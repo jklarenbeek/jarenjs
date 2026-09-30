@@ -131,11 +131,46 @@ it('tracked database defaults read back and codec failures roll back inserted ro
   });
 });
 
-it('physical keyset continuations refuse before using undecoded identities', async () => {
+it('physical keyset continuations page decoded text and bigint identities, and refuse a codec that cannot round-trip', async () => {
   await fixture(async (store) => {
-    await assert.rejects(store.entity('Pair').page({}, { limit: 2 }), /column codecs require decoded identities/);
-    await assert.rejects(store.entity('Pair').load({ after: { key: { sequence: '9', name: 'a' } } }), /column codecs require decoded identities/);
+    // a composite key of a bigint and a text column, renamed (`b`, `a`),
+    // with two sequences one apart above 2^53: every row once, in key order
+    const date = '2026-09-10T00:00:00.000Z';
+    for (const [name, sequence] of [['b', '9007199254740994'], ['a', '9007199254740993'], ['c', '1'], ['a', '9007199254740994']])
+      await store.entity('Pair').create({ name, sequence, amount: '1.00', date });
+    /** @type {string[]} */
+    const seen = [];
+    /** @type {any} */
+    let after;
+    for (let pages = 0; pages < 10; pages++) {
+      const page = await store.entity('Pair').page({}, { limit: 2, ...(after === undefined ? {} : { after }) });
+      assert.equal(page.snapshot, true, 'ordered by the primary key alone');
+      seen.push(...page.items.map((/** @type {any} */ item) => `${item.sequence}/${item.name}`));
+      if (!page.hasMore) break;
+      after = page.continuation;
+    }
+    assert.deepEqual(seen, ['1/c', '9007199254740993/a', '9007199254740994/a', '9007199254740994/b']);
   });
+  // a uuid key reads back lowercase, whatever the table stores: refused, by codec
+  const dir = mkdtempSync(join(tmpdir(), 'jaren-physical-uuid-'));
+  const path = join(dir, 'uuid.sqlite');
+  const db = await nodeDriver().open(path);
+  db.exec('CREATE TABLE tokens(id TEXT PRIMARY KEY)');
+  db.close();
+  const model = { $model: '0.1', entities: { Token: { schema: { type: 'object', properties: {
+    id: { type: 'string', 'x-entity': { key: true } } } },
+  physical: { table: 'tokens', columns: { id: { name: 'id', codec: 'uuid', null: 'reject' } } } } } };
+  const store = await openStore(model, { driver: nodeDriver(), path, adopt: true });
+  try {
+    await assert.rejects(store.entity('Token').page({}, { limit: 2 }),
+      (/** @type {any} */ error) => error.code === 'JD0032' && /'id' is a uuid column/.test(error.message));
+    await assert.rejects(store.entity('Token').load({ after: { order: [], keys: [], key: 'x' } }),
+      (/** @type {any} */ error) => error.code === 'JD0032' && /uuid/.test(error.message));
+  }
+  finally {
+    await store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 it('renamed physical revisions detect a rival writer and preserve identical-save no-ops', async () => {

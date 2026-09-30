@@ -1,0 +1,952 @@
+{
+ "group": "list membership",
+ "documents": [
+  {
+   "id": "a",
+   "n": 10,
+   "s": "ada",
+   "f": 1.5,
+   "b": true,
+   "o": {
+    "k": 1
+   },
+   "u": "text"
+  },
+  {
+   "id": "b",
+   "n": 20,
+   "s": "kid",
+   "f": -2.25,
+   "b": false,
+   "u": 7
+  },
+  {
+   "id": "c",
+   "n": 30,
+   "s": "lin",
+   "o": {
+    "k": 3
+   },
+   "u": null
+  },
+  {
+   "id": "d",
+   "s": "zed",
+   "f": 0.0,
+   "u": true
+  },
+  {
+   "id": "e",
+   "n": 20,
+   "u": [
+    1,
+    2
+   ]
+  },
+  {
+   "id": "f",
+   "s": "",
+   "f": 0,
+   "u": {
+    "k": 1
+   }
+  },
+  {
+   "id": "g",
+   "n": -5,
+   "s": "ada",
+   "u": "7"
+  },
+  {
+   "id": "h",
+   "n": 10,
+   "s": "$x",
+   "u": false
+  },
+  {
+   "id": "i"
+  },
+  {
+   "id": "j",
+   "n": 7,
+   "s": "Ada",
+   "o": {
+    "k": 4
+   },
+   "u": 1
+  }
+ ],
+ "cases": [
+  {
+   "name": "a string list on a typed member",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.s",
+      {
+       "$seq": [
+        "ada",
+        "lin",
+        "nobody"
+       ]
+      }
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "the list first, the member second",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      {
+       "$seq": [
+        "zed",
+        "kid"
+       ]
+      },
+      "$it.s"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "a number list with a duplicate, an integer and a real",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.n",
+      {
+       "$seq": [
+        10,
+        30,
+        30,
+        20.5,
+        20.0,
+        99
+       ]
+      }
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "a number list against a real member, zero both ways",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.f",
+      {
+       "$seq": [
+        1.5,
+        0,
+        -2.25
+       ]
+      }
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "a cross-type list on a typed member matches nothing",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.n",
+      {
+       "$seq": [
+        "10",
+        "ada"
+       ]
+      }
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "mixed kinds on an untyped member, a null and a boolean included",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.u",
+      {
+       "$seq": [
+        "text",
+        7,
+        null,
+        true
+       ]
+      }
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "false alone",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.u",
+      {
+       "$seq": [
+        false
+       ]
+      }
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "an array- or object-valued member against scalars",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.u",
+      {
+       "$seq": [
+        1,
+        2,
+        "k"
+       ]
+      }
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "an empty list matches nothing",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.s",
+      {
+       "$seq": []
+      }
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "an absent member is false, and its negation true",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$not": {
+      "$eq": [
+       "$it.s",
+       {
+        "$seq": [
+         "ada",
+         ""
+        ]
+       }
+      ]
+     }
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "a nested member",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.o.k",
+      {
+       "$seq": [
+        3,
+        4
+       ]
+      }
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "a dollar-leading string literal",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.s",
+      {
+       "$seq": [
+        "$$x",
+        "zed"
+       ]
+      }
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "membership is case-sensitive",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.s",
+      {
+       "$seq": [
+        "ADA",
+        "Ada"
+       ]
+      }
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "an or of equalities on one member folds",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$or": [
+      {
+       "$eq": [
+        "$it.s",
+        "ada"
+       ]
+      },
+      {
+       "$eq": [
+        "lin",
+        "$it.s"
+       ]
+      },
+      {
+       "$eq": [
+        "$it.s",
+        "zed"
+       ]
+      }
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "an or of equalities folds with a null and a number",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$or": [
+      {
+       "$eq": [
+        "$it.u",
+        "text"
+       ]
+      },
+      {
+       "$eq": [
+        "$it.u",
+        null
+       ]
+      },
+      {
+       "$eq": [
+        "$it.u",
+        7
+       ]
+      }
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "an or over two members does not fold",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$or": [
+      {
+       "$eq": [
+        "$it.s",
+        "ada"
+       ]
+      },
+      {
+       "$eq": [
+        "$it.n",
+        30
+       ]
+      }
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "a nested or of equalities folds flat",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$or": [
+      {
+       "$eq": [
+        "$it.s",
+        "ada"
+       ]
+      },
+      {
+       "$or": [
+        {
+         "$eq": [
+          "$it.s",
+          "kid"
+         ]
+        },
+        {
+         "$eq": [
+          "$it.s",
+          "lin"
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "membership inside a conjunction, ordered",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$and": [
+      {
+       "$eq": [
+        "$it.n",
+        {
+         "$seq": [
+          10,
+          20
+         ]
+        }
+       ]
+      },
+      {
+       "$ne": [
+        "$it.s",
+        "kid"
+       ]
+      }
+     ]
+    },
+    "$orderby": [
+     "$it.id"
+    ],
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "a long or chain of mixed predicates",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$or": [
+      {
+       "$eq": [
+        "$it.s",
+        "w0"
+       ]
+      },
+      {
+       "$gt": [
+        "$it.n",
+        100
+       ]
+      },
+      {
+       "$eq": [
+        "$it.s",
+        "w1"
+       ]
+      },
+      {
+       "$gt": [
+        "$it.n",
+        101
+       ]
+      },
+      {
+       "$eq": [
+        "$it.s",
+        "w2"
+       ]
+      },
+      {
+       "$gt": [
+        "$it.n",
+        102
+       ]
+      },
+      {
+       "$eq": [
+        "$it.s",
+        "w3"
+       ]
+      },
+      {
+       "$gt": [
+        "$it.n",
+        103
+       ]
+      },
+      {
+       "$eq": [
+        "$it.s",
+        "w4"
+       ]
+      },
+      {
+       "$gt": [
+        "$it.n",
+        104
+       ]
+      },
+      {
+       "$eq": [
+        "$it.s",
+        "w5"
+       ]
+      },
+      {
+       "$gt": [
+        "$it.n",
+        105
+       ]
+      },
+      {
+       "$eq": [
+        "$it.s",
+        "w6"
+       ]
+      },
+      {
+       "$gt": [
+        "$it.n",
+        106
+       ]
+      },
+      {
+       "$eq": [
+        "$it.s",
+        "w7"
+       ]
+      },
+      {
+       "$gt": [
+        "$it.n",
+        107
+       ]
+      },
+      {
+       "$eq": [
+        "$it.s",
+        "w8"
+       ]
+      },
+      {
+       "$gt": [
+        "$it.n",
+        108
+       ]
+      },
+      {
+       "$eq": [
+        "$it.s",
+        "w9"
+       ]
+      },
+      {
+       "$gt": [
+        "$it.n",
+        109
+       ]
+      },
+      {
+       "$eq": [
+        "$it.s",
+        "w10"
+       ]
+      },
+      {
+       "$gt": [
+        "$it.n",
+        110
+       ]
+      },
+      {
+       "$eq": [
+        "$it.s",
+        "w11"
+       ]
+      },
+      {
+       "$gt": [
+        "$it.n",
+        111
+       ]
+      },
+      {
+       "$eq": [
+        "$it.s",
+        "w12"
+       ]
+      },
+      {
+       "$gt": [
+        "$it.n",
+        112
+       ]
+      },
+      {
+       "$eq": [
+        "$it.s",
+        "w13"
+       ]
+      },
+      {
+       "$gt": [
+        "$it.n",
+        113
+       ]
+      },
+      {
+       "$eq": [
+        "$it.s",
+        "w14"
+       ]
+      },
+      {
+       "$gt": [
+        "$it.n",
+        114
+       ]
+      },
+      {
+       "$eq": [
+        "$it.s",
+        "w15"
+       ]
+      },
+      {
+       "$gt": [
+        "$it.n",
+        115
+       ]
+      },
+      {
+       "$eq": [
+        "$it.s",
+        "w16"
+       ]
+      },
+      {
+       "$gt": [
+        "$it.n",
+        116
+       ]
+      },
+      {
+       "$eq": [
+        "$it.s",
+        "w17"
+       ]
+      },
+      {
+       "$gt": [
+        "$it.n",
+        117
+       ]
+      },
+      {
+       "$eq": [
+        "$it.s",
+        "w18"
+       ]
+      },
+      {
+       "$gt": [
+        "$it.n",
+        118
+       ]
+      },
+      {
+       "$eq": [
+        "$it.s",
+        "w19"
+       ]
+      },
+      {
+       "$gt": [
+        "$it.n",
+        119
+       ]
+      },
+      {
+       "$eq": [
+        "$it.s",
+        "kid"
+       ]
+      }
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "an external list of strings",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.s",
+      "$ids[*]"
+     ]
+    },
+    "$return": "$it.id"
+   },
+   "externals": {
+    "ids": [
+     "ada",
+     "zed",
+     "nobody"
+    ]
+   }
+  },
+  {
+   "name": "an external list of numbers and strings on an untyped member",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.u",
+      "$ids[*]"
+     ]
+    },
+    "$return": "$it.id"
+   },
+   "externals": {
+    "ids": [
+     7,
+     "text",
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "an external list holding a null runs in the engine",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.u",
+      "$ids[*]"
+     ]
+    },
+    "$return": "$it.id"
+   },
+   "externals": {
+    "ids": [
+     null,
+     "text"
+    ]
+   }
+  },
+  {
+   "name": "an external list holding a boolean and an object runs in the engine",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.u",
+      "$ids[*]"
+     ]
+    },
+    "$return": "$it.id"
+   },
+   "externals": {
+    "ids": [
+     true,
+     {
+      "k": 1
+     }
+    ]
+   }
+  },
+  {
+   "name": "an external list holding an array runs in the engine",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.u",
+      "$ids[*]"
+     ]
+    },
+    "$return": "$it.id"
+   },
+   "externals": {
+    "ids": [
+     [
+      1,
+      2
+     ]
+    ]
+   }
+  },
+  {
+   "name": "an external object's member values",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.s",
+      "$ids[*]"
+     ]
+    },
+    "$return": "$it.id"
+   },
+   "externals": {
+    "ids": {
+     "first": "ada",
+     "second": "lin"
+    }
+   }
+  },
+  {
+   "name": "a scalar external reaches no item",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.s",
+      "$ids[*]"
+     ]
+    },
+    "$return": "$it.id"
+   },
+   "externals": {
+    "ids": "ada"
+   }
+  },
+  {
+   "name": "an empty external list",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.s",
+      "$ids[*]"
+     ]
+    },
+    "$return": "$it.id"
+   },
+   "externals": {
+    "ids": []
+   }
+  },
+  {
+   "name": "an external list on a typed number member, strings dropped",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$ids[*]",
+      "$it.n"
+     ]
+    },
+    "$return": "$it.id"
+   },
+   "externals": {
+    "ids": [
+     10,
+     "20",
+     30
+    ]
+   }
+  }
+ ]
+}

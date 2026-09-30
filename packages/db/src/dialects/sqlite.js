@@ -357,6 +357,13 @@ export const sqliteDialect = createDialect({
   // it with whatever the member holds
   externalEncoding: 'value',
   valueTypeOf: (paramSql) => `typeof(${paramSql})`,
+  // Membership in a JSON list bound as ONE parameter: one statement text
+  // for every list length, no parameter ceiling, and an index SEARCH on
+  // the value when it has one. The list's items are an array's elements
+  // or an object's member values — `key IS NOT NULL` keeps a bare scalar
+  // out, as the engine's `$x[*]` does — of one kind at a time
+  inList: (valueSql, listSql, kind) => `${valueSql} IN (SELECT value FROM json_each(${listSql}) `
+    + `WHERE key IS NOT NULL AND type ${kind === 'text' ? "= 'text'" : "IN ('integer', 'real')"})`,
   // the half-open range over the prefix, which an index on the value
   // can seek; `substr(value, 1, n) = p` and `value LIKE 'p%'` both read
   // every row. SQLite's default BINARY collation compares UTF-8 bytes,

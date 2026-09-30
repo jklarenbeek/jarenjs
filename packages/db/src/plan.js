@@ -189,6 +189,8 @@ const ENTITY_REASONS = {
     + 'a binding nothing connects is a cartesian product, which is engine work',
   conjunctBinding: 'a conjunct must belong to one binding (or be the single join equality)',
   external: 'externals compare only against entity columns in this version',
+  booleanList: 'a bound membership list compares its strings and numbers; against a boolean column '
+    + 'its items compare in the engine',
   projection: 'this entity return or grouping needs decoded-row evaluation',
   groupOrder: 'first-seen grouping over a compound physical key requires tuple ordering',
   order: 'ordering translates only over typed entity paths (never a boolean, never a document '
@@ -426,6 +428,94 @@ function operandOf(node) {
 function isScalarLiteral(value) {
   return value === null || typeof value === 'string'
     || typeof value === 'number' || typeof value === 'boolean';
+}
+
+// ————— Membership: `$eq` against a list —————
+//
+// `$eq` is a general comparison (QUERY-FORMAT §8.4): true when ANY item of
+// one side equals any item of the other. Against a sequence of scalar
+// literals (`{ $seq: [...] }`) or every item of an external
+// (`'$ids[*]'`), a singular member is therefore a membership test — and
+// so is an `$or` whose items all compare that one member with a scalar.
+// Each plans to ONE list predicate the emitter binds as one JSON value,
+// whatever its length: a flat `OR` of n equalities is n nested
+// expressions, which SQLite refuses past about a thousand.
+
+/**
+ * The list side of a membership comparison, or null: a `$seq` of scalar
+ * literals, or an external's every item (`$x[*]`).
+ * @param {any} node
+ * @returns {{ list: any[] } | { ext: string } | null}
+ */
+function membershipOperand(node) {
+  if (node.kind === 'op' && node.name === '$seq'
+    && node.args.every((arg) => arg.kind === 'literal' && isScalarLiteral(arg.value)))
+    return { list: node.args.map((arg) => arg.value) };
+  if (node.kind === 'path' && node.external === true && node.singular !== true
+    && node.segments.length === 1 && node.segments[0].descendant !== true
+    && node.segments[0].selectors.length === 1 && node.segments[0].selectors[0].kind === 'wildcard')
+    return { ext: node.name };
+  return null;
+}
+
+/**
+ * The membership plan for one member and one list. String and number
+ * items bind as the list; a `null` or a boolean in it is the type test
+ * `$eq` against that literal already plans (a present null, a present
+ * boolean), composed by `or`. An empty list matches nothing.
+ * @param {import('./algebra.js').PlanRef} ref
+ * @param {{ list: any[] } | { ext: string }} operand
+ */
+function membershipPlan(ref, operand) {
+  if ('ext' in operand) return exactly({ p: 'in', ref, operand });
+  const scalars = [...new Set(operand.list.filter((value) => typeof value === 'string' || typeof value === 'number'))];
+  const typeNames = [...new Set(operand.list.filter((value) => value === null || typeof value === 'boolean')
+    .map((value) => (value === null ? 'null' : value ? 'true' : 'false')))];
+  /** @type {any[]} */
+  const items = [];
+  if (scalars.length > 0) items.push({ p: 'in', ref, operand: { list: scalars } });
+  for (const typeName of typeNames) items.push({ p: 'typeIs', ref, types: [typeName], positive: true });
+  if (items.length === 0) return exactly({ p: 'const', value: false });
+  return exactly(items.length === 1 ? items[0] : { p: 'or', items });
+}
+
+/**
+ * `$eq` between a singular member and a list, in either order — or null.
+ * @param {any[]} args @param {number} itSlot @param {any} shape
+ */
+function planMembership(args, itSlot, shape) {
+  const [left, right] = args;
+  for (const [member, list] of [[left, right], [right, left]]) {
+    const ref = pathRef(member, itSlot, shape);
+    const operand = ref === null ? null : membershipOperand(list);
+    if (ref !== null && operand !== null) return membershipPlan(ref, operand);
+  }
+  return null;
+}
+
+/**
+ * An `$or` of two or more `$eq`s, each between ONE member and a scalar
+ * literal (either order), folded into that member's membership — or null.
+ * @param {any[]} items @param {number} itSlot @param {any} shape
+ */
+function foldMembership(items, itSlot, shape) {
+  if (items.length < 2) return null;
+  /** @type {any} */
+  let ref = null;
+  const list = [];
+  for (const item of items) {
+    if (item.kind !== 'op' || item.name !== '$eq' || item.args.length !== 2) return null;
+    let found = null;
+    for (const [member, value] of [[item.args[0], item.args[1]], [item.args[1], item.args[0]]]) {
+      const candidate = value.kind === 'literal' && isScalarLiteral(value.value) ? pathRef(member, itSlot, shape) : null;
+      if (candidate !== null) { found = { ref: candidate, value: value.value }; break; }
+    }
+    if (found === null) return null;
+    if (ref !== null && canonicalOf(found.ref.segments) !== canonicalOf(ref.segments)) return null;
+    ref ??= found.ref;
+    list.push(found.value);
+  }
+  return membershipPlan(ref, { list });
 }
 
 
@@ -1268,6 +1358,10 @@ function planPredicate(node, itSlot, shape) {
       KIND_REASONS[node.kind] ?? PREDICATE_REASONS.notPredicate) };
   }
 
+  if (node.name === '$or') {
+    const folded = foldMembership(node.args, itSlot, shape);
+    if (folded !== null) return folded;
+  }
   if (node.name === '$and' || node.name === '$or') {
     const items = [];
     const prefilters = [];
@@ -1307,6 +1401,11 @@ function planPredicate(node, itSlot, shape) {
       return { refusal: refusal(node.name, PREDICATE_REASONS.existence) };
     }
     return exactly({ p: 'typeIs', ref, types: [], positive: node.name === '$exists' });
+  }
+
+  if (node.name === '$eq') {
+    const membership = planMembership(node.args, itSlot, shape);
+    if (membership !== null) return membership;
   }
 
   const comparison = COMPARISONS.get(node.name);
@@ -3199,7 +3298,7 @@ export function planEntityPredicate(node, slot, shape) {
     if (flavored === undefined) {
       // externals against DOC paths are not translated here (the
       // phase-A external forms assume the collection layout)
-      if (pred.p === 'cmp' && 'ext' in pred.operand) {
+      if ((pred.p === 'cmp' || pred.p === 'in') && 'ext' in pred.operand) {
         blocked = refusal('$eq', ENTITY_REASONS.external);
       }
       return { ...pred, ref: { ...pred.ref, flavor: 'entity-doc' } };
@@ -3207,6 +3306,18 @@ export function planEntityPredicate(node, slot, shape) {
     const ref = { ...pred.ref, column: flavored.column,
       flavor: flavored.flavor, storage: flavored.storage, format: flavored.format,
       codec: flavored.codec, codecColumn: flavored.codecColumn, nullPolicy: flavored.nullPolicy };
+    if (flavored.flavor === 'entity-epoch' && pred.p === 'in' && 'ext' in pred.operand) {
+      // an epoch member compares as its document string; an external list
+      // against the document layout is not translated
+      blocked = refusal('$eq', ENTITY_REASONS.external);
+      return { ...pred, ref };
+    }
+    if (flavored.storage === 'boolean' && pred.p === 'in' && 'ext' in pred.operand) {
+      // the list binds no boolean, so the column could only answer false —
+      // and a `true` in the bound list must match
+      blocked = refusal('$eq', ENTITY_REASONS.booleanList);
+      return { ...pred, ref };
+    }
     if (flavored.flavor === 'entity-epoch' && pred.p === 'cmp') {
       if ('ext' in pred.operand) {
         blocked = refusal(pred.op, ENTITY_REASONS.external);

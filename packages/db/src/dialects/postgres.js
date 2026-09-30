@@ -532,6 +532,19 @@ export function postgresDialect(options = undefined) {
       ? `((((${paramSql})::jsonb) #>> '{}') COLLATE "C")`
       : `((${paramSql})::jsonb)`),
     valueTypeOf: (paramSql) => typeOfJsonb(`((${paramSql})::jsonb)`),
+    // Membership in a JSON list bound as ONE parameter (its JSON text, as
+    // every external here): an array's elements or an object's member
+    // values, of one kind — text byte-ordered like every text comparison,
+    // a number as the double precision a number member reads as
+    inList: (valueSql, listSql, kind) => {
+      const list = `((${listSql})::jsonb)`;
+      const items = `(SELECT jsonb_array_elements(${list}) WHERE jsonb_typeof(${list}) = 'array' UNION ALL `
+        + `SELECT m.value FROM jsonb_each(CASE WHEN jsonb_typeof(${list}) = 'object' THEN ${list} `
+        + "ELSE '{}'::jsonb END) AS m)";
+      return kind === 'text'
+        ? `${valueSql} IN (SELECT (i.e #>> '{}') COLLATE "C" FROM ${items} AS i(e) WHERE jsonb_typeof(i.e) = 'string')`
+        : `${valueSql} IN (SELECT (i.e #>> '{}')::double precision FROM ${items} AS i(e) WHERE jsonb_typeof(i.e) = 'number')`;
+    },
     // the half-open range over the prefix, seekable through a B-tree on
     // a `C`-collated column. Both operands are byte-ordered — the column
     // by its declaration, the extracted member by the `COLLATE` in

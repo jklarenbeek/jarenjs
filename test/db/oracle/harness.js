@@ -359,7 +359,7 @@ export const CONSTRUCT_ROSTER = [
   '$count', '$sum', '$avg', '$min', '$max',
   '$let', '$for', '$return',
   'external', 'null-literal', 'boolean-literal', 'cross-type',
-  'object-return', 'array-return', 'quantifier',
+  'object-return', 'array-return', 'quantifier', 'list-membership',
 ];
 
 /**
@@ -383,6 +383,10 @@ export function recordConstructs(query, tally) {
     for (const key of Object.keys(node)) {
       if (CONSTRUCT_ROSTER.includes(key)) bump(key);
       if (key === '$every' || key === '$some' || key === '$satisfies') bump('quantifier');
+      // `$eq` against a list: a `$seq` of literals, or an external's items
+      if (key === '$eq' && Array.isArray(node[key]) && node[key].some((v) => (v !== null && typeof v === 'object'
+        && Object.hasOwn(v, '$seq')) || (typeof v === 'string' && /^\$[A-Za-z_][A-Za-z0-9_]*\[\*\]$/.test(v))))
+        bump('list-membership');
       if ((key === '$eq' || key === '$ne') && Array.isArray(node[key])) {
         if (node[key].includes(null)) bump('null-literal');
         if (node[key].some((v) => typeof v === 'boolean')) bump('boolean-literal');

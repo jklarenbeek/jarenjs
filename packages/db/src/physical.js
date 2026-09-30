@@ -5,7 +5,7 @@ import { DbCompileError, DbRuntimeError } from './errors.js';
 import { chain } from './driver.js';
 import { canonicalizeJson } from '@jarenjs/json/canonical';
 import { planTable } from './dialects/sqlite-schema.js';
-import { sqlitePhysicalColumnType } from './dialects/sqlite.js';
+import { sqlitePhysicalColumnType, sqliteTableMigration } from './dialects/sqlite.js';
 
 const compiledCodecs = new WeakMap();
 const STORAGE = { text: 'string', integer: 'integer', number: 'number', boolean: 'boolean',
@@ -200,4 +200,82 @@ export function verifyPhysical(connection, mapping, schema) {
  * @param {any} mapping @param {any} dialect @param {string} [prefix] @returns {string} */
 export function physicalSelection(mapping, dialect, prefix = '') {
   return mapping.columns.map((c) => `${physicalRead(c, dialect, prefix)} AS ${dialect.quoteIdentifier(c.physical ?? c.name)}`).join(', ');
+}
+
+/**
+ * The text-key read plan — ONE implementation, shared by the physical
+ * migration walker and a physical keyset page. A text key is read beside
+ * its raw bytes (the dialect's binary cast), and every row proves the key
+ * survives the database's text encoding before anything is built on it:
+ * both compare and seek by the key, and a key the binding decoded lossily
+ * (malformed UTF-8 reads back as U+FFFD) seeks past the wrong rows, or
+ * back over the same ones forever.
+ *
+ * This is the synchronous half: the columns planned, the byte aliases
+ * (never a mapped column's name), and the projection that reads them.
+ * `null` when no key is text.
+ * @param {{ columns: any[] }} mapping
+ * @param {any[]} keys - the key columns; the text-codec ones are planned
+ * @param {any} dialect
+ * @param {string} [prefix] - the table alias the projection qualifies columns with
+ * @returns {{ columns: any[], aliases: string[], projection: string } | null}
+ */
+export function textKeyPlan(mapping, keys, dialect, prefix = '') {
+  const columns = keys.filter((column) => column.codec === 'text');
+  if (columns.length === 0) return null;
+  const names = new Set(mapping.columns.map((column) => String(column.physical ?? column.name).toLowerCase()));
+  const aliases = columns.map((_, index) => {
+    let name = `__jaren_key_bytes_${index}`;
+    while (names.has(name.toLowerCase())) name += '_';
+    names.add(name.toLowerCase());
+    return name;
+  });
+  const q = dialect.quoteIdentifier;
+  const projection = columns.map((column, index) =>
+    `${sqliteTableMigration.binaryCast(`${prefix}${q(column.physical ?? column.name)}`)} AS ${q(aliases[index])}`).join(', ');
+  return { columns, aliases, projection };
+}
+
+/**
+ * The connection's half of the plan: a fatal decoder in the database's own
+ * text encoding (UTF-16 files included), and whether the binding keeps a
+ * leading BOM when it binds a string back — some native bindings read one
+ * correctly and strip it on the way back, and such a key must refuse before
+ * it is sought. Two statements, the same answer for the connection's life:
+ * a caller memoizes it.
+ * @param {any} connection
+ * @returns {any} value-or-promise of `{ decoder: TextDecoder, keepsLeadingBom: boolean }`
+ */
+export function textKeyDecoding(connection) {
+  const dialect = connection.dialect;
+  return chain(connection.prepare(dialect.introspect.pragma('encoding')), (statement) => chain(statement.get([]), (row) => {
+    const decoder = new TextDecoder(row.encoding, { fatal: true, ignoreBOM: true });
+    const probe = `SELECT ${sqliteTableMigration.binaryCast(dialect.parameterRef(1, 'text'))} AS ${dialect.quoteIdentifier('bytes')}`;
+    return chain(connection.prepare(probe), (bound) => chain(bound.get(['\uFEFFx']), (read) => ({
+      decoder, keepsLeadingBom: decoder.decode(read.bytes) === '\uFEFFx',
+    })));
+  }));
+}
+
+/**
+ * Prove one row's text keys against their bytes and answer the row without
+ * the byte columns; a key that cannot round-trip is `refuse(column)`.
+ * @param {any} row
+ * @param {{ columns: any[], aliases: string[] }} plan
+ * @param {{ decoder: TextDecoder, keepsLeadingBom: boolean }} decoding
+ * @param {(column: any) => Error} refuse
+ * @returns {any}
+ */
+export function checkTextKeys(row, plan, decoding, refuse) {
+  for (let index = 0; index < plan.columns.length; index++) {
+    const column = plan.columns[index];
+    let decoded;
+    try { decoded = decoding.decoder.decode(row[plan.aliases[index]]); }
+    catch { /* the refusal below covers a replacement decoding too */ }
+    if (decoded === undefined || decoded !== row[column.physical ?? column.name]
+      || (!decoding.keepsLeadingBom && decoded.startsWith('\uFEFF'))) throw refuse(column);
+  }
+  const clean = { ...row };
+  for (const alias of plan.aliases) delete clean[alias];
+  return clean;
 }

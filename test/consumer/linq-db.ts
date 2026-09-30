@@ -38,6 +38,14 @@ async function main(): Promise<void> {
   void [posts, titles, first, n, byAuthor];
   // @ts-expect-error — a misspelled member is a compile error on the handle's chain too
   void client.entities.Post.where((p) => p.strs.ge(3));
+  // membership: a list of the member's own family, or a path to an array of it
+  const listed: Post[] = await client.entities.Post.where((p) => p.title.in(['a', 'b', null])).toArray();
+  const bound: Post[] = await client.entities.Post.params({ pids: [1, 2] }).where((p, q) => p.pid.in(q.pids)).toArray();
+  void [listed, bound];
+  // @ts-expect-error — a number list is not a string member's family
+  void client.entities.Post.where((p) => p.title.in([1, 2]));
+  // @ts-expect-error — in() takes a list, never one value
+  void client.entities.Post.where((p) => p.title.in('a'));
 
   // include widens by what it included; the spec's callbacks are typed on the TARGET entity
   const loaded = await client.entities.User

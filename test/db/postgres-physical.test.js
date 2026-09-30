@@ -106,6 +106,11 @@ describe('PostgreSQL physical adoption', { skip: !url && 'JAREN_PG_URL is not se
         throw new Error('withdraw');
       }), /withdraw/);
       assert.ok(await target.get(1));
+      // a keyset continuation over a physical table is SQLite's physical
+      // comparison until PostgreSQL's applies: refused, naming the dialect
+      await assert.rejects(target.page({}, { limit: 2 }),
+        (/** @type {any} */ error) => error.code === 'JD0032' && /not qualified on postgres/.test(error.message));
+      assert.equal((await target.load({ orderBy: '$it.id' })).length, 3, 'an ordered load without a continuation still answers');
     }
     finally { await store?.close(); await pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`); await pool.end(); }
   });

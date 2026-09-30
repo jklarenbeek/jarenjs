@@ -1,6 +1,6 @@
 # @jarenjs/db
 
-For existing-file adoption with native queries, receipts and jobs, start with the [combined public recipe and evidence ledger](../../docs/ADOPTION-EVIDENCE.md). For build-selected SQLite/PostgreSQL applications, see the [backend capability and recovery matrix](docs/POSTGRESQL.md). Adopted-trigger capture and physical keysets retain their documented refusals; synthetic proof does not retire downstream SQL.
+For existing-file adoption with native queries, receipts and jobs, start with the [combined public recipe and evidence ledger](../../docs/ADOPTION-EVIDENCE.md). For build-selected SQLite/PostgreSQL applications, see the [backend capability and recovery matrix](docs/POSTGRESQL.md). Adopted-trigger capture retains its documented refusal, and physical keyset pages qualify for SQLite integer, bigint and text identities while refusing other codecs by name; synthetic proof does not retire downstream SQL.
 
 Documents and entities in SQLite and PostgreSQL. A **model document** declares
 collections (a JSON Schema, a key, indexes) and — since phase B —

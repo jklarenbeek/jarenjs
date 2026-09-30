@@ -259,6 +259,57 @@ const binary = (op) => function (/** @type {any} */ record, /** @type {any} */ o
   return makeExpr({ [op]: [record.doc, toExpression(operand)] }, record.epoch, false);
 };
 
+/**
+ * An associative logic operator: chaining it (`a.or(b).or(c)`) extends
+ * ONE argument list instead of nesting a level per call, so a
+ * thousand-term chain is one flat `$or` rather than a thousand-deep
+ * document. The flat call means exactly what the nest does.
+ * @param {'$and' | '$or'} op
+ */
+const associative = (op) => function (/** @type {any} */ record, /** @type {any} */ operand) {
+  const doc = record.doc;
+  const items = doc !== null && typeof doc === 'object' && !Array.isArray(doc)
+    && Object.keys(doc).length === 1 && Array.isArray(doc[op]) ? doc[op] : [doc];
+  return makeExpr({ [op]: [...items, toExpression(operand)] }, record.epoch, false);
+};
+
+/**
+ * Membership: `x.in(values)` is `$eq` against the sequence of `values` —
+ * a general comparison, true when the member equals ANY of them. (`.eq`
+ * with an array compares against that one array VALUE, which only an
+ * array-valued member can equal.) The values are scalars: a list of
+ * objects or arrays is a comparison nothing but a whole member could
+ * satisfy, and is refused (`JL0005`). A PATH to a list — a declared
+ * parameter (`x.in(p.ids)`) or an array member (`x.in(it.tags)`) — is
+ * every item of it (`$ids[*]`), so a list bound at run time is one value
+ * however long it is.
+ * @param {any} record @param {any} values
+ */
+function membership(record, values) {
+  const list = values !== null && typeof values === 'object' ? values[NODE] : undefined;
+  if (list !== undefined) {
+    assertLive(list);
+    if (list.hop !== undefined || (list.seq === undefined && !list.pathable)) {
+      throw new LinqBuildError('JL0005',
+        'in() takes an array of values or a PATH to one (a parameter p.ids, a member it.tags); '
+        + 'it cannot follow an operator result or a relation');
+    }
+    return makeExpr({ $eq: [record.doc, list.seq ?? `${list.doc}[*]`] }, record.epoch, false);
+  }
+  if (!Array.isArray(values)) {
+    throw new LinqBuildError('JL0005',
+      'in() takes an array of values — x.in([a, b, c]) — or a path to one: x.in(p.ids)');
+  }
+  const items = values.map((value) => {
+    if (value !== null && typeof value === 'object' && value[NODE] === undefined) {
+      throw new LinqBuildError('JL0005',
+        'in() takes scalar values — a string, a number, a boolean or null, or a captured one');
+    }
+    return toExpression(value);
+  });
+  return makeExpr({ $eq: [record.doc, { $seq: items }] }, record.epoch, false);
+}
+
 /** Unary operator helper. @param {string} op */
 const unary = (op) => function (/** @type {any} */ record) {
   return makeExpr({ [op]: record.doc }, record.epoch, false);
@@ -325,7 +376,9 @@ const METHODS = {
   lt: binary('$lt'), le: binary('$le'),
   gt: binary('$gt'), ge: binary('$ge'),
   // §8.6 logic
-  and: binary('$and'), or: binary('$or'), not: unary('$not'),
+  and: associative('$and'), or: associative('$or'), not: unary('$not'),
+  // §8.4 membership: `$eq` against a sequence of scalars
+  in: membership,
   // §8.5 arithmetic
   add: binary('$add'), sub: binary('$sub'), mul: binary('$mul'),
   div: binary('$div'), idiv: binary('$idiv'), mod: binary('$mod'),

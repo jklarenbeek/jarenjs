@@ -221,9 +221,12 @@ describe('the spatial forms (over derived columns)', () => {
     const whole = emitPlaces(
       where({ $exists: { '$index-of': [
         { '$geohash-neighbours': 'u173zc' }, { $geohash: ['$it.at', 6] }] } }), sqliteDialect);
-    assert.match(whole.sql,
-      /WHERE \("gx_at_gh6" IS NULL OR "gx_at_gh6" IN \(\?, \?, \?, \?, \?, \?, \?, \?, \?\)\)/);
-    assert.strictEqual(whole.slots.length, 9);
+    // the nine cells are ONE bound list: the IN-list emission every
+    // membership shares, whatever the neighbourhood's size
+    assert.match(whole.sql, new RegExp('WHERE \\("gx_at_gh6" IS NULL OR "gx_at_gh6" IN '
+      + "\\(SELECT value FROM json_each\\(\\?\\) WHERE key IS NOT NULL AND type = 'text'\\)\\)"));
+    assert.strictEqual(whole.slots.length, 1);
+    assert.strictEqual(JSON.parse(/** @type {any} */ (whole.slots[0]).literal).length, 9);
 
     const prefix = emitPlaces(
       where({ '$starts-with': [{ $geohash: ['$it.at', 6] }, 'u17'] }), sqliteDialect);

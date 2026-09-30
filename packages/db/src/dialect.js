@@ -208,6 +208,7 @@ function normalizeCapabilities(declared) {
  *   mutationRowGuard?: (count: string, limit: number) => string,
  *   boundMutation?: (sql: string, limit: number) => string,
  *   codepoint?: (value: string) => string,
+ *   inList?: (valueSql: string, listSql: string, kind: 'text' | 'number') => string,
  *   physicalTypeMatches?: (codec: string, type: string) => boolean,
  *   schema?: string,
  *   relational?: any,
@@ -728,6 +729,10 @@ export function createDialect(spec) {
     mutationRowGuard: spec.mutationRowGuard,
     boundMutation: spec.boundMutation,
     codepoint: spec.codepoint,
+    /** Membership of a value in a JSON list bound as one parameter, one
+     * kind (`'text'` or `'number'`) at a time — the one IN-list spelling
+     * every membership test and `cellIn` share. */
+    inList: spec.inList,
     physicalTypeMatches: spec.physicalTypeMatches,
     schema: spec.schema,
     relational: spec.relational,

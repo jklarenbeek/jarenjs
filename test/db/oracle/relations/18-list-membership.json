@@ -1,0 +1,873 @@
+{
+  "group": "18 list membership",
+  "model": {
+    "$model": "0.1",
+    "entities": {
+      "Item": {
+        "schema": {
+          "type": "object",
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "x-entity": {
+                "key": true
+              }
+            },
+            "sku": {
+              "type": "string",
+              "x-entity": {
+                "index": true
+              }
+            },
+            "qty": {
+              "type": "integer"
+            },
+            "price": {
+              "type": "number"
+            },
+            "active": {
+              "type": "boolean"
+            },
+            "made": {
+              "type": "string",
+              "format": "date-time",
+              "x-entity": {
+                "column": "integer",
+                "index": true
+              }
+            },
+            "meta": {
+              "type": "object",
+              "properties": {
+                "tag": {
+                  "type": "string"
+                },
+                "rank": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "documents": {
+    "Item": [
+      {
+        "id": "i1",
+        "sku": "s1",
+        "qty": 1,
+        "price": 1.5,
+        "active": true,
+        "made": "2026-01-05T10:00:00Z",
+        "meta": {
+          "tag": "red",
+          "rank": 1
+        }
+      },
+      {
+        "id": "i2",
+        "sku": "s2",
+        "qty": 2,
+        "price": 0,
+        "active": false,
+        "meta": {
+          "tag": "blue"
+        }
+      },
+      {
+        "id": "i3",
+        "sku": "s3",
+        "qty": 3,
+        "price": -2.25,
+        "made": "2026-03-01T08:00:00.250Z",
+        "meta": {
+          "rank": 3
+        }
+      },
+      {
+        "id": "i4",
+        "sku": "S1",
+        "qty": 3,
+        "active": true
+      },
+      {
+        "id": "i5",
+        "qty": 5,
+        "price": 2
+      },
+      {
+        "id": "i6",
+        "sku": "$x",
+        "meta": {
+          "tag": "red"
+        }
+      },
+      {
+        "id": "i7",
+        "sku": "",
+        "qty": -1,
+        "price": 1.5,
+        "active": false
+      }
+    ]
+  },
+  "cases": [
+    {
+      "name": "a string list on an indexed column",
+      "query": {
+        "$for": {
+          "i": "$.Item[*]"
+        },
+        "$where": {
+          "$eq": [
+            "$i.sku",
+            {
+              "$seq": [
+                "s1",
+                "s3",
+                "zz"
+              ]
+            }
+          ]
+        },
+        "$orderby": [
+          "$i.id"
+        ],
+        "$return": "$i.id"
+      }
+    },
+    {
+      "name": "the list first",
+      "query": {
+        "$for": {
+          "i": "$.Item[*]"
+        },
+        "$where": {
+          "$eq": [
+            {
+              "$seq": [
+                "s2",
+                "$$x"
+              ]
+            },
+            "$i.sku"
+          ]
+        },
+        "$orderby": [
+          "$i.id"
+        ],
+        "$return": "$i.id"
+      }
+    },
+    {
+      "name": "a number list on an integer column, a real and a string dropped",
+      "query": {
+        "$for": {
+          "i": "$.Item[*]"
+        },
+        "$where": {
+          "$eq": [
+            "$i.qty",
+            {
+              "$seq": [
+                1,
+                3.0,
+                "2",
+                2.5,
+                99
+              ]
+            }
+          ]
+        },
+        "$orderby": [
+          "$i.id"
+        ],
+        "$return": "$i.id"
+      }
+    },
+    {
+      "name": "a number list on a real column",
+      "query": {
+        "$for": {
+          "i": "$.Item[*]"
+        },
+        "$where": {
+          "$eq": [
+            "$i.price",
+            {
+              "$seq": [
+                1.5,
+                0,
+                7
+              ]
+            }
+          ]
+        },
+        "$orderby": [
+          "$i.id"
+        ],
+        "$return": "$i.id"
+      }
+    },
+    {
+      "name": "a boolean column",
+      "query": {
+        "$for": {
+          "i": "$.Item[*]"
+        },
+        "$where": {
+          "$eq": [
+            "$i.active",
+            {
+              "$seq": [
+                true
+              ]
+            }
+          ]
+        },
+        "$orderby": [
+          "$i.id"
+        ],
+        "$return": "$i.id"
+      }
+    },
+    {
+      "name": "a boolean column against false and a string",
+      "query": {
+        "$for": {
+          "i": "$.Item[*]"
+        },
+        "$where": {
+          "$eq": [
+            "$i.active",
+            {
+              "$seq": [
+                false,
+                "x"
+              ]
+            }
+          ]
+        },
+        "$orderby": [
+          "$i.id"
+        ],
+        "$return": "$i.id"
+      }
+    },
+    {
+      "name": "a null in the list matches no absent member",
+      "query": {
+        "$for": {
+          "i": "$.Item[*]"
+        },
+        "$where": {
+          "$eq": [
+            "$i.sku",
+            {
+              "$seq": [
+                null,
+                "s2"
+              ]
+            }
+          ]
+        },
+        "$orderby": [
+          "$i.id"
+        ],
+        "$return": "$i.id"
+      }
+    },
+    {
+      "name": "membership is case-sensitive on a column",
+      "query": {
+        "$for": {
+          "i": "$.Item[*]"
+        },
+        "$where": {
+          "$eq": [
+            "$i.sku",
+            {
+              "$seq": [
+                "S1"
+              ]
+            }
+          ]
+        },
+        "$orderby": [
+          "$i.id"
+        ],
+        "$return": "$i.id"
+      }
+    },
+    {
+      "name": "a member inside a document column",
+      "query": {
+        "$for": {
+          "i": "$.Item[*]"
+        },
+        "$where": {
+          "$eq": [
+            "$i.meta.tag",
+            {
+              "$seq": [
+                "red",
+                "green"
+              ]
+            }
+          ]
+        },
+        "$orderby": [
+          "$i.id"
+        ],
+        "$return": "$i.id"
+      }
+    },
+    {
+      "name": "a number member inside a document column",
+      "query": {
+        "$for": {
+          "i": "$.Item[*]"
+        },
+        "$where": {
+          "$eq": [
+            "$i.meta.rank",
+            {
+              "$seq": [
+                3,
+                4
+              ]
+            }
+          ]
+        },
+        "$orderby": [
+          "$i.id"
+        ],
+        "$return": "$i.id"
+      }
+    },
+    {
+      "name": "an epoch column",
+      "query": {
+        "$for": {
+          "i": "$.Item[*]"
+        },
+        "$where": {
+          "$eq": [
+            "$i.made",
+            {
+              "$seq": [
+                "2026-01-05T10:00:00Z",
+                "2026-03-01T08:00:00.250Z"
+              ]
+            }
+          ]
+        },
+        "$orderby": [
+          "$i.id"
+        ],
+        "$return": "$i.id"
+      }
+    },
+    {
+      "name": "an empty list",
+      "query": {
+        "$for": {
+          "i": "$.Item[*]"
+        },
+        "$where": {
+          "$eq": [
+            "$i.sku",
+            {
+              "$seq": []
+            }
+          ]
+        },
+        "$orderby": [
+          "$i.id"
+        ],
+        "$return": "$i.id"
+      }
+    },
+    {
+      "name": "an absent member is false, and its negation true",
+      "query": {
+        "$for": {
+          "i": "$.Item[*]"
+        },
+        "$where": {
+          "$not": {
+            "$eq": [
+              "$i.sku",
+              {
+                "$seq": [
+                  "s1"
+                ]
+              }
+            ]
+          }
+        },
+        "$orderby": [
+          "$i.id"
+        ],
+        "$return": "$i.id"
+      }
+    },
+    {
+      "name": "an or of equalities on one column folds",
+      "query": {
+        "$for": {
+          "i": "$.Item[*]"
+        },
+        "$where": {
+          "$or": [
+            {
+              "$eq": [
+                "$i.sku",
+                "s1"
+              ]
+            },
+            {
+              "$eq": [
+                "$i.sku",
+                "s2"
+              ]
+            },
+            {
+              "$eq": [
+                "S1",
+                "$i.sku"
+              ]
+            }
+          ]
+        },
+        "$orderby": [
+          "$i.id"
+        ],
+        "$return": "$i.id"
+      }
+    },
+    {
+      "name": "an or over two columns does not fold",
+      "query": {
+        "$for": {
+          "i": "$.Item[*]"
+        },
+        "$where": {
+          "$or": [
+            {
+              "$eq": [
+                "$i.sku",
+                "s1"
+              ]
+            },
+            {
+              "$eq": [
+                "$i.qty",
+                5
+              ]
+            }
+          ]
+        },
+        "$orderby": [
+          "$i.id"
+        ],
+        "$return": "$i.id"
+      }
+    },
+    {
+      "name": "a long or chain of mixed predicates",
+      "query": {
+        "$for": {
+          "i": "$.Item[*]"
+        },
+        "$where": {
+          "$or": [
+            {
+              "$eq": [
+                "$i.sku",
+                "w0"
+              ]
+            },
+            {
+              "$gt": [
+                "$i.qty",
+                100
+              ]
+            },
+            {
+              "$eq": [
+                "$i.sku",
+                "w1"
+              ]
+            },
+            {
+              "$gt": [
+                "$i.qty",
+                101
+              ]
+            },
+            {
+              "$eq": [
+                "$i.sku",
+                "w2"
+              ]
+            },
+            {
+              "$gt": [
+                "$i.qty",
+                102
+              ]
+            },
+            {
+              "$eq": [
+                "$i.sku",
+                "w3"
+              ]
+            },
+            {
+              "$gt": [
+                "$i.qty",
+                103
+              ]
+            },
+            {
+              "$eq": [
+                "$i.sku",
+                "w4"
+              ]
+            },
+            {
+              "$gt": [
+                "$i.qty",
+                104
+              ]
+            },
+            {
+              "$eq": [
+                "$i.sku",
+                "w5"
+              ]
+            },
+            {
+              "$gt": [
+                "$i.qty",
+                105
+              ]
+            },
+            {
+              "$eq": [
+                "$i.sku",
+                "w6"
+              ]
+            },
+            {
+              "$gt": [
+                "$i.qty",
+                106
+              ]
+            },
+            {
+              "$eq": [
+                "$i.sku",
+                "w7"
+              ]
+            },
+            {
+              "$gt": [
+                "$i.qty",
+                107
+              ]
+            },
+            {
+              "$eq": [
+                "$i.sku",
+                "w8"
+              ]
+            },
+            {
+              "$gt": [
+                "$i.qty",
+                108
+              ]
+            },
+            {
+              "$eq": [
+                "$i.sku",
+                "w9"
+              ]
+            },
+            {
+              "$gt": [
+                "$i.qty",
+                109
+              ]
+            },
+            {
+              "$eq": [
+                "$i.sku",
+                "w10"
+              ]
+            },
+            {
+              "$gt": [
+                "$i.qty",
+                110
+              ]
+            },
+            {
+              "$eq": [
+                "$i.sku",
+                "w11"
+              ]
+            },
+            {
+              "$gt": [
+                "$i.qty",
+                111
+              ]
+            },
+            {
+              "$eq": [
+                "$i.sku",
+                "w12"
+              ]
+            },
+            {
+              "$gt": [
+                "$i.qty",
+                112
+              ]
+            },
+            {
+              "$eq": [
+                "$i.sku",
+                "w13"
+              ]
+            },
+            {
+              "$gt": [
+                "$i.qty",
+                113
+              ]
+            },
+            {
+              "$eq": [
+                "$i.sku",
+                "w14"
+              ]
+            },
+            {
+              "$gt": [
+                "$i.qty",
+                114
+              ]
+            },
+            {
+              "$eq": [
+                "$i.sku",
+                "s2"
+              ]
+            }
+          ]
+        },
+        "$orderby": [
+          "$i.id"
+        ],
+        "$return": "$i.id"
+      }
+    },
+    {
+      "name": "an external list on an indexed column",
+      "query": {
+        "$for": {
+          "i": "$.Item[*]"
+        },
+        "$where": {
+          "$eq": [
+            "$i.sku",
+            "$ids[*]"
+          ]
+        },
+        "$orderby": [
+          "$i.id"
+        ],
+        "$return": "$i.id"
+      },
+      "externals": {
+        "ids": [
+          "s1",
+          "s4",
+          "$x"
+        ]
+      }
+    },
+    {
+      "name": "an external list with a number on a string column",
+      "query": {
+        "$for": {
+          "i": "$.Item[*]"
+        },
+        "$where": {
+          "$eq": [
+            "$i.sku",
+            "$ids[*]"
+          ]
+        },
+        "$orderby": [
+          "$i.id"
+        ],
+        "$return": "$i.id"
+      },
+      "externals": {
+        "ids": [
+          "s1",
+          2
+        ]
+      }
+    },
+    {
+      "name": "an external list holding a null runs in the engine",
+      "query": {
+        "$for": {
+          "i": "$.Item[*]"
+        },
+        "$where": {
+          "$eq": [
+            "$i.sku",
+            "$ids[*]"
+          ]
+        },
+        "$orderby": [
+          "$i.id"
+        ],
+        "$return": "$i.id"
+      },
+      "externals": {
+        "ids": [
+          null,
+          "s2"
+        ]
+      }
+    },
+    {
+      "name": "an external list on an integer column",
+      "query": {
+        "$for": {
+          "i": "$.Item[*]"
+        },
+        "$where": {
+          "$eq": [
+            "$i.qty",
+            "$ids[*]"
+          ]
+        },
+        "$orderby": [
+          "$i.id"
+        ],
+        "$return": "$i.id"
+      },
+      "externals": {
+        "ids": [
+          1,
+          "3",
+          5
+        ]
+      }
+    },
+    {
+      "name": "an external list on a boolean column",
+      "query": {
+        "$for": {
+          "i": "$.Item[*]"
+        },
+        "$where": {
+          "$eq": [
+            "$i.active",
+            "$ids[*]"
+          ]
+        },
+        "$orderby": [
+          "$i.id"
+        ],
+        "$return": "$i.id"
+      },
+      "externals": {
+        "ids": [
+          true
+        ]
+      }
+    },
+    {
+      "name": "an external list on a document member",
+      "query": {
+        "$for": {
+          "i": "$.Item[*]"
+        },
+        "$where": {
+          "$eq": [
+            "$i.meta.tag",
+            "$ids[*]"
+          ]
+        },
+        "$orderby": [
+          "$i.id"
+        ],
+        "$return": "$i.id"
+      },
+      "externals": {
+        "ids": [
+          "blue"
+        ]
+      }
+    },
+    {
+      "name": "an external object's member values",
+      "query": {
+        "$for": {
+          "i": "$.Item[*]"
+        },
+        "$where": {
+          "$eq": [
+            "$i.sku",
+            "$ids[*]"
+          ]
+        },
+        "$orderby": [
+          "$i.id"
+        ],
+        "$return": "$i.id"
+      },
+      "externals": {
+        "ids": {
+          "a": "s3"
+        }
+      }
+    },
+    {
+      "name": "an empty external list",
+      "query": {
+        "$for": {
+          "i": "$.Item[*]"
+        },
+        "$where": {
+          "$eq": [
+            "$i.sku",
+            "$ids[*]"
+          ]
+        },
+        "$orderby": [
+          "$i.id"
+        ],
+        "$return": "$i.id"
+      },
+      "externals": {
+        "ids": []
+      }
+    }
+  ]
+}

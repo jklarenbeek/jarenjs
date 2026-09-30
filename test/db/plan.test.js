@@ -640,6 +640,9 @@ describe('the planner\'s reason vocabulary', () => {
       $where: { $and: [{ $eq: ['$a.id', '$b.ownerId'] }, { $gt: ['$a.name', '$b.pid'] }] },
       $return: '$a' }],
     'entity.external': [entity, E({ $where: { $eq: ['$p.inner.tag', '$who'] } })],
+    // a bound membership list binds its strings and numbers, so against a
+    // boolean column it could only answer false — and a `true` in it must match
+    'entity.booleanList': [entity, E({ $where: { $eq: ['$p.ok', '$flags[*]'] } })],
     // a shape of member paths projects; an OPERATOR over one does not,
     // and neither does a bare member path (the entity answers documents)
     'entity.projection': [entity,

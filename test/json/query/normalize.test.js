@@ -6,6 +6,7 @@ import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
+  analyzeQuery,
   compileJsonQuery,
   JsonQueryCompileError,
 } from '@jarenjs/json/query';
@@ -480,5 +481,61 @@ describe('Jaren JSON Query normalizer', () => {
         assert.strictEqual(typeof compileJsonQuery(doc, { compileTypeTest: stubTypeTest }), 'function');
       });
     }
+  });
+});
+
+describe('$and and $or are associative: a nested same-operator call flattens (QUERY-FORMAT §8.6)', () => {
+  const items = Array.from({ length: 3001 }, (_, i) => i);
+  const evens = Array.from({ length: 1500 }, (_, i) => i * 2);
+  /** @param {any} where */
+  const query = (where) => ({ $for: { it: '$[*]' }, $where: where, $return: '$it' });
+  /** The first `$and`/`$or` op node of an analysed tree. @param {any} node @param {string} name */
+  const firstOp = (node, name) => {
+    const pending = [node];
+    while (pending.length > 0) {
+      const current = pending.pop();
+      if (current === null || typeof current !== 'object') continue;
+      if (current.kind === 'op' && current.name === name) return current;
+      for (const value of Object.values(current)) pending.push(value);
+    }
+    return null;
+  };
+
+  it('a chain nested 1,500 deep either way analyzes without recursion and answers as the nest does', () => {
+    let left = { $eq: ['$it', 0] };
+    for (let i = 1; i < 1500; i++) left = { $or: [left, { $eq: ['$it', i * 2] }] };
+    let right = /** @type {any} */ ({ $eq: ['$it', 2998] });
+    for (let i = 1498; i >= 0; i--) right = { $or: [{ $eq: ['$it', i * 2] }, right] };
+    for (const where of [left, right]) {
+      assert.deepStrictEqual(compileJsonQuery(query(where))(items), evens);
+      const or = firstOp(analyzeQuery(query(where)).root, '$or');
+      assert.strictEqual(or.args.length, 1500, 'one flat call');
+      assert.strictEqual(or.args.some((/** @type {any} */ arg) => arg.kind === 'op' && arg.name === '$or'), false);
+    }
+    // $and alike: 1,500 nested exclusions leave the odd numbers and the tail
+    let and = /** @type {any} */ ({ $ne: ['$it', 0] });
+    for (let i = 1; i < 1500; i++) and = { $and: [and, { $ne: ['$it', i * 2] }] };
+    assert.deepStrictEqual(compileJsonQuery(query(and))(items.slice(0, 10)), [1, 3, 5, 7, 9]);
+    assert.strictEqual(firstOp(analyzeQuery(query(and)).root, '$and').args.length, 1500);
+  });
+
+  it('flattening keeps the order, the stopping point and every document path', () => {
+    const doc = query({ $or: [{ $eq: ['$it', 1] }, { $or: [{ $eq: ['$it', 2] }, { $eq: ['$it', 3] }] }] });
+    const or = firstOp(analyzeQuery(doc).root, '$or');
+    assert.deepStrictEqual(or.args.map((/** @type {any} */ arg) => arg.docPath),
+      ['/$where/$or/0', '/$where/$or/1/$or/0', '/$where/$or/1/$or/1']);
+    // an operand after the deciding one is still never evaluated
+    const guarded = query({ $or: [{ $eq: ['$it', 1] }, { $or: [true, { $div: [1, 0] }] }] });
+    assert.deepStrictEqual(compileJsonQuery(guarded)([1, 2]), [1, 2]);
+    // a different operator is an operand, never flattened
+    assert.strictEqual(firstOp(analyzeQuery(query({ $or: [{ $and: [true, true] }, false] })).root, '$or').args[0].name, '$and');
+  });
+
+  it('a nested call keeps its own errors at its own path, and depth is counted as analysed', () => {
+    failsWith(query({ $or: [true, { $or: [] }] }), 'JQ0003', '/$where/$or/1/$or');
+    failsWith(query({ $or: [true, { $or: [false, { $nope: 1 }] }] }), 'JQ0002', '/$where/$or/1/$or/1');
+    let nested = /** @type {any} */ ({ $eq: ['$it', 0] });
+    for (let i = 1; i < 200; i++) nested = { $or: [nested, { $eq: ['$it', i] }] };
+    assert.deepStrictEqual(compileJsonQuery(query(nested), { limits: { depth: 10 } })([3, 500, 7]), [3, 7]);
   });
 });

@@ -859,6 +859,11 @@ item comparison; otherwise `false`. Consequences:
 - `$ne` is existential too: `{"$ne": [L, R]}` is true iff some pair differs —
   it is NOT the negation of `$eq` on multi-item sequences. Use
   `{"$not": {"$eq": [L, R]}}` for the negation.
+- Against a sequence, `$eq` is **membership**: `{"$eq": ["$it.sku", {"$seq":
+  ["a", "b"]}]}` is true iff the member equals `"a"` or `"b"`, and
+  `{"$eq": ["$it.sku", "$ids[*]"]}` iff it equals some item of the external
+  `ids`. An array VALUE is one item: `{"$eq": ["$it.sku", {"$const": ["a",
+  "b"]}]}` is true only for a member that is that array.
 
 **Item comparison rules:**
 
@@ -924,6 +929,12 @@ Operands are reduced by EBV (§2.2) left to right with **short-circuit**
 evaluation: `$and` stops at the first false, `$or` at the first true;
 operands after the deciding one are not evaluated and cannot raise errors.
 Example in §8.4.
+
+`$and` and `$or` are associative, and analysis treats them so: a nested
+call of the same operator is flattened into its parent — `{"$or": [a,
+{"$or": [b, c]}]}` analyzes as `{"$or": [a, b, c]}`, the same value with
+the same evaluation order and the same stopping point — so a chain of any
+length analyzes without a level per term.
 
 ### 8.7 Strings
 
@@ -1201,8 +1212,10 @@ The other two bound the **query** rather than its output:
 - `depth` — bounds **expression nesting**, and is checked at **compile
   time** (`JQ0011`). The language has no recursion — no user-defined
   functions, no self-reference — so the compiled closure tree's maximum
-  evaluation depth IS the document's static nesting. Checking it once is
-  therefore exact, and costs nothing to evaluate.
+  evaluation depth IS the document's static nesting, as analysis reads
+  it: a nested `$and`/`$or` flattened into its parent (§8.6) adds no
+  level. Checking it once is therefore exact, and costs nothing to
+  evaluate.
 
 An unknown limit name, or a value that is not a positive integer, is a
 host programming error (`TypeError`), because an accepted-but-unenforced
@@ -2164,6 +2177,10 @@ Every node is a plain frozen object carrying at least
 | `let` | `bindings` — `[{ name, slot, expr }]`, `ret` (the degenerate `{$let, $return}` phrase) |
 | `quant` | `some` (boolean), `bindings` — `[{ name, slot, expr }]`, `satisfies` |
 | `flwor` | see C.4 |
+
+An `op` node named `$and` or `$or` never has an argument that is the same
+operator: a nested call the document spells is flattened into its parent
+(§8.6), and each argument keeps its own `docPath`.
 
 **Host-valued members.** `raw.test`, `call.fn`, `op.entry` and an
 orderby spec's `collation` are the four places the tree carries host

@@ -41,6 +41,11 @@ export interface ExprBase<V> {
 interface EqExpr<V> {
   eq(value: V | ExprBase<V> | null): BoolExpr;
   ne(value: V | ExprBase<V> | null): BoolExpr;
+  /** Membership — `$eq` against a sequence: true when this equals ANY of
+   * `values` (`{ $seq: values }`), or any item of the array a path holds
+   * (`p.ids`, `u.tags` → `path[*]`). `eq(array)` compares against ONE
+   * array value instead (QUERY-PEN.md §4). */
+  in(values: readonly (V | ExprBase<V> | null)[] | ArrayExpr<V>): BoolExpr;
 }
 
 export interface BoolExpr extends ExprBase<boolean>, EqExpr<boolean> {
@@ -145,6 +150,8 @@ export interface DateMethods {
 export interface DateTimeExpr extends ExprBase<DateTime>, DateMethods {
   eq(value: string | DateTimeExpr | null): BoolExpr;
   ne(value: string | DateTimeExpr | null): BoolExpr;
+  /** Membership — `$eq` against a sequence of instants (see {@link EqExpr.in}). */
+  in(values: readonly (string | DateTimeExpr | null)[] | ArrayExpr<string> | ArrayExpr<DateTime>): BoolExpr;
   lt(value: string | DateTimeExpr): BoolExpr;
   le(value: string | DateTimeExpr): BoolExpr;
   gt(value: string | DateTimeExpr): BoolExpr;
@@ -347,6 +354,8 @@ export interface UnknownExpr
   extends ExprBase<unknown>, AggregatableExpr, DateMethods, SeriesMethods, SpatialMethods {
   eq(value: unknown): BoolExpr;
   ne(value: unknown): BoolExpr;
+  /** Membership — `$eq` against a sequence (see {@link EqExpr.in}). */
+  in(values: readonly unknown[] | ExprBase<unknown>): BoolExpr;
   lt(value: unknown): BoolExpr;
   le(value: unknown): BoolExpr;
   gt(value: unknown): BoolExpr;

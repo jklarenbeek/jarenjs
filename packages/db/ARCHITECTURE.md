@@ -374,8 +374,13 @@ A single-binding FLWOR over the collection (`$for: { <name>: '$[*]' }`
 name and nothing translates differently under another one)
 with: comparison predicates (`$eq $ne $lt $le $gt $ge`) between a
 singular member path and a literal or external, or two paths in the same
-non-null number/string family; `$and`/`$or`/`$not`
-composition; `$exists`/`$empty`; `$starts-with`/`$ends-with`/
+non-null number/string family; membership — `$eq` between a singular
+member path and a `$seq` of scalar literals or every item of an external
+(`'$ids[*]'`), in either order, and an `$or` of two or more equalities
+comparing one member with scalar literals, each ONE list predicate;
+`$and`/`$or`/`$not` composition of any length (nested in halves, depth
+log₂ n: a flat chain of n terms is n nested expressions, which SQLite
+refuses near a thousand); `$exists`/`$empty`; `$starts-with`/`$ends-with`/
 `$contains` on schema-typed string paths with literal patterns;
 `$orderby` over singular schema-typed paths (`$dir`, `$empty`, no
 collation); a top-level `$subsequence` window with literal bounds; the
@@ -498,6 +503,8 @@ generated column where one exists), `?` = the bound operand:
 | `$empty` path | `jt IS NULL` |
 | `$eq` path, external | `(jt = 'text' AND typeof(?) = 'text' AND v = ?) OR (jt IN ('integer','real') AND typeof(?) IN ('integer','real') AND v = ?)` |
 | `$ne` path, external | `jt IS NOT NULL AND NOT (…the $eq form…)` |
+| `$eq` path, `$seq` of literals | `(jt = 'text' AND v IN (SELECT value FROM json_each(?) WHERE key IS NOT NULL AND type = 'text')) OR (jt IN ('integer','real') AND v IN (… type IN ('integer','real')))` — the strings bind as one JSON list and the numbers as another; a `null`, `true` or `false` in the list is its own `jt` test, OR'd in; an empty list is constant `FALSE` |
+| `$eq` path, `$x[*]` | the same two branches, each binding the external's JSON; `json_each` reaches an array's elements or an object's member values, and a scalar reaches nothing — the engine's `[*]` |
 | ordering vs external | the same two-branch form with `op` |
 | `$starts-with` path, string | `jt = 'text' AND (v >= ? AND v < ?)` — the prefix and its code-point successor |
 | `$ends-with` path, string | `jt = 'text' AND (length(?) = 0 OR substr(v, -length(?)) = ?)` |
@@ -536,6 +543,12 @@ over documents that happen to conform.
 execute time, if any referenced external is missing or not a string or
 finite number, the call runs the always-compiled set residual instead
 of the native statement — same answer, one branch, no wrong-typed SQL.
+A membership list is bound whole, and binds when every item `$x[*]`
+reaches is a string or a finite number: a `null` or boolean item (which
+`$eq` matches against a present `null` or boolean) and an object or
+array item (which it compares structurally) divert the call the same
+way. `cellIn`'s neighbourhood list and every membership share the one
+list emission (`inListSql` → the dialect's `inList`).
 A **derived** slot is the exception that proves it: a GeoJSON region is
 not bindable at all, so what binds is one edge of its bounding box per
 slot, computed at bind time; such a call diverts only when the bound

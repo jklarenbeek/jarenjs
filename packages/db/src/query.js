@@ -31,7 +31,7 @@
  * the whole document runs over them.
  */
 
-import { physicalSelection, columnCodec } from './physical.js';
+import { physicalSelection, columnCodec, textKeyPlan, textKeyDecoding, checkTextKeys } from './physical.js';
 
 import { createSemanticCache } from '@jarenjs/core/cache';
 import { analyzeQuery, JsonQueryRuntimeError } from '@jarenjs/json/query';
@@ -42,7 +42,7 @@ import {
   planQuery, planEntityQuery, entityShape, planEntityPredicate, entityPathRef,
   isRootScanSource, isEntityRootSource, BIND_REASONS,
 } from './plan.js';
-import { emitPlan, emitEntityPlan, createEntityPredicateEmitters, UnrepresentablePath } from './emit.js';
+import { emitPlan, emitEntityPlan, createEntityPredicateEmitters, UnrepresentablePath, physicalComparable } from './emit.js';
 import { selectPlan, conjoin, effectiveOrder, planOrder } from './algebra.js';
 import {
   compileSetResidual, compileRowResidual, compilePackedResidual, sequenceResult,
@@ -130,6 +130,23 @@ function bindable(value) {
 }
 
 /**
+ * Does a membership list (`$x[*]`) bind? The list compares its strings
+ * with strings and its numbers with numbers, so it binds when every item
+ * the wildcard reaches — an array's elements, an object's member values;
+ * a scalar reaches none — is one of those. A null or a boolean item is
+ * one `$eq` matches against a present null or boolean, and an object or
+ * array item one it compares structurally, so either sends the call to
+ * the engine; so does a missing external, which the engine refuses by
+ * its own error.
+ * @param {any} value
+ */
+function listBindable(value) {
+  if (value === undefined) return false;
+  if (value === null || typeof value !== 'object') return true;
+  return (Array.isArray(value) ? value : Object.values(value)).every(bindable);
+}
+
+/**
  * The value one parameter slot binds for a call. A DERIVED slot holds
  * no value of its own: it names one edge of a bound external's
  * bounding box, computed here because a GeoJSON object is not
@@ -175,13 +192,18 @@ function slotValue(slot, externals, anchors = null) {
  * because the residual needs the engine's own semantics for it.
  * @param {import('./emit.js').ParamSlot[]} slots
  * @param {import('./algebra.js').PlanRank | null} rank
- * @returns {Map<string, 'plain' | 'derived' | 'probe'>}
+ * @returns {Map<string, 'plain' | 'derived' | 'probe' | 'list'>}
  */
 function externalSlotKinds(slots, rank) {
-  /** @type {Map<string, 'plain' | 'derived' | 'probe'>} */
+  /** @type {Map<string, 'plain' | 'derived' | 'probe' | 'list'>} */
   const kinds = new Map();
   for (const slot of slots) {
-    if ('external' in slot) kinds.set(slot.external, 'plain');
+    // a membership list binds the external's JSON whatever it holds; the
+    // same external compared as a scalar elsewhere keeps the scalar rule
+    if ('external' in slot && slot.list === true) {
+      if (!kinds.has(slot.external)) kinds.set(slot.external, 'list');
+    }
+    else if ('external' in slot) kinds.set(slot.external, 'plain');
     else if ('derived' in slot) {
       const inputs = slot.derived.kind === 'bboxAxis'
         ? [slot.derived] : [slot.derived.centre, slot.derived.radius];
@@ -855,6 +877,7 @@ export function createQueryEngine(context) {
       });
       if (invalidDerived) return true;
       if (kind === 'derived') return false;
+      if (kind === 'list') return !listBindable(externals[name]);
       // a probe binds when SOME declared width takes it; a width the
       // model does not declare is the diversion it always was
       if (kind === 'probe') return rankAlternativeFor(entry, externals[name]) === null;
@@ -1512,6 +1535,24 @@ export const INCLUDE_ROWS_DEFAULT = 1000;
 export const INCLUDE_BYTES_DEFAULT = 1_048_576;
 
 /**
+ * The first external a plan predicate names, or null.
+ * @param {any} pred
+ * @returns {string | null}
+ */
+function externalOf(pred) {
+  if (pred === null || typeof pred !== 'object') return null;
+  if (pred.p === 'and' || pred.p === 'or') {
+    for (const item of pred.items) {
+      const found = externalOf(item);
+      if (found !== null) return found;
+    }
+    return null;
+  }
+  if (pred.p === 'not') return externalOf(pred.item);
+  return pred.operand !== undefined && 'ext' in pred.operand ? pred.operand.ext : null;
+}
+
+/**
  * Plan one `where` EXPRESSION over `$it` against one entity: the plan
  * predicate when every conjunct translates, else the first refusal —
  * the one translation the include tree, the profile's mandatory
@@ -1951,6 +1992,10 @@ export function createEntityQueryEngine(context) {
    */
   const divertReason = (entry, externals) => {
     for (const slot of entry.slots) {
+      if ('external' in slot && slot.list === true) {
+        if (listBindable(externals[slot.external])) continue;
+        return { construct: 'external', reason: BIND_REASONS.external(slot.external, 'root') };
+      }
       const value = slotValue(slot, externals);
       if (bindable(value) || (slot.nullable === true && value === null)) continue;
       const name = 'external' in slot ? slot.external
@@ -2105,7 +2150,11 @@ export function createEntityQueryEngine(context) {
     const classified = cursorClass(entry, options?.externals ?? null);
     const diverted = entry.planned.mode === 'native' && classified.barrier !== null
       && classified.barrier.construct === 'external';
-    const runtime = entry.runtimeReason;
+    // the last run's own finding — an aggregate that outgrew its exact
+    // range — stands until a run clears it; whether an external diverts
+    // is a question of the externals THIS call binds, so an earlier
+    // call's diversion is not carried into it
+    const runtime = entry.runtimeReason?.construct === 'external' ? null : entry.runtimeReason;
     const mode = diverted || runtime ? 'set' : entry.planned.mode;
     const reasons = runtime ? [runtime, ...entry.planned.reasons] : diverted && classified.barrier !== null
       ? [classified.barrier, ...entry.planned.reasons] : entry.planned.reasons;
@@ -2209,6 +2258,13 @@ export function createLoadEngine(context, entityName) {
     }
     if ('refusal' in planned) {
       throw refuse(`the where expression is not translatable: ${planned.refusal.reason}`, path);
+    }
+    // a load binds no externals: a where that names one would reach the
+    // driver as an unbound parameter
+    const external = externalOf(planned.filter);
+    if (external !== null) {
+      throw refuse(`the where expression names the external '$${external}', and a load binds none — `
+        + 'spell the value into the where, or query it through execute() with externals', path);
     }
     return planned.filter;
   };
@@ -2454,17 +2510,25 @@ export function createLoadEngine(context, entityName) {
    * appends whether or not the caller named it, since the key is the
    * one column guaranteed unique. A document-path term cannot carry a
    * keyset (`JD0032`).
+   *
+   * One identity model: a term's `column` is the PROPERTY — what a
+   * document, a continuation and the column encoding name — and the SQL
+   * reaches its physical column through {@link columnOfProperty}. On a
+   * managed entity the two are one name, so its continuations are
+   * unchanged.
    * @param {any[]} order - the compiled order terms
-   * @param {readonly string[]} keyColumns
+   * @param {readonly string[]} keyColumns - the key properties
+   * @param {(physical: string) => any} columnOfPhysical
    * @returns {{ column: string, desc: boolean, nullsFirst: boolean }[]}
    */
-  const orderIdentity = (order, keyColumns) => {
+  const orderIdentity = (order, keyColumns, columnOfPhysical) => {
     const terms = order.map((term) => {
       if (term.ref.flavor !== 'entity-column') {
         throw refuse('a keyset orders by mapped columns — '
           + `'${term.ref.segments.join('.')}' is a document path`, []);
       }
-      return { column: term.ref.column, desc: term.desc, nullsFirst: term.emptyGreatest === term.desc };
+      return { column: columnOfPhysical(term.ref.column)?.name ?? term.ref.column, desc: term.desc,
+        nullsFirst: term.emptyGreatest === term.desc };
     });
     for (const column of keyColumns) {
       // a key column is NOT NULL: `nullsFirst` is SQLite's own ASC
@@ -2555,8 +2619,7 @@ export function createLoadEngine(context, entityName) {
       if (spec?.[member] !== undefined && !isWindowBound(spec[member]))
         throw refuse(`${member} must be a non-negative integer`, []);
     }
-    if (entities.get(entityName)?.physical != null && (keyset || spec?.after !== undefined))
-      throw refuse('column codecs require decoded identities; physical keyset continuation is not qualified', []);
+    const physicalEntity = entities.get(entityName)?.physical != null;
     const tree = buildTree(entityName, spec ?? {}, 0, maxDepth, [], new Set(), profile);
     const rendered = render(tree, 'r', param, emitters);
 
@@ -2586,10 +2649,57 @@ export function createLoadEngine(context, entityName) {
       ...tree.entityMapping.indexes.filter((index) => index.unique)
         .map((index) => index.property),
     ]);
+    // one identity model (orderIdentity): a property's mapped column, and
+    // the property a physical column name belongs to
+    const mappedColumns = tree.entityMapping.columns;
+    const columnOfProperty = (/** @type {string} */ property) => mappedColumns.find((c) => c.name === property);
+    const columnOfPhysical = (/** @type {string} */ physical) => mappedColumns.find((c) => (c.physical ?? c.name) === physical);
+    const propertyOfPhysical = (/** @type {string} */ physical) => columnOfPhysical(physical)?.name ?? physical;
+    /**
+     * What a term compares and orders by: its physical column, compared as
+     * its codec compares — a mapped text column in codepoint order whatever
+     * collation the table declared, the order `execute()` gives it.
+     * @param {string} property
+     */
+    const termSql = (property) => {
+      const column = columnOfProperty(property);
+      const sql = `${rendered.aliasSql}.${q(column?.physical ?? column?.name ?? property)}`;
+      return physicalEntity && column !== undefined ? physicalComparable(column, sql, dialect) : sql;
+    };
+    /**
+     * A keyset over a physical table is qualified where a continuation's
+     * DECODED values compare as the stored ones do: on SQLite, over
+     * integer, bigint and text columns (a text key additionally proves it
+     * round-trips, per row). Anything else is refused by name.
+     * @param {string[]} properties
+     */
+    const requirePhysicalKeyset = (properties) => {
+      if (!physicalEntity) return;
+      if (dialect.name !== 'sqlite') {
+        throw refuse(`a physical keyset continuation is not qualified on ${dialect.name}: its `
+          + 'continuation values are compared in code-point and int64 order, which only the SQLite '
+          + 'physical comparison applies', []);
+      }
+      for (const property of properties) {
+        const column = columnOfProperty(property);
+        if (!['integer', 'bigint', 'text'].includes(column?.codec)) {
+          throw refuse(`a keyset continuation over a physical table orders by integer, bigint and text `
+            + `columns; '${property}' is a ${column?.codec} column, whose decoded value need not compare `
+            + 'as its stored one does (a uuid reads back lowercase)', []);
+        }
+      }
+    };
     /** @type {ReturnType<typeof orderIdentity> | null} */
     let identity = null;
+    /** @type {ReturnType<typeof textKeyPlan>} */
+    let textKeys = null;
     if (keysetMode) {
-      identity = orderIdentity(order, keyColumns);
+      identity = orderIdentity(order, keyColumns, columnOfPhysical);
+      requirePhysicalKeyset(identity.map((term) => term.column));
+      if (physicalEntity) {
+        textKeys = textKeyPlan(tree.entityMapping, identity.map((term) => columnOfProperty(term.column)),
+          dialect, `${rendered.aliasSql}.`);
+      }
       if (after !== undefined) {
         if (!structural) {
           throw new DbCompileError('JD0035',
@@ -2599,7 +2709,7 @@ export function createLoadEngine(context, entityName) {
         }
         pagination = 'keyset';
         const values = continuationValues(after, identity, order.length, keyColumns);
-        const column = (term) => `${rendered.aliasSql}.${q(term.column)}`;
+        const column = (/** @type {any} */ term) => termSql(term.column);
         const equal = (i) => (values[i] === null
           ? `${column(identity[i])} IS NULL`
           : `${column(identity[i])} = ${param({ literal: values[i] })}`);
@@ -2634,13 +2744,17 @@ export function createLoadEngine(context, entityName) {
     }
     else if (after !== undefined) {
       const term = order.length === 1 ? order[0] : null;
-      if (term === null || term.ref.flavor === 'entity-doc'
-        || !uniqueColumns.has(term.ref.column)) {
+      const property = term === null ? '' : propertyOfPhysical(term.ref.column);
+      if (term === null || term.ref.flavor === 'entity-doc' || !uniqueColumns.has(property)) {
         throw refuse("'after' (keyset pagination) needs a single orderBy over a unique column", []);
       }
+      requirePhysicalKeyset([property]);
+      // the caller seeks past the last row's value: a text key proves it
+      // round-trips exactly as a continuation's does
+      if (physicalEntity) textKeys = textKeyPlan(tree.entityMapping, [columnOfProperty(property)], dialect, `${rendered.aliasSql}.`);
       pagination = 'keyset';
-      conditions.push(`${rendered.aliasSql}.${q(term.ref.column)} `
-        + `${term.desc ? '<' : '>'} ${param({ literal: after })}`);
+      conditions.push(`${termSql(property)} `
+        + `${term.desc ? '<' : '>'} ${param({ literal: physicalEntity ? encodeColumn(property, after) : after })}`);
     }
     else if (spec?.skip !== undefined && spec.skip > 0) {
       pagination = 'offset';
@@ -2648,20 +2762,22 @@ export function createLoadEngine(context, entityName) {
 
     let sql = `SELECT ${tree.entity.physical != null ? physicalSelection(tree.entityMapping, dialect, `${rendered.aliasSql}.`)
       : `${rendered.aliasSql}.*, ${tree.entityMapping.document === false ? dialect.stringLiteral('{}') : dialect.jsonText(rendered.docSql)} AS ${q('__doc')}`}`
+      // a text identity's raw bytes, which every row read proves its key against
+      + (textKeys === null ? '' : `, ${textKeys.projection}`)
       + includeSql
       + ` FROM ${dialect.tableName(tree.entityMapping.table, tree.entityMapping.schema)} AS ${rendered.aliasSql}`;
     if (conditions.length > 0) sql += ` WHERE ${conditions.join(' AND ')}`;
     const orderSql = identity !== null
-      ? identity.map((term) => `${rendered.aliasSql}.${q(term.column)} `
+      ? identity.map((term) => `${termSql(term.column)} `
         + `${term.desc ? 'DESC' : 'ASC'}${dialect.orderNulls(term.nullsFirst)}`)
       : order.map((term) => {
         const value = term.ref.flavor === 'entity-column'
-          ? `${rendered.aliasSql}.${q(term.ref.column)}`
+          ? termSql(propertyOfPhysical(term.ref.column))
           : dialect.jsonExtract(rendered.docSql, dialect.jsonPathText(term.ref.segments));
         const nullsFirst = term.emptyGreatest === term.desc;
         return `${value} ${term.desc ? 'DESC' : 'ASC'}${dialect.orderNulls(nullsFirst)}`;
       });
-    if (identity === null) orderSql.push(...(tree.entity.physical != null ? tree.entityMapping.keys.map((k) => `${rendered.aliasSql}.${q(tree.entityMapping.columns.find((c) => c.name === k).physical)}`) : [`${rendered.aliasSql}.${dialect.rowIdentity()}`]));
+    if (identity === null) orderSql.push(...(physicalEntity ? keyColumns.map((key) => termSql(key)) : [`${rendered.aliasSql}.${dialect.rowIdentity()}`]));
     sql += ` ORDER BY ${orderSql.join(', ')}`;
     // the profile's row bound rides the root as LIMIT maxRows + 1, so
     // a load past it is detected at the bound and refused (JD2007)
@@ -2686,8 +2802,10 @@ export function createLoadEngine(context, entityName) {
       // explanation cannot drift from the clause
       effective: deepFreeze(effectiveOrder(order,
         identity === null ? undefined : { keyColumns })),
-      declared: order.map((term) => term.ref.column),
+      // the declared terms' PROPERTIES: what a continuation reads off a document
+      declared: order.map((term) => propertyOfPhysical(term.ref.column)),
       keyColumns,
+      textKeys,
       // a page over this ordering is a snapshot only when every order key
       // is immutable, and the primary key is the one column the engine
       // itself guarantees never moves (`update()` refuses to rewrite it)
@@ -2745,6 +2863,19 @@ export function createLoadEngine(context, entityName) {
   const profileSourceOf = (options) => (options?.profile !== undefined ? 'call'
     : (storeProfile === null ? null : 'store'));
 
+  /** The connection's text decoding (physical.js), once it has been read:
+   * the same answer for the connection's life. @type {any} */
+  let textDecoding = null;
+  const decodingOfText = () => textDecoding ?? chain(textKeyDecoding(connection), (decoding) => (textDecoding = decoding));
+  /** A text key that does not survive its SQLite text encoding cannot be
+   * sought past: refused before any continuation is built on it. @param {any} column */
+  const refuseTextKey = (column) => refuse(`the physical key '${column.name}' cannot round-trip through its `
+    + 'SQLite text encoding, so a continuation over it would seek past the wrong rows', []);
+  /** A row of a keyset read, its text identities proven and their byte
+   * columns dropped. @param {any} entry @param {any} row */
+  const provenRow = (entry, row) => (entry.textKeys === null ? row
+    : checkTextKeys(row, entry.textKeys, textDecoding, refuseTextKey));
+
   /** The graph cursor over one built load: one root row per pull. */
   const openCursor = (entry, signal, register, deadline = undefined, cursorFactory = createCursor) => {
     const params = entry.slots.map((slot) => slot.literal);
@@ -2754,8 +2885,9 @@ export function createLoadEngine(context, entityName) {
     // §5.1), and a statement of this cursor's own: two live iterators
     // over one cached statement invalidate each other at the driver
     return cursorFactory({ ...rowClassOf(connection), signal, deadline, now: state.now, wrap: driverWrap,
-      open: () => chain(connection.prepare(entry.sql, { readOnly: true, ephemeral: true }), (statement) => statement.iterate(params)),
-      items: (row) => [each(checkRoot(entry, parseGraphRow(entry.tree, row, '__doc'), ++pulled))] });
+      open: () => chain(entry.textKeys === null ? null : decodingOfText(), () =>
+        chain(connection.prepare(entry.sql, { readOnly: true, ephemeral: true }), (statement) => statement.iterate(params))),
+      items: (row) => [each(checkRoot(entry, parseGraphRow(entry.tree, provenRow(entry, row), '__doc'), ++pulled))] });
   };
 
   /**
@@ -2783,9 +2915,9 @@ export function createLoadEngine(context, entityName) {
       const entry = buildLoad(spec, false, profileOf(options));
       if (entry.statement === null) entry.statement = connection.prepare(entry.sql, { readOnly: true });
       const params = entry.slots.map((slot) => slot.literal);
-      return chain(entry.statement, (statement) =>
+      return chain(entry.textKeys === null ? null : decodingOfText(), () => chain(entry.statement, (statement) =>
         chain(statement.all(params), (rows) =>
-          rows.map((row, i) => checkRoot(entry, parseGraphRow(entry.tree, row, '__doc'), i + 1))));
+          rows.map((row, i) => checkRoot(entry, parseGraphRow(entry.tree, provenRow(entry, row), '__doc'), i + 1)))));
     },
     /**
      * The graph cursor: ONE root graph per pull, its includes attached

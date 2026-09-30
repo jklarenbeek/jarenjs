@@ -6,55 +6,23 @@ import { setObjectMember } from '@jarenjs/core/object';
 import { chain, isThenable } from './driver.js';
 import { DbCompileError } from './errors.js';
 import { readSchema } from './introspect.js';
-import { columnCodec, physicalSelection, verifyPhysical } from './physical.js';
+import { columnCodec, physicalSelection, verifyPhysical, textKeyPlan, textKeyDecoding, checkTextKeys } from './physical.js';
 import { entityCore } from './entity.js';
-import { sqliteTableMigration } from './dialects/sqlite.js';
 
 const member = (value, name) => Object.hasOwn(value, name) ? value[name] : undefined;
 const same = (a, b) => a === undefined || b === undefined
   ? a === b : canonicalizeJson(a) === canonicalizeJson(b);
 
-/** Prove text cursors survived the binding without replacement characters. */
+/** The text-key plan of a migration read (physical.js): a key that cannot
+ * round-trip through its SQLite text encoding refuses the migration (`JD0021`). */
 function textKeyReadPlan(connection, mapping, keys) {
-  const columns = keys.filter((column) => column.codec === 'text');
-  if (columns.length === 0) return null;
-  const names = new Set(mapping.columns.map((column) => column.physical.toLowerCase()));
-  const aliases = columns.map((_, index) => {
-    let name = `__jaren_key_bytes_${index}`;
-    while (names.has(name.toLowerCase())) name += '_';
-    names.add(name.toLowerCase());
-    return name;
-  });
-  const q = connection.dialect.quoteIdentifier;
-  const projection = columns.map((column, index) =>
-    `${sqliteTableMigration.binaryCast(q(column.physical))} AS ${q(aliases[index])}`).join(', ');
-  return chain(connection.prepare(connection.dialect.introspect.pragma('encoding')), (statement) => chain(statement.get([]), (row) => {
-    // Raw SQLite text bytes use the database encoding, including UTF-16 files.
-    // A fatal decoder refuses malformed text; preserving BOM makes equality
-    // with the binding's public key exact, without changing its byte identity.
-    const decoder = new TextDecoder(row.encoding, { fatal: true, ignoreBOM: true });
-    // Some native bindings read a leading BOM correctly but strip it when
-    // binding the cursor back. Probe once; those keys must refuse before paging.
-    const probe = `SELECT ${sqliteTableMigration.binaryCast(connection.dialect.parameterRef(1, 'text'))} AS ${q('bytes')}`;
-    return chain(connection.prepare(probe), (statement) => chain(statement.get(['\uFEFFx']), (bound) => {
-      const keepsLeadingBom = decoder.decode(bound.bytes) === '\uFEFFx';
-      const read = (rows) => {
-        for (const row of rows) for (let index = 0; index < columns.length; index++) {
-          let decoded;
-          try { decoded = decoder.decode(row[aliases[index]]); }
-          catch { /* The common refusal below also covers replacement decoding. */ }
-          if (decoded === undefined || decoded !== row[columns[index].physical]
-            || !keepsLeadingBom && decoded.startsWith('\uFEFF'))
-            throw new DbCompileError('JD0021', `physical '${mapping.table}' key '${columns[index].name}' cannot round-trip through its SQLite text encoding`);
-        }
-        return rows.map((row) => {
-          const clean = { ...row };
-          for (const alias of aliases) delete clean[alias];
-          return clean;
-        });
-      };
-      return { projection, read };
-    }));
+  const plan = textKeyPlan(mapping, keys, connection.dialect);
+  if (plan === null) return null;
+  const refuse = (column) => new DbCompileError('JD0021',
+    `physical '${mapping.table}' key '${column.name}' cannot round-trip through its SQLite text encoding`);
+  return chain(textKeyDecoding(connection), (decoding) => ({
+    projection: plan.projection,
+    read: (rows) => rows.map((row) => checkTextKeys(row, plan, decoding, refuse)),
   }));
 }
 

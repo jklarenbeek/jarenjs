@@ -590,6 +590,38 @@ function normalizeParams(key, params, arg, opPath, scope, ctx) {
   return args;
 }
 
+// `$and` and `$or` are associative, so an argument that is itself the same
+// operator is FLATTENED into the call — iteratively, before anything is
+// normalized: a chain built one call at a time (a thousand left-nested
+// `.or()`s) nests a level per term, and normalizing it recursively
+// overflowed the JavaScript stack. The flat call means exactly what the
+// nest did — the same arguments, in order, each short-circuiting and
+// raising at its own document path. A nested call with the wrong arity
+// is not flattened: normalized as written, it reports its own error.
+function normalizeAssociative(key, params, arg, opPath, scope, ctx) {
+  const list = requireExprArray(key, arg, params.min, Infinity, opPath);
+  const nested = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
+    && Object.keys(value).length === 1 && hasOwn(value, key)
+    && Array.isArray(value[key]) && value[key].length >= params.min;
+  const args = [];
+  // an explicit stack, depth-first and left to right: the argument order
+  // of the flat call is the evaluation order of the nest
+  const pending = [{ items: list, path: opPath, next: 0 }];
+  while (pending.length > 0) {
+    const top = pending[pending.length - 1];
+    if (top.next >= top.items.length) {
+      pending.pop();
+      continue;
+    }
+    const index = top.next++;
+    const value = top.items[index];
+    const path = top.path + '/' + index;
+    if (nested(value)) pending.push({ items: value[key], path: path + '/' + key, next: 0 });
+    else args.push(normalizeArg('expr', value, path, scope, ctx, top.path));
+  }
+  return args;
+}
+
 function argCards(args) {
   const cards = new Array(args.length);
   for (let i = 0; i < args.length; i++)
@@ -606,7 +638,9 @@ const CLOCK_OPERATORS = new Set(['$time-bucket', '$resample', '$rolling']);
 // table's `params` descriptor (JQ0003), the static cardinality from its
 // `result` - individual operators never re-check structure.
 function normalizeOperatorCall(key, entry, arg, docPath, opPath, scope, ctx) {
-  const args = normalizeParams(key, entry.params, arg, opPath, scope, ctx);
+  const args = (key === '$and' || key === '$or')
+    ? normalizeAssociative(key, entry.params, arg, opPath, scope, ctx)
+    : normalizeParams(key, entry.params, arg, opPath, scope, ctx);
   /** @type {any} */
   const node = {
     kind: 'op', card: entry.result(argCards(args)), docPath, name: key, args: Object.freeze(args),

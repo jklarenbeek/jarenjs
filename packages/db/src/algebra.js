@@ -53,6 +53,7 @@ export const PLAN_VERSION = 2;
  *   { p: 'refCmp', op: 'eq' | 'ne' | 'lt' | 'le' | 'gt' | 'ge',
  *     left: PlanRef, right: PlanRef } |
  *   { p: 'typeIs', ref: PlanRef, types: string[], positive: boolean } |
+ *   { p: 'in', ref: PlanRef, operand: { list: (string | number)[] } | { ext: string } } |
  *   { p: 'strop', kind: 'starts' | 'ends' | 'contains',
  *     ref: PlanRef, operand: PlanOperand } |
  *   { p: 'const', value: boolean } |

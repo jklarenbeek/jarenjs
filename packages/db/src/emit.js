@@ -19,8 +19,38 @@
 import { codePointPrefixSuccessor } from '@jarenjs/core/string';
 import { physicalSelection } from './physical.js';
 
-/** Physical text expressions must not inherit an application's collation. */
-const physicalComparable = (ref, sql, dialect) => ref.codec !== undefined
+/**
+ * Join boolean terms with `op`, nesting long chains in halves — depth
+ * log2 n. A flat chain of n terms parses as n nested expressions, and
+ * SQLite refuses an expression tree deeper than a thousand; a short
+ * chain keeps its flat spelling. The terms keep their order, so the
+ * parameters they bound stay in statement-text order.
+ * @param {string[]} parts @param {'AND' | 'OR'} op @returns {string}
+ */
+export function balancedJoin(parts, op) {
+  if (parts.length <= 8) return `(${parts.join(` ${op} `)})`;
+  const middle = Math.ceil(parts.length / 2);
+  return `(${balancedJoin(parts.slice(0, middle), op)} ${op} ${balancedJoin(parts.slice(middle), op)})`;
+}
+
+/**
+ * The ONE membership emission: a value in a list bound as one JSON
+ * parameter, one kind at a time (the dialect spells the list, `inList`).
+ * Every membership test and the `cellIn` neighbourhood go through it.
+ * @param {any} dialect
+ * @param {string} valueSql
+ * @param {string} listSql - the list's parameter
+ * @param {'text' | 'number'} kind
+ * @returns {string}
+ */
+export function inListSql(dialect, valueSql, listSql, kind) {
+  return dialect.inList(valueSql, listSql, kind);
+}
+
+/** Physical text expressions must not inherit an application's collation:
+ * the one rule every comparison and ordering over a mapped column follows.
+ * @param {{ codec?: string }} ref @param {string} sql @param {any} dialect @returns {string} */
+export const physicalComparable = (ref, sql, dialect) => ref.codec !== undefined
   ? dialect.physicalCompare?.(ref.codec, sql)
     ?? (['text', 'date', 'datetime'].includes(ref.codec) ? dialect.codepoint(sql) : sql) : sql;
 const physicalValueType = (ref, sql, dialect) => ref.codec !== undefined
@@ -44,7 +74,7 @@ function compareRefs(pred, read) {
 }
 
 /**
- * @typedef {{ external: string, nullable?: boolean } | { literal: unknown } |
+ * @typedef {{ external: string, nullable?: boolean, json?: boolean, list?: boolean } | { literal: unknown } |
  *   { derived: { kind: 'bboxAxis', external: string,
  *     axis: 'w' | 's' | 'e' | 'n' } } |
  *   { derived: { kind: 'circleAxis', centre: { external: string } | { literal: unknown },
@@ -318,6 +348,34 @@ export function emitPlan(plan, dialect, physical) {
   };
 
   /**
+   * Membership: the member in a list, branch by kind — text with text,
+   * number with number, each guarded by the member's JSON type exactly as
+   * an equality is, and TOTAL through its presence test. A list of
+   * literals binds each kind's items as one JSON value; an external's
+   * items bind the external itself, once per branch, and the list's own
+   * type filter keeps each branch to its kind.
+   * @param {any} pred
+   * @returns {string}
+   */
+  const emitIn = (pred) => {
+    const jt = typeOf(pred.ref);
+    const branch = (/** @type {'text' | 'number'} */ kind, /** @type {string} */ listSql) => {
+      const guard = kind === 'number' ? `${jt} IN ${NUMERIC()}` : `${jt} = ${sl('text')}`;
+      return `(${jt} IS NOT NULL AND ${guard} AND ${inListSql(dialect, valueOf(pred.ref, kind), listSql, kind)})`;
+    };
+    if ('ext' in pred.operand) {
+      const slot = () => param({ external: pred.operand.ext, json: true, list: true });
+      return `(${branch('text', slot())} OR ${branch('number', slot())})`;
+    }
+    const texts = pred.operand.list.filter((value) => typeof value === 'string');
+    const numbers = pred.operand.list.filter((value) => typeof value === 'number');
+    const branches = [];
+    if (texts.length > 0) branches.push(branch('text', param({ literal: JSON.stringify(texts) })));
+    if (numbers.length > 0) branches.push(branch('number', param({ literal: JSON.stringify(numbers) })));
+    return branches.length === 1 ? branches[0] : `(${branches.join(' OR ')})`;
+  };
+
+  /**
    * @param {import('./algebra.js').PlanPredicate} pred
    * @returns {string}
    */
@@ -327,15 +385,17 @@ export function emitPlan(plan, dialect, physical) {
         return compareRefs(pred, (ref) => ({ value: valueOf(ref, kindOf(ref)),
           present: `${typeOf(ref)} IS NOT NULL` }));
       case 'and':
-        return `(${pred.items.map(emitPred).join(' AND ')})`;
+        return balancedJoin(pred.items.map(emitPred), 'AND');
       case 'or':
-        return `(${pred.items.map(emitPred).join(' OR ')})`;
+        return balancedJoin(pred.items.map(emitPred), 'OR');
       case 'not':
         return `NOT ${emitPred(pred.item)}`;
       case 'const':
         return pred.value ? dialect.booleanLiteral(true) : dialect.booleanLiteral(false);
       case 'cmp':
         return emitCmp(pred);
+      case 'in':
+        return emitIn(pred);
       case 'colCmp': {
         const column = q(pred.column);
         const symbol = { eq: '=', lt: '<', le: '<=', gt: '>', ge: '>=' }[pred.op];
@@ -421,12 +481,13 @@ export function emitPlan(plan, dialect, physical) {
         // which for a virtual generated column is a host function call
         // per row.
         const column = q(pred.column);
-        const list = pred.cells.map((cell) => param({ literal: cell })).join(', ');
+        // the one membership emission: the cells bound as one JSON list
+        const member = () => inListSql(dialect, column, param({ literal: JSON.stringify(pred.cells) }), 'text');
         // An empty membership search item raises in the query engine. The
         // candidate fetch must retain it for the original row predicate.
         if (pred.keepEmpty === true) return pred.cells.length === 0 ? `${column} IS NULL`
-          : `(${column} IS NULL OR ${column} IN (${list}))`;
-        return `(${column} IS NOT NULL AND ${column} IN (${list}))`;
+          : `(${column} IS NULL OR ${member()})`;
+        return `(${column} IS NOT NULL AND ${member()})`;
       }
       case 'cellPrefix': {
         // A cell SHORTER than the column's own: the half-open range an
@@ -633,6 +694,19 @@ export function createEntityPredicateEmitters(dialect, param) {
 
   const emitDocPred = (docSql, pred) => {
     const jt = dialect.jsonTypeOf(docSql, pathTextOf(pred.ref));
+    if (pred.p === 'in') {
+      // the collection's membership form, over the entity's document
+      const branch = (/** @type {'text' | 'number'} */ kind, /** @type {string} */ listSql) => {
+        const guard = kind === 'number' ? `${jt} IN ${NUMERIC()}` : `${jt} = ${sl('text')}`;
+        return `(${jt} IS NOT NULL AND ${guard} AND ${inListSql(dialect, memberAt(docSql, pred.ref, kind), listSql, kind)})`;
+      };
+      const texts = pred.operand.list.filter((/** @type {any} */ value) => typeof value === 'string');
+      const numbers = pred.operand.list.filter((/** @type {any} */ value) => typeof value === 'number');
+      const branches = [];
+      if (texts.length > 0) branches.push(branch('text', param({ literal: JSON.stringify(texts) })));
+      if (numbers.length > 0) branches.push(branch('number', param({ literal: JSON.stringify(numbers) })));
+      return branches.length === 1 ? branches[0] : `(${branches.join(' OR ')})`;
+    }
     if (pred.p === 'typeIs') {
       if (pred.types.length === 0)
         return pred.positive ? `${jt} IS NOT NULL` : `${jt} IS NULL`;
@@ -680,6 +754,21 @@ export function createEntityPredicateEmitters(dialect, param) {
     if (pred.p === 'strop') {
       const form = stropForm(dialect, param, column, pred);
       return `(${column} IS NOT NULL AND ${form})`;
+    }
+    if (pred.p === 'in') {
+      // a typed column holds one kind: the list's items of the other kind
+      // could never match it, so they are not bound at all; a boolean
+      // column holds no string or number
+      const kind = pred.ref.storage === 'string' ? 'text' : pred.ref.storage === 'boolean' ? null : 'number';
+      if (kind === null) return dialect.booleanLiteral(false);
+      if ('ext' in pred.operand) {
+        return `(${column} IS NOT NULL AND ${inListSql(dialect, column,
+          param({ external: pred.operand.ext, json: true, list: true }), kind)})`;
+      }
+      const values = pred.operand.list.filter((/** @type {any} */ value) =>
+        (kind === 'text' ? typeof value === 'string' : typeof value === 'number'));
+      if (values.length === 0) return dialect.booleanLiteral(false);
+      return `(${column} IS NOT NULL AND ${inListSql(dialect, column, param({ literal: JSON.stringify(values) }), kind)})`;
     }
     const symbol = { eq: '=', ne: '<>', lt: '<', le: '<=', gt: '>', ge: '>=' }[pred.op];
     if ('ext' in pred.operand) {
@@ -752,9 +841,9 @@ export function createEntityPredicateEmitters(dialect, param) {
         present: `${dialect.jsonTypeOf(docSql, pathTextOf(ref))} IS NOT NULL` };
     });
     if (pred.p === 'and')
-      return `(${pred.items.map((item) => emitPred(aliasSql, docSql, item)).join(' AND ')})`;
+      return balancedJoin(pred.items.map((item) => emitPred(aliasSql, docSql, item)), 'AND');
     if (pred.p === 'or')
-      return `(${pred.items.map((item) => emitPred(aliasSql, docSql, item)).join(' OR ')})`;
+      return balancedJoin(pred.items.map((item) => emitPred(aliasSql, docSql, item)), 'OR');
     if (pred.p === 'not') return `NOT ${emitPred(aliasSql, docSql, pred.item)}`;
     if (pred.p === 'const')
       return pred.value ? dialect.booleanLiteral(true) : dialect.booleanLiteral(false);
@@ -816,8 +905,8 @@ export function emitEntityPlan(plan, dialect, physicalOf) {
   const emitters = createEntityPredicateEmitters(dialect, param);
   const emitPred = (bindingName, pred) => {
     if (pred.p === 'binding') return emitPred(pred.binding, pred.filter);
-    if (pred.p === 'and' || pred.p === 'or') return `(${pred.items
-      .map((item) => emitPred(bindingName, item)).join(pred.p === 'and' ? ' AND ' : ' OR ')})`;
+    if (pred.p === 'and' || pred.p === 'or')
+      return balancedJoin(pred.items.map((item) => emitPred(bindingName, item)), pred.p === 'and' ? 'AND' : 'OR');
     if (pred.p === 'not') return `NOT (${emitPred(bindingName, pred.item)})`;
     return emitters.emitPred(aliasOf(bindingName), docOf(bindingName), pred);
   };

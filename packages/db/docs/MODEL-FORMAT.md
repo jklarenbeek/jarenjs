@@ -2252,6 +2252,22 @@ guard); a boolean, `null` or missing external diverts to the residual
 at bind time, exactly as phase A does. Externals against document
 paths stay residual.
 
+**Membership** is `$eq` between a member and a list — a `$seq` of scalar
+literals, every item of an external (`'$ids[*]'`), or an `$or` of
+equalities comparing one member with literals — and it plans to ONE
+predicate whose list binds as one JSON value however long it is: 5,000
+ids are one statement with one parameter, and the column's index seeks
+them. A column compares only the list items of its own kind (a text
+column its strings, a numeric column its numbers); a `null` in a literal
+list is the present-null test and a `true`/`false` the boolean one, so
+the answer is `$eq`'s. A bound list binds when every item it reaches is
+a string or a finite number — a `null`, boolean, object or array item
+diverts the call at bind time — and against a boolean column or a
+document path a bound list stays residual. A long `$and`/`$or` that
+does not fold nests in halves (depth log₂ n), so a 5,000-term chain
+prepares and explains where a flat one met SQLite's expression-depth
+limit near 1,000 terms.
+
 ### 10.2 Joins
 
 Bindings connected by equalities between their column references
@@ -2334,6 +2350,10 @@ cursor is one position in one ordered set, and on an include it is
 `JD0032`. Clauses compile against
 the child's own reference flavors; an untranslatable clause is a
 refusal (`JD0032`) naming the include path, never a silent residual.
+A load binds no externals, so a `where` that names one is `JD0032` by
+name: spell the values in — a membership list (`{ $eq: ['$it.sku',
+{ $seq: [...] }] }`, §10.1) binds as one value however long it is — or
+query through `execute()` with externals.
 Include depth is bounded (default 3, override with `maxDepth`);
 exceeding it is `JD0032` with the bound printed. A cyclic include
 specification is rejected. Unknown relation names are `JD0032` too.
@@ -2412,6 +2432,24 @@ nor false for `NULL`, and a comparison alone would visit a null-keyed
 row twice or never. Only mapped columns carry a keyset; a document path
 in the ordering is refused (`JD0032`).
 
+**Over a physical table** (§12) the keyset is the same model with one
+identity per term: the continuation names PROPERTIES and carries their
+decoded values, while the SQL names the physical columns and compares
+each as its codec compares. A renamed key column (`item_id` for `id`),
+a composite key and a bigint above 2^53 therefore page without skipping
+or repeating a row, and a primary-key order reports `snapshot: true`.
+On SQLite, integer, bigint and text identities qualify. A text term
+orders and compares by code point (`COLLATE BINARY`) whatever collation
+the column declares — in `load({ orderBy })` exactly as in `execute()`,
+so a NOCASE index cannot serve that order — and every text key a page
+reads must round-trip through the file's text encoding: one that does
+not (malformed UTF-8) refuses `JD0032` before a continuation is built on
+it, where it used to page forever. Any other codec refuses `JD0032`
+naming it (a `uuid` reads back lowercase whatever the table stores, so
+its decoded value does not compare as the stored one), and a PostgreSQL
+physical keyset refuses naming the dialect until its physical
+comparison is qualified.
+
 **The continuation** a page emits is unsigned, structural and opaque:
 
 ```jsonc
@@ -2486,6 +2524,8 @@ a number appears only where `capabilities.rowEstimates` is filled):
   typed scalar projections lower when unordered or ordered solely by the
   projected path, preserving first occurrence or that declared order;
 - externals against document paths; booleans and `null` at bind time;
+  a bound membership list against a boolean column, and one holding a
+  `null`, a boolean, an object or an array at bind time;
 - everything phase A already listed (§8 of `QUERY-FORMAT.md`
   notwithstanding, the truth table is the contract).
 
@@ -2802,8 +2842,9 @@ Mapped query documents use the qualified native subset in [NATIVE-PLANS](NATIVE-
 Present-null scalar equality/ranges preserve Jaren semantics. Unsupported codecs
 and shapes retain explicit residuals; strict mode also rejects unsupported bound
 externals before fetching rows. Scalar graph loads use mapped names.
-Physical `page` and `after` continuation refuse until codec-aware keysets are
-qualified; an explicit `take`/`skip` load remains available.
+Physical `page` and structural `after` continuations qualify on SQLite for
+integer, bigint and text identities (§10.5); other codecs and PostgreSQL refuse
+`JD0032` by name, and an explicit `take`/`skip` load remains available.
 Capture/live/replication for adopted application triggers is not qualified and
 is refused, rather than advertised as a complete change stream. PostgreSQL
 supports explicit native scalar adoption as described below.
@@ -2856,8 +2897,8 @@ have native predicate/projection execution. Safe integer sums/averages and
 supported scalar min/max use the shared native runtime guards; floating sums
 and averages retain decoded evaluation to preserve accumulation order.
 Other scalar shapes retain a
-reported decoded residual or strict refusal. Keyset continuation remains
-unqualified. The shared native mutation engine supports bounded update, delete,
+reported decoded residual or strict refusal. A physical keyset continuation
+remains unqualified on PostgreSQL and refuses `JD0032` naming the dialect. The shared native mutation engine supports bounded update, delete,
 upsert and same-entity insert-select; returned row/byte overflow rolls back the
 statement and its transactional trigger effects. Exact decimals, bytes and JSON
 use codec-aware changed reporting. Structural SQL through
