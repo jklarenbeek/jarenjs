@@ -58,6 +58,26 @@ const AUDIENCES = Object.freeze(['public', 'server']);
 const METHODS = Object.freeze(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']);
 const LOCATIONS = Object.freeze(['path', 'query', 'header', 'body']);
 
+/** RFC 9110 §5.6.2's `token`: what a header field name may be. */
+const FIELD_NAME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+
+/**
+ * Whether a schema's own keywords leave `null` possible — the check a
+ * 204/205 binding needs: `false` only where `type`, `const` or `enum`
+ * exclude it outright (an applicator is not second-guessed).
+ * @param {unknown} schema
+ * @returns {boolean}
+ */
+function admitsNull(schema) {
+  if (typeof schema === 'boolean') return schema;
+  if (!isJsonObject(schema)) return true;
+  if (Object.hasOwn(schema, 'const')) return schema.const === null;
+  if (Array.isArray(schema.enum)) return schema.enum.includes(null);
+  if (typeof schema.type === 'string') return schema.type === 'null';
+  if (Array.isArray(schema.type)) return schema.type.includes('null');
+  return true;
+}
+
 const DEFAULT_MAX_BODY_BYTES = 1048576;
 const DEFAULT_MEDIA = 'application/json';
 const STREAM_MEDIA = 'text/event-stream';
@@ -898,14 +918,26 @@ function checkHttp(http, id, kind, members, base) {
     }
     setObjectMember(locations, m, loc);
   }
-  if (method === 'GET' || method === 'HEAD') {
+  if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') {
     for (let i = 0; i < members.length; i++) {
       const m = members[i];
       if (locations[m] === 'body') {
         throw refuse('JC0016',
-          `a ${kind} operation bound to ${method} cannot carry '${m}' in the body (a GET body)`,
+          `a ${kind} operation bound to ${method} cannot carry '${m}' in the body `
+          + (method === 'OPTIONS' ? '(an OPTIONS body is never carried: both adapters drop it)' : '(a GET body)'),
           m === bodyMember ? at(base, 'body') : (inMap[m] !== undefined ? at(at(base, 'in'), m) : at(base, 'method')));
       }
+    }
+  }
+  // a header-located member travels under its own name, so that name
+  // must be a field name — `x tenant` compiled and then failed every
+  // call as a network error
+  for (let i = 0; i < members.length; i++) {
+    const m = members[i];
+    if (locations[m] === 'header' && !FIELD_NAME.test(m)) {
+      throw refuse('JC0009',
+        `'${m}' is mapped to header, but a header's name is its member's name and '${m}' is not an HTTP token (RFC 9110 §5.6.2) — rename the member or map it to query`,
+        inMap[m] !== undefined ? at(at(base, 'in'), m) : base);
     }
   }
   // a subscribe operation's media is the stream envelope, not an opaque
@@ -1027,6 +1059,26 @@ export function compileContract(doc, options = {}) {
     const errors = checkErrors(op.errors, at(base, 'errors'), scope);
     const policy = checkPolicy(op.policy, kind, declaredMembers, at(base, 'policy'));
     const http = checkHttp(op.http, id, kind, members, at(base, 'http'));
+    if (http.opaque) {
+      // the raw handler owns the bytes: the binding never reads a key and
+      // client.bytes() never retries, so either declaration would be
+      // advertised and never enforced — the handler owns them (§4.5, §8)
+      if (policy.idempotency !== 'none') {
+        throw refuse('JC0022',
+          `an opaque operation (media ${http.media}) cannot declare policy.idempotency '${policy.idempotency}' — its raw path never reads an Idempotency-Key, so the handler owns its own idempotency`,
+          at(at(base, 'policy'), 'idempotency'));
+      }
+      if (policy.retry !== null) {
+        throw refuse('JC0022',
+          `an opaque operation (media ${http.media}) cannot declare policy.retry — bytes() never retries a stream, so the caller owns the retry`,
+          at(at(base, 'policy'), 'retry'));
+      }
+    }
+    if ((http.status === 204 || http.status === 205) && !http.opaque && !admitsNull(effectiveSchema(op.output, scope))) {
+      throw refuse('JC0012',
+        `http.status ${http.status} carries no content, but the output schema never admits null — the value could not be answered; declare an output that admits null, or another status`,
+        at(at(base, 'http'), 'status'));
+    }
 
     const shape = `${http.method} ${pathShape(http.template)}`;
     if (shapes.has(shape)) {

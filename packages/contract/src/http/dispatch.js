@@ -30,8 +30,9 @@ import { canonicalSha256, JsonCanonicalizeError } from '@jarenjs/json/canonical'
 import { ContractHostError, ContractFailure } from '../errors.js';
 import { validateOperationInput, settleOperation, safeTrace, classifyDeclared } from '../pipeline.js';
 import { identify as identifyHost, acquire as acquireHost, once, RollbackCarrier } from '../host.js';
+import { publicDescription } from '../describe.js';
 import {
-  BodyLimitError, isAsyncByteSource, normalizeBody, collectBytes, countingSource, onSettled,
+  BodyLimitError, isAsyncByteSource, normalizeBody, collectBytes, countingSource, onSettled, discard,
 } from './body.js';
 import {
   isSubscriptionLike, runSubscription, STREAM_ERRORS, STREAM_MEDIA, HEARTBEAT_LINE, encodeStreamEvent,
@@ -188,6 +189,9 @@ const utf8 = new TextDecoder('utf-8', { fatal: true });
 /** The frozen empty header table of a request without declared headers. */
 const NO_HEADERS = Object.freeze({});
 
+/** The statuses that carry no content (RFC 9110 §15.3.5, §15.3.6, §15.4.5). */
+const NO_CONTENT = new Set([204, 205, 304]);
+
 /** The valid shape of a request object — `JC1004` otherwise. */
 const REQUEST_SHAPE = 'a request is { method: string, url: string, headers: object, body: string | Uint8Array | AsyncIterable<Uint8Array> | ReadableStream | null }';
 
@@ -299,6 +303,33 @@ function refuse(server, code, trace, params, details, extraHeaders, ctx, retryab
 }
 
 /**
+ * Whether a routed segment decodes to `.` or `..`. Such a path is refused
+ * before it is matched (`JC2011`): an adapter that normalizes the URL
+ * (fetch's `new URL`) would fold it into ANOTHER path and run another
+ * operation, while one that passes the raw path (node) would bind `..`
+ * as a value — the binding answers one way for both.
+ * @param {string} path
+ * @returns {boolean}
+ */
+function hasDotSegment(path) {
+  if (path.indexOf('.') === -1 && path.indexOf('%') === -1) return false;
+  const segments = path.split('/');
+  for (let i = 0; i < segments.length; i++) {
+    const raw = segments[i];
+    if (raw.length === 0 || raw.length > 6) continue;
+    let text;
+    try {
+      text = decodeURIComponent(raw);
+    }
+    catch {
+      continue;
+    }
+    if (text === '.' || text === '..') return true;
+  }
+  return false;
+}
+
+/**
  * Whether a path decodes at all — the miss classifier: a `null` match
  * with an undecodable path is `JC2011`, not a 404.
  * @param {string} path
@@ -325,23 +356,6 @@ function hasContent(body) {
   if (typeof body === 'string') return body.length > 0;
   if (body instanceof Uint8Array) return body.byteLength > 0;
   return true;
-}
-
-/**
- * Cancel a pull source exactly once, for a body nobody will read (a
- * HEAD's returned stream, a request source a response left unread).
- * @param {AsyncIterable<Uint8Array>} source
- * @returns {Promise<void>}
- */
-async function discard(source) {
-  const iterator = source[Symbol.asyncIterator]();
-  if (typeof iterator.return !== 'function') return;
-  try {
-    await iterator.return();
-  }
-  catch {
-    // a source that refuses its cancel is already gone
-  }
 }
 
 /**
@@ -420,10 +434,19 @@ function run(server, request) {
   const body = /** @type {import('./body.js').Body} */ (normalizeBody(request.body));
 
   // ——— 2. route ———
+  if (hasDotSegment(path)) return refuse(server, 'JC2011', trace, {}, undefined, null, null);
   let hit = server.contract.match(method, path);
   let isHead = false;
   if (hit === null && method === 'HEAD' && server.head) {
-    hit = server.contract.match('GET', path);
+    const get = server.contract.match('GET', path);
+    // HEAD is a READ's answer without its body. A command bound to GET is
+    // never executed — nor its idempotency claim settled — from a HEAD: a
+    // link scanner's HEAD must not redeem a magic link, and a bodyless
+    // settlement would replay as a response without its body
+    if (get !== null && get.op.kind !== 'read') {
+      return refuse(server, 'JC2002', trace, { allow: 'GET' }, undefined, { allow: 'GET' }, null);
+    }
+    hit = get;
     isHead = hit !== null;
   }
   if (hit === null) {
@@ -431,7 +454,8 @@ function run(server, request) {
     if (server.wellKnown !== false && path === server.wellKnown) return wellKnown(server, method, trace);
     const allowed = server.contract.allowed(path);
     if (allowed.length > 0) {
-      if (server.head && allowed.includes('GET') && !allowed.includes('HEAD')) {
+      if (server.head && allowed.includes('GET') && !allowed.includes('HEAD')
+        && server.contract.match('GET', path)?.op.kind === 'read') {
         allowed.push('HEAD');
         allowed.sort();
       }
@@ -957,7 +981,7 @@ function wellKnown(server, method, trace) {
     return refuse(server, 'JC2002', trace, { allow: 'GET, HEAD' }, undefined, { allow: 'GET, HEAD' }, null);
   }
   const respond = () => {
-    if (server.described.text === null) server.described.text = JSON.stringify(server.contract.describe());
+    if (server.described.text === null) server.described.text = JSON.stringify(publicDescription(server.contract));
     return {
       status: 200,
       headers: { 'content-type': JSON_CONTENT_TYPE, 'x-jaren-trace': trace },
@@ -1383,7 +1407,8 @@ function finishValue(server, route, ctx, value, trace, armed, isHead, ifMatch, i
     }
     headers.etag = etag;
   }
-  if (text === undefined || status === 204) return { status, headers, body: null };
+  // 204 and 205 carry no content by definition — whatever the value
+  if (text === undefined || status === 204 || status === 205) return { status, headers, body: null };
   headers['content-type'] = route.media.indexOf(';') === -1 ? `${route.media}; charset=utf-8` : route.media;
   if (isHead) {
     headers['content-length'] = String(new TextEncoder().encode(text).byteLength);
@@ -1422,6 +1447,13 @@ function finishRaw(server, route, ctx, value, trace, armed, isHead) {
     if (rawHeaders !== undefined && (rawHeaders === null || typeof rawHeaders !== 'object')) throw new TypeError('raw headers');
     body = normalizeBody(body);
     if (body === undefined) throw new TypeError('raw body');
+    // a status that carries no content cannot carry this body: refused,
+    // never cut silently (and never handed to an adapter that throws on it)
+    if (NO_CONTENT.has(status) && body !== null && !(typeof body === 'string' && body.length === 0)
+      && !(body instanceof Uint8Array && body.byteLength === 0)) {
+      throw new TypeError(`a raw ${status} answer carries no body`);
+    }
+    if (NO_CONTENT.has(status)) body = null;
     if (rawHeaders !== undefined) {
       const names = Object.keys(rawHeaders);
       for (let i = 0; i < names.length; i++) {

@@ -143,7 +143,7 @@ export const de = {
   'contract/handler-failed': 'die Operation {op} ist fehlgeschlagen',
   'contract/idempotency-conflict': 'der Idempotency-Key der Operation {op} steht im Konflikt mit einer früheren Anfrage ({kind})',
   'contract/invalid-output': 'die Operation {op} hat eine Antwort erzeugt, die ihren Vertrag verletzt',
-  'contract/malformed-path': 'der Anfragepfad enthält eine fehlerhafte Prozent-Escape-Sequenz',
+  'contract/malformed-path': 'der Anfragepfad enthält eine fehlerhafte Prozent-Escape-Sequenz oder ein Segment, das . oder .. ist',
   'contract/malformed-query': 'der Query-String ist nicht dekodierbar',
   'contract/not-implemented': 'die Operation {op} ist auf diesem Server nicht implementiert',
   'contract/precondition-failed': 'die If-Match-Vorbedingung der Operation {op} ist fehlgeschlagen',

@@ -51,7 +51,8 @@ const CONTRACT = compileContract({
       input: { type: 'object', required: ['id'], properties: { id: { type: 'string' } } },
       output: true,
       errors: { gone: { status: 410 } },
-      policy: { retry: { max: 2, on: ['gone'] } },
+      // no retry policy: an opaque operation cannot declare one (JC0022) —
+      // bytes() never retries a stream, so the caller owns the retry
       http: { method: 'GET', path: '/blobs/{id}', media: 'application/octet-stream' },
     },
     'note.put': {
@@ -729,7 +730,7 @@ describe('bytes — client.bytes()', () => {
     assert.strictEqual(gone.ok, false);
     if (gone.ok) return;
     assert.strictEqual(gone.kind, 'failure');
-    assert.deepStrictEqual(gone.error, { code: 'gone', message: 'operation blob.get failed with gone', status: 410, details: { at: 1 }, retryable: true }, 'retryable by the declared policy — and still not retried by bytes');
+    assert.deepStrictEqual(gone.error, { code: 'gone', message: 'operation blob.get failed with gone', status: 410, details: { at: 1 }, retryable: false }, 'no retry policy is declared, so the failure is not retryable — and bytes never retries');
     assert.strictEqual(gone.meta.trace, 'trace-b');
 
     const html = openHttpClient(CONTRACT, { fetch: async () => new Response('<html>bad gateway</html>', { status: 502 }) });
@@ -756,7 +757,7 @@ describe('bytes — client.bytes()', () => {
       assert.strictEqual(network.kind, 'network');
       assert.strictEqual(network.error.code, 'JC2051');
     }
-    assert.strictEqual(calls, 1, 'bytes never retries, whatever the retry policy declares');
+    assert.strictEqual(calls, 1, 'bytes never retries');
 
     const controller = new AbortController();
     controller.abort();

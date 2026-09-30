@@ -143,7 +143,7 @@ export const pt = {
   'contract/handler-failed': 'a operação {op} falhou',
   'contract/idempotency-conflict': 'a Idempotency-Key da operação {op} conflita com uma solicitação anterior ({kind})',
   'contract/invalid-output': 'a operação {op} produziu uma resposta que viola seu contrato',
-  'contract/malformed-path': 'o caminho da solicitação contém um escape percentual malformado',
+  'contract/malformed-path': 'o caminho da solicitação contém um escape percentual malformado, ou um segmento que é . ou ..',
   'contract/malformed-query': 'a cadeia de consulta não é decodificável',
   'contract/not-implemented': 'a operação {op} não está implementada neste servidor',
   'contract/precondition-failed': 'a pré-condição If-Match da operação {op} falhou',

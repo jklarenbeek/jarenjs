@@ -141,7 +141,7 @@ export const zhTW = {
   'contract/handler-failed': '操作 {op} 失敗',
   'contract/idempotency-conflict': '操作 {op} 的 Idempotency-Key 與先前的請求衝突({kind})',
   'contract/invalid-output': '操作 {op} 產生了違反其契約的回應',
-  'contract/malformed-path': '請求路徑含有格式錯誤的百分比逸出序列',
+  'contract/malformed-path': '請求路徑含有格式錯誤的百分比逸出序列，或為 . 或 .. 的路徑區段',
   'contract/malformed-query': '查詢字串無法解碼',
   'contract/not-implemented': '操作 {op} 未在此伺服器上實作',
   'contract/precondition-failed': '操作 {op} 的 If-Match 前置條件失敗',

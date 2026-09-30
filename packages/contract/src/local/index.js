@@ -30,6 +30,7 @@
  * `capabilities.idempotency: false` saying so.
  */
 
+import { refuseUnknownMembers } from '@jarenjs/core/object';
 import { compileMessageCatalog } from '@jarenjs/core/message';
 
 import { ContractHostError, ContractFailure } from '../errors.js';
@@ -147,13 +148,13 @@ function prepare(op, handler) {
 }
 
 /**
- * Race the pipeline's settlement against the abort signal: the first
- * one wins, and a handler that settles after the abort settles into
- * nothing (the state-side id guard is the caller's guarantee; this is
- * the honest local reading of "the request was cancelled").
- * @param {Promise<import('../pipeline.js').OperationResult>} settled
+ * Race a settlement against the abort signal: the first one wins. It
+ * decides only what the CALLER hears — `cancelled` at the abort — never
+ * when the host's `enter` settles, which waits for the handler.
+ * @template T
+ * @param {Promise<T>} settled
  * @param {AbortSignal} signal
- * @returns {Promise<import('../pipeline.js').OperationResult | typeof ABORTED>}
+ * @returns {Promise<T | typeof ABORTED>}
  */
 function race(settled, signal) {
   return new Promise((resolve) => {
@@ -171,6 +172,9 @@ function race(settled, signal) {
     });
   });
 }
+
+/** Every option `serveLocal` reads — a CLOSED set (`JC1001`, nearest name). */
+const LOCAL_OPTIONS = Object.freeze(['validateOutput', 'trace', 'onError', 'catalog', 'runtime', 'identify', 'acquire']);
 
 /**
  * Serve a compiled contract in-process and call it through the same
@@ -212,6 +216,7 @@ export function openLocalClient(contract, handlers, options = {}) {
     }
   }
   if (options === null || typeof options !== 'object') throw host('JC1001', 'options must be an object');
+  refuseUnknownMembers(options, LOCAL_OPTIONS, (key, hint) => host('JC1001', `option '${key}' is not one serveLocal reads${hint}`));
   const validateOutput = options.validateOutput === undefined ? 'always' : options.validateOutput;
   if (validateOutput !== 'always' && validateOutput !== 'never') {
     throw host('JC1001', "options.validateOutput must be 'always' or 'never'");
@@ -289,7 +294,8 @@ export function openLocalClient(contract, handlers, options = {}) {
     if (route.op.kind === 'subscribe') {
       throw new ContractHostError('JC1005', `client: '${route.outcome.id}' is a subscribe operation; the local binding cannot carry a stream (capabilities.stream is false)`);
     }
-    if (ctx === null || typeof ctx !== 'object') throw host('JC1001', 'ctx must be an object');
+    // the same refusal every client binding answers for a malformed ctx
+    if (ctx === null || typeof ctx !== 'object') throw host('JC1008', 'ctx must be an object');
     const meta = makeMeta(route.outcome.id, ctx.attempt, null);
     const caller = ctx.signal === undefined || ctx.signal === null ? null : ctx.signal;
     if ((caller !== null && caller.aborted) || closed) return cancelled(route, meta);
@@ -361,26 +367,41 @@ export function openLocalClient(contract, handlers, options = {}) {
     // handler is still invoked with the aborted signal — told to stop, as
     // a superseded attempt always was — and its settlement is dropped
 
-    // 3. acquire, then the neutral pipeline inside enter under the composed signal
+    // 3. acquire, then the neutral pipeline inside enter under the composed
+    // signal. `enter` settles when the HANDLER does — as on the port
+    // binding — so a transaction the host opened around it never commits
+    // (or releases its lease) while the handler is still writing, and a
+    // handler fault after an abort still rolls it back. The CALLER hears
+    // `cancelled` the moment it aborts; the host's settlement and the
+    // leases' release finish behind that answer.
     const identityCtx = Object.freeze({
       op: route.op, trace: id, carrier: /** @type {const} */ ('local'), host: identified.lease.host, signal,
       method: null, path: null, params: null, headers: NO_HEADERS, body: null,
       fail: ContractFailure, idempotency: null, etag: null, status: null, header: null,
     });
-    const out = await acquireHost(lifecycle, value, identityCtx, (lease) => {
+    const running = acquireHost(lifecycle, value, identityCtx, (lease) => {
       acquired = once(lease.release, observed);
       const handlerCtx = Object.freeze({ ...identityCtx, host: lease.host });
-      return race(settleOperation(route, value, handlerCtx, validate), signal).then((result) => {
+      return settleOperation(route, value, handlerCtx, validate).then((result) => {
         // a host fault rejects enter with the carrier: a transaction around it rolls back, the fault stands
-        if (result !== ABORTED && result.kind === 'contract') throw new RollbackCarrier(result, result.cause);
+        if (result.kind === 'contract') throw new RollbackCarrier(result, result.cause);
         return result;
       });
     });
+    const first = await race(running, signal);
+    if (first === ABORTED) {
+      void running.then((late) => {
+        if (late.kind === 'fault') observed(late.cause);
+        else if (late.afterFault !== undefined) observed(late.afterFault);
+        return release();
+      }, observed);
+      return cancelled(route, meta);
+    }
+    const out = first;
     if (out.kind === 'fault') return expose(hostFault(out.cause));
     if (out.kind === 'failure') return expose(outcomeOf(classifyDeclared(route, out.failure)));
     if (out.afterFault !== undefined) observed(out.afterFault);
-    const result = /** @type {import('../pipeline.js').OperationResult | typeof ABORTED} */ (out.result);
-    if (result === ABORTED) return expose(cancelled(route, meta));
+    const result = /** @type {import('../pipeline.js').OperationResult} */ (out.result);
 
     // 4. assemble the D6 outcome
     return expose(outcomeOf(result));

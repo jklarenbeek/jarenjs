@@ -12,17 +12,17 @@
  *
  *  - `JC0001–JC0049` document compile (`ContractCompileError`)
  *  - `JC0050–JC0069` binding declaration and projection compile
- *    (`JC0060`: the OpenAPI keyword policy)
+ *    (`JC0060`: the OpenAPI keyword policy; `JC0061`: the revision)
  *  - `JC1001–JC1049` host programming errors (thrown `TypeError`s)
  *  - `JC2001–JC2049` http request-time (`ContractRuntimeError`)
  *  - `JC2050–JC2069` client-side
  *  - `JC2070–JC2089` port/local bindings
  *  - `JC2090–JC2109` stream binding
+ *  - `JC2110–JC2119` durable commands
+ *  - `JC2120–JC2139` continuations
  *
- * The document-compile range, the projection code, the host range, the
- * http request-time range, the client range and the port/local range are
- * populated; stream is reserved for its binding and is listed here so a
- * later addition lands in its range rather than at the next free number.
+ * Every range is populated; a later code lands in its own range rather
+ * than at the next free number.
  */
 
 import { CodedError } from '@jarenjs/core/errors';
@@ -40,31 +40,32 @@ export const CONTRACT_CODES = Object.freeze({
   JC0006: 'output is absent or not a schema',
   JC0007: 'a $ref resolves neither within the document nor against the registered schemas',
   JC0008: 'http.path is not a valid path template',
-  JC0009: 'a path variable, http.in key or http.body names no input member, or a member is mapped to a location it cannot travel in',
+  JC0009: 'a path variable, http.in key or http.body names no input member, or a member is mapped to a location it cannot travel in — a header member whose name is not an HTTP token among them',
   JC0010: 'two operations share method and canonical path shape',
-  JC0011: 'errors is malformed: not an object, a code is not a lowercase hyphenated word, a status is not a 100–599 integer, or a schema is not a schema',
-  JC0012: 'http.method is not an uppercase token of the supported set, http.status is not a 200–299 integer, or http.media is not a media type',
+  JC0011: 'errors is malformed: not an object, a code is not a lowercase word of letters, digits, hyphens and underscores starting with a letter (^[a-z][a-z0-9_-]*$), a status is not a 100–599 integer, or a schema is not a schema',
+  JC0012: 'http.method is not an uppercase token of the supported set, http.status is not a 200–299 integer or is 204/205 over an output that cannot be null, or http.media is not a media type',
   JC0013: 'an unknown member in a closed object (the document root, an operation, policy, http, limits, retry, or an error declaration)',
   JC0014: 'a policy member is mistyped or outside its declared set',
   JC0015: 'id, version, compat or an operation doc is mistyped',
-  JC0016: 'an operation bound to GET or HEAD carries a body-located member (a GET body)',
+  JC0016: 'an operation bound to GET, HEAD or OPTIONS carries a body-located member — a body those methods never carry',
   JC0017: 'an opaque operation (a non-JSON http.media) declares a body-located member — its body is bytes the contract never decodes, so the member could never be validated',
   JC0018: 'a subscribe operation declares a policy.task other than switch — a subscription slot is replaced, never queued',
   JC0019: 'a subscribe operation is bound to a method other than GET — a stream is fetched, not sent',
   JC0020: 'a subscribe operation declares a policy.idempotency other than none — a subscription registers, it does not commit',
   JC0021: 'a provider protocol descriptor is malformed or names an undeclared transform capability',
+  JC0022: 'an opaque operation declares policy.idempotency other than none, or a policy.retry — its raw path never reads an Idempotency-Key and bytes() never retries, so the handler and the caller own them',
   // ——— projection compile (ContractCompileError, docPath into the contract document) ———
   JC0060: 'the OpenAPI projection met a schema keyword it cannot map honestly: a boolean required (draft-04 style) or a same-document $ref that lands outside $defs (both dropped and reported under lenient), or a components member inside a schema',
   JC0061: 'the public projection is not canonicalizable, so no revision exists — a string with an unpaired surrogate, say; docPath points at the offending value inside the projection',
   // ——— host programming errors (thrown ContractHostError, a TypeError) ———
-  JC1001: 'serveHttp, serveLocal or servePort: handlers is not an object, a key names no operation of the contract, a value is not a function, or an option (a channel without postMessage, say) is malformed',
+  JC1001: 'serveHttp, serveLocal or servePort: handlers is not an object, a key names no operation of the contract, a value is not a function, an option (a channel without postMessage, say) is malformed, or an option is outside the binding\'s closed set (named, with the nearest member)',
   JC1002: 'serveHttp, serveLocal or servePort: an operation has no handler (and, on serveHttp, options.partial is not set; an opaque operation needs none on the status-less bindings)',
   JC1003: 'a binding cannot carry a declared feature: an operation declares idempotency and serveHttp was given no ledger',
-  JC1004: 'dispatch received a malformed request object (method or url not a string, headers not an object, body not a string, Uint8Array or null)',
-  JC1005: 'a client or the contract effect was asked for an operation the contract does not declare, or invoke was asked for an opaque operation (use client.url on http; the status-less bindings cannot carry it at all)',
-  JC1006: 'ctx.status(n) was called with a status that is not an integer in 200–299',
+  JC1004: 'dispatch received a malformed request object (method or url not a string, headers not an object, body not a string, a Uint8Array, an async iterable of Uint8Array chunks, a ReadableStream or null)',
+  JC1005: 'a client or the contract effect was asked for an operation the contract does not declare, or invoke was asked for an opaque operation (use client.bytes() — or client.url() for a link — on http; the status-less bindings cannot carry it at all)',
+  JC1006: 'ctx.status(n) was called with a status that is not an integer in 200–299, or ctx.header(name, value) with a header the binding derives (content-type, content-length, transfer-encoding, connection, etag, x-jaren-trace), a name that is not an HTTP token, or a value carrying CR, LF or NUL',
   JC1007: 'contractAppBinding: ops names an operation the contract does not declare, or namespace/statePath is malformed',
-  JC1008: 'openHttpClient, openPortClient, client.url, createContractEffect, createContractSubscription or a projection (publicProjection, toOpenApi, toTypeScript, toMarkdown, contractTools): an argument or option is malformed (not a compiled contract, fetch/keys/sleep/createTaskEffect/projectError not a function, storage without read/write, a non-object input to url, an ops entry naming no or an opaque operation, a tool name outside ^[a-zA-Z0-9_-]{1,64}$ or shared by two operations)',
+  JC1008: 'openHttpClient, openPortClient, client.url, createContractEffect, createContractSubscription or a projection (publicProjection, toOpenApi, toTypeScript, toMarkdown, contractTools): an argument or option is malformed (not a compiled contract, fetch/keys/sleep/createTaskEffect/projectError not a function, storage without read/write, a non-object input to url, an ops entry naming no or an opaque operation, a tool name outside ^[a-zA-Z0-9_-]{1,64}$ or shared by two operations); or an invoke ctx that is not an object — on every client binding, http, port and local alike',
   JC1009: 'encodeSseEvent (the stream wire): an event, id or data string the SSE frame cannot carry — a bare carriage return inside data, a line terminator inside event or id',
   JC1010: 'client.subscribe was asked for an operation that is not a subscribe operation (invoke carries reads and commands; subscribe carries streams)',
   JC1011: 'a ledger commit or fail named a ref that settles no started record: the key expired, was reclaimed under a newer generation, or was settled already — the settlement is refused; the binding reports it to onError and the response still goes out',
@@ -73,7 +74,7 @@ export const CONTRACT_CODES = Object.freeze({
   JC1014: 'continuation host options, key material or JSON input are malformed',
   // ——— http request-time (ContractRuntimeError, mapped onto the wire) ———
   JC2001: 'no operation matches the request method and path (404)',
-  JC2002: 'the path shape is served under other methods (405, Allow lists them)',
+  JC2002: 'the path shape is served under other methods (405, Allow lists them) — HEAD among them only beside a read: a HEAD on a GET-bound command is this code, never an execution',
   JC2003: 'the request body exceeds policy.limits.maxBodyBytes, by content-length or by read length (413)',
   JC2004: 'a body-carrying operation received a content-type that is not its declared media (415)',
   JC2005: 'the request body is present and is not valid JSON, or its bytes are not valid UTF-8 (400)',
@@ -81,14 +82,14 @@ export const CONTRACT_CODES = Object.freeze({
   JC2007: 'the operation requires an Idempotency-Key header and none was sent (400)',
   JC2008: 'the handler threw a non-declared error, rejected, or returned a hostile value (500; onError sees it)',
   JC2009: 'the idempotency ledger reports the key in progress (retryable) or bound to a different request (mismatch) (409)',
-  JC2010: 'the handler value fails the output validator or a declared error\'s details fail its schema — the server broke the contract (500)',
-  JC2011: 'the request path carries a malformed percent-escape (400)',
+  JC2010: 'the handler value fails the output validator, a declared error\'s details fail its schema, or a raw handler answered a body under a status that carries none (204, 205, 304) — the server broke the contract (500)',
+  JC2011: 'the request path carries a malformed percent-escape, or a segment that decodes to . or .. (400)',
   JC2012: 'the query string is not decodable (400)',
   JC2013: 'the operation has no handler on this partial server (501)',
   JC2014: 'the If-Match precondition does not match the entity tag the handler armed (412)',
   JC2015: 'a declared header member is repeated when its schema is scalar, or fails transport decoding (400)',
   // ——— client-side (outcomes of invoke; never thrown) ———
-  JC2050: 'the input fails the operation\'s input validator before anything was sent (kind contract)',
+  JC2050: 'the input fails the operation\'s input validator, or holds a value the transport cannot carry (an empty, . or .. path variable; a header value with NUL, CR, LF or a character beyond Latin-1; a header item with a comma or edge whitespace), before anything was sent (kind contract)',
   JC2051: 'the request did not complete: the transport rejected or timed out (kind network, retryable)',
   JC2052: 'the request was cancelled through the caller\'s signal or client.close() (kind cancelled)',
   JC2053: 'a success response is not JSON or fails the operation\'s output validator (kind contract)',

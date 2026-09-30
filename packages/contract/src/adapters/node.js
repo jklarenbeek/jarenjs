@@ -30,6 +30,7 @@
  * until `drain`, so a slow reader never grows the process's buffers.
  */
 
+import { discard } from '../http/body.js';
 import { createAwaitedSink } from '@jarenjs/core/async';
 
 /**
@@ -265,6 +266,9 @@ function pumpBody(res, body, done) {
   })();
 }
 
+/** The statuses that carry no content (RFC 9110 §15.3.5, §15.3.6, §15.4.5). */
+const NO_CONTENT = new Set([204, 205, 304]);
+
 /**
  * Whether the request could carry a body the operation reads.
  * @param {string} method
@@ -327,6 +331,15 @@ function send(res, response, close, done) {
   }
   const body = response.body;
   if (close) headers.connection = 'close';
+  if (NO_CONTENT.has(response.status)) {
+    // a status that carries no content sends none, whatever arrived: a
+    // stream handed over anyway is released, never pumped
+    if (body !== null && typeof body === 'object' && !(body instanceof Uint8Array)) void discard(body);
+    delete headers['content-length'];
+    res.writeHead(response.status, headers);
+    res.end(undefined, done);
+    return;
+  }
   if (body !== null && typeof body === 'object' && !(body instanceof Uint8Array)) {
     // a streamed body: chunked, each chunk behind the previous one's
     // drain; the peer going away cancels the source once

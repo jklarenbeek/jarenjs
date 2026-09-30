@@ -51,6 +51,24 @@ import { peekRevision } from './revision.js';
  */
 
 /**
+ * The description a PUBLIC surface serves — the well-known path answers
+ * it to anyone who asks — with every server-audience operation omitted
+ * (§3.1: a server operation stays out of every projection a caller can
+ * see). Negotiation reads only the id, version, compat and revision, so
+ * it loses nothing.
+ * @param {import('./compile.js').Contract} contract
+ * @returns {ContractDescription}
+ */
+export function publicDescription(contract) {
+  const described = describeContract(contract);
+  return {
+    ...described,
+    operations: described.operations.filter((operation) =>
+      contract.operations[operation.id].policy.audience !== 'server'),
+  };
+}
+
+/**
  * Describe a compiled contract. Reads the compiled operations for the
  * resolved values and the frozen source document for what was declared.
  * @param {import('./compile.js').Contract} contract

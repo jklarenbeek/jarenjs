@@ -47,7 +47,10 @@ function recording(shape = {}) {
     log.push(`acquire:${identity.host?.who}`);
     return enter({ host: { who: 'acquired' }, release: () => { log.push('release:acquired'); } });
   });
-  return { log, observed, options: { identify, acquire, ledger: createMemoryLedger(), onError: (/** @type {unknown} */ e) => observed.push(e) } };
+  const onError = (/** @type {unknown} */ e) => observed.push(e);
+  // `options` for serveHttp; `hostOptions` for the port and local bindings,
+  // which read no ledger — their option sets are closed (JC1001)
+  return { log, observed, options: { identify, acquire, ledger: createMemoryLedger(), onError }, hostOptions: { identify, acquire, onError } };
 }
 
 /** Wait until a condition holds. @param {() => boolean} until */
@@ -309,7 +312,7 @@ describe('host lifecycle over port and local', () => {
     const { port1, port2 } = new MessageChannel();
     /** @type {any} */
     let seen = null;
-    const server = servePort(shop, { ...shopHandlers(), 'catalog.load': (input, ctx) => { seen = ctx; r.log.push('handler'); return { revision: 1, products: [] }; } }, { channel: port1, ...r.options });
+    const server = servePort(shop, { ...shopHandlers(), 'catalog.load': (input, ctx) => { seen = ctx; r.log.push('handler'); return { revision: 1, products: [] }; } }, { channel: port1, ...r.hostOptions });
     const client = openPortClient(shop, { channel: port2 });
     const outcome = await client.invoke('catalog.load', {});
     assert.strictEqual(outcome.ok, true);
@@ -340,7 +343,7 @@ describe('host lifecycle over port and local', () => {
     for (const [shape, code, kind] of [[{ acquire: () => { throw new Error('no'); } }, 'JC2070', 'contract'], [{ identify: (/** @type {any} */ m) => m.fail('conflict') }, 'conflict', 'failure']]) {
       const r = recording(/** @type {any} */ (shape));
       const { port1, port2 } = new MessageChannel();
-      const server = servePort(shop, shopHandlers(), { channel: port1, ...r.options });
+      const server = servePort(shop, shopHandlers(), { channel: port1, ...r.hostOptions });
       const client = openPortClient(shop, { channel: port2 });
       const outcome = await client.invoke('product.save', PORT_SAVE);
       assert.strictEqual(outcome.ok, false);
@@ -362,7 +365,7 @@ describe('host lifecycle over port and local', () => {
     for (const how of ['unsubscribe', 'shutdown']) {
       const r = recording();
       const { port1, port2 } = new MessageChannel();
-      const server = servePort(live, { feed: () => ({ result: { rows: [] }, subscribe: () => () => {}, close: () => {} }) }, { channel: port1, ...r.options });
+      const server = servePort(live, { feed: () => ({ result: { rows: [] }, subscribe: () => () => {}, close: () => {} }) }, { channel: port1, ...r.hostOptions });
       const client = openPortClient(live, { channel: port2 });
       const events = [];
       const sub = client.subscribe('feed', undefined, { onSnapshot: () => events.push('snapshot'), onEnd: (i) => events.push(`end:${i.reason}`) });
@@ -383,7 +386,7 @@ describe('host lifecycle over port and local', () => {
     const r = recording();
     /** @type {any} */
     let seen = null;
-    const client = openLocalClient(shop, { ...shopHandlers(), 'catalog.load': (input, ctx) => { seen = ctx; r.log.push('handler'); return { revision: 1, products: [] }; } }, r.options);
+    const client = openLocalClient(shop, { ...shopHandlers(), 'catalog.load': (input, ctx) => { seen = ctx; r.log.push('handler'); return { revision: 1, products: [] }; } }, r.hostOptions);
     const ok = await client.invoke('catalog.load', {});
     assert.strictEqual(ok.ok, true);
     assert.deepStrictEqual(r.log, ['identify:local:catalog.load', 'acquire:identity', 'handler', 'release:acquired', 'release:identity']);
@@ -405,15 +408,19 @@ describe('host lifecycle over port and local', () => {
     assert.strictEqual(/** @type {any} */ (failed).error.code, 'conflict');
   });
 
-  it('local: an abort during the handler is a cancelled outcome and still releases both leases', async () => {
+  it('local: an abort during the handler is a cancelled outcome at once, and both leases are released once the handler settles', async () => {
     const r = recording();
     const controller = new AbortController();
-    const client = openLocalClient(shop, { ...shopHandlers(), 'catalog.load': () => new Promise((resolve) => setTimeout(() => resolve({ revision: 1, products: [] }), 50)) }, r.options);
+    const client = openLocalClient(shop, { ...shopHandlers(), 'catalog.load': () => new Promise((resolve) => setTimeout(() => resolve({ revision: 1, products: [] }), 50)) }, r.hostOptions);
     const pending = client.invoke('catalog.load', {}, { signal: controller.signal });
     await wait(() => r.log.includes('acquire:identity'));
     controller.abort();
     const outcome = await pending;
     assert.strictEqual(/** @type {any} */ (outcome).kind, 'cancelled');
+    // enter waits for the handler (as on the port binding): nothing it
+    // holds is released while it is still running
+    assert.deepStrictEqual(r.log, ['identify:local:catalog.load', 'acquire:identity']);
+    await wait(() => r.log.includes('release:identity'));
     assert.deepStrictEqual(r.log, ['identify:local:catalog.load', 'acquire:identity', 'release:acquired', 'release:identity']);
   });
 });

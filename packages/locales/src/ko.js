@@ -141,7 +141,7 @@ export const ko = {
   'contract/handler-failed': '작업 {op}이(가) 실패했습니다',
   'contract/idempotency-conflict': '작업 {op}의 Idempotency-Key가 이전 요청과 충돌합니다 ({kind})',
   'contract/invalid-output': '작업 {op}이(가) 계약을 위반하는 응답을 생성했습니다',
-  'contract/malformed-path': '요청 경로에 잘못된 퍼센트 이스케이프가 있습니다',
+  'contract/malformed-path': '요청 경로에 잘못된 퍼센트 이스케이프 또는 . 이나 .. 인 세그먼트가 있습니다',
   'contract/malformed-query': '쿼리 문자열을 디코딩할 수 없습니다',
   'contract/not-implemented': '작업 {op}은(는) 이 서버에 구현되어 있지 않습니다',
   'contract/precondition-failed': '작업 {op}의 If-Match 전제 조건이 실패했습니다',

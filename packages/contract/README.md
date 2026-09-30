@@ -228,8 +228,14 @@ with `x-jaren-trace` on the response; a handler's thrown error never
 reaches the wire (`onError` sees it). `server.capabilities` says what
 the binding carries — `head`, `etag`, `idempotency`, `validatedOutput` —
 and never degrades silently: an idempotent operation without a `ledger`
-is refused at construction. `GET /.well-known/jaren-contract` answers
-`describe()`. The normative pipeline, taxonomy and ledger interface are
+is refused at construction, and so is an option the binding does not
+read (`JC1001`, naming the nearest). `GET /.well-known/jaren-contract`
+answers the public description — `describe()` without the
+server-audience operations. A `HEAD` answers reads only (a `GET`-bound
+command is a 405, never executed), a path segment that decodes to `.` or
+`..` is a 400 before anything is matched, and the client refuses such a
+path value, or a header value the transport cannot carry, before
+sending (`JC2050`). The normative pipeline, taxonomy and ledger interface are
 [CONTRACT-FORMAT.md §7–§9](docs/CONTRACT-FORMAT.md#7-the-http-server-binding).
 
 **The host lifecycle.** Every server binding takes the same two hooks

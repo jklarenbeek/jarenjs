@@ -37,7 +37,7 @@ export const contractMessagesEn = Object.freeze({
   'contract/handler-failed': 'operation {op} failed',
   'contract/idempotency-conflict': 'the Idempotency-Key of operation {op} conflicts with an earlier request ({kind})',
   'contract/invalid-output': 'operation {op} produced a response that violates its contract',
-  'contract/malformed-path': 'the request path carries a malformed percent-escape',
+  'contract/malformed-path': 'the request path carries a malformed percent-escape, or a segment that is . or ..',
   'contract/malformed-query': 'the query string is not decodable',
   'contract/not-implemented': 'operation {op} is not implemented on this server',
   'contract/precondition-failed': 'the If-Match precondition of operation {op} failed',

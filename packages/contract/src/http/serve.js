@@ -16,6 +16,7 @@
  * decided here, once, into a `Route` per operation.
  */
 
+import { refuseUnknownMembers } from '@jarenjs/core/object';
 import { compileMessageCatalog } from '@jarenjs/core/message';
 
 import { ContractHostError } from '../errors.js';
@@ -127,6 +128,10 @@ export { HTTP_ERRORS, WELL_KNOWN_PATH, BodyLimitError };
  *   event (`server-shutdown`) and releases its subscription; requests in
  *   flight are unaffected
  */
+
+/** Every option `serveHttp` reads — a CLOSED set (`JC1001`, nearest name). */
+const HTTP_OPTIONS = Object.freeze(['partial', 'ledger', 'preconditions', 'validateOutput', 'head', 'wellKnown',
+  'trace', 'scope', 'errorBody', 'onError', 'now', 'catalog', 'runtime', 'streamLimits', 'identify', 'acquire']);
 
 /**
  * @param {string} code
@@ -243,6 +248,10 @@ export function serveHttp(contract, handlers, options = {}) {
   if (handlers === null || typeof handlers !== 'object' || Array.isArray(handlers)) {
     throw host('JC1001', 'handlers must be an object of operation id → function');
   }
+  if (options === null || typeof options !== 'object') throw host('JC1001', 'options must be an object');
+  // a CLOSED set: a typo'd option used to vanish — `precondition` served
+  // a stale If-Match with 200
+  refuseUnknownMembers(options, HTTP_OPTIONS, (key, hint) => host('JC1001', `option '${key}' is not one serveHttp reads${hint}`));
   const partial = options.partial === true;
   const ledger = options.ledger === undefined ? null : options.ledger;
   if (ledger !== null && (typeof ledger !== 'object' || typeof ledger.claim !== 'function'

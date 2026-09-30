@@ -387,6 +387,15 @@ export function openPortClient(contract, options) {
         if (entry === undefined) return;
         pending.delete(id);
         entry.cleanup();
+        // a timeout abandons the call exactly as an abort does: the server
+        // is told to stop, so a caller's retry never runs beside a
+        // still-running first attempt
+        try {
+          channel.postMessage(cancelFrame(id));
+        }
+        catch {
+          // a channel that cannot carry the cancel changes nothing
+        }
         resolve(bindingOutcome('network', 'JC2072', { op: route.op.id, ms: timeoutMs }, meta));
       }, timeoutMs);
       pending.set(id, { resolve, route, meta, timer, cleanup });

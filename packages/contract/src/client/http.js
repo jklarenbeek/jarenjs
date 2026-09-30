@@ -191,6 +191,9 @@ export { CLIENT_ERRORS };
 /** The storage member every record lives under. */
 const STORAGE_MEMBER = 'jaren-contract';
 
+/** The context of a request that carries none of the caller's own (a stream). */
+const NO_CTX = Object.freeze({});
+
 /** Read-copy-write mutations share one queue per adapter, even across
  * clients and contract ids. Other processes or adapter wrappers must
  * coordinate through their storage implementation.
@@ -233,6 +236,74 @@ function safeName(err) {
  */
 function transportString(v) {
   return typeof v === 'string' ? v : (typeof v === 'object' ? JSON.stringify(v) : String(v));
+}
+
+/** RFC 9110 §5.6.2's `token`: what a field name may be. */
+const TOKEN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+
+/**
+ * A value the transport cannot carry, thrown by `pathOf`/`headersOf` and
+ * mapped by every caller to a pre-send `JC2050` (keyword `encoding`)
+ * naming the member — never a send that fails as a retryable `network`
+ * error, and never a request that means something else.
+ */
+class Unencodable extends Error {
+  /**
+   * @param {string | null} member - the input member, when one is to blame
+   * @param {string} reason
+   */
+  constructor(member, reason) {
+    super(reason);
+    this.member = member;
+  }
+}
+
+/**
+ * The validation details of an encoding refusal: the member's pointer
+ * when one is to blame, the input's otherwise.
+ * @param {unknown} err
+ * @returns {{ path: string, keyword: 'encoding' }[]}
+ */
+function encodingDetails(err) {
+  const member = err instanceof Unencodable ? err.member : null;
+  return [{ path: member === null ? '' : `/${member.replaceAll('~', '~0').replaceAll('/', '~1')}`, keyword: 'encoding' }];
+}
+
+/**
+ * Whether fetch can carry a string as a field value: no NUL, CR or LF,
+ * and nothing beyond Latin-1 — `Headers` throws on either, which used to
+ * reach the caller as a retryable network failure after the key was
+ * already stored.
+ * @param {string} value
+ * @returns {boolean}
+ */
+function isFieldValue(value) {
+  for (let i = 0; i < value.length; i++) {
+    const c = value.charCodeAt(i);
+    if (c === 0 || c === 10 || c === 13 || c > 0xFF) return false;
+  }
+  return true;
+}
+
+/**
+ * A declared header member's value as its field text, or the refusal: a
+ * value fetch cannot carry, and — because the list is joined with `, `
+ * and the server splits on commas and trims — an item holding a comma or
+ * edge whitespace, which would arrive as other items. A scalar with edge
+ * whitespace is refused for the same reason: fetch trims it.
+ * @param {string} member
+ * @param {unknown} v
+ * @returns {string}
+ */
+function headerMemberText(member, v) {
+  const items = Array.isArray(v) ? v.map(transportString) : [transportString(v)];
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    if (!isFieldValue(item)) throw new Unencodable(member, `header member '${member}' holds a character a header cannot carry`);
+    if (/^[ \t]|[ \t]$/.test(item)) throw new Unencodable(member, `header member '${member}' has edge whitespace, which the transport trims`);
+    if (Array.isArray(v) && item.includes(',')) throw new Unencodable(member, `an item of header member '${member}' holds a comma, which would split it`);
+  }
+  return items.join(', ');
 }
 
 /**
@@ -371,6 +442,8 @@ export function openHttpClient(contract, options = {}) {
     for (let i = 0; i < names.length; i++) {
       const v = options.headers[names[i]];
       if (typeof v !== 'string') throw host('JC1008', `options.headers['${names[i]}'] must be a string`);
+      if (!TOKEN.test(names[i])) throw host('JC1008', `options.headers: '${names[i]}' is not a header field name (an HTTP token)`);
+      if (!isFieldValue(v)) throw host('JC1008', `options.headers['${names[i]}'] holds a character a header cannot carry (NUL, CR, LF, or beyond Latin-1)`);
       setObjectMember(staticHeaders, names[i].toLowerCase(), v);
     }
   }
@@ -486,7 +559,18 @@ export function openHttpClient(contract, options = {}) {
     const segments = route.segments;
     for (let i = 0; i < segments.length; i++) {
       const s = segments[i];
-      path += '/' + (s.variable ? encodeURIComponent(transportString(value[s.text])) : s.text);
+      if (!s.variable) {
+        path += '/' + s.text;
+        continue;
+      }
+      const text = transportString(value[s.text]);
+      // an empty value leaves `//`; `.` and `..` are dot segments every URL
+      // resolver folds into ANOTHER path — `/users/../sessions` is
+      // `/sessions`, so another operation would run under this one's name
+      if (text === '' || text === '.' || text === '..') {
+        throw new Unencodable(s.text, `path variable '${s.text}' is ${JSON.stringify(text)}, which a URL cannot carry as a segment`);
+      }
+      path += '/' + encodeURIComponent(text);
     }
     if (segments.length === 0) path = '/';
     if (route.queryMembers.length === 0) return path;
@@ -529,12 +613,17 @@ export function openHttpClient(contract, options = {}) {
     const headers = { ...staticHeaders };
     if (ctx.headers !== undefined && ctx.headers !== null && typeof ctx.headers === 'object') {
       const names = Object.keys(ctx.headers);
-      for (let i = 0; i < names.length; i++) setObjectMember(headers, names[i].toLowerCase(), String(ctx.headers[names[i]]));
+      for (let i = 0; i < names.length; i++) {
+        const text = String(ctx.headers[names[i]]);
+        if (!TOKEN.test(names[i])) throw new Unencodable(null, `ctx.headers: '${names[i]}' is not a header field name`);
+        if (!isFieldValue(text)) throw new Unencodable(null, `ctx.headers['${names[i]}'] holds a character a header cannot carry`);
+        setObjectMember(headers, names[i].toLowerCase(), text);
+      }
     }
     for (let i = 0; i < route.headerMembers.length; i++) {
       const v = value[route.headerMembers[i]];
       if (v === undefined || v === null) continue;
-      setObjectMember(headers, route.headerNames[i], Array.isArray(v) ? v.map(transportString).join(', ') : transportString(v));
+      setObjectMember(headers, route.headerNames[i], headerMemberText(route.headerMembers[i], v));
     }
     if (typeof ctx.ifNoneMatch === 'string') headers['if-none-match'] = ctx.ifNoneMatch;
     if (typeof ctx.ifMatch === 'string') headers['if-match'] = ctx.ifMatch;
@@ -784,8 +873,8 @@ export function openHttpClient(contract, options = {}) {
       body = bodyOf(route, value);
       headers = headersOf(route, value, ctx);
     }
-    catch {
-      return invalidInput(route, meta, [{ path: '', keyword: 'encoding' }]);
+    catch (err) {
+      return invalidInput(route, meta, encodingDetails(err));
     }
     if (body !== null) headers['content-type'] = route.media;
 
@@ -950,8 +1039,8 @@ export function openHttpClient(contract, options = {}) {
       url = baseUrl + pathOf(route, value === null ? {} : value);
       headers = headersOf(route, value === null ? {} : value, ctx);
     }
-    catch {
-      return invalidInput(route, meta, [{ path: '', keyword: 'encoding' }]);
+    catch (err) {
+      return invalidInput(route, meta, encodingDetails(err));
     }
     const upload = uploadBody(ctx.body);
     if (upload.init !== undefined && headers['content-type'] === undefined) headers['content-type'] = route.media;
@@ -1229,15 +1318,17 @@ export function openHttpClient(contract, options = {}) {
         }
         // 2. the request, from the cursor
         let requestUrl;
+        /** @type {Record<string, string>} */
+        let requestHeaders;
         try {
           requestUrl = baseUrl + pathOf(route, value);
+          // the declared header members travel on a stream too
+          requestHeaders = { ...headersOf(route, value, NO_CTX), accept: STREAM_MEDIA };
         }
-        catch {
-          consumer.fail(invalidInput(route, meta, [{ path: '', keyword: 'encoding' }]));
+        catch (err) {
+          consumer.fail(invalidInput(route, meta, encodingDetails(err)));
           return null;
         }
-        /** @type {Record<string, string>} */
-        const requestHeaders = { ...staticHeaders, accept: STREAM_MEDIA };
         if (resumeSeq !== null) requestHeaders['last-event-id'] = String(resumeSeq);
         let response;
         try {
@@ -1401,8 +1492,9 @@ export function openHttpClient(contract, options = {}) {
     try {
       return baseUrl + pathOf(route, value);
     }
-    catch {
-      throw host('JC1008', `url(): a path/query member of operation '${route.id}' cannot be encoded`);
+    catch (err) {
+      throw host('JC1008', `url(): a path/query member of operation '${route.id}' cannot be encoded`
+        + (err instanceof Unencodable ? ` — ${err.message}` : ''));
     }
   }
 

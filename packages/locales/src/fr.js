@@ -143,7 +143,7 @@ export const fr = {
   'contract/handler-failed': "l'opération {op} a échoué",
   'contract/idempotency-conflict': "la clé Idempotency-Key de l'opération {op} est en conflit avec une requête antérieure ({kind})",
   'contract/invalid-output': "l'opération {op} a produit une réponse qui viole son contrat",
-  'contract/malformed-path': "le chemin de la requête contient une séquence d'échappement pour cent malformée",
+  'contract/malformed-path': "le chemin de la requête contient une séquence d'échappement pour cent malformée, ou un segment qui vaut . ou ..",
   'contract/malformed-query': "la chaîne de requête n'est pas décodable",
   'contract/not-implemented': "l'opération {op} n'est pas implémentée sur ce serveur",
   'contract/precondition-failed': "la précondition If-Match de l'opération {op} a échoué",

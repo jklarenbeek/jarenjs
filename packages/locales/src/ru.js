@@ -161,7 +161,7 @@ export const ru = {
   'contract/handler-failed': 'операция {op} завершилась с ошибкой',
   'contract/idempotency-conflict': 'Idempotency-Key операции {op} конфликтует с более ранним запросом ({kind})',
   'contract/invalid-output': 'операция {op} вернула ответ, нарушающий её контракт',
-  'contract/malformed-path': 'путь запроса содержит некорректную процентную escape-последовательность',
+  'contract/malformed-path': 'путь запроса содержит некорректную процентную escape-последовательность или сегмент . либо ..',
   'contract/malformed-query': 'строка запроса не декодируется',
   'contract/not-implemented': 'операция {op} не реализована на этом сервере',
   'contract/precondition-failed': 'предусловие If-Match операции {op} не выполнено',

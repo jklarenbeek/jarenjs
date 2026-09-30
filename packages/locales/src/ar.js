@@ -200,7 +200,7 @@ export const ar = {
   'contract/handler-failed': 'فشلت العملية ⁨{op}⁩',
   'contract/idempotency-conflict': 'يتعارض Idempotency-Key الخاص بالعملية ⁨{op}⁩ مع طلب سابق (⁨{kind}⁩)',
   'contract/invalid-output': 'أنتجت العملية ⁨{op}⁩ استجابة تخالف عقدها',
-  'contract/malformed-path': 'يحتوي مسار الطلب على تسلسل هروب نسبة مئوية مشوّه',
+  'contract/malformed-path': 'يحتوي مسار الطلب على تسلسل هروب نسبة مئوية مشوّه، أو على مقطع هو . أو ..',
   'contract/malformed-query': 'تعذر فك ترميز سلسلة الاستعلام',
   'contract/not-implemented': 'العملية ⁨{op}⁩ غير منفّذة على هذا الخادم',
   'contract/precondition-failed': 'أخفق الشرط المسبق If-Match للعملية ⁨{op}⁩',

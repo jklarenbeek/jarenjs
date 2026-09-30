@@ -19,6 +19,8 @@
  * invisible here (the node adapter sees distinct lines).
  */
 
+import { discard } from '../http/body.js';
+
 /**
  * @typedef {import('../http/serve.js').HttpDispatcher} HttpDispatcher
  */
@@ -81,6 +83,9 @@ function bodyStream(source) {
     },
   }, { highWaterMark: 0 });
 }
+
+/** The statuses that carry no content (RFC 9110 §15.3.5, §15.3.6, §15.4.5). */
+const NO_CONTENT = new Set([204, 205, 304]);
 
 /**
  * Whether the request could carry a body the operation reads.
@@ -237,6 +242,13 @@ export function toFetchHandler(dispatcher) {
       return new Response(streamBody, { status: response.status, headers: headersOf(response.headers) });
     }
     const out = response.body;
+    if (NO_CONTENT.has(response.status)) {
+      // a status that carries no content: `new Response` throws on any
+      // body for 204/205/304, and nothing may be sent for it — a stream the
+      // dispatcher handed over anyway is released, never pulled
+      if (out !== null && typeof out === 'object' && !(out instanceof Uint8Array)) void discard(out);
+      return new Response(null, { status: response.status, headers: headersOf(response.headers) });
+    }
     if (out !== null && typeof out === 'object' && !(out instanceof Uint8Array)) {
       // a streamed body: one pull per chunk, cancelled once by the consumer
       return new Response(bodyStream(out), { status: response.status, headers: headersOf(response.headers) });

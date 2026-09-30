@@ -185,11 +185,11 @@ describe('openLocalClient — outcomes', () => {
     assert.strictEqual(ran, 0);
   });
 
-  it('host mistakes reject: an unknown operation and an opaque operation are JC1005; a malformed ctx is JC1001', async () => {
+  it('host mistakes reject: an unknown operation and an opaque operation are JC1005; a malformed ctx is JC1008, as on every client', async () => {
     const client = open();
     await assert.rejects(() => client.invoke('nope'), (/** @type {any} */ e) => e.code === 'JC1005' && e instanceof TypeError);
     await assert.rejects(() => client.invoke('image.bytes', { id: 1 }), (/** @type {any} */ e) => e.code === 'JC1005' && /opaque/.test(e.message));
-    await assert.rejects(() => client.invoke('catalog.load', null, /** @type {any} */ (null)), (/** @type {any} */ e) => e.code === 'JC1001');
+    await assert.rejects(() => client.invoke('catalog.load', null, /** @type {any} */ (null)), (/** @type {any} */ e) => e.code === 'JC1008');
   });
 
   it('validateOutput "never" is the declared downgrade: the invalid output crosses, capabilities say so', async () => {

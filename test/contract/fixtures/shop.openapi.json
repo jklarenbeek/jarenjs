@@ -544,7 +544,7 @@
     },
     "responses": {
       "BadRequest": {
-        "description": "Answered by the binding, not the handler — JC2005: the request body is present and is not valid JSON, or its bytes are not valid UTF-8 (400); JC2006: the reassembled input fails the operation's input validator (400); JC2007: the operation requires an Idempotency-Key header and none was sent (400); JC2011: the request path carries a malformed percent-escape (400); JC2012: the query string is not decodable (400); JC2015: a declared header member is repeated when its schema is scalar, or fails transport decoding (400).",
+        "description": "Answered by the binding, not the handler — JC2005: the request body is present and is not valid JSON, or its bytes are not valid UTF-8 (400); JC2006: the reassembled input fails the operation's input validator (400); JC2007: the operation requires an Idempotency-Key header and none was sent (400); JC2011: the request path carries a malformed percent-escape, or a segment that decodes to . or .. (400); JC2012: the query string is not decodable (400); JC2015: a declared header member is repeated when its schema is scalar, or fails transport decoding (400).",
         "content": {
           "application/json": {
             "schema": {
@@ -719,7 +719,7 @@
         }
       },
       "InternalError": {
-        "description": "Answered by the binding, not the handler — JC2008: the handler threw a non-declared error, rejected, or returned a hostile value (500; onError sees it); JC2010: the handler value fails the output validator or a declared error's details fail its schema — the server broke the contract (500).",
+        "description": "Answered by the binding, not the handler — JC2008: the handler threw a non-declared error, rejected, or returned a hostile value (500; onError sees it); JC2010: the handler value fails the output validator, a declared error's details fail its schema, or a raw handler answered a body under a status that carries none (204, 205, 304) — the server broke the contract (500).",
         "content": {
           "application/json": {
             "schema": {

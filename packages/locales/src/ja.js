@@ -138,7 +138,7 @@ export const ja = {
   'contract/handler-failed': '操作 {op} が失敗しました',
   'contract/idempotency-conflict': '操作 {op} の Idempotency-Key が以前のリクエストと競合しています ({kind})',
   'contract/invalid-output': '操作 {op} が契約に違反するレスポンスを生成しました',
-  'contract/malformed-path': 'リクエストパスに不正なパーセントエスケープが含まれています',
+  'contract/malformed-path': 'リクエストパスに不正なパーセントエスケープ、または . や .. のセグメントが含まれています',
   'contract/malformed-query': 'クエリ文字列をデコードできません',
   'contract/not-implemented': '操作 {op} はこのサーバーでは実装されていません',
   'contract/precondition-failed': '操作 {op} の If-Match 前提条件が満たされませんでした',

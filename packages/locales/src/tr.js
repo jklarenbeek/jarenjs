@@ -140,7 +140,7 @@ export const tr = {
   'contract/handler-failed': '{op} işlemi başarısız oldu',
   'contract/idempotency-conflict': '{op} işleminin Idempotency-Key değeri daha önceki bir istekle çakışıyor ({kind})',
   'contract/invalid-output': '{op} işlemi sözleşmesini ihlal eden bir yanıt üretti',
-  'contract/malformed-path': 'istek yolu hatalı bir yüzde kaçış dizisi içeriyor',
+  'contract/malformed-path': 'istek yolu hatalı bir yüzde kaçış dizisi ya da . veya .. olan bir bölüm içeriyor',
   'contract/malformed-query': 'sorgu dizesi çözümlenemiyor',
   'contract/not-implemented': '{op} işlemi bu sunucuda uygulanmamış',
   'contract/precondition-failed': '{op} işleminin If-Match ön koşulu sağlanamadı',

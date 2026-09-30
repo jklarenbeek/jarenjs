@@ -20,6 +20,7 @@
  * would both answer every request.
  */
 
+import { refuseUnknownMembers } from '@jarenjs/core/object';
 import { compileMessageCatalog } from '@jarenjs/core/message';
 import { utf8ByteLength } from '@jarenjs/core/string';
 
@@ -140,6 +141,10 @@ function prepare(op, handler) {
   });
 }
 
+/** Every option `servePort` reads — a CLOSED set (`JC1001`, nearest name). */
+const PORT_OPTIONS = Object.freeze(['channel', 'validateOutput', 'trace', 'onError', 'catalog', 'runtime',
+  'streamLimits', 'identify', 'acquire']);
+
 /**
  * Serve a compiled contract over a message channel. Construction refuses
  * host mistakes (`JC1001` handler table, channel or option, `JC1002`
@@ -176,6 +181,7 @@ export function servePort(contract, handlers, options) {
     }
   }
   if (options === null || typeof options !== 'object') throw host('JC1001', 'options must be an object with the channel');
+  refuseUnknownMembers(options, PORT_OPTIONS, (key, hint) => host('JC1001', `option '${key}' is not one servePort reads${hint}`));
   const channel = options.channel;
   if (!isChannel(channel)) {
     throw host('JC1001', 'options.channel must expose postMessage and a message listener surface (a MessagePort, Worker, BroadcastChannel, a worker\'s self, or the shape)');

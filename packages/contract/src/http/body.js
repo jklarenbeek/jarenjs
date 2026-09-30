@@ -335,3 +335,22 @@ export function onSettled(source, after) {
     },
   };
 }
+
+/**
+ * Cancel a pull source exactly once, for a body nobody will read — a
+ * HEAD's returned stream, a request source a response left unread, a
+ * body handed over under a status that carries no content. The one
+ * release every binding and adapter uses.
+ * @param {AsyncIterable<Uint8Array>} source
+ * @returns {Promise<void>}
+ */
+export async function discard(source) {
+  const iterator = source[Symbol.asyncIterator]();
+  if (typeof iterator.return !== 'function') return;
+  try {
+    await iterator.return();
+  }
+  catch {
+    // a source that refuses its cancel is already gone
+  }
+}

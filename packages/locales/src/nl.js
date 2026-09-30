@@ -142,7 +142,7 @@ export const nl = {
   'contract/handler-failed': 'operatie {op} is mislukt',
   'contract/idempotency-conflict': 'de Idempotency-Key van operatie {op} conflicteert met een eerder verzoek ({kind})',
   'contract/invalid-output': 'operatie {op} heeft een antwoord geproduceerd dat het contract schendt',
-  'contract/malformed-path': 'het verzoekpad bevat een misvormde procent-escape',
+  'contract/malformed-path': 'het verzoekpad bevat een misvormde procent-escape, of een segment dat . of .. is',
   'contract/malformed-query': 'de querystring is niet te decoderen',
   'contract/not-implemented': 'operatie {op} is niet geïmplementeerd op deze server',
   'contract/precondition-failed': 'de If-Match-voorwaarde van operatie {op} is niet vervuld',
