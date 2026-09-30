@@ -352,10 +352,11 @@ describe('concurrent transactions on one connection', () => {
     await store.close();
   });
 
-  it("an unknown transactions mode is API misuse, named", async () => {
+  it("an unknown transactions mode is refused by name before the driver opens (JD0009)", async () => {
     await assert.rejects(
-      () => openStore(MODEL, { driver: nodeDriver(), transactions: 'queue' }),
-      /transactions must be 'wait' or 'strict'/);
+      () => openStore(MODEL, { driver: nodeDriver(), transactions: /** @type {any} */ ('queue') }),
+      (/** @type {any} */ error) => error.code === 'JD0009'
+        && /'transactions' is 'wait' or 'strict', not 'queue'/.test(error.message));
   });
 });
 

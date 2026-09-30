@@ -22,6 +22,23 @@ import { createEntityHandle, createCollectionHandle } from './handle.js';
 import { registerLive } from './live.js';
 
 /**
+ * A client transaction's options with the client's default unit of work:
+ * `'own'` unless the caller NAMED one — an explicit `unitOfWork:
+ * undefined` is no choice, so it keeps the default rather than silently
+ * sharing the client's tracker (a spread let it override `'own'`).
+ * Anything that is not an object literal passes through untouched, for
+ * the store to refuse by its own closed set (`JD0013`).
+ * @param {unknown} transactionOptions
+ */
+function ownByDefault(transactionOptions) {
+  if (transactionOptions === undefined) return { unitOfWork: 'own' };
+  if (transactionOptions === null || typeof transactionOptions !== 'object'
+    || Object.getPrototypeOf(transactionOptions) !== Object.prototype) return transactionOptions;
+  const options = /** @type {Record<string, unknown>} */ (transactionOptions);
+  return { ...options, unitOfWork: options.unitOfWork ?? 'own' };
+}
+
+/**
  * The validator the client compiles entity and collection schemas with
  * when none is given: every issue collected, formats asserting.
  * @returns {JarenValidator}
@@ -95,7 +112,11 @@ export async function open(model, options) {
       jobs: tx.jobs,
       sync: tx.sync,
       ...handlesOf(tx),
-      transaction: (fn) => tx.transaction((nested) => fn(transactionClient(nested))),
+      // the options reach the store, which reads a nested transaction's
+      // closed set (refusing what a savepoint cannot honour) — dropping
+      // them here would make a refused `unitOfWork` silently shared
+      transaction: (fn, transactionOptions) =>
+        tx.transaction((nested) => fn(transactionClient(nested)), transactionOptions),
       // the named-savepoint group (MODEL-FORMAT §5.2), forwarded as it
       // is: partial rollback belongs to the transaction that owns the
       // connection, so the root client deliberately has no twin
@@ -119,8 +140,7 @@ export async function open(model, options) {
     // opts back into the store's, for a caller who staged changes
     // outside the transaction and means to save them inside it.
     transaction: (fn, transactionOptions) => store.transaction(
-      (tx) => fn(transactionClient(tx)),
-      { unitOfWork: 'own', ...transactionOptions }),
+      (tx) => fn(transactionClient(tx)), ownByDefault(transactionOptions)),
     close: (closeOptions) => store.close(closeOptions),
   };
   // the unit of work and entity live queries exist exactly when the

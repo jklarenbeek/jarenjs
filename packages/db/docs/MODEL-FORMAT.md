@@ -659,6 +659,16 @@ driver opens. A misspelt option is otherwise dropped in silence, and
 `{ captur: true }` opened a store with no capture at all, which the
 host discovers in production rather than at the call.
 
+**So are their values**, checked at the same moment — before the driver
+opens, so a refusal creates no file and holds no handle. `queueTimeout`
+is a whole number of milliseconds from 0 to 2147483647 (the timer's
+range: `Infinity` used to become a 1 ms wait); `readOnly` and `adopt`
+are `true` or `false`; `capture` and `jobs` are `true`, `false` or their
+options object (`'false'`, `0` and `''` used to switch the feature ON,
+and `jobs: null` threw a raw `TypeError`); `live` and `replication` are
+their options object; `transactions` is `'wait'` or `'strict'`. Each is
+`JD0009` naming the option and what it holds.
+
 Opening retries classified busy failures of its idempotent initialization
 sequence, yielding between attempts so a competing opener can finish. The
 configured `busyTimeout` bounds admission of retries, with at most 32 total
@@ -843,16 +853,40 @@ cannot retry; with the lock taken first that wait is an ordinary busy
 wait the `busyTimeout` covers, and two processes claiming one key see
 one `new`. The default `'deferred'` is unchanged, `tx.transaction()`
 inside either mode is a savepoint, `signal` and `unitOfWork` behave the
-same; the synchronous twin also accepts writer admission mode and refuses thenable callbacks. The open path already
+same; the synchronous twin reads the same options (`unitOfWork: 'own'`
+gives its body a tracker of its own, as the asynchronous root's does) and
+refuses thenable callbacks. The open path already
 brackets every first-open object — collection, entity and join tables,
 indexes, the change log and its state row, the job tables — the same
 way (§2.4).
 
+**A transaction's options are one closed set, on every surface.**
+`store.transaction`, `store.sync.transaction`, a nested `tx.transaction`
+/ `tx.sync.transaction` and the typed client's `client.transaction` read
+`mode`, `signal` and `unitOfWork` — nothing else. Anything but a plain
+object, an unknown member (named, with the nearest one: `{ mod:
+'immediate' }` is refused, where it used to run *deferred*) or a malformed
+value is **`JD0013`**, before the body runs. A nested transaction reads the
+same set and refuses what its savepoint cannot honour, **`JD0014`**:
+`unitOfWork` is the root transaction's to choose (a savepoint writes
+through the unit of work around it), and `mode: 'immediate'` inside a
+transaction that did not take the writer lock asks for a lock no
+savepoint can take — begin the root immediate. A `mode` the root already
+holds, or a weaker one, is accepted. Only the asynchronous root queues, so
+only it can abandon a wait with its `signal`; on the synchronous twin and
+a nested transaction a signal that has already aborted refuses the
+transaction before it begins (`JD2064`), and one that aborts later has
+nothing to abandon. The typed client defaults `unitOfWork` to `'own'`,
+and an explicit `unitOfWork: undefined` keeps that default.
+
 **A transaction handle lives exactly as long as its own scope.** Every
 `tx` view is pinned to the exact scope that created it, and every
 stateful member — connection work, unit-of-work bookkeeping like
-`add()`, `tx.stats()`, a lazy `query()` cursor's `next()` — checks that
-pin before reading tracker state or issuing a statement. A handle
+`add()`, `tx.stats()`, `tx.collection(name).stats()`, a lazy `query()`
+cursor's `next()` — checks that pin before reading tracker state or
+issuing a statement. `tx.introspect()` reads the database on the
+transaction's own connection (the root's takes the gate, which from
+inside the transaction is a wait for itself). A handle
 retained past its callback, or an OUTER handle used while an async
 inner savepoint is current, refuses **`JD2070`** naming the live
 callback's handle as the fix; it never falls through to the root and
@@ -911,7 +945,10 @@ What that costs, stated plainly:
   **waits** on the connection's gate, under `queueTimeout` (default 5 s,
   the busy-timeout default). `openStore(model, { transactions: 'strict' })`
   refuses at once instead, for a host that would rather see the contention
-  than pay for it.
+  than pay for it. The mode governs store-level calls — reads, writes,
+  cursor pulls, root jobs — not transactions: a second top-level
+  `store.transaction` still queues behind the first under `queueTimeout`,
+  as it must to keep one savepoint stack per connection.
 - A store-level call **awaited from inside its own transaction** is a
   self-wait: the store cannot tell it from an unrelated caller, so it
   queues and, at `queueTimeout`, becomes `JD0012` whose message names
@@ -1061,10 +1098,12 @@ error.
 | `JD0006` | an open option named a pragma this store does not configure |
 | `JD0007` | the pragma cannot be applied on this driver or store |
 | `JD0008` | a pragma did not take: the read-back disagrees with the request |
-| `JD0009` | an open option is outside the closed set `openStore` reads |
+| `JD0009` | an open option is outside the closed set `openStore` reads, or its value is malformed |
 | `JD0010` | strict mode refused a residual |
 | `JD0011` | the profile refused the document |
 | `JD0012` | work waited too long for the open transaction to settle |
+| `JD0013` | an option passed to a store operation is not one it reads, or is malformed |
+| `JD0014` | a transaction guarantee was requested where it cannot act |
 | `JD0030` | an unknown x-entity member was declared |
 | `JD0031` | relation declarations contradict each other |
 | `JD0032` | the include specification is invalid |
@@ -1388,7 +1427,7 @@ prove was applied is not a budget.
 
 **Read-only stores.** `openStore(model, { readOnly: true })` opens the
 connection read-only at the DRIVER, so every write is refused by the
-database itself (`JD2005` wrapping `SQLITE_READONLY`), not merely by
+database itself (`JD2083`, class `readonly`, wrapping `SQLITE_READONLY`), not merely by
 the API surface — a translation bug cannot become a write. A read-only
 store verifies the declared shape and creates nothing (`JD0002` when a
 table is missing), and leaves the file's journal mode untouched.
@@ -2238,11 +2277,20 @@ const report = await store.saveChanges();     // one transaction
   validates through the injected hook. `add()` completes defaults and
   validates immediately; an `auto` key stays absent until the save
   allocates it. `remove()` of a pending add cancels it. Documents
-  handed to `add`/`put` are adopted and frozen.
+  handed to `add`/`put` are adopted and frozen. Staging is
+  last-write-wins: `add()` twice under one key keeps the second document
+  (like `put`), where the explicit `create()` twice is `JD2001`.
 - A re-read refreshes a CLEAN record's snapshot; a DIRTY record stays
   authoritative — the read still returns the fresh row. `discard(key)`
-  drops tracking without scheduling anything; it is the recovery step
-  after a `JD2040` conflict (discard, re-read, reapply, save again).
+  drops tracking without scheduling anything — a pending `remove(key)`
+  included; it is the recovery step after a `JD2040` conflict (discard,
+  re-read, reapply, save again), on a guarded delete as on an update.
+- A save inside a transaction that later rolls back withdraws exactly
+  what it advanced: the records it wrote become pending again (an `auto`
+  key's allocated identity is dropped with its row), and the removals and
+  membership changes it ran are staged again — while anything staged
+  after the save (`add`, `put`, `remove`, `link`, `unlink`) stays as it
+  was staged, the later word on a membership target winning.
 - `asNoTracking()` returns a read-only surface (`get`, `load`) whose
   results are plain UNfrozen data, registered nowhere — a 100k-row
   report retains no snapshots (proven by a forced-GC live-set test).

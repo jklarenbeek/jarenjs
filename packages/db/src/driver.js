@@ -60,7 +60,7 @@ export const DEFAULT_QUEUE_TIMEOUT = 5000;
  * so a cancellation that meant something specific still says it.
  * @param {AbortSignal} [signal]
  */
-function abortReason(signal) {
+export function abortReason(signal) {
   return new DbRuntimeError('JD2064',
     'the call was aborted while it waited for the open transaction to settle; '
     + 'it ran no statement', { cause: signal?.reason });

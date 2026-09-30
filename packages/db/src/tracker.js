@@ -922,8 +922,17 @@ export function createTracker(context) {
 
   /** Put back what {@link undoFor} took a copy of: the save's statements
    * were rolled back, so every claim they made about the database is
-   * withdrawn and a retry plans them again. */
+   * withdrawn and a retry plans them again. Only what the save cleared
+   * comes back — work staged AFTER the save (a `remove()`, a `link()`,
+   * an `add()`) stays pending exactly as staged, and a later word on one
+   * membership target is still the last word. */
   const restore = (undo) => {
+    // an auto-key insert was re-keyed under the key the database handed
+    // out; the rollback took that row back, so the clean record filed
+    // under it names nothing — the pending record returns to its slot
+    for (const key of undo.rekeyed ?? []) {
+      if (!undo.slots.has(key)) records.delete(key);
+    }
     for (const [key, entry] of undo.slots) {
       if (entry === undefined) records.delete(key);
       else records.set(key, entry);
@@ -936,10 +945,17 @@ export function createTracker(context) {
       record.pendingInsert = was.pendingInsert;
       record.saved = was.saved;
     }
-    removals.clear();
-    for (const [key, removal] of undo.removals) removals.set(key, removal);
-    memberships.clear();
-    for (const [id, pending] of undo.memberships) memberships.set(id, pending);
+    for (const [key, removal] of undo.removals) {
+      if (!removals.has(key)) removals.set(key, removal);
+    }
+    for (const [id, planned] of undo.memberships) {
+      const later = memberships.get(id);
+      if (later !== undefined) {
+        for (const key of later.links) { planned.unlinks.delete(key); planned.links.add(key); }
+        for (const key of later.unlinks) { planned.links.delete(key); planned.unlinks.add(key); }
+      }
+      memberships.set(id, planned);
+    }
   };
 
   /**
@@ -973,6 +989,7 @@ export function createTracker(context) {
           // re-key under the real identity
           records.delete(record.pendingKey);
           const key = recordKeyFor(statement.entity, doc);
+          if (key !== record.pendingKey) (undo.rekeyed ??= []).push(key);
           records.set(/** @type {string} */ (key), {
             entity: statement.entity, snapshot: doc,
             current: untouched(record) ? doc : record.current, pendingInsert: false,
@@ -998,8 +1015,9 @@ export function createTracker(context) {
       }
       else if (statement.kind === 'delete') {
         const removal = statement.removal;
-        records.delete(keyOf(removal.entity, removal.parts));
-        removals.delete(keyOf(removal.entity, removal.parts));
+        const removedKey = keyOf(removal.entity, removal.parts);
+        records.delete(removedKey);
+        if (removals.get(removedKey) === removal) removals.delete(removedKey);
         if ((statement.deletedRows ?? 0) > 0) {
           captureRecord?.(removal.entity, removal.parts,
             removal.snapshot ?? undefined, null);
@@ -1032,8 +1050,18 @@ export function createTracker(context) {
         record.stamped = undefined;
       }
     }
-    removals.clear();
-    memberships.clear();
+    // what the save planned is persisted; anything staged while it ran
+    // (an asynchronous driver lets the caller in between) stays pending
+    for (const [key, removal] of undo.removals) {
+      if (removals.get(key) === removal) removals.delete(key);
+    }
+    for (const [id, planned] of undo.memberships) {
+      const live = memberships.get(id);
+      if (live === undefined) continue;
+      for (const key of planned.links) live.links.delete(key);
+      for (const key of planned.unlinks) live.unlinks.delete(key);
+      if (live.links.size === 0 && live.unlinks.size === 0) memberships.delete(id);
+    }
   };
 
   const saveChanges = () => {
@@ -1076,11 +1104,15 @@ export function createTracker(context) {
     });
   };
 
-  /** Drop tracking for a key without scheduling anything. */
+  /** Drop tracking for a key without scheduling anything — its pending
+   * removal included, so a `remove()` the caller changed their mind
+   * about (or one that failed its optimistic guard) is not re-planned by
+   * every later save. */
   const discard = (entityName, keyOrDoc) => {
     const parts = coreFor(entityName).normalizeKey(keyOrDoc);
     const key = keyOf(entityName, parts);
     records.delete(key);
+    removals.delete(key);
     // a pending membership change belongs to the key it attaches to
     for (const id of memberships.keys()) {
       if (id.startsWith(`${key}${UNIT_SEPARATOR}`)) memberships.delete(id);

@@ -36,7 +36,7 @@ import { postgresDialect } from '../dialects/postgres.js';
 import { DbCompileError, DbRuntimeError, wrapDriverError } from '../errors.js';
 import { workerQueue } from './worker-queue.js';
 import { rowBytes } from './worker-protocol.js';
-import { postgresSettings, postgresChannel, POSTGRES_DEFAULTS } from './postgres-options.js';
+import { postgresSettings, postgresChannel, POSTGRES_DEFAULTS, POSTGRES_ADAPTER_OPTIONS } from './postgres-options.js';
 import { postgresCursors } from './postgres-cursor.js';
 import { createPostgresNotifications } from './postgres-notifications.js';
 import { sqlTokens } from '../dialects/check-read.js';
@@ -241,7 +241,7 @@ export function adaptPostgresClient(client, options = undefined) {
   let cancelling = null;
   let fate = 'none';
   let retire = false;
-  const limits = postgresSettings(options);
+  const limits = postgresSettings(options, POSTGRES_ADAPTER_OPTIONS, 'adaptPostgresClient');
   const requests = workerQueue([{ active: false, healthy: true, readOnly: false }], limits.maxPending, () => performance.now());
   const status = () => client.getTransactionStatus?.() ?? (inTransaction ? 'T' : 'I');
   const cancel = (owner) => {

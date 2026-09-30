@@ -26,7 +26,8 @@ import { applyJSONPatch } from '@jarenjs/json/patch';
 import { parseJSONPointer } from '@jarenjs/json/pointer';
 
 import { DbCompileError, DbRuntimeError, wrapDriverError, isDriverError, classifyDriverError } from './errors.js';
-import { chain, toPromise, isThenable, attempt } from './driver.js';
+import { chain, toPromise, isThenable, attempt, abortReason } from './driver.js';
+import { isPlainOptions, refuseUnknownMembers } from './options.js';
 import { planCollection, planEntity, planJoinTable, verifyShape } from './ddl.js';
 import { translatePatch } from './patch-sql.js';
 import { createQueryEngine, createQueryState, createEntityQueryEngine, createLoadEngine } from './query.js';
@@ -485,14 +486,18 @@ function immediately(connection, fn, retry = true) {
  * @param {any} connection
  * @param {Map<string, any>} collections
  * @param {Map<string, any>} plans
+ * @param {string | null} createsNothing - what the store is when it may
+ *   create no table ('a read-only store', 'an adopted store …'), for the
+ *   refusal; `null` when it creates what is missing
  * @returns {any} value-or-promise
  */
-function ensureShape(connection, collections, plans, readOnly) {
+function ensureShape(connection, collections, plans, createsNothing) {
   const dialect = connection.dialect;
   const names = [...collections.keys()];
   if (names.length === 0) return null;
-  // a read-only store creates nothing, and cannot take a write lock
-  const bracket = readOnly ? (fn) => fn() : (fn) => immediately(connection, fn);
+  // a store that creates nothing (read-only, or adopted) verifies without
+  // taking a write lock
+  const bracket = createsNothing !== null ? (fn) => fn() : (fn) => immediately(connection, fn);
   return bracket(() => {
     const step = (i) => {
       if (i >= names.length) return null;
@@ -502,9 +507,9 @@ function ensureShape(connection, collections, plans, readOnly) {
       return chain(connection.prepare(dialect.introspect.tableExists()), (statement) =>
         chain(statement.get([name]), (row) => {
           if (row === undefined) {
-            if (readOnly) {
+            if (createsNothing !== null) {
               throw new DbCompileError('JD0002',
-                `collection '${name}': the table does not exist and a read-only store creates nothing`,
+                `collection '${name}': the table does not exist and ${createsNothing} creates nothing`,
                 collection.docPath);
             }
             const run = (j) => (j >= plan.createSql.length
@@ -528,14 +533,14 @@ function ensureShape(connection, collections, plans, readOnly) {
  * @param {any} connection
  * @param {Map<string, any>} entityPlans
  * @param {Map<string, any>} entities
- * @param {boolean} readOnly
+ * @param {string | null} createsNothing - as {@link ensureShape}'s
  * @returns {any} value-or-promise
  */
-function ensureEntityShape(connection, entityPlans, entities, readOnly) {
+function ensureEntityShape(connection, entityPlans, entities, createsNothing) {
   if (entityPlans.size === 0) return null;
   const dialect = connection.dialect;
   const names = [...entityPlans.keys()];
-  const bracket = readOnly ? (fn) => fn() : (fn) => immediately(connection, fn);
+  const bracket = createsNothing !== null ? (fn) => fn() : (fn) => immediately(connection, fn);
   return bracket(() => {
     const step = (i) => {
       if (i >= names.length) return null;
@@ -547,9 +552,9 @@ function ensureEntityShape(connection, entityPlans, entities, readOnly) {
       return chain(connection.prepare(dialect.introspect.tableExists()), (statement) =>
         chain(statement.get([name]), (row) => {
           if (row === undefined) {
-            if (readOnly) {
+            if (createsNothing !== null) {
               throw new DbCompileError('JD0002',
-                `entity '${name}': the table does not exist and a read-only store creates nothing`,
+                `entity '${name}': the table does not exist and ${createsNothing} creates nothing`,
                 docPath);
             }
             const run = (j) => (j >= plan.createSql.length
@@ -848,18 +853,110 @@ const OPEN_OPTIONS = new Set([
  * @param {Record<string, any>} options
  */
 function refuseUnknownOpenOptions(options) {
-  const known = [...OPEN_OPTIONS, ...PRAGMA_NAMES];
-  for (const key of Object.keys(options)) {
-    if (OPEN_OPTIONS.has(key) || PRAGMA_NAMES.includes(key)) continue;
-    const lower = key.toLowerCase();
-    const near = known.find((name) => {
-      const other = name.toLowerCase();
-      return other.startsWith(lower) || lower.startsWith(other);
-    });
-    throw new DbCompileError('JD0009',
-      `openStore option '${key}' is not one this store reads`
-      + (near === undefined ? `; the options are ${known.join(', ')}` : ` — did you mean '${near}'?`));
+  refuseUnknownMembers(options, [...OPEN_OPTIONS, ...PRAGMA_NAMES], (key, hint) =>
+    new DbCompileError('JD0009', `openStore option '${key}' is not one this store reads${hint}`));
+}
+
+/**
+ * Refuse an open option whose VALUE is malformed (`JD0009`), before the
+ * driver opens — the closed set above settles the names, this settles
+ * what each switch may hold. Each rule exists because a malformed value
+ * used to mean something else in silence: `queueTimeout: Infinity`
+ * became a 1 ms wait (the timer's own overflow rule), `capture: 'false'`
+ * and `jobs: 0` switched the feature ON (any value but `undefined` and
+ * `false` did), `jobs: null` threw a raw `TypeError`, and a misspelt
+ * `transactions` was refused only after the file was created and its
+ * handle opened.
+ * @param {Record<string, any>} options
+ */
+function refuseMalformedOpenOptions(options) {
+  const refuse = (/** @type {string} */ name, /** @type {string} */ rule) => new DbCompileError('JD0009',
+    `openStore option '${name}' ${rule}, not ${describeValue(options[name])}`);
+  const { queueTimeout } = options;
+  if (queueTimeout !== undefined
+    && (!Number.isInteger(queueTimeout) || queueTimeout < 0 || queueTimeout > 0x7fffffff))
+    throw refuse('queueTimeout', 'is a whole number of milliseconds from 0 to 2147483647');
+  for (const name of ['readOnly', 'adopt']) {
+    if (options[name] !== undefined && typeof options[name] !== 'boolean')
+      throw refuse(name, 'is true or false');
   }
+  for (const name of ['capture', 'jobs']) {
+    const value = options[name];
+    if (value !== undefined && typeof value !== 'boolean' && !isPlainOptions(value))
+      throw refuse(name, 'is true, false or its options object');
+  }
+  for (const name of ['live', 'replication']) {
+    if (options[name] !== undefined && !isPlainOptions(options[name]))
+      throw refuse(name, 'is its options object');
+  }
+  if (options.transactions !== undefined && options.transactions !== 'wait' && options.transactions !== 'strict')
+    throw refuse('transactions', "is 'wait' or 'strict'");
+}
+
+/**
+ * How a refused value reads in a message: strings quoted, the rest as
+ * JavaScript spells them (`Infinity`, `null`, `[object]`).
+ * @param {unknown} value
+ */
+function describeValue(value) {
+  if (typeof value === 'string') return `'${value}'`;
+  if (value === null || typeof value !== 'object') return String(value);
+  return Array.isArray(value) ? 'an array' : 'an object that is not a plain options object';
+}
+
+/**
+ * The members a transaction reads (MODEL-FORMAT §5.1) — ONE closed set
+ * for every surface: the asynchronous root, the synchronous twin and a
+ * nested transaction. A member a surface cannot honour is not unknown
+ * there; it is a guarantee requested where it cannot act (`JD0014`).
+ */
+const TRANSACTION_OPTIONS = Object.freeze(['mode', 'signal', 'unitOfWork']);
+
+/**
+ * Read one transaction's options, refusing before the transaction
+ * begins: anything but a plain object, an unknown member (named, with
+ * the nearest one) or a malformed value is `JD0013`; on a nested
+ * transaction, `unitOfWork` and a `mode: 'immediate'` the enclosing
+ * transaction did not take are `JD0014` — a savepoint writes through the
+ * unit of work around it and cannot take the writer lock.
+ * @param {unknown} options
+ * @param {'root' | 'nested'} surface
+ * @param {string} spelling - how the call reads, for the messages
+ * @param {'deferred' | 'immediate'} [enclosing] - the enclosing
+ *   transaction's mode, for a nested one
+ * @returns {{ mode?: 'deferred' | 'immediate', signal?: AbortSignal,
+ *   unitOfWork?: 'shared' | 'own' }}
+ */
+function readTransactionOptions(options, surface, spelling, enclosing) {
+  if (options === undefined) return {};
+  if (!isPlainOptions(options)) {
+    throw new DbCompileError('JD0013',
+      `${spelling}: its options are an object — { ${TRANSACTION_OPTIONS.join(', ')} } — `
+      + `not ${describeValue(options)}`);
+  }
+  refuseUnknownMembers(options, TRANSACTION_OPTIONS, (key, hint) =>
+    new DbCompileError('JD0013', `${spelling} option '${key}' is not one a transaction reads${hint}`));
+  const { mode, signal, unitOfWork } = options;
+  if (mode !== undefined && mode !== 'deferred' && mode !== 'immediate')
+    throw new DbCompileError('JD0013', `${spelling}: mode must be 'deferred' or 'immediate'`);
+  if (unitOfWork !== undefined && unitOfWork !== 'shared' && unitOfWork !== 'own')
+    throw new DbCompileError('JD0013', `${spelling}: unitOfWork must be 'shared' or 'own'`);
+  if (signal !== undefined && (signal === null || typeof signal !== 'object'
+    || typeof signal.aborted !== 'boolean' || typeof signal.addEventListener !== 'function'))
+    throw new DbCompileError('JD0013', `${spelling}: signal must be an AbortSignal`);
+  if (surface === 'nested') {
+    if (unitOfWork !== undefined) {
+      throw new DbCompileError('JD0014',
+        `${spelling}: unitOfWork cannot act on a nested transaction — a savepoint writes `
+        + 'through the unit of work of the transaction around it; choose it on the root transaction');
+    }
+    if (mode === 'immediate' && enclosing !== 'immediate') {
+      throw new DbCompileError('JD0014',
+        `${spelling}: mode 'immediate' cannot act inside a transaction that did not take the `
+        + "writer lock — a savepoint cannot take it; begin the ROOT transaction with { mode: 'immediate' }");
+    }
+  }
+  return { mode, signal, unitOfWork };
 }
 
 /**
@@ -1034,6 +1131,8 @@ export function openStore(model, options) {
   let entities;
   let mapping;
   try {
+    // first: the model checks below read these switches
+    refuseMalformedOpenOptions(options);
     collections = normalizeModel(model, options.expressions);
     const compiled = compileEntityModel(model);
     entities = compiled.entities;
@@ -1124,6 +1223,15 @@ export function openStore(model, options) {
        * @type {any}
        */
       let currentScope = null;
+
+      /**
+       * The mode the OUTERMOST open transaction began in, or `null` while
+       * none is open. A nested transaction reads it to refuse a
+       * `mode: 'immediate'` its savepoint could not honour (`JD0014`):
+       * only the root transaction can take the writer lock.
+       * @type {'deferred' | 'immediate' | null}
+       */
+      let currentMode = null;
 
       /**
        * What the OPEN transaction owes its in-memory callers once the
@@ -1232,12 +1340,15 @@ export function openStore(model, options) {
        *   without one the scope writes through whatever is already in
        *   force, which is what makes an inner savepoint part of the same
        *   unit of work as the transaction around it
+       * @param {'deferred' | 'immediate'} [mode] - a ROOT transaction's
+       *   mode; an inner scope inherits the one in force
        */
-      function withScope(open, fn, ownWork) {
+      function withScope(open, fn, ownWork, mode) {
         return open((inner) => {
           const outer = scope;
           const outerWork = work;
           const outerIdentity = currentScope;
+          const outerMode = currentMode;
           const outermost = settlements === null;
           if (outermost) settlements = [];
           const list = /** @type {any[]} */ (settlements);
@@ -1248,6 +1359,7 @@ export function openStore(model, options) {
           const identity = {};
           scope = inner;
           currentScope = identity;
+          if (mode !== undefined) currentMode = mode;
           if (ownWork !== undefined) work = ownWork;
           const kept = () => {
             if (outermost) flushSettlements();
@@ -1262,6 +1374,7 @@ export function openStore(model, options) {
             scope = outer;
             work = outerWork;
             currentScope = outerIdentity;
+            currentMode = outerMode;
             if (outermost) settlements = null;
           };
           let out;
@@ -1308,7 +1421,7 @@ export function openStore(model, options) {
           (error) => wrapDriverError(error, { docPath: '/transaction' }));
       let topLevelTransaction = (fn, signal, ownWork, mode) =>
         withScope((inner) => beginTransaction(inner, signal, mode),
-          (inner, identity) => fn(scopedStore(inner, identity)), ownWork);
+          (inner, identity) => fn(scopedStore(inner, identity)), ownWork, mode ?? 'deferred');
 
       /**
        * How a store-level call behaves when another caller's transaction
@@ -1318,12 +1431,8 @@ export function openStore(model, options) {
        * strict; the default keeps a contended call correct instead of
        * fast.
        */
+      // validated with the other options, before the driver opened
       const strictTransactions = options.transactions === 'strict';
-      if (options.transactions !== undefined && options.transactions !== 'wait'
-        && options.transactions !== 'strict') {
-        return Promise.reject(new TypeError(
-          "openStore: transactions must be 'wait' or 'strict'"));
-      }
 
       /** The refusal a contended store-level call gets when it cannot
        * wait. It names the scope-bound spelling, because a caller that
@@ -1498,12 +1607,15 @@ export function openStore(model, options) {
             })));
       });
 
+      // what a store that creates no table is, for the JD0002 refusal
+      const createsNothing = readOnly ? 'a read-only store'
+        : options.adopt === true ? 'an adopted store ({ adopt: true })' : null;
       const opening = () => chain(pragmas(), () =>
         chain(registerExpressionFunctions(connection, expressionNames,
           options.expressions ?? {}), () =>
         chain(needsDeriveFunctions ? registerDeriveFunctions(connection) : null, () =>
-        chain(ensureShape(connection, collections, plans, readOnly || options.adopt === true), () =>
-        chain(ensureEntityShape(connection, entityPlans, entities, readOnly || options.adopt === true), () => {
+        chain(ensureShape(connection, collections, plans, createsNothing), () =>
+        chain(ensureEntityShape(connection, entityPlans, entities, createsNothing), () => {
           // ————— change capture (LIVE-FORMAT §§1–6) —————
           const captureOption = options.capture ?? (options.replication === undefined ? undefined : true);
           const captureRequested = captureOption === true
@@ -1685,7 +1797,7 @@ export function openStore(model, options) {
               withScope((inner) => beginTransaction(inner, signal, mode),
                 () => capture.nest((innerScope, identity) =>
                   fn(scopedStore(innerScope, identity))),
-                ownWork);
+                ownWork, mode ?? 'deferred');
           }
           // the live registry rides the capture stream; its dispatcher
           // registers FIRST so maintenance sees every record before any
@@ -2506,18 +2618,11 @@ export function openStore(model, options) {
             // default stays the deferred savepoint; nesting is a savepoint
             // under either.
             transaction: lift((fn, transactionOptions) => {
-              const wanted = transactionOptions?.unitOfWork;
-              if (wanted !== undefined && wanted !== 'own' && wanted !== 'shared') {
-                throw new TypeError(
-                  "store.transaction: unitOfWork must be 'shared' or 'own'");
-              }
-              const mode = transactionOptions?.mode;
-              if (mode !== undefined && mode !== 'deferred' && mode !== 'immediate') {
-                throw new TypeError(
-                  "store.transaction: mode must be 'deferred' or 'immediate'");
-              }
-              return topLevelTransaction(fn, transactionOptions?.signal,
-                wanted === 'own' ? createUnitOfWork() : undefined, mode);
+              // a closed set, read before anything begins (JD0013)
+              const { mode, signal, unitOfWork } =
+                readTransactionOptions(transactionOptions, 'root', 'store.transaction');
+              return topLevelTransaction(fn, signal,
+                unitOfWork === 'own' ? createUnitOfWork() : undefined, mode);
             }),
             observe: (fn) => {
               if (capture === null) {
@@ -2719,7 +2824,7 @@ export function openStore(model, options) {
             const inner = boundCollection(name);
             const out = scopedMembers(identity, inner,
               ['get', 'insert', 'put', 'patch', 'delete', 'explain', 'live'],
-              ['execute']);
+              ['execute', 'stats']);
             out.query = (/** @type {any} */ document, /** @type {any} */ queryOptions) =>
               scopedCursor(identity, () => inner.query(document, queryOptions));
             return Object.freeze(out);
@@ -2789,6 +2894,8 @@ export function openStore(model, options) {
             /** The unit of work in force for THIS scope, captured once:
              * the view's tracker surface never follows a later scope. */
             const myWork = work;
+            /** The mode the root transaction around this scope began in. */
+            const myMode = currentMode ?? 'deferred';
             /** @type {Map<string, any>} */
             const myCollections = new Map();
             /** @type {Map<string, any>} */
@@ -2812,9 +2919,19 @@ export function openStore(model, options) {
 
             /** Nest through THIS scope's savepoint. The capture scope
              * goes INSIDE the savepoint, so a rollback undoes the
-             * translated patch with the rows it describes. */
-            const nested = (/** @type {any} */ fn) => {
+             * translated patch with the rows it describes. Its options
+             * are the root's closed set: `mode` may not exceed the
+             * enclosing one and `unitOfWork` is the root's to choose
+             * (`JD0014`); a nested transaction never queues, so a
+             * `signal` can only refuse it before it begins, exactly as an
+             * uncontended root's does.
+             * @param {any} fn
+             * @param {unknown} [transactionOptions]
+             * @param {string} [spelling] */
+            const nested = (fn, transactionOptions, spelling = 'tx.transaction') => {
               requireScope(identity);
+              const { signal } = readTransactionOptions(transactionOptions, 'nested', spelling, myMode);
+              if (signal?.aborted === true) throw abortReason(signal);
               return withScope(driverScope.transaction,
                 (inner, innerIdentity) => (capture === null
                   ? fn(scopedStore(inner, innerIdentity))
@@ -2923,15 +3040,29 @@ export function openStore(model, options) {
             });
             const members = {
               sql: override(sql),
-              transaction: override((/** @type {any} */ fn) => lift(() => nested(fn))()),
+              transaction: override((/** @type {any} */ fn, /** @type {any} */ transactionOptions) =>
+                lift(() => nested(fn, transactionOptions))()),
               collection: override(collectionFor),
               entity: override(entityFor),
-              // THIS scope's bookkeeping, whatever scope is current later
-              stats: override(() => ({
-                statementCache: { ...queryState.counters },
-                udfRegistrations: queryState.registered.size,
-                tracker: myWork.tracker === null ? null : myWork.tracker.counts(),
-                liveQueries: liveRegistry === null ? 0 : liveRegistry.count(),
+              // THIS scope's bookkeeping, and only while this scope is
+              // the live one: an escaped handle, or an outer one used
+              // while an inner transaction is open, is JD2070 like every
+              // other stateful member — never a report from a dead scope
+              stats: override(() => {
+                requireScope(identity);
+                return {
+                  statementCache: { ...queryState.counters },
+                  udfRegistrations: queryState.registered.size,
+                  tracker: myWork.tracker === null ? null : myWork.tracker.counts(),
+                  liveQueries: liveRegistry === null ? 0 : liveRegistry.count(),
+                };
+              }),
+              // the transaction's own connection: the root's introspect
+              // takes the gate, which from inside the transaction is a
+              // wait for itself (JD0012 at queueTimeout, then a rollback)
+              introspect: override(lift((/** @type {any} */ introspectOptions) => {
+                requireScope(identity);
+                return introspectModel(connection, introspectOptions);
               })),
               dataVersion: override(lift(() => {
                 requireScope(identity);
@@ -3073,7 +3204,7 @@ export function openStore(model, options) {
                   let handle = mySyncCollections.get(name);
                   if (handle === undefined) {
                     handle = Object.freeze(scopedMembers(identity, forSync(name), [],
-                      ['get', 'insert', 'put', 'patch', 'delete', 'execute', 'explain']));
+                      ['stats', 'get', 'insert', 'put', 'patch', 'delete', 'execute', 'explain']));
                     mySyncCollections.set(name, handle);
                   }
                   return handle;
@@ -3087,7 +3218,8 @@ export function openStore(model, options) {
                   return handle;
                 },
                 sql,
-                transaction: (fn) => nested((tx) => synchronousBody(fn, tx)),
+                transaction: (fn, transactionOptions) => nested((tx) => synchronousBody(fn, tx),
+                  transactionOptions, 'tx.sync.transaction'),
                 savepoints: Object.freeze({
                   create: savepointCreate,
                   rollbackTo: savepointRollbackTo,
@@ -3168,6 +3300,10 @@ export function openStore(model, options) {
                 return handle;
               },
               transaction: (fn, transactionOptions) => {
+                // the root's closed set (JD0013), read first; `unitOfWork`
+                // is honoured exactly as the asynchronous root honours it
+                const { mode, signal, unitOfWork } = readTransactionOptions(
+                  transactionOptions, 'root', 'store.sync.transaction');
                 // the synchronous surface answers values: while a
                 // transaction owns the connection it could only QUEUE,
                 // which handed a Promise back under a value's type
@@ -3177,9 +3313,10 @@ export function openStore(model, options) {
                     + 'settle — nest through the store the callback received, or use the '
                     + 'asynchronous store.transaction()');
                 }
-                const mode = transactionOptions?.mode;
-                if (mode !== undefined && mode !== 'deferred' && mode !== 'immediate') throw new TypeError('invalid transaction mode');
-                return topLevelTransaction((tx) => synchronousBody(fn, tx), undefined, undefined, mode);
+                // it never queues, so a signal can only refuse it up front
+                if (signal?.aborted === true) throw abortReason(signal);
+                return topLevelTransaction((tx) => synchronousBody(fn, tx), undefined,
+                  unitOfWork === 'own' ? createUnitOfWork() : undefined, mode);
               },
               entity(name) {
                 let handle = gatedSyncEntities.get(name);

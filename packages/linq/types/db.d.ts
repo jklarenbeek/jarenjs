@@ -336,11 +336,14 @@ export type LedgerClient =
  * `ttlMs` or `now`. */
 export function createDbLedger(client: LedgerClient, options?: DbLedgerOptions): DbLedger;
 
-/** How a transaction relates to the client's unit of work: `'own'` (the
- * default) gives the callback a tracker of its own, so two handlers on
- * one client hold two records for the same entity key; `'shared'` opts
- * back into the client's, for a caller who staged changes outside the
- * transaction and means to save them inside it. */
+/** A client transaction's options — the store's closed set (an unknown
+ * member or a malformed value is `JD0013` at runtime). `unitOfWork`
+ * relates the transaction to the client's unit of work: `'own'` (the
+ * default, also when passed as `undefined`) gives the callback a
+ * tracker of its own, so two handlers on one client hold two records
+ * for the same entity key; `'shared'` opts back into the client's, for a
+ * caller who staged changes outside the transaction and means to save
+ * them inside it. */
 export interface TransactionOptions {
   readonly unitOfWork?: 'own' | 'shared';
   /** `'immediate'` takes the write lock up front (`BEGIN IMMEDIATE`),
@@ -373,8 +376,11 @@ export type TransactionClientOf<E extends MetaMap<E>, C = Record<string, unknown
   readonly capabilities: StoreCapabilities;
   readonly entities: { readonly [K in keyof E & string]: EntityHandle<E, E[K]> };
   readonly collections: { readonly [K in keyof C & string]: CollectionHandle<C[K]> };
-  /** Nest through this transaction's savepoint. */
-  transaction<R>(fn: (tx: TransactionClientOf<E, C>) => R | Promise<R>): Promise<Awaited<R>>;
+  /** Nest through this transaction's savepoint. The options are the
+   * root's less `unitOfWork` (`JD0014` at runtime), and `mode:
+   * 'immediate'` needs a root that took the writer lock. */
+  transaction<R>(fn: (tx: TransactionClientOf<E, C>) => R | Promise<R>,
+    options?: Omit<TransactionOptions, 'unitOfWork'>): Promise<Awaited<R>>;
   /** Named partial rollback (MODEL-FORMAT §5.2) — the store's
    * `tx.savepoints`, forwarded unchanged: create, roll back to and
    * release a checkpoint by label without a sentinel exception. Only a

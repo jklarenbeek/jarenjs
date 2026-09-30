@@ -1005,8 +1005,13 @@ server configuration determine deployment costs.
   unrelated writer on a shared store keeps its own fate rather than
   sharing a rollback it knows nothing about. Contention waits under
   `queueTimeout` and then names itself `JD0012`, or refuses at once under
-  `openStore(model, { transactions: 'strict' })`. One store is safe for a
-  handler per request. Every `tx` view is pinned to its EXACT scope: a
+  `openStore(model, { transactions: 'strict' })` — a mode that governs
+  store-level calls; a second `store.transaction` still queues. One store
+  is safe for a handler per request. A transaction's options (`mode`,
+  `signal`, `unitOfWork`) are a closed set on every surface: an unknown
+  or malformed one is `JD0013`, and a nested transaction refuses what a
+  savepoint cannot honour (`unitOfWork`, a writer lock the root did not
+  take) as `JD0014`. Every `tx` view is pinned to its EXACT scope: a
   handle retained past its callback, or an outer handle used while an
   async inner savepoint is open, refuses `JD2070` instead of joining a
   transaction it does not own — and a transaction view carries no

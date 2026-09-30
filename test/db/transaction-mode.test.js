@@ -119,7 +119,7 @@ describe("store.transaction(fn, { mode: 'immediate' })", () => {
     const store = await openStore(MODEL, { driver: nodeDriver() });
     let ran = false;
     await assert.rejects(store.transaction(async () => { ran = true; }, /** @type {any} */ ({ mode: 'exclusive' })),
-      (/** @type {any} */ err) => err instanceof TypeError && /mode must be 'deferred' or 'immediate'/.test(err.message));
+      (/** @type {any} */ err) => err.code === 'JD0013' && /mode must be 'deferred' or 'immediate'/.test(err.message));
     assert.strictEqual(ran, false);
     assert.strictEqual(store.sync?.transaction.length, 2, 'sync.transaction(fn, options) accepts mode');
     await store.close();

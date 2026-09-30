@@ -730,7 +730,10 @@ export interface SyncStore {
    * the consumer's words; the handle's writes take it and reads answer it. */
   collection<T = unknown>(name: string): SyncCollection<T>;
   entity(name: string): SyncEntitySet;
-  transaction<R>(fn: (store: TransactionStore) => R, options?: { mode?: 'deferred' | 'immediate' }): R;
+  /** The synchronous root transaction: the root's closed option set
+   * (`JD0013`); it never queues, so a contended call is `JD0012` and an
+   * aborted `signal` refuses it before it begins. */
+  transaction<R>(fn: (store: TransactionStore) => R, options?: TransactionScopeOptions): R;
   execute?<R = unknown>(document: unknown, options?: ExecuteOptions): SequenceResult<R>;
   explain?(document: unknown, options?: ExecuteOptions): unknown;
   /** The entity roots this store-level provider serves (present with
@@ -834,23 +837,35 @@ export interface Store {
   readonly sync?: SyncStore;
 }
 
-/** The options a top-level transaction takes. An unknown `unitOfWork`
- * value is a compile error here and runtime API misuse there. */
+/** The options a transaction takes — a CLOSED set on every surface
+ * (MODEL-FORMAT §5.1): an unknown member or a malformed value is a
+ * compile error here and `JD0013` at runtime, before the body runs. */
 export interface TransactionScopeOptions {
   /** Abandons the call while it is still QUEUED (`JD2064`); a
-   * transaction that has taken the connection runs to its own end. */
+   * transaction that has taken the connection runs to its own end. On
+   * the synchronous twin and a nested transaction, which never queue, a
+   * signal that has already aborted refuses the transaction before it
+   * begins. */
   signal?: AbortSignal;
   /** `'own'` gives the callback an independent tracker; `'shared'`
-   * (the default) writes through the store's. */
+   * (the default) writes through the store's. The root's to choose: a
+   * nested transaction refuses it (`JD0014`). */
   unitOfWork?: 'own' | 'shared';
   /** `'immediate'` takes the write lock up front (`BEGIN IMMEDIATE`), so
    * a body that reads before it writes never meets the read→write
    * upgrade `SQLITE_BUSY` the busy handler cannot retry — what a claim
    * needs under concurrent writers; `'deferred'` (the default) is the
    * savepoint as always. A nested `tx.transaction()` is a savepoint
-   * whichever mode the root chose; the root synchronous twin accepts the same mode. */
+   * whichever mode the root chose, and refuses `'immediate'` inside a
+   * root that did not take the lock (`JD0014`); the root synchronous
+   * twin accepts the same mode. */
   mode?: 'deferred' | 'immediate';
 }
+
+/** A nested transaction's options: the root's, less `unitOfWork` —
+ * the root transaction chooses the unit of work every savepoint in it
+ * writes through (`JD0014` at runtime). */
+export type NestedTransactionOptions = Omit<TransactionScopeOptions, 'unitOfWork'>;
 
 /**
  * The named-savepoint group a live transaction view carries
@@ -882,6 +897,10 @@ export interface SyncSavepointController {
 export interface TransactionSyncStore extends SyncStore {
   readonly sql: TrustedSyncSql;
   readonly savepoints: SyncSavepointController;
+  /** Nest through this scope's savepoint, synchronously — the nested
+   * option set (`JD0014` for `unitOfWork` or an immediate the root did
+   * not take). */
+  transaction<R>(fn: (store: TransactionStore) => R, options?: NestedTransactionOptions): R;
 }
 
 /**
@@ -909,7 +928,12 @@ export interface TransactionStore extends Omit<Store,
    * an admin operation is a root call. */
   readonly sql: TrustedSql;
   readonly jobs?: JobsApi;
-  transaction<R>(fn: (store: TransactionStore) => R | Promise<R>): Promise<Awaited<R>>;
+  /** Nest through this scope's savepoint. Its options are the root's
+   * closed set less `unitOfWork` (a savepoint writes through the unit of
+   * work around it); `mode: 'immediate'` inside a root that did not take
+   * the writer lock is `JD0014`. */
+  transaction<R>(fn: (store: TransactionStore) => R | Promise<R>,
+    options?: NestedTransactionOptions): Promise<Awaited<R>>;
   /** Named partial rollback over the transaction's one savepoint stack
    * (MODEL-FORMAT §5.2). Root stores, clients, workers and checkpoint
    * stores expose none of it. */

@@ -138,6 +138,13 @@ async function main(): Promise<void> {
       const nestedRows: Post[] = await inner.entities.Post.toArray();
       void nestedRows;
     });
+    // a nested transaction takes the root's options less unitOfWork —
+    // the root chose the unit of work every savepoint writes through
+    await tx.transaction(async () => 1, { mode: 'deferred' });
+    // @ts-expect-error — unitOfWork is the root transaction's to choose (JD0014)
+    await tx.transaction(async () => 1, { unitOfWork: 'own' });
+    // @ts-expect-error — the options are a closed set (JD0013)
+    await tx.transaction(async () => 1, { mod: 'immediate' });
     // named savepoints are the transaction's alone, forwarded from the store
     await tx.savepoints.create('mid');
     await tx.savepoints.rollbackTo('mid');

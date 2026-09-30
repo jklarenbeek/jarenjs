@@ -2,6 +2,7 @@
 /** Finite resource and server deadline defaults, shared by PG host owners. */
 import { positiveOption } from './worker-protocol.js';
 import { DbCompileError } from '../errors.js';
+import { refuseUnknownMembers } from '../options.js';
 
 export const POSTGRES_DEFAULTS = Object.freeze({ windowRows: 64, windowBytes: 1048576,
   maxPending: 64, maxStatements: 256, maxCursors: 64, allMaxRows: 100000,
@@ -17,8 +18,41 @@ export function postgresChannel(value) {
   return value;
 }
 
-/** @param {any} options */
-export function postgresSettings(options = {}) {
+/** Every member `postgresDriver` reads: the limits and its session
+ * policy. A CLOSED set — a misspelt `statmentTimeoutMs` used to leave
+ * the server default in force without a word. */
+export const POSTGRES_DRIVER_OPTIONS = Object.freeze([...Object.keys(POSTGRES_DEFAULTS),
+  'schema', 'notifyChannel', 'queueTimeout', 'poolMode', 'prepared', 'cursorMode', 'destroy', 'cancel']);
+
+/** What `adaptPostgresClient` reads: the driver's set, plus the members
+ * the driver hands one acquired client. */
+export const POSTGRES_ADAPTER_OPTIONS = Object.freeze([...POSTGRES_DRIVER_OPTIONS,
+  'onClose', 'nativeCursor', 'serverTimeouts', 'cacheIdentity']);
+
+/** What `postgresNotifications` reads: the limits and its listener policy. */
+export const POSTGRES_NOTIFICATION_OPTIONS = Object.freeze([...Object.keys(POSTGRES_DEFAULTS),
+  'channel', 'maxReconnects', 'retryBaseMs', 'retryMaxMs']);
+
+/**
+ * Refuse an option outside a PostgreSQL owner's closed set (`JD0003`,
+ * the driver's configuration refusal), naming the nearest member.
+ * @param {any} options
+ * @param {readonly string[]} known
+ * @param {string} owner - how the call reads, for the message
+ */
+export function refuseUnknownPostgresOptions(options, known, owner) {
+  if (options === null || typeof options !== 'object') return;
+  refuseUnknownMembers(options, known, (key, hint) =>
+    new DbCompileError('JD0003', `${owner} option '${key}' is not one it reads${hint}`));
+}
+
+/**
+ * @param {any} options
+ * @param {readonly string[]} [known] - the caller's closed set
+ * @param {string} [owner] - how the call reads, for the message
+ */
+export function postgresSettings(options = {}, known = POSTGRES_DRIVER_OPTIONS, owner = 'postgresDriver') {
+  refuseUnknownPostgresOptions(options, known, owner);
   const result = {};
   for (const [key, fallback] of Object.entries(POSTGRES_DEFAULTS)) {
     result[key] = positiveOption(key, options[key], fallback);

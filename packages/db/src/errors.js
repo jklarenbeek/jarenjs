@@ -35,10 +35,12 @@ export const DB_CODES = Object.freeze({
   JD0006: 'an open option named a pragma this store does not configure',
   JD0007: 'the pragma cannot be applied on this driver or store',
   JD0008: 'a pragma did not take: the read-back disagrees with the request',
-  JD0009: 'an open option is outside the closed set openStore reads',
+  JD0009: 'an open option is outside the closed set openStore reads, or its value is malformed',
   JD0010: 'strict mode refused a residual',
   JD0011: 'the profile refused the document',
   JD0012: 'work waited too long for the open transaction to settle',
+  JD0013: 'an option passed to a store operation is not one it reads, or is malformed',
+  JD0014: 'a transaction guarantee was requested where it cannot act',
   JD0030: 'an unknown x-entity member was declared',
   JD0031: 'relation declarations contradict each other',
   JD0032: 'the include specification is invalid',
@@ -148,6 +150,19 @@ export const DB_CODES = Object.freeze({
  *  - `JD0008` — a requested pragma did not take: the value read back
  *    from the connection after the open sequence disagrees with the
  *    request; the reason carries both, and the store did not open
+ *  - `JD0009` — an `openStore` option outside the closed set the store
+ *    reads (the reason names it and the nearest member), or one whose
+ *    value is malformed (`queueTimeout: Infinity`, `capture: 'false'`,
+ *    `jobs: null`, a misspelt `transactions`); refused before the driver
+ *    opens, so no file is created and no handle is held
+ *  - `JD0013` — an option passed to a store operation — a transaction's
+ *    `mode`, `signal`, `unitOfWork` — is not one it reads (named, with
+ *    the nearest member), or its value is malformed; refused before the
+ *    operation begins
+ *  - `JD0014` — a transaction guarantee requested where it cannot act:
+ *    `unitOfWork` on a nested transaction (a savepoint writes through the
+ *    unit of work around it), or `mode: 'immediate'` inside a
+ *    transaction that did not take the writer lock
  *  - `JD0010` — `strict: true` and part of the query would have run
  *    outside the database; the reason names the forcing construct
  *  - `JD0011` — the active profile refused the document before any

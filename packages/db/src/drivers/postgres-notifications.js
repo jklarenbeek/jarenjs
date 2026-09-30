@@ -2,7 +2,7 @@
 /** One dedicated PostgreSQL listener: a coalesced wake token, never durable data. */
 import { backoffDelay, sleep } from '@jarenjs/core/retry';
 import { DbCompileError, DbRuntimeError, wrapDriverError } from '../errors.js';
-import { postgresChannel } from './postgres-options.js';
+import { postgresChannel, refuseUnknownPostgresOptions, POSTGRES_NOTIFICATION_OPTIONS } from './postgres-options.js';
 
 /**
  * Use the driver's existing bounded acquisition/settlement owner for each
@@ -14,6 +14,7 @@ import { postgresChannel } from './postgres-options.js';
  * @returns {any}
  */
 export function createPostgresNotifications(driverFactory, source, options) {
+  refuseUnknownPostgresOptions(options, POSTGRES_NOTIFICATION_OPTIONS, 'postgresNotifications');
   const channel = postgresChannel(options?.channel);
   if (!source || typeof source.connect !== 'function')
     throw new DbCompileError('JD0003', 'notifications need an injected connection source');
@@ -66,8 +67,7 @@ export function createPostgresNotifications(driverFactory, source, options) {
           ? new DbRuntimeError('JD2090', 'the listener closed before UNLISTEN settled') : undefined));
       },
     };
-  } }, { ...options, schema: undefined, notifyChannel: undefined,
-    maxConnections: 1, queueCapacity: 1, prepared: 'unnamed' });
+  } }, { ...driverLimits(options), maxConnections: 1, queueCapacity: 1, prepared: 'unnamed' });
 
   const run = (async () => {
     while (!closed) {
@@ -152,4 +152,12 @@ export function createPostgresNotifications(driverFactory, source, options) {
     [Symbol.asyncIterator]: () => iterator,
   };
   return Object.freeze(iterator);
+}
+
+/** The driver's share of the listener's options: the limits only — the
+ * listener policy is the owner's, and the driver's set is closed.
+ * @param {any} options */
+function driverLimits(options) {
+  const { channel: _channel, maxReconnects: _reconnects, retryBaseMs: _base, retryMaxMs: _max, ...limits } = options ?? {};
+  return limits;
 }
