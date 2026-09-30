@@ -11,7 +11,8 @@ The same migration entry points also accept explicitly reviewed PostgreSQL SQL
 and complete native catalog targets; see
 [native preservation](MIGRATION-FORMAT.md#postgresql-native-preservation) for
 their asynchronous ownership, schema policy and receipt composition.
-It opens no store and uses the supplied connection and transaction. Expressions
+It opens no store and uses the supplied connection and transaction; a store
+carries the same engine as `store.relational` (see [Through a store](#through-a-store)). Expressions
 are closed `$sql` nodes built by `sql`; strings are bound values, never SQL
 fragments. Identifiers are quoted as single names. `planRelational` returns
 `{ sql, params, access }` for review without reading the database.
@@ -80,6 +81,17 @@ const result = r.execute({
 // result.affected is SQLite's direct statement count, excluding trigger writes.
 ```
 
+`lastInsertRowid` is present only after an insert that inserted a row of a
+rowid table. SQLite's last rowid belongs to the connection, so after an insert
+that inserted nothing (`ignore`, a `nothing` conflict), after an upsert (which
+may have updated instead — `returning` names its row) or after an insert into a
+`WITHOUT ROWID` table it would be another row's, and the result omits it. A
+driver failure is classified like every store failure — `JD2005` with its
+`class` (`constraint` for a key or CHECK conflict), the driver's error as
+`cause` and its text in the message — and a synchronous engine used while
+another caller's transaction owns the connection refuses `JD0012`; a disposed
+one refuses `JD2063`.
+
 UPDATE emits exactly the supplied assignments. `reporting: 'matched'` is the
 native surface's default and executes identical assignments, so UPDATE OF and
 immutability triggers run. `reporting: 'changed'` adds a BINARY, null-safe
@@ -104,6 +116,35 @@ collects rows using SQLite RETURNING timing, before subsequent AFTER-trigger
 changes. Unlike bounded entity mutation documents, this explicit native surface
 has no automatic result row/byte limit; use a bounded selection or streaming read
 when handling large results.
+
+## Through a store
+
+`store.relational` is this engine admitted by the store
+([MODEL-FORMAT §5.3](MODEL-FORMAT.md#53-relational-statements-through-the-store)):
+root reads take the store gate, prepared read-only so a pool reader can serve
+them; a root cursor is admitted per pull, so other calls run between pulls; a
+root write runs in a top-level `immediate` transaction of its own. The same
+engine on a transaction view, `tx.relational`, runs as that exact scope, and
+its writes are savepoints of the transaction. `store.sync.relational` and
+`tx.sync.relational` answer values on a synchronous driver. The engine works on
+every store host — the in-thread drivers, `node-worker` and `node-pool`, where
+the bare `relational(connection)` requires a synchronous SQLite connection —
+and on PostgreSQL.
+
+```js
+const r = store.relational;
+await r.execute({ op: 'insert', table: 'staging', values: { sku: 'a-1', body } });
+for await (const row of r.iterate({ from: 'staging', columns: { sku: sql.column('sku') } })) consume(row);
+await store.transaction(async (tx) => {
+  await tx.relational.execute({ op: 'delete', table: 'staging', where: 1 });
+  await tx.entity('Item').create(item);        // one transaction, one commit
+});
+```
+
+Its writes follow the rules trusted SQL follows: pending tracked changes
+refuse, a store-only invariant refuses a write to its own entity's table,
+journal capture refuses and session capture records the write on a store
+table. The store owns the engine's lifetime, so there is no `dispose`.
 
 ## Physical schema ownership
 

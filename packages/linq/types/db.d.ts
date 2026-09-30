@@ -378,6 +378,8 @@ export type TransactionClientOf<E extends MetaMap<E>, C = Record<string, unknown
    * no `close`: a transaction never owns the connection's lifetime. */
   readonly store: TransactionStore;
   readonly sql: TransactionStore['sql'];
+  /** The store's relational engine as this transaction's owner (MODEL-FORMAT §5.3). */
+  readonly relational: TransactionStore['relational'];
   readonly jobs: TransactionStore['jobs'];
   readonly sync: TransactionStore['sync'];
   readonly capabilities: StoreCapabilities;

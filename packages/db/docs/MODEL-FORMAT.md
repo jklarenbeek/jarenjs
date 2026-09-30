@@ -1105,6 +1105,60 @@ looked at.
 - No observer delivery or persisted capture record occurs before the
   owning transaction commits, exactly as everywhere else.
 
+### 5.3 Relational statements through the store
+
+`relational(connection)` runs structural SQL documents over a bare
+connection ([SQLITE-RELATIONAL](SQLITE-RELATIONAL.md)). A store carries the
+same engine — one planner, one emitter, one result rule — admitted the way
+every other store operation is admitted:
+
+| Surface | Reads | Cursor | Writes |
+|---|---|---|---|
+| `store.relational` | under the store gate, prepared read-only, so a pool reader serves a read no transaction pins | admitted per pull, as the root collection cursor is; a PostgreSQL native cursor holds the session until it is released | one top-level transaction of its own, `mode: 'immediate'` |
+| `store.sync.relational` | under the synchronous gate | per pull | a top-level immediate transaction |
+| `tx.relational`, `tx.sync.relational` | as the exact scope | pinned to the scope | a savepoint of the transaction |
+
+- **Documents, results and codes are the engine's.** A malformed
+  document is `JD0038`; every driver failure is classified (`JD2005`
+  with its `class`, never a raw driver error). `lastInsertRowid` is
+  present only after an insert that inserted a row of a rowid table on
+  SQLite — never after an insert that inserted nothing, an upsert (it
+  may have updated; `returning` names the row), an insert into a
+  `WITHOUT ROWID` table, or on PostgreSQL. SQLite's last rowid belongs
+  to the connection, so each of those would report another row's.
+- **Admission is the store's.** A root call on a strict store refuses
+  at once while a transaction owns the connection, and the synchronous
+  surface always does (`JD0012`); the asynchronous root queues under
+  `queueTimeout`. A transaction's engine refuses once its scope settled
+  (`JD2070`) or its hold limit passed (`JD2098`), and its calls count as
+  in flight for that limit. A failed write inside a transaction rolls
+  back to its savepoint and the transaction carries on — on PostgreSQL
+  too, where a failed statement would otherwise abort it (`25P02`).
+- **Writes follow the rules trusted SQL follows, from one function.**
+  Pending tracked changes refuse (`JD2040`), because a later save would
+  write over what the statement wrote. A read-only store refuses
+  (`JD2095`). A store-only invariant (§13) refuses a write to **its
+  entity's table** (`JD2095`) and no other: the document names its
+  table, where `tx.sql` names none and so refuses whenever any
+  store-only invariant exists. Journal capture refuses a relational
+  write (`JD0051`): the journal is written by the store's own writers
+  from before and after images the engine does not read. Session capture
+  records it like any statement on a store table — the changeset is
+  SQLite's own — and a write to a table the store does not own is not
+  part of its stream. `tx.sql` still refuses under any capture. Every
+  write invalidates the tracked entities it may have changed.
+- **What stays refused.** Physical entities (§12) refuse capture at
+  open: their adopted application triggers write rows capture cannot
+  see, so a relational write on an adopted file is never captured.
+  Triggers and cascades a relational write fires are the application's
+  own SQL; a store-only invariant is enforced by the store's writers and
+  is not re-checked on the rows they write.
+- **Statements are prepared once per text.** The engines of one store
+  share one bounded cache (`statementCacheBound`), keyed by the SQL text
+  and its access: a document with externals plans one text for every
+  binding, and a worker host caps the statements it keeps. Cursors
+  prepare their own.
+
 ## 6. Identity
 
 Key allocation is declared, never guessed (three strategies, platform
@@ -1246,7 +1300,7 @@ error.
 | `JD2092` | a host frame or compatibility result exceeds its declared row/byte bound |
 | `JD2093` | malformed worker protocol request |
 | `JD2094` | invalid or uncommitted durable snapshot; reopen the last committed version |
-| `JD2095` | trusted SQL or synchronous callback authority refused |
+| `JD2095` | trusted SQL, a relational write, or synchronous callback authority refused |
 | `JD2096` | persistence invariant rejected the mutation; constraint class |
 | `JD2097` | supervised native operation cancelled or past its response deadline; owner exit and transaction fate are reported separately |
 | `JD2098` | the transaction held its connection past its hold limit and was rolled back |

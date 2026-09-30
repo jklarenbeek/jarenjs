@@ -1269,6 +1269,20 @@ The supplied driver owns transactions and cursors. These programs are explicitly
 SQLite-semantic and never enter the JSON residual evaluator. See
 [the native SQLite contract](docs/SQLITE-RELATIONAL.md).
 
+`relational.js` is one engine over an admission policy: planning, emission,
+execution, the result rule (`lastInsertRowid` only for an insert that inserted
+a row of a rowid table) and the classification of every driver failure are the
+engine's; where each operation runs is the policy's. `relational(connection)`
+is the engine with the connection's own policy. `store.js` supplies four more
+(the root, the synchronous root, a transaction view and its synchronous twin),
+so `store.relational` needs no second planner: its reads take the gate
+prepared read-only, its root cursor goes through `admitRootCursor`, and its
+writes run a top-level immediate transaction or a savepoint of the open one.
+Its writes pass the one write-rule function trusted SQL uses
+(`beforeSqlWrite`), which reads the written table structurally where trusted
+SQL's free-form text cannot name one. The store's engines share one bounded
+statement cache and one table-kind memo.
+
 `engine-metadata.js` holds inert version/table constants so schema inspection
 does not import runtime owners. `/query`, `/model` and `/entity` expose those
 mechanisms without the root store import. `compileEntityModel` performs one model

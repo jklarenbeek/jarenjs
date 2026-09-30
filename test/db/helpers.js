@@ -345,6 +345,7 @@ export function fullDoubleDialect(createDialect) {
       compileOptions: () => 'GET options',
       pragma: (name) => `GET pragma ${pragmaWord(name)}`,
       tableExists: () => 'GET table @p1',
+      tableKind: () => 'GET table-kind @p1',
       columns: (t) => `GET columns ${t}`,
       indexes: (t) => `GET indexes ${t}`,
       indexColumns: (i) => `GET indexcolumns ${i}`,

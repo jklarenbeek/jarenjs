@@ -22,6 +22,19 @@ async function example() {
   withForeignKeysSuspended(db, () => affected);
   return copy;
 }
+// the Store-bound engines: promises at the root and on a transaction view,
+// values on the synchronous twins; the Store owns their lifetime
+async function storeBound(store: import('@jarenjs/db').Store) {
+  const rows: { id: number }[] = await store.relational.all<{ id: number }>(query);
+  const result = await store.relational.execute({ op: 'insert', table: 'images', values: { data: null } });
+  const rowid: number | bigint | undefined = result.lastInsertRowid;
+  for await (const row of store.relational.iterate<{ id: number }>(query)) { const id: number = row.id; void id; }
+  const inside: number = await store.transaction(async (tx) => (await tx.relational.execute({ op: 'delete', table: 'images', where: true })).affected);
+  const syncRows: { id: number }[] | undefined = store.sync?.relational.all<{ id: number }>(query);
+  // @ts-expect-error the Store owns the engine's lifetime: there is no dispose
+  store.relational.dispose();
+  return [rows, rowid, inside, syncRows];
+}
 // @ts-expect-error SQL parameter objects need an explicit structural expression
 sql.value({ unexpected: true });
 // @ts-expect-error physical types are a closed native vocabulary
@@ -30,4 +43,4 @@ sql.cast(sql.column('id'), 'TEXT; DROP TABLE images');
 const refused: Parameters<ReturnType<typeof relational>['execute']>[0] = { op: 'update', table: 'images', set: { data: null } };
 // @ts-expect-error absence suppression belongs to drop operations
 planSchemaChange({}, { op: 'renameTable', table: 'images', to: 'archive', ifExists: true });
-void [example, refused, planTable, compileEntityModel, readSchema, createEntityQueryEngine, createQueryState, entityCore, collectEntityRoots];
+void [example, storeBound, refused, planTable, compileEntityModel, readSchema, createEntityQueryEngine, createQueryState, entityCore, collectEntityRoots];

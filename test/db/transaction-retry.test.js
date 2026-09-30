@@ -8,16 +8,9 @@
  * `tx.attempt`. Before, `{ retry }` was accepted and ignored, and
  * re-running a callback by hand after a busy failure inserted TWO rows
  * under the default shared unit of work.
- *
- * The README's retry-and-hold example is RUN here, not read: its fence,
- * executed as written, must answer every value its `// →` lines print.
  */
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import path from 'node:path';
-import util from 'node:util';
-import { fileURLToPath, pathToFileURL } from 'node:url';
 import { openStore } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';
 import { postgresDriver } from '@jarenjs/db/postgres';
@@ -219,36 +212,6 @@ describe('retry on PostgreSQL', { skip: !url && 'JAREN_PG_URL is not set' }, () 
       await b.close();
       await poolA.end();
       await poolB.end();
-    }
-  });
-});
-
-describe("the README's retry and hold example", () => {
-  const ROOT = fileURLToPath(new URL('../../', import.meta.url));
-  const readme = fs.readFileSync(path.join(ROOT, 'packages/db/README.md'), 'utf8');
-  const from = readme.indexOf('Retry and the hold limit, end to end');
-  const fence = from < 0 ? null : /```js\n([\s\S]*?)```/.exec(readme.slice(from));
-  const section = fence === null ? '' : readme.slice(from, from + fence.index + fence[0].length);
-
-  it('runs as written and answers what it prints', async () => {
-    assert.ok(fence !== null, 'packages/db/README.md no longer carries the retry-and-hold example');
-    // inside node_modules, so the bare `@jarenjs/*` specifiers resolve as
-    // they do for a consumer and a crashed run leaves nothing git sees
-    const dir = fs.mkdtempSync(path.join(ROOT, 'node_modules', '.cache-readme-retry-'));
-    try {
-      const file = path.join(dir, 'example.mjs');
-      fs.writeFileSync(file, `${fence[1]}\nexport { claimed, code, holdTimeoutMs, after, expired };\n`);
-      const ran = await import(pathToFileURL(file).href);
-      assert.deepEqual(ran.claimed, { n: 42, attempt: 2 }, 'the retried claim commits on attempt 2 over the concurrent write');
-      assert.equal(ran.code, 'JD2098');
-      assert.ok(ran.expired.elapsedMs >= ran.holdTimeoutMs, 'the rollback began at the limit, not before');
-      assert.equal(ran.after, 42, "nothing of the expired body's write remains");
-      for (const printed of [ran.claimed, { code: ran.code, holdTimeoutMs: ran.holdTimeoutMs }, ran.after]) {
-        assert.ok(section.includes(`// → ${util.inspect(printed)}`), `the example no longer prints ${util.inspect(printed)}`);
-      }
-    }
-    finally {
-      fs.rmSync(dir, { recursive: true, force: true });
     }
   });
 });

@@ -153,6 +153,8 @@ export interface TypedEntitySet<E extends MetaMap<E>, M extends EntityMeta> {
 /** The typed store: every member of `Store` (a typed store is the same
  * object, identity at runtime), with the entity sets typed. */
 export interface TypedStore<E extends MetaMap<E>> {
+  /** Native statements over any table (MODEL-FORMAT §5.3). */
+  readonly relational: import('./relational.js').StoreRelational;
   readonly capabilities: StoreCapabilities;
   readonly dialect: Dialect;
   stats(): StoreStats;

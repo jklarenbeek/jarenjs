@@ -414,7 +414,12 @@ at the head can leave a reader idle. Metrics report active/idle/queued, worker
 health/generation/role/executions, and wait p50/p95 over the last 1024 admissions.
 
 Compiled operation metadata supplies read classification, and SQLite itself
-refuses a write on a read-only worker. Transactions pin one worker for their entire
+refuses a write on a read-only worker. The Store-bound relational engine
+(`store.relational`, MODEL-FORMAT §5.3) classifies every read it plans: a root
+`all`, `get` or cursor pull outside a transaction runs on a reader, while its
+writes and everything inside a transaction stay on the writer. Its reusable
+statements share one bounded cache per store, because a worker keeps at most
+`maxStatements` prepared statements. Transactions pin one worker for their entire
 lifetime, including nested savepoints. Normal writable Store transactions pin the
 writer; a read-only opened pool pins a reader. There is no extra transport-specific
 transaction API. Store root admission still serializes unrelated operations to

@@ -111,6 +111,8 @@ export async function open(model, options) {
       // the attempt of a retried transaction this callback runs in (1-based)
       attempt: tx.attempt,
       sql: tx.sql,
+      // the store's relational engine as this transaction's owner
+      relational: tx.relational,
       jobs: tx.jobs,
       sync: tx.sync,
       ...handlesOf(tx),

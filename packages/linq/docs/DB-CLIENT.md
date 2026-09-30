@@ -937,8 +937,12 @@ whatever the corpus and whatever the clock says.
 ## Trusted SQL during adoption
 
 `open()` forwards `adopt: true` and physical model declarations to the store.
-A transaction client exposes `tx.sql`, `tx.jobs`, and the store's optional
-`tx.sync` surface. `tx.sql.prepare(text, { access: 'read' | 'write', affects? })`
+A transaction client exposes `tx.sql`, `tx.relational`, `tx.jobs`, and the store's optional
+`tx.sync` surface. `tx.relational` is the store's relational engine as the
+transaction's owner — structural documents instead of SQL text, the same write
+rules, and a write that is a savepoint of the transaction
+([MODEL-FORMAT §5.3](../../db/docs/MODEL-FORMAT.md#53-relational-statements-through-the-store));
+the root's is `client.store.relational`. `tx.sql.prepare(text, { access: 'read' | 'write', affects? })`
 returns `run(params)`, `get(params)`, `all(params)` and `close()`. Parameters are
 positional arrays. These methods answer values on synchronous hosts and promises
 on asynchronous hosts. Always await asynchronous operations inside the callback;

@@ -21,6 +21,7 @@
  */
 
 import { resolveRuntime } from '@jarenjs/core/runtime';
+import { createBoundedCache } from '@jarenjs/core/cache';
 import { backoffDelay, sleep } from '@jarenjs/core/retry';
 import { applyJSONPatch } from '@jarenjs/json/patch';
 import { parseJSONPointer } from '@jarenjs/json/pointer';
@@ -32,7 +33,7 @@ import { canonicalKeyText } from './key-text.js';
 import { planCollection, planEntity, planJoinTable, verifyShape } from './ddl.js';
 import { translatePatch } from './patch-sql.js';
 import { createQueryEngine, createQueryState, createEntityQueryEngine, createLoadEngine } from './query.js';
-import { admitCursor, admitSyncCursor, createCursor, drainPage, utf8Length } from './cursor.js';
+import { admitCursor, admitSyncCursor, createCursor, createSyncCursor, drainPage, utf8Length } from './cursor.js';
 import { refuseUnsupportedPragmaKeys, resolvePragmaRequests, configurePragmas, PRAGMA_NAMES } from './pragmas.js';
 import { createMaintenance } from './maintenance.js';
 import { createBackup } from './backup.js';
@@ -41,6 +42,7 @@ import { compileEntityModel, joinTableRoots } from './model.js';
 import { entityCore } from './entity.js';
 import { verifyPhysical } from './physical.js';
 import { trustedSql, synchronousBody } from './sql.js';
+import { relationalEngine } from './relational.js';
 import { createTracker, membershipKeys } from './tracker.js';
 import { createCaptureEngine, DEFAULT_RETENTION } from './capture.js';
 import { createReplicationEngine } from './replication.js';
@@ -2787,6 +2789,99 @@ export function openStore(model, options) {
             return Object.freeze(out);
           };
 
+          // ————— SQL the store did not plan: trusted SQL and relational writes —————
+          /** The entity a physical table belongs to, by the dialect's own
+           * identifier rules (SQLite folds ASCII case; PostgreSQL's quoted
+           * names are exact). @param {string} table */
+          const entityOfTable = (table) => {
+            const same = dialect.name === 'sqlite'
+              ? (/** @type {string} */ a) => a.replace(/[A-Z]/g, (c) => c.toLowerCase()) === table.replace(/[A-Z]/g, (c) => c.toLowerCase())
+              : (/** @type {string} */ a) => a === table;
+            for (const [name, entityMapping] of Object.entries(mapping?.entities ?? {}))
+              if (typeof entityMapping?.table === 'string' && same(entityMapping.table)) return name;
+            return undefined;
+          };
+          /**
+           * The write rules for SQL the store did not plan (D4: ONE function
+           * for `tx.sql` and the relational engine). A relational write
+           * names its table, so a store-only invariant refuses it only when
+           * the table is that invariant's entity's, and session capture
+           * records it like any statement on a store table. Trusted SQL
+           * names none, so it is judged conservatively: any store-only
+           * invariant, any capture. Either refuses while tracked changes
+           * are pending, which a later save would write over what the
+           * statement wrote.
+           * @param {string | undefined} table - the written table, when the statement is structural
+           * @param {any[]} works - the units of work the writing scope writes through
+           */
+          const beforeSqlWrite = (table, works) => {
+            if (table === undefined) {
+              if ([...entities.values()].some((e) => e.invariants.some((r) => r.enforcement === 'store')))
+                throw new DbRuntimeError('JD2095', 'trusted SQL cannot bypass store-only invariants');
+              if (capture !== null) throw new DbRuntimeError('JD0051', 'trusted SQL writes cannot guarantee complete live/capture/replication coverage');
+            }
+            else {
+              if (readOnly) throw new DbRuntimeError('JD2095', 'this store grants no SQL write authority');
+              const owner = entityOfTable(table);
+              if (owner !== undefined && entities.get(owner)?.invariants.some((r) => r.enforcement === 'store')) {
+                throw new DbRuntimeError('JD2095', `a relational write to '${table}' cannot bypass the store-only `
+                  + `invariants of entity '${owner}': write it through the entity`);
+              }
+              if (capture !== null && capture.mode === 'journal') {
+                throw new DbRuntimeError('JD0051', 'journal capture records only the store\'s own writers, which read '
+                  + 'the before and after images a relational write does not have: use session capture');
+              }
+            }
+            for (const unit of works) unit.tracker?.assertSqlWritable();
+          };
+          /** What such a write owes the trackers it may have changed.
+           * @param {any[]} works */
+          const afterSqlWrite = (works) => {
+            for (const unit of works) unit.tracker?.invalidate();
+          };
+
+          // ————— the relational engine, bound to the store (MODEL-FORMAT §5.3) —————
+          // One engine (relational.js) over the store's admission: here the
+          // root's and the synchronous root's, and in each transaction view
+          // the exact scope's. Their reusable statements share one bounded
+          // cache, as the query cache is bounded: a document with externals
+          // plans one text for every binding, and a worker host caps the
+          // statements it keeps.
+          const relationalStatements = createBoundedCache(options.statementCacheBound ?? 128);
+          /** @type {Map<string, boolean>} */
+          const rowidTables = new Map();
+          /** @param {any} where @param {string} sql @param {any} [metadata] */
+          const prepareRelational = (where, sql, metadata) => {
+            const key = `${metadata?.readOnly === true ? 'read' : 'write'}\u0000${sql}`;
+            const cached = relationalStatements.get(key);
+            if (cached !== undefined) return cached;
+            const made = where.prepare(sql, metadata);
+            relationalStatements.set(key, made);
+            // a refused preparation is not a statement to keep
+            if (isThenable(made)) made.then(undefined, () => { if (relationalStatements.get(key) === made) relationalStatements.delete(key); });
+            return made;
+          };
+          const relationalBase = { dialect, connection: opened, prepare: prepareRelational, rowidTables };
+          // the root: reads under the gate, prepared read-only so a pool
+          // reader can serve them; a cursor admitted per pull; a write in a
+          // top-level transaction of its own that takes the writer lock
+          const rootRelational = relationalEngine({
+            ...relationalBase,
+            // the gate refuses a closed store (JD2063)
+            available: () => {},
+            read: (run, signal) => gated(() => run(connection), 'a root relational read', signal),
+            cursor: (spec) => admitRootCursor(createCursor({ ...spec, open: () => spec.open(connection) }),
+              spec.signal, 'a root relational cursor pull'),
+            write: (run, signal) => {
+              if (strictTransactions && opened.mustQueue)
+                throw contended("{ transactions: 'strict' } refuses to queue behind it");
+              return topLevelTransaction(() => run(connection), signal, undefined, 'immediate');
+            },
+            beforeWrite: (table) => beforeSqlWrite(table, [rootWork]),
+            afterWrite: () => afterSqlWrite([rootWork]),
+            lift: true,
+          });
+
           /** @type {Map<string, any>} */
           const gatedCollections = new Map();
           /** @type {Map<string, any>} */
@@ -2794,6 +2889,8 @@ export function openStore(model, options) {
 
           const store = {
             capabilities,
+            // native statements over any table (MODEL-FORMAT §5.3)
+            relational: rootRelational,
             // the ROOT's bookkeeping, always: an open own-unit
             // transaction changes what its own view reports, never this
             stats: () => ({
@@ -3338,24 +3435,41 @@ export function openStore(model, options) {
               });
             });
 
+            // the units of work this scope's SQL may change: its own, and
+            // the root's when the transaction has one of its own
+            const sqlWorks = rootWork === myWork ? [myWork] : [myWork, rootWork];
             const sql = trustedSql({ connection, readOnly, requireScope: () => requireScope(identity),
               track: (/** @type {() => any} */ fn) => runScoped(identity, fn),
-              beforeWrite: () => {
-                if ([...entities.values()].some((e) => e.invariants.some((r) => r.enforcement === 'store')))
-                  throw new DbRuntimeError('JD2095', 'trusted SQL cannot bypass store-only invariants');
-                if (capture !== null) throw new DbRuntimeError('JD0051', 'trusted SQL writes cannot guarantee complete live/capture/replication coverage');
-                myWork.tracker?.assertSqlWritable();
-                if (rootWork !== myWork) rootWork.tracker?.assertSqlWritable();
-              },
-              afterWrite: () => {
-                myWork.tracker?.invalidate();
-                if (rootWork !== myWork) rootWork.tracker?.invalidate();
-              },
+              beforeWrite: () => beforeSqlWrite(undefined, sqlWorks),
+              afterWrite: () => afterSqlWrite(sqlWorks),
             });
+            // the relational engine as THIS scope's owner: every call checks
+            // the exact scope and counts in flight for a hold limit, a write
+            // is a savepoint of the transaction, and a cursor is the scope's
+            const relationalScope = {
+              ...relationalBase,
+              available: () => requireScope(identity),
+              read: (/** @type {any} */ run) => runScoped(identity, () => run(connection)),
+              write: (/** @type {any} */ run) => runScoped(identity, () => connection.transaction(() => run(connection))),
+              beforeWrite: (/** @type {string} */ table) => beforeSqlWrite(table, sqlWorks),
+              afterWrite: () => afterSqlWrite(sqlWorks),
+            };
+            /** @type {any} */
+            let scopeRelational;
+            /** @type {any} */
+            let scopeSyncRelational;
+            const relationalOfScope = () => (scopeRelational ??= relationalEngine({ ...relationalScope, lift: true,
+              cursor: (/** @type {any} */ spec) => scopedCursor(identity,
+                () => createCursor({ ...spec, open: () => spec.open(connection) })) }));
+            const syncRelationalOfScope = () => (scopeSyncRelational ??= relationalEngine({ ...relationalScope,
+              cursor: (/** @type {any} */ spec) => admitSyncCursor(createSyncCursor({ ...spec, open: () => spec.open(connection) }),
+                (/** @type {() => any} */ fn) => runScoped(identity, fn)) }));
             const members = {
               // 1-based: the attempt of a retried transaction this callback runs in
               attempt: override(myRoot?.attempt ?? 1),
               sql: override(sql),
+              // built on first use: most transactions never reach for it
+              relational: { get: relationalOfScope, enumerable: true, configurable: false },
               transaction: override((/** @type {any} */ fn, /** @type {any} */ transactionOptions) =>
                 lift(() => nested(fn, transactionOptions))()),
               collection: override(collectionFor),
@@ -3471,6 +3585,7 @@ export function openStore(model, options) {
                   return handle;
                 },
                 sql,
+                get relational() { return syncRelationalOfScope(); },
                 attempt: myRoot?.attempt ?? 1,
                 transaction: (fn, transactionOptions) => nested((tx) => synchronousBody(fn, tx),
                   transactionOptions, 'tx.sync.transaction'),
@@ -3534,7 +3649,26 @@ export function openStore(model, options) {
             const gatedSyncCollections = new Map();
             /** @type {Map<string, any>} */
             const gatedSyncEntities = new Map();
+            // the synchronous root: the gate refuses rather than queues, a
+            // cursor takes it per pull, a write is a top-level immediate
+            // transaction that cannot wait for another caller's commit
+            const syncRootRelational = relationalEngine({
+              ...relationalBase,
+              available: () => {},
+              read: (run) => gatedSync(() => run(connection)),
+              cursor: (spec) => admitSyncCursor(createSyncCursor({ ...spec, open: () => spec.open(connection) }), gatedSync),
+              write: (run) => {
+                if (opened.mustQueue) {
+                  throw contended('the synchronous surface answers values, so it cannot '
+                    + 'wait for the commit');
+                }
+                return topLevelTransaction(() => run(connection), undefined, undefined, 'immediate');
+              },
+              beforeWrite: (table) => beforeSqlWrite(table, [rootWork]),
+              afterWrite: () => afterSqlWrite([rootWork]),
+            });
             store.sync = Object.freeze({
+              relational: syncRootRelational,
               collection(name) {
                 let handle = gatedSyncCollections.get(name);
                 if (handle === undefined) {

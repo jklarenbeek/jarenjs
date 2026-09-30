@@ -455,6 +455,9 @@ export const sqliteDialect = createDialect({
       'SELECT compile_options AS name FROM pragma_compile_options',
     tableExists: () =>
       "SELECT name FROM sqlite_schema WHERE type = 'table' AND name = ?",
+    // what a name is — a table, a view — and whether it keeps rowids
+    // (`wr` is 1 for WITHOUT ROWID); bound, so any name reads as data
+    tableKind: () => 'SELECT schema, type, wr FROM pragma_table_list(?)',
     columns: (table) =>
       `SELECT name, type, hidden, pk, "notnull" AS not_null, dflt_value AS default_value `
       + `FROM pragma_table_xinfo(${stringLiteral(table)}) ORDER BY cid`,

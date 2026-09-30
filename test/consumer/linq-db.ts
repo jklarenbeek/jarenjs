@@ -224,6 +224,9 @@ export async function trustedTransactionTypes() {
   await client.transaction(async (tx) => {
     const rows: any[] = await tx.sql.prepare('SELECT ?', { access: 'read' }).all([1]);
     const syncRow: any = tx.sync?.sql.prepare('SELECT ?', { access: 'read' }).get([1]);
+    // the store's relational engine, as this transaction's owner
+    const counted: { n: number } | undefined = await tx.relational.get<{ n: number }>({ from: 'Post', columns: { n: { $sql: 'call', name: 'count', args: [] } } });
+    void counted;
     // @ts-expect-error — transaction control is not an access mode
     tx.sql.prepare('SELECT 1', { access: 'transaction' });
     void [rows, syncRow];

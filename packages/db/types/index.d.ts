@@ -726,6 +726,9 @@ export interface SyncQueryCursor<T = unknown> extends IterableIterator<T> {
 // ————— the store —————
 
 export interface SyncStore {
+  /** Native statements over any table, answering values (MODEL-FORMAT
+   * §5.3): the relational engine under the synchronous gate. */
+  readonly relational: import('./relational.js').SyncStoreRelational;
   /** `T` is the collection's document shape — the model's schema in
    * the consumer's words; the handle's writes take it and reads answer it. */
   collection<T = unknown>(name: string): SyncCollection<T>;
@@ -748,6 +751,10 @@ export interface SyncStore {
 
 export interface Store {
   readonly replication?: Replication;
+  /** Native statements over any table (MODEL-FORMAT §5.3): the relational
+   * engine admitted by the store — at the root through the gate, on a
+   * transaction view as that exact scope. */
+  readonly relational: import('./relational.js').StoreRelational;
   readonly capabilities: StoreCapabilities;
   readonly dialect: Dialect;
   stats(): StoreStats;

@@ -165,3 +165,19 @@ it('a delayed statement preparation cannot execute SQL after its transaction set
   }
   finally { ready.resolve(); await store.close(); }
 });
+
+it('replace( is a function call a read may make; REPLACE INTO and INSERT OR REPLACE stay mutations', async () => {
+  const store = await openStore(model, { driver: nodeDriver() });
+  try {
+    await store.transaction(async (tx) => {
+      const read = tx.sql.prepare("SELECT replace('abc', 'a', 'z') AS s, REPLACE ('xy', 'x', 'w') AS t", { access: 'read' });
+      assert.deepEqual({ ...read.get([]) }, { s: 'zbc', t: 'wy' });
+      read.close();
+      for (const text of ['REPLACE INTO "Item"(id, count, doc) VALUES (?, 1, jsonb(\'{}\'))',
+        'INSERT OR REPLACE INTO "Item"(id, count, doc) VALUES (?, 1, jsonb(\'{}\'))',
+        "UPDATE \"Item\" SET id = replace(id, 'a', 'b')"])
+        assert.throws(() => tx.sql.prepare(text, { access: 'read' }), { code: 'JD2095' }, text);
+    });
+  }
+  finally { await store.close(); }
+});

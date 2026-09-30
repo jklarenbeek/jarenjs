@@ -634,6 +634,24 @@ describe('transaction(): a typed client bound to the transaction', () => {
     await client.close();
   });
 
+  it("carries the store's relational engine, bound to the transaction", async () => {
+    const { client } = await seeded();
+    const { sql } = await import('@jarenjs/db/relational');
+    const zeroed = { from: 'Post', columns: { n: sql.call('count', []) }, where: sql.binary('=', sql.column('stars'), 0) };
+    await assert.rejects(client.transaction(async (tx) => {
+      await tx.relational.execute({ op: 'update', table: 'Post', set: { stars: 0 }, where: 1 });
+      throw new Error('undo');
+    }), /undo/);
+    assert.strictEqual((await client.store.relational.get(zeroed)).n, 0, 'rolled back with its transaction');
+    const inside = await client.transaction(async (tx) => {
+      await tx.relational.execute({ op: 'update', table: 'Post', set: { stars: 0 }, where: 1 });
+      return (await tx.relational.get(zeroed)).n;
+    });
+    assert.strictEqual(inside, 4);
+    assert.strictEqual(await client.entities.Post.where((p) => p.stars.eq(0)).count(), 4, 'the entities read what it wrote');
+    await client.close();
+  });
+
   it('registers a live query from inside the transaction, and it outlives it', async () => {
     const { client, ada } = await seeded({ capture: true });
     const live = await client.transaction(async (tx) =>

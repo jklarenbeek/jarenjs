@@ -125,3 +125,65 @@ it('catalog-driven native reads include framework tables without adopting their 
   assert.ok(tables.some((table) => table.name === '_jaren_jobs'));
   assert.equal(r.get({ from: '_jaren_jobs', columns: { text: c('payload') }, where: b('=', call('typeof', [c('payload')]), 'text') }).text, 'framework text');
 }));
+
+it('execute reports lastInsertRowid only for an insert that inserted a row of a rowid table', async () => fixture((db, r) => {
+  db.exec('CREATE TABLE a(id INTEGER PRIMARY KEY, name TEXT UNIQUE); CREATE TABLE b(id INTEGER PRIMARY KEY, x);'
+    + ' CREATE TABLE w(k TEXT PRIMARY KEY, v) WITHOUT ROWID; CREATE TABLE copies(id INTEGER PRIMARY KEY, x)');
+  const has = (/** @type {any} */ result) => Object.hasOwn(result, 'lastInsertRowid');
+  r.execute({ op: 'insert', table: 'b', values: { x: 1 } });
+  assert.equal(Number(r.execute({ op: 'insert', table: 'b', values: { x: 2 } }).lastInsertRowid), 2);
+  assert.equal(Number(r.execute({ op: 'insert', table: 'a', values: { name: 'n' } }).lastInsertRowid), 1);
+  // an ignored duplicate inserted nothing: the connection's last rowid is another row's
+  const ignored = r.execute({ op: 'insert', table: 'a', values: { name: 'n' }, ignore: true });
+  assert.equal(ignored.affected, 0);
+  assert.equal(has(ignored), false, 'no rowid for an insert that inserted nothing');
+  r.execute({ op: 'insert', table: 'b', values: { x: 3 } });
+  // an upsert that updated reports the changed row as affected, and SQLite cannot say whether it inserted
+  const upserted = r.execute({ op: 'insert', table: 'a', values: { name: 'n' },
+    conflict: { target: ['name'], action: 'update', set: { name: c('name', 'excluded') } } });
+  assert.equal(upserted.affected, 1);
+  assert.equal(has(upserted), false, "an upsert's row may have been updated: returning names it");
+  // a WITHOUT ROWID table has no rowid to report
+  const keyed = r.execute({ op: 'insert', table: 'w', values: { k: 'k', v: 1 } });
+  assert.equal(keyed.affected, 1);
+  assert.equal(has(keyed), false, 'a WITHOUT ROWID insert reports no rowid');
+  for (const document of [{ op: 'update', table: 'a', set: { name: 'm' }, where: 1 }, { op: 'delete', table: 'b', where: b('=', c('id'), 3) }])
+    assert.equal(has(r.execute(/** @type {any} */ (document))), false, `${document.op} reports no rowid`);
+  const copied = r.execute({ op: 'insert', table: 'copies', columns: ['x'], source: { from: 'b', columns: { x: c('x') }, orderBy: [{ by: c('id') }] } });
+  assert.equal(copied.affected, 2);
+  assert.equal(Number(copied.lastInsertRowid), 2, 'an insert-select reports its last inserted row');
+}));
+
+it('a synchronous engine refuses to enter another caller\'s transaction (JD0012) and refuses once disposed (JD2063)', async () => fixture(async (db, r) => {
+  db.exec('CREATE TABLE t(id INTEGER PRIMARY KEY, n INTEGER); INSERT INTO t VALUES (1, 1)');
+  /** @type {(v?: any) => void} */
+  let release = () => {};
+  const gate = new Promise((resolve) => { release = resolve; });
+  const holding = db.transaction(async () => { await gate; });
+  try {
+    for (const call of [() => r.all({ from: 't' }), () => r.get({ from: 't' }), () => r.iterate({ from: 't' }).next(),
+      () => r.execute({ op: 'update', table: 't', set: { n: 2 }, where: 1 })]) {
+      assert.throws(call, (/** @type {any} */ error) => error.code === 'JD0012', 'contention is the store\'s code, not an invalid document');
+    }
+  }
+  finally {
+    release();
+    await holding;
+  }
+  assert.equal(r.get({ from: 't', columns: { n: c('n') } }).n, 1);
+  r.dispose();
+  for (const call of [() => r.all({ from: 't' }), () => r.execute({ op: 'delete', table: 't', where: 1 })])
+    assert.throws(call, (/** @type {any} */ error) => error.code === 'JD2063' && /disposed/.test(error.message));
+}));
+
+it('driver failures are classified on every path: execute, reads and cursor pulls', async () => fixture((db, r) => {
+  db.exec('CREATE TABLE t(id INTEGER PRIMARY KEY, n INTEGER CHECK (n >= 0)); INSERT INTO t VALUES (1, 1)');
+  const classified = (/** @type {string} */ klass, /** @type {RegExp} */ text) => (/** @type {any} */ error) =>
+    error.code === 'JD2005' && error.class === klass && text.test(error.message) && error.cause !== undefined;
+  assert.throws(() => r.execute({ op: 'insert', table: 't', values: { id: 1, n: 2 } }), classified('constraint', /UNIQUE/));
+  assert.throws(() => r.execute({ op: 'update', table: 't', set: { n: -1 }, where: 1 }), classified('constraint', /CHECK/));
+  const malformed = { columns: { x: call('json_extract', ['not json', '$.a']) } };
+  assert.throws(() => r.all(malformed), classified('error', /malformed JSON/));
+  assert.throws(() => r.get(malformed), classified('error', /malformed JSON/));
+  assert.throws(() => r.iterate(malformed).next(), classified('error', /malformed JSON/));
+}));

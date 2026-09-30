@@ -1,5 +1,5 @@
 /** Structural authoring with explicit native dialect semantics. */
-import type { Dialect, QueryCursor, PhysicalMigrationDocument, PostgresPhysicalMigrationTarget } from './index.js';
+import type { Dialect, QueryCursor, SyncQueryCursor, PhysicalMigrationDocument, PostgresPhysicalMigrationTarget } from './index.js';
 export type SqlValue = string | number | bigint | boolean | Uint8Array | null;
 export type SqlInput = SqlValue | SqlExpression;
 export type SqlOperator = '=' | '<>' | '<' | '<=' | '>' | '>=' | 'IS' | 'IS NOT'
@@ -50,6 +50,10 @@ export type SqlMutation = { readonly table: string; readonly returning?: SqlProj
     { readonly values: Readonly<Record<string, SqlInput>> } | { readonly source: SqlSelect; readonly columns: readonly string[] })));
 export interface RelationalOptions { readonly externals?: Readonly<Record<string, SqlValue>>; readonly signal?: AbortSignal }
 export interface RelationalPlan { readonly sql: string; readonly params: readonly SqlValue[]; readonly access: 'read' | 'write' }
+/** `lastInsertRowid` is present only after an insert that inserted a row of
+ * a rowid table on SQLite: never after an insert that inserted nothing, an
+ * upsert (it may have updated — `returning` names the row), an insert into
+ * a WITHOUT ROWID table, or on PostgreSQL. */
 export interface RelationalMutationResult { readonly affected: number; readonly rows?: readonly Record<string, unknown>[]; readonly lastInsertRowid?: number | bigint }
 export interface RelationalEngine {
   plan(document: SqlSelect | SqlMutation, options?: RelationalOptions): RelationalPlan;
@@ -66,6 +70,36 @@ export interface AsyncRelationalEngine {
   iterate<T = Record<string, unknown>>(document: SqlSelect, options?: RelationalOptions): QueryCursor<T>;
   execute(document: SqlMutation, options?: RelationalOptions): Promise<RelationalMutationResult>;
   dispose(): Promise<void>;
+}
+/**
+ * The relational engine bound to a Store (MODEL-FORMAT §5.3): the same
+ * documents, results and codes as {@link relational}, admitted by the
+ * Store. At the root (`store.relational`) a read takes the gate, prepared
+ * read-only so a pool reader can serve it; a cursor is admitted per pull;
+ * a write runs in a top-level transaction of its own that takes the writer
+ * lock. On a transaction view (`tx.relational`) every call runs as that
+ * exact scope (`JD2070` once it settled, `JD2098` after a hold limit) and a
+ * write is a savepoint of the transaction. A write is refused while
+ * tracked changes are pending, when its table belongs to an entity with a
+ * store-only invariant (`JD2095`), and under journal capture (`JD0051`);
+ * session capture records it. The Store owns its lifetime: there is no
+ * `dispose`.
+ */
+export interface StoreRelational {
+  plan(document: SqlSelect | SqlMutation, options?: RelationalOptions): RelationalPlan;
+  all<T = Record<string, unknown>>(document: SqlSelect, options?: RelationalOptions): Promise<T[]>;
+  get<T = Record<string, unknown>>(document: SqlSelect, options?: RelationalOptions): Promise<T | undefined>;
+  iterate<T = Record<string, unknown>>(document: SqlSelect, options?: RelationalOptions): QueryCursor<T>;
+  execute(document: SqlMutation, options?: RelationalOptions): Promise<RelationalMutationResult>;
+}
+/** The synchronous twin of {@link StoreRelational} (`store.sync.relational`,
+ * `tx.sync.relational`): values, and a contended call is `JD0012`. */
+export interface SyncStoreRelational {
+  plan(document: SqlSelect | SqlMutation, options?: RelationalOptions): RelationalPlan;
+  all<T = Record<string, unknown>>(document: SqlSelect, options?: RelationalOptions): T[];
+  get<T = Record<string, unknown>>(document: SqlSelect, options?: RelationalOptions): T | undefined;
+  iterate<T = Record<string, unknown>>(document: SqlSelect, options?: RelationalOptions): SyncQueryCursor<T>;
+  execute(document: SqlMutation, options?: RelationalOptions): RelationalMutationResult;
 }
 export declare const sql: {
   column(name: string, table?: string): SqlExpression;

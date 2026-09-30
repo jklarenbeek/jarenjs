@@ -4,6 +4,23 @@ import { sqlTokens } from './dialects/check-read.js';
 import { chain, attempt } from './driver.js';
 import { DbRuntimeError, wrapDriverError } from './errors.js';
 
+/**
+ * Whether a statement's tokens write: `INSERT`, `UPDATE`, `DELETE`, or
+ * `REPLACE` as a statement (`REPLACE INTO`, `INSERT OR REPLACE`). A
+ * `REPLACE` immediately followed by `(` is the string function, which a
+ * read may call.
+ * @param {{ kind: string, value: string }[]} tokens
+ * @returns {boolean}
+ */
+export function writesRows(tokens) {
+  return tokens.some((token, i) => {
+    if (token.kind !== 'word') return false;
+    const word = token.value.toUpperCase();
+    if (word === 'REPLACE') return !(tokens[i + 1]?.kind === 'symbol' && tokens[i + 1].value === '(');
+    return word === 'INSERT' || word === 'UPDATE' || word === 'DELETE';
+  });
+}
+
 /** @param {any} context @returns {any} a scoped SQL capability */
 export function trustedSql({ connection, requireScope, beforeWrite, afterWrite, readOnly, track = (fn) => fn() }) {
   return Object.freeze({
@@ -20,7 +37,7 @@ export function trustedSql({ connection, requireScope, beforeWrite, afterWrite, 
       if (tokens.some((t, i) => t.value === ';' && t.kind === 'symbol' && i !== tokens.length - 1)
         || words.some((w) => /^(?:BEGIN|COMMIT|ROLLBACK|SAVEPOINT|RELEASE|ATTACH|DETACH|PRAGMA|CREATE|ALTER|DROP|VACUUM)$/.test(w))) refuse('SQL cannot change transaction ownership, schema or connection configuration');
       const writing = options.access === 'write';
-      if (!writing && words.some((w) => ['INSERT', 'UPDATE', 'DELETE', 'REPLACE'].includes(w))) refuse('a mutation requires write access');
+      if (!writing && writesRows(tokens)) refuse('a mutation requires write access');
       if (writing && readOnly) refuse('this store grants no SQL write authority');
       if (options.affects !== undefined && (!Array.isArray(options.affects) || options.affects.some((v) => typeof v !== 'string'))) refuse('affects is an array of entity names');
       let closed = false;

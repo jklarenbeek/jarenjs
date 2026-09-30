@@ -1608,6 +1608,75 @@ RENAME TABLE or DROP TABLE against source drift. Identity-changing policies stay
 explicit; ordinary rebuilds retain key and row preservation. Mutation statements
 are reused by SQL without retaining previous payload-bearing documents.
 
+A store carries the same engine as `store.relational`, admitted like every
+other store operation ([MODEL-FORMAT §5.3](docs/MODEL-FORMAT.md#53-relational-statements-through-the-store)):
+root reads take the gate and a pool reader serves them, a root cursor is
+admitted per pull, a root write is a top-level immediate transaction of its
+own, and `tx.relational` runs as the transaction's own scope — so an entity
+write and a native statement commit or roll back together. Every value printed
+below is what the example answers when it runs:
+
+```js
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { openStore } from '@jarenjs/db';
+import { nodeDriver } from '@jarenjs/db/node';
+import { sql, defineTable, planTable } from '@jarenjs/db/relational';
+
+// an existing file whose application table the model does not declare
+const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'shop-'));
+const file = path.join(dir, 'shop.db');
+const existing = await nodeDriver().open(file);
+const stock = defineTable({ name: 'stock', primaryKey: ['sku'], columns: [
+  { name: 'sku', type: 'TEXT', nullable: false },
+  { name: 'qty', type: 'INTEGER', nullable: false, default: 0 },
+] });
+for (const statement of planTable(stock).createSql) existing.exec(statement);
+existing.close();
+
+const store = await openStore({
+  $model: '0.1',
+  entities: {
+    Order: { schema: { type: 'object', properties: {
+      id: { type: 'string', 'x-entity': { key: true } }, sku: { type: 'string' }, qty: { type: 'integer' },
+    } } },
+  },
+}, { driver: nodeDriver(), path: file });
+
+await store.relational.execute({ op: 'insert', table: 'stock', values: { sku: 'a-1', qty: 5 } });
+const take = {
+  op: 'update', table: 'stock',
+  set: { qty: sql.binary('-', sql.column('qty'), sql.param('n')) },
+  where: sql.binary('AND', sql.binary('=', sql.column('sku'), sql.param('sku')),
+    sql.binary('>=', sql.column('qty'), sql.param('n'))),
+};
+// the order and the stock move in one transaction
+const taken = await store.transaction(async (tx) => {
+  await tx.entity('Order').create({ id: 'o-1', sku: 'a-1', qty: 2 });
+  return (await tx.relational.execute(take, { externals: { n: 2, sku: 'a-1' } })).affected;
+});
+// → 1
+// and roll back together: no stock for nine, so the order goes too
+const refused = await store.transaction(async (tx) => {
+  await tx.entity('Order').create({ id: 'o-2', sku: 'a-1', qty: 9 });
+  const { affected } = await tx.relational.execute(take, { externals: { n: 9, sku: 'a-1' } });
+  if (affected === 0) throw new Error('out of stock');
+}).catch((error) => error.message);
+// → 'out of stock'
+const { qty } = await store.relational.get({ from: 'stock', columns: { qty: sql.column('qty') } });
+// → 3
+const orders = (await store.entity('Order').load()).map((order) => order.id);
+// → [ 'o-1' ]
+
+await store.close();
+fs.rmSync(dir, { recursive: true, force: true });
+```
+
+`StoreRelational` types the engine — `get<T>`/`all<T>` name the row, and the
+Store owns its lifetime, so it has no `dispose`; `store.sync.relational` and
+`tx.sync.relational` answer values on a synchronous driver.
+
 `@jarenjs/db/node-process` adds supervised native execution with finite owner
 admission, caller deadlines, generation fencing and separate process-exit and
 transaction-fate observations. See [execution hosts](docs/HOSTS.md#supervised-node-processes)

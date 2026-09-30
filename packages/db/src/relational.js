@@ -1,10 +1,10 @@
 //@ts-check
 /** Structural native SQL over an existing connection. One emitter owns the
  * expression grammar; the dialect declares its operators, types and functions. */
-import { DbCompileError } from './errors.js';
+import { DbCompileError, DbRuntimeError, wrapDriverError } from './errors.js';
 import { sqliteDialect } from './dialects/sqlite.js';
 import { sqliteRelationalVocabulary } from './dialects/sqlite-relational.js';
-import { chain } from './driver.js';
+import { chain, attempt } from './driver.js';
 import { createCursor, createSyncCursor, admitCursor, rowClassOf } from './cursor.js';
 
 /** @typedef {{ sql: string, params: any[], access: 'read'|'write' }} RelationalPlan */
@@ -281,6 +281,114 @@ export function planRelational(document, options) {
     params: emitter.params, access: writing ? 'write' : 'read' };
 }
 
+/**
+ * Where each relational operation runs, and the rules around its writes.
+ * The engine owns planning, emission, execution, the result shape and the
+ * classification of every driver failure; a policy owns only admission —
+ * the connection's own for {@link relational}, the Store's root,
+ * synchronous and transaction policies for the Store-bound engines.
+ * @typedef {object} RelationalPolicy
+ * @property {any} dialect - what documents are planned for
+ * @property {any} connection - whose capabilities classify a cursor (`rowClassOf`)
+ * @property {() => void} available - throws when the engine may not run
+ * @property {(run: (scope: any) => any, signal?: AbortSignal) => any} read -
+ *   runs a read where it is admitted; `run` prepares on the scope it is given
+ * @property {(spec: any) => any} cursor - builds and admits a cursor; the
+ *   spec's `open(scope)` prepares on the scope it is given
+ * @property {(run: (scope: any) => any, signal?: AbortSignal) => any} write -
+ *   runs a write inside a transaction (its own, or a savepoint of the one open)
+ * @property {(table: string) => void} [beforeWrite] - the write rules,
+ *   checked inside the write's transaction before its statement
+ * @property {(table: string) => void} [afterWrite] - bookkeeping once the
+ *   statement ran (tracked entities it may have changed)
+ * @property {boolean} [lift] - answer `all`/`get`/`execute` refusals as
+ *   rejections, as every asynchronous Store member does
+ * @property {(scope: any, sql: string, metadata?: any) => any} [prepare] -
+ *   how a reusable statement is prepared: the Store shares one bounded cache
+ *   across its engines; by default every call prepares its own
+ * @property {Map<string, boolean>} [rowidTables] - the tables known to keep
+ *   (or not keep) rowids, shared by the engines of one Store
+ */
+
+/** A driver failure met by a relational operation, classified — never raw. */
+const classified = (error) => wrapDriverError(error, { docPath: '/relational' });
+
+/**
+ * The one relational engine (D4): every relational surface — a bare
+ * connection's and the Store's — is this engine over an admission policy.
+ * @param {RelationalPolicy} policy
+ */
+export function relationalEngine(policy) {
+  const { dialect } = policy;
+  const planFor = (document, options) => planRelational(document, { ...options, dialect });
+  const readPlan = (document, options) => {
+    policy.available();
+    const plan = planFor(document, options);
+    if (plan.access !== 'read') fail('a read method requires a select document');
+    return plan;
+  };
+  const prepare = policy.prepare ?? ((scope, sql, metadata) => scope.prepare(sql, metadata));
+  const answer = policy.lift === true
+    ? (fn) => { try { return Promise.resolve(fn()); } catch (error) { return Promise.reject(error); } }
+    : (fn) => fn();
+  /**
+   * Whether a table keeps rowids. SQLite's last insert rowid belongs to the
+   * CONNECTION, so after an insert into a WITHOUT ROWID table it is some
+   * other row's; read once per table from the catalog.
+   * @type {Map<string, boolean>}
+   */
+  const rowidTables = policy.rowidTables ?? new Map();
+  const keepsRowids = (scope, table) => {
+    const known = rowidTables.get(table);
+    if (known !== undefined) return known;
+    return chain(prepare(scope, dialect.introspect.tableKind()), (statement) =>
+      chain(statement.all([table]), (rows) => {
+        const row = rows.find((r) => r.schema === 'temp') ?? rows.find((r) => r.schema === 'main') ?? rows[0];
+        const rowid = row !== undefined && row.type === 'table' && Number(row.wr) === 0;
+        rowidTables.set(table, rowid);
+        return rowid;
+      }));
+  };
+  const selected = (method, document, options) => {
+    const plan = readPlan(document, options);
+    return policy.read((scope) => attempt(() =>
+      chain(prepare(scope, plan.sql, { readOnly: true }), (statement) => statement[method](plan.params)), classified),
+    options?.signal);
+  };
+  return Object.freeze({
+    plan: planFor,
+    all: (document, options = undefined) => answer(() => selected('all', document, options)),
+    get: (document, options = undefined) => answer(() => selected('get', document, options)),
+    iterate(document, options = undefined) {
+      const plan = readPlan(document, options);
+      return policy.cursor({ ...rowClassOf(policy.connection), signal: options?.signal, wrap: classified,
+        open: (scope) => chain(scope.prepare(plan.sql, { readOnly: true, ephemeral: true }), (statement) => statement.iterate(plan.params)),
+        items: (row) => [row],
+      });
+    },
+    execute: (document, options = undefined) => answer(() => {
+      policy.available();
+      const plan = planFor(document, options);
+      if (plan.access !== 'write') fail('execute requires a mutation document');
+      const { table } = document;
+      // only an insert that inserted has a rowid of its own, and an upsert
+      // cannot say whether it inserted or updated (`returning` names its row)
+      const insertion = document.op === 'insert' && document.conflict?.action !== 'update' && dialect.name === 'sqlite';
+      return policy.write((scope) => attempt(() => {
+        policy.beforeWrite?.(table);
+        return chain(prepare(scope, plan.sql), (statement) => (document.returning !== undefined
+          ? chain(statement.all(plan.params), (rows) => { policy.afterWrite?.(table); return { affected: rows.length, rows }; })
+          : chain(statement.run(plan.params), (result) => {
+            policy.afterWrite?.(table);
+            const affected = Number(result.changes);
+            if (!insertion || affected === 0 || result.lastInsertRowid === undefined) return { affected };
+            return chain(keepsRowids(scope, table), (rowid) => (rowid ? { affected, lastInsertRowid: result.lastInsertRowid } : { affected }));
+          })));
+      }, classified), options?.signal);
+    }),
+  });
+}
+
 /** Native operations without a model store. The caller owns the connection;
  * dispose drains this engine's cursors. Async operations share its admission.
  * @param {any} connection */
@@ -289,55 +397,36 @@ export function relational(connection) {
   if (connection.dialect.name === 'sqlite' && !connection.synchronous) fail('relational operations require a synchronous SQLite connection');
   let disposed = false;
   const owners = new Set();
-  const available = () => { if (disposed) fail('relational engine is disposed'); };
-  const planFor = (document, options) => planRelational(document, { ...options, dialect: connection.dialect });
-  const admit = (fn, what, signal) => connection.exclusively ? connection.exclusively(fn, what, signal) : fn(connection);
-  const read = (document, options) => {
-    available();
-    if (connection.synchronous && connection.mustQueue) fail('synchronous reads cannot enter another transaction');
-    const plan = planFor(document, options);
-    if (plan.access !== 'read') fail('a read method requires a select document');
-    return plan;
+  const available = () => {
+    if (disposed) throw new DbRuntimeError('JD2063', 'the relational engine is disposed');
   };
-  return Object.freeze({
-    plan: planFor,
-    all(document, options = undefined) {
-      const plan = read(document, options);
-      return admit((scope) => chain(scope.prepare(plan.sql, { readOnly: true }), (s) => s.all(plan.params)), 'relational read', options?.signal);
-    },
-    get(document, options = undefined) {
-      const plan = read(document, options);
-      return admit((scope) => chain(scope.prepare(plan.sql, { readOnly: true }), (s) => s.get(plan.params)), 'relational read', options?.signal);
-    },
-    iterate(document, options = undefined) {
-      const plan = read(document, options);
-      if (!connection.synchronous) {
-        const cursor = createCursor({ ...rowClassOf(connection), signal: options?.signal,
-          open: () => { available(); return chain(connection.prepare(plan.sql, { readOnly: true, ephemeral: true }), (s) => s.iterate(plan.params)); },
-          items: (row) => [row],
-        });
-        return admitCursor(cursor, (fn, what, signal) => admit(() => fn(), what, signal), options?.signal,
-          'relational cursor', { owners, max: connection.capabilities.postgres.maxCursors,
-            holdMs: connection.capabilities.postgres.cursorLifetimeMs });
+  // a synchronous connection answers values, so it cannot wait for another
+  // caller's open transaction: that is contention, refused as the Store refuses it
+  const unqueued = (what) => {
+    if (connection.synchronous && connection.mustQueue) {
+      throw new DbCompileError('JD0012', `another caller's transaction owns this connection and ${what} `
+        + 'answers values, so it cannot wait for the commit; run it inside that transaction');
+    }
+  };
+  const admit = (fn, what, signal) => (connection.exclusively ? connection.exclusively(fn, what, signal) : fn(connection));
+  const engine = relationalEngine({
+    dialect: connection.dialect,
+    connection,
+    available,
+    read: (run, signal) => { unqueued('a synchronous read'); return admit(run, 'relational read', signal); },
+    cursor: (spec) => {
+      if (connection.synchronous) {
+        return createSyncCursor({ ...spec, open: () => { available(); unqueued('synchronous iteration'); return spec.open(connection); } });
       }
-      return createSyncCursor({ ...rowClassOf(connection), signal: options?.signal,
-        open: () => {
-          available();
-          if (connection.mustQueue) fail('synchronous iteration cannot enter another transaction');
-          return chain(connection.prepare(plan.sql, { readOnly: true, ephemeral: true }), (statement) => statement.iterate(plan.params));
-        },
-        items: (row) => [row],
-      });
+      const cursor = createCursor({ ...spec, open: () => { available(); return spec.open(connection); } });
+      return admitCursor(cursor, (fn, what, signal) => admit(() => fn(), what, signal), spec.signal,
+        'relational cursor', { owners, max: connection.capabilities.postgres.maxCursors,
+          holdMs: connection.capabilities.postgres.cursorLifetimeMs });
     },
-    execute(document, options = undefined) {
-      available();
-      if (connection.synchronous && connection.mustQueue) fail('synchronous mutation cannot wait for another transaction');
-      const plan = planFor(document, options);
-      if (plan.access !== 'write') fail('execute requires a mutation document');
-      return connection.transaction((scope) => chain(scope.prepare(plan.sql), (s) =>
-        document.returning !== undefined ? chain(s.all(plan.params), (rows) => ({ affected: rows.length, rows }))
-          : chain(s.run(plan.params), (result) => ({ affected: Number(result.changes), lastInsertRowid: result.lastInsertRowid }))), options?.signal);
-    },
+    write: (run, signal) => { unqueued('a synchronous mutation'); return connection.transaction(run, signal); },
+  });
+  return Object.freeze({
+    ...engine,
     dispose() { disposed = true; return connection.synchronous ? undefined : Promise.all([...owners].map((cursor) => cursor.return())).then(() => undefined); },
   });
 }
