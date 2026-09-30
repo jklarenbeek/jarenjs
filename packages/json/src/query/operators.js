@@ -890,8 +890,8 @@ function vectorArg(v, docPath) {
 // is `JQ2001` against the operand that carried it. An as-of row with no
 // match is neither: it is `right: null`, which is an answer.
 //
-// The instants in and out are epoch milliseconds, because that is what
-// D3 makes canonical and what an indexed column stores. `$epoch` and
+// The instants in and out are epoch milliseconds, because that is the
+// canonical instant and what an indexed column stores. `$epoch` and
 // `$datetime` are the two conversions, and they already exist.
 
 /** The default clock: UTC, which needs no context at all. */

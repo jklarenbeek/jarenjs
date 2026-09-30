@@ -14,7 +14,7 @@
  * from `policy.task` through `createContractEffect` — but the generator
  * derives the document's state-side guards from it exactly as it
  * derives the document's shape from `kind`, so that the slot and the
- * effect tell the same story in every mode (D10): an `exhaust`
+ * effect tell the same story in every mode: an `exhaust`
  * operation's `start` is a no-op in state while its slot is `loading`
  * (the effect would ignore the duplicate start; state decides first, so
  * the one completion that arrives carries the current id and lands).
@@ -76,7 +76,7 @@ import { ContractHostError } from '../errors.js';
 /** `statePath`: identifier-safe segments only, so it maps to a JSONPath without quoting. */
 const STATE_PATH = /^(\/[A-Za-z_][A-Za-z0-9_]*)+$/;
 
-/** The D6 error object as a schema: what a failed outcome puts in `error`. */
+/** The outcome error object as a schema: what a failed outcome puts in `error`. */
 const ERROR_SCHEMA = Object.freeze({
   type: 'object',
   required: ['code', 'message', 'status', 'details', 'retryable'],

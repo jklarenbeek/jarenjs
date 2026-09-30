@@ -1,7 +1,7 @@
 //@ts-check
 /**
  * @file The local binding: client and server in one object over the
- * same pipeline as HTTP, with no wire. Outcomes carry the fixed D6
+ * same pipeline as HTTP, with no wire. Outcomes carry the fixed
  * members — a declared failure is `kind: "failure"` with `status: null`
  * PRESENT (this binding carries no statuses and never omits the
  * member), a handler fault of any class is `kind: "contract"` `JC2070`
@@ -28,7 +28,7 @@ const PRODUCT = { id: 1, name: 'x', price: 1 };
 const SAVE = { id: 1, revision: 2, product: PRODUCT };
 
 /**
- * Every outcome's error and meta carry exactly the D6 members, none
+ * Every outcome's error and meta carry exactly the fixed members, none
  * `undefined` — the 03A invariant every later binding inherits.
  * @param {any} outcome
  */
@@ -82,7 +82,7 @@ describe('openLocalClient — construction', () => {
 });
 
 describe('openLocalClient — outcomes', () => {
-  it('a success validates the output once and lands with value, trace and the D6 meta', async () => {
+  it('a success validates the output once and lands with value, trace and the outcome meta', async () => {
     const client = open({}, { trace: () => 'trace-1' });
     const outcome = /** @type {any} */ (assertShape(await client.invoke('catalog.load', { since: '2026-01-01T00:00:00Z' }, { attempt: 7 })));
     assert.strictEqual(outcome.ok, true);

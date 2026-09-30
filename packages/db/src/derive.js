@@ -20,8 +20,8 @@
  * column is readable without any registration, and bun has no
  * function API — one mapping is the only way every driver agrees.
  *
- * It is also this package's ONLY seam onto `@jarenjs/core/geo` (D1 —
- * one home for spatial arithmetic, grep-proven by test) and onto
+ * It is also this package's ONLY seam onto `@jarenjs/core/geo` (one
+ * home for spatial arithmetic, grep-proven by test) and onto
  * `@jarenjs/core/vector` (the same rule, one home for vector
  * arithmetic): the planner's probe geometry — the box of a literal or
  * bound region, the box of a bounded-distance circle, a cell's
@@ -369,7 +369,7 @@ export function probeCircleBox(position, metres) {
 }
 
 /**
- * A cell and its neighbours, the nine-cell probe D7 requires — a single
+ * A cell and its neighbours, the nine-cell probe proximity requires — a single
  * prefix is bucketing, never proximity.
  * @param {string} cell
  * @returns {string[]} up to nine cells (fewer past a pole)

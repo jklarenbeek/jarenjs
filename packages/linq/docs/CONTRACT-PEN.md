@@ -1083,7 +1083,7 @@ Two files, both compiled by `npm run test:types`:
 | File | What it proves |
 |---|---|
 | `test/consumer/linq-contract-generated.ts` | `toTypeScript`'s own declarations for the three documents `test/linq/contract-corpus.js` emits, produced by `scripts/generate-contract-pen-fixture.js`. `test/linq/contract-pen.test.js` asserts the committed file is exactly what the generator produces today, so it cannot drift |
-| `test/consumer/linq-contract.ts` | for all three corpus contracts and a fourth built in the file, `ContractOf<>`'s `input`, `output` and error codes EQUAL (not merely assignable) to what the projection declares; `Meta`, `WireError`, `Outcome<T>`, `InvokeContext`, `Failure` and `HandlerContext` equal to the projection's rendering of §10.1's fixed D6 shapes; a local round trip; and six negatives |
+| `test/consumer/linq-contract.ts` | for all three corpus contracts and a fourth built in the file, `ContractOf<>`'s `input`, `output` and error codes EQUAL (not merely assignable) to what the projection declares; `Meta`, `WireError`, `Outcome<T>`, `InvokeContext`, `Failure` and `HandlerContext` equal to the projection's rendering of §10.1's fixed outcome shapes; a local round trip; and six negatives |
 
 The six negatives are the list of what the types forbid, each of which
 FAILS the build the day it starts compiling:

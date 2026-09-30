@@ -384,7 +384,7 @@ describe('WKT nesting is bounded, on both entry points alike', () => {
   it('refuses past the bound rather than recursing — no RangeError at any depth', () => {
     // seen red first: before the bound, n = 5000 threw RangeError from
     // both entry points; a hostile string is "not WKT", like any other
-    // malformed text, and the two entry points still agree (D3)
+    // malformed text, and the two entry points still agree
     for (const n of [9, 10, 64, 5000]) {
       assert.strictEqual(isValidWkt(nested(n)), false, `${n} deep is refused`);
       assert.strictEqual(wktToGeoJson(nested(n)), null, `${n} deep parses to nothing`);

@@ -723,7 +723,7 @@ function planBoxPredicate(node, itSlot, shape) {
   // `$bbox-intersects` is EXACT over the four columns — they ARE
   // `B(row)` — and only IMPLIED over an R*Tree, whose 32-bit float
   // coordinates round outward: the stored box is a superset. No false
-  // negatives either way, which is what D8 needs; but a superset does
+  // negatives either way, which is what the pushdown needs; but a superset does
   // not DECIDE, so the exact box test keeps its refinement and
   // `strict: true` is JD0010 where the column mapping ran native
   const exact = construct === '$bbox-intersects' && !conjunct.inexact;
@@ -867,7 +867,7 @@ function planCellPrefix(node, itSlot, shape) {
 }
 
 /**
- * P4, proximity — the nine-cell probe (D7), promoted to a membership
+ * P4, proximity — the nine-cell probe, promoted to a membership
  * test over one column. The single-cell version misses a point ten metres
  * away across a cell edge, so a single prefix is BUCKETING and only the
  * neighbourhood is proximity; this is the shape §8.14 publishes with
@@ -1368,7 +1368,7 @@ function planPredicate(node, itSlot, shape) {
 //
 // The physical feature is one a model already has: a composite index
 // over `[$.series, $.at]`. There is no `derive: 'series'`, no column
-// type and no host function — D9's whole point is that a declared
+// type and no host function — the whole point is that a declared
 // numeric epoch column is already 52× reading the instant back out of
 // the document, so the work here is recognizing which questions that
 // index can answer rather than inventing a place to put time.
@@ -1527,7 +1527,7 @@ function resampleBucket(spec, shape) {
     const valueBad = valueRefusal(value);
     if (valueBad !== null) return { code: valueBad };
   }
-  // D5's shape, exactly: the bucket's start, its reading, and the count
+  // The bucket shape, exactly: the bucket's start, its reading, and the count
   // of SOURCE rows — which is `COUNT(*)` whether or not it is also the
   // answer, because `aggregate: 'count'` returns that same number
   return { bucket: {
@@ -2307,8 +2307,8 @@ function projectionTree(node, itSlot, shape) {
 /**
  * Plan a FLWOR node into a select plan, recording refusals. When a
  * conjunct refuses native translation, the injected `udf` hook may
- * promote it to a deterministic-function predicate instead (the D9
- * hatch — the hook is supplied by the query layer, capability-gated,
+ * promote it to a deterministic-function predicate instead (the
+ * deterministic-function hatch — the hook is supplied by the query layer, capability-gated,
  * and absent means no hatch).
  * @param {any} node
  * @param {any} shape - { collection, schema, columnByCanonical }

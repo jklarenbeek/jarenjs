@@ -182,7 +182,7 @@ const SERIES_KEY = 'sensor-a';
 const GAP_PERIOD = 997;
 const GAP_RUN = 300;
 
-/** What a downsampled line is asked for — D11's default threshold. */
+/** What a downsampled line is asked for — the default threshold. */
 const RENDER_TARGET = 2000;
 
 /**
@@ -378,7 +378,7 @@ function downsampleViolation(result, source, target) {
 /**
  * Replay every case in the committed fixture through the references.
  * The fixture is what a second executor — a query, a database plan, a
- * browser tab — will be held to in a later order, so a run that measured
+ * browser tab — is held to, so a run that measured
  * references which had drifted away from it would be measuring the wrong
  * thing entirely.
  * @returns {{ version: number, cases: number, samples: number }}

@@ -48,7 +48,7 @@ function residualOptions(limits, operators, zoneProvider) {
   if (limits !== undefined) options.limits = limits;
   if (functions !== undefined) options.functions = functions;
   if (extensions !== undefined) options.extensions = extensions;
-  // D7's injected clock: without it a named zone is a compile refusal,
+  // The injected clock: without it a named zone is a compile refusal,
   // which is what the language wants — being right for eight months of
   // the year is exactly what a silent UTC fallback would be
   if (clock !== null) options.zoneProvider = clock;
@@ -63,7 +63,7 @@ function residualOptions(limits, operators, zoneProvider) {
  * @param {any} [limits]
  * @param {{ functions?: any, extensions?: any } | null} [operators] -
  *   the store's registered operators, so the residual can evaluate them
- * @param {any} [zoneProvider] - D7's injected clock, so a calendar
+ * @param {any} [zoneProvider] - the injected clock, so a calendar
  *   ladder on a named zone compiles rather than being refused
  * @returns {(candidates: any[], externals: any) => any}
  */
@@ -98,7 +98,7 @@ export function compilePackedResidual(document, limits, operators, zoneProvider)
  *   the only place that knows the name.
  * @param {any} [limits]
  * @param {{ functions?: any, extensions?: any } | null} [operators]
- * @param {any} [zoneProvider] - D7's injected clock
+ * @param {any} [zoneProvider] - the injected clock
  * @returns {(row: any, externals: any) => any[]} the row's items
  */
 export function compileRowResidual(rowDocument, limits, operators, zoneProvider) {

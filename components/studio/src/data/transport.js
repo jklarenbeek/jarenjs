@@ -19,7 +19,7 @@ import { createStageRunner, bootFailure, BOOT_STAGES } from './boot-stages.js';
 
 /**
  * The transport: a contract PORT client over the own worker (owner) or
- * the shared channel (client). `request` unwraps the binding's D6
+ * the shared channel (client). `request` unwraps the binding's
  * outcome into the value-or-throw shape the effects consume — a
  * declared `db` failure surfaces the store's own code and message from
  * its details; `subscribe` is the client's stream half, passed through.

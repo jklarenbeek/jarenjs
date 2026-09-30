@@ -189,7 +189,7 @@ describe('one operation suite, three drivers', () => {
   });
 });
 
-describe('identity strategies (D11)', () => {
+describe('identity strategies', () => {
   it('uuid and integer allocation, and put() against allocated keys', async () => {
     const store = await openStore(USERS_MODEL, { driver: nodeDriver() });
     const events = store.collection('events');
@@ -316,7 +316,7 @@ describe('the synchronous fast path', () => {
       knn: { queries: 0, rows: 0, candidates: 0, fullFetches: 0, diverted: 0 },
       series: { queries: 0, statements: 0, candidates: 0, results: 0, diverted: 0 },
       bind: { diverted: 0 } });
-    // the query surface, promise-free: the D2 provider and explain
+    // the query surface, promise-free: the provider and explain
     const hit = users.execute(
       { $for: { it: '$[*]' }, $where: { $eq: ['$it.id', 'u1'] }, $return: '$it.age' });
     assert.strictEqual(hit, 3);

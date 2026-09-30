@@ -666,7 +666,7 @@ operators; a per-element async *predicate* is `mapAsync` then `where`.
   chain that reaches it SPLITS: everything before is pushed to the
   provider whole, everything after runs locally, and `explain()`
   reports `{ split: { pushed, residual } }` — the same residual
-  honesty the SQL pushdown owes (D8), applied to the async boundary.
+  honesty the SQL pushdown owes, applied to the async boundary.
 
 ## 12. The cursor contract and the source adapters
 
@@ -676,7 +676,7 @@ operators; a per-element async *predicate* is `mapAsync` then `where`.
   `execute` duck that also happens to be iterable is a provider. The
   whole chain up to the first `mapAsync` — the terminal's wrapper
   included — is ONE document `execute` receives, once, with the bound
-  externals, and `execute` MAY answer a promise here (D8: the contract
+  externals, and `execute` MAY answer a promise here (the contract
   mirrors §8's; the awaiting is this surface's). The residual after a
   `mapAsync` streams locally over the pushed rows, and `explain()`
   reports `{ split: { pushed, residual } }` exactly as for a

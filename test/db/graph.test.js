@@ -98,8 +98,8 @@ before(async () => {
   for (const post of POSTS) await store.entity('Post').create(post);
   for (const comment of COMMENTS) await store.entity('Comment').create(comment);
   for (const name of ['admin', 'dev']) await store.entity('Label').create({ name });
-  // join-table membership seeded directly — the read side is this
-  // order's surface; a membership API is a later order's
+  // join-table membership seeded directly — the read side is the
+  // surface under test; there is no membership API to write it through
   db.exec(`INSERT INTO "Label_User" ("Label_key", "User_key") VALUES
     ('admin', 'u1'), ('dev', 'u1'), ('admin', 'u2')`);
 });

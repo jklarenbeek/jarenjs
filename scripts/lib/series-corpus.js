@@ -377,7 +377,7 @@ export function calendarBucketStart(at, months, originMonths = 0) {
 }
 
 /**
- * One bucket's rows reduced, by the D5 rule the whole family shares: the
+ * One bucket's rows reduced, by the rule the whole family shares: the
  * six value aggregates skip a `null` reading, so `value` is `null`
  * exactly when nothing in the window carried a number, and `count` is
  * every source row — duplicates and gaps included.
@@ -799,7 +799,7 @@ export const SERIES_KEY = 'sensor-a';
 /**
  * The schema the projection stores under: every member the corpus's
  * own cases spell, typed where a column has to be able to seek. `at` is
- * a whole epoch (D3) and `value` admits the measured gap a `null`
+ * a whole epoch and `value` admits the measured gap a `null`
  * reading is; `on` and `recorded at` are the two other spellings the
  * as-of selector cases use.
  */
@@ -817,7 +817,7 @@ export const SERIES_SCHEMA = Object.freeze({
 
 /**
  * The model one mapping stores the corpus under. The indexed mapping
- * declares exactly what D9 fixes — a composite `(series, at)` — plus
+ * declares exactly what the temporal plan needs — a composite `(series, at)` — plus
  * the `(k, at)` twin the keyed as-of cases group by; the unindexed one
  * declares nothing, and both must answer what the references recorded.
  * @param {any[]} indexes

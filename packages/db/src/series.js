@@ -41,7 +41,7 @@ export const SERIES_OPS = Object.freeze([
   '$overlaps', '$time-bucket', '$resample', '$rolling', '$asof']);
 
 /**
- * The D5 aggregates a `GROUP BY` reproduces exactly, and the plan's
+ * The aggregates a `GROUP BY` reproduces exactly, and the plan's
  * name for each. `count` is `rows` because it counts SOURCE ROWS —
  * duplicates and measured gaps included — which is `COUNT(*)` and not
  * `COUNT(value)`; the six value aggregates skip a `null` reading,
@@ -120,7 +120,7 @@ export function seriesReason(code, construct) {
  * `minColumns` is what keeps an ordinary query ordinary. A collection
  * that declares `(age)` and is asked for `age > 21` is not asking a
  * temporal question, and nothing in a column can say otherwise — so
- * the shape D9 actually names, a COMPOSITE index whose last column is
+ * the shape that matters, a COMPOSITE index whose last column is
  * the instant, is what makes a plain selection temporal. A document
  * that named a §8.16 operator has already said so itself, and reads
  * the singular index too.

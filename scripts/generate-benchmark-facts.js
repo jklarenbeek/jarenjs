@@ -30,8 +30,8 @@
  * the committed measurements, and nothing else. That split is the point:
  * one namespace and one runner for every derived span in the repository,
  * one registry per source. The derivations stay in JavaScript on purpose:
- * bands, means and whole tables read worse as query one-liners, and D8
- * governs template vocabularies, not build scripts.
+ * bands, means and whole tables read worse as query one-liners, and
+ * query templates are for document vocabularies, not build scripts.
  */
 
 import { readFileSync } from 'node:fs';
@@ -649,7 +649,7 @@ const FACTS = {
   // Three facts, all derived from orm.json's own rows: what the typed
   // client beats, what beats it, and what the door itself costs over the
   // store it fronts. Quoting only the first would be the same dishonesty
-  // a dropped row is (D11 — report the loss).
+  // a dropped row is (report the loss).
   'orm.clientVsRivals': () => {
     const rows = ormClientRows();
     const beaten = ['Prisma', 'Drizzle', 'Kysely']
@@ -747,7 +747,7 @@ const FACTS = {
   // -- series: the STORE's own rows, against the statement a hand would
   // have written, against the vocabulary the store replaces, and
   // against the array already in memory. Three ratios per shape,
-  // because quoting only the flattering one is the thing D15 forbids.
+  // because quoting only the flattering one is the thing honesty forbids.
   'series.storeShapes': () => {
     const { figures } = data('series').meta;
     return `the planned range costs ${ratio(figures.storeRangeVsSql)}× the hand-written `
@@ -849,7 +849,7 @@ const FACTS = {
         ? `${ratio(storeRtreeVsColumns)}× in the R\\*Tree's favour`
         : `${ratio(1 / storeRtreeVsColumns)}× in the columns' favour`);
   },
-  // and the other half of it, which D10 requires beside the read
+  // and the other half of it, which belongs beside the read
   'spatial.rtreeLoad': () => {
     const { rtreeLoadCost } = data('spatial').meta.figures;
     return `${ms(spatialMs('load-rtree'))} ms against ${ms(spatialMs('load-columns'))} ms for `

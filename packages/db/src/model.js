@@ -5,8 +5,7 @@
  * `explainMapping` — the derived physical shape as plain data, so the
  * hybrid mapping rule is golden-testable rather than folklore.
  *
- * THE DESCENT DECISION (recorded here because TODO's D22 demands it
- * be explicit): six copies of the `properties`/`prefixItems`/`items`/
+ * THE DESCENT DECISION (recorded here so it stays explicit): six copies of the `properties`/`prefixItems`/`items`/
  * `allOf` descent spine exist in this repository, and this walk was
  * the candidate seventh. It is NOT one. The entity walk is
  * deliberately ONE level deep — it enumerates the TOP-LEVEL

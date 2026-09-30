@@ -98,7 +98,7 @@ console.log('Tree-shaking smoke test passed (compileDateLocale carries neither I
 // Every `@jarenjs/linq` subpath's measured size, collected as the probes
 // run and checked against docs/CONSUMING.md's table at the end: a price
 // this repository publishes is a price this gate measured, so it can go
-// stale only by failing here (D11 — report the loss).
+// stale only by failing here (report the loss).
 /** @type {Map<string, number>} */
 const linqBundles = new Map();
 
@@ -674,7 +674,7 @@ if (Object.entries(Object.values(formulaPen.metafile.outputs)[0].inputs).some(([
 linqBundles.set('formula', formulaPenBytes);
 console.log(`Formula authoring tree shaking passed (${formulaPenBytes} bytes).`);
 
-// ---- the measured baseline (D11) ----
+// ---- the measured baseline ----
 // Every figure this repository publishes about a `@jarenjs/linq` subpath
 // — docs/CONSUMING.md's rounded table, each pen document's `## 7. Cost`
 // headline, the chain's four §17 figures, and every sentence in one

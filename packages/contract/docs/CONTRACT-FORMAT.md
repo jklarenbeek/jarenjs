@@ -667,8 +667,8 @@ reaches EOF, throws, or is cancelled by the consumer. A limit crossing
 met by such a transform after the headers went out cuts the response
 body (the status cannot be rewritten) and is reported to `onError`.
 Effects a handler made before a chunked upload crossed its limit are its
-own to undo; the host lifecycle's acquired transaction (a later order's
-seam) is where such a rollback belongs.
+own to undo; the host lifecycle's acquired transaction (§7.7) is where
+such a rollback belongs.
 Its transport members are decoded and normalized into `input` and
 validated like any other input (`JC2006`) — they **are** its whole
 input, since an opaque operation cannot declare a body-located member
@@ -1585,7 +1585,7 @@ outcome is **JSON** (no `Error`, `Response`, `Headers` or
   store that threw (`JC2054`), an undeclared response (`JC2055`);
 - `cancelled` — `ctx.signal` aborted or `close()` was called (`JC2052`).
 
-**The fixed shapes — every binding (D6).** An outcome never carries an
+**The fixed shapes — every binding.** An outcome never carries an
 `undefined` member: an optional member that is absent is `null`
 (`isJsonValue` — the predicate `@jarenjs/app`'s task effect and state
 honor — rejects `undefined`, and an outcome with one would fall back to
@@ -1810,7 +1810,7 @@ is part of the public projection, so adding a range moves the revision
 `bytes(op, input, ctx) → Promise<Outcome>` is `invoke`'s twin for an
 **opaque** operation (§4.5): the same pre-send validation of the
 transport members (`JC2050`), the same URL and header assembly, one
-request through the injected `fetch`, and a D6 outcome — but its
+request through the injected `fetch`, and an outcome — but its
 success owns a **live stream**, never a JSON value. `op` must be opaque
 (`JC1005` for a JSON operation: use `invoke`); `ctx` is `{ signal?,
 attempt?, headers?, ifNoneMatch?, ifMatch?, body? }` — no idempotency
@@ -1911,7 +1911,7 @@ Rules the generator keeps:
   current one yields the empty sequence — no state change, no render, no
   subscriber — so an out-of-order older response can never overwrite a
   newer one. Cancellation (below) is the optimization.
-- **The state slot and the effect agree in every mode (D10).** A task
+- **The state slot and the effect agree in every mode.** A task
   mode is never *named* in the document or in the effect props; the
   generator derives the document's state-side guards from `policy.task`
   exactly as it derives the document's shape from `kind`. With one slot
@@ -2160,7 +2160,7 @@ point). The mapping:
 | `http.in` `path`/`query`/`header` members | `parameters` (name, `in`, `schema`, or `content.application/json.schema` for JSON query members; `required` from the effective input's `required`, a path parameter always required); an idempotent operation gains the `Idempotency-Key` header parameter (required under `"required"`) |
 | body members | `requestBody`: the object of the body-located members (their `required` intersection, the input's `additionalProperties`); the whole input schema when every member is body-located; the member's own schema under `http.body`; `content[<http.media>]` |
 | `output`, `http.status` | `responses[<status>]` with the output schema; no content on `204`; opaque → `content[<media>]: { type: "string", format: "binary" }` |
-| declared `errors` | one response per status: the D7 wire-error schema (`code` **enum-pinned** to the codes of that status, `details` the declared schema when present) |
+| declared `errors` | one response per status: the wire-error schema (`code` **enum-pinned** to the codes of that status, `details` the declared schema when present) |
 | the binding's own statuses | shared `components.responses` (`BadRequest` 400, `NotFound` 404, `IdempotencyConflict` 409 on idempotent operations, `PayloadTooLarge` 413, `UnsupportedMediaType` 415 on body-carrying operations, `InternalError` 500), `$ref`'d per operation unless a declared error already answers that status |
 | `$defs` | `components.schemas`, every `#/$defs/X…` rewritten `#/components/schemas/X…` |
 | policy | the `x-jaren-policy` extension: `{ task, idempotency, cache, revision?, retry? }` verbatim (an `x-` extension is OpenAPI's sanctioned place) |
@@ -2217,7 +2217,7 @@ HTTP context with `host: null`, exactly the shape it always was plus
 members, the body, the key, `etag` and `status` as `null` rather than
 omitting them, so an HTTP-only member is a compile error there; a
 carrier union is a discriminated union to narrow on `ctx.carrier`. `Meta` and
-`WireError` spell **exactly** the fixed D6 shapes (§10.1) —
+`WireError` spell **exactly** the fixed outcome shapes (§10.1) —
 `OUTCOME_META_MEMBERS`/`OUTCOME_ERROR_MEMBERS` are the runtime twins and
 a test holds the text to them; `details` is `unknown` and `status`
 `number | null`, never optional members. An input-less operation's
@@ -2370,7 +2370,8 @@ Riders the rows carry:
   `'public'`, keeps the compatibility surface to what clients see. The
   option set is closed (`JC1008`).
 
-- **R3 covers the whole wire shape.** The order's five members plus a
+- **R3 covers the whole wire shape.** The binding's five members (`kind`,
+  `http.method`, `http.path`, `http.status`, `http.media`) plus a
   member's `in` location and the whole-body `body` member — a member
   that moves from `query` to `header` rewrites the request exactly like
   a moved path, so it classifies with the binding row. Renaming a path
@@ -2549,7 +2550,7 @@ no `negotiate`, no `pending`.
 | settlement | outcome |
 |---|---|
 | the output, valid | `{ ok: true, value, meta }` — `meta.trace` the generated trace |
-| a declared failure (`ctx.fail`, or a thrown `ContractRuntimeError` whose code the operation declares) | kind `failure` with `{ code, message, status: null, details, retryable }` — `status` is `null` and PRESENT (D6: a binding that cannot carry a member carries `null`, never omits it); the message is `contract/error/<code>` from the host catalog or the generic `contract/handler-error` |
+| a declared failure (`ctx.fail`, or a thrown `ContractRuntimeError` whose code the operation declares) | kind `failure` with `{ code, message, status: null, details, retryable }` — `status` is `null` and PRESENT (a binding that cannot carry a member carries `null`, never omits it); the message is `contract/error/<code>` from the host catalog or the generic `contract/handler-error` |
 | any handler fault — a throw, a rejection, an undeclared code, an output or error-details schema violation | kind `contract` `JC2070`, message `contract/local-handler-failed`; the distinguishing cause goes to `onError(error, { op, trace })`, never into the outcome |
 | `ctx.signal` aborted before or while running, or the client closed | kind `cancelled` `JC2052`, at once; a handler that settles later settles into nothing for the caller, while the host's `enter` still waits for it (step 3) |
 
@@ -2645,14 +2646,14 @@ ignores every frame whose id does not start with its own `clientId +
 for a cancelled or timed-out id finds no pending entry and is dropped
 silently. The request members `attempt` and `key` are reserved by the
 grammar and ignored by servers of this version: the attempt id stays
-caller-side in `meta` (D6 — the identities live in state, never in the
+caller-side in `meta` (the identities live in state, never in the
 transport) and idempotency is not carried on this binding.
 
 **What the wire cannot carry, it does not pretend to.** No statuses,
 no headers, no entity tags, no non-JSON media (an opaque operation is
 `JC1005` at `invoke` and answered `JC2071` if some other client asks);
-a declared failure's `status` is `null` in the outcome, member present
-(D6). `input` is the whole input object (`null` for an input-less
+a declared failure's `status` is `null` in the outcome, member present.
+`input` is the whole input object (`null` for an input-less
 operation); an `undefined` handler value crosses as `null` (frames are
 JSON). Cancellation is `cancel: "message"`: an abort posts the cancel
 frame — an optimization that stops wasted work; the id scoping is the
@@ -2987,7 +2988,7 @@ operation is `JC1010`, thrown — the host named the wrong operation.
   client forwards patches; the app binding (§11.4) and the consumer
   apply them (`@jarenjs/json/patch`). `seq` is strictly increasing or
   the stream ends with `JC2092`.
-- `onError(outcome)` — a D6 `ok: false` outcome (`failure` for a
+- `onError(outcome)` — an `ok: false` outcome (`failure` for a
   declared error event; `network` for a transport failure, a missed
   heartbeat, the server's `JC2096` — the consumer fell behind the
   stream's bounded queue — or `JC2097`, a spent reconnect budget;

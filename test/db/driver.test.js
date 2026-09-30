@@ -113,7 +113,7 @@ class BunShapedDatabaseWithCursor extends BunShapedDatabase {
   }
 }
 
-describe('the import graph (D6)', () => {
+describe('the import graph', () => {
   it("the root export's closure contains no node: or bun: specifier", () => {
     const closure = importClosure(path.join(PKG_SRC, 'index.js'));
     for (const file of closure) {

@@ -3,7 +3,7 @@
  * @file The mapping table, row by row (QUERY-PEN.md §4): every
  * `native` row asserts BOTH the emitted document and the executed
  * result, and the worked examples in the format doc are
- * byte-reproducible by the builder. The D2 proof runs here too: the
+ * byte-reproducible by the builder. The provider proof runs here too: the
  * same chain's `toDocument()` compiles under a bare `compileJsonQuery`
  * with no linq involvement.
  */
@@ -20,7 +20,7 @@ const USERS = [
   { id: 3, name: 'lin', age: 64, tags: ['dev'] },
 ];
 
-describe('emission — the worked example is byte-reproducible (D2 proof)', () => {
+describe('emission — the worked example is byte-reproducible', () => {
   it('emits the documented shape and compiles under bare compileJsonQuery', () => {
     const q = from(USERS)
       .where((u) => u.age.gt(21))

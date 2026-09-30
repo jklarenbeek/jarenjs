@@ -7,7 +7,7 @@
  * failure, with its details validated against the declaration's schema,
  * or a host fault), and validate the output. The HTTP binding wraps the
  * result in statuses, headers and bodies; the `local` and `port`
- * bindings wrap it in D6 outcomes and frames — the classification is
+ * bindings wrap it in outcomes and frames — the classification is
  * decided here once so the three can never disagree.
  *
  * Total for everything a handler can do: a hostile value whose `then`

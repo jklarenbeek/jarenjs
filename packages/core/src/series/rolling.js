@@ -46,7 +46,7 @@ import { CLOCK_MEMBERS } from './zone.js';
 
 /** @typedef {import('./normalize.js').Sample} Sample */
 
-/** What a window's rows can be reduced to — the seven of D5. */
+/** What a window's rows can be reduced to — the seven reducers. */
 const AGGREGATES = Object.freeze(['sum', 'mean', 'min', 'max', 'first', 'last', 'count']);
 
 /**

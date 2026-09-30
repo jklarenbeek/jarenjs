@@ -509,7 +509,7 @@ describe('migrating a derived index', () => {
   });
 });
 
-describe('one home for spatial arithmetic (D1)', () => {
+describe('one home for spatial arithmetic', () => {
   it('no file in packages/db computes a cell, a box or a distance of its own', () => {
     const root = 'packages/db/src';
     /** @param {string} dir @returns {string[]} */

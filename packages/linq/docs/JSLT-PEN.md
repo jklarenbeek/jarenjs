@@ -681,7 +681,7 @@ every claim below is pinned at compile level in
 `test/consumer/linq-jslt.ts` with a runtime twin in
 `test/linq/jslt-pen.test.js`. This subpath exports **no builder class, no
 constant and no type guard** — the three kinds the mapping table excludes
-(LINQ-FORMAT's D5 reading) are empty here, so §2 names the whole runtime
+(the reading LINQ-FORMAT gives it) are empty here, so §2 names the whole runtime
 surface and this section is about the compile-time one. The shapes below
 are §3.2's book and its chapters, declared.
 

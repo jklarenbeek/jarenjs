@@ -64,7 +64,7 @@ nothing else would notice drift.
 
 ## The async surface (`src/async.js`, `src/concurrency.js`)
 
-Async is a boundary, not a colour (D5). `fromAsync` streams a
+Async is a boundary, not a colour. `fromAsync` streams a
 single-pass source through per-item compiled evaluators; a barrier
 operator (`orderBy`, `groupBy`, `aggregate`, `reverse`) collects the
 buffer and runs the MAXIMAL document slice through the sync engine in

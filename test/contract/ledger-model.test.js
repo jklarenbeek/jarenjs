@@ -28,7 +28,7 @@ describe('idempotencyLedgerModel — a $model 0.1 document', () => {
     assert.deepStrictEqual(JSON.parse(JSON.stringify(idempotencyLedgerModel)), idempotencyLedgerModel);
     assert.strictEqual(Object.isFrozen(idempotencyLedgerModel), true);
     assert.deepStrictEqual(Object.keys(manifest.dependencies).sort(), ['@jarenjs/core', '@jarenjs/emit', '@jarenjs/json', '@jarenjs/validate'],
-      'exactly the D1 set — emit reached only from ./project; never db, flow, app or ai');
+      'exactly the declared set — emit reached only from ./project; never db, flow, app or ai');
   });
 
   it('opens with @jarenjs/db and accepts the record the memory ledger keeps', async () => {

@@ -228,7 +228,7 @@ describe('a budget the engine counts is enforced; one it cannot count is refused
     await assert.rejects(async () => {
       for await (const u of users.loadCursor({}, { profile: tiny })) void u;
     }, bytes);
-    // D6: the slots SQLite cannot fill are declared, not guessed
+    // the slots SQLite cannot fill are declared, not guessed
     assert.strictEqual(store.capabilities.statementTimeout, false);
     const explained = await store.collection('docs').explain(
       { $for: { it: '$[*]' }, $return: '$it' }, { profile: { refuseFullScan: true, maxRows: 7 } });

@@ -787,7 +787,7 @@ Here: the document and its grammar, `compileContract`, `contract.match`,
 (`serveHttp`, the `JC2001–JC2016` wire taxonomy with its English catalog,
 `fetch` and `node` adapters, the ledger interface with `createMemoryLedger`
 and the `idempotencyLedgerModel`/`commandLifecycleFsm` documents); the HTTP
-client (`openHttpClient`, the D6 outcomes with the `JC2050–JC2058` client
+client (`openHttpClient`, the outcomes with the `JC2050–JC2058` client
 codes, the client half of idempotency, retry, `negotiate`, and `bytes`
 for the opaque operations — a live response stream and a streamed
 upload, typed as `HttpClient`/`ByteOperations` by the projection and

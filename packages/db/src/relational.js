@@ -312,7 +312,7 @@ export function planRelational(document, options) {
 const classified = (error) => wrapDriverError(error, { docPath: '/relational' });
 
 /**
- * The one relational engine (D4): every relational surface — a bare
+ * The one relational engine: every relational surface — a bare
  * connection's and the Store's — is this engine over an admission policy.
  * @param {RelationalPolicy} policy
  */

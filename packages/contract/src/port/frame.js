@@ -12,7 +12,7 @@
  * its own responses with one cheap prefix test before any map lookup.
  * The request members `attempt` and `key` are reserved by the grammar
  * (`schemas/jaren-contract-port.schema.json`) and ignored by this
- * order's server: the attempt id stays caller-side in `meta` (D6 — the
+ * binding's server: the attempt id stays caller-side in `meta` (the
  * identities live in state, never in the transport) and idempotency is
  * not carried on this binding (`capabilities` says so).
  */

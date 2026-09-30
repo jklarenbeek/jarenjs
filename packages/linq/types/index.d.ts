@@ -448,7 +448,7 @@ export interface Hop {
   binding: string;
 }
 
-/** The provider contract (D2, QUERY-PEN §8): any object exposing
+/** The provider contract (QUERY-PEN §8): any object exposing
  * `execute(document, options)`. The document arrives whole; the return
  * value uses the engine's result mapping. `T` is the item type — read
  * from the `__item` phantom a typed provider carries (a typed entity
@@ -475,7 +475,7 @@ export interface Provider<T = unknown> {
   readonly relations?: RelationTable;
 }
 
-/** The asynchronous provider (D8, §12): the same members, and `execute`
+/** The asynchronous provider (§12): the same members, and `execute`
  * may answer a promise — `fromAsync(provider)` awaits it, and the whole
  * chain up to a `mapAsync` arrives as ONE document. */
 export interface AsyncProvider<T = unknown> {

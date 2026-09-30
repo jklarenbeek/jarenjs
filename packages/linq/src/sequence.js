@@ -8,7 +8,7 @@
  *
  * The chain is data: `toDocument()` emits one Jaren query document, and
  * a terminal either compiles it in memory (the reference semantics) or
- * hands it WHOLE to a provider (`execute(document, options)`, D2) —
+ * hands it WHOLE to a provider (`execute(document, options)`) —
  * which is what makes a query loggable, storable, diffable and
  * authorable by a constrained decoder.
  */
@@ -615,7 +615,7 @@ export class Sequence {
 }
 
 /**
- * Build a sequence over an iterable or a provider (D2). Dispatch
+ * Build a sequence over an iterable or a provider. Dispatch
  * happens ONCE, here: an `execute` duck is a provider and is never
  * enumerated locally; any iterable gets the in-memory reference
  * semantics; anything else is `JL0001` now, not at enumeration time.

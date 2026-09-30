@@ -149,7 +149,7 @@ export const PLAN_VERSION = 2;
  *   The fixed-width temporal GROUP BY: the instant column, the ladder's
  *   width and anchor in epoch milliseconds, the name the bucket's start
  *   is answered under, how the groups are ordered, and one aggregate
- *   per answered member. `rows` is `COUNT(*)` — the D5 count of SOURCE
+ *   per answered member. `rows` is `COUNT(*)` — the count of SOURCE
  *   rows, duplicates and measured gaps included — and the four value
  *   aggregates skip a `NULL` reading exactly as the kernel skips a
  *   `null` one. `first-seen` order is the group's earliest row identity,

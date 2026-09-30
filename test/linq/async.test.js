@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file The async surface (QUERY-PEN.md §10): the D5 proof FIRST —
+ * @file The async surface (QUERY-PEN.md §10): the proof FIRST —
  * the same chain emits a byte-identical document through `from` and
  * `fromAsync` — then streaming (a counting source proves nothing
  * materialises), barriers (named by `explain()`), early close (a
@@ -44,7 +44,7 @@ const USERS = [
   { id: 3, name: 'lin', age: 64 },
 ];
 
-describe('D5 — one operator set, two drivers', () => {
+describe('one operator set, two drivers', () => {
   it('the same chain emits a byte-identical document through from and fromAsync', () => {
     const build = (f) => f(USERS)
       .where((u) => u.age.gt(21))

@@ -117,7 +117,7 @@ describe('contractTools — through a real server', () => {
   });
 });
 
-describe('contractTools — the no-import rule (D1)', () => {
+describe('contractTools — the no-import rule', () => {
   it('packages/contract/src never imports @jarenjs/ai, and only src/project imports @jarenjs/emit', () => {
     const src = fileURLToPath(new URL('../../packages/contract/src', import.meta.url));
     /** @param {string} dir @returns {string[]} */

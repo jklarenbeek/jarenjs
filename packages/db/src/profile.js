@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file The safe execution profile (D15): a query document that arrives
+ * @file The safe execution profile: a query document that arrives
  * from a tenant, a remote client or a language model can reach a
  * database, and injection being structurally impossible (parameter
  * binding) says nothing about resource exhaustion or cross-tenant
@@ -11,7 +11,7 @@
  *     portion of a query is bounded by the engine's own enforcement;
  *  2. the mandatory row bound — every non-aggregate fetch carries a
  *     LIMIT of `maxRows + 1`, and fetching more than `maxRows` rows is
- *     the coded `JD2007`, never a silent truncation (D14);
+ *     the coded `JD2007`, never a silent truncation;
  *  3. reference containment — undeclared externals, host functions,
  *     collations or collections are the compile error `JD0011`; no UDF
  *     registration happens under a profile; optionally, a plan whose

@@ -7,7 +7,7 @@
  * the `Infer<>` of its output, the union of its declared error codes,
  * and whether its media makes it opaque. Every one of those is a
  * compile-time reading of the SAME builders the emitted document was
- * written from (D2), so the wrappers below can type a client (an HTTP
+ * written from, so the wrappers below can type a client (an HTTP
  * one with its byte method), a handler table and an AI toolbox with no
  * `generate` step.
  *
@@ -20,7 +20,7 @@
  * boolean `output` is `unknown`, an error's `details` is `unknown` — the
  * pen widens identically. The shapes `Meta`, `WireError`, `Outcome<T>`,
  * `InvokeContext`, `Failure`, `HandlerContext` restate
- * CONTRACT-FORMAT §10.1's fixed D6 members and §12.3's rendering of
+ * CONTRACT-FORMAT §10.1's fixed outcome members and §12.3's rendering of
  * them, and the same file pins them equal.
  *
  * The runtime is in src/contract/*; CONTRACT-PEN.md is the normative

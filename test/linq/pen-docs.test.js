@@ -25,7 +25,7 @@ import { schemaOf } from '@jarenjs/linq/schema';
  * One TOP-LEVEL section of a pen document — its `## N. Title` heading to
  * the next `## `, exclusive. `sectionOf` stops at the next heading of any
  * depth, which is right for the `### n.m` subsections of a format spec
- * and wrong here: a D3 section may group its rows under `###`
+ * and wrong here: a pen document's section may group its rows under `###`
  * subheadings, and a slice that stopped at the first of them would hand
  * every gate below the section's preamble and call it the section.
  * @param {string} text @param {string} heading
@@ -106,8 +106,8 @@ const DOCS = [
 const MAPPING_HEADING = { db: '## 2. The surface' };
 
 /** One document's worked examples, executed. The heading is a parameter
- * because `QUERY-PEN.md` keeps its own twelve sections (D2 forbids
- * renumbering it) and appends its examples as §13. @param {string} pen
+ * because `QUERY-PEN.md` keeps its own twelve sections (its citations
+ * forbid renumbering them) and appends its examples as §13. @param {string} pen
  * @param {string} what @param {string} file @param {string} heading
  * @param {number} atLeast */
 function workedExamples(pen, what, file, heading, atLeast) {
@@ -384,7 +384,7 @@ describe('the refusal section is the pen\'s own codes', () => {
 
 // ——— the chain's own document ———
 //
-// `QUERY-PEN.md` is not a pen document: D2 fixes its twelve sections
+// `QUERY-PEN.md` is not a pen document: it keeps its twelve sections
 // where 72 citations point at them, so its worked examples are §13, its
 // refusals §14 and its types §15, and its mapping table (§4) is keyed by
 // C# operator name rather than by the JavaScript spelling. The three

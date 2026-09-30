@@ -10,7 +10,7 @@
  * source panes plus a LIST of datasets: 0 = the engine takes no data
  * (markdown/mermaid), 1 = one dataset, N = a dataset switcher (the same
  * source over several shapes). The engine registry and the example library
- * fill in over the next orders; this is the headless core the component
+ * are registered into it; this is the headless core the component
  * renders.
  */
 

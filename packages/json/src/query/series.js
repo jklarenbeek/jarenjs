@@ -64,13 +64,13 @@ const spellable = (members) =>
 /**
  * The calendar context every clock-reading spec carries, and the one
  * `$time-bucket` takes as its own literal. `zone` is an IANA name — only
- * `'UTC'` resolves without a provider (D7: this suite bundles no tzdb) —
+ * `'UTC'` resolves without a provider (this suite bundles no tzdb) —
  * `offset` is minutes east of UTC, and `disambiguation` says what a
  * local time that happens twice, or never, resolves to.
  */
 export const CLOCK_MEMBERS = spellable(KERNEL_CLOCK_MEMBERS);
 
-/** `$resample`: the D5 bucket contract, plus where a row keeps its members. */
+/** `$resample`: the bucket contract, plus where a row keeps its members. */
 export const RESAMPLE_MEMBERS = spellable(KERNEL_RESAMPLE_MEMBERS);
 
 /** `$rolling`: a window measured in time, and how much of one counts. */
@@ -270,7 +270,7 @@ export function compileSelector(value, member, docPath) {
  * The wall clock a spec's calendar boundaries fall on, resolved once.
  *
  * UTC and a fixed offset need nothing. A named zone needs the tzdb this
- * suite deliberately does not bundle (D7), and a JSON document cannot
+ * suite deliberately does not bundle, and a JSON document cannot
  * carry one — so the provider arrives through the compilation's
  * `zoneProvider` option, and a named zone without one is a refusal
  * naming the seam rather than a silent fall back to UTC that is right
@@ -318,11 +318,11 @@ export function compileClock(spec, provider, docPath) {
   return clock;
 }
 
-/** The seven aggregates D5 fixes, for both `$resample` and `$rolling`. */
+/** The seven aggregates, for both `$resample` and `$rolling`. */
 export const AGGREGATES = Object.freeze([
   'sum', 'mean', 'min', 'max', 'first', 'last', 'count']);
 
-/** The five fill policies D5 fixes. */
+/** The five fill policies. */
 export const FILLS = Object.freeze(['omit', 'null', 'zero', 'locf', 'linear']);
 
 /** Which way an as-of join looks for its match. */

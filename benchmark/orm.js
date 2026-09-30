@@ -3,7 +3,7 @@
 /**
  * JarenJS ORM Benchmark — phase B against the tools it will actually
  * be compared to: Prisma, Drizzle and Kysely, over SQLite, on Node
- * and on Bun (D16). Every loss is published in the same tables with a
+ * and on Bun. Every loss is published in the same tables with a
  * one-line reason.
  *
  * Rival routes, because they decide the numbers:

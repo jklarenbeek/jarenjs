@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file Document migrations (D12): two model documents diff into a
+ * @file Document migrations: two model documents diff into a
  * migration document whose steps are rendered DDL, JSLT data
  * transforms and query assertions; the migration replays on a shadow
  * database first; a history table records what ran with a
@@ -11,7 +11,7 @@
  * Identity is a hash, not a version number: `from`/`to` are
  * `hashContent(canonicalizeJson(model))` — the identity of a SHAPE,
  * which nobody has to remember to bump. The checksum discipline is
- * D12's: `canonicalizeJson` + `hashContent` (signature-grade — throws
+ * `canonicalizeJson` + `hashContent` (signature-grade — throws
  * on the unserializable), never the memo-grade `contentKey`.
  *
  * Like the query emitter, this module is part of the emitter layer:

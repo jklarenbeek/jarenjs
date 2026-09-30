@@ -11,7 +11,7 @@
  * There is no server and no wire: GitHub Pages is static, so the
  * handlers are thin wrappers over the host's fetch capabilities and
  * `openLocalClient` supplies the pipeline — one input validation, one
- * output validation, one D6 outcome. Output validation stays ON, which
+ * output validation, one outcome. Output validation stays ON, which
  * is the point of the arrangement: the generator that writes an
  * artifact and the browser that reads it declare its shape in the SAME
  * document, so a drifted artifact settles as a typed `contract`-kind
@@ -56,7 +56,7 @@ export const siteContract = compileContract(contractDoc);
  */
 
 /**
- * Map a D6 outcome onto the shape the effects dispatch from. A declared
+ * Map an outcome onto the shape the effects dispatch from. A declared
  * failure carries the host's own message in its details, so a fetch
  * error still reads as `404 Not Found` rather than as a generic
  * refusal; every other kind carries the binding's `JC` code, which is

@@ -38,7 +38,7 @@ const READERS = [
   ['benchmark/spatial.js', /readSpatialCorpus|spatial-corpus\.json/, 'the storage suite'],
 ];
 
-describe('the spatial corpus has one source (D9)', () => {
+describe('the spatial corpus has one source', () => {
   it('is tracked exactly once, at the path the shared reader names', () => {
     const tracked = execFileSync('git', ['ls-files', '--', '*spatial-corpus.json'], { cwd: ROOT, encoding: 'utf8' })
       .split('\n').filter((line) => line !== '');

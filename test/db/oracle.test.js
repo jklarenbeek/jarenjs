@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file The differential oracle (D3, D8): the whole corpus in four
+ * @file The differential oracle: the whole corpus in four
  * modes — native (pushdown on), native over a store with every declared
  * index REMOVED (so the same documents reach a plan with no generated
  * column to read: a promotion that only agrees where an index exists is

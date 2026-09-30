@@ -1,7 +1,7 @@
 //@ts-check
 /**
  * @file `fromAsync` — the SAME operator surface over async sources,
- * emitting the SAME query documents (the D5 proof is a byte-identity
+ * emitting the SAME query documents (the proof is a byte-identity
  * test), with terminals returning promises. The rule: the pipeline is
  * synchronous, the boundaries are async — a compiled Jaren query never
  * awaits; what is asynchronous is where rows come from (`fromAsync`
@@ -28,7 +28,7 @@
  *    here: everything up to the first `mapAsync` is ONE document the
  *    provider executes — a terminal's wrapper included, exactly as the
  *    synchronous surface pushes it, `execute` answering a promise if it
- *    must (D8). Iteration hands that document to the provider's CURSOR
+ *    must. Iteration hands that document to the provider's CURSOR
  *    when it offers one, so a `for await` pulls one row at a time from
  *    an open statement and a `break` releases it; the residual after
  *    the split streams locally, and a `join` exists on this surface
@@ -181,7 +181,7 @@ export class AsyncSequence {
   }
 
   /** Whether the chain so far goes to a provider as ONE document: a
-   * provider origin with no `mapAsync` yet (D8 — the document arrives
+   * provider origin with no `mapAsync` yet (the document arrives
    * whole; a host callback is where it splits). */
   #pushable() {
     return this.#origin.kind === 'provider'
@@ -875,7 +875,7 @@ export function fromAsync(source, options = {}) {
  * The `Sequence.prototype.mapAsync` seam: the sync chain becomes the
  * PREFIX (compiled in memory or pushed WHOLE to its provider), and the
  * async surface continues locally from its rows. `explain()` reports
- * the split (D8's residual honesty, applied to the async boundary).
+ * the split (the residual honesty, applied to the async boundary).
  * @param {{ runPrefix: (params: ReadonlyMap<string, any>) => any[],
  *   prefixDocument: () => any, params: ReadonlyMap<string, any>,
  *   options: { compileTypeTest?: any } }} carrier

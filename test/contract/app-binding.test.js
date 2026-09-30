@@ -173,7 +173,7 @@ describe('contractAppBinding — the generated documents', () => {
     ] }, 'reset releases status/kind/error; id, value and meta stay');
     const text = JSON.stringify(actions);
     assert.strictEqual(text.includes('"mode"'), false, 'the task mode never appears in the document');
-    for (const mode of ['exhaust', 'switch', 'concat', 'parallel']) assert.strictEqual(text.includes(`"${mode}"`), false, `the mode name "${mode}" is never written (D10)`);
+    for (const mode of ['exhaust', 'switch', 'concat', 'parallel']) assert.strictEqual(text.includes(`"${mode}"`), false, `the mode name "${mode}" is never written`);
     // the same over a contract with one operation per mode: only the exhaust start is guarded
     const modes = contractAppBinding(MODES);
     assert.deepStrictEqual(Object.entries(modes.actions).filter(([k]) => k.endsWith('/start')).map(([k, v]) => [k, v.$if !== undefined]),

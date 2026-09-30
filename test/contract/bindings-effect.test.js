@@ -9,7 +9,7 @@
  * guard, the exhaust result-lands case, `reset`, the slot `kind`, and
  * cancellation dispatching nothing. What differs by construction is
  * asserted as such: a declared failure carries `status: null` on these
- * bindings (D6 — the member present, never omitted) where HTTP carries
+ * bindings (the member present, never omitted) where HTTP carries
  * 409, and `meta.trace` is still a server-generated string on both.
  */
 

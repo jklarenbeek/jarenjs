@@ -3,7 +3,7 @@
  * @file The Sequence contract (QUERY-PEN.md §§5–8): deferral,
  * immutability, re-enumeration, the C# terminal matrix, parameters as
  * externals, and the provider seam — a double proves the document
- * arrives WHOLE and nothing is enumerated locally (D2).
+ * arrives WHOLE and nothing is enumerated locally.
  */
 
 import { describe, it } from 'node:test';
@@ -112,7 +112,7 @@ describe('parameters (§7)', () => {
   });
 });
 
-describe('the provider seam (§8, D2)', () => {
+describe('the provider seam (§8)', () => {
   it('a provider receives the document WHOLE and nothing is enumerated locally', () => {
     const calls = [];
     const provider = {

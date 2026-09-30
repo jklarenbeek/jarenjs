@@ -246,7 +246,7 @@ repair loop gets a `docPath` pointing at exactly the query that failed.
 **Dag runs are different, deliberately** (§7.3): a dag has no
 recorded-error channel. A failure rejects the whole run promise —
 because a dataflow result assembled from partially failed nodes is
-exactly the kind of partial result D7 forbids:
+exactly the kind of partial result the format forbids:
 
 | code | condition |
 |---|---|

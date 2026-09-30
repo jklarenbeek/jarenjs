@@ -4,7 +4,7 @@
  * binding (docs/CONTRACT-FORMAT.md §16). `invoke(op, input, ctx)`
  * validates the input with the operation's compiled validator (a refusal
  * is the `JC2050` outcome — nothing is posted), posts one request frame,
- * and resolves a D6 outcome for every way a channel can answer: the
+ * and resolves an outcome for every way a channel can answer: the
  * matching response (success validated against the output schema,
  * `JC2053`; a declared or taxonomy error a `failure` with `status:
  * null`; a served-host fault `kind: "contract"` with the server's

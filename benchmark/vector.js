@@ -783,7 +783,7 @@ const figures = {
   planVsResident: ratio(largest.rows.plan, largest.rows.resident),
   // what the plan itself costs over the statement it runs
   planVsFetch: ratio(largest.rows.plan, largest.rows.fetch),
-  // the decision D7 rests on: pushing the rank into SQL against not
+  // the decision the ranked read rests on: pushing the rank into SQL against not
   // pushing it (> 1 means the UDF is slower, which is why it is not emitted)
   udfVsFetch: ratio(largest.rows.udf, largest.rows.fetch),
   udfVsFetchLow: ratio(Math.min(...legs.map((leg) => leg.rows.udf / leg.rows.fetch)), 1),

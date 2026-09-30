@@ -133,7 +133,7 @@ export interface TypedEntitySet<E extends MetaMap<E>, M extends EntityMeta> {
   unlink<K extends MembershipMember<M>>(own: M['key'] | M['doc'], member: K, target: MembershipTarget<E, M, K>): void;
   asNoTracking(): TypedUntrackedReads<E, M>;
   /** The provider contract over this entity's root (MODEL-FORMAT §10.1);
-   * the answer is the engine's result shape, value-or-promise (D2). */
+   * the answer is the engine's result shape, value-or-promise. */
   execute<R = unknown>(document: unknown, options?: ExecuteOptions): ValueOrPromise<SequenceResult<R>>;
   /** The same document as an item cursor: one row per pull, the
    * statement released on `return()`; untracked unless `tracking: true`. */

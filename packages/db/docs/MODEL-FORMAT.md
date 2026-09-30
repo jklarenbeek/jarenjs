@@ -2003,7 +2003,7 @@ error, and the declared on-delete behaviour is observed by test.
 
 ### 9.5 Identity
 
-Per entity, by the key properties (D11 — platform primitives only):
+Per entity, by the key properties (platform primitives only):
 caller-supplied (any scalar key, composite included);
 `default: "uuid"` on a single string key (`crypto.randomUUID()`);
 `default: "auto"` on a single integer key (the database allocates —

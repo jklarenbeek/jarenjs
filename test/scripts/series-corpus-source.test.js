@@ -153,7 +153,7 @@ describe('the corpus carries the vocabulary every executor is held to', () => {
       ['$asof', '$overlaps', '$resample', '$rolling', '$time-bucket']);
   });
 
-  it('names every case exactly once, so a later order appends rather than forks', () => {
+  it('names every case exactly once, so a new case appends rather than forks', () => {
     const names = corpus.cases.map((c) => c.name);
     assert.deepStrictEqual(names.length, new Set(names).size,
       'two cases share a name; `cases` is keyed by name and append-only');

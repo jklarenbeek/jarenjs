@@ -228,7 +228,7 @@ describe('the linq-roots groups are what the chains emit', () => {
         `${kase.name}: ${JSON.stringify(explained.reasons)}`);
       assert.deepStrictEqual([...explained.referenced].sort(), ['Post', 'User'], kase.name);
       // the entity engine refuses before it returns a promise (value-or-
-      // promise, D2), so the refusal is awaited through an async wrapper
+      // promise), so the refusal is awaited through an async wrapper
       await assert.rejects(async () => store.execute(kase.query, { strict: true }),
         (error) => /** @type {any} */ (error).code === 'JD0010', kase.name);
     }

@@ -6,7 +6,7 @@
  * wins:
  *
  *  1. Incremental versus RE-RUN maintenance on the SAME query shape —
- *     the D14 honesty measurement: how much does incremental actually
+ *     the honesty measurement: how much does incremental actually
  *     buy, at a few table sizes?
  *  2. Capture overhead: write cost with capture off / journal / session
  *     (the capture-overhead claim, re-measured here in one place).

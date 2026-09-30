@@ -556,7 +556,7 @@ stays readable (the last value), and a leak test asserts the live set
 after a forced GC.
 
 Bounds, both configurable at `openStore({ live: { … } })`, both
-ERRORING rather than degrading (the D14 rule — the bound is printed):
+ERRORING rather than degrading (the bound is printed, never silent):
 
 - `maxQueries` (default 64): registrations beyond it are `JD0052`;
 - `maxMaintained` (default 10 000): the per-query ceiling on

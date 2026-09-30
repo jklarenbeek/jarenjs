@@ -84,7 +84,7 @@ export function createExcluder(rules, weekendStart) {
       if (isExcludedDay(d))
         spans.push({ start: d * DAY_MS, end: (d + 1) * DAY_MS });
     }
-    // touching days merge by default (core/series D4), so a weekend is
+    // touching days merge by default (core/series), so a weekend is
     // one two-day span rather than two abutting ones
     return spans.length === 0 ? [] : mergeIntervals(spans);
   };

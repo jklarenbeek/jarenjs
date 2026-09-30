@@ -872,7 +872,7 @@ describe('dispatch — declared failures and the handler boundary', () => {
     assert.strictEqual(json(await bad.dispatch(req('GET', '/api/catalog'))).code, 'JC2010');
   });
 
-  it('errorBody projects the wire record (legacy shapes); a projector that throws or returns non-JSON falls back to the D7 body', async () => {
+  it('errorBody projects the wire record (legacy shapes); a projector that throws or returns non-JSON falls back to the wire-error body', async () => {
     const legacy = serve({}, { errorBody: (wire, ctx) => ({ error: `${wire.status} ${wire.code}`, op: ctx === null ? null : ctx.op.id, requestId: wire.requestId }) });
     const r = await legacy.dispatch(req('GET', '/nope'));
     assert.deepStrictEqual(json(r), { error: '404 JC2001', op: null, requestId: r.headers['x-jaren-trace'] });

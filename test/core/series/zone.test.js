@@ -5,7 +5,7 @@ import { resolveClock, compileBuckets, resampleSeries, rollingSeries } from '@ja
 import { partsFromEpoch } from '@jarenjs/core/dates/civil';
 import { epochOfRFC3339Parts } from '@jarenjs/core/dates/rfc3339';
 
-// The whole point of D7 is that this file can exist. There is no tzdb in
+// The whole point of the zone seam is that this file can exist. There is no tzdb in
 // the tree and no `Intl` call in the kernel, so a DST gap and a DST fold
 // are tested against a provider written here, in thirty lines, whose
 // rules are visible rather than inherited from whatever the host's

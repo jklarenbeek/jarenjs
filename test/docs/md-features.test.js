@@ -68,7 +68,7 @@ describe('the markdown feature list matches the parser', function () {
 
   it('and every one of them is gated on gfm', function () {
     // "GFM extensions" has to mean something; a feature that stayed on
-    // with the flag off would make the D5 promise false as well.
+    // with the flag off would make that promise false as well.
     for (const feature of GFM_FEATURES) {
       assert.equal(produces(feature.src, feature.proof, { gfm: false }), false,
         `${feature.name} still parses with gfm: false`);

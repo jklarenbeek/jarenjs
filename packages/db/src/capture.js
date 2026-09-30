@@ -2,7 +2,7 @@
 import { CHANGES_TABLE, CHANGES_STATE_TABLE } from './engine-metadata.js';
 export { CHANGES_TABLE, CHANGES_STATE_TABLE };
 /**
- * @file Change capture (D13): committed writes become an observable,
+ * @file Change capture: committed writes become an observable,
  * ordered stream of RFC 6902 patches — derived from SQLite's own
  * session changesets where the binding has them, from a write-path
  * journal where it does not (`bun:sqlite` has no `createSession`), or

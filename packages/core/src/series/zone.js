@@ -5,7 +5,7 @@
 // clock that is not UTC is data this suite refuses to bundle. A tzdb is
 // megabytes that go stale on a government's timetable; a Temporal
 // polyfill is a runtime dependency; reading the host's zone is the
-// hidden clock D7 exists to forbid. So this module is a **seam**, not an
+// hidden clock the zone seam exists to forbid. So this module is a **seam**, not an
 // implementation.
 //
 // Three clocks come out of it:

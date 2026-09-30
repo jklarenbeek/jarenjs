@@ -1,10 +1,10 @@
 //@ts-check
 /**
- * @file The D2 seam: a `@jarenjs/linq` chain executes against a
+ * @file The provider seam: a `@jarenjs/linq` chain executes against a
  * collection because the collection implements `execute(document,
  * options)` — contract-level coupling. The one import edge between the
  * two packages is the client subpath's (`@jarenjs/linq/db` → db,
- * validate, formats, as optional peers) and it runs one way: the D6
+ * validate, formats, as optional peers) and it runs one way: the
  * suite below scans both manifests and every source and declaration
  * file for every import spelling. The same chains run in-memory and
  * against the store and must agree; `fromAsync` streams the cursor.
@@ -67,7 +67,7 @@ async function seeded() {
   return { store, users };
 }
 
-describe('a linq chain against a collection (D2)', () => {
+describe('a linq chain against a collection', () => {
   it('where/orderBy/select agree with the in-memory run', async () => {
     const { store, users } = await seeded();
     const chain = (source) => from(source)
@@ -115,7 +115,7 @@ describe('a linq chain against a collection (D2)', () => {
   });
 });
 
-describe('one edge, one direction (D6)', () => {
+describe('one edge, one direction', () => {
   const PEERS = ['@jarenjs/db', '@jarenjs/validate', '@jarenjs/formats'];
   /** Every quoted `@jarenjs/<name>` specifier in a file's CODE — the
    * import, export-from, dynamic-import, require and reference spellings
@@ -154,7 +154,7 @@ describe('one edge, one direction (D6)', () => {
   });
 
   it('the scan is load-bearing: every import spelling, in a .js and in a .d.ts', () => {
-    // D7 (the hunt): the first version of this suite read `src/**` with a
+    // the first version of this suite read `src/**` with a
     // regex that only saw a static `import … from`, so a `.d.ts` and four
     // other spellings could carry the edge past it. The predicate is
     // proven here against synthetic sources rather than by mutating the
@@ -210,7 +210,7 @@ describe('one edge, one direction (D6)', () => {
   });
 });
 
-describe('a spatial linq chain reaches the derived index (D2)', () => {
+describe('a spatial linq chain reaches the derived index', () => {
   const seededPlaces = async () => {
     const store = await openStore(PLACES_MODEL, { driver: nodeDriver() });
     const places = store.collection('places');
@@ -552,7 +552,7 @@ describe('a relation hop is a residual the store runs over the fetched roots (MO
   });
 });
 
-describe("a chain's element window is read through by both planners (QUERY-PEN §6, D15)", () => {
+describe("a chain's element window is read through by both planners (QUERY-PEN §6)", () => {
   it('a collection answers the rows as the one array item, never unwrapped: [] for none, [row] for one', async () => {
     const { store, users } = await seeded();
     const window = (min) => [{ $for: { it: ['$[*]'] }, $where: { $ge: ['$it.age', min] }, $return: '$it' }];

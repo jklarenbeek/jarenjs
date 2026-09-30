@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file The provider seam (D2): a provider is any object exposing
+ * @file The provider seam: a provider is any object exposing
  * `execute(queryDocument, options)` — contract-level coupling: the
  * chain imports no provider. `@jarenjs/db` implements this interface;
  * the package's one runtime edge — the client subpath `./db` — runs

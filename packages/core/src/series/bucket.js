@@ -287,7 +287,7 @@ function requireMember(name, allowed, role) {
 }
 
 /**
- * `resampleSeries`' closed specification: the D5 bucket contract, the
+ * `resampleSeries`' closed specification: the bucket contract, the
  * clock it reads and where a row keeps its instant and its reading.
  */
 export const RESAMPLE_MEMBERS = Object.freeze([

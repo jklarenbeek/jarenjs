@@ -554,7 +554,7 @@ describe('the drift gate the unit of work owes itself', () => {
     assert.ok(!/commit phase[^.]*registered as a\s+settlement effect/is.test(tracker),
       'the commit JSDoc must not say the advance waits for settlement');
     assert.match(tracker, /Advance phase: runs as soon as every statement/,
-      'the commit JSDoc states the amended D3 mechanics');
+      'the commit JSDoc states the amended advance mechanics');
     assert.ok(!/advance[^.]*waits? for the outermost commit/is.test(tracker),
       'no tracker comment defers the advance to the outermost commit');
 

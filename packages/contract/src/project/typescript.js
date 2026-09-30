@@ -20,7 +20,7 @@
  *
  * `Meta`, `WireError`, `Outcome<T>`, `InvokeContext`, `Client`,
  * `Failure`, `HandlerContext` and `Handlers` are fixed text in the
- * stylesheet — the D6 shapes as every binding carries them
+ * stylesheet — the fixed outcome shapes as every binding carries them
  * (`OUTCOME_META_MEMBERS` / `OUTCOME_ERROR_MEMBERS` in the client module
  * are the runtime twins; a test holds the text to them).
  *

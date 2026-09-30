@@ -39,7 +39,7 @@ import {
 const OUT = fileURLToPath(new URL('../test/json/fixtures/series-corpus.json', import.meta.url));
 
 /**
- * The vocabulary of cases this file holds; a later order raises it.
+ * The vocabulary of cases this file holds; a new case kind raises it.
  *
  * 1 — the range, bucket, rolling and as-of answers the plain references
  *     give, for a runner holding a kernel to a value.

@@ -661,7 +661,7 @@ describe('spatial pushdown: narrow in SQLite, refine in the engine', () => {
       { id: 'no-box', at: { type: 'FeatureCollection', features: [] } },
     ];
     // the cell just east of the level-1 boundary Greenwich sits on: the
-    // point is in 'gcpuz' and only the NEIGHBOURHOOD reaches it (D7)
+    // point is in 'gcpuz' and only the NEIGHBOURHOOD reaches it
     const document = where({ $exists: { '$index-of': [
       { '$geohash-neighbours': 'u10hb' }, { $geohash: ['$it.at', 5] }] } });
     assert.throws(() => compileJsonQuery(document)(structuredClone(documents)),

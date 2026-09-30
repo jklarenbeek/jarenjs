@@ -658,7 +658,7 @@ describe('migrating a vector column', () => {
   });
 });
 
-describe('one home for vector arithmetic (D2), one home for SQL text (D12)', () => {
+describe('one home for vector arithmetic, one home for SQL text', () => {
   const root = 'packages/db/src';
   /** @param {string} dir @returns {string[]} */
   const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true })
@@ -706,7 +706,7 @@ describe('one home for vector arithmetic (D2), one home for SQL text (D12)', () 
   });
 });
 
-describe('one home for vector arithmetic, across every package (D2)', () => {
+describe('one home for vector arithmetic, across every package', () => {
   // the db gate above proves it for one package; a second dot product
   // anywhere in the suite is the drift the rule exists to prevent, and
   // the packages that could grow one are the four that consume vectors

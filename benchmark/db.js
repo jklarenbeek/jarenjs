@@ -7,7 +7,7 @@
  * planner) and @jarenjs/linq's in-memory surface against the JS
  * document stores a reader would actually shortlist.
  *
- * Rival selection, because it decides the numbers (D16):
+ * Rival selection, because it decides the numbers:
  *
  *  - `lowdb` (Memory adapter) is a plain JavaScript object with a
  *    write-through veneer — the floor every in-process store must be
@@ -486,7 +486,7 @@ report('Sort + limit 20 (ns/query)', ['ns/query'], sortRows);
     + 'hold the Sequence (or the compiled document) to pay capture once');
 }
 
-// ---- the pens: what a document costs to WRITE by code (D11) ----
+// ---- the pens: what a document costs to WRITE by code ----
 // Not a per-request price. A pen builds a definition — a schema, a model,
 // a stylesheet, a migration — once, at module load, and the engine
 // compiles the document it emitted. The row that matters is therefore

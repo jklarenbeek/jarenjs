@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file Validated writes (D10): the injected `compileSchema` hook in
+ * @file Validated writes: the injected `compileSchema` hook in
  * both its result shapes (`{ valid, errors }` and bare boolean),
  * `JD2003` before any SQL reaches the database, the declared
  * `capabilities.validated` flag, and the runtime error taxonomy —
@@ -46,7 +46,7 @@ function richCompileSchema() {
   return (schema) => validator.compile(schema);
 }
 
-describe('the injected validation hook (D10)', () => {
+describe('the injected validation hook', () => {
   it('rejects an invalid insert with JD2003 carrying the findings, before any SQL', async () => {
     const store = await openStore(MODEL,
       { driver: nodeDriver(), compileSchema: richCompileSchema() });

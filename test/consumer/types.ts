@@ -1134,7 +1134,7 @@ async function dbBlock(): Promise<void> {
   void [checkpointed, integrity, fkRow, optimized, canCheckpoint, CHECKPOINT_MODES.length, MAINTENANCE_OPERATIONS.length];
   // @ts-expect-error — a checkpoint mode outside the closed set is a compile error
   await configured.checkpoint({ mode: 'sometimes' });
-  // the online backup: typed progress, the D4 result, the capability
+  // the online backup: typed progress, the typed result, the capability
   const backedUp: { path: string; pages: number; checkpoint: { busy: boolean } | null } =
     await configured.backupTo('/tmp/never.db', {
       rate: 16, signal: new AbortController().signal, checkpoint: 'truncate',

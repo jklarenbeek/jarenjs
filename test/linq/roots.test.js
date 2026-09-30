@@ -71,7 +71,7 @@ describe('a provider binds its items through its own root (§8)', () => {
     assert.deepStrictEqual(from(recorder(undefined).provider).toDocument(), '$[*]');
   });
 
-  it('a reseat over a named root packs the phrase; the root itself stays bare (D15)', () => {
+  it('a reseat over a named root packs the phrase; the root itself stays bare', () => {
     const { provider } = recorder('$.Post[*]');
     const doc = from(provider).orderBy((p) => p.stars).where((p) => p.stars.gt(1)).toDocument();
     assert.deepStrictEqual(doc.$for.it,
@@ -168,7 +168,7 @@ describe('one-root joins (§4, §8)', () => {
   });
 });
 
-describe('the asynchronous provider (§12, D8)', () => {
+describe('the asynchronous provider (§12)', () => {
   it('receives the WHOLE document — terminal wrapper included — once, with the externals', async () => {
     const { provider, calls } = asyncRecorder('$.Post[*]', { answer: ['p1', 'p3'] });
     const titles = await fromAsync(provider).params({ min: 2 })

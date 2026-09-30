@@ -373,7 +373,7 @@ export const sqliteDialect = createDialect({
   // INTEGER, so nothing here converts and nothing rounds.
   timeBucket: (instantSql, originSql, everyA, everyB, everyC) =>
     `(${instantSql} - (((${instantSql} - ${originSql}) % ${everyA} + ${everyB}) % ${everyC}))`,
-  // `rows` is COUNT(*) — the D5 count of SOURCE rows, which is not
+  // `rows` is COUNT(*) — the count of SOURCE rows, which is not
   // COUNT(value): a measured gap is a row that reported nothing, and
   // the difference between "nobody reported" and "everybody reported a
   // gap" is exactly what the count is for

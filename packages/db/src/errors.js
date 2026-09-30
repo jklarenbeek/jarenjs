@@ -442,7 +442,7 @@ function isUncodedLoss(error) {
 }
 
 /**
- * THE connection-loss rule (one home, D4): SQLSTATE class 08 and
+ * THE connection-loss rule (one home): SQLSTATE class 08 and
  * 57P01–57P03 (by the table), a socket errno (`ECONNRESET`, `EPIPE`, …)
  * and node-postgres's uncoded "Connection terminated …" all classify as
  * `JD2087`, class `connection`.

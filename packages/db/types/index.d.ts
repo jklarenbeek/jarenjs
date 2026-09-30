@@ -94,7 +94,7 @@ export type EntityKeyArg = string | number | Readonly<Record<string, string | nu
  */
 export type SequenceResult<T = unknown> = T[] | T | undefined;
 
-/** The D2 provider contract: a synchronous driver answers the value
+/** The provider contract: a synchronous driver answers the value
  * itself and an asynchronous one a promise of it, so a linq chain over
  * a synchronous driver stays synchronous; `await` reads both. */
 export type ValueOrPromise<T> = T | Promise<T>;
@@ -534,7 +534,7 @@ export interface StoreCapabilities {
   /** Whether dataVersion() can detect commits from other connections. */
   readonly dataVersion: boolean;
   readonly jobs: boolean;
-  /** Whether a temporal spec naming a ZONE compiles here (D7's
+  /** Whether a temporal spec naming a ZONE compiles here (the
    * injected clock was supplied at open). Without it such a document
    * is refused rather than answered in UTC. */
   readonly zoneProvider: boolean;
@@ -554,7 +554,7 @@ export interface Collection<T = unknown> {
    * `R` is what the document's `$return` produces — a document, a
    * projected value, an aggregate's number — and only the caller knows
    * it, so it is stated per call and defaults to `unknown` rather than
-   * to a guess. The D2 provider: value-or-promise so a linq chain over
+   * to a guess. The provider: value-or-promise so a linq chain over
    * a synchronous driver stays synchronous. */
   execute<R = unknown>(document: unknown, options?: ExecuteOptions): ValueOrPromise<SequenceResult<R>>;
   /** The same document as an item cursor — one item per pull. */
@@ -662,7 +662,7 @@ export interface EntitySet<T = unknown, I = unknown> {
   asNoTracking(): UntrackedReads<T>;
   /** The provider contract over this entity's root (MODEL-FORMAT §10.1):
    * the document is over the multi-entity root and arrives whole; the
-   * answer is the engine's result shape, value-or-promise (D2). */
+   * answer is the engine's result shape, value-or-promise. */
   execute<R = unknown>(document: unknown, options?: ExecuteOptions): ValueOrPromise<SequenceResult<R>>;
   /** The same document as an item cursor: one row per pull from an open
    * statement, released on `return()`; a set residual materialises the
@@ -763,7 +763,7 @@ export interface Store {
   collection<T = unknown>(name: string): Collection<T>;
   entity(name: string): EntitySet;
   /** Entity documents over the multi-entity root (§10.1); present
-   * only when the model declares entities. Value-or-promise (D2),
+   * only when the model declares entities. Value-or-promise,
    * in the engine's result shape. */
   execute?<R = unknown>(document: unknown, options?: ExecuteOptions): ValueOrPromise<SequenceResult<R>>;
   explain?(document: unknown, options?: ExecuteOptions): Promise<unknown>;
@@ -1198,10 +1198,10 @@ export interface OpenStoreOptions {
   live?: LiveBounds;
   /** The durable job queue (JOBS-FORMAT); off unless requested. */
   jobs?: boolean | JobsOptions;
-  /** The injected validation hook (D10); absent means unvalidated,
+  /** The injected validation hook; absent means unvalidated,
    * declared through `capabilities.validated`. */
   compileSchema?: (schema: unknown) => (doc: unknown) => unknown;
-  /** D7's injected clock — `{ toParts(epoch, zone), toEpoch(parts, zone,
+  /** The injected clock — `{ toParts(epoch, zone), toEpoch(parts, zone,
    * disambiguation) }`. A temporal spec naming a zone
    * (`{ "every": "P1M", "zone": "Europe/Amsterdam" }`) compiles only
    * where one was injected; without it the document is refused rather

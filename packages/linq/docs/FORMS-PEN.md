@@ -39,7 +39,7 @@ one namespaced annotation keyword added: `x-form`. That is the whole
 difference between the two pens, and it is why this document is the
 shortest of the nine — 27 of its 31 names are the schema pen's, emitting
 the schema pen's documents, and §2 links them rather than restating them
-(the binder's D4 rule: a fact has one home).
+(the binder's rule: a fact has one home).
 
 A rule is an ANNOTATION. It never changes what the schema validates:
 `required`, `additionalProperties` and every other keyword stay exactly

@@ -69,7 +69,7 @@ import { contractCatalogEn } from '../messages.js';
  */
 
 /**
- * The D7 error body of every non-2xx JSON response.
+ * The wire-error body of every non-2xx JSON response.
  * @typedef {Object} WireErrorBody
  * @property {string} code - a `JC2xxx` code, or the declared error code
  * @property {string} message
@@ -463,10 +463,10 @@ export function projectValidationDetails(policy, errors) {
 }
 
 /**
- * Build the D7 error body and the response around it. `override` is the
+ * Build the wire-error body and the response around it. `override` is the
  * host's `errorBody` option: called with the wire record (the body plus
  * `status`) and the request context; TOTAL — a projector that throws or
- * returns a non-JSON value falls back to the D7 shape.
+ * returns a non-JSON value falls back to the wire-error shape.
  * @param {number} status
  * @param {string} code
  * @param {string} message

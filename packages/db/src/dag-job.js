@@ -3,8 +3,8 @@
  * @file The composition (JOBS-FORMAT §7): a persisted `@jarenjs/flow`
  * DAG run wired to a queue job. THE FLOW ENGINE IS INJECTED, NEVER
  * IMPORTED — the shared invariant forbids `@jarenjs/db` importing
- * `@jarenjs/flow`, so `compileDag` arrives as a capability (the D10
- * shape applied to flow) and a test asserts the manifest and import
+ * `@jarenjs/flow`, so `compileDag` arrives as a capability (the shape
+ * the injected validation hook has, applied to flow) and a test asserts the manifest and import
  * graph name flow nowhere.
  *
  * Each kind's document compiles ONCE against a delegating checkpoint

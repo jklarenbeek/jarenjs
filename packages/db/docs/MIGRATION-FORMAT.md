@@ -282,7 +282,7 @@ _jaren_migrations(id TEXT PRIMARY KEY, applied_at INTEGER,
 ```
 
 `checksum` is `hashContent(canonicalizeJson(migration))` —
-signature-grade (D12), never the memo-grade `contentKey`. On every
+signature-grade, never the memo-grade `contentKey`. On every
 run, the supplied migration list MUST contain every applied migration,
 in order, with matching checksums; a migration whose recorded checksum
 differs from the document on disk is `JD0022` — someone edited an

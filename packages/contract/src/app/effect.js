@@ -2,7 +2,7 @@
 /**
  * @file `createContractEffect(client, options)`: ONE `@jarenjs/app`
  * effect handler (`run: "contract"`) that calls any operation of a
- * client and settles every descriptor with a D6 outcome
+ * client and settles every descriptor with an outcome
  * (docs/CONTRACT-FORMAT.md §11). It owns one task effect per distinct
  * `policy.task` mode the contract uses — built lazily through the
  * `createTaskEffect` factory the host hands in from `@jarenjs/app` —

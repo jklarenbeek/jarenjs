@@ -187,7 +187,7 @@ describe('a complete backup', () => {
   });
 });
 
-describe('killed mid-flight (D4)', () => {
+describe('killed mid-flight', () => {
   it('a backup cancelled from its first progress event rejects JD2079 and leaves no target and no temporary file', async () => {
     const source = tempDbPath();
     const target = tempDbPath();

@@ -422,7 +422,7 @@ describe('spatial promotions (the implied conjunct)', () => {
     }
   });
 
-  it('the nine-cell neighbourhood is a membership test over the same column (D7)', () => {
+  it('the nine-cell neighbourhood is a membership test over the same column', () => {
     const planned = planQuery(where({
       $exists: {
         '$index-of': [{ '$geohash-neighbours': 'u173zc' }, { $geohash: ['$it.at', 6] }],

@@ -195,7 +195,7 @@ describe('client outcomes — the §10.2 assembly table, row by row', () => {
     assert.strictEqual(isOutcome({ ok: true }), false);
     assert.strictEqual(isOutcome({ ok: false, kind: 'weird', error: { code: 'x' }, meta: {} }), false);
     assert.strictEqual(isOutcome(new Proxy({}, { get() { throw new Error('hostile'); } })), false);
-    // D6 (03A): the fixed shapes — a meta or error missing a member, or carrying undefined in one, is not an outcome
+    // the fixed shapes: a meta or error missing a member, or carrying undefined in one, is not an outcome
     const META = makeMeta('a', 1, null);
     const ERROR = outcomeError('c', 'm', null, undefined, false);
     assert.strictEqual(isOutcome({ ok: false, kind: 'failure', error: { code: 'x' }, meta: {} }), false);
@@ -211,7 +211,7 @@ describe('client outcomes — the §10.2 assembly table, row by row', () => {
     assert.strictEqual(isOutcome(hostFailureOutcome('a', null, null)), true);
   });
 
-  it('the D6 member lists are exactly the keys of a fresh makeMeta / outcomeError, in order, frozen', () => {
+  it('the outcome member lists are exactly the keys of a fresh makeMeta / outcomeError, in order, frozen', () => {
     assert.deepStrictEqual([...OUTCOME_META_MEMBERS], Object.keys(makeMeta('a', null, null)));
     assert.deepStrictEqual([...OUTCOME_ERROR_MEMBERS], Object.keys(outcomeError('c', 'm', null, undefined, false)));
     assert.deepStrictEqual([...OUTCOME_META_MEMBERS], ['op', 'attempt', 'trace', 'revision', 'etag', 'notModified']);

@@ -3,7 +3,7 @@
  * @file The playground's engine descriptors — each wraps a real shipped
  * `@jarenjs` compiler into a pure `run(source, data, options) → PlayResult`.
  * `sourcePanes` are the engine input(s); `dataPanes` are the JSON it runs
- * against (empty for source-only engines, which land in a later order).
+ * against (empty for a source-only engine).
  * Registered operators reach the `query`/`jslt` engines through
  * `options.operators` (a `.toOptions()` registry) — the host opt-in.
  */

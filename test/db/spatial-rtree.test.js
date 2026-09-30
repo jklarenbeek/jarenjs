@@ -13,7 +13,7 @@
  * The one legitimate difference is exactness. An R\*Tree stores
  * coordinates as 32-bit floats rounded OUTWARD, so the stored box is a
  * SUPERSET of the row's — no false negatives, which is what the implied
- * conjunct needs (D8), but not a decision. `$bbox-intersects` is
+ * conjunct needs, but not a decision. `$bbox-intersects` is
  * therefore refined rather than exact under this mapping, and
  * `strict: true` is `JD0010` where the column mapping reported a native
  * plan.
@@ -278,7 +278,7 @@ describe('the R*Tree stays in sync — every write path, through the triggers', 
     finally { temp.cleanup(); }
   });
 
-  it('packages/db writes the virtual table through NO JavaScript path (D1/D-c)', async () => {
+  it('packages/db writes the virtual table through NO JavaScript path', async () => {
     const { readFileSync, readdirSync } = await import('node:fs');
     const { join } = await import('node:path');
     const { fileURLToPath } = await import('node:url');
@@ -294,7 +294,7 @@ describe('the R*Tree stays in sync — every write path, through the triggers', 
         offenders.push(String(name));
     }
     assert.deepStrictEqual(offenders, [],
-      'the sync is three declared triggers; a second write path is exactly what D1 forbids');
+      'the sync is three declared triggers; a second write path is exactly what the one-home rule forbids');
   });
 });
 

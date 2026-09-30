@@ -5,7 +5,7 @@
  * consumer snippet that calls `invoke('product.save', …)` and reads a
  * typed outcome — TypeScript is the judge of a TypeScript question, the
  * emit pattern), render byte-identical twice, name the operation types
- * predictably (and uniquely under collisions), spell the fixed D6
+ * predictably (and uniquely under collisions), spell the fixed outcome
  * shapes exactly as the runtime member lists have them, and carry the
  * suite's `DateTime` brand on every date-formatted string.
  */

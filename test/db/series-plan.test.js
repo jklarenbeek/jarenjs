@@ -28,7 +28,7 @@ import { SERIES_REASONS, singularSelector } from '../../packages/db/src/series.j
 
 const ORIGIN = 1767225600000;
 
-/** One collection with the composite index D9 fixes, and two decoys. */
+/** One collection with the composite index the temporal plan needs, and two decoys. */
 const MODEL = {
   $model: '0.1',
   collections: {
@@ -192,7 +192,7 @@ describe('the three closed shapes seek the composite index', () => {
     const planned = plan({ $for: { s: '$[*]' },
       $where: { '$starts-with': ['$s.note', 'x'] }, $return: '$s' });
     assert.strictEqual(planned.series, null,
-      'a singular index cannot make a query temporal — only the composite shape D9 names can');
+      'a singular index cannot make a query temporal — only the composite shape can');
   });
 });
 

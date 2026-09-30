@@ -6,7 +6,7 @@
  * `serveHttp`. `invoke(op, input, ctx)` validates the input with the
  * SAME compiled validator the server will run, splits it by the declared
  * locations (path, query, header, body), sends it through an injectable
- * `fetch`, and resolves a D6 outcome for every possible result — success,
+ * `fetch`, and resolves an outcome for every possible result — success,
  * declared failure, network failure, contract violation, cancellation —
  * keeping the three identities apart: the caller's `attempt` (carried
  * in `meta`, never sent), the server's `trace` (read from

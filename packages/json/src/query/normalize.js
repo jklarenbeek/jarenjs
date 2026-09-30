@@ -616,8 +616,8 @@ function normalizeOperatorCall(key, entry, arg, docPath, opPath, scope, ctx) {
   // node through to the entry's compile)
   if (key === '$range' && ctx.limits !== null) node.limits = ctx.limits;
   // the series operators resolve their wall clock when the query
-  // compiles, and a named zone needs the tzdb this suite does not bundle
-  // (SERIES D7). The provider is a compilation capability, like a
+  // compiles, and a named zone needs the tzdb this suite does not bundle.
+  // The provider is a compilation capability, like a
   // collation, so it reaches the entry the same way $range's guard does
   if (ctx.zoneProvider !== null && CLOCK_OPERATORS.has(key)) node.zoneProvider = ctx.zoneProvider;
   return Object.freeze(node);
@@ -1294,7 +1294,7 @@ function validateNamedFunctions(value, what) {
 }
 
 // Validate the injected time-zone provider (options.zoneProvider): the
-// two-question seam SERIES D7 fixes, because this suite bundles no
+// two-question seam a named zone needs, because this suite bundles no
 // tzdb and a JSON document cannot carry one. Violations are host
 // programming errors (TypeError), like options.extensions.
 function validateZoneProvider(value) {

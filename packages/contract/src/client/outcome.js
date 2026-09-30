@@ -19,7 +19,7 @@
  *
  * Outcome, error and meta objects are built with a fixed member order so
  * each shape is one hidden class — and the shapes `makeMeta` and
- * `outcomeError` build ARE the D6 shapes of every binding (03A): `error`
+ * `outcomeError` build ARE the fixed outcome shapes of every binding: `error`
  * is always `{ code, message, status, details, retryable }`, `meta` is
  * always `{ op, attempt, trace, revision, etag, notModified }`, and no
  * member is ever `undefined` (`isJsonValue` — the predicate the app's
@@ -70,13 +70,13 @@ import { renderMessage, projectValidationDetails, verdict, HTTP_ERRORS, HANDLER_
  */
 
 /**
- * The members of every outcome `error`, in order (D6). Frozen.
+ * The members of every outcome `error`, in order. Frozen.
  * @type {readonly ['code', 'message', 'status', 'details', 'retryable']}
  */
 export const OUTCOME_ERROR_MEMBERS = Object.freeze(/** @type {const} */ (['code', 'message', 'status', 'details', 'retryable']));
 
 /**
- * The members of every outcome `meta`, in order (D6). Frozen.
+ * The members of every outcome `meta`, in order. Frozen.
  * @type {readonly ['op', 'attempt', 'trace', 'revision', 'etag', 'notModified']}
  */
 export const OUTCOME_META_MEMBERS = Object.freeze(/** @type {const} */ (['op', 'attempt', 'trace', 'revision', 'etag', 'notModified']));
@@ -193,7 +193,7 @@ export function clientError(catalog, code, params, status, details, retryable) {
 
 /**
  * Whether `value` is an object carrying every member of `members`, none
- * of them `undefined` (D6: an absent member is `null`, never omitted).
+ * of them `undefined` (an absent member is `null`, never omitted).
  * @param {any} value
  * @param {readonly string[]} members
  * @returns {boolean}
@@ -208,8 +208,8 @@ function hasMembers(value, members) {
 
 /**
  * True for a value shaped like an outcome: a plain object with a
- * boolean `ok`, a `meta` carrying every D6 meta member, and, when
- * failed, a `kind` and an `error` carrying every D6 error member with a
+ * boolean `ok`, a `meta` carrying every meta member, and, when
+ * failed, a `kind` and an `error` carrying every error member with a
  * string `code` — no member `undefined`. Reads guardedly, so a hostile
  * value classifies as "not an outcome".
  * @param {unknown} value

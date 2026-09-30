@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file The spatial corpus, run through SQLite (D9).
+ * @file The spatial corpus, run through SQLite.
  *
  * `test/json/fixtures/spatial-corpus.json` records what the JavaScript
  * engine answers for every case. This file makes the database a second

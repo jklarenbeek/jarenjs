@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file Entity types from models (D17): build an EMIT MODEL DOCUMENT
+ * @file Entity types from models: build an EMIT MODEL DOCUMENT
  * — the published contract from EMIT-FORMAT.md — that renders entity
  * interfaces, input variants and the typed-store metadata from the
  * same model document the runtime validates against.

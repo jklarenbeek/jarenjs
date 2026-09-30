@@ -70,7 +70,7 @@ export { HTTP_ERRORS, WELL_KNOWN_PATH, BodyLimitError, BodyEncodingError, readBo
  * @property {(wire: WireErrorBody & { status: number }, ctx: RequestContext | null) => unknown} [errorBody]
  *   - projects the wire error record into the response body (a legacy
  *   shape, an extra `error` string); a throw or a non-JSON result falls
- *   back to the D7 shape
+ *   back to the wire-error shape
  * @property {(error: unknown, ctx: RequestContext | null) => void} [onError]
  *   - observes `JC2008`/`JC2010` causes and ledger faults; the response never carries them
  * @property {Record<string, string | ((params: object) => string)>} [catalog]
@@ -224,7 +224,7 @@ function prepare(op, handler, tag) {
  * Serve a compiled contract over HTTP: a dispatcher whose `dispatch`
  * routes, decodes, normalizes, validates, calls the handler, validates
  * the output, applies idempotency and entity-tag policy and answers with
- * the declared statuses and the D7 error body — a pure function over
+ * the declared statuses and the wire-error body — a pure function over
  * plain request/response objects. Refuses host mistakes at construction
  * (`JC1001` handler table, `JC1002` missing handler, `JC1003` idempotency
  * without a ledger).

@@ -4,7 +4,7 @@
  * binding-agnostic (it reads `client.invoke` and nothing else), so the
  * tools execute in-process — the wiring an AI host uses when its
  * operations and its model live in one runtime. Tool execution resolves
- * D6 outcomes exactly as over HTTP, with `status: null` where a status
+ * outcomes exactly as over HTTP, with `status: null` where a status
  * cannot exist; the default set excludes the opaque operation the
  * binding could not carry.
  */

@@ -23,7 +23,7 @@
  * empty sequence, and `null` is a legitimate answer that must stay
  * distinguishable from "no answer". An entry whose answer no second
  * executor could produce (a WKT string is text this engine writes)
- * carries `executors: ["engine"]`, so a later order skips it explicitly
+ * carries `executors: ["engine"]`, so another executor skips it explicitly
  * rather than by accident.
  *
  * An entry whose `data` is a LIST carries `collection: true`: its data
@@ -346,7 +346,7 @@ const ENTRIES = [
     query: rows({ $exists: { '$index-of': [
       { '$geohash-neighbours': geohashEncode(-0.00007, 51.4779, 6) },
       { $geohash: ['$it.at', 6] }] } }),
-    note: 'the D7 case as a stored query: the point 9.7 m east is in a cell whose FIRST character differs, and only the neighbourhood finds it' },
+    note: 'the neighbourhood case as a stored query: the point 9.7 m east is in a cell whose FIRST character differs, and only the neighbourhood finds it' },
   { name: 'plan/one-cell-misses-what-nine-find', collection: true, data: GREENWICH,
     query: rows({ '$starts-with': [{ $geohash: ['$it.at', 6] }, geohashEncode(-0.00007, 51.4779, 6)] }),
     note: 'the same pair through a single cell: the neighbour across the edge is lost. This is why a prefix is bucketing' },

@@ -79,7 +79,7 @@ Three gates hold it, and §7 states what it costs:
 titles its §2 "The mapping table", because a pen maps a method to the
 member it emits. The client maps nothing: it opens a store and hands
 back typed handles, so a table with an "Emits" column would have to
-invent one. §2 keeps its D3 slot and its meaning — this is where every
+invent one. §2 keeps its slot and its meaning — this is where every
 name a caller writes is named — under the title that describes what it
 holds.
 
@@ -276,7 +276,7 @@ The implementation is the client's own surface and nothing else: it
 imports no contract module, no driver, no store; the record it writes
 is exactly the model's, and the id is the same versioned JSON tuple the
 memory ledger spells (`1:["op","scope","key"]`, injective over `|`,
-control characters and Unicode). The contract package keeps its D1
+control characters and Unicode). The contract package keeps its one
 edge: it depends on no store, and this door depends on no contract.
 
 **Which client decides the transaction.** A root client (the one `open`

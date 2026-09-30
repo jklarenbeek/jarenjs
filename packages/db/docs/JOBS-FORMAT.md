@@ -379,7 +379,7 @@ runner.start();
 await store.jobs.enqueue('sync-report', { input: { day: '2026-08-05' } });
 ```
 
-- The engine arrives as a capability (the D10 shape applied to flow);
+- The engine arrives as a capability (the validation hook's shape, applied to flow);
   `@jarenjs/db`'s manifest and import graph name `@jarenjs/flow`
   nowhere, asserted by test.
 - The job id is the run id. Node values save into

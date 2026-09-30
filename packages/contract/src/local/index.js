@@ -11,7 +11,7 @@
  * compiled validator (a refusal is the `JC2050` outcome — nothing ran),
  * runs the neutral pipeline against the handler with a frozen context
  * `{ op, trace, signal, params: null, headers: {}, fail, idempotency:
- * null }`, and resolves a D6 outcome: a declared failure is `kind:
+ * null }`, and resolves an outcome: a declared failure is `kind:
  * "failure"` with `status: null` (the member present, never omitted —
  * this binding carries no statuses and `capabilities` says so); a
  * handler fault of any class — a throw, an undeclared code, a broken
@@ -416,7 +416,7 @@ export function openLocalClient(contract, handlers, options = {}) {
     if (out.afterFault !== undefined) observed(out.afterFault);
     const result = /** @type {import('../pipeline.js').OperationResult} */ (out.result);
 
-    // 4. assemble the D6 outcome
+    // 4. assemble the outcome
     return expose(outcomeOf(result));
   }
 

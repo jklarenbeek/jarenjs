@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file The deterministic-function hatch (D9): a conjunct with no
+ * @file The deterministic-function hatch: a conjunct with no
  * native spelling rides a registered WHERE-clause function when — and
  * only when — the capability exists and the fragment is provably
  * deterministic (no externals, no host functions, no collations).

@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file Expression capture (D4): a predicate or projection callback
+ * @file Expression capture: a predicate or projection callback
  * receives a RECORDING PROXY, never a stringified function. Member
  * access records a path segment; a method call records an operator; the
  * output is a plain Jaren query expression (QUERY-FORMAT.md §§3–8) —

@@ -127,7 +127,7 @@ describe('a recorded run: the input the document accepts', function () {
       'output validation is the alarm this demo exists to show ringing');
   });
 
-  it('settles a real outcome envelope — the D6 members, none of them undefined', async function () {
+  it('settles a real outcome envelope — the fixed members, none of them undefined', async function () {
     const run = await runHeroDispatch(HERO_INPUTS.valid);
     const outcome = run.settled;
     assert.strictEqual(outcome.ok, true);

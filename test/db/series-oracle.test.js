@@ -13,7 +13,7 @@
  * than against itself.
  *
  * Every case runs under two mappings — a collection that declares the
- * composite `(series, at)` index D9 fixes, and one that declares
+ * composite `(series, at)` index the temporal plan needs, and one that declares
  * nothing — and both must equal what the references recorded. An index
  * narrows; it never decides, and a physical mapping is not allowed to
  * be visible in an answer.
@@ -416,7 +416,7 @@ describe('the streaming cursor answers what execute answers', () => {
 });
 
 describe("the injected clock reaches the residual, and the zone survives it", () => {
-  // D7's seam, and the one thing it exists to prevent: a refinement
+  // the zone seam, and the one thing it exists to prevent: a refinement
   // that rebuilt the spec instead of passing it through would answer in
   // UTC and be right for eight months of the year. The provider is a
   // scripted fixed offset, so nothing here depends on the host's tzdb.
@@ -472,7 +472,7 @@ describe("the injected clock reaches the residual, and the zone survives it", ()
       // would pass for a refinement that dropped the zone
       assert.ok(!deepEquals(actual,
         resampleSeries(rows, { every: 'P1M', aggregate: 'mean' })),
-      'a UTC answer here would be the D7 failure this test exists for');
+      'a UTC answer here would be the zone failure this test exists for');
     }
     finally {
       await store.close();

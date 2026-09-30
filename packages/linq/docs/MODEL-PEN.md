@@ -260,7 +260,7 @@ behaviour and the class is the whole difference.
 Every builder method the schema pen documents — `.optional()`,
 `.open()`, `.min()`, `.format()`, `.check()`, `.describe()`, `.extend()`,
 `.with()`, and the rest — is reachable here too and behaves identically;
-[SCHEMA-PEN.md](SCHEMA-PEN.md) §2 is their one home (D4). `.with()` is
+[SCHEMA-PEN.md](SCHEMA-PEN.md) §2 is their one home. `.with()` is
 what keeps the subclass: `m.string().min(1).nullable().key` is still a
 function.
 
