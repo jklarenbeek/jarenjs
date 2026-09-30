@@ -21,7 +21,7 @@ import type {
 import type {
   Collection, ExecuteOptions, LiveOptions, LiveQuery, LoadExplanation, OpenStoreOptions,
   SavepointController, SaveReport, StoreCapabilities, TransactionStore,
-  EntityCursorOptions, QueryCursor, LoadContinuation, Page, IsolationLevel,
+  EntityCursorOptions, QueryCursor, LoadContinuation, Page, IsolationLevel, AllOptions,
 } from '@jarenjs/db';
 import type { JarenValidator } from '@jarenjs/validate';
 import type { Runtime } from '@jarenjs/core/runtime';
@@ -81,10 +81,17 @@ export type ChainStart<T> = Omit<AsyncSequence<T, {}>, 'explain'> & {
 };
 
 /** A collection handle: the collection, the chain start, and a `live`
- * that takes a chain (its document and bound params) or a document. */
-export type CollectionHandle<T> = Omit<Collection<T>, 'live' | 'explain'> & ChainStart<T> & {
+ * that takes a chain (its document and bound params) or a document.
+ * `all` is told apart by its argument: nothing (or `AllOptions`) is the
+ * collection's every document, always an array; a predicate is the
+ * chain's quantifier. */
+export type CollectionHandle<T> = Omit<Collection<T>, 'live' | 'explain' | 'all'> & Omit<ChainStart<T>, 'all'> & {
   explain(document: unknown, options?: ExecuteOptions): Promise<unknown>;
   live<R = T>(source?: AsyncSequence<R, any> | object, options?: LiveOptions): Promise<TypedLiveQuery<R>>;
+  /** Every stored document — always an array, one entry per document. */
+  all(options?: AllOptions): Promise<T[]>;
+  /** Whether every document satisfies `predicate` (the chain's quantifier). */
+  all(predicate: Parameters<AsyncSequence<T, {}>['all']>[0]): Promise<boolean>;
 };
 
 type TargetMeta<E extends MetaMap<E>, M extends EntityMeta, K extends keyof M['relations']> =
@@ -305,6 +312,10 @@ export interface DbLedgerOptions {
   collection?: string;
   /** The retention of a key; 86,400,000 ms by default. */
   ttlMs?: number;
+  /** How long a `started` claim blocks its key — `ttlMs` by default, at
+   * most `ttlMs`; past it the key is claimed afresh under a new
+   * generation and the old ref is refused (`JL2007`). */
+  startedTtlMs?: number;
   /** The host's runtime record: its `now` is the clock, its `uuid`
    * mints every generation. */
   runtime?: Partial<Runtime>;
@@ -313,9 +324,20 @@ export interface DbLedgerOptions {
   now?: () => number;
 }
 
+/** One claim `inFlight` reports: the tuple, the generation that started
+ * it (what `release` may name), and when it was claimed. */
+export interface InFlightClaim {
+  readonly op: string;
+  readonly scope: string;
+  readonly key: string;
+  readonly generation: string;
+  readonly claimedAt: number;
+}
+
 /** The ledger the http binding calls, over the store: structurally the
  * contract package's `Ledger`, every method asynchronous. A `commit` or
- * `fail` whose ref settles no started record rejects `JL2007`. */
+ * `fail` whose ref settles no started record rejects `JL2007`; a
+ * `fail(ref, false)` without the response it replays rejects `JL2010`. */
 export interface DbLedger {
   claim(claim: { op: string; scope: string; key: string; hash: string; now?: number }): Promise<DbClaimResult>;
   commit(ref: unknown, response: unknown, now?: number): Promise<void>;
@@ -323,6 +345,13 @@ export interface DbLedger {
   lookup(key: { op: string; scope: string; key: string; now?: number }): Promise<DbLedgerRecord | null>;
   /** Drop every expired record; answers how many. */
   sweep(now?: number): Promise<number>;
+  /** The claims still `started` and blocking their key, oldest first —
+   * `olderThan` an instant (epoch ms), `limit` 1,000 by default. */
+  inFlight(query?: { op?: string; scope?: string; olderThan?: number; limit?: number; now?: number }): Promise<InFlightClaim[]>;
+  /** Free one `started` claim as a server fault would (failed, retryable,
+   * no response) — only `generation`'s, when given; `false` when there is
+   * nothing to release. Takes a claim as `inFlight` answers it. */
+  release(claim: { op: string; scope: string; key: string; generation?: string; claimedAt?: number; now?: number }): Promise<boolean>;
 }
 
 /** What the durable adapters need of a client (DB-CLIENT.md §2.6): the

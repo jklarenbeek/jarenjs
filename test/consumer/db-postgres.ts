@@ -44,6 +44,13 @@ const ran: IsolationLevel = await owned.transaction(async (tx) => {
 await owned.transaction(async () => 1, { isolation: 'snapshot' });
 // @ts-expect-error — an owner is { id, leaseMs? }
 await openStore({ $model: '0.1', collections: {} }, { driver: portable, owner: 'api-1' });
+// compare-and-set and every document, on the store's own collection
+const accounts = owned.collection<{ id: string; revision: number }>('accounts');
+await accounts.put({ id: 'a', revision: 2 }, undefined, { expect: { path: '/revision', value: 1 } });
+const everyAccount: { id: string; revision: number }[] = await accounts.all({ deadline: Date.now() + 1000 });
+// @ts-expect-error — insert holds no precondition: its options read nothing
+await accounts.insert({ id: 'b', revision: 1 }, { expect: { path: '/revision', value: 1 } });
+void everyAccount;
 declare const refused: OwnerError;
 const holder: string | null = refused.owner;
 const until: number | null = refused.expiresAt;

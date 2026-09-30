@@ -179,6 +179,7 @@ function corpusOf(dialect) {
   out['dml.insertAllocated'] = dialect.dml.insertAllocated(shapeWithStored);
   out['dml.upsert'] = dialect.dml.upsert(shapeWithStored);
   out['dml.get'] = dialect.dml.get(physical);
+  out['dml.getForUpdate'] = dialect.dml.getForUpdate(physical);
   out['dml.del'] = dialect.dml.del(physical);
   out['dml.keySpellings'] = dialect.dml.keySpellings(physical);
   out['dml.rekey'] = dialect.dml.rekey(physical);

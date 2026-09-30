@@ -21,7 +21,7 @@ import { join } from 'node:path';
 import { compileContract } from '@jarenjs/contract';
 import { serveHttp } from '@jarenjs/contract/http';
 import { jsonReq, json, load, shopHandlers } from './helpers.js';
-import { ledgerContract, CLAIM, RESPONSE } from './ledger-contract.js';
+import { ledgerContract, cases, CLAIM, RESPONSE } from './ledger-contract.js';
 
 // —— the example (docs/CONTRACT-FORMAT.md §8.1) ——
 import { DatabaseSync } from 'node:sqlite';
@@ -79,6 +79,9 @@ export function createSqliteLedger(path, { ttlMs = 86_400_000, now: clock = Date
       settled(ref, settle.run('committed', JSON.stringify(response), null, time, /** @type {any} */ (ref)?.id ?? '', /** @type {any} */ (ref)?.generation ?? '', time).changes);
     },
     fail(ref, retryable, response, now) {
+      // a failure for good replays its response, so it must carry one
+      if (retryable !== true && (response === undefined || response === null))
+        throw Object.assign(new Error('ledger: fail(ref, false) needs the response it replays'), { code: 'JC1015' });
       const time = at(now);
       settled(ref, settle.run('failed', response === undefined ? null : JSON.stringify(response), retryable === true ? 1 : 0, time, /** @type {any} */ (ref)?.id ?? '', /** @type {any} */ (ref)?.generation ?? '', time).changes);
     },
@@ -104,6 +107,13 @@ let n = 0;
 ledgerContract('the §8.1 sqlite ledger', (options) => {
   const ledger = createSqliteLedger(join(dir, `contract-${n++}.db`), options);
   return { ledger, staleCode: 'JC1011', close: () => ledger.close() };
+});
+
+describe('the §8.1 sqlite ledger — a failure for good carries its response', () => {
+  it('fail(ref, false) without a response is refused JC1015, and the claim stays started', () => cases.missingResponse((options) => {
+    const ledger = createSqliteLedger(join(dir, `missing-${n++}.db`), options);
+    return { ledger, staleCode: 'JC1011', failCode: 'JC1015', close: () => ledger.close() };
+  }));
 });
 
 describe('the §8.1 sqlite ledger — durable, and carried by serveHttp', () => {

@@ -938,6 +938,7 @@ wire response:
 | `JC1011` | a ledger `commit`/`fail` named a ref that settles no started record — expired, reclaimed under a newer generation, or settled already (§8); refused by the ledger, reported to `onError` by the binding |
 | `JC1013` | a durable command settlement capability is malformed |
 | `JC1014` | continuation host options, key material or JSON input are malformed (§20) |
+| `JC1015` | a ledger `fail(ref, false)` carried no response: a failure that is not retryable replays its stored response, so it must carry one — refused, and the claim stays `started` (§8) |
 | `JC2110` | a durable command was refused or failed validation |
 | `JC1012` | a provider executor, descriptor host or run capability is malformed (PROVIDER-FORMAT.md) |
 
@@ -1214,7 +1215,11 @@ is the same request. The binding then calls the ledger:
 { "claim":  "({ op, scope, key, hash, now }) → { state: 'new', ref } | { state: 'replay', response } | { state: 'in-progress' } | { state: 'mismatch' }",
   "commit": "(ref, response, now?) → void",
   "fail":   "(ref, retryable, response?, now?) → void",
-  "lookup": "({ op, scope, key, now? }) → record | null" }
+  "lookup": "({ op, scope, key, now? }) → record | null",
+  // optional: the binding never calls them, both suite ledgers carry them
+  "sweep":    "(now?) → count",
+  "inFlight": "({ op?, scope?, olderThan?, limit?, now? }?) → [{ op, scope, key, generation, claimedAt }]",
+  "release":  "({ op, scope, key, generation?, now? }) → boolean" }
 ```
 
 The `ref` a `new` claim hands back is `{ id, generation }` — the
@@ -1228,7 +1233,15 @@ ref whose record expired, was reclaimed under a newer generation, or was
 settled already is refused with `JC1011` (thrown or rejected) — the
 binding reports it to `onError` and the response still goes out, so a
 stale settlement is visible instead of silently landing on a later
-claim's record.
+claim's record. The stale-settlement code is `JC1011` on the memory
+ledger and on the §8.1 example, and `JL2007` on `createDbLedger`
+(DB-CLIENT.md §2.6).
+
+A failure for good carries the response it replays: `fail(ref, false)`
+without one is refused — `JC1015` on the memory ledger, `JL2010` on
+`createDbLedger` — and the claim stays `started`. Such a failure could
+replay nothing, and a ledger that freed the key instead re-ran a command
+that had failed for good. The binding always passes a response.
 
 Semantics the binding relies on: same key + same hash → `replay` — the
 stored `{ status, headers, body }` **verbatim** with a fresh
@@ -1277,14 +1290,52 @@ milliseconds; anything else is a `TypeError`, the handler's fault
 (`JC2008`). A failure that may not be retried carries no `retry-after`,
 whatever `retryAfterMs` says, and neither does its replay.
 
-`createMemoryLedger({ ttlMs = 86_400_000, now, runtime })` (`@jarenjs/contract/ledger`)
-is the reference implementation over a `Map`: synchronous,
-single-process, expiring on `claim` and `lookup`, with `sweep(now?)` for a
-host timer and `size`. Built without `now` or `runtime` it keeps time by
-the instants the binding passes it (a host-side `lookup`/`sweep` that
-passes none uses the latest one); built with either, that clock judges
-every record; the runtime record's `uuid` mints each generation, and
-`lookup` answers a copy. The record it keeps is:
+`createMemoryLedger({ ttlMs = 86_400_000, startedTtlMs = ttlMs, now, runtime })`
+(`@jarenjs/contract/ledger`) is the reference implementation over a
+`Map`: synchronous, single-process, expiring on `claim` and `lookup`,
+with `sweep(now?)` for a host timer and `size`. Built without `now` or
+`runtime` it keeps time by the instants the binding passes it (a
+host-side `lookup`/`sweep` that passes none uses the latest one); built
+with either, that clock judges every record; the runtime record's `uuid`
+mints each generation, and `lookup` answers a copy. Its options are a
+closed set (a `TypeError` names an unknown one).
+
+**A claim's lease and a key's retention are two numbers.** `ttlMs` is how
+long a settled key is kept (and replayed); `startedTtlMs` — at most
+`ttlMs`, and `ttlMs` by default, which is the behaviour this ledger always
+had — is how long a `started` claim blocks its key. A request that dies
+between its claim and its settlement leaves the key `in-progress` only
+until then: the next claim takes the key under a new generation, and the
+dead request's late settlement is refused by the generation fence. A
+started record's `expiresAt` is its lease, a settled one's `createdAt +
+ttlMs`, so a second ledger instance over the same records judges both
+alike; `lookup`, `sweep` and a settlement treat an abandoned claim as
+expired at its lease end.
+
+**Interrupted claims are found and released by the host.**
+`inFlight({ op?, scope?, olderThan?, limit? })` lists the claims still
+`started` and blocking their key — `{ op, scope, key, generation,
+claimedAt }`, oldest first, `limit` 1,000 by default, `olderThan` an
+instant like every ledger `now` (the claims made before it).
+`release({ op, scope, key, generation? })` leaves one such claim exactly
+as a server fault leaves it (`failed`, retryable, no response), so the
+next claim of the key is `new`; given `generation`, it releases only that
+claim. It answers `false` — changing nothing — when there is nothing to
+release: no record, a settled one, another generation, or a second
+release. A single-process host that knows no request outlives it frees
+its own interrupted claims at startup:
+
+```js
+for (const claim of await ledger.inFlight()) await ledger.release(claim);
+```
+
+It is safe for the reason every settlement is: each released claim is
+fenced by its generation, so a request of the previous run that somehow
+settles later is refused (`JC1011`), and a key another process claimed
+since carries another generation and is not released. Both methods
+refuse an unknown member or a malformed value with a `TypeError`.
+
+The record it keeps is:
 
 ```jsonc
 { "id": "1:[\"product.save\",\"tenant-a\",\"k-1\"]",   // ledgerId(op, scope, key): version 1, the JSON tuple
@@ -1398,6 +1449,9 @@ export function createSqliteLedger(path, { ttlMs = 86_400_000, now: clock = Date
       settled(ref, settle.run('committed', JSON.stringify(response), null, time, (ref)?.id ?? '', (ref)?.generation ?? '', time).changes);
     },
     fail(ref, retryable, response, now) {
+      // a failure for good replays its response, so it must carry one
+      if (retryable !== true && (response === undefined || response === null))
+        throw Object.assign(new Error('ledger: fail(ref, false) needs the response it replays'), { code: 'JC1015' });
       const time = at(now);
       settled(ref, settle.run('failed', response === undefined ? null : JSON.stringify(response), retryable === true ? 1 : 0, time, (ref)?.id ?? '', (ref)?.generation ?? '', time).changes);
     },

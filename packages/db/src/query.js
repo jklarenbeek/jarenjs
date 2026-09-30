@@ -1188,8 +1188,11 @@ export function createQueryEngine(context) {
    * @param {any} document
    * @param {{ externals?: any, strict?: boolean, profile?: any,
    *   pushdown?: boolean, signal?: AbortSignal }} [options]
+   * @param {typeof createCursor} [cursorFactory] - the synchronous cursor
+   *   for a caller that drains it on a synchronous driver (`all()` on the
+   *   synchronous twin); the asynchronous one otherwise
    */
-  const query = (document, options = undefined) => {
+  const query = (document, options = undefined, cursorFactory = createCursor) => {
     requireCallable(options, state.now);
     const { externals, strict, profile, pushdown } = callState(options);
     const entry = entryFor(document, strict, profile, pushdown);
@@ -1201,13 +1204,13 @@ export function createQueryEngine(context) {
     if (entry.planned.wrapped === true) {
       // a chain's element window is ONE item — the array — whatever
       // the plan mode; the cursor hands it over as `execute` answers it
-      return createCursor({ ...classified, signal, deadline, now: state.now, wrap: driverWrap,
+      return cursorFactory({ ...classified, signal, deadline, now: state.now, wrap: driverWrap,
         materialize: () => chain(execute(document, options), (value) => [value]) });
     }
     const diverted = mustDivert(entry, externals);
     if (diverted || entry.planned.mode === 'set' || entry.planned.mode === 'knn') {
       // the barrier: materialize candidates, pack the result items
-      return createCursor({ ...classified, signal, deadline, now: state.now, wrap: driverWrap,
+      return cursorFactory({ ...classified, signal, deadline, now: state.now, wrap: driverWrap,
         materialize: () => chain(guardScan(entry), () =>
           chain(candidatesOf(entry, externals, diverted), (docs) => {
             const items = packedResidualOf(entry, document)(docs, externals);
@@ -1217,14 +1220,14 @@ export function createQueryEngine(context) {
     }
     if (entry.plan.group !== null && entry.plan.aggregate === null) {
       // a native grouping is a barrier: the groups are the answer
-      return createCursor({ ...classified, signal, deadline, now: state.now, wrap: driverWrap,
+      return cursorFactory({ ...classified, signal, deadline, now: state.now, wrap: driverWrap,
         materialize: () => chain(guardScan(entry), () => chain(statementOf(entry), (statement) =>
           chain(runAll(entry, externals, statement), (rows) =>
             groupItems(entry.plan.group, checkRowBound(entry, rows))))) });
     }
     if (entry.plan.bucket !== null) {
       // a native bucket is a barrier: the groups are the answer
-      return createCursor({ ...classified, signal, deadline, now: state.now, wrap: driverWrap,
+      return cursorFactory({ ...classified, signal, deadline, now: state.now, wrap: driverWrap,
         materialize: () => chain(guardScan(entry), () => chain(statementOf(entry), (statement) =>
           chain(runAll(entry, externals, statement), (rows) => {
             const items = bucketItems(entry, checkRowBound(entry, rows));
@@ -1239,7 +1242,7 @@ export function createQueryEngine(context) {
     if (entry.plan.aggregate !== null) {
       // a native aggregate yields exactly one item; an int64 overflow
       // answers the engine's item instead
-      return createCursor({ ...classified, signal, deadline, now: state.now, wrap: driverWrap,
+      return cursorFactory({ ...classified, signal, deadline, now: state.now, wrap: driverWrap,
         materialize: () => chain(guardScan(entry), () => chain(statementOf(entry), (statement) =>
           recoverOverflow(() => chain(runGet(entry, externals, statement), (row) => {
             const value = aggregateResult(entry, row);
@@ -1252,7 +1255,7 @@ export function createQueryEngine(context) {
     const tally = seriesTally(entry);
     // a cursor iterates a statement of its OWN: two cursors over one
     // cached statement invalidate each other's iterator at the driver
-    return createCursor({ ...classified, signal, deadline, now: state.now, wrap: driverWrap,
+    return cursorFactory({ ...classified, signal, deadline, now: state.now, wrap: driverWrap,
       // the bind may have to READ first (a seek's anchor), so it settles
       // before the statement it binds is prepared
       open: () => chain(guardScan(entry), () => chain(bindParams(entry, externals),

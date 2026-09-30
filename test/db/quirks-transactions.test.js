@@ -162,8 +162,10 @@ describe('transaction quirks on PostgreSQL', { skip: !url && 'JAREN_PG_URL is no
     const { store, proxy, close } = await lossy();
     try {
       await store.collection('docs').put({ id: 'k', tags: [] });
-      proxy.arm('UPDATE');
-      const error = await store.collection('docs').patch('k', [{ op: 'add', path: '/tags/-', value: 'x' }]).catch((/** @type {any} */ e) => e);
+      // a put is one autocommit statement (a patch reads and writes in a
+      // transaction of its own, which the next case covers)
+      proxy.arm('INSERT');
+      const error = await store.collection('docs').put({ id: 'k', tags: ['x'] }).catch((/** @type {any} */ e) => e);
       assert.deepEqual([error.code, error.class, error.retryable], ['JD2087', 'connection', false]);
       const row = (await admin.query(`SELECT doc FROM "${schema}"."docs" WHERE key = 'k'`)).rows[0].doc;
       assert.deepEqual(row.tags, ['x'], 'it had committed — a retry would have applied it twice');
@@ -174,6 +176,21 @@ describe('transaction quirks on PostgreSQL', { skip: !url && 'JAREN_PG_URL is no
       assert.equal(second.code, 'JD2087');
       assert.notEqual(first, second, 'not one object thrown to every caller');
       assert.equal(second.attempts, undefined, "the first caller's attempts stay the first caller's");
+    }
+    finally { await close(); }
+  });
+
+  it('6b. a patch whose UPDATE reply was lost inside its own transaction is one JD2087, and nothing committed', async () => {
+    const { store, proxy, close } = await lossy();
+    try {
+      await store.collection('docs').put({ id: 'p', tags: [] });
+      proxy.arm('UPDATE');
+      const error = await store.collection('docs').patch('p', [{ op: 'add', path: '/tags/-', value: 'x' }]).catch((/** @type {any} */ e) => e);
+      // the failed ROLLBACK on the lost session is the same failure, not a second one
+      assert.equal(error instanceof AggregateError, false, 'not a TransactionFailure');
+      assert.deepEqual([error.code, error.class, error.retryable], ['JD2087', 'connection', false]);
+      const row = (await admin.query(`SELECT doc FROM "${schema}"."docs" WHERE key = 'p'`)).rows[0].doc;
+      assert.deepEqual(row.tags, [], 'its transaction never committed: the server rolled it back with the session');
     }
     finally { await close(); }
   });

@@ -406,6 +406,8 @@ export function postgresDialect(options = undefined) {
     // the owner lock (MODEL-FORMAT §5.1): no table — a session lock of its
     // own class, held for the store's session and released at close
     owner: Object.freeze({ kind: 'session', ...OWNER_LOCK }),
+    // a read-modify-write locks the ROW it reads, never the store
+    rowLockSuffix: ' FOR UPDATE',
     replication: postgresReplication,
     // Ordinary writes still check after each statement. Logical replay alone
     // defers validation so canonical envelope order need not follow FK order.

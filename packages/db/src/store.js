@@ -24,7 +24,8 @@ import { resolveRuntime } from '@jarenjs/core/runtime';
 import { createBoundedCache } from '@jarenjs/core/cache';
 import { backoffDelay, sleep } from '@jarenjs/core/retry';
 import { applyJSONPatch } from '@jarenjs/json/patch';
-import { parseJSONPointer } from '@jarenjs/json/pointer';
+import { parseJSONPointer, compileJSONPointer, JSONPOINTER_NOTHING } from '@jarenjs/json/pointer';
+import { equalsJson } from '@jarenjs/core/object';
 
 import { DbCompileError, DbRuntimeError, wrapDriverError, isDriverError, classifyDriverError } from './errors.js';
 import { chain, toPromise, isThenable, attempt, abortReason } from './driver.js';
@@ -684,10 +685,10 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
   };
   /** @type {Map<string, any>} */
   const statements = new Map();
-  const prepared = (name, sql) => {
+  const prepared = (name, sql, metadata = undefined) => {
     let statement = statements.get(name);
     if (statement === undefined) {
-      statement = connection.prepare(sql);
+      statement = connection.prepare(sql, metadata);
       statements.set(name, statement);
     }
     return statement;
@@ -798,6 +799,104 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
       ? connection.transaction(() => chain(converge(/** @type {number} */ (key)), write), 'immediate')
       : write());
 
+  /**
+   * A write's options — a closed set, its last argument (MODEL-FORMAT
+   * §5): `expect`, one precondition `{ path, value }` or a non-empty list
+   * of them, on `put`, `patch` and `delete`; nothing on `insert`, which
+   * has no stored document to hold one to. Anything else, or options
+   * that are not a plain object, is `JD0013` before any statement.
+   * @param {unknown} options
+   * @param {string} verb
+   * @param {boolean} expects - whether this write reads `expect`
+   * @returns {{ get: (doc: any) => any, path: string, value: any }[] | null}
+   */
+  const readWriteOptions = (options, verb, expects) => {
+    if (options === undefined) return null;
+    const spelling = `collection('${collection.name}').${verb}`;
+    const refuse = (/** @type {string} */ reason) => new DbCompileError('JD0013', `${spelling}: ${reason}`);
+    if (!isPlainOptions(options))
+      throw refuse(`its options are ${expects ? '{ expect }' : 'an empty object'}, not ${describeValue(options)}`);
+    refuseUnknownMembers(options, expects ? ['expect'] : [], (key, hint) =>
+      refuse(`option '${key}' is not one ${verb} reads${hint}`));
+    const { expect } = /** @type {any} */ (options);
+    if (expect === undefined) return null;
+    const list = Array.isArray(expect) ? expect : [expect];
+    if (list.length === 0) throw refuse('expect is one { path, value } or a non-empty list of them');
+    return list.map((one) => {
+      if (!isPlainOptions(one)) throw refuse(`an expect is { path, value }, not ${describeValue(one)}`);
+      refuseUnknownMembers(one, ['path', 'value'], (key, hint) =>
+        refuse(`expect member '${key}' is not one it reads${hint}`));
+      const { path, value } = /** @type {any} */ (one);
+      let get;
+      try {
+        get = compileJSONPointer(path);
+      }
+      catch {
+        throw refuse(`an expect's path is a JSON Pointer (RFC 6901), not ${describeValue(path)}`);
+      }
+      if (value === undefined) throw refuse(`the expect at '${path}' needs a value: the JSON value the stored document holds there`);
+      return { get, path, value };
+    });
+  };
+  /**
+   * Refuse a write whose preconditions the stored document does not meet
+   * (`JD2040`) — judged inside the write's own transaction, against the
+   * very document the write replaces. Nothing stored meets none.
+   * @param {string} verb @param {string | number} key
+   * @param {{ get: (doc: any) => any, path: string, value: any }[]} expected
+   * @param {any} current - the stored document, or `undefined`
+   */
+  const requireExpected = (verb, key, expected, current) => {
+    if (current === undefined) {
+      throw new DbRuntimeError('JD2040',
+        `${verb}: nothing is stored under key '${String(key)}', so its expect does not hold`,
+        { docPath: collection.docPath, collection: collection.name, key });
+    }
+    const failed = expected.find((one) => {
+      const actual = one.get(current);
+      return actual === JSONPOINTER_NOTHING || !equalsJson(actual, one.value);
+    });
+    if (failed !== undefined) {
+      throw new DbRuntimeError('JD2040',
+        `${verb}: the document stored under key '${String(key)}' does not hold ${JSON.stringify(failed.value)} `
+        + `at '${failed.path}' — it changed since it was read; nothing was written`,
+        { docPath: collection.docPath, collection: collection.name, key });
+    }
+  };
+  /**
+   * A read-modify-write, atomically: the read and the write in ONE write
+   * transaction — its own at the root (SQLite's `BEGIN IMMEDIATE`, where
+   * writers serialize; on PostgreSQL a plain one whose read locks the ROW,
+   * never the store's writer lock), a savepoint inside a caller's. So a
+   * precondition, a leading `test` and the validator all judge the very
+   * document the write replaces: another writer can no longer slip a
+   * commit between the read and the write.
+   * @param {string | number} key
+   * @param {(current: any) => any} fn - receives the stored document or `undefined`
+   */
+  const atomically = (key, fn) => connection.transaction(() =>
+    chain(spelledTwice(key) ? converge(/** @type {number} */ (key)) : null, () =>
+      chain(attempt(() => chain(
+        // buffered: a point read under the write, never a server cursor
+        prepared('getForUpdate', dialect.dml.getForUpdate(shape), { buffered: true }), (statement) =>
+          chain(statement.get([bindKey(key)]), (row) => (row === undefined ? undefined : JSON.parse(row.doc)))),
+      (error) => wrapDriverError(error, { docPath: collection.docPath, collection: collection.name, key })), fn)),
+  'immediate');
+  /**
+   * `all()`'s options: the cursor's own — `signal`, `deadline`, `profile`,
+   * `strictStreaming` — and nothing a fixed document cannot use
+   * (`JD0013`).
+   * @param {unknown} options
+   */
+  const readAllOptions = (options) => {
+    if (options === undefined) return;
+    const spelling = `collection('${collection.name}').all`;
+    if (!isPlainOptions(options))
+      throw new DbCompileError('JD0013', `${spelling}: its options are an object, not ${describeValue(options)}`);
+    refuseUnknownMembers(options, ['signal', 'deadline', 'profile', 'strictStreaming'], (key, hint) =>
+      new DbCompileError('JD0013', `${spelling} option '${key}' is not one it reads${hint}`));
+  };
+
   // RETURNING is decoded after the server has inserted the row. Keep
   // decoding in the same transaction so an unrepresentable allocated
   // key refuses without committing a document the caller cannot address.
@@ -831,7 +930,8 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
             (row) => (row === undefined ? undefined : JSON.parse(row.doc))))),
       (error) => wrapDriverError(error, { docPath: collection.docPath, collection: collection.name, key }));
     },
-    insert(doc) {
+    insert(doc, options) {
+      readWriteOptions(options, 'insert', false);
       checkValid(doc);
       const key = resolveWriteKey(doc, undefined);
       if (key === null) return insertAllocated(doc);
@@ -840,25 +940,45 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
           [bindKey(key), JSON.stringify(doc), ...derivedFor(doc)], key, false),
         () => key));
     },
-    put(doc, explicitKey) {
+    put(doc, explicitKey, options) {
+      const expected = readWriteOptions(options, 'put', true);
       checkValid(doc);
       const key = resolveWriteKey(doc, explicitKey);
-      if (key === null) return insertAllocated(doc);
-      return keyedWrite(key, () => chain(
+      if (key === null) {
+        // a key the database allocates names no stored document yet
+        if (expected !== null) requireExpected('put', '(allocated)', expected, undefined);
+        return insertAllocated(doc);
+      }
+      const upsert = () => chain(
         runWrite('upsert', dialect.dml.upsert(shape),
           [bindKey(key), JSON.stringify(doc), ...derivedFor(doc)], key, false),
-        () => key));
+        () => key);
+      // a plain put is one statement; one with a precondition reads what
+      // it replaces in the same transaction
+      return expected === null ? keyedWrite(key, upsert)
+        : atomically(key, (current) => {
+          requireExpected('put', key, expected, current);
+          return upsert();
+        });
     },
-    patch(key, ops) {
+    patch(key, ops, options) {
       requireKey(key, collection.name, collection.docPath);
-      return keyedWrite(key, () => chain(core.get(key), (current) => {
+      const expected = readWriteOptions(options, 'patch', true);
+      return atomically(key, (current) => {
         if (current === undefined) {
           throw new DbRuntimeError('JD2006',
             `no document to patch under key '${String(key)}'`,
             { docPath: collection.docPath, collection: collection.name, key });
         }
-        // the copy-on-write engine validates the RESULT before any SQL
+        if (expected !== null) requireExpected('patch', key, expected, current);
+        // the copy-on-write engine applies the patch to the stored
+        // document read under this transaction's lock, and the RESULT is
+        // validated before the write — so the document validated is the
+        // document written
         const next = applyJSONPatch(current, ops);
+        // a patch that changes nothing writes nothing: no statement, no
+        // change for capture, no commit another connection can see
+        if (equalsJson(next, current)) return next;
         checkValid(next);
         // the document's key IS its key: a patch that rewrites it is the
         // same disagreement `put(doc, key)` refuses
@@ -889,13 +1009,58 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
           chain(attempt(() => statement.run([...params, ...derivedFor(next), bindKey(key)]),
             (error) => wrapWriteError(error, plan, collection.name, collection.docPath, key)),
           () => next));
-      }));
+      });
     },
-    delete(key) {
+    delete(key, options) {
       requireKey(key, collection.name, collection.docPath);
-      return keyedWrite(key, () => chain(
+      const expected = readWriteOptions(options, 'delete', true);
+      const remove = () => chain(
         runWrite('delete', dialect.dml.del(shape), [bindKey(key)], key, false),
-        (result) => Number(result?.changes ?? 0) > 0));
+        (result) => Number(result?.changes ?? 0) > 0);
+      return expected === null ? keyedWrite(key, remove)
+        : atomically(key, (current) => {
+          requireExpected('delete', key, expected, current);
+          return remove();
+        });
+    },
+    /**
+     * Every stored document, ALWAYS as an array with one entry per
+     * document, in the order `execute('$[*]')` visits them. It drains the
+     * item cursor of `$[*]` rather than reading `execute`'s answer, which
+     * is a sequence — `undefined` for none, the bare document for one, and
+     * for one array-valued document exactly what two documents would give.
+     * @param {{ signal?: AbortSignal, deadline?: number, profile?: any,
+     *   strictStreaming?: boolean }} [options]
+     * @returns {any} value-or-promise of the documents
+     */
+    all(options) {
+      readAllOptions(options);
+      const cursor = engine.query('$[*]', options, connection.synchronous ? createSyncCursor : createCursor);
+      /** @type {any[]} */
+      const documents = [];
+      const pump = () => {
+        for (;;) {
+          const step = cursor.next();
+          if (isThenable(step)) {
+            return step.then((/** @type {any} */ result) => {
+              if (result.done) return documents;
+              documents.push(result.value);
+              return pump();
+            });
+          }
+          if (step.done) return documents;
+          documents.push(step.value);
+        }
+      };
+      let out;
+      try {
+        out = pump();
+      }
+      catch (error) {
+        return chain(attempt(() => cursor.return(), () => error), () => { throw error; });
+      }
+      if (!isThenable(out)) return out;
+      return out.catch((error) => chain(attempt(() => cursor.return(), () => error), () => { throw error; }));
     },
   };
   return core;
@@ -934,6 +1099,7 @@ function asyncCollection(core, live) {
     put: lift(core.put),
     patch: lift(core.patch),
     delete: lift(core.delete),
+    all: lift(core.all),
     // the provider contract: execute stays value-or-promise so a
     // linq chain over a synchronous driver stays synchronous
     execute: (document, options) => core.execute(document, options),
@@ -2456,34 +2622,36 @@ export function openStore(model, options) {
           const captureCollection = (collectionName, core) => {
             if (capture === null) return core;
             const journal = capture.mode === 'journal';
+            // a write's options ride through unchanged: the core reads them
             return {
               ...core,
-              insert: (doc) => guard(() => chain(core.insert(doc), (key) => {
+              insert: (doc, options) => guard(() => chain(core.insert(doc, options), (key) => {
                 if (journal) capture.record(collectionName, [key], null, doc);
                 return key;
               })),
-              put: (doc, key) => guard(() => (journal
+              put: (doc, key, options) => guard(() => (journal
                 ? chain(readBefore(core, doc, key), (before) =>
-                  chain(core.put(doc, key), (storedKey) => {
+                  chain(core.put(doc, key, options), (storedKey) => {
                     capture.record(collectionName, [storedKey], before ?? null, doc);
                     return storedKey;
                   }))
-                : core.put(doc, key))),
-              patch: (key, ops) => guard(() => (journal
+                : core.put(doc, key, options))),
+              patch: (key, ops, options) => guard(() => (journal
                 ? chain(core.get(key), (before) =>
-                  chain(core.patch(key, ops), (after) => {
-                    capture.record(collectionName, [key], before ?? null, after);
+                  chain(core.patch(key, ops, options), (after) => {
+                    // a patch that changed nothing wrote nothing, and records nothing
+                    if (!equalsJson(before, after)) capture.record(collectionName, [key], before ?? null, after);
                     return after;
                   }))
-                : core.patch(key, ops))),
-              delete: (key) => guard(() => (journal
+                : core.patch(key, ops, options))),
+              delete: (key, options) => guard(() => (journal
                 ? chain(core.get(key), (before) =>
-                  chain(core.delete(key), (deleted) => {
+                  chain(core.delete(key, options), (deleted) => {
                     if (deleted && before !== undefined)
                       capture.record(collectionName, [key], before, null);
                     return deleted;
                   }))
-                : core.delete(key))),
+                : core.delete(key, options))),
             };
           };
           /** Journal-mode write wrappers for an entity core. */
@@ -3209,7 +3377,7 @@ export function openStore(model, options) {
                 // (preflight, compilation) touches no connection.
                 handle = Object.freeze({
                   ...gatedMembers(inner,
-                    ['get', 'insert', 'put', 'patch', 'delete', 'explain', 'live'],
+                    ['get', 'insert', 'put', 'patch', 'delete', 'all', 'explain', 'live'],
                     ['execute']),
                   query: (document, queryOptions) => admitRootCursor(inner.query(document, queryOptions),
                     queryOptions?.signal, 'a root collection cursor pull'),
@@ -3566,7 +3734,7 @@ export function openStore(model, options) {
           const scopedCollection = (identity, name) => {
             const inner = boundCollection(name);
             const out = scopedMembers(identity, inner,
-              ['get', 'insert', 'put', 'patch', 'delete', 'explain', 'live'],
+              ['get', 'insert', 'put', 'patch', 'delete', 'all', 'explain', 'live'],
               ['execute', 'stats']);
             out.query = (/** @type {any} */ document, /** @type {any} */ queryOptions) =>
               scopedCursor(identity, () => inner.query(document, queryOptions));
@@ -3930,7 +4098,7 @@ export function openStore(model, options) {
                   let handle = mySyncCollections.get(name);
                   if (handle === undefined) {
                     handle = Object.freeze(scopedMembers(identity, forSync(name), [],
-                      ['stats', 'get', 'insert', 'put', 'patch', 'delete', 'execute', 'explain']));
+                      ['stats', 'get', 'insert', 'put', 'patch', 'delete', 'all', 'execute', 'explain']));
                     mySyncCollections.set(name, handle);
                   }
                   return handle;
@@ -3978,10 +4146,11 @@ export function openStore(model, options) {
                 handle = Object.freeze({
                   stats: () => core.stats(),
                   get: (/** @type {any} */ key) => core.get(key),
-                  insert: (/** @type {any} */ doc) => core.insert(doc),
-                  put: (/** @type {any} */ doc, /** @type {any} */ key) => core.put(doc, key),
-                  patch: (/** @type {any} */ key, /** @type {any} */ ops) => core.patch(key, ops),
-                  delete: (/** @type {any} */ key) => core.delete(key),
+                  insert: (/** @type {any} */ doc, /** @type {any} */ o) => core.insert(doc, o),
+                  put: (/** @type {any} */ doc, /** @type {any} */ key, /** @type {any} */ o) => core.put(doc, key, o),
+                  patch: (/** @type {any} */ key, /** @type {any} */ ops, /** @type {any} */ o) => core.patch(key, ops, o),
+                  delete: (/** @type {any} */ key, /** @type {any} */ o) => core.delete(key, o),
+                  all: (/** @type {any} */ o) => core.all(o),
                   execute: (/** @type {any} */ document, /** @type {any} */ o) =>
                     core.execute(document, o),
                   explain: (/** @type {any} */ document, /** @type {any} */ o) =>
@@ -4039,7 +4208,7 @@ export function openStore(model, options) {
                 let handle = gatedSyncCollections.get(name);
                 if (handle === undefined) {
                   handle = syncGatedMembers(forSync(name),
-                    ['get', 'insert', 'put', 'patch', 'delete', 'execute', 'explain']);
+                    ['get', 'insert', 'put', 'patch', 'delete', 'all', 'execute', 'explain']);
                   gatedSyncCollections.set(name, handle);
                 }
                 return handle;

@@ -268,7 +268,8 @@ its client: a collections-only model opens a client with no
 ### 2.6 The ledger
 
 `createDbLedger(client, { collection = 'ledger', ttlMs = 86_400_000,
-runtime, now })` is the `Ledger` the `@jarenjs/contract` http binding
+startedTtlMs = ttlMs, runtime, now })` (a closed set; a `TypeError` names
+an unknown option) is the `Ledger` the `@jarenjs/contract` http binding
 calls under `policy.idempotency` (CONTRACT-FORMAT.md §8), over a
 declared collection of the store the client opened — the collection
 `idempotencyLedgerModel` declares, or any collection with that
@@ -283,9 +284,11 @@ edge: it depends on no store, and this door depends on no contract.
 
 **Which client decides the transaction.** A root client (the one `open`
 answered) runs every claim, settlement, lookup and sweep in a
-transaction of its own with `mode: 'immediate'` — the write lock taken
-before the read, so two processes claiming one key from one file see
-exactly one `new` and the other `in-progress`, never two handlers. The
+transaction of its own with `mode: 'immediate'` — the store's writer lock
+taken before the read (on PostgreSQL the advisory writer lock of
+MODEL-FORMAT §5.1), so two processes claiming one key see exactly one
+`new` and the other `in-progress`, never two handlers. `inFlight` is one
+read and takes no lock. The
 client a transaction callback received runs them as savepoints inside
 that transaction instead: a domain write and the settlement then
 commit together or roll back together — the ledger a lifecycle
@@ -312,13 +315,24 @@ ref whose key expired, was reclaimed under a newer generation, or was
 settled already is refused with **`JL2007`** (rejected), and the
 record it would have touched is unchanged — across processes and
 restarts, because the generation is in the file. The binding reports
-the refusal to its `onError`; the response still goes out.
+the refusal to its `onError`; the response still goes out. A failure for
+good carries the response it replays: `fail(ref, false)` without one is
+refused with **`JL2010`** (rejected; the memory ledger's twin is
+`JC1015`), and the claim stays `started`.
 
 **Clocks and expiry.** `now` wins, then the runtime record's clock;
 given neither, the ledger follows the instants the binding passes with
 each call (a host-side `lookup`/`sweep` without one uses the latest).
 A record past `expiresAt` is dropped on `claim` and `lookup`;
 `sweep(now?)` drops every expired record and answers the count. A
+started record's `expiresAt` is its lease (`startedTtlMs`), a settled
+one's its retention (`createdAt + ttlMs`): a claim whose request died
+blocks its key only for the lease, then the key is claimed afresh under
+a new generation. `inFlight({ op?, scope?, olderThan?, limit? })` lists
+the claims still blocking their key, oldest first, and `release({ op,
+scope, key, generation? })` frees one as a server fault would — the
+memory ledger's rules and its startup recipe exactly (CONTRACT-FORMAT.md
+§8), run by the same conformance kit. A
 record written under the earlier `"<op>|<scope>|<key>"` id spelling
 is matched by no claim: it expires by its own `expiresAt`, or a host
 rewrites its `id` once with `ledgerId` from `@jarenjs/contract/ledger`.

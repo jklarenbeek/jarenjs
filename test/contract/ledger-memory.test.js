@@ -10,9 +10,12 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert';
 
 import { createMemoryLedger } from '@jarenjs/contract/ledger';
-import { ledgerContract, cases } from './ledger-contract.js';
+import { ledgerContract, ledgerLifecycleContract, cases } from './ledger-contract.js';
 
 ledgerContract('createMemoryLedger', (options) => ({ ledger: createMemoryLedger(options), staleCode: 'JC1011' }));
+ledgerLifecycleContract('createMemoryLedger', (options) => ({
+  ledger: createMemoryLedger(options), staleCode: 'JC1011', failCode: 'JC1015',
+}));
 
 /** The tuple a versioned id names, read back from the id. */
 const tupleOf = (/** @type {any} */ ref) => /** @type {[string, string, string]} */ (JSON.parse(String(ref.id).slice(2)));

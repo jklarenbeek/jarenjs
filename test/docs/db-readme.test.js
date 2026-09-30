@@ -80,6 +80,16 @@ describe("the db README's runnable examples", () => {
       ran.refusal, ran.ran, ran.reopened]);
   });
 
+  it('compare-and-set and all() (Operating a store) run as written and answer what they print', async () => {
+    const example = exampleAfter('Compare-and-set on a plain collection, and every document as an array');
+    assert.ok(example !== null, 'packages/db/README.md no longer carries the compare-and-set example');
+    const ran = await run(example.code, ['stale', 'moved', 'ids']);
+    assert.equal(ran.stale, 'JD2040', 'the stale expect wrote nothing');
+    assert.deepEqual(ran.moved, { id: 'a', revision: 2, balance: 7 });
+    assert.deepEqual(ran.ids, ['a', 'b']);
+    printed(example.section, [ran.stale, ran.moved, ran.ids]);
+  });
+
   it('relational statements through a store (Existing relational stores) run as written and answer what they print', async () => {
     const example = exampleAfter('A store carries the same engine as `store.relational`');
     assert.ok(example !== null, 'packages/db/README.md no longer carries the store-bound relational example');

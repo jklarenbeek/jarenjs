@@ -762,9 +762,11 @@ const users = store.collection('users');
 
 await users.insert(doc);            // JD2001 when the key exists
 await users.put(doc);               // upsert
-await users.patch(key, jsonPatch);  // RFC 6902, applied in the database
+await users.patch(key, jsonPatch);  // RFC 6902, read and written in one transaction
 await users.delete(key);            // resolves false when nothing was stored
 await users.get(key);               // resolves undefined when absent
+await users.all();                  // every document, always an array
+await users.put(doc, undefined, { expect: { path: '/revision', value: 3 } });  // JD2040 unless it holds
 await store.transaction(fn);        // savepoint-nested, returns fn's value
 ```
 
@@ -789,10 +791,21 @@ document is ever stored.
 `@jarenjs/validate` is only the pure same-document `$ref`/`$anchor`
 resolution in `@jarenjs/validate/normalize`, for model compilation.
 
-**`patch` validates the result, then updates in place.** The patch is
-applied to the stored document with the copy-on-write engine and the
-RESULT is validated (`JD2003` rejects before any SQL). The operations
-are then translated to the dialect's JSON-set primitives so a
+**`patch` is a read-modify-write in one write transaction.** The stored
+document is read inside the write's own transaction — at the root a
+transaction of its own (SQLite's `BEGIN IMMEDIATE`, where writers
+serialize; on PostgreSQL a plain one whose read locks the row `FOR
+UPDATE`, never the store's writer lock of §5.1), a savepoint inside a
+caller's transaction. The patch is applied to that document with the
+copy-on-write engine, and the RESULT is validated (`JD2003`) before it
+is written, so the document validated is the document written, and a
+leading `test` is a true compare-and-set: two stores racing
+`[{ op: 'test', path: '/revision', value: r }, { op: 'replace', path:
+'/revision', value: r + 1 }, …]` commit one patch and refuse the other
+(`JP2004`), where both used to succeed and one wrote over the other. A
+patch whose result equals the stored document writes nothing — no
+statement, no change for capture, no commit another connection sees. The
+operations are then translated to the dialect's JSON-set primitives so a
 one-field update does not rewrite a large document. Translatable in
 0.1: `replace`, `add` of an object member, `add` at an array's end,
 and `remove`. Anything else — `test`, `move`, `copy`, a mid-array
@@ -801,6 +814,29 @@ insert — falls back to a whole-document write. The fallback is
 (`{ patchTranslated, patchFallback }`), measured rather than assumed.
 A malformed patch document raises the json family's own coded errors
 unchanged; `patch` on an absent key is `JD2006`.
+
+**`expect` makes a keyed write conditional.** `put(doc, key?, { expect
+})`, `patch(key, ops, { expect })` and `delete(key, { expect })` take a
+precondition `{ path, value }` — `path` a JSON Pointer, `value` the JSON
+value the stored document holds there, compared structurally — or a
+non-empty list of them. It is judged against the stored document inside
+the write's own transaction, the same one a patch reads in; a document
+that does not hold it, or nothing stored, refuses the write **`JD2040`**
+and writes nothing (`patch` of an absent key stays `JD2006`). Without
+`expect`, `put` and `delete` remain one statement each. A write's
+options are a closed set (`JD0013`): `insert` reads none, and an unknown
+member, a path that is not a JSON Pointer or a missing `value` is
+refused before any statement.
+
+**`all()` reads every document.** `collection.all(options?)` answers
+every stored document as an array, one entry per document, in the order
+`execute('$[*]')` visits them — on the synchronous twin and inside a
+transaction alike; it reads the cursor's `signal`, `deadline`, `profile`
+and `strictStreaming`, nothing else (`JD0013`). `execute('$[*]')`
+answers the engine's SEQUENCE instead: `undefined` for an empty
+collection, the bare document for one, and for one array-valued
+document exactly what two documents would give. `query('$[*]')` is the
+same items as a cursor, one per pull.
 
 **`transaction(fn)` nests via savepoints.** `fn` receives the store
 and may itself call `transaction`; each level is one savepoint. A
@@ -1205,7 +1241,7 @@ every other store operation is admitted:
   back to its savepoint and the transaction carries on — on PostgreSQL
   too, where a failed statement would otherwise abort it (`25P02`).
 - **Writes follow the rules trusted SQL follows, from one function.**
-  Pending tracked changes refuse (`JD2040`), because a later save would
+  Pending tracked changes refuse (`JD2041`), because a later save would
   write over what the statement wrote. A read-only store refuses
   (`JD2095`). A store-only invariant (§13) refuses a write to **its
   entity's table** (`JD2095`) and no other: the document names its
@@ -1351,7 +1387,8 @@ error.
 | `JD2005` | a database operation failed |
 | `JD2006` | patch found no document at the key |
 | `JD2007` | the result exceeded the profile row bound |
-| `JD2040` | the row changed under an optimistic update |
+| `JD2040` | an optimistic precondition did not hold: the row changed under an update, or an expect did not match |
+| `JD2041` | tracked changes are pending; save or discard them first |
 | `JD2050` | a changeset could not be decoded |
 | `JD2051` | the change log is not enabled |
 | `JD2060` | the maintained live state exceeded its bound |
@@ -2617,6 +2654,12 @@ version property there is no concurrency check and the report says so:
 never a silent last-write-wins the reader believes is protected. (A
 row that vanished entirely still conflicts an update: zero rows is
 zero rows.) An unguarded delete of a missing row is a no-op.
+
+`JD2040` means one thing across the store: an optimistic precondition
+did not hold. For an entity it is the version guard above; for a plain
+collection it is a write's `expect` (§5), judged in the write's own
+transaction. Pending tracked changes refusing a statement the store did
+not plan are a different fact and code, `JD2041` (§5.3).
 
 ### 11.6 Failure semantics and the return shape
 

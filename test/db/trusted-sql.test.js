@@ -87,7 +87,9 @@ it('unknown SQL writes invalidate clean tracking and refuse pending changes or i
     await store.transaction((tx) => tx.sql.prepare('UPDATE Item SET count=2', { access: 'write' }).run([]));
     assert.equal((await store.entity('Item').get('one')).count, 2);
     store.entity('Item').put({ id: 'one', count: 3 });
-    await assert.rejects(store.transaction((tx) => tx.sql.prepare('UPDATE Item SET count=4', { access: 'write' }).run([])), { code: 'JD2040' });
+    // pending tracked changes are their own refusal (JD2041); JD2040 is an
+    // optimistic precondition that did not hold
+    await assert.rejects(store.transaction((tx) => tx.sql.prepare('UPDATE Item SET count=4', { access: 'write' }).run([])), { code: 'JD2041' });
   }
   finally { await store.close(); }
   const captured = await openStore(model, { driver: nodeDriver(), capture: true });

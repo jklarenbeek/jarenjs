@@ -41,6 +41,7 @@ export const LINQ_CODES = /* @__PURE__ */ Object.freeze({
   JL2007: 'a ledger settlement named a ref that settles no started record',
   JL2008: 'a federated fetch reached its row or byte budget',
   JL2009: 'a durable mapped record violated identity, retention or fencing',
+  JL2010: 'a ledger fail(ref, false) carried no response',
 });
 
 /**
@@ -158,6 +159,10 @@ export class LinqBuildError extends CodedError {
  *    budget. A budget is a REFUSAL, not a spill: the fetch stops at the
  *    row that would have broken it, every cursor it opened is closed,
  *    and the reason names the side and the bound (QUERY-PEN.md §13)
+ *  - `JL2010` — `createDbLedger`'s `fail(ref, false)` carried no
+ *    response: a failure that is not retryable replays its stored
+ *    response, so it must carry one; the claim stays started
+ *    (DB-CLIENT.md §2.6; the memory ledger's twin is `JC1015`)
  */
 export class LinqRuntimeError extends CodedError {
   /**

@@ -148,9 +148,10 @@ for (const [host, driverOf] of HOSTS) {
         }
         await assert.rejects(store.transaction((tx) => tx.relational.execute(bump('A'))), coded('JD2095'));
         assert.equal((await store.entity('A').get('a1'))?.amount, 1, 'the guarded table was not written');
-        // a pending tracked change would be saved over what the statement wrote
+        // a pending tracked change would be saved over what the statement
+        // wrote: its own refusal (JD2041), apart from JD2040's preconditions
         store.entity('B').add({ id: 'b2', amount: 3 });
-        await assert.rejects(store.relational.execute(bump('B')), coded('JD2040'));
+        await assert.rejects(store.relational.execute(bump('B')), coded('JD2041'));
         store.entity('B').discard('b2');
         assert.equal((await store.relational.execute(bump('B'))).affected, 1);
         // and the write invalidates what the trackers held: the entity reads the new value

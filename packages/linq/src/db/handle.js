@@ -85,6 +85,13 @@ export function createCollectionHandle(store, name) {
   /** @type {Record<string | symbol, any>} */
   const members = { ...collection };
   chainStart(collection, members);
+  // `all` is two things on a collection handle, told apart by the
+  // argument: a predicate is the chain's quantifier (does every document
+  // satisfy it?); nothing, or all()'s options, is the collection's every
+  // document — always an array, one entry per document
+  const quantifier = members.all;
+  members.all = (/** @type {any} */ arg, /** @type {any[]} */ ...rest) =>
+    (typeof arg === 'function' ? quantifier(arg, ...rest) : collection.all(arg));
   members.live = (source = fromAsync(collection), options = undefined) =>
     registerLive(collection.live, source, options);
   return Object.freeze(members);

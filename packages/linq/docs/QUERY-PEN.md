@@ -568,6 +568,7 @@ Runtime errors (`LinqRuntimeError`):
 | `JL2007` | a ledger settlement named a ref that settles no started record — `createDbLedger`'s fence ([DB-CLIENT.md §2.6](DB-CLIENT.md#26-the-ledger)) |
 | `JL2009` | a durable mapped record violated identity, retention or fencing |
 | `JL2008` | a federated fetch reached its row or byte budget (§12.1) |
+| `JL2010` | a ledger `fail(ref, false)` carried no response — `createDbLedger`'s twin of the memory ledger's `JC1015` ([DB-CLIENT.md §2.6](DB-CLIENT.md#26-the-ledger)) |
 
 Engine errors (`JQ…`) from a hand-written `fromDocument` document pass
 through unwrapped — they already carry their own code and `docPath` —
@@ -1166,15 +1167,15 @@ held equal to the runtime's `LINQ_CODES` by
 reader needs — the SPELLING that trips each one and the spelling that
 works.
 
-The chain raises sixteen of the twenty-four codes:
+The chain raises sixteen of the twenty-five codes:
 - `JL0001`–`JL0007` at build time;
 - `JL2001`–`JL2006` and `JL2008` while a terminal runs;
 - `JL0105` and `JL0108`. These sit in the `JL01xx` block because a
   relation hop and a primitive conversion are pen-shaped refusals, but
   the chain's own expression capture raises them.
 
-The other eight are the PENS' and the CLIENT's: `JL0101`–`JL0104`,
-`JL0106` and `JL0107`, and the client door's `JL2007` and `JL2009`. Their per-code conditions are the binder's,
+The other nine are the PENS' and the CLIENT's: `JL0101`–`JL0104`,
+`JL0106` and `JL0107`, and the client door's `JL2007`, `JL2009` and `JL2010`. Their per-code conditions are the binder's,
 [LINQ-FORMAT.md](LINQ-FORMAT.md) §1.3, and the spelling that trips each
 one is in §4 of the document of the pen that raises it:
 [SCHEMA-PEN.md](SCHEMA-PEN.md#4-refusals),

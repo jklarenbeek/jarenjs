@@ -17,6 +17,7 @@
  */
 
 import { resolveRuntime } from '@jarenjs/core/runtime';
+import { refuseUnknownMembers } from '@jarenjs/core/object';
 
 import { ContractHostError } from './errors.js';
 
@@ -85,10 +86,89 @@ import { ContractHostError } from './errors.js';
  * @property {(now?: number) => number | Promise<number>} [sweep] - drop every
  *   expired record and answer how many; optional — the binding never calls
  *   it (retention is the host's schedule), and both suite ledgers carry it
+ * @property {(query?: InFlightQuery) => InFlightClaim[] | Promise<InFlightClaim[]>} [inFlight] -
+ *   the claims still `started` and blocking their key, oldest first;
+ *   optional — the binding never calls it, and both suite ledgers carry it
+ * @property {(claim: { op: string, scope: string, key: string, generation?: string, now?: number }) => boolean | Promise<boolean>} [release] -
+ *   free one `started` claim as a server fault leaves it (failed,
+ *   retryable, no response), so the next claim of the key is `new`;
+ *   `false` when there is nothing to release. Optional, as `inFlight`
+ *
+ * A `fail(ref, false)` carries the response it replays: without one the
+ * failure could replay nothing, and a ledger that freed the key instead
+ * re-ran a command that had failed for good — it is refused (`JC1015` on
+ * the memory ledger), and the claim stays `started`.
+ */
+
+/**
+ * What `inFlight` reads — a closed set: `op` and `scope` narrow to one
+ * operation or scope, `olderThan` (epoch ms, an instant like every
+ * ledger `now`) keeps the claims made before it, `limit` (default 1,000)
+ * bounds the answer.
+ * @typedef {{ op?: string, scope?: string, olderThan?: number, limit?: number, now?: number }} InFlightQuery
+ */
+
+/**
+ * One claim `inFlight` reports: the tuple, the generation that started
+ * it (what `release` may name), and when it was claimed.
+ * @typedef {{ op: string, scope: string, key: string, generation: string, claimedAt: number }} InFlightClaim
  */
 
 /** One day, the default retention of a key. */
 const DEFAULT_TTL_MS = 86_400_000;
+
+/** The most claims one `inFlight` answers by default. */
+const IN_FLIGHT_LIMIT = 1_000;
+
+/**
+ * Read `inFlight`'s query (a closed set, refused by name before anything
+ * is read).
+ * @param {unknown} query
+ * @param {string} spelling
+ * @returns {{ op?: string, scope?: string, olderThan?: number, limit: number, now?: number }}
+ */
+function readInFlightQuery(query, spelling) {
+  if (query === undefined) return { limit: IN_FLIGHT_LIMIT };
+  if (query === null || typeof query !== 'object' || Array.isArray(query))
+    throw new TypeError(`${spelling}: the query is { op?, scope?, olderThan?, limit?, now? }`);
+  refuseUnknownMembers(query, ['op', 'scope', 'olderThan', 'limit', 'now'], (key, hint) =>
+    new TypeError(`${spelling}: '${key}' is not a member the query reads${hint}`));
+  const { op, scope, olderThan, limit = IN_FLIGHT_LIMIT, now } = /** @type {any} */ (query);
+  for (const [name, value] of [['op', op], ['scope', scope]]) {
+    if (value !== undefined && typeof value !== 'string') throw new TypeError(`${spelling}: ${name} is a string`);
+  }
+  for (const [name, value] of [['olderThan', olderThan], ['now', now]]) {
+    if (value !== undefined && !Number.isFinite(value)) throw new TypeError(`${spelling}: ${name} is an instant in epoch milliseconds`);
+  }
+  if (!Number.isInteger(limit) || limit < 1) throw new TypeError(`${spelling}: limit is a whole number from 1`);
+  return { op, scope, olderThan, limit, now };
+}
+
+/**
+ * Read `release`'s argument (a closed set): the tuple, and optionally the
+ * `generation` the release is fenced to.
+ * @param {unknown} claim
+ * @param {string} spelling
+ * @returns {{ op: string, scope: string, key: string, generation?: string, now?: number }}
+ */
+function readReleaseClaim(claim, spelling) {
+  if (claim === null || typeof claim !== 'object' || Array.isArray(claim))
+    throw new TypeError(`${spelling}: the claim is { op, scope, key, generation?, now? }`);
+  // a claim exactly as `inFlight` answers it is accepted, `claimedAt` and all
+  refuseUnknownMembers(claim, ['op', 'scope', 'key', 'generation', 'claimedAt', 'now'], (key, hint) =>
+    new TypeError(`${spelling}: '${key}' is not a member a release reads${hint}`));
+  const { op, scope, key, generation, claimedAt, now } = /** @type {any} */ (claim);
+  if (claimedAt !== undefined && !Number.isFinite(claimedAt)) throw new TypeError(`${spelling}: claimedAt is an instant in epoch milliseconds`);
+  for (const [name, value] of [['op', op], ['scope', scope], ['key', key]]) {
+    if (typeof value !== 'string') throw new TypeError(`${spelling}: ${name} is a string`);
+  }
+  if (generation !== undefined && typeof generation !== 'string') throw new TypeError(`${spelling}: generation is a string`);
+  if (now !== undefined && !Number.isFinite(now)) throw new TypeError(`${spelling}: now is an instant in epoch milliseconds`);
+  return { op, scope, key, generation, now };
+}
+
+/** The members `createMemoryLedger` reads. */
+const MEMORY_LEDGER_OPTIONS = Object.freeze(['ttlMs', 'startedTtlMs', 'now', 'runtime']);
 
 /**
  * The id of one `(op, scope, key)` tuple: the version `1`, a colon, the
@@ -135,13 +215,28 @@ function staleSettlement(ref) {
  * given the same record as the binding, never a second one. The runtime
  * record's `uuid` mints each record's `generation`; `lookup` answers a
  * copy, never the ledger's own record.
- * @param {{ ttlMs?: number, now?: () => number,
+ *
+ * `ttlMs` is a key's retention; `startedTtlMs` (default `ttlMs`, at most
+ * it) is how long a `started` claim blocks its key — a claim its request
+ * never settled is reclaimed after it, under a new generation, and the
+ * generation fence refuses the old ref. A started record's `expiresAt` is
+ * that lease; a settled one's is `createdAt + ttlMs`.
+ * @param {{ ttlMs?: number, startedTtlMs?: number, now?: () => number,
  *   runtime?: Partial<import('@jarenjs/core/runtime').Runtime> }} [options]
- * @returns {Ledger & { sweep(now?: number): number, size: number }}
+ * @returns {Ledger & { sweep(now?: number): number, size: number,
+ *   inFlight(query?: InFlightQuery): InFlightClaim[],
+ *   release(claim: { op: string, scope: string, key: string, generation?: string, now?: number }): boolean }}
  */
 export function createMemoryLedger(options = {}) {
+  if (options === null || typeof options !== 'object' || Array.isArray(options))
+    throw new TypeError('createMemoryLedger: options is { ttlMs?, startedTtlMs?, now?, runtime? }');
+  refuseUnknownMembers(options, MEMORY_LEDGER_OPTIONS, (key, hint) =>
+    new TypeError(`createMemoryLedger: '${key}' is not an option it reads${hint}`));
   const ttlMs = options.ttlMs === undefined ? DEFAULT_TTL_MS : options.ttlMs;
   if (!Number.isFinite(ttlMs) || ttlMs <= 0) throw new TypeError('createMemoryLedger: ttlMs must be a positive number');
+  const startedTtlMs = options.startedTtlMs === undefined ? ttlMs : options.startedTtlMs;
+  if (!Number.isFinite(startedTtlMs) || startedTtlMs <= 0 || startedTtlMs > ttlMs)
+    throw new TypeError('createMemoryLedger: startedTtlMs must be a positive number no greater than ttlMs');
   let runtime;
   try {
     runtime = resolveRuntime(options.runtime);
@@ -196,7 +291,8 @@ export function createMemoryLedger(options = {}) {
       /** @type {LedgerRecord} */
       const record = {
         id, generation, op, scope, key, hash, status: 'started', response: null, retryable: null,
-        createdAt: at, updatedAt: at, expiresAt: at + ttlMs,
+        // a started record expires at its lease; settled, at its retention
+        createdAt: at, updatedAt: at, expiresAt: at + startedTtlMs,
       };
       records.set(id, record);
       return { state: 'new', ref: Object.freeze({ id, generation }) };
@@ -208,14 +304,23 @@ export function createMemoryLedger(options = {}) {
       record.response = response;
       record.retryable = null;
       record.updatedAt = at;
+      record.expiresAt = record.createdAt + ttlMs;
     },
     fail(ref, retryable, response, now = undefined) {
+      // a failure for good replays its response: it must carry one
+      if (retryable !== true && (response === undefined || response === null)) {
+        const r = /** @type {any} */ (ref);
+        throw new ContractHostError('JC1015', `ledger: fail(${r !== null && typeof r === 'object' && typeof r.id === 'string' ? r.id : 'ref'}, false) `
+          + 'carried no response — a failure that is not retryable replays its stored response, so pass the one '
+          + 'the caller was sent; the claim stays started');
+      }
       const at = instant(now);
       const record = settling(ref, at);
       record.status = 'failed';
       record.retryable = retryable === true;
       record.response = response === undefined ? null : response;
       record.updatedAt = at;
+      record.expiresAt = record.createdAt + ttlMs;
     },
     lookup({ op, scope, key, now = undefined }) {
       const record = records.get(ledgerId(op, scope, key));
@@ -236,6 +341,37 @@ export function createMemoryLedger(options = {}) {
         }
       }
       return dropped;
+    },
+    inFlight(query = undefined) {
+      const { op, scope, olderThan, limit, now } = readInFlightQuery(query, 'ledger.inFlight');
+      const at = instant(now);
+      /** @type {InFlightClaim[]} */
+      const claims = [];
+      for (const record of records.values()) {
+        if (record.status !== 'started' || record.expiresAt <= at) continue;
+        if ((op !== undefined && record.op !== op) || (scope !== undefined && record.scope !== scope)
+          || (olderThan !== undefined && !(record.createdAt < olderThan))) continue;
+        claims.push({ op: record.op, scope: record.scope, key: record.key, generation: record.generation,
+          claimedAt: record.createdAt });
+      }
+      // oldest first; the id breaks a tie, so two ledgers answer alike
+      claims.sort((a, b) => a.claimedAt - b.claimedAt
+        || (ledgerId(a.op, a.scope, a.key) < ledgerId(b.op, b.scope, b.key) ? -1 : 1));
+      return claims.slice(0, limit);
+    },
+    release(claim) {
+      const { op, scope, key, generation, now } = readReleaseClaim(claim, 'ledger.release');
+      const at = instant(now);
+      const record = records.get(ledgerId(op, scope, key));
+      if (record === undefined || record.status !== 'started' || record.expiresAt <= at
+        || (generation !== undefined && record.generation !== generation)) return false;
+      // exactly what a server fault leaves: the next claim is `new`
+      record.status = 'failed';
+      record.retryable = true;
+      record.response = null;
+      record.updatedAt = at;
+      record.expiresAt = record.createdAt + ttlMs;
+      return true;
     },
     get size() {
       return records.size;

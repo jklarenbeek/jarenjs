@@ -26,6 +26,25 @@ const DEFAULT_TTL_MS = 86_400_000;
 /** The collection `idempotencyLedgerModel` declares. */
 const DEFAULT_COLLECTION = 'ledger';
 
+/** The most claims one `inFlight` answers by default — the memory ledger's. */
+const IN_FLIGHT_LIMIT = 1_000;
+
+/** The members `createDbLedger` reads. */
+const DB_LEDGER_OPTIONS = Object.freeze(['collection', 'ttlMs', 'startedTtlMs', 'runtime', 'now']);
+
+/**
+ * Refuse a member outside a closed set, naming it and the set (a
+ * `TypeError`, as every other refusal of this ledger's arguments).
+ * @param {Record<string, unknown>} value
+ * @param {readonly string[]} known
+ * @param {(key: string, list: string) => string} message
+ */
+function refuseUnknown(value, known, message) {
+  for (const key of Object.keys(value)) {
+    if (!known.includes(key)) throw new TypeError(message(key, known.map((name) => `'${name}'`).join(', ')));
+  }
+}
+
 /**
  * The id of one `(op, scope, key)` tuple — the version `1`, a colon, the
  * JSON array of the three: the spelling `@jarenjs/contract/ledger`'s
@@ -46,6 +65,9 @@ function ledgerId(op, scope, key) {
  * @typedef {Object} DbLedgerOptions
  * @property {string} [collection] - the declared collection, `'ledger'` by default
  * @property {number} [ttlMs] - the retention of a key, 86,400,000 ms by default
+ * @property {number} [startedTtlMs] - how long a `started` claim blocks its
+ *   key (default `ttlMs`, at most it): past it the next claim reclaims the
+ *   key under a new generation, and the old ref is refused (`JL2007`)
  * @property {Partial<import('@jarenjs/core/runtime').Runtime>} [runtime] -
  *   the host's runtime record: its `now` is the clock, its `uuid` mints
  *   every generation
@@ -64,6 +86,52 @@ function stale(ref, reason) {
 }
 
 /**
+ * The same closed set the memory ledger reads for `inFlight` — a
+ * `TypeError` names an unknown member or a malformed value.
+ * @param {unknown} query
+ * @returns {{ op?: string, scope?: string, olderThan?: number, limit: number, now?: number }}
+ */
+function readInFlightQuery(query) {
+  const spelling = 'ledger.inFlight';
+  if (query === undefined) return { limit: IN_FLIGHT_LIMIT };
+  if (query === null || typeof query !== 'object' || Array.isArray(query))
+    throw new TypeError(`${spelling}: the query is { op?, scope?, olderThan?, limit?, now? }`);
+  refuseUnknown(query, ['op', 'scope', 'olderThan', 'limit', 'now'], (key, list) =>
+    `${spelling}: '${key}' is not a member the query reads; it reads ${list}`);
+  const { op, scope, olderThan, limit = IN_FLIGHT_LIMIT, now } = /** @type {any} */ (query);
+  for (const [name, value] of [['op', op], ['scope', scope]]) {
+    if (value !== undefined && typeof value !== 'string') throw new TypeError(`${spelling}: ${name} is a string`);
+  }
+  for (const [name, value] of [['olderThan', olderThan], ['now', now]]) {
+    if (value !== undefined && !Number.isFinite(value)) throw new TypeError(`${spelling}: ${name} is an instant in epoch milliseconds`);
+  }
+  if (!Number.isInteger(limit) || limit < 1) throw new TypeError(`${spelling}: limit is a whole number from 1`);
+  return { op, scope, olderThan, limit, now };
+}
+
+/**
+ * The same closed set the memory ledger reads for `release`.
+ * @param {unknown} claim
+ * @returns {{ op: string, scope: string, key: string, generation?: string, now?: number }}
+ */
+function readReleaseClaim(claim) {
+  const spelling = 'ledger.release';
+  if (claim === null || typeof claim !== 'object' || Array.isArray(claim))
+    throw new TypeError(`${spelling}: the claim is { op, scope, key, generation?, now? }`);
+  // a claim exactly as `inFlight` answers it is accepted, `claimedAt` and all
+  refuseUnknown(claim, ['op', 'scope', 'key', 'generation', 'claimedAt', 'now'], (key, list) =>
+    `${spelling}: '${key}' is not a member a release reads; it reads ${list}`);
+  const { op, scope, key, generation, claimedAt, now } = /** @type {any} */ (claim);
+  if (claimedAt !== undefined && !Number.isFinite(claimedAt)) throw new TypeError(`${spelling}: claimedAt is an instant in epoch milliseconds`);
+  for (const [name, value] of [['op', op], ['scope', scope], ['key', key]]) {
+    if (typeof value !== 'string') throw new TypeError(`${spelling}: ${name} is a string`);
+  }
+  if (generation !== undefined && typeof generation !== 'string') throw new TypeError(`${spelling}: generation is a string`);
+  if (now !== undefined && !Number.isFinite(now)) throw new TypeError(`${spelling}: now is an instant in epoch milliseconds`);
+  return { op, scope, key, generation, now };
+}
+
+/**
  * The durable ledger over a client's declared collection.
  * @param {any} client - a `@jarenjs/linq/db` client: the root one, or
  *   the one a transaction callback received
@@ -72,13 +140,20 @@ function stale(ref, reason) {
  *   commit: (ref: unknown, response: unknown, now?: number) => Promise<void>,
  *   fail: (ref: unknown, retryable: boolean, response?: unknown, now?: number) => Promise<void>,
  *   lookup: (key: { op: string, scope: string, key: string, now?: number }) => Promise<any>,
- *   sweep: (now?: number) => Promise<number> }}
+ *   sweep: (now?: number) => Promise<number>,
+ *   inFlight: (query?: { op?: string, scope?: string, olderThan?: number, limit?: number, now?: number }) =>
+ *     Promise<{ op: string, scope: string, key: string, generation: string, claimedAt: number }[]>,
+ *   release: (claim: { op: string, scope: string, key: string, generation?: string, now?: number }) => Promise<boolean> }}
  */
 export function createDbLedger(client, options = {}) {
   if (client === null || typeof client !== 'object' || client.collections === null
     || typeof client.collections !== 'object' || typeof client.transaction !== 'function') {
     throw new TypeError('createDbLedger: client must be a @jarenjs/linq/db client — the root client, or the one a transaction callback received');
   }
+  if (options === null || typeof options !== 'object' || Array.isArray(options))
+    throw new TypeError('createDbLedger: options is { collection?, ttlMs?, startedTtlMs?, runtime?, now? }');
+  refuseUnknown(options, DB_LEDGER_OPTIONS, (key, list) =>
+    `createDbLedger: '${key}' is not an option it reads; it reads ${list}`);
   const name = options.collection === undefined ? DEFAULT_COLLECTION : options.collection;
   if (typeof name !== 'string' || name === '') throw new TypeError('createDbLedger: collection must be a non-empty collection name');
   if (!Object.hasOwn(client.collections, name)) {
@@ -86,6 +161,9 @@ export function createDbLedger(client, options = {}) {
   }
   const ttlMs = options.ttlMs === undefined ? DEFAULT_TTL_MS : options.ttlMs;
   if (!Number.isFinite(ttlMs) || ttlMs <= 0) throw new TypeError('createDbLedger: ttlMs must be a positive number');
+  const startedTtlMs = options.startedTtlMs === undefined ? ttlMs : options.startedTtlMs;
+  if (!Number.isFinite(startedTtlMs) || startedTtlMs <= 0 || startedTtlMs > ttlMs)
+    throw new TypeError('createDbLedger: startedTtlMs must be a positive number no greater than ttlMs');
   let runtime;
   try {
     runtime = resolveRuntime(options.runtime);
@@ -136,7 +214,8 @@ export function createDbLedger(client, options = {}) {
         || record.expiresAt <= at) {
         throw stale(ref, 'the key expired, was reclaimed under a newer generation, or was settled already');
       }
-      await c.put({ ...record, ...changes, updatedAt: at }, r.id);
+      // settled, a record expires at its retention
+      await c.put({ ...record, ...changes, updatedAt: at, expiresAt: record.createdAt + ttlMs }, r.id);
     });
   }
 
@@ -158,7 +237,8 @@ export function createDbLedger(client, options = {}) {
         const generation = runtime.uuid();
         await c.insert({
           id, generation, op, scope, key, hash, status: 'started', response: null, retryable: null,
-          createdAt: at, updatedAt: at, expiresAt: at + ttlMs,
+          // a started record expires at its lease; settled, at its retention
+          createdAt: at, updatedAt: at, expiresAt: at + startedTtlMs,
         });
         return { state: 'new', ref: Object.freeze({ id, generation }) };
       });
@@ -167,6 +247,13 @@ export function createDbLedger(client, options = {}) {
       return settle(ref, { status: 'committed', response, retryable: null }, now);
     },
     fail(ref, retryable, response = undefined, now = undefined) {
+      // a failure for good replays its response: it must carry one
+      if (retryable !== true && (response === undefined || response === null)) {
+        const r = /** @type {any} */ (ref);
+        return Promise.reject(new LinqRuntimeError('JL2010', `fail(${r !== null && typeof r === 'object' && typeof r.id === 'string' ? r.id : 'ref'}, false) `
+          + 'carried no response — a failure that is not retryable replays its stored response, so pass the one '
+          + 'the caller was sent; the claim stays started'));
+      }
       return settle(ref, { status: 'failed', response: response === undefined ? null : response, retryable: retryable === true }, now);
     },
     lookup({ op, scope, key, now = undefined }) {
@@ -190,6 +277,38 @@ export function createDbLedger(client, options = {}) {
         const expired = await c.where((/** @type {any} */ r) => r.expiresAt.le(at)).select((/** @type {any} */ r) => r.id).toArray();
         for (const id of expired) await c.delete(id);
         return expired.length;
+      });
+    },
+    async inFlight(query = undefined) {
+      const { op, scope, olderThan, limit, now } = readInFlightQuery(query);
+      const at = instant(now);
+      // one read through the status index: no transaction, no lock
+      /** @type {any} */
+      let chain = rows(client).where((/** @type {any} */ r) => r.status.eq('started'))
+        .where((/** @type {any} */ r) => r.expiresAt.gt(at));
+      if (op !== undefined) chain = chain.where((/** @type {any} */ r) => r.op.eq(op));
+      if (scope !== undefined) chain = chain.where((/** @type {any} */ r) => r.scope.eq(scope));
+      if (olderThan !== undefined) chain = chain.where((/** @type {any} */ r) => r.createdAt.lt(olderThan));
+      // oldest first; the id breaks a tie, as the memory ledger's does
+      const found = await chain.orderBy((/** @type {any} */ r) => r.createdAt).thenBy((/** @type {any} */ r) => r.id)
+        .take(limit).toArray();
+      return found.map((/** @type {any} */ r) => ({
+        op: r.op, scope: r.scope, key: r.key, generation: r.generation, claimedAt: r.createdAt,
+      }));
+    },
+    async release(claim) {
+      const { op, scope, key, generation, now } = readReleaseClaim(claim);
+      const at = instant(now);
+      const id = ledgerId(op, scope, key);
+      return inside(async (tx) => {
+        const c = rows(tx);
+        const record = await c.get(id);
+        if (record === undefined || record.status !== 'started' || record.expiresAt <= at
+          || (generation !== undefined && record.generation !== generation)) return false;
+        // exactly what a server fault leaves: the next claim is `new`
+        await c.put({ ...record, status: 'failed', retryable: true, response: null, updatedAt: at,
+          expiresAt: record.createdAt + ttlMs }, id);
+        return true;
       });
     },
   });

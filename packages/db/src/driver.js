@@ -191,10 +191,13 @@ export function attempt(call, wrap) {
  */
 function settleTransaction(body, commit, rollback) {
   const fail = (error) => chain(attempt(rollback, (cleanupError) =>
-    // Losing one remote generation also loses its rollback channel.
-    // That is one failure, not two independent transaction defects.
+    // Losing one remote generation also loses its rollback channel, and a
+    // lost session (JD2087) refuses the ROLLBACK for the same reason — the
+    // server rolls back an open transaction whose session ends. Either is
+    // one failure, not two independent transaction defects.
     error === cleanupError || error?.code === 'JD2090' && cleanupError?.code === 'JD2090'
       && error.generation === cleanupError.generation
+      || error?.code === 'JD2087' && cleanupError?.code === 'JD2087'
       ? error : new TransactionFailure(error, cleanupError)), () => { throw error; });
   const succeed = (value) => {
     let committed;

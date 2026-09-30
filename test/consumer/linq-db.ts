@@ -195,6 +195,18 @@ async function main(): Promise<void> {
   const place: Infer<typeof Place> | undefined = await collection.get('p1');
   const ids: string[] = await collection.where((p) => p.t.gt(1)).select((p) => p.id).toArray();
   void [place, ids];
+  // every document, typed from the pen; given a predicate, the quantifier
+  const everyPlace: Infer<typeof Place>[] = await collection.all();
+  const bounded: Infer<typeof Place>[] = await collection.all({ signal: new AbortController().signal });
+  const allPositive: boolean = await collection.all((p) => p.t.gt(0));
+  // compare-and-set on a write
+  await collection.patch('p1', [{ op: 'test', path: '/t', value: 1 }], { expect: { path: '/t', value: 1 } });
+  await collection.delete('p1', { expect: [{ path: '/t', value: 1 }] });
+  // @ts-expect-error — an expect names the path it compares
+  await collection.delete('p1', { expect: { value: 1 } });
+  // @ts-expect-error — all() reads the cursor's options, not a fixed document's externals
+  await collection.all({ externals: {} });
+  void [everyPlace, bounded, allPositive];
   // @ts-expect-error — a collections-only model has no unit of work
   void places.saveChanges;
 }
@@ -219,6 +231,13 @@ export async function ledgerTyping(client: LedgerClient) {
   const record: DbLedgerRecord | null = await ledger.lookup({ op: 'a', scope: '', key: 'k' });
   const asRecord: LedgerRecord | null = record;
   const swept: number = await ledger.sweep();
+  // the claims an interrupted request left behind, found and freed
+  for (const claim of await ledger.inFlight({ olderThan: Date.now() - 60_000 })) {
+    const freed: boolean = await ledger.release(claim);
+    void freed;
+  }
+  const leased: DbLedger = createDbLedger(client, { ttlMs: 60_000, startedTtlMs: 5_000 });
+  void leased;
   // @ts-expect-error — a ref is named by id and generation; a bare string is not one the types admit
   const bad: DbClaimResult = { state: 'new', ref: 'seq-1' };
   void asContract; void wide; void asRecord; void swept; void bad;

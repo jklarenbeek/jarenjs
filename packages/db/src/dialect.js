@@ -143,6 +143,7 @@ function normalizeCapabilities(declared) {
  *     afterLog?: (connection: any) => any },
  *   jobs?: any,
  *   replication?: any,
+ *   rowLockSuffix?: string,
  *   owner?: { kind: 'lease', table: string, create: string, ensure: string, read: string,
  *     take: string, renew: string, release: string }
  *     | { kind: 'session', acquire: string, release: string },
@@ -468,6 +469,17 @@ export function createDialect(spec) {
     get({ table, keyColumn, docColumn }) {
       return `SELECT ${spec.jsonText(q(docColumn))} AS ${q('doc')} `
         + `FROM ${q(table)} WHERE ${q(keyColumn)} = ${p(1, 'key')}`;
+    },
+    /**
+     * The point read of a read-modify-write, inside the write's own
+     * transaction: the row locked for the rest of it where the engine
+     * locks rows (`rowLockSuffix`, PostgreSQL's `FOR UPDATE`), the plain
+     * read where writers serialize anyway (SQLite, under the transaction's
+     * write lock).
+     * @param {{ table: string, keyColumn: string, docColumn: string }} s
+     */
+    getForUpdate(s) {
+      return `${dml.get(s)}${spec.rowLockSuffix ?? ''}`;
     },
     /** @param {{ table: string, keyColumn: string }} s */
     del({ table, keyColumn }) {

@@ -1131,7 +1131,7 @@ export function createTracker(context) {
 
   const assertSqlWritable = () => {
     if (removals.size || memberships.size || [...records.values()].some((r) => r.pendingInsert || r.current !== r.snapshot))
-      throw new DbRuntimeError('JD2040', 'trusted SQL requires saving or discarding pending tracked changes first');
+      throw new DbRuntimeError('JD2041', 'SQL the store did not plan requires saving or discarding pending tracked changes first');
   };
   const invalidate = () => { assertSqlWritable(); records.clear(); };
   return {

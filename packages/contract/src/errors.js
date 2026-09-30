@@ -72,6 +72,7 @@ export const CONTRACT_CODES = Object.freeze({
   JC1012: 'a provider executor, descriptor host or run capability is malformed',
   JC1013: 'a durable command settlement capability is malformed',
   JC1014: 'continuation host options, key material or JSON input are malformed',
+  JC1015: 'a ledger fail(ref, false) carried no response: a non-retryable failure replays its stored response, so it must carry one — the settlement is refused and the claim stays started',
   // ——— http request-time (ContractRuntimeError, mapped onto the wire) ———
   JC2001: 'no operation matches the request method and path (404)',
   JC2002: 'the path shape is served under other methods (405, Allow lists them) — HEAD among them only beside a read: a HEAD on a GET-bound command is this code, never an execution',

@@ -1352,6 +1352,15 @@ it needs raw SQL or the raw handle. The rules, in one place:
   store as its database's single writable owner: a second store that asks
   while the lease is held is refused `JD2061`, naming the holder and when
   its lease ends ([HOSTS](docs/HOSTS.md#the-owner-lease)).
+- **A plain collection has compare-and-set.** `patch` reads and writes in
+  one write transaction (on PostgreSQL it locks the row, never the
+  store), so a leading `test` holds across processes and the document
+  validated is the document written; `put`, `patch` and `delete` take
+  `{ expect: { path, value } }` and refuse `JD2040` when the stored
+  document no longer holds it; a patch that changes nothing writes
+  nothing. `collection.all()` is every document, always an array —
+  `execute('$[*]')` answers a sequence (`undefined`, one bare value, or
+  an array).
 
 ```js
 import { openStore } from '@jarenjs/db';
@@ -1515,6 +1524,58 @@ fs.rmSync(dir, { recursive: true, force: true });
 `isolation` is typed as `IsolationLevel` on the open options, the
 transaction options and `tx.isolation`, `owner` as `StoreOwner`, and the
 refusal as `OwnerError` (`code: 'JD2061'`, `owner`, `expiresAt`).
+
+Compare-and-set on a plain collection, and every document as an array —
+every printed value is what the example answers when it runs:
+
+```js
+import { openStore } from '@jarenjs/db';
+import { nodeDriver } from '@jarenjs/db/node';
+
+const model = {
+  $model: '0.1',
+  collections: {
+    accounts: {
+      schema: {
+        type: 'object',
+        required: ['id', 'revision', 'balance'],
+        properties: { id: { type: 'string' }, revision: { type: 'integer' }, balance: { type: 'integer' } },
+      },
+      key: '/id',
+      indexes: [],
+    },
+  },
+};
+const store = await openStore(model, { driver: nodeDriver() });
+const accounts = store.collection('accounts');
+await accounts.put({ id: 'a', revision: 1, balance: 10 });
+await accounts.put({ id: 'b', revision: 1, balance: 5 });
+
+// a write that holds only if the stored revision is still the one this
+// caller read — here it is not, so nothing is written
+const stale = await accounts.put({ id: 'a', revision: 2, balance: 0 }, undefined,
+  { expect: { path: '/revision', value: 0 } }).catch((error) => error.code);
+// → 'JD2040'
+
+// a leading test is a compare-and-set: read and written in one transaction
+const moved = await accounts.patch('a', [
+  { op: 'test', path: '/revision', value: 1 },
+  { op: 'replace', path: '/revision', value: 2 },
+  { op: 'replace', path: '/balance', value: 7 },
+]);
+// → { id: 'a', revision: 2, balance: 7 }
+
+// every document, always an array, in the order execute('$[*]') visits them
+const ids = (await accounts.all()).map((account) => account.id);
+// → [ 'a', 'b' ]
+
+await store.close();
+```
+
+`expect` is typed as `WriteOptions` on `put`, `patch` and `delete`, and
+`all()` answers `T[]` on `Collection<T>` and `SyncCollection<T>`; the
+typed client's collection handle forwards both, where `all(predicate)`
+stays the chain's quantifier.
 
 The normative contract is [MODEL-FORMAT](docs/MODEL-FORMAT.md) §4 (the
 pragma set, the maintenance and backup rules, the cancellation report)

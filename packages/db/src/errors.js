@@ -76,7 +76,8 @@ export const DB_CODES = Object.freeze({
   JD2005: 'a database operation failed',
   JD2006: 'patch found no document at the key',
   JD2007: 'the result exceeded the profile row bound',
-  JD2040: 'the row changed under an optimistic update',
+  JD2040: 'an optimistic precondition did not hold: the row changed under an update, or an expect did not match',
+  JD2041: 'tracked changes are pending; save or discard them first',
   JD2050: 'a changeset could not be decoded',
   JD2051: 'the change log is not enabled',
   JD2060: 'the maintained live state exceeded its bound',
@@ -237,10 +238,16 @@ export class DbCompileError extends CodedError {
  *  - `JD2006` — `patch` addressed a key with no stored document
  *  - `JD2007` — a fetch crossed the profile's `maxRows` bound; the
  *    result is refused whole, never silently truncated
- *  - `JD2040` — an optimistic update or delete matched no row: the
- *    declared version changed under the save (or the row is gone);
- *    the error names the entity and key, and the whole save rolled
- *    back
+ *  - `JD2040` — an optimistic precondition did not hold. A tracked
+ *    update or delete matched no row: the declared version changed
+ *    under the save (or the row is gone); the error names the entity
+ *    and key, and the whole save rolled back. Or a collection write's
+ *    `expect` did not match the stored document (MODEL-FORMAT §5):
+ *    nothing was written
+ *  - `JD2041` — SQL the store did not plan (trusted SQL, a relational
+ *    write) was refused while tracked changes are pending: a later save
+ *    would write over what the statement wrote — save or discard them
+ *    first
  *  - `JD2050` — a session changeset carried bytes this decoder does
  *    not recognise (a future SQLite format change would land here)
  *  - `JD2051` — `changesSince` was called on a store whose capture

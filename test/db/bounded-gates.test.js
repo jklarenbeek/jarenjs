@@ -51,9 +51,11 @@ describe('the one-implementation gate', () => {
     assert.strictEqual(sources().filter((file) => /export function createCursor\(/.test(read(`packages/db/src/${file}`))).length, 1);
     const sites = sources().filter((file) => read(`packages/db/src/${file}`).includes("'JD2074'"));
     assert.deepStrictEqual(sites, ['cursor.js']);
-    // every engine reads its rows through that one cursor
+    // every engine reads its rows through that one cursor — directly, or
+    // through a factory parameter whose default is it (the synchronous
+    // twin of the same mechanism is the only other value it takes)
     for (const file of ['query.js', 'capture.js']) {
-      assert.match(read(`packages/db/src/${file}`), /createCursor\(\{/, `${file} builds its cursor on the mechanism`);
+      assert.match(read(`packages/db/src/${file}`), /createCursor\(\{|cursorFactory = createCursor\b/, `${file} builds its cursor on the mechanism`);
     }
   });
 });

@@ -203,6 +203,26 @@ export interface ExecuteOptions {
  * later pull is `JD2072`. */
 export interface CursorOptions extends ExecuteOptions {}
 
+/** One precondition of a collection write (MODEL-FORMAT §5): the stored
+ * document holds `value` at the JSON Pointer `path`, compared with the
+ * engine's JSON equality inside the write's own transaction. */
+export interface Expectation {
+  path: string;
+  value: unknown;
+}
+
+/** A collection write's options — a closed set (`JD0013`). `expect` is
+ * one precondition or a non-empty list of them: a document that does not
+ * hold them — or nothing stored — refuses the write `JD2040` and writes
+ * nothing. */
+export interface WriteOptions {
+  expect?: Expectation | readonly Expectation[];
+}
+
+/** `all()`'s options: the cursor's own, and nothing a fixed document
+ * cannot use (`JD0013`). */
+export type AllOptions = Pick<CursorOptions, 'signal' | 'deadline' | 'profile' | 'strictStreaming'>;
+
 /** An entity cursor's options. `tracking: true` registers every yielded
  * entity document with the unit of work — a snapshot per row, so the
  * tracker grows with the result and is bounded by nothing but it; off
@@ -563,11 +583,20 @@ export interface StoreCapabilities {
 
 export interface Collection<T = unknown> {
   stats(): unknown;
-  insert(doc: T): Promise<string | number>;
+  /** Insert; `options` reads nothing (a new document holds no
+   * precondition), and any member is `JD0013`. */
+  insert(doc: T, options?: Record<string, never>): Promise<string | number>;
   get(key: string | number): Promise<T | undefined>;
-  put(doc: T, key?: string | number): Promise<string | number>;
-  patch(key: string | number, ops: readonly unknown[]): Promise<T>;
-  delete(key: string | number): Promise<boolean>;
+  put(doc: T, key?: string | number, options?: WriteOptions): Promise<string | number>;
+  /** RFC 6902, read and written in one write transaction: a leading
+   * `test` is a compare-and-set, the result is validated before it is
+   * written, and a patch that changes nothing writes nothing. */
+  patch(key: string | number, ops: readonly unknown[], options?: WriteOptions): Promise<T>;
+  delete(key: string | number, options?: WriteOptions): Promise<boolean>;
+  /** Every stored document — always an array, one entry per document,
+   * in the order `execute('$[*]')` visits them (which answers a
+   * sequence: `undefined`, one bare value, or an array). */
+  all(options?: AllOptions): Promise<T[]>;
   /** Run a query document and answer in the engine's result shape.
    * `R` is what the document's `$return` produces — a document, a
    * projected value, an aggregate's number — and only the caller knows
@@ -584,11 +613,12 @@ export interface Collection<T = unknown> {
 
 export interface SyncCollection<T = unknown> {
   stats(): unknown;
-  insert(doc: T): string | number;
+  insert(doc: T, options?: Record<string, never>): string | number;
   get(key: string | number): T | undefined;
-  put(doc: T, key?: string | number): string | number;
-  patch(key: string | number, ops: readonly unknown[]): T;
-  delete(key: string | number): boolean;
+  put(doc: T, key?: string | number, options?: WriteOptions): string | number;
+  patch(key: string | number, ops: readonly unknown[], options?: WriteOptions): T;
+  delete(key: string | number, options?: WriteOptions): boolean;
+  all(options?: AllOptions): T[];
   execute<R = unknown>(document: unknown, options?: ExecuteOptions): SequenceResult<R>;
   explain(document: unknown, options?: ExecuteOptions): unknown;
 }

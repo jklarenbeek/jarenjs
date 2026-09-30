@@ -83,8 +83,10 @@ describe('PostgreSQL: the writer lock and the isolation floor', { skip: !url && 
   /** Wait until some session waits for the writer lock. */
   const writerLockWaited = async () => {
     for (let i = 0; i < 500; i++) {
+      // this schema's writer lock only: other files take their own meanwhile
       const { rows } = await admin.query("SELECT count(*)::int AS n FROM pg_catalog.pg_locks WHERE locktype = 'advisory' "
-        + 'AND NOT granted AND classid = $1::oid', [POSTGRES_LOCK_CLASSES.writer]);
+        + 'AND NOT granted AND classid = $1::oid AND objid = (pg_catalog.hashtext($2)::bigint & 4294967295)::oid',
+      [POSTGRES_LOCK_CLASSES.writer, schema]);
       if (rows[0].n > 0) return;
       await delay(10);
     }

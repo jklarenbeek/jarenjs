@@ -222,10 +222,12 @@ describe('idempotency — the binding over the memory ledger', () => {
     assert.throws(() => ledger.fail(failed.ref, false, { status: 400, headers: {}, body: 'stale' }), (/** @type {any} */ err) => err.code === 'JC1011');
     assert.strictEqual(ledger.lookup({ op: 'o', scope: 's', key: 'f' })?.status, 'started');
     assert.strictEqual(ledger.lookup({ op: 'o', scope: 's', key: 'f' })?.generation, again.ref.generation);
-    // a non-retryable failure without a stored response cannot replay: the key is new again
+    // a non-retryable failure without a response could replay nothing:
+    // refused (JC1015), and the claim stays started rather than freeing
+    // the key to re-run a command that failed for good
     const nores = ledger.claim({ op: 'o', scope: 's', key: 'n', hash: 'h' });
-    ledger.fail(nores.ref, false);
-    assert.strictEqual(ledger.claim({ op: 'o', scope: 's', key: 'n', hash: 'h' }).state, 'new');
+    assert.throws(() => ledger.fail(nores.ref, false), (/** @type {any} */ err) => err.code === 'JC1015');
+    assert.deepStrictEqual(ledger.claim({ op: 'o', scope: 's', key: 'n', hash: 'h' }), { state: 'in-progress' });
     assert.strictEqual(ledger.lookup({ op: 'o', scope: 's', key: 'missing' }), null);
     assert.throws(() => createMemoryLedger({ ttlMs: 0 }), TypeError);
     assert.throws(() => createMemoryLedger({ now: /** @type {any} */ (5) }), TypeError);
