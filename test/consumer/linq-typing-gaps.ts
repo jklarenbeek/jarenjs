@@ -55,7 +55,7 @@ export function channelHeaderIsNull(ctx: HandlerContext<null, 'port'>): null { r
 // ——— every tool's execute exists ———
 export async function tools(list: readonly unknown[]): Promise<void> {
   for (const tool of typedTools(list, Labels)) {
-    const outcome = await tool.execute({ id: 'l1' });
+    const outcome = await tool.execute({ id: 'l1' }, { signal: AbortSignal.timeout(1000), attempt: 'a1' });
     void outcome;
   }
 }

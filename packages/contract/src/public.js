@@ -53,14 +53,19 @@ export function isCompiledContract(value) {
 
 /**
  * The operations a projection retains, in document order: the public
- * ones, narrowed by `ops` when given. Throws `JC1008` for a malformed
- * `contract` or an `ops` entry that names no operation.
+ * ones — or the ones whose audience `audiences` names — narrowed by `ops`
+ * when given. Throws `JC1008` for a malformed `contract` or an `ops`
+ * entry that names no operation. Without `audiences` a named server
+ * operation is left out silently (the public projection's rule, which
+ * the revision hashes); with it, a named operation outside the audiences
+ * is `JC1008`, so a caller never loses one it asked for.
  * @param {Contract} contract
  * @param {readonly string[] | undefined} ops
  * @param {string} who - the projection's name, for the message
+ * @param {readonly ('public' | 'server')[]} [audiences] - the audiences to retain
  * @returns {CompiledOperation[]}
  */
-export function retainedOperations(contract, ops, who) {
+export function retainedOperations(contract, ops, who, audiences = undefined) {
   if (!isCompiledContract(contract)) {
     throw new ContractHostError('JC1008', `${who}: contract must be a compiled contract (compileContract(doc))`);
   }
@@ -73,18 +78,27 @@ export function retainedOperations(contract, ops, who) {
       if (typeof id !== 'string' || !Object.hasOwn(contract.operations, id)) {
         throw new ContractHostError('JC1008', `${who}: ops[${i}] names no operation of the contract (${typeof id === 'string' ? id : typeof id})`);
       }
+      const audience = contract.operations[id].policy.audience;
+      if (audiences !== undefined && !audiences.includes(audience)) {
+        throw new ContractHostError('JC1008', `${who}: ops[${i}] names '${id}', a ${audience}-audience operation — `
+          + `pass audiences: ['public', '${audience}'] to expose it`);
+      }
       wanted.add(id);
     }
   }
+  const retained = audiences === undefined ? PUBLIC : audiences;
   const out = [];
   for (let i = 0; i < contract.ids.length; i++) {
     const op = contract.operations[contract.ids[i]];
-    if (op.policy.audience === 'server') continue;
+    if (!retained.includes(op.policy.audience)) continue;
     if (wanted !== null && !wanted.has(op.id)) continue;
     out.push(op);
   }
   return out;
 }
+
+/** The audiences a projection retains by default. */
+const PUBLIC = Object.freeze(['public']);
 
 /**
  * The public policy of an operation: the client-facing members in the
@@ -174,7 +188,28 @@ function publicOperation(op) {
  * compileContract(pub).ids; // the public operations, in document order
  */
 export function publicProjection(contract, options = {}) {
-  const ops = retainedOperations(contract, options.ops, 'publicProjection');
+  return projectionOf(contract, retainedOperations(contract, options.ops, 'publicProjection'));
+}
+
+/**
+ * The host projection: the public projection's document over EVERY
+ * operation, server-audience ones included, in the same member order —
+ * what the host revision hashes (docs/CONTRACT-FORMAT.md §14). It is an
+ * internal gate's identity: never served, never negotiated.
+ * @param {Contract} contract
+ * @returns {Record<string, unknown>}
+ */
+export function hostProjection(contract) {
+  return projectionOf(contract, retainedOperations(contract, undefined, 'hostProjection', ['public', 'server']));
+}
+
+/**
+ * The projection document over the retained operations.
+ * @param {Contract} contract
+ * @param {CompiledOperation[]} ops
+ * @returns {Record<string, unknown>}
+ */
+function projectionOf(contract, ops) {
   /** @type {Record<string, unknown>} */
   const out = { $contract: '0.1' };
   if (contract.id !== null) out.id = contract.id;

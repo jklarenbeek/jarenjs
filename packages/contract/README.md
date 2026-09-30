@@ -521,7 +521,9 @@ toTypeScript(contract);       // one .d.ts: CatalogLoadInput/Output per operatio
 toMarkdown(contract);         // reference docs: operations table, per-operation sections, the type tables
 contractTools(contract, client);
                               // plain ToolDefs for the shared WebMCP adapter:
-                              //   name 'product_save', a self-contained inputSchema, execute → the outcome
+                              //   name 'product_save', a self-contained inputSchema, execute → the outcome;
+                              //   execute(args, { signal }) cancels the call; audiences: ['public', 'server']
+                              //   admits a host's internal operations (a named server op is JC1008 otherwise)
 ```
 
 And on the command line, the drift gate:
@@ -531,6 +533,7 @@ jaren-contract openapi --contract shop.json --out api/ --info-title Shop
 jaren-contract types   --contract shop.js   --out src/shop.d.ts --check   # exit 1 when stale; the module IS the source
 jaren-contract docs    --contract shop.json --out docs/
 jaren-contract diff    --from api/v1.json --to shop.js --fail-on breaking
+jaren-contract lint    --contract shop.json --fail-on all                  # authoring findings (§13.1)
 ```
 
 Every document flag — `--contract`, `--from`, `--to` — takes a `.json`
@@ -570,24 +573,33 @@ await contract.revision();
 // compatibility decision.
 
 const { breaking, additive, neutral, unknown } = diffContracts(v1, v2);
-// every change classified by the CONTRACT-FORMAT §13 rule table (R1–R16):
+// every change classified by the CONTRACT-FORMAT §13 rule table (R1–R16),
+// read as variance — an input is the server's to accept, an output the client's:
 //   breaking — an operation or error removed, a binding member moved, a new
 //              required input member, a narrowed input, a removed/optional-
-//              ized/narrowed output member, idempotency now required, an
+//              ized/WIDENED output (a closed output gaining a member too —
+//              the old client refuses it), idempotency now required, an
 //              operation withdrawn to audience: server
 //   additive — an operation/error added, an optional input member, a widened
-//              schema, a relaxed idempotency
-//   neutral  — task mode, retry, cache, policy.revision, doc
+//              input, a NARROWED output, a relaxed idempotency
+//   neutral  — task mode, retry, cache, policy.revision, policy.stream, doc,
+//              a nullable respelling that accepts the same values (R16)
 //   unknown  — what the checker does not model (anyOf/if/not, a CHANGED
 //              pattern, an external $ref, an error details schema):
 //              REPORTED, never silently classed
 // each Change = { kind, op, docPath, from?, to?, rule } — the docPath a
 // validator error would name, $refs resolved
 
+diffContracts(v1, v2, { audience: 'all' });
+// an internal gate: the same rules over server-audience operations too, each
+// of their changes marked audience: 'server' — and contract.revision({ audience:
+// 'all' }) fingerprints every operation (never served)
+
 isCompatible(clientContract, serverContract);
 // the negotiation rule as a pure function (same version, or either end's
-// compat names the other's) — the SAME implementation negotiate() runs,
-// exported so a server can refuse an incompatible peer too
+// compat names the other's, or ranges over it: compat: ['^1'] beside a numeric
+// version) — the SAME implementation negotiate() runs, exported so a server
+// can refuse an incompatible peer too
 ```
 
 ```sh

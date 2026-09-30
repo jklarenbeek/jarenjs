@@ -55,8 +55,11 @@ export const POLICY_VALUES = Object.freeze({
   audience: ['public', 'server'],
 });
 
-/** An error code: `^[a-z][a-z0-9_-]*$` (§3's table). */
-const CODE = /^[a-z][a-z0-9_-]*$/;
+/** An error code: CONTRACT-FORMAT §3.1's grammar table, `errorCode` —
+ * lowercase words, dotted for namespacing. A copy, because linq depends on
+ * core and json only; test/linq/contract-pen.test.js holds it equal to
+ * `CONTRACT_GRAMMARS` from @jarenjs/contract. */
+const CODE = /^[a-z][a-z0-9_-]*(\.[a-z][a-z0-9_-]*)*$/;
 
 /**
  * A member set the pen knows, or `JL0101` naming the one it does not.
@@ -238,7 +241,7 @@ export function readErrors(errors, at) {
   return Object.keys(errors).map((code) => {
     if (!CODE.test(code)) {
       throw new LinqBuildError('JL0101',
-        `an error code matches ^[a-z][a-z0-9_-]*$, got '${code}'`, `${at}/${code}`);
+        `an error code matches ${CODE.source} — lowercase words, dotted for namespacing (ai.rate-limited); got '${code}'`, `${at}/${code}`);
     }
     const declared = errors[code];
     if (!isJsonObject(declared)) {

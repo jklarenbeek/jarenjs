@@ -133,3 +133,64 @@ describe('contractTools — the no-import rule (D1)', () => {
     }
   });
 });
+
+describe('contractTools — named operations and the call context', () => {
+  const contract = compileContract({ $contract: '0.1', operations: {
+    'admin.purge': { kind: 'command', output: true, http: { method: 'POST', path: '/purge' }, policy: { audience: 'server' } },
+    'slow.run': { kind: 'command', input: { type: 'object', properties: {} }, output: true, http: { method: 'POST', path: '/slow' } },
+    'ping': { kind: 'read', output: true, http: { method: 'GET', path: '/ping' } },
+  } });
+
+  it('a server operation named in ops is JC1008 — never skipped — unless audiences admits it', async () => {
+    const { openLocalClient } = await import('@jarenjs/contract/local');
+    const client = openLocalClient(contract, { 'admin.purge': () => true, 'slow.run': () => true, ping: () => true });
+    assert.throws(() => contractTools(contract, client, { ops: ['admin.purge'] }),
+      (e) => e instanceof ContractHostError && e.code === 'JC1008' && /'admin\.purge', a server-audience operation/.test(e.message)
+        && /audiences: \['public', 'server'\]/.test(e.message));
+    const both = contractTools(contract, client, { ops: ['admin.purge'], audiences: ['public', 'server'] });
+    assert.deepStrictEqual(both.map((t) => t.name), ['admin_purge']);
+    assert.deepStrictEqual(contractTools(contract, client).map((t) => t.name), ['slow_run', 'ping'], 'the default stays public');
+    assert.deepStrictEqual(contractTools(contract, client, { audiences: ['public', 'server'] }).map((t) => t.name),
+      ['admin_purge', 'slow_run', 'ping']);
+    for (const audiences of [[], ['private'], 'public', [1]]) {
+      assert.throws(() => contractTools(contract, client, { audiences: /** @type {any} */ (audiences) }),
+        (e) => e.code === 'JC1008' && /audiences/.test(e.message), JSON.stringify(audiences));
+    }
+  });
+
+  it('the signal passed to execute cancels a pending local invoke; a key or headers in the context never reach it', async () => {
+    const { openLocalClient } = await import('@jarenjs/contract/local');
+    /** @type {any[]} */
+    const seen = [];
+    let release = () => {};
+    const handlerDone = new Promise((r) => { release = r; });
+    const client = openLocalClient(contract, {
+      'admin.purge': () => true,
+      'slow.run': async (_input, ctx) => {
+        await new Promise((r) => setTimeout(r, 300));
+        seen.push({ aborted: ctx.signal?.aborted === true });
+        release();
+        return true;
+      },
+      ping: (_input, ctx) => { seen.push({ headers: ctx.headers }); return true; },
+    });
+    const tool = contractTools(contract, client).find((t) => t.name === 'slow_run');
+    const ac = new AbortController();
+    setTimeout(() => ac.abort(), 20);
+    const started = performance.now();
+    const outcome = await tool.execute({}, { signal: ac.signal });
+    assert.ok(!outcome.ok && outcome.error.code === 'JC2052', JSON.stringify(outcome));
+    assert.ok(performance.now() - started < 250, 'resolved at the abort, not at the handler\'s end');
+    await handlerDone;
+    assert.deepStrictEqual(seen, [{ aborted: true }], 'the handler saw the abort');
+
+    // a model-supplied context with a key, headers or a precondition: dropped, and the call still resolves
+    const invoked = [];
+    const spy = { invoke: (/** @type {string} */ op, /** @type {unknown} */ input, /** @type {any} */ ctx) => { invoked.push(ctx); return client.invoke(op, input, ctx); } };
+    const ping = contractTools(contract, spy).find((t) => t.name === 'ping');
+    const pong = await ping.execute(undefined, { idempotencyKey: 'k', headers: { 'x-a': '1' }, ifMatch: '"v"', attempt: 3, signal: 'nope' });
+    assert.strictEqual(pong.ok, true);
+    assert.deepStrictEqual(invoked, [{ attempt: 3 }]);
+    assert.deepStrictEqual(await ping.execute(undefined, /** @type {any} */ ('not an object')).then((o) => o.ok), true);
+  });
+});

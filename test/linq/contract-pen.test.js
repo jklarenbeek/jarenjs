@@ -359,7 +359,7 @@ describe('the contract pen: the refusals it can see earlier than the compiler', 
     assert.match(refusal(() => defineContract({}, {})).reason, /at least one operation/);
     assert.match(refusal(() => defineContract({}, {
       a: read({ output: true, errors: { Bad: error({}) } }),
-    })).reason, /matches \^\[a-z\]\[a-z0-9_-\]\*\$/);
+    })).reason, /matches \^\[a-z\]\[a-z0-9_-\]\*\(\\\.\[a-z\]\[a-z0-9_-\]\*\)\*\$ — lowercase words, dotted for namespacing/);
   });
 
   it('a member mapped to `path` the template does not declare is JL0102', () => {
@@ -466,5 +466,34 @@ describe('the contract pen: the generated projection', () => {
     assert.strictEqual(committed, renderFixture(),
       'regenerate with `node scripts/generate-contract-pen-fixture.js`');
     assert.ok(committed.startsWith(HEADER));
+  });
+});
+
+describe('the pen\'s naming grammars are the contract\'s (CONTRACT_GRAMMARS)', () => {
+  // linq depends on core and json only, so it carries copies of the
+  // grammars; this holds each copy to the table the compiler applies
+  const names = ['a', 'a.b', 'ai.rate-limited', 'a_b', 'a-b', 'A', 'Ab_c', 'a/b', 'a..b', '1a', '_x', 'a.b-c.d_e', 'x-y.z'];
+  const builds = (/** @type {() => unknown} */ fn) => { try { fn(); return true; } catch (e) { if (e instanceof LinqBuildError) return false; throw e; } };
+
+  it('a declared error code', async () => {
+    const { CONTRACT_GRAMMARS } = await import('@jarenjs/contract');
+    const grammar = new RegExp(CONTRACT_GRAMMARS.errorCode);
+    for (const name of names) {
+      const ok = builds(() => defineContract({ id: 'c' }, {
+        'a.b': read({ output: s.boolean(), errors: { [name]: error({ status: 400 }) }, http: http({ method: 'GET', path: '/a' }) }),
+      }));
+      assert.strictEqual(ok, grammar.test(name), name);
+    }
+  });
+
+  it('a contract id and a path variable', async () => {
+    const { CONTRACT_GRAMMARS } = await import('@jarenjs/contract');
+    const id = new RegExp(CONTRACT_GRAMMARS.contractId);
+    const variable = new RegExp(CONTRACT_GRAMMARS.pathVariable);
+    for (const name of names) {
+      assert.strictEqual(builds(() => defineContract({ id: name }, { 'a.b': read({ output: s.boolean(), http: http({ method: 'GET', path: '/a' }) }) })),
+        id.test(name), `id ${name}`);
+      assert.strictEqual(builds(() => http({ method: 'GET', path: `/a/{${name}}` })), variable.test(name), `variable ${name}`);
+    }
   });
 });

@@ -17,7 +17,7 @@ import { peekRevision } from './revision.js';
  * The description of one operation.
  * @typedef {Object} OperationDescription
  * @property {string} id
- * @property {'read' | 'command'} kind
+ * @property {'read' | 'command' | 'subscribe'} kind
  * @property {string} method
  * @property {string} path - the canonical `{name}` template
  * @property {number} status
@@ -28,6 +28,8 @@ import { peekRevision } from './revision.js';
  * @property {string} task
  * @property {string} idempotency
  * @property {string} cache
+ * @property {'public' | 'server'} audience - who may see the operation; the
+ *   well-known path serves the public description, which omits `server` ones
  * @property {{ resume: string, heartbeatMs: number, maxPatchBytes: number | null }} [stream]
  *   - the resolved stream policy; present exactly on subscribe operations
  * @property {{ http: boolean, status: boolean, media: boolean, in: readonly string[], task: boolean, idempotency: boolean, cache: boolean }} inferred
@@ -104,6 +106,7 @@ export function describeContract(contract) {
       task: op.policy.task,
       idempotency: op.policy.idempotency,
       cache: op.policy.cache,
+      audience: op.policy.audience,
       ...(op.policy.stream !== null ? { stream: { ...op.policy.stream } } : {}),
       inferred: {
         http: http === undefined,

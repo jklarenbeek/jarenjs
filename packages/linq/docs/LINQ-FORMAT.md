@@ -210,7 +210,7 @@ and the bundle is the byte count the tree-shaking probe builds.
 | [MODEL-PEN.md](MODEL-PEN.md) | `./model` | 1,117 | 30 | 6 | 3 | 45,117 B |
 | [JSLT-PEN.md](JSLT-PEN.md) | `./jslt` | 962 | 17 | 8 | 3 | 18,837 B |
 | [MIGRATION-PEN.md](MIGRATION-PEN.md) | `./migration` | 808 | 12 | 5 | 4 | 24,219 B |
-| [CONTRACT-PEN.md](CONTRACT-PEN.md) | `./contract` | 1,221 | 38 | 6 | 3 | 47,917 B |
+| [CONTRACT-PEN.md](CONTRACT-PEN.md) | `./contract` | 1,221 | 38 | 6 | 3 | 47,997 B |
 | [FLOW-PEN.md](FLOW-PEN.md) | `./flow` | 1,040 | 16 | 7 | 3 | 18,891 B |
 | [APP-PEN.md](APP-PEN.md) | `./app` | 1,163 | 22 | 7 | 3 | 50,062 B |
 | [FORMS-PEN.md](FORMS-PEN.md) | `./forms` | 940 | 18 | 6 | 3 | 39,929 B |
@@ -268,7 +268,7 @@ it and each document publishes it. The rounded column is what
 | `@jarenjs/linq/model` | [MODEL-PEN.md](MODEL-PEN.md) | 45,117 B | 45 kB |
 | `@jarenjs/linq/jslt` | [JSLT-PEN.md](JSLT-PEN.md) | 18,837 B | 19 kB |
 | `@jarenjs/linq/migration` | [MIGRATION-PEN.md](MIGRATION-PEN.md) | 24,219 B | 24 kB |
-| `@jarenjs/linq/contract` | [CONTRACT-PEN.md](CONTRACT-PEN.md) | 47,917 B | 48 kB |
+| `@jarenjs/linq/contract` | [CONTRACT-PEN.md](CONTRACT-PEN.md) | 47,997 B | 48 kB |
 | `@jarenjs/linq/flow` | [FLOW-PEN.md](FLOW-PEN.md) | 18,891 B | 19 kB |
 | `@jarenjs/linq/app` | [APP-PEN.md](APP-PEN.md) | 50,062 B | 50 kB |
 | `@jarenjs/linq/forms` | [FORMS-PEN.md](FORMS-PEN.md) | 39,929 B | 40 kB |
@@ -635,7 +635,7 @@ it says.
 
 | Method | Emits | Type reading | Status |
 |---|---|---|---|
-| `errors: { <code>: … }` | `{ <code>: { status?, schema? } }`, in declaration order | the declared codes are the operation's `errors` union — `'conflict' \| 'not-found'` | native; a map that is not a plain object, a code outside `^[a-z][a-z0-9_-]*$`, or an entry that is not a plain object, `JL0101` |
+| `errors: { <code>: … }` | `{ <code>: { status?, schema? } }`, in declaration order | the declared codes are the operation's `errors` union — `'conflict' \| 'not-found'` | native; a map that is not a plain object, a code outside the `errorCode` grammar (CONTRACT-FORMAT §2.4: lowercase words, dotted for namespacing — `ai.rate-limited`), or an entry that is not a plain object, `JL0101` |
 | `error({ status?, schema? })` | `{ status?, schema? }` in that order — `error()` with nothing emits `{}` | `ErrorDeclaration<E>` | native; another member, or a status outside 100–599, `JL0101` |
 
 **The policy**
@@ -674,7 +674,7 @@ it says.
 | `typedClient(client, contract)` | — (identity) | `TypedClient<C>`: `invoke` over the invokable operations, `subscribe` over the subscribe ones, `url` over all of them | native |
 | `typedHttpClient(client, contract)` | — (identity) | `TypedHttpClient<C>`: `TypedClient<C>` plus `bytes` over `OpaqueOf<C>` — the opaque operations, whose success is a `ByteResponse` (a live stream) rather than the output type; for an `openHttpClient` client only, a local or port client has no `bytes` | native |
 | `typedHandlers(contract, handlers)` | — (identity) | `TypedHandlerTable<C, Host = null, Carrier = 'http'>`: one handler per invokable operation, `(input, ctx) => output \| Failure`. `ctx` is `HandlerContext<Host, Carrier>`: the HTTP context by default, `Host` the host lifecycle's `ctx.host`, and a carrier union a discriminated union to narrow on `ctx.carrier` (CONTRACT-FORMAT §7.7). `ctx.op` is `OperationInfo`, the structural subset of the compiled operation: `id`, `kind`, `doc`, `errors` (`status` per declared code), `policy` and `http`. "Does my operation declare this failure?" is `Object.hasOwn(ctx.op.errors, code)`, with no runtime member added. `ctx.header(name, value)` arms a response header on HTTP and is `null` on port and local. An `onError(error, ctx)` observer takes `ErrorContext<Host>`: the handler context, or `null` | native; a missing or misspelled operation does not compile, and an HTTP-only member on a port/local context does not either. `op.id` stays `string`, because a table whose handlers demanded a literal id would no longer be the `Handler` a binding accepts |
-| `typedTools(tools, contract)` | — (identity) | `TypedTool<C>[]`: `name` is the id with `.` → `_`, and `execute` takes the operation's ACCEPTED input. `execute` is always a function: an operation without input ignores its argument | native |
+| `typedTools(tools, contract)` | — (identity) | `TypedTool<C>[]`: `name` is the id with `.` → `_`, and `execute(args, ctx?)` takes the operation's ACCEPTED input. `ctx` is a `ToolCallContext` (`signal`, `attempt`): aborting the signal cancels the call, and nothing else reaches the operation. `execute` is always a function: an operation without input ignores its argument | native |
 
 **What the pen does not judge**
 

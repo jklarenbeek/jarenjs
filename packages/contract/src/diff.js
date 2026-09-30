@@ -38,6 +38,7 @@ import { canonicalNullable } from '@jarenjs/core/schema';
 import { collectSameDocumentAnchors, resolveSameDocumentRef } from '@jarenjs/validate/normalize';
 
 import { compileContract } from './compile.js';
+import { ContractHostError } from './errors.js';
 import { isCompiledContract } from './public.js';
 import { pathShape } from './path.js';
 
@@ -58,6 +59,8 @@ export { isCompatible, compatReason } from './compat.js';
  * @property {unknown} [to] - the new value, where one exists
  * @property {string} rule - the §13 row: `'R1'`–`'R16'`
  * @property {string} [note] - the honesty rider some rows carry (R5's "now ignored, not validated")
+ * @property {'server'} [audience] - present, under `audience: 'all'`, on every
+ *   change of a server-audience operation
  */
 
 /**
@@ -123,10 +126,12 @@ function resolveHops(node, side) {
  * @typedef {Object} Sink
  * @property {(direction: 'narrowed' | 'widened', keyword: string, path: string, from: unknown, to: unknown) => void} constraint
  * @property {(event: 'removed' | 'added-required' | 'added-optional' | 'made-required' | 'made-optional',
- *   direction: 'narrowed' | 'widened' | null, path: string, member: string) => void} member
+ *   direction: 'narrowed' | 'widened' | null, path: string, member: string, closedBefore: boolean) => void} member
  *   `direction` is the AP-aware narrowing/widening reading of the member
  *   event (`null` when it is a no-op, e.g. an unconstrained optional
- *   member added to an open object)
+ *   member added to an open object); `closedBefore` says whether the
+ *   object refused unknown members in `a` — an output member a closed
+ *   schema never allowed is one the old client's validator refuses
  * @property {(keyword: string, path: string, from: unknown, to: unknown) => void} unknown
  * @property {(path: string, from: unknown, to: unknown) => void} respelled - a nullable
  *   node respelled between a type array and a two-branch `anyOf`/`oneOf` (R16)
@@ -303,30 +308,30 @@ function compareObject(A, B, path, a, b, sink, visited) {
     const inB = Object.hasOwn(bProps, m);
     if (inA && !inB) {
       // removed: forbidden under a closed b, unconstrained under an open one
-      sink.member('removed', bClosed ? 'narrowed' : 'widened', at, m);
+      sink.member('removed', bClosed ? 'narrowed' : 'widened', at, m, aClosed);
       continue;
     }
     if (!inA && inB) {
       const unconstrained = bProps[m] === true || (isObject(bProps[m]) && Object.keys(bProps[m]).length === 0);
-      if (bReq.has(m)) sink.member('added-required', 'narrowed', at, m);
-      else if (aClosed) sink.member('added-optional', 'widened', at, m); // was forbidden, now allowed
-      else sink.member('added-optional', unconstrained ? null : 'narrowed', at, m); // was unconstrained
+      if (bReq.has(m)) sink.member('added-required', 'narrowed', at, m, aClosed);
+      else if (aClosed) sink.member('added-optional', 'widened', at, m, aClosed); // was forbidden, now allowed
+      else sink.member('added-optional', unconstrained ? null : 'narrowed', at, m, aClosed); // was unconstrained
       continue;
     }
-    if (!aReq.has(m) && bReq.has(m)) sink.member('made-required', 'narrowed', at, m);
-    else if (aReq.has(m) && !bReq.has(m)) sink.member('made-optional', 'widened', at, m);
+    if (!aReq.has(m) && bReq.has(m)) sink.member('made-required', 'narrowed', at, m, aClosed);
+    else if (aReq.has(m) && !bReq.has(m)) sink.member('made-optional', 'widened', at, m, aClosed);
     compareSchema(aProps[m], bProps[m], at, a, b, sink, visited);
   }
 
   // a required name without a properties entry is still a requirement
   for (const m of bReq) {
     if (!aReq.has(m) && !Object.hasOwn(bProps, m) && !Object.hasOwn(aProps, m)) {
-      sink.member('added-required', 'narrowed', path + '/required', m);
+      sink.member('added-required', 'narrowed', path + '/required', m, aClosed);
     }
   }
   for (const m of aReq) {
     if (!bReq.has(m) && !Object.hasOwn(aProps, m) && !Object.hasOwn(bProps, m)) {
-      sink.member('made-optional', 'widened', path + '/required', m);
+      sink.member('made-optional', 'widened', path + '/required', m, aClosed);
     }
   }
 
@@ -373,23 +378,35 @@ function classOf(diff, rule) {
  * @returns {Sink}
  */
 function schemaSink(diff, op, root, what) {
+  // Variance: an input is consumed by the SERVER, so narrowing it refuses
+  // what old clients send (breaking) and widening accepts more (additive);
+  // an output is consumed by the CLIENT, which validates what it receives
+  // against its own contract, so widening hands it values it refuses
+  // (breaking — the suite's own client answers JC2053) and narrowing is
+  // additive: a client on the wider contract accepts every narrower answer.
   /** @type {(direction: 'narrowed' | 'widened') => [string, string]} */
   const directionRule = (direction) => (what === 'input'
     ? (direction === 'narrowed' ? ['R6', 'input-narrowed'] : ['R7', 'input-widened'])
-    : (direction === 'narrowed' ? ['R8', 'output-narrowed'] : ['R9', 'output-widened']));
+    : (direction === 'widened' ? ['R8', 'output-widened'] : ['R9', 'output-narrowed']));
   return {
     constraint(direction, keyword, path, from, to) {
       const [rule, kind] = directionRule(direction);
       push(classOf(diff, rule), { kind, op, docPath: root + path, from, to, rule, note: keyword });
     },
-    member(event, direction, path, member) {
+    member(event, direction, path, member, closedBefore) {
       if (what === 'output') {
-        const breaking = event === 'removed' || event === 'made-optional';
+        // the consumer's view: a removed or no-longer-guaranteed member
+        // breaks a client that reads it, and a new member breaks a client
+        // whose schema was closed (its validator refuses the member); on
+        // an open schema a new member is additive
+        const added = event === 'added-optional' || event === 'added-required';
+        const breaking = event === 'removed' || event === 'made-optional' || (added && closedBefore);
         const rule = breaking ? 'R8' : 'R9';
         push(classOf(diff, rule), {
-          kind: breaking
-            ? (event === 'removed' ? 'output-member-removed' : 'output-member-optional')
-            : (event === 'made-required' ? 'output-member-guaranteed' : 'output-member-added'),
+          kind: event === 'removed' ? 'output-member-removed'
+            : event === 'made-optional' ? 'output-member-optional'
+              : event === 'made-required' ? 'output-member-guaranteed'
+                : 'output-member-added',
           op, docPath: root + path, from: member, to: member, rule,
         });
         return;
@@ -567,6 +584,9 @@ function comparePolicy(diff, aOp, bOp) {
     ['retry', from.retry, to.retry],
     ['cache', from.cache, to.cache],
     ['revision', from.revision, to.revision],
+    // a stream's resume policy, heartbeat or patch bound: the stream's
+    // behaviour, not its wire shape — reported, neutral like the others
+    ['stream', from.stream, to.stream],
   ]);
   for (const [member, before, after] of neutral) {
     if (canon(before) !== canon(after)) {
@@ -594,16 +614,21 @@ function asCompiled(value) {
  * rule table. Takes compiled contracts or raw documents (documents are
  * compiled, so a malformed one refuses with its compile error before any
  * comparison). Operations whose `policy.audience` is `server` on BOTH
- * sides are outside the compatibility surface and are skipped; an
- * audience flip is R14 and subsumes the operation's other changes.
+ * sides are outside the compatibility surface and are skipped — unless
+ * `options.audience` is `'all'`, an internal gate's choice, which runs
+ * the same rules on them and marks each of their changes `audience:
+ * 'server'`. An audience flip is R14 and subsumes the operation's other
+ * changes.
  * @param {Contract | Record<string, unknown>} a - the contract consumers hold today
  * @param {Contract | Record<string, unknown>} b - the contract they would meet
+ * @param {{ audience?: 'public' | 'all' }} [options] - a closed set (`JC1008`)
  * @returns {ContractDiff}
  * @example
  * const { breaking } = diffContracts(v1Doc, v2Doc);
  * if (breaking.length > 0) throw new Error(breaking.map((c) => `${c.rule} ${c.op}: ${c.kind}`).join('\n'));
  */
-export function diffContracts(a, b) {
+export function diffContracts(a, b, options = undefined) {
+  const audience = diffAudience(options);
   const A = asCompiled(a);
   const B = asCompiled(b);
   /** @type {ContractDiff} */
@@ -616,36 +641,88 @@ export function diffContracts(a, b) {
   for (const id of new Set([...A.ids, ...B.ids])) {
     const aOp = Object.hasOwn(A.operations, id) ? A.operations[id] : null;
     const bOp = Object.hasOwn(B.operations, id) ? B.operations[id] : null;
-    if (aOp !== null && bOp === null) {
-      if (aOp.policy.audience !== 'server') {
-        push(diff.breaking, { kind: 'operation-removed', op: id, docPath: opPath(id), rule: 'R1' });
-      }
-      continue;
-    }
-    if (aOp === null && bOp !== null) {
-      if (bOp.policy.audience !== 'server') {
-        push(diff.additive, { kind: 'operation-added', op: id, docPath: opPath(id), rule: 'R2' });
-      }
-      continue;
-    }
-    if (aOp === null || bOp === null) continue;
-    if (aOp.policy.audience !== bOp.policy.audience) {
-      const narrowed = bOp.policy.audience === 'server';
-      push(narrowed ? diff.breaking : diff.additive, {
-        kind: narrowed ? 'audience-narrowed' : 'audience-widened',
-        op: id, docPath: opPath(id) + '/policy/audience',
-        from: aOp.policy.audience, to: bOp.policy.audience, rule: 'R14',
+    const marks = CLASSES.map((name) => diff[name].length);
+    const server = compareOperation(diff, id, aOp, bOp, sideA, sideB, audience);
+    // under `audience: 'all'`, every change of a server operation says so
+    if (server) {
+      CLASSES.forEach((name, i) => {
+        for (let j = marks[i]; j < diff[name].length; j++) diff[name][j].audience = 'server';
       });
-      continue; // the flip subsumes the operation's other changes
     }
-    if (aOp.policy.audience === 'server') continue; // invisible on both sides
-
-    compareBinding(diff, aOp, bOp);
-    compareInput(diff, aOp, bOp, sideA, sideB);
-    const outSink = schemaSink(diff, id, opPath(id) + '/output', 'output');
-    compareSchema(aOp.output.schema, bOp.output.schema, '', sideA, sideB, outSink, new Map());
-    compareErrors(diff, aOp, bOp);
-    comparePolicy(diff, aOp, bOp);
   }
   return diff;
+}
+
+/** The four classes, in the order a diff lists them. */
+const CLASSES = /** @type {const} */ (['breaking', 'additive', 'neutral', 'unknown']);
+
+/**
+ * The audience a diff reads: `'public'` by default (server-audience
+ * operations are outside the compatibility surface and skipped), or
+ * `'all'` for an internal gate, where the same rules run on them too.
+ * @param {unknown} options
+ * @returns {'public' | 'all'}
+ */
+function diffAudience(options) {
+  if (options === undefined) return 'public';
+  if (options === null || typeof options !== 'object' || Array.isArray(options)) {
+    throw new ContractHostError('JC1008', 'diffContracts: options must be an object');
+  }
+  for (const key of Object.keys(options)) {
+    if (key !== 'audience') throw new ContractHostError('JC1008', `diffContracts: options has no member '${key}' (it reads audience)`);
+  }
+  const audience = /** @type {any} */ (options).audience;
+  if (audience === undefined) return 'public';
+  if (audience !== 'public' && audience !== 'all') {
+    throw new ContractHostError('JC1008', "diffContracts: options.audience is 'public' or 'all'");
+  }
+  return audience;
+}
+
+/**
+ * Classify one operation's changes into `diff`. Answers whether the
+ * changes it recorded belong to a server-audience operation (only ever
+ * true under `audience: 'all'`).
+ * @param {ContractDiff} diff
+ * @param {string} id
+ * @param {CompiledOperation | null} aOp
+ * @param {CompiledOperation | null} bOp
+ * @param {Side} sideA
+ * @param {Side} sideB
+ * @param {'public' | 'all'} audience
+ * @returns {boolean}
+ */
+function compareOperation(diff, id, aOp, bOp, sideA, sideB, audience) {
+  const all = audience === 'all';
+  if (aOp !== null && bOp === null) {
+    if (all || aOp.policy.audience !== 'server') {
+      push(diff.breaking, { kind: 'operation-removed', op: id, docPath: opPath(id), rule: 'R1' });
+    }
+    return aOp.policy.audience === 'server';
+  }
+  if (aOp === null && bOp !== null) {
+    if (all || bOp.policy.audience !== 'server') {
+      push(diff.additive, { kind: 'operation-added', op: id, docPath: opPath(id), rule: 'R2' });
+    }
+    return bOp.policy.audience === 'server';
+  }
+  if (aOp === null || bOp === null) return false;
+  if (aOp.policy.audience !== bOp.policy.audience) {
+    const narrowed = bOp.policy.audience === 'server';
+    push(narrowed ? diff.breaking : diff.additive, {
+      kind: narrowed ? 'audience-narrowed' : 'audience-widened',
+      op: id, docPath: opPath(id) + '/policy/audience',
+      from: aOp.policy.audience, to: bOp.policy.audience, rule: 'R14',
+    });
+    return false; // the flip subsumes the operation's other changes
+  }
+  if (aOp.policy.audience === 'server' && !all) return false; // invisible on both sides
+
+  compareBinding(diff, aOp, bOp);
+  compareInput(diff, aOp, bOp, sideA, sideB);
+  const outSink = schemaSink(diff, id, opPath(id) + '/output', 'output');
+  compareSchema(aOp.output.schema, bOp.output.schema, '', sideA, sideB, outSink, new Map());
+  compareErrors(diff, aOp, bOp);
+  comparePolicy(diff, aOp, bOp);
+  return aOp.policy.audience === 'server';
 }

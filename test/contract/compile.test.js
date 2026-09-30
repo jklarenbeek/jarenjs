@@ -13,7 +13,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert';
 
 import { JarenValidator } from '@jarenjs/validate';
-import { compileContract, ContractCompileError } from '@jarenjs/contract';
+import { compileContract, ContractCompileError, CONTRACT_GRAMMARS } from '@jarenjs/contract';
 import { load, ROUTES, PROBES, routesToContract, opId } from './helpers.js';
 
 const shop = load('./fixtures/shop.contract.json');
@@ -624,5 +624,33 @@ describe('compileContract — a nullable transport member reads as its non-null 
     const transport = c.operations['a.b'].input?.transport;
     assert.deepStrictEqual([...(transport?.queryJson ?? [])], ['q1', 'q2', 'q3']);
     assert.deepStrictEqual([...(transport?.members.repeated ?? [])], ['q1', 'q2', 'h1']);
+  });
+});
+
+describe('compileContract — the naming grammars are one exported table', () => {
+  it('a declared code may be dotted for namespacing; a "/" is JC0011 naming the reason', () => {
+    const doc = (/** @type {string} */ code) => ({ $contract: '0.1', operations: { 'a.b': { kind: 'read', output: true, errors: { [code]: { status: 429 } } } } });
+    assert.doesNotThrow(() => compileContract(doc('ai.rate-limited')));
+    assert.doesNotThrow(() => compileContract(doc('rate_limited')));
+    assert.throws(() => compileContract(doc('ai/rate-limited')),
+      (e) => e.code === 'JC0011' && /message ids are contract\/error\/<code>/.test(e.reason) && e.docPath === '/operations/a.b/errors/ai~1rate-limited');
+    for (const code of ['Ai', 'a..b', '.a', 'a.', 'JC2001']) {
+      assert.throws(() => compileContract(doc(code)), (e) => e.code === 'JC0011', code);
+    }
+  });
+
+  it('CONTRACT_GRAMMARS is frozen, and the compiler and the tools apply exactly its patterns', () => {
+    assert.ok(Object.isFrozen(CONTRACT_GRAMMARS));
+    assert.deepStrictEqual(Object.keys(CONTRACT_GRAMMARS), ['contractId', 'operationId', 'errorCode', 'pathVariable', 'toolName']);
+    const errorCode = new RegExp(CONTRACT_GRAMMARS.errorCode);
+    const opId = new RegExp(CONTRACT_GRAMMARS.operationId);
+    const contractId = new RegExp(CONTRACT_GRAMMARS.contractId);
+    const compiles = (/** @type {any} */ doc) => { try { compileContract(doc); return true; } catch { return false; } };
+    for (const name of ['a', 'a.b', 'ai.rate-limited', 'a_b', 'a-b', 'A', 'a/b', 'a..b', '1a', 'a.b-c.d_e']) {
+      assert.strictEqual(compiles({ $contract: '0.1', operations: { 'a.b': { kind: 'read', output: true, errors: { [name]: { status: 400 } } } } }),
+        errorCode.test(name), `errorCode ${name}`);
+      assert.strictEqual(compiles({ $contract: '0.1', operations: { [name]: { kind: 'read', output: true } } }), opId.test(name), `operationId ${name}`);
+      assert.strictEqual(compiles({ $contract: '0.1', id: name, operations: { 'a.b': { kind: 'read', output: true } } }), contractId.test(name), `contractId ${name}`);
+    }
   });
 });

@@ -53,3 +53,37 @@ describe('isCompatible / compatReason — the negotiation rule as a pure functio
     assert.strictEqual(compatReason({ version: '5' }, { version: '4', compat: /** @type {any} */ ('5') }), null);
   });
 });
+
+describe('compat ranges — honoured beside a numeric version, npm\'s semantics', () => {
+  it('a 1.4.0 client and a 1.9.0 server with compat [\'^1\'] negotiate; a 2.0.0 client does not', () => {
+    assert.strictEqual(compatReason({ version: '1.4.0' }, { version: '1.9.0', compat: ['^1'] }), 'server-accepts');
+    assert.strictEqual(compatReason({ version: '2.0.0' }, { version: '1.9.0', compat: ['^1'] }), null);
+    assert.strictEqual(compatReason({ version: '1.9.0', compat: ['~1.4'] }, { version: '1.4.7' }), 'client-accepts');
+  });
+
+  it('caret keeps the left-most non-zero part, tilde keeps the minor, >= is a floor; a non-numeric version satisfies none', () => {
+    const table = /** @type {[string, string, boolean][]} */ ([
+      ['^1', '1.0.0', true], ['^1', '1.99.3', true], ['^1', '2.0.0', false], ['^1.2', '1.1.9', false], ['^1.2', '1.2', true],
+      ['^0.3', '0.3.9', true], ['^0.3', '0.4.0', false], ['^0.0.3', '0.0.3', true], ['^0.0.3', '0.0.4', false], ['^0', '0.9.9', true],
+      ['~1.4', '1.4.0', true], ['~1.4', '1.4.7', true], ['~1.4', '1.5.0', false], ['~1.4.2', '1.4.1', false],
+      ['>=1.2.0', '1.2.0', true], ['>=1.2.0', '9', true], ['>=1.2.0', '1.1.9', false],
+      ['^1', 'banana', false], ['^1', '1.0.0-rc.1', false],
+    ]);
+    for (const [range, version, expected] of table) {
+      assert.strictEqual(compatReason({ version }, { version: '99.0.0', compat: [range] }) !== null, expected, `${range} ∋ ${version}`);
+    }
+  });
+
+  it('a malformed range, or a range beside a version that is not numeric, is JC0015 at compile; exact entries keep working', () => {
+    const doc = (/** @type {string | undefined} */ version, /** @type {string[]} */ compat) => ({
+      $contract: '0.1', ...(version === undefined ? {} : { version }), compat, operations: { 'a.b': { kind: 'read', output: true } },
+    });
+    for (const [version, compat, at] of /** @type {[string | undefined, string[], string][]} */ ([
+      ['1.9.0', ['^x'], '/compat/0'], ['1.9.0', ['1', '~1'], '/compat/1'], ['banana', ['^1'], '/compat/0'], [undefined, ['>=1'], '/compat/0'],
+    ])) {
+      assert.throws(() => compileContract(doc(version, compat)), (e) => e.code === 'JC0015' && e.docPath === at, JSON.stringify([version, compat]));
+    }
+    assert.doesNotThrow(() => compileContract(doc('banana', ['apple', '1.0'])), 'exact strings beside any version');
+    assert.doesNotThrow(() => compileContract(doc('1.9.0', ['^1', '1.8.0'])));
+  });
+});

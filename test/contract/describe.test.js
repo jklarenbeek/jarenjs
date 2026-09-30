@@ -30,7 +30,7 @@ describe('contract describe()', () => {
     assert.deepStrictEqual(Object.keys(d), ['$contract', 'id', 'version', 'compat', 'revision', 'operations']);
     for (const op of d.operations) {
       assert.deepStrictEqual(Object.keys(op),
-        ['id', 'kind', 'method', 'path', 'status', 'media', 'opaque', 'in', 'body', 'task', 'idempotency', 'cache', 'inferred']);
+        ['id', 'kind', 'method', 'path', 'status', 'media', 'opaque', 'in', 'body', 'task', 'idempotency', 'cache', 'audience', 'inferred']);
       assert.deepStrictEqual(Object.keys(op.inferred), ['http', 'status', 'media', 'in', 'task', 'idempotency', 'cache']);
     }
   });

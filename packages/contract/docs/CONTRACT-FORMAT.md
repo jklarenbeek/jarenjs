@@ -124,9 +124,9 @@ coming lines of this package and will append their sections here.
 | member | required | meaning |
 |---|---|---|
 | `$contract` | yes | MUST be `"0.1"`. |
-| `id` | no | An identifier for the contract (`[A-Za-z_][A-Za-z0-9_-]*`): a tool prefix, a file name. |
+| `id` | no | An identifier for the contract (the `contractId` grammar, §2.4): a tool prefix, a file name. |
 | `version` | no | The consumer's version string — a compatibility claim, unrelated to any content hash. |
-| `compat` | no | Peer `version` strings this contract accepts. |
+| `compat` | no | Peer `version` strings this contract accepts: an exact string, or a range (`^1`, `~1.4`, `>=1.2.0`) when `version` is numeric (§10.5). |
 | `$defs` | no | Named schemas the operations reference as `#/$defs/<name>`. Every value MUST be a schema (an object or a boolean). |
 | `operations` | yes | Operation id → operation. MUST carry at least one. |
 
@@ -146,8 +146,8 @@ object is neither frozen nor mutated.
 
 ### §2.2 Operation ids
 
-An operation id MUST match `^[a-z][a-z0-9]*(\.[a-z][a-z0-9]*)*$` —
-dotted lowercase words (`catalog.load`, `product.save`). The same string
+An operation id MUST match the `operationId` grammar (§2.4),
+`^[a-z][a-z0-9]*(\.[a-z][a-z0-9]*)*$` — dotted lowercase words (`catalog.load`, `product.save`). The same string
 is a valid JSON member, a file name and a URL path segment, so it is
 stable across every projection; an AI tool name is derived from it (`.`
 becomes `_`, §12.5), because a tool name may not contain a dot. In a `docPath` an id is one
@@ -170,6 +170,32 @@ removed — a host sharing one validator across many compiles keeps them
 all; a host that compiles many documents passes a validator per compile
 or accepts the growth.
 
+### §2.4 The naming grammars
+
+Every name a document declares follows one grammar. `CONTRACT_GRAMMARS`
+(`@jarenjs/contract`) exports the table as anchored regular-expression
+sources:
+- the compiler checks the contract id, operation ids and declared codes
+  against it;
+- `contractTools` checks tool names;
+- the path parser's identifier check is `pathVariable`;
+- `@jarenjs/linq/contract` mirrors it, holding copies a test keeps equal,
+  since linq depends on core and json only.
+
+| grammar | pattern | example |
+|---|---|---|
+| `contractId` | `^[A-Za-z_][A-Za-z0-9_-]*$` | `shop`, `label-ops` |
+| `operationId` | `^[a-z][a-z0-9]*(\.[a-z][a-z0-9]*)*$` | `product.save` |
+| `errorCode` | `^[a-z][a-z0-9_-]*(\.[a-z][a-z0-9_-]*)*$` | `not-found`, `ai.rate-limited` |
+| `pathVariable` | `^[A-Za-z_][A-Za-z0-9_]*$` | `{id}` |
+| `toolName` | `^[a-zA-Z0-9_-]{1,64}$` | `product_save` |
+
+A declared code is namespaced with `.`, never `/`: its message id is
+`contract/error/<code>` (§7.3), so a `/` inside it would make that id
+ambiguous. Because a declared code starts lowercase, it can never spell
+one of the binding's `JC…` codes. `contract/invalid-input` is a message
+id, not a code; its wire code is `JC2006`.
+
 ## §3 Operations, policy and the defaults
 
 An operation is `{ kind, input?, output, errors?, policy?, http?, doc? }`.
@@ -179,7 +205,7 @@ An operation is `{ kind, input?, output, errors?, policy?, http?, doc? }`.
 | `kind` | yes | `"read"`, `"command"` or `"subscribe"`. A subscribe operation's `output` is its **snapshot** schema and its emissions travel the stream binding (§17–§19). |
 | `input` | no | A JSON Schema whose **effective type is `object`** — `"type": "object"` on the schema itself or on the schema a `$ref` chain reaches (`JC0005`). Its top-level `properties` are the members the HTTP binding places (§4). Absent means the operation takes no input. |
 | `output` | yes | Any JSON Schema, `true` included (`JC0006` when absent). |
-| `errors` | no | `code → { status?, schema? }`. A code matches `^[a-z][a-z0-9_-]*$` — kebab-case is the suite's own spelling, and the underscore is admitted so a product migrating a `snake_case` wire keeps its codes; `status` is an integer in 100–599 (default **400**); `schema` a JSON Schema for the error's details (`JC0011`). |
+| `errors` | no | `code → { status?, schema? }`. A code matches the `errorCode` grammar (§2.4): lowercase words, dotted for namespacing (`ai.rate-limited`). Kebab-case is the suite's own spelling; the underscore is admitted so a product migrating a `snake_case` wire keeps its codes; a `/` is refused, because a code's message id is `contract/error/<code>`. `status` is an integer in 100–599 (default **400**); `schema` a JSON Schema for the error's details (`JC0011`). |
 | `policy` | no | The declared behavior — the table below. |
 | `http` | no | The REST binding (§4). Absent means the **canonical binding**. |
 | `doc` | no | A string for projections. |
@@ -222,6 +248,7 @@ subscribe operation and `null` on every other kind.
     "in": { "id": "path", "revision": "body", "product": "body" },
     "body": null,
     "task": "exhaust", "idempotency": "required", "cache": "none",
+    "audience": "public",
     "inferred": { "http": false, "status": true, "media": true, "in": [],
                   "task": false, "idempotency": false, "cache": true }
   }]
@@ -231,7 +258,9 @@ subscribe operation and `null` on every other kind.
 `inferred` tells declared from defaulted: `http` is true when the whole
 binding is the canonical one; `in` lists the members whose location the
 compiler chose; the booleans mark defaulted `status`, `media`, `task`,
-`idempotency`, `cache`. Operations appear in document order. A subscribe
+`idempotency`, `cache`. `audience` says who may see the operation; the
+full description lists server-audience ones too, and the well-known path
+serves the public description, which omits them (§7.6). Operations appear in document order. A subscribe
 operation additionally shows its resolved `stream` policy (`{ resume,
 heartbeatMs, maxPatchBytes }`) and its forced `media`
 (`text/event-stream`).
@@ -444,11 +473,11 @@ carries the same codes and a test holds them equal.
 | JC0008 | `http.path` is not a valid path template (§4.2; the message names the reserved form) |
 | JC0009 | a path variable, `http.in` key or `http.body` names no input member, or a member is mapped to a location it cannot travel in (§4.1) — a header-located member whose name is not an HTTP token (RFC 9110 §5.6.2) among them, or whose name is a field the transport or the binding writes itself (`connection`, `content-length`, `expect`, `host`, `keep-alive`, `transfer-encoding`, `upgrade`; `accept`, `content-type`, `idempotency-key`, `if-match`, `if-none-match`, `last-event-id`): its name is the header's, and under one of those it failed every call or was replaced |
 | JC0010 | two operations share method and canonical path shape (§4.4) |
-| JC0011 | `errors` is malformed: not an object, a code is not `^[a-z][a-z0-9_-]*$`, a status is not a 100–599 integer, or a schema is not a schema |
+| JC0011 | `errors` is malformed: not an object, a code is outside the `errorCode` grammar (§2.4; a `/` is named as the reason), a status is not a 100–599 integer, or a schema is not a schema |
 | JC0012 | `http.method` is not an uppercase token of the supported set, or binds a `command` to `HEAD` (a HEAD never executes a command — §7.6), `http.status` is not a 200–299 integer, `http.status` is 204 or 205 on a JSON operation whose `output` cannot be `null` (its `type`, `const` or `enum` exclude it — the status carries no content, so the value could never be answered), or `http.media` is not a media type (or a `type/*` range, which only a non-`subscribe` operation may declare — §4.5) |
 | JC0013 | an unknown member in a closed object (the document root, an operation, `policy`, `limits`, `retry`, `policy.errors`, `http`, or an error declaration) |
 | JC0014 | a `policy` member is mistyped or outside its declared set (§3.1), a read declares `idempotency`, or a command declares `retry` without `idempotency: "required"` |
-| JC0015 | `id`, `version`, `compat` or an operation `doc` is mistyped |
+| JC0015 | `id`, `version`, `compat` or an operation `doc` is mistyped; a `compat` entry that opens like a range (`^`, `~`, `>=`) is malformed, or a range sits beside a `version` that is not numeric |
 | JC0016 | an operation bound to `GET`, `HEAD` or `OPTIONS` carries a body-located member — a body those methods never carry (both adapters drop an `OPTIONS` body) |
 | JC0017 | an opaque operation (a non-JSON `http.media`) declares a body-located member — its body is bytes the contract never decodes, so the member could never be validated (§4.5) |
 | JC0018 | a subscribe operation declares a `policy.task` other than `switch` — a subscription slot is replaced, never queued (§17) |
@@ -1575,8 +1604,8 @@ one of:
 | reason | when | compatible | error |
 |---|---|---|---|
 | `same-version` | `server.version === contract.version` (both `null` included) | yes | — |
-| `server-accepts` | `contract.version ∈ server.compat` | yes | — |
-| `client-accepts` | `server.version ∈ contract.compat` | yes | — |
+| `server-accepts` | `server.compat` names `contract.version`, or ranges over it | yes | — |
+| `client-accepts` | `contract.compat` names `server.version`, or ranges over it | yes | — |
 | `version-mismatch` | none of the above | no | `JC2057` |
 | `not-a-contract` | no 200, not JSON, not a `$contract: "0.1"` description with an `operations` array, or the server's `id` differs from the client's (both non-null) | no | `JC2056` |
 | `unreachable` | the transport rejected | no | `JC2051` |
@@ -1585,6 +1614,28 @@ one of:
 itself (`null` when unreachable or not a contract). **Nothing else is
 inferred**: an unrelated service on the port is exactly `not-a-contract`;
 two unversioned contracts are `same-version`.
+
+**Compat ranges.** A `compat` entry is an exact version string, or a range:
+`^M[.m[.p]]`, `~M.m[.p]` or `>=M[.m[.p]]`. A range is honoured only against
+a numeric version (`MAJOR[.MINOR[.PATCH]]`, no prerelease), with npm's
+meaning:
+- `^` keeps the left-most non-zero part: `^1` is `>=1.0.0 <2.0.0`, and
+  `^0.3` is `>=0.3.0 <0.4.0`.
+- `~` keeps the minor: `~1.4` is `>=1.4.0 <1.5.0`.
+- `>=` is a floor.
+
+So a 1.4.0 client and a 1.9.0 server with `compat: ["^1"]` negotiate
+(`server-accepts`). A version that is not numeric satisfies no range. A
+malformed range, or a range beside a `version` that is not numeric (or
+beside none), is `JC0015` at compile. `isCompatible` and `compatReason`
+(`@jarenjs/contract/diff`) are the same rule; one comparator serves both
+ends.
+
+Roll a range out in two steps. A peer from before ranges reads a range as
+an unknown exact string. So a new server keeps its exact entries beside
+the range (`["^1", "1.0", "1.4"]`) until every peer has upgraded. `compat`
+is part of the public projection, so adding a range moves the revision
+(§14).
 
 ### §10.6 `bytes(op, input, ctx)` — the opaque operations
 
@@ -1896,9 +1947,10 @@ hash is a compatibility claim, the member order is **normative**:
 - error declaration: `status` (always, resolved), `schema` (when
   declared);
 - policy: `task`, `idempotency`, `revision` (when declared), `cache`,
-  `retry` (when declared), `audience` — every default materialized;
-  **`limits` and `errors.details` are server-side knobs and never
-  appear**;
+  `retry` (when declared), `stream` (on a subscribe operation:
+  `resume`, `heartbeatMs`, and `maxPatchBytes` when declared), `audience`
+  — every default materialized; **`limits` and `errors.details` are
+  server-side knobs and never appear**;
 - http: `method`, `path` (canonical `{name}` template), `in` (every
   member's location), `body` (when a whole-body member is declared),
   `status`, `media` — the canonical binding is written out like any
@@ -1915,6 +1967,11 @@ narrowed further by `ops` when given (`JC1008` for an id the contract
 does not declare; a listed `server` operation is still not retained).
 Schema subtrees are the compiled document's own (frozen); the
 composition is fresh.
+
+The **host projection** is the same document over every operation,
+server-audience ones included, in the same member order. The host
+revision hashes it (§14). It is an internal gate's identity: never served,
+never negotiated.
 
 ### §12.2 OpenAPI 3.1
 
@@ -2023,7 +2080,7 @@ rendered by emit's Markdown target over the **same** type model as
 
 ### §12.5 AI tools
 
-`contractTools(contract, client, { ops?, name? })` → an array of
+`contractTools(contract, client, { ops?, name?, audiences? })` → an array of
 `{ name, description, inputSchema, execute }` — the `ToolDef` shape
 browser or host operation registries takes and WebMCP's `registerTool`
 reads, **without importing that package** (the generated-document rule:
@@ -2034,8 +2091,8 @@ one — a tool carries one invoke, not bytes and not a stream), in
 document order:
 
 - `name`: the id with `.` → `_` (injective — an id carries no `_`), or
-  `options.name(id)`; every name MUST match OpenAI's
-  `^[a-zA-Z0-9_-]{1,64}$` and two operations mapping to one name is
+  `options.name(id)`; every name MUST match the `toolName` grammar
+  (§2.4, OpenAI's `^[a-zA-Z0-9_-]{1,64}$`) and two operations mapping to one name is
   `JC1008`;
 - `description`: the `doc`, or a derived `<kind> operation <id>
   (<METHOD> <path>)`;
@@ -2043,20 +2100,36 @@ document order:
   the `$defs` it reaches inlined under the schema's own `$defs`
   (`bundleSameDocument`, the suite's one same-document bundler) — or a
   closed empty object schema for an input-less operation;
-- `execute`: `(args) => client.invoke(op, args)` (`null` for an
-  input-less operation), resolving the outcome JSON — a model sees the
-  same `{ ok, value | error, meta }` an app does, and a failed outcome
-  is a resolved value, never a rejection.
+- `execute`: `(args, ctx?) => client.invoke(op, args, { signal, attempt })`
+  (`args` is `null` for an input-less operation), resolving the outcome
+  JSON. A model sees the same `{ ok, value | error, meta }` an app does,
+  and a failed outcome is a resolved value, never a rejection.
+  - Only an `AbortSignal` `signal` and an `attempt` pass from `ctx`, so
+    aborting the signal cancels the pending invoke and the handler's
+    `ctx.signal` aborts.
+  - An idempotency key, headers or a precondition in `ctx` are dropped:
+    those are the host's, never a model's. A `ctx` that is not an object
+    forwards nothing.
 
 Opaque operations are skipped by default and refused (`JC1008`) when
 `ops` names one — a tool carries JSON; an opaque operation is reached
 through `client.url`.
 
+`audiences` (default `["public"]`, a non-empty array of `"public"` and
+`"server"`; anything else is `JC1008`) names whose operations become
+tools. An `ops` entry naming a server-audience operation is **refused**
+(`JC1008`, naming the option that admits it), never skipped silently. With
+`audiences: ["public", "server"]`, a host's own agent gets its internal
+operations. `publicProjection` and the revision take no such option: they
+stay public.
+
 ### §12.6 The CLI
 
-`jaren-contract <describe|public|openapi|types|docs> --contract <file>
+`jaren-contract <describe|public|openapi|types|docs|lint> --contract <file>
 [--out <dir|file>] [--check] [--info-title T] [--info-version V]
-[--lenient]` (the package `bin`). `describe` prints `describe()`;
+[--lenient] [--fail-on <rule,…|all>]` (the package `bin`). `lint` prints
+`lintContract`'s findings (§13.1) and, under `--fail-on`, exits **1** when
+a named rule (or any, with `all`) has one. `describe` prints `describe()`;
 `public`/`openapi` print or write JSON (two-space indent, trailing
 newline); `types`/`docs` the text artifacts; `--out` names a file, or a
 directory that gets `<contract id><extension>`
@@ -2070,13 +2143,13 @@ rejectable keyword is exit 2 with `JC0060` and its `docPath`.
 
 ## §13 The breaking-change diff
 
-`diffContracts(a, b)` (`@jarenjs/contract/diff`) classifies every change
+`diffContracts(a, b, { audience? })` (`@jarenjs/contract/diff`) classifies every change
 from contract `a` (what consumers hold today) to contract `b` (what they
 would meet) into `{ breaking, additive, neutral, unknown }` by the rule
 table below. It takes compiled contracts or raw documents (a document is
 compiled first, so a malformed one refuses with its own `JC00xx` before
 any comparison). Each entry is a
-`Change = { kind, op, docPath, from?, to?, rule, note? }` where `kind` is
+`Change = { kind, op, docPath, from?, to?, rule, note?, audience? }` where `kind` is
 a stable slug, `rule` names the row, and `docPath` points into the
 document that carries the change — into `a` for a removal, into `b`
 otherwise — composed over the *resolved* structure, so a constraint
@@ -2092,17 +2165,34 @@ validator error would name.
 | R5 | input: a member removed while the new input schema is `additionalProperties: false` (or the input removed entirely) | breaking; otherwise `neutral` with a note (the member is now ignored, not validated) |
 | R6 | input: a member's schema narrowed (type set shrinks, `enum`/`const` shrinks, `maximum` lowers, `minimum` rises, `maxLength` lowers, `minLength` rises, `pattern` added) | breaking |
 | R7 | input: a member's schema widened (the inverse of R6), an optional member added, or a member dropped from `required` | additive |
-| R8 | output: a member removed, made optional (dropped from `required`), or narrowed | breaking |
-| R9 | output: a new member (optional or required), a member added to `required`, or widened | additive |
+| R8 | output: a member removed, made optional (dropped from `required`), or widened (type set grows, `enum`/`const` grows, a bound relaxes, a `pattern` dropped), or a member added to an object that was closed (`additionalProperties: false`) | breaking |
+| R9 | output: a member added to an open object, a member added to `required`, or narrowed | additive |
 | R10 | error code removed, or its `status` changed | breaking |
 | R11 | error code added | additive |
 | R12 | `policy.idempotency` `none/optional → required` (a client must now send a key) | breaking; `required → optional/none` and `none ↔ optional` additive |
-| R13 | `policy.task`, `policy.retry`, `policy.cache`, `policy.revision` or `doc` changed | neutral |
+| R13 | `policy.task`, `policy.retry`, `policy.cache`, `policy.revision`, `policy.stream` (a resume policy, heartbeat or patch bound) or `doc` changed | neutral |
 | R14 | `policy.audience` `public → server` | breaking; the reverse additive |
 | R15 | a schema construct the checker does not model differs between the two (`anyOf`/`oneOf`/`allOf`/`if`/`not`/`$dynamicRef`, a `format`, a *changed* `pattern`, an external or sibling-carrying `$ref`, a changed error `details` schema, …) | **unknown** — reported, never silently classed |
 | R16 | a nullable node respelled between `type: [T, 'null']` and a two-branch `anyOf`/`oneOf` with a null-only branch, where both spellings accept exactly the same values | neutral (`schema-respelled`) — the bytes and the revision move, the accepted values do not |
 
 Riders the rows carry:
+
+- **R6–R9 are variance, read from the consumer.** An input is consumed by
+  the server, so narrowing it refuses what an old client sends (R6) and
+  widening it is additive (R7). An output is consumed by the client,
+  which validates every answer against its own contract, so a widened
+  output hands an old client values it refuses (R8). The suite's own HTTP
+  client answers `JC2053`, and a test runs exactly that. Narrowing an
+  output is additive (R9): a client on the wider contract accepts every
+  narrower answer. Member events take the consumer's view on both sides.
+  A removed or no-longer-guaranteed output member breaks a client that
+  reads it. A new output member breaks a client whose schema was closed,
+  and is additive on an open one.
+- **`audience: 'all'`** — an internal gate's option (CLI `--audience
+  all`). The same rules then run on server-audience operations, and each
+  of their changes carries `audience: "server"`. The default, `'public'`,
+  keeps the compatibility surface to what clients see. The option set is
+  closed (`JC1008`).
 
 - **R3 covers the whole wire shape.** The order's five members plus a
   member's `in` location and the whole-body `body` member — a member
@@ -2158,6 +2248,25 @@ JSON and exits **1** when any `--fail-on` class is non-empty (exit 0
 otherwise; exit 2 on a usage error, an unreadable file or a compile
 refusal).
 
+### §13.1 `lintContract` — the authoring checks
+
+`compileContract` is total: a document compiles or throws. A warning
+therefore needs a function of its own. `lintContract(contract)`
+(`@jarenjs/contract`; a document is compiled first) answers
+`{ rule, op, docPath, message }[]` in document order, and `jaren-contract
+lint --contract <file> [--fail-on <rule,…|all>]` gates on them in CI.
+The rule ids are stable (`LINT_RULES`):
+
+| rule | finds | the fix the message names |
+|---|---|---|
+| `read-query-on-body-method` | a read bound to POST, PUT or PATCH whose members default to the query string: the client sends them there, and a hand-written JSON body is ignored | bind the read to GET, or declare the members' location (`http.in`) or a whole-body member |
+| `body-limit-unsatisfiable` | the smallest body the required members can encode to exceeds `policy.limits.maxBodyBytes`, so every valid request is refused `JC2003` | raise the limit or relax the bounds. The size is a **lower bound**: `maxLength` counts code points and JSON escaping only adds bytes |
+| `retry-on-undeclared` | a `policy.retry.on` entry that is neither a code the operation declares nor a `JC` code a binding raises (`bussy`, `JC9999`), so the retry it asks for can never happen | name a declared code, or a transport code (`JC2051` is a network loss) |
+
+A header member whose name is not an HTTP token, and an opaque operation's
+idempotency, are refused at compile (`JC0009`, `JC0022`), so they are not
+lint rules.
+
 ## §14 The revision
 
 `contract.revision() → Promise<string>` is the lowercase hex SHA-256
@@ -2189,6 +2298,15 @@ subsequent outcome — correlation data, never the compatibility decision
 (that is `version`/`compat`, §13). The revision is not a `version`:
 never bump `version` merely because the revision moved, and never
 compare revisions to decide compatibility.
+
+**The host revision.** `contract.revision({ audience: 'all' })` is the
+same digest over the host projection (§12.1), every operation included,
+with a memo of its own. It moves when a server-audience operation
+changes, and the public revision does not. It fingerprints the whole
+surface for an internal gate (with `diffContracts(a, b, { audience:
+'all' })`, §13). It is never served on the well-known path, never
+carried in `meta.revision`, and never negotiated. The option set is
+closed (`JC1008`).
 
 A public projection that cannot be canonicalized has no revision:
 

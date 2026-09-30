@@ -14,8 +14,8 @@
 
 import { canonicalSha256 } from '@jarenjs/json/canonical';
 
-import { ContractCompileError } from './errors.js';
-import { publicProjection } from './public.js';
+import { ContractCompileError, ContractHostError } from './errors.js';
+import { hostProjection, publicProjection } from './public.js';
 
 /**
  * @typedef {import('./compile.js').Contract} Contract
@@ -30,6 +30,9 @@ import { publicProjection } from './public.js';
  */
 const revisions = new WeakMap();
 
+/** The host revisions' memo, apart from the public one: a separate identity. */
+const hostRevisions = new WeakMap();
+
 /**
  * Compute (once) the revision of a compiled contract: SHA-256 over the
  * canonical bytes of `publicProjection(contract)`, as 64 lowercase hex
@@ -37,34 +40,64 @@ const revisions = new WeakMap();
  * carrying an unpaired surrogate, say — rejects with `JC0061`
  * (`ContractCompileError`, its `docPath` the offending value's pointer
  * INTO THE PROJECTION).
+ *
+ * `{ audience: 'all' }` asks for the HOST revision instead: the same
+ * digest over `hostProjection(contract)`, every operation included, with
+ * a memo of its own. It moves when a server-audience operation changes
+ * and the public one does not; it is an internal gate's identity, never
+ * served on the well-known path or in `meta.revision`.
  * @param {Contract} contract
+ * @param {{ audience?: 'public' | 'all' }} [options] - a closed set (`JC1008`)
  * @returns {Promise<string>}
  * @example
  * const contract = compileContract(doc);
  * await contract.revision(); // 'e3b0c442…' — stable across compiles of equal documents
+ * await contract.revision({ audience: 'all' }); // the host revision
  */
-export function contractRevision(contract) {
-  const memo = revisions.get(contract);
+export function contractRevision(contract, options = undefined) {
+  const all = revisionAudience(options) === 'all';
+  const memos = all ? hostRevisions : revisions;
+  const memo = memos.get(contract);
   if (memo !== undefined) return memo.promise;
   /** @type {{ promise: Promise<string>, value: string | null }} */
   const record = { promise: /** @type {any} */ (null), value: null };
-  record.promise = digest(contract, record);
-  revisions.set(contract, record);
+  record.promise = digest(contract, record, memos, all ? hostProjection : publicProjection);
+  memos.set(contract, record);
   return record.promise;
+}
+
+/**
+ * Which revision a caller asks for: the public one by default, or the
+ * host revision under `{ audience: 'all' }` — a closed set (`JC1008`).
+ * @param {unknown} options
+ * @returns {'public' | 'all'}
+ */
+function revisionAudience(options) {
+  if (options === undefined) return 'public';
+  if (options === null || typeof options !== 'object' || Array.isArray(options)
+    || Object.keys(options).some((key) => key !== 'audience')) {
+    throw new ContractHostError('JC1008', "revision: options is { audience?: 'public' | 'all' }");
+  }
+  const audience = /** @type {any} */ (options).audience;
+  if (audience === undefined || audience === 'public') return 'public';
+  if (audience === 'all') return 'all';
+  throw new ContractHostError('JC1008', "revision: options.audience is 'public' or 'all'");
 }
 
 /**
  * @param {Contract} contract
  * @param {{ promise: Promise<string>, value: string | null }} record
+ * @param {WeakMap<object, { promise: Promise<string>, value: string | null }>} memos
+ * @param {(contract: Contract) => Record<string, unknown>} project
  * @returns {Promise<string>}
  */
-async function digest(contract, record) {
+async function digest(contract, record, memos, project) {
   let hex;
   try {
-    hex = await canonicalSha256(publicProjection(contract));
+    hex = await canonicalSha256(project(contract));
   }
   catch (err) {
-    revisions.delete(contract);
+    memos.delete(contract);
     if (err !== null && typeof err === 'object' && /** @type {any} */ (err).name === 'JsonCanonicalizeError') {
       throw new ContractCompileError('JC0061',
         `the public projection is not canonicalizable: ${/** @type {Error} */ (err).message}`,

@@ -15,6 +15,9 @@ import assert from 'node:assert';
 
 import { compileContract } from '@jarenjs/contract';
 import { diffContracts } from '@jarenjs/contract/diff';
+import { serveHttp } from '@jarenjs/contract/http';
+import { toFetchHandler } from '@jarenjs/contract/fetch';
+import { openHttpClient } from '@jarenjs/contract/client';
 import { load } from './helpers.js';
 
 const shop = load('./fixtures/shop.contract.json');
@@ -191,7 +194,16 @@ describe('diffContracts — the rule table, row by row', () => {
     assert.deepStrictEqual([opt.rule, opt.kind], ['R7', 'input-member-optional']);
   });
 
-  it('R8: an output member removed, made optional, or narrowed is breaking', () => {
+  // Variance (CONTRACT-FORMAT §13): an input is consumed by the SERVER, so
+  // narrowing it refuses what an old client sends (R6, breaking) and
+  // widening is additive (R7); an output is consumed by the CLIENT, which
+  // validates every answer against its own contract, so a WIDENED output
+  // hands an old client values it refuses (R8, breaking — the suite's own
+  // HTTP client answers JC2053) and a narrowed output is additive (R9): a
+  // client on the wider contract accepts every narrower answer. Member
+  // events take the consumer's view on both sides.
+
+  it('R8: an output member removed, made optional, widened, or added to a closed object is breaking', () => {
     const out = (/** @type {any} */ output) => one({ ...readOp(), output });
     const full = { type: 'object', required: ['id', 'name'], properties: { id: { type: 'integer' }, name: { type: 'string' } } };
 
@@ -203,12 +215,24 @@ describe('diffContracts — the rule table, row by row', () => {
     const o = only(optional.breaking);
     assert.deepStrictEqual([o.rule, o.kind], ['R8', 'output-member-optional']);
 
-    const narrowed = diffContracts(out(full), out({ ...full, properties: { ...full.properties, id: { type: 'integer', minimum: 1 } } }));
-    const n = only(narrowed.breaking);
-    assert.deepStrictEqual([n.rule, n.kind, n.docPath], ['R8', 'output-narrowed', '/operations/a.b/output/properties/id/minimum']);
+    const widened = diffContracts(out({ ...full, properties: { ...full.properties, id: { type: 'integer', minimum: 1 } } }), out(full));
+    const w = only(widened.breaking);
+    assert.deepStrictEqual([w.rule, w.kind, w.docPath], ['R8', 'output-widened', '/operations/a.b/output/properties/id/minimum']);
+    onlyClasses(widened, ['breaking']);
+
+    // three widenings: a closed object gaining a member, a type
+    // widened to nullable, an enum widened — each is refused by an old client
+    const closed = { type: 'object', properties: { a: { type: 'string' } }, additionalProperties: false };
+    const grownClosed = only(diffContracts(out(closed), out({ ...closed, properties: { a: { type: 'string' }, b: { type: 'string' } } })).breaking);
+    assert.deepStrictEqual([grownClosed.rule, grownClosed.kind, grownClosed.docPath],
+      ['R8', 'output-member-added', '/operations/a.b/output/properties/b']);
+    const nullable = only(diffContracts(out({ type: 'string' }), out({ type: ['string', 'null'] })).breaking);
+    assert.deepStrictEqual([nullable.rule, nullable.kind, nullable.note], ['R8', 'output-widened', 'type']);
+    const wideEnum = only(diffContracts(out({ enum: ['a'] }), out({ enum: ['a', 'b'] })).breaking);
+    assert.deepStrictEqual([wideEnum.rule, wideEnum.kind, wideEnum.note], ['R8', 'output-widened', 'enum']);
   });
 
-  it('R9: a new output member (even required, even nested) or a widened one is additive', () => {
+  it('R9: an output member added to an open object, guaranteed, or narrowed is additive', () => {
     const out = (/** @type {any} */ output) => one({ ...readOp(), output });
     const base = { type: 'object', required: ['id'], properties: { id: { type: 'integer' } } };
 
@@ -219,9 +243,30 @@ describe('diffContracts — the rule table, row by row', () => {
     assert.deepStrictEqual([g.rule, g.kind, g.docPath], ['R9', 'output-member-added', '/operations/a.b/output/properties/etag']);
     onlyClasses(grown, ['additive']);
 
-    const widened = diffContracts(out({ ...base, properties: { id: { type: 'integer', minimum: 1 } } }), out(base));
-    const w = only(widened.additive);
-    assert.deepStrictEqual([w.rule, w.kind], ['R9', 'output-widened']);
+    const narrowed = diffContracts(out(base), out({ ...base, properties: { id: { type: 'integer', minimum: 1 } } }));
+    const n = only(narrowed.additive);
+    assert.deepStrictEqual([n.rule, n.kind, n.docPath], ['R9', 'output-narrowed', '/operations/a.b/output/properties/id/minimum']);
+    onlyClasses(narrowed, ['additive']);
+
+    // the reverse of those widenings narrows, and is additive
+    const unNullable = only(diffContracts(out({ type: ['string', 'null'] }), out({ type: 'string' })).additive);
+    assert.deepStrictEqual([unNullable.rule, unNullable.kind], ['R9', 'output-narrowed']);
+    const fewer = only(diffContracts(out({ enum: ['a', 'b'] }), out({ enum: ['a'] })).additive);
+    assert.deepStrictEqual([fewer.rule, fewer.kind], ['R9', 'output-narrowed']);
+  });
+
+  it('the suite\'s own client agrees with the variance: a widened output answer fails an old client, a narrowed one does not', async () => {
+    const out = (/** @type {any} */ output) => one({ ...readOp(), output });
+    const run = async (/** @type {any} */ clientDoc, /** @type {any} */ serverDoc, /** @type {unknown} */ answer) => {
+      const server = serveHttp(compileContract(serverDoc), { 'a.b': () => answer });
+      const handler = toFetchHandler(server);
+      const client = openHttpClient(compileContract(clientDoc), { baseUrl: 'http://x.test', fetch: (url, init) => handler(new Request(url, init)) });
+      return client.invoke('a.b', null);
+    };
+    const widened = await run(out({ type: 'string' }), out({ type: ['string', 'null'] }), null);
+    assert.ok(!widened.ok && widened.error.code === 'JC2053', JSON.stringify(widened));
+    const narrowed = await run(out({ type: ['string', 'null'] }), out({ type: 'string' }), 'x');
+    assert.strictEqual(narrowed.ok, true);
   });
 
   it('R10/R11: an error code removed or its status changed is breaking; a code added is additive', () => {
@@ -459,5 +504,45 @@ describe('diffContracts — behavior of the whole', () => {
     ]);
     assert.deepStrictEqual(d.neutral.map((c) => [c.rule, c.op]), [['R13', 'catalog.load']]);
     assert.deepStrictEqual(d.unknown, []);
+  });
+});
+
+describe('diffContracts — the internal gate and the stream policy', () => {
+  const serverOp = (/** @type {any} */ output) => ({ $contract: '0.1', operations: {
+    'admin.purge': { kind: 'command', output, http: { method: 'POST', path: '/purge' }, policy: { audience: 'server' } },
+  } });
+
+  it('audience: \'all\' classifies a server operation\'s changes with the same rules, each marked audience: \'server\'; the default ignores them', () => {
+    const a = serverOp({ type: 'string' });
+    const b = serverOp({ type: ['string', 'null'] });
+    onlyClasses(diffContracts(a, b), []);
+    onlyClasses(diffContracts(a, b, { audience: 'public' }), []);
+    const all = diffContracts(a, b, { audience: 'all' });
+    const c = only(all.breaking);
+    assert.deepStrictEqual([c.rule, c.kind, c.audience], ['R8', 'output-widened', 'server']);
+    onlyClasses(all, ['breaking']);
+    // an added or removed server operation, too (beside one public operation)
+    const plain = { $contract: '0.1', operations: { 'a.read': readOp() } };
+    const withServer = { $contract: '0.1', operations: { 'a.read': readOp(), ...a.operations } };
+    assert.deepStrictEqual(only(diffContracts(plain, withServer, { audience: 'all' }).additive).audience, 'server');
+    assert.deepStrictEqual(only(diffContracts(withServer, plain, { audience: 'all' }).breaking).audience, 'server');
+    onlyClasses(diffContracts(plain, withServer), []);
+    // a public operation's changes carry no audience member
+    const pub = (/** @type {any} */ output) => one({ ...readOp(), output });
+    assert.strictEqual(Object.hasOwn(only(diffContracts(pub({ type: 'string' }), pub({ type: ['string', 'null'] }), { audience: 'all' }).breaking), 'audience'), false);
+  });
+
+  it('options are a closed set (JC1008)', () => {
+    const doc = one(readOp());
+    for (const options of [{ audiance: 'all' }, { audience: 'server' }, 'all', null]) {
+      assert.throws(() => diffContracts(doc, doc, /** @type {any} */ (options)), (e) => e.code === 'JC1008', JSON.stringify(options));
+    }
+  });
+
+  it('a policy.stream change is reported (R13, neutral)', () => {
+    const sub = (/** @type {number} */ heartbeatMs) => one({ kind: 'subscribe', output: { type: 'object' }, http: { method: 'GET', path: '/a' }, policy: { stream: { heartbeatMs } } });
+    const c = only(diffContracts(sub(15000), sub(30000)).neutral);
+    assert.deepStrictEqual([c.rule, c.kind, c.docPath], ['R13', 'policy-changed', '/operations/a.b/policy/stream']);
+    assert.deepStrictEqual([c.from.heartbeatMs, c.to.heartbeatMs], [15000, 30000]);
   });
 });

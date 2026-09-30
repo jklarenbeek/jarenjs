@@ -164,7 +164,7 @@ optional payload schema.
 
 | Method | Emits | Type reading | Status |
 |---|---|---|---|
-| `errors: { <code>: … }` | `{ <code>: { status?, schema? } }`, in declaration order | the declared codes are the operation's `errors` union — `'conflict' \| 'not-found'` | native; a map that is not a plain object, a code outside `^[a-z][a-z0-9_-]*$`, or an entry that is not a plain object, `JL0101` |
+| `errors: { <code>: … }` | `{ <code>: { status?, schema? } }`, in declaration order | the declared codes are the operation's `errors` union — `'conflict' \| 'not-found'` | native; a map that is not a plain object, a code outside the `errorCode` grammar (CONTRACT-FORMAT §2.4: lowercase words, dotted for namespacing — `ai.rate-limited`), or an entry that is not a plain object, `JL0101` |
 | `error({ status?, schema? })` | `{ status?, schema? }` in that order — `error()` with nothing emits `{}` | `ErrorDeclaration<E>` | native; another member, or a status outside 100–599, `JL0101` |
 
 `error()` is a checked declaration, and the same two members written by
@@ -241,7 +241,7 @@ they exist so a mismatch is a compile error rather than a 404.
 | `typedClient(client, contract)` | — (identity) | `TypedClient<C>`: `invoke` over the invokable operations, `subscribe` over the subscribe ones, `url` over all of them | native |
 | `typedHttpClient(client, contract)` | — (identity) | `TypedHttpClient<C>`: `TypedClient<C>` plus `bytes` over `OpaqueOf<C>` — the opaque operations, whose success is a `ByteResponse` (a live stream) rather than the output type; for an `openHttpClient` client only, a local or port client has no `bytes` | native |
 | `typedHandlers(contract, handlers)` | — (identity) | `TypedHandlerTable<C, Host = null, Carrier = 'http'>`: one handler per invokable operation, `(input, ctx) => output \| Failure`. `ctx` is `HandlerContext<Host, Carrier>`: the HTTP context by default, `Host` the host lifecycle's `ctx.host`, and a carrier union a discriminated union to narrow on `ctx.carrier` (CONTRACT-FORMAT §7.7). `ctx.op` is `OperationInfo`, the structural subset of the compiled operation: `id`, `kind`, `doc`, `errors` (`status` per declared code), `policy` and `http`. "Does my operation declare this failure?" is `Object.hasOwn(ctx.op.errors, code)`, with no runtime member added. `ctx.header(name, value)` arms a response header on HTTP and is `null` on port and local. An `onError(error, ctx)` observer takes `ErrorContext<Host>`: the handler context, or `null` | native; a missing or misspelled operation does not compile, and an HTTP-only member on a port/local context does not either. `op.id` stays `string`, because a table whose handlers demanded a literal id would no longer be the `Handler` a binding accepts |
-| `typedTools(tools, contract)` | — (identity) | `TypedTool<C>[]`: `name` is the id with `.` → `_`, and `execute` takes the operation's ACCEPTED input. `execute` is always a function: an operation without input ignores its argument | native |
+| `typedTools(tools, contract)` | — (identity) | `TypedTool<C>[]`: `name` is the id with `.` → `_`, and `execute(args, ctx?)` takes the operation's ACCEPTED input. `ctx` is a `ToolCallContext` (`signal`, `attempt`): aborting the signal cancels the call, and nothing else reaches the operation. `execute` is always a function: an operation without input ignores its argument | native |
 
 All of them are `void contract; return x;` at run time — they add
 nothing, wrap nothing and cost nothing. What they do is carry the phantom `Ops`
@@ -829,7 +829,7 @@ Raised at the door of whichever function received it.
 | `read({ output: { type: 'string', default: () => 1 } })` | `the schema at /operations/a/output received a Object instance, which is not JSON — a document carries null, booleans, finite numbers (never -0), strings, arrays and plain objects, and nothing else` | a JSON value for the default |
 | `read({ output: 42 })` | `a schema is an object, true or false — got 42` | a builder, an object, or `true` |
 | `errors: 42` | `errors is a plain object of code → error(), got 42` | a plain object |
-| `errors: { Bad: error({}) }` | `an error code matches ^[a-z][a-z0-9_-]*$, got 'Bad'` | `{ bad: error({}) }` |
+| `errors: { Bad: error({}) }` | `an error code matches ^[a-z][a-z0-9_-]*(\.[a-z][a-z0-9_-]*)*$ — lowercase words, dotted for namespacing (ai.rate-limited); got 'Bad'` | `{ bad: error({}) }` |
 | `errors: { bad: 42 }` | `errors.bad is error({ status?, schema? }), got 42` | `error({ status: 400 })` |
 | `error({ code: 'x' })` | `error() does not take 'code' — it takes status, schema` | the code is the map's key |
 | `error({ status: 99 })` | `error() status is an integer in 100–599, got 99` | `error({ status: 409 })` |
@@ -1188,7 +1188,7 @@ to write, and reaching them means one import of `@jarenjs/contract` over
 
 ## 7. Cost
 
-`@jarenjs/linq/contract` builds to **<!--fact:bundle.contract-->47,917<!--/fact--> bytes** as a minified,
+`@jarenjs/linq/contract` builds to **<!--fact:bundle.contract-->47,997<!--/fact--> bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
 measures and `npm run test:tree-shaking` reports, published rounded
 (<!--fact:bundle.contract.kb-->48<!--/fact--> kB) beside the other nine subpath prices in
@@ -1200,7 +1200,7 @@ them:
 
 - **the schema pen is included, and that is the ceiling.** A contract's
   inputs and outputs are schemas, so the two are measured together and
-  the bundle carries <!--fact:bundle.schema-->35,773<!--/fact--> of its <!--fact:bundle.contract-->47,917<!--/fact--> bytes as the schema pen's own.
+  the bundle carries <!--fact:bundle.schema-->35,773<!--/fact--> of its <!--fact:bundle.contract-->47,997<!--/fact--> bytes as the schema pen's own.
   The contract pen's own share is the remaining ~12 kB, most of it the
   refusal messages §4 lists;
 - **no chain module** — none of `sequence.js`, `document.js`, `async.js`,

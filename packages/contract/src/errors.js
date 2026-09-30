@@ -42,7 +42,7 @@ export const CONTRACT_CODES = Object.freeze({
   JC0008: 'http.path is not a valid path template',
   JC0009: 'a path variable, http.in key or http.body names no input member, or a member is mapped to a location it cannot travel in — a header member whose name is not an HTTP token, or is a field the transport or the binding writes itself, among them',
   JC0010: 'two operations share method and canonical path shape',
-  JC0011: 'errors is malformed: not an object, a code is not a lowercase word of letters, digits, hyphens and underscores starting with a letter (^[a-z][a-z0-9_-]*$), a status is not a 100–599 integer, or a schema is not a schema',
+  JC0011: 'errors is malformed: not an object, a code is not lowercase words of letters, digits, hyphens and underscores starting with a letter, dotted for namespacing (^[a-z][a-z0-9_-]*(\\.[a-z][a-z0-9_-]*)*$; a "/" is refused — message ids are contract/error/<code>), a status is not a 100–599 integer, or a schema is not a schema',
   JC0012: 'http.method is not an uppercase token of the supported set or binds a command to HEAD, http.status is not a 200–299 integer or is 204/205 over an output that cannot be null, or http.media is not a media type',
   JC0013: 'an unknown member in a closed object (the document root, an operation, policy, http, limits, retry, or an error declaration)',
   JC0014: 'a policy member is mistyped or outside its declared set',

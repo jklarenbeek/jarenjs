@@ -16,6 +16,7 @@ import { isJsonObject } from '@jarenjs/core/object';
 import { ContractHostError } from '../errors.js';
 import { retainedOperations } from '../public.js';
 import { bundleSameDocument } from '../bundle.js';
+import { CONTRACT_GRAMMARS } from '../grammars.js';
 
 /**
  * @typedef {import('../compile.js').Contract} Contract
@@ -29,7 +30,10 @@ import { bundleSameDocument } from '../bundle.js';
  * @property {string} name
  * @property {string} description
  * @property {any} inputSchema - the operation's input schema, self-contained
- * @property {(args: any) => any} execute - `client.invoke(op, args)`, resolving the outcome
+ * @property {(args: any, ctx?: { signal?: AbortSignal, attempt?: unknown }) => any} execute -
+ *   `client.invoke(op, args, { signal, attempt })`, resolving the outcome. Only an
+ *   `AbortSignal` `signal` and an `attempt` reach the operation; a key, headers or a
+ *   precondition are the host's, never a model's
  */
 
 /**
@@ -54,10 +58,13 @@ import { bundleSameDocument } from '../bundle.js';
  * @property {(id: string) => string} [name] - the tool name of an
  *   operation (default: the id with `.` → `_`); must satisfy OpenAI's
  *   `^[a-zA-Z0-9_-]{1,64}$` and be distinct per operation
+ * @property {readonly ('public' | 'server')[]} [audiences] - the audiences
+ *   whose operations become tools (default `['public']`); an `ops` entry
+ *   naming an operation outside them is refused, never skipped
  */
 
 /** OpenAI's function-name constraint, which WebMCP tool names satisfy too. */
-const TOOL_NAME = /^[a-zA-Z0-9_-]{1,64}$/;
+const TOOL_NAME = new RegExp(CONTRACT_GRAMMARS.toolName);
 
 /**
  * The default tool name of an operation: its id with `.` → `_` (`a.b` →
@@ -67,6 +74,42 @@ const TOOL_NAME = /^[a-zA-Z0-9_-]{1,64}$/;
  */
 function defaultName(id) {
   return id.replaceAll('.', '_');
+}
+
+/** The audiences a tool set may expose. */
+const AUDIENCES = new Set(['public', 'server']);
+
+/**
+ * The audiences of a tool set: `['public']` by default; an array of the
+ * two audience names otherwise (`JC1008` for anything else).
+ * @param {unknown} audiences
+ * @returns {readonly ('public' | 'server')[]}
+ */
+function readAudiences(audiences) {
+  if (audiences === undefined) return ['public'];
+  if (!Array.isArray(audiences) || audiences.length === 0
+    || audiences.some((a) => typeof a !== 'string' || !AUDIENCES.has(a))) {
+    throw new ContractHostError('JC1008', "contractTools: audiences must be a non-empty array of 'public' and 'server'");
+  }
+  return /** @type {('public' | 'server')[]} */ (audiences);
+}
+
+/**
+ * The call context a tool forwards: an `AbortSignal` `signal` and an
+ * `attempt`, from an object context, and nothing else — so the model
+ * cannot supply a key, headers or a precondition, and the invoke never
+ * refuses the context (`execute` always resolves an outcome).
+ * @param {unknown} ctx
+ * @returns {{ signal?: AbortSignal, attempt?: unknown }}
+ */
+function callContext(ctx) {
+  /** @type {{ signal?: AbortSignal, attempt?: unknown }} */
+  const out = {};
+  if (ctx === null || typeof ctx !== 'object') return out;
+  const { signal, attempt } = /** @type {any} */ (ctx);
+  if (typeof AbortSignal !== 'undefined' && signal instanceof AbortSignal) out.signal = signal;
+  if (attempt !== undefined) out.attempt = attempt;
+  return out;
 }
 
 /**
@@ -99,7 +142,7 @@ function toolInputSchema(op, contract) {
  */
 export function contractTools(contract, client, options = {}) {
   if (!isJsonObject(options)) throw new ContractHostError('JC1008', 'contractTools: options must be an object');
-  const ops = retainedOperations(contract, options.ops, 'contractTools');
+  const ops = retainedOperations(contract, options.ops, 'contractTools', readAudiences(options.audiences));
   if (client === null || typeof client !== 'object' || typeof client.invoke !== 'function') {
     throw new ContractHostError('JC1008', 'contractTools: client must be a contract client (an object with invoke)');
   }
@@ -140,7 +183,7 @@ export function contractTools(contract, client, options = {}) {
       name,
       description: op.doc !== null ? op.doc : `${op.kind} operation ${id} (${op.http.method} ${op.http.path})`,
       inputSchema: toolInputSchema(op, contract),
-      execute: (args) => client.invoke(id, hasInput ? args : null),
+      execute: (args, ctx) => client.invoke(id, hasInput ? args : null, callContext(ctx)),
     });
   }
   return tools;

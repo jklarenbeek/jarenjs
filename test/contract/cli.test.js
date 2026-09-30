@@ -301,3 +301,44 @@ describe('jaren-contract — module documents (the shared @jarenjs/json/node loa
     assert.match(badTo.stderr, /cannot load --to module 'nope\.mjs'/);
   });
 });
+
+describe('jaren-contract diff --audience and lint', () => {
+  const serverDoc = (/** @type {any} */ output) => ({ $contract: '0.1', operations: {
+    'a.read': { kind: 'read', output: true, http: { method: 'GET', path: '/a' } },
+    'admin.purge': { kind: 'command', output, http: { method: 'POST', path: '/purge' }, policy: { audience: 'server' } },
+  } });
+  const write = (/** @type {Record<string, unknown>} */ files) => (/** @type {string} */ dir) => {
+    for (const [name, doc] of Object.entries(files)) fs.writeFileSync(path.join(dir, name), JSON.stringify(doc));
+  };
+
+  it('--audience all runs the rules on server operations; the default ignores them', () => {
+    const files = write({ 'v1.json': serverDoc({ type: 'string' }), 'v2.json': serverDoc({ type: ['string', 'null'] }) });
+    const plain = run(['diff', '--from', 'v1.json', '--to', 'v2.json', '--fail-on', 'breaking'], files);
+    assert.strictEqual(plain.status, 0, plain.stderr);
+    const all = run(['diff', '--from', 'v1.json', '--to', 'v2.json', '--fail-on', 'breaking', '--audience', 'all'], files);
+    assert.strictEqual(all.status, 1, all.stderr);
+    assert.deepStrictEqual(JSON.parse(all.stdout).breaking.map((/** @type {any} */ c) => [c.rule, c.audience]), [['R8', 'server']]);
+    const bad = run(['diff', '--from', 'v1.json', '--to', 'v2.json', '--audience', 'server'], files);
+    assert.strictEqual(bad.status, 2);
+  });
+
+  it('lint prints the findings; --fail-on exits 1 on a named rule (or all), 0 on a clean contract', () => {
+    const findings = write({ 'api.json': { $contract: '0.1', operations: {
+      'labels.search': { kind: 'read', input: { type: 'object', properties: { q: { type: 'string' } } }, output: true,
+        http: { method: 'POST', path: '/labels/search' }, policy: { retry: { max: 1, on: ['bussy'] } } },
+    } } });
+    const printed = run(['lint', '--contract', 'api.json'], findings);
+    assert.strictEqual(printed.status, 0, printed.stderr);
+    assert.deepStrictEqual(JSON.parse(printed.stdout).map((/** @type {any} */ f) => f.rule), ['read-query-on-body-method', 'retry-on-undeclared']);
+    const gated = run(['lint', '--contract', 'api.json', '--fail-on', 'all'], findings);
+    assert.strictEqual(gated.status, 1);
+    assert.match(gated.stderr, /lint: 2 finding\(s\)/);
+    const one = run(['lint', '--contract', 'api.json', '--fail-on', 'body-limit-unsatisfiable'], findings);
+    assert.strictEqual(one.status, 0, 'a rule with no finding does not fail');
+    const clean = run(['lint', '--contract', 'shop.json', '--fail-on', 'all']);
+    assert.strictEqual(clean.status, 0, clean.stderr);
+    assert.deepStrictEqual(JSON.parse(clean.stdout), []);
+    const unknown = run(['lint', '--contract', 'shop.json', '--fail-on', 'nope']);
+    assert.strictEqual(unknown.status, 2);
+  });
+});

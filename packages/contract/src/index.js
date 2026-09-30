@@ -10,7 +10,8 @@
  * and `contract.allowed`.
  */
 
-export { compileContract } from './compile.js';
+export { compileContract, CONTRACT_GRAMMARS } from './compile.js';
+export { lintContract, LINT_RULES } from './lint.js';
 export {
   ContractCompileError, ContractRuntimeError, ContractHostError,
   ContractFailure, isContractFailure, CONTRACT_CODES,
@@ -30,5 +31,6 @@ export { contractMessagesEn, contractCatalogEn } from './messages.js';
  * @typedef {import('./compile.js').CompileContractOptions} CompileContractOptions
  * @typedef {import('./describe.js').ContractDescription} ContractDescription
  * @typedef {import('./describe.js').OperationDescription} OperationDescription
+ * @typedef {import('./lint.js').LintFinding} LintFinding
  * @typedef {import('./errors.js').ContractFailureValue} ContractFailureValue
  */

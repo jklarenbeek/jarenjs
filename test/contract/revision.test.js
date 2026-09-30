@@ -150,3 +150,34 @@ describe('the revision end to end — well-known, negotiate, meta.revision', () 
     assert.strictEqual(observed.length, 1, 'the memoized description never recomputes');
   });
 });
+
+describe('the host revision — an internal gate\'s identity over every operation', () => {
+  const doc = (/** @type {any} */ output) => ({ $contract: '0.1', operations: {
+    'a.read': { kind: 'read', output: true, http: { method: 'GET', path: '/a' } },
+    'admin.purge': { kind: 'command', output, http: { method: 'POST', path: '/purge' }, policy: { audience: 'server' } },
+  } });
+
+  it('moves when a server operation changes; the public revision does not', async () => {
+    const a = compileContract(doc({ type: 'string' }));
+    const b = compileContract(doc({ type: 'integer' }));
+    assert.strictEqual(await a.revision(), await b.revision(), 'the public identity ignores the server operation');
+    assert.notStrictEqual(await a.revision({ audience: 'all' }), await b.revision({ audience: 'all' }));
+    assert.notStrictEqual(await a.revision({ audience: 'all' }), await a.revision(), 'two identities');
+    assert.strictEqual(await a.revision({ audience: 'public' }), await a.revision());
+    assert.strictEqual(await a.revision({ audience: 'all' }), await compileContract(doc({ type: 'string' })).revision({ audience: 'all' }),
+      'stable across compiles');
+    for (const options of [{ audience: 'server' }, { scope: 'all' }, 'all']) {
+      assert.throws(() => a.revision(/** @type {any} */ (options)), (e) => e.code === 'JC1008', JSON.stringify(options));
+    }
+  });
+
+  it('is never served: the well-known description and meta.revision carry the public one', async () => {
+    const contract = compileContract(doc({ type: 'string' }));
+    const server = serveHttp(contract, { 'a.read': () => true, 'admin.purge': () => 'x' });
+    const res = await toFetchHandler(server)(new Request(`http://x${WELL_KNOWN_PATH}`));
+    const described = await res.json();
+    assert.strictEqual(described.revision, await contract.revision());
+    assert.notStrictEqual(described.revision, await contract.revision({ audience: 'all' }));
+    assert.deepStrictEqual(described.operations.map((/** @type {any} */ o) => o.id), ['a.read']);
+  });
+});

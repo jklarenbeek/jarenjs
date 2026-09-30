@@ -20,6 +20,7 @@ import * as path from 'node:path';
 import { compileContract } from './compile.js';
 import { ContractCompileError, ContractHostError } from './errors.js';
 import { diffContracts } from './diff.js';
+import { lintContract, LINT_RULES } from './lint.js';
 import { loadDocument } from '@jarenjs/json/node';
 import { publicProjection } from './public.js';
 import { toOpenApi } from './project/openapi.js';
@@ -28,7 +29,8 @@ const USAGE = `jaren-contract — projections of a jaren-contract document
 
 Usage:
   jaren-contract <command> --contract <file> [--out <dir|file>] [--check] [options]
-  jaren-contract diff --from <file> --to <file> [--fail-on <class,…>]
+  jaren-contract diff --from <file> --to <file> [--fail-on <class,…>] [--audience all]
+  jaren-contract lint --contract <file> [--fail-on <rule,…|all>]
 
 Commands:
   describe   The describe() summary (JSON): every operation's resolved binding and policy
@@ -37,6 +39,7 @@ Commands:
   types      TypeScript declarations (.d.ts): operation types, Operations, Client, Handlers
   docs       Markdown reference documentation
   diff       The classified changes from --from to --to (JSON: breaking, additive, neutral, unknown)
+  lint       Authoring findings the compiler lets through (JSON: rule, op, docPath, message)
 
 Options:
   --contract <file>     The $contract document (required except for diff)
@@ -47,7 +50,9 @@ Options:
   --lenient             openapi: drop and report keywords the projection would refuse
   --from <file>         diff: the contract consumers hold today
   --to <file>           diff: the contract they would meet
-  --fail-on <class,…>   diff: exit 1 when any named class (breaking, additive, neutral, unknown) is non-empty
+  --fail-on <class,…>   diff: exit 1 when any named class (breaking, additive, neutral, unknown) is non-empty;
+                        lint: exit 1 when any named rule (or 'all') has a finding
+  --audience all        diff: run the rules on server-audience operations too (an internal gate)
   --help                This text
 
 Exit codes: 0 current or written (diff: no failing class), 1 drift under
@@ -59,6 +64,8 @@ Examples:
   jaren-contract openapi --contract shop.json --out api/ --info-title Shop
   jaren-contract types --contract shop.json --out src/shop.d.ts --check
   jaren-contract diff --from api/v1.json --to api/v2.json --fail-on breaking
+  jaren-contract diff --from api/v1.json --to api/v2.json --fail-on breaking --audience all
+  jaren-contract lint --contract api/v2.json --fail-on all
 `;
 
 const COMMANDS = /** @type {const} */ ({
@@ -78,7 +85,7 @@ function parseArgs(argv) {
     out: /** @type {string | null} */ (null), check: false, help: false, lenient: false,
     infoTitle: /** @type {string | null} */ (null), infoVersion: /** @type {string | null} */ (null),
     from: /** @type {string | null} */ (null), to: /** @type {string | null} */ (null),
-    failOn: /** @type {string | null} */ (null),
+    failOn: /** @type {string | null} */ (null), audience: /** @type {string | null} */ (null),
   };
   for (let i = 2; i < argv.length; i++) {
     switch (argv[i]) {
@@ -89,6 +96,10 @@ function parseArgs(argv) {
         if (argv[i + 1] === undefined || argv[i + 1].startsWith('-'))
           throw new Error('--fail-on needs at least one change class');
         options.failOn = argv[++i];
+        break;
+      case '--audience':
+        if (argv[i + 1] !== 'all' && argv[i + 1] !== 'public') throw new Error("--audience is 'all' or 'public'");
+        options.audience = argv[++i];
         break;
       case '--out': options.out = argv[++i] ?? null; break;
       case '--check': options.check = true; break;
@@ -192,7 +203,7 @@ async function runDiff(options) {
   const to = await readDocument(options.to, '--to');
   let diff;
   try {
-    diff = diffContracts(from, to);
+    diff = diffContracts(from, to, options.audience === null ? undefined : { audience: /** @type {'all' | 'public'} */ (options.audience) });
   }
   catch (error) {
     if (error instanceof ContractCompileError) return fail(`${error.code} ${error.docPath ?? ''} ${error.reason}`);
@@ -202,6 +213,40 @@ async function runDiff(options) {
   const failing = failOn.filter((name) => diff[/** @type {keyof typeof diff} */ (name)].length > 0);
   if (failing.length > 0) {
     console.error(`diff: ${failing.map((name) => `${diff[/** @type {keyof typeof diff} */ (name)].length} ${name}`).join(', ')} change(s)`);
+    process.exit(1);
+  }
+}
+
+/**
+ * The `lint` command: print the findings; under `--fail-on` exit 1 when a
+ * named rule (or any, with `all`) has one.
+ * @param {ReturnType<typeof parseArgs>} options
+ */
+async function runLint(options) {
+  if (options.contract === null) return fail('lint needs --contract <file>', true);
+  /** @type {string[]} */
+  let failOn = [];
+  if (options.failOn !== null) {
+    failOn = options.failOn.split(',').map((s) => s.trim()).filter((s) => s.length > 0);
+    if (failOn.length === 0) return fail('--fail-on needs at least one rule', true);
+    if (failOn.includes('all')) failOn = [...LINT_RULES];
+    for (const name of failOn) {
+      if (!LINT_RULES.includes(name)) return fail(`--fail-on '${name}' is not a lint rule (${LINT_RULES.join(', ')}, or all)`, true);
+    }
+  }
+  const document = await readDocument(options.contract, 'contract');
+  let findings;
+  try {
+    findings = lintContract(document);
+  }
+  catch (error) {
+    if (error instanceof ContractCompileError) return fail(`${error.code} ${error.docPath ?? ''} ${error.reason}`);
+    throw error;
+  }
+  process.stdout.write(JSON.stringify(findings, null, 2) + '\n');
+  const failing = findings.filter((f) => failOn.includes(f.rule));
+  if (failing.length > 0) {
+    console.error(`lint: ${failing.length} finding(s): ${[...new Set(failing.map((f) => f.rule))].join(', ')}`);
     process.exit(1);
   }
 }
@@ -219,6 +264,7 @@ async function main() {
     return;
   }
   if (options.command === 'diff') return runDiff(options);
+  if (options.command === 'lint') return runLint(options);
   if (options.command === null || !Object.hasOwn(COMMANDS, options.command)) {
     return fail(options.command === null ? 'a command is required' : `unknown command '${options.command}'`, true);
   }

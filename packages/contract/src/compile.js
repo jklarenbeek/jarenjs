@@ -31,6 +31,10 @@ import {
 import { encodeJSONPointerSegment, parseJSONPointer } from '@jarenjs/json/pointer';
 
 import { ContractCompileError } from './errors.js';
+import { CONTRACT_GRAMMARS } from './grammars.js';
+import { compatEntryKind, isNumericVersion } from './compat.js';
+
+export { CONTRACT_GRAMMARS };
 import { parsePathTemplate, pathShape, compileRoutes } from './path.js';
 import { describeContract } from './describe.js';
 import { contractRevision } from './revision.js';
@@ -101,14 +105,14 @@ const DEFAULT_ERROR_STATUS = 400;
 const DEFAULT_HEARTBEAT_MS = 15000;
 
 /** The contract `id`: an identifier that may carry hyphens. */
-const CONTRACT_ID = /^[A-Za-z_][A-Za-z0-9_-]*$/;
+const CONTRACT_ID = new RegExp(CONTRACT_GRAMMARS.contractId);
 /** An operation id: dotted lowercase words. */
-const OP_ID = /^[a-z][a-z0-9]*(\.[a-z][a-z0-9]*)*$/;
-/** A declared error code: a lowercase word, hyphenated or underscored
- * — the underscore is admitted so a product migrating a `snake_case`
- * wire does not have to rename its codes and keep a mapping table in
- * every compatibility adapter (§6). */
-const ERROR_CODE = /^[a-z][a-z0-9_-]*$/;
+const OP_ID = new RegExp(CONTRACT_GRAMMARS.operationId);
+/** A declared error code: lowercase words, hyphenated or underscored —
+ * the underscore is admitted so a product migrating a `snake_case` wire
+ * does not have to rename its codes and keep a mapping table in every
+ * compatibility adapter (§6) — and dotted for namespacing. */
+const ERROR_CODE = new RegExp(CONTRACT_GRAMMARS.errorCode);
 /** A media type: `type/subtype` with optional parameters. */
 const MEDIA_TYPE = /^[A-Za-z0-9!#$&^_.+-]+\/[A-Za-z0-9!#$&^_.+-]+(?:\s*;.*)?$/;
 
@@ -513,9 +517,10 @@ function checkRefs(node, docPath, scope, isRoot) {
  *   this path shape reaches an operation, sorted (`[]` for none) — what a
  *   405 answers in `Allow`; the path only, query split off, like `match`
  * @property {() => any} describe - a pure-JSON summary (docs/CONTRACT-FORMAT.md §3)
- * @property {() => Promise<string>} revision - the SHA-256 (lowercase hex)
+ * @property {(options?: { audience?: 'public' | 'all' }) => Promise<string>} revision - the SHA-256 (lowercase hex)
  *   over the RFC 8785 canonical bytes of the public projection, memoized —
- *   computed at most once per compiled contract (docs/CONTRACT-FORMAT.md §14)
+ *   computed at most once per compiled contract (docs/CONTRACT-FORMAT.md §14);
+ *   `{ audience: 'all' }` answers the host revision over every operation instead
  * @property {any} $defs - frozen view of the document's `$defs` (`{}` when absent)
  */
 
@@ -563,6 +568,15 @@ function checkRoot(src, scope) {
       if (typeof src.compat[i] !== 'string' || src.compat[i] === '') {
         throw refuse('JC0015', 'compat entries must be non-empty version strings', at('/compat', i));
       }
+      const kind = compatEntryKind(src.compat[i]);
+      if (kind === 'malformed') {
+        throw refuse('JC0015', `compat entry '${src.compat[i]}' is not a range — a range is ^M[.m[.p]], ~M.m[.p] or >=M[.m[.p]] over numeric parts`,
+          at('/compat', i));
+      }
+      if (kind === 'range' && !isNumericVersion(src.version)) {
+        throw refuse('JC0015', `compat range '${src.compat[i]}' needs a numeric version (MAJOR[.MINOR[.PATCH]]) beside it, `
+          + `got ${src.version === undefined ? 'none' : `'${src.version}'`}`, at('/compat', i));
+      }
     }
   }
   if (src.$defs !== undefined) {
@@ -597,7 +611,10 @@ function checkErrors(errors, base, scope) {
     const code = codes[i];
     const path = at(base, code);
     if (!ERROR_CODE.test(code)) {
-      throw refuse('JC0011', `error code '${code}' must match ^[a-z][a-z0-9_-]*$`, path);
+      throw refuse('JC0011', code.includes('/')
+        ? `error code '${code}' carries a '/' — message ids are contract/error/<code>, so a '/' would make them ambiguous; namespace with '.' (ai.rate-limited)`
+        : `error code '${code}' must match ${CONTRACT_GRAMMARS.errorCode} — lowercase words of letters, digits, hyphens and underscores, dotted for namespacing (ai.rate-limited)`,
+      path);
     }
     const decl = errors[code];
     if (!isJsonObject(decl)) throw refuse('JC0011', `error '${code}' must be an object { status?, schema? }`, path);
@@ -1045,7 +1062,7 @@ export function compileContract(doc, options = {}) {
     const id = opIds[n];
     const base = at('/operations', id);
     if (!OP_ID.test(id)) {
-      throw refuse('JC0003', `operation id '${id}' must match ^[a-z][a-z0-9]*(\\.[a-z][a-z0-9]*)*$`, base);
+      throw refuse('JC0003', `operation id '${id}' must match ${CONTRACT_GRAMMARS.operationId}`, base);
     }
     const op = src.operations[id];
     if (!isJsonObject(op)) throw refuse('JC0002', `operation '${id}' must be an object`, base);
@@ -1260,7 +1277,7 @@ export function compileContract(doc, options = {}) {
     match,
     allowed: router.allowed,
     describe: () => describeContract(contract),
-    revision: () => contractRevision(contract),
+    revision: (options) => contractRevision(contract, options),
     $defs: src.$defs === undefined ? Object.freeze({}) : src.$defs,
   };
   return freezeAll(contract);

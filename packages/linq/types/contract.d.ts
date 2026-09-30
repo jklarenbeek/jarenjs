@@ -452,6 +452,10 @@ export type TypedHandlerTable<C, Host = null, Carrier extends CarrierName = 'htt
 export type ToolName<S extends string> =
   S extends `${infer A}.${infer B}` ? `${A}_${ToolName<B>}` : S;
 
+/** What a tool call forwards to the operation (`contractTools`): an
+ * `AbortSignal` and an attempt identity, nothing else. */
+export interface ToolCallContext { signal?: AbortSignal; attempt?: unknown }
+
 /** One tool definition, typed by the operation it invokes — the
  * `ToolDef` shape browser or host operation registries takes. */
 export type TypedTool<C> = {
@@ -459,9 +463,13 @@ export type TypedTool<C> = {
     name: ToolName<Extract<K, string>>;
     description: string;
     inputSchema: JsonSchema;
-    /** Always a function: an operation without input ignores `args`. */
+    /** Always a function: an operation without input ignores `args`. Only
+     * the call's `signal` and `attempt` reach the operation — a key,
+     * headers or a precondition are the host's, never a model's. */
     execute: InvokableOf<C>[K] extends { accepts: infer In; output: infer O }
-      ? (In extends null ? (args?: unknown) => Promise<Outcome<O>> : (args: In) => Promise<Outcome<O>>)
+      ? (In extends null
+        ? (args?: unknown, ctx?: ToolCallContext) => Promise<Outcome<O>>
+        : (args: In, ctx?: ToolCallContext) => Promise<Outcome<O>>)
       : never;
   };
 }[keyof InvokableOf<C>];
