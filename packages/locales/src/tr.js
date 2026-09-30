@@ -135,6 +135,7 @@ export const tr = {
   'contract/body-too-large': '{op} işleminin istek gövdesi {limit} baytlık sınırını aşıyor',
   'contract/unsupported-media': '{op} işlemi yalnızca {media} gövdeleri kabul eder',
   'contract/malformed-json': '{op} işleminin istek gövdesi geçerli JSON değil',
+  'contract/malformed-body': '{op} işleminin istek gövdesi geçerli UTF-8 metni değil',
   'contract/invalid-input': '{op} işleminin girdisi geçersiz',
   'contract/idempotency-key-required': '{op} işlemi bir Idempotency-Key üst bilgisi gerektirir',
   'contract/handler-failed': '{op} işlemi başarısız oldu',

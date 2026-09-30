@@ -3,7 +3,7 @@
  * @file The outcome assembler, pure (no fetch): every row of the
  * CONTRACT-FORMAT.md §10.2 assembly table has the test case the table
  * names (a test enumerates the table from the markdown and checks each
- * name exists in the client test files); every `JC2001–JC2015` taxonomy row maps to a
+ * name exists in the client test files); every `JC2001–JC2016` taxonomy row maps to a
  * `failure` outcome with its status, code and retryable; the §10.3
  * client-code table ⇔ `CLIENT_ERRORS` ⇔ `CONTRACT_CODES` ⇔ the English
  * catalog; and `invoke` never rejects for any server response.

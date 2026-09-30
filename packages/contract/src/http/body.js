@@ -36,6 +36,75 @@ export class BodyLimitError extends Error {
 }
 
 /**
+ * The bytes of a body read as text are not UTF-8. A raw handler that lets
+ * it propagate (`readBody(ctx.body, { as: 'text' })`) answers 400 `JC2016`
+ * rather than a host fault.
+ */
+export class BodyEncodingError extends Error {
+  /** @param {unknown} cause */
+  constructor(cause) {
+    super('the request body is not valid UTF-8 text', { cause });
+    this.name = 'BodyEncodingError';
+  }
+}
+
+/** The strict decoder `readBody` reads text with: fatal, the BOM stripped
+ * — the JSON path's own. */
+const strictUtf8 = new TextDecoder('utf-8', { fatal: true });
+
+/**
+ * Read an opaque operation's request body whole, as bytes or strictly
+ * decoded text — every shape `ctx.body` takes: a string, bytes, the
+ * counting source of a streamed upload, or `null` (an empty body).
+ *
+ * The limit stays the binding's: a streamed body is pulled through its
+ * counting source, whose `BodyLimitError` is rethrown, so the binding
+ * still answers 413 `JC2003`. Text is decoded fatally with the BOM
+ * stripped, and invalid bytes throw `BodyEncodingError`, which the binding
+ * answers 400 `JC2016`. An aborted `signal` rejects with its reason.
+ * @param {string | Uint8Array | AsyncIterable<Uint8Array> | null | undefined} body - `ctx.body`
+ * @param {{ as?: 'bytes' | 'text', signal?: AbortSignal | null }} [options]
+ * @returns {Promise<Uint8Array | string>}
+ * @example
+ * // an opaque text/plain PUT
+ * const text = await readBody(ctx.body, { as: 'text', signal: ctx.signal });
+ */
+export async function readBody(body, options = {}) {
+  if (options === null || typeof options !== 'object') throw new TypeError('readBody: options must be an object');
+  for (const key of Object.keys(options)) {
+    if (key !== 'as' && key !== 'signal') throw new TypeError(`readBody: options has no member '${key}' (it reads as and signal)`);
+  }
+  const as = options.as === undefined ? 'bytes' : options.as;
+  if (as !== 'bytes' && as !== 'text') throw new TypeError("readBody: options.as is 'bytes' or 'text'");
+  const signal = options.signal === undefined ? null : options.signal;
+  /** @type {Uint8Array} */
+  let bytes;
+  if (body === null || body === undefined) bytes = new Uint8Array(0);
+  else if (typeof body === 'string') {
+    if (as === 'text') return body.charCodeAt(0) === 0xFEFF ? body.slice(1) : body;
+    bytes = new TextEncoder().encode(body);
+  }
+  else if (body instanceof Uint8Array) bytes = body;
+  else if (isAsyncByteSource(body)) {
+    // the counting source enforces the binding's limit by throwing
+    const collected = await collectBytes(body, Infinity, signal);
+    if (!collected.ok) {
+      if (collected.kind === 'aborted') throw /** @type {AbortSignal} */ (signal).reason;
+      throw /** @type {any} */ (collected).cause;
+    }
+    bytes = /** @type {any} */ (collected).bytes;
+  }
+  else throw new TypeError('readBody: body is ctx.body — a string, bytes, a byte source or null');
+  if (as === 'bytes') return bytes;
+  try {
+    return strictUtf8.decode(bytes);
+  }
+  catch (err) {
+    throw new BodyEncodingError(err);
+  }
+}
+
+/**
  * Whether a value is an async iterable — the pull shape of a byte source.
  * @param {unknown} value
  * @returns {value is AsyncIterable<Uint8Array>}

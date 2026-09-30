@@ -342,7 +342,7 @@ export function openLocalClient(contract, handlers, options = {}) {
 
     // 1. identify — before the input is judged (§7.7)
     const identified = await identifyHost(lifecycle, Object.freeze({
-      op: route.op, trace: id, signal, carrier: /** @type {const} */ ('local'), method: null, path: null, headers: null, fail: ContractFailure,
+      op: route.op, trace: id, signal, carrier: /** @type {const} */ ('local'), method: null, path: null, headers: null, request: null, fail: ContractFailure,
     }));
     if (identified.kind === 'fault') return hostFault(identified.cause);
     if (identified.kind === 'failure') return outcomeOf(classifyDeclared(route, identified.failure));

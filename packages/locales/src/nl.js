@@ -137,6 +137,7 @@ export const nl = {
   'contract/body-too-large': 'de verzoekbody van operatie {op} overschrijdt de limiet van {limit} bytes',
   'contract/unsupported-media': "operatie {op} accepteert alleen {media}-body's",
   'contract/malformed-json': 'de verzoekbody van operatie {op} is geen geldige JSON',
+  'contract/malformed-body': 'de verzoekbody van operatie {op} is geen geldige UTF-8-tekst',
   'contract/invalid-input': 'de invoer van operatie {op} is ongeldig',
   'contract/idempotency-key-required': 'operatie {op} vereist een Idempotency-Key-header',
   'contract/handler-failed': 'operatie {op} is mislukt',

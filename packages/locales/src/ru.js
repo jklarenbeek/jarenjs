@@ -156,6 +156,7 @@ export const ru = {
   'contract/body-too-large': 'тело запроса операции {op} превышает её лимит в {limit} байт',
   'contract/unsupported-media': 'операция {op} принимает только тела {media}',
   'contract/malformed-json': 'тело запроса операции {op} не является корректным JSON',
+  'contract/malformed-body': 'тело запроса операции {op} не является корректным текстом UTF-8',
   'contract/invalid-input': 'входные данные операции {op} недопустимы',
   'contract/idempotency-key-required': 'операция {op} требует заголовок Idempotency-Key',
   'contract/handler-failed': 'операция {op} завершилась с ошибкой',

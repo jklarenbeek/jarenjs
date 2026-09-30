@@ -18,7 +18,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
 
-import { compileContract } from '@jarenjs/contract';
+import { compileContract, ContractFailure } from '@jarenjs/contract';
 import { runSubscription, resolveStreamLimits, STREAM_LIMITS_DEFAULT } from '@jarenjs/contract/stream';
 
 const CONTRACT = compileContract({
@@ -652,10 +652,21 @@ describe('stream runner — a source error the operation declares', () => {
     return last.data;
   }
 
-  it('a declared code crosses as the declared intent: code, JSON-safe details, its own retryable', async () => {
+  it('a declared code crosses as the declared intent: code, its params, JSON-safe details, its own retryable', async () => {
     const data = await endWith({ code: 'gone', details: { at: 1 }, retryable: false });
     assert.strictEqual(data.intent, 'declared');
-    assert.deepStrictEqual(data.declared, { code: 'gone', details: { at: 1 }, retryable: false });
+    assert.deepStrictEqual(data.declared, { code: 'gone', params: {}, details: { at: 1 }, retryable: false });
+    const failure = ContractFailure('gone', { room: 'r1', count: 2 }, null);
+    assert.deepStrictEqual((await endWith(failure)).declared.params, { room: 'r1', count: 2 },
+      'a ctx.fail value carries the params its message renders with, mid-stream as on a request');
+  });
+
+  it('params that are not a JSON plain object — an array, a function inside, a cycle — cross as {}', async () => {
+    const cyclic = /** @type {any} */ ({});
+    cyclic.self = cyclic;
+    for (const params of [['r1'], { room: () => 'r1' }, cyclic, 'r1', null]) {
+      assert.deepStrictEqual((await endWith({ code: 'gone', params })).declared.params, {});
+    }
   });
 
   it('retryable without an own boolean is the retry set\'s verdict', async () => {

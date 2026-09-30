@@ -46,6 +46,7 @@ import { ContractFailure, isContractFailure } from './errors.js';
  * @property {string | null} method - the request line on HTTP; `null` elsewhere
  * @property {string | null} path
  * @property {Readonly<Record<string, string | readonly string[]>> | null} headers - the raw request headers on HTTP; `null` elsewhere
+ * @property {unknown} request - the host's own per-request value on HTTP (the dispatch request's `request` member — `toNodeHandler`'s `request` seed, a framework-decorated principal); `null` when none was given and on the other carriers
  * @property {typeof ContractFailure} fail - the declared-failure factory
  */
 

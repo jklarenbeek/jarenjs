@@ -544,7 +544,7 @@
     },
     "responses": {
       "BadRequest": {
-        "description": "Answered by the binding, not the handler — JC2005: the request body is present and is not valid JSON, or its bytes are not valid UTF-8 (400); JC2006: the reassembled input fails the operation's input validator (400); JC2007: the operation requires an Idempotency-Key header and none was sent (400); JC2011: the request path carries a malformed percent-escape, or a segment that decodes to . or .. (400); JC2012: the query string is not decodable (400); JC2015: a declared header member is repeated when its schema is scalar, or fails transport decoding (400).",
+        "description": "Answered by the binding, not the handler — JC2005: the request body is present and is not valid JSON, or its bytes are not valid UTF-8 (400); JC2006: the reassembled input fails the operation's input validator (400); JC2007: the operation requires an Idempotency-Key header and none was sent (400); JC2011: the request path carries a malformed percent-escape, or a segment that decodes to . or .. (400); JC2012: the query string is not decodable (400); JC2015: a declared header member is repeated when its schema is scalar, or fails transport decoding (400); JC2016: an opaque operation's body read as text (readBody) is not valid UTF-8 (400).",
         "content": {
           "application/json": {
             "schema": {
@@ -564,7 +564,8 @@
                     "JC2007",
                     "JC2011",
                     "JC2012",
-                    "JC2015"
+                    "JC2015",
+                    "JC2016"
                   ]
                 },
                 "message": {

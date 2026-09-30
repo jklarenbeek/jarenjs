@@ -120,7 +120,7 @@ import { verdict } from '../http/wire.js';
  * otherwise), and `retryable` — the error's own boolean, else whether
  * `policy.retry.on` names the code. Nothing of the error's message or
  * stack is here: the carrier renders the operation's declared message.
- * @typedef {{ code: string, details: unknown, retryable: boolean }} DeclaredStreamFailure
+ * @typedef {{ code: string, params: Readonly<Record<string, unknown>>, details: unknown, retryable: boolean }} DeclaredStreamFailure
  */
 
 /**
@@ -271,8 +271,16 @@ function declaredFailureOf(error, route) {
     const code = e.code;
     if (typeof code !== 'string' || !Object.hasOwn(route.errors, code)) return null;
     const details = e.details;
+    const params = e.params;
     const retryable = typeof e.retryable === 'boolean' ? e.retryable : route.retryOn.has(code);
-    return { code, details: details !== undefined && isJsonValue(details) ? details : undefined, retryable };
+    // the catalog parameters a declared failure's message renders with — a
+    // ctx.fail value carries them, as it does on a request
+    return {
+      code,
+      params: params !== null && typeof params === 'object' && !Array.isArray(params) && isJsonValue(params) ? params : {},
+      details: details !== undefined && isJsonValue(details) ? details : undefined,
+      retryable,
+    };
   }
   catch {
     return null;

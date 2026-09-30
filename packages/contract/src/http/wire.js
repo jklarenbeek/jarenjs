@@ -29,13 +29,16 @@ import { contractCatalogEn } from '../messages.js';
  * normalizes) the pipeline drains under the operation's limit for a
  * JSON operation and hands an opaque handler one chunk at a time
  * (`null` for none); `signal` is the request's abort signal when the
- * host has one.
+ * host has one; `request` is the host's own per-request value (a
+ * framework-decorated principal, say) — never read by the binding, it
+ * reaches `identify` as `meta.request`.
  * @typedef {Object} HttpRequest
  * @property {string} method
  * @property {string} url
  * @property {Readonly<Record<string, string | readonly string[]>>} headers
  * @property {string | Uint8Array | AsyncIterable<Uint8Array> | ReadableStream<Uint8Array> | null} body
  * @property {AbortSignal | null} [signal]
+ * @property {unknown} [request]
  */
 
 /**
@@ -116,6 +119,7 @@ export const HTTP_ERRORS = Object.freeze({
   JC2013: Object.freeze({ status: 501, msgid: 'contract/not-implemented', retryable: false }),
   JC2014: Object.freeze({ status: 412, msgid: 'contract/precondition-failed', retryable: false }),
   JC2015: Object.freeze({ status: 400, msgid: 'contract/invalid-header', retryable: false }),
+  JC2016: Object.freeze({ status: 400, msgid: 'contract/malformed-body', retryable: false }),
 });
 
 /** The msgid of a declared operation error that has no message of its own. */

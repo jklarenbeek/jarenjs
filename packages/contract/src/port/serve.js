@@ -255,7 +255,7 @@ export function servePort(contract, handlers, options) {
    * @returns {Promise<{ entered: boolean, value: unknown, release: () => Promise<boolean> }>}
    */
   async function lifecycleAround(route, trace, signal, value, observed, refuse, failed, enter) {
-    const meta = Object.freeze({ op: route.op, trace, signal, carrier: /** @type {const} */ ('port'), method: null, path: null, headers: null, fail: ContractFailure });
+    const meta = Object.freeze({ op: route.op, trace, signal, carrier: /** @type {const} */ ('port'), method: null, path: null, headers: null, request: null, fail: ContractFailure });
     const identified = await identifyHost(lifecycle, meta);
     const none = () => Promise.resolve(true);
     if (identified.kind === 'fault') {
@@ -502,7 +502,7 @@ export function servePort(contract, handlers, options) {
         error: (intent, cause, seq, declared) => {
           if (intent !== 'slow-consumer') observe(cause, pushCtx);
           if (intent === 'declared' && declared !== null) {
-            return pushFrame(id, 'error', seq, wireError(declared.code, declaredMessage(catalog, opId, declared.code, {}), trace, declared.details, declared.retryable));
+            return pushFrame(id, 'error', seq, wireError(declared.code, declaredMessage(catalog, opId, declared.code, declared.params), trace, declared.details, declared.retryable));
           }
           const code = intent === 'invalid-snapshot' ? 'JC2091' : intent === 'slow-consumer' ? 'JC2096' : 'JC2070';
           const row = intent === 'invalid-snapshot' ? STREAM_ERRORS.JC2091

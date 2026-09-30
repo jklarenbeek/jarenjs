@@ -25,9 +25,9 @@ import { resolveStreamLimits } from '../stream/server.js';
 import { resolveLifecycle } from '../host.js';
 import { dispatch } from './dispatch.js';
 import { HTTP_ERRORS, WELL_KNOWN_PATH } from './wire.js';
-import { BodyLimitError } from './body.js';
+import { BodyLimitError, BodyEncodingError, readBody } from './body.js';
 
-export { HTTP_ERRORS, WELL_KNOWN_PATH, BodyLimitError };
+export { HTTP_ERRORS, WELL_KNOWN_PATH, BodyLimitError, BodyEncodingError, readBody };
 
 /**
  * @typedef {import('./wire.js').HttpRequest} HttpRequest
@@ -64,8 +64,8 @@ export { HTTP_ERRORS, WELL_KNOWN_PATH, BodyLimitError };
  *   `If-None-Match` a PRE-handler decision for that operation: a stale
  *   precondition refuses `JC2014` with zero handler invocations, a
  *   matching `If-None-Match` read answers 304 without computing the
- *   representation (docs/CONTRACT-FORMAT.md §7.5); refused on a
- *   `subscribe` or opaque operation
+ *   representation (docs/CONTRACT-FORMAT.md §7.5), an opaque operation's
+ *   included; refused on a `subscribe` operation
  * @property {string | false} [wellKnown] - the path answering `describe()`; default `/.well-known/jaren-contract`; `false` disables
  * @property {(wire: WireErrorBody & { status: number }, ctx: RequestContext | null) => unknown} [errorBody]
  *   - projects the wire error record into the response body (a legacy
@@ -285,9 +285,6 @@ export function serveHttp(contract, handlers, options = {}) {
       const op = contract.operations[id];
       if (op.kind === 'subscribe') {
         throw host('JC1001', `operation '${id}' is a subscribe — a stream has no single representation for a precondition to guard`);
-      }
-      if (op.http.opaque) {
-        throw host('JC1001', `operation '${id}' is opaque — its raw handler owns the bytes and the headers; preconditions cannot apply`);
       }
     }
   }

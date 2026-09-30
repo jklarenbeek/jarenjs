@@ -251,10 +251,11 @@ export interface InvokeContext {
   headers?: Record<string, string>; ifNoneMatch?: string; ifMatch?: string;
 }
 
-/** A declared failure a handler returns (`ctx.fail`). */
+/** A declared failure a handler returns (`ctx.fail`); `retryAfterMs` is
+ * the backoff a retryable one asks for (`retry-after` on HTTP). */
 export type Failure = {
   code: string; params: Readonly<Record<string, unknown>>; details: unknown;
-  retryable: boolean | null;
+  retryable: boolean | null; retryAfterMs?: number;
 };
 
 /** The binding a handler context comes from. */
@@ -304,7 +305,7 @@ export interface HandlerContextBase<Host = null> {
   headers: Readonly<Record<string, string>>;
   signal: AbortSignal | null;
   fail(code: string, params?: Record<string, unknown>, details?: unknown,
-    options?: { retryable?: boolean }): Failure;
+    options?: { retryable?: boolean; retryAfterMs?: number }): Failure;
 }
 
 /** The HTTP binding's context: the request line, the raw body of an

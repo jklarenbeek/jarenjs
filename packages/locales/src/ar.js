@@ -195,6 +195,7 @@ export const ar = {
   'contract/body-too-large': 'يتجاوز متن طلب العملية ⁨{op}⁩ حدّها البالغ {limit} بايت',
   'contract/unsupported-media': 'لا تقبل العملية ⁨{op}⁩ سوى متون ⁨{media}⁩',
   'contract/malformed-json': 'متن طلب العملية ⁨{op}⁩ ليس JSON صالحًا',
+  'contract/malformed-body': 'متن طلب العملية ⁨{op}⁩ ليس نص UTF-8 صالحًا',
   'contract/invalid-input': 'مدخلات العملية ⁨{op}⁩ غير صالحة',
   'contract/idempotency-key-required': 'تتطلب العملية ⁨{op}⁩ ترويسة Idempotency-Key',
   'contract/handler-failed': 'فشلت العملية ⁨{op}⁩',

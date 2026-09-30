@@ -214,7 +214,7 @@ and the bundle is the byte count the tree-shaking probe builds.
 | [FLOW-PEN.md](FLOW-PEN.md) | `./flow` | 1,040 | 16 | 7 | 3 | 18,891 B |
 | [APP-PEN.md](APP-PEN.md) | `./app` | 1,163 | 22 | 7 | 3 | 50,062 B |
 | [FORMS-PEN.md](FORMS-PEN.md) | `./forms` | 940 | 18 | 6 | 3 | 39,929 B |
-| [MESSAGES-PEN.md](MESSAGES-PEN.md) | `./messages` | 105 | 9 | 2 | 1 | 17,344 B |
+| [MESSAGES-PEN.md](MESSAGES-PEN.md) | `./messages` | 105 | 9 | 2 | 1 | 17,377 B |
 | [JTLT-PEN.md](JTLT-PEN.md) | `./jtlt` | 83 | 13 | 1 | 2 | 15,706 B |
 | [PROJECT-PEN.md](PROJECT-PEN.md) | `./project` | 81 | 9 | 1 | 1 | 14,206 B |
 | [CHARTS-PEN.md](CHARTS-PEN.md) | `./charts` | 94 | 21 | 1 | 1 | 15,995 B |
@@ -272,7 +272,7 @@ it and each document publishes it. The rounded column is what
 | `@jarenjs/linq/flow` | [FLOW-PEN.md](FLOW-PEN.md) | 18,891 B | 19 kB |
 | `@jarenjs/linq/app` | [APP-PEN.md](APP-PEN.md) | 50,062 B | 50 kB |
 | `@jarenjs/linq/forms` | [FORMS-PEN.md](FORMS-PEN.md) | 39,929 B | 40 kB |
-| `@jarenjs/linq/messages` | [MESSAGES-PEN.md](MESSAGES-PEN.md) | 17,344 B | 17 kB |
+| `@jarenjs/linq/messages` | [MESSAGES-PEN.md](MESSAGES-PEN.md) | 17,377 B | 17 kB |
 | `@jarenjs/linq/jtlt` | [JTLT-PEN.md](JTLT-PEN.md) | 15,706 B | 16 kB |
 | `@jarenjs/linq/project` | [PROJECT-PEN.md](PROJECT-PEN.md) | 14,206 B | 14 kB |
 | `@jarenjs/linq/charts` | [CHARTS-PEN.md](CHARTS-PEN.md) | 15,995 B | 16 kB |

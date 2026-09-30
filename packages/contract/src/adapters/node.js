@@ -356,112 +356,198 @@ function send(res, response, close, done) {
 }
 
 /**
+ * The dispatch request of one Node request, with its body source and
+ * the Node request it came from — what `writeNodeResponse` reads to
+ * decide `connection: close` and the linger.
+ * @typedef {import('../http/wire.js').HttpRequest & {
+ *   body: (AsyncIterable<Uint8Array> & { state: { started: boolean, ended: boolean, cancelled: boolean } }) | null,
+ *   signal: AbortSignal,
+ * }} NodeDispatchRequest
+ */
+
+/** The Node request each `nodeRequest` result came from. */
+const origins = new WeakMap();
+
+/**
+ * @param {unknown} dispatcher
+ * @param {string} who
+ */
+function requireDispatcher(dispatcher, who) {
+  if (dispatcher === null || typeof dispatcher !== 'object' || typeof (/** @type {any} */ (dispatcher)).dispatch !== 'function') {
+    throw new TypeError(`${who}: the dispatcher must come from serveHttp`);
+  }
+}
+
+/**
+ * The dispatch request of a Node request, built exactly as
+ * `toNodeHandler` builds it — for a framework-native route that runs its
+ * own guards first and then calls `dispatcher.dispatch` itself:
+ * - the lowercase header table (repeated lines as arrays);
+ * - the body as a PULL SOURCE over the request's own chunks, read only
+ *   for an operation that takes one, and never when a declared
+ *   `content-length` already exceeds its limit (the dispatcher answers
+ *   the 413 from the header);
+ * - a `signal` that aborts when the client goes away before the response
+ *   finished — what stops a stream and reaches `ctx.signal`.
+ *
+ * The request's body stream must be unread: a framework that parsed it
+ * leaves nothing to pull, so register the contract's routes where their
+ * body stays raw (the README's Fastify recipe).
+ * @param {HttpDispatcher} dispatcher
+ * @param {NodeRequestLike} req
+ * @param {NodeResponseLike} res
+ * @returns {NodeDispatchRequest}
+ * @example
+ * const incoming = nodeRequest(dispatcher, req.raw, reply.raw);
+ * const response = await dispatcher.dispatch({ ...incoming, request: req.user });
+ * reply.hijack();
+ * writeNodeResponse(reply.raw, response, { from: incoming });
+ */
+export function nodeRequest(dispatcher, req, res) {
+  requireDispatcher(dispatcher, 'nodeRequest');
+  const method = req.method === undefined ? 'GET' : req.method;
+  const url = req.url === undefined ? '/' : req.url;
+  const q = url.indexOf('?');
+  const path = q === -1 ? url : url.slice(0, q);
+  const headers = headersOf(req);
+  const controller = new AbortController();
+  res.on('close', () => {
+    if (res.writableFinished !== true) controller.abort();
+  });
+  let body = null;
+  if (mayCarryBody(method)) {
+    const hit = dispatcher.contract.match(method, path);
+    if (hit !== null) {
+      const declared = Number(headers['content-length']);
+      if (!(Number.isFinite(declared) && declared > hit.op.policy.limits.maxBodyBytes)) body = requestSource(req);
+    }
+  }
+  /** @type {NodeDispatchRequest} */
+  const incoming = { method, url, headers, body, signal: controller.signal };
+  origins.set(incoming, req);
+  return incoming;
+}
+
+/**
+ * Write a dispatcher response to a Node response — the writer
+ * `toNodeHandler` uses, for a framework route that dispatched itself
+ * (Fastify after `reply.hijack()`, say):
+ * - a streamed body is pumped chunk by chunk behind the socket's `drain`,
+ *   and the peer going away cancels it once;
+ * - a subscribe answer (SSE) writes each event only after the previous one
+ *   drained, so a slow reader parks the source instead of growing a buffer;
+ * - a status without content sends none.
+ *
+ * With `from` (what `nodeRequest` built), an upload that was pulled and
+ * left unread closes the connection. The socket then lingers, draining the
+ * rest, before it is destroyed, so the peer can read the answer through
+ * the close. An answer Node refuses to write never escapes as a throw:
+ * before the head is out a plain 500 replaces it, after it the socket goes.
+ * @param {NodeResponseLike} res
+ * @param {import('../http/wire.js').HttpResponse} response
+ * @param {{ from?: NodeDispatchRequest, lingerMs?: number }} [options]
+ * @returns {void}
+ */
+export function writeNodeResponse(res, response, options = {}) {
+  if (options === null || typeof options !== 'object') throw new TypeError('writeNodeResponse: options must be an object');
+  const lingerMs = typeof options.lingerMs === 'number' && options.lingerMs >= 0 ? options.lingerMs : LINGER_MS;
+  const source = options.from === undefined ? null : options.from.body;
+  const close = source !== null && source.state.started && !source.state.ended;
+  const req = options.from === undefined ? undefined : origins.get(options.from);
+  write(res, response, close, close && req !== undefined ? () => lingerThenDestroy(req, lingerMs) : undefined);
+}
+
+/**
+ * `send`, guarded: an answer Node refuses to write (a header value it
+ * rejects) must neither crash the process nor hang the socket.
+ * @param {NodeResponseLike} res
+ * @param {import('../http/wire.js').HttpResponse} response
+ * @param {boolean} close
+ * @param {(() => void) | undefined} done
+ */
+function write(res, response, close, done) {
+  try {
+    send(res, response, close, done);
+  }
+  catch (err) {
+    if (res.headersSent) {
+      if (typeof res.destroy === 'function') res.destroy(err instanceof Error ? err : undefined);
+      return;
+    }
+    const names = typeof (/** @type {any} */ (res)).getHeaderNames === 'function' ? /** @type {any} */ (res).getHeaderNames() : [];
+    for (const name of names) /** @type {any} */ (res).removeHeader(name);
+    send(res, { status: 500, headers: { 'content-type': 'text/plain; charset=utf-8' },
+      body: 'the response could not be written' }, true, undefined);
+  }
+}
+
+/**
+ * Closing a socket with unread data in its receive buffer sends RST, and
+ * winsock discards buffered receive data on RST — the flushed 413 would
+ * never reach a Windows client. So the close lingers: resume the paused
+ * request so what is still arriving drains and discards, and destroy only
+ * after a grace window, which closes with FIN and leaves the response
+ * readable. No request event can drive this — once the response has
+ * finished, a paused, unconsumed request emits nothing further — so the
+ * window is a plain unref'd timer.
+ * @param {NodeRequestLike} req
+ * @param {number} lingerMs
+ */
+function lingerThenDestroy(req, lingerMs) {
+  if (typeof req.destroy !== 'function' || req.destroyed === true) return;
+  if (req.readableEnded === true) {
+    req.destroy();
+    return;
+  }
+  if (typeof req.resume === 'function') req.resume();
+  const timer = setTimeout(() => {
+    if (req.destroyed !== true) /** @type {NonNullable<NodeRequestLike['destroy']>} */ (req.destroy)();
+  }, lingerMs);
+  if (typeof timer.unref === 'function') timer.unref();
+}
+
+/**
  * Put a dispatcher behind Node's `(req, res)` listener.
  * @param {HttpDispatcher} dispatcher
- * @param {{ lingerMs?: number }} [options] - `lingerMs` bounds how long a
- *   closing response waits, draining the peer's unfinished upload, before
- *   the socket is destroyed (default 1000 ms; see the linger comment
- *   below — it is what keeps an overflow 413 readable through the close).
+ * @param {{ lingerMs?: number, request?: (req: NodeRequestLike) => unknown }} [options] -
+ *   `lingerMs` bounds how long a closing response waits, draining the peer's
+ *   unfinished upload, before the socket is destroyed (default 1000 ms — it
+ *   is what keeps an overflow 413 readable through the close); `request` is a
+ *   per-request seed — its answer reaches `identify` as `meta.request`, so a
+ *   principal a framework decorated onto the request (`req.user`) needs no
+ *   side channel. A seed that throws answers a plain 500.
  * @returns {(req: NodeRequestLike, res: NodeResponseLike) => void}
  * @example
  * http.createServer(toNodeHandler(serveHttp(contract, handlers))).listen(8080);
  */
 export function toNodeHandler(dispatcher, options = {}) {
-  if (dispatcher === null || typeof dispatcher !== 'object' || typeof dispatcher.dispatch !== 'function') {
-    throw new TypeError('toNodeHandler: the argument must be a dispatcher from serveHttp');
-  }
+  requireDispatcher(dispatcher, 'toNodeHandler');
+  if (options === null || typeof options !== 'object') throw new TypeError('toNodeHandler: options must be an object');
   const lingerMs = typeof options.lingerMs === 'number' && options.lingerMs >= 0
     ? options.lingerMs : LINGER_MS;
-  const contract = dispatcher.contract;
-  const head = dispatcher.capabilities.head;
+  const seed = options.request;
+  if (seed !== undefined && typeof seed !== 'function') throw new TypeError('toNodeHandler: options.request must be a function (req) => unknown');
 
   return function nodeHandler(req, res) {
-    const method = req.method === undefined ? 'GET' : req.method;
-    const url = req.url === undefined ? '/' : req.url;
-    const q = url.indexOf('?');
-    const path = q === -1 ? url : url.slice(0, q);
-    const headers = headersOf(req);
-
-    const controller = new AbortController();
-    res.on('close', () => {
-      if (res.writableFinished !== true) controller.abort();
-    });
-
-    // Closing a socket with unread data in its receive buffer sends RST,
-    // and winsock discards buffered receive data on RST — the flushed 413
-    // would never reach a Windows client. So the close lingers: resume the
-    // paused request so what is still arriving drains and discards (the
-    // settled guard below already ignores it), and destroy only after a
-    // grace window, which closes with FIN and leaves the response
-    // readable. No request event can drive this — once the response has
-    // finished, a paused, unconsumed request emits nothing further — so
-    // the window is a plain unref'd timer.
-    const lingerThenDestroy = () => {
-      if (typeof req.destroy !== 'function' || req.destroyed === true) return;
-      if (req.readableEnded === true) {
-        req.destroy();
+    const incoming = nodeRequest(dispatcher, req, res);
+    /** @type {import('../http/wire.js').HttpRequest} */
+    let request = incoming;
+    if (seed !== undefined) {
+      try {
+        request = { ...incoming, request: seed(req) };
+      }
+      catch {
+        write(res, { status: 500, headers: { 'content-type': 'text/plain; charset=utf-8' }, body: 'the request seed failed' }, true, undefined);
         return;
       }
-      if (typeof req.resume === 'function') req.resume();
-      const timer = setTimeout(() => {
-        if (req.destroyed !== true) req.destroy();
-      }, lingerMs);
-      if (typeof timer.unref === 'function') timer.unref();
-    };
-    /** @param {import('../http/wire.js').HttpResponse} response @param {boolean} close */
-    const finish = (response, close) => {
-      send(res, response, close, close ? lingerThenDestroy : undefined);
-    };
-    /**
-     * Dispatch and answer. A request whose upload was pulled and left
-     * unread (a limit crossing, a response before EOF) cannot keep its
-     * connection: the answer carries `connection: close` and the socket
-     * lingers, draining and discarding the rest, before it is destroyed
-     * — so the 413 is readable through a FIN, never lost to an RST. An
-     * upload that was never pulled is the platform's to discard.
-     * @param {(AsyncIterable<Uint8Array> & { state: { started: boolean, ended: boolean, cancelled: boolean } }) | null} body
-     */
-    const answer = (body) => {
-      dispatcher.dispatch({ method, url, headers, body, signal: controller.signal })
-        .then((response) => finish(response, body !== null && body.state.started && !body.state.ended), (err) => {
-          // only JC1004 can arrive here, and this adapter builds a
-          // well-formed request; still, a rejection must not hang the socket
-          const message = err instanceof Error ? err.message : String(err);
-          send(res, { status: 500, headers: { 'content-type': 'text/plain; charset=utf-8' }, body: message }, true, undefined);
-        })
-        .catch((err) => {
-          // an answer Node refuses to write (a header value it rejects)
-          // must neither crash the process nor hang the socket: before the
-          // head is out, a plain 500 replaces it; after, the socket goes
-          if (res.headersSent) {
-            res.destroy(err instanceof Error ? err : undefined);
-            return;
-          }
-          for (const name of res.getHeaderNames()) res.removeHeader(name);
-          send(res, { status: 500, headers: { 'content-type': 'text/plain; charset=utf-8' },
-            body: 'the response could not be written' }, true, undefined);
-        });
-    };
-
-    let hit = null;
-    if (mayCarryBody(method)) {
-      hit = contract.match(method, path);
-      if (hit === null && method === 'HEAD' && head) hit = contract.match('GET', path);
     }
-    if (hit === null) {
-      answer(null);
-      return;
-    }
-    const limit = hit.op.policy.limits.maxBodyBytes;
-    const declared = Number(headers['content-length']);
-    if (Number.isFinite(declared) && declared > limit) {
-      // the dispatcher answers the 413 from the header; the body is never read
-      answer(null);
-      return;
-    }
-    // the body reaches the dispatcher as a pull source: a JSON operation
-    // drains it under its limit there, an opaque handler pulls it chunk
-    // by chunk, and nothing is collected here
-    answer(requestSource(req));
+    dispatcher.dispatch(request).then(
+      (response) => writeNodeResponse(res, response, { from: incoming, lingerMs }),
+      (err) => {
+        // only JC1004 can arrive here, and this adapter builds a
+        // well-formed request; still, a rejection must not hang the socket
+        const message = err instanceof Error ? err.message : String(err);
+        write(res, { status: 500, headers: { 'content-type': 'text/plain; charset=utf-8' }, body: message }, true, undefined);
+      });
   };
 }

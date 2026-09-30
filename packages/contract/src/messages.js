@@ -32,6 +32,7 @@ export const contractMessagesEn = Object.freeze({
   'contract/body-too-large': 'the request body of operation {op} exceeds its {limit}-byte limit',
   'contract/unsupported-media': 'operation {op} accepts {media} bodies only',
   'contract/malformed-json': 'the request body of operation {op} is not valid JSON',
+  'contract/malformed-body': 'the request body of operation {op} is not valid UTF-8 text',
   'contract/invalid-input': 'the input of operation {op} is invalid',
   'contract/idempotency-key-required': 'operation {op} requires an Idempotency-Key header',
   'contract/handler-failed': 'operation {op} failed',

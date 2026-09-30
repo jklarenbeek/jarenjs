@@ -136,6 +136,7 @@ export const zhTW = {
   'contract/body-too-large': '操作 {op} 的請求主體超過其 {limit} 位元組上限',
   'contract/unsupported-media': '操作 {op} 僅接受 {media} 主體',
   'contract/malformed-json': '操作 {op} 的請求主體不是有效的 JSON',
+  'contract/malformed-body': '操作 {op} 的請求主體不是有效的 UTF-8 文字',
   'contract/invalid-input': '操作 {op} 的輸入無效',
   'contract/idempotency-key-required': '操作 {op} 需要 Idempotency-Key 標頭',
   'contract/handler-failed': '操作 {op} 失敗',

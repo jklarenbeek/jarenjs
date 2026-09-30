@@ -684,10 +684,10 @@ void contractAllowed;
 // @jarenjs/contract/http, /fetch, /node, /ledger — the server binding: a
 // dispatcher over plain request/response objects, the two adapters, the
 // ledger interface and its documents
-import { serveHttp, HTTP_ERRORS, WELL_KNOWN_PATH } from '@jarenjs/contract/http';
+import { serveHttp, HTTP_ERRORS, WELL_KNOWN_PATH, readBody, BodyEncodingError, BodyLimitError } from '@jarenjs/contract/http';
 import type { HttpRequest, HttpResponse, HttpDispatcher, RequestContext, Handler, ServeHttpOptions } from '@jarenjs/contract/http';
 import { toFetchHandler } from '@jarenjs/contract/fetch';
-import { toNodeHandler } from '@jarenjs/contract/node';
+import { toNodeHandler, nodeRequest, writeNodeResponse } from '@jarenjs/contract/node';
 import { createMemoryLedger, idempotencyLedgerModel, commandLifecycleFsm } from '@jarenjs/contract/ledger';
 import type { Ledger, LedgerRecord, ClaimResult } from '@jarenjs/contract/ledger';
 
@@ -699,6 +699,14 @@ const saveHandler: Handler = (input, ctx: RequestContext) => {
   void [key, signal, ctx.op.id, ctx.trace, ctx.params.id, ctx.headers['if-match'], ctx.body];
   return input.revision > 0 ? { id: input.id, name: 'x' } : ctx.fail('conflict', { revision: input.revision }, { current: null }, { retryable: false });
 };
+const textBody: Promise<string | Uint8Array> = readBody('x', { as: 'text', signal: new AbortController().signal });
+const bytesBody: Promise<string | Uint8Array> = readBody(new Uint8Array(1));
+const encodingError: Error = new BodyEncodingError(new TypeError('bad'));
+void [textBody, bytesBody, encodingError.name, BodyLimitError];
+const backoff: contract.ContractFailureValue = contract.ContractFailure('conflict', {}, null, { retryable: true, retryAfterMs: 1500 });
+void backoff;
+const readMeta = (meta: Parameters<NonNullable<ServeHttpOptions['identify']>>[0]): unknown => meta.request;
+void readMeta;
 const failureValue: contract.ContractFailureValue = contract.ContractFailure('conflict');
 void [failureValue.code, failureValue.retryable, contract.isContractFailure(failureValue)];
 const serveOptions: ServeHttpOptions = {
@@ -716,7 +724,13 @@ void [wireRow, WELL_KNOWN_PATH.startsWith('/')];
 const fetchHandler: (request: Request) => Promise<Response> = toFetchHandler(dispatcher);
 void fetchHandler;
 const nodeHandler = toNodeHandler(dispatcher);
-void nodeHandler;
+const seededHandler = toNodeHandler(dispatcher, { lingerMs: 500, request: (req) => req.headers['x-user'] });
+declare const nodeReq: Parameters<typeof nodeHandler>[0];
+declare const nodeRes: Parameters<typeof nodeHandler>[1];
+const incoming = nodeRequest(dispatcher, nodeReq, nodeRes);
+const incomingSignal: AbortSignal = incoming.signal;
+void dispatcher.dispatch({ ...incoming, request: { user: 'ada' } }).then((response) => writeNodeResponse(nodeRes, response, { from: incoming, lingerMs: 100 }));
+void [nodeHandler, seededHandler, incomingSignal];
 const ledger: Ledger = createMemoryLedger();
 const claimed: ClaimResult | Promise<ClaimResult> = ledger.claim({ op: 'a', scope: '', key: 'k', hash: 'h' });
 const record: LedgerRecord | null | Promise<LedgerRecord | null> = ledger.lookup({ op: 'a', scope: '', key: 'k' });

@@ -136,6 +136,7 @@ export const ko = {
   'contract/body-too-large': '작업 {op}의 요청 본문이 {limit}바이트 한도를 초과합니다',
   'contract/unsupported-media': '작업 {op}은(는) {media} 본문만 허용합니다',
   'contract/malformed-json': '작업 {op}의 요청 본문이 유효한 JSON이 아닙니다',
+  'contract/malformed-body': '작업 {op}의 요청 본문이 유효한 UTF-8 텍스트가 아닙니다',
   'contract/invalid-input': '작업 {op}의 입력이 유효하지 않습니다',
   'contract/idempotency-key-required': '작업 {op}에는 Idempotency-Key 헤더가 필요합니다',
   'contract/handler-failed': '작업 {op}이(가) 실패했습니다',

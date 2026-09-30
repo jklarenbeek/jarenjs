@@ -398,6 +398,34 @@ describe('stream over SSE — failures', () => {
     }
   });
 
+  it('a declared failure raised mid-stream renders its params through the host catalog — its own entry, or the one handler-error entry', async () => {
+    /** @param {Record<string, any>} catalog */
+    const endOf = async (catalog) => {
+      const live = makeSource({ rows: [] });
+      const own = serveHttp(CONTRACT, { feed: () => live.sub, tiny: () => live.sub }, { trace: () => 'trace-m', catalog });
+      const response = await toFetchHandler(own)(new Request('http://contract.local/rooms/r1/feed', { headers: { accept: 'text/event-stream' } }));
+      const reader = /** @type {NonNullable<typeof response.body>} */ (response.body).getReader();
+      const decoder = new TextDecoder();
+      let text = '';
+      while (!text.includes('event: snapshot')) text += decoder.decode((await reader.read()).value, { stream: true });
+      live.emit({ error: ContractFailure('gone', { room: 'r1', message: 'room r1 was archived' }, null) });
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        text += decoder.decode(value, { stream: true });
+      }
+      await wait(() => live.counts.closes === 1);
+      const match = /event: error\ndata: (.*)\n\n/.exec(text);
+      assert.ok(match !== null, text);
+      return JSON.parse(match[1]);
+    };
+    assert.deepStrictEqual(await endOf({ 'contract/error/gone': 'room {room} is gone' }),
+      { code: 'gone', message: 'room r1 is gone', requestId: 'trace-m', details: null, retryable: false });
+    const generic = await endOf({ 'contract/handler-error': (/** @type {any} */ p) => p.message ?? `operation ${p.op} failed with ${p.code}` });
+    assert.strictEqual(generic.message, 'room r1 was archived', 'the host opted in to the handler\'s own message');
+    assert.strictEqual((await endOf({})).message, 'operation feed failed with gone', 'without an opt-in the generic text, never the params');
+  });
+
   it('an invalid input is refused pre-send (JC2050), and a non-subscribe operation throws JC1010', async () => {
     const { seen } = record({ room: 5 });
     await wait(() => seen.errors.length === 1);

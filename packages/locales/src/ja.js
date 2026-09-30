@@ -133,6 +133,7 @@ export const ja = {
   'contract/body-too-large': '操作 {op} のリクエストボディが {limit} バイトの上限を超えています',
   'contract/unsupported-media': '操作 {op} は {media} のボディのみ受け付けます',
   'contract/malformed-json': '操作 {op} のリクエストボディは有効な JSON ではありません',
+  'contract/malformed-body': '操作 {op} のリクエストボディは有効な UTF-8 テキストではありません',
   'contract/invalid-input': '操作 {op} の入力が無効です',
   'contract/idempotency-key-required': '操作 {op} には Idempotency-Key ヘッダーが必要です',
   'contract/handler-failed': '操作 {op} が失敗しました',

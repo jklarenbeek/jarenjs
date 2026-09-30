@@ -154,6 +154,9 @@ export const CATALOGS = deepFreeze({
     "contract/malformed-json": [
       "op"
     ],
+    "contract/malformed-body": [
+      "op"
+    ],
     "contract/invalid-input": [
       "op"
     ],

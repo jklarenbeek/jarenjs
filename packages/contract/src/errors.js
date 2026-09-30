@@ -88,6 +88,7 @@ export const CONTRACT_CODES = Object.freeze({
   JC2013: 'the operation has no handler on this partial server (501)',
   JC2014: 'the If-Match precondition does not match the entity tag the handler armed (412)',
   JC2015: 'a declared header member is repeated when its schema is scalar, or fails transport decoding (400)',
+  JC2016: 'an opaque operation\'s body read as text (readBody) is not valid UTF-8 (400)',
   // ——— client-side (outcomes of invoke; never thrown) ———
   JC2050: 'the input fails the operation\'s input validator, or holds a value the transport cannot carry (an empty, . or .. path variable; a header value with NUL, CR, LF or a character beyond Latin-1; a header item with a comma or edge whitespace), before anything was sent (kind contract)',
   JC2051: 'the request did not complete: the transport rejected or timed out (kind network, retryable)',
@@ -211,6 +212,9 @@ export class ContractHostError extends TypeError {
  * @property {Readonly<Record<string, unknown>>} params
  * @property {unknown} details - `undefined` when the failure carries none
  * @property {boolean | null} retryable - `null` defers to the operation's retry policy
+ * @property {number} [retryAfterMs] - the backoff hint a retryable failure
+ *   carries to the HTTP wire as `retry-after` (seconds, rounded up); present
+ *   only when given
  */
 
 /** The identity brand of every value `ContractFailure` produced. */
@@ -224,16 +228,33 @@ const failures = new WeakSet();
  * @param {string} code - A code the operation declares in `errors`
  * @param {Record<string, unknown>} [params] - Message parameters for the catalog
  * @param {unknown} [details] - The wire `details` member
- * @param {{ retryable?: boolean }} [options] - `retryable` overrides the
- *   default taken from the operation's `policy.retry.on`
+ * @param {{ retryable?: boolean, retryAfterMs?: number }} [options] - a
+ *   closed set: `retryable` overrides the default taken from the
+ *   operation's `policy.retry.on`; `retryAfterMs`, a non-negative integer,
+ *   is the backoff a retryable failure asks for — the HTTP binding sends it
+ *   as `retry-after` in whole seconds, rounded up
  * @returns {ContractFailureValue}
  */
 export function ContractFailure(code, params, details, options) {
+  let retryAfterMs;
+  if (options !== undefined && options !== null) {
+    if (typeof options !== 'object') throw new TypeError('ctx.fail: options must be an object { retryable?, retryAfterMs? }');
+    for (const key of Object.keys(options)) {
+      if (key !== 'retryable' && key !== 'retryAfterMs') {
+        throw new TypeError(`ctx.fail: options has no member '${key}' (it reads retryable and retryAfterMs)`);
+      }
+    }
+    retryAfterMs = options.retryAfterMs;
+    if (retryAfterMs !== undefined && (!Number.isSafeInteger(retryAfterMs) || retryAfterMs < 0)) {
+      throw new TypeError(`ctx.fail: retryAfterMs must be a non-negative integer of milliseconds, got ${String(retryAfterMs)}`);
+    }
+  }
   const value = Object.freeze({
     code,
     params: Object.freeze(params === undefined || params === null ? {} : { ...params }),
     details,
     retryable: options !== undefined && options !== null && typeof options.retryable === 'boolean' ? options.retryable : null,
+    ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
   });
   failures.add(value);
   return value;

@@ -591,6 +591,126 @@ describe('dispatch — preconditions: a declared tag resolver decides BEFORE the
     assert.strictEqual(writes, 1);
   });
 
+  it('an opaque GET: a matching If-None-Match answers 304 (etag, trace) with ZERO handler runs; HEAD rides it; a miss writes the resolved tag', async () => {
+    let calls = 0;
+    const server = serve(
+      { 'image.bytes': () => { calls += 1; return { status: 200, headers: { 'content-type': 'image/png' }, body: new Uint8Array([7]) }; } },
+      { preconditions: { 'image.bytes': () => 'v7' } });
+    for (const inm of ['"v7"', '*', 'W/"v7"', '"v6", "v7"']) {
+      const cached = await server.dispatch(req('GET', '/api/images/1', { 'if-none-match': inm }));
+      assert.strictEqual(cached.status, 304, inm);
+      assert.strictEqual(cached.body, null);
+      assert.strictEqual(cached.headers.etag, '"v7"');
+      assert.match(cached.headers['x-jaren-trace'], TRACES);
+    }
+    const head = await server.dispatch(req('HEAD', '/api/images/1', { 'if-none-match': '"v7"' }));
+    assert.strictEqual(head.status, 304);
+    assert.strictEqual(calls, 0, 'the representation was never computed');
+    const fresh = await server.dispatch(req('GET', '/api/images/1', { 'if-none-match': '"v6"' }));
+    assert.strictEqual(fresh.status, 200);
+    assert.strictEqual(fresh.headers.etag, '"v7"', 'the resolved tag rides the raw answer');
+    assert.deepStrictEqual(Array.from(/** @type {Uint8Array} */ (fresh.body)), [7]);
+    const headFresh = await server.dispatch(req('HEAD', '/api/images/1'));
+    assert.strictEqual(headFresh.status, 200);
+    assert.strictEqual(headFresh.headers.etag, '"v7"');
+    assert.strictEqual(headFresh.body, null);
+    assert.strictEqual(calls, 2);
+  });
+
+  it('an opaque PUT: a failed If-Match answers 412 before the handler and cancels the upload with no byte pulled', async () => {
+    const upload = compileContract({ $contract: '0.1', operations: {
+      'blob.put': { kind: 'command', input: { type: 'object', properties: { id: { type: 'string' } } }, output: true,
+        http: { method: 'PUT', path: '/blobs/{id}', media: 'application/octet-stream' } },
+    } });
+    let calls = 0;
+    const server = serveHttp(upload, { 'blob.put': () => { calls += 1; return { status: 204 }; } },
+      { preconditions: { 'blob.put': () => 'b3' } });
+    const pulls = { next: 0, returned: 0 };
+    /** @type {AsyncIterable<Uint8Array>} */
+    const body = {
+      [Symbol.asyncIterator]() {
+        return {
+          async next() {
+            pulls.next += 1;
+            return { done: false, value: new Uint8Array(16) };
+          },
+          async return() {
+            pulls.returned += 1;
+            return { done: true, value: undefined };
+          },
+        };
+      },
+    };
+    const stale = await server.dispatch(req('PUT', '/blobs/b1', { 'content-type': 'application/octet-stream', 'if-match': '"b2"' }, body));
+    assert.strictEqual(stale.status, 412);
+    assert.strictEqual(json(stale).code, 'JC2014');
+    assert.strictEqual(stale.headers.etag, '"b3"', 'the current tag rides the 412 for recovery');
+    assert.strictEqual(calls, 0, 'the handler never ran');
+    assert.deepStrictEqual(pulls, { next: 0, returned: 1 }, 'the upload was cancelled unread');
+    // the matching tag lets the upload through
+    const ok = await server.dispatch(req('PUT', '/blobs/b1', { 'content-type': 'application/octet-stream', 'if-match': '"b3"' }, new Uint8Array([1])));
+    assert.strictEqual(ok.status, 204);
+    assert.strictEqual(ok.headers.etag, undefined, 'a command echoes no pre-state tag');
+    assert.strictEqual(calls, 1);
+  });
+
+  it('ctx.etag on a raw route writes the header; a matching If-None-Match then answers 304 after the handler, its streamed body released', async () => {
+    let calls = 0;
+    let released = 0;
+    const server = serve({ 'image.bytes': (/** @type {any} */ input, /** @type {any} */ ctx) => {
+      calls += 1;
+      ctx.etag('v7', { strong: true });
+      return { status: 200, headers: { 'content-type': 'image/png' }, body: {
+        [Symbol.asyncIterator]() {
+          return {
+            async next() {
+              return { done: true, value: undefined };
+            },
+            async return() {
+              released += 1;
+              return { done: true, value: undefined };
+            },
+          };
+        },
+      } };
+    } });
+    const first = await server.dispatch(req('GET', '/api/images/1'));
+    assert.strictEqual(first.status, 200);
+    assert.strictEqual(first.headers.etag, '"v7"');
+    for (const inm of ['"v7"', '*']) {
+      const cached = await server.dispatch(req('GET', '/api/images/1', { 'if-none-match': inm }));
+      assert.strictEqual(cached.status, 304, inm);
+      assert.strictEqual(cached.body, null);
+      assert.strictEqual(cached.headers.etag, '"v7"');
+    }
+    assert.strictEqual(calls, 3, 'without a resolver the handler must run to learn the tag');
+    assert.strictEqual(released, 2, 'each 304 released the body source it will never send');
+    const failed = await server.dispatch(req('GET', '/api/images/1', { 'if-match': '"v6"' }));
+    assert.strictEqual(failed.status, 412);
+    assert.strictEqual(json(failed).code, 'JC2014');
+  });
+
+  it('the tag has one source: a raw etag header that disagrees with the resolved tag is JC2008, observed; an agreeing one passes', async () => {
+    /** @type {unknown[]} */
+    const seen = [];
+    let answer = '"v8"';
+    const server = serve(
+      { 'image.bytes': () => ({ status: 200, headers: { 'content-type': 'image/png', etag: answer }, body: new Uint8Array([1]) }) },
+      { preconditions: { 'image.bytes': () => 'v7' }, onError: (/** @type {unknown} */ err) => { seen.push(err); } });
+    const clash = await server.dispatch(req('GET', '/api/images/1'));
+    assert.strictEqual(clash.status, 500);
+    assert.strictEqual(json(clash).code, 'JC2008');
+    assert.strictEqual(seen.length, 1);
+    assert.match(String(/** @type {Error} */ (seen[0]).message), /one source: ctx\.etag or the tag resolver/);
+    answer = '"v7"';
+    const agree = await server.dispatch(req('GET', '/api/images/1'));
+    assert.strictEqual(agree.status, 200);
+    assert.strictEqual(agree.headers.etag, '"v7"');
+    // with no tag armed, a raw etag header is the handler's own, passed through
+    const own = serve({ 'image.bytes': () => ({ status: 200, headers: { 'content-type': 'image/png', etag: '"mine"' }, body: new Uint8Array([1]) }) });
+    assert.strictEqual((await own.dispatch(req('GET', '/api/images/1'))).headers.etag, '"mine"');
+  });
+
   it('a command without a conditional header never consults its resolver', async () => {
     let resolves = 0;
     const server = serve(
@@ -631,7 +751,7 @@ describe('dispatch — preconditions: a declared tag resolver decides BEFORE the
     assert.strictEqual(writes, 1);
   });
 
-  it('JC1001 — preconditions must name operations, hold functions, and never sit on a subscribe or opaque operation', () => {
+  it('JC1001 — preconditions must name operations, hold functions, and never sit on a subscribe operation (an opaque one takes them)', () => {
     for (const bad of [5, 'x', []]) {
       assert.throws(() => serve({}, { preconditions: bad }), (/** @type {any} */ err) => err instanceof ContractHostError && err.code === 'JC1001');
     }
@@ -639,8 +759,7 @@ describe('dispatch — preconditions: a declared tag resolver decides BEFORE the
       (/** @type {any} */ err) => err instanceof ContractHostError && err.code === 'JC1001' && /nope\.op/.test(err.message));
     assert.throws(() => serve({}, { preconditions: { 'catalog.load': 5 } }),
       (/** @type {any} */ err) => err instanceof ContractHostError && err.code === 'JC1001');
-    assert.throws(() => serve({}, { preconditions: { 'image.bytes': () => 'a' } }),
-      (/** @type {any} */ err) => err instanceof ContractHostError && err.code === 'JC1001' && /opaque/.test(err.message));
+    assert.doesNotThrow(() => serve({}, { preconditions: { 'image.bytes': () => 'a' } }));
     const sub = compileContract({ $contract: '0.1', operations: { feed: { kind: 'subscribe', output: true } } });
     assert.throws(() => serveHttp(sub, { feed: () => null }, { preconditions: { feed: () => 'a' } }),
       (/** @type {any} */ err) => err instanceof ContractHostError && err.code === 'JC1001' && /subscribe/.test(err.message));

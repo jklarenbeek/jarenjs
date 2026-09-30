@@ -138,6 +138,7 @@ export const de = {
   'contract/body-too-large': 'der Anfragekörper der Operation {op} überschreitet sein Limit von {limit} Bytes',
   'contract/unsupported-media': 'die Operation {op} akzeptiert nur {media}-Körper',
   'contract/malformed-json': 'der Anfragekörper der Operation {op} ist kein gültiges JSON',
+  'contract/malformed-body': 'der Anfragekörper der Operation {op} ist kein gültiger UTF-8-Text',
   'contract/invalid-input': 'die Eingabe der Operation {op} ist ungültig',
   'contract/idempotency-key-required': 'die Operation {op} erfordert einen Idempotency-Key-Header',
   'contract/handler-failed': 'die Operation {op} ist fehlgeschlagen',

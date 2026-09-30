@@ -208,11 +208,15 @@ const honoMod = await rival('hono');
 const expressMod = await rival('express');
 
 describe('README recipes', () => {
-  it('Fastify: hijack before parsing; the node adapter carries body limits, SSE and abort', { skip: fastifyMod === null ? 'fastify is not installed in benchmark/' : false, timeout: 30_000 }, async () => {
+  it('Fastify: hijack before parsing; the node adapter carries body limits, SSE and abort; the onRequest guard runs first', { skip: fastifyMod === null ? 'fastify is not installed in benchmark/' : false, timeout: 30_000 }, async () => {
     const fastify = fastifyMod.default ?? fastifyMod;
+    let guards = 0;
+    const guard = async () => { guards += 1; };
+    const server = dispatcher;
     // —— the recipe ——
     const app = fastify();
-    const handler = toNodeHandler(dispatcher);
+    app.addHook('onRequest', guard);   // a guard that must run before a stream lives here
+    const handler = toNodeHandler(server);
     app.all('/*', {
       onRequest: (req, reply, done) => { reply.hijack(); handler(req.raw, reply.raw); done(); },
     }, () => {});
@@ -220,6 +224,7 @@ describe('README recipes', () => {
     const origin = await app.listen({ port: 0, host: '127.0.0.1' });
     try {
       await exercise(origin);
+      assert.ok(guards >= 9, `the guard ran before every hijacked request (${guards})`);
     }
     finally {
       // a hijacked request never completes in fastify's own bookkeeping,
@@ -347,20 +352,21 @@ describe('README recipes', () => {
 
   it('Express: the node handler is mounted as middleware', { skip: expressMod === null ? 'express is not installed in benchmark/' : false, timeout: 30_000 }, async () => {
     const express = expressMod.default ?? expressMod;
+    const server = dispatcher;
     // —— the recipe ——
     const app = express();
-    app.use(toNodeHandler(dispatcher));
+    app.use(toNodeHandler(server, { request: (req) => /** @type {any} */ (req).user }));
     // —— end of the recipe ——
-    const server = app.listen(0, '127.0.0.1');
-    await once(server, 'listening');
-    const port = /** @type {import('node:net').AddressInfo} */ (server.address()).port;
+    const listener = app.listen(0, '127.0.0.1');
+    await once(listener, 'listening');
+    const port = /** @type {import('node:net').AddressInfo} */ (listener.address()).port;
     try {
       await exercise(`http://127.0.0.1:${port}`);
     }
     finally {
-      server.closeAllConnections();
-      server.close();
-      await once(server, 'close');
+      listener.closeAllConnections();
+      listener.close();
+      await once(listener, 'close');
     }
   });
 

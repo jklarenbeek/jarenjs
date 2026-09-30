@@ -174,7 +174,7 @@ describe('toOpenApi — the mapping', () => {
     assert.deepStrictEqual(load_.responses['409'].content['application/json'].schema.properties.code.enum, ['stale']);
     assert.deepStrictEqual(Object.keys(components.responses), ['BadRequest', 'NotFound', 'IdempotencyConflict', 'PayloadTooLarge', 'UnsupportedMediaType', 'InternalError']);
     assert.deepStrictEqual(components.responses.BadRequest.content['application/json'].schema.properties.code.enum,
-      ['JC2005', 'JC2006', 'JC2007', 'JC2011', 'JC2012', 'JC2015']);
+      ['JC2005', 'JC2006', 'JC2007', 'JC2011', 'JC2012', 'JC2015', 'JC2016']);
     assert.match(components.responses.NotFound.description, /JC2001/);
   });
 

@@ -417,6 +417,53 @@ a declaration the binding would advertise (a required key in OpenAPI, a
 ledger demanded at `serveHttp`) and never enforce. A handler that needs
 exactly-once uploads keys them itself (a header member it reads).
 
+**Members beside the bytes.** Path, query and header members compile
+beside a raw body, and validate like any other input (`JC2006` on a bad
+value, the raw handler never run). Only a body-located member is
+refused, because JSON members inside a raw body would be multipart.
+
+```js
+const contract = compileContract({ $contract: '0.1', operations: {
+  'label.render': {
+    kind: 'command', output: true,
+    input: { type: 'object', required: ['id', 'format'], properties: {
+      id: { type: 'string' },                                   // path
+      format: { enum: ['zpl', 'epl'] },                         // query
+      'x-printer': { type: 'string', maxLength: 64 },           // header
+    } },
+    http: { method: 'PUT', path: '/labels/{id}', media: 'text/plain',
+      in: { format: 'query', 'x-printer': 'header' } },
+    policy: { limits: { maxBodyBytes: 65536 } },
+  },
+} });
+
+const server = serveHttp(contract, {
+  'label.render': async (input, ctx) => {                       // input: { id, format, 'x-printer'? }
+    const template = await readBody(ctx.body, { as: 'text', signal: ctx.signal });
+    return { status: 200, headers: { 'content-type': 'text/plain; charset=utf-8' }, body: render(input, template) };
+  },
+});
+```
+
+**Reading the body.** `readBody(ctx.body, { as, signal })` from
+`@jarenjs/contract/http` reads an opaque upload whole, whatever shape
+`ctx.body` has: a string, bytes, the counting source of a streamed
+upload, or `null` for none. `as` is `'bytes'` (the default) or `'text'`;
+the options are closed.
+- Text is decoded strictly, as the JSON path decodes it: fatal, with
+  the BOM stripped.
+- Invalid bytes throw `BodyEncodingError`, which the binding answers
+  400 `JC2016` (`contract/malformed-body`), not the handler's 500.
+- The limit stays the binding's: a streamed upload is pulled through
+  its counting source, whose `BodyLimitError` is rethrown, so the
+  binding still answers 413 `JC2003`.
+- An aborted `signal` rejects with its reason and cancels the source.
+
+A handler that streams the upload onward reads `ctx.body` chunk by
+chunk instead (§7.1). An opaque operation takes a `preconditions`
+resolver like a JSON one (§7.5): a matching `If-None-Match` answers 304
+without running the handler.
+
 ## §5 The path matcher
 
 `contract.match(method, path)` resolves a request line to
@@ -809,10 +856,30 @@ code. The `errorBody` option projects the wire record (the body plus
 `status`) into another JSON shape for legacy consumers; a projector that
 throws or answers non-JSON falls back to the shape above.
 
+**A handler's own message, by opt-in.** A declared failure's message
+renders with the failure's own `params` (`ctx.fail`'s second argument)
+plus `op` and `code`, alike on HTTP, port and local and for a failure
+raised mid-stream (§18). The trust rule holds: nothing the handler says
+reaches the wire unless the host's catalog puts it there. One entry is
+enough for every declared code of every operation:
+
+```js
+serveHttp(contract, handlers, {
+  catalog: { 'contract/handler-error': (p) => p.message ?? `operation ${p.op} failed with ${p.code}` },
+});
+// a handler: return ctx.fail('stale', { message: 'the catalog moved on' });  → message: "the catalog moved on"
+```
+
+The entry is the host's decision that a handler's `params.message` is
+fit for the client. A per-code `contract/error/<code>` entry still wins
+for its code. Without either entry, the wire says `operation {op} failed
+with {code}`, whatever the params hold.
+
 Every response carries `x-jaren-trace: <trace>`; every error response
 also `cache-control: no-store`; a 405 carries `Allow`; a 409
-`in-progress` carries `retry-after: 1`; a 412 from `If-None-Match`
-carries the `etag`. Header names are lowercase.
+`in-progress` carries `retry-after: 1`; a retryable declared failure
+given `retryAfterMs` carries `retry-after` in whole seconds (§8); a 412
+from `If-None-Match` carries the `etag`. Header names are lowercase.
 
 The taxonomy — code, status, msgid, retryable — is the normative table
 below; `HTTP_ERRORS` (`@jarenjs/contract/http`) is the same table as data,
@@ -837,6 +904,7 @@ below; `HTTP_ERRORS` (`@jarenjs/contract/http`) is the same table as data,
 | `JC2013` | 501 | `contract/not-implemented` | no | a `partial` server has no handler for the operation |
 | `JC2014` | 412 | `contract/precondition-failed` | no | `If-Match` does not match the armed tag (strong comparison), or `If-None-Match` matches on a non-GET/HEAD |
 | `JC2015` | 400 | `contract/invalid-header` | no | a declared scalar header member arrived repeated, or a header value is not a string |
+| `JC2016` | 400 | `contract/malformed-body` | no | an opaque handler read its body as text with `readBody` (§4.5) and the bytes are not valid UTF-8 |
 
 `JC2016–JC2049` are reserved for later http-side codes; a new one is
 added to `CONTRACT_CODES`, this table and the English catalog in one
@@ -898,8 +966,8 @@ blind retry replays the 412 instead of mutating again.
 **The `preconditions` option — pre-handler, the write guard.**
 `serveHttp(contract, handlers, { preconditions: { '<op>': (input, ctx)
 => … } })` declares the CURRENT entity-tag resolver of an operation
-(refused at construction, `JC1001`, on a subscribe or opaque
-operation). The resolver answers a plain string — a **strong** tag (the
+(refused at construction, `JC1001`, on a subscribe operation). The
+resolver answers a plain string — a **strong** tag (the
 deliberate asymmetry with `ctx.etag`, whose bare form is weak:
 `If-Match` needs strong comparison to mean anything) — or `{ tag,
 strong }`, or `null` for "no current representation", or a promise of
@@ -923,6 +991,24 @@ key retryable — nothing ran. This is how a `policy.revision` command
 becomes HTTP-enforceable (§3.1): resolve the resource's current
 revision into a tag, and the domain transaction stays the final
 authority.
+
+**Opaque operations.** A raw handler takes both paths too:
+- With a resolver, its conditionals are decided before the handler, as
+  above. A matching `If-None-Match` answers `304` (`etag`,
+  `x-jaren-trace`) with zero handler invocations, a HEAD included. A
+  failed `If-Match` answers `412` before the handler, and an upload is
+  cancelled with no byte pulled.
+- On a pass, a safe method's response carries the resolved tag.
+- Without a resolver, `ctx.etag` in a raw handler arms the tag. The
+  binding writes the `etag` header and applies the post-handler
+  conditionals; a `304` there releases the handler's streamed body
+  unread.
+
+The operation's tag has one source. A raw handler that also answers an
+`etag` header must answer the same value as the resolver or `ctx.etag`,
+or the binding answers `JC2008` (a server fault, its cause observed). A
+raw `etag` header with no tag armed is the handler's own and passes
+through.
 
 ### §7.6 HEAD, the well-known path, options
 
@@ -978,12 +1064,17 @@ default identify → { host: null }
 default acquire  → enter({ host: identity.host })
 ```
 
-`meta` is `{ op, trace, signal, carrier, method, path, headers, fail }`
-— the matched operation, the trace, the request signal, the carrier
-name, the request line and the raw request headers on HTTP (`null` on
-port and local), and the declared-failure factory. It carries **no
-parsed input and no authentication vocabulary**: what an identity is
-made of is the host's. `identity` is the frozen identity context (the
+`meta` is `{ op, trace, signal, carrier, method, path, headers, request,
+fail }` — the matched operation, the trace, the request signal, the
+carrier name, the request line and the raw request headers on HTTP
+(`null` on port and local), the host's own per-request value, and the
+declared-failure factory. `request` is the dispatch request's `request`
+member, never read by the binding: `toNodeHandler`'s `request` seed puts
+it there, and so does a framework route that dispatches itself (§18.1).
+A principal the framework decorated (`req.user`) thus reaches `identify`
+without a side channel. It is `null` when none was given, and always
+`null` on port and local. The meta carries **no parsed input and no
+authentication vocabulary**: what an identity is made of is the host's. `identity` is the frozen identity context (the
 request context with the identity's `host`); `scope(ctx, input)` sees that
 context. A lease is an object with an own `host` — the value the
 handler sees as `ctx.host` — and an optional `release` function; the
@@ -1139,6 +1230,28 @@ command that runs twice. Opaque
 operations bypass the ledger; reads never carry a key. A ledger that
 throws or rejects is reported to `onError` and the response still goes
 out (a throwing `claim` is `JC2008`).
+
+**Retryable refusals.** What frees a key and what the wire says are two
+different facts:
+
+| the handler | the key | the wire's `retryable` |
+|---|---|---|
+| a declared failure, retryable (its own `retryable: true`, or `policy.retry.on` names the code) | freed: the same key runs the handler again | `true` |
+| a declared failure, not retryable | recorded: the same key replays it | `false` |
+| a throw, a rejection, an invalid output (`JC2008`, `JC2010`) | freed: nothing was recorded | `false` |
+
+The throw's `false` is about the request: nothing declared the fault
+transient, so a client must not retry it blindly. Nothing was recorded
+either, so a deliberate retry under the same key runs fresh.
+
+A retryable declared failure may name its backoff:
+`ctx.fail(code, params, details, { retryable: true, retryAfterMs: 1500 })`.
+The binding answers `retry-after` in whole seconds, rounded up (`2`
+here; RFC 9110 §10.2.3). `ctx.fail`'s options are closed, `retryable`
+and `retryAfterMs` only, and `retryAfterMs` is a non-negative integer of
+milliseconds; anything else is a `TypeError`, the handler's fault
+(`JC2008`). A failure that may not be retried carries no `retry-after`,
+whatever `retryAfterMs` says, and neither does its replay.
 
 `createMemoryLedger({ ttlMs = 86_400_000, now, runtime })` (`@jarenjs/contract/ledger`)
 is the reference implementation over a `Map`: synchronous,
@@ -1328,6 +1441,28 @@ the platform:
   finished; `content-length` is set on every text or byte body, and a
   streamed body is written chunk by chunk behind the socket's `drain`,
   its source cancelled once when the peer goes away.
+  `toNodeHandler(dispatcher, { request: (req) => unknown })` seeds each
+  dispatch request's `request` member, which reaches `identify` as
+  `meta.request` (§7.7): the principal a middleware put on `req.user`,
+  say. A seed that throws answers a plain 500 before the dispatcher sees
+  the request, and a seed that is not a function is a `TypeError` at
+  construction.
+- **`nodeRequest` and `writeNodeResponse`** (`@jarenjs/contract/node`) are
+  `toNodeHandler`'s two halves, packaged for a framework route that runs
+  its own lifecycle and dispatches itself:
+  - `nodeRequest(dispatcher, req, res)` builds the dispatch request
+    exactly as `toNodeHandler` does: the header table, the body source
+    under the operation's limit, and the abort signal.
+  - `writeNodeResponse(res, response, { from, lingerMs })` writes any
+    dispatcher response, SSE included, with `toNodeHandler`'s writer. It
+    drains behind `drain`, aborts on disconnect, and tears the stream
+    down after a `JC2096`.
+  - `from` is what `nodeRequest` built. It decides `connection: close`
+    and the linger for an upload left unread.
+  - A framework guard runs in the framework's lifecycle, before the
+    route dispatches, so it answers before any byte streams (the
+    README's native Fastify pattern, executed by
+    `test/contract/node-framework.test.js`).
 - **Both adapters send no body for 204, 205 or 304**, whatever reached
   them (a stream is released unread) — the statuses carry no content,
   and `new Response` throws on one — and neither reads an `OPTIONS`
@@ -1357,12 +1492,19 @@ answer a promise; `response.stream(sink)` answers `{ stop, done }` —
 `stop()` ends the stream when the consumer cancels, `done` settles once
 the subscription is released and the sink has ended.
 
-Fastify, Hono and Express are recipes in the README, each ≤15 lines and
+Fastify, Hono and Express are recipes in the README, each short and
 executed by a test that imports the framework from the benchmark
 workspace only — no framework is a dependency of this package. Each
-recipe rides one of the two adapters (Fastify hijacks the raw
-request/response pair before any parser runs), so body limits, SSE
-streaming and peer abort behave identically through all three.
+recipe rides one of the two adapters, so body limits, SSE streaming and
+peer abort behave identically through all three. Fastify has two
+recipes:
+- **The hijack.** It takes the raw request/response pair in a route
+  `onRequest`, before any parser runs, so Fastify's lifecycle ends there.
+  A guard that must run before a stream is an `onRequest` hook of the
+  route's scope; a `preHandler` beside the hijack never runs.
+- **The native pattern.** The route dispatches itself behind Fastify's
+  own guards, through `nodeRequest` and `writeNodeResponse`, in a scope
+  whose content-type parser leaves the body raw.
 
 ## §10 The HTTP client binding
 
@@ -2660,7 +2802,9 @@ no-store`, `x-jaren-trace`. Events, in order:
   LIVE-FORMAT emission verbatim.
 - heartbeat comment lines (`:`) every `policy.stream.heartbeatMs`.
 - `error` — data the §7.3 wire error (no `status` member matters here);
-  the stream ends with it.
+  the stream ends with it. A declared failure the source raises
+  mid-stream (a `ctx.fail` value as the emission's `error`) renders its
+  message with its own params, exactly as on a request (§7.3).
 - `end` — data `{ "reason": "closed" | "server-shutdown" }`.
 
 `seq` is strictly increasing per stream; a violation is the client's
@@ -2723,9 +2867,10 @@ sink down (the node adapter destroys the socket, the fetch bridge
 errors the stream) rather than wait for a consumer that stopped
 reading; nothing is dropped silently, oldest or newest.
 
-`toNodeHandler` writes SSE with `flushHeaders()` + `res.write`, waits
-for `drain` whenever `res.write()` answered `false` before the next
-event, and ends on close; `toFetchHandler` answers a `ReadableStream`
+`toNodeHandler` — and `writeNodeResponse`, the same writer for a
+framework route that dispatched itself (§9) — writes SSE with
+`flushHeaders()` + `res.write`, waits for `drain` whenever `res.write()`
+answered `false` before the next event, and ends on close; `toFetchHandler` answers a `ReadableStream`
 body that produces on the consumer's `pull`; both abort `ctx.signal`
 when the peer goes away (`request.signal`, `req` close), which runs the
 exactly-once `stop()`/`close()`, and both tear the connection down

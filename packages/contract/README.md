@@ -284,6 +284,25 @@ const server = serveHttp(contract, handlers, {
 });
 ```
 
+The same guard works on an opaque operation: its resolver answers a
+matching `If-None-Match` with 304 without running the raw handler, and
+`ctx.etag` in a raw handler writes the `etag` header.
+
+**Opaque bodies, declared messages, backoff.**
+- An opaque handler reads its upload with
+  `readBody(ctx.body, { as: 'text' })` from `@jarenjs/contract/http`.
+  Text is strict UTF-8 with the BOM stripped. Invalid bytes answer 400
+  `JC2016`, and a body over the operation's limit answers 413 `JC2003`,
+  for a string, a bytes and a streamed body alike.
+- A declared failure's message comes from the catalog. One host entry,
+  `` { 'contract/handler-error': (p) => p.message ?? `operation ${p.op} failed with ${p.code}` } ``,
+  opts every declared code into the handler's own `params.message`, on
+  every binding and mid-stream. Without it, the wire never repeats what a
+  handler said.
+- A retryable declared failure may name its backoff:
+  `ctx.fail(code, params, details, { retryable: true, retryAfterMs: 1500 })`
+  answers `retry-after: 2`.
+
 ### Recipes: Fastify, Hono, Express
 
 None of these is a dependency; each recipe is executed by a test that
@@ -292,6 +311,7 @@ imports the framework from the benchmark workspace.
 ```js
 // Fastify — hijack before parsing; the node adapter carries body limits, SSE and abort
 const app = fastify();
+app.addHook('onRequest', guard);   // a guard that must run before a stream lives here
 const handler = toNodeHandler(server);
 app.all('/*', {
   onRequest: (req, reply, done) => { reply.hijack(); handler(req.raw, reply.raw); done(); },
@@ -307,8 +327,7 @@ refusing as the contract's coded `JC2003` instead of Fastify's
 `FST_ERR_CTP_BODY_TOO_LARGE`. Subscribe operations stream (the adapter
 calls `response.stream`, writing each event only after the previous one
 drained — a slow reader parks the source instead of growing a buffer)
-and a dropped peer reaches the handler as `ctx.signal` — the earlier
-buffer-parser recipe carried neither. To
+and a dropped peer reaches the handler as `ctx.signal`. To
 confine the contract, register the same route in an encapsulated plugin
 with `{ prefix }`; the prefix must then prefix the contract's declared
 paths (canonical bindings and the well-known path included). One
@@ -317,6 +336,55 @@ bookkeeping, so its keep-alive socket never counts as idle — close the
 dispatcher first, then `app.server.closeAllConnections()` before
 `app.close()`.
 
+**Where guards live.** The hijack ends Fastify's lifecycle for the
+request: nothing after it runs — no parser, no `preValidation`, no
+`preHandler`, no handler. A guard that must decide before a byte streams
+(authentication, a tenant check) is therefore an `onRequest` hook of the
+route's scope, which Fastify runs before the route's own `onRequest`. A
+`preHandler` guard beside this recipe never runs, and the stream is
+served anyway. When the guards are `preHandler`s — they read the parsed
+request, or a plugin installs them there — use the native pattern:
+
+```js
+// Fastify, natively — the framework's own lifecycle first, then the packaged writer
+app.register(async (scope) => {
+  // this scope's routes keep the body raw: the dispatcher reads it under
+  // the operation's own limit (the parsers of the rest of the app stay)
+  scope.removeAllContentTypeParsers();
+  scope.addContentTypeParser('*', (req, payload, done) => done(null));
+  scope.decorateRequest('user', null);
+  // the framework's own guard, in its own lifecycle, before anything streams
+  scope.addHook('preHandler', async (req, reply) => {
+    if (req.headers.authorization !== 'Bearer ok') return reply.code(403).send({ error: 'forbidden' });
+    req.user = { user: 'ada' };
+  });
+  scope.all('/*', async (req, reply) => {
+    const incoming = nodeRequest(server, req.raw, reply.raw);
+    const response = await server.dispatch({ ...incoming, request: req.user });
+    reply.hijack();
+    writeNodeResponse(reply.raw, response, { from: incoming });
+  });
+});
+```
+
+`nodeRequest` builds the dispatch request exactly as `toNodeHandler`
+does: the header table; the body as a pull source read under the
+operation's limit, and never read when a declared `content-length`
+already exceeds it; and a `signal` that aborts when the peer goes away.
+`writeNodeResponse` is `toNodeHandler`'s own writer:
+- a streamed body goes out behind the socket's `drain`;
+- an SSE stream goes out event by event, so a slow reader parks the source
+  until the stream's bounded queue gives up;
+- an upload left unread, which `from` reveals, gets `connection: close`
+  and a linger, so the peer reads the answer through the close.
+
+The `request` member is the host's own value. It reaches `identify` as
+`meta.request`, and the handler never sees it directly, so the principal
+a guard decorated becomes `ctx.host` through
+`identify: (meta) => ({ host: meta.request })`. The scope's catch-all
+parser is what keeps the body readable: a parser that consumed it would
+leave the dispatcher nothing to pull.
+
 ```js
 // Hono — the fetch handler is the whole app (Bun.serve, Deno, workers alike)
 const app = new Hono();
@@ -324,10 +392,15 @@ app.all('*', (c) => toFetchHandler(server)(c.req.raw));
 ```
 
 ```js
-// Express — the node handler is middleware
+// Express — the node handler is middleware; `request` seeds identify's meta.request
 const app = express();
-app.use(toNodeHandler(server));
+app.use(toNodeHandler(server, { request: (req) => req.user }));
 ```
+
+`request: (req) => req.user` hands `identify` the principal an earlier
+middleware put on the request (`meta.request`, `null` when no seed is
+given); a seed that throws answers a plain 500 before the dispatcher
+sees the request.
 
 ### Recipe: large outputs — validate on rebuild, serve by revision
 
@@ -708,7 +781,7 @@ deliberate decision, not a gap:
 
 Here: the document and its grammar, `compileContract`, `contract.match`,
 `describe()`, the `JC0001–JC0017` compile errors; the HTTP server binding
-(`serveHttp`, the `JC2001–JC2015` wire taxonomy with its English catalog,
+(`serveHttp`, the `JC2001–JC2016` wire taxonomy with its English catalog,
 `fetch` and `node` adapters, the ledger interface with `createMemoryLedger`
 and the `idempotencyLedgerModel`/`commandLifecycleFsm` documents); the HTTP
 client (`openHttpClient`, the D6 outcomes with the `JC2050–JC2058` client

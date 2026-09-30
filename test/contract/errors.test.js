@@ -3,7 +3,7 @@
  * @file The error surface: every code in `CONTRACT_CODES` has a one-line
  * meaning, the populated ranges are exactly the compile codes
  * `JC0001–JC0017`, the projection codes `JC0060`–`JC0061`, the host codes
- * `JC1001–JC1008`, the http codes `JC2001–JC2015`, the client codes
+ * `JC1001–JC1008`, the http codes `JC2001–JC2016`, the client codes
  * `JC2050–JC2058` and the port/local codes `JC2070–JC2074`, and every
  * class keeps its contract — the
  * coded-error contract for compile/runtime (composed message, own
@@ -20,7 +20,7 @@ const range = (/** @type {number} */ from, /** @type {number} */ to) => Array.fr
 describe('contract errors — the code table', () => {
   it('lists the compile, projection, host, http, client and port/local codes with one-line meanings, frozen', () => {
     const codes = Object.keys(CONTRACT_CODES);
-    assert.deepStrictEqual(codes, [...range(1, 22), ...range(60, 61), ...range(1001, 1014), ...range(2001, 2015), ...range(2050, 2058), ...range(2070, 2074), ...range(2090, 2097), 'JC2110', ...range(2120, 2124)]);
+    assert.deepStrictEqual(codes, [...range(1, 22), ...range(60, 61), ...range(1001, 1014), ...range(2001, 2016), ...range(2050, 2058), ...range(2070, 2074), ...range(2090, 2097), 'JC2110', ...range(2120, 2124)]);
     for (const code of codes) {
       const meaning = CONTRACT_CODES[/** @type {keyof typeof CONTRACT_CODES} */ (code)];
       assert.strictEqual(typeof meaning, 'string', code);

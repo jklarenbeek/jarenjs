@@ -102,6 +102,7 @@ const SAMPLE_PARAMS = {
   'contract/body-too-large': { op: 'product.save', limit: 1048576 },
   'contract/unsupported-media': { op: 'product.save', media: 'application/json' },
   'contract/malformed-json': { op: 'product.save' },
+  'contract/malformed-body': { op: 'label.render' },
   'contract/invalid-input': { op: 'product.save' },
   'contract/idempotency-key-required': { op: 'product.save' },
   'contract/handler-failed': { op: 'product.save' },

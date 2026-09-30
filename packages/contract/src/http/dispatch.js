@@ -32,7 +32,7 @@ import { validateOperationInput, settleOperation, safeTrace, classifyDeclared } 
 import { identify as identifyHost, acquire as acquireHost, once, RollbackCarrier } from '../host.js';
 import { publicDescription } from '../describe.js';
 import {
-  BodyLimitError, isAsyncByteSource, normalizeBody, collectBytes, countingSource, onSettled, discard,
+  BodyLimitError, BodyEncodingError, isAsyncByteSource, normalizeBody, collectBytes, countingSource, onSettled, discard,
 } from './body.js';
 import {
   isSubscriptionLike, runSubscription, STREAM_ERRORS, STREAM_MEDIA, HEARTBEAT_LINE, encodeStreamEvent,
@@ -79,7 +79,7 @@ import {
  * @property {string | Uint8Array | AsyncIterable<Uint8Array> | null} body
  * @property {AbortSignal | null} signal
  * @property {Readonly<{ key: string, scope: string }> | null} idempotency
- * @property {(code: string, params?: Record<string, unknown>, details?: unknown, options?: { retryable?: boolean }) => ContractFailureValue} fail
+ * @property {(code: string, params?: Record<string, unknown>, details?: unknown, options?: { retryable?: boolean, retryAfterMs?: number }) => ContractFailureValue} fail
  * @property {(tag: string, options?: { strong?: boolean }) => void} etag
  * @property {(status: number) => void} status
  * @property {(name: string, value: string) => void} header - arm a response
@@ -478,7 +478,9 @@ function run(server, request) {
   // ——— 3. identify: the host's first look at the request, before any
   // byte of the body is read — the operation, the trace, the signal and
   // the transport facts; never a parsed input (§7.7) ———
-  const meta = Object.freeze({ op, trace, signal: signalOf(request), carrier: /** @type {const} */ ('http'), method, path, headers, fail: ContractFailure });
+  const seed = /** @type {any} */ (request).request;
+  const meta = Object.freeze({ op, trace, signal: signalOf(request), carrier: /** @type {const} */ ('http'), method, path, headers,
+    request: seed === undefined ? null : seed, fail: ContractFailure });
   const identified = identifyHost(server.lifecycle, meta);
   /** @param {ReturnType<typeof identifyHost> extends Promise<infer A> ? A : never} answer */
   const identifiedAs = (answer) => {
@@ -783,7 +785,13 @@ function afterIdentity(server, request, route, trace, hit, isHead, method, path,
     Object.freeze(ctx);
     const rawInput = op.input === null ? null : transported;
     return acquireAround(server, route, ctx, rawInput, trace, armed, life, (lease, hctx) => {
-      const ran = boundary(server, route, hctx, rawInput, trace, armed, isHead, ifMatch, ifNoneMatch, true);
+      // a declared tag resolver decides the conditionals BEFORE the raw
+      // handler, exactly as for a JSON operation: a matching If-None-Match
+      // answers 304 with zero handler invocations, and a failed If-Match
+      // answers 412 — the upload is then cancelled unread (settleUpload)
+      const ran = route.tag !== null
+        ? Promise.resolve(preconditionedBoundary(server, route, hctx, rawInput, trace, armed, isHead, ifMatch, ifNoneMatch, true))
+        : boundary(server, route, hctx, rawInput, trace, armed, isHead, ifMatch, ifNoneMatch, true);
       return (requestSource === null ? ran : ran.then((response) => settleUpload(server, hctx, response, requestSource)))
         .then((response) => deferToBody(server, life, response));
     });
@@ -1189,7 +1197,7 @@ function sseResponse(server, route, ctx, sub, trace, headers, life, armed) {
         if (intent === 'declared' && declared !== null) {
           // the operation's own declared failure, its message rendered
           // from the catalog — never the error's text
-          const message = declaredMessage(server.catalog, route.op.id, declared.code, {});
+          const message = declaredMessage(server.catalog, route.op.id, declared.code, declared.params);
           return frame('error', null, declared.details === undefined
             ? { code: declared.code, message, requestId: trace, retryable: declared.retryable }
             : { code: declared.code, message, requestId: trace, details: declared.details, retryable: declared.retryable });
@@ -1256,12 +1264,13 @@ function sseResponse(server, route, ctx, sub, trace, headers, life, armed) {
  * @param {boolean} isHead
  * @param {string | undefined} ifMatch
  * @param {string | undefined} ifNoneMatch
+ * @param {boolean} [raw] - an opaque operation's raw handler
  * @returns {HttpResponse | Promise<HttpResponse>}
  */
-function preconditionedBoundary(server, route, ctx, input, trace, armed, isHead, ifMatch, ifNoneMatch) {
+function preconditionedBoundary(server, route, ctx, input, trace, armed, isHead, ifMatch, ifNoneMatch, raw = false) {
   const safe = ctx.method === 'GET' || ctx.method === 'HEAD';
   if (!safe && ifMatch === undefined && ifNoneMatch === undefined) {
-    return boundary(server, route, ctx, input, trace, armed, isHead, ifMatch, ifNoneMatch, false);
+    return boundary(server, route, ctx, input, trace, armed, isHead, ifMatch, ifNoneMatch, raw);
   }
   /** @param {unknown} err @returns {HttpResponse} */
   const fault = (err) => {
@@ -1298,7 +1307,7 @@ function preconditionedBoundary(server, route, ctx, input, trace, armed, isHead,
       armed.etag = resolved.tag;
       armed.strong = resolved.strong;
     }
-    return boundary(server, route, ctx, input, trace, armed, isHead, ifMatch, ifNoneMatch, false);
+    return boundary(server, route, ctx, input, trace, armed, isHead, ifMatch, ifNoneMatch, raw);
   };
   let resolution;
   try {
@@ -1357,12 +1366,17 @@ function project(server, route, ctx, result, trace, armed, isHead, ifMatch, ifNo
       armed.outcome = 2;
       return refuse(server, 'JC2003', trace, { op: route.op.id, limit: result.cause.limit }, undefined, null, ctx);
     }
+    if (raw && result.code === 'JC2008' && result.cause instanceof BodyEncodingError) {
+      // the body read as text is not UTF-8: the request is malformed
+      armed.outcome = 2;
+      return refuse(server, 'JC2016', trace, { op: route.op.id }, undefined, null, ctx);
+    }
     if (result.cause !== undefined) observe(server, result.cause, ctx);
     armed.outcome = 2;
     return refuse(server, result.code, trace, { op: route.op.id }, result.details, null, ctx);
   }
   return raw
-    ? finishRaw(server, route, ctx, result.value, trace, armed, isHead)
+    ? finishRaw(server, route, ctx, result.value, trace, armed, isHead, ifMatch, ifNoneMatch)
     : finishValue(server, route, ctx, result.value, trace, armed, isHead, ifMatch, ifNoneMatch);
 }
 
@@ -1444,9 +1458,11 @@ function finishValue(server, route, ctx, value, trace, armed, isHead, ifMatch, i
  * @param {string} trace
  * @param {Armed} armed
  * @param {boolean} isHead
+ * @param {string | undefined} ifMatch
+ * @param {string | undefined} ifNoneMatch
  * @returns {HttpResponse}
  */
-function finishRaw(server, route, ctx, value, trace, armed, isHead) {
+function finishRaw(server, route, ctx, value, trace, armed, isHead, ifMatch, ifNoneMatch) {
   let status;
   let body;
   /** @type {Record<string, string | string[]>} */
@@ -1502,6 +1518,36 @@ function finishRaw(server, route, ctx, value, trace, armed, isHead) {
   }
   applyArmedHeaders(headers, armed);
   headers['x-jaren-trace'] = trace;
+  if (armed.etag !== null) {
+    // the operation's tag — the resolver's, or the handler's ctx.etag — is
+    // the one source of truth: a raw etag header must agree with it
+    const etag = formatEntityTag(armed.etag, armed.strong);
+    if (headers.etag !== undefined && headers.etag !== etag) {
+      if (isAsyncByteSource(body)) void discard(body);
+      observe(server, new TypeError(`the raw handler of '${route.op.id}' answered etag ${JSON.stringify(headers.etag)}, `
+        + `but the operation's tag is ${etag} — the tag has one source: ctx.etag or the tag resolver`), ctx);
+      armed.outcome = 2;
+      return refuse(server, 'JC2008', trace, { op: route.op.id }, undefined, null, ctx);
+    }
+    if (!armed.decided) {
+      // the post-handler conditionals, as finishValue's: a cache device,
+      // never a write guard — the handler has already run
+      if (ifMatch !== undefined && !entityTagMatches(ifMatch, armed.etag, armed.strong, true)) {
+        if (isAsyncByteSource(body)) void discard(body);
+        armed.outcome = 3;
+        return refuse(server, 'JC2014', trace, { op: route.op.id }, undefined, null, ctx);
+      }
+      if (ifNoneMatch !== undefined && entityTagMatches(ifNoneMatch, armed.etag, armed.strong, false)) {
+        if (isAsyncByteSource(body)) void discard(body);
+        if (ctx.method === 'GET' || ctx.method === 'HEAD') {
+          return { status: 304, headers: { ...headers, etag }, body: null };
+        }
+        armed.outcome = 3;
+        return refuse(server, 'JC2014', trace, { op: route.op.id }, undefined, { etag }, ctx);
+      }
+    }
+    headers.etag = etag;
+  }
   if (isHead && isAsyncByteSource(body)) {
     // a HEAD drops the body: a source nobody will read is released, never pulled
     void discard(body);
@@ -1558,7 +1604,11 @@ function declaredFailure(server, route, ctx, result, trace, armed) {
   const message = declaredMessage(server.catalog, route.op.id, result.code, result.params);
   armed.outcome = 1;
   armed.retryable = result.retryable;
-  return errorResponse(result.status, result.code, message, trace, result.details, result.retryable, null, server.errorBody, ctx);
+  // the backoff a retryable failure asks for, in whole seconds (RFC 9110
+  // §10.2.3); a failure that may not be retried carries none
+  const retryAfter = result.retryable && typeof result.retryAfterMs === 'number'
+    ? { 'retry-after': String(Math.ceil(result.retryAfterMs / 1000)) } : null;
+  return errorResponse(result.status, result.code, message, trace, result.details, result.retryable, retryAfter, server.errorBody, ctx);
 }
 
 //#endregion

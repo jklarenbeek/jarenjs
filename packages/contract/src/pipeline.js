@@ -59,7 +59,7 @@ import { HTTP_ERRORS, verdict, projectValidationDetails } from './http/wire.js';
  *    wire.
  *
  * @typedef {{ kind: 'value', value: unknown }
- *   | { kind: 'failure', code: string, params: Readonly<Record<string, unknown>>, details: unknown, retryable: boolean, status: number }
+ *   | { kind: 'failure', code: string, params: Readonly<Record<string, unknown>>, details: unknown, retryable: boolean, status: number, retryAfterMs?: number }
  *   | { kind: 'contract', code: 'JC2006' | 'JC2008' | 'JC2010', details: unknown, cause: unknown }} OperationResult
  */
 
@@ -139,7 +139,7 @@ export function validateOperationInput(route, input) {
  * @param {boolean | null} retryable
  * @returns {OperationResult}
  */
-function declaredResult(route, code, params, details, retryable) {
+function declaredResult(route, code, params, details, retryable, retryAfterMs = undefined) {
   const decl = typeof code === 'string' && Object.hasOwn(route.errors, code) ? route.errors[code] : undefined;
   if (decl === undefined) {
     return contractResult('JC2008', undefined, new ContractRuntimeError('JC2008',
@@ -163,6 +163,7 @@ function declaredResult(route, code, params, details, retryable) {
     kind: 'failure', code, params, details,
     retryable: retryable !== null ? retryable : route.retryOn.has(code),
     status: decl.status,
+    ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
   };
 }
 
@@ -188,7 +189,7 @@ export function classifyDeclared(route, failure) {
  * @returns {OperationResult}
  */
 function settleValue(route, value, validateOutput) {
-  if (isContractFailure(value)) return declaredResult(route, value.code, value.params, value.details, value.retryable);
+  if (isContractFailure(value)) return declaredResult(route, value.code, value.params, value.details, value.retryable, value.retryAfterMs);
   if (!route.raw && validateOutput) {
     const v = verdict(route.validateOutput, value);
     if (!v.valid) {

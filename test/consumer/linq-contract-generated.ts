@@ -128,8 +128,8 @@ export interface HttpClient extends Client {
   bytes<K extends keyof ByteOperations>(op: K, input: ByteOperations[K], ctx?: ByteContext): Promise<Outcome<ByteResponse>>;
 }
 
-/** A declared failure a handler returns (ctx.fail): the declared code, the catalog parameters, the wire details and whether the caller may retry (null defers to the operation's retry policy). */
-export type Failure = { code: string; params: Readonly<Record<string, unknown>>; details: unknown; retryable: boolean | null };
+/** A declared failure a handler returns (ctx.fail): the declared code, the catalog parameters, the wire details, whether the caller may retry (null defers to the operation's retry policy) and the backoff a retryable one asks for (retry-after on HTTP). */
+export type Failure = { code: string; params: Readonly<Record<string, unknown>>; details: unknown; retryable: boolean | null; retryAfterMs?: number };
 
 /** The binding a handler context comes from. */
 export type CarrierName = 'http' | 'port' | 'local';
@@ -170,7 +170,7 @@ export interface HandlerContextBase<Host = null> {
   host: Host;
   headers: Readonly<Record<string, string>>;
   signal: AbortSignal | null;
-  fail(code: string, params?: Record<string, unknown>, details?: unknown, options?: { retryable?: boolean }): Failure;
+  fail(code: string, params?: Record<string, unknown>, details?: unknown, options?: { retryable?: boolean; retryAfterMs?: number }): Failure;
 }
 
 /** The HTTP binding's context: the request line, the raw body of an opaque operation, the idempotency key, and the entity-tag and status arms. */
@@ -258,8 +258,8 @@ export interface HttpClient extends Client {
   bytes<K extends keyof ByteOperations>(op: K, input: ByteOperations[K], ctx?: ByteContext): Promise<Outcome<ByteResponse>>;
 }
 
-/** A declared failure a handler returns (ctx.fail): the declared code, the catalog parameters, the wire details and whether the caller may retry (null defers to the operation's retry policy). */
-export type Failure = { code: string; params: Readonly<Record<string, unknown>>; details: unknown; retryable: boolean | null };
+/** A declared failure a handler returns (ctx.fail): the declared code, the catalog parameters, the wire details, whether the caller may retry (null defers to the operation's retry policy) and the backoff a retryable one asks for (retry-after on HTTP). */
+export type Failure = { code: string; params: Readonly<Record<string, unknown>>; details: unknown; retryable: boolean | null; retryAfterMs?: number };
 
 /** The binding a handler context comes from. */
 export type CarrierName = 'http' | 'port' | 'local';
@@ -300,7 +300,7 @@ export interface HandlerContextBase<Host = null> {
   host: Host;
   headers: Readonly<Record<string, string>>;
   signal: AbortSignal | null;
-  fail(code: string, params?: Record<string, unknown>, details?: unknown, options?: { retryable?: boolean }): Failure;
+  fail(code: string, params?: Record<string, unknown>, details?: unknown, options?: { retryable?: boolean; retryAfterMs?: number }): Failure;
 }
 
 /** The HTTP binding's context: the request line, the raw body of an opaque operation, the idempotency key, and the entity-tag and status arms. */
@@ -404,8 +404,8 @@ export interface HttpClient extends Client {
   bytes<K extends keyof ByteOperations>(op: K, input: ByteOperations[K], ctx?: ByteContext): Promise<Outcome<ByteResponse>>;
 }
 
-/** A declared failure a handler returns (ctx.fail): the declared code, the catalog parameters, the wire details and whether the caller may retry (null defers to the operation's retry policy). */
-export type Failure = { code: string; params: Readonly<Record<string, unknown>>; details: unknown; retryable: boolean | null };
+/** A declared failure a handler returns (ctx.fail): the declared code, the catalog parameters, the wire details, whether the caller may retry (null defers to the operation's retry policy) and the backoff a retryable one asks for (retry-after on HTTP). */
+export type Failure = { code: string; params: Readonly<Record<string, unknown>>; details: unknown; retryable: boolean | null; retryAfterMs?: number };
 
 /** The binding a handler context comes from. */
 export type CarrierName = 'http' | 'port' | 'local';
@@ -446,7 +446,7 @@ export interface HandlerContextBase<Host = null> {
   host: Host;
   headers: Readonly<Record<string, string>>;
   signal: AbortSignal | null;
-  fail(code: string, params?: Record<string, unknown>, details?: unknown, options?: { retryable?: boolean }): Failure;
+  fail(code: string, params?: Record<string, unknown>, details?: unknown, options?: { retryable?: boolean; retryAfterMs?: number }): Failure;
 }
 
 /** The HTTP binding's context: the request line, the raw body of an opaque operation, the idempotency key, and the entity-tag and status arms. */

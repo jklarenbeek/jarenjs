@@ -19,7 +19,7 @@ import assert from 'node:assert';
 
 import { JarenValidator } from '@jarenjs/validate';
 import { jsonFormats } from '@jarenjs/formats';
-import { compileContract, ContractHostError } from '@jarenjs/contract';
+import { compileContract, ContractHostError, ContractFailure } from '@jarenjs/contract';
 import { servePort, openPortClient } from '@jarenjs/contract/port';
 import { load } from './helpers.js';
 
@@ -220,6 +220,36 @@ describe('stream over port — a MessageChannel pair', () => {
     assert.deepStrictEqual(source.counts, { stops: 1, closes: 1 });
     assert.strictEqual(source.active(), 0);
     assert.deepStrictEqual(seen.errors, []);
+  });
+
+  it('a declared failure raised mid-stream renders its params through the host catalog, like a request\'s', async () => {
+    const declaring = compileContract({ $contract: '0.1', operations: {
+      'data.live': {
+        kind: 'subscribe',
+        input: { type: 'object', required: ['collection'], properties: { collection: { type: 'string' } } },
+        output: { type: 'object', required: ['rows'], properties: { rows: { type: 'array' } } },
+        errors: { gone: { status: 410 } },
+      },
+    } });
+    for (const [catalog, message] of /** @type {[Record<string, any>, string][]} */ ([
+      [{ 'contract/error/gone': 'collection {collection} is gone' }, 'collection notes is gone'],
+      [{ 'contract/handler-error': (/** @type {any} */ p) => p.message ?? `operation ${p.op} failed with ${p.code}` }, 'notes was archived'],
+      [{}, 'operation data.live failed with gone'],
+    ])) {
+      const { server, client: clientPort, emitted } = pair();
+      const source = makeSource({ rows: [] });
+      track(servePort(declaring, { 'data.live': () => source.sub }, { channel: server, catalog }));
+      const client = track(openPortClient(declaring, { channel: clientPort }));
+      const { seen } = record(client);
+      await wait(() => seen.snapshots.length === 1);
+      source.emit({ error: ContractFailure('gone', { collection: 'notes', message: 'notes was archived' }, null) });
+      await wait(() => seen.errors.length === 1);
+      assert.strictEqual(seen.errors[0].kind, 'failure');
+      assert.strictEqual(seen.errors[0].error.code, 'gone');
+      assert.strictEqual(seen.errors[0].error.message, message);
+      assert.strictEqual(emitted[emitted.length - 1].event, 'error');
+      await wait(() => source.counts.closes === 1);
+    }
   });
 
   it('resume replay yields only the later patches; a refused resume yields a fresh snapshot', async () => {

@@ -114,10 +114,51 @@ describe('idempotency — the binding over the memory ledger', () => {
     assert.strictEqual(retry.ledger.lookup({ op: 'product.save', scope: '', key: 'r' })?.status, 'committed');
   });
 
+  it('retryAfterMs on a retryable declared failure sets retry-after in whole seconds, rounded up; a non-retryable one sends none', async () => {
+    for (const [ms, seconds] of /** @type {[number, string][]} */ ([[1500, '2'], [1000, '1'], [1, '1'], [0, '0']])) {
+      const { server } = serve({ 'product.save': (i, ctx) => ctx.fail('not-found', {}, undefined, { retryable: true, retryAfterMs: ms }) });
+      const r = await server.dispatch(jsonReq('PUT', URL, SAVE, { 'idempotency-key': `ra-${ms}` }));
+      assert.strictEqual(r.status, 404);
+      assert.strictEqual(r.headers['retry-after'], seconds, `${ms} ms`);
+      assert.strictEqual(json(r).retryable, true);
+    }
+    // the retry set's verdict counts as retryable: product.save retries not-found
+    const bySet = serve({ 'product.save': (i, ctx) => ctx.fail('not-found', {}, undefined, { retryAfterMs: 2500 }) });
+    assert.strictEqual((await bySet.server.dispatch(jsonReq('PUT', URL, SAVE, { 'idempotency-key': 'ra-set' }))).headers['retry-after'], '3');
+    // a failure that may not be retried carries no backoff hint, and replays without one
+    const final = serve({ 'product.save': (i, ctx) => ctx.fail('not-found', {}, undefined, { retryable: false, retryAfterMs: 1500 }) });
+    const first = await final.server.dispatch(jsonReq('PUT', URL, SAVE, { 'idempotency-key': 'ra-no' }));
+    assert.strictEqual(first.headers['retry-after'], undefined);
+    const replay = await final.server.dispatch(jsonReq('PUT', URL, SAVE, { 'idempotency-key': 'ra-no' }));
+    assert.strictEqual(replay.headers['idempotent-replayed'], 'true');
+    assert.strictEqual(replay.headers['retry-after'], undefined);
+    // a read without a key carries it too: the hint is the failure's, not the ledger's
+    const read = serve({ 'catalog.load': (i, ctx) => ctx.fail('stale', {}, undefined, { retryable: true, retryAfterMs: 1500 }) });
+    assert.strictEqual((await read.server.dispatch(req('GET', '/api/catalog'))).headers['retry-after'], '2');
+  });
+
+  it('ctx.fail options are closed: retryable and retryAfterMs, a non-negative integer of milliseconds — anything else is a handler fault', async () => {
+    for (const options of [{ retryAfterMs: -1 }, { retryAfterMs: 1.5 }, { retryAfterMs: '10' }, { retryAfterMs: Number.MAX_SAFE_INTEGER + 1 }, { wait: 1 }, 5]) {
+      /** @type {unknown[]} */
+      const seen = [];
+      const { server } = serve({ 'product.save': (i, ctx) => ctx.fail('not-found', {}, undefined, /** @type {any} */ (options)) },
+        { onError: (/** @type {unknown} */ err) => { seen.push(err); } });
+      const r = await server.dispatch(jsonReq('PUT', URL, SAVE, { 'idempotency-key': `bad-${JSON.stringify(options)}` }));
+      assert.strictEqual(r.status, 500, JSON.stringify(options));
+      assert.strictEqual(json(r).code, 'JC2008');
+      assert.ok(seen[0] instanceof TypeError, JSON.stringify(options));
+    }
+  });
+
   it('a server fault (JC2008/JC2010) releases the key: the next attempt runs again', async () => {
     let runs = 0;
     const { server, ledger } = serve({ 'product.save': () => { runs++; if (runs === 1) throw new Error('transient'); return { id: 1, name: 'x', price: 1 }; } });
-    assert.strictEqual((await server.dispatch(jsonReq('PUT', URL, SAVE, { 'idempotency-key': 'f' }))).status, 500);
+    const thrown = await server.dispatch(jsonReq('PUT', URL, SAVE, { 'idempotency-key': 'f' }));
+    assert.strictEqual(thrown.status, 500);
+    // the wire says the REQUEST may not be blindly retried (a server fault
+    // is not a declared transient condition), while the ledger frees the
+    // key: nothing was recorded, so a deliberate retry runs fresh
+    assert.strictEqual(json(thrown).retryable, false);
     const rec = ledger.lookup({ op: 'product.save', scope: '', key: 'f' });
     assert.strictEqual(rec?.status, 'failed');
     assert.strictEqual(rec?.retryable, true);

@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file The wire-error taxonomy: every `JC2001–JC2015` row answers its
+ * @file The wire-error taxonomy: every `JC2001–JC2016` row answers its
  * status and code with `requestId === x-jaren-trace`, `cache-control:
  * no-store` and the row's `retryable`; `details` follows
  * `policy.errors.details` (`none` / `paths` / `full`); and the four
@@ -15,10 +15,11 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 
 import { compileContract, CONTRACT_CODES, contractMessagesEn } from '@jarenjs/contract';
-import { serveHttp, HTTP_ERRORS } from '@jarenjs/contract/http';
+import { serveHttp, HTTP_ERRORS, readBody } from '@jarenjs/contract/http';
 import { createMemoryLedger } from '@jarenjs/contract/ledger';
 import { CLIENT_ERRORS } from '@jarenjs/contract/client';
-import { PORT_LOCAL_ERRORS } from '@jarenjs/contract/port';
+import { PORT_LOCAL_ERRORS, servePort, openPortClient } from '@jarenjs/contract/port';
+import { openLocalClient } from '@jarenjs/contract/local';
 import { STREAM_ERRORS } from '@jarenjs/contract/stream';
 import { nl, fr, es, pt, de, ja, ko, zhTW, ru, tr, ar } from '@jarenjs/locales';
 import { load, shopHandlers, req, jsonReq, json, parkedHandler } from './helpers.js';
@@ -194,6 +195,69 @@ describe('the wire-error taxonomy — one test per row', () => {
     assert.deepStrictEqual(json(await server.dispatch(req('GET', '/a', { 'x-rev': ['7'], 'x-list': ['a', 'b'] }))), { 'x-rev': 7, 'x-list': ['a', 'b'] });
     // a scalar header that fails coercion is a validation failure, not JC2015
     assert.strictEqual(json(await server.dispatch(req('GET', '/a', { 'x-rev': 'seven' }))).code, 'JC2006');
+  });
+
+  it('JC2016 400 an opaque body read as text (readBody) is not valid UTF-8', async () => {
+    const contract = compileContract({ $contract: '0.1', operations: {
+      'note.put': { kind: 'command', output: true, http: { method: 'PUT', path: '/notes', media: 'text/plain' } },
+    } });
+    const server = serveHttp(contract, { 'note.put': async (input, ctx) => {
+      await readBody(/** @type {any} */ (ctx).body, { as: 'text' });
+      return { status: 204 };
+    } });
+    const body = wireError(await server.dispatch(req('PUT', '/notes', { 'content-type': 'text/plain' }, new Uint8Array([0x61, 0xC3, 0x28]))), 'JC2016', 400, false);
+    assert.strictEqual(body.message, 'the request body of operation note.put is not valid UTF-8 text');
+  });
+});
+
+describe('declared messages — one opt-in host entry renders the handler\'s own message for every declared code, on every binding', () => {
+  // the trust rule (§7.3): a message never interpolates a request value,
+  // so the handler's own text reaches the wire only when the host says so
+  // — here with ONE catalog entry, no per-code entry
+  const catalog = { 'contract/handler-error': (/** @type {any} */ p) => p.message ?? `operation ${p.op} failed with ${p.code}` };
+  const handlers = {
+    ...shopHandlers(),
+    'catalog.load': (/** @type {any} */ input, /** @type {any} */ ctx) => ctx.fail('stale', { message: 'the catalog moved on' }),
+    'product.remove': (/** @type {any} */ input, /** @type {any} */ ctx) => ctx.fail('not-found', {}),
+  };
+  const STALE = 'the catalog moved on';
+  const NOT_FOUND = 'operation product.remove failed with not-found';
+
+  it('http', async () => {
+    const server = serveHttp(shop, handlers, { ledger: createMemoryLedger(), catalog });
+    const stale = json(await server.dispatch(req('GET', '/api/catalog')));
+    assert.deepStrictEqual([stale.code, stale.message], ['stale', STALE]);
+    const missing = json(await server.dispatch(jsonReq('POST', '/product.remove', { id: 1 })));
+    assert.deepStrictEqual([missing.code, missing.message], ['not-found', NOT_FOUND]);
+    // without the entry, the generic text — never the handler's
+    const plain = json(await serveHttp(shop, handlers, { ledger: createMemoryLedger() }).dispatch(req('GET', '/api/catalog')));
+    assert.strictEqual(plain.message, 'operation catalog.load failed with stale');
+  });
+
+  it('local', async () => {
+    const client = openLocalClient(shop, handlers, { catalog });
+    const stale = /** @type {any} */ (await client.invoke('catalog.load', {}));
+    assert.deepStrictEqual([stale.error.code, stale.error.message], ['stale', STALE]);
+    const missing = /** @type {any} */ (await client.invoke('product.remove', { id: 1 }));
+    assert.deepStrictEqual([missing.error.code, missing.error.message], ['not-found', NOT_FOUND]);
+  });
+
+  it('port', async () => {
+    const { port1, port2 } = new MessageChannel();
+    const server = servePort(shop, handlers, { channel: port1, catalog });
+    const client = openPortClient(shop, { channel: port2 });
+    try {
+      const stale = /** @type {any} */ (await client.invoke('catalog.load', {}));
+      assert.deepStrictEqual([stale.error.code, stale.error.message], ['stale', STALE]);
+      const missing = /** @type {any} */ (await client.invoke('product.remove', { id: 1 }));
+      assert.deepStrictEqual([missing.error.code, missing.error.message], ['not-found', NOT_FOUND]);
+    }
+    finally {
+      client.close();
+      server.close();
+      port1.close();
+      port2.close();
+    }
   });
 });
 

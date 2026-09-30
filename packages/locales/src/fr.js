@@ -138,6 +138,7 @@ export const fr = {
   'contract/body-too-large': "le corps de la requête de l'opération {op} dépasse sa limite de {limit} octets",
   'contract/unsupported-media': "l'opération {op} n'accepte que des corps {media}",
   'contract/malformed-json': "le corps de la requête de l'opération {op} n'est pas du JSON valide",
+  'contract/malformed-body': "le corps de la requête de l'opération {op} n'est pas un texte UTF-8 valide",
   'contract/invalid-input': "l'entrée de l'opération {op} est invalide",
   'contract/idempotency-key-required': "l'opération {op} exige un en-tête Idempotency-Key",
   'contract/handler-failed': "l'opération {op} a échoué",
