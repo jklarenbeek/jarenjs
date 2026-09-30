@@ -468,6 +468,29 @@ export function createDialect(spec) {
       return `DELETE FROM ${q(table)} WHERE ${q(keyColumn)} = ${p(1, 'key')}`;
     },
     /**
+     * Every spelling under which a TEXT key column may hold one NUMERIC
+     * key, with each row's document: its canonical JSON text (bound
+     * first) and the text an earlier write stored by binding the number
+     * as a floating-point value (bound second, spelled by
+     * `legacyNumericKeyText` — `'7.0'` for 7 on SQLite). Present only on
+     * a dialect whose files can hold that second spelling.
+     * @param {{ table: string, keyColumn: string, docColumn: string }} s
+     */
+    keySpellings({ table, keyColumn, docColumn }) {
+      return `SELECT ${q(keyColumn)} AS ${q('key')}, ${spec.jsonText(q(docColumn))} AS ${q('doc')} `
+        + `FROM ${q(table)} WHERE ${q(keyColumn)} IN `
+        + `(${p(1, 'key')}, ${spec.legacyNumericKeyText(p(2, 'number'))})`;
+    },
+    /**
+     * Move one row to another key spelling (the convergence of a legacy
+     * numeric key onto its canonical text).
+     * @param {{ table: string, keyColumn: string }} s
+     */
+    rekey({ table, keyColumn }) {
+      return `UPDATE ${q(table)} SET ${q(keyColumn)} = ${p(1, 'key')} `
+        + `WHERE ${q(keyColumn)} = ${p(2, 'from')}`;
+    },
+    /**
      * The documents of a list of row identities, in identity order —
      * the fetch of a k-nearest plan's candidates after the engine's
      * cut. `count` placeholders; a caller with fewer identities binds
@@ -706,6 +729,12 @@ export function createDialect(spec) {
     /** Whether one narrative line reports a seek through the named index. */
     usesIndex: spec.usesIndex,
     excludedRef: spec.excludedRef,
+    /** The SQL spelling of the text a NUMBER bound as a floating-point
+     * value takes in a TEXT column — SQLite's `'7.0'` for 7, which is
+     * what node:sqlite stored before numeric keys were bound as their
+     * canonical text — or `null` on a dialect whose files cannot hold
+     * such a spelling. */
+    legacyNumericKeyText: spec.legacyNumericKeyText ?? null,
     epochFromRfc3339: spec.epochFromRfc3339,
     tx: Object.freeze({ ...spec.tx }),
     pragma: Object.freeze({ ...spec.pragma }),

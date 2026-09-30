@@ -404,6 +404,12 @@ export const sqliteDialect = createDialect({
   usesIndex: (line, index) =>
     line.includes(`USING INDEX ${index}`) || line.includes(`USING COVERING INDEX ${index}`),
   excludedRef: (columnSql) => `excluded.${columnSql}`,
+  // node:sqlite binds a JavaScript number as a REAL, which a TEXT column
+  // stores as SQLite's REAL-to-TEXT spelling ('7.0' for 7); every numeric
+  // key is now bound as its canonical JSON text, and this is how a read
+  // still finds a row an earlier write stored the old way — the CAST
+  // chain spells it identically whatever the driver bound the number as
+  legacyNumericKeyText: (ref) => `CAST(CAST(${ref} AS REAL) AS TEXT)`,
   tx: {
     begin: 'BEGIN',
     beginImmediate: 'BEGIN IMMEDIATE',

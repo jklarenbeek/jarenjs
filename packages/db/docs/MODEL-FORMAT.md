@@ -1074,8 +1074,47 @@ primitives only):
 
 A caller-keyed document whose pointer resolves to nothing or to a
 non-scalar is `JD2002`; so is an explicit key argument that is not a
-string or a number. For allocated identities, `put(doc, key)` updates
-a known document and `put(doc)` allocates.
+string or a number, and a number that is not finite (NaN and ±Infinity
+have no key spelling). For allocated identities, `put(doc, key)` updates
+a known document and `put(doc)` allocates. On a caller-keyed collection
+the document's key is the key: `put(doc, key)` whose `key` names another
+key than the document carries is `JD2002` — it used to write under the
+document's key and answer that, while journal capture read its
+before-image under the one passed.
+
+**A key names one row, in one spelling.** A number reaching a TEXT key
+column — an untyped key schema, `["string", "integer"]`, or a typed
+`string` on an unvalidated store — is bound as its canonical JSON text
+(`7` as `'7'`, `1.5` as `'1.5'`) on every driver, in every read and
+write, and so in the path both capture modes record. It used to be the
+driver's choice: node:sqlite bound a number as a REAL, which a TEXT
+column stores as `'7.0'`, while Bun stored `'7'` — a file both runtimes
+wrote could hold one key as two rows, and an index-only migration was
+refused as "a transform changed the key". A file an earlier node write
+left still works: a read of a numeric key matches either spelling, and a
+write first moves a legacy row onto the canonical text, in the same
+transaction, so the file converges as it is written. A key the file
+already holds under BOTH spellings is refused on write — `JD2001`,
+naming both rows — rather than merged in silence: keep the row you want,
+delete the other. Session capture reports that one-time move as what it
+is (a `remove` of the old path beside the write's `add`); journal
+capture reports the write.
+
+To converge a whole file at once, run this statement once per collection
+whose documents carry numeric keys — `<table>` is the collection's name
+and `<member>` its key pointer as a JSON path (`/id` is `$.id`):
+
+```sql
+UPDATE "<table>" SET "key" = CAST(json_extract("doc", '<member>') AS TEXT)
+WHERE json_type("doc", '<member>') = 'integer'
+  AND "key" <> CAST(json_extract("doc", '<member>') AS TEXT);
+```
+
+It rewrites only rows whose document's key member is a JSON integer (a
+string key such as `'1.0'` is left alone) and takes the canonical text
+from the document itself. A duplicate makes it refuse as a whole (the
+primary key rejects the moved row and nothing changes), and a second run
+changes nothing.
 
 ## 7. Error codes
 
@@ -1118,8 +1157,8 @@ error.
 | `JD0051` | the demanded live mode is unavailable |
 | `JD0052` | the live-query bound was reached |
 | `JD0053` | the live event-time declaration is invalid |
-| `JD2001` | insert found the key already present |
-| `JD2002` | a usable key could not be resolved for the write |
+| `JD2001` | insert found the key already present, or the key is stored under two spellings |
+| `JD2002` | a usable key could not be resolved for the write, or an explicit key disagrees with the document |
 | `JD2003` | the write failed schema validation |
 | `JD2004` | an undeclared collection was requested |
 | `JD2005` | a database operation failed |

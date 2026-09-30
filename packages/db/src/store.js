@@ -28,6 +28,7 @@ import { parseJSONPointer } from '@jarenjs/json/pointer';
 import { DbCompileError, DbRuntimeError, wrapDriverError, isDriverError, classifyDriverError } from './errors.js';
 import { chain, toPromise, isThenable, attempt, abortReason } from './driver.js';
 import { isPlainOptions, refuseUnknownMembers } from './options.js';
+import { canonicalKeyText } from './key-text.js';
 import { planCollection, planEntity, planJoinTable, verifyShape } from './ddl.js';
 import { translatePatch } from './patch-sql.js';
 import { createQueryEngine, createQueryState, createEntityQueryEngine, createLoadEngine } from './query.js';
@@ -397,6 +398,11 @@ function extractKey(doc, keySegments, pointer, collection, docPath) {
       `the document carries no scalar key at the declared pointer '${pointer}'`,
       { docPath, collection });
   }
+  if (typeof node === 'number' && !Number.isFinite(node)) {
+    throw new DbRuntimeError('JD2002',
+      `the document's key at '${pointer}' is ${node} — a numeric key must be finite: `
+      + 'NaN and ±Infinity have no key spelling', { docPath, collection });
+  }
   return node;
 }
 
@@ -410,6 +416,11 @@ function requireKey(key, collection, docPath) {
   if (typeof key !== 'string' && typeof key !== 'number') {
     throw new DbRuntimeError('JD2002',
       'a key must be a string or a number', { docPath, collection });
+  }
+  if (typeof key === 'number' && !Number.isFinite(key)) {
+    throw new DbRuntimeError('JD2002',
+      `a numeric key must be finite, not ${key} — NaN and ±Infinity have no key spelling`,
+      { docPath, collection });
   }
   return key;
 }
@@ -683,8 +694,21 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
 
   const resolveWriteKey = (doc, explicitKey) => {
     if (collection.keySegments !== null) {
-      return extractKey(doc, collection.keySegments, collection.key,
+      const own = extractKey(doc, collection.keySegments, collection.key,
         collection.name, collection.docPath);
+      // a keyed collection writes under the document's OWN key: an
+      // explicit one that disagrees used to be ignored in silence (the
+      // write landed under the document's key, while journal capture read
+      // its before-image under the explicit one)
+      if (explicitKey !== undefined && canonicalKeyText(
+        requireKey(explicitKey, collection.name, collection.docPath)) !== canonicalKeyText(own)) {
+        throw new DbRuntimeError('JD2002',
+          `put: the key ${JSON.stringify(explicitKey)} disagrees with the document's key `
+          + `${JSON.stringify(own)} at '${collection.key}' — a keyed collection writes under the `
+          + "document's own key; pass none, or the same one",
+          { docPath: collection.docPath, collection: collection.name, key: explicitKey });
+      }
+      return own;
     }
     if (explicitKey !== undefined)
       return requireKey(explicitKey, collection.name, collection.docPath);
@@ -692,11 +716,54 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
     return null; // integer: the database allocates
   };
 
+  // ONE spelling per numeric key over a TEXT key column (MODEL-FORMAT
+  // §5): bound as its canonical JSON text on every driver. On a dialect
+  // whose files may hold the spelling an earlier write stored for a
+  // number (SQLite: node:sqlite bound it as a REAL and stored '7.0'), a
+  // read finds either spelling and a write first moves a legacy row onto
+  // the canonical text, so the file converges as it is written.
+  const textKey = plan.keyType === dialect.typeFor('string', 'key');
+  const bindKey = (/** @type {string | number} */ key) => (textKey ? canonicalKeyText(key) : key);
+  const spelledTwice = (/** @type {unknown} */ key) => textKey && typeof key === 'number'
+    && dialect.legacyNumericKeyText !== null;
+  /** Every stored row of a numeric key, under either spelling. */
+  const spellingsOf = (/** @type {number} */ key) =>
+    chain(prepared('keySpellings', dialect.dml.keySpellings(shape)), (statement) =>
+      statement.all([canonicalKeyText(key), key]));
+
   const runWrite = (statementName, sql, params, key, reads) => {
     return chain(prepared(statementName, sql), (statement) =>
       attempt(() => (reads ? statement.get(params) : statement.run(params)),
         (error) => wrapWriteError(error, plan, collection.name, collection.docPath, key)));
   };
+
+  /**
+   * Before a write of a numeric key that may be spelled twice: refuse a
+   * key the collection already holds under BOTH spellings (`JD2001`,
+   * naming them — a duplicate an earlier cross-runtime write left is
+   * never merged in silence), and move a legacy-spelled row onto the
+   * canonical text, so the canonical statement that follows addresses it.
+   * @param {number} key
+   */
+  const converge = (key) => {
+    const canonical = canonicalKeyText(key);
+    return chain(spellingsOf(key), (rows) => {
+      const spellings = [...new Set(rows.map((/** @type {any} */ row) => row.key))];
+      if (spellings.length > 1) {
+        throw new DbRuntimeError('JD2001',
+          `collection '${collection.name}' holds key ${canonical} under two spellings `
+          + `(${spellings.map((spelling) => `'${spelling}'`).join(' and ')}) — a duplicate an `
+          + 'earlier write left; keep one row, delete the other (MODEL-FORMAT §5), and write again',
+          { docPath: collection.docPath, collection: collection.name, key });
+      }
+      if (spellings.length === 0 || spellings[0] === canonical) return null;
+      return runWrite('rekey', dialect.dml.rekey(shape), [canonical, spellings[0]], key, false);
+    });
+  };
+  /** A write addressed by `key`: converged first, atomically with it,
+   * when the key may be spelled twice; as it is otherwise. */
+  const keyedWrite = (/** @type {string | number} */ key, /** @type {() => any} */ write) =>
+    (spelledTwice(key) ? connection.transaction(() => chain(converge(/** @type {number} */ (key)), write)) : write());
 
   // RETURNING is decoded after the server has inserted the row. Keep
   // decoding in the same transaction so an unrepresentable allocated
@@ -719,32 +786,39 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
       requireKey(key, collection.name, collection.docPath);
       // a point read meets the same failures a statement of the query
       // engine does (a corrupt page, a locked file): classified, never raw
-      return attempt(() => chain(prepared('get', dialect.dml.get(shape)), (statement) =>
-        chain(statement.get([key]),
-          (row) => (row === undefined ? undefined : JSON.parse(row.doc)))),
+      return attempt(() => (spelledTwice(key)
+        // either spelling; a key held under both (a duplicate a write
+        // refuses) reads its canonical row
+        ? chain(spellingsOf(/** @type {number} */ (key)), (rows) => {
+          const row = rows.find((/** @type {any} */ r) => r.key === canonicalKeyText(key)) ?? rows[0];
+          return row === undefined ? undefined : JSON.parse(row.doc);
+        })
+        : chain(prepared('get', dialect.dml.get(shape)), (statement) =>
+          chain(statement.get([bindKey(key)]),
+            (row) => (row === undefined ? undefined : JSON.parse(row.doc))))),
       (error) => wrapDriverError(error, { docPath: collection.docPath, collection: collection.name, key }));
     },
     insert(doc) {
       checkValid(doc);
       const key = resolveWriteKey(doc, undefined);
       if (key === null) return insertAllocated(doc);
-      return chain(
+      return keyedWrite(key, () => chain(
         runWrite('insert', dialect.dml.insert(shape),
-          [key, JSON.stringify(doc), ...derivedFor(doc)], key, false),
-        () => key);
+          [bindKey(key), JSON.stringify(doc), ...derivedFor(doc)], key, false),
+        () => key));
     },
     put(doc, explicitKey) {
       checkValid(doc);
       const key = resolveWriteKey(doc, explicitKey);
       if (key === null) return insertAllocated(doc);
-      return chain(
+      return keyedWrite(key, () => chain(
         runWrite('upsert', dialect.dml.upsert(shape),
-          [key, JSON.stringify(doc), ...derivedFor(doc)], key, false),
-        () => key);
+          [bindKey(key), JSON.stringify(doc), ...derivedFor(doc)], key, false),
+        () => key));
     },
     patch(key, ops) {
       requireKey(key, collection.name, collection.docPath);
-      return chain(core.get(key), (current) => {
+      return keyedWrite(key, () => chain(core.get(key), (current) => {
         if (current === undefined) {
           throw new DbRuntimeError('JD2006',
             `no document to patch under key '${String(key)}'`,
@@ -759,7 +833,7 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
           return chain(
             runWrite('patchFallback',
               dialect.dml.updateDoc(shape, dialect.jsonEncode(dialect.parameterRef(1, 'doc')), 2),
-              [JSON.stringify(next), ...derivedFor(next), key], key, false),
+              [JSON.stringify(next), ...derivedFor(next), bindKey(key)], key, false),
             () => next);
         }
         stats.patchTranslated++;
@@ -767,16 +841,16 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
           dialect.quoteIdentifier(plan.docColumn), 1);
         const sql = dialect.dml.updateDoc(shape, expression, params.length + 1);
         return chain(prepared(`patch:${sql}`, sql), (statement) =>
-          chain(attempt(() => statement.run([...params, ...derivedFor(next), key]),
+          chain(attempt(() => statement.run([...params, ...derivedFor(next), bindKey(key)]),
             (error) => wrapWriteError(error, plan, collection.name, collection.docPath, key)),
           () => next));
-      });
+      }));
     },
     delete(key) {
       requireKey(key, collection.name, collection.docPath);
-      return chain(
-        runWrite('delete', dialect.dml.del(shape), [key], key, false),
-        (result) => Number(result?.changes ?? 0) > 0);
+      return keyedWrite(key, () => chain(
+        runWrite('delete', dialect.dml.del(shape), [bindKey(key)], key, false),
+        (result) => Number(result?.changes ?? 0) > 0));
     },
   };
   return core;

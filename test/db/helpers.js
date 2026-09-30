@@ -325,6 +325,7 @@ export function fullDoubleDialect(createDialect) {
     isFullScan: (line, tables) => tables.some((table) => line === `READALL ${table}`),
     usesIndex: (line, index) => line.includes(`VIA ${index}`),
     excludedRef: (column) => `NEW.${column}`,
+    legacyNumericKeyText: (ref) => `LEGACYTEXT(${ref})`,
     tx: {
       begin: 'BEGIN', beginImmediate: 'GRAB', commit: 'COMMIT', rollback: 'ROLLBACK', deferForeignKeys: 'DEFER CHECKS',
       savepoint: (n) => `MARK ${quoteIdentifier(n)}`,

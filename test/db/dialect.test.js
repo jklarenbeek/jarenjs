@@ -80,6 +80,13 @@ describe('SQLite dialect goldens', () => {
       'SELECT json("doc") AS "doc" FROM "users" WHERE "key" = ?');
     assert.strictEqual(sqliteDialect.dml.del(SHAPE),
       'DELETE FROM "users" WHERE "key" = ?');
+    // a numeric key over a TEXT key column: its canonical text, and the
+    // text an earlier write stored by binding the number as a REAL
+    assert.strictEqual(sqliteDialect.dml.keySpellings(SHAPE),
+      'SELECT "key" AS "key", json("doc") AS "doc" FROM "users" '
+      + 'WHERE "key" IN (?, CAST(CAST(? AS REAL) AS TEXT))');
+    assert.strictEqual(sqliteDialect.dml.rekey(SHAPE),
+      'UPDATE "users" SET "key" = ? WHERE "key" = ?');
     // the by-identities fetch of a k-nearest plan's candidates: a
     // membership test over the row identity, in identity order
     assert.strictEqual(sqliteDialect.dml.selectByIdentities(SHAPE, 3),

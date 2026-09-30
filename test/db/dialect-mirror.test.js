@@ -180,6 +180,8 @@ function corpusOf(dialect) {
   out['dml.upsert'] = dialect.dml.upsert(shapeWithStored);
   out['dml.get'] = dialect.dml.get(physical);
   out['dml.del'] = dialect.dml.del(physical);
+  out['dml.keySpellings'] = dialect.dml.keySpellings(physical);
+  out['dml.rekey'] = dialect.dml.rekey(physical);
   out['dml.selectByIdentities'] = dialect.dml.selectByIdentities(physical, 2);
   out['dml.updateDoc'] = dialect.dml.updateDoc(shapeWithStored,
     dialect.jsonSet(dialect.quoteIdentifier('doc'), dialect.jsonPathText([{ name: 'tag' }]),
@@ -270,6 +272,7 @@ const MIRROR_SPELLINGS = [
   [/\bCELL\(|\bBOX_/, 'the mirror derived-column functions'],
   [/\bAMONG\b/, 'the mirror identity membership'],
   [/\bLADDER\(/, 'the mirror bucket ladder'],
+  [/\bLEGACYTEXT\(/, 'the mirror legacy numeric key spelling'],
   [/\bTALLY\(|\bROLLUP_/, 'the mirror grouped aggregates'],
 ];
 

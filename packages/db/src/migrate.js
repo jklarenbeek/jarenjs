@@ -30,6 +30,7 @@ import { compileJsonQuery } from '@jarenjs/json/query';
 import { compileJsltStylesheet } from '@jarenjs/json/jslt';
 
 import { DbCompileError } from './errors.js';
+import { storedKeyMatches } from './key-text.js';
 import { chain } from './driver.js';
 import { normalizeModel } from './store.js';
 import { planQuery } from './plan.js';
@@ -1453,7 +1454,10 @@ function validateTargetState(connection, model, options) {
           if (collection.keySegments !== null) {
             let node = doc;
             for (const segment of collection.keySegments) node = node?.[segment.name];
-            if (node !== row.k) {
+            // the stored key text names the document's key: equal, its
+            // canonical text, or the spelling an earlier node write stored
+            // for a number ('1.0') — never "a transform changed the key"
+            if (!storedKeyMatches(node, row.k)) {
               throw refuse('JD0023',
                 `collection '${collection.name}': a transform changed the key member `
                 + `of '${String(row.k)}' — key changes are not supported in ${MIGRATION_VERSION}`);
