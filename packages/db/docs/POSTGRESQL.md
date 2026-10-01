@@ -21,6 +21,7 @@ spatial/vector execution capability to this release.
 | Session ownership | Exact settings restored, missing/inaccessible schema refused, cached-plan failure preserved inside transactions: [session tests](../../../test/db/postgres-session.test.js) | Host provisions schema, roles, TLS and session-affine pool; a Store owns a client until close |
 | Bounded execution | Native cursors, finite admission, server deadlines, cancellation settlement: [cursor tests](../../../test/db/postgres-cursor.test.js) | A normalized row/frame limit cannot prevent allocation inside an injected client; buffered compatibility declares weaker bounds |
 | Retry, hold limit, lost sessions | Whole-transaction retry after 40001, a Store-level hold limit that rolls back without ending the session, a lost session coded JD2087 instead of an uncaught exception: [retry](../../../test/db/transaction-retry.test.js), [hold](../../../test/db/transaction-hold.test.js) and [loss](../../../test/db/connection-loss.test.js) tests | Retry is explicit and never follows a connection loss; the server-side idle/transaction timeouts stay unset because they end the session |
+| Several sessions per Store | `sessions: N` runs independent transactions and reads at once, each on a session of its own; conflicts settle in the database; capture, jobs and live queries stay exact: [session tests](../../../test/db/postgres-sessions.test.js) | The store's own unit of work runs on the first session, one call at a time; captured writes stay ordered by the capture lock; replication runs on one session |
 | Writer lock, isolation, owner | `mode: 'immediate'` loses no update between two Stores, the three isolation levels run and are reported, a lock wait past `lock_timeout` is busy and retryable, one owner per schema: [isolation](../../../test/db/postgres-isolation.test.js) and [owner](../../../test/db/postgres-owner.test.js) tests | The writer lock orders immediate transactions only; plain writes lock rows. The owner lock is cooperative and names no holder |
 | Relational statements through the Store | `store.relational` and `tx.relational` over the native cursors, the write rules shared with trusted SQL, a failed write inside a transaction contained by its savepoint: [store-bound tests](../../../test/db/relational-store.test.js) | A root native cursor holds the session until released, so other root calls wait for it; `lastInsertRowid` is never reported |
 | Physical tables and catalog | Explicit codecs, exact bigint/decimal strings, date/time distinctions, declared layout and rich loss/disposition inventory: [physical tests](../../../test/db/postgres-physical.test.js) | Arbitrary catalog objects are inventoried, not automatically translated into model intent |
@@ -98,6 +99,27 @@ session's search path and returns it to its pool, which a session lock
 would otherwise outlive — or by the server when the session ends; a
 session whose release could not run is destroyed rather than pooled. An
 adopted Store takes it too: it needs no table.
+
+## Several sessions per Store
+
+A Store holds one session unless it is opened with `sessions: N`
+([MODEL-FORMAT §5.1](MODEL-FORMAT.md#51-transaction-ownership)). On one session
+every root call and transaction waits its turn behind the one in progress, so a
+server answering many users from one process runs their commits one after
+another. With N sessions each root call or transaction checks out a session of
+its own and the server works on N of them together: conflicts between them are
+the database's (a serialization failure or deadlock is busy and retryable, and
+immediate transactions take the writer lock in turn). The store's own unit of
+work stays on the first session, one call at a time, every transaction has its
+own, and a paused cursor holds one session rather than the store. Capture's
+allocation lock still orders captured commits, so captured writes gain no
+concurrency; reads and uncaptured writes do. Replication runs on one session.
+
+The committed [measurement](../../../benchmark/postgres-sessions-result.json)
+compares one Store on N sessions with N Stores of one session each:
+
+<!--fact:postgres.sessions-->
+<!--/fact-->
 
 ## Select the backend at build time
 

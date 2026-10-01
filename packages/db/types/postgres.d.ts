@@ -60,6 +60,12 @@ export interface PostgresAdmissionMetrics {
 export interface PostgresDriver extends Driver {
   open(path?: string, options?: { queueTimeout?: number; signal?: AbortSignal }): Promise<PostgresConnection>;
   metrics(): PostgresAdmissionMetrics;
+  /** The sessions this driver admits at once: the most a Store opened with
+   * `sessions` may hold. */
+  readonly maxConnections: number;
+  /** The async context a Store on several sessions carries each root
+   * call's transaction state in (Node's and Bun's `AsyncLocalStorage`). */
+  contextStorage(): Promise<unknown>;
 }
 export interface PostgresStatement {
   get(params?: readonly unknown[]): Promise<Record<string, unknown> | undefined>;

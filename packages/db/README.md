@@ -869,8 +869,11 @@ const store = await openStore(model, {
 The client is INJECTED. `@jarenjs/db` depends on nothing outside
 `@jarenjs/*` and imports no PostgreSQL package; anything with
 `connect()` answering `{ query(text, values), release?() }` will do, and
-a `pg.Pool` is one as it stands. One client is acquired at open, held
-for the store's life (a connection owns one savepoint stack) and
+a `pg.Pool` is one as it stands. One client is acquired at open — or N
+with `sessions: N`, each running one root call or transaction at a time,
+so independent transactions overlap and the database settles them
+([MODEL-FORMAT §5.1](docs/MODEL-FORMAT.md#51-transaction-ownership)) —
+held for the store's life (a connection owns one savepoint stack) and
 released exactly once at `close()`. The schema must exist and grant USAGE.
 The original session search path is restored before reuse; failed cleanup
 discards the client. See [PostgreSQL session ownership](docs/HOSTS.md#postgresql-sessions).

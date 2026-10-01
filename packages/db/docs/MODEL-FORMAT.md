@@ -880,6 +880,30 @@ So a **top-level transaction owns its connection until it settles**, and
 an overlapping one waits its turn. Two concurrent request handlers
 sharing a store both commit, and both report success.
 
+**On PostgreSQL a store can run on several sessions.** `openStore(model,
+{ sessions: N })` — `@jarenjs/db/postgres` only, from 1 to the driver's
+`maxConnections`, without replication; anything else is `JD0009` before
+anything opens — holds N sessions, each a connection with its own
+savepoint stack. A root call or a root transaction checks out a free
+session for its extent, first come first served under `queueTimeout`
+(`JD0012`; `transactions: 'strict'` refuses when none is free), so
+independent transactions overlap in time and the database settles what
+they do to each other: a serialization failure or a deadlock is a busy,
+retryable refusal that `retry` absorbs, and `mode: 'immediate'`
+transactions take the writer lock in turn. A call made inside a
+transaction's synchronous extent stays on its session, as on one; a
+transaction's handle used from another transaction's flow is `JD2070`, and
+a hold limit rolls back its own transaction only. Every transaction has a
+unit of work of its own (as `unitOfWork: 'own'`), and its trusted SQL
+invalidates only that one. The store's own unit of work — root entity
+handles, tracked reads, `saveChanges`, root relational writes — is served
+on the first session, one call at a time; ordinary calls leave that
+session free while another one is. A paused root cursor holds one
+session, never the store. Capture's journal belongs to each transaction,
+and its allocation lock still orders captured commits; jobs and live
+queries need nothing more. `capabilities.connections` reports N, and the
+default — one session — is everything above, unchanged.
+
 **The store the callback receives is the transaction.** `tx.collection`,
 `tx.entity`, `tx.sync`, `tx.jobs` and `tx.saveChanges()` run as the
 transaction's owner, and `tx.transaction()` nests through its savepoint:

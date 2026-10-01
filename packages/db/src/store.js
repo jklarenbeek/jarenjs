@@ -28,7 +28,8 @@ import { parseJSONPointer, compileJSONPointer, JSONPOINTER_NOTHING } from '@jare
 import { equalsJson } from '@jarenjs/core/object';
 
 import { DbCompileError, DbRuntimeError, wrapDriverError, isDriverError, classifyDriverError } from './errors.js';
-import { chain, toPromise, isThenable, attempt, abortReason } from './driver.js';
+import { chain, toPromise, isThenable, attempt, abortReason, DEFAULT_QUEUE_TIMEOUT } from './driver.js';
+import { createSessionRouter } from './sessions.js';
 import { isPlainOptions, refuseUnknownMembers } from './options.js';
 import { canonicalKeyText } from './key-text.js';
 import { planCollection, planEntity, planJoinTable, verifyShape } from './ddl.js';
@@ -1172,7 +1173,7 @@ const OPEN_OPTIONS = new Set([
   'capture', 'replication', 'jobs', 'live', 'adopt', 'transactions',
   'expressions', 'operators', 'functions', 'extensions',
   'profile', 'statementCacheBound', 'zoneProvider', 'runtime', 'holdTimeoutMs',
-  'isolation', 'owner', 'reads',
+  'isolation', 'owner', 'reads', 'sessions',
 ]);
 
 /**
@@ -1223,6 +1224,8 @@ function refuseMalformedOpenOptions(options) {
     throw refuse('transactions', "is 'wait' or 'strict'");
   if (options.reads !== undefined && options.reads !== 'serialized' && options.reads !== 'parallel')
     throw refuse('reads', "is 'serialized' or 'parallel'");
+  if (options.sessions !== undefined && (!Number.isInteger(options.sessions) || options.sessions < 1))
+    throw refuse('sessions', 'is a whole number of sessions from 1');
   const { holdTimeoutMs } = options;
   if (holdTimeoutMs !== undefined
     && (!Number.isInteger(holdTimeoutMs) || holdTimeoutMs < 1 || holdTimeoutMs > TIMER_MAX))
@@ -1230,6 +1233,26 @@ function refuseMalformedOpenOptions(options) {
   if (options.isolation !== undefined && !ISOLATION_LEVELS.includes(options.isolation))
     throw refuse('isolation', "is 'read committed', 'repeatable read' or 'serializable'");
   readOwnerOption(options);
+}
+
+/**
+ * `sessions` is how many PostgreSQL sessions a Store runs its root calls and
+ * transactions on: a driver that hands out several, up to what it admits.
+ * Every refusal here is `JD0009`, before anything opens.
+ * @param {Record<string, any>} options
+ */
+function refuseSessionsHere(options) {
+  if (options.sessions === undefined) return;
+  const driver = options.driver;
+  if (typeof driver.contextStorage !== 'function')
+    throw new DbCompileError('JD0009', "openStore option 'sessions' needs a driver that runs several sessions "
+      + `(@jarenjs/db/postgres); this store's driver '${driver.name}' runs one connection`);
+  if (options.sessions > driver.maxConnections)
+    throw new DbCompileError('JD0009', "openStore option 'sessions' is at most the driver's maxConnections "
+      + `(${driver.maxConnections}), not ${options.sessions}`);
+  if (options.sessions > 1 && options.replication !== undefined)
+    throw new DbCompileError('JD0009', "openStore option 'sessions' above 1 runs no replication: its pages, "
+      + 'snapshots and applies are qualified on one session');
 }
 
 /**
@@ -1575,6 +1598,7 @@ export function openStore(model, options) {
   try {
     // first: the model checks below read these switches
     refuseMalformedOpenOptions(options);
+    refuseSessionsHere(options);
     ownerOption = readOwnerOption(options);
     collections = normalizeModel(model, options.expressions);
     const compiled = compileEntityModel(model);
@@ -1640,10 +1664,27 @@ export function openStore(model, options) {
     return wrapped;
   };
 
+  const openOne = () => attempt(() => options.driver.open(path,
+    { timeout: busyTimeout, readOnly, queueTimeout: options.queueTimeout }),
+  (failure) => (isDriverError(failure) ? openFailure(failure) : failure));
+  /**
+   * A store on several sessions: the driver's own connections, opened one
+   * after another, behind one router (sessions.js). A refused open closes
+   * what it had opened.
+   * @returns {Promise<any>}
+   */
+  const openSessions = () => Promise.resolve(options.driver.contextStorage()).then((storage) => {
+    /** @type {any[]} */
+    const sessions = [];
+    const next = () => (sessions.length === options.sessions
+      ? createSessionRouter({ sessions, storage, queueTimeout: options.queueTimeout ?? DEFAULT_QUEUE_TIMEOUT })
+      : chain(openOne(), (connection) => { sessions.push(connection); return next(); }));
+    return toPromise(next()).catch((error) =>
+      Promise.allSettled(sessions.map((connection) => connection.close())).then(() => { throw error; }));
+  });
+
   return toPromise(chain(
-    attempt(() => options.driver.open(path,
-      { timeout: busyTimeout, readOnly, queueTimeout: options.queueTimeout }),
-    (failure) => (isDriverError(failure) ? openFailure(failure) : failure)),
+    (options.sessions ?? 1) > 1 ? openSessions() : openOne(),
     (opened) => {
       /**
        * The owner lease (MODEL-FORMAT §5.1) once the open sequence took it,
@@ -1672,13 +1713,24 @@ export function openStore(model, options) {
       };
 
       /**
-       * The transaction SCOPE that currently owns the driver connection,
-       * or `null`. A top-level `store.transaction()` sets it for the
-       * callback's whole lifetime so the collection/entity cores below
-       * reach the open transaction instead of queueing behind it.
-       * @type {any}
+       * The transaction state of the CALLING context, as one object: the
+       * slots `scope`, `currentScope`, `currentRoot`, `settlements` and
+       * `work` described below. A store on one session has one owner at a
+       * time, so the slots are the store's own; a store on several sessions
+       * (`sessions`) gives each root call a context of its own, so two
+       * transactions on two sessions never share one (see `openSessions`).
+       * @type {{ scope: any, currentScope: any, currentRoot: any, settlements: any[] | null, work: any }}
        */
-      let scope = null;
+      const rootContext = { scope: null, currentScope: null, currentRoot: null, settlements: null, work: null };
+      /** @type {() => typeof rootContext} */
+      let ctx = () => rootContext;
+
+      /**
+       * `scope`: the transaction SCOPE that currently owns the driver
+       * connection, or `null`. A top-level `store.transaction()` sets it for
+       * the callback's whole lifetime so the collection/entity cores below
+       * reach the open transaction instead of queueing behind it.
+       */
 
       /**
        * Whether the calling async context is inside a PARALLEL read (`reads:
@@ -1700,7 +1752,7 @@ export function openStore(model, options) {
       };
 
       /**
-       * The IDENTITY of the scope that is current right now, or `null`.
+       * `currentScope`: the IDENTITY of the scope that is current right now, or `null`.
        * One fresh identity per `withScope` invocation: it is what every
        * transaction view is pinned to (§5.1's exact-scope rule), and the
        * comparison `currentScope === identity` is the whole lifetime
@@ -1708,12 +1760,10 @@ export function openStore(model, options) {
        * or been crossed by an inner scope, and refuses `JD2070` before
        * reading tracker state or issuing a statement. It must never fall
        * through to the root and never follow a newer scope.
-       * @type {any}
        */
-      let currentScope = null;
 
       /**
-       * The ROOT record of the open top-level transaction, or `null` while
+       * `currentRoot`: the ROOT record of the open top-level transaction, or `null` while
        * none is open: its `mode` (a nested transaction reads it to refuse
        * a `mode: 'immediate'` its savepoint could not honour, `JD0014`),
        * its `attempt` (`tx.attempt`), the isolation level it runs at
@@ -1721,13 +1771,9 @@ export function openStore(model, options) {
        * run at the session's), and its hold limit's state — `hold`
        * (ms, or `undefined`), `expired` (set when the limit passed: every
        * handle of the transaction then refuses `JD2098`), and the handle
-       * operations in flight, which a hold waits for before it rolls back.
-       * @type {{ mode: 'deferred' | 'immediate', attempt: number, isolation: string | undefined,
-       *   hold: number | undefined,
-       *   expired: { holdTimeoutMs: number, elapsedMs: number } | null, inFlight: number,
-       *   onIdle: (() => void) | null } | null}
+       * operations in flight, which a hold waits for before it rolls back:
+       * `{ mode, attempt, isolation, hold, expired, inFlight, onIdle }`.
        */
-      let currentRoot = null;
       /** A scope identity's root record (a nested scope shares its root's):
        * carried ON the identity, which lives exactly as long as the scope's
        * handles do — a map from short-lived keys cost every transaction a
@@ -1768,7 +1814,7 @@ export function openStore(model, options) {
       const heldBodies = new WeakMap();
 
       /**
-       * What the OPEN transaction owes its in-memory callers once the
+       * `settlements`: what the OPEN transaction owes its in-memory callers once the
        * database has agreed, in registration order, or `null` when no
        * transaction is open. One list, owned by the outermost scope: a
        * nested savepoint remembers only where it started, so rolling it
@@ -1778,22 +1824,26 @@ export function openStore(model, options) {
        * It exists because an in-memory claim about what the database
        * holds may not become true before the database does — the unit of
        * work's snapshots are such a claim, and a savepoint release is not
-       * a commit.
-       * @type {{ commit: () => void, rollback: () => void }[] | null}
+       * a commit. Each entry is `{ commit?, rollback? }`.
        */
-      let settlements = null;
 
       /**
-       * The unit of work the OPEN scope writes through, and the store's
+       * `work`: the unit of work the OPEN scope writes through, and the store's
        * own. A nested savepoint inherits whatever is in force — it is the
        * same unit of work one level down — while a transaction asked for
        * `unitOfWork: 'own'` gets a fresh one for its callback's lifetime.
        * Both are set once the model's cores exist.
-       * @type {any}
        */
-      let work = null;
       /** @type {any} */
       let rootWork = null;
+
+      // a store on several sessions: each root call's context carries its
+      // own state, starting as the store's own does outside any transaction
+      const severalSessions = opened.primary !== undefined;
+      if (severalSessions) {
+        ctx = () => opened.context() ?? rootContext;
+        opened.newContext = () => ({ scope: null, currentScope: null, currentRoot: null, settlements: null, work: rootWork });
+      }
 
       /**
        * Run what the open transaction owes on its COMMIT, in registration
@@ -1801,8 +1851,8 @@ export function openStore(model, options) {
        * effect is taken off the list before it runs.
        */
       const flushSettlements = () => {
-        if (settlements === null) return;
-        for (const effect of settlements.splice(0)) effect.commit?.();
+        if (ctx().settlements === null) return;
+        for (const effect of ctx().settlements.splice(0)) effect.commit?.();
       };
 
       /**
@@ -1819,22 +1869,41 @@ export function openStore(model, options) {
        * is the one caller that bypasses the scope: it runs on a reader of
        * its own, outside whatever transaction is open (see `share`).
        */
+      /**
+       * A statement of a store on several sessions: prepared again on the
+       * calling context's session at each execution — a core keeps the
+       * statements it prepares, and one bound to the session that prepared
+       * it would run on another caller's. An iterator stays on the session
+       * that opened it.
+       * @param {string} sql @param {any} [metadata]
+       */
+      const sessionStatement = (sql, metadata) => {
+        const here = () => (ctx().scope ?? opened).prepare(sql, metadata);
+        return Object.freeze({
+          run: (/** @type {any[]} */ params) => chain(here(), (statement) => statement.run(params)),
+          get: (/** @type {any[]} */ params) => chain(here(), (statement) => statement.get(params)),
+          all: (/** @type {any[]} */ params) => chain(here(), (statement) => statement.all(params)),
+          iterate: (/** @type {any[]} */ params) => chain(here(), (statement) => statement.iterate(params)),
+          finalize: () => undefined,
+        });
+      };
       const connection = Object.freeze({
         get synchronous() { return opened.synchronous; },
         get capabilities() { return opened.capabilities; },
         get dialect() { return opened.dialect; },
         /** @param {string} sql */
-        exec: (sql) => (inParallelRead() ? opened : scope ?? opened).exec(sql),
+        exec: (sql) => (inParallelRead() ? opened : ctx().scope ?? opened).exec(sql),
         /** @param {string} sql */
-        prepare: (sql, metadata) => (inParallelRead() ? opened : scope ?? opened).prepare(sql, metadata),
+        prepare: severalSessions ? sessionStatement
+          : (sql, metadata) => (inParallelRead() ? opened : ctx().scope ?? opened).prepare(sql, metadata),
         /** Internal transaction users (jobs, checkpoints, migrations)
          * nest when a transaction is open and take the gate when not.
          * `'immediate'` takes the writer lock up front when nothing is open
          * yet; inside an open transaction the call is its savepoint.
          * @param {(scope: any) => any} fn @param {'immediate'} [mode] */
-        transaction: (fn, mode) => (inParallelRead() ? refuseInParallelRead() : withScope(scope === null
+        transaction: (fn, mode) => (inParallelRead() ? refuseInParallelRead() : withScope(ctx().scope === null
           ? (/** @type {any} */ inner) => opened.transaction(inner, undefined, mode)
-          : (/** @type {any} */ inner) => /** @type {any} */ (scope).transaction(inner, mode), fn)),
+          : (/** @type {any} */ inner) => /** @type {any} */ (ctx().scope).transaction(inner, mode), fn)),
         /**
          * Register what settling the OPEN transaction owes an in-memory
          * caller: `commit` when it commits, `rollback` when it rolls back,
@@ -1845,8 +1914,8 @@ export function openStore(model, options) {
          * @param {{ commit?: () => void, rollback?: () => void }} effects
          */
         onSettle: (effects) => {
-          if (settlements === null) effects.commit?.();
-          else settlements.push(effects);
+          if (ctx().settlements === null) effects.commit?.();
+          else ctx().settlements.push(effects);
         },
         registerFunction: opened.registerFunction === null ? null
           : (/** @type {string} */ name, /** @type {any} */ o, /** @type {Function} */ fn) =>
@@ -1906,27 +1975,27 @@ export function openStore(model, options) {
 
       function withScope(open, fn, ownWork, root) {
         return open((inner) => {
-          const outer = scope;
-          const outerWork = work;
-          const outerIdentity = currentScope;
-          const outerRoot = currentRoot;
-          const outermost = settlements === null;
-          if (outermost) settlements = [];
-          const list = /** @type {any[]} */ (settlements);
+          const outer = ctx().scope;
+          const outerWork = ctx().work;
+          const outerIdentity = ctx().currentScope;
+          const outerRoot = ctx().currentRoot;
+          const outermost = ctx().settlements === null;
+          if (outermost) ctx().settlements = [];
+          const list = /** @type {any[]} */ (ctx().settlements);
           // where this scope's own effects begin: a rollback takes back
           // from here, and everything before it belongs to a scope that
           // is still open
           const mark = list.length;
           /** @type {{ root?: any, cursors?: Set<() => Promise<unknown>> }} */
           const identity = {};
-          scope = inner;
-          currentScope = identity;
+          ctx().scope = inner;
+          ctx().currentScope = identity;
           if (root !== undefined) {
-            currentRoot = { mode: root.mode, attempt: root.attempt ?? 1, isolation: root.isolation,
+            ctx().currentRoot = { mode: root.mode, attempt: root.attempt ?? 1, isolation: root.isolation,
               hold: root.holdTimeoutMs, expired: null, inFlight: 0, onIdle: null };
           }
-          if (currentRoot !== null) identity.root = currentRoot;
-          if (ownWork !== undefined) work = ownWork;
+          if (ctx().currentRoot !== null) identity.root = ctx().currentRoot;
+          if (ownWork !== undefined) ctx().work = ownWork;
           const kept = () => {
             if (outermost) flushSettlements();
           };
@@ -1939,14 +2008,14 @@ export function openStore(model, options) {
             // it — a hold limit rolled the root back while this body still
             // ran — restores nothing: the root put the store back when it
             // settled, and another owner may be current by now
-            if (!outermost && currentScope !== identity) return;
+            if (!outermost && ctx().currentScope !== identity) return;
             if (settled) kept();
             else undone();
-            scope = outer;
-            work = outerWork;
-            currentScope = outerIdentity;
-            currentRoot = outerRoot;
-            if (outermost) settlements = null;
+            ctx().scope = outer;
+            ctx().work = outerWork;
+            ctx().currentScope = outerIdentity;
+            ctx().currentRoot = outerRoot;
+            if (outermost) ctx().settlements = null;
           };
           let out;
           try {
@@ -1991,10 +2060,12 @@ export function openStore(model, options) {
       // passes a callback's own error through untouched). A store that is
       // not, or no longer, its database's owner begins nothing (`JD2061`).
       // `begin` carries the isolation level to spell and the writer lock.
-      const beginTransaction = (inner, signal, mode, begin) =>
+      // `via` is where it begins: any session, or the first one for a write
+      // on the store's own unit of work (`gatedWork`)
+      const beginTransaction = (inner, signal, mode, begin, via = opened) =>
         attempt(() => {
           refuseClosed();
-          return chain(ownerGuard(false), () => opened.transaction((/** @type {any} */ scope) => {
+          return chain(ownerGuard(false), () => via.transaction((/** @type {any} */ scope) => {
             ownerAdmitted();
             return inner(scope);
           }, signal, mode, begin));
@@ -2078,9 +2149,9 @@ export function openStore(model, options) {
        *   - what a `store.transaction` asks of its BEGIN (see `beginFor`);
        *   the store's own transactions pass none
        */
-      let topLevelTransaction = (fn, signal, ownWork, mode, attempt, holdTimeoutMs, begin = undefined) =>
-        withScope((inner) => beginTransaction(inner, signal, mode, begin),
-          (inner, identity) => holdAround(currentRoot, () => fn(scopedStore(inner, identity))), ownWork,
+      let topLevelTransaction = (fn, signal, ownWork, mode, attempt, holdTimeoutMs, begin = undefined, via = opened) =>
+        withScope((inner) => beginTransaction(inner, signal, mode, begin, via),
+          (inner, identity) => holdAround(ctx().currentRoot, () => fn(scopedStore(inner, identity))), ownWork,
           { mode: mode ?? 'deferred', attempt, holdTimeoutMs, isolation: begin?.level });
 
       /**
@@ -2154,20 +2225,32 @@ export function openStore(model, options) {
        * @param {string} [what] - what is waiting, for the timeout message
        * @param {AbortSignal} [signal]
        */
-      const gated = (fn, what, signal) => {
+      const gatedOn = (/** @type {any} */ gate) => (/** @type {() => any} */ fn, /** @type {string | undefined} */ what,
+        /** @type {AbortSignal | undefined} */ signal) => {
         refuseClosed();
-        if (strictTransactions && opened.mustQueue)
+        if (strictTransactions && gate.mustQueue)
           throw contended("{ transactions: 'strict' } refuses to queue behind it");
-        return chain(ownerGuard(false), () => withScope((inner) => opened.exclusively((/** @type {any} */ admitted) => {
+        return chain(ownerGuard(false), () => withScope((inner) => gate.exclusively((/** @type {any} */ admitted) => {
           ownerAdmitted();
           return inner(admitted);
         }, what, signal), fn));
       };
+      const gated = gatedOn(opened);
+      /**
+       * A root call on the store's OWN unit of work — a root entity handle,
+       * a tracked read, `saveChanges`, a root relational write: the gate
+       * itself on a store with one session; on a store with several, the
+       * first session, so the unit of work keeps one caller at a time.
+       */
+      const gatedWork = severalSessions ? gatedOn(opened.pinned) : gated;
 
       const cursorOwnership = opened.capabilities.cursorTransaction === true
         ? { holdMs: opened.capabilities.cursorLifetimeMs, owners: new Set(), max: opened.capabilities.maxCursors } : undefined;
-      const admitRootCursor = (cursor, signal, what) =>
-        admitCursor(cursor, gated, signal, what, cursorOwnership);
+      const admitCursorOn = (/** @type {any} */ gate) => (/** @type {any} */ cursor, /** @type {AbortSignal | undefined} */ signal,
+        /** @type {string} */ what) => admitCursor(cursor, gate, signal, what, cursorOwnership);
+      const admitRootCursor = admitCursorOn(gated);
+      /** A tracked root cursor: its pulls register in the store's own unit of work. */
+      const admitWorkCursor = severalSessions ? admitCursorOn(gatedWork) : admitRootCursor;
 
       /**
        * Run `fn` inside one PARALLEL read (`reads: 'parallel'`): on a
@@ -2398,10 +2481,12 @@ export function openStore(model, options) {
           // the store gate, waiting whatever `transactions` says: a renewal
           // is the store's own write, never a caller's, and may take the
           // gate's next turn and wait for the holder however long it holds
-          exclusively: (fn, what, options) => opened.exclusively(fn, what, options?.signal,
-            options?.first === true, options?.unbounded === true),
+          // on a store with several sessions, the first: the lock is its session's
+          exclusively: severalSessions ? (fn, what, options) => opened.pinned.exclusively(fn, what, options?.signal)
+            : (fn, what, options) => opened.exclusively(fn, what, options?.signal,
+              options?.first === true, options?.unbounded === true),
           // never from inside a transaction's own synchronous body
-          renewsInline: () => currentRoot === null || opened.mustQueue,
+          renewsInline: () => ctx().currentRoot === null || opened.mustQueue,
         });
         return ownerLease.acquire();
       };
@@ -2554,6 +2639,9 @@ export function openStore(model, options) {
               retention: captureRequested.log?.retention ?? DEFAULT_RETENTION,
               now: runtime.now,
               beforeCommit: (patch, context) => replicationEngine?.commit(patch, context),
+              // on a store with several sessions, each transaction's capture scope is its context's
+              ...(severalSessions ? { stateOf: () => (/** @type {any} */ (ctx()).capture
+                ??= { depth: 0, generation: 0, context: null, session: null, journal: [] }) } : {}),
             });
             return capture === null ? null : capture.ready;
           });
@@ -2603,10 +2691,10 @@ export function openStore(model, options) {
             // The hold clock starts inside capture's scope: what capture does
             // before the body (PostgreSQL's journal takes its advisory lock
             // there) is a wait, and a wait never counts against the limit.
-            topLevelTransaction = (fn, signal, ownWork, mode, attempt, holdTimeoutMs, begin = undefined) =>
-              withScope((inner) => beginTransaction(inner, signal, mode, begin),
+            topLevelTransaction = (fn, signal, ownWork, mode, attempt, holdTimeoutMs, begin = undefined, via = opened) =>
+              withScope((inner) => beginTransaction(inner, signal, mode, begin, via),
                 () => capture.nest((innerScope, identity) =>
-                  holdAround(currentRoot, () => fn(scopedStore(innerScope, identity)))),
+                  holdAround(ctx().currentRoot, () => fn(scopedStore(innerScope, identity)))),
                 ownWork, { mode: mode ?? 'deferred', attempt, holdTimeoutMs, isolation: begin?.level });
             abandonCapture = () => capture.abandon();
           }
@@ -2878,6 +2966,9 @@ export function openStore(model, options) {
             // readers, each in a committed snapshot of its own, or
             // 'serialized' through the one gate every other call takes
             parallelReads: options.reads === 'parallel' ? 'parallel' : 'serialized',
+            // the sessions root calls and transactions run on, each one call
+            // at a time (`sessions`; 1 unless the open asked for more)
+            connections: severalSessions ? opened.sessions.length : 1,
             // per-operation availability: the binding's declaration, and
             // for the two that write the store's read-only flag — `false`
             // exactly where a call is refused (`JD2077`)
@@ -3242,7 +3333,7 @@ export function openStore(model, options) {
           // the store's own unit of work: what a store-level handle and a
           // transaction that did not ask for its own both write through
           rootWork = createUnitOfWork();
-          work = rootWork;
+          ctx().work = rootWork;
 
           /** @type {Map<string, any>} */
           const asyncHandles = new Map();
@@ -3428,10 +3519,10 @@ export function openStore(model, options) {
            * @param {string} spelling
            */
           const nestedAtRoot = (fn, transactionOptions, spelling) => {
-            const root = /** @type {any} */ (currentRoot);
+            const root = /** @type {any} */ (ctx().currentRoot);
             const { signal } = readTransactionOptions(transactionOptions, 'nested', spelling, root.mode);
             if (signal?.aborted === true) throw abortReason(signal);
-            const driverScope = /** @type {any} */ (scope);
+            const driverScope = /** @type {any} */ (ctx().scope);
             return withScope(driverScope.transaction, (inner, innerIdentity) => (capture === null
               ? fn(scopedStore(inner, innerIdentity))
               : capture.nest(() => fn(scopedStore(inner, innerIdentity)))));
@@ -3510,10 +3601,12 @@ export function openStore(model, options) {
             read: (run, signal) => gatedRead(() => run(connection), 'a root relational read', signal),
             cursor: (spec) => admitReadCursor(createCursor({ ...spec, open: () => spec.open(connection) }),
               spec.signal, 'a root relational cursor pull'),
+            // a write the store's own unit of work hears of (`afterWrite`)
             write: (run, signal) => {
-              if (strictTransactions && opened.mustQueue)
+              const via = severalSessions ? opened.pinned : opened;
+              if (strictTransactions && via.mustQueue)
                 throw contended("{ transactions: 'strict' } refuses to queue behind it");
-              return topLevelTransaction(() => run(connection), signal, undefined, 'immediate');
+              return topLevelTransaction(() => run(connection), signal, undefined, 'immediate', undefined, undefined, undefined, via);
             },
             beforeWrite: (table) => beforeSqlWrite(table, [rootWork]),
             afterWrite: () => afterSqlWrite([rootWork]),
@@ -3579,16 +3672,16 @@ export function openStore(model, options) {
                 // registers what it read in the unit of work and keeps the
                 // gate on a store that reads in parallel; the untracked
                 // reads and the document queries take a reader there
-                handle = gatedMembers(gatedMembers(inner, ['create', 'get', 'update', 'mutate', 'delete', 'load']),
+                handle = gatedMembers(gatedMembers(inner, ['create', 'get', 'update', 'mutate', 'delete', 'load'], [], gatedWork),
                   ['explain'], ['execute'], gatedRead);
                 const untracked = gatedMembers(inner.asNoTracking(), ['get', 'load'], [], gatedRead);
                 handle = Object.freeze({
                   ...handle,
-                  page: (spec, pageOptions) => lift(() => (pageOptions?.tracking === true ? gated : gatedRead)(
+                  page: (spec, pageOptions) => lift(() => (pageOptions?.tracking === true ? gatedWork : gatedRead)(
                     () => inner.page(spec, pageOptions), undefined, signalOf('page', [spec, pageOptions])))(),
-                  cursor: (document, queryOptions) => (queryOptions?.tracking === true ? admitRootCursor : admitReadCursor)(
+                  cursor: (document, queryOptions) => (queryOptions?.tracking === true ? admitWorkCursor : admitReadCursor)(
                     inner.cursor(document, queryOptions), queryOptions?.signal, 'a root entity cursor pull'),
-                  loadCursor: (spec, cursorOptions) => (cursorOptions?.tracking === true ? admitRootCursor : admitReadCursor)(
+                  loadCursor: (spec, cursorOptions) => (cursorOptions?.tracking === true ? admitWorkCursor : admitReadCursor)(
                     inner.loadCursor(spec, cursorOptions), cursorOptions?.signal, 'a root graph cursor pull'),
                   asNoTracking: () => untracked,
                 });
@@ -3597,7 +3690,7 @@ export function openStore(model, options) {
               return handle;
             },
             saveChanges: entities.size === 0 ? undefined
-              : lift(() => gated(() => guard(() => rootWork.tracker.saveChanges()))),
+              : lift(() => gatedWork(() => guard(() => rootWork.tracker.saveChanges()))),
             // entity DOCUMENTS query the multi-entity root at the store;
             // `roots` names the entity arrays this provider serves, so a
             // chain asked to iterate the store itself can refuse by name
@@ -3643,7 +3736,7 @@ export function openStore(model, options) {
               // called from inside a transaction's own synchronous extent,
               // the driver nests the call as a savepoint of that transaction:
               // it IS a nested transaction, with the nested option set
-              if (currentRoot !== null && !opened.mustQueue) return nestedAtRoot(fn, transactionOptions, 'store.transaction');
+              if (ctx().currentRoot !== null && !opened.mustQueue) return nestedAtRoot(fn, transactionOptions, 'store.transaction');
               // a closed set, read before anything begins (JD0013, JD0014)
               const { mode, signal, unitOfWork, retry, holdTimeoutMs, isolation } =
                 readTransactionOptions(transactionOptions, 'async', 'store.transaction');
@@ -3654,8 +3747,10 @@ export function openStore(model, options) {
               const once = (attempt) => afterHeldBody(topLevelTransaction(fn, signal,
                 // a retried transaction runs every attempt on a fresh own
                 // unit of work: a failed attempt's restored pending records
-                // must never be saved by the next one
-                unitOfWork === 'own' || retry !== undefined ? createUnitOfWork() : undefined,
+                // must never be saved by the next one. On a store with
+                // several sessions every transaction has its own: the
+                // store's is served on its first session, one call at a time
+                unitOfWork === 'own' || retry !== undefined || severalSessions ? createUnitOfWork() : undefined,
                 mode, attempt, hold, begin));
               return retry === undefined ? once(1) : retrying(once, retry, signal);
             }),
@@ -3800,7 +3895,7 @@ export function openStore(model, options) {
             // out refuses with the reason, not as a stale scope
             const root = rootOf(identity);
             if (root !== undefined && root.expired !== null) throw heldTooLong(root.expired);
-            if (currentScope === identity) return;
+            if (ctx().currentScope === identity) return;
             throw new DbRuntimeError('JD2070',
               'this transaction handle is pinned to a scope that is not current: '
               + 'its transaction settled, or an inner transaction is open. Use the '
@@ -4005,10 +4100,10 @@ export function openStore(model, options) {
           scopedStore = (driverScope, identity) => {
             /** The unit of work in force for THIS scope, captured once:
              * the view's tracker surface never follows a later scope. */
-            const myWork = work;
+            const myWork = ctx().work;
             /** The root transaction around this scope: its mode (a nested
              * transaction may not exceed it) and its attempt number. */
-            const myRoot = currentRoot;
+            const myRoot = ctx().currentRoot;
             const myMode = myRoot?.mode ?? 'deferred';
             /** @type {Map<string, any>} */
             const myCollections = new Map();
@@ -4091,7 +4186,7 @@ export function openStore(model, options) {
               return chain(driverScope.savepoint(), (checkpoint) => {
                 checkpoints.set(label, {
                   checkpoint,
-                  settleMark: settlements === null ? 0 : settlements.length,
+                  settleMark: ctx().settlements === null ? 0 : ctx().settlements.length,
                   captureMark: capture === null ? null : capture.mark(),
                 });
                 return undefined;
@@ -4105,8 +4200,8 @@ export function openStore(model, options) {
               // defined; entries created after it are gone from the
               // engine stack and invalidated here.
               return chain(driverScope.rollbackTo(entry.checkpoint), () => {
-                if (settlements !== null) {
-                  const withdrawn = settlements.splice(entry.settleMark);
+                if (ctx().settlements !== null) {
+                  const withdrawn = ctx().settlements.splice(entry.settleMark);
                   for (let i = withdrawn.length - 1; i >= 0; i--) withdrawn[i].rollback?.();
                 }
                 if (capture !== null) capture.truncate(entry.captureMark);
@@ -4141,8 +4236,11 @@ export function openStore(model, options) {
             // (one getter each), which keeps a short transaction's cost to
             // what it reaches for.
             // the units of work this scope's SQL may change: its own, and
-            // the root's when the transaction has one of its own
-            const sqlWorks = () => (rootWork === myWork ? [myWork] : [myWork, rootWork]);
+            // the root's when the transaction has one of its own — on one
+            // session only: with several, the store's own unit of work is
+            // another session's, which this write no more reaches than
+            // another store's
+            const sqlWorks = () => (rootWork === myWork || severalSessions ? [myWork] : [myWork, rootWork]);
             /** @type {any} */
             let scopeSql;
             const sqlOfScope = () => (scopeSql ??= trustedSql({ connection, readOnly, requireScope: () => requireScope(identity),
@@ -4407,7 +4505,7 @@ export function openStore(model, options) {
               },
               transaction: (fn, transactionOptions) => {
                 // inside a transaction's own synchronous extent the call nests
-                if (currentRoot !== null && !opened.mustQueue) {
+                if (ctx().currentRoot !== null && !opened.mustQueue) {
                   return nestedAtRoot((tx) => synchronousBody(fn, tx), transactionOptions, 'store.sync.transaction');
                 }
                 // the root's closed set (JD0013), read first; `unitOfWork`

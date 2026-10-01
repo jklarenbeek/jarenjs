@@ -28,6 +28,13 @@ const rows: number | undefined = store.capabilities.postgres?.windowRows;
 // @ts-expect-error transaction pooling cannot preserve a Store's session
 postgresDriver({ connect: async () => client }, { poolMode: 'transaction' });
 void [active, connection, streaming, rows];
+// a store on several sessions, bounded by what the driver admits
+const most: number = driver.maxConnections;
+const several = await openStore({ $model: '0.1', collections: {} }, { driver, sessions: Math.min(4, most) });
+const connections: number = several.capabilities.connections;
+// @ts-expect-error — a count of sessions, not a mode
+await openStore({ $model: '0.1', collections: {} }, { driver, sessions: 'many' });
+void connections;
 // the writer lock, the isolation floor and the owner lock, typed
 const owned = await openStore({ $model: '0.1', collections: {} },
   { driver: portable, isolation: 'repeatable read', owner: { id: 'api-1', leaseMs: 30_000 } });

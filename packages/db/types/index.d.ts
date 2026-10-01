@@ -530,6 +530,8 @@ export interface StoreCapabilities {
    * its own (`reads: 'parallel'`), or `'serialized'` through the one gate
    * every other call takes. */
   readonly parallelReads: 'parallel' | 'serialized';
+  /** The sessions root calls and transactions run on (`sessions`; 1 unless asked). */
+  readonly connections: number;
   readonly validated: boolean;
   readonly profiled: boolean;
   /** The read-back connection configuration (MODEL-FORMAT §4). */
@@ -1291,6 +1293,17 @@ export interface OpenStoreOptions {
    * Writes, transactions and tracked reads keep the gate.
    */
   reads?: 'serialized' | 'parallel';
+  /**
+   * How many PostgreSQL sessions the store runs root calls and
+   * transactions on (MODEL-FORMAT §5.1), from 1 (the default: one
+   * session, one caller at a time) to the driver's `maxConnections`. With
+   * several, each root call or transaction checks out a session of its own
+   * and the database settles what two of them do to each other; every
+   * transaction has a unit of work of its own, and the store's own unit of
+   * work is served on the first session, one call at a time. Accepted only
+   * on `@jarenjs/db/postgres`, and without replication; elsewhere `JD0009`.
+   */
+  sessions?: number;
   /** Change capture (LIVE-FORMAT): off unless requested. */
   capture?: boolean | CaptureOptions;
   /** Live-query bounds (LIVE-FORMAT §12). */

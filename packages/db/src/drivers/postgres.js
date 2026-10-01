@@ -32,6 +32,7 @@
  */
 
 import { chain, openConnection, baseCapabilities } from '../driver.js';
+import { createAsyncContext } from './async-context.js';
 import { postgresDialect } from '../dialects/postgres.js';
 import { DbCompileError, DbRuntimeError, wrapDriverError, connectionLost, isConnectionLoss } from '../errors.js';
 import { workerQueue } from './worker-queue.js';
@@ -569,6 +570,12 @@ export function postgresDriver(source, options = undefined) {
     name: 'postgres',
     dialect,
     metrics: () => admissions.metrics(),
+    /** The sessions this driver admits at once — the most a Store opened
+     * with `sessions` may hold. */
+    maxConnections: limits.maxConnections,
+    /** The async context a Store on several sessions carries each root
+     * call's transaction state in (`openStore(model, { sessions })`). */
+    contextStorage: createAsyncContext,
     /**
      * @param {string} [path] - a PostgreSQL store lives in a SCHEMA on a
      *   server, not at a path; anything but the conventional `':memory:'`

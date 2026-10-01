@@ -357,14 +357,16 @@ export function createCaptureEngine(options) {
   // when no log is kept, and otherwise the file's allocation read back
   // from the durable row — never an answer to a watermark question
   let seq = 0;
-  let depth = 0;
-  /** Which outermost wrap owns the engine (`abandon()` moves it on). */
-  let generation = 0;
-  let context = null;
-  /** @type {any} */
-  let session = null;
-  /** @type {any[]} */
-  let journal = [];
+  /**
+   * The capture scope of the CALLING context: how deeply it is nested
+   * (`depth`), which outermost wrap owns it (`generation` — `abandon()`
+   * moves it on), its metadata (`context`), the open SQLite session
+   * (`session`) and the journal buffer (`journal`). A store that serves
+   * one owner at a time has one; a store with several sessions answers
+   * each transaction's own through `stateOf`.
+   * @type {() => { depth: number, generation: number, context: any, session: any, journal: any[] }}
+   */
+  const st = options.stateOf ?? ((own) => () => own)({ depth: 0, generation: 0, context: null, session: null, journal: [] });
   /** @type {any[]} */
   const pendingDeliveries = [];
 
@@ -454,8 +456,8 @@ export function createCaptureEngine(options) {
 
   /** Journal-mode emission from the write paths. */
   const record = (table, keyParts, before, after) => {
-    if (mode !== 'journal' || depth === 0) return;
-    journal.push({ table, keyParts,
+    if (mode !== 'journal' || st().depth === 0) return;
+    st().journal.push({ table, keyParts,
       before: jsonReality(before), after: jsonReality(after) });
   };
 
@@ -470,7 +472,7 @@ export function createCaptureEngine(options) {
     const netted = new Map();
     /** @type {string[]} */
     const order = [];
-    for (const entry of journal) {
+    for (const entry of st().journal) {
       const token = keyToken(entry.keyParts);
       const key = `${entry.table}\u0000${token}`;
       const existing = netted.get(key);
@@ -510,14 +512,14 @@ export function createCaptureEngine(options) {
   /** Collect this commit's patch (inside the transaction). */
   const collect = () => {
     if (mode === 'session') {
-      const changeset = session.changeset();
-      session.close();
-      session = null;
+      const changeset = st().session.changeset();
+      st().session.close();
+      st().session = null;
       if (changeset.length === 0) return [];
       return translateOperations(connection, shapes, parseChangeset(changeset));
     }
     const ops = journalOps();
-    journal = [];
+    st().journal = [];
     return ops;
   };
 
@@ -583,9 +585,9 @@ export function createCaptureEngine(options) {
    * it, and closing it again throws — which must not replace the failure
    * that brought the capture scope down. */
   const closeSession = () => {
-    if (session === null) return;
-    const open = session;
-    session = null;
+    if (st().session === null) return;
+    const open = st().session;
+    st().session = null;
     try {
       open.close();
     }
@@ -595,24 +597,24 @@ export function createCaptureEngine(options) {
   };
 
   const wrap = (fn) => {
-    if (depth > 0) return fn();
-    depth = 1;
+    if (st().depth > 0) return fn();
+    st().depth = 1;
     // this wrap's claim on the engine: `abandon()` moves the generation on,
     // and a continuation of an abandoned wrap then touches nothing — the
     // engine may already be serving the next transaction
-    const mine = ++generation;
-    const abandoned = () => generation !== mine;
+    const mine = ++st().generation;
+    const abandoned = () => st().generation !== mine;
     const cleanupFailure = () => {
       if (abandoned()) return;
-      depth = 0;
-      context = null;
+      st().depth = 0;
+      st().context = null;
       closeSession();
-      journal = [];
+      st().journal = [];
     };
     let outcome;
     try {
-      if (mode === 'session') session = connection.session();
-      else journal = [];
+      if (mode === 'session') st().session = connection.session();
+      else st().journal = [];
       // a captured write reads before it writes (the journal's before-image,
       // a key's spellings), so a transaction it opens takes the writer lock
       // up front: a deferred one met the read→write upgrade busy the busy
@@ -620,7 +622,7 @@ export function createCaptureEngine(options) {
       outcome = connection.transaction((...scopeArgs) =>
         chain(dialect.capture?.beforeWrite(connection), () =>
         chain(fn(...scopeArgs), (result) =>
-          chain(collect(), (patch) => chain(options.beforeCommit?.(patch, context), () => {
+          chain(collect(), (patch) => chain(options.beforeCommit?.(patch, st().context), () => {
             if (patch.length === 0) return { result, delivery: null };
             const at = clock();
             return chain(persist(patch, at), () => ({
@@ -643,8 +645,8 @@ export function createCaptureEngine(options) {
     // it wraps, so only the failure path runs, and that one gives up
     // nothing that is no longer this wrap's (`cleanupFailure`)
     const finish = (bundle) => {
-      depth = 0;
-      context = null;
+      st().depth = 0;
+      st().context = null;
       if (bundle.delivery !== null) pendingDeliveries.push(bundle.delivery);
       deliver();
       return bundle.result;
@@ -666,11 +668,11 @@ export function createCaptureEngine(options) {
    * collects, persists and delivers nothing.
    */
   const abandon = () => {
-    generation++;
-    depth = 0;
-    context = null;
+    st().generation++;
+    st().depth = 0;
+    st().context = null;
     closeSession();
-    journal = [];
+    st().journal = [];
   };
 
   /**
@@ -681,14 +683,14 @@ export function createCaptureEngine(options) {
    * failure.
    */
   const nest = (fn) => {
-    if (depth === 0) return wrap(fn);
+    if (st().depth === 0) return wrap(fn);
     if (mode !== 'journal') return fn();
-    const mark = journal.length;
+    const mark = st().journal.length;
     // a hold limit may give the engine up while this scope still runs:
     // the journal is then the NEXT owner's, and a late failure here must
     // not truncate what that owner buffered
-    const mine = generation;
-    const undo = () => { if (generation === mine) journal.length = mark; };
+    const mine = st().generation;
+    const undo = () => { if (st().generation === mine) st().journal.length = mark; };
     let outcome;
     try {
       outcome = fn();
@@ -715,10 +717,10 @@ export function createCaptureEngine(options) {
    * SQLite's own changeset already excludes the undone rows — and
    * answers `null` so the caller stores nothing.
    */
-  const mark = () => (mode === 'journal' ? journal.length : null);
+  const mark = () => (mode === 'journal' ? st().journal.length : null);
   /** @param {number | null} at - a value {@link mark} answered */
   const truncate = (at) => {
-    if (mode === 'journal' && at !== null && journal.length > at) journal.length = at;
+    if (mode === 'journal' && at !== null && st().journal.length > at) st().journal.length = at;
   };
 
   return {
@@ -733,8 +735,8 @@ export function createCaptureEngine(options) {
     // Metadata belongs to this capture transaction and is cleared on every
     // settlement, including a failure while collecting or persisting changes.
     setContext(value) {
-      if (depth === 0) throw new TypeError('capture context needs an active transaction');
-      context = value;
+      if (st().depth === 0) throw new TypeError('capture context needs an active transaction');
+      st().context = value;
     },
     observe(fn) {
       if (typeof fn !== 'function')

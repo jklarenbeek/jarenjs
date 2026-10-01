@@ -37,6 +37,20 @@ export const postgresFacts = {
         + `| Sampled heap before / after MiB | ${(sqlite.memoryBefore.heapUsed / 1048576).toFixed(2)} / ${(sqlite.memoryAfter.heapUsed / 1048576).toFixed(2)} | ${(native.memoryBefore.heapUsed / 1048576).toFixed(2)} / ${(native.memoryAfter.heapUsed / 1048576).toFixed(2)} |\n\n`
         + `After close: driver active=${native.admission.active}, queued=${native.admission.queued}; native cursors=${native.settled.cursors}, prepared statements=${native.settled.statements}; host pool total=${native.poolCounts.total}, idle=${native.poolCounts.idle}, waiting=${native.poolCounts.waiting}.\n\n${report.scope}\n\n`;
     },
+    'postgres.sessions': () => {
+      const report = measured('postgres-sessions-result.json');
+      const one = report.rows.filter((row) => row.shape === 'one store');
+      const separate = report.rows.filter((row) => row.shape === 'separate stores');
+      const plain = report.routing['one session'].nsPerTransaction;
+      const routed = report.routing['two sessions, one client'].nsPerTransaction;
+      return `\n\nMeasured ${report.measuredAt}: PostgreSQL ${report.postgres.version} (fsync=${report.postgres.fsync}, synchronous_commit=${report.postgres.synchronous_commit}, full_page_writes=${report.postgres.full_page_writes}), Node ${report.runtime.node}, pg ${report.runtime.pg}; ${report.clients} clients at once, each ${report.perClient} one-document write transactions on keys of its own; the median of ${report.runs} runs.\n\n`
+        + '| N | One store on N sessions, tx/s | N stores of one session, tx/s | One store over N stores |\n|---:|---:|---:|---:|\n'
+        + one.map((row) => {
+          const stores = separate.find((other) => other.stores === row.sessions);
+          return `| ${row.sessions} | ${row.txPerSecond.toFixed(0)} | ${stores.txPerSecond.toFixed(0)} | ${(row.txPerSecond / stores.txPerSecond).toFixed(2)}× |`;
+        }).join('\n')
+        + `\n\nOne transaction with nothing beside it: ${(plain / 1e6).toFixed(3)} ms on a store of one session, ${(routed / 1e6).toFixed(3)} ms through the router of a store on two (${((routed - plain) / plain * 100).toFixed(1)}%). A store on one session has no router.\n\n${report.scope}\n\n`;
+    },
     'postgres.executables': () => {
       const report = measured('backend-executables-result.json');
       return `\n\n${report.platform}/${report.arch}, ${report.packages.length} locally packed public packages; ${report.source}.\n\n`

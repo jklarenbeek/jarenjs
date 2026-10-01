@@ -13,7 +13,8 @@ constraint failures remain errors, and a repeated collision refuses the open.
 
 ## PostgreSQL sessions
 
-`postgresDriver(source, { schema })` acquires one physical session for the Store.
+`postgresDriver(source, { schema })` acquires one physical session per `open()`:
+one for a Store, or N for a Store opened with `sessions: N`.
 The source must hand out an idle session and retain it until release. The schema
 must already exist and grant USAGE; missing schema is cantopen/JD2005 (3F000),
 and absent USAGE is readonly/JD2083 (42501). Opening never creates a schema.
@@ -62,8 +63,11 @@ cached-plan recovery above applies to buffered reads. `prepared: 'unnamed'`
 disables named plans. Named cache lifetime is also bounded across reuse of a
 physical client; an exhausted client is retired on close rather than retaining
 unlimited client-side parse metadata. `poolMode: 'session'` is required;
-transaction poolers refuse JD0003, including with unnamed statements. One Store
-needs one exclusive physical client. Driver admission is not a per-query pool.
+transaction poolers refuse JD0003, including with unnamed statements. A Store
+holds its physical clients exclusively: one, or N with `sessions: N`, each
+running one root call or transaction at a time (MODEL-FORMAT §5.1). Driver
+admission is not a per-query pool: a Store's sessions are checked out per root
+call, never per statement, and `maxConnections` bounds how many a Store asks for.
 
 Acquisition includes queueing, source connection and session setup and defaults
 to 5 seconds; cursor lifetime and server statement timeout default
@@ -99,7 +103,7 @@ never retries a connection loss.
 
 **The hold limit is the Store's, not the server's.** `holdTimeoutMs`
 (MODEL-FORMAT §5.1) rolls a transaction back without ending the session
-(so the Store keeps its one client), which is why the driver leaves
+(so the Store keeps its client), which is why the driver leaves
 `idle_in_transaction_session_timeout` and `transaction_timeout` unset —
 either would kill the session, and with it the Store. A lock wait is
 bounded by the lock timeout (55P03, busy and retryable), never counted

@@ -5,6 +5,7 @@ import { DbCompileError, DbRuntimeError } from '../errors.js';
 import { sqliteDialect } from '../dialects/sqlite.js';
 import { positiveOption } from './worker-protocol.js';
 import { workerQueue } from './worker-queue.js';
+import { createAsyncContext } from './async-context.js';
 
 /**
  * Reads explicitly classified by their compiled operation may use a read worker.
@@ -58,10 +59,9 @@ export function workerPoolDriver(configuration, driverFactory) {
       const queue = workerQueue(slots, capacity, () => performance.now());
       // the parallel read in progress on this async context, if any: its
       // reader lease and the iterators it opened (Node and Bun ship it;
-      // loaded here, as every binding loads its runtime builtin, at open)
-      const { AsyncLocalStorage } = await import('node:async_hooks');
+      // loaded at open, as every binding loads its runtime builtin)
       /** @type {import('node:async_hooks').AsyncLocalStorage<{ lease: any, iterators: Set<any>, ended: boolean }>} */
-      const parallel = new AsyncLocalStorage();
+      const parallel = await createAsyncContext();
       const readLane = (readOnly) => options.readOnly === true || (readOnly && slots.length > 1);
       const replace = async (slot) => {
         if (closed || slot.healthy) return;
