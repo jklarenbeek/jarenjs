@@ -668,10 +668,11 @@ entry remains pending until its actual host and operator evidence exists.
 ## Windows qualification (cross-package)
 
 Nothing below has run on Windows; [HOSTS.md](../packages/db/docs/HOSTS.md)
-says as much of the owner lease. The suite's Windows CI runs the
-tests on every push; these behaviours depend on Windows file locking, sockets,
-process termination, timers, links or line endings in ways a Linux run cannot
-show, so each needs a run on a Windows machine and its result recorded here.
+says as much of the owner lease. Hosted CI runs on Linux only, and the
+[Windows workflow](workflow/WINDOWS.md) is opt-in. These behaviours depend on
+Windows file locking, sockets, process termination, timers, links or line
+endings in ways a Linux run cannot show, so each needs a run on a Windows
+machine — the opt-in workflow or a local one — and its result recorded here.
 
 - [ ] **Files and SQLite locking.**
   - A refused `openStore` (a malformed option value) creates no file and
