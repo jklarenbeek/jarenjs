@@ -10,6 +10,36 @@ import { DbCompileError, DbRuntimeError } from './errors.js';
 const MEMBERS = ['name', 'on', 'assert', 'enforcement', 'audit', 'when', 'columns', 'effects'];
 /** The codecs a rule compares, as SQL and as JSON alike. */
 export const RULE_CODECS = ['text', 'integer', 'number', 'boolean', 'date', 'datetime'];
+/** A rule value that reads the record: `$.old.<member>` or `$.new.<member>`. */
+export const RECORD_PATH = /^\$\.(old|new)\.([A-Za-z_][A-Za-z0-9_]*)$/;
+
+/**
+ * The literal a rule value that is not a record path stands for. The query
+ * language reads a string that starts with `$` as an expression and `$$` as
+ * the escape for a literal `$`, so `$$x` is the text `$x`; a `$const` holds
+ * its value as written.
+ * @param {any} value @returns {any}
+ */
+export function ruleLiteral(value) {
+  if (typeof value === 'string') return value.startsWith('$$') ? value.slice(1) : value;
+  let literal = value;
+  while (literal && typeof literal === 'object' && Object.hasOwn(literal, '$const')) literal = literal.$const;
+  return literal;
+}
+
+/** ASCII letters lowered, as SQLite folds an identifier. @param {string} name */
+const folded = (name) => name.replace(/[A-Z]/g, (letter) => letter.toLowerCase());
+
+/**
+ * Whether two layouts can name one table: the same name as SQLite compares
+ * identifiers (ASCII case aside), in one schema or where either leaves its
+ * schema to the connection.
+ * @param {{ table: string, schema?: string }} a @param {{ table: string, schema?: string }} b
+ */
+export function sameTable(a, b) {
+  return folded(a.table) === folded(b.table)
+    && (a.schema === undefined || b.schema === undefined || folded(a.schema) === folded(b.schema));
+}
 
 /** Replace each `$exists-row` with a read of its answer, collecting the probes.
  * @param {any} node @param {any[]} probes @param {(why: string) => never} fail @returns {any} */
@@ -74,18 +104,17 @@ function pathsOf(node, out = []) {
   return out;
 }
 
-/** The scalar type a match value or a column compares as.
- * @param {string} codec */
-const typeOfCodec = (codec) => codec === 'boolean' ? 'boolean' : ['integer', 'number'].includes(codec) ? 'number' : 'string';
-
 /**
  * Resolve what a rule names in other members and entities, once the whole
  * model is known: `columns` and increments name physical columns of their own
- * entity, a probe's target is another entity's physical layout and its match
- * covers the target's key. Both enforcements read the result.
+ * entity, a probe's target is another table's physical layout, its match
+ * covers the target's key, and each match value is a member the rule's own
+ * entity has, of the target column's codec, or a literal that codec holds.
+ * Both enforcements read the result.
  * @param {Map<string, any>} entities
+ * @param {(column: any) => { encode: (value: any) => any }} codecOf the column codec
  */
-export function resolveInvariants(entities) {
+export function resolveInvariants(entities, codecOf) {
   for (const entity of entities.values()) {
     const fail = (reason) => { throw new DbCompileError('JD0005', reason, `${entity.docPath}/invariants`); };
     const layout = entity.physical;
@@ -107,21 +136,39 @@ export function resolveInvariants(entities) {
       for (const probe of rule.probes) {
         const target = entities.get(probe.entity);
         if (!target || target.physical === null) fail(`$exists-row reads a physical layout; '${probe.entity}' has none`);
-        if (target === entity) fail("$exists-row reads another entity's table: PostgreSQL's row triggers run at statement end, SQLite's per row");
+        if (target.physical.kind === 'view') fail(`$exists-row reads a table by its primary key; '${probe.entity}' is a view, which has none`);
+        // two entities can map one table: the table decides, not the entity
+        if (sameTable(target.physical, layout ?? { table: entity.name }))
+          fail("$exists-row reads another table: PostgreSQL's row triggers run at statement end, SQLite's per row");
         for (const key of target.keys)
           if (!Object.hasOwn(probe.match, key)) fail(`$exists-row on '${probe.entity}' must match its key member '${key}'`);
         for (const [member, value] of Object.entries(probe.match)) {
           const column = target.physical.columns.find((c) => c.name === member);
           if (!column || column.null === 'absent' || !RULE_CODECS.includes(column.codec)) fail(`$exists-row member '${member}' needs a scalar column codec`);
-          let literal = value;
-          while (literal && typeof literal === 'object' && Object.hasOwn(literal, '$const')) literal = literal.$const;
-          const path = typeof value === 'string' && value.startsWith('$.') ? /^\$\.(old|new)\.([A-Za-z_][A-Za-z0-9_]*)$/.exec(value) : null;
-          if (typeof value === 'string' && value.startsWith('$.') && path === null) fail(`$exists-row value '${value}' must read $.old or $.new`);
-          const source = path === null ? undefined : columnOf(path[2]);
-          const type = path !== null ? source === undefined ? null : typeOfCodec(source.codec)
-            : literal === null ? null : typeof literal;
-          if (path === null && !['string', 'number', 'boolean'].includes(type ?? 'string')) fail(`$exists-row value for '${member}' must be a scalar`);
-          if (type !== null && type !== typeOfCodec(column.codec)) fail(`$exists-row member '${member}' compares a ${type} with a ${typeOfCodec(column.codec)} column`);
+          const escaped = typeof value === 'string' && value.startsWith('$') && !value.startsWith('$$');
+          const path = escaped ? RECORD_PATH.exec(value) : null;
+          if (escaped && path === null) fail(`$exists-row value '${value}' must read $.old.<member> or $.new.<member>; a text that starts with $ is written $$`);
+          if (path !== null) {
+            const name = path[2];
+            if (layout === null) {
+              if (entity.properties.get(name)?.relation !== undefined || !entity.properties.has(name))
+                fail(`$exists-row value '${value}': '${entity.name}' has no stored property '${name}'`);
+              continue;
+            }
+            const source = columnOf(name);
+            if (source === undefined) fail(`$exists-row value '${value}': '${entity.name}' has no column '${name}'`);
+            // the two engines compare a match as the target's type: one codec
+            // on both sides (an integer into a number column is exact) or the
+            // database and the store would round or reparse it differently
+            if (source.codec !== column.codec && !(source.codec === 'integer' && column.codec === 'number'))
+              fail(`$exists-row matches ${column.codec} column '${member}' with ${source.codec} column '${name}'; a match compares one codec`);
+            continue;
+          }
+          const literal = ruleLiteral(value);
+          if (literal === null) continue;
+          if (!['string', 'number', 'boolean'].includes(typeof literal)) fail(`$exists-row value for '${member}' must be a scalar`);
+          try { codecOf(column).encode(literal); }
+          catch { fail(`$exists-row value ${JSON.stringify(literal)} is not one the ${column.codec} column '${member}' holds`); }
         }
         probe.target = target.physical;
         probe.keys = target.keys;
@@ -149,12 +196,14 @@ export function invariantFailure(name) {
 /**
  * Store enforcement. An update rule with `columns` is checked when the write
  * assigns one of them (`assigned` names the members a statement sets; absent,
- * it sets them all). A probe is answered by `probe(probe, record)`, a
+ * it sets them all); a rule that judges changes (neither `when: "assigned"`
+ * nor `columns`) is skipped when `unchanged` says the write changed no member
+ * a database rule counts. A probe is answered by `probe(probe, record)`, a
  * value-or-promise of a boolean, so a synchronous driver stays synchronous; a
  * caller that checks before its transaction opens passes `defer`, and a rule
  * that reads another row is handed to it to run inside that transaction.
  * @param {any[]} rules @param {string} op @param {any} before @param {any} after
- * @param {{ assigned?: Iterable<string>, probe?: (probe: any, record: any) => any,
+ * @param {{ assigned?: Iterable<string>, unchanged?: boolean, probe?: (probe: any, record: any) => any,
  *   defer?: (run: () => any) => void }} [context]
  * @returns {any} value-or-promise
  */
@@ -166,6 +215,7 @@ export function checkInvariants(rules, op, before, after, context = {}) {
       const rule = rules[i];
       if (rule.enforcement !== 'store' || !rule.on.includes(op)) continue;
       if (op === 'update' && rule.columns !== undefined && assigned !== null && !rule.columns.some((member) => assigned.has(member))) continue;
+      if (op === 'update' && context.unchanged === true && rule.columns === undefined && rule.when !== 'assigned') continue;
       if (rule.probes.length === 0) {
         if (rule.evaluate(record) !== true) throw invariantFailure(rule.name);
         continue;
@@ -204,7 +254,8 @@ export function existsRowSql(probe, dialect, value) {
     const left = `${alias}.${q(column.physical)}`;
     const right = value(expression, column);
     if (probe.keys.includes(member)) return `${left} = ${right}`;
-    const different = dialect.physicalDifferent?.(column.codec, left, right) ?? `${left} IS NOT ${right}`;
+    // SQLite compares text by code point, whatever the column's collation
+    const different = dialect.physicalDifferent?.(column.codec, left, right) ?? `${left} IS NOT ${right} COLLATE BINARY`;
     return `NOT (${different})`;
   });
   return `EXISTS (SELECT 1 FROM ${dialect.tableName(probe.target.table, probe.target.schema ?? dialect.schema)} AS ${alias} WHERE ${conditions.join(' AND ')})`;

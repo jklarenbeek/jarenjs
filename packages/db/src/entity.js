@@ -21,15 +21,19 @@ import {
 import { resolveRuntime } from '@jarenjs/core/runtime';
 
 import { DbRuntimeError, wrapDriverError } from './errors.js';
-import { chain, attempt } from './driver.js';
-import { checkInvariants, existsRowSql } from './invariants.js';
+import { chain, attempt, useStatementOnce } from './driver.js';
+import { checkInvariants, existsRowSql, RECORD_PATH, ruleLiteral } from './invariants.js';
 import { columnCodec, physicalRead } from './physical.js';
 import { mergeEntityRow } from './graph.js';
 import { createJSONPatch } from '@jarenjs/json/patch';
+import { canonicalizeJson } from '@jarenjs/json/canonical';
 import { createEntityMutation } from './mutation.js';
 
 /** How many update shapes an entity keeps prepared. */
 const UPDATE_SHAPES = 32;
+
+/** The top-level member a JSON Patch operation touches. @param {{ path: string }} op */
+const memberOfPatch = (op) => (op.path.split('/')[1] ?? '').replace(/~1/g, '/').replace(/~0/g, '~');
 
 /**
  * The write/read machinery for one entity, prepared once.
@@ -275,12 +279,13 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
     return statement;
   };
   // an update's shape is the set of members it assigns: the first few shapes
-  // stay prepared, any beyond them are prepared per call, as a save's are
+  // stay prepared, any beyond them are prepared for the one call and released
   let updateShapes = 0;
-  const preparedUpdate = (name, sql) => {
-    if (statements.has(name) || updateShapes >= UPDATE_SHAPES) return statements.get(name) ?? connection.prepare(sql, { readOnly: false });
-    updateShapes += 1;
-    return prepared(name, sql);
+  const runUpdate = (names, sql, use) => {
+    const name = `update:${JSON.stringify(names)}`;
+    if (!statements.has(name) && updateShapes >= UPDATE_SHAPES) return useStatementOnce(connection, sql, use, { readOnly: false });
+    if (!statements.has(name)) updateShapes += 1;
+    return chain(prepared(name, sql), use);
   };
   const parameterAt = (i) => dialect.parameterRef(i, 'v');
   const keyWhere = (offset) => keys
@@ -340,10 +345,8 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
     const params = [];
     let none = false;
     const sql = existsRowSql(spec, dialect, (expression, column) => {
-      let value = expression;
-      const path = typeof expression === 'string' ? /^\$\.(old|new)\.(.+)$/.exec(expression) : null;
-      if (path !== null) value = record[path[1]]?.[path[2]] ?? null;
-      while (value && typeof value === 'object' && Object.hasOwn(value, '$const')) value = value.$const;
+      const path = typeof expression === 'string' ? RECORD_PATH.exec(expression) : null;
+      const value = path === null ? ruleLiteral(expression) : record[path[1]]?.[path[2]] ?? null;
       let encoded = null;
       try { encoded = value === null ? null : columnCodec(column).encode(value); }
       catch { none = true; }
@@ -356,9 +359,26 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
       chain(statement.get(params), (row) => row?.hit === true || Number(row?.hit) === 1)),
     (error) => wrapDriverError(error, { docPath, collection: entity.name }));
   };
+  const ruledOps = new Set(entity.invariants.flatMap((rule) => (rule.enforcement === 'store' ? rule.on : [])));
+  /** Whether a store rule judges `op`. @param {string} op */
+  const ruled = (op) => ruledOps.has(op);
   /** Whether a store rule on `op` reads another row, so its check and the
    * write share one transaction. @param {string} op */
   const probing = (op) => entity.invariants.some((rule) => rule.enforcement === 'store' && rule.on.includes(op) && rule.probes.length > 0);
+  // what a database rule counts as a change (§13.1): every column but the
+  // version, a generated column and a member a rule increments
+  const incremented = new Set(entity.invariants.flatMap((rule) => (rule.effects ?? []).map((effect) => effect.increment)));
+  const counted = physical ? scalarColumns.filter((column) => !column.generated && column.name !== entity.version
+    && !incremented.has(column.name)).map((column) => column.name) : [];
+  /** Whether a counted member differs between two stored rows, each read back
+   * through its codec — the comparison a database rule's change test makes. */
+  const changedBetween = (before, after) => counted.some((name) =>
+    canonicalizeJson(before?.[name] ?? null) !== canonicalizeJson(after?.[name] ?? null));
+  /** Judge a physical row's write against the row it replaced and the row now
+   * stored: an update that changes no counted member runs no `changed` rule.
+   * @param {string} op @param {any} before @param {any} stored @param {string[]} [assigned] */
+  const checkStored = (op, before, stored, assigned) => (!ruledOps.has(op) ? null : checkInvariants(entity.invariants, op, before, stored,
+    { probe, ...(assigned === undefined ? {} : { assigned }), ...(op === 'update' ? { unchanged: !changedBetween(before, stored) } : {}) }));
 
   const columnByName = new Map(scalarColumns.map((column) => [column.name, column]));
   /** Encode ONE column assignment the way {@link split} would. */
@@ -381,6 +401,9 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
       physicalName,
       writable,
       checkMutation: (op, before, after, options = {}) => checkInvariants(entity.invariants, op, before, after, { probe, ...options }),
+      checkStored,
+      ruled,
+      normalize: (doc) => normalizePhysicalDoc(doc),
       keys,
       autoKey,
       version: entity.version ?? null,
@@ -417,7 +440,7 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
       const { values, rest } = split(completed);
       const names = values.map((value) => value.name);
       const sql = insertSqlFor(names);
-      const insert = () => chain(prepared(`insert:${names.join(',')}`, sql), (statement) => {
+      const insert = () => chain(prepared(`insert:${JSON.stringify(names)}`, sql), (statement) => {
         const params = [...values.map((value) => value.value), ...(physical ? [] : [JSON.stringify(rest)])];
         const returning = autoKey !== null && !names.includes(autoKey);
         return chain(
@@ -427,7 +450,7 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
             const made = returning ? { ...completed, [autoKey]: out.key } : completed;
             return physical ? chain(this.get(made), (stored) => {
               checkValid(stored);
-              return chain(checkInvariants(entity.invariants, 'insert', null, stored, { probe }), () => stored);
+              return chain(checkStored('insert', null, stored), () => stored);
             }) : asStored(made);
           });
       });
@@ -463,7 +486,8 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
           }
         }
         const candidate = normalizePhysicalDoc({ ...current, ...changes });
-        if (physical && createJSONPatch(current, candidate).length === 0) return current;
+        // the version is the store's: a change to it alone writes nothing
+        if (physical && createJSONPatch(current, candidate).every((op) => memberOfPatch(op) === entity.version)) return current;
         if (physical && scalarColumns.some((c) => c.generated && Object.hasOwn(changes, c.name)
           && changes[c.name] !== current[c.name])) throw new DbRuntimeError('JD2003', 'generated columns are database-owned');
         const next = applyDefaults(candidate, { updating: true });
@@ -476,8 +500,7 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
         const { values: all, rest } = split(next, { updating: true });
         // a physical row is assigned what changes and nothing else, as a
         // tracked save assigns it: an UPDATE OF program sees what was written
-        const changed = physical ? new Set(createJSONPatch(current, next)
-          .map((op) => op.path.split('/')[1].replace(/~1/g, '/').replace(/~0/g, '~'))) : null;
+        const changed = physical ? new Set(createJSONPatch(current, next).map(memberOfPatch)) : null;
         const values = changed === null ? all : all.filter((value) => changed.has(value.name));
         if (physical && values.length === 0) return current;
         const assignments = [
@@ -487,25 +510,24 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
         const sql = `UPDATE ${tableSql} SET ${assignments} `
           + `WHERE ${keyWhere(values.length + (physical ? 0 : 1))}`;
         return chain(physical ? null : checkInvariants(entity.invariants, 'update', current, next, { probe }), () =>
-          chain(preparedUpdate(`update:${values.map((v) => v.name).join(',')}`, sql), (statement) =>
-            chain(attempt(() => statement.run([...values.map((value) => value.value),
-              ...(physical ? [] : [JSON.stringify(rest)]), ...parts]), (error) => wrapWrite(error, parts[0])),
-            () => physical ? chain(this.get(key), (stored) => {
-              checkValid(stored);
-              return chain(checkInvariants(entity.invariants, 'update', current, stored,
-                { probe, assigned: values.map((value) => value.name) }), () => stored);
-            }) : asStored(next))));
+          chain(runUpdate(values.map((value) => value.name), sql, (statement) =>
+            attempt(() => statement.run([...values.map((value) => value.value),
+              ...(physical ? [] : [JSON.stringify(rest)]), ...parts]), (error) => wrapWrite(error, parts[0]))),
+          () => physical ? chain(this.get(key), (stored) => {
+            checkValid(stored);
+            return chain(checkStored('update', current, stored, values.map((value) => value.name)), () => stored);
+          }) : asStored(next)));
       });
       return physical || probing('update') ? connection.transaction(update) : update();
     },
     delete(key) {
       writable();
-      if (entity.invariants.some((r) => r.enforcement === 'store' && r.on.includes('delete'))) {
-        const checked = () => chain(this.get(key), (before) =>
-          chain(checkInvariants(entity.invariants, 'delete', before, null, { probe }), () => remove(key)));
-        return probing('delete') ? connection.transaction(checked) : checked();
-      }
-      return remove(key);
+      if (!ruled('delete')) return remove(key);
+      // judged after the delete, against the row it removed, as a database
+      // rule is: a key with no row removes nothing and runs no rule
+      return connection.transaction(() => chain(this.get(key), (before) => before === undefined ? remove(key)
+        : chain(remove(key), (removed) => removed
+          ? chain(checkInvariants(entity.invariants, 'delete', before, null, { probe }), () => removed) : removed)));
     },
   };
   core.mutate = createEntityMutation(connection, entity, entityMapping, core);

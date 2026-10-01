@@ -209,11 +209,17 @@ export function verifyPhysical(connection, mapping, schema) {
     : chain(connection.prepare(connection.dialect.introspect.pragma('recursive_triggers')), (s) => chain(s.get([]), (row) => {
       if (Number(row?.recursive_triggers) !== 0) fail('an increment rule updates its own row, and recursive_triggers would run its trigger again; switch it off');
     }));
+  // a rule compares text by code point, which SQLite's BINARY collation is
+  // only over UTF-8: a UTF-16 database orders text by its code units
+  const encoding = (mapping.triggers ?? []).length === 0 || connection.dialect.name !== 'sqlite' ? null
+    : chain(connection.prepare(connection.dialect.introspect.pragma('encoding')), (s) => chain(s.get([]), (row) => {
+      if (String(row?.encoding).toUpperCase() !== 'UTF-8') fail(`database rules compare text by code point, which a ${row?.encoding} database does not; use a UTF-8 database`);
+    }));
   const read = mapping.kind === 'view'
     ? chain(connection.prepare(connection.dialect.introspect.columns(mapping.table)), (s) =>
       chain(s.all([]), (columns) => ({ columns: columns.map((c) => ({ ...c, generated: !!c.hidden })), primaryKey: [] })))
     : schema.tables.find((t) => t.name === mapping.table);
-  return chain(recursion, () => chain(installed, () => chain(read, (table) => {
+  return chain(recursion, () => chain(encoding, () => chain(installed, () => chain(read, (table) => {
     if (mapping.kind !== 'view' && JSON.stringify(table.primaryKey) !== JSON.stringify(mapping.keys.map((k) => mapping.columns.find((c) => c.name === k).physical))) fail('ordered primary key disagrees');
     for (const column of mapping.columns) {
       const actual = table.columns.find((c) => c.name === column.physical);
@@ -224,7 +230,7 @@ export function verifyPhysical(connection, mapping, schema) {
       connection.dialect.qualifyPhysicalColumn?.(column, actual, mapping.kind);
     }
     return null;
-  })));
+  }))));
 }
 
 /** Select mapped columns with their physical aliases for the shared row merger.

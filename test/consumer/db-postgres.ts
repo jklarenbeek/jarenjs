@@ -1,5 +1,5 @@
-import { openStore, type Driver, type PostgresPhysicalMigrationTarget, type IsolationLevel, type OwnerError } from '@jarenjs/db';
-import { postgresDriver, postgresNotifications, POSTGRES_DEFAULTS, type PostgresClient, type PostgresOptions } from '@jarenjs/db/postgres';
+import { openStore, planInvariants, type InvariantProgram, type Driver, type PostgresPhysicalMigrationTarget, type IsolationLevel, type OwnerError } from '@jarenjs/db';
+import { postgresDialect, postgresDriver, postgresNotifications, POSTGRES_DEFAULTS, type PostgresClient, type PostgresOptions } from '@jarenjs/db/postgres';
 import { relational, sql, planSchemaChange, applySchemaChange, planTableMigration, applyTableMigration, type AsyncRelationalEngine } from '@jarenjs/db/relational';
 import { asyncLive, type AsyncLiveOptions } from '@jarenjs/db/async-live';
 import { createDbSearch, type DbSearchOptions } from '@jarenjs/db/search';
@@ -35,6 +35,15 @@ const connections: number = several.capabilities.connections;
 // @ts-expect-error — a count of sessions, not a mode
 await openStore({ $model: '0.1', collections: {} }, { driver, sessions: 'many' });
 void connections;
+// a planned rule program: row programs, and the statement program that refuses TRUNCATE
+const truncating: Pick<InvariantProgram, 'level' | 'events'> = { level: 'STATEMENT', events: ['TRUNCATE'] };
+const fixedPath: InvariantProgram['function']['config'] = ['search_path=pg_catalog, pg_temp'];
+for (const item of planInvariants({ $model: '0.1', entities: {} }, { dialect: postgresDialect({ searchPath: 'app' }) })) {
+  if (item.type !== 'trigger' || item.program === undefined) continue;
+  const level: 'ROW' | 'STATEMENT' = item.program.level;
+  void level;
+}
+void [truncating, fixedPath];
 // the writer lock, the isolation floor and the owner lock, typed
 const owned = await openStore({ $model: '0.1', collections: {} },
   { driver: portable, isolation: 'repeatable read', owner: { id: 'api-1', leaseMs: 30_000 } });

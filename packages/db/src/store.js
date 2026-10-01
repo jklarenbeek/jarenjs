@@ -28,7 +28,7 @@ import { parseJSONPointer, compileJSONPointer, JSONPOINTER_NOTHING } from '@jare
 import { equalsJson } from '@jarenjs/core/object';
 
 import { DbCompileError, DbRuntimeError, wrapDriverError, isDriverError, classifyDriverError } from './errors.js';
-import { chain, toPromise, isThenable, attempt, abortReason, DEFAULT_QUEUE_TIMEOUT } from './driver.js';
+import { chain, toPromise, isThenable, attempt, abortReason } from './driver.js';
 import { createSessionRouter } from './sessions.js';
 import { isPlainOptions, refuseUnknownMembers } from './options.js';
 import { canonicalKeyText } from './key-text.js';
@@ -1673,11 +1673,15 @@ export function openStore(model, options) {
    * what it had opened.
    * @returns {Promise<any>}
    */
+  /** What a fresh root context starts with on several sessions, set once the
+   * store has its own unit of work: no call checks out a session before.
+   * @type {() => Record<string, any>} */
+  let freshContext;
   const openSessions = () => Promise.resolve(options.driver.contextStorage()).then((storage) => {
     /** @type {any[]} */
     const sessions = [];
     const next = () => (sessions.length === options.sessions
-      ? createSessionRouter({ sessions, storage, queueTimeout: options.queueTimeout ?? DEFAULT_QUEUE_TIMEOUT })
+      ? createSessionRouter({ sessions, storage, newContext: () => freshContext() })
       : chain(openOne(), (connection) => { sessions.push(connection); return next(); }));
     return toPromise(next()).catch((error) =>
       Promise.allSettled(sessions.map((connection) => connection.close())).then(() => { throw error; }));
@@ -1842,7 +1846,7 @@ export function openStore(model, options) {
       const severalSessions = opened.primary !== undefined;
       if (severalSessions) {
         ctx = () => opened.context() ?? rootContext;
-        opened.newContext = () => ({ scope: null, currentScope: null, currentRoot: null, settlements: null, work: rootWork });
+        freshContext = () => ({ scope: null, currentScope: null, currentRoot: null, settlements: null, work: rootWork });
       }
 
       /**
@@ -1986,8 +1990,8 @@ export function openStore(model, options) {
           // from here, and everything before it belongs to a scope that
           // is still open
           const mark = list.length;
-          /** @type {{ root?: any, cursors?: Set<() => Promise<unknown>> }} */
-          const identity = {};
+          /** @type {{ root?: any, cursors?: Set<() => Promise<unknown>>, context?: any }} */
+          const identity = { context: ctx() };
           ctx().scope = inner;
           ctx().currentScope = identity;
           if (root !== undefined) {
@@ -2228,7 +2232,7 @@ export function openStore(model, options) {
       const gatedOn = (/** @type {any} */ gate) => (/** @type {() => any} */ fn, /** @type {string | undefined} */ what,
         /** @type {AbortSignal | undefined} */ signal) => {
         refuseClosed();
-        if (strictTransactions && gate.mustQueue)
+        if (strictTransactions && (gate.wouldWait ?? gate.mustQueue))
           throw contended("{ transactions: 'strict' } refuses to queue behind it");
         return chain(ownerGuard(false), () => withScope((inner) => gate.exclusively((/** @type {any} */ admitted) => {
           ownerAdmitted();
@@ -2242,12 +2246,52 @@ export function openStore(model, options) {
        * itself on a store with one session; on a store with several, the
        * first session, so the unit of work keeps one caller at a time.
        */
-      const gatedWork = severalSessions ? gatedOn(opened.pinned) : gated;
+      const gatedWork = severalSessions ? ((pinned) => (/** @type {() => any} */ fn, /** @type {string | undefined} */ what,
+        /** @type {AbortSignal | undefined} */ signal) => { refuseInsideTransaction(); return pinned(fn, what, signal); })(gatedOn(opened.pinned))
+        : gated;
+
+      /**
+       * On a store with several sessions, a call on the store's own unit of
+       * work made from inside a transaction would neither join it nor wait
+       * for it, and which one happened would depend on the load: refused by
+       * name instead.
+       */
+      function refuseInsideTransaction() {
+        if (ctx().currentRoot === null) return;
+        throw new DbCompileError('JD0012', "the store's own unit of work runs on its first session, apart from every "
+          + 'transaction: a call on it from inside one would neither join that transaction nor wait for it. Inside the '
+          + 'transaction use the store the callback received (tx.entity / tx.saveChanges); otherwise call it after it settles.');
+      }
 
       const cursorOwnership = opened.capabilities.cursorTransaction === true
         ? { holdMs: opened.capabilities.cursorLifetimeMs, owners: new Set(), max: opened.capabilities.maxCursors } : undefined;
+      /**
+       * On several sessions, a cursor and the gate it is admitted through,
+       * both re-entering the call that holds its session: the cursor's own
+       * steps — its pulls, its lifetime timer, an abort's release — run
+       * there, whoever makes them. @param {any} cursor @param {any} gate
+       */
+      const holdingSession = (cursor, gate) => {
+        /** @type {any} */
+        let holder;
+        const recording = (/** @type {() => any} */ fn, /** @type {string | undefined} */ label,
+          /** @type {AbortSignal | undefined} */ abort) => gate(() => { holder = opened.context(); return fn(); }, label, abort);
+        const within = (/** @type {() => any} */ fn) => (holder === undefined ? fn() : opened.enter(holder, fn));
+        /** @type {any} */
+        const entered = {
+          streaming: cursor.streaming,
+          barrier: cursor.barrier,
+          get settled() { return cursor.settled; },
+          next: () => within(() => cursor.next()),
+          return: (/** @type {any} */ value) => within(() => cursor.return(value)),
+        };
+        return { cursor: entered, gate: recording };
+      };
       const admitCursorOn = (/** @type {any} */ gate) => (/** @type {any} */ cursor, /** @type {AbortSignal | undefined} */ signal,
-        /** @type {string} */ what) => admitCursor(cursor, gate, signal, what, cursorOwnership);
+        /** @type {string} */ what) => {
+        const admitted = severalSessions ? holdingSession(cursor, gate) : { cursor, gate };
+        return admitCursor(admitted.cursor, admitted.gate, signal, what, cursorOwnership);
+      };
       const admitRootCursor = admitCursorOn(gated);
       /** A tracked root cursor: its pulls register in the store's own unit of work. */
       const admitWorkCursor = severalSessions ? admitCursorOn(gatedWork) : admitRootCursor;
@@ -2487,6 +2531,9 @@ export function openStore(model, options) {
               options?.first === true, options?.unbounded === true),
           // never from inside a transaction's own synchronous body
           renewsInline: () => ctx().currentRoot === null || opened.mustQueue,
+          // on a store with several sessions the lock lives on the first one,
+          // and the others must not outlive it
+          lost: severalSessions ? () => opened.primary.lost() : undefined,
         });
         return ownerLease.acquire();
       };
@@ -3604,7 +3651,8 @@ export function openStore(model, options) {
             // a write the store's own unit of work hears of (`afterWrite`)
             write: (run, signal) => {
               const via = severalSessions ? opened.pinned : opened;
-              if (strictTransactions && via.mustQueue)
+              if (severalSessions) refuseInsideTransaction();
+              if (strictTransactions && (via.wouldWait ?? via.mustQueue))
                 throw contended("{ transactions: 'strict' } refuses to queue behind it");
               return topLevelTransaction(() => run(connection), signal, undefined, 'immediate', undefined, undefined, undefined, via);
             },
@@ -3740,6 +3788,9 @@ export function openStore(model, options) {
               // a closed set, read before anything begins (JD0013, JD0014)
               const { mode, signal, unitOfWork, retry, holdTimeoutMs, isolation } =
                 readTransactionOptions(transactionOptions, 'async', 'store.transaction');
+              if (severalSessions && unitOfWork === 'shared')
+                throw new DbCompileError('JD0014', "store.transaction: unitOfWork 'shared' cannot act on a store with several "
+                  + "sessions — each transaction has a unit of work of its own there, and the store's own is served on its first session");
               const hold = holdTimeoutMs ?? options.holdTimeoutMs;
               // the call's own level wins over the store's default
               const begin = beginFor(isolation ?? options.isolation, mode);
@@ -3898,7 +3949,8 @@ export function openStore(model, options) {
             if (ctx().currentScope === identity) return;
             throw new DbRuntimeError('JD2070',
               'this transaction handle is pinned to a scope that is not current: '
-              + 'its transaction settled, or an inner transaction is open. Use the '
+              + 'its transaction settled, an inner transaction is open, or — on a store with '
+              + "several sessions — it is used from another transaction's flow. Use the "
               + 'store the LIVE transaction callback received (tx.collection / '
               + 'tx.entity / tx.saveChanges / tx.jobs) — a handle never outlives '
               + 'or crosses its own scope.');
@@ -3915,6 +3967,12 @@ export function openStore(model, options) {
            * @returns {any}
            */
           const runScoped = (identity, fn) => {
+            // a handle used from a flow in no transaction — a listener, a timer
+            // made outside the body — runs in its own transaction's context, as
+            // on one session; from another transaction's flow it stays JD2070
+            if (severalSessions && ctx().currentRoot === null && identity.context !== ctx()
+              && identity.context?.currentScope === identity)
+              return opened.enter(identity.context, () => runScoped(identity, fn));
             requireScope(identity);
             const root = rootOf(identity);
             if (root === undefined || root.hold === undefined) return fn();

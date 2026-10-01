@@ -449,8 +449,15 @@ if (asyncLiveLeak.length)
 // cursor that holds one read across its pulls, and the connection's shared
 // admission — add 2338. Measured 813018 since: F&O's minimum-size
 // adjustments and exponent scaling, the rules for reading a quantity out of
-// text, and the cursor's owner check before each pull add 448.
-if (clientBytes > 814000)
+// text, and the cursor's owner check before each pull add 448. Measured
+// 833547 since: database rules — the trigger programs the store verifies at
+// open field by field, the change test, keyed existence probes and
+// increments, and the narrowed physical update — add 9633; several sessions
+// per Store — the session router, a transaction context per call, the
+// statement that resolves its session at each execution and capture's state
+// per transaction — and store rules judged at their own statements, against
+// the row as it was and as it is stored, add 10896.
+if (clientBytes > 834500)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 

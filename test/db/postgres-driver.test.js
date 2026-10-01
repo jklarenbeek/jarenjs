@@ -159,10 +159,12 @@ describe('the injected PostgreSQL driver', () => {
     });
     const connection = await postgresDriver({ connect: () => client }).open();
     assert.strictEqual(listeners.get('error')?.size, 1, 'the adapter listens for as long as it holds the session');
+    assert.strictEqual(connection.lost(), false);
     // what pg emits when the server ends a session it holds
     for (const listener of [...(listeners.get('error') ?? [])]) {
       listener(Object.assign(new Error('terminating connection due to administrator command'), { code: '57P01' }));
     }
+    assert.strictEqual(connection.lost(), true, 'the store asks this before it trusts a session again');
     await assert.rejects(connection.prepare('SELECT 1').get(),
       (/** @type {any} */ error) => error.code === 'JD2087' && error.class === 'connection' && error.retryable === true);
     await connection.close().catch(() => {});
@@ -654,6 +656,37 @@ describe('the injected PostgreSQL driver', () => {
         await store.close();
       }
       assert.strictEqual(injected.client.releases, 1);
+    });
+
+    it('on several sessions, every call refuses once the session holding the owner lock is gone', async () => {
+      /** @type {any[]} */
+      const clients = [];
+      const connect = () => {
+        const client = /** @type {any} */ (scriptedClient([...EXISTING,
+          [/pg_try_advisory_lock/, { rows: [{ held: true, schema: 'jaren_run_1' }], rowCount: 1,
+            fields: [{ name: 'held', dataTypeID: 16 }, { name: 'schema', dataTypeID: 25 }] }]]));
+        /** @type {Set<Function>} */
+        const errors = new Set();
+        Object.assign(client, {
+          errors,
+          on: (/** @type {string} */ event, /** @type {Function} */ listener) => { if (event === 'error') errors.add(listener); },
+          off: (/** @type {string} */ event, /** @type {Function} */ listener) => { errors.delete(listener); },
+        });
+        clients.push(client);
+        return Promise.resolve(client);
+      };
+      const store = await openStore(MODEL, { driver: postgresDriver({ connect }, { schema: 'jaren_run_1' }),
+        sessions: 2, owner: { id: 'api-1' } });
+      try {
+        assert.strictEqual(store.capabilities.connections, 2);
+        await store.collection('rows').put({ id: 'a', n: 1 });
+        // the server ends the first session, the one whose lock makes this store the owner
+        for (const listener of [...clients[0].errors])
+          listener(Object.assign(new Error('terminating connection due to administrator command'), { code: '57P01' }));
+        await assert.rejects(async () => store.collection('rows').put({ id: 'b', n: 2 }),
+          (/** @type {any} */ error) => error.code === 'JD2061' && /no longer owns its database/.test(error.message));
+      }
+      finally { await store.close().catch(() => {}); }
     });
 
     it('a top-level transaction is a BLOCK, and a nested one a savepoint', async () => {

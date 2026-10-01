@@ -656,8 +656,8 @@ are the same two read-back values under their long-published names.
 `readOnly`, `queueTimeout`, `compileSchema`, `capture`, `replication`,
 `jobs`, `live`, `adopt`, `transactions`, `expressions`, `operators`,
 `functions`, `extensions`, `profile`, `statementCacheBound`,
-`zoneProvider`, `runtime`, `holdTimeoutMs`, `isolation`, `owner` and
-`reads`, beside the pragmas above — anything else
+`zoneProvider`, `runtime`, `holdTimeoutMs`, `isolation`, `owner`,
+`reads` and `sessions`, beside the pragmas above — anything else
 is `JD0009`, named and with the nearest option suggested, before the
 driver opens. A misspelt option is otherwise dropped in silence, and
 `{ captur: true }` opened a store with no capture at all, which the
@@ -671,8 +671,10 @@ are `true` or `false`; `capture` and `jobs` are `true`, `false` or their
 options object (`'false'`, `0` and `''` used to switch the feature ON,
 and `jobs: null` threw a raw `TypeError`); `live` and `replication` are
 their options object; `transactions` is `'wait'` or `'strict'`; `reads`
-is `'serialized'` or `'parallel'` (§5.1). Each is `JD0009` naming the
-option and what it holds.
+is `'serialized'` or `'parallel'` (§5.1); `sessions` is a whole number from
+1, at most the driver's `maxConnections`, on a PostgreSQL driver and
+without `replication` (§5.1). Each is `JD0009` naming the option and what
+it holds.
 
 Opening retries classified busy failures of its idempotent initialization
 sequence, yielding between attempts so a competing opener can finish. The
@@ -891,7 +893,10 @@ independent transactions overlap in time and the database settles what
 they do to each other: a serialization failure or a deadlock is a busy,
 retryable refusal that `retry` absorbs, and `mode: 'immediate'`
 transactions take the writer lock in turn. A call made inside a
-transaction's synchronous extent stays on its session, as on one; a
+transaction's synchronous extent stays on its session, as on one — except
+a call on the store's own unit of work (below), which runs on the first
+session and so never joins a transaction on another one: inside a body,
+use `tx.entity` and `tx.saveChanges`. A
 transaction's handle used from another transaction's flow is `JD2070`, and
 a hold limit rolls back its own transaction only. Every transaction has a
 unit of work of its own (as `unitOfWork: 'own'`), and its trusted SQL
@@ -3069,22 +3074,34 @@ The store writes a physical row only when it changes, and then assigns only the
 members that change, with the version bump and update stamps — `update()` and a
 tracked save alike — so an immutable-column guard (`{ "on": ["update"],
 "columns": ["createdAt"], "assert": false }`) refuses a write to that member and
-no other. `changed` and `assigned` therefore coincide for the store's own writes;
-they differ for other SQL writers (raw SQL, a native mutation with
+no other. A value that stores as the one already there (a uuid in other letter
+case, `null` over an absent member) is no change, nor is the version alone; a
+change inside a json member assigns that member alone. `changed` and `assigned`
+therefore coincide for the store's own writes, except a write that sets only an
+incremented member (§13.5), which assigns it without counting as a change; they
+differ for other SQL writers (raw SQL, a native mutation with
 `reporting: "matched"`), which only a database rule meets.
 
 ### 13.2 Existence probes
 
 `{ "$exists-row": { "entity": "<Entity>", "match": { "<member>": <value>, … } } }`
 is true when the target entity holds a row whose members equal the values. A
-value is `$.old.member`, `$.new.member` or a scalar literal. `match` must cover
-the target's whole primary key, so a probe is one indexed read; key members
-compare with `=`, other members null-safely, so a `null` literal matches SQL
-NULL. The target is the physical layout of another entity: PostgreSQL runs row
-triggers at the end of a statement and SQLite per row, so a probe of the rule's
-own table would see a multi-row statement's other rows differently. Each value
-compares as its column's type. A probe composes with `$not`, `$and` and `$or` —
-"the parent is a draft, or it is gone" is
+value is `$.old.member`, `$.new.member` or a scalar literal; a text literal
+that starts with `$` is written `$$`, as in any query (`"$$draft"` is the text
+`$draft`). `match` must cover the target's whole primary key, so a probe is one
+indexed read; key members compare with `=`, other members null-safely, so a
+`null` literal matches SQL NULL, and text by code point whatever the column's
+collation. The target is the physical layout of another table — not a view,
+which has no primary key to read by, and not the rule's own table, even through
+a second entity mapped to it: PostgreSQL runs row triggers at the end of a
+statement and SQLite per row, so a probe of the rule's own table would see a
+multi-row statement's other rows differently. A path names a member the rule's
+own entity has — a column of its layout, or a stored property of a document —
+whose column has the target column's codec (an integer into a number column is
+exact), and a literal is a value the target column holds, so the database, its
+other engine and the store compare one value one way; anything else refuses at
+planning. A probe composes with `$not`, `$and` and `$or` — "the parent is a
+draft, or it is gone" is
 
 ```json
 { "$or": [
@@ -3098,14 +3115,23 @@ its values bound, inside the write's transaction.
 
 ### 13.3 Store enforcement
 
-Store enforcement covers direct and tracked model writes; arbitrary external
-SQL is outside that population. Trusted SQL writes refuse while store rules are
-present, and native mutations refuse an entity with store rules. The store
-checks an update rule whenever it writes the row, and a `columns` rule when the
-statement it writes assigns one of them. A physical row's rules are checked
-after the write, inside its transaction, against the stored row; a document's
-before the write — and a document entity's `update()` rewrites the whole
-document on every call, so its update rules are checked on every call.
+Store enforcement covers direct and tracked model writes and a migration's
+physical transform; arbitrary external SQL is outside that population. Trusted
+SQL writes refuse while store rules are present, and native mutations refuse an
+entity with store rules. Each rule is checked at its own statement, inside the
+write's transaction, so a tracked save's rule sees what the statements ahead of
+it wrote. A physical row's insert and update rules are checked after the write,
+against the row as it was — read just before the statement, not the copy a unit
+of work holds — and the row now stored: an update that changes nothing a
+database rule counts runs no `changed` rule, and a `columns` rule runs when the
+statement assigns one of them (§13.1). A delete rule is checked after the
+delete, against the row it removed; a key with no row removes nothing and runs
+no rule. A document's insert and update rules are checked before its own
+statement, against the document the unit of work holds, membership arrays
+included; a save that changes only a document's memberships writes the join
+table, not its row, and runs its update rules after the save's other
+statements. A document entity's `update()` rewrites the whole document on
+every call, so its update rules are checked on every call.
 
 ### 13.4 Database enforcement
 
@@ -3122,8 +3148,10 @@ limitation of the rule language.
 Database enforcement also requires a bounded scalar query expression: `$eq`,
 `$ne`, `$lt`, `$le`, `$gt`, `$ge`, `$and`, `$or`, `$not`, `$exists-row`, scalar
 literals, `$.op`, and `$.old.member` / `$.new.member` references over `text`,
-`integer`, `number`, `boolean`, `date` and `datetime` columns. Unsupported
-expressions refuse at planning. A rule such as
+`integer`, `number`, `boolean`, `date` and `datetime` columns. A text literal
+that starts with `$` is written `$$`, as the query language reads it; any other
+`$` expression (a variable, a bracketed path) refuses. Unsupported expressions
+refuse at planning. A rule such as
 `{ "$le": ["$.new.start", "$.new.end"] }` declares an interval constraint without
 claiming interval indexing.
 
@@ -3135,20 +3163,27 @@ both engines:
 
 - **SQLite** — one AFTER trigger per table and operation, plus one `AFTER UPDATE
   OF` trigger per distinct `columns` set (`_jaren_rule_<length>_<table>_<op>`,
-  `…_update_of_<hash>`). A failure is `RAISE(ABORT, 'jaren invariant:<rule>')`.
-  Opening compares each trigger's stored CREATE text.
+  `…_update_of_<hash>`; two sets whose hash meets refuse at planning). A
+  failure is `RAISE(ABORT, 'jaren invariant:<rule>')`. Opening compares each
+  trigger's stored CREATE text, and refuses a UTF-16 database (`JD0002`),
+  whose `BINARY` order is not code point order.
 - **PostgreSQL** — per program, a PL/pgSQL trigger function and the row trigger
   that calls it: two items, `type: "function"` then `type: "trigger"`, because a
   PostgreSQL migration step is one statement. Both live in the driver-owned
-  schema (`searchPath`, required), and every table a program names carries that
-  schema, since a function runs under its caller's search path. A name past
-  PostgreSQL's 63-byte identifier limit becomes `_jaren_rule_<hash of the
-  table>_<op>`. A failure raises SQLSTATE **`23J01`** (class 23, integrity
-  constraint violation) with the message `jaren invariant:<rule>`. The server
-  stores a trigger deparsed, so opening reads each program back field by
-  field — the trigger's timing, events, level, `UPDATE OF` columns, `WHEN`
-  condition, enablement and deferral, and its function's schema, name,
-  language, return type, arguments, settings, security and verbatim source.
+  schema (`searchPath`, required); every table a program names carries that
+  schema, and every function runs with `search_path = pg_catalog, pg_temp`, so
+  no schema a writer puts ahead of `pg_catalog` can supply its operators, casts
+  or collations. `TRUNCATE` runs no row trigger, so a table whose deletes a
+  rule judges gets one more program, a `BEFORE TRUNCATE` statement trigger that
+  refuses it in the delete rule's name. A name past PostgreSQL's 63-byte
+  identifier limit becomes `_jaren_rule_<hash of the table>_<op>`; two tables
+  that meet in one such name refuse at planning. A failure raises SQLSTATE
+  **`23J01`** (class 23, integrity constraint violation) with the message
+  `jaren invariant:<rule>`. The server stores a trigger deparsed, so opening
+  reads each program back field by field — the trigger's timing, events,
+  level, `UPDATE OF` columns, `WHEN` condition, enablement and deferral, and its
+  function's schema, name, language, return type, arguments, settings,
+  security and verbatim source.
 
 `JD2096` is reported only for such a raise: on SQLite a message that starts
 with `jaren invariant:` (result code 1811), on PostgreSQL SQLSTATE `23J01` with
@@ -3164,11 +3199,20 @@ statement spends a PostgreSQL transaction (the next statement is `JD2088`, as
 after any failed statement there) unless it ran in a nested transaction.
 Existing application triggers keep their engine's ordering relative to these
 programs. Equality uses JSON-style scalar types and null equality; an ordered
-comparison involving SQL NULL is false; `$not` negates that boolean. Text
-compares by code point on both engines (SQLite `BINARY`, PostgreSQL
-`COLLATE "C"`), a `date` column as its `YYYY-MM-DD` text. An absent-column
-policy cannot be lowered to a database rule and refuses. Store validation and
-codec checks are not a substitute for database constraints on external inputs.
+comparison involving SQL NULL is false, and so is one over a boolean, as in the
+query engine; `$not` negates that boolean. Text compares by code point on both
+engines (SQLite `BINARY`, PostgreSQL `COLLATE "C"`), a `date` column as its
+`YYYY-MM-DD` text. A rule's change test (§13.1) is the exception on SQLite: it
+compares each column as stored, under the column's declared collation, so on a
+`COLLATE NOCASE` column a rewrite that changes only letter case is no change,
+and an outside writer's other spelling of one json or uuid value is one;
+PostgreSQL compares by codec, and the store compares the values it reads back.
+An absent-column policy cannot be lowered to a database rule and refuses.
+SQLite's `INSERT OR REPLACE` and `UPDATE OR REPLACE` delete a conflicting row
+without running its delete trigger while `recursive_triggers` is off, as
+increments need it (§13.5), so such a writer passes a delete rule by. Store
+validation and codec checks are not a substitute for database constraints on
+external inputs.
 
 References to a property of the unavailable old/insert or new/delete record
 refuse database lowering, because absence differs from SQL NULL. A referenced
@@ -3181,9 +3225,15 @@ codec's type, a safe integer, a finite number within ±(2^53−1), a date of yea
 An optional database `audit: { entity, values }` inserts into an
 application-owned mapped table after the accepted mutation, after identity
 allocation. Values use old/new scalar references. Self-referential or chained
-audit effects refuse; all effects share the writer transaction. On PostgreSQL an
-integer audit member fed by a `number` column or a non-integer literal refuses at
-planning, because an assignment cast would round it.
+audit effects refuse — judged by table, so a second entity mapped to the rule's
+own table is that table; all effects share the writer transaction. On
+PostgreSQL an integer audit member fed by a `number` column or a non-integer
+literal refuses at planning, because an assignment cast would round it. On
+SQLite a writer's conflict clause governs every statement of the trigger but
+its `RAISE`: under `UPDATE OR IGNORE` an audit insert that fails a constraint is
+dropped while the row change stands, and under `OR REPLACE` it replaces the
+audit row it meets — so an audit table carries no UNIQUE or CHECK constraint
+beyond its key, or such writers stay away from the audited table.
 
 `effects: [{ "increment": "<member>" }]` on a rule that includes `update` moves
 a revision by one on each update the rule fires for, unless the writer set it:
@@ -3191,7 +3241,10 @@ a revision by one on each update the rule fires for, unless the writer set it:
 runs it in a BEFORE UPDATE program, so the row is written with its revision;
 SQLite as the last statement of the AFTER UPDATE trigger, an update of the same
 row that its own trigger cannot fire again while `recursive_triggers` is off,
-which opening verifies. The member is a non-key, non-null integer column the
+which opening verifies on the store's connection. That second UPDATE is a write
+of its own: an application's AFTER UPDATE trigger on the table runs once more
+for it, and a writer that switches `recursive_triggers` on for its own
+connection runs the rule's program again over the row it has just written. The member is a non-key, non-null integer column the
 database owns like a version: it never counts as a change, it cannot be a rule
 column, and no update rule of the entity may read `$.new.member` (PostgreSQL's
 AFTER programs see the new revision, SQLite's trigger the writer's). A rule

@@ -2491,11 +2491,14 @@ export interface TrustedSyncSql {
 }
 /** What an installed rule program does, as the PostgreSQL catalog reports it:
  * the trigger's timing, events, level, `UPDATE OF` columns, `WHEN` presence,
- * enablement and deferral, and its function — verified field by field at open. */
+ * enablement and deferral, and its function — verified field by field at open.
+ * A row program judges each row; the one statement program refuses `TRUNCATE`
+ * of a table whose deletes a rule judges. Every function's `config` fixes its
+ * search path (`search_path=pg_catalog, pg_temp`). */
 export interface InvariantProgram {
   timing: 'BEFORE' | 'AFTER';
-  events: ('INSERT' | 'UPDATE' | 'DELETE')[];
-  level: 'ROW';
+  events: ('INSERT' | 'UPDATE' | 'DELETE' | 'TRUNCATE')[];
+  level: 'ROW' | 'STATEMENT';
   columns: string[];
   condition: boolean;
   enabled: string;

@@ -11,88 +11,129 @@
  * that transaction holds, exactly as a store on one session nests it; any
  * other call is a root call and checks out a session. Every use of a session
  * goes through here, one call at a time per session, so a session's own gate
- * never queues. Statements go to the session the calling context holds.
+ * never queues. Statements go to the session the calling context holds. A
+ * session the server dropped is never handed out again.
  */
 import { isThenable, chain } from '@jarenjs/core/function';
-import { DbCompileError } from './errors.js';
+import { DbCompileError, DbRuntimeError } from './errors.js';
 import { abortReason } from './driver.js';
 
 /**
  * @param {{ sessions: any[], storage: { run: (context: any, fn: () => any) => any, getStore: () => any },
- *   queueTimeout: number }} options
- * @returns {any} the connection surface a store uses, with `primary`, `pinned`, `context()` and `newContext`
+ *   newContext: () => Record<string, any> }} options - `newContext` is what a fresh root context starts with,
+ *   asked each time a call checks out a session
+ * @returns {any} the connection surface a store uses, with `primary`, `pinned`, `context()` and `enter()`
  */
-export function createSessionRouter({ sessions, storage, queueTimeout }) {
+export function createSessionRouter({ sessions, storage, newContext }) {
   const primary = sessions[0];
+  // the bounds every session keeps for its own gate, kept for the set
+  const queueTimeout = primary.queueTimeout;
+  const queueCapacity = primary.queueCapacity;
   const busy = sessions.map(() => false);
   /** Callers waiting for a session, in arrival order: `want` is the index a
-   * pinned call needs, `-1` any. @type {{ want: number, take: (index: number) => void }[]} */
+   * pinned call needs, `-1` any. @type {{ want: number, take: (index: number) => void, leave: (error: any) => void }[]} */
   const waiting = [];
+  let closing = false;
   /** The session the calling context holds, or `undefined` outside any. */
   const held = () => storage.getStore()?.session;
+  /** @param {number} index */
+  const usable = (index) => !busy[index] && !sessions[index].lost();
+  /** The session a call asking for `want` would take now, or -1. An ordinary
+   * call takes the highest usable one: the first, which serves the store's
+   * own unit of work, stays free while another is.
+   * @param {number} want */
+  const freeFor = (want) => {
+    if (want >= 0) return usable(want) ? want : -1;
+    for (let i = sessions.length - 1; i >= 0; i--) if (usable(i)) return i;
+    return -1;
+  };
+  const closed = () => new DbRuntimeError('JD2063', 'the store is closed — a call after close() has no connection to run on');
+  /** No session left to wait for: the ones asked for were all dropped.
+   * @param {number} want */
+  const gone = (want) => (want >= 0 ? sessions[want].lost() : sessions.every((session) => session.lost()))
+    ? new DbRuntimeError('JD2087', want >= 0
+      ? "the store's first session was lost: its own unit of work and its owner lock went with it"
+      : "every one of the store's sessions was lost")
+    : null;
 
   /** Give a session back: to the first waiter it suits, or to the free set.
    * @param {number} index */
   const release = (index) => {
+    busy[index] = false;
+    if (closing || sessions[index].lost()) return;
     const at = waiting.findIndex((waiter) => waiter.want < 0 || waiter.want === index);
-    if (at < 0) { busy[index] = false; return; }
+    if (at < 0) return;
     const [waiter] = waiting.splice(at, 1);
+    busy[index] = true;
     waiter.take(index);
   };
 
   /**
    * A free session's index now — the one asked for, or any — or a promise of
-   * it, bounded by `queueTimeout` (`JD0012`) and abandoned by `signal`.
+   * it, bounded by `queueTimeout` (`JD0012`) and the queue's capacity
+   * (`JD2091`), and abandoned by `signal`.
    * @param {number} want @param {string} what @param {AbortSignal} [signal] @returns {number | Promise<number>}
    */
   const checkout = (want, what, signal) => {
+    if (closing) return Promise.reject(closed());
     if (signal?.aborted === true) return Promise.reject(abortReason(signal));
-    // an ordinary call takes the highest free session: the first, which
-    // serves the store's own unit of work, stays free while another is
-    const index = want < 0 ? busy.lastIndexOf(false) : busy[want] ? -1 : want;
+    const lost = gone(want);
+    if (lost !== null) return Promise.reject(lost);
+    const index = freeFor(want);
     if (index >= 0) { busy[index] = true; return index; }
+    if (waiting.length >= queueCapacity)
+      return Promise.reject(new DbRuntimeError('JD2091', 'the connection admission queue is full'));
     return new Promise((resolve, reject) => {
-      /** @type {{ want: number, take: (index: number) => void }} */
-      const waiter = { want, take: (at) => {
-        clearTimeout(timer);
-        signal?.removeEventListener('abort', cancelled);
-        resolve(at);
-      } };
-      const leave = (/** @type {any} */ error) => {
-        const at = waiting.indexOf(waiter);
-        if (at >= 0) waiting.splice(at, 1);
-        clearTimeout(timer);
-        signal?.removeEventListener('abort', cancelled);
-        reject(error);
+      /** @type {{ want: number, take: (index: number) => void, leave: (error: any) => void }} */
+      const waiter = {
+        want,
+        take: (at) => {
+          clearTimeout(timer);
+          signal?.removeEventListener('abort', cancelled);
+          resolve(at);
+        },
+        leave: (error) => {
+          const at = waiting.indexOf(waiter);
+          if (at >= 0) waiting.splice(at, 1);
+          clearTimeout(timer);
+          signal?.removeEventListener('abort', cancelled);
+          reject(error);
+        },
       };
-      const timer = setTimeout(() => leave(new DbCompileError('JD0012',
+      const timer = setTimeout(() => waiter.leave(new DbCompileError('JD0012',
         `${what} waited ${queueTimeout}ms for ${want < 0 ? `one of the store's ${sessions.length} sessions`
           : "the store's first session, which serves its own unit of work"}. A session runs one root call or `
         + 'transaction at a time; work that belongs INSIDE a transaction goes through the store the '
         + 'callback received (tx.collection / tx.entity / tx.transaction).')), queueTimeout);
-      const cancelled = () => leave(abortReason(signal));
+      const cancelled = () => waiter.leave(abortReason(signal));
       signal?.addEventListener('abort', cancelled, { once: true });
       waiting.push(waiter);
     });
+  };
+
+  /** Whether the held session runs a call made now, nested: the calling
+   * transaction is on its own synchronous extent there.
+   * @param {number} want */
+  const nests = (want) => {
+    const session = held();
+    return session !== undefined && !session.mustQueue && (want < 0 || session === sessions[want]);
   };
 
   /**
    * A session's `method` for a root call: the held session while the calling
    * transaction is still on its own synchronous extent (a nested call), or
    * one checked out for the call — `want` names it for a pinned call — whose
-   * callback runs in a context of its own.
+   * callback runs in a context of its own, whoever invokes it.
    * @param {'exclusively' | 'transaction'} method @param {number} want
    * @param {string} what @param {(args: any[]) => AbortSignal | undefined} signalOf
    */
   const routed = (method, want, what, signalOf) => (/** @type {any[]} */ ...args) => {
-    // a pinned call nests only on the session it is pinned to
-    const session = held();
-    if (session !== undefined && !session.mustQueue && (want < 0 || session === sessions[want])) return session[method](...args);
+    if (nests(want)) return held()[method](...args);
     const signal = signalOf(args);
     return chain(checkout(want, what, signal), (index) => {
       const chosen = sessions[index];
       /** @type {Record<string, any>} */
-      const context = { ...router.newContext(), session: chosen };
+      const context = { ...newContext(), session: chosen };
       // a call that ended holds nothing: work its body left behind (a timer,
       // an unawaited promise) takes a session the way any root call does
       const end = () => { context.session = undefined; release(index); };
@@ -120,17 +161,19 @@ export function createSessionRouter({ sessions, storage, queueTimeout }) {
     get synchronous() { return primary.synchronous; },
     get capabilities() { return primary.capabilities; },
     get dialect() { return primary.dialect; },
-    /** What a fresh root context starts with; the store sets it before any call.
-     * @type {() => Record<string, any>} */
-    newContext: () => ({}),
     /** The calling context, or `undefined` outside every root call. */
     context: () => storage.getStore(),
-    /** Whether a root call made now would wait: the calling transaction is
-     * past its synchronous extent, or every session is held. */
+    /** Run `fn` in `context`: a cursor's pulls in the call that holds its session.
+     * @param {any} context @param {() => any} fn */
+    enter: (context, fn) => storage.run(context, fn),
+    /** Whether the calling transaction is past its synchronous extent on the
+     * session it holds — what decides nesting, as on one session. */
     get mustQueue() {
       const session = held();
-      return session !== undefined ? session.mustQueue : !busy.includes(false);
+      return session !== undefined ? session.mustQueue : freeFor(-1) < 0;
     },
+    /** Whether a root call made now would wait for a session. */
+    get wouldWait() { return !nests(-1) && freeFor(-1) < 0; },
     /** @param {string} sql */
     exec: (sql) => (held() ?? primary).exec(sql),
     /** @param {string} sql @param {any} [metadata] */
@@ -140,10 +183,7 @@ export function createSessionRouter({ sessions, storage, queueTimeout }) {
     /** The first session for the calls that serve the store's own unit of
      * work, one at a time. */
     pinned: Object.freeze({
-      get mustQueue() {
-        const session = held();
-        return session !== undefined ? session.mustQueue : busy[0];
-      },
+      get wouldWait() { return !nests(0) && freeFor(0) < 0; },
       exclusively: routed('exclusively', 0, 'a call on the store\'s own unit of work', exclusiveSignal),
       transaction: routed('transaction', 0, 'a write on the store\'s own unit of work', transactionSignal),
     }),
@@ -153,13 +193,22 @@ export function createSessionRouter({ sessions, storage, queueTimeout }) {
     registerFunction: primary.registerFunction,
     registerAggregate: primary.registerAggregate,
     backup: primary.backup,
-    /** Close every session, the primary last: it holds the owner lease.
-     * @param {any} [closeOptions] */
+    /**
+     * Close every session at once: a call still waiting is refused `JD2063`,
+     * as one session's gate refuses its queue, and a transaction still
+     * running meets its closed session. `discard` is the first session's
+     * alone (it holds the owner lock); the first failure is reported.
+     * @param {any} [closeOptions]
+     */
     close: (closeOptions) => {
-      const rest = sessions.slice(1);
-      const closeAt = (/** @type {number} */ i) => (i >= rest.length ? primary.close(closeOptions)
-        : Promise.resolve().then(() => rest[i].close(closeOptions)).catch(() => undefined).then(() => closeAt(i + 1)));
-      return closeAt(0);
+      closing = true;
+      for (const waiter of waiting.splice(0)) waiter.leave(closed());
+      return Promise.allSettled(sessions.map((session, i) =>
+        Promise.resolve().then(() => session.close(i === 0 ? closeOptions : undefined))))
+        .then((results) => {
+          const failed = results.find((result) => result.status === 'rejected');
+          if (failed !== undefined) throw /** @type {PromiseRejectedResult} */ (failed).reason;
+        });
     },
   };
   return router;

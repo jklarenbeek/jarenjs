@@ -43,7 +43,7 @@ export const postgresFacts = {
       const separate = report.rows.filter((row) => row.shape === 'separate stores');
       const plain = report.routing['one session'].nsPerTransaction;
       const routed = report.routing['two sessions, one client'].nsPerTransaction;
-      return `\n\nMeasured ${report.measuredAt}: PostgreSQL ${report.postgres.version} (fsync=${report.postgres.fsync}, synchronous_commit=${report.postgres.synchronous_commit}, full_page_writes=${report.postgres.full_page_writes}), Node ${report.runtime.node}, pg ${report.runtime.pg}; ${report.clients} clients at once, each ${report.perClient} one-document write transactions on keys of its own; the median of ${report.runs} runs.\n\n`
+      return `\n\nMeasured ${report.measuredAt}: PostgreSQL ${report.postgres.version} (fsync=${report.postgres.fsync}, synchronous_commit=${report.postgres.synchronous_commit}, full_page_writes=${report.postgres.full_page_writes}), Node ${report.runtime.node}, pg ${report.runtime.pg}; ${report.clients} clients at once, each ${report.perClient} one-document write transactions on keys of its own; the median of ${report.rounds} rounds, each measuring every shape once.\n\n`
         + '| N | One store on N sessions, tx/s | N stores of one session, tx/s | One store over N stores |\n|---:|---:|---:|---:|\n'
         + one.map((row) => {
           const stores = separate.find((other) => other.stores === row.sessions);

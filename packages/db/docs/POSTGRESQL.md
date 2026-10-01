@@ -26,7 +26,7 @@ spatial/vector execution capability to this release.
 | Relational statements through the Store | `store.relational` and `tx.relational` over the native cursors, the write rules shared with trusted SQL, a failed write inside a transaction contained by its savepoint: [store-bound tests](../../../test/db/relational-store.test.js) | A root native cursor holds the session until released, so other root calls wait for it; `lastInsertRowid` is never reported |
 | Physical tables and catalog | Explicit codecs, exact bigint/decimal strings, date/time distinctions, declared layout and rich loss/disposition inventory: [physical tests](../../../test/db/postgres-physical.test.js) | Arbitrary catalog objects are inventoried, not automatically translated into model intent |
 | Native migrations | Reviewed native catalog artifacts, dependency/sequence preservation, receipts, transaction rollback and separate shadow replay: [migration tests](../../../test/db/postgres-migration.test.js) | Concurrent index creation and unreviewed destructive dependencies refuse; opening never silently changes an existing schema |
-| Database rules | Persistence invariants as PL/pgSQL trigger functions (SQLSTATE `23J01`), installed by a reviewed migration and verified field by field through the catalog at open; one differential oracle with SQLite over refusals, audit rows, revisions, existence probes and fresh and migrated installs: [invariant tests](../../../test/db/postgres-invariants.test.js) | Physical layouts only; a refused trusted statement spends its transaction (`JD2088`); `TableTrigger` documents remain SQLite SQL |
+| Database rules | Persistence invariants as PL/pgSQL trigger functions (SQLSTATE `23J01`) under a fixed `search_path = pg_catalog, pg_temp`, with a statement program refusing `TRUNCATE` where deletes are judged, installed by a reviewed migration and verified field by field through the catalog at open; one differential oracle with SQLite over refusals, audit rows, revisions, existence probes, store enforcement and fresh and migrated installs: [invariant tests](../../../test/db/postgres-invariants.test.js) | Physical layouts only; a refused trusted statement spends its transaction (`JD2088`); `TableTrigger` documents remain SQLite SQL |
 | Committed feed | Shared write journal, transactionally locked high-water and finite resume/reset: [capture tests](../../../test/db/postgres-capture.test.js) | Participating managed writers only; arbitrary external SQL, unenrolled trigger/cascade effects and physical layouts are outside capture coverage |
 | Jobs, flow and outbox | Shared engine, concurrent row-locked claims, leases, fenced checkpoints and atomic business/job writes: [job tests](../../../test/db/postgres-jobs.test.js) | Another database/file is another transaction; external delivery needs durable intent, receipts and reconciliation |
 | Live and lexical freshness | Optional `@jarenjs/db/async-live`, bounded resnapshot and the existing lexical ranker: [async tests](../../../test/db/postgres-async-live.test.js) | Not synchronous incremental live or native PostgreSQL full-text ranking; NOTIFY only wakes a durable page reader |
@@ -116,9 +116,24 @@ allocation lock still orders captured commits, so captured writes gain no
 concurrency; reads and uncaptured writes do. Replication runs on one session.
 
 The committed [measurement](../../../benchmark/postgres-sessions-result.json)
-compares one Store on N sessions with N Stores of one session each:
+compares one Store on N sessions with N Stores of one session each; the last
+column is what being one Store costs (below 1×) or gains (above):
 
 <!--fact:postgres.sessions-->
+
+Measured 2026-10-01T16:14:54.424Z: PostgreSQL 17.11 (Debian 17.11-1.pgdg12+2) (fsync=on, synchronous_commit=on, full_page_writes=on), Node 24.20.0, pg 8.23.0; 8 clients at once, each 40 one-document write transactions on keys of its own; the median of 5 rounds, each measuring every shape once.
+
+| N | One store on N sessions, tx/s | N stores of one session, tx/s | One store over N stores |
+|---:|---:|---:|---:|
+| 1 | 1258 | 1253 | 1.00× |
+| 2 | 2667 | 2714 | 0.98× |
+| 4 | 4650 | 5010 | 0.93× |
+| 8 | 7106 | 7285 | 0.98× |
+
+One transaction with nothing beside it: 0.822 ms on a store of one session, 0.822 ms through the router of a store on two (-0.0%). A store on one session has no router.
+
+One host, client and server on one machine; each client a run of one-document transactions on keys of its own (no conflicts), every commit durable, so it waits on a disk the host shares with whatever else runs there. A store on one session runs them in turn; several sessions and separate stores let the server work on them together. No production throughput claim.
+
 <!--/fact-->
 
 ## Select the backend at build time
@@ -266,10 +281,10 @@ retains earlier Bun memory-budget losses even when a later sample passes.
 
 | Existing SQLite adoption executable | Workload | RSS bytes | Frozen reference bytes | RSS disposition |
 |---|---|---:|---:|---|
-| bun-executable | catalog | 265486336 | 536870912 | within reference |
-| bun-executable | archive-stock | 1075605504 | 1073741824 | loss (+1863680) |
-| node-executable | catalog | 288641024 | 536870912 | within reference |
-| node-executable | archive-stock | 827826176 | 1073741824 | within reference |
+| bun-executable | catalog | 263417856 | 536870912 | within reference |
+| bun-executable | archive-stock | 1063981056 | 1073741824 | within reference |
+| node-executable | catalog | 288460800 | 536870912 | within reference |
+| node-executable | archive-stock | 828166144 | 1073741824 | within reference |
 
 These larger physical SQLite workloads are separate from the small build-selected managed application. Functional recovery success does not imply memory-budget success. Earlier samples remain in the resource history.
 

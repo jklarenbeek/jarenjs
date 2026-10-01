@@ -198,6 +198,7 @@ const GRID_ROWS = [
   { i: null, n: null, t: null, d: null, s: null, f: null },
   { i: 3, n: 2.25, t: 'b', d: null, s: '2020-01-01T00:00:00Z', f: null },
   { i: -1, n: -1, t: '', d: '0001-01-01', s: '', f: false },
+  { i: 4, n: 4, t: '$a', d: '2020-02-02', s: '2020-02-02T00:00:00Z', f: false },
 ];
 const WRONG_STORAGE = {
   sqlite: ["(1, 'x', 1, 'a', '2020-01-01', 's', 1)", "(1, 1, 'abc', 'a', '2020-01-01', 's', 1)", "(1, 1, 1, 'a', '2020-01-01', 's', 2)",
@@ -213,6 +214,8 @@ export const GRID_PREDICATES = [
   { $le: ['$.new.i', '$.new.n'] }, { $eq: ['$.new.i', '$.new.n'] }, { $ne: ['$.new.s', '2020-01-01T00:00:00Z'] },
   { $eq: ['$.new.i', 'x'] }, { $ne: ['$.new.f', 1] }, { $gt: ['$.new.d', '$.new.s'] },
   { $or: [{ $eq: ['$.new.t', null] }, { $gt: ['$.new.t', 'B'] }] }, { $not: { $ge: ['$.new.n', '$.new.i'] } },
+  // `$$` is a literal `$`; an ordered comparison over a boolean is false
+  { $eq: ['$.new.t', '$$a'] }, { $ne: ['$.new.t', '$$$a'] }, { $le: ['$.new.f', true] }, { $not: { $gt: ['$.new.f', false] } },
   { $and: [{ $ne: ['$.new.i', 'x'] }, { $ne: ['$.new.n', 'x'] }, { $ne: ['$.new.t', 1] }, { $ne: ['$.new.d', 1] }, { $ne: ['$.new.s', 1] }, { $ne: ['$.new.f', 'x'] }] },
 ];
 
@@ -415,4 +418,157 @@ export const FAMILY_REFUSALS = [
   ['two increments of one member', (m) => { m.entities.Line.invariants.push({ ...m.entities.Line.invariants[4], name: 'again' }); }],
   ['an update rule reading the incremented member', (m) => { m.entities.Line.invariants[0].assert = { $gt: ['$.new.revision', 0] }; }],
   ['an incremented member as a rule column', (m) => { m.entities.Line.invariants[1].columns = ['revision']; }],
+  ['a probe of a second entity on its own table', (m) => {
+    m.entities.LineAlias = { schema: m.entities.Line.schema, physical: { ...m.entities.Line.physical } };
+    m.entities.Line.invariants[2].assert = { '$exists-row': { entity: 'LineAlias', match: { id: '$.new.doc' } } };
+  }],
+  ['a probe of a view', (m) => {
+    m.entities.DocView = { schema: m.entities.Doc.schema, physical: { ...m.entities.Doc.physical, table: 'doc_view', kind: 'view' } };
+    m.entities.Line.invariants[2].assert = { '$exists-row': { entity: 'DocView', match: { id: '$.new.doc' } } };
+  }],
+  ['a probe reading a member its entity lacks', (m) => { m.entities.Line.invariants[3].assert = { '$exists-row': { entity: 'Doc', match: { id: '$.old.dco' } } }; }],
+  ['a probe matching an integer key with a number column', (m) => {
+    m.entities.Line.schema.properties.share = { type: 'number' };
+    m.entities.Line.physical.columns.share = column('share', 'number');
+    m.entities.Line.invariants[2].assert = { '$exists-row': { entity: 'Doc', match: { id: '$.new.share' } } };
+  }],
+  ['a probe literal its column cannot hold', (m) => { m.entities.Line.invariants[2].assert = { '$exists-row': { entity: 'Doc', match: { id: 1.5 } } }; }],
+  ['a probe text that starts with $ and reads no record', (m) => {
+    m.entities.Line.invariants[2].assert = { '$exists-row': { entity: 'Doc', match: { id: '$.new.doc', status: '$draft' } } };
+  }],
+  ['an assertion text that starts with $ and reads no record', (m) => { m.entities.Line.invariants[0].assert = { $ne: ['$.old.note', '$locked'] }; }],
+  ['two column sets that meet in one program name', (m) => {
+    for (const name of ['c2ya8', 'czki6']) {
+      m.entities.Line.schema.properties[name] = { type: 'integer' };
+      m.entities.Line.physical.columns[name] = column(name);
+      m.entities.Line.invariants.push({ name: `pin_${name}`, on: ['update'], columns: [name], enforcement: 'database', assert: false });
+    }
+  }],
+  ['database rules from two entities on one table', (m) => {
+    m.entities.LineAlias = { schema: m.entities.Line.schema, physical: { ...m.entities.Line.physical },
+      invariants: [{ name: 'alias', on: ['insert'], enforcement: 'database', assert: true }] };
+  }],
 ];
+
+const nullableText = { type: ['string', 'null'] };
+const UUID = '0f0e0d0c-0b0a-4908-8706-050403020100';
+
+/**
+ * The families and three more tables, for the writes a store rule must judge
+ * as the database's own rule does: an `Item` whose writes store what is
+ * already there or change only what the database owns, a `Tag` whose json
+ * member changes inside, and a `Wide` row whose member names read as lists.
+ * @param {'database' | 'store'} enforcement
+ */
+export const agreementModel = (enforcement) => {
+  const model = /** @type {any} */ (familyModel(enforcement));
+  Object.assign(model.entities, {
+    Item: { schema: { type: 'object', properties: {
+      id: { type: 'integer', 'x-entity': { key: true } }, note: nullableText, u: { type: 'string' },
+      ver: { type: 'integer', 'x-entity': { version: true } }, revision: { type: 'integer' },
+    } }, physical: { table: 'items', columns: { id: column('id'), note: column('note', 'text', 'absent'), u: column('u', 'uuid'),
+      ver: column('ver'), revision: column('revision') } }, invariants: [
+      { name: 'still', on: ['update'], enforcement, assert: false },
+      { name: 'counted', on: ['update'], enforcement: 'database', assert: true, effects: [{ increment: 'revision' }] },
+    ] },
+    Tag: { schema: { type: 'object', properties: {
+      id: { type: 'integer', 'x-entity': { key: true } }, made: { type: 'string' }, meta: { type: 'object' },
+    } }, physical: { table: 'tags', columns: { id: column('id'), made: column('made', 'text'), meta: column('meta', 'json') } },
+    invariants: [{ name: 'made_once', on: ['update'], columns: ['made'], enforcement, assert: false }] },
+    Wide: { schema: { type: 'object', properties: {
+      id: { type: 'integer', 'x-entity': { key: true } }, x: nullableText, 'x,y': nullableText, z: nullableText, 'y,z': nullableText,
+    } }, physical: { table: 'wide', columns: { id: column('id'), x: column('x', 'text', 'null'), 'x,y': column('xy', 'text', 'null'),
+      z: column('z', 'text', 'null'), 'y,z': column('yz', 'text', 'null') } } },
+  });
+  return model;
+};
+export const AGREEMENT_TABLES = {
+  sqlite: `${FAMILY_TABLES.sqlite}; CREATE TABLE items(id INTEGER PRIMARY KEY, note TEXT, u TEXT, ver INTEGER, revision INTEGER); `
+    + 'CREATE TABLE tags(id INTEGER PRIMARY KEY, made TEXT, meta TEXT); CREATE TABLE wide(id INTEGER PRIMARY KEY, x TEXT, xy TEXT, z TEXT, yz TEXT)',
+  postgres: `${FAMILY_TABLES.postgres}; CREATE TABLE items(id integer PRIMARY KEY, note text, u uuid, ver integer, revision integer); `
+    + 'CREATE TABLE tags(id integer PRIMARY KEY, made text, meta jsonb); CREATE TABLE wide(id integer PRIMARY KEY, x text, xy text, z text, yz text)',
+};
+
+/**
+ * The writes a store rule judges as the database's rule would: each at its
+ * own statement, against the row as it was and as it is stored. Returns every
+ * outcome and the rows left behind, read back through the store.
+ * @param {RuleEngine} engine @param {'database' | 'store'} enforcement
+ * @param {Record<string, unknown>} [storeOptions] - `sessions`, where the engine has them
+ * @returns {Promise<string>}
+ */
+export async function storeAgreement(engine, enforcement, storeOptions = {}) {
+  const model = agreementModel(enforcement);
+  const fixture = await engine.fixture(AGREEMENT_TABLES);
+  try {
+    for (const statement of planInvariants(model, { dialect: fixture.dialect })) await fixture.exec(statement.sql);
+    const store = await openStore(model, { driver: fixture.driver, ...storeOptions });
+    try {
+      const writes = [];
+      const save = () => outcome(() => store.saveChanges());
+      const docs = store.entity('Doc'), lines = store.entity('Line'), memos = store.entity('Memo');
+      // a row the unit of work read went stale under a direct write: the save
+      // is judged against the row it replaces, not the one it read
+      await docs.create({ id: 1, status: 'draft', sealed: null });
+      await lines.create({ id: 1, doc: 1, qty: 1, note: 'a', revision: 0 });
+      lines.put({ ...(await lines.get(1)), qty: 5 });
+      writes.push(await outcome(() => lines.update(1, { note: 'locked' })));
+      writes.push(await save());
+      lines.discard(1);
+      // one save makes the parent final and removes a line: the delete runs
+      // after the update, and so does its rule; then the mirror
+      await docs.create({ id: 2, status: 'draft', sealed: null });
+      await lines.create({ id: 2, doc: 2, qty: 1, note: 'a', revision: 0 });
+      docs.put({ ...(await docs.get(2)), status: 'final' });
+      lines.remove(2);
+      writes.push(await save());
+      docs.discard(2);
+      lines.discard(2);
+      await docs.update(2, { status: 'final' });
+      docs.put({ ...(await docs.get(2)), status: 'draft' });
+      lines.remove(2);
+      writes.push(await save());
+      // a removal the unit of work never read is judged against the row it
+      // removes; a key with no row removes nothing and runs no rule
+      await fixture.exec("INSERT INTO docs(id, status, sealed) VALUES (3, 'draft', NULL)");
+      await fixture.exec("INSERT INTO lines(id, doc_id, qty, note, revision) VALUES (3, 3, 1, 'a', 0)");
+      await fixture.exec("UPDATE docs SET status = 'final' WHERE id = 3");
+      lines.remove(3);
+      writes.push(await save());
+      lines.discard(3);
+      writes.push(await outcome(() => lines.delete(99)));
+      lines.remove(98);
+      writes.push(await save());
+      // a document's probe sees the parent its own save inserted ahead of it
+      docs.add({ id: 6, status: 'draft', sealed: null });
+      memos.add({ id: 'm', parent: 6 });
+      writes.push(await save());
+      // a value stored as the one already there, a version alone, and a member
+      // the database increments change nothing a rule counts
+      const items = store.entity('Item');
+      await items.create({ id: 1, u: UUID, ver: 0, revision: 0 });
+      items.put({ ...(await items.get(1)), u: UUID.toUpperCase() });
+      writes.push(await save());
+      items.discard(1);
+      items.put({ ...(await items.get(1)), note: null });
+      writes.push(await save());
+      items.discard(1);
+      for (const changes of [{ ver: 100 }, { revision: 7 }, { note: 'b' }]) writes.push(await outcome(() => items.update(1, changes)));
+      // a change inside a json member assigns that member alone
+      const tags = store.entity('Tag');
+      await tags.create({ id: 1, made: '2020-01-01', meta: { a: 1, list: [1] } });
+      tags.put({ ...(await tags.get(1)), meta: { a: 2, list: [1, 2] } });
+      writes.push(await save());
+      writes.push(await outcome(() => tags.update(1, { made: '2021-01-01' })));
+      // member names that read as lists keep their own statements
+      const wide = store.entity('Wide');
+      await wide.create({ id: 1, x: null, 'x,y': null, z: null, 'y,z': null });
+      for (const changes of [{ 'x,y': 'XY', z: 'Z' }, { x: 'X', 'y,z': 'YZ' }, { 'x,y': 'C' }]) writes.push(await outcome(() => wide.update(1, changes)));
+      const read = async (/** @type {string} */ name, /** @type {any[]} */ keys) => Promise.all(keys.map((key) => store.entity(name).get(key)));
+      return JSON.stringify({ writes, docs: await read('Doc', [1, 2, 3, 6]), lines: await read('Line', [1, 2, 3]), memo: await read('Memo', ['m']),
+        items: await read('Item', [1]), tags: await read('Tag', [1]), wide: await read('Wide', [1]) });
+    }
+    finally { await store.close(); }
+  }
+  finally { await fixture.dispose(); }
+}

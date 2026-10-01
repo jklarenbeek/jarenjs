@@ -147,9 +147,12 @@ export function transformPhysicalRows(connection, target, operation, options) {
               operation.fail('the physical transform changed or lost its addressed key');
             if (values.some(({ name }) => !same(member(stored, name), member(candidate, name))))
               operation.fail('the physical transform did not store its requested column values');
-            core.plan.checkMutation('update', before, stored);
-            transformed++;
-            return null;
+            // judged as the entity's own update is: the row it replaced, the
+            // row now stored and the columns this statement set
+            return chain(core.plan.checkStored('update', before, stored, values.map((value) => value.name)), () => {
+              transformed++;
+              return null;
+            });
           });
         }));
       };

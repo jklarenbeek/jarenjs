@@ -418,6 +418,8 @@ export function adaptPostgresClient(client, options = undefined) {
     limits, queueCapacity: limits.maxPending,
     metrics: () => Object.freeze({ ...requests.metrics(), ...cursors.metrics(), statements: names.size, transaction: fate }),
     transactionState: () => fate,
+    // a session the server or the network dropped: every later call refuses
+    lost: () => poisoned !== null,
     settleCancellation: () => cancelling,
     // Initialization uses the same request owner as normal SQL and cleanup.
     query,

@@ -5,7 +5,7 @@
  * renders the programs as its triggers. */
 import { hashContent } from '@jarenjs/core/string';
 import { DbCompileError, INVARIANT_MARKER } from '../errors.js';
-import { existsRowSql, RULE_CODECS } from '../invariants.js';
+import { existsRowSql, RULE_CODECS, ruleLiteral, sameTable } from '../invariants.js';
 
 const SAFE_RANGE = 'BETWEEN -9007199254740991 AND 9007199254740991';
 
@@ -54,12 +54,15 @@ export function compileInvariants(mapping, all, dialect, flavor) {
     const match = /^\$\.(old|new)\.([A-Za-z_][A-Za-z0-9_]*)$/.exec(value);
     return match ? { record: match[1], column: columns.find((c) => c.name === match[2]), name: match[2] } : null;
   };
-  // `raw` reads a column as its stored value, for a probe's own comparison
+  // `raw` reads a column as its stored value, for a probe's own comparison.
+  // The query language reads a string that starts with `$` as an expression
+  // (`$$` escapes a literal `$`), so a lowered rule reads `$.op` and old/new
+  // members and refuses every other expression rather than compare its text
   const scalar = (value, op, raw = false) => {
-    if (typeof value === 'string' && value.startsWith('$.')) {
+    if (typeof value === 'string' && value.startsWith('$') && !value.startsWith('$$')) {
       if (value === '$.op') return sl(op);
       const path = columnOf(value);
-      if (!path) return fail(`unsupported record path '${value}'`);
+      if (!path) return fail(`unsupported record path '${value}'; a text that starts with $ is written $$`);
       const { record, column, name } = path;
       if (!column || column.null === 'absent' || !RULE_CODECS.includes(column.codec)) return fail(`'${name}' needs a scalar column codec`);
       if ((op === 'insert' && record === 'old') || (op === 'delete' && record === 'new')) return fail('a property of an unavailable record is absent, not SQL NULL');
@@ -69,7 +72,7 @@ export function compileInvariants(mapping, all, dialect, flavor) {
       return raw ? ref : read.value;
     }
     if (value === null) return 'NULL';
-    if (typeof value === 'string') return sl(value);
+    if (typeof value === 'string') return sl(ruleLiteral(value));
     if (typeof value === 'boolean') return value ? flavor.true : flavor.false;
     if (typeof value === 'number' && Number.isFinite(value) && (!Number.isInteger(value) || Number.isSafeInteger(value))) return String(value);
     if (value && typeof value === 'object' && Object.keys(value).length === 1 && Object.hasOwn(value, '$const')) {
@@ -79,7 +82,7 @@ export function compileInvariants(mapping, all, dialect, flavor) {
     return fail('only scalar literals and old/new property paths can be lowered');
   };
   const typeOf = (value) => {
-    if (typeof value === 'string' && value.startsWith('$.')) {
+    if (typeof value === 'string' && value.startsWith('$') && !value.startsWith('$$')) {
       if (value === '$.op') return 'string';
       const name = value.slice(value.indexOf('.', 2) + 1);
       const column = columns.find((c) => c.name === name);
@@ -107,6 +110,9 @@ export function compileInvariants(mapping, all, dialect, flavor) {
     const left = scalar(args[0], op), right = scalar(args[1], op);
     const lt = typeOf(args[0]), rt = typeOf(args[1]);
     if (lt !== rt && lt !== 'null' && rt !== 'null') return key === '$ne' ? flavor.true : flavor.false;
+    // an ordered comparison holds between two numbers or two texts, never
+    // over a boolean (QUERY-FORMAT §8.4); SQL would order false before true
+    if (key !== '$eq' && key !== '$ne' && (lt === 'boolean' || rt === 'boolean')) return flavor.false;
     const compare = `(${left} ${operators[key]} ${right})`;
     return key === '$eq' || key === '$ne' ? compare : `COALESCE(${compare}, ${flavor.false})`;
   };
@@ -119,7 +125,12 @@ export function compileInvariants(mapping, all, dialect, flavor) {
   const programs = new Map();
   const programOf = (op, of = []) => {
     const name = of.length === 0 ? op : `${op}_of_${hashContent(of.join('\0'))}`;
-    if (!programs.has(name)) programs.set(name, { op, name, columns: of, rules: [], checks: [], audits: [], increments: [] });
+    const known = programs.get(name);
+    // a short hash names the column set: two sets that meet in it would
+    // merge into one program that one of them never fires
+    if (known !== undefined && known.columns.join('\0') !== of.join('\0'))
+      fail(`the column sets ${JSON.stringify(known.columns)} and ${JSON.stringify(of)} name one program '${name}'; give one rule another set`);
+    if (known === undefined) programs.set(name, { op, name, columns: of, rules: [], checks: [], audits: [], increments: [] });
     return programs.get(name);
   };
   for (const rule of rules) {
@@ -134,7 +145,9 @@ export function compileInvariants(mapping, all, dialect, flavor) {
       if (rule.audit !== undefined) {
         const target = all.entities[rule.audit.entity];
         if (!target || target.document !== false || target.kind === 'view') fail('audit target must be a mapped application table');
-        if (target === mapping || (target.invariants ?? []).some((r) => r.audit)) fail('recursive or chained audit effects are refused');
+        // two entities can map one table: the table decides, not the entity
+        if (sameTable(target, mapping) || Object.values(all.entities).some((other) => sameTable(other, target)
+          && (other.invariants ?? []).some((r) => r.audit !== undefined))) fail('recursive or chained audit effects are refused');
         const names = [], values = [];
         for (const [member, expression] of Object.entries(rule.audit.values)) {
           const column = target.columns.find((c) => c.name === member);

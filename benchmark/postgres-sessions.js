@@ -12,7 +12,10 @@
  * durable (fsync, synchronous_commit and full_page_writes on: published
  * figures come only from `npm run postgres:durable`), so a store on one
  * session pays each commit's flush in turn, and several sessions let the
- * server share it.
+ * server share it. A flush waits on a disk the host shares with whatever
+ * else runs on it, so the figures are taken in rounds, each measuring every
+ * shape once: a stall of a few seconds lands in one round, and the median
+ * over the rounds sets it aside rather than letting it decide a whole row.
  *
  * Usage:
  *   JAREN_PG_URL=postgres://jaren:jaren@127.0.0.1:55433/jaren node benchmark/postgres-sessions.js [--write]
@@ -31,7 +34,7 @@ for (const arg of args) assert.equal(arg, '--write', 'unknown argument');
 const URL = process.env.JAREN_PG_URL;
 if (!URL) throw new Error('the sessions profile needs a PostgreSQL endpoint: set JAREN_PG_URL');
 const sourceFiles = ['benchmark/postgres-sessions.js', 'packages/db/src/store.js', 'packages/db/src/sessions.js',
-  'packages/db/src/driver.js', 'packages/db/src/drivers/postgres.js'];
+  'packages/db/src/drivers/postgres.js'];
 const sourceHashes = Object.fromEntries(sourceFiles.map((file) => [file,
   createHash('sha256').update(readFileSync(new globalThis.URL(`../${file}`, import.meta.url))).digest('hex')]));
 
@@ -39,10 +42,12 @@ const MODEL = { $model: '0.1', collections: { items: { key: '/id',
   schema: { type: 'object', properties: { id: { type: 'string' }, n: { type: 'integer' } } } } } };
 const CLIENTS = 8;
 const PER_CLIENT = 40;
-const RUNS = 3;
+const ROUNDS = 5;
 const SEQUENTIAL = 200;
 
 const median = (values) => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)];
+/** The host's load when the figures were taken, where the platform reports it. */
+const loadAverage = () => { try { return readFileSync('/proc/loadavg', 'utf8').trim(); } catch { return null; } };
 
 const pg = (await import('pg')).default;
 const admin = new pg.Client({ connectionString: URL });
@@ -79,43 +84,40 @@ async function sequential(store) {
   return Number(process.hrtime.bigint() - started) / SEQUENTIAL;
 }
 
-const rows = [];
+const SHAPES = [
+  ...[1, 2, 4, 8].map((sessions) => ({ shape: 'one store', sessions, stores: 1 })),
+  ...[1, 2, 4, 8].map((stores) => ({ shape: 'separate stores', sessions: 1, stores })),
+];
+const ROUTES = [['one session', {}], ['two sessions, one client', { sessions: 2 }]];
+const rates = SHAPES.map(() => /** @type {number[]} */ ([]));
+const samples = ROUTES.map(() => /** @type {number[]} */ ([]));
 const routing = {};
+let rows = [];
 try {
   // a first store creates the collection, so every measured open verifies it
   await (await openStore(MODEL, { driver })).close();
-  for (const sessions of [1, 2, 4, 8]) {
-    const store = await openStore(MODEL, { driver, sessions });
-    try {
-      assert.equal(store.capabilities.connections, sessions);
-      await concurrent([store]);
-      const rates = [];
-      for (let r = 0; r < RUNS; r++) rates.push(await concurrent([store]));
-      rows.push({ shape: 'one store', sessions, stores: 1, txPerSecond: median(rates), runs: rates });
+  for (let round = 0; round < ROUNDS; round++) {
+    for (const [i, { shape, sessions, stores: count }] of SHAPES.entries()) {
+      const stores = [];
+      try {
+        for (let n = 0; n < count; n++) stores.push(await openStore(MODEL, { driver, ...(shape === 'one store' ? { sessions } : {}) }));
+        assert.equal(stores[0].capabilities.connections, sessions);
+        await concurrent(stores);
+        rates[i].push(await concurrent(stores));
+      }
+      finally { for (const store of stores) await store.close(); }
     }
-    finally { await store.close(); }
-  }
-  for (const count of [1, 2, 4, 8]) {
-    const stores = [];
-    try {
-      for (let i = 0; i < count; i++) stores.push(await openStore(MODEL, { driver }));
-      await concurrent(stores);
-      const rates = [];
-      for (let r = 0; r < RUNS; r++) rates.push(await concurrent(stores));
-      rows.push({ shape: 'separate stores', sessions: 1, stores: count, txPerSecond: median(rates), runs: rates });
+    for (const [i, [, options]] of ROUTES.entries()) {
+      const store = await openStore(MODEL, { driver, ...options });
+      try {
+        await sequential(store);
+        samples[i].push(await sequential(store));
+      }
+      finally { await store.close(); }
     }
-    finally { for (const store of stores) await store.close(); }
   }
-  for (const [label, options] of [['one session', {}], ['two sessions, one client', { sessions: 2 }]]) {
-    const store = await openStore(MODEL, { driver, ...options });
-    try {
-      await sequential(store);
-      const samples = [];
-      for (let r = 0; r < RUNS; r++) samples.push(await sequential(store));
-      routing[label] = { nsPerTransaction: median(samples), runs: samples };
-    }
-    finally { await store.close(); }
-  }
+  rows = SHAPES.map((shape, i) => ({ ...shape, txPerSecond: median(rates[i]), runs: rates[i] }));
+  ROUTES.forEach(([label], i) => { routing[label] = { nsPerTransaction: median(samples[i]), runs: samples[i] }; });
   assert.equal(driver.metrics().active, 0);
 }
 finally {
@@ -124,7 +126,7 @@ finally {
   await admin.end();
 }
 
-console.log(`\nIndependent one-document write transactions, ${CLIENTS} clients × ${PER_CLIENT}, median of ${RUNS} runs — PostgreSQL ${server.version}, fsync=${server.fsync}`);
+console.log(`\nIndependent one-document write transactions, ${CLIENTS} clients × ${PER_CLIENT}, median of ${ROUNDS} rounds — PostgreSQL ${server.version}, fsync=${server.fsync}`);
 for (const row of rows)
   console.log(`  ${`${row.shape}: ${row.stores} store(s) × ${row.sessions} session(s)`.padEnd(44)}${row.txPerSecond.toFixed(0).padStart(8)} tx/s`);
 for (const [label, value] of Object.entries(routing))
@@ -133,8 +135,8 @@ for (const [label, value] of Object.entries(routing))
 if (args.includes('--write')) {
   const evidence = { format: 'jaren-postgres-sessions/1', measuredAt: new Date().toISOString(),
     runtime: { node: process.versions.node, pg: JSON.parse(readFileSync(new globalThis.URL('../node_modules/pg/package.json', import.meta.url), 'utf8')).version,
-      platform: process.platform, arch: process.arch, cpu: cpus()[0]?.model, loadavg: readFileSync('/proc/loadavg', 'utf8').trim() },
-    sourceHashes, postgres: server, clients: CLIENTS, perClient: PER_CLIENT, runs: RUNS, sequential: SEQUENTIAL, rows, routing,
-    scope: 'One host, client and server on one machine; each client a run of one-document transactions on keys of its own (no conflicts), every commit durable. A store on one session runs them in turn; several sessions and separate stores let the server work on them together. No production throughput claim.' };
+      platform: process.platform, arch: process.arch, cpu: cpus()[0]?.model, loadavg: loadAverage() },
+    sourceHashes, postgres: server, clients: CLIENTS, perClient: PER_CLIENT, rounds: ROUNDS, sequential: SEQUENTIAL, rows, routing,
+    scope: 'One host, client and server on one machine; each client a run of one-document transactions on keys of its own (no conflicts), every commit durable, so it waits on a disk the host shares with whatever else runs there. A store on one session runs them in turn; several sessions and separate stores let the server work on them together. No production throughput claim.' };
   writeFileSync(new globalThis.URL('./postgres-sessions-result.json', import.meta.url), JSON.stringify(evidence, null, 2) + '\n');
 }

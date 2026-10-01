@@ -5,6 +5,8 @@ import { openStore } from '@jarenjs/db';
 import { asyncLive } from '@jarenjs/db/async-live';
 import { nodeDriver } from '@jarenjs/db/node';
 import { postgresDriver } from '@jarenjs/db/postgres';
+import { POSTGRES_LOCK_CLASSES } from '../../packages/db/src/dialects/postgres-locks.js';
+import { tempDbPath } from './helpers.js';
 
 const model = { $model: '0.1', collections: {
   notes: { key: '/id', schema: { type: 'object', properties: { id: { type: 'string' }, n: { type: 'integer' } } } },
@@ -34,16 +36,100 @@ describe('a store on several sessions refuses before it opens', () => {
   });
 });
 
+describe('a store on several sessions, whatever driver declares them', () => {
+  /** What @jarenjs/db/postgres declares, on sessions that need no server: two
+   * SQLite connections to one file. @param {(store: any, closeNow: () => Promise<void>) => Promise<void>} fn @param {any} [options] */
+  async function onTwoSessions(fn, options = {}) {
+    const { AsyncLocalStorage } = await import('node:async_hooks');
+    const { dbPath, cleanup } = tempDbPath();
+    const driver = { ...nodeDriver(), contextStorage: () => new AsyncLocalStorage(), maxConnections: 2 };
+    try {
+      const store = await openStore(model, { driver, path: dbPath, sessions: 2, ...options });
+      let closed = false;
+      try { await fn(store, async () => { closed = true; await store.close(); }); }
+      finally { if (!closed) await store.close(); }
+    }
+    finally { cleanup(); }
+  }
+
+  it('routes root calls, transactions, held cursors, tracked saves and per-transaction capture, and keeps its own unit of work out of a transaction', async () => {
+    await onTwoSessions(async (store) => {
+      assert.equal(store.capabilities.connections, 2);
+      for (let i = 0; i < 3; i++) await store.collection('notes').put({ id: `n${i}`, n: i });
+      await store.transaction(async (tx) => { await tx.collection('notes').put({ id: 't', n: 9 }); });
+      // a transaction opened on another's synchronous extent nests there
+      await store.transaction(() => store.transaction(async (inner) => inner.collection('notes').put({ id: 'u', n: 8 })));
+      await store.transaction(async () => {
+        await assert.rejects(async () => store.entity('Item').create({ id: 'x', title: 'inside' }), { code: 'JD0012' });
+      });
+      await store.entity('Item').create({ id: 'i', title: 'root' });
+      const tracked = await store.entity('Item').get('i');
+      store.entity('Item').put({ ...tracked, title: 'saved' });
+      assert.equal((await store.saveChanges()).updated, 1);
+      const ids = [];
+      for await (const id of store.collection('notes').query(stream)) ids.push(id);
+      assert.deepEqual(ids, ['n0', 'n1', 'n2', 't', 'u']);
+      // a cursor left early gives its session back
+      for await (const id of store.collection('notes').query(stream)) { assert.equal(id, 'n0'); break; }
+      assert.deepEqual(await store.entity('Item').get('i'), { id: 'i', title: 'saved' });
+    }, { capture: { mode: 'journal', log: { retention: 100 } } });
+  });
+
+  it('queues a call for the next free session, lets its signal abandon it, refuses it when the store closes, and under strict transactions refuses at once', async () => {
+    await onTwoSessions(async (store, closeNow) => {
+      const first = Promise.withResolvers(), second = Promise.withResolvers(), third = Promise.withResolvers(), started = Promise.withResolvers();
+      const held = [store.transaction(async () => { await first.promise; }), store.transaction(async () => { await second.promise; })];
+      await delay(20);
+      // waiting for a session: the first one given back, or the caller gives up
+      const taken = store.transaction(async () => { started.resolve(undefined); await third.promise; });
+      const aborter = new AbortController();
+      const abandoned = store.transaction(async () => 'ran', { signal: aborter.signal });
+      await delay(20);
+      aborter.abort(new Error('caller gave up'));
+      await assert.rejects(abandoned, (/** @type {any} */ error) => error.cause?.message === 'caller gave up' || error.message === 'caller gave up');
+      first.resolve(undefined);
+      await held[0];
+      await started.promise;
+      // both sessions are taken again; a call still waiting when the store closes is refused
+      const queued = Promise.resolve().then(() => store.collection('notes').get('n0'));
+      await delay(20);
+      const closing = closeNow();
+      await assert.rejects(queued, { code: 'JD2063' });
+      second.resolve(undefined);
+      third.resolve(undefined);
+      await Promise.allSettled([held[1], taken]);
+      await closing.catch(() => {});
+    });
+    await onTwoSessions(async (store) => {
+      await store.collection('notes').put({ id: 'a', n: 1 });
+      await store.entity('Item').create({ id: 'i', title: 'x' });
+      const free = Promise.withResolvers();
+      const held = [store.transaction(async () => { await free.promise; }), store.transaction(async () => { await free.promise; })];
+      await delay(20);
+      await assert.rejects(async () => store.collection('notes').get('a'), /strict/);
+      await assert.rejects(async () => store.entity('Item').get('i'), /strict/);
+      free.resolve(undefined);
+      await Promise.all(held);
+    }, { transactions: 'strict' });
+  });
+});
+
 const url = process.env.JAREN_PG_URL;
 describe('PostgreSQL store on several sessions', { skip: !url && 'JAREN_PG_URL is not set' }, () => {
   let pg, sequence = 0;
   before(async () => { pg = (await import('pg')).default; });
+  /** @type {WeakMap<object, string>} */
+  const schemas = new WeakMap();
+  const schemaOf = (/** @type {object} */ store) => schemas.get(store);
   async function fixture(fn) {
     const schema = `jaren_sessions_${process.pid}_${sequence++}`;
-    const pool = new pg.Pool({ connectionString: url, max: 12 }), stores = [];
+    // named after its schema, so a count of sessions sees this fixture's alone
+    // while other test files share the server
+    const pool = new pg.Pool({ connectionString: url, max: 12, application_name: schema }), stores = [];
     const open = async (options = {}) => {
       const store = await openStore(model, { driver: postgresDriver(pool, { schema }), sessions: 4, queueTimeout: 2000, ...options });
       stores.push(store);
+      schemas.set(store, schema);
       return store;
     };
     try { await pool.query(`CREATE SCHEMA "${schema}"`); await fn({ pool, open }); }
@@ -193,6 +279,12 @@ describe('PostgreSQL store on several sessions', { skip: !url && 'JAREN_PG_URL i
       assert.equal((await items.asNoTracking().get('a')).title, 'three');
       await store.saveChanges();
       assert.equal((await items.asNoTracking().get('a')).title, 'pending at the root');
+      // the store's own unit of work is unreachable from inside a transaction,
+      // whichever session the transaction landed on: refused, not raced
+      await store.transaction(async () => {
+        await assert.rejects(async () => items.update('a', { title: 'inside' }), { code: 'JD0012', message: /own unit of work/ });
+        await assert.rejects(async () => store.saveChanges(), { code: 'JD0012', message: /own unit of work/ });
+      });
       // with every session held, tracked work waits for the first one, and says so
       const short = await open({ queueTimeout: 200 });
       const letGo = Promise.withResolvers();
@@ -218,6 +310,124 @@ describe('PostgreSQL store on several sessions', { skip: !url && 'JAREN_PG_URL i
       assert.equal(pool.idleCount, pool.totalCount);
       const next = await open({ owner: { id: 'next' } });
       assert.deepEqual(await next.collection('notes').get('o1'), { id: 'o1', n: 1 });
+    });
+  });
+
+  it('runs a paused cursor\'s statements on the session its call holds: a stranger\'s rollback stays rolled back', async () => {
+    await fixture(async ({ pool, open }) => {
+      const store = await open({ sessions: 2 });
+      for (let i = 0; i < 10; i++) await store.collection('notes').put({ id: `n${i}`, n: i });
+      const cursor = /** @type {any} */ (store).collection('notes').query(stream);
+      await cursor.next();
+      const entered = Promise.withResolvers(), proceed = Promise.withResolvers();
+      /** @type {number[]} */
+      const pids = [];
+      const undone = store.transaction(async (tx) => {
+        pids.push((await where(tx)).pid);
+        await tx.collection('notes').put({ id: 't1', n: 100 });
+        entered.resolve(undefined);
+        await proceed.promise;
+        throw new Error('undo');
+      });
+      await entered.promise;
+      const cursors = (await pool.query("SELECT pid FROM pg_stat_activity WHERE state = 'idle in transaction' AND application_name = $2 AND pid <> ALL($1)",
+        [pids, schemaOf(store)])).rows;
+      assert.equal(cursors.length, 1, 'the cursor holds a session of its own');
+      assert.equal((await cursor.next()).value, 'n1');
+      await cursor.return();
+      proceed.resolve(undefined);
+      await assert.rejects(undone, /undo/);
+      assert.equal(await store.collection('notes').get('t1'), undefined);
+    });
+  });
+
+  it('refuses every call once the session holding its owner lock is gone, and retires any other lost session', async () => {
+    await fixture(async ({ pool, open }) => {
+      const owned = await open({ owner: { id: 'a' } });
+      await owned.collection('notes').put({ id: 'before', n: 0 });
+      // the session holding this schema's owner lock — the store's first — and only it
+      const holder = (await pool.query(`SELECT l.pid FROM pg_locks l JOIN pg_namespace n ON n.nspname = $2
+        WHERE l.locktype = 'advisory' AND l.granted AND l.classid::text = $1::text
+        AND l.objid::text = (n.oid::int8 + 2147483648)::text AND l.objsubid = 2`, [POSTGRES_LOCK_CLASSES.owner, schemaOf(owned)])).rows;
+      assert.equal(holder.length, 1);
+      await pool.query('SELECT pg_terminate_backend($1)', [holder[0].pid]);
+      await delay(200);
+      await assert.rejects(owned.transaction(async (tx) => { await tx.collection('notes').put({ id: 'after', n: 1 }); }), { code: 'JD2061' });
+      await assert.rejects(async () => owned.collection('notes').put({ id: 'after', n: 2 }), { code: 'JD2061' });
+      const next = await open({ owner: { id: 'b' } });
+      await next.collection('notes').put({ id: 'by-b', n: 3 });
+      assert.equal(await next.collection('notes').get('after'), undefined);
+      // a store whose first session is gone still closes, giving the rest back
+      await owned.close();
+      await next.close();
+      // without an owner a lost session is retired and the others carry on
+      const plain = await open();
+      const pid = await plain.transaction(async (tx) => (await where(tx)).pid);
+      await pool.query('SELECT pg_terminate_backend($1)', [pid]);
+      await delay(200);
+      const outcomes = [];
+      for (let i = 0; i < 6; i++) outcomes.push(await Promise.resolve(plain.collection('notes').put({ id: `k${i}`, n: i })).then(() => 'ok', (e) => e.code));
+      assert.deepEqual(outcomes, ['ok', 'ok', 'ok', 'ok', 'ok', 'ok']);
+    });
+  });
+
+  it('closes as one session does: a queued call refuses, a running transaction meets its closed session, only the first session is discarded', async () => {
+    await fixture(async ({ pool, open }) => {
+      const store = await open({ sessions: 2, queueTimeout: 5000 });
+      const free = Promise.withResolvers();
+      const slow = store.transaction(async (tx) => { await sleep(tx, 0.3); });
+      await delay(30);
+      const parked = store.transaction(async () => { await free.promise; });
+      await delay(30);
+      const queued = Promise.resolve().then(() => store.collection('notes').put({ id: 'late', n: 1 }));
+      await delay(30);
+      const closing = store.close();
+      await assert.rejects(queued, { code: 'JD2063' });
+      free.resolve(undefined);
+      await assert.rejects(parked, { code: 'JD2063' });
+      await assert.rejects(slow, { code: 'JD2063' });
+      await closing;
+      const fresh = await open({ sessions: 1 });
+      assert.equal(await fresh.collection('notes').get('late'), undefined);
+      // an owner's close gives its other sessions back to the pool
+      const owner = await open({ owner: { id: 'o' } });
+      await Promise.all([1, 2, 3].map((i) => owner.collection('notes').put({ id: `o${i}`, n: i })));
+      const before = pool.totalCount;
+      await owner.close();
+      assert.equal(pool.totalCount, before);
+    });
+  });
+
+  it('keeps one session\'s admission bounds and refuses an option that cannot act', async () => {
+    await fixture(async ({ open }) => {
+      const store = await open({ sessions: 2, queueTimeout: 300 });
+      const letGo = Promise.withResolvers();
+      const holding = [1, 2].map(() => store.transaction(async () => { await letGo.promise; }));
+      await delay(50);
+      const started = performance.now();
+      await assert.rejects(async () => store.collection('notes').get('x'), { code: 'JD0012' });
+      assert.ok(performance.now() - started < 1500, 'the queue timeout bounds the wait');
+      letGo.resolve(undefined);
+      await Promise.all(holding);
+      await assert.rejects(store.transaction(async () => 1, { unitOfWork: 'shared' }), { code: 'JD0014' });
+      // strict refuses only a call that would wait: a free session takes it
+      const strict = await open({ transactions: 'strict' });
+      await strict.transaction(async () => {
+        await delay(1);
+        assert.equal(await strict.collection('notes').get('none'), undefined);
+      });
+      // a listener made outside the body uses the transaction's handle in its context
+      const { EventEmitter } = await import('node:events');
+      const emitter = new EventEmitter();
+      /** @type {any} */
+      let handle;
+      emitter.on('write', () => { void handle.collection('notes').put({ id: 'from-listener', n: 1 }); });
+      await store.transaction(async (tx) => {
+        handle = tx;
+        emitter.emit('write');
+        await delay(50);
+      });
+      assert.deepEqual(await store.collection('notes').get('from-listener'), { id: 'from-listener', n: 1 });
     });
   });
 

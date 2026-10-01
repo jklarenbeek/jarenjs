@@ -1,10 +1,11 @@
 //@ts-check
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { openStore, planInvariants, readSchema, sqliteDialect } from '@jarenjs/db';
+import { explainMapping, openStore, planInvariants, readSchema, sqliteDialect } from '@jarenjs/db';
+import { verifyPhysical } from '../../packages/db/src/physical.js';
 import { postgresDialect, postgresDriver } from '@jarenjs/db/postgres';
 import { ruleModel, truthModel, RULE_TABLES, ruleLifecycle, ruleTruthTable, ruleGrid, familyModel, familyLifecycle, FAMILY_REFUSALS,
-  sqliteEngine } from './invariant-oracle.js';
+  sqliteEngine, storeAgreement } from './invariant-oracle.js';
 
 describe('PostgreSQL rule lowering', () => {
   it('plans a function and a row trigger per table and operation in the driver-owned schema, each program verified by its fields', () => {
@@ -12,20 +13,27 @@ describe('PostgreSQL rule lowering', () => {
     assert.deepEqual(items.map((item) => [item.type, item.name, item.rule]), [
       ['function', '_jaren_rule_5_entry_insert', 'ordered'], ['trigger', '_jaren_rule_5_entry_insert', 'ordered'],
       ['function', '_jaren_rule_5_entry_update', 'ordered,frozen'], ['trigger', '_jaren_rule_5_entry_update', 'ordered,frozen'],
-      ['function', '_jaren_rule_5_entry_delete', 'frozen'], ['trigger', '_jaren_rule_5_entry_delete', 'frozen']]);
+      ['function', '_jaren_rule_5_entry_delete', 'frozen'], ['trigger', '_jaren_rule_5_entry_delete', 'frozen'],
+      ['function', '_jaren_rule_5_entry_truncate', 'frozen'], ['trigger', '_jaren_rule_5_entry_truncate', 'frozen']]);
     const [fn, trigger] = items.slice(2, 4);
     assert.equal(trigger.sql, 'CREATE TRIGGER "_jaren_rule_5_entry_update" AFTER UPDATE ON "tenant"."entry" FOR EACH ROW EXECUTE FUNCTION "tenant"."_jaren_rule_5_entry_update"()');
     const { source, ...function_ } = trigger.program.function;
     assert.deepEqual({ ...trigger.program, function: function_ }, { timing: 'AFTER', events: ['UPDATE'], level: 'ROW', columns: [],
       condition: false, enabled: 'O', deferrable: false, deferred: false, function: { schema: 'tenant', name: '_jaren_rule_5_entry_update',
-        language: 'plpgsql', returns: 'trigger', arguments: '', securityDefiner: false, config: null } });
-    // the function is installed from the very source its trigger is verified against
-    assert.equal(fn.sql, `CREATE FUNCTION "tenant"."_jaren_rule_5_entry_update"() RETURNS trigger LANGUAGE plpgsql AS $jaren$${source}$jaren$`);
+        language: 'plpgsql', returns: 'trigger', arguments: '', securityDefiner: false, config: ['search_path=pg_catalog, pg_temp'] } });
+    // the function is installed from the very source its trigger is verified
+    // against, under a search path no writer's schema can come ahead of
+    assert.equal(fn.sql, `CREATE FUNCTION "tenant"."_jaren_rule_5_entry_update"() RETURNS trigger LANGUAGE plpgsql SET search_path = pg_catalog, pg_temp AS $jaren$${source}$jaren$`);
     assert.match(source, /RAISE EXCEPTION USING MESSAGE = 'jaren invariant:frozen', ERRCODE = '23J01';/);
     // a program runs under its caller's search path, so it names its tables
     assert.match(source, /INSERT INTO "tenant"\."audit" \("entry_id", "operation"\) SELECT NEW\."id", 'update' WHERE/);
     assert.equal(source.indexOf('jaren invariant:ordered') < source.indexOf('jaren invariant:frozen'), true);
     assert.equal(source.lastIndexOf('IF ') < source.indexOf('INSERT INTO'), true, 'every check runs before the audit');
+    // TRUNCATE runs no row trigger: a table whose deletes a rule judges refuses it whole
+    const truncate = /** @type {any} */ (items[7]);
+    assert.equal(truncate.sql, 'CREATE TRIGGER "_jaren_rule_5_entry_truncate" BEFORE TRUNCATE ON "tenant"."entry" FOR EACH STATEMENT EXECUTE FUNCTION "tenant"."_jaren_rule_5_entry_truncate"()');
+    assert.deepEqual([truncate.program.timing, truncate.program.events, truncate.program.level], ['BEFORE', ['TRUNCATE'], 'STATEMENT']);
+    assert.match(truncate.program.function.source, /^\nBEGIN\n {2}RAISE EXCEPTION USING MESSAGE = 'jaren invariant:frozen', ERRCODE = '23J01';\n/);
   });
 
   it('refuses what PostgreSQL could not mean the same way, before anything is installed', () => {
@@ -54,6 +62,13 @@ describe('PostgreSQL rule lowering', () => {
     }
     rounding.entities.Entry.invariants[0].audit.values.entry = { $const: 2 };
     assert.doesNotThrow(() => planInvariants(rounding, { dialect: postgresDialect({ searchPath: 'tenant' }) }));
+    // two long table names a short hash cannot tell apart would install one function over the other
+    const twins = /** @type {any} */ (structuredClone(ruleModel));
+    twins.entities.Entry.physical.table = 'ledger_entries_archive_partition_for_region_00005vl8';
+    twins.entities.Twin = { ...structuredClone(twins.entities.Entry), invariants: [twins.entities.Entry.invariants[1]] };
+    twins.entities.Twin.physical.table = 'ledger_entries_archive_partition_for_region_0000mpd6';
+    assert.throws(() => planInvariants(twins, { dialect }), { code: 'JD0005', message: /name one function '_jaren_rule_1vd5hfm_update'/ });
+    assert.doesNotThrow(() => planInvariants(twins, { dialect: sqliteDialect }));
   });
 
   it('plans the trigger families as AFTER programs, an UPDATE OF program per column set and a BEFORE program for increments, refusing what SQLite refuses', () => {
@@ -64,7 +79,8 @@ describe('PostgreSQL rule lowering', () => {
       ['_jaren_rule_5_lines_update_before', 'BEFORE', ['UPDATE'], []],
       ['_jaren_rule_5_lines_update', 'AFTER', ['UPDATE'], []],
       [programs[3].name, 'AFTER', ['UPDATE'], ['doc_id']],
-      ['_jaren_rule_5_lines_delete', 'AFTER', ['DELETE'], []]]);
+      ['_jaren_rule_5_lines_delete', 'AFTER', ['DELETE'], []],
+      ['_jaren_rule_5_lines_truncate', 'BEFORE', ['TRUNCATE'], []]]);
     assert.match(programs[3].name, /^_jaren_rule_5_lines_update_of_[0-9a-z]+$/);
     assert.match(programs[1].program.function.source, /IF \(.*\) AND \(NEW\."revision" IS NOT DISTINCT FROM OLD\."revision"\) THEN\n {4}NEW\."revision" := OLD\."revision" \+ 1;/);
     assert.match(programs[0].program.function.source, /EXISTS \(SELECT 1 FROM "tenant"\."docs" AS "_jaren_row" WHERE "_jaren_row"\."id" = NEW\."doc_id" AND NOT/);
@@ -74,12 +90,37 @@ describe('PostgreSQL rule lowering', () => {
     }
   });
 
+  it('opens over a catalog whose programs match the plan field by field, and names each field that differs', async () => {
+    const dialect = postgresDialect({ searchPath: 'tenant' });
+    const items = planInvariants(ruleModel, { dialect });
+    const mapping = { ...explainMapping(ruleModel).entities.Entry, triggers: items };
+    // the catalog's answer, as the program query reads it back: one row per installed trigger
+    const rows = items.filter((item) => item.type === 'trigger')
+      .map((item) => ({ name: item.name, owner: 'entry', program: JSON.stringify(/** @type {any} */ (item).program) }));
+    const column = (/** @type {string} */ name, /** @type {string} */ type, extra = {}) => ({ name, type, generated: false, ...extra });
+    const schema = { objects: [{ type: 'table', name: 'entry' }], tables: [{ name: 'entry', primaryKey: ['id'], columns: [
+      column('id', 'integer', { default: "nextval('entry_id_seq'::regclass)" }), column('starts', 'integer'), column('ends', 'integer'),
+      column('phase', 'text')] }] };
+    /** @type {string[]} */
+    const read = [];
+    const connection = { dialect, prepare: (/** @type {string} */ sql) => ({ all: async () => { read.push(sql); return rows; } }) };
+    await verifyPhysical(connection, mapping, schema);
+    assert.match(read[0], /FROM pg_catalog\.pg_trigger t JOIN pg_catalog\.pg_class c/);
+    const at = rows.findIndex((row) => row.name === '_jaren_rule_5_entry_update');
+    const tampered = JSON.parse(rows[at].program);
+    tampered.level = 'STATEMENT';
+    tampered.function.config = ['search_path=public'];
+    rows[at] = { ...rows[at], program: JSON.stringify(tampered) };
+    await assert.rejects(async () => verifyPhysical(connection, mapping, schema), { code: 'JD0002',
+      message: /invariant trigger '_jaren_rule_5_entry_update' is missing or changed \(level, function\.config\)/ });
+  });
+
   it('names a long table by a hash and quotes a body that contains its own dollar tag', () => {
     const long = structuredClone(ruleModel);
     long.entities.Entry.physical.table = 'e'.repeat(60);
     const names = planInvariants(long, { dialect: postgresDialect({ searchPath: 'tenant' }) }).map((item) => item.name);
-    assert.ok(names.every((name) => Buffer.byteLength(name) <= 63 && /^_jaren_rule_[0-9a-z]+_(insert|update|delete)$/.test(name)), names.join());
-    assert.equal(new Set(names).size, 3);
+    assert.ok(names.every((name) => Buffer.byteLength(name) <= 63 && /^_jaren_rule_[0-9a-z]+_(insert|update|delete|truncate)$/.test(name)), names.join());
+    assert.equal(new Set(names).size, 4);
     const tagged = structuredClone(ruleModel);
     tagged.entities.Entry.invariants[1].assert = { $ne: ['$.old.phase', { $const: '$jaren$' }] };
     const fn = planInvariants(tagged, { dialect: postgresDialect({ searchPath: 'tenant' }) }).find((item) => item.type === 'function' && item.rule === 'frozen');
@@ -140,6 +181,15 @@ describe('PostgreSQL database invariants', { skip: !url && 'JAREN_PG_URL is not 
     for (const enforcement of /** @type {const} */ (['database', 'store'])) for (const upgraded of [false, true])
       assert.equal(await familyLifecycle(postgresEngine(), { enforcement, upgraded }), await familyLifecycle(sqliteEngine(), { enforcement, upgraded }),
         `${enforcement}${upgraded ? ', upgraded' : ''}`);
+  });
+
+  it('a store rule judges each write at its own statement as the database rule does, on PostgreSQL as on SQLite, on one session or several', async () => {
+    for (const enforcement of /** @type {const} */ (['database', 'store'])) {
+      const sqlite = await storeAgreement(sqliteEngine(), enforcement);
+      assert.equal(await storeAgreement(postgresEngine(), enforcement), sqlite, enforcement);
+      // a rule's own transaction and its probes nest on the session its write holds
+      assert.equal(await storeAgreement(postgresEngine(), enforcement, { sessions: 3 }), sqlite, `${enforcement} on three sessions`);
+    }
   });
 
   it('the null truth tables and every scalar codec give the query engine\'s verdict on both engines, and refuse what a codec cannot read', async () => {
@@ -230,6 +280,31 @@ describe('PostgreSQL database invariants', { skip: !url && 'JAREN_PG_URL is not 
         finally { await store.close(); }
       }
       finally { await fixture.dispose(); }
+    }
+  });
+
+  it('refuses TRUNCATE of a table a delete rule judges, and resolves no operator through the writer\'s search path', async () => {
+    const fixture = await postgresEngine().fixture(RULE_TABLES);
+    const other = `${fixture.dialect.schema}_ops`;
+    try {
+      for (const item of planInvariants(ruleModel, { dialect: fixture.dialect })) await fixture.exec(item.sql);
+      await (await openStore(ruleModel, { driver: fixture.driver, adopt: true })).close();
+      await fixture.exec("INSERT INTO entry (starts, ends, phase) VALUES (1, 2, 'draft')");
+      await assert.rejects(fixture.exec('TRUNCATE entry'), (error) => {
+        assert.equal(/** @type {any} */ (error).code, '23J01');
+        assert.equal(/** @type {any} */ (error).message, 'jaren invariant:frozen');
+        return true;
+      });
+      assert.equal((await fixture.all('SELECT count(*)::integer AS n FROM entry'))[0].n, 1);
+      // an operator a writer's schema puts ahead of pg_catalog answers no rule
+      await fixture.exec(`CREATE SCHEMA "${other}"; CREATE FUNCTION "${other}".yes(integer, integer) RETURNS boolean LANGUAGE sql IMMUTABLE AS 'SELECT true'; `
+        + `CREATE OPERATOR "${other}".<= (LEFTARG = integer, RIGHTARG = integer, FUNCTION = "${other}".yes)`);
+      await fixture.exec(`SET search_path = "${other}", pg_catalog, "${fixture.dialect.schema}"`);
+      await assert.rejects(fixture.exec("INSERT INTO entry (starts, ends, phase) VALUES (5, 2, 'draft')"), /jaren invariant:ordered/);
+    }
+    finally {
+      await fixture.exec(`SET search_path = "${fixture.dialect.schema}"; DROP SCHEMA IF EXISTS "${other}" CASCADE`);
+      await fixture.dispose();
     }
   });
 

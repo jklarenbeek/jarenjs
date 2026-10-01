@@ -2,12 +2,16 @@
 /** PostgreSQL lowering of database rules: per table and operation, one
  * PL/pgSQL trigger function and the row trigger that calls it. The server
  * keeps a function's source verbatim but deparses a trigger, so an installed
- * program is verified field by field through the catalog, not by its text. */
+ * program is verified field by field through the catalog, not by its text.
+ * Every function runs with a fixed search path, so no schema a writer puts
+ * ahead of `pg_catalog` can supply its operators, casts or collations. */
 import { hashContent, utf8ByteLength } from '@jarenjs/core/string';
 import { DbCompileError, INVARIANT_MARKER, INVARIANT_SQLSTATE } from '../errors.js';
 import { compileInvariants } from './invariant-sql.js';
 
 const SAFE_RANGE = 'BETWEEN -9007199254740991 AND 9007199254740991';
+/** The search path every rule function runs under, as the catalog keeps it. */
+const SEARCH_PATH = 'pg_catalog, pg_temp';
 
 /** Every PostgreSQL column is typed, so an operand's domain is what its codec
  * reads back: a safe integer, a finite number inside that range, a date of
@@ -55,23 +59,25 @@ function programName(table, suffix, limit) {
   return utf8ByteLength(full) <= limit ? full : `_jaren_rule_${hashContent(table)}_${suffix}`;
 }
 
-/** A function and the row trigger that calls it, as two plan items (a
- * migration step is one statement), the trigger carrying what its open verifies.
+/** A function and the trigger that calls it, as two plan items (a migration
+ * step is one statement), the trigger carrying what its open verifies.
  * @param {any} dialect @param {string} table @param {string} name @param {string} rule
- * @param {{ timing: 'BEFORE' | 'AFTER', event: string, columns: string[] }} on @param {string} source */
+ * @param {{ timing: 'BEFORE' | 'AFTER', event: string, columns: string[], level?: 'ROW' | 'STATEMENT' }} on
+ * @param {string} source */
 function triggerFunction(dialect, table, name, rule, on, source) {
   const q = dialect.quoteIdentifier;
+  const level = on.level ?? 'ROW';
   let tag = '$jaren$';
   for (let i = 1; source.includes(tag); i++) tag = `$jaren_${i}$`;
   const fn = `${q(dialect.schema)}.${q(name)}`;
   const event = `${on.event}${on.columns.length ? ` OF ${on.columns.map(q).join(', ')}` : ''}`;
   return [{ type: 'function', name, owner: table, rule,
-    sql: `CREATE FUNCTION ${fn}() RETURNS trigger LANGUAGE plpgsql AS ${tag}${source}${tag}` },
+    sql: `CREATE FUNCTION ${fn}() RETURNS trigger LANGUAGE plpgsql SET search_path = ${SEARCH_PATH} AS ${tag}${source}${tag}` },
   { type: 'trigger', name, owner: table, rule,
-    sql: `CREATE TRIGGER ${q(name)} ${on.timing} ${event} ON ${q(dialect.schema)}.${q(table)} FOR EACH ROW EXECUTE FUNCTION ${fn}()`,
-    program: { timing: on.timing, events: [on.event], level: 'ROW', columns: on.columns, condition: false, enabled: 'O',
+    sql: `CREATE TRIGGER ${q(name)} ${on.timing} ${event} ON ${q(dialect.schema)}.${q(table)} FOR EACH ${level} EXECUTE FUNCTION ${fn}()`,
+    program: { timing: on.timing, events: [on.event], level, columns: on.columns, condition: false, enabled: 'O',
       deferrable: false, deferred: false, function: { schema: dialect.schema, name, language: 'plpgsql',
-        returns: 'trigger', arguments: '', securityDefiner: false, config: null, source } } }];
+        returns: 'trigger', arguments: '', securityDefiner: false, config: [`search_path=${SEARCH_PATH}`], source } } }];
 }
 
 /** @param {any} mapping @param {any} all @param {any} dialect @param {number} limit @returns {any[]} */
@@ -80,9 +86,18 @@ export function postgresInvariantTriggers(mapping, all, dialect, limit) {
     throw new DbCompileError('JD0005', 'database invariant: PostgreSQL rules install in the driver-owned schema; name it with searchPath');
   const q = dialect.quoteIdentifier;
   const sl = dialect.stringLiteral;
+  const programs = compileInvariants(mapping, all, dialect, POSTGRES);
+  // TRUNCATE removes rows without a row trigger: on a table whose deletes a
+  // rule judges, a statement program refuses it in the delete rule's name
+  const deletes = programs.find((program) => program.op === 'delete');
+  const truncate = deletes === undefined ? [] : triggerFunction(dialect, mapping.table,
+    programName(mapping.table, 'truncate', limit), deletes.rules.join(','), { timing: 'BEFORE', event: 'TRUNCATE', columns: [], level: 'STATEMENT' },
+    ['', 'BEGIN',
+      `  RAISE EXCEPTION USING MESSAGE = ${sl(`${INVARIANT_MARKER}${deletes.rules[0]}`)}, ERRCODE = ${sl(INVARIANT_SQLSTATE)};`,
+      '  RETURN NULL;', 'END;', ''].join('\n'));
   // an increment rewrites the row before it is written, so every AFTER
   // program of the statement reads the revision it will keep
-  return compileInvariants(mapping, all, dialect, POSTGRES).flatMap((program) => {
+  return [...programs.flatMap((program) => {
     const name = programName(mapping.table, program.name, limit);
     const event = program.op.toUpperCase();
     const rule = program.rules.join(',');
@@ -103,5 +118,5 @@ export function postgresInvariantTriggers(mapping, all, dialect, limit) {
     const increments = [...new Set(program.increments.map((increment) => increment.rule))].join(',');
     return [...triggerFunction(dialect, mapping.table, programName(mapping.table, `${program.name}_before`, limit), increments,
       { timing: 'BEFORE', event, columns: [] }, before), ...after];
-  });
+  }), ...truncate];
 }

@@ -1,0 +1,157 @@
+{
+  "format": "jaren-postgres-sessions/1",
+  "measuredAt": "2026-10-01T16:14:54.424Z",
+  "runtime": {
+    "node": "24.20.0",
+    "pg": "8.23.0",
+    "platform": "linux",
+    "arch": "x64",
+    "cpu": "AMD Ryzen 9 5900HX with Radeon Graphics",
+    "loadavg": "2.69 5.90 8.66 2/6073 3864323"
+  },
+  "sourceHashes": {
+    "benchmark/postgres-sessions.js": "a44b3d2e50ee6b2e035c8406c226e99fa93373f00183cde223ceafc92650286f",
+    "packages/db/src/store.js": "ce3c97c27ab7c5d7655e229355951a1a7c769121a7187b2455c27c00ebb93cc8",
+    "packages/db/src/sessions.js": "1c3441357e02c4bbd1062b3d5583268f0ae3abb06bec6f09b2341e1f488e7810",
+    "packages/db/src/drivers/postgres.js": "0e3c8a394ce876464598a95141be1dc9f71824b9ba5eb3dec56266cce6aedab4"
+  },
+  "postgres": {
+    "version": "17.11 (Debian 17.11-1.pgdg12+2)",
+    "fsync": "on",
+    "synchronous_commit": "on",
+    "full_page_writes": "on"
+  },
+  "clients": 8,
+  "perClient": 40,
+  "rounds": 5,
+  "sequential": 200,
+  "rows": [
+    {
+      "shape": "one store",
+      "sessions": 1,
+      "stores": 1,
+      "txPerSecond": 1257.7885806443883,
+      "runs": [
+        1257.7885806443883,
+        1242.1314321704365,
+        1314.33050197518,
+        575.9535898901097,
+        1384.6686783825603
+      ]
+    },
+    {
+      "shape": "one store",
+      "sessions": 2,
+      "stores": 1,
+      "txPerSecond": 2666.623600695508,
+      "runs": [
+        2707.003775035194,
+        2666.623600695508,
+        2737.236524839062,
+        508.12884761018853,
+        2618.897603370687
+      ]
+    },
+    {
+      "shape": "one store",
+      "sessions": 4,
+      "stores": 1,
+      "txPerSecond": 4649.978262804752,
+      "runs": [
+        4034.4976275704025,
+        4649.978262804752,
+        5083.47397876101,
+        943.6354263114996,
+        4838.561691570794
+      ]
+    },
+    {
+      "shape": "one store",
+      "sessions": 8,
+      "stores": 1,
+      "txPerSecond": 7106.136026322029,
+      "runs": [
+        6066.2004071292495,
+        7120.853704908986,
+        7106.136026322029,
+        6071.55313991226,
+        7369.277706923744
+      ]
+    },
+    {
+      "shape": "separate stores",
+      "sessions": 1,
+      "stores": 1,
+      "txPerSecond": 1253.0266270820932,
+      "runs": [
+        1249.0657817410317,
+        1234.6516641570795,
+        1253.0266270820932,
+        1284.4930281632148,
+        1323.9632153701139
+      ]
+    },
+    {
+      "shape": "separate stores",
+      "sessions": 1,
+      "stores": 2,
+      "txPerSecond": 2713.69256166522,
+      "runs": [
+        2642.2387510586627,
+        2713.69256166522,
+        2726.2847898220125,
+        2710.3961530263387,
+        2741.7205117013837
+      ]
+    },
+    {
+      "shape": "separate stores",
+      "sessions": 1,
+      "stores": 4,
+      "txPerSecond": 5009.8537561065095,
+      "runs": [
+        4686.206007637036,
+        4969.217946498355,
+        5043.70591840431,
+        5108.49689104056,
+        5009.8537561065095
+      ]
+    },
+    {
+      "shape": "separate stores",
+      "sessions": 1,
+      "stores": 8,
+      "txPerSecond": 7284.859875720377,
+      "runs": [
+        6725.574997254635,
+        7021.429358518307,
+        7609.555061468213,
+        7284.859875720377,
+        7856.20069175348
+      ]
+    }
+  ],
+  "routing": {
+    "one session": {
+      "nsPerTransaction": 822244.68,
+      "runs": [
+        705053.21,
+        822244.68,
+        2164572.705,
+        853734.71,
+        760356.295
+      ]
+    },
+    "two sessions, one client": {
+      "nsPerTransaction": 822155.11,
+      "runs": [
+        858721.535,
+        822155.11,
+        2331422.655,
+        789849.765,
+        805095.925
+      ]
+    }
+  },
+  "scope": "One host, client and server on one machine; each client a run of one-document transactions on keys of its own (no conflicts), every commit durable, so it waits on a disk the host shares with whatever else runs there. A store on one session runs them in turn; several sessions and separate stores let the server work on them together. No production throughput claim."
+}

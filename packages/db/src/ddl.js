@@ -975,11 +975,25 @@ export function planJoinTable(tableName, join, entities, dialect) {
   };
 }
 
-/** Plan explicit database-enforced persistence rules; never applies them.
+/** Plan explicit database-enforced persistence rules; never applies them. A
+ * name too long for PostgreSQL becomes a short hash of its table, so two
+ * tables can meet in one name: the plan refuses that rather than install one
+ * table's program over the other's.
  * @param {any} model @param {{ dialect: any }} options @returns {any[]} */
 export function planInvariants(model, options) {
   const mapping = explainMapping(model);
   const dialect = options.dialect;
   if (typeof dialect.invariantTriggers !== 'function') throw new DbCompileError('JD0005', 'this dialect cannot lower database invariants');
-  return Object.values(mapping.entities).flatMap((entity) => dialect.invariantTriggers(entity, mapping, dialect));
+  const items = Object.values(mapping.entities).flatMap((entity) => dialect.invariantTriggers(entity, mapping, dialect));
+  /** @type {Map<string, string>} */
+  const owners = new Map();
+  for (const item of items) {
+    const name = `${item.type} ${item.name}`;
+    const owner = owners.get(name);
+    if (owner !== undefined) throw new DbCompileError('JD0005', owner === item.owner
+      ? `database invariant: two entities map table '${owner}' and both declare database rules; declare them on one`
+      : `database invariant: tables '${owner}' and '${item.owner}' name one ${item.type} '${item.name}'; rename one table`);
+    owners.set(name, item.owner);
+  }
+  return items;
 }

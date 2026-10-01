@@ -185,6 +185,44 @@ export function attempt(call, wrap) {
 }
 
 /**
+ * Prepare `sql` for one use and release it once that use ends, however it
+ * ends: a worker keeps every statement it prepared until it is finalized, so
+ * a statement prepared per call and never released filled its capacity.
+ * @template T
+ * @param {any} connection
+ * @param {string} sql
+ * @param {(statement: any) => T | Promise<T>} use
+ * @param {{ readOnly?: boolean }} [options]
+ * @returns {T | Promise<T>}
+ */
+export function useStatementOnce(connection, sql, use, options = undefined) {
+  return chain(options === undefined ? connection.prepare(sql) : connection.prepare(sql, options), (statement) => {
+    const release = () => {
+      try {
+        void Promise.resolve(statement.finalize?.()).catch(() => {});
+      }
+      catch {
+        // a statement its connection already discarded
+      }
+    };
+    let out;
+    try {
+      out = use(statement);
+    }
+    catch (error) {
+      release();
+      throw error;
+    }
+    if (!isThenable(out)) {
+      release();
+      return out;
+    }
+    return /** @type {Promise<T>} */ (out).then((value) => { release(); return value; },
+      (error) => { release(); throw error; });
+  });
+}
+
+/**
  * Settle a transaction only after its commit succeeds. Deferred constraints
  * can refuse COMMIT or RELEASE after the body returned successfully; that
  * failure owes the same rollback as a failing body.
@@ -866,6 +904,13 @@ export function finishConnection(raw, dialect, synchronous, capabilities, queueT
      * synchronous call from inside the callback nests instead). What a
      * synchronous surface must know before it would hand back a Promise. */
     get mustQueue() { return owned && !onStack; },
+    /** The admission bounds above: how long a caller waits for the owner,
+     * and how many may wait — a router over several connections keeps the
+     * same ones (sessions.js). */
+    queueTimeout,
+    queueCapacity: raw.queueCapacity ?? Infinity,
+    /** Whether the binding lost its session: every later call on it refuses. */
+    lost: () => raw.lost?.() === true,
     /**
      * A transaction. `fn`'s value is returned; a throw rolls back exactly
      * this level and rethrows. A refused COMMIT or RELEASE also rolls

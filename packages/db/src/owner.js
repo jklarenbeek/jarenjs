@@ -115,6 +115,12 @@ export function createOwnerLease(context) {
  */
 function sessionLock(strategy, context, owner, connection) {
   let held = false;
+  const refuseLost = () => {
+    if (held && context.lost?.() === true)
+      throw notOwner(`the session that held the owner lock of this store ('${owner.id}') ended, and the lock with it: `
+        + 'this store no longer owns its database', { owner: null, expiresAt: null }, false);
+    return undefined;
+  };
   /** @param {any} on @param {string} sql */
   const one = (on, sql) => chain(on.prepare(sql, { buffered: true }), (statement) => statement.get([]));
   return {
@@ -134,10 +140,12 @@ function sessionLock(strategy, context, owner, connection) {
       throw notOwner(`another session owns schema "${row.schema}": it holds the store's owner lock until its `
         + `store closes or its session ends (this store asked as '${owner.id}')`, { owner: null, expiresAt: null }, true);
     })),
-    // the lock cannot be lost without the session, and a lost session is
-    // refused by every call already (JD2087)
-    guard: () => undefined,
-    admitted: () => undefined,
+    // the lock cannot be lost without its session, and a lost session is
+    // refused by every call already (JD2087) — unless the store runs on
+    // several sessions, whose others outlive the first: then every call
+    // refuses once it is gone (`context.lost`)
+    guard: () => refuseLost(),
+    admitted: () => refuseLost(),
     // under the store gate, so it follows whatever the session is still
     // doing, and before the driver restores the session's search path —
     // the key is the current schema. `held` clears only once the server
