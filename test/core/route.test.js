@@ -1,8 +1,8 @@
 //@ts-check
 /**
- * @file The path matcher, tested through its package-private module: the
- * template parser's dialect (canonicalization, the reserved forms it
- * names) and `compileRoutes` on the partner's 123-route table — every
+ * @file `@jarenjs/core/route` — the suite's one path-template parser and
+ * its matcher: the template dialect (canonicalization, the reserved forms
+ * it names) and `compileRoutes` on the reference 123-route table — every
  * probe, both registration orders, trailing slash, percent-decoding,
  * malformed escapes, unknown methods, backtracking and the host guard.
  */
@@ -10,8 +10,8 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
 
-import { parsePathTemplate, compileRoutes, pathShape } from '../../packages/contract/src/path.js';
-import { ROUTES, PROBES, opId } from './helpers.js';
+import { parsePathTemplate, compileRoutes, pathShape } from '@jarenjs/core/route';
+import { ROUTES, PROBES, opId } from '../contract/helpers.js';
 
 /** @param {[string, string][]} routes */
 function entriesOf(routes) {

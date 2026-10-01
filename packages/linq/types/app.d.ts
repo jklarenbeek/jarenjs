@@ -32,7 +32,7 @@
  * normative mapping table.
  */
 
-import type { Expr, MemberExpr, UnknownExpr } from './index.js';
+import type { BoolExpr, Expr, MemberExpr, UnknownExpr } from './index.js';
 import type { AnyBuilder, BuilderLike, Infer, Json, JsonSchema } from './schema.js';
 
 
@@ -203,6 +203,70 @@ export function transition(spec: {
   readonly patch?: readonly PatchOp[];
   readonly effects?: readonly EffectDeclaration[];
 }): Transition;
+
+/**
+ * A conditional transition, as `when()` spells it (`{ "$if": [cond,
+ * then, else?] }`): what an action returns, or a branch of another
+ * `when()`. Branded, so a branch is a transition or a conditional and
+ * nothing else.
+ */
+export interface Conditional {
+  readonly __conditional: true;
+}
+
+/**
+ * `then` when `cond` holds; `otherwise` — or the empty sequence, the
+ * format's no-op transition — when it does not. Not the schema pen's
+ * `when` (a JSON Schema `if`/`then`/`else`).
+ */
+export function when(
+  cond: BoolExpr | boolean,
+  then: Transition | Conditional,
+  otherwise?: Transition | Conditional,
+): Conditional;
+
+/** What a task's completion carries (`createTaskEffect`): the id the
+ * start sent, and the result — or the error. */
+export interface TaskSettled {
+  readonly id: number;
+  readonly result?: unknown;
+  readonly error?: unknown;
+}
+
+/** A start's props: the effect's own, as a value or a callback over the
+ * action's scope. */
+export type TaskProps<State> =
+  | { readonly [prop: string]: unknown }
+  | ((state: ValueExpr<State>, externals: ActionScope<unknown>) => { readonly [prop: string]: unknown });
+
+/** A completion's extra patch: as a list, or a callback over the
+ * action's scope (where `x.payload.result` lives). */
+export type TaskPatch<State> =
+  | readonly PatchOp[]
+  | ((state: ValueExpr<State>, externals: ActionScope<TaskSettled>) => readonly PatchOp[]);
+
+/** One task slot's initial value and its three actions, each answered
+ * under its own literal name so a spread keeps `ActionsOf<>` exact. */
+export interface TaskSlot<Name extends string, State = unknown> {
+  readonly initial: { readonly id: 0; readonly status: 'idle'; readonly error: null };
+  start<const Run extends string>(run: Run, props?: TaskProps<State>):
+    { readonly [K in `${Name}/start`]: ActionDeclaration<unknown> };
+  done(patch?: TaskPatch<State>): { readonly [K in `${Name}/done`]: ActionDeclaration<TaskSettled> };
+  fail(patch?: TaskPatch<State>): { readonly [K in `${Name}/fail`]: ActionDeclaration<TaskSettled> };
+}
+
+/**
+ * The async-task convention (TASKS.md) for one slot: the increment
+ * written once, every completion guarded on the slot's id. `mode:
+ * 'exhaust'` adds the document's guard; the host still registers
+ * `createTaskEffect` with the same mode. `fail: true` routes failures
+ * to `<name>/fail` instead of `<name>/done`.
+ */
+export function taskSlot<const Name extends string, State = unknown>(name: Name, options: {
+  readonly at: (state: ValueExpr<State>) => unknown;
+  readonly mode?: 'switch' | 'exhaust' | 'concat' | 'parallel';
+  readonly fail?: boolean;
+}): TaskSlot<Name, State>;
 
 /** One effect invocation (§5.1). Its props are a value in the ACTION's
  * own scope: one document, one capture. */

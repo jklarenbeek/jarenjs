@@ -245,6 +245,78 @@ the current id, lands. The same holds when polling: every tick is a
 fresh id, so the guard serializes an arbitrary storm of overlapping
 responses down to "latest wins".
 
+## Through the app pen
+
+`taskSlot(name, { at, mode?, fail? })` from `@jarenjs/linq/app` writes
+one slot's half of this convention: the slot's `initial` value and its
+start, completion and failure actions, under the names `<name>/start`,
+`<name>/done` and `<name>/fail`. The worked example above, rebuilt
+through two slots, is the same document action for action under those
+names (`test/linq/app-tasks.test.js` asserts it):
+
+```js
+import { replace, taskSlot } from '@jarenjs/linq/app';
+import { op } from '@jarenjs/linq/jslt';
+
+const list = taskSlot('list', { at: (s) => s.tasks.list });
+const detail = taskSlot('detail', { at: (s) => s.tasks.detail, fail: true });
+
+const actions = {
+  ...list.start('http', { url: '/api/items' }),
+  ...list.done((s, x) => [replace((st) => st.items, x.payload.result)]),
+  ...detail.start('http', (s, x) => ({ url: op('$concat', ['/api/items/', op('$string', x.payload)]) })),
+  ...detail.done((s, x) => [replace((st) => st.detail, x.payload.result)]),
+  ...detail.fail(),
+};
+```
+
+What a hand-written document has to keep right, the slot keeps by
+construction:
+
+- The start's increment is **one** expression, written into the patch
+  and into the effect's `with.id` — the pre-transition-`$` gotcha above
+  cannot happen.
+- Every completion opens with the id guard and has no else-branch.
+- Without `fail: true`, failures reach `<name>/done`, told apart with
+  `$exists: "$payload.error"` — the single-completion default. With it,
+  the start names `<name>/fail` in the effect and `fail()` writes that
+  action.
+- `mode: "exhaust"` adds the document's own guard: a start while the
+  slot is `loading` is the empty sequence, so a double click changes
+  nothing. **The host still registers `createTaskEffect(run, { mode:
+  "exhaust" })`** — the mode is a host option and a document cannot
+  carry it, so the slot writes only the half a document can say. The
+  halves must agree. An `exhaust` effect behind a slot without the guard
+  is the trap: the second start moves the slot to id `2`, the effect
+  ignores it, and the first request's completion carries id `1` and is
+  refused as stale — the slot stays `loading` with no request behind it.
+
+## The host-effect rule
+
+The id guard protects the **completion**. An effect of the host's own
+that awaits needs the same discipline, because the state it read before
+its `await` may be gone by the time it resumes:
+
+- **An effect that reads state, awaits, and then acts must carry the
+  identity it captured** — the task id, or a revision — in what it
+  dispatches, so the completion's guard rejects a stale result exactly
+  as it rejects a stale response.
+- **Where it must act on the state directly**, it re-reads
+  `app.getState()` after its last `await` and compares that identity
+  before acting. A value read before the `await` is a value from a
+  transaction that may no longer be the current one.
+
+```js
+const app = createApp(doc, {
+  effects: {
+    exportReport: async (props, dispatch) => {
+      const file = await render(props.rows);              // props were computed at the start
+      dispatch('report/exported', { id: props.id, file }); // the completion's guard compares props.id
+    },
+  },
+});
+```
+
 ## What the meta-schema needs
 
 Nothing — and that is the point. The convention is ordinary `state`,

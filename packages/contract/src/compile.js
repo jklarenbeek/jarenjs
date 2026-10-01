@@ -35,7 +35,7 @@ import { CONTRACT_GRAMMARS } from './grammars.js';
 import { compatEntryKind, isNumericVersion } from './compat.js';
 
 export { CONTRACT_GRAMMARS };
-import { parsePathTemplate, pathShape, compileRoutes } from './path.js';
+import { parsePathTemplate, pathShape, compileRoutes } from '@jarenjs/core/route';
 import { describeContract } from './describe.js';
 import { contractRevision } from './revision.js';
 
@@ -483,7 +483,7 @@ function checkRefs(node, docPath, scope, isRoot) {
  * @typedef {Object} CompiledHttp
  * @property {string} method
  * @property {string} path
- * @property {import('./path.js').ParsedPathTemplate} template
+ * @property {import('@jarenjs/core/route').ParsedPathTemplate} template
  * @property {readonly string[]} variables
  * @property {Readonly<Record<string, 'path' | 'query' | 'header' | 'body'>>} in
  * @property {string | null} body

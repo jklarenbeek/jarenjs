@@ -49,6 +49,7 @@ export const APP_CODES = Object.freeze({
   JA2024: 'route navigation violates the origin, protocol or base-path boundary',
   JA2025: 'a route URL, query or delivery bound would be exceeded',
   JA2026: 'route owner is disposed, inactive or already subscribed',
+  JA2027: 'a route table is malformed or two of its templates collide',
 });
 
 /**

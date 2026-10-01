@@ -1,16 +1,19 @@
 //@ts-check
 /**
- * @file The path matcher: RFC 6570 level-1 templates (`/api/products/{id}`)
- * compiled into one static-segment tree per HTTP method, walked by
- * char-code scan with zero allocation until the leaf is known.
- *
- * Package-private (docs/CONTRACT-FORMAT.md §5). Two stages:
+ * @file `@jarenjs/core/route` — path templates and the matcher: RFC 6570
+ * level-1 templates (`/api/products/{id}`) compiled into one
+ * static-segment tree per method, walked by char-code scan with zero
+ * allocation until the leaf is known. The contract package routes its
+ * operations through it, the linq contract pen checks a binding's
+ * template with it, and an app matches its own routes with it
+ * (`@jarenjs/app/routes`). Two stages:
  *
  *  1. `parsePathTemplate` — the one template parser in the suite: it
  *     canonicalizes `:name` to `{name}`, splits static from variable
- *     segments and refuses every reserved form with a message that names
- *     it. `compileContract` calls it once per operation and maps a
- *     refusal to `JC0008`.
+ *     segments and refuses every reserved form with a `TypeError` that
+ *     names it. Each caller maps the refusal to its own code
+ *     (`compileContract`: `JC0008`; the contract pen: `JL0102`; an app's
+ *     route table: `JA2027`).
  *  2. `compileRoutes` — the operation table becomes a tree of nodes
  *     `{ statics, variable, leaf }`; `match(method, path)` walks statics
  *     first, falls back to the variable child, and backtracks on a dead
@@ -38,8 +41,8 @@ import {
   CC_QUESTION, CC_HASH, CC_UNDERSCORE, CC_PLUS, CC_DOT, CC_SEMICOLON,
   CC_AMP, CC_EQ, CC_DEL, CC_SPACE,
   isAsciiLetterCode, isDigitCode, isHexDigitCode,
-} from '@jarenjs/core/scan';
-import { setObjectMember } from '@jarenjs/core/object';
+} from './scan.js';
+import { setObjectMember } from './object.js';
 
 /**
  * One parsed template segment: a static literal or a variable name.

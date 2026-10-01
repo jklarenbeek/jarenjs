@@ -185,6 +185,10 @@
       "types": "./dist/types/range/index.d.ts",
       "default": "./src/range/index.js"
     },
+    "./route": {
+      "types": "./dist/types/route.d.ts",
+      "default": "./src/route.js"
+    },
     "./retry": {
       "types": "./dist/types/retry.d.ts",
       "default": "./src/retry.js"

@@ -1,24 +1,24 @@
 {
   "bundles": {
-    "schema": 36808,
-    "chain": 177904,
-    "model": 46152,
-    "jslt": 19781,
-    "migration": 25601,
-    "db": 778930,
-    "contract": 49032,
-    "flow": 19836,
-    "app": 51100,
-    "forms": 40964,
+    "schema": 36834,
+    "chain": 177930,
+    "model": 46178,
+    "jslt": 19806,
+    "migration": 25627,
+    "db": 778956,
+    "contract": 50054,
+    "flow": 19862,
+    "app": 51127,
+    "forms": 40990,
     "charts": 16939,
     "project": 15150,
-    "jtlt": 16650,
+    "jtlt": 16675,
     "messages": 18321,
     "formula": 16207
   },
   "chain": {
-    "own": 40595,
-    "withSchemaPen": 202231,
-    "shared": 12481
+    "own": 40621,
+    "withSchemaPen": 202257,
+    "shared": 12507
   }
 }

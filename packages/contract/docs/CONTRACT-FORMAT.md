@@ -502,10 +502,13 @@ under which this path shape reaches an operation, sorted (`[]` for none,
 for a malformed escape, or for a non-path) — what a server answers in a
 405's `Allow` (§7.2). It walks every method tree and is off the hot path.
 
-The matcher is package-private (`compileRoutes` is not exported); it is
-reached only through `contract.match` and `contract.allowed`. Its
-measured cost on the reference 123-route table is published by the
-benchmark suite when that lands.
+The template parser and the matcher are `@jarenjs/core/route`
+(`parsePathTemplate`, `pathShape`, `compileRoutes`) — the suite's one
+parser, which the contract pen checks a binding's template with and an
+app matches its routes with (`@jarenjs/app/routes`). The contract package
+does not re-export them: a contract is reached through `contract.match`
+and `contract.allowed`. Its measured cost on the reference 123-route table
+is published by the benchmark suite when that lands.
 
 ## §6 Error codes
 

@@ -24,6 +24,8 @@ import {
   compileJsltStylesheet, createJsltRegistry, financePack, JsltCompileError, JsltRuntimeError,
 } from '@jarenjs/json/jslt';
 import { createTypeTestCompiler } from '@jarenjs/validate/query';
+import { compileJsonQuery } from '@jarenjs/json';
+import { action } from '@jarenjs/linq/app';
 
 import { compileArtifact } from '../json/schema-artifact-helpers.js';
 
@@ -289,7 +291,7 @@ describe('op() — a registered operator, spelled without judging it', () => {
   it('takes one operand or a list; a name without $ is JL0101; outside any capture JL0005', () => {
     assert.deepStrictEqual(body((v) => op('$sqrt', v.x)), { $sqrt: '$.x' });
     assert.deepStrictEqual(body(() => op('$now')), { $now: [] });
-    assert.deepStrictEqual(body((v) => op('$x', [v.a, 1, { k: 'v' }])), { $x: ['$.a', 1, { $const: { k: 'v' } }] });
+    assert.deepStrictEqual(body((v) => op('$x', [v.a, 1, { k: 'v' }])), { $x: ['$.a', 1, { k: 'v' }] });
     assert.throws(() => body(() => op('npv', [])), (e) => e.code === 'JL0101' && /starting with '\$'/.test(e.message));
     assert.throws(() => op('$npv', []), (e) => e.code === 'JL0005');
     // it lifts in a chain capture too — the document is the same; the
@@ -297,6 +299,29 @@ describe('op() — a registered operator, spelled without judging it', () => {
     const chain = from([input]).select((r) => ({ v: op('$npv', [r.rate, r.cashflows.all()]) }));
     assert.throws(() => chain.explain(), (e) => e.code === 'JQ0002' && e.docPath === '/$return/v');
     assert.throws(() => chain.toArray(), (e) => e.code === 'JQ0002');
+  });
+});
+
+describe('op() spells its operands as the capture in progress does', () => {
+  // an operand's POSITION used to reach toExpression's fold flag: in a body
+  // (which folds nothing) every operand after the first became a $const,
+  // and in a chain (which folds data) the first one did not
+  const data = { k: 'v' };
+  it('a body and an action fold no operand; a chain folds every one', () => {
+    assert.deepStrictEqual(body(() => op('$foo', [data, data, data])), { $foo: [data, data, data] });
+    assert.deepStrictEqual(body(() => op('$foo', data)), { $foo: data });
+    assert.deepStrictEqual(action(() => op('$foo', [data, data, data])).document, { $foo: [data, data, data] });
+    assert.deepStrictEqual(from([]).select(() => op('$foo', [data, data, data])).toDocument().$return,
+      { $foo: [{ $const: data }, { $const: data }, { $const: data }] });
+  });
+
+  it('the spelling moved, the value did not: the old and the new document answer alike', () => {
+    const now = body((v) => op('$if', [v.flag, data, { k: 'w' }]));
+    const before = { $if: ['$.flag', { k: 'v' }, { $const: { k: 'w' } }] };
+    assert.deepStrictEqual(now, { $if: ['$.flag', data, { k: 'w' }] });
+    for (const flag of [true, false]) {
+      assert.deepStrictEqual(compileJsonQuery(now)({ flag }), compileJsonQuery(before)({ flag }), String(flag));
+    }
   });
 });
 

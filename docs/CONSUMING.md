@@ -160,7 +160,7 @@ the table and stale in the paragraph that cites it:
 | `./model` | <!--fact:bundle.model.kb-->46<!--/fact--> kB | the schema pen it subclasses |
 | `./jslt` | <!--fact:bundle.jslt.kb-->20<!--/fact--> kB | the body capture; of the schema pen, only the builder brand |
 | `./migration` | <!--fact:bundle.migration.kb-->26<!--/fact--> kB | the canonicalizer and hash a shape identity needs |
-| `./contract` | <!--fact:bundle.contract.kb-->49<!--/fact--> kB | the schema pen (a contract's inputs and outputs are schemas) |
+| `./contract` | <!--fact:bundle.contract.kb-->50<!--/fact--> kB | the schema pen (a contract's inputs and outputs are schemas) |
 | `./flow` | <!--fact:bundle.flow.kb-->20<!--/fact--> kB | the capture; of the schema pen, only the brand |
 | `./app` | <!--fact:bundle.app.kb-->51<!--/fact--> kB | the schema pen and the JSLT pen (state, and views) |
 | `./forms` | <!--fact:bundle.forms.kb-->41<!--/fact--> kB | the schema pen it subclasses |

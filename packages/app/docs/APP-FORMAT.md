@@ -768,6 +768,7 @@ refreshes or paired native events are deduplicated:
 | `query` | Frozen object of frozen string arrays. Repeated keys retain their encounter order; even a single value is an array. Prototype names are ordinary own keys. |
 | `fragment` | Inner fragment without `#`, still percent-encoded. In hash mode this is the second hash, inside the route. |
 | `raw` | Original location hash in hash mode; pathname+search+hash in history mode. Adapters can preserve their own existing route grammar. |
+| `name`, `params` | Only with `templates`: the matched route's name and its decoded parameters, or `null` and `{}`. |
 
 Parsing follows URL pathname normalization and URLSearchParams query
 decoding: plus becomes a space, malformed percent escapes remain
@@ -811,10 +812,32 @@ Options accept an injected `window` (default current browser window)
 and optional `onError(error)` for native event errors. Direct calls
 throw; without a sink, native event errors also surface. Codes:
 `JA2023` malformed host/input/action, `JA2024` URL/origin/protocol/base
-refusal, `JA2025` bounds, `JA2026` unavailable subscription ownership.
-Initial delivery failure removes every listener it acquired. A host
-must configure its action/error policy; these helpers add no auth or
-application page vocabulary.
+refusal, `JA2025` bounds, `JA2026` unavailable subscription ownership,
+`JA2027` a malformed or colliding route table. An initial address the
+subscription cannot read — outside the base, past a bound — is reported
+as a native event's refusal is (to `onError`, or without one as the
+platform's uncaught error, thrown from a task of its own), delivers
+nothing, and leaves the subscription live: the next address it can read
+is delivered and navigation works. An initial delivery that fails — a
+throwing action dispatch, the delivery bound — removes every listener it
+acquired. A host must configure its action/error policy; these helpers
+add no auth or application page vocabulary.
+
+**Route tables.** `compileRouteTable({ name: template, … })` names
+addresses by RFC 6570 level-1 templates (`/items/{id}`, `/items/:id`),
+parsed and matched by the suite's one template parser
+(`@jarenjs/core/route`, the contract binding's own), and
+`matchRoute(table, record)` answers `{ name, params }` or `null` for a
+record's `path`. A static segment beats a variable whatever the order;
+a variable binds one whole segment, percent-decoded once, so `/items/a%2Fb`
+binds `id` to `a/b`; a trailing slash, an empty segment and a malformed
+escape match nothing. A table that is not an object of templates, a
+template the parser refuses (`/labels/{id}.pdf`), or two templates of one
+shape (`/items/{id}`, `/items/{key}`) is `JA2027`. Given `templates` — an
+object of them or a compiled table — a subscription compiles it before it
+adds a listener and gives every record two more members: the matched
+`name` and its frozen `params`, or `null` and `{}` for an address no
+template matches.
 
 The website uses the shared hash owner with a 65536-character/1024-query
 ceiling to accommodate its existing share-token budget. Its page adapter
@@ -1000,6 +1023,7 @@ defaults to rethrowing):
 | `JA2024` | route URL, origin, protocol or base-path boundary refuses navigation (§8.8) |
 | `JA2025` | a route URL, query-entry or delivery bound would be exceeded (§8.8) |
 | `JA2026` | route owner is disposed, inactive or already has an active subscription (§8.8) |
+| `JA2027` | a route table is malformed — not an object of templates, a template the parser refuses — or two of its templates have one shape (§8.8) |
 
 Wrapped causes are preserved on `error.cause`; compile errors from
 embedded documents keep their own codes (`JQ...`, `JT...`) there —

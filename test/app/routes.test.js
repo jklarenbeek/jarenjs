@@ -1,6 +1,8 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { createHashRouteSubscription, createHistoryRouteSubscription } from '@jarenjs/app/routes';
+import {
+  compileRouteTable, createHashRouteSubscription, createHistoryRouteSubscription, matchRoute,
+} from '@jarenjs/app/routes';
 
 function windowAt(href) {
   let current = new URL(href), at = 0;
@@ -115,5 +117,73 @@ describe('owned route subscriptions', () => {
     assert.throws(() => routes.navigate(1), { code: 'JA2023' });
     assert.throws(() => routes.navigate('/x', { replace: 'yes' }), { code: 'JA2023' });
     stop(); routes.dispose();
+  });
+});
+
+describe('route tables: an address named by its template', () => {
+  const table = compileRouteTable({ item: '/items/{id}', newItem: '/items/new', print: '/labels/:label/print' });
+  const at = (/** @type {string} */ path) => matchRoute(table, { path });
+
+  it('matches through the suite\'s one template parser: a static segment wins, a variable binds one decoded segment', () => {
+    assert.deepEqual(at('/items/42'), { name: 'item', params: { id: '42' } });
+    assert.deepEqual(at('/items/new'), { name: 'newItem', params: {} }, 'the static route wins');
+    assert.deepEqual(at('/items/a%2Fb'), { name: 'item', params: { id: 'a/b' } }, 'an escaped separator stays inside');
+    assert.deepEqual(at('/labels/L%C3%A9/print'), { name: 'print', params: { label: 'Lé' } });
+    assert.equal(at('/items/'), null, 'a trailing slash is another shape');
+    assert.equal(at('/items/%E0%A4%A'), null, 'a malformed escape matches nothing');
+    assert.equal(at('/elsewhere'), null);
+    assert.ok(Object.isFrozen(at('/items/42')) && Object.isFrozen(at('/items/42')?.params));
+    assert.deepEqual(table.names, ['item', 'newItem', 'print']);
+  });
+
+  it('refuses a malformed table or two templates of one shape (JA2027), and a non-table (JA2023)', () => {
+    for (const [templates, pattern] of /** @type {[any, RegExp][]} */ ([
+      [null, /an object of route name/], [['/a'], /an object of route name/], [{ a: 7 }, /not a path template/],
+      [{ a: '/labels/{id}.pdf' }, /whole segment/], [{ a: '/items/' }, /trailing/],
+      [{ a: '/items/{id}', b: '/items/{key}' }, /share one shape/],
+    ])) assert.throws(() => compileRouteTable(templates), (/** @type {any} */ error) => error.code === 'JA2027' && pattern.test(error.message), JSON.stringify(templates));
+    assert.throws(() => matchRoute(/** @type {any} */ ({ names: [] }), { path: '/a' }), { code: 'JA2023' });
+    assert.throws(() => matchRoute(table, /** @type {any} */ ({})), { code: 'JA2023' });
+  });
+
+  it('a subscription given templates names each record; a malformed table is JA2027 before any listener', () => {
+    const host = windowAt('https://app.test/#/base/items/42'), seen = [];
+    const routes = createHashRouteSubscription({ window: host.window, basePath: '/base',
+      templates: { item: '/items/{id}', list: '/items' } });
+    const stop = routes({ action: 'route' }, (_action, record) => seen.push([record.path, record.name, record.params]));
+    routes.navigate('/base/items'); routes.navigate('/base/nowhere');
+    assert.deepEqual(seen, [['/items/42', 'item', { id: '42' }], ['/items', 'list', {}], ['/nowhere', null, {}]]);
+    stop(); routes.dispose();
+    // a compiled table is taken as it is
+    const named = createHistoryRouteSubscription({ window: windowAt('https://app.test/items/7').window, templates: table });
+    let record; named({ action: 'route' }, (_action, value) => { record = value; });
+    assert.deepEqual([record.name, record.params], ['item', { id: '7' }]); named.dispose();
+    const fresh = windowAt('https://app.test/');
+    assert.throws(() => createHistoryRouteSubscription({ window: fresh.window, templates: { a: '/x/{id}', b: '/x/{y}' } }), { code: 'JA2027' });
+    assert.equal(fresh.count(), 0);
+    // without templates a record carries no name
+    const plain = createHistoryRouteSubscription({ window: fresh.window });
+    plain({ action: 'route' }, (_action, value) => { record = value; });
+    assert.deepEqual(Object.keys(record), ['mode', 'path', 'query', 'fragment', 'raw']); plain.dispose();
+  });
+
+  it('a first address outside the base is reported (JA2024) and the subscription stays live for the next one', () => {
+    for (const [mode, factory, start, next] of /** @type {const} */ ([
+      ['hash', createHashRouteSubscription, 'https://app.test/#/outside', '#/app/items'],
+      ['history', createHistoryRouteSubscription, 'https://app.test/outside', '/app/items'],
+    ])) {
+      const host = windowAt(start), seen = [], errors = [];
+      const routes = factory({ window: host.window, basePath: '/app', onError: (error) => errors.push(error.code) });
+      const stop = routes({ action: 'route' }, (_action, record) => seen.push(record.path));
+      assert.deepEqual([errors, seen], [['JA2024'], []], `${mode}: reported, nothing delivered`);
+      assert.ok(host.count() > 0, `${mode}: the listeners stay`);
+      if (mode === 'hash') host.hash(next);
+      else { host.window.history.pushState(null, '', `https://app.test${next}`); host.fire('popstate'); }
+      assert.deepEqual(seen, ['/items'], `${mode}: the next in-base address is delivered`);
+      routes.navigate(mode === 'hash' ? '/app/more' : '/app/more');
+      assert.deepEqual(seen, ['/items', '/more'], `${mode}: navigation works`);
+      stop(); routes.dispose();
+      assert.equal(host.count(), 0);
+    }
   });
 });

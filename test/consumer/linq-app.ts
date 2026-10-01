@@ -6,7 +6,7 @@
 // the state builder); a form rule's document is typed the same way. The
 // runtime twins live in test/linq/app-pen.test.js and forms-pen.test.js.
 import {
-  action, add, append, bind, defineApp, effect, remove, replace, sub, transition,
+  action, add, append, bind, defineApp, effect, remove, replace, sub, taskSlot, transition, when,
 } from '@jarenjs/linq/app';
 import type {
   ActionScope, ActionsOf, AppDocument, AppResult, Binding, EffectDeclaration, PatchOp,
@@ -210,3 +210,28 @@ const gated = f.object({
 // @ts-expect-error — x-form is the pen's keyword here too, not meta()'s
 f.when(f.string()).meta({ 'x-form': { visible: '$.a' } });
 void gated;
+
+// ——— a conditional transition, and the task slot ———
+// when() is the app pen's $if: a transition or another when() in either
+// branch, no cast — op('$if', [cond, transition(…)]) did not compile,
+// because a Transition is not Json
+type Tasked = { tasks: { scan: { id: number; status: string; error: unknown } }; items: unknown[] };
+const guarded = action((st: Expr<Tasked>, x) =>
+  when(x.payload.eq(st.tasks.scan.id),
+    transition({ patch: [replace((c: Expr<Tasked>) => c.tasks.scan.status, 'idle')] }),
+    when(true, transition({}))));
+// @ts-expect-error — a branch is a transition or a conditional, never a bare value
+action((st: Expr<Tasked>) => when(st.tasks.scan.id.eq(1), 42));
+const scanSlot = taskSlot('scan', { at: (st: Expr<Tasked>) => st.tasks.scan, mode: 'exhaust' });
+const tasked = defineApp({
+  state: { tasks: { scan: scanSlot.initial }, items: [] }, view: [],
+  actions: {
+    ...scanSlot.start('http', { url: '/api/scan' }),
+    ...scanSlot.done((_st, x) => [replace((c: Expr<Tasked>) => c.items, x.payload.result)]),
+  },
+});
+// the slot's actions keep their literal names through the spread
+const slotActions: ActionsOf<typeof tasked>[] = ['scan/start', 'scan/done'];
+// @ts-expect-error — 'scan/fail' was never declared
+const undeclared: ActionsOf<typeof tasked> = 'scan/fail';
+void [guarded, slotActions, undeclared];

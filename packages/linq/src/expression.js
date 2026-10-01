@@ -52,6 +52,20 @@ let epochCounter = 0;
  * @type {number[]}
  */
 const captureStack = [];
+/** Each capture's own fold setting, beside its epoch on `captureStack`:
+ * what a value a pen lowers INSIDE the capture (an `op()` operand, a
+ * `when()` branch) folds by, so it is spelled as the capture spells its
+ * own result. @type {boolean[]} */
+const foldStack = [];
+
+/**
+ * Whether the innermost capture folds a pure data tree into one `$const`
+ * — the default outside any capture, where nothing is lowered anyway.
+ * @returns {boolean}
+ */
+export function captureFold() {
+  return foldStack.length === 0 ? true : foldStack[foldStack.length - 1];
+}
 
 /** @param {any} record */
 function assertLive(record) {
@@ -895,11 +909,13 @@ export function captureExpression(fn, roots, declaredParams, fold = true) {
     : makeExpr(root.doc, epoch, root.pathable, root)));
   proxies.push(makeParams(declaredParams, epoch));
   captureStack.push(epoch);
+  foldStack.push(fold);
   try {
     return toExpression(fn(...proxies), fold);
   }
   finally {
     captureStack.pop(); // every proxy of this capture is now dead
+    foldStack.pop();
   }
 }
 

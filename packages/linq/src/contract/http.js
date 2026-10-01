@@ -2,14 +2,15 @@
 /**
  * @file `http()` — the REST binding of one operation (CONTRACT-FORMAT
  * §4), written as the format spells it and checked as far as the pen can
- * see. The path template scan mirrors the compiler's own parser: every
- * form §4.2 reserves is refused by name with `JL0102`, at build time,
- * before `compileContract` would answer `JC0008` with the same meaning.
- * Nothing is canonicalized here — a `:name` template is written as the
- * author declared it, and the projections are what show the `{name}`
- * form.
+ * see. The path template is checked by the compiler's own parser
+ * (`@jarenjs/core/route`): every form §4.2 reserves is refused by name
+ * with `JL0102`, at build time, before `compileContract` would answer
+ * `JC0008` with the same meaning. Nothing is canonicalized here — a
+ * `:name` template is written as the author declared it, and the
+ * projections are what show the `{name}` form.
  */
 
+import { parsePathTemplate } from '@jarenjs/core/route';
 import { LinqBuildError } from '../errors.js';
 import { describeValue, requireJson } from '../json-boundary.js';
 
@@ -25,57 +26,11 @@ export const HTTP_METHODS = Object.freeze(['GET', 'HEAD', 'POST', 'PUT', 'PATCH'
 /** The four places an input member can travel. */
 export const LOCATIONS = Object.freeze(['path', 'query', 'header', 'body']);
 
-/** `[A-Za-z_][A-Za-z0-9_]*` — a path variable's name. */
-const IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/;
-
-/** The RFC 6570 operators a `{…}` expression may open with; all reserved. */
-const OPERATORS = '+#./;?&=';
-
-/**
- * One static segment: any character but the structural ones (`/ { } : *
- * ? #`), whitespace and controls; a `%` must open a well-formed escape.
- * @param {string} segment
- * @param {string} at
- */
-function checkStatic(segment, at) {
-  for (let i = 0; i < segment.length; i++) {
-    const ch = segment[i];
-    if (ch === '{' || ch === '}') {
-      throw new LinqBuildError('JL0102',
-        `a variable must be a whole segment ("{name}"), found "${segment}" — the format `
-        + 'reserves a variable that is only part of a segment', at);
-    }
-    if (ch === ':') {
-      throw new LinqBuildError('JL0102',
-        `":" is reserved for a variable segment (":name"), found "${segment}"`, at);
-    }
-    if (ch === '*') {
-      throw new LinqBuildError('JL0102',
-        `"*" is a reserved wildcard form; $contract 0.1 has no wildcards, found "${segment}"`, at);
-    }
-    if (ch === '?' || ch === '#') {
-      throw new LinqBuildError('JL0102',
-        `"${ch}" cannot appear in a path template (the query and fragment are not part of `
-        + 'the path)', at);
-    }
-    const code = segment.charCodeAt(i);
-    if (code <= 0x20 || code === 0x7f) {
-      throw new LinqBuildError('JL0102',
-        `whitespace or a control character in segment "${segment}"`, at);
-    }
-    if (ch === '%') {
-      if (!/^[0-9A-Fa-f]{2}$/.test(segment.slice(i + 1, i + 3))) {
-        throw new LinqBuildError('JL0102',
-          `a malformed percent-escape in segment "${segment}"`, at);
-      }
-      i += 2;
-    }
-  }
-}
-
 /**
  * The variables a template declares, refusing every reserved form by
- * name (§4.2). Mirrors the compiler's parser; nothing is rewritten.
+ * name (§4.2) with the suite's one template parser (`@jarenjs/core/route`)
+ * — the compiler's own, so the pen refuses earlier and never differently.
+ * Nothing is rewritten: the binding keeps the template as declared.
  * @param {any} source
  * @param {string} at
  * @returns {string[]} the variable names, in order
@@ -85,73 +40,12 @@ export function pathVariables(source, at) {
     throw new LinqBuildError('JL0102',
       `http() path is a path template string, got ${describeValue(source)}`, at);
   }
-  if (source.length === 0 || source[0] !== '/') {
-    throw new LinqBuildError('JL0102', 'a path template must start with "/"', at);
+  try {
+    return [...parsePathTemplate(source).variables];
   }
-  /** @type {string[]} */
-  const variables = [];
-  if (source === '/') return variables;
-  const segments = source.slice(1).split('/');
-  for (let i = 0; i < segments.length; i++) {
-    const segment = segments[i];
-    if (segment.length === 0) {
-      throw new LinqBuildError('JL0102', i === segments.length - 1
-        ? 'a trailing "/" declares an empty segment; the root template "/" is the only empty path'
-        : 'an empty segment ("//")', at);
-    }
-    /** @type {string | null} */
-    let name = null;
-    if (segment[0] === '{') {
-      if (segment[segment.length - 1] !== '}') {
-        throw new LinqBuildError('JL0102',
-          `a variable must be a whole segment ("{name}"), found "${segment}" — the format `
-          + 'reserves a variable that is only part of a segment', at);
-      }
-      name = segment.slice(1, -1);
-      if (name.length > 0 && OPERATORS.includes(name[0])) {
-        throw new LinqBuildError('JL0102',
-          `"{${name}}" uses the reserved RFC 6570 operator "${name[0]}"; $contract 0.1 `
-          + 'supports only "{name}"', at);
-      }
-      const last = name[name.length - 1];
-      if (last === '+' || last === '*') {
-        throw new LinqBuildError('JL0102',
-          `"{${name}}" uses the reserved "${last}" expansion modifier; $contract 0.1 has no `
-          + 'wildcards', at);
-      }
-      if (name.includes(',') || name.includes(':')) {
-        throw new LinqBuildError('JL0102',
-          `"{${name}}" uses a reserved RFC 6570 list or prefix form; $contract 0.1 supports `
-          + 'only "{name}"', at);
-      }
-    }
-    else if (segment[0] === ':') {
-      name = segment.slice(1);
-      if (name.length === 0 || name.includes('{') || name.includes('}')) {
-        throw new LinqBuildError('JL0102',
-          `":name" must be a whole segment with an identifier name, found "${segment}"`, at);
-      }
-      const last = name[name.length - 1];
-      if (last === '*' || last === '+' || last === '?') {
-        throw new LinqBuildError('JL0102',
-          `":${name}" uses a reserved "${last}" modifier; $contract 0.1 has no wildcards or `
-          + 'optional segments', at);
-      }
-    }
-    if (name === null) {
-      checkStatic(segment, at);
-      continue;
-    }
-    if (!IDENT.test(name)) {
-      throw new LinqBuildError('JL0102',
-        `a variable name must match [A-Za-z_][A-Za-z0-9_]*, found "${name}"`, at);
-    }
-    if (variables.includes(name)) {
-      throw new LinqBuildError('JL0102', `the variable "${name}" is declared twice`, at);
-    }
-    variables.push(name);
+  catch (error) {
+    throw new LinqBuildError('JL0102', /** @type {Error} */ (error).message, at);
   }
-  return variables;
 }
 
 /**

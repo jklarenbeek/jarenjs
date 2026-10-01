@@ -105,7 +105,7 @@ the tree-shaking probe (§7) measures the bundle that follows from it.
 
 ## 2. The mapping table
 
-Every name `@jarenjs/linq/app` exports — all thirteen — and the members
+Every name `@jarenjs/linq/app` exports — all fifteen — and the members
 each writes. The subpath exports no builder class, no constant and no
 guard, so §5 documents the exported TYPES rather than a set of values a
 caller meets.
@@ -139,10 +139,65 @@ and nothing else — a transition is data, so a test can read it.
 | `action(fn, { payload?, event? })` | one action document, captured over `$`, `$event`, `$payload` | `ActionDeclaration<Payload>`; `payload` and `event` are TYPES — the format carries no schema for either, and nothing is emitted for them | native; a non-builder `payload` `JL0101`; an excluded `event` field `JL0102`; a name §3.1 does not bind `JL0104` |
 | `transition({ state?, patch?, effects? })` | the transition object of APP-FORMAT §3.2, in the order the runtime applies it | `Transition` | native; another member `JL0101` |
 | `effect(run, with?)` | `{ run, with? }` (§5.1); `with` is a value in the ACTION's scope, not a callback | `EffectDeclaration<Run>` — `Run` is a literal | native; an empty `run` `JL0101` |
+| `when(cond, then, otherwise?)` | `{ "$if": [cond, then, otherwise?] }` — the branches spelled as the action spells its own result; no `otherwise` is the empty sequence, the no-op transition | `Conditional`; `cond` is a `BoolExpr` or a boolean, a branch a `Transition` or a `Conditional` | native; a condition or a branch that is not one `JL0101`; outside an action's capture `JL0005` |
+| `taskSlot(name, { at, mode?, fail? })` | the slot's `initial` value `{ id: 0, status: 'idle', error: null }` and three actions, `<name>/start`, `<name>/done` and `<name>/fail`, each answered under its own name for a spread into `actions` | `TaskSlot<Name, State>`: the names are template literals, so `ActionsOf<>` stays exact | native; an option it does not take, a `mode` outside `switch`/`exhaust`/`concat`/`parallel`, a start prop the slot owns (`id`, `done`, `fail`, `slot`), or `fail()` on a slot without `fail: true` `JL0101` |
 
 Returning nothing from an action is the format's own no-op, and
 `transition({})` is that same empty object: it is allowed, and it is
 what an action that only fires an effect on a later turn writes.
+
+`when()` is how an action returns a transition for SOME dispatches: the
+operator is `$if`, and its missing else-branch is the empty sequence —
+APP-FORMAT §3.2's no-op — which is the whole guard of the task
+convention. It lowers its branches with the capture's own setting (an
+action folds nothing), so a branch reads as the format's examples do, and
+it nests. It is not the schema pen's `when` (a JSON Schema
+`if`/`then`/`else` builder in another module); the name matches the flow
+pen's transition guard, which is the same idea over a machine.
+
+#### 2.2.1 The task slot
+
+`taskSlot()` writes [TASKS.md](../../app/docs/TASKS.md)'s convention for
+one slot, with what that convention asks a hand-written document to keep
+right kept by construction:
+
+- `start(run, props?)` writes the start action: the slot's `id` to its
+  increment, `status` to `'loading'`, `error` to `null`, and the effect
+  `{ run, with: { id, done, fail?, slot, …props } }` — and the increment
+  is ONE expression in both places. Both evaluate against the
+  pre-transition state, so an effect `id` that read the patched slot would
+  ship the old id and every completion would be refused as stale. `props`
+  is a value or a callback over the action's scope (`(s, x) => ({ url:
+  … x.payload … })`).
+- `done(patch?)` writes the completion, guarded first on `$payload.id`
+  against the slot's id with no else-branch: a stale completion is the
+  empty sequence. By default it is also the failure path — `$exists:
+  "$payload.error"` tells the two apart, the single-completion shape
+  `createTaskEffect` defaults to; with `fail: true` the start names
+  `<name>/fail` in the effect and `fail(patch?)` writes that action. A
+  `patch` is extra operations, as a list or a callback over the action's
+  scope (`(s, x) => [replace((st) => st.items, x.payload.result)]`).
+- `mode: 'exhaust'` adds the document's own guard — a start while the
+  slot is loading changes nothing. The host still registers
+  `createTaskEffect(run, { mode })` with the same mode: a document cannot
+  carry a host option, so the slot's `mode` writes only what the document
+  can say.
+
+The worked example of TASKS.md, rebuilt through two slots, is the same
+document action for action under the slot's names
+(`test/linq/app-tasks.test.js`):
+
+```js
+const list = taskSlot('list', { at: (s) => s.tasks.list });
+const detail = taskSlot('detail', { at: (s) => s.tasks.detail, fail: true });
+const actions = {
+  ...list.start('http', { url: '/api/items' }),
+  ...list.done((s, x) => [replace((st) => st.items, x.payload.result)]),
+  ...detail.start('http', (s, x) => ({ url: op('$concat', ['/api/items/', op('$string', x.payload)]) })),
+  ...detail.done((s, x) => [replace((st) => st.detail, x.payload.result)]),
+  ...detail.fail(),
+};
+```
 
 ### 2.3 The seven patch operations
 
@@ -710,6 +765,15 @@ Raised at the door, before anything is captured.
 | `transition({ patch: 'x' })`, `{ patch: [1] }` | `transition() patch is an array of add/replace/remove/move/copy/test operations, got a string`; `transition() patch[0] is one of add/replace/remove/move/copy/test, got 1` | an array of operations |
 | `transition({ effects: [{ run: 'x' }] })` | `transition() effects[0] is effect(run, with?), got a Object instance` | `effect('x')` |
 | `effect('')`, `bind('')`, `sub('')` | `effect() takes the handler name as a non-empty string, got a string`; `bind() takes an action name as a non-empty string, …`; `sub() takes the handler name as a non-empty string, …` | a non-empty name |
+| `when(7, transition({}))` | `when() takes a condition — a captured boolean expression or a boolean — got 7 at /cond` | `x.payload.id.eq(st.task.id)`, or `true` |
+| `when(c, { nope: 1 })`, `when(c, st.n)` | `when() then is a transition — transition({ state?, patch?, effects? }) — or another when(), got a Object instance at /then`; `when() then is a transition — transition({ … }) — or another when(), got an expression that is neither at /then` — and the same for `otherwise` | `transition({ … })`, or a `when()` |
+| `taskSlot('')`, `taskSlot('x', 7)` | `taskSlot() takes a slot name as a non-empty string, got a string`; `taskSlot() options are { at, mode?, fail? }, got 7` | `taskSlot('scan', { at })` |
+| `taskSlot('x', { at, nope: 1 })` | `taskSlot() does not take 'nope' — it takes at, mode, fail at /nope` | one of the three |
+| `taskSlot('x', { at: 's.tasks.x' })`, `{ at, mode: 'merge' }`, `{ at, fail: 'yes' }` | `taskSlot() at is a lambda over the state to the slot — (s) => s.tasks.x — got a string at /at`; `taskSlot() mode is one of switch, exhaust, concat, parallel, got a string at /mode`; `taskSlot() fail is a boolean, got a string at /fail` | `at: (s) => s.tasks.x`, a mode `createTaskEffect` takes, `fail: true` |
+| `slot.start('')`, `slot.start('http', 7)` | `start() takes the effect handler's name, got a string`; `start() props are an object of the effect's own props, got 7` | `start('http', { url })` |
+| `slot.start('http', { id: 1 })` | `start() props cannot set 'id' — id, done, fail and slot are the slot's own (TASKS.md) at /id` | a prop of the effect's own |
+| `slot.done(7)`, `slot.fail([1])` | `done() patch is an array of add/replace/remove/move/copy/test operations, got 7`; `fail() patch[0] is one of add/replace/remove/move/copy/test, got 1 at /patch/0` | a list of patch operations, or a callback answering one |
+| `slot.fail()` on a slot without `fail: true` | `the slot 'x' sends a failure to x/done, so it has no fail action — create it with { fail: true } to route failures to their own` | `taskSlot('x', { at, fail: true })`, or handle the error in `done` |
 | `bind('a', { nope: 1 })` | `bind() does not take 'nope' — it takes payload, event, preventDefault, stopPropagation` | one of the four |
 | `bind('a', { preventDefault: 'yes' })` | `bind() preventDefault is a boolean — it is allowed only on the object binding form and defaults to false (APP-FORMAT §4), got a string` | `preventDefault: true` |
 | `sub('a', { nope: 1 })` | `sub() does not take 'nope' — it takes with, when, withQuery, key, for (APP-FORMAT §5.3)` | one of the five |
@@ -1051,7 +1115,12 @@ application uses together. Compiled by `npm run test:types`, it holds:
   the two closed vocabularies;
 - `PatchOp`, `EffectDeclaration<'save'>` and `SubDeclaration<'interval'>`
   as the concrete types the three helpers answer, with
-  `effect('save').run` pinned to the literal `'save'`.
+  `effect('save').run` pinned to the literal `'save'`;
+- `when()` returned from an action, nested, and with an `otherwise`, all
+  with no cast, and a bare value as a branch `@ts-expect-error` (§5.7);
+- `ActionsOf<>` of an app built from a `taskSlot('scan', …)` equal to
+  `'scan/start' | 'scan/done'`, and `'scan/fail'` `@ts-expect-error`
+  against it.
 
 ### 5.6 `=== null` compares the proxy, never the value
 
@@ -1072,6 +1141,41 @@ action((st, x) => transition({ state: x.payload.eq(null) }))   // { "$eq": ["$pa
 action((st, x) => transition({ state: x.payload.exists() }))   // present at all
 action((st, x) => transition({ state: x.payload.isEmpty() }))  // the empty sequence
 ```
+
+### 5.7 A conditional is a `Conditional`, not an operator call
+
+`op('$if', [cond, transition({ … })])` is the spelling a reader reaches
+for first, and it does not compile: `op()` types its operands as an
+expression or `Json`, and a `Transition` is an interface — it declares
+its members and carries no index signature, so it is not assignable to
+`Json` (TS2322 on the transition operand; the TS2322 on the `BoolExpr`
+beside it is a side effect, and goes away with the transition). A cast
+gets it through and even emits the same `$if`, since `op()` lowers its
+operands as the capture in progress does — but the cast also lets
+through a branch that is no transition at all, which `when()` refuses
+(§4.2).
+
+`when()` answers a branded `Conditional` that `action()` accepts as its
+result and `when()` accepts as a branch, so the whole tree types with no
+cast:
+
+```ts
+const Done = s.object({ id: s.integer() });
+
+action((st: Expr<State>, x) =>
+  when(x.payload.id.eq(st.task.id), transition({ patch: [] }), when(true, transition({}))),
+  { payload: Done });
+
+// @ts-expect-error — a branch is a transition or another when()
+action(() => when(true, 42));
+```
+
+`taskSlot()` answers `TaskSlot<Name, State>`, and each method's return is
+keyed by a template literal — `start()` answers `{ readonly
+'scan/start': ActionDeclaration }` — so a spread into `actions` keeps
+`ActionsOf<>` exact. `fail()` is typed on every slot, because `fail:
+true` is a value the type does not follow; on a slot without it,
+`fail()` is the `JL0101` §4.2 lists.
 
 ## 6. What it cannot spell
 
@@ -1096,11 +1200,17 @@ document.
 The convention for it exists and is the host's, not the format's:
 `createTaskEffect` and the async-task pattern of
 [TASKS.md](../../app/docs/TASKS.md) give the sequence a key, a
-concurrency mode and a structured failure, and APP-FORMAT §9 is the
-normative half. What is open is expressing the awaiting IN the action
-document, which is an entry in `docs/ROADMAP.md` under `@jarenjs/app`;
-this pen writes whatever that grammar grows, because it has no opinion
-of its own about it.
+concurrency mode and a structured failure — `taskSlot()` (§2.2.1) writes
+its document half — and APP-FORMAT §9 is the normative half. One rule
+belongs to every host effect that awaits: an effect that reads state,
+awaits, and then acts must carry the identity it captured — the task id,
+or a revision — in what it dispatches, so the completion's guard refuses
+a stale result; one that must act on the state directly re-reads
+`app.getState()` after its last await and compares that identity first.
+What is open is expressing the awaiting IN the action document, which is
+an entry in `docs/ROADMAP.md` under `@jarenjs/app`; this pen writes
+whatever that grammar grows, because it has no opinion of its own about
+it.
 
 Two smaller things the pen deliberately does not do, so a reader does
 not look for them:
@@ -1143,7 +1253,7 @@ not look for them:
 
 ## 7. Cost
 
-`@jarenjs/linq/app` builds to **<!--fact:bundle.app-->51,100<!--/fact--> bytes** as a minified,
+`@jarenjs/linq/app` builds to **<!--fact:bundle.app-->51,127<!--/fact--> bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
 measures and `npm run test:tree-shaking` reports, published rounded
 beside the other nine subpath prices in
@@ -1153,8 +1263,8 @@ pen and the JSLT pen (state, and views), and no chain module, no
 
 It is the second-largest pen bundle after the client, and the two pens
 it carries are most of it. The three figures the same probe measures,
-side by side: `@jarenjs/linq/schema` <!--fact:bundle.schema-->36,808<!--/fact--> bytes,
-`@jarenjs/linq/jslt` <!--fact:bundle.jslt-->19,781<!--/fact-->, `@jarenjs/linq/app` <!--fact:bundle.app-->51,100<!--/fact-->. The subpath sums do not add — all
+side by side: `@jarenjs/linq/schema` <!--fact:bundle.schema-->36,834<!--/fact--> bytes,
+`@jarenjs/linq/jslt` <!--fact:bundle.jslt-->19,806<!--/fact-->, `@jarenjs/linq/app` <!--fact:bundle.app-->51,127<!--/fact-->. The subpath sums do not add — all
 three carry the capture, the expression lowering and the JSON boundary,
 which each bundle counts once — so what the app pen costs a consumer who
 already imports the schema pen is the difference the numbers do state:

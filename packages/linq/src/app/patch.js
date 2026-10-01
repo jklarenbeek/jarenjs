@@ -258,18 +258,19 @@ export function test(path, value) { return operation('test', path, { value, hasV
 /**
  * A patch list, as the transition carries it.
  * @param {any} list
+ * @param {string} [who] - the call the list was handed to, for the message
  * @returns {any[]}
  */
-export function readPatch(list) {
+export function readPatch(list, who = 'transition()') {
   if (!Array.isArray(list)) {
     throw new LinqBuildError('JL0101',
-      'transition() patch is an array of add/replace/remove/move/copy/test operations, got '
+      `${who} patch is an array of add/replace/remove/move/copy/test operations, got `
       + describeValue(list));
   }
   return list.map((op, i) => {
     if (op === null || typeof op !== 'object' || Array.isArray(op) || typeof op.op !== 'string') {
       throw new LinqBuildError('JL0101',
-        `transition() patch[${i}] is one of add/replace/remove/move/copy/test, got `
+        `${who} patch[${i}] is one of add/replace/remove/move/copy/test, got `
         + describeValue(op), `/patch/${i}`);
     }
     return op;

@@ -40,7 +40,7 @@ import { collectSameDocumentAnchors, resolveSameDocumentRef } from '@jarenjs/val
 import { compileContract } from './compile.js';
 import { ContractHostError } from './errors.js';
 import { isCompiledContract } from './public.js';
-import { pathShape } from './path.js';
+import { pathShape } from '@jarenjs/core/route';
 
 export { isCompatible, compatReason } from './compat.js';
 

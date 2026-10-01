@@ -178,8 +178,10 @@ Three rules the table implies, spelled out:
 - **A body's literal is a constructor, not a constant.** §1.1 point 4 is
   where the reason lives; the consequence for the table is that a `body`
   cell never shows a `$const` unless the value reached the document as
-  DATA (an `apply()` selector that is plain data, an `op()` operand that
-  is an object).
+  DATA (an `apply()` selector that is plain data). An `op()` operand is
+  spelled as the capture in progress spells its own literals: a
+  constructor in a body or an app action, one `$const` per data tree in a
+  chain callback — every operand alike, the first included.
 - **`root` and `path` need no declaration; a parameter needs one.** The
   engine binds the two on every dispatch (§8.2) and shadows any binding
   of the same name, so declaring them is the mistake and is refused. A
@@ -927,7 +929,7 @@ non-judgement is itself gated.
 
 ## 7. Cost
 
-`@jarenjs/linq/jslt` builds to **<!--fact:bundle.jslt-->19,781<!--/fact--> bytes** as a minified,
+`@jarenjs/linq/jslt` builds to **<!--fact:bundle.jslt-->19,806<!--/fact--> bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
 measures and `npm run test:tree-shaking` reports, published rounded
 (<!--fact:bundle.jslt.kb-->20<!--/fact--> kB) beside the other nine subpath prices in
@@ -956,8 +958,8 @@ source. That makes it the SMALLEST of the nine pen bundles, and the
 reason is that a stylesheet is mostly bodies, and a body is the shared
 machine every pen already pays for.
 
-Two figures worth reading beside it: `./migration` (<!--fact:bundle.migration-->25,601<!--/fact--> bytes)
+Two figures worth reading beside it: `./migration` (<!--fact:bundle.migration-->25,627<!--/fact--> bytes)
 carries this pen's `body()` and pays for it, which is why the two prices
-sit so close; and `./flow` (<!--fact:bundle.flow-->19,836<!--/fact--> bytes) is within 60 bytes of this one
+sit so close; and `./flow` (<!--fact:bundle.flow-->19,862<!--/fact--> bytes) is within 60 bytes of this one
 despite writing two formats, because it shares the same capture and adds
 almost nothing but member checks and their messages.

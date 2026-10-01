@@ -444,7 +444,9 @@ console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle â
 // carry: a chain module, a query engine, a validator, another pen, and
 // above all any byte of `@jarenjs/contract`, whose compiler is the only
 // judge of what the document means. The chain carries no contract
-// module in return.
+// module in return. Measured 50054 bytes once the pen's path templates
+// parse through `@jarenjs/core/route`, the suite's one template parser
+// (3211 of them), in place of a scan of its own.
 const contractPenResult = await build({
   stdin: {
     contents: "import { defineContract, read, http } from '@jarenjs/linq/contract'; import * as s from '@jarenjs/linq/schema'; export const C = defineContract({ id: 'c' }, { 'a.b': read({ output: s.object({ id: s.string() }), http: http({ method: 'GET', path: '/a' }) }) }).document;",

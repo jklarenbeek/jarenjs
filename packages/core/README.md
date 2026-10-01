@@ -303,6 +303,7 @@ Every subpath a consumer can import, derived from the manifest by
 | `@jarenjs/core/package.json` | metadata | — |
 | `@jarenjs/core/virtual` | JavaScript | declared |
 | `@jarenjs/core/range` | JavaScript | declared |
+| `@jarenjs/core/route` | JavaScript | declared |
 | `@jarenjs/core/retry` | JavaScript | declared |
 | `@jarenjs/core/schedule` | JavaScript | declared |
 | `@jarenjs/core/check` | JavaScript | declared |

@@ -17,7 +17,7 @@
  * engine would only refuse it at run time, on the second child.
  */
 
-import { liftExpression, toExpression } from '../expression.js';
+import { captureFold, liftExpression, toExpression } from '../expression.js';
 import { captureQuery } from '../capture-root.js';
 import { describeValue } from '../json-boundary.js';
 import { LinqBuildError } from '../errors.js';
@@ -191,7 +191,12 @@ export function op(name, operands = []) {
     throw new LinqBuildError('JL0101',
       `op() takes an operator name starting with '$' ('$npv'), got ${describeValue(name)}`);
   }
-  const value = Array.isArray(operands) ? operands.map(toExpression) : toExpression(operands);
+  // each operand is spelled as the capture in progress spells its own
+  // result: a body or an action folds nothing, a chain folds data into
+  // `$const` — the same for every operand, whatever its position
+  const fold = captureFold();
+  const value = Array.isArray(operands) ? operands.map((operand) => toExpression(operand, fold))
+    : toExpression(operands, fold);
   return liftExpression({ [name]: value });
 }
 

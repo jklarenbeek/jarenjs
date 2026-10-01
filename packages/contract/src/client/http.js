@@ -307,7 +307,7 @@ function headerMemberText(member, v) {
  * @property {CompiledOperation} op
  * @property {string} id
  * @property {string} method
- * @property {readonly import('../path.js').PathSegment[]} segments
+ * @property {readonly import('@jarenjs/core/route').PathSegment[]} segments
  * @property {readonly string[]} queryMembers
  * @property {ReadonlySet<string>} queryJson
  * @property {readonly string[]} headerMembers
