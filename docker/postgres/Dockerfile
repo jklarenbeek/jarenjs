@@ -13,8 +13,15 @@ FROM ${POSTGIS_IMAGE}
 ARG PGVECTOR_PACKAGE_VERSION=0.8.6-1.pgdg11+1
 
 # PG_MAJOR comes from the base image, so the extension matches the server
-# that will load it rather than a version guessed here.
+# that will load it rather than a version guessed here. The pinned base is
+# Debian bullseye, whose PGDG suite moved to apt-archive.postgresql.org when
+# bullseye reached its end of life: the image's own source is pointed there,
+# and the pinned package is the same one.
 RUN set -eux; \
+    . /etc/os-release; \
+    if [ "$VERSION_CODENAME" = bullseye ]; then \
+        sed -i 's#http://apt.postgresql.org/pub/repos/apt/#https://apt-archive.postgresql.org/pub/repos/apt/#' /etc/apt/sources.list.d/pgdg.list; \
+    fi; \
     apt-get update; \
     apt-get install -y --no-install-recommends "postgresql-${PG_MAJOR}-pgvector=${PGVECTOR_PACKAGE_VERSION}"; \
     rm -rf /var/lib/apt/lists/*
