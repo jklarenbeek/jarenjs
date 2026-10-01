@@ -20,7 +20,7 @@ export function note(value, text) {
 export const isNoted = (result) => Boolean(result && typeof result === 'object' && result.noted === true);
 
 /** A number from a number, or from a text holding one (a comma or a point before the decimals). @param {any} value */
-function amount(value) {
+function numberIn(value) {
   if (value == null || value === '') return null;
   if (typeof value === 'number') return Number.isFinite(value) ? value : null;
   const text = String(value).trim().replace(',', '.');
@@ -31,26 +31,26 @@ const EURO = new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR'
 
 /** Cents as euro text, a dash for no amount. @param {any} cents */
 export function euro(cents) {
-  const n = amount(cents);
+  const n = numberIn(cents);
   return n == null ? '–' : EURO.format(n / 100);
 }
 
 /** To the nearest 5. @param {any} x */
 export function nearest5(x) {
-  const n = amount(x);
+  const n = numberIn(x);
   return n == null ? null : Math.round(n / 5) * 5;
 }
 
 /** Up to a multiple of 5. @param {any} x */
 export function upTo5(x) {
-  const n = amount(x);
+  const n = numberIn(x);
   return n == null ? null : Math.ceil(n / 5) * 5;
 }
 
 /** Raised by a percentage. @param {any} x @param {any} percent */
 export function percentUp(x, percent) {
-  const n = amount(x);
-  const p = amount(percent);
+  const n = numberIn(x);
+  const p = numberIn(percent);
   return n == null || p == null ? null : n * (1 + p / 100);
 }
 
@@ -76,53 +76,54 @@ export const massOf = (text) => measure(text, { ...MASS, ...VOLUME });
 
 /** Text without its surrounding blanks; nothing for none. @param {any} value */
 export function clean(value) {
-  if (value == null) return null;
-  const text = String(value).trim();
-  return text === '' ? null : text;
+  if (value === null || value === undefined) return null;
+  const text = `${value}`.trim();
+  return text || null;
 }
 
-/** Every word with a capital first letter. @param {any} value */
+/** A capital at the start of every word. @param {any} value */
 export function capitalize(value) {
   const text = clean(value);
-  if (text == null) return null;
-  return text.split(/(\s+)/).map((word) => (/^\s*$/.test(word) ? word : word[0].toUpperCase() + word.slice(1))).join('');
+  return text === null ? null : text.replace(/(^|\s)(\p{L})/gu, (_all, space, letter) => space + letter.toUpperCase());
 }
 
-const ENTITIES = { amp: '&', egrave: 'è', eacute: 'é', euml: 'ë', iuml: 'ï', ouml: 'ö' };
+/** The character each entity of an imported list stands for. */
+const ENTITY_CHARS = new Map([['&amp;', '&'], ['&egrave;', 'è'], ['&eacute;', 'é'], ['&euml;', 'ë'], ['&iuml;', 'ï'], ['&ouml;', 'ö']]);
 
-/** A list repaired: words split at an entity's ';' joined again, entities decoded, blanks and doubles dropped. @param {any} values */
+/** An imported list repaired: a piece an import cut at an entity's ';' glued back on, entities spelled out, repeats dropped. @param {any} values */
 export function tidyList(values) {
-  const parts = Array.isArray(values) ? values.map((v) => String(v ?? '')) : [];
-  const joined = [];
-  for (let i = 0; i < parts.length; i++) {
-    let part = parts[i];
-    while (/&[a-z]+$/i.test(part.trim()) && i + 1 < parts.length) part = `${part.trim()};${parts[++i]}`;
-    joined.push(part.replace(/&([a-z]+);?/gi, (m, name) => ENTITIES[name.toLowerCase()] ?? m).trim());
-  }
-  return distinct(joined);
+  if (!Array.isArray(values)) return [];
+  const glued = values.map((v) => `${v ?? ''}`).reduce((/** @type {string[]} */ pieces, piece) => {
+    const previous = pieces.at(-1);
+    if (previous !== undefined && /&\w+$/.test(previous)) pieces[pieces.length - 1] = `${previous};${piece}`;
+    else pieces.push(piece.trim());
+    return pieces;
+  }, []);
+  return distinct(glued.map((text) => {
+    let spelled = text;
+    for (const [spelling, char] of ENTITY_CHARS) spelled = spelled.replaceAll(spelling, char);
+    return spelled.trim();
+  }));
 }
 
-/** The list without blanks and without a second spelling of an entry (letter case aside). @param {any} values */
+/** The entries in first-seen order, blanks left out, one per spelling apart from letter case. @param {any} values */
 export function distinct(values) {
-  const seen = new Set();
-  const out = [];
-  for (const value of Array.isArray(values) ? values : [values]) {
+  const kept = new Map();
+  for (const value of [values].flat()) {
     const entry = typeof value === 'string' ? value.trim() : value;
-    if (entry == null || entry === '') continue;
-    const key = typeof entry === 'string' ? entry.toLowerCase() : entry;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(entry);
+    if (entry === null || entry === undefined || entry === '') continue;
+    const fold = typeof entry === 'string' ? entry.toLowerCase() : JSON.stringify(entry);
+    if (!kept.has(fold)) kept.set(fold, entry);
   }
-  return out;
+  return [...kept.values()];
 }
 
-/** A web address part: accents dropped, lower case, dashes between words. @param {any} value */
+/** A web address part: marks removed, lower case, the words joined by dashes. @param {any} value */
 export function toSlug(value) {
   const text = clean(value);
-  if (text == null) return null;
-  const slug = text.normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
-  return slug || null;
+  if (text === null) return null;
+  const words = text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().split(/[^a-z0-9]/).filter(Boolean);
+  return words.length ? words.join('-') : null;
 }
 
 /** The host helpers a translation calls through $call, by name. */
@@ -180,11 +181,11 @@ const hit = texts.map((piece) => String(piece ?? '').match(amountPattern)).find(
 if (!hit || record.listCents == null) return null;
 
 const unit = hit[2].toLowerCase();
-let amount = Number(hit[1].replace(',', '.'));
-if (['kg', 'kgs', 'litre', 'l'].includes(unit)) amount *= 1000;
-if (!amount) return null;
+let measured = Number(hit[1].replace(',', '.'));
+if (['kg', 'kgs', 'litre', 'l'].includes(unit)) measured *= 1000;
+if (!measured) return null;
 
-const per100 = record.listCents / 100 / amount * 100;
+const per100 = record.listCents / 100 / measured * 100;
 const measure = ['litre', 'cl', 'ml', 'l'].includes(unit) ? 'ml' : 'g';
 return per100.toLocaleString('nl-NL', { style: 'currency', currency: 'EUR' }) + ' per 100 ' + measure;
 // end:price-per-100
@@ -502,7 +503,7 @@ return pack && !caption.toLowerCase().includes(pack.toLowerCase()) ? `${caption}
   "retire": (record) => {
 // body:retire
 // Archive only when every member meets every condition.
-if (record.family.some(member => !member.retired
+if (record.lineup.some(member => !member.retired
     || member.onHand !== 0 || member.webId)) return LEAVE;
 return note('stored', 'Every member: retired at the till, no stock, not on the web');
 // end:retire
@@ -510,9 +511,9 @@ return note('stored', 'Every member: retired at the till, no stock, not on the w
   "retire-online-report": (record) => {
 // body:retire-online-report
 // Archive these on the web, or order them again.
-if (!record.family.some(member => member.webId)) return LEAVE; // not on the web
-if (record.family.some(member => !member.retired)) return LEAVE;
-if (record.family.some(member => member.onHand == null || member.onHand > 0)) return LEAVE;
+if (!record.lineup.some(member => member.webId)) return LEAVE; // not on the web
+if (record.lineup.some(member => !member.retired)) return LEAVE;
+if (record.lineup.some(member => member.onHand == null || member.onHand > 0)) return LEAVE;
 return note('stored', 'Retired at the till, no stock, yet still live on the web');
 // end:retire-online-report
   },
