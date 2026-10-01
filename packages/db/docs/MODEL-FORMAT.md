@@ -804,7 +804,10 @@ leading `test` is a true compare-and-set: two stores racing
 '/revision', value: r + 1 }, …]` commit one patch and refuse the other
 (`JP2004`), where both used to succeed and one wrote over the other. A
 patch whose result equals the stored document writes nothing — no
-statement, no change for capture, no commit another connection sees. The
+statement, no change for capture, no commit another connection sees. An
+operation's `value` counts as the JSON it is written as — an undefined
+member is no member, a Date its ISO text — so a patch that sets a value
+the document already holds in that form is such a patch. The
 operations are then translated to the dialect's JSON-set primitives so a
 one-field update does not rewrite a large document. Translatable in
 0.1: `replace`, `add` of an object member, `add` at an array's end,
@@ -818,21 +821,26 @@ unchanged; `patch` on an absent key is `JD2006`.
 **`expect` makes a keyed write conditional.** `put(doc, key?, { expect
 })`, `patch(key, ops, { expect })` and `delete(key, { expect })` take a
 precondition `{ path, value }` — `path` a JSON Pointer, `value` the JSON
-value the stored document holds there, compared structurally — or a
-non-empty list of them. It is judged against the stored document inside
+value the stored document holds there, compared structurally as the JSON
+it is written as (an undefined member is no member, a Date its ISO text,
+`NaN` is `null`; a bigint or a function, which no document holds, is
+`JD0013`) — or a non-empty list of them. It is judged against the stored document inside
 the write's own transaction, the same one a patch reads in; a document
 that does not hold it, or nothing stored, refuses the write **`JD2040`**
 and writes nothing (`patch` of an absent key stays `JD2006`). Without
 `expect`, `put` and `delete` remain one statement each. A write's
 options are a closed set (`JD0013`): `insert` reads none, and an unknown
 member, a path that is not a JSON Pointer or a missing `value` is
-refused before any statement.
+refused before any statement — on a capturing store too, before its
+capture transaction begins.
 
 **`all()` reads every document.** `collection.all(options?)` answers
 every stored document as an array, one entry per document, in the order
 `execute('$[*]')` visits them — on the synchronous twin and inside a
 transaction alike; it reads the cursor's `signal`, `deadline`, `profile`
-and `strictStreaming`, nothing else (`JD0013`). `execute('$[*]')`
+and `strictStreaming`, nothing else (`JD0013`), and a `signal` that aborts
+while the call waits in the store's queue takes it off the queue
+(`JD2064`), as it does for `execute`, `explain`, `load` and `page`. `execute('$[*]')`
 answers the engine's SEQUENCE instead: `undefined` for an empty
 collection, the bare document for one, and for one array-valued
 document exactly what two documents would give. `query('$[*]')` is the
@@ -950,7 +958,10 @@ PostgreSQL it is a session lock held for exactly the store's session. The
 lease is cooperative (an open without `owner` neither takes nor checks
 it), a read-only open never takes it (`owner` with `readOnly` is
 `JD0009`), an adopted SQLite store needs the owner table (`JD0015`), and a
-store whose lease another holder took refuses every later call.
+store whose lease another holder took refuses every later call. A call is
+checked again once the store's gate admits it, so one that waited in the
+queue past the lease's expiry refuses rather than write beside the next
+owner, and a call after `close()` refuses `JD2063` however long after.
 `capabilities.owner` says which mode is in force; [HOSTS.md](HOSTS.md#the-owner-lease)
 has the constraint on `leaseMs`, the table statement and the platform
 status.
@@ -1448,8 +1459,9 @@ an open with `owner` while another store holds the lease (busy, retryable;
 `owner` names the holder and `expiresAt` says until when — on PostgreSQL,
 whose lock names no one, both are `null`), and every later call of a store
 whose lease another holder took (not retryable: the store is no longer the
-owner, close it) or whose lease lapsed on its own clock and could not be
-renewed yet (retryable). `JD0015` is the owner lease on an adopted SQLite
+owner, close it) or whose lease lapsed on its own clock — before the call,
+or while it waited in the store's queue — and could not be renewed yet
+(retryable). `JD0015` is the owner lease on an adopted SQLite
 store: adoption creates nothing, so the reason names the one statement
 that creates the owner table.
 
@@ -1597,7 +1609,14 @@ that reads a name outside it is `JD0011` on every engine, with the
 same reason. `predicates` is keyed by collection or entity name, and
 an entity's predicate is conjoined into every fetch of that entity —
 the native statement, each root the residual fetches, the load's root
-and every include subquery over that entity. `maxRows` bounds every
+and every include subquery over that entity. A predicate may name an
+external, which `execute()` binds from the call's `externals` — so it
+isolates tenants only when the host, not the caller, supplies those
+externals; one the database cannot bind — a missing one, a boolean, or a
+list holding a `null` or a boolean — is refused `JD0011` rather than
+dropped from the fetch. A load binds none, so
+a load under such a profile refuses `JD0032`, as a load whose own `where`
+names one does. `maxRows` bounds every
 fetch on every engine (`JD2007`), the residual's input rows included:
 each root an entity residual fetches carries `LIMIT maxRows + 1`. The
 graph caps are hard maxima an include's own declaration cannot exceed:
@@ -1705,7 +1724,13 @@ prove was applied is not a budget.
 **Read-only stores.** `openStore(model, { readOnly: true })` opens the
 connection read-only at the DRIVER, so every write is refused by the
 database itself (`JD2083`, class `readonly`, wrapping `SQLITE_READONLY`), not merely by
-the API surface — a translation bug cannot become a write. A read-only
+the API surface — a translation bug cannot become a write. On PostgreSQL
+the driver sets the session's `default_transaction_read_only` for the
+store's life (restored at close), so every transaction the store runs is
+`READ ONLY` and a write is the server's 25006, the same `JD2083`; a patch
+reads its row under a row lock there, which a read-only transaction
+refuses too, so on PostgreSQL even a patch that would change nothing is
+`JD2083`, where SQLite answers it. A read-only
 store verifies the declared shape and creates nothing (`JD0002` when a
 table is missing), and leaves the file's journal mode untouched.
 
@@ -2446,11 +2471,16 @@ the column declares — in `load({ orderBy })` exactly as in `execute()`,
 so a NOCASE index cannot serve that order — and every text key a page
 reads must round-trip through the file's text encoding: one that does
 not (malformed UTF-8) refuses `JD0032` before a continuation is built on
-it, where it used to page forever. Any other codec refuses `JD0032`
-naming it (a `uuid` reads back lowercase whatever the table stores, so
-its decoded value does not compare as the stored one), and a PostgreSQL
-physical keyset refuses naming the dialect until its physical
-comparison is qualified.
+it, where it used to page forever. A nullable text order column's `NULL`
+has no text to prove, and pages by its null placement. Any other codec
+refuses `JD0032` naming it (a `uuid` reads back lowercase whatever the
+table stores, so its decoded value does not compare as the stored one),
+and a PostgreSQL physical keyset refuses naming the dialect until its
+physical comparison is qualified. A view refuses `JD0032` too: it
+enforces no primary key, so two of its rows can share the declared key,
+and a continuation past one would skip the other. `explainLoad()`'s
+`order` names the declared terms by property and appends the key a
+physical table's order ends with.
 
 **The continuation** a page emits is unsigned, structural and opaque:
 

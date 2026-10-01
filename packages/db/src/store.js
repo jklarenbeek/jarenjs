@@ -635,6 +635,88 @@ function ensureEntityShape(connection, entityPlans, entities, createsNothing) {
 }
 
 /**
+ * A collection write's options — a closed set, its last argument
+ * (MODEL-FORMAT §5): `expect`, one precondition `{ path, value }` or a
+ * non-empty list of them, on `put`, `patch` and `delete`; nothing on
+ * `insert`, which has no stored document to hold one to. Anything else, or
+ * options that are not a plain object, is `JD0013` before any statement —
+ * the capture wrap reads them too, before its transaction begins. An
+ * expected value is compared as the JSON it is written as (a Date as its
+ * ISO text, an undefined member as no member, `NaN` as `null`), because
+ * the stored document is that JSON; one JSON cannot carry (a bigint, a
+ * function) is `JD0013`.
+ * @param {string} collectionName
+ * @param {unknown} options
+ * @param {string} verb
+ * @param {boolean} expects - whether this write reads `expect`
+ * @returns {{ get: (doc: any) => any, path: string, value: any }[] | null}
+ */
+function readWriteOptions(collectionName, options, verb, expects) {
+  if (options === undefined) return null;
+  const spelling = `collection('${collectionName}').${verb}`;
+  const refuse = (/** @type {string} */ reason) => new DbCompileError('JD0013', `${spelling}: ${reason}`);
+  if (!isPlainOptions(options))
+    throw refuse(`its options are ${expects ? '{ expect }' : 'an empty object'}, not ${describeValue(options)}`);
+  refuseUnknownMembers(options, expects ? ['expect'] : [], (key, hint) =>
+    refuse(`option '${key}' is not one ${verb} reads${hint}`));
+  const { expect } = /** @type {any} */ (options);
+  if (expect === undefined) return null;
+  const list = Array.isArray(expect) ? expect : [expect];
+  if (list.length === 0) throw refuse('expect is one { path, value } or a non-empty list of them');
+  return list.map((one) => {
+    if (!isPlainOptions(one)) throw refuse(`an expect is { path, value }, not ${describeValue(one)}`);
+    refuseUnknownMembers(one, ['path', 'value'], (key, hint) =>
+      refuse(`expect member '${key}' is not one it reads${hint}`));
+    const { path, value } = /** @type {any} */ (one);
+    let get;
+    try {
+      get = compileJSONPointer(path);
+    }
+    catch {
+      throw refuse(`an expect's path is a JSON Pointer (RFC 6901), not ${describeValue(path)}`);
+    }
+    if (value === undefined) throw refuse(`the expect at '${path}' needs a value: the JSON value the stored document holds there`);
+    let text;
+    try {
+      text = JSON.stringify(value);
+    }
+    catch {
+      text = undefined;
+    }
+    if (text === undefined) {
+      const kind = typeof value === 'bigint' ? `the bigint ${value}n`
+        : typeof value === 'object' ? 'an object JSON cannot write (a cycle, or a throwing toJSON)' : `a ${typeof value}`;
+      throw refuse(`the expect at '${path}' holds ${kind}, which no JSON document holds`);
+    }
+    return { get, path, value: JSON.parse(text) };
+  });
+}
+
+/**
+ * A patch's operations with each `value` as the JSON it is written as,
+ * read back — an undefined member is no member, a Date its ISO text — so
+ * the patch tests, compares and writes the document it stores. An
+ * operation whose value JSON cannot carry stays as it is, for the patch
+ * engine to meet.
+ * @param {unknown} ops
+ * @returns {unknown}
+ */
+function patchAsJson(ops) {
+  if (!Array.isArray(ops)) return ops;
+  return ops.map((op) => {
+    if (op === null || typeof op !== 'object' || !Object.hasOwn(op, 'value')) return op;
+    let text;
+    try {
+      text = JSON.stringify(op.value);
+    }
+    catch {
+      return op;
+    }
+    return text === undefined ? op : { ...op, value: JSON.parse(text) };
+  });
+}
+
+/**
  * Build the per-collection operation core. Every function returns a
  * value or a promise depending on the driver; the async surface lifts
  * once, the sync surface passes through.
@@ -800,45 +882,6 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
       : write());
 
   /**
-   * A write's options — a closed set, its last argument (MODEL-FORMAT
-   * §5): `expect`, one precondition `{ path, value }` or a non-empty list
-   * of them, on `put`, `patch` and `delete`; nothing on `insert`, which
-   * has no stored document to hold one to. Anything else, or options
-   * that are not a plain object, is `JD0013` before any statement.
-   * @param {unknown} options
-   * @param {string} verb
-   * @param {boolean} expects - whether this write reads `expect`
-   * @returns {{ get: (doc: any) => any, path: string, value: any }[] | null}
-   */
-  const readWriteOptions = (options, verb, expects) => {
-    if (options === undefined) return null;
-    const spelling = `collection('${collection.name}').${verb}`;
-    const refuse = (/** @type {string} */ reason) => new DbCompileError('JD0013', `${spelling}: ${reason}`);
-    if (!isPlainOptions(options))
-      throw refuse(`its options are ${expects ? '{ expect }' : 'an empty object'}, not ${describeValue(options)}`);
-    refuseUnknownMembers(options, expects ? ['expect'] : [], (key, hint) =>
-      refuse(`option '${key}' is not one ${verb} reads${hint}`));
-    const { expect } = /** @type {any} */ (options);
-    if (expect === undefined) return null;
-    const list = Array.isArray(expect) ? expect : [expect];
-    if (list.length === 0) throw refuse('expect is one { path, value } or a non-empty list of them');
-    return list.map((one) => {
-      if (!isPlainOptions(one)) throw refuse(`an expect is { path, value }, not ${describeValue(one)}`);
-      refuseUnknownMembers(one, ['path', 'value'], (key, hint) =>
-        refuse(`expect member '${key}' is not one it reads${hint}`));
-      const { path, value } = /** @type {any} */ (one);
-      let get;
-      try {
-        get = compileJSONPointer(path);
-      }
-      catch {
-        throw refuse(`an expect's path is a JSON Pointer (RFC 6901), not ${describeValue(path)}`);
-      }
-      if (value === undefined) throw refuse(`the expect at '${path}' needs a value: the JSON value the stored document holds there`);
-      return { get, path, value };
-    });
-  };
-  /**
    * Refuse a write whose preconditions the stored document does not meet
    * (`JD2040`) — judged inside the write's own transaction, against the
    * very document the write replaces. Nothing stored meets none.
@@ -931,7 +974,7 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
       (error) => wrapDriverError(error, { docPath: collection.docPath, collection: collection.name, key }));
     },
     insert(doc, options) {
-      readWriteOptions(options, 'insert', false);
+      readWriteOptions(collection.name, options, 'insert', false);
       checkValid(doc);
       const key = resolveWriteKey(doc, undefined);
       if (key === null) return insertAllocated(doc);
@@ -941,7 +984,7 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
         () => key));
     },
     put(doc, explicitKey, options) {
-      const expected = readWriteOptions(options, 'put', true);
+      const expected = readWriteOptions(collection.name, options, 'put', true);
       checkValid(doc);
       const key = resolveWriteKey(doc, explicitKey);
       if (key === null) {
@@ -961,9 +1004,10 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
           return upsert();
         });
     },
-    patch(key, ops, options) {
+    patch(key, given, options) {
       requireKey(key, collection.name, collection.docPath);
-      const expected = readWriteOptions(options, 'patch', true);
+      const expected = readWriteOptions(collection.name, options, 'patch', true);
+      const ops = patchAsJson(given);
       return atomically(key, (current) => {
         if (current === undefined) {
           throw new DbRuntimeError('JD2006',
@@ -1013,7 +1057,7 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
     },
     delete(key, options) {
       requireKey(key, collection.name, collection.docPath);
-      const expected = readWriteOptions(options, 'delete', true);
+      const expected = readWriteOptions(collection.name, options, 'delete', true);
       const remove = () => chain(
         runWrite('delete', dialect.dml.del(shape), [bindKey(key)], key, false),
         (result) => Number(result?.changes ?? 0) > 0);
@@ -1609,6 +1653,21 @@ export function openStore(model, options) {
       let ownerLease = null;
       /** @param {boolean} synchronous - whether the caller cannot wait for a renewal */
       const ownerGuard = (synchronous) => (ownerLease === null ? undefined : ownerLease.guard(synchronous));
+      /** The lease checked again once the gate admitted the call: it may
+       * have waited past the lease's expiry. */
+      const ownerAdmitted = () => (ownerLease === null ? undefined : ownerLease.admitted());
+      /**
+       * Set by `close()` once its job workers have stopped: every later
+       * admission refuses `JD2063` by name, rather than queue behind the
+       * lease's release and run after the store gave its lease back.
+       */
+      let admissionClosed = false;
+      const refuseClosed = () => {
+        if (admissionClosed) {
+          throw new DbRuntimeError('JD2063',
+            'the store is closed — a call after close() has no connection to run on');
+        }
+      };
 
       /**
        * The transaction SCOPE that currently owns the driver connection,
@@ -1776,7 +1835,7 @@ export function openStore(model, options) {
           : (/** @type {any} */ table) => opened.session(table),
         // the online-backup primitives, when the binding has them
         backup: opened.backup ?? null,
-        close: () => opened.close(),
+        close: (/** @type {any} */ closeOptions) => opened.close(closeOptions),
       });
 
       /**
@@ -1910,8 +1969,13 @@ export function openStore(model, options) {
       // not, or no longer, its database's owner begins nothing (`JD2061`).
       // `begin` carries the isolation level to spell and the writer lock.
       const beginTransaction = (inner, signal, mode, begin) =>
-        attempt(() => chain(ownerGuard(false), () => opened.transaction(inner, signal, mode, begin)),
-          (error) => wrapDriverError(error, { docPath: '/transaction' }));
+        attempt(() => {
+          refuseClosed();
+          return chain(ownerGuard(false), () => opened.transaction((/** @type {any} */ scope) => {
+            ownerAdmitted();
+            return inner(scope);
+          }, signal, mode, begin));
+        }, (error) => wrapDriverError(error, { docPath: '/transaction' }));
       /** Gives the capture engine up for an expired transaction; set once
        * capture exists (a store without capture has nothing to give up). */
       let abandonCapture = () => {};
@@ -2068,9 +2132,13 @@ export function openStore(model, options) {
        * @param {AbortSignal} [signal]
        */
       const gated = (fn, what, signal) => {
+        refuseClosed();
         if (strictTransactions && opened.mustQueue)
           throw contended("{ transactions: 'strict' } refuses to queue behind it");
-        return chain(ownerGuard(false), () => withScope((inner) => opened.exclusively(inner, what, signal), fn));
+        return chain(ownerGuard(false), () => withScope((inner) => opened.exclusively((/** @type {any} */ admitted) => {
+          ownerAdmitted();
+          return inner(admitted);
+        }, what, signal), fn));
       };
 
       const cursorOwnership = opened.capabilities.cursorTransaction === true
@@ -2082,6 +2150,7 @@ export function openStore(model, options) {
        * a Promise back under a value's type — so a contended call is a
        * refusal whatever the mode. */
       const gatedSync = (fn) => {
+        refuseClosed();
         if (opened.mustQueue) {
           throw contended('the synchronous surface answers values, so it cannot '
             + 'wait for the commit');
@@ -2120,7 +2189,9 @@ export function openStore(model, options) {
         try {
           // a lease the open took is given back first (best effort, never
           // throwing): on PostgreSQL before the session returns to its pool
-          closing = chain(ownerLease === null ? null : ownerLease.release(), () => opened.close());
+          // — or destroyed with it, when the release could not run
+          closing = chain(ownerLease === null ? null : ownerLease.release(), () =>
+            opened.close(ownerLease?.holds() === true ? { discard: true } : undefined));
         }
         catch (closeError) {
           return both(closeError);
@@ -2263,8 +2334,10 @@ export function openStore(model, options) {
           dialect, connection, owner: ownerOption, adopt: options.adopt === true, now: runtime.now,
           bracket: (fn) => immediately(connection, fn),
           // the store gate, waiting whatever `transactions` says: a renewal
-          // is the store's own write, never a caller's
-          exclusively: (fn, what) => opened.exclusively(fn, what),
+          // is the store's own write, never a caller's, and may take the
+          // gate's next turn and wait for the holder however long it holds
+          exclusively: (fn, what, options) => opened.exclusively(fn, what, options?.signal,
+            options?.first === true, options?.unbounded === true),
           // never from inside a transaction's own synchronous body
           renewsInline: () => currentRoot === null || opened.mustQueue,
         });
@@ -2622,36 +2695,50 @@ export function openStore(model, options) {
           const captureCollection = (collectionName, core) => {
             if (capture === null) return core;
             const journal = capture.mode === 'journal';
-            // a write's options ride through unchanged: the core reads them
+            // a write's options are refused (JD0013) before the capture
+            // transaction begins — never as a busy wait for a write lock the
+            // write would not have used — and then ride through to the core
             return {
               ...core,
-              insert: (doc, options) => guard(() => chain(core.insert(doc, options), (key) => {
-                if (journal) capture.record(collectionName, [key], null, doc);
-                return key;
-              })),
-              put: (doc, key, options) => guard(() => (journal
-                ? chain(readBefore(core, doc, key), (before) =>
-                  chain(core.put(doc, key, options), (storedKey) => {
-                    capture.record(collectionName, [storedKey], before ?? null, doc);
-                    return storedKey;
-                  }))
-                : core.put(doc, key, options))),
-              patch: (key, ops, options) => guard(() => (journal
-                ? chain(core.get(key), (before) =>
-                  chain(core.patch(key, ops, options), (after) => {
-                    // a patch that changed nothing wrote nothing, and records nothing
-                    if (!equalsJson(before, after)) capture.record(collectionName, [key], before ?? null, after);
-                    return after;
-                  }))
-                : core.patch(key, ops, options))),
-              delete: (key, options) => guard(() => (journal
-                ? chain(core.get(key), (before) =>
-                  chain(core.delete(key, options), (deleted) => {
-                    if (deleted && before !== undefined)
-                      capture.record(collectionName, [key], before, null);
-                    return deleted;
-                  }))
-                : core.delete(key, options))),
+              insert: (doc, options) => {
+                readWriteOptions(collectionName, options, 'insert', false);
+                return guard(() => chain(core.insert(doc, options), (key) => {
+                  if (journal) capture.record(collectionName, [key], null, doc);
+                  return key;
+                }));
+              },
+              put: (doc, key, options) => {
+                readWriteOptions(collectionName, options, 'put', true);
+                return guard(() => (journal
+                  ? chain(readBefore(core, doc, key), (before) =>
+                    chain(core.put(doc, key, options), (storedKey) => {
+                      capture.record(collectionName, [storedKey], before ?? null, doc);
+                      return storedKey;
+                    }))
+                  : core.put(doc, key, options)));
+              },
+              patch: (key, ops, options) => {
+                readWriteOptions(collectionName, options, 'patch', true);
+                return guard(() => (journal
+                  ? chain(core.get(key), (before) =>
+                    chain(core.patch(key, ops, options), (after) => {
+                      // a patch that changed nothing wrote nothing, and records nothing
+                      if (!equalsJson(before, after)) capture.record(collectionName, [key], before ?? null, after);
+                      return after;
+                    }))
+                  : core.patch(key, ops, options)));
+              },
+              delete: (key, options) => {
+                readWriteOptions(collectionName, options, 'delete', true);
+                return guard(() => (journal
+                  ? chain(core.get(key), (before) =>
+                    chain(core.delete(key, options), (deleted) => {
+                      if (deleted && before !== undefined)
+                        capture.record(collectionName, [key], before, null);
+                      return deleted;
+                    }))
+                  : core.delete(key, options)));
+              },
             };
           };
           /** Journal-mode write wrappers for an entity core. */
@@ -3176,15 +3263,27 @@ export function openStore(model, options) {
             for (const member of names) {
               if (typeof handle[member] !== 'function') continue;
               out[member] = (/** @type {any[]} */ ...args) =>
-                lift(() => gated(() => handle[member](...args), undefined,
-                  member === 'page' ? args[1]?.signal : undefined))();
+                lift(() => gated(() => handle[member](...args), undefined, signalOf(member, args)))();
             }
             for (const member of valued) {
               if (typeof handle[member] !== 'function') continue;
               out[member] = (/** @type {any[]} */ ...args) =>
-                gated(() => handle[member](...args));
+                gated(() => handle[member](...args), undefined, signalOf(member, args));
             }
             return Object.freeze(out);
+          };
+          /** The argument a gated member reads its options from, by member:
+           * a call's `signal` rides into the gate, so one that aborts while
+           * it waits in the queue leaves it (JD2064) instead of waiting for
+           * its turn to refuse. One already aborted does not: the call then
+           * refuses by its own check, before any statement (JD2072). */
+          const OPTIONS_ARGUMENT = new Map([['all', 0], ['page', 1], ['load', 1], ['explain', 1], ['execute', 1]]);
+          /** @param {string} member @param {any[]} args @returns {AbortSignal | undefined} */
+          const signalOf = (member, args) => {
+            const at = OPTIONS_ARGUMENT.get(member);
+            const options = at === undefined ? undefined : args[at];
+            const signal = options !== null && typeof options === 'object' ? options.signal : undefined;
+            return signal?.aborted === true ? undefined : signal;
           };
 
           // ————— SQL the store did not plan: trusted SQL and relational writes —————
@@ -3419,10 +3518,10 @@ export function openStore(model, options) {
             // chain asked to iterate the store itself can refuse by name
             execute: entityEngine === null ? undefined
               : (document, queryOptions) =>
-                gated(() => entityEngine.execute(document, queryOptions)),
+                gated(() => entityEngine.execute(document, queryOptions), undefined, signalOf('execute', [document, queryOptions])),
             explain: entityEngine === null ? undefined
               : lift((document, queryOptions) =>
-                gated(() => entityEngine.explain(document, queryOptions))),
+                gated(() => entityEngine.explain(document, queryOptions), undefined, signalOf('explain', [document, queryOptions]))),
             roots: entityEngine === null ? undefined : Object.freeze([...entities.keys()]),
             relations: entityEngine === null ? undefined : entityEngine.relations,
             // entity live queries re-run on invalidation — declared,
@@ -3573,22 +3672,29 @@ export function openStore(model, options) {
               const liveCleanup = liveRegistry?.closeAll();
               const cursorCleanup = cursorOwnership === undefined ? null
                 : Promise.allSettled([...cursorOwnership.owners].map((cursor) => cursor.return()));
-              return chain(jobsEngine === null ? null : jobsEngine.stopAll(closeOptions),
+              return chain(jobsEngine === null ? null : jobsEngine.stopAll(closeOptions), (stopped) => {
+                // admission closes once the workers have stopped: a call
+                // after close() refuses by name instead of queueing behind
+                // the lease's release and running once the lease is given back
+                admissionClosed = true;
                 // the lease goes back first — on PostgreSQL before the driver
-                // restores the session's path and returns it to its pool
-                (stopped) => chain(ownerLease === null ? null : ownerLease.release(), () =>
-                  chain(connection.close(), () => chain(liveCleanup, () => chain(cursorCleanup, () => {
-                  const stuck = (stopped ?? []).filter(
-                    (/** @type {any} */ outcome) => outcome.drained === false);
-                  if (stuck.length === 0) return undefined;
-                  // reported, not swallowed: the handle is released, but
-                  // handlers are still running against a closed connection
-                  throw new DbRuntimeError('JD2062',
-                    `the store closed with ${stuck.reduce(
-                      (/** @type {number} */ n, /** @type {any} */ o) => n + o.inFlight, 0)} `
-                    + `job handler(s) still in flight across ${stuck.length} worker(s); `
-                    + 'they were signalled to abort and did not settle within the grace period');
-                })))));
+                // restores the session's path and returns it to its pool, or
+                // with the session destroyed when its release could not run
+                return chain(ownerLease === null ? null : ownerLease.release(), () =>
+                  chain(connection.close(ownerLease?.holds() === true ? { discard: true } : undefined),
+                    () => chain(liveCleanup, () => chain(cursorCleanup, () => {
+                      const stuck = (stopped ?? []).filter(
+                        (/** @type {any} */ outcome) => outcome.drained === false);
+                      if (stuck.length === 0) return undefined;
+                      // reported, not swallowed: the handle is released, but
+                      // handlers are still running against a closed connection
+                      throw new DbRuntimeError('JD2062',
+                        `the store closed with ${stuck.reduce(
+                          (/** @type {number} */ n, /** @type {any} */ o) => n + o.inFlight, 0)} `
+                        + `job handler(s) still in flight across ${stuck.length} worker(s); `
+                        + 'they were signalled to abort and did not settle within the grace period');
+                    }))));
+              });
             }),
           };
 

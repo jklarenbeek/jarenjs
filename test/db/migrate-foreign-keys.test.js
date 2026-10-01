@@ -101,6 +101,35 @@ describe(`a migration enforces foreign keys (${process.versions.bun ? 'bun' : 'n
   });
 });
 
+describe(`the check is the link's own (${process.versions.bun ? 'bun' : 'node'})`, () => {
+  it("an orphan an earlier, unenforced write left is not the link's doing; one the link adds still refuses it", async () => {
+    const { dbPath, cleanup } = await seeded();
+    try {
+      // written while enforcement was off, long before this migration
+      const db = await raw(dbPath);
+      try {
+        db.exec('PRAGMA foreign_keys = OFF');
+        db.exec(`INSERT INTO "Child" ("id", "parentId", "doc") VALUES ('stale', 'gone', jsonb('{}'))`);
+      }
+      finally { db.close(); }
+      assert.deepEqual(await facts(dbPath), { children: 2, violations: 1 });
+      const touch = step('touch', `UPDATE "Child" SET "doc" = jsonb('{}') WHERE "id" = 'c1'`);
+      const outcome = await migrate({ driver: await driver(), path: dbPath }, [touch], { baseline: MODEL, model: MODEL, shadow: false });
+      assert.deepEqual(/** @type {any} */ (outcome).applied, ['touch'], 'the old orphan does not refuse the link');
+      const connection = await (await driver()).open(dbPath, {});
+      try {
+        connection.exec('PRAGMA foreign_keys = OFF');
+        // the one violation the link adds is named — the old one is not
+        assert.throws(() => migrate({ connection }, [touch, DELETE_PARENT], { baseline: MODEL, shadow: false }),
+          (/** @type {any} */ error) => error.code === 'JD0023' && error.class === 'constraint'
+            && /leaves 1 foreign-key violation\(s\): \[\{"table":"Child","rowid":"1","parent":"Parent"/.test(error.message));
+      }
+      finally { connection.close(); }
+    }
+    finally { cleanup(); }
+  });
+});
+
 describe('the same migration under Bun, spawned', { skip: process.versions.bun !== undefined && 'this is Bun already' }, () => {
   it("bun:sqlite's default is off, and the migration's own connection turns it on", async (t) => {
     const which = spawnSync('bun', ['--version'], { encoding: 'utf8' });

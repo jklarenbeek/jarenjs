@@ -179,17 +179,36 @@ export function hostFailureText(e) {
 export function deepFreezeCopy(value) {
   if (typeof value !== 'object' || value === null)
     return value;
-  if (Array.isArray(value)) {
-    const out = new Array(value.length);
-    for (let i = 0; i < value.length; i++)
-      out[i] = deepFreezeCopy(value[i]);
-    return Object.freeze(out);
+  // an explicit stack, not recursion: a document's nesting is its
+  // author's, and a deep one must not overflow the copy
+  const shell = (source) => (Array.isArray(source) ? new Array(source.length) : {});
+  const root = shell(value);
+  const made = [root];
+  const pending = [value, root];
+  while (pending.length > 0) {
+    const out = pending.pop();
+    const source = pending.pop();
+    const keys = Array.isArray(source) ? null : Object.keys(source);
+    const count = keys === null ? source.length : keys.length;
+    for (let i = 0; i < count; i++) {
+      const key = keys === null ? i : keys[i];
+      let item = source[key];
+      if (typeof item === 'object' && item !== null) {
+        const copy = shell(item);
+        made.push(copy);
+        pending.push(item, copy);
+        item = copy;
+      }
+      // an own member whatever its name: `__proto__` assigned would
+      // rewrite the copy's prototype and lose the member
+      if (key === '__proto__')
+        Object.defineProperty(out, key, { value: item, writable: true, enumerable: true, configurable: true });
+      else out[key] = item;
+    }
   }
-  const out = {};
-  const keys = Object.keys(value);
-  for (let i = 0; i < keys.length; i++)
-    out[keys[i]] = deepFreezeCopy(value[keys[i]]);
-  return Object.freeze(out);
+  for (let i = 0; i < made.length; i++)
+    Object.freeze(made[i]);
+  return root;
 }
 
 //#endregion

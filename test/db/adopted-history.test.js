@@ -125,6 +125,29 @@ describe('a baseline receipt adopts history', () => {
   });
 });
 
+describe('the status read', () => {
+  it('reports the baseline receipt, and classifies a file it cannot read (JD0023) as a run would', async () => {
+    const baseline = await reviewedBaseline();
+    const { dbPath, cleanup } = installation(true);
+    try {
+      await migrate({ driver: nodeDriver(), path: dbPath }, [baseline], { baseline: MODEL, model: MODEL, shadow: false });
+      const status = /** @type {any} */ (await migrationStatus({ driver: nodeDriver(), path: dbPath }, [baseline], {}));
+      assert.equal(status.baseline, '0000-baseline');
+      const garbage = `${dbPath}.not-a-database`;
+      const { writeFileSync, rmSync } = await import('node:fs');
+      writeFileSync(garbage, 'not a database '.repeat(400));
+      try {
+        await assert.rejects(migrationStatus({ driver: nodeDriver(), path: garbage }, [], {}), (/** @type {any} */ error) =>
+          error.code === 'JD0023' && error.class === 'corrupt' && error.retryable === false && /status could not be read/.test(error.message));
+      }
+      finally { rmSync(garbage, { force: true }); }
+      await assert.rejects(migrationStatus({ driver: nodeDriver(), path: `${dbPath}-missing/dir/x.db` }, [], {}),
+        (/** @type {any} */ error) => error.code === 'JD0023' && error.class === 'cantopen');
+    }
+    finally { cleanup(); }
+  });
+});
+
 describe('the scope is validated', () => {
   it('an unscoped plan still inventories the whole schema: the second installation refuses JD0020', async () => {
     const reference = installation(false);

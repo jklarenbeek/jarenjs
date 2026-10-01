@@ -225,11 +225,24 @@ describe('the PostgreSQL mapping', () => {
       TypeError);
   });
 
+  it('a membership list is one JSON parameter: text byte-ordered, numbers as the numeric a column is declared as', () => {
+    const text = pg.inList('"t"."sku"', '$1', 'text');
+    const number = pg.inList('"t"."n"', '$1', 'number');
+    for (const sql of [text, number]) {
+      assert.match(sql, /jsonb_array_elements\(\(\(\$1\)::jsonb\)\)/, 'an array\'s elements');
+      assert.match(sql, /jsonb_each\(CASE WHEN jsonb_typeof\(\(\(\$1\)::jsonb\)\) = 'object'/, "or an object's member values");
+    }
+    assert.match(text, /^"t"\."sku" IN \(SELECT \(i\.e #>> '\{\}'\) COLLATE "C" FROM .* WHERE jsonb_typeof\(i\.e\) = 'string'\)$/);
+    // numeric, never double precision: the cast would sit on the column's side and stop its index
+    assert.match(number, /^"t"\."n" IN \(SELECT \(i\.e #>> '\{\}'\)::numeric FROM .* WHERE jsonb_typeof\(i\.e\) = 'number'\)$/);
+    assert.ok(!number.includes('double precision'));
+  });
+
   it('the writer lock follows a plain BEGIN, and a BEGIN may name any of the three levels', () => {
     assert.strictEqual(pg.capabilities.immediateTransactions, true);
     assert.strictEqual(pg.tx.beginImmediate, pg.tx.begin, 'the open path\'s own brackets take no lock here');
-    assert.strictEqual(pg.tx.writerLock,
-      'SELECT pg_catalog.pg_advisory_xact_lock(1246907984, pg_catalog.hashtext(current_schema()))');
+    assert.strictEqual(pg.tx.writerLock, 'SELECT pg_catalog.pg_advisory_xact_lock(1246907984, ((SELECT n.oid '
+      + 'FROM pg_catalog.pg_namespace n WHERE n.nspname = pg_catalog.current_schema())::int8 - 2147483648)::int4)');
     assert.deepStrictEqual([...pg.tx.isolationLevels], ['read committed', 'repeatable read', 'serializable']);
     assert.strictEqual(pg.tx.beginAt('repeatable read'), 'BEGIN ISOLATION LEVEL REPEATABLE READ');
     assert.strictEqual(sqliteDialect.tx.writerLock, undefined, 'BEGIN IMMEDIATE is the lock itself');
@@ -238,6 +251,10 @@ describe('the PostgreSQL mapping', () => {
   });
 
   it('every advisory lock is a class of one family, keyed by the current schema, and listed in POSTGRESQL.md', async () => {
+    // the writer and owner key the schema by OID, which no two schemas
+    // share; the older classes by the name's hash, as earlier releases do
+    const byOid = /\((\d+), \(\(SELECT n\.oid FROM pg_catalog\.pg_namespace n WHERE n\.nspname = pg_catalog\.current_schema\(\)\)::int8 - 2147483648\)::int4\)/;
+    const byHash = /\((\d+), pg_catalog\.hashtext\(current_schema\(\)\)\)/;
     const ids = Object.values(POSTGRES_LOCK_CLASSES);
     assert.strictEqual(new Set(ids).size, ids.length, 'one class per lock');
     for (const id of ids) assert.strictEqual(Math.floor(id / 256), 0x4A524E, `${id} is of the 0x4A524E__ family`);
@@ -255,8 +272,11 @@ describe('the PostgreSQL mapping', () => {
       issued.push(dialect.migration.lock, dialect.tx.writerLock, dialect.owner.acquire, dialect.owner.release);
     }
     for (const sql of issued) {
-      assert.match(sql, /pg_catalog\.pg_(try_)?advisory_(xact_)?(un)?lock\((\d+), pg_catalog\.hashtext\(current_schema\(\)\)\)/, sql);
-      assert.ok(ids.includes(Number(/\((\d+),/.exec(sql)?.[1])), `${sql} uses a listed class`);
+      assert.match(sql, /pg_catalog\.pg_(try_)?advisory_(xact_)?(un)?lock\(/, sql);
+      const id = Number(/\((\d+),/.exec(sql)?.[1]);
+      assert.ok(ids.includes(id), `${sql} uses a listed class`);
+      const oidKeyed = id === POSTGRES_LOCK_CLASSES.writer || id === POSTGRES_LOCK_CLASSES.owner;
+      assert.match(sql, oidKeyed ? byOid : byHash, sql);
     }
   });
 

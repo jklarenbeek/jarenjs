@@ -467,8 +467,12 @@ export function adaptPostgresClient(client, options = undefined) {
         ...(options?.nativeCursor !== true ? {} : { iterate: (params = []) => cursors.open(sql, params.map(encodeParam)) }),
       };
     },
-    close: () => {
+    close: (/** @type {{ discard?: boolean } | undefined} */ closeOptions = undefined) => {
       if (closing !== undefined) return closing;
+      // a session that still holds a session lock of the store's (its owner
+      // lock, whose release could not run) is destroyed, never pooled: the
+      // server releases a session's locks when the session ends
+      const discard = closeOptions?.discard === true;
       const clean = async () => {
         let cursorFailure;
         try { await cursors.close(); }
@@ -495,7 +499,8 @@ export function adaptPostgresClient(client, options = undefined) {
         catch (error) { failures.push(error); }
         const failure = failures.length === 1 ? failures[0]
           : failures.length > 1 ? new AggregateError(failures, 'PostgreSQL session cleanup failed') : null;
-        await releaseClient(failure ?? (retire ? new Error('prepared session cache lifetime exhausted') : undefined));
+        await releaseClient(failure ?? (discard ? new Error('the session still holds the store\'s owner lock')
+          : retire ? new Error('prepared session cache lifetime exhausted') : undefined));
         if (failure !== null) throw failure;
       };
       let releasedClient = false;
@@ -568,7 +573,7 @@ export function postgresDriver(source, options = undefined) {
      * @param {string} [path] - a PostgreSQL store lives in a SCHEMA on a
      *   server, not at a path; anything but the conventional `':memory:'`
      *   is refused by name rather than quietly ignored
-     * @param {{ queueTimeout?: number, signal?: AbortSignal }} [openOptions]
+     * @param {{ queueTimeout?: number, signal?: AbortSignal, readOnly?: boolean }} [openOptions]
      * @returns {Promise<any>}
      */
     open: (path, openOptions) => {
@@ -655,6 +660,17 @@ export function postgresDriver(source, options = undefined) {
               throw new DbRuntimeError('JD2005', `the PostgreSQL source did not apply ${name}`);
           }
           raw.serverTimeouts = true;
+          // a read-only open is read-only at the SESSION: every transaction
+          // it runs is READ ONLY, so the server refuses a write whatever path
+          // issued it (25006, JD2083) — the setting restored at close, as the
+          // timeouts are
+          if (openOptions?.readOnly === true) {
+            const readOnlyBefore = (await initialQuery('SHOW default_transaction_read_only')).rows[0]?.default_transaction_read_only;
+            if (typeof readOnlyBefore !== 'string')
+              throw new DbRuntimeError('JD2005', 'the source did not return default_transaction_read_only');
+            savedSettings.set('default_transaction_read_only', readOnlyBefore);
+            await initialQuery("SELECT pg_catalog.set_config('default_transaction_read_only', 'on', false)");
+          }
           if (schema !== undefined) {
             originalPath = (await initialQuery('SHOW search_path')).rows[0]?.search_path;
             if (typeof originalPath !== 'string')

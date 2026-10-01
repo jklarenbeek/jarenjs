@@ -243,7 +243,7 @@ is part of THIS design.
 | `OfType<S>` | `$valid` filter with a JSON Schema literal | native | `(schema)` → `Seq<S>`; needs `compileTypeTest` (`JL0003`) |
 | `Cast<S>` | `$assert` per item | native | `(schema)` → `Seq<S>`; needs `compileTypeTest` (`JL0003`) |
 | `Zip` | — no positional co-iteration in the grammar | unsupported (`JL0006`) | — |
-| expression methods | `eq ne lt le gt ge` → `$eq…$ge`; `in(values)` → `$eq` against `{ $seq: values }`, `in(path)` → `$eq` against `path[*]` (membership, never `eq(array)`); `and or not` (a chain extends one argument list); `add sub mul div idiv mod neg`; `startsWith endsWith contains matches upper lower length concat substring replace` → §8.7; `count sum avg min max` → §8.8 (aggregates as expressions, e.g. over a group); `exists isEmpty`; `at all get` | native | on `Expr<…>`, per the typed-surface order |
+| expression methods | `eq ne lt le gt ge` → `$eq…$ge`; `in(values)` → `$eq` against `{ $seq: values }`, `in(path)` → `$eq` against `path[*]`, or a path that already fans as it stands (membership, never `eq(array)`); `and or not` (a chain extends one argument list); `add sub mul div idiv mod neg`; `startsWith endsWith contains matches upper lower length concat substring replace` → §8.7; `count sum avg min max` → §8.8 (aggregates as expressions, e.g. over a group); `exists isEmpty`; `at all get` | native | on `Expr<…>`, per the typed-surface order |
 | date family (§8.13) | the whole family, one method per operator. Components `year month day hours minutes seconds offset week weekYear quarter weekday`; instants `epoch datetime`; predicates `isDate isTime isDatetime isDuration`; arithmetic `startOf(unit) endOf(unit) dateAdd(duration \| amount, unit?) dateSub(…) dateDiff(to, unit) dateFormat(pattern)`. `dateAdd`/`dateSub`/`dateFormat` carry the prefix because `add`, `sub` and `format` are taken or ambiguous on this surface — the same reason §8.14 spells `geoArea`. There is no `now()`: §8.13 has no clock, and a fluent surface does not get to add one | native | on `DateTimeExpr` (the `DateTime` brand) and on `UnknownExpr` |
 | series family (§8.16) | `overlaps(other)` → `$overlaps`; `timeBucket(every, origin?, context?)` → `$time-bucket`; `resample(spec)`, `rolling(spec)` and `asof(right, spec?)` → the three sequence operators. A **spec is a literal** and is embedded verbatim — it is read once when the query compiles, so a spec built from the row is `JL0005`, and every rule about what it may *say* stays in the compiler (`JQ0003`). Note that a member literally named `at` is read with `get('at')`: `at(index)` is path navigation on this surface | native | on `ArrayExpr`/fanned paths for the three sequence operators, on `Expr<…>` for the two scalar ones |
 | spatial family (§8.14) | `bbox geoArea geoLength centroid` → `$bbox $area $length $centroid`; `distance within bboxIntersects` → `$distance $within $bbox-intersects`; `geohash(precision?)` → `$geohash` (optional arity, like `substring`); `geoParse geoText geohashBounds geohashNeighbours` → the conversion family; `geoSimplify(tolerance)` → `$geo-simplify`. A plain JSON polygon embeds as a literal (`p.at.within(poly)`); `.params({ region })` makes it an external instead | native | on `Expr<…>`, per the typed-surface order |
@@ -283,12 +283,16 @@ it equals any of them — while `u.sku.eq(['a', 'b'])` embeds the array as
 ONE value (`$const`), which only an array-valued member equals. A list
 bound at call time is a path: `.params({ skus })` with `u.sku.in(p.skus)`
 emits `{ "$eq": ["$it.sku", "$skus[*]"] }`, one document for every list,
-and `u.sku.in(u.tags)` is membership in an array member. The values are
+and `u.sku.in(u.tags)` is membership in an array member. A path that
+already fans is the list as it stands: `u.sku.in(u.tags.all())` emits
+`"$it.tags[*]"`, as `u.sku.in(u.tags)` does. The values are
 scalars — a string, a number, a boolean, `null` or a captured
 expression; an object or array item, or an argument that is neither an
-array nor a path, is `JL0005`. A store plans each spelling, and a chain
-of `.or()` equalities on one member, to one bound list the member's
-index seeks (MODEL-FORMAT §10.1).
+array nor a path, is `JL0005`. A store plans a list of values, a
+parameter's list and a chain of `.or()` equalities on one member to one
+bound list the member's index seeks (MODEL-FORMAT §10.1); membership in
+another member's array compares two members of one row, which runs in
+the engine, and `explain()` names it.
 
 **A chain of `.or()` or `.and()` is one operator.** `a.or(b).or(c)`
 emits `{ "$or": [a, b, c] }`, not a nest: chaining extends one argument
@@ -1741,14 +1745,14 @@ are shorter:
 ## 17. Cost
 
 A consumer importing `from` from `@jarenjs/linq` and calling one
-terminal bundles **<!--fact:bundle.chain-->176,016<!--/fact--> bytes** (esbuild, ESM, minified, tree-shaken,
+terminal bundles **<!--fact:bundle.chain-->177,904<!--/fact--> bytes** (esbuild, ESM, minified, tree-shaken,
 `platform: 'neutral'`). The figure is measured by
 `scripts/check-tree-shaking.js`'s chain probe and compared with this
 section on every `npm run test:tree-shaking`: it is derived, never typed,
 and a stale one is red here rather than wrong in a document somebody
 reads.
 
-Of that, **<!--fact:bundle.chain.own-->39,453<!--/fact--> bytes** are the chain's own modules — `sequence.js`,
+Of that, **<!--fact:bundle.chain.own-->40,595<!--/fact--> bytes** are the chain's own modules — `sequence.js`,
 `async.js`, `expression.js`, `document.js`, `provider.js`,
 `concurrency.js`, `errors.js` and `schema-of.js`. The remaining ~134 kB
 is the query ENGINE and the core it stands on: a chain's document has to
@@ -1769,13 +1773,13 @@ making:
   `@jarenjs/formats`** — the client's optional peers. A consumer of the
   chain alone installs nothing new;
 - **no pen bytes at all**, in either direction: the pens carry no chain
-  module either, which is what keeps a <!--fact:bundle.jslt.kb-->19<!--/fact--> kB JSLT
-  pen <!--fact:bundle.jslt.kb-->19<!--/fact--> kB.
+  module either, which is what keeps a <!--fact:bundle.jslt.kb-->20<!--/fact--> kB JSLT
+  pen <!--fact:bundle.jslt.kb-->20<!--/fact--> kB.
 
 `docs/CONSUMING.md` states the rounded price of all ten subpaths in one
 table, each figure held equal to the same measurements. Two of its rows
-are the ones to read together: the chain at <!--fact:bundle.chain.kb-->176<!--/fact--> kB and
-`./db` at <!--fact:bundle.db.kb-->757<!--/fact--> kB.
+are the ones to read together: the chain at <!--fact:bundle.chain.kb-->178<!--/fact--> kB and
+`./db` at <!--fact:bundle.db.kb-->779<!--/fact--> kB.
 The client costs what the store costs, by construction, and the chain
 costs what running a query costs.
 
@@ -1784,7 +1788,7 @@ the reason is worth knowing: a bundler counts a shared module once, and
 the chain and every pen share the expression capture (`expression.js`)
 and the coded errors under it (`errors.js`, and `@jarenjs/core`'s error
 and object helpers). A consumer importing the chain AND the schema pen
-bundles **<!--fact:bundle.chain.withSchemaPen-->200,340<!--/fact--> bytes** — **<!--fact:bundle.chain.shared-->11,541<!--/fact--> bytes** less than the sum of the
+bundles **<!--fact:bundle.chain.withSchemaPen-->202,231<!--/fact--> bytes** — **<!--fact:bundle.chain.shared-->12,481<!--/fact--> bytes** less than the sum of the
 figure above and [SCHEMA-PEN.md](SCHEMA-PEN.md#7-cost) §7's, which is
 what those shared modules weigh. The probe measures that pair too, so
 the saving is derived like everything else here. What the chain does NOT

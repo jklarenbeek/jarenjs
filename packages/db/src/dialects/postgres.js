@@ -535,7 +535,9 @@ export function postgresDialect(options = undefined) {
     // Membership in a JSON list bound as ONE parameter (its JSON text, as
     // every external here): an array's elements or an object's member
     // values, of one kind — text byte-ordered like every text comparison,
-    // a number as the double precision a number member reads as
+    // a number as the `numeric` a number member reads as and a number
+    // column is declared as, so the comparison casts neither side and the
+    // column's index seeks
     inList: (valueSql, listSql, kind) => {
       const list = `((${listSql})::jsonb)`;
       const items = `(SELECT jsonb_array_elements(${list}) WHERE jsonb_typeof(${list}) = 'array' UNION ALL `
@@ -543,7 +545,7 @@ export function postgresDialect(options = undefined) {
         + "ELSE '{}'::jsonb END) AS m)";
       return kind === 'text'
         ? `${valueSql} IN (SELECT (i.e #>> '{}') COLLATE "C" FROM ${items} AS i(e) WHERE jsonb_typeof(i.e) = 'string')`
-        : `${valueSql} IN (SELECT (i.e #>> '{}')::double precision FROM ${items} AS i(e) WHERE jsonb_typeof(i.e) = 'number')`;
+        : `${valueSql} IN (SELECT (i.e #>> '{}')::numeric FROM ${items} AS i(e) WHERE jsonb_typeof(i.e) = 'number')`;
     },
     // the half-open range over the prefix, seekable through a B-tree on
     // a `C`-collated column. Both operands are byte-ordered — the column

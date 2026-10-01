@@ -3093,10 +3093,12 @@ export function entityShape(entity, entityMapping) {
         && !['text', 'integer', 'number', 'boolean', 'date', 'datetime'].includes(column.codec),
     });
   }
+  // an inferred foreign key has no property of its own: its column
+  // stores the referenced key's type, and compares as that type does
   for (const fk of entityMapping.foreignKeys) {
     const fkCanonical = canonicalOf([{ name: fk.column }]);
     if (!flavors.has(fkCanonical))
-      flavors.set(fkCanonical, { column: fk.column, flavor: 'entity-column', storage: 'string' });
+      flavors.set(fkCanonical, { column: fk.column, flavor: 'entity-column', storage: fk.referencesType });
   }
   return {
     collection: entity.name,
@@ -3931,7 +3933,13 @@ export function entityRoot(name) {
 /** The entity names a document's root paths reference (`$.Name[*]`). */
 export function collectEntityRoots(document, entities) {
   const found = new Set();
-  const walk = (node) => {
+  // an explicit stack, not recursion: a query's depth is the caller's, and
+  // a long chain nested one operand deep must not overflow the walk. The
+  // children go on in reverse, so the roots are found in document order —
+  // the order a plan's `referenced` reports
+  const pending = [document];
+  while (pending.length > 0) {
+    const node = pending.pop();
     if (typeof node === 'string') {
       for (const name of entities.keys()) {
         if (node.startsWith(entityRoot(name))) {
@@ -3939,16 +3947,14 @@ export function collectEntityRoots(document, entities) {
           break;
         }
       }
-      return;
     }
-    if (Array.isArray(node)) {
-      node.forEach(walk);
-      return;
+    else if (Array.isArray(node)) {
+      for (let i = node.length - 1; i >= 0; i--) pending.push(node[i]);
     }
-    if (node !== null && typeof node === 'object') {
-      for (const key of Object.keys(node)) walk(node[key]);
+    else if (node !== null && typeof node === 'object') {
+      const keys = Object.keys(node);
+      for (let i = keys.length - 1; i >= 0; i--) pending.push(node[keys[i]]);
     }
-  };
-  walk(document);
+  }
   return found;
 }

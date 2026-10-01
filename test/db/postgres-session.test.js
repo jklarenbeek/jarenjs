@@ -51,6 +51,28 @@ describe('PostgreSQL session ownership', { skip: !url && 'JAREN_PG_URL is not se
     assert.equal((await pool.query('SELECT count(*)::int AS n FROM pg_namespace WHERE nspname=$1',
       [`${schema}_missing`])).rows[0].n, 0);
   });
+  it('a read-only store is read-only at the session: the server refuses its writes, and the session is restored', async () => {
+    const { openStore } = await import('@jarenjs/db');
+    const model = { $model: '0.1', collections: { docs: { schema: { type: 'object' }, key: '/id', indexes: [] } } };
+    const writer = await openStore(model, { driver: postgresDriver(pool, { schema }) });
+    await writer.collection('docs').put({ id: 'kept' });
+    await writer.close();
+    const store = await openStore(model, { driver: postgresDriver(pool, { schema }), readOnly: true });
+    try {
+      assert.deepEqual(await store.collection('docs').get('kept'), { id: 'kept' });
+      const refused = (/** @type {any} */ e) => e.code === 'JD2083' && e.class === 'readonly' && e.cause?.code === '25006';
+      await assert.rejects(store.collection('docs').put({ id: 'a' }), refused);
+      await assert.rejects(store.collection('docs').insert({ id: 'b' }), refused);
+      await assert.rejects(store.collection('docs').delete('kept'), refused);
+      await assert.rejects(store.collection('docs').patch('kept', [{ op: 'add', path: '/n', value: 1 }]), refused);
+    }
+    finally { await store.close(); }
+    const { rows } = await pool.query('SELECT "key" FROM "' + schema + '"."docs" ORDER BY "key"');
+    assert.deepEqual(rows.map((/** @type {any} */ row) => row.key), ['kept'], 'nothing a read-only store ran was written');
+    assert.equal((await pool.query('SHOW default_transaction_read_only')).rows[0].default_transaction_read_only, 'off',
+      'the pooled session is writable again');
+    await pool.query('DROP TABLE "' + schema + '"."docs"');
+  });
   it('preserves named buffered cached-plan refusal in blocks and nested savepoints, then recovers after rollback', async () => {
     const connection = await postgresDriver(pool, { schema, cursorMode: 'buffered' }).open();
     try {

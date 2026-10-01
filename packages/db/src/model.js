@@ -608,6 +608,14 @@ export function compileEntityModel(model) {
   return { entities, mapping: mappingOf(model, entities) };
 }
 
+/** The storage an entity's key column is declared with: its property's
+ * scalar type, or the epoch integer a date-time key is kept as.
+ * @param {any} entity @returns {string} */
+function keyStorageOf(entity) {
+  const key = entity.properties.get(entity.keys[0]);
+  return key.column === 'integer' ? 'integer' : key.type;
+}
+
 /** @param {any} model @param {Map<string,any>} entities @returns {any} */
 function mappingOf(model, entities) {
   /** @type {any} */
@@ -670,10 +678,14 @@ function mappingOf(model, entities) {
           existing.unique = existing.unique && relation.kind === 'oneToOne';
           continue;
         }
+        const target = entities.get(relation.fkTargets);
         const fk = {
           column: relation.via,
           references: relation.fkTargets,
-          referencesKey: entities.get(relation.fkTargets).keys[0],
+          referencesKey: target.keys[0],
+          // the referenced key's storage: the column type the DDL gives
+          // the foreign key, so the comparisons a planner gives it
+          referencesType: keyStorageOf(target),
           onDelete: relation.onDelete,
           unique: relation.kind === 'oneToOne',
         };

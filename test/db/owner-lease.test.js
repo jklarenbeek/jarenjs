@@ -25,6 +25,8 @@ import { DatabaseSync } from 'node:sqlite';
 import { openStore } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';
 import { tempDbPath } from './helpers.js';
+import { createOwnerLease } from '../../packages/db/src/owner.js';
+import { OWNER_LOCK } from '../../packages/db/src/dialects/postgres-locks.js';
 
 const MODEL = {
   $model: '0.1',
@@ -277,6 +279,224 @@ describe('the owner lease in one process', () => {
       finally { await store.close(); }
     }
     finally { cleanup(); }
+  });
+});
+
+describe('the owner lease at the gate', () => {
+  /** A promise and the function that settles it. */
+  const deferred = () => {
+    /** @type {() => void} */
+    let settle = () => {};
+    const promise = new Promise((resolve) => { settle = () => resolve(undefined); });
+    return { promise, settle };
+  };
+  // a long lease: its renewal timer never fires within a test, so the
+  // clock the store reads is the only thing that moves
+  /** @param {string} dbPath @param {() => number} now */
+  const openLong = (dbPath, now) => openStore(MODEL,
+    { driver: nodeDriver(), path: dbPath, owner: { id: 'gate', leaseMs: 30_000 }, runtime: { now } });
+
+  it('a call that waited in the queue past the lease\'s expiry refuses JD2061, retryable, and writes nothing', async () => {
+    const { dbPath, cleanup } = tempDbPath();
+    let offset = 0;
+    try {
+      const store = await openLong(dbPath, () => Date.now() + offset);
+      try {
+        const body = deferred();
+        const holding = store.transaction(() => body.promise);
+        // admitted to the queue under a valid lease, then the clock passes its expiry
+        const queued = store.collection('docs').put({ id: 'late', n: 1 }, 'late');
+        offset = 60_000;
+        body.settle();
+        await holding;
+        await assert.rejects(queued, (/** @type {any} */ error) => error.code === 'JD2061'
+          && error.retryable === true && error.owner === 'gate' && /lapsed/.test(error.message));
+        assert.strictEqual(await store.collection('docs').get('late'), undefined, 'the refused call wrote nothing');
+        // the next call renews the lease before it runs
+        await store.collection('docs').put({ id: 'retried', n: 1 }, 'retried');
+        assert.strictEqual((await store.collection('docs').get('retried'))?.n, 1);
+      }
+      finally { await store.close(); }
+    }
+    finally { cleanup(); }
+  });
+
+  it('the renewal takes the gate\'s next turn: it runs before the calls already queued, so they run under a renewed lease', async () => {
+    const { dbPath, cleanup } = tempDbPath();
+    let offset = 0;
+    try {
+      const store = await openLong(dbPath, () => Date.now() + offset);
+      try {
+        const body = deferred();
+        const holding = store.transaction(() => body.promise);
+        const queued = store.collection('docs').put({ id: 'queued', n: 1 }, 'queued');
+        offset = 60_000;
+        // this call finds the lease lapsed and asks for a renewal, which
+        // takes the turn after the holder's — ahead of the queued put
+        const renewing = store.collection('docs').get('queued');
+        body.settle();
+        await holding;
+        await queued;
+        assert.strictEqual((await renewing)?.n, 1);
+      }
+      finally { await store.close(); }
+    }
+    finally { cleanup(); }
+  });
+
+  it('the renewal waits for a transaction longer than queueTimeout: leaseMs above 1.5 × holdTimeoutMs keeps the lease', async () => {
+    // leaseMs 3000 renews every 1000 ms; a transaction from 700 ms to 2550 ms
+    // (holdTimeoutMs 1900) holds the gate when the renewal comes. With
+    // queueTimeout 1400 a renewal that gave up at 2400 came back at 3400,
+    // and the lease lay open from 3000: a second owner took it at 3150
+    const { dbPath, cleanup } = tempDbPath();
+    try {
+      const started = Date.now();
+      const until = (/** @type {number} */ at) => delay(Math.max(0, at - (Date.now() - started)));
+      const first = await openStore(MODEL, { driver: nodeDriver(), path: dbPath,
+        owner: { id: 'first', leaseMs: 3000 }, holdTimeoutMs: 1900, queueTimeout: 1400 });
+      try {
+        await until(700);
+        const holding = first.transaction(() => until(2550));
+        await until(3150);
+        await assert.rejects(openOwner(dbPath, 'second'), ownedBy('first'));
+        await holding;
+        assert.strictEqual(await first.collection('docs').get('none'), undefined, 'the first is still the owner');
+      }
+      finally { await first.close(); }
+    }
+    finally { cleanup(); }
+  });
+
+  it('close() behind a body that never settles still settles: the waiting renewal leaves the queue', async () => {
+    const { dbPath, cleanup } = tempDbPath();
+    try {
+      // leaseMs 1000 renews every 333 ms: the renewal is queued behind the body by 500 ms
+      const store = await openStore(MODEL, { driver: nodeDriver(), path: dbPath, owner: { id: 'stuck', leaseMs: 1000 }, queueTimeout: 300 });
+      store.transaction(() => new Promise(() => {})).catch(() => {});
+      await delay(500);
+      const started = Date.now();
+      await Promise.race([store.close(), delay(4000).then(() => { throw new Error('close() did not settle'); })]);
+      // its own release outwaited the gate (queueTimeout) behind the body; the renewal did not hold it up
+      assert.ok(Date.now() - started < 2000, `close() took ${Date.now() - started} ms`);
+    }
+    finally { cleanup(); }
+  });
+
+  it('a call after close() refuses JD2063 however long after, on every surface, and never JD2061', async () => {
+    const { dbPath, cleanup } = tempDbPath();
+    let offset = 0;
+    try {
+      const store = await openLong(dbPath, () => Date.now() + offset);
+      await store.collection('docs').put({ id: 'a', n: 1 }, 'a');
+      await store.close();
+      const closed = (/** @type {any} */ error) => error.code === 'JD2063';
+      for (const late of [0, 60_000]) {
+        offset = late;
+        await assert.rejects(async () => store.collection('docs').get('a'), closed);
+        await assert.rejects(async () => store.transaction(async () => {}, { retry: { attempts: 3 } }), closed);
+        assert.throws(() => store.sync?.collection('docs').get('a'), closed);
+      }
+    }
+    finally { cleanup(); }
+  });
+
+  it('a call made while close() waits for a transaction refuses JD2063 and writes nothing after the lease is given back', async () => {
+    const { dbPath, cleanup } = tempDbPath();
+    try {
+      const store = await openLong(dbPath, () => Date.now());
+      const body = deferred();
+      const holding = store.transaction(() => body.promise);
+      const closing = store.close();
+      const late = store.collection('docs').put({ id: 'after-close', n: 1 }, 'after-close');
+      body.settle();
+      await holding;
+      await closing;
+      await assert.rejects(late, (/** @type {any} */ error) => error.code === 'JD2063');
+      const probe = new DatabaseSync(dbPath);
+      try {
+        assert.strictEqual(probe.prepare("SELECT count(*) AS n FROM docs WHERE key = 'after-close'").get()?.n, 0);
+        assert.strictEqual(probe.prepare('SELECT count(*) AS n FROM "_jaren_owner"').get()?.n, 0);
+      }
+      finally { probe.close(); }
+    }
+    finally { cleanup(); }
+  });
+
+  it('a transaction whose connection closed under its body refuses its commit JD2063, not the binding\'s own error', async () => {
+    // a plain transaction settles a savepoint, an immediate one its block
+    for (const mode of /** @type {const} */ ([undefined, 'immediate'])) {
+      const { dbPath, cleanup } = tempDbPath();
+      try {
+        const store = await openStore(MODEL, { driver: nodeDriver(), path: dbPath });
+        const body = deferred();
+        const holding = store.transaction(async (/** @type {any} */ tx) => {
+          await tx.collection('docs').put({ id: 'uncommitted', n: 1 }, 'uncommitted');
+          await body.promise;
+        }, mode === undefined ? undefined : { mode });
+        await delay(10);
+        await store.close();
+        body.settle();
+        await assert.rejects(holding, (/** @type {any} */ error) => error.code === 'JD2063', String(mode));
+        // read raw: a binding may keep a closed connection's lock until its
+        // statements are gone, and the write it held never committed either way
+        const probe = new DatabaseSync(dbPath);
+        try { assert.strictEqual(probe.prepare("SELECT count(*) AS n FROM docs WHERE key = 'uncommitted'").get()?.n, 0); }
+        finally { probe.close(); }
+      }
+      finally { cleanup(); }
+    }
+  });
+});
+
+describe('the session strategy (PostgreSQL), over a scripted session', () => {
+  /** A session that answers each statement with the next scripted row, and records it.
+   * @param {any[]} rows */
+  const session = (rows) => {
+    /** @type {string[]} */
+    const statements = [];
+    const connection = { prepare: (/** @type {string} */ sql) => {
+      statements.push(sql);
+      return { get: () => rows.shift() };
+    } };
+    return { connection, statements };
+  };
+  /** @param {any} connection @param {(fn: any) => any} [exclusively] */
+  const lease = (connection, exclusively = (/** @type {any} */ fn) => fn(connection)) => createOwnerLease({
+    dialect: { name: 'postgres', owner: { kind: 'session', ...OWNER_LOCK } },
+    owner: { id: 'service', leaseMs: 30_000 }, adopt: false, now: () => 0,
+    bracket: (/** @type {any} */ fn) => fn(), exclusively, renewsInline: () => true, connection,
+  });
+
+  it('holds what the server granted, and lets go only when the server says it released', () => {
+    const { connection, statements } = session([{ held: 1, schema: 's' }, { released: 0 }, { released: 1 }]);
+    const owner = lease(connection);
+    assert.strictEqual(owner.mode, 'session');
+    owner.acquire();
+    assert.strictEqual(owner.holds(), true);
+    // the lock cannot lapse without the session: the gate's checks pass
+    assert.strictEqual(owner.guard(false), undefined);
+    assert.strictEqual(owner.admitted(), undefined);
+    owner.release();
+    assert.strictEqual(owner.holds(), true, 'the server did not release it: the session must be destroyed, not pooled');
+    owner.release();
+    assert.strictEqual(owner.holds(), false);
+    assert.strictEqual(owner.release(), undefined, 'nothing left to release');
+    assert.deepStrictEqual(statements, [OWNER_LOCK.acquire, OWNER_LOCK.release, OWNER_LOCK.release]);
+  });
+
+  it('a release the gate could not run leaves the lock held; a held lock elsewhere refuses JD2061; no schema is JD0003', () => {
+    const { connection } = session([{ held: true, schema: 's' }]);
+    const owner = lease(connection, () => { throw new Error('outwaited the gate'); });
+    // acquire runs on the connection itself; only the release goes through the gate
+    owner.acquire();
+    assert.strictEqual(owner.release(), undefined, 'a release never throws');
+    assert.strictEqual(owner.holds(), true);
+    const refused = lease(session([{ held: 0, schema: 's' }]).connection);
+    assert.throws(() => refused.acquire(), (/** @type {any} */ error) => error.code === 'JD2061'
+      && error.retryable === true && /another session owns schema "s"/.test(error.message));
+    const nowhere = lease(session([{ held: null, schema: null }]).connection);
+    assert.throws(() => nowhere.acquire(), (/** @type {any} */ error) => error.code === 'JD0003' && /no current schema/.test(error.message));
   });
 });
 

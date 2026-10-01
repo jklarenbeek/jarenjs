@@ -259,7 +259,8 @@ export function textKeyDecoding(connection) {
 
 /**
  * Prove one row's text keys against their bytes and answer the row without
- * the byte columns; a key that cannot round-trip is `refuse(column)`.
+ * the byte columns; a key that cannot round-trip is `refuse(column)`, and a
+ * SQL NULL (a nullable order column's) has nothing to prove.
  * @param {any} row
  * @param {{ columns: any[], aliases: string[] }} plan
  * @param {{ decoder: TextDecoder, keepsLeadingBom: boolean }} decoding
@@ -269,6 +270,9 @@ export function textKeyDecoding(connection) {
 export function checkTextKeys(row, plan, decoding, refuse) {
   for (let index = 0; index < plan.columns.length; index++) {
     const column = plan.columns[index];
+    // a SQL NULL carries no text to lose: a nullable order column's null
+    // orders and seeks by its null branch, never by a decoded value
+    if (row[column.physical ?? column.name] === null && row[plan.aliases[index]] === null) continue;
     let decoded;
     try { decoded = decoding.decoder.decode(row[plan.aliases[index]]); }
     catch { /* the refusal below covers a replacement decoding too */ }

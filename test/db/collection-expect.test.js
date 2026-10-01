@@ -96,6 +96,59 @@ describe('expect: a precondition on the stored document', () => {
     finally { await store.close(); }
   });
 
+  it('an expected value compares as the JSON it is written as; one no JSON document holds is JD0013', async () => {
+    const store = await openStore(MODEL, { driver: nodeDriver() });
+    try {
+      const docs = store.collection('docs');
+      const profile = { name: 'ann', nickname: undefined };
+      const updatedAt = new Date('2026-10-01T00:00:00.000Z');
+      await docs.put({ id: 'a', revision: 1, profile, updatedAt, n: Number.NaN });
+      // the stored document is the JSON of what was put: the same values expected hold
+      for (const expect of [{ path: '/profile', value: profile }, { path: '/updatedAt', value: updatedAt },
+        { path: '/n', value: Number.NaN }, { path: '', value: { id: 'a', revision: 1, profile, updatedAt, n: Number.NaN } }]) {
+        assert.deepStrictEqual(await docs.patch('a', [], { expect }), await docs.get('a'), JSON.stringify(expect));
+      }
+      assert.strictEqual(await docs.delete('a', { expect: { path: '/profile', value: profile } }), true);
+      await docs.put({ id: 'b', big: 1 });
+      for (const value of [1n, () => 1, Symbol('x')]) {
+        await assert.rejects(async () => docs.patch('b', [], { expect: { path: '/big', value } }),
+          (/** @type {any} */ error) => error.code === 'JD0013' && /which no JSON document holds/.test(error.message), typeof value);
+      }
+      const cycle = /** @type {any} */ ({});
+      cycle.self = cycle;
+      await assert.rejects(async () => docs.put({ id: 'b' }, undefined, { expect: { path: '/big', value: cycle } }), coded('JD0013'));
+      assert.deepStrictEqual(await docs.get('b'), { id: 'b', big: 1 }, 'nothing ran');
+    }
+    finally { await store.close(); }
+  });
+
+  it('on a capturing store the options are refused before its capture transaction begins', async () => {
+    for (const mode of /** @type {const} */ (['journal', 'session'])) {
+      const { dbPath, cleanup } = tempDbPath();
+      const store = await openStore(MODEL, { driver: nodeDriver(), path: dbPath, busyTimeout: 2_000, capture: { mode, log: true } });
+      const other = new DatabaseSync(dbPath);
+      try {
+        await store.collection('docs').put({ id: 'a', revision: 1 });
+        // another connection holds the write lock the capture transaction would wait for
+        other.exec('BEGIN IMMEDIATE');
+        const started = Date.now();
+        for (const call of [
+          () => store.collection('docs').put({ id: 'a' }, undefined, /** @type {any} */ ({ expct: {} })),
+          () => store.collection('docs').patch('a', [], /** @type {any} */ ({ expct: {} })),
+          () => store.collection('docs').insert({ id: 'b' }, /** @type {any} */ ({ expect: { path: '/x', value: 1 } })),
+          () => store.collection('docs').delete('a', /** @type {any} */ ({ expect: [] })),
+        ]) await assert.rejects(async () => call(), coded('JD0013'), mode);
+        assert.ok(Date.now() - started < 1_000, `${mode}: refused at once, not after a busy wait`);
+        other.exec('ROLLBACK');
+      }
+      finally {
+        other.close();
+        await store.close();
+        cleanup();
+      }
+    }
+  });
+
   it('the synchronous twin and a transaction take the same options', async () => {
     const store = await openStore(MODEL, { driver: nodeDriver() });
     try {
@@ -197,7 +250,10 @@ describe('a patch that changes nothing writes nothing', () => {
         const changes = async () => store.transaction(async (tx) =>
           Number((await tx.sql.prepare('SELECT total_changes() AS n', { access: 'read' }).get())?.n));
         for (const ops of [[], [{ op: 'test', path: '/n', value: 1 }], [{ op: 'replace', path: '/n', value: 1 }],
-          [{ op: 'remove', path: '/tags/0' }, { op: 'add', path: '/tags/-', value: 'x' }]]) {
+          [{ op: 'remove', path: '/tags/0' }, { op: 'add', path: '/tags/-', value: 'x' }],
+          // a value counts as the JSON it is written as: an undefined member is no member
+          [{ op: 'replace', path: '', value: { id: 'a', n: 1, tags: ['x'], note: undefined } }],
+          [{ op: 'test', path: '', value: { id: 'a', n: 1, tags: ['x'], note: undefined } }]]) {
           const [v0, c0] = [version(), await changes()];
           assert.deepStrictEqual(await docs.patch('a', ops), { id: 'a', n: 1, tags: ['x'] });
           assert.strictEqual(await changes(), c0, `${JSON.stringify(ops)} issued a write`);

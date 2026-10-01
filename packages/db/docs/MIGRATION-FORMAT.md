@@ -86,10 +86,15 @@ shape change is a **transformation of values**, not a table rebuild.
   `scope.collection(name)` answers the transaction's documents: `all()`,
   and `update(fn)`, whose `fn(doc)` answers the replacement document or
   `undefined` to keep it — an entity row whole, as a `jslt` step sees it,
-  under the step's `model` when it carries one. `scope.relational` is the
+  under the step's `model` when it carries one — and whose replacement is
+  checked as a stylesheet's is: a non-document refuses the step
+  (`JD0023`), a key member it leaves out is kept, and one it rewrites
+  refuses the step. `scope.relational` is the
   relational engine (MODEL-FORMAT §5.3) bound to the transaction, whose
   writes are savepoints of it. Nothing the scope holds outlives the step
-  (`JD0025`), and a host must perform no effect outside it: a crash rolls
+  (`JD0025`): the step's end returns every cursor the scope opened, so no
+  statement stays open past it, and a later pull refuses `JD0025` — and a
+  host must perform no effect outside it: a crash rolls
   back only what the transaction holds. On a synchronous connection `run`
   is synchronous — a promise there is `JD0025`, because it would settle
   after the savepoint closed — and on an asynchronous one it may be
@@ -97,7 +102,10 @@ shape change is a **transformation of values**, not a table rebuild.
   them: a changed version is a different migration. A missing host, a host
   of another version, or a host step in a documents-only run (§6.1) is
   `JD0025` before anything runs; a host that throws is `JD0023` naming the
-  step, with its error as `cause` and its `class`/`retryable` kept. Every
+  step, with its error as `cause` and its `class`/`retryable` kept — except
+  what the scope raised itself, which passes as it is: a cancellation its
+  walk met (`JD2080`, `JD2075`), a scope used after its step (`JD0025`), a
+  replacement refused (`JD0023`). Every
   host step the run executes needs its host: the pending ones, and — since
   the shadow replays the whole chain from the baseline — every one on the
   shadow, so a host whose version moved on keeps the old version registered
@@ -255,10 +263,14 @@ so the previous shape lives beside the code, where a diff can read it.
   commits whole or not at all, and a repair link after a narrowing lands
   before the check. A narrowing's repair can also be planned up front:
   `planModelMigration(from, to, { transform })` puts the supplied `jslt`
-  or `host` step where the draft would be — one step or a list in place
-  of every draft (at the first), or a map of them by collection or entity
-  name — and reports the names as `report.transformed`, so the plan
-  applies unattended; a transform no draft asks for is a `TypeError`.
+  or `host` step where the drafts would be — one step or a list in place
+  of every draft, run once after every structural step of the link (an
+  `ADD COLUMN` a later entity plans included) and followed by the
+  derived-column backfills those drafts would have run, or a map of them
+  by collection or entity name, each in its own draft's place — and
+  reports the names as `report.transformed`, so the plan applies
+  unattended; a transform no draft asks for is a `TypeError`, on a pair of
+  column-layout models too.
   A widening needs no transform, and passes this check by fact. For an entity
   the validated document is the whole row — columns merged back under
   the target mapping — so a pure widening of a column-mapped member
@@ -423,7 +435,13 @@ The run options include:
   off, so a cascade the schema declares used to leave an orphan under Bun
   that Node removed), and every link ends with the database's foreign-key
   check before its history row: a reference a step broke refuses the link
-  `JD0023` (`class: 'constraint'`), listing the violations. A borrowed
+  `JD0023` (`class: 'constraint'`), listing the violations. The check reads
+  the whole database, so the link runs it twice — before its first step
+  and after its last, in its own transaction — and refuses only the
+  violations it introduced: an orphan an earlier, unenforced write left is
+  not the link's doing (a violation is the same one when its table, rowid,
+  parent and constraint are; a rebuild that renumbers a table's rows counts
+  that table's as new). A borrowed
   connection keeps its caller's setting, and the check still refuses the
   orphan an unenforced delete would leave.
 - **Every failure is classified** (MODEL-FORMAT §7): a step's is `JD0023`
@@ -431,7 +449,9 @@ The run options include:
   driver's error as `cause` — a transform that meets a UNIQUE index is a
   `constraint`, not a raw driver error, and a held writer at the begin is
   `busy`, retryable, as opening a store answers it. A refusal that owns a
-  code keeps it.
+  code keeps it. `migrationStatus` reads the history the same way: a file
+  it cannot open, or one that is not a database, is `JD0023` with the
+  driver's class (`cantopen`, `corrupt`).
 - A run is cancellable: `migrate(target, migrations, { signal,
   deadline })` checks both BETWEEN migrations, between steps and
   between the batches of a data step — never inside a statement, which
@@ -521,7 +541,8 @@ an assertion, the same refusals in the same words.
   one batch is held, so a collection larger than memory still migrates.
 
 Both refuse, BEFORE asking for the first document, any step this host
-cannot honour (`JD0023`):
+cannot honour (`JD0023`, classified as a failing step's is: `class:
+'error'`, not retryable — as is a malformed migration document):
 
 | Step kind | Without a database |
 |---|---|
@@ -634,8 +655,9 @@ name, copy (the planner renders the column mapping: surviving columns
 verbatim, new ones from the document, dropped ones already folded),
 `DROP` the old table, `RENAME` the new one into place, recreate every
 index from the target model, then **`PRAGMA foreign_key_check` inside
-the transaction** — a broken reference fails the migration rather
-than shipping.
+the transaction** — a reference the rebuild broke fails the migration
+rather than shipping (compared against the same check taken before it
+began, as a link's is, §6).
 
 Two deviations from the cited twelve steps, recorded: (1) the
 procedure's `PRAGMA foreign_keys=OFF/ON` bracket is honoured

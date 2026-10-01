@@ -37,7 +37,7 @@ is the index of those guides, and it is how a reader reaches any of them.
 | Document | Lines | What it writes, and when to open it |
 |---|---:|---|
 | [LINQ-FORMAT.md](LINQ-FORMAT.md) | 949 | this file, the binder and the family's **normative reference**: what a pen is, the rules all of them keep, the shared `JL01xx` table, and the cross-pen views derived from the guides it indexes. **Read it when** you want a rule that is true of every pen, an index of the documents, or one place to look up a method without knowing which pen owns it |
-| [QUERY-PEN.md](QUERY-PEN.md) | 1,819 | the chain, `.` — query documents (`jaren-query`) and the provider seam. **Read it when** you are querying data, or implementing a provider that answers a query document |
+| [QUERY-PEN.md](QUERY-PEN.md) | 1,823 | the chain, `.` — query documents (`jaren-query`) and the provider seam. **Read it when** you are querying data, or implementing a provider that answers a query document |
 | [SCHEMA-PEN.md](SCHEMA-PEN.md) | 1,250 | `./schema` — JSON Schema 2020-12: the structural keywords, the constraints and the annotations, each with a method of its own, plus `$query`, `$defs`/`$ref` recursion and the normalizer's per-field predicates. **Read it when** you are describing the shape of data — for validation, for a form, or as the base of an entity |
 | [MODEL-PEN.md](MODEL-PEN.md) | 1,117 | `./model` — the `x-entity` vocabulary on JSON Schema, and the `$model` 0.1 document `openStore` accepts unchanged. **Read it when** you are declaring a store's entities, their keys and their relations |
 | [JSLT-PEN.md](JSLT-PEN.md) | 963 | `./jslt` — `$jslt` 0.1 stylesheets: the envelope and its rules, whose bodies are captured over the matched value. **Read it when** you are transforming one document into another |
@@ -50,7 +50,7 @@ is the index of those guides, and it is how a reader reaches any of them.
 | [JTLT-PEN.md](JTLT-PEN.md) | 83 | `./jtlt` — text templates with JSLT dispatch and query expressions. **Read it when** you want to author Markdown, XML or source text as portable JSON. |
 | [PROJECT-PEN.md](PROJECT-PEN.md) | 81 | `./project` — Studio projects with named, typed files. **Read it when** you want a portable editor workspace containing documents written by several pens. |
 | [CHARTS-PEN.md](CHARTS-PEN.md) | 94 | `./charts` — chart-definition documents for every chart kind. **Read it when** you want typed chart data and presentation options that `compileChart` consumes. |
-| [DB-CLIENT.md](DB-CLIENT.md) | 1,143 | `./db` — the client: the store's typed front door, not a pen, and the package's one runtime edge. **Read it when** you are reading or writing rows: `load`, `include`, `link`/`unlink`, `live` |
+| [DB-CLIENT.md](DB-CLIENT.md) | 1,144 | `./db` — the client: the store's typed front door, not a pen, and the package's one runtime edge. **Read it when** you are reading or writing rows: `load`, `include`, `link`/`unlink`, `live` |
 | [FORMULA-PEN.md](FORMULA-PEN.md) | 41 | `./formula` — author versioned saved JSON Query profiles without executing them. |
 <!--/fact-->
 
@@ -205,22 +205,22 @@ and the bundle is the byte count the tree-shaking probe builds.
 | Document | Subpath | Lines | Mapping rows | Worked examples | Refusals | Bundle |
 |---|---|---:|---:|---:|---:|---:|
 | [LINQ-FORMAT.md](LINQ-FORMAT.md) | — | 949 | — | — | — | — |
-| [QUERY-PEN.md](QUERY-PEN.md) | `.` | 1,819 | 34 | 8 | 16 | 176,016 B |
-| [SCHEMA-PEN.md](SCHEMA-PEN.md) | `./schema` | 1,250 | 82 | 10 | 4 | 35,865 B |
-| [MODEL-PEN.md](MODEL-PEN.md) | `./model` | 1,117 | 30 | 6 | 3 | 45,209 B |
-| [JSLT-PEN.md](JSLT-PEN.md) | `./jslt` | 963 | 17 | 8 | 3 | 18,837 B |
-| [MIGRATION-PEN.md](MIGRATION-PEN.md) | `./migration` | 810 | 13 | 5 | 4 | 24,219 B |
-| [CONTRACT-PEN.md](CONTRACT-PEN.md) | `./contract` | 1,221 | 38 | 6 | 3 | 48,089 B |
-| [FLOW-PEN.md](FLOW-PEN.md) | `./flow` | 1,041 | 16 | 7 | 3 | 18,891 B |
-| [APP-PEN.md](APP-PEN.md) | `./app` | 1,163 | 22 | 7 | 3 | 50,154 B |
-| [FORMS-PEN.md](FORMS-PEN.md) | `./forms` | 940 | 18 | 6 | 3 | 40,021 B |
-| [MESSAGES-PEN.md](MESSAGES-PEN.md) | `./messages` | 105 | 9 | 2 | 1 | 17,377 B |
-| [JTLT-PEN.md](JTLT-PEN.md) | `./jtlt` | 83 | 13 | 1 | 2 | 15,706 B |
-| [PROJECT-PEN.md](PROJECT-PEN.md) | `./project` | 81 | 9 | 1 | 1 | 14,206 B |
-| [CHARTS-PEN.md](CHARTS-PEN.md) | `./charts` | 94 | 21 | 1 | 1 | 15,995 B |
-| [DB-CLIENT.md](DB-CLIENT.md) | `./db` | 1,143 | 45 | 4 | 2 | 757,474 B |
-| [FORMULA-PEN.md](FORMULA-PEN.md) | `./formula` | 41 | 2 | — | — | 15,263 B |
-| **16 documents** | | **12,820** | **369** | **72** | | |
+| [QUERY-PEN.md](QUERY-PEN.md) | `.` | 1,823 | 34 | 8 | 16 | 177,904 B |
+| [SCHEMA-PEN.md](SCHEMA-PEN.md) | `./schema` | 1,250 | 82 | 10 | 4 | 36,808 B |
+| [MODEL-PEN.md](MODEL-PEN.md) | `./model` | 1,117 | 30 | 6 | 3 | 46,152 B |
+| [JSLT-PEN.md](JSLT-PEN.md) | `./jslt` | 963 | 17 | 8 | 3 | 19,781 B |
+| [MIGRATION-PEN.md](MIGRATION-PEN.md) | `./migration` | 810 | 13 | 5 | 4 | 25,601 B |
+| [CONTRACT-PEN.md](CONTRACT-PEN.md) | `./contract` | 1,221 | 38 | 6 | 3 | 49,032 B |
+| [FLOW-PEN.md](FLOW-PEN.md) | `./flow` | 1,041 | 16 | 7 | 3 | 19,836 B |
+| [APP-PEN.md](APP-PEN.md) | `./app` | 1,163 | 22 | 7 | 3 | 51,100 B |
+| [FORMS-PEN.md](FORMS-PEN.md) | `./forms` | 940 | 18 | 6 | 3 | 40,964 B |
+| [MESSAGES-PEN.md](MESSAGES-PEN.md) | `./messages` | 105 | 9 | 2 | 1 | 18,321 B |
+| [JTLT-PEN.md](JTLT-PEN.md) | `./jtlt` | 83 | 13 | 1 | 2 | 16,650 B |
+| [PROJECT-PEN.md](PROJECT-PEN.md) | `./project` | 81 | 9 | 1 | 1 | 15,150 B |
+| [CHARTS-PEN.md](CHARTS-PEN.md) | `./charts` | 94 | 21 | 1 | 1 | 16,939 B |
+| [DB-CLIENT.md](DB-CLIENT.md) | `./db` | 1,144 | 45 | 4 | 2 | 778,930 B |
+| [FORMULA-PEN.md](FORMULA-PEN.md) | `./formula` | 41 | 2 | — | — | 16,207 B |
+| **16 documents** | | **12,825** | **369** | **72** | | |
 <!--/fact-->
 
 A pen whose mapping rows are far below its worked examples is a pen
@@ -263,21 +263,21 @@ it and each document publishes it. The rounded column is what
 <!--fact:pens.cost-->
 | Subpath | Document | Bundle | Rounded |
 |---|---|---:|---:|
-| `@jarenjs/linq` | [QUERY-PEN.md](QUERY-PEN.md) | 176,016 B | 176 kB |
-| `@jarenjs/linq/schema` | [SCHEMA-PEN.md](SCHEMA-PEN.md) | 35,865 B | 36 kB |
-| `@jarenjs/linq/model` | [MODEL-PEN.md](MODEL-PEN.md) | 45,209 B | 45 kB |
-| `@jarenjs/linq/jslt` | [JSLT-PEN.md](JSLT-PEN.md) | 18,837 B | 19 kB |
-| `@jarenjs/linq/migration` | [MIGRATION-PEN.md](MIGRATION-PEN.md) | 24,219 B | 24 kB |
-| `@jarenjs/linq/contract` | [CONTRACT-PEN.md](CONTRACT-PEN.md) | 48,089 B | 48 kB |
-| `@jarenjs/linq/flow` | [FLOW-PEN.md](FLOW-PEN.md) | 18,891 B | 19 kB |
-| `@jarenjs/linq/app` | [APP-PEN.md](APP-PEN.md) | 50,154 B | 50 kB |
-| `@jarenjs/linq/forms` | [FORMS-PEN.md](FORMS-PEN.md) | 40,021 B | 40 kB |
-| `@jarenjs/linq/messages` | [MESSAGES-PEN.md](MESSAGES-PEN.md) | 17,377 B | 17 kB |
-| `@jarenjs/linq/jtlt` | [JTLT-PEN.md](JTLT-PEN.md) | 15,706 B | 16 kB |
-| `@jarenjs/linq/project` | [PROJECT-PEN.md](PROJECT-PEN.md) | 14,206 B | 14 kB |
-| `@jarenjs/linq/charts` | [CHARTS-PEN.md](CHARTS-PEN.md) | 15,995 B | 16 kB |
-| `@jarenjs/linq/db` | [DB-CLIENT.md](DB-CLIENT.md) | 757,474 B | 757 kB |
-| `@jarenjs/linq/formula` | [FORMULA-PEN.md](FORMULA-PEN.md) | 15,263 B | 15 kB |
+| `@jarenjs/linq` | [QUERY-PEN.md](QUERY-PEN.md) | 177,904 B | 178 kB |
+| `@jarenjs/linq/schema` | [SCHEMA-PEN.md](SCHEMA-PEN.md) | 36,808 B | 37 kB |
+| `@jarenjs/linq/model` | [MODEL-PEN.md](MODEL-PEN.md) | 46,152 B | 46 kB |
+| `@jarenjs/linq/jslt` | [JSLT-PEN.md](JSLT-PEN.md) | 19,781 B | 20 kB |
+| `@jarenjs/linq/migration` | [MIGRATION-PEN.md](MIGRATION-PEN.md) | 25,601 B | 26 kB |
+| `@jarenjs/linq/contract` | [CONTRACT-PEN.md](CONTRACT-PEN.md) | 49,032 B | 49 kB |
+| `@jarenjs/linq/flow` | [FLOW-PEN.md](FLOW-PEN.md) | 19,836 B | 20 kB |
+| `@jarenjs/linq/app` | [APP-PEN.md](APP-PEN.md) | 51,100 B | 51 kB |
+| `@jarenjs/linq/forms` | [FORMS-PEN.md](FORMS-PEN.md) | 40,964 B | 41 kB |
+| `@jarenjs/linq/messages` | [MESSAGES-PEN.md](MESSAGES-PEN.md) | 18,321 B | 18 kB |
+| `@jarenjs/linq/jtlt` | [JTLT-PEN.md](JTLT-PEN.md) | 16,650 B | 17 kB |
+| `@jarenjs/linq/project` | [PROJECT-PEN.md](PROJECT-PEN.md) | 15,150 B | 15 kB |
+| `@jarenjs/linq/charts` | [CHARTS-PEN.md](CHARTS-PEN.md) | 16,939 B | 17 kB |
+| `@jarenjs/linq/db` | [DB-CLIENT.md](DB-CLIENT.md) | 778,930 B | 779 kB |
+| `@jarenjs/linq/formula` | [FORMULA-PEN.md](FORMULA-PEN.md) | 16,207 B | 16 kB |
 <!--/fact-->
 
 Read these as prices, not as scores. `./db` is the largest by an order of
@@ -354,7 +354,7 @@ it says.
 | `OfType<S>` | `$valid` filter with a JSON Schema literal | native | `(schema)` → `Seq<S>`; needs `compileTypeTest` (`JL0003`) |
 | `Cast<S>` | `$assert` per item | native | `(schema)` → `Seq<S>`; needs `compileTypeTest` (`JL0003`) |
 | `Zip` | — no positional co-iteration in the grammar | unsupported (`JL0006`) | — |
-| expression methods | `eq ne lt le gt ge` → `$eq…$ge`; `in(values)` → `$eq` against `{ $seq: values }`, `in(path)` → `$eq` against `path[*]` (membership, never `eq(array)`); `and or not` (a chain extends one argument list); `add sub mul div idiv mod neg`; `startsWith endsWith contains matches upper lower length concat substring replace` → §8.7; `count sum avg min max` → §8.8 (aggregates as expressions, e.g. over a group); `exists isEmpty`; `at all get` | native | on `Expr<…>`, per the typed-surface order |
+| expression methods | `eq ne lt le gt ge` → `$eq…$ge`; `in(values)` → `$eq` against `{ $seq: values }`, `in(path)` → `$eq` against `path[*]`, or a path that already fans as it stands (membership, never `eq(array)`); `and or not` (a chain extends one argument list); `add sub mul div idiv mod neg`; `startsWith endsWith contains matches upper lower length concat substring replace` → §8.7; `count sum avg min max` → §8.8 (aggregates as expressions, e.g. over a group); `exists isEmpty`; `at all get` | native | on `Expr<…>`, per the typed-surface order |
 | date family (§8.13) | the whole family, one method per operator. Components `year month day hours minutes seconds offset week weekYear quarter weekday`; instants `epoch datetime`; predicates `isDate isTime isDatetime isDuration`; arithmetic `startOf(unit) endOf(unit) dateAdd(duration \| amount, unit?) dateSub(…) dateDiff(to, unit) dateFormat(pattern)`. `dateAdd`/`dateSub`/`dateFormat` carry the prefix because `add`, `sub` and `format` are taken or ambiguous on this surface — the same reason §8.14 spells `geoArea`. There is no `now()`: §8.13 has no clock, and a fluent surface does not get to add one | native | on `DateTimeExpr` (the `DateTime` brand) and on `UnknownExpr` |
 | series family (§8.16) | `overlaps(other)` → `$overlaps`; `timeBucket(every, origin?, context?)` → `$time-bucket`; `resample(spec)`, `rolling(spec)` and `asof(right, spec?)` → the three sequence operators. A **spec is a literal** and is embedded verbatim — it is read once when the query compiles, so a spec built from the row is `JL0005`, and every rule about what it may *say* stays in the compiler (`JQ0003`). Note that a member literally named `at` is read with `get('at')`: `at(index)` is path navigation on this surface | native | on `ArrayExpr`/fanned paths for the three sequence operators, on `Expr<…>` for the two scalar ones |
 | spatial family (§8.14) | `bbox geoArea geoLength centroid` → `$bbox $area $length $centroid`; `distance within bboxIntersects` → `$distance $within $bbox-intersects`; `geohash(precision?)` → `$geohash` (optional arity, like `substring`); `geoParse geoText geohashBounds geohashNeighbours` → the conversion family; `geoSimplify(tolerance)` → `$geo-simplify`. A plain JSON polygon embeds as a literal (`p.at.within(poly)`); `.params({ region })` makes it an external instead | native | on `Expr<…>`, per the typed-surface order |

@@ -127,6 +127,37 @@ export function classifyAssertion(query, options = {}) {
 }
 
 /**
+ * A transform's replacement for one document, checked as every data step
+ * checks it — a jslt stylesheet's and a host step's `update` alike: it is
+ * a document (an object, not an array), and the declared key members are
+ * the row's identity, not the document's to change — a replacement that
+ * leaves one out keeps it, one that rewrites it is refused, as a
+ * collection's key is.
+ * @param {any} next - the replacement
+ * @param {any} document - the document it replaces
+ * @param {string[]} keys - the key members a document of this table carries
+ * @param {any} identity - the host's name for the row, which a refusal quotes
+ * @param {(reason: string) => never} fail
+ * @returns {any} the replacement
+ */
+export function checkReplacement(next, document, keys, identity, fail) {
+  if (next === null || typeof next !== 'object' || Array.isArray(next))
+    fail(`the transform produced a non-document for row ${identity}`);
+  for (const key of keys) {
+    const present = Object.hasOwn(document, key);
+    const previous = present ? document[key] : undefined;
+    if (!Object.hasOwn(next, key) || next[key] === undefined) {
+      if (present) setObjectMember(next, key, previous);
+    }
+    else if (next[key] !== previous) {
+      fail(`the transform changed the key member '${key}' of row ${identity} — `
+        + `key changes are not supported in ${MIGRATION_VERSION}`);
+    }
+  }
+  return next;
+}
+
+/**
  * Compile one document step into the operation both hosts run.
  *
  * A `jslt` step answers `{ apply }`: one document in, its replacement
@@ -179,26 +210,7 @@ export function compileDocumentStep(step, index, context) {
        *   refusal quotes so the operator can find it
        * @returns {any} the replacement document
        */
-      apply: (document, identity) => {
-        const next = transform(document);
-        if (next === null || typeof next !== 'object' || Array.isArray(next))
-          fail(`the transform produced a non-document for row ${identity}`);
-        // the key is the row's identity, not the document's to change:
-        // a body that leaves it out keeps it, a body that rewrites it
-        // is refused, as a collection's key is
-        for (const key of keys) {
-          const present = Object.hasOwn(document, key);
-          const previous = present ? document[key] : undefined;
-          if (!Object.hasOwn(next, key) || next[key] === undefined) {
-            if (present) setObjectMember(next, key, previous);
-          }
-          else if (next[key] !== previous) {
-            fail(`the transform changed the key member '${key}' of row ${identity} — `
-              + `key changes are not supported in ${MIGRATION_VERSION}`);
-          }
-        }
-        return next;
-      },
+      apply: (document, identity) => checkReplacement(transform(document), document, keys, identity, fail),
     };
   }
 
@@ -289,6 +301,18 @@ const STEP_KINDS = new Set([...DOCUMENT_STEP_KINDS, ...PHYSICAL_STEP_KINDS, HOST
  * @param {any} migration
  */
 export function checkMigrationDocument(migration) {
+  try {
+    checkDocumentShape(migration);
+  }
+  catch (error) {
+    // a malformed document is refused as a failing step is: no rerun fixes it
+    if (/** @type {any} */ (error)?.code === 'JD0023') Object.assign(/** @type {any} */ (error), { class: 'error', retryable: false });
+    throw error;
+  }
+}
+
+/** The checks of {@link checkMigrationDocument}. @param {any} migration */
+function checkDocumentShape(migration) {
   if (migration === null || typeof migration !== 'object'
     || migration.$migration !== MIGRATION_VERSION
     || typeof migration.id !== 'string' || migration.id === ''

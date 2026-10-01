@@ -90,7 +90,7 @@ describe('explainMapping — the hybrid rule as data (every §9.3 row)', () => {
 
   it('a one-to-many relation is a foreign key on the target entity', () => {
     assert.deepStrictEqual(mapping.entities.Post.foreignKeys, [{
-      column: 'authorId', references: 'User', referencesKey: 'id',
+      column: 'authorId', references: 'User', referencesKey: 'id', referencesType: 'string',
       onDelete: 'cascade', unique: false,
     }]);
   });

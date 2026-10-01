@@ -40,8 +40,8 @@ define the options, refusal codes and resource owners.
 ## The writer lock and the lock family
 
 `store.transaction(fn, { mode: 'immediate' })` runs `BEGIN`, then takes the
-store's writer lock — `SELECT pg_catalog.pg_advisory_xact_lock(1246907984,
-pg_catalog.hashtext(current_schema()))` — and only then runs the body. Two
+store's writer lock — `SELECT pg_catalog.pg_advisory_xact_lock(1246907984, …)`
+keyed by the current schema's OID — and only then runs the body. Two
 immediate transactions on two Stores of one schema therefore run one after
 the other, and a read-then-write body cannot lose an update to the other:
 
@@ -70,7 +70,13 @@ operator raised it higher, and `tx.isolation` reports the level that ran.
 
 Every advisory lock the store takes is a class of one family (`0x4A524E__`,
 the first key) and is keyed by the session's current schema (the second
-key) — the store's own, once the driver has set its search path:
+key) — the store's own, once the driver has set its search path. The writer
+and owner locks key the schema by its OID (looked up by exact name, shifted
+into `int4`), which no two schemas share. The migration, capture and jobs
+locks key it by `pg_catalog.hashtext(current_schema())`, as stores of earlier
+releases do: two releases migrating one schema must meet on one lock, so those
+keys stay as they are, and a 32-bit hash two schema names can share makes two
+such schemas wait for each other there — a wait, never a wrong answer:
 
 | Class | Lock | Held for | Taken |
 |---|---|---|---|
@@ -80,14 +86,16 @@ key) — the store's own, once the driver has set its search path:
 | `1246907985` | owner | the store's session | by `openStore(model, { owner })`, until `close()` or the session ends |
 | `1246907990` | jobs | the transaction | by the job queue's catalog initialization |
 
-Two classes never contend, and two schemas never do. An immediate
+Two classes never contend, and two schemas never contend for the writer or
+the owner lock. An immediate
 transaction on a capturing Store takes the writer lock first and the
 capture lock right after it, as its capture scope opens; nothing takes
 them the other way round, so the two cannot deadlock. The owner lock is session-scoped: it is
 taken with `pg_try_advisory_lock` at open (a held lock refuses `JD2061`),
 and released explicitly at `close()` — before the driver restores the
 session's search path and returns it to its pool, which a session lock
-would otherwise outlive — or by the server when the session ends. An
+would otherwise outlive — or by the server when the session ends; a
+session whose release could not run is destroyed rather than pooled. An
 adopted Store takes it too: it needs no table.
 
 ## Select the backend at build time
@@ -235,10 +243,10 @@ retains earlier Bun memory-budget losses even when a later sample passes.
 
 | Existing SQLite adoption executable | Workload | RSS bytes | Frozen reference bytes | RSS disposition |
 |---|---|---:|---:|---|
-| bun-executable | catalog | 236105728 | 536870912 | within reference |
-| bun-executable | archive-stock | 978984960 | 1073741824 | within reference |
-| node-executable | catalog | 289456128 | 536870912 | within reference |
-| node-executable | archive-stock | 853475328 | 1073741824 | within reference |
+| bun-executable | catalog | 232976384 | 536870912 | within reference |
+| bun-executable | archive-stock | 1052753920 | 1073741824 | within reference |
+| node-executable | catalog | 294031360 | 536870912 | within reference |
+| node-executable | archive-stock | 849846272 | 1073741824 | within reference |
 
 These larger physical SQLite workloads are separate from the small build-selected managed application. Functional recovery success does not imply memory-budget success. Earlier samples remain in the resource history.
 

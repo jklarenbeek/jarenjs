@@ -93,8 +93,11 @@ describe('transaction quirks', () => {
     const store = await openStore(DOCS, { driver: nodeWorkerDriver() });
     try {
       let finishedAt = 0;
-      const started = performance.now();
       const error = await store.transaction(async (tx) => {
+        // the hold clock starts when the body does, so this one does too: a
+        // start taken before the call counts the begin, which a loaded host
+        // can stretch past the tolerance below
+        const started = performance.now();
         await tx.sql.prepare('WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c WHERE x < 2000000) SELECT count(*) AS n FROM c', { access: 'read' }).get([]);
         finishedAt = performance.now() - started;
       }, { holdTimeoutMs: 50 }).catch((/** @type {any} */ e) => e);

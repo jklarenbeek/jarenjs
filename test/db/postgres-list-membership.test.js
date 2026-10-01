@@ -25,7 +25,7 @@ const MODEL = {
   },
   entities: {
     Item: { schema: { type: 'object', properties: {
-      id: { type: 'string', ...key }, sku: { type: 'string', 'x-entity': { index: true } }, n: { type: 'integer' } } } },
+      id: { type: 'string', ...key }, sku: { type: 'string', 'x-entity': { index: true } }, n: { type: 'integer', 'x-entity': { index: true } } } } },
   },
 };
 const ROWS = 2000;
@@ -123,6 +123,62 @@ describe('PostgreSQL: membership over thousands of values', { skip: !url && 'JAR
     const expected = IDS.slice(0, 150).map((id) => `i${id.slice(1)}`);
     assert.deepEqual(sorted(await store.collection('items').execute(short)), sorted(expected));
     assert.equal((await store.collection('items').explain(short)).mode, 'native');
+  });
+
+  it('a number list compares as numeric, the type a number column is declared as, so the column index seeks it', async () => {
+    const query = overItem({ $eq: ['$it.n', '$ids[*]'] });
+    assert.deepEqual(await store.execute(query, { externals: { ids: [1, 2.5, 1999] } }), ['i1', 'i1999']);
+    const plan = await store.explain(query, { externals: { ids: [1, 2] } });
+    // costed with sequential scans off: the index is usable, not merely unchosen
+    await admin.query(`SET search_path TO "${schema}"`);
+    await admin.query('SET enable_seqscan = off');
+    try {
+      const rows = (await admin.query({ text: `EXPLAIN ${plan.sql}`, values: [JSON.stringify([1, 2])] })).rows;
+      assert.match(rows.map((/** @type {any} */ row) => row['QUERY PLAN']).join('\n'), /Index Cond: \(\(n = .*::numeric\)/);
+    }
+    finally {
+      await admin.query('RESET enable_seqscan');
+      await admin.query('RESET search_path');
+    }
+  });
+
+  it('a profile predicate naming a bound list binds in the native statement and in the residual\'s root fetch', async () => {
+    const profile = { predicates: { Item: { $eq: ['$it.sku', '$allowed[*]'] } } };
+    const native = overItem({ $lt: ['$it.n', 10] });
+    const residual = overItem({ $eq: [{ $count: '$it.id' }, 1] });
+    assert.equal((await store.explain(native, { profile, externals: { allowed: ['s1', 's3'] } })).mode, 'native');
+    assert.deepEqual(await store.execute(native, { profile, externals: { allowed: ['s1', 's3', 's11'] } }), ['i1', 'i3']);
+    assert.deepEqual(await store.execute(residual, { profile, externals: { allowed: ['s1', 's3'] } }), ['i1', 'i3']);
+    await assert.rejects(async () => store.execute(residual, { profile, externals: { allowed: ['s1', null] } }),
+      (/** @type {any} */ error) => error.code === 'JD0011' && /cannot bind '\$allowed' for this call/.test(error.message));
+  });
+
+  it('an inferred integer foreign key compares as the numeric its key is declared as', async () => {
+    const fkSchema = `${schema}_fk`;
+    await admin.query(`CREATE SCHEMA "${fkSchema}"`);
+    const fkPool = new pg.Pool({ connectionString: url, max: 1 });
+    /** @type {any} */
+    let fkStore;
+    try {
+      fkStore = await openStore({ $model: '0.1', entities: {
+        User: { schema: { type: 'object', required: ['uid'], properties: { uid: { type: 'integer', ...key },
+          posts: { 'x-entity': { relation: { to: 'Post', many: true, via: 'authorId', onDelete: 'cascade' } } } } } },
+        Post: { schema: { type: 'object', required: ['pid'], properties: { pid: { type: 'integer', ...key } } } },
+      } }, { driver: postgresDriver(fkPool, { schema: fkSchema }) });
+      await fkStore.entity('User').create({ uid: 1 });
+      await fkStore.entity('Post').create({ pid: 10, authorId: 1 });
+      await fkStore.entity('Post').create({ pid: 11 });
+      for (const predicate of [{ $eq: ['$p.authorId', 1] }, { $eq: ['$p.authorId', { $seq: [1, 2] }] }, { $eq: ['$p.authorId', '$ids[*]'] }]) {
+        const query = { $for: { p: '$.Post[*]' }, $where: predicate, $return: '$p.pid' };
+        assert.deepEqual(await fkStore.execute(query, { externals: { ids: [1] } }), 10, JSON.stringify(predicate));
+        assert.equal((await fkStore.explain(query, { externals: { ids: [1] } })).mode, 'native');
+      }
+    }
+    finally {
+      await fkStore?.close().catch(() => {});
+      await fkPool.end().catch(() => {});
+      await admin.query(`DROP SCHEMA IF EXISTS "${fkSchema}" CASCADE`);
+    }
   });
 
   it('a bound list holding a null or a boolean runs in the engine; numbers and strings keep their kinds', async () => {

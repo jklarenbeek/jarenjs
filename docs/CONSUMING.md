@@ -155,21 +155,21 @@ the table and stale in the paragraph that cites it:
 
 | Subpath | Bundle | What rides along |
 |---|---:|---|
-| `.` | <!--fact:bundle.chain.kb-->176<!--/fact--> kB | the query engine — a chain's document has to run somewhere |
-| `./schema` | <!--fact:bundle.schema.kb-->36<!--/fact--> kB | the builders and the recording proxy `check()` captures through |
-| `./model` | <!--fact:bundle.model.kb-->45<!--/fact--> kB | the schema pen it subclasses |
-| `./jslt` | <!--fact:bundle.jslt.kb-->19<!--/fact--> kB | the body capture; of the schema pen, only the builder brand |
-| `./migration` | <!--fact:bundle.migration.kb-->24<!--/fact--> kB | the canonicalizer and hash a shape identity needs |
-| `./contract` | <!--fact:bundle.contract.kb-->48<!--/fact--> kB | the schema pen (a contract's inputs and outputs are schemas) |
-| `./flow` | <!--fact:bundle.flow.kb-->19<!--/fact--> kB | the capture; of the schema pen, only the brand |
-| `./app` | <!--fact:bundle.app.kb-->50<!--/fact--> kB | the schema pen and the JSLT pen (state, and views) |
-| `./forms` | <!--fact:bundle.forms.kb-->40<!--/fact--> kB | the schema pen it subclasses |
-| `./formula` | <!--fact:bundle.formula.kb-->15<!--/fact--> kB | saved Query profiles; no evaluator |
-| `./messages` | <!--fact:bundle.messages.kb-->17<!--/fact--> kB | message templates; no locale packs |
-| `./jtlt` | <!--fact:bundle.jtlt.kb-->16<!--/fact--> kB | text template capture; no renderer |
-| `./project` | <!--fact:bundle.project.kb-->14<!--/fact--> kB | project files; no Studio engine |
-| `./charts` | <!--fact:bundle.charts.kb-->16<!--/fact--> kB | chart definitions; no chart engine |
-| `./db` | <!--fact:bundle.db.kb-->757<!--/fact--> kB | the store, the validator and the formats, by construction |
+| `.` | <!--fact:bundle.chain.kb-->178<!--/fact--> kB | the query engine — a chain's document has to run somewhere |
+| `./schema` | <!--fact:bundle.schema.kb-->37<!--/fact--> kB | the builders and the recording proxy `check()` captures through |
+| `./model` | <!--fact:bundle.model.kb-->46<!--/fact--> kB | the schema pen it subclasses |
+| `./jslt` | <!--fact:bundle.jslt.kb-->20<!--/fact--> kB | the body capture; of the schema pen, only the builder brand |
+| `./migration` | <!--fact:bundle.migration.kb-->26<!--/fact--> kB | the canonicalizer and hash a shape identity needs |
+| `./contract` | <!--fact:bundle.contract.kb-->49<!--/fact--> kB | the schema pen (a contract's inputs and outputs are schemas) |
+| `./flow` | <!--fact:bundle.flow.kb-->20<!--/fact--> kB | the capture; of the schema pen, only the brand |
+| `./app` | <!--fact:bundle.app.kb-->51<!--/fact--> kB | the schema pen and the JSLT pen (state, and views) |
+| `./forms` | <!--fact:bundle.forms.kb-->41<!--/fact--> kB | the schema pen it subclasses |
+| `./formula` | <!--fact:bundle.formula.kb-->16<!--/fact--> kB | saved Query profiles; no evaluator |
+| `./messages` | <!--fact:bundle.messages.kb-->18<!--/fact--> kB | message templates; no locale packs |
+| `./jtlt` | <!--fact:bundle.jtlt.kb-->17<!--/fact--> kB | text template capture; no renderer |
+| `./project` | <!--fact:bundle.project.kb-->15<!--/fact--> kB | project files; no Studio engine |
+| `./charts` | <!--fact:bundle.charts.kb-->17<!--/fact--> kB | chart definitions; no chart engine |
+| `./db` | <!--fact:bundle.db.kb-->779<!--/fact--> kB | the store, the validator and the formats, by construction |
 
 Read the last row as the honest one: the front door costs what the store
 costs, because it *is* the store. The tree-shaking gate holds both

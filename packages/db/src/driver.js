@@ -510,9 +510,15 @@ export function finishConnection(raw, dialect, synchronous, capabilities, queueT
    * @param {() => any} work
    * @param {string} what - what is waiting, for the timeout message
    * @param {AbortSignal} [signal] - abandons the wait when it aborts
+   * @param {boolean} [first] - take the next turn rather than the last: the
+   *   store's own upkeep (an owner lease renewal) waits for the holder
+   *   only, never behind every caller queued after it
+   * @param {boolean} [unbounded] - wait without `queueTimeout`, for as long
+   *   as the holder holds: only for the store's own upkeep, which its
+   *   `signal` takes off the queue when the store closes
    * @returns {any} value-or-promise
    */
-  const whenFree = (work, what, signal) => {
+  const whenFree = (work, what, signal, first = false, unbounded = false) => {
     if (signal?.aborted === true) return Promise.reject(abortReason(signal));
     if (!owned) return work();
     if (waiting.length >= (raw.queueCapacity ?? Infinity))
@@ -529,7 +535,7 @@ export function finishConnection(raw, dialect, synchronous, capabilities, queueT
         signal?.removeEventListener('abort', cancelled);
         reject(error);
       };
-      const timer = setTimeout(() => abandon(new DbCompileError('JD0012',
+      const timer = unbounded ? undefined : setTimeout(() => abandon(new DbCompileError('JD0012',
         `${what} waited ${queueTimeout}ms for the open transaction to settle. `
         + 'A transaction owns its connection until it commits; work that belongs '
         + 'INSIDE it must go through the store or client the callback received '
@@ -557,7 +563,8 @@ export function finishConnection(raw, dialect, synchronous, capabilities, queueT
         }
         toPromise(out).then(resolve, reject);
       };
-      waiting.push(run);
+      if (first) waiting.unshift(run);
+      else waiting.push(run);
     });
   };
 
@@ -575,8 +582,10 @@ export function finishConnection(raw, dialect, synchronous, capabilities, queueT
    * @param {(scope: any) => any} fn
    * @param {string} [what] - what is waiting, for the timeout message
    * @param {AbortSignal} [signal]
+   * @param {boolean} [first] - take the next turn (see `whenFree`)
+   * @param {boolean} [unbounded] - wait without `queueTimeout` (see `whenFree`)
    */
-  const exclusively = (fn, what, signal) => {
+  const exclusively = (fn, what, signal, first = false, unbounded = false) => {
     requireOpen();
     // a synchronous extent inside an owning callback cannot interleave
     // with anything, so there is nothing to wait for
@@ -604,7 +613,7 @@ export function finishConnection(raw, dialect, synchronous, capabilities, queueT
       return out.then(
         (value) => { end(); return value; },
         (error) => { end(); throw error; });
-    }, what ?? 'a store-level call', signal);
+    }, what ?? 'a store-level call', signal, first, unbounded);
   };
 
   /**
@@ -714,7 +723,10 @@ export function finishConnection(raw, dialect, synchronous, capabilities, queueT
       try {
         out = settleTransaction(() => (lock === undefined ? callBody(fn, life)
           : chain(raw.exec(lock), () => callBody(fn, life))),
-        () => raw.exec(dialect.tx.commit), rollbackUnlessClosed(() => raw.exec(dialect.tx.rollback)));
+        // a connection closed under the body took its work with it: the
+        // commit refuses by name (JD2063) rather than the binding's error
+        () => { requireOpen(); return raw.exec(dialect.tx.commit); },
+        rollbackUnlessClosed(() => raw.exec(dialect.tx.rollback)));
       }
       catch (error) {
         restore(undefined);
@@ -746,7 +758,7 @@ export function finishConnection(raw, dialect, synchronous, capabilities, queueT
       let out;
       try {
         out = settleTransaction(() => callBody(fn, life),
-          () => { requireLive(life); return releaseCheckpoint(checkpoint); },
+          () => { requireOpen(); requireLive(life); return releaseCheckpoint(checkpoint); },
           rollbackUnlessClosed(() => (life.alive
             ? chain(rollbackToCheckpoint(checkpoint), () => releaseCheckpoint(checkpoint))
             : undefined)));
@@ -893,8 +905,10 @@ export function finishConnection(raw, dialect, synchronous, capabilities, queueT
      * cannot fall inside a transaction it is not part of. */
     exclusively,
     // idempotent: the second close is a no-op on every driver, not a
-    // raw error on one and a resolved promise on another
-    close: () => {
+    // raw error on one and a resolved promise on another. `discard` asks a
+    // pooled session's driver to destroy the session rather than return it
+    // (it still holds a session lock the store could not release)
+    close: (/** @type {{ discard?: boolean } | undefined} */ closeOptions = undefined) => {
       if (closed) return closeResult;
       closed = true;
       for (const waitingCall of waiting.splice(0)) waitingCall();
@@ -902,15 +916,15 @@ export function finishConnection(raw, dialect, synchronous, capabilities, queueT
       // Waiting for a row here would postpone that deadline indefinitely.
       if (raw.closeDrainsIterators === true) {
         activeIterators.clear();
-        return closeResult = raw.close();
+        return closeResult = raw.close(closeOptions);
       }
       const pending = [];
       for (const iterator of activeIterators) {
         try { pending.push(iterator.return()); }
         catch (error) { pending.push(Promise.reject(error)); }
       }
-      if (pending.some(isThenable)) return closeResult = Promise.allSettled(pending).then(() => raw.close());
-      return closeResult = raw.close();
+      if (pending.some(isThenable)) return closeResult = Promise.allSettled(pending).then(() => raw.close(closeOptions));
+      return closeResult = raw.close(closeOptions);
     },
     transactionState: () => raw.transactionState?.() ?? null,
     registerFunction: typeof raw.registerFunction === 'function'

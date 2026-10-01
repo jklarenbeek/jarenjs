@@ -37,6 +37,15 @@ describe('in(values)', () => {
     assert.deepEqual(emitted((/** @type {any} */ it) => it.sku.in(it.tags)), { $eq: ['$it.sku', '$it.tags[*]'] });
   });
 
+  it('a path that already fans is the list as it stands, not fanned again', () => {
+    assert.deepEqual(emitted((/** @type {any} */ it) => it.sku.in(it.tags.all())), { $eq: ['$it.sku', '$it.tags[*]'] });
+    assert.deepEqual(emitted((/** @type {any} */ it, /** @type {any} */ p) => it.sku.in(p.ids.all())), { $eq: ['$it.sku', '$ids[*]'] });
+    const ids = (/** @type {any} */ seq) => seq.select((/** @type {any} */ it) => it.id).toArray();
+    assert.deepEqual(ids(from(ROWS).where((/** @type {any} */ it) => it.sku.in(it.tags.all()))), [1]);
+    assert.deepEqual(ids(from(ROWS).params({ skus: ['c', 'b'] })
+      .where((/** @type {any} */ it, /** @type {any} */ p) => it.sku.in(p.skus.all()))), [2, 3]);
+  });
+
   it('is membership, where eq(array) compares against one array value', () => {
     const ids = (/** @type {any} */ seq) => seq.select((/** @type {any} */ it) => it.id).toArray();
     assert.deepEqual(ids(from(ROWS).where((/** @type {any} */ it) => it.sku.in(['a', 'b']))), [1, 3]);
@@ -68,6 +77,20 @@ describe('chained .or() and .and() are one flat operator', () => {
       { $and: [{ $or: [{ $eq: ['$it.a', 1] }, { $eq: ['$it.b', 2] }] }, { $eq: ['$it.c', 3] }] });
     assert.deepEqual(emitted((/** @type {any} */ it) => it.a.eq(1).or(it.b.eq(2).or(it.c.eq(3)))),
       { $or: [{ $eq: ['$it.a', 1] }, { $or: [{ $eq: ['$it.b', 2] }, { $eq: ['$it.c', 3] }] }] });
+  });
+
+  it('a grouping nested by hand thousands deep is copied into its document, and answers', () => {
+    /** @param {any} it */
+    const nested = (it) => {
+      let predicate = it.sku.eq('s4999');
+      for (let i = 4998; i >= 0; i--) predicate = it.sku.eq(`s${i}`).or(predicate);
+      return predicate;
+    };
+    const document = from([]).where(nested).toDocument();
+    let depth = 0;
+    for (let node = document.$where; node.$or !== undefined; node = node.$or[1]) depth++;
+    assert.equal(depth, 4999);
+    assert.deepEqual(from([{ sku: 's7' }, { sku: 'x' }]).where(nested).toArray(), [{ sku: 's7' }]);
   });
 
   it('1,500 chained .or() calls analyze and answer — over an array and over a store', async () => {

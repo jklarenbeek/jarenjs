@@ -66,9 +66,11 @@ describe('PostgreSQL: a patch reads and writes in one transaction', { skip: !url
   };
   /** @param {string} id */
   const xminOf = async (id) => (await admin.query(`SELECT xmin::text AS v FROM "${schema}"."docs" WHERE "key" = $1`, [id])).rows[0]?.v;
-  // this schema's writer locks only: other files hold their own at the same time
+  // this schema's writer locks only: other files hold their own at the same
+  // time (the second key is the schema's OID, shifted into int4)
   const writerLocks = async () => (await admin.query("SELECT count(*)::int AS n FROM pg_catalog.pg_locks WHERE locktype = 'advisory' "
-    + 'AND classid = $1::oid AND objid = (pg_catalog.hashtext($2)::bigint & 4294967295)::oid',
+    + 'AND classid = $1::oid AND objid = (((SELECT n.oid FROM pg_catalog.pg_namespace n '
+    + 'WHERE n.nspname = $2)::int8 - 2147483648) & 4294967295)::oid',
   [POSTGRES_LOCK_CLASSES.writer, schema])).rows[0].n;
 
   it('two stores racing a leading-test patch for 300 rounds lose no update', async () => {

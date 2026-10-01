@@ -920,31 +920,31 @@ alone; writing accepted evidence requires both engines. The committed
 
 <!--fact:postgres.portability-->
 
-Measured 2026-09-30T14:26:15.756Z: 500 documents, Node 24.20.0, SQLite 3.53.4, PostgreSQL 17.11 (Debian 17.11-1.pgdg12+2), pg 8.23.0. Durability settings: fsync=on, synchronous_commit=on, full_page_writes=on.
+Measured 2026-10-01T00:00:56.674Z: 500 documents, Node 24.20.0, SQLite 3.53.4, PostgreSQL 17.11 (Debian 17.11-1.pgdg12+2), pg 8.23.0. Durability settings: fsync=on, synchronous_commit=on, full_page_writes=on.
 
 | Operation | SQLite ms | PostgreSQL ms | PG / SQLite | Client query calls per PG operation | Iterations |
 |---|---:|---:|---:|---:|---:|
-| open | 18.747 | 23.091 | 1.2× | 17 | 1 |
-| insert | 0.017 | 0.677 | 38.9× | 1 | 500 |
-| get | 0.015 | 0.679 | 44.8× | 5 | 50 |
-| indexed | 0.643 | 3.555 | 5.5× | 13 | 20 |
-| scanned | 0.641 | 2.986 | 4.7× | 13 | 20 |
-| range | 0.706 | 3.191 | 4.5× | 13 | 20 |
-| transaction | 0.140 | 1.156 | 8.3× | 3 | 20 |
-| migration (one index) | 12.225 | 79.675 | 6.5× | not separately counted | 1 |
+| open | 24.798 | 33.503 | 1.4× | 17 | 1 |
+| insert | 0.025 | 1.040 | 42.1× | 1 | 500 |
+| get | 0.018 | 1.001 | 55.1× | 5 | 50 |
+| indexed | 0.860 | 4.817 | 5.6× | 13 | 20 |
+| scanned | 0.766 | 4.201 | 5.5× | 13 | 20 |
+| range | 0.861 | 4.119 | 4.8× | 13 | 20 |
+| transaction | 0.159 | 1.682 | 10.6× | 3 | 20 |
+| migration (one index) | 14.810 | 98.858 | 6.7× | not separately counted | 1 |
 
-Sequential insert throughput: SQLite 57423, PostgreSQL 1478 documents/second.
+Sequential insert throughput: SQLite 40528, PostgreSQL 962 documents/second.
 
 | First-row probe | SQLite | PostgreSQL |
 |---|---:|---:|
-| First row ms | 0.990 | 1.060 |
-| First row plus cleanup ms | 1.081 | 1.376 |
+| First row ms | 1.147 | 1.454 |
+| First row plus cleanup ms | 1.281 | 1.934 |
 | Returned rows | 1 | 1 |
 | Fetched native rows / normalized bytes | not instrumented | 64 / 5661 |
 | Session peak native frame rows / bytes | not instrumented | 64 / 5813 |
 | Client query calls including cleanup | no network | 5 |
-| Sampled RSS before / after MiB | 90.50 / 108.63 | 111.89 / 117.96 |
-| Sampled heap before / after MiB | 20.79 / 36.41 | 14.89 / 22.26 |
+| Sampled RSS before / after MiB | 89.54 / 110.63 | 112.55 / 118.80 |
+| Sampled heap before / after MiB | 21.25 / 22.95 | 15.25 / 22.89 |
 
 After close: driver active=0, queued=0; native cursors=0, prepared statements=0; host pool total=1, idle=1, waiting=0.
 

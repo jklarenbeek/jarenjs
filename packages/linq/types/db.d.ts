@@ -310,11 +310,11 @@ export type DbClaimResult =
 export interface DbLedgerOptions {
   /** The declared collection; `'ledger'` (the model's) by default. */
   collection?: string;
-  /** The retention of a key; 86,400,000 ms by default. */
+  /** The retention of a key, in whole milliseconds; 86,400,000 by default. */
   ttlMs?: number;
-  /** How long a `started` claim blocks its key — `ttlMs` by default, at
-   * most `ttlMs`; past it the key is claimed afresh under a new
-   * generation and the old ref is refused (`JL2007`). */
+  /** How long a `started` claim blocks its key, in whole milliseconds —
+   * `ttlMs` by default, at most `ttlMs`; past it the key is claimed afresh
+   * under a new generation and the old ref is refused (`JL2007`). */
   startedTtlMs?: number;
   /** The host's runtime record: its `now` is the clock, its `uuid`
    * mints every generation. */

@@ -59,7 +59,7 @@ describe('createDbLedger — construction', () => {
     assert.throws(() => createDbLedger(/** @type {any} */ ({ collections: {} })), /must be a @jarenjs\/linq\/db client/);
     assert.throws(() => createDbLedger(client, { collection: 'nope' }), /declares no collection 'nope'/);
     assert.throws(() => createDbLedger(client, { collection: '' }), /non-empty collection name/);
-    assert.throws(() => createDbLedger(client, { ttlMs: 0 }), /ttlMs must be a positive number/);
+    assert.throws(() => createDbLedger(client, { ttlMs: 0 }), /ttlMs must be a positive whole number of milliseconds/);
     assert.throws(() => createDbLedger(client, { now: /** @type {any} */ ('soon') }), /now must be a function/);
     assert.ok(Object.isFrozen(createDbLedger(client)));
   });
@@ -142,8 +142,10 @@ describe('createDbLedger — durability and the fence across processes', () => {
 
   /** @param {string[][]} argv */
   function release(argv) {
-    const children = argv.map((args) => spawn(process.execPath,
-      ['--no-warnings=ExperimentalWarning', '--input-type=module', '-e', CHILD, ...args],
+    // whichever runtime runs this file runs the children: Bun takes a
+    // module from -e as it is, and knows neither of Node's two flags
+    const flags = process.versions.bun ? ['-e'] : ['--no-warnings=ExperimentalWarning', '--input-type=module', '-e'];
+    const children = argv.map((args) => spawn(process.execPath, [...flags, CHILD, ...args],
       { cwd: process.cwd(), stdio: ['ignore', 'pipe', 'pipe'] }));
     return Promise.all(children.map((child) => new Promise((resolve) => {
       let stdout = '';

@@ -147,6 +147,77 @@ describe('a keyset page over a physical table', () => {
     finally { await close(); }
   });
 
+  it('a nullable text order column holding NULLs pages as it loads, in both directions', async () => {
+    const { store, close } = await adopted(
+      'CREATE TABLE item(item_id INTEGER PRIMARY KEY, label TEXT); '
+      + "INSERT INTO item VALUES (1, 'b'), (2, NULL), (3, 'a'), (4, NULL), (5, 'c');",
+      { Item: { schema: { type: 'object', properties: { id: { type: 'integer', ...key }, name: { type: 'string' } } },
+        physical: { table: 'item', columns: { id: { name: 'item_id', codec: 'integer', null: 'reject' },
+          name: { name: 'label', codec: 'text', null: 'null' } } } } });
+    try {
+      const set = store.entity('Item');
+      for (const [spec, expected] of /** @type {[any, number[]][]} */ ([
+        [{ orderBy: '$it.name' }, [2, 4, 3, 1, 5]],
+        [{ orderBy: { $key: '$it.name', $dir: 'desc' } }, [5, 1, 3, 2, 4]],
+        [{ orderBy: { $key: '$it.name', $empty: 'greatest' } }, [3, 1, 5, 2, 4]],
+      ])) {
+        assert.deepEqual((await set.load(spec)).map((/** @type {any} */ item) => item.id), expected);
+        for (const limit of [1, 2, 3]) {
+          const { items } = await everyPage(set, spec, limit);
+          assert.deepEqual(items.map((item) => item.id), expected, `${JSON.stringify(spec)} limit ${limit}`);
+        }
+      }
+    }
+    finally { await close(); }
+  });
+
+  it('a view is refused by name — it enforces no key, and a continuation past a repeated one would skip a row', async () => {
+    const { store, close } = await adopted(
+      'CREATE TABLE src(id INTEGER, label TEXT); '
+      + "INSERT INTO src VALUES (1, 'a'), (2, 'b'), (2, 'b2'), (3, 'c'); "
+      + 'CREATE VIEW v AS SELECT id, label FROM src;',
+      { V: { schema: { type: 'object', properties: { id: { type: 'integer', ...key }, label: { type: 'string' } } },
+        physical: { table: 'v', kind: 'view', columns: { id: { name: 'id', codec: 'integer', null: 'reject' },
+          label: { name: 'label', codec: 'text', null: 'null' } } } } });
+    try {
+      const set = store.entity('V');
+      const refused = (/** @type {any} */ error) => error.code === 'JD0032'
+        && /a keyset continuation over a view is not qualified/.test(error.message);
+      await assert.rejects(set.page({}, { limit: 1 }), refused);
+      await assert.rejects(set.load({ orderBy: '$it.id', after: 1 }), refused);
+      // a load emits no continuation: every row, the repeated key twice
+      assert.deepEqual((await set.load({})).map((/** @type {any} */ row) => `${row.id}/${row.label}`).sort(),
+        ['1/a', '2/b', '2/b2', '3/c']);
+    }
+    finally { await close(); }
+  });
+
+  it('explainLoad().order names the declared terms by property, and a physical table\'s key closes it', async () => {
+    const { store, close } = await adopted(
+      'CREATE TABLE item(item_id INTEGER PRIMARY KEY, label TEXT); '
+      + "INSERT INTO item VALUES (1, 'a'), (2, 'b'), (3, 'c');",
+      { Item: { schema: { type: 'object', properties: { id: { type: 'integer', ...key }, name: { type: 'string' } } },
+        physical: { table: 'item', columns: { id: { name: 'item_id', codec: 'integer', null: 'reject' },
+          name: { name: 'label', codec: 'text', null: 'null' } } } } });
+    try {
+      const set = store.entity('Item');
+      const terms = (/** @type {any} */ plan) => plan.order.map((/** @type {any} */ term) =>
+        `${term.source}:${term.column}${term.tieBreaker ? ' (tie)' : ''}`);
+      for (const [spec, expected] of /** @type {[any, string[]][]} */ ([
+        [{ orderBy: '$it.id' }, ['column:id']],
+        [{ orderBy: '$it.name' }, ['column:name', 'column:id (tie)']],
+        [{}, ['column:id (tie)']],
+      ])) {
+        const first = await set.page(spec, { limit: 1 });
+        const paged = await set.explainLoad({ ...spec, after: first.continuation });
+        assert.deepEqual(terms(paged), expected, `keyset ${JSON.stringify(spec)}`);
+        // outside keyset mode the ORDER BY still ends with the key, not a row identity
+        assert.deepEqual(terms(await set.explainLoad(spec)), expected, `load ${JSON.stringify(spec)}`);
+      }
+    }
+    finally { await close(); }
+  });
+
   it('a uuid key is refused by codec — it reads back lowercase, whatever the table stores', async () => {
     const { store, close } = await adopted(
       "CREATE TABLE token(id TEXT PRIMARY KEY); INSERT INTO token VALUES ('A0000000-0000-4000-8000-000000000000'), "

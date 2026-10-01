@@ -7,18 +7,23 @@
  *
  * SQLite keeps the lease in one row of an engine table — the owner's id,
  * the holding Store's random token, the expiry — taken in an immediate
- * bracket at open, renewed every third of the lease as an ordinary gated
- * write, and deleted at close; a holder that crashed leaves the row to
- * expire. A renewal that finds another holder's token marks the lease
- * lost, and every later call of the Store refuses. A lease that lapsed on
- * the holder's own clock (a suspended process, a starved event loop) is
- * renewed before the next call runs, and that call is refused only when
- * the renewal cannot confirm the lease is still this Store's.
+ * bracket at open, renewed every third of the lease as a write of the
+ * store's own that takes the gate's next turn and waits for the holder
+ * however long it holds, and deleted at close; a
+ * holder that crashed leaves the row to expire. A renewal that finds
+ * another holder's token marks the lease lost, and every later call of the
+ * Store refuses. A lease that lapsed on the holder's own clock (a suspended
+ * process, a starved event loop) is renewed before the next call runs, and
+ * that call is refused only when the renewal cannot confirm the lease is
+ * still this Store's. A call is checked again once the gate admits it: one
+ * that waited in the queue past the lease's expiry refuses rather than
+ * write beside the next owner.
  *
  * PostgreSQL holds a session advisory lock of its own class instead: no
  * table, and no expiry — it is held for exactly as long as the Store's
  * session, so it is released at close (explicitly: a pooled session
- * outlives the Store) or when the session ends.
+ * outlives the Store) or when the session ends; a session whose release
+ * could not run is destroyed rather than pooled.
  *
  * The lease is cooperative: only an open that asks for `owner` takes or
  * checks it. A read-only open never does.
@@ -68,24 +73,28 @@ const quietly = (fn) => {
  * The lease of one Store. `acquire()` runs in the open sequence, before
  * any table of the model is created or verified; `guard()` runs at every
  * admission — a store-level call, a transaction's begin — and answers
- * `undefined` (value-or-promise) or throws the refusal; `release()` never
- * fails.
+ * `undefined` (value-or-promise) or throws the refusal; `admitted()` runs
+ * once the gate has admitted the call, and only throws; `release()` never
+ * fails, and `holds()` says whether a session lock outlived it.
  * @param {{
  *   dialect: any,
  *   owner: { id: string, leaseMs: number },
  *   adopt: boolean,
  *   now: () => number,
  *   bracket: (fn: () => any) => any,
- *   exclusively: (fn: (scope: any) => any, what: string) => any,
+ *   exclusively: (fn: (scope: any) => any, what: string,
+ *     options?: { first?: boolean, unbounded?: boolean, signal?: AbortSignal }) => any,
  *   renewsInline: () => boolean,
  *   connection: any,
  * }} context - `bracket` is the open path's immediate bracket; `exclusively`
  *   holds the connection for one call (the store gate, never refusing to
- *   wait); `renewsInline` says whether a renewal may run from the caller's
- *   own extent — never from inside a transaction's synchronous body, whose
- *   rollback would take the renewal with it
+ *   wait; `first` takes the gate's next turn, `unbounded` waits past
+ *   `queueTimeout` until `signal` takes it off the queue); `renewsInline`
+ *   says whether a renewal may run from the caller's own extent — never from
+ *   inside a transaction's synchronous body, whose rollback would take the
+ *   renewal with it
  * @returns {{ mode: 'lease' | 'session', acquire: () => any, guard: (synchronous: boolean) => any,
- *   release: () => any }}
+ *   admitted: () => void, release: () => any, holds: () => boolean }}
  */
 export function createOwnerLease(context) {
   const { dialect, owner, now, connection } = context;
@@ -128,15 +137,21 @@ function sessionLock(strategy, context, owner, connection) {
     // the lock cannot be lost without the session, and a lost session is
     // refused by every call already (JD2087)
     guard: () => undefined,
+    admitted: () => undefined,
     // under the store gate, so it follows whatever the session is still
     // doing, and before the driver restores the session's search path —
-    // the key is the current schema
+    // the key is the current schema. `held` clears only once the server
+    // says the lock is released: a release that failed, or outwaited the
+    // gate behind a body that never settled, leaves it held, and the
+    // store's close then destroys the session rather than pool it
     release: () => {
       if (!held) return undefined;
-      held = false;
-      return quietly(() => context.exclusively((/** @type {any} */ scope) => one(scope, strategy.release),
-        'the owner lock release'));
+      return quietly(() => chain(context.exclusively((/** @type {any} */ scope) => one(scope, strategy.release),
+        'the owner lock release'), (/** @type {any} */ row) => {
+        if (row?.released === true || row?.released === 1) held = false;
+      }));
     },
+    holds: () => held,
   };
 }
 
@@ -159,8 +174,10 @@ function tableLease(strategy, context, owner, now) {
   /** @type {any} */
   let timer = null;
   let stopped = false;
-  /** The renewal in flight, or `null`. @type {Promise<void> | null} */
+  /** The timer's renewal in flight, or `null`. @type {Promise<void> | null} */
   let renewing = null;
+  /** Takes the timer's renewal off the gate's queue when the store closes. */
+  const closing = new AbortController();
 
   /** @param {any} scope @param {string} sql @param {any[]} params */
   const run = (scope, sql, params) => chain(scope.prepare(sql), (statement) => statement.run(params));
@@ -196,22 +213,36 @@ function tableLease(strategy, context, owner, now) {
     });
   };
 
-  /** Renew under the store gate; a failure leaves the lease to lapse
-   * (the next renewal, or the next call, tries again).
-   * @returns {any} value-or-promise */
-  const renew = () => {
+  /**
+   * One renewal under the store gate, at its next turn — it waits for the
+   * call that holds the connection, never behind every caller queued after
+   * it. A failure leaves the lease to lapse (the next renewal, or the next
+   * call, tries again).
+   * @param {{ unbounded?: boolean, signal?: AbortSignal }} [options]
+   * @returns {any} value-or-promise
+   */
+  const renewOnce = (options = undefined) => {
     if (stopped || lost !== null) return undefined;
-    if (renewing !== null) return renewing;
     let out;
     try {
-      out = exclusively((scope) => renewOn(scope), 'the owner lease renewal');
+      out = exclusively((scope) => renewOn(scope), 'the owner lease renewal', { ...options, first: true });
     }
     catch {
       return undefined;
     }
+    return isThenable(out) ? Promise.resolve(out).then(() => undefined, () => undefined) : undefined;
+  };
+
+  /** The timer's renewal: it waits for the holder however long the holder
+   * holds, not `queueTimeout` — a renewal that gave up behind a transaction
+   * still running would come back a third of the lease later, past the
+   * expiry `leaseMs` above 1.5 × `holdTimeoutMs` keeps it clear of. Closing
+   * the store takes it off the queue. @returns {any} value-or-promise */
+  const renewInBackground = () => {
+    if (renewing !== null) return renewing;
+    const out = renewOnce({ unbounded: true, signal: closing.signal });
     if (!isThenable(out)) return undefined;
-    renewing = Promise.resolve(out).then(() => undefined, () => undefined)
-      .finally(() => { renewing = null; });
+    renewing = out.finally(() => { renewing = null; });
     return renewing;
   };
 
@@ -220,7 +251,7 @@ function tableLease(strategy, context, owner, now) {
     if (timer !== null) clearTimeout(timer);
     timer = setTimeout(() => {
       timer = null;
-      const out = renew();
+      const out = renewInBackground();
       if (isThenable(out)) void out.then(arm);
       else arm();
     }, renewEvery);
@@ -267,7 +298,8 @@ function tableLease(strategy, context, owner, now) {
       // anything runs — unless the call is inside a transaction's own
       // synchronous body, whose rollback would undo the renewal
       if (!renewsInline()) throw lapsed();
-      const renewal = renew();
+      // the call's own renewal asks once, as long as the call would queue
+      const renewal = renewOnce();
       // a caller that answers values cannot wait for a renewal that queued
       if (synchronous && isThenable(renewal)) throw lapsed();
       return chain(renewal, () => {
@@ -276,13 +308,26 @@ function tableLease(strategy, context, owner, now) {
         return undefined;
       });
     },
+    // the call the gate admitted, checked again: it may have waited in
+    // the queue past the lease's expiry, and another holder may own the
+    // database by now. It never renews — the renewal is a write of its
+    // own, and this call holds the connection it would wait for
+    admitted: () => {
+      if (lost !== null) throw lostRefusal();
+      if (now() >= expiresAt) throw lapsed();
+    },
+    // after the calls already queued, which were admitted under the lease;
+    // a body that never settles holds the gate, and a release that
+    // outwaits it leaves the row to expire
     release: () => {
       stopped = true;
       if (timer !== null) clearTimeout(timer);
       timer = null;
+      closing.abort();
       if (lost !== null || expiresAt === 0) return undefined;
       return quietly(() => chain(renewing, () =>
         exclusively((scope) => run(scope, strategy.release, [holder]), 'the owner lease release')));
     },
+    holds: () => false,
   };
 }

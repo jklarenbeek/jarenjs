@@ -191,3 +191,93 @@ describe('membership over a physical column that stores present nulls', () => {
     }
   });
 });
+
+describe('membership edges', () => {
+  it('an inferred integer foreign key compares as the integer its key is — natively, by value and by list', async () => {
+    const store = await openStore({ $model: '0.1', entities: {
+      User: { schema: { type: 'object', required: ['uid'], properties: { uid: { type: 'integer', ...key },
+        posts: { 'x-entity': { relation: { to: 'Post', many: true, via: 'authorId', onDelete: 'cascade' } } } } } },
+      Post: { schema: { type: 'object', required: ['pid'], properties: { pid: { type: 'integer', ...key } } } },
+    } }, { driver: nodeDriver(), path: ':memory:' });
+    try {
+      await store.entity('User').create({ uid: 1 });
+      await store.entity('Post').create({ pid: 10, authorId: 1 });
+      await store.entity('Post').create({ pid: 11 });
+      for (const predicate of [{ $eq: ['$p.authorId', 1] }, { $eq: ['$p.authorId', { $seq: [1, 2] }] },
+        { $or: [{ $eq: ['$p.authorId', 1] }, { $eq: ['$p.authorId', 2] }] }, { $eq: ['$p.authorId', '$ids[*]'] }]) {
+        const query = { $for: { p: '$.Post[*]' }, $where: predicate, $return: '$p.pid' };
+        const options = { externals: { ids: [1] } };
+        assert.deepEqual(await store.execute(query, options), 10, JSON.stringify(predicate));
+        assert.deepEqual(await store.execute(query, { ...options, pushdown: false }), 10, 'the residual agrees');
+        assert.equal((await store.explain(query, options)).mode, 'native');
+      }
+      assert.deepEqual((await store.entity('Post').load({ where: { $eq: ['$it.authorId', { $seq: [1] }] } }))
+        .map((/** @type {any} */ post) => post.pid), [10]);
+    }
+    finally { await store.close(); }
+  });
+
+  it('a bound list that is no JSON value (a bigint, a function, a symbol) runs the call in the engine, and answers as it does', async () => {
+    const store = await openStore(MODEL, { driver: nodeDriver(), path: ':memory:' });
+    try {
+      await store.collection('items').put({ id: 'i1', sku: 's1', n: 10 });
+      await store.entity('Item').create({ id: 'i1', sku: 's1', n: 10 });
+      for (const value of [10n, () => 10, Symbol('ids')]) {
+        for (const [target, root] of /** @type {[any, string][]} */ ([[store.collection('items'), '$[*]'], [store, '$.Item[*]']])) {
+          const query = { $for: { it: root }, $where: { $eq: ['$it.n', '$ids[*]'] }, $return: '$it.id' };
+          const options = { externals: { ids: value } };
+          assert.deepEqual(await target.execute(query, options), await target.execute(query, { ...options, pushdown: false }),
+            `${typeof value} over ${root}`);
+          assert.notEqual((await target.explain(query, options)).mode, 'native');
+        }
+      }
+    }
+    finally { await store.close(); }
+  });
+
+  it('a profile predicate naming an external binds under execute(), and a load under it refuses by name', async () => {
+    const store = await openStore(MODEL, { driver: nodeDriver(), path: ':memory:' });
+    try {
+      for (const [id, sku] of [['i1', 'a'], ['i2', 'b']]) await store.entity('Item').create({ id, sku, n: 1 });
+      const profile = { predicates: { Item: { $eq: ['$it.sku', '$allowed[*]'] } } };
+      // the native statement and the residual's root fetch both bind it from the call
+      const native = overItem({ $eq: ['$it.n', 1] });
+      const residual = overItem({ $eq: [{ $count: '$it.id' }, 1] });
+      assert.equal((await store.explain(native, { profile, externals: { allowed: ['a'] } })).mode, 'native');
+      assert.notEqual((await store.explain(residual, { profile, externals: { allowed: ['a'] } })).mode, 'native');
+      for (const query of [native, residual, overItem(true)])
+        assert.deepEqual(await store.execute(query, { profile, externals: { allowed: ['a'] } }), 'i1');
+      // a value the database cannot compare is refused, never dropped from the fetch
+      for (const externals of [{ allowed: ['a', null] }, {}]) {
+        for (const query of [native, residual]) {
+          // a thunk: over a synchronous driver the refusal is thrown, not a rejection
+          await assert.rejects(async () => store.execute(query, { profile, externals }), (/** @type {any} */ error) => error.code === 'JD0011'
+            && /the profile's predicate for 'Item' cannot bind '\$allowed' for this call/.test(error.message));
+        }
+      }
+      await assert.rejects(store.entity('Item').load({}, { profile }), (/** @type {any} */ error) => error.code === 'JD0032'
+        && /the profile's predicate for 'Item' names the external '\$allowed', and a load binds none/.test(error.message));
+    }
+    finally { await store.close(); }
+  });
+
+  it('a same-operator chain nested thousands deep plans, explains and answers on every path', { timeout: 60_000 }, async () => {
+    const store = await openStore(MODEL, { driver: nodeDriver(), path: ':memory:' });
+    try {
+      await store.collection('items').put({ id: 'i1', sku: 's1', n: 1 });
+      await store.entity('Item').create({ id: 'i1', sku: 's1', n: 1 });
+      // as a client that does not flatten builds it: { $or: [acc, next] }
+      let nested = /** @type {any} */ ({ $eq: ['$it.sku', 's0'] });
+      for (let i = 1; i < 5000; i++) nested = { $or: [nested, { $eq: ['$it.sku', `s${i}`] }] };
+      const items = store.collection('items');
+      assert.deepEqual(await items.execute(overItems(nested)), 'i1');
+      assert.deepEqual(await items.execute(overItems(nested), { pushdown: false }), 'i1');
+      assert.equal((await items.explain(overItems(nested))).mode, 'native');
+      assert.deepEqual(await store.execute(overItem(nested)), 'i1');
+      assert.deepEqual(await store.execute(overItem(nested), { pushdown: false }), 'i1');
+      assert.equal((await store.explain(overItem(nested))).mode, 'native');
+      assert.deepEqual((await store.entity('Item').load({ where: nested })).map((/** @type {any} */ row) => row.id), ['i1']);
+    }
+    finally { await store.close(); }
+  });
+});

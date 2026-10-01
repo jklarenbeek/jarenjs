@@ -31,6 +31,11 @@ import {
   normalizeAssertionBounds, createAssertionBoundGuard,
 } from './document-steps.js';
 
+/** A step this runner cannot run as written (`JD0023`): an `error` no
+ * rerun fixes, as a failing step's refusal is.
+ * @param {string} reason */
+const unrunnable = (reason) => Object.assign(new DbCompileError('JD0023', reason), { class: 'error', retryable: false });
+
 /**
  * Compile every migration's document steps and refuse, before any
  * document is read, anything this host cannot honour.
@@ -55,19 +60,16 @@ function planStorelessRun(migrations, present, context) {
           `migration '${migration.id}' step ${i} runs host '${step.run}', which needs a database `
           + 'transaction to run in: a document runner has none. Run this migration against a store');
       }
+      // each refusal is classified as a failing step's is: no rerun fixes it
       if (PHYSICAL_STEP_KINDS.has(step.kind)) {
-        throw new DbCompileError('JD0023',
-          `migration '${migration.id}' step ${i} (${step.kind}) needs a database: a `
+        throw unrunnable(`migration '${migration.id}' step ${i} (${step.kind}) needs a database: a `
           + 'document runner has no tables to change. Run this migration against a '
           + 'store, or split the physical steps out of it');
       }
-      if (!DOCUMENT_STEP_KINDS.has(step.kind)) {
-        throw new DbCompileError('JD0023',
-          `migration '${migration.id}' step ${i} has no recognised kind`);
-      }
+      if (!DOCUMENT_STEP_KINDS.has(step.kind))
+        throw unrunnable(`migration '${migration.id}' step ${i} has no recognised kind`);
       if (!present.has(step.collection)) {
-        throw new DbCompileError('JD0023',
-          `migration '${migration.id}' step ${i} (${step.kind}) names collection `
+        throw unrunnable(`migration '${migration.id}' step ${i} (${step.kind}) names collection `
           + `'${step.collection}', which was not supplied`);
       }
     }

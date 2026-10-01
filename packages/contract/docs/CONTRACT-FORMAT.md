@@ -1303,7 +1303,9 @@ closed set (a `TypeError` names an unknown one).
 **A claim's lease and a key's retention are two numbers.** `ttlMs` is how
 long a settled key is kept (and replayed); `startedTtlMs` — at most
 `ttlMs`, and `ttlMs` by default, which is the behaviour this ledger always
-had — is how long a `started` claim blocks its key. A request that dies
+had — is how long a `started` claim blocks its key. Both are whole
+milliseconds (a fraction is a `TypeError` when the ledger is made, on the
+db ledger too, whose record stores an integer expiry). A request that dies
 between its claim and its settlement leaves the key `in-progress` only
 until then: the next claim takes the key under a new generation, and the
 dead request's late settlement is refused by the generation fence. A
@@ -1315,7 +1317,9 @@ expired at its lease end.
 **Interrupted claims are found and released by the host.**
 `inFlight({ op?, scope?, olderThan?, limit? })` lists the claims still
 `started` and blocking their key — `{ op, scope, key, generation,
-claimedAt }`, oldest first, `limit` 1,000 by default, `olderThan` an
+claimedAt }`, oldest first with a tie broken by the record's id in
+code-point order (the order a database compares text by, so the memory
+and db ledgers answer alike), `limit` 1,000 by default, `olderThan` an
 instant like every ledger `now` (the claims made before it).
 `release({ op, scope, key, generation? })` leaves one such claim exactly
 as a server fault leaves it (`failed`, retryable, no response), so the

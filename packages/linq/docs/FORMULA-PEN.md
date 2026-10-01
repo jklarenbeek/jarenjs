@@ -36,6 +36,6 @@ capabilities use the owning JSON formula registry. The pen never executes a quer
 
 ## 4. Cost
 
-The isolated formula pen costs **<!--fact:bundle.formula-->15,263<!--/fact--> bytes**.
+The isolated formula pen costs **<!--fact:bundle.formula-->16,207<!--/fact--> bytes**.
 Its bundle contains envelope validation and JSON helpers, with no Query evaluator
 or component. The tree-shaking gate enforces the separate authoring boundary.

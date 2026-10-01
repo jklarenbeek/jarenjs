@@ -87,6 +87,36 @@ describe('collection.all()', () => {
     finally { await store.close(); }
   });
 
+  it('a signal that aborts while the call waits in the queue takes it off the queue (JD2064), as execute\'s does', async () => {
+    const store = await openStore({ ...MODEL, entities: { Item: { schema: { type: 'object',
+      properties: { id: { type: 'string', 'x-entity': { key: true } } } } } } }, { driver: nodeDriver() });
+    try {
+      await store.collection('docs').insert({ a: 1 });
+      /** @type {() => void} */
+      let settle = () => {};
+      const holding = store.transaction(() => new Promise((resolve) => { settle = () => resolve(undefined); }));
+      const docs = store.collection('docs');
+      for (const [name, call] of /** @type {[string, (signal: AbortSignal) => any][]} */ ([
+        ['all', (signal) => docs.all({ signal })],
+        ['execute', (signal) => docs.execute('$[*]', { signal })],
+        ['store.execute', (signal) => store.execute({ $for: { it: '$.Item[*]' }, $return: '$it' }, { signal })],
+        ['page', (signal) => store.entity('Item').page({}, { limit: 1, signal })],
+      ])) {
+        const controller = new AbortController();
+        const queued = Promise.resolve().then(() => call(controller.signal));
+        setTimeout(() => controller.abort(new Error('stop')), 20);
+        const started = Date.now();
+        await assert.rejects(queued, (/** @type {any} */ error) => error.code === 'JD2064' && error.cause?.message === 'stop', name);
+        assert.ok(Date.now() - started < 1_000, `${name} left the queue when it aborted`);
+      }
+      settle();
+      await holding;
+      // one already aborted refuses by its own check, before any statement
+      await assert.rejects(docs.all({ signal: AbortSignal.abort() }), (/** @type {any} */ error) => error.code === 'JD2072');
+    }
+    finally { await store.close(); }
+  });
+
   it('the typed client: all() is every document, all(predicate) the chain quantifier', async () => {
     const client = await open(MODEL, { driver: nodeDriver(), validator: null });
     try {

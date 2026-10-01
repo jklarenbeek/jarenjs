@@ -282,7 +282,9 @@ const associative = (op) => function (/** @type {any} */ record, /** @type {any}
  * satisfy, and is refused (`JL0005`). A PATH to a list — a declared
  * parameter (`x.in(p.ids)`) or an array member (`x.in(it.tags)`) — is
  * every item of it (`$ids[*]`), so a list bound at run time is one value
- * however long it is.
+ * however long it is. A path that already fans (`it.tags.all()`,
+ * `$it.tags[*]`) is a sequence of those items, and is the list as it
+ * stands — fanning it again would fan each item.
  * @param {any} record @param {any} values
  */
 function membership(record, values) {
@@ -294,7 +296,8 @@ function membership(record, values) {
         'in() takes an array of values or a PATH to one (a parameter p.ids, a member it.tags); '
         + 'it cannot follow an operator result or a relation');
     }
-    return makeExpr({ $eq: [record.doc, list.seq ?? `${list.doc}[*]`] }, record.epoch, false);
+    const items = list.seq ?? (list.doc.endsWith('[*]') ? list.doc : `${list.doc}[*]`);
+    return makeExpr({ $eq: [record.doc, items] }, record.epoch, false);
   }
   if (!Array.isArray(values)) {
     throw new LinqBuildError('JL0005',

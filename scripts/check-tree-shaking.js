@@ -364,7 +364,11 @@ if (migrationEngineLeak.length > 0)
 // Raised to 25,000 with the schema and model pens, and for the same
 // reason: the capture's hop machinery gained the second link a
 // many-to-many relation lowers through, and every pen carries it.
-if (migrationBytes > 25000)
+// Raised to 26,000 with the host step: `.host(run, version)` and its
+// checks ride in the pen, and the document snapshot every pen shares
+// copies by an explicit stack (a grouping nested thousands deep by hand no
+// longer overflows it). Measured 25601.
+if (migrationBytes > 26000)
   throw new Error(`The migration pen bundle grew to ${migrationBytes} bytes.`);
 const chainMigrationLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/migration/') && info.bytesInOutput > 0);
@@ -424,7 +428,12 @@ if (asyncLiveLeak.length)
 // finalization under its bounded cache add 17671 more. The optional scheduler
 // and evaluator stay outside this closure, checked above. This structural
 // allowance does not change application RSS, work or deadline budgets.
-if (clientBytes > 758500)
+// Measured 778772 bytes since: the isolation floor and the owner lease with
+// its second check at the gate, the atomic patch with its preconditions and
+// all(), keyset pages over column-mapped tables, bound membership lists,
+// and migration host steps with atomic runs and the per-link foreign-key
+// baseline add 21656.
+if (clientBytes > 780000)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 

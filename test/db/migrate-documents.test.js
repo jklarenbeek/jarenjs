@@ -279,6 +279,8 @@ describe('a step that needs a database', () => {
       const migration = { ...documentMigration(`0001-${kind}`, []), steps: [step] };
       await assert.rejects(() => migrateDocuments({ users: [{ id: 'u1' }] }, [migration]),
         (error) => /** @type {any} */ (error).code === 'JD0023'
+          // classified as a failing step's refusal is: no rerun fixes it
+          && /** @type {any} */ (error).class === 'error' && /** @type {any} */ (error).retryable === false
           && new RegExp(`step 0 \\(${kind}\\) needs a database`).test(/** @type {Error} */ (error).message));
       await assert.rejects(() => streamDocuments({ users: source }, [migration],
         { write: () => { throw new Error('nothing may be written'); } }),
@@ -290,8 +292,17 @@ describe('a step that needs a database', () => {
   it('a step naming a collection nobody supplied refuses before reading', async () => {
     const migration = documentMigration('0001-absent', [{ ...SPLIT_NAME, collection: 'ghosts' }]);
     await assert.rejects(() => migrateDocuments({ users: [] }, [documentHalf(migration)]),
-      (error) => /** @type {any} */ (error).code === 'JD0023'
+      (error) => /** @type {any} */ (error).code === 'JD0023' && /** @type {any} */ (error).class === 'error'
         && /names collection 'ghosts', which was not supplied/.test(/** @type {Error} */ (error).message));
+  });
+
+  it('a malformed document or step is JD0023 classified alike: class error, not retryable', async () => {
+    for (const migration of [{ $migration: '0.1', id: 'x' }, { ...documentMigration('0001-kind', []), steps: [{ kind: 'nope' }] },
+      { ...documentMigration('0001-host', []), steps: [{ kind: 'host', run: '' }] }]) {
+      await assert.rejects(() => migrateDocuments({ users: [] }, [/** @type {any} */ (migration)]),
+        (error) => /** @type {any} */ (error).code === 'JD0023' && /** @type {any} */ (error).class === 'error'
+          && /** @type {any} */ (error).retryable === false, JSON.stringify(migration));
+    }
   });
 });
 

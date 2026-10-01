@@ -264,7 +264,22 @@ export const cases = {
       assert.deepStrictEqual((await ledger.inFlight({ now: 1105 })).map((c) => c.key), ['b', 'c']);
       await assert.rejects(async () => ledger.inFlight({ opp: 'x' }), (/** @type {any} */ err) => err instanceof TypeError && /'op'/.test(err.message));
       await assert.rejects(async () => ledger.inFlight({ limit: 0 }), TypeError);
+      // a tie breaks by the id in code-point order, the order a database
+      // compares text by: U+FF01 comes before U+1F600, whose UTF-16 form
+      // (a surrogate pair from U+D83D) would sort first
+      const astral = await ledger.claim({ ...CLAIM, key: 'tie-\u{1F600}', now: 1110 });
+      const high = await ledger.claim({ ...CLAIM, key: 'tie-\uFF01', now: 1110 });
+      assert.deepStrictEqual((await ledger.inFlight({ olderThan: 1111, now: 1110 })).filter((c) => c.claimedAt === 1110)
+        .map((c) => c.generation), [high.ref.generation, astral.ref.generation]);
     });
+  },
+
+  /** A lease is whole milliseconds on every ledger. */
+  async wholeMilliseconds(factory) {
+    for (const options of [{ ttlMs: 1000.5 }, { ttlMs: 1000, startedTtlMs: 100.5 }, { ttlMs: 2 ** 53 }]) {
+      await assert.rejects(async () => factory(options),
+        (/** @type {any} */ err) => err instanceof TypeError && /whole number of milliseconds/.test(err.message), JSON.stringify(options));
+    }
   },
 
   /** `release` frees one interrupted claim as a server fault would. */
@@ -353,5 +368,6 @@ export function ledgerLifecycleContract(name, factory) {
     it('a started claim blocks its key for startedTtlMs; its late settlement is fenced; a settled record keeps ttlMs', () => cases.startedLease(factory));
     it('inFlight lists the claims still blocking their key, oldest first, narrowed by op, scope, olderThan and limit', () => cases.inFlight(factory));
     it('release frees one interrupted claim as a server fault would, once, and only its own generation', () => cases.release(factory));
+    it('a lease is whole milliseconds: a fraction is refused when the ledger is made', () => cases.wholeMilliseconds(factory));
   });
 }

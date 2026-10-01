@@ -18,6 +18,7 @@
 
 import { resolveRuntime } from '@jarenjs/core/runtime';
 import { refuseUnknownMembers } from '@jarenjs/core/object';
+import { compareCodePoints } from '@jarenjs/core/string';
 
 import { ContractHostError } from './errors.js';
 
@@ -232,11 +233,15 @@ export function createMemoryLedger(options = {}) {
     throw new TypeError('createMemoryLedger: options is { ttlMs?, startedTtlMs?, now?, runtime? }');
   refuseUnknownMembers(options, MEMORY_LEDGER_OPTIONS, (key, hint) =>
     new TypeError(`createMemoryLedger: '${key}' is not an option it reads${hint}`));
+  // whole milliseconds, as the db ledger stores an expiry: a fraction is
+  // refused on both rather than run by one and refused at the first claim
+  // by the other
   const ttlMs = options.ttlMs === undefined ? DEFAULT_TTL_MS : options.ttlMs;
-  if (!Number.isFinite(ttlMs) || ttlMs <= 0) throw new TypeError('createMemoryLedger: ttlMs must be a positive number');
+  if (!Number.isSafeInteger(ttlMs) || ttlMs <= 0)
+    throw new TypeError('createMemoryLedger: ttlMs must be a positive whole number of milliseconds');
   const startedTtlMs = options.startedTtlMs === undefined ? ttlMs : options.startedTtlMs;
-  if (!Number.isFinite(startedTtlMs) || startedTtlMs <= 0 || startedTtlMs > ttlMs)
-    throw new TypeError('createMemoryLedger: startedTtlMs must be a positive number no greater than ttlMs');
+  if (!Number.isSafeInteger(startedTtlMs) || startedTtlMs <= 0 || startedTtlMs > ttlMs)
+    throw new TypeError('createMemoryLedger: startedTtlMs must be a positive whole number of milliseconds no greater than ttlMs');
   let runtime;
   try {
     runtime = resolveRuntime(options.runtime);
@@ -354,9 +359,10 @@ export function createMemoryLedger(options = {}) {
         claims.push({ op: record.op, scope: record.scope, key: record.key, generation: record.generation,
           claimedAt: record.createdAt });
       }
-      // oldest first; the id breaks a tie, so two ledgers answer alike
+      // oldest first; the id breaks a tie in code-point order — the order a
+      // database compares text by — so two ledgers answer alike
       claims.sort((a, b) => a.claimedAt - b.claimedAt
-        || (ledgerId(a.op, a.scope, a.key) < ledgerId(b.op, b.scope, b.key) ? -1 : 1));
+        || compareCodePoints(ledgerId(a.op, a.scope, a.key), ledgerId(b.op, b.scope, b.key)));
       return claims.slice(0, limit);
     },
     release(claim) {

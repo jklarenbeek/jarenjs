@@ -56,10 +56,12 @@ describe('PostgreSQL: the owner session lock', { skip: !url && 'JAREN_PG_URL is 
     pools.push(made);
     return made;
   };
-  /** How many sessions hold the owner lock on this schema. */
+  /** How many sessions hold the owner lock on this schema: its second key
+   * is the schema's OID, shifted into int4 (pg_locks shows it unsigned). */
   const holders = async () => (await admin.query("SELECT count(*)::int AS n FROM pg_catalog.pg_locks l "
     + "WHERE l.locktype = 'advisory' AND l.granted AND l.classid = $1::oid "
-    + 'AND l.objid = (pg_catalog.hashtext($2)::bigint & 4294967295)::oid', [POSTGRES_LOCK_CLASSES.owner, schema])).rows[0].n;
+    + 'AND l.objid = (((SELECT n.oid FROM pg_catalog.pg_namespace n WHERE n.nspname = $2)::int8 - 2147483648) '
+    + '& 4294967295)::oid', [POSTGRES_LOCK_CLASSES.owner, schema])).rows[0].n;
   /** @param {any} source @param {Record<string, any>} [more] */
   const openOwner = (source, more = {}) => openStore(MODEL,
     { driver: postgresDriver(source, { schema }), owner: { id: 'service' }, ...more });
@@ -114,6 +116,56 @@ describe('PostgreSQL: the owner session lock', { skip: !url && 'JAREN_PG_URL is 
     assert.equal(await holders(), 0);
     const { rows } = await shared.query("SELECT count(*)::int AS n FROM pg_catalog.pg_locks WHERE locktype = 'advisory' AND pid = pg_backend_pid()");
     assert.equal(rows[0].n, 0);
+  });
+
+  it('a session whose lock release could not run is destroyed, never pooled, and the next owner opens', async () => {
+    const shared = pool();
+    const first = await openOwner(shared, { queueTimeout: 300 });
+    // a body that never settles holds the gate, so the release outwaits it
+    first.transaction(() => new Promise(() => {})).catch(() => {});
+    await delay(20);
+    await first.close();
+    assert.equal(await holders(), 0, 'the server released the destroyed session\'s lock');
+    assert.equal(shared.totalCount, 0, 'the session was destroyed, not returned to its pool');
+    const second = await openOwner(pool());
+    await second.close();
+  });
+
+  it('two schemas whose names share a hashtext never contend for the owner lock or the writer lock', async () => {
+    // two of this run's own schema names whose 32-bit name hashes collide
+    const { rows } = await admin.query("SELECT array_agg(name ORDER BY name) AS names FROM (SELECT 'jaren_hc_' || $1::text "
+      + "|| '_' || g AS name FROM generate_series(1, 300000) g) AS t GROUP BY pg_catalog.hashtext(name) "
+      + 'HAVING count(*) > 1 LIMIT 1', [String(process.pid)]);
+    const [left, right] = rows[0].names;
+    await admin.query(`CREATE SCHEMA "${left}"; CREATE SCHEMA "${right}"`);
+    /** @type {any[]} */
+    const stores = [];
+    try {
+      const own = async (/** @type {string} */ name) => {
+        const store = await openStore(MODEL, { driver: postgresDriver(pool(), { schema: name }), owner: { id: name } });
+        stores.push(store);
+        return store;
+      };
+      const a = await own(left);
+      const b = await own(right);
+      assert.equal(b.capabilities.owner, 'session');
+      // an immediate transaction held open in one schema does not hold up the other's
+      /** @type {() => void} */
+      let settle = () => {};
+      const held = a.transaction(async (/** @type {any} */ tx) => {
+        await tx.collection('docs').put({ id: 'a', n: 1 }, 'a');
+        await new Promise((resolve) => { settle = () => resolve(undefined); });
+      }, { mode: 'immediate' });
+      await delay(50);
+      await b.transaction(async (/** @type {any} */ tx) => { await tx.collection('docs').put({ id: 'b', n: 1 }, 'b'); },
+        { mode: 'immediate' });
+      settle();
+      await held;
+    }
+    finally {
+      for (const store of stores) await store.close().catch(() => {});
+      await admin.query(`DROP SCHEMA IF EXISTS "${left}" CASCADE; DROP SCHEMA IF EXISTS "${right}" CASCADE`);
+    }
   });
 
   it('a session that ends releases the lock on the server', async () => {

@@ -269,7 +269,8 @@ its client: a collections-only model opens a client with no
 
 `createDbLedger(client, { collection = 'ledger', ttlMs = 86_400_000,
 startedTtlMs = ttlMs, runtime, now })` (a closed set; a `TypeError` names
-an unknown option) is the `Ledger` the `@jarenjs/contract` http binding
+an unknown option, and a lease that is not a positive whole number of
+milliseconds) is the `Ledger` the `@jarenjs/contract` http binding
 calls under `policy.idempotency` (CONTRACT-FORMAT.md §8), over a
 declared collection of the store the client opened — the collection
 `idempotencyLedgerModel` declares, or any collection with that
@@ -892,10 +893,10 @@ never builds one; the migration between two of them is
 
 ## 7. Cost
 
-`@jarenjs/linq/db` builds to **<!--fact:bundle.db-->757,474<!--/fact--> bytes** as a minified,
+`@jarenjs/linq/db` builds to **<!--fact:bundle.db-->778,930<!--/fact--> bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
 measures and `npm run test:tree-shaking` reports, published rounded
-(<!--fact:bundle.db.kb-->757<!--/fact--> kB) beside the other nine subpath prices in
+(<!--fact:bundle.db.kb-->779<!--/fact--> kB) beside the other nine subpath prices in
 [docs/CONSUMING.md](../../../docs/CONSUMING.md).
 
 It is by far the largest of the ten, and the reason is §1.1's edge rather
@@ -926,7 +927,7 @@ What the probe asserts, and fails the build on:
   asserts the same exclusion.
 
 A consumer who wants the model pen's types without the store pays
-`./model`'s <!--fact:bundle.model-->45,209<!--/fact--> bytes and installs no peer; one who wants to run
+`./model`'s <!--fact:bundle.model-->46,152<!--/fact--> bytes and installs no peer; one who wants to run
 queries against an array rather than a database pays the chain's price
 (§17 of [QUERY-PEN.md](QUERY-PEN.md)) and installs no peer. `./db` is
 the one subpath whose `package.json` entry carries an optional peer at

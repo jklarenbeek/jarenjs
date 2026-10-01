@@ -155,21 +155,34 @@ const store = await openStore(model, {
 owner's id, the holding Store's random token and the expiry. The open takes it
 in an immediate bracket before it creates or verifies any table of the model,
 so a refused open changes nothing. The Store renews it every third of `leaseMs`
-as an ordinary write under its gate, and deletes it at `close()`; a process
+as a write of its own under its gate, and deletes it at `close()`; a process
 that dies leaves the row to expire, and the refusal's `expiresAt` tells a
-restarting host how long to wait. The renewal waits behind the Store's own
-transactions, so `leaseMs` must exceed the longest transaction the host allows
-(its `holdTimeoutMs`) plus the renewal interval — `leaseMs` above 1.5 ×
-`holdTimeoutMs` — or a busy owner can lose its lease. Holders compare
+restarting host how long to wait. The renewal takes the gate's next turn: it
+waits for the call that holds the connection — however long that call holds,
+past `queueTimeout` — and never behind the calls queued after it. So `leaseMs`
+must exceed the longest transaction the host allows (its `holdTimeoutMs`)
+plus the renewal interval — `leaseMs` above 1.5 × `holdTimeoutMs` — or a busy
+owner can lose its lease; without a hold limit, a transaction longer than two
+thirds of `leaseMs` can. Holders compare
 wall-clock expiries, so hosts sharing a file must agree on the time.
 
 A Store checks its lease at every admission — a store-level call, a
 transaction's begin. A lease that lapsed on its own clock (a suspended
 process, a starved event loop) is renewed before the call runs, and the call is
 refused `JD2061`, retryable, only while that renewal cannot confirm the lease.
-A lease another holder took — its clock said the lease had expired — makes
+The check runs again once the gate admits the call: one that waited in the
+queue past the lease's expiry refuses `JD2061`, retryable, and runs nothing —
+it never renews from there, and the next call renews before it runs. A lease
+another holder took — its clock said the lease had expired — makes
 every later call refuse `JD2061`, not retryable: the Store is no longer the
 owner, so close it (and open again, which waits for the new owner).
+
+`close()` gives the lease back after the calls already queued, which run under
+it; a call made after `close()` refuses `JD2063`, and so does every later call
+however long after. A transaction body that never settles holds the gate, so
+`close()` waits up to `queueTimeout` for the release, then closes the
+connection without it: the row is left to expire within `leaseMs`, and until
+then a new owner is refused with the old one's `expiresAt`.
 
 An adopted Store (`adopt: true`) creates no table, the owner table included, so
 it refuses `owner` with `JD0015` until the table exists. Create it once with
@@ -182,12 +195,16 @@ CREATE TABLE "_jaren_owner" ("slot" INTEGER PRIMARY KEY CHECK ("slot" = 1), "own
 or open the file once without `adopt`, which creates it.
 
 **PostgreSQL.** The owner is a session-level advisory lock of its own class,
-keyed by the schema ([the lock family](POSTGRESQL.md#the-writer-lock-and-the-lock-family)):
+keyed by the schema's OID ([the lock family](POSTGRESQL.md#the-writer-lock-and-the-lock-family)):
 no table — an adopted Store takes it too — and no expiry. It is held for
 exactly the Store's session and released at `close()` before the session
 returns to its pool, when an open fails after taking it, or by the server when
-the session ends. The refusal names no holder (`owner` and `expiresAt` are
-`null`); its reason names the schema.
+the session ends. A release that cannot run — it outwaited `queueTimeout`
+behind a body that never settles, or it failed — leaves the lock on the
+session, so the driver destroys the session instead of returning it to its
+pool, and the server releases the lock with it; over one injected client with
+no `release`, that disposal is the host's. The refusal names no holder
+(`owner` and `expiresAt` are `null`); its reason names the schema.
 
 **On both.** The lease is cooperative: only an open that asks for `owner` takes
 or checks it, and a writable open without `owner` still writes. A read-only

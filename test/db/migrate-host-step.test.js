@@ -185,6 +185,131 @@ describe('a host step runs in its link, and on the shadow first', () => {
   });
 });
 
+describe('what a host step\'s scope hands back is checked as a stylesheet\'s, and ends with the step', () => {
+  const SAME = { ...REPAIR, to: shapeHash(V1) };
+  /** A link over V1 that runs one host step, then `more`. @param {string} id @param {any[]} [more] */
+  const link = (id, more = []) => ({ $migration: '0.1', id, from: shapeHash(V1), to: shapeHash(V1),
+    steps: [{ kind: 'host', run: 'h', version: '1' }, ...more] });
+
+  it('a replacement that is no document, or that moves a key member, refuses JD0023; one that leaves the key out keeps it', async () => {
+    for (const replacement of [null, [1, 2], 42, 'text']) {
+      const { dbPath, cleanup } = await seeded();
+      try {
+        const hosts = { truncate: { version: '1', run: (/** @type {any} */ scope) => scope.collection('docs').update(() => replacement) } };
+        await assert.rejects(migrate({ driver: nodeDriver(), path: dbPath }, [SAME], { baseline: V1, shadow: false, hosts }),
+          (/** @type {any} */ error) => error.code === 'JD0023' && error.class === 'error' && error.retryable === false
+            && /step 0 \(host 'truncate' 1\) failed: the transform produced a non-document for row/.test(error.message),
+          JSON.stringify(replacement));
+        const store = await openStore(V1, { driver: nodeDriver(), path: dbPath });
+        assert.deepEqual(await store.collection('docs').get('a'), { id: 'a', name: 'abcdef' }, 'nothing was written');
+        await store.close();
+      }
+      finally { cleanup(); }
+    }
+    const MODEL = { $model: '0.1', entities: { User: { schema: { type: 'object', properties: {
+      id: { type: 'string', 'x-entity': { key: true } }, name: { type: 'string' } } } } } };
+    const temp = tempDbPath();
+    try {
+      const store = await openStore(MODEL, { driver: nodeDriver(), path: temp.dbPath });
+      await store.entity('User').create({ id: 'u1', name: 'ada' });
+      await store.close();
+      const run = (/** @type {string} */ id, /** @type {(user: any) => any} */ fn) => migrate({ driver: nodeDriver(), path: temp.dbPath },
+        [{ $migration: '0.1', id, from: shapeHash(MODEL), to: shapeHash(MODEL), steps: [{ kind: 'host', run: 'h', version: '1' }] }],
+        { baseline: MODEL, model: MODEL, shadow: false, hosts: { h: { version: '1', run: (/** @type {any} */ scope) => scope.collection('User').update(fn) } } });
+      await assert.rejects(run('move', (user) => ({ ...user, id: 'u2' })),
+        coded('JD0023', /changed the key member 'id' of row 1 — key changes are not supported/));
+      await run('omit', (user) => ({ name: user.name.toUpperCase() }));
+      const reopened = await openStore(MODEL, { driver: nodeDriver(), path: temp.dbPath });
+      assert.deepEqual(await reopened.entity('User').load({}), [{ id: 'u1', name: 'ADA' }]);
+      await reopened.close();
+    }
+    finally { temp.cleanup(); }
+  });
+
+  it('a cursor the scope opened is returned when the step ends: a later pull is JD0025, and a later step meets no open statement', async () => {
+    const { dbPath, cleanup } = await seeded();
+    try {
+      /** @type {any} */
+      let kept;
+      const hosts = { h: { version: '1', run(/** @type {any} */ scope) {
+        kept = scope.relational.iterate({ from: 'docs', columns: { key: sql.column('key') } });
+        const first = kept.next();
+        assert.deepEqual([first.done, { ...first.value }], [false, { key: 'a' }]);
+      } } };
+      // the DDL after the host step used to meet the cursor's open statement: "database table is locked"
+      const outcome = await migrate({ driver: nodeDriver(), path: dbPath }, [link('peek', [
+        { kind: 'ddl', sql: 'CREATE TABLE "scratch_t" ("x" INTEGER)' }, { kind: 'ddl', sql: 'DROP TABLE "scratch_t"' }])],
+      { baseline: V1, shadow: false, hosts });
+      assert.deepEqual(/** @type {any} */ (outcome).applied, ['peek']);
+      assert.throws(() => kept.next(), coded('JD0025', /used its scope after the step ended/));
+    }
+    finally { cleanup(); }
+  });
+
+  it('a scope cursor iterates, breaks and disposes as any cursor does, on both drivers, and refuses a pull after its step', async () => {
+    const select = { from: 'docs', columns: { key: sql.column('key') } };
+    for (const driver of [nodeDriver, nodeWorkerDriver]) {
+      const { dbPath, cleanup } = await seeded(driver());
+      try {
+        /** @type {any} */
+        const seen = {};
+        /** @type {any} */
+        let kept;
+        const run = driver === nodeDriver
+          ? (/** @type {any} */ scope) => {
+            const cursor = scope.relational.iterate(select);
+            Object.assign(seen, { streaming: cursor.streaming, barrier: cursor.barrier, keys: [] });
+            for (const row of cursor) { seen.keys.push(row.key); break; }
+            seen.settled = cursor.settled;
+            const disposed = scope.relational.iterate(select);
+            disposed[Symbol.dispose]();
+            seen.disposed = disposed.settled;
+            kept = scope.relational.iterate(select);
+          }
+          : async (/** @type {any} */ scope) => {
+            const cursor = scope.relational.iterate(select);
+            Object.assign(seen, { streaming: cursor.streaming, barrier: cursor.barrier, keys: [] });
+            for await (const row of cursor) { seen.keys.push(row.key); break; }
+            seen.settled = cursor.settled;
+            const disposed = scope.relational.iterate(select);
+            await disposed[Symbol.asyncDispose]();
+            seen.disposed = disposed.settled;
+            kept = scope.relational.iterate(select);
+          };
+        await migrate({ driver: driver(), path: dbPath }, [link(`iterate-${driver.name}`)],
+          { baseline: V1, shadow: false, hosts: { h: { version: '1', run } } });
+        assert.deepEqual(seen, { streaming: 'row', barrier: null, keys: ['a'], settled: true, disposed: true }, driver.name);
+        if (driver === nodeDriver) assert.throws(() => kept.next(), coded('JD0025'));
+        else await assert.rejects(kept.next(), coded('JD0025'));
+        // its return stays the cursor's own: idempotent after the step
+        assert.deepEqual(await kept.return(), { done: true, value: undefined });
+      }
+      finally { cleanup(); }
+    }
+  });
+
+  it('a cancellation or a deadline its walk met passes as it is: JD2080 and JD2075, never re-coded', async () => {
+    for (const [code, options] of /** @type {[string, (hold: { now: number }) => any][]} */ ([
+      ['JD2080', () => {
+        const controller = new AbortController();
+        return { signal: controller.signal, hosts: { h: { version: '1', run: (/** @type {any} */ scope) =>
+          scope.collection('docs').update((/** @type {any} */ doc) => { controller.abort(); return { ...doc, name: 'X' }; }) } } };
+      }],
+      ['JD2075', (hold) => ({ deadline: 2000, runtime: { now: () => hold.now }, hosts: { h: { version: '1', run: (/** @type {any} */ scope) =>
+        scope.collection('docs').update((/** @type {any} */ doc) => { hold.now = 5000; return { ...doc, name: 'Y' }; }) } } })],
+    ])) {
+      const { dbPath, cleanup } = await seeded();
+      try {
+        const hold = { now: 1000 };
+        await assert.rejects(migrate({ driver: nodeDriver(), path: dbPath }, [link(`cancel-${code}`)],
+          { baseline: V1, shadow: false, batchSize: 1, ...options(hold) }), (/** @type {any} */ error) => error.code === code);
+        assert.deepEqual((await migrationStatus({ driver: nodeDriver(), path: dbPath }, [], {})).applied, []);
+      }
+      finally { cleanup(); }
+    }
+  });
+});
+
 describe('a host step that cannot run as its document names is JD0025, before anything runs', () => {
   it('a missing host, another version, and a documents-only run', async () => {
     const { dbPath, cleanup } = await seeded();

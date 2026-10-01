@@ -159,11 +159,14 @@ export function createDbLedger(client, options = {}) {
   if (!Object.hasOwn(client.collections, name)) {
     throw new TypeError(`createDbLedger: the client declares no collection '${name}' — open the store with idempotencyLedgerModel, or a model that declares it`);
   }
+  // whole milliseconds: the record's expiry is an integer member, so a
+  // fraction would pass here and be refused at the first claim
   const ttlMs = options.ttlMs === undefined ? DEFAULT_TTL_MS : options.ttlMs;
-  if (!Number.isFinite(ttlMs) || ttlMs <= 0) throw new TypeError('createDbLedger: ttlMs must be a positive number');
+  if (!Number.isSafeInteger(ttlMs) || ttlMs <= 0)
+    throw new TypeError('createDbLedger: ttlMs must be a positive whole number of milliseconds');
   const startedTtlMs = options.startedTtlMs === undefined ? ttlMs : options.startedTtlMs;
-  if (!Number.isFinite(startedTtlMs) || startedTtlMs <= 0 || startedTtlMs > ttlMs)
-    throw new TypeError('createDbLedger: startedTtlMs must be a positive number no greater than ttlMs');
+  if (!Number.isSafeInteger(startedTtlMs) || startedTtlMs <= 0 || startedTtlMs > ttlMs)
+    throw new TypeError('createDbLedger: startedTtlMs must be a positive whole number of milliseconds no greater than ttlMs');
   let runtime;
   try {
     runtime = resolveRuntime(options.runtime);

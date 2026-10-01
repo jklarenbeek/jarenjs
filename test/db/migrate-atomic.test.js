@@ -175,4 +175,54 @@ describe("the planner takes a narrowing's repair: transform", () => {
       /a jslt step .* or a host step/);
     assert.throws(() => planModelMigration(V1, V2, { dialect: sqliteDialect, transform: [] }), /at least one step/);
   });
+
+  it("a list's repair runs after every structural step, then the backfills its drafts owed; a map's stays in each draft's place", async () => {
+    // a collection AND an entity narrow, and the entity's link adds a column
+    const M1 = { $model: '0.1',
+      collections: { docs: { schema: { type: 'object', properties: { name: { type: 'string' }, e: { type: 'array', items: { type: 'number' } } } },
+        key: '/id', indexes: [{ name: 'by_e', path: '$.e', derive: 'vector', dims: 2 }] } },
+      entities: { User: { schema: { type: 'object', properties: { id: { type: 'string', 'x-entity': { key: true } }, name: { type: 'string' } } } } } };
+    const M2 = /** @type {any} */ (structuredClone(M1));
+    M2.collections.docs.schema.properties.name.maxLength = 3;
+    M2.entities.User.schema.properties.name.maxLength = 3;
+    M2.entities.User.schema.properties.nick = { type: 'string' };
+    const fix = (/** @type {string} */ run) => ({ kind: 'host', run, version: '1' });
+    const shape = (/** @type {any} */ transform) => planModelMigration(M1, M2, { dialect: sqliteDialect, id: 'repair', transform })
+      .migration.steps.map((/** @type {any} */ step) => (step.kind === 'host' ? step.run : step.kind));
+    // the entity's host reads the column its own link adds, so it runs after it
+    assert.deepEqual(shape([fix('fixDocs'), fix('fixUsers')]), ['ddl', 'fixDocs', 'fixUsers', 'derive']);
+    assert.deepEqual(shape(fix('fixAll')), ['ddl', 'fixAll', 'derive']);
+    assert.deepEqual(shape({ docs: fix('fixDocs'), User: fix('fixUsers') }), ['fixDocs', 'derive', 'ddl', 'fixUsers']);
+    const cut = (/** @type {any} */ doc) => (doc.name.length > 3 ? { ...doc, name: doc.name.slice(0, 3) } : undefined);
+    const repairs = { fixAll: { version: '1', run(/** @type {any} */ scope) {
+      scope.collection('docs').update(cut);
+      return scope.collection('User').update((/** @type {any} */ user) => ({ ...cut(user) ?? user, nick: 'n' }));
+    } } };
+    const temp = tempDbPath();
+    try {
+      const store = await openStore(M1, { driver: nodeDriver(), path: temp.dbPath });
+      await store.collection('docs').put({ id: 'a', name: 'abcdef', e: [1, 0] });
+      await store.entity('User').create({ id: 'u1', name: 'adalovelace' });
+      await store.close();
+      const { migration } = planModelMigration(M1, M2, { dialect: sqliteDialect, id: 'repair', transform: fix('fixAll') });
+      await migrate({ driver: nodeDriver(), path: temp.dbPath }, [migration], { baseline: M1, model: M2, compileSchema, hosts: repairs });
+      const reopened = await openStore(M2, { driver: nodeDriver(), path: temp.dbPath });
+      assert.deepEqual(await reopened.entity('User').get('u1'), { id: 'u1', name: 'ada', nick: 'n' });
+      assert.equal((await reopened.collection('docs').get('a'))?.name, 'abc');
+      await reopened.close();
+    }
+    finally { temp.cleanup(); }
+  });
+
+  it('a pair of column-layout models narrows nothing, so a transform given is refused, never dropped', () => {
+    const PHYSICAL = { $model: '0.1', entities: { Item: { schema: { type: 'object', properties: {
+      id: { type: 'integer', 'x-entity': { key: true } }, name: { type: 'string' } } },
+    physical: { table: 'item', columns: { id: { name: 'id', codec: 'integer', null: 'reject' },
+      name: { name: 'name', codec: 'text', null: 'null' } } } } } };
+    assert.deepEqual(planModelMigration(PHYSICAL, PHYSICAL, { dialect: sqliteDialect }).report.transformed, []);
+    assert.throws(() => planModelMigration(PHYSICAL, PHYSICAL, { dialect: sqliteDialect, transform: { kind: 'host', run: 'h', version: '1' } }),
+      /plans no draft transform/);
+    assert.throws(() => planModelMigration(PHYSICAL, PHYSICAL, { dialect: sqliteDialect, transform: /** @type {any} */ ({ kind: 'sql', sql: 'x' }) }),
+      /a jslt step .* or a host step/);
+  });
 });

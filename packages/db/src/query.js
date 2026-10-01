@@ -43,7 +43,7 @@ import {
   isRootScanSource, isEntityRootSource, BIND_REASONS,
 } from './plan.js';
 import { emitPlan, emitEntityPlan, createEntityPredicateEmitters, UnrepresentablePath, physicalComparable } from './emit.js';
-import { selectPlan, conjoin, effectiveOrder, planOrder } from './algebra.js';
+import { selectPlan, conjoin, effectiveOrder, planOrder, ordersByColumn } from './algebra.js';
 import {
   compileSetResidual, compileRowResidual, compilePackedResidual, sequenceResult,
 } from './residual.js';
@@ -137,12 +137,16 @@ function bindable(value) {
  * one `$eq` matches against a present null or boolean, and an object or
  * array item one it compares structurally, so either sends the call to
  * the engine; so does a missing external, which the engine refuses by
- * its own error.
+ * its own error. A scalar still crosses as one JSON value, so only a
+ * JSON scalar binds: a bigint, a function or a symbol is the engine's to
+ * answer.
  * @param {any} value
  */
 function listBindable(value) {
   if (value === undefined) return false;
-  if (value === null || typeof value !== 'object') return true;
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return true;
+  if (typeof value === 'number') return Number.isFinite(value);
+  if (typeof value !== 'object') return false;
   return (Array.isArray(value) ? value : Object.values(value)).every(bindable);
 }
 
@@ -1844,8 +1848,11 @@ export function createEntityQueryEngine(context) {
   /** Fetch every referenced entity's rows and build the in-memory
    * root — each fetch wearing the profile's mandatory predicate for its
    * entity and its row bound (`LIMIT maxRows + 1`, refused when crossed),
-   * so a residual's input is as bounded as a native answer. */
-  const fetchRoot = (entry) => {
+   * so a residual's input is as bounded as a native answer. The
+   * predicate's externals bind from the call's; one the database cannot
+   * take is refused (`JD0011`), never dropped: a mandatory predicate runs
+   * in the database or not at all. */
+  const fetchRoot = (entry, externals) => {
     if (entry.fetchers === null) {
       entry.fetchers = [...(entry.planned.referenced.length === 0
         ? entities.keys() : entry.planned.referenced)].map((name) => {
@@ -1870,10 +1877,18 @@ export function createEntityQueryEngine(context) {
               const value = `${q('t')}.${q(column.physical)}`;
               return column.codec === 'text' ? dialect.codepoint(value) : value;
             }).join(', ') : `${q('t')}.${dialect.rowIdentity()}`}${limit}`,
-          params: slots.map((slot) => slot.literal),
+          slots,
           statement: null,
         };
       });
+    }
+    for (const fetcher of entry.fetchers) {
+      if (divertReason(fetcher, externals) === null) continue;
+      const names = [...new Set(fetcher.slots.filter((/** @type {any} */ slot) => 'external' in slot)
+        .map((/** @type {any} */ slot) => `'$${slot.external}'`))];
+      throw profileEntityRefusal(`the profile's predicate for '${fetcher.name}' cannot bind ${names.join(', ')} `
+        + 'for this call — missing, or a value the database cannot compare — and a mandatory predicate runs '
+        + 'in the database or not at all', entities.get(fetcher.name)?.docPath);
     }
     /** @type {any} */
     const root = {};
@@ -1882,7 +1897,7 @@ export function createEntityQueryEngine(context) {
       const fetcher = entry.fetchers[i];
       if (fetcher.statement === null) fetcher.statement = connection.prepare(fetcher.sql, { readOnly: true });
       return chain(fetcher.statement, (statement) =>
-        chain(statement.all(fetcher.params), (rows) => {
+        chain(statement.all(fetcher.slots.map((slot) => slotValue(slot, externals))), (rows) => {
           admittedRows(entry, rows);
           root[fetcher.name] = checkRows(entry, rows, fetcher.name).map((row) =>
             checkBytes(entry, mergeEntityRow(mapping.entities[fetcher.name], row, '__doc'), fetcher.name));
@@ -1895,7 +1910,7 @@ export function createEntityQueryEngine(context) {
   const runResidual = (entry, document, externals) => {
     if (entry.setResidual === null)
       entry.setResidual = compileSetResidual(document, entry.residualLimits, operators, zoneProvider);
-    return chain(fetchRoot(entry), (root) => entry.setResidual(root, externals));
+    return chain(fetchRoot(entry, externals), (root) => entry.setResidual(root, externals));
   };
 
   const execute = (document, options = undefined) => {
@@ -2092,7 +2107,7 @@ export function createEntityQueryEngine(context) {
       return cursorFactory({ ...classified, signal, deadline, now: state.now, wrap: driverWrap,
         materialize: () => {
           entry.admitted = { statements: 0, rows: 0, bytes: 0 };
-          return chain(fetchRoot(entry), (root) => packedResidualOf(entry, document)(root, externals).map(each));
+          return chain(fetchRoot(entry, externals), (root) => packedResidualOf(entry, document)(root, externals).map(each));
         } });
     }
     const params = entry.slots.map((slot) => slotValue(slot, externals));
@@ -2280,6 +2295,14 @@ export function createLoadEngine(context, entityName) {
     }
     const predicate = mandatoryEntityPredicate(profile, entities.get(name), mapping.entities[name], analyzeOpts);
     if (predicate === null) return node;
+    // the profile's predicate binds as the load's own where does: an
+    // external it names has no value here, and would reach the driver as
+    // an unbound parameter
+    const external = externalOf(predicate);
+    if (external !== null) {
+      throw refuse(`the profile's predicate for '${name}' names the external '$${external}', and a load `
+        + 'binds none — run the read through execute() with externals, or spell the value into the predicate', path);
+    }
     return { ...node, where: conjoin(node.where, predicate) };
   };
 
@@ -2675,6 +2698,13 @@ export function createLoadEngine(context, entityName) {
      */
     const requirePhysicalKeyset = (properties) => {
       if (!physicalEntity) return;
+      // a view enforces no key: two rows can carry the declared one, and a
+      // continuation past that value would skip the second
+      if (tree.entityMapping.kind === 'view') {
+        throw refuse('a keyset continuation over a view is not qualified: a view enforces no '
+          + 'primary key, so two rows can share the declared key and a page past one would skip '
+          + 'the other — load the view whole, or page the table it reads', []);
+      }
       if (dialect.name !== 'sqlite') {
         throw refuse(`a physical keyset continuation is not qualified on ${dialect.name}: its `
           + 'continuation values are compared in code-point and int64 order, which only the SQLite '
@@ -2796,12 +2826,14 @@ export function createLoadEngine(context, entityName) {
       profile,
       identity: identity === null ? null : deepFreeze(identity),
       // the order the statement executes under, in the vocabulary both
-      // query engines report: the declared terms and the tie-breaker the
-      // ORDER BY above appends — the primary key in keyset mode, the row
-      // identity otherwise. Built from the same normalized terms, so the
-      // explanation cannot drift from the clause
-      effective: deepFreeze(effectiveOrder(order,
-        identity === null ? undefined : { keyColumns })),
+      // query engines report: the declared terms by PROPERTY and the
+      // tie-breaker the ORDER BY above appends — the primary key in keyset
+      // mode and over a physical table, the row identity otherwise. Built
+      // from the same normalized terms, so the explanation cannot drift
+      // from the clause
+      effective: deepFreeze(effectiveOrder(order.map((term) => (ordersByColumn(term.ref)
+        ? { ...term, ref: { ...term.ref, column: propertyOfPhysical(term.ref.column) } } : term)),
+        identity === null && !physicalEntity ? undefined : { keyColumns })),
       // the declared terms' PROPERTIES: what a continuation reads off a document
       declared: order.map((term) => propertyOfPhysical(term.ref.column)),
       keyColumns,
@@ -2869,8 +2901,8 @@ export function createLoadEngine(context, entityName) {
   const decodingOfText = () => textDecoding ?? chain(textKeyDecoding(connection), (decoding) => (textDecoding = decoding));
   /** A text key that does not survive its SQLite text encoding cannot be
    * sought past: refused before any continuation is built on it. @param {any} column */
-  const refuseTextKey = (column) => refuse(`the physical key '${column.name}' cannot round-trip through its `
-    + 'SQLite text encoding, so a continuation over it would seek past the wrong rows', []);
+  const refuseTextKey = (column) => refuse(`the text column '${column.name}' a continuation seeks by cannot `
+    + 'round-trip through its SQLite text encoding, so the continuation would seek past the wrong rows', []);
   /** A row of a keyset read, its text identities proven and their byte
    * columns dropped. @param {any} entry @param {any} row */
   const provenRow = (entry, row) => (entry.textKeys === null ? row

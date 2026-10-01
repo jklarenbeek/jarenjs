@@ -54,8 +54,8 @@ import { readSchema } from './introspect.js';
 import { verifyPhysical } from './physical.js';
 import { walkPhysicalRows, transformPhysicalRows } from './physical-transform.js';
 import {
-  MIGRATION_VERSION, isPerDocumentAssertion, compileDocumentStep, checkMigrationDocument,
-  normalizeAssertionBounds, ASSERTION_BOUNDS_DEFAULT, createAssertionBoundGuard,
+  MIGRATION_VERSION, isPerDocumentAssertion, compileDocumentStep, checkMigrationDocument, checkReplacement,
+  stepFailure, normalizeAssertionBounds, ASSERTION_BOUNDS_DEFAULT, createAssertionBoundGuard,
 } from './document-steps.js';
 
 export { MIGRATION_VERSION, isPerDocumentAssertion, ASSERTION_BOUNDS_DEFAULT };
@@ -327,17 +327,21 @@ function hostRefusal(migration, index, step, host) {
  * `all()` — every document as the table holds it now (a mapped entity row
  * WHOLE, as a jslt step reads it) — and `update(fn)`, the transform a jslt
  * stylesheet is, spelled in code: `fn(doc)` answers the replacement, or
- * `undefined` to keep the document; it answers how many it replaced.
+ * `undefined` to keep the document; it answers how many it replaced. A
+ * replacement is checked as a stylesheet's is (`checkReplacement`): a
+ * non-document, or a moved key member, refuses the step.
  * @param {any} connection @param {string} name @param {any} step @param {any} options
  * @param {() => void} closed - throws once the step has returned
+ * @param {(reason: string) => never} fail - the step's own refusal
  */
-function hostCollection(connection, name, step, options, closed) {
+function hostCollection(connection, name, step, options, closed, fail) {
   const stepEntity = entityStepMapping(options, name, step, connection.dialect);
   if (stepEntity?.mapping.document === false) {
     throw refuse('JD0025', `'${name}' is a column-mapped table without a document: a host step `
       + 'reads and writes it through scope.relational');
   }
   const mapping = stepEntity?.mapping ?? null;
+  const keys = mapping?.keys ?? [];
   const read = (/** @type {any} */ row) => (mapping === null ? JSON.parse(row.doc) : mergeEntityRow(mapping, row, 'doc'));
   return Object.freeze({
     all() {
@@ -352,13 +356,15 @@ function hostCollection(connection, name, step, options, closed) {
       if (typeof fn !== 'function') throw new TypeError('update() takes a function from a document to its replacement');
       let replaced = 0;
       return chain(documentWriter(connection, name, stepEntity, options.runtime), (write) =>
-        chain(walkRows(connection, name, options.batchSize, (rows) => sequentially(rows, (row) =>
-          chain(fn(read(row)), (next) => {
+        chain(walkRows(connection, name, options.batchSize, (rows) => sequentially(rows, (row) => {
+          const document = read(row);
+          return chain(fn(document), (next) => {
             if (next === undefined) return null;
             closed();
             replaced++;
-            return write(next, row.rid);
-          })), false, mapping, options.check), () => replaced));
+            return write(checkReplacement(next, document, keys, row.rid, fail), row.rid);
+          });
+        }), false, mapping, options.check), () => replaced));
     },
   });
 }
@@ -378,6 +384,7 @@ function runHostStep(connection, migration, index, step, options) {
   const host = options.hosts?.[step.run];
   // checked before the run began; a borrowed caller could still pass another list
   if (host === undefined || host.version !== step.version) throw hostRefusal(migration, index, step, host);
+  const kind = `host '${step.run}' ${step.version}`;
   let open = true;
   const closed = () => {
     if (!open) {
@@ -385,35 +392,86 @@ function runHostStep(connection, migration, index, step, options) {
         + 'the step ended — a host step runs inside its savepoint, and only there');
     }
   };
+  // every cursor the scope opened: returned when the step ends, so none
+  // keeps a statement open past its savepoint, and a pull after refuses
+  /** @type {Set<any>} */
+  const cursors = new Set();
   const relational = relationalEngine({
     dialect: connection.dialect,
     connection,
     available: closed,
     read: (run) => run(connection),
-    cursor: (spec) => (connection.synchronous ? createSyncCursor : createCursor)({
-      ...spec, open: () => { closed(); return spec.open(connection); } }),
+    cursor: (spec) => stepCursor((connection.synchronous ? createSyncCursor : createCursor)({
+      ...spec, open: () => { closed(); return spec.open(connection); } }), connection.synchronous, closed, cursors),
     // a write is a savepoint of the migration's transaction
     write: (run) => connection.transaction(run),
   });
+  const fail = (/** @type {string} */ reason) => { throw stepFailure(migration.id, index, kind, reason); };
   const scope = Object.freeze({
-    collection: (/** @type {string} */ name) => { closed(); return hostCollection(connection, name, step, options, closed); },
+    collection: (/** @type {string} */ name) => { closed(); return hostCollection(connection, name, step, options, closed, fail); },
     relational,
   });
   const ctx = Object.freeze({ migration: migration.id, step: index, version: step.version, shadow: false });
-  const failed = (/** @type {any} */ error) => Object.assign(refuse('JD0023',
-    `migration '${migration.id}' step ${index} (host '${step.run}' ${step.version}) failed: ${error?.message ?? String(error)}`,
-    error), verdictOf(error));
+  // the scope's own refusals keep their codes — a cancellation its walk met
+  // (JD2080, JD2075), a scope used out of its step (JD0025), a replacement
+  // refused as a stylesheet's is (JD0023); anything else the host raised is
+  // JD0023 naming the step, the host's error as cause, its verdict kept
+  const failed = (/** @type {any} */ error) => (HOST_SCOPE_REFUSALS.has(error?.code) ? error
+    : Object.assign(refuse('JD0023', `migration '${migration.id}' step ${index} (${kind}) failed: `
+      + `${error?.message ?? String(error)}`, error), verdictOf(error)));
+  // the step's end: nothing the scope holds outlives it
+  const end = () => {
+    open = false;
+    const pending = [];
+    for (const cursor of cursors) {
+      try { pending.push(cursor.return()); }
+      catch { /* a cursor that cannot close has nothing left to release */ }
+    }
+    cursors.clear();
+    const settling = pending.filter(isThenable);
+    return settling.length === 0 ? null : Promise.allSettled(settling).then(() => null);
+  };
   let out;
   try { out = host.run(scope, ctx); }
-  catch (error) { open = false; throw failed(error); }
-  if (!isThenable(out)) { open = false; return null; }
+  catch (error) { end(); throw failed(error); }
+  if (!isThenable(out)) return end();
   if (connection.synchronous) {
-    open = false;
+    end();
     out.then(undefined, () => undefined);
     throw refuse('JD0025', `migration '${migration.id}' step ${index}: host '${step.run}' answered a promise on a `
       + 'synchronous connection — a host step runs synchronously there; an asynchronous host needs an asynchronous driver');
   }
-  return out.then(() => { open = false; return null; }, (error) => { open = false; throw failed(error); });
+  return out.then(() => end(), (error) => chain(end(), () => { throw failed(error); }));
+}
+
+/** The codes a host step's scope raises itself, which its step passes on
+ * as they are. */
+const HOST_SCOPE_REFUSALS = new Set(['JD2080', 'JD2075', 'JD0025', 'JD0023']);
+
+/**
+ * A relational cursor of a host step's scope: every pull checks the step
+ * is still running (`JD0025` after it), and the step's end returns it.
+ * @param {any} cursor @param {boolean} synchronous @param {() => void} closed
+ * @param {Set<any>} cursors - the step's open cursors
+ */
+function stepCursor(cursor, synchronous, closed, cursors) {
+  cursors.add(cursor);
+  const next = synchronous ? () => { closed(); return cursor.next(); } : () => {
+    try { closed(); }
+    catch (error) { return Promise.reject(error); }
+    return cursor.next();
+  };
+  const stepped = {
+    streaming: cursor.streaming,
+    barrier: cursor.barrier,
+    get settled() { return cursor.settled; },
+    next,
+    return: () => cursor.return(),
+    ...(synchronous
+      ? { [Symbol.iterator]: () => stepped, [Symbol.dispose]: () => cursor.return() }
+      : { [Symbol.asyncIterator]: () => stepped, [Symbol.asyncDispose]: async () => { await cursor.return(); } }),
+  };
+  return Object.freeze(stepped);
 }
 
 /**
@@ -519,10 +577,13 @@ export function planMigration(fromModel, toModel, options = undefined) {
     normalizeEntities(toModel);
     if (canonicalizeJson(fromModel) !== canonicalizeJson(toModel))
       throw refuse('JD0021', 'changed column layouts require planTableMigration on the open connection or planPhysicalMigration with explicit preservation dispositions');
+    // an unchanged pair narrows nothing, so a transform given is one no
+    // draft asks for — refused as it is for any such pair, never dropped
+    transformOf(options?.transform)?.finish();
     return { migration: { $migration: MIGRATION_VERSION,
       id: options?.id ?? `to-${shapeHash(toModel).slice(0, 8)}`,
       from: shapeHash(fromModel), to: shapeHash(toModel), steps: [] },
-    report: { renamed: [], added: [], removed: [], schemaChanged: [], drafts: [], widened: [], destructive: false } };
+    report: { renamed: [], added: [], removed: [], schemaChanged: [], drafts: [], widened: [], transformed: [], destructive: false } };
   }
   const mapping = { derived: options?.derived ?? 'virtual', rtree: options?.rtree !== false,
     // a model that declares an index EXPRESSION resolves its functions
@@ -722,9 +783,18 @@ export function planMigration(fromModel, toModel, options = undefined) {
         report.widened.push(name);
       }
       else {
+        // a transform rewrites the document — the planner's draft, or the
+        // one the caller supplied — and a stored derived column is computed
+        // FROM the document: without this it keeps the old document's value
+        const stale = toPlan.derived
+          .filter((column) => toColumns.get(column.name)?.stored === true)
+          .map((column) => column.name)
+          .filter((columnName) => !backfilled.includes(columnName));
+        const backfills = stale.length === 0 ? [] : [deriveStep(name, toPlan, stale,
+          `recompute derived column(s) ${stale.join(', ')} on '${name}' after the transform`)];
         if (transform !== null && transform.covers(name)) {
           report.transformed.push(name);
-          steps.push(...transform.take(name));
+          steps.push(...transform.place(name, backfills));
         }
         else {
           report.drafts.push(name);
@@ -736,18 +806,7 @@ export function planMigration(fromModel, toModel, options = undefined) {
             note: `the schema of '${name}' changed; the planner cannot infer the data `
               + 'transform. Fill in the stylesheet (or delete this step if every stored '
               + 'document already validates against the new schema) and remove "draft".',
-          });
-        }
-        // a transform rewrites the document — the planner's draft, or the
-        // one the caller supplied — and a stored derived column is computed
-        // FROM the document: without this it keeps the old document's value
-        const stale = toPlan.derived
-          .filter((column) => toColumns.get(column.name)?.stored === true)
-          .map((column) => column.name)
-          .filter((columnName) => !backfilled.includes(columnName));
-        if (stale.length > 0) {
-          steps.push(deriveStep(name, toPlan, stale,
-            `recompute derived column(s) ${stale.join(', ')} on '${name}' after the transform`));
+          }, ...backfills);
         }
       }
     }
@@ -774,7 +833,8 @@ export function planMigration(fromModel, toModel, options = undefined) {
   }
 
   planEntityChanges(fromModel, toModel, dialect, steps, report, transform);
-  transform?.finish();
+  // a list's repair runs last: after every structural step it may read
+  steps.push(...(transform?.finish() ?? []));
 
   const migration = {
     $migration: MIGRATION_VERSION,
@@ -790,12 +850,15 @@ export function planMigration(fromModel, toModel, options = undefined) {
  * The `transform` a plan puts in place of the drafts a narrowing needs — so
  * a host that plans each link from model snapshots plans one that carries
  * its own repair, and pins its checksum. Steps (one, or a list) are the
- * link's repair and take the place of every draft, at the first; a map by
- * collection or entity name replaces that name's draft only. A step is a
- * `jslt` transform or a `host` step; a transform no draft asks for is a
+ * link's repair and take the place of every draft: they run once, after
+ * every structural step of the link — an ADD COLUMN a later entity plans
+ * included — followed by the derived-column backfills the drafts they
+ * replace would have run after them. A map by collection or entity name
+ * replaces that name's draft only, in its place. A step is a `jslt`
+ * transform or a `host` step; a transform no draft asks for is a
  * programming error.
  * @param {any} transform
- * @returns {{ covers(name: string): boolean, take(name: string): any[], finish(): void } | null}
+ * @returns {{ covers(name: string): boolean, place(name: string, after: any[]): any[], finish(): any[] } | null}
  */
 function transformOf(transform) {
   if (transform === undefined) return null;
@@ -811,10 +874,15 @@ function transformOf(transform) {
     const steps = list(transform, 'a transform step');
     if (steps.length === 0) throw new TypeError('a transform names at least one step');
     let used = false;
+    /** the backfills that follow the repair: they read what it wrote */
+    const tail = [];
     return {
       covers: () => true,
-      take: () => { if (used) return []; used = true; return steps; },
-      finish: () => { if (!used) throw new TypeError('the pair plans no draft transform — it widens, or no document schema changed; put the steps in the migration document directly'); },
+      place: (_name, after) => { used = true; tail.push(...after); return []; },
+      finish: () => {
+        if (!used) throw new TypeError('the pair plans no draft transform — it widens, or no document schema changed; put the steps in the migration document directly');
+        return [...steps, ...tail];
+      },
     };
   }
   if (transform === null || typeof transform !== 'object')
@@ -823,10 +891,11 @@ function transformOf(transform) {
   const taken = new Set();
   return {
     covers: (name) => byName.has(name),
-    take: (name) => { taken.add(name); return byName.get(name) ?? []; },
+    place: (name, after) => { taken.add(name); return [...(byName.get(name) ?? []), ...after]; },
     finish: () => {
       const unused = [...byName.keys()].find((name) => !taken.has(name));
       if (unused !== undefined) throw new TypeError(`the transform names '${unused}', whose schema this pair does not narrow`);
+      return [];
     },
   };
 }
@@ -1089,7 +1158,7 @@ function planEntityChanges(fromModel, toModel, dialect, steps, report, transform
       }
       else if (transform !== null && transform.covers(name)) {
         report.transformed.push(name);
-        steps.push(...transform.take(name));
+        steps.push(...transform.place(name, []));
       }
       else {
         report.drafts.push(name);
@@ -1469,6 +1538,43 @@ function entityStepMapping(options, table, step, dialect) {
 }
 
 /**
+ * The database's foreign-key violations now, as plain rows — `null` where
+ * the dialect has no check to run (the engine enforces every reference,
+ * or offers no check).
+ * @param {any} connection @returns {any} value-or-promise of `any[] | null`
+ */
+function foreignKeyViolations(connection) {
+  const dialect = connection.dialect;
+  if (dialect.capabilities.foreignKeysAlwaysOn === true || typeof dialect.pragma?.foreignKeyCheck !== 'function') return null;
+  return chain(connection.prepare(dialect.pragma.foreignKeyCheck()), (statement) => chain(statement.all([]),
+    (rows) => rows.map((/** @type {any} */ row) => ({ table: row.table,
+      rowid: row.rowid === null || row.rowid === undefined ? null : String(row.rowid),
+      parent: row.parent, fkid: row.fkid }))));
+}
+
+/**
+ * The violations `after` holds beyond `before`, compared as whole rows and
+ * counted: a WITHOUT ROWID table's violations carry no rowid, so two of
+ * them read alike, and one fixed while another appears is still one new.
+ * @param {any[] | null} before @param {any[]} after @returns {any[]}
+ */
+function introducedViolations(before, after) {
+  const seen = new Map();
+  for (const row of before ?? []) {
+    const key = JSON.stringify(row);
+    seen.set(key, (seen.get(key) ?? 0) + 1);
+  }
+  const introduced = [];
+  for (const row of after) {
+    const key = JSON.stringify(row);
+    const left = seen.get(key) ?? 0;
+    if (left > 0) seen.set(key, left - 1);
+    else introduced.push(row);
+  }
+  return introduced;
+}
+
+/**
  * Run one migration's steps against a connection.
  * @param {any} connection
  * @param {any} migration
@@ -1509,7 +1615,8 @@ function runSteps(connection, migration, options) {
         // the documented ALTER TABLE procedure (§10): create the new
         // shape under the temporary name, copy, drop, rename, recreate
         // indexes, then PRAGMA foreign_key_check INSIDE the
-        // transaction — a broken reference fails the migration
+        // transaction — a reference the rebuild broke fails the migration,
+        // one broken before it began is not the rebuild's doing
         const temporary = `${current.table}__rebuild`;
         const statements = [
           ...current.create,
@@ -1518,18 +1625,20 @@ function runSteps(connection, migration, options) {
           dialect.ddl.renameTable(temporary, current.table),
           ...current.indexes,
         ];
+        /** @type {any[] | null} */
+        let before = null;
         const runNext = (j) => {
           if (j >= statements.length) {
-            if (dialect.capabilities.foreignKeysAlwaysOn === true) return null;
-            return chain(connection.prepare(dialect.pragma.foreignKeyCheck()),
-              (checkStatement) => chain(checkStatement.all([]), (violations) => {
-                if (violations.length > 0) {
-                  fail(`foreign_key_check found ${violations.length} broken reference(s) `
-                    + `after rebuilding '${current.table}' `
-                    + `(first: ${JSON.stringify(violations[0])})`, undefined, { class: 'constraint', retryable: false });
-                }
-                return null;
-              }));
+            if (before === null) return null;
+            return chain(foreignKeyViolations(connection), (after) => {
+              const violations = introducedViolations(before, /** @type {any[]} */ (after));
+              if (violations.length > 0) {
+                fail(`foreign_key_check found ${violations.length} broken reference(s) `
+                  + `after rebuilding '${current.table}' `
+                  + `(first: ${JSON.stringify(violations[0])})`, undefined, { class: 'constraint', retryable: false });
+              }
+              return null;
+            });
           }
           try {
             return chain(connection.exec(statements[j]), () => runNext(j + 1));
@@ -1538,7 +1647,7 @@ function runSteps(connection, migration, options) {
             return fail(/** @type {Error} */ (cause).message, /** @type {Error} */ (cause));
           }
         };
-        return runNext(0);
+        return chain(foreignKeyViolations(connection), (rows) => { before = rows; return runNext(0); });
       }
       if (current.kind === 'derive') {
         // recompute stored derived columns from the documents already
@@ -1847,7 +1956,9 @@ export function migrationStatus(target, migrations, options = {}) {
   }
   catch (error) { if (target?.connection !== undefined) throw error; return Promise.reject(error); }
   if (!Array.isArray(migrations)) throw new TypeError('migrationStatus needs the full ordered migration list');
-  return withMigrationConnection(target, (connection) => {
+  // a driver failure — a file that will not open, one that is not a
+  // database — is classified as a run's is (JD0023), never the binding's own
+  return attempt(() => withMigrationConnection(target, (connection) => {
     if (connection.mustQueue) throw refuse('JD0021', 'status needs an exclusively available connection or its owning transaction scope');
     const dialect = connection.dialect, statements = historyStatements(dialect);
     return chain(registerDeriveFunctions(connection), () => chain(connection.prepare(dialect.introspect.tableExists()), (probe) =>
@@ -1876,7 +1987,7 @@ export function migrationStatus(target, migrations, options = {}) {
           : compareShapeToModel(driver, connection, options.model, options.registerFunctions),
         (difference) => ({ applied, pending, drift: difference, upToDate: difference === null, baseline }));
       }))));
-  });
+  }), (error) => runFailure(error, 'the migration status could not be read'));
 }
 
 /**
@@ -2078,28 +2189,36 @@ export function migrate(target, migrations, options) {
               });
             });
           // a link ends with the database's own foreign-key check, before its
-          // history row: a reference a step broke refuses the link, listed
-          const foreignKeyCheck = (scope, migration) => dialect.capabilities.foreignKeysAlwaysOn === true
-            || typeof dialect.pragma?.foreignKeyCheck !== 'function' ? null
-            : chain(scope.prepare(dialect.pragma.foreignKeyCheck()), (statement) => chain(statement.all([]), (violations) => {
+          // history row: a reference a step broke refuses the link, listed.
+          // The check reads the whole database, so it is taken before the
+          // steps too, in the same transaction: a violation already there (an
+          // orphan written while enforcement was off) is not the link's doing
+          const foreignKeyCheck = (scope, migration, before) => (before === null ? null
+            : chain(foreignKeyViolations(scope), (after) => {
+              const violations = introducedViolations(before, /** @type {any[]} */ (after));
               if (violations.length === 0) return null;
-              const listed = violations.slice(0, 10).map((violation) => ({ ...violation }));
+              const listed = violations.slice(0, 10);
               throw Object.assign(refuse('JD0023', `migration '${migration.id}' leaves ${violations.length} foreign-key `
                 + `violation(s): ${JSON.stringify(listed)}${violations.length > listed.length ? ' …' : ''}`),
               { class: 'constraint', retryable: false });
             }));
-          // one link's work in the transaction or savepoint it is given: its
-          // steps, its physical checks, the foreign-key check, its history row
-          // — and, for the chain's last link, the final checks
+          // one link's work in the transaction or savepoint it is given: the
+          // foreign-key baseline, its steps, its physical checks, the
+          // foreign-key check, its history row — and, for the chain's last
+          // link, the final checks
           const linkWork = (scope, migration, final) => {
             let allocations;
-            let work = migration.physical ? chain(verifyPreservation(scope, migration.physical, false), (state) => { allocations = state; }) : null;
+            /** @type {any[] | null} */
+            let violationsBefore = null;
+            let work = chain(foreignKeyViolations(scope), (rows) => { violationsBefore = rows; });
+            work = chain(work, () => (migration.physical
+              ? chain(verifyPreservation(scope, migration.physical, false), (state) => { allocations = state; }) : null));
             work = chain(work, () => historyExists ? null : chain(scope.exec(statements.create), () => { historyExists = true; }));
             work = chain(work, () => runSteps(scope, migration, runOptions));
             work = chain(work, () => migration.physical ? verifyPreservation(scope, migration.physical, true, allocations) : null);
             work = chain(work, () => acceptTarget(scope, final ? finalTarget : migration.physical?.target));
             work = chain(work, () => final ? finalChecks(scope, migration) : null);
-            work = chain(work, () => foreignKeyCheck(scope, migration));
+            work = chain(work, () => foreignKeyCheck(scope, migration, violationsBefore));
             return chain(work, () => chain(scope.prepare(statements.insert), (insert) =>
               insert.run([migration.id, runtime.now(), migration.from, migration.to, migrationChecksum(migration), migration.steps.length])));
           };

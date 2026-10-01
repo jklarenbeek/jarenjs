@@ -151,11 +151,30 @@ export function fanProjection(projection) {
  */
 export function snapshot(node) {
   if (node === null || typeof node !== 'object') return node;
-  if (Array.isArray(node)) return node.map(snapshot);
-  /** @type {Record<string, any>} */
-  const out = {};
-  for (const key of Object.keys(node)) defineOwn(out, key, snapshot(node[key]));
-  return out;
+  // an explicit stack, not recursion: a grouping nested by hand is as deep
+  // as its author wrote it, and a deep one must not overflow the copy
+  /** @param {any} source @returns {any} */
+  const shell = (source) => (Array.isArray(source) ? new Array(source.length) : {});
+  const root = shell(node);
+  const pending = [node, root];
+  while (pending.length > 0) {
+    const out = pending.pop();
+    const source = pending.pop();
+    const keys = Array.isArray(source) ? null : Object.keys(source);
+    const count = keys === null ? source.length : keys.length;
+    for (let i = 0; i < count; i++) {
+      const key = keys === null ? i : keys[i];
+      let item = source[key];
+      if (item !== null && typeof item === 'object') {
+        const copy = shell(item);
+        pending.push(item, copy);
+        item = copy;
+      }
+      if (keys === null) out[key] = item;
+      else defineOwn(out, /** @type {string} */ (key), item);
+    }
+  }
+  return root;
 }
 
 /**

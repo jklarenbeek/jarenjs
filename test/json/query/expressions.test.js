@@ -493,4 +493,28 @@ describe('constructed __proto__ members are data, not the prototype', () => {
     const q = compileJsonQuery(parse('{"title": "$.t"}'));
     assert.deepStrictEqual(q({ t: 'x' }), { title: 'x' });
   });
+
+  it('should keep a $const value\'s __proto__ member as data, at every depth', () => {
+    const q = compileJsonQuery({ $const: parse('{"__proto__": {"polluted": true}, "list": [{"__proto__": 2}]}') });
+    const out = q(null);
+    assert.strictEqual(Object.getPrototypeOf(out), Object.prototype);
+    assert.strictEqual(Object.hasOwn(out, '__proto__'), true);
+    assert.deepStrictEqual(out['__proto__'], { polluted: true });
+    assert.strictEqual(Object.hasOwn(out.list[0], '__proto__'), true);
+    assert.strictEqual(Object.isFrozen(out.list[0]), true);
+    assert.strictEqual(/** @type {any} */ ({}).polluted, undefined);
+  });
+});
+
+describe('a document nested thousands deep compiles without exhausting the stack', () => {
+  it('should compile and answer a 20,000-deep same-operator nest, and copy it as its .doc', () => {
+    let where = /** @type {any} */ ({ $eq: ['$it', 0] });
+    for (let i = 1; i < 20000; i++) where = { $or: [where, { $eq: ['$it', i] }] };
+    const q = compileJsonQuery({ $for: { it: '$[*]' }, $where: where, $return: '$it' });
+    assert.deepStrictEqual(q([5, 20001, 19999]), [5, 19999]);
+    let depth = 0;
+    for (let node = q.doc.$where; node.$or !== undefined; node = node.$or[0]) depth++;
+    assert.strictEqual(depth, 19999);
+    assert.strictEqual(Object.isFrozen(q.doc.$where.$or[0]), true);
+  });
 });
