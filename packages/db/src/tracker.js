@@ -504,12 +504,15 @@ export function createTracker(context) {
     const joinOnly = [];
     let fallbacks = 0;
     const unversioned = new Set();
+    /** Rules that read another row, checked inside the save's transaction. @type {(() => any)[]} */
+    const deferred = [];
+    const defer = { defer: (/** @type {() => any} */ run) => { deferred.push(run); } };
 
     for (const record of records.values()) {
       const core = coreFor(record.entity);
       if (record.pendingInsert === true) {
         core.plan.writable?.();
-        if (core.plan.document !== false) core.plan.checkMutation?.('insert', null, record.current);
+        if (core.plan.document !== false) core.plan.checkMutation?.('insert', null, record.current, defer);
         let list = inserts.get(record.entity);
         if (list === undefined) {
           list = [];
@@ -529,7 +532,7 @@ export function createTracker(context) {
       if (createJSONPatch(record.snapshot, record.current).length === 0) continue;
       core.plan.writable?.();
       record.stamped = core.stampUpdated(record.current);
-      if (core.plan.document !== false) core.plan.checkMutation?.('update', record.snapshot, record.stamped);
+      if (core.plan.document !== false) core.plan.checkMutation?.('update', record.snapshot, record.stamped, defer);
       const parts = partitionDiff(record.entity, record);
       for (const member of parts.m2mMembers) {
         joinOps.push(joinDiff(record.entity, record.snapshot, record.stamped,
@@ -554,7 +557,7 @@ export function createTracker(context) {
     const deletes = [];
     for (const removal of removals.values()) {
       coreFor(removal.entity).plan.writable?.();
-      coreFor(removal.entity).plan.checkMutation?.('delete', removal.snapshot, null);
+      coreFor(removal.entity).plan.checkMutation?.('delete', removal.snapshot, null, defer);
       deletes.push(removal);
       if (coreFor(removal.entity).plan.version === null)
         unversioned.add(removal.entity);
@@ -658,12 +661,15 @@ export function createTracker(context) {
         const plan = coreFor(record.entity).plan;
         const params = [];
         const assignments = [];
+        // the members this statement sets, which an UPDATE OF rule reads
+        const assigned = [];
         if (parts.fallback) {
           const split = plan.split(record.stamped);
           for (const value of split.values) {
             if (value.name === plan.version) continue;
             assignments.push(`${q(plan.physicalName(value.name))} = ${parameterAt(params.length + 1)}`);
             params.push(value.value);
+            assigned.push(value.name);
           }
           if (plan.document !== false) {
             assignments.push(`${q('doc')} = ${dialect.jsonEncode(parameterAt(params.length + 1))}`);
@@ -674,6 +680,7 @@ export function createTracker(context) {
           for (const [name, value] of parts.columnSets) {
             assignments.push(`${q(plan.physicalName(name))} = ${parameterAt(params.length + 1)}`);
             params.push(value);
+            assigned.push(name);
           }
           if (parts.docBuild !== null) {
             const built = parts.docBuild.build(q('doc'), params.length);
@@ -686,6 +693,7 @@ export function createTracker(context) {
         if (plan.version !== null) {
           assignments.push(`${q(plan.physicalName(plan.version))} = ${parameterAt(params.length + 1)}`);
           params.push(snapshotVersion + 1);
+          assigned.push(plan.version);
         }
         const wheres = plan.keys.map((key) => {
           params.push(plan.encodeColumn(key, record.snapshot[key]));
@@ -696,7 +704,7 @@ export function createTracker(context) {
           wheres.push(`${q(plan.physicalName(plan.version))} = ${parameterAt(params.length)}`);
         }
         statements.push({
-          kind: 'update', entity: record.entity, record,
+          kind: 'update', entity: record.entity, record, assigned,
           sql: `UPDATE ${plan.tableSql} SET ${assignments.join(', ')} `
             + `WHERE ${wheres.join(' AND ')}`,
           params,
@@ -757,7 +765,7 @@ export function createTracker(context) {
         }
       }
 
-      return { statements, fallbacks, joinOnly, unversioned: [...unversioned].sort() };
+      return { statements, fallbacks, joinOnly, unversioned: [...unversioned].sort(), deferred };
     };
     return chain(resolveJoins(0), assemble);
   };
@@ -804,9 +812,11 @@ export function createTracker(context) {
           const key = statement.returning ? { ...record.current, [core.plan.autoKey]: statement.generatedKeys[at] } : record.current;
           return chain(core.get(key), (stored) => {
             core.validateOnly(stored);
-            core.plan.checkMutation(statement.kind, statement.kind === 'insert' ? null : record.snapshot, stored);
-            statement.stored.push(deepFreeze(stored));
-            return refresh(at + 1);
+            return chain(core.plan.checkMutation(statement.kind, statement.kind === 'insert' ? null : record.snapshot, stored,
+              statement.assigned === undefined ? {} : { assigned: statement.assigned }), () => {
+              statement.stored.push(deepFreeze(stored));
+              return refresh(at + 1);
+            });
           });
         };
         return refresh(0);
@@ -1076,7 +1086,8 @@ export function createTracker(context) {
 
   const saveChanges = () => {
     const startedAt = performance.now();
-    return chain(planSave(), ({ statements, fallbacks, joinOnly, unversioned }) => {
+    return chain(planSave(), ({ statements, fallbacks, joinOnly, unversioned, deferred }) => {
+    const checks = (i = 0) => i >= deferred.length ? null : chain(deferred[i](), () => checks(i + 1));
     const report = {
       inserted: 0, updated: 0, deleted: 0,
       joinInserted: 0, joinDeleted: 0,
@@ -1089,15 +1100,17 @@ export function createTracker(context) {
       elapsedMs: 0,
     };
     if (statements.length === 0) {
-      report.elapsedMs = performance.now() - startedAt;
-      return report;
+      return chain(checks(), () => {
+        report.elapsedMs = performance.now() - startedAt;
+        return report;
+      });
     }
     // what the tracker looked like before the save, taken while it still
     // does: the statements below run in a savepoint whose release is not
     // a commit, so the right to KEEP what they justify waits for one
     const undo = undoFor(statements, joinOnly);
     return chain(
-      connection.transaction(() => runStatements(statements, report)),
+      connection.transaction(() => chain(checks(), () => runStatements(statements, report))),
       (finished) => {
         // The advance itself lands now, because inside the transaction the
         // database DOES hold these rows: every later read, plan and

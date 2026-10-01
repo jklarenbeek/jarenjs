@@ -1785,8 +1785,10 @@ a Promise and closes acquired resources on every path. Populated `shadowFixture`
 replay uses the same guarded executor and history owner. Start with the
 [runnable physical lifecycle](docs/MIGRATION-FORMAT.md#runnable-physical-lifecycle).
 Changed physical model diffs remain a specific `JD0021` policy refusal;
-structural changes are explicitly reviewed. `planInvariants` supplies declared
-SQLite constraint/audit triggers for installation through that boundary.
+structural changes are explicitly reviewed. `planInvariants` supplies the
+declared rule programs — SQLite triggers, PostgreSQL trigger functions
+([MODEL-FORMAT §13](docs/MODEL-FORMAT.md#13-persistence-invariants)) — for
+installation through that boundary.
 
 Native column reads and bounded mutation documents are specified in [NATIVE-PLANS](docs/NATIVE-PLANS.md), including SQL census coverage, resource accounting and refusals.
 

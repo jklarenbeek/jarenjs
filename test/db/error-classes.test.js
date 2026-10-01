@@ -145,6 +145,27 @@ describe('the table', () => {
     assert.strictEqual(wrapDriverError(misuse), misuse);
   });
 
+  it("a database invariant's refusal is its own code and text, never a message that quotes the marker", () => {
+    const refusal = (/** @type {any} */ error) => wrapDriverError(error).code;
+    // PostgreSQL: the dedicated SQLSTATE; an input-syntax error quoting the marker is not one
+    assert.strictEqual(refusal(Object.assign(new Error('jaren invariant:ordered'), { code: '23J01' })), 'JD2096');
+    assert.strictEqual(refusal(Object.assign(new Error('invalid input syntax for type integer: "jaren invariant:spoof"'),
+      { code: '22P02' })), 'JD2005');
+    assert.strictEqual(refusal(Object.assign(new Error('another check failed'), { code: '23J01' })), 'JD2005');
+    // SQLite: a trigger's RAISE whose own text starts with the marker, as each binding reports it
+    assert.strictEqual(refusal(Object.assign(new Error('jaren invariant:x'), { code: 'ERR_SQLITE_ERROR', errcode: 1811 })), 'JD2096');
+    assert.strictEqual(refusal(Object.assign(new Error('jaren invariant:x'), { code: 'SQLITE_CONSTRAINT_TRIGGER', errno: 1811 })), 'JD2096');
+    assert.strictEqual(refusal(Object.assign(new Error('SQLITE_CONSTRAINT_TRIGGER: sqlite3 result code 1811: jaren invariant:x'),
+      { resultCode: 1811, name: 'SQLite3Error' })), 'JD2096');
+    assert.strictEqual(refusal(Object.assign(new Error('a trigger said: jaren invariant:x'), { code: 'ERR_SQLITE_ERROR', errcode: 1811 })), 'JD2005');
+    assert.strictEqual(refusal(Object.assign(new Error('CHECK constraint failed: jaren invariant:x'), { code: 'ERR_SQLITE_ERROR', errcode: 275 })), 'JD2005');
+    // and a real trigger's refusal through a real binding
+    const db = new DatabaseSync(':memory:');
+    db.exec("CREATE TABLE t(a); CREATE TRIGGER g BEFORE INSERT ON t BEGIN SELECT RAISE(ABORT, 'jaren invariant:x'); END;");
+    assert.throws(() => db.exec('INSERT INTO t VALUES (1)'), (/** @type {any} */ e) => refusal(e) === 'JD2096');
+    db.close();
+  });
+
   it('exactly one module reads result codes or the overflow text', () => {
     const root = path.resolve('packages/db/src');
     const offenders = [];

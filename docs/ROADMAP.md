@@ -304,8 +304,8 @@ what each does is its own documentation's job
   rule such as `UNIQUE (employeeId, localStartDate) WHERE status IN
   (…)` — one active row per owner per day — can therefore not be
   declared on an entity at all, and §13's invariants cannot express it
-  either, because a rule sees `{ old, new, op }` and never another
-  row. Until it exists the guarantee lives in application code inside
+  either, because a rule reads another row only by that row's primary
+  key (`$exists-row`). Until it exists the guarantee lives in application code inside
   the writing transaction, which is exactly where a concurrent writer
   can slip past it. Wanted: an entity-level `indexes` array with the
   collection's vocabulary, carried through `planEntity`, the migration
@@ -378,13 +378,16 @@ what each does is its own documentation's job
   pushdown beyond the qualified native census and additional PostgreSQL types remain
   open. Application trigger/cascade capture and replication remain refused until their complete
   writer population has an executable oracle.
-- [ ] **Broader database invariant lowering.** Declared scalar old/new/operation
-  rules and ordered application audit effects now lower to verified SQLite
-  triggers ([MODEL-FORMAT §13](../packages/db/docs/MODEL-FORMAT.md#13-persistence-invariants)).
-  Arbitrary trigger programs, expression families outside the bounded grammar,
-  external-writer revision automation and PostgreSQL lowering remain open.
-  Store-only rules retain their explicit writer qualification. General interval
-  seek/indexing remains separate from the supported cross-member predicate.
+- [ ] **Broader database invariant lowering.** Rules lower to verified triggers
+  on SQLite and PostgreSQL alike ([MODEL-FORMAT §13](../packages/db/docs/MODEL-FORMAT.md#13-persistence-invariants)).
+  Arbitrary trigger programs (a `TableTrigger` stays SQLite SQL), expression
+  families outside the bounded grammar (arithmetic, membership, aggregates over
+  other rows), existence probes keyed by anything but the target's primary key
+  (a physical layout verifies no unique index), probes of the rule's own table
+  and the stored-row walk of a PostgreSQL migration over physical entities
+  remain open. Store-only rules retain their explicit writer qualification.
+  General interval seek/indexing remains separate from the supported
+  cross-member predicate.
 - [ ] **Broader native authoring for legacy SQL.** The executable census now
   proves five adopted-column read families and three SQLite mutation families
   ([native contracts](../packages/db/docs/NATIVE-PLANS.md)). Receipt history

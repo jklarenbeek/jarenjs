@@ -535,6 +535,33 @@ function resultCodeOf(error) {
   return null;
 }
 
+/** The text a database invariant's refusal starts with (MODEL-FORMAT §13). */
+export const INVARIANT_MARKER = 'jaren invariant:';
+/** The SQLSTATE a database invariant raises on PostgreSQL: class 23,
+ * integrity constraint violation, with an implementation-defined subclass. */
+export const INVARIANT_SQLSTATE = '23J01';
+/** SQLite's extended result code for a trigger's `RAISE(ABORT, …)`. */
+const SQLITE_CONSTRAINT_TRIGGER = 1811;
+
+/**
+ * Whether a driver error is a database invariant's own refusal. On
+ * PostgreSQL that is its dedicated SQLSTATE; on SQLite, a trigger's
+ * `RAISE` (the extended code `SQLITE_CONSTRAINT_TRIGGER`) whose own text
+ * starts with the marker — a binding may put its result code in front of
+ * that text, as the wasm build does. A value that merely quotes the
+ * marker somewhere in a message (PostgreSQL quotes the input it could
+ * not read) is never one.
+ * @param {any} error
+ * @returns {boolean}
+ */
+function isInvariantRefusal(error) {
+  const message = typeof error?.message === 'string' ? error.message : '';
+  const state = sqlStateOf(error);
+  if (state !== null) return state === INVARIANT_SQLSTATE && message.startsWith(INVARIANT_MARKER);
+  if (resultCodeOf(error) !== SQLITE_CONSTRAINT_TRIGGER) return false;
+  return message.replace(/^SQLITE_[A-Z_]+: sqlite3 result code \d+: /, '').startsWith(INVARIANT_MARKER);
+}
+
 /**
  * Whether an error is a SQLite driver's own: it carries a numeric
  * result code, or the shape node:sqlite gives its errors.
@@ -668,7 +695,7 @@ export function wrapDriverError(error, details = {}) {
     generic.retryable = false;
     return generic;
   }
-  if (typeof error?.message === 'string' && error.message.includes('jaren invariant:')) {
+  if (isInvariantRefusal(error)) {
     const wrapped = new DbRuntimeError('JD2096', error.message, { ...details, cause: error });
     wrapped.class = 'constraint'; wrapped.retryable = false;
     return wrapped;

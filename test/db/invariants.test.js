@@ -1,82 +1,13 @@
 //@ts-check
 import { it } from 'node:test';
 import assert from 'node:assert/strict';
-import { openStore, planInvariants, sqliteDialect, classifyDriverError, planPhysicalMigration, migrate } from '@jarenjs/db';
+import { openStore, planInvariants, sqliteDialect } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';
-
-const column = (name, codec = 'integer') => ({ name, codec, null: 'reject' });
-const model = { $model: '0.1', entities: {
-  Entry: { schema: { type: 'object', properties: {
-    id: { type: 'integer', 'x-entity': { key: true, default: 'auto' } },
-    start: { type: 'integer' }, end: { type: 'integer' }, phase: { type: 'string' },
-  } }, physical: { table: 'entry', columns: {
-    id: column('id'), start: column('starts'), end: column('ends'), phase: column('phase', 'text'),
-  } }, invariants: [
-    { name: 'ordered', on: ['insert', 'update'], enforcement: 'database', assert: { $and: [{ $le: ['$.new.start', '$.new.end'] }, { $gt: ['$.new.id', 0] }] },
-      audit: { entity: 'Audit', values: { entry: '$.new.id', operation: '$.op' } } },
-    { name: 'frozen', on: ['update', 'delete'], enforcement: 'database', assert: { $eq: ['$.old.phase', 'draft'] } },
-  ] },
-  Audit: { schema: { type: 'object', properties: {
-    id: { type: 'integer', 'x-entity': { key: true, default: 'auto' } }, entry: { type: 'integer' }, operation: { type: 'string' },
-  } }, physical: { table: 'audit', columns: { id: column('id'), entry: column('entry_id'), operation: column('operation', 'text') } } },
-} };
+import { ruleModel as model, truthModel, ruleLifecycle, ruleTruthTable, ruleGrid, sqliteEngine, familyModel, familyLifecycle,
+  FAMILY_TABLES, FAMILY_REFUSALS } from './invariant-oracle.js';
 
 it('fresh and upgraded rules agree for every SQL writer, allocated audit keys, nulls and frozen no-ops', async () => {
-  const outcomes = [];
-  for (const upgraded of [false, true]) {
-    const db = await nodeDriver().open(':memory:');
-    db.exec(`CREATE TABLE entry(id INTEGER PRIMARY KEY, starts INTEGER, ends INTEGER, phase TEXT);
-      CREATE TABLE audit(id INTEGER PRIMARY KEY, entry_id INTEGER, operation TEXT);`);
-    if (upgraded) db.exec("INSERT INTO entry VALUES(20, 1, 2, 'draft'); DELETE FROM entry");
-    const statements = planInvariants(model, { dialect: sqliteDialect });
-    const driver = { ...nodeDriver(), open: async () => db };
-    await assert.rejects(openStore(model, { driver }), { code: 'JD0002' });
-    // A refused open owns and closes its handle, so install on a fresh fixture.
-    const connection = await nodeDriver().open(':memory:');
-    connection.exec(`CREATE TABLE entry(id INTEGER PRIMARY KEY, starts INTEGER, ends INTEGER, phase TEXT);
-      CREATE TABLE audit(id INTEGER PRIMARY KEY, entry_id INTEGER, operation TEXT);`);
-    if (upgraded) connection.exec("INSERT INTO entry VALUES(20, 1, 2, 'draft'); DELETE FROM entry");
-    if (upgraded) {
-      const from = structuredClone(model);
-      from.entities.Entry.invariants = [];
-      const migration = await planPhysicalMigration(connection, from, model, {
-        id: 'install-rules', steps: statements.map((statement) => ({ kind: 'ddl', sql: statement.sql })),
-        dispositions: { 'table:entry': 'preserve', 'table:audit': 'preserve' },
-        assertions: [{ sql: 'SELECT * FROM entry', expected: [] }],
-      });
-      const target = { driver: { ...nodeDriver(), open: async () => ({ ...connection, close() {} }) } };
-      await migrate(target, [migration], { baseline: from, model, shadow: false });
-      assert.equal((await migrate(target, [migration], { baseline: from, model, shadow: false })).applied.length, 0);
-    }
-    else for (const statement of statements) connection.exec(statement.sql);
-    const store = await openStore(model, { driver: { ...nodeDriver(), open: async () => connection }, adopt: true });
-    try {
-      const created = await store.entity('Entry').create({ start: 1, end: 2, phase: 'draft' });
-      assert.equal(created.id, 1);
-      await assert.rejects(store.entity('Entry').update(1, { start: 3 }), { code: 'JD2096', class: 'constraint' });
-      store.entity('Entry').put({ ...created, start: 3 });
-      await assert.rejects(store.saveChanges(), { code: 'JD2096', class: 'constraint' });
-      store.entity('Entry').discard(1);
-      const native = { op: 'update', key: 1, set: { start: 0 } };
-      await assert.rejects(store.entity('Entry').mutate({ ...native, set: { start: 3 } }), { code: 'JD2096', class: 'constraint' });
-      assert.equal((await store.entity('Entry').mutate(native)).affected, 1);
-      const nativeAudit = connection.prepare('SELECT count(*) AS n FROM audit').get([]).n;
-      assert.equal((await store.entity('Entry').mutate(native)).affected, 0);
-      assert.equal(connection.prepare('SELECT count(*) AS n FROM audit').get([]).n, nativeAudit);
-      for (const sql of ["INSERT INTO entry(starts,ends,phase) VALUES(3,2,'draft')", "UPDATE entry SET starts=NULL WHERE id=1"])
-        assert.throws(() => connection.exec(sql), (e) => classifyDriverError(e).class === 'constraint');
-      await store.entity('Entry').update(1, { phase: 'frozen' });
-      const before = connection.prepare('SELECT count(*) AS n FROM audit').get([]).n;
-      await store.entity('Entry').update(1, { phase: 'frozen' });
-      connection.exec("UPDATE entry SET phase='frozen' WHERE id=1");
-      assert.equal(connection.prepare('SELECT count(*) AS n FROM audit').get([]).n, before);
-      await assert.rejects(store.entity('Entry').delete(1), { code: 'JD2096' });
-      assert.throws(() => connection.exec('DELETE FROM entry WHERE id=1'), /jaren invariant:frozen/);
-      outcomes.push(JSON.stringify({ rows: connection.prepare('SELECT * FROM entry').all([]), audit: connection.prepare('SELECT * FROM audit').all([]) }));
-    }
-    finally { await store.close(); }
-  }
-  assert.equal(outcomes[0], outcomes[1]);
+  assert.equal(await ruleLifecycle(sqliteEngine(), false), await ruleLifecycle(sqliteEngine(), true));
 });
 
 it('recursive audit effects and unbounded SQL predicates refuse before execution', () => {
@@ -108,36 +39,18 @@ it('store-only query rules protect direct and tracked writes and visibly refuse 
 });
 
 it('database predicates agree with Query null truth tables and refuse unavailable or absent paths', async () => {
-  const { compileJsonQuery } = await import('@jarenjs/json/query');
-  const declaration = { $model: '0.1', entities: { Row: { schema: { type: 'object', properties: {
-    id: { type: 'integer', 'x-entity': { key: true } }, a: { type: ['integer', 'null'] }, b: { type: ['integer', 'null'] },
-  } }, physical: { table: 'rows', columns: { id: column('id'), a: { ...column('a'), null: 'null' }, b: { ...column('b'), null: 'null' } } } } } };
-  for (const expression of [{ $eq: ['$.new.a', '$.new.b'] }, { $ne: ['$.new.a', { $const: null }] },
-    { $le: ['$.new.a', '$.new.b'] }, { $not: { $lt: ['$.new.a', '$.new.b'] } },
-    { $and: [{ $eq: ['$.op', 'insert'] }, { $or: [{ $gt: ['$.new.a', 0] }, { $eq: ['$.new.a', null] }] }] }]) {
-    const spec = structuredClone(declaration);
-    spec.entities.Row.invariants = [{ name: 'truth', on: ['insert'], assert: expression, enforcement: 'database' }];
-    const evaluate = compileJsonQuery(expression);
-    const db = await nodeDriver().open(':memory:');
-    try {
-      db.exec('CREATE TABLE rows(id INTEGER PRIMARY KEY,a INTEGER,b INTEGER)');
-      for (const statement of planInvariants(spec, { dialect: sqliteDialect })) db.exec(statement.sql);
-      for (const a of [null, -1, 2]) for (const b of [null, -1, 2]) {
-        const insert = () => db.prepare('INSERT INTO rows VALUES(1,?,?)').run([a, b]);
-        if (evaluate({ old: null, new: { id: 1, a, b }, op: 'insert' }) === true) { insert(); db.exec('DELETE FROM rows'); }
-        else assert.throws(insert, /jaren invariant:truth/);
-      }
-      assert.throws(() => db.exec("INSERT INTO rows VALUES(1,'wrong type',4)"), /jaren invariant:truth/);
-    }
-    finally { db.close(); }
-  }
+  await ruleTruthTable(sqliteEngine());
   for (const absent of [false, true]) {
-    const spec = structuredClone(declaration);
+    const spec = structuredClone(truthModel);
     if (absent) spec.entities.Row.physical.columns.a.null = 'absent';
     spec.entities.Row.invariants = [{ name: 'absence', on: ['insert'], enforcement: 'database',
       assert: { $eq: [absent ? '$.new.a' : '$.old.a', null] } }];
     assert.throws(() => planInvariants(spec, { dialect: sqliteDialect }), { code: 'JD0005' });
   }
+});
+
+it('every scalar codec gives the query engine\'s verdict and refuses a stored value its codec cannot read', async () => {
+  await ruleGrid(sqliteEngine());
 });
 
 it('invariant declarations refuse unspecified writer authority and duplicate names', () => {
@@ -147,4 +60,48 @@ it('invariant declarations refuse unspecified writer authority and duplicate nam
     const spec = structuredClone(model); edit(spec);
     assert.throws(() => planInvariants(spec, { dialect: sqliteDialect }), { code: 'JD0005' });
   }
+});
+
+it('the trigger families: store and database enforcement refuse the same store writes; SQL writers meet assignment, columns, probes and revisions', async () => {
+  /** @type {Record<string, any>} */
+  const runs = {};
+  for (const enforcement of /** @type {const} */ (['database', 'store'])) for (const upgraded of [false, true])
+    runs[`${enforcement}${upgraded ? ' upgraded' : ''}`] = JSON.parse(await familyLifecycle(sqliteEngine(), { enforcement, upgraded }));
+  assert.deepEqual(runs['database upgraded'], runs.database);
+  assert.deepEqual(runs['store upgraded'], runs.store);
+  assert.deepEqual(runs.store.writes, runs.database.writes);
+  assert.deepEqual(runs.database.writes, [
+    // inserts: a draft, unsealed, present parent only
+    'ok', 'refused open_parent', 'refused open_parent', 'refused open_parent', 'ok',
+    // updates: a change, a no-op that writes nothing, the pinned column, the lock, a write to a locked line
+    'ok', 'ok', 'refused pinned', 'ok', 'refused locked',
+    // tracked saves: a change, the pinned column
+    'ok', 'refused pinned',
+    // a document's probe, created directly and tracked: a parent that exists, one that does not
+    'ok', 'refused memo_parent', 'refused memo_parent', 'ok',
+    // removals: tracked under a draft parent, direct and tracked under a final one, direct under none
+    'ok', 'refused draft_parent', 'refused draft_parent', 'ok']);
+  // SQL writers: a change, a same-value assignment, the pinned column assigned to itself, a revision the
+  // writer sets, the lock, a same-value assignment to a locked line, a missing parent, a delete
+  assert.deepEqual(runs.database.raw, ['ok', 'ok', 'refused pinned', 'ok', 'ok', 'refused locked', 'refused open_parent', 'ok']);
+  // a revision moves by one per changing update, whoever writes, and keeps a writer's own value
+  assert.deepEqual(runs.database.rows.map((/** @type {any[]} */ rows) => rows.map((row) => row.revision)), [[2, 1], [], [1], [1], [1], [10], [11], [11], [11]]);
+  assert.deepEqual(runs.store.rows, runs.database.rows.slice(0, 2));
+});
+
+it('the trigger families refuse what they cannot mean before anything is planned', () => {
+  for (const [label, edit] of FAMILY_REFUSALS) {
+    const spec = familyModel('database'); edit(spec);
+    assert.throws(() => planInvariants(spec, { dialect: sqliteDialect }), { code: 'JD0005' }, label);
+  }
+});
+
+it('an increment program refuses to open while recursive triggers would run it again', async () => {
+  const fixture = await sqliteEngine().fixture(FAMILY_TABLES);
+  try {
+    for (const statement of planInvariants(familyModel('database'), { dialect: sqliteDialect })) await fixture.exec(statement.sql);
+    await fixture.exec('PRAGMA recursive_triggers = ON');
+    await assert.rejects(openStore(familyModel('database'), { driver: fixture.driver, adopt: true }), { code: 'JD0002', message: /recursive_triggers/ });
+  }
+  finally { await fixture.dispose(); }
 });

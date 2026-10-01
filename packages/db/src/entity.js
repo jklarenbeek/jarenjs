@@ -22,11 +22,14 @@ import { resolveRuntime } from '@jarenjs/core/runtime';
 
 import { DbRuntimeError, wrapDriverError } from './errors.js';
 import { chain, attempt } from './driver.js';
-import { checkInvariants } from './invariants.js';
+import { checkInvariants, existsRowSql } from './invariants.js';
 import { columnCodec, physicalRead } from './physical.js';
 import { mergeEntityRow } from './graph.js';
 import { createJSONPatch } from '@jarenjs/json/patch';
 import { createEntityMutation } from './mutation.js';
+
+/** How many update shapes an entity keeps prepared. */
+const UPDATE_SHAPES = 32;
 
 /**
  * The write/read machinery for one entity, prepared once.
@@ -266,10 +269,18 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
   const prepared = (name, sql) => {
     let statement = statements.get(name);
     if (statement === undefined) {
-      statement = connection.prepare(sql, { readOnly: name === 'get' });
+      statement = connection.prepare(sql, { readOnly: name === 'get' || name.startsWith('probe:') });
       statements.set(name, statement);
     }
     return statement;
+  };
+  // an update's shape is the set of members it assigns: the first few shapes
+  // stay prepared, any beyond them are prepared per call, as a save's are
+  let updateShapes = 0;
+  const preparedUpdate = (name, sql) => {
+    if (statements.has(name) || updateShapes >= UPDATE_SHAPES) return statements.get(name) ?? connection.prepare(sql, { readOnly: false });
+    updateShapes += 1;
+    return prepared(name, sql);
   };
   const parameterAt = (i) => dialect.parameterRef(i, 'v');
   const keyWhere = (offset) => keys
@@ -319,6 +330,36 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
     duplicateReason: `a '${entity.name}' already exists under key ${JSON.stringify(key)}`,
   });
 
+  /**
+   * A store rule's `$exists-row`: the probe SQL the database's trigger runs,
+   * its values bound, read inside the write's own transaction. A key member
+   * with no value, or one its column cannot hold, matches no row.
+   * @param {any} spec a resolved probe @param {any} record `{ old, new, op }`
+   */
+  const probe = (spec, record) => {
+    const params = [];
+    let none = false;
+    const sql = existsRowSql(spec, dialect, (expression, column) => {
+      let value = expression;
+      const path = typeof expression === 'string' ? /^\$\.(old|new)\.(.+)$/.exec(expression) : null;
+      if (path !== null) value = record[path[1]]?.[path[2]] ?? null;
+      while (value && typeof value === 'object' && Object.hasOwn(value, '$const')) value = value.$const;
+      let encoded = null;
+      try { encoded = value === null ? null : columnCodec(column).encode(value); }
+      catch { none = true; }
+      if (encoded === null && spec.keys.includes(column.name)) none = true;
+      params.push(encoded);
+      return dialect.parameterRef(params.length, 'v');
+    });
+    if (none) return false;
+    return attempt(() => chain(prepared(`probe:${sql}`, `SELECT ${sql} AS ${q('hit')}`), (statement) =>
+      chain(statement.get(params), (row) => row?.hit === true || Number(row?.hit) === 1)),
+    (error) => wrapDriverError(error, { docPath, collection: entity.name }));
+  };
+  /** Whether a store rule on `op` reads another row, so its check and the
+   * write share one transaction. @param {string} op */
+  const probing = (op) => entity.invariants.some((rule) => rule.enforcement === 'store' && rule.on.includes(op) && rule.probes.length > 0);
+
   const columnByName = new Map(scalarColumns.map((column) => [column.name, column]));
   /** Encode ONE column assignment the way {@link split} would. */
   const encodeColumn = (name, value) => {
@@ -339,7 +380,7 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
       document: !physical,
       physicalName,
       writable,
-      checkMutation: (op, before, after) => checkInvariants(entity.invariants, op, before, after),
+      checkMutation: (op, before, after, options = {}) => checkInvariants(entity.invariants, op, before, after, { probe, ...options }),
       keys,
       autoKey,
       version: entity.version ?? null,
@@ -371,7 +412,6 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
       refuseProjections(doc, 'create', true);
       const completed = applyDefaults(doc, { updating: false });
       checkValid(completed);
-      if (!physical) checkInvariants(entity.invariants, 'insert', null, completed);
       if (physical && scalarColumns.some((c) => c.generated && Object.hasOwn(doc, c.name)))
         throw new DbRuntimeError('JD2003', 'generated columns are database-owned');
       const { values, rest } = split(completed);
@@ -386,11 +426,14 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
           (out) => {
             const made = returning ? { ...completed, [autoKey]: out.key } : completed;
             return physical ? chain(this.get(made), (stored) => {
-              checkValid(stored); checkInvariants(entity.invariants, 'insert', null, stored); return stored;
+              checkValid(stored);
+              return chain(checkInvariants(entity.invariants, 'insert', null, stored, { probe }), () => stored);
             }) : asStored(made);
           });
       });
-      return physical ? connection.transaction(insert) : insert();
+      if (physical) return connection.transaction(insert);
+      const write = () => chain(checkInvariants(entity.invariants, 'insert', null, completed, { probe }), insert);
+      return probing('insert') ? connection.transaction(write) : write();
     },
     get(key) {
       const parts = normalizeKeyArg(key).map((v, i) => physical ? columnByName.get(keys[i]).codecPlan.encode(v) : v);
@@ -430,30 +473,38 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
         if (entity.version !== null && entity.version !== undefined)
           next[entity.version] = (Number(current[entity.version]) || 0) + 1;
         checkValid(next);
-        if (!physical) checkInvariants(entity.invariants, 'update', current, next);
-        const { values, rest } = split(next, { updating: true });
+        const { values: all, rest } = split(next, { updating: true });
+        // a physical row is assigned what changes and nothing else, as a
+        // tracked save assigns it: an UPDATE OF program sees what was written
+        const changed = physical ? new Set(createJSONPatch(current, next)
+          .map((op) => op.path.split('/')[1].replace(/~1/g, '/').replace(/~0/g, '~'))) : null;
+        const values = changed === null ? all : all.filter((value) => changed.has(value.name));
+        if (physical && values.length === 0) return current;
         const assignments = [
           ...values.map((value, i) => `${q(physicalName(value.name))} = ${parameterAt(i + 1)}`),
           ...(physical ? [] : [`${q('doc')} = ${dialect.jsonEncode(parameterAt(values.length + 1))}`]),
         ].join(', ');
         const sql = `UPDATE ${tableSql} SET ${assignments} `
           + `WHERE ${keyWhere(values.length + (physical ? 0 : 1))}`;
-        return chain(prepared(`update:${values.map((v) => v.name).join(',')}`, sql), (statement) =>
-          chain(attempt(() => statement.run([...values.map((value) => value.value),
-            ...(physical ? [] : [JSON.stringify(rest)]), ...parts]), (error) => wrapWrite(error, parts[0])),
-          () => physical ? chain(this.get(key), (stored) => {
-            checkValid(stored); checkInvariants(entity.invariants, 'update', current, stored); return stored;
-          }) : asStored(next)));
+        return chain(physical ? null : checkInvariants(entity.invariants, 'update', current, next, { probe }), () =>
+          chain(preparedUpdate(`update:${values.map((v) => v.name).join(',')}`, sql), (statement) =>
+            chain(attempt(() => statement.run([...values.map((value) => value.value),
+              ...(physical ? [] : [JSON.stringify(rest)]), ...parts]), (error) => wrapWrite(error, parts[0])),
+            () => physical ? chain(this.get(key), (stored) => {
+              checkValid(stored);
+              return chain(checkInvariants(entity.invariants, 'update', current, stored,
+                { probe, assigned: values.map((value) => value.name) }), () => stored);
+            }) : asStored(next))));
       });
-      return physical ? connection.transaction(update) : update();
+      return physical || probing('update') ? connection.transaction(update) : update();
     },
     delete(key) {
       writable();
-      if (entity.invariants.some((r) => r.enforcement === 'store' && r.on.includes('delete')))
-        return chain(this.get(key), (before) => {
-          checkInvariants(entity.invariants, 'delete', before, null);
-          return remove(key);
-        });
+      if (entity.invariants.some((r) => r.enforcement === 'store' && r.on.includes('delete'))) {
+        const checked = () => chain(this.get(key), (before) =>
+          chain(checkInvariants(entity.invariants, 'delete', before, null, { probe }), () => remove(key)));
+        return probing('delete') ? connection.transaction(checked) : checked();
+      }
       return remove(key);
     },
   };

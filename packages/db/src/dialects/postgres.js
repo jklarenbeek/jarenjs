@@ -29,8 +29,10 @@
  * configuration vocabulary (`pragmas: false` — a PostgreSQL server is
  * configured by its operator, not by a store at open), no stored CREATE
  * text (`declaredSqlText: false` — the drift check is the structural
- * one), no virtual tables and no triggers (so a `physical: 'rtree'`
- * column set maps back onto the B-tree over its four edge columns), and
+ * one), no virtual tables and no sync triggers (so a `physical: 'rtree'`
+ * column set maps back onto the B-tree over its four edge columns; the
+ * database rules of MODEL-FORMAT §13 are trigger functions of their own,
+ * verified through the catalog), and
  * no column without a scalar type — which is why a comparison against a
  * member the schema does not type reads the document rather than the
  * column. `BEGIN IMMEDIATE` has no analogue either: the store's writer
@@ -41,6 +43,7 @@
 import { createDialect } from '../dialect.js';
 import { postgresPhysicalRead, postgresPhysicalCompare, postgresPhysicalValueType, postgresPhysicalDifferent, postgresPhysicalTypeMatches, qualifyPostgresPhysicalColumn } from './postgres-physical.js';
 import { postgresCatalog } from './postgres-catalog.js';
+import { postgresInvariantTriggers } from './postgres-invariants.js';
 import { postgresRelational } from './postgres-relational.js';
 import { postgresMigration } from './postgres-migration.js';
 import { postgresCapture } from './postgres-capture.js';
@@ -427,6 +430,7 @@ export function postgresDialect(options = undefined) {
     numberCast: (sql) => `CAST(${sql} AS DOUBLE PRECISION)`,
     physicalTypeMatches: postgresPhysicalTypeMatches,
     qualifyPhysicalColumn: qualifyPostgresPhysicalColumn,
+    invariantTriggers: (mapping, all, dialect) => postgresInvariantTriggers(mapping, all, dialect, IDENTIFIER_BYTES),
     capabilities: {
       jsonb: true,
       generatedColumns: true,
@@ -676,6 +680,25 @@ export function postgresDialect(options = undefined) {
         + 'JOIN pg_namespace n ON n.oid = c.relnamespace '
         + `WHERE c.relkind IN ('r', 'p', 'v', 'm') AND ${inNamespace} `
         + 'ORDER BY type, c.relname',
+      // an installed rule program as the fields that decide what it does:
+      // the trigger's timing, events, level and columns from `tgtype` and
+      // `tgattr`, and its function's language, settings and verbatim source
+      invariantPrograms: () =>
+        'SELECT t.tgname AS name, c.relname AS owner, pg_catalog.jsonb_build_object('
+        + "'timing', CASE WHEN t.tgtype::integer & 2 <> 0 THEN 'BEFORE' WHEN t.tgtype::integer & 64 <> 0 THEN 'INSTEAD OF' ELSE 'AFTER' END, "
+        + "'events', (SELECT pg_catalog.jsonb_agg(e.event ORDER BY e.ord) FROM (VALUES (1, 'INSERT', 4), (2, 'UPDATE', 16), "
+        + "(3, 'DELETE', 8), (4, 'TRUNCATE', 32)) e(ord, event, bit) WHERE t.tgtype::integer & e.bit <> 0), "
+        + "'level', CASE WHEN t.tgtype::integer & 1 <> 0 THEN 'ROW' ELSE 'STATEMENT' END, "
+        + "'columns', COALESCE((SELECT pg_catalog.jsonb_agg(a.attname ORDER BY k.ord) FROM unnest(t.tgattr::smallint[]) WITH ORDINALITY k(num, ord) "
+        + "JOIN pg_catalog.pg_attribute a ON a.attrelid = t.tgrelid AND a.attnum = k.num), '[]'::jsonb), "
+        + "'condition', t.tgqual IS NOT NULL, 'enabled', t.tgenabled::text, 'deferrable', t.tgdeferrable, 'deferred', t.tginitdeferred, "
+        + "'function', pg_catalog.jsonb_build_object('schema', pn.nspname, 'name', p.proname, 'language', l.lanname, "
+        + "'returns', pg_catalog.format_type(p.prorettype, NULL), 'arguments', pg_catalog.pg_get_function_identity_arguments(p.oid), "
+        + "'securityDefiner', p.prosecdef, 'config', p.proconfig, 'source', p.prosrc))::text AS program "
+        + 'FROM pg_catalog.pg_trigger t JOIN pg_catalog.pg_class c ON c.oid = t.tgrelid '
+        + 'JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace JOIN pg_catalog.pg_proc p ON p.oid = t.tgfoid '
+        + 'JOIN pg_catalog.pg_namespace pn ON pn.oid = p.pronamespace JOIN pg_catalog.pg_language l ON l.oid = p.prolang '
+        + `WHERE NOT t.tgisinternal AND ${inNamespace} ORDER BY c.relname, t.tgname`,
       objects: () =>
         "SELECT 'trigger' AS type, t.tgname AS name, c.relname AS owner, "
         + 'pg_get_triggerdef(t.oid) AS sql FROM pg_trigger t '

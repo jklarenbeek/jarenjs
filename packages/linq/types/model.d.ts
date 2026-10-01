@@ -230,9 +230,12 @@ export class EntityObjectBuilder<
   N extends boolean = false, F extends Flag = never,
 > extends ObjectBuilder<P, Open, PV, PVIn, N, F> {
   physical(layout: PhysicalLayout): this;
+  /** Persistence rules (MODEL-FORMAT §13); `assert` is a Query expression, and may use `$exists-row`. */
   invariants(rules: readonly { name: string; on: readonly ('insert' | 'update' | 'delete')[];
     enforcement: 'database' | 'store'; assert: unknown;
-    audit?: { entity: string; values: Readonly<Record<string, unknown>> } }[]): this;
+    when?: 'changed' | 'assigned'; columns?: readonly string[];
+    audit?: { entity: string; values: Readonly<Record<string, unknown>> };
+    effects?: readonly { increment: string }[] }[]): this;
   optional(): EntityObjectBuilder<P, Open, PV, PVIn, N, F | 'optional'>;
   nullable(): EntityObjectBuilder<P, Open, PV, PVIn, true, F>;
   open(): EntityObjectBuilder<P, true, PV, PVIn, N, F>;

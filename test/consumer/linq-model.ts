@@ -129,5 +129,16 @@ const physicalSetting = m.object({ id: m.string().key(), value: m.string() }).ph
 }).invariants([{ name: 'nonempty', on: ['insert'], enforcement: 'store', assert: { $ne: ['$.new.value', ''] } }]);
 const physicalDoc: EntityDoc<{ Setting: typeof physicalSetting }, 'Setting'> = { id: 'locale', value: 'nl-NL' };
 void physicalDoc;
+const revised = m.object({ id: m.string().key(), value: m.string(), revision: m.integer() }).physical({
+  table: 'revised', columns: { id: { name: 'id', codec: 'text', null: 'reject' }, value: { name: 'value', codec: 'text', null: 'reject' },
+    revision: { name: 'revision', codec: 'integer', null: 'reject' } },
+}).invariants([
+  { name: 'pinned', on: ['update'], columns: ['value'], enforcement: 'database', assert: false },
+  { name: 'guarded', on: ['update'], when: 'assigned', enforcement: 'database', assert: { $ne: ['$.old.value', 'locked'] } },
+  { name: 'revision', on: ['update'], enforcement: 'database', assert: true, effects: [{ increment: 'revision' }] },
+]);
+void revised;
+// @ts-expect-error — `when` is changed or assigned
+m.object({ id: m.string().key() }).invariants([{ name: 'r', on: ['update'], enforcement: 'store', assert: true, when: 'always' }]);
 // @ts-expect-error — codecs are a closed vocabulary
 m.object({ id: m.string().key() }).physical({ table: 'settings', columns: { id: { name: 'key', codec: 'coerce', null: 'reject' } } });

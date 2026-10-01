@@ -3012,10 +3012,78 @@ migration lifecycle. See [the runnable lifecycle](MIGRATION-FORMAT.md#runnable-p
 An entity may declare `invariants`: each has `name`, `on` (insert/update/delete),
 `assert` (a Query expression), and explicit `enforcement` (`database` or `store`).
 The evaluator receives `{ old, new, op }`; the missing record is null. A rule
-passes only on boolean true. Update rules and audit effects skip identical rows.
+passes only on boolean true. Failed rules use `JD2096`, with constraint
+classification.
+
+| Member | Meaning |
+|---|---|
+| `name` | an identifier, distinct within the entity |
+| `on` | the operations it judges: a non-empty subset of `insert`, `update`, `delete` |
+| `assert` | a Query expression over `{ old, new, op }`, which may use `$exists-row` (§13.2) |
+| `enforcement` | `database` (a trigger program, §13.4) or `store` (the store's own writes, §13.3) |
+| `when` | on a rule that includes `update`: `changed` (the default) or `assigned` (§13.1) |
+| `columns` | on a rule that includes `update`: the members whose assignment fires it (§13.1) |
+| `audit` | a database effect: `{ entity, values }` inserts a row (§13.5) |
+| `effects` | database effects of an update: `[{ "increment": "<member>" }]` (§13.5) |
+
+### 13.1 Updates: changed, assigned, columns
+
+By default an update rule judges an UPDATE that **changes** the row: an
+assignment that leaves every value as it was (`SET total = total`) runs no check
+and writes no audit row. A version member, a generated column and an
+incremented member never count as a change. `when: "assigned"` judges every
+UPDATE of the row, even to the same value — an unconditional update guard is
+`{ "on": ["update"], "when": "assigned", "assert": false }`.
+
+`columns: [<member>, …]` judges an UPDATE that **assigns** one of those members,
+whatever else it sets and whether or not the value moves (SQL's `UPDATE OF`); an
+UPDATE that sets only other columns does not fire it. It names writable mapped
+columns of a physical layout and implies `assigned` (`when: "changed"` beside it
+is refused). Rules naming the same columns share one program.
+
+The store writes a physical row only when it changes, and then assigns only the
+members that change, with the version bump and update stamps — `update()` and a
+tracked save alike — so an immutable-column guard (`{ "on": ["update"],
+"columns": ["createdAt"], "assert": false }`) refuses a write to that member and
+no other. `changed` and `assigned` therefore coincide for the store's own writes;
+they differ for other SQL writers (raw SQL, a native mutation with
+`reporting: "matched"`), which only a database rule meets.
+
+### 13.2 Existence probes
+
+`{ "$exists-row": { "entity": "<Entity>", "match": { "<member>": <value>, … } } }`
+is true when the target entity holds a row whose members equal the values. A
+value is `$.old.member`, `$.new.member` or a scalar literal. `match` must cover
+the target's whole primary key, so a probe is one indexed read; key members
+compare with `=`, other members null-safely, so a `null` literal matches SQL
+NULL. The target is the physical layout of another entity: PostgreSQL runs row
+triggers at the end of a statement and SQLite per row, so a probe of the rule's
+own table would see a multi-row statement's other rows differently. Each value
+compares as its column's type. A probe composes with `$not`, `$and` and `$or` —
+"the parent is a draft, or it is gone" is
+
+```json
+{ "$or": [
+  { "$not": { "$exists-row": { "entity": "Order", "match": { "id": "$.old.order" } } } },
+  { "$exists-row": { "entity": "Order", "match": { "id": "$.old.order", "status": "draft" } } }
+] }
+```
+
+Store enforcement answers a probe with the same SQL the database's trigger runs,
+its values bound, inside the write's transaction.
+
+### 13.3 Store enforcement
+
 Store enforcement covers direct and tracked model writes; arbitrary external
 SQL is outside that population. Trusted SQL writes refuse while store rules are
-present. Failed rules use `JD2096`, with constraint classification.
+present, and native mutations refuse an entity with store rules. The store
+checks an update rule whenever it writes the row, and a `columns` rule when the
+statement it writes assigns one of them. A physical row's rules are checked
+after the write, inside its transaction, against the stored row; a document's
+before the write — and a document entity's `update()` rewrites the whole
+document on every call, so its update rules are checked on every call.
+
+### 13.4 Database enforcement
 
 Database enforcement requires a writable physical layout — in practice
 `physical: { table, columns }` (§12), an explicitly owned column layout.
@@ -3027,36 +3095,91 @@ covers direct and tracked writes but not an external SQL writer.
 Lowering rules over a store-owned layout is open work, not a
 limitation of the rule language.
 
-Database enforcement also requires a bounded scalar
-query expression: `$eq`, `$ne`, `$lt`, `$le`, `$gt`, `$ge`, `$and`, `$or`, `$not`,
-scalar literals, `$.op`, and `$.old.member` / `$.new.member` references. Unsupported
-expressions refuse at planning. `planInvariants(model, { dialect })` returns
-reviewable trigger DDL; an explicit migration installs it. Opening verifies those
-programs. A rule such as `{ "$le": ["$.new.start", "$.new.end"] }` declares an
-interval constraint without claiming interval indexing.
+Database enforcement also requires a bounded scalar query expression: `$eq`,
+`$ne`, `$lt`, `$le`, `$gt`, `$ge`, `$and`, `$or`, `$not`, `$exists-row`, scalar
+literals, `$.op`, and `$.old.member` / `$.new.member` references over `text`,
+`integer`, `number`, `boolean`, `date` and `datetime` columns. Unsupported
+expressions refuse at planning. A rule such as
+`{ "$le": ["$.new.start", "$.new.end"] }` declares an interval constraint without
+claiming interval indexing.
 
-An optional database `audit: { entity, values }` inserts into an application-owned
-mapped table after the accepted mutation, after identity allocation. Values use
-old/new scalar references. Self-referential or chained audit effects refuse;
-all effects share the writer transaction. Existing unrecognized triggers remain
-application-owned physical objects requiring preservation dispositions.
+`planInvariants(model, { dialect })` returns reviewable statements in install
+order; an explicit migration installs them, one `ddl` step each
+(MIGRATION-FORMAT, "Installing database rules"), and opening verifies those
+programs (`JD0002` names what is missing or changed). One document plans for
+both engines:
 
+- **SQLite** — one AFTER trigger per table and operation, plus one `AFTER UPDATE
+  OF` trigger per distinct `columns` set (`_jaren_rule_<length>_<table>_<op>`,
+  `…_update_of_<hash>`). A failure is `RAISE(ABORT, 'jaren invariant:<rule>')`.
+  Opening compares each trigger's stored CREATE text.
+- **PostgreSQL** — per program, a PL/pgSQL trigger function and the row trigger
+  that calls it: two items, `type: "function"` then `type: "trigger"`, because a
+  PostgreSQL migration step is one statement. Both live in the driver-owned
+  schema (`searchPath`, required), and every table a program names carries that
+  schema, since a function runs under its caller's search path. A name past
+  PostgreSQL's 63-byte identifier limit becomes `_jaren_rule_<hash of the
+  table>_<op>`. A failure raises SQLSTATE **`23J01`** (class 23, integrity
+  constraint violation) with the message `jaren invariant:<rule>`. The server
+  stores a trigger deparsed, so opening reads each program back field by
+  field — the trigger's timing, events, level, `UPDATE OF` columns, `WHEN`
+  condition, enablement and deferral, and its function's schema, name,
+  language, return type, arguments, settings, security and verbatim source.
 
-One AFTER trigger per operation evaluates assertions in declaration order, then
-runs audit inserts in declaration order. Assertions see the allocated identity
-and generated columns. A failed assertion aborts the entire statement, including
-its trigger effects. Existing application triggers keep SQLite's ordering relative to these
+`JD2096` is reported only for such a raise: on SQLite a message that starts
+with `jaren invariant:` (result code 1811), on PostgreSQL SQLSTATE `23J01` with
+that message — never for an error that merely quotes the marker, as an
+input-syntax error quoting a value does.
+
+A program runs its assertions in declaration order, then its audit inserts in
+declaration order. Assertions see the allocated identity and generated columns.
+A failed assertion aborts the entire statement, including its trigger effects.
+Inside a transaction each store write is its own savepoint, so a refused write
+leaves the transaction body usable on both engines; a refused trusted `tx.sql`
+statement spends a PostgreSQL transaction (the next statement is `JD2088`, as
+after any failed statement there) unless it ran in a nested transaction.
+Existing application triggers keep their engine's ordering relative to these
 programs. Equality uses JSON-style scalar types and null equality; an ordered
-comparison involving SQL NULL is false; `$not` negates that boolean. An absent-column
-policy cannot be lowered to a database rule and refuses. Existing optimistic
-version properties remain owned by the model writer; an external SQL writer must
-supply its own declared revision discipline. Store validation and codec checks
-are not a substitute for database constraints on external inputs.
+comparison involving SQL NULL is false; `$not` negates that boolean. Text
+compares by code point on both engines (SQLite `BINARY`, PostgreSQL
+`COLLATE "C"`), a `date` column as its `YYYY-MM-DD` text. An absent-column
+policy cannot be lowered to a database rule and refuses. Store validation and
+codec checks are not a substitute for database constraints on external inputs.
 
 References to a property of the unavailable old/insert or new/delete record
-refuse database lowering, because absence differs from SQL NULL. Referenced
-scalar storage types are checked by the assertion trigger; numeric references
-must stay in the safe-number range.
+refuse database lowering, because absence differs from SQL NULL. A referenced
+column must hold a value its codec reads back — SQLite's storage class of the
+codec's type, a safe integer, a finite number within ±(2^53−1), a date of years
+1–9999 — or the write is refused.
+
+### 13.5 Database effects: audit and increment
+
+An optional database `audit: { entity, values }` inserts into an
+application-owned mapped table after the accepted mutation, after identity
+allocation. Values use old/new scalar references. Self-referential or chained
+audit effects refuse; all effects share the writer transaction. On PostgreSQL an
+integer audit member fed by a `number` column or a non-integer literal refuses at
+planning, because an assignment cast would round it.
+
+`effects: [{ "increment": "<member>" }]` on a rule that includes `update` moves
+a revision by one on each update the rule fires for, unless the writer set it:
+`NEW.member = OLD.member + 1` when the UPDATE left the member alone. PostgreSQL
+runs it in a BEFORE UPDATE program, so the row is written with its revision;
+SQLite as the last statement of the AFTER UPDATE trigger, an update of the same
+row that its own trigger cannot fire again while `recursive_triggers` is off,
+which opening verifies. The member is a non-key, non-null integer column the
+database owns like a version: it never counts as a change, it cannot be a rule
+column, and no update rule of the entity may read `$.new.member` (PostgreSQL's
+AFTER programs see the new revision, SQLite's trigger the writer's). A rule
+with effects names no `columns`. The store's own version bump is a writer's, so
+a version member that is also incremented moves once per store write; an
+external SQL writer without such a rule must supply its own revision discipline.
+
+Audit rows and increments are writes the database makes. Journal capture never
+sees them (LIVE-FORMAT: triggers are not enrolled, and physical-table adoption
+refuses capture); the store reads an incremented revision back with the row it
+wrote. Existing unrecognized triggers remain application-owned physical objects
+requiring preservation dispositions.
 
 ## Native column mutation documents
 

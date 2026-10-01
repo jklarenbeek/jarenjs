@@ -27,7 +27,7 @@ import { compileJsonQuery } from '@jarenjs/json/query';
 
 import { DbCompileError } from './errors.js';
 import { normalizePhysical } from './physical.js';
-import { normalizeInvariants } from './invariants.js';
+import { normalizeInvariants, resolveInvariants } from './invariants.js';
 
 /** The closed `x-entity` vocabulary; anything else is `JD0030`. */
 const ENTITY_MEMBERS = new Set(['key', 'unique', 'index', 'default', 'column', 'relation', 'version']);
@@ -393,6 +393,7 @@ export function normalizeEntities(model) {
   for (const entity of entities.values())
     if (entity.physical !== null && entity.relations.length) throw modelError('physical join tables are declared as entities; relation navigation is not qualified for column layouts', entity.docPath);
   resolveRelations(entities);
+  resolveInvariants(entities);
   return entities;
 }
 

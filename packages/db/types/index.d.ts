@@ -2476,9 +2476,30 @@ export interface TrustedSyncSql {
     close(): void;
   };
 }
-export declare function planInvariants(model: unknown, options: { dialect: Dialect }): {
-  type: 'trigger'; name: string; owner: string; rule: string; sql: string;
-}[];
+/** What an installed rule program does, as the PostgreSQL catalog reports it:
+ * the trigger's timing, events, level, `UPDATE OF` columns, `WHEN` presence,
+ * enablement and deferral, and its function — verified field by field at open. */
+export interface InvariantProgram {
+  timing: 'BEFORE' | 'AFTER';
+  events: ('INSERT' | 'UPDATE' | 'DELETE')[];
+  level: 'ROW';
+  columns: string[];
+  condition: boolean;
+  enabled: string;
+  deferrable: boolean;
+  deferred: boolean;
+  function: {
+    schema: string; name: string; language: 'plpgsql'; returns: 'trigger'; arguments: string;
+    securityDefiner: boolean; config: string[] | null; source: string;
+  };
+}
+/** One statement of a planned database rule (MODEL-FORMAT §13), in install
+ * order: SQLite plans a trigger per table and operation; PostgreSQL a trigger
+ * function, then the trigger that calls it, carrying its `program`. */
+export type PlannedInvariant =
+  | { type: 'function'; name: string; owner: string; rule: string; sql: string }
+  | { type: 'trigger'; name: string; owner: string; rule: string; sql: string; program?: InvariantProgram };
+export declare function planInvariants(model: unknown, options: { dialect: Dialect }): PlannedInvariant[];
 /** A reviewed preservation document. The supplied steps retain their types;
  * untyped saved steps remain unknown until the caller validates them. */
 export interface PhysicalMigrationDocument<Steps extends readonly unknown[] = readonly unknown[]> {

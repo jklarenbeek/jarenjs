@@ -275,3 +275,28 @@ it('same-arity physical updates bind their own column names and database default
   }
   finally { await store.close(); }
 });
+
+it('a physical update assigns only the members it changes, in every shape it writes', async () => {
+  const names = ['c0', 'c1', 'c2', 'c3', 'c4', 'c5', 'c6'];
+  const model = { $model: '0.1', entities: { Row: { schema: { type: 'object', properties: {
+    id: { type: 'integer', 'x-entity': { key: true } }, ...Object.fromEntries(names.map((name) => [name, { type: 'integer' }])),
+  } }, physical: { table: 'rows', columns: { id: { name: 'id', codec: 'integer', null: 'reject' },
+    ...Object.fromEntries(names.map((name) => [name, { name, codec: 'integer', null: 'reject' }])) } } } } };
+  const db = await nodeDriver().open(':memory:');
+  // an application's UPDATE OF trigger counts the statements that assign c0
+  db.exec(`CREATE TABLE rows(id INTEGER PRIMARY KEY, ${names.map((name) => `${name} INTEGER`).join(', ')});
+    INSERT INTO rows VALUES (1, ${names.map(() => 0).join(', ')}); CREATE TABLE hits(n INTEGER); INSERT INTO hits VALUES (0);
+    CREATE TRIGGER counted AFTER UPDATE OF c0 ON rows BEGIN UPDATE hits SET n = n + 1; END;`);
+  const store = await openStore(model, { driver: { ...nodeDriver(), open: async () => db }, adopt: true });
+  try {
+    // 127 assignment shapes: more than an entity keeps prepared
+    for (let mask = 1; mask < 128; mask++)
+      await store.entity('Row').update(1, Object.fromEntries(names.filter((_, i) => mask & (1 << i)).map((name) => [name, mask])));
+    // a no-op writes nothing; a change to c1 alone does not assign c0
+    await store.entity('Row').update(1, { c0: 127 });
+    await store.entity('Row').update(1, { c1: 0 });
+    assert.deepEqual(await store.entity('Row').get(1), { id: 1, ...Object.fromEntries(names.map((name) => [name, name === 'c1' ? 0 : 127])) });
+    assert.equal(db.prepare('SELECT n FROM hits').get([]).n, 64);
+  }
+  finally { await store.close(); }
+});

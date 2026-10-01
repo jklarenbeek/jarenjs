@@ -976,6 +976,45 @@ step also adds the existing ordered receipt and checked restart contract.
 The SQLite structural `defineTable`/`planTable` vocabulary remains SQLite SQL;
 native PostgreSQL plans take explicitly reviewed SQL and native catalog targets.
 
+A `TableTrigger` in that vocabulary stays SQLite SQL too. It is an arbitrary
+trigger program over the relational grammar, which no oracle can prove means
+the same on PostgreSQL — its `NEW`/`OLD` references render as quoted
+identifiers, which PostgreSQL does not read as the trigger's records. A rule
+both engines must keep is a persistence invariant instead (MODEL-FORMAT §13): a
+guard with `when` or `columns`, a parent read with `$exists-row`, a revision with
+an `increment` effect, planned for either engine by `planInvariants` and held to
+one differential oracle.
+
+### Installing database rules
+
+`planInvariants(model, { dialect })` returns the statements in install order;
+each is one `ddl` step. A SQLite trigger is one statement. A PostgreSQL program
+is two items, its function and then its trigger, and a native plan takes the
+complete target catalog: read it from a reference schema where the statements
+were applied, or inside a transaction on the primary that applies them and
+rolls back.
+
+```js
+import { planInvariants, planPhysicalMigration, migrate, readSchema, physicalObjectKey } from '@jarenjs/db';
+import { postgresDialect } from '@jarenjs/db/postgres';
+
+const steps = planInvariants(model, { dialect: postgresDialect({ searchPath: schema }) })
+  .map((statement) => ({ kind: 'ddl', sql: statement.sql }));
+const source = (await readSchema(connection)).catalog;
+const target = { dialect: 'postgres', schema, catalog: (await readSchema(reference)).catalog };
+const migration = await planPhysicalMigration(connection, fromModel, model, {
+  id: 'install-rules', steps, physicalTarget: target,
+  dispositions: Object.fromEntries(source.map((object) => [physicalObjectKey(object), 'preserve'])),
+});
+await migrate({ driver }, [migration], { baseline: fromModel, shadow: false });
+```
+
+`migrate` accepts the target catalog after applying the steps, and opening the
+Store verifies each program field by field. On PostgreSQL the target catalog is
+the whole acceptance: `migrate(…, { model })` reads a physical entity's stored
+rows through SQLite tables only and refuses there (`JD0021`). Removing a rule is
+a migration of its own: drop its trigger, and on PostgreSQL its function.
+
 ### Runnable physical lifecycle
 
 Run this ES module in a project with `@jarenjs/db` and `@jarenjs/linq`
