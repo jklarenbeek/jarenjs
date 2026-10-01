@@ -10,6 +10,7 @@ import * as assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 import { compileJsonQuery } from '@jarenjs/json';
+import { compileNumberLocale, nl } from '@jarenjs/locales';
 
 const DOC = readFileSync(new URL('../../packages/json/docs/FORMULA-FORMAT.md', import.meta.url), 'utf8');
 
@@ -69,5 +70,35 @@ describe('FORMULA-FORMAT\'s JavaScript equivalents', () => {
     assert.strictEqual(Math.round(0.015 * 100) / 100, 0.02);
     assert.strictEqual(q({ x: -0.125 }), -0.12);
     assert.strictEqual((-0.125).toFixed(2), '-0.13');
+  });
+
+  // the Dutch number formats are ICU's, as the host runs it: measured on ICU 78.3
+  const ICU = { skip: process.versions.icu !== '78.3' && `measured on ICU 78.3; this host runs ${process.versions.icu}` };
+  const SIGNED = [...HALF_CENTS, ...HALF_CENTS.map((x) => -x)];
+
+  it('n.toFixed(d): the exact value rounded half away from zero, then written', () => {
+    const fixed = (/** @type {number} */ d) => compileJsonQuery({ '$format-number': [{ $if: [{ $lt: ['$.x', 0] }, { $neg: { $round: [{ $neg: '$.x' }, d] } },
+      { $round: [{ $add: ['$.x', 0] }, d] }] }, d === 0 ? '0' : `0.${'0'.repeat(d)}`] });
+    for (const d of [0, 1, 2]) {
+      const q = fixed(d);
+      let differ = 0;
+      for (const x of SIGNED) if (q({ x }) !== x.toFixed(d)) differ++;
+      assert.strictEqual(differ, 0, `toFixed(${d})`);
+    }
+    assert.strictEqual(SIGNED.length, 200000);
+    assert.ok(DOC.includes('no difference over 200,000 values'), 'the document states the measured count');
+  });
+
+  it("n.toLocaleString('nl-NL', …): the decimal and currency pictures under the Dutch format", ICU, () => {
+    const decimalFormats = { nl: compileNumberLocale(nl).decimalFormat };
+    for (const [picture, options] of /** @type {[string, Intl.NumberFormatOptions][]} */ ([
+      ['#.##0,###', {}], ['#.##0,#', { maximumFractionDigits: 1 }], ['€\u00a0#.##0,00;€\u00a0-#.##0,00', { style: 'currency', currency: 'EUR' }]])) {
+      const q = compileJsonQuery({ '$format-number': ['$.x', picture, 'nl'] }, { decimalFormats });
+      // toLocaleString(locale, options) is new Intl.NumberFormat(locale, options).format, built once here
+      const intl = new Intl.NumberFormat('nl-NL', options);
+      let differ = 0;
+      for (const x of SIGNED) if (q({ x }) !== intl.format(x)) differ++;
+      assert.strictEqual(differ, 0, picture);
+    }
   });
 });

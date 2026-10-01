@@ -19,7 +19,7 @@ it('formula measurements retain the unchanged freeze, source outcomes and finite
     assert.ok(measured.sampledHeapBytes < definition.budgets.resources.sampledHeapBytes);
     assert.ok(measured.rssBytes < definition.budgets.resources.peakRssBytes);
   }
-  assert.deepEqual(result.sources, { originals: 8, converted: 2, unresolved: 5, disabled: 1, originalByteChanges: 0, secondChanges: 0 });
+  assert.deepEqual(result.sources, { originals: 8, translated: 5, withDifferences: 1, untranslatable: 2, disabled: 1, originalByteChanges: 0, secondChanges: 0 });
   assert.ok(formulaFacts.facts()['formula.measurements']().includes('Static arithmetic'));
   const definition = manifest.consumers[0];
   assert.equal(runFormulaConsumer(definition, adoptionRows(definition).slice(0, 300)).errors, 0);

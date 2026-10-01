@@ -125,7 +125,8 @@ function createAdoption(client, model, definition, authorize, executor, release)
     migrateSaved: () => client.transaction(async (tx) => {
       const original = await tx.collections.settings.get('originals');
       const prior = await tx.collections.settings.get('migrated-originals');
-      const result = await migrateFormulas(original.sources, prior?.records);
+      // the saved originals spell an explanation as a returned { explanation } object
+      const result = await migrateFormulas(original.sources, prior?.records, { translate: { explanationMember: 'explanation' } });
       if (result.changed) await tx.collections.settings.put({ id: 'migrated-originals', records: result.records }, 'migrated-originals');
       return { ...result, writes: result.changed ? 1 : 0, revisions: result.changed ? 1 : 0 };
     }),

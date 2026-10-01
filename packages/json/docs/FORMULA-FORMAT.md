@@ -158,29 +158,125 @@ same-thread timeout guarantee. `stats()` reports admitted pending work;
 
 ## Explicit migration
 
-`migrateFormulas` and `rollbackFormula` live at
-`@jarenjs/json/formula/migrate`. Source records require `id`, `label`, `enabled`,
-`storageVersion` and `body`. The entire original is retained, including exact line
-endings and extra application metadata. No source body is evaluated.
+`migrateFormulas`, `rollbackFormula`, `resolveFormulaMigration` and
+`translateFormulaBody` live at `@jarenjs/json/formula/migrate`. Source records
+require `id`, `label`, `enabled`, `storageVersion` and `body`. The entire original
+is retained, including exact line endings and extra application metadata. No source
+body is evaluated: a body is read by a parser and translated, never run.
 
-The measured conversion subset is deliberately narrow: `return null;` and
-`return row.name * row.name;`, with ASCII identifier variations and whitespace that preserves JavaScript return
-semantics. A line break immediately after `return` is refused because JavaScript
-automatic semicolon insertion would change its meaning. Numeric
-conversions emit required-number input schemas so JavaScript coercion is never
-silently adopted, each under its own id (`<formula id>/input`), so converted
-formulas share a batch as `{id, formula: native.formula, schemas: native.schemas}`.
-Outputs retain Number arithmetic, including its rounding limitations; overflow
-refuses. A native target is `{formula, schemas}`.
+### Translating a saved source
 
-Every other source receives a specific review reason: statements, optional
-chaining, Intl formatting, application helpers, throw statements, result-policy
-objects or unsupported syntax. Disabled sources are preserved without parsing.
-The frozen synthetic corpus retains the original application-owned static oracle;
-Jaren neither supplies a trusted JavaScript runner nor describes one as a sandbox.
+A body is the statements of a JavaScript function: `migrateFormulas` reads each
+enabled one with a hand-written parser (over `@jarenjs/core/scan`, no `eval`, no
+`new Function`) and translates it into a native formula. The parser reads all of
+the statement and expression syntax a formula body uses, so a construct outside the
+translated subset is named with its position rather than stopping at the first:
 
-A body left for review translates by hand with these equivalents; a test runs
-each one value for value against the JavaScript it replaces:
+- literals, names, member access with `.`, `[…]` and `?.`, template literals,
+  array and object literals, spread into an array;
+- the arithmetic, comparison, equality and logical operators, `??` and `?:`;
+- `Math.round`, `ceil`, `floor`, `abs`, `max` and `min`; `Date.now()`;
+  `new Date(text).getTime()`; `String()` and `Number()`;
+- text methods (`toLowerCase`, `toUpperCase`, `trim`, `includes`, `startsWith`,
+  `endsWith`, `replace` with a literal text or regular expression, `split(x)[0]`)
+  and a regular expression's `test`;
+- `toFixed` and `toLocaleString`, and `new Intl.NumberFormat(…).format`, for a
+  language the host describes;
+- arrow callbacks of `map`, `filter`, `find`, `some`, `every` and `sort`, and
+  `join`, `includes`, `length` and `concat` on an array;
+- `const` and `let`, a destructuring of plain names (`const { a, b: c } = e`, read
+  as the members it names), `if` and `else`, `return`; a `let` reassigned, or an
+  array pushed to, inside an `if` that does not return; `void 0` as undefined.
+
+Statements translate by continuation: `const x = e; rest` is a `$let` around the
+rest, `if (c) return a; rest` is `$if(c, a, rest)`, and a variable an `if` changes
+is rebound to `$if(c, new, old)` for what follows.
+
+`options.translate` (closed: an unknown key is a `TypeError`) names what the body
+reads and calls:
+
+| Option | Default | Meaning |
+|---|---|---|
+| `argument` | `'row'` | the row's parameter name |
+| `helperObject` | `'helpers'` | the helpers' parameter; `helpers.X` reads as the bare helper `X` |
+| `helpers` | none | each helper the body calls: `{call: {name, version}}` (a `$call` of the host helper, listed in the formula's `helpers`) or `{native: {params, expression}}` (an expansion into operators over its parameters, `$name` in the expression); with `returns`, `element`, `absent`, `nullable` and the `differences` it has |
+| `skip` | `'SKIP'` | the skip sentinel: returning it, or `undefined`, skips the row |
+| `explain` | `'because'` | `explain(value, text)` returns an explanation |
+| `explanationMember` | none | a returned object literal with this one member is an explanation, its value the text |
+| `locales` | none | the languages number formatting may name: `{decimalFormat, grouping, decimal, currencies, nan}`, the decimal format registered under `decimalFormat` and each currency's picture |
+
+Using the skip sentinel or an explanation makes the formula an outcome-mode one.
+`options.formula`, when given, is the `FormulaOptions` each translation must
+compile under; one that does not (a helper or decimal format the host does not
+supply) is untranslatable with the reason `compile`, naming what it lacks.
+
+### The report
+
+Each record is `{version: 1, id, original, sourceHash, state, reason, reasons,
+differences, native, nativeHash}`:
+
+- `translated`: the native formula is the source's meaning;
+- `translated-with-differences`: the same, but where each named difference
+  applies;
+- `untranslatable`: `native` is null and `reasons` names every blocker;
+- `disabled-preserved`: a disabled source, kept without parsing.
+
+`reason` is the first reason's kind, `translated` or `differences`. A difference
+is `{kind, at, note}` and a reason `{kind, at, message}`; `at` is `{offset, line,
+column}` in the body, 1-based. Translation is deterministic: the same body and
+options give the same formula, whatever was translated before.
+
+A translation is exact on two conditions, stated once rather than at every site.
+Each field holds the JSON type the body uses it as: where JavaScript would coerce
+text to a number, the operator refuses the row (`JQ2001`). And a value the body
+reads where a guard (`if (x == null) return …`, `!x`, `x?.y`, `x ?? y`, a test in
+an `&&` chain) has not proven it present is named where it matters:
+
+| Difference | Where JavaScript and the query part ways |
+|---|---|
+| `absent-receiver` | a member or method of null or undefined: JavaScript throws, the query reads nothing |
+| `nullish-arithmetic` | arithmetic on undefined (NaN) or null (0): the query yields nothing, or refuses null |
+| `nullish-comparison` | `<`, `>`, `<=`, `>=` with null, which JavaScript compares as 0, where 0 would pass |
+| `concat-undefined` | `'x' + undefined` is `"xundefined"`; the query writes `"x"` |
+| `absent-element` | undefined kept as an array element; the query drops it |
+| `identity` | objects compared by identity in JavaScript, by value in the query |
+| `prototype-key` | a constant table indexed by a key JavaScript finds on `Object.prototype` (`constructor`) |
+| `clock` | `Date.now()` is `$context.now`: the host evaluates with `context.now` (epoch milliseconds) |
+| `date-parse` | `new Date(text)` also reads dates that are not RFC 3339, implementation-defined |
+| `regex-subset` | a regular expression rewritten to an I-Regexp that cannot say the same (`\b`) |
+| `sort-key` | a sort key that may be missing: JavaScript keeps the order, the query sorts it first |
+| `remainder-by-zero` | `%` by zero: JavaScript computes NaN, the query refuses (`JQ2002`) |
+| `number-parse` | `Number(text)`: JavaScript reads `''` as 0 and accepts hex, the query does not |
+| `replacement-pattern` | a computed replacement: JavaScript reads `$&` and `$1` in it |
+| `loose-equality` | `==` between values of unknown type: JavaScript converts between types |
+| (the host's) | a native helper's own `differences`, at each call |
+
+Regular expressions are rewritten exactly where I-Regexp can say the same: `\d`,
+`\w` and `\s` as their classes (`\s` is JavaScript's fixed white-space set), `.` as
+everything but a line terminator, the anchors `^` and `$` marked by a sentinel the
+text does not hold, and the `i` flag by lower-casing the tested text. Captures,
+lookaround, lazy quantifiers and back references are reasons. Number formatting is
+translated for the languages `options.translate.locales` describes:
+`toLocaleString` with `style`, `currency`, `minimumFractionDigits` and
+`maximumFractionDigits`, written with `$format-number` (QUERY-FORMAT §8.7).
+
+Every reason kind names what stops the translation: `syntax`, `unreachable` (a
+statement after a `return`), `return-line-break` (a line break right after
+`return`, where JavaScript returns undefined), `loop`, `throw`, `statement`,
+`assignment`, `function`, `method`, `regex`, `replace`, `replace-first`,
+`split`, `length` and `includes` (of a value that could be text or an array),
+`destructuring` (with a default, a nested or array pattern, or a rest), `new`,
+`locale`, `helper`, `unknown-name`, `typeof`, `operator`, `callback`, `sort` and
+`compile`, among others; each carries a message.
+
+A native formula carries no input schema (`schemas` is `{}`): the operators
+refuse what JavaScript would coerce, at the operator rather than the boundary. A
+batch still merges schemas a host declares on its targets.
+
+### Equivalents, measured
+
+A body translates with these equivalents; a test runs each one value for value
+against the JavaScript it replaces:
 
 | JavaScript | JSON Query |
 |---|---|
@@ -189,6 +285,10 @@ each one value for value against the JavaScript it replaces:
 | `a == null` | `{"$is-null": {"$default": [a, null]}}` |
 | `Math.round(x * 100) / 100` | `{"$div": [{"$round": [{"$mul": [x, 100]}]}, 100]}` |
 | `Number(x.toFixed(2))`, `x >= 0` | `{"$round": [x, 2]}` |
+| `x.toFixed(d)` | `x` rounded on its exact value half away from zero (`$round` of the magnitude, the sign put back), written with the picture `0.00…` |
+| `x.toLocaleString('nl-NL')` | `{"$format-number": [x, "#.##0,###", "nl"]}` |
+| `x.toLocaleString('nl-NL', {maximumFractionDigits: 1})` | `{"$format-number": [x, "#.##0,#", "nl"]}` |
+| `x.toLocaleString('nl-NL', {style: 'currency', currency: 'EUR'})` | `{"$format-number": [x, "€ #.##0,00;€ -#.##0,00", "nl"]}`, the space a no-break space, and `€ NaN` for NaN as ICU writes it |
 
 The two rounding spellings are not interchangeable. `Math.round(x * 100) / 100`
 rounds the product, which binary multiplication has already rounded, so
@@ -200,17 +300,37 @@ multiply-round-divide spelling reproduces it bit for bit (no difference over
 zero (`(-0.125).toFixed(2)` is `-0.13`) where `$round` rounds toward positive
 infinity (`-0.12`).
 
+`toFixed` translated as the table says agrees with JavaScript at 0, 1 and 2 digits:
+no difference over 200,000 values (the half-cent values, both signs). The three
+Dutch number formats agree with `Intl.NumberFormat` on ICU 78.3 over the same
+values.
+
+### Parity, records and review
+
+`checkFormulaParity(formula, rows, expected, options)` from
+`@jarenjs/json/formula` checks a compiled formula against the outputs the host's
+own trusted runner produced for the same rows (`expected[i]` in the outcome
+shape); the library never runs the original. It returns `{rows, agree, differ,
+mismatches, omittedMismatches}`, at most `maxMismatches` (default 20) mismatches
+listed. Outcomes compare as canonical JSON; two errors agree whatever their
+messages, since a JavaScript TypeError and a query refusal word one failure
+differently. The acceptance corpus (`test/json/formula-corpus.json`, 35 saved
+columns and rules) translates 20 sources exactly, 14 with named differences and
+1 not at all, and agrees with its runner on every row but those made to show a
+named difference.
+
 Migration returns `{records, changes, changed}`. Repeating input reports zero
 changes; missing sources in a later input do not delete records. A changed source
 creates a conflict carrying both the original and current source. Native edits
-are preserved. SHA-256 identities track source and native content.
+are preserved. SHA-256 identities track source and native content; a record kept
+from an earlier migration stays as it was until its source changes.
 `resolveFormulaMigration(record, native, review, options)` requires a reviewer,
 reason, matching `sourceHash` and `expectedNativeHash`; it compiles the rewrite
 and retains native history. Repeating an identical resolution is a no-op.
 Rollback is a compare-and-restore proposal: changed source/native data refuses;
 restoring twice has zero changes. The host applies returned records through its
-own persistence command. Real saved corpora and operator review remain pending;
-unresolved records prevent retirement of a trusted compatibility runner.
+own persistence command. Untranslatable records keep their trusted runner until a
+reviewer resolves them.
 
 ## Reviewed plans
 

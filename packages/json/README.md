@@ -857,4 +857,4 @@ Unit tests live in `test/json/` at the repository root (`npm run test:json`); th
 
 ## Saved formulas and reviewed plans
 
-`./formula`, `./formula/batch`, `./formula/migrate` and `./rules` compile saved JSON Query profiles, bounded per-cell outcomes, explicit source migrations and immutable reviewed plans. Schema, helper and operator-pack versions, locale data and current command authority are explicit. See [FORMULA-FORMAT](docs/FORMULA-FORMAT.md) for the normative contract and measured refusals.
+`./formula`, `./formula/batch`, `./formula/migrate` and `./rules` compile saved JSON Query profiles, bounded per-cell outcomes, source migrations and immutable reviewed plans. A migration reads each saved JavaScript body with a parser and translates it — exactly, with each difference named, or not at all with every reason positioned — and `checkFormulaParity` holds a translation to the host's own outputs. Schema, helper and operator-pack versions, locale data and current command authority are explicit. See [FORMULA-FORMAT](docs/FORMULA-FORMAT.md) for the normative contract and measured refusals.

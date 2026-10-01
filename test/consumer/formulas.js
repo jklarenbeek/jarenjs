@@ -8,14 +8,16 @@ import { createTypeTestCompiler } from '@jarenjs/validate/query';
 import { defineFormula } from '@jarenjs/linq/formula';
 import { createRuleEditor } from '@jarenjs/rules';
 
-/** Original-source parity and two-run migration/rollback, including unsupported originals. */
+/** Original-source parity and two-run migration/rollback, including untranslatable originals. */
 export async function qualifyFormulaSources(sources) {
-  const first = await migrateFormulas(sources);
-  let converted = 0;
+  // this corpus spells an explanation as a returned { explanation } object
+  const options = { translate: { explanationMember: 'explanation' } };
+  const first = await migrateFormulas(sources, [], options);
+  let translated = 0;
   for (const record of first.records) {
     assert.deepEqual(record.original, sources.find((source) => source.id === record.id));
     if (record.native) {
-      converted++;
+      translated++;
       const formula = compileFormula(record.native.formula, { schemas: record.native.schemas, compileTypeTest: createTypeTestCompiler() });
       assert.deepEqual(formula.evaluate(record.original.input), record.original.expected);
       const restore = await rollbackFormula(record, record.original, record.native);
@@ -23,9 +25,11 @@ export async function qualifyFormulaSources(sources) {
       assert.equal((await rollbackFormula(record, restore.source, restore.native)).changed, 0);
     }
   }
-  assert.equal((await migrateFormulas(sources, first.records)).changed, 0);
-  assert.equal(converted, 2);
-  return { originals: sources.length, converted, unresolved: first.records.filter((r) => r.state === 'review-required').length, disabled: first.records.filter((r) => r.state === 'disabled-preserved').length, originalByteChanges: 0, secondChanges: 0 };
+  assert.equal((await migrateFormulas(sources, first.records, options)).changed, 0);
+  assert.equal(translated, 5);
+  const count = (/** @type {string} */ state) => first.records.filter((r) => r.state === state).length;
+  return { originals: sources.length, translated, withDifferences: count('translated-with-differences'), untranslatable: count('untranslatable'),
+    disabled: count('disabled-preserved'), originalByteChanges: 0, secondChanges: 0 };
 }
 
 /** Formula costs include compilation and snapshots; the static arithmetic oracle is retained. */

@@ -65,7 +65,7 @@ export async function runAdoptionJourney({ openAdoption, seedAdoptionFile, adopt
     assert.equal((await app.client.store.jobs.get('historic-job')).payload.original, true);
     if (fresh) {
       const migrated = await app.migrateSaved();
-      assert.equal(migrated.records.filter((record) => record.native).length, 2);
+      assert.equal(migrated.records.filter((record) => record.native).length, 5);
       const secondMigration = await app.migrateSaved();
       assert.deepEqual([secondMigration.changed, secondMigration.writes, secondMigration.revisions], [0, 0, 0]);
       const queryStart = performance.now();

@@ -1,0 +1,3565 @@
+{
+  "policy": "trusted static module only (formula-corpus-oracle.js); bodies never dynamically compiled",
+  "clock": "2026-10-01T12:00:00Z",
+  "columns": [
+    {
+      "id": "price-gap",
+      "body": "if (record.web?.listCents == null || record.till?.listCents == null) return null;\nconst gap = record.till.listCents - record.web.listCents;\nreturn new Intl.NumberFormat('nl-NL', {\n  style: 'currency',\n  currency: 'EUR',\n}).format(gap / 100);"
+    },
+    {
+      "id": "margin",
+      "body": "// Margin per piece: the price without tax, less the cost.\n// The vendor's cost is taken to exclude tax; the till knows the rate.\nconst ask = record.listCents;\nconst cost = record.vendor?.costCents;\nconst tax = record.till?.tax;\n// a cost of 0 stands for: not known\nif (ask == null || !cost || tax?.rate == null) return null;\n\nconst net = tax.inclusive ? ask / (1 + tax.rate / 100) : ask;\nconst left = (net - cost) / 100;\nreturn left.toLocaleString('nl-NL', { style: 'currency', currency: 'EUR' });"
+    },
+    {
+      "id": "margin-share",
+      "body": "// Gross margin as a share of the price without tax.\nconst ask = record.listCents;\nconst cost = record.vendor?.costCents;\nconst tax = record.till?.tax;\n// a cost of 0 stands for: not known\nif (ask == null || !cost || tax?.rate == null) return null;\n\nconst net = tax.inclusive ? ask / (1 + tax.rate / 100) : ask;\nif (net <= 0) return null;\nconst share = (net - cost) / net * 100;\nreturn share.toLocaleString('nl-NL', { maximumFractionDigits: 1 }) + '%';"
+    },
+    {
+      "id": "price-per-100",
+      "body": "// Looks for an amount like \"250 gm\", \"2 kg\" or \"50 cl\"\n// in the size text, the pack text or the name.\nconst texts = [record.sizeText, record.packText, record.caption];\nconst amountPattern = /(\\d+(?:[.,]\\d+)?)\\s*(kgs?|gm|g|cl|litre|ml|l)\\b/i;\nconst hit = texts.map((piece) => String(piece ?? '').match(amountPattern)).find(Boolean);\nif (!hit || record.listCents == null) return null;\n\nconst unit = hit[2].toLowerCase();\nlet amount = Number(hit[1].replace(',', '.'));\nif (['kg', 'kgs', 'litre', 'l'].includes(unit)) amount *= 1000;\nif (!amount) return null;\n\nconst per100 = record.listCents / 100 / amount * 100;\nconst measure = ['litre', 'cl', 'ml', 'l'].includes(unit) ? 'ml' : 'g';\nreturn per100.toLocaleString('nl-NL', { style: 'currency', currency: 'EUR' }) + ' per 100 ' + measure;"
+    },
+    {
+      "id": "restock",
+      "body": "// Compares the till stock with its reorder level.\n// A pack size rounds the advice up to whole packs.\nconst onHand = record.till?.onHand;\nconst level = record.till?.reorderAt;\nif (onHand == null) return null;\nif (!level) return onHand <= 0 ? 'Sold out' : null;\nif (onHand > level) return 'No';\n\nconst short = level - onHand;\nconst pack = record.vendor?.packSize;\nconst order = pack ? Math.ceil(short / pack) * pack : short;\nreturn 'Yes, ' + order + ' pieces';"
+    },
+    {
+      "id": "stock-value",
+      "body": "// Stock times cost. A stock below zero counts as none.\nconst CEILING = 4000; // more is mostly a bulk or open-ended setting at the till\nconst onHand = record.till?.onHand;\nconst cost = record.vendor?.costCents;\nif (onHand == null || !cost) return null;\nif (onHand > CEILING) return 'check the stock';\n// a cost above the price is mostly per crate or per kilo: the value would be off\nconst tax = record.till?.tax;\nconst netPrice = record.listCents != null && tax?.rate != null\n  ? (tax.inclusive ? record.listCents / (1 + tax.rate / 100) : record.listCents) : null;\nif (netPrice != null && cost > netPrice) return 'check the cost';\n\nconst worth = Math.max(0, onHand) * cost / 100;\nreturn worth.toLocaleString('nl-NL', { style: 'currency', currency: 'EUR' });"
+    },
+    {
+      "id": "gaps",
+      "body": "// Lists what the web shop still lacks.\nconst lacking = [];\nif (!record.photo) lacking.push('photo');\nif (!record.hasBlurb) lacking.push('blurb');\nif (!record.shelfId) lacking.push('shelf');\nif (!record.kind) lacking.push('kind');\nif (!record.netGrams) lacking.push('weight');\nif (!record.ean) lacking.push('ean');\nreturn lacking.length ? lacking.join(', ') : 'complete';"
+    },
+    {
+      "id": "sales-value",
+      "body": "// Stock times the price without tax.\nconst CEILING = 4000; // more is mostly a bulk or open-ended setting at the till\nconst onHand = record.till?.onHand;\nconst tax = record.till?.tax;\nif (onHand == null || record.listCents == null || tax?.rate == null) return null;\nif (onHand > CEILING) return 'check the stock';\n\nconst netPrice = tax.inclusive ? record.listCents / (1 + tax.rate / 100) : record.listCents;\nconst worth = Math.max(0, onHand) * netPrice / 100;\nreturn worth.toLocaleString('nl-NL', { style: 'currency', currency: 'EUR' });"
+    },
+    {
+      "id": "profit-potential",
+      "body": "// What the present stock brings in when all of it sells at today's price:\n// stock times (price without tax, less the cost).\nconst CEILING = 4000; // more is mostly a bulk or open-ended setting at the till\nconst onHand = record.till?.onHand;\nconst cost = record.vendor?.costCents;\nconst tax = record.till?.tax;\nif (!onHand || onHand < 0 || !cost || record.listCents == null || tax?.rate == null) return null;\nif (onHand > CEILING) return 'check the stock';\n\nconst netPrice = tax.inclusive ? record.listCents / (1 + tax.rate / 100) : record.listCents;\n// a cost above the price is mostly a price per crate or per kilo\nif (cost > netPrice) return 'check the cost';\nconst gain = onHand * (netPrice - cost) / 100;\nreturn gain.toLocaleString('nl-NL', { style: 'currency', currency: 'EUR' });"
+    },
+    {
+      "id": "margin-flag",
+      "body": "// Set the bounds to your own policy.\nconst LOW = 25;   // percent\nconst WATCH = 40; // percent\nconst cost = record.vendor?.costCents;\nconst tax = record.till?.tax;\nif (!cost || record.listCents == null || tax?.rate == null) return null;\n\nconst netPrice = tax.inclusive ? record.listCents / (1 + tax.rate / 100) : record.listCents;\nconst share = (netPrice - cost) / netPrice * 100;\n// sorted descending, \"loss?\" leads, then \"too low\", \"watch\" and \"fine\";\n// a loss is often a cost per crate or per kilo: check that first\nif (share < 0) return 'loss?';\nif (share < LOW) return 'too low';\nif (share < WATCH) return 'watch';\nreturn 'fine';"
+    },
+    {
+      "id": "advised-price",
+      "body": "// The price (with tax) that yields the target margin,\n// rounded up to 10 cents.\nconst TARGET = 45; // percent of the price without tax\nconst cost = record.vendor?.costCents;\nconst tax = record.till?.tax;\nif (!cost || tax?.rate == null) return null;\n\nconst net = cost / (1 - TARGET / 100);\nconst gross = tax.inclusive ? net * (1 + tax.rate / 100) : net;\nconst advice = Math.ceil(gross / 10) * 10;\nreturn (advice / 100).toLocaleString('nl-NL', { style: 'currency', currency: 'EUR' });"
+    },
+    {
+      "id": "advice-gap",
+      "body": "// Today's price less the advised one: below zero means \"under the advice\".\nconst TARGET = 45;\nconst cost = record.vendor?.costCents;\nconst tax = record.till?.tax;\nif (!cost || record.listCents == null || tax?.rate == null) return null;\n\nconst net = cost / (1 - TARGET / 100);\nconst advice = Math.ceil((tax.inclusive ? net * (1 + tax.rate / 100) : net) / 10) * 10;\nreturn ((record.listCents - advice) / 100).toLocaleString('nl-NL', { style: 'currency', currency: 'EUR' });"
+    },
+    {
+      "id": "retire-action",
+      "body": "// Advice for items the till marks as retired.\nif (!record.till?.retired) return null;\nconst onHand = record.till.onHand;\nif (onHand == null) return 'Stock unknown: count first';\nif (onHand < 0) return 'Stock below zero [' + onHand + ']: count first';\nif (onHand > 0) {\n  const cost = record.vendor?.costCents;\n  const worth = cost ? ' [' + (onHand * cost / 100).toLocaleString('nl-NL', { style: 'currency', currency: 'EUR' }) + ']' : '';\n  return 'Sell off: ' + onHand + ' pieces' + worth;\n}\nif (record.state === 'live' && record.web) return 'Archive in the web shop';\nif (record.state === 'live') return 'Archive';\nreturn null; // archived or a draft already: nothing to do"
+    },
+    {
+      "id": "shop-refill",
+      "body": "// The shop is the store with a low mark; top it up to its high mark (or low mark)\n// once its stock drops below the low mark, from the store that holds the most.\n// When several stores have a low mark, the shop is mostly the one without an aisle.\nconst stores = record.till?.stores ?? [];\nconst marked = stores.filter((store) => store.low > 0);\nconst shop = marked.find((store) => !store.aisle) ?? marked[0];\nif (!shop || shop.onHand == null || shop.onHand >= shop.low) return null;\n\nconst source = stores.filter((store) => store !== shop && store.onHand > 0)\n  .sort((a, b) => b.onHand - a.onHand)[0];\nconst needed = (shop.high ?? shop.low) - shop.onHand;\nif (!source) return needed + ' needed, none in stock';\nconst count = Math.min(needed, source.onHand);\nconst where = source.aisle ? ', aisle ' + source.aisle : '';\nreturn count + ' from ' + source.place.split(' ')[0] + where;"
+    },
+    {
+      "id": "label-ready",
+      "body": "// What a shelf label and the till need to be filled in.\nconst lacking = [];\nif (!record.tag?.style) lacking.push('label');\nif (!record.ean) lacking.push('ean');\nif (!record.packText && !/\\d/.test(record.sizeText ?? '')) lacking.push('size');\nif (!record.till?.shortName) lacking.push('till name');\nif (record.listCents == null) lacking.push('price');\nreturn lacking.length ? 'missing ' + lacking.join(', ') : 'yes';"
+    },
+    {
+      "id": "days-listed",
+      "body": "// Days since the till first listed the item.\nconst since = record.till?.since;\nif (!since) return null;\nreturn Math.floor((Date.now() - new Date(since).getTime()) / 86400000);"
+    },
+    {
+      "id": "web-ready",
+      "body": "// New items: what has to happen before the web shop?\nconst todo = [];\nif (!record.photo) todo.push('photo');\nif (!record.hasBlurb) todo.push('blurb');\nif (!record.shelfId) todo.push('shelf');\nif (record.listCents == null) todo.push('price');\nif (!record.web) todo.push('list on the web');\nreturn todo.length ? todo.join(', ') : 'yes';"
+    }
+  ],
+  "rules": [
+    {
+      "id": "price-raise",
+      "body": "const RAISE = 4; // 4 means 4% dearer, -8 is 8% cheaper\n\nif (record.listCents == null) return LEAVE;\nconst fresh = nearest5(percentUp(record.listCents, RAISE));\nreturn note(fresh, `${euro(record.listCents)} + ${RAISE}% → ${euro(fresh)}`);"
+    },
+    {
+      "id": "price-from-cost",
+      "body": "const MARKUP = 2.2; // 2,2 means: price without tax = 2,2 × the cost\n\nconst cost = record.vendor?.costCents;\nconst tax = record.till?.tax;\nif (!cost || tax?.rate == null) return LEAVE; // cost or tax rate unknown\nconst net = cost * MARKUP;\nconst fresh = upTo5(tax.inclusive ? net * (1 + tax.rate / 100) : net);\nreturn note(fresh, `cost ${euro(cost)} × ${MARKUP} + ${tax.rate}% tax → ${euro(fresh)}`);"
+    },
+    {
+      "id": "price-steps",
+      "body": "// weight in grams → price in cents\nconst STEPS = { 25: 150, 75: 290, 125: 410, 250: 760, 500: 1390 };\n\n// The size is not in the same field everywhere: try the pack text, then the\n// size text (\"75gr.\", \"0,5kg.\"), then the net weight.\nconst size = weightOf(record.packText) ?? weightOf(record.sizeText) ?? record.netGrams;\nif (!size) return LEAVE;\nconst price = STEPS[size];\nif (price == null) return LEAVE;\nreturn note(price, `${size} g on the price steps`);"
+    },
+    {
+      "id": "copy-till-price",
+      "body": "// Copy only when the till has one valid price.\nif (record.till?.listCents == null) return LEAVE;\nif (record.till.priceCount > 1) return LEAVE; // conflicting prices\nreturn record.till.listCents;"
+    },
+    {
+      "id": "net-weight",
+      "body": "// For liquids, 1 ml counts as 1 gram.\nconst net = massOf(record.packText) ?? massOf(record.sizeText);\nreturn net || LEAVE;"
+    },
+    {
+      "id": "pack-weight",
+      "body": "// tare per pack size in grams\nconst net = massOf(record.packText) ?? massOf(record.sizeText);\nif (!net) return LEAVE;\nconst tare = net <= 120 ? 15 : net <= 250 ? 25 : 50;\nreturn note(net + tare, `${net} g net + ${tare} g packing`);"
+    },
+    {
+      "id": "customs-code",
+      "body": "// kind → customs code (check the codes with your forwarder)\nconst TARIFFS = {\n  Seeds: '120991',  // seeds for sowing\n  Bulbs: '060110',  // bulbs, dormant\n  Pots: '691200',   // ceramic pots\n  Tools: '820190',  // hand tools\n  Soil: '253090',   // potting soil\n};\nconst tariff = TARIFFS[record.kind];\nreturn tariff ? note(tariff, `kind ${record.kind}`) : LEAVE;"
+    },
+    {
+      "id": "caption-tidy",
+      "body": "const caption = clean(record.caption);\nif (caption == null) return LEAVE;\nlet tidy = caption.replace(/\\s+/g, ' ');\n// Only names written wholly in capitals (at least 5 letters).\nconst alpha = tidy.replace(/[^a-zA-Z\\u00C0-\\u024F]/g, '');\nif (alpha.length >= 5 && alpha === alpha.toUpperCase()) tidy = capitalize(tidy.toLowerCase());\nreturn tidy === caption ? LEAVE : tidy;"
+    },
+    {
+      "id": "aliases",
+      "body": "// tidyList also repairs earlier imports split at an entity, like \"Cr&egrave\" + \"me\".\nconst fromTill = record.till?.aliases ?? [];\nconst present = record.aliases ?? [];\nif (fromTill.length === 0 && present.length === 0) return LEAVE;\nconst merged = tidyList([...present, ...fromTill]);\nreturn merged.length === present.length && merged.every((alias, i) => alias === present[i]) ? LEAVE : merged;"
+    },
+    {
+      "id": "labels-from-section",
+      "body": "// '#roses' > '#red' becomes the labels 'roses' and 'red'.\nconst fromSection = (record.section?.trail ?? []).map((step) => step.replace(/^#/, ''));\nif (fromSection.length === 0) return LEAVE;\nreturn distinct([...(record.labels ?? []), ...fromSection]);"
+    },
+    {
+      "id": "till-text",
+      "body": "const caption = clean(record.caption);\nif (caption == null) return LEAVE;\n// \"One size\" is the web shop's name for an item without sizes.\nconst size = record.sizeText === 'One size' ? null : clean(record.sizeText);\nconst pack = clean(record.packText) ?? size;\nreturn pack && !caption.toLowerCase().includes(pack.toLowerCase()) ? `${caption} ${pack}` : caption;"
+    },
+    {
+      "id": "retire",
+      "body": "// Archive only when every member meets every condition.\nif (record.family.some(member => !member.retired\n    || member.onHand !== 0 || member.webId)) return LEAVE;\nreturn note('stored', 'Every member: retired at the till, no stock, not on the web');"
+    },
+    {
+      "id": "retire-online-report",
+      "body": "// Archive these on the web, or order them again.\nif (!record.family.some(member => member.webId)) return LEAVE; // not on the web\nif (record.family.some(member => !member.retired)) return LEAVE;\nif (record.family.some(member => member.onHand == null || member.onHand > 0)) return LEAVE;\nreturn note('stored', 'Retired at the till, no stock, yet still live on the web');"
+    },
+    {
+      "id": "margin-floor-report",
+      "body": "const FLOOR = 25;          // report below this margin (%)\nconst TARGET = 40;         // the proposed price yields this margin (%)\nconst SHOW_LOSS = false;   // true: also costs above the price (often per crate or per kilo)\n\nconst cost = record.vendor?.costCents;\nconst tax = record.till?.tax;\nif (!cost || record.listCents == null || tax?.rate == null) return LEAVE;\nconst uplift = tax.inclusive ? 1 + tax.rate / 100 : 1;\nconst net = record.listCents / uplift;\nconst share = (net - cost) / net * 100;\nif (share >= FLOOR) return LEAVE;\nif (share < 0 && !SHOW_LOSS) return LEAVE;\nconst advice = upTo5(cost / (1 - TARGET / 100) * uplift);\nconst why = `margin ${share.toFixed(1).replace('.', ',')}% (cost ${euro(cost)} at ${record.vendor.firm})`;\n// A margin below zero is often a cost per crate or per kilo.\nreturn note(advice, share < 0 ? `check the cost first: ${why}` : why);"
+    },
+    {
+      "id": "step-drift-report",
+      "body": "// the price steps of this class (grams → cents)\nconst STEPS = { 25: 150, 75: 290, 125: 410, 250: 760, 500: 1390 };\nconst size = weightOf(record.packText) ?? weightOf(record.sizeText) ?? record.netGrams;\nif (!size) return LEAVE;\nconst due = STEPS[size];\nif (due == null) return LEAVE;\nif (record.listCents === due) return LEAVE;\nreturn note(due, `${size} g should cost ${euro(due)}, listed at ${euro(record.listCents)}`);"
+    },
+    {
+      "id": "price-parity-report",
+      "body": "const own = record.listCents;\nconst till = record.till?.listCents ?? null;\nconst web = record.web?.listCents ?? null;\nif (till == null && web == null) return LEAVE;\nif (own === till && own === web) return LEAVE;\nreturn note(till ?? web, `own ${euro(own)} · till ${euro(till)} · web ${euro(web)}`);"
+    },
+    {
+      "id": "url-key-report",
+      "body": "// The web shop drops brackets and quotes without a dash: \"(Mini)rake\" → \"minirake\".\nconst plain = String(record.caption ?? '').replace(/[()\"'´]/g, '').replace(/[åÅ]/g, 'a').replace(/[þÞ]/g, 'th').replace(/[œŒ]/g, 'oe');\nconst fresh = toSlug(plain);\nif (fresh == null || record.urlKey == null) return LEAVE;\n// The web shop adds \"-1\", \"-2\" to a repeated name; that is no drift.\nif (record.urlKey.replace(/-\\d+$/, '') === fresh) return LEAVE;\nreturn fresh === record.urlKey ? LEAVE : fresh;"
+    },
+    {
+      "id": "starter",
+      "body": "// Work out the new value for this field here.\n// Return LEAVE to keep a record as it is.\nreturn LEAVE;"
+    }
+  ],
+  "rows": [
+    {
+      "id": 1,
+      "groupId": 1,
+      "caption": "(Mini)rake",
+      "sizeText": "1 l",
+      "packText": "500 g",
+      "netGrams": 0,
+      "listCents": null,
+      "photo": "/photos/1",
+      "hasBlurb": true,
+      "kind": "Bulbs",
+      "ean": "5412345000013",
+      "state": "stored",
+      "urlKey": "fern-mix-2",
+      "labels": [],
+      "aliases": [
+        "Fern"
+      ],
+      "web": null,
+      "vendor": {
+        "costCents": 0,
+        "firm": "Greenhouse Supply",
+        "packSize": 0
+      },
+      "till": null,
+      "section": {
+        "trail": []
+      },
+      "family": [
+        {
+          "retired": false,
+          "onHand": 0,
+          "webId": "w0-0"
+        },
+        {
+          "retired": true,
+          "onHand": 0,
+          "webId": null
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "groupId": 1,
+      "caption": "(Mini)rake",
+      "sizeText": "Large",
+      "packText": "1 l",
+      "listCents": null,
+      "hasBlurb": false,
+      "shelfId": "s-4-2",
+      "kind": "Seeds",
+      "ean": "5412345000013",
+      "state": "draft",
+      "labels": [
+        "roses",
+        "red"
+      ],
+      "aliases": [
+        "moss",
+        "Moss"
+      ],
+      "tag": {
+        "style": "standard"
+      },
+      "web": {
+        "listCents": 884,
+        "id": "w1"
+      },
+      "vendor": {
+        "costCents": 950,
+        "firm": "Greenhouse Supply",
+        "packSize": 4
+      },
+      "till": {
+        "listCents": 1639,
+        "onHand": -2,
+        "reorderAt": 0,
+        "tax": {
+          "rate": 0,
+          "inclusive": true
+        },
+        "retired": true,
+        "priceCount": 2,
+        "aliases": [
+          "Hart fern"
+        ],
+        "since": "2026-05-31T23:00:00+02:00",
+        "stores": []
+      },
+      "section": null,
+      "family": [
+        {
+          "retired": true,
+          "onHand": 3,
+          "webId": null
+        },
+        {
+          "retired": false,
+          "onHand": 0,
+          "webId": null
+        },
+        {
+          "retired": false,
+          "onHand": 0,
+          "webId": "w1-2"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "groupId": 1,
+      "caption": "MOSS",
+      "sizeText": "One size",
+      "packText": "1 l",
+      "netGrams": 60,
+      "listCents": 1390,
+      "photo": "/photos/1",
+      "hasBlurb": true,
+      "shelfId": "s-4-2",
+      "kind": "Tools",
+      "ean": "5412345000013",
+      "state": "stored",
+      "urlKey": "fern-mix",
+      "labels": [],
+      "aliases": [
+        "Cr&egrave",
+        "me"
+      ],
+      "tag": {
+        "style": "standard"
+      },
+      "web": {
+        "listCents": 574,
+        "id": "w2"
+      },
+      "vendor": {
+        "costCents": 2064,
+        "firm": "Greenhouse Supply",
+        "packSize": 10
+      },
+      "till": {
+        "listCents": null,
+        "onHand": -2,
+        "reorderAt": null,
+        "tax": {
+          "rate": 21,
+          "inclusive": true
+        },
+        "retired": false,
+        "shortName": "Till caption",
+        "priceCount": 2,
+        "aliases": [],
+        "stores": null
+      },
+      "section": {
+        "trail": []
+      },
+      "family": [
+        {
+          "retired": false,
+          "onHand": 0,
+          "webId": null
+        },
+        {
+          "retired": false,
+          "onHand": 0,
+          "webId": null
+        },
+        {
+          "retired": true,
+          "onHand": 0,
+          "webId": null
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "groupId": 2,
+      "caption": "FERN MIX",
+      "sizeText": "Large",
+      "packText": "0,5 kg",
+      "netGrams": 25,
+      "listCents": 290,
+      "photo": "/photos/1",
+      "hasBlurb": true,
+      "shelfId": "s-4-2",
+      "kind": "Fertiliser",
+      "ean": "5412345000013",
+      "state": "draft",
+      "urlKey": "grosser-topf",
+      "labels": [],
+      "aliases": [],
+      "tag": {
+        "style": "standard"
+      },
+      "web": null,
+      "vendor": {
+        "firm": "Greenhouse Supply",
+        "packSize": 10
+      },
+      "till": {
+        "listCents": 1336,
+        "onHand": 35,
+        "reorderAt": 12,
+        "tax": null,
+        "retired": false,
+        "shortName": "Till caption",
+        "priceCount": 1,
+        "aliases": [
+          "Cr&egrave",
+          "me"
+        ],
+        "since": "2026-05-31T23:00:00+02:00"
+      },
+      "section": {
+        "trail": [
+          "#roses",
+          "#red"
+        ]
+      },
+      "family": [
+        {
+          "retired": false,
+          "onHand": 0,
+          "webId": "w3-0"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "groupId": 2,
+      "caption": "a",
+      "sizeText": "0,5kg.",
+      "packText": "0,5 kg",
+      "netGrams": 0,
+      "listCents": 0,
+      "hasBlurb": true,
+      "shelfId": "s-4-2",
+      "kind": "Pots",
+      "ean": "5412345000013",
+      "state": "stored",
+      "labels": [
+        "roses",
+        "red"
+      ],
+      "aliases": [
+        "moss",
+        "Moss"
+      ],
+      "tag": null,
+      "web": {
+        "listCents": 1103,
+        "id": "w4"
+      },
+      "vendor": {
+        "costCents": 450,
+        "firm": "Greenhouse Supply",
+        "packSize": 10
+      },
+      "till": {
+        "tax": {
+          "inclusive": false
+        },
+        "retired": false,
+        "shortName": "Till caption",
+        "priceCount": 1,
+        "aliases": [],
+        "since": "2026-08-02T09:30:00Z"
+      },
+      "section": {
+        "trail": []
+      },
+      "family": [
+        {
+          "retired": true,
+          "onHand": 3,
+          "webId": "w4-0"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "groupId": 2,
+      "caption": "a",
+      "sizeText": "250 ml",
+      "packText": null,
+      "netGrams": 75,
+      "listCents": 254,
+      "hasBlurb": false,
+      "shelfId": "s-4-2",
+      "kind": "Bulbs",
+      "ean": "5412345000013",
+      "state": "stored",
+      "urlKey": "fern-mix",
+      "labels": [
+        "roses"
+      ],
+      "aliases": [
+        "moss",
+        "Moss"
+      ],
+      "tag": {
+        "style": "standard"
+      },
+      "web": null,
+      "vendor": {
+        "costCents": 1226,
+        "firm": "Greenhouse Supply",
+        "packSize": null
+      },
+      "till": {
+        "listCents": 1325,
+        "onHand": 5000,
+        "reorderAt": 12,
+        "tax": {
+          "rate": 9,
+          "inclusive": true
+        },
+        "retired": false,
+        "shortName": "Till caption",
+        "priceCount": 2,
+        "aliases": [
+          "  moss ",
+          "Moss"
+        ],
+        "since": null,
+        "stores": [
+          {
+            "place": "Shop Front",
+            "aisle": "",
+            "onHand": 1,
+            "low": 3,
+            "high": 8
+          },
+          {
+            "place": "Barn North",
+            "aisle": "C3",
+            "onHand": 25,
+            "low": 0
+          }
+        ]
+      },
+      "section": null,
+      "family": [
+        {
+          "retired": true,
+          "onHand": 0,
+          "webId": null
+        },
+        {
+          "retired": true,
+          "onHand": 0,
+          "webId": null
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "groupId": 3,
+      "caption": "Fern mix",
+      "sizeText": "Large",
+      "packText": "14 cm",
+      "netGrams": 500,
+      "listCents": 290,
+      "photo": "/photos/1",
+      "hasBlurb": true,
+      "kind": "Pots",
+      "ean": "5412345000013",
+      "state": "draft",
+      "urlKey": "akerbar-seeds",
+      "labels": [],
+      "aliases": [
+        "Cr&egrave",
+        "me"
+      ],
+      "tag": null,
+      "web": {
+        "listCents": null,
+        "id": "w6"
+      },
+      "vendor": {
+        "costCents": 2246,
+        "firm": "Greenhouse Supply",
+        "packSize": 0
+      },
+      "till": {
+        "listCents": 330,
+        "onHand": 3,
+        "reorderAt": 0,
+        "tax": {
+          "rate": 21,
+          "inclusive": false
+        },
+        "retired": false,
+        "shortName": "Till caption",
+        "priceCount": 1,
+        "aliases": [],
+        "since": "2026-05-31T23:00:00+02:00",
+        "stores": [
+          {
+            "place": "Shop Front",
+            "aisle": "",
+            "onHand": 1,
+            "low": 3,
+            "high": 8
+          },
+          {
+            "place": "Barn North",
+            "aisle": "C3",
+            "onHand": 25,
+            "low": 0
+          }
+        ]
+      },
+      "section": {
+        "trail": [
+          "#bulbs"
+        ]
+      },
+      "family": [
+        {
+          "retired": true,
+          "onHand": 0,
+          "webId": null
+        },
+        {
+          "retired": true,
+          "onHand": 0,
+          "webId": null
+        },
+        {
+          "retired": true,
+          "onHand": 0,
+          "webId": "w6-2"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "groupId": 3,
+      "caption": "Åkerbär Seeds",
+      "sizeText": "0,5kg.",
+      "packText": "500 g",
+      "netGrams": 0,
+      "listCents": 0,
+      "photo": "/photos/1",
+      "hasBlurb": true,
+      "shelfId": "s-4-2",
+      "kind": "Fertiliser",
+      "state": "draft",
+      "labels": [
+        "roses"
+      ],
+      "aliases": [
+        "Fern"
+      ],
+      "web": null,
+      "till": null,
+      "section": {
+        "trail": [
+          "#roses",
+          "#red"
+        ]
+      },
+      "family": [
+        {
+          "retired": true,
+          "onHand": 3,
+          "webId": null
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "groupId": 3,
+      "caption": "Großer Topf",
+      "packText": "300",
+      "listCents": 1142,
+      "photo": null,
+      "hasBlurb": true,
+      "shelfId": "s-4-2",
+      "kind": "Fertiliser",
+      "state": "live",
+      "urlKey": "akerbar-seeds",
+      "labels": [
+        "roses",
+        "red"
+      ],
+      "aliases": [
+        "moss",
+        "Moss"
+      ],
+      "web": {
+        "listCents": 399,
+        "id": "w8"
+      },
+      "vendor": {
+        "costCents": 266,
+        "firm": "Greenhouse Supply",
+        "packSize": 0
+      },
+      "till": null,
+      "section": {
+        "trail": []
+      },
+      "family": [
+        {
+          "retired": true,
+          "onHand": 3,
+          "webId": null
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "groupId": 4,
+      "caption": "FERN MIX",
+      "sizeText": "250 ml",
+      "packText": "0,5 kg",
+      "netGrams": null,
+      "listCents": 1390,
+      "photo": "/photos/1",
+      "hasBlurb": true,
+      "shelfId": "s-4-2",
+      "kind": "Soil",
+      "state": "stored",
+      "urlKey": "grosser-topf",
+      "labels": [
+        "roses"
+      ],
+      "aliases": [
+        "Cr&egrave",
+        "me"
+      ],
+      "tag": {
+        "style": "standard"
+      },
+      "web": {
+        "id": "w9"
+      },
+      "till": {
+        "listCents": 1266,
+        "onHand": 3,
+        "reorderAt": 0,
+        "tax": {
+          "rate": 9,
+          "inclusive": true
+        },
+        "retired": false,
+        "shortName": "Till caption",
+        "priceCount": 2,
+        "aliases": [
+          "Cr&egrave",
+          "me"
+        ],
+        "since": "2025-03-10",
+        "stores": [
+          {
+            "place": "Shop",
+            "aisle": null,
+            "onHand": 4,
+            "low": 3
+          },
+          {
+            "place": "Yard South",
+            "aisle": "G2",
+            "onHand": 0,
+            "low": 0
+          }
+        ]
+      },
+      "section": {
+        "trail": [
+          "#roses",
+          "#red"
+        ]
+      },
+      "family": [
+        {
+          "retired": false,
+          "onHand": 3,
+          "webId": "w9-0"
+        },
+        {
+          "retired": false,
+          "onHand": 3,
+          "webId": null
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "groupId": 4,
+      "caption": "FERN MIX",
+      "sizeText": "250 ml",
+      "netGrams": 25,
+      "listCents": 0,
+      "photo": "/photos/1",
+      "hasBlurb": true,
+      "shelfId": "s-4-2",
+      "kind": "Pots",
+      "ean": "5412345000013",
+      "state": "draft",
+      "urlKey": null,
+      "labels": [],
+      "aliases": [
+        "moss",
+        "Moss"
+      ],
+      "web": {
+        "listCents": 1916,
+        "id": "w10"
+      },
+      "vendor": {
+        "costCents": 5877,
+        "firm": "Greenhouse Supply",
+        "packSize": null
+      },
+      "till": {
+        "listCents": 820,
+        "onHand": -2,
+        "tax": {
+          "rate": 0,
+          "inclusive": true
+        },
+        "retired": true,
+        "shortName": "Till caption",
+        "priceCount": 1,
+        "aliases": null,
+        "since": "2026-05-31T23:00:00+02:00"
+      },
+      "section": {
+        "trail": [
+          "#bulbs"
+        ]
+      },
+      "family": [
+        {
+          "retired": true,
+          "onHand": 0,
+          "webId": "w10-0"
+        },
+        {
+          "retired": true,
+          "onHand": null,
+          "webId": "w10-1"
+        },
+        {
+          "retired": true,
+          "onHand": 0,
+          "webId": null
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "groupId": 4,
+      "caption": "FERN MIX",
+      "sizeText": "250 ml",
+      "packText": "75 g",
+      "netGrams": 25,
+      "listCents": 3884,
+      "photo": "/photos/1",
+      "hasBlurb": false,
+      "shelfId": "s-4-2",
+      "kind": "Tools",
+      "ean": "5412345000013",
+      "state": "draft",
+      "urlKey": null,
+      "labels": [],
+      "aliases": [
+        "Cr&egrave",
+        "me"
+      ],
+      "tag": null,
+      "web": null,
+      "vendor": {
+        "costCents": 4292,
+        "firm": "Greenhouse Supply",
+        "packSize": 0
+      },
+      "till": null,
+      "section": {
+        "trail": []
+      },
+      "family": [
+        {
+          "retired": true,
+          "onHand": 3,
+          "webId": "w11-0"
+        },
+        {
+          "retired": false,
+          "onHand": 0,
+          "webId": "w11-1"
+        },
+        {
+          "retired": true,
+          "onHand": 3,
+          "webId": null
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "groupId": 5,
+      "caption": "(Mini)rake",
+      "sizeText": "75gr.",
+      "packText": "500 g",
+      "netGrams": 125,
+      "listCents": 1846,
+      "photo": "/photos/1",
+      "hasBlurb": true,
+      "shelfId": "s-4-2",
+      "kind": "Seeds",
+      "ean": "5412345000013",
+      "state": "stored",
+      "urlKey": "fern-mix",
+      "labels": [],
+      "aliases": null,
+      "tag": {
+        "style": null
+      },
+      "web": null,
+      "vendor": {
+        "costCents": null,
+        "firm": "Greenhouse Supply"
+      },
+      "till": {
+        "listCents": 2289,
+        "onHand": 3,
+        "tax": {
+          "rate": 9,
+          "inclusive": true
+        },
+        "retired": false,
+        "priceCount": 1,
+        "aliases": [],
+        "since": null,
+        "stores": [
+          {
+            "place": "Shop Front",
+            "aisle": "",
+            "onHand": 1,
+            "low": 3,
+            "high": 8
+          },
+          {
+            "place": "Barn North",
+            "aisle": "C3",
+            "onHand": 25,
+            "low": 0
+          }
+        ]
+      },
+      "section": {
+        "trail": [
+          "#bulbs"
+        ]
+      },
+      "family": [
+        {
+          "retired": true,
+          "onHand": 0,
+          "webId": null
+        },
+        {
+          "retired": false,
+          "onHand": 0,
+          "webId": null
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "groupId": 5,
+      "caption": "Åkerbär Seeds",
+      "packText": "1 l",
+      "netGrams": 60,
+      "listCents": 0,
+      "photo": null,
+      "hasBlurb": true,
+      "shelfId": "s-4-2",
+      "kind": "Seeds",
+      "ean": "5412345000013",
+      "state": "stored",
+      "labels": null,
+      "aliases": null,
+      "tag": {
+        "style": "standard"
+      },
+      "web": {
+        "listCents": 1806,
+        "id": "w13"
+      },
+      "vendor": {
+        "costCents": 0,
+        "firm": "Greenhouse Supply",
+        "packSize": 10
+      },
+      "till": {
+        "listCents": 137,
+        "onHand": 3,
+        "reorderAt": 12,
+        "tax": {
+          "rate": 21,
+          "inclusive": true
+        },
+        "retired": true,
+        "priceCount": 1,
+        "aliases": null,
+        "since": "2026-08-02T09:30:00Z",
+        "stores": [
+          {
+            "place": "Shop",
+            "aisle": null,
+            "onHand": 4,
+            "low": 3
+          },
+          {
+            "place": "Yard South",
+            "aisle": "G2",
+            "onHand": 0,
+            "low": 0
+          }
+        ]
+      },
+      "section": {
+        "trail": [
+          "#bulbs"
+        ]
+      },
+      "family": [
+        {
+          "retired": false,
+          "onHand": 0,
+          "webId": "w13-0"
+        },
+        {
+          "retired": true,
+          "onHand": 0,
+          "webId": null
+        }
+      ]
+    },
+    {
+      "id": 15,
+      "groupId": 5,
+      "caption": "a",
+      "sizeText": "75gr.",
+      "packText": "25 g",
+      "netGrams": 500,
+      "listCents": 2391,
+      "photo": "/photos/1",
+      "hasBlurb": false,
+      "shelfId": "s-4-2",
+      "kind": "Seeds",
+      "state": "live",
+      "urlKey": "moss",
+      "labels": [
+        "roses"
+      ],
+      "aliases": [
+        "Fern"
+      ],
+      "tag": {
+        "style": "standard"
+      },
+      "web": {
+        "listCents": 1849,
+        "id": "w14"
+      },
+      "vendor": {
+        "firm": "Greenhouse Supply",
+        "packSize": null
+      },
+      "till": {
+        "listCents": null,
+        "onHand": 35,
+        "reorderAt": 12,
+        "tax": null,
+        "retired": false,
+        "shortName": null,
+        "priceCount": 1,
+        "aliases": [
+          "Hart fern"
+        ],
+        "since": "2026-05-31T23:00:00+02:00",
+        "stores": [
+          {
+            "place": "Shop",
+            "aisle": null,
+            "onHand": 4,
+            "low": 3
+          },
+          {
+            "place": "Yard South",
+            "aisle": "G2",
+            "onHand": 0,
+            "low": 0
+          }
+        ]
+      },
+      "section": {
+        "trail": [
+          "#roses",
+          "#red"
+        ]
+      },
+      "family": [
+        {
+          "retired": false,
+          "onHand": 0,
+          "webId": null
+        },
+        {
+          "retired": false,
+          "onHand": 3,
+          "webId": null
+        },
+        {
+          "retired": true,
+          "onHand": 3,
+          "webId": null
+        }
+      ]
+    },
+    {
+      "id": 16,
+      "groupId": 6,
+      "caption": "  Rose  of the  Month ",
+      "sizeText": "14 cm",
+      "packText": "250 ml",
+      "netGrams": 60,
+      "listCents": 0,
+      "photo": "/photos/1",
+      "hasBlurb": true,
+      "shelfId": "s-4-2",
+      "kind": null,
+      "ean": "5412345000013",
+      "state": "stored",
+      "urlKey": "akerbar-seeds",
+      "labels": [],
+      "aliases": [
+        "Fern"
+      ],
+      "tag": {
+        "style": "standard"
+      },
+      "web": {
+        "listCents": null,
+        "id": "w15"
+      },
+      "vendor": {
+        "costCents": 0,
+        "firm": "Greenhouse Supply"
+      },
+      "till": null,
+      "section": {
+        "trail": [
+          "#roses",
+          "#red"
+        ]
+      },
+      "family": [
+        {
+          "retired": true,
+          "onHand": 0,
+          "webId": "w15-0"
+        },
+        {
+          "retired": true,
+          "onHand": 0,
+          "webId": null
+        }
+      ]
+    },
+    {
+      "id": 17,
+      "groupId": 6,
+      "caption": "  Rose  of the  Month ",
+      "sizeText": "0,5kg.",
+      "packText": "1 l",
+      "listCents": 290,
+      "photo": "/photos/1",
+      "hasBlurb": false,
+      "shelfId": null,
+      "state": "stored",
+      "labels": [],
+      "aliases": [
+        "Cr&egrave",
+        "me"
+      ],
+      "tag": {
+        "style": "standard"
+      },
+      "web": {
+        "listCents": 1127,
+        "id": "w16"
+      },
+      "till": {
+        "listCents": null,
+        "onHand": -2,
+        "reorderAt": null,
+        "tax": {
+          "inclusive": false
+        },
+        "retired": true,
+        "shortName": "Till caption",
+        "priceCount": 1,
+        "since": "2025-03-10",
+        "stores": [
+          {
+            "place": "Shop Front",
+            "aisle": "",
+            "onHand": 1,
+            "low": 3,
+            "high": 8
+          },
+          {
+            "place": "Barn North",
+            "aisle": "C3",
+            "onHand": 25,
+            "low": 0
+          }
+        ]
+      },
+      "section": {
+        "trail": [
+          "#bulbs"
+        ]
+      },
+      "family": [
+        {
+          "retired": true,
+          "onHand": 3,
+          "webId": null
+        }
+      ]
+    },
+    {
+      "id": 18,
+      "groupId": 6,
+      "caption": "  Rose  of the  Month ",
+      "sizeText": "One size",
+      "packText": "250 ml",
+      "netGrams": 75,
+      "listCents": 1390,
+      "photo": "/photos/1",
+      "hasBlurb": true,
+      "shelfId": null,
+      "kind": "Soil",
+      "ean": "5412345000013",
+      "state": "draft",
+      "urlKey": "grosser-topf",
+      "labels": null,
+      "aliases": [],
+      "web": null,
+      "vendor": {
+        "costCents": 0,
+        "firm": "Greenhouse Supply",
+        "packSize": 0
+      },
+      "till": {
+        "listCents": 1588,
+        "onHand": 3,
+        "reorderAt": 12,
+        "tax": null,
+        "retired": false,
+        "shortName": null,
+        "priceCount": 2,
+        "aliases": null,
+        "since": "2026-08-02T09:30:00Z",
+        "stores": [
+          {
+            "place": "Shop Front",
+            "aisle": "",
+            "onHand": 1,
+            "low": 3,
+            "high": 8
+          },
+          {
+            "place": "Barn North",
+            "aisle": "C3",
+            "onHand": 25,
+            "low": 0
+          }
+        ]
+      },
+      "section": {
+        "trail": [
+          "#roses",
+          "#red"
+        ]
+      },
+      "family": [
+        {
+          "retired": true,
+          "onHand": 0,
+          "webId": "w17-0"
+        }
+      ]
+    },
+    {
+      "id": 19,
+      "groupId": 7,
+      "caption": "  Rose  of the  Month ",
+      "sizeText": "1 l",
+      "packText": "25 g",
+      "listCents": 1390,
+      "photo": "/photos/1",
+      "hasBlurb": true,
+      "shelfId": "s-4-2",
+      "kind": "Fertiliser",
+      "ean": "5412345000013",
+      "state": "draft",
+      "urlKey": "fern-mix-2",
+      "labels": [],
+      "aliases": [
+        "Fern"
+      ],
+      "tag": {
+        "style": "standard"
+      },
+      "web": {
+        "listCents": 786,
+        "id": "w18"
+      },
+      "till": {
+        "listCents": 523,
+        "onHand": 35,
+        "reorderAt": null,
+        "tax": {
+          "rate": 0,
+          "inclusive": true
+        },
+        "retired": false,
+        "shortName": "Till caption",
+        "priceCount": 1,
+        "since": "2026-08-02T09:30:00Z",
+        "stores": [
+          {
+            "place": "Shop",
+            "aisle": null,
+            "onHand": 4,
+            "low": 3
+          },
+          {
+            "place": "Yard South",
+            "aisle": "G2",
+            "onHand": 0,
+            "low": 0
+          }
+        ]
+      },
+      "section": {
+        "trail": [
+          "#bulbs"
+        ]
+      },
+      "family": [
+        {
+          "retired": false,
+          "onHand": null,
+          "webId": null
+        },
+        {
+          "retired": true,
+          "onHand": 0,
+          "webId": null
+        }
+      ]
+    },
+    {
+      "id": 20,
+      "groupId": 7,
+      "caption": "Crème pot",
+      "sizeText": "75gr.",
+      "netGrams": 500,
+      "listCents": 648,
+      "photo": "/photos/1",
+      "hasBlurb": true,
+      "shelfId": "s-4-2",
+      "ean": "5412345000013",
+      "state": "draft",
+      "urlKey": "minirake",
+      "labels": null,
+      "aliases": [],
+      "tag": {},
+      "web": {
+        "id": "w19"
+      },
+      "vendor": {
+        "costCents": 1796,
+        "firm": "Greenhouse Supply"
+      },
+      "till": {
+        "listCents": 992,
+        "onHand": 5000,
+        "reorderAt": 0,
+        "tax": {
+          "rate": 9,
+          "inclusive": false
+        },
+        "retired": true,
+        "shortName": "Till caption",
+        "priceCount": 2,
+        "aliases": null,
+        "since": "2025-03-10",
+        "stores": null
+      },
+      "section": {
+        "trail": [
+          "#bulbs"
+        ]
+      },
+      "family": [
+        {
+          "retired": true,
+          "onHand": 0,
+          "webId": null
+        }
+      ]
+    },
+    {
+      "id": 21,
+      "groupId": 7,
+      "caption": "a",
+      "sizeText": "0,5kg.",
+      "packText": "",
+      "netGrams": 0,
+      "listCents": 0,
+      "photo": "/photos/1",
+      "hasBlurb": false,
+      "shelfId": "s-4-2",
+      "kind": "Fertiliser",
+      "ean": "5412345000013",
+      "state": "draft",
+      "urlKey": "grosser-topf",
+      "labels": [],
+      "tag": {
+        "style": "standard"
+      },
+      "web": {
+        "listCents": 2276,
+        "id": "w20"
+      },
+      "vendor": {
+        "costCents": 269,
+        "firm": "Greenhouse Supply",
+        "packSize": 0
+      },
+      "till": {
+        "onHand": 3,
+        "reorderAt": 12,
+        "tax": null,
+        "retired": false,
+        "shortName": "Till caption",
+        "priceCount": 2,
+        "aliases": [
+          "Cr&egrave",
+          "me"
+        ],
+        "since": "2025-03-10",
+        "stores": [
+          {
+            "place": "Shop",
+            "aisle": null,
+            "onHand": 4,
+            "low": 3
+          },
+          {
+            "place": "Yard South",
+            "aisle": "G2",
+            "onHand": 0,
+            "low": 0
+          }
+        ]
+      },
+      "section": {
+        "trail": [
+          "#roses",
+          "#red"
+        ]
+      },
+      "family": [
+        {
+          "retired": false,
+          "onHand": 0,
+          "webId": "w20-0"
+        }
+      ]
+    },
+    {
+      "id": 22,
+      "groupId": 8,
+      "caption": "MOSS",
+      "sizeText": "250 ml",
+      "packText": null,
+      "netGrams": 60,
+      "listCents": 3397,
+      "photo": "/photos/1",
+      "hasBlurb": false,
+      "shelfId": "s-4-2",
+      "kind": "Pots",
+      "ean": "5412345000013",
+      "state": "draft",
+      "urlKey": "akerbar-seeds",
+      "labels": [
+        "roses",
+        "red"
+      ],
+      "aliases": [],
+      "tag": {
+        "style": "standard"
+      },
+      "web": {
+        "listCents": 2143,
+        "id": "w21"
+      },
+      "vendor": {
+        "firm": "Greenhouse Supply"
+      },
+      "till": {
+        "onHand": 3,
+        "tax": {
+          "rate": 21,
+          "inclusive": false
+        },
+        "retired": false,
+        "shortName": "Till caption",
+        "priceCount": 2,
+        "aliases": [
+          "Hart fern"
+        ],
+        "since": "2026-05-31T23:00:00+02:00"
+      },
+      "section": {
+        "trail": [
+          "#roses",
+          "#red"
+        ]
+      },
+      "family": [
+        {
+          "retired": true,
+          "onHand": 0,
+          "webId": "w21-0"
+        },
+        {
+          "retired": false,
+          "onHand": 0,
+          "webId": "w21-1"
+        }
+      ]
+    },
+    {
+      "id": 23,
+      "groupId": 8,
+      "caption": "Åkerbär Seeds",
+      "sizeText": "Large",
+      "netGrams": null,
+      "listCents": null,
+      "photo": "/photos/1",
+      "hasBlurb": false,
+      "shelfId": "s-4-2",
+      "kind": "Pots",
+      "ean": "5412345000013",
+      "state": "draft",
+      "urlKey": null,
+      "labels": [
+        "roses"
+      ],
+      "tag": {},
+      "web": {
+        "listCents": 2009,
+        "id": "w22"
+      },
+      "vendor": {
+        "firm": "Greenhouse Supply",
+        "packSize": null
+      },
+      "till": {
+        "onHand": null,
+        "reorderAt": 12,
+        "tax": {
+          "rate": 0,
+          "inclusive": true
+        },
+        "retired": false,
+        "priceCount": 2,
+        "since": null,
+        "stores": [
+          {
+            "place": "Shop Front",
+            "aisle": "",
+            "onHand": 1,
+            "low": 3,
+            "high": 8
+          },
+          {
+            "place": "Barn North",
+            "aisle": "C3",
+            "onHand": 25,
+            "low": 0
+          }
+        ]
+      },
+      "section": {
+        "trail": [
+          "#roses",
+          "#red"
+        ]
+      },
+      "family": [
+        {
+          "retired": false,
+          "onHand": 0,
+          "webId": null
+        }
+      ]
+    },
+    {
+      "id": 24,
+      "groupId": 8,
+      "caption": "Åkerbär Seeds",
+      "sizeText": "One size",
+      "packText": "75 g",
+      "netGrams": 250,
+      "listCents": 0,
+      "photo": "/photos/1",
+      "hasBlurb": false,
+      "shelfId": null,
+      "kind": "Tools",
+      "ean": "5412345000013",
+      "state": "draft",
+      "urlKey": "fern-mix",
+      "labels": [
+        "roses",
+        "red"
+      ],
+      "aliases": [
+        "moss",
+        "Moss"
+      ],
+      "web": null,
+      "till": {
+        "listCents": 1225,
+        "onHand": null,
+        "reorderAt": 0,
+        "tax": null,
+        "retired": true,
+        "priceCount": 1,
+        "aliases": [
+          "  moss ",
+          "Moss"
+        ],
+        "since": null,
+        "stores": [
+          {
+            "place": "Shop",
+            "aisle": null,
+            "onHand": 4,
+            "low": 3
+          },
+          {
+            "place": "Yard South",
+            "aisle": "G2",
+            "onHand": 0,
+            "low": 0
+          }
+        ]
+      },
+      "family": [
+        {
+          "retired": false,
+          "onHand": 0,
+          "webId": "w23-0"
+        },
+        {
+          "retired": true,
+          "onHand": 0,
+          "webId": "w23-1"
+        }
+      ]
+    },
+    {
+      "id": 25,
+      "groupId": 9,
+      "caption": "  Rose  of the  Month ",
+      "sizeText": "250 ml",
+      "packText": "250 ml",
+      "netGrams": 0,
+      "photo": "/photos/1",
+      "hasBlurb": true,
+      "kind": "Soil",
+      "ean": "5412345000013",
+      "state": "stored",
+      "labels": [
+        "roses"
+      ],
+      "aliases": null,
+      "web": {
+        "listCents": null,
+        "id": "w24"
+      },
+      "till": {
+        "onHand": -2,
+        "reorderAt": 4,
+        "tax": {
+          "rate": 0,
+          "inclusive": true
+        },
+        "retired": false,
+        "shortName": null,
+        "priceCount": 2,
+        "aliases": [],
+        "since": "2025-03-10",
+        "stores": null
+      },
+      "section": {
+        "trail": [
+          "#bulbs"
+        ]
+      },
+      "family": [
+        {
+          "retired": true,
+          "onHand": 3,
+          "webId": null
+        }
+      ]
+    },
+    {
+      "id": 26,
+      "groupId": 9,
+      "caption": "Fern mix",
+      "sizeText": "0,5kg.",
+      "packText": "75 g",
+      "netGrams": 25,
+      "listCents": 0,
+      "photo": "/photos/1",
+      "hasBlurb": true,
+      "shelfId": null,
+      "kind": "Seeds",
+      "ean": "5412345000013",
+      "state": "draft",
+      "urlKey": "fern-mix",
+      "labels": [
+        "roses",
+        "red"
+      ],
+      "aliases": [
+        "moss",
+        "Moss"
+      ],
+      "web": null,
+      "vendor": {
+        "costCents": 2508,
+        "firm": "Greenhouse Supply",
+        "packSize": 4
+      },
+      "till": {
+        "listCents": null,
+        "onHand": null,
+        "reorderAt": 4,
+        "tax": {
+          "rate": null,
+          "inclusive": false
+        },
+        "retired": true,
+        "shortName": "Till caption",
+        "priceCount": 2,
+        "aliases": [
+          "Hart fern"
+        ],
+        "since": "2025-03-10",
+        "stores": []
+      },
+      "section": {
+        "trail": []
+      },
+      "family": [
+        {
+          "retired": true,
+          "onHand": 0,
+          "webId": "w25-0"
+        }
+      ]
+    },
+    {
+      "id": 27,
+      "groupId": 9,
+      "caption": "Crème pot",
+      "sizeText": "Large",
+      "listCents": 1390,
+      "photo": "/photos/1",
+      "hasBlurb": false,
+      "shelfId": "s-4-2",
+      "kind": "Fertiliser",
+      "state": "live",
+      "urlKey": "grosser-topf",
+      "labels": [
+        "roses",
+        "red"
+      ],
+      "tag": {
+        "style": "standard"
+      },
+      "web": {
+        "listCents": null,
+        "id": "w26"
+      },
+      "vendor": {
+        "costCents": 80,
+        "firm": "Greenhouse Supply",
+        "packSize": 10
+      },
+      "till": {
+        "listCents": null,
+        "onHand": -2,
+        "reorderAt": 0,
+        "tax": {
+          "rate": 9,
+          "inclusive": true
+        },
+        "retired": false,
+        "shortName": "Till caption",
+        "priceCount": 1,
+        "aliases": [
+          "  moss ",
+          "Moss"
+        ],
+        "since": "2025-03-10",
+        "stores": [
+          {
+            "place": "Shop Front",
+            "aisle": "",
+            "onHand": 1,
+            "low": 3,
+            "high": 8
+          },
+          {
+            "place": "Barn North",
+            "aisle": "C3",
+            "onHand": 25,
+            "low": 0
+          }
+        ]
+      },
+      "section": {
+        "trail": []
+      },
+      "family": [
+        {
+          "retired": true,
+          "webId": null
+        }
+      ]
+    },
+    {
+      "id": 28,
+      "groupId": 10,
+      "caption": "a",
+      "sizeText": "250 ml",
+      "packText": null,
+      "netGrams": 125,
+      "listCents": 1551,
+      "photo": "/photos/1",
+      "hasBlurb": true,
+      "shelfId": "s-4-2",
+      "kind": "Seeds",
+      "state": "stored",
+      "urlKey": "fern-mix",
+      "labels": [],
+      "aliases": null,
+      "web": {
+        "listCents": 590,
+        "id": "w27"
+      },
+      "vendor": {
+        "costCents": 0,
+        "firm": "Greenhouse Supply",
+        "packSize": 0
+      },
+      "till": {
+        "listCents": null,
+        "onHand": 0,
+        "tax": null,
+        "retired": false,
+        "shortName": "Till caption",
+        "priceCount": 1,
+        "since": "2025-03-10",
+        "stores": null
+      },
+      "family": [
+        {
+          "retired": true,
+          "onHand": 3,
+          "webId": null
+        }
+      ]
+    },
+    {
+      "id": 29,
+      "groupId": 10,
+      "caption": "a",
+      "sizeText": "75gr.",
+      "packText": null,
+      "netGrams": 0,
+      "listCents": 119,
+      "photo": "/photos/1",
+      "hasBlurb": true,
+      "shelfId": "s-4-2",
+      "kind": "Seeds",
+      "ean": "5412345000013",
+      "state": "stored",
+      "urlKey": "fern-mix",
+      "labels": null,
+      "aliases": [
+        "Cr&egrave",
+        "me"
+      ],
+      "tag": {
+        "style": "standard"
+      },
+      "web": {
+        "listCents": null,
+        "id": "w28"
+      },
+      "vendor": {
+        "costCents": 0,
+        "firm": "Greenhouse Supply",
+        "packSize": null
+      },
+      "till": {
+        "listCents": 1956,
+        "reorderAt": 0,
+        "tax": {
+          "rate": 9,
+          "inclusive": false
+        },
+        "retired": true,
+        "shortName": "Till caption",
+        "priceCount": 1,
+        "aliases": [],
+        "since": "2026-05-31T23:00:00+02:00",
+        "stores": [
+          {
+            "place": "Shop",
+            "aisle": null,
+            "onHand": 4,
+            "low": 3
+          },
+          {
+            "place": "Yard South",
+            "aisle": "G2",
+            "onHand": 0,
+            "low": 0
+          }
+        ]
+      },
+      "section": {
+        "trail": [
+          "#roses",
+          "#red"
+        ]
+      },
+      "family": [
+        {
+          "retired": true,
+          "onHand": 0,
+          "webId": null
+        },
+        {
+          "retired": true,
+          "onHand": 0,
+          "webId": null
+        }
+      ]
+    },
+    {
+      "id": 30,
+      "groupId": 10,
+      "caption": "Fern mix",
+      "sizeText": "One size",
+      "packText": "0,5 kg",
+      "netGrams": 125,
+      "listCents": 290,
+      "photo": "/photos/1",
+      "hasBlurb": true,
+      "shelfId": "s-4-2",
+      "kind": "Soil",
+      "state": "stored",
+      "urlKey": "grosser-topf",
+      "labels": [],
+      "aliases": [
+        "moss",
+        "Moss"
+      ],
+      "tag": {
+        "style": "standard"
+      },
+      "web": null,
+      "vendor": {
+        "firm": "Greenhouse Supply",
+        "packSize": 0
+      },
+      "till": {
+        "listCents": 2194,
+        "onHand": -2,
+        "reorderAt": 12,
+        "tax": {
+          "rate": 0,
+          "inclusive": true
+        },
+        "retired": true,
+        "shortName": "Till caption",
+        "priceCount": 1,
+        "aliases": [
+          "Hart fern"
+        ],
+        "since": "2025-03-10",
+        "stores": [
+          {
+            "place": "Shop",
+            "aisle": null,
+            "onHand": 4,
+            "low": 3
+          },
+          {
+            "place": "Yard South",
+            "aisle": "G2",
+            "onHand": 0,
+            "low": 0
+          }
+        ]
+      },
+      "section": null,
+      "family": [
+        {
+          "retired": true,
+          "onHand": 0,
+          "webId": null
+        },
+        {
+          "retired": false,
+          "onHand": 0,
+          "webId": "w29-1"
+        }
+      ]
+    },
+    {
+      "id": 31,
+      "groupId": 11,
+      "caption": "MOSS",
+      "packText": "75 g",
+      "netGrams": 25,
+      "listCents": 1390,
+      "hasBlurb": true,
+      "kind": null,
+      "ean": "5412345000013",
+      "state": "draft",
+      "urlKey": "fern-mix",
+      "labels": [
+        "roses"
+      ],
+      "aliases": [
+        "Fern"
+      ],
+      "tag": null,
+      "web": null,
+      "vendor": {
+        "costCents": null,
+        "firm": "Greenhouse Supply",
+        "packSize": null
+      },
+      "till": {
+        "listCents": 2292,
+        "onHand": null,
+        "reorderAt": 0,
+        "tax": {
+          "inclusive": true
+        },
+        "retired": true,
+        "shortName": "Till caption",
+        "priceCount": 1,
+        "aliases": [
+          "Cr&egrave",
+          "me"
+        ],
+        "since": "2025-03-10",
+        "stores": [
+          {
+            "place": "Shop",
+            "aisle": null,
+            "onHand": 4,
+            "low": 3
+          },
+          {
+            "place": "Yard South",
+            "aisle": "G2",
+            "onHand": 0,
+            "low": 0
+          }
+        ]
+      },
+      "section": {
+        "trail": [
+          "#roses",
+          "#red"
+        ]
+      },
+      "family": [
+        {
+          "retired": true,
+          "onHand": 3,
+          "webId": null
+        },
+        {
+          "retired": true,
+          "onHand": 3,
+          "webId": "w30-1"
+        }
+      ]
+    },
+    {
+      "id": 32,
+      "groupId": 11,
+      "caption": "Fern mix",
+      "sizeText": "1 l",
+      "packText": "500 g",
+      "netGrams": 0,
+      "listCents": 1374,
+      "photo": null,
+      "hasBlurb": true,
+      "shelfId": "s-4-2",
+      "kind": "Pots",
+      "state": "stored",
+      "urlKey": "moss",
+      "labels": [
+        "roses"
+      ],
+      "aliases": [
+        "Cr&egrave",
+        "me"
+      ],
+      "tag": {
+        "style": "standard"
+      },
+      "web": {
+        "listCents": 2302,
+        "id": "w31"
+      },
+      "till": {
+        "listCents": 1574,
+        "onHand": 35,
+        "tax": null,
+        "retired": false,
+        "shortName": null,
+        "priceCount": 1,
+        "aliases": [],
+        "since": "2026-05-31T23:00:00+02:00",
+        "stores": []
+      },
+      "section": {
+        "trail": [
+          "#roses",
+          "#red"
+        ]
+      },
+      "family": [
+        {
+          "retired": true,
+          "onHand": 3,
+          "webId": null
+        },
+        {
+          "retired": false,
+          "onHand": 0,
+          "webId": "w31-1"
+        },
+        {
+          "retired": false,
+          "onHand": 3,
+          "webId": null
+        }
+      ]
+    },
+    {
+      "id": 33,
+      "groupId": 11,
+      "caption": "Großer Topf",
+      "sizeText": "1 l",
+      "packText": null,
+      "netGrams": 250,
+      "listCents": 1390,
+      "photo": "/photos/1",
+      "hasBlurb": true,
+      "shelfId": null,
+      "kind": "Tools",
+      "ean": "5412345000013",
+      "state": "stored",
+      "urlKey": "akerbar-seeds",
+      "labels": [],
+      "aliases": [
+        "moss",
+        "Moss"
+      ],
+      "tag": {
+        "style": "standard"
+      },
+      "web": {
+        "listCents": 496,
+        "id": "w32"
+      },
+      "vendor": {
+        "costCents": 1717,
+        "firm": "Greenhouse Supply",
+        "packSize": 4
+      },
+      "till": {
+        "listCents": 1665,
+        "onHand": 3,
+        "reorderAt": 12,
+        "tax": {
+          "rate": 21,
+          "inclusive": true
+        },
+        "retired": false,
+        "shortName": null,
+        "priceCount": 1,
+        "since": "2025-03-10",
+        "stores": [
+          {
+            "place": "Shop Front",
+            "aisle": "",
+            "onHand": 1,
+            "low": 3,
+            "high": 8
+          },
+          {
+            "place": "Barn North",
+            "aisle": "C3",
+            "onHand": 25,
+            "low": 0
+          }
+        ]
+      },
+      "section": {
+        "trail": [
+          "#roses",
+          "#red"
+        ]
+      },
+      "family": [
+        {
+          "retired": true,
+          "onHand": null,
+          "webId": "w32-0"
+        },
+        {
+          "retired": true,
+          "onHand": 0,
+          "webId": null
+        },
+        {
+          "retired": true,
+          "onHand": 0,
+          "webId": null
+        }
+      ]
+    },
+    {
+      "id": 34,
+      "groupId": 12,
+      "caption": "a",
+      "sizeText": "Large",
+      "netGrams": 25,
+      "photo": "/photos/1",
+      "hasBlurb": true,
+      "shelfId": "s-4-2",
+      "kind": "Soil",
+      "ean": "5412345000013",
+      "state": "stored",
+      "urlKey": "akerbar-seeds",
+      "labels": null,
+      "aliases": [
+        "Fern"
+      ],
+      "web": {
+        "listCents": 1672,
+        "id": "w33"
+      },
+      "vendor": {
+        "costCents": 639,
+        "firm": "Greenhouse Supply",
+        "packSize": 4
+      },
+      "till": {
+        "listCents": 920,
+        "onHand": 0,
+        "reorderAt": 0,
+        "tax": {
+          "rate": 9,
+          "inclusive": true
+        },
+        "retired": false,
+        "priceCount": 2,
+        "aliases": [],
+        "since": "2026-08-02T09:30:00Z"
+      },
+      "section": {
+        "trail": [
+          "#roses",
+          "#red"
+        ]
+      },
+      "family": [
+        {
+          "retired": true,
+          "onHand": 0,
+          "webId": null
+        }
+      ]
+    },
+    {
+      "id": 35,
+      "groupId": 12,
+      "caption": "Åkerbär Seeds",
+      "sizeText": "Large",
+      "photo": "/photos/1",
+      "hasBlurb": true,
+      "shelfId": null,
+      "kind": "Bulbs",
+      "ean": "5412345000013",
+      "state": "stored",
+      "urlKey": "moss",
+      "labels": null,
+      "aliases": [
+        "moss",
+        "Moss"
+      ],
+      "tag": {
+        "style": null
+      },
+      "web": {
+        "listCents": 2153,
+        "id": "w34"
+      },
+      "vendor": {
+        "costCents": 0,
+        "firm": "Greenhouse Supply",
+        "packSize": 4
+      },
+      "till": {
+        "listCents": 1917,
+        "onHand": 3,
+        "reorderAt": 0,
+        "tax": {
+          "rate": 9,
+          "inclusive": true
+        },
+        "retired": false,
+        "shortName": "Till caption",
+        "priceCount": 2,
+        "aliases": [
+          "  moss ",
+          "Moss"
+        ]
+      },
+      "section": {
+        "trail": [
+          "#roses",
+          "#red"
+        ]
+      },
+      "family": [
+        {
+          "retired": true,
+          "onHand": 0,
+          "webId": "w34-0"
+        },
+        {
+          "retired": false,
+          "onHand": null,
+          "webId": "w34-1"
+        }
+      ]
+    },
+    {
+      "id": 36,
+      "groupId": 12,
+      "caption": "  Rose  of the  Month ",
+      "listCents": 1390,
+      "photo": "/photos/1",
+      "hasBlurb": true,
+      "shelfId": "s-4-2",
+      "kind": "Soil",
+      "ean": "5412345000013",
+      "state": "live",
+      "urlKey": "fern-mix-2",
+      "labels": null,
+      "aliases": null,
+      "tag": {
+        "style": "standard"
+      },
+      "web": null,
+      "vendor": {
+        "costCents": 0,
+        "firm": "Greenhouse Supply"
+      },
+      "till": {
+        "listCents": 1668,
+        "onHand": -2,
+        "reorderAt": 0,
+        "tax": {
+          "rate": 9,
+          "inclusive": true
+        },
+        "retired": false,
+        "shortName": null,
+        "priceCount": 2,
+        "aliases": [
+          "Cr&egrave",
+          "me"
+        ],
+        "since": "2026-08-02T09:30:00Z",
+        "stores": null
+      },
+      "section": {
+        "trail": [
+          "#roses",
+          "#red"
+        ]
+      },
+      "family": [
+        {
+          "retired": false,
+          "onHand": 0,
+          "webId": "w35-0"
+        }
+      ]
+    },
+    {
+      "id": 37,
+      "groupId": 13,
+      "caption": "Åkerbär Seeds",
+      "sizeText": "0,5kg.",
+      "packText": "250 ml",
+      "netGrams": 500,
+      "listCents": 2219,
+      "hasBlurb": true,
+      "shelfId": "s-4-2",
+      "kind": "Bulbs",
+      "ean": null,
+      "state": "draft",
+      "urlKey": null,
+      "labels": [],
+      "tag": {
+        "style": "standard"
+      },
+      "web": null,
+      "vendor": {
+        "costCents": 0,
+        "firm": "Greenhouse Supply",
+        "packSize": 0
+      },
+      "till": {
+        "listCents": 2449,
+        "reorderAt": null,
+        "tax": {
+          "rate": 21,
+          "inclusive": false
+        },
+        "retired": false,
+        "shortName": "Till caption",
+        "priceCount": 1,
+        "aliases": [
+          "  moss ",
+          "Moss"
+        ],
+        "since": "2025-03-10"
+      },
+      "section": {
+        "trail": [
+          "#roses",
+          "#red"
+        ]
+      },
+      "family": [
+        {
+          "retired": true,
+          "onHand": 0,
+          "webId": null
+        }
+      ]
+    },
+    {
+      "id": 38,
+      "groupId": 13,
+      "caption": "(Mini)rake",
+      "sizeText": "1 l",
+      "listCents": 675,
+      "photo": "/photos/1",
+      "hasBlurb": true,
+      "shelfId": "s-4-2",
+      "kind": "Bulbs",
+      "ean": "5412345000013",
+      "state": "draft",
+      "urlKey": "fern-mix-2",
+      "labels": [],
+      "aliases": [
+        "Fern"
+      ],
+      "tag": {
+        "style": "standard"
+      },
+      "web": null,
+      "vendor": {
+        "costCents": 0,
+        "firm": "Greenhouse Supply",
+        "packSize": 0
+      },
+      "till": {
+        "listCents": 958,
+        "onHand": -2,
+        "reorderAt": 4,
+        "tax": {
+          "rate": 21,
+          "inclusive": true
+        },
+        "retired": false,
+        "shortName": null,
+        "priceCount": 1,
+        "aliases": [
+          "  moss ",
+          "Moss"
+        ],
+        "since": "2026-08-02T09:30:00Z",
+        "stores": [
+          {
+            "place": "Shop Front",
+            "aisle": "",
+            "onHand": 1,
+            "low": 3,
+            "high": 8
+          },
+          {
+            "place": "Barn North",
+            "aisle": "C3",
+            "onHand": 25,
+            "low": 0
+          }
+        ]
+      },
+      "section": {
+        "trail": [
+          "#roses",
+          "#red"
+        ]
+      },
+      "family": [
+        {
+          "retired": false,
+          "onHand": 3,
+          "webId": null
+        },
+        {
+          "retired": false,
+          "onHand": 0,
+          "webId": null
+        },
+        {
+          "retired": false,
+          "onHand": 3,
+          "webId": "w37-2"
+        }
+      ]
+    },
+    {
+      "id": 39,
+      "groupId": 13,
+      "caption": "Crème pot",
+      "sizeText": "14 cm",
+      "packText": "",
+      "netGrams": 500,
+      "listCents": 3619,
+      "photo": "/photos/1",
+      "hasBlurb": true,
+      "shelfId": "s-4-2",
+      "kind": null,
+      "ean": "5412345000013",
+      "state": "live",
+      "urlKey": "akerbar-seeds",
+      "labels": [
+        "roses",
+        "red"
+      ],
+      "web": {
+        "listCents": 128,
+        "id": "w38"
+      },
+      "vendor": {
+        "costCents": 6709,
+        "firm": "Greenhouse Supply",
+        "packSize": null
+      },
+      "till": {
+        "listCents": 295,
+        "onHand": null,
+        "reorderAt": 0,
+        "tax": null,
+        "retired": false,
+        "shortName": "Till caption",
+        "priceCount": 2,
+        "aliases": [],
+        "since": "2026-08-02T09:30:00Z"
+      },
+      "section": {
+        "trail": []
+      },
+      "family": [
+        {
+          "retired": true,
+          "onHand": 3,
+          "webId": "w38-0"
+        }
+      ]
+    },
+    {
+      "id": 40,
+      "groupId": 14,
+      "caption": "FERN MIX",
+      "sizeText": "Large",
+      "packText": "14 cm",
+      "netGrams": null,
+      "listCents": 0,
+      "photo": null,
+      "hasBlurb": false,
+      "shelfId": "s-4-2",
+      "kind": "Bulbs",
+      "ean": "5412345000013",
+      "state": "live",
+      "urlKey": "fern-mix",
+      "labels": [],
+      "aliases": [
+        "Fern"
+      ],
+      "web": {
+        "listCents": 101,
+        "id": "w39"
+      },
+      "vendor": {
+        "firm": "Greenhouse Supply"
+      },
+      "till": {
+        "onHand": 0,
+        "reorderAt": 0,
+        "tax": {
+          "rate": 0,
+          "inclusive": false
+        },
+        "retired": true,
+        "shortName": "Till caption",
+        "priceCount": 1,
+        "aliases": [
+          "Cr&egrave",
+          "me"
+        ],
+        "since": "2026-05-31T23:00:00+02:00",
+        "stores": []
+      },
+      "section": {
+        "trail": [
+          "#roses",
+          "#red"
+        ]
+      },
+      "family": [
+        {
+          "retired": true,
+          "onHand": 0,
+          "webId": "w39-0"
+        },
+        {
+          "retired": false,
+          "onHand": 3,
+          "webId": null
+        },
+        {
+          "retired": true,
+          "webId": "w39-2"
+        }
+      ]
+    },
+    {
+      "id": 41,
+      "groupId": 14,
+      "caption": "FERN MIX",
+      "sizeText": "Large",
+      "packText": null,
+      "netGrams": 125,
+      "listCents": 290,
+      "hasBlurb": true,
+      "shelfId": "s-4-2",
+      "kind": "Pots",
+      "ean": "5412345000013",
+      "state": "stored",
+      "urlKey": "moss",
+      "labels": [
+        "roses",
+        "red"
+      ],
+      "aliases": [
+        "moss",
+        "Moss"
+      ],
+      "tag": {
+        "style": "standard"
+      },
+      "web": null,
+      "till": {
+        "listCents": 1338,
+        "onHand": null,
+        "reorderAt": 12,
+        "tax": {
+          "rate": 9,
+          "inclusive": true
+        },
+        "retired": false,
+        "priceCount": 1,
+        "aliases": [
+          "Hart fern"
+        ],
+        "since": "2026-05-31T23:00:00+02:00",
+        "stores": []
+      },
+      "section": {
+        "trail": []
+      },
+      "family": [
+        {
+          "retired": true,
+          "onHand": 0,
+          "webId": "w40-0"
+        },
+        {
+          "retired": true,
+          "onHand": 3,
+          "webId": null
+        }
+      ]
+    },
+    {
+      "id": 42,
+      "groupId": 14,
+      "caption": "FERN MIX",
+      "sizeText": "75gr.",
+      "packText": "14 cm",
+      "netGrams": 60,
+      "listCents": 0,
+      "photo": "/photos/1",
+      "hasBlurb": true,
+      "shelfId": null,
+      "kind": "Pots",
+      "ean": "5412345000013",
+      "state": "draft",
+      "urlKey": "moss",
+      "labels": [],
+      "aliases": [
+        "Fern"
+      ],
+      "tag": {
+        "style": "standard"
+      },
+      "web": {
+        "listCents": 466,
+        "id": "w41"
+      },
+      "till": {
+        "listCents": null,
+        "onHand": 0,
+        "reorderAt": 12,
+        "tax": {
+          "rate": 21,
+          "inclusive": false
+        },
+        "retired": false,
+        "shortName": "Till caption",
+        "priceCount": 1,
+        "aliases": [
+          "  moss ",
+          "Moss"
+        ],
+        "since": "2026-05-31T23:00:00+02:00",
+        "stores": [
+          {
+            "place": "Shop",
+            "aisle": null,
+            "onHand": 4,
+            "low": 3
+          },
+          {
+            "place": "Yard South",
+            "aisle": "G2",
+            "onHand": 0,
+            "low": 0
+          }
+        ]
+      },
+      "section": {
+        "trail": [
+          "#bulbs"
+        ]
+      },
+      "family": [
+        {
+          "retired": true,
+          "onHand": 3,
+          "webId": "w41-0"
+        }
+      ]
+    },
+    {
+      "id": 43,
+      "groupId": 15,
+      "caption": "a",
+      "sizeText": "0,5kg.",
+      "packText": "14 cm",
+      "netGrams": 60,
+      "listCents": 0,
+      "photo": "/photos/1",
+      "hasBlurb": true,
+      "shelfId": null,
+      "ean": "5412345000013",
+      "state": "live",
+      "urlKey": "moss",
+      "labels": null,
+      "tag": {
+        "style": "standard"
+      },
+      "web": {
+        "listCents": 605,
+        "id": "w42"
+      },
+      "vendor": {
+        "costCents": 997,
+        "firm": "Greenhouse Supply",
+        "packSize": 10
+      },
+      "till": {
+        "listCents": 2234,
+        "onHand": -2,
+        "reorderAt": 12,
+        "tax": {
+          "rate": null,
+          "inclusive": true
+        },
+        "retired": false,
+        "shortName": "Till caption",
+        "priceCount": 1,
+        "aliases": null,
+        "since": "2025-03-10"
+      },
+      "section": {
+        "trail": [
+          "#roses",
+          "#red"
+        ]
+      },
+      "family": [
+        {
+          "retired": true,
+          "onHand": 0,
+          "webId": null
+        }
+      ]
+    },
+    {
+      "id": 44,
+      "groupId": 15,
+      "caption": "Åkerbär Seeds",
+      "sizeText": "0,5kg.",
+      "packText": "300",
+      "netGrams": 125,
+      "listCents": 1390,
+      "photo": "/photos/1",
+      "hasBlurb": true,
+      "shelfId": "s-4-2",
+      "kind": "Seeds",
+      "ean": "5412345000013",
+      "state": "stored",
+      "labels": [
+        "roses",
+        "red"
+      ],
+      "aliases": [],
+      "tag": {
+        "style": "standard"
+      },
+      "web": {
+        "listCents": 1908,
+        "id": "w43"
+      },
+      "till": {
+        "listCents": 1230,
+        "onHand": 0,
+        "reorderAt": 12,
+        "tax": {
+          "inclusive": false
+        },
+        "retired": true,
+        "shortName": "Till caption",
+        "priceCount": 1,
+        "aliases": [
+          "  moss ",
+          "Moss"
+        ],
+        "since": "2026-05-31T23:00:00+02:00",
+        "stores": [
+          {
+            "place": "Shop",
+            "aisle": null,
+            "onHand": 4,
+            "low": 3
+          },
+          {
+            "place": "Yard South",
+            "aisle": "G2",
+            "onHand": 0,
+            "low": 0
+          }
+        ]
+      },
+      "section": {
+        "trail": [
+          "#bulbs"
+        ]
+      },
+      "family": [
+        {
+          "retired": false,
+          "onHand": 3,
+          "webId": "w43-0"
+        }
+      ]
+    },
+    {
+      "id": 45,
+      "groupId": 15,
+      "caption": "Åkerbär Seeds",
+      "sizeText": "75gr.",
+      "packText": "300",
+      "netGrams": 250,
+      "listCents": 2845,
+      "photo": null,
+      "hasBlurb": true,
+      "shelfId": "s-4-2",
+      "ean": null,
+      "state": "live",
+      "urlKey": "grosser-topf",
+      "labels": [
+        "roses"
+      ],
+      "aliases": [],
+      "tag": {
+        "style": "standard"
+      },
+      "web": null,
+      "vendor": {
+        "costCents": null,
+        "firm": "Greenhouse Supply"
+      },
+      "till": null,
+      "section": {
+        "trail": []
+      },
+      "family": [
+        {
+          "retired": false,
+          "onHand": 3,
+          "webId": "w44-0"
+        },
+        {
+          "retired": true,
+          "onHand": 0,
+          "webId": null
+        }
+      ]
+    },
+    {
+      "id": 46,
+      "groupId": 16,
+      "caption": "MOSS",
+      "sizeText": "250 ml",
+      "packText": "250 ml",
+      "netGrams": 250,
+      "listCents": 3218,
+      "photo": "/photos/1",
+      "hasBlurb": true,
+      "shelfId": null,
+      "kind": "Soil",
+      "ean": null,
+      "state": "live",
+      "urlKey": null,
+      "labels": [
+        "roses"
+      ],
+      "aliases": [],
+      "tag": {
+        "style": "standard"
+      },
+      "web": {
+        "listCents": 534,
+        "id": "w45"
+      },
+      "vendor": {
+        "costCents": 2462,
+        "firm": "Greenhouse Supply",
+        "packSize": 4
+      },
+      "till": {
+        "listCents": 401,
+        "onHand": 3,
+        "tax": {
+          "rate": 0,
+          "inclusive": true
+        },
+        "retired": false,
+        "priceCount": 1,
+        "aliases": [
+          "Cr&egrave",
+          "me"
+        ],
+        "since": "2026-05-31T23:00:00+02:00",
+        "stores": null
+      },
+      "section": {
+        "trail": []
+      },
+      "family": [
+        {
+          "retired": true,
+          "onHand": 0,
+          "webId": "w45-0"
+        },
+        {
+          "retired": true,
+          "onHand": 0,
+          "webId": null
+        }
+      ]
+    },
+    {
+      "id": 47,
+      "groupId": 16,
+      "caption": "a",
+      "sizeText": "25 g",
+      "packText": "",
+      "listCents": 290,
+      "photo": "/photos/1",
+      "hasBlurb": true,
+      "kind": "Soil",
+      "ean": "5412345000013",
+      "state": "live",
+      "urlKey": "grosser-topf",
+      "labels": [
+        "roses"
+      ],
+      "aliases": [
+        "moss",
+        "Moss"
+      ],
+      "tag": {
+        "style": "standard"
+      },
+      "web": {
+        "listCents": 1431,
+        "id": "w46"
+      },
+      "vendor": {
+        "costCents": 1756,
+        "firm": "Greenhouse Supply",
+        "packSize": 0
+      },
+      "till": {
+        "listCents": 2052,
+        "onHand": 35,
+        "reorderAt": 0,
+        "tax": {
+          "rate": 21,
+          "inclusive": true
+        },
+        "retired": false,
+        "shortName": null,
+        "priceCount": 1,
+        "aliases": [
+          "Cr&egrave",
+          "me"
+        ],
+        "since": "2026-05-31T23:00:00+02:00",
+        "stores": []
+      },
+      "section": null,
+      "family": [
+        {
+          "retired": true,
+          "onHand": 3,
+          "webId": null
+        },
+        {
+          "retired": false,
+          "onHand": 3,
+          "webId": "w46-1"
+        }
+      ]
+    },
+    {
+      "id": 48,
+      "groupId": 16,
+      "caption": "Großer Topf",
+      "sizeText": "One size",
+      "packText": "300",
+      "netGrams": 125,
+      "listCents": 0,
+      "photo": "/photos/1",
+      "hasBlurb": false,
+      "shelfId": null,
+      "kind": "Fertiliser",
+      "ean": "5412345000013",
+      "state": "draft",
+      "urlKey": "fern-mix-2",
+      "labels": [],
+      "aliases": [],
+      "tag": {},
+      "web": {
+        "listCents": 589,
+        "id": "w47"
+      },
+      "vendor": {
+        "costCents": 2300,
+        "firm": "Greenhouse Supply",
+        "packSize": 4
+      },
+      "till": {
+        "listCents": 561,
+        "onHand": -2,
+        "reorderAt": 12,
+        "tax": null,
+        "retired": false,
+        "priceCount": 1,
+        "aliases": [
+          "Hart fern"
+        ],
+        "since": "2025-03-10",
+        "stores": [
+          {
+            "place": "Shop Front",
+            "aisle": "",
+            "onHand": 1,
+            "low": 3,
+            "high": 8
+          },
+          {
+            "place": "Barn North",
+            "aisle": "C3",
+            "onHand": 25,
+            "low": 0
+          }
+        ]
+      },
+      "section": {
+        "trail": [
+          "#roses",
+          "#red"
+        ]
+      },
+      "family": [
+        {
+          "retired": true,
+          "onHand": 3,
+          "webId": null
+        },
+        {
+          "retired": true,
+          "onHand": 3,
+          "webId": null
+        }
+      ]
+    },
+    {
+      "id": 101,
+      "groupId": 2,
+      "caption": "a",
+      "sizeText": "250 ml",
+      "packText": null,
+      "netGrams": 75,
+      "listCents": 254,
+      "hasBlurb": false,
+      "shelfId": "s-4-2",
+      "kind": "constructor",
+      "ean": "5412345000013",
+      "state": "stored",
+      "urlKey": "fern-mix",
+      "labels": [
+        "roses"
+      ],
+      "aliases": [
+        "moss",
+        "Moss"
+      ],
+      "tag": {
+        "style": "standard"
+      },
+      "web": null,
+      "vendor": {
+        "costCents": 1226,
+        "firm": "Greenhouse Supply",
+        "packSize": null
+      },
+      "till": {
+        "listCents": 1325,
+        "onHand": 5000,
+        "reorderAt": 12,
+        "tax": {
+          "rate": 9,
+          "inclusive": true
+        },
+        "retired": false,
+        "shortName": "Till caption",
+        "priceCount": 2,
+        "aliases": [
+          "  moss ",
+          "Moss"
+        ],
+        "since": null,
+        "stores": [
+          {
+            "place": "Shop Front",
+            "aisle": "",
+            "onHand": 1,
+            "low": 3,
+            "high": 8
+          },
+          {
+            "place": "Barn North",
+            "aisle": "C3",
+            "onHand": 25,
+            "low": 0
+          }
+        ]
+      },
+      "section": null,
+      "family": [
+        {
+          "retired": true,
+          "onHand": 0,
+          "webId": null
+        },
+        {
+          "retired": true,
+          "onHand": 0,
+          "webId": null
+        }
+      ],
+      "case": "prototype-key"
+    },
+    {
+      "id": 102,
+      "groupId": 3,
+      "caption": "Åkerbär Seeds",
+      "sizeText": "0,5kg.",
+      "packText": "500 g",
+      "netGrams": 0,
+      "listCents": 0,
+      "photo": "/photos/1",
+      "hasBlurb": true,
+      "shelfId": "s-4-2",
+      "kind": "Fertiliser",
+      "state": "draft",
+      "labels": [
+        "roses"
+      ],
+      "aliases": [
+        "Fern"
+      ],
+      "web": null,
+      "till": {
+        "since": "2026-02-29"
+      },
+      "section": {
+        "trail": [
+          "#roses",
+          "#red"
+        ]
+      },
+      "family": [
+        {
+          "retired": true,
+          "onHand": 3,
+          "webId": null
+        }
+      ],
+      "case": "date-parse"
+    },
+    {
+      "id": 103,
+      "groupId": 4,
+      "caption": "FERN MIX",
+      "sizeText": "250 ml",
+      "packText": "0,5 kg",
+      "netGrams": null,
+      "listCents": 1390,
+      "photo": "/photos/1",
+      "hasBlurb": true,
+      "shelfId": "s-4-2",
+      "kind": "Soil",
+      "state": "stored",
+      "urlKey": "grosser-topf",
+      "labels": [
+        "roses"
+      ],
+      "aliases": [
+        "Cr&egrave",
+        "me"
+      ],
+      "tag": {
+        "style": "standard"
+      },
+      "web": {
+        "id": "w9"
+      },
+      "till": {
+        "listCents": 1266,
+        "onHand": 3,
+        "reorderAt": 0,
+        "tax": {
+          "rate": 9,
+          "inclusive": true
+        },
+        "retired": false,
+        "shortName": "Till caption",
+        "priceCount": 2,
+        "aliases": [
+          "Cr&egrave",
+          "me"
+        ],
+        "since": "2025-03-10",
+        "stores": [
+          {
+            "place": "Shop Front",
+            "aisle": "",
+            "onHand": 1,
+            "low": 3,
+            "high": 8
+          },
+          {
+            "place": "Shop Front",
+            "aisle": "",
+            "onHand": 1,
+            "low": 3,
+            "high": 8
+          },
+          {
+            "place": "Barn North",
+            "aisle": "C3",
+            "onHand": 0,
+            "low": 0
+          }
+        ]
+      },
+      "section": {
+        "trail": [
+          "#roses",
+          "#red"
+        ]
+      },
+      "family": [
+        {
+          "retired": false,
+          "onHand": 3,
+          "webId": "w9-0"
+        },
+        {
+          "retired": false,
+          "onHand": 3,
+          "webId": null
+        }
+      ],
+      "case": "identity"
+    }
+  ],
+  "expected": {
+    "price-gap": {
+      "state": "translated",
+      "differences": [],
+      "reasons": []
+    },
+    "margin": {
+      "state": "translated",
+      "differences": [],
+      "reasons": []
+    },
+    "margin-share": {
+      "state": "translated",
+      "differences": [],
+      "reasons": []
+    },
+    "price-per-100": {
+      "state": "untranslatable",
+      "differences": [
+        "absent-element",
+        "absent-receiver",
+        "nullish-arithmetic",
+        "number-parse"
+      ],
+      "reasons": [
+        "method",
+        "replace-first"
+      ]
+    },
+    "restock": {
+      "state": "translated",
+      "differences": [],
+      "reasons": []
+    },
+    "stock-value": {
+      "state": "translated",
+      "differences": [],
+      "reasons": []
+    },
+    "gaps": {
+      "state": "translated",
+      "differences": [],
+      "reasons": []
+    },
+    "sales-value": {
+      "state": "translated",
+      "differences": [],
+      "reasons": []
+    },
+    "profit-potential": {
+      "state": "translated",
+      "differences": [],
+      "reasons": []
+    },
+    "margin-flag": {
+      "state": "translated",
+      "differences": [],
+      "reasons": []
+    },
+    "advised-price": {
+      "state": "translated",
+      "differences": [],
+      "reasons": []
+    },
+    "advice-gap": {
+      "state": "translated",
+      "differences": [],
+      "reasons": []
+    },
+    "retire-action": {
+      "state": "translated",
+      "differences": [],
+      "reasons": []
+    },
+    "shop-refill": {
+      "state": "translated-with-differences",
+      "differences": [
+        "absent-receiver",
+        "concat-undefined",
+        "identity",
+        "nullish-arithmetic",
+        "nullish-comparison",
+        "sort-key"
+      ],
+      "reasons": []
+    },
+    "label-ready": {
+      "state": "translated",
+      "differences": [],
+      "reasons": []
+    },
+    "days-listed": {
+      "state": "translated-with-differences",
+      "differences": [
+        "clock",
+        "date-parse"
+      ],
+      "reasons": []
+    },
+    "web-ready": {
+      "state": "translated",
+      "differences": [],
+      "reasons": []
+    },
+    "price-raise": {
+      "state": "translated-with-differences",
+      "differences": [
+        "helper"
+      ],
+      "reasons": []
+    },
+    "price-from-cost": {
+      "state": "translated-with-differences",
+      "differences": [
+        "helper"
+      ],
+      "reasons": []
+    },
+    "price-steps": {
+      "state": "translated-with-differences",
+      "differences": [
+        "helper",
+        "prototype-key"
+      ],
+      "reasons": []
+    },
+    "copy-till-price": {
+      "state": "translated",
+      "differences": [],
+      "reasons": []
+    },
+    "net-weight": {
+      "state": "translated-with-differences",
+      "differences": [
+        "helper"
+      ],
+      "reasons": []
+    },
+    "pack-weight": {
+      "state": "translated-with-differences",
+      "differences": [
+        "helper"
+      ],
+      "reasons": []
+    },
+    "customs-code": {
+      "state": "translated-with-differences",
+      "differences": [
+        "concat-undefined",
+        "prototype-key"
+      ],
+      "reasons": []
+    },
+    "caption-tidy": {
+      "state": "translated",
+      "differences": [],
+      "reasons": []
+    },
+    "aliases": {
+      "state": "translated-with-differences",
+      "differences": [
+        "absent-receiver"
+      ],
+      "reasons": []
+    },
+    "labels-from-section": {
+      "state": "translated",
+      "differences": [],
+      "reasons": []
+    },
+    "till-text": {
+      "state": "translated",
+      "differences": [],
+      "reasons": []
+    },
+    "retire": {
+      "state": "translated-with-differences",
+      "differences": [
+        "absent-receiver"
+      ],
+      "reasons": []
+    },
+    "retire-online-report": {
+      "state": "translated-with-differences",
+      "differences": [
+        "absent-receiver"
+      ],
+      "reasons": []
+    },
+    "margin-floor-report": {
+      "state": "translated-with-differences",
+      "differences": [
+        "concat-undefined",
+        "helper"
+      ],
+      "reasons": []
+    },
+    "step-drift-report": {
+      "state": "translated-with-differences",
+      "differences": [
+        "helper",
+        "prototype-key"
+      ],
+      "reasons": []
+    },
+    "price-parity-report": {
+      "state": "translated-with-differences",
+      "differences": [
+        "helper"
+      ],
+      "reasons": []
+    },
+    "url-key-report": {
+      "state": "translated",
+      "differences": [],
+      "reasons": []
+    },
+    "starter": {
+      "state": "translated",
+      "differences": [],
+      "reasons": []
+    }
+  }
+}

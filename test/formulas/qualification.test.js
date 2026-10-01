@@ -8,7 +8,7 @@ import { openRuleExample, savedRule } from '../../packages/website/src/examples/
 
 const sources = JSON.parse(readFileSync(new URL('../adoption/fixtures/formulas.json', import.meta.url), 'utf8')).formulas;
 it('portable formula and durable review composition qualifies without source evaluation', async () => {
-  assert.equal((await qualifyFormulaSources(sources)).converted, 2);
+  assert.deepEqual(await qualifyFormulaSources(sources), { originals: 8, translated: 5, withDifferences: 1, untranslatable: 2, disabled: 1, originalByteChanges: 0, secondChanges: 0 });
   assert.equal((await qualifyRuleCommand(openRuleExample, savedRule)).secondWrites, 0);
 });
 

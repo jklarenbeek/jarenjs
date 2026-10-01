@@ -25,6 +25,6 @@ export const formulaFacts = {
       + '| Consumer | Rows | Static arithmetic ms | Native formula ms | Added cost ratio | Errors | Page rows | Heap / RSS MiB |\n'
       + '|---|---:|---:|---:|---:|---:|---:|---|\n'
       + result.consumers.map((r) => `| ${r.consumer} | ${r.rows} | ${ms(r.baselineMs)} | ${ms(r.evaluationMs)} | ${ms(r.overhead)}x | ${r.errors} | ${r.pageRows} | ${ms(r.sampledHeapBytes / 1048576)} / ${ms(r.rssBytes / 1048576)} |`).join('\n')
-      + `\n\nSources: ${result.sources.originals} preserved, ${result.sources.converted} converted, ${result.sources.unresolved} require review, ${result.sources.disabled} disabled. Original byte changes: ${result.sources.originalByteChanges}; repeat migration changes: ${result.sources.secondChanges}. Preview writes: ${result.command.previewWrites}; replay writes/revisions: ${result.command.secondWrites}/${result.command.secondRevisions}.\n\n${result.scope}\n\n`;
+      + `\n\nSources: ${result.sources.originals} preserved, ${result.sources.translated} translated (${result.sources.withDifferences} with named differences), ${result.sources.untranslatable} untranslatable, ${result.sources.disabled} disabled. Original byte changes: ${result.sources.originalByteChanges}; repeat migration changes: ${result.sources.secondChanges}. Preview writes: ${result.command.previewWrites}; replay writes/revisions: ${result.command.secondWrites}/${result.command.secondRevisions}.\n\n${result.scope}\n\n`;
   } }),
 };

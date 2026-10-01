@@ -3,6 +3,7 @@
 import { createBoundedCache } from '@jarenjs/core/cache';
 import { semanticKey } from '@jarenjs/core/object';
 import { compileJsonQuery } from '../query/index.js';
+import { canonicalizeJson } from '../canonical.js';
 import { FormulaError, snapshot, credit } from './shared.js';
 
 export { FormulaError };
@@ -189,4 +190,41 @@ export function createFormulaCompiler(options = {}) {
 /** Compile one profile without retaining a cache. @param {any} doc @param {FormulaOptions} [options] */
 export function compileFormula(doc, options = {}) {
   return createFormulaCompiler(options).compile(doc);
+}
+
+/**
+ * Per-row agreement of a compiled formula with the outputs a host's own
+ * trusted runner produced: the parity check a migrated source is accepted
+ * by. The library never runs the original; `expected[i]` is the host's
+ * outcome for `rows[i]`, in the formula's outcome shape (`{kind:'value',
+ * value}`, `{kind:'empty', values:[]}`, `{kind:'skip'}`, `{kind:'explanation',
+ * text, value?}` or `{kind:'error'}`). Outcomes compare as canonical JSON;
+ * two errors agree whatever their messages, since a JavaScript TypeError and
+ * a query refusal word the same failure differently.
+ * @param {{ evaluate: (row: any, context?: any) => any }} formula - a compiled formula
+ * @param {any[]} rows
+ * @param {any[]} expected
+ * @param {{ context?: any, maxRows?: number, maxMismatches?: number }} [options]
+ * @returns {{ rows: number, agree: number, differ: number, mismatches: { index: number, expected: any, actual: any }[], omittedMismatches: number }}
+ */
+export function checkFormulaParity(formula, rows, expected, options = {}) {
+  const maxRows = credit(options.maxRows, 10000, 'maxRows');
+  const maxMismatches = credit(options.maxMismatches, 20, 'maxMismatches');
+  if (!formula || typeof formula.evaluate !== 'function') throw new TypeError('checkFormulaParity needs a compiled formula');
+  if (!Array.isArray(rows) || !Array.isArray(expected) || rows.length !== expected.length)
+    throw new TypeError('rows and expected outputs must be arrays of one length');
+  if (rows.length > maxRows) throw new TypeError('parity row limit exceeded');
+  const shape = (/** @type {any} */ outcome) => (outcome?.kind === 'error' ? '{"kind":"error"}' : canonicalizeJson(outcome));
+  let agree = 0;
+  const mismatches = [];
+  let omitted = 0;
+  for (const [index, row] of rows.entries()) {
+    let actual;
+    try { actual = formula.evaluate(row, options.context ?? {}); }
+    catch (error) { actual = { kind: 'error', code: /** @type {any} */ (error)?.code ?? null }; }
+    if (shape(actual) === shape(expected[index])) { agree++; continue; }
+    if (mismatches.length < maxMismatches) mismatches.push({ index, expected: expected[index], actual });
+    else omitted++;
+  }
+  return snapshot({ rows: rows.length, agree, differ: rows.length - agree, mismatches, omittedMismatches: omitted });
 }
