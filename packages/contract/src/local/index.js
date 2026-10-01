@@ -413,7 +413,9 @@ export function openLocalClient(contract, handlers, options = {}) {
     const out = first;
     if (out.kind === 'fault') return expose(hostFault(out.cause));
     if (out.kind === 'failure') return expose(outcomeOf(classifyDeclared(route, out.failure)));
-    if (out.afterFault !== undefined) observed(out.afterFault);
+    // the hook rejected after enter settled — the transaction around it
+    // did not commit: the host's fault, and the handler's result does not stand
+    if (out.afterFault !== undefined) return expose(hostFault(out.afterFault));
     const result = /** @type {import('../pipeline.js').OperationResult} */ (out.result);
 
     // 4. assemble the outcome

@@ -7,6 +7,8 @@ import { join } from 'node:path';
 import { openStore } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';
 import { nodeWorkerDriver } from '../../packages/db/src/drivers/node-worker.js';
+import { nodeWorkerPoolDriver } from '../../packages/db/src/drivers/node-pool.js';
+import { nodeProcessDriver } from '../../packages/db/src/drivers/node-process.js';
 import { validRequest, validResponse, validResult, rowBytes } from '../../packages/db/src/drivers/worker-protocol.js';
 
 const model = { $model: '0.1', entities: { Item: { schema: {
@@ -35,6 +37,31 @@ describe('Node worker protocol and lifecycle', () => {
       { rows: [1], bytes: 0, done: false }, { rows: [], bytes: 0, done: false }])
       assert.equal(validResult('next', value, limits), false);
     assert.equal(rowBytes(new Uint8Array(17)), 17);
+  });
+  it('each host driver reads a closed option set: a member it does not read is JD0003, naming the nearest', () => {
+    const refused = (/** @type {RegExp} */ pattern) => (/** @type {any} */ error) =>
+      error.code === 'JD0003' && pattern.test(error.message);
+    assert.throws(() => nodeWorkerDriver(/** @type {any} */ ({ windowRow: 1 })),
+      refused(/^JD0003: nodeWorkerDriver option 'windowRow' is not one it reads — did you mean 'windowRows'\?$/));
+    assert.throws(() => nodeProcessDriver(/** @type {any} */ ({ windowRow: 1 })),
+      refused(/^JD0003: nodeProcessDriver option 'windowRow' is not one it reads — did you mean 'windowRows'\?$/));
+    assert.throws(() => nodeWorkerPoolDriver(/** @type {any} */ ({ reader: 0 })),
+      refused(/^JD0003: nodeWorkerPoolDriver option 'reader' is not one it reads — did you mean 'readers'\?$/));
+    assert.throws(() => nodeWorkerPoolDriver(/** @type {any} */ ({ graceMS: 1 })),
+      refused(/nodeWorkerPoolDriver option 'graceMS' is not one it reads — did you mean 'graceMs'\?$/));
+    // the pool's per-worker options are the worker driver's set, refused when the pool is made
+    assert.throws(() => nodeWorkerPoolDriver(/** @type {any} */ ({ worker: { maxPendng: 1 } })),
+      refused(/^JD0003: nodeWorkerPoolDriver worker option 'maxPendng' is not one it reads — did you mean 'maxPending'\?$/));
+    // nothing close: the refusal lists the set
+    assert.throws(() => nodeProcessDriver(/** @type {any} */ ({ colour: 'red' })),
+      refused(/option 'colour' is not one it reads; the options are windowRows, .*startupTimeoutMs, maxOwners, timeoutMs, maxRequestBytes, endpoint$/));
+    // every member each driver reads is accepted
+    const worker = { windowRows: 2, windowBytes: 4096, maxPending: 2, maxStatements: 2, maxCursors: 2,
+      allMaxRows: 2, allMaxBytes: 4096, closeTimeoutMs: 20, startupTimeoutMs: 2000 };
+    assert.doesNotThrow(() => nodeWorkerDriver({ ...worker, endpoint: undefined }));
+    assert.doesNotThrow(() => nodeWorkerPoolDriver({ readers: 1, queueCapacity: 4, graceMs: 20, endpoint: undefined,
+      worker: { ...worker, endpoint: undefined } }));
+    assert.doesNotThrow(() => nodeProcessDriver({ ...worker, maxOwners: 1, timeoutMs: 100, maxRequestBytes: 4096 }));
   });
   it('streams by hard row/byte credits and bounds all() without one whole-result frame', async () => {
     const connection = await nodeWorkerDriver({ windowRows: 3, windowBytes: 100, allMaxRows: 5 }).open();

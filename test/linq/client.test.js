@@ -604,6 +604,17 @@ describe('transaction(): a typed client bound to the transaction', () => {
     await client.close();
   });
 
+  it("a null-prototype options object keeps the transaction's own unit of work by default", async () => {
+    const { client, ada } = await seeded();
+    const seed = await client.entities.User.get(ada.id);
+    client.entities.User.put({ ...seed, age: 51 });
+    const report = await client.transaction(async (tx) => tx.saveChanges(),
+      Object.assign(Object.create(null), { mode: 'immediate' }));
+    assert.strictEqual(report.updated, 0, "the client's staged change is not the transaction's");
+    assert.strictEqual((await client.entities.User.asNoTracking().get(ada.id)).age, 36);
+    await client.close();
+  });
+
   it('a root handle awaited from inside the transaction is JD0012, naming the fix', async () => {
     const { client } = await seeded({ queueTimeout: 40 });
     const started = Date.now();

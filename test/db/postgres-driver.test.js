@@ -211,6 +211,41 @@ describe('the injected PostgreSQL driver', () => {
     assert.throws(() => engine.all({ from: 'native_items' }), /disposed/);
     await connection.close();
   });
+  it('a cursor whose transaction settled sends no FETCH or CLOSE into the next owner\'s transaction', async () => {
+    const client = scriptedClient([VERSION, [/SELECT.*native_items/, { rows: [{ id: 1 }, { id: 2 }], fields: [{ name: 'id', dataTypeID: 23 }] }]]);
+    const connection = await postgresDriver({ connect: () => client }, { windowRows: 1 }).open();
+    try {
+      await connection.exec('BEGIN');
+      const cursor = await (await connection.prepare('SELECT id FROM native_items')).iterate();
+      assert.deepStrictEqual(await cursor.next(), { value: { id: 1 }, done: false });
+      await connection.exec('COMMIT');
+      // the next owner's transaction: one failing statement in it would abort it
+      await connection.exec('BEGIN');
+      const before = client.calls.length;
+      await assert.rejects(cursor.next(), { code: 'JD2070' });
+      assert.deepStrictEqual(await cursor.return(), { done: true, value: undefined });
+      assert.deepStrictEqual(client.calls.slice(before).map((call) => call.text), [], 'nothing of the settled cursor reached the connection');
+      await connection.exec('COMMIT');
+      // a pull overtaken on its way by its transaction's end is the same
+      // refusal: the server closed the cursor with the transaction
+      await connection.exec('BEGIN');
+      const overtaken = await (await connection.prepare('SELECT id FROM native_items')).iterate();
+      assert.deepStrictEqual(await overtaken.next(), { value: { id: 1 }, done: false });
+      const original = client.query;
+      let ended = false;
+      client.query = (/** @type {any} */ config, /** @type {any} */ values) => {
+        const text = typeof config === 'string' ? config : config.text;
+        if (text === 'ROLLBACK') ended = true;
+        if (ended && /^FETCH/.test(text)) return Promise.reject(Object.assign(new Error('cursor "jaren_c2" does not exist'), { code: '34000' }));
+        return original.call(client, config, values);
+      };
+      const pull = overtaken.next();
+      await connection.exec('ROLLBACK');
+      await assert.rejects(pull, { code: 'JD2070' });
+      client.query = original;
+    }
+    finally { await connection.close(); }
+  });
   it('accepts declared boolean parser forms and refuses ambiguous representations', async () => {
     for (const value of [false, true, 'f', 't', 'false', 'true', 0, 1, null, 'FALSE', 'yes', 2]) {
       const client = scriptedClient([VERSION, [/SELECT parsed/, { rows: [{ parsed: value }], fields: [{ name: 'parsed', dataTypeID: 16 }] }]]);
@@ -752,6 +787,54 @@ describe('the injected PostgreSQL driver', () => {
           return true;
         });
         await store.close();
+      });
+
+    it('a COMMIT the server answers with ROLLBACK refuses the transaction instead of resolving it',
+      async () => {
+        // a body that catches its own failed statement and returns leaves
+        // the PostgreSQL transaction aborted, and the server answers its
+        // COMMIT with the ROLLBACK command tag: nothing was committed
+        let aborted = false;
+        const injected = source([...EXISTING,
+          [/^INSERT INTO "rows"/, () => {
+            aborted = true;
+            return Object.assign(new Error('duplicate key value violates unique constraint "rows_pkey"'),
+              { code: '23505', constraint: 'rows_pkey' });
+          }],
+          [/^COMMIT$/, () => {
+            const command = aborted ? 'ROLLBACK' : 'COMMIT';
+            aborted = false;
+            return { rows: [], rowCount: null, fields: [], command };
+          }]]);
+        const store = await openStore(MODEL,
+          { driver: postgresDriver(injected, { schema: 'jaren_run_1' }) });
+        await assert.rejects(() => store.transaction(async (tx) => {
+          await assert.rejects(() => Promise.resolve(tx.collection('rows').insert({ id: 'a', n: 1 })),
+            { code: 'JD2001' });
+          return 'the body caught its failure';
+        }), (error) => {
+          assert.ok(!(error instanceof AggregateError), 'one refusal, not a rollback failure beside it');
+          assert.strictEqual(error.code, 'JD2088');
+          assert.strictEqual(error.class, 'aborted');
+          assert.strictEqual(error.retryable, false);
+          return true;
+        });
+        // the session is usable again: the next call is not refused
+        assert.strictEqual(await store.collection('rows').get('a'), undefined);
+        await store.close();
+      });
+
+    it('a root cursor open across close() refuses its next pull (JD2063) instead of ending as though complete',
+      async () => {
+        const injected = source([...EXISTING,
+          [/SELECT.*native_items/, { rows: [{ id: 1 }, { id: 2 }], fields: [{ name: 'id', dataTypeID: 23 }] }]]);
+        const store = await openStore(MODEL,
+          { driver: postgresDriver(injected, { schema: 'jaren_run_1', windowRows: 1 }) });
+        const cursor = store.relational.iterate({ from: 'native_items', columns: { id: sql.column('id') } });
+        assert.deepStrictEqual(await cursor.next(), { value: { id: 1 }, done: false });
+        await store.close();
+        await assert.rejects(cursor.next(), { code: 'JD2063' });
+        assert.deepStrictEqual(await cursor.return(), { done: true, value: undefined });
       });
 
     it('a lost connection is retryable, and no credential reaches the message', async () => {

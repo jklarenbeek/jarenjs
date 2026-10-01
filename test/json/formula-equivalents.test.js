@@ -44,6 +44,13 @@ describe('FORMULA-FORMAT\'s JavaScript equivalents', () => {
     for (const row of ROWS) assert.strictEqual(run(q, row), row.a == null, JSON.stringify(row));
   });
 
+  it('text[n]: the character at n, nothing past the end — as JavaScript indexes a text without a character beyond U+FFFF', () => {
+    for (const n of [0, 1, 2, 5]) {
+      const q = compileJsonQuery({ $if: [{ $lt: [n, { '$string-length': '$.s' }] }, { $substring: ['$.s', n, 1] }, { $seq: [] }] });
+      for (const s of ['', 'a', 'ab', 'abc', 'Zoë', '！x', 'abcdef']) assert.strictEqual(q({ s }), s[n], `${JSON.stringify(s)}[${n}]`);
+    }
+  });
+
   it('Math.round(x * 100) / 100: multiply, round, divide — bit for bit', () => {
     const q = compileJsonQuery({ $div: [{ $round: [{ $mul: ['$.x', 100] }] }, 100] });
     const values = [...HALF_CENTS, ...HALF_CENTS.map((x) => -x), ...sample(200000, 20261001)];

@@ -33,8 +33,10 @@
 import { aggregateSequence } from './accumulator.js';
 import { equalsJson, compareJsonScalarLt } from '@jarenjs/core/object';
 import { isJsonNumberString } from '@jarenjs/core/number';
-import { mathf64_abs, mathf64_ceil, mathf64_floor, mathf64_round, roundExact } from '@jarenjs/core/math';
-import { convert, dimensionOf, unitOfAlias } from '@jarenjs/core/convert';
+import {
+  mathf64_abs, mathf64_ceil, mathf64_floor, mathf64_round, roundExact, shortestDecimal, shiftDecimal, decimalToNumber,
+} from '@jarenjs/core/math';
+import { UNIT_INDEX, convert, dimensionOf, unitOfAlias } from '@jarenjs/core/convert';
 import {
   DEFAULT_DECIMAL_FORMAT, FormatRefusal, compilePicture, formatNumberPicture, readDecimalFormat,
 } from './format-number.js';
@@ -444,8 +446,11 @@ function pictureOf(picture, format, docPath, compileTime) {
 // misreading: the second group of "1 500 g" (the space may be a grouping
 // separator, and 500 would misread 1500), the denominator of "1/2 kg", the
 // end of the range "2-3 kg", the exponent of "1e3 g", digits glued to a
-// word ("B12"). Nor is a word followed by a digit or a slash read as the
-// unit: "300 m2" is an area and "30 km/h" a speed, never a length.
+// word ("B12"), a number after a dash that is not its sign ("– 2 kg": read
+// without the dash, it would drop a sign the writer may have meant). Nor is
+// a word followed by a digit or a slash read as the unit: "300 m2" is an
+// area and "30 km/h" a speed, never a length; nor one a hyphen joins to a
+// word: "2 t-shirts" is no mass.
 const quantityPatterns = new WeakMap();
 // written so it holds inside a character class and outside one under `u`
 const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&').replace(/-/g, '\\x2d');
@@ -458,10 +463,10 @@ function quantityPattern(format) {
     const g = escapeRegExp(format.groupingSeparator);
     const d = escapeRegExp(format.decimalSeparator);
     const minus = `[\\x2d\\u2212${escapeRegExp(format.minusSign)}]`;
-    pattern = new RegExp(`(?<![${family}${g}${d}\\p{L}])(?<![${family}]\\s)(?<![${family}][eE]${minus}?)`
-      + `(?<!\\/\\s*)(?<![${family}]\\s*[\\x2d\\u2212\\u2013]\\s*)(${minus})?`
+    pattern = new RegExp(`(?<![${family}${g}${d}\\p{L}])(?<![${family}]\\s+)(?<![${family}][eE]${minus}?)`
+      + `(?<!\\/\\s*)(?<![\\p{Pd}\\u2212${escapeRegExp(format.minusSign)}]\\s*)(${minus})?`
       + `([${family}]{1,3}(?:${g}[${family}]{3})+|[${family}]+)`
-      + `(?:${d}([${family}]+))?\\s*(\\p{L}[\\p{L}\\p{N}]*)(?![\\p{L}\\p{N}/])`, 'gu');
+      + `(?:${d}([${family}]+))?\\s*(\\p{L}[\\p{L}\\p{N}]*)(?![\\p{L}\\p{N}/]|[\\x2d\\u2010\\u2011]\\p{L})`, 'gu');
     quantityPatterns.set(format, pattern);
   }
   return pattern;
@@ -502,10 +507,33 @@ function readQuantity(text, unit, format) {
       continue;
     const whole = asciiDigits(m[2].split(format.groupingSeparator).join(''), format);
     const fraction = m[3] === undefined ? '' : asciiDigits(m[3], format);
-    const value = Number(fraction === '' ? whole : `${whole}.${fraction}`);
-    return convert(m[1] === undefined ? value : -value, from, unit);
+    return convertWritten(whole, fraction, m[1] !== undefined, from, unit);
   }
   return EMPTY;
+}
+
+/**
+ * The number written `whole.fraction` (ASCII digits) in unit `fromId`, in
+ * unit `toId`. Where the target's factor is a power of ten (and neither unit
+ * has an offset) the decimal arithmetic is exact: the written digits times
+ * the source's factor, as the decimal it is written as, with the point
+ * shifted, rounded once into a double, so `0.7 l` is `700` ml and never
+ * `699.9999999999999`. Any other target (an inch, a pound) divides as the
+ * registry does.
+ */
+function convertWritten(whole, fraction, negative, fromId, toId) {
+  const from = UNIT_INDEX.get(fromId).unit;
+  const to = UNIT_INDEX.get(toId).unit;
+  const target = shortestDecimal(to.factor);
+  if (!from.offset && !to.offset && /^10*$/.test(target.digits)) {
+    const factor = shortestDecimal(from.factor);
+    const digits = (BigInt(whole + fraction) * BigInt(factor.digits)).toString();
+    // dividing by 10^(zeros - scale) shifts the point the other way
+    const shift = target.scale - (target.digits.length - 1);
+    return decimalToNumber(shiftDecimal({ digits, scale: fraction.length + factor.scale }, shift), negative);
+  }
+  const value = Number(fraction === '' ? whole : `${whole}.${fraction}`);
+  return convert(negative ? -value : value, fromId, toId);
 }
 
 // IEEE double arithmetic (section 8.5, D1): empty operands propagate,

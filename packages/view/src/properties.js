@@ -1,8 +1,11 @@
 //@ts-check
 /**
  * @file The property table (VIEW-FORMAT §3): what a prop name means to the
- * two renderers. The DOM patcher and the serializer both read it, so they
- * write the same attributes for every kind of property.
+ * two renderers. The serializer writes every prop as an attribute; the DOM
+ * patcher writes a prop through the node's property where it has one, and
+ * reads this table for the three kinds of property where that write would
+ * differ from the serializer's markup: enumerated attributes, removal, and a
+ * value the property would convert.
  *
  * **Enumerated attributes.** HTML spells a few on/off settings as
  * enumerated attributes with keywords of their own, and reflects four of
@@ -29,8 +32,22 @@
  *
  * `contentEditable` and `writingSuggestions`, the IDL spellings, are read as
  * the attributes they reflect. `autocapitalize`, `hidden` and `popover` are
- * enumerated too, but no JSON boolean names one of their keywords, so they
- * keep the ordinary rules.
+ * enumerated too and keep the ordinary rules: `false` removes the attribute,
+ * and `true` writes it empty — the writing rule below — which is a state of
+ * each (`popover`'s `auto`, `hidden`'s hidden state, `autocapitalize`'s
+ * default), the same on the client and in the markup.
+ *
+ * **Writing.** A value the property would convert into something the
+ * serializer never writes is written as the attribute. `true` on a property
+ * that is not boolean is the empty attribute: through the property,
+ * `download = true` names the file `true`, `title = true` shows `true`, and
+ * `popover = true` writes the `manual` state where the markup's `popover`
+ * is `auto`. A string on a number-typed property is that string: through the
+ * property, `width = '100px'` writes `width="0"`. Numbers, strings on string
+ * properties and boolean properties are assigned. The trade: a
+ * string on a number-typed property that reflects no attribute
+ * (`scrollTop: '100'`) becomes an attribute of that name, as the serializer
+ * writes it; pass a number to reach the property.
  *
  * **Removal.** `null`, `false` or a removed prop on a property that is not
  * boolean removes the attribute the property reflects. Assigning `''`
@@ -152,6 +169,27 @@ const REFLECTED_ELSEWHERE = Object.freeze(Object.assign(Object.create(null), {
   className: 'class',
   htmlFor: 'for',
 }));
+
+/**
+ * Write a property the DOM renderer writes through the node (the writing
+ * rule above). A value the property would convert into something the
+ * serializer never writes is written as that attribute instead: `true` on
+ * a property that is not boolean is the empty attribute (`download`,
+ * `title`, `popover`, where the property writes `"true"`), and a string on
+ * a number-typed property is the string (`width: '100px'`, where the
+ * property writes `0`). Every other value is assigned.
+ * @param {any} node - an HTML element that has the property
+ * @param {string} name - the property name
+ * @param {any} value - the prop value, neither nullish nor `false`
+ */
+export function writeProperty(node, name, value) {
+  if (value === true ? typeof node[name] !== 'boolean'
+    : typeof value === 'string' && typeof node[name] === 'number') {
+    node.setAttribute(name, value === true ? '' : value);
+    return;
+  }
+  node[name] = value;
+}
 
 /**
  * Remove a property the DOM renderer writes through the node (the removal

@@ -25,6 +25,20 @@ const shop = compileContract(load('./fixtures/shop.contract.json'));
 const SAVE = { revision: 1, product: { id: 1, name: 'x', price: 1 } };
 const URL = '/api/products/1/master';
 
+/** A command bound to GET under an optional key — the magic-link shape. */
+const LINK = compileContract({
+  $contract: '0.1',
+  operations: {
+    'link.redeem': {
+      kind: 'command',
+      input: { type: 'object', properties: { token: { type: 'string' } }, required: ['token'] },
+      output: { type: 'object', properties: { session: { type: 'string' } }, required: ['session'] },
+      policy: { idempotency: 'optional' },
+      http: { method: 'GET', path: '/links/{token}' },
+    },
+  },
+});
+
 /**
  * @param {Record<string, any>} [overrides]
  * @param {any} [options]
@@ -344,6 +358,57 @@ describe('idempotency — the binding over the memory ledger', () => {
     assert.strictEqual(retry.status, 412);
     assert.strictEqual(retry.headers['idempotent-replayed'], 'true');
     assert.strictEqual(calls, 1, 'the recorded 412 replays; the handler never runs twice under one key');
+  });
+
+  it('a PRE-handler 304 on a GET-bound command under a key releases the key retryable: nothing ran, so the same key then runs the command', async () => {
+    let calls = 0;
+    const ledger = createMemoryLedger();
+    const server = serveHttp(LINK, { 'link.redeem': () => { calls += 1; return { session: `s-${calls}` }; } },
+      { ledger, preconditions: { 'link.redeem': () => 'v1' } });
+    const cached = await server.dispatch(req('GET', '/links/abc', { 'idempotency-key': 'k1', 'if-none-match': '"v1"' }));
+    assert.deepStrictEqual([cached.status, cached.body, calls], [304, null, 0]);
+    const record = ledger.lookup({ op: 'link.redeem', scope: '', key: 'k1' });
+    assert.deepStrictEqual([record?.status, record?.retryable, record?.response], ['failed', true, null]);
+    const redeemed = await server.dispatch(req('GET', '/links/abc', { 'idempotency-key': 'k1' }));
+    assert.deepStrictEqual([redeemed.status, json(redeemed), redeemed.headers['idempotent-replayed']], [200, { session: 's-1' }, undefined]);
+    assert.strictEqual(calls, 1);
+  });
+
+  it('a POST-handler 304 on a GET-bound command under a key answers 304 while the key records the success it stood for: a retry replays the answer with its body', async () => {
+    let calls = 0;
+    const ledger = createMemoryLedger();
+    const redeem = (/** @type {any} */ input, /** @type {any} */ ctx) => {
+      calls += 1;
+      ctx.etag('v1', { strong: true });
+      ctx.header('set-cookie', `sid=s-${calls}`);
+      return { session: `s-${calls}` };
+    };
+    const server = serveHttp(LINK, { 'link.redeem': redeem }, { ledger });
+    const cached = await server.dispatch(req('GET', '/links/abc', { 'idempotency-key': 'k2', 'if-none-match': '"v1"' }));
+    assert.deepStrictEqual([cached.status, cached.body, cached.headers.etag, calls], [304, null, '"v1"', 1]);
+    const record = ledger.lookup({ op: 'link.redeem', scope: '', key: 'k2' });
+    assert.deepStrictEqual([record?.status, record?.response?.status, JSON.parse(String(record?.response?.body))], ['committed', 200, { session: 's-1' }]);
+    // the retry of a lost answer replays the command's answer: its body, its armed headers, its tag
+    const retry = await server.dispatch(req('GET', '/links/abc', { 'idempotency-key': 'k2' }));
+    assert.deepStrictEqual([retry.status, json(retry), retry.headers['idempotent-replayed'], retry.headers['set-cookie'], retry.headers.etag],
+      [200, { session: 's-1' }, 'true', 'sid=s-1', '"v1"']);
+    assert.strictEqual(calls, 1);
+    // without a key the 304 is the whole answer, as before
+    assert.strictEqual((await server.dispatch(req('GET', '/links/abc', { 'if-none-match': '"v1"' }))).status, 304);
+    // a required settlement records the same receipt through the lease's ledger
+    /** @type {any[]} */
+    const receipts = [];
+    const root = createMemoryLedger();
+    const settled = serveHttp(LINK, { 'link.redeem': redeem }, {
+      ledger: root,
+      acquire: (input, identity, enter) => enter({ host: null, settlement: { required: true, ledger: {
+        commit: (/** @type {any} */ ref, /** @type {any} */ response, /** @type {any} */ now) => { receipts.push(response); return root.commit(ref, response, now); },
+        fail: (/** @type {any[]} */ ...args) => root.fail(args[0], args[1], args[2], args[3]),
+      } } }),
+    });
+    const leased = await settled.dispatch(req('GET', '/links/abc', { 'idempotency-key': 'k3', 'if-none-match': '"v1"' }));
+    assert.strictEqual(leased.status, 304);
+    assert.deepStrictEqual(receipts.map((r) => [r.status, JSON.parse(r.body)]), [[200, { session: `s-${calls}` }]]);
   });
 });
 

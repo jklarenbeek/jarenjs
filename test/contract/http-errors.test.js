@@ -13,6 +13,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
+import { gzipSync } from 'node:zlib';
 
 import { compileContract, CONTRACT_CODES, contractMessagesEn } from '@jarenjs/contract';
 import { serveHttp, HTTP_ERRORS, readBody } from '@jarenjs/contract/http';
@@ -97,6 +98,36 @@ describe('the wire-error taxonomy — one test per row', () => {
     // an empty body needs no media
     assert.strictEqual((await serve().dispatch(req('POST', '/product.remove', {}, ''))).status, 400);
     assert.strictEqual(json(await serve().dispatch(req('POST', '/product.remove', {}, ''))).code, 'JC2006');
+  });
+
+  it('JC2004 415 a JSON body under a content coding the binding does not decode; an opaque operation\'s bytes pass through with theirs', async () => {
+    const coded = (/** @type {string} */ coding, /** @type {string | Uint8Array} */ body) =>
+      serve().dispatch(req('POST', '/product.remove', { 'content-type': 'application/json', 'content-encoding': coding }, body));
+    const plain = '{"id":1}';
+    // gzipped JSON, and plain JSON that only claims a coding, are refused alike
+    wireError(await coded('gzip', new Uint8Array(gzipSync(plain))), 'JC2004', 415, false);
+    wireError(await coded('gzip', plain), 'JC2004', 415, false);
+    wireError(await coded('br, identity', plain), 'JC2004', 415, false);
+    // identity is no coding, and neither is an empty field
+    for (const coding of ['identity', 'Identity', '', ' identity ']) {
+      assert.strictEqual((await coded(coding, plain)).status, 200, JSON.stringify(coding));
+    }
+    // an empty body has nothing to decode: its input decides
+    wireError(await coded('gzip', ''), 'JC2006', 400, false);
+    // an opaque operation's bytes are the handler's, coding and all
+    const upload = compileContract({ $contract: '0.1', operations: { 'blob.put': {
+      kind: 'command',
+      input: { type: 'object', properties: { 'content-encoding': { type: 'string' } } },
+      output: true,
+      http: { method: 'PUT', path: '/blob', media: 'application/octet-stream', in: { 'content-encoding': 'header' } },
+    } } });
+    /** @type {any} */
+    let seen;
+    const raw = serveHttp(upload, { 'blob.put': (input, ctx) => { seen = { coding: input['content-encoding'], body: ctx.body }; return { status: 201 }; } });
+    const zipped = new Uint8Array(gzipSync('hello'));
+    const stored = await raw.dispatch(req('PUT', '/blob', { 'content-type': 'application/octet-stream', 'content-encoding': 'gzip' }, zipped));
+    assert.strictEqual(stored.status, 201);
+    assert.deepStrictEqual([seen.coding, seen.body], ['gzip', zipped]);
   });
 
   it('JC2005 400 malformed JSON, including invalid UTF-8 bytes', async () => {

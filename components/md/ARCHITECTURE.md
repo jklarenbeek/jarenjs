@@ -120,7 +120,7 @@ hand-written expectations.
 | `src/to-html.js` | String emitter: AST → HTML bytes, the raw-HTML modes, `wrap` |
 | `src/to-vnode.js` | Vnode emitter (per-node memo, content-hash keys), `createMdRenderer` with hydrate scheduling |
 | `src/loader.js` | Shared core LRU + HTTP validators, in-flight sharing, AbortSignal, `streamMarkdown` |
-| `src/plugins/` | `definePlugin` + the two reference plugins (highlight, mermaid) |
+| `src/plugins/` | `definePlugin` + the reference syntax highlighter (`highlightPlugin`); diagrams come from `@jarenjs/mermaid/plugin`, which a host hands in |
 | `src/component/` | **the visual component** — `createMdComponent` (memoized `view()`, app `effects`, `hydrate`); imports the engine, never the reverse |
 | `styles/md.css` | the component stylesheet (`.md` rhythm, `tok-*` token colors, mermaid placeholder), light/dark |
 

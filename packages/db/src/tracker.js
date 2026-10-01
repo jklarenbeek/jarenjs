@@ -556,8 +556,9 @@ export function createTracker(context) {
       // stores as the one already there is no change and no write
       const current = core.plan.document === false ? core.plan.normalize(record.current) : record.current;
       // probe before stamping: an update stamp must never turn a
-      // deep-equal replacement into a phantom write
-      if (createJSONPatch(record.snapshot, current).length === 0) continue;
+      // deep-equal replacement — or one that differs only in the version
+      // member, which is the store's own — into a phantom write
+      if (core.plan.unchanged(record.snapshot, current)) continue;
       core.plan.writable?.();
       record.stamped = core.stampUpdated(current);
       const parts = partitionDiff(record.entity, record);
@@ -852,10 +853,11 @@ export function createTracker(context) {
       const core = ['insert', 'update', 'delete'].includes(statement.kind) ? coreFor(statement.entity) : null;
       if (core === null) return null;
       const runs = recordsOf(statement).flatMap((record) => deferred.get(record) ?? []);
+      // the row a rule judges, locked for the save's transaction (see `getLocked`)
       const read = statement.kind === 'update' && core.plan.document === false && core.plan.ruled('update')
-        ? core.get(statement.record.snapshot)
+        ? core.getLocked(statement.record.snapshot)
         : statement.kind === 'delete' && core.plan.ruled('delete')
-          ? core.get(keyArgument(core.plan, statement.removal.parts)) : undefined;
+          ? core.getLocked(keyArgument(core.plan, statement.removal.parts)) : undefined;
       return chain(read, (row) => {
         statement.before = row;
         return settleChecks(runs);

@@ -21,8 +21,12 @@
 
 import { parseFormulaBody, positionOf, FormulaSyntaxError } from './javascript.js';
 
-/** The noncharacter the anchor and trim compositions mark an end with. */
-const SENTINEL = '\uFFFF';
+/** The noncharacter the anchor composition marks a text's start with. */
+const START = '\uFFFE';
+/** The noncharacter the anchor composition marks a text's end with, and the trim composition each end in turn. */
+const END = '\uFFFF';
+/** Either mark, as an I-Regexp class. */
+const MARKS = `[${START}${END}]`;
 /** ECMAScript white space and line terminators, as an I-Regexp class body (`\s`, `trim`). */
 const JS_SPACE = '\t\n\u000b\f\r \u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000\uFEFF';
 /** Any character, as an I-Regexp class. */
@@ -434,6 +438,12 @@ export function translateFormulaBody(source, options = {}) {
     }
     if (property.type === 'Literal' && typeof property.value === 'number' && Number.isInteger(property.value) && property.value >= 0) {
       if (object.type === 'object' || object.table) return { ...value({ $get: [object.q, String(property.value)] }, 'unknown', absent, true, key), refs };
+      if (object.type === 'string') return characterAt(node, object, property.value, key, env);
+      // text reads a character where an array reads an element: the type decides, as for .length
+      if (object.type === 'unknown') {
+        reason('index', node, 'an index into a value whose type (text or array) the translation cannot tell');
+        return EMPTY();
+      }
       if (object.pathable) return { ...value(`${object.q}[${property.value}]`, elementType(object), absent, true, key), pathable: true, fromArray: true, refs };
       return { ...value({ $get: [object.q, property.value] }, elementType(object), absent, true, key), fromArray: true, refs };
     }
@@ -459,6 +469,18 @@ export function translateFormulaBody(source, options = {}) {
 
   /** The type of an array's elements, when known. @param {Value} v */
   const elementType = (v) => v.element ?? 'unknown';
+
+  /**
+   * `text[n]`: the character at 0-based index `n`, nothing past the end (the
+   * `??` fallback then applies, as for JavaScript's undefined). JavaScript
+   * indexes UTF-16 code units and the query characters (`code-units`).
+   * @param {any} node @param {Value} text @param {number} n @param {string | null} key @param {Env} env @returns {Value}
+   */
+  function characterAt(node, text, n, key, env) {
+    differ('code-units', node, 'JavaScript indexes a text by UTF-16 code unit where the query indexes characters: from a character beyond U+FFFF (an emoji, two code units) on they read different ones');
+    return guarded(text, env, (s) => value(once(s, (x) => ({ $if: [{ $lt: [n, { '$string-length': x }] }, { $substring: [x, n, 1] }, { $seq: [] }] })),
+      'string', true, false, key));
+  }
 
   /** A JSONPath member segment. @param {string} name */
   function segment(name) {
@@ -868,7 +890,7 @@ export function translateFormulaBody(source, options = {}) {
       if (node.args.length !== 1) { reason('arguments', node, 'Number() of one value'); return EMPTY(); }
       const v = tx(node.args[0], env);
       if (v.type === 'number') return v;
-      differ('number-parse', node, "JavaScript's Number() reads '' and blanks as 0 and accepts hex; the query's $number reads them as NaN");
+      differ('number-parse', node, "JavaScript's Number() reads '' and blanks as 0 and accepts hex; the query's $number refuses such a text (JQ2001)");
       return value({ $number: v.q }, 'number', v.absent);
     }
     if (name === opts.explain) {
@@ -1057,6 +1079,7 @@ export function translateFormulaBody(source, options = {}) {
       const global = name === 'replaceAll' || p.regex?.flags.includes('g');
       const rewritten = rewriteRegExp(/** @type {any} */ (p.regex), pattern);
       if (!rewritten) return EMPTY();
+      if (rewritten.emptyMatch) { reason('regex', pattern, 'a replaced pattern that can match the empty text: JavaScript replaces an empty match, which the query cannot'); return EMPTY(); }
       if (rewritten.ignoreCase) { reason('regex', pattern, 'a case-insensitive pattern in .replace(): the replaced text keeps its case'); return EMPTY(); }
       if (!global && !rewritten.singleMatch) {
         reason('replace-first', node, '.replace() of the first match only (no g flag), where more than one can match');
@@ -1067,9 +1090,9 @@ export function translateFormulaBody(source, options = {}) {
       if (rewritten.unitSensitive && !oneAtom)
         differ('code-units', pattern, 'JavaScript matches one UTF-16 code unit where the query matches a character: an emoji (two code units) differs');
       if (rewritten.anchored) {
-        // the ends marked by a sentinel, matched, then unmarked
-        const marked = { $concat: [SENTINEL, s.q, SENTINEL] };
-        return value({ $replace: [{ $replace: [marked, rewritten.pattern, replacementQ] }, SENTINEL, ''] }, 'string', s.absent);
+        // the start and the end marked, matched, then unmarked
+        const text = { $concat: [START, s.q, END] };
+        return value({ $replace: [{ $replace: [text, rewritten.pattern, replacementQ] }, MARKS, ''] }, 'string', s.absent);
       }
       return value({ $replace: [s.q, rewritten.pattern, replacementQ] }, 'string', s.absent);
     }
@@ -1110,7 +1133,7 @@ export function translateFormulaBody(source, options = {}) {
       differ('code-units', node, 'JavaScript matches one UTF-16 code unit where the query matches a character: an emoji (two code units) differs');
     let text = certainType(subject) === 'string' ? subject.q : { $string: subject.q };
     if (rewritten.ignoreCase) text = { $lower: text };
-    if (rewritten.anchored) text = { $concat: [SENTINEL, text, SENTINEL] };
+    if (rewritten.anchored) text = { $concat: [START, text, END] };
     return value({ $search: [text, rewritten.pattern] }, 'boolean');
   }
 
@@ -1308,7 +1331,7 @@ export function translateFormulaBody(source, options = {}) {
       // ICU writes NaN with the currency's prefix: the picture would write NaN alone
       const nan = `${picture.slice(0, picture.search(/[#0-9]/))}${locale.nan ?? 'NaN'}`;
       // a picture or a text that starts with $ is written $$, or the query reads it as a path
-      return value(once(n, (x) => ({ $if: [{ $eq: [x, x] }, { '$format-number': [x, str(picture), locale.decimalFormat] }, str(nan)] })), 'string');
+      return value(once(n, (x) => ({ $if: [{ $eq: [x, x] }, grouped(x, picture, locale), str(nan)] })), 'string');
     }
     if (style !== 'decimal') { reason('locale', optionsNode, `the formatting style '${style}'`); return EMPTY(); }
     const min = o.minimumFractionDigits ?? 0;
@@ -1319,7 +1342,34 @@ export function translateFormulaBody(source, options = {}) {
     }
     const { grouping, decimal } = locale;
     const picture = `#${grouping}##0${max > 0 ? `${decimal}${'0'.repeat(min)}${'#'.repeat(max - min)}` : ''}`;
-    return value({ '$format-number': [n.q, str(picture), locale.decimalFormat] }, 'string');
+    if ((locale.minimumGroupingDigits ?? 1) === 1) return value({ '$format-number': [n.q, str(picture), locale.decimalFormat] }, 'string');
+    return value(once(n, (x) => grouped(x, picture, locale)), 'string');
+  }
+
+  /**
+   * A number written with a picture that groups its integer part, in a
+   * language whose grouped numbers hold at least `minimumGroupingDigits` in
+   * their leftmost group (CLDR's minimum grouping digits): a rounded value
+   * with fewer digits than the group size plus that minimum is written with
+   * the picture's grouping separators left out. The rounded integer part
+   * reaches 10^k exactly where |x| reaches 10^k less half a unit of the last
+   * fraction digit, as $format-number rounds; NaN is written alike either way.
+   * @param {any} x @param {string} picture @param {any} locale
+   */
+  function grouped(x, picture, locale) {
+    const write = (/** @type {string} */ p) => ({ '$format-number': [x, str(p), locale.decimalFormat] });
+    const minimum = locale.minimumGroupingDigits ?? 1;
+    const digit = '[#\\p{Nd}]';
+    const separator = new RegExp(`(?<=${digit})${escapeRegExp(locale.grouping)}(?=${digit})`, 'gu');
+    // the positive sub-picture's integer part and fraction, split at the decimal separator that follows a digit
+    const positive = picture.split(';')[0];
+    const at = positive.search(new RegExp(`(?<=${digit})${escapeRegExp(locale.decimal)}`, 'u'));
+    const groups = (at < 0 ? positive : positive.slice(0, at)).split(separator);
+    if (minimum === 1 || groups.length === 1) return write(picture);
+    const size = /** @type {string[]} */ (groups[groups.length - 1].match(/[#\p{Nd}]/gu)).length;
+    const fraction = at < 0 ? 0 : (/** @type {string[]} */ (positive.slice(at + 1).match(/^[#\p{Nd}]*/u)))[0].length;
+    const boundary = Number(`${'9'.repeat(size + minimum - 1)}.${'9'.repeat(fraction)}5`);
+    return { $if: [{ $ge: [{ $abs: x }, boundary] }, write(picture), write(picture.replace(separator, ''))] };
   }
 
   //#endregion
@@ -1330,13 +1380,13 @@ export function translateFormulaBody(source, options = {}) {
    * A JavaScript regular expression (read without the u flag, as the body
    * writes it) as an I-Regexp: exact where I-Regexp can say the same (`\d`,
    * `\s`, `.` and the classes spelled out, an escaped character as itself),
-   * with the anchors marked by a sentinel; refused where it cannot
+   * with the anchors marked by the start and end marks; refused where it cannot
    * (lookaround, lazy quantifiers, back references, a legacy octal escape).
    * It also tells whether a part of it matches one UTF-16 code unit (`.`, a
    * negated class, `\S`, `\D`, `\W`, a character beyond U+FFFF), which an
    * emoji — two code units — matches differently.
    * @param {{ pattern: string, flags: string }} re @param {any} node
-   * @returns {{ pattern: string, anchored: boolean, ignoreCase: boolean, singleMatch: boolean, unitSensitive: boolean, oneUnit: { plus: boolean } | null } | null}
+   * @returns {{ pattern: string, anchored: boolean, ignoreCase: boolean, emptyMatch: boolean, singleMatch: boolean, unitSensitive: boolean, oneUnit: { plus: boolean } | null } | null}
    */
   function rewriteRegExp(re, node) {
     const { pattern, flags } = re;
@@ -1344,7 +1394,14 @@ export function translateFormulaBody(source, options = {}) {
     let out = '';
     let anchored = false;
     let inClass = false;
+    let negatedClass = false;
     let unitSensitive = false;
+    // the text an anchored pattern searches is marked at its start and its end: where an anchor stands, the mark
+    // it matches goes in, and where `.`, a negated class, \D, \W or \S closes, both marks, which none of them may match
+    /** @type {[number, string][]} */
+    const anchors = [];
+    /** @type {[number, string][]} */
+    const negated = [];
     for (let i = 0; i < pattern.length; i++) {
       const c = pattern[i];
       // a character beyond U+FFFF, written as itself: two code units for JavaScript
@@ -1358,14 +1415,18 @@ export function translateFormulaBody(source, options = {}) {
             if (!classes[e][0]) { reason('regex', node, `\\${e} inside a character class`); return null; }
             out += classes[e][0];
           }
-          else {
-            out += classes[e][1];
-            if (e === 'D' || e === 'W' || e === 'S') unitSensitive = true;
+          else if (e === 'D' || e === 'W' || e === 'S') {
+            out += classes[e][1].slice(0, -1);
+            negated.push([out.length, START + END]);
+            out += ']';
+            unitSensitive = true;
           }
+          else out += classes[e][1];
           continue;
         }
         if (e === 'b' || e === 'B') {
-          if (inClass) { out += '\b'; continue; }
+          // in a class \b is the backspace and \B the letter B
+          if (inClass) { out += e === 'b' ? '\b' : 'B'; continue; }
           differ('regex-subset', node, `I-Regexp has no word boundary (\\${e}): it is left out, so the pattern also matches inside words`);
           continue;
         }
@@ -1398,7 +1459,12 @@ export function translateFormulaBody(source, options = {}) {
         continue;
       }
       if (inClass) {
-        if (c === ']') { inClass = false; out += c; continue; }
+        if (c === ']') {
+          inClass = false;
+          if (negatedClass) negated.push([out.length, START + END]);
+          out += c;
+          continue;
+        }
         if (c === '[') { out += '\\['; continue; }
         out += c === '-' || c === '^' ? c : escapeRegExp(c, true);
         continue;
@@ -1406,7 +1472,8 @@ export function translateFormulaBody(source, options = {}) {
       if (c === '[') {
         inClass = true;
         out += '[';
-        if (pattern[i + 1] === '^') { out += '^'; i++; unitSensitive = true; }
+        negatedClass = pattern[i + 1] === '^';
+        if (negatedClass) { out += '^'; i++; unitSensitive = true; }
         if (pattern[i + 1] === ']') { reason('regex', node, 'an empty character class'); return null; }
         continue;
       }
@@ -1436,8 +1503,18 @@ export function translateFormulaBody(source, options = {}) {
       }
       if (c === '}' || c === ']') { out += `\\${c}`; continue; }
       if ((c === '*' || c === '+' || c === '?') && pattern[i + 1] === '?') { reason('regex', node, 'a lazy quantifier'); return null; }
-      if (c === '^' || c === '$') { anchored = true; out += SENTINEL; continue; }
-      if (c === '.') { out += '[^\\n\\r  ]'; unitSensitive = true; continue; }
+      if (c === '^' || c === '$') {
+        anchored = true;
+        anchors.push([out.length, c === '^' ? START : END]);
+        continue;
+      }
+      if (c === '.') {
+        out += '[^\\n\\r\u2028\u2029';
+        negated.push([out.length, START + END]);
+        out += ']';
+        unitSensitive = true;
+        continue;
+      }
       out += c;
     }
     const ignoreCase = flags.includes('i');
@@ -1446,17 +1523,21 @@ export function translateFormulaBody(source, options = {}) {
       reason('regex', node, 'a case-insensitive pattern with capitals in it');
       return null;
     }
+    const rewritten = anchored ? marked(out, [...anchors, ...negated].sort((a, b) => a[0] - b[0])) : out;
+    let emptyMatch;
     try {
-      if (new RegExp(`^(?:${out})$`, 'u').test('')) { reason('regex', node, 'a pattern that matches the empty text, which the query refuses to replace'); return null; }
+      new RegExp(rewritten, 'u');
+      // read with its anchors as the zero-width assertions they are: whether it can match the empty text
+      emptyMatch = new RegExp(`^(?:${out})$`, 'u').test('');
     }
     catch {
       reason('regex', node, 'a pattern the rewrite could not read');
       return null;
     }
-    // a pattern anchored at the start, or both ends, matches once
-    const singleMatch = anchored && !/\|/.test(out);
+    // it matches at most once where a ^ begins it or a $ ends it, and it has no alternation
+    const singleMatch = (pattern.startsWith('^') || /(?:^|[^\\])(?:\\\\)*\$$/.test(pattern)) && !out.includes('|');
     const one = ONE_UNIT_ATOM.exec(pattern);
-    return { pattern: out, anchored, ignoreCase, singleMatch, unitSensitive, oneUnit: one ? { plus: one[1] === '+' } : null };
+    return { pattern: rewritten, anchored, ignoreCase, emptyMatch, singleMatch, unitSensitive, oneUnit: one ? { plus: one[1] === '+' } : null };
   }
 
   //#endregion
@@ -1860,8 +1941,9 @@ function readOptions(options) {
   }
   const locales = options.locales ?? {};
   for (const [tag, l] of Object.entries(locales)) {
-    if (!l || typeof l.decimalFormat !== 'string' || typeof l.grouping !== 'string' || typeof l.decimal !== 'string')
-      throw new TypeError(`locale '${tag}' must be { decimalFormat, grouping, decimal, currencies?, nan? }`);
+    if (!l || typeof l.decimalFormat !== 'string' || typeof l.grouping !== 'string' || typeof l.decimal !== 'string'
+      || (l.minimumGroupingDigits !== undefined && !(Number.isSafeInteger(l.minimumGroupingDigits) && l.minimumGroupingDigits >= 1)))
+      throw new TypeError(`locale '${tag}' must be { decimalFormat, grouping, decimal, currencies?, nan?, minimumGroupingDigits? }`);
   }
   return {
     argument: /** @type {string} */ (name(options.argument, 'argument', 'row')),
@@ -1948,6 +2030,17 @@ function renameVariables(q, renames) {
   return q;
 }
 
+/** A text with each mark's text put in at its position (the positions ascending). @param {string} text @param {[number, string][]} marks */
+function marked(text, marks) {
+  let out = '';
+  let from = 0;
+  for (const [at, insert] of marks) {
+    out += text.slice(from, at) + insert;
+    from = at;
+  }
+  return out + text.slice(from);
+}
+
 /**
  * Escape a text for an I-Regexp. A dollar sign has no I-Regexp escape: it is
  * written as the class `[$]`.
@@ -1964,9 +2057,9 @@ function escapeRegExp(text, inClass = false) {
  */
 function trim(q, which) {
   const space = `[${JS_SPACE}]*`;
-  const end = which === 'trimStart' ? q : { $replace: [{ $concat: [q, SENTINEL] }, `${space}${SENTINEL}`, ''] };
+  const end = which === 'trimStart' ? q : { $replace: [{ $concat: [q, END] }, `${space}${END}`, ''] };
   if (which === 'trimEnd') return end;
-  return { $replace: [{ $concat: [SENTINEL, end] }, `${SENTINEL}${space}`, ''] };
+  return { $replace: [{ $concat: [END, end] }, `${END}${space}`, ''] };
 }
 
 /**
@@ -1978,8 +2071,9 @@ function trim(q, which) {
  * @property {string | null} [explain] - the explanation helper's name (default `because`)
  * @property {string | null} [explanationMember] - a returned object literal whose one member has
  *   this name is an explanation, its value the text (default none)
- * @property {Record<string, { decimalFormat: string, grouping: string, decimal: string, currencies?: Record<string, string>, nan?: string }>} [locales]
- *   the languages number formatting may name, each with the decimal format registered for it and its currency pictures
+ * @property {Record<string, { decimalFormat: string, grouping: string, decimal: string, currencies?: Record<string, string>, nan?: string, minimumGroupingDigits?: number }>} [locales]
+ *   the languages number formatting may name, each with the decimal format registered for it, its currency pictures,
+ *   and the fewest digits the leftmost group of a grouped number holds (default 1; Spanish 2: 1234, but 12.345)
  */
 /**
  * @typedef {Object} HelperMapping

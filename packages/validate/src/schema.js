@@ -101,8 +101,10 @@ function compileRecursiveRef(schemaObj, jsonSchema) {
 
   // Get the base URI for resolving the reference
   // This is the effective base URI of the schema containing $recursiveRef
-  // (accounts for $id of containing schemas)
-  const baseUri = schemaObj.baseUri;
+  // (accounts for $id of containing schemas); a schema reached through a
+  // pointer `$ref` resolved on first use has none of its own, and resolves
+  // against its own location, as `compileValidator` does
+  const baseUri = schemaObj.baseUri || schemaObj.path;
   
   // Resolve the reference to find the initial target URI
   // For "#", this resolves against the baseUri
@@ -162,7 +164,10 @@ function compileDynamicAnchorRef(schemaObj, jsonSchema) {
   const ref = jsonSchema.$dynamicRef;
   const addError = schemaObj.createErrorHandler(ref, '$dynamicRef');
 
-  const baseUri = schemaObj.baseUri;
+  // a schema reached through a pointer `$ref` resolved on first use has no
+  // base URI of its own: it resolves against its own location, as
+  // `compileValidator` does
+  const baseUri = schemaObj.baseUri || schemaObj.path;
   const { id: initialTargetUri, fragment: anchorName } = createJsonPointer(ref, baseUri);
 
   // Pointer fragments resolve statically, regardless of whether the reference

@@ -947,7 +947,7 @@ export interface TransactionScopeOptions {
 
 /** A transaction's retry policy: `attempts` 1–32 (1 is no retry); the
  * backoff between attempts is full jitter between `baseMs` (default 5)
- * and `maxMs` (default 250). */
+ * and `maxMs` (default 250, or `baseMs` when that is larger). */
 export interface TransactionRetry {
   attempts: number;
   baseMs?: number;

@@ -5,9 +5,10 @@ import { semanticKey } from '@jarenjs/core/object';
 import { compileJsonQuery } from '../query/index.js';
 import { validateDateNames, validateDecimalFormats } from '../query/normalize.js';
 import { canonicalizeJson } from '../canonical.js';
-import { FormulaError, snapshot, credit } from './shared.js';
+import { FormulaError, causeMessage, formulaMessage, snapshot, credit } from './shared.js';
 
 export { FormulaError };
+export { formulaMessagesEn } from './messages.js';
 
 /**
  * @typedef {object} FormulaOptions
@@ -30,44 +31,47 @@ export { FormulaError };
 export function formulaDocument(value) {
   let doc;
   try { doc = snapshot(value); }
-  catch (cause) { throw new FormulaError('JQ0013', 'profile must be JSON', value?.id ?? '', '', cause); }
-  const fail = (reason, path) => { throw new FormulaError('JQ0013', reason, doc?.id ?? '', path); };
-  if (doc === null || typeof doc !== 'object' || Array.isArray(doc)) fail('profile must be an object', '');
-  if (doc.$formula !== '1') fail('unsupported language version', '/$formula');
-  for (const key of ['id', 'revision']) if (typeof doc[key] !== 'string' || !doc[key] || doc[key].length > 256) fail(`${key} must be nonempty and at most 256 characters`, `/${key}`);
-  if (!Object.hasOwn(doc, 'expression')) fail('expression is required', '/expression');
-  if (doc.resultMode !== undefined && !['value', 'outcome'].includes(doc.resultMode)) fail('unknown result mode', '/resultMode');
-  if (doc.bindings !== undefined && (doc.bindings === null || typeof doc.bindings !== 'object' || Array.isArray(doc.bindings))) fail('bindings must be an object', '/bindings');
-  if (Object.hasOwn(doc.bindings ?? {}, 'computed') || Object.hasOwn(doc.bindings ?? {}, 'context')) fail('computed/context are reserved bindings', '/bindings');
-  if (doc.helpers !== undefined && !Array.isArray(doc.helpers)) fail('helpers must be an array', '/helpers');
+  catch (cause) { throw new FormulaError('JQ0013', formulaMessage('query/formula/profile-json'), value?.id ?? '', '', cause); }
+  const fail = (/** @type {string} */ messageId, /** @type {string} */ path, params = {}) => {
+    throw new FormulaError('JQ0013', formulaMessage(messageId, params), doc?.id ?? '', path);
+  };
+  if (doc === null || typeof doc !== 'object' || Array.isArray(doc)) fail('query/formula/profile-object', '');
+  if (doc.$formula !== '1') fail('query/formula/profile-version', '/$formula');
+  for (const key of ['id', 'revision']) if (typeof doc[key] !== 'string' || !doc[key] || doc[key].length > 256) fail('query/formula/profile-identity', `/${key}`, { member: key });
+  if (!Object.hasOwn(doc, 'expression')) fail('query/formula/profile-expression', '/expression');
+  if (doc.resultMode !== undefined && !['value', 'outcome'].includes(doc.resultMode)) fail('query/formula/profile-result-mode', '/resultMode');
+  if (doc.bindings !== undefined && (doc.bindings === null || typeof doc.bindings !== 'object' || Array.isArray(doc.bindings))) fail('query/formula/profile-bindings', '/bindings');
+  if (Object.hasOwn(doc.bindings ?? {}, 'computed') || Object.hasOwn(doc.bindings ?? {}, 'context')) fail('query/formula/profile-reserved', '/bindings');
+  if (doc.helpers !== undefined && !Array.isArray(doc.helpers)) fail('query/formula/profile-helpers', '/helpers');
   const names = new Set();
   for (const [i, ref] of (doc.helpers ?? []).entries()) {
-    if (!ref || typeof ref.name !== 'string' || !ref.name || typeof ref.version !== 'string' || !ref.version || names.has(ref.name)) fail('unique helper name and version required', `/helpers/${i}`);
+    if (!ref || typeof ref.name !== 'string' || !ref.name || typeof ref.version !== 'string' || !ref.version || names.has(ref.name)) fail('query/formula/profile-helper', `/helpers/${i}`);
     names.add(ref.name);
   }
-  if (doc.packs !== undefined && !Array.isArray(doc.packs)) fail('packs must be an array', '/packs');
+  if (doc.packs !== undefined && !Array.isArray(doc.packs)) fail('query/formula/profile-packs', '/packs');
   const packs = new Set();
   for (const [i, ref] of (doc.packs ?? []).entries()) {
-    if (!ref || typeof ref.name !== 'string' || !ref.name || typeof ref.version !== 'string' || !ref.version || packs.has(ref.name)) fail('unique pack name and version required', `/packs/${i}`);
+    if (!ref || typeof ref.name !== 'string' || !ref.name || typeof ref.version !== 'string' || !ref.version || packs.has(ref.name)) fail('query/formula/profile-pack', `/packs/${i}`);
     packs.add(ref.name);
   }
   return doc;
 }
 
-/** Extract conservative top-level field dependencies from the normalized Query AST. */
-function fields(root) {
+/** Extract conservative top-level field dependencies from the normalized Query AST. @param {any} root @param {string} formulaId */
+function fields(root, formulaId) {
+  const unnamed = (/** @type {any} */ node) => new FormulaError('JQ0015', formulaMessage('query/formula/computed-unnamed'), formulaId, `/expression${node.docPath}`);
   const source = new Set();
   const computed = new Set();
   let all = false;
   function visit(node) {
     if (!node || typeof node !== 'object') return;
     if (node.kind === 'var' && node.name === '$') all = true;
-    if (node.kind === 'var' && node.name === 'computed') throw new FormulaError('JQ0015', 'computed references require a named target', '', node.docPath);
+    if (node.kind === 'var' && node.name === 'computed') throw unnamed(node);
     if (node.kind === 'path' && (node.name === '$' || node.name === 'computed')) {
       const first = node.segments[0];
       const name = first && !first.descendant && first.selectors.length === 1 && first.selectors[0].kind === 'name' ? first.selectors[0].name : null;
       if (node.name === 'computed') {
-        if (name === null) throw new FormulaError('JQ0015', 'computed references require a named target', '', node.docPath);
+        if (name === null) throw unnamed(node);
         computed.add(name);
       }
       else if (name === null || !node.singular) all = true;
@@ -92,7 +96,7 @@ function outcome(value, doc) {
     || value.kind === 'skip'
     || value.kind === 'explanation' && typeof value.text === 'string'
     || value.kind === 'error' && typeof value.message === 'string');
-  if (!valid || Object.keys(value).some((key) => !keys[value.kind].includes(key))) throw new FormulaError('JQ2014', 'invalid tagged outcome', doc.id, '/expression');
+  if (!valid || Object.keys(value).some((key) => !keys[value.kind].includes(key))) throw new FormulaError('JQ2014', formulaMessage('query/formula/outcome-invalid'), doc.id, '/expression');
   return snapshot(value);
 }
 
@@ -123,7 +127,7 @@ export function createFormulaCompiler(options = {}) {
       const helper = Object.hasOwn(options.helpers ?? {}, ref.name) ? options.helpers[ref.name] : null;
       if (!helper || helper.version !== ref.version || helper.trust !== 'pure' || typeof helper.run !== 'function'
         || !Number.isFinite(helper.cost) || helper.cost <= 0)
-        throw new FormulaError('JQ0014', `missing/incompatible pure helper ${ref.name}@${ref.version}`, doc.id, `/helpers/${i}`);
+        throw new FormulaError('JQ0014', formulaMessage('query/formula/helper-missing', { name: ref.name, version: ref.version }), doc.id, `/helpers/${i}`);
       functions[ref.name] = helper.run;
       capabilityKeys.push([ref.name, ref.version, helper.cost, identity(helper.run)]);
     }
@@ -132,7 +136,7 @@ export function createFormulaCompiler(options = {}) {
     for (const [i, ref] of (doc.packs ?? []).entries()) {
       const supplied = options.packs?.packs?.().find((known) => known.name === ref.name) ?? null;
       if (!supplied || supplied.version !== ref.version)
-        throw new FormulaError('JQ0014', `missing/incompatible operator pack ${ref.name}@${ref.version}`, doc.id, `/packs/${i}`);
+        throw new FormulaError('JQ0014', formulaMessage('query/formula/pack-missing', { name: ref.name, version: ref.version }), doc.id, `/packs/${i}`);
       packNames.push(ref.name);
       capabilityKeys.push(['pack', ref.name, ref.version, identity(options.packs)]);
     }
@@ -140,14 +144,14 @@ export function createFormulaCompiler(options = {}) {
     // a helper named like a function of a listed pack would shadow one or the other: refused, not resolved
     for (const [i, ref] of (doc.helpers ?? []).entries()) {
       if (Object.hasOwn(packOptions.functions ?? {}, ref.name))
-        throw new FormulaError('JQ0014', `helper ${ref.name} has the name of a function of a listed operator pack`, doc.id, `/helpers/${i}`);
+        throw new FormulaError('JQ0014', formulaMessage('query/formula/helper-shadows', { name: ref.name }), doc.id, `/helpers/${i}`);
     }
     const schemas = {};
     for (const key of ['inputSchema', 'resultSchema']) if (doc[key] !== undefined) {
       const ref = doc[key];
       const entry = ref && Object.hasOwn(options.schemas ?? {}, ref.id) ? options.schemas[ref.id] : null;
       if (!ref || typeof ref.version !== 'string' || !entry || entry.version !== ref.version || typeof options.compileTypeTest !== 'function')
-        throw new FormulaError('JQ0014', 'missing/incompatible schema or type-test compiler', doc.id, `/${key}`);
+        throw new FormulaError('JQ0014', formulaMessage('query/formula/schema-missing'), doc.id, `/${key}`);
       schemas[key] = snapshot(entry.schema);
     }
     const key = semanticKey([doc, capabilityKeys, schemas, options.compileTypeTest ? identity(options.compileTypeTest) : null, options.limits ?? {},
@@ -160,7 +164,7 @@ export function createFormulaCompiler(options = {}) {
         tests[name] = options.compileTypeTest(schemas[name], `/${name}`);
         if (typeof tests[name] !== 'function') throw new TypeError('expected a predicate');
       }
-      catch (cause) { throw new FormulaError('JQ0014', 'schema rejected', doc.id, `/${name}`, cause); }
+      catch (cause) { throw new FormulaError('JQ0014', formulaMessage('query/formula/schema-rejected'), doc.id, `/${name}`, cause); }
     }
     let query;
     try {
@@ -170,26 +174,24 @@ export function createFormulaCompiler(options = {}) {
         externals: [...Object.keys(doc.bindings ?? {}), 'computed', 'context'], analysis: true,
         limits: options.limits ?? { steps: 10000, depth: 64, resultItems: 10000, sequenceItems: 10000 } });
     }
-    catch (cause) { throw new FormulaError(cause.code ?? 'JQ0013', cause.reason ?? cause.message, doc.id, `/expression${cause.docPath ?? ''}`, cause); }
-    let dependencies;
-    try { dependencies = fields(query.analysis.root); }
-    catch (cause) { throw new FormulaError('JQ0015', cause.reason ?? cause.message, doc.id, `/expression${cause.docPath}`, cause); }
+    catch (cause) { throw new FormulaError(cause.code ?? 'JQ0013', causeMessage(cause), doc.id, `/expression${cause.docPath ?? ''}`, cause); }
+    const dependencies = fields(query.analysis.root, doc.id);
     const compiled = Object.freeze({ doc, key, dependencies, queryDependencies: query.dependencies,
       evaluate(input, context = {}, computed = {}) {
         try {
           const data = snapshot(input);
-          if (tests.inputSchema && !tests.inputSchema(data)) throw new FormulaError('JQ2013', 'input schema failed', doc.id, '/inputSchema');
+          if (tests.inputSchema && !tests.inputSchema(data)) throw new FormulaError('JQ2013', formulaMessage('query/formula/input-schema'), doc.id, '/inputSchema');
           const items = query.items(data, snapshot({ ...doc.bindings, context, computed }));
           if (items.length === 0) return snapshot({ kind: 'empty', values: [] });
           const result = items.length === 1 ? items[0] : items;
           const answer = doc.resultMode === 'outcome' ? outcome(result, doc) : snapshot({ kind: 'value', value: result });
           if (tests.resultSchema && Object.hasOwn(answer, 'value') && !tests.resultSchema(answer.value))
-            throw new FormulaError('JQ2013', 'result schema failed', doc.id, '/resultSchema');
+            throw new FormulaError('JQ2013', formulaMessage('query/formula/result-schema'), doc.id, '/resultSchema');
           return answer;
         }
         catch (cause) {
           if (cause instanceof FormulaError) throw cause;
-          throw new FormulaError(cause.code ?? 'JQ2013', cause.reason ?? cause.message, doc.id, `/expression${cause.docPath ?? ''}`, cause);
+          throw new FormulaError(cause.code ?? 'JQ2013', causeMessage(cause), doc.id, `/expression${cause.docPath ?? ''}`, cause);
         }
       },
     });
@@ -212,7 +214,9 @@ export function compileFormula(doc, options = {}) {
  * value}`, `{kind:'empty', values:[]}`, `{kind:'skip'}`, `{kind:'explanation',
  * text, value?}` or `{kind:'error'}`). Outcomes compare as canonical JSON;
  * two errors agree whatever their messages, since a JavaScript TypeError and
- * a query refusal word the same failure differently.
+ * a query refusal word the same failure differently. An expected outcome
+ * that is not JSON (`NaN`, `Infinity`) is refused before any row runs: a
+ * `JQ2013` FormulaError whose `docPath` (`/i/…`) names the row.
  * @param {{ evaluate: (row: any, context?: any) => any }} formula - a compiled formula
  * @param {any[]} rows
  * @param {any[]} expected
@@ -227,6 +231,14 @@ export function checkFormulaParity(formula, rows, expected, options = {}) {
     throw new TypeError('rows and expected outputs must be arrays of one length');
   if (rows.length > maxRows) throw new TypeError('parity row limit exceeded');
   const shape = (/** @type {any} */ outcome) => (outcome?.kind === 'error' ? '{"kind":"error"}' : canonicalizeJson(outcome));
+  // every expected outcome is JSON before any row runs: one that is not is the host's error, named by its row
+  const wanted = expected.map((outcome, index) => {
+    try { return shape(outcome); }
+    catch (cause) {
+      throw new FormulaError('JQ2013', formulaMessage('query/formula/parity-expected', { index }), /** @type {any} */ (formula).doc?.id ?? '',
+        `/${index}${/** @type {any} */ (cause)?.dataPath ?? ''}`, cause);
+    }
+  });
   let agree = 0;
   const mismatches = [];
   let omitted = 0;
@@ -234,7 +246,7 @@ export function checkFormulaParity(formula, rows, expected, options = {}) {
     let actual;
     try { actual = formula.evaluate(row, options.context ?? {}); }
     catch (error) { actual = { kind: 'error', code: /** @type {any} */ (error)?.code ?? null }; }
-    if (shape(actual) === shape(expected[index])) { agree++; continue; }
+    if (shape(actual) === wanted[index]) { agree++; continue; }
     if (mismatches.length < maxMismatches) mismatches.push({ index, expected: expected[index], actual });
     else omitted++;
   }

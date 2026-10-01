@@ -22,6 +22,7 @@ import {
 import { formsMessagesEn } from '@jarenjs/forms';
 import { contractMessagesEn } from '@jarenjs/contract';
 import { compileJsonQuery, queryMessagesEn, renderQueryMessage } from '@jarenjs/json';
+import { compileFormula, formulaMessagesEn } from '@jarenjs/json/formula';
 import { compileMessageTemplate } from '@jarenjs/core/message';
 
 const compiled = compileMessageCatalog(nl);
@@ -47,6 +48,18 @@ const NUMBER_SAMPLE_PARAMS = Object.fromEntries(Object.keys(numberMessagesEn).ma
 const QUERY_SAMPLE_PARAMS = Object.fromEntries(Object.entries(queryMessagesEn).map(([key, template]) =>
   [key, Object.fromEntries(compileMessageTemplate(template).parameters.map((name) => [name, `<${name}>`]))]));
 
+/** The formula msgids are derived the same way. */
+const FORMULA_SAMPLE_PARAMS = Object.fromEntries(Object.entries(formulaMessagesEn).map(([key, template]) =>
+  [key, Object.fromEntries(compileMessageTemplate(template).parameters.map((name) => [name, `<${name}>`]))]));
+
+/**
+ * A template that carries no words of its own (only placeholders, operator
+ * names and punctuation, or the literal null) is the same in every language.
+ * @param {any} template
+ */
+const wordless = (template) => template === 'null'
+  || !/\p{L}/u.test(String(template).replace(/\{[a-z]+\}/gi, '').replace(/\$[a-z-]+/gi, ''));
+
 /** The placeholder names of a template, sorted. @param {any} template */
 const placeholders = (template) => [...compileMessageTemplate(String(template)).parameters].sort();
 
@@ -55,6 +68,7 @@ const SAMPLE_PARAMS = {
   ...DATE_SAMPLE_PARAMS,
   ...NUMBER_SAMPLE_PARAMS,
   ...QUERY_SAMPLE_PARAMS,
+  ...FORMULA_SAMPLE_PARAMS,
   type: { type: 'string' },
   required: { missingProperty: 'name' },
   minimum: { limit: 10, comparison: '>=' },
@@ -172,6 +186,10 @@ describe('@jarenjs/locales nl', () => {
       assert.ok(nlKeys.has(key), `nl is missing query key '${key}'`);
       assert.deepStrictEqual(placeholders(nl[key]), placeholders(queryMessagesEn[key]), `nl ${key} placeholders`);
     }
+    for (const key of Object.keys(formulaMessagesEn)) {
+      assert.ok(nlKeys.has(key), `nl is missing formula key '${key}'`);
+      assert.deepStrictEqual(placeholders(nl[key]), placeholders(formulaMessagesEn[key]), `nl ${key} placeholders`);
+    }
     assert.ok(nlKeys.has('x-form/assert'));
   });
 
@@ -184,6 +202,24 @@ describe('@jarenjs/locales nl', () => {
     assert.strictEqual(dutch, 'een tekst (string) verwacht, een getal gekregen');
     assert.strictEqual(dutch, nl['query/expected-string'].replace('{got}', nl['query/item/number']));
     assert.notStrictEqual(dutch, error.reason);
+  });
+
+  it('translates every query and formula message that carries words, copying none from English', () => {
+    const copied = [...Object.entries(queryMessagesEn), ...Object.entries(formulaMessagesEn)]
+      .filter(([key, english]) => !wordless(english) && nl[key] === english).map(([key]) => key);
+    assert.deepStrictEqual(copied, []);
+  });
+
+  it('renders a formula error in Dutch: its own message, and a query error raised inside the formula', () => {
+    let own;
+    try { compileFormula({ $formula: '1', id: 'prijs', revision: '1', expression: 1, helpers: [{ name: 'round2', version: '1' }] }); }
+    catch (thrown) { own = thrown; }
+    assert.strictEqual(own.reason, 'prijs: missing/incompatible pure helper round2@1');
+    assert.strictEqual(renderQueryMessage(own, nl), 'prijs: de pure hulpfunctie round2@1 ontbreekt of is niet compatibel');
+    let inner;
+    try { compileFormula({ $formula: '1', id: 'f', revision: '1', expression: { $nope: 1 } }); }
+    catch (thrown) { inner = thrown; }
+    assert.strictEqual(renderQueryMessage(inner, nl), "f: onbekende operator '$nope' (bedoelde je '$some'?)");
   });
 
   it('renders the plural pair correctly (the demonstration case)', () => {

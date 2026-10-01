@@ -73,6 +73,63 @@ describe('PostgreSQL session ownership', { skip: !url && 'JAREN_PG_URL is not se
       'the pooled session is writable again');
     await pool.query('DROP TABLE "' + schema + '"."docs"');
   });
+  it('a transaction whose body caught a refused write is refused at COMMIT, and none of its writes persist', async () => {
+    const { openStore } = await import('@jarenjs/db');
+    const model = { $model: '0.1', collections: { caught: { schema: { type: 'object' }, key: '/id', indexes: [] } } };
+    const store = await openStore(model, { driver: postgresDriver(pool, { schema }) });
+    try {
+      await store.collection('caught').put({ id: 'dup' });
+      await assert.rejects(store.transaction(async (tx) => {
+        await tx.collection('caught').put({ id: 'a' });
+        await assert.rejects(Promise.resolve(tx.collection('caught').insert({ id: 'dup' })), { code: 'JD2001' });
+        return 'caught';
+      }), (/** @type {any} */ e) => e.code === 'JD2088' && e.class === 'aborted' && e.retryable === false);
+      assert.equal(await store.collection('caught').get('a'), undefined, 'the write before the refusal was not committed');
+      // catching and continuing takes a nested transaction
+      assert.equal(await store.transaction(async (tx) => {
+        await tx.collection('caught').put({ id: 'b' });
+        await assert.rejects(Promise.resolve(tx.transaction((inner) => inner.collection('caught').insert({ id: 'dup' }))),
+          { code: 'JD2001' });
+        return 'continued';
+      }), 'continued');
+      assert.deepEqual(await store.collection('caught').get('b'), { id: 'b' });
+    }
+    finally { await store.close(); }
+    await pool.query('DROP TABLE "' + schema + '"."caught"');
+  });
+  it('a lookup by text that is no number on a numeric key names no row, and spends no transaction', async () => {
+    const { openStore } = await import('@jarenjs/db');
+    const model = {
+      $model: '0.1',
+      collections: { nums: { schema: { type: 'object', properties: { id: { type: 'integer' } }, required: ['id'] }, key: '/id', indexes: [] } },
+      entities: { Doc: { schema: { type: 'object', required: ['id'], properties: { id: { type: 'integer', 'x-entity': { key: true } }, t: { type: 'string' } } } } },
+    };
+    const store = await openStore(model, { driver: postgresDriver(pool, { schema }) });
+    try {
+      const nums = store.collection('nums');
+      await nums.put({ id: 7 });
+      for (const key of ['abc', 'NaN', '0x7', '1_000']) {
+        assert.equal(await nums.get(key), undefined, key);
+        assert.equal(await nums.delete(key), false, key);
+        await assert.rejects(Promise.resolve(nums.patch(key, [{ op: 'add', path: '/x', value: 1 }])), { code: 'JD2006' }, key);
+      }
+      assert.deepEqual(await nums.get(' 7'), { id: 7 });
+      const docs = store.entity('Doc');
+      await docs.create({ id: 7, t: 'x' });
+      assert.equal(await docs.get('abc'), undefined);
+      assert.equal(await docs.delete('abc'), false);
+      await assert.rejects(Promise.resolve(docs.update('abc', { t: 'y' })), { code: 'JD2006' });
+      // inside a transaction the lookup leaves the transaction usable
+      await store.transaction(async (tx) => {
+        assert.equal(await tx.collection('nums').get('abc'), undefined);
+        await tx.collection('nums').put({ id: 8 });
+      });
+      assert.deepEqual(await nums.get(8), { id: 8 });
+    }
+    finally { await store.close(); }
+    await pool.query('DROP TABLE "' + schema + '"."nums"');
+    await pool.query('DROP TABLE "' + schema + '"."Doc"');
+  });
   it('preserves named buffered cached-plan refusal in blocks and nested savepoints, then recovers after rollback', async () => {
     const connection = await postgresDriver(pool, { schema, cursorMode: 'buffered' }).open();
     try {

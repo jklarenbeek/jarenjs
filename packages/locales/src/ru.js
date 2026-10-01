@@ -81,7 +81,7 @@ const typeName = makeTypeNamer(TYPE_NAMES);
  * every `form/*` key of forms' `formsMessagesEn`, `x-form/assert`, the
  * `JQ2xxx` codes reachable through `$query`, every `contract/*`
  * wire-error msgid of `@jarenjs/contract`'s `contractMessagesEn`, and
- * every `query/*` message of `@jarenjs/json`'s `queryMessagesEn`.
+ * every `query/*` message of `@jarenjs/json`'s `queryMessagesEn` and every message of its `formulaMessagesEn`.
  * @type {Record<string, string | ((params: any, error?: object) => string)>}
  */
 export const ru = {
@@ -437,6 +437,49 @@ export const ru = {
   'query/lexical-result': 'лексический провайдер вернул недопустимый или неполный результат',
   //#endregion
 
+  //#region @jarenjs/json formulas (the messages of formulaMessagesEn)
+  'query/formula/query': '{formulaId}: {message}',
+  'query/formula/detail': '{formulaId}: {detail}',
+  'query/formula/profile-json': '{formulaId}: профиль должен быть в формате JSON',
+  'query/formula/profile-object': '{formulaId}: профиль должен быть объектом',
+  'query/formula/profile-version': '{formulaId}: неподдерживаемая версия языка',
+  'query/formula/profile-identity': '{formulaId}: {member} не должно быть пустым и должно содержать не более 256 символов',
+  'query/formula/profile-expression': '{formulaId}: выражение обязательно',
+  'query/formula/profile-result-mode': '{formulaId}: неизвестный режим результата',
+  'query/formula/profile-bindings': '{formulaId}: bindings должно быть объектом',
+  'query/formula/profile-reserved': '{formulaId}: computed и context — зарезервированные привязки',
+  'query/formula/profile-helpers': '{formulaId}: helpers должно быть массивом',
+  'query/formula/profile-helper': '{formulaId}: у каждой вспомогательной функции должны быть уникальное имя и версия',
+  'query/formula/profile-packs': '{formulaId}: packs должно быть массивом',
+  'query/formula/profile-pack': '{formulaId}: у каждого пакета должны быть уникальное имя и версия',
+  'query/formula/helper-missing': '{formulaId}: чистая вспомогательная функция {name}@{version} отсутствует или несовместима',
+  'query/formula/pack-missing': '{formulaId}: пакет операторов {name}@{version} отсутствует или несовместим',
+  'query/formula/helper-shadows': '{formulaId}: вспомогательная функция {name} носит имя функции из указанного пакета операторов',
+  'query/formula/schema-missing': '{formulaId}: схема или компилятор проверок типа отсутствует или несовместим',
+  'query/formula/schema-rejected': '{formulaId}: схема отклонена',
+  'query/formula/computed-unnamed': '{formulaId}: ссылка на computed должна называть свою цель',
+  'query/formula/computed-cycle': '{formulaId}: вычисляемые зависимости образуют цикл',
+  'query/formula/computed-unknown': '{formulaId}: неизвестная вычисляемая цель',
+  'query/formula/targets-invalid': '{formulaId}: недопустимый список целей',
+  'query/formula/target-identity': '{formulaId}: у каждой цели должны быть уникальный идентификатор и логическое значение enabled',
+  'query/formula/target-schemas': '{formulaId}: схемы цели должны быть объектом вида id -> {{version, schema}',
+  'query/formula/target-schema-clash': "{formulaId}: две разные схемы под одним id '{id}'",
+  'query/formula/batch-limit': '{formulaId}: превышен предел строк или ячеек пакетной обработки',
+  'query/formula/row-identity': '{formulaId}: у каждой строки должен быть уникальный постоянный ID',
+  'query/formula/input-schema': '{formulaId}: входные данные не соответствуют входной схеме',
+  'query/formula/result-schema': '{formulaId}: результат не соответствует схеме результата',
+  'query/formula/outcome-invalid': '{formulaId}: недопустимый помеченный результат',
+  'query/formula/parity-expected': '{formulaId}: ожидаемый результат {index} не является JSON',
+  'query/formula/rule-identity': '{formulaId}: правилу нужны идентификатор, цели и доступные для записи поля',
+  'query/formula/rule-field-not-writable': '{formulaId}: целевое поле недоступно для записи',
+  'query/formula/rule-rows': '{formulaId}: требуются ограниченный набор строк и ревизия набора данных',
+  'query/formula/rule-entity-duplicate': '{formulaId}: повторяющийся идентификатор сущности',
+  'query/formula/rule-preview-stale': '{formulaId}: предпросмотр устарел или изменён',
+  'query/formula/rule-selection-duplicate': '{formulaId}: выбор должен содержать уникальные ID изменений',
+  'query/formula/rule-selection-unknown': '{formulaId}: неизвестное выбранное изменение',
+  'query/formula/rule-conflict': '{formulaId}: противоречащие друг другу значения для одного поля',
+  //#endregion
+
   //#region @jarenjs/locales numbers (the decimal format, CLDR as ICU 78.3 ships it)
   'number/decimal-separator': ',',
   'number/grouping-separator': '\u00a0',
@@ -447,5 +490,6 @@ export const ru = {
   'number/exponent-separator': 'E',
   'number/infinity': '∞',
   'number/nan': 'не\u00a0число',
+  'number/minimum-grouping-digits': '1',
   //#endregion
 };

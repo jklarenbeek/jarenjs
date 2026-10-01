@@ -480,6 +480,14 @@ describe('compileContract — every rule has its code and docPath', () => {
     }));
   });
 
+  it('JC0011 — a declared error status is 400–599: a 1xx, 2xx or 3xx would reach the client as an interim head, a success or a redirect', () => {
+    for (const status of [100, 103, 200, 204, 304, 399]) {
+      refuses(one({ kind: 'read', output: true, errors: { e: { status } } }), 'JC0011', '/operations/a/errors/e/status', /400–599/);
+    }
+    const edges = compileContract(one({ kind: 'read', output: true, errors: { low: { status: 400 }, high: { status: 599 } } }));
+    assert.deepStrictEqual([edges.operations.a.errors.low.status, edges.operations.a.errors.high.status], [400, 599]);
+  });
+
   it('JC0011 — errors', () => {
     refuses(one({ kind: 'read', output: true, errors: [] }), 'JC0011', '/operations/a/errors');
     refuses(one({ kind: 'read', output: true, errors: { Bad: {} } }), 'JC0011', '/operations/a/errors/Bad');

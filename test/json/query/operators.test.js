@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 
 import {
   compileJsonQuery,
+  createQueryAccumulator,
   queryJson,
   JsonQueryRuntimeError,
 } from '@jarenjs/json/query';
@@ -105,6 +106,22 @@ describe('Jaren JSON Query operator library', () => {
     it('should make any NaN item the result NaN (F&O)', () => {
       assert.strictEqual(Number.isNaN(queryJson({ $min: { $seq: [5, NAN, 1] } }, null)), true);
       assert.strictEqual(Number.isNaN(queryJson({ $max: { $seq: [NAN, 5] } }, null)), true);
+    });
+
+    it('should take +0 as the greater and -0 as the lesser of two zeros, in either order, as Math.max and Math.min do', () => {
+      const NEG_ZERO = { $neg: 0 };
+      for (const items of [[NEG_ZERO, 0], [0, NEG_ZERO]]) {
+        assert.ok(Object.is(queryJson({ $max: { $seq: items } }, null), 0), `$max of ${JSON.stringify(items)}`);
+        assert.ok(Object.is(queryJson({ $min: { $seq: items } }, null), -0), `$min of ${JSON.stringify(items)}`);
+      }
+      assert.ok(Object.is(queryJson({ $max: { $seq: [NEG_ZERO, NEG_ZERO] } }, null), -0));
+      assert.ok(Object.is(queryJson({ $min: { $seq: [0, 0] } }, null), 0));
+      for (const order of [[-0, 0], [0, -0]]) {
+        const max = createQueryAccumulator('$max');
+        const min = createQueryAccumulator('$min');
+        for (const item of order) { max.add(item); min.add(item); }
+        assert.ok(Object.is(max.value(), Math.max(...order)) && Object.is(min.value(), Math.min(...order)), `streamed ${order.map((z) => (Object.is(z, -0) ? '-0' : '0'))}`);
+      }
     });
 
     it('should raise JQ2001 for mixed or non-comparable items', () => {

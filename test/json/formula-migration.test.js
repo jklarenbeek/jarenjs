@@ -118,3 +118,21 @@ it('two translated formulas reading different fields share a batch', async () =>
   assert.equal(batch.evaluate([{ id: 2, price: 2.5, quantity: 4 }]).results[0].outcomes.weight.kind, 'empty');
   assert.deepEqual(records[1].differences.map((d) => d.kind), ['nullish-arithmetic', 'nullish-arithmetic']);
 });
+
+it('a conflict whose source is put back returns to the state it had, a change reported once', async () => {
+  const original = { id: 'a', label: 'A', enabled: true, storageVersion: 1, body: 'return row.x + 1;' };
+  const first = await migrateFormulas([original]);
+  const conflict = await migrateFormulas([{ ...original, body: 'return row.x + 2;' }], first.records);
+  assert.deepEqual([conflict.changed, conflict.records[0].state, conflict.records[0].previousState, conflict.records[0].previousReason],
+    [1, 'conflict', 'translated-with-differences', 'differences']);
+  const editedAgain = await migrateFormulas([{ ...original, body: 'return row.x + 3;' }], conflict.records);
+  assert.deepEqual([editedAgain.records[0].state, editedAgain.records[0].previousState], ['conflict', 'translated-with-differences']);
+  const reverted = await migrateFormulas([original], editedAgain.records);
+  assert.deepEqual(reverted.changes, [{ id: 'a', state: 'translated-with-differences' }]);
+  assert.deepEqual(reverted.records, first.records);
+  assert.equal((await migrateFormulas([original], reverted.records)).changed, 0);
+  // a conflict that does not carry the state it had has nothing to return to: it stays a conflict
+  const { previousState: _state, previousReason: _reason, ...bare } = conflict.records[0];
+  const kept = await migrateFormulas([original], [bare]);
+  assert.deepEqual([kept.changed, kept.records[0].state], [0, 'conflict']);
+});

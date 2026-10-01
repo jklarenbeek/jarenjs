@@ -9,16 +9,4 @@
  * shared with every other closed option set in the suite.
  */
 
-export { nearestName, refuseUnknownMembers } from '@jarenjs/core/object';
-
-/**
- * Whether `value` is a plain options object: an object literal or a
- * null-prototype record, never an array, a class instance or a string.
- * @param {unknown} value
- * @returns {value is Record<string, any>}
- */
-export function isPlainOptions(value) {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
-  const proto = Object.getPrototypeOf(value);
-  return proto === Object.prototype || proto === null;
-}
+export { isPlainOptions, nearestName, refuseUnknownMembers } from '@jarenjs/core/object';

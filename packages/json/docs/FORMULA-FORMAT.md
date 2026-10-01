@@ -83,6 +83,15 @@ compile options above. No implicit clock, locale, network or database access is
 supplied. Formula errors carry `formulaId`, `code`
 and an RFC 6901 `docPath`; wrapped Query errors retain their code and point below
 `/expression`. Codes are allocated in the [Query registry](QUERY-FORMAT.md#10-errors).
+A formula error names its sentence as a query error does: `messageId` is a
+message of `formulaMessagesEn` (exported by `@jarenjs/json/formula`, keys
+`query/formula/*`, each `{formulaId}: …`) and `params` holds its values, the
+formula's id among them, so `renderQueryMessage(error, pack)` renders it in a
+`@jarenjs/locales` pack's language. A Query error raised inside the formula keeps
+its own message, a reference in `query/formula/query` (`{formulaId}: {message}`),
+and text another component wrote (a JSON boundary's) rides as
+`query/formula/detail`. `params.reason` is the English, which a catalog without
+the formula's messages renders.
 
 ## Values, outcomes and arithmetic
 
@@ -219,7 +228,7 @@ reads and calls:
 | `skip` | `'SKIP'` | the skip sentinel: returning it, or `undefined`, skips the row, and so does `x ?? SKIP`, `x \|\| SKIP` or `x && SKIP` on that side; the sentinel anywhere else (kept in a name, in an array) is the reason `skip-value` |
 | `explain` | `'because'` | `explain(value, text)` returns an explanation, its text `String(text ?? '')` |
 | `explanationMember` | none | a returned object literal with this one member is an explanation, its value the text |
-| `locales` | none | the languages number formatting may name: `{decimalFormat, grouping, decimal, currencies, nan}`, the decimal format registered under `decimalFormat` and each currency's picture |
+| `locales` | none | the languages number formatting may name: `{decimalFormat, grouping, decimal, currencies, nan, minimumGroupingDigits}`, the decimal format registered under `decimalFormat`, each currency's picture, and the fewest digits the leftmost group of a grouped number holds (default 1; `compileNumberLocale(pack).minimumGroupingDigits` of `@jarenjs/locales`, 2 for Spanish, which writes 1234 but 12.345): a value whose rounded integer part has fewer digits than a group and that many is written without grouping separators |
 
 Using the skip sentinel or an explanation makes the formula an outcome-mode one.
 `options.formula`, when given, is the `FormulaOptions` each translation must
@@ -269,10 +278,10 @@ present is named where it matters:
 | `regex-subset` | a regular expression rewritten to an I-Regexp that cannot say the same (`\b`) |
 | `regex-coercion` | a regular expression's test of a value that may be undefined: JavaScript tests the text `"undefined"`, the query tests nothing |
 | `case-fold` | a case-insensitive test: JavaScript folds case by its own table (the dotted and dotless i, the final sigma, the Kelvin sign), the query lower-cases the text |
-| `code-units` | text beyond U+FFFF (an emoji is two UTF-16 code units): a pattern's `.`, negated class, `\S`, `\D` or `\W` (but for one such atom replaced away, a run of it, or a test for it), or a character beyond U+FFFF in a pattern, matches one code unit in JavaScript and one character in the query |
+| `code-units` | text beyond U+FFFF (an emoji is two UTF-16 code units): a pattern's `.`, negated class, `\S`, `\D` or `\W` (but for one such atom replaced away, a run of it, or a test for it), or a character beyond U+FFFF in a pattern, matches one code unit in JavaScript and one character in the query; an index into a text (`s[0]`) reads a code unit in JavaScript and a character in the query |
 | `sort-key` | a sort key that may be missing: JavaScript keeps the order, the query sorts it first |
 | `remainder-by-zero` | `%` by zero: JavaScript computes NaN, the query refuses (`JQ2002`) |
-| `number-parse` | `Number(text)`, or a text the body computes used as a number: JavaScript reads `''` as 0 and accepts hex, the query does not |
+| `number-parse` | `Number(text)`, or a text the body computes used as a number: JavaScript reads `''` as 0 and accepts hex, where the query refuses the row (`JQ2001`) |
 | `replacement-pattern` | a computed replacement: JavaScript reads `$&` and `$1` in it |
 | `loose-equality` | `==` where a side's type is not known: JavaScript converts between types (`'1' == 1`, `'' == 0`) |
 | (the host's) | a native helper's own `differences`, at each call |
@@ -281,19 +290,27 @@ Text is measured and ordered as JavaScript measures and orders it, in UTF-16 cod
 units: `.length` counts a character beyond U+FFFF twice, and two texts compare by
 their code units — the query's character order, turned around where, at the first
 difference, one text has a character from U+E000 to U+FFFF and the other one
-beyond U+FFFF.
+beyond U+FFFF. A literal index into a text (`s[0]`) reads its character, and
+nothing past its end, where JavaScript reads a code unit (`code-units`); an index
+into a value the translation cannot tell is text or an array is the reason
+`index`, as `.length` of one is the reason `length`.
 
 Regular expressions are read as JavaScript reads them without the `u` flag (`\p`
 is the letter p, `\u{2}` a `u` twice, a brace that is no quantifier is itself) and
 rewritten exactly where I-Regexp can say the same: `\d`, `\w` and `\s` as their
 classes (`\s` is JavaScript's fixed white-space set), `.` as everything but a line
 terminator, an escaped character as itself (`\$` as the class `[$]`), the anchors
-`^` and `$` marked by a sentinel, and the `i` flag by lower-casing the tested text
-(`case-fold`; a capital in a case-insensitive pattern is a reason). The anchors and
-`trim` mark the ends of a text with the noncharacter U+FFFF, which the text must not
-hold. Groups are kept; lookaround, lazy quantifiers, back references and a legacy
-octal escape are reasons. A `replace` without the `g` flag is translated where its
-pattern matches at most once (anchored, without an alternation). Number formatting
+`^` and `$` as marks of the text's start and end, and the `i` flag by lower-casing
+the tested text (`case-fold`; a capital in a case-insensitive pattern is a reason).
+The anchors mark a text's start with the noncharacter U+FFFE and its end with
+U+FFFF, and `trim` marks its ends with U+FFFF, so the text must hold neither; in an
+anchored pattern `.`, a negated class, `\D`, `\W` and `\S` match every character
+but the two. Groups are kept; lookaround, lazy quantifiers, back references and a
+legacy octal escape are reasons. A `replace` of a pattern that can match the empty
+text (`/^/`, `/\s*$/`, `/x*$/g`) is a reason, with or without the `g` flag:
+JavaScript replaces an empty match, which the query cannot; a `test` of one is
+translated. A `replace` without the `g` flag is translated where its pattern can
+match at most once: a `^` begins it or a `$` ends it, and it has no alternation. Number formatting
 is translated for the languages `options.translate.locales` describes:
 `toLocaleString` with `style`, `currency`, `minimumFractionDigits` and
 `maximumFractionDigits`, written with `$format-number` (QUERY-FORMAT §8.7); a
@@ -329,11 +346,11 @@ Every reason names what stops the translation, with a message:
 | `date` | `new Date()` without exactly one argument |
 | `new` | a `new` other than `new Date(text).getTime()` and `new Intl.NumberFormat(…).format(n)` |
 | `method` | a method outside the subset |
-| `length`, `includes`, `concat` | of a value that could be text or an array |
+| `length`, `includes`, `concat`, `index` | `.length`, `.includes()`, `.concat()` or a literal index (`x[0]`) of a value that could be text or an array |
 | `split` | `.split()` other than its first part by a literal text |
 | `replace` | a replacement function, a computed pattern, a replacement that names the match (`$&`, `$1`), or `replaceAll` of a pattern without the `g` flag |
 | `replace-first` | `.replace()` of the first match, where more than one can match |
-| `regex` | a pattern outside the rewrite: a flag other than `g` and `i`, lookaround, a lazy quantifier, a back reference, a legacy octal escape, a capital in a case-insensitive pattern, a pattern that matches the empty text, `test()` of a `g` pattern kept in a name |
+| `regex` | a pattern outside the rewrite: a flag other than `g` and `i`, lookaround, a lazy quantifier, a back reference, a legacy octal escape, a capital in a case-insensitive pattern, a replaced pattern that can match the empty text, `test()` of a `g` pattern kept in a name |
 | `callback` | a callback other than an arrow of the element (and its index) |
 | `toFixed` | `.toFixed()` of anything but a literal number of digits from 0 to 20 |
 | `locale` | number formatting or case mapping in a language the translation does not describe, whose case rules are its own, or whose tag JavaScript refuses |
@@ -361,6 +378,7 @@ against the JavaScript it replaces:
 | `Number(x.toFixed(2))`, `x >= 0` | `{"$round": [x, 2]}` |
 | `x.toFixed(d)` | `x` rounded on its exact value half away from zero (`$round` of the magnitude, the sign put back), written with the picture `0.00…`, where `x` is below 10^(15 − d) or an integer below 2^53; `{"$string": x}` from 10^21 on; any other `x` refuses the row (`JQ2001`) |
 | `text.length` | `{"$add": [{"$string-length": text}, {"$string-length": {"$replace": [text, "[^\uD800\uDC00-\uDBFF\uDFFF]", ""]}}]}`: UTF-16 code units, a character beyond U+FFFF counted twice |
+| `text[n]`, `n` a literal | `{"$if": [{"$lt": [n, {"$string-length": text}]}, {"$substring": [text, n, 1]}, {"$seq": []}]}`: the character at `n` (`$substring` counts characters from 0), nothing past the end; a code unit in JavaScript (`code-units`) |
 | `list.join(sep)` | `{"$string-join": [{"$for": {"x": list}, "$return": {"$if": [{"$is-null": "$x"}, "", "$x"]}}, sep]}`: a null element is the empty text |
 | `list.map((e) => …)` | `[{"$for": {"e": list}, "$return": …}]`: `$for` takes the array one level deep (QUERY-FORMAT §6.2), so an element that is itself an array stays one element |
 | `x.toLocaleString('nl-NL')` | `{"$format-number": [x, "#.##0,###", "nl"]}` |
@@ -386,7 +404,9 @@ no difference over 200,000 values (the half-cent values, both signs). At every
 digit count from 0 to 20, over 84,000 values from 10^−8 to 10^22 (integers, ties
 and both signs among them), each value in that range agrees and each outside it is
 refused. The three Dutch number formats agree with `Intl.NumberFormat` on ICU 78.3
-over the half-cent values.
+over the half-cent values, and every shipped language's decimal format, described
+with its minimum grouping digits, agrees with it over the values 1000 to 99999 and
+each rounding boundary, for every decimal option set the translation takes.
 
 ### Parity, records and review
 
@@ -397,14 +417,18 @@ shape); the library never runs the original. It returns `{rows, agree, differ,
 mismatches, omittedMismatches}`, at most `maxMismatches` (default 20) mismatches
 listed. Outcomes compare as canonical JSON; two errors agree whatever their
 messages, since a JavaScript TypeError and a query refusal word one failure
-differently. The acceptance corpus (`test/json/formula-corpus.json`, 35 saved
+differently. An expected outcome that is not JSON, a runner's `NaN` or
+`Infinity`, is the host's error: the check refuses it before any row runs
+(`JQ2013`, its `docPath` `/i/…` naming the row and the member). The acceptance corpus (`test/json/formula-corpus.json`, 35 saved
 columns and rules) translates 20 sources exactly, 14 with named differences and
 1 not at all, and agrees with its runner on every row but those made to show a
 named difference.
 
 Migration returns `{records, changes, changed}`. Repeating input reports zero
 changes; missing sources in a later input do not delete records. A changed source
-creates a conflict carrying both the original and current source. Native edits
+creates a conflict carrying both the original and current source, and the state
+and reason the record had (`previousState`, `previousReason`): when the source is
+the original again, the record returns to them, a change reported once. Native edits
 are preserved. SHA-256 identities track source and native content; a record kept
 from an earlier migration stays as it was until its source changes.
 `resolveFormulaMigration(record, native, review, options)` requires a reviewer,
@@ -426,7 +450,11 @@ remaining duplicates are counted. Group/sibling/provenance data is explicit
 
 `preview({rows, datasetRevision, context})` returns a deeply frozen plan with
 SHA-256 `id`, rule ID/revision/document hash, dataset revision, enabled target IDs,
-changes, counts and bounded diagnostics. Every change identifies entity/field,
+changes, counts and bounded diagnostics. A plan's refusals are `JQ2015` formula
+errors whose message names the rule (`query/formula/rule-*`), and a conflict's
+diagnostic carries its message the same way: `message` (English), `messageId`
+`query/formula/rule-conflict` and `params`, which `renderQueryMessage` renders in a
+pack's language. Every change identifies entity/field,
 target IDs, before presence/value, proposed value and any explanation. Equal
 proposals deduplicate; differing proposals for the same entity/field conflict,
 including when one proposal is a no-op. Conflicting locations are omitted from

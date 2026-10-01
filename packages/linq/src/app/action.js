@@ -25,6 +25,7 @@ import { effectDescriptor, readEffects } from '../effect.js';
 import { describeValue } from '../json-boundary.js';
 import { isSchemaBuilder } from '../schema/brand.js';
 import { captureAction } from './capture.js';
+import { refuseConditional } from './conditional.js';
 import { readPatch } from './patch.js';
 
 /** The action brand: how `defineApp` tells a captured action apart. */
@@ -91,12 +92,18 @@ function typeOnly(value, what, types, at) {
  * @param {string} run - the registered handler name (`options.effects[run]`)
  * @param {any} [props] - the handler's `with`
  * @returns {any} the effect declaration
+ * @throws {LinqBuildError} `JL0101` an empty `run`, or a `when()` in the
+ *   props — a value, where a `when()` would put the branch's transition
+ *   object at dispatch
  * @example
  * effect('http', { url: '/api/todos', done: 'todo/loaded' });
  * effect('contract', { op: 'catalog.load', input: x.payload });
  */
 export function effect(run, props = undefined) {
-  return effectDescriptor(run, props, (value) => value);
+  return effectDescriptor(run, props, (value) => {
+    refuseConditional(value, 'effect() props are a value', '/with');
+    return value;
+  });
 }
 
 /** Every transition `transition()` answered: its effects are already read
@@ -113,8 +120,10 @@ const TRANSITIONS = new WeakSet();
  *
  * @param {{ state?: any, patch?: readonly any[], effects?: readonly any[] }} spec
  * @returns {any} the transition, for the action capture to spell
- * @throws {LinqBuildError} `JL0101` a member the pen does not know, or a
- *   patch/effects list that is not one
+ * @throws {LinqBuildError} `JL0101` a member the pen does not know, a
+ *   patch/effects list that is not one, or a `when()` in the state or in a
+ *   patch operation — a value, where a `when()` would put the branch's
+ *   transition object at dispatch
  * @example
  * transition({ patch: [add((st) => st.todos, x.payload)] });
  * transition({ state: () => null, effects: [effect('save')] });
@@ -148,7 +157,10 @@ export function readTransition(spec, who = 'transition()') {
   }
   closedTo(spec, TRANSITION_MEMBERS, who);
   const out = {};
-  if (spec.state !== undefined) out.state = spec.state;
+  if (spec.state !== undefined) {
+    refuseConditional(spec.state, `${who} state is a value`, '/state');
+    out.state = spec.state;
+  }
   if (spec.patch !== undefined) out.patch = readPatch(spec.patch, who);
   if (spec.effects !== undefined) out.effects = readEffects(spec.effects, `${who} effects`);
   return out;

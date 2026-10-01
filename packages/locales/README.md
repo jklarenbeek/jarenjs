@@ -229,10 +229,18 @@ refused, and the Dutch picture is `'#.##0,00'`.
 | `number/exponent-separator` | `E` | `exponentSeparator` |
 | `number/infinity` | `∞` | `infinity` |
 | `number/nan` | `NaN` | `NaN` |
+| `number/minimum-grouping-digits` | `1` | `minimumGroupingDigits`, beside the record |
 
 `numberMessagesEn` is the English set and the canonical key list; a key a
 catalog leaves out falls back to English, and an entry that renders an
-empty string is refused. The picture's own syntax, `#` for an optional
+empty string is refused. `number/minimum-grouping-digits` is no character
+but a count, CLDR's minimum grouping digits: the fewest digits the leftmost
+group of a grouped number holds. Spanish writes 1234 but 12.345, so its pack
+says 2 and every other shipped pack 1; `compileNumberLocale` returns it as
+`minimumGroupingDigits` beside the decimal format (a decimal format record
+has no member for it), for the language description `toLocaleString`
+translates with (`@jarenjs/json/formula/migrate`), and refuses one that is
+not a positive whole number. The picture's own syntax, `#` for an optional
 digit and `;` between the positive and negative sub-pictures, is the same
 in every language. Some separators are not the space they look like:
 French groups with U+202F (narrow no-break space) and Russian with U+00A0,
@@ -256,7 +264,8 @@ export const xx = {
 
 A query error names its message the same way — a `messageId` from
 `@jarenjs/json`'s `queryMessagesEn` and its `params` — so a pack renders it
-too:
+too, as it renders a formula error's (`formulaMessagesEn`, the formula's id
+before the sentence, a query error raised inside the formula kept whole):
 
 ```js
 import { compileJsonQuery, renderQueryMessage } from '@jarenjs/json';
@@ -274,7 +283,8 @@ Rules of the road:
 1. **Key parity.** Cover every key of validate's `messagesEn`, every
    `form/*` key of forms' `formsMessagesEn`, every `contract/*` wire-error
    key of contract's `contractMessagesEn`, every `query/*` message of
-   json's `queryMessagesEn`, every `date/*` and `format/name/*` key of
+   json's `queryMessagesEn` and every message of its `formulaMessagesEn`
+   (`@jarenjs/json/formula`), every `date/*` and `format/name/*` key of
    this package's own `dateMessagesEn`, every `number/*` key of its
    `numberMessagesEn`, plus `x-form/assert` and the
    `JQ2xxx` codes a `$query` assertion reports. The repo enforces

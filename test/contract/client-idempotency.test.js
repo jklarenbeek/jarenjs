@@ -4,8 +4,9 @@
  * generated (or taken from `ctx.idempotencyKey`) and sent for every
  * `optional`/`required` command; with a `storage` the record
  * `{ op, key, hash, at }` — never the input — is written before the
- * send, cleared on a terminal outcome, left on `network`/`cancelled` for
- * `pending()`; a throwing store is `JC2054` and nothing is sent; retry
+ * send, cleared on a terminal outcome, left on `network`/`cancelled` and
+ * on the server's in-progress answer for `pending()`; a throwing store is
+ * `JC2054` and nothing is sent; retry
  * runs only under a declared policy, on `network` and on `retry.on`
  * codes, at most `max` times, through the injected `sleep`.
  */
@@ -19,7 +20,7 @@ import { toFetchHandler } from '@jarenjs/contract/fetch';
 import { createMemoryLedger } from '@jarenjs/contract/ledger';
 import { canonicalSha256 } from '@jarenjs/json/canonical';
 import { openHttpClient } from '@jarenjs/contract/client';
-import { load, shopHandlers } from './helpers.js';
+import { load, shopHandlers, parkedHandler } from './helpers.js';
 
 const shop = compileContract(load('./fixtures/shop.contract.json'));
 const PRODUCT = { id: 1, name: 'x', price: 1 };
@@ -157,6 +158,32 @@ describe('the client half of idempotency', () => {
     const r3 = await c3.invoke('product.save', SAVE);
     assert.strictEqual(r3.ok, true);
     assert.ok((await c3.pending()).some((p) => p.key === 'k-late'));
+  });
+
+  it('an in-progress answer (JC2009, retryable) keeps the durable record — the command\'s outcome is still unknown; the definite answer drops it, and so does a mismatch', async () => {
+    const mem = memoryStorage();
+    const parked = parkedHandler(PRODUCT);
+    const handler = toFetchHandler(serveHttp(shop, { ...shopHandlers(), 'product.save': parked.handler }, { ledger: createMemoryLedger() }));
+    const options = {
+      storage: mem.storage, sleep: async () => {},
+      fetch: (/** @type {string} */ url, /** @type {any} */ init) => handler(new Request('http://x' + url, init)),
+    };
+    const first = openHttpClient(shop, options);
+    const running = first.invoke('product.save', SAVE, { idempotencyKey: 'k-busy' });
+    await parked.running;
+    // the same key again while the first attempt still runs — what a
+    // reconcile after a restart, or a caller's own retry, sends
+    const second = openHttpClient(shop, options);
+    const busy = /** @type {any} */ (await second.invoke('product.save', SAVE, { idempotencyKey: 'k-busy' }));
+    assert.deepStrictEqual([busy.kind, busy.error.code, busy.error.status, busy.error.retryable], ['failure', 'JC2009', 409, true]);
+    assert.deepStrictEqual(await second.pending(), [{ op: 'product.save', key: 'k-busy' }], 'an answer that is not the outcome keeps the record');
+    parked.release();
+    assert.strictEqual((await running).ok, true);
+    assert.deepStrictEqual(await second.pending(), [], 'the definite answer drops it');
+    // a mismatch is definite: the key is bound to another request
+    const other = /** @type {any} */ (await second.invoke('product.save', { ...SAVE, revision: 2 }, { idempotencyKey: 'k-busy' }));
+    assert.deepStrictEqual([other.kind, other.error.code, other.error.retryable], ['failure', 'JC2009', false]);
+    assert.deepStrictEqual(await second.pending(), []);
   });
 
   it('a lone surrogate in the input is JC2050 (keyword canonical) when a hash is needed', async () => {

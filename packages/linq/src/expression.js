@@ -318,9 +318,12 @@ const associative = (op) => function (/** @type {any} */ record, /** @type {any}
  * satisfy, and is refused (`JL0005`). A PATH to a list — a declared
  * parameter (`x.in(p.ids)`) or an array member (`x.in(it.tags)`) — is
  * every item of it (`$ids[*]`), so a list bound at run time is one value
- * however long it is. A path that already fans (`it.tags.all()`,
- * `$it.tags[*]`) is a sequence of those items, and is the list as it
- * stands — fanning it again would fan each item.
+ * however long it is. A path that already fans anywhere along it
+ * (`it.tags.all()`, `$it.tags[*]`; `it.items.all().sku`,
+ * `$it.items[*].sku`) is a sequence of those items, and is the list as
+ * it stands — fanning it again would fan each item. Whether it fans is
+ * the record's own `fanned` mark, never a scan of the path text: a
+ * member NAMED `a[*]` is one bracketed step that fans nothing.
  * @param {any} record @param {any} values
  */
 function membership(record, values) {
@@ -332,7 +335,7 @@ function membership(record, values) {
         'in() takes an array of values or a PATH to one (a parameter p.ids, a member it.tags); '
         + 'it cannot follow an operator result or a relation');
     }
-    const items = list.seq ?? (list.doc.endsWith('[*]') ? list.doc : `${list.doc}[*]`);
+    const items = list.seq ?? (list.fanned ? list.doc : `${list.doc}[*]`);
     return makeExpr({ $eq: [record.doc, items] }, record.epoch, false);
   }
   if (!Array.isArray(values)) {
@@ -537,7 +540,7 @@ const METHODS = {
   // path navigation
   at(record, index) {
     if (record.pathable && Number.isInteger(index)) {
-      return makeExpr(`${record.doc}[${index}]`, record.epoch, true);
+      return makeExpr(`${record.doc}[${index}]`, record.epoch, true, { fanned: record.fanned });
     }
     return makeExpr({ $get: [record.doc, toExpression(index)] }, record.epoch, false);
   },
@@ -546,12 +549,12 @@ const METHODS = {
     if (record.hop !== undefined) return makeHop({ ...record.hop, fan: true }, record.epoch, record.nav);
     // a bound array's fan carries the array's navigation (a group-join's
     // group holds the inner rows; a hop off them binds each row first)
-    if (record.seq !== undefined) return makeExpr(record.seq, record.epoch, true, { nav: record.nav });
+    if (record.seq !== undefined) return makeExpr(record.seq, record.epoch, true, { nav: record.nav, fanned: true });
     if (!record.pathable) {
       throw new LinqBuildError('JL0005',
         "all() fans out a PATH ('$it.tags[*]'); it cannot follow an operator result");
     }
-    return makeExpr(`${record.doc}[*]`, record.epoch, true);
+    return makeExpr(`${record.doc}[*]`, record.epoch, true, { fanned: true });
   },
   get(record, name) {
     if (typeof name === 'string') {
@@ -807,14 +810,15 @@ export function groupRoot(relations, sink) {
  * @param {boolean} pathable - whether `doc` is a pure path string that
  *   member access may extend
  * @param {{ seq?: any, nav?: any, navOnFan?: boolean, hop?: any,
- *   group?: string }} [extra] -
+ *   group?: string, fanned?: boolean }} [extra] -
  *   `seq`: for a value standing for an array or a hop, the fanned form
  *   its aggregates range over (`'$g[*]'`, a hop's phrase); `nav`: the
  *   relation table of the rows the value stands for, with the resolver
  *   for the other roots and the capture's hop sink; `navOnFan`: the
  *   table applies to the fan, not the value; `hop`: the hop chain;
  *   `group`: the member this value carries a GROUP's rows in, whose
- *   aggregates therefore range over the rows
+ *   aggregates therefore range over the rows; `fanned`: the path fans
+ *   (`all()`) somewhere along it, so it is already a sequence
  * @returns {any}
  */
 /** The capture proxy's `Symbol.toPrimitive`: always a refusal (JL0108). */
@@ -830,7 +834,7 @@ function makeExpr(doc, epoch, pathable, extra = undefined) {
   const record = {
     doc, epoch, pathable,
     seq: extra?.seq, nav: extra?.nav, navOnFan: extra?.navOnFan === true, hop: extra?.hop,
-    group: extra?.group,
+    group: extra?.group, fanned: extra?.fanned === true,
   };
   return new Proxy(record, {
     get(target, prop) {
@@ -881,8 +885,8 @@ function member(target, prop) {
  */
 function pathStep(target, prop, segment) {
   const doc = `${target.doc}${segment}`;
-  return makeExpr(doc, target.epoch, true,
-    target.group === prop ? { seq: `${doc}[*]` } : undefined);
+  return makeExpr(doc, target.epoch, true, target.group === prop
+    ? { seq: `${doc}[*]`, fanned: target.fanned } : { fanned: target.fanned });
 }
 
 /**

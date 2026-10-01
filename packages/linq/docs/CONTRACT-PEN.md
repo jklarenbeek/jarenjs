@@ -165,7 +165,7 @@ optional payload schema.
 | Method | Emits | Type reading | Status |
 |---|---|---|---|
 | `errors: { <code>: … }` | `{ <code>: { status?, schema? } }`, in declaration order | the declared codes are the operation's `errors` union — `'conflict' \| 'not-found'` | native; a map that is not a plain object, a code outside the `errorCode` grammar (CONTRACT-FORMAT §2.4: lowercase words, dotted for namespacing — `ai.rate-limited`), or an entry that is not a plain object, `JL0101` |
-| `error({ status?, schema? })` | `{ status?, schema? }` in that order — `error()` with nothing emits `{}` | `ErrorDeclaration<E>` | native; another member, or a status outside 100–599, `JL0101` |
+| `error({ status?, schema? })` | `{ status?, schema? }` in that order — `error()` with nothing emits `{}` | `ErrorDeclaration<E>` | native; another member, or a status outside 400–599, `JL0101` |
 
 `error()` is a checked declaration, and the same two members written by
 hand are accepted and checked identically: `readErrors` runs the plain
@@ -832,7 +832,7 @@ Raised at the door of whichever function received it.
 | `errors: { Bad: error({}) }` | `an error code matches ^[a-z][a-z0-9_-]*(\.[a-z][a-z0-9_-]*)*$ — lowercase words, dotted for namespacing (ai.rate-limited); got 'Bad'` | `{ bad: error({}) }` |
 | `errors: { bad: 42 }` | `errors.bad is error({ status?, schema? }), got 42` | `error({ status: 400 })` |
 | `error({ code: 'x' })` | `error() does not take 'code' — it takes status, schema` | the code is the map's key |
-| `error({ status: 99 })` | `error() status is an integer in 100–599, got 99` | `error({ status: 409 })` |
+| `error({ status: 200 })` | `error() status is an integer in 400–599, got 200` | `error({ status: 409 })` |
 | `policy: 42` | `policy is a plain object of the members CONTRACT-FORMAT §3.1 declares, got 42` | a plain object |
 | `policy: { mode: 1 }` | `policy does not take 'mode' — it takes task, idempotency, revision, cache, limits, errors, retry, stream, audience` | the member §3.1 names |
 | `policy: { task: 'queue' }` | `policy.task is one of switch, exhaust, concat, parallel, got a string` | `task: 'exhaust'` |
@@ -1189,7 +1189,7 @@ to write, and reaching them means one import of `@jarenjs/contract` over
 
 ## 7. Cost
 
-`@jarenjs/linq/contract` builds to **<!--fact:bundle.contract-->50,125<!--/fact--> bytes** as a minified,
+`@jarenjs/linq/contract` builds to **<!--fact:bundle.contract-->50,201<!--/fact--> bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
 measures and `npm run test:tree-shaking` reports, published rounded
 (<!--fact:bundle.contract.kb-->50<!--/fact--> kB) beside the other nine subpath prices in
@@ -1201,7 +1201,7 @@ them:
 
 - **the schema pen is included, and that is the ceiling.** A contract's
   inputs and outputs are schemas, so the two are measured together and
-  the bundle carries <!--fact:bundle.schema-->36,880<!--/fact--> of its <!--fact:bundle.contract-->50,125<!--/fact--> bytes as the schema pen's own.
+  the bundle carries <!--fact:bundle.schema-->36,956<!--/fact--> of its <!--fact:bundle.contract-->50,201<!--/fact--> bytes as the schema pen's own.
   The contract pen's own share is the remaining ~12 kB, most of it the
   refusal messages §4 lists;
 - **no chain module** — none of `sequence.js`, `document.js`, `async.js`,

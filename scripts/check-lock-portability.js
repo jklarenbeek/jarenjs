@@ -63,7 +63,7 @@ let missing = 0;
 for (const [key, record] of Object.entries(packages)) {
   const optionals = record.optionalDependencies;
   if (optionals === undefined) continue;
-  const parent = nameOfKey(key) ?? key ?? '(root)';
+  const parent = nameOfKey(key) ?? (key || '(root)');
   const parentVersion = typeof record.version === 'string' ? `@${record.version}` : '';
   for (const [name, wanted] of Object.entries(optionals)) {
     if (typeof wanted !== 'string' || !EXACT_VERSION.test(wanted)) continue;

@@ -12,8 +12,12 @@
  *   number/decimal-separator   number/grouping-separator   number/minus-sign
  *   number/percent             number/per-mille            number/zero-digit
  *   number/exponent-separator  number/infinity             number/nan
+ *   number/minimum-grouping-digits
  *
- * Every entry is one character but the last two, which are words.
+ * Every entry is one character but `infinity` and `nan`, which are words, and
+ * `minimum-grouping-digits`, a count: the fewest digits the leftmost group of
+ * a grouped integer part may hold (CLDR's minimum grouping digits; Spanish
+ * writes 1234 but 12.345, so 2).
  */
 
 import { compileMessageCatalog } from '@jarenjs/core/message';
@@ -22,6 +26,7 @@ import { compileMessageCatalog } from '@jarenjs/core/message';
 const NUMBER_KEYS = Object.freeze([
   'number/decimal-separator', 'number/grouping-separator', 'number/minus-sign', 'number/percent',
   'number/per-mille', 'number/zero-digit', 'number/exponent-separator', 'number/infinity', 'number/nan',
+  'number/minimum-grouping-digits',
 ]);
 
 /**
@@ -39,6 +44,7 @@ export const numberMessagesEn = {
   'number/exponent-separator': 'E',
   'number/infinity': '∞',
   'number/nan': 'NaN',
+  'number/minimum-grouping-digits': '1',
 };
 
 /**
@@ -59,12 +65,16 @@ export const numberMessagesEn = {
  */
 
 /**
- * Compile a catalog into its decimal format. Every key the argument leaves
- * out falls back to English; the eleven shipped packs cover the whole set.
- * A picture's own syntax (`#` and `;`) is the same in every language.
+ * Compile a catalog into its decimal format, and the minimum grouping digits
+ * a number written in the language observes (`toLocaleString` translated by
+ * `@jarenjs/json/formula/migrate` reads them from its language description).
+ * Every key the argument leaves out falls back to English; the eleven shipped
+ * packs cover the whole set. A picture's own syntax (`#` and `;`) is the same
+ * in every language.
  * @param {Record<string, any>} [catalogLike] - a locale pack, or undefined for English
- * @returns {Readonly<{ decimalFormat: Readonly<DecimalFormat> }>}
- * @throws {TypeError} when an entry does not render a non-empty string
+ * @returns {Readonly<{ decimalFormat: Readonly<DecimalFormat>, minimumGroupingDigits: number }>}
+ * @throws {TypeError} when an entry does not render a non-empty string, or the
+ *   minimum grouping digits are not a positive whole number
  * @example
  * import { compileJsonQuery } from '@jarenjs/json';
  * import { nl } from '@jarenjs/locales';
@@ -85,6 +95,9 @@ export function compileNumberLocale(catalogLike = undefined) {
     if (typeof text !== 'string' || text === '') throw new TypeError(`the number catalog entry '${key}' must render a non-empty string`);
     return text;
   };
+  const minimumGroupingDigits = Number(read('number/minimum-grouping-digits'));
+  if (!Number.isSafeInteger(minimumGroupingDigits) || minimumGroupingDigits < 1)
+    throw new TypeError("the number catalog entry 'number/minimum-grouping-digits' must be a positive whole number");
   return Object.freeze({
     decimalFormat: Object.freeze({
       decimalSeparator: read('number/decimal-separator'),
@@ -99,5 +112,6 @@ export function compileNumberLocale(catalogLike = undefined) {
       infinity: read('number/infinity'),
       NaN: read('number/nan'),
     }),
+    minimumGroupingDigits,
   });
 }

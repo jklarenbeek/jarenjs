@@ -44,7 +44,8 @@ shape change is a **transformation of values**, not a table rebuild.
   a reviewer reads exactly what will run.
 - `kind: "jslt"` rewrites every document of a collection through a
   compiled JSLT stylesheet, in batches, inside the migration's
-  transaction. The empty stylesheet (`[]`) is the identity transform.
+  transaction, each with the values of the collection's stored derived
+  columns (§2.1). The empty stylesheet (`[]`) is the identity transform.
   Over an ENTITY table the stylesheet sees the whole row — the mapped
   columns merged into the document under `step.model`, when supplied,
   or the target model otherwise. A hybrid row is split back into columns
@@ -89,7 +90,9 @@ shape change is a **transformation of values**, not a table rebuild.
   under the step's `model` when it carries one — and whose replacement is
   checked as a stylesheet's is: a non-document refuses the step
   (`JD0023`), a key member it leaves out is kept, and one it rewrites
-  refuses the step. `scope.relational` is the
+  refuses the step. A replacement is written as a stylesheet's is, with
+  the values of the collection's stored derived columns (§2.1).
+  `scope.relational` is the
   relational engine (MODEL-FORMAT §5.3) bound to the transaction, whose
   writes are savepoints of it. Nothing the scope holds outlives the step
   (`JD0025`): the step's end returns every cursor the scope opened, so no
@@ -144,6 +147,19 @@ fewer rows, so the planner emits an explicit `derive` step after the
 A `jslt` transform on such a collection gets the same treatment for the
 same reason: it rewrites the documents the columns are computed from,
 so the planner follows it with a `derive` step that recomputes them.
+
+A document a `jslt` or `host` step writes to a collection carries its
+stored derived values itself, as a store's write does, so a step written
+by hand leaves no column stale (a nearest-neighbour search over a stale
+vector column would rank by the old embedding). The runner computes them
+from the replacement as it is stored, for every derived column that the
+model in force at the step declares — the step's `model`, else the run's
+`model` — and the table holds as an ordinary column at that point: not a
+generated column, which the engine computes, nor one a later step of the
+link adds, which the backfill after that step computes. A run given
+neither model cannot know them, so a hand-written step there is followed
+by a `derive` step. The planner's `derive` step after a transform it
+plans stays, and writes the same values again.
 
 A `derive: 'vector'` column (MODEL-FORMAT §2.1) is stored under BOTH
 mappings, so the planner emits its backfill whatever `derived` says,
@@ -440,8 +456,10 @@ The run options include:
   and after its last, in its own transaction — and refuses only the
   violations it introduced: an orphan an earlier, unenforced write left is
   not the link's doing (a violation is the same one when its table, rowid,
-  parent and constraint are; a rebuild that renumbers a table's rows counts
-  that table's as new). A borrowed
+  parent and constraint are, the table and the parent read under the names
+  the link's `ALTER TABLE … RENAME TO` steps leave them — renaming the
+  child or the parent of an old orphan does not make it the link's; a
+  rebuild that renumbers a table's rows counts that table's as new). A borrowed
   connection keeps its caller's setting, and the check still refuses the
   orphan an unenforced delete would leave.
 - **Every failure is classified** (MODEL-FORMAT §7): a step's is `JD0023`
@@ -657,7 +675,8 @@ verbatim, new ones from the document, dropped ones already folded),
 index from the target model, then **`PRAGMA foreign_key_check` inside
 the transaction** — a reference the rebuild broke fails the migration
 rather than shipping (compared against the same check taken before it
-began, as a link's is, §6).
+began, as a link's is, §6; a parent an earlier step of the link renamed
+counts under its new name, which the rebuilt `REFERENCES` clause spells).
 
 Two deviations from the cited twelve steps, recorded: (1) the
 procedure's `PRAGMA foreign_keys=OFF/ON` bracket is honoured

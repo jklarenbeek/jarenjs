@@ -1,7 +1,7 @@
 //@ts-check
 import { it } from 'node:test';
 import assert from 'node:assert/strict';
-import { compileFormula, createFormulaCompiler, formulaDocument } from '@jarenjs/json/formula';
+import { checkFormulaParity, compileFormula, createFormulaCompiler, formulaDocument } from '@jarenjs/json/formula';
 import { defineFormula } from '@jarenjs/linq/formula';
 import { createTypeTestCompiler } from '@jarenjs/validate/query';
 import { QUERY_CODES } from '@jarenjs/json/query';
@@ -90,4 +90,19 @@ it('live cache identities distinguish signed zero without changing Query arithme
   const profile = { $formula: '1', id: 'sign', revision: '1', helpers: [{ name: 'sign', version: '1' }], expression: { $call: ['sign', '$zero'] }, bindings: { zero: -0 } };
   assert.equal(compiler.compile(profile).evaluate({}).value, true);
   assert.equal(compiler.compile({ ...profile, bindings: { zero: 0 } }).evaluate({}).value, false);
+});
+
+it('parity refuses an expected outcome that is not JSON before it evaluates a row, naming that row', () => {
+  const real = compileFormula(doc({ $div: ['$.n', '$.m'] }));
+  let evaluated = 0;
+  const formula = { doc: real.doc, evaluate: (/** @type {any} */ row) => { evaluated++; return real.evaluate(row); } };
+  const rows = [{ n: 1, m: 2 }, { n: 0, m: 0 }, { n: 1, m: 0 }];
+  const expected = rows.map((row) => ({ kind: 'value', value: row.n / row.m }));
+  assert.throws(() => checkFormulaParity(formula, rows, expected),
+    { name: 'FormulaError', code: 'JQ2013', formulaId: 'amount', docPath: '/1/value', message: /expected outcome 1 is not JSON/ });
+  assert.equal(evaluated, 0, 'no row is evaluated before the expected outcomes are checked');
+  assert.throws(() => checkFormulaParity(formula, rows.slice(2), expected.slice(2)), { code: 'JQ2013', docPath: '/0/value' });
+  // an expected error agrees with any error, whatever it holds
+  const parity = checkFormulaParity(real, [{ n: 1, m: 'x' }], [{ kind: 'error', message: undefined }]);
+  assert.deepEqual([parity.agree, parity.differ], [1, 0]);
 });

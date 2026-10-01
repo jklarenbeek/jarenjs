@@ -59,4 +59,19 @@ describe('stream consumer sequence lifecycle', () => {
     assert.deepStrictEqual(resumed.events, [['snapshot', 5], ['patch', 6]]);
     assert.strictEqual(resumed.consumer.lastSeq(), 6);
   });
+
+  it('a reset that opens a resumed stream re-seeds a cursor the server\'s log no longer covers, below it included; any other regression still ends the stream', () => {
+    const restored = observe(50);
+    restored.consumer.snapshot(10, { value: {}, reset: true });
+    restored.consumer.patch(11, { patch: [], seq: 11 });
+    assert.deepStrictEqual(restored.events, [['snapshot', 10], ['patch', 11]]);
+    assert.strictEqual(restored.consumer.lastSeq(), 11);
+    // once the stream delivered, a reset below the cursor is a regression
+    restored.consumer.snapshot(5, { value: {}, reset: true });
+    assert.deepStrictEqual(restored.events.slice(2), [['finish'], ['error', 'JC2092']]);
+    // a plain snapshot below the resume cursor is no re-seed
+    const plain = observe(50);
+    plain.consumer.snapshot(10, { value: {} });
+    assert.deepStrictEqual(plain.events, [['finish'], ['error', 'JC2092']]);
+  });
 });

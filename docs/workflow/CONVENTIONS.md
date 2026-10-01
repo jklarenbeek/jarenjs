@@ -17,13 +17,27 @@ this file wins and the playbook is repaired.
 - **Dependency arrow (one way, no cycles):** `@jarenjs/core` (zero-dep base) →
   `@jarenjs/view` → `@jarenjs/app` → `components/*` → `website`. Sibling packages
   (`json`, `validate`, `formats`, `refs`, `emit`, `forms`, `locales`, `flow`,
-  `linq`, `db`, `josl`) sit on `core` and each other only in the direction
+  `linq`, `db`, `josl`, `contract`) sit on `core` and each other only in the direction
   `docs/ARCHITECTURE.md`'s graph draws; cooperation across layers is by an
   injected hook, an extension keyword, or a generated document — never a
   reverse import.
-- **Two-layer components:** a component's engine (`components/<x>/src/*`) imports
-  only `@jarenjs/core` + `@jarenjs/view`; its component layer (`src/component/*`)
-  may add `@jarenjs/app`/`@jarenjs/forms`.
+- **Two-layer components, and no component imports another:** a component is an
+  engine (`components/<x>/src/*`) plus a component layer (`src/component/*`) that
+  packages it for a rendering host, and both build on `packages/*`. The calc,
+  charts, collection, md, mermaid and rules engines import no more than
+  `@jarenjs/core` + `@jarenjs/view`, and their component layers add
+  `@jarenjs/app`/`@jarenjs/forms` at most. `play` and `studio` host the suite's
+  engines and edit their documents, so they import those packages too: play's
+  engine `json`, `josl`, `validate` and `contract`; studio `contract`, `json`,
+  `validate`, `formats`, `flow` and `app` in both layers, and `db` in its
+  engine. **No component imports another** — not by name, not by
+  a relative path into its folder. Cooperation across components is by an
+  injected hook (a host hands `mermaidPlugin` to md and charts'
+  `mermaidPieRenderer` to mermaid), so Markdown without diagrams loads no diagram
+  code and mermaid loads no chart code. The one exception is studio's component
+  layer, the suite's integrated editor, which composes the chart and diagram
+  editors of `@jarenjs/charts` and `@jarenjs/mermaid`; its engine stays inside
+  the rule. `test/docs/component-rule.test.js` enforces it.
 - **House rules:** zero runtime dependencies in `packages/*` and `components/*`
   except `@jarenjs/*`; two-stage compilers (validate/compile once, run closures);
   **no `eval`/`new Function`** (CSP-safe); char-code recursive-descent parsers over

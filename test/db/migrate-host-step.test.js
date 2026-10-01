@@ -17,7 +17,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 
-import { openStore, migrate, migrationStatus, migrationChecksum, migrateDocuments, planPhysicalMigration, shapeHash, readSchema, sql } from '@jarenjs/db';
+import { openStore, migrate, migrationStatus, migrationChecksum, migrateDocuments, planModelMigration, planPhysicalMigration, shapeHash, readSchema, sql, sqliteDialect } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';
 import { nodeWorkerDriver } from '@jarenjs/db/node-worker';
 import { JarenValidator } from '@jarenjs/validate';
@@ -357,6 +357,102 @@ describe('a host step that cannot run as its document names is JD0025, before an
         assert.deepEqual(plan.steps.map((/** @type {any} */ s) => s.kind), ['host']);
       }
       finally { connection.close(); }
+    }
+    finally { cleanup(); }
+  });
+});
+
+describe("a migration's document write carries the collection's stored derived columns", () => {
+  const schema = { type: 'object', properties: { id: { type: 'string' }, embedding: { type: 'array', items: { type: 'number' } } } };
+  const PLAIN = { $model: '0.1', collections: { rows: { key: '/id', schema } } };
+  const VECTORS = { $model: '0.1', collections: { rows: { key: '/id', schema,
+    indexes: [{ name: 'by_vec', path: '$.embedding', derive: 'vector', dims: 3 }] } } };
+  const NEAREST_EAST = { $subsequence: [{ $for: { r: '$[*]' }, $orderby: [{ $key: { $similarity: ['$r.embedding', [1, 0, 0]] },
+    $dir: 'desc', $empty: 'least' }, '$r.id'], $return: '$r.id' }, 0, 1] };
+  const SWAP = { kind: 'host', run: 'swap', version: '1' };
+  const swap = { swap: { version: '1', run: (/** @type {any} */ scope) => scope.collection('rows').update((/** @type {any} */ doc) =>
+    ({ ...doc, embedding: doc.id === 'a' ? [0, 1, 0] : [1, 0, 0] })) } };
+  /** The stored vector column of every row, unpacked, by key. @param {string} file */
+  const storedVectors = (file) => {
+    const db = new DatabaseSync(file);
+    try {
+      return Object.fromEntries(db.prepare('SELECT "key", "gx_embedding_v3" AS v FROM "rows" ORDER BY "key"').all()
+        .map((/** @type {any} */ row) => [row.key, row.v === null ? null : Array.from(new Float32Array(new Uint8Array(row.v).buffer))]));
+    }
+    finally { db.close(); }
+  };
+  /** A file holding a (east) and b (north). @param {any} model */
+  const seededVectors = async (model) => {
+    const temp = tempDbPath();
+    const store = await openStore(model, { driver: nodeDriver(), path: temp.dbPath });
+    await store.collection('rows').put({ id: 'a', embedding: [1, 0, 0] });
+    await store.collection('rows').put({ id: 'b', embedding: [0, 1, 0] });
+    await store.close();
+    return temp;
+  };
+
+  it('a host step and a jslt step rewrite a vector-indexed member, and nearest-neighbour search follows', async () => {
+    const { dbPath, cleanup } = await seededVectors(VECTORS);
+    try {
+      const swapped = { $migration: '0.1', id: 'swap', from: shapeHash(VECTORS), to: shapeHash(VECTORS), steps: [SWAP] };
+      await migrate({ driver: nodeDriver(), path: dbPath }, [swapped], { baseline: VECTORS, model: VECTORS, hosts: swap });
+      assert.deepEqual(storedVectors(dbPath), { a: [0, 1, 0], b: [1, 0, 0] });
+      const store = await openStore(VECTORS, { driver: nodeDriver(), path: dbPath });
+      try { assert.equal(await store.collection('rows').execute(NEAREST_EAST), 'b'); }
+      finally { await store.close(); }
+      // a stylesheet's write, under the model its step carries (the run names none)
+      const up = { $migration: '0.1', id: 'up', from: shapeHash(VECTORS), to: shapeHash(VECTORS), steps: [{ kind: 'jslt', collection: 'rows',
+        model: VECTORS, stylesheet: [{ match: '$', body: { id: '$.id', embedding: { $const: [0, 0, 1] } } }] }] };
+      await migrate({ driver: nodeDriver(), path: dbPath }, [swapped, up], { baseline: VECTORS, hosts: swap });
+      assert.deepEqual(storedVectors(dbPath), { a: [0, 0, 1], b: [0, 0, 1] });
+    }
+    finally { cleanup(); }
+  });
+
+  it("a stored geohash column follows a host step on the worker host; the in-thread host's generated one is the engine's", async () => {
+    const MODEL = { $model: '0.1', collections: { places: { key: '/id',
+      schema: { type: 'object', properties: { id: { type: 'string' }, at: { type: 'array', items: { type: 'number' } } } },
+      indexes: [{ name: 'by_cell', path: '$.at', derive: 'geohash', precision: 5 }] } } };
+    const RADIUS = { $for: { p: '$[*]' }, $where: { $le: [{ $distance: ['$p.at', [4.9, 52.37]] }, 20000] }, $return: '$p.id' };
+    const moved = (/** @type {any} */ doc) => ({ ...doc, at: doc.id === 'ams' ? [-74.0, 40.7] : [4.9, 52.37] });
+    const MOVE = { $migration: '0.1', id: 'move', from: shapeHash(MODEL), to: shapeHash(MODEL), steps: [{ kind: 'host', run: 'move', version: '1' }] };
+    for (const [driver, run] of /** @type {[() => any, (scope: any) => any][]} */ ([
+      [() => nodeWorkerDriver(), async (scope) => scope.collection('places').update(moved)],
+      [() => nodeDriver(), (scope) => scope.collection('places').update(moved)],
+    ])) {
+      const { dbPath, cleanup } = tempDbPath();
+      try {
+        let store = await openStore(MODEL, { driver: driver(), path: dbPath });
+        await store.collection('places').put({ id: 'ams', at: [4.9, 52.37] });
+        await store.collection('places').put({ id: 'nyc', at: [-74.0, 40.7] });
+        const stored = store.capabilities.deterministicIndexableFunctions !== true;
+        await store.close();
+        await migrate({ driver: driver(), path: dbPath }, [MOVE], { baseline: MODEL, model: MODEL, hosts: { move: { version: '1', run } } });
+        if (stored) {
+          const db = new DatabaseSync(dbPath);
+          try {
+            assert.deepEqual(db.prepare('SELECT "key", "gx_at_gh5" AS cell FROM "places" ORDER BY "key"').all().map((/** @type {any} */ row) => ({ ...row })),
+              [{ key: 'ams', cell: 'dr5rs' }, { key: 'nyc', cell: 'u173z' }]);
+          }
+          finally { db.close(); }
+        }
+        store = await openStore(MODEL, { driver: driver(), path: dbPath });
+        try { assert.equal(await store.collection('places').execute(RADIUS), 'nyc'); }
+        finally { await store.close(); }
+      }
+      finally { cleanup(); }
+    }
+  });
+
+  it('a host step before the step that adds a stored column writes the document alone, and the backfill after it computes the column', async () => {
+    const { dbPath, cleanup } = await seededVectors(PLAIN);
+    try {
+      const added = planModelMigration(PLAIN, VECTORS, { dialect: sqliteDialect, id: 'add-vectors' }).migration;
+      assert.deepEqual(added.steps.map((/** @type {any} */ step) => step.kind), ['ddl', 'derive']);
+      const link = { ...added, steps: [SWAP, ...added.steps] };
+      const outcome = await migrate({ driver: nodeDriver(), path: dbPath }, [link], { baseline: PLAIN, model: VECTORS, hosts: swap });
+      assert.deepEqual(/** @type {any} */ (outcome).applied, ['add-vectors']);
+      assert.deepEqual(storedVectors(dbPath), { a: [0, 1, 0], b: [1, 0, 0] });
     }
     finally { cleanup(); }
   });

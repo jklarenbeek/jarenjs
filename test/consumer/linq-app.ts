@@ -222,6 +222,14 @@ const guarded = action((st: Expr<Tasked>, x) =>
     when(true, transition({}))));
 // @ts-expect-error — a branch is a transition or a conditional, never a bare value
 action((st: Expr<Tasked>) => when(st.tasks.scan.id.eq(1), 42));
+// and a conditional is never a value: where one goes, it would replace
+// the value with the branch's transition object at dispatch
+// @ts-expect-error — a transition's state is a value
+action((st: Expr<Tasked>) => transition({ state: when(st.tasks.scan.id.eq(1), transition({})) }));
+// @ts-expect-error — a patch operation's value is a value
+action((st: Expr<Tasked>) => transition({ patch: [replace((c: Expr<Tasked>) => c.items, when(st.tasks.scan.id.eq(1), transition({})))] }));
+// @ts-expect-error — an effect's props are a value
+action((st: Expr<Tasked>) => transition({ effects: [effect('save', when(st.tasks.scan.id.eq(1), transition({})))] }));
 const scanSlot = taskSlot('scan', { at: (st: Expr<Tasked>) => st.tasks.scan, mode: 'exhaust' });
 const tasked = defineApp({
   state: { tasks: { scan: scanSlot.initial }, items: [] }, view: [],

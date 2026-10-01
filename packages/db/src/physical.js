@@ -212,9 +212,9 @@ export function verifyPhysical(connection, mapping, schema) {
   // a rule compares text by code point, which SQLite's BINARY collation is
   // only over UTF-8: a UTF-16 database orders text by its code units
   const encoding = (mapping.triggers ?? []).length === 0 || connection.dialect.name !== 'sqlite' ? null
-    : chain(connection.prepare(connection.dialect.introspect.pragma('encoding')), (s) => chain(s.get([]), (row) => {
-      if (String(row?.encoding).toUpperCase() !== 'UTF-8') fail(`database rules compare text by code point, which a ${row?.encoding} database does not; use a UTF-8 database`);
-    }));
+    : chain(databaseEncoding(connection), (name) => {
+      if (String(name).toUpperCase() !== 'UTF-8') fail(`database rules compare text by code point, which a ${name} database does not; use a UTF-8 database`);
+    });
   const read = mapping.kind === 'view'
     ? chain(connection.prepare(connection.dialect.introspect.columns(mapping.table)), (s) =>
       chain(s.all([]), (columns) => ({ columns: columns.map((c) => ({ ...c, generated: !!c.hidden })), primaryKey: [] })))
@@ -285,13 +285,27 @@ export function textKeyPlan(mapping, keys, dialect, prefix = '') {
  */
 export function textKeyDecoding(connection) {
   const dialect = connection.dialect;
-  return chain(connection.prepare(dialect.introspect.pragma('encoding')), (statement) => chain(statement.get([]), (row) => {
-    const decoder = new TextDecoder(row.encoding, { fatal: true, ignoreBOM: true });
+  return chain(databaseEncoding(connection), (encoding) => {
+    const decoder = new TextDecoder(encoding, { fatal: true, ignoreBOM: true });
     const probe = `SELECT ${sqliteTableMigration.binaryCast(dialect.parameterRef(1, 'text'))} AS ${dialect.quoteIdentifier('bytes')}`;
     return chain(connection.prepare(probe), (bound) => chain(bound.get(['\uFEFFx']), (read) => ({
       decoder, keepsLeadingBom: decoder.decode(read.bytes) === '\uFEFFx',
     })));
-  }));
+  });
+}
+
+/**
+ * The SQLite database's text encoding, as `PRAGMA encoding` names it. A
+ * build compiled without UTF-16 (`SQLITE_OMIT_UTF16`, as the official
+ * wasm build is) answers that pragma with no row at all — and such a
+ * build reads only UTF-8 databases, so no row is UTF-8. The one reading
+ * of the encoding, for the rule check and the text-key decoder alike.
+ * @param {any} connection
+ * @returns {any} value-or-promise of the encoding's name
+ */
+function databaseEncoding(connection) {
+  return chain(connection.prepare(connection.dialect.introspect.pragma('encoding')), (statement) =>
+    chain(statement.get([]), (row) => (row === undefined || row === null ? 'UTF-8' : row.encoding)));
 }
 
 /**

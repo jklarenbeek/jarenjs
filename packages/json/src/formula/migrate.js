@@ -40,7 +40,9 @@ function translate(source, options) {
  * `translated-with-differences` (each difference named, with its position)
  * or `untranslatable` (each reason named, with its position). Repeating
  * identical input reports no changes, including after native edits. Source
- * edits produce a conflict carrying both versions rather than overwriting.
+ * edits produce a conflict carrying both versions rather than overwriting,
+ * and the state the record had (`previousState`, `previousReason`), which it
+ * returns to when its source is the recorded one again.
  * @param {any[]} sources
  * @param {any[]} [previous]
  * @param {{maxRecords?:number,maxSourceChars?:number,translate?:import('./translate.js').TranslateOptions,formula?:import('./index.js').FormulaOptions}} [options]
@@ -66,9 +68,18 @@ export async function migrateFormulas(sources, previous = [], options = {}) {
     seen.add(source.id);
     const sourceHash = await canonicalSha256(source);
     const prior = records.get(source.id);
-    if (prior?.sourceHash === sourceHash || prior?.currentHash === sourceHash) continue;
     let record;
-    if (prior) record = { ...prior, state: 'conflict', reason: 'source-edited', current: source, currentHash: sourceHash };
+    // a conflict whose source is the recorded one again returns to the state it had before the edit
+    if (prior?.state === 'conflict' && prior.sourceHash === sourceHash && prior.previousState !== undefined) {
+      const { current: _current, currentHash: _currentHash, previousState, previousReason, ...kept } = prior;
+      record = { ...kept, state: previousState, reason: previousReason };
+    }
+    else if (prior?.sourceHash === sourceHash || prior?.currentHash === sourceHash) continue;
+    // an edit keeps the state the record had, which a later edit of the conflict leaves as it was
+    else if (prior) {
+      record = { ...prior, state: 'conflict', reason: 'source-edited', current: source, currentHash: sourceHash,
+        ...(prior.state === 'conflict' ? {} : { previousState: prior.state, previousReason: prior.reason }) };
+    }
     else if (!source.enabled) {
       record = { version: 1, id: source.id, original: source, sourceHash, state: 'disabled-preserved', reason: 'disabled',
         reasons: [], differences: [], native: null, nativeHash: null };

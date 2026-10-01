@@ -111,9 +111,11 @@ its own and the server works on N of them together: conflicts between them are
 the database's (a serialization failure or deadlock is busy and retryable, and
 immediate transactions take the writer lock in turn). The store's own unit of
 work stays on the first session, one call at a time, every transaction has its
-own, and a paused cursor holds one session rather than the store. Capture's
-allocation lock still orders captured commits, so captured writes gain no
-concurrency; reads and uncaptured writes do. Replication runs on one session.
+own, and a paused cursor holds one session rather than the store. On a store
+with capture, every transaction — a root write included, and a transaction that
+only reads — takes capture's allocation lock when it begins and holds it to its
+end, so they run one at a time; root reads, which open no transaction, gain the
+concurrency. Replication runs on one session.
 
 The committed [measurement](../../../benchmark/postgres-sessions-result.json)
 compares one Store on N sessions with N Stores of one session each; the last
@@ -121,16 +123,16 @@ column is what being one Store costs (below 1×) or gains (above):
 
 <!--fact:postgres.sessions-->
 
-Measured 2026-10-01T16:14:54.424Z: PostgreSQL 17.11 (Debian 17.11-1.pgdg12+2) (fsync=on, synchronous_commit=on, full_page_writes=on), Node 24.20.0, pg 8.23.0; 8 clients at once, each 40 one-document write transactions on keys of its own; the median of 5 rounds, each measuring every shape once.
+Measured 2026-10-01T18:44:49.703Z: PostgreSQL 17.11 (Debian 17.11-1.pgdg12+2) (fsync=on, synchronous_commit=on, full_page_writes=on), Node 24.20.0, pg 8.23.0; 8 clients at once, each 40 one-document write transactions on keys of its own; the median of 5 rounds, each measuring every shape once.
 
 | N | One store on N sessions, tx/s | N stores of one session, tx/s | One store over N stores |
 |---:|---:|---:|---:|
-| 1 | 1258 | 1253 | 1.00× |
-| 2 | 2667 | 2714 | 0.98× |
-| 4 | 4650 | 5010 | 0.93× |
-| 8 | 7106 | 7285 | 0.98× |
+| 1 | 1282 | 1244 | 1.03× |
+| 2 | 2638 | 2591 | 1.02× |
+| 4 | 4187 | 4567 | 0.92× |
+| 8 | 6087 | 6567 | 0.93× |
 
-One transaction with nothing beside it: 0.822 ms on a store of one session, 0.822 ms through the router of a store on two (-0.0%). A store on one session has no router.
+One transaction with nothing beside it: 0.784 ms on a store of one session, 0.806 ms through the router of a store on two (2.8%). A store on one session has no router.
 
 One host, client and server on one machine; each client a run of one-document transactions on keys of its own (no conflicts), every commit durable, so it waits on a disk the host shares with whatever else runs there. A store on one session runs them in turn; several sessions and separate stores let the server work on them together. No production throughput claim.
 
@@ -281,10 +283,10 @@ retains earlier Bun memory-budget losses even when a later sample passes.
 
 | Existing SQLite adoption executable | Workload | RSS bytes | Frozen reference bytes | RSS disposition |
 |---|---|---:|---:|---|
-| bun-executable | catalog | 263417856 | 536870912 | within reference |
-| bun-executable | archive-stock | 1063981056 | 1073741824 | within reference |
-| node-executable | catalog | 288460800 | 536870912 | within reference |
-| node-executable | archive-stock | 828166144 | 1073741824 | within reference |
+| bun-executable | catalog | 272564224 | 536870912 | within reference |
+| bun-executable | archive-stock | 1056256000 | 1073741824 | within reference |
+| node-executable | catalog | 293818368 | 536870912 | within reference |
+| node-executable | archive-stock | 824340480 | 1073741824 | within reference |
 
 These larger physical SQLite workloads are separate from the small build-selected managed application. Functional recovery success does not imply memory-budget success. Earlier samples remain in the resource history.
 

@@ -3,7 +3,7 @@
 import { canonicalizeJson, canonicalSha256 } from '../canonical.js';
 import { compileJSONPointer, JSONPOINTER_NOTHING } from '../pointer.js';
 import { compileFormulaBatch } from '../formula/batch.js';
-import { FormulaError, snapshot, credit } from '../formula/shared.js';
+import { FormulaError, formulaDiagnostic, formulaMessage, snapshot, credit } from '../formula/shared.js';
 
 /**
  * Compile rule targets over the shared formula batch evaluator.
@@ -16,12 +16,12 @@ export function compileRulePlan(definition, options) {
   const doc = snapshot(definition);
   if (!doc || doc.$rules !== '1' || typeof doc.id !== 'string' || !doc.id || typeof doc.revision !== 'string'
     || !doc.revision || !Array.isArray(doc.targets) || !Array.isArray(options?.writableFields))
-    throw new FormulaError('JQ2015', 'rule identity, targets and writable fields required', doc?.id ?? '', '');
+    throw new FormulaError('JQ2015', formulaMessage('query/formula/rule-identity'), doc?.id ?? '', '');
   const allowed = new Set(options.writableFields);
   const pointers = new Map();
   for (const [i, target] of doc.targets.entries()) if (target.enabled !== false) {
     if (typeof target.field !== 'string' || !target.field.startsWith('/') || !allowed.has(target.field))
-      throw new FormulaError('JQ2015', 'target field is not writable', doc.id, `/targets/${i}/field`);
+      throw new FormulaError('JQ2015', formulaMessage('query/formula/rule-field-not-writable'), doc.id, `/targets/${i}/field`);
     pointers.set(target.id, compileJSONPointer(target.field));
   }
   const batch = compileFormulaBatch(doc.targets, options);
@@ -31,13 +31,13 @@ export function compileRulePlan(definition, options) {
     /** Read-only preview. A current snapshot revision is mandatory, never inferred from loaded rows. */
     async preview({ rows, datasetRevision, context = {} }) {
       if (!Array.isArray(rows) || rows.length > maxRows || typeof datasetRevision !== 'string' || !datasetRevision)
-        throw new FormulaError('JQ2015', 'bounded rows and dataset revision required', doc.id, '');
+        throw new FormulaError('JQ2015', formulaMessage('query/formula/rule-rows'), doc.id, '');
       const data = snapshot(rows), scope = snapshot(context);
       const groups = new Set(), selected = [], ids = new Set();
       let deduplicated = 0;
       for (const row of data) {
         const key = canonicalizeJson(row.id);
-        if (ids.has(key)) throw new FormulaError('JQ2015', 'duplicate entity identity', doc.id, '');
+        if (ids.has(key)) throw new FormulaError('JQ2015', formulaMessage('query/formula/rule-entity-duplicate'), doc.id, '');
         ids.add(key);
         if (options.groupKey) {
           const group = canonicalizeJson(options.groupKey(row, scope));
@@ -69,7 +69,9 @@ export function compileRulePlan(definition, options) {
             if (canonicalizeJson(previous.proposed) === canonicalizeJson(outcome.value)) { counts.deduplicated++; previous.targetIds.push(target.id); }
             else {
               candidates.delete(key); conflicts.add(key); counts.conflicts++;
-              if (errors.length < maxErrors) errors.push({ rowId: row.id, targetId: target.id, code: 'JQ2015', message: 'conflicting target values', docPath: '/targets' });
+              // a diagnostic a reviewer reads: its message named as a formula error names it, in any language
+              if (errors.length < maxErrors) errors.push({ rowId: row.id, targetId: target.id, code: 'JQ2015', docPath: '/targets',
+                ...formulaDiagnostic(formulaMessage('query/formula/rule-conflict'), doc.id) });
             }
           }
           else candidates.set(key, { id: await canonicalSha256([doc.id, doc.revision, datasetRevision, row.id, target.field]),
@@ -96,12 +98,12 @@ export async function selectRuleChanges(plan, selection, currentPlan) {
   const { id, ...body } = plan;
   const { id: currentId, ...currentBody } = currentPlan;
   if (id !== await canonicalSha256(body) || currentId !== await canonicalSha256(currentBody) || id !== currentId)
-    throw new FormulaError('JQ2015', 'stale or modified preview', plan.rule?.id ?? '', '');
+    throw new FormulaError('JQ2015', formulaMessage('query/formula/rule-preview-stale'), plan.rule?.id ?? '', '');
   if (!Array.isArray(selection) || new Set(selection).size !== selection.length)
-    throw new FormulaError('JQ2015', 'selection must contain unique change IDs', plan.rule.id, '/selection');
+    throw new FormulaError('JQ2015', formulaMessage('query/formula/rule-selection-duplicate'), plan.rule.id, '/selection');
   const changes = new Map(currentPlan.changes.map((change) => [change.id, change]));
   return snapshot(selection.map((key) => {
-    if (!changes.has(key)) throw new FormulaError('JQ2015', 'unknown selected change', plan.rule.id, '/selection');
+    if (!changes.has(key)) throw new FormulaError('JQ2015', formulaMessage('query/formula/rule-selection-unknown'), plan.rule.id, '/selection');
     return changes.get(key);
   }));
 }

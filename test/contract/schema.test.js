@@ -158,6 +158,7 @@ describe('the jaren-contract schema artifact', () => {
     ['JC0011', one({ kind: 'read', output: true, errors: { e: 404 } })],
     ['JC0011', one({ kind: 'read', output: true, errors: { e: { status: 99 } } })],
     ['JC0011', one({ kind: 'read', output: true, errors: { e: { status: 600 } } })],
+    ['JC0011', one({ kind: 'read', output: true, errors: { e: { status: 304 } } })],
     ['JC0011', one({ kind: 'read', output: true, errors: { e: { schema: 5 } } })],
     ['JC0012', one({ kind: 'read', output: true, http: 'GET /a' })],
     ['JC0012', one({ kind: 'read', output: true, http: { method: 'get', path: '/a' } })],

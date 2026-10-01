@@ -58,7 +58,7 @@ const typeName = makeTypeNamer(TYPE_NAMES);
  * every `form/*` key of forms' `formsMessagesEn`, `x-form/assert`, the
  * `JQ2xxx` codes reachable through `$query`, every `contract/*`
  * wire-error msgid of `@jarenjs/contract`'s `contractMessagesEn`, and
- * every `query/*` message of `@jarenjs/json`'s `queryMessagesEn`.
+ * every `query/*` message of `@jarenjs/json`'s `queryMessagesEn` and every message of its `formulaMessagesEn`.
  * @type {Record<string, string | ((params: any, error?: object) => string)>}
  */
 export const ja = {
@@ -412,6 +412,49 @@ export const ja = {
   'query/lexical-result': 'レキシカル検索プロバイダーが無効または不完全な結果を返しました',
   //#endregion
 
+  //#region @jarenjs/json formulas (the messages of formulaMessagesEn)
+  'query/formula/query': '{formulaId}: {message}',
+  'query/formula/detail': '{formulaId}: {detail}',
+  'query/formula/profile-json': '{formulaId}: プロファイルは JSON でなければなりません',
+  'query/formula/profile-object': '{formulaId}: プロファイルはオブジェクトでなければなりません',
+  'query/formula/profile-version': '{formulaId}: サポートされていない言語バージョンです',
+  'query/formula/profile-identity': '{formulaId}: {member} は空でなく、256 文字以内でなければなりません',
+  'query/formula/profile-expression': '{formulaId}: 式は必須です',
+  'query/formula/profile-result-mode': '{formulaId}: 不明な結果モードです',
+  'query/formula/profile-bindings': '{formulaId}: bindings はオブジェクトでなければなりません',
+  'query/formula/profile-reserved': '{formulaId}: computed と context は予約済みの束縛です',
+  'query/formula/profile-helpers': '{formulaId}: helpers は配列でなければなりません',
+  'query/formula/profile-helper': '{formulaId}: ヘルパー関数には一意の名前とバージョンが必要です',
+  'query/formula/profile-packs': '{formulaId}: packs は配列でなければなりません',
+  'query/formula/profile-pack': '{formulaId}: パックには一意の名前とバージョンが必要です',
+  'query/formula/helper-missing': '{formulaId}: 純粋なヘルパー関数 {name}@{version} が見つからないか、互換性がありません',
+  'query/formula/pack-missing': '{formulaId}: 演算子パック {name}@{version} が見つからないか、互換性がありません',
+  'query/formula/helper-shadows': '{formulaId}: ヘルパー関数 {name} は、指定された演算子パックの関数と同じ名前です',
+  'query/formula/schema-missing': '{formulaId}: スキーマまたは型テストコンパイラーが見つからないか、互換性がありません',
+  'query/formula/schema-rejected': '{formulaId}: スキーマが拒否されました',
+  'query/formula/computed-unnamed': '{formulaId}: computed の参照には名前付きの対象が必要です',
+  'query/formula/computed-cycle': '{formulaId}: 計算される依存関係が循環しています',
+  'query/formula/computed-unknown': '{formulaId}: 不明な計算対象です',
+  'query/formula/targets-invalid': '{formulaId}: 対象の一覧が無効です',
+  'query/formula/target-identity': '{formulaId}: 各対象には一意の識別子とブール値の enabled が必要です',
+  'query/formula/target-schemas': '{formulaId}: 対象の schemas は id -> {{version, schema} のオブジェクトでなければなりません',
+  'query/formula/target-schema-clash': "{formulaId}: 同じ id '{id}' に異なるスキーマが 2 つあります",
+  'query/formula/batch-limit': '{formulaId}: バッチの行数またはセル数の上限を超えました',
+  'query/formula/row-identity': '{formulaId}: 各行には一意で安定した ID が必要です',
+  'query/formula/input-schema': '{formulaId}: 入力が入力スキーマを満たしていません',
+  'query/formula/result-schema': '{formulaId}: 結果が結果スキーマを満たしていません',
+  'query/formula/outcome-invalid': '{formulaId}: タグ付きの結果が無効です',
+  'query/formula/parity-expected': '{formulaId}: 期待される結果 {index} は JSON ではありません',
+  'query/formula/rule-identity': '{formulaId}: ルールには識別子、対象、書き込み可能なフィールドが必要です',
+  'query/formula/rule-field-not-writable': '{formulaId}: 対象フィールドは書き込みできません',
+  'query/formula/rule-rows': '{formulaId}: 上限のある行とデータセットのリビジョンが必要です',
+  'query/formula/rule-entity-duplicate': '{formulaId}: エンティティの識別子が重複しています',
+  'query/formula/rule-preview-stale': '{formulaId}: プレビューが古いか、変更されています',
+  'query/formula/rule-selection-duplicate': '{formulaId}: 選択には一意の変更 ID が必要です',
+  'query/formula/rule-selection-unknown': '{formulaId}: 選択された変更が不明です',
+  'query/formula/rule-conflict': '{formulaId}: 同じフィールドに矛盾する値があります',
+  //#endregion
+
   //#region @jarenjs/locales numbers (the decimal format, CLDR as ICU 78.3 ships it)
   'number/decimal-separator': '.',
   'number/grouping-separator': ',',
@@ -422,5 +465,6 @@ export const ja = {
   'number/exponent-separator': 'E',
   'number/infinity': '∞',
   'number/nan': 'NaN',
+  'number/minimum-grouping-digits': '1',
   //#endregion
 };

@@ -180,13 +180,36 @@ describe('PostgreSQL native cursor and deadline execution', { skip: !url && 'JAR
     }
     finally { await connection.close(); }
   });
+  it('a transaction that settles with a read in flight leaves the next caller untouched', async () => {
+    const store = await openStore(model, { driver: postgresDriver(pool, { schema }) });
+    try {
+      await store.collection('notes').put({ id: 'a' });
+      for (const settle of ['commit', 'rollback']) {
+        /** @type {any} */
+        let inflight;
+        await store.transaction(async (tx) => {
+          await tx.collection('notes').put({ id: `b-${settle}` });
+          inflight = Promise.resolve(tx.collection('notes').get('a')).then(() => 'read', (/** @type {any} */ error) => error.code);
+          if (settle === 'rollback') throw new Error('rolled back on purpose');
+        }).catch((error) => { if (!/on purpose/.test(error.message)) throw error; });
+        // the next caller's statements run in a transaction no stray statement aborted
+        assert.deepEqual(await store.collection('notes').get('a'), { id: 'a' }, settle);
+        await store.transaction(async (tx) => { await tx.collection('notes').put({ id: `after-${settle}` }); });
+        assert.deepEqual(await store.collection('notes').get(`after-${settle}`), { id: `after-${settle}` });
+        // the read itself either finished inside its transaction or says it outlived it
+        assert.ok(['read', 'JD2070'].includes(await inflight), `${settle}: ${await inflight}`);
+      }
+    }
+    finally { await store.close(); }
+  });
   it('closes an abandoned Store cursor and drains or discards an active fetch within the close deadline', async () => {
     const store = await openStore(model, { driver: postgresDriver(pool, { schema }) });
     await store.collection('notes').put({ id: 'one' });
     const held = store.collection('notes').query(document);
     await held.next();
     await store.close();
-    assert.equal((await held.next()).done, true);
+    // the stream close cut short refuses its next pull rather than ending as though complete
+    await assert.rejects(held.next(), code('JD2063'));
     const fetching = deferred();
     const source = { connect: async () => {
       const client = await pool.connect();

@@ -37,14 +37,14 @@ is the index of those guides, and it is how a reader reaches any of them.
 | Document | Lines | What it writes, and when to open it |
 |---|---:|---|
 | [LINQ-FORMAT.md](LINQ-FORMAT.md) | 951 | this file, the binder and the family's **normative reference**: what a pen is, the rules all of them keep, the shared `JL01xx` table, and the cross-pen views derived from the guides it indexes. **Read it when** you want a rule that is true of every pen, an index of the documents, or one place to look up a method without knowing which pen owns it |
-| [QUERY-PEN.md](QUERY-PEN.md) | 1,823 | the chain, `.` — query documents (`jaren-query`) and the provider seam. **Read it when** you are querying data, or implementing a provider that answers a query document |
+| [QUERY-PEN.md](QUERY-PEN.md) | 1,825 | the chain, `.` — query documents (`jaren-query`) and the provider seam. **Read it when** you are querying data, or implementing a provider that answers a query document |
 | [SCHEMA-PEN.md](SCHEMA-PEN.md) | 1,250 | `./schema` — JSON Schema 2020-12: the structural keywords, the constraints and the annotations, each with a method of its own, plus `$query`, `$defs`/`$ref` recursion and the normalizer's per-field predicates. **Read it when** you are describing the shape of data — for validation, for a form, or as the base of an entity |
 | [MODEL-PEN.md](MODEL-PEN.md) | 1,117 | `./model` — the `x-entity` vocabulary on JSON Schema, and the `$model` 0.1 document `openStore` accepts unchanged. **Read it when** you are declaring a store's entities, their keys and their relations |
 | [JSLT-PEN.md](JSLT-PEN.md) | 965 | `./jslt` — `$jslt` 0.1 stylesheets: the envelope and its rules, whose bodies are captured over the matched value. **Read it when** you are transforming one document into another |
 | [MIGRATION-PEN.md](MIGRATION-PEN.md) | 810 | `./migration` — `$migration` 0.1 documents: the two shape hashes and the ordered steps the runner takes. **Read it when** you are moving a store from one model to the next |
 | [CONTRACT-PEN.md](CONTRACT-PEN.md) | 1,222 | `./contract` — `$contract` 0.1 documents: the operations, their schemas, their declared behavior and their REST binding. **Read it when** you are declaring an API and want its client, its server and its tools typed from one document |
 | [FLOW-PEN.md](FLOW-PEN.md) | 1,041 | `./flow` — `jaren-fsm` 0.1 machines and `jaren-dag` 0.1 dataflows, every query-valued member captured. **Read it when** you are declaring a state machine or a dependency graph of tasks |
-| [APP-PEN.md](APP-PEN.md) | 1,295 | `./app` — the `jaren-app` 0.1 document `createApp` runs, and the JSON Schema of its state beside it. **Read it when** you are declaring a whole application: state, view, actions, effects |
+| [APP-PEN.md](APP-PEN.md) | 1,307 | `./app` — the `jaren-app` 0.1 document `createApp` runs, and the JSON Schema of its state beside it. **Read it when** you are declaring a whole application: state, view, actions, effects |
 | [FORMS-PEN.md](FORMS-PEN.md) | 940 | `./forms` — the `x-form` vocabulary on JSON Schema, and `assertOnSubmit()`, the same rules' layer-3 `$query` twin. **Read it when** you are turning a schema into a form |
 | [MESSAGES-PEN.md](MESSAGES-PEN.md) | 105 | `./messages` — JSON message catalogs and message references. **Read it when** you want checked translation keys, placeholders and explicit completeness. |
 | [JTLT-PEN.md](JTLT-PEN.md) | 83 | `./jtlt` — text templates with JSLT dispatch and query expressions. **Read it when** you want to author Markdown, XML or source text as portable JSON. |
@@ -205,22 +205,22 @@ and the bundle is the byte count the tree-shaking probe builds.
 | Document | Subpath | Lines | Mapping rows | Worked examples | Refusals | Bundle |
 |---|---|---:|---:|---:|---:|---:|
 | [LINQ-FORMAT.md](LINQ-FORMAT.md) | — | 951 | — | — | — | — |
-| [QUERY-PEN.md](QUERY-PEN.md) | `.` | 1,823 | 34 | 8 | 16 | 210,075 B |
-| [SCHEMA-PEN.md](SCHEMA-PEN.md) | `./schema` | 1,250 | 82 | 10 | 4 | 36,880 B |
-| [MODEL-PEN.md](MODEL-PEN.md) | `./model` | 1,117 | 30 | 6 | 3 | 46,224 B |
-| [JSLT-PEN.md](JSLT-PEN.md) | `./jslt` | 965 | 17 | 8 | 3 | 19,851 B |
-| [MIGRATION-PEN.md](MIGRATION-PEN.md) | `./migration` | 810 | 13 | 5 | 4 | 25,673 B |
-| [CONTRACT-PEN.md](CONTRACT-PEN.md) | `./contract` | 1,222 | 38 | 6 | 3 | 50,125 B |
-| [FLOW-PEN.md](FLOW-PEN.md) | `./flow` | 1,041 | 16 | 7 | 3 | 19,908 B |
-| [APP-PEN.md](APP-PEN.md) | `./app` | 1,295 | 24 | 7 | 4 | 51,242 B |
-| [FORMS-PEN.md](FORMS-PEN.md) | `./forms` | 940 | 18 | 6 | 3 | 41,036 B |
-| [MESSAGES-PEN.md](MESSAGES-PEN.md) | `./messages` | 105 | 9 | 2 | 1 | 24,603 B |
-| [JTLT-PEN.md](JTLT-PEN.md) | `./jtlt` | 83 | 13 | 1 | 2 | 16,720 B |
-| [PROJECT-PEN.md](PROJECT-PEN.md) | `./project` | 81 | 9 | 1 | 1 | 15,150 B |
-| [CHARTS-PEN.md](CHARTS-PEN.md) | `./charts` | 94 | 21 | 1 | 1 | 16,939 B |
-| [DB-CLIENT.md](DB-CLIENT.md) | `./db` | 1,144 | 45 | 4 | 2 | 833,470 B |
-| [FORMULA-PEN.md](FORMULA-PEN.md) | `./formula` | 41 | 2 | — | — | 16,568 B |
-| **16 documents** | | **12,962** | **371** | **72** | | |
+| [QUERY-PEN.md](QUERY-PEN.md) | `.` | 1,825 | 34 | 8 | 16 | 210,608 B |
+| [SCHEMA-PEN.md](SCHEMA-PEN.md) | `./schema` | 1,250 | 82 | 10 | 4 | 36,956 B |
+| [MODEL-PEN.md](MODEL-PEN.md) | `./model` | 1,117 | 30 | 6 | 3 | 46,300 B |
+| [JSLT-PEN.md](JSLT-PEN.md) | `./jslt` | 965 | 17 | 8 | 3 | 19,927 B |
+| [MIGRATION-PEN.md](MIGRATION-PEN.md) | `./migration` | 810 | 13 | 5 | 4 | 25,749 B |
+| [CONTRACT-PEN.md](CONTRACT-PEN.md) | `./contract` | 1,222 | 38 | 6 | 3 | 50,201 B |
+| [FLOW-PEN.md](FLOW-PEN.md) | `./flow` | 1,041 | 16 | 7 | 3 | 19,984 B |
+| [APP-PEN.md](APP-PEN.md) | `./app` | 1,307 | 24 | 7 | 4 | 52,114 B |
+| [FORMS-PEN.md](FORMS-PEN.md) | `./forms` | 940 | 18 | 6 | 3 | 41,112 B |
+| [MESSAGES-PEN.md](MESSAGES-PEN.md) | `./messages` | 105 | 9 | 2 | 1 | 24,679 B |
+| [JTLT-PEN.md](JTLT-PEN.md) | `./jtlt` | 83 | 13 | 1 | 2 | 16,796 B |
+| [PROJECT-PEN.md](PROJECT-PEN.md) | `./project` | 81 | 9 | 1 | 1 | 15,226 B |
+| [CHARTS-PEN.md](CHARTS-PEN.md) | `./charts` | 94 | 21 | 1 | 1 | 17,015 B |
+| [DB-CLIENT.md](DB-CLIENT.md) | `./db` | 1,144 | 45 | 4 | 2 | 835,534 B |
+| [FORMULA-PEN.md](FORMULA-PEN.md) | `./formula` | 41 | 2 | — | — | 21,572 B |
+| **16 documents** | | **12,976** | **371** | **72** | | |
 <!--/fact-->
 
 A pen whose mapping rows are far below its worked examples is a pen
@@ -263,21 +263,21 @@ it and each document publishes it. The rounded column is what
 <!--fact:pens.cost-->
 | Subpath | Document | Bundle | Rounded |
 |---|---|---:|---:|
-| `@jarenjs/linq` | [QUERY-PEN.md](QUERY-PEN.md) | 210,075 B | 210 kB |
-| `@jarenjs/linq/schema` | [SCHEMA-PEN.md](SCHEMA-PEN.md) | 36,880 B | 37 kB |
-| `@jarenjs/linq/model` | [MODEL-PEN.md](MODEL-PEN.md) | 46,224 B | 46 kB |
-| `@jarenjs/linq/jslt` | [JSLT-PEN.md](JSLT-PEN.md) | 19,851 B | 20 kB |
-| `@jarenjs/linq/migration` | [MIGRATION-PEN.md](MIGRATION-PEN.md) | 25,673 B | 26 kB |
-| `@jarenjs/linq/contract` | [CONTRACT-PEN.md](CONTRACT-PEN.md) | 50,125 B | 50 kB |
-| `@jarenjs/linq/flow` | [FLOW-PEN.md](FLOW-PEN.md) | 19,908 B | 20 kB |
-| `@jarenjs/linq/app` | [APP-PEN.md](APP-PEN.md) | 51,242 B | 51 kB |
-| `@jarenjs/linq/forms` | [FORMS-PEN.md](FORMS-PEN.md) | 41,036 B | 41 kB |
-| `@jarenjs/linq/messages` | [MESSAGES-PEN.md](MESSAGES-PEN.md) | 24,603 B | 25 kB |
-| `@jarenjs/linq/jtlt` | [JTLT-PEN.md](JTLT-PEN.md) | 16,720 B | 17 kB |
-| `@jarenjs/linq/project` | [PROJECT-PEN.md](PROJECT-PEN.md) | 15,150 B | 15 kB |
-| `@jarenjs/linq/charts` | [CHARTS-PEN.md](CHARTS-PEN.md) | 16,939 B | 17 kB |
-| `@jarenjs/linq/db` | [DB-CLIENT.md](DB-CLIENT.md) | 833,470 B | 833 kB |
-| `@jarenjs/linq/formula` | [FORMULA-PEN.md](FORMULA-PEN.md) | 16,568 B | 17 kB |
+| `@jarenjs/linq` | [QUERY-PEN.md](QUERY-PEN.md) | 210,608 B | 211 kB |
+| `@jarenjs/linq/schema` | [SCHEMA-PEN.md](SCHEMA-PEN.md) | 36,956 B | 37 kB |
+| `@jarenjs/linq/model` | [MODEL-PEN.md](MODEL-PEN.md) | 46,300 B | 46 kB |
+| `@jarenjs/linq/jslt` | [JSLT-PEN.md](JSLT-PEN.md) | 19,927 B | 20 kB |
+| `@jarenjs/linq/migration` | [MIGRATION-PEN.md](MIGRATION-PEN.md) | 25,749 B | 26 kB |
+| `@jarenjs/linq/contract` | [CONTRACT-PEN.md](CONTRACT-PEN.md) | 50,201 B | 50 kB |
+| `@jarenjs/linq/flow` | [FLOW-PEN.md](FLOW-PEN.md) | 19,984 B | 20 kB |
+| `@jarenjs/linq/app` | [APP-PEN.md](APP-PEN.md) | 52,114 B | 52 kB |
+| `@jarenjs/linq/forms` | [FORMS-PEN.md](FORMS-PEN.md) | 41,112 B | 41 kB |
+| `@jarenjs/linq/messages` | [MESSAGES-PEN.md](MESSAGES-PEN.md) | 24,679 B | 25 kB |
+| `@jarenjs/linq/jtlt` | [JTLT-PEN.md](JTLT-PEN.md) | 16,796 B | 17 kB |
+| `@jarenjs/linq/project` | [PROJECT-PEN.md](PROJECT-PEN.md) | 15,226 B | 15 kB |
+| `@jarenjs/linq/charts` | [CHARTS-PEN.md](CHARTS-PEN.md) | 17,015 B | 17 kB |
+| `@jarenjs/linq/db` | [DB-CLIENT.md](DB-CLIENT.md) | 835,534 B | 836 kB |
+| `@jarenjs/linq/formula` | [FORMULA-PEN.md](FORMULA-PEN.md) | 21,572 B | 22 kB |
 <!--/fact-->
 
 Read these as prices, not as scores. `./db` is the largest by an order of
@@ -637,7 +637,7 @@ it says.
 | Method | Emits | Type reading | Status |
 |---|---|---|---|
 | `errors: { <code>: … }` | `{ <code>: { status?, schema? } }`, in declaration order | the declared codes are the operation's `errors` union — `'conflict' \| 'not-found'` | native; a map that is not a plain object, a code outside the `errorCode` grammar (CONTRACT-FORMAT §2.4: lowercase words, dotted for namespacing — `ai.rate-limited`), or an entry that is not a plain object, `JL0101` |
-| `error({ status?, schema? })` | `{ status?, schema? }` in that order — `error()` with nothing emits `{}` | `ErrorDeclaration<E>` | native; another member, or a status outside 100–599, `JL0101` |
+| `error({ status?, schema? })` | `{ status?, schema? }` in that order — `error()` with nothing emits `{}` | `ErrorDeclaration<E>` | native; another member, or a status outside 400–599, `JL0101` |
 
 **The policy**
 
@@ -730,22 +730,22 @@ it says.
 | Method | Emits | Type reading | Status |
 |---|---|---|---|
 | `action(fn, { payload?, event? })` | one action document, captured over `$`, `$event`, `$payload` | `ActionDeclaration<Payload>`; `payload` and `event` are TYPES — the format carries no schema for either, and nothing is emitted for them | native; a non-builder `payload` `JL0101`; an excluded `event` field `JL0102`; a name §3.1 does not bind `JL0104` |
-| `transition({ state?, patch?, effects? })` | the transition object of APP-FORMAT §3.2, in the order the runtime applies it | `Transition` | native; another member `JL0101` |
-| `effect(run, with?)` | `{ run, with? }` (§5.1); `with` is a value in the ACTION's scope, not a callback | `EffectDeclaration<Run>` — `Run` is a literal | native; an empty `run` `JL0101` |
-| `when(cond, then, otherwise?)` | `{ "$if": [cond, then, otherwise?] }` — the branches spelled as the action spells its own result; no `otherwise` is the empty sequence, the no-op transition | `Conditional`; `cond` is a `BoolExpr` or a boolean, a branch a `Transition` or a `Conditional` | native; a condition or a branch that is not one `JL0101` — a branch written as an object is held to `transition()`'s own rules; outside an action's capture (none, a subscription's, a view's, a chain's) `JL0005` |
+| `transition({ state?, patch?, effects? })` | the transition object of APP-FORMAT §3.2, in the order the runtime applies it | `Transition`; `state` does not take a `Conditional` (§5.7) | native; another member `JL0101`; a `when()` in the state or in a patch operation `JL0101` |
+| `effect(run, with?)` | `{ run, with? }` (§5.1); `with` is a value in the ACTION's scope, not a callback | `EffectDeclaration<Run>` — `Run` is a literal; `with` does not take a `Conditional` | native; an empty `run` `JL0101`; a `when()` in `with` `JL0101` |
+| `when(cond, then, otherwise?)` | `{ "$if": [cond, then, otherwise?] }` — the branches spelled as the action spells its own result; no `otherwise` is the empty sequence, the no-op transition | `Conditional`; `cond` is a `BoolExpr` or a boolean, a branch a `Transition` or a `Conditional` | native; a condition or a branch that is not one `JL0101` — another `when()` is a branch, never a condition, and a branch written as an object is held to `transition()`'s own rules; outside an action's capture (none, a subscription's, a view's, a chain's) `JL0005` |
 | `taskSlot(name, { at, mode?, fail? })` | the slot's `initial` value `{ id: 0, status: 'idle', error: null }` and four actions, `<name>/start`, `<name>/done`, `<name>/fail` and `<name>/cancel`, each answered under its own name for a spread into `actions` | `TaskSlot<Name, State>`: the names are template literals, so `ActionsOf<>` stays exact | native; an option it does not take, a `mode` outside `switch`/`exhaust`/`concat`/`parallel`, a start prop the slot owns (`id`, `done`, `fail`, `slot`), `fail()` on a slot without `fail: true`, or an `at` that answers no path into the state `JL0101` |
 
 **The seven patch operations**
 
 | Method | Emits | Type reading | Status |
 |---|---|---|---|
-| `add(path, value)` | `{ op: 'add', path, value }` — **sets a member, and REPLACES an array when the path names one** | `PatchOp` | native |
-| `append(path, value)` | `{ op: 'add', path: '<path>/-', value }` — RFC 6902's array APPEND, the same op at the array's `-` position | `PatchOp` | native |
-| `replace(path, value)` | `{ op: 'replace', path, value }` — the op a transition writes most, and the one an array ELEMENT needs | `PatchOp` | native |
+| `add(path, value)` | `{ op: 'add', path, value }` — **sets a member, and REPLACES an array when the path names one** | `PatchOp`; `value` does not take a `Conditional` | native; a `when()` in `value` `JL0101` where a transition reads the operation |
+| `append(path, value)` | `{ op: 'add', path: '<path>/-', value }` — RFC 6902's array APPEND, the same op at the array's `-` position | `PatchOp`; `value` does not take a `Conditional` | native; a `when()` in `value` `JL0101` where a transition reads the operation |
+| `replace(path, value)` | `{ op: 'replace', path, value }` — the op a transition writes most, and the one an array ELEMENT needs | `PatchOp`; `value` does not take a `Conditional` | native; a `when()` in `value` `JL0101` where a transition reads the operation |
 | `remove(path)` | `{ op: 'remove', path }` | `PatchOp` | native |
 | `move(from, path)` | `{ op: 'move', from, path }` — both lowered as pointers | `PatchOp` | native |
 | `copy(from, path)` | `{ op: 'copy', from, path }` | `PatchOp` | native |
-| `test(path, value)` | `{ op: 'test', path, value }` — a failing test aborts the WHOLE transition (`JA2004`), which is the format's own way to write a precondition | `PatchOp` | native |
+| `test(path, value)` | `{ op: 'test', path, value }` — a failing test aborts the WHOLE transition (`JA2004`), which is the format's own way to write a precondition | `PatchOp`; `value` does not take a `Conditional` | native; a `when()` in `value` `JL0101` where a transition reads the operation |
 | a path lambda `(st, x) => …` | the JSON Pointer the state shape describes: `st.todos` → `/todos`, `st.todos.at(2).done` → `/todos/2/done`, `st.get('a/b')` → `/a~1b` (RFC 6901 escaping) | `PatchPath<State, Payload>` — annotate to type it | native |
 | a path lambda with a COMPUTED index | the pointer as a string EXPRESSION, `{ "$concat": ["/todos/", <index>, "/done"] }` — APP-FORMAT §3.2's "op members like `value` and `path` are themselves query expressions" | the same | native; anything that is not a chain of member reads and subscripts `JL0102` |
 | a path as a string | the pointer verbatim, `+ '/-'` under `append()` | `string` | native; a string that does not start with `/` `JL0102` |

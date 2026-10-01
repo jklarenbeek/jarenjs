@@ -39,6 +39,7 @@ import { collectSameDocumentAnchors, resolveSameDocumentRef } from '@jarenjs/val
 
 import { compileContract } from './compile.js';
 import { ContractHostError } from './errors.js';
+import { bareMedia } from './http/wire.js';
 import { isCompiledContract } from './public.js';
 import { pathShape } from '@jarenjs/core/route';
 
@@ -602,7 +603,15 @@ function compareBinding(diff, aOp, bOp) {
   const bShape = pathShape(bOp.http.template);
   if (aShape !== bShape) emit('path', aOp.http.path, bOp.http.path);
   if (aOp.http.status !== bOp.http.status) emit('status', aOp.http.status, bOp.http.status);
-  if (aOp.http.media !== bOp.http.media) emit('media', aOp.http.media, bOp.http.media);
+  if (aOp.http.media !== bOp.http.media) {
+    // the binding matches media by type/subtype alone — case-insensitive,
+    // parameters ignored — so a respelling moves the document, never what
+    // a request must send
+    if (bareMedia(aOp.http.media) === bareMedia(bOp.http.media)) {
+      push(diff.neutral, { kind: 'media-respelled', op, docPath: opPath(op) + '/http/media', from: aOp.http.media, to: bOp.http.media, rule: 'R3' });
+    }
+    else emit('media', aOp.http.media, bOp.http.media);
+  }
   if (aOp.http.opaque !== bOp.http.opaque) emit('media', aOp.http.opaque, bOp.http.opaque);
   if (aOp.http.body !== bOp.http.body) emit('body', aOp.http.body, bOp.http.body);
   for (const m of new Set([...Object.keys(aOp.http.in), ...Object.keys(bOp.http.in)])) {
@@ -663,10 +672,13 @@ function comparePolicy(diff, aOp, bOp) {
   const from = aOp.policy;
   const to = bOp.policy;
   if (from.idempotency !== to.idempotency) {
-    const tightened = to.idempotency === 'required';
-    push(tightened ? diff.breaking : diff.additive, {
-      kind: tightened ? 'idempotency-required' : 'idempotency-relaxed',
-      op, docPath: at('idempotency'), from: from.idempotency, to: to.idempotency, rule: 'R12',
+    // a client must now send a key it never sent (→ required); or a key an
+    // old client still sends — and retries under, by policy or by hand — is
+    // no longer read, so a retried lost answer runs the command twice (→ none)
+    const kind = to.idempotency === 'required' ? 'idempotency-required'
+      : to.idempotency === 'none' ? 'idempotency-dropped' : 'idempotency-relaxed';
+    push(kind === 'idempotency-relaxed' ? diff.additive : diff.breaking, {
+      kind, op, docPath: at('idempotency'), from: from.idempotency, to: to.idempotency, rule: 'R12',
     });
   }
   const neutral = /** @type {[string, unknown, unknown][]} */ ([

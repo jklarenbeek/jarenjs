@@ -500,9 +500,16 @@ export function finishConnection(raw, dialect, synchronous, capabilities, queueT
    * IS the block, and the flag is never read.
    */
   let inBlock = false;
-  /** The structured savepoints open right now: on SQLite the first one
-   * starts the transaction, so a scope that finds one is inside it. */
+  /** The structured savepoints the current owner has open right now: on
+   * SQLite the first one starts the transaction, so a scope that finds one
+   * is inside it. Handing the connection on resets it — the owner's
+   * transaction ended and took its savepoints with it — and a savepoint
+   * whose body settles after that (a hold limit rolled its root back while
+   * it still ran) no longer counts against the next owner. */
   let structured = 0;
+  /** Bumped each time the connection is handed on: which owner a
+   * savepoint's count belongs to. */
+  let ownership = 0;
   /**
    * Whether an owning callback is on the stack RIGHT NOW — set around the
    * synchronous extent of every transaction body, cleared the moment it
@@ -530,6 +537,8 @@ export function finishConnection(raw, dialect, synchronous, capabilities, queueT
   /** Hand the connection to the next waiter, in arrival order. */
   const release = () => {
     owned = false;
+    structured = 0;
+    ownership += 1;
     const next = waiting.shift();
     if (next !== undefined) next();
   };
@@ -578,7 +587,7 @@ export function finishConnection(raw, dialect, synchronous, capabilities, queueT
         reject(error);
       };
       const timer = unbounded ? undefined : setTimeout(() => abandon(new DbCompileError('JD0012',
-        `${what} waited ${queueTimeout}ms for the open transaction to settle. `
+        `${what} waited ${queueTimeout}ms for the connection, which a transaction or another call held all that time. `
         + 'A transaction owns its connection until it commits; work that belongs '
         + 'INSIDE it must go through the store or client the callback received '
         + '(tx.collection / tx.entity / tx.entities / tx.transaction), not the '
@@ -631,7 +640,7 @@ export function finishConnection(raw, dialect, synchronous, capabilities, queueT
     requireOpen();
     // a synchronous extent inside an owning callback cannot interleave
     // with anything, so there is nothing to wait for
-    if (onStack) return fn(scopeFor(ALWAYS_LIVE));
+    if (onStack) return fn(scopeFor(INLINE_CALL));
     return whenFree(() => {
       owned = true;
       const life = { alive: true };
@@ -724,6 +733,11 @@ export function finishConnection(raw, dialect, synchronous, capabilities, queueT
   /** The life of scopes no settlement can outlive (a synchronous extent
    * inside an owning callback). */
   const ALWAYS_LIVE = Object.freeze({ alive: true });
+  /** The life of an unrelated caller's extent run inline, on an owning
+   * callback's synchronous extent: part of that owner's work, so its scope
+   * says so (`inline`) and the store gives the owner its slots back as soon
+   * as the call returns rather than when its promise settles. */
+  const INLINE_CALL = Object.freeze({ alive: true });
   /**
    * Refuse a statement through a scope whose transaction (or exclusive
    * extent) has settled. A body can outlive its transaction — a hold
@@ -822,7 +836,8 @@ export function finishConnection(raw, dialect, synchronous, capabilities, queueT
     // connection may already belong to the next owner
     return chain(openCheckpoint(), (checkpoint) => {
       structured += 1;
-      const done = () => { structured -= 1; };
+      const owner = ownership;
+      const done = () => { if (owner === ownership) structured -= 1; };
       let out;
       try {
         out = settleTransaction(() => callBody(fn, life),
@@ -851,6 +866,7 @@ export function finishConnection(raw, dialect, synchronous, capabilities, queueT
     synchronous,
     capabilities,
     dialect,
+    inline: life === INLINE_CALL,
     /** @param {string} sql */
     exec: (sql) => { requireOpen(); requireLive(life); return raw.exec(sql); },
     /** @param {string} sql */

@@ -88,6 +88,35 @@ describe('a numeric key has one canonical spelling', () => {
   });
 });
 
+describe('a lookup on a numeric key column by text that is no number', () => {
+  const NUMBERED = {
+    $model: '0.1',
+    collections: { nums: { schema: { type: 'object', properties: { id: { type: 'integer' } }, required: ['id'] }, key: '/id', indexes: [] } },
+    entities: { Doc: { schema: { type: 'object', required: ['id'], properties: { id: { type: 'integer', 'x-entity': { key: true } }, t: { type: 'string' } } } } },
+  };
+  it('names no row: absent, nothing deleted, nothing to patch or update — and decimal text still finds its number', async () => {
+    const store = await openStore(NUMBERED, { driver: nodeDriver() });
+    try {
+      const nums = store.collection('nums');
+      await nums.put({ id: 7 });
+      for (const key of ['abc', 'NaN', 'Infinity', '0x7', '1_000', '-', '']) {
+        assert.strictEqual(await nums.get(key), undefined, key);
+        assert.strictEqual(await nums.delete(key), false, key);
+        await assert.rejects(Promise.resolve(nums.patch(key, [{ op: 'add', path: '/x', value: 1 }])), coded('JD2006'), key);
+      }
+      for (const key of ['7', ' 7', '7.0', '+7', '7e0']) assert.deepStrictEqual(await nums.get(key), { id: 7 }, key);
+      const docs = store.entity('Doc');
+      await docs.create({ id: 7, t: 'x' });
+      assert.strictEqual(await docs.get('abc'), undefined);
+      assert.strictEqual(await docs.delete('abc'), false);
+      await assert.rejects(Promise.resolve(docs.update('abc', { t: 'y' })), coded('JD2006'));
+      assert.deepStrictEqual(await docs.get('7'), { id: 7, t: 'x' });
+      assert.deepStrictEqual(await nums.all(), [{ id: 7 }], 'nothing was written or removed');
+    }
+    finally { await store.close(); }
+  });
+});
+
 describe('a file an earlier node write left', () => {
   it('is read under either spelling, and every write converges the row to one canonical key', async () => {
     const { dbPath, cleanup } = await freshFile();

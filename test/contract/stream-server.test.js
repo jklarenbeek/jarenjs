@@ -481,6 +481,22 @@ describe('stream runner — the total reset', () => {
     assert.deepStrictEqual(carrier.log, ['snapshot:42', 'patch:43'], 'only live events above the snapshot id follow');
   });
 
+  it('a cursor above the log\'s high watermark — a log restored or recreated — is a reset: one snapshot at the watermark with reset true, then every live emission above it', () => {
+    /** @type {number[]} */
+    const asked = [];
+    const source = makeSource({ rows: ['restored'] }, {
+      // the page a change feed answers such a cursor: nothing after it, and no refusal
+      replay: (/** @type {number} */ after) => { asked.push(after); return { items: [], next: after, earliestAvailable: 1, highWatermark: 10, hasMore: false, resetRequired: false }; },
+    });
+    const carrier = makeCarrier({ sync: true });
+    runSubscription(ROUTE, source.sub, carrier.hooks, { lastSeq: 50, validate: true });
+    assert.deepStrictEqual(asked, [50]);
+    assert.deepStrictEqual(carrier.log, ['snapshot:10']);
+    assert.deepStrictEqual(carrier.frames[0].data, { value: { rows: ['restored'] }, resumed: false, reset: true, earliestAvailable: 1, highWatermark: 10 });
+    for (const seq of [11, 12, 13]) source.emit(patchAt(seq));
+    assert.deepStrictEqual(carrier.log, ['snapshot:10', 'patch:11', 'patch:12', 'patch:13'], 'nothing above the watermark is dropped');
+  });
+
   it('a reset with nothing held uses the page\'s watermark as the id', () => {
     const source = makeSource({ rows: ['x'] }, { replay: () => ({ items: [], earliestAvailable: 30, highWatermark: 40, hasMore: false, resetRequired: true }) });
     const carrier = makeCarrier({ sync: true });

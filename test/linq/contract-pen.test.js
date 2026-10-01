@@ -364,6 +364,12 @@ describe('the contract pen: the refusals it can see earlier than the compiler', 
       /does not take 'headers'/);
     assert.match(refusal(() => read({ output: true, extra: 1 })).reason, /does not take 'extra'/);
     assert.match(refusal(() => error({ code: 'x' })).reason, /does not take 'code'/);
+    // a failure's status is a client or server error, as the contract compiler requires (JC0011)
+    for (const status of [99, 200, 304, 399, 600]) {
+      assert.match(refusal(() => error({ status })).reason, /error\(\) status is an integer in 400–599/, String(status));
+    }
+    assert.deepStrictEqual({ ...error({ status: 400 }) }, { status: 400 });
+    assert.deepStrictEqual({ ...error({ status: 599 }) }, { status: 599 });
     assert.match(refusal(() => defineContract({ name: 'x' }, { a: read({ output: true }) })).reason,
       /does not take 'name'/);
     assert.match(refusal(() => defineContract({}, {

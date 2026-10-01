@@ -24,10 +24,16 @@
  * these controls MUST register them.
  *
  * A cleared text or number control removes its member (an empty control
- * means absent); a cleared array element keeps its slot. The remaining
- * limitation: standard actions require intermediate object/array
- * containers to exist in the data. `createInitialData` supplies those
- * containers for a new form; loaded documents must supply them too.
+ * means absent); a cleared array element keeps its slot. Every control
+ * shows the state: the text family and the textarea are controlled and
+ * write on every keystroke, and the `json` editor, which commits on
+ * `change`, is keyed by its text — a new value is a new editor, focused
+ * or not, and a render that leaves the value alone keeps what the
+ * operator is typing.
+ * The remaining limitation: standard actions require intermediate
+ * object/array containers to exist in the data. `createInitialData`
+ * supplies those containers for a new form; loaded documents must supply
+ * them too.
  */
 
 /** The default action names shared by both factories. */
@@ -54,9 +60,11 @@ const JSON_FIELD = 'formJsonValue';
  * A select carries `option.key` (the view model's JSON text for the
  * typed enum value) and the `json` editor carries whatever the operator
  * typed. Unparsable text yields `null` rather than throwing, so a
- * half-typed JSON document is a validation problem — visible, fixable —
- * instead of a dispatch error; `json` fields therefore want a schema
- * that rejects `null` if absence is not acceptable.
+ * half-typed JSON document is a validation problem instead of a dispatch
+ * error: the field holds `null` — over a stored value that is a new
+ * value, which empties the editor — and its errors say why when its
+ * schema refuses `null`; `json` fields therefore want a schema that
+ * rejects `null` if absence is not acceptable.
  *
  * @example
  * createApp(doc, { node, eventFields: { ...formEventFields() } });
@@ -249,26 +257,35 @@ export function createFormView(options = {}) {
         on: { change: { action: act.check, with: writeWith } },
       }]),
     },
-    // free text: textarea with the value as its text child
+    // free text: a controlled textarea, as the text inputs are. It writes
+    // on every keystroke, so the value it shows is the state's; a text
+    // child would only be its default, which an edited textarea ignores
     {
       match: ctl('textarea'),
       body: field(['textarea', {
+        value: '$.value',
         placeholder: '$.placeholder',
         'aria-required': { $if: ['$.required', 'true'] },
         readonly: '$.readOnly',
         disabled,
         on: { input: { action: act.input, with: writeWith } },
-      }, '$.value']),
+      }]),
     },
     // numbers: coerced by the standard number action
     { match: ctl('number'), body: field(textInput('number', act.number)) },
     // fixed values render as text
     { match: ctl('const'), body: field(['span', { class: `${cls}-const` }, '$.value']) },
     // structured values: a JSON text editor. The view model precomputes
-    // the text (`json`), so the control needs no encoder of its own.
+    // the text (`json`), so the control needs no encoder of its own. The
+    // editor commits on `change`, so it is not controlled — a render
+    // while the operator types would put the state's text back over
+    // theirs — and the text is its key instead: a new value (an item
+    // moved up, data replaced, a commit stored) is a new editor showing
+    // it, and a render that leaves the value alone keeps what is typed.
     {
       match: ctl('json'),
       body: field(['textarea', {
+        key: '$.json',
         class: `${cls}-json`,
         rows: 4,
         spellcheck: 'false',

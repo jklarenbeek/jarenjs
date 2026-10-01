@@ -34,6 +34,14 @@ function intlSymbols(code) {
   };
 }
 
+/** The fewest digits the leftmost group of a number `Intl.NumberFormat` groups holds, for a locale. @param {string} code */
+function intlMinimumGroupingDigits(code) {
+  const format = new Intl.NumberFormat(code);
+  let digits = 1;
+  while (!format.formatToParts(10 ** (2 + digits)).some((part) => part.type === 'group')) digits++;
+  return digits;
+}
+
 describe('compileNumberLocale', () => {
   it('compiles English, the fallback, with the picture syntax every language shares', () => {
     assert.deepStrictEqual(compileNumberLocale().decimalFormat, {
@@ -50,11 +58,19 @@ describe('compileNumberLocale', () => {
     assert.throws(() => compileNumberLocale({ 'number/minus-sign': '' }), /'number\/minus-sign' must render a non-empty string/);
   });
 
+  it('reads the minimum grouping digits as a positive whole number, 1 by default', () => {
+    assert.strictEqual(compileNumberLocale().minimumGroupingDigits, 1);
+    assert.strictEqual(compileNumberLocale(es).minimumGroupingDigits, 2, 'Spanish writes 1234 but 12.345');
+    for (const digits of ['0', 'two', '1.5'])
+      assert.throws(() => compileNumberLocale({ 'number/minimum-grouping-digits': digits }), /'number\/minimum-grouping-digits' must be a positive whole number/, digits);
+  });
+
   for (const [code, pack] of Object.entries(PACKS)) {
     it(`${code} carries the decimal format CLDR gives it`, { skip: process.versions.icu !== SOURCE_ICU && `the data was taken from ICU ${SOURCE_ICU}; this host runs ${process.versions.icu}` }, () => {
-      const { decimalFormat } = compileNumberLocale(pack);
+      const { decimalFormat, minimumGroupingDigits } = compileNumberLocale(pack);
       const { perMille, digit, patternSeparator, ...compared } = decimalFormat;
       assert.deepStrictEqual(compared, intlSymbols(code));
+      assert.strictEqual(minimumGroupingDigits, intlMinimumGroupingDigits(code), 'the fewest digits of a grouped number\'s leftmost group');
       assert.strictEqual(perMille, '‰');
       assert.deepStrictEqual([digit, patternSeparator], ['#', ';'], 'the picture syntax is the same in every language');
       if (pack !== undefined) assert.deepStrictEqual(Object.keys(numberMessagesEn).filter((key) => !(key in pack)), []);

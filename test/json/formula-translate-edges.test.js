@@ -17,7 +17,8 @@ import { readFileSync } from 'node:fs';
 
 import { compileFormula, formulaDocument } from '@jarenjs/json/formula';
 import { translateFormulaBody, migrateFormulas } from '@jarenjs/json/formula/migrate';
-import { compileNumberLocale, nl } from '@jarenjs/locales';
+import { compileJsonQuery } from '@jarenjs/json';
+import { ar, compileNumberLocale, de, es, fr, ja, ko, nl, pt, ru, tr, zhTW } from '@jarenjs/locales';
 
 // the English decimal format is the number catalog's default
 const decimalFormats = { nl: compileNumberLocale(nl).decimalFormat, en: compileNumberLocale().decimalFormat };
@@ -111,7 +112,8 @@ describe('arrays whose elements are arrays', () => {
     agrees((row) => { if (!row.sets) return null; return row.sets.every((t) => t.join('') !== ''); }, rows);
     agrees((row) => { if (!row.sets) return null; return row.sets.find((t) => t !== null) ?? 'none'; }, rows);
     agrees((row) => { if (!row.sets) return null; return row.sets.map((t, i) => i); }, rows);
-    agrees((row) => { if (!row.pairs) return null; return [...row.pairs].sort((a, b) => a[0] - b[0]).map((p) => p[1]); },
+    // `?? []` says the element is an array: an index into a value of unknown type is refused (see indexes into text)
+    agrees((row) => { if (!row.pairs) return null; return [...row.pairs].sort((a, b) => (a ?? [])[0] - (b ?? [])[0]).map((p) => (p ?? [])[1]); },
       [{ pairs: [[2, 'b'], [1, 'a']] }]);
     agrees((row) => { return [row.a ?? 0, row.b ?? 0].includes(1); }, [{ a: [1], b: 2 }, { a: 1 }]);
   });
@@ -238,6 +240,89 @@ describe('array indexes', () => {
   });
 });
 
+describe('indexes into text', () => {
+  it('reads the character at an index of a text, and nothing past its end, naming code-units', () => {
+    const rows = [{ code: ' ABC ' }, { code: 'x' }, { code: '' }, { code: 'Zoë' }];
+    const t = agrees((row) => { if (row.code == null) return null; return row.code.trim()[0]; }, rows);
+    assert.deepStrictEqual(t.differences.map((d) => d.kind), ['code-units']);
+    names("if (row.code == null) return null;\nreturn row.code.trim()[2];", 'code-units', 'row.code.trim()[2]');
+    agrees((row) => { if (row.code == null) return null; return row.code.trim()[2] ?? '-'; }, rows);
+    agrees((row) => { return (row.code ?? '')[0] ?? '-'; }, [...rows, {}, { code: null }]);
+    agrees((row) => { if (!row.first || !row.last) return null; return `${row.first.trim()[0]}${row.last.trim()[0]}`.toUpperCase(); },
+      [{ first: 'john', last: 'Doe' }, { first: 'Ann', last: 'lee' }]);
+    agrees((_row) => { const names = ['ab', 'cd']; return names.map((n) => n[1]).join(''); }, [{}]);
+  });
+
+  it('reads a character where JavaScript reads one code unit of a character beyond U+FFFF, as code-units says', () => {
+    const t = translateFormulaBody('if (row.s == null) return null;\nreturn row.s.trim()[1];');
+    const formula = compiled(t);
+    assert.strictEqual(valueOf(formula, { s: 'ab' }), 'b');
+    assert.strictEqual(valueOf(formula, { s: '\u{1F600}x' }), 'x', 'the query reads the second character; JavaScript a lone surrogate');
+    assert.ok(t.differences.some((d) => d.kind === 'code-units' && /code unit/.test(d.note)));
+  });
+
+  it('refuses an index into a value it cannot tell is text or an array, as .length is refused', () => {
+    refuses("return row.code?.[0] ?? '-';", 'index', 'row.code?.[0]');
+    refuses('if (!row.first || !row.last) return null;\nreturn `${row.first[0]}${row.last[0]}`;', 'index', 'row.first[0]');
+    refuses('return row.list[0];', 'index', 'row.list[0]');
+    agrees((row) => { return (row.list ?? [])[0] ?? 'none'; }, [{ list: ['a', 'b'] }, { list: [] }, {}]);
+  });
+});
+
+describe('anchored patterns', () => {
+  const rows = ['', 'a', 'ab', 'abc', '0', '5', 'b', 'x1', 'xb', ' abc ', 'abc  ', '0042'].map((s) => ({ s }));
+
+  it('matches no end of the text with ., a negated class, \\D, \\W or \\S', () => {
+    for (const fn of [
+      (/** @type {any} */ row) => { if (row.s == null) return null; return /^.{3}/.test(row.s); },
+      (/** @type {any} */ row) => { if (row.s == null) return null; return /.{3}$/.test(row.s); },
+      (/** @type {any} */ row) => { if (row.s == null) return null; return /^[^a]/.test(row.s); },
+      (/** @type {any} */ row) => { if (row.s == null) return null; return /[^a]$/.test(row.s); },
+      (/** @type {any} */ row) => { if (row.s == null) return null; return /^\D/.test(row.s); },
+      (/** @type {any} */ row) => { if (row.s == null) return null; return /\W$/.test(row.s); },
+      (/** @type {any} */ row) => { if (row.s == null) return null; return /^\S\S/.test(row.s); },
+      (/** @type {any} */ row) => { if (row.s == null) return null; return /^0./.test(row.s); },
+      (/** @type {any} */ row) => { if (row.s == null) return null; return /.$/.test(row.s); },
+      (/** @type {any} */ row) => { if (row.s == null) return null; return row.s.replace(/^[^b]/, 'X'); },
+      (/** @type {any} */ row) => { if (row.s == null) return null; return row.s.replace(/.$/, '!'); },
+    ]) agrees(fn, rows);
+  });
+
+  it('marks the start and the end of the text apart: ^ matches at the start only and $ at the end only', () => {
+    for (const fn of [
+      (/** @type {any} */ row) => { if (row.s == null) return null; return /^$/.test(row.s); },
+      (/** @type {any} */ row) => { if (row.s == null) return null; return /^a|c$/.test(row.s); },
+      (/** @type {any} */ row) => { if (row.s == null) return null; return /a^|$b/.test(row.s); },
+      (/** @type {any} */ row) => { if (row.s == null) return null; return row.s.replace(/$x|b/g, '_'); },
+      (/** @type {any} */ row) => { if (row.s == null) return null; return row.s.replace(/^0+/, '#'); },
+      (/** @type {any} */ row) => { if (row.s == null) return null; return row.s.replace(/\s+$/, '.'); },
+      (/** @type {any} */ row) => { if (row.s == null) return null; return row.s.replace(/^a|c$/g, '_'); },
+      (/** @type {any} */ row) => { if (row.s == null) return null; return row.s.replace(/^\s+|\s+$/g, ''); },
+    ]) agrees(fn, rows);
+  });
+
+  it('refuses a replace, with or without the g flag, whose pattern can match the empty text', () => {
+    for (const pattern of ['/\\s*$/', '/^/', '/$/', '/^0*/', '/x*$/g', '/\\s*$/g', '/(a|)/g', '/a*/g', '/a?/'])
+      refuses(`if (row.s == null) return null;\nreturn row.s.replace(${pattern}, '.');`, 'regex', pattern);
+    refuses("if (row.s == null) return null;\nreturn row.s.replaceAll(/x*$/g, '-');", 'regex', '/x*$/g');
+  });
+
+  it('tests a pattern that can match the empty text as JavaScript does', () => {
+    for (const fn of [
+      (/** @type {any} */ row) => { if (row.s == null) return null; return /^\d*$/.test(row.s); },
+      (/** @type {any} */ row) => { if (row.s == null) return null; return /^/.test(row.s); },
+      (/** @type {any} */ row) => { if (row.s == null) return null; return /x*/.test(row.s); },
+      (/** @type {any} */ row) => { if (row.s == null) return null; return /^(a|)$/.test(row.s); },
+    ]) agrees(fn, rows);
+  });
+
+  it('replaces the first match only where an anchor that begins or ends the pattern lets it match once', () => {
+    refuses("if (row.s == null) return null;\nreturn row.s.replace(/(^a)?b/, '-');", 'replace-first', 'row.s.replace');
+    agrees((row) => { if (row.s == null) return null; return row.s.replace(/^\d+/, '#'); }, rows);
+    agrees((row) => { if (row.s == null) return null; return row.s.replace(/\\$/, '/'); }, [{ s: 'a\\' }, { s: '\\a\\' }, { s: '' }]);
+  });
+});
+
 describe('replace', () => {
   it('refuses a first-match replace whose anchored pattern can match more than once', () => {
     refuses("if (row.s == null) return null;\nreturn row.s.replace(/^\\s+|\\s+$/, '');", 'replace-first', 'row.s.replace');
@@ -261,6 +346,18 @@ describe('replace', () => {
       assert.strictEqual(valueOf(compiled(t), { s: input }), input.replace(new RegExp(source, 'g'), '_'), body);
     }
     refuses('if (row.s == null) return null;\nreturn /\\01/.test(row.s.trim());', 'regex', '/\\01/');
+  });
+
+  it('reads \\B inside a class as the letter B, and only \\b there as a backspace', () => {
+    for (const source of ['[\\B]', '[\\b]', '[a\\B]']) {
+      const replaced = translateFormulaBody(`if (row.s == null) return null;\nreturn row.s.replace(/${source}/g, '_');`);
+      const tested = translateFormulaBody(`if (row.s == null) return null;\nreturn /${source}/.test(row.s);`);
+      assert.deepStrictEqual([replaced.state, tested.state], ['translated', 'translated'], source);
+      for (const s of ['B', '\b', 'aBc', 'a\bc', 'x']) {
+        assert.strictEqual(valueOf(compiled(replaced), { s }), s.replace(new RegExp(source, 'g'), '_'), `${source} replacing in ${JSON.stringify(s)}`);
+        assert.strictEqual(valueOf(compiled(tested), { s }), new RegExp(source).test(s), `${source} testing ${JSON.stringify(s)}`);
+      }
+    }
   });
 });
 
@@ -288,6 +385,16 @@ describe('number and currency text', () => {
       [{ x: 1234.5 }, { x: -2 }, { x: 0 }]);
   });
 
+  it('names Number() of a text as the refusal it is: the query refuses the row where JavaScript reads 0, hex or a sign', () => {
+    const t = names('if (row.s == null) return null;\nreturn Number(row.s);', 'number-parse', 'Number(row.s)');
+    const note = t.differences.find((d) => d.kind === 'number-parse')?.note ?? '';
+    assert.match(note, /refuses .*\(JQ2001\)/);
+    assert.doesNotMatch(note, /NaN/);
+    const formula = compiled(t);
+    for (const s of ['', ' ', '0x10', '.5', '+5', 'Infinity']) assert.throws(() => formula.evaluate({ s }), { code: 'JQ2001' }, JSON.stringify(s));
+    assert.strictEqual(valueOf(formula, { s: '12' }), 12);
+  });
+
   it('writes toFixed exactly where it can, as String does from 1e21, and refuses the row in between', () => {
     agrees((row) => { if (row.x == null) return null; return row.x.toFixed(2); },
       [{ x: 1e15 }, { x: 1e21 }, { x: -1.5e21 }, { x: 123.456 }, { x: -0.004 }, { x: 9007199254740990 }, { x: 99999999999.995 }]);
@@ -296,6 +403,68 @@ describe('number and currency text', () => {
     assert.throws(() => two.evaluate({ x: 1000000000000000.25 }), { code: 'JQ2001' });
     const twelve = compiled(translateFormulaBody('if (row.x == null) return null;\nreturn row.x.toFixed(12);'));
     assert.throws(() => twelve.evaluate({ x: 123456.789 }), { code: 'JQ2001' });
+  });
+});
+
+describe('number formats of every shipped language', () => {
+  const PACKS = { ar, de, es, fr, ja, ko, nl, pt, ru, tr, 'zh-TW': zhTW };
+  /** The option sets toLocaleString translates in the decimal style. */
+  const OPTION_SETS = [{}, { maximumFractionDigits: 0 }, { maximumFractionDigits: 1 }, { minimumFractionDigits: 2 },
+    { minimumFractionDigits: 1, maximumFractionDigits: 2 }];
+  const ICU = { skip: process.versions.icu !== '78.3' && `the packs carry CLDR as ICU 78.3 ships it; this host runs ${process.versions.icu}` };
+  const F64 = new Float64Array(1);
+  const U64 = new BigUint64Array(F64.buffer);
+  /** The doubles either side of a positive one. @param {number} x */
+  const neighbours = (x) => [-1n, 1n].map((step) => { F64[0] = x; U64[0] += step; return F64[0]; });
+  /** The values where rounding carries the integer part to 1000, 10000 or 100000, and the doubles either side. @param {number} fraction */
+  const boundaries = (fraction) => [3, 4, 5].flatMap((digits) => {
+    const half = Number(`${'9'.repeat(digits)}.${'9'.repeat(fraction)}5`);
+    return [half, ...neighbours(half), 10 ** digits, 10 ** digits - 1];
+  });
+  /** A body's translation under a pack's number description, compiled. @param {string} tag @param {any} pack @param {string} body @param {Record<string, string>} [currencies] */
+  const translatedUnder = (tag, pack, body, currencies) => {
+    const { decimalFormat, minimumGroupingDigits } = compileNumberLocale(pack);
+    const described = { decimalFormat: tag, grouping: decimalFormat.groupingSeparator, decimal: decimalFormat.decimalSeparator, minimumGroupingDigits, currencies };
+    const t = translateFormulaBody(body, { locales: { [tag]: described } });
+    assert.notStrictEqual(t.state, 'untranslatable', `${body}: ${JSON.stringify(t.reasons)}`);
+    return compileJsonQuery(t.expression, { decimalFormats: { [tag]: decimalFormat } });
+  };
+
+  it('writes every value from 1000 to 99999 and every rounding boundary as Intl.NumberFormat does, four-digit numbers included', ICU, () => {
+    const integers = Array.from({ length: 99000 }, (_, i) => 1000 + i);
+    for (const [tag, pack] of Object.entries(PACKS)) {
+      for (const options of OPTION_SETS) {
+        const written = Object.entries(options).map(([key, n]) => `${key}: ${n}`).join(', ');
+        const query = translatedUnder(tag, pack, `if (row.x == null) return null;\nreturn row.x.toLocaleString('${tag}'${written ? `, { ${written} }` : ''});`);
+        const intl = new Intl.NumberFormat(tag, options);
+        const fraction = options.maximumFractionDigits ?? Math.max(options.minimumFractionDigits ?? 0, 3);
+        const differ = [];
+        for (const x of [...integers, ...boundaries(fraction), 1234.5, 9999.25, 12345.678, 999.5]) {
+          const got = query({ x });
+          if (got !== intl.format(x)) differ.push(`${x}: ${got} for ${intl.format(x)}`);
+        }
+        assert.deepStrictEqual(differ.slice(0, 5), [], `${tag} ${JSON.stringify(options)}`);
+      }
+    }
+  });
+
+  it('writes a currency in a language that groups from five digits only as Intl.NumberFormat does', ICU, () => {
+    const query = translatedUnder('es', es, "if (row.x == null) return null;\nreturn row.x.toLocaleString('es', { style: 'currency', currency: 'EUR' });",
+      { EUR: '#.##0,00\u00a0\u20ac;-#.##0,00\u00a0\u20ac' });
+    const intl = new Intl.NumberFormat('es', { style: 'currency', currency: 'EUR' });
+    const differ = [];
+    for (const x of [...Array.from({ length: 9900 }, (_, i) => 100 + i * 10 + 0.25), ...boundaries(2), -1234.5, -12345.5, 0])
+      if (query({ x }) !== intl.format(x)) differ.push(`${x}: ${query({ x })} for ${intl.format(x)}`);
+    assert.deepStrictEqual(differ.slice(0, 5), []);
+    const ungrouped = translatedUnder('es', es, "if (row.x == null) return null;\nreturn row.x.toLocaleString('es', { style: 'currency', currency: 'XTS' });",
+      { XTS: '0,00\u00a0X' });
+    assert.deepStrictEqual([1234.5, 12345.5].map((x) => ungrouped({ x })), ['1234,50\u00a0X', '12345,50\u00a0X'], 'a picture without separators is written as it is');
+  });
+
+  it('refuses a language description whose minimum grouping digits are not a positive whole number', () => {
+    for (const minimumGroupingDigits of [0, 1.5, '2'])
+      assert.throws(() => translateFormulaBody('return 1;', { locales: { es: /** @type {any} */ ({ decimalFormat: 'es', grouping: '.', decimal: ',', minimumGroupingDigits }) } }),
+        /locale 'es' must be/);
   });
 });
 

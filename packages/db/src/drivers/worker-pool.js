@@ -1,6 +1,6 @@
 //@ts-check
 /** One writer and bounded read-only WAL workers behind a Connection. */
-import { finishConnection } from '../driver.js';
+import { finishConnection, DEFAULT_QUEUE_TIMEOUT } from '../driver.js';
 import { DbCompileError, DbRuntimeError } from '../errors.js';
 import { sqliteDialect } from '../dialects/sqlite.js';
 import { positiveOption } from './worker-protocol.js';
@@ -57,6 +57,9 @@ export function workerPoolDriver(configuration, driverFactory) {
       }
       catch (error) { await Promise.allSettled(slots.map((slot) => slot.connection.close())); throw error; }
       const queue = workerQueue(slots, capacity, () => performance.now());
+      // how long a cursor outside any read or transaction waits for its
+      // lane: the connection's own queueTimeout, as a parallel read's wait
+      const queueTimeout = options.queueTimeout ?? DEFAULT_QUEUE_TIMEOUT;
       // the parallel read in progress on this async context, if any: its
       // reader lease and the iterators it opened (Node and Bun ship it;
       // loaded at open, as every binding loads its runtime builtin)
@@ -95,7 +98,10 @@ export function workerPoolDriver(configuration, driverFactory) {
         const read = currentRead();
         if (read !== undefined) return execute(read.lease, fn);
         if (transaction !== null) return execute(transaction, fn);
-        const lease = await queue.acquire(readLane(readOnly), { borrow });
+        // bounded as a cursor's wait is: on a pool without readers an open
+        // root cursor holds the writer, and a root write waiting for it
+        // unbounded would hold the store's gate against that cursor's next pull
+        const lease = await queue.acquire(readLane(readOnly), { borrow, timeoutMs: queueTimeout });
         try { return await execute(lease, fn); }
         finally { lease.release(); await replace(lease.slot); }
       };
@@ -109,7 +115,7 @@ export function workerPoolDriver(configuration, driverFactory) {
           const release = /^RELEASE\b/.test(sql);
           const end = /^(?:COMMIT|ROLLBACK(?! TO))\b/.test(sql);
           const rollback = /^ROLLBACK\b/.test(sql);
-          if (begin && transaction === null) transaction = await queue.acquire(options.readOnly === true);
+          if (begin && transaction === null) transaction = await queue.acquire(options.readOnly === true, { timeoutMs: queueTimeout });
           if (begin) depth++;
           const operation = withLease(false, (slot) => slot.connection.exec(sql));
           if (end || (release && depth === 1)) committing = operation;
@@ -181,8 +187,13 @@ export function workerPoolDriver(configuration, driverFactory) {
                   return: async () => { forget(); await iterator.return(); return { done: true, value: undefined }; },
                 };
               }
+              // a cursor holds its lease across pulls, so it never borrows the
+              // writer, and its wait is bounded: a root cursor's first pull
+              // runs inside the store's gate, and an unbounded wait for a read
+              // worker another open cursor holds would keep every call out
+              // (that cursor's next pull included) until one was returned
               const pinned = transaction;
-              const lease = pinned ?? await queue.acquire(readLane(metadata.readOnly === true));
+              const lease = pinned ?? await queue.acquire(readLane(metadata.readOnly === true), { timeoutMs: queueTimeout });
               let iterator;
               try { iterator = await execute(lease, async (slot) => (await statementFor(slot)).iterate(params)); }
               catch (error) { if (pinned === null) { lease.release(); await replace(lease.slot); } throw error; }

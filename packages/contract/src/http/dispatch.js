@@ -32,7 +32,7 @@ import { validateOperationInput, settleOperation, safeTrace, classifyDeclared } 
 import { identify as identifyHost, acquire as acquireHost, once, RollbackCarrier } from '../host.js';
 import { publicDescription } from '../describe.js';
 import {
-  BodyLimitError, BodyEncodingError, isAsyncByteSource, normalizeBody, collectBytes, countingSource, onSettled, discard,
+  BodyLimitError, BodyEncodingError, isAsyncByteSource, normalizeBody, collectBytes, firstBytes, countingSource, onSettled, discard,
 } from './body.js';
 import {
   isSubscriptionLike, runSubscription, STREAM_ERRORS, STREAM_MEDIA, HEARTBEAT_LINE, encodeStreamEvent,
@@ -101,7 +101,8 @@ import {
  */
 
 /**
- * The raw response of an opaque operation's handler: `body` may be text,
+ * The raw response of an opaque operation's handler: `status` is a final
+ * status, 200–599 (a 1xx is `JC2010`); `body` may be text,
  * bytes, a pull source of chunks (an async iterable, or a Web
  * `ReadableStream` — normalized, never collected), or none.
  * @typedef {{ status: number, headers?: Record<string, string | readonly string[]>, body?: string | Uint8Array | AsyncIterable<Uint8Array> | ReadableStream<Uint8Array> | null }} RawResponse
@@ -191,6 +192,14 @@ const NO_HEADERS = Object.freeze({});
 
 /** The statuses that carry no content (RFC 9110 §15.3.5, §15.3.6, §15.4.5). */
 const NO_CONTENT = new Set([204, 205, 304]);
+
+/**
+ * The subscription behind each SSE answer the adapter has not yet
+ * streamed: an answer refused after `enter` settled closes it here,
+ * since no runner ever will.
+ * @type {WeakMap<object, import('../stream/server.js').SubscriptionLike>}
+ */
+const STRANDED = new WeakMap();
 
 /** The valid shape of a request object — `JC1004` otherwise. */
 const REQUEST_SHAPE = 'a request is { method: string, url: string, headers: object, body: string | Uint8Array | AsyncIterable<Uint8Array> | ReadableStream | null }';
@@ -348,16 +357,36 @@ function decodable(path) {
 }
 
 /**
- * Whether the request carried a non-empty body. A pull source counts as
- * content: whether it yields anything is known only by pulling it.
+ * Whether the request may carry a non-empty body, as far as it is known
+ * before a byte is pulled: text and bytes by their length; a pull source
+ * by its declared length — `content-length: 0` is none, whatever the
+ * adapter handed over — and otherwise as content, which a JSON
+ * operation's first pull confirms or refutes (`firstBytes`).
  * @param {string | Uint8Array | AsyncIterable<Uint8Array> | null} body
+ * @param {number} declared - the declared `content-length`, `-1` when absent
  * @returns {boolean}
  */
-function hasContent(body) {
+function hasContent(body, declared) {
   if (body === null) return false;
   if (typeof body === 'string') return body.length > 0;
   if (body instanceof Uint8Array) return body.byteLength > 0;
-  return true;
+  return declared !== 0;
+}
+
+/**
+ * Whether a `content-encoding` names a coding other than `identity` (RFC
+ * 9110 §8.4: a list, case-insensitive; empty members are no coding).
+ * @param {string | undefined} field
+ * @returns {boolean}
+ */
+function coded(field) {
+  if (field === undefined) return false;
+  const codings = field.split(',');
+  for (let i = 0; i < codings.length; i++) {
+    const coding = codings[i].trim().toLowerCase();
+    if (coding.length > 0 && coding !== 'identity') return true;
+  }
+  return false;
 }
 
 /**
@@ -391,8 +420,9 @@ function signalOf(request) {
 /**
  * Per-request mutable state: what the context's `etag`/`status` armed,
  * and how the settlement classified — `outcome` 0 success, 1 declared
- * failure (with `retryable`), 2 server fault (a pre-handler `JC2014`
- * among them: nothing ran, the claim is released retryable), 3 a
+ * failure (with `retryable`), 2 server fault (a pre-handler `JC2014`, or
+ * a claimed command's pre-handler 304, among them: nothing ran, the
+ * claim is released retryable), 3 a
  * POST-handler precondition failure (the handler already ran and may
  * have mutated: the claim is recorded non-retryable with its 412) —
  * which is what the ledger needs to commit, record or release the
@@ -400,8 +430,11 @@ function signalOf(request) {
  * evaluated the conditionals; the post-handler comparison then stands
  * down.
  * `settled` is set by a required settlement (§7.7) that recorded the
- * claim inside `enter`; the root ledger then stands down.
- * @typedef {{ etag: string | null, strong: boolean, status: number, outcome: number, retryable: boolean, decided: boolean, settled: boolean, headers: Map<string, string | string[]> | null }} Armed
+ * claim inside `enter`; the root ledger then stands down. `receipt` is
+ * what a success commits in place of the answer: a POST-handler 304
+ * under a key answers 304 and records the success it stood for, so a
+ * replay carries the command's answer, never a bodyless 304 (§7.6).
+ * @typedef {{ etag: string | null, strong: boolean, status: number, outcome: number, retryable: boolean, decided: boolean, settled: boolean, headers: Map<string, string | string[]> | null, receipt: HttpResponse | null }} Armed
  */
 
 /**
@@ -510,7 +543,7 @@ function run(server, request) {
 
 /** A fresh per-request state record. @returns {Armed} */
 function freshArmed() {
-  return { etag: null, strong: false, status: 0, outcome: 0, retryable: false, decided: false, settled: false, headers: null };
+  return { etag: null, strong: false, status: 0, outcome: 0, retryable: false, decided: false, settled: false, headers: null, receipt: null };
 }
 
 /**
@@ -602,9 +635,13 @@ function handlerContext(ctx, host) {
 
 /**
  * Run `acquire` around a continuation and settle its answer: a lease
- * entered is the continuation's response (a rejection of the hook after
- * the continuation settled is observed, the response stands); a declared
- * failure is rendered; a fault is the host's (`JC2008`, observed). The
+ * entered is the continuation's response; a declared failure is
+ * rendered; a fault is the host's (`JC2008`, observed) — a hook that
+ * rejects after the continuation settled among them: the transaction it
+ * opened around `enter` did not commit (a commit that failed), so nothing
+ * the continuation answered stands. What that answer held is released,
+ * the claim is freed retryable (a receipt recorded inside `enter` rolled
+ * back with the transaction), and the fault is the answer. The
  * acquired release is registered on the lifetime as the lease enters.
  * @param {Server} server
  * @param {Route} route
@@ -628,9 +665,35 @@ function acquireAround(server, route, ctx, input, trace, armed, life, enter) {
       return refuse(server, 'JC2008', trace, { op: route.op.id }, undefined, null, ctx);
     }
     if (out.kind === 'failure') return hookFailure(server, route, ctx, out.failure, trace, armed);
-    if (out.afterFault !== undefined) observe(server, out.afterFault, ctx);
+    if (out.afterFault !== undefined) {
+      observe(server, out.afterFault, ctx);
+      abandon(server, life, out.result, ctx);
+      armed.outcome = 2;
+      armed.settled = false;
+      return refuse(server, 'JC2008', trace, { op: route.op.id }, undefined, null, ctx);
+    }
     return /** @type {HttpResponse} */ (out.result);
   });
+}
+
+/**
+ * Release what an answer holds that will never be exposed — the one
+ * `enter` settled with, refused after it: a pull-source body is
+ * discarded (which runs the releases hung on it), and the subscription
+ * behind an SSE answer no adapter will stream is closed (a close that
+ * throws or rejects is observed). The lifetime's releases then run before
+ * the refusal is exposed, as for any refusal.
+ * @param {Server} server
+ * @param {Life} life
+ * @param {unknown} answer
+ * @param {RequestContext} ctx
+ */
+function abandon(server, life, answer, ctx) {
+  const response = /** @type {HttpResponse} */ (answer);
+  if (isAsyncByteSource(response.body)) void discard(response.body);
+  const sub = STRANDED.get(response);
+  if (sub !== undefined) void Promise.resolve().then(() => sub.close()).then(undefined, (err) => observe(server, err, ctx));
+  life.deferred = false;
 }
 
 /**
@@ -658,7 +721,7 @@ function afterIdentity(server, request, route, trace, hit, isHead, method, path,
   // ——— 4. the body limit: by declaration before the read, by length after ———
   const declared = contentLength(headers);
   if (declared > route.maxBody) return refuse(server, 'JC2003', trace, { op: op.id, limit: route.maxBody }, undefined, null, null);
-  const content = hasContent(body);
+  const content = hasContent(body, declared);
   const sourced = isAsyncByteSource(body);
   if (content && !sourced && exceedsBytes(/** @type {string | Uint8Array} */ (body), route.maxBody)) {
     return refuse(server, 'JC2003', trace, { op: op.id, limit: route.maxBody }, undefined, null, null);
@@ -685,22 +748,23 @@ function afterIdentity(server, request, route, trace, hit, isHead, method, path,
       if (raw === undefined) continue;
       const m = route.headerMembers[i];
       if (route.headerArray[i]) {
+        // repeated field lines are ONE field, joined with ", " (RFC 9110
+        // §5.3): each line is split exactly as a single line is, so the
+        // node adapter's distinct lines and the fetch adapter's combined
+        // line read as the same list
+        const lines = typeof raw === 'string' ? [raw] : raw;
+        if (!Array.isArray(lines)) return refuse(server, 'JC2015', trace, { op: op.id, header: m }, undefined, null, null);
         /** @type {string[]} */
         const list = [];
-        if (typeof raw === 'string') {
-          const parts = raw.split(',');
+        for (let k = 0; k < lines.length; k++) {
+          const line = lines[k];
+          if (typeof line !== 'string') return refuse(server, 'JC2015', trace, { op: op.id, header: m }, undefined, null, null);
+          const parts = line.split(',');
           for (let j = 0; j < parts.length; j++) {
             const part = parts[j].trim();
             if (part.length > 0) list.push(part);
           }
         }
-        else if (Array.isArray(raw)) {
-          for (let j = 0; j < raw.length; j++) {
-            if (typeof raw[j] !== 'string') return refuse(server, 'JC2015', trace, { op: op.id, header: m }, undefined, null, null);
-            list.push(raw[j]);
-          }
-        }
-        else return refuse(server, 'JC2015', trace, { op: op.id, header: m }, undefined, null, null);
         setObjectMember(input, m, list);
         setObjectMember(ctxHeaders, name, list.join(', '));
       }
@@ -816,14 +880,24 @@ function afterIdentity(server, request, route, trace, hit, isHead, method, path,
 
   // ——— 5. media, 6. parse ———
   if (route.hasBody && content) {
-    if (!mediaMatches(headerValue(headers, 'content-type'), route.media)) {
-      if (sourced) void discard(/** @type {AsyncIterable<Uint8Array>} */ (body));
-      return refuse(server, 'JC2004', trace, { op: op.id, media: route.media }, undefined, null, null);
-    }
-    if (sourced) {
+    /**
+     * A body that carries bytes: its media decides, then it parses — a
+     * source drained whole under the limit first.
+     * @param {string | Uint8Array | AsyncIterable<Uint8Array>} payload
+     * @returns {HttpResponse | Promise<HttpResponse>}
+     */
+    const readJson = (payload) => {
+      const pulled = isAsyncByteSource(payload);
+      // the binding decodes no content coding: bytes under one are not
+      // the declared media, whatever the content-type says
+      if (!mediaMatches(headerValue(headers, 'content-type'), route.media) || coded(headerValue(headers, 'content-encoding'))) {
+        if (pulled) void discard(payload);
+        return refuse(server, 'JC2004', trace, { op: op.id, media: route.media }, undefined, null, null);
+      }
+      if (!pulled) return parseAndContinue(server, route, ctx, request, trace, armed, isHead, ifMatch, ifNoneMatch, transported, headers, payload, life);
       // a JSON body must be parsed and validated whole: drain the
       // source under the limit — never past it — then parse
-      return collectBytes(/** @type {AsyncIterable<Uint8Array>} */ (body), route.maxBody, signalOf(request)).then((collected) => {
+      return collectBytes(payload, route.maxBody, signalOf(request)).then((collected) => {
         if (!collected.ok) {
           if (collected.kind === 'limit') return refuse(server, 'JC2003', trace, { op: op.id, limit: route.maxBody }, undefined, null, null);
           // the body never arrived whole (the source failed, or the
@@ -832,14 +906,26 @@ function afterIdentity(server, request, route, trace, hit, isHead, method, path,
         }
         return parseAndContinue(server, route, ctx, request, trace, armed, isHead, ifMatch, ifNoneMatch, transported, headers, collected.bytes.byteLength === 0 ? null : collected.bytes, life);
       });
-    }
+    };
+    // text, bytes, or a source whose declared length says bytes follow:
+    // the media is decided before anything is pulled
+    if (!sourced || declared > 0) return readJson(/** @type {string | Uint8Array | AsyncIterable<Uint8Array>} */ (body));
+    // a source of undeclared length — a chunked upload, a stream built
+    // in process — shows whether it carries a body only by its first
+    // byte: one that ends without any is a request without a body, and
+    // an empty body needs no media
+    return firstBytes(/** @type {AsyncIterable<Uint8Array>} */ (body), signalOf(request)).then((first) => {
+      if (first.kind === 'bytes') return readJson(first.source);
+      if (first.kind === 'empty') return parseAndContinue(server, route, ctx, request, trace, armed, isHead, ifMatch, ifNoneMatch, transported, headers, null, life);
+      return refuse(server, 'JC2005', trace, { op: op.id }, undefined, null, null);
+    });
   }
-  else if (sourced) {
-    // a body-less operation ignores the body; a source is released, never read
+  if (sourced) {
+    // a body-less operation ignores the body, and an empty one is none:
+    // a source is released, never read
     void discard(/** @type {AsyncIterable<Uint8Array>} */ (body));
   }
-  return parseAndContinue(server, route, ctx, request, trace, armed, isHead, ifMatch, ifNoneMatch, transported, headers,
-    route.hasBody && content && !sourced ? /** @type {string | Uint8Array} */ (body) : null, life);
+  return parseAndContinue(server, route, ctx, request, trace, armed, isHead, ifMatch, ifNoneMatch, transported, headers, null, life);
 }
 
 /**
@@ -990,7 +1076,7 @@ function requiredSettlement(server, route, ledger, ref, response, hctx, armed, t
   let settlement;
   try {
     const now = server.now();
-    if (armed.outcome === 0) settlement = ledger.commit(ref, response, now);
+    if (armed.outcome === 0) settlement = ledger.commit(ref, armed.receipt ?? response, now);
     else if (armed.outcome === 1) settlement = ledger.fail(ref, armed.retryable, response, now);
     else settlement = ledger.fail(ref, false, response, now);
   }
@@ -1251,7 +1337,9 @@ function sseResponse(server, route, ctx, sub, trace, headers, life, armed) {
   /** @type {Record<string, string | string[]>} */
   const responseHeaders = { 'content-type': STREAM_MEDIA, 'cache-control': 'no-store', 'x-jaren-trace': trace };
   applyArmedHeaders(responseHeaders, armed);
-  return { status: 200, headers: responseHeaders, body: null, stream };
+  const response = { status: 200, headers: responseHeaders, body: null, stream };
+  STRANDED.set(response, sub);
+  return response;
 }
 
 //#endregion
@@ -1315,7 +1403,12 @@ function preconditionedBoundary(server, route, ctx, input, trace, armed, isHead,
     }
     if (ifNoneMatch !== undefined && resolved !== null && entityTagMatches(ifNoneMatch, resolved.tag, resolved.strong, false)) {
       const etag = formatEntityTag(resolved.tag, resolved.strong);
-      if (safe) return { status: 304, headers: { etag, 'x-jaren-trace': trace }, body: null };
+      if (safe) {
+        // nothing ran: on a claimed command (one bound to GET) the key is
+        // released retryable, as for the pre-handler 412
+        if (ctx.idempotency !== null) armed.outcome = 2;
+        return { status: 304, headers: { etag, 'x-jaren-trace': trace }, body: null };
+      }
       armed.outcome = 2;
       return refuse(server, 'JC2014', trace, { op: route.op.id }, undefined, { etag }, ctx);
     }
@@ -1400,6 +1493,24 @@ function project(server, route, ctx, result, trace, armed, isHead, ifMatch, ifNo
 }
 
 /**
+ * The answer a JSON handler's serialized value makes under `status`: no
+ * body for `undefined`, or under 204 and 205 — they carry no content,
+ * whatever the value; otherwise the text under the operation's media,
+ * with `charset=utf-8` unless the media names its own parameters.
+ * `headers` is the answer's own table and gains its `content-type`.
+ * @param {Route} route
+ * @param {number} status
+ * @param {Record<string, string | string[]>} headers
+ * @param {string | undefined} text
+ * @returns {HttpResponse}
+ */
+function answerOf(route, status, headers, text) {
+  if (text === undefined || status === 204 || status === 205) return { status, headers, body: null };
+  headers['content-type'] = route.media.indexOf(';') === -1 ? `${route.media}; charset=utf-8` : route.media;
+  return { status, headers, body: text };
+}
+
+/**
  * The validated value of a JSON handler: serialized (`JC2010` when JSON
  * cannot carry it), then the entity-tag conditionals and the HEAD/204
  * body rules.
@@ -1446,6 +1557,10 @@ function finishValue(server, route, ctx, value, trace, armed, isHead, ifMatch, i
       if (ifNoneMatch !== undefined && entityTagMatches(ifNoneMatch, armed.etag, armed.strong, false)) {
         if (ctx.method === 'GET' || ctx.method === 'HEAD') {
           headers.etag = etag;
+          // the handler ran: on a claimed command the ledger records the
+          // answer the 304 stands for, with its body — a retry under the
+          // key must replay the command's answer (§7.6, §8)
+          if (ctx.idempotency !== null) armed.receipt = answerOf(route, status, { ...headers }, text);
           return { status: 304, headers, body: null };
         }
         armed.outcome = 3;
@@ -1454,22 +1569,22 @@ function finishValue(server, route, ctx, value, trace, armed, isHead, ifMatch, i
     }
     headers.etag = etag;
   }
-  // 204 and 205 carry no content by definition — whatever the value
-  if (text === undefined || status === 204 || status === 205) return { status, headers, body: null };
-  headers['content-type'] = route.media.indexOf(';') === -1 ? `${route.media}; charset=utf-8` : route.media;
-  if (isHead) {
-    headers['content-length'] = String(new TextEncoder().encode(text).byteLength);
+  const answer = answerOf(route, status, headers, text);
+  if (isHead && answer.body !== null) {
+    headers['content-length'] = String(new TextEncoder().encode(/** @type {string} */ (text)).byteLength);
     return { status, headers, body: null };
   }
-  return { status, headers, body: text };
+  return answer;
 }
 
 /**
  * The value of a raw (opaque) handler: passed through verbatim plus the
- * trace header; anything that is not `{ status, headers?, body? }` is
- * `JC2010`. A body that is a pull source (an async iterable, or a Web
+ * trace header; anything that is not `{ status, headers?, body? }` with
+ * a final status (200–599) is `JC2010`. A body that is a pull source (an async iterable, or a Web
  * stream, normalized) is passed through as one — the adapter writes it
- * chunk by chunk — and under HEAD it is cancelled, never drained.
+ * chunk by chunk — and under HEAD it is cancelled, never drained; text
+ * or bytes under HEAD are dropped with their byte length kept as
+ * `content-length`, as a JSON read's HEAD keeps it.
  * @param {Server} server
  * @param {Route} route
  * @param {RequestContext} ctx
@@ -1492,7 +1607,9 @@ function finishRaw(server, route, ctx, value, trace, armed, isHead, ifMatch, ifN
     status = r.status;
     const rawHeaders = r.headers;
     body = r.body;
-    if (!Number.isInteger(status) || status < 100 || status > 599) throw new TypeError('raw status');
+    // a final answer only: a 1xx is an interim head no adapter can end the
+    // exchange with (a Response refuses it; Node leaves the peer waiting)
+    if (!Number.isInteger(status) || status < 200 || status > 599) throw new TypeError(`a raw answer's status must be an integer in 200–599, got ${String(status)}`);
     if (rawHeaders !== undefined && (rawHeaders === null || typeof rawHeaders !== 'object')) throw new TypeError('raw headers');
     body = normalizeBody(body);
     if (body === undefined) throw new TypeError('raw body');
@@ -1577,6 +1694,12 @@ function finishRaw(server, route, ctx, value, trace, armed, isHead, ifMatch, ifN
     // a HEAD drops the body: a source nobody will read is released, never pulled
     void discard(body);
     body = null;
+  }
+  // a HEAD answers the headers its GET sends: the byte length of the text
+  // or bytes it dropped, unless the handler stated one (as a JSON read's
+  // HEAD does); a stream has no length to state
+  if (isHead && body !== null && headers['content-length'] === undefined) {
+    headers['content-length'] = String(typeof body === 'string' ? utf8ByteLength(body) : /** @type {Uint8Array} */ (body).byteLength);
   }
   return { status, headers, body: isHead ? null : body };
 }
@@ -1739,9 +1862,10 @@ function idempotent(server, route, ctx, input, trace, armed, isHead, ifMatch, if
 
 /**
  * Settle a `new` claim with the response the handler produced: a
- * success commits (replayed verbatim later); a declared failure is
+ * success commits (replayed verbatim later) — the receipt a POST-handler
+ * 304 armed in its place, when there is one; a declared failure is
  * recorded as failed with its response and retryability; a server fault
- * (`JC2008`/`JC2010`, and a PRE-handler `JC2014` — nothing ran)
+ * (`JC2008`/`JC2010`, and a PRE-handler `JC2014` or 304 — nothing ran)
  * releases the key as retryable; a POST-handler `JC2014` (outcome 3) is
  * recorded NON-retryable with its 412 — the handler already ran and may
  * have mutated, so a blind retry with the same key replays the 412
@@ -1761,7 +1885,7 @@ function settleClaim(server, ledger, ref, response, ctx, armed) {
   // clock judges the record from claim to expiry
   try {
     const now = server.now();
-    if (armed.outcome === 0) settlement = ledger.commit(ref, response, now);
+    if (armed.outcome === 0) settlement = ledger.commit(ref, armed.receipt ?? response, now);
     else if (armed.outcome === 1) settlement = ledger.fail(ref, armed.retryable, response, now);
     else if (armed.outcome === 3) settlement = ledger.fail(ref, false, response, now);
     else settlement = ledger.fail(ref, true, undefined, now);

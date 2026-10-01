@@ -680,6 +680,20 @@ export function nearestName(key, known) {
 }
 
 /**
+ * Whether `value` is a plain options object — an object literal or a
+ * null-prototype record, never an array, a class instance or a string:
+ * the one test every closed option set in the suite reads its options
+ * object by, so a caller's `Object.create(null)` is read like a literal.
+ * @param {unknown} value
+ * @returns {value is Record<string, any>}
+ */
+export function isPlainOptions(value) {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
+/**
  * Refuse the first own member of `options` outside `known`, through the
  * caller's own coded error — a closed option set refuses before any
  * effect rather than dropping a misspelt member in silence. The hint

@@ -210,6 +210,32 @@ describe('host lifecycle over HTTP — hook faults and declared failures', () =>
     assert.strictEqual(json(response).code, 'JC2008');
     assert.deepStrictEqual(r.observed.map((e) => /** @type {any} */ (e).message), ['release broke']);
   });
+
+  it('acquire rejecting after enter settled — a commit that failed — is JC2008, observed: both leases release, the key is freed retryable even when the receipt was recorded inside enter', async () => {
+    for (const settled of [false, true]) {
+      let calls = 0;
+      /** @type {unknown[]} */
+      const receipts = [];
+      const r = recording({
+        acquire: async (/** @type {any} */ input, /** @type {any} */ identity, /** @type {any} */ enter) => {
+          // the transaction's own ledger: what it records is lost with the rollback
+          const settlement = { required: true, ledger: { commit: (/** @type {any[]} */ ...a) => { receipts.push(a); }, fail: (/** @type {any[]} */ ...a) => { receipts.push(a); } } };
+          await enter({ host: 'tx', release: () => { r.log.push('release:acquired'); }, ...(settled ? { settlement } : {}) });
+          throw new Error('COMMIT failed');
+        },
+      });
+      const server = serveHttp(shop, { ...shopHandlers(), 'product.save': () => { calls += 1; return { id: 1, name: 'x', price: 1 }; } }, r.options);
+      const response = await server.dispatch(jsonReq('PUT', URL, SAVE, { 'idempotency-key': 'k' }));
+      assert.deepStrictEqual([response.status, json(response).code], [500, 'JC2008'], String(settled));
+      assert.deepStrictEqual(r.observed.map((e) => /** @type {any} */ (e).message), ['COMMIT failed']);
+      assert.deepStrictEqual(r.log, ['identify:http:product.save', 'release:acquired', 'release:identity']);
+      assert.strictEqual(receipts.length, settled ? 1 : 0, 'the receipt went to the transaction it rolled back with');
+      const record = r.options.ledger.lookup({ op: 'product.save', scope: '', key: 'k' });
+      assert.deepStrictEqual([record?.status, record?.retryable, record?.response], ['failed', true, null]);
+      await server.dispatch(jsonReq('PUT', URL, SAVE, { 'idempotency-key': 'k' }));
+      assert.strictEqual(calls, 2, 'the same key runs the command again');
+    }
+  });
 });
 
 describe('host lifecycle over HTTP — opaque bodies and streams', () => {
@@ -302,6 +328,57 @@ describe('host lifecycle over HTTP — opaque bodies and streams', () => {
       await pump.done;
       assert.deepStrictEqual(r.log, ['identify:http:feed', 'acquire:identity', 'release:acquired', 'release:identity'], how);
       assert.deepStrictEqual(closes, ['closed']);
+    }
+  });
+});
+
+describe('host lifecycle over HTTP — what a refused answer held', () => {
+  /** An acquire that enters, logs its release, and then rejects — a commit that failed. @param {() => any} getRecording */
+  const failingCommit = (getRecording) => async (/** @type {any} */ input, /** @type {any} */ identity, /** @type {any} */ enter) => {
+    await enter({ host: 'tx', release: () => { getRecording().log.push('release:acquired'); } });
+    throw new Error('COMMIT failed');
+  };
+
+  it('a streamed opaque body is released unread and the leases before the JC2008 is exposed', async () => {
+    /** @type {any} */
+    let r = null;
+    r = recording({ acquire: failingCommit(() => r) });
+    let pulled = 0;
+    const source = { [Symbol.asyncIterator]: () => ({
+      next: async () => { pulled += 1; return { done: false, value: new Uint8Array(1) }; },
+      return: async () => { r.log.push('source:closed'); return { done: true, value: undefined }; },
+    }) };
+    const server = serveHttp(shop, { ...shopHandlers(), 'image.bytes': () => ({ status: 200, headers: {}, body: source }) }, r.options);
+    const response = await server.dispatch(req('GET', IMAGE));
+    assert.deepStrictEqual([response.status, json(response).code], [500, 'JC2008']);
+    assert.deepStrictEqual(r.log, ['identify:http:image.bytes', 'source:closed', 'release:acquired', 'release:identity']);
+    assert.strictEqual(pulled, 0);
+    assert.deepStrictEqual(r.observed.map((/** @type {any} */ e) => e.message), ['COMMIT failed']);
+  });
+
+  it('the subscription behind an SSE answer is closed, never streamed; a close that fails is observed', async () => {
+    const live = compileContract({
+      $contract: '0.1',
+      operations: { feed: { kind: 'subscribe', output: { type: 'object', required: ['rows'], properties: { rows: { type: 'array' } } } } },
+    });
+    for (const closing of ['clean', 'throws']) {
+      /** @type {any} */
+      let r = null;
+      r = recording({ acquire: failingCommit(() => r) });
+      /** @type {string[]} */
+      const closes = [];
+      const server = serveHttp(live, { feed: () => ({
+        result: { rows: [] },
+        subscribe: () => { closes.push('subscribed'); return () => {}; },
+        close: () => { closes.push('closed'); if (closing === 'throws') throw new Error('close broke'); },
+      }) }, r.options);
+      const response = await server.dispatch({ method: 'GET', url: '/feed', headers: { accept: 'text/event-stream' }, body: null });
+      assert.deepStrictEqual([response.status, json(response).code, response.stream], [500, 'JC2008', undefined], closing);
+      await wait(() => closes.length === 1);
+      assert.deepStrictEqual(closes, ['closed'], 'closed once, never subscribed');
+      assert.deepStrictEqual(r.log, ['identify:http:feed', 'release:acquired', 'release:identity']);
+      await wait(() => r.observed.length === (closing === 'throws' ? 2 : 1));
+      assert.deepStrictEqual(r.observed.map((/** @type {any} */ e) => e.message), closing === 'throws' ? ['COMMIT failed', 'close broke'] : ['COMMIT failed']);
     }
   });
 });
@@ -422,5 +499,56 @@ describe('host lifecycle over port and local', () => {
     assert.deepStrictEqual(r.log, ['identify:local:catalog.load', 'acquire:identity']);
     await wait(() => r.log.includes('release:identity'));
     assert.deepStrictEqual(r.log, ['identify:local:catalog.load', 'acquire:identity', 'release:acquired', 'release:identity']);
+  });
+
+  it('port and local: acquire rejecting after enter settled — a commit that failed — is JC2070, observed; a subscription it stranded is closed once', async () => {
+    const failing = async (/** @type {any} */ input, /** @type {any} */ identity, /** @type {any} */ enter) => {
+      await enter({ host: 'tx' });
+      throw new Error('COMMIT failed');
+    };
+    /** @type {unknown[]} */
+    const observed = [];
+    const local = openLocalClient(shop, shopHandlers(), { acquire: failing, onError: (e) => { observed.push(e); } });
+    const viaLocal = /** @type {any} */ (await local.invoke('product.save', PORT_SAVE));
+    assert.deepStrictEqual([viaLocal.ok, viaLocal.kind, viaLocal.error?.code], [false, 'contract', 'JC2070']);
+    assert.deepStrictEqual(observed.map((e) => /** @type {any} */ (e).message), ['COMMIT failed']);
+
+    const document = load('./fixtures/shop.contract.json');
+    document.operations.feed = { kind: 'subscribe', output: { type: 'object', required: ['rows'], properties: { rows: { type: 'array' } } } };
+    const live = compileContract(document);
+    for (const closing of ['clean', 'throws']) {
+      observed.length = 0;
+      /** @type {string[]} */
+      const closes = [];
+      const { port1, port2 } = new MessageChannel();
+      const server = servePort(live, {
+        ...shopHandlers(),
+        feed: () => ({
+          result: { rows: [] },
+          subscribe: () => { closes.push('subscribed'); return () => {}; },
+          close: () => { closes.push('closed'); if (closing === 'throws') throw new Error('close broke'); },
+        }),
+      }, { channel: port1, acquire: failing, onError: (e) => { observed.push(e); } });
+      const client = openPortClient(live, { channel: port2 });
+      try {
+        const viaPort = /** @type {any} */ (await client.invoke('product.save', PORT_SAVE));
+        assert.deepStrictEqual([viaPort.ok, viaPort.kind, viaPort.error?.code], [false, 'contract', 'JC2070'], closing);
+        /** @type {any[]} */
+        const errors = [];
+        client.subscribe('feed', undefined, { onSnapshot: () => errors.push('snapshot'), onError: (o) => errors.push(o) });
+        await wait(() => errors.length === 1 && closes.length === 1);
+        assert.strictEqual(errors[0].error.details.code, 'JC2070');
+        assert.deepStrictEqual(closes, ['closed'], 'closed once, never subscribed');
+        await wait(() => observed.length === (closing === 'throws' ? 3 : 2));
+        assert.deepStrictEqual(observed.map((e) => /** @type {any} */ (e).message),
+          closing === 'throws' ? ['COMMIT failed', 'COMMIT failed', 'close broke'] : ['COMMIT failed', 'COMMIT failed']);
+      }
+      finally {
+        client.close();
+        server.close();
+        port1.close();
+        port2.close();
+      }
+    }
   });
 });

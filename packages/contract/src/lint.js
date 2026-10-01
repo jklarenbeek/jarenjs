@@ -15,6 +15,11 @@
  * - `body-limit-unsatisfiable` — the smallest body the required members
  *   can encode to already exceeds `policy.limits.maxBodyBytes`, so every
  *   valid request is refused `JC2003`. The size is a LOWER bound.
+ * - `body-limit-exceedable` — a body member's own `maxLength` admits a
+ *   valid string whose encoding alone exceeds the limit, so a valid request
+ *   carrying one is refused `JC2003`. Only a bound nothing else can keep out
+ *   of reach counts: a `pattern`, `format`, `enum` or `const` beside it may,
+ *   so such a string is not reported.
  * - `retry-on-undeclared` — a `policy.retry.on` entry that is neither a
  *   code the operation declares nor a `JC` code a binding raises, so the
  *   retry it asks for can never happen.
@@ -34,14 +39,15 @@ import { isCompiledContract } from './public.js';
 /**
  * One finding.
  * @typedef {Object} LintFinding
- * @property {'read-query-on-body-method' | 'body-limit-unsatisfiable' | 'retry-on-undeclared'} rule
+ * @property {'read-query-on-body-method' | 'body-limit-unsatisfiable' | 'body-limit-exceedable' | 'retry-on-undeclared'} rule
  * @property {string} op - the operation id
  * @property {string} docPath - the member at fault, a pointer into the document
  * @property {string} message - what happens, and the fix
  */
 
 /** The rule ids, in the order a report lists them. */
-export const LINT_RULES = Object.freeze(['read-query-on-body-method', 'body-limit-unsatisfiable', 'retry-on-undeclared']);
+export const LINT_RULES = Object.freeze(['read-query-on-body-method', 'body-limit-unsatisfiable', 'body-limit-exceedable',
+  'retry-on-undeclared']);
 
 /** Methods that carry a request body. */
 const BODY_METHODS = new Set(['POST', 'PUT', 'PATCH']);
@@ -73,6 +79,7 @@ export function lintContract(contract) {
     const base = `/operations/${token(op.id)}`;
     readQueryOnBodyMethod(op, declared, base, findings);
     bodyLimitUnsatisfiable(op, contract, base, findings);
+    bodyLimitExceedable(op, contract, base, findings);
     retryOnUndeclared(op, base, findings);
   }
   return findings;
@@ -135,6 +142,80 @@ function bodyLimitUnsatisfiable(op, contract, base, findings) {
       + 'valid request is refused JC2003. The size is a lower bound: maxLength counts code points and JSON escaping only adds. '
       + 'Raise the limit, or relax the bounds',
   });
+}
+
+/**
+ * @param {CompiledOperation} op
+ * @param {Contract} contract
+ * @param {string} base
+ * @param {LintFinding[]} findings
+ */
+function bodyLimitExceedable(op, contract, base, findings) {
+  if (op.input === null || op.http.opaque) return;
+  const effective = op.input.effective;
+  const properties = isJsonObject(effective.properties) ? effective.properties : {};
+  const members = op.http.body !== null ? [op.http.body]
+    : Object.keys(op.http.in).filter((m) => op.http.in[m] === 'body');
+  const scope = { doc: contract.doc, seen: new Set() };
+  /** @type {{ path: string, length: number } | null} */
+  let widest = null;
+  for (const m of members) {
+    const found = widestString(properties[m], `/${token(m)}`, scope, 0);
+    if (found !== null && (widest === null || found.length > widest.length)) widest = found;
+  }
+  const limit = op.policy.limits.maxBodyBytes;
+  // the string alone, quoted: every other byte of the body only adds to it
+  if (widest === null || widest.length + 2 <= limit) return;
+  findings.push({
+    rule: 'body-limit-exceedable',
+    op: op.id,
+    docPath: `${base}/policy/limits/maxBodyBytes`,
+    message: `'${widest.path}' admits strings of up to ${widest.length} characters — at least ${widest.length + 2} bytes `
+      + `encoded — over policy.limits.maxBodyBytes ${limit}, so a valid request carrying one is refused JC2003. `
+      + 'Lower the maxLength, or raise the limit',
+  });
+}
+
+/**
+ * The longest string a member's own bound admits, where nothing else can
+ * keep that length out of reach: a `string` type (alone or in a union),
+ * an integer `maxLength`, and no `pattern`, `format`, `enum` or `const`.
+ * Object members, array items and union branches are read below it.
+ * @param {unknown} schema
+ * @param {string} path - a pointer into the input, for the message
+ * @param {{ doc: any, seen: Set<unknown> }} scope
+ * @param {number} depth
+ * @returns {{ path: string, length: number } | null}
+ */
+function widestString(schema, path, scope, depth) {
+  if (depth > 32 || !isJsonObject(schema)) return null;
+  if (typeof schema.$ref === 'string') {
+    if (!schema.$ref.startsWith('#/$defs/') || scope.seen.has(schema.$ref)) return null;
+    const target = scope.doc.$defs?.[decodeURIComponent(schema.$ref.slice('#/$defs/'.length))];
+    scope.seen.add(schema.$ref);
+    const found = widestString(target, path, scope, depth + 1);
+    scope.seen.delete(schema.$ref);
+    return found;
+  }
+  /** @type {{ path: string, length: number } | null} */
+  let widest = null;
+  const consider = (/** @type {{ path: string, length: number } | null} */ found) => {
+    if (found !== null && (widest === null || found.length > widest.length)) widest = found;
+  };
+  const types = typeof schema.type === 'string' ? [schema.type] : Array.isArray(schema.type) ? schema.type : [];
+  if (types.includes('string') && Number.isInteger(schema.maxLength)
+    && !['pattern', 'format', 'enum', 'const'].some((keyword) => Object.hasOwn(schema, keyword))
+    && !(Number.isInteger(schema.minLength) && schema.minLength > schema.maxLength)) {
+    consider({ path, length: schema.maxLength });
+  }
+  if (isJsonObject(schema.properties)) {
+    for (const [name, member] of Object.entries(schema.properties)) consider(widestString(member, `${path}/${token(name)}`, scope, depth + 1));
+  }
+  if (isJsonObject(schema.items)) consider(widestString(schema.items, `${path}/0`, scope, depth + 1));
+  for (const key of ['anyOf', 'oneOf']) {
+    if (Array.isArray(schema[key])) for (const branch of schema[key]) consider(widestString(branch, path, scope, depth + 1));
+  }
+  return widest;
 }
 
 /**

@@ -240,7 +240,8 @@ export function servePort(contract, handlers, options) {
    * Run the host lifecycle around a served request or subscription:
    * identify before validation, the validation itself (`validate`),
    * acquire after it, then `enter` with the handler's context. Every
-   * fault of a hook is the binding's host fault (`JC2070`); a declared
+   * fault of a hook is the binding's host fault (`JC2070`) — a hook that
+   * rejects after `enter` settled (a commit that failed) among them; a declared
    * failure is classified like a handler's. The answer is what `enter`
    * (or a refusal) produced, plus the releases the caller runs at its
    * own boundary.
@@ -288,7 +289,17 @@ export function servePort(contract, handlers, options) {
       failed(classifyDeclared(route, out.failure));
       return { entered: false, value: undefined, release };
     }
-    if (out.afterFault !== undefined) observed(out.afterFault);
+    if (out.afterFault !== undefined) {
+      // the hook rejected after enter settled — the transaction around it
+      // did not commit: the host's fault, and nothing enter answered
+      // stands; a subscription it settled with is closed, never run
+      const settled = /** @type {any} */ (out.result);
+      if (settled.kind === 'value' && isSubscriptionLike(settled.value)) {
+        void Promise.resolve().then(() => settled.value.close()).then(undefined, observed);
+      }
+      refuse('JC2070', undefined, out.afterFault);
+      return { entered: false, value: undefined, release };
+    }
     return { entered: true, value: out.result, release };
   }
 

@@ -23,6 +23,7 @@ import * as fs from 'node:fs';
 import { openStore, createCursor } from '@jarenjs/db';
 import { admitCursor } from '../../packages/db/src/cursor.js';
 import { nodeDriver } from '@jarenjs/db/node';
+import { nodeWorkerDriver } from '@jarenjs/db/node-worker';
 import { createRuntime } from '@jarenjs/core/runtime';
 import { statementCountingDriver } from './helpers.js';
 
@@ -352,6 +353,24 @@ describe('concurrent transactions on one connection', () => {
     await store.close();
   });
 
+  it("transactions: 'strict' on an asynchronous host refuses a root call behind another root call, and says so", async () => {
+    const store = await openStore(MODEL, { driver: nodeWorkerDriver(), transactions: 'strict' });
+    try {
+      const docs = store.collection('docs');
+      await docs.put({ id: 'a' }, 'a');
+      // no transaction anywhere: the first call holds the gate while its
+      // statement runs on the worker, and the other two would queue
+      const outcomes = await Promise.all([docs.get('a'), settle(docs.get('a')), settle(docs.put({ id: 'b' }, 'b'))]);
+      assert.deepStrictEqual(outcomes[0], { id: 'a' });
+      for (const refused of outcomes.slice(1)) {
+        assert.strictEqual(refused.code, 'JD0012');
+        assert.match(refused.message, /another caller holds this store's connection — a transaction, or a store-level call still in flight/);
+        assert.doesNotMatch(refused.message, /^JD0012: a transaction owns/);
+      }
+    }
+    finally { await store.close(); }
+  });
+
   it("an unknown transactions mode is refused by name before the driver opens (JD0009)", async () => {
     await assert.rejects(
       () => openStore(MODEL, { driver: nodeDriver(), transactions: /** @type {any} */ ('queue') }),
@@ -471,7 +490,82 @@ describe('the store a transaction callback receives carries the whole surface', 
   });
 });
 
+describe('a transaction\'s operations run one at a time, in call order', () => {
+  it('an operation refused inside its own savepoint never takes back an overlapping one that reported success', async () => {
+    const drivers = [nodeWorkerDriver()];
+    for (const driver of drivers) {
+      const store = await openStore(MODEL, { driver });
+      try {
+        const docs = store.collection('docs');
+        await docs.put({ id: 'a', n: 0 }, 'a');
+        await docs.put({ id: 'b', n: 0 }, 'b');
+        const outcome = await store.transaction(async (tx) => {
+          const d = tx.collection('docs');
+          const settled = await Promise.allSettled([
+            // refused by its precondition, inside a savepoint of its own
+            d.put({ id: 'a', n: 1 }, 'a', { expect: { path: '/n', value: 99 } }),
+            d.put({ id: 'b', n: 2 }, 'b'),
+          ]);
+          // a read issued while another operation's savepoint is open waits its turn
+          const patched = d.patch('a', [{ op: 'test', path: '/n', value: 99 }]).then(() => 'patched', (/** @type {any} */ e) => e.code);
+          await new Promise((resolve) => setImmediate(resolve));
+          const read = await d.get('b');
+          return { settled: settled.map((r) => (r.status === 'fulfilled' ? 'ok' : r.reason.code)), patched: await patched, read };
+        });
+        assert.deepStrictEqual(outcome, { settled: ['JD2040', 'ok'], patched: 'JP2004', read: { id: 'b', n: 2 } }, driver.name);
+        assert.deepStrictEqual(await docs.get('b'), { id: 'b', n: 2 }, 'the write that reported success was committed');
+        assert.deepStrictEqual(await docs.get('a'), { id: 'a', n: 0 });
+        // an outer handle used from an inner transaction's body still refuses at once rather than waiting for it
+        await store.transaction(async (tx) => {
+          await tx.transaction(async () => {
+            await assert.rejects(Promise.resolve(tx.collection('docs').get('a')), { code: 'JD2070' });
+          });
+        });
+        // an operation a body did not await, still waiting for its turn when the transaction settled, sends nothing
+        /** @type {any} */
+        let late;
+        await store.transaction(async (tx) => {
+          const d = tx.collection('docs');
+          void d.put({ id: 'c', n: 1 }, 'c');
+          late = Promise.resolve(d.put({ id: 'late', n: 1 }, 'late')).then(() => 'written', (/** @type {any} */ e) => e.code);
+        });
+        assert.strictEqual(await late, 'JD2070');
+        assert.strictEqual(await docs.get('late'), undefined);
+      }
+      finally { await store.close(); }
+    }
+  });
+});
+
 describe('a transaction handle is pinned to its exact scope (JD2070)', () => {
+  it('a store-level call on the body\'s synchronous extent runs as the owner, and the body\'s own handle stays usable beside it', async () => {
+    for (const driver of [nodeDriver(), nodeWorkerDriver()]) {
+      const store = await openStore(MODEL, { driver });
+      try {
+        const docs = store.collection('docs');
+        // a root read issued before the body first awaits, then the body's own write
+        assert.strictEqual(await store.transaction(async (tx) => {
+          void docs.get('anything');
+          await tx.collection('docs').put({ id: 'c' }, 'c');
+          return 'committed';
+        }), 'committed', driver.name);
+        assert.deepStrictEqual(await docs.get('c'), { id: 'c' });
+        // a root write there is the owner's: it rolls back with the transaction
+        /** @type {any} */
+        let rootWrite;
+        await assert.rejects(store.transaction(async (tx) => {
+          rootWrite = docs.put({ id: 'root' }, 'root');
+          await tx.collection('docs').put({ id: 'body' }, 'body');
+          throw new Error('rolled back on purpose');
+        }), /on purpose/);
+        assert.strictEqual(await rootWrite, 'root');
+        assert.strictEqual(await docs.get('root'), undefined, 'the root write rolled back with its owner');
+        assert.strictEqual(await docs.get('body'), undefined);
+      }
+      finally { await store.close(); }
+    }
+  });
+
   const isScopeRefusal = (outcome) => {
     assert.strictEqual(outcome.code, 'JD2070');
     assert.match(outcome.message, /LIVE transaction callback/);

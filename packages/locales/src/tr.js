@@ -60,7 +60,7 @@ const typeName = makeTypeNamer(TYPE_NAMES);
  * every `form/*` key of forms' `formsMessagesEn`, `x-form/assert`, the
  * `JQ2xxx` codes reachable through `$query`, every `contract/*`
  * wire-error msgid of `@jarenjs/contract`'s `contractMessagesEn`, and
- * every `query/*` message of `@jarenjs/json`'s `queryMessagesEn`.
+ * every `query/*` message of `@jarenjs/json`'s `queryMessagesEn` and every message of its `formulaMessagesEn`.
  * @type {Record<string, string | ((params: any, error?: object) => string)>}
  */
 export const tr = {
@@ -414,6 +414,49 @@ export const tr = {
   'query/lexical-result': 'sözcüksel sağlayıcı geçersiz ya da eksik bir sonuç döndürdü',
   //#endregion
 
+  //#region @jarenjs/json formulas (the messages of formulaMessagesEn)
+  'query/formula/query': '{formulaId}: {message}',
+  'query/formula/detail': '{formulaId}: {detail}',
+  'query/formula/profile-json': '{formulaId}: profil JSON olmalıdır',
+  'query/formula/profile-object': '{formulaId}: profil bir nesne olmalıdır',
+  'query/formula/profile-version': '{formulaId}: desteklenmeyen dil sürümü',
+  'query/formula/profile-identity': '{formulaId}: {member} boş olmamalı ve en fazla 256 karakter içermelidir',
+  'query/formula/profile-expression': '{formulaId}: ifade zorunludur',
+  'query/formula/profile-result-mode': '{formulaId}: bilinmeyen sonuç modu',
+  'query/formula/profile-bindings': '{formulaId}: bindings bir nesne olmalıdır',
+  'query/formula/profile-reserved': '{formulaId}: computed ve context ayrılmış bağlamalardır',
+  'query/formula/profile-helpers': '{formulaId}: helpers bir dizi olmalıdır',
+  'query/formula/profile-helper': '{formulaId}: her yardımcı işlev için benzersiz bir ad ve bir sürüm gerekir',
+  'query/formula/profile-packs': '{formulaId}: packs bir dizi olmalıdır',
+  'query/formula/profile-pack': '{formulaId}: her paket için benzersiz bir ad ve bir sürüm gerekir',
+  'query/formula/helper-missing': '{formulaId}: saf yardımcı işlev {name}@{version} eksik veya uyumsuz',
+  'query/formula/pack-missing': '{formulaId}: işleç paketi {name}@{version} eksik veya uyumsuz',
+  'query/formula/helper-shadows': '{formulaId}: {name} yardımcı işlevi, listelenen bir işleç paketindeki bir işlevle aynı adı taşıyor',
+  'query/formula/schema-missing': '{formulaId}: şema ya da tür testi derleyicisi eksik veya uyumsuz',
+  'query/formula/schema-rejected': '{formulaId}: şema reddedildi',
+  'query/formula/computed-unnamed': '{formulaId}: computed başvurusu hedefini adıyla belirtmelidir',
+  'query/formula/computed-cycle': '{formulaId}: hesaplanan bağımlılıklar bir döngü oluşturuyor',
+  'query/formula/computed-unknown': '{formulaId}: bilinmeyen hesaplanan hedef',
+  'query/formula/targets-invalid': '{formulaId}: geçersiz hedef listesi',
+  'query/formula/target-identity': '{formulaId}: her hedef için benzersiz bir kimlik ve boolean bir enabled gerekir',
+  'query/formula/target-schemas': '{formulaId}: bir hedefin şemaları id -> {{version, schema} biçiminde bir nesne olmalıdır',
+  'query/formula/target-schema-clash': "{formulaId}: aynı id '{id}' altında iki farklı şema var",
+  'query/formula/batch-limit': '{formulaId}: toplu işin satır veya hücre sınırı aşıldı',
+  'query/formula/row-identity': '{formulaId}: her satır için benzersiz ve kalıcı bir kimlik gerekir',
+  'query/formula/input-schema': '{formulaId}: girdi, girdi şemasını karşılamıyor',
+  'query/formula/result-schema': '{formulaId}: sonuç, sonuç şemasını karşılamıyor',
+  'query/formula/outcome-invalid': '{formulaId}: geçersiz etiketli sonuç',
+  'query/formula/parity-expected': '{formulaId}: beklenen sonuç {index} JSON değil',
+  'query/formula/rule-identity': '{formulaId}: bir kural için kimlik, hedefler ve yazılabilir alanlar gerekir',
+  'query/formula/rule-field-not-writable': '{formulaId}: hedef alan yazılabilir değil',
+  'query/formula/rule-rows': '{formulaId}: sınırlı satırlar ve bir veri kümesi revizyonu gerekir',
+  'query/formula/rule-entity-duplicate': '{formulaId}: yinelenen varlık kimliği',
+  'query/formula/rule-preview-stale': '{formulaId}: eskimiş veya değiştirilmiş önizleme',
+  'query/formula/rule-selection-duplicate': '{formulaId}: seçim benzersiz değişiklik kimlikleri içermelidir',
+  'query/formula/rule-selection-unknown': '{formulaId}: bilinmeyen seçili değişiklik',
+  'query/formula/rule-conflict': '{formulaId}: aynı alan için çelişen değerler',
+  //#endregion
+
   //#region @jarenjs/locales numbers (the decimal format, CLDR as ICU 78.3 ships it)
   'number/decimal-separator': ',',
   'number/grouping-separator': '.',
@@ -424,5 +467,6 @@ export const tr = {
   'number/exponent-separator': 'E',
   'number/infinity': '∞',
   'number/nan': 'NaN',
+  'number/minimum-grouping-digits': '1',
   //#endregion
 };

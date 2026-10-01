@@ -6,6 +6,7 @@ import { asyncLive } from '@jarenjs/db/async-live';
 import { nodeDriver } from '@jarenjs/db/node';
 import { postgresDriver } from '@jarenjs/db/postgres';
 import { POSTGRES_LOCK_CLASSES } from '../../packages/db/src/dialects/postgres-locks.js';
+import { createSessionRouter } from '../../packages/db/src/sessions.js';
 import { tempDbPath } from './helpers.js';
 
 const model = { $model: '0.1', collections: {
@@ -73,6 +74,36 @@ describe('a store on several sessions, whatever driver declares them', () => {
       for await (const id of store.collection('notes').query(stream)) { assert.equal(id, 'n0'); break; }
       assert.deepEqual(await store.entity('Item').get('i'), { id: 'i', title: 'saved' });
     }, { capture: { mode: 'journal', log: { retention: 100 } } });
+  });
+
+  it('refuses a call queued for a session that is then lost at once (JD2087), not at queueTimeout', async () => {
+    const { AsyncLocalStorage } = await import('node:async_hooks');
+    /** @type {boolean[]} */
+    const lost = [false, false];
+    // sessions as the router sees them: each runs a call as it comes, and says whether the server dropped it
+    const session = (/** @type {number} */ index) => ({ lost: () => lost[index], queueTimeout: 5000, queueCapacity: 10, mustQueue: false,
+      transaction: (/** @type {any} */ fn) => fn({}), exclusively: (/** @type {any} */ fn) => fn({}), close: () => undefined });
+    const router = createSessionRouter({ sessions: [session(0), session(1)], storage: new AsyncLocalStorage(), newContext: () => ({}) });
+    const hold = () => {
+      const gate = Promise.withResolvers();
+      return { gate, done: router.transaction(() => gate.promise) };
+    };
+    // the first call takes session 1, the second session 0; a pinned call waits for session 0
+    const [onOne, onZero] = [hold(), hold()];
+    const pinned = router.pinned.transaction(async () => 'ran');
+    lost[0] = true;
+    let started = Date.now();
+    onZero.gate.resolve(undefined);
+    await assert.rejects(pinned, { code: 'JD2087', message: /first session was lost/ });
+    assert.ok(Date.now() - started < 1000, 'refused when the session came back lost, not at queueTimeout');
+    // a call for any session waits while one is still alive, and is refused once none is
+    const any = router.transaction(async () => 'ran');
+    lost[1] = true;
+    started = Date.now();
+    onOne.gate.resolve(undefined);
+    await assert.rejects(any, { code: 'JD2087', message: /every one of the store's sessions was lost/ });
+    assert.ok(Date.now() - started < 1000);
+    await Promise.all([onOne.done, onZero.done]);
   });
 
   it('queues a call for the next free session, lets its signal abandon it, refuses it when the store closes, and under strict transactions refuses at once', async () => {

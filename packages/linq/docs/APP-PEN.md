@@ -137,9 +137,9 @@ and nothing else — a transition is data, so a test can read it.
 | Method | Emits | Type reading | Status |
 |---|---|---|---|
 | `action(fn, { payload?, event? })` | one action document, captured over `$`, `$event`, `$payload` | `ActionDeclaration<Payload>`; `payload` and `event` are TYPES — the format carries no schema for either, and nothing is emitted for them | native; a non-builder `payload` `JL0101`; an excluded `event` field `JL0102`; a name §3.1 does not bind `JL0104` |
-| `transition({ state?, patch?, effects? })` | the transition object of APP-FORMAT §3.2, in the order the runtime applies it | `Transition` | native; another member `JL0101` |
-| `effect(run, with?)` | `{ run, with? }` (§5.1); `with` is a value in the ACTION's scope, not a callback | `EffectDeclaration<Run>` — `Run` is a literal | native; an empty `run` `JL0101` |
-| `when(cond, then, otherwise?)` | `{ "$if": [cond, then, otherwise?] }` — the branches spelled as the action spells its own result; no `otherwise` is the empty sequence, the no-op transition | `Conditional`; `cond` is a `BoolExpr` or a boolean, a branch a `Transition` or a `Conditional` | native; a condition or a branch that is not one `JL0101` — a branch written as an object is held to `transition()`'s own rules; outside an action's capture (none, a subscription's, a view's, a chain's) `JL0005` |
+| `transition({ state?, patch?, effects? })` | the transition object of APP-FORMAT §3.2, in the order the runtime applies it | `Transition`; `state` does not take a `Conditional` (§5.7) | native; another member `JL0101`; a `when()` in the state or in a patch operation `JL0101` |
+| `effect(run, with?)` | `{ run, with? }` (§5.1); `with` is a value in the ACTION's scope, not a callback | `EffectDeclaration<Run>` — `Run` is a literal; `with` does not take a `Conditional` | native; an empty `run` `JL0101`; a `when()` in `with` `JL0101` |
+| `when(cond, then, otherwise?)` | `{ "$if": [cond, then, otherwise?] }` — the branches spelled as the action spells its own result; no `otherwise` is the empty sequence, the no-op transition | `Conditional`; `cond` is a `BoolExpr` or a boolean, a branch a `Transition` or a `Conditional` | native; a condition or a branch that is not one `JL0101` — another `when()` is a branch, never a condition, and a branch written as an object is held to `transition()`'s own rules; outside an action's capture (none, a subscription's, a view's, a chain's) `JL0005` |
 | `taskSlot(name, { at, mode?, fail? })` | the slot's `initial` value `{ id: 0, status: 'idle', error: null }` and four actions, `<name>/start`, `<name>/done`, `<name>/fail` and `<name>/cancel`, each answered under its own name for a spread into `actions` | `TaskSlot<Name, State>`: the names are template literals, so `ActionsOf<>` stays exact | native; an option it does not take, a `mode` outside `switch`/`exhaust`/`concat`/`parallel`, a start prop the slot owns (`id`, `done`, `fail`, `slot`), `fail()` on a slot without `fail: true`, or an `at` that answers no path into the state `JL0101` |
 
 Returning nothing from an action is the format's own no-op, and
@@ -216,13 +216,13 @@ string is accepted verbatim for the locations a shape cannot spell.
 
 | Method | Emits | Type reading | Status |
 |---|---|---|---|
-| `add(path, value)` | `{ op: 'add', path, value }` — **sets a member, and REPLACES an array when the path names one** | `PatchOp` | native |
-| `append(path, value)` | `{ op: 'add', path: '<path>/-', value }` — RFC 6902's array APPEND, the same op at the array's `-` position | `PatchOp` | native |
-| `replace(path, value)` | `{ op: 'replace', path, value }` — the op a transition writes most, and the one an array ELEMENT needs | `PatchOp` | native |
+| `add(path, value)` | `{ op: 'add', path, value }` — **sets a member, and REPLACES an array when the path names one** | `PatchOp`; `value` does not take a `Conditional` | native; a `when()` in `value` `JL0101` where a transition reads the operation |
+| `append(path, value)` | `{ op: 'add', path: '<path>/-', value }` — RFC 6902's array APPEND, the same op at the array's `-` position | `PatchOp`; `value` does not take a `Conditional` | native; a `when()` in `value` `JL0101` where a transition reads the operation |
+| `replace(path, value)` | `{ op: 'replace', path, value }` — the op a transition writes most, and the one an array ELEMENT needs | `PatchOp`; `value` does not take a `Conditional` | native; a `when()` in `value` `JL0101` where a transition reads the operation |
 | `remove(path)` | `{ op: 'remove', path }` | `PatchOp` | native |
 | `move(from, path)` | `{ op: 'move', from, path }` — both lowered as pointers | `PatchOp` | native |
 | `copy(from, path)` | `{ op: 'copy', from, path }` | `PatchOp` | native |
-| `test(path, value)` | `{ op: 'test', path, value }` — a failing test aborts the WHOLE transition (`JA2004`), which is the format's own way to write a precondition | `PatchOp` | native |
+| `test(path, value)` | `{ op: 'test', path, value }` — a failing test aborts the WHOLE transition (`JA2004`), which is the format's own way to write a precondition | `PatchOp`; `value` does not take a `Conditional` | native; a `when()` in `value` `JL0101` where a transition reads the operation |
 | a path lambda `(st, x) => …` | the JSON Pointer the state shape describes: `st.todos` → `/todos`, `st.todos.at(2).done` → `/todos/2/done`, `st.get('a/b')` → `/a~1b` (RFC 6901 escaping) | `PatchPath<State, Payload>` — annotate to type it | native |
 | a path lambda with a COMPUTED index | the pointer as a string EXPRESSION, `{ "$concat": ["/todos/", <index>, "/done"] }` — APP-FORMAT §3.2's "op members like `value` and `path` are themselves query expressions" | the same | native; anything that is not a chain of member reads and subscripts `JL0102` |
 | a path as a string | the pointer verbatim, `+ '/-'` under `append()` | `string` | native; a string that does not start with `/` `JL0102` |
@@ -777,6 +777,7 @@ Raised at the door, before anything is captured.
 | `when(7, transition({}))` | `when() takes a condition — a captured boolean expression or a boolean — got 7 at /cond` | `x.payload.id.eq(st.task.id)`, or `true` |
 | `when(c, { nope: 1 })`, `when(c, st.n)` | `when() then is a transition — transition({ state?, patch?, effects? }) — or another when(), got a Object instance at /then`; `when() then is a transition — transition({ … }) — or another when(), got an expression that is neither at /then` — and the same for `otherwise` | `transition({ … })`, or a `when()` |
 | `when(c, { patch: 'x' })`, `when(c, { effects: [{ run: 'save' }] })` | `when() then patch is an array of add/replace/remove/move/copy/test operations, got a string at /then`; `when() then effects[0] is effect(run, with?), got a Object instance at /then` — a branch written as an object is held to `transition()`'s rules, at build time rather than at dispatch | `transition({ patch: […] })`, or `effects: [effect('save')]` |
+| `transition({ state: when(c, t) })`, `transition({ patch: [replace((st) => st.n, when(c, t))] })`, `effect('log', { msg: when(c, t) })`, `when(when(c, t), t)` | `transition() state is a value, got a when() — a when() is a transition: an action returns it, or another when() takes it as a branch; write the when() around the transition instead, when(cond, transition({ … })) at /state`; `transition() patch[0] takes values, got a when() — … at /patch/0/value`; `effect() props are a value, got a when() — … at /with/msg`; `when() takes a condition — a captured boolean expression or a boolean, got a when() — … at /cond` — each with the same tail as the first. A `when()` is found anywhere inside the value and named at its own pointer (`/state/list/1`); at dispatch it would replace the value with the branch's transition object | `when(c, transition({ state: … }))`, returned from the action |
 | `taskSlot('')`, `taskSlot('x', 7)` | `taskSlot() takes a slot name as a non-empty string, got a string`; `taskSlot() options are { at, mode?, fail? }, got 7` | `taskSlot('scan', { at })` |
 | `taskSlot('x', { at, nope: 1 })` | `taskSlot() does not take 'nope' — it takes at, mode, fail at /nope` | one of the three |
 | `taskSlot('x', { at: 's.tasks.x' })`, `{ at, mode: 'merge' }`, `{ at, fail: 'yes' }` | `taskSlot() at is a lambda over the state to the slot — (s) => s.tasks.x — got a string at /at`; `taskSlot() mode is one of switch, exhaust, concat, parallel, got a string at /mode`; `taskSlot() fail is a boolean, got a string at /fail` | `at: (s) => s.tasks.x`, a mode `createTaskEffect` takes, `fail: true` |
@@ -1140,6 +1141,9 @@ application uses together. Compiled by `npm run test:types`, it holds:
   `effect('save').run` pinned to the literal `'save'`;
 - `when()` returned from an action, nested, and with an `otherwise`, all
   with no cast, and a bare value as a branch `@ts-expect-error` (§5.7);
+- a `when()` as a transition's `state`, as a patch operation's value and
+  as an effect's props — three `@ts-expect-error`s, the type half of the
+  refusal §4.2 states;
 - `ActionsOf<>` of an app built from a `taskSlot('scan', …)` equal to
   `'scan/start' | 'scan/done'`, and `'scan/fail'` `@ts-expect-error`
   against it.
@@ -1191,6 +1195,14 @@ action((st: Expr<State>, x) =>
 // @ts-expect-error — a branch is a transition or another when()
 action(() => when(true, 42));
 ```
+
+The brand also keeps a `Conditional` out of the places a value goes: a
+transition's `state`, the `value` of `add()`, `append()`, `replace()` and
+`test()`, and an effect's props do not take one, because at dispatch it
+would replace that value with the branch's transition object. The type
+reads the position itself; a `when()` nested deeper in the value (`{
+msg: when(…) }`) still types, and the pen refuses it at build time,
+naming its pointer (§4.2).
 
 `taskSlot()` answers `TaskSlot<Name, State>`, and each method's return is
 keyed by a template literal — `start()` answers `{ readonly
@@ -1275,7 +1287,7 @@ not look for them:
 
 ## 7. Cost
 
-`@jarenjs/linq/app` builds to **<!--fact:bundle.app-->51,242<!--/fact--> bytes** as a minified,
+`@jarenjs/linq/app` builds to **<!--fact:bundle.app-->52,114<!--/fact--> bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
 measures and `npm run test:tree-shaking` reports, published rounded
 beside the other nine subpath prices in
@@ -1285,8 +1297,8 @@ pen and the JSLT pen (state, and views), and no chain module, no
 
 It is the second-largest pen bundle after the client, and the two pens
 it carries are most of it. The three figures the same probe measures,
-side by side: `@jarenjs/linq/schema` <!--fact:bundle.schema-->36,880<!--/fact--> bytes,
-`@jarenjs/linq/jslt` <!--fact:bundle.jslt-->19,851<!--/fact-->, `@jarenjs/linq/app` <!--fact:bundle.app-->51,242<!--/fact-->. The subpath sums do not add — all
+side by side: `@jarenjs/linq/schema` <!--fact:bundle.schema-->36,956<!--/fact--> bytes,
+`@jarenjs/linq/jslt` <!--fact:bundle.jslt-->19,927<!--/fact-->, `@jarenjs/linq/app` <!--fact:bundle.app-->52,114<!--/fact-->. The subpath sums do not add — all
 three carry the capture, the expression lowering and the JSON boundary,
 which each bundle counts once — so what the app pen costs a consumer who
 already imports the schema pen is the difference the numbers do state:

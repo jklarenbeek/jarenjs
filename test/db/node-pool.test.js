@@ -115,6 +115,70 @@ describe('WAL worker pool', () => {
     }
     finally { await rm(folder, { recursive: true }); }
   });
+  it('a root cursor that finds every read worker held refuses JD2091 at queueTimeout and gives the store back', async () => {
+    const folder = await mkdtemp(join(tmpdir(), 'jaren-pool-cursors-'));
+    const store = await openStore({ $model: '0.1', collections: { items: { key: '/id', schema: { type: 'object' } } } },
+      { driver: nodeWorkerPoolDriver({ readers: 1 }), path: join(folder, 'db.sqlite'), queueTimeout: 300 });
+    const items = store.collection('items');
+    const first = items.query('$[*]');
+    const second = items.query('$[*]');
+    try {
+      for (let i = 0; i < 3; i++) await items.put({ id: `k${i}`, n: i });
+      // the first cursor holds the pool's one read worker across its pulls
+      assert.deepEqual(await first.next(), { done: false, value: { id: 'k0', n: 0 } });
+      // the second's first pull waits for that worker at most queueTimeout, as a parallel read does
+      const outcome = await Promise.race([second.next().then(() => 'answered', (error) => error.code),
+        new Promise((resolve) => { setTimeout(resolve, 3000, 'still waiting'); })]);
+      assert.equal(outcome, 'JD2091');
+      // and the store is not held by it: unrelated reads and writes run, and the first cursor goes on
+      assert.deepEqual(await items.get('k1'), { id: 'k1', n: 1 });
+      await items.put({ id: 'k3', n: 3 });
+      assert.deepEqual(await first.next(), { done: false, value: { id: 'k1', n: 1 } });
+      await first.return();
+      // the worker given back, a new cursor runs
+      const ids = [];
+      for await (const item of items.query('$[*]')) ids.push(item.id);
+      assert.deepEqual(ids, ['k0', 'k1', 'k2', 'k3']);
+    }
+    finally {
+      await first.return();
+      await second.return();
+      await store.close();
+      await rm(folder, { recursive: true });
+    }
+  });
+});
+
+describe('a pool without readers', () => {
+  it('a root write that finds the writer held by an open cursor refuses JD2091 at queueTimeout, and the cursor goes on', async () => {
+    const folder = await mkdtemp(join(tmpdir(), 'jaren-pool-noreaders-'));
+    for (const [label, path, readers] of /** @type {[string, string, number][]} */ ([['memory', ':memory:', 2],
+      ['readers: 0', join(folder, 'db.sqlite'), 0]])) {
+      const store = await openStore({ $model: '0.1', collections: { items: { key: '/id', schema: { type: 'object' } } } },
+        { driver: nodeWorkerPoolDriver({ readers }), path, queueTimeout: 300 });
+      const items = store.collection('items');
+      const cursor = items.query('$[*]');
+      try {
+        for (let i = 0; i < 3; i++) await items.put({ id: `k${i}` });
+        // the cursor holds the one worker, the writer, across its pulls
+        assert.deepEqual(await cursor.next(), { done: false, value: { id: 'k0' } }, label);
+        // a write waits for it at most queueTimeout, and holds the store's gate no longer
+        const outcome = await Promise.race([items.put({ id: 'x' }).then(() => 'written', (error) => error.code),
+          new Promise((resolve) => { setTimeout(resolve, 3000, 'still waiting'); })]);
+        assert.equal(outcome, 'JD2091', label);
+        assert.deepEqual(await cursor.next(), { done: false, value: { id: 'k1' } }, label);
+        await cursor.return();
+        // the writer given back, the write runs
+        await items.put({ id: 'x' });
+        assert.deepEqual((await items.all()).map((item) => item.id), ['k0', 'k1', 'k2', 'x'], label);
+      }
+      finally {
+        await cursor.return();
+        await store.close();
+      }
+    }
+    await rm(folder, { recursive: true });
+  });
 });
 
 describe('pool recovery and commit settlement', () => {

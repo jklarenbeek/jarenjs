@@ -253,7 +253,9 @@ has the claim recorded inside `enter`, so the domain write and the
 receipt commit together or not at all. Releases run once each, acquired
 before identity, before the response is exposed — or when an opaque
 body or an SSE stream is done. A hook fault is the host's (`JC2008`,
-observed), a hook's `meta.fail(code)` a declared failure. The generated
+observed) — a commit that fails after `enter` resolved among them: the
+fault is the answer and the claim is released retryable, so no success
+that never committed replays — a hook's `meta.fail(code)` a declared failure. The generated
 `HandlerContext<Host, Carrier>` carries `ctx.host` and `ctx.carrier`;
 port and local contexts spell the HTTP-only members as `null`.
 
@@ -651,13 +653,15 @@ const { breaking, additive, neutral, unknown } = diffContracts(v1, v2);
 //   breaking — an operation or error removed, a binding member moved, a new
 //              required input member, a narrowed input, a removed/optional-
 //              ized/WIDENED output (a closed output gaining a member too —
-//              the old client refuses it), idempotency now required, an
-//              operation withdrawn to audience: server, a SLOWER stream
+//              the old client refuses it), idempotency now required — or
+//              dropped to none (the old client's retry would run twice) —
+//              an operation withdrawn to audience: server, a SLOWER stream
 //              heartbeat (the old client's watchdog fires first)
 //   additive — an operation/error added, an optional input member, a widened
-//              input, a NARROWED output, a relaxed idempotency
+//              input, a NARROWED output, idempotency relaxed to optional
 //   neutral  — task mode, retry, cache, policy.revision, policy.stream, doc,
-//              a nullable respelling that accepts the same values (R16)
+//              a nullable respelling that accepts the same values (R16), a
+//              media respelling (case, parameters) the wire matches alike
 //   unknown  — what the checker does not model (anyOf/if/not, a CHANGED
 //              pattern, an external $ref, an error details schema, a
 //              constraint moved into an applicator, a member beside a

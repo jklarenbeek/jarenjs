@@ -8,14 +8,18 @@
  *
  * Every source file of `components/<x>/src` is scanned with the import
  * scanner `@jarenjs/emit/importmap` ships, so an import in a comment or a
- * string is never counted. The engine (`src/*` outside `src/component/`)
- * imports no other component, without exception. The component layer
- * (`src/component/*`) carries one exception, named below with its reason.
+ * string is never counted. An import of another component is one that names
+ * its package, or a relative path that lands in its folder. The engine
+ * (`src/*` outside `src/component/`) imports no other component, without
+ * exception. The component layer (`src/component/*`) carries one exception,
+ * named below with its reason, and it covers no relative path: a published
+ * package cannot reach a sibling's folder that way.
  */
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -42,22 +46,39 @@ const sources = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e
 /** The package an import specifier names. @param {string} specifier */
 const packageOf = (specifier) => (specifier.startsWith('@') ? specifier.split('/').slice(0, 2).join('/') : specifier.split('/')[0]);
 
-const components = fs.readdirSync(COMPONENTS, { withFileTypes: true })
-  .filter((entry) => entry.isDirectory() && fs.existsSync(path.join(COMPONENTS, entry.name, 'package.json')))
-  .map((entry) => ({ dir: entry.name, name: JSON.parse(fs.readFileSync(path.join(COMPONENTS, entry.name, 'package.json'), 'utf8')).name }));
+/** The components in a directory: each folder holding a manifest, and its package name. @param {string} dir */
+const componentsIn = (dir) => fs.readdirSync(dir, { withFileTypes: true })
+  .filter((entry) => entry.isDirectory() && fs.existsSync(path.join(dir, entry.name, 'package.json')))
+  .map((entry) => ({ dir: entry.name, name: JSON.parse(fs.readFileSync(path.join(dir, entry.name, 'package.json'), 'utf8')).name }));
+
+const components = componentsIn(COMPONENTS);
 const componentNames = new Set(components.map((component) => component.name));
 
-/** Every import of another component, by layer. */
-function crossImports() {
-  /** @type {Array<{ from: string, layer: 'engine' | 'component', file: string, imports: string }>} */
+/**
+ * Every import of another component in a components directory, by layer;
+ * an edge written as a relative path carries that path. Files are named
+ * relative to the directory's parent (`components/<x>/src/…`).
+ * @param {string} [dir]
+ */
+function crossImports(dir = COMPONENTS) {
+  const local = componentsIn(dir);
+  const names = new Set(local.map((component) => component.name));
+  const byFolder = new Map(local.map((component) => [component.dir, component.name]));
+  /** @type {Array<{ from: string, layer: 'engine' | 'component', file: string, imports: string, path?: string }>} */
   const found = [];
-  for (const { dir, name } of components) {
-    for (const file of sources(path.join(COMPONENTS, dir, 'src'))) {
-      const rel = path.relative(ROOT, file).split(path.sep).join('/');
+  for (const { dir: folder, name } of local) {
+    for (const file of sources(path.join(dir, folder, 'src'))) {
+      const rel = path.relative(path.dirname(dir), file).split(path.sep).join('/');
       const layer = rel.includes('/src/component/') ? 'component' : 'engine';
       for (const { specifier } of scanImports(fs.readFileSync(file, 'utf8'))) {
+        if (specifier.startsWith('./') || specifier.startsWith('../')) {
+          // the folder of the components directory the path lands in
+          const target = byFolder.get(path.relative(dir, path.resolve(path.dirname(file), specifier)).split(path.sep)[0]);
+          if (target !== undefined && target !== name) found.push({ from: name, layer, file: rel, imports: target, path: specifier });
+          continue;
+        }
         const target = packageOf(specifier);
-        if (target !== name && componentNames.has(target)) found.push({ from: name, layer, file: rel, imports: target });
+        if (target !== name && names.has(target)) found.push({ from: name, layer, file: rel, imports: target });
       }
     }
   }
@@ -78,16 +99,40 @@ describe('the component rule — no component imports another', () => {
 
   it('no component-layer file does either, but for the one named exception', () => {
     const unexpected = found.filter((edge) => edge.layer === 'component'
-      && !(COMPONENT_LAYER_EXCEPTIONS[edge.from] ?? []).includes(edge.imports));
+      && (edge.path !== undefined || !(COMPONENT_LAYER_EXCEPTIONS[edge.from] ?? []).includes(edge.imports)));
     assert.deepStrictEqual(unexpected, []);
   });
 
   it('the exception is still needed — a stale entry would hide the next edge', () => {
     for (const [from, imports] of Object.entries(COMPONENT_LAYER_EXCEPTIONS)) {
       for (const target of imports) {
-        assert.ok(found.some((edge) => edge.from === from && edge.imports === target), `${from} → ${target} is no longer imported`);
+        assert.ok(found.some((edge) => edge.from === from && edge.imports === target && edge.path === undefined),
+          `${from} → ${target} is no longer imported`);
       }
     }
+  });
+
+  it('counts a relative path into another component\'s folder as an import of it, in either layer', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'jaren-component-rule-'));
+    const dir = path.join(root, 'components');
+    const put = (/** @type {string} */ rel, /** @type {string} */ text) => {
+      fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true });
+      fs.writeFileSync(path.join(dir, rel), text);
+    };
+    try {
+      put('a/package.json', JSON.stringify({ name: '@x/a' }));
+      put('a/src/index.js', "import { b } from '../../b/src/index.js';\nimport './own.js';\nimport '../../../packages/core/src/index.js';\nexport { b };\n");
+      put('a/src/own.js', 'export {};\n');
+      put('b/package.json', JSON.stringify({ name: '@x/b' }));
+      put('b/src/index.js', 'export const b = 1;\n');
+      put('b/src/component/index.js', "import { a } from '../../../a/src/index.js';\nimport '@x/a';\nexport { a };\n");
+      assert.deepStrictEqual(crossImports(dir), [
+        { from: '@x/a', layer: 'engine', file: 'components/a/src/index.js', imports: '@x/b', path: '../../b/src/index.js' },
+        { from: '@x/b', layer: 'component', file: 'components/b/src/component/index.js', imports: '@x/a', path: '../../../a/src/index.js' },
+        { from: '@x/b', layer: 'component', file: 'components/b/src/component/index.js', imports: '@x/a' },
+      ]);
+    }
+    finally { fs.rmSync(root, { recursive: true, force: true }); }
   });
 
   it('the manifests agree: md does not depend on mermaid, nor mermaid on charts', () => {

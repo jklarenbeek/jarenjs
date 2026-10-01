@@ -117,7 +117,7 @@ function compareLimit(p) {
  * every `form/*` key of forms' `formsMessagesEn`, `x-form/assert`, the
  * `JQ2xxx` codes reachable through `$query`, every `contract/*`
  * wire-error msgid of `@jarenjs/contract`'s `contractMessagesEn`, and
- * every `query/*` message of `@jarenjs/json`'s `queryMessagesEn` — the
+ * every `query/*` message of `@jarenjs/json`'s `queryMessagesEn` and every message of its `formulaMessagesEn` — the
  * contract and query entries wrap their Latin values (operation ids,
  * media types, error codes, operator names, paths and quoted values) in
  * first-strong isolates (U+2068 FSI … U+2069 PDI) so a Latin run cannot
@@ -475,6 +475,49 @@ export const ar = {
   'query/lexical-result': 'أرجع الموفّر المعجمي نتيجة غير صالحة أو غير مكتملة',
   //#endregion
 
+  //#region @jarenjs/json formulas (the messages of formulaMessagesEn)
+  'query/formula/query': '⁨{formulaId}⁩: {message}',
+  'query/formula/detail': '⁨{formulaId}⁩: ⁨{detail}⁩',
+  'query/formula/profile-json': '⁨{formulaId}⁩: يجب أن يكون الملف التعريفي بصيغة ⁨JSON⁩',
+  'query/formula/profile-object': '⁨{formulaId}⁩: يجب أن يكون الملف التعريفي كائنًا',
+  'query/formula/profile-version': '⁨{formulaId}⁩: إصدار اللغة غير مدعوم',
+  'query/formula/profile-identity': '⁨{formulaId}⁩: يجب ألا يكون ⁨{member}⁩ فارغًا وألا يزيد طوله عن 256 حرفًا',
+  'query/formula/profile-expression': '⁨{formulaId}⁩: التعبير مطلوب',
+  'query/formula/profile-result-mode': '⁨{formulaId}⁩: وضع النتيجة غير معروف',
+  'query/formula/profile-bindings': '⁨{formulaId}⁩: يجب أن يكون ⁨bindings⁩ كائنًا',
+  'query/formula/profile-reserved': '⁨{formulaId}⁩: الربطان ⁨computed⁩ و⁨context⁩ محجوزان',
+  'query/formula/profile-helpers': '⁨{formulaId}⁩: يجب أن يكون ⁨helpers⁩ مصفوفة',
+  'query/formula/profile-helper': '⁨{formulaId}⁩: تحتاج كل دالة مساعدة إلى اسم فريد وإصدار',
+  'query/formula/profile-packs': '⁨{formulaId}⁩: يجب أن يكون ⁨packs⁩ مصفوفة',
+  'query/formula/profile-pack': '⁨{formulaId}⁩: تحتاج كل حزمة إلى اسم فريد وإصدار',
+  'query/formula/helper-missing': '⁨{formulaId}⁩: الدالة المساعدة النقية ⁨{name}@{version}⁩ مفقودة أو غير متوافقة',
+  'query/formula/pack-missing': '⁨{formulaId}⁩: حزمة العوامل ⁨{name}@{version}⁩ مفقودة أو غير متوافقة',
+  'query/formula/helper-shadows': '⁨{formulaId}⁩: تحمل الدالة المساعدة ⁨{name}⁩ اسم دالة من حزمة عوامل مدرجة',
+  'query/formula/schema-missing': '⁨{formulaId}⁩: المخطط أو مُصرِّف اختبارات النوع مفقود أو غير متوافق',
+  'query/formula/schema-rejected': '⁨{formulaId}⁩: رُفض المخطط',
+  'query/formula/computed-unnamed': '⁨{formulaId}⁩: يجب أن يسمّي المرجع إلى ⁨computed⁩ هدفه',
+  'query/formula/computed-cycle': '⁨{formulaId}⁩: تشكّل التبعيات المحسوبة حلقة',
+  'query/formula/computed-unknown': '⁨{formulaId}⁩: هدف محسوب غير معروف',
+  'query/formula/targets-invalid': '⁨{formulaId}⁩: قائمة الأهداف غير صالحة',
+  'query/formula/target-identity': '⁨{formulaId}⁩: يحتاج كل هدف إلى هوية فريدة وقيمة منطقية ⁨enabled⁩',
+  'query/formula/target-schemas': '⁨{formulaId}⁩: يجب أن تكون مخططات الهدف كائنًا من الشكل ⁨id -> {{version, schema}⁩',
+  'query/formula/target-schema-clash': "⁨{formulaId}⁩: مخططان مختلفان تحت المعرّف نفسه ⁨'{id}'⁩",
+  'query/formula/batch-limit': '⁨{formulaId}⁩: تم تجاوز حد الصفوف أو الخلايا في الدفعة',
+  'query/formula/row-identity': '⁨{formulaId}⁩: يحتاج كل صف إلى معرّف فريد وثابت',
+  'query/formula/input-schema': '⁨{formulaId}⁩: لا تستوفي المدخلات مخطط الإدخال',
+  'query/formula/result-schema': '⁨{formulaId}⁩: لا تستوفي النتيجة مخطط النتيجة',
+  'query/formula/outcome-invalid': '⁨{formulaId}⁩: النتيجة الموسومة غير صالحة',
+  'query/formula/parity-expected': '⁨{formulaId}⁩: النتيجة المتوقعة ⁨{index}⁩ ليست بصيغة ⁨JSON⁩',
+  'query/formula/rule-identity': '⁨{formulaId}⁩: تحتاج القاعدة إلى هوية وأهداف وحقول قابلة للكتابة',
+  'query/formula/rule-field-not-writable': '⁨{formulaId}⁩: الحقل الهدف غير قابل للكتابة',
+  'query/formula/rule-rows': '⁨{formulaId}⁩: يلزم عدد محدود من الصفوف ومراجعة لمجموعة البيانات',
+  'query/formula/rule-entity-duplicate': '⁨{formulaId}⁩: هوية كيان مكررة',
+  'query/formula/rule-preview-stale': '⁨{formulaId}⁩: المعاينة قديمة أو معدّلة',
+  'query/formula/rule-selection-duplicate': '⁨{formulaId}⁩: يجب أن يحتوي التحديد على معرّفات تغيير فريدة',
+  'query/formula/rule-selection-unknown': '⁨{formulaId}⁩: التغيير المحدد غير معروف',
+  'query/formula/rule-conflict': '⁨{formulaId}⁩: قيم متعارضة للحقل نفسه',
+  //#endregion
+
   //#region @jarenjs/locales numbers (the decimal format, CLDR as ICU 78.3 ships it)
   'number/decimal-separator': '.',
   'number/grouping-separator': ',',
@@ -485,5 +528,6 @@ export const ar = {
   'number/exponent-separator': 'E',
   'number/infinity': '∞',
   'number/nan': 'ليس\u00a0رقمًا',
+  'number/minimum-grouping-digits': '1',
   //#endregion
 };

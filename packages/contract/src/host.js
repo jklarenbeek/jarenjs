@@ -301,7 +301,9 @@ export function acquire(lifecycle, input, identity, enter) {
         return { kind: 'entered', lease, result: rolledBack.response, rolledBack };
       }
       if (entered !== null && lease !== null) {
-        // the hook rejected after enter settled: the settled result stands, the rejection is the host's fault to observe
+        // the hook rejected after enter settled — a COMMIT that failed: the
+        // settled result is reported beside the rejection (`afterFault`), and
+        // every binding answers it as the host's fault, never as that result
         return { kind: 'entered', lease, result: entered.value, rolledBack: null, afterFault: value };
       }
       return { kind: 'fault', cause: value };

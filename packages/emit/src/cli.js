@@ -42,16 +42,21 @@ what a caller may hand in.
 
 importmap options — serve installed packages unbundled:
   --packages <a,b>     Package names, comma separated; a bare name is a suite
-                       package (app is @jarenjs/app). Their dependencies follow.
+                       package (app is @jarenjs/app). Their dependencies follow,
+                       peer and optional dependencies included.
   --prefix <url>       The URL root/node_modules is served under (default /node_modules/)
   --root <dir>         The directory holding node_modules (default .)
-  --conditions <a,b>   Export conditions, in preference (default browser,import,default)
+  --conditions <a,b>   Export conditions to match (default browser,import,default);
+                       default always matches, as in Node, and the package's
+                       own key order, not the order given, decides which wins
   --files              Print the files a server must serve, one per line,
                        instead of the import map
   --allow-duplicates   Print even when a package is installed more than once
 
 The import map is printed to stdout. A package installed twice, or an import
-the map cannot resolve, is reported on stderr with exit code 1.
+the map cannot resolve, is reported on stderr with exit code 1. An import of an
+optional peer dependency that is not installed is a warning on stderr: only a
+page that loads the file importing it needs it.
 
 Examples:
   jaren-emit --schema ./schemas --out ./src/types
@@ -93,6 +98,9 @@ function importmapCommand(argv) {
   for (const { name, paths } of result.duplicates) {
     console.error(`${options.allowDuplicates ? 'warning' : 'error'}: ${name} is installed more than once: ${paths.join(', ')}`);
     if (!options.allowDuplicates) failed = true;
+  }
+  for (const { specifier, from, reason } of result.optional) {
+    console.error(`warning: ${from} imports ${specifier}, ${reason}: only a page that loads ${from} needs it`);
   }
   for (const { specifier, from } of result.unresolved) {
     console.error(`error: ${from} imports ${specifier}, which the map does not resolve`);

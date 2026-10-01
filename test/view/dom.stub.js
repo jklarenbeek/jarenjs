@@ -296,9 +296,14 @@ function idl(node, name, get, set) {
  *  - `className` and a label's `htmlFor` — strings reflecting `class` and `for`;
  *  - `disabled` — a boolean attribute;
  *  - `size` on an input (ToUint32; 0 throws `IndexSizeError`), `width` on an
- *    image (ToUint32), `href` on an anchor (a string), `value` on a progress
- *    (ToNumber) — non-boolean properties whose setter always writes the
- *    attribute, so assigning `''` writes `0`, `""` or `0`.
+ *    image or a canvas (ToUint32), `href` and `download` on an anchor and
+ *    `title` on every element (strings), `value` on a progress (ToNumber) —
+ *    non-boolean properties whose setter always writes the attribute, so
+ *    assigning `''` writes `0`, `""` or `0`, `true` writes `"true"` and
+ *    `'100px'` writes `0`;
+ *  - `popover` — a nullable string reflecting the enumerated attribute:
+ *    `null` removes it, anything else is written as its string, and it reads
+ *    back the state (`''` and `'auto'` are `auto`, an invalid value `manual`).
  */
 class ReflectingElement extends StubElement {
   /**
@@ -339,7 +344,21 @@ class ReflectingElement extends StubElement {
       });
     }
     if (lower === 'img') idl(this, 'width', () => toUint32(attr('width') ?? 0), (value) => this.setAttribute('width', String(toUint32(value))));
-    if (lower === 'a') idl(this, 'href', () => attr('href') ?? '', (value) => this.setAttribute('href', String(value)));
+    if (lower === 'canvas') idl(this, 'width', () => toUint32(attr('width') ?? 300), (value) => this.setAttribute('width', String(toUint32(value))));
+    if (lower === 'a') {
+      idl(this, 'href', () => attr('href') ?? '', (value) => this.setAttribute('href', String(value)));
+      idl(this, 'download', () => attr('download') ?? '', (value) => this.setAttribute('download', String(value)));
+    }
+    idl(this, 'title', () => attr('title') ?? '', (value) => this.setAttribute('title', String(value)));
+    idl(this, 'popover', () => {
+      const state = attr('popover');
+      if (state === null) return null;
+      const keyword = state.toLowerCase();
+      return keyword === '' || keyword === 'auto' ? 'auto' : keyword === 'hint' ? 'hint' : 'manual';
+    }, (value) => {
+      if (value === null) this.removeAttribute('popover');
+      else this.setAttribute('popover', String(value));
+    });
     if (lower === 'progress') {
       idl(this, 'value', () => Number(attr('value') ?? 0), (value) => this.setAttribute('value', String(Number(value))));
     }

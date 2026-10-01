@@ -897,7 +897,7 @@ oracle run on both. What differs is declared rather than discovered:
 | live queries | synchronous incremental/rerun; optional async resnapshot | optional bounded resnapshot over durable journal |
 | maintenance (checkpoint, integrity, optimize) | yes | no — every one of them IS a pragma |
 | a spatial `physical: 'rtree'` | an R\*Tree virtual table | the B-tree over the four edge columns, and `explain().prefilters[].via` says so |
-| a transaction a statement failed in | continues | is aborted until it ends (`JD2088`); catch-and-continue needs a nested `transaction()` |
+| a transaction a statement failed in | continues | is aborted until it ends (`JD2088`, its COMMIT included, so nothing in it commits); catch-and-continue needs a nested `transaction()` |
 | `ALTER TABLE` | additive only | full, so a rebuild is never needed |
 
 PostgreSQL has bounded native cursors, finite admission and a read-back server
@@ -923,31 +923,31 @@ alone; writing accepted evidence requires both engines. The committed
 
 <!--fact:postgres.portability-->
 
-Measured 2026-10-01T16:14:37.193Z: 500 documents, Node 24.20.0, SQLite 3.53.4, PostgreSQL 17.11 (Debian 17.11-1.pgdg12+2), pg 8.23.0. Durability settings: fsync=on, synchronous_commit=on, full_page_writes=on.
+Measured 2026-10-01T18:44:25.483Z: 500 documents, Node 24.20.0, SQLite 3.53.4, PostgreSQL 17.11 (Debian 17.11-1.pgdg12+2), pg 8.23.0. Durability settings: fsync=on, synchronous_commit=on, full_page_writes=on.
 
 | Operation | SQLite ms | PostgreSQL ms | PG / SQLite | Client query calls per PG operation | Iterations |
 |---|---:|---:|---:|---:|---:|
-| open | 18.616 | 27.215 | 1.5× | 17 | 1 |
-| insert | 0.012 | 0.609 | 52.9× | 1 | 500 |
-| get | 0.014 | 0.709 | 52.4× | 5 | 50 |
-| indexed | 0.604 | 2.698 | 4.5× | 13 | 20 |
-| scanned | 0.571 | 2.305 | 4.0× | 13 | 20 |
-| range | 0.589 | 2.249 | 3.8× | 13 | 20 |
-| transaction | 0.126 | 1.078 | 8.6× | 3 | 20 |
-| migration (one index) | 13.219 | 55.393 | 4.2× | not separately counted | 1 |
+| open | 18.577 | 59.708 | 3.2× | 17 | 1 |
+| insert | 0.014 | 0.701 | 50.5× | 1 | 500 |
+| get | 0.015 | 0.555 | 36.7× | 5 | 50 |
+| indexed | 0.603 | 2.924 | 4.8× | 13 | 20 |
+| scanned | 0.730 | 2.519 | 3.5× | 13 | 20 |
+| range | 0.642 | 2.427 | 3.8× | 13 | 20 |
+| transaction | 0.133 | 0.926 | 7.0× | 3 | 20 |
+| migration (one index) | 11.879 | 111.216 | 9.4× | not separately counted | 1 |
 
-Sequential insert throughput: SQLite 86829, PostgreSQL 1643 documents/second.
+Sequential insert throughput: SQLite 72029, PostgreSQL 1426 documents/second.
 
 | First-row probe | SQLite | PostgreSQL |
 |---|---:|---:|
-| First row ms | 0.858 | 0.901 |
-| First row plus cleanup ms | 0.939 | 1.134 |
+| First row ms | 1.107 | 0.841 |
+| First row plus cleanup ms | 1.190 | 1.085 |
 | Returned rows | 1 | 1 |
 | Fetched native rows / normalized bytes | not instrumented | 64 / 5661 |
 | Session peak native frame rows / bytes | not instrumented | 64 / 5813 |
 | Client query calls including cleanup | no network | 5 |
-| Sampled RSS before / after MiB | 91.33 / 108.72 | 110.77 / 116.56 |
-| Sampled heap before / after MiB | 21.38 / 26.94 | 17.66 / 26.36 |
+| Sampled RSS before / after MiB | 89.88 / 106.92 | 109.26 / 115.76 |
+| Sampled heap before / after MiB | 21.28 / 26.82 | 16.14 / 24.24 |
 
 After close: driver active=0, queued=0; native cursors=0, prepared statements=0; host pool total=1, idle=1, waiting=0.
 

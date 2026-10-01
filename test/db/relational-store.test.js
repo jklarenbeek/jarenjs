@@ -297,6 +297,29 @@ describe('store.sync.relational', () => {
   });
 });
 
+describe('a table two entities share', () => {
+  it('a store-only rule on either entity refuses a relational write to the table, whichever is declared first', async () => {
+    const rule = [{ name: 'frozen', on: ['update', 'delete'], enforcement: 'store', assert: { $eq: ['$.old.phase', 'draft'] } }];
+    const entity = (/** @type {any} */ invariants) => ({
+      schema: { type: 'object', properties: { id: { type: 'integer', 'x-entity': { key: true } }, phase: { type: 'string' } } },
+      physical: { table: 'entry', columns: { id: { name: 'id', codec: 'integer', null: 'reject' }, phase: { name: 'phase', codec: 'text', null: 'reject' } } },
+      ...(invariants === null ? {} : { invariants }),
+    });
+    for (const entities of [{ Reader: entity(null), Writer: entity(rule) }, { Writer: entity(rule), Reader: entity(null) }]) {
+      const driver = await inThread();
+      const connection = await driver.open(':memory:');
+      connection.exec("CREATE TABLE entry(id INTEGER PRIMARY KEY, phase TEXT NOT NULL); INSERT INTO entry VALUES (1, 'frozen')");
+      const store = await openStore({ $model: '0.1', entities }, { driver: { ...driver, open: async () => connection }, adopt: true });
+      try {
+        await assert.rejects(store.relational.execute({ op: 'update', table: 'entry', set: { phase: 'thawed' }, where: b('=', c('id'), 1) }),
+          (/** @type {any} */ error) => error.code === 'JD2095' && /entity 'Writer'/.test(error.message), Object.keys(entities).join());
+        assert.deepEqual((await store.relational.all({ from: 'entry', columns: { phase: c('phase') } })).map((row) => row.phase), ['frozen']);
+      }
+      finally { await store.close(); }
+    }
+  });
+});
+
 const url = process.env.JAREN_PG_URL;
 // a packed consumer inherits the variable but installs no PostgreSQL client
 const pgClient = url ? await import('pg').then(() => true, () => false) : false;

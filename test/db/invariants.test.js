@@ -146,6 +146,41 @@ it('a store rule judges each write at its own statement, against the row as it w
   assert.deepEqual(runs.database.wide, [{ id: 1, x: 'X', 'x,y': 'C', z: 'Z', 'y,z': 'YZ' }]);
 });
 
+it('a tracked save whose only change is the version member writes nothing, stamp and rules included', async () => {
+  const col = (/** @type {string} */ name, /** @type {string} */ codec = 'integer') => ({ name, codec, null: 'reject' });
+  const properties = { id: { type: 'integer', 'x-entity': { key: true } }, note: { type: 'string' },
+    ver: { type: 'integer', 'x-entity': { version: true } }, stamp: { type: 'string', format: 'date-time', 'x-entity': { default: 'updated' } } };
+  const refuseEveryUpdate = [{ name: 'moved', on: ['update'], enforcement: 'store', assert: false }];
+  const physicalModel = { $model: '0.1', entities: {
+    Item: { schema: { type: 'object', properties }, invariants: refuseEveryUpdate,
+      physical: { table: 'items', columns: { id: col('id'), note: col('note', 'text'), ver: col('ver'), stamp: col('stamp', 'text') } } } } };
+  const documentModel = { $model: '0.1', entities: { Item: { schema: { type: 'object', properties }, invariants: refuseEveryUpdate } } };
+  const driver = nodeDriver();
+  let clock = Date.UTC(2026, 0, 1);
+  const runtime = { now: () => (clock += 1000) };
+  for (const [versionModel, adopt] of /** @type {[any, boolean][]} */ ([[physicalModel, true], [documentModel, false]])) {
+    const connection = await driver.open(':memory:');
+    if (adopt) connection.exec('CREATE TABLE items(id INTEGER PRIMARY KEY, note TEXT, ver INTEGER, stamp TEXT)');
+    const store = await openStore(versionModel, { driver: { ...driver, open: async () => connection }, adopt, runtime });
+    try {
+      const name = adopt ? 'physical' : 'document';
+      const entity = store.entity('Item');
+      const created = await entity.create({ id: 1, note: 'a' });
+      for (let i = 0; i < 2; i++) {
+        const row = await entity.get(1);
+        // a client's copy: the content unchanged, a version it should not have sent
+        entity.put({ ...row, ver: 99 });
+        assert.equal((await store.saveChanges()).updated, 0, name);
+        entity.discard(1);
+      }
+      const stored = await entity.get(1);
+      assert.equal(stored.ver, created.ver, `${name}: the version did not move`);
+      assert.equal(stored.stamp, created.stamp, `${name}: the stamp did not move`);
+    }
+    finally { await store.close(); }
+  }
+});
+
 it('a migration transform is judged as the entity\'s own update: by the columns it sets, and inside its transaction on every host', async () => {
   const transformModel = { $model: '0.1', entities: {
     Doc: { schema: { type: 'object', properties: { id: { type: 'integer', 'x-entity': { key: true } }, status: { type: 'string' } } },

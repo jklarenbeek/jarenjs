@@ -32,7 +32,9 @@
  * `{ items, next?, earliestAvailable, highWatermark, hasMore,
  * resetRequired }` — validated defensively; the first page's
  * `highWatermark` is the target, and paging stops there however busy
- * the writer is. A page with `resetRequired` delivers no suffix: the
+ * the writer is. A page with `resetRequired` — or one whose
+ * `highWatermark` lies below the cursor, a log restored or recreated —
+ * delivers no suffix: the
  * runner reads a fresh snapshot and emits it with `reset: true`, both
  * watermarks, and an event id no lower than any live emission already
  * buffered, so a patch the snapshot already reflects is never replayed.
@@ -746,7 +748,11 @@ export function runSubscription(route, sub, hooks, options) {
         seedSnapshot(effective, { reset: false, earliestAvailable: p.earliestAvailable, highWatermark: effective });
         return;
       }
-      if (p.resetRequired) {
+      // a cursor above the log's high watermark names emissions this log
+      // never had — a log restored from a backup, or recreated: resuming
+      // from it would drop every live emission up to it, so it is the
+      // same total refusal as a cursor below the retention floor
+      if (p.resetRequired || after > p.highWatermark) {
         // a total refusal: no suffix, a fresh snapshot instead. Its id
         // is the higher of the log's watermark and anything the live
         // source already delivered into the hold, because the snapshot

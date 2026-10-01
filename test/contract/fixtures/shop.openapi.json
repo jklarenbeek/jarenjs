@@ -686,7 +686,7 @@
         }
       },
       "UnsupportedMediaType": {
-        "description": "Answered by the binding, not the handler — JC2004: a body-carrying operation received a content-type that is not its declared media (415).",
+        "description": "Answered by the binding, not the handler — JC2004: a body-carrying operation received a content-type that is not its declared media, or a content-encoding other than identity — the binding decodes no content coding (415).",
         "content": {
           "application/json": {
             "schema": {
@@ -720,7 +720,7 @@
         }
       },
       "InternalError": {
-        "description": "Answered by the binding, not the handler — JC2008: the handler threw a non-declared error, rejected, or returned a hostile value (500; onError sees it); JC2010: the handler value fails the output validator, a declared error's details fail its schema, or a raw handler answered a body under a status that carries none (204, 205, 304) — the server broke the contract (500).",
+        "description": "Answered by the binding, not the handler — JC2008: the handler threw a non-declared error, rejected, or returned a hostile value (500; onError sees it); JC2010: the handler value fails the output validator, a declared error's details fail its schema, or a raw handler answered a status below 200 or a body under a status that carries none (204, 205, 304) — the server broke the contract (500).",
         "content": {
           "application/json": {
             "schema": {

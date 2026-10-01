@@ -93,7 +93,7 @@ describe('schema registration', () => {
   });
 
   for (const version of [6, 7, 2019, 2020]) {
-    it(`registers the draft ${version} bundle without mutation and returns schema booleans`, () => {
+    it(`registers the draft ${version} bundle without mutation and returns schema booleans, applicators included`, () => {
       const bundle = structuredClone(getSchemaDraftByVersion(version));
       const before = structuredClone(bundle.schema);
       for (const collectErrors of [false, true]) {
@@ -102,6 +102,17 @@ describe('schema registration', () => {
         for (const suffix of ['', '#']) {
           assert.equal(validator.validateSchema({ $schema: bundle.draft + suffix, type: 'string' }), true);
           assert.equal(validator.validateSchema({ $schema: bundle.draft + suffix, type: 123 }), false);
+        }
+        // applicators reach the meta-schema's dynamic references (2019-09 `$recursiveRef`,
+        // 2020-12 `$dynamicRef`) through a pointer `$ref`: a verdict, never a thrown URL error
+        for (const [schema, verdict] of /** @type {[any, boolean][]} */ ([
+          [{ allOf: [{ type: 'string' }] }, true],
+          [{ anyOf: [{ type: 'string' }, { type: 'null' }] }, true],
+          [{ properties: { a: { oneOf: [{ type: 'string' }, { minLength: 1 }] } } }, true],
+          [{ allOf: 5 }, false],
+          [{ properties: { a: { anyOf: [{ type: 123 }] } } }, false],
+        ])) {
+          assert.equal(validator.validateSchema({ $schema: bundle.draft, ...schema }), verdict, `${version} ${JSON.stringify(schema)}`);
         }
       }
     });

@@ -107,12 +107,12 @@
       "additionalProperties": false
     },
     "errorDeclaration": {
-      "description": "One declared error: the HTTP status a binding that carries statuses uses (default 400) and an optional schema for its details.",
+      "description": "One declared error: the HTTP status a binding that carries statuses uses (400–599 — a failure answers a client or server error; default 400) and an optional schema for its details.",
       "type": "object",
       "properties": {
         "status": {
           "type": "integer",
-          "minimum": 100,
+          "minimum": 400,
           "maximum": 599
         },
         "schema": {

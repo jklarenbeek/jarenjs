@@ -4,7 +4,7 @@ import { createBoundedCache } from '@jarenjs/core/cache';
 import { setObjectMember, semanticKey } from '@jarenjs/core/object';
 import { canonicalizeJson } from '../canonical.js';
 import { createFormulaCompiler } from './index.js';
-import { FormulaError, snapshot, credit } from './shared.js';
+import { FormulaError, formulaMessage, snapshot, credit } from './shared.js';
 
 /** Copy a bounded diagnostic; arbitrary host rejection values never escape into JSON. */
 function diagnostic(error, targetId, maxChars) {
@@ -35,10 +35,10 @@ function batchSchemas(list, given) {
   for (const [i, target] of list.entries()) {
     if (target?.schemas === undefined || target.enabled === false) continue;
     if (target.schemas === null || typeof target.schemas !== 'object' || Array.isArray(target.schemas))
-      throw new FormulaError('JQ0015', 'target schemas must be an object of id -> {version, schema}', target?.id ?? '', `/targets/${i}/schemas`);
+      throw new FormulaError('JQ0015', formulaMessage('query/formula/target-schemas'), target?.id ?? '', `/targets/${i}/schemas`);
     for (const [id, entry] of Object.entries(target.schemas)) {
       if (Object.hasOwn(merged, id) && canonicalizeJson(merged[id]) !== canonicalizeJson(entry))
-        throw new FormulaError('JQ0015', `two different schemas under one id '${id}'`, target.id ?? '', `/targets/${i}/schemas`);
+        throw new FormulaError('JQ0015', formulaMessage('query/formula/target-schema-clash', { id }), target.id ?? '', `/targets/${i}/schemas`);
       setObjectMember(merged, id, entry);
     }
   }
@@ -60,13 +60,13 @@ export function compileFormulaBatch(targets, options = {}) {
   const maxChars = credit(options.maxMessageChars, 256, 'maxMessageChars');
   const memo = createBoundedCache(credit(options.memoSize, 10000, 'memoSize'));
   const list = snapshot(targets);
-  if (!Array.isArray(list) || list.length > maxCells) throw new FormulaError('JQ0015', 'invalid target list', '', '/targets');
+  if (!Array.isArray(list) || list.length > maxCells) throw new FormulaError('JQ0015', formulaMessage('query/formula/targets-invalid'), '', '/targets');
   const compiler = createFormulaCompiler({ ...options, schemas: batchSchemas(list, options.schemas) });
   const nodes = new Map();
   for (const [i, target] of list.entries()) {
     if (!target || typeof target.id !== 'string' || !target.id || target.id.length > 256 || nodes.has(target.id)
       || target.enabled !== undefined && typeof target.enabled !== 'boolean')
-      throw new FormulaError('JQ0015', 'unique target identity and boolean enabled required', '', `/targets/${i}`);
+      throw new FormulaError('JQ0015', formulaMessage('query/formula/target-identity'), '', `/targets/${i}`);
     const node = { target, compiled: null, error: null };
     if (target.enabled !== false) {
       try { node.compiled = compiler.compile(target.formula); }
@@ -84,8 +84,8 @@ export function compileFormulaBatch(targets, options = {}) {
       const dependencies = frame.node.compiled?.dependencies.computed ?? [];
       if (frame.index < dependencies.length) {
         const dependency = dependencies[frame.index++];
-        if (visiting.has(dependency)) throw new FormulaError('JQ0015', 'computed dependency cycle', dependency, '/targets');
-        if (!nodes.has(dependency)) throw new FormulaError('JQ0015', 'unknown computed target', dependency, '/targets');
+        if (visiting.has(dependency)) throw new FormulaError('JQ0015', formulaMessage('query/formula/computed-cycle'), dependency, '/targets');
+        if (!nodes.has(dependency)) throw new FormulaError('JQ0015', formulaMessage('query/formula/computed-unknown'), dependency, '/targets');
         if (!visited.has(dependency)) stack.push({ node: nodes.get(dependency), index: 0 });
       }
       else { visiting.delete(id); visited.add(id); order.push(frame.node); stack.pop(); }
@@ -95,7 +95,7 @@ export function compileFormulaBatch(targets, options = {}) {
     /** Evaluate a bounded page; stable IDs permit memo reuse across page eviction. */
     evaluate(rows, { context = {}, revision = '', key = 'id' } = {}) {
       if (!Array.isArray(rows) || rows.length > maxRows || rows.length * list.length > maxCells)
-        throw new FormulaError('JQ2009', 'batch row/cell limit exceeded', '', '');
+        throw new FormulaError('JQ2009', formulaMessage('query/formula/batch-limit'), '', '');
       const frozenContext = snapshot(context);
       const counts = { rows: rows.length, cells: 0, evaluated: 0, cached: 0, value: 0, empty: 0, skip: 0, explanation: 0, error: 0, disabled: 0 };
       const errors = [];
@@ -104,7 +104,7 @@ export function compileFormulaBatch(targets, options = {}) {
       for (const row of rows) {
         const rowId = row?.[key];
         if ((typeof rowId !== 'string' && typeof rowId !== 'number') || typeof rowId === 'string' && rowId.length > 256 || !Number.isFinite(typeof rowId === 'number' ? rowId : 0)
-          || rowIds.has(canonicalizeJson(rowId))) throw new FormulaError('JQ2013', 'unique stable row IDs required', '', '');
+          || rowIds.has(canonicalizeJson(rowId))) throw new FormulaError('JQ2013', formulaMessage('query/formula/row-identity'), '', '');
         rowIds.add(canonicalizeJson(rowId));
         let inputError = null;
         try { canonicalizeJson(row); }

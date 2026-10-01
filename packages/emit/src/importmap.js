@@ -13,15 +13,17 @@
  *    imports: `import … from`, `export … from`, `import 'x'` and
  *    `import('x')` with a literal. A char-code scan over
  *    `@jarenjs/core/scan`, so a specifier in a comment, a string or a
- *    template is never misread as an import.
+ *    template is never misread as an import, and every ECMAScript space
+ *    and line end — a byte order mark included — separates tokens.
  *  - `exportTarget` / `expandExports` — a manifest's `exports` for a set of
  *    conditions, single-star wildcards expanded through an injected file
  *    lister. The repository's export census (`scripts/lib/exports.js`)
  *    reads its manifests through these same two functions with a
  *    git-backed lister; this module lists the installed directory.
  *  - `buildImportMap(options)` — the installed tree under `root`, the
- *    packages' dependency closure resolved as Node resolves it, nested
- *    copies reported as `duplicates`.
+ *    packages' dependency closure (peer and optional dependencies
+ *    included) resolved as Node resolves it, nested copies reported as
+ *    `duplicates`.
  */
 
 import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
@@ -30,7 +32,7 @@ import { dirname, join, posix, relative, resolve, sep } from 'node:path';
 
 import {
   CC_BACKSLASH, CC_DOLLAR, CC_DQUOTE, CC_LF, CC_CR, CC_LBRACKET, CC_RBRACKET, CC_SLASH, CC_SQUOTE, CC_STAR,
-  isDigitCode, isNameCharCode, isNameStartCode, isWhitespaceCode,
+  isDigitCode, isNameCharCode, isNameStartCode,
 } from '@jarenjs/core/scan';
 
 //#region scanImports
@@ -42,14 +44,32 @@ const CC_DOT = 0x2E;
 const CC_LPAREN = 0x28;
 const CC_RPAREN = 0x29;
 
+/** Whether a code unit ends a line: LF, CR, and U+2028/U+2029 (ECMAScript
+ * LineTerminator). @param {number} c */
+const isLineEndCode = (c) => c === CC_LF || c === CC_CR || c === 0x2028 || c === 0x2029;
+
+/** Whether a code unit is ECMAScript WhiteSpace or a LineTerminator: tab,
+ * vertical tab, form feed, space, the byte order mark, every Unicode space
+ * separator (U+00A0, U+1680, U+2000–U+200A, U+202F, U+205F, U+3000) and the
+ * four line ends. @param {number} c */
+const isSpaceCode = (c) => (c >= 0x09 && c <= 0x0D) || c === 0x20
+  || (c >= 0xA0 && (c === 0xA0 || c === 0x1680 || (c >= 0x2000 && c <= 0x200A) || c === 0x2028 || c === 0x2029
+    || c === 0x202F || c === 0x205F || c === 0x3000 || c === 0xFEFF));
+
+/** Whether a code unit continues a name, a number or a regular expression's
+ * flags: `isNameCharCode` admits every code unit above ASCII, the Unicode
+ * spaces included, so they are taken out here. @param {number} c */
+const isNamePartCode = (c) => isNameCharCode(c) && !isSpaceCode(c);
+
 /** After these words a `/` opens a regular expression, not a division. */
 const REGEX_AFTER_WORD = new Set(['return', 'typeof', 'instanceof', 'in', 'of', 'new', 'delete', 'void',
   'throw', 'case', 'do', 'else', 'yield', 'await', 'export', 'default']);
 
 /**
  * One token of the scan: a word, a string (its decoded value), or a single
- * punctuation character. Comments, whitespace, regular expressions and
- * template text produce nothing.
+ * punctuation character. Comments, white space (a byte order mark and every
+ * Unicode space and line end included), regular expressions and template
+ * text produce nothing.
  * @typedef {{ kind: 'word' | 'string' | 'punct', value: string }} Token
  */
 
@@ -138,11 +158,11 @@ function tokenize(source) {
   };
   while (i < n) {
     const c = source.charCodeAt(i);
-    if (isWhitespaceCode(c) || c === CC_LF || c === CC_CR) { i++; continue; }
+    if (isSpaceCode(c)) { i++; continue; }
     if (c === CC_SLASH) {
       const next = source.charCodeAt(i + 1);
       if (next === CC_SLASH) {
-        while (i < n && source.charCodeAt(i) !== CC_LF) i++;
+        while (i < n && !isLineEndCode(source.charCodeAt(i))) i++;
         continue;
       }
       if (next === CC_STAR) {
@@ -162,7 +182,7 @@ function tokenize(source) {
           else if (r === CC_SLASH) { i++; break; }
           i++;
         }
-        while (i < n && isNameCharCode(source.charCodeAt(i))) i++;
+        while (i < n && isNamePartCode(source.charCodeAt(i))) i++;
         // a regular expression ends an operand, as a string does
         tokens.push({ kind: 'string', value: '' });
         continue;
@@ -223,13 +243,13 @@ function tokenize(source) {
     if (isNameStartCode(c) || c === CC_DOLLAR) {
       const start = i;
       i++;
-      while (i < n && (isNameCharCode(source.charCodeAt(i)) || source.charCodeAt(i) === CC_DOLLAR)) i++;
+      while (i < n && (isNamePartCode(source.charCodeAt(i)) || source.charCodeAt(i) === CC_DOLLAR)) i++;
       tokens.push({ kind: 'word', value: source.slice(start, i) });
       continue;
     }
     if (isDigitCode(c)) {
       const start = i;
-      while (i < n && (isNameCharCode(source.charCodeAt(i)) || source.charCodeAt(i) === CC_DOT)) i++;
+      while (i < n && (isNamePartCode(source.charCodeAt(i)) || source.charCodeAt(i) === CC_DOT)) i++;
       tokens.push({ kind: 'word', value: source.slice(start, i) });
       continue;
     }
@@ -313,29 +333,53 @@ export function scanImports(source) {
 
 /**
  * The target one `exports` value resolves to for a set of conditions, or
- * null: a string as it is; an array, its first entry that resolves; a
- * condition object, its first key — in the manifest's own order, as Node
- * and the bundlers read it — that is one of `conditions` and resolves.
+ * null when it exports nothing: a string as it is; a condition object, its
+ * first key — in the manifest's own order, as Node and the bundlers read
+ * it — that is `default` or one of `conditions` and answers, a `null`
+ * included, so a `null` under a matched condition withholds the subpath
+ * (`default` matches whatever the conditions are, as it does in Node); an
+ * array, its first entry that resolves to a target Node takes, past a
+ * `null`, an unmatched entry and a target Node refuses — and, when none
+ * does, its last refusal or `null`.
  * @param {any} value
  * @param {readonly string[]} conditions
  * @returns {string | null}
  */
 export function exportTarget(value, conditions) {
+  return resolveTarget(value, conditions) ?? null;
+}
+
+/**
+ * One `exports` value as Node's PACKAGE_TARGET_RESOLVE reads it, keeping
+ * apart what `exportTarget` folds into null: a string target, `null` when
+ * the value withholds the subpath, `undefined` when no condition matches
+ * (the enclosing object then reads its next key). A target that is no
+ * string, array, object or null is passed over like an unmatched one.
+ * @param {any} value
+ * @param {readonly string[]} conditions
+ * @returns {string | null | undefined}
+ */
+function resolveTarget(value, conditions) {
   if (typeof value === 'string') return value;
   if (Array.isArray(value)) {
+    /** @type {string | null | undefined} */
+    let last = value.length === 0 ? null : undefined;
     for (const entry of value) {
-      const target = exportTarget(entry, conditions);
-      if (target !== null) return target;
+      const target = resolveTarget(entry, conditions);
+      if (target === undefined) continue;
+      if (target !== null && validTarget(target, null)) return target;
+      last = target;
     }
-    return null;
+    return last;
   }
-  if (value === null || typeof value !== 'object') return null;
+  if (value === null) return null;
+  if (typeof value !== 'object') return undefined;
   for (const key of Object.keys(value)) {
-    if (!conditions.includes(key)) continue;
-    const target = exportTarget(value[key], conditions);
-    if (target !== null) return target;
+    if (key !== 'default' && !conditions.includes(key)) continue;
+    const target = resolveTarget(value[key], conditions);
+    if (target !== undefined) return target;
   }
-  return null;
+  return undefined;
 }
 
 /**
@@ -349,7 +393,9 @@ export function exportTarget(value, conditions) {
  * @property {boolean} unexpanded - a wildcard the lister could not make finite
  * @property {boolean} invalid - a target Node refuses (`ERR_INVALID_PACKAGE_TARGET`):
  *   one that does not start with `./`, or holds a `.`, `..`, `node_modules` or
- *   empty segment — in the target or in what a `*` matched
+ *   empty segment. What a `*` matched through such a segment (a nested
+ *   `node_modules`) is no export at all — Node refuses the specifier — and
+ *   makes no row
  * @property {any} value - the manifest's value for the pattern
  */
 
@@ -414,8 +460,11 @@ function governingKey(keys, subpath) {
  * asks for nothing. Anything else — two stars, no folder, no matching file,
  * or a folder outside the package — stays the pattern it is, marked
  * `unexpanded`; nothing is dropped. A target Node refuses is marked
- * `invalid`. A manifest without `exports` exports `main` (or
- * `./src/index.js`) as `.`, and a string or a root condition map is
+ * `invalid`; a file a `*` reaches through a `node_modules`, `.` or `..`
+ * folder is no subpath Node exports, and makes no row. A manifest without
+ * `exports` exports its `main` as `.` — read
+ * from the package root, with or without a leading `./` — or `./index.js`
+ * when it names none, as Node reads it; a string or a root condition map is
  * shorthand for `.`.
  * @param {any} manifest - the parsed `package.json`
  * @param {{ conditions: readonly string[], listFiles?: (folder: string) => string[] | null }} options
@@ -423,7 +472,7 @@ function governingKey(keys, subpath) {
  */
 export function expandExports(manifest, options) {
   const { conditions, listFiles } = options;
-  const declared = manifest.exports ?? { '.': manifest.main ?? './src/index.js' };
+  const declared = manifest.exports ?? { '.': legacyMain(manifest.main) };
   const keys = typeof declared === 'object' && declared !== null ? Object.keys(declared) : [];
   const exports = typeof declared === 'string' || Array.isArray(declared)
     || (keys.length > 0 && !keys.some((key) => key.startsWith('.')))
@@ -448,6 +497,10 @@ export function expandExports(manifest, options) {
       continue;
     }
     for (const stem of stems) {
+      // a file reached through a node_modules, . or .. folder names no subpath:
+      // Node refuses such a specifier (ERR_INVALID_MODULE_SPECIFIER), so it is
+      // skipped as a withheld one is
+      if (stem.split(/[/\\]/).some(refusedSegment)) continue;
       const subpath = key.replace('*', stem);
       if (governingKey(exportKeys, subpath) !== key) continue;
       out.push({ key: subpath, pattern: key, target: target.replace('*', stem), expanded: true, unexpanded: false,
@@ -455,6 +508,18 @@ export function expandExports(manifest, options) {
     }
   }
   return out;
+}
+
+/**
+ * The `.` target of a manifest without `exports`: its `main`, which Node
+ * reads from the package root whether or not it starts with `./`, or
+ * `./index.js` when there is none.
+ * @param {unknown} main
+ * @returns {string}
+ */
+function legacyMain(main) {
+  if (typeof main !== 'string' || main === '') return './index.js';
+  return main.startsWith('./') ? main : `./${main}`;
 }
 
 /**
@@ -494,6 +559,9 @@ const BROWSER_CONDITIONS = Object.freeze(['browser', 'import', 'default']);
 /** The options `buildImportMap` reads. */
 const OPTIONS = Object.freeze(['packages', 'root', 'prefix', 'conditions']);
 
+/** The fields of a manifest whose packages the closure follows. */
+const DEPENDENCY_FIELDS = Object.freeze(['dependencies', 'peerDependencies', 'optionalDependencies']);
+
 /** The JavaScript files a scan follows. */
 const RE_SCRIPT = /\.(?:m?js)$/;
 
@@ -512,15 +580,22 @@ const RE_SCRIPT = /\.(?:m?js)$/;
  *   relative import that leaves its package or names no file (credited to
  *   the file that imports it), a wildcard export the installed files could
  *   not make finite, or an export whose target Node refuses
+ * @property {Array<{ specifier: string, from: string, reason: string }>} optional -
+ *   a bare specifier a served file imports that names an optional peer of
+ *   its package (`peerDependencies`, marked `optional` in
+ *   `peerDependenciesMeta`) which is not installed: not a failure, since
+ *   only a page that loads that file needs it; `reason` says so
  */
 
 /**
  * Build the import map, and the file list, that serve `packages` and their
  * dependency closure unbundled from an installed tree.
  *
- * Each package is found as Node finds it — `node_modules/<name>` beside
- * the dependent, then in each parent directory up to `root` — starting
- * from `root` for the packages named. Its `exports` resolve under
+ * The closure follows each package's `dependencies`, `peerDependencies`
+ * and `optionalDependencies`, a dependency that is not installed passed
+ * over. Each package is found as Node finds it — `node_modules/<name>`
+ * beside the dependent, then in each parent directory up to `root` —
+ * starting from `root` for the packages named. Its `exports` resolve under
  * `conditions` with Node's precedence (`expandExports`), single-star
  * wildcards expand from the installed directory, and every export becomes
  * `imports[specifier] = prefix + <the copy's path below
@@ -528,7 +603,10 @@ const RE_SCRIPT = /\.(?:m?js)$/;
  * served from its nested place, never from a root copy no dependent
  * reaches. A target Node refuses is reported in `unresolved`, a `null`
  * target maps nothing. A package installed more than once is reported in
- * `duplicates`. Node built-ins (`node:fs`, `fs`) are left to the platform.
+ * `duplicates`. An import of an optional peer that is not installed is
+ * reported in `optional`, not in `unresolved`: a page that never loads the
+ * importing file never fetches it. Node built-ins (`node:fs`, `fs`) are
+ * left to the platform.
  *
  * Two calls over the same tree answer the same bytes: keys and lists are
  * sorted.
@@ -537,7 +615,7 @@ const RE_SCRIPT = /\.(?:m?js)$/;
  *   `@jarenjs/app`). `root` holds `node_modules` (default: the current
  *   directory). `prefix` is the URL `root/node_modules` is served under
  *   and ends with `/` (default `/node_modules/`). `conditions` default to
- *   `browser`, `import`, `default`.
+ *   `browser`, `import`, `default`; `default` matches whatever they are.
  * @returns {ImportMapResult}
  * @throws {TypeError} an option it does not take, or one that is malformed; a
  *   named package that is not installed
@@ -593,7 +671,9 @@ export function buildImportMap(options) {
   while (queue.length > 0) {
     const { name, dir } = /** @type {{ name: string, dir: string }} */ (queue.shift());
     const manifest = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'));
-    for (const dep of Object.keys(manifest.dependencies ?? {})) visit(dep, dir, false);
+    for (const field of DEPENDENCY_FIELDS) {
+      for (const dep of Object.keys(manifest[field] ?? {})) visit(dep, dir, false);
+    }
     if (chosen.get(name) === dir) manifests.set(name, manifest);
   }
   const names = [...manifests.keys()].sort();
@@ -606,6 +686,8 @@ export function buildImportMap(options) {
   const imports = {};
   /** @type {Array<{ specifier: string, from: string }>} */
   const unresolved = [];
+  /** @type {Array<{ specifier: string, from: string, reason: string }>} */
+  const optional = [];
   /** @type {Array<{ name: string, file: string }>} */
   const entryFiles = [];
   for (const name of names) {
@@ -626,7 +708,10 @@ export function buildImportMap(options) {
   for (const { name, file } of entryFiles) {
     const dir = /** @type {string} */ (chosen.get(name));
     followFiles(name, dir, file, served(dir), files, unresolved, (bare, from) => {
-      if (!resolvesBare(bare, imports)) unresolved.push({ specifier: bare, from });
+      if (resolvesBare(bare, imports)) return;
+      const reason = absentOptionalPeer(name, manifests.get(name), bare, dir, top);
+      if (reason === null) unresolved.push({ specifier: bare, from });
+      else optional.push({ specifier: bare, from, reason });
     });
   }
   /** @type {Array<{ name: string, paths: string[] }>} */
@@ -635,19 +720,45 @@ export function buildImportMap(options) {
     if (paths.size > 1) duplicates.push({ name, paths: [...paths].map((path) => relative(top, path).split(sep).join('/')).sort() });
   }
   duplicates.sort((a, b) => compare(a.name, b.name));
+  return {
+    imports: Object.fromEntries(Object.keys(imports).sort(compare).map((key) => [key, imports[key]])),
+    files: [...files].sort(compare),
+    duplicates,
+    unresolved: once(unresolved),
+    optional: once(optional),
+  };
+}
+
+/**
+ * Each import once, sorted by specifier, then by the file that imports it.
+ * @template {{ specifier: string, from: string }} T
+ * @param {T[]} entries
+ * @returns {T[]}
+ */
+function once(entries) {
   const seen = new Set();
-  const open = unresolved.filter((entry) => {
+  return entries.filter((entry) => {
     const id = `${entry.specifier}\u0000${entry.from}`;
     if (seen.has(id)) return false;
     seen.add(id);
     return true;
   }).sort((a, b) => compare(a.specifier, b.specifier) || compare(a.from, b.from));
-  return {
-    imports: Object.fromEntries(Object.keys(imports).sort(compare).map((key) => [key, imports[key]])),
-    files: [...files].sort(compare),
-    duplicates,
-    unresolved: open,
-  };
+}
+
+/**
+ * Why a bare import of package `name` the map does not resolve is no
+ * failure, or null when it is one: the import names an optional peer of
+ * `name` — in `peerDependencies`, marked `optional` in
+ * `peerDependenciesMeta` — that is not installed where Node would look.
+ * @param {string} name @param {any} manifest - `name`'s manifest
+ * @param {string} specifier @param {string} dir - `name`'s directory
+ * @param {string} top
+ * @returns {string | null}
+ */
+function absentOptionalPeer(name, manifest, specifier, dir, top) {
+  const peer = specifier.split('/').slice(0, specifier.startsWith('@') ? 2 : 1).join('/');
+  if (!Object.hasOwn(manifest.peerDependencies ?? {}, peer) || manifest.peerDependenciesMeta?.[peer]?.optional !== true) return null;
+  return locate(peer, dir, top) === null ? `an optional peer of ${name} that is not installed` : null;
 }
 
 /** Code-unit order, the same on every host. @param {string} a @param {string} b */

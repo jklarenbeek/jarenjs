@@ -197,9 +197,19 @@ export function action<const Fields extends readonly string[], State = unknown>(
   options: { readonly event: Fields },
 ): ActionDeclaration<unknown>;
 
+/**
+ * A value position: anything but a {@link Conditional}. A `when()` is a
+ * transition — an action's result or a branch of another `when()` — and
+ * where a value goes it would replace that value with the branch's
+ * transition object at dispatch, so the pen refuses it (`JL0101`) and the
+ * type does not take it. Only the position itself is typed: a `when()`
+ * nested inside a value is the run-time refusal's.
+ */
+type NotConditional<V> = V extends Conditional ? never : V;
+
 /** A transition object (§3.2), in the order the runtime applies it. */
-export function transition(spec: {
-  readonly state?: unknown;
+export function transition<S = unknown>(spec: {
+  readonly state?: NotConditional<S>;
   readonly patch?: readonly PatchOp[];
   readonly effects?: readonly EffectDeclaration[];
 }): Transition;
@@ -208,7 +218,8 @@ export function transition(spec: {
  * A conditional transition, as `when()` spells it (`{ "$if": [cond,
  * then, else?] }`): what an action returns, or a branch of another
  * `when()`. Branded, so a branch is a transition or a conditional and
- * nothing else.
+ * nothing else — and so a place a value goes (a transition's `state`, a
+ * patch operation's `value`, an effect's props) does not take one.
  */
 export interface Conditional {
   readonly __conditional: true;
@@ -273,19 +284,19 @@ export function taskSlot<const Name extends string, State = unknown>(name: Name,
 
 /** One effect invocation (§5.1). Its props are a value in the ACTION's
  * own scope: one document, one capture. */
-export function effect<const Run extends string>(
-  run: Run, props?: unknown): EffectDeclaration<Run>;
+export function effect<const Run extends string, P = unknown>(
+  run: Run, props?: NotConditional<P>): EffectDeclaration<Run>;
 
 /** `{ "op": "add", "path", "value" }` — sets a member, or REPLACES an
  * array when the path names one; `append()` is the array insert. */
-export function add<State = unknown, Payload = unknown>(
-  path: PatchPath<State, Payload>, value: unknown): PatchOp;
+export function add<State = unknown, Payload = unknown, V = unknown>(
+  path: PatchPath<State, Payload>, value: NotConditional<V>): PatchOp;
 /** `{ "op": "add", "path": "<path>/-", "value" }` — RFC 6902's array append. */
-export function append<State = unknown, Payload = unknown>(
-  path: PatchPath<State, Payload>, value: unknown): PatchOp;
+export function append<State = unknown, Payload = unknown, V = unknown>(
+  path: PatchPath<State, Payload>, value: NotConditional<V>): PatchOp;
 /** `{ "op": "replace", "path", "value" }` — and the op an array ELEMENT needs. */
-export function replace<State = unknown, Payload = unknown>(
-  path: PatchPath<State, Payload>, value: unknown): PatchOp;
+export function replace<State = unknown, Payload = unknown, V = unknown>(
+  path: PatchPath<State, Payload>, value: NotConditional<V>): PatchOp;
 /** `{ "op": "remove", "path" }`. */
 export function remove<State = unknown, Payload = unknown>(
   path: PatchPath<State, Payload>): PatchOp;
@@ -296,8 +307,8 @@ export function move<State = unknown, Payload = unknown>(
 export function copy<State = unknown, Payload = unknown>(
   from: PatchPath<State, Payload>, path: PatchPath<State, Payload>): PatchOp;
 /** `{ "op": "test", "path", "value" }` — a failing test aborts the transition. */
-export function test<State = unknown, Payload = unknown>(
-  path: PatchPath<State, Payload>, value: unknown): PatchOp;
+export function test<State = unknown, Payload = unknown, V = unknown>(
+  path: PatchPath<State, Payload>, value: NotConditional<V>): PatchOp;
 
 /**
  * One event binding (§4). Annotate the call with the declared action

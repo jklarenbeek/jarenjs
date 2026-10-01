@@ -193,7 +193,7 @@ export function declaredMessage(catalog, op, code, params) {
  * The single string value of a header: a repeated field is combined with
  * `, ` (RFC 9110 §5.3), an absent one is `undefined`. For the protocol
  * headers the binding itself reads (`content-type`, `content-length`,
- * `idempotency-key`, `if-match`, `if-none-match`).
+ * `content-encoding`, `idempotency-key`, `if-match`, `if-none-match`).
  * @param {Readonly<Record<string, string | readonly string[]>>} headers
  * @param {string} name - lowercase
  * @returns {string | undefined}
@@ -254,11 +254,12 @@ export function mediaMatches(contentType, media) {
 
 /**
  * `type/subtype` of a media type, lowercased, parameters and whitespace
- * dropped.
+ * dropped — what `mediaMatches` compares, and what the diff compares a
+ * declared media by.
  * @param {string} value
  * @returns {string}
  */
-function bareMedia(value) {
+export function bareMedia(value) {
   const semi = value.indexOf(';');
   return (semi === -1 ? value : value.slice(0, semi)).trim().toLowerCase();
 }

@@ -61,7 +61,7 @@ const typeName = makeTypeNamer(TYPE_NAMES);
  * every `form/*` key of forms' `formsMessagesEn`, `x-form/assert`, the
  * `JQ2xxx` codes reachable through `$query`, every `contract/*`
  * wire-error msgid of `@jarenjs/contract`'s `contractMessagesEn`, and
- * every `query/*` message of `@jarenjs/json`'s `queryMessagesEn`.
+ * every `query/*` message of `@jarenjs/json`'s `queryMessagesEn` and every message of its `formulaMessagesEn`.
  * @type {Record<string, string | ((params: any, error?: object) => string)>}
  */
 export const zhTW = {
@@ -415,6 +415,49 @@ export const zhTW = {
   'query/lexical-result': '詞彙搜尋提供者傳回了無效或不完整的結果',
   //#endregion
 
+  //#region @jarenjs/json formulas (the messages of formulaMessagesEn)
+  'query/formula/query': '{formulaId}：{message}',
+  'query/formula/detail': '{formulaId}：{detail}',
+  'query/formula/profile-json': '{formulaId}：設定檔必須是 JSON',
+  'query/formula/profile-object': '{formulaId}：設定檔必須是物件',
+  'query/formula/profile-version': '{formulaId}：不支援的語言版本',
+  'query/formula/profile-identity': '{formulaId}：{member} 不得為空，且最多 256 個字元',
+  'query/formula/profile-expression': '{formulaId}：必須提供運算式',
+  'query/formula/profile-result-mode': '{formulaId}：未知的結果模式',
+  'query/formula/profile-bindings': '{formulaId}：bindings 必須是物件',
+  'query/formula/profile-reserved': '{formulaId}：computed 與 context 是保留的繫結',
+  'query/formula/profile-helpers': '{formulaId}：helpers 必須是陣列',
+  'query/formula/profile-helper': '{formulaId}：每個輔助函式都需要唯一的名稱與版本',
+  'query/formula/profile-packs': '{formulaId}：packs 必須是陣列',
+  'query/formula/profile-pack': '{formulaId}：每個套件都需要唯一的名稱與版本',
+  'query/formula/helper-missing': '{formulaId}：純輔助函式 {name}@{version} 不存在或不相容',
+  'query/formula/pack-missing': '{formulaId}：運算子套件 {name}@{version} 不存在或不相容',
+  'query/formula/helper-shadows': '{formulaId}：輔助函式 {name} 與所列運算子套件中的函式同名',
+  'query/formula/schema-missing': '{formulaId}：綱要或型別測試編譯器不存在或不相容',
+  'query/formula/schema-rejected': '{formulaId}：綱要遭到拒絕',
+  'query/formula/computed-unnamed': '{formulaId}：computed 參照必須指名目標',
+  'query/formula/computed-cycle': '{formulaId}：計算的相依關係形成循環',
+  'query/formula/computed-unknown': '{formulaId}：未知的計算目標',
+  'query/formula/targets-invalid': '{formulaId}：無效的目標清單',
+  'query/formula/target-identity': '{formulaId}：每個目標都需要唯一的識別與布林值 enabled',
+  'query/formula/target-schemas': '{formulaId}：目標的 schemas 必須是 id -> {{version, schema} 的物件',
+  'query/formula/target-schema-clash': "{formulaId}：同一個 id '{id}' 下有兩個不同的綱要",
+  'query/formula/batch-limit': '{formulaId}：超過批次的列數或儲存格數上限',
+  'query/formula/row-identity': '{formulaId}：每一列都需要唯一且穩定的 ID',
+  'query/formula/input-schema': '{formulaId}：輸入不符合輸入綱要',
+  'query/formula/result-schema': '{formulaId}：結果不符合結果綱要',
+  'query/formula/outcome-invalid': '{formulaId}：無效的標記結果',
+  'query/formula/parity-expected': '{formulaId}：預期結果 {index} 不是 JSON',
+  'query/formula/rule-identity': '{formulaId}：規則需要識別、目標與可寫入的欄位',
+  'query/formula/rule-field-not-writable': '{formulaId}：目標欄位不可寫入',
+  'query/formula/rule-rows': '{formulaId}：需要有上限的資料列與資料集修訂版本',
+  'query/formula/rule-entity-duplicate': '{formulaId}：實體識別重複',
+  'query/formula/rule-preview-stale': '{formulaId}：預覽已過時或遭到修改',
+  'query/formula/rule-selection-duplicate': '{formulaId}：選取項目必須包含唯一的變更 ID',
+  'query/formula/rule-selection-unknown': '{formulaId}：未知的選取變更',
+  'query/formula/rule-conflict': '{formulaId}：同一欄位的值互相衝突',
+  //#endregion
+
   //#region @jarenjs/locales numbers (the decimal format, CLDR as ICU 78.3 ships it)
   'number/decimal-separator': '.',
   'number/grouping-separator': ',',
@@ -425,5 +468,6 @@ export const zhTW = {
   'number/exponent-separator': 'E',
   'number/infinity': '∞',
   'number/nan': '非數值',
+  'number/minimum-grouping-digits': '1',
   //#endregion
 };

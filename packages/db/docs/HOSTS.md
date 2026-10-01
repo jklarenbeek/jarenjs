@@ -183,7 +183,8 @@ owner, so close it (and open again, which waits for the new owner).
 
 `close()` gives the lease back after the calls already queued, which run under
 it; a call made after `close()` refuses `JD2063`, and so does every later call
-however long after. A transaction body that never settles holds the gate, so
+however long after — a cursor's next pull included: a stream the close cut
+short refuses rather than ending as though it were complete. A transaction body that never settles holds the gate, so
 `close()` waits up to `queueTimeout` for the release, then closes the
 connection without it: the row is left to expire within `leaseMs`, and until
 then a new owner is refused with the old one's `expiresAt`.
@@ -256,7 +257,11 @@ metadata. One oversized row is `JD2092`. Abort takes effect at a row boundary;
 | `startupTimeoutMs` | 10000 | Worker readiness deadline |
 | `closeTimeoutMs` | 5000 | Cleanup acknowledgement deadline |
 
-All worker options are positive safe integers. Cleanup reserves at most one
+All worker options are positive safe integers. The options are a closed set, and
+so are the pool's (`readers`, `queueCapacity`, `graceMs`, `worker`, `endpoint`),
+its `worker` member's and the process host's: a member a driver does not read —
+`windowRow` for `windowRows` — is `JD0003` when the driver is made, naming the
+nearest one. Cleanup reserves at most one
 request per cursor plus one close beyond `maxPending`; total pending admission is
 also capped. A compiled transient cursor marks its statement ephemeral, releasing
 its remote ID on exhaustion or return. Cached statements remain subject to the
@@ -552,7 +557,11 @@ read never jumps an earlier read. A classified call that is over when it answers
 (`run`, `get`, `all` — never a cursor) may borrow the free writer while every
 reader is held, never while a write waits for it: readers held by open cursors do
 not stall a read the writer could serve, at the price that a long read on the
-borrowed writer delays a write that arrives during it. Metrics report active/idle/queued,
+borrowed writer delays a write that arrives during it. A cursor outside a
+transaction waits for its reader for at most the connection's `queueTimeout`, then
+refuses `JD2091`, as a parallel read does: a root cursor's first pull runs inside
+the store's gate, so a cursor that finds every reader held gives the gate back
+rather than holding every other call out. Metrics report active/idle/queued,
 worker health/generation/role/executions, and wait p50/p95 over the last 1024
 admissions.
 
@@ -669,40 +678,40 @@ Measured 2026-10-01, v24.20.0, AMD Ryzen 9 5900HX with Radeon Graphics; 7 sample
 
 | Host | Open p50 ms | Slow SQL p50 ms | Event-loop max ms | Tiny reads/s | Mixed work ms | Wait p95 ms |
 |---|---:|---:|---:|---:|---:|---:|
-| node | 0.18 | 77.84 | 79.69 | 754486 | 187.43 | 0.00 |
-| worker | 84.93 | 90.14 | 1.81 | 38648 | 192.61 | 0.00 |
-| pool-1-reader | 166.85 | 77.55 | 1.88 | 33092 | 111.55 | 99.37 |
-| pool-3-readers | 338.34 | 89.90 | 1.72 | 31032 | 56.76 | 46.42 |
+| node | 0.22 | 87.46 | 91.88 | 749427 | 214.80 | 0.00 |
+| worker | 94.60 | 86.89 | 1.40 | 32651 | 215.91 | 0.00 |
+| pool-1-reader | 189.60 | 87.49 | 1.76 | 32411 | 115.65 | 105.76 |
+| pool-3-readers | 371.25 | 90.06 | 1.72 | 34703 | 65.55 | 54.87 |
 
 | Host | Cursor rows | Cursor ms | Sampled heap growth MiB | Sampled total RSS MiB |
 |---|---:|---:|---:|---:|
-| node | 100000 | 120.69 | 22.20 | 113.91 |
-| worker | 100000 | 242.03 | 14.12 | 155.89 |
-| pool-1-reader | 100000 | 270.97 | 14.73 | 191.58 |
-| pool-3-readers | 100000 | 286.63 | 14.72 | 259.39 |
+| node | 100000 | 125.81 | 22.17 | 108.56 |
+| worker | 100000 | 293.41 | 13.94 | 152.00 |
+| pool-1-reader | 100000 | 296.30 | 14.89 | 185.13 |
+| pool-3-readers | 100000 | 287.10 | 14.75 | 253.58 |
 
 | Store root admission (2000 rows) | Reads | Mixed work p50 ms | Tiny root gets/s |
 |---|---|---:|---:|
-| pool-1-reader | serialized | 135.26 | 23346 |
-| pool-1-reader | parallel | 72.06 | 15824 |
-| pool-3-readers | serialized | 128.83 | 25814 |
-| pool-3-readers | parallel | 51.24 | 16027 |
+| pool-1-reader | serialized | 143.63 | 23021 |
+| pool-1-reader | parallel | 83.74 | 15363 |
+| pool-3-readers | serialized | 141.32 | 20183 |
+| pool-3-readers | parallel | 57.31 | 15009 |
 
-On pool-1-reader, `reads: 'parallel'` runs the Store-level mixed work 1.88× faster than the serialized default and answers 32.22% fewer sequential tiny root gets per second.
-On pool-3-readers, `reads: 'parallel'` runs the Store-level mixed work 2.51× faster than the serialized default and answers 37.91% fewer sequential tiny root gets per second.
+On pool-1-reader, `reads: 'parallel'` runs the Store-level mixed work 1.72× faster than the serialized default and answers 33.26% fewer sequential tiny root gets per second.
+On pool-3-readers, `reads: 'parallel'` runs the Store-level mixed work 2.47× faster than the serialized default and answers 25.63% fewer sequential tiny root gets per second.
 
 | Bun 1.4.2 executable | Rows written | Rows streamed | Long read ms | Event-loop max ms |
 |---|---:|---:|---:|---:|
-| worker | 20001 | 20001 | 299.55 | 1.27 |
-| pool | 20001 | 20001 | 301.31 | 1.23 |
-| in-thread | 20001 | 20001 | 83.73 | 83.72 |
+| worker | 20001 | 20001 | 272.47 | 1.46 |
+| pool | 20001 | 20001 | 335.09 | 1.96 |
+| in-thread | 20001 | 20001 | 87.13 | 86.71 |
 
-Built with `bun build --compile ./worker-app.js ./worker-endpoint.js --outfile worker-hosts-bun` and run with every source and module path removed; the long read is 5 whole-collection reads of 20001 rows. The worker host held the event loop at most 1.27 ms against the 50 ms bound and took 3.58× as long as the in-thread binding, which held the loop 83.72 ms. The pool host held the event loop at most 1.23 ms against the 50 ms bound and took 3.60× as long as the in-thread binding, which held the loop 83.72 ms. Built without the second entrypoint, the open refused: worker JD0003 (retryable: false), pool JD0003 (retryable: false). The side-effect import of `@jarenjs/db/worker-endpoint`, bundled alone, keeps the endpoint: 97944 bytes with Bun, 132692 with esbuild.
+Built with `bun build --compile ./worker-app.js ./worker-endpoint.js --outfile worker-hosts-bun` and run with every source and module path removed; the long read is 5 whole-collection reads of 20001 rows. The worker host held the event loop at most 1.46 ms against the 50 ms bound and took 3.13× as long as the in-thread binding, which held the loop 86.71 ms. The pool host held the event loop at most 1.96 ms against the 50 ms bound and took 3.85× as long as the in-thread binding, which held the loop 86.71 ms. Built without the second entrypoint, the open refused: worker JD0003 (retryable: false), pool JD0003 (retryable: false). The side-effect import of `@jarenjs/db/worker-endpoint`, bundled alone, keeps the endpoint: 98528 bytes with Bun, 133413 with esbuild.
 
 | Include accounting | Encoded bytes | Time p50 ms | Uncollected heap growth p50 MiB |
 |---|---:|---:|---:|
-| serialize-again | 3218891 | 11.21 | 8.00 |
-| count-during-decode | 3218891 | 21.01 | 8.84 |
+| serialize-again | 3218891 | 11.84 | 8.00 |
+| count-during-decode | 3218891 | 23.39 | 8.84 |
 
 The worker event-loop acceptance bound is 50 ms. The original in-process baseline measured p50/p95/max event-loop delay of 1.07/86.97/87.62 ms, bare worker startup p50 27.48 ms, and duplicate include serialization 14.68 ms with 8.00 MiB uncollected heap growth. The current open measurement also includes driver probing; its startup cost is broader than that bare-worker baseline.
 

@@ -86,12 +86,36 @@ describe('query errors carry their message as data', () => {
     assert.strictEqual(renderQueryMessage({ reason: 'plain' }), 'plain', 'anything with a reason renders');
   });
 
-  it('a JQ-coded formula error names its message too, as its own English', async () => {
-    const { compileFormula } = await import('@jarenjs/json/formula');
+  it('a formula error names its own message, the English of which rides in its params for a catalog without it', async () => {
+    const { compileFormula, formulaMessagesEn } = await import('@jarenjs/json/formula');
     const error = thrown(() => compileFormula(/** @type {any} */ ({ id: 'f1' })));
-    assert.match(error.code, /^JQ/);
-    assert.strictEqual(error.messageId, 'query/reason');
+    assert.strictEqual(error.code, 'JQ0013');
+    assert.strictEqual(error.messageId, 'query/formula/profile-version');
+    assert.ok(Object.hasOwn(formulaMessagesEn, error.messageId));
+    assert.deepStrictEqual(error.params, { formulaId: 'f1', reason: 'f1: unsupported language version' });
+    assert.strictEqual(error.reason, 'f1: unsupported language version');
     assert.strictEqual(renderQueryMessage(error), error.reason);
+    assert.strictEqual(renderQueryMessage(error, { 'query/formula/profile-version': '{formulaId}: VERSIE' }), 'f1: VERSIE');
+  });
+
+  it('a query error raised inside a formula keeps its own message after the formula\'s id, at compile and at run time', async () => {
+    const { compileFormula } = await import('@jarenjs/json/formula');
+    const bare = thrown(() => compileJsonQuery({ $nope: 1 }));
+    const wrapped = thrown(() => compileFormula({ $formula: '1', id: 'f', revision: 'r1', expression: { $nope: 1 } }));
+    assert.strictEqual(wrapped.code, bare.code);
+    assert.strictEqual(wrapped.messageId, 'query/formula/query');
+    assert.deepStrictEqual(wrapped.params.message, { messageId: bare.messageId, params: bare.params });
+    assert.strictEqual(wrapped.reason, `f: ${bare.reason}`);
+    const shouting = { 'query/formula/query': '{formulaId} SAYS {message}', 'query/unknown-operator-suggest': 'NO {key}, MAYBE {suggestion}' };
+    assert.strictEqual(renderQueryMessage(wrapped, shouting), 'f SAYS NO $nope, MAYBE $some');
+    const runtime = thrown(() => compileFormula({ $formula: '1', id: 'g', revision: 'r1', expression: { $substring: ['$.s', 1] } }).evaluate({ s: 5 }));
+    assert.deepStrictEqual([runtime.code, runtime.messageId, runtime.params.message.messageId], ['JQ2001', 'query/formula/query', 'query/expected-string']);
+    // text another component wrote rides as a detail, and stays as it came
+    const nonJson = thrown(() => compileFormula({ $formula: '1', id: 'h', revision: 'r1', expression: '$.x' }).evaluate({ x: NaN }));
+    assert.deepStrictEqual([nonJson.code, nonJson.messageId, nonJson.reason], ['JQ2013', 'query/formula/detail', 'h: NaN is not a JSON number at /x']);
+    // a computed reference without a name names the formula once
+    const computed = thrown(() => compileFormula({ $formula: '1', id: 'k', revision: 'r1', expression: '$computed' }));
+    assert.deepStrictEqual([computed.code, computed.reason, computed.docPath], ['JQ0015', 'k: computed references require a named target', '/expression']);
   });
 
   it('a cause is kept exactly as before: present when given, even undefined', () => {
@@ -147,6 +171,24 @@ describe('the catalog is the only source of a query message', () => {
       else assert.match(target, /^\$[a-z][a-z-]*$/, `${key} names one operator, or its hint is a message`);
     }
     assert.deepStrictEqual([...hints].sort(), Object.keys(queryMessagesEn).filter((id) => id.startsWith('query/use/')).sort());
+  });
+
+  it('every formula and rule-plan error names a message of the formula catalog, and every one of them is raised', async () => {
+    const { formulaMessagesEn } = await import('@jarenjs/json/formula');
+    const formula = ['formula/', 'rules/'].flatMap((dir) => readdirSync(new URL(dir, SRC)).filter((f) => f.endsWith('.js') && f !== 'messages.js')
+      .map((f) => readFileSync(new URL(`${dir}${f}`, SRC), 'utf8'))).join('\n');
+    const raised = [...formula.matchAll(/new FormulaError\(/g)].length;
+    const named = [...formula.matchAll(/new FormulaError\([^,]+, (?:formulaMessage|causeMessage)\(/g)].length;
+    assert.strictEqual(named, raised, 'every formula error is raised with a message of the catalog');
+    assert.ok(raised >= 29, `${raised} raise sites scanned`);
+    const ids = new Set([...formula.matchAll(/['"](query\/formula\/[a-z-]+)['"]/g)].map((m) => m[1]));
+    assert.deepStrictEqual([...ids].sort(), Object.keys(formulaMessagesEn).sort());
+    for (const [id, template] of Object.entries(formulaMessagesEn)) {
+      assert.ok(!Object.hasOwn(queryMessagesEn, id), `${id} is the formula catalog's alone`);
+      const names = compileMessageTemplate(template).parameters;
+      assert.ok(names.includes('formulaId'), `${id} names the formula`);
+      for (const name of names) assert.match(name, /^[a-z]+$/i, `${id}: {${name}}`);
+    }
   });
 
   it('every English template compiles and names its parameters', () => {

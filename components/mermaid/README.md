@@ -218,9 +218,11 @@ import { compileDateLocale, nl } from '@jarenjs/locales';
 renderMermaid(source, { dateNames: compileDateLocale(nl).names });
 ```
 
-Without a provider a name token is a compile error, not a silent English
-fallback. Task ids and dates stay ASCII data either way — an RTL name is
-text, not syntax.
+`compileMermaid`, `mermaidPlugin` and `createMermaidComponent` take the same
+`dateNames` option, and the same `parseFrontmatter` hook for a front-matter
+parser of the host's own. Without a provider a name token is a compile
+error, not a silent English fallback. Task ids and dates stay ASCII data
+either way — an RTL name is text, not syntax.
 
 At scale, parse (which is also schedule resolution), layout and render
 are reported separately in the benchmark: <!--fact:mermaid.ganttScale-->at 10,000 tasks, ~34 ms to parse and resolve, ~3.8 ms to lay out and ~7.7 ms to render<!--/fact-->.

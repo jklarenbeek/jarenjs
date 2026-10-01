@@ -22,6 +22,24 @@ export function canonicalKeyText(key) {
   return typeof key === 'number' ? JSON.stringify(key) : key;
 }
 
+/** A decimal number as both engines read text into a numeric column: an
+ * optional sign, digits with an optional fraction (or a bare fraction), an
+ * optional exponent, white space around it. */
+const DECIMAL_TEXT = /^[ \t\n\v\f\r]*[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?[ \t\n\v\f\r]*$/;
+
+/**
+ * Whether a key names no row of a NUMERIC key column: a string that is no
+ * decimal number. SQLite compares such text with the column's numbers and
+ * finds nothing, while PostgreSQL refuses to read it as a number at all
+ * (and on a transaction spends the transaction), so a lookup binds it as
+ * NULL — which matches no row on either engine — and answers absent.
+ * @param {unknown} key
+ * @returns {boolean}
+ */
+export function namesNoNumber(key) {
+  return typeof key === 'string' && !DECIMAL_TEXT.test(key);
+}
+
 /**
  * The text SQLite stores for a floating-point value in a TEXT column: a
  * decimal point always, no zero beyond the single `.0` of an integer, and

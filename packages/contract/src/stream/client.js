@@ -28,8 +28,10 @@ import { STREAM_ERRORS } from './sse.js';
 /**
  * The callbacks of one `client.subscribe` call; every one optional.
  * `onSnapshot`'s `info` is stable in shape: `reset` says the snapshot
- * re-seeds a consumer whose cursor fell behind the server's retention
- * (its `seq` is then the cursor to resume from), and the two watermarks
+ * re-seeds a consumer whose cursor the server's log no longer covers —
+ * behind its retention, or above its high watermark (a restored log) —
+ * and its `seq` is then the cursor to resume from, below the one held
+ * included; the two watermarks
  * are the server log's when it reported them (`null` on a fresh stream).
  * @typedef {Object} StreamCallbacks
  * @property {(value: unknown, info: { seq: number, resumed: boolean, reset: boolean, earliestAvailable: number | null, highWatermark: number | null }) => void} [onSnapshot]
@@ -148,8 +150,11 @@ export function createStreamConsumer(options) {
       // advance; a reset snapshot may land AT the resume cursor — the
       // server's watermark had not moved past what the consumer held.
       // A zero seed may replace the resume cursor only before this
-      // attempt delivers anything, when replay falls back to a fresh source.
-      const initialSeed = !delivered && at === 0;
+      // attempt delivers anything, when replay falls back to a fresh source;
+      // so may a reset that opens the attempt, wherever it lands: the
+      // server's log no longer covers the cursor (restored, or recreated),
+      // and the document it carries replaces the consumer's own
+      const initialSeed = !delivered && (at === 0 || reset);
       if (at !== null && lastSeq !== null && !initialSeed && (reset ? at < lastSeq : at <= lastSeq)) {
         if (terminate()) call(callbacks.onError, streamOutcome('JC2092', {}));
         return;

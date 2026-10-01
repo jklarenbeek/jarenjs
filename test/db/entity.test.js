@@ -53,6 +53,17 @@ MODEL.entities.User.schema.properties.posts = {
 };
 
 describe('identity and defaults', () => {
+  it('an empty collections map beside entities is an entities-only model', async () => {
+    const store = await openStore({ ...MODEL, collections: {} }, { driver: nodeDriver() });
+    try {
+      const user = await store.entity('User').create({ email: 'e@x.org' });
+      assert.strictEqual((await store.entity('User').get(user.id))?.email, 'e@x.org');
+    }
+    finally { await store.close(); }
+    await assert.rejects(openStore({ $model: '0.1', collections: {} }, { driver: nodeDriver() }),
+      (/** @type {any} */ error) => error.code === 'JD0005');
+  });
+
   it('uuid and auto keys allocate; the returned object equals storage', async () => {
     const store = await openStore(MODEL, { driver: nodeDriver() });
     const users = store.entity('User');

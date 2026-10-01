@@ -16,7 +16,7 @@ import { describe, it, before } from 'node:test';
 import * as assert from 'node:assert';
 
 import sqlite3InitModule from '@sqlite.org/sqlite-wasm';
-import { openStore, migrate, planModelMigration, SQLITE_FLOOR } from '@jarenjs/db';
+import { openStore, migrate, planModelMigration, planInvariants, sqliteDialect, SQLITE_FLOOR } from '@jarenjs/db';
 import { wasmDriver, sqlite3Handle } from '@jarenjs/db/wasm';
 import {
   loadGroups, storeForGroup, runCase, loadRelationGroups,
@@ -288,5 +288,44 @@ describe('the wasm driver (real sqlite-wasm build)', () => {
     }, 'a second open verifies the shape, registers the functions and reads');
     await reopened.close();
     holder.close();
+  });
+
+  // this build omits UTF-16 (`OMIT_UTF16`), so `PRAGMA encoding` answers no
+  // row at all — and a database such a build reads can only be UTF-8
+  it('opens a store whose entity carries a database rule, and the rule refuses', async () => {
+    const column = (/** @type {string} */ name, /** @type {string} */ codec) => ({ name, codec, null: 'reject' });
+    const ruled = { $model: '0.1', entities: { Entry: {
+      schema: { type: 'object', properties: { id: { type: 'integer', 'x-entity': { key: true } }, phase: { type: 'string' } } },
+      physical: { table: 'entry', columns: { id: column('id', 'integer'), phase: column('phase', 'text') } },
+      invariants: [{ name: 'frozen', on: ['update', 'delete'], enforcement: 'database',
+        assert: { $eq: ['$.old.phase', 'draft'] } }] } } };
+    const connection = await driver.open(':memory:');
+    assert.strictEqual(await (await connection.prepare('PRAGMA encoding')).get([]), undefined);
+    await connection.exec("CREATE TABLE entry(id INTEGER PRIMARY KEY, phase TEXT NOT NULL); INSERT INTO entry VALUES (1, 'draft'), (2, 'final')");
+    for (const statement of planInvariants(ruled, { dialect: sqliteDialect })) await connection.exec(statement.sql);
+    const store = await openStore(ruled, { driver: { ...driver, open: async () => connection }, adopt: true });
+    try {
+      assert.deepStrictEqual(await store.entity('Entry').update(1, { phase: 'final' }), { id: 1, phase: 'final' });
+      await assert.rejects(store.entity('Entry').update(2, { phase: 'draft' }), { code: 'JD2096' });
+      assert.deepStrictEqual(await store.entity('Entry').get(2), { id: 2, phase: 'final' });
+    }
+    finally { await store.close(); }
+  });
+
+  it('pages a physical entity keyed by text, proving each key against its bytes', async () => {
+    const column = (/** @type {string} */ name) => ({ name, codec: 'text', null: 'reject' });
+    const tags = { $model: '0.1', entities: { Tag: {
+      schema: { type: 'object', properties: { code: { type: 'string', 'x-entity': { key: true } }, label: { type: 'string' } } },
+      physical: { table: 'tags', columns: { code: column('code'), label: column('label') } } } } };
+    const connection = await driver.open(':memory:');
+    await connection.exec("CREATE TABLE tags(code TEXT PRIMARY KEY, label TEXT NOT NULL); INSERT INTO tags VALUES ('b', 'y'), ('a', 'x'), ('é', 'z')");
+    const store = await openStore(tags, { driver: { ...driver, open: async () => connection }, adopt: true });
+    try {
+      const first = await store.entity('Tag').page({}, { limit: 2 });
+      assert.deepStrictEqual(first.items, [{ code: 'a', label: 'x' }, { code: 'b', label: 'y' }]);
+      const rest = await store.entity('Tag').page({}, { limit: 2, after: first.continuation });
+      assert.deepStrictEqual(rest.items, [{ code: 'é', label: 'z' }]);
+    }
+    finally { await store.close(); }
   });
 });

@@ -602,6 +602,9 @@ export function createDialect(spec) {
     capture: spec.capture,
     jobs: spec.jobs,
     replication: spec.replication,
+    /** What a read inside a write appends to lock the rows it reads
+     * (PostgreSQL's ` FOR UPDATE`); empty where writers serialize anyway. */
+    rowLockSuffix: spec.rowLockSuffix ?? '',
     // how a store becomes the single owner of its database, or absent
     owner: spec.owner,
     comparableForeignKeyAction: spec.comparableForeignKeyAction ?? ((action) => action),

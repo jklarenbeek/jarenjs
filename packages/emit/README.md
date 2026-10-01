@@ -246,20 +246,31 @@ npx jaren-emit importmap --packages app,view --prefix /vendor/ > importmap.json
 npx jaren-emit importmap --packages app,view --prefix /vendor/ --files   # what to serve
 ```
 
-The packages' dependency closure is followed as Node resolves it, and so is
-each subpath:
+The packages' dependency closure — their `dependencies`, `peerDependencies`
+and `optionalDependencies` — is followed as Node resolves it, and so is each
+subpath:
 - an exact key wins over a pattern, and a longer pattern over a shorter one;
-- a `*` matches across folders;
-- a `null` target withholds its subpaths;
+- a `*` matches across folders, but a file it reaches through a nested
+  `node_modules` is no export;
+- a `null` target withholds its subpaths, under a matched condition too
+  (`{ "browser": null, "default": "./node.js" }` serves a browser nothing),
+  and a fallback array takes its first target Node takes;
 - a target Node refuses (outside `./`, or through `..` or `node_modules`) is
-  reported, not mapped.
+  reported, not mapped;
+- a package without `exports` serves its `main`, read from the package root,
+  or else its `index.js`.
 
 `--prefix` is the URL `node_modules` is served under, so a dependency
 installed nested is served from where it sits. A package installed twice — a
 nested second copy — would load twice in the browser, so the command refuses
 it unless `--allow-duplicates`, and an import the map cannot resolve is
-refused too, naming the file that imports it. Two runs over the same tree
-print the same bytes. The function behind it:
+refused too, naming the file that imports it. The one import that is not
+refused is of an optional peer that is not installed (`peerDependenciesMeta`
+marks it `optional`): only a page that loads the importing file needs it, so
+it is a warning, and listed in `optional` with its reason — `@jarenjs/linq`
+maps without its optional peer `@jarenjs/db`, which only `@jarenjs/linq/db`
+reaches. Two runs over the same tree print the same bytes. The function
+behind it:
 
 ```javascript
 import { buildImportMap } from '@jarenjs/emit/importmap';
@@ -271,9 +282,10 @@ files[0];                       // '/vendor/@jarenjs/app/package.json', and ever
 ```
 
 Conditions resolve in the manifest's own key order under `browser`, `import`
-and `default` (override with `conditions`). `files` follows relative static
-imports and `import()` of a literal, read by `scanImports`, a scanner that
-never mistakes an import in a comment or a string for one; `exportTarget` and
+and `default` (override with `conditions`; `default` matches whatever they
+are, as in Node). `files` follows relative static imports and `import()` of a
+literal, read by `scanImports`, a scanner that never mistakes an import in a
+comment or a string for one; `exportTarget` and
 `expandExports` are the resolution and expansion it uses, exported for a tool
 of your own.
 

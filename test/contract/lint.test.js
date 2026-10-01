@@ -16,8 +16,8 @@ import { load } from './helpers.js';
 const contract = (operations) => compileContract({ $contract: '0.1', operations });
 
 describe('lintContract', () => {
-  it('names its three rules, and a clean contract (the shop example) has no finding', () => {
-    assert.deepStrictEqual([...LINT_RULES], ['read-query-on-body-method', 'body-limit-unsatisfiable', 'retry-on-undeclared']);
+  it('names its four rules, and a clean contract (the shop example) has no finding', () => {
+    assert.deepStrictEqual([...LINT_RULES], ['read-query-on-body-method', 'body-limit-unsatisfiable', 'body-limit-exceedable', 'retry-on-undeclared']);
     assert.deepStrictEqual(lintContract(compileContract(load('./fixtures/shop.contract.json'))), []);
   });
 
@@ -50,6 +50,39 @@ describe('lintContract', () => {
     assert.match(f.message, /at least 31 bytes, over policy\.limits\.maxBodyBytes 30/);
     assert.match(f.message, /lower bound/);
     assert.deepStrictEqual(lintContract(tight(20, 31)), [], 'the exact minimum fits');
+  });
+
+  it('body-limit-exceedable: a member\'s own bound admits a valid value whose encoding alone exceeds the limit', () => {
+    const labels = (/** @type {Record<string, any>} */ text, /** @type {Record<string, any>} */ policy = {}) => contract({
+      'labels.put': { kind: 'command', input: { type: 'object', properties: { text, meta: { type: 'object', properties: { note: text } } } },
+        output: true, http: { method: 'POST', path: '/labels' }, policy },
+    });
+    // up to 2,097,152 characters under the default 1 MiB limit: a valid request that long is refused JC2003
+    const findings = lintContract(labels({ type: 'string', maxLength: 2097152 }));
+    assert.deepStrictEqual(findings.map((f) => [f.rule, f.docPath]), [
+      ['body-limit-exceedable', '/operations/labels.put/policy/limits/maxBodyBytes'],
+    ]);
+    assert.match(findings[0].message, /'\/text' admits strings of up to 2097152 characters — at least 2097154 bytes encoded — over policy\.limits\.maxBodyBytes 1048576/);
+    assert.match(findings[0].message, /refused JC2003/);
+    // a nested member, a nullable spelling and a union branch are read too; the largest bound is named
+    const nested = lintContract(contract({
+      'a.b': { kind: 'command', output: true, http: { method: 'POST', path: '/a' }, policy: { limits: { maxBodyBytes: 100 } },
+        input: { type: 'object', properties: { meta: { type: 'object', properties: { note: { type: ['string', 'null'], maxLength: 120 } } },
+          tag: { anyOf: [{ type: 'string', maxLength: 99 }, { type: 'null' }] } } } },
+    }));
+    assert.deepStrictEqual(nested.map((f) => f.rule), ['body-limit-exceedable']);
+    assert.match(nested[0].message, /'\/meta\/note' admits strings of up to 120 characters/);
+    // within the limit, or a bound that a pattern, format or value set may keep out of reach: no finding
+    assert.deepStrictEqual(lintContract(labels({ type: 'string', maxLength: 1000 })), []);
+    assert.deepStrictEqual(lintContract(labels({ type: 'string', maxLength: 2097152 }, { limits: { maxBodyBytes: 4 * 2097152 } })), []);
+    for (const narrowed of [{ pattern: '^[a-z]{3}$' }, { format: 'date' }, { enum: ['a'] }, { const: 'a' }]) {
+      assert.deepStrictEqual(lintContract(labels({ type: 'string', maxLength: 2097152, ...narrowed })), [], JSON.stringify(narrowed));
+    }
+    // a query member travels in the URL, not the body: not this rule's
+    assert.deepStrictEqual(lintContract(contract({
+      'a.q': { kind: 'read', output: true, http: { method: 'GET', path: '/q' },
+        input: { type: 'object', properties: { q: { type: 'string', maxLength: 2097152 } } } },
+    })), []);
   });
 
   it('retry-on-undeclared: every entry that is neither a declared code nor a binding\'s JC code', () => {

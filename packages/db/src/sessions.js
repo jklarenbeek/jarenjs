@@ -57,10 +57,20 @@ export function createSessionRouter({ sessions, storage, newContext }) {
     : null;
 
   /** Give a session back: to the first waiter it suits, or to the free set.
+   * A session that was lost is never handed out again, so a waiter it was
+   * the last hope of — one pinned to it, or one for any session when every
+   * session is lost — hears `JD2087` now rather than at `queueTimeout`.
    * @param {number} index */
   const release = (index) => {
     busy[index] = false;
-    if (closing || sessions[index].lost()) return;
+    if (closing) return;
+    if (sessions[index].lost()) {
+      for (const waiter of [...waiting]) {
+        const lost = gone(waiter.want);
+        if (lost !== null) waiter.leave(lost);
+      }
+      return;
+    }
     const at = waiting.findIndex((waiter) => waiter.want < 0 || waiter.want === index);
     if (at < 0) return;
     const [waiter] = waiting.splice(at, 1);

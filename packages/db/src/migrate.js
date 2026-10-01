@@ -260,19 +260,57 @@ function sequentially(items, fn, from = 0) {
 }
 
 /**
+ * The values of derived columns — entries as a `derive` step carries them,
+ * `{ name, derive, segments, precision?, component?, dims? }` — for one
+ * document in the form the database holds it: the one computation a
+ * migration's backfill and its document writes share.
+ * @param {readonly any[]} columns
+ * @param {any} stored - the document as stored (parsed from its JSON text)
+ * @returns {any[]}
+ */
+function derivedValuesOf(columns, stored) {
+  return columns.map((column) => derivedValue(column, memberAt(stored, column.segments)));
+}
+
+/**
+ * A collection's STORED derived columns as its table holds them now: the
+ * columns the model in force at the step (the step's `model`, else the
+ * run's) derives that the table carries as ordinary columns. A generated
+ * column is the engine's to compute, and one a later step of the link
+ * adds is not there yet — the backfill that follows it computes it. With
+ * no model declaring the collection, none is known.
+ * @param {any} connection @param {string} table @param {any} step @param {any} options
+ * @returns {any} value-or-promise of the column entries
+ */
+function storedDerivedColumns(connection, table, step, options) {
+  const model = step?.model ?? options.model;
+  const collection = model === undefined ? undefined : normalizeModel(model, options.expressions).get(table);
+  if (collection === undefined) return [];
+  const { derived } = planCollection(table, collection, connection.dialect, mappingFor(connection, options.expressions));
+  if (derived.length === 0) return [];
+  return chain(connection.prepare(connection.dialect.introspect.columns(table)), (statement) => chain(statement.all([]),
+    (/** @type {any[]} */ columns) => {
+      const ordinary = new Set(columns.filter((column) => Number(column.hidden) === 0).map((column) => column.name));
+      return derived.filter((/** @type {any} */ column) => ordinary.has(column.name));
+    }));
+}
+
+/**
  * How a data step writes one document back: a collection's `doc` by row
- * identity, or a mapped entity row WHOLE — its columns split out through the
+ * identity, with the values of its stored derived columns — every write
+ * carries them, as a store's does, so a host or jslt step leaves none
+ * stale — or a mapped entity row WHOLE: its columns split out through the
  * entity's own split and the rest into its document (a column-mapped member
  * a transform wrote used to land in the document and be shadowed on read).
- * @param {any} connection @param {string} table
- * @param {{ entity: any, mapping: any } | null} stepEntity @param {any} runtime
+ * @param {any} connection @param {string} table @param {any} step
+ * @param {{ entity: any, mapping: any } | null} stepEntity @param {any} options
  * @returns {any} value-or-promise of `(doc, rid) => value-or-promise`
  */
-function documentWriter(connection, table, stepEntity, runtime) {
+function documentWriter(connection, table, step, stepEntity, options) {
   const dialect = connection.dialect;
   const q = dialect.quoteIdentifier;
   if (stepEntity !== null) {
-    const core = entityCore(connection, stepEntity.entity, stepEntity.mapping, null, runtime);
+    const core = entityCore(connection, stepEntity.entity, stepEntity.mapping, null, options.runtime);
     const columns = entityColumnsOf(stepEntity.mapping);
     const assignments = [
       ...columns.map((column, i) => `${q(column)} = ${dialect.parameterRef(i + 1, 'v')}`),
@@ -286,10 +324,16 @@ function documentWriter(connection, table, stepEntity, runtime) {
         return update.run([...columns.map((column) => byName.get(column) ?? null), JSON.stringify(rest), rid]);
       });
   }
-  return chain(connection.prepare(`UPDATE ${q(table)} SET ${q('doc')} = `
-    + `${dialect.jsonEncode(dialect.parameterRef(1, 'doc'))} `
-    + `WHERE ${dialect.rowIdentity()} = ${dialect.parameterRef(2, 'rid')}`), (update) =>
-    (/** @type {any} */ next, /** @type {any} */ rid) => update.run([JSON.stringify(next), rid]));
+  return chain(storedDerivedColumns(connection, table, step, options), (/** @type {any[]} */ derived) => {
+    const assignments = [`${q('doc')} = ${dialect.jsonEncode(dialect.parameterRef(1, 'doc'))}`,
+      ...derived.map((column, at) => `${q(column.name)} = ${dialect.parameterRef(at + 2, column.name)}`)];
+    return chain(connection.prepare(`UPDATE ${q(table)} SET ${assignments.join(', ')} `
+      + `WHERE ${dialect.rowIdentity()} = ${dialect.parameterRef(derived.length + 2, 'rid')}`), (update) =>
+      (/** @type {any} */ next, /** @type {any} */ rid) => {
+        const text = JSON.stringify(next);
+        return update.run([text, ...(derived.length === 0 ? [] : derivedValuesOf(derived, JSON.parse(text))), rid]);
+      });
+  });
 }
 
 /**
@@ -355,7 +399,7 @@ function hostCollection(connection, name, step, options, closed, fail) {
       closed();
       if (typeof fn !== 'function') throw new TypeError('update() takes a function from a document to its replacement');
       let replaced = 0;
-      return chain(documentWriter(connection, name, stepEntity, options.runtime), (write) =>
+      return chain(documentWriter(connection, name, step, stepEntity, options), (write) =>
         chain(walkRows(connection, name, options.batchSize, (rows) => sequentially(rows, (row) => {
           const document = read(row);
           return chain(fn(document), (next) => {
@@ -1552,21 +1596,71 @@ function foreignKeyViolations(connection) {
       parent: row.parent, fkid: row.fkid }))));
 }
 
+/** A name as SQLite matches a table name: without regard to ASCII case. @param {string} name */
+const tableNameKey = (name) => name.replace(/[A-Z]+/g, (letters) => letters.toLowerCase());
+
+/**
+ * The table renames `steps` perform, as one function from a table name to
+ * the name the steps leave it under: every `ddl` or `sql` step that is
+ * exactly `ALTER TABLE <name> RENAME TO <name>` (quoted, bare or
+ * schema-qualified), applied in step order, so a chain of renames ends
+ * where its last one does. A `rebuild` or `table` step renames only its own
+ * temporary table, which no violation read before it names.
+ * @param {readonly any[]} steps
+ * @returns {(name: any) => any}
+ */
+function renamesOf(steps) {
+  /** @type {[string, string][]} */
+  const renames = [];
+  for (const step of steps) {
+    if ((step?.kind !== 'ddl' && step?.kind !== 'sql') || typeof step.sql !== 'string') continue;
+    const tokens = sqlTokens(step.sql);
+    if (tokens.at(-1)?.kind === 'symbol' && tokens.at(-1)?.value === ';') tokens.pop();
+    const keyword = (/** @type {number} */ at, /** @type {string} */ value) =>
+      tokens[at]?.kind === 'word' && tokens[at].value.toUpperCase() === value;
+    const name = (/** @type {number} */ at) =>
+      (tokens[at]?.kind === 'word' || tokens[at]?.kind === 'identifier' ? tokens[at].value : undefined);
+    const at = tokens[3]?.kind === 'symbol' && tokens[3].value === '.' ? 4 : 2;
+    const from = name(at), to = name(at + 3);
+    if (keyword(0, 'ALTER') && keyword(1, 'TABLE') && keyword(at + 1, 'RENAME') && keyword(at + 2, 'TO')
+      && from !== undefined && to !== undefined && tokens.length === at + 4) renames.push([tableNameKey(from), to]);
+  }
+  return (name) => {
+    let current = name;
+    for (const [from, to] of renames) if (typeof current === 'string' && tableNameKey(current) === from) current = to;
+    return current;
+  };
+}
+
 /**
  * The violations `after` holds beyond `before`, compared as whole rows and
  * counted: a WITHOUT ROWID table's violations carry no rowid, so two of
  * them read alike, and one fixed while another appears is still one new.
- * @param {any[] | null} before @param {any[]} after @returns {any[]}
+ *
+ * A rename between the two reads changes no reference, so rows compare
+ * under the names the renames leave: a `before` row's table through
+ * `names.table` (the renames since it was read), and the parent of both
+ * through `names.parent` (every rename so far) — a parent is the table
+ * its child's `REFERENCES` clause spells, and a rename made with
+ * `legacy_alter_table` on (the setting a link that rebuilds runs under)
+ * leaves that clause spelling the old name until the child is rebuilt.
+ * The rows answered are `after`'s own.
+ * @param {any[] | null} before @param {any[]} after
+ * @param {{ table?: (name: any) => any, parent: (name: any) => any }} names
+ * @returns {any[]}
  */
-function introducedViolations(before, after) {
+function introducedViolations(before, after, names) {
+  const { table = (/** @type {any} */ name) => name, parent } = names;
+  const keyOf = (/** @type {any} */ row, /** @type {boolean} */ earlier) =>
+    JSON.stringify({ ...row, table: earlier ? table(row.table) : row.table, parent: parent(row.parent) });
   const seen = new Map();
   for (const row of before ?? []) {
-    const key = JSON.stringify(row);
+    const key = keyOf(row, true);
     seen.set(key, (seen.get(key) ?? 0) + 1);
   }
   const introduced = [];
   for (const row of after) {
-    const key = JSON.stringify(row);
+    const key = keyOf(row, false);
     const left = seen.get(key) ?? 0;
     if (left > 0) seen.set(key, left - 1);
     else introduced.push(row);
@@ -1616,8 +1710,11 @@ function runSteps(connection, migration, options) {
         // shape under the temporary name, copy, drop, rename, recreate
         // indexes, then PRAGMA foreign_key_check INSIDE the
         // transaction — a reference the rebuild broke fails the migration,
-        // one broken before it began is not the rebuild's doing
+        // one broken before it began is not the rebuild's doing, and
+        // neither is a parent an earlier step renamed, which the rebuilt
+        // REFERENCES clause names by its new name
         const temporary = `${current.table}__rebuild`;
+        const renamedSoFar = renamesOf(migration.steps.slice(0, i));
         const statements = [
           ...current.create,
           current.copy,
@@ -1631,7 +1728,7 @@ function runSteps(connection, migration, options) {
           if (j >= statements.length) {
             if (before === null) return null;
             return chain(foreignKeyViolations(connection), (after) => {
-              const violations = introducedViolations(before, /** @type {any[]} */ (after));
+              const violations = introducedViolations(before, /** @type {any[]} */ (after), { parent: renamedSoFar });
               if (violations.length > 0) {
                 fail(`foreign_key_check found ${violations.length} broken reference(s) `
                   + `after rebuilding '${current.table}' `
@@ -1663,11 +1760,7 @@ function runSteps(connection, migration, options) {
         return chain(connection.prepare(updateSql), (update) =>
           chain(walkRows(connection, current.collection, options.batchSize, (rows) => {
             for (const row of rows) {
-              const doc = JSON.parse(row.doc);
-              update.run([
-                ...columns.map((column) => derivedValue(column, memberAt(doc, column.segments))),
-                row.rid,
-              ]);
+              update.run([...derivedValuesOf(columns, JSON.parse(row.doc)), row.rid]);
               derivedRows++;
             }
             options.onProgress?.({
@@ -1695,7 +1788,7 @@ function runSteps(connection, migration, options) {
         // before the stylesheet and split out after it (documentWriter)
         const mapping = stepEntity?.mapping ?? null;
         let transformed = 0;
-        return chain(documentWriter(connection, current.collection, stepEntity, options.runtime), (write) =>
+        return chain(documentWriter(connection, current.collection, current, stepEntity, options), (write) =>
           chain(walkRows(connection, current.collection, options.batchSize, (rows) => {
             for (const row of rows) {
               const doc = mapping === null ? JSON.parse(row.doc) : mergeEntityRow(mapping, row, 'doc');
@@ -2192,10 +2285,12 @@ export function migrate(target, migrations, options) {
           // history row: a reference a step broke refuses the link, listed.
           // The check reads the whole database, so it is taken before the
           // steps too, in the same transaction: a violation already there (an
-          // orphan written while enforcement was off) is not the link's doing
+          // orphan written while enforcement was off) is not the link's doing,
+          // under the name the link's renames leave its table and parent
           const foreignKeyCheck = (scope, migration, before) => (before === null ? null
             : chain(foreignKeyViolations(scope), (after) => {
-              const violations = introducedViolations(before, /** @type {any[]} */ (after));
+              const renamed = renamesOf(migration.steps);
+              const violations = introducedViolations(before, /** @type {any[]} */ (after), { table: renamed, parent: renamed });
               if (violations.length === 0) return null;
               const listed = violations.slice(0, 10);
               throw Object.assign(refuse('JD0023', `migration '${migration.id}' leaves ${violations.length} foreign-key `

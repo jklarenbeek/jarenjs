@@ -238,6 +238,10 @@ describe('parallel root reads on the pool host', () => {
     const started = performance.now();
     await closeAgain();
     assert.ok(performance.now() - started < 2500, 'close gives the held read back instead of waiting out the pool grace');
+    // and the stream it cut short refuses its next pull rather than ending as though it were complete
+    await assert.rejects(held.next(), { code: 'JD2063' });
+    await assert.rejects(held.next(), { code: 'JD2063' });
+    assert.deepEqual(await held.return(), { done: true, value: undefined });
   });
 
   it('a point read borrows the free writer while every reader is held', { timeout: 60000 }, async () => {

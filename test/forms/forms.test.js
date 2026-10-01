@@ -15,6 +15,7 @@ import {
   humanizeKey,
   getFormatInfo,
 } from '@jarenjs/forms';
+import { JarenValidator } from '@jarenjs/validate';
 
 describe('Form Model', function () {
   describe('#buildFormModel()', function () {
@@ -614,6 +615,31 @@ describe('layer 1 agrees with the validator about null and about a required bool
     assert.deepStrictEqual(validateField(field('age'), null).map((e) => e.keyword), ['type']);
     // absent is still absent: only `required` applies
     assert.deepStrictEqual(validateField(field('manager'), undefined).map((e) => e.keyword), ['required']);
+  });
+
+  it('a member with no type, enum, const or union admits null, as the validator reads it', () => {
+    const members = {
+      untyped: {},
+      lengthOnly: { minLength: 2 },
+      shapeOnly: { properties: { a: { type: 'number' } } },
+      bounded: { maximum: 10 },
+      described: { description: 'free JSON' },
+      typelessBranch: { anyOf: [{ minLength: 2 }, { type: 'integer' }] },
+    };
+    for (const [name, member] of Object.entries(members)) {
+      for (const required of [false, true]) {
+        const memberSchema = { type: 'object', properties: { m: member }, ...(required ? { required: ['m'] } : {}) };
+        const memberModel = buildFormModel(memberSchema);
+        const label = `${name}, ${required ? 'required' : 'optional'}`;
+        assert.strictEqual(memberModel.children[0].nullable, true, label);
+        assert.deepStrictEqual(validateField(memberModel.children[0], null), [], label);
+        assert.deepStrictEqual(validateAllFields(memberModel, { m: null }), {}, label);
+        assert.strictEqual(new JarenValidator().compile(memberSchema)({ m: null }), true, `the validator agrees: ${label}`);
+      }
+    }
+    // a union none of whose branches admits null still refuses it
+    const union = buildFormModel({ type: 'object', properties: { m: { anyOf: [{ type: 'string' }, { type: 'integer' }] } } });
+    assert.strictEqual(union.children[0].nullable, false);
   });
 
   it('a required boolean without a default starts false, so the form holds what the validator judges', () => {

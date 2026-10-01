@@ -62,7 +62,7 @@ const typeName = makeTypeNamer(TYPE_NAMES);
  * `form/*` key of forms' `formsMessagesEn`, `x-form/assert`, the
  * `JQ2xxx` codes reachable through `$query`, every `contract/*`
  * wire-error msgid of `@jarenjs/contract`'s `contractMessagesEn`, and
- * every `query/*` message of `@jarenjs/json`'s `queryMessagesEn`.
+ * every `query/*` message of `@jarenjs/json`'s `queryMessagesEn` and every message of its `formulaMessagesEn`.
  * @type {Record<string, string | ((params: any, error?: object) => string)>}
  */
 export const nl = {
@@ -416,6 +416,49 @@ export const nl = {
   'query/lexical-result': 'de lexicale provider gaf een ongeldig of onvolledig resultaat terug',
   //#endregion
 
+  //#region @jarenjs/json formulas (the messages of formulaMessagesEn)
+  'query/formula/query': '{formulaId}: {message}',
+  'query/formula/detail': '{formulaId}: {detail}',
+  'query/formula/profile-json': '{formulaId}: het profiel moet JSON zijn',
+  'query/formula/profile-object': '{formulaId}: het profiel moet een object zijn',
+  'query/formula/profile-version': '{formulaId}: niet-ondersteunde taalversie',
+  'query/formula/profile-identity': '{formulaId}: {member} mag niet leeg zijn en hoogstens 256 tekens bevatten',
+  'query/formula/profile-expression': '{formulaId}: een expressie is verplicht',
+  'query/formula/profile-result-mode': '{formulaId}: onbekende resultaatmodus',
+  'query/formula/profile-bindings': '{formulaId}: bindings moet een object zijn',
+  'query/formula/profile-reserved': '{formulaId}: computed en context zijn gereserveerde bindingen',
+  'query/formula/profile-helpers': '{formulaId}: helpers moet een lijst (array) zijn',
+  'query/formula/profile-helper': '{formulaId}: elke hulpfunctie heeft een unieke naam en een versie nodig',
+  'query/formula/profile-packs': '{formulaId}: packs moet een lijst (array) zijn',
+  'query/formula/profile-pack': '{formulaId}: elk pakket heeft een unieke naam en een versie nodig',
+  'query/formula/helper-missing': '{formulaId}: de pure hulpfunctie {name}@{version} ontbreekt of is niet compatibel',
+  'query/formula/pack-missing': '{formulaId}: het operatorpakket {name}@{version} ontbreekt of is niet compatibel',
+  'query/formula/helper-shadows': '{formulaId}: de hulpfunctie {name} draagt de naam van een functie uit een vermeld operatorpakket',
+  'query/formula/schema-missing': '{formulaId}: het schema of de typetest-compiler ontbreekt of is niet compatibel',
+  'query/formula/schema-rejected': '{formulaId}: het schema is geweigerd',
+  'query/formula/computed-unnamed': '{formulaId}: een verwijzing naar computed moet een doel bij naam noemen',
+  'query/formula/computed-cycle': '{formulaId}: de berekende afhankelijkheden vormen een kring',
+  'query/formula/computed-unknown': '{formulaId}: onbekend berekend doel',
+  'query/formula/targets-invalid': '{formulaId}: ongeldige lijst van doelen',
+  'query/formula/target-identity': '{formulaId}: elk doel heeft een unieke identiteit en een boolean enabled nodig',
+  'query/formula/target-schemas': "{formulaId}: de schema's van een doel moeten een object van id -> {{version, schema} zijn",
+  'query/formula/target-schema-clash': "{formulaId}: twee verschillende schema's onder dezelfde id '{id}'",
+  'query/formula/batch-limit': '{formulaId}: de limiet op rijen of cellen van de batch is overschreden',
+  'query/formula/row-identity': '{formulaId}: elke rij heeft een unieke, stabiele id nodig',
+  'query/formula/input-schema': '{formulaId}: de invoer voldoet niet aan het invoerschema',
+  'query/formula/result-schema': '{formulaId}: het resultaat voldoet niet aan het resultaatschema',
+  'query/formula/outcome-invalid': '{formulaId}: ongeldige gelabelde uitkomst',
+  'query/formula/parity-expected': '{formulaId}: verwachte uitkomst {index} is geen JSON',
+  'query/formula/rule-identity': '{formulaId}: een regel heeft een identiteit, doelen en schrijfbare velden nodig',
+  'query/formula/rule-field-not-writable': '{formulaId}: het doelveld is niet schrijfbaar',
+  'query/formula/rule-rows': '{formulaId}: begrensde rijen en een datasetrevisie zijn verplicht',
+  'query/formula/rule-entity-duplicate': '{formulaId}: dubbele entiteitsidentiteit',
+  'query/formula/rule-preview-stale': '{formulaId}: verouderde of gewijzigde preview',
+  'query/formula/rule-selection-duplicate': "{formulaId}: de selectie moet unieke wijzigings-ID's bevatten",
+  'query/formula/rule-selection-unknown': '{formulaId}: onbekende geselecteerde wijziging',
+  'query/formula/rule-conflict': '{formulaId}: tegenstrijdige waarden voor hetzelfde veld',
+  //#endregion
+
   //#region @jarenjs/locales numbers (the decimal format, CLDR as ICU 78.3 ships it)
   'number/decimal-separator': ',',
   'number/grouping-separator': '.',
@@ -426,5 +469,6 @@ export const nl = {
   'number/exponent-separator': 'E',
   'number/infinity': '∞',
   'number/nan': 'NaN',
+  'number/minimum-grouping-digits': '1',
   //#endregion
 };

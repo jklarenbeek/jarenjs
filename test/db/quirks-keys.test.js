@@ -4,7 +4,9 @@
  *
  * 1. A string key spelled like a legacy float (`'7.0'`) was taken for
  *    number 7's old-style row: reads of 7 answered it, writes of 7 moved
- *    and overwrote it, `insert(7)` refused with a duplicate that was not.
+ *    and overwrote it, `insert(7)` refused with a duplicate that was not —
+ *    on a collection without a key member too, where no document can
+ *    confirm a legacy spelling.
  * 2. The same spelling test let one float take another's row where an
  *    older SQLite rounded both to fifteen digits (`0.3`, `0.1 + 0.2`).
  * 3. A numeric key's write read before it wrote in a deferred
@@ -64,6 +66,26 @@ describe('key quirks', () => {
     finally { await store.close(); }
   });
 
+  it('1c. on a collection without a key member the string key "7.0" and the number 7 are two keys', async () => {
+    const NOTES = { $model: '0.1', collections: { notes: { schema: { type: 'object' }, key: null, identity: 'uuid', indexes: [] } } };
+    const { store } = await withRaw(NOTES);
+    try {
+      const notes = store.collection('notes');
+      await notes.put({ text: 'the string key' }, '7.0');
+      assert.equal(await notes.get(7), undefined);
+      await notes.put({ text: 'the number' }, 7);
+      assert.deepEqual(await notes.get('7.0'), { text: 'the string key' });
+      assert.deepEqual(await notes.get(7), { text: 'the number' });
+      await notes.put({ text: 'the number again' }, 7);
+      assert.equal(await notes.delete(7), true);
+      assert.deepEqual(await notes.get('7.0'), { text: 'the string key' }, 'deleting 7 left "7.0" alone');
+      await notes.put({ text: 'another string key' }, '8.0');
+      assert.equal(await notes.delete(8), false, 'nothing is stored under the number 8');
+      assert.deepEqual(await notes.get('8.0'), { text: 'another string key' });
+    }
+    finally { await store.close(); }
+  });
+
   it('2. a legacy spelling of one float never answers for another', async () => {
     const { store, raw } = await withRaw(RELEASES);
     try {
@@ -97,6 +119,40 @@ describe('key quirks', () => {
       }
       finally { await store.close(); }
     }
+  });
+
+  it('3b. a nested body that outlives its root\'s hold limit leaves the next owner\'s writer lock alone', async () => {
+    /** @type {string[]} */
+    const execs = [];
+    const db = new DatabaseSync(':memory:');
+    const recorded = new Proxy(db, { get: (target, prop) => {
+      if (prop === 'exec') return (/** @type {string} */ sql) => { execs.push(sql); return target.exec(sql); };
+      const value = /** @type {any} */ (target)[prop];
+      return typeof value === 'function' ? value.bind(target) : value;
+    } });
+    const store = await openStore(RELEASES, { driver: { name: 'node-sqlite', dialect: sqliteDialect, open: async () => adaptNodeDatabase(recorded) } });
+    try {
+      /** @type {() => void} */
+      let finish = () => {};
+      const pending = new Promise((resolve) => { finish = () => resolve(undefined); });
+      const held = store.transaction(async (tx) => {
+        await tx.transaction(async (/** @type {any} */ inner) => {
+          await inner.collection('releases').put({ id: 'z', label: 'nested' });
+          await pending; // still running when the root's limit passes
+        });
+      }, { holdTimeoutMs: 30 }).then(() => 'committed', (/** @type {any} */ error) => error.code);
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      execs.length = 0;
+      await store.collection('releases').put({ id: 7, label: 'the next owner' });
+      assert.equal(execs.find((sql) => /^(BEGIN|SAVEPOINT)/.test(sql)), 'BEGIN IMMEDIATE',
+        'the rolled-back root\'s savepoint does not count against the next owner');
+      finish();
+      assert.equal(await held, 'JD2098');
+      execs.length = 0;
+      await store.collection('releases').put({ id: 8, label: 'after the body settled' });
+      assert.equal(execs.find((sql) => /^(BEGIN|SAVEPOINT)/.test(sql)), 'BEGIN IMMEDIATE');
+    }
+    finally { await store.close(); }
   });
 
   it('4. a migration may not move a document to a key that merely parses like its stored one', async () => {

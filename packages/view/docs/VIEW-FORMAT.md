@@ -96,7 +96,12 @@ A patching renderer meets such a refusal part-way through a frame, after
 it wrote earlier siblings. The reference DOM renderer then tears its tree
 down — every mounted widget unmounts, and the container empties — and
 rethrows, so the next frame builds from its own vnode rather than from a
-baseline the failed frame no longer matches. A hydrating renderer adopts
+baseline the failed frame no longer matches. The throw carries every
+failure of the failed frame: a widget hook failure parked before the
+refusal, and an unmount failure of that teardown that no `onCleanupError`
+takes, join the refusal in occurrence order under §7.3.1's rule — the
+refusal alone surfaces by identity, two or more as one `AggregateError` —
+and the next frame reports none of them. A hydrating renderer adopts
 the server's markup on its first pass only; a tree rebuilt after a
 failure is created.
 
@@ -119,19 +124,23 @@ Prop values MUST be JSON values. Four names are renderer instructions:
   rendered.
 - **`style`** — a CSS declaration string, or an object of declarations.
   Object keys in camelCase are converted to kebab-case; keys starting
-  with `--` pass through. `null`/`false` members are dropped.
+  with `--` pass through. `null`/`false` members are dropped, and an
+  object left with no declaration (`{}`) writes no `style` attribute in
+  either renderer — a patching renderer removes the one a previous frame
+  wrote.
 
 Every other prop **writes through**:
 
 - A patching renderer targeting the DOM SHOULD assign `node[name]` when
   the node has that property (form controls: `value`, `checked`, ...)
-  and use attributes otherwise; elements in a foreign namespace (§5.4)
-  always use attributes.
+  and use attributes otherwise — the property table below names the
+  values written as attributes even then; elements in a foreign
+  namespace (§5.4) always use attributes.
 - `true` renders as a bare attribute, `false` and `null` remove the
   attribute / clear the property.
 - Prop names are used as-is: producers write `class`, not `className`.
 
-Two kinds of property are not left to the node's own property, and the
+Three kinds of property are not left to the node's own property, and the
 serializer and the patching renderer MUST write them identically — the
 reference implementation keeps them in one **property table**
 (`properties.js`) that both read:
@@ -161,6 +170,18 @@ reference implementation keeps them in one **property table**
   (`textContent`, `innerHTML`, `scrollTop`) is still cleared to `''`,
   and one that was never written is left alone. Boolean properties
   (`disabled`, `hidden`, `multiple`) are unchanged.
+
+- **A value the property would convert.** `true` on a property that is
+  not boolean is written as the empty attribute, and a string on a
+  number-typed property as that string — the markup the serializer
+  writes, which a hydrating renderer then keeps. Through the property,
+  `download: true` names the file `true`, `title: true` shows `true`,
+  `popover: true` is the `manual` popover where `popover=""` is `auto`,
+  and `width: '100px'` writes `width="0"`. Numbers, strings on string
+  properties and boolean properties are assigned. A string on a
+  number-typed property that reflects no attribute (`scrollTop: '100'`)
+  is therefore written as an attribute of that name, as the serializer
+  writes it; a number reaches the property.
 
 A **controlled form value** is authoritative. A patching renderer MUST
 reassert `value`/`checked` on a form control against the control's

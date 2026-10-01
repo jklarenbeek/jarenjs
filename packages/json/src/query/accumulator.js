@@ -30,8 +30,11 @@ function createAggregateState(operator, options = {}) {
         throw queryRuntimeError('JQ2001', 'query/minmax-mixed', { got: itemRef(item) }, docPath);
       if (count === 0) best = item;
       else {
+        // of two zeros +0 is the greater and -0 the lesser, as IEEE 754
+        // maximum and minimum (and Math.max and Math.min) order them
         const order = typeof item === 'string' ? compareCodePoints(item, best)
-          : item > best ? 1 : item < best ? -1 : 0;
+          : item > best ? 1 : item < best ? -1
+            : item === 0 && Object.is(item, -0) !== Object.is(best, -0) ? (Object.is(item, -0) ? -1 : 1) : 0;
         if (operator === '$max' ? order > 0 : order < 0) best = item;
       }
       if (typeof item === 'number' && Number.isNaN(item)) sawNaN = true;

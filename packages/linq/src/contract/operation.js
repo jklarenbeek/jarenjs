@@ -214,10 +214,12 @@ export function error(spec = {}) {
       `error() takes { status?, schema? }, got ${describeValue(spec)}`);
   }
   closedTo(spec, ['status', 'schema'], 'error()', '');
+  // a failure's status is a client or server error: one in 100–399 would
+  // reach the client as a success (CONTRACT-FORMAT §3, JC0011)
   if (spec.status !== undefined
-    && (!Number.isInteger(spec.status) || spec.status < 100 || spec.status > 599)) {
+    && (!Number.isInteger(spec.status) || spec.status < 400 || spec.status > 599)) {
     throw new LinqBuildError('JL0101',
-      `error() status is an integer in 100–599, got ${describeValue(spec.status)}`, '/status');
+      `error() status is an integer in 400–599, got ${describeValue(spec.status)}`, '/status');
   }
   const out = {};
   if (spec.status !== undefined) out.status = spec.status;

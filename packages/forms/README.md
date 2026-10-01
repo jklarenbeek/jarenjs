@@ -63,7 +63,7 @@ const result = validate(data); // { valid, errors: [{ instancePath, keyword, mes
 | `kind` | `string` `number` `integer` `boolean` `enum` `const` `object` `array` |
 | `control` | Rendering hint: `text` `email` `url` `password` `textarea` `number` `checkbox` `select` `date` `datetime-local` `time` `color` `json` |
 | `required` | Whether the parent object requires this property |
-| `nullable` | Whether the schema admits `null`, as the validator reads it: a type list naming `'null'` (an `enum` or `const` beside it must admit `null` too), OpenAPI's `nullable: true`, or an `anyOf`/`oneOf` with a branch that admits it |
+| `nullable` | Whether the schema admits `null`, as the validator reads it: a type list naming `'null'` (an `enum` or `const` beside it must admit `null` too), OpenAPI's `nullable: true`, an `anyOf`/`oneOf` with a branch that admits it, or none of `type`, `enum`, `const`, `anyOf` and `oneOf` at all — `{}` or `{ maxLength: 20 }`, whose keywords judge only values of their own type |
 | `constraints` | `minLength`/`maxLength`/`pattern`/`format`/`minimum`/`maximum`/`multipleOf`/`minItems`/... |
 | `rules` | The raw `x-form` rules annotation, if any (see below) |
 | `enumValues` / `constValue` / `defaultValue` / `placeholder` | Values for the UI |

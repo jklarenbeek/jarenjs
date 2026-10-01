@@ -52,7 +52,7 @@ import {
   EMPTY_PROPS,
   WIDGET_TAG,
 } from './vnode.js';
-import { ENUMERATED_ALIASES, enumeratedAttribute, isAliased, removeProperty, writingSpelling } from './properties.js';
+import { ENUMERATED_ALIASES, enumeratedAttribute, isAliased, removeProperty, writeProperty, writingSpelling } from './properties.js';
 import { createSafePolicy } from './safe.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -332,10 +332,22 @@ export function createDomRenderer(container, options = {}) {
       // the frame before it and keep them. The tree is torn down — every
       // mounted widget unmounts, the container empties — so the next frame
       // builds from its own vnode.
+      // The failed pass delivers every failure of its own, in occurrence
+      // order: a hook failure parked before the throw, the throw, and an
+      // unmount failure of the teardown with no cleanup sink to take it.
+      // Left parked, they would surface after the next, healthy frame.
+      const parked = ctx.frameError;
+      ctx.frameError = null;
       teardown();
       container.textContent = '';
       destroyPending = false;
-      throw error;
+      const cleanup = ctx.frameError;
+      ctx.frameError = parked;
+      appendFrameFailure(ctx, error);
+      if (cleanup !== null) appendFrameFailure(ctx, cleanup.value);
+      const delivered = /** @type {{ value: unknown }} */ (ctx.frameError);
+      ctx.frameError = null;
+      throw delivered.value;
     }
     finally {
       rendering = false;
@@ -913,7 +925,8 @@ function setProp(ctx, node, name, oldValue, newValue, ns) {
     // for a cleared value (an empty reflected attribute vs an omitted one).
     // Writing/removing the attribute matches exactly what the serializer does.
     if (name === 'style' && typeof newValue === 'object' && newValue !== null) {
-      newValue = styleToString(newValue);
+      // an object with no declaration is no attribute, as the serializer omits it
+      newValue = styleToString(newValue) || null;
     }
     if (writeEnumerated(node, name, newValue)) return;
     if (newValue == null || newValue === false) node.removeAttribute(name);
@@ -922,7 +935,9 @@ function setProp(ctx, node, name, oldValue, newValue, ns) {
   }
   // Trusted path: a property where the node has one, else an attribute —
   // the equivalent of writing the DOM by hand — with the property table's
-  // two exceptions (VIEW-FORMAT §3).
+  // exceptions (VIEW-FORMAT §3): enumerated attributes, removal, and a
+  // value the property would convert into markup the serializer never
+  // writes.
   // Controlled values settle after children and never interrupt composition.
   if ((name === 'value' || name === 'checked')
     && (node.nodeName === 'INPUT' || node.nodeName === 'TEXTAREA' || node.nodeName === 'SELECT')) return;
@@ -936,10 +951,15 @@ function setProp(ctx, node, name, oldValue, newValue, ns) {
   if (writeEnumerated(node, name, newValue)) return;
   if (name === 'style' && typeof newValue === 'object' && newValue !== null) {
     newValue = styleToString(newValue);
+    // an object with no declaration is no attribute, as the serializer omits it
+    if (newValue === '') {
+      node.removeAttribute('style');
+      return;
+    }
   }
   if (ns === null && name in node && name !== 'list' && name !== 'form') {
     if (newValue == null || newValue === false) removeProperty(node, name, oldValue);
-    else node[name] = newValue;
+    else writeProperty(node, name, newValue);
   }
   else if (newValue == null || newValue === false) {
     node.removeAttribute(name);

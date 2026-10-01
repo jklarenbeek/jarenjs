@@ -332,6 +332,14 @@ export function admitCursor(cursor, admit, signal, what, ownership) {
 }
 
 /**
+ * What the store calls on a cursor that holds a read or a session when the
+ * store closes under it: what it holds goes back, and every later pull
+ * refuses with the error given (`JD2063`) — a stream cut short by a close
+ * never ends as though it were complete.
+ */
+export const CLOSED_UNDER = Symbol('closed under');
+
+/**
  * A ROOT cursor's admission on a store that reads in parallel (`reads:
  * 'parallel'`, MODEL-FORMAT §5.1). The cursor's pulls share ONE parallel
  * read — a reader of its own, inside one read transaction, so one
@@ -371,6 +379,8 @@ export function shareCursor(cursor, share, signal, what, owners, guard = () => {
   let read = null;
   // once the source is done with a read, later pulls reach the cursor alone
   let finished = false;
+  /** Set when the store closed under the cursor: every later pull refuses with it. @type {any} */
+  let closedBy = null;
   // one pull or release at a time, in call order
   let tail = Promise.resolve();
   /** @param {() => Promise<any>} step */
@@ -412,6 +422,7 @@ export function shareCursor(cursor, share, signal, what, owners, guard = () => {
   // the read goes back after any pull in flight settles
   const onAbort = () => { serial(giveBack).catch(() => {}); };
   const pull = async () => {
+    if (closedBy !== null) throw closedBy;
     if (finished || cursor.settled === true || signal?.aborted === true) {
       await giveBack();
       return cursor.next();
@@ -455,6 +466,7 @@ export function shareCursor(cursor, share, signal, what, owners, guard = () => {
     barrier: cursor.barrier,
     next: () => serial(pull),
     return: () => serial(release),
+    [CLOSED_UNDER]: (/** @type {any} */ error) => { closedBy ??= error; return serial(release); },
     [Symbol.asyncIterator]: () => admitted,
   });
   if (signal?.aborted !== true) signal?.addEventListener('abort', onAbort, { once: true });
@@ -521,6 +533,7 @@ function holdCursor(cursor, admit, signal, what, ownership) {
       catch (error) { await settle().catch(() => {}); throw error; }
     },
     return: async () => { await settle(); return { done: true, value: undefined }; },
+    [CLOSED_UNDER]: (/** @type {any} */ error) => { failure ??= error; return settle(); },
     [Symbol.asyncIterator]: () => owned,
   };
   ownership.owners.add(owned);

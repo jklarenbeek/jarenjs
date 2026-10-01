@@ -275,6 +275,25 @@ describe('stream over SSE — the happy path on a real node:http wire', () => {
     await wait(() => source.counts.closes === 1);
   });
 
+  it('a resume cursor above the log\'s high watermark — a log restored from a backup — re-seeds with one reset snapshot at the watermark, and the live emissions above it arrive', async () => {
+    source = makeSource({ rows: ['restored'] }, {
+      replay: (/** @type {number} */ after) => ({ items: [], next: after, earliestAvailable: 1, highWatermark: 10, hasMore: false, resetRequired: false }),
+    });
+    /** @type {any[]} */
+    const snapshots = [];
+    /** @type {number[]} */
+    const seqs = [];
+    const sub = client.subscribe('feed', { room: 'r1' }, { lastSeq: 50, onSnapshot: (value, info) => snapshots.push({ value, ...info }), onPatch: (e) => seqs.push(e.seq) });
+    await wait(() => snapshots.length === 1);
+    assert.deepStrictEqual(snapshots[0], { value: { rows: ['restored'] }, seq: 10, resumed: false, reset: true, earliestAvailable: 1, highWatermark: 10 });
+    for (const seq of [11, 12, 13]) source.emit({ patch: [{ op: 'add', path: '/rows/-', value: seq }], seq });
+    await wait(() => seqs.length === 3);
+    assert.deepStrictEqual(seqs, [11, 12, 13]);
+    assert.strictEqual(sub.lastSeq, 13);
+    sub.stop();
+    await wait(() => source.counts.closes === 1);
+  });
+
   it('a consumer that stops reading ends the stream with JC2096 and the socket is torn down, the subscription released once', async () => {
     source = makeSource({ rows: [] });
     const bounded = serveHttp(CONTRACT, { feed: () => source.sub, tiny: () => source.sub }, { trace: () => 'trace-q', streamLimits: { queue: { events: 4 } } });

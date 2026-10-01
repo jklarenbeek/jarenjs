@@ -93,10 +93,11 @@ export { CLIENT_ERRORS };
  * @typedef {Object} InvokeContext
  * @property {AbortSignal} [signal] - cancels the request (`kind: "cancelled"`)
  * @property {unknown} [attempt] - the caller's attempt id, echoed in `meta.attempt`, never sent
- * @property {string} [idempotencyKey] - the key to send instead of a generated one
+ * @property {string} [idempotencyKey] - the key to send instead of a generated one; one a
+ *   header cannot carry, or with edge whitespace, is `JC2050` before anything is recorded
  * @property {Record<string, string>} [headers] - per-call headers (over the static ones)
- * @property {string} [ifNoneMatch] - sent as `If-None-Match`
- * @property {string} [ifMatch] - sent as `If-Match`
+ * @property {string} [ifNoneMatch] - sent as `If-None-Match` (`JC2050` when a header cannot carry it)
+ * @property {string} [ifMatch] - sent as `If-Match` (`JC2050` when a header cannot carry it)
  */
 
 /**
@@ -634,9 +635,22 @@ export function openHttpClient(contract, options = {}) {
       }
       setObjectMember(headers, route.headerNames[i], headerMemberText(route.headerMembers[i], v));
     }
-    if (typeof ctx.ifNoneMatch === 'string') headers['if-none-match'] = ctx.ifNoneMatch;
-    if (typeof ctx.ifMatch === 'string') headers['if-match'] = ctx.ifMatch;
+    if (typeof ctx.ifNoneMatch === 'string') headers['if-none-match'] = protocolField('ctx.ifNoneMatch', ctx.ifNoneMatch);
+    if (typeof ctx.ifMatch === 'string') headers['if-match'] = protocolField('ctx.ifMatch', ctx.ifMatch);
     return headers;
+  }
+
+  /**
+   * A protocol header value the caller handed over, held to the rule a
+   * header member is held to: one the transport cannot carry is refused
+   * here, before anything is sent or any key is stored.
+   * @param {string} name - the ctx member, for the reason
+   * @param {string} value
+   * @returns {string}
+   */
+  function protocolField(name, value) {
+    if (!isFieldValue(value)) throw new Unencodable(null, `${name} holds a character a header cannot carry`);
+    return value;
   }
 
   /**
@@ -759,12 +773,16 @@ export function openHttpClient(contract, options = {}) {
 
   /**
    * Whether a durable key record may be dropped: the peer gave a
-   * definite answer (or the client refused for good).
+   * definite answer (or the client refused for good). The server's
+   * in-progress answer (`JC2009`, retryable) is not one: another attempt
+   * under the key is still running, and its outcome is unknown.
    * @param {Outcome} outcome
    * @returns {boolean}
    */
   function terminal(outcome) {
-    return outcome.ok || outcome.kind === 'failure' || (outcome.kind === 'contract' && !outcome.error.retryable);
+    if (outcome.ok) return true;
+    if (outcome.kind === 'failure') return !(outcome.error.code === 'JC2009' && outcome.error.retryable);
+    return outcome.kind === 'contract' && !outcome.error.retryable;
   }
 
   //#endregion
@@ -890,7 +908,18 @@ export function openHttpClient(contract, options = {}) {
     // 3. the idempotency key — generated here, never by the server
     let key = null;
     if (route.idempotency !== 'none') {
-      key = typeof ctx.idempotencyKey === 'string' && ctx.idempotencyKey.length > 0 ? ctx.idempotencyKey : String(hostFact('keys', keys));
+      if (typeof ctx.idempotencyKey === 'string' && ctx.idempotencyKey.length > 0) {
+        // the key recorded must be the key sent: one the transport would
+        // refuse, or trim (edge whitespace), never reaches the store
+        try {
+          key = protocolField('ctx.idempotencyKey', ctx.idempotencyKey);
+          if (/^[ \t]|[ \t]$/.test(key)) throw new Unencodable(null, 'ctx.idempotencyKey has edge whitespace, which the transport trims');
+        }
+        catch (err) {
+          return invalidInput(route, meta, encodingDetails(err));
+        }
+      }
+      else key = String(hostFact('keys', keys));
       headers['idempotency-key'] = key;
       if (storage !== null) {
         let hash;
@@ -930,7 +959,7 @@ export function openHttpClient(contract, options = {}) {
     }
 
     // 5. settle the durable record: a definite answer drops it; a
-    // network/cancelled outcome leaves it for `pending()`
+    // network, cancelled or in-progress outcome leaves it for `pending()`
     if (key !== null && storage !== null && terminal(outcome)) {
       try {
         await releaseKey(route.id, key);

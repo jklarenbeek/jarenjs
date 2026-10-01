@@ -26,6 +26,10 @@ import { compileMermaid, diagramToVnode } from '../index.js';
  * @property {any} [theme] theme name or override object
  * @property {{ pie?: import('../render/index.js').DiagramRenderer }} [renderers] renderers for the
  *   types this engine does not draw itself — a pie, from `@jarenjs/charts/transforms/mermaid-adapter`
+ * @property {import('@jarenjs/core/dates').DateNames} [dateNames] the locale-name record a Gantt's
+ *   `dateFormat`/`axisFormat` needs for a month or weekday token (`compileDateLocale(pack).names`)
+ * @property {(text: string) => any} [parseFrontmatter] the front-matter parser, in place of the
+ *   built-in YAML subset
  * @property {number} [memoLimit] LRU size for the source-string memo (default 32)
  * @property {string | URL} [base] base URL for `mermaid-load`
  * @property {typeof globalThis.fetch} [fetch] fetch implementation for `mermaid-load`
@@ -53,7 +57,8 @@ import { compileMermaid, diagramToVnode } from '../index.js';
  * @returns {MermaidComponent}
  */
 export function createMermaidComponent(options = {}) {
-  const compileOptions = { theme: options.theme, renderers: options.renderers };
+  const compileOptions = { theme: options.theme, renderers: options.renderers,
+    dateNames: options.dateNames, parseFrontmatter: options.parseFrontmatter };
 
   const { compile, view } = createProjectionMemo({
     memoLimit: options.memoLimit ?? 32,

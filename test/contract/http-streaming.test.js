@@ -31,7 +31,7 @@ import { serveHttp, BodyLimitError } from '@jarenjs/contract/http';
 import { toNodeHandler } from '@jarenjs/contract/node';
 import { toFetchHandler } from '@jarenjs/contract/fetch';
 import { openHttpClient } from '@jarenjs/contract/client';
-import { collectBytes, countingSource, normalizeBody } from '../../packages/contract/src/http/body.js';
+import { collectBytes, countingSource, firstBytes, normalizeBody } from '../../packages/contract/src/http/body.js';
 import { req, json } from './helpers.js';
 
 const LIMIT = 4096;
@@ -224,6 +224,36 @@ describe('bytes — the body helpers', () => {
     assert.strictEqual(read.state.finished, true);
     assert.strictEqual(read.state.cancelled, false);
   });
+
+  it('firstBytes: an empty source — empty chunks included — is empty; one with a byte replays it ahead of the rest; a broken source, a non-byte chunk and an abort are errors with one return()', async () => {
+    const empty = chunkSource([new Uint8Array(0), new Uint8Array(0)]);
+    assert.deepStrictEqual(await firstBytes(empty.source, null), { kind: 'empty' });
+    assert.deepStrictEqual(empty.counts, { pulled: 2, returned: 0 }, 'an exhausted source has nothing left to cancel');
+
+    const bytes = chunkSource([new Uint8Array(0), new Uint8Array([1, 2]), new Uint8Array([3])]);
+    const first = await firstBytes(bytes.source, null);
+    assert.strictEqual(first.kind, 'bytes');
+    assert.deepStrictEqual(Array.from(await drain(/** @type {any} */ (first).source)), [1, 2, 3], 'nothing pulled is lost');
+    assert.deepStrictEqual(bytes.counts, { pulled: 3, returned: 0 });
+
+    const released = chunkSource([new Uint8Array([1]), new Uint8Array([2])]);
+    const peeked = /** @type {any} */ (await firstBytes(released.source, null));
+    for await (const chunk of peeked.source) {
+      assert.deepStrictEqual(Array.from(chunk), [1]);
+      break;
+    }
+    assert.deepStrictEqual(released.counts, { pulled: 1, returned: 1 }, 'an early return cancels the upstream once');
+
+    const broken = chunkSource([new Uint8Array([1])], { throwAt: 0 });
+    assert.deepStrictEqual(await firstBytes(broken.source, null), { kind: 'error' });
+    assert.strictEqual(broken.counts.returned, 1);
+    const strange = /** @type {any} */ (chunkSource([/** @type {any} */ ('text')]));
+    assert.deepStrictEqual(await firstBytes(strange.source, null), { kind: 'error' });
+    assert.strictEqual(strange.counts.returned, 1);
+    const gone = chunkSource([new Uint8Array([1])]);
+    assert.deepStrictEqual(await firstBytes(gone.source, AbortSignal.abort()), { kind: 'error' });
+    assert.deepStrictEqual(gone.counts, { pulled: 0, returned: 1 });
+  });
 });
 
 describe('bytes — direct dispatch', () => {
@@ -263,7 +293,7 @@ describe('bytes — direct dispatch', () => {
     assert.deepStrictEqual(counts, { pulled: 3, returned: 0 });
   });
 
-  it('a JSON operation drains a source under its limit: split UTF-8 parses, limit+1 is JC2003 with one return(), a broken source and invalid UTF-8 are JC2005, a media mismatch never pulls', async () => {
+  it('a JSON operation drains a source under its limit: split UTF-8 parses, limit+1 is JC2003 with one return(), a broken source and invalid UTF-8 are JC2005, a media mismatch pulls nothing under a declared length and one chunk without', async () => {
     const server = serve({});
     const body = JSON.stringify({ text: 'héllo wörld' });
     const ok = await server.dispatch(req('PUT', '/notes/n1', { 'content-type': 'application/json' }, /** @type {any} */ (chunkSource(split(body, 1)).source)));
@@ -289,11 +319,19 @@ describe('bytes — direct dispatch', () => {
     const invalid = await server.dispatch(req('PUT', '/notes/n1', { 'content-type': 'application/json' }, /** @type {any} */ (chunkSource([new Uint8Array([0x7b, 0xff, 0x7d])]).source)));
     assert.strictEqual(json(invalid).code, 'JC2005');
 
+    // a declared length says a body is there: a refused media never pulls it
     const wrongMedia = chunkSource(split(body, 4));
-    const unsupported = await server.dispatch(req('PUT', '/notes/n1', { 'content-type': 'text/plain' }, /** @type {any} */ (wrongMedia.source)));
+    const length = String(encoder.encode(body).byteLength);
+    const unsupported = await server.dispatch(req('PUT', '/notes/n1', { 'content-type': 'text/plain', 'content-length': length }, /** @type {any} */ (wrongMedia.source)));
     assert.strictEqual(unsupported.status, 415);
     await wait(() => wrongMedia.counts.returned === 1);
-    assert.strictEqual(wrongMedia.counts.pulled, 0, 'a refused media never pulls the body');
+    assert.strictEqual(wrongMedia.counts.pulled, 0, 'a refused media under a declared length never pulls the body');
+    // without one, the first chunk tells a body from none; the refusal releases the rest unread
+    const unsized = chunkSource(split(body, 4));
+    const unsizedRefused = await server.dispatch(req('PUT', '/notes/n1', { 'content-type': 'text/plain' }, /** @type {any} */ (unsized.source)));
+    assert.strictEqual(unsizedRefused.status, 415);
+    await wait(() => unsized.counts.returned === 1);
+    assert.strictEqual(unsized.counts.pulled, 1, 'one chunk, then released');
 
     // a body-less operation with a source ignores it: released, never read
     const ignored = chunkSource([new Uint8Array(1)]);
@@ -301,6 +339,37 @@ describe('bytes — direct dispatch', () => {
     assert.strictEqual(got.status, 200);
     await wait(() => ignored.counts.returned === 1);
     assert.strictEqual(ignored.counts.pulled, 0);
+  });
+
+  it('a source that carries no byte is a request without a body, whatever its content-type: a declared content-length of 0 is never pulled, one of undeclared length is pulled to its end', async () => {
+    const touch = compileContract({ $contract: '0.1', operations: { 'note.touch': {
+      kind: 'command',
+      input: { type: 'object', required: ['id'], properties: { id: { type: 'string' }, patch: { type: 'object' } } },
+      output: true,
+      http: { method: 'POST', path: '/notes/{id}/touch', body: 'patch' },
+    } } });
+    const server = serveHttp(touch, { 'note.touch': (input) => input });
+    for (const [headers, chunks, counts] of /** @type {[Record<string, string>, Uint8Array[], { pulled: number, returned: number }][]} */ ([
+      [{ 'content-type': 'text/plain;charset=UTF-8', 'content-length': '0' }, [], { pulled: 0, returned: 1 }],
+      [{}, [], { pulled: 0, returned: 0 }],
+      [{ 'content-type': 'text/plain' }, [new Uint8Array(0)], { pulled: 1, returned: 0 }],
+    ])) {
+      const empty = chunkSource(chunks);
+      const answered = await server.dispatch(req('POST', '/notes/n1/touch', headers, /** @type {any} */ (empty.source)));
+      assert.strictEqual(answered.status, 200, JSON.stringify(headers));
+      assert.deepStrictEqual(json(answered), { id: 'n1' });
+      await wait(() => empty.counts.returned === counts.returned);
+      assert.deepStrictEqual(empty.counts, counts, JSON.stringify(headers));
+    }
+    // a byte arrives: the media decides, then the whole body parses
+    const some = chunkSource(split('{"x":1}', 3));
+    const parsed = await server.dispatch(req('POST', '/notes/n1/touch', { 'content-type': 'application/json' }, /** @type {any} */ (some.source)));
+    assert.deepStrictEqual(json(parsed), { id: 'n1', patch: { x: 1 } });
+    assert.deepStrictEqual(some.counts, { pulled: 3, returned: 0 });
+    // a source that breaks before its first byte never arrived whole
+    const broken = chunkSource([new Uint8Array([1])], { throwAt: 0 });
+    const failed = await server.dispatch(req('POST', '/notes/n1/touch', { 'content-type': 'application/json' }, /** @type {any} */ (broken.source)));
+    assert.strictEqual(json(failed).code, 'JC2005');
   });
 
   it('a limit crossing the handler lets propagate is JC2003, never a host fault; a handler that catches it decides for itself', async () => {

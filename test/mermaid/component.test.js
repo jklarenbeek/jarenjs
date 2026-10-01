@@ -3,8 +3,9 @@ import { describe, it } from 'node:test';
 import * as assert from 'node:assert/strict';
 
 import { createMermaidComponent } from '@jarenjs/mermaid/component';
-import { parseMermaid } from '@jarenjs/mermaid';
+import { parseMermaid, renderMermaid } from '@jarenjs/mermaid';
 import { renderToString, isElementNode } from '@jarenjs/view';
+import { compileDateLocale, nl } from '@jarenjs/locales';
 
 describe('createMermaidComponent: view projection', function () {
   it('is reference-stable per source string (the O(change) contract)', function () {
@@ -70,5 +71,36 @@ describe('createMermaidComponent: app effects', function () {
   it('hydrate is a no-op (render is complete)', function () {
     const c = createMermaidComponent();
     assert.doesNotThrow(() => c.hydrate({ querySelectorAll: () => { throw new Error('should not run'); } }));
+  });
+});
+
+describe('createMermaidComponent: the parse options reach the engine', function () {
+  const gantt = 'gantt\ndateFormat YYYY-MM-DD\naxisFormat %b %d\ntickInterval 1day\nsection A\nTask one :a1, 2026-05-04, 3d';
+  const dateNames = compileDateLocale(nl).names;
+  const ticks = (/** @type {string} */ svg) => [...svg.matchAll(/class="mm-gantt-tick"[^>]*>([^<]*)</g)].map((m) => m[1]);
+
+  it('names a gantt axis\'s months through dateNames, as renderMermaid does, from a source and from a document', function () {
+    const engine = renderToString(renderMermaid(gantt, { dateNames }));
+    assert.deepEqual(ticks(engine), ['mei 04', 'mei 05', 'mei 06', 'mei 07']);
+    const c = createMermaidComponent({ dateNames });
+    assert.equal(renderToString(c.view(gantt)), engine);
+    assert.equal(renderToString(c.view(parseMermaid(gantt, { dateNames }))), engine);
+    // without a provider the name token is the engine's refusal
+    assert.match(renderToString(createMermaidComponent().view(gantt)), /mm-error/);
+  });
+
+  it('reads the front matter through the host\'s parseFrontmatter', function () {
+    /** @type {string[]} */
+    const seen = [];
+    const c = createMermaidComponent({
+      parseFrontmatter: (text) => {
+        seen.push(text);
+        return { title: 'From the host', config: { theme: 'dark' } };
+      },
+    });
+    const { doc } = c.compile('---\ntitle = "not the built-in subset"\n---\nflowchart TD\n A-->B');
+    assert.deepEqual(seen, ['title = "not the built-in subset"\n']);
+    assert.equal(doc.meta.title, 'From the host');
+    assert.deepEqual(doc.config, { theme: 'dark' });
   });
 });

@@ -230,6 +230,58 @@ describe('widget vnodes (VIEW-FORMAT §7)', function () {
     assert.deepStrictEqual(order, ['a', 'b', 'c'], 'every sibling still unmounted');
   });
 
+  it('a hook failure parked before a pass throws is delivered with that pass, never with the next frame', function () {
+    const unmountFailure = new Error('unmount of the replaced widget');
+    const frames = [];
+    const { document, container } = createStubHost();
+    const render = createDomRenderer(container, {
+      document,
+      widgets: { w: { mount: () => ({}), unmount: () => { throw unmountFailure; } } },
+      onFrame: (state) => frames.push(state),
+    });
+    render(['div', {}, ['jaren-widget', { name: 'w' }]]);
+    // the rename replaces the widget (its unmount throws and parks), then
+    // the new name is unregistered and the pass throws
+    let thrown = null;
+    try {
+      render(['div', {}, ['jaren-widget', { name: 'nope' }]]);
+    }
+    catch (error) {
+      thrown = error;
+    }
+    assert.ok(thrown instanceof AggregateError);
+    assert.strictEqual(thrown.message, 'multiple failures in one frame');
+    assert.strictEqual(thrown.errors.length, 2);
+    assert.strictEqual(thrown.errors[0], unmountFailure, 'the parked failure first, in occurrence order');
+    assert.match(thrown.errors[1].message, /unregistered widget 'nope'/);
+    assert.doesNotThrow(() => render(['p', {}, 'healthy']), 'the next, healthy frame reports nothing');
+    assert.deepStrictEqual(frames, ['live', 'live'], 'the failed pass settles no frame');
+  });
+
+  it('an unmount failure in the teardown of a failed pass is delivered with that pass', function () {
+    const unmountFailure = new Error('unmount during the teardown');
+    const { document, container } = createStubHost();
+    const render = createDomRenderer(container, {
+      document,
+      widgets: { w: { mount: () => ({}), unmount: () => { throw unmountFailure; } } },
+    });
+    render(['div', {}, ['jaren-widget', { name: 'w', key: 'w' }]]);
+    let thrown = null;
+    try {
+      // the widget stays; the refused tag beside it aborts the pass, and
+      // the teardown that follows unmounts the widget, which throws
+      render(['div', {}, ['jaren-widget', { name: 'w', key: 'w' }], ['Total:', 3]]);
+    }
+    catch (error) {
+      thrown = error;
+    }
+    assert.ok(thrown instanceof AggregateError);
+    assert.strictEqual(thrown.errors.length, 2);
+    assert.match(thrown.errors[0].message, /the tag "Total:" at \/3 is not an element name/);
+    assert.strictEqual(thrown.errors[1], unmountFailure, 'the teardown failure after the error that caused it');
+    assert.doesNotThrow(() => render(['p', {}, 'healthy']), 'the next, healthy frame reports nothing');
+  });
+
   it('emit delivers (binding, event) verbatim to onEvent', function () {
     const seen = [];
     const binding = { action: 'pick', with: { id: 7 } };

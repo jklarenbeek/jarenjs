@@ -278,6 +278,76 @@ export async function collectBytes(source, limit, signal) {
 }
 
 /**
+ * Pull a byte source up to its first byte, or to its end, and lose
+ * nothing: a source that ends before any byte (empty chunks included)
+ * answers `empty`; one that yields a byte answers `bytes` with a source
+ * that replays the chunk already pulled ahead of the rest, whose
+ * `return()` cancels the upstream once; a source that throws, yields a
+ * chunk that is not bytes, or whose signal aborted between pulls answers
+ * `error`, the upstream cancelled once. Whether a source of undeclared
+ * length carries a body is known only this way.
+ * @param {AsyncIterable<Uint8Array>} source
+ * @param {AbortSignal | null} signal - checked between pulls
+ * @returns {Promise<{ kind: 'empty' } | { kind: 'bytes', source: AsyncIterable<Uint8Array> } | { kind: 'error' }>}
+ */
+export async function firstBytes(source, signal) {
+  const iterator = source[Symbol.asyncIterator]();
+  for (;;) {
+    if (signal !== null && signal.aborted) {
+      await cancelIterator(iterator);
+      return { kind: 'error' };
+    }
+    let r;
+    try {
+      r = await iterator.next();
+    }
+    catch {
+      await cancelIterator(iterator);
+      return { kind: 'error' };
+    }
+    if (r.done) return { kind: 'empty' };
+    if (!(r.value instanceof Uint8Array)) {
+      await cancelIterator(iterator);
+      return { kind: 'error' };
+    }
+    if (r.value.byteLength > 0) return { kind: 'bytes', source: replaying(r.value, iterator) };
+  }
+}
+
+/**
+ * A source that yields `first`, then what `iterator` still holds; its
+ * `return()` cancels the iterator once.
+ * @param {Uint8Array} first
+ * @param {AsyncIterator<Uint8Array>} iterator
+ * @returns {AsyncIterable<Uint8Array>}
+ */
+function replaying(first, iterator) {
+  /** @type {Uint8Array | null} */
+  let held = first;
+  let cancelled = false;
+  return {
+    [Symbol.asyncIterator]() {
+      return {
+        next() {
+          if (held === null) return iterator.next();
+          const value = held;
+          held = null;
+          return Promise.resolve({ done: false, value });
+        },
+        async return(value) {
+          held = null;
+          if (!cancelled) {
+            cancelled = true;
+            await cancelIterator(iterator);
+          }
+          return { done: true, value };
+        },
+      };
+    },
+  };
+}
+
+/**
  * The state of a counting source, readable by the binding that made it.
  * @typedef {Object} SourceState
  * @property {boolean} started - a chunk was pulled

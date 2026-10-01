@@ -82,4 +82,24 @@ describe('check-lock-portability', () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it('names the root record (root) and a workspace record by its path', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'jaren-lock-gate-'));
+    try {
+      const lock = join(dir, 'package-lock.json');
+      writeFileSync(lock, JSON.stringify({ name: 'x', lockfileVersion: 3, packages: {
+        '': { name: 'x', version: '1.0.0', optionalDependencies: { '@esbuild/win32-x64': '0.28.1' } },
+        'packages/w': { name: '@x/w', version: '2.0.0', optionalDependencies: { '@esbuild/linux-arm64': '0.28.1' } },
+      } }));
+      const { status, stderr } = runGate(lock);
+      assert.strictEqual(status, 1);
+      assert.deepStrictEqual(stderr.split('\n').filter((line) => line.includes('✗')), [
+        '  ✗ (root)@1.0.0 declares optional @esbuild/win32-x64@0.28.1, but the lock has no record for it',
+        '  ✗ packages/w@2.0.0 declares optional @esbuild/linux-arm64@0.28.1, but the lock has no record for it',
+      ]);
+    }
+    finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

@@ -25,6 +25,7 @@ import { chain, attempt, useStatementOnce } from './driver.js';
 import { checkInvariants, existsRowSql, RECORD_PATH, ruleLiteral } from './invariants.js';
 import { columnCodec, physicalRead } from './physical.js';
 import { mergeEntityRow } from './graph.js';
+import { namesNoNumber } from './key-text.js';
 import { createJSONPatch } from '@jarenjs/json/patch';
 import { canonicalizeJson } from '@jarenjs/json/canonical';
 import { createEntityMutation } from './mutation.js';
@@ -310,6 +311,13 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
       + `VALUES (${refs.join(', ')})${returning}`;
   };
 
+  // a lookup of a string that is no number on a numeric key column names no
+  // row on either engine (see `namesNoNumber`)
+  const numericKey = keys.map((name) => ['integer', 'number'].includes(entity.properties.get(name)?.type));
+  /** The parameters a statement names a row by. @param {any} key */
+  const keyParts = (key) => normalizeKeyArg(key).map((v, i) => (physical ? columnByName.get(keys[i]).codecPlan.encode(v)
+    : numericKey[i] && namesNoNumber(v) ? null : v));
+
   const normalizeKeyArg = (key) => {
     if (keys.length === 1) {
       if (typeof key === 'string' || typeof key === 'number') return [key];
@@ -380,6 +388,11 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
   const checkStored = (op, before, stored, assigned) => (!ruledOps.has(op) ? null : checkInvariants(entity.invariants, op, before, stored,
     { probe, ...(assigned === undefined ? {} : { assigned }), ...(op === 'update' ? { unchanged: !changedBetween(before, stored) } : {}) }));
 
+  /** Whether a write from `before` to `after` changes nothing the store
+   * writes: the version member is the store's own (§11.3), so a change to
+   * it alone is no change. @param {any} before @param {any} after */
+  const versionOnly = (before, after) => createJSONPatch(before, after).every((op) => memberOfPatch(op) === entity.version);
+
   const columnByName = new Map(scalarColumns.map((column) => [column.name, column]));
   /** Encode ONE column assignment the way {@link split} would. */
   const encodeColumn = (name, value) => {
@@ -404,6 +417,7 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
       checkStored,
       ruled,
       normalize: (doc) => normalizePhysicalDoc(doc),
+      unchanged: versionOnly,
       keys,
       autoKey,
       version: entity.version ?? null,
@@ -459,18 +473,32 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
       return probing('insert') ? connection.transaction(write) : write();
     },
     get(key) {
-      const parts = normalizeKeyArg(key).map((v, i) => physical ? columnByName.get(keys[i]).codecPlan.encode(v) : v);
+      const parts = keyParts(key);
       const sql = `SELECT ${selectColumns} FROM ${tableSql} WHERE ${keyWhere(0)}`;
       // classified like every read of the query engines, never raw
       return attempt(() => chain(prepared('get', sql), (statement) =>
         chain(statement.get(parts), (row) => (row === undefined ? undefined : merge(row)))),
       (error) => wrapDriverError(error, { docPath, collection: entity.name, key }));
     },
+    /**
+     * The row a store rule judges as `$.old`, read inside the write's
+     * transaction and locked for the rest of it where the engine locks rows
+     * (`FOR UPDATE`): a concurrent writer's change waits or lands before the
+     * read, never between the read and the statement (§13.3).
+     * @param {any} key
+     */
+    getLocked(key) {
+      const parts = keyParts(key);
+      const sql = `SELECT ${selectColumns} FROM ${tableSql} WHERE ${keyWhere(0)}${dialect.rowLockSuffix}`;
+      return attempt(() => chain(prepared('getLocked', sql), (statement) =>
+        chain(statement.get(parts), (row) => (row === undefined ? undefined : merge(row)))),
+      (error) => wrapDriverError(error, { docPath, collection: entity.name, key }));
+    },
     update(key, changes) {
       writable();
-      const parts = normalizeKeyArg(key).map((v, i) => physical ? columnByName.get(keys[i]).codecPlan.encode(v) : v);
+      const parts = keyParts(key);
       refuseProjections(changes, 'update', false);
-      const update = () => chain(this.get(key), (current) => {
+      const update = () => chain(ruled('update') ? this.getLocked(key) : this.get(key), (current) => {
         if (current === undefined) {
           throw new DbRuntimeError('JD2006',
             `no '${entity.name}' to update under that key`,
@@ -487,7 +515,7 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
         }
         const candidate = normalizePhysicalDoc({ ...current, ...changes });
         // the version is the store's: a change to it alone writes nothing
-        if (physical && createJSONPatch(current, candidate).every((op) => memberOfPatch(op) === entity.version)) return current;
+        if (physical && versionOnly(current, candidate)) return current;
         if (physical && scalarColumns.some((c) => c.generated && Object.hasOwn(changes, c.name)
           && changes[c.name] !== current[c.name])) throw new DbRuntimeError('JD2003', 'generated columns are database-owned');
         const next = applyDefaults(candidate, { updating: true });
@@ -518,14 +546,15 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
             return chain(checkStored('update', current, stored, values.map((value) => value.name)), () => stored);
           }) : asStored(next)));
       });
-      return physical || probing('update') ? connection.transaction(update) : update();
+      // a rule judges the row this update replaces: read and write in one transaction
+      return physical || ruled('update') ? connection.transaction(update) : update();
     },
     delete(key) {
       writable();
       if (!ruled('delete')) return remove(key);
       // judged after the delete, against the row it removed, as a database
       // rule is: a key with no row removes nothing and runs no rule
-      return connection.transaction(() => chain(this.get(key), (before) => before === undefined ? remove(key)
+      return connection.transaction(() => chain(this.getLocked(key), (before) => before === undefined ? remove(key)
         : chain(remove(key), (removed) => removed
           ? chain(checkInvariants(entity.invariants, 'delete', before, null, { probe }), () => removed) : removed)));
     },
@@ -533,7 +562,7 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
   core.mutate = createEntityMutation(connection, entity, entityMapping, core);
   return core;
   function remove(key) {
-      const parts = normalizeKeyArg(key).map((v, i) => physical ? columnByName.get(keys[i]).codecPlan.encode(v) : v);
+      const parts = keyParts(key);
       const sql = `DELETE FROM ${tableSql} WHERE ${keyWhere(0)}`;
       return chain(prepared('delete', sql), (statement) =>
         chain(attempt(() => statement.run(parts), (error) => wrapWrite(error, parts[0])),

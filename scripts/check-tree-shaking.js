@@ -196,8 +196,11 @@ if (chainEdgeLeak.length > 0)
 // picture formatter (5193 bytes), the unit registry $quantity converts
 // through with its alias table (5603), the seven operators' entries,
 // checks and f64 helpers (5678), their 25 English messages (2293) and
-// exact decimal rounding (1518).
-if (chainBytes > 210500)
+// exact decimal rounding (1518). Measured 210541 once $quantity converted
+// the decimal its text writes exactly — the core decimal helpers and a unit
+// index (the exact path) — and $max/$min ordered signed zeros as IEEE 754:
+// 826 bytes.
+if (chainBytes > 211300)
   throw new Error(`The chain bundle grew to ${chainBytes} bytes.`);
 
 console.log(`Tree-shaking smoke test passed (${chainBytes} byte chain bundle; no schema-pen module, no client module, no store/validator/formats bytes).`);
@@ -456,8 +459,12 @@ if (asyncLiveLeak.length)
 // per Store — the session router, a transaction context per call, the
 // statement that resolves its session at each execution and capture's state
 // per transaction — and store rules judged at their own statements, against
-// the row as it was and as it is stored, add 10896.
-if (clientBytes > 834500)
+// the row as it was and as it is stored, add 10896. Measured 835467 since: a
+// transaction's operations taking turns, the owner's slots given back after
+// an inline call, a cursor cut short by close refusing its next pull, the
+// locked row a store rule judges, a numeric key's text that names no row,
+// and the engine's exact quantity conversion (826, the chain's) add 1920.
+if (clientBytes > 836300)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 

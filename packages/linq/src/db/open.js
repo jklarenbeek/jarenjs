@@ -16,7 +16,7 @@
 import { openStore } from '@jarenjs/db';
 import { JarenValidator } from '@jarenjs/validate';
 import { stringFormats, dateTimeFormats } from '@jarenjs/formats';
-import { setObjectMember } from '@jarenjs/core/object';
+import { isPlainOptions, setObjectMember } from '@jarenjs/core/object';
 
 import { createEntityHandle, createCollectionHandle } from './handle.js';
 import { registerLive } from './live.js';
@@ -26,16 +26,16 @@ import { registerLive } from './live.js';
  * `'own'` unless the caller NAMED one — an explicit `unitOfWork:
  * undefined` is no choice, so it keeps the default rather than silently
  * sharing the client's tracker (a spread let it override `'own'`).
- * Anything that is not an object literal passes through untouched, for
- * the store to refuse by its own closed set (`JD0013`).
+ * Options the store reads as plain — an object literal or a
+ * null-prototype record (`isPlainOptions`, the store's own test) — get the
+ * default; anything else passes through untouched, for the store to refuse
+ * by its own closed set (`JD0013`).
  * @param {unknown} transactionOptions
  */
 function ownByDefault(transactionOptions) {
   if (transactionOptions === undefined) return { unitOfWork: 'own' };
-  if (transactionOptions === null || typeof transactionOptions !== 'object'
-    || Object.getPrototypeOf(transactionOptions) !== Object.prototype) return transactionOptions;
-  const options = /** @type {Record<string, unknown>} */ (transactionOptions);
-  return { ...options, unitOfWork: options.unitOfWork ?? 'own' };
+  if (!isPlainOptions(transactionOptions)) return transactionOptions;
+  return { ...transactionOptions, unitOfWork: transactionOptions.unitOfWork ?? 'own' };
 }
 
 /**

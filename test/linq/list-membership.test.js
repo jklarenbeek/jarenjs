@@ -46,6 +46,41 @@ describe('in(values)', () => {
       .where((/** @type {any} */ it, /** @type {any} */ p) => it.sku.in(p.skus.all()))), [2, 3]);
   });
 
+  it('a path that fans before its last step is the list as it stands — over arrays and over a store', async () => {
+    assert.deepEqual(emitted((/** @type {any} */ it) => it.sku.in(it.items.all().sku)), { $eq: ['$it.sku', '$it.items[*].sku'] });
+    assert.deepEqual(emitted((/** @type {any} */ it, /** @type {any} */ p) => it.sku.in(p.ids.all().sku)), { $eq: ['$it.sku', '$ids[*].sku'] });
+    assert.deepEqual(emitted((/** @type {any} */ it) => it.sku.in(it.items.all().codes.at(0))),
+      { $eq: ['$it.sku', '$it.items[*].codes[0]'] });
+    // a member whose NAME spells a fan is one member, and is fanned once
+    assert.deepEqual(emitted((/** @type {any} */ it) => it.sku.in(it.get('a[*]'))), { $eq: ['$it.sku', "$it['a[*]'][*]"] });
+
+    const orders = [
+      { id: 1, sku: 'a', items: [{ sku: 'a', codes: ['x'] }, { sku: 'x', codes: ['y', 'a'] }], 'a[*]': ['z'] },
+      { id: 2, sku: 'b', items: [{ sku: 'a', codes: ['b'] }], 'a[*]': ['b'] },
+      { id: 3, sku: 'c', items: [], 'a[*]': [] },
+    ];
+    const objs = [{ sku: 'b' }, { sku: 'c' }];
+    const ids = (/** @type {any} */ seq) => seq.select((/** @type {any} */ it) => it.id).toArray();
+    assert.deepEqual(ids(from(orders).where((/** @type {any} */ it) => it.sku.in(it.items.all().sku))), [1]);
+    assert.deepEqual(ids(from(orders).params({ objs })
+      .where((/** @type {any} */ it, /** @type {any} */ p) => it.sku.in(p.objs.all().sku))), [2, 3]);
+    assert.deepEqual(ids(from(orders).where((/** @type {any} */ it) => it.sku.in(it.items.all().codes.at(0)))), [2]);
+    assert.deepEqual(ids(from(orders).where((/** @type {any} */ it) => it.sku.in(it.get('a[*]')))), [2]);
+
+    const store = await openStore({ $model: '0.1', collections: { orders: { key: '/id', schema: { type: 'object' } } } },
+      { driver: nodeDriver() });
+    try {
+      for (const order of orders) await store.collection('orders').put(order);
+      const stored = (/** @type {any} */ seq) => seq.orderBy((/** @type {any} */ it) => it.id)
+        .select((/** @type {any} */ it) => it.id).toArray();
+      assert.deepEqual(await stored(fromAsync(store.collection('orders'))
+        .where((/** @type {any} */ it) => it.sku.in(it.items.all().sku))), [1]);
+      assert.deepEqual(await stored(fromAsync(store.collection('orders')).params({ objs })
+        .where((/** @type {any} */ it, /** @type {any} */ p) => it.sku.in(p.objs.all().sku))), [2, 3]);
+    }
+    finally { await store.close(); }
+  });
+
   it('is membership, where eq(array) compares against one array value', () => {
     const ids = (/** @type {any} */ seq) => seq.select((/** @type {any} */ it) => it.id).toArray();
     assert.deepEqual(ids(from(ROWS).where((/** @type {any} */ it) => it.sku.in(['a', 'b']))), [1, 3]);

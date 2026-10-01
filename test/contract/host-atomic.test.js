@@ -143,6 +143,47 @@ describe('required settlement inside a real transaction', () => {
     });
   }
 
+  for (const [name, required] of /** @type {const} */ ([['under a required settlement', true], ['without one', false]])) {
+    it(`a transaction whose commit fails after enter settled is the host's fault ${name}: JC2008, neither the write nor a receipt is visible, the root claim is retryable, the retry runs again`, async () => {
+      const db = await open(MODEL, { driver: nodeDriver(), validator: null });
+      cleanups.push(() => db.close());
+      /** @type {string[]} */
+      const sequence = [];
+      /** @type {any[]} */
+      const observed = [];
+      const server = serveHttp(shop, {
+        ...shopHandlers(),
+        'product.save': async (input, ctx) => {
+          await ctx.host.db.collections.products.insert({ id: 1, name: 'ghost', price: 1 });
+          sequence.push('write');
+          return { id: 1, name: 'ghost', price: 1 };
+        },
+      }, {
+        ledger: createDbLedger(db),
+        onError: (e) => observed.push(e),
+        acquire: (input, identity, enter) => db.transaction(async (tx) => {
+          sequence.push('begin');
+          await enter({ host: { db: tx }, ...(required ? { settlement: { ledger: createDbLedger(tx), required: true } } : {}) });
+          // the commit is refused — a serialization failure, a deferred
+          // constraint: the transaction rolls back and the hook rejects
+          // after enter settled
+          sequence.push('commit refused');
+          throw new Error('could not serialize access (40001)');
+        }, { mode: 'immediate' }),
+      });
+      const response = await server.dispatch(jsonReq('PUT', URL, SAVE, { 'idempotency-key': 'k' }));
+      assert.deepStrictEqual([response.status, json(response).code], [500, 'JC2008']);
+      assert.ok(!String(response.body).includes('serialize'), 'the cause stays off the wire');
+      assert.deepStrictEqual(observed.map((e) => e.message), ['could not serialize access (40001)']);
+      assert.strictEqual(await db.collections.products.get(1), undefined, 'the domain write rolled back');
+      const record = await db.collections.ledger.get(ledgerId('product.save', '', 'k'));
+      assert.deepStrictEqual([record?.status, record?.retryable, record?.response], ['failed', true, null], 'the key is free, and no success replays');
+      const again = await server.dispatch(jsonReq('PUT', URL, SAVE, { 'idempotency-key': 'k' }));
+      assert.strictEqual(again.headers['idempotent-replayed'], undefined);
+      assert.deepStrictEqual(sequence, ['begin', 'write', 'commit refused', 'begin', 'write', 'commit refused'], 'the retry ran the handler again');
+    });
+  }
+
   it('a pre-handler precondition refusal rolls back without running the handler and releases the key retryable', async () => {
     let ran = false;
     const { db, server, sequence } = await atomicServer({ 'product.save': () => { ran = true; return { id: 1, name: 'x', price: 1 }; } });

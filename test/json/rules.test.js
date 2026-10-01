@@ -35,3 +35,39 @@ it('conflicts include no-op targets; grouping, duplicates, disabled targets and 
   await assert.rejects(compiled.preview({ rows: [], datasetRevision: '' }), { code: 'JQ2015' });
   await assert.rejects(compiled.preview({ rows: [{ id: 'a', group: 'g' }, { id: 'a', group: 'g' }], datasetRevision: '1' }), { code: 'JQ2015' });
 });
+
+it('every refusal and the conflict diagnostic name a message of the formula catalog, which a pack renders in its language', async () => {
+  const { formulaMessagesEn } = await import('@jarenjs/json/formula');
+  const { renderQueryMessage } = await import('@jarenjs/json');
+  const { nl } = await import('@jarenjs/locales');
+  /** @param {() => unknown} run */
+  const refusal = async (run) => {
+    try { await run(); }
+    catch (error) { return /** @type {any} */ (error); }
+    throw new Error('expected a refusal');
+  };
+  const compiled = compileRulePlan(definition([target('same', '/count', '$.count'), target('other', '/count', 99)]), { writableFields: ['/count'] });
+  const rows = [{ id: 'a', count: 2 }];
+  const plan = await compiled.preview({ rows, datasetRevision: '1' });
+  const current = await compiled.preview({ rows, datasetRevision: '2' });
+  const refusals = [
+    [await refusal(() => compileRulePlan(definition([]), /** @type {any} */ ({}))), 'query/formula/rule-identity', 'adjust: rule identity, targets and writable fields required'],
+    [await refusal(() => compileRulePlan(definition([target('bad', '/secret', 1)]), { writableFields: [] })), 'query/formula/rule-field-not-writable', 'adjust: target field is not writable'],
+    [await refusal(() => compiled.preview({ rows: [], datasetRevision: '' })), 'query/formula/rule-rows', 'adjust: bounded rows and dataset revision required'],
+    [await refusal(() => compiled.preview({ rows: [{ id: 'a' }, { id: 'a' }], datasetRevision: '1' })), 'query/formula/rule-entity-duplicate', 'adjust: duplicate entity identity'],
+    [await refusal(() => selectRuleChanges(plan, [], current)), 'query/formula/rule-preview-stale', 'adjust: stale or modified preview'],
+    [await refusal(() => selectRuleChanges(plan, ['x', 'x'], plan)), 'query/formula/rule-selection-duplicate', 'adjust: selection must contain unique change IDs'],
+    [await refusal(() => selectRuleChanges(plan, ['missing'], plan)), 'query/formula/rule-selection-unknown', 'adjust: unknown selected change'],
+  ];
+  for (const [error, messageId, reason] of refusals) {
+    assert.deepEqual([error.code, error.messageId, error.reason], ['JQ2015', messageId, reason]);
+    assert.ok(Object.hasOwn(formulaMessagesEn, messageId), messageId);
+    assert.equal(renderQueryMessage(error), reason);
+    assert.notEqual(renderQueryMessage(error, nl), reason, `${messageId} renders in Dutch`);
+  }
+  const conflict = plan.errors.find((/** @type {any} */ e) => e.code === 'JQ2015');
+  assert.deepEqual(conflict, { rowId: 'a', targetId: 'other', code: 'JQ2015', docPath: '/targets', message: 'adjust: conflicting target values',
+    messageId: 'query/formula/rule-conflict', params: { formulaId: 'adjust', reason: 'adjust: conflicting target values' } });
+  assert.equal(renderQueryMessage(conflict), conflict.message);
+  assert.equal(renderQueryMessage(conflict, nl), 'adjust: tegenstrijdige waarden voor hetzelfde veld');
+});

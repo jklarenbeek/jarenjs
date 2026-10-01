@@ -194,6 +194,122 @@ describe('buildImportMap — an installed tree, served unbundled', () => {
     finally { fs.rmSync(root, { recursive: true, force: true }); }
   });
 
+  it('serves a package without exports from its main, read from the package root, or else its index.js', () => {
+    const root = installTree({
+      'node_modules/@x/legacy-main/package.json': { name: '@x/legacy-main', version: '1.0.0', main: 'lib/index.js' },
+      'node_modules/@x/legacy-main/lib/index.js': 'export const where = 1;\n',
+      'node_modules/@x/legacy-index/package.json': { name: '@x/legacy-index', version: '1.0.0' },
+      'node_modules/@x/legacy-index/index.js': 'export const where = 2;\n',
+      'node_modules/@x/legacy-index/src/index.js': 'export const where = 3;\n',
+    });
+    try {
+      const { imports, files, unresolved } = buildImportMap({ packages: ['@x/legacy-main', '@x/legacy-index'], root, prefix: '/vendor/' });
+      assert.deepStrictEqual(imports, { '@x/legacy-index': '/vendor/@x/legacy-index/index.js', '@x/legacy-main': '/vendor/@x/legacy-main/lib/index.js' });
+      assert.deepStrictEqual(files, ['/vendor/@x/legacy-index/index.js', '/vendor/@x/legacy-main/lib/index.js']);
+      assert.deepStrictEqual(unresolved, []);
+    }
+    finally { fs.rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it('maps nothing a null under a matched condition withholds, and a fallback array\'s first target Node takes', () => {
+    const root = installTree({
+      'node_modules/@x/withheld/package.json': { name: '@x/withheld', version: '1.0.0', exports: {
+        '.': { browser: null, default: './node-only.js' },
+        './sub': { import: { browser: null, default: './node-only.js' }, default: './fallback.js' },
+        './lib/*': { browser: null, default: './lib/*.js' },
+        './fallback': ['not-relative.js', './node-only.js'],
+        './refused': ['not-relative.js'],
+      } },
+      'node_modules/@x/withheld/node-only.js': 'export {};\n',
+      'node_modules/@x/withheld/fallback.js': 'export {};\n',
+      'node_modules/@x/withheld/lib/a.js': 'export {};\n',
+    });
+    try {
+      const { imports, files, unresolved } = buildImportMap({ packages: ['@x/withheld'], root, prefix: '/vendor/' });
+      assert.deepStrictEqual(imports, { '@x/withheld/fallback': '/vendor/@x/withheld/node-only.js' });
+      assert.deepStrictEqual(files, ['/vendor/@x/withheld/node-only.js']);
+      assert.deepStrictEqual(unresolved, [{ specifier: '@x/withheld/refused', from: '@x/withheld/package.json' }]);
+    }
+    finally { fs.rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it('maps no export through a nested install a * would reach, and serves that install as the dependency it is', () => {
+    const root = installTree({
+      'node_modules/@x/open/package.json': { name: '@x/open', version: '1.0.0', exports: { '.': './index.js', './*': './*' },
+        dependencies: { '@x/dep': '1.0.0' } },
+      'node_modules/@x/open/index.js': "import dep from '@x/dep';\nexport default dep;\n",
+      'node_modules/@x/open/node_modules/@x/dep/package.json': { name: '@x/dep', version: '1.0.0', exports: './index.js' },
+      'node_modules/@x/open/node_modules/@x/dep/index.js': 'export default 1;\n',
+    });
+    try {
+      const { imports, unresolved } = buildImportMap({ packages: ['@x/open'], root, prefix: '/vendor/' });
+      assert.deepStrictEqual(imports, {
+        '@x/dep': '/vendor/@x/open/node_modules/@x/dep/index.js',
+        '@x/open': '/vendor/@x/open/index.js',
+        '@x/open/index.js': '/vendor/@x/open/index.js',
+        '@x/open/package.json': '/vendor/@x/open/package.json',
+      });
+      assert.deepStrictEqual(unresolved, []);
+      const run = runCli(root, ['--packages', '@x/open']);
+      assert.strictEqual(run.status, 0, run.stderr);
+    }
+    finally { fs.rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it('follows peer and optional dependencies, and reports an optional peer that is not installed as a warning with its reason', () => {
+    const root = installTree({
+      'node_modules/@x/host/package.json': { name: '@x/host', version: '1.0.0',
+        exports: { '.': './index.js', './db': './db.js' },
+        peerDependencies: { '@x/peer': '1.0.0', '@x/needed': '1.0.0', loose: '1.0.0' },
+        peerDependenciesMeta: { '@x/peer': { optional: true }, '@x/listed': { optional: true }, loose: { optional: true } },
+        optionalDependencies: { '@x/extra': '1.0.0' } },
+      'node_modules/@x/host/index.js': "import '@x/needed';\nimport '@x/extra';\nexport const host = 1;\n",
+      'node_modules/@x/host/db.js': "import { peer } from '@x/peer/sub';\nimport '@x/peer/hidden';\nimport '@x/listed';\nexport { peer };\n",
+      'node_modules/@x/needed/package.json': { name: '@x/needed', version: '1.0.0', exports: './index.js' },
+      'node_modules/@x/needed/index.js': 'export {};\n',
+      'node_modules/@x/extra/package.json': { name: '@x/extra', version: '1.0.0', exports: './index.js' },
+      'node_modules/@x/extra/index.js': 'export {};\n',
+      'node_modules/@x/peer/package.json': { name: '@x/peer', version: '1.0.0', exports: { './sub': './sub.js' } },
+      'node_modules/@x/peer/sub.js': 'export const peer = 1;\n',
+      'node_modules/@x/listed/package.json': { name: '@x/listed', version: '1.0.0', exports: './index.js' },
+      'node_modules/@x/listed/index.js': 'export {};\n',
+    });
+    try {
+      const options = { packages: ['@x/host'], root, prefix: '/vendor/' };
+      // installed, a peer and an optional dependency are part of the closure; @x/listed, in
+      // peerDependenciesMeta but not peerDependencies, is no dependency and not followed; a
+      // subpath an installed optional peer does not export is unresolved like any other
+      const installed = buildImportMap(options);
+      assert.deepStrictEqual(Object.keys(installed.imports), ['@x/extra', '@x/host', '@x/host/db', '@x/needed', '@x/peer/sub']);
+      assert.deepStrictEqual(installed.unresolved, [
+        { specifier: '@x/listed', from: '@x/host/db.js' }, { specifier: '@x/peer/hidden', from: '@x/host/db.js' }]);
+      assert.deepStrictEqual(installed.optional, []);
+      // the optional peers not installed, scoped or not: a warning each, and the rest of the map serves
+      fs.rmSync(path.join(root, 'node_modules/@x/peer'), { recursive: true });
+      fs.rmSync(path.join(root, 'node_modules/@x/listed'), { recursive: true });
+      fs.writeFileSync(path.join(root, 'node_modules/@x/host/db.js'), "import { peer } from '@x/peer/sub';\nimport 'loose/x';\nimport '@x/listed';\nexport { peer };\n");
+      const absent = buildImportMap(options);
+      assert.deepStrictEqual(Object.keys(absent.imports), ['@x/extra', '@x/host', '@x/host/db', '@x/needed']);
+      assert.deepStrictEqual(absent.unresolved, [{ specifier: '@x/listed', from: '@x/host/db.js' }]);
+      assert.deepStrictEqual(absent.optional, [
+        { specifier: '@x/peer/sub', from: '@x/host/db.js', reason: 'an optional peer of @x/host that is not installed' },
+        { specifier: 'loose/x', from: '@x/host/db.js', reason: 'an optional peer of @x/host that is not installed' },
+      ]);
+      fs.writeFileSync(path.join(root, 'node_modules/@x/host/db.js'), "import { peer } from '@x/peer/sub';\nexport { peer };\n");
+      const run = runCli(root, ['--packages', '@x/host', '--prefix', '/vendor/']);
+      assert.strictEqual(run.status, 0, run.stderr);
+      assert.deepStrictEqual(Object.keys(JSON.parse(run.stdout).imports), ['@x/extra', '@x/host', '@x/host/db', '@x/needed']);
+      assert.strictEqual(run.stderr, 'warning: @x/host/db.js imports @x/peer/sub, an optional peer of @x/host that is not installed:'
+        + ' only a page that loads @x/host/db.js needs it\n');
+      // a peer that is not optional is still required
+      fs.rmSync(path.join(root, 'node_modules/@x/needed'), { recursive: true });
+      const required = runCli(root, ['--packages', '@x/host', '--prefix', '/vendor/']);
+      assert.strictEqual(required.status, 1);
+      assert.match(required.stderr, /^error: @x\/host\/index\.js imports @x\/needed, which the map does not resolve$/m);
+    }
+    finally { fs.rmSync(root, { recursive: true, force: true }); }
+  });
+
   it('refuses what it does not take, and a package that is not installed', () => {
     const root = installTree();
     try {
@@ -235,6 +351,31 @@ describe('jaren-emit importmap', () => {
       fs.rmSync(deduped, { recursive: true, force: true });
       assert.strictEqual(clean.status, 0, clean.stderr);
       assert.strictEqual(clean.stdout, first.stdout);
+    }
+    finally { fs.rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it('matches default whatever --conditions names, as Node does, and lets the manifest\'s key order decide', () => {
+    const root = installTree({
+      'node_modules/@x/order/package.json': { name: '@x/order', version: '1.0.0',
+        exports: { '.': { import: './i.js', browser: './b.js', default: './d.js' } } },
+      'node_modules/@x/order/i.js': 'export {};\n',
+      'node_modules/@x/order/b.js': 'export {};\n',
+      'node_modules/@x/order/d.js': 'export {};\n',
+    });
+    try {
+      const run = (/** @type {string} */ conditions) => runCli(root, ['--packages', 'app,view', '--prefix', '/vendor/', '--allow-duplicates', '--conditions', conditions]);
+      const without = run('development,browser,import');
+      assert.strictEqual(without.status, 0, without.stderr);
+      assert.deepStrictEqual(JSON.parse(without.stdout), { imports: EXPECTED_IMPORTS });
+      const order = (/** @type {string} */ conditions) => JSON.parse(runCli(root, ['--packages', '@x/order', '--conditions', conditions]).stdout).imports['@x/order'];
+      assert.strictEqual(order('browser,import'), '/node_modules/@x/order/i.js');
+      assert.strictEqual(order('import,browser'), '/node_modules/@x/order/i.js');
+      assert.strictEqual(order('browser'), '/node_modules/@x/order/b.js');
+      assert.strictEqual(order('development'), '/node_modules/@x/order/d.js');
+      const help = spawnSync(process.execPath, [CLI, 'importmap', '--help'], { encoding: 'utf8' });
+      assert.match(help.stdout, /default always matches/);
+      assert.doesNotMatch(help.stdout, /in preference/);
     }
     finally { fs.rmSync(root, { recursive: true, force: true }); }
   });
@@ -286,6 +427,21 @@ describe('scanImports — imports, never a comment or a string', () => {
     assert.deepStrictEqual(scanImports(source), []);
   });
 
+  it('reads an import after a byte order mark, and across every ECMAScript white space and line terminator', () => {
+    assert.deepStrictEqual(scanImports("\uFEFFimport { a } from './a.js';\nexport { a };\n"), [{ specifier: './a.js', dynamic: false }]);
+    for (const space of ['\u00A0', '\v', '\f', '\u1680', '\u2000', '\u200A', '\u202F', '\u205F', '\u3000', '\uFEFF', '\u2028', '\u2029']) {
+      assert.deepStrictEqual(scanImports(`import${space}{ a }${space}from${space}'./a.js';`).map((i) => i.specifier), ['./a.js'],
+        `U+${space.charCodeAt(0).toString(16).toUpperCase()}`);
+    }
+    // a name, a number and a regular expression's flags end at a line terminator
+    assert.deepStrictEqual(scanImports("const b = 1; const a = b\u2028import './after-word.js';\n"
+      + "const n = 1\u2028import './after-number.js';\nconst r = /x/g\u2028import './after-flags.js';").map((i) => i.specifier),
+    ['./after-word.js', './after-number.js', './after-flags.js']);
+    // so does a line comment, at any of the four
+    assert.deepStrictEqual(scanImports("// ls\u2028import './after-ls.js';\n// cr\rimport './after-cr.js';\n// ps\u2029import './after-ps.js';")
+      .map((i) => i.specifier), ['./after-ls.js', './after-cr.js', './after-ps.js']);
+  });
+
   it('reads an import inside a template substitution', () => {
     assert.deepStrictEqual(scanImports('const t = `${await import(\'./inside.js\')}`;'),
       [{ specifier: './inside.js', dynamic: true }]);
@@ -331,6 +487,32 @@ describe('exportTarget and expandExports — the one export expansion', () => {
     assert.strictEqual(exportTarget({ import: { types: './t.d.ts', default: './i.js' } }, ['import', 'default']), './i.js');
     assert.strictEqual(exportTarget([{ worker: './w.js' }, './fallback.js'], ['default']), './fallback.js');
     assert.strictEqual(exportTarget({ types: './t.d.ts' }, ['default']), null);
+    // default matches whatever conditions are set, as in Node and the bundlers
+    assert.strictEqual(exportTarget({ types: './t.d.ts', default: './d.js' }, ['browser']), './d.js');
+    assert.strictEqual(exportTarget({ import: { default: './i.js' } }, ['import']), './i.js');
+    assert.strictEqual(exportTarget({ node: './n.js', default: './d.js' }, []), './d.js');
+  });
+
+  it('keeps withheld apart from unmatched: a null under a matched condition withholds, and a fallback array passes a null or a refused target', () => {
+    const conditions = ['browser', 'import', 'default'];
+    // an object answers as soon as a matched key answers, a null included
+    assert.strictEqual(exportTarget({ browser: null, default: './node-only.js' }, conditions), null);
+    assert.strictEqual(exportTarget({ import: { browser: null, default: './node-only.js' }, default: './fallback.js' }, conditions), null);
+    // a matched key that matches nothing inside is no answer: the next key is read
+    assert.strictEqual(exportTarget({ import: { node: './n.js' }, default: './fallback.js' }, conditions), './fallback.js');
+    // a target that is no string, array, object or null names nothing and is passed over
+    assert.strictEqual(exportTarget({ browser: 5, default: './d.js' }, conditions), './d.js');
+    // an array takes its first entry Node takes, past a null, an unmatched entry and a refused target
+    assert.strictEqual(exportTarget([null, './a.js'], conditions), './a.js');
+    assert.strictEqual(exportTarget([{ node: './n.js' }, './a.js'], conditions), './a.js');
+    assert.strictEqual(exportTarget(['not-relative.js', './node-only.js'], conditions), './node-only.js');
+    assert.strictEqual(exportTarget([{ browser: 'not-relative.js' }, './b.js'], conditions), './b.js');
+    // and when none resolves, its last refusal or withholding stands
+    assert.strictEqual(exportTarget(['not-relative.js'], conditions), 'not-relative.js');
+    assert.strictEqual(exportTarget([null, 'not-relative.js'], conditions), 'not-relative.js');
+    assert.strictEqual(exportTarget(['not-relative.js', null], conditions), null);
+    assert.strictEqual(exportTarget([], conditions), null);
+    assert.strictEqual(exportTarget([{ types: './t.d.ts' }], conditions), null);
   });
 
   it('expands a single-star wildcard through the lister it is handed, and keeps anything else a pattern', () => {
@@ -352,6 +534,13 @@ describe('exportTarget and expandExports — the one export expansion', () => {
       [['.', './main.js']]);
     assert.deepStrictEqual(expandExports({ main: './lib.js' }, { conditions: ['default'] }).map((r) => [r.key, r.target]),
       [['.', './lib.js']]);
+    // without exports, main is read from the package root, and its absence is ./index.js, as Node reads them
+    for (const [manifest, target] of /** @type {[any, string][]} */ ([
+      [{ main: 'lib/index.js' }, './lib/index.js'], [{}, './index.js'], [{ main: '' }, './index.js'], [{ main: 7 }, './index.js'],
+    ])) {
+      assert.deepStrictEqual(expandExports(manifest, { conditions: ['default'] }).map((r) => [r.key, r.target, r.invalid]),
+        [['.', target, false]], JSON.stringify(manifest));
+    }
     assert.deepStrictEqual(expandExports({ exports: { import: './i.js', default: './d.js' } }, { conditions: ['default'] })
       .map((r) => [r.key, r.target]), [['.', './d.js']]);
   });
@@ -379,6 +568,21 @@ describe('exportTarget and expandExports — the one export expansion', () => {
     const rows = expandExports({ exports: { './*': './src/*' } },
       { conditions: ['default'], listFiles: (folder) => (folder === './src' ? ['top.js', 'nested/deep.js'] : null) });
     assert.deepStrictEqual(rows.map((r) => r.key), ['./nested/deep.js', './top.js']);
+  });
+
+  it('makes no export of what a * matched into node_modules, which Node refuses as a specifier, and still marks a refused target', () => {
+    const listFiles = (/** @type {string} */ folder) => ({
+      '.': ['index.js', 'lib/a.js', 'node_modules/dep/index.js', 'Node_Modules/x/y.js', 'package.json'],
+      './node_modules': ['a.js'],
+    })[folder] ?? null;
+    const rows = expandExports({ exports: { '.': './index.js', './*': './*', './vendor/*': './node_modules/*' } }, { conditions: ['default'], listFiles });
+    assert.deepStrictEqual(rows.map((r) => [r.key, r.target, r.invalid]), [
+      ['.', './index.js', false],
+      ['./index.js', './index.js', false],
+      ['./lib/a.js', './lib/a.js', false],
+      ['./package.json', './package.json', false],
+      ['./vendor/a.js', './node_modules/a.js', true],
+    ]);
   });
 
   it('marks a target Node refuses: not under ./, or holding .., . or node_modules', () => {

@@ -108,6 +108,27 @@ describe('diffContracts — the rule table, row by row', () => {
     assert.ok(media.breaking.some((c) => c.docPath === '/operations/a.b/http/media'));
   });
 
+  it('R3: a media respelled to the same type/subtype — its case or its parameters — is neutral and an old client still matches; another type/subtype is breaking', async () => {
+    const note = (/** @type {string | undefined} */ media) => one({
+      kind: 'command',
+      input: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'] },
+      output: { type: 'object' },
+      http: { method: 'POST', path: '/notes', ...(media === undefined ? {} : { media }) },
+    });
+    for (const to of ['application/json; charset=utf-8', 'Application/JSON']) {
+      const d = diffContracts(note(undefined), note(to));
+      const c = only(d.neutral);
+      assert.deepStrictEqual([c.rule, c.kind, c.docPath, c.from, c.to], ['R3', 'media-respelled', '/operations/a.b/http/media', 'application/json', to]);
+      onlyClasses(d, ['neutral']);
+      // what an old client sends is what the new server matches
+      const server = serveHttp(compileContract(note(to)), { 'a.b': (input) => ({ saved: input.text }) });
+      const r = await server.dispatch({ method: 'POST', url: '/notes', headers: { 'content-type': 'application/json' }, body: '{"text":"hi"}' });
+      assert.strictEqual(r.status, 200, to);
+    }
+    const vendor = only(diffContracts(note(undefined), note('application/vnd.acme+json')).breaking);
+    assert.deepStrictEqual([vendor.rule, vendor.kind, vendor.docPath, vendor.to], ['R3', 'binding-changed', '/operations/a.b/http/media', 'application/vnd.acme+json']);
+  });
+
   it('R4: a member added to required, and a new required member, are breaking', () => {
     const optional = one({ kind: 'command', input: { type: 'object', properties: { x: { type: 'string' } } }, output: true, http: { method: 'POST', path: '/a' } });
     const required = commandWith({ type: 'string' });
@@ -283,10 +304,10 @@ describe('diffContracts — the rule table, row by row', () => {
     assert.deepStrictEqual([added.rule, added.kind, added.docPath], ['R11', 'error-added', '/operations/a.b/errors/gone']);
   });
 
-  it('R12: idempotency none/optional → required is breaking; required → optional/none is additive', () => {
-    const idem = (/** @type {string | undefined} */ level) => one({
+  it('R12: idempotency → required, and required/optional → none, are breaking; required → optional and none → optional are additive', () => {
+    const idem = (/** @type {string | undefined} */ level, /** @type {any} */ extra = {}) => one({
       kind: 'command', output: true, http: { method: 'POST', path: '/a' },
-      ...(level === undefined ? {} : { policy: { idempotency: level } }),
+      ...(level === undefined ? {} : { policy: { idempotency: level, ...extra } }),
     });
     const tightened = only(diffContracts(idem(undefined), idem('required')).breaking);
     assert.deepStrictEqual([tightened.rule, tightened.kind, tightened.from, tightened.to, tightened.docPath],
@@ -294,9 +315,22 @@ describe('diffContracts — the rule table, row by row', () => {
     const fromOptional = only(diffContracts(idem('optional'), idem('required')).breaking);
     assert.strictEqual(fromOptional.rule, 'R12');
 
+    // an old client keeps sending a key and retrying under it; a server that
+    // no longer reads the key runs every retry of a lost answer again
+    for (const from of ['required', 'optional']) {
+      const d = diffContracts(idem(from), idem(undefined));
+      const dropped = only(d.breaking);
+      assert.deepStrictEqual([dropped.rule, dropped.kind, dropped.from, dropped.to, dropped.docPath],
+        ['R12', 'idempotency-dropped', from, 'none', '/operations/a.b/policy/idempotency'], from);
+      assert.deepStrictEqual(d.additive, [], from);
+    }
+    const withRetry = diffContracts(idem('required', { retry: { max: 2, on: [] } }), idem(undefined));
+    assert.deepStrictEqual(withRetry.breaking.map((c) => [c.rule, c.kind]), [['R12', 'idempotency-dropped']]);
+
     const relaxed = only(diffContracts(idem('required'), idem('optional')).additive);
-    assert.deepStrictEqual([relaxed.rule, relaxed.kind], ['R12', 'idempotency-relaxed']);
-    assert.strictEqual(only(diffContracts(idem('required'), idem(undefined)).additive).rule, 'R12');
+    assert.deepStrictEqual([relaxed.rule, relaxed.kind, relaxed.from, relaxed.to], ['R12', 'idempotency-relaxed', 'required', 'optional']);
+    const opened = only(diffContracts(idem(undefined), idem('optional')).additive);
+    assert.deepStrictEqual([opened.rule, opened.kind, opened.from, opened.to], ['R12', 'idempotency-relaxed', 'none', 'optional']);
   });
 
   it('R13: task, retry, cache, policy.revision and doc changes are neutral', () => {

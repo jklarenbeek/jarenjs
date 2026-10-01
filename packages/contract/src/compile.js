@@ -419,8 +419,8 @@ function checkRefs(node, docPath, scope, isRoot) {
  * The transport half of an operation's input. Scalar path/query/header
  * members use a compiled coercing normalizer; queryJson members carry
  * one JSON value and bypass coercion. `repeated` marks array types (the
- * header decoder collects their repeated lines or comma-separated list;
- * JSON query encoding takes precedence for query members). Body members
+ * header decoder splits every line of theirs, repeated or single, on
+ * commas; JSON query encoding takes precedence for query members). Body members
  * are never here. `schemas` and `required` describe every transport
  * member for URL validation, including those excluded from normalization.
  * @typedef {Object} InputTransport
@@ -626,8 +626,10 @@ function checkErrors(errors, base, scope) {
     }
     let status = DEFAULT_ERROR_STATUS;
     if (decl.status !== undefined) {
-      if (!Number.isInteger(decl.status) || decl.status < 100 || decl.status > 599) {
-        throw refuse('JC0011', `error '${code}' status must be an integer in 100–599`, at(path, 'status'));
+      // a failure answers a client or server error: under a 1xx, 2xx or 3xx
+      // the client would read it as an interim head, a success or a redirect
+      if (!Number.isInteger(decl.status) || decl.status < 400 || decl.status > 599) {
+        throw refuse('JC0011', `error '${code}' status must be an integer in 400–599 — a declared failure answers a client or server error`, at(path, 'status'));
       }
       status = decl.status;
     }

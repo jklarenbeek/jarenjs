@@ -905,8 +905,10 @@ handles, tracked reads, `saveChanges`, root relational writes — is served
 on the first session, one call at a time; ordinary calls leave that
 session free while another one is. A paused root cursor holds one
 session, never the store. Capture's journal belongs to each transaction,
-and its allocation lock still orders captured commits; jobs and live
-queries need nothing more. `capabilities.connections` reports N, and the
+and its allocation lock orders them: on a store with capture every
+transaction (a root write included, and one that only reads) takes it when
+it begins, so transactions run one at a time and only root reads gain the
+concurrency; jobs and live queries need nothing more. `capabilities.connections` reports N, and the
 default — one session — is everything above, unchanged.
 
 **The store the callback receives is the transaction.** `tx.collection`,
@@ -1001,7 +1003,8 @@ status.
 only when that is safe.** `store.transaction(fn, { retry: { attempts,
 baseMs?, maxMs? } })` — `attempts` 1–32 (1 is no retry), the backoff
 between attempts full jitter from `baseMs` (default 5 ms) up to `maxMs`
-(default 250 ms), the store's `runtime.random` drawing it. An attempt is
+(default 250 ms, or `baseMs` when that is larger), the store's
+`runtime.random` drawing it. An attempt is
 retried only after a failure that says it may be (`class: 'busy'`,
 `retryable: true` — SQLite's busy and locked, PostgreSQL's 40001, 40P01,
 55P03) whose commit outcome is known; never after a connection loss, a
@@ -1120,21 +1123,26 @@ cosmetic:
   stack cannot say whether a request is its own nested work or an
   unrelated caller. Nest through the store the callback RECEIVED.
 
-**A store-level handle is never inside the transaction.** `store.collection`,
-`store.entity`, `store.saveChanges()`, `store.execute`, `store.dataVersion`
-and the whole `store.sync` surface hold the connection for their own
-extent, so their statements cannot fall inside a transaction they are not
-part of and share a rollback they know nothing about. One store is
-therefore safe for a handler per request: an unrelated writer waits for
-the commit and keeps its own fate.
+**A store-level handle is never inside another caller's transaction.**
+`store.collection`, `store.entity`, `store.saveChanges()`, `store.execute`,
+`store.dataVersion` and the whole `store.sync` surface hold the connection
+for their own extent, so their statements cannot fall inside a transaction
+they are not part of and share a rollback they know nothing about. One
+store is therefore safe for a handler per request: an unrelated writer
+waits for the commit and keeps its own fate. The one exception is the
+synchronous rule above: a store-level call made on a transaction's own
+synchronous extent — before its callback first awaits — runs as that
+transaction's owner, so its writes commit or roll back with it, and the
+callback's own handle stays usable beside it.
 
 What that costs, stated plainly:
 
-- A store-level call made while another caller's transaction is open
-  **waits** on the connection's gate, under `queueTimeout` (default 5 s,
-  the busy-timeout default). `openStore(model, { transactions: 'strict' })`
-  refuses at once instead, for a host that would rather see the contention
-  than pay for it. The mode governs store-level calls — reads, writes,
+- A store-level call made while another caller holds the connection —
+  its transaction, or on an asynchronous host a store-level call still in
+  flight — **waits** on the connection's gate, under `queueTimeout`
+  (default 5 s, the busy-timeout default). `openStore(model, { transactions:
+  'strict' })` refuses at once instead, for a host that would rather see
+  the contention than pay for it. The mode governs store-level calls — reads, writes,
   cursor pulls, root jobs — not transactions: a second top-level
   `store.transaction` still queues behind the first under `queueTimeout`,
   as it must to keep one savepoint stack per connection.
@@ -1301,7 +1309,7 @@ every other store operation is admitted:
   `WITHOUT ROWID` table, or on PostgreSQL. SQLite's last rowid belongs
   to the connection, so each of those would report another row's.
 - **Admission is the store's.** A root call on a strict store refuses
-  at once while a transaction owns the connection, and the synchronous
+  at once while another caller holds the connection, and the synchronous
   surface always does (`JD0012`); the asynchronous root queues under
   `queueTimeout`. A transaction's engine refuses once its scope settled
   (`JD2070`) or its hold limit passed (`JD2098`), and its calls count as
@@ -1356,7 +1364,10 @@ primitives only):
 A caller-keyed document whose pointer resolves to nothing or to a
 non-scalar is `JD2002`; so is an explicit key argument that is not a
 string or a number, and a number that is not finite (NaN and ±Infinity
-have no key spelling). For allocated identities, `put(doc, key)` updates
+have no key spelling). On a numeric key column a string that is no decimal
+number (`'abc'`, `'0x7'`) names no row on either engine: `get` answers
+`undefined`, `delete` `false`, `patch` `JD2006` — PostgreSQL never sees it.
+For allocated identities, `put(doc, key)` updates
 a known document and `put(doc)` allocates. On a caller-keyed collection
 the document's key is the key: `put(doc, key)` whose `key` names another
 key than the document carries is `JD2002` — it used to write under the
@@ -1375,7 +1386,9 @@ refused as "a transform changed the key". A file an earlier node write
 left still works: a read of a numeric key also finds a row under the
 spelling the running SQLite gives that number as a float (`'7.0'`) — but
 only when the row's document holds that number at its key member, so a
-string key spelled `'7.0'` stays a key of its own — and a write first
+string key spelled `'7.0'` stays a key of its own (and on a collection
+without a key member, where no document can say, every spelling is a key
+of its own) — and a write first
 moves such a row onto the canonical text, in the same transaction (which
 takes the writer lock before its first read), so the file converges as it
 is written. The float spelling depends on the SQLite that wrote it:
@@ -1430,7 +1443,7 @@ error.
 | `JD0009` | an open option is outside the closed set `openStore` reads, or its value is malformed |
 | `JD0010` | strict mode refused a residual |
 | `JD0011` | the profile refused the document |
-| `JD0012` | work waited too long for the open transaction to settle |
+| `JD0012` | work waited too long for the connection a transaction or another call held |
 | `JD0013` | an option passed to a store operation is not one it reads, or is malformed |
 | `JD0014` | a transaction guarantee was requested where it cannot act |
 | `JD0015` | owner was asked of an adopted store whose database has no owner table |
@@ -3122,7 +3135,9 @@ entity with store rules. Each rule is checked at its own statement, inside the
 write's transaction, so a tracked save's rule sees what the statements ahead of
 it wrote. A physical row's insert and update rules are checked after the write,
 against the row as it was — read just before the statement, not the copy a unit
-of work holds — and the row now stored: an update that changes nothing a
+of work holds, and on PostgreSQL locked (`FOR UPDATE`) for the rest of the
+transaction, so a concurrent writer's change lands before that read, never
+between it and the statement — and the row now stored: an update that changes nothing a
 database rule counts runs no `changed` rule, and a `columns` rule runs when the
 statement assigns one of them (§13.1). A delete rule is checked after the
 delete, against the row it removed; a key with no row removes nothing and runs
@@ -3193,10 +3208,13 @@ input-syntax error quoting a value does.
 A program runs its assertions in declaration order, then its audit inserts in
 declaration order. Assertions see the allocated identity and generated columns.
 A failed assertion aborts the entire statement, including its trigger effects.
-Inside a transaction each store write is its own savepoint, so a refused write
-leaves the transaction body usable on both engines; a refused trusted `tx.sql`
-statement spends a PostgreSQL transaction (the next statement is `JD2088`, as
-after any failed statement there) unless it ran in a nested transaction.
+Inside a transaction a write to a physical entity, and a write a store rule
+probes for, is its own savepoint, so a refused rule leaves the transaction body
+usable on both engines. On PostgreSQL any other failed statement spends the
+transaction unless it ran in a nested transaction — a plain insert's duplicate
+key, a refused trusted `tx.sql` statement: the next statement is `JD2088`, and a
+body that catches the failure and returns is refused `JD2088` at its COMMIT,
+with nothing committed.
 Existing application triggers keep their engine's ordering relative to these
 programs. Equality uses JSON-style scalar types and null equality; an ordered
 comparison involving SQL NULL is false, and so is one over a boolean, as in the

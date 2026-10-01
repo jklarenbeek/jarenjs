@@ -41,6 +41,27 @@ describe('$quantity', () => {
     assert.strictEqual(qty('\u0661\u066b\u0665 kg', 'g', 'ar'), 1500, 'the format\'s own digit family');
   });
 
+  it('converts the decimal the text writes exactly, rounding once, where the target unit is a power of ten', () => {
+    assert.strictEqual(qty('0.7 l', 'ml'), 700);
+    assert.strictEqual(qty('1.15 m', 'cm'), 115);
+    assert.strictEqual(qty('5 mg', 'g'), 0.005);
+    assert.strictEqual(qty('3 lbs', 'kg'), 1.36077711);
+    assert.strictEqual(qty('-0,35 kg', 'g', 'nl'), -350);
+    assert.ok(Object.is(qty('-0 kg', 'g'), -0), 'a negative zero keeps its sign');
+    // every two-decimal value from 0.01 to 99.99, shifted by the power of ten between the units
+    for (const [from, to, shift] of /** @type {[string, string, number][]} */ ([['kg', 'g', 3], ['g', 'kg', -3], ['l', 'ml', 3], ['ml', 'l', -3],
+      ['m', 'cm', 2], ['km', 'm', 3], ['mg', 'g', -3]])) {
+      const read = compileJsonQuery({ $quantity: ['$.t', to] });
+      const artifacts = [];
+      for (let i = 1; i <= 9999; i++) {
+        const text = (i / 100).toFixed(2);
+        if (read({ t: `${text} ${from}` }) !== Number(`${text}e${shift}`)) artifacts.push(text);
+      }
+      assert.deepStrictEqual(artifacts, [], `${from} to ${to}`);
+    }
+    assert.strictEqual(qty('1 m', 'in'), 1 / 0.0254, 'a target that is no power of ten divides as the registry does');
+  });
+
   it('composes with $default like ?? over undefined', () => {
     const q = compileJsonQuery({ $default: [{ $quantity: ['$.t', 'g'] }, 0] });
     assert.strictEqual(q({ t: 'Zonder gewicht' }), 0);
@@ -69,10 +90,24 @@ describe('$quantity', () => {
       assert.strictEqual(qty(text, 'g'), undefined, text);
   });
 
+  it('reads no number after another number and any run of white space', () => {
+    for (const text of ['1  500 g', '1 \t 500 g', '1  500 g', '12   500 g'])
+      assert.strictEqual(qty(text, 'g'), undefined, JSON.stringify(text));
+    assert.strictEqual(qty('2 x  500 g', 'g'), 500, 'a word between the numbers keeps them apart');
+  });
+
   it('reads a minus sign written right before the number', () => {
     assert.strictEqual(qty('Gewichtsverlies: -2 kg', 'g', 'nl'), -2000);
     assert.strictEqual(qty('Change: \u22122 kg', 'g'), -2000);
     assert.strictEqual(qty('Tolerance -0.5 mm', 'mm'), -0.5);
+  });
+
+  it('reads no number after a dash that is not its sign, never the number without its sign', () => {
+    for (const text of ['Gewichtsverlies: –2 kg', 'Gewichtsverlies: - 2 kg', 'Change: ‒2 kg', 'Change: — 2 kg',
+      'Change: − 2 kg', 'Change: --2 kg', '2〜3 kg'])
+      assert.strictEqual(qty(text, 'g', 'nl'), undefined, JSON.stringify(text));
+    assert.strictEqual(qty('Gewichtsverlies: -2 kg', 'g', 'nl'), -2000, 'a minus sign right before the number is its sign');
+    assert.strictEqual(qty('- 2 kg, 3 kg', 'g'), 3000, 'the quantity after it is read');
   });
 
   it('reads a unit word whole: an area or a speed is never a length', () => {
@@ -82,6 +117,13 @@ describe('$quantity', () => {
     assert.strictEqual(qty('Perceel 300 m2', 'm2'), 300, 'an area read as an area');
     assert.strictEqual(qty('1200 m3 gas', 'm3'), 1200);
     assert.strictEqual(qty('1200 m\u00b3 gas', 'l'), 1200000);
+  });
+
+  it('reads no unit symbol that a hyphen joins to a word', () => {
+    assert.strictEqual(qty('maat: 2 t-shirts', 'kg'), undefined);
+    assert.strictEqual(qty('2 t-shirts, 1 kg', 'kg'), 1, 'the quantity after it is read');
+    assert.strictEqual(qty('5 g‐pack', 'g'), undefined, 'a Unicode hyphen joins a word too');
+    assert.strictEqual(qty('5 kg-3', 'kg'), 5, 'a hyphen before a digit leaves the symbol whole');
   });
 
   it('reads a one-letter symbol as written, and leaves words with another meaning out', () => {

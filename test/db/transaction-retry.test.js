@@ -148,11 +148,14 @@ describe('store.transaction(fn, { retry })', () => {
       await assert.rejects(tx.transaction(async () => {}, /** @type {any} */ ({ retry: { attempts: 2 } })), coded('JD0014'));
     });
     for (const retry of [3, { attempts: 0 }, { attempts: 33 }, { attempts: 1.5 }, { attempts: 2, baseMs: 10, maxMs: 5 },
-      { attempts: 2, baseMs: -1 }, {}]) {
+      { attempts: 2, baseMs: -1 }, { attempts: 2, maxMs: null }, {}]) {
       await assert.rejects(store.transaction(async () => {}, /** @type {any} */ ({ retry })), coded('JD0013'), JSON.stringify(retry));
     }
     await assert.rejects(store.transaction(async () => {}, /** @type {any} */ ({ retry: { atempts: 2 } })),
       (/** @type {any} */ error) => error.code === 'JD0013' && /did you mean 'attempts'\?/.test(error.message));
+    // a base above the default ceiling raises the default ceiling with it
+    assert.equal(await store.transaction(async () => 'ran', { retry: { attempts: 3, baseMs: 500 } }), 'ran');
+    await assert.rejects(store.transaction(async () => {}, { retry: { attempts: 3, baseMs: 500, maxMs: 250 } }), coded('JD0013'));
     await store.close();
   });
 

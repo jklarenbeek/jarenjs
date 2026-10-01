@@ -1,14 +1,19 @@
 //@ts-check
 import { nodeWorkerDriver, workerEndpoint } from './node-worker.js';
 import { workerPoolDriver } from './worker-pool.js';
+import { POOL_OPTIONS, WORKER_OPTIONS, refuseUnknownDriverOptions } from './worker-protocol.js';
 
 /** One writer and bounded read-only WAL workers behind the Connection contract.
  * `endpoint` names every worker's endpoint module, as `nodeWorkerDriver`'s does.
+ * The options are a closed set, and so are `worker`'s: a member either does
+ * not read is `JD0003`, refused when the pool is made.
  * @param {{readers?:number, queueCapacity?:number, graceMs?:number, worker?:any,
  *   endpoint?: URL | string}} [options]
  * @returns {any}
  */
 export function nodeWorkerPoolDriver(options = {}) {
+  refuseUnknownDriverOptions(options, POOL_OPTIONS, 'nodeWorkerPoolDriver');
+  refuseUnknownDriverOptions(options.worker, WORKER_OPTIONS, 'nodeWorkerPoolDriver worker');
   // refused here, at construction, as the worker driver refuses it
   if (options.endpoint !== undefined) workerEndpoint(options.endpoint);
   return workerPoolDriver(options, (worker = {}) => nodeWorkerDriver(options.endpoint === undefined

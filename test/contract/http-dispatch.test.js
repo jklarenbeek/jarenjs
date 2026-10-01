@@ -453,6 +453,34 @@ describe('dispatch — HEAD, entity tags, status override, opaque, well-known', 
     assert.strictEqual(json(gone).code, 'gone');
   });
 
+  it('HEAD on an opaque read carries the byte length of the text or bytes it dropped, as a JSON read\'s HEAD does; a streamed body carries none', async () => {
+    const contract = compileContract({ $contract: '0.1', operations: {
+      'doc.raw': { kind: 'read', output: true, http: { method: 'GET', path: '/raw', media: 'text/plain' } },
+    } });
+    /** @type {any} */
+    let answer = { status: 200, headers: { 'content-type': 'text/plain; charset=utf-8' }, body: 'héllo wörld' };
+    const server = serveHttp(contract, { 'doc.raw': () => answer });
+    const head = await server.dispatch(req('HEAD', '/raw'));
+    assert.strictEqual(head.status, 200);
+    assert.strictEqual(head.body, null);
+    assert.strictEqual(head.headers['content-length'], '13', 'UTF-8 bytes, not code units');
+    answer = { status: 200, body: new Uint8Array([1, 2, 3]) };
+    assert.strictEqual((await server.dispatch(req('HEAD', '/raw'))).headers['content-length'], '3');
+    // a length the handler states itself is the one its GET sends, and stays the only one
+    answer = { status: 200, headers: { 'Content-Length': '3' }, body: 'abc' };
+    const stated = await server.dispatch(req('HEAD', '/raw'));
+    assert.deepStrictEqual(Object.keys(stated.headers).filter((name) => name.toLowerCase() === 'content-length'), ['content-length']);
+    assert.strictEqual(stated.headers['content-length'], '3');
+    // a stream has no length to state
+    answer = { status: 200, body: (async function* () { yield new Uint8Array([1]); })() };
+    assert.strictEqual((await server.dispatch(req('HEAD', '/raw'))).headers['content-length'], undefined);
+    // a GET hands the body over and leaves the measuring to the adapter
+    answer = { status: 200, body: 'abc' };
+    const get = await server.dispatch(req('GET', '/raw'));
+    assert.strictEqual(get.body, 'abc');
+    assert.strictEqual(get.headers['content-length'], undefined);
+  });
+
   it('serves the well-known description under GET/HEAD, 405 under other methods, and can be moved or disabled', async () => {
     const server = serve();
     const r = await server.dispatch(req('GET', WELL_KNOWN_PATH));

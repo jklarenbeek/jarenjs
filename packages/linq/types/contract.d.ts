@@ -99,7 +99,7 @@ export type SchemaSpec = BuilderLike<any, any, any> | JsonSchema | boolean;
 
 /** One entry of an operation's `errors` map (§3). */
 export interface ErrorSpec {
-  /** 100–599. Default `400`, never written. */
+  /** 400–599. Default `400`, never written. */
   readonly status?: number;
   /** A JSON Schema for the error's details. */
   readonly schema?: SchemaSpec;

@@ -20,6 +20,7 @@
 import { compileMessageCatalog } from '@jarenjs/core/message';
 import { isJsonObject } from '@jarenjs/core/object';
 
+import { messageRef, renderMessageId } from '../message-ref.js';
 import { JsonQueryCompileError, JsonQueryRuntimeError } from './errors.js';
 
 /**
@@ -236,31 +237,7 @@ export const queryMessagesEn = Object.freeze({
 /** The compiled English catalog (module-level singleton). */
 export const queryCatalogEn = compileMessageCatalog(queryMessagesEn);
 
-/**
- * A message reference: a message id and its params, rendered by the
- * catalog that renders the message holding it.
- * @param {string} messageId
- * @param {Record<string, any>} [params]
- * @returns {{ messageId: string, params: Record<string, any> }}
- */
-export function messageRef(messageId, params = {}) {
-  return Object.freeze({ messageId, params: Object.freeze(params) });
-}
-
-/** @param {any} value @returns {value is { messageId: string, params: Record<string, any> }} */
-const isMessageRef = (value) => isJsonObject(value) && typeof value.messageId === 'string'
-  && Object.keys(value).length === 2 && isJsonObject(value.params);
-
-/** Compiled locale catalogs, by the pack object they were compiled from. */
-const compiledPacks = new WeakMap();
-
-/** @param {Record<string, any>} catalog @returns {Readonly<Record<string, (params: object) => string>>} */
-function compiled(catalog) {
-  if (catalog === queryCatalogEn) return queryCatalogEn;
-  let out = compiledPacks.get(catalog);
-  if (out === undefined) compiledPacks.set(catalog, out = compileMessageCatalog(catalog));
-  return out;
-}
+export { messageRef };
 
 /**
  * Render a message id and its params through a catalog: message
@@ -273,16 +250,7 @@ function compiled(catalog) {
  * @returns {string}
  */
 export function renderQueryMessageId(messageId, params, catalog = queryCatalogEn) {
-  const target = compiled(catalog);
-  /** @type {Record<string, any>} */
-  const resolved = {};
-  for (const name of Object.keys(params ?? {})) {
-    const value = params[name];
-    resolved[name] = isMessageRef(value) ? renderQueryMessageId(value.messageId, value.params, catalog) : value;
-  }
-  const template = Object.hasOwn(target, messageId) ? target[messageId]
-    : Object.hasOwn(queryCatalogEn, messageId) ? queryCatalogEn[messageId] : null;
-  return template === null ? String(resolved.reason ?? messageId) : template(resolved);
+  return renderMessageId(messageId, params, catalog, queryCatalogEn);
 }
 
 /**

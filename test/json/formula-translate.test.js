@@ -121,6 +121,9 @@ describe('the translation agrees with JavaScript', () => {
     agrees((row) => { return Math.ceil(row.x) + Math.floor(row.x) + Math.abs(row.x); }, rows);
     agrees((row) => { return Math.round(row.x * 100) / 100; }, rows);
     agrees((row) => { return Math.max(0, row.x) - Math.min(1, row.x); }, rows);
+    // of two zeros Math.max takes +0 and Math.min -0, in either order
+    agrees((row) => { return [1 / Math.max(row.x * 0, 0) > 0, 1 / Math.max(0, row.x * 0) > 0, 1 / Math.min(row.x * 0, 0) < 0, 1 / Math.min(0, row.x * 0) < 0]; },
+      [{ x: -5 }, { x: 5 }]);
     agrees((row) => { return 1 + 2 + 'x' + row.x + 3; }, rows);
     agrees((row) => { return `t ${row.x} ${row.x * 2}`; }, rows);
   });

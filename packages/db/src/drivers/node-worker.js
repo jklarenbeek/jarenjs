@@ -3,7 +3,7 @@
 import { lazyOpen } from '../driver.js';
 import { sqliteDialect } from '../dialects/sqlite.js';
 import { createWorkerConnection } from './worker-client.js';
-import { WORKER_ENDPOINT_MARK, workerSettings } from './worker-protocol.js';
+import { WORKER_ENDPOINT_MARK, WORKER_OPTIONS, refuseUnknownDriverOptions, workerSettings } from './worker-protocol.js';
 
 /**
  * The worker endpoint a driver starts: by default the module beside this
@@ -27,6 +27,7 @@ export function workerEndpoint(endpoint) {
 }
 
 /** Dedicated SQLite worker per connection. No function serialization or write replay.
+ * The options are a closed set: a member it does not read is `JD0003`.
  * @param {{ windowRows?: number, windowBytes?: number, maxPending?: number,
  *   maxStatements?: number, maxCursors?: number, allMaxRows?: number,
  *   allMaxBytes?: number, closeTimeoutMs?: number, startupTimeoutMs?: number,
@@ -34,6 +35,7 @@ export function workerEndpoint(endpoint) {
  * @returns {any} a Driver
  */
 export function nodeWorkerDriver(configuration = {}) {
+  refuseUnknownDriverOptions(configuration, WORKER_OPTIONS, 'nodeWorkerDriver');
   const { limits, maxPending, allRows, allBytes, closeMs, startupMs } = workerSettings(configuration);
   const endpoint = workerEndpoint(configuration.endpoint);
   let generation = 0;

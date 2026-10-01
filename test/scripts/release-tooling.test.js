@@ -39,6 +39,23 @@ describe('release:bump refuses an npm that is not the pinned one', function () {
     assert.match(refusal, new RegExp(`npm i -g npm@${pin.replace(/\./g, '\\.')}`));
     assert.match(refusal, /lockfile/);
   });
+
+  it('reads the version out of a pin that carries an integrity hash, as Corepack writes it', function () {
+    const dir = mkdtempSync(join(tmpdir(), 'jaren-pin-'));
+    try {
+      writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'x', packageManager: 'npm@11.12.1+sha512.0123abcd' }));
+      const pin = pinnedNpm(dir);
+      assert.strictEqual(pin, '11.12.1');
+      assert.strictEqual(npmMismatch('11.12.1\n', pin), null);
+      // the suggested command is an npm spec npm accepts: the version, not the hash
+      assert.match(String(npmMismatch('10.0.0\n', pin)), /\n {2}npm i -g npm@11\.12\.1\n$/);
+      writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'x', packageManager: 'pnpm@9.0.0' }));
+      assert.throws(() => pinnedNpm(dir), /'pnpm@9\.0\.0', which is not an npm version/);
+    }
+    finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('release:bump runs the npm that launched it, through the current Node', function () {

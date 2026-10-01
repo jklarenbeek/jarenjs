@@ -175,3 +175,91 @@ describe('non-boolean properties — null, false and removal remove the attribut
     assert.deepStrictEqual(attributesOf(h.node()), [], 'both left: removed');
   });
 });
+
+describe('a value the property would convert is written as the attribute the serializer writes', () => {
+  const CASES = [
+    [['a', { href: '/r.csv', download: true }], [['href', '/r.csv'], ['download', '']]],
+    [['div', { title: true }], [['title', '']]],
+    [['div', { popover: true }], [['popover', '']]],
+    [['img', { src: '/x.png', width: '100px' }], [['src', '/x.png'], ['width', '100px']]],
+    [['img', { width: '50%' }], [['width', '50%']]],
+    [['canvas', { width: '300px' }], [['width', '300px']]],
+    [['img', { width: '100' }], [['width', '100']]],
+  ];
+
+  it('true on a property that is not boolean is the empty attribute, a string on a number-typed one is that string, in the DOM and the markup', () => {
+    for (const [vnode, expected] of CASES) {
+      const h = host();
+      h.render(vnode);
+      assert.deepStrictEqual(attributesOf(h.node()), expected, `DOM ${JSON.stringify(vnode)}`);
+      assert.deepStrictEqual(ssrAttributes(renderToString(vnode)), expected, `SSR ${JSON.stringify(vnode)}`);
+    }
+  });
+
+  it('the element reads what the markup says: an unnamed download, the auto popover', () => {
+    const a = host();
+    a.render(['a', { href: '/r.csv', download: true }]);
+    assert.strictEqual(a.node().download, '');
+    const menu = host();
+    menu.render(['div', { popover: true }]);
+    assert.strictEqual(menu.node().popover, 'auto');
+  });
+
+  it('a patch moves between the property and the attribute, and a removal removes either', () => {
+    const a = host();
+    for (const [download, expected] of [[true, ''], ['r.csv', 'r.csv'], [true, ''], [undefined, null]]) {
+      a.render(['a', download === undefined ? {} : { download }]);
+      assert.strictEqual(a.node().getAttribute('download'), expected, JSON.stringify(download));
+    }
+    const img = host();
+    for (const [width, expected] of [['100px', '100px'], [40, '40'], ['50%', '50%'], [null, null]]) {
+      img.render(['img', { width }]);
+      assert.strictEqual(img.node().getAttribute('width'), expected, JSON.stringify(width));
+    }
+  });
+
+  it('hydration keeps the server markup it adopts', () => {
+    const { document, container } = createReflectingHost();
+    const link = document.createElement('a');
+    link.setAttribute('href', '/r.csv');
+    link.setAttribute('download', '');
+    const image = document.createElement('img');
+    image.setAttribute('width', '100px');
+    container.appendChild(link);
+    container.appendChild(image);
+    createDomRenderer(container, { document, hydrate: true })([['a', { href: '/r.csv', download: true }], ['img', { width: '100px' }]]);
+    assert.strictEqual(container.childNodes[0], link, 'adopted, not rebuilt');
+    assert.deepStrictEqual(attributesOf(link), [['href', '/r.csv'], ['download', '']]);
+    assert.deepStrictEqual(attributesOf(image), [['width', '100px']]);
+  });
+
+  it('numbers, strings on string properties, boolean properties and safe mode keep their writes', () => {
+    const h = host();
+    h.render(['img', { width: 40 }]);
+    assert.deepStrictEqual(attributesOf(h.node()), [['width', '40']]);
+    h.render(['img', { width: 40, title: 'a photo' }]);
+    assert.deepStrictEqual(attributesOf(h.node()), [['width', '40'], ['title', 'a photo']]);
+    const button = host();
+    button.render(['button', { disabled: true }]);
+    assert.strictEqual(button.node().disabled, true);
+    assert.deepStrictEqual(attributesOf(button.node()), [['disabled', '']]);
+    for (const [vnode, expected] of CASES) {
+      const safe = host(true);
+      safe.render(vnode);
+      assert.deepStrictEqual(attributesOf(safe.node()), expected, `safe ${JSON.stringify(vnode)}`);
+    }
+  });
+
+  it('a style object with no declaration writes no style attribute, as the serializer omits it', () => {
+    for (const safe of [false, true]) {
+      const h = host(safe);
+      h.render(['div', { style: {} }]);
+      assert.deepStrictEqual(attributesOf(h.node()), [], safe ? 'safe' : 'trusted');
+      assert.strictEqual(renderToString(['div', { style: {} }], { safe }), '<div></div>');
+      h.render(['div', { style: { color: 'red' } }]);
+      assert.deepStrictEqual(attributesOf(h.node()), [['style', 'color:red']]);
+      h.render(['div', { style: { color: null } }]);
+      assert.deepStrictEqual(attributesOf(h.node()), [], `${safe ? 'safe' : 'trusted'}: the emptied object removes it`);
+    }
+  });
+});

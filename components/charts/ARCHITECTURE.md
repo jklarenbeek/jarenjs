@@ -17,8 +17,9 @@ the [README](README.md); the design mirrors
 
 The dependency arrow points **one way**: the engine never imports the
 component, `@jarenjs/app`, or the DOM — it runs in a worker, an edge
-runtime or a build step. `@jarenjs/mermaid` depends on charts (its pie
-delegates here); charts never imports mermaid.
+runtime or a build step. Charts and `@jarenjs/mermaid` import nothing of
+each other: mermaid draws a pie only through the renderer a host hands it,
+and charts' `mermaidPieRenderer` is that renderer.
 
 ## The geometry-free AST contract
 
@@ -87,9 +88,10 @@ requested `$event` fields. The engine names an action and never calls
 one, and `renderToString` drops `on`, so the SSR bytes are identical
 either way. `tooltipView` in the component layer is the floating host.
 
-`@jarenjs/mermaid` renders its pie with `titles: false`. A mermaid
-diagram's SVG is a byte-stable contract; the delegation exists to share
-the geometry, not to change what mermaid draws.
+`mermaidPieRenderer`, the pie a host injects into `@jarenjs/mermaid`,
+draws with `titles: false`. A mermaid diagram's SVG is a byte-stable
+contract; the delegation exists to share the geometry, not to change
+what mermaid draws.
 
 ## Scales and axes (`src/core/`)
 
@@ -211,8 +213,12 @@ benchmark shapes to `{config, data}` pairs.
 ## Mermaid delegation
 
 `mermaidPieToChartAST` (`src/transforms/mermaid-adapter.js`) maps a
-mermaid pie AST to `{config, data}`. Mermaid's `renderPie` calls
-`buildPieAST` + `renderPieAST` with options carrying its class names
-(`mm-pie-slice`, …), key prefix (`mmpie-`), palette and theme — making
-the emitted SVG byte-identical to the charts pie renderer's while the
-geometry lives in exactly one place.
+mermaid pie AST to `{config, data}`. Beside it, `mermaidPieRenderer` is
+the pie renderer a host injects into mermaid
+(`diagramToVnode(doc, { renderers: { pie: mermaidPieRenderer } })`): it
+calls `buildPieAST` + `renderPieAST` with options carrying mermaid's
+class names (`mm-pie-slice`, …), key prefix (`mmpie-`), palette and
+theme, so the emitted SVG is the one mermaid has always drawn while the
+geometry lives in exactly one place. The adapter reads mermaid's AST and
+theme as data and imports no mermaid module; mermaid, handed no
+renderer, draws a placeholder instead of a pie.

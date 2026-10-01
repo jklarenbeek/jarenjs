@@ -31,11 +31,11 @@ import { DbCompileError, DbRuntimeError, wrapDriverError, isDriverError, classif
 import { chain, toPromise, isThenable, attempt, abortReason } from './driver.js';
 import { createSessionRouter } from './sessions.js';
 import { isPlainOptions, refuseUnknownMembers } from './options.js';
-import { canonicalKeyText } from './key-text.js';
+import { canonicalKeyText, namesNoNumber } from './key-text.js';
 import { planCollection, planEntity, planJoinTable, verifyShape } from './ddl.js';
 import { translatePatch } from './patch-sql.js';
 import { createQueryEngine, createQueryState, createEntityQueryEngine, createLoadEngine } from './query.js';
-import { admitCursor, admitSyncCursor, createCursor, createSyncCursor, drainPage, shareCursor, utf8Length } from './cursor.js';
+import { CLOSED_UNDER, admitCursor, admitSyncCursor, createCursor, createSyncCursor, drainPage, shareCursor, utf8Length } from './cursor.js';
 import { refuseUnsupportedPragmaKeys, resolvePragmaRequests, configurePragmas, PRAGMA_NAMES } from './pragmas.js';
 import { createMaintenance } from './maintenance.js';
 import { createBackup } from './backup.js';
@@ -233,8 +233,10 @@ export function normalizeModel(model, expressions = undefined) {
       `the model must declare "$model": "${MODEL_VERSION}"`, '/$model');
   }
   const collections = model.collections;
-  if (collections === undefined && model.entities !== undefined) {
-    return new Map(); // an entities-only model (§9)
+  const noCollections = collections === undefined || (collections !== null && typeof collections === 'object'
+    && !Array.isArray(collections) && Object.keys(collections).length === 0);
+  if (noCollections && model.entities !== undefined) {
+    return new Map(); // an entities-only model (§9), whether it omits `collections` or leaves it empty
   }
   if (collections === null || typeof collections !== 'object'
     || Array.isArray(collections) || Object.keys(collections).length === 0) {
@@ -827,20 +829,26 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
   // the canonical text, so the file converges as it is written.
   const textKey = plan.keyType === dialect.typeFor('string', 'key');
   const bindKey = (/** @type {string | number} */ key) => (textKey ? canonicalKeyText(key) : key);
+  // a lookup of a string that is no number on a numeric key column names no
+  // row on either engine (see `namesNoNumber`); a WRITE keeps its key, which
+  // both engines refuse alike
+  const whereKey = (/** @type {string | number} */ key) => (!textKey && namesNoNumber(key) ? null : bindKey(key));
+  // A collection without a key member has no document that could confirm
+  // a legacy spelling, so a number names its canonical row only and a
+  // string key spelled `'7.0'` stays a key of its own.
   const spelledTwice = (/** @type {unknown} */ key) => textKey && typeof key === 'number'
-    && dialect.legacyNumericKeyText !== null;
+    && dialect.legacyNumericKeyText !== null && collection.keySegments !== null;
   /**
    * Every stored row of a numeric key: its canonical spelling, and a legacy
    * one only when the row's own document holds this number at the key
    * member. The spelling alone cannot tell — the string key `'7.0'` is
    * spelled like 7 written as a float, and a spelling an older SQLite
-   * rounded can name another number. A collection without a key member has
-   * no document to ask, and trusts the spelling.
+   * rounded can name another number.
    */
   const spellingsOf = (/** @type {number} */ key) =>
     chain(prepared('keySpellings', dialect.dml.keySpellings(shape), { readOnly: true }), (statement) =>
       chain(statement.all([canonicalKeyText(key), key]), (/** @type {any[]} */ rows) =>
-        rows.filter((row) => row.key === canonicalKeyText(key) || collection.keySegments === null
+        rows.filter((row) => row.key === canonicalKeyText(key)
           || keyMemberOf(JSON.parse(row.doc), collection.keySegments) === key)));
 
   const runWrite = (statementName, sql, params, key, reads) => {
@@ -923,7 +931,7 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
       chain(attempt(() => chain(
         // buffered: a point read under the write, never a server cursor
         prepared('getForUpdate', dialect.dml.getForUpdate(shape), { buffered: true }), (statement) =>
-          chain(statement.get([bindKey(key)]), (row) => (row === undefined ? undefined : JSON.parse(row.doc)))),
+          chain(statement.get([whereKey(key)]), (row) => (row === undefined ? undefined : JSON.parse(row.doc)))),
       (error) => wrapDriverError(error, { docPath: collection.docPath, collection: collection.name, key })), fn)),
   'immediate');
   /**
@@ -970,7 +978,7 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
           return row === undefined ? undefined : JSON.parse(row.doc);
         })
         : chain(prepared('get', dialect.dml.get(shape), { readOnly: true }), (statement) =>
-          chain(statement.get([bindKey(key)]),
+          chain(statement.get([whereKey(key)]),
             (row) => (row === undefined ? undefined : JSON.parse(row.doc))))),
       (error) => wrapDriverError(error, { docPath: collection.docPath, collection: collection.name, key }));
     },
@@ -1043,7 +1051,7 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
           return chain(
             runWrite('patchFallback',
               dialect.dml.updateDoc(shape, dialect.jsonEncode(dialect.parameterRef(1, 'doc')), 2),
-              [JSON.stringify(next), ...derivedFor(next), bindKey(key)], key, false),
+              [JSON.stringify(next), ...derivedFor(next), whereKey(key)], key, false),
             () => next);
         }
         stats.patchTranslated++;
@@ -1051,7 +1059,7 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
           dialect.quoteIdentifier(plan.docColumn), 1);
         const sql = dialect.dml.updateDoc(shape, expression, params.length + 1);
         return chain(prepared(`patch:${sql}`, sql), (statement) =>
-          chain(attempt(() => statement.run([...params, ...derivedFor(next), bindKey(key)]),
+          chain(attempt(() => statement.run([...params, ...derivedFor(next), whereKey(key)]),
             (error) => wrapWriteError(error, plan, collection.name, collection.docPath, key)),
           () => next));
       });
@@ -1060,7 +1068,7 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
       requireKey(key, collection.name, collection.docPath);
       const expected = readWriteOptions(collection.name, options, 'delete', true);
       const remove = () => chain(
-        runWrite('delete', dialect.dml.del(shape), [bindKey(key)], key, false),
+        runWrite('delete', dialect.dml.del(shape), [whereKey(key)], key, false),
         (result) => Number(result?.changes ?? 0) > 0);
       return expected === null ? keyedWrite(key, remove)
         : atomically(key, (current) => {
@@ -1400,8 +1408,9 @@ function readTransactionOptions(options, surface, spelling, enclosing) {
 /**
  * Read `retry` — `{ attempts, baseMs?, maxMs? }`: `attempts` a whole
  * number from 1 to 32 (1 is no retry), `baseMs` (default 5) and `maxMs`
- * (default 250, at least `baseMs`) the full-jitter backoff's bounds — the
- * policy the store's open retry measured and uses.
+ * (default 250, or `baseMs` when that is larger, and never below it) the
+ * full-jitter backoff's bounds — the policy the store's open retry
+ * measured and uses.
  * @param {unknown} value
  * @param {string} spelling
  * @returns {{ attempts: number, baseMs: number, maxMs: number }}
@@ -1412,7 +1421,8 @@ function readRetry(value, spelling) {
   }
   refuseUnknownMembers(value, RETRY_MEMBERS, (key, hint) =>
     new DbCompileError('JD0013', `${spelling}: retry member '${key}' is not one it reads${hint}`));
-  const { attempts, baseMs = 5, maxMs = 250 } = value;
+  const { attempts, baseMs = 5 } = value;
+  const maxMs = value.maxMs === undefined ? (Number.isInteger(baseMs) ? Math.max(250, baseMs) : 250) : value.maxMs;
   if (!Number.isInteger(attempts) || attempts < 1 || attempts > 32)
     throw new DbCompileError('JD0013', `${spelling}: retry.attempts is a whole number from 1 to 32, not ${describeValue(attempts)}`);
   if (!Number.isInteger(baseMs) || baseMs < 0 || baseMs > TIMER_MAX)
@@ -1907,7 +1917,10 @@ export function openStore(model, options) {
          * @param {(scope: any) => any} fn @param {'immediate'} [mode] */
         transaction: (fn, mode) => (inParallelRead() ? refuseInParallelRead() : withScope(ctx().scope === null
           ? (/** @type {any} */ inner) => opened.transaction(inner, undefined, mode)
-          : (/** @type {any} */ inner) => /** @type {any} */ (ctx().scope).transaction(inner, mode), fn)),
+          : (/** @type {any} */ inner) => /** @type {any} */ (ctx().scope).transaction(inner, mode), fn, undefined, undefined,
+          // a savepoint an operation opens inside a transaction's scope is
+          // that scope's own work, which its other operations wait for
+          ctx().currentScope === null ? undefined : ctx().currentScope.internalOf ?? ctx().currentScope)),
         /**
          * Register what settling the OPEN transaction owes an in-memory
          * caller: `commit` when it commits, `rollback` when it rolls back,
@@ -1977,7 +1990,7 @@ export function openStore(model, options) {
         return Promise.allSettled([...open].map((release) => release())).then(() => undefined);
       };
 
-      function withScope(open, fn, ownWork, root) {
+      function withScope(open, fn, ownWork, root, internalOf) {
         return open((inner) => {
           const outer = ctx().scope;
           const outerWork = ctx().work;
@@ -1990,8 +2003,9 @@ export function openStore(model, options) {
           // from here, and everything before it belongs to a scope that
           // is still open
           const mark = list.length;
-          /** @type {{ root?: any, cursors?: Set<() => Promise<unknown>>, context?: any }} */
+          /** @type {{ root?: any, cursors?: Set<() => Promise<unknown>>, context?: any, internalOf?: any }} */
           const identity = { context: ctx() };
+          if (internalOf !== undefined) identity.internalOf = internalOf;
           ctx().scope = inner;
           ctx().currentScope = identity;
           if (root !== undefined) {
@@ -2032,6 +2046,19 @@ export function openStore(model, options) {
           if (!isThenable(out)) {
             restore(true);
             return out;
+          }
+          if (inner?.inline === true && !outermost) {
+            // a call run inline on its owner's synchronous extent is part of
+            // the owner's work: the owner's slots come back as soon as the
+            // call returns, so the body's own handle stays current while the
+            // call's promise is pending, and the call's later statements run
+            // through the owner's scope; its effects stay on the owner's list
+            ctx().scope = outer;
+            ctx().work = outerWork;
+            ctx().currentScope = outerIdentity;
+            ctx().currentRoot = outerRoot;
+            return out.then((value) => chain(closeCursorsOf(identity), () => value),
+              (error) => chain(closeCursorsOf(identity), () => { throw error; }));
           }
           // the scope's cursors close inside it, before it settles
           return out.then(
@@ -2194,25 +2221,27 @@ export function openStore(model, options) {
       };
 
       /**
-       * How a store-level call behaves when another caller's transaction
-       * owns the connection: `'wait'` queues behind it under the
-       * connection's `queueTimeout`, `'strict'` refuses at once. A host
-       * that would rather see the contention than pay for it asks for
-       * strict; the default keeps a contended call correct instead of
+       * How a store-level call behaves when another caller holds the
+       * connection — its transaction, or on an asynchronous host a
+       * store-level call still in flight: `'wait'` queues behind it under
+       * the connection's `queueTimeout`, `'strict'` refuses at once. A
+       * host that would rather see the contention than pay for it asks
+       * for strict; the default keeps a contended call correct instead of
        * fast.
        */
       // validated with the other options, before the driver opened
       const strictTransactions = options.transactions === 'strict';
 
       /** The refusal a contended store-level call gets when it cannot
-       * wait. It names the scope-bound spelling, because a caller that
-       * meant to be inside the transaction has one and a caller that did
-       * not has to wait for the commit either way. */
+       * wait. The gate cannot tell which kind of caller holds it, so the
+       * message names both; it names the scope-bound spelling, because a
+       * caller that meant to be inside a transaction has one and a caller
+       * that did not has to wait for it either way. */
       const contended = (why) => new DbCompileError('JD0012',
-        `a transaction owns this store's connection and ${why}. Work that belongs `
-        + 'INSIDE the transaction goes through the store the callback received '
+        `another caller holds this store's connection — a transaction, or a store-level call still in flight — and ${why}. `
+        + 'Work that belongs INSIDE a transaction goes through the store the callback received '
         + '(tx.collection / tx.entity / tx.saveChanges); work that does not belongs '
-        + 'after it commits.');
+        + 'after it settles.');
 
       /**
        * Run one STORE-LEVEL call: a caller that is not inside whatever
@@ -3507,13 +3536,14 @@ export function openStore(model, options) {
           /** The entity a physical table belongs to, by the dialect's own
            * identifier rules (SQLite folds ASCII case; PostgreSQL's quoted
            * names are exact). @param {string} table */
-          const entityOfTable = (table) => {
+          /** Every entity mapped onto `table` — several entities may share one. */
+          const entitiesOfTable = (table) => {
             const fold = (/** @type {string} */ name) => (dialect.name === 'sqlite'
               ? name.replace(/[A-Z]/g, (c) => c.toLowerCase()) : name);
             const wanted = fold(table);
-            for (const [name, entityMapping] of Object.entries(mapping?.entities ?? {}))
-              if (typeof entityMapping?.table === 'string' && fold(entityMapping.table) === wanted) return name;
-            return undefined;
+            return Object.entries(mapping?.entities ?? {})
+              .filter(([, entityMapping]) => typeof entityMapping?.table === 'string' && fold(entityMapping.table) === wanted)
+              .map(([name]) => name);
           };
           /**
            * The write rules for SQL the store did not plan (ONE function
@@ -3536,8 +3566,9 @@ export function openStore(model, options) {
             }
             else {
               if (readOnly) throw new DbRuntimeError('JD2095', 'this store grants no SQL write authority');
-              const owner = entityOfTable(table);
-              if (owner !== undefined && entities.get(owner)?.invariants.some((r) => r.enforcement === 'store')) {
+              const owner = entitiesOfTable(table)
+                .find((name) => entities.get(name)?.invariants.some((r) => r.enforcement === 'store'));
+              if (owner !== undefined) {
                 throw new DbRuntimeError('JD2095', `a relational write to '${table}' cannot bypass the store-only `
                   + `invariants of entity '${owner}': write it through the entity`);
               }
@@ -3903,7 +3934,8 @@ export function openStore(model, options) {
               const liveCleanup = liveRegistry?.closeAll();
               const cursorCleanup = cursorOwnership === undefined && sharedCursors.size === 0 ? null
                 : Promise.allSettled([...cursorOwnership?.owners ?? [], ...sharedCursors]
-                  .map((cursor) => cursor.return()));
+                  .map((cursor) => cursor[CLOSED_UNDER](new DbRuntimeError('JD2063',
+                    'the store closed while this cursor was open: the rows after the last one it read were never read'))));
               return chain(jobsEngine === null ? null : jobsEngine.stopAll(closeOptions), (stopped) => {
                 // admission closes once the workers have stopped: a call
                 // after close() refuses by name instead of queueing behind
@@ -3966,14 +3998,65 @@ export function openStore(model, options) {
            * @param {() => any} fn
            * @returns {any}
            */
-          const runScoped = (identity, fn) => {
+          const runScoped = (identity, fn, ordered = true) => {
             // a handle used from a flow in no transaction — a listener, a timer
             // made outside the body — runs in its own transaction's context, as
             // on one session; from another transaction's flow it stays JD2070
             if (severalSessions && ctx().currentRoot === null && identity.context !== ctx()
               && identity.context?.currentScope === identity)
-              return opened.enter(identity.context, () => runScoped(identity, fn));
+              return opened.enter(identity.context, () => runScoped(identity, fn, ordered));
+            // a savepoint one of this scope's own operations opened is current:
+            // the call waits for that operation's turn rather than refusing
+            const current = ctx().currentScope;
+            if (ordered && current !== identity && current?.internalOf === identity && identity.turn !== undefined)
+              return identity.turn.then(() => runScoped(identity, fn, ordered));
             requireScope(identity);
+            return ordered ? inTurn(identity, () => counted(identity, fn)) : counted(identity, fn);
+          };
+
+          /**
+           * One operation of a scope at a time, in call order. An operation
+           * that opens a savepoint of its own — a patch, an `expect` write, a
+           * nested transaction — wraps whatever else the transaction sends
+           * while it is open, and its rollback took back another operation
+           * that had already reported success. So an operation called while
+           * another holds the scope's turn waits for it (a synchronous driver
+           * never has one in flight), and checks the scope again once it has
+           * the turn: one called after its transaction settled refuses
+           * (`JD2070`) without a statement. The scope is checked BEFORE the
+           * wait too, so an outer handle used from an inner transaction's body
+           * refuses at once instead of waiting for the transaction it is in.
+           * A call on the synchronous extent of the operation holding the turn
+           * is part of it and runs at once.
+           * @param {any} identity @param {() => any} start
+           * @returns {any}
+           */
+          const inTurn = (identity, start) => {
+            if (identity.turn !== undefined && identity.onStack !== true) {
+              return identity.turn.then(() => {
+                requireScope(identity);
+                return inTurn(identity, start);
+              });
+            }
+            const wasOnStack = identity.onStack === true;
+            identity.onStack = true;
+            let out;
+            try {
+              out = start();
+            }
+            finally { identity.onStack = wasOnStack; }
+            if (wasOnStack || !isThenable(out)) return out;
+            // the turn is given back the moment the operation settles, before
+            // its caller resumes and before a waiter takes it
+            const giveBack = () => { if (identity.turn === turn) identity.turn = undefined; };
+            const turn = toPromise(out).then(giveBack, giveBack);
+            identity.turn = turn;
+            return out;
+          };
+
+          /** A handle operation, counted in flight while its root has a hold
+           * limit (see `runScoped`). @param {any} identity @param {() => any} fn */
+          const counted = (identity, fn) => {
             const root = rootOf(identity);
             if (root === undefined || root.hold === undefined) return fn();
             root.inFlight += 1;
@@ -4012,9 +4095,12 @@ export function openStore(model, options) {
               out[member] = (/** @type {any[]} */ ...args) =>
                 lift(() => runScoped(identity, () => handle[member](...args)))();
             }
+            // a direct member answers a value: the unit-of-work bookkeeping,
+            // which touches no connection, and the synchronous twins — never
+            // a promise of waiting for the turn
             for (const member of direct) {
               if (typeof handle[member] !== 'function') continue;
-              out[member] = (/** @type {any[]} */ ...args) => runScoped(identity, () => handle[member](...args));
+              out[member] = (/** @type {any[]} */ ...args) => runScoped(identity, () => handle[member](...args), false);
             }
             return out;
           };
@@ -4050,14 +4136,12 @@ export function openStore(model, options) {
                 catch (error) {
                   return release().then(() => { throw error; });
                 }
-                // an exhausted or failed cursor has released its source
+                // an exhausted or failed cursor has released its source; a
+                // pull the scope refused once it had the turn releases it too
                 return Promise.resolve(pulled).then((step) => {
                   if (step.done) identity.cursors?.delete(release);
                   return step;
-                }, (error) => {
-                  identity.cursors?.delete(release);
-                  throw error;
-                });
+                }, (error) => release().then(() => { throw error; }));
               },
               // a refused release still releases, as a root cursor's does
               return: () => {
@@ -4199,10 +4283,12 @@ export function openStore(model, options) {
               requireScope(identity);
               const { signal } = readTransactionOptions(transactionOptions, 'nested', spelling, myMode);
               if (signal?.aborted === true) throw abortReason(signal);
-              return withScope(driverScope.transaction,
+              // its savepoint takes the scope's turn: it never wraps an
+              // operation of the scope still in flight
+              return inTurn(identity, () => withScope(driverScope.transaction,
                 (inner, innerIdentity) => (capture === null
                   ? fn(scopedStore(inner, innerIdentity))
-                  : capture.nest(() => fn(scopedStore(inner, innerIdentity)))));
+                  : capture.nest(() => fn(scopedStore(inner, innerIdentity))))));
             };
 
             // ————— named savepoints (MODEL-FORMAT §5.2) —————
@@ -4311,19 +4397,20 @@ export function openStore(model, options) {
             // is a savepoint of the transaction, and a cursor is the scope's;
             // a scope never queues, so a signal can only refuse a call up
             // front — as it refuses a nested transaction (JD2064)
-            /** @type {any} */
-            let scopePolicy;
-            const relationalPolicy = () => (scopePolicy ??= {
+            /** The policy of the asynchronous engine (`ordered`: it takes the
+             * scope's turn) or of the synchronous twin, which answers values.
+             * @param {boolean} ordered */
+            const relationalPolicy = (ordered) => ({
               ...relationalBase,
               available: () => requireScope(identity),
               read: (/** @type {any} */ run, /** @type {AbortSignal | undefined} */ signal) => runScoped(identity, () => {
                 if (signal?.aborted === true) throw abortReason(signal);
                 return run(connection);
-              }),
+              }, ordered),
               write: (/** @type {any} */ run, /** @type {AbortSignal | undefined} */ signal) => runScoped(identity, () => {
                 if (signal?.aborted === true) throw abortReason(signal);
                 return connection.transaction(() => run(connection));
-              }),
+              }, ordered),
               beforeWrite: (/** @type {string} */ table) => beforeSqlWrite(table, sqlWorks()),
               afterWrite: () => afterSqlWrite(sqlWorks()),
             });
@@ -4331,12 +4418,12 @@ export function openStore(model, options) {
             let scopeRelational;
             /** @type {any} */
             let scopeSyncRelational;
-            const relationalOfScope = () => (scopeRelational ??= relationalEngine({ ...relationalPolicy(), lift: true,
+            const relationalOfScope = () => (scopeRelational ??= relationalEngine({ ...relationalPolicy(true), lift: true,
               cursor: (/** @type {any} */ spec) => scopedCursor(identity,
                 () => createCursor({ ...spec, open: () => spec.open(connection) })) }));
-            const syncRelationalOfScope = () => (scopeSyncRelational ??= relationalEngine({ ...relationalPolicy(),
+            const syncRelationalOfScope = () => (scopeSyncRelational ??= relationalEngine({ ...relationalPolicy(false),
               cursor: (/** @type {any} */ spec) => admitSyncCursor(createSyncCursor({ ...spec, open: () => spec.open(connection) }),
-                (/** @type {() => any} */ fn) => runScoped(identity, fn)) }));
+                (/** @type {() => any} */ fn) => runScoped(identity, fn, false)) }));
             const members = {
               // 1-based: the attempt of a retried transaction this callback runs in
               attempt: override(myRoot?.attempt ?? 1),
@@ -4471,11 +4558,11 @@ export function openStore(model, options) {
                   release: savepointRelease,
                 }),
                 saveChanges: entities.size === 0 ? undefined
-                  : () => runScoped(identity, () => guard(() => myWork.tracker.saveChanges())),
+                  : () => runScoped(identity, () => guard(() => myWork.tracker.saveChanges()), false),
                 execute: entityEngine === null ? undefined
-                  : (/** @type {any} */ document, /** @type {any} */ queryOptions) => runScoped(identity, () => entityEngine.execute(document, queryOptions)),
+                  : (/** @type {any} */ document, /** @type {any} */ queryOptions) => runScoped(identity, () => entityEngine.execute(document, queryOptions), false),
                 explain: entityEngine === null ? undefined
-                  : (/** @type {any} */ document, /** @type {any} */ queryOptions) => runScoped(identity, () => entityEngine.explain(document, queryOptions)),
+                  : (/** @type {any} */ document, /** @type {any} */ queryOptions) => runScoped(identity, () => entityEngine.explain(document, queryOptions), false),
                 roots: entityEngine === null ? undefined : Object.freeze([...entities.keys()]),
                 relations: entityEngine === null ? undefined : entityEngine.relations,
                 });

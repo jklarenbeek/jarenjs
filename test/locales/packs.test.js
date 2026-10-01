@@ -30,6 +30,7 @@ import {
 import { formsMessagesEn } from '@jarenjs/forms';
 import { contractMessagesEn } from '@jarenjs/contract';
 import { compileJsonQuery, queryMessagesEn, renderQueryMessage } from '@jarenjs/json';
+import { compileFormula, formulaMessagesEn } from '@jarenjs/json/formula';
 import { compileMessageTemplate } from '@jarenjs/core/message';
 
 
@@ -53,6 +54,18 @@ const NUMBER_SAMPLE_PARAMS = Object.fromEntries(Object.keys(numberMessagesEn).ma
 const QUERY_SAMPLE_PARAMS = Object.fromEntries(Object.entries(queryMessagesEn).map(([key, template]) =>
   [key, Object.fromEntries(compileMessageTemplate(template).parameters.map((name) => [name, `<${name}>`]))]));
 
+/** The formula msgids are derived the same way. */
+const FORMULA_SAMPLE_PARAMS = Object.fromEntries(Object.entries(formulaMessagesEn).map(([key, template]) =>
+  [key, Object.fromEntries(compileMessageTemplate(template).parameters.map((name) => [name, `<${name}>`]))]));
+
+/**
+ * A template that carries no words of its own (only placeholders, operator
+ * names and punctuation, or the literal null) is the same in every language.
+ * @param {any} template
+ */
+const wordless = (template) => template === 'null'
+  || !/\p{L}/u.test(String(template).replace(/\{[a-z]+\}/gi, '').replace(/\$[a-z-]+/gi, ''));
+
 /** The placeholder names of a template, sorted. @param {any} template */
 const placeholders = (template) => [...compileMessageTemplate(String(template)).parameters].sort();
 
@@ -61,6 +74,7 @@ const SAMPLE_PARAMS = {
   ...DATE_SAMPLE_PARAMS,
   ...NUMBER_SAMPLE_PARAMS,
   ...QUERY_SAMPLE_PARAMS,
+  ...FORMULA_SAMPLE_PARAMS,
   type: { type: 'string' },
   required: { missingProperty: 'name' },
   minimum: { limit: 10, comparison: '>=' },
@@ -350,6 +364,10 @@ describe('@jarenjs/locales fr/es/pt/de/ja', () => {
           assert.ok(keys.has(key), `${code} is missing query key '${key}'`);
           assert.deepStrictEqual(placeholders(pack[key]), placeholders(queryMessagesEn[key]), `${code} ${key} placeholders`);
         }
+        for (const key of Object.keys(formulaMessagesEn)) {
+          assert.ok(keys.has(key), `${code} is missing formula key '${key}'`);
+          assert.deepStrictEqual(placeholders(pack[key]), placeholders(formulaMessagesEn[key]), `${code} ${key} placeholders`);
+        }
         assert.ok(keys.has('x-form/assert'));
       });
 
@@ -360,6 +378,26 @@ describe('@jarenjs/locales fr/es/pt/de/ja', () => {
         const rendered = renderQueryMessage(error, pack);
         assert.strictEqual(rendered, String(pack['query/expected-string']).replace('{got}', String(pack['query/item/number'])));
         assert.notStrictEqual(rendered, error.reason, `${code} renders its own words`);
+      });
+
+      it('translates every query and formula message that carries words, copying none from English', () => {
+        const copied = [...Object.entries(queryMessagesEn), ...Object.entries(formulaMessagesEn)]
+          .filter(([key, english]) => !wordless(english) && pack[key] === english).map(([key]) => key);
+        assert.deepStrictEqual(copied, []);
+      });
+
+      it('renders a formula error in its language, a query error raised inside the formula included', () => {
+        let own;
+        try { compileFormula({ $formula: '1', id: 'price', revision: '1', expression: 1, helpers: [{ name: 'round2', version: '1' }] }); }
+        catch (thrown) { own = thrown; }
+        const rendered = renderQueryMessage(own, pack);
+        assert.strictEqual(rendered, String(pack['query/formula/helper-missing']).replace('{formulaId}', 'price').replace('{name}', 'round2').replace('{version}', '1'));
+        assert.notStrictEqual(rendered, own.reason, `${code} renders its own words`);
+        let inner;
+        try { compileFormula({ $formula: '1', id: 'f', revision: '1', expression: { $substring: ['$.s', 1] } }).evaluate({ s: 5 }); }
+        catch (thrown) { inner = thrown; }
+        const message = String(pack['query/expected-string']).replace('{got}', String(pack['query/item/number']));
+        assert.strictEqual(renderQueryMessage(inner, pack), String(pack['query/formula/query']).replace('{formulaId}', 'f').replace('{message}', message));
       });
 
       it('renders the demonstration samples', () => {

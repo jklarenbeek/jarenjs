@@ -313,6 +313,34 @@ describe('7. what the transport cannot carry is refused before it is sent or com
     assert.deepStrictEqual(ran, ['doc.tag:{"tenant":"acme","tags":["a","b"]}']);
   });
 
+  it('a ctx.idempotencyKey, ctx.ifMatch or ctx.ifNoneMatch a header cannot carry, and a key with edge whitespace, are JC2050 before any key is stored', async () => {
+    /** @type {any} */
+    let stored;
+    const storage = { read: () => stored, write: (/** @type {any} */ v) => { stored = JSON.parse(JSON.stringify(v)); } };
+    /** @type {unknown[]} */
+    const attempts = [];
+    const durable = openHttpClient(SAFETY, { storage, fetch: async (url) => { attempts.push(url); throw new Error('never reached'); } });
+    for (const ctx of [
+      { idempotencyKey: 'clé-🔑' },
+      { idempotencyKey: 'k\r\nx-evil: 1' },
+      { idempotencyKey: ' k1' },
+      { idempotencyKey: 'k1\t' },
+      { idempotencyKey: 'k2', ifMatch: '"a"\r\nx-evil: 1' },
+      { idempotencyKey: 'k3', ifNoneMatch: '"ü€"' },
+    ]) {
+      const outcome = /** @type {any} */ (await durable.invoke('doc.tag', { tenant: 'acme' }, ctx));
+      assert.deepStrictEqual([outcome.kind, outcome.error.code, outcome.error.retryable, outcome.error.details],
+        ['contract', 'JC2050', false, [{ path: '', keyword: 'encoding' }]], JSON.stringify(ctx));
+    }
+    assert.deepStrictEqual(attempts, [], 'nothing was sent');
+    assert.deepStrictEqual(await durable.pending(), [], 'no key was recorded for a refused call');
+    // what a header carries travels: an inner space, a Latin-1 tag
+    const { client, ran } = fetchPair();
+    const ok = await client.invoke('doc.tag', { tenant: 'acme' }, { idempotencyKey: 'cart 5', ifNoneMatch: '"ü"', ifMatch: '*' });
+    assert.strictEqual(ok.ok, true, JSON.stringify(ok));
+    assert.deepStrictEqual(ran, ['doc.tag:{"tenant":"acme"}']);
+  });
+
   it('compile refuses a header member whose name is not a token (JC0009), an OPTIONS body member (JC0016), and 204/205 over an output that cannot be null (JC0012)', () => {
     const one = (/** @type {any} */ op) => ({ $contract: '0.1', operations: { a: op } });
     assert.throws(() => compileContract(one({ kind: 'command', output: true,
@@ -355,6 +383,40 @@ describe('7. what the transport cannot carry is refused before it is sent or com
       assert.strictEqual(viaNode.body, '');
     }
     finally { await node.close(); }
+  });
+
+  it('a raw answer below 200 is JC2010, observed: dispatch and both adapters answer a final 500, never an informational head', async () => {
+    const contract = compileContract({ $contract: '0.1', operations: {
+      'file.get': { kind: 'read', output: true, http: { method: 'GET', path: '/file', media: 'application/octet-stream' } },
+    } });
+    /** @type {unknown[]} */
+    const observed = [];
+    let status = 103;
+    const server = serveHttp(contract, { 'file.get': () => ({ status, headers: { link: '</a.css>; rel=preload' }, body: 'hello' }) },
+      { onError: (err) => { observed.push(err); } });
+    for (const informational of [100, 103, 199]) {
+      status = informational;
+      const r = await server.dispatch(req('GET', '/file'));
+      assert.strictEqual(r.status, 500, String(informational));
+      assert.strictEqual(json(r).code, 'JC2010');
+    }
+    assert.strictEqual(observed.length, 3, 'each refusal reached onError');
+    status = 103;
+    const viaFetch = await toFetchHandler(server)(new Request('http://x/file'));
+    assert.strictEqual(viaFetch.status, 500);
+    assert.strictEqual((await viaFetch.json()).code, 'JC2010');
+    const node = await nodeServer(server);
+    try {
+      const viaNode = /** @type {any} */ (await node.request('GET', '/file'));
+      assert.strictEqual(viaNode.status, 500);
+      assert.strictEqual(JSON.parse(viaNode.body).code, 'JC2010');
+    }
+    finally { await node.close(); }
+    // the lowest final status still passes through
+    status = 200;
+    const ok = await server.dispatch(req('GET', '/file'));
+    assert.strictEqual(ok.status, 200);
+    assert.strictEqual(ok.body, 'hello');
   });
 
   it('serveHttp, serveLocal and servePort refuse an option they do not read, naming the nearest one (JC1001)', () => {

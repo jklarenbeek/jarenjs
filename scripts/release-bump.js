@@ -38,11 +38,13 @@ import { npmCliPath } from './lib/portable.js';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 
-/** The npm this repository's lockfile shape belongs to. */
+/** The npm this repository's lockfile shape belongs to: the version of the
+ * `packageManager` pin, without the `+sha512.…` integrity hash Corepack
+ * may append to it. */
 export function pinnedNpm(root = ROOT) {
   const manifest = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8'));
   const pin = String(manifest.packageManager ?? '');
-  const match = /^npm@(.+)$/.exec(pin);
+  const match = /^npm@([^+]+)/.exec(pin);
   if (match === null) {
     throw new Error(`the root manifest pins '${pin}', which is not an npm version`);
   }

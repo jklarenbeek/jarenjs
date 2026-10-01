@@ -40,10 +40,11 @@ const DEFAULT_MAX_DEPTH = 24;
  * @property {string} kind - 'string'|'number'|'integer'|'boolean'|'enum'|'const'|'object'|'array'|'unknown'
  * @property {string} control - Suggested control: 'text'|'email'|'url'|'password'|'textarea'|'number'|'checkbox'|'select'|'date'|'datetime-local'|'time'|'color'|'json'
  * @property {boolean} required - Whether the parent object requires this property
- * @property {boolean} nullable - Whether the schema admits `null` beside its type: a type
- *   array that lists `'null'`, or an `anyOf`/`oneOf` of one branch and a null-only branch.
- *   The two spellings of one nullable type give the field the non-null branch's kind,
- *   control and constraints
+ * @property {boolean} nullable - Whether the schema admits `null`, as the validator reads
+ *   it: a type that lists `'null'` (an `enum` or `const` beside it must admit `null` too),
+ *   OpenAPI's `nullable: true`, an `anyOf`/`oneOf` with a branch that admits it, or no
+ *   `type`, `enum`, `const`, `anyOf` or `oneOf` at all. The two spellings of one nullable
+ *   type give the field the non-null branch's kind, control and constraints
  * @property {boolean} readOnly
  * @property {Array<any>|null} enumValues - Options for a select control
  * @property {Array<string>|null} enumLabels - Display labels parallel to enumValues (oneOf const/title idiom, through the `t` hook)
@@ -192,8 +193,11 @@ function getOneOfConstBranches(schema) {
  * Whether a resolved schema admits `null` — what layer 1 reads so an
  * explicit `null` is judged as the validator judges it: a type that lists
  * `null` (an `enum` or `const` beside it must admit `null` too), OpenAPI's
- * `nullable: true` (which the validator honours), or an `anyOf`/`oneOf`
- * with a branch that admits it.
+ * `nullable: true` (which the validator honours), an `anyOf`/`oneOf` with
+ * a branch that admits it, or a schema with none of these: without a
+ * `type`, the keywords a form reads (`minLength`, `maximum`,
+ * `properties`, …) judge only values of their own type and let `null`
+ * through.
  * @param {unknown} schema
  * @param {object} rootSchema
  * @param {number} depth
@@ -207,11 +211,14 @@ function admitsNull(schema, rootSchema, depth) {
   const type = schema.type;
   if (type !== undefined) return type === 'null' || (Array.isArray(type) && type.includes('null'));
   if (Array.isArray(schema.enum) || Object.hasOwn(schema, 'const')) return true;
+  let union = false;
   for (const key of ['anyOf', 'oneOf']) {
     const branches = schema[key];
-    if (Array.isArray(branches) && branches.some((branch) => admitsNull(resolveSchema(branch, rootSchema, depth + 1), rootSchema, depth + 1))) return true;
+    if (!Array.isArray(branches)) continue;
+    if (branches.some((branch) => admitsNull(resolveSchema(branch, rootSchema, depth + 1), rootSchema, depth + 1))) return true;
+    union = true;
   }
-  return false;
+  return !union;
 }
 
 /**

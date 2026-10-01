@@ -13,7 +13,7 @@ import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 
-import { action, defineApp, replace, sub, taskSlot, transition, when } from '@jarenjs/linq/app';
+import { action, defineApp, effect, replace, sub, taskSlot, transition, when } from '@jarenjs/linq/app';
 import { from } from '@jarenjs/linq';
 import { op } from '@jarenjs/linq/jslt';
 import { createApp, createTaskEffect } from '@jarenjs/app';
@@ -68,6 +68,25 @@ describe('when() — a conditional transition', () => {
     const doc = action((/** @type {any} */ s) => when(s.ready, { patch: [{ op: 'remove', path: '/a' }] },
       transition({ state: { a: 1 } }))).document;
     assert.deepStrictEqual(doc, { $if: ['$.ready', { patch: [{ op: 'remove', path: '/a' }] }, { state: { a: 1 } }] });
+  });
+
+  it('is refused where a value goes — a state, a patch value, an effect\'s props, a condition — at build time (JL0101), at its place', () => {
+    const noop = () => transition({});
+    for (const [build, pattern, path] of /** @type {[(s: any) => any, RegExp, string][]} */ ([
+      [(s) => transition({ state: when(s.ready, noop()) }), /: transition\(\) state is a value, got a when\(\)/, '/state'],
+      [(s) => transition({ state: { list: [1, when(s.ready, noop())] } }), /: transition\(\) state is a value, got a when\(\)/, '/state/list/1'],
+      [(s) => transition({ patch: [replace((st) => st.n, when(s.ready, noop()))] }), /: transition\(\) patch\[0\] takes values, got a when\(\)/, '/patch/0/value'],
+      [(s) => transition({ patch: [{ op: 'add', path: '/n', value: { a: when(s.ready, noop()) } }] }), /: transition\(\) patch\[0\] takes values, got a when\(\)/, '/patch/0/value/a'],
+      [(s) => transition({ effects: [effect('log', { msg: when(s.ready, noop()) })] }), /: effect\(\) props are a value, got a when\(\)/, '/with/msg'],
+      [(s) => when(s.ready, { state: when(s.ready, noop()) }), /: when\(\) then state is a value, got a when\(\)/, '/then/state'],
+      [(s) => when(when(s.ready, noop()), noop()), /: when\(\) takes a condition .* got a when\(\)/, '/cond'],
+    ])) {
+      assert.throws(() => action(build), (/** @type {any} */ error) => coded('JL0101', pattern)(error) && error.docPath === path,
+        `${pattern} at ${path}`);
+    }
+    // the places a when() belongs still take it: an action's result, and a branch
+    const doc = action((/** @type {any} */ s) => when(s.ready, when(s.n.gt(1), noop()))).document;
+    assert.deepStrictEqual(doc, { $if: ['$.ready', { $if: [{ $gt: ['$.n', 1] }, {}] }] });
   });
 
   it('is refused in a capture that is not an action\'s (JL0005): a subscription, a chain', () => {

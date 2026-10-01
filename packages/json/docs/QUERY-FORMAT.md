@@ -1096,20 +1096,27 @@ difference is `NaN`: F&O writes the symbol alone, ICU with the prefix
 `G` and `M` are giga and mega, never a gram or a metre). A word that names a
 different thing in other places — `ton`, `pound`, `in` — is not in it. *unit*
 is a registry id or an alias; an unknown one is `JQ0003` when literal and
-`JQ2001` when computed.
+`JQ2001` when computed. Where *unit*'s factor is a power of ten, the number
+converts as the decimal the text writes: its digits times the source unit's
+factor, rounded once into a double, so `"0.7 l"` in millilitres is `700` and
+`"3 lbs"` in kilograms `1.36077711`; to any other unit it divides as the
+registry does.
 - The number is written in the format's characters: digits grouped in threes
   or not at all, then an optional fraction after the decimal separator
   (default `.`). Under the Dutch format, `"1,5 kg"` in grams is `1500` and
   `"1.500 gram"` in kilograms is `1.5`; under the default, `"1,5 kg"` holds no
   quantity at all. A minus sign written right before the number reads it
-  negative (`"-2 kg"`).
+  negative (`"-2 kg"`). A number after any other dash, or after a dash and
+  white space (`"–2 kg"`, `"- 2 kg"`), is not read at all: read without the
+  dash, it would lose a sign the writer may have meant.
 - A number that is the tail of something else is not read: after another
-  number and a space (`"1 500 g"`: the space may group thousands, and neither
-  500 nor 1500 is guessed), after a slash (`"1/2 kg"`), at the end of a range
+  number and white space, one character of it or more (`"1 500 g"`: the space
+  may group thousands, and neither 500 nor 1500 is guessed), after a slash (`"1/2 kg"`), at the end of a range
   (`"2-3 kg"`), in an exponent (`"1e3 g"`), or glued to a word (`"B12"`).
 - The unit is a word read whole: a word followed by a digit or a slash names
   something else, so `"300 m2"` is an area and `"30 km/h"` a speed, never a
-  length.
+  length, and a word a hyphen joins to another word is part of it, so
+  `"2 t-shirts"` is no mass.
 - When no quantity of the dimension is there (`"14 cm"` asked in grams), the
   result is the **empty sequence**, not `null`, so `$default` composes like
   JavaScript's `??` over `undefined`.
@@ -1128,7 +1135,7 @@ clause/operator collision note.
 | `$count` | `0` | The number of items in the operand's result (`fn:count`). |
 | `$sum` | `0` | The sum of the items (`fn:sum`). Every item MUST be a number (`JQ2001`). |
 | `$avg` | empty | The arithmetic mean of the items (`fn:avg`). Every item MUST be a number (`JQ2001`). |
-| `$min` | empty | The least item (`fn:min`). Items MUST be all numbers or all strings (`JQ2001` otherwise, including mixed); numbers compare mathematically, strings by Unicode scalar values. A `NaN` item makes the result `NaN` (F&O). |
+| `$min` | empty | The least item (`fn:min`). Items MUST be all numbers or all strings (`JQ2001` otherwise, including mixed); numbers compare mathematically, strings by Unicode scalar values. A `NaN` item makes the result `NaN` (F&O). Of two zeros `-0` is the lesser, as IEEE 754 minimum and maximum order them (F&O leaves it to the implementation): `$min` of `0` and `-0` is `-0`, `$max` is `0`. |
 | `$max` | empty | The greatest item (`fn:max`), same rules as `$min`. |
 
 ### 8.9 Sequence operators — `$distinct $reverse $sort $head $tail $subsequence $index-of $range $get $entries $from-entries`
@@ -1955,7 +1962,10 @@ around it. Text that
 another component produced — a path parser's or a host function's message —
 is a `{detail}` param and stays as it came. An error built without a message
 id (a host's own, with a bare `reason`) carries `query/reason`, which renders
-that reason.
+that reason. A formula error (`@jarenjs/json/formula`) names a message of the
+formula catalog (`formulaMessagesEn`, keys `query/formula/*`) the same way, and
+a query error raised inside a formula keeps its own message, a reference in
+`query/formula/query` ([FORMULA-FORMAT](FORMULA-FORMAT.md#profile-and-capabilities)).
 
 ### 10.2 Compile errors (`JQ0xxx`)
 

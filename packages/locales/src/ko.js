@@ -61,7 +61,7 @@ const typeName = makeTypeNamer(TYPE_NAMES);
  * every `form/*` key of forms' `formsMessagesEn`, `x-form/assert`, the
  * `JQ2xxx` codes reachable through `$query`, every `contract/*`
  * wire-error msgid of `@jarenjs/contract`'s `contractMessagesEn`, and
- * every `query/*` message of `@jarenjs/json`'s `queryMessagesEn`.
+ * every `query/*` message of `@jarenjs/json`'s `queryMessagesEn` and every message of its `formulaMessagesEn`.
  * @type {Record<string, string | ((params: any, error?: object) => string)>}
  */
 export const ko = {
@@ -415,6 +415,49 @@ export const ko = {
   'query/lexical-result': '어휘 검색 공급자가 유효하지 않거나 불완전한 결과를 반환했습니다',
   //#endregion
 
+  //#region @jarenjs/json formulas (the messages of formulaMessagesEn)
+  'query/formula/query': '{formulaId}: {message}',
+  'query/formula/detail': '{formulaId}: {detail}',
+  'query/formula/profile-json': '{formulaId}: 프로필은 JSON이어야 합니다',
+  'query/formula/profile-object': '{formulaId}: 프로필은 객체여야 합니다',
+  'query/formula/profile-version': '{formulaId}: 지원되지 않는 언어 버전입니다',
+  'query/formula/profile-identity': '{formulaId}: {member}은(는) 비어 있지 않아야 하며 최대 256자여야 합니다',
+  'query/formula/profile-expression': '{formulaId}: 식이 필요합니다',
+  'query/formula/profile-result-mode': '{formulaId}: 알 수 없는 결과 모드입니다',
+  'query/formula/profile-bindings': '{formulaId}: bindings는 객체여야 합니다',
+  'query/formula/profile-reserved': '{formulaId}: computed와 context는 예약된 바인딩입니다',
+  'query/formula/profile-helpers': '{formulaId}: helpers는 배열이어야 합니다',
+  'query/formula/profile-helper': '{formulaId}: 각 도우미 함수에는 고유한 이름과 버전이 필요합니다',
+  'query/formula/profile-packs': '{formulaId}: packs는 배열이어야 합니다',
+  'query/formula/profile-pack': '{formulaId}: 각 팩에는 고유한 이름과 버전이 필요합니다',
+  'query/formula/helper-missing': '{formulaId}: 순수 도우미 함수 {name}@{version}이(가) 없거나 호환되지 않습니다',
+  'query/formula/pack-missing': '{formulaId}: 연산자 팩 {name}@{version}이(가) 없거나 호환되지 않습니다',
+  'query/formula/helper-shadows': '{formulaId}: 도우미 함수 {name}의 이름이 나열된 연산자 팩의 함수 이름과 같습니다',
+  'query/formula/schema-missing': '{formulaId}: 스키마 또는 유형 테스트 컴파일러가 없거나 호환되지 않습니다',
+  'query/formula/schema-rejected': '{formulaId}: 스키마가 거부되었습니다',
+  'query/formula/computed-unnamed': '{formulaId}: computed 참조에는 이름이 지정된 대상이 필요합니다',
+  'query/formula/computed-cycle': '{formulaId}: 계산된 종속성이 순환합니다',
+  'query/formula/computed-unknown': '{formulaId}: 알 수 없는 계산 대상입니다',
+  'query/formula/targets-invalid': '{formulaId}: 대상 목록이 올바르지 않습니다',
+  'query/formula/target-identity': '{formulaId}: 각 대상에는 고유한 식별자와 불리언 enabled가 필요합니다',
+  'query/formula/target-schemas': '{formulaId}: 대상의 schemas는 id -> {{version, schema} 형식의 객체여야 합니다',
+  'query/formula/target-schema-clash': "{formulaId}: 같은 id '{id}'에 서로 다른 스키마가 두 개 있습니다",
+  'query/formula/batch-limit': '{formulaId}: 배치의 행 또는 셀 한도를 초과했습니다',
+  'query/formula/row-identity': '{formulaId}: 각 행에는 고유하고 안정적인 ID가 필요합니다',
+  'query/formula/input-schema': '{formulaId}: 입력이 입력 스키마를 충족하지 않습니다',
+  'query/formula/result-schema': '{formulaId}: 결과가 결과 스키마를 충족하지 않습니다',
+  'query/formula/outcome-invalid': '{formulaId}: 태그가 지정된 결과가 올바르지 않습니다',
+  'query/formula/parity-expected': '{formulaId}: 예상 결과 {index}이(가) JSON이 아닙니다',
+  'query/formula/rule-identity': '{formulaId}: 규칙에는 식별자, 대상, 쓰기 가능한 필드가 필요합니다',
+  'query/formula/rule-field-not-writable': '{formulaId}: 대상 필드에 쓸 수 없습니다',
+  'query/formula/rule-rows': '{formulaId}: 제한된 행과 데이터 세트 리비전이 필요합니다',
+  'query/formula/rule-entity-duplicate': '{formulaId}: 엔터티 식별자가 중복되었습니다',
+  'query/formula/rule-preview-stale': '{formulaId}: 미리 보기가 오래되었거나 수정되었습니다',
+  'query/formula/rule-selection-duplicate': '{formulaId}: 선택에는 고유한 변경 ID가 있어야 합니다',
+  'query/formula/rule-selection-unknown': '{formulaId}: 선택한 변경을 알 수 없습니다',
+  'query/formula/rule-conflict': '{formulaId}: 같은 필드에 충돌하는 값이 있습니다',
+  //#endregion
+
   //#region @jarenjs/locales numbers (the decimal format, CLDR as ICU 78.3 ships it)
   'number/decimal-separator': '.',
   'number/grouping-separator': ',',
@@ -425,5 +468,6 @@ export const ko = {
   'number/exponent-separator': 'E',
   'number/infinity': '∞',
   'number/nan': 'NaN',
+  'number/minimum-grouping-digits': '1',
   //#endregion
 };

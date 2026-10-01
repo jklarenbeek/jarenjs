@@ -4,11 +4,13 @@ import { sqliteDialect } from '../dialects/sqlite.js';
 import { sqlTokens } from '../dialects/check-read.js';
 import { DbCompileError, DbRuntimeError } from '../errors.js';
 import { createWorkerConnection } from './worker-client.js';
-import { positiveOption, queueFailure, rowBytes, workerSettings, PROCESS_DEFAULTS } from './worker-protocol.js';
+import { positiveOption, queueFailure, refuseUnknownDriverOptions, rowBytes, workerSettings,
+  PROCESS_DEFAULTS, PROCESS_OPTIONS } from './worker-protocol.js';
 
 /**
  * Finite owned SQLite processes behind the ordinary Driver contract.
  * A quarantined process retains its admission credit until its exit event.
+ * The options are a closed set: a member it does not read is `JD0003`.
  * @param {import('../../types/node-process.js').NodeProcessOptions} [configuration]
  * @returns {import('../../types/node-process.js').NodeProcessDriver}
  */
@@ -18,6 +20,7 @@ export function nodeProcessDriver(configuration = {}) {
     throw new TypeError('endpoint is an option of nodeWorkerDriver and nodeWorkerPoolDriver; the supervised '
       + 'process host forks its own endpoint beside the installed @jarenjs/db');
   }
+  refuseUnknownDriverOptions(configuration, PROCESS_OPTIONS, 'nodeProcessDriver');
   const maxOwners = positiveOption('maxOwners', configuration.maxOwners, PROCESS_DEFAULTS.maxOwners);
   const timeoutMs = positiveOption('timeoutMs', configuration.timeoutMs, PROCESS_DEFAULTS.timeoutMs);
   const maxRequestBytes = positiveOption('maxRequestBytes', configuration.maxRequestBytes, PROCESS_DEFAULTS.maxRequestBytes);

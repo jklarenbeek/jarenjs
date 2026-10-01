@@ -63,7 +63,7 @@ const typeName = makeTypeNamer(TYPE_NAMES);
  * `form/*` key of forms' `formsMessagesEn`, `x-form/assert`, the
  * `JQ2xxx` codes reachable through `$query`, every `contract/*`
  * wire-error msgid of `@jarenjs/contract`'s `contractMessagesEn`, and
- * every `query/*` message of `@jarenjs/json`'s `queryMessagesEn`.
+ * every `query/*` message of `@jarenjs/json`'s `queryMessagesEn` and every message of its `formulaMessagesEn`.
  * @type {Record<string, string | ((params: any, error?: object) => string)>}
  */
 export const fr = {
@@ -417,6 +417,49 @@ export const fr = {
   'query/lexical-result': 'le fournisseur lexical a renvoyé un résultat invalide ou incomplet',
   //#endregion
 
+  //#region @jarenjs/json formulas (the messages of formulaMessagesEn)
+  'query/formula/query': '{formulaId} : {message}',
+  'query/formula/detail': '{formulaId} : {detail}',
+  'query/formula/profile-json': '{formulaId} : le profil doit être du JSON',
+  'query/formula/profile-object': '{formulaId} : le profil doit être un objet',
+  'query/formula/profile-version': '{formulaId} : version de langage non prise en charge',
+  'query/formula/profile-identity': '{formulaId} : {member} doit être non vide et compter au plus 256 caractères',
+  'query/formula/profile-expression': "{formulaId} : l'expression est obligatoire",
+  'query/formula/profile-result-mode': '{formulaId} : mode de résultat inconnu',
+  'query/formula/profile-bindings': '{formulaId} : bindings doit être un objet',
+  'query/formula/profile-reserved': '{formulaId} : computed et context sont des liaisons réservées',
+  'query/formula/profile-helpers': '{formulaId} : helpers doit être un tableau',
+  'query/formula/profile-helper': '{formulaId} : chaque fonction auxiliaire exige un nom unique et une version',
+  'query/formula/profile-packs': '{formulaId} : packs doit être un tableau',
+  'query/formula/profile-pack': '{formulaId} : chaque paquet exige un nom unique et une version',
+  'query/formula/helper-missing': '{formulaId} : la fonction auxiliaire pure {name}@{version} est absente ou incompatible',
+  'query/formula/pack-missing': "{formulaId} : le paquet d'opérateurs {name}@{version} est absent ou incompatible",
+  'query/formula/helper-shadows': "{formulaId} : la fonction auxiliaire {name} porte le nom d'une fonction d'un paquet d'opérateurs listé",
+  'query/formula/schema-missing': '{formulaId} : le schéma ou le compilateur de tests de type est absent ou incompatible',
+  'query/formula/schema-rejected': '{formulaId} : schéma refusé',
+  'query/formula/computed-unnamed': '{formulaId} : une référence à computed doit nommer sa cible',
+  'query/formula/computed-cycle': '{formulaId} : les dépendances calculées forment un cycle',
+  'query/formula/computed-unknown': '{formulaId} : cible calculée inconnue',
+  'query/formula/targets-invalid': '{formulaId} : liste de cibles invalide',
+  'query/formula/target-identity': '{formulaId} : chaque cible exige une identité unique et un booléen enabled',
+  'query/formula/target-schemas': "{formulaId} : les schémas d'une cible doivent être un objet id -> {{version, schema}",
+  'query/formula/target-schema-clash': "{formulaId} : deux schémas différents sous le même id '{id}'",
+  'query/formula/batch-limit': '{formulaId} : limite de lignes ou de cellules du lot dépassée',
+  'query/formula/row-identity': '{formulaId} : chaque ligne exige un identifiant unique et stable',
+  'query/formula/input-schema': "{formulaId} : l'entrée ne satisfait pas le schéma d'entrée",
+  'query/formula/result-schema': '{formulaId} : le résultat ne satisfait pas le schéma de résultat',
+  'query/formula/outcome-invalid': '{formulaId} : résultat étiqueté invalide',
+  'query/formula/parity-expected': "{formulaId} : le résultat attendu {index} n'est pas du JSON",
+  'query/formula/rule-identity': '{formulaId} : une règle exige une identité, des cibles et des champs modifiables',
+  'query/formula/rule-field-not-writable': "{formulaId} : le champ cible n'est pas modifiable",
+  'query/formula/rule-rows': '{formulaId} : des lignes bornées et une révision du jeu de données sont requises',
+  'query/formula/rule-entity-duplicate': "{formulaId} : identité d'entité en double",
+  'query/formula/rule-preview-stale': '{formulaId} : aperçu périmé ou modifié',
+  'query/formula/rule-selection-duplicate': '{formulaId} : la sélection doit contenir des identifiants de modification uniques',
+  'query/formula/rule-selection-unknown': '{formulaId} : modification sélectionnée inconnue',
+  'query/formula/rule-conflict': '{formulaId} : valeurs contradictoires pour un même champ',
+  //#endregion
+
   //#region @jarenjs/locales numbers (the decimal format, CLDR as ICU 78.3 ships it)
   'number/decimal-separator': ',',
   'number/grouping-separator': '\u202f',
@@ -427,5 +470,6 @@ export const fr = {
   'number/exponent-separator': 'E',
   'number/infinity': '∞',
   'number/nan': 'NaN',
+  'number/minimum-grouping-digits': '1',
   //#endregion
 };

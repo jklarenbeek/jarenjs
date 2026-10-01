@@ -159,6 +159,13 @@ establish registry publication or downstream acceptance.
   semantics. APP-FORMAT §8.4/§8.7 state the contracts that audit would have to
   prove.
 - [ ] **First-class awaiting action documents** — the async-task convention and `createTaskEffect` cover the pattern without a format change (`packages/app/docs/TASKS.md`); making *awaiting* expressible in the action document itself is the open half (APP-FORMAT §11).
+- [ ] **Two property writes the renderers still spell differently.** The
+  property table settles enumerated attributes and removal, and both renderers
+  read it. `true` given to a non-boolean property is still written `"true"` by
+  the DOM renderer and as a bare attribute by SSR, and a trusted inline handler
+  string (`onclick: '…'`) is dropped on the DOM property path while SSR writes
+  it as a live attribute. Each needs a rule in the table and a decision on the
+  trusted-mode handler string before either renderer changes.
 - [ ] **Native IME verification** — composition-aware controlled writes,
   caret preservation, multiple selects and the safe create/update/remove/reinsert
   corpus are exercised in Chromium, Firefox and WebKit. The automated tests
@@ -173,12 +180,26 @@ establish registry publication or downstream acceptance.
   `@jarenjs/josl` incremental readers is the natural 0.2 composition,
   and doing it honestly changes the node contract, so it is a format
   revision rather than an option.
+- [ ] **A whole-graph checkpoint rule in the pen's types** — the flow pen's
+  types refuse a checkpoint on an unversioned task node, but a graph with a
+  checkpoint on its input node and an unversioned task elsewhere type-checks
+  and only `compileDag` refuses it (`JF0011`). "Any checkpoint means every task
+  is versioned" is a property of the whole graph, which the builder's types
+  would have to carry from node to node.
 - [ ] **Editor: free-form geometry** — the Flow studio lays out every
   diagram deterministically and connects by click-source-then-target;
   free-form node dragging and *persisted* positions are out of scope for
   0.1 (geometry never enters the document). A `meta.layout` side-table
   would let a user override the auto-layout without polluting the AST —
   the honest place to add it if a consumer asks.
+
+## @jarenjs/contract
+
+- [ ] **A retry policy on a subscribe operation is never read.** `policy.retry`
+  on a subscribe operation compiles and has no effect, since a stream is not
+  retried as a call is. The `retry-on-undeclared` lint flags an entry that names
+  a stream code, but an entry naming a declared code passes. Refusing a retry
+  policy where it cannot apply is a lint rule of its own.
 
 ## @jarenjs/md
 
@@ -374,7 +395,11 @@ what each does is its own documentation's job
 - [ ] **Broader relational mapping and query qualification.** Explicit SQLite and PostgreSQL
   column layouts, codecs, read-only views and composite-key join-table entities
   are supported ([MODEL-FORMAT §12](../packages/db/docs/MODEL-FORMAT.md#12-existing-column-layouts)).
-  Relation navigation across physical layouts, codec-aware keyset continuation,
+  Physical tables page by integer, bigint and text identities on SQLite
+  ([MODEL-FORMAT §10.5](../packages/db/docs/MODEL-FORMAT.md#105-pagination)).
+  Relation navigation across physical layouts, keyset continuation over a `uuid`
+  key (it reads back lowercase whatever the table stores, so its decoded value does
+  not compare as the stored one) and over any physical table on PostgreSQL,
   pushdown beyond the qualified native census and additional PostgreSQL types remain
   open. Application trigger/cascade capture and replication remain refused until their complete
   writer population has an executable oracle.
@@ -386,6 +411,10 @@ what each does is its own documentation's job
   (a physical layout verifies no unique index), probes of the rule's own table
   and the stored-row walk of a PostgreSQL migration over physical entities
   remain open. Store-only rules retain their explicit writer qualification.
+  SQLite's change test compares each column under its declared collation and
+  stored spelling (§13.4), where PostgreSQL and the store compare by codec;
+  comparing by code point would change the text of every installed update
+  program, so it waits for a reviewed migration of installed programs.
   General interval seek/indexing remains separate from the supported
   cross-member predicate.
 - [ ] **Broader native authoring for legacy SQL.** The executable census now
@@ -427,7 +456,9 @@ what each does is its own documentation's job
   relations at open because its write journal cannot observe those database
   side effects. Removing that refusal requires transactional child before/after
   capture across all delete paths, including replay and unit-of-work writes.
-  Independent field merges require a declared resolver policy.
+  Independent field merges require a declared resolver policy. A store on
+  several PostgreSQL sessions (`sessions` above 1) refuses `replication`
+  (`JD0009`): its pages, snapshots and applies are qualified on one session.
 - [ ] **Remaining incremental live shapes.**
   [The matrix](../packages/db/docs/LIVE-FORMAT.md) retains self joins,
   non-equality and unindexed joins, reverse many-to-many edges without an
@@ -452,6 +483,28 @@ what each does is its own documentation's job
   describe documents between transform steps. Typed SQL promotion needs an
   intermediate-schema contract and equivalent numeric/order/error semantics;
   inferring that schema from either endpoint can return a wrong answer.
+- [ ] **Finalizing what the query engine's semantic cache evicts.** The
+  relational statement cache finalizes a statement it evicts once no call runs
+  on it, so a worker host's `maxStatements` bounds what it should; the query
+  engine's semantic cache still evicts without finalizing, so a store that plans
+  more distinct query texts than a worker's `maxStatements` over its life meets
+  `JD2092`. The finalize path exists in the worker client and the pool; wiring
+  the semantic cache to it is open.
+- [ ] **Long membership chains over a PostgreSQL collection member.** A
+  same-member `$or` folds into one bound list, and an entity column answers a
+  chain of equalities quickly, but a chain that cannot fold over a collection's
+  document member compiles to a `CASE` over `jsonb_typeof` per term: 2,000 terms
+  over 2,000 documents take about 16 s, and a 5,000-term chain kept a backend
+  running after its client went away, past both `pg_cancel_backend` and
+  `pg_terminate_backend`. Wanted: the typed fold a column gets, or a bound on the
+  terms such a chain may compile to.
+- [ ] **A predicate callback that answers a JavaScript boolean.** A pen
+  predicate written `x => x.a === null` captures the comparison as JavaScript
+  evaluates it on the capture — a constant — because `===` cannot be trapped,
+  and a constant predicate is a legal spelling. The pens refuse the trappable
+  forms (`==`, templates, `+`) and their docs name every untrappable one;
+  refusing a callback that returns a bare boolean would change the capture's
+  contract, so it needs a decision first.
 - [ ] **An interval declaration is needed before `$overlaps` can seek.**
   The current prefilter retains malformed stored spans so the engine can raise
   the required error; that extra disjunct prevents an index seek.
@@ -485,10 +538,20 @@ implemented in [FORMULA-FORMAT](../packages/json/docs/FORMULA-FORMAT.md) and
 [@jarenjs/rules](../components/rules/README.md). Reviewed writes use the existing
 validated command/receipt transaction with current-authority and snapshot checks.
 
-- [ ] Resolve real saved-source corpora with application owners. Statements,
-  optional chaining, Intl formatting and application helper/result policies
-  require explicit manual rewrites or further measured converters; retain the
-  application-selected trusted runner until every original is resolved.
+- [ ] Resolve real saved-source corpora with application owners. The
+  translator covers a measured corpus with every remaining difference named and
+  positioned; what stays open is what such a corpus needs beyond the translated
+  subset — regular-expression captures (`.match(…)[n]`) and a first-occurrence
+  `.replace`, a string-or-array `.length`/`.includes` on a field no host schema
+  types, and each application's helper and result policies, which decide the
+  differences a translation names. Retain the application-selected trusted
+  runner until every original is resolved.
+- [ ] `FormulaError` messages are English: the formula engine's 19 raise sites
+  pass their reason through `query/reason`, where the query engine's own messages
+  are catalog entries every locale pack translates.
+- [ ] A per-dimension unit registry: `$quantity` carries every dimension's unit
+  table, though its words name only mass, volume and length, because the
+  registry is one module.
 - [ ] Qualify real downstream adoption, physical-device behavior and manual
   accessibility. Automated synthetic Node/Bun and browser results do not prove
   those host/operator outcomes.
@@ -560,6 +623,10 @@ production cutover. Streaming DAG input is not required by this composition.
   schemas and rules. Other operating systems, PostgreSQL and downstream/manual
   acceptance remain open beyond the combined Linux executable proof; synthetic
   restart, takeover and observer evidence do not substitute for those runs.
+  A conformance kit for host-owned run tables — tests a host runs against its
+  own table to prove it keeps the run store's contract — is an open decision:
+  the store's adapters are typed for every durable client, and no host has
+  needed the kit to adopt them.
 
 ## Native application adoption — external qualification
 
@@ -597,6 +664,76 @@ entry remains pending until its actual host and operator evidence exists.
   handles need a matching measurement for each combined host/workload. Sampled
   heap, process high-water RSS and focused component teardown do not fill those
   cells in the [complete budget comparison](ADOPTION-EVIDENCE.md#complete-frozen-budget-comparison).
+
+## Windows qualification (cross-package)
+
+Nothing below has run on Windows; [HOSTS.md](../packages/db/docs/HOSTS.md)
+says as much of the owner lease. The suite's Windows CI runs the
+tests on every push; these behaviours depend on Windows file locking, sockets,
+process termination, timers, links or line endings in ways a Linux run cannot
+show, so each needs a run on a Windows machine and its result recorded here.
+
+- [ ] **Files and SQLite locking.**
+  - A refused `openStore` (a malformed option value) creates no file and
+    holds no handle: its temp directory is removable at once.
+  - The owner lease (`test/db/owner-lease.test.js`): a second process refused
+    while the first holds it, a killed holder's lease expiring, `close()`
+    releasing at once, a read-only open never refused. `BEGIN IMMEDIATE` under
+    the lease bracket and the renewal's busy wait meet Windows file locking;
+    `child.kill('SIGKILL')` is `TerminateProcess`, so a killed child's handle
+    may outlive it for longer; the renewal test runs on the wall clock (3 s,
+    margins of 150 ms).
+  - Two worker-thread stores racing on one file
+    (`test/db/collection-expect.test.js`, 300 rounds of `BEGIN IMMEDIATE`,
+    bounded by the 5 s busy timeout), and a second `DatabaseSync` holding a
+    writer while a store refuses options.
+  - Keyset pages over adopted files, including a malformed-UTF-8 key
+    (`test/db/physical-page.test.js`); list membership on a file-backed store
+    read by a second connection (`test/db/list-membership.test.js`,
+    `test/linq/list-membership.test.js`).
+  - Migrations: host steps on a worker store (`migrate-host-step`), foreign
+    keys with a raw second connection writing an orphan (`migrate-foreign-keys`),
+    atomic runs, adopted history and the planner goldens, whose JSON fixtures
+    rely on LF checkouts (`.gitattributes` sets `eol=lf`).
+  - Every test and README example that removes a temp directory after
+    `close()`: watch for `EBUSY`/`EPERM` when a worker's handle outlives it.
+- [ ] **Worker and pool hosts.** `test/db/relational-store.test.js` and
+  `quirks-relational.test.js` (`node-worker` and a WAL `node-pool` over a temp
+  file: the reader-lane assertion and the WAL sidecars); the hold limit, retry
+  and connection loss (`transaction-hold`, `transaction-retry` with its README
+  runner, `connection-loss`, `quirks-transactions` with 100 ms holds near the
+  limit); `pool-parallel-reads` (a held read given back on close within
+  2,500 ms). A worker `endpoint` is a URL: on Windows it is
+  `pathToFileURL(path)`, never a `C:\` path. Compiled executables are
+  qualified on Linux only.
+- [ ] **Sockets.** `test/contract/node-framework.test.js` drives Fastify over
+  loopback: its slow reader depends on loopback buffering (Winsock's smaller
+  buffers should give up sooner; the bound reads `writableHighWaterMark`), and
+  its chunked-upload 413s rely on the linger that keeps an RST from eating the
+  answer. `server-surface-quirks.test.js` and `binding-quirks.test.js` open real
+  servers on `127.0.0.1`; `test/contract/cli.test.js` spawns `node` in a temp
+  directory and removes it.
+- [ ] **Processes and runtimes.** The cross-process ledger test
+  (`test/linq/db-ledger.test.js`) spawns `node --input-type=module -e` or
+  `bun -e`; `test/db/numeric-keys.test.js` and `migrate-foreign-keys` spawn
+  `bun` when present, which must resolve to `bun.exe`.
+- [ ] **Links, paths and line endings.** `buildImportMap` compares real paths
+  and reports URLs and duplicates with `/`; `test/emit/importmap.test.js` builds
+  its fixture behind a junction (no privilege needed), and a short `8.3` temp
+  path is the case to watch. The task documents (`test/linq/app-tasks.test.js`,
+  `test/app/tasks.test.js`) and the formula corpus split their text on LF, which
+  `.gitattributes` keeps; the translator counts CRLF as one line break.
+- [ ] **PostgreSQL from Windows.** `test/db/postgres-sessions.test.js` and the
+  other server tests against a Windows-hosted or remote server: their timing
+  bounds (an unrelated call under 250 ms, tracked work under 500 ms) assume a
+  local one. Its server-less part opens two SQLite connections to one file and
+  closes a store with transactions in flight.
+- [ ] **Timers, focus and input.** `test/app/settled.test.js` and
+  `test/view/controlled.test.js` schedule with `setTimeout(…, 0)` and wait on
+  promises; the focus end-to-end test uses real keyboard input, where OS-level
+  IME and focus behaviour is what a Windows run would surface. The ICU
+  cross-check of number formatting skips unless the runtime's ICU is the one it
+  was measured against.
 
 ## Dates & times (cross-package)
 
@@ -687,6 +824,16 @@ still open is listed here, each with its reason.
   (~577k), and records the loss here rather than pretending the gap is small.
 
 ## Benchmarks & tooling
+
+- [ ] **The import map reads `exports` and `main` as Node does, short of three
+  edges.** A `main` that names a missing file is taken literally, where Node also
+  tries `main.js` and `main/index.js` before `./index.js`; an export target that is
+  a number or a boolean is passed over, where Node raises
+  `ERR_INVALID_PACKAGE_TARGET`; and following `optionalDependencies` can reach a
+  platform-binary package with no JavaScript entry, whose `./index.js` is then
+  reported unresolved. None occurs in the suite's own closure; each needs a
+  deliberate rule for which of Node's fallbacks a browser map should copy, since a
+  map cannot probe the file system at load time as Node does.
 
 - [ ] **`vector.js`'s largest leg needs about 1.5 GB.** 50,000 × 768 holds one
   in-memory SQLite database of roughly a gigabyte beside a 153 MB resident

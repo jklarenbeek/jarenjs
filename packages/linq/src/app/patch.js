@@ -19,13 +19,16 @@
  *
  * A `value` is left exactly as the caller wrote it — an expression from
  * the enclosing action capture, or a literal — because the action
- * capture is what spells the whole transition.
+ * capture is what spells the whole transition. A `when()` is the one
+ * thing it cannot be: that is a transition, and `readPatch` refuses it
+ * wherever an operation holds one.
  */
 
 import { LinqBuildError } from '../errors.js';
 import { liftExpression } from '../expression.js';
 import { describeValue } from '../json-boundary.js';
 import { captureAction } from './capture.js';
+import { refuseConditional } from './conditional.js';
 
 /** RFC 6901: `~` and `/` escape inside a pointer segment. @param {string} segment */
 const escapeSegment = (segment) => segment.replaceAll('~', '~0').replaceAll('/', '~1');
@@ -273,6 +276,7 @@ export function readPatch(list, who = 'transition()') {
         `${who} patch[${i}] is one of add/replace/remove/move/copy/test, got `
         + describeValue(op), `/patch/${i}`);
     }
+    refuseConditional(op, `${who} patch[${i}] takes values`, `/patch/${i}`);
     return op;
   });
 }

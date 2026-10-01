@@ -322,16 +322,22 @@ export function adaptPostgresClient(client, options = undefined) {
 
   // Command tags come from the server, including for statements prepared
   // through the public raw adapter. ROLLBACK TO keeps the transaction open.
+  // `transactions` counts transaction boundaries — each BEGIN, COMMIT and
+  // ROLLBACK — so a cursor can tell whether the transaction it was declared
+  // in is still the one running.
+  let transactions = 0;
   const observe = (result, sql) => {
     for (const item of Array.isArray(result) ? result : [result]) {
       if (item?.command === 'BEGIN' || /^\s*(BEGIN|START TRANSACTION)\b/i.test(sql)) {
-        inTransaction = true; fate = 'active'; wrote = false;
+        inTransaction = true; fate = 'active'; wrote = false; transactions += 1;
       }
       if (item?.command === 'COMMIT' || /^\s*(COMMIT|END)\b/i.test(sql)) {
         inTransaction = /\bAND CHAIN\s*;?\s*$/i.test(sql); fate = inTransaction ? 'active' : 'committed';
+        transactions += 1;
       }
       if ((item?.command === 'ROLLBACK' || /^\s*ROLLBACK\b/i.test(sql)) && !/\bTO\b/i.test(sql)) {
         inTransaction = /\bAND CHAIN\s*;?\s*$/i.test(sql); fate = inTransaction ? 'active' : 'rolled-back';
+        transactions += 1;
       }
     }
     return result;
@@ -344,6 +350,7 @@ export function adaptPostgresClient(client, options = undefined) {
     // (`SELECT fn()` can insert): the caller's declaration decides too
     const changes = writes || mayWrite(sql);
     const operation = { id: ++querySequence, owner, writes: changes && !inTransaction };
+    let result;
     activeQuery = operation;
     if (inTransaction && changes) wrote = true;
     try {
@@ -355,9 +362,8 @@ export function adaptPostgresClient(client, options = undefined) {
         if (!operationNames.has(name)) { operationNames.add(name); sessionStatementCounts.set(options?.cacheIdentity ?? client, count); }
         if ((sessionStatementCounts.get(options?.cacheIdentity ?? client) ?? 0) >= limits.maxStatements) retire = true;
       }
-      const result = await (name !== undefined ? client.query({ name, text: sql, values })
-        : values !== undefined ? client.query({ text: sql, values, queryMode: 'extended' }) : client.query(sql));
-      return observe(result, sql);
+      result = observe(await (name !== undefined ? client.query({ name, text: sql, values })
+        : values !== undefined ? client.query({ text: sql, values, queryMode: 'extended' }) : client.query(sql)), sql);
     }
     catch (error) {
       if (/^\s*COMMIT\b/i.test(sql) && !/^(23|40)/.test(error?.code ?? '')) fate = 'unknown';
@@ -378,10 +384,19 @@ export function adaptPostgresClient(client, options = undefined) {
       try { if (cancelling !== null) await cancelling; }
       finally { if (activeQuery === operation) activeQuery = null; lease.release(); }
     }
+    // The server answers COMMIT with ROLLBACK when an earlier failure
+    // aborted the transaction (a statement the body caught): nothing in
+    // it was committed, so the commit refuses instead of succeeding.
+    if (/^\s*(COMMIT|END)\b/i.test(sql) && (Array.isArray(result) ? result : [result]).some((item) => item?.command === 'ROLLBACK')) {
+      throw Object.assign(new DbRuntimeError('JD2088',
+        'the transaction was aborted by an earlier failure in it, so its COMMIT rolled it back'),
+      { class: 'aborted', retryable: false });
+    }
+    return result;
   };
   const operationNames = new Set();
   const cursors = postgresCursors({ query: (sql, params, owner) => query(sql, params, undefined, owner), status, normalize: normalizeRows, cancel,
-    unhealthy: (error) => { poisoned = error; } }, limits);
+    generation: () => transactions, unhealthy: (error) => { poisoned = error; } }, limits);
   const boundedRows = (result) => {
     const rows = normalizeRows(result);
     if (rows.length > limits.allMaxRows || rows.reduce((n, row) => n + rowBytes(row), 0) > limits.allMaxBytes)

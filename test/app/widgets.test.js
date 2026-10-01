@@ -138,6 +138,35 @@ describe('widgets in the app loop', function () {
       '$event.shiftKey crossed the widget boundary as data');
   });
 
+  it('a frame that fails after a widget hook failed reports both on its own dispatch, and the next frame reports nothing', function () {
+    const unmountFailure = new Error('unmount of the renamed widget');
+    const { document, container } = createStubHost();
+    /** @type {unknown[]} */
+    const reported = [];
+    const app = createApp({
+      $app: '0.1',
+      state: { name: 'w' },
+      view: [{ match: '$', body: { $if: [{ $eq: ['$.name', 'none'] }, ['p', {}, 'healthy'],
+        ['div', {}, ['jaren-widget', { name: '$.name' }]]] } }],
+      actions: { set: { patch: [{ op: 'replace', path: '/name', value: '$payload' }] } },
+    }, {
+      node: container,
+      document,
+      schedule: sync,
+      widgets: { w: { mount: () => ({}), unmount: () => { throw unmountFailure; } } },
+      onError: (error) => reported.push(error),
+    });
+    app.dispatch('set', 'nope');
+    assert.strictEqual(reported.length, 1);
+    const failure = /** @type {AggregateError} */ (reported[0]);
+    assert.ok(failure instanceof AggregateError);
+    assert.strictEqual(failure.errors[0], unmountFailure);
+    assert.match(failure.errors[1].message, /unregistered widget 'nope'/);
+    app.dispatch('set', 'none');
+    assert.strictEqual(reported.length, 1, 'the healthy frame reports nothing');
+    app.destroy();
+  });
+
   it('with the JSLT memo, a transition outside the widget\'s state slice produces zero widget calls', function () {
     const { app, log } = mountGrid();
     app.dispatch('bump');

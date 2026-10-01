@@ -1,7 +1,8 @@
 //@ts-check
 /** Structured-clone frames; identities belong to one connection generation. */
-import { DbRuntimeError } from '../errors.js';
+import { DbCompileError, DbRuntimeError } from '../errors.js';
 import { jsonStringBytes } from '../json-bytes.js';
+import { refuseUnknownMembers } from '../options.js';
 
 export const WORKER_PROTOCOL_VERSION = 1;
 /** The mark a driver puts in its worker's `workerData`: an endpoint serves
@@ -12,6 +13,32 @@ export const WORKER_DEFAULTS = Object.freeze({ windowRows: 64, windowBytes: 1048
   allMaxBytes: 16777216, closeTimeoutMs: 5000, startupTimeoutMs: 10000 });
 export const PROCESS_DEFAULTS = Object.freeze({ ...WORKER_DEFAULTS, closeTimeoutMs: 1000,
   maxOwners: 4, timeoutMs: 250, maxRequestBytes: 1048576 });
+
+/** Every member `nodeWorkerDriver` reads, which is also what a pool's
+ * `worker` member holds. A CLOSED set: a misspelt `windowRow` used to
+ * leave the default in force without a word. */
+export const WORKER_OPTIONS = Object.freeze([...Object.keys(WORKER_DEFAULTS), 'endpoint']);
+/** What `nodeProcessDriver` reads: the worker's limits and its own. It
+ * reads `endpoint` only to refuse it by name — the process host forks
+ * its own endpoint. */
+export const PROCESS_OPTIONS = Object.freeze([...Object.keys(PROCESS_DEFAULTS), 'endpoint']);
+/** What `nodeWorkerPoolDriver` reads; `worker` is `WORKER_OPTIONS`'s set. */
+export const POOL_OPTIONS = Object.freeze(['readers', 'queueCapacity', 'graceMs', 'worker', 'endpoint']);
+
+/**
+ * Refuse a host driver option outside its closed set (`JD0003`, the
+ * configuration refusal `postgresDriver` raises for its own), naming the
+ * nearest member the driver reads — when the driver is made, before any
+ * worker or process starts.
+ * @param {any} options
+ * @param {readonly string[]} known
+ * @param {string} owner - how the call reads, for the message
+ */
+export function refuseUnknownDriverOptions(options, known, owner) {
+  if (options === null || typeof options !== 'object') return;
+  refuseUnknownMembers(options, known, (key, hint) =>
+    new DbCompileError('JD0003', `${owner} option '${key}' is not one it reads${hint}`));
+}
 const operations = new Set(['exec', 'prepare', 'run', 'get', 'iterate', 'next', 'return', 'finalize', 'close']);
 
 /** @param {number} generation @param {boolean} [transaction] @param {unknown} [cause] */

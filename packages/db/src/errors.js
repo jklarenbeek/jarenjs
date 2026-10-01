@@ -38,7 +38,7 @@ export const DB_CODES = Object.freeze({
   JD0009: 'an open option is outside the closed set openStore reads, or its value is malformed',
   JD0010: 'strict mode refused a residual',
   JD0011: 'the profile refused the document',
-  JD0012: 'work waited too long for the open transaction to settle',
+  JD0012: 'work waited too long for the connection a transaction or another call held',
   JD0013: 'an option passed to a store operation is not one it reads, or is malformed',
   JD0014: 'a transaction guarantee was requested where it cannot act',
   JD0015: 'owner was asked of an adopted store whose database has no owner table',

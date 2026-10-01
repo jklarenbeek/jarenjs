@@ -27,6 +27,14 @@ export function postgresCursors(host, limits) {
         throw new DbRuntimeError('JD2091', 'the PostgreSQL cursor capacity is exhausted');
       const name = `jaren_c${++sequence}`;
       let rows = [], offset = 0, done = false, declared = false, closing, timer, expired, tail = Promise.resolve();
+      /** The transaction the cursor was declared in. @type {number | undefined} */
+      let born;
+      // that transaction settled — the server closed the cursor with it, and
+      // a FETCH or CLOSE sent now would land outside it, or inside the next
+      // owner's transaction, which one failing statement aborts
+      const outlived = () => declared && host.generation() !== born;
+      const settledUnder = () => new DbRuntimeError('JD2070', 'the transaction this cursor read in has settled, and '
+        + 'its rows went with it: a pull after that never reaches the connection');
       const finish = () => {
         if (closing !== undefined) return closing;
         done = true;
@@ -34,7 +42,7 @@ export function postgresCursors(host, limits) {
         rows = [];
         closing = (async () => {
           try {
-            if (declared && host.status() !== 'E') await host.query(`CLOSE "${name}"`, undefined, name);
+            if (declared && host.status() !== 'E' && !outlived()) await host.query(`CLOSE "${name}"`, undefined, name);
           }
           catch (error) {
             // Transaction settlement may already have removed its cursors.
@@ -51,6 +59,7 @@ export function postgresCursors(host, limits) {
             if (done) return { done: true, value: undefined };
             try {
               if (offset >= rows.length) {
+                if (outlived()) throw settledUnder();
                 const result = await host.query(`FETCH FORWARD ${windowRows} FROM "${name}"`, undefined, name);
                 if (expired) throw expired;
                 const batch = host.normalize(result);
@@ -69,7 +78,14 @@ export function postgresCursors(host, limits) {
               rows[offset++] = undefined;
               return { done: false, value };
             }
-            catch (error) { if (automatic) failed = true; await finish().catch(() => {}); throw error; }
+            catch (error) {
+              if (automatic) failed = true;
+              await finish().catch(() => {});
+              // the transaction settled while the pull was on its way: the
+              // same refusal as a pull made after it
+              if (error?.code === '34000' && outlived()) throw settledUnder();
+              throw error;
+            }
           });
           tail = next.catch(() => {});
           return next;
@@ -94,6 +110,7 @@ export function postgresCursors(host, limits) {
         await opening;
         if (done) { await closing; return cursor; }
         await host.query(`DECLARE "${name}" NO SCROLL CURSOR FOR ${sql}`, params, name);
+        born = host.generation();
         declared = true;
         if (done) { await closing; return cursor; }
         timer = setTimeout(() => {

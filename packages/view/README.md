@@ -68,7 +68,11 @@ written with its own keyword: `spellcheck: false` and `spellcheck: 'false'`
 both turn spell-checking off, where the boolean DOM property reads the
 string `'false'` as on. `null`, `false` or a removed prop on a property that
 is not boolean removes its attribute, so a removed `size` throws nothing and
-a removed `href` leaves no link. A tag that is not an element name
+a removed `href` leaves no link. `true` on a property that is not boolean
+writes the empty attribute and a string on a number-typed property writes the
+string, so `download: true` is a download with no name of its own and
+`width: '100px'` never becomes `width="0"` — on the client as in the markup,
+and through hydration. A tag that is not an element name
 (`['Total:', 3]`, `[' ', …]`) throws a `TypeError` naming its JSON Pointer in
 both renderers; `[null, 'Total:', 3]` is the list that was meant.
 

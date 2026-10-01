@@ -600,7 +600,10 @@ no-ops.
 `createApp` forwards `safe`, `onUnsafe`, `hydrate` and `controlled` to its DOM
 renderer (VIEW-FORMAT §3/§6/§8). `controlled: 'focus'` lets a text control the
 operator is typing into keep their text through a state change until it loses
-focus; the state's value is reconciled then. The dialog widget's content
+focus; the state's value is reconciled then. The standard form view's `json`
+editor is not a controlled control: it is keyed by its value's text, so a
+change to that value shows at once, focused or not, and every other render
+keeps what the operator is typing in either mode. The dialog widget's content
 renders under the same mode. Any other value is a `TypeError`. `capabilities` optionally grants names from the host's
 `effects`, `subs`, `widgets` and `eventFields` registries:
 

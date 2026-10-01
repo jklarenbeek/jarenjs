@@ -13,6 +13,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert';
 import http from 'node:http';
+import net from 'node:net';
 import { EventEmitter, once } from 'node:events';
 
 import { compileContract } from '@jarenjs/contract';
@@ -20,6 +21,7 @@ import { serveHttp } from '@jarenjs/contract/http';
 import { toNodeHandler } from '@jarenjs/contract/node';
 import { toFetchHandler } from '@jarenjs/contract/fetch';
 import { createMemoryLedger } from '@jarenjs/contract/ledger';
+import { openHttpClient } from '@jarenjs/contract/client';
 import { load, shopHandlers } from './helpers.js';
 
 const shop = compileContract(load('./fixtures/shop.contract.json'));
@@ -301,6 +303,129 @@ describe('adapters — headers and the signal', () => {
       // through the fetch adapter the platform combines lines: the array member still collects
       const combined = await toFetchHandler(serveHttp(contract, { a: (input) => input }))(new Request('http://x/a', { headers: [['x-tags', 'red'], ['x-tags', 'blue']] }));
       assert.deepStrictEqual(await combined.json(), { 'x-tags': ['red', 'blue'] });
+    }
+    finally {
+      s.closeAllConnections();
+      s.close();
+      await once(s, 'close');
+    }
+  });
+
+  it('an array header member reads the same array behind both adapters: every repeated line is split as one line is (RFC 9110 §5.3)', async () => {
+    const contract = compileContract({ $contract: '0.1', operations: { a: {
+      kind: 'read', input: { type: 'object', properties: { 'x-tags': { type: 'array', items: { type: 'string', pattern: '^[a-z]+$' } } } },
+      output: true, http: { method: 'GET', path: '/a', in: { 'x-tags': 'header' } } } } });
+    /** @type {any[]} */
+    const seen = [];
+    const served = serveHttp(contract, { a: (input, ctx) => { seen.push(ctx.headers['x-tags']); return input; } });
+    const s = http.createServer(toNodeHandler(served));
+    s.listen(0, '127.0.0.1');
+    await once(s, 'listening');
+    const port = /** @type {import('node:net').AddressInfo} */ (s.address()).port;
+    /** @param {string[]} lines */
+    const viaNode = (lines) => new Promise((resolve, reject) => {
+      http.get({ host: '127.0.0.1', port, path: '/a', headers: { 'x-tags': lines } }, async (res) => {
+        let text = '';
+        for await (const c of res) text += c;
+        resolve({ status: res.statusCode, body: JSON.parse(text) });
+      }).on('error', reject);
+    });
+    /** @param {string[]} lines */
+    const viaFetch = async (lines) => {
+      const res = await toFetchHandler(served)(new Request('http://x/a', { headers: lines.map((line) => ['x-tags', line]) }));
+      return { status: res.status, body: await res.json() };
+    };
+    try {
+      for (const [lines, tags] of /** @type {[string[], string[]][]} */ ([
+        [['a,b', 'c'], ['a', 'b', 'c']],
+        [['', 'a'], ['a']],
+        [['a , b', 'c'], ['a', 'b', 'c']],
+      ])) {
+        const node = await viaNode(lines);
+        assert.deepStrictEqual(node, { status: 200, body: { 'x-tags': tags } }, `node: ${JSON.stringify(lines)}`);
+        assert.deepStrictEqual(await viaFetch(lines), node, `fetch: ${JSON.stringify(lines)}`);
+      }
+      // the handler's view of the field is the joined list, alike behind both
+      assert.deepStrictEqual(seen, ['a, b, c', 'a, b, c', 'a', 'a', 'a, b, c', 'a, b, c']);
+      // a line that is not a string is still the request's mistake
+      const bad = await served.dispatch({ method: 'GET', url: '/a', headers: { 'x-tags': /** @type {any} */ (['a', 7]) }, body: null });
+      assert.strictEqual(bad.status, 400);
+      assert.strictEqual(JSON.parse(String(bad.body)).code, 'JC2015');
+    }
+    finally {
+      s.closeAllConnections();
+      s.close();
+      await once(s, 'close');
+    }
+  });
+
+  it('a request that carries no body bytes is bodyless behind both adapters — no body, content-length 0, an empty chunked body — and needs no media', async () => {
+    const contract = compileContract({ $contract: '0.1', operations: {
+      'note.touch': {
+        kind: 'command',
+        input: { type: 'object', required: ['id'], properties: { id: { type: 'string' }, patch: { type: 'object' } } },
+        output: { type: 'object' },
+        http: { method: 'POST', path: '/notes/{id}/touch', body: 'patch' },
+      },
+      'item.remove': {
+        kind: 'command',
+        input: { type: 'object', required: ['id'], properties: { id: { type: 'string' }, reason: { type: 'string' } } },
+        output: { type: 'object' },
+        http: { method: 'DELETE', path: '/items/{id}' },
+      },
+    } });
+    const served = serveHttp(contract, {
+      'note.touch': (input) => ({ touched: input.id, patch: input.patch ?? null }),
+      'item.remove': (input) => ({ removed: input.id, reason: input.reason ?? null }),
+    });
+    const viaFetchAdapter = toFetchHandler(served);
+    const s = http.createServer(toNodeHandler(served));
+    s.listen(0, '127.0.0.1');
+    await once(s, 'listening');
+    const port = /** @type {import('node:net').AddressInfo} */ (s.address()).port;
+    const base = `http://127.0.0.1:${port}`;
+    /** One raw HTTP/1.1 exchange, framed exactly as written. @param {string} head @returns {Promise<string>} */
+    const raw = (head) => new Promise((resolve, reject) => {
+      const socket = net.connect(port, '127.0.0.1', () => { socket.write(head); });
+      let out = '';
+      socket.on('data', (chunk) => { out += chunk; });
+      socket.on('end', () => resolve(out));
+      socket.on('error', reject);
+    });
+    const removed = { removed: 'i1', reason: null };
+    const touched = { touched: 'n1', patch: null };
+    try {
+      // no body at all: neither content-length nor transfer-encoding
+      const plain = await fetch(`${base}/items/i1`, { method: 'DELETE' });
+      assert.deepStrictEqual([plain.status, await plain.json()], [200, removed]);
+      // an empty string: content-length 0 under a text/plain content-type
+      const zero = await fetch(`${base}/items/i1`, { method: 'DELETE', body: '' });
+      assert.deepStrictEqual([zero.status, await zero.json()], [200, removed]);
+      // an empty chunked body, with and without a content-type
+      for (const type of ['', 'Content-Type: text/plain\r\n']) {
+        const answer = await raw(`POST /notes/n1/touch HTTP/1.1\r\nHost: x\r\n${type}Transfer-Encoding: chunked\r\nConnection: close\r\n\r\n0\r\n\r\n`);
+        assert.match(answer, /^HTTP\/1\.1 200 /, type);
+        assert.deepStrictEqual(JSON.parse(answer.slice(answer.indexOf('\r\n\r\n') + 4)), touched);
+      }
+      // the fetch adapter: an empty string (an empty stream, text/plain, no length) and an empty stream
+      for (const init of [{ body: '' }, { body: new ReadableStream({ start(controller) { controller.close(); } }), duplex: 'half' }]) {
+        const answer = await viaFetchAdapter(new Request('http://x/notes/n1/touch', /** @type {any} */ ({ method: 'POST', ...init })));
+        assert.deepStrictEqual([answer.status, await answer.json()], [200, touched]);
+      }
+      // the suite's own client leaves an undefined whole-body member out: no body, no content-type
+      for (const client of [
+        openHttpClient(contract, { baseUrl: base }),
+        openHttpClient(contract, { baseUrl: 'http://x', fetch: (url, init) => viaFetchAdapter(new Request(url, init)) }),
+      ]) {
+        const outcome = await client.invoke('note.touch', { id: 'n1' });
+        assert.deepStrictEqual(outcome.ok && outcome.value, touched);
+        client.close();
+      }
+      // a byte under another media is still refused, behind both
+      const wrong = await raw('POST /notes/n1/touch HTTP/1.1\r\nHost: x\r\nContent-Type: text/plain\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n2\r\n{}\r\n0\r\n\r\n');
+      assert.match(wrong, /^HTTP\/1\.1 415 /);
+      const wrongFetch = await viaFetchAdapter(new Request('http://x/notes/n1/touch', { method: 'POST', body: '{}', headers: { 'content-type': 'text/plain' } }));
+      assert.strictEqual(wrongFetch.status, 415);
     }
     finally {
       s.closeAllConnections();

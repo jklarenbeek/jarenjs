@@ -283,6 +283,46 @@ describe('PostgreSQL database invariants', { skip: !url && 'JAREN_PG_URL is not 
     }
   });
 
+  it('a store rule judges the row a concurrent writer committed, as the database rule does', async () => {
+    const col = (/** @type {string} */ name, /** @type {string} */ codec = 'integer') => ({ name, codec, null: 'reject' });
+    const draftsModel = (/** @type {'store' | 'database'} */ enforcement) => ({ $model: '0.1', entities: { Doc: {
+      schema: { type: 'object', properties: { id: { type: 'integer', 'x-entity': { key: true } }, status: { type: 'string' }, title: { type: 'string' } } },
+      physical: { table: 'docs', columns: { id: col('id'), status: col('status', 'text'), title: col('title', 'text') } },
+      invariants: [{ name: 'only_drafts', on: ['update', 'delete'], enforcement, assert: { $eq: ['$.old.status', 'draft'] } }] } } });
+    const tables = { postgres: 'CREATE TABLE docs(id integer PRIMARY KEY, status text NOT NULL, title text NOT NULL)', sqlite: '' };
+    for (const enforcement of /** @type {const} */ (['store', 'database'])) for (const op of ['update', 'delete', 'tracked save']) {
+      const fixture = await postgresEngine().fixture(tables);
+      try {
+        const model = draftsModel(enforcement);
+        for (const item of planInvariants(model, { dialect: fixture.dialect })) await fixture.exec(item.sql);
+        const store = await openStore(model, { driver: fixture.driver, adopt: true, sessions: 2 });
+        try {
+          const docs = store.entity('Doc');
+          await docs.create({ id: 1, status: 'draft', title: 'a' });
+          if (op === 'tracked save') docs.put({ .../** @type {any} */ (await docs.get(1)), title: 'changed after it was final' });
+          const locked = Promise.withResolvers(), commit = Promise.withResolvers();
+          // another transaction makes the row final and holds its lock
+          const finalizing = store.transaction(async (tx) => {
+            await tx.entity('Doc').update(1, { status: 'final' });
+            locked.resolve(undefined);
+            await commit.promise;
+          });
+          await locked.promise;
+          const write = Promise.resolve(op === 'tracked save' ? store.saveChanges()
+            : op === 'update' ? docs.update(1, { title: 'changed after it was final' }) : docs.delete(1)).then(() => 'ok',
+            (/** @type {any} */ error) => error.code);
+          await new Promise((resolve) => setTimeout(resolve, 200));
+          commit.resolve(undefined);
+          await finalizing;
+          assert.equal(await write, 'JD2096', `${enforcement} ${op}`);
+          assert.deepEqual(await fixture.all('SELECT status, title FROM docs'), [{ status: 'final', title: 'a' }], `${enforcement} ${op}`);
+        }
+        finally { await store.close(); }
+      }
+      finally { await fixture.dispose(); }
+    }
+  });
+
   it('refuses TRUNCATE of a table a delete rule judges, and resolves no operator through the writer\'s search path', async () => {
     const fixture = await postgresEngine().fixture(RULE_TABLES);
     const other = `${fixture.dialect.schema}_ops`;
