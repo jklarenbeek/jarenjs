@@ -25,7 +25,7 @@
 
 import { EMPTY, Seq, seqOf, firstItem } from '../query/runtime.js';
 import { CARD_OPT, CARD_MANY, isReservedQueryName } from '../query/normalize.js';
-import { JsonQueryRuntimeError } from '../query/errors.js';
+import { queryRuntimeError } from '../query/messages.js';
 import { compileJsonQuery } from '../query/index.js';
 import { compileJsltStylesheet } from './index.js';
 
@@ -80,9 +80,7 @@ function toExtensionEntry(name, entry) {
         out = fn(...call);
       }
       catch (err) {
-        throw new JsonQueryRuntimeError('JQ2010',
-          `registered operator '${name}' failed: ${err?.message ?? String(err)}`,
-          docPath);
+        throw queryRuntimeError('JQ2010', 'query/operator-threw', { name, detail: String(err?.message ?? String(err)) }, docPath);
       }
       if (seqResult) {
         if (!Array.isArray(out)) return out === undefined || out === null ? EMPTY : out;

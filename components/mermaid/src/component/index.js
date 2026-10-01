@@ -24,6 +24,8 @@ import { compileMermaid, diagramToVnode } from '../index.js';
 /**
  * @typedef {object} MermaidComponentOptions
  * @property {any} [theme] theme name or override object
+ * @property {{ pie?: import('../render/index.js').DiagramRenderer }} [renderers] renderers for the
+ *   types this engine does not draw itself — a pie, from `@jarenjs/charts/transforms/mermaid-adapter`
  * @property {number} [memoLimit] LRU size for the source-string memo (default 32)
  * @property {string | URL} [base] base URL for `mermaid-load`
  * @property {typeof globalThis.fetch} [fetch] fetch implementation for `mermaid-load`
@@ -51,7 +53,7 @@ import { compileMermaid, diagramToVnode } from '../index.js';
  * @returns {MermaidComponent}
  */
 export function createMermaidComponent(options = {}) {
-  const compileOptions = { theme: options.theme };
+  const compileOptions = { theme: options.theme, renderers: options.renderers };
 
   const { compile, view } = createProjectionMemo({
     memoLimit: options.memoLimit ?? 32,

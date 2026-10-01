@@ -2,8 +2,9 @@
 
 Locale packs (message catalogs) for the error messages of
 [`@jarenjs/validate`](../validate/README.md),
-[`@jarenjs/forms`](../forms/README.md) and
-[`@jarenjs/contract`](../contract/README.md), and the calendar language
+[`@jarenjs/forms`](../forms/README.md),
+[`@jarenjs/contract`](../contract/README.md) and the query engine of
+[`@jarenjs/json`](../json/README.md), and the calendar language
 `@jarenjs/core/dates` refuses to invent.
 
 Jaren validators and form checks never bake prose into the hot path: every
@@ -208,13 +209,29 @@ export const xx = {
 };
 ```
 
+A query error names its message the same way — a `messageId` from
+`@jarenjs/json`'s `queryMessagesEn` and its `params` — so a pack renders it
+too:
+
+```js
+import { compileJsonQuery, renderQueryMessage } from '@jarenjs/json';
+import { nl } from '@jarenjs/locales';
+
+try { compileJsonQuery({ $substring: ['$.s', 1] })({ s: 5 }); }
+catch (error) {
+  error.reason;                   // 'expected a string, got a number'
+  renderQueryMessage(error, nl);  // 'een tekst (string) verwacht, een getal gekregen'
+}
+```
+
 Rules of the road:
 
 1. **Key parity.** Cover every key of validate's `messagesEn`, every
    `form/*` key of forms' `formsMessagesEn`, every `contract/*` wire-error
-   key of contract's `contractMessagesEn`, every `date/*` and
-   `format/name/*` key of this package's own `dateMessagesEn`, plus
-   `x-form/assert` and the `JQ2xxx` query runtime codes. The repo enforces
+   key of contract's `contractMessagesEn`, every `query/*` message of
+   json's `queryMessagesEn`, every `date/*` and `format/name/*` key of
+   this package's own `dateMessagesEn`, plus `x-form/assert` and the
+   `JQ2xxx` codes a `$query` assertion reports. The repo enforces
    this with tests (`test/locales/`); missing keys silently fall back to
    English.
 2. **Never depend on a consumer.** A pack must stay importable without

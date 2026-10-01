@@ -399,10 +399,21 @@ method or turn sampling off without the adapter noticing.
 
 ## Mermaid interop
 
-`@jarenjs/mermaid` delegates its `pie` diagrams here (the arrow is
-mermaid → charts, never the reverse); the
-`@jarenjs/charts/transforms/mermaid-adapter` transform maps a mermaid
-pie AST onto `compileChart` inputs.
+`@jarenjs/mermaid` draws a `pie` with the renderer a host hands it, and
+this package ships that renderer: `mermaidPieRenderer` from
+`@jarenjs/charts/transforms/mermaid-adapter`, charts' own pie with
+mermaid's class names, palette and theme. Neither component imports the
+other — the host composes them:
+
+```js
+import { diagramToVnode } from '@jarenjs/mermaid';
+import { mermaidPieRenderer } from '@jarenjs/charts/transforms/mermaid-adapter';
+
+diagramToVnode('pie title Pets\n "Dogs" : 3\n "Cats" : 1', { renderers: { pie: mermaidPieRenderer } });
+```
+
+The same module's `mermaidPieToChartAST` maps a mermaid pie AST onto
+`compileChart` inputs.
 
 ## Validation
 

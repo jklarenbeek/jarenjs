@@ -59,6 +59,10 @@
       "types": "./dist/types/markdown.d.ts",
       "default": "./src/markdown.js"
     },
+    "./importmap": {
+      "types": "./dist/types/importmap.d.ts",
+      "default": "./src/importmap.js"
+    },
     "./schemas/*": "./schemas/*",
     "./package.json": "./package.json"
   },

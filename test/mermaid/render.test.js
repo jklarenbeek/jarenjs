@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 import * as assert from 'node:assert/strict';
 
 import { renderMermaid, compileMermaid, sanitizeHref } from '@jarenjs/mermaid';
+import { mermaidPieRenderer } from '@jarenjs/charts/transforms/mermaid-adapter';
 import { renderToString, isElementNode } from '@jarenjs/view';
 
 describe('render to pure-vnode SVG', function () {
@@ -58,9 +59,11 @@ describe('render to pure-vnode SVG', function () {
       'erDiagram\n A ||--o{ B : has',
       'gantt\n title T\n section S\n T1 : a, 2024-01-01, 1d',
     ]) {
-      const svg = renderToString(renderMermaid(src));
+      // a pie is drawn by the renderer the host injects: charts' own
+      const svg = renderToString(renderMermaid(src, { renderers: { pie: mermaidPieRenderer } }));
       assert.equal(svg.startsWith('<svg'), true, src);
       assert.equal(svg.includes('mm-error'), false, src);
+      assert.equal(svg.includes('mmph-'), false, `${src} is drawn, not a placeholder`);
     }
   });
 

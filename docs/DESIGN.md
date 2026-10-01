@@ -281,7 +281,7 @@ through **host-linked themes**:
   reserved `'host'` name so all three components resolve it identically. Generic form:
   `resolveTheme`'s overrides object takes a reserved `vars` key (`{ theme: 'dark',
   vars: {...} }` composes).
-- The website passes `theme: 'host'` at every embed point: the md `mermaidPlugin`,
+- The website passes `theme: 'host'` at every embed point: the `mermaidPlugin` it hands md,
   `createMermaidComponent`, the calc viewmodel, and each charts entry
   (`createChartComponent`, `compileChart`, `createChartSession`). A new embed that
   omits it renders the component's own default palette instead of the site's, which

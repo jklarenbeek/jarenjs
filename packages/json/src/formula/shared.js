@@ -9,6 +9,10 @@ export class FormulaError extends CodedDocPathError {
   constructor(code, reason, formulaId, docPath = '', cause = undefined) {
     super('FormulaError', code, `${formulaId}: ${reason}`, docPath, cause);
     this.formulaId = formulaId;
+    // a JQ-coded error, so it names its message as the query errors do:
+    // its own English, as `query/reason` renders it
+    this.messageId = 'query/reason';
+    this.params = { reason: this.reason };
   }
 }
 

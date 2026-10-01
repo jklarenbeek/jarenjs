@@ -3,7 +3,9 @@ import { describe, it } from 'node:test';
 import * as assert from 'node:assert/strict';
 
 import { parseMarkdown, mdToVnode, definePlugin, toMarkdown } from '@jarenjs/md';
-import { highlightPlugin, mermaidPlugin, tokenizeCode } from '@jarenjs/md/plugins';
+import * as plugins from '@jarenjs/md/plugins';
+import { highlightPlugin, tokenizeCode } from '@jarenjs/md/plugins';
+import { mermaidPlugin } from '@jarenjs/mermaid/plugin';
 import { renderToString } from '@jarenjs/view';
 
 describe('definePlugin', function () {
@@ -162,6 +164,10 @@ describe('highlightPlugin', function () {
 });
 
 describe('mermaidPlugin (native)', function () {
+  it('comes from @jarenjs/mermaid/plugin: the Markdown engine exports no diagram plugin', function () {
+    assert.deepEqual(Object.keys(plugins).sort(), ['GRAMMAR_NAMES', 'definePlugin', 'highlightPlugin', 'tokenizeCode']);
+  });
+
   it('renders inline pure-vnode SVG with no injected instance or innerHTML', function () {
     const plugin = mermaidPlugin();
     const doc = parseMarkdown('```mermaid\ngraph TD; A-->B\n```\n', { plugins: [plugin] });

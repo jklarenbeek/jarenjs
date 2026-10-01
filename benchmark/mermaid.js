@@ -41,6 +41,7 @@
 
 import { writeFileSync } from 'node:fs';
 
+import { mermaidPieRenderer } from '@jarenjs/charts/transforms/mermaid-adapter';
 import { parseMermaid, compileMermaid, layoutDiagram, diagramToVnode } from '@jarenjs/mermaid';
 import { CORPUS, PIE_CORPUS, buildScaled, buildGantt } from './fixtures/mermaid.js';
 import { timeIt } from './lib/measure.js';
@@ -116,7 +117,8 @@ function computeScorecard() {
     for (const src of docs) {
       examples++;
       try {
-        const svg = compileMermaid(src).toSvgString();
+        // a pie is drawn by charts' renderer, handed in as any host hands it
+        const svg = compileMermaid(src, { renderers: { pie: mermaidPieRenderer } }).toSvgString();
         if (svg.startsWith('<svg') && !svg.includes('mm-error')) rendered++;
       }
       catch { /* counted as not rendered */ }

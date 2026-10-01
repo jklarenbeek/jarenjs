@@ -23,8 +23,10 @@
  */
 
 import { readdirSync, statSync, existsSync } from 'node:fs';
-import { join, dirname, basename, extname, relative, sep } from 'node:path';
+import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
+
+import { expandExports } from '@jarenjs/emit/importmap';
 
 /**
  * @typedef {Object} ExportEntry
@@ -36,26 +38,9 @@ import { execFileSync } from 'node:child_process';
  * @property {boolean} expanded - whether this row came out of a wildcard
  */
 
-/** The condition names a runtime target hides behind, in preference order. */
+/** The conditions the census resolves a runtime target under: every
+ * runtime condition a manifest here may name. */
 const CONDITIONS = ['default', 'import', 'node', 'browser', 'require'];
-
-/**
- * The default (runtime) target of one export entry, or null: a string,
- * or the first condition — recursively, so `{ import: { default } }`
- * resolves like `{ default }`.
- * @param {any} value
- * @returns {string | null}
- */
-function targetOf(value) {
-  if (typeof value === 'string') return value;
-  if (value === null || typeof value !== 'object') return null;
-  for (const condition of CONDITIONS) {
-    if (!(condition in value)) continue;
-    const target = targetOf(value[condition]);
-    if (target !== null) return target;
-  }
-  return null;
-}
 
 /**
  * Whether a declaration rides with the entry, at any depth of conditions.
@@ -76,7 +61,8 @@ function hasTypes(value) {
 function kindOf(key, target) {
   if (key === './package.json') return 'metadata';
   if (target === null) return 'asset';
-  const ext = extname(target);
+  const dot = target.lastIndexOf('.');
+  const ext = dot > target.lastIndexOf('/') ? target.slice(dot) : '';
   if (ext === '.js' || ext === '.mjs' || ext === '.cjs') return 'javascript';
   if (ext === '.json' && /schema/i.test(target)) return 'schema';
   return 'asset';
@@ -84,57 +70,36 @@ function kindOf(key, target) {
 
 /**
  * Every export of one manifest, wildcards expanded from the committed
- * files where the workspace directory is given.
+ * files where the workspace directory is given. The resolution and the
+ * expansion are `@jarenjs/emit/importmap`'s — the one implementation the
+ * import map builder uses too — with this census's git-backed lister.
  * @param {any} pkg - the parsed `package.json`
  * @param {string | null} [dir] - the workspace directory, for expansion
  * @returns {ExportEntry[]}
  */
 export function exportEntries(pkg, dir = null) {
-  const declared = pkg.exports ?? { '.': pkg.main ?? './src/index.js' };
-  const keys = Object.keys(declared);
-  // A string or a root condition map is shorthand for the root export;
-  // its characters/condition names are not public subpath keys.
-  const exports = typeof declared === 'string'
-    || (!Array.isArray(declared) && keys.length > 0 && !keys.some((key) => key.startsWith('.')))
-    ? { '.': declared } : declared;
-  /** @type {ExportEntry[]} */
-  const entries = [];
   const specifier = (/** @type {string} */ key) => (key === '.' ? pkg.name : pkg.name + key.slice(1));
-  for (const key of Object.keys(exports)) {
-    const value = exports[key];
-    const target = targetOf(value);
-    const types = hasTypes(value);
-    if (!key.includes('*')) {
-      entries.push({ subpath: specifier(key), key, kind: kindOf(key, target), target, types, expanded: false });
-      continue;
-    }
-    // a wildcard: finite when ONE star names committed files beside the
-    // manifest; anything else stays the pattern it is
-    const single = key.split('*').length === 2 && target !== null && target.split('*').length === 2;
-    const files = dir === null || !single ? null : wildcardFiles(dir, /** @type {string} */ (target));
-    if (files === null || files.length === 0) {
-      entries.push({ subpath: specifier(key), key, kind: 'pattern', target, types, expanded: false });
-      continue;
-    }
-    for (const stem of files) {
-      const concreteKey = key.replace('*', stem);
-      const concreteTarget = target.replace('*', stem);
-      entries.push({ subpath: specifier(concreteKey), key, kind: kindOf(concreteKey, concreteTarget),
-        target: concreteTarget, types, expanded: true });
-    }
-  }
-  return entries;
+  const listFiles = dir === null ? undefined : (/** @type {string} */ folder) => committedFiles(join(dir, folder));
+  return expandExports(pkg, { conditions: CONDITIONS, listFiles }).map((entry) => ({
+    subpath: specifier(entry.key),
+    key: entry.pattern,
+    kind: entry.unexpanded ? 'pattern' : kindOf(entry.key, entry.target),
+    target: entry.target,
+    types: hasTypes(entry.value),
+    expanded: entry.expanded,
+  }));
 }
 
 /**
  * The file names of a directory as git knows them — tracked or staged,
  * never a scratch file — or the directory listing where git cannot
- * answer (a tarball, no git). Names only: a nested path is not a file of
- * this directory.
+ * answer (a tarball, no git); null when the directory is absent. Names
+ * only: a nested path is not a file of this directory.
  * @param {string} folder
- * @returns {string[]}
+ * @returns {string[] | null}
  */
-function committedNames(folder) {
+function committedFiles(folder) {
+  if (!existsSync(folder) || !statSync(folder).isDirectory()) return null;
   try {
     const out = execFileSync('git', ['ls-files', '-z', '--', '.'],
       { cwd: folder, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
@@ -143,31 +108,6 @@ function committedNames(folder) {
   catch {
     return readdirSync(folder).filter((name) => !statSync(join(folder, name)).isDirectory());
   }
-}
-
-/**
- * The stems a `dir/prefix*suffix` pattern matches among the committed
- * files of the workspace, sorted — or null when the directory is absent.
- * @param {string} dir @param {string} pattern
- * @returns {string[] | null}
- */
-function wildcardFiles(dir, pattern) {
-  const star = pattern.indexOf('*');
-  const before = pattern.slice(0, star);
-  const after = pattern.slice(star + 1);
-  const folder = join(dir, dirname(before + 'x'));
-  if (!existsSync(folder) || !statSync(folder).isDirectory()) return null;
-  // the folder must lie inside the workspace: a pattern cannot list a stranger's files
-  const inside = relative(dir, folder);
-  if (inside.startsWith('..') || inside.split(sep).includes('..')) return null;
-  const prefix = basename(before + 'x').slice(0, -1);
-  const stems = [];
-  for (const name of committedNames(folder)) {
-    if (!name.startsWith(prefix) || !name.endsWith(after)) continue;
-    const stem = name.slice(prefix.length, name.length - after.length);
-    if (stem.length > 0) stems.push(stem);
-  }
-  return stems.sort();
 }
 
 /**

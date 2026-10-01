@@ -223,11 +223,21 @@ a schedule skips exactly what its own `excludes` line lists.
 3. **No guessed dependencies** — Mermaid falls back to today for an
    `after` naming an unknown id; this engine refuses.
 
-### 4.5 Secondary types
+### 4.5 Secondary types, and the pie renderer
 
 mindmap, gitGraph, journey, timeline, quadrantChart, requirement
 parse-accept into `{ diagram, lines[] }` and render an honest "not yet
 laid out" placeholder — counted in the coverage scorecard.
+
+A **pie** parses into its AST (§4.3) and is drawn by a renderer the host
+injects: `diagramToVnode(doc, { renderers: { pie } })`, the option every
+render entry point carries. The renderer is called with the pie AST, the
+resolved theme and the document hash, and answers the SVG vnode. The pie
+engine lives in `@jarenjs/charts`, which ships the one to inject —
+`mermaidPieRenderer` from `@jarenjs/charts/transforms/mermaid-adapter` —
+so this engine imports no other component. Without a renderer a pie
+renders the same placeholder, its second line reading "parsed — no pie
+renderer was injected".
 
 ## 5. The bidirectional round trip
 

@@ -233,6 +233,41 @@ two schemas both declare comes out as `Id` and `Id2`, deterministically in
 sorted-file order, instead of two colliding declarations. The programmatic
 equivalent is the `reserved` option of `compileEmitModel`.
 
+## Import maps: serving the suite unbundled
+
+A browser can load the suite's ES modules straight from a server, without a
+bundler, once it has an import map: every package's `exports` resolved for
+the browser, every `*` subpath expanded (an import map cannot express a
+suffix pattern), and every file those entries reach listed for the server.
+`jaren-emit importmap` writes it from the installed tree:
+
+```bash
+npx jaren-emit importmap --packages app,view --prefix /vendor/ > importmap.json
+npx jaren-emit importmap --packages app,view --prefix /vendor/ --files   # what to serve
+```
+
+The packages' dependency closure is followed as Node resolves it. A package
+installed twice — a nested second copy — would load twice in the browser, so
+the command refuses it unless `--allow-duplicates`, and an import the map
+cannot resolve is refused too. Two runs over the same tree print the same
+bytes. The function behind it:
+
+```javascript
+import { buildImportMap } from '@jarenjs/emit/importmap';
+
+const { imports, files, duplicates, unresolved } = buildImportMap({ packages: ['app'], prefix: '/vendor/' });
+imports['@jarenjs/app'];        // '/vendor/@jarenjs/app/src/index.js'
+imports['@jarenjs/core/scan'];  // '/vendor/@jarenjs/core/src/scan.js' — a dependency, mapped too
+files[0];                       // '/vendor/@jarenjs/app/package.json', and every file a page may reach
+```
+
+Conditions resolve in the manifest's own key order under `browser`, `import`
+and `default` (override with `conditions`). `files` follows relative static
+imports and `import()` of a literal, read by `scanImports`, a scanner that
+never mistakes an import in a comment or a string for one; `exportTarget` and
+`expandExports` are the resolution and expansion it uses, exported for a tool
+of your own.
+
 ## What it maps
 
 | JSON Schema | TypeScript |
@@ -319,6 +354,7 @@ Every subpath a consumer can import, derived from the manifest by
 | `@jarenjs/emit/model` | JavaScript | declared |
 | `@jarenjs/emit/typescript` | JavaScript | declared |
 | `@jarenjs/emit/markdown` | JavaScript | declared |
+| `@jarenjs/emit/importmap` | JavaScript | declared |
 | `@jarenjs/emit/schemas/jaren-emit-model.schema.json` | schema | — |
 | `@jarenjs/emit/package.json` | metadata | — |
 <!--/fact-->

@@ -7,8 +7,8 @@
 
 The pen writes a flat JSON map of msgid to template string, or the existing
 MessageSpec string/object used by `errorMessage` and `x-form.message`. The
-`validate`, `forms` and `contract` scopes derive from their English catalogs;
-`all` combines those disjoint key spaces. The locale name is diagnostic metadata
+`validate`, `forms`, `contract` and `query` scopes derive from their English
+catalogs; `all` combines those disjoint key spaces. The locale name is diagnostic metadata
 and never appears in the emitted catalog.
 
 A catalog draft is immutable. `complete()` emits only when every required id is
@@ -86,8 +86,8 @@ Parameter value types stay JSON; no numeric or semantic inference is invented.
 Existing locale packs also contain render functions for pluralization, localized
 numbers and lists. Those functions are not JSON and are not serialized by this
 pen. Every locale's string entries round-trip exactly; its function entries keep
-running through the existing renderer. Contract catalogs consist entirely of
-strings, so their full catalogs round-trip for every shipped locale.
+running through the existing renderer. Contract and query catalogs consist
+entirely of strings, so their full catalogs round-trip for every shipped locale.
 
 Ids derive from the actual English objects. String placeholders come from the
 shared compiler; function parameter names are read statically from their
@@ -100,6 +100,6 @@ gate compares generated files and all locale parameter sets with their sources.
 
 ## 7. Cost
 
-The isolated messages pen costs **<!--fact:bundle.messages-->18,321<!--/fact--> bytes**.
+The isolated messages pen costs **<!--fact:bundle.messages-->23,735<!--/fact--> bytes**.
 It carries the shared template compiler and generated vocabulary, with no locale,
 validator, forms or contract engine and no query chain.

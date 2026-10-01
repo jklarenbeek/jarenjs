@@ -46,10 +46,19 @@ export const QUERY_CODES = Object.freeze({
 });
 
 /**
+ * The options a query error takes: `cause` retains what host code threw;
+ * `messageId` and `params` name the sentence and its values, so the error
+ * can be rendered in another language (`renderQueryMessage`). Without
+ * them the error carries `query/reason` and its own `reason`.
+ * @typedef {{ cause?: unknown, messageId?: string, params?: Record<string, any> }} JsonQueryErrorOptions
+ */
+
+/**
  * Shared constructor body for the two query error classes: `cause`
  * retains what host code threw, BY VALUE — set via an own property
  * even for `undefined`, so presence is testable (the base's `hasOwn`
- * options form, passed through unchanged).
+ * options form, passed through unchanged). Every query error carries a
+ * `messageId` and `params`.
  */
 class JsonQueryError extends CodedError {
   /**
@@ -57,10 +66,15 @@ class JsonQueryError extends CodedError {
    * @param {string} code
    * @param {string} reason
    * @param {string} docPath
-   * @param {{ cause?: unknown }} [options]
+   * @param {JsonQueryErrorOptions} [options]
    */
   constructor(name, code, reason, docPath, options) {
-    super(name, code, reason, docPath, options);
+    super(name, code, reason, docPath,
+      options !== undefined && Object.hasOwn(options, 'cause') ? { cause: options.cause } : undefined);
+    /** The message id of `reason` in the query catalogs. */
+    this.messageId = options?.messageId ?? 'query/reason';
+    /** The values `reason` was rendered with. @type {Record<string, any>} */
+    this.params = options?.params ?? { reason };
   }
 }
 
@@ -73,7 +87,7 @@ export class JsonQueryCompileError extends JsonQueryError {
    * @param {string} code
    * @param {string} reason
    * @param {string} docPath
-   * @param {{ cause?: unknown }} [options] - `cause` retains what a
+   * @param {JsonQueryErrorOptions} [options] - `cause` retains what a
    *   host hook (e.g. `compileTypeTest`) threw
    */
   constructor(code, reason, docPath, options) {
@@ -90,7 +104,7 @@ export class JsonQueryRuntimeError extends JsonQueryError {
    * @param {string} code
    * @param {string} reason
    * @param {string} docPath
-   * @param {{ cause?: unknown }} [options] - `cause` retains what host
+   * @param {JsonQueryErrorOptions} [options] - `cause` retains what host
    *   code threw
    */
   constructor(code, reason, docPath, options) {

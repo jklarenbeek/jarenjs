@@ -18,21 +18,26 @@ deliberately.
 | State | none — pure functions over data | memoization caches |
 
 The dependency arrow points **one way**. The engine never imports the
-component, `@jarenjs/app`, the DOM, or `@jarenjs/md` — so it runs in a
-worker, an edge runtime or a build step. The Markdown plugin sits on the
-**md → mermaid** arrow (never the reverse):
+component, `@jarenjs/app`, the DOM, `@jarenjs/md` or `@jarenjs/charts` — so
+it runs in a worker, an edge runtime or a build step. No component imports
+another: the **host** composes them, handing the Markdown plugin to md and
+charts' pie renderer to mermaid:
 
 ```mermaid
 flowchart LR
-  md["@jarenjs/md"] -->|re-exports| plugin["@jarenjs/mermaid/plugin"]
+  host["a host (the website)"] --> md["@jarenjs/md"]
+  host --> plugin["@jarenjs/mermaid/plugin"]
+  host --> adapter["@jarenjs/charts/transforms/mermaid-adapter"]
   plugin --> engine["@jarenjs/mermaid (engine)"]
   component["@jarenjs/mermaid/component"] --> engine
   engine --> view["@jarenjs/view"]
+  adapter --> view
 ```
 
 `@jarenjs/mermaid/plugin` returns a self-frozen `MdPlugin`-shaped object
-**without** importing `definePlugin` from md, so there is no cycle;
-mermaid stays opt-in (not in md's `DEFAULT_PLUGINS`).
+**without** importing anything of md; mermaid stays opt-in (not in md's
+`DEFAULT_PLUGINS`). A pie is drawn by `options.renderers.pie`
+(MERMAID-FORMAT §4.5), which the host takes from charts.
 
 ## Overview — parse once, then specialized closures
 

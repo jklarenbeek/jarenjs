@@ -77,7 +77,6 @@
     "prepack": "npm run build:types"
   },
   "dependencies": {
-    "@jarenjs/charts": "0.95.0",
     "@jarenjs/core": "0.95.0",
     "@jarenjs/view": "0.95.0"
   }

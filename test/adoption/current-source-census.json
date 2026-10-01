@@ -59,8 +59,8 @@
       "api": "@jarenjs/json/query",
       "role": "existing regex; lexical index pending",
       "matches": [
-        "437:// $match (anchored) / $search (free): I-Regexp (RFC 9485, D5). Literal",
-        "1236:  '$search': regexTestEntry(false),"
+        "438:// $match (anchored) / $search (free): I-Regexp (RFC 9485, D5). Literal",
+        "1228:  '$search': regexTestEntry(false),"
       ],
       "disposition": "retained"
     },
@@ -71,16 +71,16 @@
       "api": "@jarenjs/json/query",
       "role": "existing compiler and limits; saved-profile conversion pending",
       "matches": [
-        "59: * Compile options for {@link compileJsonQuery}.",
-        "99: * @property {boolean} [analysis] - On `compileJsonQuery`: additionally",
-        "107: * what `analyzeQuery` returns and `compileJsonQuery`'s `analysis`",
-        "141: * The compiled query returned by {@link compileJsonQuery}: the query",
-        "198: * const q = compileJsonQuery({",
-        "205:export function compileJsonQuery(doc, options = {}) {",
-        "317: * shared by `analyzeQuery` and `compileJsonQuery`'s `analysis` option",
-        "355: *   `compileJsonQuery`",
-        "368:const compileUncached = (/** @type {any} */ doc) => compileJsonQuery(doc);",
-        "391:    query = compileJsonQuery(doc);"
+        "60: * Compile options for {@link compileJsonQuery}.",
+        "100: * @property {boolean} [analysis] - On `compileJsonQuery`: additionally",
+        "108: * what `analyzeQuery` returns and `compileJsonQuery`'s `analysis`",
+        "142: * The compiled query returned by {@link compileJsonQuery}: the query",
+        "199: * const q = compileJsonQuery({",
+        "206:export function compileJsonQuery(doc, options = {}) {",
+        "316: * shared by `analyzeQuery` and `compileJsonQuery`'s `analysis` option",
+        "354: *   `compileJsonQuery`",
+        "367:const compileUncached = (/** @type {any} */ doc) => compileJsonQuery(doc);",
+        "390:    query = compileJsonQuery(doc);"
       ],
       "disposition": "retained"
     },

@@ -12,7 +12,7 @@
 // than two items. All constructors go through `seqOf`/`appendItem`, which
 // maintain the invariant; `assertSeqInvariant` checks it in tests.
 
-import { JsonQueryRuntimeError } from './errors.js';
+import { messageRef, queryRuntimeError } from './messages.js';
 
 /**
  * The empty sequence `()` (same singleton-sentinel pattern as
@@ -97,29 +97,29 @@ export function ebv(v, docPath) {
       if (v === null)
         return false;
       if (v instanceof Seq)
-        throw new JsonQueryRuntimeError('JQ2003',
-          'the effective boolean value of a sequence of two or more items is undefined', docPath);
+        throw queryRuntimeError('JQ2003', 'query/ebv-sequence', {}, docPath);
       return true; // array or object (D3)
   }
 }
 
 /**
- * Describe a sequence value for a runtime error message (non-normative,
- * human-readable).
- * @param {any} v - a sequence value (EMPTY, item, or Seq)
- * @returns {string}
+ * What an item is, as a message reference (`query/item/*`): the `{got}`
+ * of a refusal, translated whole by whichever catalog renders it.
+ * @param {any} v
+ * @returns {{ messageId: string, params: Record<string, any> }}
  */
-export function describeItem(v) {
+export function itemRef(v) {
   if (v instanceof Seq)
-    return `a sequence of ${v.items.length} items`;
+    return messageRef('query/item/sequence', { count: v.items.length });
   if (v === EMPTY)
-    return 'the empty sequence';
+    return messageRef('query/item/empty');
   if (v === null)
-    return 'null';
+    return messageRef('query/item/null');
   if (Array.isArray(v))
-    return 'an array';
+    return messageRef('query/item/array');
   const t = typeof v;
-  return t === 'object' ? 'an object' : `a ${t}`;
+  return t === 'object' || t === 'string' || t === 'number' || t === 'boolean'
+    ? messageRef(`query/item/${t}`) : messageRef('query/item/other', { type: t });
 }
 
 /**

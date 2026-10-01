@@ -28,6 +28,8 @@ import {
 } from '@jarenjs/validate';
 import { formsMessagesEn } from '@jarenjs/forms';
 import { contractMessagesEn } from '@jarenjs/contract';
+import { compileJsonQuery, queryMessagesEn, renderQueryMessage } from '@jarenjs/json';
+import { compileMessageTemplate } from '@jarenjs/core/message';
 
 
 /**
@@ -39,9 +41,21 @@ import { contractMessagesEn } from '@jarenjs/contract';
 const DATE_SAMPLE_PARAMS = Object.fromEntries(
   Object.keys(dateMessagesEn).map((key) => [key, { value: 2 }]));
 
+/**
+ * The query msgids are templates over the values their English names, so
+ * their sample params are DERIVED from the English placeholders: one
+ * string per parameter.
+ */
+const QUERY_SAMPLE_PARAMS = Object.fromEntries(Object.entries(queryMessagesEn).map(([key, template]) =>
+  [key, Object.fromEntries(compileMessageTemplate(template).parameters.map((name) => [name, `<${name}>`]))]));
+
+/** The placeholder names of a template, sorted. @param {any} template */
+const placeholders = (template) => [...compileMessageTemplate(String(template)).parameters].sort();
+
 /** Representative params per message key, for renders and the sweep. */
 const SAMPLE_PARAMS = {
   ...DATE_SAMPLE_PARAMS,
+  ...QUERY_SAMPLE_PARAMS,
   type: { type: 'string' },
   required: { missingProperty: 'name' },
   minimum: { limit: 10, comparison: '>=' },
@@ -324,7 +338,20 @@ describe('@jarenjs/locales fr/es/pt/de/ja', () => {
         for (const key of Object.keys(dateMessagesEn)) {
           assert.ok(keys.has(key), `${code} is missing date key '${key}'`);
         }
+        for (const key of Object.keys(queryMessagesEn)) {
+          assert.ok(keys.has(key), `${code} is missing query key '${key}'`);
+          assert.deepStrictEqual(placeholders(pack[key]), placeholders(queryMessagesEn[key]), `${code} ${key} placeholders`);
+        }
         assert.ok(keys.has('x-form/assert'));
+      });
+
+      it('renders a query error in its language, the item it met included', () => {
+        let error;
+        try { compileJsonQuery({ $substring: ['$.s', 1] })({ s: 5 }); }
+        catch (thrown) { error = thrown; }
+        const rendered = renderQueryMessage(error, pack);
+        assert.strictEqual(rendered, String(pack['query/expected-string']).replace('{got}', String(pack['query/item/number'])));
+        assert.notStrictEqual(rendered, error.reason, `${code} renders its own words`);
       });
 
       it('renders the demonstration samples', () => {
@@ -390,6 +417,20 @@ describe('@jarenjs/locales fr/es/pt/de/ja', () => {
     // in a first-strong-isolate so it cannot visually flip
     assert.match(compiled.minimum({ comparison: '≥', limit: 5 }),
       /⁦≥ 5⁩/);
+  });
+
+  it('arabic isolates the Latin values of a query message, every isolate closed', () => {
+    for (const [key, template] of Object.entries(ar)) {
+      if (!key.startsWith('query/')) continue;
+      const text = String(template);
+      assert.strictEqual(text.split('\u2068').length, text.split('\u2069').length, `${key} closes every isolate`);
+    }
+    let error;
+    try { compileJsonQuery({ $last: '$.a' }); }
+    catch (thrown) { error = thrown; }
+    const rendered = renderQueryMessage(error, ar);
+    assert.match(rendered, /\u2068'\$last'\u2069/, 'the operator the writer typed is isolated');
+    assert.match(rendered, /\u2068\$head\u2069/, 'so is each operator the hint names');
   });
 
   it("russian genitive follows CLDR's recurring 'one' category (21, 22, 25)", () => {

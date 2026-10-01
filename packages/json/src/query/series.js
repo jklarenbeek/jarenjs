@@ -41,8 +41,8 @@ import {
   RESAMPLE_MEMBERS as KERNEL_RESAMPLE_MEMBERS,
   ROLLING_MEMBERS as KERNEL_ROLLING_MEMBERS,
 } from '@jarenjs/core/series';
-import { JsonQueryCompileError, JsonQueryRuntimeError } from './errors.js';
-import { EMPTY, Seq, describeItem } from './runtime.js';
+import { queryCompileError, queryRuntimeError } from './messages.js';
+import { EMPTY, Seq, itemRef } from './runtime.js';
 
 const hasOwn = Object.hasOwn;
 
@@ -94,10 +94,11 @@ const DISAMBIGUATIONS = Object.freeze(['reject', 'earlier', 'later']);
 /** The spec members that are singular paths into a row rather than values. */
 const SELECTOR_MEMBERS = Object.freeze(['at', 'value', 'by', 'leftAt', 'rightAt']);
 
-/** @param {string} code @param {string} message @param {string} docPath @param {unknown} [cause] */
-function compileError(code, message, docPath, cause) {
-  return new JsonQueryCompileError(code, message, docPath,
-    cause === undefined ? undefined : { cause });
+/** A compile refusal whose reason is a catalog message (./messages.js).
+ * @param {string} code @param {string} messageId @param {Record<string, any>} params
+ * @param {string} docPath @param {unknown} [cause] */
+function compileError(code, messageId, params, docPath, cause) {
+  return queryCompileError(code, messageId, params, docPath, cause === undefined ? undefined : { cause });
 }
 
 /**
@@ -107,7 +108,7 @@ function compileError(code, message, docPath, cause) {
  * never guesses when nothing is close.
  * @param {string} name
  * @param {readonly string[]} allowed
- * @returns {string} `''`, or ` (did you mean 'x'?)`
+ * @returns {string | null} the member it meant, or null
  */
 function nearMiss(name, allowed) {
   const lower = name.toLowerCase();
@@ -116,9 +117,9 @@ function nearMiss(name, allowed) {
     if (other === lower
       || (other.startsWith(lower) && other.length - lower.length <= 2)
       || (lower.startsWith(other) && lower.length - other.length <= 2))
-      return ` (did you mean '${candidate}'?)`;
+      return candidate;
   }
-  return '';
+  return null;
 }
 
 /**
@@ -133,14 +134,15 @@ function nearMiss(name, allowed) {
  */
 export function requireSpec(value, allowed, operator, docPath) {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-    throw compileError('JQ0003',
-      `'${operator}' takes a literal spec object, got ${describeItem(value)}`, docPath);
+    throw compileError('JQ0003', 'query/series-spec-object', { operator, got: itemRef(value) }, docPath);
   }
   for (const name of Object.keys(value)) {
     if (!allowed.includes(name)) {
-      throw compileError('JQ0003',
-        `'${operator}' has no spec member '${name}'${nearMiss(name, allowed)}; it admits ${
-          allowed.map((m) => `'${m}'`).join(', ')}`, docPath);
+      const suggestion = nearMiss(name, allowed);
+      const admitted = allowed.map((m) => `'${m}'`).join(', ');
+      throw suggestion === null
+        ? compileError('JQ0003', 'query/series-spec-member', { operator, name, allowed: admitted }, docPath)
+        : compileError('JQ0003', 'query/series-spec-member-suggest', { operator, name, suggestion, allowed: admitted }, docPath);
     }
   }
   return value;
@@ -156,10 +158,8 @@ export function requireSpec(value, allowed, operator, docPath) {
  */
 export function requireEnum(value, allowed, member, docPath) {
   if (typeof value !== 'string' || !allowed.includes(value)) {
-    throw compileError('JQ0003',
-      `'${member}' is ${allowed.map((a) => `'${a}'`).join(', ')}, got ${
-        typeof value === 'string' ? JSON.stringify(value) : describeItem(value)}`,
-      docPath);
+    throw compileError('JQ0003', 'query/series-member-enum', { member, allowed: allowed.map((a) => `'${a}'`).join(', '),
+      got: typeof value === 'string' ? JSON.stringify(value) : itemRef(value) }, docPath);
   }
   return value;
 }
@@ -173,8 +173,7 @@ export function requireEnum(value, allowed, member, docPath) {
  */
 export function requireNumber(value, member, docPath) {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
-    throw compileError('JQ0003',
-      `'${member}' is a finite number, got ${describeItem(value)}`, docPath);
+    throw compileError('JQ0003', 'query/series-member-number', { member, got: itemRef(value) }, docPath);
   }
   return value;
 }
@@ -193,8 +192,7 @@ export function requireInstant(value, member, docPath) {
     return value;
   if (typeof value === 'string')
     return value;
-  throw compileError('JQ0003',
-    `'${member}' is epoch milliseconds or an RFC 3339 string, got ${describeItem(value)}`, docPath);
+  throw compileError('JQ0003', 'query/series-member-instant', { member, got: itemRef(value) }, docPath);
 }
 
 /**
@@ -211,9 +209,7 @@ export function requireSpan(value, member, docPath) {
     return value;
   if (typeof value === 'string')
     return value;
-  throw compileError('JQ0003',
-    `'${member}' is a duration string or a count of milliseconds, got ${describeItem(value)}`,
-    docPath);
+  throw compileError('JQ0003', 'query/series-member-duration', { member, got: itemRef(value) }, docPath);
 }
 
 /**
@@ -235,27 +231,23 @@ export function requireSpan(value, member, docPath) {
  */
 export function compileSelector(value, member, docPath) {
   if (typeof value !== 'string') {
-    throw compileError('JQ0003',
-      `'${member}' is a singular path into the row, got ${describeItem(value)}`, docPath);
+    throw compileError('JQ0003', 'query/series-member-path', { member, got: itemRef(value) }, docPath);
   }
   let ast;
   try {
     ast = parseJSONPath(value);
   }
   catch (e) {
-    throw compileError('JQ0003',
-      `'${member}': ${e instanceof JSONPathSyntaxError ? e.message : 'is not a path'}`,
-      docPath, e);
+    throw e instanceof JSONPathSyntaxError
+      ? compileError('JQ0003', 'query/series-member-path-detail', { member, detail: e.message }, docPath, e)
+      : compileError('JQ0003', 'query/series-member-not-path', { member }, docPath, e);
   }
   const segments = ast.segments;
   if (segments.length === 0) {
-    throw compileError('JQ0003',
-      `'${member}' selects the whole row rather than a member of it`, docPath);
+    throw compileError('JQ0003', 'query/series-member-whole-row', { member }, docPath);
   }
   if (!isSingularSegments(segments)) {
-    throw compileError('JQ0003',
-      `'${member}' is a singular path — one name or index per segment, no wildcard,`
-      + ' descendant or filter', docPath);
+    throw compileError('JQ0003', 'query/series-member-singular', { member }, docPath);
   }
   if (segments.length === 1 && segments[0].selectors[0].kind === 'name')
     return segments[0].selectors[0].name;
@@ -288,16 +280,12 @@ export function compileClock(spec, provider, docPath) {
   const clock = {};
   if (hasOwn(spec, 'zone')) {
     if (typeof spec.zone !== 'string') {
-      throw compileError('JQ0003',
-        `'zone' is an IANA zone name, got ${describeItem(spec.zone)}`, docPath);
+      throw compileError('JQ0003', 'query/series-zone', { got: itemRef(spec.zone) }, docPath);
     }
     clock.zone = spec.zone;
     if (spec.zone !== 'UTC') {
       if (provider === null) {
-        throw compileError('JQ0003',
-          `the zone '${spec.zone}' needs a time-zone provider: this suite bundles no tzdb, so`
-          + ' a named zone is compiled with options.zoneProvider (toParts / toEpoch).'
-          + " 'UTC' and a numeric 'offset' need none", docPath);
+        throw compileError('JQ0003', 'query/series-zone-provider', { zone: spec.zone }, docPath);
       }
       clock.provider = provider;
     }
@@ -312,8 +300,7 @@ export function compileClock(spec, provider, docPath) {
     resolveClock(clock);
   }
   catch (e) {
-    throw compileError('JQ0003',
-      `the calendar context: ${e instanceof Error ? e.message : 'is invalid'}`, docPath, e);
+    throw compileError('JQ0003', 'query/series-calendar', { detail: e instanceof Error ? e.message : 'is invalid' }, docPath, e);
   }
   return clock;
 }
@@ -375,8 +362,7 @@ export function seriesArg(v, docPath) {
     return v;
   if (v !== null && typeof v === 'object')
     return [v];
-  throw new JsonQueryRuntimeError('JQ2001',
-    `expected a series (records with an instant and a reading), got ${describeItem(v)}`, docPath);
+  throw queryRuntimeError('JQ2001', 'query/expected-series', { got: itemRef(v) }, docPath);
 }
 
 /**
@@ -390,8 +376,7 @@ export function seriesArg(v, docPath) {
  */
 export function intervalArg(v, docPath) {
   if (v === null || typeof v !== 'object' || Array.isArray(v) || v instanceof Seq) {
-    throw new JsonQueryRuntimeError('JQ2001',
-      `expected an interval record { start, end }, got ${describeItem(v)}`, docPath);
+    throw queryRuntimeError('JQ2001', 'query/expected-interval', { got: itemRef(v) }, docPath);
   }
   return v;
 }
@@ -409,7 +394,7 @@ export function intervalArg(v, docPath) {
 export function seriesRefusal(e, docPath) {
   if (!(e instanceof TypeError))
     throw e;
-  return new JsonQueryRuntimeError('JQ2001', e.message, docPath, { cause: e });
+  return queryRuntimeError('JQ2001', 'query/detail', { detail: e.message }, docPath, { cause: e });
 }
 
 //#endregion

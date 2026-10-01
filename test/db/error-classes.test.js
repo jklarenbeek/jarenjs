@@ -236,9 +236,13 @@ describe('the query path', () => {
     // execute on a synchronous driver throws synchronously; the async
     // function turns that into the rejection to assert on
     for (const options of [undefined, { pushdown: false }]) {
+      // relocated or not, it keeps its message as data, so it still
+      // renders in another language
       await assert.rejects(async () => m.execute(single, options),
         (error) => error.code === 'JQ2001' && error.docPath === '/$where/$match/0'
-          && error.message.endsWith(' at /$where/$match/0'), JSON.stringify(options));
+          && error.message.endsWith(' at /$where/$match/0')
+          && error.messageId === 'query/expected-string'
+          && error.params.got?.messageId === 'query/item/number', JSON.stringify(options));
     }
     const conjoined = { $for: { it: '$[*]' },
       $where: { $and: [{ $gt: ['$it.n', 0] }, { $match: ['$it.n', 'x'] }] }, $return: '$it' };

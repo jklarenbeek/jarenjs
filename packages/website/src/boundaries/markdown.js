@@ -22,6 +22,7 @@
  * links against them.
  */
 
+import { mermaidPieRenderer } from '@jarenjs/charts/transforms/mermaid-adapter';
 import { createMdComponent } from '@jarenjs/md/component';
 import { highlightPlugin } from '@jarenjs/md/plugins';
 import { mermaidPlugin } from '@jarenjs/mermaid/plugin';
@@ -66,7 +67,7 @@ export const readmeUrl = (dir) => rawUrl(`${dir}/README.md`);
 // `[see below](#the-section)` links land here exactly as they do on
 // GitHub.
 export const md = createMdComponent({
-  plugins: [highlightPlugin(), mermaidPlugin({ theme: 'host', interactive: true })],
+  plugins: [highlightPlugin(), mermaidPlugin({ theme: 'host', interactive: true, renderers: { pie: mermaidPieRenderer } })],
   headingIds: true,
   headingAnchors: true,
 });

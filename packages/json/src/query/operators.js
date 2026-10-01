@@ -84,10 +84,10 @@ import {
   geoJsonToWkt,
   simplifyGeometry,
 } from '@jarenjs/core/geo';
-import { JsonQueryCompileError, JsonQueryRuntimeError } from './errors.js';
+import { queryCompileError, queryRuntimeError } from './messages.js';
 import {
   EMPTY, Seq, seqOf, appendItem, ebv, firstItem,
-  describeItem,
+  itemRef,
 } from './runtime.js';
 import {
   CARD_ZERO, CARD_ONE, CARD_OPT, CARD_MANY, joinCard, sumCard,
@@ -153,8 +153,9 @@ const RT_MINMAX = (types) => {
 
 //#region runtime argument helpers
 
-function runtimeError(code, message, docPath) {
-  return new JsonQueryRuntimeError(code, message, docPath);
+// a runtime refusal whose reason is a catalog message (./messages.js)
+function runtimeError(code, messageId, params, docPath) {
+  return queryRuntimeError(code, messageId, params, docPath);
 }
 
 // string parameter rule (section 8.7): the empty sequence reads as '',
@@ -164,14 +165,14 @@ function stringArg(v, docPath) {
     return v;
   if (v === EMPTY)
     return '';
-  throw runtimeError('JQ2001', `expected a string, got ${describeItem(v)}`, docPath);
+  throw runtimeError('JQ2001', 'query/expected-string', { got: itemRef(v) }, docPath);
 }
 
 // numeric position/length parameter: a single number, everything else -
 // including the empty sequence - is JQ2001
 function numberArg(v, docPath) {
   if (typeof v !== 'number')
-    throw runtimeError('JQ2001', `expected a number, got ${describeItem(v)}`, docPath);
+    throw runtimeError('JQ2001', 'query/expected-number', { got: itemRef(v) }, docPath);
   return v;
 }
 
@@ -187,7 +188,7 @@ function castString(v, docPath) {
     default:
       if (v === null)
         return 'null';
-      throw runtimeError('JQ2001', `cannot cast ${describeItem(v)} to a string`, docPath);
+      throw runtimeError('JQ2001', 'query/cast-string', { got: itemRef(v) }, docPath);
   }
 }
 
@@ -202,9 +203,9 @@ function castNumber(v, docPath) {
     case 'string':
       if (isJsonNumberString(v))
         return Number(v);
-      throw runtimeError('JQ2001', `'${v}' is not a JSON number`, docPath);
+      throw runtimeError('JQ2001', 'query/not-json-number', { value: v }, docPath);
     default:
-      throw runtimeError('JQ2001', `cannot cast ${describeItem(v)} to a number`, docPath);
+      throw runtimeError('JQ2001', 'query/cast-number', { got: itemRef(v) }, docPath);
   }
 }
 
@@ -313,7 +314,7 @@ function comparisonEntry(itemCmp) {
 }
 
 function arithOperandError(v, docPath) {
-  return runtimeError('JQ2001', `arithmetic requires a number operand, got ${describeItem(v)}`, docPath);
+  return runtimeError('JQ2001', 'query/arithmetic-operand', { got: itemRef(v) }, docPath);
 }
 
 // IEEE double arithmetic (section 8.5, D1): empty operands propagate,
@@ -488,9 +489,8 @@ function replaceRegexp(pattern) {
 }
 
 function replaceRegexpError(gre, pattern, docPath) {
-  return runtimeError('JQ2001', gre === null
-    ? `'${pattern}' is not a valid I-Regexp pattern`
-    : `'$replace' pattern '${pattern}' matches the zero-length string`, docPath);
+  return runtimeError('JQ2001', gre === null ? 'query/regex-invalid' : 'query/replace-empty-match',
+    { pattern: String(pattern) }, docPath);
 }
 
 function compileReplace(gets, args) {
@@ -549,7 +549,7 @@ function aggregateEntry(operator, result, resultType) {
 //#region sequence operators
 
 function sortError(v, docPath) {
-  return runtimeError('JQ2005', `'$sort' items must be all numbers or all strings, got ${describeItem(v)}`, docPath);
+  return runtimeError('JQ2005', 'query/sort-mixed', { got: itemRef(v) }, docPath);
 }
 
 // number order for $sort: NaN equal to itself and less than every other
@@ -565,7 +565,7 @@ function compareNumberKeys(a, b) {
 }
 
 function rangeBoundError(v, docPath) {
-  return runtimeError('JQ2001', `'$range' bounds must be safe integers, got ${describeItem(v)}`, docPath);
+  return runtimeError('JQ2001', 'query/range-bounds', { got: itemRef(v) }, docPath);
 }
 
 /**
@@ -607,8 +607,8 @@ function dateParts(v, docPath) {
   if (parts === null) {
     // a malformed string is the common case here, so show it rather than
     // reporting the useless fact that it was a string
-    throw runtimeError('JQ2001', 'expected an RFC 3339 date, time, or date-time string, got '
-      + (typeof v === 'string' ? JSON.stringify(v) : describeItem(v)), docPath);
+    throw runtimeError('JQ2001', 'query/expected-datetime',
+      { got: typeof v === 'string' ? JSON.stringify(v) : itemRef(v) }, docPath);
   }
   return parts;
 }
@@ -628,7 +628,8 @@ function dateComponentEntry(pick, half) {
           return EMPTY;
         const n = pick(dateParts(v, docPath));
         if (n < 0)
-          throw runtimeError('JQ2001', `'${v}' carries no ${half} component`, docPath);
+          throw runtimeError('JQ2001', half === 'date' ? 'query/no-date-component' : 'query/no-time-component',
+            { value: String(v) }, docPath);
         return n;
       };
     },
@@ -640,8 +641,7 @@ function dateComponentEntry(pick, half) {
 // `$orderby`'s registered collation names get.
 function unitArg(v, docPath) {
   if (!isDateUnit(v)) {
-    throw runtimeError('JQ2001',
-      `expected a calendar unit ('year', 'month', 'day', ...), got ${describeItem(v)}`, docPath);
+    throw runtimeError('JQ2001', 'query/calendar-unit', { got: itemRef(v) }, docPath);
   }
   return v;
 }
@@ -654,7 +654,7 @@ function unitArg(v, docPath) {
 function dateRefusal(e, docPath) {
   if (!(e instanceof TypeError))
     throw e;
-  return runtimeError('JQ2001', e.message, docPath);
+  return runtimeError('JQ2001', 'query/detail', { detail: e.message }, docPath);
 }
 
 // The shared shape of $date-add / $date-sub: [date, duration] applies an
@@ -684,9 +684,8 @@ function dateShiftEntry(sign) {
         if (unitGet === null) {
           const duration = parseDuration(second);
           if (duration === null) {
-            throw runtimeError('JQ2001', 'expected an ISO 8601 duration, got '
-              + (typeof second === 'string' ? JSON.stringify(second) : describeItem(second)),
-            secondPath);
+            throw runtimeError('JQ2001', 'query/expected-duration',
+              { got: typeof second === 'string' ? JSON.stringify(second) : itemRef(second) }, secondPath);
           }
           try {
             return formatRFC3339Parts(addDuration(parts, duration, sign));
@@ -696,7 +695,7 @@ function dateShiftEntry(sign) {
           }
         }
         if (typeof second !== 'number')
-          throw runtimeError('JQ2001', `expected a number of units, got ${describeItem(second)}`, secondPath);
+          throw runtimeError('JQ2001', 'query/expected-units', { got: itemRef(second) }, secondPath);
         const unit = unitArg(unitGet(f), unitPath);
         try {
           return formatRFC3339Parts(addToParts(parts, sign * second, unit));
@@ -768,19 +767,17 @@ function dateTruncEntry(truncate) {
 // at the call site, so this only ever sees a real item.
 function geoArg(v, docPath) {
   if (v === EMPTY || v instanceof Seq || v === null || typeof v !== 'object') {
-    throw runtimeError('JQ2001',
-      `expected a GeoJSON value or a [longitude, latitude] position, got ${describeItem(v)}`,
-      docPath);
+    throw runtimeError('JQ2001', 'query/expected-geo', { got: itemRef(v) }, docPath);
   }
   return v;
 }
 
 // A cell string operand — the geohash family and `$geo-parse` take text
-// where the rest of the family takes a value.
+// where the rest of the family takes a value. `what` is the refusal's
+// message id, naming the text the operator takes.
 function geoTextArg(v, what, docPath) {
   if (typeof v !== 'string') {
-    throw runtimeError('JQ2001',
-      `expected ${what}, got ${describeItem(v)}`, docPath);
+    throw runtimeError('JQ2001', what, { got: itemRef(v) }, docPath);
   }
   return v;
 }
@@ -858,14 +855,11 @@ function geoUnaryEntry(measure, check = geoArg) {
 // empty, decided by the caller against the other operand's width.
 function vectorArg(v, docPath) {
   if (!Array.isArray(v)) {
-    throw runtimeError('JQ2001',
-      `expected a vector (an array of numbers), got ${describeItem(v)}`, docPath);
+    throw runtimeError('JQ2001', 'query/expected-vector', { got: itemRef(v) }, docPath);
   }
   for (let i = 0; i < v.length; i++) {
     if (typeof v[i] !== 'number') {
-      throw runtimeError('JQ2001',
-        `expected a vector (an array of numbers), got ${describeItem(v[i])} at index ${i}`,
-        docPath);
+      throw runtimeError('JQ2001', 'query/expected-vector-item', { got: itemRef(v[i]), index: i }, docPath);
     }
   }
   return v;
@@ -933,8 +927,7 @@ function seriesEntry(name, members, rules, required, kernel) {
       const specPath = specNode.docPath;
       const spec = requireSpec(specNode.value, members, name, specPath);
       if (!hasOwn(spec, required)) {
-        throw new JsonQueryCompileError('JQ0003',
-          `'${name}' needs a spec member '${required}'`, specPath);
+        throw queryCompileError('JQ0003', 'query/spec-member-required', { name, member: required }, specPath);
       }
       const kernelSpec = Object.freeze(
         buildKernelSpec(spec, node.zoneProvider ?? null, specPath, rules));
@@ -950,8 +943,7 @@ function seriesEntry(name, members, rules, required, kernel) {
       catch (e) {
         if (!(e instanceof TypeError))
           throw e;
-        throw new JsonQueryCompileError('JQ0003',
-          `'${name}' spec: ${e.message}`, specPath, { cause: e });
+        throw queryCompileError('JQ0003', 'query/spec-invalid', { name, detail: e.message }, specPath, { cause: e });
       }
       return (f) => {
         const rows = seriesArg(seriesGet(f), seriesPath);
@@ -1084,13 +1076,13 @@ export const OPERATORS = Object.freeze({
   // truncating division; zero divisor errors (section 8.5)
   '$idiv': arithmeticEntry((docPath) => (a, b) => {
     if (b === 0)
-      throw runtimeError('JQ2002', "'$idiv' by zero", docPath);
+      throw runtimeError('JQ2002', 'query/idiv-zero', {}, docPath);
     return Math.trunc(a / b);
   }, RT_INTEGER),
   // XQuery double mod takes the sign of the dividend = JS %
   '$mod': arithmeticEntry((docPath) => (a, b) => {
     if (b === 0)
-      throw runtimeError('JQ2002', "'$mod' by zero", docPath);
+      throw runtimeError('JQ2002', 'query/mod-zero', {}, docPath);
     return a % b;
   }),
 
@@ -1370,8 +1362,7 @@ export const OPERATORS = Object.freeze({
         const v = seqGet(f);
         const target = itemGet(f);
         if (target === EMPTY || target instanceof Seq)
-          throw runtimeError('JQ2001',
-            `'$index-of' takes a single search item, got ${describeItem(target)}`, itemPath);
+          throw runtimeError('JQ2001', 'query/index-of-item', { got: itemRef(target) }, itemPath);
         // deep equality per D2 (the $eq relation: NaN matches nothing),
         // 0-based positions (D6)
         if (v === EMPTY)
@@ -1413,7 +1404,7 @@ export const OPERATORS = Object.freeze({
           return EMPTY;
         const n = b - a + 1;
         if (n > cap)
-          throw runtimeError('JQ2007', `'$range' of ${n} items exceeds the ${cap}-item resource guard`, docPath);
+          throw runtimeError('JQ2007', 'query/range-guard', { count: n, limit: cap }, docPath);
         const out = new Array(n);
         for (let i = 0; i < n; i++)
           out[i] = a + i;
@@ -1607,7 +1598,7 @@ export const OPERATORS = Object.freeze({
         return (f) => {
           const v = get(f);
           if (!test(v))
-            throw runtimeError('JQ2008', `'$assert' failed: ${describeItem(v)} does not satisfy the schema`, docPath);
+            throw runtimeError('JQ2008', 'query/assert-failed', { got: itemRef(v) }, docPath);
           return v;
         };
       }
@@ -1619,12 +1610,12 @@ export const OPERATORS = Object.freeze({
           const items = v.items;
           for (let i = 0; i < items.length; i++) {
             if (!test(items[i]))
-              throw runtimeError('JQ2008', `'$assert' failed: item ${i} (${describeItem(items[i])}) does not satisfy the schema`, docPath);
+              throw runtimeError('JQ2008', 'query/assert-failed-item', { index: i, got: itemRef(items[i]) }, docPath);
           }
           return v;
         }
         if (!test(v))
-          throw runtimeError('JQ2008', `'$assert' failed: ${describeItem(v)} does not satisfy the schema`, docPath);
+          throw runtimeError('JQ2008', 'query/assert-failed', { got: itemRef(v) }, docPath);
         return v;
       };
     },
@@ -1739,9 +1730,7 @@ export const OPERATORS = Object.freeze({
         if (precisionGet !== null) {
           precision = precisionGet(f);
           if (!Number.isInteger(precision) || precision < 1 || precision > 12) {
-            throw runtimeError('JQ2001',
-              `a geohash precision must be an integer from 1 to 12, got ${describeItem(precision)}`,
-              precisionPath);
+            throw runtimeError('JQ2001', 'query/geohash-precision', { got: itemRef(precision) }, precisionPath);
           }
         }
         return geohashEncode(at[0], at[1], precision);
@@ -1756,7 +1745,7 @@ export const OPERATORS = Object.freeze({
   // string through untouched. Text that is not well-formed WKT is empty
   // rather than an error, like every other "nothing to answer" here.
   '$geo-parse': geoUnaryEntry(wktToGeoJson,
-    (v, docPath) => geoTextArg(v, 'a Well-Known Text string', docPath)),
+    (v, docPath) => geoTextArg(v, 'query/expected-wkt', docPath)),
 
   // A value with no WKT spelling — a non-finite coordinate — is empty,
   // never written approximately.
@@ -1764,7 +1753,7 @@ export const OPERATORS = Object.freeze({
 
   '$geohash-bounds': geoUnaryEntry(
     (hash) => bboxPolygon(geohashBounds(hash)),
-    (v, docPath) => geoTextArg(v, 'a geohash cell string', docPath)),
+    (v, docPath) => geoTextArg(v, 'query/expected-geohash', docPath)),
 
   // The neighbourhood, not the cell: two points metres apart can sit in
   // different cells, so a proximity probe tests the nine cells and a
@@ -1781,7 +1770,7 @@ export const OPERATORS = Object.freeze({
         const v = get(f);
         if (v === EMPTY)
           return EMPTY;
-        return seqOf(geohashNeighbours(geoTextArg(v, 'a geohash cell string', docPath)));
+        return seqOf(geohashNeighbours(geoTextArg(v, 'query/expected-geohash', docPath)));
       };
     },
   },
@@ -1807,9 +1796,7 @@ export const OPERATORS = Object.freeze({
         // degree of longitude is not a fixed distance, so naming it a
         // distance is the confusion this family exists to prevent.
         if (typeof tolerance !== 'number' || !Number.isFinite(tolerance) || tolerance < 0) {
-          throw runtimeError('JQ2001',
-            `a simplification tolerance is a non-negative number of degrees, got ${describeItem(tolerance)}`,
-            tolerancePath);
+          throw runtimeError('JQ2001', 'query/simplify-tolerance', { got: itemRef(tolerance) }, tolerancePath);
         }
         return simplifyGeometry(geoArg(v, valuePath), tolerance);
       };
@@ -1883,8 +1870,7 @@ export const OPERATORS = Object.freeze({
             // the fixed-width branch below refuses this through NaN; the
             // calendar branch has to say so itself, or a full-time pair
             // measures zero months apart
-            throw runtimeError('JQ2001', 'cannot measure a span from a value with no date',
-              from.year < 0 ? fromPath : toPath);
+            throw runtimeError('JQ2001', 'query/span-no-date', {}, from.year < 0 ? fromPath : toPath);
           }
           const months = monthsBetween(from, to);
           return unit === 'month' ? months
@@ -1893,7 +1879,7 @@ export const OPERATORS = Object.freeze({
         const fromMs = epochOfRFC3339Parts(from);
         const toMs = epochOfRFC3339Parts(to);
         if (fromMs !== fromMs || toMs !== toMs)
-          throw runtimeError('JQ2001', 'cannot measure a span from a value with no date', fromPath);
+          throw runtimeError('JQ2001', 'query/span-no-date', {}, fromPath);
         return Math.trunc((toMs - fromMs) / fixedUnitMs(unit));
       };
     },
@@ -1915,9 +1901,8 @@ export const OPERATORS = Object.freeze({
         }
         catch (e) {
           // a literal pattern is authored, not data: reject the document
-          throw new JsonQueryCompileError('JQ0003',
-            `'$date-format' pattern: ${e instanceof Error ? e.message : 'invalid'}`,
-            docPath, { cause: e });
+          throw queryCompileError('JQ0003', 'query/date-pattern',
+            { detail: e instanceof Error ? e.message : 'invalid' }, docPath, { cause: e });
         }
         return (f) => {
           const v = dateGet(f);
@@ -1936,7 +1921,7 @@ export const OPERATORS = Object.freeze({
           return EMPTY;
         const pattern = patternGet(f);
         if (typeof pattern !== 'string')
-          throw runtimeError('JQ2001', `expected a date pattern, got ${describeItem(pattern)}`, patternPath);
+          throw runtimeError('JQ2001', 'query/expected-date-pattern', { got: itemRef(pattern) }, patternPath);
         if (pattern !== lastPattern) {
           lastPattern = pattern;
           try {
@@ -1944,8 +1929,8 @@ export const OPERATORS = Object.freeze({
           }
           catch (e) {
             lastFormat = null;
-            throw runtimeError('JQ2001',
-              `'$date-format' pattern: ${e instanceof Error ? e.message : 'invalid'}`, patternPath);
+            throw runtimeError('JQ2001', 'query/date-pattern',
+              { detail: e instanceof Error ? e.message : 'invalid' }, patternPath);
           }
         }
         return lastFormat(dateParts(v, datePath));
@@ -1997,7 +1982,7 @@ export const OPERATORS = Object.freeze({
           return EMPTY;
         const ms = epochOfRFC3339Parts(dateParts(v, docPath));
         if (ms !== ms) // a full-time has no instant to place
-          throw runtimeError('JQ2001', `'${v}' carries no date component`, docPath);
+          throw runtimeError('JQ2001', 'query/no-date-component', { value: String(v) }, docPath);
         return ms;
       };
     },
@@ -2014,8 +1999,7 @@ export const OPERATORS = Object.freeze({
         if (v === EMPTY)
           return EMPTY;
         if (typeof v !== 'number')
-          throw runtimeError('JQ2001',
-            `'$datetime' takes epoch milliseconds, got ${describeItem(v)}`, docPath);
+          throw runtimeError('JQ2001', 'query/datetime-epoch', { got: itemRef(v) }, docPath);
         // outside ±8.64e15 ms, and outside years 0000-9999, there is no
         // RFC 3339 spelling of the instant. Rendering goes through the
         // kernel like every other date operator, so one query cannot
@@ -2024,7 +2008,7 @@ export const OPERATORS = Object.freeze({
           ? formatRFC3339Parts(partsFromEpoch(v))
           : '';
         if (!isDateTimeRFC3339(iso))
-          throw runtimeError('JQ2001', `${v} is outside the range RFC 3339 can spell`, docPath);
+          throw runtimeError('JQ2001', 'query/datetime-range', { value: String(v) }, docPath);
         return iso;
       };
     },
@@ -2104,8 +2088,7 @@ export const OPERATORS = Object.freeze({
         catch (e) {
           if (!(e instanceof TypeError))
             throw e;
-          throw new JsonQueryCompileError('JQ0003',
-            `'$time-bucket': ${e.message}`, everyPath, { cause: e });
+          throw queryCompileError('JQ0003', 'query/time-bucket-invalid', { detail: e.message }, everyPath, { cause: e });
         }
       }
       return (f) => {
@@ -2122,8 +2105,7 @@ export const OPERATORS = Object.freeze({
           origin = EMPTY;
         if (buckets === null || every !== lastEvery || origin !== lastOrigin) {
           if (typeof every !== 'string' && typeof every !== 'number') {
-            throw runtimeError('JQ2001',
-              `expected a bucket width, got ${describeItem(every)}`, everyPath);
+            throw runtimeError('JQ2001', 'query/expected-bucket-width', { got: itemRef(every) }, everyPath);
           }
           try {
             buckets = compileBuckets(origin === EMPTY ? { every } : { every, origin }, clock);
@@ -2171,8 +2153,7 @@ export const OPERATORS = Object.freeze({
       catch (e) {
         if (!(e instanceof TypeError))
           throw e;
-        throw new JsonQueryCompileError('JQ0003',
-          `'$asof' spec: ${e.message}`, specPath, { cause: e });
+        throw queryCompileError('JQ0003', 'query/spec-invalid', { name: '$asof', detail: e.message }, specPath, { cause: e });
       }
       return (f) => {
         const left = seriesArg(leftGet(f), leftPath);

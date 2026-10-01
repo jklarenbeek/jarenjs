@@ -2,42 +2,15 @@
 /**
  * @file Renderers for the first-class types beyond flowchart and
  * sequence, and an honest placeholder for the deferred secondary
- * types. Pie is
- * a real chart; class and ER render as structured panels — a
- * readable, geometry-light view that renders without error and so counts
+ * types. Class and ER render as structured panels — a readable,
+ * geometry-light view that renders without error and so counts
  * honestly in the coverage scorecard. Secondary types (mindmap,
  * gitGraph, journey, timeline) render a labeled "not yet laid out"
- * placeholder.
+ * placeholder. Pie is drawn by the renderer the host injects (charts'
+ * `mermaidPieRenderer`), or by the placeholder when none was.
  */
 
 import { svgRoot, rect, path, textAt, num, textWidth } from '@jarenjs/view/helpers';
-import { buildPieAST, renderPieAST, CATEGORICAL } from '@jarenjs/charts';
-import { mermaidPieToChartAST } from '@jarenjs/charts/transforms/mermaid-adapter';
-
-/**
- * Pie rendering delegates to `@jarenjs/charts` (the pie engine's single
- * home); the options carry the mermaid class names, palette and theme
- * so the SVG is byte-identical to the pre-delegation renderer.
- * @param {any} ast pie AST
- * @param {any} theme
- * @param {string} hash
- * @returns {any}
- */
-export function renderPie(ast, theme, hash) {
-  const { config, data } = mermaidPieToChartAST(ast);
-  return renderPieAST(buildPieAST(data, config), theme, hash, {
-    rootClass: 'mermaid mm-svg',
-    keyPrefix: 'mmpie-',
-    sliceClass: 'mm-pie-slice',
-    legendClass: 'mm-pie-legend',
-    palette: CATEGORICAL,
-    textColor: theme.tokens.nodeText,
-    sliceStroke: '#fff',
-    // A mermaid diagram's SVG is a byte-stable contract; the per-slice
-    // hover text charts adds for its own pies would break it.
-    titles: false,
-  });
-}
 
 /**
  * Render a structured panel: a title and a list of sections, each a
@@ -76,20 +49,22 @@ export function renderStructured(title, sections, theme, hash) {
 }
 
 /**
- * The honest placeholder for a parse-accepted secondary type.
+ * The honest placeholder for a parse-accepted type this engine does not
+ * draw: a secondary type, or a pie when no pie renderer was injected.
  * @param {string} type
  * @param {any} theme
  * @param {string} hash
+ * @param {string} [note] - the second line; a secondary type's by default
  * @returns {any}
  */
-export function renderPlaceholder(type, theme, hash) {
+export function renderPlaceholder(type, theme, hash, note = 'parsed — not yet laid out in v1') {
   const t = theme.tokens;
   const width = 380;
   const height = 84;
   return svgRoot('mermaid mm-svg', width, height, theme, [
     rect(1, 1, width - 2, height - 2, { rx: 6, fill: t.clusterFill, stroke: t.clusterStroke, 'stroke-width': 1, 'stroke-dasharray': '5 4' }),
     textAt(width / 2, 36, `${type} diagram`, 15, { 'font-weight': 'bold', 'text-anchor': 'middle', fill: t.nodeText }),
-    textAt(width / 2, 58, 'parsed — not yet laid out in v1', 12, { 'text-anchor': 'middle', fill: t.nodeText }),
+    textAt(width / 2, 58, note, 12, { 'text-anchor': 'middle', fill: t.nodeText }),
   ], 'mmph-' + hash);
 }
 

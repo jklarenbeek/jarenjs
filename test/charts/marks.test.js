@@ -87,7 +87,9 @@ describe('per-mark hover titles', function () {
 
   it('mermaid keeps its byte-stable pie: titles are opt-out', async function () {
     const { renderMermaid } = await import('@jarenjs/mermaid');
-    const svg = renderToString(renderMermaid('pie title Pets\n  "Dogs" : 3\n  "Cats" : 1'));
+    const { mermaidPieRenderer } = await import('@jarenjs/charts/transforms/mermaid-adapter');
+    const svg = renderToString(renderMermaid('pie title Pets\n  "Dogs" : 3\n  "Cats" : 1',
+      { renderers: { pie: mermaidPieRenderer } }));
     assert.match(svg, /mm-pie-slice/);
     assert.doesNotMatch(svg, /<title>Dogs/);
   });

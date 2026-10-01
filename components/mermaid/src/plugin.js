@@ -1,12 +1,11 @@
 //@ts-check
 /**
- * @file The Markdown plugin — the md→mermaid dependency arrow.
- * `mermaidPlugin()` returns a **plain, self-frozen object**
- * shaped exactly like `@jarenjs/md`'s `MdPlugin` typedef, but it does
- * **not** import `definePlugin` from `@jarenjs/md` — so there is no
- * import cycle. `@jarenjs/md` re-exports this and adds `@jarenjs/mermaid`
- * to its dependencies; consumers who never use it tree-shake it away
- * (`sideEffects:false`).
+ * @file The Markdown plugin. `mermaidPlugin()` returns a **plain,
+ * self-frozen object** shaped exactly like `@jarenjs/md`'s `MdPlugin`
+ * typedef, without importing anything of `@jarenjs/md`: a host that wants
+ * diagrams in its Markdown imports this module and passes the plugin in,
+ * so neither component imports the other (CONVENTIONS §1). Its options
+ * reach the renderer — a pie is drawn by `renderers.pie`.
  *
  * `render` is pure, synchronous and error-safe: a `mermaid`
  * fence becomes inline SVG with no injected instance and no `innerHTML`,
@@ -24,7 +23,9 @@ import { toMermaid } from './to-mermaid.js';
 import { hashContent } from './utils.js';
 
 /**
- * @param {{ theme?: any, [k: string]: any }} [options]
+ * @param {{ theme?: any, interactive?: boolean, renderers?: { pie?: import('./render/index.js').DiagramRenderer },
+ *   [k: string]: any }} [options] - `renderers.pie` draws a pie fence (charts'
+ *   `mermaidPieRenderer`); without it a pie renders the placeholder
  * @returns {Readonly<{ name: string, fences: string[], node: string, render: (node: any, h: any, ctx: any) => any }>}
  */
 export function mermaidPlugin(options = {}) {

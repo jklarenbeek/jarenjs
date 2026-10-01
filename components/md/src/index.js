@@ -54,7 +54,7 @@ export {
 
 export { bake } from './bake.js';
 
-export { definePlugin } from './plugins/index.js';
+export { definePlugin } from './plugins/define.js';
 
 export { parseHtmlFragment, parseHtmlTag } from './html.js';
 

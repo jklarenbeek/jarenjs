@@ -71,7 +71,7 @@ describe('the manifest census', () => {
     assert.ok(schemas.length >= 1, `emit ships ${schemas.length} schema file(s)`);
     assert.ok(schemas.every((e) => e.expanded && e.subpath.startsWith('@jarenjs/emit/schemas/')));
     assert.deepStrictEqual(entries.filter((e) => e.kind === 'javascript').map((e) => e.subpath),
-      ['@jarenjs/emit', '@jarenjs/emit/model', '@jarenjs/emit/typescript', '@jarenjs/emit/markdown']);
+      ['@jarenjs/emit', '@jarenjs/emit/model', '@jarenjs/emit/typescript', '@jarenjs/emit/markdown', '@jarenjs/emit/importmap']);
     // the importable subpaths are the JavaScript ones, wildcards excluded
     assert.deepStrictEqual(importSubpaths(pkg), ['@jarenjs/x', '@jarenjs/x/plain']);
     assert.deepStrictEqual(importSubpaths({ name: '@jarenjs/y' }), ['@jarenjs/y'], 'no exports: the main is the root');

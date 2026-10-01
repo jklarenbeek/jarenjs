@@ -34,7 +34,7 @@
 import { physicalSelection, columnCodec, textKeyPlan, textKeyDecoding, checkTextKeys } from './physical.js';
 
 import { createSemanticCache } from '@jarenjs/core/cache';
-import { analyzeQuery, JsonQueryRuntimeError } from '@jarenjs/json/query';
+import { analyzeQuery, JsonQueryRuntimeError, renderQueryMessage } from '@jarenjs/json/query';
 
 import { DbCompileError, DbRuntimeError, wrapDriverError, classifyDriverError } from './errors.js';
 import { chain, attempt, isThenable } from './driver.js';
@@ -121,6 +121,17 @@ function answerOf(entry, items) {
 function wrapValue(entry, value) {
   if (entry.planned.wrapped !== true) return value;
   return value === undefined ? [] : [value];
+}
+
+/**
+ * The refusal of an aggregate whose pushed-down column met a null: the
+ * query catalog's sentence, so `renderQueryMessage` shows it in the
+ * operator's language as it does the engine's own aggregate refusals.
+ * @returns {JsonQueryRuntimeError}
+ */
+function aggregateNullError() {
+  const message = { messageId: 'query/aggregate-null', params: {} };
+  return new JsonQueryRuntimeError('JQ2001', renderQueryMessage(message), '', message);
 }
 
 /** @param {any} value - a bindable native parameter? */
@@ -1947,7 +1958,7 @@ export function createEntityQueryEngine(context) {
       if (entry.planned.plan.scalarAggregate) return chain(statement.get(params), (row) => {
         admittedRows(entry, row ? [row] : []);
         if (row?._valid === 0) throw new DbRuntimeError('JD2003', 'an aggregate column refuses a lossy or invalid value');
-        if (row?._nulls > 0) throw new JsonQueryRuntimeError('JQ2001', 'an aggregate requires numbers or strings, got null');
+        if (row?._nulls > 0) throw aggregateNullError();
         if (row?._safe === 0) {
           entry.runtimeReason = { construct: 'aggregate', reason: 'integer accumulation exceeded its runtime exactness bound' };
           if (strict) throw new DbCompileError('JD0010', entry.runtimeReason.reason);

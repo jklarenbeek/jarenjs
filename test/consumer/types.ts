@@ -144,7 +144,8 @@ import {
   definePlugin,
   loadMarkdown,
 } from '@jarenjs/md';
-import { highlightPlugin, mermaidPlugin } from '@jarenjs/md/plugins';
+import { highlightPlugin } from '@jarenjs/md/plugins';
+import { mermaidPlugin } from '@jarenjs/mermaid/plugin';
 
 const mdPlugins = [highlightPlugin(), mermaidPlugin()];
 const mdDoc = parseMarkdown('# Hi *there*', { plugins: mdPlugins });
@@ -1618,3 +1619,33 @@ void (async (store: import('@jarenjs/db').Store) => {
 import { createGuardedRefiner } from '@jarenjs/core/guarded';
 const guardedConsumer = createGuardedRefiner({ read: async () => ({ count: 1 }), validateProposal: () => true, apply: (doc, value) => ({ ...doc, count: value }), validateCandidate: () => true, planCommit: doc => doc, commit: async doc => doc });
 void guardedConsumer.commit(2);
+
+// @jarenjs/emit/importmap — serving installed packages unbundled
+import { buildImportMap, scanImports, expandExports, exportTarget } from '@jarenjs/emit/importmap';
+const importMap = buildImportMap({ packages: ['app'], prefix: '/vendor/' });
+const mapped: Record<string, string> = importMap.imports;
+const servedFiles: string[] = importMap.files;
+void [mapped, servedFiles, importMap.duplicates.map((d) => d.paths.join()), importMap.unresolved.map((u) => u.from)];
+const scanned: Array<{ specifier: string, dynamic: boolean }> = scanImports("import './a.js';");
+void scanned;
+void exportTarget({ default: './x.js' }, ['default'])?.length;
+void expandExports({ exports: './x.js' }, { conditions: ['default'], listFiles: () => null })[0]?.unexpanded;
+// @ts-expect-error packages is required
+buildImportMap({ prefix: '/vendor/' });
+
+// @jarenjs/json — a query error's message, as data, in any catalog
+import { queryMessagesEn, renderQueryMessage, JsonQueryRuntimeError } from '@jarenjs/json';
+try { compileJsonQuery({ $substring: ['$.s', 1] })({ s: 5 }); }
+catch (error) {
+  if (error instanceof JsonQueryRuntimeError) {
+    const id: string = error.messageId;
+    const values: Record<string, any> = error.params;
+    const text: string = renderQueryMessage(error, { 'query/expected-string': 'wanted a string' });
+    void [id, values, text, queryMessagesEn['query/expected-string']];
+  }
+}
+
+// @jarenjs/mermaid + charts — a pie drawn by the renderer the host injects
+import { diagramToVnode } from '@jarenjs/mermaid';
+import { mermaidPieRenderer } from '@jarenjs/charts/transforms/mermaid-adapter';
+void diagramToVnode('pie\n "a" : 1', { renderers: { pie: mermaidPieRenderer } });

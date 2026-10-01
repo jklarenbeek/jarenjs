@@ -12,7 +12,7 @@
  * `span.tok-{kind}` (plain `id` runs render as bare text).
  */
 
-import { definePlugin } from './index.js';
+import { definePlugin } from './define.js';
 
 /**
  * @typedef {{ kind: 'kw'|'str'|'num'|'com'|'pun'|'id'|'op'|'lit', value: string }} Token
@@ -272,7 +272,7 @@ export function tokenizeCode(code, lang) {
  *
  * @param {{ grammars?: Record<string, MdGrammar>,
  *           adapter?: (code: string, lang: string|null) => (Token[] | null) }} [config]
- * @returns {import('./index.js').MdPlugin}
+ * @returns {import('./define.js').MdPlugin}
  */
 export function highlightPlugin(config = {}) {
   const adapter = config.adapter;

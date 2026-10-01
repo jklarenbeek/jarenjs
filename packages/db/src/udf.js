@@ -137,9 +137,12 @@ export function deterministicFragment(fragment, operators = null, binding = 'it'
           // the caller's document; anything else propagates as it is
           if (error instanceof JsonQueryRuntimeError && typeof error.docPath === 'string'
             && error.docPath.startsWith(WRAPPER)) {
+            // the message id and its params travel with it, so the refusal
+            // still renders in another language
             throw new JsonQueryRuntimeError(error.code, error.reason,
               (typeof mount === 'string' ? mount : '/$where') + error.docPath.slice(WRAPPER.length),
-              Object.hasOwn(error, 'cause') ? { cause: error.cause } : undefined);
+              { ...(Object.hasOwn(error, 'cause') ? { cause: error.cause } : {}),
+                messageId: error.messageId, params: error.params });
           }
           throw error;
         }

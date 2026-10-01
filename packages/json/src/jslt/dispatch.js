@@ -123,11 +123,11 @@ function createApplyEntry(ruleBox, tableBox, targetModes) {
       }
       else {
         if (arg.length < 1 || arg.length > 2)
-          helpers.fail('JQ0003', "'$apply' takes [selector] or [selector, mode]", opPath);
+          helpers.raise('JQ0003', 'query/apply-arguments', {}, opPath);
         selector = helpers.normalizeExpr(arg[0], opPath + '/0', scope, ctx);
         if (arg.length === 2) {
           if (typeof arg[1] !== 'string')
-            helpers.fail('JQ0003', "the '$apply' mode must be a literal string", opPath + '/1');
+            helpers.raise('JQ0003', 'query/apply-mode', {}, opPath + '/1');
           targetMode = arg[1];
         }
       }

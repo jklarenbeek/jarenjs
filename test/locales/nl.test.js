@@ -21,6 +21,8 @@ import {
 } from '@jarenjs/validate';
 import { formsMessagesEn } from '@jarenjs/forms';
 import { contractMessagesEn } from '@jarenjs/contract';
+import { compileJsonQuery, queryMessagesEn, renderQueryMessage } from '@jarenjs/json';
+import { compileMessageTemplate } from '@jarenjs/core/message';
 
 const compiled = compileMessageCatalog(nl);
 
@@ -34,9 +36,21 @@ const compiled = compileMessageCatalog(nl);
 const DATE_SAMPLE_PARAMS = Object.fromEntries(
   Object.keys(dateMessagesEn).map((key) => [key, { value: 2 }]));
 
+/**
+ * The query msgids are templates over the values their English names, so
+ * their sample params are DERIVED from the English placeholders: one
+ * string per parameter.
+ */
+const QUERY_SAMPLE_PARAMS = Object.fromEntries(Object.entries(queryMessagesEn).map(([key, template]) =>
+  [key, Object.fromEntries(compileMessageTemplate(template).parameters.map((name) => [name, `<${name}>`]))]));
+
+/** The placeholder names of a template, sorted. @param {any} template */
+const placeholders = (template) => [...compileMessageTemplate(String(template)).parameters].sort();
+
 /** Representative params per message key, for renders and the sweep. */
 const SAMPLE_PARAMS = {
   ...DATE_SAMPLE_PARAMS,
+  ...QUERY_SAMPLE_PARAMS,
   type: { type: 'string' },
   required: { missingProperty: 'name' },
   minimum: { limit: 10, comparison: '>=' },
@@ -147,7 +161,22 @@ describe('@jarenjs/locales nl', () => {
     for (const key of Object.keys(dateMessagesEn)) {
       assert.ok(nlKeys.has(key), `nl is missing date key '${key}'`);
     }
+    for (const key of Object.keys(queryMessagesEn)) {
+      assert.ok(nlKeys.has(key), `nl is missing query key '${key}'`);
+      assert.deepStrictEqual(placeholders(nl[key]), placeholders(queryMessagesEn[key]), `nl ${key} placeholders`);
+    }
     assert.ok(nlKeys.has('x-form/assert'));
+  });
+
+  it('renders a query error in Dutch, the item it met included', () => {
+    let error;
+    try { compileJsonQuery({ $substring: ['$.s', 1] })({ s: 5 }); }
+    catch (thrown) { error = thrown; }
+    assert.strictEqual(error.reason, 'expected a string, got a number');
+    const dutch = renderQueryMessage(error, nl);
+    assert.strictEqual(dutch, 'een tekst (string) verwacht, een getal gekregen');
+    assert.strictEqual(dutch, nl['query/expected-string'].replace('{got}', nl['query/item/number']));
+    assert.notStrictEqual(dutch, error.reason);
   });
 
   it('renders the plural pair correctly (the demonstration case)', () => {

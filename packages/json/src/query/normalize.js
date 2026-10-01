@@ -22,6 +22,7 @@ import { parseJSONPath, JSONPathSyntaxError, RE_JSONPATH_VARIABLE_HEAD } from '.
 import { isSingularSegments } from '../segments.js';
 import { encodeJSONPointerSegment } from '../pointer.js';
 import { JsonQueryCompileError } from './errors.js';
+import { queryCompileError, messageRef } from './messages.js';
 import { normalizeLexical } from './lexical.js';
 import { deepFreeze, isJsonObject } from '@jarenjs/core/object';
 // The operator registry: `name -> { params, result, compile }`. Only
@@ -141,6 +142,14 @@ function isVocabularyKey(key, ctx) {
 
 //#region helpers
 
+// A compile error whose reason is a catalog message (`./messages.js`):
+// every refusal the engine raises names its message id and params.
+function raise(code, messageId, params, docPath, options) {
+  throw queryCompileError(code, messageId, params, docPath, options);
+}
+
+// The extension operators' refusal (`EXTENSION_HELPERS.fail`): an English
+// reason of the extension's own, carried as `query/reason`.
 function fail(code, message, docPath, options) {
   throw new JsonQueryCompileError(code, message, docPath, options);
 }
@@ -223,7 +232,7 @@ function parsePathString(source, original, docPath, ctx) {
     /* c8 ignore next 2 -- parseJSONPath only throws syntax errors */
     if (!(e instanceof JSONPathSyntaxError))
       throw e;
-    return fail('JQ0004', `'${original}' is not a valid path: ${e.message}`, docPath);
+    return raise('JQ0004', 'query/invalid-path-detail', { path: original, detail: e.message }, docPath);
   }
 }
 
@@ -256,10 +265,8 @@ function resolveVariable(name, scope, ctx, docPath) {
   if (slot === undefined) {
     if (ctx.declaredExternals !== null && !ctx.declaredExternals.has(name)) {
       const declared = [...ctx.declaredExternals];
-      fail('JQ0005', `'$${name}' is neither bound by an enclosing phrase nor a declared external`
-        + (declared.length === 0
-          ? ' (this query was compiled closed-world, declaring no externals)'
-          : ` (declared externals: ${declared.map((n) => "'" + n + "'").join(', ')})`), docPath);
+      raise('JQ0005', declared.length === 0 ? 'query/unbound-variable-closed' : 'query/unbound-variable',
+        declared.length === 0 ? { name } : { name, declared: declared.map((n) => "'" + n + "'").join(', ') }, docPath);
     }
     slot = ctx.nextSlot++;
     ctx.externals.set(name, slot);
@@ -282,7 +289,7 @@ function normalizeString(s, docPath, scope, ctx) {
   }
   const m = VAR_HEAD_RE.exec(s);
   if (m === null)
-    return fail('JQ0004', `'${s}' is not a valid path or escape`, docPath);
+    return raise('JQ0004', 'query/invalid-path', { path: s }, docPath);
   const name = m[1];
   const rest = s.slice(m[0].length);
   const ref = resolveVariable(name, scope, ctx, docPath);
@@ -317,7 +324,7 @@ function normalizeObject(obj, docPath, scope, ctx) {
     return Object.freeze({ kind: 'object', card: CARD_ONE, docPath, entries: Object.freeze(entries) });
   }
   if (dollarCount !== keys.length)
-    return fail('JQ0001', 'an object cannot mix $-prefixed and plain keys', docPath);
+    return raise('JQ0001', 'query/mixed-keys', {}, docPath);
   return normalizePhrase(obj, keys, docPath, scope, ctx);
 }
 
@@ -351,7 +358,7 @@ function normalizePhrase(obj, keys, docPath, scope, ctx) {
     if (!isVocabularyKey(keys[i], ctx))
       return failUnknownOperator(keys[i], docPath, ctx);
   }
-  return fail('JQ0003', `invalid phrase key combination (${keys.join(', ')})`, docPath);
+  return raise('JQ0003', 'query/phrase-keys', { keys: keys.join(', ') }, docPath);
 }
 
 //#endregion
@@ -393,20 +400,22 @@ let VOCABULARY_NAMES = null;
 // most: it guesses `$first`/`$filter`/`$map` and, without a pointer,
 // abandons the language. Each entry is the CLOSEST real spelling; a
 // value of null means "no operator does this — here is how instead".
-const OPERATOR_ALIASES = {
+// A composition rather than one operator is a `query/use/*` message, so
+// the hint is translated with the sentence that carries it.
+export const OPERATOR_ALIASES = {
   // sequence access
-  $first: "$head", $last: "$head of $reverse", $nth: "$get", $at: "$get",
+  $first: "$head", $last: "query/use/head-of-reverse", $nth: "$get", $at: "$get",
   $take: "$subsequence", $skip: "$subsequence", $slice: "$subsequence",
   $drop: "$subsequence", $limit: "$subsequence",
   // filtering / mapping / folding: these are FLWOR or a JSONPath filter,
   // not operators ($where, $map, $fold, $orderby ARE real keys and never
   // reach here — only the guesses that miss them are listed)
-  $filter: "a JSONPath filter like $[?(@.x > 1)] or $where in a $for",
-  $select: "a $for phrase with $return", $flatmap: "a $for phrase",
+  $filter: "query/use/jsonpath-filter",
+  $select: "query/use/for-return", $flatmap: "query/use/for-phrase",
   $reduce: "$fold", $foldl: "$fold", $aggregate: "$fold",
   $group: "$groupby", "$group-by": "$groupby",
-  $sortby: "$sort (sorts scalars; order objects via a $for over a sorted key)",
-  "$sort-by": "$sort (scalars only)", $order: "$sort",
+  $sortby: "query/use/sort-objects",
+  "$sort-by": "query/use/sort-scalars", $order: "$sort",
   // aggregates / arithmetic
   $size: "$count", $len: "$length", $abs: null, $round: null, $floor: "$idiv",
   $ceil: null, $sqrt: null, $pow: null, $modulo: "$mod", $remainder: "$mod",
@@ -415,27 +424,27 @@ const OPERATOR_ALIASES = {
   // strings / collections
   $join: "$string-join", $split: null, $includes: "$contains",
   $indexof: "$index-of", $find: "$index-of", $keys: "$entries",
-  $values: "$entries then $get", $has: "$exists", $tostring: "$string",
+  $values: "query/use/entries-get", $has: "$exists", $tostring: "$string",
   $tonumber: "$number", $len_str: "$string-length", $trim: "$normalize-space",
   $lowercase: "$lower", $uppercase: "$upper", $startswith: "$starts-with",
-  $endswith: "$ends-with", $unique: "$distinct", $flatten: "a $for phrase",
+  $endswith: "$ends-with", $unique: "$distinct", $flatten: "query/use/for-phrase",
   // conditionals ($coalesce is a real operator; the guesses are here)
   $case: "$if", $cond: "$if", $switch: "$if", $ternary: "$if",
   $ifnull: "$default", $ifempty: "$default", $nvl: "$default",
   // spatial: the PostGIS/Turf spellings, and the American plural
-  $wkt: "$geo-parse to read one, $geo-text to write one",
+  $wkt: "query/use/geo-parse-text",
   "$parse-wkt": "$geo-parse", "$from-wkt": "$geo-parse", $st_geomfromtext: "$geo-parse",
   "$to-wkt": "$geo-text", $st_astext: "$geo-text", "$geo-stringify": "$geo-text",
   "$geohash-decode": "$geohash-bounds", "$geohash-bbox": "$geohash-bounds",
   "$geohash-neighbors": "$geohash-neighbours", "$geohash-adjacent": "$geohash-neighbours",
   $simplify: "$geo-simplify", "$douglas-peucker": "$geo-simplify",
-  $intersects: "$bbox-intersects (boxes only — real overlay is deliberately absent)",
+  $intersects: "query/use/bbox-intersects",
   $buffer: null, $union: null, $difference: null,
   // the one absence that needs its reason, not a pointer: a projected
   // position is the same [x, y] array as a geographic one, so an
   // operator making one could not stop it reaching $distance
-  $project: "the renderer — the language cannot make a projected coordinate at all, so a measurement can never land on one; measurement here is geodesic",
-  "$geo-project": "the renderer, as for '$project'",
+  $project: "query/use/renderer",
+  "$geo-project": "query/use/renderer-project",
   $srid: null, $transform: null,
   // vectors: the spellings a writer reaches for from a ranking library.
   // The metric names all point at the one operator because the packed
@@ -446,13 +455,13 @@ const OPERATOR_ALIASES = {
   $cosine: "$similarity", "$cosine-similarity": "$similarity",
   "$cos-sim": "$similarity", "$dot-product": "$similarity",
   $dot: "$similarity", "$inner-product": "$similarity",
-  "$vector-distance": "$similarity (higher is closer; there is no distance metric)",
-  "$l2-distance": "$similarity (higher is closer; there is no distance metric)",
-  $knn: "$orderby on a $similarity key with $dir 'desc', then $subsequence for the k",
-  $nearest: "$orderby on a $similarity key with $dir 'desc', then $subsequence for the k",
-  "$nearest-neighbours": "$orderby on a $similarity key, then $subsequence",
-  "$nearest-neighbors": "$orderby on a $similarity key, then $subsequence",
-  "$top-k": "$orderby then $subsequence", $embed: null, $normalize: null,
+  "$vector-distance": "query/use/similarity",
+  "$l2-distance": "query/use/similarity",
+  $knn: "query/use/knn-desc",
+  $nearest: "query/use/knn-desc",
+  "$nearest-neighbours": "query/use/knn",
+  "$nearest-neighbors": "query/use/knn",
+  "$top-k": "query/use/top-k", $embed: null, $normalize: null,
   // time series: the spellings a writer arrives with from Timescale,
   // pandas, SQL and kdb+. The bucketing family all points at the two
   // operators that exist - the scalar label and the aggregating one -
@@ -460,12 +469,12 @@ const OPERATOR_ALIASES = {
   // MEMBER of a resample spec rather than an operation of its own
   $time_bucket: "$time-bucket", "$date-bin": "$time-bucket",
   $date_bin: "$time-bucket", $bucket: "$time-bucket",
-  "$time-bucket-gapfill": "$resample with a 'fill'",
-  $gapfill: "$resample with a 'fill'", $locf: "$resample with fill 'locf'",
-  $interpolate: "$resample with fill 'linear'",
-  $downsample: "$resample", $upsample: "$resample with a 'fill'",
+  "$time-bucket-gapfill": "query/use/resample-fill",
+  $gapfill: "query/use/resample-fill", $locf: "query/use/resample-locf",
+  $interpolate: "query/use/resample-linear",
+  $downsample: "$resample", $upsample: "query/use/resample-fill",
   $rollup: "$resample", $groupbytime: "$resample",
-  "$moving-average": "$rolling with aggregate 'mean'",
+  "$moving-average": "query/use/rolling-mean",
   $rollingwindow: "$rolling", "$time-window": "$rolling",
   "$as-of": "$asof", "$asof-join": "$asof", $aj: "$asof",
   "$merge-asof": "$asof", "$latest-at": "$asof",
@@ -482,10 +491,9 @@ const OPERATOR_ALIASES = {
 function failUnknownOperator(key, docPath, ctx) {
   if (hasOwn(OPERATOR_ALIASES, key)) {
     const target = OPERATOR_ALIASES[key];
-    const hint = target === null
-      ? ' (no operator does this in jaren-query)'
-      : ` (use ${target.startsWith('$') && !target.includes(' ') ? `'${target}'` : target})`;
-    return fail('JQ0002', `unknown operator '${key}'${hint}`, docPath);
+    if (target === null) return raise('JQ0002', 'query/unknown-operator-none', { key }, docPath);
+    return raise('JQ0002', 'query/unknown-operator-use',
+      { key, use: target.startsWith('query/use/') ? messageRef(target) : `'${target}'` }, docPath);
   }
   if (VOCABULARY_NAMES === null) {
     VOCABULARY_NAMES = [
@@ -508,8 +516,8 @@ function failUnknownOperator(key, docPath, ctx) {
       best = name;
     }
   }
-  const hint = best === null ? '' : ` (did you mean '${best}'?)`;
-  return fail('JQ0002', `unknown operator '${key}'${hint}`, docPath);
+  return best === null ? raise('JQ0002', 'query/unknown-operator', { key }, docPath)
+    : raise('JQ0002', 'query/unknown-operator-suggest', { key, suggestion: best }, docPath);
 }
 
 //#endregion
@@ -518,10 +526,11 @@ function failUnknownOperator(key, docPath, ctx) {
 
 function requireExprArray(op, arg, min, max, docPath) {
   if (!Array.isArray(arg))
-    return fail('JQ0003', `'${op}' takes an array of expressions`, docPath);
+    return raise('JQ0003', 'query/operands-array', { op }, docPath);
   if (arg.length < min || arg.length > max) {
-    const arity = min === max ? `exactly ${min}` : (max === Infinity ? `at least ${min}` : `${min} to ${max}`);
-    return fail('JQ0003', `'${op}' takes ${arity} operand(s), got ${arg.length}`, docPath);
+    return min === max ? raise('JQ0003', 'query/operands-exactly', { op, min, count: arg.length }, docPath)
+      : max === Infinity ? raise('JQ0003', 'query/operands-at-least', { op, min, count: arg.length }, docPath)
+        : raise('JQ0003', 'query/operands-range', { op, min, max, count: arg.length }, docPath);
   }
   return arg;
 }
@@ -549,7 +558,7 @@ function compileSchemaLiteral(value, schemaPath, opPath, ctx) {
     // never sets ctx.analysis, so its behaviour is untouched.
     if (ctx.analysis)
       return { schema: deepFreezeCopy(value), test: null };
-    fail('JQ0008', 'schema operators require a type-test compiler (options.compileTypeTest)', opPath);
+    raise('JQ0008', 'query/schema-no-compiler', {}, opPath);
   }
   const schema = deepFreezeCopy(value);
   let test;
@@ -557,10 +566,10 @@ function compileSchemaLiteral(value, schemaPath, opPath, ctx) {
     test = ctx.compileTypeTest(schema, schemaPath);
   }
   catch (e) {
-    fail('JQ0009', `invalid schema literal: ${hostFailureText(e)}`, opPath, { cause: e });
+    raise('JQ0009', 'query/schema-invalid', { detail: hostFailureText(e) }, opPath, { cause: e });
   }
   if (typeof test !== 'function')
-    fail('JQ0009', 'the type-test compiler did not return a predicate function', opPath);
+    raise('JQ0009', 'query/schema-no-predicate', {}, opPath);
   return { schema, test };
 }
 
@@ -589,7 +598,7 @@ function normalizeArg(kind, value, argPath, scope, ctx, opPath) {
   }
   // 'name'
   if (typeof value !== 'string' || !VAR_NAME_RE.test(value))
-    fail('JQ0003', 'expected a variable name string', argPath);
+    raise('JQ0003', 'query/variable-name-expected', {}, argPath);
   return Object.freeze({ kind: 'raw', card: CARD_ONE, docPath: argPath, value });
 }
 
@@ -679,13 +688,15 @@ function normalizeOperatorCall(key, entry, arg, docPath, opPath, scope, ctx) {
 // Helpers handed to an extension entry's `normalize` override; see
 // normalizeExtensionCall. Function declarations hoist, so freezing at
 // module evaluation time is safe.
-const EXTENSION_HELPERS = Object.freeze({ normalizeExpr, fail, makeRaw });
+const EXTENSION_HELPERS = Object.freeze({ normalizeExpr, fail, raise, makeRaw });
 
 // A host extension operator call (options.extensions, package-internal):
 // the registry contract plus an optional `normalize(arg, docPath, opPath,
 // scope, ctx, helpers) -> { args, card? }` override for operators whose
 // value shape the uniform `params` descriptor cannot express. `helpers`
-// is `{ normalizeExpr, fail, makeRaw }`. The op node is built uniformly
+// is `{ normalizeExpr, fail, raise, makeRaw }`: `fail(code, reason, …)`
+// refuses with an English reason of the extension's own, `raise(code,
+// messageId, params, …)` with a message of the query catalog. The op node is built uniformly
 // from the returned args - `card = card ?? entry.result(argCards)` - and
 // carries the resolved entry so compileOp can dispatch without the table.
 function normalizeExtensionCall(key, entry, arg, docPath, opPath, scope, ctx) {
@@ -717,13 +728,13 @@ function normalizeOperator(key, arg, docPath, scope, ctx) {
 
     case '$call': { // a registered trusted host function (options.functions)
       if (!Array.isArray(arg) || arg.length < 1 || typeof arg[0] !== 'string')
-        return fail('JQ0010', "'$call' requires ['name', ...argument expressions]", opPath);
+        return raise('JQ0010', 'query/call-arguments', {}, opPath);
       const name = arg[0];
       const fn = ctx.functions !== null && hasOwn(ctx.functions, name)
         ? ctx.functions[name]
         : undefined;
       if (fn === undefined)
-        return fail('JQ0010', `'$call' names no registered function '${name}'`, opPath);
+        return raise('JQ0010', 'query/call-unregistered', { name }, opPath);
       ctx.usedFunctions.add(name);
       const callArgs = new Array(arg.length - 1);
       for (let i = 1; i < arg.length; i++)
@@ -741,7 +752,7 @@ function normalizeOperator(key, arg, docPath, scope, ctx) {
         const entry = list[i];
         const entryPath = opPath + '/' + i;
         if (!Array.isArray(entry) || entry.length !== 2)
-          return fail('JQ0003', 'a $map entry must be an array of exactly two expressions', entryPath);
+          return raise('JQ0003', 'query/map-entry', {}, entryPath);
         pairs[i] = Object.freeze({
           key: normalizeExpr(entry[0], entryPath + '/0', scope, ctx),
           value: normalizeExpr(entry[1], entryPath + '/1', scope, ctx),
@@ -760,7 +771,7 @@ function normalizeOperator(key, arg, docPath, scope, ctx) {
       if (ctx.extensions !== null && hasOwn(ctx.extensions, key))
         return normalizeExtensionCall(key, ctx.extensions[key], arg, docPath, opPath, scope, ctx);
       if (FLWOR_KEYS.has(key) || QUANTIFIER_KEYS.has(key))
-        return fail('JQ0003', `'${key}' cannot form a phrase on its own`, docPath);
+        return raise('JQ0003', 'query/phrase-alone', { key }, docPath);
       return failUnknownOperator(key, docPath, ctx);
     }
   }
@@ -776,18 +787,18 @@ function normalizeOperator(key, arg, docPath, scope, ctx) {
 // shadowing and never hits this check.
 function bindPhraseName(name, phraseNames, bindPath) {
   if (!VAR_NAME_RE.test(name))
-    fail('JQ0003', `'${name}' is not a valid variable name`, bindPath);
+    raise('JQ0003', 'query/variable-name-invalid', { name }, bindPath);
   if (phraseNames.has(name))
-    fail('JQ0007', `duplicate binding of variable '${name}' within one phrase`, bindPath);
+    raise('JQ0007', 'query/variable-duplicate', { name }, bindPath);
   phraseNames.add(name);
 }
 
 function requireBindingObject(clause, bindObj, clausePath) {
   if (!isJsonObject(bindObj))
-    fail('JQ0003', `'${clause}' takes an object of variable bindings`, clausePath);
+    raise('JQ0003', 'query/bindings-object', { clause }, clausePath);
   const names = Object.keys(bindObj);
   if (names.length === 0)
-    fail('JQ0003', `'${clause}' requires at least one binding`, clausePath);
+    raise('JQ0003', 'query/bindings-empty', { clause }, clausePath);
   return names;
 }
 
@@ -805,7 +816,7 @@ function normalizeLetBindings(letObj, letPath, scope, ctx, phraseNames, bindings
     bindPhraseName(name, phraseNames, bindPath);
     const source = letObj[name];
     if (isExtendedBinding(source))
-      return fail('JQ0003', "the extended binding form is not available in '$let'", bindPath);
+      return raise('JQ0003', 'query/extended-let', {}, bindPath);
     const expr = normalizeExpr(source, bindPath, sc, ctx);
     const slot = ctx.nextSlot++;
     sc = { name, slot, card: expr.card, parent: sc };
@@ -839,17 +850,17 @@ function normalizeLetPhrase(obj, docPath, scope, ctx) {
 function normalizeWindowSpec(source, bindPath) {
   const kind = source.$window;
   if (kind !== 'tumbling' && kind !== 'sliding')
-    return fail('JQ0003', "'$window' must be 'tumbling' or 'sliding'", bindPath + '/$window');
+    return raise('JQ0003', 'query/window-kind', {}, bindPath + '/$window');
   if (!hasOwn(source, '$size'))
-    return fail('JQ0003', "a '$window' binding requires '$size'", bindPath);
+    return raise('JQ0003', 'query/window-size-required', {}, bindPath);
   const size = source.$size;
   if (!Number.isInteger(size) || size < 1)
-    return fail('JQ0003', "'$size' must be a positive integer", bindPath + '/$size');
+    return raise('JQ0003', 'query/window-size', {}, bindPath + '/$size');
   let step = kind === 'tumbling' ? size : 1;
   if (hasOwn(source, '$step')) {
     step = source.$step;
     if (!Number.isInteger(step) || step < 1)
-      return fail('JQ0003', "'$step' must be a positive integer", bindPath + '/$step');
+      return raise('JQ0003', 'query/window-step', {}, bindPath + '/$step');
   }
   return Object.freeze({ sliding: kind === 'sliding', size, step });
 }
@@ -875,24 +886,24 @@ function normalizeForBindings(forObj, forPath, scope, ctx, phraseNames, bindings
       const bindKeys = Object.keys(source);
       for (let k = 0; k < bindKeys.length; k++) {
         if (!FOR_BINDING_KEYS.has(bindKeys[k]))
-          return fail('JQ0003', `'${bindKeys[k]}' is not a valid key of an extended '$for' binding`, bindPath);
+          return raise('JQ0003', 'query/for-key', { key: bindKeys[k] }, bindPath);
       }
       if (!hasOwn(source, '$in'))
-        return fail('JQ0003', "an extended '$for' binding requires '$in'", bindPath);
+        return raise('JQ0003', 'query/for-in-required', {}, bindPath);
       if (hasOwn(source, '$at')) {
         atName = source.$at;
         if (typeof atName !== 'string' || !VAR_NAME_RE.test(atName))
-          return fail('JQ0003', "'$at' takes a variable name string", bindPath + '/$at');
+          return raise('JQ0003', 'query/for-at', {}, bindPath + '/$at');
       }
       if (hasOwn(source, '$allowing-empty')) {
         if (typeof source['$allowing-empty'] !== 'boolean')
-          return fail('JQ0003', "'$allowing-empty' takes a boolean", bindPath + '/$allowing-empty');
+          return raise('JQ0003', 'query/for-allowing-empty', {}, bindPath + '/$allowing-empty');
         allowingEmpty = source['$allowing-empty'];
       }
       if (hasOwn(source, '$window'))
         window = normalizeWindowSpec(source, bindPath);
       else if (hasOwn(source, '$size') || hasOwn(source, '$step'))
-        return fail('JQ0003', "'$size'/'$step' require '$window'", bindPath);
+        return raise('JQ0003', 'query/window-required', {}, bindPath);
       source = source.$in;
       sourcePath = bindPath + '/$in';
     }
@@ -933,29 +944,29 @@ function normalizeOrderbySpec(spec, specPath, scope, ctx) {
     const specKeys = Object.keys(spec);
     for (let i = 0; i < specKeys.length; i++) {
       if (!ORDERBY_SPEC_KEYS.has(specKeys[i]))
-        return fail('JQ0003', `'${specKeys[i]}' is not a valid key of an $orderby key spec`, specPath);
+        return raise('JQ0003', 'query/orderby-spec-key', { key: specKeys[i] }, specPath);
     }
     if (!hasOwn(spec, '$key'))
-      return fail('JQ0003', "an explicit $orderby key spec requires '$key'", specPath);
+      return raise('JQ0003', 'query/orderby-spec-key-required', {}, specPath);
     if (hasOwn(spec, '$dir')) {
       if (spec.$dir !== 'asc' && spec.$dir !== 'desc')
-        return fail('JQ0003', "'$dir' must be 'asc' or 'desc'", specPath + '/$dir');
+        return raise('JQ0003', 'query/orderby-dir', {}, specPath + '/$dir');
       desc = spec.$dir === 'desc';
     }
     if (hasOwn(spec, '$empty')) {
       if (spec.$empty !== 'least' && spec.$empty !== 'greatest')
-        return fail('JQ0003', "'$empty' must be 'least' or 'greatest'", specPath + '/$empty');
+        return raise('JQ0003', 'query/orderby-empty', {}, specPath + '/$empty');
       emptyGreatest = spec.$empty === 'greatest';
     }
     if (hasOwn(spec, '$collation')) {
       if (typeof spec.$collation !== 'string')
-        return fail('JQ0003', "'$collation' must be a registered collation name", specPath + '/$collation');
+        return raise('JQ0003', 'query/collation-name', {}, specPath + '/$collation');
       collationName = spec.$collation;
       collation = ctx.collations !== null && hasOwn(ctx.collations, collationName)
         ? ctx.collations[collationName]
         : undefined;
       if (collation === undefined)
-        return fail('JQ0010', `'$collation' names no registered collation '${collationName}'`, specPath + '/$collation');
+        return raise('JQ0010', 'query/collation-unregistered', { name: collationName }, specPath + '/$collation');
       ctx.usedCollations.add(collationName);
     }
     key = spec.$key;
@@ -1071,7 +1082,7 @@ function normalizeFlworPhrase(obj, docPath, scope, ctx) {
     const foldPath = docPath + '/$fold';
     const names = requireBindingObject('$fold', obj.$fold, foldPath);
     if (names.length !== 1)
-      return fail('JQ0003', "'$fold' takes exactly one accumulator binding", foldPath);
+      return raise('JQ0003', 'query/fold-binding', {}, foldPath);
     const name = names[0];
     const bindPath = foldPath + '/' + encodeJSONPointerSegment(name);
     bindPhraseName(name, phraseNames, bindPath);
@@ -1105,10 +1116,10 @@ function normalizeFlworPhrase(obj, docPath, scope, ctx) {
     const asPath = docPath + '/$as';
     const asObj = obj.$as;
     if (!isJsonObject(asObj))
-      return fail('JQ0003', "'$as' takes an object of variable-name to schema members", asPath);
+      return raise('JQ0003', 'query/as-object', {}, asPath);
     const names = Object.keys(asObj);
     if (names.length === 0)
-      return fail('JQ0003', "'$as' requires at least one member", asPath);
+      return raise('JQ0003', 'query/as-empty', {}, asPath);
     const checks = new Array(names.length);
     for (let i = 0; i < names.length; i++) {
       const name = names[i];
@@ -1121,7 +1132,7 @@ function normalizeFlworPhrase(obj, docPath, scope, ctx) {
         }
       }
       if (slot < 0)
-        return fail('JQ0005', `'$as' names '${name}', which is not bound by this phrase's '$for'/'$let'`, checkPath);
+        return raise('JQ0005', 'query/as-unbound', { name }, checkPath);
       let isLet = false;
       for (let j = 0; j < letBindings.length; j++) {
         if (letBindings[j].name === name) {
@@ -1172,7 +1183,7 @@ function normalizeFlworPhrase(obj, docPath, scope, ctx) {
     let specs;
     if (Array.isArray(raw)) { // always a list of key specs, major to minor
       if (raw.length === 0)
-        return fail('JQ0003', "'$orderby' takes a key spec or a non-empty array of key specs", orderPath);
+        return raise('JQ0003', 'query/orderby-spec', {}, orderPath);
       specs = new Array(raw.length);
       for (let i = 0; i < raw.length; i++)
         specs[i] = normalizeOrderbySpec(raw[i], orderPath + '/' + i, sc, ctx);
@@ -1188,7 +1199,7 @@ function normalizeFlworPhrase(obj, docPath, scope, ctx) {
     const countPath = docPath + '/$count';
     const name = obj.$count;
     if (typeof name !== 'string')
-      return fail('JQ0003', "'$count' takes a variable name string", countPath);
+      return raise('JQ0003', 'query/count-variable', {}, countPath);
     bindPhraseName(name, phraseNames, countPath);
     const slot = ctx.nextSlot++;
     sc = { name, slot, card: CARD_ONE, parent: sc };
@@ -1279,7 +1290,7 @@ function normalizeQuantifierPhrase(obj, docPath, scope, ctx) {
     bindPhraseName(name, phraseNames, bindPath);
     const source = bindObj[name];
     if (isExtendedBinding(source))
-      return fail('JQ0003', 'the extended binding form is not available in quantifiers', bindPath);
+      return raise('JQ0003', 'query/extended-quantifier', {}, bindPath);
     const expr = normalizeExpr(source, bindPath, sc, ctx);
     const slot = ctx.nextSlot++;
     sc = { name, slot, card: CARD_ONE, parent: sc };
@@ -1488,7 +1499,7 @@ function normalizeExpr(value, docPath, scope, ctx) {
       return normalizeObject(value, docPath, scope, ctx);
     }
     default:
-      return fail('JQ0003', `a query document cannot contain a ${typeof value}`, docPath);
+      return raise('JQ0003', 'query/document-value', { type: typeof value }, docPath);
   }
 }
 
@@ -1556,9 +1567,9 @@ export function normalizeQuery(doc, options = {}) {
     }
     if (allDollar) {
       if (hasOwn(doc, '$query') && doc.$query !== '0.1')
-        fail('JQ0006', `unknown query format version ${JSON.stringify(doc.$query)}`, '/$query');
+        raise('JQ0006', 'query/version-unknown', { version: String(JSON.stringify(doc.$query)) }, '/$query');
       if (!hasOwn(doc, '$query') || !hasOwn(doc, '$expr') || keys.length !== 2)
-        fail('JQ0003', "the version envelope requires exactly the keys '$query' and '$expr'", '');
+        raise('JQ0003', 'query/version-envelope', {}, '');
       expr = doc.$expr;
       rootPath = '/$expr';
     }
@@ -1568,7 +1579,7 @@ export function normalizeQuery(doc, options = {}) {
     const worst = { depth: 0, docPath: rootPath };
     measureDepth(root, 1, worst);
     if (worst.depth > limits.depth)
-      fail('JQ0011', `the query nests ${worst.depth} expressions deep, more than limits.depth (${limits.depth})`, worst.docPath);
+      raise('JQ0011', 'query/depth-limit', { depth: worst.depth, limit: limits.depth }, worst.docPath);
   }
   // limits.steps instruments every node evaluation; the counter lives in
   // its own frame slot, so nothing is threaded through the closures

@@ -215,12 +215,15 @@ on the server, keep everything up to `renderToString`:
 
 ```js
 import { loadMarkdown, createMdRenderer } from '@jarenjs/md';
-import { highlightPlugin, mermaidPlugin } from '@jarenjs/md/plugins';
+import { highlightPlugin } from '@jarenjs/md/plugins';
+import { mermaidPlugin } from '@jarenjs/mermaid/plugin';
+import { mermaidPieRenderer } from '@jarenjs/charts/transforms/mermaid-adapter';
 import { renderToString } from '@jarenjs/view';
 import { compileJsltStylesheet } from '@jarenjs/json/jslt';
 import { createTypeTestCompiler } from '@jarenjs/validate/query';
 
-const plugins = [highlightPlugin(), mermaidPlugin()];   // native engine, no injected instance
+// native diagrams, no injected instance; a pie is drawn by charts' renderer
+const plugins = [highlightPlugin(), mermaidPlugin({ renderers: { pie: mermaidPieRenderer } })];
 
 // 1. Load + compile (cached by URL, AbortSignal-aware, streaming).
 const md = await loadMarkdown('/docs/article.md', { plugins });
@@ -267,6 +270,14 @@ hot loops only do indexed lookups. Without a plugin, its syntax
 degrades gracefully (a ` ```mermaid ` fence is just a `code` node). The
 contract and both reference plugins are specified in
 [docs/PLUGINS.md](docs/PLUGINS.md).
+
+This package imports no other component. Diagrams come from
+`@jarenjs/mermaid/plugin`, handed in, so a page without them loads no
+diagram or chart code, bundled or not. Parsing and rendering to vnodes
+costs a consumer **<!--fact:bundle.md-->78,501<!--/fact--> bytes**
+minified and tree-shaken. `npm run test:tree-shaking` measures it and
+holds both import graphs (`@jarenjs/md` and `@jarenjs/md/component`) free
+of mermaid and charts modules.
 
 ### The visual component (part two)
 
@@ -322,11 +333,13 @@ createApp(appDoc, {
   action payload; `md-parse` does the same for an in-state source
   string. Failures route to an optional `error` action.
 - `md.hydrate(container)` runs plugin `hydrate` hooks (browser-only
-  upgrades) over app-managed DOM, once per content hash. The bundled
-  plugins need none — mermaid renders complete SVG synchronously — so
-  this is a no-op until a hydrating third-party plugin is added.
+  upgrades) over app-managed DOM, once per content hash. The highlighter
+  needs none, nor does mermaid's plugin unless it is asked for pan and
+  zoom (`interactive: true`) — it renders complete SVG synchronously.
 - Pass `plugins` to extend the compiled-in set — e.g.
-  `createMdComponent({ plugins: [highlightPlugin(), mermaidPlugin()] })`.
+  `createMdComponent({ plugins: [highlightPlugin(), mermaidPlugin()] })`,
+  with `mermaidPlugin` from `@jarenjs/mermaid/plugin`: this package
+  imports no diagram or chart code of its own.
 
 ### Forms and apps
 

@@ -10,6 +10,7 @@ import * as path from 'path';
 import { compileEmitModel } from './model.js';
 import { renderTypeScript } from './typescript.js';
 import { renderMarkdown } from './markdown.js';
+import { buildImportMap } from './importmap.js';
 
 const TARGETS = {
   typescript: { render: renderTypeScript, extension: '.d.ts' },
@@ -20,6 +21,7 @@ const USAGE = `jaren-emit — build-time artifacts from JSON Schema
 
 Usage:
   jaren-emit --schema <file|dir> --out <dir> [options]
+  jaren-emit importmap --packages <names> [importmap options]
 
 Options:
   --schema <path>   A .json schema file, or a directory of them (required)
@@ -38,11 +40,74 @@ name. With either on, a type whose shape differs before and after normalizing
 gains a second declaration: Config is what you have afterwards, ConfigInput is
 what a caller may hand in.
 
+importmap options — serve installed packages unbundled:
+  --packages <a,b>     Package names, comma separated; a bare name is a suite
+                       package (app is @jarenjs/app). Their dependencies follow.
+  --prefix <url>       The URL the files are served under (default /node_modules/)
+  --root <dir>         The directory holding node_modules (default .)
+  --conditions <a,b>   Export conditions, in preference (default browser,import,default)
+  --files              Print the files a server must serve, one per line,
+                       instead of the import map
+  --allow-duplicates   Print even when a package is installed more than once
+
+The import map is printed to stdout. A package installed twice, or an import
+the map cannot resolve, is reported on stderr with exit code 1.
+
 Examples:
   jaren-emit --schema ./schemas --out ./src/types
   jaren-emit --schema ./schemas/user.json --out ./types --name User
   jaren-emit --schema ./schemas --out ./src/types --check
+  jaren-emit importmap --packages app,view --prefix /vendor/ > importmap.json
 `;
+
+/**
+ * The importmap subcommand: options in, the map (or the file list) out.
+ * @param {string[]} argv - the arguments after `importmap`
+ * @returns {number} the exit code
+ */
+function importmapCommand(argv) {
+  const options = { packages: /** @type {string[] | null} */ (null), prefix: '/node_modules/', root: '.',
+    conditions: /** @type {string[] | undefined} */ (undefined), files: false, allowDuplicates: false };
+  for (let i = 0; i < argv.length; i++) {
+    const value = () => {
+      const next = argv[i + 1];
+      if (next === undefined || next.startsWith('--')) throw new Error(`${argv[i]} requires a value`);
+      i++;
+      return next;
+    };
+    switch (argv[i]) {
+      case '--packages': options.packages = value().split(',').map((name) => name.trim()).filter(Boolean); break;
+      case '--prefix': options.prefix = value(); break;
+      case '--root': options.root = value(); break;
+      case '--conditions': options.conditions = value().split(',').map((name) => name.trim()).filter(Boolean); break;
+      case '--files': options.files = true; break;
+      case '--allow-duplicates': options.allowDuplicates = true; break;
+      case '--help': case '-h': console.log(USAGE); return 0;
+      default: throw new Error(`unknown importmap option: ${argv[i]}`);
+    }
+  }
+  if (options.packages === null || options.packages.length === 0) throw new Error('importmap needs --packages');
+  const result = buildImportMap({ packages: options.packages, root: options.root, prefix: options.prefix,
+    ...(options.conditions === undefined ? {} : { conditions: options.conditions }) });
+  let failed = false;
+  for (const { name, paths } of result.duplicates) {
+    console.error(`${options.allowDuplicates ? 'warning' : 'error'}: ${name} is installed more than once: ${paths.join(', ')}`);
+    if (!options.allowDuplicates) failed = true;
+  }
+  for (const { specifier, from } of result.unresolved) {
+    console.error(`error: ${from} imports ${specifier}, which the map does not resolve`);
+    failed = true;
+  }
+  if (failed) {
+    if (result.duplicates.length > 0 && !options.allowDuplicates) {
+      console.error('a package installed twice runs twice in the browser; dedupe the install, or pass --allow-duplicates to serve the copy nearest the root');
+    }
+    return 1;
+  }
+  process.stdout.write(options.files ? result.files.join('\n') + '\n'
+    : JSON.stringify({ imports: result.imports }, null, 2) + '\n');
+  return 0;
+}
 
 function parseArgs(argv) {
   const options = {
@@ -116,6 +181,17 @@ function writeOrCheck(file, content, check) {
 }
 
 function main() {
+  if (process.argv[2] === 'importmap') {
+    try {
+      process.exitCode = importmapCommand(process.argv.slice(3));
+    }
+    catch (error) {
+      console.error(error instanceof Error ? error.message : String(error));
+      console.error(USAGE);
+      process.exitCode = 2;
+    }
+    return;
+  }
   let options;
   try {
     options = parseArgs(process.argv);

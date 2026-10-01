@@ -3,7 +3,7 @@ import { describe, it } from 'node:test';
 import * as assert from 'node:assert/strict';
 
 import { compileChart, buildPieAST, renderPieAST, CATEGORICAL, createTheme } from '@jarenjs/charts';
-import { mermaidPieToChartAST } from '@jarenjs/charts/transforms/mermaid-adapter';
+import { mermaidPieRenderer, mermaidPieToChartAST } from '@jarenjs/charts/transforms/mermaid-adapter';
 import { renderMermaid, parseMermaid, hashContent, createTheme as createMermaidTheme } from '@jarenjs/mermaid';
 import { renderToString, isElementNode } from '@jarenjs/view';
 
@@ -101,12 +101,12 @@ describe('pie render', function () {
 });
 
 describe('mermaid delegation', function () {
-  it('mermaid pie output equals charts render with mermaid options', function () {
+  it('mermaid pie output, with the renderer injected, equals charts render with mermaid options', function () {
     const source = 'pie showData\n  title Pets\n  "Dogs" : 40\n  "Cats" : 25\n  "Birds" : 10';
     const doc = parseMermaid(source);
     const { config, data } = mermaidPieToChartAST(doc.ast);
     // the same theme+hash the mermaid dispatcher would use
-    const mermaidSvg = renderToString(renderMermaid(source));
+    const mermaidSvg = renderToString(renderMermaid(source, { renderers: { pie: mermaidPieRenderer } }));
     const chartsVnode = renderPieAST(buildPieAST(data, config), mermaidTheme(), doc.meta?.hash ?? '0', {
       rootClass: 'mermaid mm-svg',
       keyPrefix: 'mmpie-',

@@ -1,9 +1,8 @@
 //@ts-check
 /** Ordered aggregate state shared by query evaluation and streaming hosts. */
 import { compareCodePoints } from '@jarenjs/core/string';
-import { EMPTY, Seq, seqOf, ebv, stableKeyString, describeItem } from './runtime.js';
-import { JsonQueryRuntimeError } from './errors.js';
-const runtimeError = (code, message, docPath) => new JsonQueryRuntimeError(code, message, docPath);
+import { EMPTY, Seq, seqOf, ebv, stableKeyString, itemRef } from './runtime.js';
+import { queryRuntimeError } from './messages.js';
 
 /**
  * Accumulate sequence ITEMS, preserving order, singleton arrays, numeric
@@ -22,13 +21,13 @@ function createAggregateState(operator, options = {}) {
   const add = (item) => {
     if (operator === '$sum' || operator === '$avg') {
       if (typeof item !== 'number')
-        throw runtimeError('JQ2001', `aggregate items must be numbers, got ${describeItem(item)}`, docPath);
+        throw queryRuntimeError('JQ2001', 'query/aggregate-not-number', { got: itemRef(item) }, docPath);
       total += item;
     }
     if (operator === '$min' || operator === '$max') {
       if ((typeof item !== 'number' && typeof item !== 'string')
         || (count > 0 && typeof item !== typeof first))
-        throw runtimeError('JQ2001', `'$min'/'$max' items must be all numbers or all strings, got ${describeItem(item)}`, docPath);
+        throw queryRuntimeError('JQ2001', 'query/minmax-mixed', { got: itemRef(item) }, docPath);
       if (count === 0) best = item;
       else {
         const order = typeof item === 'string' ? compareCodePoints(item, best)

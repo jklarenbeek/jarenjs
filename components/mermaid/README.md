@@ -93,7 +93,8 @@ createApp(appDoc, {
 ```js
 import { parseMarkdown, mdToVnode } from '@jarenjs/md';
 import { mermaidPlugin } from '@jarenjs/mermaid/plugin';
-const plugins = [mermaidPlugin()];
+import { mermaidPieRenderer } from '@jarenjs/charts/transforms/mermaid-adapter';
+const plugins = [mermaidPlugin({ renderers: { pie: mermaidPieRenderer } })];
 mdToVnode(parseMarkdown(md, { plugins }), { plugins }); // fence → inline <svg>
 ```
 
@@ -288,9 +289,15 @@ Everything runs on the SVG's `viewBox` — four numbers changing. Nothing
 re-renders, nothing re-parses, and the view is clamped so it can never be
 panned off its own canvas.
 
-Pie rendering delegates to [`@jarenjs/charts`](../charts) (the pie
-engine's single home) — the emitted SVG is unchanged; mermaid passes
-its class names, palette and theme through the render options.
+**A pie is drawn by the renderer the host hands in.** The pie engine lives
+in [`@jarenjs/charts`](../charts), and mermaid imports no other component:
+`diagramToVnode(doc, { renderers: { pie } })` — and the same option on
+`renderMermaid`, `compileMermaid`, `mermaidPlugin` and
+`createMermaidComponent` — draws a pie with `mermaidPieRenderer` from
+`@jarenjs/charts/transforms/mermaid-adapter`, the SVG mermaid has always
+emitted (a test holds it byte-identical to fixtures rendered before the
+renderer was injected). Without a renderer a pie renders the placeholder
+(MERMAID-FORMAT §4.5).
 
 ## Performance (measured)
 
@@ -320,6 +327,12 @@ head-to-heads:
 detection + Jison + validation — so it is heavy and noisy; these are
 representative, not a bare-grammar microbenchmark.)
 
+Rendering through `diagramToVnode` costs a consumer
+**<!--fact:bundle.mermaid-->75,930<!--/fact--> bytes** minified and
+tree-shaken, and the import graph holds no chart or Markdown module: a pie
+renderer, when a host wants one, is charts' and is handed in.
+`npm run test:tree-shaking` measures both.
+
 The headless **parse → layout → SVG string** rows are jaren-only
 (<!--fact:mermaid.svgMs-->~0.68 ms for a 25-node flowchart, ~1 ms at 100 nodes<!--/fact-->): mermaid.js
 needs a browser DOM (`getBBox`) to render, so there is no fair
@@ -331,7 +344,8 @@ Node is a capability it lacks.
 - **Two layers, one-way arrow.** The engine imports only `@jarenjs/core`
   and `@jarenjs/view` (shared SVG builders from `@jarenjs/view/helpers`,
   `hashContent` from core); the component adds the app glue. The Markdown
-  plugin lives on the md→mermaid arrow with no cycle.
+  plugin imports nothing of md, and a pie's renderer comes from the host:
+  no component imports another.
 - **CSP-safe.** No `eval`, no `new Function`, no `innerHTML`. Text and
   attributes are escaped by the view serializer.
 - **Structural sharing.** Same source → reference-equal vnode; a small

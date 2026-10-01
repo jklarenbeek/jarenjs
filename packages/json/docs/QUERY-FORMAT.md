@@ -1812,6 +1812,21 @@ runtime errors as `JsonQueryRuntimeError`. Every error carries:
   the offending construct (e.g. `/$expr/$where/$eq/1`);
 - `message` — human-readable, non-normative.
 
+The reference implementation carries the sentence as data as well:
+`messageId` names a message of its English catalog (`queryMessagesEn`, keys
+`query/*`) and `params` holds the values in it. `reason` is that message
+rendered in English, and `renderQueryMessage(error, catalog)` renders it
+through another catalog, such as a `@jarenjs/locales` pack, which mirrors the
+keys one for one. A param may be a message reference itself (`{ messageId,
+params }`): what an item was (`query/item/*`, "a string", "the empty
+sequence") is one, and so is the composition an unknown operator's hint names
+(`query/use/*`, "$head of $reverse"), so each is translated with the sentence
+around it. Text that
+another component produced — a path parser's or a host function's message —
+is a `{detail}` param and stays as it came. An error built without a message
+id (a host's own, with a bare `reason`) carries `query/reason`, which renders
+that reason.
+
 ### 10.2 Compile errors (`JQ0xxx`)
 
 | Code | Condition | XQuery analogue (non-normative) |

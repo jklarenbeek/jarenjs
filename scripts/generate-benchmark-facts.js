@@ -1049,6 +1049,16 @@ const FACTS = {
   'bundle.chain.own': () => thousands(bundles().chain.own),
   'bundle.chain.withSchemaPen': () => thousands(bundles().chain.withSchemaPen),
   'bundle.chain.shared': () => thousands(bundles().chain.shared),
+  // the two components the component rule cut apart: what md and mermaid
+  // each cost a consumer who renders with them and imports nothing else
+  ...Object.fromEntries(['md', 'mermaid'].map((name) => [`bundle.${name}`, () => {
+    const bytes = bundles().components?.[name];
+    if (typeof bytes !== 'number') {
+      throw new Error(`benchmark/bundle-sizes.json has no '${name}' component bundle `
+        + '— re-measure with `npm run test:tree-shaking -- --write`');
+    }
+    return thousands(bytes);
+  }])),
 };
 
 /** One named row of the vector suite's flat rows at the largest leg. */

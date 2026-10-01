@@ -74,7 +74,6 @@
   },
   "dependencies": {
     "@jarenjs/core": "0.95.0",
-    "@jarenjs/mermaid": "0.95.0",
     "@jarenjs/view": "0.95.0"
   }
 }

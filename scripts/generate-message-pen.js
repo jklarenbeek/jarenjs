@@ -8,6 +8,7 @@ import { compileMessageTemplate } from '@jarenjs/core/message';
 import { messagesEn } from '@jarenjs/validate';
 import { formsMessagesEn } from '@jarenjs/forms';
 import { contractMessagesEn } from '@jarenjs/contract';
+import { queryMessagesEn } from '@jarenjs/json';
 
 /** Derive parameter reads from a render closure, refusing unfamiliar code shapes.
  * This is static JavaScript analysis, not a template parser or code execution. */
@@ -50,7 +51,7 @@ export function catalogParameters(catalog) {
 
 /** Reproducible runtime vocabulary and declaration fragments; no target package runtime edge. */
 export function messagePenArtifacts() {
-  const catalogs = { validate: messagesEn, forms: formsMessagesEn, contract: contractMessagesEn };
+  const catalogs = { validate: messagesEn, forms: formsMessagesEn, contract: contractMessagesEn, query: queryMessagesEn };
   const parameters = Object.fromEntries(Object.entries(catalogs).map(([scope, catalog]) => [scope, catalogParameters(catalog)]));
   const all = Object.assign({}, ...Object.values(parameters));
   if (Object.keys(all).length !== Object.values(parameters).reduce((sum, map) => sum + Object.keys(map).length, 0))

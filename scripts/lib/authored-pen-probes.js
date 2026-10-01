@@ -4,5 +4,7 @@ export const AUTHORED_PEN_PROBES = {
   charts: { source: "import { bar } from '@jarenjs/linq/charts'; export const doc = bar().categories(['A']).series([{ name: 'S', values: [1] }]).schema;", maxBytes: 18000 },
   project: { source: "import { defineProject, jsonFile } from '@jarenjs/linq/project'; export const doc = defineProject([jsonFile('data', 'data', [1])]).active('data').schema;", maxBytes: 18000 },
   jtlt: { source: "import { stylesheet, rule, query } from '@jarenjs/linq/jtlt'; export const doc = stylesheet([rule([query(v => v.get('name'))], { match: '$' })]).schema;", maxBytes: 23000 },
-  messages: { source: "import { catalog } from '@jarenjs/linq/messages'; export const doc = catalog('forms').entry('form/required', 'Required').partial();", maxBytes: 23000 },
+  // the vocabulary lists every id of the four English catalogs; the query
+  // catalog's 167 took the pen from 18321 bytes to 23735
+  messages: { source: "import { catalog } from '@jarenjs/linq/messages'; export const doc = catalog('forms').entry('form/required', 'Required').partial();", maxBytes: 24000 },
 };

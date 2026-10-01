@@ -16,7 +16,7 @@ import { layoutGantt } from '../layout/gantt.js';
 import { renderFlowchart } from './flowchart.js';
 import { renderSequence } from './sequence.js';
 import { renderGantt } from './gantt.js';
-import { renderPie, renderStructured, renderPlaceholder, structuredSections } from './misc.js';
+import { renderStructured, renderPlaceholder, structuredSections } from './misc.js';
 import { errorVnode } from './error.js';
 
 /**
@@ -36,9 +36,25 @@ export function layoutDiagram(doc) {
 }
 
 /**
+ * A renderer a host injects for a diagram type this engine does not draw
+ * itself: called with the type's AST, the resolved theme and the
+ * document hash, it answers the SVG vnode.
+ * @callback DiagramRenderer
+ * @param {any} ast
+ * @param {any} theme
+ * @param {string} hash
+ * @returns {any}
+ */
+
+/**
  * Render a doc or source to a pure-vnode SVG. Error-safe.
+ *
+ * A pie is drawn by `options.renderers.pie` — charts' ready one is
+ * `mermaidPieRenderer` from `@jarenjs/charts/transforms/mermaid-adapter`
+ * — and without one renders the placeholder (MERMAID-FORMAT §4.5): the
+ * pie engine lives in charts, and mermaid imports no other component.
  * @param {import('../ast.js').DiagramDocument | string} docOrSource
- * @param {{ theme?: any, [k: string]: any }} [options]
+ * @param {{ theme?: any, renderers?: { pie?: DiagramRenderer }, [k: string]: any }} [options]
  * @returns {any} an SVG vnode
  */
 export function diagramToVnode(docOrSource, options = {}) {
@@ -63,8 +79,11 @@ export function diagramToVnode(docOrSource, options = {}) {
         return renderFlowchart(layoutState(doc.ast), theme, hash, 'mermaid mm-svg mm-state');
       case 'sequence':
         return renderSequence(layoutSequence(doc.ast), theme, hash);
-      case 'pie':
-        return renderPie(doc.ast, theme, hash);
+      case 'pie': {
+        const pie = options.renderers?.pie;
+        return typeof pie === 'function' ? pie(doc.ast, theme, hash)
+          : renderPlaceholder('pie', theme, hash, 'parsed — no pie renderer was injected');
+      }
       case 'gantt':
         return renderGantt(layoutGantt(doc.ast, options), theme, hash);
       case 'class':

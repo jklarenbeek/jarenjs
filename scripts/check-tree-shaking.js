@@ -189,7 +189,10 @@ const chainEdgeLeak = Object.entries(chainInputs)
   .filter(([file, info]) => /packages\/(db|validate|formats|emit|refs)\//.test(file) && info.bytesInOutput > 0);
 if (chainEdgeLeak.length > 0)
   throw new Error(`The chain pulled an optional peer into the bundle: ${chainEdgeLeak.map(([file]) => file).join(', ')}`);
-if (chainBytes > 180000)
+// Measured 189359 bytes once the query engine's English message catalog
+// rode with it (queryMessagesEn, 12350 bytes of the bundle): every refusal
+// names its message, and a locale pack can translate it.
+if (chainBytes > 190000)
   throw new Error(`The chain bundle grew to ${chainBytes} bytes.`);
 
 console.log(`Tree-shaking smoke test passed (${chainBytes} byte chain bundle; no schema-pen module, no client module, no store/validator/formats bytes).`);
@@ -432,8 +435,9 @@ if (asyncLiveLeak.length)
 // its second check at the gate, the atomic patch with its preconditions and
 // all(), keyset pages over column-mapped tables, bound membership lists,
 // and migration host steps with atomic runs and the per-link foreign-key
-// baseline add 21656.
-if (clientBytes > 780000)
+// baseline add 21656. Measured 789872 bytes since: the query engine's
+// English message catalog, which the store's evaluator carries, adds 10916.
+if (clientBytes > 790000)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 
@@ -685,6 +689,45 @@ if (Object.entries(Object.values(formulaPen.metafile.outputs)[0].inputs).some(([
 linqBundles.set('formula', formulaPenBytes);
 console.log(`Formula authoring tree shaking passed (${formulaPenBytes} bytes).`);
 
+// ---- the component rule, measured (docs/workflow/CONVENTIONS.md §1) ----
+// No component imports another: a host hands mermaid's plugin to md and
+// charts' pie renderer to mermaid. The probe reads the IMPORT GRAPH, not a
+// tree-shaken bundle — a browser loading these modules unbundled fetches
+// every static import whatever is used, so `sideEffects` hints are
+// ignored and nothing is shaken: a re-export of a diagram plugin is a
+// leak here even where a bundler would drop it.
+/** @type {Map<string, number>} */
+const componentBundles = new Map();
+for (const [entry, forbidden] of [
+  ['@jarenjs/md', /components\/(mermaid|charts)\//],
+  ['@jarenjs/md/component', /components\/(mermaid|charts)\//],
+  ['@jarenjs/md/plugins', /components\/(mermaid|charts)\//],
+  ['@jarenjs/mermaid', /components\/(charts|md)\//],
+  ['@jarenjs/mermaid/plugin', /components\/(charts|md)\//],
+  ['@jarenjs/mermaid/component', /components\/(charts|md)\//],
+]) {
+  const graph = await build({
+    stdin: { contents: `export * from '${entry}';`, resolveDir: process.cwd(), sourcefile: 'component-graph.js' },
+    bundle: true, format: 'esm', platform: 'browser', treeShaking: false, ignoreAnnotations: true,
+    metafile: true, write: false, logLevel: 'silent',
+  });
+  const leaked = Object.keys(graph.metafile.inputs).filter((file) => forbidden.test(file));
+  if (leaked.length) throw new Error(`${entry} imports another component: ${leaked.join(', ')}`);
+}
+// what each costs a consumer who uses it and nothing else, tree-shaken
+for (const [name, contents] of [
+  ['md', "import { parseMarkdown, mdToVnode } from '@jarenjs/md'; export const render = (s) => mdToVnode(parseMarkdown(s));"],
+  ['mermaid', "import { diagramToVnode } from '@jarenjs/mermaid'; export const render = (s) => diagramToVnode(s);"],
+]) {
+  const result = await build({
+    stdin: { contents, resolveDir: process.cwd(), sourcefile: `${name}-consumer.js` },
+    bundle: true, format: 'esm', platform: 'browser', treeShaking: true, minify: true, write: false,
+  });
+  componentBundles.set(name, result.outputFiles[0].contents.length);
+}
+console.log('Component rule passed (md imports no mermaid or charts module, mermaid no charts or md module, '
+  + `unbundled; md ${componentBundles.get('md')} bytes, mermaid ${componentBundles.get('mermaid')} bytes tree-shaken).`);
+
 // ---- the measured baseline ----
 // Every figure this repository publishes about a `@jarenjs/linq` subpath
 // — docs/CONSUMING.md's rounded table, each pen document's `## 7. Cost`
@@ -707,6 +750,7 @@ const kb = (bytes) => Math.round(bytes / 1000);
 const measured = {
   bundles: Object.fromEntries(linqBundles),
   chain: { own: chainOwnBytes, withSchemaPen: chainPairBytes, shared: chainSharedBytes },
+  components: Object.fromEntries(componentBundles),
 };
 const asJson = `${JSON.stringify(measured, null, 2)}\n`;
 
@@ -724,6 +768,9 @@ else {
       .map(([name, bytes]) => `  ${name}: committed ${was.bundles?.[name] ?? '(absent)'}, measured ${bytes}`);
     for (const [key, bytes] of Object.entries(measured.chain)) {
       if (was.chain?.[key] !== bytes) moved.push(`  chain.${key}: committed ${was.chain?.[key] ?? '(absent)'}, measured ${bytes}`);
+    }
+    for (const [key, bytes] of Object.entries(measured.components)) {
+      if (was.components?.[key] !== bytes) moved.push(`  components.${key}: committed ${was.components?.[key] ?? '(absent)'}, measured ${bytes}`);
     }
     throw new Error(`${BASELINE} is stale:\n${moved.join('\n') || '  (formatting only)'}\n`
       + 'Re-measure with `npm run test:tree-shaking -- --write`, then bake the documents '

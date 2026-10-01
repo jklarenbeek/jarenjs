@@ -17,8 +17,8 @@ import {
   compileSegmentV,
   runSegmentsV,
 } from '../segments.js';
-import { JsonQueryRuntimeError } from './errors.js';
-import { EMPTY, Seq, seqOf, appendItem, ebv, stableKeyString, describeItem } from './runtime.js';
+import { queryRuntimeError } from './messages.js';
+import { EMPTY, Seq, seqOf, appendItem, ebv, stableKeyString, itemRef } from './runtime.js';
 import { CARD_ONE, CARD_MANY, hostFailureText, collectReadSlots } from './normalize.js';
 // The operator registry: every section-8 operator compiles through its
 // table entry (compileOp). Only referenced inside functions, so the
@@ -40,7 +40,7 @@ function compileVarGetter(slot, external, name, docPath) {
   return (f) => {
     const v = f[slot];
     if (v === UNBOUND)
-      throw new JsonQueryRuntimeError('JQ2006', `external parameter '${name}' was not bound`, docPath);
+      throw queryRuntimeError('JQ2006', 'query/external-unbound', { name }, docPath);
     return v;
   };
 }
@@ -172,8 +172,7 @@ export function compileExistsTest(node) {
 // multi-item result is JQ2001 (a JSON member holds exactly one value)
 function memberValue(v, name, docPath) {
   if (v instanceof Seq)
-    throw new JsonQueryRuntimeError('JQ2001',
-      `member '${name}' evaluated to ${v.items.length} items; an object member takes exactly one`, docPath);
+    throw queryRuntimeError('JQ2001', 'query/member-cardinality', { name, count: v.items.length }, docPath);
   return v;
 }
 
@@ -235,8 +234,7 @@ function compileMap(node) {
     appliers[i] = (f, out) => {
       const k = keyGet(f);
       if (typeof k !== 'string')
-        throw new JsonQueryRuntimeError('JQ2004',
-          `a $map key must evaluate to a single string, got ${describeItem(k)}`, keyPath);
+        throw queryRuntimeError('JQ2004', 'query/map-key', { got: itemRef(k) }, keyPath);
       // the key is dynamic, so the '__proto__' test is a runtime one
       if (valOne) {
         setObjectMember(out, k, valGet(f));
@@ -326,8 +324,7 @@ function compileCall(node) {
       // TOTAL: the registered function is host code — no .message read
       // on the raw value, no coercion; the original thrown value is
       // retained as an own cause (present even for undefined)
-      throw new JsonQueryRuntimeError('JQ2010',
-        `registered function '${name}' threw: ${hostFailureText(err)}`, docPath,
+      throw queryRuntimeError('JQ2010', 'query/function-threw', { name, detail: hostFailureText(err) }, docPath,
         { cause: err });
     }
     return out === undefined ? EMPTY : out;
@@ -979,8 +976,7 @@ function compileAsCheck(check, next) {
     return (f, out) => {
       const v = f[slot];
       if (!test(v))
-        throw new JsonQueryRuntimeError('JQ2008',
-          `variable '${name}' failed its '$as' schema: ${describeItem(v)} does not satisfy it`, docPath);
+        throw queryRuntimeError('JQ2008', 'query/as-failed', { name, got: itemRef(v) }, docPath);
       next(f, out);
     };
   }
@@ -991,13 +987,11 @@ function compileAsCheck(check, next) {
         const items = v.items;
         for (let i = 0; i < items.length; i++) {
           if (!test(items[i]))
-            throw new JsonQueryRuntimeError('JQ2008',
-              `variable '${name}' failed its '$as' schema: item ${i} (${describeItem(items[i])}) does not satisfy it`, docPath);
+            throw queryRuntimeError('JQ2008', 'query/as-failed-item', { name, index: i, got: itemRef(items[i]) }, docPath);
         }
       }
       else if (!test(v)) {
-        throw new JsonQueryRuntimeError('JQ2008',
-          `variable '${name}' failed its '$as' schema: ${describeItem(v)} does not satisfy it`, docPath);
+        throw queryRuntimeError('JQ2008', 'query/as-failed', { name, got: itemRef(v) }, docPath);
       }
     }
     next(f, out);
@@ -1015,8 +1009,7 @@ function compileRowSink(specs, keyGets, keyPaths, liveSlots) {
     for (let i = 0; i < keyCount; i++) {
       const v = keyGets[i](f);
       if (v !== EMPTY && typeof v !== 'number' && typeof v !== 'string')
-        throw new JsonQueryRuntimeError('JQ2005',
-          `an $orderby key must be the empty sequence, a number, or a string, got ${describeItem(v)}`, keyPaths[i]);
+        throw queryRuntimeError('JQ2005', 'query/orderby-key', { got: itemRef(v) }, keyPaths[i]);
       row[i] = v;
     }
     const snap = new Array(liveCount);
@@ -1057,8 +1050,7 @@ function compileRowComparator(specs, keyPaths) {
         c = emptyGreatests[i] ? -1 : 1;
       else if (typeof x === 'number') {
         if (typeof y !== 'number')
-          throw new JsonQueryRuntimeError('JQ2005',
-            'cannot order a number against a string in $orderby', keyPaths[i]);
+          throw queryRuntimeError('JQ2005', 'query/orderby-number-string', {}, keyPaths[i]);
         if (x < y)
           c = -1;
         else if (x > y)
@@ -1070,8 +1062,7 @@ function compileRowComparator(specs, keyPaths) {
       }
       else {
         if (typeof y !== 'string')
-          throw new JsonQueryRuntimeError('JQ2005',
-            'cannot order a string against a number in $orderby', keyPaths[i]);
+          throw queryRuntimeError('JQ2005', 'query/orderby-string-number', {}, keyPaths[i]);
         // a registered $collation orders the STRING keys; the default
         // stays the format's code-point order
         c = collations[i] !== null ? collations[i](x, y) : compareCodePoints(x, y);
@@ -1088,8 +1079,7 @@ function compileFlwor(node) {
   const checkFold = seqLimit > 0 ? (value) => {
     const size = value instanceof Seq ? value.items.length : value === EMPTY ? 0 : 1;
     if (size > seqLimit)
-      throw new JsonQueryRuntimeError('JQ2009',
-        `a fold accumulator exceeded ${seqLimit} items (limits.sequenceItems)`, node.docPath);
+      throw queryRuntimeError('JQ2009', 'query/fold-limit', { limit: seqLimit }, node.docPath);
     return value;
   } : null;
   // final sink: $return collects into the accumulator; the $count clause
@@ -1130,8 +1120,7 @@ function compileFlwor(node) {
     sink = (f, out) => {
       inner(f, out);
       if (out.length > seqLimit)
-        throw new JsonQueryRuntimeError('JQ2009',
-          `a phrase materialized more than ${seqLimit} items (limits.sequenceItems)`, limitPath);
+        throw queryRuntimeError('JQ2009', 'query/phrase-limit', { limit: seqLimit }, limitPath);
     };
   }
 
@@ -1173,8 +1162,7 @@ function compileFlwor(node) {
       for (let i = 0; i < groupCount; i++) {
         const v = keyGets[i](f);
         if (v instanceof Seq)
-          throw new JsonQueryRuntimeError('JQ2001',
-            `a $groupby key must be the empty sequence or a single item, got ${describeItem(v)}`, keyPaths[i]);
+          throw queryRuntimeError('JQ2001', 'query/groupby-key', { got: itemRef(v) }, keyPaths[i]);
         keyValues[i] = v;
         // '\u0000' never occurs in stableKeyString output, '~' never
         // starts one: the composite cannot collide across keys
@@ -1498,8 +1486,7 @@ export function compileNode(node) {
   const docPath = node.docPath;
   return (f) => {
     if (++f[slot] > limit)
-      throw new JsonQueryRuntimeError('JQ2009',
-        `the query exceeded limits.steps (${limit} expression evaluations)`, docPath);
+      throw queryRuntimeError('JQ2009', 'query/steps-limit', { limit }, docPath);
     return get(f);
   };
 }

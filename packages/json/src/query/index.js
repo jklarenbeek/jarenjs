@@ -17,9 +17,10 @@ import { createBoundedCache, createWeakCache } from '@jarenjs/core/cache';
 import { normalizeQuery, deepFreezeCopy, NODE_KINDS } from './normalize.js';
 import { compileQueryRoot, UNBOUND } from './compile.js';
 import { EMPTY, Seq, ebv } from './runtime.js';
-import { JsonQueryRuntimeError } from './errors.js';
+import { queryRuntimeError } from './messages.js';
 
 export { JsonQueryCompileError, JsonQueryRuntimeError, QUERY_CODES } from './errors.js';
+export { queryMessagesEn, queryCatalogEn, renderQueryMessage } from './messages.js';
 export { NODE_KINDS };
 export { createQueryAccumulator } from './accumulator.js';
 export { createLexicalProvider } from './lexical-provider.js';
@@ -226,7 +227,7 @@ export function compileJsonQuery(doc, options = {}) {
     // answered true. Every other non-JSON value flows through as an
     // opaque item, which is the caller's contract to keep.
     if (data === undefined)
-      throw new JsonQueryRuntimeError('JQ2011', 'the input document is undefined, which is not a JSON value', '');
+      throw queryRuntimeError('JQ2011', 'query/input-undefined', {}, '');
     const frame = new Array(frameSize);
     frame[0] = data;
     if (stepSlot >= 0)
@@ -247,8 +248,7 @@ export function compileJsonQuery(doc, options = {}) {
       return undefined;
     if (v instanceof Seq) {
       if (resultCap > 0 && v.items.length > resultCap)
-        throw new JsonQueryRuntimeError('JQ2009',
-          `the query result has ${v.items.length} items, more than limits.resultItems (${resultCap})`, '');
+        throw queryRuntimeError('JQ2009', 'query/result-limit', { count: v.items.length, limit: resultCap }, '');
       return v.items;
     }
     return v;
@@ -257,8 +257,7 @@ export function compileJsonQuery(doc, options = {}) {
     const v = evaluate(data, ext);
     const items = v === EMPTY ? [] : v instanceof Seq ? v.items : [v];
     if (resultCap > 0 && items.length > resultCap)
-      throw new JsonQueryRuntimeError('JQ2009',
-        `the query result has ${items.length} items, more than limits.resultItems (${resultCap})`, '');
+      throw queryRuntimeError('JQ2009', 'query/result-limit', { count: items.length, limit: resultCap }, '');
     return items;
   };
   query.first = (data, ext) => {

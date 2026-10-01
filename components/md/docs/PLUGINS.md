@@ -157,17 +157,33 @@ default `console.error`).
 
 ## 6. The reference plugins
 
-Both ship from `@jarenjs/md/plugins` and are the canonical templates
-for third-party plugins (math, callouts/admonitions, embeds). GFM
+They are the canonical templates for third-party plugins (math,
+callouts/admonitions, embeds). The highlighter ships from
+`@jarenjs/md/plugins`; the diagram plugin ships from
+`@jarenjs/mermaid/plugin`, and a host passes it in — the Markdown engine
+imports no other component (CONVENTIONS §1). GFM
 footnotes are NOT a plugin — they are part of the dialect
 ([MD-FORMAT.md](MD-FORMAT.md) §4.6), gated on `gfm` like tables are.
 
-### 6.1 mermaidPlugin({ theme })
+### 6.1 mermaidPlugin({ theme, renderers })
 
-The **native** plugin, re-exported from `@jarenjs/mermaid/plugin`. It
+The **native** plugin, imported from `@jarenjs/mermaid/plugin`. It
 parses the fence source with the in-house headless Mermaid engine and
 emits **pure-vnode SVG** synchronously — no injected `mermaid` instance,
 no CDN global, no `innerHTML`.
+
+```js
+import { parseMarkdown, mdToVnode } from '@jarenjs/md';
+import { mermaidPlugin } from '@jarenjs/mermaid/plugin';
+import { mermaidPieRenderer } from '@jarenjs/charts/transforms/mermaid-adapter';
+
+const plugins = [mermaidPlugin({ renderers: { pie: mermaidPieRenderer } })];
+mdToVnode(parseMarkdown(source, { plugins }), { plugins });
+```
+
+A pie fence is drawn by the renderer in `renderers.pie` — charts' own
+pie, through its mermaid adapter. Without one it renders mermaid's
+placeholder, so a host that never draws a pie loads no chart code.
 
 - `render` claims `mermaid`/`mmd` fences and returns
   `div.md-mermaid.mermaid-block > svg`, keyed by content hash. Because it
@@ -176,16 +192,14 @@ no CDN global, no `innerHTML`.
   Text and attribute values are escaped by the view serializer, and
   only `http(s)`/relative link `href`s survive, so there is no
   raw-`innerHTML` injection surface.
-- There is **no `hydrate`** — the render is already complete.
-  Optional client-only enhancements (pan/zoom) are reserved for a future
-  interactivity plugin.
-- The dependency arrow is **md → mermaid**:
-  `@jarenjs/mermaid/plugin` returns a self-frozen `MdPlugin`-shaped
-  object *without* importing `definePlugin`, so there is no cycle;
-  `@jarenjs/md` re-exports it and adds `@jarenjs/mermaid` to its
-  dependencies. Consumers who never use it tree-shake it away
-  (`sideEffects:false`). Mermaid stays **opt-in** — it is not in
-  `DEFAULT_PLUGINS`.
+- There is **no `hydrate`** unless `interactive: true` asks for pan and
+  zoom — the render is already complete.
+- **Neither component imports the other.** `@jarenjs/mermaid/plugin`
+  returns a self-frozen `MdPlugin`-shaped object without importing
+  `@jarenjs/md`, and `@jarenjs/md` neither re-exports it nor depends on
+  `@jarenjs/mermaid`: Markdown without diagrams loads no diagram or
+  chart code at all, bundled or not. Mermaid stays **opt-in** — it is
+  not in `DEFAULT_PLUGINS`.
 
 **Transformed-diagram round-trip.** There is no per-plugin `toMarkdown`
 hook; a `mermaid` fence round-trips through `toMarkdown` generically as
