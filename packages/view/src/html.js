@@ -13,11 +13,14 @@
 import {
   isTextNode,
   isElementNode,
+  isElementName,
+  elementNameError,
   propsOf,
   childrenOf,
   WIDGET_TAG,
 } from './vnode.js';
 import { styleToString } from './dom.js';
+import { enumeratedAttribute } from './properties.js';
 import { createSafePolicy } from './safe.js';
 
 /** Void elements per the HTML standard: no children, no end tag. */
@@ -95,6 +98,13 @@ function serializeProps(props, skip, policy, onUnsafe) {
       attr = decided.name;
       value = decided.value;
     }
+    // an enumerated attribute is written with its keyword, exactly as the
+    // DOM renderer writes it (the property table)
+    const enumerated = enumeratedAttribute(attr, value);
+    if (enumerated !== undefined) {
+      if (enumerated.value !== null) out += ' ' + enumerated.name + '="' + escapeAttribute(enumerated.value) + '"';
+      continue;
+    }
     if (value == null || value === false) continue;
     if (attr === 'style' && typeof value === 'object') {
       value = styleToString(value);
@@ -139,7 +149,7 @@ function serializeProps(props, skip, policy, onUnsafe) {
 export function renderToString(vnode, options = {}) {
   const policy = options.safe ? createSafePolicy() : null;
   const onUnsafe = typeof options.onUnsafe === 'function' ? options.onUnsafe : null;
-  return renderNode(vnode, options.widgets, policy, onUnsafe);
+  return renderNode(vnode, options.widgets, policy, onUnsafe, null, vnode);
 }
 
 /**
@@ -150,16 +160,18 @@ export function renderToString(vnode, options = {}) {
  * @param {Record<string, { ssr?: (props: any) => any }> | undefined} widgets
  * @param {import('./safe.js').SafePolicy | null} policy
  * @param {((info: { kind: string, name: string }) => void) | null} onUnsafe
- * @param {{values: Set<string>, multiple: boolean, matched: boolean} | null} [selection]
+ * @param {{values: Set<string>, multiple: boolean, matched: boolean} | null} selection
+ * @param {any} root - the document `renderToString` was handed, where a
+ *   refused tag is located
  * @returns {string}
  */
-function renderNode(vnode, widgets, policy, onUnsafe, selection = null) {
+function renderNode(vnode, widgets, policy, onUnsafe, selection, root) {
   if (isTextNode(vnode)) {
     return escapeText(String(vnode));
   }
   if (!isElementNode(vnode)) {
     if (Array.isArray(vnode)) return childrenOf(['root', {}, vnode])
-      .map((child) => renderNode(child, widgets, policy, onUnsafe, selection)).join('');
+      .map((child) => renderNode(child, widgets, policy, onUnsafe, selection, root)).join('');
     return '';
   }
   const tag = vnode[0];
@@ -172,7 +184,8 @@ function renderNode(vnode, widgets, policy, onUnsafe, selection = null) {
       if (onUnsafe !== null) onUnsafe({ kind: 'widget', name: String(props.name ?? '') });
       return '';
     }
-    const hostTag = typeof props.tag === 'string' && props.tag !== '' ? props.tag : 'div';
+    const hostTag = props.tag ?? 'div';
+    if (!isElementName(hostTag)) throw elementNameError(root, vnode, hostTag);
     const def = widgets !== undefined && typeof props.name === 'string'
       && Object.hasOwn(widgets, props.name) ? widgets[props.name] : undefined;
     // one read: acquisition and invocation are one boundary here too —
@@ -181,7 +194,7 @@ function renderNode(vnode, widgets, policy, onUnsafe, selection = null) {
     // `ssr()` (the documented behavior for both)
     const ssr = def !== undefined ? def.ssr : undefined;
     const inner = ssr !== undefined
-      ? renderNode(ssr.call(def, props.props ?? null), widgets, policy, onUnsafe, selection)
+      ? renderNode(ssr.call(def, props.props ?? null), widgets, policy, onUnsafe, selection, root)
       : '';
     return '<' + hostTag + serializeProps(props, WIDGET_SKIP_PROPS, policy, onUnsafe) + '>'
       + inner + '</' + hostTag + '>';
@@ -192,6 +205,9 @@ function renderNode(vnode, widgets, policy, onUnsafe, selection = null) {
     if (onUnsafe !== null) onUnsafe({ kind: 'tag', name: String(tag) });
     return '';
   }
+  // Trusted mode holds a tag to the same grammar and refuses, as the DOM
+  // renderer does, rather than writing `<Total:>` or `< >` into markup.
+  if (!isElementName(tag)) throw elementNameError(root, vnode, tag);
   // Report a stripped `on` binding for observability parity with the DOM
   // renderer — SSR never emits `on`, but a host still wants to know an
   // untrusted document tried to bind an action.
@@ -233,7 +249,7 @@ function renderNode(vnode, widgets, policy, onUnsafe, selection = null) {
   }
   const children = childrenOf(vnode);
   for (let i = 0; i < children.length; i++) {
-    out += renderNode(children[i], widgets, policy, onUnsafe, selection);
+    out += renderNode(children[i], widgets, policy, onUnsafe, selection, root);
   }
   return out + '</' + tag + '>';
 }

@@ -47,6 +47,10 @@ import { AppCompileError, AppRuntimeError, toError, safeErrorMessage } from './e
  * @property {any} [document] - The DOM document (defaults to
  *   `node.ownerDocument`).
  * @property {boolean} [hydrate] - Adopt existing DOM on the first frame.
+ * @property {'focus'} [controlled] - Forwarded to the renderer: with
+ *   `'focus'`, a controlled text control the operator is typing into
+ *   keeps their text until it loses focus, then the state's value is
+ *   reconciled (VIEW-FORMAT §3). Absent, the state's value always wins.
  * @property {boolean} [safe] - Forward the inert view render profile. In
  *   this mode host capabilities default to empty allow-lists.
  * @property {import('@jarenjs/view').DomRendererOptions['onUnsafe']} [onUnsafe]
@@ -249,6 +253,9 @@ export function createApp(appDoc, options = {}) {
     throw new TypeError('createApp: options.maxSubInstances must be a positive integer');
   }
   const capturePayloads = options.capturePayloads === true;
+  if (options.controlled !== undefined && options.controlled !== 'focus') {
+    throw new TypeError(`createApp: options.controlled is 'focus' or absent, got ${JSON.stringify(options.controlled) ?? String(options.controlled)}`);
+  }
 
   let state = appDoc.state;
   let running = true;
@@ -296,6 +303,17 @@ export function createApp(appDoc, options = {}) {
    * @type {unknown[]}
    */
   const pendingFailures = [];
+
+  /**
+   * `settled()` callers. A drain waiter resolves when the drain in
+   * progress ends; a frame waiter when the next frame commits (after
+   * `afterRender`). Both resolve with the state at that moment, and both
+   * are released by `stop()`/`destroy()` — no frame comes after either.
+   * @type {Array<{ frame: boolean, resolve: (state: any) => void }>}
+   */
+  const drainWaiters = [];
+  /** @type {Array<(state: any) => void>} */
+  const frameWaiters = [];
 
   /** @type {(((vnode: any) => void) & { destroy?: () => void }) | null} */
   let renderer = null;
@@ -418,7 +436,32 @@ export function createApp(appDoc, options = {}) {
     finally {
       draining = false;
     }
+    settleDrainWaiters();
     flushPendingError();
+  }
+
+  /**
+   * Resolve one `settled()` caller now, or park it on the next frame: a
+   * frame is awaited only when one is pending or being painted, on an app
+   * that still renders.
+   * @param {boolean} frame
+   * @param {(state: any) => void} resolve
+   */
+  function settleOne(frame, resolve) {
+    if (frame && running && renderer !== null && (renderScheduled || renderDepth > 0)) frameWaiters.push(resolve);
+    else resolve(state);
+  }
+
+  /** The drain ended: every caller that waited on it is answered. */
+  function settleDrainWaiters() {
+    if (drainWaiters.length === 0) return;
+    for (const waiter of drainWaiters.splice(0)) settleOne(waiter.frame, waiter.resolve);
+  }
+
+  /** A frame committed — or none will: every frame waiter is answered. */
+  function settleFrameWaiters() {
+    if (frameWaiters.length === 0) return;
+    for (const resolve of frameWaiters.splice(0)) resolve(state);
   }
 
   /** @type {Dispatch} */
@@ -1107,6 +1150,10 @@ export function createApp(appDoc, options = {}) {
       catch (err) {
         safeError(toError(err));
       }
+      // a pass that failed before committing a frame reported through
+      // onError; its waiters are answered now rather than left for a
+      // frame nothing has scheduled
+      settleFrameWaiters();
       if (!draining) flushPendingError();
     });
   }
@@ -1149,6 +1196,9 @@ export function createApp(appDoc, options = {}) {
     actionQueue.length = 0;
     refreshSubs();
     stateListeners.clear();
+    // a stopped loop renders no more frames: nobody waits for one
+    for (const waiter of drainWaiters.splice(0)) waiter.resolve(state);
+    settleFrameWaiters();
   }
 
   /**
@@ -1247,6 +1297,7 @@ export function createApp(appDoc, options = {}) {
           widgets,
           safe: options.safe,
           hydrate: options.hydrate,
+          controlled: options.controlled,
           onUnsafe: options.onUnsafe,
           // terminal-cleanup provenance: a widget unmount that throws
           // during renderer teardown — deferred teardown after an
@@ -1290,6 +1341,8 @@ export function createApp(appDoc, options = {}) {
                 safeError(toError(err));
               }
             }
+            // the frame is on screen and its post-render work ran
+            settleFrameWaiters();
           },
         });
       }
@@ -1432,6 +1485,38 @@ export function createApp(appDoc, options = {}) {
     /** The current view output — for SSR or custom renderers. */
     getVnode: vnode,
     render,
+    /**
+     * Wait for the app to settle (APP-FORMAT §8.1). Without options it
+     * resolves when the drain in progress ends — every queued dispatch,
+     * the ones its effects queued included, has committed — or at once
+     * when the queue is idle. With `{ frame: true }` it resolves after the
+     * next committed frame and its `afterRender`: the DOM shows the state
+     * it resolves with. A headless or stopped app, or one with no frame
+     * pending, resolves at once.
+     * @param {{ frame?: boolean }} [settleOptions]
+     * @returns {Promise<any>} the state then
+     * @throws {TypeError} an option it does not take, or `frame` that is
+     *   not a boolean
+     */
+    settled(settleOptions = undefined) {
+      let frame = false;
+      if (settleOptions !== undefined) {
+        if (settleOptions === null || typeof settleOptions !== 'object' || Array.isArray(settleOptions)) {
+          throw new TypeError('app.settled: options are { frame?: boolean }');
+        }
+        for (const key of Object.keys(settleOptions)) {
+          if (key !== 'frame') throw new TypeError(`app.settled: does not take '${key}' — it takes frame`);
+        }
+        if (settleOptions.frame !== undefined && typeof settleOptions.frame !== 'boolean') {
+          throw new TypeError('app.settled: options.frame is a boolean');
+        }
+        frame = settleOptions.frame === true;
+      }
+      return new Promise((resolve) => {
+        if (draining && running) drainWaiters.push({ frame, resolve });
+        else settleOne(frame, resolve);
+      });
+    },
     /**
      * Observe state changes. The listener receives the new state and the
      * transition's changed paths: an array of JSON Pointers when the

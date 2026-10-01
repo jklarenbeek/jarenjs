@@ -9,6 +9,7 @@ export { createApp } from './app.js';
 export { compileActions, compileSubs } from './actions.js';
 export { createFormView, createFormActions, formEventFields } from './forms.js';
 export { createTaskEffect } from './tasks.js';
+export { createJsonStateValidator } from './state-validator.js';
 export { createFocusEffect } from './focus.js';
 export { createTransactionLog } from './diagnostics.js';
 export { createSplitterWidget } from './splitter.js';

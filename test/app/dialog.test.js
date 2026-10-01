@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { createDialog, DIALOG_CODES } from '@jarenjs/view/helpers/dialog';
 import { createDialogWidget } from '@jarenjs/app/dialog';
+import { createDomRenderer } from '@jarenjs/view';
 import { createStubHost, fire } from '../view/dom.stub.js';
 
 function nativeFacade() {
@@ -110,5 +111,43 @@ describe('dialog lifecycle and app binding', () => {
     assert.deepEqual(emitted, [{ action: 'finish', with: 7 }]);
     assert.throws(() => widget.update(handle, { ...props, close: false }), { code: 'JA2022' });
     widget.unmount(handle); widget.unmount(handle); assert.equal(host.childNodes.length, 0);
+  });
+
+  it('nested widgets render from the registry the dialog was mounted from; an explicit one still wins', () => {
+    const { host, doc, walk } = nativeFacade();
+    const badge = (/** @type {string} */ mark) => ({ mount: (node) => { node.setAttribute('data-badge', mark); return null; } });
+    const marks = () => walk(host).map((node) => node.getAttribute?.('data-badge')).filter((mark) => mark != null);
+    const vnode = ['jaren-widget', { name: 'dialog', props: { ...props, close: 'close',
+      content: ['jaren-widget', { name: 'badge' }] } }];
+    const inherited = createDomRenderer(host, { document: doc, widgets: { dialog: createDialogWidget(), badge: badge('inherited') } });
+    inherited(vnode);
+    assert.deepEqual(marks(), ['inherited']);
+    inherited.destroy();
+    const explicit = createDomRenderer(host, { document: doc, widgets: {
+      dialog: createDialogWidget({ widgets: { badge: badge('explicit') } }), badge: badge('inherited') } });
+    explicit(vnode);
+    assert.deepEqual(marks(), ['explicit']);
+    explicit.destroy();
+    assert.equal(host.childNodes.length, 0);
+  });
+
+  it("a widget's mount receives the renderer's registry and document, frozen", () => {
+    const { container, document } = createStubHost();
+    /** @type {any[]} */
+    const contexts = [];
+    const probe = { mount: (_node, _props, _emit, context) => { contexts.push(context); return null; } };
+    const widgets = { probe };
+    const render = createDomRenderer(container, { document, widgets });
+    render(['div', {}, ['jaren-widget', { name: 'probe', key: 1 }], ['jaren-widget', { name: 'probe', key: 2 }]]);
+    assert.equal(contexts.length, 2);
+    assert.equal(contexts[0], contexts[1], 'one context per renderer');
+    assert.equal(contexts[0].widgets, widgets);
+    assert.equal(contexts[0].document, document);
+    assert.ok(Object.isFrozen(contexts[0]));
+    // no update hook: new props remount, with the same context
+    render(['div', {}, ['jaren-widget', { name: 'probe', key: 1, props: { n: 1 } }], ['jaren-widget', { name: 'probe', key: 2 }]]);
+    assert.equal(contexts.length, 3);
+    assert.equal(contexts[2], contexts[0]);
+    render.destroy();
   });
 });

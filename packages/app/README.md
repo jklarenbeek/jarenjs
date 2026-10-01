@@ -202,6 +202,26 @@ createApp(doc, {
 
 `validateState` runs against every candidate next state; a rejection blocks the transition (fail closed) and surfaces as a `JA2005` error with the validator's structured errors in `detail`. The app package itself never imports the validator — the same boundary discipline as `@jarenjs/forms`.
 
+One invariant every state shares ships with the package: the state is JSON. `createJsonStateValidator()` checks it in time proportional to what a transition changed — the value at each pointer the patch wrote — so a large state costs nothing extra per keystroke (an insert or a removal that shifts an array checks that array; APP-FORMAT §6):
+
+```javascript
+import { createApp, createJsonStateValidator } from '@jarenjs/app';
+
+const app = createApp({
+  state: { at: null },
+  view: [{ match: '$', body: ['p', {}, 'saved'] }],
+  actions: { stamp: { patch: [{ op: 'replace', path: '/at', value: '$payload' }] } },
+}, {
+  validateState: createJsonStateValidator(),
+  onError: (error) => console.log(error.code, error.detail),
+});
+
+app.dispatch('stamp', new Date(0));
+// JA2005 [ { instancePath: '/at', message: 'is not a JSON value' } ] — not applied
+app.dispatch('stamp', new Date(0).toISOString());
+app.getState();   // { at: '1970-01-01T00:00:00.000Z' }
+```
+
 ## The standard forms stylesheet
 
 The marquee integration: render any [`@jarenjs/forms`](../forms) model with **zero hand-written render code**. `createFormView()` returns a plain-JSON JSLT rule set that dispatches over a `buildFormViewModel` tree by *shape* (JSONPath filter selectors on each node's `control`), and `createFormActions()` returns the matching action documents that write keystrokes back into the state — choosing the correct RFC 6902 op per node (`replace` for array elements, where `add` would insert; `add` for object members, where it means set-or-replace).
@@ -247,11 +267,13 @@ renderToString(createApp(doc).getVnode());
 
 ## API
 
-`createApp(appDoc, options)` → `{ dispatch(name, payload?), getState(), setState(next), getVnode(), render(), subscribe(listener), observe(observer), stop(), destroy() }`
+`createApp(appDoc, options)` → `{ dispatch(name, payload?), getState(), setState(next), getVnode(), render(), settled({ frame? }?), subscribe(listener), observe(observer), stop(), destroy() }`
 
-Also exported: `compileActions`, `compileSubs`, `createFormView`, `createFormActions`, `formEventFields`, `createTaskEffect`, `createFocusEffect`, `createTransactionLog`, `createSplitterWidget`, `createDocStore`, `encodeShare`, `decodeShare`, and the error classes (`AppCompileError`, `AppRuntimeError`, `HostValueError`, `toError`, `APP_CODES`).
+`await app.settled()` resolves with the state once the queue has drained — the dispatches an effect queued included; `await app.settled({ frame: true })` resolves after the next committed frame, when the DOM shows that state (APP-FORMAT §8.1).
 
-Options: `node`, `document`, `effects`, `subs`, `eventFields` (named `$event` field extractors), `widgets` (registered widget definitions, forwarded to the renderer), `compileTypeTest`, `validateState`, `viewModel`, `onError` (default rethrows), `schedule` (render batching; default microtask — pass `(f) => f()` for synchronous tests). Compile failures throw `AppCompileError` (`JA0xxx`, with a `docPath` into the app document); runtime failures route `AppRuntimeError` (`JA2xxx`) through `onError`. The full code table is in [APP-FORMAT.md](docs/APP-FORMAT.md) §10.
+Also exported: `compileActions`, `compileSubs`, `createFormView`, `createFormActions`, `formEventFields`, `createTaskEffect`, `createJsonStateValidator`, `createFocusEffect`, `createTransactionLog`, `createSplitterWidget`, `createDocStore`, `encodeShare`, `decodeShare`, and the error classes (`AppCompileError`, `AppRuntimeError`, `HostValueError`, `toError`, `APP_CODES`).
+
+Options: `node`, `document`, `effects`, `subs`, `eventFields` (named `$event` field extractors), `widgets` (registered widget definitions, forwarded to the renderer), `compileTypeTest`, `validateState`, `viewModel`, `onError` (default rethrows), `schedule` (render batching; default microtask — pass `(f) => f()` for synchronous tests), `controlled` (`'focus'`: a field the operator is typing into keeps their text until it loses focus). Compile failures throw `AppCompileError` (`JA0xxx`, with a `docPath` into the app document); runtime failures route `AppRuntimeError` (`JA2xxx`) through `onError`. The full code table is in [APP-FORMAT.md](docs/APP-FORMAT.md) §10.
 
 ## Exports
 

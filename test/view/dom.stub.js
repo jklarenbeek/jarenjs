@@ -271,3 +271,98 @@ export function createStubHost() {
   const container = document.createElement('div');
   return { document, container };
 }
+
+/** ToUint32, the conversion an `unsigned long` IDL setter applies. @param {any} value */
+const toUint32 = (value) => Number(value) >>> 0;
+
+/**
+ * Define one IDL property on a stub element.
+ * @param {StubElement} node
+ * @param {string} name
+ * @param {() => any} get
+ * @param {(value: any) => void} set
+ */
+function idl(node, name, get, set) {
+  Object.defineProperty(node, name, { get, set, enumerable: false, configurable: true });
+}
+
+/**
+ * An element carrying the IDL properties the HTML Standard gives it, for the
+ * properties whose reflection decides what a renderer writes:
+ *  - `spellcheck`, `draggable`, `translate`, `autocorrect` — BOOLEAN IDL
+ *    properties reflecting enumerated attributes: the setter converts its
+ *    argument with ToBoolean, so the string `'false'` turns the setting on;
+ *  - `contentEditable` — a DOMString that refuses anything but its keywords;
+ *  - `className` and a label's `htmlFor` — strings reflecting `class` and `for`;
+ *  - `disabled` — a boolean attribute;
+ *  - `size` on an input (ToUint32; 0 throws `IndexSizeError`), `width` on an
+ *    image (ToUint32), `href` on an anchor (a string), `value` on a progress
+ *    (ToNumber) — non-boolean properties whose setter always writes the
+ *    attribute, so assigning `''` writes `0`, `""` or `0`.
+ */
+class ReflectingElement extends StubElement {
+  /**
+   * @param {StubDocument} doc
+   * @param {string} tag
+   * @param {string | null} [ns]
+   */
+  constructor(doc, tag, ns = null) {
+    super(doc, tag, ns);
+    const lower = String(tag).toLowerCase();
+    const attr = (/** @type {string} */ name) => this.getAttribute(name);
+    // the empty string is the yes state, except for draggable, where it is
+    // invalid and falls to the default
+    const enumerated = (/** @type {string} */ name, /** @type {string} */ yes, /** @type {string} */ no,
+      /** @type {boolean} */ fallback, emptyIsYes = true) => idl(this, name,
+      () => (attr(name) === yes || (emptyIsYes && attr(name) === '') ? true : attr(name) === no ? false : fallback),
+      (value) => this.setAttribute(name, value ? yes : no));
+    enumerated('spellcheck', 'true', 'false', lower === 'textarea' || lower === 'input');
+    enumerated('draggable', 'true', 'false', lower === 'img', false);
+    enumerated('translate', 'yes', 'no', true);
+    enumerated('autocorrect', 'on', 'off', true);
+    idl(this, 'contentEditable', () => (attr('contenteditable') === null ? 'inherit' : attr('contenteditable') || 'true'),
+      (value) => {
+        const keyword = String(value).toLowerCase();
+        if (keyword === 'inherit') this.removeAttribute('contenteditable');
+        else if (['true', 'false', 'plaintext-only'].includes(keyword)) this.setAttribute('contenteditable', keyword);
+        else throw new DOMException(`'${value}' is not one of 'true', 'false', 'plaintext-only' or 'inherit'`, 'SyntaxError');
+      });
+    idl(this, 'className', () => attr('class') ?? '', (value) => this.setAttribute('class', String(value)));
+    if (lower === 'label') idl(this, 'htmlFor', () => attr('for') ?? '', (value) => this.setAttribute('for', String(value)));
+    idl(this, 'disabled', () => attr('disabled') !== null,
+      (value) => { if (value) this.setAttribute('disabled', ''); else this.removeAttribute('disabled'); });
+    if (lower === 'input') {
+      idl(this, 'size', () => toUint32(attr('size') ?? 20), (value) => {
+        const size = toUint32(value);
+        if (size === 0) throw new DOMException('the value provided is 0, which is an invalid size', 'IndexSizeError');
+        this.setAttribute('size', String(size));
+      });
+    }
+    if (lower === 'img') idl(this, 'width', () => toUint32(attr('width') ?? 0), (value) => this.setAttribute('width', String(toUint32(value))));
+    if (lower === 'a') idl(this, 'href', () => attr('href') ?? '', (value) => this.setAttribute('href', String(value)));
+    if (lower === 'progress') {
+      idl(this, 'value', () => Number(attr('value') ?? 0), (value) => this.setAttribute('value', String(Number(value))));
+    }
+  }
+}
+
+/** A stub document whose elements reflect as a browser's do (see
+ * {@link ReflectingElement}). */
+export class ReflectingDocument extends StubDocument {
+  /** @param {string} tag */
+  createElement(tag) {
+    return new ReflectingElement(this, tag);
+  }
+
+  /** @param {string} ns @param {string} tag */
+  createElementNS(ns, tag) {
+    return new ReflectingElement(this, tag, ns);
+  }
+}
+
+/** A fresh `{ document, container }` pair whose elements reflect. */
+export function createReflectingHost() {
+  const document = new ReflectingDocument();
+  const container = document.createElement('div');
+  return { document, container };
+}

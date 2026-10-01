@@ -54,8 +54,23 @@ Both renderers accept fragment roots without a wrapper. Pass `hydrate: true`
 to adopt matching server DOM on the first trusted render; local mismatches
 are repaired and widgets get fresh hosts. Safe mode rebuilds existing DOM.
 Controlled text writes defer through composition and the final input event,
-then settle with the caret preserved. The browser tests cover these paths in
-Chromium, Firefox and WebKit; native OS IME audits remain separate.
+then settle with the caret preserved. With `controlled: 'focus'` they also
+wait while the operator types: a focused control keeps its text through a
+background refresh and is reconciled when it loses focus. The browser tests
+cover these paths in Chromium, Firefox and WebKit; native OS IME audits
+remain separate.
+
+The renderer and the serializer read one property table
+([VIEW-FORMAT §3](docs/VIEW-FORMAT.md#3-props)), so they write the same
+attributes. An enumerated attribute — `spellcheck`, `draggable`,
+`translate`, `autocorrect`, `contenteditable`, `writingsuggestions` — is
+written with its own keyword: `spellcheck: false` and `spellcheck: 'false'`
+both turn spell-checking off, where the boolean DOM property reads the
+string `'false'` as on. `null`, `false` or a removed prop on a property that
+is not boolean removes its attribute, so a removed `size` throws nothing and
+a removed `href` leaves no link. A tag that is not an element name
+(`['Total:', 3]`, `[' ', …]`) throws a `TypeError` naming its JSON Pointer in
+both renderers; `[null, 'Total:', 3]` is the list that was meant.
 
 ### On the server
 
@@ -97,7 +112,7 @@ const render = createDomRenderer(container, {
 });
 ```
 
-`name`/`props`/`tag` configure the widget (the host tag defaults to `div`); every other prop — `key`, `class`, `on`, ... — applies to the host element as usual, and the widget node has no vnode children (the widget owns the host's subtree). `props` is compared **by reference**: with the JSLT memo option, unchanged state yields reference-equal props, so an untouched widget is never called. `mount` runs after the host is connected (grids can measure) and returns a handle threaded to `update`/`unmount`; `unmount` runs exactly once when the widget leaves the tree, even when an ancestor subtree is replaced. A throwing `mount` or `update` **poisons** the widget instead of corrupting it: siblings and the frame still complete, the first error surfaces after the frame settles, and the next render that revisits the widget replaces it with a fresh lifecycle (`unmount` runs on the old instance only when its `mount` had succeeded). `emit(binding, event)` delivers ordinary event bindings to `onEvent` — a widget composes runtime data (the clicked row id) into the binding its props carry instead of inventing an action vocabulary. `renderToString(vnode, { widgets })` serializes the host around the widget's `ssr(props)` vnode — still pure, nothing mounts.
+`name`/`props`/`tag` configure the widget (the host tag defaults to `div`); every other prop — `key`, `class`, `on`, ... — applies to the host element as usual, and the widget node has no vnode children (the widget owns the host's subtree). `props` is compared **by reference**: with the JSLT memo option, unchanged state yields reference-equal props, so an untouched widget is never called. `mount` runs after the host is connected (grids can measure) and returns a handle threaded to `update`/`unmount`; `unmount` runs exactly once when the widget leaves the tree, even when an ancestor subtree is replaced. A throwing `mount` or `update` **poisons** the widget instead of corrupting it: siblings and the frame still complete, the first error surfaces after the frame settles, and the next render that revisits the widget replaces it with a fresh lifecycle (`unmount` runs on the old instance only when its `mount` had succeeded). `emit(binding, event)` delivers ordinary event bindings to `onEvent` — a widget composes runtime data (the clicked row id) into the binding its props carry instead of inventing an action vocabulary. `mount` also receives a fourth argument, the renderer's frozen `{ widgets, document }`, so a widget that renders vnodes of its own (a dialog's content) renders them with the registry it was mounted from. `renderToString(vnode, { widgets })` serializes the host around the widget's `ssr(props)` vnode — still pure, nothing mounts.
 
 ## Untrusted views: the safe profile
 

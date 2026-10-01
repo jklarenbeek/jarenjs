@@ -441,6 +441,31 @@ never imports the validator; like forms, the application holds the key
 (`compileTypeTest` for schema operators inside documents,
 `validateState` for the authoritative check).
 
+`createJsonStateValidator()` is the hook for the invariant every state
+shares: it is JSON. A `Date`, a `Map` or a class instance that a
+payload carried into a patch is rejected (`JA2005`, its `detail` naming
+the pointer it was written to) before it can break a snapshot, a replay
+or `renderToString`. It checks only what the transaction changed, in
+time proportional to that rather than to the state:
+
+- `changes` is `null` (boot, a transition carrying `state`, `setState`):
+  the whole state is checked;
+- `''`, a write at the root: the whole state;
+- a pointer that no longer addresses a location (a removal): passes;
+- any other pointer: the value there.
+
+Every location the transition did not write is the previous state's,
+checked when it was committed. The limit is the patch engine's: an
+insert or a removal that shifts an array reports the array, so that
+array is checked whole. A host with a schema validator calls both from
+one hook: this one first, then the schema.
+
+Large read-only data — a catalog, a dataset, an index — stays **out of
+the state**: derive it in `viewModel` (§5.2), or serve it through a
+bounded provider ([COLLECTION-PROVIDER](COLLECTION-PROVIDER.md)), so no
+validator, listener or snapshot walks it. The state carries JSON intent
+and bounded observations.
+
 ## 7. Serialization, replay, SSR (non-normative)
 
 Because state, view, actions and subs are one JSON value and every
@@ -500,6 +525,26 @@ engine's changed-pointer list, or `null` meaning *unknown: validate
 fully*. Selective validation keyed on `changes` is sound only when the
 hook falls back to a full check for `null`.
 
+**Settled.** `app.settled()` answers a `Promise` of the state at one of
+two moments, because "settled" means two things:
+
+- `app.settled()` — the **queue** has settled: it resolves when the
+  drain in progress ends, every dispatch it held committed, including
+  the ones its effects queued; at once when no drain is running. An
+  effect that dispatched reads the state its dispatch produced with
+  `await app.settled()` instead of guessing how many microtasks the
+  loop takes.
+- `app.settled({ frame: true })` — the **screen** has settled: it
+  resolves after the next committed frame, once that frame's
+  `afterRender` (§8.4) ran, so the DOM shows the state it resolves
+  with. It resolves at once when no frame is pending, on a headless
+  app, and after `stop()` or `destroy()`, after which no frame comes. A
+  frame that fails to render reports through `onError` and still
+  answers its waiters.
+
+The options are closed: anything other than a boolean `frame` is a
+`TypeError`.
+
 ### 8.2 Boot, stop, destroy
 
 **Boot is a transaction.** Compiling the documents, creating the
@@ -548,8 +593,10 @@ no-ops.
 
 ### 8.2.1 DOM profiles and host capability grants
 
-`createApp` forwards `safe`, `onUnsafe` and `hydrate` to its DOM renderer
-(VIEW-FORMAT §6/§8). `capabilities` optionally grants names from the host's
+`createApp` forwards `safe`, `onUnsafe`, `hydrate` and `controlled` to its DOM
+renderer (VIEW-FORMAT §3/§6/§8). `controlled: 'focus'` lets a text control the
+operator is typing into keep their text through a state change until it loses
+focus; the state's value is reconciled then. Any other value is a `TypeError`. `capabilities` optionally grants names from the host's
 `effects`, `subs`, `widgets` and `eventFields` registries:
 
 ```js
@@ -669,9 +716,7 @@ listener and nested content widget. DOM values remain outside state:
 
 ```javascript
 import { createDialogWidget } from '@jarenjs/app/dialog';
-const widgets = {};
-widgets.dialog = createDialogWidget({ widgets });
-const app = createApp(doc, { node, widgets });
+const app = createApp(doc, { node, widgets: { dialog: createDialogWidget(), badge } });
 ```
 
 An ordinary `jaren-widget` uses these JSON props:
@@ -690,9 +735,12 @@ binding. Escape and the visible close button emit that binding; its
 action must change `open` to false or remove the widget. This keeps a
 confirmation policy in app state. A missing close action is `JA2022`.
 For a state-driven stylesheet, set `open` to `"$.dialog.open"` in the
-template. Other props follow VIEW-FORMAT §7.5. Child widgets receive
-the supplied `widgets` registry, so nested dialogs reuse the same
-definition. Closing a parent destroys its content owners first.
+template. Other props follow VIEW-FORMAT §7.5. The content renders with
+the registry the dialog was mounted from — the renderer hands every
+widget's `mount` its own registry (VIEW-FORMAT §7.2) — so a nested
+widget or dialog needs no second registration; `createDialogWidget({
+widgets })` replaces that registry for one dialog's content. Closing a
+parent destroys its content owners first.
 
 The native browser owns background inertness and modal stacking. The
 helper handles visible naming, both Tab boundaries, chosen initial

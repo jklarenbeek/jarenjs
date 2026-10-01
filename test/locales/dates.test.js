@@ -407,12 +407,12 @@ describe('@jarenjs/locales — server-rendered bytes do not move with the host',
       const long = compileDateFormat("EEEE d MMMM yyyy 'om' HH:mm a", dates.names);
       const short = compileDateFormat('EEE d MMM yy', dates.names);
       const error = validateField(model.children[0], 'nope', compileMessageCatalog(pack))[0];
-      rows.push(['li', { class: 'row', lang: code }, [
+      rows.push(['li', { class: 'row', lang: code },
         long(at), ' / ', short(at),
         ' / ', dates.relative(-3, 'day'), ' / ', dates.relative(21, 'month'),
         ' / ', dates.relative(-1, 'day', { numeric: 'auto' }),
         ' / ', error.message,
-      ]]);
+      ]);
     }
     console.log(renderToString(['ul', {}, rows]));
   `;
@@ -423,8 +423,10 @@ describe('@jarenjs/locales — server-rendered bytes do not move with the host',
       TZ: 'Pacific/Kiritimati', LANG: 'ru_RU.UTF-8', LC_ALL: 'ru_RU.UTF-8',
     });
     assert.strictEqual(utc, kiritimati);
-    // and it really did render the calendar language, not an empty list
-    assert.match(utc, /zondag 5 juli 2026/);
+    // and it really did render the calendar language, as text, not an
+    // empty list (and not as tag names: a list whose first item is a
+    // string is an element, and a date is no element name)
+    assert.match(utc, /<li class="row" lang="nl">zondag 5 juli 2026/);
     assert.match(utc, /5 июля 2026/);
     assert.match(utc, /datum en tijd/);
     assert.match(utc, /الأحد/);

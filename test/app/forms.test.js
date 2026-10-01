@@ -10,7 +10,7 @@ import {
   createInitialData,
   buildFormViewModel,
 } from '@jarenjs/forms';
-import { createStubHost, fire } from '../view/dom.stub.js';
+import { createReflectingHost, createStubHost, fire } from '../view/dom.stub.js';
 
 const schema = {
   type: 'object',
@@ -50,6 +50,7 @@ function fieldControl(container, pointer, tag = 'input') {
 /** A complete form app over the stub DOM: the whole suite in one loop. */
 function mountForm(options = {}) {
   const model = buildFormModel(options.schema ?? schema);
+  const { document, container } = options.reflecting === true ? createReflectingHost() : createStubHost();
   const rules = compileFormRules(model);
   const appDoc = {
     state: { data: createInitialData(model) },
@@ -59,7 +60,6 @@ function mountForm(options = {}) {
     ],
     actions: createFormActions({ dataPointer: '/data' }),
   };
-  const { document, container } = createStubHost();
   const app = createApp(appDoc, {
     node: container,
     document,
@@ -270,6 +270,16 @@ describe('the standard forms stylesheet', function () {
     // the rendered text is the value, indented
     assert.strictEqual(fieldControl(container, '/meta', 'textarea').childNodes[0].nodeValue,
       '{\n  "a": [\n    1,\n    2\n  ]\n}');
+  });
+
+  it('the json control renders spell-checking off, in the markup and in a DOM that reflects', function () {
+    // a browser reads `spellcheck = 'false'` as true: the control is written
+    // through the attribute, with its keyword, by both renderers
+    const { app, container } = mountForm({ reflecting: true });
+    const editor = fieldControl(container, '/meta', 'textarea');
+    assert.strictEqual(editor.getAttribute('spellcheck'), 'false');
+    assert.strictEqual(editor.spellcheck, false);
+    assert.match(renderToString(app.getVnode()), /<textarea class="jaren-form-json" rows="4" spellcheck="false"/);
   });
 
   it('unparsable json text writes null rather than failing the dispatch', function () {

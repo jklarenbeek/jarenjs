@@ -63,9 +63,13 @@ A vnode is classified by shape, in this order:
    an *empty sequence* from a query (which `@jarenjs/json` maps to
    `undefined`) also renders nothing.
 3. **Element** — an array whose first item is a string: `[tag,
-   props?, ...children]`. The tag MUST be a non-empty string. If the
-   second item is a plain object (not an array, not `null`) it is the
-   **props**; otherwise it is the first child. The tag
+   props?, ...children]`. The tag MUST be an **element name**: a
+   letter, then letters, digits or hyphens (`^[A-Za-z][A-Za-z0-9-]*$`).
+   Custom elements (`my-chart`) and SVG's camelCase tags
+   (`linearGradient`) are element names; a custom element whose name
+   uses `.`, `_` or a non-ASCII character is outside this grammar. If
+   the second item is a plain object (not an array, not `null`) it is
+   the **props**; otherwise it is the first child. The tag
    `"jaren-widget"` is reserved: it marks a widget node (§7).
 4. **List** — any other array. Its items are spliced into the parent's
    children **in place**, recursively. A list at the root of a document
@@ -76,6 +80,17 @@ The props-detection rule (element item 2) means an element whose first
 child is itself an object-shaped value cannot omit props: write
 `["div", {}, child]`. Producers SHOULD always write the props object;
 `h()` does.
+
+A tag outside the element-name grammar is a producer error, and the
+classic one is a list meant as text: `["Total:", 3]` and `[" ", ["b", {},
+"x"]]` are elements by rule 3, not text followed by a node. Both trusted
+renderers MUST refuse such a tag — the reference implementation throws a
+`TypeError` whose message names the vnode's JSON Pointer in the
+document it was handed — rather than writing `<Total:>` or `< >` into
+markup or meeting the platform's own exception. A widget's host `tag`
+(§7.1) is held to the same grammar. The safe profile drops the element
+instead (§8), through the same predicate. A list that starts with
+`null` splices text before an element: `[null, "Total:", 3]`.
 
 **Rationale for the tagged-array form** (non-normative): rule bodies in
 JSLT are query documents where object members with `$`-prefixed names
@@ -108,6 +123,37 @@ Every other prop **writes through**:
   attribute / clear the property.
 - Prop names are used as-is: producers write `class`, not `className`.
 
+Two kinds of property are not left to the node's own property, and the
+serializer and the patching renderer MUST write them identically — the
+reference implementation keeps them in one **property table**
+(`properties.js`) that both read:
+
+- **Enumerated attributes.** HTML spells some on/off settings as
+  enumerated attributes, and reflects `spellcheck`, `draggable`,
+  `translate` and `autocorrect` through a *boolean* property: assigning
+  the string `"false"` to it turns the setting on. These are written as
+  attributes, always. A JSON `true` or `false`, or the strings `"true"`
+  or `"false"`, become the attribute's own keyword; any other value is
+  written as its string; `null` omits the attribute.
+
+  | Attribute | `true` / `false` | HTML Standard |
+  |---|---|---|
+  | `contenteditable` (also `contentEditable`) | `true` / `false` | §6.8.1 |
+  | `spellcheck` | `true` / `false` | §6.8.5 |
+  | `writingsuggestions` (also `writingSuggestions`) | `true` / `false` | §6.8.6 |
+  | `autocorrect` | `on` / `off` | §6.8.8 |
+  | `translate` | `yes` / `no` | §3.2.6.3 |
+  | `draggable` | `true` / `false` | §6.11.7 |
+
+- **Removal from a non-boolean property.** `null`, `false` or a removed
+  prop on a property that is not boolean removes the attribute it
+  reflects — never `node[name] = ''`, which throws for an input's
+  `size`, writes `width="0"`, leaves a live `href=""` and makes a
+  progress determinate. A property with no attribute of its name
+  (`textContent`, `innerHTML`, `scrollTop`) is still cleared to `''`,
+  and one that was never written is left alone. Boolean properties
+  (`disabled`, `hidden`, `multiple`) are unchanged.
+
 A **controlled form value** is authoritative. A patching renderer MUST
 reassert `value`/`checked` on a form control against the control's
 **live** DOM property, not against the previous vnode's value: a user
@@ -128,6 +174,16 @@ values. Trusted text controls defer authoritative writes through composition
 and the final input event, then settle with a clamped caret range (§8).
 Removal and destruction cancel pending settlement. Physical OS IME and
 assistive-technology fidelity still require separate manual qualification.
+
+The one exception a host can choose: `createDomRenderer(container, {
+controlled: 'focus' })`. While a controlled text control is the document's
+active element, its authoritative `value` write is **deferred** — the
+operator's typing survives a background refresh — and reconciled when the
+control loses focus, one task after `focusout` so a render the `change`
+event scheduled lands first. It is the composition deferral above with a
+second cause, not a second mechanism. Without the option, the
+authoritative value always wins. `checked` and a `select`'s value are not
+deferred.
 
 ## 4. Events are data
 
@@ -309,10 +365,10 @@ A widget is registered JavaScript with this shape:
 
 ```js
 {
-  mount(host, props, emit),        // REQUIRED → returns a handle
-  update(handle, props, prevProps),// OPTIONAL
-  unmount(handle),                 // OPTIONAL cleanup
-  ssr(props),                      // OPTIONAL → a vnode for serialization
+  mount(host, props, emit, context), // REQUIRED → returns a handle
+  update(handle, props, prevProps),  // OPTIONAL
+  unmount(handle),                   // OPTIONAL cleanup
+  ssr(props),                        // OPTIONAL → a vnode for serialization
 }
 ```
 
@@ -333,6 +389,12 @@ A widget is registered JavaScript with this shape:
   clicked row id, the visible range) composes the binding it was given
   with that data — in `@jarenjs/app` terms, merges it into `with`. The
   single point of binding interpretation stays the layer above.
+- **`context`** — the fourth argument `mount` receives: a frozen `{
+  widgets, document }`, the renderer's own registry and document, one
+  object per renderer. A widget that renders vnodes of its own (a
+  dialog's content, §7.5) renders them with the registry it was
+  mounted from, so a nested widget needs no second registration. The
+  argument is additive: a `mount` that takes three still works.
 
 ### 7.3 Registration and reconciliation
 
@@ -626,5 +688,7 @@ Safe mode is one layer under a Content-Security-Policy, not a substitute for one
 - ~~Component escape hatch~~ — **shipped**: the registered-widget
   vocabulary of §7.
 - ~~A renderer `destroy()`~~ — **shipped**: §7.3.1.
-- **A `properties`-vs-`attributes` normative table** replacing the
-  `name in node` heuristic of §3.
+- ~~A `properties`-vs-`attributes` normative table~~ — **shipped**: §3's
+  property table decides the two kinds where the `name in node`
+  heuristic wrote the wrong thing — enumerated attributes, and removal
+  from a non-boolean property — and both renderers read it.

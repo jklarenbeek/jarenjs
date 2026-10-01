@@ -37,7 +37,7 @@
       "api": "@jarenjs/view",
       "role": "widget lifecycle",
       "matches": [
-        "171:export function createDomRenderer(container, options = {}) {"
+        "188:export function createDomRenderer(container, options = {}) {"
       ],
       "disposition": "retained"
     },

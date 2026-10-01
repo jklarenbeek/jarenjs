@@ -47,9 +47,12 @@ import {
   keyOf,
   childrenOf,
   isSkippedNode,
+  isElementName,
+  elementNameError,
   EMPTY_PROPS,
   WIDGET_TAG,
 } from './vnode.js';
+import { enumeratedAttribute, removeProperty } from './properties.js';
 import { createSafePolicy } from './safe.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -95,15 +98,24 @@ const WIDGET_SKIP_PROPS = { name: true, props: true, tag: true };
  * and replaces it. A poisoned widget never receives further `update`
  * calls.
  * @typedef {Object} WidgetDef
- * @property {(host: any, props: any, emit: WidgetEmit) => any} mount -
+ * @property {(host: any, props: any, emit: WidgetEmit, context: WidgetContext) => any} mount -
  *   Called with the host element after it is connected to the rendered
- *   tree; returns an opaque handle threaded to `update`/`unmount`.
+ *   tree; returns an opaque handle threaded to `update`/`unmount`. The
+ *   fourth argument is the renderer's {@link WidgetContext}.
  * @property {(handle: any, props: any, prevProps: any) => void} [update]
  *   Called when the vnode's `props` reference changed. Absent: the
  *   renderer falls back to `unmount` + fresh `mount` into the same host.
  * @property {(handle: any) => void} [unmount] - Called exactly once when
  *   the widget leaves the tree; timers, listeners and observers die here.
  * @property {(props: any) => any} [ssr] - A vnode for `renderToString`.
+ */
+
+/**
+ * What a widget's `mount` receives as its fourth argument: the renderer's
+ * own registry and document, frozen, one object per renderer. A widget
+ * that renders vnodes of its own (a dialog's content) renders them with
+ * the registry it was mounted from.
+ * @typedef {Readonly<{ widgets: Record<string, WidgetDef>, document: any }>} WidgetContext
  */
 
 /**
@@ -117,6 +129,11 @@ const WIDGET_SKIP_PROPS = { name: true, props: true, tag: true };
  * @property {boolean} [hydrate=false] - Adopt matching server DOM on the
  *   first render. Mismatches are replaced locally. Safe mode rebuilds
  *   existing markup because the renderer cannot trust its provenance.
+ * @property {'focus'} [controlled] - `'focus'`: while a controlled text
+ *   control is the document's active element, an authoritative `value`
+ *   write is deferred and reconciled when the control loses focus — the
+ *   operator's typing survives a background refresh until blur
+ *   (VIEW-FORMAT §3). Absent, the controlled value always wins.
  * @property {boolean} [safe=false] - Render under the SAFE policy
  *   ({@link createSafePolicy}): treat the vnode as untrusted. Tags are
  *   restricted to an inert HTML/SVG allow-list, scripting-sink and inline
@@ -169,6 +186,9 @@ const WIDGET_SKIP_PROPS = { name: true, props: true, tag: true };
  * @returns {DomRenderer}
  */
 export function createDomRenderer(container, options = {}) {
+  if (options.controlled !== undefined && options.controlled !== 'focus') {
+    throw new TypeError(`view: the controlled option is 'focus' or absent, got ${JSON.stringify(options.controlled) ?? String(options.controlled)}`);
+  }
   const ctx = {
     doc: options.document ?? container.ownerDocument,
     onEvent: options.onEvent ?? null,
@@ -189,6 +209,15 @@ export function createDomRenderer(container, options = {}) {
      * events, so a safe-mode view has no controlled inputs to fight the user
      * over. @type {Set<any>} */
     controlled: new Set(),
+    /** `controlled: 'focus'`: a focused text control's value write waits
+     * for its blur, through the same deferral composition uses. */
+    deferFocused: options.controlled === 'focus',
+    /** The document the pass in progress renders: where a refused tag is
+     * located, by identity, when one is met. */
+    root: /** @type {any} */ (null),
+    /** The fourth `mount` argument, one frozen object per renderer.
+     * @type {WidgetContext | null} */
+    widgetContext: null,
     /** Widget host nodes created this patch, awaiting `mount` (§7). */
     mountQueue: [],
     /** True once any widget node exists — gates the destroy walk. */
@@ -226,6 +255,7 @@ export function createDomRenderer(container, options = {}) {
   ctx.emit = function emit(binding, nativeEvent) {
     if (ctx.onEvent !== null) ctx.onEvent(binding, nativeEvent);
   };
+  ctx.widgetContext = Object.freeze({ widgets: ctx.widgets, document: ctx.doc });
   /** @type {any} */
   let oldVnode = null;
   /** @type {any} */
@@ -258,6 +288,7 @@ export function createDomRenderer(container, options = {}) {
       let next = vnode;
       do {
         pendingVnode = undefined;
+        ctx.root = next;
         if (rootNode === null) {
           if (options.hydrate && ctx.policy === null) {
             adoptChildren(ctx, container, childrenOf(['root', {}, next]), null);
@@ -289,6 +320,7 @@ export function createDomRenderer(container, options = {}) {
     finally {
       rendering = false;
       pendingVnode = undefined;
+      ctx.root = null;
     }
     if (destroyPending) {
       destroyPending = false;
@@ -402,7 +434,7 @@ function flushMounts(ctx) {
     if (w.mounted || w.destroyed) continue;
     w.mounted = true;
     try {
-      w.handle = w.def.mount(node, w.props, ctx.emit);
+      w.handle = w.def.mount(node, w.props, ctx.emit, ctx.widgetContext);
     }
     catch (err) {
       w.failed = 'mount';
@@ -439,6 +471,11 @@ function createNode(ctx, vnode, ns) {
     // safe-mode widget into an empty text node above.
     return createWidgetNode(ctx, vnode, ns);
   }
+  // Trusted mode only, too: the safe policy dropped a tag outside the
+  // grammar above. A mistyped tag is a producer error, refused loudly
+  // rather than built (`['Total:', 3]`) or left to the platform's own
+  // exception (`[' ', …]`).
+  if (!isElementName(tag)) throw elementNameError(ctx.root, vnode, tag);
   if (tag === 'svg') ns = SVG_NS;
   const node = ns !== null
     ? ctx.doc.createElementNS(ns, tag)
@@ -467,6 +504,7 @@ function adoptChildren(ctx, parent, children, ns) {
       continue;
     }
     const tag = isElementNode(vnode) ? vnode[0] : null;
+    if (tag !== null && tag !== WIDGET_TAG && !isElementName(tag)) throw elementNameError(ctx.root, vnode, tag);
     const namespace = tag === 'svg' ? SVG_NS : ns;
     if (node && tag && tag !== WIDGET_TAG && node.nodeType === 1
       && (node.localName ?? node.tagName?.toLowerCase()) === tag
@@ -636,26 +674,37 @@ function registerControlled(ctx, node, props) {
     return;
   }
   if (node.__jarenComposition === undefined && kind !== 'SELECT') {
+    // One deferral for two causes: a composition in progress, and — with
+    // `controlled: 'focus'` — a control the operator is typing into. A
+    // write either one holds back marks the node, and settles one task
+    // after the composition ends or the focus leaves.
     let settlement;
-    const start = () => {
-      clearTimeout(settlement);
-      node.__jarenComposing = true;
-      node.__jarenCompositionDirty = false;
-    };
-    const end = () => {
+    let ending = false;
+    const settle = () => {
       clearTimeout(settlement);
       // Engines can checkpoint microtasks between compositionend and the
-      // final input. Keep writes deferred through that event sequence, or
-      // the stale value clears Firefox's dirty flag and loses change-on-blur.
+      // final input, and a focus loss dispatches change before focusout.
+      // Keep writes deferred through either sequence, or the stale value
+      // clears Firefox's dirty flag and loses change-on-blur, and a render
+      // the change event scheduled lands after the stale write.
       settlement = setTimeout(() => {
-        node.__jarenComposing = false;
-        if (node.__jarenCompositionDirty && !ctx.destroyed && ctx.controlled.has(node) && node.parentNode !== null)
+        if (ending) { ending = false; node.__jarenComposing = false; }
+        if (node.__jarenDeferred && !ctx.destroyed && ctx.controlled.has(node) && node.parentNode !== null)
           reconcileControlled(node);
       }, 0);
     };
-    node.__jarenComposition = { start, end, cancel: () => clearTimeout(settlement) };
+    const start = () => {
+      clearTimeout(settlement);
+      ending = false;
+      node.__jarenComposing = true;
+    };
+    const end = () => { ending = true; settle(); };
+    const blur = ctx.deferFocused ? settle : null;
+    node.__jarenComposition = { start, end, blur, cancel: () => clearTimeout(settlement) };
+    node.__jarenDeferFocused = ctx.deferFocused;
     node.addEventListener('compositionstart', start, true);
     node.addEventListener('compositionend', end, true);
+    if (blur !== null) node.addEventListener('focusout', blur, true);
   }
   node.__jarenControlled = {
     hasValue,
@@ -673,9 +722,12 @@ function releaseControlled(ctx, node) {
     listeners.cancel();
     node.removeEventListener('compositionstart', listeners.start, true);
     node.removeEventListener('compositionend', listeners.end, true);
+    if (listeners.blur !== null) node.removeEventListener('focusout', listeners.blur, true);
   }
   node.__jarenComposition = undefined;
   node.__jarenComposing = false;
+  node.__jarenDeferred = false;
+  node.__jarenDeferFocused = false;
   node.__jarenControlled = undefined;
   ctx.controlled.delete(node);
 }
@@ -695,10 +747,12 @@ function reconcileControlledSet(ctx, container) {
 
 /**
  * Reassert one control's authoritative value/checked. React's controlled
- * contract: the passed value wins over a user edit. Writes only on a genuine
- * divergence, which preserves the caret on an unchanged control. Runs after
- * the whole tree is built, so a `select` sees its options, and a `multiple`
- * select applies an array by marking each option `selected`.
+ * contract: the passed value wins over a user edit — after a composition,
+ * and with `controlled: 'focus'` after the operator's focus leaves. Writes
+ * only on a genuine divergence, which preserves the caret on an unchanged
+ * control. Runs after the whole tree is built, so a `select` sees its
+ * options, and a `multiple` select applies an array by marking each option
+ * `selected`.
  * @param {any} node
  */
 function reconcileControlled(node) {
@@ -709,7 +763,14 @@ function reconcileControlled(node) {
     if (node.checked !== want) node.checked = want;
   }
   if (!c.hasValue) return;
-  if (node.__jarenComposing) { node.__jarenCompositionDirty = true; return; }
+  // a composition in progress, or (opted in) the operator's focused edit,
+  // holds the authoritative write back until it settles (§3)
+  if (node.__jarenComposing
+    || (node.__jarenDeferFocused === true && node.ownerDocument?.activeElement === node)) {
+    node.__jarenDeferred = true;
+    return;
+  }
+  node.__jarenDeferred = false;
   const isMultiple = node.multiple === true
     || (typeof node.getAttribute === 'function' && node.getAttribute('multiple') != null);
   if (node.nodeName === 'SELECT' && isMultiple && Array.isArray(c.value)) {
@@ -789,12 +850,14 @@ function setProp(ctx, node, name, oldValue, newValue, ns) {
     if (name === 'style' && typeof newValue === 'object' && newValue !== null) {
       newValue = styleToString(newValue);
     }
+    if (writeEnumerated(node, name, newValue)) return;
     if (newValue == null || newValue === false) node.removeAttribute(name);
     else node.setAttribute(name, newValue === true ? '' : String(newValue));
     return;
   }
-  // Trusted path (unchanged): a property where the node has one, else an
-  // attribute — the equivalent of writing the DOM by hand.
+  // Trusted path: a property where the node has one, else an attribute —
+  // the equivalent of writing the DOM by hand — with the property table's
+  // two exceptions (VIEW-FORMAT §3).
   // Controlled values settle after children and never interrupt composition.
   if ((name === 'value' || name === 'checked')
     && (node.nodeName === 'INPUT' || node.nodeName === 'TEXTAREA' || node.nodeName === 'SELECT')) return;
@@ -805,11 +868,13 @@ function setProp(ctx, node, name, oldValue, newValue, ns) {
     else node.setAttributeNS(attrNs, name, String(newValue));
     return;
   }
+  if (writeEnumerated(node, name, newValue)) return;
   if (name === 'style' && typeof newValue === 'object' && newValue !== null) {
     newValue = styleToString(newValue);
   }
   if (ns === null && name in node && name !== 'list' && name !== 'form') {
-    node[name] = newValue == null ? '' : newValue;
+    if (newValue == null || newValue === false) removeProperty(node, name, oldValue);
+    else node[name] = newValue;
   }
   else if (newValue == null || newValue === false) {
     node.removeAttribute(name);
@@ -817,6 +882,23 @@ function setProp(ctx, node, name, oldValue, newValue, ns) {
   else {
     node.setAttribute(name, newValue === true ? '' : String(newValue));
   }
+}
+
+/**
+ * An enumerated attribute (the property table) is an attribute in every
+ * mode, written with its keyword: never through the boolean property that
+ * reads `'false'` as true. Answers whether `name` was one.
+ * @param {any} node
+ * @param {string} name
+ * @param {any} value
+ * @returns {boolean}
+ */
+function writeEnumerated(node, name, value) {
+  const attribute = enumeratedAttribute(name, value);
+  if (attribute === undefined) return false;
+  if (attribute.value === null) node.removeAttribute(attribute.name);
+  else node.setAttribute(attribute.name, attribute.value);
+  return true;
 }
 
 /**
@@ -890,6 +972,7 @@ function createWidgetNode(ctx, vnode, ns) {
   const props = propsOf(vnode);
   const def = widgetDef(ctx, vnode, props);
   const tag = props.tag ?? 'div';
+  if (!isElementName(tag)) throw elementNameError(ctx.root, vnode, tag);
   const node = ns !== null
     ? ctx.doc.createElementNS(ns, tag)
     : ctx.doc.createElement(tag);
@@ -1006,7 +1089,7 @@ function patchWidgetNode(ctx, parent, node, oldV, newV, ns) {
             w.destroyed = true;
             return node;
           }
-          w.handle = w.def.mount(node, props, ctx.emit);
+          w.handle = w.def.mount(node, props, ctx.emit, ctx.widgetContext);
         }
         catch (err) {
           w.failed = unmountAttempted ? 'mount' : 'update';

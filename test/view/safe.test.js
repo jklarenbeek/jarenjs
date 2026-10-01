@@ -83,8 +83,11 @@ describe('safe render — trusted mode still passes the payloads (the teeth)', (
     assert.strictEqual(renderToString(ATTACKS[1].vnode), '<script>alert(1)</script>');
     assert.strictEqual(renderToString(ATTACKS[6].vnode), '<div onclick="alert(1)">x</div>');
   });
-  it('emits the structural tag and attribute injections untouched by default', () => {
-    assert.match(renderToString(ATTACKS[3].vnode), /^<div><img src=x onerror=alert\(1\)>/);
+  it('emits the attribute-name injection untouched by default; a tag outside the grammar is refused', () => {
+    // an attribute name is trusted in trusted mode; a tag never was markup's
+    // to invent — both trusted renderers hold it to the element-name grammar
+    assert.throws(() => renderToString(ATTACKS[3].vnode),
+      (e) => e instanceof TypeError && /is not an element name/.test(e.message));
     assert.strictEqual(renderToString(ATTACKS[4].vnode), '<input x onfocus="alert(1)">');
   });
   it('passes a javascript: URL by default', () => {

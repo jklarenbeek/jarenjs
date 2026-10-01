@@ -121,3 +121,84 @@ test('SVG foreignObject changes namespace and namespaced attributes update and r
   });
   expect(result).toEqual(['http://www.w3.org/1999/xhtml', 'http://www.w3.org/2000/svg', '#two', null]);
 });
+
+test('enumerated attributes and removed properties: the DOM writes what the markup says', async ({ page }) => {
+  const result = await page.evaluate(() => {
+    const { createDomRenderer, renderToString } = window.JarenTest;
+    const host = document.getElementById('host');
+    const parsed = document.createElement('div');
+    const differ = [];
+    for (const name of ['spellcheck', 'draggable', 'translate', 'autocorrect', 'contenteditable', 'writingsuggestions']) {
+      for (const value of [true, false, 'true', 'false', null]) {
+        const vnode = ['textarea', { [name]: value }];
+        const render = createDomRenderer(host);
+        render(vnode);
+        parsed.innerHTML = renderToString(vnode);
+        if (host.innerHTML !== parsed.innerHTML) differ.push(['render', name, value, host.innerHTML, parsed.innerHTML]);
+        // hydration keeps the server's keyword rather than flipping it
+        const hydrate = createDomRenderer(parsed, { hydrate: true });
+        hydrate(vnode);
+        if (parsed.innerHTML !== host.innerHTML) differ.push(['hydrate', name, value, parsed.innerHTML]);
+        hydrate.destroy();
+        render.destroy();
+      }
+    }
+    const render = createDomRenderer(host);
+    render(['textarea', { spellcheck: 'false' }]);
+    const spellcheckOff = host.firstChild.spellcheck === false;
+    render.destroy();
+    const removals = [];
+    for (const [from, to] of [
+      [['input', { size: 5 }], ['input', {}]],
+      [['img', { width: 40 }], ['img', {}]],
+      [['a', { href: '/x' }], ['a', {}]],
+      [['a', { href: '/x' }], ['a', { href: false }]],
+      [['progress', { value: 3, max: 10 }], ['progress', { max: 10 }]],
+    ]) {
+      const patch = createDomRenderer(host);
+      let error = null;
+      patch(from);
+      try { patch(to); } catch (thrown) { error = thrown.name; }
+      parsed.innerHTML = renderToString(to);
+      removals.push({ to: to[0], error, dom: host.innerHTML, ssr: parsed.innerHTML,
+        indeterminate: to[0] === 'progress' ? host.firstChild.position === -1 : null });
+      patch.destroy();
+    }
+    return { differ, spellcheckOff, removals };
+  });
+  expect(result.differ).toEqual([]);
+  expect(result.spellcheckOff).toBe(true);
+  for (const removal of result.removals) {
+    expect(removal.error).toBeNull();
+    expect(removal.dom).toBe(removal.ssr);
+  }
+  expect(result.removals.at(-1).indeterminate).toBe(true);
+});
+
+test("controlled: 'focus' keeps what the operator types through a refresh until blur, then reconciles", async ({ page }) => {
+  for (const controlled of ['focus', undefined]) {
+    await page.evaluate((controlled) => {
+      const host = document.getElementById('host');
+      window.view?.destroy();
+      window.view = window.JarenTest.createDomRenderer(host, controlled === undefined ? {} : { controlled });
+      window.tree = (value) => ['div', {}, ['input', { id: 'field', value }], ['button', { id: 'elsewhere' }, 'elsewhere']];
+      window.view(window.tree('server'));
+    }, controlled);
+    await page.focus('#field');
+    await page.keyboard.press('End');
+    await page.keyboard.type(' typed');
+    await page.evaluate(() => window.view(window.tree('refreshed')));
+    if (controlled === 'focus') {
+      await expect(page.locator('#field')).toHaveValue('server typed');
+      await page.keyboard.type('!');
+      await expect(page.locator('#field')).toHaveValue('server typed!');
+      await page.focus('#elsewhere');
+      await expect(page.locator('#field')).toHaveValue('refreshed');
+    }
+    else {
+      // the default: the state's value wins at once
+      await expect(page.locator('#field')).toHaveValue('refreshed');
+    }
+  }
+  await page.evaluate(() => window.view.destroy());
+});

@@ -43,6 +43,13 @@ export const EMPTY_PROPS = Object.freeze({});
 export const WIDGET_TAG = 'jaren-widget';
 
 /**
+ * The element-name grammar (VIEW-FORMAT §2): a letter, then letters, digits
+ * or hyphens. Custom elements (`my-chart`) and SVG's camelCase tags
+ * (`linearGradient`) are in it; a tag that is not is a producer error.
+ */
+const RE_ELEMENT_NAME = /^[A-Za-z][A-Za-z0-9-]*$/;
+
+/**
  * A vnode JSON value.
  * @typedef {string | number | boolean | null | undefined | VNodeElement | VNodeJson[]} VNodeJson
  */
@@ -68,6 +75,49 @@ export function isTextNode(vnode) {
  */
 export function isElementNode(vnode) {
   return Array.isArray(vnode) && typeof vnode[0] === 'string';
+}
+
+/**
+ * Is this tag an element name? The one predicate the safe profile and both
+ * trusted renderers hold a tag to (VIEW-FORMAT §2).
+ * @param {any} tag
+ * @returns {boolean}
+ */
+export function isElementName(tag) {
+  return typeof tag === 'string' && RE_ELEMENT_NAME.test(tag);
+}
+
+/**
+ * The refusal of a tag that is not an element name, naming where the vnode
+ * sits in the document the renderer was handed: a JSON Pointer found by
+ * identity, so the hot path carries no path at all.
+ * @param {any} root - the document being rendered
+ * @param {any} vnode - the element vnode whose tag failed
+ * @param {any} tag - the tag that failed (a widget's host `tag` included)
+ * @returns {TypeError}
+ */
+export function elementNameError(root, vnode, tag) {
+  const pointer = pointerTo(root, vnode);
+  const where = pointer === null ? 'inside a widget\'s ssr vnode' : pointer === '' ? 'at the root' : `at ${pointer}`;
+  return new TypeError(`view: the tag ${JSON.stringify(tag)} ${where} is not an element name (a letter, then `
+    + 'letters, digits or hyphens). An array whose first item is a string is an element; to splice text '
+    + 'before an element, start the list with null: [null, \' \', [\'b\', {}, \'x\']]');
+}
+
+/**
+ * The JSON Pointer of `target` inside `root`, by identity, or `null`.
+ * @param {any} root
+ * @param {any} target
+ * @returns {string | null}
+ */
+function pointerTo(root, target) {
+  if (root === target) return '';
+  if (!Array.isArray(root)) return null;
+  for (let i = 0; i < root.length; i++) {
+    const below = pointerTo(root[i], target);
+    if (below !== null) return `/${i}${below}`;
+  }
+  return null;
 }
 
 /**

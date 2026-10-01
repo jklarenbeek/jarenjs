@@ -20,7 +20,7 @@ import assert from 'node:assert';
 
 import { createDomRenderer } from '@jarenjs/view';
 
-import { createStubHost } from './dom.stub.js';
+import { createStubHost, fire } from './dom.stub.js';
 
 /** A renderer over a fresh host, plus the current root node. */
 function host() {
@@ -193,5 +193,82 @@ describe('controlled selects — value after options, and multiple', () => {
     h.root().options[1].selected = true;
     h.render(tree());
     assert.deepStrictEqual(h.root().options.map((o) => o.selected), [true, false]);
+  });
+});
+
+describe("controlled: 'focus' — the operator's focused edit holds until blur", () => {
+  /** One task: the deferral settles after the focus loss's event sequence. */
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  /** @param {any} [options] */
+  function focused(options) {
+    const { document, container } = createStubHost();
+    const render = createDomRenderer(container, { document, ...options });
+    render(['input', { value: 'server' }]);
+    const input = container.childNodes[0];
+    input.focus();
+    input.value = 'typed'; // the operator types
+    return { render, input, document, container };
+  }
+
+  it('a background refresh waits for the blur, then the state\'s value is reconciled', async () => {
+    const { render, input, document } = focused({ controlled: 'focus' });
+    render(['input', { value: 'refreshed' }]);
+    assert.strictEqual(input.value, 'typed', 'the refresh did not overwrite the focused edit');
+    render(['input', { value: 'refreshed', class: 'again' }]);
+    assert.strictEqual(input.value, 'typed', 'nor did a second pass');
+    document.activeElement = null; // the focus leaves
+    fire(input, 'focusout');
+    assert.strictEqual(input.value, 'typed', 'the write settles one task later, after change and blur');
+    await tick();
+    assert.strictEqual(input.value, 'refreshed');
+    render.destroy();
+  });
+
+  it('a render the blur scheduled lands first: the value it registers is the one reconciled', async () => {
+    const { render, input, document } = focused({ controlled: 'focus' });
+    render(['input', { value: 'refreshed' }]);
+    document.activeElement = null;
+    fire(input, 'focusout');
+    render(['input', { value: 'typed' }]); // the change event put the edit into the state
+    await tick();
+    assert.strictEqual(input.value, 'typed');
+    render.destroy();
+  });
+
+  it('without the option the state\'s value wins at once, as before', () => {
+    const { render, input } = focused();
+    render(['input', { value: 'refreshed' }]);
+    assert.strictEqual(input.value, 'refreshed');
+    render.destroy();
+  });
+
+  it('a control without focus reconciles at once even with the option', () => {
+    const { render, input, document } = focused({ controlled: 'focus' });
+    document.activeElement = null;
+    render(['input', { value: 'refreshed' }]);
+    assert.strictEqual(input.value, 'refreshed');
+    render.destroy();
+  });
+
+  it('removing the control cancels the pending write, and releases the listener', async () => {
+    const { render, input, document, container } = focused({ controlled: 'focus' });
+    render(['input', { value: 'refreshed' }]);
+    document.activeElement = null;
+    fire(input, 'focusout');
+    render(['p', {}, 'gone']);
+    await tick();
+    assert.strictEqual(input.value, 'typed', 'a removed control is never written');
+    assert.strictEqual(input.listeners.get('focusout')?.size ?? 0, 0);
+    assert.strictEqual(container.childNodes[0].tagName, 'p');
+    render.destroy();
+  });
+
+  it("refuses any other value of the option", () => {
+    const { document, container } = createStubHost();
+    for (const controlled of ['always', true, 1]) {
+      assert.throws(() => createDomRenderer(container, { document, controlled: /** @type {any} */ (controlled) }),
+        (/** @type {any} */ error) => error instanceof TypeError && /controlled option is 'focus'/.test(error.message));
+    }
   });
 });

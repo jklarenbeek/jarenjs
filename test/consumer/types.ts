@@ -165,20 +165,35 @@ import { createDomRenderer } from '@jarenjs/view';
 
 const renderDom = createDomRenderer(({} as any), {
   onEvent: (binding, event) => void [binding, event],
+  controlled: 'focus',
+  widgets: {
+    // the fourth argument: the renderer's own registry and document
+    probe: { mount: (host, props, emit, context) => void [host, props, emit, context.widgets, context.document] },
+  },
 });
 renderDom(['p', {}, 'hi']);
 renderDom.destroy();
+// @ts-expect-error the controlled option is 'focus' or absent
+createDomRenderer(({} as any), { controlled: 'always' });
 
 // @jarenjs/app — app handle (observe/destroy), tasks, focus
-import { createApp, createTaskEffect, createFocusEffect } from '@jarenjs/app';
+import { createApp, createTaskEffect, createFocusEffect, createJsonStateValidator } from '@jarenjs/app';
 
 const app = createApp({ state: {}, view: [{ match: '$', body: ['p', {}, 'x'] }] }, {
   validateState: (next, context) =>
     context.action === null ? true : { valid: next !== undefined },
   maxTurns: 100,
+  controlled: 'focus',
 });
 app.dispatch('noop');
 void app.getState();
+// settled: the drain, or the frame — both answer the state
+void (async () => [await app.settled(), await app.settled({ frame: true })])();
+// @ts-expect-error frame is a boolean
+void app.settled({ frame: 'yes' });
+// the JSON validator is a validateState hook as it stands
+const jsonApp = createApp({ state: {}, view: [] }, { validateState: createJsonStateValidator() });
+jsonApp.destroy();
 const unobserve = app.observe((tx) => void `${tx.seq}:${tx.action}:${tx.status}`);
 unobserve();
 const unsubscribe = app.subscribe((state, changes) => void [state, changes]);

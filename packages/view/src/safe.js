@@ -44,10 +44,13 @@
  */
 
 import { sanitizeUrl } from './helpers/url.js';
+import { isElementName } from './vnode.js';
 
-/** A tag or property name that is a bare identifier: a letter, then letters,
+/** A property name that is a bare identifier: a letter, then letters,
  * digits or hyphens. No spaces, `>`, `=`, `/`, colons or quotes — the
- * characters every structural-injection payload needs. */
+ * characters every structural-injection payload needs. A tag is held to the
+ * same grammar through {@link isElementName}, the predicate the trusted
+ * renderers share. */
 const RE_SAFE_NAME = /^[A-Za-z][A-Za-z0-9-]*$/;
 
 /**
@@ -153,8 +156,7 @@ export function createSafePolicy() {
     dropsEvents: true,
 
     tag(tag) {
-      if (typeof tag === 'string' && RE_SAFE_NAME.test(tag)
-        && (SAFE_HTML_TAGS.has(tag) || SAFE_SVG_TAGS.has(tag))) {
+      if (isElementName(tag) && (SAFE_HTML_TAGS.has(tag) || SAFE_SVG_TAGS.has(tag))) {
         return tag;
       }
       return null;
