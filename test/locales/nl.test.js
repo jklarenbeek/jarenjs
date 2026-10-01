@@ -10,7 +10,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
 
-import { nl, dateMessagesEn, compileDateLocale } from '@jarenjs/locales';
+import { nl, dateMessagesEn, compileDateLocale, numberMessagesEn } from '@jarenjs/locales';
 import { compileDateFormat, parseRFC3339Parts } from '@jarenjs/core/dates';
 import {
   JarenValidator,
@@ -36,6 +36,9 @@ const compiled = compileMessageCatalog(nl);
 const DATE_SAMPLE_PARAMS = Object.fromEntries(
   Object.keys(dateMessagesEn).map((key) => [key, { value: 2 }]));
 
+/** The number entries are characters and words: no parameter. */
+const NUMBER_SAMPLE_PARAMS = Object.fromEntries(Object.keys(numberMessagesEn).map((key) => [key, {}]));
+
 /**
  * The query msgids are templates over the values their English names, so
  * their sample params are DERIVED from the English placeholders: one
@@ -50,6 +53,7 @@ const placeholders = (template) => [...compileMessageTemplate(String(template)).
 /** Representative params per message key, for renders and the sweep. */
 const SAMPLE_PARAMS = {
   ...DATE_SAMPLE_PARAMS,
+  ...NUMBER_SAMPLE_PARAMS,
   ...QUERY_SAMPLE_PARAMS,
   type: { type: 'string' },
   required: { missingProperty: 'name' },
@@ -160,6 +164,9 @@ describe('@jarenjs/locales nl', () => {
     }
     for (const key of Object.keys(dateMessagesEn)) {
       assert.ok(nlKeys.has(key), `nl is missing date key '${key}'`);
+    }
+    for (const key of Object.keys(numberMessagesEn)) {
+      assert.ok(nlKeys.has(key), `nl is missing number key '${key}'`);
     }
     for (const key of Object.keys(queryMessagesEn)) {
       assert.ok(nlKeys.has(key), `nl is missing query key '${key}'`);

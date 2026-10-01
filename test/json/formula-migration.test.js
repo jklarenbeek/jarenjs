@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { migrateFormulas, rollbackFormula, resolveFormulaMigration } from '@jarenjs/json/formula/migrate';
 import { compileFormula } from '@jarenjs/json/formula';
+import { compileFormulaBatch } from '@jarenjs/json/formula/batch';
 import { createTypeTestCompiler } from '@jarenjs/validate/query';
 import { trustedBodies } from '../adoption/trusted-bodies.js';
 
@@ -71,4 +72,15 @@ it('unsupported and malformed bodies remain visible, never guessed or executed',
   await assert.rejects(migrateFormulas([sources[0], sources[0]]), TypeError);
   await assert.rejects(migrateFormulas(sources, [], { maxRecords: 1 }), TypeError);
   await assert.rejects(migrateFormulas([{ ...sources[0], body: 'x'.repeat(100) }], [], { maxSourceChars: 2 }), TypeError);
+});
+
+it('each converted formula gets its own input schema id, so two of them share a batch', async () => {
+  const pair = [{ ...sources[0] }, { ...sources[0], id: 'weight', body: 'return row.grams * row.count;', input: { grams: 3, count: 2 }, expected: { kind: 'value', value: 6 } }];
+  const { records } = await migrateFormulas(pair);
+  assert.deepEqual(records.map((r) => r.state), ['converted', 'converted']);
+  assert.deepEqual(records.map((r) => r.native.formula.inputSchema.id), ['amount/input', 'weight/input']);
+  const batch = compileFormulaBatch(records.map((r) => ({ id: r.id, formula: r.native.formula, schemas: r.native.schemas })), { compileTypeTest: createTypeTestCompiler() });
+  const result = batch.evaluate([{ id: 1, price: 2.5, quantity: 4, grams: 3, count: 2 }]);
+  assert.deepEqual([result.results[0].outcomes.amount.value, result.results[0].outcomes.weight.value], [10, 6]);
+  assert.equal(batch.evaluate([{ id: 2, price: 2.5, quantity: 4 }]).results[0].outcomes.weight.kind, 'error');
 });

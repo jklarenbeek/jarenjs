@@ -14,6 +14,14 @@ export { FormulaError };
  * @property {(schema:any, path:string)=>(value:any)=>boolean} [compileTypeTest]
  * @property {import('../query/index.js').JsonQueryLimits} [limits]
  * @property {number} [cacheSize]
+ * @property {Pick<import('../jslt/registry.js').JsltRegistry, 'packs' | 'forPacks'>} [packs]
+ *   The operator packs a profile may list (`packs: [{name, version}]`): a
+ *   `createJsltRegistry()` registry from `@jarenjs/json/jslt`.
+ * @property {import('@jarenjs/core/dates').DateNames} [dateNames] - The month
+ *   and weekday names `$date-format` spells (`compileDateLocale(pack).names`
+ *   from `@jarenjs/locales`).
+ * @property {Record<string, object>} [decimalFormats] - The decimal formats
+ *   `$format-number` and `$quantity` name (`compileNumberLocale(pack).decimalFormat`).
  */
 
 /** Validate a versioned profile; compilation checks the expression and capabilities. */
@@ -34,6 +42,12 @@ export function formulaDocument(value) {
   for (const [i, ref] of (doc.helpers ?? []).entries()) {
     if (!ref || typeof ref.name !== 'string' || !ref.name || typeof ref.version !== 'string' || !ref.version || names.has(ref.name)) fail('unique helper name and version required', `/helpers/${i}`);
     names.add(ref.name);
+  }
+  if (doc.packs !== undefined && !Array.isArray(doc.packs)) fail('packs must be an array', '/packs');
+  const packs = new Set();
+  for (const [i, ref] of (doc.packs ?? []).entries()) {
+    if (!ref || typeof ref.name !== 'string' || !ref.name || typeof ref.version !== 'string' || !ref.version || packs.has(ref.name)) fail('unique pack name and version required', `/packs/${i}`);
+    packs.add(ref.name);
   }
   return doc;
 }
@@ -105,6 +119,16 @@ export function createFormulaCompiler(options = {}) {
       functions[ref.name] = helper.run;
       capabilityKeys.push([ref.name, ref.version, helper.cost, identity(helper.run)]);
     }
+    // operator packs: each listed pack, at its version, from the host's registry
+    const packNames = [];
+    for (const [i, ref] of (doc.packs ?? []).entries()) {
+      const supplied = options.packs?.packs?.().find((known) => known.name === ref.name) ?? null;
+      if (!supplied || supplied.version !== ref.version)
+        throw new FormulaError('JQ0014', `missing/incompatible operator pack ${ref.name}@${ref.version}`, doc.id, `/packs/${i}`);
+      packNames.push(ref.name);
+      capabilityKeys.push(['pack', ref.name, ref.version, identity(options.packs)]);
+    }
+    const packOptions = packNames.length === 0 ? { extensions: undefined, functions: {} } : options.packs.forPacks(packNames);
     const schemas = {};
     for (const key of ['inputSchema', 'resultSchema']) if (doc[key] !== undefined) {
       const ref = doc[key];
@@ -113,7 +137,8 @@ export function createFormulaCompiler(options = {}) {
         throw new FormulaError('JQ0014', 'missing/incompatible schema or type-test compiler', doc.id, `/${key}`);
       schemas[key] = snapshot(entry.schema);
     }
-    const key = semanticKey([doc, capabilityKeys, schemas, options.compileTypeTest ? identity(options.compileTypeTest) : null, options.limits ?? {}]);
+    const key = semanticKey([doc, capabilityKeys, schemas, options.compileTypeTest ? identity(options.compileTypeTest) : null, options.limits ?? {},
+      options.dateNames ?? null, options.decimalFormats ?? null]);
     const cached = cache.get(key);
     if (cached) return cached;
     const tests = {};
@@ -126,7 +151,9 @@ export function createFormulaCompiler(options = {}) {
     }
     let query;
     try {
-      query = compileJsonQuery(doc.expression, { functions, compileTypeTest: options.compileTypeTest,
+      query = compileJsonQuery(doc.expression, { functions: { ...packOptions.functions, ...functions },
+        extensions: packOptions.extensions, compileTypeTest: options.compileTypeTest,
+        dateNames: options.dateNames, decimalFormats: options.decimalFormats,
         externals: [...Object.keys(doc.bindings ?? {}), 'computed', 'context'], analysis: true,
         limits: options.limits ?? { steps: 10000, depth: 64, resultItems: 10000, sequenceItems: 10000 } });
     }

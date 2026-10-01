@@ -314,6 +314,8 @@ export const CATALOGS = deepFreeze({
     "query/use/resample-locf": [],
     "query/use/resample-linear": [],
     "query/use/rolling-mean": [],
+    "query/use/trim": [],
+    "query/use/truncate": [],
     "query/phrase-keys": [
       "keys"
     ],
@@ -516,6 +518,54 @@ export const CATALOGS = deepFreeze({
     "query/arithmetic-operand": [
       "got"
     ],
+    "query/round-precision": [
+      "got",
+      "op"
+    ],
+    "query/format-picture": [
+      "picture",
+      "rule"
+    ],
+    "query/picture/separator-twice": [],
+    "query/picture/decimal-twice": [],
+    "query/picture/percent": [],
+    "query/picture/no-digit": [],
+    "query/picture/passive-inside": [],
+    "query/picture/grouping-twice": [],
+    "query/picture/grouping-edge": [],
+    "query/picture/digit-order": [],
+    "query/picture/exponent-twice": [],
+    "query/picture/exponent-percent": [],
+    "query/picture/exponent-digits": [],
+    "query/decimal-format-type": [
+      "got",
+      "op"
+    ],
+    "query/decimal-format-unknown": [
+      "name",
+      "op"
+    ],
+    "query/decimal-format-invalid": [
+      "op",
+      "rule"
+    ],
+    "query/decimal-format-record": [],
+    "query/decimal-format-member": [
+      "name"
+    ],
+    "query/decimal-format-character": [
+      "name"
+    ],
+    "query/decimal-format-zero": [
+      "char"
+    ],
+    "query/decimal-format-clash": [
+      "char"
+    ],
+    "query/quantity-unit": [
+      "op",
+      "unit"
+    ],
     "query/aggregate-not-number": [
       "got"
     ],
@@ -562,6 +612,9 @@ export const CATALOGS = deepFreeze({
     ],
     "query/expected-date-pattern": [
       "got"
+    ],
+    "query/date-names": [
+      "token"
     ],
     "query/datetime-epoch": [
       "got"

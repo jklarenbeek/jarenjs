@@ -27,6 +27,7 @@
  */
 
 export { dateMessagesEn, compileDateLocale, RELATIVE_UNITS } from './dates.js';
+export { numberMessagesEn, compileNumberLocale } from './numbers.js';
 export { createIntlDateLocale } from './intl-dates.js';
 
 export { ar } from './ar.js';

@@ -193,6 +193,51 @@ built once per zone and kept in a bounded, least-recently-used cache of
 `ZONE_CACHE_LIMIT` zones (`options.zones` resizes it), so a generated
 stream of zone names cannot grow it without limit.
 
+## Number language
+
+A query writes a number as text through a **decimal format**: the
+characters XPath F&O `fn:format-number` reads its picture with and writes
+its digits in. Every pack carries its language's format as data, taken
+from CLDR as ICU 78.3 ships it and committed, so a price renders the same
+on every Node version; `compileNumberLocale` turns a pack into the frozen
+record `@jarenjs/json`'s `$format-number` and `$quantity` take through
+the `decimalFormats` compile option:
+
+```js
+import { compileJsonQuery } from '@jarenjs/json';
+import { compileNumberLocale, nl } from '@jarenjs/locales';
+
+const decimalFormats = { nl: compileNumberLocale(nl).decimalFormat };
+compileJsonQuery({ '$format-number': ['$.price', '€ #.##0,00', 'nl'] }, { decimalFormats })({ price: 1234.5 });
+// '€ 1.234,50'
+compileJsonQuery({ $quantity: ['$.label', 'g', 'nl'] }, { decimalFormats })({ label: 'Inhoud 1,5 kg' });
+// 1500
+```
+
+The picture is written in the format's own characters: under `nl` the
+decimal separator is `,`, so `'#,##0.00'` reads as a fraction and is
+refused, and the Dutch picture is `'#.##0,00'`.
+
+| Key | English | Record member |
+|---|---|---|
+| `number/decimal-separator` | `.` | `decimalSeparator` |
+| `number/grouping-separator` | `,` | `groupingSeparator` |
+| `number/minus-sign` | `-` | `minusSign` |
+| `number/percent` | `%` | `percent` |
+| `number/per-mille` | `‰` | `perMille` |
+| `number/zero-digit` | `0` | `zeroDigit` |
+| `number/exponent-separator` | `E` | `exponentSeparator` |
+| `number/infinity` | `∞` | `infinity` |
+| `number/nan` | `NaN` | `NaN` |
+
+`numberMessagesEn` is the English set and the canonical key list; a key a
+catalog leaves out falls back to English, and an entry that renders an
+empty string is refused. The picture's own syntax, `#` for an optional
+digit and `;` between the positive and negative sub-pictures, is the same
+in every language. Some separators are not the space they look like:
+French groups with U+202F (narrow no-break space) and Russian with U+00A0,
+and Russian and Arabic write the not-a-number word with U+00A0 inside it.
+
 ## Authoring a pack
 
 A catalog is a plain flat object; each entry is either a **template
@@ -230,7 +275,8 @@ Rules of the road:
    `form/*` key of forms' `formsMessagesEn`, every `contract/*` wire-error
    key of contract's `contractMessagesEn`, every `query/*` message of
    json's `queryMessagesEn`, every `date/*` and `format/name/*` key of
-   this package's own `dateMessagesEn`, plus `x-form/assert` and the
+   this package's own `dateMessagesEn`, every `number/*` key of its
+   `numberMessagesEn`, plus `x-form/assert` and the
    `JQ2xxx` codes a `$query` assertion reports. The repo enforces
    this with tests (`test/locales/`); missing keys silently fall back to
    English.
@@ -293,6 +339,7 @@ Every subpath a consumer can import, derived from the manifest by
 |---|---|---|
 | `@jarenjs/locales` | JavaScript | declared |
 | `@jarenjs/locales/dates` | JavaScript | declared |
+| `@jarenjs/locales/numbers` | JavaScript | declared |
 | `@jarenjs/locales/intl-dates` | JavaScript | declared |
 | `@jarenjs/locales/intl-zones` | JavaScript | declared |
 | `@jarenjs/locales/ar` | JavaScript | declared |

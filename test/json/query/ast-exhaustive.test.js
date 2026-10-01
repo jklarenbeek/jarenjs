@@ -141,7 +141,7 @@ describe('gate 2 — NODE_KINDS equals the Appendix C.3 table', () => {
 });
 
 describe('gate 3 — the operator registry equals QUERY-FORMAT §8', () => {
-  it('every registry operator is documented and vice versa (104 total)', () => {
+  it('every registry operator is documented and vice versa (111 total)', () => {
     const section = FORMAT.split(/^## 8\. /m)[1]?.split(/^## 9\. /m)[0];
     assert.ok(section, 'section 8 is missing from QUERY-FORMAT.md');
     const documented = new Set();
@@ -157,7 +157,7 @@ describe('gate 3 — the operator registry equals QUERY-FORMAT §8', () => {
     const undocumented = registry.filter((op) => !documented.has(op));
     assert.deepStrictEqual(undocumented, [],
       'registry operators with no mention in section 8');
-    assert.strictEqual(registry.length, 104,
+    assert.strictEqual(registry.length, 111,
       'the operator count moved — update this pin and every COUNT_SOURCES document together');
   });
 

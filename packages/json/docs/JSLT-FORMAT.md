@@ -623,17 +623,22 @@ const jslt = createJsltRegistry().use(mathPack).use(financePack).use(statsPack);
 const transform = jslt.compile(stylesheet);   // bound compileJsltStylesheet
 const q = jslt.compileQuery(queryDocument);    // bound compileJsonQuery
 jslt.names();                                  // every registered name
+jslt.packs();                                  // [{ name: 'math', version: '1' }, …]
+jslt.forPacks(['math']);                       // { extensions, functions } of those packs only
 jslt.toOptions();                              // { extensions, functions }
 ```
 
 `createJsltRegistry()` is **immutable-by-copy**: `.use(pack)` returns a
 new registry (a value, not a mutable singleton), and a name that collides
-with the core vocabulary or a name already registered throws a
-`TypeError` at `.use()` — a host programming error, never a `JQ`
-document error.
+with the core vocabulary, a name already registered, or a second pack
+under a registered pack name throws a `TypeError` at `.use()` — a host
+programming error, never a `JQ` document error.
 
-A **pack** is plain data — `{ name, entries }` — wrapping pure functions,
-free of the operator internals. Each entry declares a **kind**:
+A **pack** is plain data — `{ name, version?, entries }` — wrapping pure
+functions, free of the operator internals. `version` is a string the pack
+bumps when an entry's meaning changes; a saved formula lists the packs it
+uses by name and version, and `forPacks` hands it exactly those
+([FORMULA-FORMAT](./FORMULA-FORMAT.md)). Each entry declares a **kind**:
 
 - **`op`** — a scalar `$`-operator over scalar operands (`$sqrt`,
   `$pow`). An empty operand propagates to an empty result.
@@ -653,8 +658,10 @@ the same discipline `$call` and `$orderby`'s collations demand. A
 throwing function surfaces as the coded runtime error `JQ2010`, never a
 crash; a function returning `NaN`/`null` is the caller's data problem.
 
-The built-in packs wrap `@jarenjs/core`: `mathPack` (`$sqrt`, `$pow`,
-`$hypot`, trigonometry, logs — scalar ops), `financePack` (`$npv`,
+The built-in packs, each at version `'1'`, wrap `@jarenjs/core`:
+`mathPack` (`$sqrt`, `$pow`, `$hypot`, trigonometry, logs — scalar ops;
+`$abs` and the rounding operators are core, QUERY-FORMAT §8.5),
+`financePack` (`$npv`,
 `$irr`, `$mirr`, `$fv`/`$pv`/`$pmt`, `$sma`/`$ema`/`$wma`/`$rsi`,
 `$volatility`/`$sharpe`/`$maxDrawdown` — aggregators over a series), and
 `statsPack` (`$mean`, `$median`, `$variance`, `$stddev`, `$percentile`).

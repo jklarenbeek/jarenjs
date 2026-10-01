@@ -1,0 +1,49 @@
+//@ts-check
+/**
+ * @file The words a measured quantity is written with, as data beside the
+ * unit registry: each alias names one registry unit. A reader of free text
+ * (`'100 gram'`, `'1,5 kg'`, `'250ml'`) looks a word up here, then converts
+ * through the registry, so an alias never carries a factor of its own.
+ *
+ * Aliases are matched case-insensitively. The list covers mass, volume and
+ * length in English, Dutch and German spellings; a host extends it by
+ * passing a table of its own where a reader takes one. A word that names
+ * different units in different places is left out rather than guessed:
+ * `ton` is the metric tonne in Dutch and 907 kg in US English.
+ */
+
+/**
+ * Every alias, lower-cased, to its registry unit id.
+ * @type {Readonly<Record<string, string>>}
+ */
+export const UNIT_ALIASES = Object.freeze(Object.assign(Object.create(null), {
+  // mass
+  mg: 'mg', milligram: 'mg', milligrams: 'mg', milligramme: 'mg', milligrammes: 'mg', milligramm: 'mg',
+  g: 'g', gr: 'g', gram: 'g', grams: 'g', gramme: 'g', grammes: 'g', gramm: 'g', grammen: 'g',
+  kg: 'kg', kilo: 'kg', kilos: 'kg', kilogram: 'kg', kilograms: 'kg', kilogramme: 'kg', kilogramm: 'kg',
+  t: 't', tonne: 't', tonnes: 't',
+  oz: 'oz', ounce: 'oz', ounces: 'oz',
+  lb: 'lb', lbs: 'lb', pound: 'lb', pounds: 'lb',
+  // volume
+  ml: 'ml', milliliter: 'ml', milliliters: 'ml', millilitre: 'ml', millilitres: 'ml',
+  l: 'l', liter: 'l', liters: 'l', litre: 'l', litres: 'l', ltr: 'l',
+  // length
+  mm: 'mm', millimeter: 'mm', millimeters: 'mm', millimetre: 'mm', millimetres: 'mm',
+  cm: 'cm', centimeter: 'cm', centimeters: 'cm', centimetre: 'cm', centimetres: 'cm',
+  m: 'm', meter: 'm', meters: 'm', metre: 'm', metres: 'm',
+  km: 'km', kilometer: 'km', kilometers: 'km', kilometre: 'km', kilometres: 'km',
+  in: 'in', inch: 'in', inches: 'in',
+  ft: 'ft', foot: 'ft', feet: 'ft',
+}));
+
+/**
+ * The registry unit an alias names, or undefined.
+ * @param {string} word
+ * @returns {string | undefined}
+ * @example
+ * unitOfAlias('Gram'); // 'g'
+ * unitOfAlias('cm');   // 'cm'
+ */
+export function unitOfAlias(word) {
+  return UNIT_ALIASES[word.toLowerCase()];
+}

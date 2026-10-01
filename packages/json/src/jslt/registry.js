@@ -95,8 +95,9 @@ function toExtensionEntry(name, entry) {
 function validatePack(pack) {
   if (pack === null || typeof pack !== 'object'
     || typeof pack.name !== 'string' || pack.name === ''
+    || (pack.version !== undefined && (typeof pack.version !== 'string' || pack.version === ''))
     || pack.entries === null || typeof pack.entries !== 'object') {
-    throw new TypeError('a pack must be { name: string, entries: object }');
+    throw new TypeError('a pack must be { name: string, version?: string, entries: object }');
   }
   for (const [name, entry] of Object.entries(pack.entries)) {
     if (entry === null || typeof entry !== 'object' || typeof entry.fn !== 'function') {
@@ -115,6 +116,33 @@ function validatePack(pack) {
 }
 
 /**
+ * A pack: plain data wrapping pure functions (JSLT-FORMAT section 13).
+ * @typedef {Object} JsltPack
+ * @property {string} name
+ * @property {string} [version] - bumped when an entry's meaning changes
+ * @property {Record<string, any>} entries - name -> `{ kind, signature, result, fn, … }`
+ */
+
+/**
+ * An immutable operator registry: every member answers from the packs
+ * the registry was built with, and `use` builds a new one.
+ * @typedef {Object} JsltRegistry
+ * @property {(pack: JsltPack) => JsltRegistry} use - a NEW registry with the pack merged
+ * @property {() => string[]} names - every registered operator/function name (for docs, AI, errors)
+ * @property {() => Array<{ name: string, version: string | null }>} packs - the registered packs, in
+ *   order (`version` null for a pack that declares none)
+ * @property {(names: readonly string[]) => { extensions: Record<string, any>, functions: Record<string, Function> }} forPacks
+ *   the `{ extensions, functions }` of the named packs only — what a saved formula that lists those packs may use
+ * @property {() => { extensions: Record<string, any>, functions: Record<string, Function> }} toOptions
+ *   the raw `{ extensions, functions }` for a manual compile call
+ * @property {() => Record<string, any>} forSql - the SQL-pushable subset, as `{ name -> meta }`
+ * @property {() => Record<string, any>} describe - the full registration metadata
+ * @property {(stylesheet: any, opts?: any) => Function} compile - compile a JSLT stylesheet bound to this registry
+ * @property {(document: any, opts?: any) => import('../query/index.js').CompiledJsonQuery} compileQuery
+ *   compile a bare query document bound to this registry (linq-over-memory)
+ */
+
+/**
  * Build an immutable JSLT operator registry. `.use(pack)` returns a NEW
  * registry with the pack merged (a value, not a mutable singleton, so
  * the functional spirit of the compilers is preserved). A name that
@@ -122,7 +150,8 @@ function validatePack(pack) {
  * throws a `TypeError` at `.use()` time — a host programming error, never
  * a `JQ` document error.
  * @param {{ extensions: Record<string, any>, functions: Record<string, Function>,
- *   meta: Record<string, any>, packs: string[] }} [state]
+ *   meta: Record<string, any>, packs: Array<{ name: string, version: string | null }> }} [state]
+ * @returns {Readonly<JsltRegistry>}
  */
 export function createJsltRegistry(state) {
   const base = state ?? { extensions: {}, functions: {}, meta: {}, packs: [] };
@@ -153,8 +182,12 @@ export function createJsltRegistry(state) {
         pushable: entry.pushable ?? false, fn: entry.fn,
       };
     }
+    if (base.packs.some((known) => known.name === pack.name)) {
+      throw new TypeError(`pack '${pack.name}' is already registered`);
+    }
     return createJsltRegistry({
-      extensions, functions, meta, packs: [...base.packs, pack.name],
+      extensions, functions, meta,
+      packs: [...base.packs, Object.freeze({ name: pack.name, version: pack.version ?? null })],
     });
   };
 
@@ -182,6 +215,17 @@ export function createJsltRegistry(state) {
     use,
     /** Every registered operator/function name (for docs, AI, errors). */
     names: () => [...Object.keys(base.extensions), ...Object.keys(base.functions)],
+    /** The registered packs, in order, as `{ name, version }` (`version`
+     * null for a pack that declares none). */
+    packs: () => base.packs.slice(),
+    /** The `{ extensions, functions }` of the named packs only — what a
+     * saved formula that lists those packs may use. */
+    forPacks: (/** @type {readonly string[]} */ names) => {
+      const wanted = new Set(names);
+      const pick = (/** @type {Record<string, any>} */ table) => Object.fromEntries(
+        Object.entries(table).filter(([name]) => wanted.has(base.meta[name]?.pack)));
+      return { extensions: pick(base.extensions), functions: pick(base.functions) };
+    },
     /** The raw `{ extensions, functions }` for a manual compile call. */
     toOptions: () => ({ extensions: { ...base.extensions }, functions: { ...base.functions } }),
     /** The SQL-pushable subset, as `{ name -> meta }` (consumed by the db

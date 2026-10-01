@@ -409,8 +409,8 @@ describe('Jaren JSON Query normalizer', () => {
       });
     });
 
-    it('should say plainly when no operator does it (e.g. $abs)', () => {
-      for (const op of ['$abs', '$sqrt', '$ceil', '$buffer', '$union', '$embed']) {
+    it('should say plainly when no operator does it (e.g. $sqrt)', () => {
+      for (const op of ['$sqrt', '$pow', '$buffer', '$union', '$embed']) {
         assert.throws(() => compileJsonQuery({ [op]: '$' }), (e) => {
           assert.strictEqual(e.code, 'JQ0002');
           assert.ok(e.message.includes('no operator does this'), e.message);

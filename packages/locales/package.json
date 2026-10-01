@@ -15,6 +15,10 @@
       "types": "./dist/types/dates.d.ts",
       "default": "./src/dates.js"
     },
+    "./numbers": {
+      "types": "./dist/types/numbers.d.ts",
+      "default": "./src/numbers.js"
+    },
     "./intl-dates": {
       "types": "./dist/types/intl-dates.d.ts",
       "default": "./src/intl-dates.js"

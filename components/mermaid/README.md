@@ -328,7 +328,7 @@ detection + Jison + validation — so it is heavy and noisy; these are
 representative, not a bare-grammar microbenchmark.)
 
 Rendering through `diagramToVnode` costs a consumer
-**<!--fact:bundle.mermaid-->75,930<!--/fact--> bytes** minified and
+**<!--fact:bundle.mermaid-->75,963<!--/fact--> bytes** minified and
 tree-shaken, and the import graph holds no chart or Markdown module: a pie
 renderer, when a host wants one, is charts' and is handed in.
 `npm run test:tree-shaking` measures both.

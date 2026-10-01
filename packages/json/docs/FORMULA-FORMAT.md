@@ -16,8 +16,9 @@ formula.evaluate({ price: 2.5, quantity: 4 }); // {kind:'value', value:10}
 A profile requires `$formula: "1"`, nonempty `id` and `revision` strings, and
 `expression`, an existing JSON Query document. Identity and revision strings have
 a maximum length of 256 characters. Optional members are `bindings`, `helpers`,
-`inputSchema`, `resultSchema`, and `resultMode` (`value`, the default, or `outcome`).
-Bindings are immutable JSON. `context` and `computed` are reserved external names.
+`packs`, `inputSchema`, `resultSchema`, and `resultMode` (`value`, the default, or
+`outcome`). Bindings are immutable JSON. `context` and `computed` are reserved
+external names.
 
 Schema references are `{id, version}` and resolve through
 `options.schemas[id] = {version, schema}`. Supply `compileTypeTest` from
@@ -30,17 +31,50 @@ result value to validate.
 Helper references are `{name, version}` and resolve through
 `options.helpers[name] = {version, run, trust:'pure', cost}`. Positive finite cost
 is a host declaration, not measured enforcement. Versioned helpers must remain
-pure and stable for the lifetime of a compiled formula. `createFormulaCompiler`
-retains a bounded compilation cache (default 128 profiles): its collision-free
-key includes the complete profile, helper function identity/version/cost, schema
-contents, type-test function identity and limits. Recompile after replacing a
-capability; a new compiler never shares another host's cache. `clear()` releases
-entries and `size()` reports retained profiles.
+pure and stable for the lifetime of a compiled formula.
+
+Operator packs are listed the same way: `packs` is an array of unique
+`{name, version}` and resolves through `options.packs`, a registry from
+`createJsltRegistry()` of `@jarenjs/json/jslt` ([JSLT-FORMAT §13](JSLT-FORMAT.md#13-registered-operators-host-opt-in-non-normative)).
+A pack the registry lacks, or holds at another version, refuses at compile time
+(`JQ0014`, at `/packs/i`), as a missing helper does. The formula is compiled with
+the operators of the listed packs only: an operator of a pack the registry holds
+but the profile does not list stays unknown (`JQ0002`), so a saved formula names
+every operator its meaning depends on.
+
+```js
+import { createJsltRegistry, mathPack } from '@jarenjs/json/jslt';
+const packs = createJsltRegistry().use(mathPack);
+const profile = defineFormula('side', { $sqrt: ['$.area'] }, { packs: [{ name: 'math', version: '1' }] });
+compileFormula(profile, { packs }).evaluate({ area: 16 }); // {kind:'value', value:4}
+```
+
+Locale data is data the host hands in, never looked up: `options.dateNames`
+(the names `$date-format` writes month and weekday words with, from
+`compileDateLocale(pack).names` of `@jarenjs/locales`) and
+`options.decimalFormats` (named decimal formats for `$format-number` and
+`$quantity`, from `compileNumberLocale(pack).decimalFormat`), passed through to
+the Query engine ([QUERY-FORMAT §8.7, §8.13](QUERY-FORMAT.md#87-strings)).
+
+```js
+import { compileDateLocale, compileNumberLocale, nl } from '@jarenjs/locales';
+const options = { dateNames: compileDateLocale(nl).names, decimalFormats: { nl: compileNumberLocale(nl).decimalFormat } };
+compileFormula(defineFormula('price', { '$format-number': ['$.price', '€ #.##0,00', 'nl'] }), options)
+  .evaluate({ price: 1234.5 }); // {kind:'value', value:'€ 1.234,50'}
+```
+
+`createFormulaCompiler` retains a bounded compilation cache (default 128
+profiles): its collision-free key includes the complete profile, helper function
+identity/version/cost, the pack registry, the locale data, schema contents,
+type-test function identity and limits. Recompile after replacing a capability; a
+new compiler never shares another host's cache. `clear()` releases entries and
+`size()` reports retained profiles.
 
 `evaluate(row, context?, computed?)` snapshots and freezes JSON inputs without
-freezing caller objects. Clock values, locale, rates and unit tables belong in
-bindings/context or explicitly registered pure helpers. No implicit clock, locale,
-network or database access is supplied. Formula errors carry `formulaId`, `code`
+freezing caller objects. Clock values, rates and unit tables belong in
+bindings/context or explicitly registered pure helpers, and locale data in the
+compile options above. No implicit clock, locale, network or database access is
+supplied. Formula errors carry `formulaId`, `code`
 and an RFC 6901 `docPath`; wrapped Query errors retain their code and point below
 `/expression`. Codes are allocated in the [Query registry](QUERY-FORMAT.md#10-errors).
 
@@ -49,10 +83,15 @@ and an RFC 6901 `docPath`; wrapped Query errors retain their code and point belo
 JSON Query semantics apply unchanged: missing paths yield an empty sequence;
 explicit null is a value. Numeric operators do not convert strings to numbers.
 Native floating-point overflow/non-finite values and non-JSON host results are
-refused at the formula boundary. Rounding is explicit through existing Query/core
-operations or a declared helper. There is no implicit currency rounding or
-formatting; formatted text is an ordinary string. JavaScript Number precision and
-Query rounding rules remain visible; the API does not claim decimal arithmetic.
+refused at the formula boundary. Rounding is explicit: `$round`,
+`$round-half-to-even`, `$floor`, `$ceiling` and `$abs` are Query operators
+([QUERY-FORMAT §8.5](QUERY-FORMAT.md#85-arithmetic--add-sub-mul-div-idiv-mod-neg-rounding)),
+and `$round` with a precision rounds the exact binary value, as XPath F&O
+`fn:round` says (`1.005` is stored just below 1.005, so at two places it is 1).
+There is no implicit currency rounding or formatting: `$format-number` writes a
+number with a picture and a decimal format, and its text is an ordinary string.
+JavaScript Number precision remains visible; the API does not claim decimal
+arithmetic.
 
 The default result mode produces `{kind:'value', value}`. Empty sequence produces
 `{kind:'empty', values:[]}`, distinct from a value containing an empty array.
@@ -72,7 +111,11 @@ object results are never interpreted as outcome instructions in `value` mode.
 ## Batches and isolation
 
 `compileFormulaBatch(targets, options)` from `@jarenjs/json/formula/batch` compiles
-`{id, enabled?, formula}` targets once. Disabled targets neither compile nor run.
+`{id, enabled?, formula, schemas?}` targets once. A target's own `schemas` (a
+migration record's `native.schemas`) join `options.schemas`; two different
+schemas under one id refuse (`JQ0015` at `/targets/i/schemas`), since one formula
+would otherwise validate its rows against the other's schema. Disabled targets
+neither compile nor run.
 Compile/runtime failure of one target does not stop independent cells. Each row
 has a stable string/finite-number `id` (or the configured `key`); string IDs and
 target IDs are bounded at 256 characters. Duplicate row/target identities refuse.
@@ -125,14 +168,37 @@ The measured conversion subset is deliberately narrow: `return null;` and
 semantics. A line break immediately after `return` is refused because JavaScript
 automatic semicolon insertion would change its meaning. Numeric
 conversions emit required-number input schemas so JavaScript coercion is never
-silently adopted. Outputs retain Number arithmetic, including its rounding
-limitations; overflow refuses. A native target is `{formula, schemas}`.
+silently adopted, each under its own id (`<formula id>/input`), so converted
+formulas share a batch as `{id, formula: native.formula, schemas: native.schemas}`.
+Outputs retain Number arithmetic, including its rounding limitations; overflow
+refuses. A native target is `{formula, schemas}`.
 
 Every other source receives a specific review reason: statements, optional
 chaining, Intl formatting, application helpers, throw statements, result-policy
 objects or unsupported syntax. Disabled sources are preserved without parsing.
 The frozen synthetic corpus retains the original application-owned static oracle;
 Jaren neither supplies a trusted JavaScript runner nor describes one as a sandbox.
+
+A body left for review translates by hand with these equivalents; a test runs
+each one value for value against the JavaScript it replaces:
+
+| JavaScript | JSON Query |
+|---|---|
+| `a ?? b`, `a` a missing field | `{"$default": [a, b]}`: a missing path is the empty sequence |
+| `a ?? b`, `a` possibly an explicit `null` | `{"$if": [{"$is-null": {"$default": [a, null]}}, b, a]}` |
+| `a == null` | `{"$is-null": {"$default": [a, null]}}` |
+| `Math.round(x * 100) / 100` | `{"$div": [{"$round": [{"$mul": [x, 100]}]}, 100]}` |
+| `Number(x.toFixed(2))`, `x >= 0` | `{"$round": [x, 2]}` |
+
+The two rounding spellings are not interchangeable. `Math.round(x * 100) / 100`
+rounds the product, which binary multiplication has already rounded, so
+`0.015` becomes `0.02` where `{"$round": [0.015, 2]}` is `0.01`: they differ on
+43,412 of the 100,000 half-cent values from 0.005 to 999.995. The
+multiply-round-divide spelling reproduces it bit for bit (no difference over
+400,000 values, both signs). `toFixed` rounds the exact value too, and agrees with
+`$round` on every non-negative value; on a negative exact tie it rounds away from
+zero (`(-0.125).toFixed(2)` is `-0.13`) where `$round` rounds toward positive
+infinity (`-0.12`).
 
 Migration returns `{records, changes, changed}`. Repeating input reports zero
 changes; missing sources in a later input do not delete records. A changed source

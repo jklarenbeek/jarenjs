@@ -619,7 +619,7 @@ describe('the planner\'s reason vocabulary', () => {
     'plan.countProjection': [collection,
       { $count: { $for: { it: '$[*]' }, $return: { x: { $count: '$it.n' } } } }],
     'operators.registered': [collection,
-      { $for: { it: '$[*]' }, $return: { a: { $abs: '$it.f' } } }],
+      { $for: { it: '$[*]' }, $return: { a: { $sqrt: '$it.f' } } }],
     'plan.aggregatePath': [collection,
       { $sum: { $for: { it: '$[*]' }, $return: '$it.s' } }],
     // A bare key can omit an absent group's item, so its window still

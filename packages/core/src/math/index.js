@@ -8,3 +8,4 @@ export * from './solve.js';
 export * from './mat4.js';
 export * from './project.js';
 export * from './format.js';
+export * from './decimal.js';

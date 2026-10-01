@@ -22,7 +22,8 @@ import { parseJSONPath, JSONPathSyntaxError, RE_JSONPATH_VARIABLE_HEAD } from '.
 import { isSingularSegments } from '../segments.js';
 import { encodeJSONPointerSegment } from '../pointer.js';
 import { JsonQueryCompileError } from './errors.js';
-import { queryCompileError, messageRef } from './messages.js';
+import { queryCompileError, messageRef, renderQueryMessageId } from './messages.js';
+import { FormatRefusal, readDecimalFormat } from './format-number.js';
 import { normalizeLexical } from './lexical.js';
 import { deepFreeze, isJsonObject } from '@jarenjs/core/object';
 // The operator registry: `name -> { params, result, compile }`. Only
@@ -416,16 +417,18 @@ export const OPERATOR_ALIASES = {
   $group: "$groupby", "$group-by": "$groupby",
   $sortby: "query/use/sort-objects",
   "$sort-by": "query/use/sort-scalars", $order: "$sort",
-  // aggregates / arithmetic
-  $size: "$count", $len: "$length", $abs: null, $round: null, $floor: "$idiv",
-  $ceil: null, $sqrt: null, $pow: null, $modulo: "$mod", $remainder: "$mod",
+  // aggregates / arithmetic ($floor, $ceiling, $round and $abs are real
+  // operators; the spellings that miss them are here)
+  $size: "$count", $len: "$length", $ceil: "$ceiling", $truncate: "query/use/truncate",
+  $trunc: "query/use/truncate", $fix: "query/use/truncate",
+  $sqrt: null, $pow: null, $modulo: "$mod", $remainder: "$mod",
   $subtract: "$sub", $multiply: "$mul", $divide: "$div", $minus: "$sub",
   $times: "$mul", $negate: "$neg", $product: "$mul", $total: "$sum",
   // strings / collections
   $join: "$string-join", $split: null, $includes: "$contains",
   $indexof: "$index-of", $find: "$index-of", $keys: "$entries",
   $values: "query/use/entries-get", $has: "$exists", $tostring: "$string",
-  $tonumber: "$number", $len_str: "$string-length", $trim: "$normalize-space",
+  $tonumber: "$number", $len_str: "$string-length", $trim: "query/use/trim",
   $lowercase: "$lower", $uppercase: "$upper", $startswith: "$starts-with",
   $endswith: "$ends-with", $unique: "$distinct", $flatten: "query/use/for-phrase",
   // conditionals ($coalesce is a real operator; the guesses are here)
@@ -682,6 +685,11 @@ function normalizeOperatorCall(key, entry, arg, docPath, opPath, scope, ctx) {
   // The provider is a compilation capability, like a
   // collation, so it reaches the entry the same way $range's guard does
   if (ctx.zoneProvider !== null && CLOCK_OPERATORS.has(key)) node.zoneProvider = ctx.zoneProvider;
+  // locale data is data the host hands the compilation, never a lookup:
+  // the names $date-format spells, the decimal formats a number is
+  // written and read with
+  if (key === '$date-format' && ctx.dateNames !== null) node.dateNames = ctx.dateNames;
+  if ((key === '$format-number' || key === '$quantity') && ctx.decimalFormats !== null) node.decimalFormats = ctx.decimalFormats;
   return Object.freeze(node);
 }
 
@@ -1370,6 +1378,39 @@ function validateZoneProvider(value) {
   return value;
 }
 
+// Validate the month and weekday names `$date-format` reads
+// (options.dateNames): the DateNames record of @jarenjs/core/dates, which
+// compileDateLocale(pack).names answers. A host programming error is a
+// TypeError, like options.zoneProvider.
+function validateDateNames(value) {
+  const list = (key, n) => Array.isArray(value[key]) && value[key].length === n
+    && value[key].every((name) => typeof name === 'string' && name !== '');
+  if (value === null || typeof value !== 'object' || !list('months', 12) || !list('monthsShort', 12)
+    || !list('weekdays', 7) || !list('weekdaysShort', 7) || !list('meridiem', 2)) {
+    throw new TypeError('options.dateNames must be a DateNames record { months, monthsShort, weekdays,'
+      + ' weekdaysShort, meridiem } - compileDateLocale(pack).names from @jarenjs/locales');
+  }
+  return value;
+}
+
+// Validate the named decimal formats `$format-number` and `$quantity` read
+// (options.decimalFormats): each record checked and completed once, here.
+function validateDecimalFormats(value) {
+  if (value === null || typeof value !== 'object' || Array.isArray(value))
+    throw new TypeError('options.decimalFormats must be an object of name -> decimal format record');
+  const out = Object.create(null);
+  for (const name of Object.keys(value)) {
+    try {
+      out[name] = readDecimalFormat(value[name]);
+    }
+    catch (e) {
+      if (!(e instanceof FormatRefusal)) throw e;
+      throw new TypeError(`options.decimalFormats.${name} is not a decimal format (${renderQueryMessageId(e.messageId, e.params)})`);
+    }
+  }
+  return Object.freeze(out);
+}
+
 // The known limits (section 8.12). Only limits the engine actually
 // enforces are accepted - an accepted-but-unenforced limit would be a
 // silent false guarantee.
@@ -1536,6 +1577,8 @@ export function normalizeQuery(doc, options = {}) {
   const functions = options.functions == null ? null : validateNamedFunctions(options.functions, 'functions');
   const collations = options.collations == null ? null : validateNamedFunctions(options.collations, 'collations');
   const zoneProvider = options.zoneProvider == null ? null : validateZoneProvider(options.zoneProvider);
+  const dateNames = options.dateNames == null ? null : validateDateNames(options.dateNames);
+  const decimalFormats = options.decimalFormats == null ? null : validateDecimalFormats(options.decimalFormats);
   const limits = options.limits == null ? null : validateLimits(options.limits);
   const declaredExternals = options.externals == null
     ? null
@@ -1549,7 +1592,8 @@ export function normalizeQuery(doc, options = {}) {
     : { pathFunctions: options.pathFunctions };
   const ctx = {
     nextSlot: 1, externals: new Map(), compileTypeTest, extensions,
-    functions, collations, zoneProvider, limits, pathOptions, declaredExternals, lexicalProviders: options.lexicalProviders,
+    functions, collations, zoneProvider, dateNames, decimalFormats, limits, pathOptions, declaredExternals,
+    lexicalProviders: options.lexicalProviders,
     // package-internal: set only by analyzeQuery (Appendix C.1); the
     // compile entry point never passes it
     analysis: options.analysis === true,

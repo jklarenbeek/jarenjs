@@ -175,8 +175,10 @@ export function compileDateFormat(pattern, names = undefined) {
     }
     const need = NEEDS_NAMES[matched];
     if (need !== undefined && (names === undefined || names[need] === undefined)) {
-      throw new TypeError(`the '${matched}' token needs a '${need}' names provider`
-        + ' (@jarenjs/core/dates is locale-free by design)');
+      // the token and the names it needs ride on the error, so a caller
+      // can say what to supply in its own words
+      throw Object.assign(new TypeError(`the '${matched}' token needs a '${need}' names provider`
+        + ' (@jarenjs/core/dates is locale-free by design)'), { token: matched, names: need });
     }
     flushLiteral();
     const fn = TOKENS[matched];

@@ -34,6 +34,7 @@ const aggNum = (signature, fn) =>
 
 export const statsPack = {
   name: 'stats',
+  version: '1',
   entries: {
     $mean: aggNum(['seq<number>'], mean),
     $median: aggNum(['seq<number>'], median),

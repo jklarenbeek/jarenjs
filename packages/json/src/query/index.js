@@ -90,6 +90,24 @@ const hasOwn = Object.hasOwn;
  *   document contains. Deliberately separate from `functions`: that
  *   registry extends the query vocabulary through `$call`, this one
  *   extends the RFC 9535 grammar the path strings are written in.
+ * @property {import('@jarenjs/core/series').ZoneProvider} [zoneProvider]
+ *   The two questions a named time zone needs (QUERY-FORMAT.md section
+ *   8.13): `toParts(epoch, zone)` and `toEpoch(parts, zone,
+ *   disambiguation)`. This package bundles no tzdb;
+ *   `createIntlZoneProvider()` of `@jarenjs/locales/intl-zones` answers
+ *   them over `Intl`. Without a provider a named zone is refused, never
+ *   answered in UTC.
+ * @property {import('@jarenjs/core/dates').DateNames} [dateNames]
+ *   The month and weekday names `$date-format` writes `MMMM`, `EEEE`
+ *   and `a` with (QUERY-FORMAT.md section 8.13):
+ *   `compileDateLocale(pack).names` of `@jarenjs/locales`. Without them a
+ *   names pattern is JQ0003 when literal and JQ2001 when computed.
+ * @property {Record<string, object>} [decimalFormats]
+ *   Named decimal formats for `$format-number` and `$quantity`
+ *   (QUERY-FORMAT.md section 8.7), each the record
+ *   `compileNumberLocale(pack).decimalFormat` of `@jarenjs/locales`
+ *   answers, under the name a document passes as the third operand.
+ *   Every record is checked when the query compiles (TypeError).
  * @property {JsonQueryLimits} [limits] - Enforced execution limits.
  * @property {readonly string[]} [externals] - Closed-world compilation:
  *   the variable names (no `$` sigil) the document may leave free.

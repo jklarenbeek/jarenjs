@@ -1,0 +1,33 @@
+{
+  "format": "jaren-format-number-agreement/1",
+  "runnerHash": "e77146915a7591ecc3c7c28ed2cf4732e968d3a5df7c386bde74323406701d81",
+  "runtime": {
+    "node": "v24.20.0",
+    "icu": "78.3",
+    "unicode": "17.0",
+    "cldr": "48.0"
+  },
+  "seed": 20261001,
+  "picture": "€ #.##0,00;€ -#.##0,00",
+  "locale": "nl-NL",
+  "currency": "EUR",
+  "values": 60022,
+  "sampled": 60000,
+  "edges": 22,
+  "disagreements": 0,
+  "examples": [],
+  "symbols": {
+    "NaN": {
+      "ours": "NaN",
+      "intl": "€ NaN"
+    },
+    "Infinity": {
+      "ours": "€ ∞",
+      "intl": "€ ∞"
+    },
+    "-Infinity": {
+      "ours": "€ -∞",
+      "intl": "€ -∞"
+    }
+  }
+}

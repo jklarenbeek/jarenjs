@@ -21,6 +21,7 @@ const opNum = (n, fn) => ({ kind: 'op', signature: new Array(n).fill('number'), 
 
 export const financePack = {
   name: 'finance',
+  version: '1',
   entries: {
     // present value of a cashflow series at a rate
     $npv: aggNum(['number', 'seq<number>'], (rate, cashflows) => npv(rate, cashflows)),

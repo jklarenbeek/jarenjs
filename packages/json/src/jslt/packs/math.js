@@ -1,7 +1,8 @@
 //@ts-check
 /**
  * @file The math pack — scalar `$`-operators the core query vocabulary
- * lacks, wrapping the pure f64 functions of `@jarenjs/core/math`. Every
+ * lacks, wrapping the pure f64 functions of `@jarenjs/core/math` (`$abs`
+ * and the rounding operators are core: QUERY-FORMAT §8.5). Every
  * entry is `kind: 'op'` (scalar operands, scalar result). `pushable:
  * 'scalar'` marks the ones Ring 3 MAY register as a SQLite UDF; it is
  * ignored in Rings 1–2.
@@ -9,7 +10,7 @@
 
 import {
   mathf64_sqrt, mathf64_cbrt, mathf64_pow, mathf64_hypot, mathf64_sign,
-  mathf64_abs, mathf64_sin, mathf64_cos, mathf64_tan,
+  mathf64_sin, mathf64_cos, mathf64_tan,
   mathf64_asin, mathf64_acos, mathf64_atan, mathf64_atan2,
   mathf64_sinh, mathf64_cosh, mathf64_tanh,
   mathf64_log, mathf64_log2, mathf64_log10, mathf64_exp, mathf64_expm1,
@@ -20,8 +21,8 @@ const op2 = (fn) => ({ kind: 'op', signature: ['number', 'number'], result: 'num
 
 export const mathPack = {
   name: 'math',
+  version: '1',
   entries: {
-    $abs: op1(mathf64_abs),
     $sign: op1(mathf64_sign),
     $sqrt: op1(mathf64_sqrt),
     $cbrt: op1(mathf64_cbrt),

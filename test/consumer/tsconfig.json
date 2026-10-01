@@ -26,6 +26,7 @@
     "providers.ts",
     "durable-types.ts",
     "linq-formula.ts",
+    "formula-locale.ts",
     "studio-editors.ts",
     "db-relational.ts",
     "db-process.ts",

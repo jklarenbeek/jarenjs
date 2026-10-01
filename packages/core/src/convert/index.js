@@ -9,3 +9,4 @@
 export { DIMENSIONS, UNIT_INDEX } from './registry.js';
 export { convert, unitsOf, dimensions, dimensionOf } from './convert.js';
 export { convertCurrency, currenciesOf } from './currency.js';
+export { UNIT_ALIASES, unitOfAlias } from './aliases.js';

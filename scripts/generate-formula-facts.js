@@ -4,8 +4,18 @@ import { createHash } from 'node:crypto';
 /** Formula results derive from the measured runner and unchanged adoption freeze. */
 export const formulaFacts = {
   name: 'formula measurements',
-  docs: () => ['benchmark/README.md', 'packages/json/docs/FORMULA-FORMAT.md'],
-  facts: () => ({ 'formula.measurements': () => {
+  docs: () => ['benchmark/README.md', 'packages/json/docs/FORMULA-FORMAT.md', 'packages/json/docs/QUERY-FORMAT.md'],
+  facts: () => ({ 'format-number.intl': () => {
+    // $format-number against Intl.NumberFormat: the committed runner's own result
+    const result = JSON.parse(readFileSync(new URL('../benchmark/format-number-result.json', import.meta.url), 'utf8'));
+    const hash = createHash('sha256').update(readFileSync(new URL('../benchmark/format-number.js', import.meta.url))).digest('hex');
+    if (result.runnerHash !== hash) throw new Error('format-number agreement runner drift: rerun node benchmark/format-number.js --write');
+    const n = (/** @type {number} */ v) => v.toLocaleString('en-US');
+    return `${n(result.disagreements)} of ${n(result.values)} values (${n(result.sampled)} sampled with seed ${result.seed}, `
+      + `${n(result.edges)} edge cases) differ from Intl.NumberFormat('${result.locale}', ${result.currency}) on ICU `
+      + `${result.runtime.icu} (CLDR ${result.runtime.cldr})`;
+  },
+  'formula.measurements': () => {
     const result = JSON.parse(readFileSync(new URL('../benchmark/formula-result.json', import.meta.url), 'utf8'));
     const manifest = JSON.parse(readFileSync(new URL('../test/adoption/manifest.json', import.meta.url), 'utf8'));
     const hash = createHash('sha256').update(readFileSync(new URL('../benchmark/formulas.js', import.meta.url))).digest('hex');

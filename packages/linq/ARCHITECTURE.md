@@ -220,7 +220,7 @@ Not a storage engine (entities, identity, migrations — the store is
 `@jarenjs/db`'s, and `src/db/` is its front door, never a second
 engine), not IQueryable with expression trees over
 arbitrary CLR-style methods (the operator set is the query engine's
-104, closed and documented), not a runtime type inferrer for JSON
+111, closed and documented), not a runtime type inferrer for JSON
 literals (`from(json)` is `unknown` until the caller asserts, and a pen
 is the only inference route — `json-schema-to-ts`-style computation over
 schema literals is deliberately absent), and not a lazy-collection

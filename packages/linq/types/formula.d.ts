@@ -5,5 +5,6 @@ export declare function defineFormula(id: string, expression: unknown, options?:
   inputSchema?: { id: string; version: string };
   resultSchema?: { id: string; version: string };
   helpers?: { name: string; version: string }[];
+  packs?: { name: string; version: string }[];
   resultMode?: 'value' | 'outcome';
 }): any;

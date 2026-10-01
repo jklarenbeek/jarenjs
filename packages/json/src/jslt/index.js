@@ -13,6 +13,9 @@ export { JsltCompileError, JsltRuntimeError } from './errors.js';
 export { createJsltRegistry } from './registry.js';
 export { mathPack, financePack, statsPack, allPacks } from './packs/index.js';
 
+/** @typedef {import('./registry.js').JsltRegistry} JsltRegistry */
+/** @typedef {import('./registry.js').JsltPack} JsltPack */
+
 /**
  * Compile a Jaren JSLT 0.1 stylesheet into a reusable transformation.
  *

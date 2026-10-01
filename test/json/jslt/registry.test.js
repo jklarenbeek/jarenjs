@@ -60,6 +60,30 @@ describe('the registry builder', () => {
     assert.throws(() => createJsltRegistry().use(/** @type {any} */ ({ entries: {} })), /must be \{ name/);
   });
 
+  it('records each pack once, with its version, and hands out the entries of the named packs only', () => {
+    const registry = jslt();
+    assert.deepStrictEqual(registry.packs(), [{ name: 'math', version: '1' }, { name: 'finance', version: '1' }, { name: 'stats', version: '1' }]);
+    const { extensions, functions } = registry.forPacks(['math']);
+    assert.ok('$sqrt' in extensions);
+    assert.ok(!('$npv' in extensions) && !('$mean' in extensions));
+    assert.deepStrictEqual(Object.keys(functions), []);
+    assert.deepStrictEqual(registry.forPacks([]), { extensions: {}, functions: {} });
+    const unversioned = createJsltRegistry().use({ name: 'mine', entries: { $twice: { kind: 'op', signature: ['number'], result: 'number', fn: (x) => 2 * x } } });
+    assert.deepStrictEqual(unversioned.packs(), [{ name: 'mine', version: null }]);
+  });
+
+  it('refuses a second pack under a registered name, and a version that is no string', () => {
+    const other = { name: 'math', version: '2', entries: { $cube: { kind: 'op', signature: ['number'], result: 'number', fn: (x) => x ** 3 } } };
+    assert.throws(() => jslt().use(other), /pack 'math' is already registered/);
+    assert.throws(() => createJsltRegistry().use(/** @type {any} */ ({ ...other, version: 2 })), /version\?: string/);
+    assert.throws(() => createJsltRegistry().use({ ...other, version: '' }), /version\?: string/);
+  });
+
+  it('$abs is core vocabulary, so no pack carries it', () => {
+    assert.ok(!jslt().names().includes('$abs'));
+    assert.strictEqual(compileJsonQuery({ $abs: -3 })(null), 3);
+  });
+
   it('allPacks registers everything', () => {
     const all = allPacks.reduce((r, p) => r.use(p), createJsltRegistry());
     assert.ok(all.names().length >= 40);

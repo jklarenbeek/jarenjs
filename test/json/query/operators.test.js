@@ -970,7 +970,7 @@ describe('section 8.13 — date arithmetic', () => {
     // the query engine has no locale, and a silent English fallback
     // would put English into every localized render
     assert.throws(() => compileJsonQuery({ '$date-format': ['$.at', 'MMMM'] }),
-      (e) => e.code === 'JQ0003' && /names provider/.test(e.message));
+      (e) => e.code === 'JQ0003' && /'MMMM'.*dateNames option/.test(e.message));
     assert.throws(() => queryJson({ '$date-format': ['$.at', '$.p'] }, { at: doc.at, p: 'EEEE' }),
       (e) => e.code === 'JQ2001');
   });

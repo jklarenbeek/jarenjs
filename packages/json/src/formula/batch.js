@@ -21,8 +21,33 @@ function diagnostic(error, targetId, maxChars) {
 }
 
 /**
+ * The schemas the batch compiles with: the host's `options.schemas` and each
+ * target's own `schemas` (a migration record's `native.schemas`), merged.
+ * Two DIFFERENT schemas under one id refuse — one of the formulas would
+ * otherwise validate its rows against the other's schema, last one wins.
+ * @param {any[]} list @param {Record<string, any> | undefined} given
+ */
+function batchSchemas(list, given) {
+  /** @type {Record<string, any>} */
+  const merged = { ...(given ?? {}) };
+  for (const [i, target] of list.entries()) {
+    if (target?.schemas === undefined) continue;
+    if (target.schemas === null || typeof target.schemas !== 'object' || Array.isArray(target.schemas))
+      throw new FormulaError('JQ0015', 'target schemas must be an object of id -> {version, schema}', target?.id ?? '', `/targets/${i}/schemas`);
+    for (const [id, entry] of Object.entries(target.schemas)) {
+      if (Object.hasOwn(merged, id) && canonicalizeJson(merged[id]) !== canonicalizeJson(entry))
+        throw new FormulaError('JQ0015', `two different schemas under one id '${id}'`, target.id ?? '', `/targets/${i}/schemas`);
+      setObjectMember(merged, id, entry);
+    }
+  }
+  return merged;
+}
+
+/**
  * Compile enabled targets once and refuse computed cycles before admitting rows.
- * A target is `{id, enabled?, formula}`; `$computed.name` reads a prior VALUE.
+ * A target is `{id, enabled?, formula, schemas?}`; `$computed.name` reads a prior VALUE.
+ * A target's own `schemas` join `options.schemas`; two different schemas under
+ * one id refuse.
  * @param {any[]} targets
  * @param {import('./index.js').FormulaOptions & {maxRows?:number,maxCells?:number,maxErrors?:number,maxMessageChars?:number,memoSize?:number}} [options]
  */
@@ -32,9 +57,9 @@ export function compileFormulaBatch(targets, options = {}) {
   const maxErrors = credit(options.maxErrors, 100, 'maxErrors');
   const maxChars = credit(options.maxMessageChars, 256, 'maxMessageChars');
   const memo = createBoundedCache(credit(options.memoSize, 10000, 'memoSize'));
-  const compiler = createFormulaCompiler(options);
   const list = snapshot(targets);
   if (!Array.isArray(list) || list.length > maxCells) throw new FormulaError('JQ0015', 'invalid target list', '', '/targets');
+  const compiler = createFormulaCompiler({ ...options, schemas: batchSchemas(list, options.schemas) });
   const nodes = new Map();
   for (const [i, target] of list.entries()) {
     if (!target || typeof target.id !== 'string' || !target.id || target.id.length > 256 || nodes.has(target.id)

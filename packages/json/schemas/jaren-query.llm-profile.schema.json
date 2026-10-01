@@ -150,6 +150,9 @@
           "$ref": "#/$defs/stringJoinPhrase"
         },
         {
+          "$ref": "#/$defs/roundingPhrase"
+        },
+        {
           "$ref": "#/$defs/geohashPhrase"
         },
         {
@@ -518,7 +521,7 @@
       }
     },
     "conditionalArityOperatorPhrase": {
-      "description": "Operators taking two or three operand expressions: $if [cond, then, else?], $substring [str, start, len?], $subsequence [seq, start, len?], $date-add / $date-sub [date, duration] or [date, amount, unit]. (LLM profile: a member-name constraint is relaxed here; the canonical schema enforces it)",
+      "description": "Operators taking two or three operand expressions: $if [cond, then, else?], $substring [str, start, len?], $subsequence [seq, start, len?], $date-add / $date-sub [date, duration] or [date, amount, unit], $format-number [value, picture, decimalFormat?], $quantity [text, unit, decimalFormat?]. (LLM profile: a member-name constraint is relaxed here; the canonical schema enforces it)",
       "type": "object",
       "minProperties": 1,
       "maxProperties": 1,
@@ -566,6 +569,20 @@
         "$string-join"
       ],
       "additionalProperties": false
+    },
+    "roundingPhrase": {
+      "description": "$round / $round-half-to-even [value] or [value, precision]: the precision an integer, default 0. (LLM profile: a member-name constraint is relaxed here; the canonical schema enforces it)",
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 1,
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/expression"
+        },
+        "minItems": 1,
+        "maxItems": 2
+      }
     },
     "ternaryOperatorPhrase": {
       "description": "Operators whose value is an array of exactly three operand expressions: $date-diff [from, to, unit]. (LLM profile: a member-name constraint is relaxed here; the canonical schema enforces it)",

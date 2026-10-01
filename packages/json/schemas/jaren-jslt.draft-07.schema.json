@@ -275,6 +275,9 @@
           "$ref": "#/definitions/stringJoinPhrase"
         },
         {
+          "$ref": "#/definitions/roundingPhrase"
+        },
+        {
           "$ref": "#/definitions/geohashPhrase"
         },
         {
@@ -585,6 +588,9 @@
           "$empty",
           "$not",
           "$neg",
+          "$floor",
+          "$ceiling",
+          "$abs",
           "$count",
           "$sum",
           "$avg",
@@ -728,7 +734,7 @@
       }
     },
     "conditionalArityOperatorPhrase": {
-      "description": "Operators taking two or three operand expressions: $if [cond, then, else?], $substring [str, start, len?], $subsequence [seq, start, len?], $date-add / $date-sub [date, duration] or [date, amount, unit].",
+      "description": "Operators taking two or three operand expressions: $if [cond, then, else?], $substring [str, start, len?], $subsequence [seq, start, len?], $date-add / $date-sub [date, duration] or [date, amount, unit], $format-number [value, picture, decimalFormat?], $quantity [text, unit, decimalFormat?].",
       "type": "object",
       "minProperties": 1,
       "maxProperties": 1,
@@ -738,7 +744,9 @@
           "$substring",
           "$subsequence",
           "$date-add",
-          "$date-sub"
+          "$date-sub",
+          "$format-number",
+          "$quantity"
         ]
       },
       "additionalProperties": {
@@ -767,6 +775,26 @@
         "$string-join"
       ],
       "additionalProperties": false
+    },
+    "roundingPhrase": {
+      "description": "$round / $round-half-to-even [value] or [value, precision]: the precision an integer, default 0.",
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 1,
+      "propertyNames": {
+        "enum": [
+          "$round",
+          "$round-half-to-even"
+        ]
+      },
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "$ref": "#/definitions/expression"
+        },
+        "minItems": 1,
+        "maxItems": 2
+      }
     },
     "replacePhrase": {
       "description": "$replace [input, pattern, replacement]: exactly three operand expressions (I-Regexp has no flags argument, D5).",

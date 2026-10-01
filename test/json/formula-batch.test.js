@@ -56,3 +56,17 @@ it('batch bounds and non-finite outputs never turn truncation into completeness'
   assert.equal(errors.evaluate([{ id: 1 }]).errors[0].message, 'x'.repeat(16));
   assert.equal(errors.evaluate([{ id: 1 }]).counts.cached, 0);
 });
+
+it('a target brings its own schemas; two different schemas under one id refuse', () => {
+  const row = (properties) => ({ version: '1', schema: { type: 'object', properties } });
+  const typed = (id, expression, schema) => ({ ...target(id, expression, { inputSchema: { id: 'row', version: '1' } }), schemas: { row: schema } });
+  const options = { compileTypeTest: createTypeTestCompiler() };
+  const same = row({ price: { type: 'number' } });
+  const batch = compileFormulaBatch([typed('a', '$.price', same), typed('b', { $mul: ['$.price', 2] }, same)], options);
+  assert.deepEqual(batch.evaluate([{ id: 1, price: 2 }]).counts.value, 2);
+  assert.equal(batch.evaluate([{ id: 1, price: 'two' }]).counts.error, 2);
+  assert.throws(() => compileFormulaBatch([typed('a', '$.price', same), typed('b', '$.weight', row({ weight: { type: 'number' } }))], options),
+    (/** @type {any} */ e) => e.code === 'JQ0015' && /two different schemas under one id 'row'/.test(e.message) && e.docPath === '/targets/1/schemas');
+  assert.throws(() => compileFormulaBatch([typed('a', '$.price', same)], { ...options, schemas: { row: row({ other: {} }) } }), { code: 'JQ0015' });
+  assert.throws(() => compileFormulaBatch([{ ...target('a', 1), schemas: [] }]), { code: 'JQ0015' });
+});

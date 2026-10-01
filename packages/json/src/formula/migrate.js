@@ -38,8 +38,11 @@ function convert(body, id) {
   space(); if (pos !== body.length) return null;
   const names = [...new Set([left, right])];
   const schema = { type: 'object', required: names, properties: Object.fromEntries(names.map((name) => [name, { type: 'number' }])) };
+  // each conversion's input schema is its own: two formulas reading different
+  // fields must never meet under one schema id in a batch
+  const schemaId = `${id}/input`;
   return { formula: formulaDocument({ $formula: '1', id, revision: '1', expression: { $mul: [`$[${JSON.stringify(left)}]`, `$[${JSON.stringify(right)}]`] },
-    inputSchema: { id: 'numeric-input', version: '1' } }), schemas: { 'numeric-input': { version: '1', schema } } };
+    inputSchema: { id: schemaId, version: '1' } }), schemas: { [schemaId]: { version: '1', schema } } };
 }
 
 function refusal(body) {

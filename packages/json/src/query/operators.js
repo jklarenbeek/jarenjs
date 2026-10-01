@@ -33,6 +33,11 @@
 import { aggregateSequence } from './accumulator.js';
 import { equalsJson, compareJsonScalarLt } from '@jarenjs/core/object';
 import { isJsonNumberString } from '@jarenjs/core/number';
+import { mathf64_abs, mathf64_ceil, mathf64_floor, mathf64_round, roundExact } from '@jarenjs/core/math';
+import { convert, dimensionOf, unitOfAlias } from '@jarenjs/core/convert';
+import {
+  DEFAULT_DECIMAL_FORMAT, FormatRefusal, compilePicture, formatNumberPicture, readDecimalFormat,
+} from './format-number.js';
 import { countCodePoints, compareCodePoints } from '@jarenjs/core/string';
 import { compileIRegexp } from '@jarenjs/core/text/iregexp';
 import {
@@ -84,7 +89,7 @@ import {
   geoJsonToWkt,
   simplifyGeometry,
 } from '@jarenjs/core/geo';
-import { queryCompileError, queryRuntimeError } from './messages.js';
+import { queryCompileError, queryRuntimeError, messageRef } from './messages.js';
 import {
   EMPTY, Seq, seqOf, appendItem, ebv, firstItem,
   itemRef,
@@ -315,6 +320,179 @@ function comparisonEntry(itemCmp) {
 
 function arithOperandError(v, docPath) {
   return runtimeError('JQ2001', 'query/arithmetic-operand', { got: itemRef(v) }, docPath);
+}
+
+// F&O fn:floor, fn:ceiling and fn:abs over the core float64 functions
+// (section 8.5): the empty sequence propagates, a non-number is JQ2001,
+// NaN and the infinities pass through
+function numericUnaryEntry(apply) {
+  return {
+    params: UNARY,
+    result: resultEmptyPropagates,
+    resultType: RT_NUMBER,
+    compile: (gets, args) => {
+      const get = gets[0];
+      const docPath = args[0].docPath;
+      return (f) => {
+        const a = get(f);
+        if (a === EMPTY)
+          return EMPTY;
+        if (typeof a !== 'number')
+          throw arithOperandError(a, docPath);
+        return apply(a);
+      };
+    },
+  };
+}
+
+// F&O fn:round (a tie toward positive infinity) and fn:round-half-to-even,
+// with the optional precision: the multiple of 10^-precision nearest the
+// EXACT value of the double (core math's roundExact) - so 1.005, stored
+// just below it, rounds to 1 at two places, as F&O says
+function roundingEntry(name, mode) {
+  return {
+    params: ARGS_1_2,
+    result: resultEmptyPropagates,
+    resultType: RT_NUMBER,
+    compile: (gets, args) => {
+      const get = gets[0];
+      const valuePath = args[0].docPath;
+      const precisionGet = gets.length === 2 ? gets[1] : null;
+      const precisionPath = precisionGet === null ? '' : args[1].docPath;
+      return (f) => {
+        const a = get(f);
+        if (a === EMPTY)
+          return EMPTY;
+        if (typeof a !== 'number')
+          throw arithOperandError(a, valuePath);
+        if (precisionGet === null)
+          return mode === 'half-up' ? mathf64_round(a) : roundExact(a, 0, mode);
+        const precision = precisionGet(f);
+        if (typeof precision !== 'number' || !Number.isInteger(precision))
+          throw runtimeError('JQ2001', 'query/round-precision', { op: name, got: itemRef(precision) }, precisionPath);
+        return roundExact(a, precision, mode);
+      };
+    },
+  };
+}
+
+// Locale data as data (sections 8.7, 8.13): a decimal format is a record
+// or the name of one registered at compile (options.decimalFormats); a
+// literal one is checked when the query compiles (JQ0003), a computed one
+// when it is read (JQ2001). Records are checked once per identity.
+const checkedFormats = new WeakMap();
+
+/** Resolve a decimal format operand: undefined is F&O's default. */
+function decimalFormatOf(value, node, op, docPath, compileTime) {
+  const refuse = (messageId, params) => (compileTime
+    ? queryCompileError('JQ0003', messageId, params, docPath)
+    : runtimeError('JQ2001', messageId, params, docPath));
+  if (value === undefined)
+    return DEFAULT_DECIMAL_FORMAT;
+  if (typeof value === 'string') {
+    const named = node.decimalFormats?.[value];
+    if (named === undefined)
+      throw refuse('query/decimal-format-unknown', { op, name: value });
+    return named;
+  }
+  if (value !== null && typeof value === 'object' && !Array.isArray(value) && !(value instanceof Seq)) {
+    const known = checkedFormats.get(value);
+    if (known !== undefined)
+      return known;
+    try {
+      const format = readDecimalFormat(value);
+      checkedFormats.set(value, format);
+      return format;
+    }
+    catch (e) {
+      if (!(e instanceof FormatRefusal))
+        throw e;
+      throw refuse('query/decimal-format-invalid', { op, rule: messageRef(e.messageId, e.params) });
+    }
+  }
+  throw refuse('query/decimal-format-type', { op, got: itemRef(value) });
+}
+
+/** A literal operand's value, or undefined when it is computed. */
+const literalOf = (arg) => (arg !== undefined && arg.kind === 'literal' ? arg.value : undefined);
+
+/** Compile a picture under a format, refusing in the operator's voice. */
+function pictureOf(picture, format, docPath, compileTime) {
+  try {
+    return compilePicture(picture, format);
+  }
+  catch (e) {
+    if (!(e instanceof FormatRefusal))
+      throw e;
+    const params = { picture, rule: messageRef(e.messageId, e.params) };
+    throw compileTime ? queryCompileError('JQ0003', 'query/format-picture', params, docPath)
+      : runtimeError('JQ2001', 'query/format-picture', params, docPath);
+  }
+}
+
+// $quantity: a number in the text, followed by a unit word of the asked
+// unit's dimension, read with the format's separators and digits (its own
+// digit family, and ASCII). The pattern is built once per format: digits
+// grouped in threes or not grouped at all, an optional fraction, the word.
+// A number right after another number and a space is not read: in
+// "1 500 g" the space may be a grouping separator, and 500 would be a
+// silent misreading of 1500.
+const quantityPatterns = new WeakMap();
+const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\-]/g, '\\$&');
+function quantityPattern(format) {
+  let pattern = quantityPatterns.get(format);
+  if (pattern === undefined) {
+    const zero = format.zeroDigit.codePointAt(0);
+    const family = zero === 0x30 ? '0-9'
+      : `0-9${escapeRegExp(format.zeroDigit)}-${escapeRegExp(String.fromCodePoint(zero + 9))}`;
+    const g = escapeRegExp(format.groupingSeparator);
+    const d = escapeRegExp(format.decimalSeparator);
+    pattern = new RegExp(`(?<![${family}${g}${d}])(?<![${family}]\\s)([${family}]{1,3}(?:${g}[${family}]{3})+|[${family}]+)`
+      + `(?:${d}([${family}]+))?\\s*(\\p{L}+)(?!\\p{L})`, 'gu');
+    quantityPatterns.set(format, pattern);
+  }
+  return pattern;
+}
+
+/** The ASCII spelling of digits from the format's family or ASCII. */
+function asciiDigits(text, format) {
+  const zero = format.zeroDigit.codePointAt(0);
+  if (zero === 0x30)
+    return text;
+  let out = '';
+  for (const c of text) {
+    const cp = c.codePointAt(0);
+    out += cp >= zero && cp <= zero + 9 ? String.fromCharCode(0x30 + cp - zero) : c;
+  }
+  return out;
+}
+
+/** A unit operand: a registry id or an alias, as the registry id. */
+function unitOf(value, op, docPath, compileTime) {
+  const id = typeof value === 'string' ? (dimensionOf(value) != null ? value : unitOfAlias(value)) : undefined;
+  if (id === undefined || dimensionOf(id) == null) {
+    const params = { op, unit: typeof value === 'string' ? value : String(value) };
+    throw compileTime ? queryCompileError('JQ0003', 'query/quantity-unit', params, docPath)
+      : runtimeError('JQ2001', 'query/quantity-unit', params, docPath);
+  }
+  return id;
+}
+
+/** The first quantity of `unit`'s dimension in `text`, in `unit`, or EMPTY. */
+function readQuantity(text, unit, format) {
+  const dimension = dimensionOf(unit);
+  const pattern = quantityPattern(format);
+  pattern.lastIndex = 0;
+  for (const m of text.matchAll(pattern)) {
+    const from = unitOfAlias(m[3]);
+    if (from === undefined || dimensionOf(from) !== dimension)
+      continue;
+    const whole = asciiDigits(m[1].split(format.groupingSeparator).join(''), format);
+    const fraction = m[2] === undefined ? '' : asciiDigits(m[2], format);
+    const value = Number(fraction === '' ? whole : `${whole}.${fraction}`);
+    return convert(value, from, unit);
+  }
+  return EMPTY;
 }
 
 // IEEE double arithmetic (section 8.5, D1): empty operands propagate,
@@ -1111,6 +1289,13 @@ export const OPERATORS = Object.freeze({
     },
   },
 
+  // rounding, F&O semantics (section 8.5)
+  '$floor': numericUnaryEntry(mathf64_floor),
+  '$ceiling': numericUnaryEntry(mathf64_ceil),
+  '$abs': numericUnaryEntry(mathf64_abs),
+  '$round': roundingEntry('$round', 'half-up'),
+  '$round-half-to-even': roundingEntry('$round-half-to-even', 'half-even'),
+
   //#endregion
 
   //#region section 8.6 - logic
@@ -1223,6 +1408,89 @@ export const OPERATORS = Object.freeze({
   '$lower': stringUnaryEntry((s) => s.toLowerCase()),
   '$string-length': stringUnaryEntry(countCodePoints, RT_INTEGER),
   '$normalize-space': stringUnaryEntry(normalizeSpace),
+
+  // F&O fn:format-number with the decimal format as data (section 8.7); a
+  // literal picture and format compile with the query
+  '$format-number': {
+    params: ARGS_2_3,
+    result: RESULT_ONE,
+    resultType: RT_STRING,
+    compile: (gets, args, docPath, node) => {
+      const valueGet = gets[0];
+      const valuePath = args[0].docPath;
+      const literalPicture = literalOf(args[1]);
+      const formatArg = args[2];
+      const literalFormat = formatArg === undefined ? undefined : literalOf(formatArg);
+      // a literal format, a record or a registered name, is checked with the query
+      const staticFormat = formatArg === undefined || literalFormat !== undefined;
+      const value = (f) => {
+        const v = valueGet(f);
+        // F&O: the empty sequence formats as NaN
+        if (v === EMPTY)
+          return NaN;
+        if (typeof v !== 'number')
+          throw runtimeError('JQ2001', 'query/expected-number', { got: itemRef(v) }, valuePath);
+        return v;
+      };
+      if (typeof literalPicture === 'string' && staticFormat) {
+        const format = decimalFormatOf(literalFormat, node, '$format-number', formatArg?.docPath ?? docPath, true);
+        const picture = pictureOf(literalPicture, format, args[1].docPath, true);
+        return (f) => formatNumberPicture(value(f), picture);
+      }
+      // computed: a monomorphic per-callsite cache, as the regex operators keep
+      const pictureGet = gets[1];
+      const pictureNode = args[1];
+      const formatGet = formatArg === undefined ? null : gets[2];
+      let lastPicture = null;
+      let lastFormat = null;
+      let lastCompiled = null;
+      return (f) => {
+        const v = value(f);
+        const pictureText = pictureGet(f);
+        if (typeof pictureText !== 'string')
+          throw runtimeError('JQ2001', 'query/expected-string', { got: itemRef(pictureText) }, pictureNode.docPath);
+        const format = formatGet === null ? DEFAULT_DECIMAL_FORMAT
+          : decimalFormatOf(formatGet(f), node, '$format-number', formatArg.docPath, false);
+        if (pictureText !== lastPicture || format !== lastFormat) {
+          lastCompiled = pictureOf(pictureText, format, pictureNode.docPath, false);
+          lastPicture = pictureText;
+          lastFormat = format;
+        }
+        return formatNumberPicture(v, lastCompiled);
+      };
+    },
+  },
+
+  // a measured quantity in free text, in the asked unit (section 8.7); no
+  // quantity of that dimension is the empty sequence
+  '$quantity': {
+    params: ARGS_2_3,
+    result: () => CARD_OPT,
+    resultType: RT_NUMBER,
+    compile: (gets, args, docPath, node) => {
+      const textGet = gets[0];
+      const textPath = args[0].docPath;
+      const literalUnit = literalOf(args[1]);
+      const formatArg = args[2];
+      const literalFormat = formatArg === undefined ? undefined : literalOf(formatArg);
+      // a literal unit and a literal format are checked with the query
+      const unit = literalUnit !== undefined ? unitOf(literalUnit, '$quantity', args[1].docPath, true) : null;
+      const format = formatArg === undefined || literalFormat !== undefined
+        ? decimalFormatOf(literalFormat, node, '$quantity', formatArg?.docPath ?? docPath, true) : null;
+      const unitGet = gets[1];
+      const formatGet = formatArg === undefined ? null : gets[2];
+      return (f) => {
+        const text = textGet(f);
+        if (text === EMPTY)
+          return EMPTY;
+        if (typeof text !== 'string')
+          throw runtimeError('JQ2001', 'query/expected-string', { got: itemRef(text) }, textPath);
+        const asked = unit ?? unitOf(unitGet(f), '$quantity', args[1].docPath, false);
+        const read = format ?? decimalFormatOf(formatGet(f), node, '$quantity', formatArg.docPath, false);
+        return readQuantity(text, asked, read);
+      };
+    },
+  },
 
   '$match': regexTestEntry(true),
   '$search': regexTestEntry(false),
@@ -1888,19 +2156,22 @@ export const OPERATORS = Object.freeze({
   '$date-format': { // an LDML pattern, compiled once when it is literal
     params: ARGS_2,
     result: resultEmptyPropagates,
-    compile: (gets, args, docPath) => {
+    compile: (gets, args, docPath, node) => {
       const dateGet = gets[0];
       const datePath = args[0].docPath;
       const patternNode = args[1];
       // the common case is a literal pattern: compile it at query
       // compile time, so a bad one is a compile error, not a surprise
+      const names = node.dateNames;
       if (patternNode.kind === 'literal' && typeof patternNode.value === 'string') {
         let format;
         try {
-          format = compileDateFormat(patternNode.value);
+          format = compileDateFormat(patternNode.value, names);
         }
         catch (e) {
           // a literal pattern is authored, not data: reject the document
+          if (e instanceof TypeError && typeof e.token === 'string')
+            throw queryCompileError('JQ0003', 'query/date-names', { token: e.token }, docPath, { cause: e });
           throw queryCompileError('JQ0003', 'query/date-pattern',
             { detail: e instanceof Error ? e.message : 'invalid' }, docPath, { cause: e });
         }
@@ -1925,10 +2196,13 @@ export const OPERATORS = Object.freeze({
         if (pattern !== lastPattern) {
           lastPattern = pattern;
           try {
-            lastFormat = compileDateFormat(pattern);
+            lastFormat = compileDateFormat(pattern, names);
           }
           catch (e) {
             lastFormat = null;
+            lastPattern = null;
+            if (e instanceof TypeError && typeof e.token === 'string')
+              throw runtimeError('JQ2001', 'query/date-names', { token: e.token }, patternPath);
             throw runtimeError('JQ2001', 'query/date-pattern',
               { detail: e instanceof Error ? e.message : 'invalid' }, patternPath);
           }

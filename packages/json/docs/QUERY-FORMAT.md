@@ -886,7 +886,7 @@ item comparison; otherwise `false`. Consequences:
 ] }
 ```
 
-### 8.5 Arithmetic — `$add $sub $mul $div $idiv $mod`, `$neg`
+### 8.5 Arithmetic — `$add $sub $mul $div $idiv $mod`, `$neg`, rounding
 
 Signatures: `{"$add": [a, b]}` etc., arity exactly 2; `{"$neg": a}` unary
 (the value is the operand expression itself, not a one-element array).
@@ -916,6 +916,26 @@ All arithmetic is IEEE double arithmetic (**D1**):
             { "$div": [1, 0] }, { "$idiv": [7, 2] }, { "$mod": [7, 2] },
             { "$neg": "$.store.bicycle.price" } ] }
 ```
+
+**Rounding — `$floor $ceiling $abs $round $round-half-to-even`**, F&O
+semantics over IEEE doubles. The operand rules above apply: the empty
+sequence propagates, a non-number is `JQ2001`, and `NaN` and the infinities
+pass through.
+
+| Operator | Signature | Definition |
+|---|---|---|
+| `$floor` | `{"$floor": e}` | The largest integral value not above *e* (`fn:floor`): `-1.5` → `-2`. |
+| `$ceiling` | `{"$ceiling": e}` | The smallest integral value not below *e* (`fn:ceiling`): `2.01` → `3`, `-0.5` → `-0`. |
+| `$abs` | `{"$abs": e}` | The absolute value (`fn:abs`). |
+| `$round` | `[e, precision?]` (1–2) | The multiple of 10<sup>−precision</sup> nearest *e*; a tie rounds toward positive infinity (`fn:round`): `[2.5]` → `3`, `[-2.5]` → `-2`, `[1234.5, -2]` → `1200`. |
+| `$round-half-to-even` | `[e, precision?]` (1–2) | The same, a tie rounding to the even neighbour (`fn:round-half-to-even`): `[2.5]` → `2`, `[3.5]` → `4`. |
+
+*precision* is a single integer, default 0; anything else is `JQ2001`. As
+F&O specifies for doubles, rounding with a precision decides on the
+**exact** value of the double, not on its shortest decimal spelling:
+`1.005` is stored as `1.00499999…`, so `{"$round": [1.005, 2]}` is `1`. A
+negative argument that rounds to zero is `-0`. Truncation toward zero is
+`{"$idiv": [e, 1]}`; `$floor` and `$ceiling` round toward an infinity.
 
 ### 8.6 Logic — `$and $or $not`
 
@@ -961,6 +981,8 @@ single items.
 | `$match` | `[input, pattern]` | `true` iff *pattern* matches **all** of *input* (anchored, the RFC 9535 `match()` behavior). |
 | `$search` | `[input, pattern]` | `true` iff *pattern* matches a substring of *input* (RFC 9535 `search()`, XQuery `fn:matches`). |
 | `$replace` | `[input, pattern, replacement]` (exactly 3) | Replaces every non-overlapping match of *pattern* in *input* with *replacement* (`fn:replace`). *replacement* is inserted **literally** — there are no capture-group references (I-Regexp guarantees no capture semantics). |
+| `$format-number` | `[value, picture, format?]` (2–3) | *value* spelled through an F&O picture under a decimal format (below; `fn:format-number`). |
+| `$quantity` | `[text, unit, format?]` (2–3) | The first measured quantity in *text* of *unit*'s dimension, as a number in *unit*; none is the empty sequence (below). |
 
 Regular expression operators use **I-Regexp (RFC 9485)** syntax — the same
 interoperable regex dialect RFC 9535 uses — not XSD regular expressions
@@ -985,6 +1007,94 @@ in all three operators per the string-parameter rule above.
             { "$match": ["abc", "a.c"] }, { "$search": ["abc", "b"] },
             { "$replace": ["abc", "b", "x"] } ] }
 ```
+
+**Trimming.** F&O 3.1 has no `trim`, and `$normalize-space` also collapses
+the whitespace inside a string. An I-Regexp has no anchors, so a trim is
+two `$replace` calls around a sentinel character the text does not hold
+(here U+FFFF), one end at a time — trailing whitespace before the
+sentinel, then the sentinel and the leading whitespace after it:
+
+```json
+{ "$replace": [
+    { "$concat": ["\uffff", { "$replace": [{ "$concat": ["$s", "\uffff"] }, "[ \\t\\n\\r]*\uffff", ""] }] },
+    "\uffff[ \\t\\n\\r]*", ""] }
+```
+
+`"  a  b \t"` becomes `"a  b"`. A test holds this composition to that
+result, and the unknown operator `$trim` names it.
+
+**Numbers as text — `$format-number`, `$quantity`.** A number is written
+and read through a **decimal format**: the characters F&O's `fn:format-number`
+calls the decimal format, as data. The query stays locale-free: a format is
+the operand itself (an object), or the name of one the host registered at
+compile time (`options.decimalFormats`, name → record); without one, F&O's
+default applies. `@jarenjs/locales` ships each pack's record:
+`compileNumberLocale(nl).decimalFormat`.
+
+| Member | F&O default | Dutch (`nl`) |
+|---|---|---|
+| `decimalSeparator` | `.` | `,` |
+| `groupingSeparator` | `,` | `.` |
+| `minusSign` | `-` | `-` |
+| `percent` / `perMille` | `%` / `‰` | `%` / `‰` |
+| `zeroDigit` / `digit` | `0` / `#` | `0` / `#` |
+| `patternSeparator` | `;` | `;` |
+| `exponentSeparator` | `e` | `E` |
+| `infinity` / `NaN` | `Infinity` / `NaN` | `∞` / `NaN` |
+
+Every member but `infinity` and `NaN` is one character; the picture
+characters (separators, percent, per-mille, digit, pattern and exponent
+separators) all differ, and `zeroDigit` is the zero of a Unicode digit
+family. A record that breaks a rule is `JQ0003` when literal, `JQ2001` when
+computed — as is a name nothing registered.
+
+`$format-number` follows F&O §4.7. The picture is written in the format's
+own characters: under the Dutch format, `"€ #.##0,00;€ -#.##0,00"` spells
+1234.5 as `€ 1.234,50`. Its parts:
+- a passive prefix and suffix;
+- mandatory digits (`0`) and optional ones (`#`);
+- grouping separators, which repeat when they are regular;
+- one decimal separator;
+- a percent or per-mille sign, which multiplies by 100 or 1000;
+- an exponent;
+- after the pattern separator, a negative sub-picture. Without one, the
+  minus sign precedes the positive prefix.
+
+A negative value takes the negative sub-picture, negative zero included. An
+infinity is the prefix, the infinity symbol and the suffix; `NaN` (and the
+empty sequence) is the `NaN` symbol alone. A picture that breaks F&O's rules
+is `JQ0003` when the picture and its format are both literal (the format a
+record or a registered name), and `JQ2001` otherwise, since a picture is read
+in its format's characters; the message names the rule.
+
+**One deviation, for parity with ICU:** the value is rounded on its shortest
+round-trip decimal (the digits a JSON serializer prints), half away from
+zero, where F&O rounds the binary value half to even. So `1.005` at two
+places is `1,01`, as `Intl.NumberFormat` writes it. The committed
+measurement (`benchmark/format-number.js`) formats a seeded sample with the
+Dutch currency picture and compares it with `Intl.NumberFormat` string for
+string: <!--fact:format-number.intl-->0 of 60,022 values (60,000 sampled with seed 20261001, 22 edge cases) differ from Intl.NumberFormat('nl-NL', EUR) on ICU 78.3 (CLDR 48.0)<!--/fact-->. The one designed
+difference is `NaN`: F&O writes the symbol alone, ICU with the prefix
+(`€ NaN`).
+
+`$quantity` reads a measured quantity out of free text: `"100 gram"`,
+`"1,5 kg"`, `"250ml"`. It finds the first number followed by a unit word of
+*unit*'s dimension and converts it to *unit*. Units and their conversion are
+`@jarenjs/core/convert`'s registry, and the words are its alias table
+(`UNIT_ALIASES`: `g`, `gr`, `gram`, `kg`, `kilo`, `ml`, `l`, `liter`, …,
+case-insensitive; a word that names different units in different places,
+like `ton`, is not in it). *unit* is a registry id or an alias; an unknown
+one is `JQ0003` when literal and `JQ2001` when computed.
+- The number is written in the format's characters: digits grouped in threes
+  or not at all, then an optional fraction after the decimal separator
+  (default `.`). Under the Dutch format, `"1,5 kg"` in grams is `1500` and
+  `"1.500 gram"` in kilograms is `1.5`; under the default, `"1,5 kg"` holds no
+  quantity at all. A number right after another number and a space
+  (`"1 500 g"`) is not read either: the space may group thousands, and
+  neither 500 nor 1500 is guessed.
+- When no quantity of the dimension is there (`"14 cm"` asked in grams), the
+  result is the **empty sequence**, not `null`, so `$default` composes like
+  JavaScript's `??` over `undefined`.
 
 ### 8.8 Aggregates — `$count $sum $avg $min $max`
 
@@ -1307,11 +1417,13 @@ and applies.
 
 `$date-format` renders a value through a **Unicode LDML** pattern
 (`yyyy-MM-dd`, not moment's `YYYY-MM-DD`); a literal pattern compiles once
-with the query. Patterns are limited to the locale-independent tokens: month
-and weekday *names* would need locale data this format does not carry, so
-`MMMM`, `MMM`, `EEEE`, `EEE` and `a` are rejected — `JQ0003` for a literal
-pattern, `JQ2001` for one computed at runtime. Localized rendering belongs to
-the presentation layer, not to a query.
+with the query. Month and weekday *names* (`MMMM`, `MMM`, `EEEE`, `EEE`) and
+the day period (`a`) are locale data, which the host hands the compilation
+as data: the `dateNames` option, the same `DateNames` record the chart time
+axis and the Gantt take — `compileDateLocale(nl).names` from
+`@jarenjs/locales` renders `"d MMMM yyyy"` as `27 september 2026`. Without
+the option such a token is `JQ0003` for a literal pattern and `JQ2001` for
+one computed at runtime, the message naming the option.
 
 | Operator | Definition |
 |---|---|

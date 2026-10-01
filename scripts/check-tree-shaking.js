@@ -191,8 +191,13 @@ if (chainEdgeLeak.length > 0)
   throw new Error(`The chain pulled an optional peer into the bundle: ${chainEdgeLeak.map(([file]) => file).join(', ')}`);
 // Measured 189359 bytes once the query engine's English message catalog
 // rode with it (queryMessagesEn, 12350 bytes of the bundle): every refusal
-// names its message, and a locale pack can translate it.
-if (chainBytes > 190000)
+// names its message, and a locale pack can translate it. Measured 209715
+// once the engine wrote and read numbers (QUERY-FORMAT 8.5, 8.7): the F&O
+// picture formatter (5193 bytes), the unit registry $quantity converts
+// through with its alias table (5603), the seven operators' entries,
+// checks and f64 helpers (5678), their 25 English messages (2293) and
+// exact decimal rounding (1518).
+if (chainBytes > 210500)
   throw new Error(`The chain bundle grew to ${chainBytes} bytes.`);
 
 console.log(`Tree-shaking smoke test passed (${chainBytes} byte chain bundle; no schema-pen module, no client module, no store/validator/formats bytes).`);
@@ -437,7 +442,10 @@ if (asyncLiveLeak.length)
 // and migration host steps with atomic runs and the per-link foreign-key
 // baseline add 21656. Measured 789872 bytes since: the query engine's
 // English message catalog, which the store's evaluator carries, adds 10916.
-if (clientBytes > 790000)
+// Measured 810232 bytes since (789909 at the last release): the engine's
+// numbers as text, quantities and exact rounding, which the evaluator
+// carries too, add 20323 (the parts the chain bundle's ceiling itemizes).
+if (clientBytes > 811000)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 

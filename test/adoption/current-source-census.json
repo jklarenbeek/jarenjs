@@ -59,8 +59,8 @@
       "api": "@jarenjs/json/query",
       "role": "existing regex; lexical index pending",
       "matches": [
-        "438:// $match (anchored) / $search (free): I-Regexp (RFC 9485, D5). Literal",
-        "1228:  '$search': regexTestEntry(false),"
+        "616:// $match (anchored) / $search (free): I-Regexp (RFC 9485, D5). Literal",
+        "1496:  '$search': regexTestEntry(false),"
       ],
       "disposition": "retained"
     },
@@ -72,15 +72,15 @@
       "role": "existing compiler and limits; saved-profile conversion pending",
       "matches": [
         "60: * Compile options for {@link compileJsonQuery}.",
-        "100: * @property {boolean} [analysis] - On `compileJsonQuery`: additionally",
-        "108: * what `analyzeQuery` returns and `compileJsonQuery`'s `analysis`",
-        "142: * The compiled query returned by {@link compileJsonQuery}: the query",
-        "199: * const q = compileJsonQuery({",
-        "206:export function compileJsonQuery(doc, options = {}) {",
-        "316: * shared by `analyzeQuery` and `compileJsonQuery`'s `analysis` option",
-        "354: *   `compileJsonQuery`",
-        "367:const compileUncached = (/** @type {any} */ doc) => compileJsonQuery(doc);",
-        "390:    query = compileJsonQuery(doc);"
+        "118: * @property {boolean} [analysis] - On `compileJsonQuery`: additionally",
+        "126: * what `analyzeQuery` returns and `compileJsonQuery`'s `analysis`",
+        "160: * The compiled query returned by {@link compileJsonQuery}: the query",
+        "217: * const q = compileJsonQuery({",
+        "224:export function compileJsonQuery(doc, options = {}) {",
+        "334: * shared by `analyzeQuery` and `compileJsonQuery`'s `analysis` option",
+        "372: *   `compileJsonQuery`",
+        "385:const compileUncached = (/** @type {any} */ doc) => compileJsonQuery(doc);",
+        "408:    query = compileJsonQuery(doc);"
       ],
       "disposition": "retained"
     },
