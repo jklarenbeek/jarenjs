@@ -20,14 +20,17 @@ function translate(source, options) {
   const doc = { $formula: '1', id: source.id, revision: '1', expression: t.expression };
   if (t.resultMode === 'outcome') doc.resultMode = 'outcome';
   if (t.helpers?.length) doc.helpers = t.helpers;
-  const formula = formulaDocument(doc);
+  /** @param {unknown} error @param {string} what */
+  const refused = (error, what) => ({ state: 'untranslatable', differences: t.differences, native: null,
+    reasons: [{ kind: 'compile', at: { offset: 0, line: 1, column: 1 }, message: `${what}: ${/** @type {any} */ (error)?.message ?? String(error)}` }] });
+  // a translation that is no formula document (a host's native helper written with a value JSON cannot hold)
+  // is this source's reason, never the end of the migration
+  let formula;
+  try { formula = formulaDocument(doc); }
+  catch (error) { return refused(error, 'the translation is not a formula document (a native helper the host maps holds a value JSON cannot)'); }
   if (options.formula !== undefined) {
     try { compileFormula(formula, options.formula); }
-    catch (error) {
-      const message = /** @type {any} */ (error)?.message ?? String(error);
-      return { state: 'untranslatable', differences: t.differences, native: null,
-        reasons: [{ kind: 'compile', at: { offset: 0, line: 1, column: 1 }, message: `the translation does not compile under the host's formula options (a helper, a decimal format or a pack it names): ${message}` }] };
-    }
+    catch (error) { return refused(error, "the translation does not compile under the host's formula options (a helper, a decimal format or a pack it names)"); }
   }
   return { state: t.state, reasons: [], differences: t.differences, native: { formula, schemas: {} } };
 }

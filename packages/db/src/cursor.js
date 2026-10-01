@@ -345,11 +345,12 @@ export function admitCursor(cursor, admit, signal, what, ownership) {
  * failed, released by `return()`, aborted, or, for a buffered cursor, as
  * soon as its first pull materialised every item. Later pulls reach the
  * cursor alone: it answers from its buffer, `{ done: true }`, or its own
- * `JD2072`, and issues no statement. A pull refused before the read began
- * (the wait for a reader timed out, the signal aborted while queued, the
- * store closing) refuses that pull only — nothing was opened, and the next
- * pull asks again. `owners` holds every cursor holding a read right now,
- * so the store's close gives each one back.
+ * `JD2072`, and issues no statement. A pull refused before it reached the
+ * source — the owner lease refusing, the wait for a reader timing out, the
+ * signal aborting while queued, the store closing — refuses that pull only:
+ * the cursor and any read it holds stay as they were, and the next pull
+ * asks again, as a refused pull through the gate does. `owners` holds every
+ * cursor holding a read right now, so the store's close gives each one back.
  * @param {any} cursor - the engine's `QueryCursor`
  * @param {(fn: (enter: (next: () => any) => any) => any, what?: string, signal?: AbortSignal,
  *   held?: boolean) => any} share - the store's parallel admission: runs `fn` inside a new
@@ -358,11 +359,14 @@ export function admitCursor(cursor, admit, signal, what, ownership) {
  * @param {AbortSignal | undefined} signal - the cursor's own signal
  * @param {string} what - what is waiting, for the reader wait's message
  * @param {Set<any>} owners - the cursors holding a read right now
+ * @param {() => any} [guard] - asked before each pull, outside the read
+ *   (the store's owner lease, which may renew itself: an exclusive write);
+ *   value-or-promise
  * @param {() => void} [check] - asked inside the read before each pull
- *   (the store's owner lease)
+ *   (the same lease, checked again once the pull is admitted)
  * @returns {any} the admitted `QueryCursor`
  */
-export function shareCursor(cursor, share, signal, what, owners, check = () => {}) {
+export function shareCursor(cursor, share, signal, what, owners, guard = () => {}, check = () => {}) {
   /** @type {{ enter: (next: () => any) => any, giveBack: () => void, ended: Promise<void> } | null} */
   let read = null;
   // once the source is done with a read, later pulls reach the cursor alone
@@ -412,17 +416,25 @@ export function shareCursor(cursor, share, signal, what, owners, check = () => {
       await giveBack();
       return cursor.next();
     }
+    await guard();
     if (read === null) {
       read = /** @type {any} */ (await take());
       owners.add(admitted);
     }
     const { enter } = /** @type {any} */ (read);
+    let reached = false;
     let step;
     try {
-      step = await enter(() => { check(); return cursor.next(); });
+      step = await enter(() => {
+        check();
+        reached = true;
+        return cursor.next();
+      });
     }
     catch (error) {
-      await giveBack();
+      // a failure of the source settled the cursor: its read goes back; a
+      // refusal before the source leaves both for the next pull
+      if (reached) await giveBack();
       throw error;
     }
     if (step.done === true || cursor.streaming !== 'row') await giveBack();

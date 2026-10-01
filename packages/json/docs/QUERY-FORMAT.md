@@ -1053,12 +1053,21 @@ own characters: under the Dutch format, `"€ #.##0,00;€ -#.##0,00"` spells
 1234.5 as `€ 1.234,50`. Its parts:
 - a passive prefix and suffix;
 - mandatory digits (`0`) and optional ones (`#`);
-- grouping separators, which repeat when they are regular;
+- grouping separators, which repeat when they are regular: every multiple of
+  the smallest position inside the integer part holds one (`#,##0` repeats,
+  `####,##` writes 642120 as `6421,20`);
 - one decimal separator;
 - a percent or per-mille sign, which multiplies by 100 or 1000;
-- an exponent;
+- an exponent: the mantissa has as many integer digits as the picture has
+  mandatory ones, none allowed (`0.234` under `#.00E0` is `0.23E0`, `1`
+  under `00.0e0` is `10.0e-1`), and prints as it rounds;
 - after the pattern separator, a negative sub-picture. Without one, the
   minus sign precedes the positive prefix.
+
+F&O's adjustments of the minimum sizes apply as written: a picture with no
+mandatory digit and no fraction writes one integer digit (`#` writes 0.23 as
+`0`), and one with no mandatory digit on either side keeps one fraction
+digit — zero under `#.#` is `.0`, one is `1.0`.
 
 A negative value takes the negative sub-picture, negative zero included. An
 infinity is the prefix, the infinity symbol and the suffix; `NaN` (and the
@@ -1067,10 +1076,11 @@ is `JQ0003` when the picture and its format are both literal (the format a
 record or a registered name), and `JQ2001` otherwise, since a picture is read
 in its format's characters; the message names the rule.
 
-**One deviation, for parity with ICU:** the value is rounded on its shortest
-round-trip decimal (the digits a JSON serializer prints), half away from
-zero, where F&O rounds the binary value half to even. So `1.005` at two
-places is `1,01`, as `Intl.NumberFormat` writes it. The committed
+**One deviation, for parity with ICU:** the value is scaled and rounded on its
+shortest round-trip decimal (the digits a JSON serializer prints), half away
+from zero, where F&O rounds the binary value half to even. So `1.005` at two
+places is `1,01`, as `Intl.NumberFormat` writes it, and a percent of `1e308`
+prints its digits where F&O's double overflows to `Infinity%`. The committed
 measurement (`benchmark/format-number.js`) formats a seeded sample with the
 Dutch currency picture and compares it with `Intl.NumberFormat` string for
 string: <!--fact:format-number.intl-->0 of 60,022 values (60,000 sampled with seed 20261001, 22 edge cases) differ from Intl.NumberFormat('nl-NL', EUR) on ICU 78.3 (CLDR 48.0)<!--/fact-->. The one designed
@@ -1081,17 +1091,25 @@ difference is `NaN`: F&O writes the symbol alone, ICU with the prefix
 `"1,5 kg"`, `"250ml"`. It finds the first number followed by a unit word of
 *unit*'s dimension and converts it to *unit*. Units and their conversion are
 `@jarenjs/core/convert`'s registry, and the words are its alias table
-(`UNIT_ALIASES`: `g`, `gr`, `gram`, `kg`, `kilo`, `ml`, `l`, `liter`, …,
-case-insensitive; a word that names different units in different places,
-like `ton`, is not in it). *unit* is a registry id or an alias; an unknown
-one is `JQ0003` when literal and `JQ2001` when computed.
+(`UNIT_ALIASES`: `g`, `gr`, `gram`, `kg`, `kilo`, `ml`, `l`, `liter`, `m2`,
+`m²`, …, case-insensitive but for the one-letter symbols, read as written:
+`G` and `M` are giga and mega, never a gram or a metre). A word that names a
+different thing in other places — `ton`, `pound`, `in` — is not in it. *unit*
+is a registry id or an alias; an unknown one is `JQ0003` when literal and
+`JQ2001` when computed.
 - The number is written in the format's characters: digits grouped in threes
   or not at all, then an optional fraction after the decimal separator
   (default `.`). Under the Dutch format, `"1,5 kg"` in grams is `1500` and
   `"1.500 gram"` in kilograms is `1.5`; under the default, `"1,5 kg"` holds no
-  quantity at all. A number right after another number and a space
-  (`"1 500 g"`) is not read either: the space may group thousands, and
-  neither 500 nor 1500 is guessed.
+  quantity at all. A minus sign written right before the number reads it
+  negative (`"-2 kg"`).
+- A number that is the tail of something else is not read: after another
+  number and a space (`"1 500 g"`: the space may group thousands, and neither
+  500 nor 1500 is guessed), after a slash (`"1/2 kg"`), at the end of a range
+  (`"2-3 kg"`), in an exponent (`"1e3 g"`), or glued to a word (`"B12"`).
+- The unit is a word read whole: a word followed by a digit or a slash names
+  something else, so `"300 m2"` is an area and `"30 km/h"` a speed, never a
+  length.
 - When no quantity of the dimension is there (`"14 cm"` asked in grams), the
   result is the **empty sequence**, not `null`, so `$default` composes like
   JavaScript's `??` over `undefined`.

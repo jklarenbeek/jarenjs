@@ -23,19 +23,22 @@ export async function createWorkerConnection(worker, settings) {
   /** A worker that exits or errors before its ready frame never served:
    * most often its endpoint module was not found (a bundle that left it
    * behind). That fails the OPEN, by name — a reopen would meet the same
-   * missing module, so it is not a lost generation to retry. */
+   * missing module, so it is not a lost generation to retry. The host
+   * says what fixes it (`startupAdvice`). */
   const unstarted = (cause) => {
     if (failed !== null || closed) return;
     failed = Object.assign(new DbCompileError('JD0003',
       `the SQLite worker endpoint ${settings.endpoint ?? '(unnamed)'} stopped before it was ready `
-      + `(${cause?.message ?? String(cause)}); a bundled or compiled application ships the endpoint `
-      + "beside it and names it with the driver's endpoint option", undefined, cause),
-    { retryable: false, endpoint: settings.endpoint });
+      + `(${cause?.message ?? String(cause)}); ${settings.startupAdvice
+        ?? "a bundled or compiled application ships the endpoint beside it and names it with the driver's endpoint option"}`,
+      undefined, cause), { retryable: false, endpoint: settings.endpoint });
     readyReject(failed);
   };
-  const lose = (cause) => {
+  /** @param {any} cause @param {any} [failure] - what the generation's work
+   * is refused with; a lost generation by default */
+  const lose = (cause, failure = undefined) => {
     if (failed !== null || closed) return;
-    failed = generationFailure(epoch, transactionDepth > 0, cause);
+    failed = failure ?? generationFailure(epoch, transactionDepth > 0, cause);
     hooks.lost?.(failed, [...pending.values()]);
     readyReject(failed);
     for (const request of pending.values()) request.reject(failed);
@@ -69,7 +72,16 @@ export async function createWorkerConnection(worker, settings) {
     }
     else { request.reject(generationFailure(epoch, transactionDepth > 0)); lose(new Error('invalid worker response')); }
   });
-  const timer = setTimeout(() => { lose(new Error('worker startup timed out')); worker.terminate(); }, startupMs);
+  // a start that outlives its deadline may only have been slow: retryable,
+  // and named — nothing was opened, so there is no connection to reopen
+  const timer = setTimeout(() => {
+    const cause = new Error('worker startup timed out');
+    lose(cause, Object.assign(new DbRuntimeError('JD2090', `the SQLite worker endpoint ${settings.endpoint
+      ?? '(unnamed)'} did not become ready within ${startupMs} ms; nothing was opened, and opening again `
+      + 'may succeed if the start was only slow', { cause }),
+    { class: 'generation', retryable: true, generation: epoch, endpoint: settings.endpoint }));
+    worker.terminate();
+  }, startupMs);
   let capabilities;
   try { capabilities = await ready; }
   catch (error) {

@@ -3,7 +3,7 @@
 import { lazyOpen } from '../driver.js';
 import { sqliteDialect } from '../dialects/sqlite.js';
 import { createWorkerConnection } from './worker-client.js';
-import { workerSettings } from './worker-protocol.js';
+import { WORKER_ENDPOINT_MARK, workerSettings } from './worker-protocol.js';
 
 /**
  * The worker endpoint a driver starts: by default the module beside this
@@ -15,9 +15,15 @@ import { workerSettings } from './worker-protocol.js';
  */
 export function workerEndpoint(endpoint) {
   if (endpoint === undefined) return new URL('./node-worker-endpoint.js', import.meta.url);
-  if (endpoint instanceof URL) return endpoint;
-  if (typeof endpoint === 'string' && URL.canParse(endpoint)) return new URL(endpoint);
-  throw new TypeError("endpoint must be a URL, such as new URL('./worker-endpoint.js', import.meta.url)");
+  // a worker loads only file: and data: modules, and the text of a Windows
+  // path parses as a URL of scheme `c:`: both refused here, by name
+  const url = endpoint instanceof URL ? endpoint
+    : typeof endpoint === 'string' && URL.canParse(endpoint) ? new URL(endpoint) : undefined;
+  if (url === undefined || (url.protocol !== 'file:' && url.protocol !== 'data:')) {
+    throw new TypeError("endpoint must be a file: (or data:) URL, such as new URL('./worker-endpoint.js', "
+      + 'import.meta.url) or pathToFileURL(path)');
+  }
+  return url;
 }
 
 /** Dedicated SQLite worker per connection. No function serialization or write replay.
@@ -37,7 +43,8 @@ export function nodeWorkerDriver(configuration = {}) {
       'Node worker threads are unavailable on this runtime', async ({ Worker }) => {
         const epoch = ++generation;
         const worker = new Worker(endpoint, {
-          workerData: { path, options: { timeout: options.timeout, readOnly: options.readOnly }, generation: epoch, limits },
+          workerData: { endpoint: WORKER_ENDPOINT_MARK, path,
+            options: { timeout: options.timeout, readOnly: options.readOnly }, generation: epoch, limits },
           // Parent --test/--input-type/preloads do not describe the endpoint.
           execArgv: ['--no-warnings=ExperimentalWarning'],
         });

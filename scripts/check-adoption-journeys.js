@@ -33,7 +33,7 @@ try {
     const nodeBinary = join(isolated, 'adoption-node');
     compileStandalone(bundled, nodeBinary, 'node');
     // the worker and pool hosts compiled with the documented endpoint recipe
-    const compiledHosts = buildCompiledWorkerHosts(directory, isolated);
+    const compiledHosts = await buildCompiledWorkerHosts(directory, isolated);
     // Remove every source and module lookup path before executing any binary.
     rmSync(join(directory, 'node_modules'));
     for (const name of ['adoption.js', 'adoption-model.js', 'adoption-fixture.js', 'journey.js', 'adoption-rows.js', 'journey-entry.js', 'adoption.cjs',

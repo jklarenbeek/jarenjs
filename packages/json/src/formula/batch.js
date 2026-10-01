@@ -22,16 +22,18 @@ function diagnostic(error, targetId, maxChars) {
 
 /**
  * The schemas the batch compiles with: the host's `options.schemas` and each
- * target's own `schemas` (a migration record's `native.schemas`), merged.
- * Two DIFFERENT schemas under one id refuse — one of the formulas would
- * otherwise validate its rows against the other's schema, last one wins.
+ * enabled target's own `schemas` (a migration record's `native.schemas`),
+ * merged. Two DIFFERENT schemas under one id refuse — one of the formulas
+ * would otherwise validate its rows against the other's schema, last one
+ * wins. A disabled target neither compiles nor runs, so its schemas take no
+ * part: they can neither refuse the batch nor feed another target.
  * @param {any[]} list @param {Record<string, any> | undefined} given
  */
 function batchSchemas(list, given) {
   /** @type {Record<string, any>} */
   const merged = { ...(given ?? {}) };
   for (const [i, target] of list.entries()) {
-    if (target?.schemas === undefined) continue;
+    if (target?.schemas === undefined || target.enabled === false) continue;
     if (target.schemas === null || typeof target.schemas !== 'object' || Array.isArray(target.schemas))
       throw new FormulaError('JQ0015', 'target schemas must be an object of id -> {version, schema}', target?.id ?? '', `/targets/${i}/schemas`);
     for (const [id, entry] of Object.entries(target.schemas)) {

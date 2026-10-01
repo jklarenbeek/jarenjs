@@ -8,9 +8,16 @@
  * `@jarenjs/locales` ships each pack's record.
  *
  * One deviation, for parity with ICU (`Intl.NumberFormat`): the value is
- * rounded on its shortest round-trip decimal (the digits `String(x)`
- * prints), half away from zero — so `1.005` at two places is `1.01` — where
- * F&O rounds the binary value half to even.
+ * scaled and rounded on its shortest round-trip decimal (the digits
+ * `String(x)` prints), half away from zero — so `1.005` at two places is
+ * `1.01`, where F&O rounds the binary value half to even, and a percent of
+ * `1e308` prints its digits, where F&O's double overflows to infinity.
+ * Everything else is §4.7.4 and §4.7.5 as written: the three adjustments
+ * of the minimum sizes (so zero under `#.#` is `.0`), the mantissa scaled
+ * by the mandatory integer digits (none is allowed: `0.23E0` under
+ * `#.00E0`), grouping that repeats only when every multiple of its size
+ * inside the integer part holds a separator, and a mantissa printed as it
+ * rounds (`10.0e-1` under `0.0e0`).
  */
 
 import { roundDecimal, shiftDecimal, shortestDecimal } from '@jarenjs/core/math';
@@ -116,6 +123,8 @@ export function readDecimalFormat(record) {
  * @property {string} prefix
  * @property {string} suffix
  * @property {number} minInt
+ * @property {number} scaling - the mantissa's integer digits under an
+ *   exponent: the integer part's mandatory digits, zero allowed
  * @property {number[]} intGroups - grouping positions from the right
  * @property {number} groupSize - the regular grouping size, or 0
  * @property {number} minFrac
@@ -199,12 +208,14 @@ function analyse(chars, df) {
     if (integer[i] === df.groupingSeparator) intGroups.push(digitsRight);
     else digitsRight++;
   }
-  // regular: every position a multiple of the smallest, every multiple occupied (F&O §4.7.4)
+  // regular: every position a multiple of the smallest, and every multiple
+  // inside the integer part occupied (F&O §4.7.4) — `####,##` is irregular,
+  // its one separator never repeats
   let groupSize = 0;
   if (intGroups.length > 0) {
     const g = Math.min(...intGroups);
     const sorted = [...intGroups].sort((a, b) => a - b);
-    const regular = g > 0 && sorted.every((p, i) => p === g * (i + 1));
+    const regular = g > 0 && sorted.every((p, i) => p === g * (i + 1)) && g * (sorted.length + 1) >= digitsRight;
     if (regular) groupSize = g;
   }
   const fracGroups = [];
@@ -213,11 +224,21 @@ function analyse(chars, df) {
     if (c === df.groupingSeparator) fracGroups.push(digitsLeft);
     else digitsLeft++;
   }
-  let minInt = integer.filter(isDigit).length;
-  const minFrac = fraction.filter(isDigit).length;
-  const maxFrac = fraction.filter((c) => isDigit(c) || c === df.digit).length;
-  if (minInt === 0 && maxFrac === 0 && exponents.length === 0) minInt = 1;
-  return { prefix, suffix, minInt, intGroups, groupSize, minFrac, maxFrac, fracGroups,
+  const scaling = integer.filter(isDigit).length;
+  let minInt = scaling;
+  let minFrac = fraction.filter(isDigit).length;
+  let maxFrac = fraction.filter((c) => isDigit(c) || c === df.digit).length;
+  // F&O §4.7.4's three adjustments, in order
+  if (minInt === 0 && maxFrac === 0) {
+    if (exponents.length === 1) {
+      minFrac = 1;
+      maxFrac = 1;
+    }
+    else minInt = 1;
+  }
+  if (exponents.length === 1 && minInt === 0 && integer.some((c) => c === df.digit)) minInt = 1;
+  if (minInt === 0 && minFrac === 0) minFrac = 1;
+  return { prefix, suffix, minInt, scaling, intGroups, groupSize, minFrac, maxFrac, fracGroups,
     scale: percents > 0 ? 2 : perMilles > 0 ? 3 : 0,
     minExp: exponents.length === 1 ? exponent.length : -1 };
 }
@@ -299,20 +320,15 @@ export function formatNumberPicture(value, picture) {
   let decimal = shiftDecimal(shortestDecimal(value), sub.scale);
   let exponentText = '';
   if (sub.minExp >= 0) {
-    // the mantissa keeps minInt integer digits (one, when the picture has none)
-    const integerDigits = Math.max(sub.minInt, 1);
+    // the mantissa has `scaling` digits before the point — at least
+    // 10^(N-1) and under 10^N (F&O §4.7.5); zero is a zero mantissa and a
+    // zero exponent. The mantissa then rounds, and prints as it rounds
     let exponent = 0;
     if (decimal.digits !== '0') {
-      const magnitude = decimal.digits.length - decimal.scale; // digits before the point
-      exponent = magnitude - integerDigits;
-      decimal = { digits: decimal.digits, scale: decimal.scale + exponent };
-      decimal = roundDecimal(decimal, sub.maxFrac, 'half-up');
-      // rounding up can carry into another integer digit: renormalize once
-      if (decimal.digits.length - decimal.scale > integerDigits) {
-        exponent += 1;
-        decimal = roundDecimal({ digits: decimal.digits, scale: decimal.scale + 1 }, sub.maxFrac, 'half-up');
-      }
+      exponent = decimal.digits.length - decimal.scale - sub.scaling;
+      decimal = shiftDecimal(decimal, -exponent);
     }
+    decimal = roundDecimal(decimal, sub.maxFrac, 'half-up');
     const sign = exponent < 0 ? df.minusSign : '';
     exponentText = df.exponentSeparator + sign + mapDigits(String(Math.abs(exponent)).padStart(sub.minExp, '0'), df).join('');
   }
@@ -324,7 +340,7 @@ export function formatNumberPicture(value, picture) {
   integer = integer.padStart(sub.minInt, '0');
   while (fraction.length > sub.minFrac && fraction.endsWith('0')) fraction = fraction.slice(0, -1);
   fraction = fraction.padEnd(sub.minFrac, '0');
-  if (integer === '' && fraction === '') integer = '0';
+  // the adjustments leave a minimum on one side at least: never an empty number
   let out = sub.prefix + groupInteger(mapDigits(integer, df), sub, df.groupingSeparator);
   if (fraction !== '') out += df.decimalSeparator + groupFraction(mapDigits(fraction, df), sub, df.groupingSeparator);
   return out + exponentText + sub.suffix;

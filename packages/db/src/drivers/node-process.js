@@ -13,6 +13,11 @@ import { positiveOption, queueFailure, rowBytes, workerSettings, PROCESS_DEFAULT
  * @returns {import('../../types/node-process.js').NodeProcessDriver}
  */
 export function nodeProcessDriver(configuration = {}) {
+  // the process host forks its own endpoint from the installed package
+  if (configuration.endpoint !== undefined) {
+    throw new TypeError('endpoint is an option of nodeWorkerDriver and nodeWorkerPoolDriver; the supervised '
+      + 'process host forks its own endpoint beside the installed @jarenjs/db');
+  }
   const maxOwners = positiveOption('maxOwners', configuration.maxOwners, PROCESS_DEFAULTS.maxOwners);
   const timeoutMs = positiveOption('timeoutMs', configuration.timeoutMs, PROCESS_DEFAULTS.timeoutMs);
   const maxRequestBytes = positiveOption('maxRequestBytes', configuration.maxRequestBytes, PROCESS_DEFAULTS.maxRequestBytes);
@@ -142,7 +147,9 @@ export function nodeProcessDriver(configuration = {}) {
         },
       };
       const opening = createWorkerConnection(transport, { ...settings, epoch, options, hooks, awaitStartupExit: false,
-        endpoint: endpoint.href, reopen: () => driver.open(path, options) });
+        endpoint: endpoint.href, reopen: () => driver.open(path, options),
+        startupAdvice: 'the supervised process host forks it from the installed @jarenjs/db, so keep the package '
+          + 'outside a bundle' });
       child.send({ generation: epoch, path, options: { timeout: options.timeout, readOnly: options.readOnly }, limits });
       const connection = await opening;
       state.status = 'healthy';

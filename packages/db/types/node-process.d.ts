@@ -2,7 +2,8 @@ import type { NodeOpenOptions } from './node.js';
 import type { CancellationCapabilities, Driver } from './index.js';
 import type { NodeWorkerConnection, NodeWorkerOptions, WorkerMetrics } from './node-worker.js';
 
-export interface NodeProcessOptions extends NodeWorkerOptions { maxOwners?: number; timeoutMs?: number; maxRequestBytes?: number }
+/** The worker options but `endpoint`: the process host forks its own endpoint (passing one is a `TypeError`). */
+export interface NodeProcessOptions extends Omit<NodeWorkerOptions, 'endpoint'> { maxOwners?: number; timeoutMs?: number; maxRequestBytes?: number }
 export interface ProcessSettlement {
   readonly path: string | null;
   readonly generation: number;

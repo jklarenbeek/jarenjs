@@ -1382,7 +1382,7 @@ function validateZoneProvider(value) {
 // (options.dateNames): the DateNames record of @jarenjs/core/dates, which
 // compileDateLocale(pack).names answers. A host programming error is a
 // TypeError, like options.zoneProvider.
-function validateDateNames(value) {
+export function validateDateNames(value) {
   const list = (key, n) => Array.isArray(value[key]) && value[key].length === n
     && value[key].every((name) => typeof name === 'string' && name !== '');
   if (value === null || typeof value !== 'object' || !list('months', 12) || !list('monthsShort', 12)
@@ -1395,7 +1395,7 @@ function validateDateNames(value) {
 
 // Validate the named decimal formats `$format-number` and `$quantity` read
 // (options.decimalFormats): each record checked and completed once, here.
-function validateDecimalFormats(value) {
+export function validateDecimalFormats(value) {
   if (value === null || typeof value !== 'object' || Array.isArray(value))
     throw new TypeError('options.decimalFormats must be an object of name -> decimal format record');
   const out = Object.create(null);

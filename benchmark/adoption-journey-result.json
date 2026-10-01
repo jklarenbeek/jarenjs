@@ -8,14 +8,14 @@
     "cpu": "AMD Ryzen 9 5900HX with Radeon Graphics"
   },
   "sourceHashes": {
-    "packages/website/src/examples/adoption.js": "b9013cc001d1384c095e4348429bd065150e83bfc8195227da44b1fbb6bf375b",
+    "packages/website/src/examples/adoption.js": "50d1a8f48d7f8006c116a2e6a6ded59375a36f303f35e4b081f8e713e194647c",
     "packages/website/src/examples/adoption-model.js": "7e990a688127108a8e7b158c5030f777baef9a2b5bfcabaf156115ff76551577",
     "packages/website/src/examples/adoption-fixture.js": "16479fa5b6fab527767b763780d9cf2dd24143bdca25f7990ac74cc8779ec567",
-    "test/consumer/journey.js": "0870f6365a6a60829a04c9fa12dc45639bb1bdde60175ccdc3ce0d94365411e1",
+    "test/consumer/journey.js": "38010d72aabaeb2c840f091ec1f7f8781f2d357eb4ce9f393b05770259132d3a",
     "scripts/lib/adoption-journey.js": "ac4f3c24a0d7edddaf08bbd012d38dbf0c4b0effa4443f17333b543948e7efc6",
-    "benchmark/adoption-journey.js": "685477fc875289a5229fcf6ec1804ac25e5e9e66f64f17df24a4cba18d80538e",
+    "benchmark/adoption-journey.js": "dc56b491e74317925dfbfe50719ec865e03b6bbcb47aab8b024e5dac31b222b4",
     "packages/db/src/jobs.js": "55b287e58ac90433bf615b411423e50b053ca71870c995bb9d4052f094392474",
-    "packages/db/src/store.js": "36f45137c525d4f6aee142e3a562c12b6a759b5d0c12268d046ed1d949645d60"
+    "packages/db/src/store.js": "1578efa3e76328981dac598959b491294bcec71b609ff8785ac3fe53dca2479f"
   },
   "hosts": [
     {
@@ -30,7 +30,7 @@
           "secondWrites": 0,
           "secondRevisions": 0,
           "changes": 256,
-          "searchMs": 433.102639,
+          "searchMs": 354.84352200000006,
           "searchHash": "e1a757541681300c320a4f07aa0742b817d9363eb284bfd0d061691e76de93bf",
           "startupDDL": 0,
           "history": 3,
@@ -61,11 +61,11 @@
               "body": "{\"id\":\"catalog-1022\"}"
             }
           ],
-          "elapsedMs": 925.8236730000001,
-          "teardownMs": 0.2659550000000763,
+          "elapsedMs": 779.8949690000001,
+          "teardownMs": 0.20943999999997231,
           "runtime": "v24.20.0",
-          "heapBytes": 68168432,
-          "peakRssBytes": 287928320
+          "heapBytes": 69397744,
+          "peakRssBytes": 287465472
         },
         {
           "consumer": "archive-stock",
@@ -76,7 +76,7 @@
           "secondWrites": 0,
           "secondRevisions": 0,
           "changes": 512,
-          "searchMs": 3265.7707480000004,
+          "searchMs": 2738.477806,
           "searchHash": "51902a33caf8dad05035c9e56096dde0af6c44bb7491692213654b689fcd58ae",
           "startupDDL": 0,
           "history": 1,
@@ -112,11 +112,11 @@
               "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":\"430\"}}"
             }
           ],
-          "elapsedMs": 4897.013341999999,
-          "teardownMs": 0.2962809999999081,
+          "elapsedMs": 4129.911291,
+          "teardownMs": 0.2541129999999612,
           "runtime": "v24.20.0",
-          "heapBytes": 391838808,
-          "peakRssBytes": 909365248
+          "heapBytes": 395857920,
+          "peakRssBytes": 906596352
         },
         {
           "consumer": "catalog",
@@ -130,11 +130,11 @@
           "startupDDL": 0,
           "history": 3,
           "wire": [],
-          "elapsedMs": 97.46990400000001,
-          "teardownMs": 0.779248999999993,
+          "elapsedMs": 89.454669,
+          "teardownMs": 0.7179049999999734,
           "runtime": "v24.20.0",
-          "heapBytes": 34375848,
-          "peakRssBytes": 116482048
+          "heapBytes": 27397376,
+          "peakRssBytes": 134836224
         }
       ],
       "crashExit": 73,
@@ -153,7 +153,7 @@
           "secondWrites": 0,
           "secondRevisions": 0,
           "changes": 256,
-          "searchMs": 334.21114000000006,
+          "searchMs": 304.51600600000006,
           "searchHash": "e1a757541681300c320a4f07aa0742b817d9363eb284bfd0d061691e76de93bf",
           "startupDDL": 0,
           "history": 3,
@@ -184,11 +184,11 @@
               "body": "{\"id\":\"catalog-1022\"}"
             }
           ],
-          "elapsedMs": 760.912453,
-          "teardownMs": 0.24696900000003552,
+          "elapsedMs": 717.452212,
+          "teardownMs": 0.3643779999999879,
           "runtime": "1.4.2",
-          "heapBytes": 56342395,
-          "peakRssBytes": 251535360
+          "heapBytes": 52210718,
+          "peakRssBytes": 257974272
         },
         {
           "consumer": "archive-stock",
@@ -199,7 +199,7 @@
           "secondWrites": 0,
           "secondRevisions": 0,
           "changes": 512,
-          "searchMs": 2253.913611,
+          "searchMs": 1959.988843,
           "searchHash": "51902a33caf8dad05035c9e56096dde0af6c44bb7491692213654b689fcd58ae",
           "startupDDL": 0,
           "history": 1,
@@ -235,11 +235,11 @@
               "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":\"430\"}}"
             }
           ],
-          "elapsedMs": 3666.391204,
-          "teardownMs": 0.4273740000003272,
+          "elapsedMs": 3147.564488,
+          "teardownMs": 0.34352999999964595,
           "runtime": "1.4.2",
-          "heapBytes": 336645812,
-          "peakRssBytes": 988020736
+          "heapBytes": 348653947,
+          "peakRssBytes": 1043984384
         },
         {
           "consumer": "catalog",
@@ -253,11 +253,11 @@
           "startupDDL": 0,
           "history": 3,
           "wire": [],
-          "elapsedMs": 84.27685699999999,
-          "teardownMs": 0.8570130000000233,
+          "elapsedMs": 71.721403,
+          "teardownMs": 0.8122809999999845,
           "runtime": "1.4.2",
-          "heapBytes": 8198802,
-          "peakRssBytes": 79904768
+          "heapBytes": 8777041,
+          "peakRssBytes": 82989056
         }
       ],
       "crashExit": 73,
@@ -273,25 +273,25 @@
         {
           "metric": "startupMs",
           "limit": 15000,
-          "value": 433.102639,
+          "value": 354.84352200000006,
           "status": "pass"
         },
         {
           "metric": "sampledHeapBytes",
           "limit": 268435456,
-          "value": 68168432,
+          "value": 69397744,
           "status": "pass"
         },
         {
           "metric": "peakRssBytes",
           "limit": 536870912,
-          "value": 287928320,
+          "value": 287465472,
           "status": "pass"
         },
         {
           "metric": "teardownMs",
           "limit": 1000,
-          "value": 0.2659550000000763,
+          "value": 0.20943999999997231,
           "status": "pass"
         },
         {
@@ -309,25 +309,25 @@
         {
           "metric": "startupMs",
           "limit": 45000,
-          "value": 3265.7707480000004,
+          "value": 2738.477806,
           "status": "pass"
         },
         {
           "metric": "sampledHeapBytes",
           "limit": 805306368,
-          "value": 391838808,
+          "value": 395857920,
           "status": "pass"
         },
         {
           "metric": "peakRssBytes",
           "limit": 1073741824,
-          "value": 909365248,
+          "value": 906596352,
           "status": "pass"
         },
         {
           "metric": "teardownMs",
           "limit": 2000,
-          "value": 0.2962809999999081,
+          "value": 0.2541129999999612,
           "status": "pass"
         },
         {
@@ -345,25 +345,25 @@
         {
           "metric": "startupMs",
           "limit": 15000,
-          "value": 334.21114000000006,
+          "value": 304.51600600000006,
           "status": "pass"
         },
         {
           "metric": "sampledHeapBytes",
           "limit": 268435456,
-          "value": 56342395,
+          "value": 52210718,
           "status": "pass"
         },
         {
           "metric": "peakRssBytes",
           "limit": 536870912,
-          "value": 251535360,
+          "value": 257974272,
           "status": "pass"
         },
         {
           "metric": "teardownMs",
           "limit": 1000,
-          "value": 0.24696900000003552,
+          "value": 0.3643779999999879,
           "status": "pass"
         },
         {
@@ -381,25 +381,25 @@
         {
           "metric": "startupMs",
           "limit": 45000,
-          "value": 2253.913611,
+          "value": 1959.988843,
           "status": "pass"
         },
         {
           "metric": "sampledHeapBytes",
           "limit": 805306368,
-          "value": 336645812,
+          "value": 348653947,
           "status": "pass"
         },
         {
           "metric": "peakRssBytes",
           "limit": 1073741824,
-          "value": 988020736,
+          "value": 1043984384,
           "status": "pass"
         },
         {
           "metric": "teardownMs",
           "limit": 2000,
-          "value": 0.4273740000003272,
+          "value": 0.34352999999964595,
           "status": "pass"
         },
         {
@@ -441,7 +441,7 @@
       "packages/website/src/examples/adoption.js",
       "packages/website/src/examples/adoption-model.js"
     ],
-    "adoptedPolicyLines": 195,
+    "adoptedPolicyLines": 196,
     "retainedThirdPartyMechanisms": [
       "minisearch",
       "@tanstack/virtual-core"
@@ -449,8 +449,9 @@
     "adoptedThirdPartyMechanisms": [],
     "domainSqlInAdoptedHost": 0,
     "privateDriverBridges": 0,
-    "trustedSourceConversions": 2,
-    "reviewRequiredSources": 5,
+    "translatedSources": 5,
+    "sourcesWithDifferences": 1,
+    "untranslatableSources": 2,
     "disabledPreservedSources": 1
   },
   "evidence": {
@@ -462,7 +463,7 @@
   },
   "limitations": [
     "Source lines compare executable reference adapters with remaining application policy, not a claim that oracle files were deleted.",
-    "Formula retirement covers only converted or natively authored definitions; unresolved originals and their retained oracle remain.",
+    "Formula retirement covers only translated or natively authored definitions; untranslatable originals, translations with named differences until they are reviewed, and their retained oracle remain.",
     "Capture of adopted triggers and native FTS remain refused. Search refresh reads a bounded resident snapshot; complete search membership is separate from cached pages.",
     "Heap is a sample and RSS is a process high-water mark, including the assertion instrument. Exact peak heap remains unmeasured.",
     "The full source sizes apply to query/search; provider snapshots and rule previews retain their separate frozen limits."

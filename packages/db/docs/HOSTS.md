@@ -296,10 +296,13 @@ second endpoint would be a second protocol peer to qualify for no measured gain.
 A worker loads its endpoint module by URL — by default the
 `node-worker-endpoint.js` file beside the driver's own module. A bundler, or `bun
 build --compile`, that inlines the driver leaves that file behind, so the endpoint
-is published as an entry of its own, `@jarenjs/db/worker-endpoint` (a module that
-serves when it is loaded as a worker and does nothing when imported anywhere
-else), and both drivers take an `endpoint` option: the URL of the bundled copy.
-The default is unchanged.
+is published as an entry of its own, `@jarenjs/db/worker-endpoint`. It serves a
+worker its driver started (the driver marks the worker's data) and does nothing
+anywhere else: the main thread, a side-effect import, another library's worker
+thread. The worker and pool drivers take an `endpoint` option: the `file:` (or
+`data:`) URL of the bundled copy — on Windows, `pathToFileURL(path)`. The default
+is unchanged. The supervised process host forks its own endpoint from the
+installed package and refuses the option.
 
 ```js
 // app.js
@@ -327,7 +330,9 @@ of shaking it to nothing. Without the endpoint the open fails at once: a worker
 that exits before its ready frame is `JD0003`, naming the endpoint URL, with
 `retryable: false` — a reopen cannot find a module that was never bundled. (It
 used to surface as a lost generation, `JD2090`, whose `retryable: true` invited a
-retry that could never succeed.)
+retry that could never succeed.) A start that outlives `startupTimeoutMs` stays a
+retryable `JD2090`, now naming the endpoint and the deadline: that start may only
+have been slow.
 
 ## Async SQLite jobs and committed feeds
 
@@ -589,7 +594,8 @@ streams kept open. A read waits for a reader for at most `queueTimeout` (`JD2091
 a one-shot read that finds every reader held runs on the writer when the writer is
 free. Writes, transactions, live registration, root jobs and tracked reads keep
 the gate. The in-thread, worker and process hosts have no readers and refuse the
-option (`JD0009`), as does a pool on `:memory:` or with `readers: 0`. The price
+option (`JD0009`), as does a writable pool on `:memory:` or with `readers: 0`;
+every worker of a read-only pool is a reader. The price
 is two round trips per read — its `BEGIN` and `COMMIT` on the reader — which
 sequential tiny reads pay; the measurements below state it beside the gain.
 
@@ -655,26 +661,44 @@ hosts that need explicit snapshot cleanup.
 
 <!--fact:db.hosts-->
 
-Measured 2026-09-08, v24.19.0, AMD Ryzen 9 5900HX with Radeon Graphics; 7 samples per latency/include case.
+Measured 2026-10-01, v24.20.0, AMD Ryzen 9 5900HX with Radeon Graphics; 7 samples per latency/include case.
 
 | Host | Open p50 ms | Slow SQL p50 ms | Event-loop max ms | Tiny reads/s | Mixed work ms | Wait p95 ms |
 |---|---:|---:|---:|---:|---:|---:|
-| node | 0.19 | 87.04 | 92.34 | 876870 | 207.12 | 0.00 |
-| worker | 52.99 | 85.23 | 3.52 | 19168 | 198.57 | 0.00 |
-| pool-1-reader | 76.73 | 81.95 | 1.62 | 25109 | 207.11 | 190.32 |
-| pool-3-readers | 152.95 | 82.50 | 1.86 | 26201 | 74.79 | 63.91 |
+| node | 0.18 | 77.84 | 79.69 | 754486 | 187.43 | 0.00 |
+| worker | 84.93 | 90.14 | 1.81 | 38648 | 192.61 | 0.00 |
+| pool-1-reader | 166.85 | 77.55 | 1.88 | 33092 | 111.55 | 99.37 |
+| pool-3-readers | 338.34 | 89.90 | 1.72 | 31032 | 56.76 | 46.42 |
 
 | Host | Cursor rows | Cursor ms | Sampled heap growth MiB | Sampled total RSS MiB |
 |---|---:|---:|---:|---:|
-| node | 100000 | 113.84 | 8.39 | 70.26 |
-| worker | 100000 | 316.64 | 5.60 | 100.64 |
-| pool-1-reader | 100000 | 295.61 | 8.45 | 124.79 |
-| pool-3-readers | 100000 | 287.91 | 13.29 | 168.73 |
+| node | 100000 | 120.69 | 22.20 | 113.91 |
+| worker | 100000 | 242.03 | 14.12 | 155.89 |
+| pool-1-reader | 100000 | 270.97 | 14.73 | 191.58 |
+| pool-3-readers | 100000 | 286.63 | 14.72 | 259.39 |
+
+| Store root admission (2000 rows) | Reads | Mixed work p50 ms | Tiny root gets/s |
+|---|---|---:|---:|
+| pool-1-reader | serialized | 135.26 | 23346 |
+| pool-1-reader | parallel | 72.06 | 15824 |
+| pool-3-readers | serialized | 128.83 | 25814 |
+| pool-3-readers | parallel | 51.24 | 16027 |
+
+On pool-1-reader, `reads: 'parallel'` runs the Store-level mixed work 1.88× faster than the serialized default and answers 32.22% fewer sequential tiny root gets per second.
+On pool-3-readers, `reads: 'parallel'` runs the Store-level mixed work 2.51× faster than the serialized default and answers 37.91% fewer sequential tiny root gets per second.
+
+| Bun 1.4.2 executable | Rows written | Rows streamed | Long read ms | Event-loop max ms |
+|---|---:|---:|---:|---:|
+| worker | 20001 | 20001 | 275.88 | 1.30 |
+| pool | 20001 | 20001 | 324.53 | 1.84 |
+| in-thread | 20001 | 20001 | 111.23 | 110.91 |
+
+Built with `bun build --compile ./worker-app.js ./worker-endpoint.js --outfile worker-hosts-bun` and run with every source and module path removed; the long read is 5 whole-collection reads of 20001 rows. The worker host held the event loop at most 1.30 ms against the 50 ms bound and took 2.48× as long as the in-thread binding, which held the loop 110.91 ms. The pool host held the event loop at most 1.84 ms against the 50 ms bound and took 2.92× as long as the in-thread binding, which held the loop 110.91 ms. Built without the second entrypoint, the open refused: worker JD0003 (retryable: false), pool JD0003 (retryable: false). The side-effect import of `@jarenjs/db/worker-endpoint`, bundled alone, keeps the endpoint: 92651 bytes with Bun, 126998 with esbuild.
 
 | Include accounting | Encoded bytes | Time p50 ms | Uncollected heap growth p50 MiB |
 |---|---:|---:|---:|
-| serialize-again | 3218891 | 12.38 | 8.00 |
-| count-during-decode | 3218891 | 21.36 | 8.84 |
+| serialize-again | 3218891 | 11.21 | 8.00 |
+| count-during-decode | 3218891 | 21.01 | 8.84 |
 
 The worker event-loop acceptance bound is 50 ms. The original in-process baseline measured p50/p95/max event-loop delay of 1.07/86.97/87.62 ms, bare worker startup p50 27.48 ms, and duplicate include serialization 14.68 ms with 8.00 MiB uncollected heap growth. The current open measurement also includes driver probing; its startup cost is broader than that bare-worker baseline.
 

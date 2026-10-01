@@ -70,3 +70,18 @@ it('a target brings its own schemas; two different schemas under one id refuse',
   assert.throws(() => compileFormulaBatch([typed('a', '$.price', same)], { ...options, schemas: { row: row({ other: {} }) } }), { code: 'JQ0015' });
   assert.throws(() => compileFormulaBatch([{ ...target('a', 1), schemas: [] }]), { code: 'JQ0015' });
 });
+
+it("a disabled target's schemas take no part in the batch: they neither refuse it nor feed another target", () => {
+  const row = (properties) => ({ version: '1', schema: { type: 'object', properties } });
+  const typed = (id, expression, schema, extra = {}) => ({ ...target(id, expression, { inputSchema: { id: 'row', version: '1' } }), schemas: { row: schema }, ...extra });
+  const options = { compileTypeTest: createTypeTestCompiler() };
+  const same = row({ price: { type: 'number' } });
+  // a conflicting or malformed schema on a disabled target no longer refuses the batch
+  const conflicting = compileFormulaBatch([typed('a', '$.price', same), typed('b', '$.weight', row({ weight: { type: 'number' } }), { enabled: false })], options);
+  assert.equal(conflicting.evaluate([{ id: 1, price: 2 }]).counts.value, 1);
+  assert.doesNotThrow(() => compileFormulaBatch([typed('a', '$.price', same), { ...target('b', 1), enabled: false, schemas: [] }], options));
+  // an enabled target cannot borrow its input schema from a disabled one
+  const borrowing = compileFormulaBatch([{ ...target('a', '$.price', { inputSchema: { id: 'row', version: '1' } }) },
+    typed('b', '$.price', same, { enabled: false })], options);
+  assert.equal(borrowing.evaluate([{ id: 1, price: 2 }]).errors[0].code, 'JQ0014');
+});

@@ -447,8 +447,10 @@ if (asyncLiveLeak.length)
 // carries too, add 20323 (the parts the chain bundle's ceiling itemizes).
 // Measured 812570 bytes since: parallel root reads — the read gate, the
 // cursor that holds one read across its pulls, and the connection's shared
-// admission — add 2338.
-if (clientBytes > 813000)
+// admission — add 2338. Measured 813018 since: F&O's minimum-size
+// adjustments and exponent scaling, the rules for reading a quantity out of
+// text, and the cursor's owner check before each pull add 448.
+if (clientBytes > 814000)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 

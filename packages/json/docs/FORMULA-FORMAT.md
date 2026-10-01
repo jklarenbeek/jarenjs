@@ -40,7 +40,9 @@ A pack the registry lacks, or holds at another version, refuses at compile time
 (`JQ0014`, at `/packs/i`), as a missing helper does. The formula is compiled with
 the operators of the listed packs only: an operator of a pack the registry holds
 but the profile does not list stays unknown (`JQ0002`), so a saved formula names
-every operator its meaning depends on.
+every operator its meaning depends on. A helper the profile lists under the name
+of a function of a listed pack is refused too (`JQ0014`, at `/helpers/i`): one
+would shadow the other, so neither is chosen for it.
 
 ```js
 import { createJsltRegistry, mathPack } from '@jarenjs/json/jslt';
@@ -55,6 +57,10 @@ Locale data is data the host hands in, never looked up: `options.dateNames`
 `options.decimalFormats` (named decimal formats for `$format-number` and
 `$quantity`, from `compileNumberLocale(pack).decimalFormat`), passed through to
 the Query engine ([QUERY-FORMAT §8.7, §8.13](QUERY-FORMAT.md#87-strings)).
+`createFormulaCompiler` (and so `compileFormula` and `compileFormulaBatch`) checks
+these and `options.packs` once, when it is made: a malformed record, or a list of
+packs where a registry belongs, is the host's `TypeError`, never every formula's
+document error.
 
 ```js
 import { compileDateLocale, compileNumberLocale, nl } from '@jarenjs/locales';
@@ -111,11 +117,11 @@ object results are never interpreted as outcome instructions in `value` mode.
 ## Batches and isolation
 
 `compileFormulaBatch(targets, options)` from `@jarenjs/json/formula/batch` compiles
-`{id, enabled?, formula, schemas?}` targets once. A target's own `schemas` (a
-migration record's `native.schemas`) join `options.schemas`; two different
-schemas under one id refuse (`JQ0015` at `/targets/i/schemas`), since one formula
-would otherwise validate its rows against the other's schema. Disabled targets
-neither compile nor run.
+`{id, enabled?, formula, schemas?}` targets once. An enabled target's own
+`schemas` (a migration record's `native.schemas`) join `options.schemas`; two
+different schemas under one id refuse (`JQ0015` at `/targets/i/schemas`), since
+one formula would otherwise validate its rows against the other's schema. Disabled
+targets neither compile nor run, and their schemas take no part in the batch.
 Compile/runtime failure of one target does not stop independent cells. Each row
 has a stable string/finite-number `id` (or the configured `key`); string IDs and
 target IDs are bounded at 256 characters. Duplicate row/target identities refuse.
@@ -172,25 +178,35 @@ enabled one with a hand-written parser (over `@jarenjs/core/scan`, no `eval`, no
 the statement and expression syntax a formula body uses, so a construct outside the
 translated subset is named with its position rather than stopping at the first:
 
-- literals, names, member access with `.`, `[…]` and `?.`, template literals,
-  array and object literals, spread into an array;
+- literals, names, member access with `.`, `[…]` and `?.` (an optional call
+  `x?.m()` yields undefined when `x` is null or undefined, along the whole chain),
+  template literals, array and object literals, a spread of an array or a text
+  (its characters) into an array;
 - the arithmetic, comparison, equality and logical operators, `??` and `?:`;
 - `Math.round`, `ceil`, `floor`, `abs`, `max` and `min`; `Date.now()`;
   `new Date(text).getTime()`; `String()` and `Number()`;
-- text methods (`toLowerCase`, `toUpperCase`, `trim`, `includes`, `startsWith`,
-  `endsWith`, `replace` with a literal text or regular expression, `split(x)[0]`)
-  and a regular expression's `test`;
+- text methods (`toLowerCase`, `toUpperCase`, `toLocaleLowerCase` and
+  `toLocaleUpperCase` outside Turkish, Azerbaijani and Lithuanian, `trim`,
+  `trimStart`, `trimEnd`, `includes`, `startsWith`, `endsWith`, `concat`, `replace`
+  and `replaceAll` with a literal text or regular expression, `split(x)[0]`) and a
+  regular expression's `test`;
 - `toFixed` and `toLocaleString`, and `new Intl.NumberFormat(…).format`, for a
   language the host describes;
-- arrow callbacks of `map`, `filter`, `find`, `some`, `every` and `sort`, and
-  `join`, `includes`, `length` and `concat` on an array;
+- arrow callbacks of `map`, `filter`, `find`, `some`, `every` and `sort` (of a
+  copy, `[...list].sort(…)`, or of a `map` or `filter` result), and `join`,
+  `includes`, `length` and `concat` on an array;
 - `const` and `let`, a destructuring of plain names (`const { a, b: c } = e`, read
   as the members it names), `if` and `else`, `return`; a `let` reassigned, or an
-  array pushed to, inside an `if` that does not return; `void 0` as undefined.
+  array literal a name alone holds pushed to, inside an `if` that does not return;
+  `void 0` as undefined.
 
 Statements translate by continuation: `const x = e; rest` is a `$let` around the
 rest, `if (c) return a; rest` is `$if(c, a, rest)`, and a variable an `if` changes
-is rebound to `$if(c, new, old)` for what follows.
+is rebound to `$if(c, new, old)` for what follows. A block's `let` and `const` end
+with the block: what follows reads the name as it was before it, and what the
+block assigns to an outer `let` stays. Before its declaration such a name is no
+name at all (JavaScript throws reading it): read there it is the reason
+`unknown-name`, assigned there the reason `assignment`.
 
 `options.translate` (closed: an unknown key is a `TypeError`) names what the body
 reads and calls:
@@ -200,8 +216,8 @@ reads and calls:
 | `argument` | `'row'` | the row's parameter name |
 | `helperObject` | `'helpers'` | the helpers' parameter; `helpers.X` reads as the bare helper `X` |
 | `helpers` | none | each helper the body calls: `{call: {name, version}}` (a `$call` of the host helper, listed in the formula's `helpers`) or `{native: {params, expression}}` (an expansion into operators over its parameters, `$name` in the expression); with `returns`, `element`, `absent`, `nullable` and the `differences` it has |
-| `skip` | `'SKIP'` | the skip sentinel: returning it, or `undefined`, skips the row |
-| `explain` | `'because'` | `explain(value, text)` returns an explanation |
+| `skip` | `'SKIP'` | the skip sentinel: returning it, or `undefined`, skips the row, and so does `x ?? SKIP`, `x \|\| SKIP` or `x && SKIP` on that side; the sentinel anywhere else (kept in a name, in an array) is the reason `skip-value` |
+| `explain` | `'because'` | `explain(value, text)` returns an explanation, its text `String(text ?? '')` |
 | `explanationMember` | none | a returned object literal with this one member is an explanation, its value the text |
 | `locales` | none | the languages number formatting may name: `{decimalFormat, grouping, decimal, currencies, nan}`, the decimal format registered under `decimalFormat` and each currency's picture |
 
@@ -227,47 +243,105 @@ column}` in the body, 1-based. Translation is deterministic: the same body and
 options give the same formula, whatever was translated before.
 
 A translation is exact on two conditions, stated once rather than at every site.
-Each field holds the JSON type the body uses it as: where JavaScript would coerce
-text to a number, the operator refuses the row (`JQ2001`). And a value the body
-reads where a guard (`if (x == null) return …`, `!x`, `x?.y`, `x ?? y`, a test in
-an `&&` chain) has not proven it present is named where it matters:
+Each field holds the JSON type the body uses it as (`row.l ?? []` uses it as an
+array, `row.s ?? ''` as text): where JavaScript would convert a field's value
+between types — text in arithmetic, a number ordered against a text, a boolean,
+an array or an object ordered with `<`, `>`, `<=` or `>=`, an array or an object
+made into text — the operator refuses the row (`JQ2001`). A value the body computes
+itself, or one that may be such a value (`row.b ?? (x > 1)`), is converted as
+JavaScript converts it: a boolean is 0 or 1 in arithmetic and in an ordering, and a
+text beside a number is read as `Number` reads it (`number-parse`). And a value the
+body reads where a guard (`if (x == null)
+return …`, `!x`, `x?.y`, `x ?? y`, a test in an `&&` chain) has not proven it
+present is named where it matters:
 
 | Difference | Where JavaScript and the query part ways |
 |---|---|
-| `absent-receiver` | a member or method of null or undefined: JavaScript throws, the query reads nothing |
+| `absent-receiver` | a member or method of null or undefined: JavaScript throws, the query reads nothing (an optional `x?.m()` is exact: both yield undefined) |
 | `nullish-arithmetic` | arithmetic on undefined (NaN) or null (0): the query yields nothing, or refuses null |
 | `nullish-comparison` | `<`, `>`, `<=`, `>=` with null, which JavaScript compares as 0, where 0 would pass |
 | `concat-undefined` | `'x' + undefined` is `"xundefined"`; the query writes `"x"` |
-| `absent-element` | undefined kept as an array element; the query drops it |
-| `identity` | objects compared by identity in JavaScript, by value in the query |
-| `prototype-key` | a constant table indexed by a key JavaScript finds on `Object.prototype` (`constructor`) |
+| `absent-element` | undefined kept as an array element (an array literal, a push, `concat`, a `map` result); the query drops it |
+| `identity` | objects compared by identity in JavaScript, by value in the query: a fresh array or object, two elements of arrays, a value the translation cannot trace to one read (two different reads of the row are never one object, and compare exactly) |
+| `prototype-key` | a constant table indexed by a key JavaScript finds on `Object.prototype` (`constructor`), or an array read at an index of unknown type, where JavaScript also reads a key the array has (`length`, `map`) |
 | `clock` | `Date.now()` is `$context.now`: the host evaluates with `context.now` (epoch milliseconds) |
 | `date-parse` | `new Date(text)` also reads dates that are not RFC 3339, implementation-defined |
 | `regex-subset` | a regular expression rewritten to an I-Regexp that cannot say the same (`\b`) |
+| `regex-coercion` | a regular expression's test of a value that may be undefined: JavaScript tests the text `"undefined"`, the query tests nothing |
+| `case-fold` | a case-insensitive test: JavaScript folds case by its own table (the dotted and dotless i, the final sigma, the Kelvin sign), the query lower-cases the text |
+| `code-units` | text beyond U+FFFF (an emoji is two UTF-16 code units): a pattern's `.`, negated class, `\S`, `\D` or `\W` (but for one such atom replaced away, a run of it, or a test for it), or a character beyond U+FFFF in a pattern, matches one code unit in JavaScript and one character in the query |
 | `sort-key` | a sort key that may be missing: JavaScript keeps the order, the query sorts it first |
 | `remainder-by-zero` | `%` by zero: JavaScript computes NaN, the query refuses (`JQ2002`) |
-| `number-parse` | `Number(text)`: JavaScript reads `''` as 0 and accepts hex, the query does not |
+| `number-parse` | `Number(text)`, or a text the body computes used as a number: JavaScript reads `''` as 0 and accepts hex, the query does not |
 | `replacement-pattern` | a computed replacement: JavaScript reads `$&` and `$1` in it |
-| `loose-equality` | `==` between values of unknown type: JavaScript converts between types |
+| `loose-equality` | `==` where a side's type is not known: JavaScript converts between types (`'1' == 1`, `'' == 0`) |
 | (the host's) | a native helper's own `differences`, at each call |
 
-Regular expressions are rewritten exactly where I-Regexp can say the same: `\d`,
-`\w` and `\s` as their classes (`\s` is JavaScript's fixed white-space set), `.` as
-everything but a line terminator, the anchors `^` and `$` marked by a sentinel the
-text does not hold, and the `i` flag by lower-casing the tested text. Captures,
-lookaround, lazy quantifiers and back references are reasons. Number formatting is
-translated for the languages `options.translate.locales` describes:
-`toLocaleString` with `style`, `currency`, `minimumFractionDigits` and
-`maximumFractionDigits`, written with `$format-number` (QUERY-FORMAT §8.7).
+Text is measured and ordered as JavaScript measures and orders it, in UTF-16 code
+units: `.length` counts a character beyond U+FFFF twice, and two texts compare by
+their code units — the query's character order, turned around where, at the first
+difference, one text has a character from U+E000 to U+FFFF and the other one
+beyond U+FFFF.
 
-Every reason kind names what stops the translation: `syntax`, `unreachable` (a
-statement after a `return`), `return-line-break` (a line break right after
-`return`, where JavaScript returns undefined), `loop`, `throw`, `statement`,
-`assignment`, `function`, `method`, `regex`, `replace`, `replace-first`,
-`split`, `length` and `includes` (of a value that could be text or an array),
-`destructuring` (with a default, a nested or array pattern, or a rest), `new`,
-`locale`, `helper`, `unknown-name`, `typeof`, `operator`, `callback`, `sort` and
-`compile`, among others; each carries a message.
+Regular expressions are read as JavaScript reads them without the `u` flag (`\p`
+is the letter p, `\u{2}` a `u` twice, a brace that is no quantifier is itself) and
+rewritten exactly where I-Regexp can say the same: `\d`, `\w` and `\s` as their
+classes (`\s` is JavaScript's fixed white-space set), `.` as everything but a line
+terminator, an escaped character as itself (`\$` as the class `[$]`), the anchors
+`^` and `$` marked by a sentinel, and the `i` flag by lower-casing the tested text
+(`case-fold`; a capital in a case-insensitive pattern is a reason). The anchors and
+`trim` mark the ends of a text with the noncharacter U+FFFF, which the text must not
+hold. Groups are kept; lookaround, lazy quantifiers, back references and a legacy
+octal escape are reasons. A `replace` without the `g` flag is translated where its
+pattern matches at most once (anchored, without an alternation). Number formatting
+is translated for the languages `options.translate.locales` describes:
+`toLocaleString` with `style`, `currency`, `minimumFractionDigits` and
+`maximumFractionDigits`, written with `$format-number` (QUERY-FORMAT §8.7); a
+text's `toLocaleString` is the text, a boolean's its name.
+
+Every reason names what stops the translation, with a message:
+
+| Reason | What it names |
+|---|---|
+| `syntax` | text JavaScript does not read (or this parser does not: a class, a label); a let or const of a parameter's name |
+| `unreachable` | a statement after a `return` |
+| `return-line-break` | a line break right after `return`, where JavaScript returns undefined |
+| `loop` | `for`, `while` and `do` |
+| `function` | a function, class or async declaration, or an arrow outside a callback |
+| `statement` | `switch`, `try`, `break` and the other statements outside the subset; an expression statement other than an assignment to a let or a push |
+| `throw` | a `throw` statement |
+| `assignment` | an assignment to anything but a `let` of the body (to a `const`, or to a name before its declaration), or inside an expression |
+| `push` | a push to a name that does not hold an array literal of its own: JavaScript changes the array in place, which the row or another name may hold too |
+| `sort` | `.sort()` other than `(a, b) => key(a) - key(b)` (or the reverse), or of an array the body may read again: JavaScript sorts in place |
+| `sequence` | the comma operator |
+| `spread` | a spread outside an array literal |
+| `array-hole` | a hole in an array literal |
+| `object-spread` | a spread or a computed key in an object literal |
+| `object-key` | an object key that starts with `$`, or `__proto__` |
+| `computed-member` | a computed member of a value that is neither a constant table nor an array |
+| `string-of-object` | an array or an object made into text |
+| `call` | a call of something other than a helper, `Math`, `Date.now` or a method |
+| `arguments` | a call with arguments the translation does not take |
+| `helper` | a name that is not a helper the host maps |
+| `explanation` | the explaining helper outside a returned value |
+| `skip-value` | the skip sentinel used as a value |
+| `math` | a `Math` function outside the subset |
+| `date` | `new Date()` without exactly one argument |
+| `new` | a `new` other than `new Date(text).getTime()` and `new Intl.NumberFormat(…).format(n)` |
+| `method` | a method outside the subset |
+| `length`, `includes`, `concat` | of a value that could be text or an array |
+| `split` | `.split()` other than its first part by a literal text |
+| `replace` | a replacement function, a computed pattern, a replacement that names the match (`$&`, `$1`), or `replaceAll` of a pattern without the `g` flag |
+| `replace-first` | `.replace()` of the first match, where more than one can match |
+| `regex` | a pattern outside the rewrite: a flag other than `g` and `i`, lookaround, a lazy quantifier, a back reference, a legacy octal escape, a capital in a case-insensitive pattern, a pattern that matches the empty text, `test()` of a `g` pattern kept in a name |
+| `callback` | a callback other than an arrow of the element (and its index) |
+| `toFixed` | `.toFixed()` of anything but a literal number of digits from 0 to 20 |
+| `locale` | number formatting or case mapping in a language the translation does not describe, whose case rules are its own, or whose tag JavaScript refuses |
+| `destructuring` | a destructuring with a default, a nested or array pattern, or a rest |
+| `typeof` | `typeof` |
+| `operator` | another operator (`**`, `in`, `instanceof`, a bitwise one, unary `+`), or a `+` adding a value that may be text or a number, which JavaScript adds or concatenates by the value |
+| `unknown-name` | a name that is neither a variable of the body, the row nor a helper (`this` too), or a `let` or `const` read before its declaration |
+| `compile` | a translation the host's formula options cannot compile, or that is no formula document |
 
 A native formula carries no input schema (`schemas` is `{}`): the operators
 refuse what JavaScript would coerce, at the operator rather than the boundary. A
@@ -285,7 +359,10 @@ against the JavaScript it replaces:
 | `a == null` | `{"$is-null": {"$default": [a, null]}}` |
 | `Math.round(x * 100) / 100` | `{"$div": [{"$round": [{"$mul": [x, 100]}]}, 100]}` |
 | `Number(x.toFixed(2))`, `x >= 0` | `{"$round": [x, 2]}` |
-| `x.toFixed(d)` | `x` rounded on its exact value half away from zero (`$round` of the magnitude, the sign put back), written with the picture `0.00…` |
+| `x.toFixed(d)` | `x` rounded on its exact value half away from zero (`$round` of the magnitude, the sign put back), written with the picture `0.00…`, where `x` is below 10^(15 − d) or an integer below 2^53; `{"$string": x}` from 10^21 on; any other `x` refuses the row (`JQ2001`) |
+| `text.length` | `{"$add": [{"$string-length": text}, {"$string-length": {"$replace": [text, "[^\uD800\uDC00-\uDBFF\uDFFF]", ""]}}]}`: UTF-16 code units, a character beyond U+FFFF counted twice |
+| `list.join(sep)` | `{"$string-join": [{"$for": {"x": list}, "$return": {"$if": [{"$is-null": "$x"}, "", "$x"]}}, sep]}`: a null element is the empty text |
+| `list.map((e) => …)` | `[{"$for": {"e": list}, "$return": …}]`: `$for` takes the array one level deep (QUERY-FORMAT §6.2), so an element that is itself an array stays one element |
 | `x.toLocaleString('nl-NL')` | `{"$format-number": [x, "#.##0,###", "nl"]}` |
 | `x.toLocaleString('nl-NL', {maximumFractionDigits: 1})` | `{"$format-number": [x, "#.##0,#", "nl"]}` |
 | `x.toLocaleString('nl-NL', {style: 'currency', currency: 'EUR'})` | `{"$format-number": [x, "€ #.##0,00;€ -#.##0,00", "nl"]}`, the space a no-break space, and `€ NaN` for NaN as ICU writes it |
@@ -300,10 +377,16 @@ multiply-round-divide spelling reproduces it bit for bit (no difference over
 zero (`(-0.125).toFixed(2)` is `-0.13`) where `$round` rounds toward positive
 infinity (`-0.12`).
 
-`toFixed` translated as the table says agrees with JavaScript at 0, 1 and 2 digits:
-no difference over 200,000 values (the half-cent values, both signs). The three
-Dutch number formats agree with `Intl.NumberFormat` on ICU 78.3 over the same
-values.
+`toFixed(d)` writes the digits of the exact binary value, the query a rounded
+value's shortest digits: they are the same digits where the rounded value has at
+most 15 significant ones (`x` below 10^(15 − d)) or `x` is an integer below 2^53,
+and from 10^21 on JavaScript writes the number as `String` does. Translated as the
+table says, it agrees with JavaScript at 0, 1 and 2 digits:
+no difference over 200,000 values (the half-cent values, both signs). At every
+digit count from 0 to 20, over 84,000 values from 10^−8 to 10^22 (integers, ties
+and both signs among them), each value in that range agrees and each outside it is
+refused. The three Dutch number formats agree with `Intl.NumberFormat` on ICU 78.3
+over the half-cent values.
 
 ### Parity, records and review
 
@@ -379,14 +462,14 @@ qualification; their absence is not a pass.
 
 <!--fact:formula.measurements-->
 
-Measured on v24.19.0, linux/x64, AMD Ryzen 9 5900HX with Radeon Graphics.
+Measured on v24.20.0, linux/x64, AMD Ryzen 9 5900HX with Radeon Graphics.
 
 | Consumer | Rows | Static arithmetic ms | Native formula ms | Added cost ratio | Errors | Page rows | Heap / RSS MiB |
 |---|---:|---:|---:|---:|---:|---:|---|
-| catalog | 10000 | 0.75 | 224.64 | 297.63x | 0 | 256 | 31.20 / 110.09 |
-| archive-stock | 75000 | 2.29 | 1641.62 | 715.60x | 0 | 256 | 103.36 / 239.91 |
+| catalog | 10000 | 0.95 | 229.04 | 240.11x | 0 | 256 | 35.85 / 116.09 |
+| archive-stock | 75000 | 2.65 | 1629.40 | 615.91x | 0 | 256 | 84.54 / 255.76 |
 
-Sources: 8 preserved, 2 converted, 5 require review, 1 disabled. Original byte changes: 0; repeat migration changes: 0. Preview writes: 0; replay writes/revisions: 0/0.
+Sources: 8 preserved, 5 translated (1 with named differences), 2 untranslatable, 1 disabled. Original byte changes: 0; repeat migration changes: 0. Preview writes: 0; replay writes/revisions: 0/0.
 
 Synthetic public APIs only. Static arithmetic is faster; native costs include compilation, immutable snapshots, bounded outcomes and dependency memoization. Real saved-corpus, manual and physical-device acceptance remains pending.
 

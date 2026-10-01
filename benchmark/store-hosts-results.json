@@ -1,10 +1,10 @@
 {
   "recipe": "node --expose-gc benchmark/store-hosts.js",
-  "measuredAt": "2026-09-08T16:29:55.892Z",
-  "runtime": "v24.19.0",
+  "measuredAt": "2026-10-01T10:14:17.778Z",
+  "runtime": "v24.20.0",
   "host": {
     "platform": "linux",
-    "release": "7.2.3-200.nobara.fc44.x86_64",
+    "release": "7.2.6-201.nobara.fc44.x86_64",
     "cpu": "AMD Ryzen 9 5900HX with Radeon Graphics"
   },
   "samples": 7,
@@ -14,36 +14,36 @@
     {
       "name": "node",
       "startupMs": {
-        "p50": 0.1909429999999972,
-        "p95": 1.7004670000000033,
-        "max": 1.7004670000000033
+        "p50": 0.18452299999998445,
+        "p95": 1.806681999999995,
+        "max": 1.806681999999995
       },
       "statementMs": {
-        "p50": 87.03714200000002,
-        "p95": 91.088708,
-        "max": 91.088708
+        "p50": 77.83825399999998,
+        "p95": 78.42413399999998,
+        "max": 78.42413399999998
       },
       "eventLoopDelayMs": {
-        "p50": 1.074175,
-        "p95": 87.949311,
-        "max": 92.340223
+        "p50": 1.063935,
+        "p95": 78.905343,
+        "max": 79.691775
       },
       "tiny": {
         "operations": 1000,
-        "durationMs": 1.1404200000000628,
-        "operationsPerSecond": 876869.9251152601
+        "durationMs": 1.3254060000000436,
+        "operationsPerSecond": 754485.7952959072
       },
       "cursor": {
         "rows": 100000,
-        "durationMs": 113.83640600000001,
-        "sampledHeapGrowthBytes": 8795216,
-        "sampledRssGrowthBytes": 14970880,
-        "sampledRssBytes": 73674752
+        "durationMs": 120.68752499999994,
+        "sampledHeapGrowthBytes": 23276256,
+        "sampledRssGrowthBytes": 20447232,
+        "sampledRssBytes": 119447552
       },
       "mixed": {
         "reads": 24,
         "writes": 6,
-        "durationMs": 207.11544000000004,
+        "durationMs": 187.42578500000013,
         "metrics": null
       },
       "metrics": null
@@ -51,36 +51,36 @@
     {
       "name": "worker",
       "startupMs": {
-        "p50": 52.99385200000006,
-        "p95": 65.61752499999989,
-        "max": 65.61752499999989
+        "p50": 84.93240500000002,
+        "p95": 115.03426600000012,
+        "max": 115.03426600000012
       },
       "statementMs": {
-        "p50": 85.22905200000014,
-        "p95": 96.69240000000036,
-        "max": 96.69240000000036
+        "p50": 90.14074599999958,
+        "p95": 92.38321799999994,
+        "max": 92.38321799999994
       },
       "eventLoopDelayMs": {
-        "p50": 1.072127,
-        "p95": 1.091583,
-        "max": 3.516415
+        "p50": 1.060863,
+        "p95": 1.065983,
+        "max": 1.808383
       },
       "tiny": {
         "operations": 1000,
-        "durationMs": 52.17008699999997,
-        "operationsPerSecond": 19168.0723093293
+        "durationMs": 25.874444999999923,
+        "operationsPerSecond": 38648.171970452044
       },
       "cursor": {
         "rows": 100000,
-        "durationMs": 316.64082499999995,
-        "sampledHeapGrowthBytes": 5876192,
-        "sampledRssGrowthBytes": 13881344,
-        "sampledRssBytes": 105529344
+        "durationMs": 242.02711199999976,
+        "sampledHeapGrowthBytes": 14803072,
+        "sampledRssGrowthBytes": 3276800,
+        "sampledRssBytes": 163463168
       },
       "mixed": {
         "reads": 24,
         "writes": 6,
-        "durationMs": 198.56770700000015,
+        "durationMs": 192.60874999999987,
         "metrics": {
           "frames": 0,
           "rows": 0,
@@ -106,43 +106,43 @@
     {
       "name": "pool-1-reader",
       "startupMs": {
-        "p50": 76.72755199999983,
-        "p95": 77.48294299999998,
-        "max": 77.48294299999998
+        "p50": 166.84669399999984,
+        "p95": 176.09075399999983,
+        "max": 176.09075399999983
       },
       "statementMs": {
-        "p50": 81.95208299999967,
-        "p95": 83.82037599999967,
-        "max": 83.82037599999967
+        "p50": 77.5467520000002,
+        "p95": 79.57631799999945,
+        "max": 79.57631799999945
       },
       "eventLoopDelayMs": {
-        "p50": 1.072127,
-        "p95": 1.082367,
-        "max": 1.624063
+        "p50": 1.061887,
+        "p95": 1.071103,
+        "max": 1.881087
       },
       "tiny": {
         "operations": 1000,
-        "durationMs": 39.82591400000001,
-        "operationsPerSecond": 25109.279350123634
+        "durationMs": 30.21882800000003,
+        "operationsPerSecond": 33091.95181229395
       },
       "cursor": {
         "rows": 100000,
-        "durationMs": 295.61315000000013,
-        "sampledHeapGrowthBytes": 8865512,
-        "sampledRssGrowthBytes": 16891904,
-        "sampledRssBytes": 130850816
+        "durationMs": 270.96829400000024,
+        "sampledHeapGrowthBytes": 15440992,
+        "sampledRssGrowthBytes": 9527296,
+        "sampledRssBytes": 200888320
       },
       "mixed": {
         "reads": 24,
         "writes": 6,
-        "durationMs": 207.10999300000003,
+        "durationMs": 111.55292800000007,
         "metrics": {
           "active": 0,
           "idle": 2,
           "queued": 0,
           "waitMs": {
-            "p50": 95.20627200000035,
-            "p95": 190.31644499999948
+            "p50": 34.56489500000043,
+            "p95": 99.37343599999986
           },
           "workers": [
             {
@@ -150,14 +150,14 @@
               "healthy": true,
               "active": false,
               "generation": 1,
-              "executions": 7
+              "executions": 20
             },
             {
               "readOnly": true,
               "healthy": true,
               "active": false,
               "generation": 2,
-              "executions": 24
+              "executions": 11
             }
           ]
         }
@@ -167,8 +167,8 @@
         "idle": 2,
         "queued": 0,
         "waitMs": {
-          "p50": 0.0018850000001293665,
-          "p95": 0.0024450000000797445
+          "p50": 0.00042099999973288504,
+          "p95": 0.0011020000001735752
         },
         "workers": [
           {
@@ -191,43 +191,43 @@
     {
       "name": "pool-3-readers",
       "startupMs": {
-        "p50": 152.94953199999964,
-        "p95": 158.2923719999999,
-        "max": 158.2923719999999
+        "p50": 338.3402729999998,
+        "p95": 345.3224449999998,
+        "max": 345.3224449999998
       },
       "statementMs": {
-        "p50": 82.49704500000007,
-        "p95": 83.53717500000039,
-        "max": 83.53717500000039
+        "p50": 89.90065900000081,
+        "p95": 101.78967100000045,
+        "max": 101.78967100000045
       },
       "eventLoopDelayMs": {
-        "p50": 1.073151,
-        "p95": 1.082367,
-        "max": 1.857535
+        "p50": 1.061887,
+        "p95": 1.075199,
+        "max": 1.718271
       },
       "tiny": {
         "operations": 1000,
-        "durationMs": 38.166582000000744,
-        "operationsPerSecond": 26200.93148503527
+        "durationMs": 32.22483099999954,
+        "operationsPerSecond": 31031.970346097834
       },
       "cursor": {
         "rows": 100000,
-        "durationMs": 287.9088760000004,
-        "sampledHeapGrowthBytes": 13931176,
-        "sampledRssGrowthBytes": 23191552,
-        "sampledRssBytes": 176930816
+        "durationMs": 286.6284629999991,
+        "sampledHeapGrowthBytes": 15434088,
+        "sampledRssGrowthBytes": 6918144,
+        "sampledRssBytes": 271990784
       },
       "mixed": {
         "reads": 24,
         "writes": 6,
-        "durationMs": 74.79242299999987,
+        "durationMs": 56.758099999999104,
         "metrics": {
           "active": 0,
           "idle": 4,
           "queued": 0,
           "waitMs": {
-            "p50": 28.87568099999953,
-            "p95": 63.90881499999978
+            "p50": 18.677333999999973,
+            "p95": 46.418149999999514
           },
           "workers": [
             {
@@ -235,28 +235,28 @@
               "healthy": true,
               "active": false,
               "generation": 1,
-              "executions": 7
+              "executions": 13
             },
             {
               "readOnly": true,
               "healthy": true,
               "active": false,
               "generation": 2,
-              "executions": 8
+              "executions": 6
             },
             {
               "readOnly": true,
               "healthy": true,
               "active": false,
               "generation": 3,
-              "executions": 8
+              "executions": 6
             },
             {
               "readOnly": true,
               "healthy": true,
               "active": false,
               "generation": 4,
-              "executions": 8
+              "executions": 6
             }
           ]
         }
@@ -266,8 +266,8 @@
         "idle": 4,
         "queued": 0,
         "waitMs": {
-          "p50": 0.0018859999991036602,
-          "p95": 0.002304999999978463
+          "p50": 0.0004709999993792735,
+          "p95": 0.0015329999987443443
         },
         "workers": [
           {
@@ -302,14 +302,90 @@
       }
     }
   ],
+  "storeRows": 2000,
+  "storeScan": "$[?@.n < 0]",
+  "storeLevel": [
+    {
+      "host": "pool-1-reader",
+      "reads": "serialized",
+      "mixed": {
+        "reads": 24,
+        "writes": 6,
+        "durationMs": {
+          "p50": 135.25524099999893,
+          "p95": 142.80774399999973,
+          "max": 142.80774399999973
+        }
+      },
+      "tiny": {
+        "operations": 1000,
+        "durationMs": 42.834171999998944,
+        "operationsPerSecond": 23345.846395724064
+      }
+    },
+    {
+      "host": "pool-1-reader",
+      "reads": "parallel",
+      "mixed": {
+        "reads": 24,
+        "writes": 6,
+        "durationMs": {
+          "p50": 72.05716700000085,
+          "p95": 80.7787559999997,
+          "max": 80.7787559999997
+        }
+      },
+      "tiny": {
+        "operations": 1000,
+        "durationMs": 63.195738999998866,
+        "operationsPerSecond": 15823.851668227473
+      }
+    },
+    {
+      "host": "pool-3-readers",
+      "reads": "serialized",
+      "mixed": {
+        "reads": 24,
+        "writes": 6,
+        "durationMs": {
+          "p50": 128.8285330000017,
+          "p95": 135.68900799999938,
+          "max": 135.68900799999938
+        }
+      },
+      "tiny": {
+        "operations": 1000,
+        "durationMs": 38.73848100000032,
+        "operationsPerSecond": 25814.12523635069
+      }
+    },
+    {
+      "host": "pool-3-readers",
+      "reads": "parallel",
+      "mixed": {
+        "reads": 24,
+        "writes": 6,
+        "durationMs": {
+          "p50": 51.2410349999991,
+          "p95": 56.58258399999977,
+          "max": 56.58258399999977
+        }
+      },
+      "tiny": {
+        "operations": 1000,
+        "durationMs": 62.392785,
+        "operationsPerSecond": 16027.494204658438
+      }
+    }
+  ],
   "includes": [
     {
       "method": "serialize-again",
       "bytes": 3218891,
       "durationMs": {
-        "p50": 12.376438999999664,
-        "p95": 15.684277000000293,
-        "max": 15.684277000000293
+        "p50": 11.21376600000076,
+        "p95": 13.305677999998807,
+        "max": 13.305677999998807
       },
       "heapGrowthBytes": {
         "p50": 8387744,
@@ -321,21 +397,22 @@
       "method": "count-during-decode",
       "bytes": 3218891,
       "durationMs": {
-        "p50": 21.363886000000093,
-        "p95": 24.80113700000038,
-        "max": 24.80113700000038
+        "p50": 21.014361999999892,
+        "p95": 22.741275000000314,
+        "max": 22.741275000000314
       },
       "heapGrowthBytes": {
-        "p50": 9266632,
-        "p95": 9784584,
-        "max": 9784584
+        "p50": 9266984,
+        "p95": 10241456,
+        "max": 10241456
       }
     }
   ],
   "notes": [
     "Uncollected heap growth is allocation evidence, not retained memory or a precise allocation count.",
     "RSS includes SQLite worker heaps; sampling occurs every 1024 cursor rows.",
-    "Mixed workload uses classified Connection reads; Store root admission remains serial to preserve transaction ownership.",
+    "The host mixed workload uses classified Connection reads; the Store-level workload runs the same shape through one Store, serialized and with reads: parallel.",
+    "A parallel root read opens and commits a read transaction on its reader; sequential tiny root reads pay those two round trips.",
     "Tiny queries and startup include transport overhead; pool configuration adds a writer to its reader count."
   ]
 }

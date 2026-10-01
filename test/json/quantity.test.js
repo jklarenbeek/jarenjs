@@ -64,10 +64,46 @@ describe('$quantity', () => {
     assert.strictEqual(compileJsonQuery({ $quantity: ['$.missing', 'g'] })({}), undefined);
   });
 
+  it('never reads the tail of something else as a quantity', () => {
+    for (const text of ['1/2 kg', '1/4 lb', '5 1/2 lb', '2-3 kg', '2 - 3 kg', '2–3 kg', '1e3 g', '1e-3 g', 'B12 kg', '5 -2 kg'])
+      assert.strictEqual(qty(text, 'g'), undefined, text);
+  });
+
+  it('reads a minus sign written right before the number', () => {
+    assert.strictEqual(qty('Gewichtsverlies: -2 kg', 'g', 'nl'), -2000);
+    assert.strictEqual(qty('Change: \u22122 kg', 'g'), -2000);
+    assert.strictEqual(qty('Tolerance -0.5 mm', 'mm'), -0.5);
+  });
+
+  it('reads a unit word whole: an area or a speed is never a length', () => {
+    assert.strictEqual(qty('Perceel 300 m2, breedte 12 m', 'm', 'nl'), 12);
+    assert.strictEqual(qty('Woning 120 m\u00b2, plafond 2,6 m hoog', 'm', 'nl'), 2.6);
+    assert.strictEqual(qty('max 30 km/h over 5 km', 'km'), 5);
+    assert.strictEqual(qty('Perceel 300 m2', 'm2'), 300, 'an area read as an area');
+    assert.strictEqual(qty('1200 m3 gas', 'm3'), 1200);
+    assert.strictEqual(qty('1200 m\u00b3 gas', 'l'), 1200000);
+  });
+
+  it('reads a one-letter symbol as written, and leaves words with another meaning out', () => {
+    assert.strictEqual(qty('Router 5G, gewicht 300 g', 'g', 'nl'), 300, 'G is giga, not a gram');
+    assert.strictEqual(qty('2 in stock, 30 cm long', 'cm'), 30, 'in is a preposition');
+    assert.strictEqual(qty('Costs 5 pounds, weighs 2 kg', 'g'), 2000, 'a pound is a currency too');
+    assert.strictEqual(qty('1,5 L', 'ml', 'nl'), 1500, 'L is the litre');
+  });
+
+  it('reads a format whose separator is a hyphen', () => {
+    const q = (/** @type {string} */ t, /** @type {any} */ f) => compileJsonQuery({ $quantity: ['$.t', 'g', '$.f'] })({ t, f });
+    assert.strictEqual(q('1-500 g', { groupingSeparator: '-' }), 1500);
+    assert.strictEqual(q('1-5 g', { decimalSeparator: '-' }), 1.5);
+    assert.strictEqual(compileJsonQuery({ $quantity: ['$.t', 'g', '$.missing'] })({ t: '5 g' }), 5, 'an empty format is the default');
+  });
+
   it('every alias names a registry unit', () => {
     for (const [alias, id] of Object.entries(UNIT_ALIASES)) assert.ok(dimensionOf(id) !== null, `${alias} -> ${id}`);
     assert.strictEqual(unitOfAlias('GRAM'), 'g');
     assert.strictEqual(unitOfAlias('parsec'), undefined);
     assert.strictEqual(unitOfAlias('ton'), undefined, 'a word naming different units in different places is not guessed');
+    for (const word of ['in', 'pound', 'pounds', 'G', 'M', 'T']) assert.strictEqual(unitOfAlias(word), undefined, word);
+    assert.deepStrictEqual(['g', 't', 'm', 'l', 'L'].map(unitOfAlias), ['g', 't', 'm', 'l', 'l']);
   });
 });

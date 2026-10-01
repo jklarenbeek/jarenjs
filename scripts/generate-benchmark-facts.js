@@ -331,7 +331,8 @@ const FACTS = {
         '',
         `Built with \`${compiled.recipe}\` and run with every source and module path removed; the long read is ${compiled.scans} whole-collection reads of ${compiled.rows + 1} rows. `
           + ['worker', 'pool'].map((name) => `The ${name} host held the event loop at most ${fixed(host(name).eventLoopDelayMs.max)} ms against the ${compiled.eventLoopBoundMs} ms bound and took ${fixed(host(name).longReadMs / inThread.longReadMs)}× as long as the in-thread binding, which held the loop ${fixed(inThread.eventLoopDelayMs.max)} ms.`).join(' ')
-          + ` Built without the second entrypoint, the open refused: ${refused}.`,
+          + ` Built without the second entrypoint, the open refused: ${refused}.`
+          + ` The side-effect import of \`@jarenjs/db/worker-endpoint\`, bundled alone, keeps the endpoint: ${compiled.sideEffectImportBytes.bun} bytes with Bun, ${compiled.sideEffectImportBytes.esbuild} with esbuild.`,
         '',
       ];
     };

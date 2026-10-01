@@ -69,7 +69,7 @@ export const numberMessagesEn = {
  * import { compileJsonQuery } from '@jarenjs/json';
  * import { nl } from '@jarenjs/locales';
  * const { decimalFormat } = compileNumberLocale(nl);
- * compileJsonQuery({ $format-number: [1234.5, '€ #.##0,00', 'nl'] }, { decimalFormats: { nl: decimalFormat } })(null);
+ * compileJsonQuery({ '$format-number': [1234.5, '€ #.##0,00', 'nl'] }, { decimalFormats: { nl: decimalFormat } })(null);
  * // '€ 1.234,50'
  */
 export function compileNumberLocale(catalogLike = undefined) {

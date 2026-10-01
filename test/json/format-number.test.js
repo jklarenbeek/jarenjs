@@ -36,6 +36,38 @@ describe('$format-number — F&O pictures', () => {
     assert.strictEqual(fmt(-0, '0.00'), '-0.00', 'negative zero is negative');
   });
 
+  it("scales an exponent's mantissa by the picture's mandatory integer digits, none allowed, and prints it as it rounds", () => {
+    const fortran = { exponentSeparator: 'E' };
+    for (const [value, picture, want] of /** @type {[number, string, string][]} */ ([
+      // the mantissa has as many integer digits as the picture has mandatory ones
+      [1, '00.0e0', '10.0e-1'], [0.2, '000.0e0', '200.0e-3'], [12, '000.00e0', '120.00e-1'], [5, '000e0', '500e-2'],
+      [-7, '00.0e0', '-70.0e-1'],
+      // none: the mantissa is under one, and an optional integer digit writes its zero
+      [12345.678, '#.99e99', '0.12e05'], [0.2, '#e0', '0.2e0'], [0, '#.0e9', '0.0e0'], [0.123, '#.e9', '0.1e0'],
+      [0.1, '.9e9', '.1e0'],
+      // a rounding carry prints as it rounds
+      [0.99999, '0.0e0', '10.0e-1'],
+    ])) assert.strictEqual(fmt(value, picture), want, `${value} ${picture}`);
+    assert.strictEqual(fmt(0.234, '#.00E0', fortran), '0.23E0');
+    assert.strictEqual(fmt(0.234, '.00E0', fortran), '.23E0');
+  });
+
+  it('applies the minimum-size adjustments: zero under a picture with no mandatory digit keeps one fraction digit', () => {
+    for (const [value, picture, want] of /** @type {[number, string, string][]} */ ([
+      [0, '#.#', '.0'], [0, '.#', '.0'], [0, '###.###', '.0'], [0, '#.##', '.0'], [0, '###,###.##', '.0'],
+      [0.1, '###,###.##', '.1'], [1.2, '#.#', '1.2'], [1, '#.#', '1.0'], [0.2, '#.', '0'], [0, '#.00', '.00'],
+    ])) assert.strictEqual(fmt(value, picture), want, `${value} ${picture}`);
+  });
+
+  it('repeats grouping only when every multiple of its size inside the integer part holds a separator', () => {
+    for (const [value, picture, want] of /** @type {[number, string, string][]} */ ([
+      [642120, '####,##', '6421,20'], [642120, '###,##', '6421,20'], [642120, '0000,00', '6421,20'],
+      [642120, '##,#,#', '6421,2,0'], [123456789, '###,##,00', '12345,67,89'],
+      // regular: the multiples repeat as far as the number needs
+      [123456789, '#,##0', '123,456,789'], [123456789, '##,##', '1,23,45,67,89'], [1234567, '###,###', '1,234,567'],
+    ])) assert.strictEqual(fmt(value, picture), want, `${value} ${picture}`);
+  });
+
   it('spells NaN alone, an infinity between the prefix and suffix, and the empty sequence as NaN', () => {
     assert.strictEqual(compileJsonQuery({ '$format-number': [{ $div: [0, 0] }, '€ #0'] })(null), 'NaN');
     assert.strictEqual(compileJsonQuery({ '$format-number': [{ $div: [-1, 0] }, '€ #0 x'] })(null), '-€ Infinity x');
@@ -92,6 +124,23 @@ describe('$format-number — refusals', () => {
     refused({ '$format-number': [1, '#;#;#', '$.f'] }, 'JQ2001', /more than one pattern separator/, undefined, { f: { decimalSeparator: ',', groupingSeparator: '.' } });
     assert.throws(() => compileJsonQuery(1, { decimalFormats: { bad: { zeroDigit: 'x' } } }),
       (/** @type {any} */ e) => e instanceof TypeError && /options\.decimalFormats\.bad is not a decimal format/.test(e.message));
+  });
+
+  it('reads an empty format operand as the default format, as F&O reads an empty decimal-format name', () => {
+    assert.strictEqual(compileJsonQuery({ '$format-number': ['$.v', '#,##0.0', '$.missing'] })({ v: 1234.5 }), '1,234.5');
+  });
+
+  it('reads a decimal format record that can still change afresh, never as it read it before', () => {
+    const record = { decimalSeparator: ',', groupingSeparator: '.' };
+    const spell = () => compileJsonQuery({ '$format-number': [1234.5, '#.##0,0', '$.f'] })({ f: record });
+    assert.strictEqual(spell(), '1.234,5');
+    record.decimalSeparator = '.';
+    record.groupingSeparator = ',';
+    assert.throws(spell, (/** @type {any} */ e) => e.code === 'JQ2001', 'the Dutch picture no longer reads under the changed record');
+    assert.strictEqual(compileJsonQuery({ '$format-number': [1234.5, '#,##0.0', '$.f'] })({ f: record }), '1,234.5');
+    // a frozen record cannot change: it is read once
+    const frozen = Object.freeze({ decimalSeparator: ',', groupingSeparator: '.' });
+    assert.strictEqual(compileJsonQuery({ '$format-number': [1234.5, '#.##0,0', '$.f'] })({ f: frozen }), '1.234,5');
   });
 
   it('refuses a computed picture or format at run time (JQ2001), and caches the last one', () => {

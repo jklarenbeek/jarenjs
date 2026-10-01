@@ -113,7 +113,7 @@ export const DB_CODES = Object.freeze({
   JD2087: 'the connection to the database was lost',
   JD2088: 'the transaction was aborted by an earlier failure in it',
   JD2089: 'the statement was cancelled by the server',
-  JD2090: 'the connection generation was lost or cleanup expired',
+  JD2090: 'the connection generation was lost, its cleanup expired, or a statement reached a parallel read that had ended',
   JD2091: 'host admission capacity was exhausted or acquisition expired',
   JD2092: 'a host transport or buffered result bound was exceeded',
   JD2093: 'the worker protocol frame is invalid',

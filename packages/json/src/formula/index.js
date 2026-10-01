@@ -3,6 +3,7 @@
 import { createBoundedCache } from '@jarenjs/core/cache';
 import { semanticKey } from '@jarenjs/core/object';
 import { compileJsonQuery } from '../query/index.js';
+import { validateDateNames, validateDecimalFormats } from '../query/normalize.js';
 import { canonicalizeJson } from '../canonical.js';
 import { FormulaError, snapshot, credit } from './shared.js';
 
@@ -101,6 +102,12 @@ function outcome(value, doc) {
  * @param {FormulaOptions} [options]
  */
 export function createFormulaCompiler(options = {}) {
+  // the host's locale data and pack registry are checked once, here: a
+  // malformed one is the host's TypeError, never every document's error
+  if (options.dateNames !== undefined) validateDateNames(options.dateNames);
+  if (options.decimalFormats !== undefined) validateDecimalFormats(options.decimalFormats);
+  if (options.packs !== undefined && (typeof options.packs?.packs !== 'function' || typeof options.packs?.forPacks !== 'function'))
+    throw new TypeError('options.packs must be an operator pack registry - createJsltRegistry() with its packs - not a list of packs');
   const cache = createBoundedCache(credit(options.cacheSize, 128, 'cacheSize'));
   const identities = new WeakMap();
   let nextIdentity = 0;
@@ -130,6 +137,11 @@ export function createFormulaCompiler(options = {}) {
       capabilityKeys.push(['pack', ref.name, ref.version, identity(options.packs)]);
     }
     const packOptions = packNames.length === 0 ? { extensions: undefined, functions: {} } : options.packs.forPacks(packNames);
+    // a helper named like a function of a listed pack would shadow one or the other: refused, not resolved
+    for (const [i, ref] of (doc.helpers ?? []).entries()) {
+      if (Object.hasOwn(packOptions.functions ?? {}, ref.name))
+        throw new FormulaError('JQ0014', `helper ${ref.name} has the name of a function of a listed operator pack`, doc.id, `/helpers/${i}`);
+    }
     const schemas = {};
     for (const key of ['inputSchema', 'resultSchema']) if (doc[key] !== undefined) {
       const ref = doc[key];

@@ -4,6 +4,9 @@ import { DbRuntimeError } from '../errors.js';
 import { jsonStringBytes } from '../json-bytes.js';
 
 export const WORKER_PROTOCOL_VERSION = 1;
+/** The mark a driver puts in its worker's `workerData`: an endpoint serves
+ * only a worker started with it, never a thread that merely imported it. */
+export const WORKER_ENDPOINT_MARK = `jarenjs-sqlite-endpoint/${WORKER_PROTOCOL_VERSION}`;
 export const WORKER_DEFAULTS = Object.freeze({ windowRows: 64, windowBytes: 1048576,
   maxPending: 64, maxStatements: 1024, maxCursors: 64, allMaxRows: 100000,
   allMaxBytes: 16777216, closeTimeoutMs: 5000, startupTimeoutMs: 10000 });

@@ -22,11 +22,24 @@
 import { parseFormulaBody, positionOf, FormulaSyntaxError } from './javascript.js';
 
 /** The noncharacter the anchor and trim compositions mark an end with. */
-const SENTINEL = '￿';
+const SENTINEL = '\uFFFF';
 /** ECMAScript white space and line terminators, as an I-Regexp class body (`\s`, `trim`). */
-const JS_SPACE = '\t\n\u000b\f\r    -     　﻿';
+const JS_SPACE = '\t\n\u000b\f\r \u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000\uFEFF';
 /** Any character, as an I-Regexp class. */
 const ANYTHING = '[\\p{L}\\P{L}]';
+/** The characters from U+E000 to U+FFFF: JavaScript orders them after every character beyond U+FFFF (an I-Regexp class). */
+const HIGH_BMP = '[\uE000-\uFFFF]';
+/** The characters beyond U+FFFF, each two UTF-16 code units in JavaScript (an I-Regexp class). */
+const ASTRAL = '[\u{10000}-\u{10FFFF}]';
+/** Every character but those beyond U+FFFF (an I-Regexp class). */
+const NOT_ASTRAL = '[^\u{10000}-\u{10FFFF}]';
+/**
+ * A JavaScript pattern that is one atom matching a single UTF-16 code unit
+ * (`.`, `\S`, `\D`, `\W` or a negated class), alone or repeated with `+`.
+ */
+const ONE_UNIT_ATOM = /^(?:\.|\\[SDW]|\[\^(?:\\.|[^\]\\])*\])(\+)?$/;
+/** The methods whose result is a new array: sorting it in place changes nothing the body reads again. */
+const FRESH_ARRAY_METHODS = new Set(['map', 'filter', 'concat', 'slice', 'flatMap']);
 
 /** @param {Set<string>} a @param {Set<string>} b */
 const union = (a, b) => new Set([...a, ...b]);
@@ -63,6 +76,8 @@ export function translateFormulaBody(source, options = {}) {
     return finish(null, 'value', [], [{ kind: 'syntax', at: at(e.offset), message: e.message }], []);
   }
 
+  // the names whose array may also be held elsewhere: a push to one is a reason (see assignment)
+  const aliased = aliasedNames(ast);
   const usesOutcome = mentions(ast, (name) => name === opts.skip || name === opts.explain, opts.helperObject)
     || (opts.explanationMember !== null && returnsExplanationObject(ast, opts.explanationMember));
   const resultMode = usesOutcome ? 'outcome' : 'value';
@@ -97,6 +112,8 @@ export function translateFormulaBody(source, options = {}) {
    * @property {any} [table] - the object literal a constant table was built from
    * @property {string} [element] - an array's element type, when known
    * @property {boolean} [fromArray] - an element of an array (a callback's parameter, a find, an index)
+   * @property {boolean} [assumed] - `type` is taken from a `??` fallback: the value itself may hold another
+   * @property {string[]} [refs] - the objects it may be (see `refsOf`)
    */
 
   /** @returns {Value} */
@@ -121,6 +138,53 @@ export function translateFormulaBody(source, options = {}) {
     const name = fresh('t');
     return { $let: { [name]: v.q }, $return: use(`$${name}`) };
   }
+
+  /**
+   * An array as the source of a `$for`, `$some` or `$every`: the array value
+   * itself, which they iterate one level deep (QUERY-FORMAT §6.2), so an
+   * element that is itself an array stays one element.
+   * @param {Value} v
+   */
+  const iterate = (v) => v.q;
+
+  /** A value's type where the translation knows it, not where `??` took it from its fallback. @param {Value} v */
+  const certainType = (v) => (v.assumed ? 'unknown' : v.type);
+
+  /**
+   * The objects a value may be, for `===`: the row's members it may read
+   * (by their keys) and the helper calls it may come from; none for a
+   * primitive; undefined where the translation cannot tell.
+   * @param {Value} v @returns {string[] | undefined}
+   */
+  const refsOf = (v) => v.refs ?? (['number', 'string', 'boolean', 'null', 'undefined'].includes(certainType(v)) ? [] : undefined);
+
+  /** The union of two values' possible objects. @param {Value} a @param {Value} b @returns {string[] | undefined} */
+  const refsOfEither = (a, b) => {
+    const ra = refsOf(a);
+    const rb = refsOf(b);
+    return ra === undefined || rb === undefined ? undefined : [...new Set([...ra, ...rb])];
+  };
+
+  /** A read of the row (`row`, `row.a`, `row.a[0]`) as the object it is. @param {string | null} key */
+  const rowRefs = (key) => (key !== null && /^row(?:$|[.[])/.test(key) ? [key] : undefined);
+
+  /**
+   * A call (or `.length`) on a receiver that may be null or undefined yields
+   * nothing there: JavaScript yields undefined for an optional call, and
+   * throws for a plain one (the absent-receiver difference).
+   * @param {Value} receiver @param {Env} env @param {(receiver: Value) => Value} build @returns {Value}
+   */
+  function guarded(receiver, env, build) {
+    if (!nullish(receiver, env) || receiver.type === 'regexp') return build(receiver);
+    const name = receiver.pathable ? null : fresh('r');
+    const ref = name ? `$${name}` : receiver.q;
+    const inner = build({ ...receiver, q: ref, pathable: true, absent: false, nullable: false });
+    const q = { $if: [{ '$is-null': { $default: [ref, null] } }, { $seq: [] }, inner.q] };
+    return { ...inner, q: name ? { $let: { [name]: receiver.q }, $return: q } : q, absent: true };
+  }
+
+  /** A text's length in UTF-16 code units, as JavaScript counts it: each character beyond U+FFFF is two. @param {Value} s */
+  const utf16Length = (s) => once(s, (x) => ({ $add: [{ '$string-length': x }, { '$string-length': { $replace: [x, NOT_ASTRAL, ''] } }] }));
 
   //#endregion
 
@@ -225,9 +289,10 @@ export function translateFormulaBody(source, options = {}) {
   /** The fact key of a read (`row.a.b`, an alias's key), or null. @param {any} node @param {Env} env */
   function keyOf(node, env) {
     if (node.type === 'Identifier') {
-      if (node.name === opts.argument) return 'row';
+      // a name the body binds (a callback's parameter, a var) is that binding, even one named like the row
       const info = env.vars.get(node.name);
-      return info ? info.value.key : null;
+      if (info) return info.tdz ? null : info.value.key;
+      return node.name === opts.argument ? 'row' : null;
     }
     if (node.type === 'Member') {
       const base = keyOf(node.object, env);
@@ -253,7 +318,8 @@ export function translateFormulaBody(source, options = {}) {
       case 'Literal': {
         const v = node.value;
         if (typeof v === 'string') return { ...value(str(v), 'string'), literal: v };
-        if (typeof v === 'number') return { ...value(v, 'number'), literal: v };
+        // a literal too large for a double is Infinity, which JSON cannot hold: 1 / 0
+        if (typeof v === 'number') return { ...value(Number.isFinite(v) ? v : { $div: [1, 0] }, 'number'), literal: v };
         if (typeof v === 'boolean') return { ...value(v, 'boolean'), literal: v };
         return { ...value(null, 'null', false, true), literal: null };
       }
@@ -272,7 +338,8 @@ export function translateFormulaBody(source, options = {}) {
         const test = condition(node.test, env);
         const a = tx(node.consequent, withFacts(env, factsWhen(node.test, env, true)));
         const b = tx(node.alternate, withFacts(env, factsWhen(node.test, env, false)));
-        return value({ $if: [test, a.q, b.q] }, a.type === b.type ? a.type : 'unknown', a.absent || b.absent, a.nullable || b.nullable);
+        return { ...value({ $if: [test, a.q, b.q] }, a.type === b.type ? a.type : 'unknown', a.absent || b.absent, a.nullable || b.nullable),
+          assumed: a.type === b.type && Boolean(a.assumed || b.assumed), refs: refsOfEither(a, b), kinds: kindsOfEither(a, b) };
       }
       case 'Arrow':
         reason('function', node, 'a function outside the callback of map, filter, find, some, every or sort');
@@ -287,7 +354,8 @@ export function translateFormulaBody(source, options = {}) {
         reason('spread', node, 'a spread outside an array literal');
         return EMPTY();
       case 'Unsupported':
-        reason(node.what, node, `'${node.what}' is not translated`);
+        // this, super and import: a body reads its row through its parameter
+        reason('unknown-name', node, `'${node.what}' is not translated: a body reads its row through its parameter`);
         return EMPTY();
       default:
         reason('syntax', node, `a ${node.type} expression is not translated`);
@@ -312,13 +380,21 @@ export function translateFormulaBody(source, options = {}) {
   /** @param {any} node @param {Env} env @returns {Value} */
   function identifier(node, env) {
     const { name } = node;
-    if (name === opts.argument) return { ...value('$', 'object', false, false, 'row'), pathable: true };
+    // a name the body binds (a callback's parameter, a var) is that binding, even one named like the row
     const info = env.vars.get(name);
+    if (info?.tdz) {
+      reason('unknown-name', node, `'${name}' is read before its let or const: JavaScript throws a ReferenceError there`);
+      return EMPTY();
+    }
     if (info) return prove(readVar(info), env);
+    if (name === opts.argument) return { ...value('$', 'object', false, false, 'row'), pathable: true, refs: ['row'] };
     if (name === 'undefined') return EMPTY();
     if (name === 'NaN') return value({ $div: [0, 0] }, 'number');
     if (name === 'Infinity') return value({ $div: [1, 0] }, 'number');
-    if (name === opts.skip) return value({ kind: 'skip' }, 'skip');
+    if (name === opts.skip) {
+      reason('skip-value', node, 'the skip sentinel used as a value: only a returned sentinel skips');
+      return EMPTY();
+    }
     reason('unknown-name', node, `'${name}' is neither a variable of the body, the row nor a helper this translation maps`);
     return EMPTY();
   }
@@ -333,39 +409,50 @@ export function translateFormulaBody(source, options = {}) {
     if (!node.computed && node.object.type === 'Identifier' && node.object.name === opts.helperObject && !env.vars.has(opts.helperObject))
       return identifier({ ...node, type: 'Identifier', name: node.property }, env);
     const object = tx(node.object, env);
-    if (!node.optional && !node.object.optionalChain && nullish(object, env) && !(object.type === 'undefined'))
+    if (!node.optional && nullish(object, env) && !(object.type === 'undefined'))
       differ('absent-receiver', node, node.destructured
         ? 'JavaScript throws a TypeError destructuring null or undefined; the query reads nothing'
         : 'JavaScript throws a TypeError reading a member of null or undefined; the query reads nothing');
     if (!node.computed && node.property === 'length') {
-      if (object.type === 'string') return value({ '$string-length': object.q }, 'number', object.absent, false);
-      if (object.type === 'array') return value({ $count: itemsOf(object) }, 'number');
+      if (object.type === 'string') return guarded(object, env, (s) => value(utf16Length(s), 'number'));
+      if (object.type === 'array') return guarded(object, env, (a) => value({ $count: itemsOf(a) }, 'number'));
       reason('length', node, '.length of a value whose type (string or array) the translation cannot tell');
       return EMPTY();
     }
     const key = keyOf(node, env);
     const absent = true;
+    // a read of the row is the object at its key; a constant table holds primitives only
+    const refs = object.table ? [] : rowRefs(key);
     if (!node.computed) {
-      if (object.pathable) return prove({ ...value(`${object.q}${segment(node.property)}`, 'unknown', absent, true, key), pathable: true }, env);
-      return prove(value({ $get: [object.q, str(node.property)] }, 'unknown', absent, true, key), env);
+      if (object.pathable) return prove({ ...value(`${object.q}${segment(node.property)}`, 'unknown', absent, true, key), pathable: true, refs }, env);
+      return prove({ ...value({ $get: [object.q, str(node.property)] }, 'unknown', absent, true, key), refs }, env);
     }
     const property = node.property;
     if (property.type === 'Literal' && typeof property.value === 'string') {
-      if (object.pathable) return prove({ ...value(`${object.q}${segment(property.value)}`, 'unknown', absent, true, key), pathable: true }, env);
-      return prove(value({ $get: [object.q, str(property.value)] }, 'unknown', absent, true, key), env);
+      if (object.pathable) return prove({ ...value(`${object.q}${segment(property.value)}`, 'unknown', absent, true, key), pathable: true, refs }, env);
+      return prove({ ...value({ $get: [object.q, str(property.value)] }, 'unknown', absent, true, key), refs }, env);
     }
     if (property.type === 'Literal' && typeof property.value === 'number' && Number.isInteger(property.value) && property.value >= 0) {
-      if (object.type === 'object' || object.table) return value({ $get: [object.q, String(property.value)] }, 'unknown', absent, true, key);
-      if (object.pathable) return { ...value(`${object.q}[${property.value}]`, elementType(object), absent, true, key), pathable: true, fromArray: true };
-      return { ...value({ $get: [object.q, property.value] }, elementType(object), absent, true, key), fromArray: true };
+      if (object.type === 'object' || object.table) return { ...value({ $get: [object.q, String(property.value)] }, 'unknown', absent, true, key), refs };
+      if (object.pathable) return { ...value(`${object.q}[${property.value}]`, elementType(object), absent, true, key), pathable: true, fromArray: true, refs };
+      return { ...value({ $get: [object.q, property.value] }, elementType(object), absent, true, key), fromArray: true, refs };
     }
-    // a dynamic key into a constant table
+    // a dynamic key into a constant table: JavaScript makes the key text, undefined as 'undefined'
     const k = tx(property, env);
     if (object.table) {
       differ('prototype-key', node, 'JavaScript also finds a key on Object.prototype (constructor, toString, …) where the table has none; the query finds nothing');
-      return value({ $get: [object.q, k.type === 'string' ? k.q : { $string: k.q }] }, 'unknown', true, true);
+      return { ...value({ $get: [object.q, certainType(k) === 'string' && !nullish(k, env) ? k.q : { $string: { $default: [k.q, 'undefined'] } }] }, 'unknown', true, true), refs: [] };
     }
-    if (object.type === 'array') return { ...value({ $get: [object.q, k.q] }, elementType(object), true, true), fromArray: true };
+    if (object.type === 'array') {
+      // an array has no element at a negative index (the query's $get counts those from the end)
+      const element = (/** @type {any} */ list, /** @type {any} */ key) => ({ $if: [{ $lt: [key, 0] }, { $seq: [] }, { $get: [list, key] }] });
+      if (certainType(k) === 'number') return { ...value(once(object, (list) => once(k, (key) => element(list, key))), elementType(object), true, true), fromArray: true };
+      differ('prototype-key', node, 'JavaScript also reads an array at a text key the array has (length, map, …); the query reads nothing there');
+      // a text JavaScript reads as an index: '1', not '01'
+      const q = once(object, (list) => once(k, (key) => ({ $if: [{ '$is-string': key },
+        { $if: [{ $match: [key, '0|[1-9][0-9]*'] }, { $get: [list, { $number: key }] }, { $seq: [] }] }, element(list, key)] })));
+      return { ...value(q, elementType(object), true, true), fromArray: true };
+    }
     reason('computed-member', node, 'a computed member of a value that is neither a constant table nor an array');
     return EMPTY();
   }
@@ -412,10 +499,9 @@ export function translateFormulaBody(source, options = {}) {
     for (const element of node.elements) {
       if (element === null) { reason('array-hole', node, 'an array hole'); continue; }
       if (element.type === 'Spread') {
-        // a spread uses its value as an array (the type precondition)
         const v = tx(element.argument, env);
         if (nullish(v, env)) differ('absent-receiver', element, 'JavaScript throws a TypeError spreading null or undefined; the query spreads nothing');
-        members.push(itemsOf(v));
+        members.push(spreadItems(v));
         continue;
       }
       const v = tx(element, env);
@@ -424,6 +510,24 @@ export function translateFormulaBody(source, options = {}) {
     }
     const element = node.elements.length > 0 && node.elements.every((/** @type {any} */ e) => e && e.type === 'Literal' && typeof e.value === 'string') ? 'string' : 'unknown';
     return { ...value(members, 'array'), element };
+  }
+
+  /**
+   * What `...v` puts into an array: an array's elements, a text's characters
+   * (JavaScript spreads a text by code points); anything else refuses the
+   * row, as JavaScript throws.
+   * @param {Value} v
+   */
+  function spreadItems(v) {
+    if (certainType(v) === 'array') return itemsOf(v);
+    const characters = (/** @type {any} */ x) => {
+      const i = fresh('i');
+      return { $for: { [i]: { $range: [0, { $sub: [{ '$string-length': x }, 1] }] } }, $return: { $substring: [x, `$${i}`, 1] } };
+    };
+    if (certainType(v) === 'string') return once(v, characters);
+    const items = fresh('items');
+    return { $let: { [items]: v.q }, $return: { $if: [{ '$is-string': `$${items}` }, characters(`$${items}`),
+      { $if: [{ '$is-array': `$${items}` }, `$${items}[*]`, { $add: [`$${items}`, ''] }] }] } };
   }
 
   /** @param {any} node @param {Env} env @returns {Value} */
@@ -450,9 +554,9 @@ export function translateFormulaBody(source, options = {}) {
     if (node.operator === 'void' && node.argument.type === 'Literal') return EMPTY();
     if (node.operator === '-') {
       const v = tx(node.argument, env);
-      if (typeof v.q === 'number') return { ...value(-v.q, 'number'), literal: -v.q };
-      arithmeticOperand(v, node.argument, env);
-      return value({ $neg: v.q }, 'number', v.absent);
+      // a negative zero is written $neg 0: JSON text writes -0 as 0
+      if (typeof v.q === 'number') return { ...value(v.q === 0 ? { $neg: 0 } : -v.q, 'number'), literal: -v.q };
+      return value({ $neg: numeric(v, node.argument, env).q }, 'number', v.absent);
     }
     if (node.operator === 'typeof') reason('typeof', node, 'typeof');
     else reason('operator', node, `the operator '${node.operator}'`);
@@ -464,15 +568,65 @@ export function translateFormulaBody(source, options = {}) {
     if (nullish(v, env)) differ('nullish-arithmetic', node, 'JavaScript computes with undefined (NaN) or null (0); the query yields nothing for undefined and refuses null');
   }
 
+  /**
+   * An arithmetic operand as JavaScript converts it: a boolean the body
+   * computes is 0 or 1; a text it computes is read as Number reads it
+   * (named number-parse); null and undefined are named nullish-arithmetic.
+   * @param {Value} v @param {any} node @param {Env} env @returns {Value}
+   */
+  function numeric(v, node, env) {
+    arithmeticOperand(v, node, env);
+    return asNumber(v, node, env, true);
+  }
+
+  /**
+   * A value the body computes, where JavaScript reads it as a number: a
+   * boolean is 0 or 1, and (with `text`) a text is read as Number reads it
+   * (named number-parse). A read of the row is left as it is: it holds the
+   * type the body uses it as (the type precondition).
+   * @param {Value} v @param {any} node @param {Env} env @param {boolean} text @returns {Value}
+   */
+  function asNumber(v, node, env, text) {
+    const kinds = kindsOf(v);
+    if (!kinds) return v;
+    const bool = kinds.includes('boolean');
+    const str = text && kinds.includes('string');
+    if (!bool && !str) return v;
+    if (str) differ('number-parse', node, "JavaScript computes with text as Number reads it ('' and blanks as 0, hex); the query's $number reads a JSON number only");
+    const rest = kinds.filter((k) => k !== 'boolean' && (!str || k !== 'string'));
+    if (!rest.length && kinds.length === 1) return { ...v, q: bool ? { $if: [v.q, 1, 0] } : { $number: v.q }, type: 'number', kinds: ['number'] };
+    const q = once(v, (x) => {
+      let r = x;
+      if (str) r = { $if: [{ '$is-string': x }, { $number: x }, r] };
+      if (bool) r = { $if: [{ '$is-boolean': x }, { $if: [x, 1, 0] }, r] };
+      return r;
+    });
+    const converted = [...new Set(['number', ...rest])];
+    return { ...v, q, type: converted.length === 1 ? 'number' : 'unknown', kinds: converted };
+  }
+
+  /**
+   * The primitive types a value the body computes may have: one for a
+   * literal or an operator's result, several for `?:`, `||`, `&&` and `??`
+   * of such values; undefined for a read of the row (or anything else).
+   * @param {Value} v @returns {string[] | undefined}
+   */
+  const kindsOf = (v) => v.kinds ?? (['number', 'string', 'boolean', 'null', 'undefined'].includes(certainType(v)) ? [certainType(v)] : undefined);
+
+  /** The types either of two values may have; a read of the row on a side counts as `unknown`. @param {Value} a @param {Value} b @returns {string[] | undefined} */
+  const kindsOfEither = (a, b) => {
+    const ka = kindsOf(a);
+    const kb = kindsOf(b);
+    return ka === undefined && kb === undefined ? undefined : [...new Set([...(ka ?? ['unknown']), ...(kb ?? ['unknown'])])];
+  };
+
   /** @param {any} node @param {Env} env @returns {Value} */
   function binary(node, env) {
     const { operator } = node;
     if (operator === '+') return plus(node, env);
     if (operator === '-' || operator === '*' || operator === '/' || operator === '%') {
-      const a = tx(node.left, env);
-      const b = tx(node.right, env);
-      arithmeticOperand(a, node.left, env);
-      arithmeticOperand(b, node.right, env);
+      const a = numeric(tx(node.left, env), node.left, env);
+      const b = numeric(tx(node.right, env), node.right, env);
       if (operator === '%' && !(typeof b.q === 'number' && b.q !== 0))
         differ('remainder-by-zero', node, 'JavaScript computes NaN for a remainder by zero; the query refuses it (JQ2002)');
       const op = { '-': '$sub', '*': '$mul', '/': '$div', '%': '$mod' }[operator];
@@ -488,11 +642,77 @@ export function translateFormulaBody(source, options = {}) {
       if (b.nullable && nullish(b, env) && !(typeof a.literal === 'number' && !passes(a.literal, 0)))
         differ('nullish-comparison', node.right, 'JavaScript compares null as 0; the query compares nothing');
       const op = { '<': '$lt', '>': '$gt', '<=': '$le', '>=': '$ge' }[operator];
-      return value({ [/** @type {string} */ (op)]: [a.q, b.q] }, 'boolean');
+      return value(ordered(/** @type {string} */ (op), a, b, env, node), 'boolean');
     }
     if (operator === '===' || operator === '!==' || operator === '==' || operator === '!=') return equality(node, env);
     reason('operator', node, `the operator '${operator}'`);
     return EMPTY();
+  }
+
+  /**
+   * An ordering comparison as JavaScript makes it: two numbers, or two texts
+   * by their UTF-16 code units; a boolean the body computes is 0 or 1. Where
+   * JavaScript would convert between types — a number and a text, a boolean,
+   * an array or an object read from the row — the row is refused (JQ2001).
+   * null and undefined compare as the query compares them (nullish-comparison).
+   * @param {string} op @param {Value} a @param {Value} b @param {Env} env @param {any} nodes - the comparison, for positions
+   */
+  function ordered(op, a, b, env, nodes) {
+    // a boolean the body computes is a number; beside a number, so is a text the body computes
+    let left = asNumber(a, nodes.left, env, false);
+    let right = asNumber(b, nodes.right, env, false);
+    const onlyNumbers = (/** @type {Value} */ v) => kindsOf(v)?.every((k) => k === 'number') ?? false;
+    if (onlyNumbers(left)) right = asNumber(right, nodes.right, env, true);
+    if (onlyNumbers(right)) left = asNumber(left, nodes.left, env, true);
+    const ta = certainType(left);
+    const tb = certainType(right);
+    if (ta === 'number' && tb === 'number') return { [op]: [left.q, right.q] };
+    if (ta === 'string' && tb === 'string') return once(left, (l) => once(right, (r) => textOrder(op, l, r, left, right)));
+    return once(left, (l) => once(right, (r) => {
+      const both = (/** @type {string} */ test) => ({ $and: [{ [test]: l }, { [test]: r }] });
+      const nothing = (/** @type {Value} */ v, /** @type {any} */ x) => (nullish(v, env) ? [{ '$is-null': { $default: [x, null] } }] : []);
+      // compared without a conversion: two numbers, or null or nothing on a side
+      const plain = [...(ta === 'string' || tb === 'string' ? [] : [both('$is-number')]), ...nothing(left, l), ...nothing(right, r)];
+      // a number beside a text: JavaScript reads a text the body computes as Number reads it (number-parse);
+      // a text the row holds refuses the row ($add of a non-number), as does any other pairing
+      const bodyText = (/** @type {Value} */ v) => kindsOf(v)?.includes('string') ?? false;
+      let mixed = { $add: [l, r] };
+      if (bodyText(left) || bodyText(right)) {
+        differ('number-parse', nodes, "JavaScript compares a text with a number as Number reads the text ('' and blanks as 0, hex); the query's $number reads a JSON number only");
+        const [m, n] = [fresh('n'), fresh('n')];
+        const asNum = (/** @type {any} */ x, /** @type {Value} */ v) => (bodyText(v) ? { $if: [{ '$is-string': x }, { $number: x }, x] } : x);
+        mixed = { $let: { [m]: asNum(l, left), [n]: asNum(r, right) },
+          $return: { $if: [{ $and: [{ '$is-number': `$${m}` }, { '$is-number': `$${n}` }] }, { [op]: [`$${m}`, `$${n}`] }, { $add: [`$${m}`, `$${n}`] }] } };
+      }
+      const numbers = plain.length ? { $if: [plain.length === 1 ? plain[0] : { $or: plain }, { [op]: [l, r] }, mixed] } : mixed;
+      if (ta === 'number' || tb === 'number') return numbers;
+      return { $if: [both('$is-string'), textOrder(op, l, r, left, right), numbers] };
+    }));
+  }
+
+  /**
+   * Two texts in JavaScript's order, by UTF-16 code units. The query orders
+   * characters, which differs only where, at the first difference, one text
+   * has a character from U+E000 to U+FFFF and the other one beyond U+FFFF:
+   * there the order of that pair is turned around.
+   * @param {string} op @param {any} l @param {any} r @param {Value} a @param {Value} b
+   */
+  function textOrder(op, l, r, a, b) {
+    // a literal without a character from U+D800 on never meets that pair
+    const plain = (/** @type {Value} */ v) => typeof v.literal === 'string' && !/[\uD800-\uFFFF]/.test(v.literal);
+    if (plain(a) || plain(b)) return { [op]: [l, r] };
+    const has = (/** @type {any} */ x, /** @type {string} */ cls) => ({ $search: [x, cls] });
+    const risky = { $or: [{ $and: [has(l, HIGH_BMP), has(r, ASTRAL)] }, { $and: [has(l, ASTRAL), has(r, HIGH_BMP)] }] };
+    const [i, k, x, y] = [fresh('i'), fresh('k'), fresh('x'), fresh('y')];
+    const charAt = (/** @type {any} */ s, /** @type {any} */ p) => ({ $substring: [s, p, 1] });
+    const length = (/** @type {any} */ s) => ({ '$string-length': s });
+    const firstDifference = { $head: { $for: { [k]: { $range: [0, { $sub: [{ $min: { $seq: [length(l), length(r)] } }, 1] }] } },
+      $where: { $ne: [charAt(l, `$${k}`), charAt(r, `$${k}`)] }, $return: `$${k}` } };
+    const pair = (/** @type {string} */ p, /** @type {string} */ q) => ({ $and: [{ $match: [p, HIGH_BMP] }, { $match: [q, ASTRAL] }] });
+    const exact = { $let: { [i]: firstDifference }, $return: { $if: [{ $empty: `$${i}` }, { [op]: [length(l), length(r)] },
+      { $let: { [x]: charAt(l, `$${i}`), [y]: charAt(r, `$${i}`) }, $return: { $if: [{ $or: [pair(`$${x}`, `$${y}`), pair(`$${y}`, `$${x}`)] },
+        { [op]: [`$${y}`, `$${x}`] }, { [op]: [`$${x}`, `$${y}`] }] } }] } };
+    return { $if: [risky, exact, { [op]: [l, r] }] };
   }
 
   /** `+`: concatenation once an operand is text, addition otherwise. @param {any} node @param {Env} env @returns {Value} */
@@ -505,18 +725,25 @@ export function translateFormulaBody(source, options = {}) {
     const values = operands.map((o) => ({ o, v: tx(o, env) }));
     // JavaScript adds until the first text operand, then concatenates
     const firstText = values.findIndex(({ v }) => v.type === 'string');
+    // an operand added (all of them with no text, those before the first text with two or more there) that may be
+    // text or a number decides by its value whether + adds or concatenates
+    const added = firstText < 0 ? values : firstText > 1 ? values.slice(0, firstText) : [];
+    const either = added.find(({ v }) => kindsOf(v)?.includes('string'));
+    if (either) {
+      reason('operator', either.o, "'+' of a value that may be text or a number: JavaScript adds or concatenates by the value");
+      return EMPTY();
+    }
     if (firstText < 0) {
-      let q = values[0].v.q;
-      arithmeticOperand(values[0].v, values[0].o, env);
-      for (const { o, v } of values.slice(1)) { arithmeticOperand(v, o, env); q = { $add: [q, v.q] }; }
+      let q = numeric(values[0].v, values[0].o, env).q;
+      for (const { o, v } of values.slice(1)) q = { $add: [q, numeric(v, o, env).q] };
       return value(q, 'number', values.some(({ v }) => v.absent));
     }
     const parts = [];
     let head = null;
     if (firstText > 1) {
       // the numbers before the first text are added first
-      head = values[0].v.q;
-      for (const { o, v } of values.slice(1, firstText)) { arithmeticOperand(v, o, env); head = { $add: [head, v.q] }; }
+      head = numeric(values[0].v, values[0].o, env).q;
+      for (const { o, v } of values.slice(1, firstText)) head = { $add: [head, numeric(v, o, env).q] };
       parts.push(head);
     }
     for (const [i, { o, v }] of values.entries()) {
@@ -548,15 +775,27 @@ export function translateFormulaBody(source, options = {}) {
     else {
       const a = tx(left, env);
       const b = tx(right, env);
-      if (a.type === 'skip' || b.type === 'skip') { reason('skip-value', node, 'a comparison with the skip sentinel'); return EMPTY(); }
-      const primitive = (/** @type {Value} */ v) => ['number', 'string', 'boolean', 'null', 'undefined'].includes(v.type);
-      if ([a, b].some((v) => v.type === 'object' || v.type === 'array') || (a.fromArray && b.fromArray && !primitive(a) && !primitive(b)))
-        differ('identity', node, 'JavaScript compares objects by identity; the query compares them by value');
+      const ta = certainType(a);
+      const tb = certainType(b);
+      const primitive = (/** @type {string} */ t) => ['number', 'string', 'boolean', 'null', 'undefined'].includes(t);
+      // which objects each side may be: two sides that may be one object, or may be two equal ones, are named
+      const ra = refsOf(a);
+      const rb = refsOf(b);
+      const one = ra !== undefined && rb !== undefined && ra.length === 1 && rb.length === 1 && ra[0] === rb[0];
+      const apart = ra !== undefined && rb !== undefined && !ra.some((r) => rb.includes(r));
+      const objects = !primitive(ta) && !primitive(tb);
+      const named = [a, b].some((v) => v.type === 'object' || v.type === 'array') || (objects && !one && !apart);
+      if (named) differ('identity', node, 'JavaScript compares objects by identity; the query compares them by value');
+      // two sides that are never one object are equal only where neither is an array or an object
+      const byReference = !named && objects && apart;
+      const same = (/** @type {any} */ x, /** @type {any} */ y) => (byReference
+        ? { $and: [{ $eq: [x, y] }, { $not: { $or: [{ '$is-array': x }, { '$is-object': x }] } }] } : { $eq: [x, y] });
       const aAbsent = nullish(a, env) && a.absent;
       const bAbsent = nullish(b, env) && b.absent;
-      if (aAbsent && bAbsent) q = once(a, (x) => once(b, (y) => ({ $if: [{ $and: [{ $empty: x }, { $empty: y }] }, true, { $eq: [x, y] }] })));
-      else q = { $eq: [a.q, b.q] };
-      if (loose && ![a, b].some((v) => v.type === 'number' || v.type === 'string' || v.type === 'boolean'))
+      if (aAbsent && bAbsent) q = once(a, (x) => once(b, (y) => ({ $if: [{ $and: [{ $empty: x }, { $empty: y }] }, true, same(x, y)] })));
+      else q = byReference ? once(a, (x) => same(x, b.q)) : same(a.q, b.q);
+      // == is === only between two values of one primitive type
+      if (loose && !(ta === tb && ['number', 'string', 'boolean'].includes(ta)))
         differ('loose-equality', node, "JavaScript's == converts between types ('1' == 1); the query compares values of one type");
     }
     return value(negate ? { $not: q } : q, 'boolean');
@@ -568,12 +807,16 @@ export function translateFormulaBody(source, options = {}) {
     if (node.operator === '??') {
       const b = tx(node.right, env);
       const q = once(a, (x) => ({ $if: [{ '$is-null': { $default: [x, null] } }, b.q, x] }));
-      return { ...value(q, a.type === 'unknown' ? b.type : a.type, b.absent, b.nullable, null), fromArray: Boolean(a.fromArray && b.fromArray), element: a.element ?? b.element };
+      // `row.l ?? []` is used as an array: its type is assumed from the fallback, never certain
+      const type = a.type === b.type ? a.type : a.type === 'unknown' ? b.type : 'unknown';
+      return { ...value(q, type, b.absent, b.nullable, null), assumed: type !== 'unknown' && (a.type !== b.type || Boolean(a.assumed || b.assumed)),
+        fromArray: Boolean(a.fromArray && b.fromArray), element: a.element ?? b.element, refs: refsOfEither(a, b), kinds: kindsOfEither(a, b) };
     }
     const truthy = node.operator === '||';
     const b = tx(node.right, withFacts(env, factsWhen(node.left, env, !truthy)));
     const q = once(a, (x) => ({ $if: [a.type === 'boolean' ? x : { $boolean: x }, truthy ? x : b.q, truthy ? b.q : x] }));
-    return value(q, a.type === b.type ? a.type : 'unknown', a.absent || b.absent, a.nullable || b.nullable);
+    return { ...value(q, a.type === b.type ? a.type : 'unknown', a.absent || b.absent, a.nullable || b.nullable),
+      assumed: a.type === b.type && Boolean(a.assumed || b.assumed), refs: refsOfEither(a, b), kinds: kindsOfEither(a, b) };
   }
 
   //#endregion
@@ -632,7 +875,8 @@ export function translateFormulaBody(source, options = {}) {
       reason('explanation', node, `${name}() outside a returned value`);
       return EMPTY();
     }
-    const helper = opts.helpers[name];
+    // a helper is one the host maps, never a name Object.prototype has (toString, constructor)
+    const helper = Object.hasOwn(opts.helpers, name) ? opts.helpers[name] : undefined;
     if (!helper) {
       reason('helper', node, `'${name}' is not a helper this translation maps`);
       return EMPTY();
@@ -643,9 +887,14 @@ export function translateFormulaBody(source, options = {}) {
     });
     for (const d of helper.differences ?? []) differ(d.kind, node, d.note);
     const type = helper.returns ?? 'unknown';
+    // its result is a new object, or one of its arguments
+    const refs = args.reduce((/** @type {string[] | undefined} */ all, /** @type {Value} */ a) => {
+      const r = refsOf(a);
+      return all === undefined || r === undefined ? undefined : [...all, ...r];
+    }, [`call:${node.start}`]);
     if (helper.call) {
       callHelpers.set(helper.call.name, helper.call);
-      return { ...value({ $call: [helper.call.name, ...args.map((/** @type {Value} */ a) => a.q)] }, type, true, true), element: helper.element };
+      return { ...value({ $call: [helper.call.name, ...args.map((/** @type {Value} */ a) => a.q)] }, type, true, true), element: helper.element, refs };
     }
     const { params, expression } = helper.native;
     if (args.length > params.length) reason('arguments', node, `${name}() takes ${params.length} argument(s)`);
@@ -658,13 +907,12 @@ export function translateFormulaBody(source, options = {}) {
       renames[p] = local;
       bindings[local] = i < args.length ? args[i].q : { $seq: [] };
     });
-    return { ...value({ $let: bindings, $return: renameVariables(expression, renames) }, type, helper.absent ?? true, helper.nullable ?? true), element: helper.element };
+    return { ...value({ $let: bindings, $return: renameVariables(expression, renames) }, type, helper.absent ?? true, helper.nullable ?? true), element: helper.element, refs };
   }
 
   /** @param {any} node @param {string} name @param {Env} env @returns {Value} */
   function mathCall(node, name, env) {
-    const args = node.args.map((/** @type {any} */ a) => tx(a, env));
-    args.forEach((/** @type {Value} */ a, /** @type {number} */ i) => arithmeticOperand(a, node.args[i], env));
+    const args = node.args.map((/** @type {any} */ a) => numeric(tx(a, env), a, env));
     const one = () => { if (args.length !== 1) reason('arguments', node, `Math.${name}() of one value`); return args[0]?.q ?? null; };
     switch (name) {
       case 'round': return value({ $round: [one()] }, 'number');
@@ -690,20 +938,36 @@ export function translateFormulaBody(source, options = {}) {
     // a regular expression's test
     if (receiver.type === 'regexp') {
       if (name !== 'test' || args.length !== 1) { reason('regex', node, `a regular expression's .${name}()`); return EMPTY(); }
-      return regexTest(receiver, tx(args[0], env));
+      return regexTest(receiver, tx(args[0], env), env, callee.object);
     }
-    if (name === 'toFixed') return toFixed(node, receiver, env);
-    if (name === 'toLocaleString') return localeFormat(node, receiver, args, env);
-    if (name === 'toString' && args.length === 0) return value({ $string: receiver.q }, 'string', receiver.absent);
-    const arrayMethod = ['map', 'filter', 'find', 'some', 'every', 'sort', 'join', 'includes', 'push', 'concat', 'indexOf', 'slice', 'reduce', 'forEach', 'flatMap', 'findIndex'].includes(name);
-    const stringMethod = ['toLowerCase', 'toUpperCase', 'toLocaleLowerCase', 'toLocaleUpperCase', 'trim', 'trimStart', 'trimEnd', 'startsWith', 'endsWith', 'replace', 'replaceAll', 'split', 'match', 'normalize', 'charAt', 'substring', 'padStart', 'padEnd', 'repeat'].includes(name);
-    const isArray = receiver.type === 'array' || (receiver.type !== 'string' && arrayMethod && !stringMethod);
+    // a method text and arrays both have, on a value of a type the translation cannot tell
     if (name === 'includes' && receiver.type !== 'array' && receiver.type !== 'string') {
       reason('includes', node, '.includes() on a value the translation cannot tell is text or an array');
       return EMPTY();
     }
-    if (isArray) return arrayCall(node, name, receiver, env);
-    return stringCall(node, name, receiver, env);
+    if (name === 'concat' && receiver.type !== 'array' && receiver.type !== 'string') {
+      reason('concat', node, '.concat() on a value the translation cannot tell is text or an array');
+      return EMPTY();
+    }
+    // on null or undefined the call yields nothing: JavaScript's undefined for an optional call (and a TypeError for a plain one)
+    return guarded(receiver, env, (r) => {
+      if (name === 'toFixed') return toFixed(node, r, env);
+      // a text's toLocaleString is the text, a boolean's its name; a number's is formatted
+      if (name === 'toLocaleString' && certainType(r) === 'string') return value(r.q, 'string');
+      if (name === 'toLocaleString' && certainType(r) === 'boolean') return value({ $string: r.q }, 'string');
+      if (name === 'toLocaleString') {
+        const kinds = kindsOf(r) ?? [];
+        if (!kinds.includes('string') && !kinds.includes('boolean')) return localeFormat(node, r, args, env);
+        return value(once(r, (x) => ({ $if: [{ '$is-string': x }, x,
+          { $if: [{ '$is-boolean': x }, { $string: x }, localeFormat(node, { ...r, q: x }, args, env).q] }] })), 'string');
+      }
+      if (name === 'toString' && args.length === 0) return value({ $string: r.q }, 'string');
+      const arrayMethod = ['map', 'filter', 'find', 'some', 'every', 'sort', 'join', 'includes', 'push', 'concat', 'indexOf', 'slice', 'reduce', 'forEach', 'flatMap', 'findIndex'].includes(name);
+      const stringMethod = ['toLowerCase', 'toUpperCase', 'toLocaleLowerCase', 'toLocaleUpperCase', 'trim', 'trimStart', 'trimEnd', 'startsWith', 'endsWith', 'replace', 'replaceAll', 'split', 'match', 'normalize', 'charAt', 'substring', 'padStart', 'padEnd', 'repeat', 'concat'].includes(name);
+      const isArray = r.type === 'array' || (r.type !== 'string' && arrayMethod && !stringMethod);
+      if (isArray) return arrayCall(node, name, r, env);
+      return stringCall(node, name, r, env);
+    });
   }
 
   /** @param {any} node @param {string} name @param {Value} s @param {Env} env @returns {Value} */
@@ -714,9 +978,8 @@ export function translateFormulaBody(source, options = {}) {
       case 'toLowerCase': return value({ $lower: s.q }, 'string', absent);
       case 'toUpperCase': return value({ $upper: s.q }, 'string', absent);
       case 'toLocaleLowerCase': case 'toLocaleUpperCase': {
-        const tag = args[0]?.type === 'Literal' ? String(args[0].value).toLowerCase() : null;
-        if (args.length > 1 || (args.length === 1 && (tag === null || /^(tr|az|lt)\b/.test(tag)))) {
-          reason('locale', node, `.${name}() in a language with its own case rules`);
+        if (args.length > 1 || (args.length === 1 && !plainCaseLanguage(args[0]))) {
+          reason('locale', node, `.${name}() in a language with its own case rules, or with a tag JavaScript refuses`);
           return EMPTY();
         }
         return value({ [name === 'toLocaleLowerCase' ? '$lower' : '$upper']: s.q }, 'string', absent);
@@ -725,8 +988,15 @@ export function translateFormulaBody(source, options = {}) {
       case 'startsWith': case 'endsWith': case 'includes': {
         if (args.length !== 1) { reason('arguments', node, `.${name}() with a position`); return EMPTY(); }
         const op = { startsWith: '$starts-with', endsWith: '$ends-with', includes: '$contains' }[name];
-        return value({ [/** @type {string} */ (op)]: [s.q, tx(args[0], env).q] }, 'boolean');
+        const arg = tx(args[0], env);
+        if (arg.type === 'regexp') { reason('regex', args[0], `.${name}() of a regular expression, which JavaScript refuses`); return EMPTY(); }
+        // JavaScript searches for the argument as text: undefined as 'undefined', null as 'null', a number as String writes it
+        const text = certainType(arg) === 'string' && !nullish(arg, env) ? arg.q : { $string: { $default: [arg.q, 'undefined'] } };
+        return value({ [/** @type {string} */ (op)]: [s.q, text] }, 'boolean');
       }
+      case 'concat':
+        // text concatenation: each argument as text, as + writes it
+        return value({ $concat: [s.q, ...args.map((/** @type {any} */ a) => stringPart(a, env))] }, 'string', absent);
       case 'replace': case 'replaceAll': return replaceCall(node, name, s, env);
       case 'split': {
         // only the first part: `text.split(' ')[0]`
@@ -750,7 +1020,21 @@ export function translateFormulaBody(source, options = {}) {
       reason('split', call, '.split() by something other than a non-empty literal text');
       return EMPTY();
     }
-    return value({ $replace: [s.q, `${escapeRegExp(sep.value)}${ANYTHING}*`, ''] }, 'string', s.absent);
+    return guarded(s, env, (r) => value({ $replace: [r.q, `${escapeRegExp(sep.value)}${ANYTHING}*`, ''] }, 'string'));
+  }
+
+  /**
+   * Whether a language tag maps case as the query does: a literal tag
+   * JavaScript accepts, of a language other than Turkish, Azerbaijani and
+   * Lithuanian (in any spelling: `tur`, `TR`, `tr-TR`).
+   * @param {any} arg
+   */
+  function plainCaseLanguage(arg) {
+    if (arg.type !== 'Literal' || typeof arg.value !== 'string') return false;
+    let tag;
+    try { tag = Intl.getCanonicalLocales(arg.value)[0]; }
+    catch { return false; }
+    return tag !== undefined && !/^(?:tr|az|lt)(?:-|$)/i.test(tag);
   }
 
   /** @param {any} node @param {string} name @param {Value} s @param {Env} env @returns {Value} */
@@ -769,14 +1053,19 @@ export function translateFormulaBody(source, options = {}) {
     else differ('replacement-pattern', replacement, "JavaScript reads $&, $1, … in a computed replacement; the query inserts it as written");
     const p = tx(pattern, env);
     if (p.type === 'regexp') {
+      if (name === 'replaceAll' && !p.regex?.flags.includes('g')) { reason('replace', pattern, '.replaceAll() of a regular expression without the g flag, which JavaScript refuses'); return EMPTY(); }
       const global = name === 'replaceAll' || p.regex?.flags.includes('g');
       const rewritten = rewriteRegExp(/** @type {any} */ (p.regex), pattern);
       if (!rewritten) return EMPTY();
       if (rewritten.ignoreCase) { reason('regex', pattern, 'a case-insensitive pattern in .replace(): the replaced text keeps its case'); return EMPTY(); }
-      if (!global && !rewritten.anchored && !rewritten.singleMatch) {
+      if (!global && !rewritten.singleMatch) {
         reason('replace-first', node, '.replace() of the first match only (no g flag), where more than one can match');
         return EMPTY();
       }
+      // one atom replaced away, or a run of it replaced once, comes out the same whether an emoji is one character or two
+      const oneAtom = rewritten.oneUnit && global && (rewritten.oneUnit.plus || (replacement.type === 'Literal' && replacement.value === ''));
+      if (rewritten.unitSensitive && !oneAtom)
+        differ('code-units', pattern, 'JavaScript matches one UTF-16 code unit where the query matches a character: an emoji (two code units) differs');
       if (rewritten.anchored) {
         // the ends marked by a sentinel, matched, then unmarked
         const marked = { $concat: [SENTINEL, s.q, SENTINEL] };
@@ -801,12 +1090,25 @@ export function translateFormulaBody(source, options = {}) {
     return pattern === '.' && node.type === 'Call' && node.callee.type === 'Member' && node.callee.property === 'toFixed';
   }
 
-  /** A regular expression's test of a text. @param {Value} re @param {Value} subject @returns {Value} */
-  function regexTest(re, subject) {
-    const rewritten = rewriteRegExp(/** @type {any} */ (re.regex), re.regex?.node);
+  /**
+   * A regular expression's test of a text.
+   * @param {Value} re @param {Value} subject @param {Env} env @param {any} receiver - the expression the regular expression is
+   * @returns {Value}
+   */
+  function regexTest(re, subject, env, receiver) {
+    const node = re.regex?.node;
+    // test() of a g pattern goes on from where the last match ended: a pattern kept in a name keeps that state
+    if (re.regex?.flags.includes('g') && receiver.type !== 'RegExp') { reason('regex', node, 'test() of a g regular expression kept in a name, which goes on from its last match'); return EMPTY(); }
+    const rewritten = rewriteRegExp(/** @type {any} */ (re.regex), node);
     if (!rewritten) return EMPTY();
-    if (subject.type !== 'string') differ('regex-coercion', re.regex?.node, 'JavaScript tests the text of any value (null as "null"); the query tests text only');
-    let text = subject.type === 'string' ? subject.q : { $string: subject.q };
+    // the value tested as text, as JavaScript makes it: undefined is the text 'undefined', which the query cannot spell
+    if (subject.absent && !(subject.key && env.facts.has(subject.key)))
+      differ('regex-coercion', node, "JavaScript tests undefined as the text 'undefined'; the query tests nothing");
+    if (rewritten.ignoreCase)
+      differ('case-fold', node, 'JavaScript folds case by its own table (the dotted and dotless i, the final sigma, the Kelvin sign); the query lower-cases the text');
+    if (rewritten.unitSensitive && !rewritten.oneUnit)
+      differ('code-units', node, 'JavaScript matches one UTF-16 code unit where the query matches a character: an emoji (two code units) differs');
+    let text = certainType(subject) === 'string' ? subject.q : { $string: subject.q };
     if (rewritten.ignoreCase) text = { $lower: text };
     if (rewritten.anchored) text = { $concat: [SENTINEL, text, SENTINEL] };
     return value({ $search: [text, rewritten.pattern] }, 'boolean');
@@ -817,19 +1119,44 @@ export function translateFormulaBody(source, options = {}) {
     const args = node.args;
     switch (name) {
       case 'join': {
-        const sep = args.length === 0 ? ',' : tx(args[0], env).q;
-        return value({ '$string-join': [itemsOf(a), sep] }, 'string');
+        // JavaScript joins with a comma where the separator is missing, and writes null and undefined elements as empty text
+        const v = args.length === 0 ? null : tx(args[0], env);
+        const sep = v === null ? ',' : certainType(v) === 'string' && !nullish(v, env) ? v.q : { $string: { $default: [v.q, ','] } };
+        const x = fresh('x');
+        return value({ '$string-join': [{ $for: { [x]: iterate(a) }, $return: { $if: [{ '$is-null': `$${x}` }, '', `$${x}`] } }, sep] }, 'string');
       }
       case 'includes': {
         if (args.length !== 1) { reason('arguments', node, '.includes() with a position'); return EMPTY(); }
+        const needle = tx(args[0], env);
+        if (!['number', 'string', 'boolean', 'null', 'undefined'].includes(certainType(needle)))
+          differ('identity', node, 'JavaScript finds an object by identity; the query finds one equal to it');
         const x = fresh('x');
-        return value({ $some: { [x]: itemsOf(a) }, $satisfies: { $eq: [`$${x}`, tx(args[0], env).q] } }, 'boolean');
+        // as includes compares (SameValueZero): NaN finds NaN
+        return value(once(needle, (v) => ({ $some: { [x]: iterate(a) },
+          $satisfies: { $or: [{ $eq: [`$${x}`, v] }, { $and: [{ $ne: [`$${x}`, `$${x}`] }, { $ne: [v, v] }] }] } })), 'boolean');
       }
-      case 'concat':
-        return { ...value([itemsOf(a), ...args.map((/** @type {any} */ x) => { const v = tx(x, env); return v.type === 'array' ? itemsOf(v) : v.q; })], 'array'), element: a.element };
+      case 'concat': {
+        // an array argument is spread, anything else is one element
+        const parts = args.map((/** @type {any} */ arg) => {
+          if (arg.type === 'Spread') { reason('spread', arg, 'a spread argument'); return { $seq: [] }; }
+          const v = tx(arg, env);
+          if (certainType(v) === 'array') return itemsOf(v);
+          if (nullish(v, env) && v.absent) differ('absent-element', arg, 'JavaScript keeps undefined as an element; the query drops it');
+          if (['number', 'string', 'boolean', 'null'].includes(certainType(v))) return v.q;
+          const c = fresh('c');
+          return { $let: { [c]: v.q }, $return: { $if: [{ '$is-array': `$${c}` }, `$${c}[*]`, `$${c}`] } };
+        });
+        return value([itemsOf(a), ...parts], 'array');
+      }
       case 'map': case 'filter': case 'find': case 'some': case 'every':
         return callback(node, name, a, env);
-      case 'sort': return sortCall(node, a, env);
+      case 'sort': {
+        // sort() reorders the array itself: only a fresh array ([...list], a map or filter result) leaves the body's reads as they were
+        const list = node.callee.object;
+        const copy = list.type === 'Array' || (list.type === 'Call' && list.callee.type === 'Member' && !list.callee.computed && FRESH_ARRAY_METHODS.has(list.callee.property));
+        if (!copy) { reason('sort', node, '.sort() of an array the body may read again: JavaScript sorts it in place; sort a copy ([...list].sort(…))'); return EMPTY(); }
+        return sortCall(node, a, env);
+      }
       default:
         reason('method', node, `.${name}() is not translated`);
         return EMPTY();
@@ -842,13 +1169,13 @@ export function translateFormulaBody(source, options = {}) {
     if (node.args.length !== 1 || fn.type !== 'Arrow' || fn.params.length < 1 || fn.params.length > 2) {
       if (fn?.type === 'Identifier' && fn.name === 'Boolean' && name === 'find') {
         const x = fresh('x');
-        return { ...value({ $head: { $for: { [x]: itemsOf(a) }, $where: { $boolean: `$${x}` }, $return: `$${x}` } }, a.element ?? 'unknown', true, true), fromArray: true };
+        return { ...value({ $head: { $for: { [x]: iterate(a) }, $where: { $boolean: `$${x}` }, $return: `$${x}` } }, a.element ?? 'unknown', true, true), fromArray: true };
       }
       reason('callback', node, `.${name}() takes an arrow function of the element (and its index) here`);
       return EMPTY();
     }
     const x = fresh(fn.params[0]);
-    const binding = fn.params.length === 2 ? { [x]: { $in: itemsOf(a), $at: fresh(fn.params[1]) } } : { [x]: itemsOf(a) };
+    const binding = fn.params.length === 2 ? { [x]: { $in: iterate(a), $at: fresh(fn.params[1]) } } : { [x]: iterate(a) };
     // an element is a value of the array: present, of the type the body uses it as
     let inner = withVar(env, fn.params[0], { qname: x, value: { ...value(`$${x}`, a.element ?? 'unknown', false, false, `var:${x}`), fromArray: true } });
     if (fn.params.length === 2) {
@@ -910,12 +1237,12 @@ export function translateFormulaBody(source, options = {}) {
     const inner = withVar(env, p, { qname: x, value: { ...value(`$${x}`, a.element ?? 'unknown', false, false, `var:${x}`), fromArray: true } });
     const key = tx(keyNode, inner);
     if (key.absent || key.nullable) differ('sort-key', fn, 'JavaScript leaves a NaN comparison in place; the query orders a missing key first');
-    return { ...value([{ $for: { [x]: itemsOf(a) }, $orderby: [{ $key: key.q, $dir: dir }], $return: `$${x}` }], 'array'), element: a.element };
+    return { ...value([{ $for: { [x]: iterate(a) }, $orderby: [{ $key: key.q, $dir: dir }], $return: `$${x}` }], 'array'), element: a.element };
   }
 
   /** A node's source shape with one name abstracted. @param {any} node @param {string} name */
   function shape(node, name) {
-    return JSON.stringify(node, (k, v) => (k === 'start' || k === 'end' || k === 'outerStart' || k === 'outerEnd' ? undefined
+    return JSON.stringify(node, (k, v) => (k === 'start' || k === 'end' || k === 'outerStart' || k === 'outerEnd' || k === 'opStart' ? undefined
       : v && v.type === 'Identifier' && v.name === name ? { type: 'Param' } : v));
   }
 
@@ -930,7 +1257,14 @@ export function translateFormulaBody(source, options = {}) {
     if (digits === null || node.args.length > 1) { reason('toFixed', node, '.toFixed() of a literal number of digits (0 to 20)'); return EMPTY(); }
     arithmeticOperand(n, node.callee.object, env);
     const picture = digits === 0 ? '0' : `0.${'0'.repeat(digits)}`;
-    const q = once(n, (x) => ({ '$format-number': [{ $if: [{ $lt: [x, 0] }, { $neg: { $round: [{ $neg: x }, digits] } }, { $round: [{ $add: [x, 0] }, digits] }] }, picture] }));
+    // the query writes a rounded value by its shortest digits, JavaScript by its exact ones: they are the same digits
+    // where the rounded value has at most 15 significant ones (|x| below 10^(15 − d)) or x is an integer below 2^53;
+    // from 1e21 JavaScript writes the number as String does; any other value refuses the row
+    const exact = (/** @type {any} */ x) => ({ $or: [{ $lt: [{ $abs: x }, 10 ** (15 - digits)] },
+      { $and: [{ $eq: [x, { $floor: x }] }, { $lt: [{ $abs: x }, 2 ** 53] }] }, { $ne: [x, x] }] });
+    const q = once(n, (x) => ({ $if: [exact(x),
+      { '$format-number': [{ $if: [{ $lt: [x, 0] }, { $neg: { $round: [{ $neg: x }, digits] } }, { $round: [{ $add: [x, 0] }, digits] }] }, picture] },
+      { $if: [{ $ge: [{ $abs: x }, 1e21] }, { $string: x }, { $number: 'toFixed digits the query cannot write exactly' }] }] }));
     return value(q, 'string');
   }
 
@@ -945,10 +1279,11 @@ export function translateFormulaBody(source, options = {}) {
       reason('locale', node, 'number formatting without a literal language tag');
       return EMPTY();
     }
-    const locale = opts.locales[tagNode.value];
+    // a described language is one the host names, never a name Object.prototype has
+    const locale = Object.hasOwn(opts.locales, tagNode.value) ? opts.locales[tagNode.value] : undefined;
     if (!locale) { reason('locale', tagNode, `the language '${tagNode.value}' is not one this translation describes`); return EMPTY(); }
     /** @type {Record<string, any>} */
-    const o = {};
+    const o = Object.create(null);
     if (optionsNode) {
       if (optionsNode.type !== 'Object') { reason('locale', optionsNode, 'formatting options that are not an object literal'); return EMPTY(); }
       for (const p of optionsNode.properties) {
@@ -965,14 +1300,15 @@ export function translateFormulaBody(source, options = {}) {
     arithmeticOperand(n, node, env);
     const style = o.style ?? 'decimal';
     if (style === 'currency') {
-      const picture = locale.currencies?.[o.currency];
+      const picture = locale.currencies && typeof o.currency === 'string' && Object.hasOwn(locale.currencies, o.currency) ? locale.currencies[o.currency] : undefined;
       if (!picture || o.minimumFractionDigits !== undefined || o.maximumFractionDigits !== undefined) {
         reason('locale', optionsNode ?? node, `currency '${o.currency}' formatting this translation has no measured picture for`);
         return EMPTY();
       }
       // ICU writes NaN with the currency's prefix: the picture would write NaN alone
       const nan = `${picture.slice(0, picture.search(/[#0-9]/))}${locale.nan ?? 'NaN'}`;
-      return value(once(n, (x) => ({ $if: [{ $eq: [x, x] }, { '$format-number': [x, picture, locale.decimalFormat] }, nan] })), 'string');
+      // a picture or a text that starts with $ is written $$, or the query reads it as a path
+      return value(once(n, (x) => ({ $if: [{ $eq: [x, x] }, { '$format-number': [x, str(picture), locale.decimalFormat] }, str(nan)] })), 'string');
     }
     if (style !== 'decimal') { reason('locale', optionsNode, `the formatting style '${style}'`); return EMPTY(); }
     const min = o.minimumFractionDigits ?? 0;
@@ -983,7 +1319,7 @@ export function translateFormulaBody(source, options = {}) {
     }
     const { grouping, decimal } = locale;
     const picture = `#${grouping}##0${max > 0 ? `${decimal}${'0'.repeat(min)}${'#'.repeat(max - min)}` : ''}`;
-    return value({ '$format-number': [n.q, picture, locale.decimalFormat] }, 'string');
+    return value({ '$format-number': [n.q, str(picture), locale.decimalFormat] }, 'string');
   }
 
   //#endregion
@@ -991,12 +1327,16 @@ export function translateFormulaBody(source, options = {}) {
   //#region regular expressions
 
   /**
-   * A JavaScript regular expression as an I-Regexp: exact where I-Regexp
-   * can say the same (`\d`, `\s`, `.` and the classes spelled out), with the
-   * anchors marked by a sentinel; refused where it cannot (captures,
-   * lookaround, lazy quantifiers, back references).
+   * A JavaScript regular expression (read without the u flag, as the body
+   * writes it) as an I-Regexp: exact where I-Regexp can say the same (`\d`,
+   * `\s`, `.` and the classes spelled out, an escaped character as itself),
+   * with the anchors marked by a sentinel; refused where it cannot
+   * (lookaround, lazy quantifiers, back references, a legacy octal escape).
+   * It also tells whether a part of it matches one UTF-16 code unit (`.`, a
+   * negated class, `\S`, `\D`, `\W`, a character beyond U+FFFF), which an
+   * emoji — two code units — matches differently.
    * @param {{ pattern: string, flags: string }} re @param {any} node
-   * @returns {{ pattern: string, anchored: boolean, ignoreCase: boolean, singleMatch: boolean } | null}
+   * @returns {{ pattern: string, anchored: boolean, ignoreCase: boolean, singleMatch: boolean, unitSensitive: boolean, oneUnit: { plus: boolean } | null } | null}
    */
   function rewriteRegExp(re, node) {
     const { pattern, flags } = re;
@@ -1004,8 +1344,11 @@ export function translateFormulaBody(source, options = {}) {
     let out = '';
     let anchored = false;
     let inClass = false;
+    let unitSensitive = false;
     for (let i = 0; i < pattern.length; i++) {
       const c = pattern[i];
+      // a character beyond U+FFFF, written as itself: two code units for JavaScript
+      if (/[\uD800-\uDFFF]/.test(c)) unitSensitive = true;
       if (c === '\\') {
         const e = pattern[++i];
         if (e === undefined) { reason('regex', node, 'a trailing backslash'); return null; }
@@ -1015,7 +1358,10 @@ export function translateFormulaBody(source, options = {}) {
             if (!classes[e][0]) { reason('regex', node, `\\${e} inside a character class`); return null; }
             out += classes[e][0];
           }
-          else out += classes[e][1];
+          else {
+            out += classes[e][1];
+            if (e === 'D' || e === 'W' || e === 'S') unitSensitive = true;
+          }
           continue;
         }
         if (e === 'b' || e === 'B') {
@@ -1024,34 +1370,43 @@ export function translateFormulaBody(source, options = {}) {
           continue;
         }
         if (/[1-9k]/.test(e)) { reason('regex', node, 'a back reference'); return null; }
-        if (e === 'u' || e === 'x') {
-          const hex = e === 'u' ? (pattern[i + 1] === '{' ? pattern.slice(i + 2, pattern.indexOf('}', i)) : pattern.slice(i + 1, i + 5)) : pattern.slice(i + 1, i + 3);
-          if (!/^[0-9a-fA-F]+$/.test(hex)) { reason('regex', node, 'a malformed escape'); return null; }
-          i += e === 'u' && pattern[i + 1] === '{' ? hex.length + 2 : hex.length;
-          out += escapeRegExp(String.fromCodePoint(parseInt(hex, 16)), inClass);
+        if (e === '0') {
+          if (/[0-9]/.test(pattern[i + 1] ?? '')) { reason('regex', node, 'a legacy octal escape'); return null; }
+          out += '\u0000';
           continue;
         }
-        const single = /** @type {Record<string, string>} */ ({ n: '\\n', r: '\\r', t: '\\t', f: '\f', v: '\u000b', 0: '\u0000' })[e];
+        // \uHHHH and \xHH; without the u flag a \u or \x not followed by its digits is the letter itself
+        const hex = e === 'u' ? pattern.slice(i + 1, i + 5) : e === 'x' ? pattern.slice(i + 1, i + 3) : '';
+        if (hex && /^[0-9a-fA-F]+$/.test(hex) && hex.length === (e === 'u' ? 4 : 2)) {
+          const unit = parseInt(hex, 16);
+          if (unit >= 0xD800 && unit <= 0xDFFF) unitSensitive = true;
+          out += escapeRegExp(String.fromCharCode(unit), inClass);
+          i += hex.length;
+          continue;
+        }
+        if (e === 'c') {
+          const letter = pattern[i + 1];
+          if (letter === undefined || !/[A-Za-z]/.test(letter)) { reason('regex', node, 'a \\c without a control letter'); return null; }
+          out += escapeRegExp(String.fromCharCode(letter.charCodeAt(0) % 32), inClass);
+          i++;
+          continue;
+        }
+        const single = /** @type {Record<string, string>} */ ({ n: '\\n', r: '\\r', t: '\\t', f: '\f', v: '\u000b' })[e];
         if (single !== undefined) { out += single; continue; }
-        if (e === 'p' || e === 'P') {
-          const close = pattern.indexOf('}', i);
-          out += `\\${pattern.slice(i, close + 1)}`;
-          i = close;
-          continue;
-        }
+        // any other escaped character is itself (without the u flag, \p is the letter p)
         out += escapeRegExp(e, inClass);
         continue;
       }
       if (inClass) {
         if (c === ']') { inClass = false; out += c; continue; }
-        if (c === '[' ) { out += '\\['; continue; }
+        if (c === '[') { out += '\\['; continue; }
         out += c === '-' || c === '^' ? c : escapeRegExp(c, true);
         continue;
       }
       if (c === '[') {
         inClass = true;
         out += '[';
-        if (pattern[i + 1] === '^') { out += '^'; i++; }
+        if (pattern[i + 1] === '^') { out += '^'; i++; unitSensitive = true; }
         if (pattern[i + 1] === ']') { reason('regex', node, 'an empty character class'); return null; }
         continue;
       }
@@ -1070,13 +1425,24 @@ export function translateFormulaBody(source, options = {}) {
         out += '(';
         continue;
       }
-      if ((c === '*' || c === '+' || c === '?' || c === '}') && pattern[i + 1] === '?') { reason('regex', node, 'a lazy quantifier'); return null; }
+      // a quantifier {n}, {n,} or {n,m}; without the u flag any other brace is itself
+      if (c === '{') {
+        const quantifier = /^\{\d+(?:,\d*)?\}/.exec(pattern.slice(i));
+        if (!quantifier) { out += '\\{'; continue; }
+        out += quantifier[0];
+        i += quantifier[0].length - 1;
+        if (pattern[i + 1] === '?') { reason('regex', node, 'a lazy quantifier'); return null; }
+        continue;
+      }
+      if (c === '}' || c === ']') { out += `\\${c}`; continue; }
+      if ((c === '*' || c === '+' || c === '?') && pattern[i + 1] === '?') { reason('regex', node, 'a lazy quantifier'); return null; }
       if (c === '^' || c === '$') { anchored = true; out += SENTINEL; continue; }
-      if (c === '.') { out += '[^\\n\\r  ]'; continue; }
+      if (c === '.') { out += '[^\\n\\r  ]'; unitSensitive = true; continue; }
       out += c;
     }
     const ignoreCase = flags.includes('i');
-    if (ignoreCase && /[A-Z]/.test(out.replace(/\\p\{[^}]*\}/g, ''))) {
+    // the tested text is lower-cased: a capital in the pattern (any script's) would never match it
+    if (ignoreCase && [...out].some((ch) => ch !== ch.toLowerCase())) {
       reason('regex', node, 'a case-insensitive pattern with capitals in it');
       return null;
     }
@@ -1089,7 +1455,8 @@ export function translateFormulaBody(source, options = {}) {
     }
     // a pattern anchored at the start, or both ends, matches once
     const singleMatch = anchored && !/\|/.test(out);
-    return { pattern: out, anchored, ignoreCase, singleMatch };
+    const one = ONE_UNIT_ATOM.exec(pattern);
+    return { pattern: out, anchored, ignoreCase, singleMatch, unitSensitive, oneUnit: one ? { plus: one[1] === '+' } : null };
   }
 
   //#endregion
@@ -1106,7 +1473,7 @@ export function translateFormulaBody(source, options = {}) {
     const s = list[i];
     switch (s.type) {
       case 'Empty': return statements(list, i + 1, env, after, mode);
-      case 'Block': return statements([...s.body, ...list.slice(i + 1)], 0, env, after, mode);
+      case 'Block': return block(s.body, list.slice(i + 1), env, after, mode);
       case 'Declaration': {
         /** @type {Record<string, any>} */
         const bindings = {};
@@ -1116,12 +1483,13 @@ export function translateFormulaBody(source, options = {}) {
         while (j < list.length && list[j].type === 'Declaration') {
           for (const d of list[j].declarations.flatMap(expandPattern)) {
             const v = d.init ? tx(d.init, e) : EMPTY();
-            if (v.type === 'skip') reason('skip-value', d, 'the skip sentinel kept in a variable');
             const inline = v.literal !== undefined && v.type !== 'object' && list[j].kind === 'const';
-            if (inline) { e = withVar(e, d.name, { inline: true, value: { ...v, key: null } }); continue; }
+            if (inline) { e = withVar(e, d.name, { inline: true, kind: list[j].kind, value: { ...v, key: null } }); continue; }
             const qname = fresh(d.name);
             bindings[qname] = v.q;
-            e = withVar(e, d.name, { qname, kind: list[j].kind, value: { ...v, pathable: false, key: v.key ?? `var:${qname}` } });
+            // an array literal is the name's own array, which a push may change (see assignment)
+            e = withVar(e, d.name, { qname, kind: list[j].kind, freshArray: d.init?.type === 'Array',
+              value: { ...v, pathable: false, key: v.key ?? `var:${qname}` } });
           }
           j++;
         }
@@ -1137,19 +1505,43 @@ export function translateFormulaBody(source, options = {}) {
         if (!effect) return statements(list, i + 1, env, after, mode);
         const qname = fresh(effect.name);
         const info = env.vars.get(effect.name);
-        const e = withVar(env, effect.name, { qname, kind: info.kind, value: { ...effect.value, pathable: false, key: `var:${qname}` } });
+        const e = withVar(env, effect.name, { qname, kind: info.kind, freshArray: info.freshArray, value: { ...effect.value, pathable: false, key: `var:${qname}` } });
         return { $let: { [qname]: effect.value.q }, $return: statements(list, i + 1, e, after, mode) };
       }
       case 'Throw':
         reason('throw', s, 'a throw statement');
         return statements(list, i + 1, env, after, mode);
       case 'Unsupported':
-        reason(s.what === 'for' || s.what === 'while' || s.what === 'do' ? 'loop' : s.what, s, `a ${s.what} statement`);
+        if (s.what === 'for' || s.what === 'while' || s.what === 'do') reason('loop', s, `a ${s.what} loop`);
+        else if (s.what === 'function' || s.what === 'class' || s.what === 'async') reason('function', s, `a ${s.what} declaration`);
+        else reason('statement', s, `a ${s.what} statement`);
         return statements(list, i + 1, env, after, mode);
       default:
         reason('statement', s, `a ${s.type} statement`);
         return statements(list, i + 1, env, after, mode);
     }
+  }
+
+  /**
+   * A block's statements, then `rest`: a let or const the block declares
+   * ends with it, so what follows reads the name as it was before the block
+   * (or not at all); what the block assigns to an outer let stays.
+   * @param {any[]} body @param {any[]} rest @param {Env} env @param {(env: Env) => any} after @param {string} mode
+   */
+  function block(body, rest, env, after, mode) {
+    const declared = body.filter((st) => st.type === 'Declaration' && st.kind !== 'var').flatMap((st) => st.declarations.flatMap(declaredNames));
+    if (!declared.length) return statements([...body, ...rest], 0, env, after, mode);
+    // until its declaration a block's own name is no name at all: JavaScript throws reading it (its temporal dead zone)
+    const tdz = new Map(env.vars);
+    for (const name of declared) tdz.set(name, { tdz: true });
+    return statements(body, 0, { vars: tdz, facts: env.facts }, (inner) => {
+      const vars = new Map(inner.vars);
+      for (const name of declared) {
+        if (env.vars.has(name)) vars.set(name, env.vars.get(name));
+        else vars.delete(name);
+      }
+      return statements(rest, 0, { vars, facts: inner.facts }, after, mode);
+    }, mode);
   }
 
   /**
@@ -1204,16 +1596,21 @@ export function translateFormulaBody(source, options = {}) {
         const qname = fresh(name);
         bindings[qname] = { $if: [test, t.q, f.q] };
         const info = env.vars.get(name);
-        e = withVar(e, name, { qname, kind: info.kind, value: { ...value(`$${qname}`, t.type === f.type ? t.type : 'unknown', t.absent || f.absent, t.nullable || f.nullable, `var:${qname}`), element: t.element ?? f.element } });
+        e = withVar(e, name, { qname, kind: info.kind, freshArray: info.freshArray, value: merged(t, f, `$${qname}`, `var:${qname}`) });
       }
       const next = statements(list, i + 1, e, after, mode);
       return Object.keys(bindings).length ? { $let: bindings, $return: next } : next;
     }
-    // a branch that returns: each branch goes on with the statements after it
+    // a branch that returns: each branch goes on with the statements after it (a block's own names end with it)
     return {
-      $if: [test, statements([...flat(s.consequent), ...rest], 0, yes, after, mode),
-        statements([...(s.alternate ? flat(s.alternate) : []), ...rest], 0, no, after, mode)],
+      $if: [test, block(flat(s.consequent), rest, yes, after, mode), block(s.alternate ? flat(s.alternate) : [], rest, no, after, mode)],
     };
+  }
+
+  /** A variable's value after an if: the branch's or the earlier one. @param {Value} t @param {Value} f @param {any} q @param {string | null} [key] @returns {Value} */
+  function merged(t, f, q, key = null) {
+    return { ...value(q, t.type === f.type ? t.type : 'unknown', t.absent || f.absent, t.nullable || f.nullable, key),
+      element: t.element ?? f.element, assumed: t.type === f.type && Boolean(t.assumed || f.assumed), refs: refsOfEither(t, f), kinds: kindsOfEither(t, f) };
   }
 
   /** A statement's list. @param {any} s */
@@ -1262,8 +1659,10 @@ export function translateFormulaBody(source, options = {}) {
     let e = env;
     for (const s of list) {
       if (s.type === 'Empty') continue;
+      // the name keeps what it is (a let, an array of its own) and takes the new value
+      const rebind = (/** @type {string} */ name, /** @type {Value} */ v) => { changed.set(name, v); e = withVar(e, name, { ...e.vars.get(name), inline: true, value: v }); };
       if (s.type === 'Block') {
-        for (const [k, v] of effects(s.body, e)) { changed.set(k, v); e = withVar(e, k, { inline: true, value: v }); }
+        for (const [k, v] of effects(s.body, e)) rebind(k, v);
         continue;
       }
       if (s.type === 'If') {
@@ -1274,16 +1673,12 @@ export function translateFormulaBody(source, options = {}) {
           const before = readVar(e.vars.get(name));
           const t = a.get(name) ?? before;
           const f = b.get(name) ?? before;
-          const v = { ...value({ $if: [test, t.q, f.q] }, t.type === f.type ? t.type : 'unknown', t.absent || f.absent, t.nullable || f.nullable), element: t.element ?? f.element };
-          changed.set(name, v);
-          e = withVar(e, name, { inline: true, value: v });
+          rebind(name, merged(t, f, { $if: [test, t.q, f.q] }));
         }
         continue;
       }
       const effect = assignment(s.expression, e);
-      if (!effect) continue;
-      changed.set(effect.name, effect.value);
-      e = withVar(e, effect.name, { inline: true, value: effect.value });
+      if (effect) rebind(effect.name, effect.value);
     }
     return changed;
   }
@@ -1297,7 +1692,7 @@ export function translateFormulaBody(source, options = {}) {
     if (e.type === 'Assignment' && e.target.type === 'Identifier') {
       const name = e.target.name;
       const info = env.vars.get(name);
-      if (!info || info.kind === 'const') { reason('assignment', e, `an assignment to '${name}', which is not a let variable of the body`); return null; }
+      if (!info || info.tdz || info.kind === 'const') { reason('assignment', e, `an assignment to '${name}', which is not a let variable of the body (or is one before its declaration)`); return null; }
       if (e.operator === '=') return { name, value: tx(e.value, env) };
       const op = e.operator.slice(0, -1);
       if (!['+', '-', '*', '/'].includes(op)) { reason('assignment', e, `the assignment operator '${e.operator}'`); return null; }
@@ -1307,9 +1702,14 @@ export function translateFormulaBody(source, options = {}) {
     if (e.type === 'Call' && e.callee.type === 'Member' && !e.callee.computed && e.callee.property === 'push' && e.callee.object.type === 'Identifier') {
       const name = e.callee.object.name;
       const info = env.vars.get(name);
-      if (!info) { reason('push', e, `a push to '${name}', which is not a variable of the body`); return null; }
+      if (!info || info.tdz) { reason('push', e, `a push to '${name}', which is not a variable of the body (or is one before its declaration)`); return null; }
       const current = readVar(info);
       if (current.type !== 'array') { reason('push', e, `a push to '${name}', which the translation cannot tell is an array`); return null; }
+      // push changes the array itself: only an array literal the name alone holds leaves every other read as it was
+      if (!info.freshArray || aliased.has(name)) {
+        reason('push', e, `a push to '${name}', which may hold an array the row or another name holds too: JavaScript changes that array in place`);
+        return null;
+      }
       const items = e.args.map((/** @type {any} */ a) => {
         const v = tx(a, env);
         if (nullish(v, env) && v.absent) differ('absent-element', a, 'JavaScript keeps undefined as an element; the query drops it');
@@ -1332,36 +1732,51 @@ export function translateFormulaBody(source, options = {}) {
       return { $if: [condition(node.test, env), outcomeOf(node.consequent, withFacts(env, factsWhen(node.test, env, true))),
         outcomeOf(node.alternate, withFacts(env, factsWhen(node.test, env, false)))] };
     }
-    if (node.type === 'Logical' && node.operator !== '??' && returnsSkip(node.right)) {
+    // `x || SKIP`, `x && SKIP`, `x ?? SKIP` (or an explanation there): each side is an outcome of its own
+    if (node.type === 'Logical' && mayExit(node.right)) {
       const left = tx(node.left, env);
-      const truthy = node.operator === '||';
-      return once(left, (x) => ({ $if: [left.type === 'boolean' ? x : { $boolean: x }, truthy ? valueOutcome({ ...left, q: x }, env) : outcomeOf(node.right, env),
-        truthy ? outcomeOf(node.right, withFacts(env, factsWhen(node.left, env, false))) : valueOutcome({ ...left, q: x }, env)] }));
+      const rightEnv = node.operator === '??' ? env : withFacts(env, factsWhen(node.left, env, node.operator === '&&'));
+      return once(left, (x) => {
+        const kept = valueOutcome({ ...left, q: x }, env);
+        const other = outcomeOf(node.right, rightEnv);
+        if (node.operator === '??') return { $if: [{ '$is-null': { $default: [x, null] } }, other, kept] };
+        const test = left.type === 'boolean' ? x : { $boolean: x };
+        return node.operator === '||' ? { $if: [test, kept, other] } : { $if: [test, other, kept] };
+      });
     }
-    if (node.type === 'Identifier' && (node.name === opts.skip || node.name === 'undefined') && !env.vars.has(node.name)) return { kind: 'skip' };
+    if (isSkip(node, env)) return { kind: 'skip' };
     // the host's other spelling of an explanation: { [explanationMember]: text }
     if (opts.explanationMember !== null && node.type === 'Object' && node.properties.length === 1
       && node.properties[0].type === 'Property' && !node.properties[0].computed && node.properties[0].key === opts.explanationMember) {
-      const textValue = tx(node.properties[0].value, env);
-      return { kind: 'explanation', text: textValue.type === 'string' ? textValue.q : { $string: { $default: [textValue.q, ''] } } };
+      return { kind: 'explanation', text: explanationText(tx(node.properties[0].value, env), env) };
     }
     if (isHelperCall(node, opts.explain, env)) {
       const [v, text] = node.args;
-      if (!v) return { kind: 'skip' };
-      if (v.type === 'Identifier' && v.name === opts.skip) return { kind: 'skip' };
+      if (!v || isSkip(v, env)) return { kind: 'skip' };
       const val = tx(v, env);
       const textValue = text ? tx(text, env) : value('', 'string');
       if (text && (textValue.type === 'array' || textValue.type === 'object')) reason('string-of-object', text, 'an array or object as the explanation');
-      const textQ = textValue.type === 'string' ? textValue.q : { $string: { $default: [textValue.q, ''] } };
+      const textQ = explanationText(textValue, env);
       if (!nullish(val, env) || !val.absent) return { kind: 'explanation', text: textQ, value: val.q };
       return once(val, (x) => ({ $if: [{ $empty: x }, { kind: 'skip' }, { kind: 'explanation', text: textQ, value: x }] }));
     }
     return valueOutcome(tx(node, env), env);
   }
 
-  /** @param {any} node */
-  function returnsSkip(node) {
-    return node.type === 'Identifier' && node.name === opts.skip;
+  /** Whether a returned operand may be the skip sentinel or an explanation: an outcome of its own then. @param {any} node */
+  const mayExit = (node) => mentions(node, (name) => name === opts.skip || name === opts.explain, opts.helperObject);
+
+  /** The skip sentinel itself (or undefined): its name, or the helpers' member of that name. @param {any} node @param {Env} env */
+  function isSkip(node, env) {
+    if (node.type === 'Identifier') return (node.name === opts.skip || node.name === 'undefined') && !env.vars.has(node.name);
+    return node.type === 'Member' && !node.computed && node.object.type === 'Identifier' && node.object.name === opts.helperObject
+      && !env.vars.has(opts.helperObject) && node.property === opts.skip;
+  }
+
+  /** An explanation's text, as `String(text ?? '')` makes it: null and undefined are the empty text. @param {Value} t @param {Env} env */
+  function explanationText(t, env) {
+    if (certainType(t) === 'string' && !nullish(t, env)) return t.q;
+    return once(t, (x) => ({ $if: [{ '$is-null': { $default: [x, null] } }, '', { $string: x }] }));
   }
 
   /** @param {any} node @param {string | null} name @param {Env} env */
@@ -1374,7 +1789,6 @@ export function translateFormulaBody(source, options = {}) {
 
   /** A value outcome; an undefined value skips. @param {Value} v @param {Env} env */
   function valueOutcome(v, env) {
-    if (v.type === 'skip') return { kind: 'skip' };
     if (!v.absent || (v.key && env.facts.has(v.key))) return { kind: 'value', value: v.q };
     return once(v, (x) => ({ $if: [{ $empty: x }, { kind: 'skip' }, { kind: 'value', value: x }] }));
   }
@@ -1392,6 +1806,13 @@ export function translateFormulaBody(source, options = {}) {
     }
     for (const key of Object.keys(node)) if (key !== 'start' && key !== 'end') unreachable(node[key]);
   })(ast);
+
+  // the row's and the helpers' parameters are the function's: JavaScript refuses a let or const of either name beside them
+  for (const st of ast.body) {
+    if (st.type !== 'Declaration' || st.kind === 'var') continue;
+    for (const d of st.declarations) for (const name of declaredNames(d))
+      if (name === opts.argument || name === opts.helperObject) reason('syntax', d, `'${name}' is a parameter's name: a let or const cannot declare it again`);
+  }
 
   // the body: statements, falling off the end returns undefined
   const root = { vars: new Map(), facts: new Set(['row']) };
@@ -1466,6 +1887,32 @@ function returnsExplanationObject(node, member) {
   return false;
 }
 
+/** The names a declarator declares: its name, or a destructuring's plain names. @param {any} d @returns {string[]} */
+function declaredNames(d) {
+  if (d.name !== null) return [d.name];
+  return (d.pattern?.properties ?? []).flatMap((/** @type {any} */ p) => (p.type === 'Rest' ? [p.name] : p.value?.type === 'Identifier' ? [p.value.name] : []));
+}
+
+/**
+ * The names a body reads where the value itself may be kept or handed on:
+ * anywhere but as the object of a member or a method, a returned value, a
+ * spread, a test, or an operand that compares or computes with it.
+ * @param {any} ast @returns {Set<string>}
+ */
+function aliasedNames(ast) {
+  const names = new Set();
+  const kept = (/** @type {any} */ parent, /** @type {string} */ key) => !((parent.type === 'Member' && key === 'object')
+    || (parent.type === 'Return' && key === 'argument') || parent.type === 'Spread' || parent.type === 'Unary' || parent.type === 'Binary'
+    || ((parent.type === 'If' || parent.type === 'Conditional') && key === 'test'));
+  (function walk(/** @type {any} */ node, /** @type {any} */ parent, /** @type {string} */ key) {
+    if (!node || typeof node !== 'object') return;
+    if (Array.isArray(node)) { for (const n of node) walk(n, parent, key); return; }
+    if (node.type === 'Identifier' && parent && kept(parent, key)) names.add(node.name);
+    for (const k of Object.keys(node)) if (k !== 'start' && k !== 'end') walk(node[k], node, k);
+  })(ast, null, '');
+  return names;
+}
+
 /**
  * Whether an AST mentions an identifier the predicate accepts, bare or as a
  * member of the helpers' parameter.
@@ -1501,9 +1948,13 @@ function renameVariables(q, renames) {
   return q;
 }
 
-/** Escape a text for an I-Regexp. @param {string} text @param {boolean} [inClass] */
+/**
+ * Escape a text for an I-Regexp. A dollar sign has no I-Regexp escape: it is
+ * written as the class `[$]`.
+ * @param {string} text @param {boolean} [inClass]
+ */
 function escapeRegExp(text, inClass = false) {
-  return inClass ? text.replace(/[\\\][^-]/g, '\\$&') : text.replace(/[.*+?()[\]{}|\\^$-]/g, '\\$&');
+  return inClass ? text.replace(/[\\\][^-]/g, '\\$&') : text.replace(/[.*+?()[\]{}|\\^]/g, '\\$&').replace(/\$/g, '[$]');
 }
 
 /**

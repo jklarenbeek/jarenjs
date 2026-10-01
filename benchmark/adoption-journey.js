@@ -17,6 +17,7 @@ const sources = ['packages/website/src/examples/adoption.js', 'packages/website/
   'benchmark/adoption-journey.js', 'packages/db/src/jobs.js', 'packages/db/src/store.js'];
 const retained = ['test/adoption/oracles.js', 'test/adoption/trusted-bodies.js', 'test/adoption/provider-oracle.js'];
 const count = (files) => files.reduce((n, file) => n + readFileSync(join(root, file), 'utf8').trimEnd().split('\n').length, 0);
+const formulaSources = JSON.parse(readFileSync(join(root, 'benchmark/formula-result.json'), 'utf8')).sources;
 try {
   symlinkSync(join(root, 'node_modules'), join(directory, 'node_modules'), 'dir');
   writeFileSync(join(directory, 'package.json'), '{"type":"module"}');
@@ -43,10 +44,13 @@ try {
     ownership: { retainedOracleFiles: retained, retainedOracleLines: count(retained),
       adoptedPolicyFiles: sources.slice(0, 2), adoptedPolicyLines: count(sources.slice(0, 2)),
       retainedThirdPartyMechanisms: ['minisearch', '@tanstack/virtual-core'], adoptedThirdPartyMechanisms: [],
-      domainSqlInAdoptedHost: 0, privateDriverBridges: 0, trustedSourceConversions: 2, reviewRequiredSources: 5, disabledPreservedSources: 1 },
+      domainSqlInAdoptedHost: 0, privateDriverBridges: 0,
+      // the saved formula sources as the translator measured them (benchmark/formula.js)
+      translatedSources: formulaSources.translated, sourcesWithDifferences: formulaSources.withDifferences,
+      untranslatableSources: formulaSources.untranslatable, disabledPreservedSources: formulaSources.disabled },
     evidence: { library: 'pass', portable: 'pass', actualDownstream: 'pending', actualProvider: 'pending', manual: 'pending' },
     limitations: ['Source lines compare executable reference adapters with remaining application policy, not a claim that oracle files were deleted.',
-      'Formula retirement covers only converted or natively authored definitions; unresolved originals and their retained oracle remain.',
+      'Formula retirement covers only translated or natively authored definitions; untranslatable originals, translations with named differences until they are reviewed, and their retained oracle remain.',
       'Capture of adopted triggers and native FTS remain refused. Search refresh reads a bounded resident snapshot; complete search membership is separate from cached pages.',
       'Heap is a sample and RSS is a process high-water mark, including the assertion instrument. Exact peak heap remains unmeasured.',
       'The full source sizes apply to query/search; provider snapshots and rule previews retain their separate frozen limits.'] };

@@ -97,6 +97,10 @@ const BINARY = {
   '+': 10, '-': 10, '*': 11, '/': 11, '%': 11, '**': 12,
 };
 const LOGICAL = new Set(['&&', '||', '??']);
+/** A decimal number, its separators each between two digits. */
+const DECIMAL_NUMBER = /^(?:(?:0|[1-9](?:_?[0-9])*)(?:\.(?:[0-9](?:_?[0-9])*)?)?|\.[0-9](?:_?[0-9])*)(?:[eE][+-]?[0-9]+)?$/;
+/** A hexadecimal, octal or binary number, its separators each between two digits. */
+const RADIX_NUMBER = /^0(?:[xX][0-9a-fA-F](?:_?[0-9a-fA-F])*|[oO][0-7](?:_?[0-7])*|[bB][01](?:_?[01])*)$/;
 const ASSIGNMENT = new Set(['=', '+=', '-=', '*=', '/=', '%=', '**=', '<<=', '>>=', '>>>=', '&=', '|=', '^=', '&&=', '||=', '??=']);
 
 /**
@@ -188,7 +192,8 @@ export function parseFormulaBody(source) {
   function readNumber(start, newline) {
     const c = source.charCodeAt(pos);
     const prefix = c === CC_0 ? source.charCodeAt(pos + 1) | 0x20 : 0;
-    if (prefix === 0x78 || prefix === 0x6F || prefix === 0x62) { // 0x, 0o, 0b
+    const radix = prefix === 0x78 || prefix === 0x6F || prefix === 0x62;
+    if (radix) { // 0x, 0o, 0b
       pos += 2;
       const digit = prefix === 0x78 ? isHexDigitCode : prefix === 0x6F
         ? (/** @type {number} */ d) => d >= 0x30 && d <= 0x37 : (/** @type {number} */ d) => d === 0x30 || d === 0x31;
@@ -211,7 +216,12 @@ export function parseFormulaBody(source) {
     }
     if (source.charCodeAt(pos) === 0x6E) fail('a BigInt literal', start); // n
     if (pos < source.length && isIdentifierStart(/** @type {number} */ (source.codePointAt(pos)))) fail('an identifier right after a number', pos);
-    tok = { type: 'number', value: source.slice(start, pos), start, end: pos, newline };
+    const raw = source.slice(start, pos);
+    // a separator stands between two digits only; a leading 0 starts a legacy octal number
+    if (/^0_/.test(raw)) fail('a numeric separator after a leading 0', start);
+    if (!radix && /^0[0-9]/.test(raw)) fail('a legacy octal number', start);
+    if (!(radix ? RADIX_NUMBER : DECIMAL_NUMBER).test(raw)) fail('a numeric separator that does not stand between two digits', start);
+    tok = { type: 'number', value: raw, start, end: pos, newline };
   }
 
   /** Read an escape after a backslash, inside a string or a template. @returns {string} */
@@ -336,17 +346,57 @@ export function parseFormulaBody(source) {
     return { type: 'ExpressionStatement', expression, start, end: expression.end };
   }
 
-  function parseBlock() {
+  /** A block; an arrow's body block is a function's, holding its parameters. @param {string[] | null} [params] */
+  function parseBlock(params = null) {
     const start = tok.start;
     expect('{');
+    scopes.push({ lexical: new Set(), vars: new Set(), fn: params !== null, params: new Set(params ?? []) });
     const body = [];
     while (!is('}')) {
       if (tok.type === 'eof') fail(`'}' expected`);
       body.push(parseStatement());
     }
+    scopes.pop();
     const end = tok.end;
     next();
     return { type: 'Block', body, start, end };
+  }
+
+  /**
+   * The scopes a declaration is checked in: a block's let and const names
+   * and the var names hoisted through it (JavaScript refuses a name declared
+   * twice where one of the two is a let or a const).
+   * @type {{ lexical: Set<string>, vars: Set<string>, fn: boolean, params: Set<string> }[]}
+   */
+  const scopes = [{ lexical: new Set(), vars: new Set(), fn: true, params: new Set() }];
+
+  /** Declare a name in the current scope. @param {string} name @param {string} kind @param {number} at */
+  function declare(name, kind, at) {
+    const twice = () => fail(`'${name}' is declared twice`, at);
+    if (kind === 'var') {
+      // a var belongs to the function: it meets every block's let and const on its way there
+      for (let i = scopes.length - 1; i >= 0; i--) {
+        if (scopes[i].lexical.has(name)) twice();
+        scopes[i].vars.add(name);
+        if (scopes[i].fn) break;
+      }
+      return;
+    }
+    const scope = scopes[scopes.length - 1];
+    if (scope.lexical.has(name) || scope.vars.has(name) || scope.params.has(name)) twice();
+    scope.lexical.add(name);
+  }
+
+  /** The names a destructuring pattern declares, with their offsets. @param {any} p @returns {[string, number][]} */
+  function patternNames(p) {
+    if (!p) return [];
+    switch (p.type) {
+      case 'Identifier': case 'Rest': return [[p.name, p.start]];
+      case 'Default': return patternNames(p.target);
+      case 'ArrayPattern': return p.elements.flatMap(patternNames);
+      case 'ObjectPattern': return p.properties.flatMap((/** @type {any} */ q) => (q.type === 'Rest' ? [[q.name, q.start]] : patternNames(q.value)));
+      default: return [];
+    }
   }
 
   function parseDeclaration() {
@@ -358,6 +408,7 @@ export function parseFormulaBody(source) {
       const at = tok.start;
       if (is('{') || is('[')) {
         const pattern = parsePattern();
+        for (const [name, offset] of patternNames(pattern)) declare(name, kind, offset);
         expect('=');
         const init = parseAssignment();
         declarations.push({ type: 'Declarator', name: null, pattern, init, start: at, end: init.end });
@@ -365,6 +416,7 @@ export function parseFormulaBody(source) {
       }
       if (tok.type !== 'name' || RESERVED.has(tok.value)) fail('a variable name expected');
       const name = tok.value;
+      declare(name, kind, at);
       next();
       let init = null;
       if (eat('=')) init = parseAssignment();
@@ -453,10 +505,16 @@ export function parseFormulaBody(source) {
     expect('(');
     const test = parseExpression();
     expect(')');
-    const consequent = parseStatement();
+    const consequent = parseBranch();
     let alternate = null;
-    if (isName('else')) { next(); alternate = parseStatement(); }
+    if (isName('else')) { next(); alternate = parseBranch(); }
     return { type: 'If', test, consequent, alternate, start, end: (alternate ?? consequent).end };
+  }
+
+  /** A statement that is a whole branch of an if: a let or const there has no block to belong to. */
+  function parseBranch() {
+    if (isName('let') || isName('const')) fail(`a ${tok.value} declaration as the whole branch of an if`);
+    return parseStatement();
   }
 
   function parseReturn() {
@@ -572,7 +630,7 @@ export function parseFormulaBody(source) {
   /** @param {string[]} params @param {number} start */
   function arrowBody(params, start) {
     if (is('{')) {
-      const body = parseBlock();
+      const body = parseBlock(params);
       return { type: 'Arrow', params, body, expression: false, start, end: body.end };
     }
     const body = parseAssignment();
@@ -598,9 +656,18 @@ export function parseFormulaBody(source) {
       const operator = tok.type === 'punct' || (tok.type === 'name' && (tok.value === 'instanceof' || tok.value === 'in')) ? tok.value : '';
       const precedence = BINARY[/** @type {keyof typeof BINARY} */ (operator)];
       if (precedence === undefined || precedence < minimum) return left;
+      const opStart = tok.start;
       next();
       const right = operator === '**' ? parseBinary(precedence) : parseBinary(precedence + 1);
-      left = { type: LOGICAL.has(operator) ? 'Logical' : 'Binary', operator, left, right, start, end: right.end };
+      if (!LOGICAL.has(operator)) {
+        left = { type: 'Binary', operator, left, right, start, end: right.end };
+        continue;
+      }
+      // ?? is never mixed with || or && without parentheses
+      const mixed = (/** @type {any} */ n) => n.type === 'Logical' && !n.parenthesized && (n.operator === '??') !== (operator === '??');
+      if (mixed(left)) fail(`'${operator}' after '${left.operator}' without parentheses`, opStart);
+      if (mixed(right)) fail(`'${right.operator}' after '${operator}' without parentheses`, right.opStart);
+      left = { type: 'Logical', operator, opStart, left, right, start, end: right.end };
     }
   }
 
@@ -617,6 +684,7 @@ export function parseFormulaBody(source) {
       const operator = tok.value;
       next();
       const argument = parseUnary();
+      if (is('**')) fail('a unary operand of ** needs parentheses');
       return { type: 'Unary', operator, argument, start, end: argument.end };
     }
     if (is('++') || is('--')) {
@@ -644,6 +712,7 @@ export function parseFormulaBody(source) {
       if (is('.')) fail('new.target');
       let callee = parsePrimary();
       while (is('.') || is('[')) callee = parseMember(callee, start, false);
+      if (is('?.')) fail('an optional chain in a new expression');
       const args = is('(') ? parseArguments() : [];
       expression = { type: 'New', callee, args, start, end: lastEnd };
     }
@@ -705,10 +774,8 @@ export function parseFormulaBody(source) {
     if (tok.type === 'number') {
       const raw = tok.value;
       const end = tok.end;
-      const text = raw.replace(/_/g, '');
-      if (/^0[0-9]+$/.test(text)) fail('a legacy octal number');
       next();
-      return { type: 'Literal', value: Number(text), raw, start, end };
+      return { type: 'Literal', value: Number(raw.replace(/_/g, '')), raw, start, end };
     }
     if (tok.type === 'string') {
       const value = tok.value;

@@ -301,6 +301,74 @@ describe('parallel root reads on the pool host', () => {
     }
   });
 
+  it('a cursor asks the owner lease before every pull, and renews it as a gated pull does', { timeout: 60000 }, async () => {
+    const lease = 600000;
+    let clock = Date.now();
+    const { driver } = instrumentedPool();
+    const { store, close } = await seeded(driver, { reads: 'parallel', owner: { id: 'reader', leaseMs: lease },
+      runtime: { now: () => clock } });
+    try {
+      const cursor = store.collection('items').query('$[*]');
+      let rows = 0;
+      for (let i = 0; i < 3; i++) { await cursor.next(); rows++; }
+      // past the lease on the store's own clock: the next pull renews it first
+      clock += lease + 1;
+      for await (const doc of cursor) { assert.ok(doc.id); rows++; }
+      assert.equal(rows, SEED, 'every row arrives after the renewal');
+    }
+    finally { await close(); }
+  });
+
+  it('a pull refused before it reached the source leaves the cursor and its read for the next pull', { timeout: 60000 }, async () => {
+    const lease = 600000;
+    let clock = Date.now();
+    const { driver, state } = instrumentedPool({ readers: 1 });
+    const { store, close } = await seeded(driver, { reads: 'parallel', owner: { id: 'reader', leaseMs: lease },
+      runtime: { now: () => clock } });
+    try {
+      const items = store.collection('items');
+      const holder = items.query('$[*]');
+      await holder.next(); // the only reader
+      const late = items.query(SCAN);
+      // admitted under a good lease, the pull waits for the reader; the lease
+      // lapses meanwhile, so the check inside the read refuses it
+      const refused = late.next().then(() => 'answered', (error) => error.code);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      clock += lease + 1;
+      await holder.return();
+      assert.equal(await refused, 'JD2061');
+      clock -= lease + 1;
+      // a stranger's transaction holds the writer with a row not yet committed:
+      // the cursor's next pull reads its own committed snapshot, never that row
+      const write = heldWrite(store);
+      await write.open;
+      assert.deepEqual(await late.next(), { done: true, value: undefined });
+      write.commit();
+      await write.settled;
+      assert.equal(readersActive(state.raw), 0, 'the read went back when the cursor was done');
+    }
+    finally { await close(); }
+  });
+
+  it('a transaction started from inside a parallel read — a host function that writes — is refused by name (JD0014)', { timeout: 60000 }, async () => {
+    /** @type {{ store?: any, attempt?: Promise<string> }} */
+    const holder = {};
+    const touch = (/** @type {any} */ value) => {
+      holder.attempt ??= holder.store.collection('items').patch('k000001', [{ op: 'replace', path: '/text', value: 'changed' }])
+        .then(() => 'written', (/** @type {any} */ error) => error.code);
+      return value;
+    };
+    const { driver } = instrumentedPool();
+    const { store, close } = await seeded(driver, { reads: 'parallel', functions: { touch } });
+    holder.store = store;
+    try {
+      await store.collection('items').execute({ $for: { it: '$[?@.n < 3]' }, $return: { $call: ['touch', '$it.n'] } });
+      assert.equal(await holder.attempt, 'JD0014', 'the write neither joins the read nor runs on its reader');
+      assert.equal((await store.collection('items').get('k000001')).text, 'x'.repeat(32));
+    }
+    finally { await close(); }
+  });
+
   it('a statement left behind by a parallel read that has ended is refused, not run on its reader', { timeout: 60000 }, async () => {
     const { dbPath, cleanup } = tempDbPath();
     const pool = await nodeWorkerPoolDriver({ readers: 1 }).open(dbPath);
@@ -360,6 +428,12 @@ describe('parallel root reads on the pool host', () => {
       const store = await openStore(MODEL, { driver: nodeDriver(), path: dbPath, reads: 'serialized' });
       assert.equal(store.capabilities.parallelReads, 'serialized');
       await store.close();
+      // every worker of a read-only pool is a reader, so one opened with readers: 0 reads in parallel
+      const readOnly = await openStore(MODEL, { driver: nodeWorkerPoolDriver({ readers: 0 }), path: dbPath,
+        readOnly: true, reads: 'parallel' });
+      assert.equal(readOnly.capabilities.parallelReads, 'parallel');
+      assert.equal(await readOnly.collection('items').get('missing'), undefined);
+      await readOnly.close();
     }
     finally { cleanup(); }
   });

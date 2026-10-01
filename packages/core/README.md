@@ -274,6 +274,7 @@ Every subpath a consumer can import, derived from the manifest by
 | `@jarenjs/core/text/punycode` | JavaScript | declared |
 | `@jarenjs/core/text/sse` | JavaScript | declared |
 | `@jarenjs/core/math` | JavaScript | declared |
+| `@jarenjs/core/math/decimal` | JavaScript | declared |
 | `@jarenjs/core/math/float64` | JavaScript | declared |
 | `@jarenjs/core/math/format` | JavaScript | declared |
 | `@jarenjs/core/math/index` | JavaScript | declared |
@@ -296,6 +297,7 @@ Every subpath a consumer can import, derived from the manifest by
 | `@jarenjs/core/finance/returns` | JavaScript | declared |
 | `@jarenjs/core/finance/tvm` | JavaScript | declared |
 | `@jarenjs/core/convert` | JavaScript | declared |
+| `@jarenjs/core/convert/aliases` | JavaScript | declared |
 | `@jarenjs/core/convert/convert` | JavaScript | declared |
 | `@jarenjs/core/convert/currency` | JavaScript | declared |
 | `@jarenjs/core/convert/index` | JavaScript | declared |

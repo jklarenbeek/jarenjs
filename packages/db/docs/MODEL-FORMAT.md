@@ -1170,8 +1170,8 @@ cursor, which would keep the writer for its whole life, never does.
 `transactions: 'strict'` keeps its meaning for the gated calls — a
 parallel read has no transaction to queue behind. The option is accepted
 only where there are readers to run on (`@jarenjs/db/node-pool` on a
-file, with `readers` above zero); anywhere else it is `JD0009`, naming the
-driver. `capabilities.parallelReads` reports `'parallel'`, or
+file, with `readers` above zero — or read-only, when every worker reads);
+anywhere else it is `JD0009`, naming the driver. `capabilities.parallelReads` reports `'parallel'`, or
 `'serialized'` — the default, and the behaviour described above.
 
 **A unit of work's fate is its transaction's.** A tracked `saveChanges()`
@@ -1460,7 +1460,7 @@ error.
 | `JD2087` | the connection to the database was lost |
 | `JD2088` | the transaction was aborted by an earlier failure in it |
 | `JD2089` | the statement was cancelled by the server |
-| `JD2090` | worker generation lost or PostgreSQL cleanup deadline expired; no automatic write replay |
+| `JD2090` | worker generation lost (a worker that did not become ready in time included), PostgreSQL cleanup deadline expired, or a statement reached a parallel read that had ended; no automatic write replay |
 | `JD2091` | bounded host admission or identity capacity exhausted, or acquisition expired |
 | `JD2092` | a host frame or compatibility result exceeds its declared row/byte bound |
 | `JD2093` | malformed worker protocol request |

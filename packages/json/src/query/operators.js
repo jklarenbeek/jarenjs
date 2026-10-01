@@ -379,15 +379,18 @@ function roundingEntry(name, mode) {
 // Locale data as data (sections 8.7, 8.13): a decimal format is a record
 // or the name of one registered at compile (options.decimalFormats); a
 // literal one is checked when the query compiles (JQ0003), a computed one
-// when it is read (JQ2001). Records are checked once per identity.
+// when it is read (JQ2001). A frozen record is checked once per identity;
+// one that can still change is checked at every read, so a record changed
+// after its first read is never answered with what it used to say.
 const checkedFormats = new WeakMap();
 
-/** Resolve a decimal format operand: undefined is F&O's default. */
+/** Resolve a decimal format operand: absent or empty is F&O's default
+ * (its decimal-format parameter is optional and may be empty). */
 function decimalFormatOf(value, node, op, docPath, compileTime) {
   const refuse = (messageId, params) => (compileTime
     ? queryCompileError('JQ0003', messageId, params, docPath)
     : runtimeError('JQ2001', messageId, params, docPath));
-  if (value === undefined)
+  if (value === undefined || value === EMPTY)
     return DEFAULT_DECIMAL_FORMAT;
   if (typeof value === 'string') {
     const named = node.decimalFormats?.[value];
@@ -396,12 +399,14 @@ function decimalFormatOf(value, node, op, docPath, compileTime) {
     return named;
   }
   if (value !== null && typeof value === 'object' && !Array.isArray(value) && !(value instanceof Seq)) {
-    const known = checkedFormats.get(value);
+    const frozen = Object.isFrozen(value);
+    const known = frozen ? checkedFormats.get(value) : undefined;
     if (known !== undefined)
       return known;
     try {
       const format = readDecimalFormat(value);
-      checkedFormats.set(value, format);
+      if (frozen)
+        checkedFormats.set(value, format);
       return format;
     }
     catch (e) {
@@ -432,13 +437,18 @@ function pictureOf(picture, format, docPath, compileTime) {
 
 // $quantity: a number in the text, followed by a unit word of the asked
 // unit's dimension, read with the format's separators and digits (its own
-// digit family, and ASCII). The pattern is built once per format: digits
-// grouped in threes or not grouped at all, an optional fraction, the word.
-// A number right after another number and a space is not read: in
-// "1 500 g" the space may be a grouping separator, and 500 would be a
-// silent misreading of 1500.
+// digit family, and ASCII) and a minus sign written right before it. The
+// pattern is built once per format: digits grouped in threes or not grouped
+// at all, an optional fraction, the word. A number that is the tail of
+// something else is never read, because reading it would be a silent
+// misreading: the second group of "1 500 g" (the space may be a grouping
+// separator, and 500 would misread 1500), the denominator of "1/2 kg", the
+// end of the range "2-3 kg", the exponent of "1e3 g", digits glued to a
+// word ("B12"). Nor is a word followed by a digit or a slash read as the
+// unit: "300 m2" is an area and "30 km/h" a speed, never a length.
 const quantityPatterns = new WeakMap();
-const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\-]/g, '\\$&');
+// written so it holds inside a character class and outside one under `u`
+const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&').replace(/-/g, '\\x2d');
 function quantityPattern(format) {
   let pattern = quantityPatterns.get(format);
   if (pattern === undefined) {
@@ -447,8 +457,11 @@ function quantityPattern(format) {
       : `0-9${escapeRegExp(format.zeroDigit)}-${escapeRegExp(String.fromCodePoint(zero + 9))}`;
     const g = escapeRegExp(format.groupingSeparator);
     const d = escapeRegExp(format.decimalSeparator);
-    pattern = new RegExp(`(?<![${family}${g}${d}])(?<![${family}]\\s)([${family}]{1,3}(?:${g}[${family}]{3})+|[${family}]+)`
-      + `(?:${d}([${family}]+))?\\s*(\\p{L}+)(?!\\p{L})`, 'gu');
+    const minus = `[\\x2d\\u2212${escapeRegExp(format.minusSign)}]`;
+    pattern = new RegExp(`(?<![${family}${g}${d}\\p{L}])(?<![${family}]\\s)(?<![${family}][eE]${minus}?)`
+      + `(?<!\\/\\s*)(?<![${family}]\\s*[\\x2d\\u2212\\u2013]\\s*)(${minus})?`
+      + `([${family}]{1,3}(?:${g}[${family}]{3})+|[${family}]+)`
+      + `(?:${d}([${family}]+))?\\s*(\\p{L}[\\p{L}\\p{N}]*)(?![\\p{L}\\p{N}/])`, 'gu');
     quantityPatterns.set(format, pattern);
   }
   return pattern;
@@ -484,13 +497,13 @@ function readQuantity(text, unit, format) {
   const pattern = quantityPattern(format);
   pattern.lastIndex = 0;
   for (const m of text.matchAll(pattern)) {
-    const from = unitOfAlias(m[3]);
+    const from = unitOfAlias(m[4]);
     if (from === undefined || dimensionOf(from) !== dimension)
       continue;
-    const whole = asciiDigits(m[1].split(format.groupingSeparator).join(''), format);
-    const fraction = m[2] === undefined ? '' : asciiDigits(m[2], format);
+    const whole = asciiDigits(m[2].split(format.groupingSeparator).join(''), format);
+    const fraction = m[3] === undefined ? '' : asciiDigits(m[3], format);
     const value = Number(fraction === '' ? whole : `${whole}.${fraction}`);
-    return convert(value, from, unit);
+    return convert(m[1] === undefined ? value : -value, from, unit);
   }
   return EMPTY;
 }

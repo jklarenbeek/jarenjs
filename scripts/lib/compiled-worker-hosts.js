@@ -10,13 +10,17 @@
  * commits a transaction, streams a read, and records the event-loop delay
  * during a long read (five whole-collection reads) against the 50 ms bound,
  * beside the in-thread binding on the same read, which holds the loop for
- * as long as each read takes; the build without the second entrypoint must refuse
- * the open with `JD0003` naming the endpoint, not retryable.
+ * as long as each read takes; the build without the second entrypoint must
+ * refuse the open with `JD0003` naming the endpoint, not retryable. The
+ * one-line side-effect import is bundled on its own by both bundlers too:
+ * the endpoint must survive it (a package-wide `sideEffects: false` shook
+ * it to 8 bytes).
  */
 import assert from 'node:assert/strict';
-import { writeFileSync } from 'node:fs';
+import { rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
+import { build } from 'esbuild';
 
 /** The acceptance bound on the main thread's event-loop delay during a long read. */
 export const EVENT_LOOP_BOUND_MS = 50;
@@ -24,6 +28,8 @@ export const EVENT_LOOP_BOUND_MS = 50;
 const ROWS = 20000;
 /** How many whole-collection reads make up the long read. */
 const SCANS = 5;
+/** Bytes below which a bundled side-effect import kept nothing of the endpoint. */
+const ENDPOINT_FLOOR = 1024;
 
 const APPLICATION = `import { monitorEventLoopDelay } from 'node:perf_hooks';
 import { openStore } from '@jarenjs/db';
@@ -71,14 +77,24 @@ console.log(JSON.stringify({ runtime: process.versions.bun, hosts }));
 
 /**
  * Build both executables in `directory` (which resolves `@jarenjs/*`), into
- * `isolated`; run them only after `removeSources` took every source and
- * module path away.
+ * `isolated`; run them only after the caller took every source and module
+ * path away.
  * @param {string} directory @param {string} isolated
- * @returns {{ run: () => any }}
+ * @returns {Promise<{ run: () => any }>}
  */
-export function buildCompiledWorkerHosts(directory, isolated) {
+export async function buildCompiledWorkerHosts(directory, isolated) {
   writeFileSync(join(directory, 'worker-app.js'), APPLICATION);
   writeFileSync(join(directory, 'worker-endpoint.js'), "import '@jarenjs/db/worker-endpoint';\n");
+  // the side-effect import, bundled alone, keeps the endpoint
+  const bunBundle = join(isolated, 'endpoint-bundle.js');
+  execFileSync('bun', ['build', './worker-endpoint.js', '--target', 'bun', '--outfile', bunBundle],
+    { cwd: directory, stdio: 'pipe', timeout: 120000 });
+  const esbuilt = await build({ entryPoints: ['./worker-endpoint.js'], absWorkingDir: directory, bundle: true,
+    platform: 'node', format: 'esm', write: false, logLevel: 'silent' });
+  const sideEffectImportBytes = { bun: statSync(bunBundle).size, esbuild: esbuilt.outputFiles[0].contents.length };
+  rmSync(bunBundle);
+  for (const [bundler, bytes] of Object.entries(sideEffectImportBytes))
+    assert.ok(bytes > ENDPOINT_FLOOR, `${bundler} shook the endpoint's side-effect import to ${bytes} bytes`);
   const bundled = join(isolated, 'worker-hosts-bun');
   const missing = join(isolated, 'worker-hosts-bun-without-endpoint');
   const compile = (/** @type {string[]} */ entries, /** @type {string} */ outfile) => execFileSync('bun',
@@ -109,7 +125,7 @@ export function buildCompiledWorkerHosts(directory, isolated) {
         assert.match(row.refused.endpoint, /worker-endpoint\.js$/);
       }
       return { recipe: 'bun build --compile ./worker-app.js ./worker-endpoint.js --outfile worker-hosts-bun',
-        runtime: full.runtime, rows: ROWS, scans: SCANS, eventLoopBoundMs: EVENT_LOOP_BOUND_MS,
+        runtime: full.runtime, rows: ROWS, scans: SCANS, eventLoopBoundMs: EVENT_LOOP_BOUND_MS, sideEffectImportBytes,
         hosts: full.hosts, withoutEndpoint: without.hosts.filter((/** @type {any} */ row) => row.refused !== undefined) };
     },
   };

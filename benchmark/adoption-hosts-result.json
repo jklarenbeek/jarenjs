@@ -4,15 +4,16 @@
   "platform": "linux",
   "arch": "x64",
   "sourceHashes": {
-    "scripts/check-adoption-journeys.js": "9aa7fb19107741ee3f73909bcc1e48db39f883c09860001ce3f087f8196bf484",
+    "scripts/check-adoption-journeys.js": "7e77924f87f0efc67c71c2aeb08c987725cce4ee5ef054e46d46137367a6ef96",
     "scripts/lib/standalone.js": "fc9b8b9e4d6f4a11bf04186a3a83ad15bd93970d5121de6d71febcf3aca4dec1",
     "scripts/lib/adoption-journey.js": "ac4f3c24a0d7edddaf08bbd012d38dbf0c4b0effa4443f17333b543948e7efc6",
-    "test/consumer/journey.js": "0870f6365a6a60829a04c9fa12dc45639bb1bdde60175ccdc3ce0d94365411e1",
-    "packages/website/src/examples/adoption.js": "b9013cc001d1384c095e4348429bd065150e83bfc8195227da44b1fbb6bf375b",
+    "scripts/lib/compiled-worker-hosts.js": "da4488714213686355e8b2789330a022d1e76ad8ef40d90c1bee945d1b1e0492",
+    "test/consumer/journey.js": "38010d72aabaeb2c840f091ec1f7f8781f2d357eb4ce9f393b05770259132d3a",
+    "packages/website/src/examples/adoption.js": "50d1a8f48d7f8006c116a2e6a6ded59375a36f303f35e4b081f8e713e194647c",
     "packages/website/src/examples/adoption-model.js": "7e990a688127108a8e7b158c5030f777baef9a2b5bfcabaf156115ff76551577",
     "packages/website/src/examples/adoption-fixture.js": "16479fa5b6fab527767b763780d9cf2dd24143bdca25f7990ac74cc8779ec567",
     "packages/db/src/jobs.js": "55b287e58ac90433bf615b411423e50b053ca71870c995bb9d4052f094392474",
-    "packages/db/src/store.js": "36f45137c525d4f6aee142e3a562c12b6a759b5d0c12268d046ed1d949645d60"
+    "packages/db/src/store.js": "1578efa3e76328981dac598959b491294bcec71b609ff8785ac3fe53dca2479f"
   },
   "report": [
     {
@@ -27,7 +28,7 @@
           "secondWrites": 0,
           "secondRevisions": 0,
           "changes": 256,
-          "searchMs": 614.1912159999999,
+          "searchMs": 346.52044499999994,
           "searchHash": "e1a757541681300c320a4f07aa0742b817d9363eb284bfd0d061691e76de93bf",
           "startupDDL": 0,
           "history": 3,
@@ -58,11 +59,11 @@
               "body": "{\"id\":\"catalog-1022\"}"
             }
           ],
-          "elapsedMs": 1262.129178,
-          "teardownMs": 0.49444999999991524,
+          "elapsedMs": 764.914816,
+          "teardownMs": 0.224187000000029,
           "runtime": "v24.20.0",
-          "heapBytes": 69399272,
-          "peakRssBytes": 287866880
+          "heapBytes": 69665808,
+          "peakRssBytes": 285532160
         },
         {
           "consumer": "archive-stock",
@@ -73,7 +74,7 @@
           "secondWrites": 0,
           "secondRevisions": 0,
           "changes": 512,
-          "searchMs": 4150.93547,
+          "searchMs": 2768.9191490000003,
           "searchHash": "51902a33caf8dad05035c9e56096dde0af6c44bb7491692213654b689fcd58ae",
           "startupDDL": 0,
           "history": 1,
@@ -109,11 +110,11 @@
               "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":\"430\"}}"
             }
           ],
-          "elapsedMs": 6148.972705,
-          "teardownMs": 0.29760399999941,
+          "elapsedMs": 4234.312162,
+          "teardownMs": 0.247681000000739,
           "runtime": "v24.20.0",
-          "heapBytes": 347711168,
-          "peakRssBytes": 892211200
+          "heapBytes": 396070112,
+          "peakRssBytes": 907931648
         },
         {
           "consumer": "catalog",
@@ -127,11 +128,11 @@
           "startupDDL": 0,
           "history": 3,
           "wire": [],
-          "elapsedMs": 120.41278599999998,
-          "teardownMs": 0.8329289999999787,
+          "elapsedMs": 80.626162,
+          "teardownMs": 0.6107969999999909,
           "runtime": "v24.20.0",
-          "heapBytes": 33601496,
-          "peakRssBytes": 117157888
+          "heapBytes": 35338488,
+          "peakRssBytes": 117903360
         }
       ],
       "crashExit": 73,
@@ -150,7 +151,7 @@
           "secondWrites": 0,
           "secondRevisions": 0,
           "changes": 256,
-          "searchMs": 403.15752399999997,
+          "searchMs": 263.212141,
           "searchHash": "e1a757541681300c320a4f07aa0742b817d9363eb284bfd0d061691e76de93bf",
           "startupDDL": 0,
           "history": 3,
@@ -181,11 +182,11 @@
               "body": "{\"id\":\"catalog-1022\"}"
             }
           ],
-          "elapsedMs": 895.955631,
-          "teardownMs": 0.40468299999997726,
+          "elapsedMs": 606.1213869999999,
+          "teardownMs": 0.34902999999997064,
           "runtime": "1.4.2",
-          "heapBytes": 87867253,
-          "peakRssBytes": 280092672
+          "heapBytes": 52242577,
+          "peakRssBytes": 269107200
         },
         {
           "consumer": "archive-stock",
@@ -196,7 +197,7 @@
           "secondWrites": 0,
           "secondRevisions": 0,
           "changes": 512,
-          "searchMs": 2708.8763980000003,
+          "searchMs": 1803.6581370000001,
           "searchHash": "51902a33caf8dad05035c9e56096dde0af6c44bb7491692213654b689fcd58ae",
           "startupDDL": 0,
           "history": 1,
@@ -232,11 +233,11 @@
               "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":\"430\"}}"
             }
           ],
-          "elapsedMs": 4250.609874000001,
-          "teardownMs": 0.4551069999997708,
+          "elapsedMs": 2976.2306350000003,
+          "teardownMs": 0.3615330000002359,
           "runtime": "1.4.2",
-          "heapBytes": 336701438,
-          "peakRssBytes": 1020850176
+          "heapBytes": 344873125,
+          "peakRssBytes": 1027039232
         },
         {
           "consumer": "catalog",
@@ -250,11 +251,11 @@
           "startupDDL": 0,
           "history": 3,
           "wire": [],
-          "elapsedMs": 109.28803500000001,
-          "teardownMs": 1.1346709999999973,
+          "elapsedMs": 77.383488,
+          "teardownMs": 0.832538999999997,
           "runtime": "1.4.2",
-          "heapBytes": 8195464,
-          "peakRssBytes": 79720448
+          "heapBytes": 8771723,
+          "peakRssBytes": 83697664
         }
       ],
       "crashExit": 73,
@@ -273,7 +274,7 @@
           "secondWrites": 0,
           "secondRevisions": 0,
           "changes": 256,
-          "searchMs": 321.730187,
+          "searchMs": 253.57774499999996,
           "searchHash": "e1a757541681300c320a4f07aa0742b817d9363eb284bfd0d061691e76de93bf",
           "startupDDL": 0,
           "history": 3,
@@ -304,11 +305,11 @@
               "body": "{\"id\":\"catalog-1022\"}"
             }
           ],
-          "elapsedMs": 741.354258,
-          "teardownMs": 0.22431700000004184,
+          "elapsedMs": 585.8890600000001,
+          "teardownMs": 0.23231300000009014,
           "runtime": "1.4.2",
-          "heapBytes": 64718042,
-          "peakRssBytes": 232976384
+          "heapBytes": 65110823,
+          "peakRssBytes": 265486336
         },
         {
           "consumer": "archive-stock",
@@ -319,7 +320,7 @@
           "secondWrites": 0,
           "secondRevisions": 0,
           "changes": 512,
-          "searchMs": 2228.362008,
+          "searchMs": 1816.960278,
           "searchHash": "51902a33caf8dad05035c9e56096dde0af6c44bb7491692213654b689fcd58ae",
           "startupDDL": 0,
           "history": 1,
@@ -355,11 +356,11 @@
               "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":\"430\"}}"
             }
           ],
-          "elapsedMs": 3601.8165710000003,
-          "teardownMs": 0.5318489999999656,
+          "elapsedMs": 2963.054218,
+          "teardownMs": 0.40914100000009057,
           "runtime": "1.4.2",
-          "heapBytes": 335766229,
-          "peakRssBytes": 1052753920
+          "heapBytes": 356226284,
+          "peakRssBytes": 1075605504
         },
         {
           "consumer": "catalog",
@@ -373,17 +374,17 @@
           "startupDDL": 0,
           "history": 3,
           "wire": [],
-          "elapsedMs": 89.58045100000001,
-          "teardownMs": 1.3037750000000017,
+          "elapsedMs": 67.568225,
+          "teardownMs": 0.979502999999994,
           "runtime": "1.4.2",
-          "heapBytes": 6995928,
-          "peakRssBytes": 70295552
+          "heapBytes": 7301008,
+          "peakRssBytes": 72265728
         }
       ],
       "crashExit": 73,
       "remoteSends": 2,
       "recoverySends": 0,
-      "binaryBytes": 83367392
+      "binaryBytes": 83555808
     },
     {
       "label": "node-executable",
@@ -397,7 +398,7 @@
           "secondWrites": 0,
           "secondRevisions": 0,
           "changes": 256,
-          "searchMs": 472.77931400000006,
+          "searchMs": 401.116442,
           "searchHash": "e1a757541681300c320a4f07aa0742b817d9363eb284bfd0d061691e76de93bf",
           "startupDDL": 0,
           "history": 3,
@@ -428,11 +429,11 @@
               "body": "{\"id\":\"catalog-1022\"}"
             }
           ],
-          "elapsedMs": 988.7778309999999,
-          "teardownMs": 0.2214120000001003,
+          "elapsedMs": 836.557732,
+          "teardownMs": 0.21949800000004416,
           "runtime": "v24.20.0",
-          "heapBytes": 99071960,
-          "peakRssBytes": 294031360
+          "heapBytes": 103042632,
+          "peakRssBytes": 288641024
         },
         {
           "consumer": "archive-stock",
@@ -443,7 +444,7 @@
           "secondWrites": 0,
           "secondRevisions": 0,
           "changes": 512,
-          "searchMs": 3164.6800900000003,
+          "searchMs": 2739.637834,
           "searchHash": "51902a33caf8dad05035c9e56096dde0af6c44bb7491692213654b689fcd58ae",
           "startupDDL": 0,
           "history": 1,
@@ -479,11 +480,11 @@
               "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":\"430\"}}"
             }
           ],
-          "elapsedMs": 4901.449253,
-          "teardownMs": 0.49928799999997864,
+          "elapsedMs": 4158.507912,
+          "teardownMs": 0.21705399999973451,
           "runtime": "v24.20.0",
-          "heapBytes": 319982504,
-          "peakRssBytes": 849846272
+          "heapBytes": 321486280,
+          "peakRssBytes": 827826176
         },
         {
           "consumer": "catalog",
@@ -497,17 +498,81 @@
           "startupDDL": 0,
           "history": 3,
           "wire": [],
-          "elapsedMs": 99.986335,
-          "teardownMs": 0.8683249999999987,
+          "elapsedMs": 88.953818,
+          "teardownMs": 0.6001270000000147,
           "runtime": "v24.20.0",
-          "heapBytes": 16708704,
-          "peakRssBytes": 85204992
+          "heapBytes": 17797080,
+          "peakRssBytes": 87769088
         }
       ],
       "crashExit": 73,
       "remoteSends": 2,
       "recoverySends": 0,
-      "binaryBytes": 128650432
+      "binaryBytes": 128781504
     }
-  ]
+  ],
+  "workerHosts": {
+    "recipe": "bun build --compile ./worker-app.js ./worker-endpoint.js --outfile worker-hosts-bun",
+    "runtime": "1.4.2",
+    "rows": 20000,
+    "scans": 5,
+    "eventLoopBoundMs": 50,
+    "sideEffectImportBytes": {
+      "bun": 92651,
+      "esbuild": 126998
+    },
+    "hosts": [
+      {
+        "host": "worker",
+        "written": 20001,
+        "streamed": 20001,
+        "longReadMs": 275.88428,
+        "eventLoopDelayMs": {
+          "p50": 0.046303,
+          "p99": 1.164287,
+          "max": 1.304828
+        }
+      },
+      {
+        "host": "pool",
+        "written": 20001,
+        "streamed": 20001,
+        "longReadMs": 324.5251380000002,
+        "eventLoopDelayMs": {
+          "p50": 0.056159,
+          "p99": 1.042943,
+          "max": 1.838782
+        }
+      },
+      {
+        "host": "in-thread",
+        "written": 20001,
+        "streamed": 20001,
+        "longReadMs": 111.22772299999997,
+        "eventLoopDelayMs": {
+          "p50": 0.060735,
+          "p99": 110.952447,
+          "max": 110.906295
+        }
+      }
+    ],
+    "withoutEndpoint": [
+      {
+        "host": "worker",
+        "refused": {
+          "code": "JD0003",
+          "retryable": false,
+          "endpoint": "file:///$bunfs/root/worker-endpoint.js"
+        }
+      },
+      {
+        "host": "pool",
+        "refused": {
+          "code": "JD0003",
+          "retryable": false,
+          "endpoint": "file:///$bunfs/root/worker-endpoint.js"
+        }
+      }
+    ]
+  }
 }

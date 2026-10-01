@@ -20,6 +20,27 @@ const profile = (expression, extra = {}) => ({ $formula: '1', id: 'f', revision:
 const refused = (doc, options, code, pattern) => assert.throws(() => compileFormula(doc, options),
   (/** @type {any} */ e) => e.code === code && pattern.test(e.message), JSON.stringify(doc));
 
+describe("a formula's host options", () => {
+  it('refuses malformed locale data or a pack list once, as a TypeError of the host, not as every document\'s error', () => {
+    const decimalFormats = { nl: { decimalSeparator: ',', groupingSeparator: ',' } };
+    assert.throws(() => createFormulaCompiler({ decimalFormats }), (/** @type {any} */ e) => e instanceof TypeError && /decimalFormats\.nl/.test(e.message));
+    assert.throws(() => compileFormula(profile('$.name'), { decimalFormats }), TypeError);
+    assert.throws(() => createFormulaCompiler({ dateNames: /** @type {any} */ ({ months: [] }) }), (/** @type {any} */ e) => e instanceof TypeError && /dateNames/.test(e.message));
+    assert.throws(() => createFormulaCompiler({ packs: /** @type {any} */ ([mathPack]) }),
+      (/** @type {any} */ e) => e instanceof TypeError && /operator pack registry/.test(e.message));
+  });
+
+  it('refuses a helper named like a function of a listed pack (JQ0014), instead of letting one shadow the other', () => {
+    const registry = createJsltRegistry().use({ name: 'p', version: '1', entries: { twice: { kind: 'fn', fn: (/** @type {number} */ x) => x * 2 } } });
+    const helpers = { twice: { version: '1', run: (/** @type {number} */ x) => x * 100, trust: /** @type {const} */ ('pure'), cost: 1 } };
+    refused(profile({ $call: ['twice', 3] }, { packs: [{ name: 'p', version: '1' }], helpers: [{ name: 'twice', version: '1' }] }),
+      { packs: registry, helpers }, 'JQ0014', /helper twice has the name of a function of a listed operator pack at \/helpers\/0/);
+    // without the pack, the helper answers
+    assert.deepStrictEqual(compileFormula(profile({ $call: ['twice', 3] }, { helpers: [{ name: 'twice', version: '1' }] }), { packs: registry, helpers })
+      .evaluate({}), { kind: 'value', value: 300 });
+  });
+});
+
 describe('a formula\'s operator packs', () => {
   it('evaluates an operator of a listed pack at its version', () => {
     const formula = compileFormula(profile({ $sqrt: ['$.x'] }, { packs: [{ name: 'math', version: '1' }] }), { packs });

@@ -2205,7 +2205,7 @@ export function openStore(model, options) {
       /** A classified root cursor: one parallel read across its pulls, or
        * the gate per pull. */
       const admitReadCursor = (cursor, signal, what) => (options.reads === 'parallel'
-        ? shareCursor(cursor, share, signal, what, sharedCursors, ownerAdmitted)
+        ? shareCursor(cursor, share, signal, what, sharedCursors, () => ownerGuard(false), ownerAdmitted)
         : admitRootCursor(cursor, signal, what));
 
       /** The synchronous surface's gate. It cannot wait — waiting hands
@@ -2406,7 +2406,8 @@ export function openStore(model, options) {
         return ownerLease.acquire();
       };
       // `reads: 'parallel'` needs readers to run on: the pool host's, and
-      // only once it opened them (a memory or read-only pool has none)
+      // only once it opened them (a writable pool on `:memory:` or with
+      // `readers: 0` has none; every worker of a read-only pool reads)
       const refuseParallelReadsHere = () => {
         if (options.reads !== 'parallel' || (opened.shared !== null && opened.shared !== undefined
           && Number(opened.capabilities.poolReaders) > 0)) return;
