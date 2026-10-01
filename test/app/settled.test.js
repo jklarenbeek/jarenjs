@@ -95,6 +95,23 @@ describe('app.settled() — the drain, or the frame', () => {
     app.destroy();
   });
 
+  it('a frame whose afterRender dispatched is not settled: the waiter gets the frame that paints the new state', WAIT, async () => {
+    let measured = false;
+    /** @type {any} */
+    let app;
+    let shown = () => '';
+    // afterRender answers once, as a measure op does: the state moves past the frame that ran it
+    ({ app, shown } = mount({ afterRender: () => {
+      if (!measured && app !== undefined && app.getState().n === 1) { measured = true; app.dispatch('bump'); }
+    } }));
+    await app.settled({ frame: true });
+    app.dispatch('bump');
+    const state = await app.settled({ frame: true });
+    assert.strictEqual(state.n, 2, 'the waiter gets the state the last frame painted');
+    assert.strictEqual(shown(), '<div><p>2</p></div>', 'and the DOM shows it');
+    app.destroy();
+  });
+
   it('stop() and destroy() answer a waiter: no frame comes after either', WAIT, async () => {
     for (const end of ['stop', 'destroy']) {
       const { app } = mount();

@@ -314,6 +314,9 @@ export function createApp(appDoc, options = {}) {
   const drainWaiters = [];
   /** @type {Array<(state: any) => void>} */
   const frameWaiters = [];
+  /** The state the frame in progress paints: a waiter settles on a frame
+   * only while the state is still that one. @type {any} */
+  let paintedState;
 
   /** @type {(((vnode: any) => void) & { destroy?: () => void }) | null} */
   let renderer = null;
@@ -1152,8 +1155,8 @@ export function createApp(appDoc, options = {}) {
       }
       // a pass that failed before committing a frame reported through
       // onError; its waiters are answered now rather than left for a
-      // frame nothing has scheduled
-      settleFrameWaiters();
+      // frame nothing has scheduled — unless the error sink scheduled one
+      if (!renderScheduled) settleFrameWaiters();
       if (!draining) flushPendingError();
     });
   }
@@ -1175,6 +1178,7 @@ export function createApp(appDoc, options = {}) {
     if (renderer === null) return;
     renderDepth++;
     try {
+      paintedState = state;
       renderer(vnode());
     }
     finally {
@@ -1317,8 +1321,8 @@ export function createApp(appDoc, options = {}) {
           // not fire the callback; one deferred call runs only after
           // the whole boot (queued drain included) succeeded, so no
           // post-render side effect can escape a boot that rolls back.
-          onFrame: (state) => {
-            if (state !== 'live') {
+          onFrame: (frame) => {
+            if (frame !== 'live') {
               // the pass ended in terminal teardown: a deferred
               // in-hook destroy has now finished its renderer walk —
               // the destroy-wide cleanup outcome is complete
@@ -1341,8 +1345,11 @@ export function createApp(appDoc, options = {}) {
                 safeError(toError(err));
               }
             }
-            // the frame is on screen and its post-render work ran
-            settleFrameWaiters();
+            // the frame is on screen and its post-render work ran — and
+            // when that work dispatched (a measure op answering), the
+            // state has moved past this frame: the waiters wait for the
+            // frame that paints it, so the DOM shows the state they get
+            if (state === paintedState) settleFrameWaiters();
           },
         });
       }

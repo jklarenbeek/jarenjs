@@ -116,7 +116,7 @@ function checkStaticSegment(source, pos, end) {
       throw new TypeError(`":" is reserved for a variable segment (":name"), found "${source.slice(pos, end)}"`);
     }
     if (c === CC_STAR) {
-      throw new TypeError(`"*" is a reserved wildcard form; format 0.1 has no wildcards, found "${source.slice(pos, end)}"`);
+      throw new TypeError(`"*" is a reserved wildcard form; a path template has no wildcards, found "${source.slice(pos, end)}"`);
     }
     if (c === CC_QUESTION || c === CC_HASH) {
       throw new TypeError(`"${String.fromCharCode(c)}" cannot appear in a path template (the query and fragment are not part of the path)`);
@@ -181,13 +181,13 @@ export function parsePathTemplate(source) {
       const n0 = name.length === 0 ? -1 : name.charCodeAt(0);
       const nl = name.length === 0 ? -1 : name.charCodeAt(name.length - 1);
       if (isUriTemplateOperator(n0)) {
-        throw new TypeError(`"{${name}}" uses the reserved RFC 6570 operator "${name[0]}"; format 0.1 supports only "{name}"`);
+        throw new TypeError(`"{${name}}" uses the reserved RFC 6570 operator "${name[0]}"; a path template supports only "{name}"`);
       }
       if (nl === CC_PLUS || nl === CC_STAR) {
-        throw new TypeError(`"{${name}}" uses the reserved "${name[name.length - 1]}" expansion modifier; format 0.1 has no wildcards`);
+        throw new TypeError(`"{${name}}" uses the reserved "${name[name.length - 1]}" expansion modifier; a path template has no wildcards`);
       }
       if (name.indexOf(',') !== -1 || name.indexOf(':') !== -1) {
-        throw new TypeError(`"{${name}}" uses a reserved RFC 6570 list or prefix form; format 0.1 supports only "{name}"`);
+        throw new TypeError(`"{${name}}" uses a reserved RFC 6570 list or prefix form; a path template supports only "{name}"`);
       }
     }
     else if (c0 === CC_COLON) {
@@ -197,7 +197,7 @@ export function parsePathTemplate(source) {
       }
       const nl = name.charCodeAt(name.length - 1);
       if (nl === CC_STAR || nl === CC_PLUS || nl === CC_QUESTION) {
-        throw new TypeError(`":${name}" uses a reserved "${name[name.length - 1]}" modifier; format 0.1 has no wildcards or optional segments`);
+        throw new TypeError(`":${name}" uses a reserved "${name[name.length - 1]}" modifier; a path template has no wildcards or optional segments`);
       }
     }
     if (name !== null) {

@@ -273,6 +273,27 @@ describe('the contract pen: the refusals it can see earlier than the compiler', 
     }
   });
 
+  it('CONTRACT-PEN §4.2 quotes each template refusal exactly as http() throws it', () => {
+    const md = fs.readFileSync(new URL('../../packages/linq/docs/CONTRACT-PEN.md', import.meta.url), 'utf8');
+    const start = md.indexOf('### 4.2 `JL0102`');
+    const section = md.slice(start, md.indexOf('\n### ', start + 1));
+    const last = (/** @type {string} */ path) => path.slice(path.lastIndexOf('/') + 1);
+    let rows = 0;
+    for (const line of section.split('\n')) {
+      const m = /^\| `path: '([^']*)'`(?:, `path: '([^']*)'`)? \| `(.*?)` \|/.exec(line);
+      if (m === null) continue;
+      const [, first, second, documented] = m;
+      rows++;
+      // a row of two spellings quotes the first; the message names the segment it met
+      for (const [path, expected] of [[first, documented], ...(second === undefined ? []
+        : [[second, documented.replaceAll(`"${last(first)}"`, `"${last(second)}"`)]])]) {
+        const err = refusal(() => http({ method: 'GET', path }));
+        assert.strictEqual(err.reason, expected, `${path}: the table's message`);
+      }
+    }
+    assert.ok(rows >= 16, `${rows} rows read`);
+  });
+
   it('the compiler refuses the same template with JC0008 — the pen is earlier, never different', () => {
     const err = refusal(() => compileContract({
       $contract: '0.1',

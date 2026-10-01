@@ -57,6 +57,11 @@ const captureStack = [];
  * `when()` branch) folds by, so it is spelled as the capture spells its
  * own result. @type {boolean[]} */
 const foldStack = [];
+/** Each capture's kind, beside its epoch: `'action'` for an action
+ * document (the app pen), `null` for every other capture. A pen value
+ * that only an action can carry (a `when()` transition) asks it.
+ * @type {(string | null)[]} */
+const kindStack = [];
 
 /**
  * Whether the innermost capture folds a pure data tree into one `$const`
@@ -65,6 +70,23 @@ const foldStack = [];
  */
 export function captureFold() {
   return foldStack.length === 0 ? true : foldStack[foldStack.length - 1];
+}
+
+/**
+ * The innermost capture's kind — `'action'` inside an action document's
+ * capture — or `null` inside any other capture and outside every one.
+ * @returns {string | null}
+ */
+export function captureKind() {
+  return kindStack.length === 0 ? null : kindStack[kindStack.length - 1];
+}
+
+/**
+ * Whether any capture is in progress.
+ * @returns {boolean}
+ */
+export function inCapture() {
+  return captureStack.length > 0;
 }
 
 /** @param {any} record */
@@ -900,9 +922,11 @@ function makeParams(declared, epoch) {
  * @param {Set<string>} declaredParams
  * @param {boolean} [fold] - whether a pure data tree folds into one
  *   `$const` (the chain's spelling) or is a constructor tree (a pen's)
+ * @param {string | null} [kind] - what the capture writes, for a pen value
+ *   only one kind can carry (`'action'`, see {@link captureKind})
  * @returns {any} the captured expression (plain JSON)
  */
-export function captureExpression(fn, roots, declaredParams, fold = true) {
+export function captureExpression(fn, roots, declaredParams, fold = true, kind = null) {
   const epoch = ++epochCounter;
   const proxies = roots.map((root) => (typeof root === 'string'
     ? makeExpr('$' + root, epoch, true)
@@ -910,12 +934,14 @@ export function captureExpression(fn, roots, declaredParams, fold = true) {
   proxies.push(makeParams(declaredParams, epoch));
   captureStack.push(epoch);
   foldStack.push(fold);
+  kindStack.push(kind);
   try {
     return toExpression(fn(...proxies), fold);
   }
   finally {
     captureStack.pop(); // every proxy of this capture is now dead
     foldStack.pop();
+    kindStack.pop();
   }
 }
 

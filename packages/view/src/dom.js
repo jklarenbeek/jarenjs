@@ -52,7 +52,7 @@ import {
   EMPTY_PROPS,
   WIDGET_TAG,
 } from './vnode.js';
-import { enumeratedAttribute, removeProperty } from './properties.js';
+import { ENUMERATED_ALIASES, enumeratedAttribute, isAliased, removeProperty, writingSpelling } from './properties.js';
 import { createSafePolicy } from './safe.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -115,7 +115,7 @@ const WIDGET_SKIP_PROPS = { name: true, props: true, tag: true };
  * own registry and document, frozen, one object per renderer. A widget
  * that renders vnodes of its own (a dialog's content) renders them with
  * the registry it was mounted from.
- * @typedef {Readonly<{ widgets: Record<string, WidgetDef>, document: any }>} WidgetContext
+ * @typedef {Readonly<{ widgets: Record<string, WidgetDef>, document: any, controlled?: 'focus' }>} WidgetContext
  */
 
 /**
@@ -255,7 +255,11 @@ export function createDomRenderer(container, options = {}) {
   ctx.emit = function emit(binding, nativeEvent) {
     if (ctx.onEvent !== null) ctx.onEvent(binding, nativeEvent);
   };
-  ctx.widgetContext = Object.freeze({ widgets: ctx.widgets, document: ctx.doc });
+  // a widget that renders a vnode tree of its own (a dialog's content)
+  // renders it under the same controlled mode as this renderer's
+  ctx.widgetContext = Object.freeze(ctx.deferFocused
+    ? { widgets: ctx.widgets, document: ctx.doc, controlled: /** @type {'focus'} */ ('focus') }
+    : { widgets: ctx.widgets, document: ctx.doc });
   /** @type {any} */
   let oldVnode = null;
   /** @type {any} */
@@ -269,6 +273,9 @@ export function createDomRenderer(container, options = {}) {
    * carries the full desired tree; only the last one is applied. */
   let pendingVnode;
   let destroyPending = false;
+  /** Hydration adopts the server's markup once, on the first pass: a tree
+   * rebuilt after a failed pass is created. */
+  let adopt = Boolean(options.hydrate);
 
   function render(vnode) {
     if (ctx.destroyed) return; // a scheduled flush after destroy is a no-op
@@ -290,7 +297,9 @@ export function createDomRenderer(container, options = {}) {
         pendingVnode = undefined;
         ctx.root = next;
         if (rootNode === null) {
-          if (options.hydrate && ctx.policy === null) {
+          const hydrating = adopt && ctx.policy === null;
+          adopt = false;
+          if (hydrating) {
             adoptChildren(ctx, container, childrenOf(['root', {}, next]), null);
           }
           else {
@@ -316,6 +325,17 @@ export function createDomRenderer(container, options = {}) {
       if (!ctx.destroyed && ctx.controlled.size > 0) {
         reconcileControlledSet(ctx, container);
       }
+    }
+    catch (error) {
+      // A pass that threw part-way (a refused tag, an unregistered widget)
+      // left writes no baseline records: the next frame would diff against
+      // the frame before it and keep them. The tree is torn down — every
+      // mounted widget unmounts, the container empties — so the next frame
+      // builds from its own vnode.
+      teardown();
+      container.textContent = '';
+      destroyPending = false;
+      throw error;
     }
     finally {
       rendering = false;
@@ -634,20 +654,45 @@ function patchNode(ctx, parent, node, oldV, newV, ns) {
  */
 function patchProps(ctx, node, oldProps, newProps, ns) {
   if (oldProps !== newProps) {
+    let aliased = false;
     for (const name in oldProps) {
       if (!(name in newProps)) {
-        setProp(ctx, node, name, oldProps[name], undefined, ns);
+        if (isAliased(name)) aliased = true;
+        else setProp(ctx, node, name, oldProps[name], undefined, ns);
       }
     }
     for (const name in newProps) {
-      if (oldProps[name] !== newProps[name]) {
-        setProp(ctx, node, name, oldProps[name], newProps[name], ns);
-      }
+      if (isAliased(name)) aliased = true;
+      else if (oldProps[name] !== newProps[name]) setProp(ctx, node, name, oldProps[name], newProps[name], ns);
     }
+    if (aliased) patchAliased(ctx, node, oldProps, newProps, ns);
   }
   // Record (or refresh) this control's authoritative value; the actual write
   // happens in the end-of-pass reconciliation so it survives the skip paths.
   registerControlled(ctx, node, newProps);
+}
+
+/**
+ * An attribute two props can spell, diffed by the value it ends up with —
+ * the later spelling's, as `serializeProps` writes it — so one spelling
+ * leaving, or the two swapping order, writes what remains.
+ * @param {any} ctx
+ * @param {any} node
+ * @param {Record<string, any>} oldProps
+ * @param {Record<string, any>} newProps
+ * @param {string | null} ns
+ */
+function patchAliased(ctx, node, oldProps, newProps, ns) {
+  for (const [a, b] of ENUMERATED_ALIASES) {
+    const was = writingSpelling(oldProps, a, b);
+    const now = writingSpelling(newProps, a, b);
+    if (now === undefined) {
+      if (was !== undefined) setProp(ctx, node, was, oldProps[was], undefined, ns);
+    }
+    else if (was === undefined || was !== now || oldProps[was] !== newProps[now]) {
+      setProp(ctx, node, now, was === undefined ? undefined : oldProps[was], newProps[now], ns);
+    }
+  }
 }
 
 /**
@@ -745,6 +790,25 @@ function reconcileControlledSet(ctx, container) {
   }
 }
 
+/** The input types an operator types into (VIEW-FORMAT §3); a missing or
+ * unknown type is `text`, as the platform reads it. */
+const TEXT_INPUT_TYPES = new Set(['text', 'search', 'url', 'tel', 'email', 'password', 'number']);
+
+/**
+ * Whether a control is a text control: a `textarea`, or an `input` of a
+ * type the operator types into. Read at reconcile time — a `type` can
+ * change.
+ * @param {any} node
+ * @returns {boolean}
+ */
+function isTextControl(node) {
+  if (node.nodeName === 'TEXTAREA') return true;
+  if (node.nodeName !== 'INPUT') return false;
+  const type = typeof node.type === 'string' ? node.type
+    : (typeof node.getAttribute === 'function' ? node.getAttribute('type') : null) ?? '';
+  return type === '' || TEXT_INPUT_TYPES.has(type.toLowerCase());
+}
+
 /**
  * Reassert one control's authoritative value/checked. React's controlled
  * contract: the passed value wins over a user edit — after a composition,
@@ -763,10 +827,11 @@ function reconcileControlled(node) {
     if (node.checked !== want) node.checked = want;
   }
   if (!c.hasValue) return;
-  // a composition in progress, or (opted in) the operator's focused edit,
-  // holds the authoritative write back until it settles (§3)
+  // a composition in progress, or (opted in) the operator's focused edit
+  // of a text control, holds the authoritative write back until it
+  // settles (§3); a focused range, colour or date takes its value at once
   if (node.__jarenComposing
-    || (node.__jarenDeferFocused === true && node.ownerDocument?.activeElement === node)) {
+    || (node.__jarenDeferFocused === true && isTextControl(node) && node.ownerDocument?.activeElement === node)) {
     node.__jarenDeferred = true;
     return;
   }

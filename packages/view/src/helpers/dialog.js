@@ -24,6 +24,9 @@ export const DIALOG_CODES = Object.freeze({
  * @property {(reason: 'escape'|'button'|'native', event: Event) => void} [onClose]
  * @property {import('../dom.js').EventBindingHandler} [onEvent]
  * @property {Record<string, import('../dom.js').WidgetDef>} [widgets]
+ * @property {'focus'} [controlled] - The content renderer's controlled mode
+ *   (`createDomRenderer`'s): a control the operator is typing into keeps its
+ *   text until it loses focus. A dialog mounted as a widget inherits it.
  * @typedef {{update: (props: DialogProps) => void, dispose: () => void}} DialogOwner
  */
 function refuse(code) { throw new CodedError('ViewHostError', code, DIALOG_CODES[code]); }
@@ -61,7 +64,10 @@ export function createDialog(host, initial, options = {}) {
   closeButton.setAttribute('type', 'button'); closeButton.setAttribute('data-dialog-close', '');
   dialog.appendChild(title); dialog.appendChild(content); dialog.appendChild(closeButton); host.appendChild(dialog);
   let render;
-  try { render = createDomRenderer(content, { document: doc, onEvent: options.onEvent, widgets: options.widgets }); }
+  try {
+    render = createDomRenderer(content, { document: doc, onEvent: options.onEvent, widgets: options.widgets,
+      ...(options.controlled === undefined ? {} : { controlled: options.controlled }) });
+  }
   catch (error) { host.removeChild(dialog); throw error; }
   let props = initial, disposed = false, opener = null, suppressedCloses = 0;
 

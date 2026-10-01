@@ -7,7 +7,8 @@ import { AppRuntimeError, APP_CODES } from './errors.js';
  * @typedef {Object} DialogWidgetOptions
  * @property {Record<string, import('@jarenjs/view').WidgetDef>} [widgets] - Nested content widget registry.
  *   Absent, the content renders with the registry the dialog itself was
- *   mounted from (the renderer's `context.widgets`).
+ *   mounted from (the renderer's `context.widgets`). The content renders
+ *   under the app's controlled mode too (`context.controlled`).
  */
 /**
  * Register as an ordinary jaren-widget. Props carry id/title/open/content,
@@ -26,6 +27,7 @@ export function createDialogWidget(options = {}) {
       check(props);
       const handle = { props, owner: null };
       handle.owner = createDialog(host, props, { widgets: options.widgets ?? context?.widgets, onEvent: emit,
+        ...(context?.controlled === undefined ? {} : { controlled: context.controlled }),
         onClose: (_reason, event) => emit(handle.props.close, event) });
       return handle;
     },

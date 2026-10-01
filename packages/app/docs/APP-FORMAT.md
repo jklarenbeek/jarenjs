@@ -444,8 +444,9 @@ never imports the validator; like forms, the application holds the key
 `createJsonStateValidator()` is the hook for the invariant every state
 shares: it is JSON. A `Date`, a `Map` or a class instance that a
 payload carried into a patch is rejected (`JA2005`, its `detail` naming
-the pointer it was written to) before it can break a snapshot, a replay
-or `renderToString`. It checks only what the transaction changed, in
+where the value sits — `/rows/1` for an insert at `/rows/1`, `/a/b` for a
+member of a written object, a cycle where it closes) before it can break a
+snapshot, a replay or `renderToString`. It checks only what the transaction changed, in
 time proportional to that rather than to the state:
 
 - `changes` is `null` (boot, a transition carrying `state`, `setState`):
@@ -457,7 +458,7 @@ time proportional to that rather than to the state:
 Every location the transition did not write is the previous state's,
 checked when it was committed. The limit is the patch engine's: an
 insert or a removal that shifts an array reports the array, so that
-array is checked whole. A host with a schema validator calls both from
+array is checked whole (the detail still names the offending item). A host with a schema validator calls both from
 one hook: this one first, then the schema.
 
 Large read-only data — a catalog, a dataset, an index — stays **out of
@@ -537,10 +538,13 @@ two moments, because "settled" means two things:
 - `app.settled({ frame: true })` — the **screen** has settled: it
   resolves after the next committed frame, once that frame's
   `afterRender` (§8.4) ran, so the DOM shows the state it resolves
-  with. It resolves at once when no frame is pending, on a headless
-  app, and after `stop()` or `destroy()`, after which no frame comes. A
-  frame that fails to render reports through `onError` and still
-  answers its waiters.
+  with. An `afterRender` that dispatched (a measure op answering) has
+  moved the state past its frame, so that frame does not settle the
+  screen: the waiter takes the frame that paints the new state. It
+  resolves at once when no frame is pending, on a headless app, and
+  after `stop()` or `destroy()`, after which no frame comes. A frame
+  that fails to render reports through `onError` and still answers its
+  waiters, unless the error sink scheduled another frame.
 
 The options are closed: anything other than a boolean `frame` is a
 `TypeError`.
@@ -596,7 +600,8 @@ no-ops.
 `createApp` forwards `safe`, `onUnsafe`, `hydrate` and `controlled` to its DOM
 renderer (VIEW-FORMAT §3/§6/§8). `controlled: 'focus'` lets a text control the
 operator is typing into keep their text through a state change until it loses
-focus; the state's value is reconciled then. Any other value is a `TypeError`. `capabilities` optionally grants names from the host's
+focus; the state's value is reconciled then. The dialog widget's content
+renders under the same mode. Any other value is a `TypeError`. `capabilities` optionally grants names from the host's
 `effects`, `subs`, `widgets` and `eventFields` registries:
 
 ```js
@@ -862,14 +867,23 @@ throw; without a sink, native event errors also surface. Codes:
 `JA2023` malformed host/input/action, `JA2024` URL/origin/protocol/base
 refusal, `JA2025` bounds, `JA2026` unavailable subscription ownership,
 `JA2027` a malformed or colliding route table. An initial address the
-subscription cannot read — outside the base, past a bound — is reported
-as a native event's refusal is (to `onError`, or without one as the
-platform's uncaught error, thrown from a task of its own), delivers
-nothing, and leaves the subscription live: the next address it can read
-is delivered and navigation works. An initial delivery that fails — a
-throwing action dispatch, the delivery bound — removes every listener it
-acquired. A host must configure its action/error policy; these helpers
-add no auth or application page vocabulary.
+subscription cannot read — outside the base (`JA2024`), past a bound
+(`JA2025`) — is reported as a native event's refusal is (to `onError`,
+or without one as the platform's uncaught error, thrown from a task of
+its own), delivers nothing, and leaves the subscription live: the next
+address it can read is delivered and navigation works, also away from
+an address past the bound (only the target is bounded). So an `onError`
+that navigates home lands the app there. The subscribe itself throws,
+and removes every listener it acquired, when:
+
+- the sink throws;
+- the host's address cannot be read at all (`JA2023`, a direct call's
+  refusal);
+- an initial delivery fails — a throwing action dispatch, the delivery
+  bound.
+
+A host must configure its action/error policy; these helpers add no
+auth or application page vocabulary.
 
 **Route tables.** `compileRouteTable({ name: template, … })` names
 addresses by RFC 6570 level-1 templates (`/items/{id}`, `/items/:id`),

@@ -245,7 +245,7 @@ export type TaskPatch<State> =
   | readonly PatchOp[]
   | ((state: ValueExpr<State>, externals: ActionScope<TaskSettled>) => readonly PatchOp[]);
 
-/** One task slot's initial value and its three actions, each answered
+/** One task slot's initial value and its four actions, each answered
  * under its own literal name so a spread keeps `ActionsOf<>` exact. */
 export interface TaskSlot<Name extends string, State = unknown> {
   readonly initial: { readonly id: 0; readonly status: 'idle'; readonly error: null };
@@ -253,6 +253,9 @@ export interface TaskSlot<Name extends string, State = unknown> {
     { readonly [K in `${Name}/start`]: ActionDeclaration<unknown> };
   done(patch?: TaskPatch<State>): { readonly [K in `${Name}/done`]: ActionDeclaration<TaskSettled> };
   fail(patch?: TaskPatch<State>): { readonly [K in `${Name}/fail`]: ActionDeclaration<TaskSettled> };
+  /** The host's cancellation, in the document: a loading slot back to
+   * `idle` under a new id. The host dispatches it beside `cancel(slot)`. */
+  cancel(): { readonly [K in `${Name}/cancel`]: ActionDeclaration<unknown> };
 }
 
 /**

@@ -92,6 +92,14 @@ markup or meeting the platform's own exception. A widget's host `tag`
 instead (§8), through the same predicate. A list that starts with
 `null` splices text before an element: `[null, "Total:", 3]`.
 
+A patching renderer meets such a refusal part-way through a frame, after
+it wrote earlier siblings. The reference DOM renderer then tears its tree
+down — every mounted widget unmounts, and the container empties — and
+rethrows, so the next frame builds from its own vnode rather than from a
+baseline the failed frame no longer matches. A hydrating renderer adopts
+the server's markup on its first pass only; a tree rebuilt after a
+failure is created.
+
 **Rationale for the tagged-array form** (non-normative): rule bodies in
 JSLT are query documents where object members with `$`-prefixed names
 are operators; an object-shaped element vocabulary (`{"tag": ...}` or
@@ -182,8 +190,14 @@ operator's typing survives a background refresh — and reconciled when the
 control loses focus, one task after `focusout` so a render the `change`
 event scheduled lands first. It is the composition deferral above with a
 second cause, not a second mechanism. Without the option, the
-authoritative value always wins. `checked` and a `select`'s value are not
-deferred.
+authoritative value always wins.
+
+A text control is a `textarea`, or an `input` whose `type`, read at
+reconcile time, is one the operator types into: `text` (or none),
+`search`, `url`, `tel`, `email`, `password` or `number`. A focused range,
+colour, date or radio input takes the state's value at once, so an
+app-side clamp or a remote update shows while the operator holds the
+control. `checked` and a `select`'s value are not deferred.
 
 ## 4. Events are data
 
@@ -390,11 +404,14 @@ A widget is registered JavaScript with this shape:
   with that data — in `@jarenjs/app` terms, merges it into `with`. The
   single point of binding interpretation stays the layer above.
 - **`context`** — the fourth argument `mount` receives: a frozen `{
-  widgets, document }`, the renderer's own registry and document, one
-  object per renderer. A widget that renders vnodes of its own (a
-  dialog's content, §7.5) renders them with the registry it was
-  mounted from, so a nested widget needs no second registration. The
-  argument is additive: a `mount` that takes three still works.
+  widgets, document, controlled? }`, the renderer's own registry and
+  document — and `controlled: 'focus'` when the renderer was created
+  with it (§3) — one object per renderer. A widget that renders vnodes
+  of its own (a dialog's content, §7.5) renders them with the registry
+  it was mounted from and under the same controlled mode, so a nested
+  widget needs no second registration and a field in a dialog keeps the
+  operator's text as one in the page does. The argument is additive: a
+  `mount` that takes three still works.
 
 ### 7.3 Registration and reconciliation
 

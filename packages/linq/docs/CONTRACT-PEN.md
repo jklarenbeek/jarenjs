@@ -875,29 +875,30 @@ names the position instead.
 
 ### 4.2 `JL0102` — the reserved path template, and the kind
 
-Raised by `http()` scanning the template, which mirrors the compiler's
-own parser: every form §4.2 reserves is refused by name at build time,
-before `compileContract` would answer `JC0008` with the same meaning.
-Every message carries `docPath: '/path'`.
+Raised by `http()` reading the template with the compiler's own parser
+(`@jarenjs/core/route`): every form §4.2 reserves is refused by name at
+build time, with the message `compileContract` would wrap as `JC0008`.
+Every message carries `docPath: '/path'`, and a test holds each row below
+to what `http()` throws.
 
 | The spelling that trips it | The message | The spelling that works |
 |---|---|---|
 | `path: 42` | `http() path is a path template string, got 42` | a string |
 | `path: 'a/b'` | `a path template must start with "/"` | `'/a/b'` |
 | `path: '/a/'` | `a trailing "/" declares an empty segment; the root template "/" is the only empty path` | `'/a'` |
-| `path: '/a//b'` | `an empty segment ("//")` | `'/a/b'` |
-| `path: '/a/{id}.json'` | `a variable must be a whole segment ("{name}"), found "{id}.json" — the format reserves a variable that is only part of a segment` | `'/a/{id}'`, with the suffix in `media` |
-| `path: '/a/{id'` | `a variable must be a whole segment ("{name}"), found "{id" — the format reserves a variable that is only part of a segment` | close the brace |
+| `path: '/a//b'` | `an empty segment at offset 3 ("//")` | `'/a/b'` |
+| `path: '/a/{id}.json'` | `a variable must be a whole segment ("{name}"), found "{id}.json"` | `'/a/{id}'`, with the suffix in `media` |
+| `path: '/a/{id'` | `a variable must be a whole segment ("{name}"), found "{id"` | close the brace |
 | `path: '/a/x:y'` | `":" is reserved for a variable segment (":name"), found "x:y"` | `'/a/x/y'` |
-| `path: '/a/*'` | `"*" is a reserved wildcard form; $contract 0.1 has no wildcards, found "*"` | name the segments |
+| `path: '/a/*'` | `"*" is a reserved wildcard form; a path template has no wildcards, found "*"` | name the segments |
 | `path: '/a?b'` | `"?" cannot appear in a path template (the query and fragment are not part of the path)` | `in: { b: 'query' }` |
 | `path: '/a b'` | `whitespace or a control character in segment "a b"` | `'/a%20b'` |
 | `path: '/a%zz'` | `a malformed percent-escape in segment "a%zz"` | a well-formed escape |
-| `path: '/a/{+id}'` | `"{+id}" uses the reserved RFC 6570 operator "+"; $contract 0.1 supports only "{name}"` | `'/a/{id}'` |
-| `path: '/a/{id*}'` | `"{id*}" uses the reserved "*" expansion modifier; $contract 0.1 has no wildcards` | `'/a/{id}'` |
-| `path: '/a/{a,b}'`, `path: '/a/{id:3}'` | `"{a,b}" uses a reserved RFC 6570 list or prefix form; $contract 0.1 supports only "{name}"` | one variable per segment |
+| `path: '/a/{+id}'` | `"{+id}" uses the reserved RFC 6570 operator "+"; a path template supports only "{name}"` | `'/a/{id}'` |
+| `path: '/a/{id*}'` | `"{id*}" uses the reserved "*" expansion modifier; a path template has no wildcards` | `'/a/{id}'` |
+| `path: '/a/{a,b}'`, `path: '/a/{id:3}'` | `"{a,b}" uses a reserved RFC 6570 list or prefix form; a path template supports only "{name}"` | one variable per segment |
 | `path: '/a/:'` | `":name" must be a whole segment with an identifier name, found ":"` | `'/a/:id'` |
-| `path: '/a/:id?'` | `":id?" uses a reserved "?" modifier; $contract 0.1 has no wildcards or optional segments` | two operations, or `{id}` |
+| `path: '/a/:id?'` | `":id?" uses a reserved "?" modifier; a path template has no wildcards or optional segments` | two operations, or `{id}` |
 | `path: '/a/{1x}'` | `a variable name must match [A-Za-z_][A-Za-z0-9_]*, found "1x"` | `'/a/{x1}'` |
 | `path: '/a/{id}/b/{id}'` | `the variable "id" is declared twice` | two names |
 | `http({ method: 'GET', path: '/a', in: { id: 'path' } })` | `http() maps 'id' to path, but the template declares no {id} — a path member is named by the template itself` | `path: '/a/{id}'`, and drop the `in` entry |
@@ -1188,7 +1189,7 @@ to write, and reaching them means one import of `@jarenjs/contract` over
 
 ## 7. Cost
 
-`@jarenjs/linq/contract` builds to **<!--fact:bundle.contract-->50,054<!--/fact--> bytes** as a minified,
+`@jarenjs/linq/contract` builds to **<!--fact:bundle.contract-->50,125<!--/fact--> bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
 measures and `npm run test:tree-shaking` reports, published rounded
 (<!--fact:bundle.contract.kb-->50<!--/fact--> kB) beside the other nine subpath prices in
@@ -1200,7 +1201,7 @@ them:
 
 - **the schema pen is included, and that is the ceiling.** A contract's
   inputs and outputs are schemas, so the two are measured together and
-  the bundle carries <!--fact:bundle.schema-->36,834<!--/fact--> of its <!--fact:bundle.contract-->50,054<!--/fact--> bytes as the schema pen's own.
+  the bundle carries <!--fact:bundle.schema-->36,880<!--/fact--> of its <!--fact:bundle.contract-->50,125<!--/fact--> bytes as the schema pen's own.
   The contract pen's own share is the remaining ~12 kB, most of it the
   refusal messages §4 lists;
 - **no chain module** — none of `sequence.js`, `document.js`, `async.js`,

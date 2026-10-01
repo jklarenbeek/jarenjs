@@ -290,6 +290,18 @@ construction:
   is the trap: the second start moves the slot to id `2`, the effect
   ignores it, and the first request's completion carries id `1` and is
   refused as stale — the slot stays `loading` with no request behind it.
+- **A host that cancels a slot also dispatches `<name>/cancel`**, which
+  `cancel()` writes. `cancel(slot)` and `cancelAll()` abort the request,
+  and an abort dispatches nothing, so the document cannot learn of it by
+  itself. The slot would stay `loading`, and under `exhaust` it would
+  refuse every later start. The cancel action moves a loading slot back
+  to `idle` under a new id: the next start runs, and a completion that
+  still arrives is stale. A slot that is not loading is left as it is:
+
+  ```js
+  taskEffect.cancel('save');      // the request
+  app.dispatch('save/cancel');    // the document
+  ```
 
 ## The host-effect rule
 

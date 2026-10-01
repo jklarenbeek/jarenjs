@@ -246,11 +246,20 @@ npx jaren-emit importmap --packages app,view --prefix /vendor/ > importmap.json
 npx jaren-emit importmap --packages app,view --prefix /vendor/ --files   # what to serve
 ```
 
-The packages' dependency closure is followed as Node resolves it. A package
-installed twice — a nested second copy — would load twice in the browser, so
-the command refuses it unless `--allow-duplicates`, and an import the map
-cannot resolve is refused too. Two runs over the same tree print the same
-bytes. The function behind it:
+The packages' dependency closure is followed as Node resolves it, and so is
+each subpath:
+- an exact key wins over a pattern, and a longer pattern over a shorter one;
+- a `*` matches across folders;
+- a `null` target withholds its subpaths;
+- a target Node refuses (outside `./`, or through `..` or `node_modules`) is
+  reported, not mapped.
+
+`--prefix` is the URL `node_modules` is served under, so a dependency
+installed nested is served from where it sits. A package installed twice — a
+nested second copy — would load twice in the browser, so the command refuses
+it unless `--allow-duplicates`, and an import the map cannot resolve is
+refused too, naming the file that imports it. Two runs over the same tree
+print the same bytes. The function behind it:
 
 ```javascript
 import { buildImportMap } from '@jarenjs/emit/importmap';

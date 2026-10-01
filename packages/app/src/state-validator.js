@@ -24,7 +24,7 @@
 
 import { createBoundedCache } from '@jarenjs/core/cache';
 import { isJsonValue } from '@jarenjs/core/object';
-import { compileJSONPointer, JSONPOINTER_NOTHING } from '@jarenjs/json/pointer';
+import { compileJSONPointer, encodeJSONPointerSegment, JSONPOINTER_NOTHING } from '@jarenjs/json/pointer';
 
 /** Compiled pointers kept per validator: a list's element pointers are
  * many, and the least recently used one is the one to drop. */
@@ -41,6 +41,34 @@ const notJson = (pointer) => ({
 });
 
 /**
+ * Where, under a value that is not JSON, the first offending value sits:
+ * the value's own pointer when it is the offender (`undefined`, a function,
+ * a `Date`, a non-finite number), a member's or an item's below it
+ * otherwise, and a container met twice on one descent — the cycle — at its
+ * own pointer. So the detail names the location the bad value was written
+ * to, not the array an insert reported. Walks only after a check failed.
+ * @param {any} value - a value `isJsonValue` refused
+ * @param {string} pointer - where it sits
+ * @param {Set<object>} [path] - the containers on this descent
+ * @returns {string}
+ */
+function offending(value, pointer, path = new Set()) {
+  if (value === null || typeof value !== 'object') return pointer;
+  const isArray = Array.isArray(value);
+  if (!isArray) {
+    const proto = Object.getPrototypeOf(value);
+    if (proto !== Object.prototype && proto !== null) return pointer;
+  }
+  if (path.has(value)) return pointer;
+  path.add(value);
+  const keys = isArray ? Array.from(value, (_item, index) => String(index)) : Object.keys(value);
+  for (const key of keys) {
+    if (!isJsonValue(value[key])) return offending(value[key], `${pointer}/${encodeJSONPointerSegment(key)}`, path);
+  }
+  return pointer;
+}
+
+/**
  * Create the hook. Pass it as `createApp(doc, { validateState })`, or call
  * it from a hook of your own before a schema check.
  * @returns {(state: any, context?: { changes?: string[] | null }) => true | { valid: false, errors: Array<{ instancePath: string, message: string }> }}
@@ -53,13 +81,13 @@ export function createJsonStateValidator() {
   const pointers = createBoundedCache(POINTER_CACHE_LIMIT);
   return function validateJsonState(state, context = undefined) {
     const changes = context?.changes ?? null;
-    if (changes === null) return isJsonValue(state) ? true : notJson('');
+    if (changes === null) return isJsonValue(state) ? true : notJson(offending(state, ''));
     for (const pointer of changes) {
       // '' compiles to the root, so a root write checks the whole state
       const value = pointers.getOrCreate(pointer, compileJSONPointer)(state);
       // a removed location has nothing left to check
       if (value === JSONPOINTER_NOTHING) continue;
-      if (!isJsonValue(value)) return notJson(pointer);
+      if (!isJsonValue(value)) return notJson(offending(value, pointer));
     }
     return true;
   };

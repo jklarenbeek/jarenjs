@@ -148,4 +148,30 @@ describe('non-boolean properties — null, false and removal remove the attribut
     p.render(['p', {}]);
     assert.strictEqual(p.node().childNodes.length, 0, 'textContent was cleared');
   });
+
+  it('an attribute spelled both ways is written once, by the later spelling, in the markup and in the DOM', () => {
+    for (const props of [{ contenteditable: true, contentEditable: false }, { contentEditable: false, contenteditable: true },
+      { writingSuggestions: true, writingsuggestions: false }]) {
+      const markup = renderToString(['div', props]);
+      const attribute = 'contenteditable' in props ? 'contenteditable' : 'writingsuggestions';
+      const later = Object.values(props).at(-1) ? 'true' : 'false';
+      assert.deepStrictEqual(ssrAttributes(markup), [[attribute, later]], `${JSON.stringify(props)}: ${markup}`);
+      const h = host();
+      h.render(['div', props]);
+      assert.deepStrictEqual(attributesOf(h.node()), [[attribute, later]], JSON.stringify(props));
+    }
+  });
+
+  it('a patch writes what an aliased attribute ends up with: one spelling leaving, or the two swapping', () => {
+    const h = host();
+    h.render(['div', { contenteditable: true, contentEditable: true }]);
+    h.render(['div', { contenteditable: true }]);
+    assert.deepStrictEqual(attributesOf(h.node()), [['contenteditable', 'true']], 'the remaining spelling keeps it');
+    h.render(['div', { contentEditable: false, contenteditable: true }]);
+    assert.deepStrictEqual(attributesOf(h.node()), [['contenteditable', 'true']]);
+    h.render(['div', { contenteditable: true, contentEditable: false }]);
+    assert.deepStrictEqual(attributesOf(h.node()), [['contenteditable', 'false']], 'the order swapped, so did the value');
+    h.render(['div', {}]);
+    assert.deepStrictEqual(attributesOf(h.node()), [], 'both left: removed');
+  });
 });

@@ -77,11 +77,26 @@ describe('createJsonStateValidator — what changed, not how large the state is'
     const validate = createJsonStateValidator();
     assert.strictEqual(validate({ a: [1, 'x'] }, { changes: null }), true);
     assert.strictEqual(validate({ a: [1, 'x'] }), true, 'the boot context');
+    // the detail names where the offending value sits, under the location checked
     assert.deepStrictEqual(validate({ a: new Map() }, { changes: null }),
-      { valid: false, errors: [{ instancePath: '', message: 'is not a JSON value' }] });
+      { valid: false, errors: [{ instancePath: '/a', message: 'is not a JSON value' }] });
     assert.deepStrictEqual(validate({ a: NaN }, { changes: [''] }),
-      { valid: false, errors: [{ instancePath: '', message: 'is not a JSON value' }] });
+      { valid: false, errors: [{ instancePath: '/a', message: 'is not a JSON value' }] });
     assert.strictEqual(validate({ a: {} }, { changes: ['/a/gone'] }), true);
+  });
+
+  it('the detail descends to the offending value: an insert names the item, not the array it shifted', () => {
+    const validate = createJsonStateValidator();
+    const rows = [{ id: 0 }, { id: 1 }, { id: 2 }];
+    const state = { rows: [rows[0], new Date(0), rows[1], rows[2]] };
+    assert.deepStrictEqual(validate(state, { changes: ['/rows'] }),
+      { valid: false, errors: [{ instancePath: '/rows/1', message: 'is not a JSON value' }] });
+    assert.deepStrictEqual(validate({ a: { 'b/c': [1, { d: undefined }] } }, { changes: null }).errors[0].instancePath,
+      '/a/b~1c/1/d', 'every segment encoded');
+    const loop = /** @type {any} */ ({ x: { y: {} } });
+    loop.x.y.back = loop.x;
+    assert.deepStrictEqual(validate({ loop }, { changes: ['/loop'] }).errors[0].instancePath, '/loop/x/y/back',
+      'a cycle is named where it closes');
   });
 
   it('a Date entering the state through a patch is caught at the pointer it was written to', () => {

@@ -228,10 +228,11 @@ const tasked = defineApp({
   actions: {
     ...scanSlot.start('http', { url: '/api/scan' }),
     ...scanSlot.done((_st, x) => [replace((c: Expr<Tasked>) => c.items, x.payload.result)]),
+    ...scanSlot.cancel(),
   },
 });
 // the slot's actions keep their literal names through the spread
-const slotActions: ActionsOf<typeof tasked>[] = ['scan/start', 'scan/done'];
+const slotActions: ActionsOf<typeof tasked>[] = ['scan/start', 'scan/done', 'scan/cancel'];
 // @ts-expect-error — 'scan/fail' was never declared
 const undeclared: ActionsOf<typeof tasked> = 'scan/fail';
 void [guarded, slotActions, undeclared];

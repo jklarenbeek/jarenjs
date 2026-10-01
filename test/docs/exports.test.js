@@ -97,10 +97,10 @@ describe('the manifest census', () => {
       } }, dir);
       assert.deepStrictEqual(entries.map((e) => [e.subpath, e.kind]), [
         ['@jarenjs/w/empty/*', 'pattern'],
-        ['@jarenjs/w/nested/*', 'pattern'],
+        ['@jarenjs/w/nested/deep/x', 'javascript'],
         ['@jarenjs/w/two/*/x/*', 'pattern'],
         ['@jarenjs/w/gone/*', 'pattern'],
-      ], 'an empty, a subdirectory-only, a two-star and an absent directory all stay patterns');
+      ], 'an empty, a two-star and an absent directory stay patterns; a file below a subdirectory is a subpath, as Node\'s * matches across /');
     }
     finally {
       fs.rmSync(dir, { recursive: true, force: true });

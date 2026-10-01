@@ -139,8 +139,8 @@ and nothing else — a transition is data, so a test can read it.
 | `action(fn, { payload?, event? })` | one action document, captured over `$`, `$event`, `$payload` | `ActionDeclaration<Payload>`; `payload` and `event` are TYPES — the format carries no schema for either, and nothing is emitted for them | native; a non-builder `payload` `JL0101`; an excluded `event` field `JL0102`; a name §3.1 does not bind `JL0104` |
 | `transition({ state?, patch?, effects? })` | the transition object of APP-FORMAT §3.2, in the order the runtime applies it | `Transition` | native; another member `JL0101` |
 | `effect(run, with?)` | `{ run, with? }` (§5.1); `with` is a value in the ACTION's scope, not a callback | `EffectDeclaration<Run>` — `Run` is a literal | native; an empty `run` `JL0101` |
-| `when(cond, then, otherwise?)` | `{ "$if": [cond, then, otherwise?] }` — the branches spelled as the action spells its own result; no `otherwise` is the empty sequence, the no-op transition | `Conditional`; `cond` is a `BoolExpr` or a boolean, a branch a `Transition` or a `Conditional` | native; a condition or a branch that is not one `JL0101`; outside an action's capture `JL0005` |
-| `taskSlot(name, { at, mode?, fail? })` | the slot's `initial` value `{ id: 0, status: 'idle', error: null }` and three actions, `<name>/start`, `<name>/done` and `<name>/fail`, each answered under its own name for a spread into `actions` | `TaskSlot<Name, State>`: the names are template literals, so `ActionsOf<>` stays exact | native; an option it does not take, a `mode` outside `switch`/`exhaust`/`concat`/`parallel`, a start prop the slot owns (`id`, `done`, `fail`, `slot`), or `fail()` on a slot without `fail: true` `JL0101` |
+| `when(cond, then, otherwise?)` | `{ "$if": [cond, then, otherwise?] }` — the branches spelled as the action spells its own result; no `otherwise` is the empty sequence, the no-op transition | `Conditional`; `cond` is a `BoolExpr` or a boolean, a branch a `Transition` or a `Conditional` | native; a condition or a branch that is not one `JL0101` — a branch written as an object is held to `transition()`'s own rules; outside an action's capture (none, a subscription's, a view's, a chain's) `JL0005` |
+| `taskSlot(name, { at, mode?, fail? })` | the slot's `initial` value `{ id: 0, status: 'idle', error: null }` and four actions, `<name>/start`, `<name>/done`, `<name>/fail` and `<name>/cancel`, each answered under its own name for a spread into `actions` | `TaskSlot<Name, State>`: the names are template literals, so `ActionsOf<>` stays exact | native; an option it does not take, a `mode` outside `switch`/`exhaust`/`concat`/`parallel`, a start prop the slot owns (`id`, `done`, `fail`, `slot`), `fail()` on a slot without `fail: true`, or an `at` that answers no path into the state `JL0101` |
 
 Returning nothing from an action is the format's own no-op, and
 `transition({})` is that same empty object: it is allowed, and it is
@@ -182,6 +182,14 @@ right kept by construction:
   `createTaskEffect(run, { mode })` with the same mode: a document cannot
   carry a host option, so the slot's `mode` writes only what the document
   can say.
+- `cancel()` writes `<name>/cancel`, the document's half of a
+  cancellation. The host's `cancel(slot)` and `cancelAll()` abort the
+  request and dispatch nothing (TASKS.md), so the host dispatches
+  `<name>/cancel` beside them. A loading slot then goes back to `idle`
+  under a new id, so an `exhaust` slot takes the next start and a
+  completion that still arrives is stale. A slot that is not loading is
+  left as it is. Without it, a cancelled slot stays `loading`; under
+  `exhaust` it then refuses every later start.
 
 The worked example of TASKS.md, rebuilt through two slots, is the same
 document action for action under the slot's names
@@ -730,6 +738,7 @@ code states across every pen is the binder's,
 | `JL0101` | a value this pen cannot spell, or a name → value map it cannot read |
 | `JL0102` | a construct the format cannot carry |
 | `JL0104` | a pen-owned keyword written through `meta()`, or an external a captured rule did not declare |
+| `JL0005` | a `when()` transition outside an action's capture |
 
 Every message below is the one the pen raised when the spelling beside
 it was run, with the code prefix removed. `docPath`, where the refusal
@@ -767,9 +776,11 @@ Raised at the door, before anything is captured.
 | `effect('')`, `bind('')`, `sub('')` | `effect() takes the handler name as a non-empty string, got a string`; `bind() takes an action name as a non-empty string, …`; `sub() takes the handler name as a non-empty string, …` | a non-empty name |
 | `when(7, transition({}))` | `when() takes a condition — a captured boolean expression or a boolean — got 7 at /cond` | `x.payload.id.eq(st.task.id)`, or `true` |
 | `when(c, { nope: 1 })`, `when(c, st.n)` | `when() then is a transition — transition({ state?, patch?, effects? }) — or another when(), got a Object instance at /then`; `when() then is a transition — transition({ … }) — or another when(), got an expression that is neither at /then` — and the same for `otherwise` | `transition({ … })`, or a `when()` |
+| `when(c, { patch: 'x' })`, `when(c, { effects: [{ run: 'save' }] })` | `when() then patch is an array of add/replace/remove/move/copy/test operations, got a string at /then`; `when() then effects[0] is effect(run, with?), got a Object instance at /then` — a branch written as an object is held to `transition()`'s rules, at build time rather than at dispatch | `transition({ patch: […] })`, or `effects: [effect('save')]` |
 | `taskSlot('')`, `taskSlot('x', 7)` | `taskSlot() takes a slot name as a non-empty string, got a string`; `taskSlot() options are { at, mode?, fail? }, got 7` | `taskSlot('scan', { at })` |
 | `taskSlot('x', { at, nope: 1 })` | `taskSlot() does not take 'nope' — it takes at, mode, fail at /nope` | one of the three |
 | `taskSlot('x', { at: 's.tasks.x' })`, `{ at, mode: 'merge' }`, `{ at, fail: 'yes' }` | `taskSlot() at is a lambda over the state to the slot — (s) => s.tasks.x — got a string at /at`; `taskSlot() mode is one of switch, exhaust, concat, parallel, got a string at /mode`; `taskSlot() fail is a boolean, got a string at /fail` | `at: (s) => s.tasks.x`, a mode `createTaskEffect` takes, `fail: true` |
+| `taskSlot('scan', { at: () => null }).start('http')` | `taskSlot() at is a lambda over the state to the slot — (s) => s.tasks.scan — and answered null, which is no path into the state at /at` | `at: (s) => s.tasks.scan` |
 | `slot.start('')`, `slot.start('http', 7)` | `start() takes the effect handler's name, got a string`; `start() props are an object of the effect's own props, got 7` | `start('http', { url })` |
 | `slot.start('http', { id: 1 })` | `start() props cannot set 'id' — id, done, fail and slot are the slot's own (TASKS.md) at /id` | a prop of the effect's own |
 | `slot.done(7)`, `slot.fail([1])` | `done() patch is an array of add/replace/remove/move/copy/test operations, got 7`; `fail() patch[0] is one of add/replace/remove/move/copy/test, got 1 at /patch/0` | a list of patch operations, or a callback answering one |
@@ -919,6 +930,17 @@ The app pen writes no keyword of its own onto a schema, so the other
 half of `JL0104` — a pen-owned keyword written through `meta()` — is
 reachable here only through the schema pen that types the state
 ([SCHEMA-PEN.md §4.4](SCHEMA-PEN.md#44-jl0104--the-keyword-and-the-external)).
+
+### 4.5 `JL0005` — a transition outside an action
+
+`when()` writes a transition, and only an action returns one: a
+subscription's members, a view's rule bodies and a chain's callbacks
+are captures too, but none of them carries a transition.
+
+| The spelling that trips it | The message | The spelling that works |
+|---|---|---|
+| `when(true, transition({}))` | `when() is a transition an action returns: write it inside an action's callback, action((s, x) => when(…)) — no capture is in progress` | `action((s, x) => when(…))` |
+| `sub('tick', { when: (s) => when(s.ready, transition({})) })` | `when() is a transition an action returns: write it inside an action's callback, action((s, x) => when(…)) — the capture in progress is not an action's` | `sub('tick', { when: (s) => s.ready })` |
 
 ## 5. The types
 
@@ -1253,7 +1275,7 @@ not look for them:
 
 ## 7. Cost
 
-`@jarenjs/linq/app` builds to **<!--fact:bundle.app-->51,127<!--/fact--> bytes** as a minified,
+`@jarenjs/linq/app` builds to **<!--fact:bundle.app-->51,242<!--/fact--> bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
 measures and `npm run test:tree-shaking` reports, published rounded
 beside the other nine subpath prices in
@@ -1263,8 +1285,8 @@ pen and the JSLT pen (state, and views), and no chain module, no
 
 It is the second-largest pen bundle after the client, and the two pens
 it carries are most of it. The three figures the same probe measures,
-side by side: `@jarenjs/linq/schema` <!--fact:bundle.schema-->36,834<!--/fact--> bytes,
-`@jarenjs/linq/jslt` <!--fact:bundle.jslt-->19,806<!--/fact-->, `@jarenjs/linq/app` <!--fact:bundle.app-->51,127<!--/fact-->. The subpath sums do not add — all
+side by side: `@jarenjs/linq/schema` <!--fact:bundle.schema-->36,880<!--/fact--> bytes,
+`@jarenjs/linq/jslt` <!--fact:bundle.jslt-->19,851<!--/fact-->, `@jarenjs/linq/app` <!--fact:bundle.app-->51,242<!--/fact-->. The subpath sums do not add — all
 three carry the capture, the expression lowering and the JSON boundary,
 which each bundle counts once — so what the app pen costs a consumer who
 already imports the schema pen is the difference the numbers do state:

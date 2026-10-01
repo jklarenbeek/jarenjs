@@ -39,6 +39,8 @@ const CC_BACKTICK = 0x60;
 const CC_LBRACE = 0x7B;
 const CC_RBRACE = 0x7D;
 const CC_DOT = 0x2E;
+const CC_LPAREN = 0x28;
+const CC_RPAREN = 0x29;
 
 /** After these words a `/` opens a regular expression, not a division. */
 const REGEX_AFTER_WORD = new Set(['return', 'typeof', 'instanceof', 'in', 'of', 'new', 'delete', 'void',
@@ -66,13 +68,19 @@ function decodeString(raw) {
   });
 }
 
+/** The statement heads whose parenthesized condition a regular expression
+ * may follow: `if (x) /re/.test(y)`. */
+const PAREN_HEADS = new Set(['if', 'while', 'for', 'with']);
+
 /**
  * Tokenize a JavaScript source, skipping comments, regular expressions and
  * template text (a template's `${…}` substitutions are code and are
  * tokenized). A `/` is read as a regular expression where the token before
- * it cannot end an operand — the heuristic every hand-written JS scanner
- * uses; a division right after a block's closing `}` is the case it reads
- * wrong, and it never affects an import.
+ * it cannot end an operand: not after a name or a number (a keyword such as
+ * `return` excepted, unless it is a property after `.`), a string, a `]`,
+ * a postfix `++`/`--`, or a `)` — except the `)` that closes an `if`,
+ * `while`, `for` or `with` head. A division right after a block's closing
+ * `}` is the case this reads wrong; it is a statement nobody writes.
  * @param {string} source
  * @returns {Token[]}
  */
@@ -82,15 +90,35 @@ function tokenize(source) {
   const n = source.length;
   /** Open template substitutions: the brace depth each one returns at. @type {number[]} */
   const templates = [];
+  /** Open parentheses: whether each one is a statement head's (`if (`). @type {boolean[]} */
+  const parens = [];
+  /** The `)` tokens that closed a statement head. @type {WeakSet<Token>} */
+  const headEnds = new WeakSet();
   let depth = 0;
   let i = 0;
+  /** Whether the token at `k` is a word read as a property, after a `.`. @param {number} k */
+  const property = (k) => k > 0 && tokens[k - 1].kind === 'punct' && tokens[k - 1].value === '.';
   /** Whether a `/` here opens a regular expression. */
   const regexAllowed = () => {
-    const last = tokens[tokens.length - 1];
+    const k = tokens.length - 1;
+    const last = tokens[k];
     if (last === undefined) return true;
     if (last.kind === 'string') return false;
-    if (last.kind === 'word') return REGEX_AFTER_WORD.has(last.value);
-    return last.value !== ')' && last.value !== ']';
+    if (last.kind === 'word') return REGEX_AFTER_WORD.has(last.value) && !property(k);
+    if (last.value === ')') return headEnds.has(last);
+    if (last.value === ']') return false;
+    // `a++ / 2`: a postfix increment or decrement ends an operand
+    if ((last.value === '+' || last.value === '-') && tokens[k - 1]?.value === last.value
+      && tokens[k - 1].kind === 'punct' && endsOperand(k - 2)) return false;
+    return true;
+  };
+  /** Whether the token at `k` ends an operand. @param {number} k */
+  const endsOperand = (k) => {
+    const t = tokens[k];
+    if (t === undefined) return false;
+    if (t.kind === 'string') return true;
+    if (t.kind === 'word') return !REGEX_AFTER_WORD.has(t.value) || property(k);
+    return t.value === ')' || t.value === ']';
   };
   /** Skip template text from `i` (just past a backtick or a closing `}`):
    * stop past the closing backtick, or past a `${` (entering code). */
@@ -165,6 +193,21 @@ function tokenize(source) {
       continue;
     }
     if (c === CC_LBRACE) { depth++; tokens.push({ kind: 'punct', value: '{' }); i++; continue; }
+    if (c === CC_LPAREN) {
+      const before = tokens[tokens.length - 1];
+      parens.push(before !== undefined && before.kind === 'word' && PAREN_HEADS.has(before.value) && !property(tokens.length - 1));
+      tokens.push({ kind: 'punct', value: '(' });
+      i++;
+      continue;
+    }
+    if (c === CC_RPAREN) {
+      /** @type {Token} */
+      const close = { kind: 'punct', value: ')' };
+      if (parens.pop() === true) headEnds.add(close);
+      tokens.push(close);
+      i++;
+      continue;
+    }
     if (c === CC_RBRACE) {
       depth--;
       i++;
@@ -215,6 +258,29 @@ export function scanImports(source) {
   const found = [];
   const is = (/** @type {Token | undefined} */ t, /** @type {string} */ kind, /** @type {string} */ value) =>
     t !== undefined && t.kind === kind && t.value === value;
+  /** The specifier of the clause that opens at `j` — `x`, `{ … }`, `* as ns`,
+   * a default and a brace list — or null when the tokens there are no
+   * import or export clause (an object key named `import`, say). A binding
+   * may be named by a string (`{ "a-b" as ab }`, `* as "e f"`). @param {number} j */
+  const clause = (j) => {
+    let braces = false;
+    for (; j < tokens.length; j++) {
+      const t = tokens[j];
+      if (t.kind === 'word') {
+        if (t.value === 'from' && !braces && tokens[j + 1]?.kind === 'string') return /** @type {Token} */ (tokens[j + 1]).value;
+        continue;
+      }
+      if (t.kind === 'string') {
+        // a string is a binding's name: inside the braces, or `* as "name"`
+        if (!braces && !is(tokens[j - 1], 'word', 'as')) return null;
+        continue;
+      }
+      if (t.value === '{' && !braces) braces = true;
+      else if (t.value === '}' && braces) braces = false;
+      else if (t.value !== ',' && t.value !== '*') return null;
+    }
+    return null;
+  };
   for (let k = 0; k < tokens.length; k++) {
     const t = tokens[k];
     if (t.kind !== 'word' || (t.value !== 'import' && t.value !== 'export') || is(tokens[k - 1], 'punct', '.')) continue;
@@ -229,29 +295,14 @@ export function scanImports(source) {
         }
         continue;
       }
-      if (is(next, 'punct', '.')) continue; // import.meta
-      // import x / { … } / * as ns … from 'x': the clause holds no string
-      for (let j = k + 1; j < tokens.length; j++) {
-        if (tokens[j].kind !== 'string') continue;
-        if (is(tokens[j - 1], 'word', 'from')) found.push({ specifier: tokens[j].value, dynamic: false });
-        break;
-      }
-      continue;
+      // import.meta, and an object key or a method named import
+      if (next.kind !== 'word' && !is(next, 'punct', '{') && !is(next, 'punct', '*')) continue;
     }
-    // export * from 'x', export * as ns from 'x', export { … } from 'x'
-    let j = k + 1;
-    if (is(next, 'punct', '*')) {
-      j = k + 2;
-      if (is(tokens[j], 'word', 'as')) j += 2;
-    }
-    else if (is(next, 'punct', '{')) {
-      while (j < tokens.length && !is(tokens[j], 'punct', '}')) j++;
-      j++;
-    }
-    else continue;
-    if (is(tokens[j], 'word', 'from') && tokens[j + 1]?.kind === 'string') {
-      found.push({ specifier: /** @type {Token} */ (tokens[j + 1]).value, dynamic: false });
-    }
+    // export * from 'x', export * as ns from 'x', export { … } from 'x';
+    // a declaration (`export const`, `export function`) has no clause
+    else if (!is(next, 'punct', '*') && !is(next, 'punct', '{')) continue;
+    const specifier = clause(k + 1);
+    if (specifier !== null) found.push({ specifier, dynamic: false });
   }
   return found;
 }
@@ -296,17 +347,74 @@ export function exportTarget(value, conditions) {
  * @property {string | null} target - the resolved target, concrete after expansion
  * @property {boolean} expanded - whether the row came out of a wildcard
  * @property {boolean} unexpanded - a wildcard the lister could not make finite
+ * @property {boolean} invalid - a target Node refuses (`ERR_INVALID_PACKAGE_TARGET`):
+ *   one that does not start with `./`, or holds a `.`, `..`, `node_modules` or
+ *   empty segment — in the target or in what a `*` matched
  * @property {any} value - the manifest's value for the pattern
  */
 
+/** Whether a path segment is one Node refuses in a target: empty, `.`,
+ * `..` or `node_modules`, case-insensitive and percent-decoded.
+ * @param {string} segment */
+function refusedSegment(segment) {
+  let text = segment;
+  try { text = decodeURIComponent(segment); }
+  catch { /* a malformed escape stays as written */ }
+  text = text.toLowerCase();
+  return text === '' || text === '.' || text === '..' || text === 'node_modules';
+}
+
 /**
- * Every export of a manifest for a set of conditions. A wildcard with one
- * `*` in its key and its target is expanded file by file: `listFiles`
- * answers the file names in the target's folder (a path relative to the
- * package root, `./schemas`), or null when there is none. Anything else —
- * two stars, no folder, no matching file, or a folder outside the
- * package — stays the pattern it is, marked `unexpanded`; nothing is
- * dropped. A manifest without `exports` exports `main` (or
+ * Whether Node takes `target` as an `exports` target, with `match` — what a
+ * `*` matched, or null — substituted (PACKAGE_TARGET_RESOLVE).
+ * @param {string} target
+ * @param {string | null} match
+ * @returns {boolean}
+ */
+function validTarget(target, match) {
+  if (!target.startsWith('./') || target.slice(2).split(/[/\\]/).some(refusedSegment)) return false;
+  return match === null || !match.split(/[/\\]/).some(refusedSegment);
+}
+
+/**
+ * The key a subpath resolves through, as Node resolves it: the subpath
+ * itself when it is a key without a `*`; else the pattern with the longest
+ * part before its `*`, then the longest key (PATTERN_KEY_COMPARE),
+ * whatever order the manifest writes them in; null when none matches.
+ * @param {readonly string[]} keys
+ * @param {string} subpath
+ * @returns {string | null}
+ */
+function governingKey(keys, subpath) {
+  if (keys.includes(subpath) && !subpath.includes('*')) return subpath;
+  let best = null;
+  for (const key of keys) {
+    const star = key.indexOf('*');
+    if (star < 0 || star !== key.lastIndexOf('*')) continue;
+    const base = key.slice(0, star);
+    const trailer = key.slice(star + 1);
+    if (!subpath.startsWith(base) || subpath === base) continue;
+    if (trailer.length > 0 && (!subpath.endsWith(trailer) || subpath.length < key.length)) continue;
+    if (best === null || star > best.indexOf('*') || (star === best.indexOf('*') && key.length > best.length)) best = key;
+  }
+  return best;
+}
+
+/**
+ * Every export of a manifest for a set of conditions, in the manifest's
+ * order. A wildcard with one `*` in its key and its target is expanded file
+ * by file: `listFiles` answers every file below the target's folder (a path
+ * relative to the package root, `./schemas`) as a path relative to that
+ * folder, nested ones included (`a.json`, `deep/b.json` — a `*` matches
+ * across `/`), or null when there is none. Each subpath is then resolved
+ * as Node resolves it, so a wildcard row appears only where its pattern is
+ * the one that governs the subpath: an exact key wins over every pattern,
+ * and a longer pattern over a shorter one, whatever the manifest's order.
+ * A `null` target — Node's way to withhold a subpath — exports nothing and
+ * asks for nothing. Anything else — two stars, no folder, no matching file,
+ * or a folder outside the package — stays the pattern it is, marked
+ * `unexpanded`; nothing is dropped. A target Node refuses is marked
+ * `invalid`. A manifest without `exports` exports `main` (or
  * `./src/index.js`) as `.`, and a string or a root condition map is
  * shorthand for `.`.
  * @param {any} manifest - the parsed `package.json`
@@ -320,24 +428,30 @@ export function expandExports(manifest, options) {
   const exports = typeof declared === 'string' || Array.isArray(declared)
     || (keys.length > 0 && !keys.some((key) => key.startsWith('.')))
     ? { '.': declared } : declared;
+  const exportKeys = Object.keys(exports);
   /** @type {ExportedPath[]} */
   const out = [];
-  for (const key of Object.keys(exports)) {
+  for (const key of exportKeys) {
     const value = exports[key];
     const target = exportTarget(value, conditions);
     if (!key.includes('*')) {
-      out.push({ key, pattern: key, target, expanded: false, unexpanded: false, value });
+      out.push({ key, pattern: key, target, expanded: false, unexpanded: false,
+        invalid: target !== null && !validTarget(target, null), value });
       continue;
     }
-    const stems = target !== null && key.split('*').length === 2 && target.split('*').length === 2
+    // withheld: Node answers ERR_PACKAGE_PATH_NOT_EXPORTED, and no file is asked for
+    if (target === null) continue;
+    const stems = key.split('*').length === 2 && target.split('*').length === 2
       && listFiles !== undefined ? wildcardStems(target, listFiles) : null;
     if (stems === null || stems.length === 0) {
-      out.push({ key, pattern: key, target, expanded: false, unexpanded: true, value });
+      out.push({ key, pattern: key, target, expanded: false, unexpanded: true, invalid: false, value });
       continue;
     }
     for (const stem of stems) {
-      out.push({ key: key.replace('*', stem), pattern: key, target: /** @type {string} */ (target).replace('*', stem),
-        expanded: true, unexpanded: false, value });
+      const subpath = key.replace('*', stem);
+      if (governingKey(exportKeys, subpath) !== key) continue;
+      out.push({ key: subpath, pattern: key, target: target.replace('*', stem), expanded: true, unexpanded: false,
+        invalid: !validTarget(target, stem), value });
     }
   }
   return out;
@@ -345,8 +459,8 @@ export function expandExports(manifest, options) {
 
 /**
  * The stems `./folder/prefix*suffix` matches among the files `listFiles`
- * names, sorted; null when the folder is absent or lies outside the
- * package.
+ * names below the folder — a stem may hold a `/`, as Node's `*` does —
+ * sorted; null when the folder is absent or lies outside the package.
  * @param {string} target
  * @param {(folder: string) => string[] | null} listFiles
  * @returns {string[] | null}
@@ -355,7 +469,6 @@ function wildcardStems(target, listFiles) {
   const star = target.indexOf('*');
   const before = target.slice(0, star);
   const after = target.slice(star + 1);
-  if (after.includes('/')) return null;
   const folder = posix.dirname(before + 'x');
   const normalized = posix.normalize(folder);
   if (normalized === '..' || normalized.startsWith('../') || posix.isAbsolute(normalized)) return null;
@@ -364,11 +477,11 @@ function wildcardStems(target, listFiles) {
   const prefix = posix.basename(before + 'x').slice(0, -1);
   const stems = [];
   for (const name of names) {
-    if (name.includes('/') || !name.startsWith(prefix) || !name.endsWith(after)) continue;
+    if (!name.startsWith(prefix) || !name.endsWith(after) || name.length < prefix.length + after.length) continue;
     const stem = name.slice(prefix.length, name.length - after.length);
     if (stem.length > 0) stems.push(stem);
   }
-  return stems.sort();
+  return stems.sort(compare);
 }
 
 //#endregion
@@ -396,8 +509,9 @@ const RE_SCRIPT = /\.(?:m?js)$/;
  *   the copy nearest the root
  * @property {Array<{ specifier: string, from: string }>} unresolved - a
  *   bare specifier a served file imports that the map does not resolve, a
- *   relative import that leaves its package or names no file, or a
- *   wildcard export the installed files could not make finite
+ *   relative import that leaves its package or names no file (credited to
+ *   the file that imports it), a wildcard export the installed files could
+ *   not make finite, or an export whose target Node refuses
  */
 
 /**
@@ -407,18 +521,22 @@ const RE_SCRIPT = /\.(?:m?js)$/;
  * Each package is found as Node finds it — `node_modules/<name>` beside
  * the dependent, then in each parent directory up to `root` — starting
  * from `root` for the packages named. Its `exports` resolve under
- * `conditions`, single-star wildcards expand from the installed directory,
- * and every export becomes `imports[specifier] = prefix + name + '/' +
- * path`. A package installed more than once is reported in `duplicates`.
- * Node built-ins (`node:fs`, `fs`) are left to the platform.
+ * `conditions` with Node's precedence (`expandExports`), single-star
+ * wildcards expand from the installed directory, and every export becomes
+ * `imports[specifier] = prefix + <the copy's path below
+ * root/node_modules> + '/' + path` — a dependency installed nested is
+ * served from its nested place, never from a root copy no dependent
+ * reaches. A target Node refuses is reported in `unresolved`, a `null`
+ * target maps nothing. A package installed more than once is reported in
+ * `duplicates`. Node built-ins (`node:fs`, `fs`) are left to the platform.
  *
  * Two calls over the same tree answer the same bytes: keys and lists are
  * sorted.
  * @param {{ packages: readonly string[], root?: string, prefix?: string, conditions?: readonly string[] }} options
  *   `packages` are package names; a bare name is a suite package (`app` is
  *   `@jarenjs/app`). `root` holds `node_modules` (default: the current
- *   directory). `prefix` is the URL every file is served under and ends
- *   with `/` (default `/node_modules/`). `conditions` default to
+ *   directory). `prefix` is the URL `root/node_modules` is served under
+ *   and ends with `/` (default `/node_modules/`). `conditions` default to
  *   `browser`, `import`, `default`.
  * @returns {ImportMapResult}
  * @throws {TypeError} an option it does not take, or one that is malformed; a
@@ -479,6 +597,9 @@ export function buildImportMap(options) {
     if (chosen.get(name) === dir) manifests.set(name, manifest);
   }
   const names = [...manifests.keys()].sort();
+  /** Where a copy is served: its directory below `root/node_modules`, which `prefix` serves — a copy
+   * installed nested is served from its nested place. @param {string} dir */
+  const served = (dir) => prefix + relative(join(top, 'node_modules'), dir).split(sep).join('/') + '/';
   // the map: every package's exports, before any file is followed, so a
   // bare import is checked against the whole closure
   /** @type {Record<string, string>} */
@@ -492,17 +613,19 @@ export function buildImportMap(options) {
     const entries = expandExports(manifests.get(name), { conditions, listFiles: (folder) => listDirectory(join(dir, folder)) });
     for (const entry of entries) {
       const specifier = entry.key === '.' ? name : name + entry.key.slice(1);
-      if (entry.unexpanded) { unresolved.push({ specifier, from: `${name}/package.json` }); continue; }
+      // a wildcard the files could not make finite, or a target Node refuses: nothing a browser could load
+      if (entry.unexpanded || entry.invalid) { unresolved.push({ specifier, from: `${name}/package.json` }); continue; }
       if (entry.target === null) continue;
       const file = posix.normalize(entry.target);
-      imports[specifier] = prefix + name + '/' + file;
+      imports[specifier] = served(dir) + file;
       entryFiles.push({ name, file });
     }
   }
   // the files: each export's target and what it reaches
   const files = new Set();
   for (const { name, file } of entryFiles) {
-    followFiles(name, /** @type {string} */ (chosen.get(name)), file, prefix, files, unresolved, (bare, from) => {
+    const dir = /** @type {string} */ (chosen.get(name));
+    followFiles(name, dir, file, served(dir), files, unresolved, (bare, from) => {
       if (!resolvesBare(bare, imports)) unresolved.push({ specifier: bare, from });
     });
   }
@@ -546,10 +669,24 @@ function locate(name, from, top) {
   }
 }
 
-/** The file names in a directory, or null. @param {string} folder @returns {string[] | null} */
+/** Every file below a directory, as `/`-separated paths relative to it,
+ * or null when there is no such directory. @param {string} folder
+ * @returns {string[] | null} */
 function listDirectory(folder) {
   if (!existsSync(folder) || !statSync(folder).isDirectory()) return null;
-  return readdirSync(folder).filter((name) => statSync(join(folder, name)).isFile());
+  /** @type {string[]} */
+  const out = [];
+  /** @param {string} dir @param {string} at */
+  const walk = (dir, at) => {
+    for (const name of readdirSync(dir)) {
+      const path = join(dir, name);
+      const stat = statSync(path);
+      if (stat.isDirectory()) walk(path, `${at}${name}/`);
+      else if (stat.isFile()) out.push(`${at}${name}`);
+    }
+  };
+  walk(folder, '');
+  return out;
 }
 
 /**
@@ -565,22 +702,25 @@ function resolvesBare(specifier, imports) {
 
 /**
  * Add `file` (package-relative) and every file it reaches through relative
- * imports to `files`; report what leaves the package or names nothing, and
- * hand each bare specifier to `bare`.
- * @param {string} name @param {string} dir @param {string} file @param {string} prefix
+ * imports to `files`; report what leaves the package or names nothing —
+ * credited to the file that imports it, or to the manifest for an export's
+ * own target — and hand each bare specifier to `bare`.
+ * @param {string} name @param {string} dir @param {string} file
+ * @param {string} base - the URL the package's directory is served at, ending in `/`
  * @param {Set<string>} files
  * @param {Array<{ specifier: string, from: string }>} unresolved
  * @param {(specifier: string, from: string) => void} bare
  */
-function followFiles(name, dir, file, prefix, files, unresolved, bare) {
-  const pending = [file];
+function followFiles(name, dir, file, base, files, unresolved, bare) {
+  /** @type {Array<{ path: string, specifier: string, from: string }>} */
+  const pending = [{ path: file, specifier: `./${file}`, from: `${name}/package.json` }];
   while (pending.length > 0) {
-    const current = /** @type {string} */ (pending.pop());
-    const url = prefix + name + '/' + current;
+    const { path: current, specifier: asked, from } = /** @type {{ path: string, specifier: string, from: string }} */ (pending.pop());
+    const url = base + current;
     if (files.has(url)) continue;
     const path = join(dir, ...current.split('/'));
     if (!existsSync(path) || !statSync(path).isFile()) {
-      unresolved.push({ specifier: `./${current}`, from: `${name}/package.json` });
+      unresolved.push({ specifier: asked, from });
       continue;
     }
     files.add(url);
@@ -589,7 +729,7 @@ function followFiles(name, dir, file, prefix, files, unresolved, bare) {
       if (specifier.startsWith('./') || specifier.startsWith('../')) {
         const next = posix.normalize(posix.join(posix.dirname(current), specifier));
         if (next === '..' || next.startsWith('../')) unresolved.push({ specifier, from: `${name}/${current}` });
-        else pending.push(next);
+        else pending.push({ path: next, specifier, from: `${name}/${current}` });
       }
       else bare(specifier, `${name}/${current}`);
     }

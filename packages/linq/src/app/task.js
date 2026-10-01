@@ -2,7 +2,8 @@
 /**
  * @file `taskSlot(name, { at, mode?, fail? })` — the async-task
  * convention of TASKS.md written once: the slot's initial value and its
- * three actions, `<name>/start`, `<name>/done` and `<name>/fail`.
+ * four actions, `<name>/start`, `<name>/done`, `<name>/fail` and
+ * `<name>/cancel`.
  *
  * What the convention asks a hand-written document to keep right, the
  * slot keeps by construction:
@@ -26,6 +27,7 @@
 
 import { isJsonObject } from '@jarenjs/core/object';
 import { LinqBuildError } from '../errors.js';
+import { isExpression } from '../expression.js';
 import { describeValue } from '../json-boundary.js';
 import { action, effect, transition } from './action.js';
 import { when } from './conditional.js';
@@ -54,7 +56,7 @@ const inScope = (value, state, externals) => (typeof value === 'function' ? valu
  * @param {string} name - the slot name: the actions' prefix and the
  *   effect's `slot` (its concurrency key)
  * @param {{ at: (state: any) => any, mode?: string, fail?: boolean }} options
- * @returns {any} `{ initial, start, done, fail }`
+ * @returns {any} `{ initial, start, done, fail, cancel }`
  * @throws {LinqBuildError} `JL0101` a name, an option or an argument
  *   that is not what it takes
  * @example
@@ -88,14 +90,25 @@ export function taskSlot(name, options) {
   if (typeof fail !== 'boolean') {
     throw new LinqBuildError('JL0101', `taskSlot() fail is a boolean, got ${describeValue(fail)}`, '/fail');
   }
-  const names = { start: `${name}/start`, done: `${name}/done`, fail: `${name}/fail` };
+  const names = { start: `${name}/start`, done: `${name}/done`, fail: `${name}/fail`, cancel: `${name}/cancel` };
+  /** The slot's location: a path into the state, which every action reads and
+   * writes. Anything else is refused by name, here, rather than as the
+   * TypeError a member read off it would be. @param {any} state */
+  const slotAt = (state) => {
+    const slot = at(state);
+    if (!isExpression(slot)) {
+      throw new LinqBuildError('JL0101', `taskSlot() at is a lambda over the state to the slot — `
+        + `(s) => s.tasks.${name} — and answered ${describeValue(slot)}, which is no path into the state`, '/at');
+    }
+    return slot;
+  };
   /** @param {(slot: any) => any} member */
-  const path = (member) => (/** @type {any} */ state) => member(at(state));
+  const path = (member) => (/** @type {any} */ state) => member(slotAt(state));
   /** @param {any} patch @param {any} state @param {any} externals @param {string} who */
   const userPatch = (patch, state, externals, who) => (patch === undefined ? []
     : readPatch(inScope(patch, state, externals), who));
   /** The stale guard every completion opens with. @param {any} state @param {any} externals */
-  const current = (state, externals) => externals.payload.id.eq(at(state).id);
+  const current = (state, externals) => externals.payload.id.eq(slotAt(state).id);
 
   return Object.freeze({
     initial: Object.freeze({ id: 0, status: 'idle', error: null }),
@@ -119,7 +132,7 @@ export function taskSlot(name, options) {
         }
         // the increment, written ONCE: the patch and the effect's id both
         // evaluate against the pre-transition state
-        const next = at(state).id.add(1);
+        const next = slotAt(state).id.add(1);
         const started = transition({
           patch: [
             replace(path((slot) => slot.id), next),
@@ -130,7 +143,7 @@ export function taskSlot(name, options) {
             id: next, done: names.done, ...(fail ? { fail: names.fail } : {}), slot: name, ...given,
           })],
         });
-        return mode === 'exhaust' ? when(at(state).status.ne('loading'), started) : started;
+        return mode === 'exhaust' ? when(slotAt(state).status.ne('loading'), started) : started;
       });
       return Object.freeze({ [names.start]: declared });
     },
@@ -162,6 +175,21 @@ export function taskSlot(name, options) {
         ...userPatch(patch, state, externals, 'fail()'),
       ] })));
       return Object.freeze({ [names.fail]: declared });
+    },
+    /**
+     * The host's cancellation, in the document. `cancel(slot)` and
+     * `cancelAll()` abort the request and dispatch nothing (TASKS.md), so
+     * the host that cancels the slot dispatches `<name>/cancel` beside it:
+     * a loading slot goes back to `idle` under a new id, an `exhaust`
+     * slot takes the next start, and a completion that still arrives is
+     * stale. A slot that is not loading is left as it is.
+     */
+    cancel() {
+      const declared = action((state) => when(slotAt(state).status.eq('loading'), transition({ patch: [
+        replace(path((slot) => slot.id), slotAt(state).id.add(1)),
+        replace(path((slot) => slot.status), 'idle'),
+      ] })));
+      return Object.freeze({ [names.cancel]: declared });
     },
   });
 }

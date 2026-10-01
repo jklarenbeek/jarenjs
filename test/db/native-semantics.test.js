@@ -80,7 +80,8 @@ it('standalone aggregates preserve empty results, null errors and integer overfl
   assert.throws(() => from(source).where((r) => r.id.lt(0)).select((r) => r.id).max(), { code: 'JL2001' });
   // the null the pushed-down aggregate counted is the query catalog's sentence, so it renders in any pack
   assert.throws(() => from(source).select((r) => r.name).max(), {
-    code: 'JQ2001', messageId: 'query/aggregate-null', params: {}, reason: 'an aggregate requires numbers or strings, got null' });
+    code: 'JQ2001', messageId: 'query/aggregate-null', params: {}, reason: 'an aggregate requires numbers or strings, got null',
+    docPath: undefined, message: 'JQ2001: an aggregate requires numbers or strings, got null' });
   connection.exec('INSERT INTO items(id) VALUES(9007199254740991)');
   assert.throws(() => from(source).select((r) => r.id).sum(), { code: 'JD0010' });
 }));

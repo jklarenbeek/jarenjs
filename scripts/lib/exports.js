@@ -80,7 +80,11 @@ function kindOf(key, target) {
 export function exportEntries(pkg, dir = null) {
   const specifier = (/** @type {string} */ key) => (key === '.' ? pkg.name : pkg.name + key.slice(1));
   const listFiles = dir === null ? undefined : (/** @type {string} */ folder) => committedFiles(join(dir, folder));
-  return expandExports(pkg, { conditions: CONDITIONS, listFiles }).map((entry) => ({
+  return expandExports(pkg, { conditions: CONDITIONS, listFiles }).map((entry) => {
+    // a workspace manifest never publishes a subpath Node would refuse to load
+    if (entry.invalid) throw new Error(`${pkg.name}: '${entry.pattern}' targets ${entry.target}, which Node refuses`);
+    return entry;
+  }).map((entry) => ({
     subpath: specifier(entry.key),
     key: entry.pattern,
     kind: entry.unexpanded ? 'pattern' : kindOf(entry.key, entry.target),
@@ -91,10 +95,11 @@ export function exportEntries(pkg, dir = null) {
 }
 
 /**
- * The file names of a directory as git knows them — tracked or staged,
- * never a scratch file — or the directory listing where git cannot
- * answer (a tarball, no git); null when the directory is absent. Names
- * only: a nested path is not a file of this directory.
+ * The files below a directory as git knows them — tracked or staged, never
+ * a scratch file — or the directory's own listing where git cannot answer
+ * (a tarball, no git); null when the directory is absent. Paths relative to
+ * the directory, nested ones included (a wildcard's `*` matches across
+ * `/`, as Node's does).
  * @param {string} folder
  * @returns {string[] | null}
  */
@@ -103,11 +108,18 @@ function committedFiles(folder) {
   try {
     const out = execFileSync('git', ['ls-files', '-z', '--', '.'],
       { cwd: folder, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
-    return out.split('\0').filter((name) => name !== '' && !name.includes('/'));
+    return out.split('\0').filter((name) => name !== '');
   }
   catch {
-    return readdirSync(folder).filter((name) => !statSync(join(folder, name)).isDirectory());
+    return listedFiles(folder, '');
   }
+}
+
+/** Every file below a directory, relative to it. @param {string} folder @param {string} at
+ * @returns {string[]} */
+function listedFiles(folder, at) {
+  return readdirSync(folder).flatMap((name) => (statSync(join(folder, name)).isDirectory()
+    ? listedFiles(join(folder, name), `${at}${name}/`) : [`${at}${name}`]));
 }
 
 /**

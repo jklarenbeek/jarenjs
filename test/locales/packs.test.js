@@ -431,6 +431,11 @@ describe('@jarenjs/locales fr/es/pt/de/ja', () => {
     const rendered = renderQueryMessage(error, ar);
     assert.match(rendered, /\u2068'\$last'\u2069/, 'the operator the writer typed is isolated');
     assert.match(rendered, /\u2068\$head\u2069/, 'so is each operator the hint names');
+    // a value the error met is quoted Latin text, isolated as every other value is
+    let met;
+    try { compileJsonQuery({ $year: '$.d' })({ d: 'not a date' }); }
+    catch (thrown) { met = thrown; }
+    assert.match(renderQueryMessage(met, ar), /\u2068"not a date"\u2069/);
   });
 
   it("russian genitive follows CLDR's recurring 'one' category (21, 22, 25)", () => {

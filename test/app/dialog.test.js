@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { createDialog, DIALOG_CODES } from '@jarenjs/view/helpers/dialog';
 import { createDialogWidget } from '@jarenjs/app/dialog';
+import { createApp } from '@jarenjs/app';
 import { createDomRenderer } from '@jarenjs/view';
 import { createStubHost, fire } from '../view/dom.stub.js';
 
@@ -149,5 +150,31 @@ describe('dialog lifecycle and app binding', () => {
     assert.equal(contexts.length, 3);
     assert.equal(contexts[2], contexts[0]);
     render.destroy();
+    // the controlled mode rides along, so a widget rendering a tree of its own renders it the same way
+    const focused = createDomRenderer(container, { document, widgets, controlled: 'focus' });
+    focused(['jaren-widget', { name: 'probe' }]);
+    assert.equal(contexts.at(-1).controlled, 'focus');
+    assert.equal(contexts[0].controlled, undefined);
+    focused.destroy();
+  });
+
+  it("with controlled: 'focus', a field in a dialog keeps the operator's text through a refresh, as one in the page does", () => {
+    const actions = { refresh: { patch: [{ op: 'replace', path: '/text', value: 'refreshed' }] },
+      close: { patch: [{ op: 'replace', path: '/open', value: false }] } };
+    for (const where of ['page', 'dialog']) {
+      const { doc, host, walk } = nativeFacade();
+      const field = ['input', { 'data-ref': 'field', value: '$.text' }];
+      const body = where === 'page' ? ['main', {}, field]
+        : ['jaren-widget', { name: 'dialog', props: { id: 'edit', title: 'Edit', open: '$.open', close: 'close', content: field } }];
+      const app = createApp({ state: { text: 'server', open: true }, view: [{ match: '$', body }], actions }, {
+        node: host, document: doc, schedule: (/** @type {() => void} */ flush) => flush(), controlled: 'focus',
+        widgets: { dialog: createDialogWidget() } });
+      const input = walk(host).find((/** @type {any} */ node) => node.getAttribute?.('data-ref') === 'field');
+      input.focus();
+      input.value = 'typed';
+      app.dispatch('refresh');
+      assert.equal(input.value, 'typed', `${where}: the focused field keeps the operator's text`);
+      app.destroy();
+    }
   });
 });

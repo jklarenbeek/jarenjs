@@ -149,12 +149,47 @@ describe('buildImportMap — an installed tree, served unbundled', () => {
     });
     try {
       const { unresolved } = buildImportMap({ packages: ['core'], root, prefix: '/vendor/' });
-      // sorted by specifier, code unit by code unit
+      // sorted by specifier, code unit by code unit; each credited to the file that imports it
       assert.deepStrictEqual(unresolved, [
         { specifier: '../../outside.js', from: '@jarenjs/core/src/scan.js' },
-        { specifier: './src/nowhere.js', from: '@jarenjs/core/package.json' },
+        { specifier: './nowhere.js', from: '@jarenjs/core/src/scan.js' },
         { specifier: '@jarenjs/missing', from: '@jarenjs/core/src/scan.js' },
       ]);
+    }
+    finally { fs.rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it('serves a dependency installed only nested from where it sits, and never an unused root copy', () => {
+    const root = installTree({
+      'node_modules/@jarenjs/view/package.json': { name: '@jarenjs/view', version: '1.0.0',
+        exports: { '.': './src/index.js' }, dependencies: { '@jarenjs/only': '1' } },
+      'node_modules/@jarenjs/view/src/index.js': "import '@jarenjs/only';\n",
+      'node_modules/@jarenjs/view/node_modules/@jarenjs/only/package.json': { name: '@jarenjs/only', version: '0.9.0', exports: { '.': './i.js' } },
+      'node_modules/@jarenjs/view/node_modules/@jarenjs/only/i.js': 'export const v = 9;\n',
+      'node_modules/@jarenjs/only/package.json': { name: '@jarenjs/only', version: '2.0.0', exports: { '.': './i.js' } },
+      'node_modules/@jarenjs/only/i.js': 'export const v = 2;\n',
+    });
+    try {
+      const result = buildImportMap({ packages: ['view'], root, prefix: '/vendor/' });
+      assert.strictEqual(result.imports['@jarenjs/only'], '/vendor/@jarenjs/view/node_modules/@jarenjs/only/i.js');
+      assert.ok(result.files.includes('/vendor/@jarenjs/view/node_modules/@jarenjs/only/i.js'));
+      assert.ok(!result.files.includes('/vendor/@jarenjs/only/i.js'), 'the unused root copy is not served');
+      assert.deepStrictEqual(result.unresolved, []);
+    }
+    finally { fs.rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it('reports a target Node refuses instead of mapping it, and maps nothing a null withholds', () => {
+    const root = installTree({
+      'node_modules/@jarenjs/core/package.json': {
+        name: '@jarenjs/core', version: '1.0.0',
+        exports: { '.': './src/index.js', './x': './../outside.js', './hidden/*': null, './scan': './src/scan.js' },
+      },
+    });
+    try {
+      const { imports, unresolved } = buildImportMap({ packages: ['core'], root, prefix: '/vendor/' });
+      assert.deepStrictEqual(Object.keys(imports), ['@jarenjs/core', '@jarenjs/core/scan']);
+      assert.deepStrictEqual(unresolved, [{ specifier: '@jarenjs/core/x', from: '@jarenjs/core/package.json' }]);
     }
     finally { fs.rmSync(root, { recursive: true, force: true }); }
   });
@@ -255,6 +290,37 @@ describe('scanImports — imports, never a comment or a string', () => {
     assert.deepStrictEqual(scanImports('const t = `${await import(\'./inside.js\')}`;'),
       [{ specifier: './inside.js', dynamic: true }]);
   });
+
+  it('reads a binding named by a string (ES2022), in an import and an export', () => {
+    const source = [
+      "import { \"a-b\" as ab } from './named.js';",
+      "import def, { \"x y\" as xy } from './named2.js';",
+      "export { ab as \"c-d\" } from './named3.js';",
+      "export * as \"e f\" from './named4.js';",
+    ].join('\n');
+    assert.deepStrictEqual(scanImports(source).map((i) => i.specifier), ['./named.js', './named2.js', './named3.js', './named4.js']);
+  });
+
+  it('tells a division from a regular expression where it decides what follows', () => {
+    for (const [code, specifier] of [
+      ["const half = mod.default / 2; const m = import('./after-property.js');", './after-property.js'],
+      ["const q = i++ / 2; const m = import('./after-increment.js');", './after-increment.js'],
+      ["const q = i-- / 2; const m = import('./after-decrement.js');", './after-decrement.js'],
+      ["if (s) /[/*]/.test(s);\nconst m = import('./after-if-regex.js');\nconst t = 1; /* tail */", './after-if-regex.js'],
+      ["while (s) /`/.test(s);\nconst m = import('./after-while-regex.js');\nconst t = `tail`;", './after-while-regex.js'],
+      ["const r = (a) / 2; const m = import('./after-paren-division.js'); const u = '/';", './after-paren-division.js'],
+    ]) assert.deepStrictEqual(scanImports(code).map((i) => i.specifier), [specifier], code);
+  });
+
+  it('reads no clause where import is a key, and no phantom from a tag named from', () => {
+    assert.deepStrictEqual(scanImports("export const conditions = { import: true, require: false };\nexport { helper } from './helper.js';")
+      .map((i) => i.specifier), ['./helper.js']);
+    assert.deepStrictEqual(scanImports("const from = (s) => s[0];\nconst cfg = { import: true };\nconst p = from`./phantom.js`;"), []);
+    // an export list with no from ends at its semicolon: a later tag named from is no source
+    assert.deepStrictEqual(scanImports("export { local };\nconst from = (s) => s[0];\nconst p = from`./phantom.js`;\nconst local = 1;"), []);
+    assert.deepStrictEqual(scanImports("class C { import(x) { return x; } }\nexport * from './star.js';").map((i) => i.specifier),
+      ['./star.js']);
+  });
 });
 
 describe('exportTarget and expandExports — the one export expansion', () => {
@@ -288,5 +354,38 @@ describe('exportTarget and expandExports — the one export expansion', () => {
       [['.', './lib.js']]);
     assert.deepStrictEqual(expandExports({ exports: { import: './i.js', default: './d.js' } }, { conditions: ['default'] })
       .map((r) => [r.key, r.target]), [['.', './d.js']]);
+  });
+
+  it('resolves each subpath as Node does: an exact key, then the longest pattern, and a null withholds', () => {
+    const listFiles = (/** @type {string} */ folder) => ({
+      './dist': ['a.js', 'utils.js', 'utils/index.js'],
+      './src': ['a.js', 'features/a.js', 'features/private-internal/x.js'],
+      './lib': ['a.js'],
+    })[folder] ?? null;
+    const rows = (/** @type {any} */ exports) => expandExports({ exports }, { conditions: ['default'], listFiles })
+      .map((r) => [r.key, r.target]);
+    // an exact key wins over a pattern that also expands to it, whatever the order
+    assert.deepStrictEqual(rows({ './*': './dist/*.js', './utils': './dist/utils/index.js' }),
+      [['./a', './dist/a.js'], ['./utils/index', './dist/utils/index.js'], ['./utils', './dist/utils/index.js']]);
+    // the pattern with the longer part before its * wins
+    assert.deepStrictEqual(rows({ './*': './lib/*', './*.js': './src/*.js' }).filter(([key]) => key === './a.js'),
+      [['./a.js', './src/a.js']]);
+    // a null target withholds its subpaths and asks for nothing
+    assert.deepStrictEqual(rows({ './*': './src/*', './features/private-internal/*': null }),
+      [['./a.js', './src/a.js'], ['./features/a.js', './src/features/a.js']]);
+  });
+
+  it('expands a * across folders, as Node matches it', () => {
+    const rows = expandExports({ exports: { './*': './src/*' } },
+      { conditions: ['default'], listFiles: (folder) => (folder === './src' ? ['top.js', 'nested/deep.js'] : null) });
+    assert.deepStrictEqual(rows.map((r) => r.key), ['./nested/deep.js', './top.js']);
+  });
+
+  it('marks a target Node refuses: not under ./, or holding .., . or node_modules', () => {
+    const rows = expandExports({ exports: {
+      './ok': './ok.js', './x': './../outside.js', './y': 'y.js', './z': './node_modules/dep/z.js', './w': './a/%2e%2e/w.js',
+    } }, { conditions: ['default'] });
+    assert.deepStrictEqual(rows.map((r) => [r.key, r.invalid]),
+      [['./ok', false], ['./x', true], ['./y', true], ['./z', true], ['./w', true]]);
   });
 });

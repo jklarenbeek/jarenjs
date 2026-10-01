@@ -42,7 +42,7 @@ const ACTION_ADVICE = () => ' — the whole state is the first argument; §3.1 b
  * @returns {any} the query document (plain JSON)
  */
 export function captureAction(what, fn) {
-  return captureQuery(what, ACTION_EXTERNALS, fn, { advice: ACTION_ADVICE, fold: false });
+  return captureQuery(what, ACTION_EXTERNALS, fn, { advice: ACTION_ADVICE, fold: false, kind: 'action' });
 }
 
 /**

@@ -186,4 +186,57 @@ describe('route tables: an address named by its template', () => {
       assert.equal(host.count(), 0);
     }
   });
+  it('a sink that throws on the first-address report leaves no subscription behind', () => {
+    for (const [mode, factory, start] of /** @type {const} */ ([
+      ['hash', createHashRouteSubscription, 'https://app.test/#/outside'],
+      ['history', createHistoryRouteSubscription, 'https://app.test/outside'],
+    ])) {
+      const host = windowAt(start), seen = [];
+      const routes = factory({ window: host.window, basePath: '/app', onError: (error) => { throw error; } });
+      assert.throws(() => routes({ action: 'route' }, (_action, record) => seen.push(record.path)), { code: 'JA2024' });
+      assert.equal(host.count(), 0, `${mode}: no listener is left behind`);
+      assert.throws(() => routes({ action: 'route' }, () => {}), { code: 'JA2024' }, `${mode}: the owner was released, so the next subscribe reports again`);
+      host.window.history.pushState(null, '', 'https://app.test/#/app/later'); host.fire('popstate'); host.fire('hashchange');
+      assert.deepEqual(seen, [], `${mode}: the failed subscription receives nothing`);
+      routes.dispose();
+    }
+  });
+
+  it('a first address past the length bound is reported (JA2025), and navigation away from it works', () => {
+    for (const [mode, factory, start] of /** @type {const} */ ([
+      ['hash', createHashRouteSubscription, `https://app.test/#/${'x'.repeat(100)}`],
+      ['history', createHistoryRouteSubscription, `https://app.test/${'x'.repeat(100)}`],
+    ])) {
+      const host = windowAt(start), seen = [], errors = [];
+      const routes = factory({ window: host.window, maxLength: 64, onError: (error) => errors.push(error.code) });
+      routes({ action: 'route' }, (_action, record) => seen.push(record.path));
+      assert.deepEqual([errors, seen], [['JA2025'], []], `${mode}: reported, nothing delivered`);
+      routes.navigate('/home');
+      routes.replace('/again');
+      assert.deepEqual(seen, ['/home', '/again'], `${mode}: navigation and replace work`);
+      assert.throws(() => routes.navigate(`/${'y'.repeat(100)}`), { code: 'JA2025' }, `${mode}: the target is still bounded`);
+      routes.dispose();
+    }
+  });
+
+  it('a sink that redirects on an unreadable first address lands the app there', () => {
+    const host = windowAt(`https://app.test/#/${'x'.repeat(200)}`), seen = [];
+    /** @type {any} */
+    let routes;
+    routes = createHashRouteSubscription({ window: host.window, maxLength: 128, onError: () => routes.navigate('/home') });
+    const stop = routes({ action: 'route' }, (_action, record) => seen.push(record.path));
+    assert.deepEqual(seen, ['/home']);
+    assert.ok(host.count() > 0, 'the subscription is live');
+    stop(); routes.dispose();
+    assert.equal(host.count(), 0);
+  });
+
+  it('a host whose location cannot be read at all is refused (JA2023), as a direct call, with nothing left behind', () => {
+    const host = windowAt('https://app.test/#/a'), errors = [];
+    const window = { ...host.window, location: {} };
+    const routes = createHashRouteSubscription({ window, onError: (error) => errors.push(error.code) });
+    assert.throws(() => routes({ action: 'route' }, () => {}), { code: 'JA2023' });
+    assert.deepEqual(errors, [], 'the sink is for addresses, not for a malformed host');
+    assert.equal(host.count(), 0);
+  });
 });

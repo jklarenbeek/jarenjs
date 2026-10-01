@@ -13,7 +13,8 @@ import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 
-import { action, defineApp, replace, taskSlot, transition, when } from '@jarenjs/linq/app';
+import { action, defineApp, replace, sub, taskSlot, transition, when } from '@jarenjs/linq/app';
+import { from } from '@jarenjs/linq';
 import { op } from '@jarenjs/linq/jslt';
 import { createApp, createTaskEffect } from '@jarenjs/app';
 
@@ -51,6 +52,29 @@ describe('when() — a conditional transition', () => {
     assert.throws(() => action((/** @type {any} */ s) => when(s.ready, { patch: [], nope: 1 })), coded('JL0101', /a transition/));
     assert.throws(() => action((/** @type {any} */ s) => when(s.ready, s.other)), coded('JL0101', /neither/));
     assert.throws(() => when(true, {}), coded('JL0005'));
+  });
+
+  it('holds a branch written as a plain object to transition()\'s own rules, at build time', () => {
+    for (const [branch, pattern, path] of /** @type {[any, RegExp, string][]} */ ([
+      [{ patch: 'x' }, /when\(\) then patch is an array/, '/then'],
+      [{ patch: [1] }, /when\(\) then patch\[0\] is one of/, '/then/patch/0'],
+      [{ effects: 'save' }, /when\(\) then effects is an array of effect\(\) descriptors/, '/then'],
+      [{ effects: [{ run: 'save' }] }, /when\(\) then effects\[0\] is effect\(run, with\?\)/, '/then'],
+    ])) {
+      assert.throws(() => action((/** @type {any} */ s) => when(s.ready, branch)),
+        (/** @type {any} */ error) => coded('JL0101', pattern)(error) && error.docPath === path, JSON.stringify(branch));
+    }
+    // a valid one is the transition it spells, and so is transition()'s own answer
+    const doc = action((/** @type {any} */ s) => when(s.ready, { patch: [{ op: 'remove', path: '/a' }] },
+      transition({ state: { a: 1 } }))).document;
+    assert.deepStrictEqual(doc, { $if: ['$.ready', { patch: [{ op: 'remove', path: '/a' }] }, { state: { a: 1 } }] });
+  });
+
+  it('is refused in a capture that is not an action\'s (JL0005): a subscription, a chain', () => {
+    assert.throws(() => sub('tick', { when: (/** @type {any} */ s) => when(s.ready, transition({})) }),
+      coded('JL0005', /not an action's/));
+    assert.throws(() => from([1]).select((/** @type {any} */ v) => when(v.eq(1), transition({}))).toDocument(),
+      coded('JL0005', /not an action's/));
   });
 });
 
@@ -119,6 +143,11 @@ describe('taskSlot() — the task convention written once', () => {
     assert.throws(() => slot.start(''), coded('JL0101', /handler's name/));
     assert.throws(() => slot.start('http', { id: 1 }), coded('JL0101', /cannot set 'id'/));
     assert.throws(() => slot.start('http', /** @type {any} */ ('url')), coded('JL0101', /an object of the effect's own props/));
+    // an at that answers no path into the state is refused by name, not as a TypeError
+    for (const answer of [null, 'tasks.x', { id: 1 }]) {
+      assert.throws(() => taskSlot('z', { at: () => answer }).start('http'),
+        (/** @type {any} */ error) => coded('JL0101', /no path into the state/)(error) && error.docPath === '/at', JSON.stringify(answer));
+    }
     // a patch the completion cannot read names the call it was handed to
     assert.throws(() => slot.done(/** @type {any} */ (7)), coded('JL0101', /^JL0101: done\(\) patch is an array/));
     assert.throws(() => taskSlot('y', { at, fail: true }).fail(/** @type {any} */ ([1])),
@@ -151,6 +180,38 @@ describe('taskSlot() — the task convention written once', () => {
     await drain();
     assert.deepStrictEqual(running.getState(), { scan: { id: 2, status: 'done', error: null }, result: 'fresh' });
     running.destroy();
+  });
+
+  it('cancel(): beside the host\'s cancel(slot), the slot is idle under a new id, a late completion is stale, the next start runs', async () => {
+    for (const mode of /** @type {const} */ (['switch', 'exhaust'])) {
+      const save = taskSlot('save', { at: (/** @type {any} */ s) => s.save, mode });
+      /** @type {number[]} */
+      const runs = [];
+      /** @type {Array<(value: any) => void>} */
+      const answers = [];
+      // a run that honours its signal, as fetch does: an abort rejects with AbortError and dispatches nothing
+      const http = createTaskEffect((props, signal) => new Promise((resolve, reject) => {
+        runs.push(props.id); answers.push(resolve);
+        signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+      }), { mode });
+      const app = createApp(defineApp({ state: { save: save.initial }, view: [{ match: '$', body: ['main'] }],
+        actions: { ...save.start('http'), ...save.done(), ...save.cancel() } }).document, { schedule: sync, effects: { http } });
+      app.dispatch('save/start');
+      http.cancel('save');
+      app.dispatch('save/cancel');
+      await drain();
+      assert.deepStrictEqual(app.getState().save, { id: 2, status: 'idle', error: null }, `${mode}: idle under a new id`);
+      app.dispatch('save/done', { id: 1, result: 'late' });
+      assert.deepStrictEqual(app.getState().save, { id: 2, status: 'idle', error: null }, `${mode}: the late completion is stale`);
+      app.dispatch('save/start');
+      assert.deepStrictEqual(runs, [1, 3], `${mode}: the next start runs`);
+      answers[1]('ok');
+      await drain();
+      assert.deepStrictEqual(app.getState().save, { id: 3, status: 'done', error: null });
+      app.dispatch('save/cancel');
+      assert.deepStrictEqual(app.getState().save, { id: 3, status: 'done', error: null }, `${mode}: a slot not loading is left as it is`);
+      app.destroy();
+    }
   });
 
   it('routes a failure to done by default, or to its own action', async () => {

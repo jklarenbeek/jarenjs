@@ -63,13 +63,13 @@ function externalsProxy(what, names, proxies, advice, noun) {
  * @param {string} what - the method, for the message
  * @param {readonly string[]} externals - the externals the evaluator binds
  * @param {(value: any, externals: any) => any} rule
- * @param {{ advice?: (name: string) => string, fold?: boolean, noun?: string }} [options] -
+ * @param {{ advice?: (name: string) => string, fold?: boolean, noun?: string, kind?: string }} [options] -
  *   `advice`: appended to the `JL0104` message — how an unbound name could
  *   be declared where it can, or what the callback's own argument already
  *   is; `fold`: whether a pure data tree folds into one `$const` (the
  *   default) or is spelled as a constructor tree; `noun`: what this pen
  *   calls the callback (`'rule'` by default; a pen with no rules passes
- *   its own word)
+ *   its own word); `kind`: the capture's kind (`'action'`)
  * @returns {any} the captured query expression (plain JSON)
  */
 export function captureQuery(what, externals, rule, options = {}) {
@@ -78,5 +78,6 @@ export function captureQuery(what, externals, rule, options = {}) {
     (value, ...bound) => rule(value, externalsProxy(what, externals, bound, options.advice, noun)),
     [{ doc: '$', pathable: true }, ...externals],
     NO_PARAMS,
-    options.fold !== false);
+    options.fold !== false,
+    options.kind ?? null);
 }

@@ -131,7 +131,9 @@ function wrapValue(entry, value) {
  */
 function aggregateNullError() {
   const message = { messageId: 'query/aggregate-null', params: {} };
-  return new JsonQueryRuntimeError('JQ2001', renderQueryMessage(message), '', message);
+  // no location: the statement answered for the whole aggregate (absence is
+  // `undefined`, never the root pointer)
+  return new JsonQueryRuntimeError('JQ2001', renderQueryMessage(message), undefined, message);
 }
 
 /** @param {any} value - a bindable native parameter? */

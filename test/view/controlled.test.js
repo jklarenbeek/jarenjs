@@ -243,6 +243,32 @@ describe("controlled: 'focus' — the operator's focused edit holds until blur",
     render.destroy();
   });
 
+  it('only a text control waits: a focused range, colour, date or radio takes the state\'s value at once', () => {
+    for (const [type, before, after, held] of /** @type {[string | null, string, string, boolean][]} */ ([
+      [null, 'a', 'b', true], ['text', 'a', 'b', true], ['search', 'a', 'b', true], ['email', 'a@x', 'b@x', true],
+      ['number', '1', '2', true], ['password', 'a', 'b', true],
+      ['range', '10', '50', false], ['color', '#000000', '#ff0000', false], ['date', '2026-01-01', '2026-02-02', false],
+      ['radio', 'small', 'large', false],
+    ])) {
+      const { document, container } = createStubHost();
+      const render = createDomRenderer(container, { document, controlled: 'focus' });
+      const props = (/** @type {string} */ value) => (type === null ? { value } : { type, value });
+      render(['input', props(before)]);
+      const input = container.childNodes[0];
+      input.focus();
+      render(['input', props(after)]);
+      assert.strictEqual(input.value, held ? before : after, `type=${type}: ${held ? 'held until blur' : 'written at once'}`);
+      render.destroy();
+    }
+    const { document, container } = createStubHost();
+    const render = createDomRenderer(container, { document, controlled: 'focus' });
+    render(['textarea', { value: 'a' }]);
+    container.childNodes[0].focus();
+    render(['textarea', { value: 'b' }]);
+    assert.strictEqual(container.childNodes[0].value, 'a', 'a textarea is a text control');
+    render.destroy();
+  });
+
   it('a control without focus reconciles at once even with the option', () => {
     const { render, input, document } = focused({ controlled: 'focus' });
     document.activeElement = null;

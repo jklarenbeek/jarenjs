@@ -70,6 +70,63 @@ export const ENUMERATED_ATTRIBUTES = Object.freeze(Object.assign(Object.create(n
 }));
 
 /**
+ * The attributes a props object can spell twice — the attribute's name and
+ * its IDL property's — as pairs.
+ * @type {ReadonlyArray<readonly [string, string]>}
+ */
+export const ENUMERATED_ALIASES = Object.freeze([
+  Object.freeze(/** @type {const} */ (['contenteditable', 'contentEditable'])),
+  Object.freeze(/** @type {const} */ (['writingsuggestions', 'writingSuggestions'])),
+]);
+
+/** The other spelling of an aliased prop, by prop name. */
+const ALIAS_OF = Object.freeze(Object.assign(Object.create(null),
+  Object.fromEntries(ENUMERATED_ALIASES.flatMap(([a, b]) => [[a, b], [b, a]]))));
+
+/**
+ * The other spelling of `name`'s attribute, or `undefined` for a prop no
+ * other prop spells.
+ * @param {string} name
+ * @returns {string | undefined}
+ */
+export function aliasOf(name) {
+  return ALIAS_OF[name];
+}
+
+/**
+ * Whether a prop name is one of the aliased spellings. A length test first
+ * (they are 15 and 18 characters long), so the prop a patch meets on every
+ * element costs one compare.
+ * @param {string} name
+ * @returns {boolean}
+ */
+export function isAliased(name) {
+  const n = name.length;
+  return (n === 15 || n === 18) && ALIAS_OF[name] !== undefined;
+}
+
+/**
+ * The spelling that writes an aliased attribute in `props`: of two, the
+ * later in the object's own order — the DOM's last write wins, so the
+ * serializer and the patcher take the same one — or `undefined` when
+ * `props` spells it neither way.
+ * @param {Record<string, any>} props
+ * @param {string} a
+ * @param {string} b
+ * @returns {string | undefined}
+ */
+export function writingSpelling(props, a, b) {
+  const hasA = a in props;
+  const hasB = b in props;
+  if (!hasA || !hasB) return hasA ? a : hasB ? b : undefined;
+  for (const key in props) {
+    if (key === a) return b;
+    if (key === b) return a;
+  }
+  return b;
+}
+
+/**
  * The attribute an enumerated prop writes, and its value: `undefined` when
  * the prop is not an enumerated attribute, `{ name, value: null }` to omit
  * it, otherwise the keyword (or the value's own string).

@@ -43,7 +43,7 @@ what a caller may hand in.
 importmap options — serve installed packages unbundled:
   --packages <a,b>     Package names, comma separated; a bare name is a suite
                        package (app is @jarenjs/app). Their dependencies follow.
-  --prefix <url>       The URL the files are served under (default /node_modules/)
+  --prefix <url>       The URL root/node_modules is served under (default /node_modules/)
   --root <dir>         The directory holding node_modules (default .)
   --conditions <a,b>   Export conditions, in preference (default browser,import,default)
   --files              Print the files a server must serve, one per line,

@@ -99,6 +99,10 @@ export function effect(run, props = undefined) {
   return effectDescriptor(run, props, (value) => value);
 }
 
+/** Every transition `transition()` answered: its effects are already read
+ * (the brand dropped), so it is taken as it is. @type {WeakSet<object>} */
+const TRANSITIONS = new WeakSet();
+
 /**
  * A transition object (§3.2): the next state whole, an RFC 6902 patch
  * over it, and the effects that run after it settles — written in the
@@ -116,15 +120,37 @@ export function effect(run, props = undefined) {
  * transition({ state: () => null, effects: [effect('save')] });
  */
 export function transition(spec) {
+  const out = readTransition(spec);
+  TRANSITIONS.add(out);
+  return out;
+}
+
+/**
+ * Whether `value` is a transition `transition()` answered.
+ * @param {any} value
+ * @returns {boolean}
+ */
+export function isTransition(value) {
+  return value !== null && typeof value === 'object' && TRANSITIONS.has(value);
+}
+
+/**
+ * A transition's members, read and checked — what `transition()` answers,
+ * and what `when()` holds a branch written as a plain object to.
+ * @param {any} spec
+ * @param {string} [who] - the call it was handed to, for the message
+ * @returns {any}
+ */
+export function readTransition(spec, who = 'transition()') {
   if (!isJsonObject(spec)) {
     throw new LinqBuildError('JL0101',
-      `transition() takes { state?, patch?, effects? }, got ${describeValue(spec)}`);
+      `${who} takes { state?, patch?, effects? }, got ${describeValue(spec)}`);
   }
-  closedTo(spec, TRANSITION_MEMBERS, 'transition()');
+  closedTo(spec, TRANSITION_MEMBERS, who);
   const out = {};
   if (spec.state !== undefined) out.state = spec.state;
-  if (spec.patch !== undefined) out.patch = readPatch(spec.patch);
-  if (spec.effects !== undefined) out.effects = readEffects(spec.effects, 'transition() effects');
+  if (spec.patch !== undefined) out.patch = readPatch(spec.patch, who);
+  if (spec.effects !== undefined) out.effects = readEffects(spec.effects, `${who} effects`);
   return out;
 }
 

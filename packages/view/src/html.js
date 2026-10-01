@@ -20,7 +20,7 @@ import {
   WIDGET_TAG,
 } from './vnode.js';
 import { styleToString } from './dom.js';
-import { enumeratedAttribute } from './properties.js';
+import { aliasOf, enumeratedAttribute, writingSpelling } from './properties.js';
 import { createSafePolicy } from './safe.js';
 
 /** Void elements per the HTML standard: no children, no end tag. */
@@ -84,6 +84,9 @@ function serializeProps(props, skip, policy, onUnsafe) {
   let out = '';
   for (const name in props) {
     if (skip.has(name)) continue;
+    // an attribute spelled twice is written once, by its later spelling
+    const other = aliasOf(name);
+    if (other !== undefined && writingSpelling(props, name, other) !== name) continue;
     let attr = name;
     let value = props[name];
     if (policy !== null) {

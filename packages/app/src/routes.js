@@ -76,6 +76,8 @@ export function matchRoute(table, record) {
   return hit === null ? null : Object.freeze({ name: hit.key, params: Object.freeze(hit.params) });
 }
 const bounded = (value, max) => Number.isSafeInteger(value) && value > 0 && value <= max;
+/** The refusals of an address a subscription cannot read: outside the base (`JA2024`), past a bound (`JA2025`). */
+const UNREADABLE = new Set(['JA2024', 'JA2025']);
 
 /** @param {'hash'|'history'} mode @param {RouteOptions} options @returns {RouteSubscription} */
 function createRoutes(mode, options) {
@@ -153,6 +155,13 @@ function createRoutes(mode, options) {
     finally { draining = false; turns = 0; }
   }
   function refresh() { admit(); publish(route(url(win.location.href))); }
+  /** The current address as the base a target resolves against. Unbounded: only the target is read, so an
+   * address past the bound — a first address the subscription reported — can still be navigated away from. */
+  function here() {
+    const href = win.location.href;
+    if (typeof href !== 'string') refuse('JA2023');
+    try { return new URL(href); } catch { return refuse('JA2024'); }
+  }
   /** A refusal no caller is on the stack for: to `onError`, or — without one — the platform's uncaught error,
    * thrown from a task of its own so it never unwinds the subscription that met it. @param {unknown} error */
   function report(error) {
@@ -173,9 +182,16 @@ function createRoutes(mode, options) {
     catch (error) { stop(owner); throw error; }
     let initial;
     // an address this subscription cannot read — outside the base, past a bound — is reported as a native event's
-    // refusal is, and the subscription stays live: the next address it can read is delivered
+    // refusal is, and the subscription stays live: the next address it can read is delivered. Anything else (a
+    // host whose location has no href) is the caller's to fix, and a sink that throws hands the caller nothing to
+    // stop: either way the subscribe throws and leaves no listener behind
     try { initial = route(url(win.location.href)); }
-    catch (error) { report(error); return () => stop(owner); }
+    catch (error) {
+      if (!UNREADABLE.has(/** @type {any} */ (error)?.code)) { stop(owner); throw error; }
+      try { report(error); }
+      catch (thrown) { stop(owner); throw thrown; }
+      return () => stop(owner);
+    }
     try { admit(); publish(initial); }
     catch (error) { stop(owner); throw error; }
     return () => stop(owner);
@@ -185,7 +201,7 @@ function createRoutes(mode, options) {
     if (typeof target !== 'string' || !navigation || typeof navigation !== 'object'
       || (navigation.replace !== undefined && typeof navigation.replace !== 'boolean')) refuse('JA2023');
     if (target.length > maxLength) refuse('JA2025');
-    const current = url(win.location.href);
+    const current = here();
     let next;
     if (mode === 'hash' && !/^[a-z][a-z0-9+.-]*:/i.test(target) && !target.startsWith('//')) {
       next = new URL(current.href); next.hash = target.startsWith('#') ? target : '#' + target;
