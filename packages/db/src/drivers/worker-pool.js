@@ -9,6 +9,14 @@ import { workerQueue } from './worker-queue.js';
 /**
  * Reads explicitly classified by their compiled operation may use a read worker.
  * All other work uses the writer; an open transaction keeps one worker.
+ *
+ * A PARALLEL read (`parallelRead`, what a Store opened with `reads:
+ * 'parallel'` takes for its classified root reads) holds one read worker
+ * for its whole extent, inside one read transaction: every statement it
+ * issues runs there, on one committed WAL snapshot, even while the writer
+ * holds an open transaction — it never sees that transaction's rows and
+ * never joins it. The async context that marks it reaches every statement
+ * the read awaits, and nothing outside it.
  * @param {{ readers?: number, queueCapacity?: number, graceMs?: number,
  *   worker?: any }} [configuration]
  * @returns {any} a Driver
@@ -48,6 +56,12 @@ export function workerPoolDriver(configuration, driverFactory) {
       }
       catch (error) { await Promise.allSettled(slots.map((slot) => slot.connection.close())); throw error; }
       const queue = workerQueue(slots, capacity, () => performance.now());
+      // the parallel read in progress on this async context, if any: its
+      // reader lease and the iterators it opened (Node and Bun ship it;
+      // loaded here, as every binding loads its runtime builtin, at open)
+      const { AsyncLocalStorage } = await import('node:async_hooks');
+      /** @type {import('node:async_hooks').AsyncLocalStorage<{ lease: any, iterators: Set<any>, ended: boolean }>} */
+      const parallel = new AsyncLocalStorage();
       const readLane = (readOnly) => options.readOnly === true || (readOnly && slots.length > 1);
       const replace = async (slot) => {
         if (closed || slot.healthy) return;
@@ -63,16 +77,34 @@ export function workerPoolDriver(configuration, driverFactory) {
         try { lease.slot.executions++; return await fn(lease.slot); }
         catch (error) { if (error?.code === 'JD2090') lease.slot.healthy = false; throw error; }
       };
-      const withLease = async (readOnly, fn) => {
+      /** The parallel read the calling context belongs to, while it runs.
+       * A statement issued from its context after it ended — work it set
+       * going and did not await — is refused by name: its reader has
+       * been given back, and the writer's open transaction is no place
+       * for it either. */
+      const currentRead = () => {
+        const read = parallel.getStore();
+        if (read?.ended === true) {
+          throw Object.assign(new DbRuntimeError('JD2090',
+            'a statement reached a parallel read that had ended; its reader was given back'), { retryable: false });
+        }
+        return read;
+      };
+      const withLease = async (readOnly, fn, borrow = false) => {
         if (closed) throw new DbRuntimeError('JD2063', 'the worker pool is closed');
+        const read = currentRead();
+        if (read !== undefined) return execute(read.lease, fn);
         if (transaction !== null) return execute(transaction, fn);
-        const lease = await queue.acquire(readLane(readOnly));
+        const lease = await queue.acquire(readLane(readOnly), { borrow });
         try { return await execute(lease, fn); }
         finally { lease.release(); await replace(lease.slot); }
       };
       const raw = {
         closeDrainsIterators: true,
         exec: async (sql) => {
+          // a parallel read runs on its own reader and opens no transaction of the writer's
+          const read = currentRead();
+          if (read !== undefined) return execute(read.lease, (slot) => slot.connection.exec(sql));
           const begin = /^(?:SAVEPOINT|BEGIN)\b/.test(sql);
           const release = /^RELEASE\b/.test(sql);
           const end = /^(?:COMMIT|ROLLBACK(?! TO))\b/.test(sql);
@@ -115,8 +147,11 @@ export function workerPoolDriver(configuration, driverFactory) {
             }
             return slot.statements.get(id);
           };
+          // a classified call that is over when it answers may borrow the
+          // writer while every reader is held; a cursor never does — it
+          // would keep the writer for its whole life
           const call = (method, params) => withLease(metadata.readOnly === true,
-            async (slot) => (await statementFor(slot))[method](params));
+            async (slot) => (await statementFor(slot))[method](params), metadata.readOnly === true);
           return {
             run: (params = []) => call('run', params),
             get: (params = []) => call('get', params),
@@ -131,6 +166,21 @@ export function workerPoolDriver(configuration, driverFactory) {
               }
             },
             iterate: async (params = []) => {
+              const read = currentRead();
+              if (read !== undefined) {
+                // inside a parallel read: on its reader, closed when it ends
+                const iterator = await execute(read.lease, async (slot) => (await statementFor(slot)).iterate(params));
+                read.iterators.add(iterator);
+                const forget = () => read.iterators.delete(iterator);
+                return {
+                  next: async () => {
+                    const step = await execute(read.lease, () => iterator.next());
+                    if (step.done) forget();
+                    return step;
+                  },
+                  return: async () => { forget(); await iterator.return(); return { done: true, value: undefined }; },
+                };
+              }
               const pinned = transaction;
               const lease = pinned ?? await queue.acquire(readLane(metadata.readOnly === true));
               let iterator;
@@ -158,6 +208,52 @@ export function workerPoolDriver(configuration, driverFactory) {
             },
           };
         },
+        /**
+         * Run `fn` as one parallel read: a reader lease for its whole
+         * extent, one read transaction around it (its snapshot), the
+         * lease and anything it left open released when it settles.
+         * `fn` runs inside the read and receives `enter`, which runs a
+         * later function inside it too — what a cursor that holds the
+         * read across its pulls re-enters it with. A read that is over
+         * when `fn` settles may borrow the writer while every reader is
+         * held (`borrow`); the read is the same read there, in a read
+         * transaction of its own, and a write waits only for its end.
+         * @param {(enter: (next: () => any) => any) => any} fn
+         * @param {{ signal?: AbortSignal, timeoutMs?: number, borrow?: boolean }} [readOptions]
+         */
+        parallelRead: async (fn, readOptions = {}) => {
+          if (closed) throw new DbRuntimeError('JD2063', 'the worker pool is closed');
+          const lease = await queue.acquire(true, readOptions);
+          const read = { lease, iterators: new Set(), ended: false };
+          const enter = (/** @type {() => any} */ next) => parallel.run(read, next);
+          // BEGIN is pipelined, not awaited first: a worker serves its
+          // frames one at a time in arrival order, so every statement the
+          // read issues lands after it. The read answers only once BEGIN is
+          // known to have taken.
+          let begun = false;
+          const begin = execute(lease, (slot) => slot.connection.exec('BEGIN')).then(() => { begun = true; });
+          begin.catch(() => {});
+          try {
+            const value = await enter(() => fn(enter));
+            await begin;
+            return value;
+          }
+          finally {
+            await begin.catch(() => {});
+            for (const iterator of read.iterators) await iterator.return?.().catch(() => {});
+            read.ended = true;
+            // a read transaction left open would refuse the next read's
+            // BEGIN on this worker: roll it back, or retire the worker
+            if (begun) {
+              await execute(lease, (slot) => slot.connection.exec('COMMIT')).catch(() =>
+                execute(lease, (slot) => slot.connection.exec('ROLLBACK')).catch(() => { lease.slot.healthy = false; }));
+            }
+            lease.release();
+            await replace(lease.slot);
+          }
+        },
+        /** Whether the calling async context is inside a parallel read. */
+        inParallelRead: () => parallel.getStore() !== undefined,
         close: async () => {
           if (closed) return;
           closed = true;

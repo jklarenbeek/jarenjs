@@ -19,6 +19,7 @@ export function nodeProcessDriver(configuration = {}) {
   const settings = workerSettings(configuration, PROCESS_DEFAULTS);
   const { limits } = settings;
   const owners = new Set();
+  const endpoint = new URL('./node-process-endpoint.js', import.meta.url);
   let generation = 0;
   const driver = {
     name: 'node-process-sqlite', dialect: sqliteDialect,
@@ -26,9 +27,14 @@ export function nodeProcessDriver(configuration = {}) {
       quarantined: [...owners].filter((owner) => owner.status === 'quarantined').length,
       healthy: [...owners].filter((owner) => owner.status === 'healthy').length }),
     async open(path = ':memory:', options = {}) {
-      if (globalThis.process?.versions?.bun || globalThis.process?.release?.name !== 'node'
-        || Number(process.versions.node.split('.')[0]) < 24)
-        throw new DbCompileError('JD0003', 'supervised SQLite processes require Node.js 24 or newer');
+      // qualified on Node only: Bun runs the worker and pool hosts instead
+      const bun = globalThis.process?.versions?.bun;
+      const node = globalThis.process?.release?.name === 'node' ? process.versions.node : undefined;
+      if (bun !== undefined || node === undefined || Number(node.split('.')[0]) < 24) {
+        const found = bun !== undefined ? `Bun ${bun}` : node !== undefined ? `Node.js ${node}` : 'a runtime that is not Node.js';
+        throw new DbCompileError('JD0003', `supervised SQLite processes run on Node.js 24 or newer, and this is ${found}`
+          + (bun !== undefined ? '; the worker and pool hosts (@jarenjs/db/node-worker, @jarenjs/db/node-pool) run on Bun' : ''));
+      }
       const [{ fork }, { resolve }] = await Promise.all([import('node:child_process'), import('node:path')]);
       const identity = path === ':memory:' ? null : resolve(path);
       if (owners.size >= maxOwners || identity && [...owners].some((owner) => owner.path === identity))
@@ -39,7 +45,7 @@ export function nodeProcessDriver(configuration = {}) {
       owners.add(state);
       let child;
       try {
-        child = fork(new URL('./node-process-endpoint.js', import.meta.url), [], {
+        child = fork(endpoint, [], {
           serialization: 'advanced', stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
           execArgv: ['--no-warnings=ExperimentalWarning'],
         });
@@ -136,7 +142,7 @@ export function nodeProcessDriver(configuration = {}) {
         },
       };
       const opening = createWorkerConnection(transport, { ...settings, epoch, options, hooks, awaitStartupExit: false,
-        reopen: () => driver.open(path, options) });
+        endpoint: endpoint.href, reopen: () => driver.open(path, options) });
       child.send({ generation: epoch, path, options: { timeout: options.timeout, readOnly: options.readOnly }, limits });
       const connection = await opening;
       state.status = 'healthy';

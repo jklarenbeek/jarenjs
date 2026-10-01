@@ -1068,6 +1068,57 @@ Async connections expose no `store.sync`. For live queries, configure the option
 `asyncLive()` helper and durable journal; the declared mode is `resnapshot`. See
 [execution hosts](docs/HOSTS.md) for options, cleanup guarantees, native-call
 shutdown limits, the browser persistence matrix and measured latency/memory losses.
+Both hosts run under Bun too, and inside a `bun build --compile` executable that
+ships `@jarenjs/db/worker-endpoint` beside it and names it with the drivers'
+`endpoint` option ([the recipe](docs/HOSTS.md#bundled-and-compiled-executables)).
+
+On the pool, `reads: 'parallel'` runs the classified root reads on the readers,
+each in a committed snapshot of its own, while writes, transactions and tracked
+reads keep the one gate (MODEL-FORMAT §5.1). Parallel reads on the pool, end to
+end — every printed value is what the example answers when it runs:
+
+```js
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { openStore } from '@jarenjs/db';
+import { nodeWorkerPoolDriver } from '@jarenjs/db/node-pool';
+
+const model = {
+  $model: '0.1',
+  collections: {
+    notes: {
+      schema: { type: 'object', required: ['id'], properties: { id: { type: 'string' }, body: { type: 'string' } } },
+      key: '/id',
+      indexes: [],
+    },
+  },
+};
+const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'notes-'));
+const store = await openStore(model, {
+  driver: nodeWorkerPoolDriver({ readers: 2 }), path: path.join(dir, 'app.db'), reads: 'parallel' });
+const mode = store.capabilities.parallelReads;
+// → 'parallel'
+await store.collection('notes').put({ id: 'kept', body: 'committed' });
+
+const during = await store.transaction(async (tx) => {
+  await tx.collection('notes').put({ id: 'draft', body: 'not committed yet' });
+  // a ROOT read from inside the callback runs on a reader, in the last
+  // committed snapshot: it neither waits for this transaction nor sees its row
+  return (await store.collection('notes').all()).map((note) => note.id);
+});
+// → [ 'kept' ]
+const after = (await store.collection('notes').all()).map((note) => note.id);
+// → [ 'kept', 'draft' ]
+
+await store.close();
+fs.rmSync(dir, { recursive: true, force: true });
+```
+
+Without `reads: 'parallel'` that root read would wait for the transaction it is
+called from and refuse `JD0012` at `queueTimeout`. Each parallel read pays two
+more round trips to its reader (its `BEGIN` and `COMMIT`); the host tables
+measure what that costs sequential point reads beside what it gains concurrent ones.
 
 ## The reactive and durable half (phase C)
 

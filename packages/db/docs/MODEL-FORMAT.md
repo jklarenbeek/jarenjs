@@ -656,7 +656,8 @@ are the same two read-back values under their long-published names.
 `readOnly`, `queueTimeout`, `compileSchema`, `capture`, `replication`,
 `jobs`, `live`, `adopt`, `transactions`, `expressions`, `operators`,
 `functions`, `extensions`, `profile`, `statementCacheBound`,
-`zoneProvider` and `runtime`, beside the pragmas above — anything else
+`zoneProvider`, `runtime`, `holdTimeoutMs`, `isolation`, `owner` and
+`reads`, beside the pragmas above — anything else
 is `JD0009`, named and with the nearest option suggested, before the
 driver opens. A misspelt option is otherwise dropped in silence, and
 `{ captur: true }` opened a store with no capture at all, which the
@@ -669,8 +670,9 @@ range: `Infinity` used to become a 1 ms wait); `readOnly` and `adopt`
 are `true` or `false`; `capture` and `jobs` are `true`, `false` or their
 options object (`'false'`, `0` and `''` used to switch the feature ON,
 and `jobs: null` threw a raw `TypeError`); `live` and `replication` are
-their options object; `transactions` is `'wait'` or `'strict'`. Each is
-`JD0009` naming the option and what it holds.
+their options object; `transactions` is `'wait'` or `'strict'`; `reads`
+is `'serialized'` or `'parallel'` (§5.1). Each is `JD0009` naming the
+option and what it holds.
 
 Opening retries classified busy failures of its idempotent initialization
 sequence, yielding between attempts so a competing opener can finish. The
@@ -1145,6 +1147,32 @@ What that costs, stated plainly:
   `tx.collection(name).live`) initializes from that transaction's rows and
   shares its fate: committed, it stays and is maintained; rolled back, it
   is closed with the rows that never existed.
+
+**A pool-backed store can read in parallel.** `openStore(model, { reads:
+'parallel' })` admits the classified root reads beside the gate instead of
+through it: a collection's `get`, `all`, `execute`, `explain` and
+`query()`; an entity set's untracked reads (`asNoTracking().get` and
+`.load`), its `execute` and `explain`, and its `page`, `cursor` and
+`loadCursor` unless asked to track; `store.execute` and `store.explain`;
+and the reads and cursors of `store.relational`. Each runs on a reader of
+its own inside one read transaction, so it reads one committed snapshot:
+it never waits for an open transaction, never joins one, and never sees a
+row that transaction has not committed. A cursor holds its read from its
+first pull until it settles — exhausted, released, aborted, or the store
+closing — so every pull reads the same snapshot; a buffered cursor gives
+the read back once its first pull filled the buffer. Everything else keeps
+the gate: writes, transactions, live registration, root jobs, and every
+TRACKED read (`get`, `load`, and a page or cursor with `tracking: true`),
+because it registers what it read in the unit of work. A parallel read
+waits for a free reader for at most `queueTimeout` (`JD2091`); a read that
+finds every reader held runs on the writer when the writer is free, and a
+cursor, which would keep the writer for its whole life, never does.
+`transactions: 'strict'` keeps its meaning for the gated calls — a
+parallel read has no transaction to queue behind. The option is accepted
+only where there are readers to run on (`@jarenjs/db/node-pool` on a
+file, with `readers` above zero); anywhere else it is `JD0009`, naming the
+driver. `capabilities.parallelReads` reports `'parallel'`, or
+`'serialized'` — the default, and the behaviour described above.
 
 **A unit of work's fate is its transaction's.** A tracked `saveChanges()`
 inside a transaction writes its statements immediately — inside the

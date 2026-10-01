@@ -5,7 +5,10 @@
   "type": "module",
   "main": "./src/index.js",
   "types": "./types/index.d.ts",
-  "sideEffects": false,
+  "sideEffects": [
+    "./src/drivers/node-worker-endpoint.js",
+    "./src/drivers/node-process-endpoint.js"
+  ],
   "exports": {
     "./async-live": {
       "types": "./types/async-live.d.ts",
@@ -56,6 +59,10 @@
     "./node-pool": {
       "types": "./types/node-pool.d.ts",
       "default": "./src/drivers/node-pool.js"
+    },
+    "./worker-endpoint": {
+      "types": "./types/worker-endpoint.d.ts",
+      "default": "./src/drivers/node-worker-endpoint.js"
     },
     "./relational": {
       "types": "./types/relational.d.ts",

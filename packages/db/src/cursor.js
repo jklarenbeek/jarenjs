@@ -331,6 +331,124 @@ export function admitCursor(cursor, admit, signal, what, ownership) {
   return Object.freeze(admitted);
 }
 
+/**
+ * A ROOT cursor's admission on a store that reads in parallel (`reads:
+ * 'parallel'`, MODEL-FORMAT §5.1). The cursor's pulls share ONE parallel
+ * read — a reader of its own, inside one read transaction, so one
+ * committed snapshot — taken on the first pull and held while the source
+ * needs it. Each pull re-enters that read, so every statement the pull
+ * issues runs on the reader: none joins an open transaction and none waits
+ * for one. A consumer paused between pulls keeps the reader, as a
+ * streaming statement on a pool reader always has, and blocks no writer.
+ *
+ * The read is given back once the source is done with it — exhausted,
+ * failed, released by `return()`, aborted, or, for a buffered cursor, as
+ * soon as its first pull materialised every item. Later pulls reach the
+ * cursor alone: it answers from its buffer, `{ done: true }`, or its own
+ * `JD2072`, and issues no statement. A pull refused before the read began
+ * (the wait for a reader timed out, the signal aborted while queued, the
+ * store closing) refuses that pull only — nothing was opened, and the next
+ * pull asks again. `owners` holds every cursor holding a read right now,
+ * so the store's close gives each one back.
+ * @param {any} cursor - the engine's `QueryCursor`
+ * @param {(fn: (enter: (next: () => any) => any) => any, what?: string, signal?: AbortSignal,
+ *   held?: boolean) => any} share - the store's parallel admission: runs `fn` inside a new
+ *   parallel read, held (`held: true`) until the promise `fn` returns settles; `enter`
+ *   re-enters it
+ * @param {AbortSignal | undefined} signal - the cursor's own signal
+ * @param {string} what - what is waiting, for the reader wait's message
+ * @param {Set<any>} owners - the cursors holding a read right now
+ * @param {() => void} [check] - asked inside the read before each pull
+ *   (the store's owner lease)
+ * @returns {any} the admitted `QueryCursor`
+ */
+export function shareCursor(cursor, share, signal, what, owners, check = () => {}) {
+  /** @type {{ enter: (next: () => any) => any, giveBack: () => void, ended: Promise<void> } | null} */
+  let read = null;
+  // once the source is done with a read, later pulls reach the cursor alone
+  let finished = false;
+  // one pull or release at a time, in call order
+  let tail = Promise.resolve();
+  /** @param {() => Promise<any>} step */
+  const serial = (step) => {
+    const result = tail.then(step);
+    tail = result.then(() => undefined, () => undefined);
+    return result;
+  };
+  /** Take a read and hold it until `giveBack`: resolves once it has begun. */
+  const take = () => new Promise((resolve, reject) => {
+    /** @type {any} */
+    const held = { enter: null, giveBack: null, ended: null };
+    const kept = new Promise((release) => { held.giveBack = () => release(undefined); });
+    let ended;
+    try {
+      ended = Promise.resolve(share((enter) => {
+        held.enter = enter;
+        resolve(held);
+        return kept;
+      }, what, signal, true));
+    }
+    catch (error) { ended = Promise.reject(error); }
+    // a refusal before the read began refuses the pull; once it began, its
+    // end (the reader's commit and release) is only awaited
+    held.ended = ended.then(() => undefined, () => undefined);
+    ended.catch(reject);
+  });
+  const giveBack = () => {
+    finished = true;
+    signal?.removeEventListener('abort', onAbort);
+    if (read === null) return Promise.resolve();
+    const held = read;
+    read = null;
+    owners.delete(admitted);
+    held.giveBack();
+    return held.ended;
+  };
+  // an abort resets the source at once through the cursor's own listener;
+  // the read goes back after any pull in flight settles
+  const onAbort = () => { serial(giveBack).catch(() => {}); };
+  const pull = async () => {
+    if (finished || cursor.settled === true || signal?.aborted === true) {
+      await giveBack();
+      return cursor.next();
+    }
+    if (read === null) {
+      read = /** @type {any} */ (await take());
+      owners.add(admitted);
+    }
+    const { enter } = /** @type {any} */ (read);
+    let step;
+    try {
+      step = await enter(() => { check(); return cursor.next(); });
+    }
+    catch (error) {
+      await giveBack();
+      throw error;
+    }
+    if (step.done === true || cursor.streaming !== 'row') await giveBack();
+    return step;
+  };
+  const release = async () => {
+    const held = read;
+    try {
+      if (held !== null && cursor.settled !== true) await held.enter(() => cursor.return());
+      else await cursor.return();
+    }
+    finally { await giveBack(); }
+    return { done: true, value: undefined };
+  };
+  /** @type {any} */
+  const admitted = Object.freeze({
+    streaming: cursor.streaming,
+    barrier: cursor.barrier,
+    next: () => serial(pull),
+    return: () => serial(release),
+    [Symbol.asyncIterator]: () => admitted,
+  });
+  if (signal?.aborted !== true) signal?.addEventListener('abort', onAbort, { once: true });
+  return admitted;
+}
+
 /** A native cursor pins its gate until cleanup, with finite lifetime and one
  * close owner shared by abort, expiry, return and Store close.
  * @param {any} cursor @param {Function} admit @param {AbortSignal} signal

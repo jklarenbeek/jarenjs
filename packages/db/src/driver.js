@@ -15,9 +15,13 @@
  * The runtime builtin behind a binding is imported LAZILY inside
  * `open()` via {@link lazyOpen} — never at module scope — because the
  * packed-consumer gate imports every export subpath under Node *and*
- * Bun, Bun ships no `node:sqlite`, and Node cannot resolve `bun:`
- * specifiers. `open()` is where "this driver does not exist here"
- * becomes the coded `JD0003` instead of a module-load crash.
+ * Bun, and a runtime may lack a builtin some binding needs: Node cannot
+ * resolve `bun:` specifiers, and a runtime without `node:sqlite` cannot
+ * load the Node binding. (Bun ships `node:sqlite`, so the in-thread Node
+ * binding, the worker host and the pool host all open there; the
+ * supervised process host runs on Node only.) `open()` is where "this
+ * driver does not exist here" becomes the coded `JD0003` instead of a
+ * module-load crash.
  *
  * `capabilities` is read once at open by a PROBE — the SQLite one by
  * default, another engine's through `options.probe` — and is the single
@@ -617,6 +621,32 @@ export function finishConnection(raw, dialect, synchronous, capabilities, queueT
   };
 
   /**
+   * Run one PARALLEL read: what a Store opened with `reads: 'parallel'`
+   * takes for a classified root read on a host that has readers. It takes
+   * no part in the ownership above — it never waits for an owner and no
+   * owner waits for it — because the host runs it on a reader of its own,
+   * in a read transaction of its own: a committed snapshot that an open
+   * transaction's rows never reach. Its statements go through the
+   * connection's own `prepare`/`exec`, which the host routes to that
+   * reader while the read's async context is current; `fn` receives
+   * `enter`, which re-enters the read from a later context (a cursor's
+   * next pull). Waiting for a reader is bounded by `queueTimeout` and
+   * abandoned by `signal`; a read that is over when `fn` settles may run
+   * on a free writer while every reader is held, one HELD across a
+   * cursor's pulls never does. `null` on a host without readers.
+   * @param {(enter: (next: () => any) => any) => any} fn
+   * @param {string} [_what]
+   * @param {AbortSignal} [signal]
+   * @param {boolean} [held] - the read outlives `fn`'s first answer (a cursor's)
+   */
+  const shared = typeof raw.parallelRead !== 'function' ? null : (fn, _what, signal, held = false) => {
+    requireOpen();
+    if (signal?.aborted === true) return Promise.reject(abortReason(signal));
+    return raw.parallelRead((/** @type {any} */ enter) => { requireOpen(); return fn(enter); },
+      { signal, timeoutMs: queueTimeout, borrow: !held });
+  };
+
+  /**
    * The ONE checkpoint primitive both savepoint kinds are built on: a
    * structured `transaction()` nesting opens one and settles it around
    * its callback, and a scope's manual `savepoint()` opens one the
@@ -904,6 +934,10 @@ export function finishConnection(raw, dialect, synchronous, capabilities, queueT
      * without a savepoint: what a store-level read or write takes so it
      * cannot fall inside a transaction it is not part of. */
     exclusively,
+    /** A parallel read on a reader of its own, or `null` (see `shared`). */
+    shared,
+    /** Whether the calling async context is inside a parallel read. */
+    inShared: () => raw.inParallelRead?.() === true,
     // idempotent: the second close is a no-op on every driver, not a
     // raw error on one and a resolved promise on another. `discard` asks a
     // pooled session's driver to destroy the session rather than return it

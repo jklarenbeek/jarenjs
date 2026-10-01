@@ -869,19 +869,27 @@ describe('root cursors borrow admission per pull (MODEL-FORMAT §5.1)', () => {
     assert.strictEqual(admitted, 3, 'each pull was admitted once (two items and the exhausting pull)');
   });
 
-  it('exactly one admission implementation exists, and it neither buffers nor imports a store', () => {
+  it('one admission implementation per mode exists, and neither buffers nor imports a store', () => {
     const cursor = fs.readFileSync(new URL('../../packages/db/src/cursor.js', import.meta.url), 'utf8');
     const store = fs.readFileSync(new URL('../../packages/db/src/store.js', import.meta.url), 'utf8');
+    // the gate per pull, and the parallel read held across pulls (`reads: 'parallel'`)
     assert.strictEqual((cursor.match(/export function admitCursor\(/g) ?? []).length, 1);
+    assert.strictEqual((cursor.match(/export function shareCursor\(/g) ?? []).length, 1);
+    assert.strictEqual((store.match(/admitCursor\(/g) ?? []).length, 1, 'one backend policy adapter calls the gated admission owner');
+    assert.strictEqual((store.match(/shareCursor\(/g) ?? []).length, 1, 'one adapter calls the parallel admission owner');
     // the collection query, the entity cursor, the graph cursor, the job
     // page and the Store-bound relational engine's root cursor (its root
     // policy admits per pull like the others — MODEL-FORMAT §5.3): every
-    // root cursor surface routes through it
-    assert.strictEqual((store.match(/admitCursor\(/g) ?? []).length, 1, 'one backend policy adapter calls the shared admission owner');
-    assert.strictEqual((store.match(/admitRootCursor\(/g) ?? []).length, 5, 'the five root cursor surfaces route through that adapter');
+    // root cursor surface routes through one of the two adapters — the
+    // classified reads through the one that picks the mode, the job page
+    // and a tracked cursor through the gate
+    assert.strictEqual((store.match(/admit(?:Root|Read)Cursor\)?\((?!cursor, signal, what\))/g) ?? []).length, 5,
+      'the five root cursor surfaces route through an adapter');
     assert.ok(!/query is deliberately NOT gated/.test(store), 'the ungated exception is gone');
-    const body = cursor.slice(cursor.indexOf('export function admitCursor('));
-    const fn = body.slice(0, body.indexOf('\n}\n') + 3);
-    assert.ok(!/\.all\(\)|toArray\(|\[\]/.test(fn), 'the decorator holds no buffer');
+    for (const name of ['admitCursor', 'shareCursor']) {
+      const body = cursor.slice(cursor.indexOf(`export function ${name}(`));
+      const fn = body.slice(0, body.indexOf('\n}\n') + 3);
+      assert.ok(!/\.all\(\)|toArray\(|\[\]/.test(fn), `${name} holds no buffer`);
+    }
   });
 });

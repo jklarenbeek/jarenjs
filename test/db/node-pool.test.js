@@ -171,7 +171,8 @@ describe('pool close admission', () => {
     const { connection, close } = await fixture({ readers: 1, graceMs: 1 });
     const statement = connection.prepare('SELECT 1 AS n', { readOnly: true });
     const cursor = await statement.iterate();
-    const queued = assert.rejects(statement.get(), { code: 'JD2063' });
+    // a cursor never borrows the free writer, so the second one queues for the reader
+    const queued = assert.rejects(statement.iterate(), { code: 'JD2063' });
     await close();
     await queued;
     await assert.rejects(async () => cursor.next(), { code: 'JD2063' });

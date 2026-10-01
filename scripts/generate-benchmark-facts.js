@@ -317,6 +317,24 @@ const FACTS = {
     const report = JSON.parse(readFileSync(join(ROOT, 'benchmark/store-hosts-results.json'), 'utf8'));
     const fixed = (n) => n.toFixed(2);
     const mib = (n) => fixed(n / 1048576);
+    // the worker and pool hosts inside a Bun-compiled executable, from the
+    // native executable harness (`check-adoption-journeys.js --native`)
+    const compiledHosts = () => {
+      const compiled = JSON.parse(readFileSync(join(ROOT, 'benchmark/adoption-hosts-result.json'), 'utf8')).workerHosts;
+      const host = (name) => compiled.hosts.find((h) => h.host === name);
+      const inThread = host('in-thread');
+      const refused = compiled.withoutEndpoint.map((h) => `${h.host} ${h.refused.code} (retryable: ${h.refused.retryable})`).join(', ');
+      return [
+        `| Bun ${compiled.runtime} executable | Rows written | Rows streamed | Long read ms | Event-loop max ms |`,
+        '|---|---:|---:|---:|---:|',
+        ...compiled.hosts.map((h) => `| ${h.host} | ${h.written} | ${h.streamed} | ${fixed(h.longReadMs)} | ${fixed(h.eventLoopDelayMs.max)} |`),
+        '',
+        `Built with \`${compiled.recipe}\` and run with every source and module path removed; the long read is ${compiled.scans} whole-collection reads of ${compiled.rows + 1} rows. `
+          + ['worker', 'pool'].map((name) => `The ${name} host held the event loop at most ${fixed(host(name).eventLoopDelayMs.max)} ms against the ${compiled.eventLoopBoundMs} ms bound and took ${fixed(host(name).longReadMs / inThread.longReadMs)}× as long as the in-thread binding, which held the loop ${fixed(inThread.eventLoopDelayMs.max)} ms.`).join(' ')
+          + ` Built without the second entrypoint, the open refused: ${refused}.`,
+        '',
+      ];
+    };
     return '\n\n' + [
       `Measured ${report.measuredAt.slice(0, 10)}, ${report.runtime}, ${report.host.cpu}; ${report.samples} samples per latency/include case.`,
       '',
@@ -328,6 +346,22 @@ const FACTS = {
       '|---|---:|---:|---:|---:|',
       ...report.hosts.map((h) => `| ${h.name} | ${h.cursor.rows} | ${fixed(h.cursor.durationMs)} | ${mib(h.cursor.sampledHeapGrowthBytes)} | ${mib(h.cursor.sampledRssBytes)} |`),
       '',
+      `| Store root admission (${report.storeRows} rows) | Reads | Mixed work p50 ms | Tiny root gets/s |`,
+      '|---|---|---:|---:|',
+      ...report.storeLevel.map((r) => `| ${r.host} | ${r.reads} | ${fixed(r.mixed.durationMs.p50)} | ${Math.round(r.tiny.operationsPerSecond)} |`),
+      '',
+      ...[...new Set(report.storeLevel.map((r) => r.host))].map((host) => {
+        const of = (reads) => report.storeLevel.find((r) => r.host === host && r.reads === reads);
+        const serialized = of('serialized');
+        const parallel = of('parallel');
+        const mixed = serialized.mixed.durationMs.p50 / parallel.mixed.durationMs.p50;
+        const tiny = parallel.tiny.operationsPerSecond / serialized.tiny.operationsPerSecond;
+        const times = (ratio) => (ratio >= 1 ? `${fixed(ratio)}× faster` : `${fixed(1 / ratio)}× slower`);
+        const share = (ratio) => (ratio >= 1 ? `${fixed((ratio - 1) * 100)}% more` : `${fixed((1 - ratio) * 100)}% fewer`);
+        return `On ${host}, \`reads: 'parallel'\` runs the Store-level mixed work ${times(mixed)} than the serialized default and answers ${share(tiny)} sequential tiny root gets per second.`;
+      }),
+      '',
+      ...compiledHosts(),
       '| Include accounting | Encoded bytes | Time p50 ms | Uncollected heap growth p50 MiB |',
       '|---|---:|---:|---:|',
       ...report.includes.map((r) => `| ${r.method} | ${r.bytes} | ${fixed(r.durationMs.p50)} | ${mib(r.heapGrowthBytes.p50)} |`),

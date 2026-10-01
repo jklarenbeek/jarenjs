@@ -7,11 +7,13 @@ import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { writeAdoptionConsumer, qualifyAdoptionRuntime } from './lib/adoption-journey.js';
 import { compileStandalone } from './lib/standalone.js';
+import { buildCompiledWorkerHosts } from './lib/compiled-worker-hosts.js';
 import { adoptionHash, readAdoption, verifyFreeze } from '../test/adoption/evidence.js';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const directory = mkdtempSync(join(tmpdir(), 'jaren-adoption-hosts-'));
 const report = [];
+let workerHosts;
 const manifest = readAdoption('manifest.json'); verifyFreeze(manifest);
 if (process.argv.slice(2).some((arg) => !['--native', '--native-only', '--write'].includes(arg))) throw new Error('Unknown adoption host argument');
 try {
@@ -30,17 +32,23 @@ try {
     compileStandalone(bundled, bunBinary, 'bun');
     const nodeBinary = join(isolated, 'adoption-node');
     compileStandalone(bundled, nodeBinary, 'node');
-    // Remove every source and module lookup path before executing either binary.
+    // the worker and pool hosts compiled with the documented endpoint recipe
+    const compiledHosts = buildCompiledWorkerHosts(directory, isolated);
+    // Remove every source and module lookup path before executing any binary.
     rmSync(join(directory, 'node_modules'));
-    for (const name of ['adoption.js', 'adoption-model.js', 'adoption-fixture.js', 'journey.js', 'adoption-rows.js', 'journey-entry.js', 'adoption.cjs']) rmSync(join(directory, name));
+    for (const name of ['adoption.js', 'adoption-model.js', 'adoption-fixture.js', 'journey.js', 'adoption-rows.js', 'journey-entry.js', 'adoption.cjs',
+      'worker-app.js', 'worker-endpoint.js']) rmSync(join(directory, name));
     report.push({ ...qualifyAdoptionRuntime(bunBinary, [], isolated, 'bun-executable'), binaryBytes: statSync(bunBinary).size });
     report.push({ ...qualifyAdoptionRuntime(nodeBinary, [], isolated, 'node-executable'), binaryBytes: statSync(nodeBinary).size });
+    workerHosts = compiledHosts.run();
   }
-  const files = ['scripts/check-adoption-journeys.js', 'scripts/lib/standalone.js', 'scripts/lib/adoption-journey.js', 'test/consumer/journey.js',
+  const files = ['scripts/check-adoption-journeys.js', 'scripts/lib/standalone.js', 'scripts/lib/adoption-journey.js',
+    'scripts/lib/compiled-worker-hosts.js', 'test/consumer/journey.js',
     'packages/website/src/examples/adoption.js', 'packages/website/src/examples/adoption-model.js', 'packages/website/src/examples/adoption-fixture.js',
     'packages/db/src/jobs.js', 'packages/db/src/store.js'];
   const result = { format: 'jaren-adoption-hosts/1', freezeHash: manifest.freezeHash, platform: process.platform, arch: process.arch,
-    sourceHashes: Object.fromEntries(files.map((file) => [file, adoptionHash(readFileSync(join(root, file)))])), report };
+    sourceHashes: Object.fromEntries(files.map((file) => [file, adoptionHash(readFileSync(join(root, file)))])), report,
+    ...(workerHosts === undefined ? {} : { workerHosts }) };
   if (process.argv.includes('--write')) writeFileSync(join(root, 'benchmark/adoption-hosts-result.json'), JSON.stringify(result, null, 2) + '\n');
   console.log(JSON.stringify(result, null, 2));
 }

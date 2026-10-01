@@ -2,7 +2,7 @@
 /** Shared bounded RPC Connection client for owned SQLite execution hosts. */
 import { finishConnection } from '../driver.js';
 import { sqliteDialect } from '../dialects/sqlite.js';
-import { DbRuntimeError } from '../errors.js';
+import { DbCompileError, DbRuntimeError } from '../errors.js';
 import { generationFailure, queueFailure, rowBytes, validResponse, validResult } from './worker-protocol.js';
 
 /** @param {any} worker @param {any} settings @returns {Promise<any>} */
@@ -18,7 +18,21 @@ export async function createWorkerConnection(worker, settings) {
   const metrics = { frames: 0, rows: 0, maxFrameRows: 0, maxFrameBytes: 0, maxPending: 0 };
   let readyResolve;
   let readyReject;
+  let started = false;
   const ready = new Promise((resolve, reject) => { readyResolve = resolve; readyReject = reject; });
+  /** A worker that exits or errors before its ready frame never served:
+   * most often its endpoint module was not found (a bundle that left it
+   * behind). That fails the OPEN, by name — a reopen would meet the same
+   * missing module, so it is not a lost generation to retry. */
+  const unstarted = (cause) => {
+    if (failed !== null || closed) return;
+    failed = Object.assign(new DbCompileError('JD0003',
+      `the SQLite worker endpoint ${settings.endpoint ?? '(unnamed)'} stopped before it was ready `
+      + `(${cause?.message ?? String(cause)}); a bundled or compiled application ships the endpoint `
+      + "beside it and names it with the driver's endpoint option", undefined, cause),
+    { retryable: false, endpoint: settings.endpoint });
+    readyReject(failed);
+  };
   const lose = (cause) => {
     if (failed !== null || closed) return;
     failed = generationFailure(epoch, transactionDepth > 0, cause);
@@ -28,11 +42,16 @@ export async function createWorkerConnection(worker, settings) {
     pending.clear();
   };
   hooks.control?.({ lose });
-  worker.on('error', lose);
-  worker.on('exit', (code) => { if (!closed) lose(new Error(`worker exited (${code})`)); });
+  worker.on('error', (error) => (started ? lose(error) : unstarted(error)));
+  worker.on('exit', (code) => {
+    if (closed) return;
+    const cause = new Error(`worker exited (${code})`);
+    if (started) lose(cause);
+    else unstarted(cause);
+  });
   worker.on('message', (message) => {
     if (!validResponse(message, epoch)) { lose(new Error('invalid worker response')); return; }
-    if (message.kind === 'ready') { readyResolve(message.capabilities); return; }
+    if (message.kind === 'ready') { started = true; readyResolve(message.capabilities); return; }
     if (message.kind === 'failure' && message.id === 0) {
       readyReject(Object.assign(new Error(message.error.message), message.error)); return;
     }

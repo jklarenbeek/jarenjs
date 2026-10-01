@@ -5,6 +5,7 @@ import { writeFile, mkdtemp, rm } from 'node:fs/promises';
 import { cpus, platform, release, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { openStore } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';
 import { nodeWorkerDriver } from '@jarenjs/db/node-worker';
 import { nodeWorkerPoolDriver } from '@jarenjs/db/node-pool';
@@ -16,8 +17,14 @@ const stats = (values) => {
   const sorted = [...values].sort((a, b) => a - b);
   return { p50: sorted[Math.floor(sorted.length * .5)], p95: sorted[Math.floor(sorted.length * .95)], max: sorted.at(-1) };
 };
+// the Store-level workload: one collection, a full scan per read
+const STORE_ROWS = 2000;
+const STORE_MODEL = { $model: '0.1', collections: { rows: { key: '/id',
+  schema: { type: 'object', properties: { id: { type: 'string' }, n: { type: 'integer' } } } } } };
+const STORE_SCAN = '$[?@.n < 0]';
 const folder = await mkdtemp(join(tmpdir(), 'jaren-host-benchmark-'));
 const hosts = [];
+const storeLevel = [];
 try {
   for (const [name, factory] of [
     ['node', () => nodeDriver()], ['worker', () => nodeWorkerDriver()],
@@ -90,6 +97,39 @@ try {
       cursor, mixed, metrics });
     await mix.close();
   }
+  // the same mixed shape through ONE Store's root admission: 24 classified
+  // root reads (a full scan each) with six interspersed root writes, and
+  // 1000 sequential root point reads — serialized (the default) beside
+  // parallel (`reads: 'parallel'`), on the two pool shapes
+  for (const [name, readers] of [['pool-1-reader', 1], ['pool-3-readers', 3]]) {
+    for (const reads of ['serialized', 'parallel']) {
+      const store = await openStore(STORE_MODEL, { driver: nodeWorkerPoolDriver({ readers }),
+        path: join(folder, `store-${name}-${reads}.sqlite`), reads });
+      await store.transaction(async (tx) => {
+        const rows = tx.collection('rows');
+        for (let n = 0; n < STORE_ROWS; n++) await rows.put({ id: `r${n}`, n });
+      });
+      const rows = store.collection('rows');
+      await rows.execute(STORE_SCAN);
+      const mixedTimes = [];
+      for (let sample = 0; sample < samples; sample++) {
+        const start = performance.now();
+        const jobs = [];
+        for (let i = 0; i < 24; i++) {
+          jobs.push(rows.execute(STORE_SCAN));
+          if (i % 4 === 0) jobs.push(rows.put({ id: `w${sample}-${i}`, n: STORE_ROWS + i }));
+        }
+        await Promise.all(jobs);
+        mixedTimes.push(performance.now() - start);
+      }
+      const tinyStart = performance.now();
+      for (let i = 0; i < 1000; i++) await rows.get(`r${i % STORE_ROWS}`);
+      const tinyMs = performance.now() - tinyStart;
+      storeLevel.push({ host: name, reads, mixed: { reads: 24, writes: 6, durationMs: stats(mixedTimes) },
+        tiny: { operations: 1000, durationMs: tinyMs, operationsPerSecond: 1000000 / tinyMs } });
+      await store.close();
+    }
+  }
 }
 finally { await rm(folder, { recursive: true }); }
 const encoded = JSON.stringify(Array.from({ length: 10000 }, (_, id) => ({ id, body: 'é😀\\\n'.repeat(30) })));
@@ -111,10 +151,12 @@ for (const method of ['serialize-again', 'count-during-decode']) {
 }
 const result = { recipe: 'node --expose-gc benchmark/store-hosts.js', measuredAt: new Date().toISOString(),
   runtime: process.version, host: { platform: platform(), release: release(), cpu: cpus()[0]?.model },
-  samples, slowStatementSql: sql, workerEventLoopMaxBoundMs: 50, hosts, includes,
+  samples, slowStatementSql: sql, workerEventLoopMaxBoundMs: 50, hosts, storeRows: STORE_ROWS,
+  storeScan: STORE_SCAN, storeLevel, includes,
   notes: ['Uncollected heap growth is allocation evidence, not retained memory or a precise allocation count.',
     'RSS includes SQLite worker heaps; sampling occurs every 1024 cursor rows.',
-    'Mixed workload uses classified Connection reads; Store root admission remains serial to preserve transaction ownership.',
+    'The host mixed workload uses classified Connection reads; the Store-level workload runs the same shape through one Store, serialized and with reads: parallel.',
+    'A parallel root read opens and commits a read transaction on its reader; sequential tiny root reads pay those two round trips.',
     'Tiny queries and startup include transport overhead; pool configuration adds a writer to its reader count.'] };
 await writeFile(new URL('./store-hosts-results.json', import.meta.url), JSON.stringify(result, null, 2) + '\n');
 console.log(JSON.stringify(result, null, 2));

@@ -10,6 +10,11 @@ export interface NodeWorkerOptions {
   allMaxBytes?: number;
   closeTimeoutMs?: number;
   startupTimeoutMs?: number;
+  /** The worker endpoint module to start: by default the one beside the
+   * driver; a bundled or compiled application names its own copy of
+   * `@jarenjs/db/worker-endpoint`. A worker that stops before it is ready
+   * fails the open with `JD0003` naming this URL, not retryable. */
+  endpoint?: URL | string;
 }
 
 /** One worker per connection; SQLite and its iterators live off the caller thread. */

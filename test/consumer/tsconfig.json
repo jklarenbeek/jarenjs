@@ -31,6 +31,7 @@
     "studio-editors.ts",
     "db-relational.ts",
     "db-process.ts",
+    "db-hosts.ts",
     "db-postgres.ts",
     "host-primitives-core.ts",
     "host-primitives-contract.ts",

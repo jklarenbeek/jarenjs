@@ -284,8 +284,50 @@ Worker connections declare sessions, user functions, aggregates and online backu
 unavailable: journal capture provides the same logical patches, and query residuals
 run on the caller. Synchronous Store methods are unavailable on these asynchronous
 connections; `asyncLive()` enables bounded resnapshot queries over durable capture.
-Bun can import both subpaths; opening a Node
-SQLite worker there reports the named unavailable-binding failure (`JD0003`).
+
+Both hosts run under Bun too. Their endpoint keeps using `node:sqlite`, which Bun
+ships, and `test/db/async-host-contracts.test.js` runs under `bun test` as well
+as Node; the installed-package check opens both hosts on both runtimes. A native
+`bun:sqlite` endpoint is not built: the `node:sqlite` one works there, and a
+second endpoint would be a second protocol peer to qualify for no measured gain.
+
+### Bundled and compiled executables
+
+A worker loads its endpoint module by URL — by default the
+`node-worker-endpoint.js` file beside the driver's own module. A bundler, or `bun
+build --compile`, that inlines the driver leaves that file behind, so the endpoint
+is published as an entry of its own, `@jarenjs/db/worker-endpoint` (a module that
+serves when it is loaded as a worker and does nothing when imported anywhere
+else), and both drivers take an `endpoint` option: the URL of the bundled copy.
+The default is unchanged.
+
+```js
+// app.js
+import { openStore } from '@jarenjs/db';
+import { nodeWorkerPoolDriver } from '@jarenjs/db/node-pool';
+
+const endpoint = new URL('./worker-endpoint.js', import.meta.url);
+const store = await openStore(model, {
+  driver: nodeWorkerPoolDriver({ readers: 2, endpoint }), path: 'application.sqlite' });
+```
+
+```js
+// worker-endpoint.js
+import '@jarenjs/db/worker-endpoint';
+```
+
+```sh
+bun build --compile ./app.js ./worker-endpoint.js --outfile app
+```
+
+The second entrypoint keeps its output name, `worker-endpoint.js`, inside the
+executable, which is what the URL above names. The endpoint modules are listed in
+the package's `sideEffects`, so the bundler keeps that side-effect import instead
+of shaking it to nothing. Without the endpoint the open fails at once: a worker
+that exits before its ready frame is `JD0003`, naming the endpoint URL, with
+`retryable: false` — a reopen cannot find a module that was never bundled. (It
+used to surface as a lost generation, `JD2090`, whose `retryable: true` invited a
+retry that could never succeed.)
 
 ## Async SQLite jobs and committed feeds
 
@@ -358,8 +400,9 @@ Driver and Connection contracts using one Node child process per connection. It
 shares the worker protocol, cursor credits, transaction scopes and error handling
 with the thread driver. SQLite and its native calls execute in the child; callbacks
 and decoded query residuals still execute in the parent. No function is serialized.
-Node.js 24 or newer is required. Bun can import the entry but `open` refuses with
-`JD0003`. The native-call and process-lifecycle fixtures qualify Node 24.20.0 on
+It runs on Node.js 24 or newer. Bun can import the entry, and `open` there refuses
+with `JD0003` naming the runtime it found and the one it needs; the worker and pool
+hosts are the ones that run under Bun. The native-call and process-lifecycle fixtures qualify Node 24.20.0 on
 Linux; other supported operating systems require their own timing qualification.
 
 ```js
@@ -494,9 +537,15 @@ and routes explicitly classified reads to readers. Unclassified work goes to the
 writer. `:memory:` uses the writer alone. A pool opened with `readOnly: true` has
 only read-only workers and requires an already-WAL file. Default reader count is
 two (allowed range zero through 32); the queue admits at most `queueCapacity`
-waiting requests (default 64, zero allowed), in strict FIFO order. A blocked writer
-at the head can leave a reader idle. Metrics report active/idle/queued, worker
-health/generation/role/executions, and wait p50/p95 over the last 1024 admissions.
+waiting requests (default 64, zero allowed), first in, first out within each lane:
+a write waiting for the writer never waits behind reads waiting for a reader, and a
+read never jumps an earlier read. A classified call that is over when it answers
+(`run`, `get`, `all` — never a cursor) may borrow the free writer while every
+reader is held, never while a write waits for it: readers held by open cursors do
+not stall a read the writer could serve, at the price that a long read on the
+borrowed writer delays a write that arrives during it. Metrics report active/idle/queued,
+worker health/generation/role/executions, and wait p50/p95 over the last 1024
+admissions.
 
 Compiled operation metadata supplies read classification, and SQLite itself
 refuses a write on a read-only worker. The Store-bound relational engine
@@ -507,9 +556,9 @@ statements share one bounded cache per store, because a worker keeps at most
 `maxStatements` prepared statements. Transactions pin one worker for their entire
 lifetime, including nested savepoints. Normal writable Store transactions pin the
 writer; a read-only opened pool pins a reader. There is no extra transport-specific
-transaction API. Store root admission still serializes unrelated operations to
-preserve existing ownership rules. Multiple classified Connection reads can run
-concurrently; the pool does not promise parallel root Store calls.
+transaction API. Store root admission serializes unrelated operations by default,
+to keep the ownership rules of MODEL-FORMAT §5.1; `reads: 'parallel'` opens the
+classified root reads to the readers (below).
 
 Worker loss settles in-flight work once and discards the slot's prepared cache.
 Replacement occurs only after its lease/transaction settles. Failed replacement
@@ -518,6 +567,31 @@ forever. Close refuses queued work, grants active work `graceMs`, and closes the
 workers after that grace. A commit already submitted to SQLite owns its settlement;
 close waits for its acknowledgement even beyond grace, without interrupting that
 writer. Native-call termination has the limitation described above.
+
+### Parallel root reads
+
+```js
+const store = await openStore(model, {
+  driver: nodeWorkerPoolDriver({ readers: 2 }), path: 'application.sqlite', reads: 'parallel' });
+store.capabilities.parallelReads; // 'parallel'
+```
+
+With `reads: 'parallel'` the Store admits its classified root reads (MODEL-FORMAT
+§5.1 lists them) on the readers instead of through the one gate every other call
+takes. Each read takes a reader and opens a read transaction there for its whole
+extent, so all of its statements read one committed WAL snapshot; the read's async
+context routes every statement it awaits to that reader, and reaches nothing else.
+Two such reads run at once on two readers while the writer commits, and neither
+sees a row the writer's open transaction has not committed. A cursor holds its read
+from its first pull until it settles — exhausted, released, aborted, or closed with
+the store — so a pool's open cursors hold as many readers: size `readers` for the
+streams kept open. A read waits for a reader for at most `queueTimeout` (`JD2091`);
+a one-shot read that finds every reader held runs on the writer when the writer is
+free. Writes, transactions, live registration, root jobs and tracked reads keep
+the gate. The in-thread, worker and process hosts have no readers and refuse the
+option (`JD0009`), as does a pool on `:memory:` or with `readers: 0`. The price
+is two round trips per read — its `BEGIN` and `COMMIT` on the reader — which
+sequential tiny reads pay; the measurements below state it beside the gain.
 
 ## Synchronous cursors and include accounting
 
@@ -607,7 +681,10 @@ The worker event-loop acceptance bound is 50 ms. The original in-process baselin
 <!--/fact-->
 
 The tiny workload is sequential `SELECT 7`; the mixed workload is 24 classified
-reads with six interspersed writes. RSS includes worker heaps. Heap-growth figures
+reads with six interspersed writes. The Store-level rows run the same mixed shape
+through one Store's root admission — a full scan per read, six interspersed root
+writes — and 1000 sequential root point reads, serialized (the default) and with
+`reads: 'parallel'`. RSS includes worker heaps. Heap-growth figures
 are uncollected allocations sampled in this process, not retained memory and not
 portable heap limits. Cursor sampling occurs every 1024 rows. The final runner
 measures all hosts on the same file-based workload. Timing, memory and throughput
@@ -669,8 +746,9 @@ Confirmed and fixed in the host path:
 
 Confirmed beside this path, left unchanged:
 
-- Root Store admission intentionally serializes unrelated operations; concurrent
-  classified Connection reads are the pool's current parallelism boundary.
+- Root Store admission serializes unrelated operations by default; with
+  `reads: 'parallel'` the classified root reads use the pool's readers
+  (see Parallel root reads).
 - V8 termination cannot preempt native SQLite execution. A true statement interrupt
   would need binding support; shutdown documents the unknown outcome explicitly.
 - The browser IndexedDB topology still exposes no synchronous live maintenance.
@@ -713,4 +791,5 @@ publisher. Both include committed WAL. Bun allocates no whole-database JavaScrip
 image; native SQLite caches and temporary storage govern working memory, and
 cancellation takes effect between phases. Process-kill tests
 cover rebuild copy, table drop, commit and backup publication on both hosts;
-these tests do not establish power-loss durability or native executable packaging.
+these tests do not establish power-loss durability. Compiled executables are
+qualified by their own harness (see Bundled and compiled executables).

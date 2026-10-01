@@ -138,8 +138,13 @@ export const DB_CODES = Object.freeze({
  *    locked file): the error carries `class`/`retryable` from the
  *    classifier and the driver's error as `cause`
  *  - `JD0003` — the runtime builtin behind a driver could not be
- *    loaded here (Node cannot resolve `bun:`; Bun ships no
- *    `node:sqlite`), or an injected handle is missing
+ *    loaded here (Node cannot resolve `bun:`; a runtime without
+ *    `node:sqlite` cannot load the Node binding), an injected handle is
+ *    missing, a host runs only on another runtime (the supervised
+ *    process host is Node's; the reason names both runtimes), or a
+ *    worker endpoint stopped before it was ready — a bundle that left
+ *    the endpoint behind; the reason names its URL and `retryable` is
+ *    `false`, because a reopen meets the same missing module
  *  - `JD0004` — a declared index cannot be mapped to a column: its
  *    path does not select exactly one member (wildcards, slices,
  *    filters and descendants are not indexable), or its `derive`

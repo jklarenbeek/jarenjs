@@ -1,5 +1,14 @@
 //@ts-check
-/** Bounded FIFO admission, with a deterministic clock and inspectable leases. */
+/**
+ * Bounded FIFO admission per lane, with a deterministic clock and
+ * inspectable leases. Each lane (the writer, the readers) keeps its own
+ * arrival order: a write waiting for the writer never waits behind reads
+ * waiting for a reader, and a read never jumps an earlier read. A read
+ * that is over when it answers may BORROW (`borrow: true`): it takes a
+ * free writer when every reader is busy — never while a write waits for
+ * it — so readers held by open cursors do not stall it, at the price that
+ * a long read on the borrowed writer delays a write that arrives during it.
+ */
 import { DbRuntimeError } from '../errors.js';
 import { queueFailure } from './worker-protocol.js';
 
@@ -27,11 +36,17 @@ export function workerQueue(slots, capacity, now) {
       idle();
     } });
   };
+  /** Whether a waiter of this lane is already queued (it goes first). @param {boolean} readOnly */
+  const laneWaiting = (readOnly) => waiting.some((entry) => entry.readOnly === readOnly);
+  /** A free writer a read may borrow: none while a write waits for one. */
+  const borrowable = () => (laneWaiting(false) ? undefined : choose(false));
   const pump = () => {
-    while (waiting.length > 0) {
-      const slot = choose(waiting[0].readOnly);
-      if (slot === undefined) break;
-      grant(slot, waiting.shift());
+    // the first waiter of each lane gets that lane's free slot
+    for (let i = 0; i < waiting.length;) {
+      const entry = waiting[i];
+      const slot = choose(entry.readOnly) ?? (entry.borrow ? borrowable() : undefined);
+      if (slot === undefined) { i++; continue; }
+      grant(slot, waiting.splice(i, 1)[0]);
     }
   };
   return {
@@ -42,7 +57,8 @@ export function workerQueue(slots, capacity, now) {
         return;
       }
       let timer;
-      const entry = { readOnly, resolve, reject, at: now(), cleanup: () => {
+      const borrow = readOnly && options.borrow === true;
+      const entry = { readOnly, borrow, resolve, reject, at: now(), cleanup: () => {
         clearTimeout(timer);
         options.signal?.removeEventListener('abort', abort);
       } };
@@ -56,7 +72,7 @@ export function workerQueue(slots, capacity, now) {
       };
       const abort = () => abandon(new DbRuntimeError('JD2064',
         'the queued lease was aborted before acquisition', { cause: options.signal?.reason }));
-      const slot = waiting.length === 0 ? choose(readOnly) : undefined;
+      const slot = (laneWaiting(readOnly) ? undefined : choose(readOnly)) ?? (borrow ? borrowable() : undefined);
       if (slot !== undefined) { grant(slot, entry); return; }
       if (waiting.length >= capacity) { reject(queueFailure(`lease queue capacity ${capacity} exceeded`, waiting.length)); return; }
       waiting.push(entry);

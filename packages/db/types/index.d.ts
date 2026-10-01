@@ -525,6 +525,11 @@ export interface StoreCapabilities {
    * `'lease'` (SQLite's renewed engine-table row) or `'session'`
    * (PostgreSQL's session lock). */
   readonly owner: 'none' | 'lease' | 'session';
+  /** How classified root reads are admitted (MODEL-FORMAT §5.1):
+   * `'parallel'` on the pool's readers, each in a committed snapshot of
+   * its own (`reads: 'parallel'`), or `'serialized'` through the one gate
+   * every other call takes. */
+  readonly parallelReads: 'parallel' | 'serialized';
   readonly validated: boolean;
   readonly profiled: boolean;
   /** The read-back connection configuration (MODEL-FORMAT §4). */
@@ -1276,6 +1281,16 @@ export interface OpenStoreOptions {
    * Either way the call never joins the transaction.
    */
   transactions?: 'wait' | 'strict';
+  /**
+   * How classified root reads are admitted (MODEL-FORMAT §5.1).
+   * `'serialized'` (the default) takes the one gate every store-level call
+   * takes; `'parallel'` runs them on the pool's readers, each in a read
+   * transaction of its own — a committed snapshot that never waits for an
+   * open transaction or sees its rows. Accepted only on the pool host
+   * with readers (`@jarenjs/db/node-pool` on a file); elsewhere `JD0009`.
+   * Writes, transactions and tracked reads keep the gate.
+   */
+  reads?: 'serialized' | 'parallel';
   /** Change capture (LIVE-FORMAT): off unless requested. */
   capture?: boolean | CaptureOptions;
   /** Live-query bounds (LIVE-FORMAT §12). */

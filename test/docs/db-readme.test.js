@@ -90,6 +90,16 @@ describe("the db README's runnable examples", () => {
     printed(example.section, [ran.stale, ran.moved, ran.ids]);
   });
 
+  it('parallel reads on the pool (Execution hosts) run as written and answer what they print', async () => {
+    const example = exampleAfter('Parallel reads on the pool, end to');
+    assert.ok(example !== null, 'packages/db/README.md no longer carries the parallel-reads example');
+    const ran = await run(example.code, ['mode', 'during', 'after']);
+    assert.equal(ran.mode, 'parallel');
+    assert.deepEqual(ran.during, ['kept'], 'the root read saw only committed rows, without waiting');
+    assert.deepEqual(ran.after, ['kept', 'draft']);
+    printed(example.section, [ran.mode, ran.during, ran.after]);
+  });
+
   it('relational statements through a store (Existing relational stores) run as written and answer what they print', async () => {
     const example = exampleAfter('A store carries the same engine as `store.relational`');
     assert.ok(example !== null, 'packages/db/README.md no longer carries the store-bound relational example');

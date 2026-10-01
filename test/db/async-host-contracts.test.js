@@ -1,5 +1,8 @@
 //@ts-check
-/** Public queue and committed-feed contracts on the Node SQLite hosts. */
+/** Public queue and committed-feed contracts on the Node SQLite hosts, under
+ * Node and under `bun test`: Bun runs the in-thread binding, the worker host
+ * and the pool host; the supervised process host is Node's alone (under Bun
+ * it refuses by name — test/db/worker-endpoint.test.js). */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -14,9 +17,11 @@ import { nodeProcessDriver } from '@jarenjs/db/node-process';
 const model = { $model: '0.1', collections: { notes: { key: '/id', schema: {
   type: 'object', properties: { id: { type: 'string' }, body: { type: 'string' } },
 } } } };
-const hosts = [nodeDriver, nodeWorkerDriver, nodeWorkerPoolDriver, nodeProcessDriver];
+const hosts = process.versions.bun === undefined
+  ? [nodeDriver, nodeWorkerDriver, nodeWorkerPoolDriver, nodeProcessDriver]
+  : [nodeDriver, nodeWorkerDriver, nodeWorkerPoolDriver];
 
-for (const factory of hosts) describe(`public jobs and feed: ${factory.name}`, { skip: !!process.versions.bun }, () => {
+for (const factory of hosts) describe(`public jobs and feed: ${factory.name}`, () => {
   it('settles renewed leases and checkpoints, rolls back an outbox, and recovers after reopen', async () => {
     const folder = await mkdtemp(join(tmpdir(), 'jaren-jobs-host-'));
     const driver = factory();

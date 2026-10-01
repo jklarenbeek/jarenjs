@@ -679,22 +679,19 @@ const bundle = await readCollectionBundle((async function* () {
 if (bundle.users[0].id !== 'u' || bundle.events.length !== 0) throw new Error('packed collection bundle mismatch');
 const { nodeWorkerDriver } = await import('@jarenjs/db/node-worker');
 const { nodeWorkerPoolDriver } = await import('@jarenjs/db/node-pool');
+// both hosts open and serve under Node and under Bun
 for (const driver of [nodeWorkerDriver(), nodeWorkerPoolDriver({ readers: 0 })]) {
+  const store = await openStore({ $model: '0.1', collections: {
+    notes: { key: '/id', schema: { type: 'object' } }
+  } }, { driver, replication: { replica: 'packed-worker' } });
   try {
-    const store = await openStore({ $model: '0.1', collections: {
-      notes: { key: '/id', schema: { type: 'object' } }
-    } }, { driver, replication: { replica: 'packed-worker' } });
-    try {
-      await store.collection('notes').insert({ id: 'packed', value: 7 });
-      if ((await store.collection('notes').get('packed')).value !== 7) throw new Error('packed worker data mismatch');
-      const page = await store.replication.page();
-      if (page.items.length !== 1 || page.items[0].replica !== 'packed-worker') throw new Error('packed replication mismatch');
-      const snapshot = await store.replication.snapshot();
-      if (snapshot.receipts.length !== 1) throw new Error('packed snapshot receipt mismatch');
-    } finally { await store.close(); }
-  } catch (error) {
-    if (!(typeof Bun !== 'undefined' && error.code === 'JD0003')) throw error;
-  }
+    await store.collection('notes').insert({ id: 'packed', value: 7 });
+    if ((await store.collection('notes').get('packed')).value !== 7) throw new Error('packed worker data mismatch');
+    const page = await store.replication.page();
+    if (page.items.length !== 1 || page.items[0].replica !== 'packed-worker') throw new Error('packed replication mismatch');
+    const snapshot = await store.replication.snapshot();
+    if (snapshot.receipts.length !== 1) throw new Error('packed snapshot receipt mismatch');
+  } finally { await store.close(); }
 }
 `;
     // the runtime consumer is a real program FILE: `-e` strings are not
@@ -735,6 +732,10 @@ for (const driver of [nodeWorkerDriver(), nodeWorkerPoolDriver({ readers: 0 })])
       program += "if (typeof Bun === 'undefined') await import('./async-live.test.js');\n";
       cpSync(join(root, 'test/db/node-process.test.js'), join(consumerDir, 'node-process.test.js'));
       program += "if (typeof Bun === 'undefined') await import('./node-process.test.js');\n";
+      for (const fixture of ['worker-endpoint.test.js', 'pool-parallel-reads.test.js']) {
+        cpSync(join(root, 'test/db', fixture), join(consumerDir, fixture));
+        program += `if (typeof Bun === 'undefined') await import('./${fixture}');\n`;
+      }
       mkdirSync(join(consumerDir, 'fixtures'), { recursive: true });
       for (const fixture of ['bun-probe.mjs', 'schema-upgrade.mjs', 'mutation-model.mjs', 'mutation-memory.mjs', 'physical-writer.mjs', 'physical-lifecycle-crash.mjs', 'abrupt-exit.js'])
         cpSync(join(root, 'test/db/fixtures', fixture), join(consumerDir, 'fixtures', fixture));
@@ -806,7 +807,7 @@ for (const driver of [nodeWorkerDriver(), nodeWorkerPoolDriver({ readers: 0 })])
       bunOutput = bunRun.stdout + bunRun.stderr;
       if (name === '@jarenjs/db') {
         // Bun's node:test skip options require its test runner, not a plain import.
-        const nativeHost = spawnSync('bun', ['test', './node-process.test.js', './fixture-cleanup.test.js', './json-type.test.js', './schema-change.test.js', './schema-upgrade.test.js', './mutation-reuse.test.js', './physical-locking.test.js', './physical-lifecycle-native.test.js', './physical-lifecycle.test.js', './physical-transform.test.js', './schema-sql.test.js', './foreign-key-restoration.test.js', './shadow-identity.test.js', './physical-preview.test.js', './relational-store.test.js'], { cwd: consumerDir, encoding: 'utf8' });
+        const nativeHost = spawnSync('bun', ['test', './node-process.test.js', './async-host-contracts.test.js', './worker-endpoint.test.js', './pool-parallel-reads.test.js', './fixture-cleanup.test.js', './json-type.test.js', './schema-change.test.js', './schema-upgrade.test.js', './mutation-reuse.test.js', './physical-locking.test.js', './physical-lifecycle-native.test.js', './physical-lifecycle.test.js', './physical-transform.test.js', './schema-sql.test.js', './foreign-key-restoration.test.js', './shadow-identity.test.js', './physical-preview.test.js', './relational-store.test.js'], { cwd: consumerDir, encoding: 'utf8' });
         if (nativeHost.status !== 0) {
           failures++; console.error(`✗ ${name} (bun native qualification): ${nativeHost.stdout}${nativeHost.stderr}`); continue;
         }

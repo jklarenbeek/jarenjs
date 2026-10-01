@@ -6,6 +6,8 @@ export interface NodeWorkerPoolOptions {
   queueCapacity?: number;
   graceMs?: number;
   worker?: NodeWorkerOptions;
+  /** Every worker's endpoint module, as `NodeWorkerOptions.endpoint`. */
+  endpoint?: URL | string;
 }
 
 /** One writer and bounded read-only WAL workers. Memory uses the writer alone. */

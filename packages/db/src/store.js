@@ -34,7 +34,7 @@ import { canonicalKeyText } from './key-text.js';
 import { planCollection, planEntity, planJoinTable, verifyShape } from './ddl.js';
 import { translatePatch } from './patch-sql.js';
 import { createQueryEngine, createQueryState, createEntityQueryEngine, createLoadEngine } from './query.js';
-import { admitCursor, admitSyncCursor, createCursor, createSyncCursor, drainPage, utf8Length } from './cursor.js';
+import { admitCursor, admitSyncCursor, createCursor, createSyncCursor, drainPage, shareCursor, utf8Length } from './cursor.js';
 import { refuseUnsupportedPragmaKeys, resolvePragmaRequests, configurePragmas, PRAGMA_NAMES } from './pragmas.js';
 import { createMaintenance } from './maintenance.js';
 import { createBackup } from './backup.js';
@@ -837,7 +837,7 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
    * no document to ask, and trusts the spelling.
    */
   const spellingsOf = (/** @type {number} */ key) =>
-    chain(prepared('keySpellings', dialect.dml.keySpellings(shape)), (statement) =>
+    chain(prepared('keySpellings', dialect.dml.keySpellings(shape), { readOnly: true }), (statement) =>
       chain(statement.all([canonicalKeyText(key), key]), (/** @type {any[]} */ rows) =>
         rows.filter((row) => row.key === canonicalKeyText(key) || collection.keySegments === null
           || keyMemberOf(JSON.parse(row.doc), collection.keySegments) === key)));
@@ -968,7 +968,7 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
           const row = rows.find((/** @type {any} */ r) => r.key === canonicalKeyText(key)) ?? rows[0];
           return row === undefined ? undefined : JSON.parse(row.doc);
         })
-        : chain(prepared('get', dialect.dml.get(shape)), (statement) =>
+        : chain(prepared('get', dialect.dml.get(shape), { readOnly: true }), (statement) =>
           chain(statement.get([bindKey(key)]),
             (row) => (row === undefined ? undefined : JSON.parse(row.doc))))),
       (error) => wrapDriverError(error, { docPath: collection.docPath, collection: collection.name, key }));
@@ -1172,7 +1172,7 @@ const OPEN_OPTIONS = new Set([
   'capture', 'replication', 'jobs', 'live', 'adopt', 'transactions',
   'expressions', 'operators', 'functions', 'extensions',
   'profile', 'statementCacheBound', 'zoneProvider', 'runtime', 'holdTimeoutMs',
-  'isolation', 'owner',
+  'isolation', 'owner', 'reads',
 ]);
 
 /**
@@ -1221,6 +1221,8 @@ function refuseMalformedOpenOptions(options) {
   }
   if (options.transactions !== undefined && options.transactions !== 'wait' && options.transactions !== 'strict')
     throw refuse('transactions', "is 'wait' or 'strict'");
+  if (options.reads !== undefined && options.reads !== 'serialized' && options.reads !== 'parallel')
+    throw refuse('reads', "is 'serialized' or 'parallel'");
   const { holdTimeoutMs } = options;
   if (holdTimeoutMs !== undefined
     && (!Number.isInteger(holdTimeoutMs) || holdTimeoutMs < 1 || holdTimeoutMs > TIMER_MAX))
@@ -1679,6 +1681,25 @@ export function openStore(model, options) {
       let scope = null;
 
       /**
+       * Whether the calling async context is inside a PARALLEL read (`reads:
+       * 'parallel'`). The pool routes such a read's statements to its reader
+       * by that context, whatever object prepared them; the read still goes
+       * to the driver connection rather than through the scope of a
+       * transaction that happens to be open, so nothing it does depends on
+       * that transaction's lifetime checks, and a transaction asked for
+       * inside it is refused by name below.
+       */
+      const inParallelRead = options.reads === 'parallel' ? () => opened.inShared() : () => false;
+      /** A transaction asked for inside a parallel read: the read already
+       * runs in a read transaction of its own, on a reader, where a write
+       * or a savepoint has nowhere to go. No classified read opens one, so
+       * reaching this is a defect in that classification, refused by name. */
+      const refuseInParallelRead = () => {
+        throw new DbCompileError('JD0014', 'a parallel read runs in a read transaction of its own on a '
+          + 'reader and opens no transaction; this call belongs on the exclusive path');
+      };
+
+      /**
        * The IDENTITY of the scope that is current right now, or `null`.
        * One fresh identity per `withScope` invocation: it is what every
        * transaction view is pinned to (§5.1's exact-scope rule), and the
@@ -1794,24 +1815,26 @@ export function openStore(model, options) {
        *
        * It is NOT what separates a store-level caller from the
        * transaction: that is the gate below, which the store's own
-       * handles take and a scope-bound handle does not.
+       * handles take and a scope-bound handle does not. A parallel read
+       * is the one caller that bypasses the scope: it runs on a reader of
+       * its own, outside whatever transaction is open (see `share`).
        */
       const connection = Object.freeze({
         get synchronous() { return opened.synchronous; },
         get capabilities() { return opened.capabilities; },
         get dialect() { return opened.dialect; },
         /** @param {string} sql */
-        exec: (sql) => (scope ?? opened).exec(sql),
+        exec: (sql) => (inParallelRead() ? opened : scope ?? opened).exec(sql),
         /** @param {string} sql */
-        prepare: (sql, metadata) => (scope ?? opened).prepare(sql, metadata),
+        prepare: (sql, metadata) => (inParallelRead() ? opened : scope ?? opened).prepare(sql, metadata),
         /** Internal transaction users (jobs, checkpoints, migrations)
          * nest when a transaction is open and take the gate when not.
          * `'immediate'` takes the writer lock up front when nothing is open
          * yet; inside an open transaction the call is its savepoint.
          * @param {(scope: any) => any} fn @param {'immediate'} [mode] */
-        transaction: (fn, mode) => withScope(scope === null
+        transaction: (fn, mode) => (inParallelRead() ? refuseInParallelRead() : withScope(scope === null
           ? (/** @type {any} */ inner) => opened.transaction(inner, undefined, mode)
-          : (/** @type {any} */ inner) => /** @type {any} */ (scope).transaction(inner, mode), fn),
+          : (/** @type {any} */ inner) => /** @type {any} */ (scope).transaction(inner, mode), fn)),
         /**
          * Register what settling the OPEN transaction owes an in-memory
          * caller: `commit` when it commits, `rollback` when it rolls back,
@@ -2146,6 +2169,45 @@ export function openStore(model, options) {
       const admitRootCursor = (cursor, signal, what) =>
         admitCursor(cursor, gated, signal, what, cursorOwnership);
 
+      /**
+       * Run `fn` inside one PARALLEL read (`reads: 'parallel'`): on a
+       * reader of the pool's own, in one read transaction — a committed
+       * snapshot — instead of the gate above. It never waits for an open
+       * transaction and never joins one, so `transactions: 'strict'`,
+       * which is about queueing behind a transaction, has nothing to
+       * refuse here; the owner lease is asked first, as every admission
+       * asks it, and its renewal (an exclusive write) runs before the read
+       * begins, outside it.
+       * @param {(enter: (next: () => any) => any) => any} fn
+       * @param {string} [what]
+       * @param {AbortSignal} [signal]
+       * @param {boolean} [held] - a cursor's read, held across its pulls
+       */
+      const share = (fn, what, signal, held = false) => {
+        refuseClosed();
+        return chain(ownerGuard(false), () => opened.shared(fn, what, signal, held));
+      };
+      /**
+       * A CLASSIFIED root read — one that reads committed state and
+       * retains nothing: a collection's reads, an untracked entity read,
+       * a document query, a relational read. Parallel on a store that
+       * reads in parallel, the exclusive gate otherwise. A tracked read
+       * registers what it read in the unit of work and keeps the gate.
+       * @param {() => any} fn
+       * @param {string} [what]
+       * @param {AbortSignal} [signal]
+       */
+      const gatedRead = (fn, what, signal) => (options.reads === 'parallel'
+        ? share(() => { ownerAdmitted(); return fn(); }, what, signal)
+        : gated(fn, what, signal));
+      /** The cursors holding a parallel read right now; close gives them back. */
+      const sharedCursors = new Set();
+      /** A classified root cursor: one parallel read across its pulls, or
+       * the gate per pull. */
+      const admitReadCursor = (cursor, signal, what) => (options.reads === 'parallel'
+        ? shareCursor(cursor, share, signal, what, sharedCursors, ownerAdmitted)
+        : admitRootCursor(cursor, signal, what));
+
       /** The synchronous surface's gate. It cannot wait — waiting hands
        * a Promise back under a value's type — so a contended call is a
        * refusal whatever the mode. */
@@ -2343,7 +2405,17 @@ export function openStore(model, options) {
         });
         return ownerLease.acquire();
       };
-      const opening = () => chain(pragmas(), () =>
+      // `reads: 'parallel'` needs readers to run on: the pool host's, and
+      // only once it opened them (a memory or read-only pool has none)
+      const refuseParallelReadsHere = () => {
+        if (options.reads !== 'parallel' || (opened.shared !== null && opened.shared !== undefined
+          && Number(opened.capabilities.poolReaders) > 0)) return;
+        throw new DbCompileError('JD0009', "openStore option 'reads' is 'parallel' only on a pool host "
+          + `with readers (@jarenjs/db/node-pool on a file); this store's driver '${options.driver.name}'`
+          + `${opened.capabilities.pooling === true ? ' opened no reader' : ' has no readers'}`);
+      };
+      const opening = () => { refuseParallelReadsHere(); return openSequence(); };
+      const openSequence = () => chain(pragmas(), () =>
         chain(acquireOwner(), () =>
         chain(registerExpressionFunctions(connection, expressionNames,
           options.expressions ?? {}), () =>
@@ -2801,6 +2873,10 @@ export function openStore(model, options) {
             // how this store owns its database: 'none', 'lease' (SQLite's
             // engine-table row) or 'session' (PostgreSQL's session lock)
             owner: ownerLease === null ? 'none' : ownerLease.mode,
+            // how classified root reads are admitted: 'parallel' on a pool's
+            // readers, each in a committed snapshot of its own, or
+            // 'serialized' through the one gate every other call takes
+            parallelReads: options.reads === 'parallel' ? 'parallel' : 'serialized',
             // per-operation availability: the binding's declaration, and
             // for the two that write the store's read-only flag — `false`
             // exactly where a call is refused (`JD2077`)
@@ -3257,18 +3333,20 @@ export function openStore(model, options) {
            * @param {any} handle
            * @param {string[]} names - members that answer a promise
            * @param {string[]} [valued] - members that answer value-or-promise
+           * @param {(fn: () => any, what?: string, signal?: AbortSignal) => any} [gate]
+           *   - the admission: the exclusive gate, or `gatedRead` for classified reads
            */
-          const gatedMembers = (handle, names, valued = []) => {
+          const gatedMembers = (handle, names, valued = [], gate = gated) => {
             const out = { ...handle };
             for (const member of names) {
               if (typeof handle[member] !== 'function') continue;
               out[member] = (/** @type {any[]} */ ...args) =>
-                lift(() => gated(() => handle[member](...args), undefined, signalOf(member, args)))();
+                lift(() => gate(() => handle[member](...args), undefined, signalOf(member, args)))();
             }
             for (const member of valued) {
               if (typeof handle[member] !== 'function') continue;
               out[member] = (/** @type {any[]} */ ...args) =>
-                gated(() => handle[member](...args), undefined, signalOf(member, args));
+                gate(() => handle[member](...args), undefined, signalOf(member, args));
             }
             return Object.freeze(out);
           };
@@ -3428,8 +3506,8 @@ export function openStore(model, options) {
             ...relationalBase,
             // the gate refuses a closed store (JD2063)
             available: () => {},
-            read: (run, signal) => gated(() => run(connection), 'a root relational read', signal),
-            cursor: (spec) => admitRootCursor(createCursor({ ...spec, open: () => spec.open(connection) }),
+            read: (run, signal) => gatedRead(() => run(connection), 'a root relational read', signal),
+            cursor: (spec) => admitReadCursor(createCursor({ ...spec, open: () => spec.open(connection) }),
               spec.signal, 'a root relational cursor pull'),
             write: (run, signal) => {
               if (strictTransactions && opened.mustQueue)
@@ -3473,12 +3551,13 @@ export function openStore(model, options) {
                 // would block every transaction for as long as a consumer
                 // reads slowly, while an ungated pull could read a row a
                 // stranger's transaction has not committed. Construction
-                // (preflight, compilation) touches no connection.
+                // (preflight, compilation) touches no connection. On a
+                // store that reads in parallel the reads take a reader
+                // instead, and a cursor holds one read across its pulls
                 handle = Object.freeze({
-                  ...gatedMembers(inner,
-                    ['get', 'insert', 'put', 'patch', 'delete', 'all', 'explain', 'live'],
-                    ['execute']),
-                  query: (document, queryOptions) => admitRootCursor(inner.query(document, queryOptions),
+                  ...gatedMembers(gatedMembers(inner, ['insert', 'put', 'patch', 'delete', 'live']),
+                    ['get', 'all', 'explain'], ['execute'], gatedRead),
+                  query: (document, queryOptions) => admitReadCursor(inner.query(document, queryOptions),
                     queryOptions?.signal, 'a root collection cursor pull'),
                 });
                 gatedCollections.set(name, handle);
@@ -3494,17 +3573,22 @@ export function openStore(model, options) {
                 const inner = rootWork.entityFor(name);
                 // `cursor` and `loadCursor` borrow the gate per pull, as a
                 // collection's `query` does: admitted one item at a time,
-                // never held across the caller's loop
-                handle = gatedMembers(inner,
-                  ['create', 'get', 'update', 'mutate', 'delete', 'load', 'page', 'explain'],
-                  ['execute']);
-                const untracked = gatedMembers(inner.asNoTracking(), ['get', 'load']);
+                // never held across the caller's loop. A TRACKED read
+                // (`get`, `load`, and a page or cursor asked to track)
+                // registers what it read in the unit of work and keeps the
+                // gate on a store that reads in parallel; the untracked
+                // reads and the document queries take a reader there
+                handle = gatedMembers(gatedMembers(inner, ['create', 'get', 'update', 'mutate', 'delete', 'load']),
+                  ['explain'], ['execute'], gatedRead);
+                const untracked = gatedMembers(inner.asNoTracking(), ['get', 'load'], [], gatedRead);
                 handle = Object.freeze({
                   ...handle,
-                  cursor: (document, queryOptions) => admitRootCursor(inner.cursor(document, queryOptions),
-                    queryOptions?.signal, 'a root entity cursor pull'),
-                  loadCursor: (spec, cursorOptions) => admitRootCursor(inner.loadCursor(spec, cursorOptions),
-                    cursorOptions?.signal, 'a root graph cursor pull'),
+                  page: (spec, pageOptions) => lift(() => (pageOptions?.tracking === true ? gated : gatedRead)(
+                    () => inner.page(spec, pageOptions), undefined, signalOf('page', [spec, pageOptions])))(),
+                  cursor: (document, queryOptions) => (queryOptions?.tracking === true ? admitRootCursor : admitReadCursor)(
+                    inner.cursor(document, queryOptions), queryOptions?.signal, 'a root entity cursor pull'),
+                  loadCursor: (spec, cursorOptions) => (cursorOptions?.tracking === true ? admitRootCursor : admitReadCursor)(
+                    inner.loadCursor(spec, cursorOptions), cursorOptions?.signal, 'a root graph cursor pull'),
                   asNoTracking: () => untracked,
                 });
                 gatedEntities.set(name, handle);
@@ -3518,10 +3602,10 @@ export function openStore(model, options) {
             // chain asked to iterate the store itself can refuse by name
             execute: entityEngine === null ? undefined
               : (document, queryOptions) =>
-                gated(() => entityEngine.execute(document, queryOptions), undefined, signalOf('execute', [document, queryOptions])),
+                gatedRead(() => entityEngine.execute(document, queryOptions), undefined, signalOf('execute', [document, queryOptions])),
             explain: entityEngine === null ? undefined
               : lift((document, queryOptions) =>
-                gated(() => entityEngine.explain(document, queryOptions), undefined, signalOf('explain', [document, queryOptions]))),
+                gatedRead(() => entityEngine.explain(document, queryOptions), undefined, signalOf('explain', [document, queryOptions]))),
             roots: entityEngine === null ? undefined : Object.freeze([...entities.keys()]),
             relations: entityEngine === null ? undefined : entityEngine.relations,
             // entity live queries re-run on invalidation — declared,
@@ -3670,8 +3754,9 @@ export function openStore(model, options) {
              */
             close: lift((closeOptions) => {
               const liveCleanup = liveRegistry?.closeAll();
-              const cursorCleanup = cursorOwnership === undefined ? null
-                : Promise.allSettled([...cursorOwnership.owners].map((cursor) => cursor.return()));
+              const cursorCleanup = cursorOwnership === undefined && sharedCursors.size === 0 ? null
+                : Promise.allSettled([...cursorOwnership?.owners ?? [], ...sharedCursors]
+                  .map((cursor) => cursor.return()));
               return chain(jobsEngine === null ? null : jobsEngine.stopAll(closeOptions), (stopped) => {
                 // admission closes once the workers have stopped: a call
                 // after close() refuses by name instead of queueing behind
