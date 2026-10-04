@@ -1,7 +1,8 @@
 //@ts-check
 import { it } from 'node:test';
 import assert from 'node:assert/strict';
-import { EventEmitter } from 'node:events';
+import { EventEmitter, once } from 'node:events';
+import { spawn } from 'node:child_process';
 import { PassThrough } from 'node:stream';
 import { createProcessExecutor } from '@jarenjs/core/process-node';
 
@@ -78,11 +79,23 @@ it('reports synchronous spawn failure and validates limits', async () => {
   assert.throws(() => createProcessExecutor(config({ allow: { bad: { argv0: 'node' } } })));
 });
 
-it('signals a native POSIX child group including descendants', { skip: process.platform === 'win32' }, async () => {
-  const executor = createProcessExecutor(config({ timeoutMs: 300, graceMs: 500 }));
+it('signals a native POSIX child group including descendants', { skip: process.platform === 'win32' }, async t => {
+  // Startup speed is not the assertion: fire the unchanged deadline only
+  // after the real descendant and its parent's reaping handler are ready.
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let ready;
+  const executor = createProcessExecutor(config({ timeoutMs: 300, graceMs: 500,
+    spawn(file, args, options) {
+      const child = spawn(file, args, options);
+      ready = once(child.stdout, 'data');
+      return child;
+    } }));
   try {
-    const code = "const {spawn}=require('node:child_process'); const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'}); process.stdout.write(String(child.pid)); process.on('SIGTERM',()=>child.once('close',()=>process.exit(0))); setInterval(()=>{},1000);";
-    const result = await executor.run({ name: 'node', args: ['-e', code] });
+    const code = "const {spawn}=require('node:child_process'); const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'}); child.once('close',()=>process.exit(0)); process.on('SIGTERM',()=>{}); process.stdout.write(String(child.pid)); setInterval(()=>{},1000);";
+    const pending = executor.run({ name: 'node', args: ['-e', code] });
+    await ready;
+    t.mock.timers.tick(300);
+    const result = await pending;
     assert.equal(result.reason, 'timeout'); assert.equal(result.settlement, 'closed');
     const pid = Number(result.stdout); assert.ok(Number.isSafeInteger(pid) && pid > 0);
     assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' });

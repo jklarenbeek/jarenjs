@@ -1,18 +1,32 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, existsSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, existsSync, rmSync, mkdirSync, writeFileSync, cpSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseProfilerArgs, buildProfileReport, printConsoleTable, exportCsv } from '../../benchmark/profiler.js';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
-const PROFILER = fileURLToPath(new URL('../../benchmark/profiler.js', import.meta.url));
 const options = { drafts: ['draft7'], iterations: 1 };
-const invoke = args => spawnSync(process.execPath, [PROFILER, ...args], { cwd: ROOT, encoding: 'utf8', timeout: 30_000 });
+const invoke = (args, cwd = ROOT) => spawnSync(process.execPath, [join(cwd, 'benchmark/profiler.js'), ...args], { cwd, encoding: 'utf8', timeout: 30_000 });
 const temp = t => { const directory = mkdtempSync(join(tmpdir(), 'jaren-profiler-test-')); t.after(() => rmSync(directory, { recursive: true, force: true })); return directory; };
 const capture = t => { const lines = []; t.mock.method(console, 'log', (...args) => { lines.push(args.join(' ')); }); return lines; };
+
+// Small pinned conformance inputs keep the real CLI, filesystem loader and
+// validators covered even when the optional benchmark submodule is absent.
+function profilerFixture(t) {
+  const directory = temp(t);
+  mkdirSync(join(directory, 'benchmark', 'adaptors'), { recursive: true });
+  writeFileSync(join(directory, 'package.json'), JSON.stringify({ private: true, type: 'module' }));
+  for (const file of ['profiler.js', 'loader.js', 'runner.js', 'adaptors/ajv.js', 'adaptors/jaren.js'])
+    cpSync(join(ROOT, 'benchmark', file), join(directory, 'benchmark', file));
+  cpSync(new URL('./fixtures/profiler/', import.meta.url), join(directory, 'benchmark', 'suite'), { recursive: true });
+  symlinkSync(join(ROOT, 'node_modules'), join(directory, 'node_modules'), 'junction');
+  if (existsSync(join(ROOT, 'benchmark', 'node_modules')))
+    symlinkSync(join(ROOT, 'benchmark', 'node_modules'), join(directory, 'benchmark', 'node_modules'), 'junction');
+  return args => invoke(args, directory);
+}
 const rows = () => [
   { suite: '/fixture.json', draft: 'draft7', description: 'slow measured', assertions: 1, testCount: 1, isSuccessTest: true, jarenTime: 2, ajvTime: 1, jarenTotal: 4, ajvTotal: 2, ratio: 2, diff: 1, diffPercent: 100, jarenFailures: 0, ajvFailures: 0 },
   { suite: '/fixture.json', draft: 'draft7', description: 'fast measured', assertions: 1, testCount: 1, isSuccessTest: false, jarenTime: 0.5, ajvTime: 1, jarenTotal: 1, ajvTotal: 2, ratio: 0.5, diff: -0.5, diffPercent: -50, jarenFailures: 1, ajvFailures: 0 },
@@ -24,9 +38,10 @@ const rows = () => [
 describe('profiler conformance stays independent of timing filters', () => {
   it('preserves the real content corpus verdicts in both timing modes', t => {
     const directory = temp(t);
+    const run = profilerFixture(t);
     for (const filtered of [false, true]) {
       const output = join(directory, `${filtered ? 'filtered' : 'all'}.json`);
-      const result = invoke(['/optional/content.json', '--profile', '-i', '1', '-d', 'draft7', '-o', 'json', '-f', output, ...(filtered ? ['--success-only'] : [])]);
+      const result = run(['/optional/content.json', '--profile', '-i', '1', '-d', 'draft7', '-o', 'json', '-f', output, ...(filtered ? ['--success-only'] : [])]);
       assert.equal(result.status, 0, result.stderr);
       const report = JSON.parse(readFileSync(output, 'utf8'));
       assert.deepEqual(report.summary.engineStats, { jaren: { draft7: { passed: 3, failed: 0, errors: 0 } }, ajv: { draft7: { passed: 0, failed: 3, errors: 0 } } });
@@ -50,9 +65,10 @@ describe('profiler conformance stays independent of timing filters', () => {
 
   it('attributes canonical rows to each requested draft group without merging aliases', t => {
     const directory = temp(t);
+    const run = profilerFixture(t);
     for (const drafts of ['2019', '2019,draft2019-09']) {
       const output = join(directory, `${drafts}.json`);
-      const result = invoke(['/type.json', '--profile', '-i', '1', '-d', drafts, '-o', 'json', '-f', output]);
+      const result = run(['/type.json', '--profile', '-i', '1', '-d', drafts, '-o', 'json', '-f', output]);
       assert.equal(result.status, 0, result.stderr);
       const report = JSON.parse(readFileSync(output, 'utf8'));
       const groups = drafts.split(',');
@@ -68,9 +84,9 @@ describe('profiler conformance stays independent of timing filters', () => {
     }
   });
 
-  it('counts evaluated tests across drafts separately from filtered timing rows', () => {
+  it('counts evaluated tests across drafts separately from filtered timing rows', t => {
     // Repeat the same requested group to isolate timing omission from corpus differences.
-    const result = invoke(['/optional/content.json', '--profile', '-i', '1', '-d', 'draft7,draft7', '--success-only']);
+    const result = profilerFixture(t)(['/optional/content.json', '--profile', '-i', '1', '-d', 'draft7,draft7', '--success-only']);
     assert.equal(result.status, 0, result.stderr);
     assert.match(result.stdout, /Total tests evaluated across 2 drafts: 6/);
     assert.match(result.stdout, /Timed tests across 2 drafts: 0/);

@@ -11,7 +11,7 @@
  *   of them quietly come from the registry?**
  *
  * That question is sharp for pnpm specifically. Internal edges in this repo
- * are ordinary semver ranges (`^0.22.26`), not the `workspace:` protocol —
+ * are exact suite versions, not the `workspace:` protocol —
  * npm, which this repo uses, does not understand `workspace:`, so it cannot be
  * adopted here without breaking publishing. pnpm 9 also defaults
  * `link-workspace-packages` to **false**. Together that means adding the
@@ -132,8 +132,8 @@ import { JarenValidator } from '@jarenjs/validate';
 import * as formats from '@jarenjs/formats';
 
 // Walk the WHOLE @jarenjs closure, not just the direct dependencies. The
-// internal edges are ordinary semver ranges, so a transitive @jarenjs/core is
-// exactly what a registry could satisfy behind our back.
+// internal edges name exact suite versions, which a registry can also satisfy;
+// the version alone does not prove that a transitive @jarenjs/core is local.
 //
 // Each edge is resolved FROM ITS PARENT, because pnpm's isolated layout does
 // not hoist a transitive dependency to the consumer root — resolving

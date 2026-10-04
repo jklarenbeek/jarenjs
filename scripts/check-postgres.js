@@ -45,5 +45,14 @@ const result = spawnSync(process.execPath, ['--no-warnings=ExperimentalWarning',
   timeout: 300000 });
 process.stdout.write(result.stdout ?? '');
 process.stderr.write(result.stderr ?? '');
-if (result.error) throw result.error;
-if (result.status !== 0 || /# skipped [1-9]/.test(result.stdout)) process.exit(1);
+// Setting the exit code lets asynchronous output pipes drain the complete
+// assertion and summary; an immediate exit can hide the actual failure.
+if (result.error || result.status !== 0) {
+  console.error(`PostgreSQL test process failed (exit ${result.status}, signal ${result.signal ?? 'none'}).`);
+  if (result.error) console.error(result.error);
+  process.exitCode = 1;
+}
+else if (/# skipped [1-9]/.test(result.stdout)) {
+  console.error('PostgreSQL qualification requires every selected case to run; skipped tests were reported.');
+  process.exitCode = 1;
+}

@@ -432,9 +432,11 @@ await store.jobs.enqueue('sync-report', { input: { day: '2026-08-05' } });
   identity with no node values can upgrade through the existing fenced save;
   existing hash mismatches still refuse.
 
-  On upgrade, finish populated legacy runs with their original runner, or
-  deliberately enqueue under a new id or reset the inactive run with its
-  observed generation (§10). Reset discards checkpoints and recomputes;
+  **Upgrading from 0.99.x to 0.100.x:** finish populated legacy runs with
+  their original runner before switching workers, or deliberately enqueue
+  under a new id or reset the inactive run with its observed generation
+  (§10). This checkpoint compatibility change requires a minor release.
+  Reset discards checkpoints and recomputes;
   neither reset nor a new id undoes external effects. The runner never
   automatically resets or replays a run whose exact identity is unknown.
 - A resume that DOES agree changes nothing: the recorded nodes are
