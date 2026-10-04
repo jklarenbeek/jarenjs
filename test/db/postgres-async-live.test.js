@@ -168,6 +168,58 @@ describe('PostgreSQL asynchronous live and lexical freshness', { skip: !url && '
     });
   });
 
+  it('joins a bounded busy refresh, then catches up in a fresh round after writers settle', async () => {
+    await fixture(async ({ open }) => {
+      const bounds = asyncLive({ pollMs: 60000 });
+      const entered = Array.from({ length: 3 }, () => Promise.withResolvers());
+      const released = Array.from({ length: 3 }, () => Promise.withResolvers());
+      let round = 0;
+      const reader = await open({ sessions: 4, capture: { mode: 'journal', log: { retention: 100 } },
+        live: { ...bounds, resnapshot(context) {
+          return bounds.resnapshot({ ...context, async run(read, signal, initial) {
+            const result = await context.run(read, signal, initial);
+            if (!initial && round < 3) {
+              const index = round++;
+              entered[index].resolve();
+              await released[index].promise;
+            }
+            return result;
+          } });
+        } },
+      });
+      try {
+        const live = await reader.collection('notes').live(all);
+        let next = 1;
+        for (let index = 0; index < 3; index++) {
+          await entered[index].promise;
+          const writes = [];
+          for (const last = [3, 6, 8][index]; next <= last; next++)
+            writes.push(reader.collection('notes').put({ id: `c${next}`, title: String(next) }));
+          await Promise.all(writes);
+          if (index < 2) released[index].resolve();
+        }
+        // The explicit request shares the final background attempt's credits.
+        const joined = live.refresh();
+        released[2].resolve();
+        await joined;
+        assert.equal(live.state, 'live', live.error?.message);
+        assert.deepEqual(live.result.rows, []);
+        assert.equal(live.stats().reads, 3);
+        assert.equal(live.stats().checkpoint, 0);
+        assert.equal(live.stats().lag, true);
+        assert.equal(live.stats().pending, 0);
+        await live.refresh();
+        assert.equal(live.state, 'live', live.error?.message);
+        assert.equal(live.stats().reads, 4);
+        assert.equal(live.stats().checkpoint, 8);
+        assert.equal(live.stats().lag, false);
+        assert.deepEqual(live.result.rows, await reader.collection('notes').execute(all));
+        assert.equal(live.result.rows.length, 8);
+      }
+      finally { for (const release of released) release.resolve(); }
+    });
+  });
+
   it('drains an initial registration when the Store closes and never lends an active cursor', async () => {
     await fixture(async ({ pool, open }) => {
       const entered = Promise.withResolvers(), release = Promise.withResolvers();

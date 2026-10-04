@@ -21,7 +21,7 @@ import * as assert from 'node:assert';
 import * as fs from 'node:fs';
 
 import { openStore, createCursor } from '@jarenjs/db';
-import { admitCursor } from '../../packages/db/src/cursor.js';
+import { admitCursor, shareCursor, CLOSED_UNDER } from '../../packages/db/src/cursor.js';
 import { nodeDriver } from '@jarenjs/db/node';
 import { nodeWorkerDriver } from '@jarenjs/db/node-worker';
 import { createRuntime } from '@jarenjs/core/runtime';
@@ -50,6 +50,57 @@ const settle = (p) => Promise.resolve(p).then(
   (value) => ({ value }), (error) => ({ code: error.code, message: error.message }));
 
 describe('native cursor transaction admission', () => {
+  for (const reason of ['abort', 'expiry', 'close'])
+    it(`refuses ${reason} between granted admission and the first source pull`, async t => {
+      if (reason === 'expiry') t.mock.timers.enable({ apis: ['setTimeout'] });
+      const connection = await nodeDriver().open(':memory:');
+      const controller = new AbortController();
+      const ownership = { holdMs: 1000, owners: new Set(), max: 1 };
+      let opens = 0;
+      const inner = createCursor({ streaming: 'row', signal: controller.signal, items: row => [row],
+        open: () => { opens++; return { next: () => ({ done: false, value: 1 }), return: () => ({ done: true }) }; } });
+      const cursor = admitCursor(inner, (fn, what, signal) => connection.exclusively(fn, what, signal),
+        controller.signal, 'native admission refusal', ownership);
+      try {
+        const pending = cursor.next();
+        if (reason === 'abort') controller.abort();
+        else if (reason === 'expiry') t.mock.timers.tick(1000);
+        else void cursor[CLOSED_UNDER](Object.assign(new Error('Store closed'), { code: 'JD2063' }));
+        await assert.rejects(pending, { code: { abort: 'JD2072', expiry: 'JD2075', close: 'JD2063' }[reason] });
+        assert.strictEqual(opens, 0);
+        assert.strictEqual(ownership.owners.size, 0, 'rejection acknowledges complete owner cleanup');
+        assert.strictEqual(connection.mustQueue, false);
+      }
+      finally { await cursor.return(); await connection.close(); }
+    });
+
+  for (const reason of ['expiry', 'close'])
+    it(`refuses ${reason} while the first native source pull is pending`, async t => {
+      if (reason === 'expiry') t.mock.timers.enable({ apis: ['setTimeout'] });
+      const connection = await nodeDriver().open(':memory:');
+      const entered = defer(), response = defer();
+      const ownership = { holdMs: 1000, owners: new Set(), max: 1 };
+      let resets = 0;
+      const inner = createCursor({ streaming: 'row', items: row => [row], open: () => ({
+        next: () => { entered.resolve(); return response.promise; },
+        return: () => { resets++; return { done: true }; },
+      }) });
+      const cursor = admitCursor(inner, (fn, what, signal) => connection.exclusively(fn, what, signal),
+        undefined, 'native pending refusal', ownership);
+      try {
+        const pending = cursor.next();
+        await entered.promise;
+        if (reason === 'expiry') t.mock.timers.tick(1000);
+        else void cursor[CLOSED_UNDER](Object.assign(new Error('Store closed'), { code: 'JD2063' }));
+        response.resolve({ done: false, value: 1 });
+        await assert.rejects(pending, { code: reason === 'expiry' ? 'JD2075' : 'JD2063' });
+        assert.strictEqual(resets, 1);
+        assert.strictEqual(ownership.owners.size, 0);
+        assert.strictEqual(connection.mustQueue, false);
+      }
+      finally { response.resolve({ done: true }); await cursor.return(); await connection.close(); }
+    });
+
   it('async iteration observes abort, acknowledges cleanup and releases its owner once', async () => {
     const connection = await nodeDriver().open(':memory:');
     const controller = new AbortController();
@@ -120,6 +171,27 @@ describe('native cursor transaction admission', () => {
     }
     finally { await first.return(); await second.return(); await connection.close(); }
   });
+});
+
+it('refuses Store closure during a parallel cursor pull after releasing its source and read', async () => {
+  const entered = defer(), response = defer(), owners = new Set();
+  let resets = 0;
+  const inner = createCursor({ streaming: 'row', items: row => [row], open: () => ({
+    next: () => { entered.resolve(); return response.promise; },
+    return: () => { resets++; return { done: true }; },
+  }) });
+  const cursor = shareCursor(inner, fn => fn(next => next()), undefined, 'parallel pending refusal', owners);
+  try {
+    const pending = cursor.next();
+    await entered.promise;
+    const closing = cursor[CLOSED_UNDER](Object.assign(new Error('Store closed'), { code: 'JD2063' }));
+    response.resolve({ done: false, value: 1 });
+    await assert.rejects(pending, { code: 'JD2063' });
+    assert.strictEqual(resets, 1);
+    assert.strictEqual(owners.size, 0);
+    await closing;
+  }
+  finally { response.resolve({ done: true }); await cursor.return(); }
 });
 
 describe('concurrent transactions on one connection', () => {

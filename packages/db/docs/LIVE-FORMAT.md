@@ -631,6 +631,12 @@ registration cannot publish unverified rows and refuses with `JD2060` on attempt
 exhaustion. Row/byte exhaustion is a terminal coded error; inspect `live.error`
 and `state`. No partial result is reported as complete.
 
+`refresh()` joins an active bounded round, so its promise may settle with
+`lag: true` even if writers have just finished. To request a fresh snapshot after
+writers quiesce, first await that outstanding work, then call `refresh()` again;
+check `state` and `stats().lag` before treating the result as current. Each round
+retains the same attempt and resource limits.
+
 Each observer has one active callback and at most one latest pending event.
 Coalescing emits a complete `/rows` replacement with `coalesced: true`, so a
 consumer never applies a patch whose predecessor was dropped. Callbacks are

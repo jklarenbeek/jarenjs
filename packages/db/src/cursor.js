@@ -448,6 +448,7 @@ export function shareCursor(cursor, share, signal, what, owners, guard = () => {
       if (reached) await giveBack();
       throw error;
     }
+    if (closedBy !== null) { await release(); throw closedBy; }
     if (step.done === true || cursor.streaming !== 'row') await giveBack();
     return step;
   };
@@ -525,8 +526,13 @@ function holdCursor(cursor, admit, signal, what, ownership) {
       if (stopped) return { done: true, value: undefined };
       try {
         await acquire();
+        // Admission may resolve just before abort, expiry or Store close.
+        // Preserve that refusal and drain ownership instead of reporting EOF.
+        if (signal?.aborted) { await settle(); return cursor.next(); }
+        if (failure) throw failure;
         if (stopped) return { done: true, value: undefined };
         const step = await cursor.next();
+        if (failure) throw failure;
         if (step.done) await settle();
         return step;
       }

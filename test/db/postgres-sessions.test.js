@@ -478,7 +478,14 @@ describe('PostgreSQL store on several sessions', { skip: !url && 'JAREN_PG_URL i
       assert.deepEqual(page.items.map((record) => record.seq), [1, 2, 3, 4, 5, 6, 7, 8]);
       assert.deepEqual(delivered, [1, 2, 3, 4, 5, 6, 7, 8], 'delivered once each, in sequence');
       assert.equal(new Set(page.items.flatMap((record) => record.patch.map((op) => op.path))).size, 8);
+      // Drain maintenance that started while writers were active; that bounded
+      // round may finish with lag. Then request a snapshot after they settled.
       await live.refresh();
+      assert.equal(live.state, 'live', live.error?.message);
+      assert.equal(live.stats().pending, 0);
+      await live.refresh();
+      assert.equal(live.state, 'live', live.error?.message);
+      assert.equal(live.stats().lag, false);
       assert.deepEqual(live.result.rows, await store.collection('notes').execute([{ $for: { it: '$[*]' }, $orderby: ['$it.id'], $return: '$it' }]));
       /** @type {string[]} */
       const claimed = [];
