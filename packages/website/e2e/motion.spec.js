@@ -57,6 +57,21 @@ const seenText = (page) => page.evaluate(() => window.__motionSeen);
 /** The last engine card: 21 cards deep, so nothing has revealed it yet. */
 const lastCard = (page) => page.locator('.engine-card').last();
 
+/** Start a real intersection-driven count with an explicit frame clock. */
+async function startMeasuredCount(page) {
+  await page.clock.install();
+  await openHome(page, 'no-preference');
+  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000));
+  // Read the renderer's string before the below-fold card starts counting.
+  const headline = page.locator('.engine-perf').last();
+  const published = await headline.textContent();
+  expect(published?.length, 'the last card carries a measured line').toBeGreaterThan(0);
+  await watchText(page, '.engine-perf');
+  await lastCard(page).evaluate((el) => el.scrollIntoView({ behavior: 'instant', block: 'center' }));
+  await expect(headline).toHaveClass(/counting/);
+  return { headline, published };
+}
+
 test.describe('with motion allowed', function () {
 
   test('a card below the fold waits at its pre-view state, then rises to its final one', async function ({ page }) {
@@ -83,16 +98,9 @@ test.describe('with motion allowed', function () {
   });
 
   test('a measured headline counts up and lands on exactly the string the renderer wrote', async function ({ page }) {
-    await openHome(page, 'no-preference');
-    // read the published value BEFORE anything has counted it: the card is
-    // below the fold, so the renderer's string is what stands there
-    const headline = page.locator('.engine-perf').last();
-    const published = await headline.textContent();
-    expect(published?.length, 'the last card carries a measured line').toBeGreaterThan(0);
-
-    await watchText(page, '.engine-perf');
-    await lastCard(page).scrollIntoViewIfNeeded();
-    await expect(headline).toHaveClass(/counting/);
+    const { headline, published } = await startMeasuredCount(page);
+    // Exercise intermediate frames without assuming a host frame rate.
+    await page.clock.runFor(800);
     await expect(headline).not.toHaveClass(/counting/, { timeout: 5_000 });
 
     const seen = await seenText(page);
@@ -100,6 +108,21 @@ test.describe('with motion allowed', function () {
     expect(seen.some((t) => t !== published), 'intermediate values really happened').toBe(true);
     expect(seen[seen.length - 1]).toBe(published);
     expect(await headline.textContent()).toBe(published);
+  });
+
+  test('a delayed animation frame restores the exact published headline and stops counting', async function ({ page }) {
+    const { headline, published } = await startMeasuredCount(page);
+    await page.clock.runFor(16);
+    const first = await seenText(page);
+    expect(first.length).toBe(1);
+    expect(first[0]).not.toBe(published);
+    // A suspended frame may pass the whole duration before the next paint.
+    await page.clock.fastForward(800);
+    await expect(headline).not.toHaveClass(/counting/, { timeout: 5_000 });
+    expect(await seenText(page)).toEqual([first[0], published]);
+    expect(await headline.textContent()).toBe(published);
+    await page.clock.runFor(800);
+    expect(await seenText(page)).toEqual([first[0], published]);
   });
 
   test('nothing is ever lost to the motion: a jumped scroll and an opened disclosure still arrive', async function ({ page }) {
