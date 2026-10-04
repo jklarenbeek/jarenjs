@@ -2147,10 +2147,16 @@ export function openStore(model, options) {
         const body = toPromise(out);
         return new Promise((resolve, reject) => {
           let expired = false;
+          let timer;
           const expire = () => {
             if (expired) return;
-            expired = true;
             clearTimeout(timer);
+            // A timer wake can precede the monotonic deadline.
+            if (checkHold(root) === null) {
+              timer = setTimeout(expire, Math.max(1, Math.ceil(root.hold - (performance.now() - started))));
+              return;
+            }
+            expired = true;
             // the handles refuse from this instant...
             root.expired = Object.freeze({ holdTimeoutMs: root.hold,
               elapsedMs: Math.round(performance.now() - started) });
@@ -2172,7 +2178,6 @@ export function openStore(model, options) {
               }
             });
           };
-          const timer = setTimeout(expire, Math.max(1, Math.ceil(root.hold - (performance.now() - started))));
           /** @param {(value: any) => void} settle @param {any} value */
           const finish = (settle, value) => {
             if (expired) return;
@@ -2182,7 +2187,7 @@ export function openStore(model, options) {
             settle(value);
           };
           body.then((value) => finish(resolve, value), (error) => finish(reject, error));
-          if (checkHold(root) !== null) expire();
+          expire();
         });
       };
 

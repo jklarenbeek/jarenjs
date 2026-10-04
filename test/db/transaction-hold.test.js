@@ -103,6 +103,65 @@ async function nestedOutlivesItsRoot(store) {
 }
 
 describe('holdTimeoutMs', () => {
+  for (const settlement of ['commit', 'expire']) {
+    it(`an early timer wake preserves the hold deadline before ${settlement}`, async (t) => {
+      let now = 0;
+      t.mock.method(performance, 'now', () => now);
+      const store = await openStore(MODEL, { driver: nodeDriver(), capture: { mode: 'journal' } });
+      t.mock.timers.enable({ apis: ['setTimeout'] });
+      const entered = Promise.withResolvers();
+      const release = Promise.withResolvers();
+      const recorded = [];
+      store.observe((record) => { for (const op of record.patch) recorded.push(`${op.op} ${op.path}`); });
+      let handle;
+      const held = store.transaction(async (tx) => {
+        handle = tx;
+        await tx.collection('docs').put({ id: 'before' }, 'before');
+        entered.resolve();
+        await release.promise;
+        return 'kept';
+      }, { holdTimeoutMs: 500 });
+      const outcome = held.then((value) => ({ value }), (error) => ({ error }));
+      try {
+        await entered.promise;
+        now = 499.1;
+        t.mock.timers.tick(500);
+        await handle.collection('docs').put({ id: 'early' }, 'early');
+        if (settlement === 'expire') {
+          now = 500;
+          t.mock.timers.tick(1);
+          // The next owner commits while the expired body still awaits.
+          await store.transaction(async (tx) => {
+            await tx.collection('docs').put({ id: 'next' }, 'next');
+          });
+          await assert.rejects(handle.collection('docs').get('before'), coded('JD2098'));
+          release.resolve();
+          const result = await outcome;
+          assert.equal(result.error?.code, 'JD2098');
+          assert.equal(result.error?.elapsedMs, 500);
+          assert.equal(await store.collection('docs').get('before'), undefined);
+          assert.equal(await store.collection('docs').get('early'), undefined);
+          assert.deepEqual(recorded, ['add /docs/next']);
+        }
+        else {
+          release.resolve();
+          assert.deepEqual(await outcome, { value: 'kept' });
+          now = 501;
+          t.mock.timers.tick(1);
+          await assert.rejects(handle.collection('docs').get('before'), coded('JD2070'));
+          assert.deepEqual(await store.collection('docs').get('before'), { id: 'before' });
+          assert.deepEqual(await store.collection('docs').get('early'), { id: 'early' });
+          assert.deepEqual(recorded, ['add /docs/before', 'add /docs/early']);
+        }
+      }
+      finally {
+        release.resolve();
+        await outcome;
+        await store.close();
+      }
+    });
+  }
+
   it('counts the synchronous extent and checks the deadline before settling a body', async (t) => {
     let now = 0;
     t.mock.method(performance, 'now', () => now);

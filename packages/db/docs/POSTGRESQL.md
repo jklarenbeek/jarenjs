@@ -123,16 +123,16 @@ column is what being one Store costs (below 1×) or gains (above):
 
 <!--fact:postgres.sessions-->
 
-Measured 2026-10-04T12:08:36.387Z: PostgreSQL 17.11 (Debian 17.11-1.pgdg12+2) (fsync=on, synchronous_commit=on, full_page_writes=on), Node 24.20.0, pg 8.23.0; 8 clients at once, each 40 one-document write transactions on keys of its own; the median of 5 rounds, each measuring every shape once.
+Measured 2026-10-04T20:06:05.110Z: PostgreSQL 17.11 (Debian 17.11-1.pgdg12+2) (fsync=on, synchronous_commit=on, full_page_writes=on), Node 24.20.0, pg 8.23.0; 8 clients at once, each 40 one-document write transactions on keys of its own; the median of 5 rounds, each measuring every shape once.
 
 | N | One store on N sessions, tx/s | N stores of one session, tx/s | One store over N stores |
 |---:|---:|---:|---:|
-| 1 | 1024 | 1045 | 0.98× |
-| 2 | 1866 | 2111 | 0.88× |
-| 4 | 3302 | 3331 | 0.99× |
-| 8 | 4798 | 4959 | 0.97× |
+| 1 | 1205 | 1168 | 1.03× |
+| 2 | 2210 | 2297 | 0.96× |
+| 4 | 3437 | 3571 | 0.96× |
+| 8 | 5345 | 5728 | 0.93× |
 
-One transaction with nothing beside it: 0.952 ms on a store of one session, 0.977 ms through the router of a store on two (2.7%). A store on one session has no router.
+One transaction with nothing beside it: 0.861 ms on a store of one session, 0.892 ms through the router of a store on two (3.6%). A store on one session has no router.
 
 One host, client and server on one machine; each client a run of one-document transactions on keys of its own (no conflicts), every commit durable, so it waits on a disk the host shares with whatever else runs there. A store on one session runs them in turn; several sessions and separate stores let the server work on them together. No production throughput claim.
 
@@ -283,10 +283,10 @@ retains earlier Bun memory-budget losses even when a later sample passes.
 
 | Existing SQLite adoption executable | Workload | RSS bytes | Frozen reference bytes | RSS disposition |
 |---|---|---:|---:|---|
-| bun-executable | catalog | 253308928 | 536870912 | within reference |
-| bun-executable | archive-stock | 990441472 | 1073741824 | within reference |
-| node-executable | catalog | 278175744 | 536870912 | within reference |
-| node-executable | archive-stock | 828510208 | 1073741824 | within reference |
+| bun-executable | catalog | 271425536 | 536870912 | within reference |
+| bun-executable | archive-stock | 1004081152 | 1073741824 | within reference |
+| node-executable | catalog | 290029568 | 536870912 | within reference |
+| node-executable | archive-stock | 826781696 | 1073741824 | within reference |
 
 These larger physical SQLite workloads are separate from the small build-selected managed application. Functional recovery success does not imply memory-budget success. Earlier samples remain in the resource history.
 
