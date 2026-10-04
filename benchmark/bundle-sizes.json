@@ -5,7 +5,7 @@
     "model": 46300,
     "jslt": 19927,
     "migration": 25749,
-    "db": 836037,
+    "db": 835808,
     "contract": 50201,
     "flow": 19984,
     "app": 52114,
@@ -22,7 +22,7 @@
     "shared": 12623
   },
   "components": {
-    "md": 78501,
+    "md": 78499,
     "mermaid": 75963
   }
 }

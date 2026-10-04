@@ -4,9 +4,8 @@
  * it. Every seeded corpus, oracle and property test in this repository
  * needs the same thing: a stream of numbers that is identical on every
  * host for a given seed, so that a benchmark can state a delta and a
- * failing property test can be replayed. Before this file that stream
- * was written ten times; a generator that exists once is one whose
- * sequence can be pinned once.
+ * failing property test can be replayed. Shared draws keep corpus and
+ * test generation on the same pinned sequence.
  *
  * The algorithm is mulberry32 — a 32-bit state, one multiply-xorshift
  * round per draw, a period of 2^32. It is named by its algorithm rather

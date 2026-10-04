@@ -404,11 +404,14 @@ await store.jobs.enqueue('sync-report', { input: { day: '2026-08-05' } });
   pair and `stopGraceMs`. A `runner.stop()` with no override observes
   the runner's declared `stopGraceMs` default; an explicit
   `stop({ graceMs })` still wins.
-- **A resume must be the same run.** THREE things are persisted beside a
-  run's checkpoints, under a reserved node id, and pruned with them: the
-  workflow document's revision, a hash of the run's input, and the
-  canonical map of DECLARED task versions (FLOW-FORMAT §7.8) with its
-  hash. A resume that disagrees with any of them is `JD2069` naming what
+- **A resume must be the same run.** Three exact identities are persisted
+  beside a run's checkpoints, under a reserved node id, and pruned with
+  them: the canonical workflow document (`workflowIdentity`), the canonical
+  input (`inputIdentity`), and the map of DECLARED task versions
+  (`taskVersions`, FLOW-FORMAT §7.8). Object-member order does not change
+  identity. The short `revision`, `inputHash` and `taskVersionsHash`
+  fingerprints remain diagnostic labels; equal hashes never establish
+  equality. A resume that disagrees with any identity is `JD2069` naming what
   changed — each is identified separately, and a moved task version names
   the task and both versions (`'draft' moved from version 1 to 2`).
   A deploy that edits a dag document therefore does not have to drain old
@@ -420,15 +423,20 @@ await store.jobs.enqueue('sync-report', { input: { day: '2026-08-05' } });
   redeployed implementation from the one that wrote the checkpoints.
 
   **The legacy rule is deterministic, and never reads unknown as equal.**
-  A run checkpointed by a release that did not record task identity has
-  no `taskVersionsHash`. Identity inspection reads only the reserved metadata
-  value and probes whether other rows exist; it does not load or parse node
-  values. Missing metadata with saved values refuses `JD2069`. Refused
-  legacy upgrades leave the original identity untouched. If it recorded no node value yet, there is
-  nothing that could be replayed wrongly, so the identity is upgraded in
-  place and the run proceeds. If it DID record values, the implementation
-  that produced them cannot be confirmed and the resume is refused,
-  saying exactly that.
+  Releases that recorded only workflow/input hashes lack `workflowIdentity`
+  and `inputIdentity`; older releases can also lack task identity. Identity
+  inspection reads only the reserved metadata value and probes whether other
+  rows exist; it does not load or parse node values. Missing or hash-only
+  identities with saved node values refuse `JD2069` before checkpoint load
+  or task execution, leaving the original run untouched. A matching legacy
+  identity with no node values can upgrade through the existing fenced save;
+  existing hash mismatches still refuse.
+
+  On upgrade, finish populated legacy runs with their original runner, or
+  deliberately enqueue under a new id or reset the inactive run with its
+  observed generation (§10). Reset discards checkpoints and recomputes;
+  neither reset nor a new id undoes external effects. The runner never
+  automatically resets or replays a run whose exact identity is unknown.
 - A resume that DOES agree changes nothing: the recorded nodes are
   restored rather than re-run, no checkpoint row is written, and none is
   pruned.
@@ -467,7 +475,7 @@ The fence adds five, all in the package's single runtime table
 | `JD2066` | the lease was superseded by a newer claim or renewal |
 | `JD2067` | the lease expired before the call |
 | `JD2068` | a settling call used the pre-fence `(id, owner)` spelling instead of the lease |
-| `JD2069` | a resumed run disagrees with the workflow revision, the input hash or the declared task versions its checkpoints were written under (§7) |
+| `JD2069` | a resumed run disagrees with its exact workflow, input or declared task identities, or saved values lack a provable identity (§7) |
 
 Otherwise: API misuse (a malformed handler map, a
 non-string kind, a worker started twice) is a `TypeError` at the

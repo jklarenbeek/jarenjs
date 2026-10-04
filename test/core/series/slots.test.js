@@ -1,4 +1,5 @@
 import { describe, it } from 'node:test';
+import { spawnSync } from 'node:child_process';
 import * as assert from '../../assert.node.js';
 
 import { findSlots } from '@jarenjs/core/series';
@@ -80,6 +81,39 @@ describe('findSlots', () => {
   it('should place slots over negative epochs the same way', () => {
     assert.deepStrictEqual(pairs(findSlots([iv(-120, 0)], { duration: 60 })),
       [[-120, -60], [-60, 0]]);
+  });
+
+  it('should preserve fractional widths and negative fractional epochs', () => {
+    assert.deepStrictEqual(pairs(findSlots([iv(0.1, 0.6)], { duration: 0.2, step: 0.25 })),
+      [[0.1, 0.30000000000000004], [0.35, 0.55]]);
+    assert.deepStrictEqual(pairs(findSlots([iv(-0.75, 0.25)], { duration: 0.25, step: 0.5 })),
+      [[-0.75, -0.5], [-0.25, 0]]);
+  });
+
+  it('should refuse a duration that rounds to an empty slot', () => {
+    assert.throws(() => findSlots([iv(1e16, 1e16 + 4)], { duration: 1, step: 2 }),
+      /duration must advance the slot start/);
+    assert.throws(() => findSlots([iv(-1e16, -1e16 + 4)], { duration: 1, step: 2 }),
+      /duration must advance the slot start/);
+  });
+
+  it('should keep the actual end inside availability when subtraction rounds', () => {
+    assert.deepStrictEqual(findSlots([iv(1e16, 1e16 + 2)], { duration: 3, step: 4 }), []);
+  });
+
+  it('should refuse a step that cannot advance at the window precision', () => {
+    // A bounded child makes a non-advancing loop fail without hanging the suite.
+    const source = `
+      import assert from 'node:assert/strict';
+      import { findSlots } from ${JSON.stringify(import.meta.resolve('@jarenjs/core/series'))};
+      for (const start of [1e16, -1e16])
+        assert.throws(() => findSlots([{ start, end: start + 4 }], { duration: 2, step: 1 }),
+          /step must advance the slot start/);
+    `;
+    const result = spawnSync(process.execPath, ['--input-type=module', '-e', source],
+      { encoding: 'utf8', timeout: 2000 });
+    assert.strictEqual(result.error, undefined);
+    assert.strictEqual(result.status, 0, result.stderr);
   });
 
   it('should put every slot inside availability, at the promised spacing', () => {

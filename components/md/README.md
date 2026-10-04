@@ -170,8 +170,8 @@ it.
 
 ### Footnotes and bare links (GFM)
 
-Both are on with `gfm` (the default) and both are **additive**: with
-`gfm: false` the output is byte-for-byte what it was before they existed.
+Both extensions are enabled with `gfm` (the default) and disabled with
+`gfm: false`.
 
 ```md
 A claim.[^1] Visit www.example.com or mail a@b.test.
@@ -277,7 +277,7 @@ diagram or chart code, bundled or not. Since 0.96.0 `@jarenjs/md/plugins`
 exports no `mermaidPlugin`: import it from `@jarenjs/mermaid/plugin`, and
 hand it charts' `mermaidPieRenderer` as `renderers.pie`, or a pie renders
 a placeholder. Parsing and rendering to vnodes
-costs a consumer **<!--fact:bundle.md-->78,501<!--/fact--> bytes**
+costs a consumer **<!--fact:bundle.md-->78,499<!--/fact--> bytes**
 minified and tree-shaken. `npm run test:tree-shaking` measures it and
 holds both import graphs (`@jarenjs/md` and `@jarenjs/md/component`) free
 of mermaid and charts modules.
@@ -336,7 +336,9 @@ createApp(appDoc, {
   action payload; `md-parse` does the same for an in-state source
   string. Failures route to an optional `error` action.
 - `md.hydrate(container)` runs plugin `hydrate` hooks (browser-only
-  upgrades) over app-managed DOM, once per content hash. The highlighter
+  upgrades) over app-managed DOM, once per element, plugin and exact content.
+  Distinct values sharing a plugin's content hash are ambiguous and report
+  through `onHydrateError` without invoking the wrong hook. The highlighter
   needs none, nor does mermaid's plugin unless it is asked for pan and
   zoom (`interactive: true`) — it renders complete SVG synchronously.
 - Pass `plugins` to extend the compiled-in set — e.g.

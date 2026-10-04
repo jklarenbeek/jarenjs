@@ -97,7 +97,8 @@ export type MembershipTarget<E extends MetaMap<E>, M extends EntityMeta, K exten
 
 export interface TypedUntrackedReads<E extends MetaMap<E>, M extends EntityMeta> {
   get(key: EntityKeyArg): Promise<M['doc'] | undefined>;
-  load<const S extends TypedLoadSpec<E, M>>(spec?: S): Promise<Array<Loaded<E, M, S>>>;
+  load<const S extends TypedLoadSpec<E, M>>(spec?: S,
+    options?: Pick<ExecuteOptions, 'profile' | 'signal' | 'deadline'>): Promise<Array<Loaded<E, M, S>>>;
 }
 
 export interface TypedEntitySet<E extends MetaMap<E>, M extends EntityMeta> {
@@ -111,7 +112,7 @@ export interface TypedEntitySet<E extends MetaMap<E>, M extends EntityMeta> {
    * refuses it (`JD2003`), and the type does not offer it. */
   update(key: EntityKeyArg, changes: Partial<Omit<M['doc'], keyof M['relations']>>): Promise<Readonly<M['doc']>>;
   delete(key: EntityKeyArg): Promise<boolean>;
-  load<const S extends TypedLoadSpec<E, M>>(spec?: S):
+  load<const S extends TypedLoadSpec<E, M>>(spec?: S, options?: Pick<ExecuteOptions, 'profile' | 'signal' | 'deadline'>):
     Promise<Array<Readonly<Loaded<E, M, S>>>>;
   /** The graph cursor: one root graph per pull, typed by the includes;
    * untracked unless `tracking: true`. */
@@ -120,7 +121,7 @@ export interface TypedEntitySet<E extends MetaMap<E>, M extends EntityMeta> {
   /** One bounded page over the composite keyset, typed by the includes. */
   page<const S extends TypedLoadSpec<E, M>>(spec?: S, options?: PageOptions):
     Promise<Page<Readonly<Loaded<E, M, S>>>>;
-  explainLoad(spec?: TypedLoadSpec<E, M>): LoadExplanation;
+  explainLoad(spec?: TypedLoadSpec<E, M>, options?: Pick<ExecuteOptions, 'profile'>): LoadExplanation;
   add(doc: M['input']): Readonly<M['doc']>;
   put(next: M['doc']): Readonly<M['doc']>;
   remove(key: EntityKeyArg | M['doc']): void;

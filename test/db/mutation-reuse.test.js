@@ -6,13 +6,13 @@ import { entityCore } from '@jarenjs/db/entity';
 import { sql } from '@jarenjs/db/relational';
 import { model } from './fixtures/mutation-model.mjs';
 
-async function fixture(run) {
+async function fixture(run, prepare = (db, text, options) => db.prepare(text, options)) {
   const driver = process.versions.bun ? (await import('@jarenjs/db/bun')).bunDriver() : (await import('@jarenjs/db/node')).nodeDriver();
   const db = await driver.open(':memory:');
   const { entities, mapping } = compileEntityModel(model);
   const prepared = [];
   const connection = Object.create(db);
-  Object.defineProperty(connection, 'prepare', { value: (text, options) => { prepared.push(text); return db.prepare(text, options); } });
+  Object.defineProperty(connection, 'prepare', { value: (text, options) => { prepared.push(text); return prepare(db, text, options); } });
   const core = entityCore(connection, entities.get('Entry'), mapping.entities.Entry, null);
   try {
     db.exec("CREATE TABLE entries(id INTEGER PRIMARY KEY,payload TEXT NOT NULL);INSERT INTO entries VALUES(1,'initial'),(2,'second')");
@@ -20,6 +20,37 @@ async function fixture(run) {
   }
   finally { db.close(); }
 }
+
+for (const asynchronous of [false, true]) it(`mutation preparation can recover after a classified failure (${asynchronous ? 'promise' : 'sync'})`, async () => {
+  const failure = Object.assign(new Error('database is locked'), { code: 'SQLITE_BUSY', errcode: 5 });
+  let failing = true;
+  await fixture(async (db, core, prepared) => {
+    const document = { op: 'update', key: 1, set: { payload: 'changed' } };
+    const classified = (error) => error.code === 'JD2005' && error.class === 'busy'
+      && error.retryable === true && error.cause === failure;
+    if (asynchronous) await assert.rejects(core.mutate(document), classified);
+    else assert.throws(() => core.mutate(document), classified);
+    assert.equal(prepared.length, 1);
+    assert.equal(db.prepare('SELECT payload FROM entries WHERE id=1').get([]).payload, 'initial');
+
+    const recovered = core.mutate(document);
+    if (!asynchronous) assert.equal(recovered.affected, 1, 'the native synchronous result stays synchronous');
+    assert.deepEqual((await recovered).rows, [{ id: 1, payload: 'changed' }]);
+    assert.equal(prepared.length, 2, 'a refused preparation does not occupy the statement cache');
+    assert.equal(db.prepare('SELECT payload FROM entries WHERE id=1').get([]).payload, 'changed');
+    assert.equal((await core.mutate(document)).affected, 0, 'a repeated successful write remains a no-op');
+    assert.deepEqual((await core.mutate({ ...document, set: { payload: 'again' } })).rows, [{ id: 1, payload: 'again' }]);
+    assert.equal(prepared.length, 2, 'successful preparation is still reused');
+  }, (db, text, options) => {
+    if (failing) {
+      failing = false;
+      if (asynchronous) return Promise.reject(failure);
+      throw failure;
+    }
+    const statement = db.prepare(text, options);
+    return asynchronous ? Promise.resolve(statement) : statement;
+  });
+});
 
 it('varying mutation values reuse one statement while each call owns bindings, projection and output budgets', async () => fixture((db, core, prepared) => {
   for (let i = 0; i < 128; i++) {

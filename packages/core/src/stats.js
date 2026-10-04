@@ -5,16 +5,10 @@ import { mulberry32 } from './random.js';
  * sample variance and its root, the median, and a quantile that will
  * not answer until told which quantile it is being asked for.
  *
- * Before this file the suite computed these in two places with two
- * quantile rules — linear interpolation in the query layer's statistics
- * pack, nearest rank in the benchmark harness — and each was the right
- * rule for its consumer: an interpolated percentile is what an analyst
- * expects of `$percentile`, while a benchmark row of eleven readings
- * should not publish a latency nobody measured. Both rules stay; the
- * definitions move here so that there is one of each, and `quantile`
- * makes the caller name its method, because "the 95th percentile" of a
- * small sample is a different number under every one of the seven
- * common definitions and a default would decide silently.
+ * Linear interpolation serves the query statistics pack; nearest rank
+ * lets a benchmark report a latency that was actually measured.
+ * `quantile` requires the caller to name its method because the methods
+ * can give different percentiles for the same sample.
  *
  * Every function answers `undefined` for a sample it cannot summarize —
  * an empty one, or fewer than two values for a variance — rather than
@@ -72,12 +66,10 @@ function ascending(values) {
  * The median: the middle value, or the mean of the two middle values
  * when the sample has an even count.
  *
- * This is NOT `quantile(values, 0.5, …)` under either method, and on an
- * even count the three disagree: for `[1, 2, 3, 4]` the median is `2.5`,
- * the nearest-rank p50 is `2`, and the linear p50 is `2.5` only because
- * that sample happens to be evenly spaced. A consumer publishing a "p50"
- * beside a "p95" wants `quantile` with its method named; a consumer
- * asking for the median wants this.
+ * This has the same midpoint definition as the linear p50. Nearest-rank
+ * p50 selects the lower middle value for an even count: for `[1, 2, 100,
+ * 200]`, the median and linear p50 are `51`, while nearest-rank p50 is
+ * `2`. A consumer publishing percentiles names its method in `quantile`.
  * @param {readonly number[]} values
  * @returns {number | undefined} `undefined` for an empty sample
  */

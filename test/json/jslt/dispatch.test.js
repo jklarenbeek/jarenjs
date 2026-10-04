@@ -294,6 +294,17 @@ describe('Jaren JSLT dispatch', () => {
       });
     });
 
+    it('preserves an own __proto__ member in literal root constructors', () => {
+      const body = JSON.parse('{"__proto__":18,"value":3}');
+      const rules = [{ match: '$', body }];
+      for (const document of [rules, { $jslt: '0.1', rules }]) {
+        const output = compileJsltStylesheet(document)({});
+        assert.deepStrictEqual(output, body);
+        assert.strictEqual(Object.hasOwn(output, '__proto__'), true);
+        assert.strictEqual(Object.getPrototypeOf(output), Object.prototype);
+      }
+    });
+
     it('preserves an own __proto__ member during a rebuilt object spine', () => {
       const data = JSON.parse('{"__proto__":{"price":10},"keep":1}');
       const output = compileJsltStylesheet([

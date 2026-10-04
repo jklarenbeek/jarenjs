@@ -12,7 +12,7 @@ import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, unlinkSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer } from 'node:http';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import { npmMismatch, pinnedNpm, resolveNpmCommand, bump } from '../../scripts/release-bump.js';
@@ -328,6 +328,70 @@ describe('the document gate', function () {
 });
 
 describe('the design sweep', function () {
+
+  const trees = [
+    { dir: 'src', patterns: ['**/*.js'], required: true },
+    { dir: 'dist', patterns: ['**/*.js'], required: false },
+  ];
+  function fixture(t, entries) {
+    const root = mkdtempSync(join(tmpdir(), 'jaren-design-'));
+    t.after(() => rmSync(root, { recursive: true, force: true }));
+    for (const [dir, files] of Object.entries(entries)) {
+      mkdirSync(join(root, dir), { recursive: true });
+      for (const [name, content] of Object.entries(files)) writeFileSync(join(root, dir, name), content);
+    }
+    return root;
+  }
+
+  it('refuses missing required sources even when a build exists', t => {
+    const root = fixture(t, { dist: { 'app.js': 'const ok = 1;' } });
+    const report = checkSiteDesign({ root, trees });
+    assert.strictEqual(report.code, 2); assert.strictEqual(report.files, 1);
+    assert.match(report.notes.join('\n'), /src does not exist/);
+  });
+  it('refuses an empty required source tree even when a build exists', t => {
+    const root = fixture(t, { src: {}, dist: { 'app.js': 'const ok = 1;' } });
+    const report = checkSiteDesign({ root, trees });
+    assert.strictEqual(report.code, 2); assert.strictEqual(report.files, 1);
+    assert.match(report.notes.join('\n'), /src.*no matching files/);
+  });
+  it('refuses every zero-file scan, including empty optional inputs', t => {
+    const root = fixture(t, { src: {} });
+    for (const inputs of [trees, [{ ...trees[0], required: false }], []])
+      assert.strictEqual(checkSiteDesign({ root, trees: inputs }).code, 2);
+  });
+  it('allows missing optional build output when source was scanned', t => {
+    const root = fixture(t, { src: { 'app.js': 'const ok = 1;' } });
+    const report = checkSiteDesign({ root, trees });
+    assert.strictEqual(report.code, 0); assert.strictEqual(report.files, 1); assert.deepStrictEqual(report.hits, []);
+    assert.match(report.notes.join('\n'), /dist does not exist/);
+  });
+  it('counts overlapping matches and their hue occurrences once', t => {
+    const root = fixture(t, { src: { 'app.js': "const color = '#5646d6';" } });
+    const report = checkSiteDesign({ root, trees: [{ ...trees[0], patterns: ['**/*.js', 'app.js'] }, trees[0]] });
+    assert.strictEqual(report.code, 1); assert.strictEqual(report.files, 1);
+    assert.strictEqual(report.hits.length, 1); assert.match(report.hits[0], /src\/app.js:.*5646d6/);
+  });
+  it('keeps an incomplete scan unrunnable even if another tree has a banned hue', t => {
+    const root = fixture(t, { dist: { 'app.js': "const color = '#5646d6';" } });
+    const report = checkSiteDesign({ root, trees });
+    assert.strictEqual(report.code, 2); assert.strictEqual(report.hits.length, 1);
+  });
+
+  it('the CLI exits unrunnable for incomplete input and reports any observed hue', t => {
+    const root = fixture(t, { 'packages/website/dist': { 'app.js': "const color = '#5646d6';" } });
+    mkdirSync(join(root, 'scripts'));
+    const script = join(root, 'scripts', 'check-site-design.js');
+    writeFileSync(script, read('scripts/check-site-design.js'));
+    writeFileSync(join(root, 'package.json'), '{"type":"module"}');
+    const result = spawnSync(process.execPath, [script], { encoding: 'utf8' });
+    assert.strictEqual(result.error, undefined);
+    assert.strictEqual(result.status, 2);
+    assert.match(result.stderr, /design sweep incomplete/);
+    assert.match(result.stderr, /banned hues/);
+    assert.doesNotMatch(result.stdout, /0 banned hues/);
+  });
+
   it('finds no banned hue in the site source', function () {
     const report = checkSiteDesign();
     assert.deepStrictEqual(report.hits, []);

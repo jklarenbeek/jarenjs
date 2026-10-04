@@ -5,7 +5,7 @@ User interfaces as JSON documents. This package defines the **Jaren vnode format
 - a **keyed DOM patcher** (`createDomRenderer`): diff the previous vnode against the next, touch only what changed, reuse keyed nodes across reorders;
 - an **SSR string renderer** (`renderToString`): the same JSON to an HTML string, no DOM required.
 
-It is the only package in the Jaren suite that touches the DOM, and it knows nothing about schemas, queries or state — a vnode is plain JSON, wherever it came from. In practice it comes from a [JSLT stylesheet](../json/docs/JSLT-FORMAT.md) compiled by [`@jarenjs/json`](../json), and the loop around it lives in [`@jarenjs/app`](../app). Its only runtime dependency is the pure, zero-dependency [`@jarenjs/core`](../core); no `eval`, CSP-safe.
+It owns vnode reconciliation and knows nothing about schemas, queries or state — a vnode is plain JSON, wherever it came from. App hosts and visual components use DOM APIs for mounting, events and browser interactions around this renderer. In practice a vnode comes from a [JSLT stylesheet](../json/docs/JSLT-FORMAT.md) compiled by [`@jarenjs/json`](../json), and the loop around it lives in [`@jarenjs/app`](../app). Its only runtime dependency is the pure, zero-dependency [`@jarenjs/core`](../core); no `eval`, CSP-safe.
 
 The vnode grammar is published as JSON Schema in [`schemas/jaren-vnode.schema.json`](schemas/jaren-vnode.schema.json) — hand it to a constrained decoder and a language model cannot emit a document outside the *grammar*. That is a **structural** guarantee, not a safety one: a grammar-valid vnode can still carry `innerHTML`, an inline `on*` handler or a `javascript:` URL, so validation alone does **not** make an untrusted document safe to render. Rendering an untrusted view — from a tenant, a remote service, a model — requires the [safe profile](#untrusted-views-the-safe-profile) below; the default renderers trust their input, exactly like writing the DOM by hand. The normative contract is [docs/VIEW-FORMAT.md](docs/VIEW-FORMAT.md).
 
@@ -227,4 +227,4 @@ Every subpath a consumer can import, derived from the manifest by
 
 ## Development
 
-Unit tests live in `test/view/` at the repository root (`npm run test:view`), including the minimal DOM stub they run against. See the repository [README](../../README.md) for the full suite documentation and [ROADMAP](../../docs/ROADMAP.md) for planned work: fragment roots, DOM-adopting hydration, and the memoized rule-output layer that turns JSLT sharing into cross-frame skipping.
+Unit tests live in `test/view/` at the repository root (`npm run test:view`), including the minimal DOM stub they run against. Fragment roots, DOM-adopting hydration and memoized subtree skipping are supported; their contracts are in [VIEW-FORMAT](docs/VIEW-FORMAT.md). See the repository [README](../../README.md) for the full suite documentation and [ROADMAP](../../docs/ROADMAP.md) for planned work.

@@ -26,8 +26,7 @@ import { buildPluginTables } from '../parser.js';
 import { compileMarkdown } from '../compiler.js';
 import { mdToVnode } from '../to-vnode.js';
 import { loadMarkdown } from '../loader.js';
-import { walkAst } from '../ast.js';
-import { hashContent } from '../utils.js';
+import { createHydrator, indexHydratable } from '../hydration.js';
 import { highlightPlugin } from '../plugins/highlight.js';
 
 /**
@@ -102,39 +101,27 @@ export function createMdComponent(options = {}) {
   const memoLimit = options.memoLimit ?? 32;
   const tables = buildPluginTables(plugins);
 
-  /** Content-hash → AST node, for hydratable plugin nodes. */
-  /** @type {Map<string, any>} */
+  /** @type {import('../hydration.js').HydrationIndex} */
   const hydratable = new Map();
-  /** @type {WeakMap<any, string>} */
-  const hydrated = new WeakMap();
-  const onHydrateError = options.onHydrateError
-    // eslint-disable-next-line no-console -- the documented default sink
-    ?? ((err) => console.error('md hydrate:', err));
+  const hydrate = createHydrator(options);
 
   /**
-   * Remember hydratable nodes of a document by content hash.
+   * Remember nodes across documents rendered by this component.
    * @param {MdDocument | any} doc
    */
-  const indexHydratable = (doc) => {
-    if (tables.hydrates.size === 0) return;
-    walkAst(doc.ast ?? doc, (node) => {
-      if (tables.hydrates.has(node.type) && typeof node.value === 'string') {
-        hydratable.set(hashContent(node.value), node);
-      }
-    });
-  };
+  const indexDocument = (doc) => { indexHydratable(doc, tables, hydratable); };
 
   const { compile, view: viewDefault } = createProjectionMemo({
     memoLimit,
     compile: (source) => {
       const compiled = compileMarkdown(source, compileOptions);
-      indexHydratable(compiled.doc);
+      indexDocument(compiled.doc);
       return compiled;
     },
     toVnode: (compiled) => compiled.toVnode(),
     docToVnode: (doc) => {
       const vnode = compileMarkdown(doc, compileOptions).toVnode();
-      indexHydratable(doc);
+      indexDocument(doc);
       return vnode;
     },
   });
@@ -182,7 +169,7 @@ export function createMdComponent(options = {}) {
       compile,
       toVnode: project,
       docToVnode: (doc) => {
-        indexHydratable(doc);
+        indexDocument(doc);
         return project(compileMarkdown(doc, compileOptions));
       },
     });
@@ -217,7 +204,7 @@ export function createMdComponent(options = {}) {
           cache: options.cache,
         }).then(
           (compiled) => {
-            indexHydratable(compiled.doc);
+            indexDocument(compiled.doc);
             dispatch(props.done, compiled.doc);
           },
           (err) => {
@@ -240,27 +227,7 @@ export function createMdComponent(options = {}) {
     },
 
     hydrate(container) {
-      if (tables.hydrates.size === 0) return;
-      const marked = container.querySelectorAll('[data-md-hydrate]');
-      for (const el of marked) {
-        const name = el.getAttribute('data-md-hydrate');
-        const hash = el.getAttribute('data-md-hash') ?? '';
-        if (hydrated.get(el) === hash) continue;
-        const node = hydratable.get(hash);
-        if (node === undefined) continue;
-        const plugin = tables.hydrates.get(node.type);
-        if (plugin === undefined || plugin.name !== name) continue;
-        hydrated.set(el, hash);
-        try {
-          const result = plugin.hydrate(el, node, { options, hash: hashContent });
-          if (result !== undefined && result !== null && typeof result.catch === 'function') {
-            result.catch(onHydrateError);
-          }
-        }
-        catch (err) {
-          onHydrateError(err);
-        }
-      }
+      hydrate(container, hydratable);
     },
   };
   return component;

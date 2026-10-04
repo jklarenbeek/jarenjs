@@ -2,10 +2,8 @@
 /**
  * @file The bounded ordered asynchronous map: run a worker over a list
  * with never more than `limit` calls in flight, and answer the results
- * in the list's order. Before this file the same twelve lines lived in
- * the AI package's program runner and in the benchmark harness, and a
- * downstream consumer had written them a third time; a pool that exists
- * once is one whose edge behavior can be pinned once.
+ * in the list's order. Shared admission and drainage rules let callers
+ * release their resources as soon as the returned promise settles.
  *
  * The contract, in full:
  *

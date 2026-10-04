@@ -150,8 +150,11 @@ Anything asynchronous or DOM-dependent goes in
 `hydrate(el, node, ctx)`, which `createMdRenderer` invokes **after**
 the patcher mounts the element. A hydratable render marks its root element with
 `'data-md-hydrate': plugin.name` and `'data-md-hash': contentHash`; the
-renderer finds marked elements, skips those whose hash it already
-hydrated, and calls the plugin. `hydrate` MAY be async; failures are
+renderer finds marked elements and hydrates each once per plugin and exact
+content. The marker hash remains unchanged; if distinct values share a plugin's
+hash in the hydration index, the renderer reports ambiguity through
+`options.onHydrateError` without invoking a hook for the wrong node. Queued
+hydration runs only for the latest render. `hydrate` MAY be async; failures are
 contained per element (reported through `options.onHydrateError`,
 default `console.error`).
 

@@ -119,6 +119,7 @@ hand-written expectations.
 | `src/to-md.js` | Canonical printer (round-trip fixed point) |
 | `src/to-html.js` | String emitter: AST → HTML bytes, the raw-HTML modes, `wrap` |
 | `src/to-vnode.js` | Vnode emitter (per-node memo, content-hash keys), `createMdRenderer` with hydrate scheduling |
+| `src/hydration.js` | Shared plugin hydration index and dispatch for the component and DOM renderer; exact-value identity, ambiguous-hash refusal and per-element error reporting |
 | `src/loader.js` | Shared core LRU + HTTP validators, in-flight sharing, AbortSignal, `streamMarkdown` |
 | `src/plugins/` | `definePlugin` + the reference syntax highlighter (`highlightPlugin`); diagrams come from `@jarenjs/mermaid/plugin`, which a host hands in |
 | `src/component/` | **the visual component** — `createMdComponent` (memoized `view()`, app `effects`, `hydrate`); imports the engine, never the reverse |

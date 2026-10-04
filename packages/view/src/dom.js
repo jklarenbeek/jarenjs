@@ -2,8 +2,8 @@
 /**
  * @file The DOM renderer — a keyed vnode-JSON patcher.
  *
- * This is the only module in the Jaren suite that touches the DOM. It
- * follows the repository philosophy at the render level: decide once,
+ * This module owns vnode reconciliation with the DOM. It follows the
+ * repository philosophy at the render level: decide once,
  * then run tight loops.
  *
  * Reconciliation contract (see docs/VIEW-FORMAT.md §5):

@@ -133,7 +133,7 @@ describe('the run identity carries the declared task versions', () => {
     const identity = before.find((row) => row.nodeId.endsWith('identity'));
     assert.ok(identity !== undefined, 'the identity rides with the checkpoints');
     assert.deepStrictEqual(Object.keys(identity.value).sort(),
-      ['inputHash', 'revision', 'taskVersions', 'taskVersionsHash']);
+      ['inputHash', 'inputIdentity', 'revision', 'taskVersions', 'taskVersionsHash', 'workflowIdentity']);
     assert.deepStrictEqual(identity.value.taskVersions, { first: '1', second: '1' });
     assert.strictEqual(typeof identity.value.taskVersionsHash, 'string');
   });
@@ -180,7 +180,7 @@ describe('the run identity carries the declared task versions', () => {
 });
 
 describe('the legacy upgrade rule is deterministic', () => {
-  it('a legacy identity with NO recorded values is upgraded in place, and the run proceeds', async () => {
+  it('a legacy identity with mismatching hashes refuses even without recorded values', async () => {
     const { dbPath, cleanup } = tempDbPath();
     const open = () => openStore(MODEL, { driver: nodeDriver(), path: dbPath, jobs: true });
     try {
@@ -217,11 +217,11 @@ describe('the legacy upgrade rule is deterministic', () => {
       await storeB.close();
       // the legacy identity disagreed about revision and input, so the
       // run refuses — the point here is that it refuses for THOSE, and
-      // never silently treats an absent task identity as equal
+      // only permits missing task identity when the other identities match
       assert.strictEqual(job.state, 'failed');
       assert.match(outcomes[0].reason, /cannot resume/);
       assert.doesNotMatch(outcomes[0].reason, /the task versions/,
-        'nothing was recorded, so the task identity is upgraded rather than blamed');
+        'nothing was recorded, so missing task identity does not itself cause the refusal');
     }
     finally { cleanup(); }
   });

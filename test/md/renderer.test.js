@@ -171,3 +171,73 @@ describe('createMdRenderer', function () {
     assert.deepEqual(errors, ['diagram exploded']);
   });
 });
+
+/** Hydration records exact values while rendering the public marker contract. */
+function recordingHydrators(calls) {
+  return ['first', 'second'].map(name => definePlugin({
+    name, fences: [name], node: name,
+    render: (node, hh) => hh('div', { 'data-md-hydrate': name, 'data-md-hash': hashContent(node.value) }, node.value),
+    hydrate: (element, node) => { calls.push({ plugin: name, value: node.value, element }); },
+  }));
+}
+
+describe('createMdRenderer: hydration identity', () => {
+  const values = ['$av16rctjk\n', '$av636l3s\n'];
+  const fence = (value, name = 'first') => `\`\`\`${name}\n${value}\`\`\`\n`;
+
+  it('hydrates identical text independently for each registered plugin', async () => {
+    const calls = [], plugins = recordingHydrators(calls);
+    const { document, container } = createStubHost();
+    const render = createMdRenderer({ container, document, plugins });
+    const doc = compileMarkdown(fence('same\n') + '\n' + fence('same\n', 'second'), { plugins });
+    render(doc); await Promise.resolve();
+    render(doc); await Promise.resolve();
+    assert.deepEqual(calls.map(({ plugin, value }) => ({ plugin, value })), [
+      { plugin: 'first', value: 'same\n' }, { plugin: 'second', value: 'same\n' },
+    ]);
+    const hash = hashContent('same\n');
+    assert.equal(container.querySelectorAll('[data-md-hydrate]').every(el => el.getAttribute('data-md-hash') === hash), true);
+  });
+
+  it('refuses ambiguous markers once and hydrates an element when its bucket resolves', async () => {
+    const calls = [], errors = [], plugins = recordingHydrators(calls);
+    assert.equal(hashContent(values[0]), hashContent(values[1]));
+    const { document, container } = createStubHost();
+    const render = createMdRenderer({ container, document, plugins, onHydrateError: error => errors.push(error.message) });
+    const ambiguous = compileMarkdown(values.map(value => fence(value)).join('\n'), { plugins, keyed: false });
+    render(ambiguous); await Promise.resolve();
+    const target = container.querySelectorAll('[data-md-hydrate]')[0];
+    render(ambiguous); await Promise.resolve();
+    assert.deepEqual(calls, []);
+    assert.equal(errors.length, 2);
+    assert.ok(errors.every(message => /Ambiguous hydration identity.*first.*1t4pgav/.test(message)));
+    render(compileMarkdown(fence(values[0]), { plugins, keyed: false })); await Promise.resolve();
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].element, target);
+    assert.equal(calls[0].value, values[0]);
+    assert.equal(errors.length, 2);
+  });
+
+  it('hydrates a reused element again when exact content changes at the same hash', async () => {
+    const calls = [], plugins = recordingHydrators(calls);
+    const { document, container } = createStubHost();
+    const render = createMdRenderer({ container, document, plugins });
+    for (const value of values) {
+      render(compileMarkdown(fence(value), { plugins, keyed: false })); await Promise.resolve();
+    }
+    assert.deepEqual(calls.map(call => call.value), values);
+    assert.equal(calls[0].element, calls[1].element);
+    assert.equal(calls[1].element.getAttribute('data-md-hash'), '1t4pgav');
+  });
+
+  it('skips queued hydration from a render superseded before its microtask', async () => {
+    const calls = [], plugins = recordingHydrators(calls);
+    const { document, container } = createStubHost();
+    const render = createMdRenderer({ container, document, plugins });
+    render(compileMarkdown(fence(values[0]), { plugins, keyed: false }));
+    render(compileMarkdown(fence(values[1]), { plugins, keyed: false }));
+    await Promise.resolve();
+    assert.deepEqual(calls.map(call => call.value), [values[1]]);
+    assert.equal(calls[0].element.childNodes[0].nodeValue, values[1]);
+  });
+});

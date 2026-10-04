@@ -329,6 +329,46 @@ describe('a registered aggregate lowers to a SQL aggregate, or stays where it is
     await store.close();
   });
 
+  for (const order of [['$av16rctjk', '$av636l3s'], ['$av636l3s', '$av16rctjk']]) {
+    it(`keeps colliding aggregate identities distinct when ${order[0]} registers first`, async () => {
+      const operators = createJsltRegistry().use({ name: 'collision', entries: {
+        $av16rctjk: { kind: 'agg', signature: ['seq<number>'], result: 'number', pushable: 'aggregate',
+          fn: (values) => values.reduce((sum, value) => sum + value, 0) },
+        $av636l3s: { kind: 'agg', signature: ['seq<number>'], result: 'number', pushable: 'aggregate',
+          fn: (values) => values.reduce((product, value) => product * value, 1) },
+      } });
+      const registrations = [];
+      const rows = [{ id: 'a', n: 2 }, { id: 'b', n: 3 }];
+      const { store, coll } = await openAgg(rows, {
+        operators,
+        driver: nodeAggregateDriver((name, spec, db) => {
+          registrations.push(name);
+          return db.aggregate(name, spec);
+        }),
+      });
+      const document = (name) => ({ [name]: { $for: { it: '$[*]' }, $return: '$it.n' } });
+      const expected = (doc) => compileJsonQuery(doc, operators.toOptions())(rows);
+      try {
+        for (const name of order) {
+          const doc = document(name);
+          assert.strictEqual(await coll.execute(doc), expected(doc));
+        }
+        for (let repeat = 0; repeat < 2; repeat++) {
+          for (const name of order) {
+            const doc = document(name);
+            assert.strictEqual(await coll.execute(doc), expected(doc),
+              'the original aggregate retains its implementation after the second registration');
+            assert.strictEqual(await coll.execute(doc, { pushdown: false }), expected(doc));
+            assert.strictEqual((await coll.explain(doc)).mode, 'native');
+          }
+        }
+        assert.deepStrictEqual(registrations, ['jaren_a_x19r3r', 'jaren_a_x19r3r_2'],
+          'uncollided names stay unchanged and repeated queries reuse each registration');
+      }
+      finally { await store.close(); }
+    });
+  }
+
   it('a non-numeric or null-admitting path, and a scalar of the same name, stay in the engine', async () => {
     const { store, coll } = await openAgg();
     // a string member: the engine ERRORS, so the plan must not answer

@@ -21,6 +21,7 @@ import * as ajv from './adaptors/ajv.js';
 import * as jaren from './adaptors/jaren.js';
 import * as fs from 'fs';
 import * as path from 'path';
+import { fileURLToPath } from 'node:url';
 
 const DEFAULT_TEST_DRAFT = 'draft7';
 const DEFAULT_ITERATIONS = 1000;
@@ -140,48 +141,47 @@ function parseDrafts(draftArg) {
   return draftArg.split(',').map(d => d.trim()).filter(d => d);
 }
 
-// Parse command line arguments
-async function parseArgs() {
-  const args = process.argv.slice(2);
+/** Parse the profiler's flags before loading or measuring a corpus.
+ * @param {string[]} [args] @returns {Object} */
+export function parseProfilerArgs(args = process.argv.slice(2)) {
   const options = {
-    targetFile: null,
-    profile: false,
-    profileAll: false,
-    iterations: DEFAULT_ITERATIONS,
-    output: 'console', // 'console', 'csv', 'json'
-    verbose: false,
-    topN: null, // Only show top N slowest tests
-    drafts: [DEFAULT_TEST_DRAFT], // Array of draft versions to use
-    successOnly: false, // Only include tests where all agents succeed
-    filepath: null, // Custom output file path
+    targetFile: null, profile: false, profileAll: false,
+    iterations: DEFAULT_ITERATIONS, output: 'console', verbose: false,
+    topN: null, drafts: [DEFAULT_TEST_DRAFT], successOnly: false, filepath: null,
   };
-
+  const value = (index, flag) => {
+    const next = args[index];
+    if (next === undefined || !next.trim() || next.startsWith('-')) throw new Error(`${flag} requires a value`);
+    return next;
+  };
+  const count = (index, flag) => {
+    const raw = args[index], number = Number(raw);
+    if (!/^\d+$/.test(raw ?? '') || !Number.isSafeInteger(number) || number < 1)
+      throw new Error(`${flag} must be a positive integer`);
+    return number;
+  };
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
-
-    if (arg === '--profile') {
-      options.profile = true;
-    } else if (arg === '--profile-all') {
-      options.profileAll = true;
-    } else if (arg === '--iterations' || arg === '-i') {
-      options.iterations = parseInt(args[++i], 10) || DEFAULT_ITERATIONS;
-    } else if (arg === '--output' || arg === '-o') {
-      options.output = args[++i] || 'console';
-    } else if (arg === '--verbose' || arg === '-v') {
-      options.verbose = true;
-    } else if (arg === '--top') {
-      options.topN = parseInt(args[++i], 10) || null;
-    } else if (arg === '--draft' || arg === '-d') {
-      options.drafts = parseDrafts(args[++i]);
-    } else if (arg === '--success-only') {
-      options.successOnly = true;
-    } else if (arg === '--filepath' || arg === '-f') {
-      options.filepath = args[++i];
-    } else if (!arg.startsWith('--')) {
+    if (arg === '--profile') options.profile = true;
+    else if (arg === '--profile-all') options.profileAll = true;
+    else if (arg === '--iterations' || arg === '-i') options.iterations = count(++i, '--iterations');
+    else if (arg === '--output' || arg === '-o') options.output = value(++i, '--output');
+    else if (arg === '--verbose' || arg === '-v') options.verbose = true;
+    else if (arg === '--top') options.topN = count(++i, '--top');
+    else if (arg === '--draft' || arg === '-d') {
+      options.drafts = parseDrafts(value(++i, '--draft'));
+      if (!options.drafts.length) throw new Error('--draft requires at least one draft');
+    }
+    else if (arg === '--success-only') options.successOnly = true;
+    else if (arg === '--filepath' || arg === '-f') options.filepath = value(++i, '--filepath');
+    else if (arg.startsWith('-')) throw new Error(`Unknown option: ${arg}`);
+    else {
+      if (options.targetFile !== null) throw new Error('Only one test file may be profiled');
       options.targetFile = arg;
     }
   }
-
+  if (!['console', 'csv', 'json'].includes(options.output)) throw new Error('--output must be console, csv or json');
+  if (options.profile && !options.profileAll && !options.targetFile) throw new Error('--profile requires a test file');
   return options;
 }
 
@@ -191,7 +191,7 @@ async function parseArgs() {
  * @param {number} iterations - Number of iterations to run
  * @param {string} draft - The draft version to use
  * @param {Object} remotes - Remote schemas
- * @param {boolean} successOnly - If true, skip tests where any agent fails
+ * @param {boolean} successOnly - If true, time only tests both engines pass; retain every verdict
  * @returns {Object} Profiling results
  */
 function profileTest(test, iterations, draft, remotes, successOnly = false, suiteName = undefined) {
@@ -206,12 +206,8 @@ function profileTest(test, iterations, draft, remotes, successOnly = false, suit
     return null;
   }
 
-  // Check for errors first. An engine that threw has no verdict on this
-  // test, and its failure count is null rather than 0 so nothing can read
-  // it as "no failures". The engine that DID run keeps its real count:
-  // zeroing both because one of them errored is how real failures were
-  // counted as passes for as long as the rival happened to error on the
-  // same test.
+  // An engine that threw has no verdict on this test, so its failure
+  // count is null. The other engine retains the failures it observed.
   if (jarenResult.error || ajvResult.error) {
     return {
       description: test.description,
@@ -226,10 +222,14 @@ function profileTest(test, iterations, draft, remotes, successOnly = false, suit
   if (successOnly && (jarenResult.failures > 0 || ajvResult.failures > 0)) {
     return {
       description: test.description,
-      jarenError: jarenResult.failures > 0 ? `Failed ${jarenResult.failures} assertions` : null,
-      ajvError: ajvResult.failures > 0 ? `Failed ${ajvResult.failures} assertions` : null,
+      jarenError: null,
+      ajvError: null,
       jarenFailures: jarenResult.failures,
       ajvFailures: ajvResult.failures,
+      timingSkipped: 'failed-assertions',
+      assertions: test.tests.length,
+      testCount: test.tests.length,
+      isSuccessTest: false,
     };
   }
 
@@ -305,7 +305,7 @@ function profileTest(test, iterations, draft, remotes, successOnly = false, suit
  * @param {number} iterations - Number of iterations
  * @param {string} draft - The draft version to use
  * @param {Object} remotes - Remote schemas
- * @param {boolean} successOnly - If true, skip tests where any agent fails
+ * @param {boolean} successOnly - If true, time only tests both engines pass; retain every verdict
  * @returns {Array} Array of profiling results
  */
 function profileSuite(fileKey, tests, iterations, draft, remotes, successOnly = false) {
@@ -374,6 +374,27 @@ function ranTests(rows, errorKey) {
   return rows.filter(r => !r.error && !r[errorKey]);
 }
 
+/** A timing comparison requires both engines and all finite measurements.
+ * @param {Object} row @returns {boolean} */
+function hasTiming(row) {
+  return !row.error && !row.jarenError && !row.ajvError && !row.timingSkipped
+    && ['jarenTime', 'ajvTime', 'jarenTotal', 'ajvTotal', 'ratio', 'diff', 'diffPercent']
+      .every(key => Number.isFinite(row[key]));
+}
+
+/** Sum measured work; an absent measurement has no invented duration.
+ * @param {Array} rows @param {string} key @returns {number|null} */
+function timingTotal(rows, key) {
+  return rows.length ? rows.reduce((sum, row) => sum + row[key], 0) : null;
+}
+
+/** Render an engine's observed verdict separately from omitted timings. */
+function resultTime(row, engine, width) {
+  if (row.error || row[`${engine}Error`]) return padStart('❌ Error', width);
+  const time = hasTiming(row) ? formatTime(row[`${engine}Time`]) : row.timingSkipped ? 'Skipped' : 'Not timed';
+  return padStart(`${row[`${engine}Failures`] > 0 ? '❌ ' : ''}${time}`, width);
+}
+
 /**
  * Print results to console in table format
  * @param {Array} results - Profiling results
@@ -381,9 +402,9 @@ function ranTests(rows, errorKey) {
  * @param {string} schemaDraft - The schema draft version
  * @param {string} folderDraft - The test suite folder name
  */
-function printConsoleTable(results, options, schemaDraft, folderDraft) {
-  // Filter out errors and sort by ratio (slowest first)
-  const validResults = results.filter(r => !r.error && !r.jarenError && !r.ajvError);
+export function printConsoleTable(results, options, schemaDraft, folderDraft) {
+  // Only measured timings enter comparisons; retain every verdict for display.
+  const validResults = results.filter(hasTiming);
   const sortedResults = validResults.sort((a, b) => b.ratio - a.ratio);
 
   // Calculate success-only stats
@@ -400,23 +421,23 @@ function printConsoleTable(results, options, schemaDraft, folderDraft) {
   const jarenFailures = jarenRan.filter(r => r.jarenFailures > 0).length;
   const ajvFailures = ajvRan.filter(r => r.ajvFailures > 0).length;
 
-  // Combine all results for display (valid + errors), sorted by ratio
+  // Sort measured rows by ratio and retain skipped/error rows afterwards.
   const allDisplayResults = [...results].sort((a, b) => {
-    // Put error results at the end
-    const aValid = !a.error && !a.jarenError && !a.ajvError;
-    const bValid = !b.error && !b.ajvError && !b.ajvError;
+    // Put rows without a timing comparison at the end
+    const aValid = hasTiming(a);
+    const bValid = hasTiming(b);
     if (!aValid && bValid) return 1;
     if (aValid && !bValid) return -1;
     // Both valid, sort by ratio
-    if (aValid && bValid) return (b.ratio || 0) - (a.ratio || 0);
+    if (aValid && bValid) return b.ratio - a.ratio;
     return 0;
   });
 
-  // Limit to top N if specified (but include errors)
+  // Limit measured rows to top N while retaining skipped/error verdicts.
   let displayResults;
   if (options.topN) {
     const topValid = sortedResults.slice(0, options.topN);
-    displayResults = [...topValid, ...errorResults];
+    displayResults = [...topValid, ...results.filter(r => !hasTiming(r))];
   } else {
     displayResults = allDisplayResults;
   }
@@ -426,8 +447,8 @@ function printConsoleTable(results, options, schemaDraft, folderDraft) {
   console.log('PERFORMANCE PROFILE SUMMARY');
   console.log('='.repeat(100));
   console.log(`Draft version: ${schemaDraft} (folder: ${folderDraft})`);
-  console.log(`Total tests profiled: ${results.length}`);
-  console.log(`  Valid tests: ${validResults.length}`);
+  console.log(`Total tests evaluated: ${results.length}`);
+  console.log(`  Timed tests: ${validResults.length}`);
   console.log(`  Tests with errors: ${errorResults.length}`);
   console.log(`Success tests (no failures/errors): ${successResults.length}`);
   console.log(`Iterations per test: ${options.iterations}`);
@@ -437,26 +458,25 @@ function printConsoleTable(results, options, schemaDraft, folderDraft) {
   console.log(`  Jaren: ${jarenRan.length - jarenFailures} passed, ${jarenFailures} failed, ${jarenErrors} errors`);
   console.log(`  AJV:   ${ajvRan.length - ajvFailures} passed, ${ajvFailures} failed, ${ajvErrors} errors`);
 
-  if (validResults.length === 0) {
-    console.log('\nNo valid results to display.');
-    return;
+  if (validResults.length === 0) console.log('\nNo measured timings to display.');
+
+  if (validResults.length > 0) {
+    // Calculate aggregate statistics (for valid results only)
+    const avgRatio = validResults.reduce((sum, r) => sum + r.ratio, 0) / validResults.length;
+    const minRatio = Math.min(...validResults.map(r => r.ratio));
+    const maxRatio = Math.max(...validResults.map(r => r.ratio));
+    const jarenWins = validResults.filter(r => r.ratio < 1.0).length;
+    const tied = validResults.filter(r => r.ratio === 1.0).length;
+    const ajvWins = validResults.filter(r => r.ratio > 1.0).length;
+
+    console.log(`\nAggregate Statistics (Valid Tests):`);
+    console.log(`  Average Ratio: ${avgRatio.toFixed(2)}x`);
+    console.log(`  Min Ratio: ${minRatio.toFixed(2)}x`);
+    console.log(`  Max Ratio: ${maxRatio.toFixed(2)}x`);
+    console.log(`  Jaren faster: ${jarenWins} tests`);
+    console.log(`  Tied: ${tied} tests`);
+    console.log(`  AJV faster: ${ajvWins} tests`);
   }
-
-  // Calculate aggregate statistics (for valid results only)
-  const avgRatio = validResults.reduce((sum, r) => sum + r.ratio, 0) / validResults.length;
-  const minRatio = Math.min(...validResults.map(r => r.ratio));
-  const maxRatio = Math.max(...validResults.map(r => r.ratio));
-  const jarenWins = validResults.filter(r => r.ratio < 1.0).length;
-  const tied = validResults.filter(r => r.ratio === 1.0).length;
-  const ajvWins = validResults.filter(r => r.ratio > 1.0).length;
-
-  console.log(`\nAggregate Statistics (Valid Tests):`);
-  console.log(`  Average Ratio: ${avgRatio.toFixed(2)}x`);
-  console.log(`  Min Ratio: ${minRatio.toFixed(2)}x`);
-  console.log(`  Max Ratio: ${maxRatio.toFixed(2)}x`);
-  console.log(`  Jaren faster: ${jarenWins} tests`);
-  console.log(`  Tied: ${tied} tests`);
-  console.log(`  AJV faster: ${ajvWins} tests`);
 
   // Calculate success-only statistics
   if (successResults.length > 0) {
@@ -508,33 +528,10 @@ function printConsoleTable(results, options, schemaDraft, folderDraft) {
       ? r.description.substring(0, descWidth - 3) + '...'
       : r.description;
 
-    // Check for errors or failures
-    const hasJarenError = r.jarenError || r.error;
-    const hasAjvError = r.ajvError;
-    const hasJarenFailure = r.jarenFailures > 0;
-    const hasAjvFailure = r.ajvFailures > 0;
+    const jarenTimeStr = resultTime(r, 'jaren', timeWidth);
+    const ajvTimeStr = resultTime(r, 'ajv', timeWidth);
 
-    // Format time with ❌ indicator if error or failure
-    let jarenTimeStr;
-    if (hasJarenError) {
-      jarenTimeStr = padStart('❌ Error', timeWidth);
-    } else if (hasJarenFailure) {
-      jarenTimeStr = padStart(`❌ ${formatTime(r.jarenTime || 0)}`, timeWidth);
-    } else {
-      jarenTimeStr = padStart(formatTime(r.jarenTime || 0), timeWidth);
-    }
-
-    let ajvTimeStr;
-    if (hasAjvError) {
-      ajvTimeStr = padStart('❌ Error', timeWidth);
-    } else if (hasAjvFailure) {
-      ajvTimeStr = padStart(`❌ ${formatTime(r.ajvTime || 0)}`, timeWidth);
-    } else {
-      ajvTimeStr = padStart(formatTime(r.ajvTime || 0), timeWidth);
-    }
-
-    // For error rows, don't show ratio/diff
-    if (hasJarenError || hasAjvError) {
+    if (!hasTiming(r)) {
       console.log(
         `${suite.padEnd(suiteWidth)} | ` +
         `${desc.padEnd(descWidth)} | ` +
@@ -567,8 +564,8 @@ function printConsoleTable(results, options, schemaDraft, folderDraft) {
  * @param {Array} results - Profiling results
  * @param {string} outputPath - Output file path
  */
-function exportCsv(results, outputPath) {
-  const validResults = results.filter(r => !r.error && !r.jarenError && !r.ajvError);
+export function exportCsv(results, outputPath) {
+  const validResults = results.filter(hasTiming);
   const sortedResults = validResults.sort((a, b) => b.ratio - a.ratio);
 
   let csv = 'Suite,Description,Assertions,Jaren Time (ms),Jaren Total (ms),AJV Time (ms),AJV Total (ms),Ratio,Diff (ms),Diff (%),Assertions/Iter,IsSuccessTest\n';
@@ -579,6 +576,8 @@ function exportCsv(results, outputPath) {
 
   fs.writeFileSync(outputPath, csv);
   console.log(`CSV results written to: ${outputPath}`);
+  const errors = results.filter(r => r.error || r.jarenError || r.ajvError).length;
+  console.log(`CSV includes ${sortedResults.length} timed rows; ${results.length - sortedResults.length - errors} skipped timings and ${errors} error rows omitted.`);
 }
 
 /**
@@ -587,12 +586,12 @@ function exportCsv(results, outputPath) {
  * @returns {Object} Summary statistics
  */
 function calculateSummaryStats(results) {
-  const validResults = results.filter(r => !r.error && !r.jarenError && !r.ajvError);
+  const validResults = results.filter(hasTiming);
   const successResults = validResults.filter(r => r.isSuccessTest);
   
   if (validResults.length === 0) {
     return {
-      all: { avgRatio: 0, minRatio: 0, maxRatio: 0, jarenWins: 0, tied: 0, ajvWins: 0 },
+      all: { avgRatio: null, minRatio: null, maxRatio: null, jarenWins: 0, tied: 0, ajvWins: 0 },
       successOnly: null,
     };
   }
@@ -617,14 +616,21 @@ function calculateSummaryStats(results) {
   };
 }
 
+/** Requested groups are internal provenance; published drafts stay canonical. */
+function reportRow(result) {
+  const row = { ...result };
+  delete row.requestedDraft;
+  return row;
+}
+
 /**
- * Export results to JSON format
+ * Build a report with independent verdicts and only measured timing rows.
  * @param {Array} results - Profiling results
- * @param {string} outputPath - Output file path
  * @param {Object} options - Options for metadata
+ * @returns {Object}
  */
-function exportJson(results, outputPath, options) {
-  const validResults = results.filter(r => !r.error && !r.jarenError && !r.ajvError);
+export function buildProfileReport(results, options) {
+  const validResults = results.filter(hasTiming);
   const sortedResults = validResults.sort((a, b) => b.ratio - a.ratio);
   const successResults = validResults.filter(r => r.isSuccessTest);
   
@@ -633,17 +639,18 @@ function exportJson(results, outputPath, options) {
   const engineStats = { jaren: {}, ajv: {} };
   
   for (const draft of options.drafts) {
-    const draftResults = results.filter(r => r.draft === draft);
-    const draftValidResults = draftResults.filter(r => !r.error && !r.jarenError && !r.ajvError);
+    const draftResults = results.filter(r => r.requestedDraft !== undefined
+      ? r.requestedDraft === draft : r.draft === getSchemaDraft(draft));
+    const draftValidResults = draftResults.filter(hasTiming);
     const draftSuccessResults = draftValidResults.filter(r => r.isSuccessTest);
     
     // Calculate timing totals for this draft
-    // Total time = all tests (including errors and failures)
-    const jarenTotalTime = draftResults.reduce((sum, r) => sum + (r.jarenTotal || 0), 0);
-    const ajvTotalTime = draftResults.reduce((sum, r) => sum + (r.ajvTotal || 0), 0);
+    // Total time = eligible measured tests, including measured failures
+    const jarenTotalTime = timingTotal(draftValidResults, 'jarenTotal');
+    const ajvTotalTime = timingTotal(draftValidResults, 'ajvTotal');
     // Success time = only tests with no errors AND no failures
-    const jarenSuccessTime = draftSuccessResults.reduce((sum, r) => sum + (r.jarenTotal || 0), 0);
-    const ajvSuccessTime = draftSuccessResults.reduce((sum, r) => sum + (r.ajvTotal || 0), 0);
+    const jarenSuccessTime = timingTotal(draftSuccessResults, 'jarenTotal');
+    const ajvSuccessTime = timingTotal(draftSuccessResults, 'ajvTotal');
     
     // Scored per engine over the tests that engine ran, so that
     // passed + failed + errors === totalTests for both columns.
@@ -680,20 +687,18 @@ function exportJson(results, outputPath, options) {
   }
 
   // Calculate overall timing totals
-  // Total time = all tests (including errors and failures)
-  const jarenTotalTime = results.reduce((sum, r) => sum + (r.jarenTotal || 0), 0);
-  const ajvTotalTime = results.reduce((sum, r) => sum + (r.ajvTotal || 0), 0);
+  // Total time = eligible measured tests, including measured failures
+  const jarenTotalTime = timingTotal(validResults, 'jarenTotal');
+  const ajvTotalTime = timingTotal(validResults, 'ajvTotal');
   // Success time = only tests with no errors AND no failures
-  const jarenSuccessTime = successResults.reduce((sum, r) => sum + (r.jarenTotal || 0), 0);
-  const ajvSuccessTime = successResults.reduce((sum, r) => sum + (r.ajvTotal || 0), 0);
+  const jarenSuccessTime = timingTotal(successResults, 'jarenTotal');
+  const ajvSuccessTime = timingTotal(successResults, 'ajvTotal');
 
   const output = {
     metadata: {
       timestamp: new Date().toISOString(),
-      // the runtime these timings were taken on: a file that records only
-      // WHEN it ran leaves the reader to borrow a runtime from somewhere
-      // else, which is how a summary came to name one Node version over
-      // rows measured on two
+      // Record the runtime that produced these measurements so consumers
+      // do not infer one from a different artifact.
       node: process.version,
       iterations: options.iterations,
       warmupIterations: WARMUP_ITERATIONS,
@@ -717,11 +722,16 @@ function exportJson(results, outputPath, options) {
       byDraft,
       engineStats,
     },
-    results: sortedResults,
-    errors: results.filter(r => r.error || r.jarenError || r.ajvError),
+    results: sortedResults.map(reportRow),
+    errors: results.filter(r => r.error || r.jarenError || r.ajvError).map(reportRow),
+    skipped: results.filter(r => !hasTiming(r) && !r.error && !r.jarenError && !r.ajvError).map(reportRow),
   };
+  return output;
+}
 
-  fs.writeFileSync(outputPath, JSON.stringify(output, null, 2));
+/** Write the same conformance and timing report used by controlled callers. */
+function exportJson(results, outputPath, options) {
+  fs.writeFileSync(outputPath, JSON.stringify(buildProfileReport(results, options), null, 2));
   console.log(`JSON results written to: ${outputPath}`);
 }
 
@@ -780,14 +790,14 @@ async function profileDraft(draft, options, availableDrafts) {
     results = profileSuite(fileKey, allTests[fileKey], options.iterations, schemaDraft, remotes, options.successOnly);
   }
 
-  return results;
+  return results.map(result => ({ ...result, requestedDraft: draft }));
 }
 
 /**
  * Main profiling function
  */
 async function main() {
-  const options = await parseArgs();
+  const options = parseProfilerArgs();
   const availableDrafts = await discoverAvailableDrafts();
 
   // Validate draft options
@@ -822,7 +832,7 @@ async function main() {
     console.log('  --filepath, -f PATH    Output file path (for csv/json output)');
     console.log('                         Default: benchmark/results/profile-{timestamp}.{ext}');
     console.log('  --top N                Show only top N slowest tests');
-    console.log('  --success-only         Exclude tests where any agent fails or errors');
+    console.log('  --success-only         Time only tests both engines pass; retain all verdicts');
     console.log('  --verbose, -v          Verbose output');
     process.exit(1);
   }
@@ -883,12 +893,15 @@ async function main() {
   } else {
     // Console output already printed per draft above
     if (options.drafts.length > 1) {
-      console.log(`\nTotal tests across ${options.drafts.length} drafts: ${allResults.filter(r => !r.error && !r.jarenError && !r.ajvError).length}`);
+      console.log(`\nTotal tests evaluated across ${options.drafts.length} drafts: ${allResults.length}`);
+      console.log(`Timed tests across ${options.drafts.length} drafts: ${allResults.filter(hasTiming).length}`);
     }
   }
 }
 
-main().catch(err => {
-  console.error('Error:', err);
-  process.exit(1);
-});
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch(err => {
+    console.error('Error:', err.message);
+    process.exitCode = 1;
+  });
+}

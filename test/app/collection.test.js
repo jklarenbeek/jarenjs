@@ -9,6 +9,7 @@ rangeProviderContract('resident array', (options) => {
   return { provider, invalidate: (snapshot) => provider.replace(rows.slice(0, 10), snapshot), resources: () => provider.stats().pending };
 });
 const deferred = () => { let resolve; const promise = new Promise((fn) => { resolve = fn; }); return { promise, resolve }; };
+const turn = () => new Promise(resolve => setImmediate(resolve));
 function sink() {
   const pending = [], committed = [], events = [];
   return { pending, committed, events, begin: () => events.push('begin'), write: (rows) => pending.push(...rows),
@@ -143,4 +144,94 @@ it('charges resident byte-boundary work without cloning an oversized response',a
   const request={generation:1,requestId:'x',query:'q',snapshot:'s',range:{start:0,end:1},credits:{pages:1,rows:1,bytes:10,work:1}};
   const result=await p.request(request);assert.equal(result.state,'budget-exhausted');assert.equal(result.used.work,1);assert.equal(result.used.rows,0);
   await p.dispose();assert.throws(()=>createArrayRangeProvider([{id:'a',value:undefined}]),/must be JSON/);
+});
+
+it('keeps a known total for empty pages beyond the end of a resident source', async () => {
+  for (const rows of [[], [{ id: 'a' }]]) {
+    const provider = createArrayRangeProvider(rows), coordinator = createCollectionCoordinator(provider, { pageRows: 2 });
+    try {
+      const result = await coordinator.requestRange({ start: 4, end: 5 });
+      assert.deepEqual(result, { state: 'ready', start: 4, end: 4, continuation: null, total: { kind: 'known', value: rows.length } });
+      assert.equal(coordinator.logicalCount(), rows.length);
+      assert.equal(coordinator.observation().state, 'ready');
+    }
+    finally { await coordinator.dispose(); }
+  }
+});
+
+it('still rejects negative totals and nonempty pages beyond their known total', async () => {
+  for (const [rows, total] of [[[], -1], [[{ id: 'a' }], 4]]) {
+    const provider = { query: 'q', snapshot: 's', capabilities: { seekIndex: true }, dispose() {},
+      request: async request => ({ ...request, state: 'ready', rows, keys: rows.map(row => row.id), total: { kind: 'known', value: total },
+        used: { pages: 1, rows: rows.length, bytes: new TextEncoder().encode(JSON.stringify(rows)).length, work: rows.length } }) };
+    const coordinator = createCollectionCoordinator(provider, { pageRows: 2 });
+    try { assert.deepEqual(await coordinator.requestRange({ start: 4, end: 5 }), { state: 'error', reason: 'invalid-response' }); }
+    finally { await coordinator.dispose(); }
+  }
+});
+
+it('starts one owned-provider cleanup before draining dependent requests and output', async () => {
+  const requestEntered = deferred(), exportEntered = deferred(), release = deferred(), disposed = deferred();
+  let disposeCalls = 0, aborted = 0, nested;
+  const provider = { query: 'q', snapshot: 's', capabilities: { seekIndex: true, completeExport: true },
+    async request(request, signal) { signal.addEventListener('abort', () => { nested = coordinator.dispose(); }, { once: true }); requestEntered.resolve(); await release.promise; return { ...request, state: 'invalidated' }; },
+    async *export() { exportEntered.resolve(); await release.promise; yield { state: 'complete', query: 'q', snapshot: 's', total: 0 }; },
+    async dispose() { disposeCalls++; release.resolve(); await disposed.promise; } };
+  const coordinator = createCollectionCoordinator(provider);
+  const request = coordinator.requestRange({ start: 0, end: 1 });
+  const output = coordinator.output({ write() {}, commit() { throw new Error('disposed output cannot commit'); }, abort() { aborted++; } });
+  await Promise.all([requestEntered.promise, exportEntered.promise]);
+  const stop = coordinator.dispose(), joined = coordinator.dispose();
+  let settled = false; void stop.then(() => { settled = true; });
+  try {
+    await turn();
+    assert.equal(disposeCalls, 1, 'owned cleanup must start before its pending source operations can finish');
+    assert.equal(stop, joined); assert.equal(stop, nested);
+    assert.equal(settled, false, 'all callers still await the provider disposal');
+    assert.equal((await request).reason, 'superseded');
+    assert.equal((await output).reason, 'incomplete-export');
+    assert.equal(aborted, 1);
+    disposed.resolve(); await Promise.all([stop, joined]);
+    await coordinator.dispose(); assert.equal(disposeCalls, 1);
+    assert.deepEqual(coordinator.stats(), { pages: 0, rows: 0, bytes: 0, inFlight: 0, outputs: 0 });
+  }
+  finally { release.resolve(); disposed.resolve(); await Promise.allSettled([request, output, stop, joined]); }
+});
+
+it('drains after synchronous provider cleanup failure and preserves the first unsubscribe error', async () => {
+  const pending = deferred(), entered = deferred(); let calls = 0;
+  const first = new Error('unsubscribe first'), second = new Error('provider second');
+  const provider = { query: 'q', snapshot: 's', capabilities: { seekIndex: true },
+    subscribe: () => () => { throw first; },
+    async request(request) { entered.resolve(); await pending.promise; return { ...request, state: 'invalidated' }; },
+    dispose() { calls++; pending.resolve(); throw second; } };
+  const coordinator = createCollectionCoordinator(provider), request = coordinator.requestRange({ start: 0, end: 1 });
+  await entered.promise;
+  const stop = coordinator.dispose();
+  const rejection = assert.rejects(stop, error => error === first);
+  try { await turn(); assert.equal(calls, 1); await rejection; await request; assert.equal(coordinator.stats().inFlight, 0); await coordinator.dispose(); assert.equal(calls, 1); }
+  finally { pending.resolve(); await Promise.allSettled([stop, request, rejection]); }
+});
+
+it('keeps borrowed providers owned by the host after coordinator teardown', async () => {
+  const provider = createArrayRangeProvider([{ id: 'a' }]);
+  const coordinator = createCollectionCoordinator(provider, { disposeProvider: false });
+  await coordinator.requestRange({ start: 0, end: 1 });
+  await coordinator.dispose(); await coordinator.dispose();
+  assert.equal(provider.stats().rows, 1); assert.equal(provider.stats().subscriptions, 0);
+  await provider.dispose(); assert.equal(provider.stats().rows, 0);
+});
+
+it('does not admit provider export after disposal while sink setup was awaiting', async () => {
+  const begin = deferred(), entered = deferred(); let exports = 0, disposals = 0, aborts = 0;
+  const provider = { query: 'q', snapshot: 's', capabilities: { completeExport: true },
+    async *export() { exports++; yield { state: 'complete', query: 'q', snapshot: 's', total: 0 }; },
+    dispose() { disposals++; } };
+  const coordinator = createCollectionCoordinator(provider);
+  const output = coordinator.output({ async begin() { entered.resolve(); await begin.promise; }, write() {}, commit() { throw new Error('cancelled output cannot commit'); }, abort() { aborts++; } });
+  await entered.promise;
+  const stop = coordinator.dispose();
+  await turn(); begin.resolve();
+  assert.equal((await output).reason, 'incomplete-export'); await stop;
+  assert.equal(disposals, 1); assert.equal(exports, 0); assert.equal(aborts, 1);
 });

@@ -351,7 +351,8 @@ export const SLOTS_MEMBERS = Object.freeze(['duration', 'step']);
  *   (default: `duration`)
  * @returns {Interval[]} new `{ start, end }` records, ascending
  * @throws {TypeError} for an empty, reversed or non-finite interval, or
- *   a duration/step that is not a positive fixed width
+ *   a duration/step that is not a positive fixed width or cannot advance
+ *   a slot start at the available numeric precision
  * @example
  * findSlots([{ start: 0, end: 90 }], { duration: 60, step: 30 });
  * // [{ start: 0, end: 60 }, { start: 30, end: 90 }]
@@ -365,8 +366,18 @@ export function findSlots(availability, spec) {
   const out = [];
   for (let i = 0; i < windows.length; i++) {
     const limit = windows[i].end - duration;
-    for (let start = windows[i].start; start <= limit; start += step)
-      out.push({ start, end: start + duration });
+    for (let start = windows[i].start; start <= limit;) {
+      const end = start + duration;
+      if (end <= start)
+        throw new TypeError('findSlots: duration must advance the slot start');
+      if (end > windows[i].end)
+        break;
+      out.push({ start, end });
+      const next = start + step;
+      if (next <= start)
+        throw new TypeError('findSlots: step must advance the slot start');
+      start = next;
+    }
   }
   return out;
 }

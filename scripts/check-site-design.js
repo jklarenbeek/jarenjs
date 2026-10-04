@@ -6,13 +6,10 @@
  *
  *   node scripts/check-site-design.js
  *
- * §1 of the design language forbids the pink/purple family. That rule used
- * to be enforced by a grep printed in a document, which means it was
- * enforced by whoever remembered to run it — and the values it hunts are
- * exactly the ones that arrive by accident: a vendored default palette, a
- * library's own accent, a copied gradient. `dist/` is scanned as well as
- * `src/` because a hue can enter through a dependency's stylesheet and
- * never appear in a file this repository authored.
+ * §1 of the design language forbids the pink/purple family. Source and
+ * build output are both scanned because a hue can enter through a
+ * dependency's stylesheet. Missing or empty required inputs cannot
+ * qualify a partial scan, and overlapping patterns count each file once.
  *
  * The list lives here and nowhere else. DESIGN.md names this script.
  */
@@ -63,18 +60,27 @@ export function checkSiteDesign(options = {}) {
   const hits = [];
   /** @type {string[]} */
   const notes = [];
-  let files = 0;
+  const scanned = new Set();
+  let unrunnable = false;
   for (const tree of trees) {
     const dir = join(root, tree.dir);
     if (!existsSync(dir)) {
+      if (tree.required) unrunnable = true;
       notes.push(`${tree.dir} does not exist`
         + (tree.required ? '' : " — run `npm run website:build` first; a hue can enter through a "
           + 'dependency and never appear in a file this repository authored'));
       continue;
     }
-    for (const rel of tree.patterns.flatMap((p) => globSync(p, { cwd: dir })).sort()) {
-      files += 1;
-      const text = readFileSync(join(dir, rel), 'utf8').toLowerCase();
+    const matches = [...new Set(tree.patterns.flatMap((p) => globSync(p, { cwd: dir })))].sort();
+    if (matches.length === 0) {
+      notes.push(`${tree.dir} has no matching files`);
+      if (tree.required) unrunnable = true;
+    }
+    for (const rel of matches) {
+      const file = resolve(dir, rel);
+      if (scanned.has(file)) continue;
+      scanned.add(file);
+      const text = readFileSync(file, 'utf8').toLowerCase();
       for (const needle of needles) {
         let at = text.indexOf(needle);
         while (at !== -1) {
@@ -84,8 +90,12 @@ export function checkSiteDesign(options = {}) {
       }
     }
   }
-  const unrunnable = notes.length > 0 && files === 0;
-  return { code: hits.length > 0 ? 1 : (unrunnable ? 2 : 0), files, hits, notes };
+  const files = scanned.size;
+  if (files === 0) {
+    unrunnable = true;
+    notes.push('no matching site files were scanned');
+  }
+  return { code: unrunnable ? 2 : (hits.length > 0 ? 1 : 0), files, hits, notes };
 }
 
 if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
@@ -94,12 +104,11 @@ if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(
   if (report.hits.length > 0) {
     console.error(`banned hues (docs/DESIGN.md §1) — ${report.hits.length} occurrence(s):\n\n`
       + `${report.hits.join('\n')}\n`);
-    process.exit(1);
   }
   if (report.code === 2) {
-    console.error('nothing was scanned: neither the site source nor a build exists.');
-    process.exit(2);
+    console.error('design sweep incomplete: required site input is missing or empty, or no files were scanned.');
   }
+  if (report.code !== 0) process.exit(report.code);
   console.log(`design sweep: 0 banned hues across ${report.files} site source and built files `
     + `(${BANNED_HUES.length} hues checked).`);
 }

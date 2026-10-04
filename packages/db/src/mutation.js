@@ -204,7 +204,15 @@ export function createEntityMutation(connection, entity, mapping, core) {
   return (document) => {
     const plan = compile(document);
     return connection.transaction(() => {
-      const prepared = statements.getOrCreate(plan.sql, (text) => connection.prepare(text));
+      const prepared = statements.getOrCreate(plan.sql, (text) => {
+        let made;
+        made = attempt(() => connection.prepare(text), (error) => {
+          // A rejected preparation owns no statement; preserve any newer entry.
+          if (statements.get(text) === made) statements.delete(text);
+          return wrapDriverError(error, { collection: entity.name, docPath: entity.docPath });
+        });
+        return made;
+      });
       return chain(prepared, (statement) => chain(attempt(() => statement.all(plan.params),
         (error) => String(error?.message).includes('jaren-mutation-row-bound')
           ? new DbRuntimeError('JD2007', 'insert-select exceeded its source row bound', { cause: error })

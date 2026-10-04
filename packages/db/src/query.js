@@ -96,6 +96,24 @@ export function createQueryState(bound = undefined, operators = null,
   };
 }
 
+/** Cache a successful read preparation without retaining a rejected promise.
+ * Error classification belongs to the calling query surface.
+ * @param {any} connection
+ * @param {{ sql: string, statement: any }} entry
+ * @returns {any} value-or-promise of the prepared statement
+ */
+function preparedRead(connection, entry) {
+  if (entry.statement === null) {
+    let made;
+    made = attempt(() => connection.prepare(entry.sql, { readOnly: true }), (error) => {
+      if (entry.statement === made) entry.statement = null;
+      return error;
+    });
+    entry.statement = made;
+  }
+  return entry.statement;
+}
+
 /**
  * The answer for a native selection's items: the engine's result shape
  * (`undefined | item | items`), or — when the document is a chain's
@@ -716,10 +734,7 @@ export function createQueryEngine(context) {
     return entry;
   };
 
-  const statementOf = (entry) => {
-    if (entry.statement === null) entry.statement = connection.prepare(entry.sql, { readOnly: true });
-    return entry.statement;
-  };
+  const statementOf = (entry) => preparedRead(connection, entry);
   const setResidualOf = (entry, document) => {
     if (entry.setResidual === null)
       entry.setResidual = compileSetResidual(document, entry.residualLimits, operators,
@@ -749,8 +764,7 @@ export function createQueryEngine(context) {
   };
   const fullScanOf = (entry) => {
     const emitted = fullScanEmitted(entry);
-    if (emitted.statement === null) emitted.statement = connection.prepare(emitted.sql, { readOnly: true });
-    return emitted.statement;
+    return preparedRead(connection, emitted);
   };
   const fullScanParams = (entry) =>
     fullScanEmitted(entry).slots.map((slot) => ('literal' in slot ? slot.literal : null));
@@ -810,11 +824,7 @@ export function createQueryEngine(context) {
       probeVector(value, alternative.dims) !== null) ?? null;
 
   /** One alternative's statement, prepared once and kept with the plan. */
-  const alternativeStatement = (alternative) => {
-    if (alternative.statement === null)
-      alternative.statement = connection.prepare(alternative.sql, { readOnly: true });
-    return alternative.statement;
-  };
+  const alternativeStatement = (alternative) => preparedRead(connection, alternative);
 
   /**
    * The anchors this entry's seeks answer, read before the statement
@@ -831,8 +841,7 @@ export function createQueryEngine(context) {
     const next = (i) => {
       if (i >= entry.seeks.length) return anchors;
       const seek = entry.seeks[i];
-      if (seek.statement === null) seek.statement = connection.prepare(seek.sql, { readOnly: true });
-      return chain(seek.statement, (prepared) =>
+      return chain(preparedRead(connection, seek), (prepared) =>
         chain(prepared.get(seek.slots.map((slot) => slotValue(slot, {}))), (row) => {
           anchors[seek.name] = anchorValue(seek, row);
           return next(i + 1);
@@ -1002,12 +1011,12 @@ export function createQueryEngine(context) {
     const next = (i) => {
       if (i >= batches.length) return docs;
       const batch = batches[i];
-      let statement = identityFetch.get(batch.size);
-      if (statement === undefined) {
-        statement = connection.prepare(dialect.dml.selectByIdentities(physical, batch.size), { readOnly: true });
-        identityFetch.set(batch.size, statement);
+      let entry = identityFetch.get(batch.size);
+      if (entry === undefined) {
+        entry = { sql: dialect.dml.selectByIdentities(physical, batch.size), statement: null };
+        identityFetch.set(batch.size, entry);
       }
-      return chain(statement, (prepared) => chain(prepared.all(batch.params), (rows) => {
+      return chain(preparedRead(connection, entry), (prepared) => chain(prepared.all(batch.params), (rows) => {
         for (const row of rows) docs.push(JSON.parse(row.doc));
         return next(i + 1);
       }));
@@ -1908,8 +1917,7 @@ export function createEntityQueryEngine(context) {
     const next = (i) => {
       if (i >= entry.fetchers.length) return root;
       const fetcher = entry.fetchers[i];
-      if (fetcher.statement === null) fetcher.statement = connection.prepare(fetcher.sql, { readOnly: true });
-      return chain(fetcher.statement, (statement) =>
+      return chain(preparedRead(connection, fetcher), (statement) =>
         chain(statement.all(fetcher.slots.map((slot) => slotValue(slot, externals))), (rows) => {
           admittedRows(entry, rows);
           root[fetcher.name] = checkRows(entry, rows, fetcher.name).map((row) =>
@@ -1955,8 +1963,8 @@ export function createEntityQueryEngine(context) {
       return runResidual(entry, document, externals);
     }
     const params = entry.slots.map((slot) => slotValue(slot, externals));
-    if (entry.statement === null) entry.statement = connection.prepare(entry.sql, { readOnly: true });
-    return chain(guardEntityScan(entry), () => chain(entry.statement, (statement) => {
+    const prepared = preparedRead(connection, entry);
+    return chain(guardEntityScan(entry), () => chain(prepared, (statement) => {
       if (entry.planned.plan.scalarAggregate) return chain(statement.get(params), (row) => {
         admittedRows(entry, row ? [row] : []);
         if (row?._valid === 0) throw new DbRuntimeError('JD2003', 'an aggregate column refuses a lossy or invalid value');
@@ -2127,10 +2135,7 @@ export function createEntityQueryEngine(context) {
     // the statement is prepared by the first PULL, not here: a root
     // cursor's construction touches no connection, so it can be handed
     // back before the pull is admitted (MODEL-FORMAT §5.1)
-    const prepared = () => {
-      if (entry.statement === null) entry.statement = connection.prepare(entry.sql, { readOnly: true });
-      return entry.statement;
-    };
+    const prepared = () => preparedRead(connection, entry);
     if (entry.planned.plan.aggregate === 'count') {
       return cursorFactory({ ...classified, signal, deadline, now: state.now, wrap: driverWrap,
         materialize: () => chain(guardEntityScan(entry), () => chain(prepared(), (statement) =>
@@ -2958,9 +2963,9 @@ export function createLoadEngine(context, entityName) {
     load(spec, options = undefined) {
       requireCallable(options, state.now);
       const entry = buildLoad(spec, false, profileOf(options));
-      if (entry.statement === null) entry.statement = connection.prepare(entry.sql, { readOnly: true });
+      const prepared = preparedRead(connection, entry);
       const params = entry.slots.map((slot) => slot.literal);
-      return chain(entry.textKeys === null ? null : decodingOfText(), () => chain(entry.statement, (statement) =>
+      return chain(entry.textKeys === null ? null : decodingOfText(), () => chain(prepared, (statement) =>
         chain(statement.all(params), (rows) =>
           rows.map((row, i) => checkRoot(entry, parseGraphRow(entry.tree, provenRow(entry, row), '__doc'), i + 1)))));
     },

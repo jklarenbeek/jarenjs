@@ -53,6 +53,19 @@ import { compileJsonQuery, analyzeQuery, JsonQueryRuntimeError } from '@jarenjs/
 const functionNameFor = (identity) => `jaren_p_${hashContent(identity)}`;
 
 /**
+ * Keep short SQL names distinct even when exact registration identities hash alike.
+ * @param {Map<string, string>} registered
+ * @param {string} stem
+ * @returns {string}
+ */
+function availableSqlName(registered, stem) {
+  const taken = new Set(registered.values());
+  let name = stem;
+  for (let n = 2; taken.has(name); n++) name = `${stem}_${n}`;
+  return name;
+}
+
+/**
  * Decide whether a raw predicate fragment qualifies for the hatch, and
  * build its registration if so.
  * @param {any} fragment - The raw conjunct (a JSON query expression
@@ -166,19 +179,16 @@ export function deterministicFragment(fragment, operators = null, binding = 'it'
 export function registerFragment(connection, registered, fragment) {
   const owned = registered.get(fragment.key);
   if (owned !== undefined) return owned;
-  const stem = functionNameFor(fragment.key);
-  const taken = new Set(registered.values());
-  let name = stem;
-  for (let n = 2; taken.has(name); n++) name = `${stem}_${n}`;
+  const name = availableSqlName(registered, functionNameFor(fragment.key));
   connection.registerFunction(name, { deterministic: true }, fragment.compile());
   registered.set(fragment.key, name);
   return name;
 }
 
 /**
- * The SQL identifier for one registered aggregate. Unlike a predicate
- * fragment, the identity IS the operator name — one registry, one
- * function per name — so the fingerprint has nothing to disambiguate.
+ * The SQL identifier stem for one registered aggregate. The exact
+ * identity is the operator name; distinct names can share this short
+ * fingerprint, so registration disambiguates them like predicates.
  * @param {string} name
  * @returns {string}
  */
@@ -208,7 +218,7 @@ const aggregateNameFor = (name) => `jaren_a_${hashContent(name)}`;
 export function registerAggregateOperator(connection, registered, name, spec) {
   const owned = registered.get(name);
   if (owned !== undefined) return owned;
-  const sqlName = aggregateNameFor(name);
+  const sqlName = availableSqlName(registered, aggregateNameFor(name));
   connection.registerAggregate(sqlName, {
     start: () => [],
     step: (values, value) => {

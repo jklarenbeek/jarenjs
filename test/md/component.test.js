@@ -223,3 +223,55 @@ describe('createMdComponent: per-call rendering policy', function () {
     assert.notEqual(md.view(SOURCE, { slugPrefix: 'a-' }), first);
   });
 });
+
+function recordingHydrators(calls) {
+  return ['first', 'second'].map(name => definePlugin({
+    name, fences: [name], node: name,
+    render: node => h('div', { 'data-md-hydrate': name, 'data-md-hash': hashContent(node.value) }),
+    hydrate: (_element, node) => { calls.push({ plugin: name, type: node.type, value: node.value }); },
+  }));
+}
+
+it('hydrates identical text independently for each registered plugin', () => {
+  const calls = [], md = createMdComponent({ plugins: recordingHydrators(calls) });
+  md.view('```first\nsame\n```\n\n```second\nsame\n```\n');
+  const marked = ['first', 'second'].map(name => ({
+    getAttribute: key => key === 'data-md-hydrate' ? name : hashContent('same\n'),
+  }));
+  const container = { querySelectorAll: () => marked };
+  md.hydrate(container); md.hydrate(container);
+  assert.deepEqual(calls, [
+    { plugin: 'first', type: 'first', value: 'same\n' },
+    { plugin: 'second', type: 'second', value: 'same\n' },
+  ]);
+});
+
+it('hydrates a reused element once when its plugin changes at the same content hash', () => {
+  const calls = [], md = createMdComponent({ plugins: recordingHydrators(calls) });
+  let name = 'first';
+  const marked = { getAttribute: key => key === 'data-md-hydrate' ? name : hashContent('same\n') };
+  const container = { querySelectorAll: () => [marked] };
+  md.view('```first\nsame\n```\n'); md.hydrate(container);
+  name = 'second';
+  md.view('```second\nsame\n```\n'); md.hydrate(container); md.hydrate(container);
+  assert.deepEqual(calls, [
+    { plugin: 'first', type: 'first', value: 'same\n' },
+    { plugin: 'second', type: 'second', value: 'same\n' },
+  ]);
+});
+
+it('refuses distinct plugin values with colliding published hashes once per element', () => {
+  const calls = [], errors = [];
+  const values = ['$av16rctjk\n', '$av636l3s\n'];
+  assert.equal(hashContent(values[0]), hashContent(values[1]));
+  const md = createMdComponent({ plugins: recordingHydrators(calls), onHydrateError: error => errors.push(error.message) });
+  const source = values.map(value => `\`\`\`first\n${value}\`\`\`\n`).join('\n');
+  const html = renderToString(md.view(source));
+  assert.equal((html.match(/data-md-hash="1t4pgav"/g) ?? []).length, 2);
+  const marked = values.map(() => ({ getAttribute: key => key === 'data-md-hydrate' ? 'first' : hashContent(values[0]) }));
+  const container = { querySelectorAll: () => marked };
+  md.hydrate(container); md.hydrate(container);
+  assert.deepEqual(calls, []);
+  assert.equal(errors.length, 2);
+  assert.ok(errors.every(message => /Ambiguous hydration identity.*first.*1t4pgav/.test(message)));
+});

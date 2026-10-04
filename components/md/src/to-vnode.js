@@ -31,7 +31,8 @@ import {
   hashContent, fnv1a, FNV1A_OFFSET_BASIS, headingId, permalinkLabel,
 } from './utils.js';
 import { parseHtmlFragment, parseHtmlTag } from './html.js';
-import { walkAst, textOf } from './ast.js';
+import { textOf } from './ast.js';
+import { createHydrator, indexHydratable } from './hydration.js';
 import { buildPluginTables } from './parser.js';
 import {
   collectFootnotes, footnoteId, footnoteRefId, backrefLabel,
@@ -691,13 +692,11 @@ export function createMdRenderer(options) {
   /** @type {any} */
   let domRender = null;
   const tables = buildPluginTables(options.plugins);
-  const onHydrateError = options.onHydrateError
-    // eslint-disable-next-line no-console -- the documented default sink
-    ?? ((err) => console.error('md hydrate:', err));
-  /** @type {WeakMap<any, string>} */
-  const hydrated = new WeakMap();
+  const hydrate = createHydrator(options);
+  let generation = 0;
 
   return function render(docOrCompiled) {
+    const current = ++generation;
     if (domRender === null) {
       domRender = createDomRenderer(options.container, {
         document: options.document,
@@ -718,48 +717,25 @@ export function createMdRenderer(options) {
     if (tables.hydrates.size === 0) return;
     const index = hydrateIndex(docOrCompiled, tables);
     queueMicrotask(() => {
-      const marked = options.container.querySelectorAll('[data-md-hydrate]');
-      for (const el of marked) {
-        const name = el.getAttribute('data-md-hydrate');
-        const hash = el.getAttribute('data-md-hash') ?? '';
-        if (hydrated.get(el) === hash) continue;
-        const entry = index.get(hash);
-        const plugin = entry !== undefined ? tables.hydrates.get(entry.type) : undefined;
-        if (plugin === undefined || plugin.name !== name) continue;
-        hydrated.set(el, hash);
-        try {
-          const result = plugin.hydrate(el, entry, { options, hash: hashContent });
-          if (result !== undefined && result !== null && typeof result.catch === 'function') {
-            result.catch(onHydrateError);
-          }
-        }
-        catch (err) {
-          onHydrateError(err);
-        }
-      }
+      if (current === generation) hydrate(options.container, index);
     });
   };
 }
 
 /**
- * Build (and memoize on the tables) the content-hash → node index for
+ * Build (and memoize on the tables) the plugin/content-hash index for
  * hydratable node types.
  * @param {any} docOrCompiled
  * @param {any} tables
- * @returns {Map<string, MdNode>}
+ * @returns {import('./hydration.js').HydrationIndex}
  */
 function hydrateIndex(docOrCompiled, tables) {
   const ast = Array.isArray(docOrCompiled) ? docOrCompiled : docOrCompiled.ast;
-  /** @type {WeakMap<any, Map<string, MdNode>>} */
+  /** @type {WeakMap<any, import('./hydration.js').HydrationIndex>} */
   const memo = tables.hydrateMemo;
   let index = memo.get(ast);
   if (index !== undefined) return index;
-  index = new Map();
-  walkAst(ast, (node) => {
-    if (tables.hydrates.has(node.type) && typeof node.value === 'string') {
-      /** @type {Map<string, MdNode>} */ (index).set(hashContent(node.value), node);
-    }
-  });
+  index = indexHydratable(ast, tables);
   memo.set(ast, index);
   return index;
 }

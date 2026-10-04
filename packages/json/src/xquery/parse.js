@@ -35,16 +35,20 @@ import {
   CC_BANG,
   CC_DQUOTE,
   CC_DOLLAR,
+  CC_HASH,
+  CC_PERCENT,
   CC_AMP,
   CC_SQUOTE,
   CC_LPAREN,
   CC_RPAREN,
   CC_STAR,
+  CC_PLUS,
   CC_COMMA,
   CC_MINUS,
   CC_DOT,
   CC_SLASH,
   CC_COLON,
+  CC_SEMICOLON,
   CC_LT,
   CC_EQ,
   CC_GT,
@@ -52,7 +56,9 @@ import {
   CC_AT,
   CC_LBRACKET,
   CC_RBRACKET,
+  CC_LBRACE,
   CC_PIPE,
+  CC_RBRACE,
   isDigitCode,
   isNameStartCode,
   isNameCharCode,
@@ -61,13 +67,7 @@ import {
 import { setObjectMember } from '@jarenjs/core/object';
 import { LabeledSyntaxError } from '../errors.js';
 
-const CC_HASH = 0x23;
-const CC_PERCENT = 0x25;
-const CC_PLUS = 0x2B;
-const CC_SEMICOLON = 0x3B;
 const CC_BACKTICK = 0x60;
-const CC_LBRACE = 0x7B;
-const CC_RBRACE = 0x7D;
 
 const hasOwn = Object.hasOwn;
 

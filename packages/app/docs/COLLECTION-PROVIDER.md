@@ -126,7 +126,9 @@ and zero prefetch pages. `prefetchPages` is finite, below the page limit and cla
 to row credits. `requestRange({start,end},signal)` refuses oversized ranges before
 source work. Every response must echo all four identities and fit row/byte/work
 credits before it can publish. A provider that ignores cancellation still cannot
-replace current rows. Source events need a monotone integer revision; this
+replace current rows. An empty page beyond the end retains the provider's known,
+nonnegative total; a nonempty page cannot extend beyond that total. Source events
+need a monotone integer revision; this
 coordinator treats keyed events conservatively as reset rather than claiming
 incremental maintenance. `reset` fences old work and clears cached resources.
 
@@ -138,8 +140,11 @@ frontier plus a continuation sentinel; it never manufactures a known total.
 arbitrary jumps as `unsupported-seek` without scanning. `pinKeys(keys)` protects
 editor pages within existing page/row/byte limits; an impossible admission returns
 `budget-exhausted / pinned-page-credits`. `stats()` separately reports cache pages,
-rows/bytes, in-flight requests and outputs. By default async `dispose` drains both
-the coordinator and provider; `disposeProvider:false` retains host ownership.
+rows/bytes, in-flight requests and outputs. By default async `dispose` stops
+admission, cancels work and starts provider cleanup before draining requests and
+outputs, so provider cleanup can release pending operations. Concurrent disposal
+calls share completion, and the owned provider is disposed once.
+`disposeProvider:false` retains host ownership.
 
 ## Transactional export and print sinks
 

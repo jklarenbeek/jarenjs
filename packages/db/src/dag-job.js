@@ -17,7 +17,7 @@
  * crash resumes instead of restarting.
  *
  * A resumed run also has to be the SAME run. The workflow document's
- * revision and a hash of the input are persisted with the checkpoints,
+ * canonical document and input are persisted with the checkpoints,
  * and a resume that disagrees with either is refused by name — reusing
  * checkpoints written by a different workflow is not a resume, it is a
  * silently wrong answer.
@@ -38,10 +38,6 @@ export const RUN_IDENTITY_NODE = '\u001Fidentity';
 /** What joins a job id to an attempt's token in the run key the DAG
  * sees. A unit separator, so no job id can carry one by accident. */
 const RUN_KEY_SEPARATOR = '\u001F';
-
-/** A stable fingerprint of any JSON value: the suite's one content hash
- * over the suite's one canonical form. */
-const fingerprint = (value) => hashContent(canonicalizeJson(value ?? null));
 
 /**
  * Build a worker whose handlers run checkpointed DAG documents.
@@ -129,11 +125,14 @@ export function createDagJobRunner(store, options) {
    * produces checkpoints that describe a computation nobody asked for
    * just as surely as an edited document does.
    */
-  const requireSameRun = async (context, jobId, revision, inputHash, taskVersions) => {
+  const requireSameRun = async (context, jobId, workflow, inputIdentity, taskVersions) => {
     const loaded = await context.checkpoints.inspect(jobId, RUN_IDENTITY_NODE);
     const stored = loaded.value;
-    const taskVersionsHash = fingerprint(taskVersions);
-    const identity = { revision, inputHash, taskVersionsHash, taskVersions };
+    const { revision, workflowIdentity } = workflow;
+    const inputHash = hashContent(inputIdentity);
+    const taskIdentity = canonicalizeJson(taskVersions ?? null);
+    const taskVersionsHash = hashContent(taskIdentity);
+    const identity = { revision, workflowIdentity, inputHash, inputIdentity, taskVersionsHash, taskVersions };
     if (stored === undefined) {
       if (loaded.hasValues) throw new DbRuntimeError('JD2069',
         `run '${jobId}' cannot resume: checkpoint values have no recorded workflow, input or task identity`,
@@ -145,15 +144,20 @@ export function createDagJobRunner(store, options) {
       throw new DbRuntimeError('JD2069', `run '${jobId}' has invalid checkpoint identity metadata`,
         { docPath: '/jobs', collection: jobId });
     const differs = [];
-    if (stored.revision !== revision) {
+    const missingWorkflow = stored.workflowIdentity === undefined;
+    const missingInput = stored.inputIdentity === undefined;
+    const missingTasks = stored.taskVersionsHash === undefined || stored.taskVersions === undefined;
+    if (stored.revision !== revision
+      || (!missingWorkflow && stored.workflowIdentity !== workflowIdentity)) {
       differs.push(`the workflow (checkpointed under revision ${stored.revision}, `
         + `this runner compiles revision ${revision})`);
     }
-    if (stored.inputHash !== inputHash) {
+    if (stored.inputHash !== inputHash
+      || (!missingInput && stored.inputIdentity !== inputIdentity)) {
       differs.push(`the input (checkpointed under ${stored.inputHash}, `
         + `this attempt was given ${inputHash})`);
     }
-    if (stored.taskVersionsHash === undefined) {
+    if (missingTasks) {
       // A row written before task identity was recorded. Unknown is not
       // equal: the upgrade is allowed only where nothing can be replayed
       // wrongly — when no node value has been recorded yet, so the run has
@@ -164,14 +168,20 @@ export function createDagJobRunner(store, options) {
           + 'cannot be confirmed)');
       }
     }
-    else if (stored.taskVersionsHash !== taskVersionsHash) {
+    else if (stored.taskVersionsHash !== taskVersionsHash
+      || canonicalizeJson(stored.taskVersions) !== taskIdentity) {
       const moved = describeVersionDrift(stored.taskVersions, taskVersions);
       differs.push(`the task versions (${moved.length > 0 ? moved.join(', ')
         : `checkpointed under ${stored.taskVersionsHash}, this runner compiles `
           + `${taskVersionsHash}`})`);
     }
+    if (loaded.hasValues && (missingWorkflow || missingInput)) {
+      const unknown = [missingWorkflow && 'workflow', missingInput && 'input'].filter(Boolean).join(' and ');
+      differs.push(`the exact ${unknown} identity (this run recorded node value(s) `
+        + 'with only diagnostic hashes, so the computation that produced them cannot be confirmed)');
+    }
     if (differs.length === 0) {
-      if (stored.taskVersionsHash === undefined)
+      if (missingWorkflow || missingInput || missingTasks)
         await context.checkpoints.save(jobId, RUN_IDENTITY_NODE, identity);
       return;
     }
@@ -187,15 +197,16 @@ export function createDagJobRunner(store, options) {
   for (const kind of Object.keys(documents)) {
     const compiled = compileDag(documents[kind],
       { tasks: options.tasks ?? {}, checkpoint });
-    // one revision per compiled document, so every attempt of every run
-    // of this kind compares against the same number
-    const revision = fingerprint(documents[kind]);
+    // Every attempt compares the same canonical document. The short
+    // revision is diagnostic only: different documents can hash alike.
+    const workflowIdentity = canonicalizeJson(documents[kind] ?? null);
+    const workflow = { revision: hashContent(workflowIdentity), workflowIdentity };
     setObjectMember(handlers, kind, async (payload, context) => {
       const input = payload?.input ?? null;
       const runKey = runKeyOf(context.job.id, context.job.lease.token);
       active.set(runKey, context);
       try {
-        await requireSameRun(context, context.job.id, revision, fingerprint(input),
+        await requireSameRun(context, context.job.id, workflow, canonicalizeJson(input),
           compiled.taskVersions);
         // the handler's signal reaches every task: a worker winding down
         // inside its grace period, or a lease this attempt has lost

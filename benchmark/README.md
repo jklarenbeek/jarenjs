@@ -30,8 +30,6 @@ number in a README performance table names the command that produced it.
 | [`mermaid.js`](./mermaid.js) | Mermaid coverage scorecard + parse speed | Benchmarking the headless Mermaid engine |
 | [`flow-fsm.js`](./flow-fsm.js) | FSM compile/transition vs XState v5 + the serializability wedge | Benchmarking `@jarenjs/flow` machines |
 | [`flow-dag.js`](./flow-dag.js) | Dag abstraction price vs a hand-written baseline | Benchmarking `@jarenjs/flow` dataflow |
-| [`recall-quality.js`](./recall-quality.js) | Checksum-pinned labelled datasets, identity-bound embedding caches, standard relevance metrics, exact and optional ANN candidates | Measuring real-language retrieval and the quality/cost of approximation |
-| [`refinement-pressure.js`](./refinement-pressure.js) | Labelled trajectories replayed into persisted ledgers; duplicate, conflict and complement retention with policy comparisons | Measuring refinement accumulation and the opt-in exact-evidence policy |
 | [`vector.js`](./vector.js) | k-nearest over a `derive: 'vector'` column every physical way it runs — resident sweep, the shipped plan, its own statement, `ORDER BY` over a UDF, the same query with no column — against **sqlite-vec**, equivalence-gated, with what the column costs to write and to store | Choosing between a vector column, a JSON member and an extension |
 | [`series.js`](./series.js) | The temporal ground and what was built on it: a range, a fixed bucketing, a rolling window and an as-of read over a seeded series, answered by plain references, by `@jarenjs/core/series`, by a generic query document, by stock SQLite under a declared epoch column and by the store's own plan — gated on the committed series corpus and on every route agreeing with the others before a timer starts, with the resident ceiling and the durable loss both published | Deciding what a temporal fast path has to beat, what the kernel costs against the one-pass loops it replaces, and what a declared epoch column buys over the document it came from |
 | [`db.js`](./db.js) | The store and the LINQ front door: documents in SQLite through the pushdown planner against PouchDB/RxDB/lowdb, the pushdown headline, the chain in memory, and what one DEFINITION costs to build through a pen beside the hand-written document | Deciding what pushdown buys, and what writing a document by code costs |
@@ -100,7 +98,7 @@ node benchmark/profiler.js --profile-all --output json --filepath results.json
 # Show only top 10 slowest tests
 node benchmark/profiler.js '/ref.json' --profile --top 10
 
-# Only include tests where all engines succeed
+# Time only tests both engines pass; retain every conformance verdict
 node benchmark/profiler.js '/ref.json' --profile --success-only
 
 # Full options
@@ -113,7 +111,7 @@ Options:
                          Supported: draft6, draft7, draft2019-09, 2019, draft2020-12, 2020
   --filepath, -f PATH    Output file path for csv/json
   --top N                Show only top N slowest tests
-  --success-only         Only include tests where all agents succeed
+  --success-only         Time only tests both engines pass; retain all verdicts
   --verbose, -v          Verbose output
 ```
 
@@ -126,9 +124,20 @@ results are written to `benchmark/results/results.html`.
 tests *it* ran: a test where the other engine could not compile the schema
 is still a test this one passed or failed, and it is counted here — so
 `passed + failed + errors` equals the corpus for both columns, and neither
-column is silently narrowed to the intersection. Ajv errors on more than a
-dozen cases of the official suite, and counting only what both engines could
-run hid real failures on Jaren's side for months.
+column is silently narrowed to the intersection. `--success-only` omits timings
+for tests with a failed assertion; their pass/fail verdicts remain in these counts.
+
+JSON `results` contains timed rows, `errors` contains execution errors, and
+`skipped` contains verdicts whose timings were omitted. `metadata.validTests`
+counts timing-eligible rows. Missing measurements and ratios are `null` in
+summaries, and omitted rows carry no invented timing or ratio. Draft aliases
+keep their requested summary keys while result rows name the canonical draft.
+CSV contains only timed rows; the command reports how many skipped and error
+rows it omitted. The console retains these verdicts alongside timed rows.
+
+Unknown flags, missing values, unsupported output formats and iteration/top
+counts that are not positive safe integers fail before profiling or writing a
+report. `--profile` requires a test-suite path.
 
 ## debug.js — investigating test failures
 
@@ -903,14 +912,14 @@ page-cache credits and mounted cells are separate observations.
 
 <!--fact:collection.measurements-->
 
-Measured on v24.19.0, linux/x64, AMD Ryzen 9 5900HX with Radeon Graphics.
+Measured on v24.20.0, linux/x64, AMD Ryzen 9 5900HX with Radeon Graphics.
 
 | Consumer | Rows | Reference range ms | Native range/view/interaction p95 ms | Cells | Cached rows / bytes | Measurements / accounted bytes | Heap MiB | Teardown ms |
 |---|---:|---:|---:|---:|---|---|---:|---:|
-| catalog | 10000 | 0.020 | 1.450 | 170 | 256 / 9732 | 256 / 8192 | 19.49 | 0.177 |
-| archive-stock | 75000 | 8.080 | 0.307 | 160 | 256 / 10244 | 256 / 8448 | 92.43 | 0.047 |
+| catalog | 10000 | 0.021 | 1.365 | 170 | 256 / 9732 | 256 / 8192 | 24.15 | 0.227 |
+| archive-stock | 75000 | 7.861 | 0.256 | 160 | 256 / 10244 | 256 / 8448 | 78.95 | 0.055 |
 
-The component and coordinator browser bundle is 16815 gzip bytes. Reference range calls do less work than native vnode and interaction calls; the comparison deliberately publishes that cost rather than claiming equal workloads.
+The component and coordinator browser bundle is 23274 gzip bytes. Reference range calls do less work than native vnode and interaction calls; the comparison deliberately publishes that cost rather than claiming equal workloads.
 
 <!--/fact-->
 
@@ -930,14 +939,14 @@ Measured on v24.20.0, linux/x64, AMD Ryzen 9 5900HX with Radeon Graphics.
 
 | Consumer / engine | Rows | Cold / warm ms | Query p95 ms | One update ms | Snapshot gzip bytes | Sampled heap / RSS high-water MiB | V8 heap ceiling MiB |
 |---|---:|---|---:|---:|---:|---|---:|
-| catalog / reference | 10000 | 122.06 / 50.85 | 13.43 | 0.38 | 370591 | 96.60 / 191.95 | 240.00 |
-| catalog / native | 10000 | 192.24 / 186.44 | 9.06 | 59.98 | 121054 | 103.51 / 214.36 | 240.00 |
-| archive-stock / reference | 75000 | 982.17 / 417.50 | 152.46 | 0.51 | 2820312 | 550.26 / 688.02 | 752.00 |
-| archive-stock / native | 75000 | 1219.66 / 1531.59 | 83.80 | 593.38 | 920811 | 577.94 / 738.68 | 752.00 |
+| catalog / reference | 10000 | 139.41 / 55.31 | 13.32 | 0.44 | 370591 | 94.72 / 201.86 | 240.00 |
+| catalog / native | 10000 | 227.71 / 313.00 | 17.42 | 78.24 | 121054 | 100.99 / 223.08 | 240.00 |
+| archive-stock / reference | 75000 | 1139.40 / 635.27 | 161.81 | 0.51 | 2820312 | 575.60 / 719.98 | 752.00 |
+| archive-stock / native | 75000 | 1373.79 / 1651.31 | 98.15 | 734.36 | 920811 | 576.22 / 737.68 | 752.00 |
 
 | Consumer | Native logical index MiB | Peak update accounted MiB | Native teardown ms / remaining handles | Membership / order / score / native reload differences | Reference reload tie changes |
 |---|---:|---:|---|---|---:|
-| catalog | 24.58 | 35.37 | 0.03 / 0 | 0 / 0 / 0 / 0 | 1002 |
+| catalog | 24.58 | 35.37 | 0.04 / 0 | 0 / 0 / 0 / 0 | 1002 |
 | archive-stock | 186.22 | 267.03 | 0.04 / 0 | 0 / 0 / 0 / 0 | 6002 |
 
 Browser gzip: native 5606 bytes; reference 5874 bytes.

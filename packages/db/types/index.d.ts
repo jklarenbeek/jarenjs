@@ -353,9 +353,22 @@ export interface LoadExplanation {
    * snapshot is `snapshot`. */
   identity: readonly OrderIdentity[] | null;
   snapshot: boolean | null;
-  /** A graph load pulls one root row per statement row, always. */
-  streaming: 'row';
-  barrier: null;
+  /** One root graph per statement row; drivers without an incremental
+   * cursor buffer those rows and name that barrier. */
+  streaming: 'row' | 'buffered';
+  barrier: CursorBarrier | null;
+  /** The resolved profile, its provenance and the bounds the call enforces. */
+  budget: {
+    profile: { source: 'call' | 'store'; name: 'safe' | 'custom' } | null;
+    rows: number | null;
+    includedRows: number | null;
+    depth: number | null;
+    bytes: number | null;
+    limits: Required<NonNullable<ProfileSpec['limits']>> | null;
+    scan: 'refused-by-shape' | 'unbounded';
+    time: 'enforced' | 'unavailable';
+    estimatedRows: 'available' | 'unavailable';
+  };
 }
 
 /** What `saveChanges()` returns: data, not a boolean (§11.6). */
@@ -665,7 +678,7 @@ export interface EntityScope {
 
 export interface UntrackedReads<T = unknown> {
   get(key: EntityKeyArg): Promise<T | undefined>;
-  load(spec?: LoadSpec): Promise<T[]>;
+  load(spec?: LoadSpec, options?: Pick<ExecuteOptions, 'profile' | 'signal' | 'deadline'>): Promise<T[]>;
 }
 
 /** Closed native mutation forms over declared SQLite column layouts. */
@@ -692,7 +705,8 @@ export interface EntitySet<T = unknown, I = unknown> {
   /** One bounded native SQLite column mutation; unsupported shapes refuse JD0038. */
   mutate(document: EntityMutation): Promise<MutationResult>;
   delete(key: EntityKeyArg): Promise<boolean>;
-  load(spec?: LoadSpec): Promise<ReadonlyArray<Readonly<T>>>;
+  /** Materialize root graphs; signal/deadline are checked before execution. */
+  load(spec?: LoadSpec, options?: Pick<ExecuteOptions, 'profile' | 'signal' | 'deadline'>): Promise<ReadonlyArray<Readonly<T>>>;
   /** The graph cursor: one root graph per pull, its includes attached
    * and bounded (§10.4), from the same one statement `load` runs;
    * `return()` releases it. Untracked unless `tracking: true`. */
@@ -700,7 +714,7 @@ export interface EntitySet<T = unknown, I = unknown> {
   /** One bounded page over the composite keyset (§10.5). A `take` or
    * `skip` in the spec is refused: the page windows by its limit. */
   page(spec?: LoadSpec, options?: PageOptions): Promise<Page<Readonly<T>>>;
-  explainLoad(spec?: LoadSpec): LoadExplanation;
+  explainLoad(spec?: LoadSpec, options?: Pick<ExecuteOptions, 'profile'>): LoadExplanation;
   /** Track a pending insert (local, synchronous — no round trip). */
   add(doc: I): Readonly<T>;
   /** Register the next version of a tracked entity. */
@@ -740,7 +754,7 @@ export interface EntitySet<T = unknown, I = unknown> {
 
 export interface SyncUntrackedReads<T = unknown> {
   get(key: EntityKeyArg): T | undefined;
-  load(spec?: LoadSpec): T[];
+  load(spec?: LoadSpec, options?: Pick<ExecuteOptions, 'profile' | 'signal' | 'deadline'>): T[];
 }
 
 export interface SyncEntitySet<T = unknown, I = unknown> {
@@ -750,11 +764,11 @@ export interface SyncEntitySet<T = unknown, I = unknown> {
   get(key: EntityKeyArg): Readonly<T> | undefined;
   update(key: EntityKeyArg, changes: Partial<T>): Readonly<T>;
   delete(key: EntityKeyArg): boolean;
-  load(spec?: LoadSpec): ReadonlyArray<Readonly<T>>;
+  load(spec?: LoadSpec, options?: Pick<ExecuteOptions, 'profile' | 'signal' | 'deadline'>): ReadonlyArray<Readonly<T>>;
   loadCursor(spec?: LoadSpec, options?: EntityCursorOptions): SyncQueryCursor<Readonly<T>>;
   page(spec?: LoadSpec, options?: PageOptions): Page<Readonly<T>>;
   cursor<R = T>(document: unknown, options?: EntityCursorOptions): SyncQueryCursor<R>;
-  explainLoad(spec?: LoadSpec): LoadExplanation;
+  explainLoad(spec?: LoadSpec, options?: Pick<ExecuteOptions, 'profile'>): LoadExplanation;
   add(doc: I): Readonly<T>;
   put(next: T): Readonly<T>;
   remove(key: EntityKeyArg | T): void;

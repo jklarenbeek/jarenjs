@@ -90,10 +90,12 @@ it('materializing reports count all asserted documents and invalid batch sizes r
 it('DAG identity inspection refuses missing or incompatible identity without reading or rewriting node values', async () => {
   const doc = { name: 'test' }, input = { n: 1 }, versions = { task: '1' };
   const hash = (v) => hashContent(canonicalizeJson(v));
-  const current = { revision: hash(doc), inputHash: hash(input), taskVersions: versions, taskVersionsHash: hash(versions) };
+  const legacy = { revision: hash(doc), inputHash: hash(input), taskVersions: versions, taskVersionsHash: hash(versions) };
+  const current = { ...legacy, workflowIdentity: canonicalizeJson(doc), inputIdentity: canonicalizeJson(input) };
   for (const [value, hasValues, allowed] of [[undefined, true, false], [null, true, false],
     [{ revision: 'old', inputHash: 'old' }, false, false],
-    [{ revision: current.revision, inputHash: current.inputHash }, false, true], [current, true, true]]) {
+    [{ revision: current.revision, inputHash: current.inputHash }, false, true],
+    [legacy, true, false], [current, true, true]]) {
     let handlers, writes = 0, runs = 0;
     createDagJobRunner({ jobs: { createWorker: (options) => { handlers = options.handlers; return {}; } } }, {
       compileDag: () => ({ taskVersions: versions, run: async () => { runs++; } }), documents: { work: doc },

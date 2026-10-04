@@ -923,31 +923,31 @@ alone; writing accepted evidence requires both engines. The committed
 
 <!--fact:postgres.portability-->
 
-Measured 2026-10-04T12:08:16.664Z: 500 documents, Node 24.20.0, SQLite 3.53.4, PostgreSQL 17.11 (Debian 17.11-1.pgdg12+2), pg 8.23.0. Durability settings: fsync=on, synchronous_commit=on, full_page_writes=on.
+Measured 2026-10-04T13:46:28.355Z: 500 documents, Node 24.20.0, SQLite 3.53.4, PostgreSQL 17.11 (Debian 17.11-1.pgdg12+2), pg 8.23.0. Durability settings: fsync=on, synchronous_commit=on, full_page_writes=on.
 
 | Operation | SQLite ms | PostgreSQL ms | PG / SQLite | Client query calls per PG operation | Iterations |
 |---|---:|---:|---:|---:|---:|
-| open | 25.110 | 35.383 | 1.4× | 17 | 1 |
-| insert | 0.017 | 0.714 | 41.5× | 1 | 500 |
-| get | 0.019 | 0.930 | 47.9× | 5 | 50 |
-| indexed | 0.755 | 4.433 | 5.9× | 13 | 20 |
-| scanned | 0.796 | 3.745 | 4.7× | 13 | 20 |
-| range | 1.025 | 4.036 | 3.9× | 13 | 20 |
-| transaction | 0.309 | 1.337 | 4.3× | 3 | 20 |
-| migration (one index) | 15.169 | 87.793 | 5.8× | not separately counted | 1 |
+| open | 20.829 | 22.898 | 1.1× | 17 | 1 |
+| insert | 0.013 | 0.617 | 49.3× | 1 | 500 |
+| get | 0.015 | 0.740 | 48.2× | 5 | 50 |
+| indexed | 0.631 | 3.387 | 5.4× | 13 | 20 |
+| scanned | 0.603 | 3.068 | 5.1× | 13 | 20 |
+| range | 0.636 | 2.960 | 4.7× | 13 | 20 |
+| transaction | 0.144 | 1.105 | 7.6× | 3 | 20 |
+| migration (one index) | 12.458 | 63.762 | 5.1× | not separately counted | 1 |
 
-Sequential insert throughput: SQLite 58125, PostgreSQL 1400 documents/second.
+Sequential insert throughput: SQLite 79888, PostgreSQL 1622 documents/second.
 
 | First-row probe | SQLite | PostgreSQL |
 |---|---:|---:|
-| First row ms | 1.616 | 1.246 |
-| First row plus cleanup ms | 1.781 | 2.158 |
+| First row ms | 0.968 | 0.970 |
+| First row plus cleanup ms | 1.071 | 1.317 |
 | Returned rows | 1 | 1 |
 | Fetched native rows / normalized bytes | not instrumented | 64 / 5661 |
 | Session peak native frame rows / bytes | not instrumented | 64 / 5813 |
 | Client query calls including cleanup | no network | 5 |
-| Sampled RSS before / after MiB | 90.19 / 107.54 | 110.66 / 115.99 |
-| Sampled heap before / after MiB | 21.61 / 27.28 | 16.15 / 24.23 |
+| Sampled RSS before / after MiB | 106.25 / 123.49 | 126.36 / 132.61 |
+| Sampled heap before / after MiB | 21.61 / 27.28 | 16.16 / 24.21 |
 
 After close: driver active=0, queued=0; native cursors=0, prepared statements=0; host pool total=1, idle=1, waiting=0.
 
@@ -1172,7 +1172,12 @@ measure what that costs sequential point reads beside what it gains concurrent o
   settlement before it resolves, so closing the store releases the
   database file deterministically.
   DAG jobs inspect persisted workflow/input/task identity before reading
-  checkpoint values. `jobs.reset(id, { expectedGeneration })` explicitly
+  checkpoint values. Exact canonical values establish identity; short hashes
+  are diagnostic labels. On upgrade, legacy hash-only identities with saved
+  node values refuse `JD2069`; empty matching runs upgrade under the fence.
+  Finish a populated legacy run with its original runner, or deliberately
+  use a new job id or the reset operation (JOBS-FORMAT §7).
+  `jobs.reset(id, { expectedGeneration })` explicitly
   discards an inactive run's checkpoints and restarts it under a new fence;
   live leases and stale observations refuse (JOBS-FORMAT §10).
 - **The browser** (`@jarenjs/db/wasm`): the same store, the same
@@ -1729,14 +1734,6 @@ Every subpath a consumer can import, derived from the manifest by
 | `@jarenjs/db/entity` | JavaScript | declared |
 <!--/fact-->
 
-
-The [durable AI ledger recipe](../ai/README.md#a-durable-ledger-over-jarenjsdb)
-exposes optional atomic namespace mutation as well as its base storage and rank
-capabilities. It reads and publishes through one immediate transaction, using the
-transaction's synchronous collection facade so another SQLite connection on the
-same event loop cannot block an awaiting writer. A rejected callback changes
-neither records nor counters; ledger id minting and guarded multi-record updates
-use that boundary.
 
 Document-only migrations also accept named files:
 `jaren-db documents --migrations migrations --in users=users.json --in events=events.jsonl --out migrated.json`.

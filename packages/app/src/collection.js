@@ -19,7 +19,7 @@ export function createCollectionCoordinator(provider, options = {}) {
   let observation = { state: 'loading', query, snapshot, generation, total: { kind: 'unknown' }, loadedRows: 0, loadedBytes: 0 };
   let cursor = null, frontier = 0, exhausted = false;
   const pages = new Map(), pending = new Map(), subscribers = new Set(), outputs = new Set();
-  let pinnedKeys = new Set();
+  let pinnedKeys = new Set(), disposal = null;
   function stats() { return { pages: pages.size, rows: [...pages.values()].reduce((n, p) => n + p.rows.length, 0),
     bytes: [...pages.values()].reduce((n, p) => n + p.bytes, 0), inFlight: pending.size, outputs: outputs.size }; }
   function publish(change) {
@@ -67,7 +67,8 @@ export function createCollectionCoordinator(provider, options = {}) {
           || Object.keys(request.credits).some((key) => response.used[key] > request.credits[key])
           || response.used.bytes !== bytes || response.used.rows !== response.rows.length
           || !['known', 'unknown'].includes(response.total?.kind)
-          || (response.total.kind === 'known' && (!Number.isSafeInteger(response.total.value) || response.total.value < start + response.rows.length)))
+          || (response.total.kind === 'known' && (!Number.isSafeInteger(response.total.value) || response.total.value < 0
+            || (response.rows.length > 0 && response.total.value < start + response.rows.length))))
           { publish({ state: 'error', reason: 'invalid-response' }); return { state: 'error', reason: 'invalid-response' }; }
         pages.delete(start);
         while (pages.size && (pages.size >= bounds.maxPages || stats().rows + response.rows.length > bounds.maxRows || stats().bytes + bytes > bounds.maxBytes)) {
@@ -145,6 +146,7 @@ export function createCollectionCoordinator(provider, options = {}) {
       const operation = Promise.resolve().then(async () => {
         try {
           await sink.begin?.(identity);
+          if (disposed || controller.signal.aborted || query !== identity.query || snapshot !== identity.snapshot) throw new Error('Incomplete snapshot export');
           for await (const page of provider.export({ ...identity, pageRows, pageBytes: bounds.maxBytes }, controller.signal)) {
             if (disposed || controller.signal.aborted || query !== identity.query || snapshot !== identity.snapshot
               || page.query !== identity.query || page.snapshot !== identity.snapshot || completed) throw new Error('Incomplete snapshot export');
@@ -175,17 +177,24 @@ export function createCollectionCoordinator(provider, options = {}) {
       try { return await operation; }
       finally { signal?.removeEventListener('abort', abort); for (const item of outputs) if (item.operation === operation) outputs.delete(item); }
     },
-    async dispose() {
-      let failure, failed = false;
-      if (!disposed) {
-        disposed = true; ticket++; cancel(); subscribers.clear();
+    dispose() {
+      if (disposal) return disposal;
+      if (disposed) return Promise.resolve();
+      disposed = true; ticket++;
+      disposal = Promise.resolve().then(async () => {
+        let failure, failed = false;
         try { unsubscribe?.(); } catch (error) { failure = error; failed = true; }
-        for (const item of outputs) item.controller.abort();
-      }
-      await Promise.allSettled([...pending.values(), ...[...outputs].map((item) => item.operation)]);
-      pages.clear(); cursor = null; pinnedKeys.clear();
-      if (options.disposeProvider !== false) { try { await provider.dispose(); } catch (error) { if (!failed) { failure = error; failed = true; } } }
-      if (failed) throw failure;
+        const providerDisposal = options.disposeProvider === false ? null
+          : Promise.resolve().then(() => provider.dispose()).catch((error) => {
+            if (!failed) { failure = error; failed = true; }
+          });
+        await Promise.allSettled([...pending.values(), ...[...outputs].map((item) => item.operation), providerDisposal]);
+        pages.clear(); cursor = null; pinnedKeys.clear();
+        if (failed) throw failure;
+      }).finally(() => { disposal = null; });
+      cancel(); subscribers.clear();
+      for (const item of outputs) item.controller.abort();
+      return disposal;
     },
   };
   return coordinator;

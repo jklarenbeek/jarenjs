@@ -91,7 +91,7 @@
       "api": "@jarenjs/core/async",
       "role": "ordered drained concurrency",
       "matches": [
-        "41:export async function mapConcurrent(items, limit, worker, options = {}) {"
+        "39:export async function mapConcurrent(items, limit, worker, options = {}) {"
       ],
       "disposition": "retained"
     },

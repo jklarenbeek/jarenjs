@@ -1,14 +1,14 @@
 {
   "freezeHash": "fba6d22f7d055476f7f4ef3d5fa5c7a51e372b3b0266a269e8713c9ec4b3d2b2",
   "runtime": {
-    "node": "v24.19.0",
+    "node": "v24.20.0",
     "platform": "linux",
     "arch": "x64",
     "cpu": "AMD Ryzen 9 5900HX with Radeon Graphics",
-    "os": "7.2.3-200.nobara.fc44.x86_64"
+    "os": "7.2.6-201.nobara.fc44.x86_64"
   },
   "scope": "Node geometry/vnode/interaction plus resident synthetic array and bounded page coordinator. Browser layout/paint and real AT/OS IME are separate measurements. Historical reference heap includes other adoption workloads and is not a like-for-like collection heap comparison.",
-  "browserGzipBytes": 16815,
+  "browserGzipBytes": 23274,
   "consumers": [
     {
       "consumer": "catalog",
@@ -17,27 +17,27 @@
       "baseline": {
         "relational": {
           "statements": 9,
-          "queryMs": 0.07626500000003489,
-          "recoveryMs": 33.323758999999995
+          "queryMs": 0.09058300000003783,
+          "recoveryMs": 34.72672
         },
         "search": {
-          "startupMs": 329.562679,
-          "coldIndexMs": 146.03840100000002,
-          "warmIndexMs": 63.37383599999998,
-          "queryMs": 7.903240000000039,
+          "startupMs": 372.603553,
+          "coldIndexMs": 169.505833,
+          "warmIndexMs": 65.049804,
+          "queryMs": 14.11128500000001,
           "sourceBytes": 2606620,
           "indexBytes": 1915119,
           "browserGzipBytes": 5873
         },
         "grid": {
-          "interactionMs": 0.09204899999997451,
+          "interactionMs": 0.0798970000000736,
           "mountedCells": null,
           "loadedRows": null,
           "loadedBytes": null,
           "browserGzipBytes": 7053
         },
         "formulas": {
-          "evaluationMs": 10.699145999999928,
+          "evaluationMs": 24.441210999999953,
           "errors": 1,
           "originalByteChanges": 0
         },
@@ -49,25 +49,25 @@
           "unresolvedResends": null
         },
         "resources": {
-          "sampledHeapBytes": 154108880,
-          "peakRssBytes": 316395520,
+          "sampledHeapBytes": 154179328,
+          "peakRssBytes": 315109376,
           "peakHeapBytes": null,
-          "teardownMs": 0.06739600000003065,
+          "teardownMs": 0.0697699999999486,
           "remainingHandles": null
         }
       },
       "metrics": {
         "grid": {
-          "interactionMs": 1.4496770000000083,
+          "interactionMs": 1.3650269999999978,
           "mountedCells": 170,
           "loadedRows": 256,
           "loadedBytes": 9732,
-          "browserGzipBytes": 16815
+          "browserGzipBytes": 23274
         },
         "resources": {
-          "sampledHeapBytes": 20432552,
-          "peakRssBytes": 111325184,
-          "teardownMs": 0.17732400000005555,
+          "sampledHeapBytes": 25323088,
+          "peakRssBytes": 130674688,
+          "teardownMs": 0.22656200000000126,
           "remainingHandles": 0
         }
       },
@@ -77,13 +77,13 @@
         "peakMeasurements": 256,
         "measurementBytes": 8192
       },
-      "freshReferenceRangeMs": 0.020113999999978205,
+      "freshReferenceRangeMs": 0.020533000000000357,
       "budgets": {
         "grid": [
           {
             "metric": "interactionMs",
             "limit": 16,
-            "value": 1.4496770000000083,
+            "value": 1.3650269999999978,
             "status": "pass"
           },
           {
@@ -107,7 +107,7 @@
           {
             "metric": "browserGzipBytes",
             "limit": 65536,
-            "value": 16815,
+            "value": 23274,
             "status": "pass"
           }
         ],
@@ -115,13 +115,13 @@
           {
             "metric": "sampledHeapBytes",
             "limit": 268435456,
-            "value": 20432552,
+            "value": 25323088,
             "status": "pass"
           },
           {
             "metric": "peakRssBytes",
             "limit": 536870912,
-            "value": 111325184,
+            "value": 130674688,
             "status": "pass"
           },
           {
@@ -133,7 +133,7 @@
           {
             "metric": "teardownMs",
             "limit": 1000,
-            "value": 0.17732400000005555,
+            "value": 0.22656200000000126,
             "status": "pass"
           },
           {
@@ -152,27 +152,27 @@
       "baseline": {
         "relational": {
           "statements": 9,
-          "queryMs": 0.07843000000002576,
-          "recoveryMs": 30.53336999999965
+          "queryMs": 0.16028300000016316,
+          "recoveryMs": 49.204805000000306
         },
         "search": {
-          "startupMs": 2097.809369,
-          "coldIndexMs": 1023.787061,
-          "warmIndexMs": 417.8107470000002,
-          "queryMs": 66.3714399999999,
+          "startupMs": 2096.08727,
+          "coldIndexMs": 970.363576,
+          "warmIndexMs": 479.4585920000002,
+          "queryMs": 88.96456099999978,
           "sourceBytes": 20021733,
           "indexBytes": 15820123,
           "browserGzipBytes": 5873
         },
         "grid": {
-          "interactionMs": 5.078139000000192,
+          "interactionMs": 7.882446000000527,
           "mountedCells": null,
           "loadedRows": null,
           "loadedBytes": null,
           "browserGzipBytes": 7053
         },
         "formulas": {
-          "evaluationMs": 10.225072000000182,
+          "evaluationMs": 12.517950999999812,
           "errors": 1,
           "originalByteChanges": 0
         },
@@ -184,25 +184,25 @@
           "unresolvedResends": null
         },
         "resources": {
-          "sampledHeapBytes": 1007375520,
-          "peakRssBytes": 1203056640,
+          "sampledHeapBytes": 1020055816,
+          "peakRssBytes": 1209151488,
           "peakHeapBytes": null,
-          "teardownMs": 0.08108400000037363,
+          "teardownMs": 0.10071000000061758,
           "remainingHandles": null
         }
       },
       "metrics": {
         "grid": {
-          "interactionMs": 0.30666900000005626,
+          "interactionMs": 0.2563840000000255,
           "mountedCells": 160,
           "loadedRows": 256,
           "loadedBytes": 10244,
-          "browserGzipBytes": 16815
+          "browserGzipBytes": 23274
         },
         "resources": {
-          "sampledHeapBytes": 96922424,
-          "peakRssBytes": 269107200,
-          "teardownMs": 0.047211999999944965,
+          "sampledHeapBytes": 82782312,
+          "peakRssBytes": 288440320,
+          "teardownMs": 0.05545299999994313,
           "remainingHandles": 0
         }
       },
@@ -212,13 +212,13 @@
         "peakMeasurements": 256,
         "measurementBytes": 8448
       },
-      "freshReferenceRangeMs": 8.079557000000023,
+      "freshReferenceRangeMs": 7.861282999999958,
       "budgets": {
         "grid": [
           {
             "metric": "interactionMs",
             "limit": 32,
-            "value": 0.30666900000005626,
+            "value": 0.2563840000000255,
             "status": "pass"
           },
           {
@@ -242,7 +242,7 @@
           {
             "metric": "browserGzipBytes",
             "limit": 65536,
-            "value": 16815,
+            "value": 23274,
             "status": "pass"
           }
         ],
@@ -250,13 +250,13 @@
           {
             "metric": "sampledHeapBytes",
             "limit": 805306368,
-            "value": 96922424,
+            "value": 82782312,
             "status": "pass"
           },
           {
             "metric": "peakRssBytes",
             "limit": 1073741824,
-            "value": 269107200,
+            "value": 288440320,
             "status": "pass"
           },
           {
@@ -268,7 +268,7 @@
           {
             "metric": "teardownMs",
             "limit": 2000,
-            "value": 0.047211999999944965,
+            "value": 0.05545299999994313,
             "status": "pass"
           },
           {

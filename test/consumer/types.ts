@@ -1579,6 +1579,36 @@ syncHostCursor[Symbol.dispose]();
 const syncHostPage: Page<Readonly<{ id: number }>> = syncHostItems.page({}, { limit: 2 });
 void syncHostPage.continuation;
 
+// Materialized graph loads share their profile and preflight controls across
+// tracked, untracked, generated and synchronous entity surfaces.
+async function profiledGraphLoads(): Promise<void> {
+  const options = { profile: { maxRows: 2 }, signal: new AbortController().signal, deadline: Date.now() + 1000 };
+  const raw = rawDbStore.entity('User');
+  await raw.load({}, options);
+  await raw.asNoTracking().load({}, options);
+  const users = genStore.entity('User');
+  const tracked = await users.load({ include: { posts: true } }, options);
+  const untracked = await users.asNoTracking().load({ include: { posts: true } }, options);
+  const posts: Post[] = tracked[0].posts;
+  const untrackedPosts: Post[] = untracked[0].posts;
+  const syncRows: ReadonlyArray<Readonly<{ id: number }>> = syncHostItems.load({}, options);
+  const syncUntracked: { id: number }[] = syncHostItems.asNoTracking().load({}, options);
+  for (const explanation of [raw.explainLoad({}, options), users.explainLoad({}, options),
+    syncHostItems.explainLoad({}, options)]) {
+    const rowBound: number | null = explanation.budget.rows;
+    const source: 'call' | 'store' | undefined = explanation.budget.profile?.source;
+    const streaming: 'row' | 'buffered' = explanation.streaming;
+    const barrier: string | undefined = explanation.barrier?.reason;
+    void [rowBound, source, streaming, barrier];
+  }
+  // @ts-expect-error — a materialized load has no strict-streaming option
+  await raw.load({}, { strictStreaming: true });
+  // @ts-expect-error — explainLoad resolves the profile without running a statement
+  users.explainLoad({}, { signal: options.signal });
+  void [posts, untrackedPosts, syncRows, syncUntracked];
+}
+void profiledGraphLoads;
+
 import { nodeWorkerDriver, type WorkerMetrics } from '@jarenjs/db/node-worker';
 import { nodeWorkerPoolDriver, type PoolMetrics } from '@jarenjs/db/node-pool';
 import { indexedDbSnapshotHandle, openSnapshotStorage } from '@jarenjs/db/wasm';
