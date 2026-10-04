@@ -210,6 +210,10 @@ session, so the driver destroys the session instead of returning it to its
 pool, and the server releases the lock with it; over one injected client with
 no `release`, that disposal is the host's. The refusal names no holder
 (`owner` and `expiresAt` are `null`); its reason names the schema.
+With a `pg.Pool`, the discard's `release(error)` returns before physical
+socket shutdown finishes. Until the server ends that session, a replacement
+owner can still receive the retryable `JD2061`; an ordinary successful unlock
+is acknowledged before `close()` returns.
 
 **On both.** The lease is cooperative: only an open that asks for `owner` takes
 or checks it, and a writable open without `owner` still writes. A read-only
@@ -702,11 +706,11 @@ On pool-3-readers, `reads: 'parallel'` runs the Store-level mixed work 2.47× fa
 
 | Bun 1.4.2 executable | Rows written | Rows streamed | Long read ms | Event-loop max ms |
 |---|---:|---:|---:|---:|
-| worker | 20001 | 20001 | 272.47 | 1.46 |
-| pool | 20001 | 20001 | 335.09 | 1.96 |
-| in-thread | 20001 | 20001 | 87.13 | 86.71 |
+| worker | 20001 | 20001 | 392.30 | 1.87 |
+| pool | 20001 | 20001 | 464.20 | 8.55 |
+| in-thread | 20001 | 20001 | 106.39 | 106.23 |
 
-Built with `bun build --compile ./worker-app.js ./worker-endpoint.js --outfile worker-hosts-bun` and run with every source and module path removed; the long read is 5 whole-collection reads of 20001 rows. The worker host held the event loop at most 1.46 ms against the 50 ms bound and took 3.13× as long as the in-thread binding, which held the loop 86.71 ms. The pool host held the event loop at most 1.96 ms against the 50 ms bound and took 3.85× as long as the in-thread binding, which held the loop 86.71 ms. Built without the second entrypoint, the open refused: worker JD0003 (retryable: false), pool JD0003 (retryable: false). The side-effect import of `@jarenjs/db/worker-endpoint`, bundled alone, keeps the endpoint: 98528 bytes with Bun, 133413 with esbuild.
+Built with `bun build --compile ./worker-app.js ./worker-endpoint.js --outfile worker-hosts-bun` and run with every source and module path removed; the long read is 5 whole-collection reads of 20001 rows. The worker host held the event loop at most 1.87 ms against the 50 ms bound and took 3.69× as long as the in-thread binding, which held the loop 106.23 ms. The pool host held the event loop at most 8.55 ms against the 50 ms bound and took 4.36× as long as the in-thread binding, which held the loop 106.23 ms. Built without the second entrypoint, the open refused: worker JD0003 (retryable: false), pool JD0003 (retryable: false). The side-effect import of `@jarenjs/db/worker-endpoint`, bundled alone, keeps the endpoint: 98528 bytes with Bun, 133413 with esbuild.
 
 | Include accounting | Encoded bytes | Time p50 ms | Uncollected heap growth p50 MiB |
 |---|---:|---:|---:|

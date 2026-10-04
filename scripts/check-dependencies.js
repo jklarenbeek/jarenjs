@@ -95,6 +95,19 @@ const KNOWN_TOOLING_ADVISORIES = {
   'prisma': 'ORM benchmark rival (benchmark workspace only); pinned to the version the orm suite measures',
   '@prisma/config': 'transitive under prisma (benchmark rival); the config loader that pulls deepmerge-ts',
   'deepmerge-ts': 'transitive under @prisma/config (benchmark rival); the advisory is a stack exhaustion on recursive config graphs, unreachable from anything jaren ships',
+  // GHSA-vfj7-8cjw-p6xm (reviewed 2026-10-02): braces <=3.0.3 has
+  // unbounded recursion for deeply nested brace PATTERNS. There is no
+  // patched braces release; gh-pages 6.3.0 is also the latest release.
+  // The website deploy scripts use gh-pages' fixed default patterns,
+  // not patterns supplied by site visitors. npm suggests downgrading
+  // gh-pages to 6.1.1. Keep the current deployment tool and name its
+  // transitive findings; none is in a published package's closure.
+  // https://github.com/advisories/GHSA-vfj7-8cjw-p6xm
+  'braces': 'unpatched nested-pattern stack exhaustion under gh-pages; repository-controlled deployment patterns only, absent from shipped packages',
+  'micromatch': 'transitive under gh-pages via globby and fast-glob; see the braces advisory above',
+  'fast-glob': 'transitive under gh-pages via globby; see the braces advisory above',
+  'globby': 'transitive under the website deployment tool gh-pages; see the braces advisory above',
+  'gh-pages': 'website deployment tooling only; current release still depends on unpatched braces, with fixed default patterns in this repository',
 };
 
 /*

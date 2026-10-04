@@ -1823,6 +1823,20 @@ export function openStore(model, options) {
           holdTimeoutMs: expired.holdTimeoutMs, elapsedMs: expired.elapsedMs });
         return error;
       };
+      /**
+       * Check the monotonic deadline even when synchronous work or a chain
+       * of microtasks has not let the timer run. A settled body clears its
+       * start time, so an ordinary escaped handle stays JD2070 afterwards.
+       * @param {any} root
+       */
+      const checkHold = (root) => {
+        if (root.holdStarted !== undefined && root.expired === null) {
+          const elapsed = performance.now() - root.holdStarted;
+          if (elapsed >= root.hold)
+            root.expired = Object.freeze({ holdTimeoutMs: root.hold, elapsedMs: Math.round(elapsed) });
+        }
+        return root.expired;
+      };
       /** The body a JD2098 is still waiting on, by the error the rollback raised.
        * @type {WeakMap<object, Promise<unknown>>} */
       const heldBodies = new WeakMap();
@@ -2113,7 +2127,8 @@ export function openStore(model, options) {
        * `JD2098`; the handle operations already in flight finish; then the
        * body's race is lost: the driver rolls the transaction back and
        * hands the connection on, while the body itself may still be
-       * awaiting. A body that settles synchronously never met the clock.
+       * awaiting. Admission and settlement check the same deadline, so a
+       * body cannot outrun it by keeping the timer off the event loop.
        * @param {any} root
        * @param {() => any} run
        * @returns {any}
@@ -2121,12 +2136,21 @@ export function openStore(model, options) {
       const holdAround = (root, run) => {
         if (root === null || root.hold === undefined) return run();
         const started = performance.now();
-        const out = run();
-        if (!isThenable(out)) return out;
+        root.holdStarted = started;
+        let out;
+        try { out = run(); }
+        catch (error) { out = Promise.reject(error); }
+        if (!isThenable(out) && checkHold(root) === null) {
+          root.holdStarted = undefined;
+          return out;
+        }
+        const body = toPromise(out);
         return new Promise((resolve, reject) => {
           let expired = false;
-          const timer = setTimeout(() => {
+          const expire = () => {
+            if (expired) return;
             expired = true;
+            clearTimeout(timer);
             // the handles refuse from this instant...
             root.expired = Object.freeze({ holdTimeoutMs: root.hold,
               elapsedMs: Math.round(performance.now() - started) });
@@ -2135,8 +2159,9 @@ export function openStore(model, options) {
               // finished: `elapsedMs` says when that was
               root.expired = Object.freeze({ holdTimeoutMs: root.hold,
                 elapsedMs: Math.round(performance.now() - started) });
+              root.holdStarted = undefined;
               const error = heldTooLong(root.expired);
-              heldBodies.set(error, toPromise(out));
+              heldBodies.set(error, body);
               try {
                 abandonCapture();
               }
@@ -2146,10 +2171,18 @@ export function openStore(model, options) {
                 reject(error);
               }
             });
-          }, root.hold);
-          toPromise(out).then(
-            (value) => { clearTimeout(timer); if (!expired) resolve(value); },
-            (error) => { clearTimeout(timer); if (!expired) reject(error); });
+          };
+          const timer = setTimeout(expire, Math.max(1, Math.ceil(root.hold - (performance.now() - started))));
+          /** @param {(value: any) => void} settle @param {any} value */
+          const finish = (settle, value) => {
+            if (expired) return;
+            if (checkHold(root) !== null) { expire(); return; }
+            clearTimeout(timer);
+            root.holdStarted = undefined;
+            settle(value);
+          };
+          body.then((value) => finish(resolve, value), (error) => finish(reject, error));
+          if (checkHold(root) !== null) expire();
         });
       };
 
@@ -3977,7 +4010,7 @@ export function openStore(model, options) {
             // a transaction its hold limit rolled back: every handle it gave
             // out refuses with the reason, not as a stale scope
             const root = rootOf(identity);
-            if (root !== undefined && root.expired !== null) throw heldTooLong(root.expired);
+            if (root !== undefined && checkHold(root) !== null) throw heldTooLong(root.expired);
             if (ctx().currentScope === identity) return;
             throw new DbRuntimeError('JD2070',
               'this transaction handle is pinned to a scope that is not current: '

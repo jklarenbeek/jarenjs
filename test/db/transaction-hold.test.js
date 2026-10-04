@@ -103,6 +103,63 @@ async function nestedOutlivesItsRoot(store) {
 }
 
 describe('holdTimeoutMs', () => {
+  it('counts the synchronous extent and checks the deadline before settling a body', async (t) => {
+    let now = 0;
+    t.mock.method(performance, 'now', () => now);
+    const store = await openStore(MODEL, { driver: nodeDriver() });
+    try {
+      for (const asynchronous of [false, true]) {
+        const body = (tx) => {
+          tx.sync.collection('docs').put({ id: 'overdue' }, 'overdue');
+          now += 1001;
+          return 'too late';
+        };
+        await assert.rejects(store.transaction(asynchronous ? async (tx) => body(tx) : body,
+          { holdTimeoutMs: 1000 }), (error) => {
+          assert.equal(error.code, 'JD2098');
+          assert.equal(error.elapsedMs, 1001);
+          return true;
+        });
+        assert.equal(await store.collection('docs').get('overdue'), undefined);
+      }
+    }
+    finally { await store.close(); }
+  });
+
+  it('fences overdue handles and rolls back capture even when microtasks keep the timer from firing', async (t) => {
+    let now = 0;
+    t.mock.method(performance, 'now', () => now);
+    for (const mode of ['session', 'journal']) {
+      const store = await openStore(MODEL, { driver: nodeDriver(), capture: { mode } });
+      const recorded = [];
+      store.observe((record) => { for (const op of record.patch) recorded.push(`${op.op} ${op.path}`); });
+      let expired;
+      try {
+        await assert.rejects(store.transaction(async (tx) => {
+          expired = tx;
+          await tx.collection('docs').put({ id: 'before' }, 'before');
+          now += 1001;
+          await Promise.resolve();
+          await assert.rejects(tx.collection('docs').put({ id: 'after' }, 'after'), coded('JD2098'));
+          // Catching the handle's timeout cannot turn the body into a commit.
+          return 'caught';
+        }, { holdTimeoutMs: 1000 }), coded('JD2098'));
+        assert.equal(await store.collection('docs').get('before'), undefined);
+        assert.equal(await store.collection('docs').get('after'), undefined);
+        await assert.rejects(expired.collection('docs').get('before'), coded('JD2098'));
+        let completed;
+        await store.transaction(async (tx) => {
+          completed = tx;
+          await tx.collection('docs').put({ id: 'next' }, 'next');
+        }, { holdTimeoutMs: 1000 });
+        now += 1001;
+        await assert.rejects(completed.collection('docs').get('next'), coded('JD2070'));
+        assert.deepEqual(recorded, ['add /docs/next'], mode);
+      }
+      finally { await store.close(); }
+    }
+  });
+
   it('in-thread SQLite: rolled back at the limit, the connection handed on, the handle fenced', async () => {
     const store = await openStore(MODEL, { driver: nodeDriver() });
     try { await heldTooLong(store); }

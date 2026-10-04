@@ -11,6 +11,7 @@
  */
 import { after, before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { once } from 'node:events';
 import { setTimeout as delay } from 'node:timers/promises';
 import { openStore } from '@jarenjs/db';
 import { postgresDriver } from '@jarenjs/db/postgres';
@@ -56,12 +57,13 @@ describe('PostgreSQL: the owner session lock', { skip: !url && 'JAREN_PG_URL is 
     pools.push(made);
     return made;
   };
-  /** How many sessions hold the owner lock on this schema: its second key
+  /** Sessions holding the owner lock on this schema: its second key
    * is the schema's OID, shifted into int4 (pg_locks shows it unsigned). */
-  const holders = async () => (await admin.query("SELECT count(*)::int AS n FROM pg_catalog.pg_locks l "
+  const holdingSessions = async () => (await admin.query("SELECT l.pid FROM pg_catalog.pg_locks l "
     + "WHERE l.locktype = 'advisory' AND l.granted AND l.classid = $1::oid "
     + 'AND l.objid = (((SELECT n.oid FROM pg_catalog.pg_namespace n WHERE n.nspname = $2)::int8 - 2147483648) '
-    + '& 4294967295)::oid', [POSTGRES_LOCK_CLASSES.owner, schema])).rows[0].n;
+    + '& 4294967295)::oid', [POSTGRES_LOCK_CLASSES.owner, schema])).rows;
+  const holders = async () => (await holdingSessions()).length;
   /** @param {any} source @param {Record<string, any>} [more] */
   const openOwner = (source, more = {}) => openStore(MODEL,
     { driver: postgresDriver(source, { schema }), owner: { id: 'service' }, ...more });
@@ -124,9 +126,14 @@ describe('PostgreSQL: the owner session lock', { skip: !url && 'JAREN_PG_URL is 
     // a body that never settles holds the gate, so the release outwaits it
     first.transaction(() => new Promise(() => {})).catch(() => {});
     await delay(20);
+    const removed = once(shared, 'remove');
     await first.close();
-    assert.equal(await holders(), 0, 'the server released the destroyed session\'s lock');
     assert.equal(shared.totalCount, 0, 'the session was destroyed, not returned to its pool');
+    // pg.Pool's release(error) returns void: removal from its reusable
+    // clients precedes physical socket shutdown. Observe that shutdown,
+    // not a race between two connections reaching the server.
+    await removed;
+    assert.equal(await holders(), 0, 'the server released the destroyed session\'s lock');
     const second = await openOwner(pool());
     await second.close();
   });
@@ -171,8 +178,7 @@ describe('PostgreSQL: the owner session lock', { skip: !url && 'JAREN_PG_URL is 
   it('a session that ends releases the lock on the server', async () => {
     const first = await openOwner(pool());
     try {
-      const { rows } = await admin.query("SELECT l.pid FROM pg_catalog.pg_locks l WHERE l.locktype = 'advisory' AND l.granted "
-        + 'AND l.classid = $1::oid', [POSTGRES_LOCK_CLASSES.owner]);
+      const rows = await holdingSessions();
       assert.equal(rows.length, 1);
       await admin.query('SELECT pg_catalog.pg_terminate_backend($1)', [rows[0].pid]);
       for (let i = 0; i < 200 && await holders() > 0; i++) await delay(10);

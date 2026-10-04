@@ -1,7 +1,7 @@
 //@ts-check
 /** Required live-server gate: an absent endpoint or skipped case is a failure. */
 import { spawnSync } from 'node:child_process';
-import { readdirSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 
@@ -30,8 +30,12 @@ try {
   console.log(JSON.stringify({ postgres: row, extensions, node: process.version }));
 }
 finally { await client.end(); }
-const files = readdirSync(new URL('../test/db/', import.meta.url))
-  .filter((name) => name.startsWith('postgres-') && name.endsWith('.test.js')).sort()
+const testDirectory = new URL('../test/db/', import.meta.url);
+// Portable host suites also contain live PostgreSQL cases. The required
+// endpoint must exercise those, even when their filenames name a capability.
+const files = readdirSync(testDirectory)
+  .filter((name) => name.endsWith('.test.js') && (name.startsWith('postgres-')
+    || readFileSync(new URL(name, testDirectory), 'utf8').includes('JAREN_PG_URL'))).sort()
   .map((name) => `test/db/${name}`);
 const result = spawnSync(process.execPath, ['--no-warnings=ExperimentalWarning', '--test',
   '--test-isolation=none', '--test-timeout=120000', '--test-reporter=tap', ...files],

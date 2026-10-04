@@ -1042,6 +1042,10 @@ the body is committed. A nested transaction or a capture scope still
 open at the limit settles into nothing. On in-thread SQLite a
 synchronous statement blocks the event loop, so the limit acts after it
 returns (`capabilities.cancellation.midStatement` stays `false`).
+Handle admission and body settlement also check the monotonic deadline:
+synchronous work and chains of microtasks cannot bypass it while the
+timer waits for the event loop. A body that finishes past its limit rolls
+back even if it caught an earlier handle's `JD2098`.
 `retry` and `holdTimeoutMs` act on the asynchronous root only: the
 synchronous twin cannot wait and a nested transaction inherits its
 root's — both are `JD0014` there. A `store.transaction` (or
