@@ -1359,7 +1359,10 @@ every other store operation is admitted:
   binding. A statement the bound evicts is finalized once no call runs
   on it — a worker keeps every statement it prepared until told
   otherwise, so an unfinalized one held a slot of its `maxStatements`
-  forever. Cursors prepare their own. A table's rowid-ness is read from
+  forever. Pending preparation and execution keep their borrow until they
+  settle; cleanup failures do not replace the operation's answer or error.
+  A failed preparation is discarded so a later call can retry. Cursors prepare
+  their own. A table's rowid-ness is read from
   the catalog on every reported insert, never remembered: a table
   recreated `WITHOUT ROWID` changed its answer. Virtual tables (FTS5,
   R*Tree) keep rowids and report them.

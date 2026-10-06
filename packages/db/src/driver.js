@@ -184,10 +184,44 @@ export function attempt(call, wrap) {
     : out;
 }
 
+/** Release a prepared value or promise without replacing the call's outcome.
+ * @param {any} prepared
+ */
+function releaseStatement(prepared) {
+  try {
+    void Promise.resolve(chain(prepared, (statement) => statement.finalize?.())).catch(() => {});
+  }
+  catch {
+    // a statement its connection already discarded
+  }
+}
+
+/** Settle a borrow on every completion path without making sync calls async.
+ * @template T
+ * @param {() => T | Promise<T>} call
+ * @param {() => void} done
+ * @returns {T | Promise<T>}
+ */
+function settleStatementUse(call, done) {
+  let out;
+  try {
+    out = call();
+  }
+  catch (error) {
+    done();
+    throw error;
+  }
+  if (!isThenable(out)) {
+    done();
+    return out;
+  }
+  return /** @type {Promise<T>} */ (out).then((value) => { done(); return value; },
+    (error) => { done(); throw error; });
+}
+
 /**
- * Prepare `sql` for one use and release it once that use ends, however it
- * ends: a worker keeps every statement it prepared until it is finalized, so
- * a statement prepared per call and never released filled its capacity.
+ * Prepare `sql` for one use and release it after that use settles. A worker
+ * keeps every prepared statement until finalized; cleanup is best effort.
  * @template T
  * @param {any} connection
  * @param {string} sql
@@ -196,30 +230,61 @@ export function attempt(call, wrap) {
  * @returns {T | Promise<T>}
  */
 export function useStatementOnce(connection, sql, use, options = undefined) {
-  return chain(options === undefined ? connection.prepare(sql) : connection.prepare(sql, options), (statement) => {
-    const release = () => {
-      try {
-        void Promise.resolve(statement.finalize?.()).catch(() => {});
-      }
-      catch {
-        // a statement its connection already discarded
-      }
-    };
-    let out;
-    try {
-      out = use(statement);
+  return chain(options === undefined ? connection.prepare(sql) : connection.prepare(sql, options), (statement) =>
+    settleStatementUse(() => use(statement), () => releaseStatement(statement)));
+}
+
+/**
+ * Retain one preparation and borrow it for complete operations. Retirement
+ * waits for all admitted uses, including pending preparation. Later uses
+ * prepare independent temporary statements, never a finalized handle.
+ * Preparation starts here so a synchronous refusal precedes cache insertion;
+ * a rejected preparation is forgotten and the next use retries it.
+ * @param {any} connection
+ * @param {string} sql
+ * @param {{ readOnly?: boolean }} [options]
+ * @param {() => void} [failed] - Drop this owner from its cache after a
+ *   rejected preparation; the cache must check that it still holds this owner.
+ * @returns {{ use: <T>(use: (statement: any) => T | Promise<T>) => T | Promise<T>, retire: () => void }}
+ */
+export function createStatementOwner(connection, sql, options = undefined, failed = undefined) {
+  let made;
+  let ready = null;
+  let uses = 0;
+  let retired = false;
+  const prepare = () => {
+    const pending = options === undefined ? connection.prepare(sql) : connection.prepare(sql, options);
+    if (isThenable(pending)) {
+      pending.then((statement) => {
+        if (made === pending) ready = statement;
+      }, () => {
+        if (made === pending) made = null;
+        failed?.();
+      });
     }
-    catch (error) {
-      release();
-      throw error;
-    }
-    if (!isThenable(out)) {
-      release();
-      return out;
-    }
-    return /** @type {Promise<T>} */ (out).then((value) => { release(); return value; },
-      (error) => { release(); throw error; });
-  });
+    return pending;
+  };
+  made = prepare();
+  const releaseIdle = () => {
+    if (!retired || uses > 0 || made === null) return;
+    // Keep `made`'s promise shape for callers, but release a resolved
+    // handle immediately, before a following prepare can consume its slot.
+    const prepared = ready ?? made;
+    made = null;
+    ready = null;
+    releaseStatement(prepared);
+  };
+  return {
+    use: (use) => {
+      if (retired) return useStatementOnce(connection, sql, use, options);
+      uses++;
+      return settleStatementUse(() => {
+        if (made === null) made = prepare();
+        return chain(made, use);
+      }, () => { uses--; releaseIdle(); });
+    },
+    retire: () => { retired = true; releaseIdle(); },
+  };
 }
 
 /**

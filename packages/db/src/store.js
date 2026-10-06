@@ -29,7 +29,7 @@ import { parseJSONPointer, compileJSONPointer, JSONPOINTER_NOTHING } from '@jare
 import { equalsJson } from '@jarenjs/core/object';
 
 import { DbCompileError, DbRuntimeError, wrapDriverError, isDriverError, classifyDriverError } from './errors.js';
-import { chain, toPromise, isThenable, attempt, abortReason } from './driver.js';
+import { chain, toPromise, isThenable, attempt, abortReason, createStatementOwner } from './driver.js';
 import { createSessionRouter } from './sessions.js';
 import { isPlainOptions, refuseUnknownMembers, readOptions, readControls } from './options.js';
 import { canonicalKeyText, namesNoNumber } from './key-text.js';
@@ -3730,59 +3730,23 @@ export function openStore(model, options) {
           // cache, as the query cache is bounded: a document with externals
           // plans one text for every binding, and a worker host caps the
           // statements it keeps.
-          /**
-           * One cached statement: the prepared statement (value-or-promise),
-           * the calls running on it, and whether the cache let it go. An
-           * evicted statement is finalized once no call runs on it — a
-           * worker keeps every statement it prepared until told otherwise,
-           * so without this the bound bounded nothing on a worker host.
-           * @typedef {{ made: any, uses: number, evicted: boolean }} CachedStatement
-           */
-          /** @param {CachedStatement} entry */
-          const finalizeIdle = (entry) => {
-            if (!entry.evicted || entry.uses > 0) return;
-            try {
-              void Promise.resolve(chain(entry.made, (/** @type {any} */ statement) => statement.finalize?.())).catch(() => {});
-            }
-            catch {
-              // a statement its connection already discarded
-            }
-          };
           const relationalStatements = createBoundedCache(options.statementCacheBound ?? 128,
-            (/** @type {string} */ _key, /** @type {CachedStatement} */ entry) => { entry.evicted = true; finalizeIdle(entry); });
+            (/** @type {string} */ _key, /** @type {ReturnType<typeof createStatementOwner>} */ entry) => entry.retire());
           /** @param {any} where @param {string} sql @param {any} [metadata] */
           const prepareRelational = (where, sql, metadata) => {
             const key = `${metadata?.readOnly === true ? 'read' : 'write'}\u0000${sql}`;
-            /** @type {CachedStatement | undefined} */
             let entry = relationalStatements.get(key);
             if (entry === undefined) {
-              const made = { made: where.prepare(sql, metadata), uses: 0, evicted: false };
+              const made = createStatementOwner(where, sql, metadata, () => {
+                if (relationalStatements.get(key) === made) relationalStatements.delete(key);
+              });
               relationalStatements.set(key, made);
-              // a refused preparation is not a statement to keep
-              if (isThenable(made.made)) {
-                made.made.then(undefined, () => { if (relationalStatements.get(key) === made) relationalStatements.delete(key); });
-              }
               entry = made;
             }
             const held = entry;
             /** @param {'run' | 'get' | 'all'} method */
-            const use = (method) => (/** @type {any[]} */ params) => {
-              held.uses += 1;
-              const done = () => { held.uses -= 1; finalizeIdle(held); };
-              let out;
-              try {
-                out = chain(held.made, (/** @type {any} */ statement) => statement[method](params));
-              }
-              catch (error) {
-                done();
-                throw error;
-              }
-              if (!isThenable(out)) {
-                done();
-                return out;
-              }
-              return toPromise(out).finally(done);
-            };
+            const use = (method) => (/** @type {any[]} */ params) =>
+              held.use((statement) => statement[method](params));
             return { run: use('run'), get: use('get'), all: use('all') };
           };
           const relationalBase = { dialect, connection: opened, prepare: prepareRelational };

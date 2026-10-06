@@ -378,17 +378,20 @@ describe('parallel root reads on the pool host', () => {
     const pool = await nodeWorkerPoolDriver({ readers: 1 }).open(dbPath);
     try {
       await pool.exec('CREATE TABLE t (n INTEGER); INSERT INTO t VALUES (1)');
+      const startLate = Promise.withResolvers();
       /** @type {Promise<any>} */
       let late = Promise.resolve();
       const answered = await pool.shared(async () => {
-        // work the read sets going and does not await: it outlives the read
-        late = new Promise((resolve) => setTimeout(resolve, 20))
+        // Register inside the read's context, then release only after it ends.
+        late = startLate.promise
           .then(async () => (await pool.prepare('SELECT n FROM t', { readOnly: true })).get());
         return (await (await pool.prepare('SELECT n FROM t', { readOnly: true })).get()).n;
       });
       assert.equal(answered, 1);
-      await assert.rejects(late, (error) => error.code === 'JD2090' && error.retryable === false
+      const refused = assert.rejects(late, (error) => error.code === 'JD2090' && error.retryable === false
         && /parallel read that had ended/.test(error.message));
+      startLate.resolve(undefined);
+      await refused;
       // the reader it held serves the next read as usual
       assert.equal((await pool.shared(async () => (await (await pool.prepare('SELECT n FROM t', { readOnly: true })).get()).n)), 1);
     }

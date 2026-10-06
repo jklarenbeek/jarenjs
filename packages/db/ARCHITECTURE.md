@@ -25,6 +25,15 @@ exactly once per call. Where the connection is synchronous the same
 operation cores are exposed promise-free under `store.sync`; where it
 is not, `store.sync` is absent rather than stubbed.
 
+The driver layer also owns prepared-statement lifetimes. Its private
+`createStatementOwner` retains a preparation across calls; each `use` borrows it
+through preparation and operation settlement. `retire` releases it only after
+the final borrow, and a later use prepares an independent temporary statement.
+The relational cache delegates eviction to this owner. Failed preparations are
+forgotten so a deliberate later call can retry. `useStatementOnce` handles
+temporary preparations; both owners share settlement and best-effort optional
+finalization, preserving synchronous returns and the operation's original error.
+
 Capabilities are probed once at open (version, compile options,
 binding declaration) and frozen. Two slots — `statementTimeout` and
 `rowEstimates` — are `false` on every SQLite driver because the
@@ -934,8 +943,6 @@ serialization, never a fingerprint of it: a 32-bit content hash
 collides after tens of thousands of documents, and a collision here
 answers one query with another query's plan and rows (the
 cache-identity test exists to keep that key abolished).
-`store.stats()` exposes hits, misses and evictions so the cache is
-proven rather than assumed.
 `store.stats()` exposes hits, misses and evictions, so the cache is
 proven rather than assumed.
 

@@ -132,11 +132,14 @@ export function createBoundedCache(limit, onEvict = undefined) {
  * do injectively once `a` may itself contain the separator.
  * @template V
  * @param {number} limit - Maximum number of retained entries (> 0)
+ * @param {(identity: string, entry: V) => void} [onEvict] - Called after
+ *   a capacity eviction, with the complete semantic identity and entry.
+ *   Replacement, clear and unkeyable values do not invoke it.
  * @returns {SemanticCache<V>}
  */
-export function createSemanticCache(limit) {
+export function createSemanticCache(limit, onEvict = undefined) {
   /** @type {BoundedCache<string, V>} */
-  const cache = createBoundedCache(limit);
+  const cache = createBoundedCache(limit, onEvict);
 
   /** @param {any} value @returns {string | null} */
   const identify = (value) => {

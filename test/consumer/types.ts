@@ -1,7 +1,7 @@
 import { isStringType } from '@jarenjs/core';
 import { getStringLength } from '@jarenjs/core/string';
 import { isJsonNumberString } from '@jarenjs/core/number';
-import { createBoundedCache } from '@jarenjs/core/cache';
+import { createBoundedCache, createSemanticCache } from '@jarenjs/core/cache';
 import {
   compileJsonQuery, analyzeQuery, annotateTypes,
   NODE_KINDS, TYPE_TAGS, AST_VERSION,
@@ -69,6 +69,15 @@ const boundedCache = createBoundedCache<string, number>(2);
 boundedCache.set('entry', 1);
 const removed: boolean = boundedCache.delete('entry');
 void [jsonNumber, removed];
+const semanticCache = createSemanticCache<number>(2, (identity, entry) => {
+  const key: string = identity;
+  const value: number = entry;
+  void [key, value];
+});
+const retained: boolean = semanticCache.set({ document: '$' }, 1);
+void retained;
+// @ts-expect-error — semantic eviction supplies a serialized identity string
+createSemanticCache<number>(2, (_identity: number) => {});
 getStringLength(render({ name: 'Jaren' }));
 validate('Jaren');
 createTypeTestCompiler(validator);
