@@ -37,7 +37,7 @@ import { createSemanticCache } from '@jarenjs/core/cache';
 import { analyzeQuery, JsonQueryRuntimeError, renderQueryMessage } from '@jarenjs/json/query';
 
 import { DbCompileError, DbRuntimeError, wrapDriverError, classifyDriverError } from './errors.js';
-import { chain, attempt, isThenable } from './driver.js';
+import { chain, attempt, isThenable, createStatementOwner, useStatementOnce } from './driver.js';
 import { readOptions, readControls } from './options.js';
 import {
   planQuery, planEntityQuery, entityShape, planEntityPredicate, entityPathRef,
@@ -78,7 +78,11 @@ import {
 export function createQueryState(bound = undefined, operators = null,
   zoneProvider = undefined, now = undefined) {
   return {
-    cache: createSemanticCache(bound ?? 128),
+    cache: createSemanticCache(bound ?? 128, (_key, entry) => {
+      entry.retired = true;
+      for (const statement of entry.statements ?? []) statement.retire();
+      entry.statements = null;
+    }),
     counters: { hits: 0, misses: 0, evictions: 0 },
     /** Fragment identity → the SQL function name registered for it. */
     registered: new Map(),
@@ -97,22 +101,31 @@ export function createQueryState(bound = undefined, operators = null,
   };
 }
 
-/** Cache a successful read preparation without retaining a rejected promise.
- * Error classification belongs to the calling query surface.
- * @param {any} connection
- * @param {{ sql: string, statement: any }} entry
- * @returns {any} value-or-promise of the prepared statement
+/** Retain a plan by semantic identity; an unkeyable plan has only temporary
+ * statements. Cache counts describe plans, not their prepared children.
+ * @param {any} state @param {any} key @param {any} entry
  */
-function preparedRead(connection, entry) {
+function retainEntry(state, key, entry) {
+  const before = state.cache.size();
+  if (!state.cache.set(key, entry)) entry.retired = true;
+  else if (state.cache.size() === before) state.counters.evictions++;
+  return entry;
+}
+
+/** Borrow one prepared child through the complete operation, including any
+ * awaited binds. An evicted plan can still belong to a lazy cursor: its new
+ * children are temporary and its already borrowed children finish normally.
+ * @param {any} connection @param {any} entry
+ * @param {(statement: any) => any} use
+ * @param {any} [owner] - the semantic plan, or this separate bounded entry
+ */
+function useRead(connection, entry, use, owner = entry) {
+  if (owner.retired) return useStatementOnce(connection, entry.sql, use, { readOnly: true });
   if (entry.statement === null) {
-    let made;
-    made = attempt(() => connection.prepare(entry.sql, { readOnly: true }), (error) => {
-      if (entry.statement === made) entry.statement = null;
-      return error;
-    });
-    entry.statement = made;
+    entry.statement = createStatementOwner(connection, entry.sql, { readOnly: true });
+    (owner.statements ??= []).push(entry.statement);
   }
-  return entry.statement;
+  return entry.statement.use(use);
 }
 
 /**
@@ -535,7 +548,7 @@ export function createQueryEngine(context) {
         + '(the pushed aggregate overflowed int64 and the engine would read the whole collection)');
     }
     entry.overflowRuns = (entry.overflowRuns ?? 0) + 1;
-    return chain(fullScanOf(entry), (statement) =>
+    return fullScanOf(entry, (statement) =>
       chain(statement.all(fullScanParams(entry)), (rows) =>
         setResidualOf(entry, document)(rowsToDocs(checkRowBound(entry, rows)), externals)));
   };
@@ -729,13 +742,10 @@ export function createQueryEngine(context) {
       seriesCounts: null,
     };
 
-    const sizeBefore = state.cache.size();
-    if (state.cache.set(key, entry) && state.cache.size() === sizeBefore)
-      state.counters.evictions++;
-    return entry;
+    return retainEntry(state, key, entry);
   };
 
-  const statementOf = (entry) => preparedRead(connection, entry);
+  const statementOf = (entry, use) => useRead(connection, entry, use);
   const setResidualOf = (entry, document) => {
     if (entry.setResidual === null)
       entry.setResidual = compileSetResidual(document, entry.residualLimits, operators,
@@ -763,10 +773,7 @@ export function createQueryEngine(context) {
     }
     return entry.fullScanSql;
   };
-  const fullScanOf = (entry) => {
-    const emitted = fullScanEmitted(entry);
-    return preparedRead(connection, emitted);
-  };
+  const fullScanOf = (entry, use) => useRead(connection, fullScanEmitted(entry), use, entry);
   const fullScanParams = (entry) =>
     fullScanEmitted(entry).slots.map((slot) => ('literal' in slot ? slot.literal : null));
 
@@ -798,7 +805,7 @@ export function createQueryEngine(context) {
   const guardScan = (entry) => {
     if (!entry.needsScanCheck || entry.scanChecked) return null;
     const eqpParams = entry.slots.map((slot) => ('literal' in slot ? slot.literal : null));
-    return chain(connection.prepare(dialect.explainQuery(entry.sql), { readOnly: true }), (statement) =>
+    return useStatementOnce(connection, dialect.explainQuery(entry.sql), (statement) =>
       chain(statement.all(eqpParams), (rows) => {
         const lines = dialect.explainLines(rows);
         if (lines.some((line) => dialect.isFullScan(line, [physical.table]))) {
@@ -808,7 +815,7 @@ export function createQueryEngine(context) {
         }
         entry.scanChecked = true;
         return null;
-      }));
+      }), { readOnly: true });
   };
 
   /**
@@ -823,9 +830,6 @@ export function createQueryEngine(context) {
   const rankAlternativeFor = (entry, value) =>
     entry.rankAlternatives.find((alternative) =>
       probeVector(value, alternative.dims) !== null) ?? null;
-
-  /** One alternative's statement, prepared once and kept with the plan. */
-  const alternativeStatement = (alternative) => preparedRead(connection, alternative);
 
   /**
    * The anchors this entry's seeks answer, read before the statement
@@ -842,11 +846,11 @@ export function createQueryEngine(context) {
     const next = (i) => {
       if (i >= entry.seeks.length) return anchors;
       const seek = entry.seeks[i];
-      return chain(preparedRead(connection, seek), (prepared) =>
+      return useRead(connection, seek, (prepared) =>
         chain(prepared.get(seek.slots.map((slot) => slotValue(slot, {}))), (row) => {
           anchors[seek.name] = anchorValue(seek, row);
           return next(i + 1);
-        }));
+        }), entry);
     };
     return next(0);
   };
@@ -958,7 +962,7 @@ export function createQueryEngine(context) {
    */
   const divertBucket = (entry, document, externals) => {
     seriesStats.diverted++;
-    return chain(fullScanOf(entry), (statement) =>
+    return fullScanOf(entry, (statement) =>
       chain(statement.all(fullScanParams(entry)), (rows) => {
         const docs = rowsToDocs(checkRowBound(entry, rows));
         const answer = setResidualOf(entry, document)(docs, externals);
@@ -1017,7 +1021,7 @@ export function createQueryEngine(context) {
         entry = { sql: dialect.dml.selectByIdentities(physical, batch.size), statement: null };
         identityFetch.set(batch.size, entry);
       }
-      return chain(preparedRead(connection, entry), (prepared) => chain(prepared.all(batch.params), (rows) => {
+      return useRead(connection, entry, (prepared) => chain(prepared.all(batch.params), (rows) => {
         for (const row of rows) docs.push(JSON.parse(row.doc));
         return next(i + 1);
       }));
@@ -1040,7 +1044,7 @@ export function createQueryEngine(context) {
       ? entry.rankAlternatives[0]
       : rankAlternativeFor(entry, externals[rank.probe.ext]);
     const probe = entry.probe ?? probeVector(externals[rank.probe.ext], chosen.dims);
-    return chain(alternativeStatement(chosen), (statement) =>
+    return useRead(connection, chosen, (statement) =>
       chain(statement.all(chosen.slots.map((slot) => slotValue(slot, externals))), (rows) => {
         checkRowBound(entry, rows);
         const scored = rows.map((row) =>
@@ -1051,7 +1055,7 @@ export function createQueryEngine(context) {
         knnStats.candidates += cut.identities.length;
         if (cut.full) knnStats.fullFetches++;
         return fetchByIdentities(cut.identities);
-      }));
+      }), entry);
   };
 
   /**
@@ -1073,12 +1077,12 @@ export function createQueryEngine(context) {
       }
       if (entry.planned.mode === 'knn') knnStats.diverted++;
       else bindStats.diverted++;
-      return chain(fullScanOf(entry), (statement) =>
+      return fullScanOf(entry, (statement) =>
         chain(statement.all(fullScanParams(entry)), (rows) =>
           rowsToDocs(checkRowBound(entry, rows))));
     }
     if (entry.planned.mode === 'knn') return knnCandidates(entry, externals);
-    return chain(statementOf(entry), (statement) =>
+    return statementOf(entry, (statement) =>
       chain(runAll(entry, externals, statement), (rows) =>
         rowsToDocs(checkRowBound(entry, rows))));
   };
@@ -1149,7 +1153,7 @@ export function createQueryEngine(context) {
         });
       }
       if (entry.planned.mode === 'row') {
-        return chain(statementOf(entry), (statement) =>
+        return statementOf(entry, (statement) =>
           chain(runAll(entry, externals, statement), (rows) => {
             const items = [];
             for (const row of checkRowBound(entry, rows))
@@ -1158,7 +1162,7 @@ export function createQueryEngine(context) {
             return answerOf(entry, items);
           }));
       }
-      return chain(statementOf(entry), (statement) => {
+      return statementOf(entry, (statement) => {
         if (entry.plan.aggregate !== null) {
           return recoverOverflow(() => chain(runGet(entry, externals, statement), (row) => {
             const value = aggregateResult(entry, row);
@@ -1271,14 +1275,14 @@ export function createQueryEngine(context) {
     if (entry.plan.group !== null && entry.plan.aggregate === null) {
       // a native grouping is a barrier: the groups are the answer
       return cursorFactory({ ...classified, signal, deadline, now: state.now, wrap: driverWrap,
-        materialize: () => chain(guardScan(entry), () => chain(statementOf(entry), (statement) =>
+        materialize: () => chain(guardScan(entry), () => statementOf(entry, (statement) =>
           chain(runAll(entry, externals, statement), (rows) =>
             groupItems(entry.plan.group, checkRowBound(entry, rows))))) });
     }
     if (entry.plan.bucket !== null) {
       // a native bucket is a barrier: the groups are the answer
       return cursorFactory({ ...classified, signal, deadline, now: state.now, wrap: driverWrap,
-        materialize: () => chain(guardScan(entry), () => chain(statementOf(entry), (statement) =>
+        materialize: () => chain(guardScan(entry), () => statementOf(entry, (statement) =>
           chain(runAll(entry, externals, statement), (rows) => {
             const items = bucketItems(entry, checkRowBound(entry, rows));
             if (items === null) {
@@ -1293,7 +1297,7 @@ export function createQueryEngine(context) {
       // a native aggregate yields exactly one item; an int64 overflow
       // answers the engine's item instead
       return cursorFactory({ ...classified, signal, deadline, now: state.now, wrap: driverWrap,
-        materialize: () => chain(guardScan(entry), () => chain(statementOf(entry), (statement) =>
+        materialize: () => chain(guardScan(entry), () => statementOf(entry, (statement) =>
           recoverOverflow(() => chain(runGet(entry, externals, statement), (row) => {
             const value = aggregateResult(entry, row);
             countSeries(entry, statementCost(entry), null, value === undefined ? 0 : 1);
@@ -1425,7 +1429,7 @@ export function createQueryEngine(context) {
       : entry.planned.reasons;
 
     const rank = entry.plan.rank;
-    return chain(connection.prepare(dialect.explainQuery(chosen.sql), { readOnly: true }), (statement) =>
+    return useStatementOnce(connection, dialect.explainQuery(chosen.sql), (statement) =>
       chain(statement.all(eqpParams), (rows) => ({
         mode,
         // what a cursor over this call does — one row per pull, or a
@@ -1522,7 +1526,7 @@ export function createQueryEngine(context) {
           counts: entry.seriesCounts === null ? null : { ...entry.seriesCounts },
         },
         scanNarrative: dialect.explainLines(rows).join('; '),
-      })));
+      })), { readOnly: true });
   };
 
   return { execute: bounded(execute, driverWrap), query, explain: bounded(explain, driverWrap), shape,
@@ -1811,10 +1815,7 @@ export function createEntityQueryEngine(context) {
       entry.sql = emitted.sql;
       entry.slots = emitted.slots;
     }
-    const sizeBefore = state.cache.size();
-    if (state.cache.set(key, entry) && state.cache.size() === sizeBefore)
-      state.counters.evictions++;
-    return entry;
+    return retainEntry(state, key, entry);
   };
 
   /** Refuse a native fetch that crossed the profile's row bound (JD2007). */
@@ -1851,7 +1852,7 @@ export function createEntityQueryEngine(context) {
   const guardEntityScan = (entry) => {
     if (!entry.needsScanCheck || entry.scanChecked) return null;
     const eqpParams = entry.slots.map((slot) => ('literal' in slot ? slot.literal : null));
-    return chain(connection.prepare(dialect.explainQuery(entry.sql), { readOnly: true }), (statement) =>
+    return useStatementOnce(connection, dialect.explainQuery(entry.sql), (statement) =>
       chain(statement.all(eqpParams), (rows) => {
         // the entity statement aliases its tables `t0`, `t1`, … and the
         // database's narrative names the alias; a bare table name is
@@ -1865,7 +1866,7 @@ export function createEntityQueryEngine(context) {
         }
         entry.scanChecked = true;
         return null;
-      }));
+      }), { readOnly: true });
   };
 
   /** Fetch every referenced entity's rows and build the in-memory
@@ -1918,13 +1919,13 @@ export function createEntityQueryEngine(context) {
     const next = (i) => {
       if (i >= entry.fetchers.length) return root;
       const fetcher = entry.fetchers[i];
-      return chain(preparedRead(connection, fetcher), (statement) =>
+      return useRead(connection, fetcher, (statement) =>
         chain(statement.all(fetcher.slots.map((slot) => slotValue(slot, externals))), (rows) => {
           admittedRows(entry, rows);
           root[fetcher.name] = checkRows(entry, rows, fetcher.name).map((row) =>
             checkBytes(entry, mergeEntityRow(mapping.entities[fetcher.name], row, '__doc'), fetcher.name));
           return next(i + 1);
-        }));
+        }), entry);
     };
     return next(0);
   };
@@ -1964,8 +1965,7 @@ export function createEntityQueryEngine(context) {
       return runResidual(entry, document, externals);
     }
     const params = entry.slots.map((slot) => slotValue(slot, externals));
-    const prepared = preparedRead(connection, entry);
-    return chain(guardEntityScan(entry), () => chain(prepared, (statement) => {
+    return useRead(connection, entry, (statement) => chain(guardEntityScan(entry), () => {
       if (entry.planned.plan.scalarAggregate) return chain(statement.get(params), (row) => {
         admittedRows(entry, row ? [row] : []);
         if (row?._valid === 0) throw new DbRuntimeError('JD2003', 'an aggregate column refuses a lossy or invalid value');
@@ -2136,10 +2136,9 @@ export function createEntityQueryEngine(context) {
     // the statement is prepared by the first PULL, not here: a root
     // cursor's construction touches no connection, so it can be handed
     // back before the pull is admitted (MODEL-FORMAT §5.1)
-    const prepared = () => preparedRead(connection, entry);
     if (entry.planned.plan.aggregate === 'count') {
       return cursorFactory({ ...classified, signal, deadline, now: state.now, wrap: driverWrap,
-        materialize: () => chain(guardEntityScan(entry), () => chain(prepared(), (statement) =>
+        materialize: () => chain(guardEntityScan(entry), () => useRead(connection, entry, (statement) =>
           chain(statement.get(params), (row) => {
             entry.admitted = { statements: 0, rows: 0, bytes: 0 };
             admittedRows(entry, row ? [row] : []);
@@ -2210,7 +2209,7 @@ export function createEntityQueryEngine(context) {
         : { mode: 'set', reasons },
     };
     if (mode !== 'native') return base;
-    return chain(connection.prepare(dialect.explainQuery(entry.sql), { readOnly: true }), (statement) =>
+    return useStatementOnce(connection, dialect.explainQuery(entry.sql), (statement) =>
       chain(statement.all(entry.slots.map((slot) =>
         ('literal' in slot ? slot.literal : null))), (rows) => ({
         ...base,
@@ -2219,7 +2218,7 @@ export function createEntityQueryEngine(context) {
         // it. Empty for a single-binding plan
         joins: entry.planned.plan.joins,
         scanNarrative: dialect.explainLines(rows).join('; '),
-      })));
+      })), { readOnly: true });
   };
 
   return { execute: bounded(execute, driverWrap), query,
@@ -2862,10 +2861,7 @@ export function createLoadEngine(context, entityName) {
       // itself guarantees never moves (`update()` refuses to rewrite it)
       snapshot: identity === null ? null : identity.every((term) => keyColumns.includes(term.column)),
     };
-    const sizeBefore = state.cache.size();
-    if (state.cache.set(key, entry) && state.cache.size() === sizeBefore)
-      state.counters.evictions++;
-    return entry;
+    return retainEntry(state, key, entry);
   };
 
   /**
@@ -2964,9 +2960,8 @@ export function createLoadEngine(context, entityName) {
     load(spec, options = undefined) {
       requireCallable(options, state.now);
       const entry = buildLoad(spec, false, profileOf(options));
-      const prepared = preparedRead(connection, entry);
       const params = entry.slots.map((slot) => slot.literal);
-      return chain(entry.textKeys === null ? null : decodingOfText(), () => chain(prepared, (statement) =>
+      return useRead(connection, entry, (statement) => chain(entry.textKeys === null ? null : decodingOfText(), () =>
         chain(statement.all(params), (rows) =>
           rows.map((row, i) => checkRoot(entry, parseGraphRow(entry.tree, provenRow(entry, row), '__doc'), i + 1)))));
     },

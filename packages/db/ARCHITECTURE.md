@@ -29,7 +29,7 @@ The driver layer also owns prepared-statement lifetimes. Its private
 `createStatementOwner` retains a preparation across calls; each `use` borrows it
 through preparation and operation settlement. `retire` releases it only after
 the final borrow, and a later use prepares an independent temporary statement.
-The relational cache delegates eviction to this owner. Failed preparations are
+The relational and semantic query caches delegate eviction to this owner. Failed preparations are
 forgotten so a deliberate later call can retry. `useStatementOnce` handles
 temporary preparations; both owners share settlement and best-effort optional
 finalization, preserving synchronous returns and the operation's original error.
@@ -945,6 +945,21 @@ answers one query with another query's plan and rows (the
 cache-identity test exists to keep that key abolished).
 `store.stats()` exposes hits, misses and evictions, so the cache is
 proven rather than assumed.
+
+One semantic entry owns every statement it prepares: its main read,
+full-scan diversion, temporal seeks, vector-width alternatives or entity
+root fetchers. Capacity eviction retires all those owners. A preparation or
+read already in progress keeps its borrow until it settles; a child first
+needed after retirement is temporary, as is every read of an uncacheable
+document. This lets a lazy materializing cursor outlive its cached plan
+without pinning that plan's statements indefinitely.
+
+The finite KNN identity-fetch cache remains owned by the collection engine,
+and streaming cursors own independent ephemeral statements. EXPLAIN and
+scan-guard probes use the driver's one-shot owner on both success and refusal.
+The cache bound counts plans, not physical handles: fixed Store statements,
+auxiliary reads and active cursors also consume a remote connection's
+statement capacity. Connection close remains the final resource owner.
 
 ## The relational half (`src/model.js`, `src/plan.js` §entities, `src/query.js`)
 

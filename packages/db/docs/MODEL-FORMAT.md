@@ -570,8 +570,10 @@ Statement = { run(params), get(params), all(params), iterate(params), finalize?(
 Every method MAY return a value or a promise; the store never assumes
 either. Parameters bind positionally as arrays. `finalize` is optional:
 a binding that keeps prepared statements beyond their last reference (a
-worker, up to its `maxStatements`) releases one there, and the store
-calls it for a statement its bounded cache let go.
+worker, up to its `maxStatements`) releases one there. The store calls
+it after the final use of an evicted statement, or after a temporary
+EXPLAIN or scan-guard probe settles. Pending preparation and reads retain
+their borrow; cleanup does not replace the operation's answer or error.
 
 **Capabilities** are read once at open — from the library's version
 report, its compile options, and the binding's declaration — and are
@@ -682,6 +684,21 @@ objects also refuse unknown members before opening. Capture mode is `auto`,
 Compiler registries and the zone provider are checked by the query compiler's
 own grammar at this boundary. Replication identity and its bounds are checked
 before acquisition too, preserving their existing refusal codes.
+
+`statementCacheBound` defaults to 128 and counts retained semantic query
+plans; it also bounds the separate relational SQL cache (§5.3). Evicting a
+plan retires its main and auxiliary statements after their active reads
+settle. A lazy materializing cursor remains usable after eviction and
+releases any statements it prepares for that retired plan. A valid document
+that cannot be cached uses temporary statements. Streaming cursors continue
+to own their own statements, independently of the plan cache.
+
+This setting is not a physical statement limit. A remote connection's
+`maxStatements` must also accommodate fixed schema/CRUD statements, each
+plan's auxiliary reads, the finite KNN identity-fetch cache, active cursors
+and reads still finishing after eviction. Set the plan bound with this
+working capacity in mind. Repeated explanations and full-scan refusals
+release their temporary EXPLAIN statements; a refused scan remains `JD0011`.
 
 Shipped drivers declare whether they can supply shared readers before opening.
 An injected driver's optional `supportsSharedReads` is either a boolean or a
