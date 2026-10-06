@@ -484,13 +484,6 @@ what each does is its own documentation's job
   describe documents between transform steps. Typed SQL promotion needs an
   intermediate-schema contract and equivalent numeric/order/error semantics;
   inferring that schema from either endpoint can return a wrong answer.
-- [ ] **Finalizing what the query engine's semantic cache evicts.** The
-  relational statement cache finalizes a statement it evicts once no call runs
-  on it, so a worker host's `maxStatements` bounds what it should; the query
-  engine's semantic cache still evicts without finalizing, so a store that plans
-  more distinct query texts than a worker's `maxStatements` over its life meets
-  `JD2092`. The finalize path exists in the worker client and the pool; wiring
-  the semantic cache to it is open.
 - [ ] **Long membership chains over a PostgreSQL collection member.** A
   same-member `$or` folds into one bound list, and an entity column answers a
   chain of equalities quickly, but a chain that cannot fold over a collection's

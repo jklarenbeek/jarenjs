@@ -540,8 +540,8 @@ export class AsyncSequence {
 
   /**
    * The pushed window as a STREAM. A provider that offers the cursor
-   * protocol (`cursor(document, options)` — the store's entity sets and
-   * collections do) is handed the unwrapped document and answers one
+   * protocol (`cursor(document, options)` — as the store's entity sets
+   * do) is handed the unwrapped document and answers one
    * item per pull from an open statement; the generator's `for await`
    * releases that statement on break, throw and exhaustion alike,
    * exactly once. A provider without one keeps the element window it

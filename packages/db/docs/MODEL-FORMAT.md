@@ -699,6 +699,11 @@ plan's auxiliary reads, the finite KNN identity-fetch cache, active cursors
 and reads still finishing after eviction. Set the plan bound with this
 working capacity in mind. Repeated explanations and full-scan refusals
 release their temporary EXPLAIN statements; a refused scan remains `JD0011`.
+Counter polling, membership writes and journal reads, and replication's internal
+SQL also release their per-operation statements. A bounded read keeps its statement
+until its cursor has drained or been returned, including on a refused row or byte
+bound. Failed cursor admission releases an unowned ephemeral preparation without
+retiring a retained statement or an existing cursor's handle.
 
 Shipped drivers declare whether they can supply shared readers before opening.
 An injected driver's optional `supportsSharedReads` is either a boolean or a

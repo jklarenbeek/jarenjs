@@ -1245,6 +1245,11 @@ Remote application suppresses only local envelope allocation: its data still
 invalidates capture subscribers after commit. Snapshot reset carries complete
 receipt evidence and refuses histories beyond its explicit credits.
 
+Replication and logical-row one-shot SQL use the driver's shared temporary
+statement owner. Bounded pages, snapshots and journal membership reads hold that
+borrow through complete cursor draining, including cancellation and capacity
+refusal. They never return an iterator after releasing its statement.
+
 `dialects/replication.js` declares the metadata schema once; SQL values use
 the connection's parameter vocabulary. `dialects/postgres-replication.js`
 supplies bigint sequence storage, binary text collation, enrollment checks and

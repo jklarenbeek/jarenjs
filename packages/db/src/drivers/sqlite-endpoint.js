@@ -45,12 +45,24 @@ export async function serveSqliteEndpoint(parentPort, configuration) {
       }
       case 'run': return statementOf(request.statement).statement.run(request.params);
       case 'iterate': {
-        if (cursors.size >= limits.cursors) throw bound(`worker cursor capacity ${limits.cursors} exceeded`);
-        const record = statementOf(request.statement);
-        const id = ++sequence;
-        cursors.set(id, { iterator: record.statement.iterate(request.params),
-          statement: request.statement, ephemeral: record.ephemeral, buffered: null });
-        return id;
+        try {
+          if (cursors.size >= limits.cursors) throw bound(`worker cursor capacity ${limits.cursors} exceeded`);
+          const record = statementOf(request.statement);
+          const id = ++sequence;
+          cursors.set(id, { iterator: record.statement.iterate(request.params),
+            statement: request.statement, ephemeral: record.ephemeral, buffered: null });
+          return id;
+        }
+        catch (error) {
+          // No new cursor owns a refused preparation. Preserve a retained
+          // statement, or an ephemeral one an earlier cursor still owns.
+          if (statements.get(request.statement)?.ephemeral) {
+            let owned = false;
+            for (const cursor of cursors.values()) if (cursor.statement === request.statement) owned = true;
+            if (!owned) statements.delete(request.statement);
+          }
+          throw error;
+        }
       }
       case 'next': {
         const cursor = cursors.get(request.cursor);

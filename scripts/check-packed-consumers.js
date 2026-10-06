@@ -705,7 +705,15 @@ for (const driver of [nodeWorkerDriver(), nodeWorkerPoolDriver({ readers: 0 })])
         expected: { protectedRows: Math.ceil(definition.rows / definition.policy.protectedEvery) },
       }))));
       program += "await import('./adoption.js');\n";
+      cpSync(join(root, 'test/consumer/query-ownership.js'), join(consumerDir, 'query-ownership.js'));
+      if (name === '@jarenjs/db') {
+        program += "const { qualifyQueryOwnership } = await import('./query-ownership.js');\n"
+          + "console.log('Query ownership:', JSON.stringify(await qualifyQueryOwnership()));\n";
+      }
       if (name === '@jarenjs/linq') {
+        cpSync(join(root, 'test/consumer/linq-query-ownership.js'), join(consumerDir, 'linq-query-ownership.js'));
+        program += "const { qualifyLinqQueryOwnership } = await import('./linq-query-ownership.js');\n"
+          + "console.log('LINQ query ownership:', JSON.stringify(await qualifyLinqQueryOwnership()));\n";
         writeFileSync(join(consumerDir, 'query-native.js'), readFileSync(join(root, 'test/consumer/query-native.js')));
         writeFileSync(join(consumerDir, 'adoption-sql.json'), readFileSync(join(root, 'test/db/fixtures/adoption-sql.json')));
         program += "await import('./query-native.js');\n";

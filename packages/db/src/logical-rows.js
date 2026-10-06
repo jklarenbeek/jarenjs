@@ -1,6 +1,6 @@
 //@ts-check
 /** Logical row access through the store's validation and physical column plans. */
-import { chain } from './driver.js';
+import { chain, useStatementOnce } from './driver.js';
 import { keyToken } from './capture.js';
 import { DbRuntimeError } from './errors.js';
 
@@ -9,7 +9,7 @@ export function createLogicalRows({ connection, shapes, collectionCore, entityCo
   const dialect = connection.dialect;
   const q = dialect.quoteIdentifier;
   const p = (i) => dialect.parameterRef(i, 'row');
-  const statement = (sql, method, params = []) => chain(connection.prepare(sql), (s) => s[method](params));
+  const statement = (sql, method, params = []) => useStatementOnce(connection, sql, (s) => s[method](params));
   const shapeOf = (table) => {
     const shape = shapes.get(table);
     if (!shape) throw new DbRuntimeError('JD2104', `replication names undeclared table '${table}'`);

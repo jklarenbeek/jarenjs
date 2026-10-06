@@ -4,7 +4,7 @@ import { stableStringify, deepFreeze } from '@jarenjs/core/object';
 import { applyJSONPatch } from '@jarenjs/json/patch';
 import { decodeJSONPointerSegment } from '@jarenjs/json/pointer';
 import { utf8Length, assertItemBytes, createCursor, drainPage } from './cursor.js';
-import { chain } from './driver.js';
+import { chain, useStatementOnce } from './driver.js';
 import { DbRuntimeError } from './errors.js';
 import { refuseCancelled } from './cancellation.js';
 import { normalizeReplication, normalizeReplicationSnapshot, normalizeFrontier, replicationIdentity, REPLICATION_DEFAULTS } from './replication-format.js';
@@ -52,7 +52,7 @@ export function createReplicationEngine(options) {
   const dialect = connection.dialect;
   const p = (i) => dialect.parameterRef(i, 'replica');
   const schema = replicationSchema(dialect);
-  const sql = (text, method = 'run', params = []) => chain(connection.prepare(text), (s) => s[method](params));
+  const sql = (text, method = 'run', params = []) => useStatementOnce(connection, text, (s) => s[method](params));
   const state = () => chain(sql(`SELECT value FROM ${REPLICATION_TABLES.state} WHERE id = 1`, 'get'), (row) => JSON.parse(row.value));
   const saveState = (value) => sql(`UPDATE ${REPLICATION_TABLES.state} SET value = ${p(1)} WHERE id = 1`, 'run', [stableStringify(value)]);
   const rowState = (table, key) => chain(sql(`SELECT value, frontier FROM ${REPLICATION_TABLES.rows} WHERE name = ${p(1)} AND key = ${p(2)}`, 'get', [table, key]),
@@ -71,16 +71,19 @@ export function createReplicationEngine(options) {
     [replicationIdentity(envelope.replica, envelope.seq), stableStringify(envelope)]);
   // Pull one row at a time and refuse before accumulating beyond shared credits.
   const collectBounded = async (query, params, map, request, credits) => {
-    const cursor = createCursor({ streaming: 'row', barrier: null, signal: request?.signal, deadline: request?.deadline, now,
-      open: () => chain(connection.prepare(query), (statement) => statement.iterate(params)), items: (row) => [map(row)] });
-    const result = [];
-    for await (const item of cursor) {
-      if (++credits.count > config.maxOperations) fail('JD2106', 'replication read exceeds its row capacity');
-      credits.bytes += utf8Length(stableStringify(item)) + 1;
-      assertItemBytes(credits.bytes, Math.min(request?.maxBytes ?? config.maxBytes, config.maxBytes));
-      result.push(item);
-    }
-    return result;
+    cancelled(request);
+    return useStatementOnce(connection, query, async (statement) => {
+      const cursor = createCursor({ streaming: 'row', barrier: null, signal: request?.signal, deadline: request?.deadline, now,
+        open: () => statement.iterate(params), items: (row) => [map(row)] });
+      const result = [];
+      for await (const item of cursor) {
+        if (++credits.count > config.maxOperations) fail('JD2106', 'replication read exceeds its row capacity');
+        credits.bytes += utf8Length(stableStringify(item)) + 1;
+        assertItemBytes(credits.bytes, Math.min(request?.maxBytes ?? config.maxBytes, config.maxBytes));
+        result.push(item);
+      }
+      return result;
+    });
   };
 
   const ready = bracket(() => chain(dialect.replication?.initialize?.(connection), () =>
@@ -250,12 +253,15 @@ export function createReplicationEngine(options) {
     const bounds = { earliestAvailable, highWatermark };
     if (after > highWatermark || after + 1 < (earliestAvailable ?? highWatermark + 1))
       return { items: [], ...bounds, resetRequired: true, hasMore: false };
-    const cursor = createCursor({ streaming: 'row', barrier: null, signal: request.signal, deadline: request.deadline, now,
-      open: () => chain(connection.prepare(`SELECT payload FROM ${REPLICATION_TABLES.outbox} WHERE seq > ${p(1)} ORDER BY seq LIMIT ${p(2)}`),
-        (statement) => statement.iterate([after, limit + 1])),
-      items: (row) => [{ envelope: JSON.parse(row.payload), bytes: utf8Length(row.payload) }] });
-    const page = await drainPage(cursor, { limit, maxBytes: Math.min(maxBytes, config.maxBytes), after,
-      sizeOf: (item) => item.bytes, continuationOf: (item) => item.envelope.seq });
+    cancelled(request);
+    const page = await useStatementOnce(connection,
+      `SELECT payload FROM ${REPLICATION_TABLES.outbox} WHERE seq > ${p(1)} ORDER BY seq LIMIT ${p(2)}`, (statement) => {
+        const cursor = createCursor({ streaming: 'row', barrier: null, signal: request.signal, deadline: request.deadline, now,
+          open: () => statement.iterate([after, limit + 1]),
+          items: (row) => [{ envelope: JSON.parse(row.payload), bytes: utf8Length(row.payload) }] });
+        return drainPage(cursor, { limit, maxBytes: Math.min(maxBytes, config.maxBytes), after,
+          sizeOf: (item) => item.bytes, continuationOf: (item) => item.envelope.seq });
+      });
     return { items: page.items.map((item) => item.envelope), ...bounds, next: page.continuation ?? after,
       bytes: page.items.reduce((sum, item) => sum + item.bytes, 0), resetRequired: false, hasMore: page.hasMore };
   };

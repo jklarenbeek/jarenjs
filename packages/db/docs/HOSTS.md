@@ -270,6 +270,15 @@ metadata. One oversized row is `JD2092`. Abort takes effect at a row boundary;
 | `startupTimeoutMs` | 10000 | Worker readiness deadline |
 | `closeTimeoutMs` | 5000 | Cleanup acknowledgement deadline |
 
+`maxStatements` counts physical handles in each worker. The Store's
+`statementCacheBound` counts cached plans, with a separate cache for relational
+SQL; fixed CRUD statements, auxiliary reads and active cursors need additional
+capacity. Eviction releases a plan's statements after its admitted reads settle.
+Late materializing cursors use temporary statements, and streaming cursors keep
+their independent handles until completion or `return()`. A refused cursor releases
+its unowned temporary preparation while an already admitted cursor keeps running. See
+[the Store resource contract](MODEL-FORMAT.md#4-the-driver-contract-and-the-synchronous-fast-path).
+
 All worker options are positive safe integers. The options are a closed set, and
 so are the pool's (`readers`, `queueCapacity`, `graceMs`, `worker`, `endpoint`),
 its `worker` member's and the process host's: a member a driver does not read —
@@ -402,6 +411,12 @@ also applies to PostgreSQL. The default without the helper remains `live: false`
 `capabilities.liveModes` reports the selected mechanisms; `dataVersion` reports
 the SQLite coarse revision facility separately. Native lexical freshness uses
 [enrolled revisions or an injected provider](SEARCH.md).
+
+`store.dataVersion()` and `tx.dataVersion()` are Promise-returning reads, including
+on synchronous drivers. Each releases its temporary counter statement when the
+read settles, so repeated polling does not accumulate remote handles. They keep
+the ordinary Store gate or transaction scope; PostgreSQL refuses this SQLite
+facility with `JD2077`.
 
 Business rows and `tx.jobs` in one tenant file share a transaction. Separate
 tenant/control/jobs files do not: persist an outbox intent in the tenant
@@ -715,11 +730,11 @@ On pool-3-readers, `reads: 'parallel'` runs the Store-level mixed work 2.47× fa
 
 | Bun 1.4.2 executable | Rows written | Rows streamed | Long read ms | Event-loop max ms |
 |---|---:|---:|---:|---:|
-| worker | 20001 | 20001 | 459.49 | 2.81 |
-| pool | 20001 | 20001 | 537.18 | 5.92 |
-| in-thread | 20001 | 20001 | 126.38 | 125.60 |
+| worker | 20001 | 20001 | 354.90 | 2.12 |
+| pool | 20001 | 20001 | 375.46 | 1.86 |
+| in-thread | 20001 | 20001 | 95.30 | 95.09 |
 
-Built with `bun build --compile ./worker-app.js ./worker-endpoint.js --outfile worker-hosts-bun` and run with every source and module path removed; the long read is 5 whole-collection reads of 20001 rows. The worker host held the event loop at most 2.81 ms against the 50 ms bound and took 3.64× as long as the in-thread binding, which held the loop 125.60 ms. The pool host held the event loop at most 5.92 ms against the 50 ms bound and took 4.25× as long as the in-thread binding, which held the loop 125.60 ms. Built without the second entrypoint, the open refused: worker JD0003 (retryable: false), pool JD0003 (retryable: false). The side-effect import of `@jarenjs/db/worker-endpoint`, bundled alone, keeps the endpoint: 96428 bytes with Bun, 131307 with esbuild.
+Built with `bun build --compile ./worker-app.js ./worker-endpoint.js --outfile worker-hosts-bun` and run with every source and module path removed; the long read is 5 whole-collection reads of 20001 rows. The worker host held the event loop at most 2.12 ms against the 50 ms bound and took 3.72× as long as the in-thread binding, which held the loop 95.09 ms. The pool host held the event loop at most 1.86 ms against the 50 ms bound and took 3.94× as long as the in-thread binding, which held the loop 95.09 ms. Built without the second entrypoint, the open refused: worker JD0003 (retryable: false), pool JD0003 (retryable: false). The side-effect import of `@jarenjs/db/worker-endpoint`, bundled alone, keeps the endpoint: 96843 bytes with Bun, 131676 with esbuild.
 
 | Include accounting | Encoded bytes | Time p50 ms | Uncollected heap growth p50 MiB |
 |---|---:|---:|---:|

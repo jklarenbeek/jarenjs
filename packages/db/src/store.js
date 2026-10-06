@@ -29,7 +29,7 @@ import { parseJSONPointer, compileJSONPointer, JSONPOINTER_NOTHING } from '@jare
 import { equalsJson } from '@jarenjs/core/object';
 
 import { DbCompileError, DbRuntimeError, wrapDriverError, isDriverError, classifyDriverError } from './errors.js';
-import { chain, toPromise, isThenable, attempt, abortReason, createStatementOwner } from './driver.js';
+import { chain, toPromise, isThenable, attempt, abortReason, createStatementOwner, useStatementOnce } from './driver.js';
 import { createSessionRouter } from './sessions.js';
 import { isPlainOptions, refuseUnknownMembers, readOptions, readControls } from './options.js';
 import { canonicalKeyText, namesNoNumber } from './key-text.js';
@@ -3015,17 +3015,19 @@ export function openStore(model, options) {
                   + `WHERE ${dialect.quoteIdentifier(own.column)} = ${dialect.parameterRef(1, 'v')}`;
                 const boundedRows = () => {
                   const { maxOperations = REPLICATION_DEFAULTS.maxOperations, maxBytes = REPLICATION_DEFAULTS.maxBytes } = options.replication;
-                  const cursor = createCursor({ streaming: 'row', barrier: null,
-                    open: () => chain(connection.prepare(`${sql} LIMIT ${dialect.parameterRef(2, 'v')}`), (statement) => statement.iterate([keyParts[0], maxOperations + 1])),
-                    items: (row) => [row] });
-                  return chain(drainPage(cursor, { limit: maxOperations, maxBytes,
-                    sizeOf: (row) => utf8Length(JSON.stringify(row)), continuationOf: () => null }), (page) => {
-                    if (page.hasMore) throw new DbRuntimeError('JD2106', 'membership cascade exceeds replication capacity');
-                    return page.items;
+                  return useStatementOnce(connection, `${sql} LIMIT ${dialect.parameterRef(2, 'v')}`, (statement) => {
+                    const cursor = createCursor({ streaming: 'row', barrier: null,
+                      open: () => statement.iterate([keyParts[0], maxOperations + 1]),
+                      items: (row) => [row] });
+                    return chain(drainPage(cursor, { limit: maxOperations, maxBytes,
+                      sizeOf: (row) => utf8Length(JSON.stringify(row)), continuationOf: () => null }), (page) => {
+                      if (page.hasMore) throw new DbRuntimeError('JD2106', 'membership cascade exceeds replication capacity');
+                      return page.items;
+                    });
                   });
                 };
                 return chain(options.replication === undefined
-                  ? chain(connection.prepare(sql), (statement) => statement.all([keyParts[0]])) : boundedRows(), (rows) => {
+                  ? useStatementOnce(connection, sql, (statement) => statement.all([keyParts[0]])) : boundedRows(), (rows) => {
                     for (const row of rows) {
                       capture.record(joinName, columns.map((column) => row[column]), undefined, null);
                     }
@@ -3334,7 +3336,7 @@ export function openStore(model, options) {
                 const sql = `INSERT INTO ${dialect.quoteIdentifier(table)} `
                   + `(${dialect.quoteIdentifier(own.column)}, ${dialect.quoteIdentifier(target.column)}) `
                   + `VALUES (${dialect.parameterRef(1, 'v')}, ${dialect.parameterRef(2, 'v')})`;
-                return chain(connection.prepare(sql), (statement) => {
+                return useStatementOnce(connection, sql, (statement) => {
                   const row = (j) => {
                     if (j >= keys.length) return next(i + 1);
                     let ran;
@@ -3559,7 +3561,7 @@ export function openStore(model, options) {
                 'this store has no data version: the dialect keeps no commit counter, so '
                 + 'there is no single number that changes when another connection writes');
             }
-            return chain(connection.prepare(dialect.introspect.dataVersion()),
+            return useStatementOnce(connection, dialect.introspect.dataVersion(),
               (statement) => chain(statement.get([]), (row) => Number(row.v)));
           };
 

@@ -923,31 +923,31 @@ alone; writing accepted evidence requires both engines. The committed
 
 <!--fact:postgres.portability-->
 
-Measured 2026-10-06T12:31:01.051Z: 500 documents, Node 24.20.0, SQLite 3.53.4, PostgreSQL 17.11 (Debian 17.11-1.pgdg12+2), pg 8.23.0. Durability settings: fsync=on, synchronous_commit=on, full_page_writes=on.
+Measured 2026-10-06T13:34:33.196Z: 500 documents, Node 24.20.0, SQLite 3.53.4, PostgreSQL 17.11 (Debian 17.11-1.pgdg12+2), pg 8.23.0. Durability settings: fsync=on, synchronous_commit=on, full_page_writes=on.
 
 | Operation | SQLite ms | PostgreSQL ms | PG / SQLite | Client query calls per PG operation | Iterations |
 |---|---:|---:|---:|---:|---:|
-| open | 38.219 | 36.160 | 0.9× | 17 | 1 |
-| insert | 0.017 | 0.931 | 56.0× | 1 | 500 |
-| get | 0.022 | 1.365 | 63.4× | 5 | 50 |
-| indexed | 0.994 | 6.275 | 6.3× | 13 | 20 |
-| scanned | 0.811 | 5.402 | 6.7× | 13 | 20 |
-| range | 0.915 | 4.770 | 5.2× | 13 | 20 |
-| transaction | 0.280 | 1.462 | 5.2× | 3 | 20 |
-| migration (one index) | 31.636 | 90.925 | 2.9× | not separately counted | 1 |
+| open | 22.631 | 29.961 | 1.3× | 17 | 1 |
+| insert | 0.014 | 0.616 | 44.5× | 1 | 500 |
+| get | 0.018 | 0.751 | 41.0× | 5 | 50 |
+| indexed | 0.689 | 3.480 | 5.0× | 13 | 20 |
+| scanned | 0.804 | 3.120 | 3.9× | 13 | 20 |
+| range | 0.818 | 3.205 | 3.9× | 13 | 20 |
+| transaction | 0.199 | 1.184 | 6.0× | 3 | 20 |
+| migration (one index) | 17.026 | 74.715 | 4.4× | not separately counted | 1 |
 
-Sequential insert throughput: SQLite 60169, PostgreSQL 1075 documents/second.
+Sequential insert throughput: SQLite 72298, PostgreSQL 1624 documents/second.
 
 | First-row probe | SQLite | PostgreSQL |
 |---|---:|---:|
-| First row ms | 1.761 | 1.489 |
-| First row plus cleanup ms | 1.973 | 1.938 |
+| First row ms | 1.169 | 1.203 |
+| First row plus cleanup ms | 1.295 | 1.647 |
 | Returned rows | 1 | 1 |
 | Fetched native rows / normalized bytes | not instrumented | 64 / 5661 |
 | Session peak native frame rows / bytes | not instrumented | 64 / 5813 |
 | Client query calls including cleanup | no network | 5 |
-| Sampled RSS before / after MiB | 95.07 / 112.59 | 115.59 / 121.21 |
-| Sampled heap before / after MiB | 21.82 / 27.68 | 17.12 / 25.17 |
+| Sampled RSS before / after MiB | 96.02 / 113.29 | 116.33 / 122.08 |
+| Sampled heap before / after MiB | 21.75 / 27.73 | 16.23 / 24.28 |
 
 After close: driver active=0, queued=0; native cursors=0, prepared statements=0; host pool total=1, idle=1, waiting=0.
 
@@ -1076,6 +1076,14 @@ shutdown limits, the browser persistence matrix and measured latency/memory loss
 Both hosts run under Bun too, and inside a `bun build --compile` executable that
 ships `@jarenjs/db/worker-endpoint` beside it and names it with the drivers'
 `endpoint` option ([the recipe](docs/HOSTS.md#bundled-and-compiled-executables)).
+
+`statementCacheBound` (default 128) counts retained query plans and also bounds
+the separate relational SQL cache. Evicted plans release their main and auxiliary
+statements after active reads finish; lazy cursors remain usable. Explanations,
+scan checks and completed `dataVersion()` reads release temporary statements.
+A host's `maxStatements` counts physical handles, so allow capacity for fixed
+CRUD statements, auxiliaries and active cursors as well as cached plans. See the
+[Store resource contract](docs/MODEL-FORMAT.md#4-the-driver-contract-and-the-synchronous-fast-path).
 
 On the pool, `reads: 'parallel'` runs the classified root reads on the readers,
 each in a committed snapshot of its own, while writes, transactions and tracked
