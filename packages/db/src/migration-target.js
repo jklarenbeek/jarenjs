@@ -1,7 +1,7 @@
 //@ts-check
 /** Acquisition and complete physical acceptance for migration entry points. */
 import { isThenable } from '@jarenjs/core/function';
-import { chain, toPromise } from './driver.js';
+import { chain, toPromise, useStatementOnce } from './driver.js';
 import { DbCompileError } from './errors.js';
 import { readSchema } from './introspect.js';
 import { ENGINE_TABLES } from './engine-metadata.js';
@@ -34,7 +34,7 @@ function enforceForeignKeys(connection) {
   const dialect = connection.dialect;
   if (dialect?.capabilities?.foreignKeysAlwaysOn === true || typeof dialect?.pragma?.foreignKeys !== 'function') return null;
   return chain(connection.exec(dialect.pragma.foreignKeys(true)), () =>
-    chain(connection.prepare(dialect.introspect.pragma('foreign_keys')), (statement) => chain(statement.get([]), (row) => {
+    useStatementOnce(connection, dialect.introspect.pragma('foreign_keys'), (statement) => chain(statement.get([]), (row) => {
       if (Number(row?.foreign_keys) !== 1)
         throw new DbCompileError('JD0021', 'the migration connection could not switch foreign-key enforcement on');
     })));
@@ -80,7 +80,7 @@ export function withMigrationConnection(target, run) {
  * databases have no filename and cannot be identified by an empty string.
  * @param {any} connection @returns {any} value-or-promise of string or null */
 export function sqliteDatabasePath(connection) {
-  return chain(connection.prepare(connection.dialect.introspect.pragma('database_list')), (statement) =>
+  return useStatementOnce(connection, connection.dialect.introspect.pragma('database_list'), (statement) =>
     chain(statement.all([]), (rows) => rows.find((row) => row.name === 'main')?.file || null));
 }
 
@@ -93,7 +93,7 @@ export function verifyShadowOwnership(primary, shadow, driver, independentDataba
   if (primary.dialect.migration?.identity) {
     if (primary.dialect.name !== shadow.dialect.name)
       throw new DbCompileError('JD0021', 'shadow replay requires the same database dialect');
-    const identify = (connection) => chain(connection.prepare(connection.dialect.migration.identity), (s) => s.get([]));
+    const identify = (connection) => useStatementOnce(connection, connection.dialect.migration.identity, (s) => s.get([]));
     return chain(identify(primary), (source) => chain(identify(shadow), (target) => {
       const keys = independentDatabase ? ['database', 'address', 'port'] : ['database', 'address', 'port', 'schema'];
       if (keys.every((key) => source[key] === target[key]))
@@ -193,11 +193,11 @@ export function comparePhysicalTarget(connection, target) {
 export function lockMigration(connection) {
   const strategy = connection.dialect.migration;
   if (!strategy) return null;
-  return chain(connection.prepare(strategy.settings), (s) => chain(s.get([]), (settings) => {
+  return chain(useStatementOnce(connection, strategy.settings, (s) => s.get([])), (settings) => {
     if (settings?.strings !== 'on' || !settings.lock_timeout || settings.lock_timeout === '0')
       throw new DbCompileError('JD0021', 'native migrations require standard_conforming_strings and a finite nonzero lock_timeout');
-    return chain(connection.prepare(strategy.lock), (lock) => lock.get([]));
-  }));
+    return useStatementOnce(connection, strategy.lock, (lock) => lock.get([]));
+  });
 }
 
 /** Preservation compares exact source programs, including whitespace in SQL literals.
@@ -228,12 +228,12 @@ export function verifyPreservation(connection, physical, after, allocations = []
       }
     }
     const next = (i) => i >= physical.assertions.length ? null
-      : chain(connection.prepare(physical.assertions[i].sql, { readOnly: true }), (s) =>
-        chain(s.all(physical.assertions[i].params ?? []), (rows) => {
-          if (canonicalizeJson(rows) !== canonicalizeJson(physical.assertions[i].expected))
-            throw new DbCompileError('JD0023', `preservation assertion ${i} disagrees ${after ? 'after' : 'before'} migration`);
-          return next(i + 1);
-        }));
+      : chain(useStatementOnce(connection, physical.assertions[i].sql,
+        (s) => s.all(physical.assertions[i].params ?? []), { readOnly: true }), (rows) => {
+        if (canonicalizeJson(rows) !== canonicalizeJson(physical.assertions[i].expected))
+          throw new DbCompileError('JD0023', `preservation assertion ${i} disagrees ${after ? 'after' : 'before'} migration`);
+        return next(i + 1);
+      });
     return chain(next(0), () => {
       const sequences = connection.dialect.migration?.sequence
         ? physical.source.filter((object) => object.type === 'sequence' && physical.dispositions[physicalObjectKey(object)] === 'preserve') : [];
@@ -242,7 +242,7 @@ export function verifyPreservation(connection, physical, after, allocations = []
         if (i === sequences.length) return observed;
         const object = sequences[i];
         if (object.metadata.cycle) throw new DbCompileError('JD0021', 'cyclic sequence allocation requires an explicit replacement policy');
-        return chain(connection.prepare(connection.dialect.migration.sequence(object)), (s) => chain(s.get([]), (state) => {
+        return chain(useStatementOnce(connection, connection.dialect.migration.sequence(object), (s) => s.get([])), (state) => {
           if (after) {
             const before = allocations[i];
             const direction = BigInt(object.metadata.increment) > 0n ? 1n : -1n;
@@ -252,7 +252,7 @@ export function verifyPreservation(connection, physical, after, allocations = []
           }
           observed.push(state);
           return read(i + 1);
-        }));
+        });
       };
       return read(0);
     });

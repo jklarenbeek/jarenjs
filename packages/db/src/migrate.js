@@ -23,14 +23,14 @@ import { canonicalizeJson } from '@jarenjs/json/canonical';
 import { hashContent } from '@jarenjs/core/string';
 import { resolveRuntime } from '@jarenjs/core/runtime';
 import { refuseCancelled } from './cancellation.js';
-import { setObjectMember } from '@jarenjs/core/object';
+import { cloneJson, setObjectMember } from '@jarenjs/core/object';
 import { compileJsonQuery } from '@jarenjs/json/query';
 import { compileJsltStylesheet } from '@jarenjs/json/jslt';
 
 import { DbCompileError, wrapDriverError } from './errors.js';
 import { readOptions, readControls } from './options.js';
 import { storedKeyMatches } from './key-text.js';
-import { chain, attempt } from './driver.js';
+import { chain, attempt, useStatementOnce } from './driver.js';
 import { isThenable } from '@jarenjs/core/function';
 import { relationalEngine } from './relational.js';
 import { createCursor, createSyncCursor } from './cursor.js';
@@ -189,6 +189,22 @@ export function migrationChecksum(migration) {
 }
 
 /**
+ * Admit JSON before callbacks or connection acquisition can change the caller's
+ * documents. Execution, shadow replay and receipts share these private values;
+ * declaration order stays intact. Functions, drivers and cancellation controls
+ * remain host capabilities.
+ * @param {any[]} migrations @param {any} options @returns {[any[], any]}
+ */
+function snapshotMigrationInputs(migrations, options) {
+  const snapshot = (value) => { canonicalizeJson(value); return cloneJson(value); };
+  const copy = { ...options };
+  for (const name of ['baseline', 'model', 'physicalTarget']) {
+    if (copy[name] !== undefined) copy[name] = snapshot(copy[name]);
+  }
+  return [snapshot(migrations), copy];
+}
+
+/**
  * @param {string} code
  * @param {string} reason
  * @param {Error} [cause]
@@ -287,7 +303,7 @@ function storedDerivedColumns(connection, table, step, options) {
   if (collection === undefined) return [];
   const { derived } = planCollection(table, collection, connection.dialect, mappingFor(connection, options.expressions));
   if (derived.length === 0) return [];
-  return chain(connection.prepare(connection.dialect.introspect.columns(table)), (statement) => chain(statement.all([]),
+  return useStatementOnce(connection, connection.dialect.introspect.columns(table), (statement) => chain(statement.all([]),
     (/** @type {any[]} */ columns) => {
       const ordinary = new Set(columns.filter((column) => Number(column.hidden) === 0).map((column) => column.name));
       return derived.filter((/** @type {any} */ column) => ordinary.has(column.name));
@@ -303,9 +319,10 @@ function storedDerivedColumns(connection, table, step, options) {
  * a transform wrote used to land in the document and be shadowed on read).
  * @param {any} connection @param {string} table @param {any} step
  * @param {{ entity: any, mapping: any } | null} stepEntity @param {any} options
- * @returns {any} value-or-promise of `(doc, rid) => value-or-promise`
+ * @param {(write: (doc: any, rid: any) => any) => any} use
+ * @returns {any} value-or-promise of the complete writer operation
  */
-function documentWriter(connection, table, step, stepEntity, options) {
+function documentWriter(connection, table, step, stepEntity, options, use) {
   const dialect = connection.dialect;
   const q = dialect.quoteIdentifier;
   if (stepEntity !== null) {
@@ -315,23 +332,23 @@ function documentWriter(connection, table, step, stepEntity, options) {
       ...columns.map((column, i) => `${q(column)} = ${dialect.parameterRef(i + 1, 'v')}`),
       `${q('doc')} = ${dialect.jsonEncode(dialect.parameterRef(columns.length + 1, 'doc'))}`,
     ];
-    return chain(connection.prepare(`UPDATE ${q(table)} SET ${assignments.join(', ')} `
-      + `WHERE ${dialect.rowIdentity()} = ${dialect.parameterRef(columns.length + 2, 'rid')}`), (update) =>
-      (/** @type {any} */ next, /** @type {any} */ rid) => {
+    return useStatementOnce(connection, `UPDATE ${q(table)} SET ${assignments.join(', ')} `
+      + `WHERE ${dialect.rowIdentity()} = ${dialect.parameterRef(columns.length + 2, 'rid')}`, (update) =>
+      use((/** @type {any} */ next, /** @type {any} */ rid) => {
         const { values, rest } = core.plan.split(next);
         const byName = new Map(values.map((value) => [value.name, value.value]));
         return update.run([...columns.map((column) => byName.get(column) ?? null), JSON.stringify(rest), rid]);
-      });
+      }));
   }
   return chain(storedDerivedColumns(connection, table, step, options), (/** @type {any[]} */ derived) => {
     const assignments = [`${q('doc')} = ${dialect.jsonEncode(dialect.parameterRef(1, 'doc'))}`,
       ...derived.map((column, at) => `${q(column.name)} = ${dialect.parameterRef(at + 2, column.name)}`)];
-    return chain(connection.prepare(`UPDATE ${q(table)} SET ${assignments.join(', ')} `
-      + `WHERE ${dialect.rowIdentity()} = ${dialect.parameterRef(derived.length + 2, 'rid')}`), (update) =>
-      (/** @type {any} */ next, /** @type {any} */ rid) => {
+    return useStatementOnce(connection, `UPDATE ${q(table)} SET ${assignments.join(', ')} `
+      + `WHERE ${dialect.rowIdentity()} = ${dialect.parameterRef(derived.length + 2, 'rid')}`, (update) =>
+      use((/** @type {any} */ next, /** @type {any} */ rid) => {
         const text = JSON.stringify(next);
         return update.run([text, ...(derived.length === 0 ? [] : derivedValuesOf(derived, JSON.parse(text))), rid]);
-      });
+      }));
   });
 }
 
@@ -398,7 +415,7 @@ function hostCollection(connection, name, step, options, closed, fail) {
       closed();
       if (typeof fn !== 'function') throw new TypeError('update() takes a function from a document to its replacement');
       let replaced = 0;
-      return chain(documentWriter(connection, name, step, stepEntity, options), (write) =>
+      return documentWriter(connection, name, step, stepEntity, options, (write) =>
         chain(walkRows(connection, name, options.batchSize, (rows) => sequentially(rows, (row) => {
           const document = read(row);
           return chain(fn(document), (next) => {
@@ -410,6 +427,14 @@ function hostCollection(connection, name, step, options, closed, fail) {
         }), false, mapping, options.check), () => replaced));
     },
   });
+}
+
+/** Finite statement methods for a temporary engine; its cursor path keeps its
+ * separate ephemeral owner. Preparation and use share the one-shot lifecycle. */
+function temporaryStatement(connection, sql, metadata) {
+  const use = (method) => (params) => useStatementOnce(connection, sql,
+    (statement) => statement[method](params), metadata);
+  return { run: use('run'), get: use('get'), all: use('all') };
 }
 
 /**
@@ -442,6 +467,7 @@ function runHostStep(connection, migration, index, step, options) {
   const relational = relationalEngine({
     dialect: connection.dialect,
     connection,
+    prepare: temporaryStatement,
     available: closed,
     read: (run) => run(connection),
     cursor: (spec) => stepCursor((connection.synchronous ? createSyncCursor : createCursor)({
@@ -1432,7 +1458,7 @@ export function createModelShape(connection, model, expressions = undefined) {
  */
 export function schemaShapeOf(connection, options = undefined) {
   const dialect = connection.dialect;
-  return chain(connection.prepare(dialect.introspect.schemaDump()), (statement) =>
+  return useStatementOnce(connection, dialect.introspect.schemaDump(), (statement) =>
     chain(statement.all([]), (rows) => rows
       // History, change logs, jobs and replication metadata are engine-owned.
       .filter((row) => !ENGINE_TABLES.has(String(row.name)) && !ENGINE_TABLES.has(String(row.owner)))
@@ -1539,8 +1565,8 @@ function walkRows(connection, table, batchSize, handle, keyed = true, entityMapp
   const ordered = ` ORDER BY ${rid} ${dialect.limitClause(batchSize, undefined)}`;
   // An INTEGER PRIMARY KEY can be negative. The first batch has no
   // lower bound; subsequent batches seek from a row actually read.
-  return chain(connection.prepare(select + ordered), (first) => chain(connection.prepare(
-    `${select} WHERE ${rid} > ${dialect.parameterRef(1, 'after')}${ordered}`), (statement) => {
+  return useStatementOnce(connection, select + ordered, (first) => useStatementOnce(connection,
+    `${select} WHERE ${rid} > ${dialect.parameterRef(1, 'after')}${ordered}`, (statement) => {
     const nextBatch = (after) => {
       if (check !== undefined) check();
       return chain(after === undefined ? first.all([]) : statement.all([after]), (rows) => {
@@ -1590,7 +1616,7 @@ function entityStepMapping(options, table, step, dialect) {
 function foreignKeyViolations(connection) {
   const dialect = connection.dialect;
   if (dialect.capabilities.foreignKeysAlwaysOn === true || typeof dialect.pragma?.foreignKeyCheck !== 'function') return null;
-  return chain(connection.prepare(dialect.pragma.foreignKeyCheck()), (statement) => chain(statement.all([]),
+  return useStatementOnce(connection, dialect.pragma.foreignKeyCheck(), (statement) => chain(statement.all([]),
     (rows) => rows.map((/** @type {any} */ row) => ({ table: row.table,
       rowid: row.rowid === null || row.rowid === undefined ? null : String(row.rowid),
       parent: row.parent, fkid: row.fkid }))));
@@ -1757,18 +1783,15 @@ function runSteps(connection, migration, options) {
         const updateSql = `UPDATE ${q(current.collection)} SET ${assignments.join(', ')} `
           + `WHERE ${dialect.rowIdentity()} = ${dialect.parameterRef(columns.length + 1, 'rid')}`;
         let derivedRows = 0;
-        return chain(connection.prepare(updateSql), (update) =>
-          chain(walkRows(connection, current.collection, options.batchSize, (rows) => {
-            for (const row of rows) {
-              update.run([...derivedValuesOf(columns, JSON.parse(row.doc)), row.rid]);
-              derivedRows++;
-            }
-            options.onProgress?.({
+        return useStatementOnce(connection, updateSql, (update) =>
+          chain(walkRows(connection, current.collection, options.batchSize, (rows) =>
+            chain(sequentially(rows, (row) =>
+              chain(update.run([...derivedValuesOf(columns, JSON.parse(row.doc)), row.rid]), () => { derivedRows++; })),
+            () => { options.onProgress?.({
               migration: migration.id,
               collection: current.collection,
               derived: derivedRows,
-            });
-          }, false, null, options.check), () => derivedRows));
+            }); }), false, null, options.check), () => derivedRows));
       }
       if (current.kind === 'jslt') {
         const stepEntity = entityStepMapping(options, current.collection, current, dialect);
@@ -1788,19 +1811,16 @@ function runSteps(connection, migration, options) {
         // before the stylesheet and split out after it (documentWriter)
         const mapping = stepEntity?.mapping ?? null;
         let transformed = 0;
-        return chain(documentWriter(connection, current.collection, current, stepEntity, options), (write) =>
-          chain(walkRows(connection, current.collection, options.batchSize, (rows) => {
-            for (const row of rows) {
+        return documentWriter(connection, current.collection, current, stepEntity, options, (write) =>
+          chain(walkRows(connection, current.collection, options.batchSize, (rows) =>
+            chain(sequentially(rows, (row) => {
               const doc = mapping === null ? JSON.parse(row.doc) : mergeEntityRow(mapping, row, 'doc');
-              write(operation.apply(doc, row.rid), row.rid);
-              transformed++;
-            }
-            options.onProgress?.({
+              return chain(write(operation.apply(doc, row.rid), row.rid), () => { transformed++; });
+            }), () => { options.onProgress?.({
               migration: migration.id,
               collection: current.collection,
               transformed,
-            });
-          }, false, mapping, options.check), () => transformed));
+            }); }), false, mapping, options.check), () => transformed));
       }
       // kind === 'query': the assertion step
       const assertionMapping = entityStepMapping(options, current.collection, current, dialect)?.mapping ?? null;
@@ -1820,7 +1840,9 @@ function runSteps(connection, migration, options) {
         strategy: 'provider', reason: 'the existing query planner proves a native count without assuming an intermediate schema',
       }) });
       if (provider !== null) {
-        const engine = createQueryEngine({ connection, state: createQueryState(),
+        const engine = createQueryEngine({
+          connection: { ...connection, prepare: (sql, metadata) => temporaryStatement(connection, sql, metadata) },
+          state: createQueryState(),
           collection: { name: current.collection, schema: { type: 'object' }, docPath: '' },
           physicalPlan: { table: current.collection, keyColumn: 'key', docColumn: 'doc', columnByCanonical: new Map() },
         });
@@ -2021,12 +2043,22 @@ function historyStatements(dialect) {
         { name: 'steps', type: integer },
       ],
     }),
-    select: `SELECT ${['id', 'from_hash', 'to_hash', 'checksum'].map(q).join(', ')} `
+    select: `SELECT ${['id', 'from_hash', 'to_hash', 'checksum', 'steps'].map(q).join(', ')} `
       + `FROM ${q(HISTORY_TABLE)} ORDER BY ${dialect.rowIdentity()}`,
     insert: `INSERT INTO ${q(HISTORY_TABLE)} `
       + `(${['id', 'applied_at', 'from_hash', 'to_hash', 'checksum', 'steps'].map(q).join(', ')}) `
       + `VALUES (${[1, 2, 3, 4, 5, 6].map((i) => dialect.parameterRef(i, 'v')).join(', ')})`,
   };
+}
+
+/** All persisted document fields agree; native PG integer text is compared,
+ * never rewritten or loosely coerced from a missing/invalid count. */
+function receiptMatches(row, migration) {
+  return Array.isArray(migration?.steps) && row.id === migration.id
+    && row.from_hash === migration.from && row.to_hash === migration.to
+    && (row.steps === migration.steps.length || typeof row.steps === 'string'
+      && /^(0|[1-9]\d*)$/.test(row.steps) && Number(row.steps) === migration.steps.length)
+    && row.checksum === migrationChecksum(migration);
 }
 
 /**
@@ -2051,6 +2083,7 @@ export function migrationStatus(target, migrations, options = {}) {
   try {
     readOptions(options, ['model', 'physicalTarget', 'shadowDriver', 'registerFunctions', 'runtime', 'signal', 'deadline'], 'migrationStatus()');
     readControls({ signal: options?.signal }, 'migrationStatus()');
+    if (Array.isArray(migrations)) [migrations, options] = snapshotMigrationInputs(migrations, options);
     refuseCancelled({ signal: options.signal, deadline: options.deadline }, resolveRuntime(options.runtime).now,
       { abortCode: 'JD2080', aborted: 'it ran', passed: 'the status read ran', ran: 'no step ran' });
   }
@@ -2061,12 +2094,13 @@ export function migrationStatus(target, migrations, options = {}) {
   return attempt(() => withMigrationConnection(target, (connection) => {
     if (connection.mustQueue) throw refuse('JD0021', 'status needs an exclusively available connection or its owning transaction scope');
     const dialect = connection.dialect, statements = historyStatements(dialect);
-    return chain(registerDeriveFunctions(connection), () => chain(connection.prepare(dialect.introspect.tableExists()), (probe) =>
-      chain(probe.get([HISTORY_TABLE]), (present) => chain(present === undefined ? []
-        : chain(connection.prepare(statements.select), (select) => select.all([])), (rows) => {
+    return chain(registerDeriveFunctions(connection), () =>
+      chain(useStatementOnce(connection, dialect.introspect.tableExists(), (probe) => probe.get([HISTORY_TABLE])),
+      (present) => chain(present === undefined ? []
+        : useStatementOnce(connection, statements.select, (select) => select.all([])), (rows) => {
         for (let i = 0; i < rows.length; i++) {
           const doc = migrations[i];
-          if (doc === undefined || doc.id !== rows[i].id || migrationChecksum(doc) !== rows[i].checksum)
+          if (!receiptMatches(rows[i], doc))
             throw refuse('JD0022', `history position ${i} records '${rows[i].id}' but the migration list has '${doc?.id ?? '<nothing>'}' (or an edited document)`);
         }
         const applied = rows.map((row) => String(row.id));
@@ -2086,7 +2120,7 @@ export function migrationStatus(target, migrations, options = {}) {
         return chain(physicalTarget !== undefined ? comparePhysicalTarget(connection, physicalTarget)
           : compareShapeToModel(driver, connection, options.model, options.registerFunctions),
         (difference) => ({ applied, pending, drift: difference, upToDate: difference === null, baseline }));
-      }))));
+      })));
   }), (error) => runFailure(error, 'the migration status could not be read'));
 }
 
@@ -2136,6 +2170,8 @@ export function migrate(target, migrations, options) {
   const batchSize = options.batchSize ?? 500;
   if (!Number.isSafeInteger(batchSize) || batchSize < 1) throw new TypeError('batchSize must be a positive safe integer');
   if (options.shadowFixture !== undefined && typeof options.shadowFixture !== 'function') throw new TypeError('shadowFixture must initialize a disposable connection');
+  try { [migrations, options] = snapshotMigrationInputs(migrations, options); }
+  catch (error) { if (target.connection !== undefined) throw error; return Promise.reject(error); }
   const runtime = resolveRuntime(options.runtime);
   const check = () => refuseCancelled({ signal: options.signal, deadline: options.deadline }, runtime.now, {
     abortCode: 'JD2080', aborted: 'its next step', passed: 'its next step',
@@ -2164,22 +2200,21 @@ export function migrate(target, migrations, options) {
     return chain(registerDeriveFunctions(connection), () => chain(options.registerFunctions?.(connection), () => {
       const dialect = connection.dialect, statements = historyStatements(dialect);
       let historyExists = false;
-      const readHistory = () => chain(connection.prepare(dialect.introspect.tableExists()), (probe) =>
-        chain(probe.get([HISTORY_TABLE]), (row) => {
+      const readHistory = () => chain(useStatementOnce(connection, dialect.introspect.tableExists(),
+        (probe) => probe.get([HISTORY_TABLE])), (row) => {
           historyExists = row !== undefined;
-          return historyExists ? chain(connection.prepare(statements.select), (select) => select.all([])) : [];
-        }));
+          return historyExists ? useStatementOnce(connection, statements.select, (select) => select.all([])) : [];
+        });
       return chain(readHistory(), (appliedRows) => {
         const verifyHistory = (count) => chain(readHistory(), (rows) => {
-          if (rows.length !== count || rows.some((row, at) => row.id !== migrations[at]?.id
-            || row.checksum !== migrationChecksum(migrations[at])))
+          if (rows.length !== count || rows.some((row, at) => !receiptMatches(row, migrations[at])))
             throw refuse('JD0022', 'migration history changed while acquiring its writer; no step ran');
         });
         for (let i = 0; i < appliedRows.length; i++) {
           const row = appliedRows[i], doc = migrations[i];
           if (doc === undefined || doc.id !== row.id) throw refuse('JD0022',
             `history position ${i} records '${row.id}' but the migration list has '${doc?.id ?? '<nothing>'}' — the list must contain every applied migration, in order`);
-          if (migrationChecksum(doc) !== row.checksum) throw refuse('JD0022',
+          if (!receiptMatches(row, doc)) throw refuse('JD0022',
             `migration '${row.id}' differs from the document recorded in the history — an applied migration must never be edited`);
         }
         const pending = migrations.slice(appliedRows.length);
@@ -2266,14 +2301,15 @@ export function migrate(target, migrations, options) {
                 const table = mapping?.mapping.table ?? current.collection;
                 // Preview reads current relations; earlier planned SQL may create
                 // this table/view or change its rows, but is not executed here.
-                return chain(connection.prepare(dialect.introspect.tables()), (catalog) => chain(catalog.all([]), (relations) => {
+                return chain(useStatementOnce(connection, dialect.introspect.tables(), (catalog) => catalog.all([])), (relations) => {
                   if (!relations.some((relation) => String(relation.name) === table)) {
                     setObjectMember(counts, current.collection, null);
                     return count(j + 1);
                   }
-                  return chain(connection.prepare(`SELECT COUNT(*) AS ${dialect.quoteIdentifier('n')} FROM ${dialect.quoteIdentifier(table)}`), (statement) =>
-                    chain(statement.get([]), (row) => { setObjectMember(counts, current.collection, row.n); return count(j + 1); }));
-                }));
+                  return chain(useStatementOnce(connection,
+                    `SELECT COUNT(*) AS ${dialect.quoteIdentifier('n')} FROM ${dialect.quoteIdentifier(table)}`,
+                    (statement) => statement.get([])), (row) => { setObjectMember(counts, current.collection, row.n); return count(j + 1); });
+                });
               };
               return chain(count(0), () => collect(i + 1));
             };
@@ -2325,7 +2361,7 @@ export function migrate(target, migrations, options) {
             work = chain(work, () => acceptTarget(scope, final ? finalTarget : migration.physical?.target));
             work = chain(work, () => final ? finalChecks(scope, migration) : null);
             work = chain(work, () => foreignKeyCheck(scope, migration, violationsBefore));
-            return chain(work, () => chain(scope.prepare(statements.insert), (insert) =>
+            return chain(work, () => useStatementOnce(scope, statements.insert, (insert) =>
               insert.run([migration.id, runtime.now(), migration.from, migration.to, migrationChecksum(migration), migration.steps.length])));
           };
           // link by link: each commits on its own, and the last makes the final checks

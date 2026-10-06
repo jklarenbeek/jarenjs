@@ -12,8 +12,8 @@
       "matches": [
         "3: * @file Database → model: `introspectModel(connection)` reads a live",
         "157:export function readSchema(connection, options = undefined) {",
-        "567:export function introspectModel(connection, options = undefined) {",
-        "578:  return chain(readSchema(connection, options), (schema) => {"
+        "566:export function introspectModel(connection, options = undefined) {",
+        "577:  return chain(readSchema(connection, options), (schema) => {"
       ],
       "disposition": "retained"
     },

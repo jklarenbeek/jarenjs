@@ -27,7 +27,7 @@
  * into a member path.
  */
 
-import { chain } from './driver.js';
+import { chain, useStatementOnce } from './driver.js';
 import { DbCompileError } from './errors.js';
 import { KEY_COLUMN, DOC_COLUMN } from './ddl.js';
 import { MODEL_VERSION, ENGINE_TABLES } from './engine-metadata.js';
@@ -74,7 +74,7 @@ function loss(code, object, detail) {
  */
 function readTable(connection, table, objects) {
   const dialect = connection.dialect;
-  const all = (sql) => chain(connection.prepare(sql), (statement) => statement.all([]));
+  const all = (sql) => useStatementOnce(connection, sql, (statement) => statement.all([]));
   return chain(all(dialect.introspect.columns(table)), (columnRows) =>
     chain(all(dialect.introspect.indexes(table)), (indexRows) =>
       chain(all(dialect.introspect.generated(table)), (generatedRows) =>
@@ -158,42 +158,41 @@ export function readSchema(connection, options = undefined) {
   const dialect = connection.dialect;
   const engine = ENGINE_TABLES;
   const wanted = options?.tables === undefined ? null : new Set(options.tables);
-  return chain(connection.prepare(dialect.introspect.tables()), (statement) =>
-    chain(statement.all([]), (rows) => {
-      const views = [];
-      const names = [];
+  return chain(useStatementOnce(connection, dialect.introspect.tables(), (statement) => statement.all([])), (rows) => {
+    const views = [];
+    const names = [];
+    for (const row of rows) {
+      const name = String(row.name);
+      if (engine.has(name)) continue;
+      if (wanted !== null && !wanted.has(name)) continue;
+      if (String(row.type) === 'view') views.push(name);
+      else names.push(name);
+    }
+    const readObjects = dialect.introspect.objects === undefined ? []
+      : useStatementOnce(connection, dialect.introspect.objects(), (s) => s.all([]));
+    return chain(readObjects, (catalog) => {
+      const complete = [...catalog];
       for (const row of rows) {
-        const name = String(row.name);
-        if (engine.has(name)) continue;
-        if (wanted !== null && !wanted.has(name)) continue;
-        if (String(row.type) === 'view') views.push(name);
-        else names.push(name);
+        if (!complete.some((o) => o.type === row.type && o.name === row.name))
+          complete.push({ ...row, owner: row.name, sql: null });
       }
-      const readObjects = dialect.introspect.objects === undefined ? []
-        : chain(connection.prepare(dialect.introspect.objects()), (s) => s.all([]));
-      return chain(readObjects, (catalog) => {
-        const complete = [...catalog];
-        for (const row of rows) {
-          if (!complete.some((o) => o.type === row.type && o.name === row.name))
-            complete.push({ ...row, owner: row.name, sql: null });
-        }
-        const objects = complete.filter((row) => !engine.has(String(row.owner))
-          && (wanted === null || wanted.has(String(row.owner)) || wanted.has(String(row.name))))
-          .map((row) => ({ type: String(row.type), name: String(row.name),
-            owner: String(row.owner), sql: row.sql ?? null }));
-        const step = (i, out) => (i >= names.length
-          ? { tables: out, views, objects }
-          : chain(readTable(connection, names[i], objects), (table) => step(i + 1, [...out, table])));
-        return chain(step(0, []), (schema) => dialect.introspect.catalog === undefined ? schema
-          : chain(connection.prepare(dialect.introspect.catalog()), (statement) =>
-            chain(statement.all([]), (native) => ({ ...schema, catalog: native
-              .filter((row) => !engine.has(String(row.owner))
-                && (wanted === null || wanted.has(String(row.owner)) || wanted.has(String(row.name))))
-              .map((row) => ({ type: String(row.type), name: String(row.name), owner: String(row.owner),
-                schema: String(row.schema), sql: row.sql ?? null,
-                metadata: typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata })) }))));
-      });
-    }));
+      const objects = complete.filter((row) => !engine.has(String(row.owner))
+        && (wanted === null || wanted.has(String(row.owner)) || wanted.has(String(row.name))))
+        .map((row) => ({ type: String(row.type), name: String(row.name),
+          owner: String(row.owner), sql: row.sql ?? null }));
+      const step = (i, out) => (i >= names.length
+        ? { tables: out, views, objects }
+        : chain(readTable(connection, names[i], objects), (table) => step(i + 1, [...out, table])));
+      return chain(step(0, []), (schema) => dialect.introspect.catalog === undefined ? schema
+        : useStatementOnce(connection, dialect.introspect.catalog(), (statement) =>
+          chain(statement.all([]), (native) => ({ ...schema, catalog: native
+            .filter((row) => !engine.has(String(row.owner))
+              && (wanted === null || wanted.has(String(row.owner)) || wanted.has(String(row.name))))
+            .map((row) => ({ type: String(row.type), name: String(row.name), owner: String(row.owner),
+              schema: String(row.schema), sql: row.sql ?? null,
+              metadata: typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata })) }))));
+    });
+  });
 }
 
 /**

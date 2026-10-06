@@ -3,7 +3,7 @@
 import { canonicalizeJson } from '@jarenjs/json/canonical';
 import { createBoundedCache } from '@jarenjs/core/cache';
 import { setObjectMember } from '@jarenjs/core/object';
-import { chain, isThenable } from './driver.js';
+import { chain, isThenable, releaseStatement, releaseStatements, settleStatementUse, useStatementOnce } from './driver.js';
 import { DbCompileError } from './errors.js';
 import { readSchema } from './introspect.js';
 import { columnCodec, physicalSelection, verifyPhysical, textKeyPlan, textKeyDecoding, checkTextKeys } from './physical.js';
@@ -56,9 +56,9 @@ function physicalReader(connection, mapping, batchSize, check) {
       const bounded = dialect.limitClause(batchSize, undefined);
       const keyset = mapping.kind === 'table';
       const seek = ` WHERE (${ordered.join(', ')}) > (${keys.map((_, i) => dialect.parameterRef(i + 1, 'key')).join(', ')})`;
-      const count = () => chain(connection.prepare(`SELECT COUNT(*) AS ${q('n')} FROM ${table}`), (s) => chain(s.get([]), (row) => Number(row.n)));
-      const walk = (handle) => chain(connection.prepare(select + ordering + bounded), (first) =>
-        chain(keyset ? connection.prepare(select + seek + ordering + bounded) : null, (following) => {
+      const count = () => useStatementOnce(connection, `SELECT COUNT(*) AS ${q('n')} FROM ${table}`, (s) => chain(s.get([]), (row) => Number(row.n)));
+      const walk = (handle) => useStatementOnce(connection, select + ordering + bounded, (first) => {
+        const pages = (following) => {
           let after = null, offset = 0;
           const done = Symbol('physical-migration-done');
           const consume = (rows) => {
@@ -74,7 +74,7 @@ function physicalReader(connection, mapping, batchSize, check) {
               check?.();
               const page = keyset
                 ? (after === null ? first.all([]) : following.all(after))
-                : offset === 0 ? first.all([]) : chain(connection.prepare(select + ordering + dialect.limitClause(batchSize, offset)), (s) => s.all([]));
+                : offset === 0 ? first.all([]) : useStatementOnce(connection, select + ordering + dialect.limitClause(batchSize, offset), (s) => s.all([]));
               if (isThenable(page)) return page.then((rows) => {
                 const result = consume(rows);
                 return result === done ? null : chain(result, advance);
@@ -85,7 +85,9 @@ function physicalReader(connection, mapping, batchSize, check) {
             }
           };
           return advance();
-        }));
+        };
+        return keyset ? useStatementOnce(connection, select + seek + ordering + bounded, pages) : pages(null);
+      });
       return { walk, count, keys, ordered, table };
     });
   }));
@@ -110,8 +112,23 @@ export function transformPhysicalRows(connection, target, operation, options) {
   const columns = core.plan.scalarColumns;
   const known = new Set(columns.map((column) => column.name));
   const keyNames = new Set(core.plan.keys);
-  const statements = createBoundedCache(64);
-  return chain(physicalReader(connection, mapping, options.batchSize, options.check), (reader) =>
+  const retained = new Set();
+  const statements = createBoundedCache(64, (_sql, statement) => {
+    retained.delete(statement);
+    releaseStatement(statement);
+  });
+  const prepare = (sql) => {
+    const statement = connection.prepare(sql);
+    retained.add(statement);
+    return statement;
+  };
+  const release = (wait = false) => {
+    const prepared = [...retained];
+    retained.clear();
+    statements.clear();
+    return chain(core.releaseStatements(wait), () => releaseStatements(prepared, wait));
+  };
+  return settleStatementUse(() => chain(physicalReader(connection, mapping, options.batchSize, options.check), (reader) =>
     chain(reader.count(), (initialCount) => {
       let visited = 0, transformed = 0;
       const apply = (row) => {
@@ -140,7 +157,7 @@ export function transformPhysicalRows(connection, target, operation, options) {
         const where = reader.ordered.map((column, i) => `${column} = ${dialect.parameterRef(values.length + i + 1, 'key')}`).join(' AND ');
         const sql = `UPDATE ${reader.table} SET ${assignments.join(', ')} WHERE ${where}`;
         const params = [...values.map((value) => value.value), ...core.plan.keys.map((name) => core.plan.encodeColumn(name, before[name]))];
-        return chain(statements.getOrCreate(sql, (text) => connection.prepare(text)), (statement) => chain(statement.run(params), (result) => {
+        return chain(statements.getOrCreate(sql, prepare), (statement) => chain(statement.run(params), (result) => {
           if (Number(result.changes) !== 1) operation.fail('the physical transform did not update exactly its addressed row');
           return chain(core.get(core.plan.keys.length === 1 ? before[core.plan.keys[0]] : identity), (stored) => {
             if (!stored || core.plan.keys.some((name) => !same(stored[name], before[name])))
@@ -174,5 +191,5 @@ export function transformPhysicalRows(connection, target, operation, options) {
           operation.fail('a physical transform changed source row membership');
         return transformed;
       }));
-    }));
+    })), release, () => release(true));
 }

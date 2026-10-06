@@ -21,7 +21,7 @@ import {
 import { resolveRuntime } from '@jarenjs/core/runtime';
 
 import { DbRuntimeError, wrapDriverError } from './errors.js';
-import { chain, attempt, useStatementOnce } from './driver.js';
+import { chain, attempt, useStatementOnce, releaseStatements as releasePrepared } from './driver.js';
 import { checkInvariants, existsRowSql, RECORD_PATH, ruleLiteral } from './invariants.js';
 import { columnCodec, physicalRead } from './physical.js';
 import { mergeEntityRow } from './graph.js';
@@ -405,6 +405,14 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
   };
 
   const core = {
+    // Temporary migration cores retire only their own completed work. Store
+    // cores retain these statements for the Store's existing lifetime.
+    releaseStatements(wait = false) {
+      const prepared = [...statements.values()];
+      statements.clear();
+      updateShapes = 0;
+      return releasePrepared(prepared, wait);
+    },
     // the unit-of-work exposure (tracker.js): the column plan and the
     // completion/validation/stamping machinery, one source of truth
     plan: {

@@ -354,16 +354,25 @@ _jaren_migrations(id TEXT PRIMARY KEY, applied_at INTEGER,
 FNV-1a fingerprint of the canonical JSON document, written in base 36. It is
 not a cryptographic signature or collision-free identity. On every
 run, the supplied migration list MUST contain every applied migration,
-in order, with matching checksums; a migration whose recorded checksum
-differs from the document on disk is `JD0022` — someone edited an
-applied migration, which is always a bug and always worth failing on.
+in order, with matching ids, checksums, from/to hashes and step counts.
+A disagreement is `JD0022`; the writer checks these fields again after
+acquiring its lock, before executing any pending step. These comparisons
+do not rewrite existing receipts or normalize their stored values.
 The database's current shape is the last applied `to_hash`, or the
 hash of the `baseline` model when no migration has run.
 
 `migrationChecksum(migration)` is that checksum, exported: the hash of
 the WHOLE canonical document — every step, its SQL text, a host step's
 `run` and `version`, a physical plan's source, dispositions and scope.
-The runner treats matching recorded checksums as the same migration, but two
+The runner admits a private JSON snapshot of the migration list,
+baseline, target model and explicit physical target before callbacks or
+asynchronous admission. The canonicalizer checks the JSON domain; the copy
+preserves declaration order. Shadow replay, execution and receipt creation use
+that snapshot. Changing a caller's objects during the run cannot change
+what later steps execute or what the receipt describes; the runner leaves
+the caller's objects untouched. Status takes the same input snapshot.
+
+The runner uses the recorded fingerprints and fields above, but two
 different canonical documents can share a checksum. The same limitation applies
 to model `from_hash`/`to_hash` values. Keep the reviewed migration documents in
 version control; the recorded checksum alone cannot establish that their contents
@@ -400,7 +409,17 @@ documents — makes such a change impossible to ship unnoticed.
 A borrowed target cannot also carry `driver`, `path` or `busyTimeout`.
 `migrationStatus` uses the same ownership forms. Borrowed model-only status
 comparison needs `shadowDriver`; a complete `physicalTarget` needs no
-fresh reference database. For a nested rebuild, enter
+fresh reference database. Temporary history and physical-inspection statements
+are released after each operation, including refusal. A physical row walk holds
+its statements through the complete walk; a transform releases its own cached
+reads and writes after settlement. Cleanup preserves the original outcome and
+never closes a borrowed connection. Async transforms drain bulk cleanup before
+returning to their transaction, so finalization cannot flood the request queue
+ahead of commit. Document and derived-column transforms await every write before
+checking the target, recording the receipt or reporting completion; a rejected
+write rolls back its link.
+
+For a nested rebuild, enter
 `withForeignKeysSuspended(connection, callback)` before the migration so
 the driver can bracket FK settings outside the transaction and use nested
 savepoints inside it. Each acquired connection has one cleanup owner;
@@ -784,6 +803,11 @@ jaren-db documents --migrations <dir> --in <file|-> (--out <file|-> | --in-place
   reads the history the way `status` does — probed, never created — and
   does NOT replay the chain on the shadow, so a draft step still prints
   instead of refusing. The shadow's verdict comes with the real `apply`.
+  With nothing pending, real `apply` checks the supplied model or saved
+  physical target for drift and passes the chain through the runner before
+  reporting `up to date`. A no-op needs no confirmation and changes no
+  history or application rows. A no-pending `--dry-run` reports only the
+  preview; it does not claim target acceptance.
 - `status` lists applied/pending and reports drift (§12); on a
   database without a history table it creates nothing (§6).
 - `shape` prints the physical mapping a model produces.

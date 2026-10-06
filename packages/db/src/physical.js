@@ -2,7 +2,7 @@
 /** Explicit column layouts and lossless JSON-facing column codecs. */
 import { getEpochOfDateTimeRFC3339, getEpochOfDateOnlyRFC3339 } from '@jarenjs/core/dates/rfc3339';
 import { DbCompileError, DbRuntimeError } from './errors.js';
-import { chain } from './driver.js';
+import { chain, useStatementOnce } from './driver.js';
 import { canonicalizeJson } from '@jarenjs/json/canonical';
 import { planTable } from './dialects/sqlite-schema.js';
 import { sqlitePhysicalColumnType, sqliteTableMigration } from './dialects/sqlite.js';
@@ -194,7 +194,7 @@ export function verifyPhysical(connection, mapping, schema) {
     if (!actual || actual.sql?.trim().replace(/;$/, '') !== trigger.sql.trim().replace(/;$/, '')) fail(`invariant trigger '${trigger.name}' is missing or changed; apply an explicit migration`);
   }
   const installed = programs.length === 0 ? null
-    : chain(connection.prepare(connection.dialect.introspect.invariantPrograms()), (s) => chain(s.all([]), (rows) => {
+    : useStatementOnce(connection, connection.dialect.introspect.invariantPrograms(), (s) => chain(s.all([]), (rows) => {
       for (const trigger of programs) {
         const row = rows.find((r) => r.name === trigger.name && r.owner === mapping.table);
         const actual = row === undefined ? undefined : typeof row.program === 'string' ? JSON.parse(row.program) : row.program;
@@ -206,7 +206,7 @@ export function verifyPhysical(connection, mapping, schema) {
   // an increment updates its own row from inside its trigger, which runs
   // that trigger again only while recursive triggers are on
   const recursion = !(mapping.triggers ?? []).some((trigger) => trigger.selfUpdate) ? null
-    : chain(connection.prepare(connection.dialect.introspect.pragma('recursive_triggers')), (s) => chain(s.get([]), (row) => {
+    : useStatementOnce(connection, connection.dialect.introspect.pragma('recursive_triggers'), (s) => chain(s.get([]), (row) => {
       if (Number(row?.recursive_triggers) !== 0) fail('an increment rule updates its own row, and recursive_triggers would run its trigger again; switch it off');
     }));
   // a rule compares text by code point, which SQLite's BINARY collation is
@@ -216,7 +216,7 @@ export function verifyPhysical(connection, mapping, schema) {
       if (String(name).toUpperCase() !== 'UTF-8') fail(`database rules compare text by code point, which a ${name} database does not; use a UTF-8 database`);
     });
   const read = mapping.kind === 'view'
-    ? chain(connection.prepare(connection.dialect.introspect.columns(mapping.table)), (s) =>
+    ? useStatementOnce(connection, connection.dialect.introspect.columns(mapping.table), (s) =>
       chain(s.all([]), (columns) => ({ columns: columns.map((c) => ({ ...c, generated: !!c.hidden })), primaryKey: [] })))
     : schema.tables.find((t) => t.name === mapping.table);
   return chain(recursion, () => chain(encoding, () => chain(installed, () => chain(read, (table) => {
@@ -288,7 +288,7 @@ export function textKeyDecoding(connection) {
   return chain(databaseEncoding(connection), (encoding) => {
     const decoder = new TextDecoder(encoding, { fatal: true, ignoreBOM: true });
     const probe = `SELECT ${sqliteTableMigration.binaryCast(dialect.parameterRef(1, 'text'))} AS ${dialect.quoteIdentifier('bytes')}`;
-    return chain(connection.prepare(probe), (bound) => chain(bound.get(['\uFEFFx']), (read) => ({
+    return useStatementOnce(connection, probe, (bound) => chain(bound.get(['\uFEFFx']), (read) => ({
       decoder, keepsLeadingBom: decoder.decode(read.bytes) === '\uFEFFx',
     })));
   });
@@ -304,7 +304,7 @@ export function textKeyDecoding(connection) {
  * @returns {any} value-or-promise of the encoding's name
  */
 function databaseEncoding(connection) {
-  return chain(connection.prepare(connection.dialect.introspect.pragma('encoding')), (statement) =>
+  return useStatementOnce(connection, connection.dialect.introspect.pragma('encoding'), (statement) =>
     chain(statement.get([]), (row) => (row === undefined || row === null ? 'UTF-8' : row.encoding)));
 }
 

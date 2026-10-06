@@ -186,23 +186,42 @@ export function attempt(call, wrap) {
 
 /** Release a prepared value or promise without replacing the call's outcome.
  * @param {any} prepared
+ * @param {boolean} [wait] - Let an async bulk owner await this release.
+ * @returns {void | Promise<any>}
  */
-function releaseStatement(prepared) {
+export function releaseStatement(prepared, wait = false) {
   try {
-    void Promise.resolve(chain(prepared, (statement) => statement.finalize?.())).catch(() => {});
+    const released = Promise.resolve(chain(prepared, (statement) => statement.finalize?.())).catch(() => {});
+    if (wait) return released;
   }
   catch {
     // a statement its connection already discarded
   }
 }
 
+/** Release a completed operation's cache without flooding a remote request queue.
+ * Synchronous owners keep immediate, best-effort cleanup and return timing.
+ * @param {Iterable<any>} prepared
+ * @param {boolean} [wait]
+ * @returns {void | Promise<any>}
+ */
+export function releaseStatements(prepared, wait = false) {
+  let pending;
+  for (const statement of prepared) {
+    if (wait) pending = chain(pending, () => releaseStatement(statement, true));
+    else releaseStatement(statement);
+  }
+  return pending;
+}
+
 /** Settle a borrow on every completion path without making sync calls async.
  * @template T
  * @param {() => T | Promise<T>} call
  * @param {() => void} done
+ * @param {() => void | Promise<any>} [asyncDone]
  * @returns {T | Promise<T>}
  */
-function settleStatementUse(call, done) {
+export function settleStatementUse(call, done, asyncDone = done) {
   let out;
   try {
     out = call();
@@ -215,8 +234,8 @@ function settleStatementUse(call, done) {
     done();
     return out;
   }
-  return /** @type {Promise<T>} */ (out).then((value) => { done(); return value; },
-    (error) => { done(); throw error; });
+  return /** @type {Promise<T>} */ (out).then((value) => chain(asyncDone(), () => value),
+    (error) => chain(asyncDone(), () => { throw error; }));
 }
 
 /**

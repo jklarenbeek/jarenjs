@@ -341,9 +341,17 @@ async function commandApply(options) {
   const migrations = await loadMigrationsDir(options.migrations);
   const target = { driver: nodeDriver(), path: options.store };
 
-  const status = await migrationStatus(target, migrations)
+  const status = await migrationStatus(target, migrations, options.dryRun ? {} : { model })
     .catch((error) => fail(error.message));
   if (status.pending.length === 0) {
+    if (options.dryRun) {
+      console.log('nothing to apply — dry run');
+      return;
+    }
+    if (status.drift !== null)
+      fail(`the database drifted from the target: ${status.drift}`);
+    await migrate(target, migrations, { baseline, model })
+      .catch((error) => fail(error.message));
     console.log('nothing to apply — up to date');
     return;
   }
