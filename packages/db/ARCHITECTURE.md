@@ -1002,7 +1002,13 @@ The strategy-table diff renders managed hybrid-model steps. Physical
 declaration changes remain an explicit planning-policy refusal; reviewed
 `table` steps delegate to `table-migration.js` with their entire source,
 checksum, storage, identity and object guards. `migrate.js` owns the one
-history/receipt transaction for both structural and data steps.
+history/receipt transaction for both structural and data steps. New 0.2 artifacts
+carry canonical exact model endpoints. `migration-history.js` owns full text
+observations and canonical side receipts; the normal legacy history columns and
+ordering values remain unchanged. `migrationHistory` observes without writing;
+`adoptMigrationHistory` transactionally attests an explicitly reviewed complete
+legacy prefix and model. It cannot recover unknown exact historical endpoints.
+The CLI routes history/adoption and ordinary status/apply through these owners.
 
 `physical-transform.js` reuses entity codecs and the document-step kernel
 for bounded column reads and changed-only writes. Each step can select a
@@ -1022,8 +1028,12 @@ snapshots and checksums never use relaxed comparison.
 IMMEDIATE transaction. Nested work shares savepoints. Owned handles close
 even after initialization failure; borrowed synchronous work retains its
 value boundary. `shadowFixture` initializes a disposable historical schema
-before replay calls the same `migrate` and receipt executor, with recursive
-replay disabled. Every selected target is accepted before its receipt.
+before replay uses the shared step/receipt executor, with recursive replay
+disabled. Private verified authority executes an adopted legacy prefix on an
+empty independent shadow before the exact tail; it does not copy primary
+receipts or expose a legacy bypass. Every selected target is accepted before its
+receipt. PostgreSQL writers require effective READ COMMITTED and preserve caller
+isolation; read-only observations retain the caller's transaction view.
 
 ## One cross-runtime seam worth remembering
 

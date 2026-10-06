@@ -3,7 +3,7 @@
  * @file The planner-stability gate (MIGRATION-FORMAT §5): a corpus of model
  * pairs — additive, widening, a narrowing with and without its transform, a
  * rename, an index, an entity rebuild and a physical plan — is planned and
- * compared with committed golden documents. Planner output is not promised
+ * compared with versioned committed golden documents. Planner output is not promised
  * stable across releases before 1.0, so a host persists the documents it
  * applies and never re-plans an applied link; this gate makes a change to
  * what the planner writes for an unchanged pair impossible to ship
@@ -15,13 +15,29 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
+import { createHash } from 'node:crypto';
 
 import { planModelMigration, planPhysicalMigration, planTableMigration, sqliteDialect, readSchema, migrationChecksum } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';
 import { canonicalizeJson } from '@jarenjs/json/canonical';
+import { checkMigrationStructure } from '../../packages/db/src/document-steps.js';
 
-const DIR = new URL('./fixtures/planner-goldens/', import.meta.url);
+const LEGACY = new URL('./fixtures/planner-goldens/', import.meta.url);
+const DIR = new URL('0.2/', LEGACY);
 const WRITE = process.env.JAREN_WRITE_PLANNER_GOLDENS === '1';
+
+/** Reviewed historical artifacts; the current-output writer cannot replace them. */
+const LEGACY_IDENTITIES = {
+  'additive': ['25beb7c4bd4b27550c8a8e774eeca87f7fda87da24960cbaf8d88969da55f9bf', '1flpvlx'],
+  'entity-rebuild': ['4043b9d9a988517965a970d246ef4d3f31a719639938c2b8231f3e9999730634', '10qv1jj'],
+  'index': ['2a4f72f94824c38269885c24db72df4be2f1e68f52c6ee5887b614c8ab441b99', '1wel6ms'],
+  'narrowing-draft': ['f3aa3714bdb7e4f5a4f1979d2a574b270578c528b815c71e753c740c6a4e08f8', 'norvl1'],
+  'narrowing-transform': ['fd7702a1447ed7fbdf48a2af4cb7cf55b3a6eee6952adaf6ab4eab8e93d26fd2', 'w7tn0k'],
+  'physical': ['59c0294496fbd7a609048978ffa747ed0a5e3f8e265aeffd2464573e44af035c', '1lfim8e'],
+  'rename': ['5acb983801097905b027a9ba6f37c77ecf0d565eed67c33ba99474f56c1c56b8', '12zwwyo'],
+  'widening': ['ff6fd037e76515776023a9b2825f71bb559ec505abcf6d9f7f280894b887598e', '1b0fk3k'],
+};
+
 
 const collection = (/** @type {any} */ schema, /** @type {any[]} */ indexes = []) => ({ schema, key: '/id', indexes });
 const docs = (/** @type {any} */ properties, /** @type {string[] | undefined} */ required = undefined) =>
@@ -78,8 +94,22 @@ describe('planner goldens: an unchanged pair of models plans to the committed do
     it(name, async () => {
       const planned = name === 'physical' ? await physicalPlan() : CORPUS[/** @type {keyof typeof CORPUS} */ (name)]();
       const actual = JSON.parse(canonicalizeJson(planned));
+      assert.equal(actual.migration.$migration, '0.2');
+      assert.equal(actual.migration.identity.version, 1);
+      const legacyFile = new URL(`${name}.json`, LEGACY);
+      const legacyBytes = fs.readFileSync(legacyFile);
+      const [sha256, checksum] = LEGACY_IDENTITIES[/** @type {keyof typeof LEGACY_IDENTITIES} */ (name)];
+      assert.equal(createHash('sha256').update(legacyBytes).digest('hex'), sha256, 'the applied artifact is immutable');
+      const historical = JSON.parse(legacyBytes.toString());
+      checkMigrationStructure(historical.migration);
+      assert.equal(migrationChecksum(historical.migration), checksum, 'the legacy checksum protocol is unchanged');
+      const compatible = structuredClone(actual);
+      compatible.migration.$migration = '0.1';
+      delete compatible.migration.identity;
+      assert.deepEqual(compatible, historical, 'the deliberate format change retains every step, report and compatibility fingerprint');
       const file = new URL(`${name}.json`, DIR);
       if (WRITE) {
+        fs.mkdirSync(DIR, { recursive: true });
         fs.writeFileSync(file, `${JSON.stringify(actual, null, 2)}\n`);
         return;
       }

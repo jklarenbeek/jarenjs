@@ -7,6 +7,7 @@
  */
 
 import { describe, it } from 'node:test';
+import { migrationIdentity } from './migration-fixture.js';
 import * as assert from 'node:assert';
 import { execFileSync } from 'node:child_process';
 
@@ -190,10 +191,10 @@ describe('failure semantics', () => {
     const { dbPath, cleanup } = await seeded();
     try {
       const migration = {
-        $migration: '0.1',
+        $migration: '0.2', identity: migrationIdentity(M0),
         id: '0001-doomed',
         from: planMigration(M0, M0, { dialect: sqliteDialect }).migration.from,
-        to: 'anywhere',
+        to: planMigration(M0, M0, { dialect: sqliteDialect }).migration.to,
         steps: [
           {
             kind: 'jslt',
@@ -230,10 +231,10 @@ describe('failure semantics', () => {
     const { dbPath, cleanup } = await seeded();
     try {
       const migration = {
-        $migration: '0.1',
+        $migration: '0.2', identity: migrationIdentity(M0),
         id: '0001-bad-ddl',
         from: planMigration(M0, M0, { dialect: sqliteDialect }).migration.from,
-        to: 'nowhere',
+        to: planMigration(M0, M0, { dialect: sqliteDialect }).migration.to,
         steps: [{ kind: 'ddl', sql: 'CREATE INDEX "nope" ON "ghosts" ("gone")' }],
       };
       await assert.rejects(

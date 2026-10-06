@@ -9,6 +9,7 @@
  */
 import { after, before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { migrationIdentity } from './migration-fixture.js';
 
 import { openStore, planModelMigration, migrate, migrationStatus, shapeHash, sqliteDialect } from '@jarenjs/db';
 import { postgresDriver } from '@jarenjs/db/postgres';
@@ -24,8 +25,8 @@ const V2 = structuredClone(V1);
 /** @type {any} */ (V2.collections.docs.schema.properties.name).maxLength = 3;
 // a collection narrowing plans only its draft transform, whatever the dialect: without it the link runs no statement
 const NARROW = { ...planModelMigration(V1, V2, { dialect: sqliteDialect, id: 'narrow' }).migration, steps: [] };
-const REPAIR = { $migration: '0.1', id: 'repair', from: shapeHash(V2), to: shapeHash(V2), steps: [{ kind: 'host', run: 'truncate', version: '1' }] };
-const FAILING = { $migration: '0.1', id: 'failing', from: shapeHash(V2), to: shapeHash(V2), steps: [{ kind: 'sql', sql: 'INSERT INTO nowhere VALUES (1)' }] };
+const REPAIR = { $migration: '0.2', identity: migrationIdentity(V2), id: 'repair', from: shapeHash(V2), to: shapeHash(V2), steps: [{ kind: 'host', run: 'truncate', version: '1' }] };
+const FAILING = { $migration: '0.2', identity: migrationIdentity(V2), id: 'failing', from: shapeHash(V2), to: shapeHash(V2), steps: [{ kind: 'sql', sql: 'INSERT INTO nowhere VALUES (1)' }] };
 const hosts = { truncate: { version: '1', async run(/** @type {any} */ scope) {
   await Promise.resolve();
   return scope.collection('docs').update((/** @type {any} */ doc) => (doc.name.length > 3 ? { ...doc, name: doc.name.slice(0, 3) } : undefined));

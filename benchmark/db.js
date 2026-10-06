@@ -45,7 +45,10 @@
 
 import { writeFileSync } from 'node:fs';
 
-import { openStore, shapeHash } from '@jarenjs/db';
+import { openStore } from '@jarenjs/db';
+import { canonicalizeJson } from '@jarenjs/json/canonical';
+import { withoutModelRenameHints } from '@jarenjs/core/model';
+import { hashContent } from '@jarenjs/core/string';
 import { nodeDriver } from '@jarenjs/db/node';
 import { from } from '@jarenjs/linq';
 
@@ -555,9 +558,8 @@ report('Sort + limit 20 (ns/query)', ['ns/query'], sortRows);
     console.error('  ✗ the JSLT pen and its literal are not the same document');
   }
 
-  // 4. one migration between two models — the pen hashes both shapes, so
-  //    its price includes the canonicalization a hand-written document
-  //    would have had to get right by hand
+  // 4. Both routes compute exact normalized model text once per endpoint,
+  //    then derive the compatibility fingerprints from that same text.
   const v1 = modelPen();
   const v2 = m.defineModel({ entities: {
     User: m.object({
@@ -565,16 +567,12 @@ report('Sort + limit 20 (ns/query)', ['ns/query'], sortRows);
     }),
   } });
   const migrationPen = () => defineMigration({ id: 'add-city', from: v1, to: v2 }).toJSON();
-  // the hand-written route is not cheaper by skipping the hashes: a
-  // migration document IS its two shape hashes, and an author who types
-  // one still has to compute them with the store's own function
-  const migrationLiteral = () => ({
-    $migration: '0.1',
-    id: 'add-city',
-    from: shapeHash(v1),
-    to: shapeHash(v2),
-    steps: [],
-  });
+  const migrationLiteral = () => {
+    const from = canonicalizeJson(withoutModelRenameHints(v1));
+    const to = canonicalizeJson(withoutModelRenameHints(v2));
+    return { $migration: '0.2', id: 'add-city', from: hashContent(from), to: hashContent(to),
+      identity: { version: 1, from, to }, steps: [] };
+  };
   if (!deepEquals(migrationPen(), migrationLiteral())) {
     equivalenceFailures++;
     console.error('  ✗ the migration pen and its literal are not the same document');
@@ -589,15 +587,15 @@ report('Sort + limit 20 (ns/query)', ['ns/query'], sortRows);
     { name: 'JSLT pen — one rule', results: [timeSync(jsltPen, PEN_ITER)] },
     { name: '  the same document, hand-written', results: [timeSync(jsltLiteral, PEN_ITER)] },
     { name: 'migration pen — two models, no step', results: [timeSync(migrationPen, PEN_ITER)] },
-    { name: '  the same document, hand-written (both hashes included)',
+    { name: '  the same document, hand-written (exact endpoints and fingerprints included)',
       results: [timeSync(migrationLiteral, PEN_ITER)] },
   ]);
   notes.push('the pen rows are BUILD cost, paid once per definition at module load: a pen '
     + 'emits the document a hand-written literal would have been, and every row above is '
     + 'asserted byte-equal to that literal before it is timed. The migration pen carries '
-    + "both models' shape hashes (a canonicalize + hash per side), which is the whole of "
-    + 'its distance from a literal — and is work a hand-written migration document still '
-    + 'has to get right');
+    + "both models' exact canonical text and compatibility fingerprints. Both routes "
+    + 'normalize and canonicalize each endpoint once, then hash that text; the pen also '
+    + 'validates and owns an immutable document snapshot');
 }
 
 // ---- the router's sanity floor, re-measured ----

@@ -1,10 +1,10 @@
 # The Jaren migration pen
 
-> `./migration` — `$migration` 0.1 documents: the two shape hashes and
+> `./migration` — `$migration` 0.2 documents: exact model endpoints and
 > the ordered steps the runner takes. **Read it when** you are moving a
 > store from one model to the next
 
-Version 0.1. The key words MUST, MUST NOT, SHOULD and MAY are to be
+Version 0.2. The key words MUST, MUST NOT, SHOULD and MAY are to be
 interpreted as described in RFC 2119. This document is a **guide** — read
 it in order and you can write the format — whose one normative section is
 [§2 The mapping table](#2-the-mapping-table); the rules every pen keeps, the shared refusal table, the
@@ -25,12 +25,12 @@ document that comes out is what `migrate()` runs.
 import { defineMigration, fromPlanned } from '@jarenjs/linq/migration';
 ```
 
-writes `$migration` 0.1 documents — the `jaren-migration` grammar
+writes `$migration` 0.2 documents — the `jaren-migration` grammar
 `packages/db/schemas/jaren-migration.schema.json` publishes (with a
 draft-07 twin beside it), whose one specification is
 [MIGRATION-FORMAT.md](../../db/docs/MIGRATION-FORMAT.md) §2 — and
 `@jarenjs/db`'s `migrate()` takes what this pen emits unchanged. The
-document is two shape hashes and an ordered list of steps; the order is
+document carries exact canonical model endpoints, compatible fingerprints and an ordered list of steps; the order is
 the contract.
 
 **The running example.** §3 is one project's `migrations/` directory read
@@ -41,17 +41,14 @@ the types the transforms are checked against off the same models.
 
 Four things are worth naming before the tables:
 
-- **Identity is the shape hash, and the pen computes what the store
-  computes.** `from` and `to` are
-  `hashContent(canonicalizeJson(model))` with the `x-rename` planning
-  hints stripped (`packages/linq/src/migration/define.js:45-75`) — the
-  store's own rule, from the same two functions. A test holds the pen's
-  hash equal to `@jarenjs/db`'s `shapeHash` over every model-pen corpus
-  model, rename hint included, and asserts that a model differing only by
-  a hint hashes the same (`test/linq/migration-pen.test.js`, "identity is
-  the shape hash"). A database records shapes, never version numbers a
-  human has to remember to bump; a migration whose `from` does not match
-  the recorded shape refuses to run (`JD0020`).
+- **Exact endpoints share one normalization rule.** The required
+  `identity: { version: 1, from, to }` stores canonical model JSON strings.
+  `@jarenjs/core/model` removes only collection/entity `x-rename` planning
+  hints; `@jarenjs/json` canonicalizes the result. DB and LINQ use the same
+  owners. The short `from`/`to` values retain `shapeHash` compatibility for
+  display, but a collision does not make different models equal. A wrong
+  baseline, adjacent endpoint or target refuses `JD0020` in the runner;
+  a supplied wrong model refuses `JL0102` in `fromPlanned`.
 - **The planner still plans; the pen types the human part.**
   `jaren-db plan --model ./model.js` diffs the committed
   `model.snapshot.json` against the model, renders the DDL through the
@@ -67,8 +64,8 @@ Four things are worth naming before the tables:
   `@jarenjs/validate`, `@jarenjs/emit` or the query engine — a test
   asserts it file by file. A transform's body is captured through the
   JSLT pen's `body()` ([JSLT-PEN.md](JSLT-PEN.md)); an assertion's
-  predicate through the chain's recording proxy; the hash is
-  `@jarenjs/core`'s over `@jarenjs/json`'s canonical form. Everything
+  predicate through the chain's recording proxy; normalization is in
+  `@jarenjs/core/model` and exact JSON text in `@jarenjs/json`. Everything
   else about a migration — the shadow replay, the widening check against
   real data, history and checksums, batching — is the runner's, and §6
   says so plainly because a reader who believes otherwise will lose data.
@@ -108,7 +105,7 @@ naming the reason).
 
 | Method | Emits | Type reading | Status |
 |---|---|---|---|
-| `defineMigration({ id, from, to, note? })` | `{ $migration: '0.1', id, from, to, note?, steps }` — `from`/`to` the two models' shape hashes, exactly `shapeHash` (pinned) | `Migration<From, To>`, the two model documents' phantoms | native; not a `$model` document, an empty `id`, another member `JL0101` |
+| `defineMigration({ id, from, to, note? })` | `{ $migration: '0.2', id, from, to, identity, note?, steps }` — exact canonical model endpoints under identity version 1, plus compatible `shapeHash` fingerprints | `Migration<From, To>`, the two model documents' phantoms | native; not a `$model` document, an empty `id`, another member `JL0101` |
 | `.ddl(sql, note?)` | `{ kind: 'ddl', sql, note? }` — one rendered statement (§2) | — | native; an empty statement `JL0101` |
 | `.sql(sql, note?)` | `{ kind: 'sql', sql, note? }` — one data statement spelled directly (§9.4); a dry run always prints it with its note | — | native; an empty statement `JL0101` |
 | `.host(run, version, note?)` | `{ kind: 'host', run, version, note? }` — application code in the migration's transaction: the host the run registers under `run` (`migrate(…, { hosts })`), at the version it was reviewed at (MIGRATION-FORMAT §2) | — | native; an empty `run` or `version` `JL0101` |
@@ -119,22 +116,20 @@ naming the reason).
 | `.transform(name, spelling, { model })`, `.assert(name, spelling, { model, expect? })` | the ordinary step plus an immutable current `$model` document | transform input/output and assertion rows use this model's layout; names may be absent from the final model | native; an invalid model `JL0101`; a name absent from the selected model `JL0106` |
 | `.derive(name, columns)` | `{ kind: 'derive', collection: name, columns }` — a backfill of stored derived columns (§2.1), the columns verbatim | `readonly DeriveColumn[]` | native; no columns `JL0101`; an undeclared table `JL0106` |
 | `.step(raw)` | any planner-emitted step, including a complete guarded `{ kind: 'table', plan }` or a hybrid `rebuild`; a `draft` flag rides untouched | `MigrationStep`, including `TableStep`/`ReviewedTablePlan` | native; an unrecognised kind or incomplete plan/step `JL0101` |
-| `fromPlanned(document, { from?, to? })` | the planner's document, including its `physical` header and complete saved plans; `.transform(name, …)` replaces its draft in place, and other methods append | the models type transforms and are checked against the hashes | native; a model that is not the planned one `JL0102`; two drafts for one name, or no draft and neither target nor step model `JL0106` |
-| `.document`, `.toJSON()` | the deep-frozen `$migration` document — assembled once and memoized, so `a.document === a.document` | `MigrationDocument` | native |
+| `fromPlanned(document, { from?, to? })` | the planner's document, including its `physical` header and complete saved plans; `.transform(name, …)` replaces its draft in place, and other methods append | the models type transforms and are checked against exact endpoints | native; legacy 0.1 input or a model that is not the planned one `JL0102`; two drafts for one name, or no draft and neither target nor step model `JL0106` |
+| `.document`, `.toJSON()` | the deep-frozen `$migration` document — assembled once and memoized, so `a.document === a.document` | `ExactMigrationDocument` | native |
 
-The `$migration` 0.1 vocabulary has seven kinds: `ddl`, `jslt`, `query`,
-`derive`, `sql`, `rebuild` and `table`. The two structural artifact kinds use
+The migration vocabulary has eight kinds: `ddl`, `jslt`, `query`,
+`derive`, `sql`, `rebuild`, `table` and `host`. The two structural artifact kinds use
 `step()`; the pen preserves their plans without implementing SQL execution.
 
 Three rules the table implies, spelled out:
 
-- **Identity stays the shape hash.** A database stores hashes, not
-  models; the pen computes what the store computes, from the same two
-  functions, with the same hint stripped — and the pin over every corpus
-  model is what keeps the two equal. A `x-rename` hint is a PLANNING
-  instruction, not shape, so a model that keeps carrying a satisfied hint
-  hashes the same as one without it and plans nothing (MIGRATION-FORMAT
-  §3 — a rename is idempotent across `plan` runs).
+- **Identity is exact; fingerprints stay compatible.** The complete canonical
+  document binds its ordered steps, host versions and physical/table artifacts.
+  Endpoint strings use the shared model rule. A `x-rename` hint is a planning
+  instruction, so retaining a satisfied declaration hint changes neither the
+  endpoint nor its fingerprint (MIGRATION-FORMAT §3).
 - **A step's name belongs to its selected model.** `transform` and
   `assert` use an explicit `{ model }` when supplied, or the known target
   otherwise; `derive` uses the target. Entities and collections both count.
@@ -161,9 +156,9 @@ order they are one database's history.
 
 One caveat about every fence here, because it is the thing a reader will
 misread: each declares only the entities the step touches, so the fences
-stay readable. A real migration's `from` and `to` are the hashes of the
-WHOLE model at those two points — that is what the database recorded and
-what `migrate()` compares against.
+stay readable. A real migration's identity covers the WHOLE model at those
+two points; its `from` and `to` fingerprints derive from those same canonical
+strings. The runner compares exact endpoints before execution.
 
 **0002, by hand.** A migration between two model-pen models: the DDL the
 planner would render, a typed transform, a precondition:
@@ -187,21 +182,52 @@ export const handles = defineMigration({ id: '0002-handles', from: v1, to: v2, n
 
 ```json
 {
-  "$migration": "0.1",
+  "$migration": "0.2",
   "id": "0002-handles",
   "from": "x7457y",
   "to": "hn656j",
+  "identity": {
+    "version": 1,
+    "from": "{\"$model\":\"0.1\",\"entities\":{\"User\":{\"schema\":{\"additionalProperties\":false,\"properties\":{\"age\":{\"type\":\"integer\"},\"id\":{\"type\":\"string\",\"x-entity\":{\"key\":true}},\"name\":{\"type\":\"string\"}},\"required\":[\"id\",\"name\"],\"type\":\"object\"}}}}",
+    "to": "{\"$model\":\"0.1\",\"entities\":{\"User\":{\"schema\":{\"additionalProperties\":false,\"properties\":{\"age\":{\"type\":\"integer\"},\"handle\":{\"type\":\"string\"},\"id\":{\"type\":\"string\",\"x-entity\":{\"key\":true}},\"name\":{\"type\":\"string\"}},\"required\":[\"id\",\"name\",\"handle\"],\"type\":\"object\"}}}}"
+  },
   "note": "every user gets a handle",
   "steps": [
-    { "kind": "ddl", "sql": "ALTER TABLE \"User\" ADD COLUMN \"handle\" TEXT",
-      "note": "add column 'handle' on 'User'" },
-    { "kind": "jslt", "collection": "User",
-      "stylesheet": [ { "match": "$",
-                        "body": { "id": "$.id", "name": "$.name", "age": "$.age",
-                                  "handle": { "$lower": "$.name" } } } ] },
-    { "kind": "query", "collection": "User",
-      "assert": { "$for": { "it": "$[*]" }, "$where": { "$empty": "$it.name" },
-                  "$return": "$it" } }
+    {
+      "kind": "ddl",
+      "sql": "ALTER TABLE \"User\" ADD COLUMN \"handle\" TEXT",
+      "note": "add column 'handle' on 'User'"
+    },
+    {
+      "kind": "jslt",
+      "collection": "User",
+      "stylesheet": [
+        {
+          "match": "$",
+          "body": {
+            "id": "$.id",
+            "name": "$.name",
+            "age": "$.age",
+            "handle": {
+              "$lower": "$.name"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "kind": "query",
+      "collection": "User",
+      "assert": {
+        "$for": {
+          "it": "$[*]"
+        },
+        "$where": {
+          "$empty": "$it.name"
+        },
+        "$return": "$it"
+      }
+    }
   ]
 }
 ```
@@ -237,19 +263,46 @@ export const shouty = defineMigration({ id: '0003-shout', from: v2, to: v2 })
 
 ```json
 {
-  "$migration": "0.1",
+  "$migration": "0.2",
   "id": "0003-shout",
   "from": "eedea8",
   "to": "eedea8",
+  "identity": {
+    "version": 1,
+    "from": "{\"$model\":\"0.1\",\"entities\":{\"User\":{\"schema\":{\"additionalProperties\":false,\"properties\":{\"handle\":{\"type\":\"string\"},\"id\":{\"type\":\"string\",\"x-entity\":{\"key\":true}},\"name\":{\"type\":\"string\"}},\"required\":[\"id\",\"name\",\"handle\"],\"type\":\"object\"}}}}",
+    "to": "{\"$model\":\"0.1\",\"entities\":{\"User\":{\"schema\":{\"additionalProperties\":false,\"properties\":{\"handle\":{\"type\":\"string\"},\"id\":{\"type\":\"string\",\"x-entity\":{\"key\":true}},\"name\":{\"type\":\"string\"}},\"required\":[\"id\",\"name\",\"handle\"],\"type\":\"object\"}}}}"
+  },
   "steps": [
-    { "kind": "jslt", "collection": "User",
-      "stylesheet": [ { "match": "$",
-                        "body": { "id": "$.id", "name": { "$upper": "$.name" },
-                                  "handle": "$.handle" } } ] },
-    { "kind": "query", "collection": "User",
-      "assert": { "$for": { "it": "$[*]" }, "$where": { "$exists": "$it.handle" },
-                  "$return": "$it" },
-      "expect": "ebv" }
+    {
+      "kind": "jslt",
+      "collection": "User",
+      "stylesheet": [
+        {
+          "match": "$",
+          "body": {
+            "id": "$.id",
+            "name": {
+              "$upper": "$.name"
+            },
+            "handle": "$.handle"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "query",
+      "collection": "User",
+      "assert": {
+        "$for": {
+          "it": "$[*]"
+        },
+        "$where": {
+          "$exists": "$it.handle"
+        },
+        "$return": "$it"
+      },
+      "expect": "ebv"
+    }
   ]
 }
 ```
@@ -291,20 +344,46 @@ export const backfill = defineMigration({ id: '0004-cells', from: model, to: mod
 
 ```json
 {
-  "$migration": "0.1",
+  "$migration": "0.2",
   "id": "0004-cells",
   "from": "vxjj1b",
   "to": "vxjj1b",
+  "identity": {
+    "version": 1,
+    "from": "{\"$model\":\"0.1\",\"collections\":{\"places\":{\"indexes\":[{\"derive\":\"geohash\",\"name\":\"gx_cell_gh7\",\"path\":\"$.cell\",\"precision\":7}],\"key\":\"/id\",\"schema\":{\"additionalProperties\":false,\"properties\":{\"cell\":{\"items\":{\"type\":\"number\"},\"type\":\"array\"},\"id\":{\"type\":\"string\"}},\"required\":[\"id\",\"cell\"],\"type\":\"object\"}}}}",
+    "to": "{\"$model\":\"0.1\",\"collections\":{\"places\":{\"indexes\":[{\"derive\":\"geohash\",\"name\":\"gx_cell_gh7\",\"path\":\"$.cell\",\"precision\":7}],\"key\":\"/id\",\"schema\":{\"additionalProperties\":false,\"properties\":{\"cell\":{\"items\":{\"type\":\"number\"},\"type\":\"array\"},\"id\":{\"type\":\"string\"}},\"required\":[\"id\",\"cell\"],\"type\":\"object\"}}}}"
+  },
   "steps": [
-    { "kind": "sql", "sql": "UPDATE \"places\" SET \"doc\" = json_remove(\"doc\", '$.legacy')",
-      "note": "drop the legacy member" },
-    { "kind": "derive", "collection": "places",
-      "columns": [ { "name": "gx_cell_gh7", "derive": "geohash", "precision": 7,
-                     "segments": [ { "name": "cell" } ] } ] },
-    { "kind": "rebuild", "table": "places",
-      "create": [ "CREATE TABLE \"places__rebuild\" (\"id\" TEXT PRIMARY KEY, \"doc\" BLOB NOT NULL) STRICT" ],
+    {
+      "kind": "sql",
+      "sql": "UPDATE \"places\" SET \"doc\" = json_remove(\"doc\", '$.legacy')",
+      "note": "drop the legacy member"
+    },
+    {
+      "kind": "derive",
+      "collection": "places",
+      "columns": [
+        {
+          "name": "gx_cell_gh7",
+          "derive": "geohash",
+          "precision": 7,
+          "segments": [
+            {
+              "name": "cell"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "kind": "rebuild",
+      "table": "places",
+      "create": [
+        "CREATE TABLE \"places__rebuild\" (\"id\" TEXT PRIMARY KEY, \"doc\" BLOB NOT NULL) STRICT"
+      ],
       "copy": "INSERT INTO \"places__rebuild\" (\"id\", \"doc\") SELECT \"id\", \"doc\" FROM \"places\"",
-      "indexes": [] }
+      "indexes": []
+    }
   ]
 }
 ```
@@ -326,7 +405,7 @@ its draft replaced by a typed transform:
 
 ```js
 import * as m from '@jarenjs/linq/model';
-import { fromPlanned } from '@jarenjs/linq/migration';
+import { defineMigration, fromPlanned } from '@jarenjs/linq/migration';
 
 const v1 = m.defineModel({ entities: {
   User: m.object({ id: m.string().key(), name: m.string(), age: m.integer().optional() }),
@@ -338,10 +417,7 @@ const v2 = m.defineModel({ entities: {
 // what `jaren-db plan --model ./model.js` wrote: the DDL it rendered, and
 // the transform it could not infer, left as a draft that refuses to run
 const planned = {
-  $migration: '0.1',
-  id: '0002-handles',
-  from: 'x7457y',
-  to: 'hn656j',
+  ...defineMigration({ id: '0002-handles', from: v1, to: v2 }).document,
   steps: [
     { kind: 'ddl', sql: 'ALTER TABLE "User" ADD COLUMN "handle" TEXT', note: "add column 'handle' on 'User'" },
     { kind: 'jslt', collection: 'User', stylesheet: [], draft: true,
@@ -355,17 +431,38 @@ export const typed = fromPlanned(planned, { from: v1, to: v2 })
 
 ```json
 {
-  "$migration": "0.1",
+  "$migration": "0.2",
   "id": "0002-handles",
   "from": "x7457y",
   "to": "hn656j",
+  "identity": {
+    "version": 1,
+    "from": "{\"$model\":\"0.1\",\"entities\":{\"User\":{\"schema\":{\"additionalProperties\":false,\"properties\":{\"age\":{\"type\":\"integer\"},\"id\":{\"type\":\"string\",\"x-entity\":{\"key\":true}},\"name\":{\"type\":\"string\"}},\"required\":[\"id\",\"name\"],\"type\":\"object\"}}}}",
+    "to": "{\"$model\":\"0.1\",\"entities\":{\"User\":{\"schema\":{\"additionalProperties\":false,\"properties\":{\"age\":{\"type\":\"integer\"},\"handle\":{\"type\":\"string\"},\"id\":{\"type\":\"string\",\"x-entity\":{\"key\":true}},\"name\":{\"type\":\"string\"}},\"required\":[\"id\",\"name\",\"handle\"],\"type\":\"object\"}}}}"
+  },
   "steps": [
-    { "kind": "ddl", "sql": "ALTER TABLE \"User\" ADD COLUMN \"handle\" TEXT",
-      "note": "add column 'handle' on 'User'" },
-    { "kind": "jslt", "collection": "User",
-      "stylesheet": [ { "match": "$",
-                        "body": { "id": "$.id", "name": "$.name", "age": "$.age",
-                                  "handle": { "$lower": "$.name" } } } ] }
+    {
+      "kind": "ddl",
+      "sql": "ALTER TABLE \"User\" ADD COLUMN \"handle\" TEXT",
+      "note": "add column 'handle' on 'User'"
+    },
+    {
+      "kind": "jslt",
+      "collection": "User",
+      "stylesheet": [
+        {
+          "match": "$",
+          "body": {
+            "id": "$.id",
+            "name": "$.name",
+            "age": "$.age",
+            "handle": {
+              "$lower": "$.name"
+            }
+          }
+        }
+      ]
+    }
   ]
 }
 ```
@@ -373,7 +470,7 @@ export const typed = fromPlanned(planned, { from: v1, to: v2 })
 The draft is GONE — replaced, at its own index, so the DDL still runs
 first — and its `note` went with it, because a note explaining what the
 author still has to do is false once they have done it. The step count
-does not change, and the id and both hashes are the planner's. The two
+does not change, and the id, exact identity and both fingerprints are the planner's. The two
 routes to a document are the same document:
 `test/linq/migration-pen.test.js` asserts that replacing a planner's
 draft and replaying that planner's non-draft steps through `step()`
@@ -403,16 +500,40 @@ export const days = defineMigration({ id: '0005-days', from: before, to: after }
 
 ```json
 {
-  "$migration": "0.1",
+  "$migration": "0.2",
   "id": "0005-days",
   "from": "1r3h9t3",
   "to": "vwfxn7",
+  "identity": {
+    "version": 1,
+    "from": "{\"$model\":\"0.1\",\"entities\":{\"Event\":{\"schema\":{\"additionalProperties\":false,\"properties\":{\"id\":{\"type\":\"string\",\"x-entity\":{\"key\":true}},\"stamp\":{\"format\":\"date-time\",\"type\":\"string\",\"x-entity\":{\"column\":\"integer\"}}},\"required\":[\"id\",\"stamp\"],\"type\":\"object\"}}}}",
+    "to": "{\"$model\":\"0.1\",\"entities\":{\"Event\":{\"schema\":{\"additionalProperties\":false,\"properties\":{\"day\":{\"format\":\"date\",\"type\":\"string\",\"x-entity\":{\"column\":\"integer\"}},\"id\":{\"type\":\"string\",\"x-entity\":{\"key\":true}},\"stamp\":{\"format\":\"date-time\",\"type\":\"string\",\"x-entity\":{\"column\":\"integer\"}}},\"required\":[\"id\",\"stamp\",\"day\"],\"type\":\"object\"}}}}"
+  },
   "steps": [
-    { "kind": "ddl", "sql": "ALTER TABLE \"Event\" ADD COLUMN \"day\" INTEGER" },
-    { "kind": "jslt", "collection": "Event",
-      "stylesheet": [ { "match": "$",
-                        "body": { "id": "$.id", "stamp": "$.stamp",
-                                  "day": { "$substring": [ "$.stamp", 0, 10 ] } } } ] }
+    {
+      "kind": "ddl",
+      "sql": "ALTER TABLE \"Event\" ADD COLUMN \"day\" INTEGER"
+    },
+    {
+      "kind": "jslt",
+      "collection": "Event",
+      "stylesheet": [
+        {
+          "match": "$",
+          "body": {
+            "id": "$.id",
+            "stamp": "$.stamp",
+            "day": {
+              "$substring": [
+                "$.stamp",
+                0,
+                10
+              ]
+            }
+          }
+        }
+      ]
+    }
   ]
 }
 ```
@@ -483,8 +604,8 @@ else.
 | `m().step({ kind: 'jslt', collection: 'User' })` | `step() 'jslt' needs 'stylesheet' (MIGRATION-FORMAT §2)` — `docPath` `/stylesheet` | a rules array |
 | `m().step({ kind: 'query', collection: 'User' })` | `step() 'query' needs 'assert' (MIGRATION-FORMAT §2)` — `docPath` `/assert` | a query document |
 | `m().step({ kind: 'derive', collection: 'User', columns: [] })` | `step() 'derive' needs 'columns' (MIGRATION-FORMAT §2)` — `docPath` `/columns` | a non-empty array |
-| `fromPlanned({ id: 'x' })`, `fromPlanned(42)` | `fromPlanned() takes a $migration 0.1 document — { $migration, id, from, to, steps } — as jaren-db plan writes it` | the planner's document |
-| `fromPlanned({ …, extra: 1 })` | `fromPlanned() document carries 'extra', which the migration format does not declare` — `docPath` `/extra` | the six head members |
+| `fromPlanned({ id: 'x' })`, `fromPlanned(42)` | `fromPlanned() takes a $migration 0.2 document — { $migration, id, from, to, identity, steps } — as jaren-db plan writes it` | the planner's document |
+| `fromPlanned({ …, extra: 1 })` | `fromPlanned() document carries 'extra', which the migration format does not declare` — `docPath` `/extra` | the declared head members, including exact identity |
 | `fromPlanned(planned, { nope: 1 })` | `fromPlanned() does not take 'nope'` | `{ from, to }` |
 | `fromPlanned(planned, 42)` | `fromPlanned() options are { from?, to? }, got 42` | an options object |
 
@@ -500,14 +621,15 @@ in its clearest form.
 |---|---|---|
 | `m().transform('User', stylesheet([], { unmatched: 'error' }))` | `transform() takes a stylesheet's rules — a jslt step carries the rules array (MIGRATION-FORMAT §2), so 'unmatched' has no place in it; write the rules without it` — `docPath` `/unmatched` | `stylesheet([rule('$', fn)])`, or the rules array |
 | `m().transform('User', stylesheet([], { modes: { toc: … } }))` | the same message, with `'modes'` | one root rule per step |
-| `fromPlanned(planned, { from: v2 })` | `fromPlanned() from model has shape 'hn656j', but the planned migration's from is 'x7457y' — the model given is not the one the planner planned from` — `docPath` `/from` | the model the planner planned from |
-| `fromPlanned(planned, { to: v1 })` | `fromPlanned() to model has shape 'x7457y', but the planned migration's to is 'hn656j' — the model given is not the one the planner planned to` — `docPath` `/to` | the model the planner planned to |
+| `fromPlanned(legacy01)` | `fromPlanned() cannot edit a legacy $migration 0.1 document; keep applied artifacts unchanged and deliberately plan or author a new 0.2 migration` — `docPath` `/$migration` | preserve applied JSON; author a separate reviewed exact document |
+| `fromPlanned(planned, { from: v2 })` | `fromPlanned() from model does not match the planned migration's exact from identity — the model given is not the one the planner planned from` — `docPath` `/from` | the model the planner planned from |
+| `fromPlanned(planned, { to: v1 })` | `fromPlanned() to model does not match the planned migration's exact to identity — the model given is not the one the planner planned to` — `docPath` `/to` | the model the planner planned to |
 
 The stylesheet rows are a real limit of the STEP, not a limit of the JSLT
 pen: a stylesheet is an envelope with a disposition and a mode table, and
 a `jslt` step is an array of rules. Refusing it is what keeps the
 truncation from being silent. The `fromPlanned` rows are the other kind —
-a check the pen can make because both hashes are in front of it, and one
+a check the pen can make because both exact endpoints are in front of it, and one
 whose failure means the author edited a model after planning against it.
 
 ### 4.3 `JL0104` — the externals a capture may not name
@@ -629,8 +751,8 @@ and annotate the row from it, `(u: Expr<User>) => …`.
 callback.** `Spell<New>` rejects a member the new row does not have, but
 a contextually typed callback RESULT is not excess-checked by TypeScript;
 `test/consumer/linq-migration.ts` pins both halves, the negative on a
-`const extra: Spell<NewUser> = …` annotation. At run time the target
-model's closed schema refuses the member, and the widening check turns
+`const extra: Spell<NewUser> = …` annotation. With `compileSchema`, the target
+model's closed schema refuses the member at run time, and the widening check turns
 that into `JD0021` with the whole migration rolled back.
 
 **The honest top is admitted wherever a precise value is.** `u.get(
@@ -645,10 +767,11 @@ constructor is private, `defineMigration` and `fromPlanned` are the two
 ways to get one, and every step method answers a new one. A caller meets
 it as a type (`const typed: Migration<typeof v1, typeof v2> = handles`)
 and as an `instanceof` narrow — `test/linq/migration-pen.test.js` uses
-both. The document types beside it are ordinary interfaces:
-`MigrationDocument`, `MigrationStep` and its six arms (`DdlStep`,
-`SqlStep`, `JsltStep`, `QueryStep`, `DeriveStep`, `RebuildStep`), and
-`DeriveColumn`. `JsltStep` declares `draft?: boolean` with the comment
+both. `MigrationDocument` discriminates `LegacyMigrationDocument` and
+`ExactMigrationDocument`; `MigrationIdentity` names the exact endpoint payload.
+`MigrationStep` has eight arms: `DdlStep`, `SqlStep`, `JsltStep`, `QueryStep`,
+`DeriveStep`, `RebuildStep`, `TableStep` and `HostStep`. `DeriveColumn` describes
+a derived field. `JsltStep` declares `draft?: boolean` with the comment
 that says the whole rule: the runner refuses it, and the pen never sets
 or clears it.
 
@@ -708,9 +831,9 @@ loses data. What the pen checks is in §4 and nothing else. Everything
 below is `@jarenjs/db`'s `migrate()`, and none of it has happened when
 `.document` returns:
 
-- **The from-shape against the database.** A migration whose `from` does
-  not match the shape the database recorded refuses to run (`JD0020`).
-  The pen computes the hash; only the runner compares it to a database.
+- **The exact boundary against the database.** A migration whose canonical
+  starting model differs from the recorded authority refuses `JD0020`.
+  The pen computes endpoints; the runner checks database authority.
 - **The shadow replay.** Before the real store is touched, the WHOLE
   chain — baseline, applied and pending — replays on a shadow database:
   every DDL statement runs, every stylesheet and assertion compiles and
@@ -719,9 +842,9 @@ below is `@jarenjs/db`'s `migrate()`, and none of it has happened when
   replay still uses the same migration/history executor (MIGRATION-FORMAT §4).
   A step the pen accepted and SQLite rejects fails
   there, with the real store untouched.
-- **The widening/narrowing check against real data.** At the end of the
-  run, inside its transaction, every stored document is validated against
-  the target schema. A document that no longer validates is `JD0021` and
+- **The widening/narrowing check against real data.** With `compileSchema`,
+  the run validates stored documents against the target schema at final
+  acceptance inside its transaction. A document that no longer validates is `JD0021` and
   the whole migration rolls back. A transform that forgets a new required
   member compiles, emits, passes the shadow — and fails here, which is
   the only place it CAN fail, because the answer depends on the rows.
@@ -729,14 +852,31 @@ below is `@jarenjs/db`'s `migrate()`, and none of it has happened when
 - **Assertions.** A `query` step's verdict is a fact about the data. The
   pen writes the query; the runner runs it, on the shadow and then for
   real.
-- **History, checksums and drift.** `JD0022` for an applied migration
+- **Exact history and drift.** `JD0022` for an applied migration
   that disagrees with the history record, and `jaren-db check`'s drift
   detection, are the CLI's and the runner's (MIGRATION-FORMAT §5, §12).
+
+### Preserving applied 0.1 artifacts
+
+`MigrationDocument` remains a discriminated union of `LegacyMigrationDocument`
+and `ExactMigrationDocument`. Builder outputs narrow to exact 0.2. Structural
+parsing and file-only document migration keep 0.1; `fromPlanned` authoring refuses
+recognized legacy input with `JL0102` and never silently upgrades it.
+
+Before upgrading code-first migration modules, capture their immutable emitted
+JSON using the pinned old dependencies and preserve the modules and lockfile.
+Reevaluating unchanged source with the new pen emits a different artifact.
+Observe the complete legacy history and explicitly attest the reviewed applied
+prefix/current model before normal database status/apply. The
+[upgrade guide](../../db/docs/MIGRATION-UPGRADE.md) gives commands, exact receipt
+counts, stale-observation refusals and the limits of attesting old fingerprints.
+An isolated old runtime can reproduce emissions for review, not prove which
+colliding document originally ran.
 
 ### 6.3 Two the format itself does not carry
 
 Down migrations are not
-shipped in 0.1 — a JSLT transform is not generally invertible, and a
+shipped — a JSLT transform is not generally invertible, and a
 reverse step that silently loses data is worse than a restore from backup
 (MIGRATION-FORMAT §7); the recommended path is to branch the shape,
 migrate forward and drop the old table once verified. A rename is
@@ -752,8 +892,8 @@ from a drop plus a create, and guessing risks silent data loss.
   the planner left blank, and reaching for it to retype a document that
   was already correct adds a build step and a chance to diverge.
 - **The migration is one SQL statement and no data moves.** `.ddl()`
-  around a string you would otherwise commit as JSON buys the shape hash
-  and nothing else, and the shape hash is what `plan` computes anyway.
+  around a string you would otherwise commit as JSON adds no transform typing;
+  the planner already supplies the exact endpoint header.
 - **The transform cannot be spelled as a query.** A body is captured
   through the JSLT pen and lowers to `$jslt`, so it can only do what the
   query language has operators for (§4.3, and
@@ -761,12 +901,12 @@ from a drop plus a create, and guessing risks silent data loss.
   a hash, a network lookup, a library — is a `sql` step against a table
   you populate beforehand, or a program run outside the migration
   entirely.
-- **You want to undo something.** There are no down migrations in 0.1
+- **You want to undo something.** There are no down migrations
   and §6.3 says why. Branch the shape and migrate forward; a restore from
   backup is a better answer than a reverse step that loses a column
   quietly.
 - **The document is generated per environment.** A `$migration` is
-  identified by two shape hashes and applied once, recorded in history.
+  identified by exact endpoints and canonical documents, and applied once with paired receipts.
   Anything that would make the document differ between two databases of
   the same shape — an environment name in a statement, a conditional step
   — is not a migration, it is deployment configuration, and it belongs
@@ -774,7 +914,7 @@ from a drop plus a create, and guessing risks silent data loss.
 
 ## 7. Cost
 
-`@jarenjs/linq/migration` builds to **<!--fact:bundle.migration-->25,749<!--/fact--> bytes** as a minified,
+`@jarenjs/linq/migration` builds to **<!--fact:bundle.migration-->25,931<!--/fact--> bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
 measures and `npm run test:tree-shaking` reports, published rounded
 (<!--fact:bundle.migration.kb-->26<!--/fact--> kB) beside the other nine subpath prices in

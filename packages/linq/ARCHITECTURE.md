@@ -80,6 +80,12 @@ the first rejection aborts every in-flight signal and the source.
 
 ## The pens (`src/schema/`, `src/model/`, `src/jslt/`, `src/migration/`, `src/contract/`, `src/flow/`, `src/app/`, `src/forms/`)
 
+The migration pen emits exact 0.2 endpoints using `@jarenjs/core/model`'s
+rename-hint normalization and `@jarenjs/json` canonicalization. Its independent
+declarations retain legacy 0.1 history/storeless input while builder outputs
+narrow to 0.2. `fromPlanned` requires exact artifacts and never silently upgrades
+an applied document; database authority and explicit adoption remain DB owners.
+
 A pen is a by-code front-end to one of the suite's document formats,
 exported under its own subpath (`@jarenjs/linq/schema`, `/model`, `/jslt`,
 `/migration`, `/contract`, `/flow`, `/app`, `/forms`; `.` stays the chain). The rule set is one paragraph: the document is the

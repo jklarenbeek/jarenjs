@@ -15,6 +15,7 @@ import {
 } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';
 import { tempDbPath } from './helpers.js';
+import { migrationIdentity } from './migration-fixture.js';
 
 const M0 = {
   $model: '0.1',
@@ -40,19 +41,19 @@ async function freshAt(model) {
 }
 
 describe('shape anchoring (JD0020)', () => {
-  it('a from-hash that does not match the database refuses', async () => {
+  it('a valid exact from-model that does not match the baseline refuses', async () => {
     const { dbPath, cleanup } = await freshAt(M0);
     try {
       const { migration } = planMigration(M0, M1, { dialect: sqliteDialect, id: '0001' });
-      const foreign = { ...migration, from: 'somebody-elses-shape' };
+      const foreign = { ...migration, from: shapeHash(M1), identity: migrationIdentity(M1) };
       await assert.rejects(
         () => migrate({ driver: driver(), path: dbPath }, [foreign], { baseline: M0 }),
         (error) => {
           assert.strictEqual(error.code, 'JD0020');
-          assert.match(error.message, /somebody-elses-shape/);
+          assert.ok(error.message.includes(foreign.from), 'the refused endpoint fingerprint is named');
           return true;
         });
-      // the RIGHT baseline hash accepts (same store, correct chain)
+      // The exact baseline accepts the correct chain against the same store.
       const out = await migrate({ driver: driver(), path: dbPath }, [migration],
         { baseline: M0, model: M1 });
       assert.deepStrictEqual(out.applied, ['0001']);
@@ -66,7 +67,7 @@ describe('shape anchoring (JD0020)', () => {
     const { dbPath, cleanup } = await freshAt(M0);
     try {
       const first = planMigration(M0, M1, { dialect: sqliteDialect, id: '0001' }).migration;
-      const second = { ...first, id: '0002', from: 'not-the-previous-to', to: 'x' };
+      const second = { ...first, id: '0002' };
       await assert.rejects(
         () => migrate({ driver: driver(), path: dbPath }, [first, second], { baseline: M0 }),
         (error) => error.code === 'JD0020');
@@ -94,7 +95,7 @@ describe('shape anchoring (JD0020)', () => {
     }
   });
 
-  it('the baseline is required, and hashes are stable identities', () => {
+  it('the baseline is required, and compatibility fingerprints are stable', () => {
     assert.throws(
       () => migrate({ driver: driver() }, [], /** @type {any} */ ({})),
       /baseline/);

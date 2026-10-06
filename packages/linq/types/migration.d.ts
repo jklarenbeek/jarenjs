@@ -134,8 +134,15 @@ export interface PhysicalHeader {
   readonly scope?: { readonly tables: readonly string[] };
 }
 
-/** The `$migration` 0.1 document (MIGRATION-FORMAT §2). */
-export interface MigrationDocument {
+/** Exact canonical model endpoints; no optional database import is required. */
+export interface MigrationIdentity {
+  readonly version: 1;
+  readonly from: string;
+  readonly to: string;
+}
+/** Preserved historical or storeless input. `fromPlanned` refuses legacy
+ * authoring with JL0102; database use requires explicit history adoption. */
+export interface LegacyMigrationDocument {
   readonly $migration: '0.1';
   readonly id: string;
   readonly from: string;
@@ -143,7 +150,20 @@ export interface MigrationDocument {
   readonly note?: string;
   readonly steps: readonly MigrationStep[];
   readonly physical?: PhysicalHeader;
+  readonly identity?: never;
 }
+/** The current migration pen/planner document (MIGRATION-FORMAT §2). */
+export interface ExactMigrationDocument {
+  readonly $migration: '0.2';
+  readonly id: string;
+  readonly from: string;
+  readonly to: string;
+  readonly identity: MigrationIdentity;
+  readonly note?: string;
+  readonly steps: readonly MigrationStep[];
+  readonly physical?: PhysicalHeader;
+}
+export type MigrationDocument = LegacyMigrationDocument | ExactMigrationDocument;
 
 // ————— what a model document types —————
 
@@ -275,8 +295,8 @@ export class Migration<From = unknown, To = unknown> {
   derive<N extends DeclaredNames<To>>(name: N, columns: readonly DeriveColumn[]): Migration<From, To>;
   /** Any planner-emitted step, verbatim — the escape that keeps `rebuild` authorable. */
   step(raw: MigrationStep): Migration<From, To>;
-  readonly document: MigrationDocument;
-  toJSON(): MigrationDocument;
+  readonly document: ExactMigrationDocument;
+  toJSON(): ExactMigrationDocument;
 }
 
 export interface MigrationSpec<From, To> {
@@ -288,13 +308,14 @@ export interface MigrationSpec<From, To> {
   readonly note?: string;
 }
 
-/** A migration between two model documents; `from`/`to` are their shape hashes. */
+/** A 0.2 migration with exact canonical endpoints and compatible shape hashes. */
 export function defineMigration<From extends object, To extends object>(spec: MigrationSpec<From, To>): Migration<From, To>;
 
 /** A planner's document, taken up so a typed `transform` replaces the
  * draft it left; `from`/`to` type the transforms and are checked against
- * the document's hashes (`JL0102` when they are not the planned models). */
+ * the exact endpoints (`JL0102` on disagreement or a legacy 0.1 input).
+ * Unparsed JSON is validated at runtime; no legacy document is upgraded. */
 export function fromPlanned<From = unknown, To = unknown>(
-  document: MigrationDocument | Json,
+  document: ExactMigrationDocument | Json,
   options?: { readonly from?: From; readonly to?: To },
 ): Migration<From, To>;

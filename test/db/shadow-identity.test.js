@@ -2,6 +2,7 @@
 /** A disposable shadow cannot alias the live database through a native filename. */
 import { it } from 'node:test';
 import assert from 'node:assert/strict';
+import { migrationIdentity } from './migration-fixture.js';
 import { symlinkSync, linkSync, readFileSync } from 'node:fs';
 import { basename, dirname, join, relative } from 'node:path';
 import { migrate, readSchema, shapeHash } from '@jarenjs/db';
@@ -10,7 +11,7 @@ import { tempDbPath } from './helpers.js';
 const driver = process.versions.bun ? (await import('@jarenjs/db/bun')).bunDriver()
   : (await import('@jarenjs/db/node')).nodeDriver();
 const baseline = { $model: '0.1', collections: {} };
-const migration = { $migration: '0.1', id: 'set', from: shapeHash(baseline), to: shapeHash(baseline),
+const migration = { $migration: '0.2', identity: migrationIdentity(baseline), id: 'set', from: shapeHash(baseline), to: shapeHash(baseline),
   steps: [{ kind: 'sql', sql: 'UPDATE item SET n=n+1' }] };
 const seed = (db) => db.exec('CREATE TABLE item(n INTEGER);INSERT INTO item VALUES(0)');
 const unchanged = (db) => {

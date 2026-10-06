@@ -32,6 +32,12 @@
 
 This package is intentionally **decoupled** from any JSON Schema engine, making it reusable for any JavaScript application requiring robust type checking and data validation. Its one schema-shaped module, `schema.js`, holds a keyword vocabulary and a pure nullable normalizer that the schema readers share (§5f); it validates nothing.
 
+`model.js` owns `withoutModelRenameHints`, the shallow normalization shared by
+DB model fingerprints and LINQ migration authoring. It removes only an own
+`x-rename` from collection/entity declarations, retaining nested annotations,
+member order and unchanged nested references. Validation, canonicalization
+and hashing belong to its consumers.
+
 ---
 
 ## Design Philosophy

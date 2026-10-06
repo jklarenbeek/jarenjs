@@ -1,6 +1,7 @@
 //@ts-check
 import { it } from 'node:test';
 import assert from 'node:assert/strict';
+import { migrationIdentity } from './migration-fixture.js';
 import { migrate, shapeHash, createModelShape, openConnection, sqliteDialect } from '@jarenjs/db';
 import { tempDbPath } from './helpers.js';
 
@@ -14,7 +15,7 @@ const modelFor = (properties, columns, extra = {}) => ({ $model: '0.1', entities
 } } });
 const transform = (model, body) => ({ kind: 'jslt', collection: 'Row', model,
   stylesheet: [{ match: '$', body }] });
-const document = (id, model, steps) => ({ $migration: '0.1', id, from: shapeHash(model), to: shapeHash(model), steps });
+const document = (id, model, steps) => ({ $migration: '0.2', identity: migrationIdentity(model), id, from: shapeHash(model), to: shapeHash(model), steps });
 async function fixture(run) {
   const { dbPath: path, cleanup } = tempDbPath();
   const db = await driver.open(path);
@@ -33,7 +34,7 @@ it('physical transform previews count the historical aliased table without chang
   } } };
   db.exec("CREATE TABLE rows(item_id INTEGER PRIMARY KEY,label TEXT); INSERT INTO rows VALUES(1,'old'),(2,'kept')");
   const migration = { ...document('preview', before, [transform(before, { value: 'changed' }),
-    { kind: 'ddl', sql: 'ALTER TABLE rows RENAME TO renamed_rows' }]), to: shapeHash(after) };
+    { kind: 'ddl', sql: 'ALTER TABLE rows RENAME TO renamed_rows' }]), identity: migrationIdentity(before, after), to: shapeHash(after) };
   const report = await apply(before, [migration], { model: after, dryRun: true });
   assert.deepEqual(report, { dryRun: true, pending: ['preview'],
     statements: ["-- jslt transform over 'Row'", 'ALTER TABLE rows RENAME TO renamed_rows'],
@@ -141,7 +142,7 @@ it('physical assertions and transforms select their historical model around stru
   const from = modelFor({ id: key('integer'), value: { type: 'string' } }, { id: column('id', 'integer'), value: column('value', 'text') });
   const to = structuredClone(from); to.entities.Row.schema.properties.zextra = { type: 'string' }; to.entities.Row.physical.columns.zextra = column('zextra', 'text', 'absent');
   await createModelShape(db, from); db.prepare('INSERT INTO rows VALUES(?,?)').run([17, 'before']);
-  const migration = { $migration: '0.1', id: 'historical', from: shapeHash(from), to: shapeHash(to), steps: [
+  const migration = { $migration: '0.2', identity: migrationIdentity(from, to), id: 'historical', from: shapeHash(from), to: shapeHash(to), steps: [
     { kind: 'query', collection: 'Row', model: from, assert: { $eq: [{ $count: '$[*]' }, 1] }, expect: 'ebv' },
     { kind: 'ddl', sql: 'ALTER TABLE rows ADD COLUMN "zextra" TEXT' },
     transform(to, { value: '$.value', zextra: 'after' }),

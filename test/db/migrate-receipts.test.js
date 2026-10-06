@@ -2,6 +2,7 @@
 /** Every receipt field agrees before admission and again under the writer lock. */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { migrationIdentity } from './migration-fixture.js';
 import { migrate, migrationStatus, shapeHash } from '@jarenjs/db';
 import { postgresDriver } from '@jarenjs/db/postgres';
 import { chain, useStatementOnce } from '../../packages/db/src/driver.js';
@@ -9,7 +10,7 @@ import { chain, useStatementOnce } from '../../packages/db/src/driver.js';
 const native = process.versions.bun ? (await import('@jarenjs/db/bun')).bunDriver
   : (await import('@jarenjs/db/node')).nodeDriver;
 const baseline = { $model: '0.1', collections: {} };
-const document = (id, steps = []) => ({ $migration: '0.1', id,
+const document = (id, steps = []) => ({ $migration: '0.2', identity: migrationIdentity(baseline), id,
   from: shapeHash(baseline), to: shapeHash(baseline), steps });
 const initial = document('applied', [
   { kind: 'sql', sql: 'CREATE TABLE witness(n INTEGER)' },
@@ -73,7 +74,7 @@ for (const host of ['sqlite', 'postgres']) describe(`${host}: complete migration
           const before = await all(connection, 'SELECT * FROM _jaren_migrations');
           const run = () => surface === 'status' ? migrationStatus({ connection }, [initial])
             : migrate({ connection }, surface === 'repeat' ? [initial]
-              : [initial, field === 'to_hash' ? { ...tail, from: value } : tail], options);
+              : [initial, tail], options);
           await assert.rejects(async () => run(), { code: 'JD0022' });
           assert.deepEqual(await all(connection, 'SELECT * FROM _jaren_migrations'), before);
           assert.deepEqual((await all(connection, 'SELECT n FROM witness')).map((row) => row.n), [0]);
@@ -102,7 +103,7 @@ for (const host of ['sqlite', 'postgres']) describe(`${host}: complete migration
         });
       });
 
-    it('valid repeats preserve every raw legacy field, and missing/reordered ids still refuse', async () => {
+    it('valid repeats preserve every raw history field, and missing/reordered ids still refuse', async () => {
       const docs = [initial, document('second')];
       await fixture(host, async (connection, rawRows) => {
         const before = await all(connection, 'SELECT * FROM _jaren_migrations');
@@ -134,12 +135,18 @@ for (const value of [undefined, null, '', ' ', false, 'not-a-count', -1, 0.5, In
     }, [doc]);
   });
 
-for (const value of [2, '2']) it(`legitimate ${typeof value} step counts compare without changing stored history`, async () => {
+for (const value of [2, '2']) it(`lossless history projections require text, received ${typeof value}`, async () => {
   await fixture('sqlite', async (connection) => {
     const before = await all(connection, 'SELECT * FROM _jaren_migrations');
     const wrapped = reportedSteps(connection, value);
-    assert.equal(migrationStatus({ connection: wrapped }, [initial]).upToDate, true);
-    assert.equal(migrate({ connection: wrapped }, [initial], options).upToDate, true);
+    if (typeof value === 'string') {
+      assert.equal(migrationStatus({ connection: wrapped }, [initial]).upToDate, true);
+      assert.equal(migrate({ connection: wrapped }, [initial], options).upToDate, true);
+    }
+    else {
+      assert.throws(() => migrationStatus({ connection: wrapped }, [initial]), { code: 'JD0022' });
+      assert.throws(() => migrate({ connection: wrapped }, [initial], options), { code: 'JD0022' });
+    }
     assert.deepEqual(await all(connection, 'SELECT * FROM _jaren_migrations'), before);
   });
 });

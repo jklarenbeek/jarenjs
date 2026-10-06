@@ -15,6 +15,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { migrationIdentity } from './migration-fixture.js';
 
 import { openStore, planModelMigration, migrate, migrationStatus, sqliteDialect, shapeHash } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';
@@ -34,8 +35,8 @@ const NARROW = applied(planModelMigration(V1, V2, { dialect: sqliteDialect, id: 
 const hosts = { truncate: { version: '1', run(/** @type {any} */ scope) {
   return scope.collection('docs').update((/** @type {any} */ doc) => (doc.name.length > 3 ? { ...doc, name: doc.name.slice(0, 3) } : undefined));
 } }, fail: { version: '1', run() { throw new Error('the repair gave up'); } } };
-const REPAIR = { $migration: '0.1', id: 'repair', from: shapeHash(V2), to: shapeHash(V2), steps: [{ kind: 'host', run: 'truncate', version: '1' }] };
-const FAILING = { $migration: '0.1', id: 'failing', from: shapeHash(V2), to: shapeHash(V2), steps: [{ kind: 'host', run: 'fail', version: '1' }] };
+const REPAIR = { $migration: '0.2', identity: migrationIdentity(V2), id: 'repair', from: shapeHash(V2), to: shapeHash(V2), steps: [{ kind: 'host', run: 'truncate', version: '1' }] };
+const FAILING = { $migration: '0.2', identity: migrationIdentity(V2), id: 'failing', from: shapeHash(V2), to: shapeHash(V2), steps: [{ kind: 'host', run: 'fail', version: '1' }] };
 
 async function seeded() {
   const temp = tempDbPath();
@@ -108,7 +109,7 @@ describe('atomic: the chain commits whole or not at all', () => {
         controller.abort();
         return count;
       } } };
-      const NEXT = { $migration: '0.1', id: 'next', from: shapeHash(V2), to: shapeHash(V2), steps: [] };
+      const NEXT = { $migration: '0.2', identity: migrationIdentity(V2), id: 'next', from: shapeHash(V2), to: shapeHash(V2), steps: [] };
       await assert.rejects(migrate({ driver: nodeDriver(), path: dbPath }, [NARROW, REPAIR, NEXT],
         { baseline: V1, model: V2, shadow: false, hosts: cancelling, atomic: true, signal: controller.signal }),
       (/** @type {any} */ e) => e.code === 'JD2080');

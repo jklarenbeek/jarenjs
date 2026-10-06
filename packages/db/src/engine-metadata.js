@@ -5,6 +5,8 @@ import { REPLICATION_TABLES } from './replication-tables.js';
 export const MODEL_VERSION = '0.1';
 /** Migration receipt table. */
 export const HISTORY_TABLE = '_jaren_migrations';
+/** Exact document and full-row migration authority. */
+export const MIGRATION_IDENTITY_TABLE = '_jaren_migration_identity';
 /** Change ledger table. */
 export const CHANGES_TABLE = '_jaren_changes';
 /** Change ledger retention state. */
@@ -16,5 +18,5 @@ export const JOB_CHECKPOINTS_TABLE = '_jaren_job_checkpoints';
 /** The owner lease: one row naming the store that owns the file. */
 export const OWNER_TABLE = '_jaren_owner';
 /** Tables excluded from model adoption and schema drift comparisons. */
-export const ENGINE_TABLES = new Set([HISTORY_TABLE, CHANGES_TABLE, CHANGES_STATE_TABLE,
+export const ENGINE_TABLES = new Set([HISTORY_TABLE, MIGRATION_IDENTITY_TABLE, CHANGES_TABLE, CHANGES_STATE_TABLE,
   JOBS_TABLE, JOB_CHECKPOINTS_TABLE, OWNER_TABLE, ...Object.values(REPLICATION_TABLES)]);

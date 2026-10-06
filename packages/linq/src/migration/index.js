@@ -1,8 +1,8 @@
 //@ts-check
 /**
- * @file `@jarenjs/linq/migration` — `$migration` 0.1 documents by code.
+ * @file `@jarenjs/linq/migration` — `$migration` 0.2 documents by code.
  * `defineMigration({ id, from, to })` names two model documents and
- * hashes their shapes as the store does; the steps follow in the order
+ * records their exact shapes and compatible fingerprints as the store does; the steps follow in the order
  * they are called — `ddl`, `sql`, `transform` (a `jslt` step whose
  * callback is captured over the old row shape and typed to the new one),
  * `assert` (a `query` step), `derive`, and `step` for any planner-emitted

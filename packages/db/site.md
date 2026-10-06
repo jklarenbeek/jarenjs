@@ -122,7 +122,7 @@ u.age.gt("x") does not, and an omitted include means the member is not there.
 Migrations are documents too: `planModelMigration` diffs two models into
 rendered DDL, data steps and the twelve-step table rebuild (`foreign_key_check`
 inside the transaction); the whole chain replays on a shadow database first; a
-checksummed history refuses edited or reordered migrations; and after every
+exact endpoints and side receipts refuse edited or reordered migrations; and after every
 relational migration the schema must EQUAL what a fresh build of the target
 model produces.
 

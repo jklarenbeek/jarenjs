@@ -358,8 +358,8 @@ object member (`JL0102`). The mapping table and the worked examples are
 
 ## By code: the migration pen
 
-`@jarenjs/linq/migration` writes `$migration` 0.1 documents between two
-models, hashing their shapes exactly as the store does, with the data
+`@jarenjs/linq/migration` writes `$migration` 0.2 documents between two
+models, carrying exact canonical endpoints and compatible fingerprints, with the data
 transform typed old row → new row. Reach for it when `jaren-db plan` has
 drafted a migration and a human has to fill the part the planner could
 not: `fromPlanned(planned, { from, to })` lets a typed `transform`
@@ -375,7 +375,12 @@ export default fromPlanned(planned, { from: v1, to: v2 })
 //                     ^ the old row, typed        ^ the new row, checked: a dropped `handle` does not compile
 ```
 
-How to read it: a migration is the two models' shape hashes plus a list
+Applied 0.1 artifacts stay immutable. Capture code-first emissions under the
+pinned old toolchain before upgrading; `fromPlanned` does not upgrade legacy
+input. Follow the [history upgrade guide](../db/docs/MIGRATION-UPGRADE.md) for
+explicit observation/adoption and exact new tails.
+
+How to read it: a migration carries the two exact model endpoints plus a list
 of steps. `defineMigration({ id, from, to })` writes one from scratch and
 `.ddl()`, `.sql()`, `.transform()`, `.assert()`, `.derive()` and
 `.step()` write the step kinds MIGRATION-FORMAT names; `fromPlanned`
@@ -677,14 +682,15 @@ against Prisma, Drizzle and Kysely — is
 A pen builds a **definition** — once, at module load — and the engine
 compiles the document it emitted. That is the only place its price is
 paid, and `benchmark/db.js` measures it as ns per build beside the
-hand-written literal each pen must emit byte for byte — <!--fact:linq.penBuildCost-->schema 55.7×, model 89.4×, JSLT 61.2× a hand-written literal, and the migration pen 1.4× a hand-written document carrying the same two shape hashes<!--/fact-->.
+hand-written literal each pen must emit byte for byte — <!--fact:linq.penBuildCost-->schema 61.2×, model 87.6×, JSLT 57.9× a hand-written literal, and the migration pen 1.3× a hand-written document carrying the same exact endpoints and compatibility fingerprints<!--/fact-->.
 
 Multiples that size are what typed builders, `$defs` hoisting, a
 deep-freeze and a coded refusal per mistake cost against typing the JSON
 yourself; against a request they cost nothing, because no request builds
 a definition. The one pen that is nearly free is the migration pen, and
-for a plain reason: a `$migration` document IS its two shape hashes, so
-a hand-written one has to canonicalize and hash both models too.
+for a plain reason: a current `$migration` document carries exact canonical
+endpoints and their compatible fingerprints, so a hand-written equivalent
+canonicalizes and hashes both models too.
 
 The chain's price is a different shape and is published beside it: a
 chain re-captures and re-emits its document on every call, so the

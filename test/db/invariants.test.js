@@ -1,6 +1,7 @@
 //@ts-check
 import { it } from 'node:test';
 import assert from 'node:assert/strict';
+import { migrationIdentity } from './migration-fixture.js';
 import { migrate, openStore, planInvariants, shapeHash, sqliteDialect } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';
 import { nodeWorkerDriver } from '@jarenjs/db/node-worker';
@@ -191,7 +192,7 @@ it('a migration transform is judged as the entity\'s own update: by the columns 
     invariants: [{ name: 'made_once', on: ['update'], columns: ['made'], enforcement: 'store', assert: false },
       { name: 'draft_only', on: ['update'], enforcement: 'store', assert: { '$exists-row': { entity: 'Doc', match: { id: '$.new.doc', status: 'draft' } } } }] },
   } };
-  const transform = (/** @type {number} */ qty) => ({ $migration: '0.1', id: `qty-${qty}`, from: shapeHash(transformModel), to: shapeHash(transformModel),
+  const transform = (/** @type {number} */ qty) => ({ $migration: '0.2', identity: migrationIdentity(transformModel), id: `qty-${qty}`, from: shapeHash(transformModel), to: shapeHash(transformModel),
     steps: [{ kind: 'jslt', collection: 'Line', model: transformModel, stylesheet: [{ match: '$', body: { doc: '$.doc', made: '$.made', qty } }] }] });
   for (const driver of [nodeDriver(), nodeWorkerDriver()]) {
     const { dbPath, cleanup } = tempDbPath();

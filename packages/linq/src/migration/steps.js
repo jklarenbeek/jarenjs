@@ -1,6 +1,6 @@
 //@ts-check
 /**
- * @file The step spellings of a `$migration` 0.1 document
+ * @file The step spellings of a `$migration` 0.2 document
  * (MIGRATION-FORMAT §2): each function writes one step as plain JSON in
  * the member order the format's examples use, and refuses only what it
  * cannot spell (`JL0101`) or what the runner's own structural check would

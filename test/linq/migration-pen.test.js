@@ -27,6 +27,7 @@ import {
 } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';
 import { JarenValidator } from '@jarenjs/validate';
+import { canonicalizeJson } from '@jarenjs/json/canonical';
 
 import { compileArtifact } from '../json/schema-artifact-helpers.js';
 import { CORPUS } from './model-corpus.js';
@@ -61,7 +62,8 @@ const MIGRATIONS = [
       return m.transform('User', HANDLE).assert('User', (u) => u.handle.isEmpty());
     },
     document: {
-      $migration: '0.1', id: '0002-handles', from: shapeHash(V1), to: shapeHash(V2),
+      $migration: '0.2', id: '0002-handles', from: shapeHash(V1), to: shapeHash(V2),
+      identity: { version: 1, from: canonicalizeJson(V1), to: canonicalizeJson(V2) },
       note: 'every user gets a handle',
       steps: [
         ...plannedV1V2().steps.filter((step) => step.draft !== true),
@@ -82,7 +84,8 @@ const MIGRATIONS = [
       .step({ kind: 'rebuild', table: 'User', create: ['CREATE TABLE "User__rebuild" ("id" TEXT PRIMARY KEY, "doc" BLOB NOT NULL) STRICT'],
         copy: 'INSERT INTO "User__rebuild" ("id", "doc") SELECT "id", "doc" FROM "User"', indexes: [] }),
     document: {
-      $migration: '0.1', id: '0003-kinds', from: shapeHash(V2), to: shapeHash(V2),
+      $migration: '0.2', id: '0003-kinds', from: shapeHash(V2), to: shapeHash(V2),
+      identity: { version: 1, from: canonicalizeJson(V2), to: canonicalizeJson(V2) },
       steps: [
         { kind: 'ddl', sql: 'CREATE INDEX "User_by_name" ON "User" ("name")', note: 'index by name' },
         { kind: 'sql', sql: 'UPDATE "User" SET "bio" = \'\' WHERE "bio" IS NULL', note: 'blank bios' },
@@ -100,7 +103,8 @@ const MIGRATIONS = [
   {
     name: 'no steps: the document only moves the recorded shape',
     build: () => defineMigration({ id: '0004-shape', from: V1, to: V2 }),
-    document: { $migration: '0.1', id: '0004-shape', from: shapeHash(V1), to: shapeHash(V2), steps: [] },
+    document: { $migration: '0.2', id: '0004-shape', from: shapeHash(V1), to: shapeHash(V2),
+      identity: { version: 1, from: canonicalizeJson(V1), to: canonicalizeJson(V2) }, steps: [] },
   },
   {
     name: 'a rules array verbatim, and a body reading the engine-bound externals',
@@ -108,7 +112,8 @@ const MIGRATIONS = [
       .transform('User', [{ match: '$', body: { id: '$.id', name: '$.name' } }])
       .transform('User', (u, x) => ({ id: u.id, name: x.path, age: x.root.age })),
     document: {
-      $migration: '0.1', id: '0005-rules', from: shapeHash(V1), to: shapeHash(V1),
+      $migration: '0.2', id: '0005-rules', from: shapeHash(V1), to: shapeHash(V1),
+      identity: { version: 1, from: canonicalizeJson(V1), to: canonicalizeJson(V1) },
       steps: [
         { kind: 'jslt', collection: 'User', stylesheet: [{ match: '$', body: { id: '$.id', name: '$.name' } }] },
         { kind: 'jslt', collection: 'User', stylesheet: [{ match: '$', body: { id: '$.id', name: '$path', age: '$root.age' } }] },
@@ -149,7 +154,7 @@ describe('the migration pen — every corpus migration, four ways', () => {
   }
 });
 
-describe('identity is the shape hash, as the store computes it', () => {
+describe('exact identity retains the compatible shape fingerprints', () => {
   it('from/to equal shapeHash for every corpus model — the rename hint stripped, as the store strips it', () => {
     for (const model of [...CORPUS.map((entry) => entry.model), FIXTURE_MODEL, V1, V2]) {
       const doc = defineMigration({ id: 'h', from: model, to: model }).document;
@@ -162,6 +167,8 @@ describe('identity is the shape hash, as the store computes it', () => {
     delete stripped.entities.Note['x-rename'];
     const doc = defineMigration({ id: 'h', from: notes, to: stripped }).document;
     assert.strictEqual(doc.from, doc.to, 'a planning hint is not shape');
+    assert.strictEqual(doc.identity.from, canonicalizeJson(stripped));
+    assert.strictEqual(doc.identity.to, doc.identity.from);
   });
 });
 
@@ -251,7 +258,7 @@ describe('fromPlanned', () => {
     assert.throws(() => fromPlanned(planned, { from: V2 }), codeIs('JL0102', /not the one the planner planned/));
     assert.throws(() => fromPlanned(planned, { to: V1 }), codeIs('JL0102', /not the one the planner planned/));
     assert.throws(() => fromPlanned({ ...planned, extra: 1 }), codeIs('JL0101', /'extra'/));
-    assert.throws(() => fromPlanned({ id: 'x' }), codeIs('JL0101', /\$migration 0\.1 document/));
+    assert.throws(() => fromPlanned({ id: 'x' }), codeIs('JL0101', /\$migration 0\.2 document/));
     assert.throws(() => fromPlanned(planned, { nope: 1 }), codeIs('JL0101', /'nope'/));
     // without a target model the other steps take any identifier: the runner judges
     const doc = fromPlanned(planned).ddl('SELECT 1').assert('Anything', (u) => u.x.isEmpty()).document;

@@ -14,6 +14,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { migrationIdentity } from './migration-fixture.js';
 import { DatabaseSync } from 'node:sqlite';
 
 import { openStore, planPhysicalMigration, planTableMigration, migrate, migrationStatus, readSchema } from '@jarenjs/db';
@@ -111,7 +112,7 @@ describe('a baseline receipt adopts history', () => {
       const table = planTableMigration(connection, { name: 'item', primaryKey: ['id'], columns: [
         { name: 'id', type: 'INTEGER', nullable: false }, { name: 'name', type: 'TEXT' },
         { name: 'revision', type: 'INTEGER', nullable: false, default: 1 }] }, { id: 'revision', allowRebuild: true });
-      const upgrade = /** @type {any} */ ({ $migration: '0.1', id: 'revision', from: baseline.to, to: baseline.to, steps: [{ kind: 'table', plan: table }] });
+      const upgrade = /** @type {any} */ ({ $migration: '0.2', identity: migrationIdentity(MODEL), id: 'revision', from: baseline.to, to: baseline.to, steps: [{ kind: 'table', plan: table }] });
       const outcome = /** @type {any} */ (migrate({ connection }, [baseline, upgrade], { baseline: MODEL, model: MODEL, shadow: false }));
       assert.deepEqual(outcome.applied, ['revision']);
       assert.deepEqual(connection.prepare('SELECT "id", "revision" FROM item ORDER BY id').all([]).map((/** @type {any} */ r) => ({ ...r })),

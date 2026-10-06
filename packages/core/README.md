@@ -21,6 +21,7 @@ unkeyable values. The caller owns resource cleanup and any explicit clearing.
 | `@jarenjs/core/array` | array helpers (`isUniqueArray`, `getUniqueArray`, `includesAll`, ...) |
 | `@jarenjs/core/object` | deep equality (`equalsDeep`, JSON-only `equalsJson`), the `isJsonObject` and deep `isJsonValue` predicates, `__proto__`-safe `setObjectMember`, `deepFreeze`, map/set merging |
 | `@jarenjs/core/string` | Unicode string helpers (`countCodePoints`, `compareCodePoints`, ...), regex compilation and repeatable `createRegExpTester` predicates, the suite's one content hash (`fnv1a` and the `hashContent` fingerprint over it) and `kebabCase` |
+| `@jarenjs/core/model` | `withoutModelRenameHints` copies a model without collection/entity rename hints, preserving nested schema annotations and declaration order |
 | `@jarenjs/core/cache` | the bounded LRU with key deletion (`createBoundedCache`), the reference-keyed `createWeakCache`, and `createSemanticCache` — keyed by what a value IS; both bounded caches accept an optional capacity-eviction hook |
 | `@jarenjs/core/random` | the suite's one seeded generator (`mulberry32`, pinned sequence, ToUint32 seed) and the draws built on it: `randomInt` over a half-open range, in-place Fisher–Yates `shuffle`, and `drawDistinct` — `k` distinct indices from one stream |
 | `@jarenjs/core/runtime` | the runtime record — `createRuntime({ now, uuid, random, zoneProvider })`, frozen, defaulting member for member to the platform's own (`Date.now`, `crypto.randomUUID`, `Math.random`, no zone provider) — that the store (its query deadlines included), the jobs engine, the migration runner, every contract binding and the contract memory ledger take as `runtime`, so a deterministic run is configured once; a subsystem's own explicit option wins over the record, and the record reaches hosts, never query compilation |
@@ -250,6 +251,7 @@ Every subpath a consumer can import, derived from the manifest by
 | `@jarenjs/core/function` | JavaScript | declared |
 | `@jarenjs/core/integer` | JavaScript | declared |
 | `@jarenjs/core/message` | JavaScript | declared |
+| `@jarenjs/core/model` | JavaScript | declared |
 | `@jarenjs/core/number` | JavaScript | declared |
 | `@jarenjs/core/object` | JavaScript | declared |
 | `@jarenjs/core/random` | JavaScript | declared |

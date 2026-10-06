@@ -35,7 +35,8 @@
     "db-postgres.ts",
     "host-primitives-core.ts",
     "host-primitives-contract.ts",
-    "host-primitives-charts.ts"
+    "host-primitives-charts.ts",
+    "db-migration-identity.ts"
   ],
   "include": [
     "linq-*.ts"

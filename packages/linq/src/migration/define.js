@@ -1,10 +1,9 @@
 //@ts-check
 /**
- * @file `defineMigration()` and `fromPlanned()` — a `$migration` 0.1
- * document by code (MIGRATION-FORMAT §2). Identity stays the shape hash:
- * `from`/`to` are `hashContent(canonicalizeJson(model))` with the
- * `x-rename` planning hints stripped — the store's own rule, pinned equal
- * to its `shapeHash` by a test over every corpus model. Steps are
+ * @file `defineMigration()` and `fromPlanned()` — a `$migration` 0.2
+ * document by code (MIGRATION-FORMAT §2). Exact identity carries the
+ * canonical models with collection/entity rename hints stripped;
+ * `from`/`to` retain the store's compatible shape fingerprints. Steps are
  * appended in the order they are called; a `transform` over a planned
  * document REPLACES the draft the planner left for that name, in place,
  * and nothing here ever clears a `draft` flag: a draft left in place
@@ -16,7 +15,8 @@
 
 import { canonicalizeJson } from '@jarenjs/json/canonical';
 import { hashContent } from '@jarenjs/core/string';
-import { deepFreeze, setObjectMember, isJsonObject } from '@jarenjs/core/object';
+import { deepFreeze, isJsonObject } from '@jarenjs/core/object';
+import { withoutModelRenameHints } from '@jarenjs/core/model';
 
 import { LinqBuildError } from '../errors.js';
 import { describeValue, requireJson } from '../json-boundary.js';
@@ -24,49 +24,57 @@ import {
   ddlStep, sqlStep, hostStep, transformStep, assertStep, deriveStep, rawStep,
 } from './steps.js';
 
-const MIGRATION_VERSION = '0.1';
-const HEAD_MEMBERS = ['$migration', 'id', 'from', 'to', 'note', 'steps', 'physical'];
+const MIGRATION_VERSION = '0.2';
+const HEAD_MEMBERS = ['$migration', 'id', 'from', 'to', 'identity', 'note', 'steps', 'physical'];
 
 /** A JSON value, copied: the document is a value of its own. @param {any} v */
 const copy = (v) => JSON.parse(JSON.stringify(v));
 
 /**
- * The model without its `x-rename` hints. A hint is a PLANNING
- * instruction, not shape (MIGRATION-FORMAT §3): two models that differ
- * only by it describe one database and hash the same.
- * @param {any} model
- * @returns {any}
- */
-function withoutRenameHints(model) {
-  const out = {};
-  for (const key of Object.keys(model)) setObjectMember(out, key, model[key]);
-  for (const member of ['collections', 'entities']) {
-    const declared = model[member];
-    if (!isJsonObject(declared)) continue;
-    const stripped = {};
-    for (const name of Object.keys(declared)) {
-      const spec = declared[name];
-      if (isJsonObject(spec) && Object.hasOwn(spec, 'x-rename')) {
-        const { 'x-rename': _hint, ...rest } = spec;
-        setObjectMember(stripped, name, rest);
-      }
-      else {
-        setObjectMember(stripped, name, spec);
-      }
-    }
-    out[member] = stripped;
-  }
-  return out;
-}
-
-/**
- * The persisted 32-bit fingerprint of a model shape — what a migration's
- * `from`/`to` name, and what a database records.
+ * The exact model shape shared by the pen and database endpoint rule.
  * @param {any} model
  * @returns {string}
  */
-function shapeHashOf(model) {
-  return hashContent(canonicalizeJson(withoutRenameHints(model)));
+function modelIdentityOf(model) {
+  return canonicalizeJson(withoutModelRenameHints(model));
+}
+
+/** Inspect data descriptors before any JSON traversal can evaluate a getter.
+ * @param {any} doc */
+function requireIdentity(doc) {
+  const invalid = (reason, path = '/identity') => new LinqBuildError('JL0101', `fromPlanned() ${reason}`, path);
+  const member = Object.getOwnPropertyDescriptor(doc, 'identity');
+  const input = member && Object.hasOwn(member, 'value') ? member.value : undefined;
+  if (!member?.enumerable || !isJsonObject(input))
+    throw invalid('needs identity { version: 1, from, to }');
+  const fields = Object.getOwnPropertyDescriptors(input);
+  if (Reflect.ownKeys(fields).length !== 3
+    || ['version', 'from', 'to'].some((key) => !Object.hasOwn(fields, key)
+      || !fields[key].enumerable || !Object.hasOwn(fields[key], 'value'))
+    || fields.version.value !== 1 || typeof fields.from.value !== 'string' || typeof fields.to.value !== 'string')
+    throw invalid('needs only identity version 1 and canonical from/to model texts');
+  return input;
+}
+
+/** The copied document must carry canonical exact endpoint texts.
+ * @param {any} doc */
+function checkIdentity(doc) {
+  const invalid = (reason, path = '/identity') => new LinqBuildError('JL0101', `fromPlanned() ${reason}`, path);
+  const identity = requireIdentity(doc);
+  for (const side of ['from', 'to']) {
+    const text = identity[side];
+    let model;
+    try {
+      model = JSON.parse(text);
+      if (!isJsonObject(model) || !Object.hasOwn(model, '$model') || model.$model !== '0.1'
+        || modelIdentityOf(model) !== text) throw invalid('invalid endpoint');
+    }
+    catch {
+      throw invalid(`identity.${side} must be canonical $model 0.1 text without rename hints`, `/identity/${side}`);
+    }
+    if (hashContent(text) !== doc[side])
+      throw invalid(`${side} fingerprint does not match identity.${side}`, `/${side}`);
+  }
 }
 
 /**
@@ -101,7 +109,7 @@ function declaredNames(model) {
 /**
  * The migration under construction. Immutable: every step method answers
  * a new builder; `.document` (memoized) and `toJSON()` are the deep-frozen
- * `$migration` 0.1 document.
+ * `$migration` 0.2 document.
  */
 export class Migration {
   #head;
@@ -110,7 +118,7 @@ export class Migration {
   #document;
 
   /**
-   * @param {any} head - `$migration`, `id`, `from`, `to`, `note?`
+   * @param {any} head - `$migration`, `id`, `from`, `to`, `identity`, `note?`
    * @param {readonly any[]} steps
    * @param {readonly string[] | null} names - the target model's tables,
    *   or `null` when no target model is known (a planned document alone)
@@ -224,7 +232,7 @@ export class Migration {
     return this.#append(rawStep(raw));
   }
 
-  /** The `$migration` 0.1 document, deep-frozen. */
+  /** The `$migration` 0.2 document, deep-frozen. */
   get document() {
     if (this.#document === null) {
       this.#document = deepFreeze({ ...this.#head, steps: this.#steps.map(copy) });
@@ -238,8 +246,8 @@ export class Migration {
 }
 
 /**
- * A migration between two model documents: `from`/`to` are their shape
- * hashes, the steps what the methods append.
+ * A migration between exact model shapes, with compatible `from`/`to`
+ * fingerprints and the steps the methods append.
  * @param {{ id: string, from: any, to: any, note?: string }} spec
  * @returns {Migration}
  */
@@ -258,7 +266,9 @@ export function defineMigration(spec) {
   }
   const from = requireModel(spec.from, 'defineMigration() from');
   const to = requireModel(spec.to, 'defineMigration() to');
-  const head = { $migration: MIGRATION_VERSION, id: spec.id, from: shapeHashOf(from), to: shapeHashOf(to) };
+  const identity = { version: 1, from: modelIdentityOf(from), to: modelIdentityOf(to) };
+  const head = { $migration: MIGRATION_VERSION, id: spec.id,
+    from: hashContent(identity.from), to: hashContent(identity.to), identity };
   if (spec.note !== undefined) {
     if (typeof spec.note !== 'string') {
       throw new LinqBuildError('JL0101',
@@ -272,19 +282,20 @@ export function defineMigration(spec) {
 /**
  * A planner's document, taken up so its draft steps can be replaced by
  * typed transforms. `from`/`to` model documents type the transforms and
- * are checked against the document's hashes — a model that is not the
+ * are checked against the document's exact endpoints — a model that is not the
  * one the planner planned from is refused (`JL0102`).
- * @param {any} document - a `$migration` 0.1 document, as `jaren-db plan` writes it
+ * @param {any} document - a `$migration` 0.2 document, as `jaren-db plan` writes it
  * @param {{ from?: any, to?: any }} [options]
  * @returns {Migration}
  */
 export function fromPlanned(document, options = undefined) {
+  if (isJsonObject(document) && Object.hasOwn(document, 'identity')) requireIdentity(document);
   const doc = copy(requireJson(document, 'fromPlanned() document'));
-  if (!isJsonObject(doc) || doc.$migration !== MIGRATION_VERSION
+  if (!isJsonObject(doc) || !['0.1', MIGRATION_VERSION].includes(doc.$migration)
     || typeof doc.id !== 'string' || doc.id === ''
     || typeof doc.from !== 'string' || typeof doc.to !== 'string' || !Array.isArray(doc.steps)) {
     throw new LinqBuildError('JL0101',
-      'fromPlanned() takes a $migration 0.1 document — { $migration, id, from, to, steps } — '
+      'fromPlanned() takes a $migration 0.2 document — { $migration, id, from, to, identity, steps } — '
       + 'as jaren-db plan writes it');
   }
   for (const key of Object.keys(doc)) {
@@ -294,6 +305,12 @@ export function fromPlanned(document, options = undefined) {
         `/${key}`);
     }
   }
+  if (doc.$migration === '0.1') {
+    throw new LinqBuildError('JL0102',
+      'fromPlanned() cannot edit a legacy $migration 0.1 document; keep applied artifacts unchanged '
+      + 'and deliberately plan or author a new 0.2 migration', '/$migration');
+  }
+  checkIdentity(doc);
   let names = null;
   if (options !== undefined) {
     if (!isJsonObject(options)) {
@@ -305,17 +322,17 @@ export function fromPlanned(document, options = undefined) {
     for (const side of ['from', 'to']) {
       if (options[side] === undefined) continue;
       const model = requireModel(options[side], `fromPlanned() ${side}`);
-      const hash = shapeHashOf(model);
-      if (hash !== doc[side]) {
+      const identity = modelIdentityOf(model);
+      if (identity !== doc.identity[side]) {
         throw new LinqBuildError('JL0102',
-          `fromPlanned() ${side} model has shape '${hash}', but the planned migration's ${side} is `
-          + `'${doc[side]}' — the model given is not the one the planner planned ${side === 'from' ? 'from' : 'to'}`,
+          `fromPlanned() ${side} model does not match the planned migration's exact ${side} identity — `
+          + `the model given is not the one the planner planned ${side === 'from' ? 'from' : 'to'}`,
           `/${side}`);
       }
       if (side === 'to') names = declaredNames(model);
     }
   }
-  const head = { $migration: MIGRATION_VERSION, id: doc.id, from: doc.from, to: doc.to };
+  const head = { $migration: MIGRATION_VERSION, id: doc.id, from: doc.from, to: doc.to, identity: doc.identity };
   if (doc.note !== undefined) {
     if (typeof doc.note !== 'string') {
       throw new LinqBuildError('JL0101', `fromPlanned() document note is a string, got ${describeValue(doc.note)}`, '/note');

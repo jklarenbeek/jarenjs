@@ -2,6 +2,7 @@
 /** A physical preview counts current relations without executing planned SQL. */
 import { it } from 'node:test';
 import assert from 'node:assert/strict';
+import { migrationIdentity } from './migration-fixture.js';
 import { migrate, planPhysicalMigration, planTableMigration, readSchema, shapeHash } from '@jarenjs/db';
 
 async function fixture(run) {
@@ -24,7 +25,7 @@ const table = { name: 'items', primaryKey: ['id'], columns: [
 const rowsOf = (connection) => connection.prepare('SELECT * FROM items ORDER BY id').all([]).map((row) => ({ ...row }));
 const transform = (model) => ({ kind: 'jslt', collection: 'Item', model,
   stylesheet: [{ match: '$', body: { id: '$.id', value: { $upper: '$.value' } } }] });
-const document = (id, model, steps) => ({ $migration: '0.1', id,
+const document = (id, model, steps) => ({ $migration: '0.2', identity: migrationIdentity(model), id,
   from: shapeHash(model), to: shapeHash(model), steps });
 
 it('a fresh guarded table followed by SQL and a transform previews twice with an unknown count, then applies', async () => fixture((connection) => {

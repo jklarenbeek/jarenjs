@@ -1,0 +1,28 @@
+{
+  "migration": {
+    "$migration": "0.2",
+    "from": "1jpela7",
+    "id": "widening",
+    "identity": {
+      "from": "{\"$model\":\"0.1\",\"collections\":{\"docs\":{\"indexes\":[],\"key\":\"/id\",\"schema\":{\"properties\":{\"name\":{\"type\":\"string\"}},\"required\":[\"name\"],\"type\":\"object\"}}}}",
+      "to": "{\"$model\":\"0.1\",\"collections\":{\"docs\":{\"indexes\":[],\"key\":\"/id\",\"schema\":{\"properties\":{\"name\":{\"type\":\"string\"}},\"type\":\"object\"}}}}",
+      "version": 1
+    },
+    "steps": [],
+    "to": "1b9eirz"
+  },
+  "report": {
+    "added": [],
+    "destructive": false,
+    "drafts": [],
+    "removed": [],
+    "renamed": [],
+    "schemaChanged": [
+      "docs"
+    ],
+    "transformed": [],
+    "widened": [
+      "docs"
+    ]
+  }
+}

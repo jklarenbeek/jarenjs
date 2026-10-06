@@ -64,14 +64,15 @@ export const DB_CODES = Object.freeze({
   JD2104: 'a logical row disagrees with its replication history',
   JD2105: 'replication requires an explicit snapshot reset',
   JD2106: 'replication exceeded its operation bound',
-  JD0020: "the migration's from-shape does not match the database",
-  JD0021: 'the migration is missing a required data transform',
+  JD0020: 'migration endpoint mismatch',
+  JD0021: 'migration precondition failed',
   JD0022: 'an applied migration disagrees with the history record',
   JD0023: 'a migration step failed',
   JD0024: 'a document source or target could not be read or written',
   JD0025: 'a migration host step is unknown, its version differs, or it appears where it cannot run',
   JD0026: 'an atomic migration run contains a rebuild link',
   JD0027: 'a physical scope is malformed or names a table the plan does not own',
+  JD0028: 'legacy migration authority needs attestation',
   JD2001: 'insert found the key already present, or the key is stored under two spellings',
   JD2002: 'a usable key could not be resolved for the write, or an explicit key disagrees with the document',
   JD2003: 'a value or staged operation violates its data contract',
@@ -205,11 +206,11 @@ export const DB_CODES = Object.freeze({
  *    bound; the bound is printed, never silent
  *  - `JD0053` — a live query's `eventTime` names a member it does not
  *    admit, or a watermark/retention that is not a finite span
- *  - `JD0020` — a migration's `from` hash does not match the
- *    database's recorded shape; running it would corrupt
+ *  - `JD0020` — a migration endpoint does not match its exact
+ *    baseline, adjacent endpoint or attested model boundary
  *  - `JD0021` — a draft transform was not filled in, or a document no
  *    longer validates after the migration (a narrowing without an
- *    adequate transform)
+ *    adequate transform), or a PostgreSQL writer lacks READ COMMITTED
  *  - `JD0022` — the migration list disagrees with the applied history
  *    (an edited file, a missing file, a reordered sequence)
  *  - `JD0023` — a step failed: an assertion returned rows, DDL was
@@ -222,6 +223,8 @@ export const DB_CODES = Object.freeze({
  *    rebuild changes connection settings outside any transaction)
  *  - `JD0027` — a physical plan's `scope` is malformed, or names a table
  *    the plan does not own
+ *  - `JD0028` — legacy history needs explicit attestation, or pending
+ *    work must be authored as an exact 0.2 migration
  */
 export class DbCompileError extends CodedError {
   /**

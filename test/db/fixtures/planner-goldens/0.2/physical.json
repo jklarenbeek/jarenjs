@@ -1,0 +1,94 @@
+{
+  "migration": {
+    "$migration": "0.2",
+    "from": "koofce",
+    "id": "revision",
+    "identity": {
+      "from": "{\"$model\":\"0.1\",\"entities\":{\"Item\":{\"physical\":{\"columns\":{\"id\":{\"codec\":\"integer\",\"name\":\"id\",\"null\":\"reject\"},\"name\":{\"codec\":\"text\",\"name\":\"name\",\"null\":\"null\"}},\"table\":\"item\"},\"schema\":{\"properties\":{\"id\":{\"type\":\"integer\",\"x-entity\":{\"key\":true}},\"name\":{\"type\":\"string\"}},\"type\":\"object\"}}}}",
+      "to": "{\"$model\":\"0.1\",\"entities\":{\"Item\":{\"physical\":{\"columns\":{\"id\":{\"codec\":\"integer\",\"name\":\"id\",\"null\":\"reject\"},\"name\":{\"codec\":\"text\",\"name\":\"name\",\"null\":\"null\"}},\"table\":\"item\"},\"schema\":{\"properties\":{\"id\":{\"type\":\"integer\",\"x-entity\":{\"key\":true}},\"name\":{\"type\":\"string\"}},\"type\":\"object\"}}}}",
+      "version": 1
+    },
+    "physical": {
+      "assertions": [],
+      "dispositions": {
+        "index:item_name": "preserve",
+        "table:item": "replace"
+      },
+      "scope": {
+        "tables": [
+          "item"
+        ]
+      },
+      "source": [
+        {
+          "name": "item_name",
+          "owner": "item",
+          "sql": "CREATE INDEX item_name ON item(name)",
+          "type": "index"
+        },
+        {
+          "name": "item",
+          "owner": "item",
+          "sql": "CREATE TABLE item(id INTEGER PRIMARY KEY, name TEXT)",
+          "type": "table"
+        }
+      ]
+    },
+    "steps": [
+      {
+        "kind": "table",
+        "plan": {
+          "after": [
+            {
+              "name": "item",
+              "sql": "CREATE TABLE \"item\" (\"id\" INTEGER NOT NULL, \"name\" TEXT, \"revision\" INTEGER NOT NULL DEFAULT (1), PRIMARY KEY (\"id\"))",
+              "tbl_name": "item",
+              "type": "table"
+            },
+            {
+              "name": "item_name",
+              "sql": "CREATE INDEX item_name ON item(name)",
+              "tbl_name": "item",
+              "type": "index"
+            }
+          ],
+          "checksum": "{\"after\":[{\"name\":\"item\",\"sql\":\"CREATE TABLE \\\"item\\\" (\\\"id\\\" INTEGER NOT NULL, \\\"name\\\" TEXT, \\\"revision\\\" INTEGER NOT NULL DEFAULT (1), PRIMARY KEY (\\\"id\\\"))\",\"tbl_name\":\"item\",\"type\":\"table\"},{\"name\":\"item_name\",\"sql\":\"CREATE INDEX item_name ON item(name)\",\"tbl_name\":\"item\",\"type\":\"index\"}],\"finish\":[\"DROP TABLE \\\"item\\\"\",\"ALTER TABLE \\\"_jaren_rebuild_107rmd9\\\" RENAME TO \\\"item\\\"\",\"CREATE INDEX item_name ON item(name)\"],\"id\":\"revision\",\"rebuild\":true,\"source\":[{\"name\":\"item_name\",\"sql\":\"CREATE INDEX item_name ON item(name)\",\"tbl_name\":\"item\",\"type\":\"index\"},{\"name\":\"item\",\"sql\":\"CREATE TABLE item(id INTEGER PRIMARY KEY, name TEXT)\",\"tbl_name\":\"item\",\"type\":\"table\"}],\"statements\":[\"CREATE TABLE IF NOT EXISTS \\\"_jaren_rebuild_107rmd9\\\" (\\\"id\\\" INTEGER NOT NULL, \\\"name\\\" TEXT, \\\"revision\\\" INTEGER NOT NULL DEFAULT (1), PRIMARY KEY (\\\"id\\\"))\",\"INSERT INTO \\\"_jaren_rebuild_107rmd9\\\" (\\\"id\\\", \\\"name\\\") SELECT \\\"id\\\", \\\"name\\\" FROM \\\"item\\\"\"],\"table\":\"item\",\"temporary\":\"_jaren_rebuild_107rmd9\",\"unchanged\":[\"id\",\"name\"],\"version\":1}",
+          "finish": [
+            "DROP TABLE \"item\"",
+            "ALTER TABLE \"_jaren_rebuild_107rmd9\" RENAME TO \"item\"",
+            "CREATE INDEX item_name ON item(name)"
+          ],
+          "id": "revision",
+          "rebuild": true,
+          "source": [
+            {
+              "name": "item_name",
+              "sql": "CREATE INDEX item_name ON item(name)",
+              "tbl_name": "item",
+              "type": "index"
+            },
+            {
+              "name": "item",
+              "sql": "CREATE TABLE item(id INTEGER PRIMARY KEY, name TEXT)",
+              "tbl_name": "item",
+              "type": "table"
+            }
+          ],
+          "statements": [
+            "CREATE TABLE IF NOT EXISTS \"_jaren_rebuild_107rmd9\" (\"id\" INTEGER NOT NULL, \"name\" TEXT, \"revision\" INTEGER NOT NULL DEFAULT (1), PRIMARY KEY (\"id\"))",
+            "INSERT INTO \"_jaren_rebuild_107rmd9\" (\"id\", \"name\") SELECT \"id\", \"name\" FROM \"item\""
+          ],
+          "table": "item",
+          "temporary": "_jaren_rebuild_107rmd9",
+          "unchanged": [
+            "id",
+            "name"
+          ],
+          "version": 1
+        }
+      }
+    ],
+    "to": "koofce"
+  },
+  "report": null
+}

@@ -7,6 +7,7 @@ import { defineMigration, fromPlanned } from '@jarenjs/linq/migration';
 import { stylesheet, rule } from '@jarenjs/linq/jslt';
 import { planPhysicalMigration, planTableMigration, applyTableMigration,
   readSchema, migrationChecksum } from '@jarenjs/db';
+import { canonicalizeJson } from '@jarenjs/json/canonical';
 import { compileArtifact } from '../json/schema-artifact-helpers.js';
 
 const validators = ['jaren-migration.schema.json', 'jaren-migration.draft-07.schema.json']
@@ -43,6 +44,9 @@ it('fromPlanned preserves the complete reviewed plan and physical header as an i
   const pen = fromPlanned(planned, { from: model, to: renamed });
   const doc = pen.document;
   assert.deepEqual(doc, planned);
+  assert.equal(doc.$migration, '0.2');
+  assert.deepEqual(doc.identity, { version: 1, from: canonicalizeJson(model), to: canonicalizeJson(renamed) });
+  assert.equal(Object.isFrozen(doc.identity), true);
   assert.equal(migrationChecksum(doc), migrationChecksum(planned));
   assert.equal(JSON.stringify(doc.physical), JSON.stringify(planned.physical));
   assert.deepEqual(doc.steps[0].plan, planned.steps[0].plan, 'the guarded table artifact stays complete');

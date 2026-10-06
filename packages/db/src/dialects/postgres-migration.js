@@ -47,7 +47,11 @@ export function postgresMigration() {
   return Object.freeze({
     checkSql,
     lock: transactionLock(POSTGRES_LOCK_CLASSES.migration),
-    settings: "SELECT current_setting('standard_conforming_strings') AS strings, current_setting('lock_timeout') AS lock_timeout",
+    settings: "SELECT current_setting('standard_conforming_strings') AS strings, current_setting('lock_timeout') AS lock_timeout, current_setting('transaction_isolation') AS isolation",
+    metadataRules: 'SELECT r.rulename FROM pg_catalog.pg_rewrite r '
+      + 'JOIN pg_catalog.pg_class c ON c.oid = r.ev_class '
+      + 'JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace '
+      + "WHERE n.nspname = current_schema() AND c.relname IN ($1, $2) AND r.rulename <> '_RETURN'",
     identity: "SELECT current_database() AS database, inet_server_addr()::text AS address, inet_server_port() AS port, current_schema() AS schema",
     sequence: (object) => `SELECT last_value::text AS value, is_called::text AS called FROM ${quote(object.schema)}.${quote(object.name)}`,
   });

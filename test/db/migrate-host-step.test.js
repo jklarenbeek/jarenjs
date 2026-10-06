@@ -15,6 +15,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { migrationIdentity } from './migration-fixture.js';
 import { DatabaseSync } from 'node:sqlite';
 
 import { openStore, migrate, migrationStatus, migrationChecksum, migrateDocuments, planModelMigration, planPhysicalMigration, shapeHash, readSchema, sql, sqliteDialect } from '@jarenjs/db';
@@ -31,7 +32,7 @@ const V1 = { $model: '0.1', collections: { docs: { schema: { type: 'object', pro
 const V2 = structuredClone(V1);
 /** @type {any} */ (V2.collections.docs.schema.properties.name).maxLength = 3;
 const HOST_STEP = { kind: 'host', run: 'truncate', version: '1' };
-const REPAIR = { $migration: '0.1', id: 'repair', from: shapeHash(V1), to: shapeHash(V2), steps: [HOST_STEP] };
+const REPAIR = { $migration: '0.2', identity: migrationIdentity(V1, V2), id: 'repair', from: shapeHash(V1), to: shapeHash(V2), steps: [HOST_STEP] };
 const coded = (/** @type {string} */ code, /** @type {RegExp} */ pattern = /./) =>
   (/** @type {any} */ error) => error.code === code && pattern.test(error.message);
 
@@ -103,7 +104,7 @@ describe('a host step runs in its link, and on the shadow first', () => {
     try {
       /** @type {any} */
       const seen = {};
-      const audit = { $migration: '0.1', id: 'audit', from: shapeHash(V1), to: shapeHash(V1), steps: [
+      const audit = { $migration: '0.2', identity: migrationIdentity(V1), id: 'audit', from: shapeHash(V1), to: shapeHash(V1), steps: [
         { kind: 'ddl', sql: 'CREATE TABLE "audit_log" ("id" TEXT PRIMARY KEY, "count" INTEGER NOT NULL)' },
         { kind: 'host', run: 'audit', version: '2' }] };
       const hosts = { audit: { version: '2', run(/** @type {any} */ scope) {
@@ -130,7 +131,7 @@ describe('a host step runs in its link, and on the shadow first', () => {
       const store = await openStore(MODEL, { driver: nodeDriver(), path: temp.dbPath });
       await store.entity('User').create({ id: 'u1', name: 'ada', bio: 'engineer' });
       await store.close();
-      const upper = { $migration: '0.1', id: 'upper', from: shapeHash(MODEL), to: shapeHash(MODEL), steps: [{ kind: 'host', run: 'upper', version: '1' }] };
+      const upper = { $migration: '0.2', identity: migrationIdentity(MODEL), id: 'upper', from: shapeHash(MODEL), to: shapeHash(MODEL), steps: [{ kind: 'host', run: 'upper', version: '1' }] };
       /** @type {any[]} */
       const read = [];
       const hosts = { upper: { version: '1', run(/** @type {any} */ scope) {
@@ -176,7 +177,7 @@ describe('a host step runs in its link, and on the shadow first', () => {
       /** @type {any} */
       let kept;
       const hosts = { truncate: { version: '1', run(/** @type {any} */ scope) { kept = scope; } } };
-      const SAME = { ...REPAIR, to: shapeHash(V1) };
+      const SAME = { ...REPAIR, identity: migrationIdentity(V1), to: shapeHash(V1) };
       await migrate({ driver: nodeDriver(), path: dbPath }, [SAME], { baseline: V1, model: V1, shadow: false, hosts });
       assert.throws(() => kept.collection('docs'), coded('JD0025', /used its scope after the step ended/));
       assert.throws(() => kept.relational.all({ from: 'docs' }), coded('JD0025'));
@@ -186,9 +187,9 @@ describe('a host step runs in its link, and on the shadow first', () => {
 });
 
 describe('what a host step\'s scope hands back is checked as a stylesheet\'s, and ends with the step', () => {
-  const SAME = { ...REPAIR, to: shapeHash(V1) };
+  const SAME = { ...REPAIR, identity: migrationIdentity(V1), to: shapeHash(V1) };
   /** A link over V1 that runs one host step, then `more`. @param {string} id @param {any[]} [more] */
-  const link = (id, more = []) => ({ $migration: '0.1', id, from: shapeHash(V1), to: shapeHash(V1),
+  const link = (id, more = []) => ({ $migration: '0.2', identity: migrationIdentity(V1), id, from: shapeHash(V1), to: shapeHash(V1),
     steps: [{ kind: 'host', run: 'h', version: '1' }, ...more] });
 
   it('a replacement that is no document, or that moves a key member, refuses JD0023; one that leaves the key out keeps it', async () => {
@@ -214,7 +215,7 @@ describe('what a host step\'s scope hands back is checked as a stylesheet\'s, an
       await store.entity('User').create({ id: 'u1', name: 'ada' });
       await store.close();
       const run = (/** @type {string} */ id, /** @type {(user: any) => any} */ fn) => migrate({ driver: nodeDriver(), path: temp.dbPath },
-        [{ $migration: '0.1', id, from: shapeHash(MODEL), to: shapeHash(MODEL), steps: [{ kind: 'host', run: 'h', version: '1' }] }],
+        [{ $migration: '0.2', identity: migrationIdentity(MODEL), id, from: shapeHash(MODEL), to: shapeHash(MODEL), steps: [{ kind: 'host', run: 'h', version: '1' }] }],
         { baseline: MODEL, model: MODEL, shadow: false, hosts: { h: { version: '1', run: (/** @type {any} */ scope) => scope.collection('User').update(fn) } } });
       await assert.rejects(run('move', (user) => ({ ...user, id: 'u2' })),
         coded('JD0023', /changed the key member 'id' of row 1 — key changes are not supported/));
@@ -322,7 +323,7 @@ describe('a host step that cannot run as its document names is JD0025, before an
         coded('JD0025', /needs a database transaction/));
       // the shadow replays the whole chain: an applied host step needs its host too
       await migrate({ driver: nodeDriver(), path: dbPath }, [REPAIR], { baseline: V1, model: V2, compileSchema, hosts: truncate([]) });
-      const NEXT = { $migration: '0.1', id: 'next', from: shapeHash(V2), to: shapeHash(V2), steps: [] };
+      const NEXT = { $migration: '0.2', identity: migrationIdentity(V2), id: 'next', from: shapeHash(V2), to: shapeHash(V2), steps: [] };
       await assert.rejects(migrate({ driver: nodeDriver(), path: dbPath }, [REPAIR, NEXT], { baseline: V1, model: V2 }),
         coded('JD0025', /migration 'repair' step 0/));
       const done = await migrate({ driver: nodeDriver(), path: dbPath }, [REPAIR, NEXT], { baseline: V1, model: V2, shadow: false });
@@ -394,14 +395,14 @@ describe("a migration's document write carries the collection's stored derived c
   it('a host step and a jslt step rewrite a vector-indexed member, and nearest-neighbour search follows', async () => {
     const { dbPath, cleanup } = await seededVectors(VECTORS);
     try {
-      const swapped = { $migration: '0.1', id: 'swap', from: shapeHash(VECTORS), to: shapeHash(VECTORS), steps: [SWAP] };
+      const swapped = { $migration: '0.2', identity: migrationIdentity(VECTORS), id: 'swap', from: shapeHash(VECTORS), to: shapeHash(VECTORS), steps: [SWAP] };
       await migrate({ driver: nodeDriver(), path: dbPath }, [swapped], { baseline: VECTORS, model: VECTORS, hosts: swap });
       assert.deepEqual(storedVectors(dbPath), { a: [0, 1, 0], b: [1, 0, 0] });
       const store = await openStore(VECTORS, { driver: nodeDriver(), path: dbPath });
       try { assert.equal(await store.collection('rows').execute(NEAREST_EAST), 'b'); }
       finally { await store.close(); }
       // a stylesheet's write, under the model its step carries (the run names none)
-      const up = { $migration: '0.1', id: 'up', from: shapeHash(VECTORS), to: shapeHash(VECTORS), steps: [{ kind: 'jslt', collection: 'rows',
+      const up = { $migration: '0.2', identity: migrationIdentity(VECTORS), id: 'up', from: shapeHash(VECTORS), to: shapeHash(VECTORS), steps: [{ kind: 'jslt', collection: 'rows',
         model: VECTORS, stylesheet: [{ match: '$', body: { id: '$.id', embedding: { $const: [0, 0, 1] } } }] }] };
       await migrate({ driver: nodeDriver(), path: dbPath }, [swapped, up], { baseline: VECTORS, hosts: swap });
       assert.deepEqual(storedVectors(dbPath), { a: [0, 0, 1], b: [0, 0, 1] });
@@ -415,7 +416,7 @@ describe("a migration's document write carries the collection's stored derived c
       indexes: [{ name: 'by_cell', path: '$.at', derive: 'geohash', precision: 5 }] } } };
     const RADIUS = { $for: { p: '$[*]' }, $where: { $le: [{ $distance: ['$p.at', [4.9, 52.37]] }, 20000] }, $return: '$p.id' };
     const moved = (/** @type {any} */ doc) => ({ ...doc, at: doc.id === 'ams' ? [-74.0, 40.7] : [4.9, 52.37] });
-    const MOVE = { $migration: '0.1', id: 'move', from: shapeHash(MODEL), to: shapeHash(MODEL), steps: [{ kind: 'host', run: 'move', version: '1' }] };
+    const MOVE = { $migration: '0.2', identity: migrationIdentity(MODEL), id: 'move', from: shapeHash(MODEL), to: shapeHash(MODEL), steps: [{ kind: 'host', run: 'move', version: '1' }] };
     for (const [driver, run] of /** @type {[() => any, (scope: any) => any][]} */ ([
       [() => nodeWorkerDriver(), async (scope) => scope.collection('places').update(moved)],
       [() => nodeDriver(), (scope) => scope.collection('places').update(moved)],

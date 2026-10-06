@@ -14,6 +14,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { migrationIdentity } from './migration-fixture.js';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
@@ -37,7 +38,7 @@ const MODEL = { $model: '0.1', entities: {
   Child: { schema: { type: 'object', properties: { id: { type: 'string', 'x-entity': { key: true } }, parentId: { type: 'string' } } } },
 } };
 const step = (/** @type {string} */ id, /** @type {string} */ sql) =>
-  ({ $migration: '0.1', id, from: shapeHash(MODEL), to: shapeHash(MODEL), steps: [{ kind: 'sql', sql }] });
+  ({ $migration: '0.2', identity: migrationIdentity(MODEL), id, from: shapeHash(MODEL), to: shapeHash(MODEL), steps: [{ kind: 'sql', sql }] });
 const DELETE_PARENT = step('delete-parent', `DELETE FROM "Parent" WHERE "id" = 'p1'`);
 const ORPHAN = step('orphan', `INSERT INTO "Child" ("id", "parentId", "doc") VALUES ('c2', 'nobody', jsonb('{}'))`);
 
@@ -213,7 +214,7 @@ describe(`the check is the link's own (${process.versions.bun ? 'bun' : 'node'})
   it('a hand-written rename counts however it is spelled; a column renamed without COLUMN renames no table', async () => {
     const { dbPath, cleanup } = await withOldOrphan();
     try {
-      const rename = { $migration: '0.1', id: 'rename-by-hand', from: shapeHash(MODEL), to: shapeHash(MODEL), steps: [
+      const rename = { $migration: '0.2', identity: migrationIdentity(MODEL), id: 'rename-by-hand', from: shapeHash(MODEL), to: shapeHash(MODEL), steps: [
         { kind: 'ddl', sql: 'alter table main.child rename to Kid;' },
         { kind: 'ddl', sql: 'ALTER TABLE "Kid" RENAME "parentId" TO "parentKey"' },
       ] };

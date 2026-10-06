@@ -20,9 +20,10 @@ import { analyzeQuery, createQueryAccumulator } from '@jarenjs/json/query';
 import { setObjectMember } from '@jarenjs/core/object';
 import { DbCompileError, DbRuntimeError } from './errors.js';
 import { utf8Length } from './cursor.js';
+import { checkMigrationIdentity } from './migration-identity.js';
 
-/** The migration format version. */
-export const MIGRATION_VERSION = '0.1';
+/** The format emitted by current migration authoring. Legacy 0.1 remains readable. */
+export const MIGRATION_VERSION = '0.2';
 
 /**
  * The step kinds that act on DOCUMENTS, and so run on any host.
@@ -301,8 +302,14 @@ const STEP_KINDS = new Set([...DOCUMENT_STEP_KINDS, ...PHYSICAL_STEP_KINDS, HOST
  * @param {any} migration
  */
 export function checkMigrationDocument(migration) {
+  checkMigrationStructure(migration, false);
+}
+
+/** Internal inspection for status: a draft is readable but cannot execute.
+ * @param {any} migration @param {boolean} [allowDraft] */
+export function checkMigrationStructure(migration, allowDraft = true) {
   try {
-    checkDocumentShape(migration);
+    checkDocumentShape(migration, allowDraft);
   }
   catch (error) {
     // a malformed document is refused as a failing step is: no rerun fixes it
@@ -311,16 +318,18 @@ export function checkMigrationDocument(migration) {
   }
 }
 
-/** The checks of {@link checkMigrationDocument}. @param {any} migration */
-function checkDocumentShape(migration) {
+/** The checks of {@link checkMigrationDocument}.
+ * @param {any} migration @param {boolean} allowDraft */
+function checkDocumentShape(migration, allowDraft) {
   if (migration === null || typeof migration !== 'object'
-    || migration.$migration !== MIGRATION_VERSION
+    || !['0.1', MIGRATION_VERSION].includes(migration.$migration)
     || typeof migration.id !== 'string' || migration.id === ''
     || typeof migration.from !== 'string' || typeof migration.to !== 'string'
     || !Array.isArray(migration.steps)) {
     throw new DbCompileError('JD0023',
-      `migration '${migration?.id ?? '<unknown>'}' is not a valid ${MIGRATION_VERSION} migration document`);
+      `migration '${migration?.id ?? '<unknown>'}' is not a valid 0.1 or ${MIGRATION_VERSION} migration document`);
   }
+  checkMigrationIdentity(migration);
   for (let i = 0; i < migration.steps.length; i++) {
     const step = migration.steps[i];
     if (step === null || typeof step !== 'object' || !STEP_KINDS.has(step.kind)) {
@@ -364,7 +373,7 @@ function checkDocumentShape(migration) {
       throw new DbCompileError('JD0023',
         `migration '${migration.id}' step ${i} is a derive backfill without its columns`);
     }
-    if (step.kind === 'jslt' && step.draft === true) {
+    if (!allowDraft && step.kind === 'jslt' && step.draft === true) {
       throw new DbCompileError('JD0021',
         `migration '${migration.id}' step ${i} is a DRAFT transform for collection `
         + `'${step.collection}' — the planner cannot infer a data transform; fill in `

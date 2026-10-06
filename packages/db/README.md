@@ -339,14 +339,16 @@ no continuation to emit.
 - **Migrations are documents.** `planMigration` diffs two models into
   rendered-DDL + JSLT-transform + assertion steps; a shadow database
   replays the whole chain before the real store is touched; a
-  checksummed history refuses edited or reordered migrations; a
-  narrowing without an adequate transform is refused against the REAL
-  data, inside the transaction. A `host` step runs your own code in
+  exact 0.2 endpoints and side receipts refuse edited or reordered
+  migrations even when short fingerprints collide. Legacy histories need
+  [explicit observed-history adoption](docs/MIGRATION-UPGRADE.md), preserving
+  applied artifacts and normal rows. With `compileSchema`, a narrowing without
+  an adequate transform is refused against real data inside the transaction. A `host` step runs your own code in
   the migration's transaction, `atomic: true` commits a chain whole or
   not at all, `planModelMigration(from, to, { transform })` plans a
   narrowing with its repair in place of the draft, a migration's own
   connection enforces foreign keys on every driver, and a zero-step
-  baseline scoped to the tables it owns adopts history on an existing
+  exact baseline scoped to the tables it owns starts history on an existing
   schema (MIGRATION-FORMAT §2, §6, §5). And by code: `@jarenjs/linq/migration`
   ([MIGRATION-PEN.md](../linq/docs/MIGRATION-PEN.md))
   writes the same document with the data transform typed old row → new
@@ -1771,7 +1773,8 @@ group outputs consume both state-entry and byte credits. See
 
 Use `readSchema(connection)` for physical inventory, then declare an entity's
 `physical` table, ordered keys and column codecs and open with `{ adopt: true }`.
-Opening verifies the existing shape and emits no DDL. Ordinary column tables need
+Opening verifies the existing shape and emits no DDL. It does not attest migration
+history; [legacy history adoption](docs/MIGRATION-UPGRADE.md) is explicit. Ordinary column tables need
 no document column; integer identities, exact hexadecimal BLOBs, database defaults
 and read-only views have explicit contracts in [MODEL-FORMAT](docs/MODEL-FORMAT.md#12-existing-column-layouts).
 PostgreSQL also qualifies asynchronous scalar adoption with an explicit schema,

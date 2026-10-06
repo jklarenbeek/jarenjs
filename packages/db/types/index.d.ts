@@ -1623,6 +1623,8 @@ export interface AssertionPlan {
   bounds: AssertionBounds | null;
 }
 
+/** PostgreSQL migration writes require effective READ COMMITTED (JD0021);
+ * the runner never changes the caller's isolation level. */
 export interface MigrateOptions {
   baseline: unknown;
   model?: unknown;
@@ -1761,7 +1763,7 @@ export declare function isPerDocumentAssertion(query: unknown): boolean;
  * required: the dialect renders the DDL (a `TypeError` without it). */
 export interface PlanMigrationOptions {
   readonly dialect: Dialect;
-  /** The plan's id; default `to-<first 8 hex of the target shape hash>`. */
+  /** The plan's id; default `to-${shapeHash(to).slice(0, 8)}` (base 36). */
   readonly id?: string;
   /** The physical mapping of a derived index column — the driver that will
    * run the plan decides it; default `'virtual'`. */
@@ -1793,17 +1795,39 @@ export interface MigrationStep {
   readonly [member: string]: unknown;
 }
 
-/** A `$migration` 0.1 document, as the planner writes it and `migrate()`
- * applies it. */
-export interface MigrationDocument {
+/** Exact model endpoints after removing only model rename planning hints. */
+export interface MigrationIdentity {
+  readonly version: 1;
+  readonly from: string;
+  readonly to: string;
+}
+/** Historical 0.1 input. Database histories require explicit adoption;
+ * newly pending 0.1 work refuses JD0028. Storeless document runs retain it. */
+export interface LegacyMigrationDocument {
   readonly $migration: '0.1';
   readonly id: string;
-  /** The shape hash of the model the plan starts from. */
+  /** Compatibility fingerprint; not an exact model identity. */
   readonly from: string;
-  /** The shape hash of the model the plan arrives at. */
   readonly to: string;
+  readonly note?: string;
   readonly steps: readonly MigrationStep[];
+  readonly physical?: MigrationPhysicalHeader;
+  readonly identity?: never;
 }
+/** Current planner output. Endpoint strings are canonical model JSON;
+ * `from`/`to` retain their compatible shape fingerprints. */
+export interface ExactMigrationDocument {
+  readonly $migration: '0.2';
+  readonly id: string;
+  readonly from: string;
+  readonly to: string;
+  readonly identity: MigrationIdentity;
+  readonly note?: string;
+  readonly steps: readonly MigrationStep[];
+  readonly physical?: MigrationPhysicalHeader;
+}
+/** Structural input: legacy history/storeless documents or current exact work. */
+export type MigrationDocument = LegacyMigrationDocument | ExactMigrationDocument;
 
 /** What a plan changes. `widened` names the collections and entities
  * whose document schema changed by a widening alone (new optional
@@ -1823,7 +1847,7 @@ export interface MigrationPlanReport {
 }
 
 export interface MigrationPlan {
-  migration: MigrationDocument;
+  migration: ExactMigrationDocument;
   report: MigrationPlanReport;
 }
 
@@ -1855,9 +1879,10 @@ export interface MigrationStatusOptions {
   deadline?: number;
   runtime?: Partial<Runtime>;
 }
-/** Report a database's migration state without touching it: the
- * history table is probed, never created. `model` enables the drift
- * comparison once the chain is fully applied. */
+/** Read and verify exact migration authority without creating metadata.
+ * Unadopted legacy history or newly pending 0.1 work refuses JD0028.
+ * `model` enables drift comparison once the chain is fully applied.
+ * A borrowed PostgreSQL transaction retains its own read view. */
 export declare function migrationStatus(
   target: MigrationTarget,
   migrations: readonly unknown[],
@@ -1868,6 +1893,70 @@ export declare function migrationStatus(
   migrations: readonly unknown[],
   options?: MigrationStatusOptions,
 ): MigrationStatusReport | Promise<MigrationStatusReport>;
+/** Raw database observation, not proof that a historical document ran.
+ * Numeric fields are projected to SQL TEXT before decoding; NULL and invalid
+ * payload strings remain visible for diagnosis. Adoption validates authority. */
+export interface ObservedMigrationRow {
+  readonly id: string | null;
+  readonly applied_at: string | null;
+  readonly from_hash: string | null;
+  readonly to_hash: string | null;
+  readonly checksum: string | null;
+  readonly steps: string | null;
+}
+export interface ObservedMigrationIdentity {
+  readonly present: boolean;
+  readonly rows: readonly { readonly key: string | null; readonly value: string | null }[];
+}
+export type MigrationHistoryObservation = {
+  readonly version: 1;
+  readonly dialect: 'sqlite';
+  readonly order: 'rowid';
+  readonly history: { readonly present: boolean;
+    readonly rows: readonly (ObservedMigrationRow & { readonly rowid: string | null })[] };
+  readonly identity: ObservedMigrationIdentity;
+} | {
+  readonly version: 1;
+  readonly dialect: 'postgres';
+  readonly order: 'rid';
+  readonly history: { readonly present: boolean;
+    readonly rows: readonly (ObservedMigrationRow & { readonly rid: string | null })[] };
+  readonly identity: ObservedMigrationIdentity;
+};
+export interface MigrationHistoryOptions {
+  signal?: AbortSignal;
+  deadline?: number;
+  runtime?: Partial<Runtime>;
+}
+/** Observe full ordered history and raw side metadata without creating either
+ * table. A borrowed PostgreSQL transaction retains its own read view. */
+export declare function migrationHistory(target: MigrationTarget, options?: MigrationHistoryOptions): Promise<MigrationHistoryObservation>;
+export declare function migrationHistory(target: BorrowedMigrationTarget, options?: MigrationHistoryOptions): MigrationHistoryObservation | Promise<MigrationHistoryObservation>;
+export interface AdoptMigrationHistoryOptions extends MigrationHistoryOptions {
+  observed: MigrationHistoryObservation;
+  /** Explicit attestation of the current model, not recovery from old hashes. */
+  model: unknown;
+  physicalTarget?: PhysicalMigrationTarget;
+  shadowDriver?: Driver;
+  registerFunctions?: (connection: unknown) => unknown;
+  /** Enables logical validation of stored documents; absent means no such claim. */
+  compileSchema?: (schema: unknown) => (doc: unknown) => unknown;
+  expressions?: Record<string, ExpressionFunction>;
+  batchSize?: number;
+}
+export interface AdoptMigrationHistoryResult {
+  /** Number of legacy receipts newly attested. No migration steps execute. */
+  adopted: number;
+  /** Number already covered by this exact complete attestation. */
+  unchanged: number;
+}
+/** Attest exactly the complete nonempty applied 0.1 prefix against an observed
+ * snapshot. Repeating it returns 0/N without rewriting history; stale state
+ * refuses. PostgreSQL writes require effective READ COMMITTED (JD0021). */
+export declare function adoptMigrationHistory(target: MigrationTarget, migrations: readonly unknown[],
+  options: AdoptMigrationHistoryOptions): Promise<AdoptMigrationHistoryResult>;
+export declare function adoptMigrationHistory(target: BorrowedMigrationTarget, migrations: readonly unknown[],
+  options: AdoptMigrationHistoryOptions): AdoptMigrationHistoryResult | Promise<AdoptMigrationHistoryResult>;
 /** Create a model's whole physical shape on a connection. */
 export declare function createModelShape(connection: unknown, model: unknown): unknown;
 /** The declared schema, preserving physical column order unless explicitly relaxed. */
@@ -1881,7 +1970,7 @@ export declare function compareShapeToModel(
 ): Promise<string | null> | string | null;
 export declare function shapeHash(model: unknown): string;
 export declare function migrationChecksum(migration: unknown): string;
-export declare const MIGRATION_VERSION: string;
+export declare const MIGRATION_VERSION: '0.2';
 export declare const HISTORY_TABLE: string;
 
 /** The counters a storeless run reports for one collection. */
@@ -2536,13 +2625,7 @@ export type PlannedInvariant =
 export declare function planInvariants(model: unknown, options: { dialect: Dialect }): PlannedInvariant[];
 /** A reviewed preservation document. The supplied steps retain their types;
  * untyped saved steps remain unknown until the caller validates them. */
-export interface PhysicalMigrationDocument<Steps extends readonly unknown[] = readonly unknown[]> {
-  readonly $migration: '0.1';
-  readonly id: string;
-  readonly from: string;
-  readonly to: string;
-  readonly steps: Steps;
-  readonly physical: {
+export interface MigrationPhysicalHeader {
     readonly source: readonly (SchemaObject | NativeCatalogObject)[];
     readonly dialect?: 'postgres';
     readonly schema?: string;
@@ -2551,8 +2634,12 @@ export interface PhysicalMigrationDocument<Steps extends readonly unknown[] = re
     readonly target?: PhysicalMigrationTarget;
     /** The tables a scoped plan inventories, and their programs. */
     readonly scope?: { readonly tables: readonly string[] };
-  };
 }
+export type LegacyPhysicalMigrationDocument<Steps extends readonly unknown[] = readonly unknown[]> =
+  Omit<LegacyMigrationDocument, 'steps'> & { readonly steps: Steps; readonly physical: MigrationPhysicalHeader };
+/** Current reviewed physical plan; supplied step types remain intact. */
+export type PhysicalMigrationDocument<Steps extends readonly unknown[] = readonly unknown[]> =
+  Omit<ExactMigrationDocument, 'steps'> & { readonly steps: Steps; readonly physical: MigrationPhysicalHeader };
 /** Planning retains a synchronous connection's value boundary. */
 export declare function planPhysicalMigration<const Steps extends readonly unknown[]>(connection: unknown, fromModel: unknown, toModel: unknown,
   options: { id: string; steps: Steps; dispositions: Readonly<Record<string, 'preserve' | 'replace' | 'drop'>>;

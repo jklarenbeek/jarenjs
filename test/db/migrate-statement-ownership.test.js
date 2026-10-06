@@ -2,7 +2,8 @@
 /** Borrowed migration temporaries release after their complete operation. */
 import { it } from 'node:test';
 import assert from 'node:assert/strict';
-import { migrate, migrationStatus, shapeHash, migrationChecksum, createModelShape } from '@jarenjs/db';
+import { migrationIdentity } from './migration-fixture.js';
+import { migrate, migrationStatus, shapeHash, createModelShape } from '@jarenjs/db';
 import { nodeWorkerDriver } from '@jarenjs/db/node-worker';
 import { nodeWorkerPoolDriver } from '@jarenjs/db/node-pool';
 import { nodeProcessDriver } from '@jarenjs/db/node-process';
@@ -11,7 +12,7 @@ import { useStatementOnce } from '../../packages/db/src/driver.js';
 
 const baseline = { $model: '0.1', collections: {} };
 const model = { $model: '0.1', collections: { docs: { schema: { type: 'object' }, key: '/id' } } };
-const link = (id, steps = [], from = baseline) => ({ $migration: '0.1', id, steps,
+const link = (id, steps = [], from = baseline) => ({ $migration: '0.2', identity: migrationIdentity(from), id, steps,
   from: shapeHash(from), to: shapeHash(from) });
 const anchor = link('anchor');
 const hosts = [
@@ -26,11 +27,7 @@ for (const [host, driver] of hosts) for (const applied of [false, true]) for (co
     it(`${host}: 100 ${status ? 'status' : 'no-op migrate'} reads with ${applied ? 'applied' : 'empty'} history in a borrowed ${transaction ? 'transaction' : 'connection'}`, async () => {
       const connection = await driver().open(':memory:');
       try {
-        if (applied) {
-          await connection.exec('CREATE TABLE _jaren_migrations(id TEXT PRIMARY KEY, applied_at INTEGER, from_hash TEXT, to_hash TEXT, checksum TEXT, steps INTEGER) STRICT');
-          await useStatementOnce(connection, 'INSERT INTO _jaren_migrations VALUES(?,?,?,?,?,?)',
-            (statement) => statement.run([anchor.id, 17, anchor.from, anchor.to, migrationChecksum(anchor), 0]));
-        }
+        if (applied) await migrate({ connection }, [anchor], { baseline, shadow: false });
         const documents = applied ? [anchor] : [];
         const work = async (scope) => {
           for (let n = 0; n < 100; n++) {

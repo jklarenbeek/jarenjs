@@ -1,4 +1,7 @@
 import { isStringType } from '@jarenjs/core';
+import { withoutModelRenameHints } from '@jarenjs/core/model';
+const normalizedModel = withoutModelRenameHints({ $model: '0.1', collections: { current: { 'x-rename': 'old', schema: {} } } });
+void normalizedModel;
 import { getStringLength } from '@jarenjs/core/string';
 import { isJsonNumberString } from '@jarenjs/core/number';
 import { createBoundedCache, createSemanticCache } from '@jarenjs/core/cache';

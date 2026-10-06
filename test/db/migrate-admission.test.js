@@ -2,6 +2,7 @@
 /** Migration execution and receipts use the JSON admitted before host work. */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { migrationIdentity } from './migration-fixture.js';
 import { canonicalizeJson } from '@jarenjs/json/canonical';
 import { JarenValidator } from '@jarenjs/validate';
 import { migrate, migrationStatus, migrationChecksum, shapeHash, readSchema, openStore, createModelShape, planInvariants } from '@jarenjs/db';
@@ -15,7 +16,7 @@ const nativeDriver = process.versions.bun ? (await import('@jarenjs/db/bun')).bu
 const emptyModel = () => ({ $model: '0.1', collections: {} });
 const collectionModel = () => ({ $model: '0.1', collections: { docs: { schema: { type: 'object' }, key: '/id' } } });
 const link = (id, steps, model = emptyModel()) => ({
-  $migration: '0.1', id, from: shapeHash(model), to: shapeHash(model), steps,
+  $migration: '0.2', identity: migrationIdentity(model), id, from: shapeHash(model), to: shapeHash(model), steps,
 });
 const sqlStep = (name) => ({ kind: 'sql', sql: `CREATE TABLE ${name}(n INTEGER)` });
 const hostStep = { kind: 'host', run: 'change', version: '1' };
@@ -116,7 +117,7 @@ for (const host of ['sqlite', 'postgres']) describe(`${host}: immutable migratio
         const store = await openStore(baseline, { driver, path });
         await store.collection('docs').put({ id: 'a', name: 'too long' });
         await store.close();
-        const doc = { ...link('narrow', [hostStep], baseline), to: shapeHash(model) };
+        const doc = { ...link('narrow', [hostStep], baseline), identity: migrationIdentity(baseline, model), to: shapeHash(model) };
         await assert.rejects(async () => migrate({ connection }, [doc], { baseline, model,
           shadow: false, compileSchema, hosts: { change: { version: '1', run() {
             model.collections.docs.schema.properties.name.maxLength = 100;
@@ -200,7 +201,7 @@ for (const host of ['sqlite', 'postgres']) describe(`${host}: immutable migratio
         baseline.entities.Entry.invariants = [];
         const steps = planInvariants(ruleModel, { dialect: connection.dialect })
           .map((statement) => ({ kind: 'ddl', sql: statement.sql }));
-        const doc = { ...link('rules', steps, baseline), to: shapeHash(ruleModel) };
+        const doc = { ...link('rules', steps, baseline), identity: migrationIdentity(baseline, ruleModel), to: shapeHash(ruleModel) };
         assert.deepEqual((await migrate({ connection }, [doc], {
           baseline, model: ruleModel, shadow: false,
         })).applied, ['rules']);

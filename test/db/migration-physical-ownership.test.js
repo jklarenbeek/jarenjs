@@ -2,6 +2,7 @@
 /** Borrowed migration reads release their own statements on every outcome. */
 import { it } from 'node:test';
 import assert from 'node:assert/strict';
+import { migrationIdentity } from './migration-fixture.js';
 import { migrate, shapeHash, explainMapping } from '@jarenjs/db';
 import { nodeWorkerDriver } from '@jarenjs/db/node-worker';
 import { nodeWorkerPoolDriver } from '@jarenjs/db/node-pool';
@@ -26,7 +27,7 @@ const MODEL = { $model: '0.1', entities: { Row: {
 const ROWS = [{ id: 'a', value: 1 }, { id: 'b', value: 2 }];
 const SEED = "CREATE TABLE rows(id TEXT PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO rows VALUES('a',1),('b',2)";
 const ASSERTION = { kind: 'query', collection: 'Row', model: MODEL, assert: false, expect: 'ebv' };
-const document = (steps) => ({ $migration: '0.1', id: 'borrowed-physical',
+const document = (steps) => ({ $migration: '0.2', identity: migrationIdentity(MODEL), id: 'borrowed-physical',
   from: shapeHash(MODEL), to: shapeHash(MODEL), steps });
 
 /** @type {[string, (maxStatements: number) => any][]} */

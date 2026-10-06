@@ -79,9 +79,9 @@ async function seeded(n) {
 }
 
 describe('declaration parity', () => {
-  /** The `options.<name>` reads inside one exported function's body. */
+  /** The `options.<name>` reads inside a public entry or its private execution owner. */
   const readsOf = (source, name) => {
-    const start = source.indexOf(`export function ${name}(`);
+    const start = source.indexOf(`function ${name}(`);
     assert.ok(start >= 0, name);
     const rest = source.slice(start);
     const end = rest.search(/\n}\n/);
@@ -96,7 +96,8 @@ describe('declaration parity', () => {
     const types = fs.readFileSync(path.resolve('packages/db/types/index.d.ts'), 'utf8');
     const block = types.slice(types.indexOf('export interface MigrateOptions {'));
     const declared = membersOf(block.slice(0, block.indexOf('\n}\n')));
-    assert.deepStrictEqual(readsOf(source, 'migrate'), declared);
+    const read = [...new Set([...readsOf(source, 'migrate'), ...readsOf(source, 'runMigration')])].sort();
+    assert.deepStrictEqual(read, declared);
   });
 
   it('every option migrationStatus reads is declared, and nothing declared goes unread', () => {

@@ -54,7 +54,7 @@ it('keeps native plan admission asynchronous, checks allocation and refuses alia
   const scope = { dialect, prepare: async (text) => ({
     all: async () => text === dialect.introspect.catalog() ? structuredClone(catalog) : [],
     get: async () => {
-      if (text === dialect.migration.settings) return { strings: 'on', lock_timeout: '1s' };
+      if (text === dialect.migration.settings) return { strings: 'on', lock_timeout: '1s', isolation: 'read committed' };
       if (text === dialect.migration.lock) { locks++; return {}; }
       return { value: '9007199254740993', called: 'true' };
     },

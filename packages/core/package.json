@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/core",
   "private": false,
-  "version": "0.103.0",
+  "version": "0.104.0",
   "type": "module",
   "main": "./src/index.js",
   "types": "./dist/types/index.d.ts",
@@ -107,6 +107,10 @@
     "./message": {
       "types": "./dist/types/message.d.ts",
       "default": "./src/message.js"
+    },
+    "./model": {
+      "types": "./dist/types/model.d.ts",
+      "default": "./src/model.js"
     },
     "./number": {
       "types": "./dist/types/number.d.ts",

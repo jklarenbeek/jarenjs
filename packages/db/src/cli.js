@@ -2,8 +2,9 @@
 //#region the jaren-db command
 // Migrations nobody drives by API stay undrifted by nobody: the CLI is
 // what puts `check` in CI and a reviewable migration document in the
-// repository. Six commands (MIGRATION-FORMAT §11): plan, snapshot,
-// status, apply, check, shape. A model or a migration is a JSON file or
+// repository. Planning, status, explicit history adoption and document
+// transforms share the public runners (MIGRATION-FORMAT §11).
+// A model or a migration is a JSON file or
 // a MODULE — the model pen's document, the migration pen's builder —
 // loaded twice, because a module that emits a different document on its
 // second load is one whose migration can never match its own history.
@@ -15,12 +16,14 @@ import * as readline from 'readline';
 import { loadDocument as loadDocumentFile, isDocumentFile } from '@jarenjs/json/node';
 
 import {
-  planModelMigration, migrate, migrationStatus, shapeHash, compareShapeToModel,
+  planModelMigration, migrate, migrationStatus, migrationHistory, adoptMigrationHistory,
+  shapeHash, compareShapeToModel,
   sqliteDialect, normalizeModel, normalizeEntities, explainMapping,
   planCollection, planEntity, planJoinTable, HISTORY_TABLE, entityEmitModel,
   migrateDocuments, streamDocuments, classifyAssertion,
 } from './index.js';
 import { nodeDriver } from './drivers/node.js';
+import { modelIdentity } from './migration-identity.js';
 import { prepareDocumentRun } from './documents.js';
 import { normalizeAssertionBounds, createAssertionBoundGuard } from './document-steps.js';
 import {
@@ -38,6 +41,9 @@ Usage:
   jaren-db apply    --store <db> --baseline <model> --migrations <dir> [--model <m>] [--dry-run] [--yes]
   jaren-db check    --model <model> --store <db> [--migrations <dir>] [--snapshot <file>]
   jaren-db shape    --model <model>
+  jaren-db history  --store <db> [--out <observation.json>]
+  jaren-db adopt-history --store <db> --migrations <applied-prefix-dir>
+                        --observed <observation.json> --model <model> [--physical-target <json>] [--yes]
   jaren-db documents --migrations <dir> --in <file|-> (--out <file|-> | --in-place --yes | --check)
                      [--format json|jsonl|collections] [--out-format json|jsonl|collections]
                      [--in collection=file ...] [--collection <name>] [--batch-size <n>]
@@ -50,13 +56,12 @@ module is loaded twice and refused when its two emissions differ: no
 clock, no env, no randomness. --migrations reads .json files and
 modules, sorted by file name.
 
-plan      Diff two model FILES into a migration document (a database
-          stores shape hashes, not models — the from-model is the
-          previous model file), or diff the committed SNAPSHOT (default
+plan      Diff two model FILES into an exact 0.2 migration document,
+          or diff the committed SNAPSHOT (default
           model.snapshot.json beside the model) against the model: with
           --out the migration is written and the snapshot advanced; a
           model matching its snapshot plans nothing. With --store, first
-          verify the from-model matches the database's recorded shape.
+          verify the from-model's physical shape against the database.
 snapshot  Write the model's snapshot; with --types, emit's TypeScript
           declaration for it (needs @jarenjs/emit beside @jarenjs/db).
 status    Applied, pending, drift (a hand-modified database) and — with
@@ -67,6 +72,16 @@ apply     Print every statement, then apply. Destructive steps (drop
 check     The CI command: exit 1 on an unplanned model change, pending
           migrations or drift.
 shape     Print the physical mapping a model produces.
+history   Read full history and exact metadata as one JSON observation;
+          create neither table. --out writes that JSON to a file.
+adopt-history
+          Attest the complete reviewed applied 0.1 prefix and current
+          model against --observed; record only exact side metadata.
+          Requires --yes or interactive confirmation. No steps run.
+          Keep original applied artifacts; never regenerate them with
+          an upgraded planner. No --dry-run. Exit: 2 command misuse,
+          1 runtime/authority refusal. Ordinary status/apply refuse
+          unadopted or newly pending 0.1 documents (JD0028).
 documents Run a migration's DOCUMENT steps (jslt, query) over a file of
           documents instead of a database — a JSON array or JSONL, a
           path or stdio. A step that needs tables (ddl, sql, rebuild,
@@ -99,14 +114,28 @@ function parseArgs(argv) {
   const options = {
     command: argv[2], from: null, to: null, model: null, store: null,
     baseline: null, migrations: null, id: null, out: null,
-    snapshot: null, types: null,
+    snapshot: null, types: null, observed: null, physicalTarget: null,
     inputs: [], maxRows: undefined, maxBytes: undefined, maxDistinct: undefined,
     in: null, format: null, outFormat: null, collection: null,
     batchSize: null, inPlace: false, check: false,
     dryRun: false, yes: false, help: false,
   };
+  const historyFlags = options.command === 'history'
+    ? new Set(['--store', '--out', '--help', '-h'])
+    : options.command === 'adopt-history'
+      ? new Set(['--store', '--migrations', '--observed', '--model', '--physical-target', '--yes', '--help', '-h'])
+      : null;
   for (let i = 3; i < argv.length; i++) {
-    switch (argv[i]) {
+    const flag = argv[i];
+    if (historyFlags) {
+      if (!historyFlags.has(flag)) misuse(`${options.command} does not take '${flag}'`);
+      if (!['--yes', '--help', '-h'].includes(flag)
+        && (!argv[i + 1] || argv[i + 1].startsWith('--') || argv[i + 1] === '-h'))
+        misuse(`${flag} needs a value`);
+    }
+    if ((flag === '--observed' || flag === '--physical-target') && options.command !== 'adopt-history')
+      misuse(`${flag} is only used by adopt-history`);
+    switch (flag) {
       case '--from': options.from = argv[++i]; break;
       case '--to': options.to = argv[++i]; break;
       case '--model': options.model = argv[++i]; break;
@@ -117,6 +146,8 @@ function parseArgs(argv) {
       case '--out': options.out = argv[++i]; break;
       case '--snapshot': options.snapshot = argv[++i]; break;
       case '--types': options.types = argv[++i]; break;
+      case '--observed': options.observed = argv[++i]; break;
+      case '--physical-target': options.physicalTarget = argv[++i]; break;
       case '--in': options.in = argv[++i]; options.inputs.push(options.in); break;
       case '--max-rows': options.maxRows = argv[++i]; break;
       case '--max-bytes': options.maxBytes = argv[++i]; break;
@@ -220,7 +251,7 @@ async function commandPlan(options) {
     }
     fromModel = readJson(snapshotFile, 'snapshot');
     toModel = await loadDocument(options.model, 'model', 'model');
-    if (shapeHash(fromModel) === shapeHash(toModel)) {
+    if (modelIdentity(fromModel) === modelIdentity(toModel)) {
       console.log(`no change — the model matches its snapshot (${snapshotFile}); nothing to plan`);
       return;
     }
@@ -292,16 +323,16 @@ async function commandStatus(options, { asCheck }) {
   const snapshotInUse = snapshotFile !== null && (options.snapshot !== null || fs.existsSync(snapshotFile));
   if (snapshotInUse) {
     if (!fs.existsSync(snapshotFile)) fail(`no snapshot at '${snapshotFile}'`);
-    const recorded = shapeHash(readJson(snapshotFile, 'snapshot'));
-    const current = shapeHash(model);
-    if (recorded !== current) {
-      unplanned = `${snapshotFile} records shape ${recorded}, the model is ${current} — run jaren-db plan`;
+    const snapshot = readJson(snapshotFile, 'snapshot');
+    if (modelIdentity(snapshot) !== modelIdentity(model)) {
+      unplanned = `${snapshotFile} and the model have different exact shapes `
+        + `(fingerprints ${shapeHash(snapshot)} / ${shapeHash(model)}) — run jaren-db plan`;
     }
   }
   let status;
   try {
     status = await migrationStatus({ driver: nodeDriver(), path: options.store },
-      migrations, { model });
+      migrations, unplanned === null ? { model } : {});
   }
   catch (error) {
     return fail(error.message);
@@ -309,7 +340,8 @@ async function commandStatus(options, { asCheck }) {
   console.log(`applied:  ${status.applied.length === 0 ? '(none)' : status.applied.join(', ')}`);
   console.log(`pending:  ${status.pending.length === 0 ? '(none)' : status.pending.join(', ')}`);
   if (model !== undefined && status.pending.length === 0) {
-    console.log(`drift:    ${status.drift === null ? 'none — in sync' : status.drift}`);
+    console.log(`drift:    ${unplanned !== null ? 'not checked — the model differs from its snapshot'
+      : status.drift === null ? 'none — in sync' : status.drift}`);
   }
   if (snapshotInUse) {
     console.log(`model:    ${unplanned === null ? 'planned — matches its snapshot' : `UNPLANNED change — ${unplanned}`}`);
@@ -332,6 +364,31 @@ const confirm = (question) => new Promise((resolve) => {
     resolve(/^y(es)?$/i.test(answer.trim()));
   });
 });
+
+async function commandHistory(options) {
+  if (options.store === null) misuse('history needs --store');
+  const observed = await migrationHistory({ driver: nodeDriver(), path: options.store });
+  const json = `${JSON.stringify(observed, null, 2)}\n`;
+  if (options.out === null) process.stdout.write(json);
+  else writeIfChanged(options.out, json);
+}
+
+async function commandAdoptHistory(options) {
+  if ([options.store, options.migrations, options.observed, options.model].some((value) => value === null))
+    misuse('adopt-history needs --store, --migrations, --observed and --model');
+  const observed = readJson(options.observed, 'history observation');
+  const model = await loadDocument(options.model, 'current model', 'model');
+  const migrations = await loadMigrationsDir(options.migrations);
+  const physicalTarget = options.physicalTarget === null ? undefined : readJson(options.physicalTarget, 'physical target');
+  if (!options.yes) {
+    if (!process.stdin.isTTY) fail('adopt-history needs --yes (no interactive terminal to ask) — nothing was adopted');
+    const answer = await confirm(`Attest ${migrations.length} reviewed legacy migration(s) without executing steps? [y/N] `);
+    if (!answer) fail('aborted — nothing was adopted');
+  }
+  const outcome = await adoptMigrationHistory({ driver: nodeDriver(), path: options.store }, migrations,
+    { observed, model, ...(physicalTarget === undefined ? {} : { physicalTarget }) });
+  console.log(JSON.stringify(outcome));
+}
 
 async function commandApply(options) {
   if (options.store === null || options.baseline === null || options.migrations === null)
@@ -569,6 +626,8 @@ async function main() {
     case 'status': return commandStatus(options, { asCheck: false });
     case 'check': return commandStatus(options, { asCheck: true });
     case 'apply': return commandApply(options);
+    case 'history': return commandHistory(options);
+    case 'adopt-history': return commandAdoptHistory(options);
     case 'shape': return commandShape(options);
     case 'documents': return commandDocuments(options);
     default: return fail(`unknown command '${options.command}' — try --help`);

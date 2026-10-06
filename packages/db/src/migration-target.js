@@ -187,17 +187,30 @@ export function comparePhysicalTarget(connection, target) {
   });
 }
 
-/** Acquire a transaction-scoped backend lock before accepting old receipts.
- * Native lock_timeout is finite and owned/restored by the driver.
+/** Read the effective transaction view before a migration/adoption can write.
+ * A stronger snapshot cannot observe a competing commit after waiting for the
+ * writer lock. The caller's isolation is never changed implicitly.
  * @param {any} connection @returns {any} */
-export function lockMigration(connection) {
+export function migrationWriterSettings(connection, check = undefined) {
   const strategy = connection.dialect.migration;
-  if (!strategy) return null;
-  return chain(useStatementOnce(connection, strategy.settings, (s) => s.get([])), (settings) => {
-    if (settings?.strings !== 'on' || !settings.lock_timeout || settings.lock_timeout === '0')
+  if (!strategy) { check?.(); return null; }
+  return useStatementOnce(connection, strategy.settings, (statement) => chain(statement.get([]), (settings) => {
+    check?.();
+    if (settings?.isolation !== 'read committed')
+      throw new DbCompileError('JD0021', 'migration and adoption writers require effective PostgreSQL READ COMMITTED; provide a dedicated read-committed connection or transaction scope');
+    if (settings.strings !== 'on' || !settings.lock_timeout || settings.lock_timeout === '0')
       throw new DbCompileError('JD0021', 'native migrations require standard_conforming_strings and a finite nonzero lock_timeout');
-    return useStatementOnce(connection, strategy.lock, (lock) => lock.get([]));
-  });
+    return settings;
+  }));
+}
+
+/** Acquire the transaction-scoped backend lock only with a fresh-read view.
+ * @param {any} connection @returns {any} */
+export function lockMigration(connection, check = undefined) {
+  const strategy = connection.dialect.migration;
+  if (!strategy) { check?.(); return null; }
+  return chain(migrationWriterSettings(connection, check), () =>
+    useStatementOnce(connection, strategy.lock, (lock) => chain(lock.get([]), (value) => { check?.(); return value; })));
 }
 
 /** Preservation compares exact source programs, including whitespace in SQL literals.

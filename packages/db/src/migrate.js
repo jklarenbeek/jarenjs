@@ -3,14 +3,15 @@
  * @file Document migrations: two model documents diff into a
  * migration document whose steps are rendered DDL, JSLT data
  * transforms and query assertions; the migration replays on a shadow
- * database first; a history table records applied steps and their
- * canonical-document fingerprints.
+ * database first. Unchanged history columns keep their original fingerprints;
+ * versioned side receipts bind complete canonical documents and stored rows.
+ * New 0.2 documents carry exact canonical model endpoints. Applied legacy
+ * histories need explicit reviewed attestation before they grant authority.
  *
- * `from`/`to` derive from `hashContent(canonicalizeJson(model))`, without
- * a manually advanced version. These persisted 32-bit FNV-1a hashes can
- * collide; they are not signatures or exact content identities. JSON
- * canonicalization refuses unserializable documents. Changing the hash
- * format requires an explicit upgrade of existing migration histories.
+ * The persisted 32-bit FNV-1a `from`/`to` and checksum fields can collide;
+ * they remain compatibility fingerprints, never proof of exact content.
+ * Canonical endpoint identity omits model rename hints. Execution snapshots
+ * retain declaration order, including an adopted shadow boundary's model.
  *
  * Like the query emitter, this module is part of the emitter layer:
  * the structural SQL it composes (the history table's statements, the
@@ -24,6 +25,7 @@ import { hashContent } from '@jarenjs/core/string';
 import { resolveRuntime } from '@jarenjs/core/runtime';
 import { refuseCancelled } from './cancellation.js';
 import { cloneJson, setObjectMember } from '@jarenjs/core/object';
+import { withoutModelRenameHints } from '@jarenjs/core/model';
 import { compileJsonQuery } from '@jarenjs/json/query';
 import { compileJsltStylesheet } from '@jarenjs/json/jslt';
 
@@ -38,6 +40,9 @@ import { normalizeModel } from './store.js';
 import { planQuery } from './plan.js';
 import { createQueryEngine, createQueryState } from './query.js';
 import { HISTORY_TABLE, ENGINE_TABLES } from './engine-metadata.js';
+import { modelIdentity, migrationIdentity } from './migration-identity.js';
+import { migrationChecksum, historyStatements, readMigrationHistory, checkHistoryObservation, checkAppliedRows,
+  historyHeader, identityRows, checkHistoryIdentity, checkHistoryChain, writeIdentityRows } from './migration-history.js';
 export { HISTORY_TABLE, ENGINE_TABLES };
 import { planCollection, verifyShape, planEntity, planJoinTable } from './ddl.js';
 import { normalizeEntities, explainMapping } from './model.js';
@@ -48,7 +53,7 @@ import { sqlTokens } from './dialects/check-read.js';
 import { comparableDeclaredSql } from './schema-sql.js';
 import { applyTableMigration } from './table-migration.js';
 import { withForeignKeySettings } from './foreign-key-scope.js';
-import { withMigrationConnection, physicalTargetOf, comparePhysicalTarget, verifyShadowOwnership, physicalObjectKey, migrationOwnerOf, lockMigration, preservationSchemaOf, verifyPreservation, checkPhysicalPreservation } from './migration-target.js';
+import { withMigrationConnection, physicalTargetOf, comparePhysicalTarget, verifyShadowOwnership, physicalObjectKey, migrationOwnerOf, lockMigration, migrationWriterSettings, preservationSchemaOf, verifyPreservation, checkPhysicalPreservation } from './migration-target.js';
 import { readSchema } from './introspect.js';
 import { verifyPhysical } from './physical.js';
 import { walkPhysicalRows, transformPhysicalRows } from './physical-transform.js';
@@ -142,51 +147,10 @@ function mappingFor(connection, expressions = undefined) {
  * @returns {string}
  */
 export function shapeHash(model) {
-  return hashContent(canonicalizeJson(withoutRenameHints(model)));
+  return hashContent(canonicalizeJson(withoutModelRenameHints(model)));
 }
 
-/**
- * The model without its `x-rename` hints. A hint is a PLANNING
- * instruction, not shape: two models that differ only by the hint
- * describe the same database, and hashing the hint made an empty
- * migration necessary just to move the recorded shape once the hint
- * was removed.
- * @param {any} model
- * @returns {any}
- */
-function withoutRenameHints(model) {
-  if (model === null || typeof model !== 'object') return model;
-  const out = {};
-  for (const key of Object.keys(model)) setObjectMember(out, key, model[key]);
-  for (const member of ['collections', 'entities']) {
-    const declared = model[member];
-    if (declared === null || typeof declared !== 'object' || Array.isArray(declared)) continue;
-    const stripped = {};
-    for (const name of Object.keys(declared)) {
-      const spec = declared[name];
-      if (spec !== null && typeof spec === 'object' && !Array.isArray(spec)
-        && Object.hasOwn(spec, 'x-rename')) {
-        const copy = { ...spec };
-        delete copy['x-rename'];
-        setObjectMember(stripped, name, copy);
-      }
-      else {
-        setObjectMember(stripped, name, spec);
-      }
-    }
-    out[member] = stripped;
-  }
-  return out;
-}
-
-/**
- * The persisted 32-bit checksum of a canonical migration; collisions are possible.
- * @param {any} migration
- * @returns {string}
- */
-export function migrationChecksum(migration) {
-  return hashContent(canonicalizeJson(migration));
-}
+export { migrationChecksum };
 
 /**
  * Admit JSON before callbacks or connection acquisition can change the caller's
@@ -198,7 +162,7 @@ export function migrationChecksum(migration) {
 function snapshotMigrationInputs(migrations, options) {
   const snapshot = (value) => { canonicalizeJson(value); return cloneJson(value); };
   const copy = { ...options };
-  for (const name of ['baseline', 'model', 'physicalTarget']) {
+  for (const name of ['baseline', 'model', 'physicalTarget', 'observed']) {
     if (copy[name] !== undefined) copy[name] = snapshot(copy[name]);
   }
   return [snapshot(migrations), copy];
@@ -642,6 +606,8 @@ export function planMigration(fromModel, toModel, options = undefined) {
   const dialect = options?.dialect ?? null;
   if (dialect === null || typeof dialect !== 'object')
     throw new TypeError('planMigration needs { dialect } (the store dialect renders the DDL)');
+  const identity = migrationIdentity(fromModel, toModel);
+  const from = hashContent(identity.from), to = hashContent(identity.to);
   if ([fromModel, toModel].some((m) => Object.values(m.entities ?? {}).some((e) => e.physical !== undefined))) {
     normalizeEntities(fromModel);
     normalizeEntities(toModel);
@@ -651,8 +617,8 @@ export function planMigration(fromModel, toModel, options = undefined) {
     // draft asks for — refused as it is for any such pair, never dropped
     transformOf(options?.transform)?.finish();
     return { migration: { $migration: MIGRATION_VERSION,
-      id: options?.id ?? `to-${shapeHash(toModel).slice(0, 8)}`,
-      from: shapeHash(fromModel), to: shapeHash(toModel), steps: [] },
+      id: options?.id ?? `to-${to.slice(0, 8)}`,
+      from, to, identity, steps: [] },
     report: { renamed: [], added: [], removed: [], schemaChanged: [], drafts: [], widened: [], transformed: [], destructive: false } };
   }
   const mapping = { derived: options?.derived ?? 'virtual', rtree: options?.rtree !== false,
@@ -908,9 +874,8 @@ export function planMigration(fromModel, toModel, options = undefined) {
 
   const migration = {
     $migration: MIGRATION_VERSION,
-    id: options?.id ?? `to-${shapeHash(toModel).slice(0, 8)}`,
-    from: shapeHash(fromModel),
-    to: shapeHash(toModel),
+    id: options?.id ?? `to-${to.slice(0, 8)}`,
+    from, to, identity,
     steps,
   };
   return { migration, report };
@@ -1948,7 +1913,8 @@ function validateTargetState(connection, model, options) {
     const validate = options.compileSchema !== undefined
       ? options.compileSchema(collection.schema)
       : null;
-    return chain(verifyShape(connection, plan, collection.name, collection.docPath), () =>
+    return chain(verifyShape({ ...connection, prepare: (sql, metadata) => temporaryStatement(connection, sql, metadata) },
+      plan, collection.name, collection.docPath), () =>
       chain(walkRows(connection, collection.name, options.batchSize, (rows) => {
         for (const row of rows) {
           const doc = JSON.parse(row.doc);
@@ -1980,6 +1946,127 @@ function validateTargetState(connection, model, options) {
   return chain(verifyNext(0), () => verifyEntity(0));
 }
 
+/** One target-model acceptance owner for apply, adoption and the replay boundary. */
+function acceptMigrationModel(connection, model, options, driver, physical, target) {
+  if (model === undefined) return null;
+  return chain(validateTargetState(connection, model, options), () => {
+    const entities = normalizeEntities(model);
+    if (entities.size === 0 || physical || target !== undefined || [...entities.values()].some((entity) => entity.physical)) return null;
+    if (typeof driver?.open !== 'function') throw refuse('JD0021', 'borrowed model comparison requires shadowDriver or a complete physicalTarget');
+    return chain(compareShapeToModel(driver, connection, model, options.registerFunctions, options.expressions), (difference) => {
+      if (difference !== null) throw refuse('JD0023', `the migrated shape does not equal the target model's: ${difference}`);
+    });
+  });
+}
+
+/** Read every normal receipt field and raw side payload without changing either.
+ * Numeric fields are database-produced decimal text, including rowid/rid.
+ * @param {{driver?: any, path?: string, connection?: any}} target
+ * @param {{signal?: AbortSignal, deadline?: number, runtime?: any}} [options]
+ * @returns {any} Synchronous for borrowed synchronous connections; promised when owned. */
+export function migrationHistory(target, options = {}) {
+  let check;
+  try {
+    readOptions(options, ['runtime', 'signal', 'deadline'], 'migrationHistory()');
+    readControls({ signal: options?.signal }, 'migrationHistory()');
+    const runtime = resolveRuntime(options.runtime);
+    check = () => refuseCancelled({ signal: options.signal, deadline: options.deadline }, runtime.now,
+      { abortCode: 'JD2080', aborted: 'it ran', passed: 'the history read ran', ran: 'no receipt changed' });
+    check();
+  }
+  catch (error) { if (target?.connection !== undefined) throw error; return Promise.reject(error); }
+  return attempt(() => withMigrationConnection(target, (connection) => {
+    if (connection.mustQueue) throw refuse('JD0021', 'history needs an exclusively available connection or its owning transaction scope');
+    return chain(readMigrationHistory(connection), (observed) => { check(); return observed; });
+  }), (error) => runFailure(error, 'the migration history could not be read'));
+}
+
+/** Attest exactly the complete applied legacy prefix and its current model.
+ * Only side metadata is written; original history values and artifacts remain
+ * unchanged. An identical attestation, including its original observation, is a no-op.
+ * @param {{driver?: any, path?: string, connection?: any}} target
+ * @param {any[]} migrations
+ * @param {{observed: any, model: any, physicalTarget?: any, shadowDriver?: any,
+ * registerFunctions?: Function, compileSchema?: Function, expressions?: any,
+ * batchSize?: number, runtime?: any, signal?: AbortSignal, deadline?: number}} options
+ * @returns {any} `{adopted, unchanged}` receipt counts, value-or-promise. */
+export function adoptMigrationHistory(target, migrations, options) {
+  readOptions(options, ['observed', 'model', 'physicalTarget', 'shadowDriver', 'registerFunctions',
+    'compileSchema', 'expressions', 'batchSize', 'runtime', 'signal', 'deadline'], 'adoptMigrationHistory()');
+  readControls({ signal: options?.signal }, 'adoptMigrationHistory()');
+  if (!Array.isArray(migrations) || migrations.length === 0)
+    throw new TypeError('adoptMigrationHistory needs the complete nonempty applied legacy migration list');
+  if (options?.model === undefined || options?.observed === undefined)
+    throw new TypeError('adoptMigrationHistory needs { observed, model }: a reviewed history observation and its current model');
+  const batchSize = options.batchSize ?? 500;
+  if (!Number.isSafeInteger(batchSize) || batchSize < 1) throw new TypeError('batchSize must be a positive safe integer');
+  let check, header, expected, selectedTarget;
+  try {
+    [migrations, options] = snapshotMigrationInputs(migrations, options);
+    checkHistoryObservation(options.observed);
+    if (migrations.length !== options.observed.history.rows.length || migrations.some((migration) => migration?.$migration !== '0.1'))
+      throw refuse('JD0022', 'adoption requires exactly the complete applied legacy 0.1 prefix, with no pending tail');
+    checkAppliedRows(options.observed, migrations);
+    normalizeModel(options.model, options.expressions);
+    normalizeEntities(options.model);
+    selectedTarget = options.physicalTarget ?? migrations.at(-1)?.physical?.target;
+    if (selectedTarget !== undefined) physicalTargetOf(selectedTarget);
+    if (migrations.some((migration) => migration.physical) && selectedTarget === undefined)
+      throw refuse('JD0021', 'adopting physical migration history requires its complete current physicalTarget');
+    header = historyHeader(migrations.length, modelIdentity(options.model),
+      selectedTarget === undefined ? null : canonicalizeJson(selectedTarget), JSON.stringify(options.model));
+    if (migrations.at(-1).to !== hashContent(header.legacyModel))
+      throw refuse('JD0020', 'the attested model does not match the legacy history boundary');
+    checkHistoryChain(migrations, migrations.length, header, { model: options.model });
+    expected = identityRows(migrations, options.observed.history.rows, header);
+    const runtime = resolveRuntime(options.runtime);
+    check = () => refuseCancelled({ signal: options.signal, deadline: options.deadline }, runtime.now,
+      { abortCode: 'JD2080', aborted: 'its next receipt', passed: 'its next receipt', ran: 'no partial adoption committed' });
+    check();
+  }
+  catch (error) { if (target?.connection !== undefined) throw error; return Promise.reject(error); }
+  return attempt(() => withMigrationConnection(target, (connection) => {
+    if (connection.mustQueue) throw refuse('JD0021', 'adoption needs an exclusively available connection or its owning transaction scope');
+    return chain(migrationWriterSettings(connection, check), () => chain(registerDeriveFunctions(connection), () =>
+      chain(options.registerFunctions?.(connection), () => connection.transaction((scope) => {
+        check();
+        return chain(lockMigration(scope, check), () => chain(readMigrationHistory(scope, true), (current) => {
+          check();
+          if (current.dialect !== options.observed.dialect || current.order !== options.observed.order
+            || canonicalizeJson(current.history) !== canonicalizeJson(options.observed.history))
+            throw refuse('JD0022', 'migration history changed since the supplied observation; observe and review it again');
+          checkAppliedRows(current, migrations);
+          if (current.identity.present) {
+            checkHistoryIdentity(current, migrations);
+            if (canonicalizeJson(current.identity.rows) !== canonicalizeJson(expected)
+              || options.observed.identity.present && canonicalizeJson(options.observed.identity) !== canonicalizeJson(current.identity))
+              throw refuse('JD0022', 'migration identity differs from this exact legacy attestation');
+          }
+          else if (options.observed.identity.present)
+            throw refuse('JD0022', 'migration identity changed since the supplied observation');
+          const accepted = chain(acceptMigrationModel(scope, options.model, { ...options, batchSize },
+            options.shadowDriver ?? target.driver, migrations.at(-1).physical, selectedTarget), () => selectedTarget === undefined ? null
+            : chain(comparePhysicalTarget(scope, selectedTarget), (difference) => {
+              if (difference !== null) throw refuse('JD0023', `the adopted physical target differs: ${difference}`);
+            }));
+          return chain(accepted, () => {
+            check();
+            if (current.identity.present) return { adopted: 0, unchanged: migrations.length };
+            return chain(scope.exec(historyStatements(scope.dialect).createIdentity), () =>
+              chain(writeIdentityRows(scope, expected, check), () => chain(readMigrationHistory(scope, true), (recorded) => {
+                check();
+                checkHistoryIdentity(recorded, migrations);
+                if (canonicalizeJson(recorded.history) !== canonicalizeJson(current.history)
+                  || canonicalizeJson(recorded.identity.rows) !== canonicalizeJson(expected))
+                  throw refuse('JD0022', 'adoption did not preserve its complete observed history and exact receipt set');
+                return { adopted: migrations.length, unchanged: 0 };
+              })));
+          });
+        }));
+      }, options.signal, 'immediate'))));
+  }), (error) => runFailure(error, 'migration history could not be adopted'));
+}
+
 /**
  * Replay through the same history and transaction owner on a disposable
  * connection. The default initializer creates an empty model shape; an explicit
@@ -1994,7 +2081,7 @@ function validateTargetState(connection, model, options) {
  * @param {any} options
  * @returns {any} value-or-promise
  */
-function replayOnShadow(primary, driver, shadowPath, baseline, migrations, model, options) {
+function replayOnShadow(primary, driver, shadowPath, baseline, migrations, model, options, replay) {
   const independent = { ...driver, open: (...args) => chain(driver.open(...args), (shadow) => {
     // An injected opener returning the borrowed primary never transfers its
     // ownership: reject before the cleanup bracket could close that handle.
@@ -2003,9 +2090,9 @@ function replayOnShadow(primary, driver, shadowPath, baseline, migrations, model
     return shadow;
   }) };
   return withMigrationConnection({ driver: independent, path: shadowPath }, (shadow) =>
-    chain(verifyShadowOwnership(primary, shadow, driver, migrations.some((migration) => migration.physical?.dialect === 'postgres')), () => chain(registerDeriveFunctions(shadow), () => chain(options.registerFunctions?.(shadow), () =>
+    chain(verifyShadowOwnership(primary, shadow, driver, migrations.some((migration) => migration.physical?.dialect === 'postgres')), () => chain(emptyShadowHistory(shadow), () => chain(registerDeriveFunctions(shadow), () => chain(options.registerFunctions?.(shadow), () =>
       chain(options.shadowFixture === undefined ? createModelShape(shadow, baseline, options.expressions)
-        : options.shadowFixture(shadow), () => migrate({ connection: shadow }, migrations, {
+        : options.shadowFixture(shadow), () => chain(emptyShadowHistory(shadow), () => runMigration({ connection: shadow }, migrations, {
         batchSize: options.batchSize, assertionBounds: options.assertionBounds,
         onProgress: options.onProgress, onAssertionPlan: options.onAssertionPlan,
         expressions: options.expressions, compileSchema: options.compileSchema,
@@ -2015,7 +2102,15 @@ function replayOnShadow(primary, driver, shadowPath, baseline, migrations, model
         shadowFixture: undefined, hosts: shadowHosts(options.hosts),
         registerFunctions: options.registerFunctions === undefined ? undefined
           : (reference) => reference === shadow ? null : options.registerFunctions(reference),
-      }))))));
+      }, replay))))))));
+}
+
+/** A fixture can seed application data, never receipts that skip replay. */
+function emptyShadowHistory(connection) {
+  return chain(readMigrationHistory(connection, true), (observed) => {
+    if (observed.history.rows.length || observed.identity.present)
+      throw refuse('JD0022', 'shadow replay requires empty migration history and no identity metadata before and after its fixture');
+  });
 }
 
 /** The hosts a shadow replay runs: the same code, told it is the shadow.
@@ -2024,41 +2119,6 @@ function shadowHosts(hosts) {
   if (hosts === undefined) return undefined;
   return Object.fromEntries(Object.entries(hosts).map(([name, host]) => [name, {
     version: host.version, run: (/** @type {any} */ scope, /** @type {any} */ ctx) => host.run(scope, { ...ctx, shadow: true }) }]));
-}
-
-/** History-table statement builders (dialect-spelled). */
-function historyStatements(dialect) {
-  const q = dialect.quoteIdentifier;
-  const text = dialect.typeFor('string', 'key');
-  const integer = dialect.typeFor('integer', 'key');
-  return {
-    create: dialect.ddl.createPlainTable({
-      table: HISTORY_TABLE,
-      columns: [
-        { name: 'id', type: text, primaryKey: true },
-        { name: 'applied_at', type: integer },
-        { name: 'from_hash', type: text },
-        { name: 'to_hash', type: text },
-        { name: 'checksum', type: text },
-        { name: 'steps', type: integer },
-      ],
-    }),
-    select: `SELECT ${['id', 'from_hash', 'to_hash', 'checksum', 'steps'].map(q).join(', ')} `
-      + `FROM ${q(HISTORY_TABLE)} ORDER BY ${dialect.rowIdentity()}`,
-    insert: `INSERT INTO ${q(HISTORY_TABLE)} `
-      + `(${['id', 'applied_at', 'from_hash', 'to_hash', 'checksum', 'steps'].map(q).join(', ')}) `
-      + `VALUES (${[1, 2, 3, 4, 5, 6].map((i) => dialect.parameterRef(i, 'v')).join(', ')})`,
-  };
-}
-
-/** All persisted document fields agree; native PG integer text is compared,
- * never rewritten or loosely coerced from a missing/invalid count. */
-function receiptMatches(row, migration) {
-  return Array.isArray(migration?.steps) && row.id === migration.id
-    && row.from_hash === migration.from && row.to_hash === migration.to
-    && (row.steps === migration.steps.length || typeof row.steps === 'string'
-      && /^(0|[1-9]\d*)$/.test(row.steps) && Number(row.steps) === migration.steps.length)
-    && row.checksum === migrationChecksum(migration);
 }
 
 /**
@@ -2093,16 +2153,10 @@ export function migrationStatus(target, migrations, options = {}) {
   // database — is classified as a run's is (JD0023), never the binding's own
   return attempt(() => withMigrationConnection(target, (connection) => {
     if (connection.mustQueue) throw refuse('JD0021', 'status needs an exclusively available connection or its owning transaction scope');
-    const dialect = connection.dialect, statements = historyStatements(dialect);
-    return chain(registerDeriveFunctions(connection), () =>
-      chain(useStatementOnce(connection, dialect.introspect.tableExists(), (probe) => probe.get([HISTORY_TABLE])),
-      (present) => chain(present === undefined ? []
-        : useStatementOnce(connection, statements.select, (select) => select.all([])), (rows) => {
-        for (let i = 0; i < rows.length; i++) {
-          const doc = migrations[i];
-          if (!receiptMatches(rows[i], doc))
-            throw refuse('JD0022', `history position ${i} records '${rows[i].id}' but the migration list has '${doc?.id ?? '<nothing>'}' (or an edited document)`);
-        }
+    return chain(registerDeriveFunctions(connection), () => chain(readMigrationHistory(connection, true), (observed) => {
+        const rows = observed.history.rows;
+        const header = checkHistoryIdentity(observed, migrations);
+        checkHistoryChain(migrations, rows.length, header, options, undefined, true);
         const applied = rows.map((row) => String(row.id));
         const pending = migrations.slice(rows.length).map((migration) => String(migration.id));
         // a receipt that anchors an adopted history: the first applied
@@ -2111,7 +2165,8 @@ export function migrationStatus(target, migrations, options = {}) {
         const baseline = rows.length > 0 && first?.from === first?.to && Array.isArray(first?.steps) && first.steps.length === 0
           ? String(first.id) : null;
         if (pending.length > 0) return { applied, pending, drift: null, upToDate: false, baseline };
-        const physicalTarget = options.physicalTarget ?? migrations.at(-1)?.physical?.target;
+        const physicalTarget = options.physicalTarget ?? migrations.at(-1)?.physical?.target
+          ?? (migrations.length === header.legacyCount && header.legacyTarget !== null ? JSON.parse(header.legacyTarget) : undefined);
         if (physicalTarget === undefined && options.model === undefined)
           return { applied, pending, drift: null, upToDate: true, baseline };
         const driver = options.shadowDriver ?? target.driver;
@@ -2120,7 +2175,7 @@ export function migrationStatus(target, migrations, options = {}) {
         return chain(physicalTarget !== undefined ? comparePhysicalTarget(connection, physicalTarget)
           : compareShapeToModel(driver, connection, options.model, options.registerFunctions),
         (difference) => ({ applied, pending, drift: difference, upToDate: difference === null, baseline }));
-      })));
+      }));
   }), (error) => runFailure(error, 'the migration status could not be read'));
 }
 
@@ -2158,6 +2213,11 @@ export function migrationStatus(target, migrations, options = {}) {
  *   with shadow:false and synchronous hooks settle in their caller's transaction.
  */
 export function migrate(target, migrations, options) {
+  return runMigration(target, migrations, options);
+}
+
+/** The replay authority is created only after primary exact receipt verification. */
+function runMigration(target, migrations, options, replay = undefined) {
   readOptions(options, ['baseline', 'model', 'compileSchema', 'dryRun', 'batchSize', 'onProgress',
     'shadow', 'shadowPath', 'shadowDriver', 'shadowFixture', 'physicalTarget', 'registerFunctions',
     'expressions', 'assertionBounds', 'onAssertionPlan', 'signal', 'deadline', 'runtime', 'hosts', 'atomic'], 'migrate()');
@@ -2197,37 +2257,28 @@ export function migrate(target, migrations, options) {
   // JD0023 with its class, never the binding's own error
   return attempt(() => withMigrationConnection(target, (connection) => {
     if (connection.mustQueue) throw refuse('JD0021', 'migration needs an exclusively available connection or its owning transaction scope');
-    return chain(registerDeriveFunctions(connection), () => chain(options.registerFunctions?.(connection), () => {
+    return chain(migrationWriterSettings(connection, check), () => chain(registerDeriveFunctions(connection), () => chain(options.registerFunctions?.(connection), () => {
+      check();
       const dialect = connection.dialect, statements = historyStatements(dialect);
       let historyExists = false;
-      const readHistory = () => chain(useStatementOnce(connection, dialect.introspect.tableExists(),
-        (probe) => probe.get([HISTORY_TABLE])), (row) => {
-          historyExists = row !== undefined;
-          return historyExists ? useStatementOnce(connection, statements.select, (select) => select.all([])) : [];
-        });
-      return chain(readHistory(), (appliedRows) => {
-        const verifyHistory = (count) => chain(readHistory(), (rows) => {
-          if (rows.length !== count || rows.some((row, at) => !receiptMatches(row, migrations[at])))
+      return chain(readMigrationHistory(connection, true), (observed) => {
+        const appliedRows = observed.history.rows;
+        const header = checkHistoryIdentity(observed, migrations, replay);
+        const endpoint = checkHistoryChain(migrations, appliedRows.length, header, options, replay);
+        const expectedFrom = endpoint.shape;
+        let expectedRows = appliedRows, expectedSide = observed.identity;
+        historyExists = observed.history.present;
+        const verifyHistory = (scope, count) => chain(readMigrationHistory(scope, true), (current) => {
+          if (current.history.rows.length !== count
+            || canonicalizeJson(current.history.rows) !== canonicalizeJson(expectedRows)
+            || canonicalizeJson(current.identity) !== canonicalizeJson(expectedSide))
             throw refuse('JD0022', 'migration history changed while acquiring its writer; no step ran');
+          checkHistoryIdentity(current, migrations, replay);
         });
-        for (let i = 0; i < appliedRows.length; i++) {
-          const row = appliedRows[i], doc = migrations[i];
-          if (doc === undefined || doc.id !== row.id) throw refuse('JD0022',
-            `history position ${i} records '${row.id}' but the migration list has '${doc?.id ?? '<nothing>'}' — the list must contain every applied migration, in order`);
-          if (!receiptMatches(row, doc)) throw refuse('JD0022',
-            `migration '${row.id}' differs from the document recorded in the history — an applied migration must never be edited`);
-        }
         const pending = migrations.slice(appliedRows.length);
-        let expectedFrom = appliedRows.length ? appliedRows.at(-1).to_hash : shapeHash(options.baseline);
-        for (const migration of pending) {
-          checkMigrationDocument(migration); checkPreservationPlan(migration, dialect);
-          if (migration.from !== expectedFrom) throw refuse('JD0020',
-            `migration '${migration.id}' expects shape '${migration.from}' but the database is at '${expectedFrom}' — refusing to run against the wrong shape`);
-          expectedFrom = migration.to;
-        }
-        if (options.model !== undefined && expectedFrom !== shapeHash(options.model)) throw refuse('JD0020',
-          "the last migration's to-hash is not the target model's shape — the migration chain and the code disagree about where this ends");
-        const finalTarget = options.physicalTarget ?? migrations.at(-1)?.physical?.target;
+        for (const migration of pending) checkPreservationPlan(migration, dialect);
+        const finalTarget = options.physicalTarget ?? migrations.at(-1)?.physical?.target
+          ?? (migrations.length === header.legacyCount && header.legacyTarget !== null ? JSON.parse(header.legacyTarget) : undefined);
         const acceptTarget = (scope, targetShape) => targetShape === undefined ? null
           : chain(comparePhysicalTarget(scope, targetShape), (difference) => {
             if (difference !== null) throw refuse('JD0023', `the migrated physical target differs: ${difference}`);
@@ -2235,7 +2286,7 @@ export function migrate(target, migrations, options) {
         if (pending.length === 0) {
           const result = { applied: [], skipped: appliedRows.map((row) => row.id), upToDate: true };
           return finalTarget === undefined ? result : connection.transaction((scope) =>
-            chain(lockMigration(scope), () => chain(verifyHistory(appliedRows.length), () => chain(acceptTarget(scope, finalTarget), () => result))), options.signal, 'immediate');
+            chain(lockMigration(scope, check), () => chain(verifyHistory(scope, appliedRows.length), () => chain(acceptTarget(scope, finalTarget), () => result))), options.signal, 'immediate');
         }
         // every host step the run will execute has its host at the version
         // its document names: the pending ones here, and — since the shadow
@@ -2263,7 +2314,8 @@ export function migrate(target, migrations, options) {
             && target.path !== undefined && options.shadowPath === target.path))
           throw refuse('JD0021', 'shadow replay needs an independent driver and disposable path');
         const shadowRun = options.shadow === false ? null : replayOnShadow(connection, referenceDriver,
-          options.shadowPath ?? ':memory:', options.baseline, migrations, options.model, runOptions);
+          options.shadowPath ?? ':memory:', options.baseline, migrations, options.model, runOptions,
+          header.legacyCount === 0 ? undefined : { header, documents: migrations.slice(0, header.legacyCount).map(canonicalizeJson) });
         return chain(shadowRun, () => {
           if (options.dryRun === true) {
             const rendered = [], counts = {};
@@ -2319,15 +2371,28 @@ export function migrate(target, migrations, options) {
           const applied = [];
           // the checks the chain's end makes: the model's real-data
           // validation and its shape, against the last link
-          const finalChecks = (scope, migration) => options.model === undefined ? null
-            : chain(validateTargetState(scope, options.model, { compileSchema: options.compileSchema, batchSize }), () => {
-              if (normalizeEntities(options.model).size === 0 || migration.physical || finalTarget !== undefined
-                || [...normalizeEntities(options.model).values()].some((e) => e.physical)) return null;
-              if (typeof referenceDriver?.open !== 'function') throw refuse('JD0021', 'borrowed model comparison requires shadowDriver or a complete physicalTarget');
-              return chain(compareShapeToModel(referenceDriver, scope, options.model, options.registerFunctions, options.expressions), (difference) => {
-                if (difference !== null) throw refuse('JD0023', `the migrated shape does not equal the target model's: ${difference}`);
-              });
-            });
+          const finalChecks = (scope, migration) => acceptMigrationModel(scope, options.model,
+            { compileSchema: options.compileSchema, batchSize, expressions: options.expressions,
+              registerFunctions: options.registerFunctions }, referenceDriver, migration.physical, finalTarget);
+          const record = (scope, migration) => chain(readMigrationHistory(scope, true), (current) => {
+            const rows = current.history.rows, at = expectedRows.length;
+            if (rows.length !== at + 1 || rows[at].id !== migration.id
+              || canonicalizeJson(rows.slice(0, at)) !== canonicalizeJson(expectedRows)
+              || canonicalizeJson(current.identity) !== canonicalizeJson(expectedSide))
+              throw refuse('JD0022', 'a migration changed its existing history or identity metadata');
+            checkAppliedRows(current, migrations);
+            const entries = [{ key: `receipt:${at}`, value: canonicalizeJson({
+              document: canonicalizeJson(migration), row: canonicalizeJson(rows[at]),
+            }) }];
+            const publish = replay === undefined ? !current.identity.present : at + 1 === header.legacyCount;
+            if (publish) entries.push({ key: 'header', value: canonicalizeJson(header) });
+            return chain(current.identity.present ? null : scope.exec(statements.createIdentity), () =>
+              chain(writeIdentityRows(scope, entries, check), () => chain(readMigrationHistory(scope, true), (recorded) => {
+                checkHistoryIdentity(recorded, migrations, replay);
+                expectedRows = recorded.history.rows;
+                expectedSide = recorded.identity;
+              })));
+          });
           // a link ends with the database's own foreign-key check, before its
           // history row: a reference a step broke refuses the link, listed.
           // The check reads the whole database, so it is taken before the
@@ -2361,8 +2426,14 @@ export function migrate(target, migrations, options) {
             work = chain(work, () => acceptTarget(scope, final ? finalTarget : migration.physical?.target));
             work = chain(work, () => final ? finalChecks(scope, migration) : null);
             work = chain(work, () => foreignKeyCheck(scope, migration, violationsBefore));
-            return chain(work, () => useStatementOnce(scope, statements.insert, (insert) =>
-              insert.run([migration.id, runtime.now(), migration.from, migration.to, migrationChecksum(migration), migration.steps.length])));
+            if (replay !== undefined && expectedRows.length + 1 === header.legacyCount) {
+              const legacyTarget = header.legacyTarget === null ? undefined : JSON.parse(header.legacyTarget);
+              work = chain(work, () => chain(acceptTarget(scope, legacyTarget), () =>
+                acceptMigrationModel(scope, JSON.parse(header.legacyModelSource), runOptions, referenceDriver, migration.physical, legacyTarget)));
+            }
+            return chain(work, () => chain(useStatementOnce(scope, statements.insert, (insert) =>
+              insert.run([migration.id, runtime.now(), migration.from, migration.to, migrationChecksum(migration), migration.steps.length])),
+            () => record(scope, migration)));
           };
           // link by link: each commits on its own, and the last makes the final checks
           const applyNext = (i) => {
@@ -2373,7 +2444,7 @@ export function migrate(target, migrations, options) {
               check();
               // Admission may have waited behind a different process. Never rerun
               // a body using receipts read before that process committed.
-              return chain(lockMigration(scope), () => chain(verifyHistory(appliedRows.length + applied.length), () =>
+              return chain(lockMigration(scope, check), () => chain(verifyHistory(scope, appliedRows.length + applied.length), () =>
                 linkWork(scope, migration, last)));
             };
             const transaction = () => connection.transaction(body, options.signal, 'immediate');
@@ -2389,7 +2460,7 @@ export function migrate(target, migrations, options) {
             check();
             const body = (scope) => {
               check();
-              return chain(lockMigration(scope), () => chain(verifyHistory(appliedRows.length), () => {
+              return chain(lockMigration(scope, check), () => chain(verifyHistory(scope, appliedRows.length), () => {
                 const next = (i) => {
                   if (i >= pending.length) return null;
                   check();
@@ -2409,7 +2480,7 @@ export function migrate(target, migrations, options) {
             () => ({ applied, skipped: appliedRows.map((row) => row.id), shape: expectedFrom }));
         });
       });
-    }));
+    })));
   }), (error) => runFailure(error, 'the migration failed'));
 }
 
@@ -2438,7 +2509,9 @@ export function planPhysicalMigration(connection, fromModel, toModel, options) {
       if (!assertion || typeof assertion.sql !== 'string' || !/^SELECT\b/i.test(assertion.sql.trim()) || !Array.isArray(assertion.expected))
         throw refuse('JD0021', 'preservation assertions require a SELECT and expected rows');
     }
-    const migration = { $migration: MIGRATION_VERSION, id: options.id, from: shapeHash(fromModel), to: shapeHash(toModel),
+    const identity = migrationIdentity(fromModel, toModel);
+    const migration = { $migration: MIGRATION_VERSION, id: options.id,
+      from: hashContent(identity.from), to: hashContent(identity.to), identity,
       steps: options.steps, physical: { source, ...(scope === undefined ? {} : { scope }), dispositions, assertions,
         ...(connection.dialect.migration ? { dialect: connection.dialect.name, schema: connection.dialect.schema } : {}),
         ...(options.physicalTarget === undefined ? {} : { target: structuredClone(options.physicalTarget) }) } };

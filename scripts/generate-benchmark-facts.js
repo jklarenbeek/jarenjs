@@ -718,9 +718,9 @@ const FACTS = {
       ['JSLT', 'JSLT pen — one rule']]
       .map(([name, row]) => `${name} ${ratio(at(row) / hand)}×`);
     const migration = at('migration pen — two models, no step')
-      / at('  the same document, hand-written (both hashes included)');
+      / at('  the same document, hand-written (exact endpoints and fingerprints included)');
     return `${each.join(', ')} a hand-written literal, and the migration pen `
-      + `${ratio(migration)}× a hand-written document carrying the same two shape hashes`;
+      + `${ratio(migration)}× a hand-written document carrying the same exact endpoints and compatibility fingerprints`;
   },
   'geo.losses': () => {
     const losses = data('geo').rows.filter((row) => row.rival !== null && row.rival / row.ours < 1);

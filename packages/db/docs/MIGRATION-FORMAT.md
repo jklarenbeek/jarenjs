@@ -12,7 +12,7 @@ A store evolves without hand-written SQL: two model documents diff into
 a **migration document** whose ordered steps are rendered DDL, JSLT
 data transforms and query assertions. The migration replays on a
 shadow database before the real store is touched; a history table
-records what ran, in what order, with a checksum; rolling forward is
+records what ran, in what order, with compatible fingerprints and exact side receipts; rolling forward is
 deterministic and inspectable, and the generated SQL is always shown
 before it is executed.
 
@@ -23,22 +23,63 @@ shape change is a **transformation of values**, not a table rebuild.
 
 ```json
 {
-  "$migration": "0.1",
-  "id": "0002-split-name",
-  "from": "1m60qna…", "to": "8kf22bd…",
+  "$migration": "0.2",
+  "id": "0002-normalize-name",
+  "from": "sifn5m",
+  "to": "sifn5m",
+  "identity": {
+    "version": 1,
+    "from": "{\"$model\":\"0.1\",\"collections\":{\"users\":{\"key\":\"/id\",\"schema\":{\"properties\":{\"id\":{\"type\":\"string\"},\"name\":{\"type\":\"string\"}},\"type\":\"object\"}}}}",
+    "to": "{\"$model\":\"0.1\",\"collections\":{\"users\":{\"key\":\"/id\",\"schema\":{\"properties\":{\"id\":{\"type\":\"string\"},\"name\":{\"type\":\"string\"}},\"type\":\"object\"}}}}"
+  },
   "steps": [
-    { "kind": "ddl",   "sql": "DROP INDEX \"users_by_first\"" },
-    { "kind": "jslt",  "collection": "users", "stylesheet": [ { "match": "$", "body": { } } ] },
-    { "kind": "query", "collection": "users",
-      "assert": { "$for": { "it": "$[*]" }, "$where": { "$empty": "$it.name" }, "$return": "$it.id" } }
+    {
+      "kind": "jslt",
+      "collection": "users",
+      "stylesheet": [
+        {
+          "match": "$",
+          "body": {
+            "id": "$.id",
+            "name": {
+              "$upper": "$.name"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "kind": "query",
+      "collection": "users",
+      "assert": {
+        "$for": {
+          "it": "$[*]"
+        },
+        "$where": {
+          "$empty": "$it.name"
+        },
+        "$return": "$it.id"
+      }
+    }
   ]
 }
 ```
 
-- `from`/`to` are `hashContent(canonicalizeJson(model))` — the
-  identity of a **shape**, not a version number a human must remember
-  to bump. A migration whose `from` does not match the database's
-  recorded shape MUST refuse to run (`JD0020`).
+New documents use `$migration: "0.2"`; historical `0.1` documents remain
+structurally readable, with the database admission limits in §5. The example
+rewrites names without changing the model, so both endpoints are equal.
+
+- `identity` is required on 0.2: `{ version: 1, from, to }`, whose two
+  strings are the complete canonical JSON of the endpoint models after
+  `withoutModelRenameHints` removes collection/entity `x-rename` hints.
+  Canonicalization belongs to `@jarenjs/json`; normalization is shared by DB
+  and LINQ in `@jarenjs/core/model`. No other model annotation is stripped.
+- `from`/`to` retain `hashContent` of those canonical strings, in base 36,
+  for compatibility and display. They MUST agree with `identity`, but a
+  fingerprint match is not exact authority. A wrong baseline, adjacent
+  endpoint or supplied final model refuses `JD0020`, including a no-op run.
+- A 0.1 artifact has no `identity`. Keep its applied bytes unchanged;
+  adding an identity or changing its version is not an upgrade procedure.
 - `kind: "ddl"` executes one rendered statement. The planner produces
   these through the dialect; they are ordinary text in the document so
   a reviewer reads exactly what will run.
@@ -216,7 +257,7 @@ infer application-owned DDL, key rewrites or business backfills.
 `{ migration, report }` by diffing the two models' PHYSICAL plans. The
 from-model is the previous model — the previous model FILE, or, under
 the CLI's snapshot discipline (§11), the committed `model.snapshot.json`
-the last `plan` advanced: a database stores shape hashes, never models,
+the last `plan` advanced: the previous reviewed model remains the planning input,
 so the previous shape lives beside the code, where a diff can read it.
 
 - An added collection becomes its full CREATE DDL; a removed
@@ -304,9 +345,17 @@ fixture rows. Physical preservation plans require that initializer or an
 explicit `shadow: false`, because a query mapping cannot recreate all
 application-owned programs.
 
-Replay calls the SAME `migrate` executor with the shadow connection borrowed
-and recursive replay disabled. Guarded table steps, per-step mappings,
-preservation checks, target acceptance and history receipts all run there.
+Replay uses the same step and receipt owners with recursive replay disabled.
+For an adopted legacy prefix, private verified authority replays every original
+step on a shadow proved history/identity-empty before and after fixture
+initialization. It records the shadow's own rows and exact receipts, then
+publishes its adopted boundary after that boundary passes acceptance. It never
+copies primary receipts into an empty shadow or exposes a public legacy bypass.
+The 0.2 tail then follows ordinary exact admission. Guarded table steps,
+per-step mappings, preservation checks and target acceptance all run there.
+Old starting/intermediate exact models are unknown: the original baseline can
+meet only legacy fingerprints and physical checks; adoption attests the exact
+current boundary from which the new tail proceeds.
 `shadowDriver` defaults to the owned target's driver; borrowed targets need
 an explicit independent driver. `shadowPath` defaults to `':memory:'` and
 must name a disposable database independent of the primary. The acquired
@@ -358,8 +407,28 @@ in order, with matching ids, checksums, from/to hashes and step counts.
 A disagreement is `JD0022`; the writer checks these fields again after
 acquiring its lock, before executing any pending step. These comparisons
 do not rewrite existing receipts or normalize their stored values.
-The database's current shape is the last applied `to_hash`, or the
-hash of the `baseline` model when no migration has run.
+The six normal fields and SQLite rowid/PostgreSQL rid ordering remain unchanged.
+PostgreSQL stores `applied_at` and `steps` as numeric and adds a BIGSERIAL `rid`;
+no upgrade rewrites old columns or adjusts their sequences.
+
+`_jaren_migration_identity` separately records a canonical version-1 header and
+ordinal receipts. The header pins the adopted legacy count and exact model and
+selected physical target, or a zero-legacy boundary for a fresh chain. Model
+equality uses canonical text; the admitted model source also retains declaration
+order for replay, because generated program identities can depend on that order. Each
+receipt binds the complete canonical admitted document to the complete actual
+stored normal row, including timestamp and ordering value. A newly applied link
+inserts both row families atomically; link/atomic rollback rules remain §6's.
+Missing, extra, partial, malformed or unsupported authority refuses `JD0022`.
+The runner never silently repairs it. Engine metadata is excluded centrally
+from application schema inventories.
+
+The current exact endpoint is the last 0.2 `identity.to`, or the explicitly
+attested legacy boundary. Normal status/apply refuse unadopted legacy history
+and any newly pending 0.1 artifact with `JD0028`, including CLI print-only
+previews. An applied 0.2 document with missing exact metadata is a mismatch,
+not an invitation to legacy adoption. Structural parsing, both schemas and
+storeless document runners still accept historical 0.1 documents.
 
 `migrationChecksum(migration)` is that checksum, exported: the hash of
 the WHOLE canonical document — every step, its SQL text, a host step's
@@ -372,24 +441,65 @@ that snapshot. Changing a caller's objects during the run cannot change
 what later steps execute or what the receipt describes; the runner leaves
 the caller's objects untouched. Status takes the same input snapshot.
 
-The runner uses the recorded fingerprints and fields above, but two
-different canonical documents can share a checksum. The same limitation applies
-to model `from_hash`/`to_hash` values. Keep the reviewed migration documents in
-version control; the recorded checksum alone cannot establish that their contents
-are unchanged. Existing history retains this format. An exact-identity upgrade
-requires an explicit migration/adoption protocol, tracked in the
-[roadmap](../../../docs/ROADMAP.md#jarenjslinq--jarenjsdb--the-data-pair).
+Exact canonical documents and endpoints establish authority; the short hashes
+remain compatible fingerprints. Neither the exact metadata nor an observation
+is authentication against a database operator, or proof of arbitrary host side
+effects. Keep the reviewed artifacts in version control.
+
+### Observing and adopting a legacy history
+
+`migrationHistory(target, { signal?, deadline?, runtime? })` returns one version-1
+observation and creates neither table. `dialect` is `sqlite` or `postgres` and
+`order` is respectively `rowid` or `rid`. `history` contains `present` and every
+ordered row: its ordering member, `id`, `applied_at`, `from_hash`, `to_hash`,
+`checksum`, and `steps`. `identity` contains `present` and deterministic raw
+`{ key, value }` rows. All raw fields are nullable strings for diagnosis;
+observation alone grants no execution authority.
+
+The ordering value, timestamp and step count use SQL `CAST(... AS TEXT)` before
+decoding, never a round-trip through JavaScript Number. Rows remain ordered by
+the original numeric SQL expression. JSON export preserves decimal strings and
+NULL exactly, including integers beyond 2^53. Authority requires canonical
+signed integer ordering values, nonnegative integer step counts equal to the
+document length, and finite decimal timestamp text. Fractional timestamps retain
+their exact text; invalid or unsupported fields refuse rather than normalize.
+
+`adoptMigrationHistory(target, migrations, { observed, model, ...controls })`
+requires exactly the complete nonempty applied 0.1 prefix and an explicitly
+reviewed current model. It snapshots JSON inputs, compares the complete observed
+state again under the writer lock, verifies existing model/physical acceptance,
+and writes only the exact side metadata in one transaction. No migration step
+runs and no normal history row is updated, removed, reordered or restamped.
+A physical mapping requires a complete selected target, supplied as
+`physicalTarget` or by the last reviewed saved legacy physical target.
+Logical stored-document validation runs only when `compileSchema` is supplied.
+
+Supported controls are `physicalTarget`, `shadowDriver`, `registerFunctions`,
+`compileSchema`, `expressions`, `batchSize`, `runtime`, `signal` and `deadline`.
+No `allowLegacy`, replay token or adoption dry-run exists. First adoption answers
+`{ adopted: N, unchanged: 0 }`; an identical repeat answers
+`{ adopted: 0, unchanged: N }`. These count receipts attested, not steps run.
+Repeating the original pre-adoption observation is allowed only when normal
+history is unchanged and the entire side state equals the expected attestation.
+An appended tail, changed model/target/document or stale metadata refuses.
+
+Adoption is operator attestation: a legacy checksum cannot reveal which
+colliding artifact originally ran or recover old exact model endpoints.
+Follow the [legacy upgrade guide](MIGRATION-UPGRADE.md), including immutable JSON
+capture under the pinned old toolchain before upgrading code-first artifacts.
+`openStore({ adopt: true })` verifies physical mappings; it never attests migration
+history. A new zero-step physical baseline (§13) and legacy-history adoption are
+separate operations.
 
 **Planner output is not promised stable across releases before 1.0.** A
 release may plan a different document for an unchanged pair of models —
 a better DDL spelling, a step the old one missed. So persist the
 documents you plan (`jaren-db plan --out`, or the plan's `migration`
 written to your migrations directory) and never re-plan an applied link:
-the history holds each applied link to its checksum (`JD0022`). A host
-that re-plans at load as a check compares `migrationChecksum` of the
-re-planned document with the persisted one, and treats a difference as
-that release's planner change, not as drift. The plan is typed:
-`planModelMigration` answers a `MigrationPlan`, a `MigrationDocument`
+the history holds each applied link to its exact document (`JD0022`). A host
+that re-plans at load for comparison compares full canonical documents and
+treats a difference as that release's planner change, not as database drift. The plan is typed:
+`planModelMigration` answers a `MigrationPlan`, an `ExactMigrationDocument`
 and its `MigrationPlanReport`. Every release that changes the planner's
 output for an unchanged pair says so in its release notes, and
 `test/db/planner-goldens.test.js` — a corpus of pairs (additive,
@@ -407,7 +517,7 @@ documents — makes such a change impossible to ship unnoticed.
 | `{ connection }` | Borrows an existing driver connection and leaves it open on success or failure; returns a value or Promise. Synchronous work with `shadow: false` stays synchronous when its connection and hooks do. |
 
 A borrowed target cannot also carry `driver`, `path` or `busyTimeout`.
-`migrationStatus` uses the same ownership forms. Borrowed model-only status
+`migrationStatus`, `migrationHistory` and `adoptMigrationHistory` use the same ownership forms. Borrowed model-only status
 comparison needs `shadowDriver`; a complete `physicalTarget` needs no
 fresh reference database. Temporary history and physical-inspection statements
 are released after each operation, including refusal. A physical row walk holds
@@ -425,7 +535,14 @@ the driver can bracket FK settings outside the transaction and use nested
 savepoints inside it. Each acquired connection has one cleanup owner;
 if the operation and cleanup both fail, both errors are retained.
 
-Migration planner, runner and status options are closed plain objects. A
+PostgreSQL migration/adoption writes require effective `READ COMMITTED`.
+An already-started borrowed transaction or an owned connection whose effective
+isolation is stronger refuses `JD0021` before application/metadata work. The
+runner never lowers caller isolation; supply an explicitly configured dedicated
+connection when needed. Read-only status/history retain their caller's transaction
+view and do not claim to bypass PostgreSQL MVCC.
+
+Migration planner, runner, status, observation and adoption options are closed plain objects. A
 misspelled or unknown member refuses with `JD0013` before acquiring a
 connection or applying a step; for example, `atomik: true` cannot silently
 disable an intended atomic run. Signals must be AbortSignal-compatible and
@@ -436,9 +553,9 @@ The run options include:
 - `options.baseline` (REQUIRED) — the model the store was FIRST
   created with: the chain's anchor and the shadow's starting shape.
 - `options.model` (RECOMMENDED) — the target model. When present, the
-  last pending migration's `to` MUST equal its shape hash (`JD0020`
-  otherwise), the physical end shape is verified, and the real-data
-  validation of §3 runs.
+  exact final endpoint MUST equal its normalized canonical model (`JD0020`
+  otherwise), the physical end shape is verified, and, with `compileSchema`,
+  the real-data validation of §3 runs.
 - `physicalTarget: { objects, tables? }` supplies the complete reviewed
   application schema, using `readSchema(reference, { tables }).objects`.
   It overrides the last plan's saved `physical.target` for final acceptance
@@ -590,7 +707,8 @@ an assertion, the same refusals in the same words.
   as it finishes. The input is consumed exactly once and nothing beyond
   one batch is held, so a collection larger than memory still migrates.
 
-Both refuse, BEFORE asking for the first document, any step this host
+These file-only runners accept both 0.1 and 0.2 structural documents; they have
+no database history to attest. Both refuse, BEFORE asking for the first document, any step this host
 cannot honour (`JD0023`, classified as a failing step's is: `class:
 'error'`, not retryable — as is a malformed migration document):
 
@@ -616,7 +734,7 @@ Two limits are the single pass's, and are stated rather than hidden:
 
 ## 7. Non-goals
 
-- **Down migrations are not shipped in 0.1.** A JSLT transform is not
+- **Down migrations are not shipped.** A JSLT transform is not
   generally invertible, and a reverse step that silently loses data is
   worse than a restore from backup. The recommended path: branch the
   shape (a new collection or a new store), migrate forward, drop the
@@ -633,14 +751,15 @@ Two limits are the single pass's, and are stated rather than hidden:
 
 | code | raised when |
 |---|---|
-| `JD0020` | the migration's from-shape does not match the database |
-| `JD0021` | the migration is missing a required data transform |
-| `JD0022` | an applied migration disagrees with the history record |
+| `JD0020` | a baseline, adjacent exact endpoint or supplied final model disagrees |
+| `JD0021` | a required data transform is missing, target acceptance fails, or a PostgreSQL writer scope is not READ COMMITTED |
+| `JD0022` | an exact document/receipt or full history observation disagrees, or side authority is missing/partial/unsupported |
 | `JD0023` | a migration step failed (classified: `class` and `retryable`, the driver's error as `cause`) |
 | `JD0024` | a document source or target could not be read or written |
 | `JD0025` | a migration host step is unknown, its version differs, or it appears where it cannot run |
 | `JD0026` | an atomic migration run contains a rebuild link |
 | `JD0027` | a physical scope is malformed or names a table the plan does not own |
+| `JD0028` | legacy history needs explicit observation/adoption, or newly pending work is 0.1 |
 
 These live in the same runtime `DB_CODES` table as the storage codes
 (MODEL-FORMAT §7); the union of both documents is proven in sync with
@@ -747,6 +866,9 @@ jaren-db status   --model <model> --store <db> --baseline <model> [--migrations 
 jaren-db apply    --store <db> --baseline <model> --migrations <dir> [--model <m>] [--dry-run] [--yes]
 jaren-db check    --model <model> --store <db> --baseline <model> [--migrations <dir>] [--snapshot <file>]
 jaren-db shape    --model <model>
+jaren-db history  --store <db> [--out <observation.json>]
+jaren-db adopt-history --store <db> --migrations <applied-prefix-dir> --observed <observation.json>
+                       --model <model> [--physical-target <json>] [--yes]
 jaren-db documents --migrations <dir> --in <file|-> (--out <file|-> | --in-place --yes | --check)
                    [--format json|jsonl] [--out-format json|jsonl] [--collection <name>]
                    [--batch-size <n>]
@@ -767,11 +889,11 @@ jaren-db documents --migrations <dir> --in <file|-> (--out <file|-> | --in-place
   cache-busting queries) and refuses one whose two emissions differ —
   no clock, no env, no randomness — because a migration that hashes
   differently per load can never match its own history.
-- `plan` diffs two model FILES (a database stores shape hashes, not
-  models — the from-model is the previous model file), or, with
+- `plan` diffs two reviewed model FILES into 0.2 documents, or, with
   `--model`, the committed SNAPSHOT against the model: `--snapshot`
   names it and defaults to `model.snapshot.json` beside the model; a
-  model whose shape equals the snapshot's plans nothing and exits 0;
+  model whose normalized canonical shape equals the snapshot's plans nothing and exits 0;
+  equal short fingerprints alone do not suppress a plan;
   otherwise the migration is written (`--out`) and the snapshot is
   advanced to the model — without `--out` the plan is printed and the
   snapshot stays, and the CLI says so. With `--store` it first compares
@@ -792,7 +914,11 @@ jaren-db documents --migrations <dir> --in <file|-> (--out <file|-> | --in-place
   migrations are pending, OR when the database drifted; 0 in sync.
   `--model` is required — without it drift cannot be measured, and
   `check` refuses rather than print `in sync`. `status` reports the same
-  verdict on its `model:` line.
+  verdict on its `model:` line. Snapshot/model comparison uses exact normalized
+  canonical shapes, so colliding fingerprints still name an unplanned change.
+  When that comparison differs, status verifies history authority without
+  treating the unplanned model as the chain's target and reports physical drift
+  as not checked. `check` then refuses the unplanned change by name.
 - `apply` prints every statement, then asks; destructive steps (drop
   table/column, rebuild) print what is lost and ask for that
   separately. `--yes` answers both, `--dry-run` stops after the
@@ -809,7 +935,19 @@ jaren-db documents --migrations <dir> --in <file|-> (--out <file|-> | --in-place
   history or application rows. A no-pending `--dry-run` reports only the
   preview; it does not claim target acceptance.
 - `status` lists applied/pending and reports drift (§12); on a
-  database without a history table it creates nothing (§6).
+  database without a history table it creates nothing (§6). Normal status,
+  check and apply (including `--dry-run`) refuse unverifiable legacy history
+  and pending 0.1 with `JD0028`; a printout is not a legacy bypass.
+- `history` emits one JSON observation to stdout, or writes exactly that
+  JSON with `--out`. It creates neither history table.
+- `adopt-history` requires the reviewed complete applied prefix, observation
+  and current model. `--physical-target` loads a complete target JSON file.
+  It requires `--yes` or interactive confirmation, executes no migration
+  steps, and prints `{ "adopted": N, "unchanged": M }`. No `--dry-run`
+  exists. Irrelevant/missing flags on these two new commands exit 2;
+  runtime/authority failures exit 1. The CLI supplies no `compileSchema`
+  hook, so it does not claim full logical document validation. The
+  [upgrade guide](MIGRATION-UPGRADE.md) gives the review and capture flow.
 - `shape` prints the physical mapping a model produces.
 - `documents` runs a migration's DOCUMENT steps over a file instead of a
   database — §6.1's runners, given a path or stdio. `--in`/`--out` take
@@ -922,16 +1060,18 @@ history with a **baseline receipt**: a physical plan from the model to
 itself, with no steps, every inventoried object preserved and the
 reviewed target saved.
 
-```json
-{ "$migration": "0.1", "id": "0000-baseline", "from": "<shape>", "to": "<shape>", "steps": [],
-  "physical": { "source": [], "dispositions": {}, "assertions": [], "scope": { "tables": ["item"] } } }
+```js
+const baseline = await planPhysicalMigration(connection, model, model, {
+  id: '0000-baseline', steps: [], dispositions,
+  physicalTarget: { objects }, scope: { tables },
+}); // 0.2, with exact equal model endpoints and the reviewed physical header
 ```
 
 `planPhysicalMigration(connection, model, model, { id: '0000-baseline',
 steps: [], dispositions, physicalTarget: { objects }, scope: { tables }
 })` writes it: `from` equals `to`, `migrate(target, [baseline], {
 baseline: model, model, shadow: false })` records one history row and
-changes nothing else, and every later run with the same list is `{
+also records its exact side receipt, and every later run with the same list is `{
 applied: [], upToDate: true }`, checking the saved target on the way.
 `migrationStatus` names it: `baseline: '0000-baseline'`. Guarded `table`
 plans follow it as ordinary migrations, and an applied document is never

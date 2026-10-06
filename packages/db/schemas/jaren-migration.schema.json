@@ -2,12 +2,15 @@
  "$schema": "https://json-schema.org/draft/2020-12/schema",
  "$id": "https://jarenjs.dev/schemas/jaren-migration",
  "title": "Jaren migration document",
- "description": "A jaren-migration document evolves a store from one shape to another: ordered steps of rendered DDL, JSLT data transforms and query assertions, between two shape hashes. The hashes identify SHAPES (hashContent over the canonicalized model document), not version numbers a human must remember to bump; a migration whose from-hash does not match the database's recorded shape refuses to run.",
+ "description": "A migration document evolves a store through ordered rendered DDL, data transforms and assertions. New 0.2 documents carry exact canonical model endpoints and compatible shape fingerprints. Historical 0.1 documents remain readable; database history authority requires explicit legacy adoption.",
  "type": "object",
  "properties": {
   "$migration": {
-   "description": "The migration format version.",
-   "const": "0.1"
+   "description": "The migration format version: historical 0.1 or exact 0.2.",
+   "enum": [
+    "0.1",
+    "0.2"
+   ]
   },
   "id": {
    "description": "The migration's unique identifier, recorded in the history table.",
@@ -15,14 +18,37 @@
    "minLength": 1
   },
   "from": {
-   "description": "The shape hash this migration applies to.",
+   "description": "The compatible fingerprint of the source model shape; 0.2 identity.from is its exact canonical value.",
    "type": "string",
    "minLength": 1
   },
   "to": {
-   "description": "The shape hash this migration produces.",
+   "description": "The compatible fingerprint of the target model shape; 0.2 identity.to is its exact canonical value.",
    "type": "string",
    "minLength": 1
+  },
+  "identity": {
+   "description": "Exact normalized canonical model text for both endpoints. Collection/entity x-rename planning hints are omitted; all other model data remains significant.",
+   "type": "object",
+   "properties": {
+    "version": {
+     "const": 1
+    },
+    "from": {
+     "type": "string",
+     "minLength": 1
+    },
+    "to": {
+     "type": "string",
+     "minLength": 1
+    }
+   },
+   "required": [
+    "version",
+    "from",
+    "to"
+   ],
+   "additionalProperties": false
   },
   "note": {
    "description": "Free prose for the reader; ignored by the runner.",
@@ -642,5 +668,29 @@
    ],
    "additionalProperties": false
   }
- }
+ },
+ "oneOf": [
+  {
+   "properties": {
+    "$migration": {
+     "const": "0.1"
+    }
+   },
+   "not": {
+    "required": [
+     "identity"
+    ]
+   }
+  },
+  {
+   "properties": {
+    "$migration": {
+     "const": "0.2"
+    }
+   },
+   "required": [
+    "identity"
+   ]
+  }
+ ]
 }

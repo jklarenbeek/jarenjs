@@ -15,6 +15,7 @@
  */
 
 import { describe, it, before, after } from 'node:test';
+import { migrationIdentity } from './migration-fixture.js';
 import * as assert from 'node:assert';
 import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
@@ -75,7 +76,7 @@ describe('an entity migrates whole', () => {
     await store.entity('User').create({ id: 'u1', name: 'ada' });
     await store.close();
     const transform = {
-      $migration: '0.1', id: 't1', from: shapeHash(FROM), to: shapeHash(to),
+      $migration: '0.2', identity: migrationIdentity(FROM, to), id: 't1', from: shapeHash(FROM), to: shapeHash(to),
       steps: [
         { kind: 'ddl', sql: 'ALTER TABLE "User" ADD COLUMN "idSeen" TEXT' },
         { kind: 'query', collection: 'User', assert: { $for: { it: '$[*]' }, $where: { $empty: '$it.id' }, $return: '$it' } },
@@ -107,7 +108,7 @@ describe('migration walks cover every entity and signed row identity', () => {
   const FROM = model({ User: { schema: schema({ type: 'string' }) } });
   const TO = model({ User: { schema: schema({ type: 'string', pattern: '^[A-Z]+$' }) } });
   const migration = (steps) => ({
-    $migration: '0.1', id: 'uppercase', from: shapeHash(FROM), to: shapeHash(TO), steps,
+    $migration: '0.2', identity: migrationIdentity(FROM, TO), id: 'uppercase', from: shapeHash(FROM), to: shapeHash(TO), steps,
   });
 
   it('transforms every signed key and skips the already applied migration on the second run', async () => {
@@ -148,7 +149,7 @@ describe('migration walks cover every entity and signed row identity', () => {
   it('validates later entities after an empty or valid first entity', async () => {
     const from = model({ First: FROM.entities.User, Second: FROM.entities.User });
     const to = model({ First: TO.entities.User, Second: TO.entities.User });
-    const m = { $migration: '0.1', id: 'narrow-all',
+    const m = { $migration: '0.2', identity: migrationIdentity(from, to), id: 'narrow-all',
       from: shapeHash(from), to: shapeHash(to), steps: [] };
     for (const seedFirst of [false, true]) {
       const file = fresh(`later-entity-${seedFirst}`);
@@ -249,7 +250,7 @@ describe('the rebuild keeps the absent-vs-null rule and names what it loses', ()
 
 describe("a migration's failures are classified: no raw driver error escapes migrate()", () => {
   const U = { $model: '0.1', collections: { docs: { schema: { type: 'object' }, key: '/id', indexes: [{ name: 'by_email', path: '$.email', unique: true }] } } };
-  const link = (/** @type {string} */ id, /** @type {any[]} */ steps) => ({ $migration: '0.1', id, from: shapeHash(U), to: shapeHash(U), steps });
+  const link = (/** @type {string} */ id, /** @type {any[]} */ steps) => ({ $migration: '0.2', identity: migrationIdentity(U), id, from: shapeHash(U), to: shapeHash(U), steps });
   const seeded = async (/** @type {string} */ name) => {
     const file = fresh(name);
     const store = await openStore(U, { driver: nodeDriver(), path: file });

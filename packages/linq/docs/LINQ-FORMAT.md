@@ -41,7 +41,7 @@ is the index of those guides, and it is how a reader reaches any of them.
 | [SCHEMA-PEN.md](SCHEMA-PEN.md) | 1,250 | `./schema` — JSON Schema 2020-12: the structural keywords, the constraints and the annotations, each with a method of its own, plus `$query`, `$defs`/`$ref` recursion and the normalizer's per-field predicates. **Read it when** you are describing the shape of data — for validation, for a form, or as the base of an entity |
 | [MODEL-PEN.md](MODEL-PEN.md) | 1,117 | `./model` — the `x-entity` vocabulary on JSON Schema, and the `$model` 0.1 document `openStore` accepts unchanged. **Read it when** you are declaring a store's entities, their keys and their relations |
 | [JSLT-PEN.md](JSLT-PEN.md) | 965 | `./jslt` — `$jslt` 0.1 stylesheets: the envelope and its rules, whose bodies are captured over the matched value. **Read it when** you are transforming one document into another |
-| [MIGRATION-PEN.md](MIGRATION-PEN.md) | 810 | `./migration` — `$migration` 0.1 documents: the two shape hashes and the ordered steps the runner takes. **Read it when** you are moving a store from one model to the next |
+| [MIGRATION-PEN.md](MIGRATION-PEN.md) | 950 | `./migration` — `$migration` 0.2 documents: exact model endpoints and the ordered steps the runner takes. **Read it when** you are moving a store from one model to the next |
 | [CONTRACT-PEN.md](CONTRACT-PEN.md) | 1,222 | `./contract` — `$contract` 0.1 documents: the operations, their schemas, their declared behavior and their REST binding. **Read it when** you are declaring an API and want its client, its server and its tools typed from one document |
 | [FLOW-PEN.md](FLOW-PEN.md) | 1,044 | `./flow` — `jaren-fsm` 0.1 machines and `jaren-dag` 0.1 dataflows, every query-valued member captured. **Read it when** you are declaring a state machine or a dependency graph of tasks |
 | [APP-PEN.md](APP-PEN.md) | 1,307 | `./app` — the `jaren-app` 0.1 document `createApp` runs, and the JSON Schema of its state beside it. **Read it when** you are declaring a whole application: state, view, actions, effects |
@@ -89,7 +89,7 @@ data rather than for a program has no compile step to be faithful to.
 | `x-entity` on JSON Schema; `$model` 0.1 (`jaren-model`) | `@jarenjs/db` | **`./model`** | [MODEL-PEN.md](MODEL-PEN.md) |
 | query documents (`jaren-query`) | `@jarenjs/json` | **the chain**, `.` | [QUERY-PEN.md](QUERY-PEN.md) |
 | `$jslt` 0.1 (`jaren-jslt`) | `@jarenjs/json` | **`./jslt`** | [JSLT-PEN.md](JSLT-PEN.md) |
-| `$migration` 0.1 (`jaren-migration`) | `@jarenjs/db` | **`./migration`** | [MIGRATION-PEN.md](MIGRATION-PEN.md) |
+| `$migration` 0.2 (`jaren-migration`; 0.1 historical input) | `@jarenjs/db` | **`./migration`** | [MIGRATION-PEN.md](MIGRATION-PEN.md) |
 | `$contract` 0.1 (`jaren-contract`) | `@jarenjs/contract` | **`./contract`** | [CONTRACT-PEN.md](CONTRACT-PEN.md) |
 | `$fsm` 0.1, `$dag` 0.1 (`jaren-fsm`, `jaren-dag`) | `@jarenjs/flow` | **`./flow`** | [FLOW-PEN.md](FLOW-PEN.md) |
 | `jaren-app` 0.1 | `@jarenjs/app` | **`./app`** | [APP-PEN.md](APP-PEN.md) |
@@ -209,7 +209,7 @@ and the bundle is the byte count the tree-shaking probe builds.
 | [SCHEMA-PEN.md](SCHEMA-PEN.md) | `./schema` | 1,250 | 82 | 10 | 4 | 37,008 B |
 | [MODEL-PEN.md](MODEL-PEN.md) | `./model` | 1,117 | 30 | 6 | 3 | 46,352 B |
 | [JSLT-PEN.md](JSLT-PEN.md) | `./jslt` | 965 | 17 | 8 | 3 | 19,927 B |
-| [MIGRATION-PEN.md](MIGRATION-PEN.md) | `./migration` | 810 | 13 | 5 | 4 | 25,749 B |
+| [MIGRATION-PEN.md](MIGRATION-PEN.md) | `./migration` | 950 | 13 | 5 | 4 | 25,931 B |
 | [CONTRACT-PEN.md](CONTRACT-PEN.md) | `./contract` | 1,222 | 38 | 6 | 3 | 50,253 B |
 | [FLOW-PEN.md](FLOW-PEN.md) | `./flow` | 1,044 | 16 | 7 | 3 | 19,984 B |
 | [APP-PEN.md](APP-PEN.md) | `./app` | 1,307 | 24 | 7 | 4 | 52,166 B |
@@ -218,9 +218,9 @@ and the bundle is the byte count the tree-shaking probe builds.
 | [JTLT-PEN.md](JTLT-PEN.md) | `./jtlt` | 83 | 13 | 1 | 2 | 16,796 B |
 | [PROJECT-PEN.md](PROJECT-PEN.md) | `./project` | 81 | 9 | 1 | 1 | 15,226 B |
 | [CHARTS-PEN.md](CHARTS-PEN.md) | `./charts` | 94 | 21 | 1 | 1 | 17,015 B |
-| [DB-CLIENT.md](DB-CLIENT.md) | `./db` | 1,144 | 45 | 4 | 2 | 836,243 B |
+| [DB-CLIENT.md](DB-CLIENT.md) | `./db` | 1,144 | 45 | 4 | 2 | 836,283 B |
 | [FORMULA-PEN.md](FORMULA-PEN.md) | `./formula` | 41 | 2 | — | — | 21,692 B |
-| **16 documents** | | **12,984** | **371** | **72** | | |
+| **16 documents** | | **13,124** | **371** | **72** | | |
 <!--/fact-->
 
 A pen whose mapping rows are far below its worked examples is a pen
@@ -267,7 +267,7 @@ it and each document publishes it. The rounded column is what
 | `@jarenjs/linq/schema` | [SCHEMA-PEN.md](SCHEMA-PEN.md) | 37,008 B | 37 kB |
 | `@jarenjs/linq/model` | [MODEL-PEN.md](MODEL-PEN.md) | 46,352 B | 46 kB |
 | `@jarenjs/linq/jslt` | [JSLT-PEN.md](JSLT-PEN.md) | 19,927 B | 20 kB |
-| `@jarenjs/linq/migration` | [MIGRATION-PEN.md](MIGRATION-PEN.md) | 25,749 B | 26 kB |
+| `@jarenjs/linq/migration` | [MIGRATION-PEN.md](MIGRATION-PEN.md) | 25,931 B | 26 kB |
 | `@jarenjs/linq/contract` | [CONTRACT-PEN.md](CONTRACT-PEN.md) | 50,253 B | 50 kB |
 | `@jarenjs/linq/flow` | [FLOW-PEN.md](FLOW-PEN.md) | 19,984 B | 20 kB |
 | `@jarenjs/linq/app` | [APP-PEN.md](APP-PEN.md) | 52,166 B | 52 kB |
@@ -276,7 +276,7 @@ it and each document publishes it. The rounded column is what
 | `@jarenjs/linq/jtlt` | [JTLT-PEN.md](JTLT-PEN.md) | 16,796 B | 17 kB |
 | `@jarenjs/linq/project` | [PROJECT-PEN.md](PROJECT-PEN.md) | 15,226 B | 15 kB |
 | `@jarenjs/linq/charts` | [CHARTS-PEN.md](CHARTS-PEN.md) | 17,015 B | 17 kB |
-| `@jarenjs/linq/db` | [DB-CLIENT.md](DB-CLIENT.md) | 836,243 B | 836 kB |
+| `@jarenjs/linq/db` | [DB-CLIENT.md](DB-CLIENT.md) | 836,283 B | 836 kB |
 | `@jarenjs/linq/formula` | [FORMULA-PEN.md](FORMULA-PEN.md) | 21,692 B | 22 kB |
 <!--/fact-->
 
@@ -593,7 +593,7 @@ it says.
 
 | Method | Emits | Type reading | Status |
 |---|---|---|---|
-| `defineMigration({ id, from, to, note? })` | `{ $migration: '0.1', id, from, to, note?, steps }` — `from`/`to` the two models' shape hashes, exactly `shapeHash` (pinned) | `Migration<From, To>`, the two model documents' phantoms | native; not a `$model` document, an empty `id`, another member `JL0101` |
+| `defineMigration({ id, from, to, note? })` | `{ $migration: '0.2', id, from, to, identity, note?, steps }` — exact canonical model endpoints under identity version 1, plus compatible `shapeHash` fingerprints | `Migration<From, To>`, the two model documents' phantoms | native; not a `$model` document, an empty `id`, another member `JL0101` |
 | `.ddl(sql, note?)` | `{ kind: 'ddl', sql, note? }` — one rendered statement (§2) | — | native; an empty statement `JL0101` |
 | `.sql(sql, note?)` | `{ kind: 'sql', sql, note? }` — one data statement spelled directly (§9.4); a dry run always prints it with its note | — | native; an empty statement `JL0101` |
 | `.host(run, version, note?)` | `{ kind: 'host', run, version, note? }` — application code in the migration's transaction: the host the run registers under `run` (`migrate(…, { hosts })`), at the version it was reviewed at (MIGRATION-FORMAT §2) | — | native; an empty `run` or `version` `JL0101` |
@@ -604,8 +604,8 @@ it says.
 | `.transform(name, spelling, { model })`, `.assert(name, spelling, { model, expect? })` | the ordinary step plus an immutable current `$model` document | transform input/output and assertion rows use this model's layout; names may be absent from the final model | native; an invalid model `JL0101`; a name absent from the selected model `JL0106` |
 | `.derive(name, columns)` | `{ kind: 'derive', collection: name, columns }` — a backfill of stored derived columns (§2.1), the columns verbatim | `readonly DeriveColumn[]` | native; no columns `JL0101`; an undeclared table `JL0106` |
 | `.step(raw)` | any planner-emitted step, including a complete guarded `{ kind: 'table', plan }` or a hybrid `rebuild`; a `draft` flag rides untouched | `MigrationStep`, including `TableStep`/`ReviewedTablePlan` | native; an unrecognised kind or incomplete plan/step `JL0101` |
-| `fromPlanned(document, { from?, to? })` | the planner's document, including its `physical` header and complete saved plans; `.transform(name, …)` replaces its draft in place, and other methods append | the models type transforms and are checked against the hashes | native; a model that is not the planned one `JL0102`; two drafts for one name, or no draft and neither target nor step model `JL0106` |
-| `.document`, `.toJSON()` | the deep-frozen `$migration` document — assembled once and memoized, so `a.document === a.document` | `MigrationDocument` | native |
+| `fromPlanned(document, { from?, to? })` | the planner's document, including its `physical` header and complete saved plans; `.transform(name, …)` replaces its draft in place, and other methods append | the models type transforms and are checked against exact endpoints | native; legacy 0.1 input or a model that is not the planned one `JL0102`; two drafts for one name, or no draft and neither target nor step model `JL0106` |
+| `.document`, `.toJSON()` | the deep-frozen `$migration` document — assembled once and memoized, so `a.document === a.document` | `ExactMigrationDocument` | native |
 
 ### The Jaren contract pen — [CONTRACT-PEN.md §2](CONTRACT-PEN.md)
 

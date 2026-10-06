@@ -32,9 +32,10 @@ try {
 finally { await client.end(); }
 const testDirectory = new URL('../test/db/', import.meta.url);
 // Portable host suites also contain live PostgreSQL cases. The required
-// endpoint must exercise those, even when their filenames name a capability.
+// endpoint must exercise those, including migration identity suites whose
+// shared host fixture owns the environment selection.
 const files = readdirSync(testDirectory)
-  .filter((name) => name.endsWith('.test.js') && (name.startsWith('postgres-')
+  .filter((name) => name.endsWith('.test.js') && (name.startsWith('postgres-') || name.startsWith('migration-identity-')
     || readFileSync(new URL(name, testDirectory), 'utf8').includes('JAREN_PG_URL'))).sort()
   .map((name) => `test/db/${name}`);
 const result = spawnSync(process.execPath, ['--no-warnings=ExperimentalWarning', '--test',

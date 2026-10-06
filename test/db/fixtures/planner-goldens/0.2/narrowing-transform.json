@@ -1,0 +1,34 @@
+{
+  "migration": {
+    "$migration": "0.2",
+    "from": "1b9eirz",
+    "id": "narrowing",
+    "identity": {
+      "from": "{\"$model\":\"0.1\",\"collections\":{\"docs\":{\"indexes\":[],\"key\":\"/id\",\"schema\":{\"properties\":{\"name\":{\"type\":\"string\"}},\"type\":\"object\"}}}}",
+      "to": "{\"$model\":\"0.1\",\"collections\":{\"docs\":{\"indexes\":[],\"key\":\"/id\",\"schema\":{\"properties\":{\"name\":{\"maxLength\":3,\"type\":\"string\"}},\"type\":\"object\"}}}}",
+      "version": 1
+    },
+    "steps": [
+      {
+        "kind": "host",
+        "run": "truncate",
+        "version": "1"
+      }
+    ],
+    "to": "acarg2"
+  },
+  "report": {
+    "added": [],
+    "destructive": false,
+    "drafts": [],
+    "removed": [],
+    "renamed": [],
+    "schemaChanged": [
+      "docs"
+    ],
+    "transformed": [
+      "docs"
+    ],
+    "widened": []
+  }
+}

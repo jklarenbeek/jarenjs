@@ -1,0 +1,35 @@
+{
+  "migration": {
+    "$migration": "0.2",
+    "from": "1b9eirz",
+    "id": "rename",
+    "identity": {
+      "from": "{\"$model\":\"0.1\",\"collections\":{\"docs\":{\"indexes\":[],\"key\":\"/id\",\"schema\":{\"properties\":{\"name\":{\"type\":\"string\"}},\"type\":\"object\"}}}}",
+      "to": "{\"$model\":\"0.1\",\"collections\":{\"records\":{\"indexes\":[],\"key\":\"/id\",\"schema\":{\"properties\":{\"name\":{\"type\":\"string\"}},\"type\":\"object\"}}}}",
+      "version": 1
+    },
+    "steps": [
+      {
+        "kind": "ddl",
+        "note": "rename collection 'docs' to 'records'",
+        "sql": "ALTER TABLE \"docs\" RENAME TO \"records\""
+      }
+    ],
+    "to": "2tw444"
+  },
+  "report": {
+    "added": [],
+    "destructive": false,
+    "drafts": [],
+    "removed": [],
+    "renamed": [
+      {
+        "from": "docs",
+        "to": "records"
+      }
+    ],
+    "schemaChanged": [],
+    "transformed": [],
+    "widened": []
+  }
+}

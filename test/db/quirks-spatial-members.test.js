@@ -60,7 +60,7 @@ for (const physical of ['columns', 'rtree']) it(`${physical}: legacy spatial exp
     const remove = planMigration(model, plain, { dialect: sqliteDialect }).migration;
     const restore = planMigration(plain, model, { dialect: sqliteDialect }).migration;
     const migration = { ...remove, id: 'spatial-member-json', to: restore.to,
-      steps: [...remove.steps, ...restore.steps] };
+      identity: { ...remove.identity, to: restore.identity.to }, steps: [...remove.steps, ...restore.steps] };
     const target = { driver, path: temp.dbPath };
     const options = { baseline: model, model };
     assert.deepEqual((await migrate(target, [migration], options)).applied, [migration.id]);

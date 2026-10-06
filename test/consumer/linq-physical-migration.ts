@@ -1,5 +1,5 @@
 import { defineMigration, fromPlanned } from '@jarenjs/linq/migration';
-import type { MigrationDocument, MigrationStep } from '@jarenjs/linq/migration';
+import type { MigrationDocument, ExactMigrationDocument, LegacyMigrationDocument, MigrationStep } from '@jarenjs/linq/migration';
 import { migrate, migrationStatus, planModelMigration, planPhysicalMigration, planTableMigration, readSchema, sqliteDialect } from '@jarenjs/db';
 import type { MigrationHost, MigrationHostScope, MigrationHostContext, MigrationPlan } from '@jarenjs/db';
 import type { BorrowedMigrationTarget, Driver, MigrationResult, MigrationStatusReport, PhysicalMigrationDocument, PhysicalMigrationTarget } from '@jarenjs/db';
@@ -8,7 +8,7 @@ import { model as v2 } from '../db/fixtures/models/v2.js';
 
 declare const connection: unknown;
 declare const driver: Driver;
-declare const planned: MigrationDocument;
+declare const planned: ExactMigrationDocument;
 
 const borrowed: BorrowedMigrationTarget = { connection };
 const ownedResult: Promise<MigrationResult> = migrate({ driver }, [], { baseline: v1 });
@@ -135,3 +135,9 @@ const hostStep: MigrationStep = { kind: 'host', run: 'repair', version: '1' };
 // @ts-expect-error — a host step names its version
 const versionless: MigrationStep = { kind: 'host', run: 'repair' };
 void [withHost, hostStep, versionless];
+
+declare const preservedLegacy: LegacyMigrationDocument;
+const preservedVersion: '0.1' = preservedLegacy.$migration;
+const plannedVersion: '0.2' = plannedRepair.migration.$migration;
+const plannedEndpoint: string = plannedRepair.migration.identity.from;
+void [preservedVersion, plannedVersion, plannedEndpoint];

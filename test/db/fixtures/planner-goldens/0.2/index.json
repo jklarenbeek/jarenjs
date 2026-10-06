@@ -1,0 +1,35 @@
+{
+  "migration": {
+    "$migration": "0.2",
+    "from": "1b9eirz",
+    "id": "index",
+    "identity": {
+      "from": "{\"$model\":\"0.1\",\"collections\":{\"docs\":{\"indexes\":[],\"key\":\"/id\",\"schema\":{\"properties\":{\"name\":{\"type\":\"string\"}},\"type\":\"object\"}}}}",
+      "to": "{\"$model\":\"0.1\",\"collections\":{\"docs\":{\"indexes\":[{\"name\":\"by_name\",\"path\":\"$.name\"}],\"key\":\"/id\",\"schema\":{\"properties\":{\"name\":{\"type\":\"string\"}},\"type\":\"object\"}}}}",
+      "version": 1
+    },
+    "steps": [
+      {
+        "kind": "ddl",
+        "note": "add generated column 'gx_name' on 'docs'",
+        "sql": "ALTER TABLE \"docs\" ADD COLUMN \"gx_name\" TEXT GENERATED ALWAYS AS (jsonb_extract(\"doc\", '$.\"name\"')) VIRTUAL"
+      },
+      {
+        "kind": "ddl",
+        "note": "create index 'docs_by_name' on 'docs'",
+        "sql": "CREATE INDEX \"docs_by_name\" ON \"docs\" (\"gx_name\")"
+      }
+    ],
+    "to": "1c7pybh"
+  },
+  "report": {
+    "added": [],
+    "destructive": false,
+    "drafts": [],
+    "removed": [],
+    "renamed": [],
+    "schemaChanged": [],
+    "transformed": [],
+    "widened": []
+  }
+}

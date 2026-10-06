@@ -4,6 +4,7 @@
 // bun:sqlite leaves foreign keys off by default; a migration's own
 // connection must switch them on, so the cascade the schema declares runs.
 import { openStore, migrate, shapeHash } from '@jarenjs/db';
+import { migrationIdentity } from '../migration-fixture.js';
 import { bunDriver } from '@jarenjs/db/bun';
 import { Database } from 'bun:sqlite';
 
@@ -13,12 +14,12 @@ const store = await openStore(MODEL, { driver: bunDriver(), path: file });
 await store.entity('Parent').create({ id: 'p1' });
 await store.entity('Child').create({ id: 'c1', parentId: 'p1' });
 await store.close();
-const deletion = { $migration: '0.1', id: 'delete-parent', from: shapeHash(MODEL), to: shapeHash(MODEL),
+const deletion = { $migration: '0.2', identity: migrationIdentity(MODEL), id: 'delete-parent', from: shapeHash(MODEL), to: shapeHash(MODEL),
   steps: [{ kind: 'sql', sql: `DELETE FROM "Parent" WHERE "id" = 'p1'` }] };
 const outcome = await migrate({ driver: bunDriver(), path: file }, [deletion], { baseline: MODEL, model: MODEL });
 let orphanRefused = null;
 let orphanCause = null;
-const orphan = { $migration: '0.1', id: 'orphan', from: shapeHash(MODEL), to: shapeHash(MODEL),
+const orphan = { $migration: '0.2', identity: migrationIdentity(MODEL), id: 'orphan', from: shapeHash(MODEL), to: shapeHash(MODEL),
   steps: [{ kind: 'sql', sql: `INSERT INTO "Child" ("id", "parentId", "doc") VALUES ('c2', 'nobody', jsonb('{}'))` }] };
 try { await migrate({ driver: bunDriver(), path: file }, [deletion, orphan], { baseline: MODEL, model: MODEL }); }
 catch (error) {

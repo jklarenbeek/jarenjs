@@ -8,7 +8,7 @@
 // must be the new row; an assertion's row is the members both shapes
 // share. The runtime twins live in test/linq/migration-pen.test.js.
 import { defineMigration, fromPlanned } from '@jarenjs/linq/migration';
-import type { DocOf, Migration, MigrationDocument, MigrationStep, Spell } from '@jarenjs/linq/migration';
+import type { DocOf, Migration, MigrationDocument, ExactMigrationDocument, LegacyMigrationDocument, MigrationStep, Spell } from '@jarenjs/linq/migration';
 import { stylesheet, rule } from '@jarenjs/linq/jslt';
 import type { Expr, UnknownExpr } from '@jarenjs/linq';
 import { model as v1 } from '../db/fixtures/models/v1.js';
@@ -76,7 +76,7 @@ void defineMigration({ id: 'x', from: snapshot, to: v2 }).transform('User', (u: 
 void defineMigration({ id: 'x', from: v1, to: snapshot }).transform('Anything', (u) => ({ whatever: u.get('name') }));
 
 // ——— fromPlanned: the models type the transforms; without them the honest top ———
-declare const planned: MigrationDocument;
+declare const planned: ExactMigrationDocument;
 void fromPlanned(planned, { from: v1, to: v2 }).transform('User', (u) => ({ id: u.id, name: u.name, handle: u.name.lower() }));
 // @ts-expect-error — the models type the transform here too
 void fromPlanned(planned, { from: v1, to: v2 }).transform('User', (u) => ({ id: u.id }));
@@ -93,3 +93,18 @@ void defineMigration({ id: 'x', from: v1, to: v2 }).assert('User', (u) => u.name
 // ——— the surface, named ———
 const typed: Migration<typeof v1, typeof v2> = handles;
 void typed;
+
+// Current output is exact; historical annotations stay available without a DB peer.
+const exactVersion: '0.2' = handles.document.$migration;
+const identityVersion: 1 = handles.toJSON().identity.version;
+const endpoint: string = handles.document.identity.to;
+declare const historicalDocument: LegacyMigrationDocument;
+const legacyVersion: '0.1' = historicalDocument.$migration;
+// @ts-expect-error — authoring must not silently upgrade a typed historical document
+void fromPlanned(historicalDocument);
+// @ts-expect-error — current documents require exact identity
+const noIdentity: ExactMigrationDocument = { $migration: '0.2', id: 'x', from: 'a', to: 'b', steps: [] };
+function endpointOf(document: MigrationDocument): string | undefined {
+  return document.$migration === '0.2' ? document.identity.to : undefined;
+}
+void [exactVersion, identityVersion, endpoint, legacyVersion, noIdentity, endpointOf];

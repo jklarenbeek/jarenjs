@@ -325,8 +325,10 @@ const contract: any = api.document;
 void (contract.$contract === '0.1' && Object.keys(contract.operations)[0] === 'catalog.load');
 const model = m.defineModel({ entities: { User: m.object({ id: m.string().key(), name: m.string() }) } });
 const wider = m.defineModel({ entities: { User: m.object({ id: m.string().key(), name: m.string(), city: m.string().optional() }) } });
-const step: any = defineMigration({ id: 'add-city', from: model, to: wider }).toJSON();
-void (step.$migration === '0.1' && typeof step.from === 'string' && step.from !== step.to);
+const step = defineMigration({ id: 'add-city', from: model, to: wider }).toJSON();
+const migrationVersion: '0.2' = step.$migration;
+const endpointVersion: 1 = step.identity.version;
+void [migrationVersion, endpointVersion, step.identity.from, step.identity.to];
 const opening = open(model, { driver: nodeDriver() });
 void opening.then(async (client) => {
   const names: string[] = await client.entities.User.where((u) => u.name.eq('ada')).select((u) => u.name).toArray();
@@ -510,7 +512,8 @@ void [tools[0]?.name, tools[0]?.inputSchema];
 client.close();
 `,
   '@jarenjs/collection': readFileSync(join(root, 'test/consumer/collection.ts'), 'utf8'),
-  '@jarenjs/db': readFileSync(join(root, 'test/consumer/db-relational.ts'), 'utf8')
+  '@jarenjs/db': readFileSync(join(root, 'test/consumer/db-migration-identity.ts'), 'utf8')
+    + readFileSync(join(root, 'test/consumer/db-relational.ts'), 'utf8')
     + readFileSync(join(root, 'test/consumer/db-process.ts'), 'utf8') + `
 import { openStore, normalizeModel, sqliteDialect, createDialect, DB_CODES, DbCompileError, DbRuntimeError, SQLITE_FLOOR } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';
@@ -705,6 +708,16 @@ for (const driver of [nodeWorkerDriver(), nodeWorkerPoolDriver({ readers: 0 })])
         expected: { protectedRows: Math.ceil(definition.rows / definition.policy.protectedEvery) },
       }))));
       program += "await import('./adoption.js');\n";
+      cpSync(join(root, 'test/consumer/migration-identity.js'), join(consumerDir, 'migration-identity.js'));
+      if (name === '@jarenjs/db') {
+        program += "const { qualifyMigrationIdentity } = await import('./migration-identity.js');\n"
+          + "console.log('Migration identity:', JSON.stringify(await qualifyMigrationIdentity()));\n";
+      }
+      else {
+        cpSync(join(root, 'test/consumer/linq-migration-identity.js'), join(consumerDir, 'linq-migration-identity.js'));
+        program += "const { qualifyLinqMigrationIdentity } = await import('./linq-migration-identity.js');\n"
+          + "console.log('LINQ migration identity:', JSON.stringify(await qualifyLinqMigrationIdentity()));\n";
+      }
       cpSync(join(root, 'test/consumer/query-ownership.js'), join(consumerDir, 'query-ownership.js'));
       if (name === '@jarenjs/db') {
         program += "const { qualifyQueryOwnership } = await import('./query-ownership.js');\n"
@@ -734,6 +747,7 @@ for (const driver of [nodeWorkerDriver(), nodeWorkerPoolDriver({ readers: 0 })])
     if (name === '@jarenjs/db') {
       cpSync(join(root, 'test/consumer/postgres.js'), join(consumerDir, 'postgres.js'));
       cpSync(join(root, 'test/db/helpers.js'), join(consumerDir, 'helpers.js'));
+      cpSync(join(root, 'test/db/migration-fixture.js'), join(consumerDir, 'migration-fixture.js'));
       cpSync(join(root, 'test/db/async-host-contracts.test.js'), join(consumerDir, 'async-host-contracts.test.js'));
       program += "if (typeof Bun === 'undefined') await import('./async-host-contracts.test.js');\n";
       cpSync(join(root, 'test/db/async-live.test.js'), join(consumerDir, 'async-live.test.js'));

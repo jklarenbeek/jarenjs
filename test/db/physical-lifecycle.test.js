@@ -2,6 +2,7 @@
 /** Complete physical acceptance and explicit migration connection ownership. */
 import { it } from 'node:test';
 import assert from 'node:assert/strict';
+import { migrationIdentity } from './migration-fixture.js';
 import { migrate, migrationStatus, planPhysicalMigration, readSchema, shapeHash,
   planTableMigration, applyTableMigration, withForeignKeysSuspended, compareShapeToModel,
   createModelShape } from '@jarenjs/db';
@@ -16,7 +17,7 @@ const model = { $model: '0.1', entities: { Row: { schema: { type: 'object', prop
 const sql = "CREATE TABLE rows(id INTEGER PRIMARY KEY,value TEXT DEFAULT 'a  b' CHECK(length(value)>0)); CREATE INDEX by_value ON rows(value COLLATE BINARY) WHERE value!='x  y'; CREATE TRIGGER retained AFTER DELETE ON rows BEGIN SELECT 'a  b'; END";
 const seed = (db) => db.exec(`${sql}; INSERT INTO rows(id,value) VALUES(1,'original')`);
 const targetOf = (db, tables = undefined) => ({ objects: readSchema(db, { tables }).objects, ...(tables === undefined ? {} : { tables }) });
-const document = (id, steps = []) => ({ $migration: '0.1', id, from: shapeHash(model), to: shapeHash(model), steps });
+const document = (id, steps = []) => ({ $migration: '0.2', identity: migrationIdentity(model), id, from: shapeHash(model), to: shapeHash(model), steps });
 async function fixture(run) {
   const db = await driver.open(':memory:');
   try { return await run(db); }
@@ -238,7 +239,7 @@ it('shadow replay registers each caller function once on every opened connection
   const managed = { $model: '0.1', entities: { Row: { schema: model.entities.Row.schema } } };
   createModelShape(db, managed);
   const calls = new Map();
-  const migration = { $migration: '0.1', id: 'validate', from: shapeHash(managed), to: shapeHash(managed), steps: [] };
+  const migration = { $migration: '0.2', identity: migrationIdentity(managed), id: 'validate', from: shapeHash(managed), to: shapeHash(managed), steps: [] };
   await migrate({ connection: db }, [migration], { baseline: managed, model: managed, shadowDriver: driver,
     registerFunctions: (connection) => { calls.set(connection, (calls.get(connection) ?? 0) + 1); } });
   assert.equal(calls.size, 4, 'primary, shadow, and their independent reference connections');
