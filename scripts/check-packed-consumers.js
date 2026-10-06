@@ -156,6 +156,7 @@ const boundedCache = createBoundedCache<string, number>(2);
 boundedCache.set('entry', 1);
 const removed: boolean = boundedCache.delete('entry');
 void [jsonNumber, removed];
+${readFileSync(join(root, 'test/consumer/schema-vocabulary.ts'), 'utf8')}
 `,
   '@jarenjs/view': `
 import { createDomRenderer } from '@jarenjs/view';
@@ -709,6 +710,7 @@ for (const driver of [nodeWorkerDriver(), nodeWorkerPoolDriver({ readers: 0 })])
       }))));
       program += "await import('./adoption.js');\n";
       cpSync(join(root, 'test/consumer/migration-identity.js'), join(consumerDir, 'migration-identity.js'));
+      cpSync(join(root, 'test/consumer/migration-identity-hosts.js'), join(consumerDir, 'migration-identity-hosts.js'));
       if (name === '@jarenjs/db') {
         program += "const { qualifyMigrationIdentity } = await import('./migration-identity.js');\n"
           + "console.log('Migration identity:', JSON.stringify(await qualifyMigrationIdentity()));\n";

@@ -1,11 +1,13 @@
 //@ts-check
 /**
- * @file The JSON Schema constraint-keyword vocabulary, grouped by the
+ * @file The JSON Schema keyword vocabulary, with constraints grouped by the
  * value family each keyword constrains. Forms' constraint extraction,
  * emit's dropped-constraint table and the validator's dispatch and
  * `$ref`-sibling detection compose their lists from these shared groups
  * and append their own extras. Consumers own their processing loops;
- * the shared vocabulary keeps keyword membership consistent.
+ * the shared vocabulary keeps keyword membership consistent. Subschema
+ * position groups are shared too; readers keep their traversal algorithms
+ * and append or remove their explicit compatibility positions.
  *
  * ORDER IS PART OF THE CONTRACT: the validator's `$data` dispatch
  * applies keywords in list order and its error order is observable
@@ -191,11 +193,18 @@ export function splitNullable(schema) {
   return { schema: isNode(union.branch) ? { ...union.branch, ...union.annotations } : union.branch, nullable: true };
 }
 
-/** Keywords holding one subschema, a map of them, or a list of them. */
-const ONE_SUBSCHEMA = ['items', 'contains', 'additionalProperties', 'propertyNames', 'unevaluatedItems',
-  'unevaluatedProperties', 'not', 'if', 'then', 'else', 'contentSchema'];
-const MAP_OF_SUBSCHEMAS = ['properties', 'patternProperties', 'dependentSchemas'];
-const LIST_OF_SUBSCHEMAS = ['prefixItems', 'allOf', 'anyOf', 'oneOf'];
+/** Keywords holding one schema in the nullable normalizer, in traversal order.
+ * Reference readers may also accept a tuple at `items`; callers own that policy.
+ * @type {readonly string[]} */
+export const SCHEMA_VALUE_KEYWORDS = /* @__PURE__ */ Object.freeze(['items', 'contains', 'additionalProperties', 'propertyNames', 'unevaluatedItems',
+  'unevaluatedProperties', 'not', 'if', 'then', 'else', 'contentSchema']);
+/** Applicator maps whose member values are schemas, in traversal order.
+ * Reference readers append their definition and compatibility containers.
+ * @type {readonly string[]} */
+export const SCHEMA_MAP_KEYWORDS = /* @__PURE__ */ Object.freeze(['properties', 'patternProperties', 'dependentSchemas']);
+/** Keywords holding lists of schemas, in traversal order.
+ * @type {readonly string[]} */
+export const SCHEMA_LIST_KEYWORDS = /* @__PURE__ */ Object.freeze(['prefixItems', 'allOf', 'anyOf', 'oneOf']);
 
 /**
  * Whether a normalizer keyword (`default`, `x-coerce`, `x-trim`) sits at
@@ -209,12 +218,12 @@ function reachesNormalizer(node, seen = new Set()) {
   if (!isNode(node) || seen.has(node)) return false;
   seen.add(node);
   if (Object.hasOwn(node, 'default') || Object.hasOwn(node, 'x-coerce') || Object.hasOwn(node, 'x-trim')) return true;
-  for (const key of ONE_SUBSCHEMA) if (reachesNormalizer(node[key], seen)) return true;
-  for (const key of MAP_OF_SUBSCHEMAS) {
+  for (const key of SCHEMA_VALUE_KEYWORDS) if (reachesNormalizer(node[key], seen)) return true;
+  for (const key of SCHEMA_MAP_KEYWORDS) {
     const map = node[key];
     if (isNode(map) && Object.keys(map).some((name) => reachesNormalizer(map[name], seen))) return true;
   }
-  for (const key of LIST_OF_SUBSCHEMAS) {
+  for (const key of SCHEMA_LIST_KEYWORDS) {
     const list = node[key];
     if (Array.isArray(list) && list.some((sub) => reachesNormalizer(sub, seen))) return true;
   }

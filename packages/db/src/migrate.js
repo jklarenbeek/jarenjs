@@ -26,6 +26,7 @@ import { resolveRuntime } from '@jarenjs/core/runtime';
 import { refuseCancelled } from './cancellation.js';
 import { cloneJson, setObjectMember } from '@jarenjs/core/object';
 import { withoutModelRenameHints } from '@jarenjs/core/model';
+import { schemaPosition } from './schema-positions.js';
 import { compileJsonQuery } from '@jarenjs/json/query';
 import { compileJsltStylesheet } from '@jarenjs/json/jslt';
 
@@ -939,9 +940,9 @@ function transformOf(transform) {
  * — since the relational order; this name says so. */
 export const planModelMigration = planMigration;
 
-/** Deep-copy a schema with the mapping vocabulary stripped: a pure
+/** Copy schema positions with the mapping vocabulary stripped: a pure
  * mapping change (an index, a column toggle) is not a DOCUMENT change
- * and demands no transform. */
+ * and demands no transform. Named maps and literal data keep their keys. */
 function stripEntityVocabulary(node) {
   if (Array.isArray(node)) return node.map(stripEntityVocabulary);
   if (node === null || typeof node !== 'object') return node;
@@ -949,7 +950,14 @@ function stripEntityVocabulary(node) {
   const out = {};
   for (const key of Object.keys(node)) {
     if (key === 'x-entity' || key === 'x-rename') continue;
-    out[key] = stripEntityVocabulary(node[key]);
+    const value = node[key];
+    const position = schemaPosition(key);
+    if (position === 2 && value !== null && typeof value === 'object' && !Array.isArray(value)) {
+      const map = {};
+      for (const name of Object.keys(value)) setObjectMember(map, name, stripEntityVocabulary(value[name]));
+      setObjectMember(out, key, map);
+    }
+    else setObjectMember(out, key, position === 1 ? stripEntityVocabulary(value) : value);
   }
   return out;
 }
@@ -1182,13 +1190,14 @@ function planEntityChanges(fromModel, toModel, dialect, steps, report, transform
     }
 
     // the stripped document-change rule (§9)
-    if (canonicalizeJson(stripEntityVocabulary(fromEntity.schema))
-      !== canonicalizeJson(stripEntityVocabulary(toEntity.schema))) {
+    const fromDocument = stripEntityVocabulary(fromEntity.schema);
+    const toDocument = stripEntityVocabulary(toEntity.schema);
+    if (canonicalizeJson(fromDocument) !== canonicalizeJson(toDocument)) {
       report.schemaChanged.push(name);
       // an additive, optional-only change leaves every stored document
       // valid, so the plan applies unattended (the ADD COLUMN above is
       // the whole of it)
-      if (isWidening(stripEntityVocabulary(fromEntity.schema), stripEntityVocabulary(toEntity.schema))) {
+      if (isWidening(fromDocument, toDocument)) {
         report.widened.push(name);
       }
       else if (transform !== null && transform.covers(name)) {
@@ -2162,7 +2171,9 @@ export function migrationStatus(target, migrations, options = {}) {
         // a receipt that anchors an adopted history: the first applied
         // document, which moves no shape and runs nothing
         const first = migrations[0];
-        const baseline = rows.length > 0 && first?.from === first?.to && Array.isArray(first?.steps) && first.steps.length === 0
+        const sameModel = first?.$migration === '0.2'
+          ? first.identity.from === first.identity.to : first?.from === first?.to;
+        const baseline = rows.length > 0 && sameModel && Array.isArray(first?.steps) && first.steps.length === 0
           ? String(first.id) : null;
         if (pending.length > 0) return { applied, pending, drift: null, upToDate: false, baseline };
         const physicalTarget = options.physicalTarget ?? migrations.at(-1)?.physical?.target

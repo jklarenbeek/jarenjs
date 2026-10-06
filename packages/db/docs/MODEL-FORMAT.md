@@ -2124,11 +2124,18 @@ validator's ignore-unknown posture — the strictness is local to the
 one namespace this package owns.
 
 The vocabulary is closed in POSITION as well as in name: `x-entity` is
-read on an entity's top-level properties (and through their `allOf`,
-`$defs` and `definitions` blocks) only. A block nested anywhere else —
-under a property's `properties`, `items`, `anyOf`, … — is never walked
-for mapping directives, so one found there is `JD0030` at its `docPath`
-rather than a key, an index or a relation that silently never existed.
+read on an entity's top-level property schemas, including their `allOf`
+branches and resolved local `$ref` targets. Within a property schema, a mapping
+block at an unread position — under nested `properties`, `items`, `anyOf`, or an
+unused local `$defs`/`definitions` entry — is `JD0030` at its `docPath`.
+
+Only schema keyword positions declare mapping blocks. Property, pattern and
+definition names are data: `properties: { "x-entity": { "type": "string" } }`
+declares an ordinary property. Values under `const`, `enum`, `default`,
+`examples` and other annotations likewise keep their literal members; an
+`"x-entity"` key inside such a value is not a mapping directive. The migration
+planner preserves these names and values when comparing document schemas
+([MIGRATION-FORMAT §9](MIGRATION-FORMAT.md#9-relational-changes-entities)).
 
 ### 9.3 The hybrid mapping
 

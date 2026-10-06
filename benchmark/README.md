@@ -771,14 +771,34 @@ Two tables in it are about `@jarenjs/linq` rather than the store:
   per definition at module load, never per request: the row exists so
   that "types for free" is not published without its cost. Each pen row
   is asserted `deepEquals` its literal before it is timed, and the
-  migration row's literal computes the same two shape hashes the pen
-  does, because a hand-written `$migration` document has to carry them
-  too.
+  migration row's literal computes the same canonical model endpoints and
+  compatibility fingerprints as the pen. Both produce the complete current
+  migration document before either is timed.
 
 The suite needs `rxdb`'s `rxjs` peer installed; it is declared in
 `benchmark/package.json` so that a checkout of the repository's own lock
 can run it.
 
+
+## Exact migration receipt costs
+
+Run the same native workload on both supported runtimes:
+
+```sh
+node --no-warnings=ExperimentalWarning benchmark/migration-identity.js --write
+bun benchmark/migration-identity.js --write
+npm run docs:derive
+```
+
+The instrument writes separate Node and Bun reports under `benchmark/`, records
+its declared source hashes and retains every sample. The
+[upgrade guide](../packages/db/docs/MIGRATION-UPGRADE.md#measured-costs) derives
+storage and elapsed costs from those reports. Current document JSON is compared
+with a legacy-shaped serialization projection; that projection never executes.
+The timing rows measure current exact authority checks, including assertions on
+complete read-only observations and unchanged receipts. They do not estimate
+production latency or claim a speedup over legacy admission. Code-size figures
+come from the existing tree-shaking instrument and keep its fixed ceilings.
 
 ## Forms composition addressing
 

@@ -1,6 +1,7 @@
 //@ts-check
 /** Installed public migration identity: one DB-only proof, also driven by the LINQ pen. */
 import assert from 'node:assert/strict';
+import { qualifyMigrationIdentityHosts } from './migration-identity-hosts.js';
 import { migrationHistory, adoptMigrationHistory, migrationStatus, migrate,
   planModelMigration, shapeHash, migrationChecksum, createModelShape, sqliteDialect,
   migrateDocuments, streamDocuments } from '@jarenjs/db';
@@ -90,7 +91,8 @@ export async function qualifyMigrationIdentity(author = (from, to, id) =>
     const streamed = [];
     await streamDocuments(rows, [documents], { write: (_name, row) => streamed.push(row) });
     assert.deepEqual(streamed, materialized.documents.items);
-    return { legacyReceipts: 1, exactReceipts: 1, observationNumeric: 'text', storelessLegacy: true };
   }
   finally { await connection.close(); }
+  return { legacyReceipts: 1, exactReceipts: 1, observationNumeric: 'text', storelessLegacy: true,
+    hosts: await qualifyMigrationIdentityHosts(author) };
 }

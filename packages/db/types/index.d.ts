@@ -1865,8 +1865,9 @@ export interface MigrationStatusReport {
   /** A one-line difference when the database drifted; null in sync. */
   drift: string | null;
   upToDate: boolean;
-  /** The id of the applied receipt that anchors an adopted history — the
-   * first document, moving no shape and running nothing — or null. */
+  /** The first applied zero-step receipt when its model endpoints are equal,
+   * or null. Version 0.2 compares exact identities; historical 0.1 retains
+   * the original short-fingerprint classification, not recovered exact models. */
   baseline: string | null;
 }
 export interface MigrationStatusOptions {

@@ -1,14 +1,12 @@
 //@ts-check
 import { readFileSync } from 'node:fs';
-import { createHash } from 'node:crypto';
+import { assertMeasurementSources } from './lib/measurement.js';
 
 /** Refuse an evidence summary whose explicitly recorded source has moved. */
 function measured(file) {
   const report = JSON.parse(readFileSync(new URL(`../benchmark/${file}`, import.meta.url), 'utf8'));
-  for (const [source, hash] of Object.entries(report.sourceHashes)) {
-    if (createHash('sha256').update(readFileSync(new URL(`../${source}`, import.meta.url))).digest('hex') !== hash)
-      throw new Error(`PostgreSQL evidence drift in ${file}: ${source}; rerun its qualification command`);
-  }
+  assertMeasurementSources(report.sourceHashes, source =>
+    `PostgreSQL evidence drift in ${file}: ${source}; rerun its qualification command`);
   return report;
 }
 

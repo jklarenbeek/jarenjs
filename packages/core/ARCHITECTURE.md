@@ -887,6 +887,15 @@ constraint extraction, emit's dropped-constraint table and the validator's
 dispatch compose. Their order is part of the contract: the validator applies
 `$data` keywords in list order.
 
+The frozen `SCHEMA_VALUE_KEYWORDS`, `SCHEMA_MAP_KEYWORDS` and
+`SCHEMA_LIST_KEYWORDS` describe single-schema, named-map and schema-list
+positions in stable traversal order. Readers compose copies with their own
+compatibility entries. Nullable analysis keeps its ordered loops; reference
+registration adds definition and legacy containers and excludes `contentSchema`;
+entity checks preserve literal data while examining their supported schema
+positions. Shared keyword membership does not make these traversal policies
+interchangeable.
+
 Beside them lives the suite's one nullable normalizer. `{ type: [T, 'null'] }`
 and a two-branch `anyOf`/`oneOf` with a null-only branch are two spellings,
 and readers ask two different questions of them:

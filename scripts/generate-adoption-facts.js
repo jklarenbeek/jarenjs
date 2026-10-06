@@ -1,16 +1,14 @@
 //@ts-check
 import { readFileSync } from 'node:fs';
-import { adoptionHash } from '../test/adoption/evidence.js';
+import { assertMeasurementSources } from './lib/measurement.js';
 
 /** Refuse stale summaries rather than deriving authoritative prose from old inputs. */
 function finalReport() {
   const report = JSON.parse(readFileSync(new URL('../benchmark/adoption-program-result.json', import.meta.url), 'utf8'));
   const manifest = JSON.parse(readFileSync(new URL('../test/adoption/manifest.json', import.meta.url), 'utf8'));
   if (report.freezeHash !== manifest.freezeHash) throw new Error('final adoption fixture drift');
-  for (const [file, hash] of Object.entries(report.sourceHashes)) {
-    if (adoptionHash(readFileSync(new URL(`../${file}`, import.meta.url))) !== hash)
-      throw new Error(`final adoption evidence drift: ${file}; run node benchmark/adoption.js --final --write`);
-  }
+  assertMeasurementSources(report.sourceHashes, file =>
+    `final adoption evidence drift: ${file}; run node benchmark/adoption.js --final --write`);
   return report;
 }
 

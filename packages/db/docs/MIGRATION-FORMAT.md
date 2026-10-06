@@ -71,9 +71,11 @@ rewrites names without changing the model, so both endpoints are equal.
 
 - `identity` is required on 0.2: `{ version: 1, from, to }`, whose two
   strings are the complete canonical JSON of the endpoint models after
-  `withoutModelRenameHints` removes collection/entity `x-rename` hints.
-  Canonicalization belongs to `@jarenjs/json`; normalization is shared by DB
-  and LINQ in `@jarenjs/core/model`. No other model annotation is stripped.
+  `withoutModelRenameHints` removes only an own `x-rename` on each
+  collection/entity declaration. Root annotations, nested schema annotations
+  and literal or named members stay part of the exact identity, including
+  own `__proto__` members. Canonicalization belongs to `@jarenjs/json`;
+  normalization is shared by DB and LINQ in `@jarenjs/core/model`.
 - `from`/`to` retain `hashContent` of those canonical strings, in base 36,
   for compatibility and display. They MUST agree with `identity`, but a
   fingerprint match is not exact authority. A wrong baseline, adjacent
@@ -784,10 +786,15 @@ every row has a shadow-verified test that migrates seeded data:
 
 Two rules keep the diff honest:
 
-- **Document changes are compared with `x-entity` stripped.** A pure
-  mapping change (an index added, a column toggle) is NOT a document
-  schema change and demands no transform; a real document change
-  yields the §3 draft-`jslt` step over the entity's table.
+- **Document comparison removes mapping keywords only at schema positions.**
+  The entity planner excludes `x-entity` and `x-rename` annotations from this
+  comparison, so a pure mapping change (an index or column toggle) needs no
+  document transform. Named members of `properties`, `patternProperties`,
+  `$defs`, `definitions`, `dependentSchemas` and `dependencies` keep their names;
+  `const`, `enum`, `default`, `examples` and other annotation data remain intact.
+  A property or literal member named `x-entity`, `x-rename` or `__proto__`
+  therefore still participates in the diff. A real narrowing leaves the §3
+  draft-`jslt` step. This comparison does not strip the exact model identity.
 - **Epoch columns populate in SQL** via
   `(julianday(value) − 2440587.5) × 86 400 000`, rounded to the
   millisecond — fractional seconds beyond that are the write
@@ -862,9 +869,9 @@ drop the index) on a schema the store accepts.
 jaren-db plan     --from <model> --to <model> [--store <db>] [--id x] [--out file]
 jaren-db plan     --model <model> [--snapshot <file>] [--store <db>] [--id x] --out file
 jaren-db snapshot --model <model> [--snapshot <file>] [--types <file>]
-jaren-db status   --model <model> --store <db> --baseline <model> [--migrations <dir>] [--snapshot <file>]
+jaren-db status   --model <model> --store <db> [--migrations <dir>] [--snapshot <file>]
 jaren-db apply    --store <db> --baseline <model> --migrations <dir> [--model <m>] [--dry-run] [--yes]
-jaren-db check    --model <model> --store <db> --baseline <model> [--migrations <dir>] [--snapshot <file>]
+jaren-db check    --model <model> --store <db> [--migrations <dir>] [--snapshot <file>]
 jaren-db shape    --model <model>
 jaren-db history  --store <db> [--out <observation.json>]
 jaren-db adopt-history --store <db> --migrations <applied-prefix-dir> --observed <observation.json>
@@ -1073,9 +1080,13 @@ steps: [], dispositions, physicalTarget: { objects }, scope: { tables }
 baseline: model, model, shadow: false })` records one history row and
 also records its exact side receipt, and every later run with the same list is `{
 applied: [], upToDate: true }`, checking the saved target on the way.
-`migrationStatus` names it: `baseline: '0000-baseline'`. Guarded `table`
-plans follow it as ordinary migrations, and an applied document is never
-rewritten (`JD0022`).
+`migrationStatus` names it: `baseline: '0000-baseline'`. For 0.2 this label
+requires the first applied document to have zero steps and equal exact model
+endpoints; equal short fingerprints alone do not qualify. Historical 0.1
+receipts retain their original short-fingerprint classification, which cannot
+recover unavailable exact starting models. Guarded `table` plans follow the
+baseline as ordinary migrations, and an applied document is never rewritten
+(`JD0022`).
 
 **The scope** is what lets ONE reviewed plan ship to every installation.
 Unscoped, a plan's source inventory is the whole schema, so an

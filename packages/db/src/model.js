@@ -5,29 +5,24 @@
  * `explainMapping` — the derived physical shape as plain data, so the
  * hybrid mapping rule is golden-testable rather than folklore.
  *
- * THE DESCENT DECISION (recorded here so it stays explicit): six copies of the `properties`/`prefixItems`/`items`/
- * `allOf` descent spine exist in this repository, and this walk was
- * the candidate seventh. It is NOT one. The entity walk is
- * deliberately ONE level deep — it enumerates the TOP-LEVEL
- * properties of an entity schema, resolves `$ref` and shallow-merges
- * `allOf` at each property through the resolvers
- * `@jarenjs/validate/normalize` exports for exactly this purpose, and
- * never recurses further, because the mapping rule sends every nested
- * shape to the JSONB document wholesale. A consumer with no recursion
- * has no descent spine to share, so the shared-enumerator question
- * (three different termination strategies across the six copies)
- * stays open for the first consumer that actually recurses. No
- * seventh copy was added.
+ * Entity mapping enumerates top-level properties, resolving `$ref`
+ * and shallow-merging `allOf` through `@jarenjs/validate/normalize`.
+ * Nested values stay in the JSONB document. A separate recursive guard
+ * uses the shared schema-position vocabulary to refuse mapping
+ * annotations the entity walk would not read; named map members and
+ * literal data remain data throughout that check.
  */
 
 import {
   collectSameDocumentAnchors, resolveSameDocumentRef,
 } from '@jarenjs/validate/normalize';
 import { compileJsonQuery } from '@jarenjs/json/query';
+import { isJsonObject, isJsonContainer } from '@jarenjs/core/object';
 
 import { DbCompileError } from './errors.js';
 import { columnCodec, normalizePhysical } from './physical.js';
 import { normalizeInvariants, resolveInvariants } from './invariants.js';
+import { schemaPosition } from './schema-positions.js';
 
 /** The closed `x-entity` vocabulary; anything else is `JD0030`. */
 const ENTITY_MEMBERS = new Set(['key', 'unique', 'index', 'default', 'column', 'relation', 'version']);
@@ -86,7 +81,7 @@ function modelError(reason, docPath, code = 'JD0005') {
  * @returns {any}
  */
 function effectiveSchema(node, root, anchors, docPath) {
-  if (node === null || typeof node !== 'object' || Array.isArray(node))
+  if (!isJsonObject(node))
     return {};
   let resolved = node;
   if (typeof node.$ref === 'string') {
@@ -117,7 +112,7 @@ function effectiveSchema(node, root, anchors, docPath) {
  */
 function normalizeEntityBlock(block, docPath) {
   if (block === undefined) return {};
-  if (block === null || typeof block !== 'object' || Array.isArray(block))
+  if (!isJsonObject(block))
     throw modelError('x-entity must be an object', docPath);
   for (const member of Object.keys(block)) {
     if (!ENTITY_MEMBERS.has(member)) {
@@ -130,7 +125,7 @@ function normalizeEntityBlock(block, docPath) {
   }
   if (block.relation !== undefined) {
     const relation = block.relation;
-    if (relation === null || typeof relation !== 'object' || Array.isArray(relation))
+    if (!isJsonObject(relation))
       throw modelError('x-entity.relation must be an object', `${docPath}/relation`);
     for (const member of Object.keys(relation)) {
       if (!RELATION_MEMBERS.has(member)) {
@@ -151,7 +146,7 @@ function normalizeEntityBlock(block, docPath) {
 function checkDefault(declared, docPath) {
   if (declared === 'now' || declared === 'updated' || declared === 'uuid'
     || declared === 'auto') return;
-  if (declared !== null && typeof declared === 'object' && !Array.isArray(declared)
+  if (isJsonObject(declared)
     && (Object.hasOwn(declared, 'value') !== Object.hasOwn(declared, 'query'))
     && Object.keys(declared).length === 1) {
     if (Object.hasOwn(declared, 'query')) {
@@ -174,11 +169,6 @@ function checkDefault(declared, docPath) {
     docPath);
 }
 
-/** The schema positions whose `x-entity` block the one-level walk READS:
- * a top-level property, an `allOf` branch of one (shallow-merged), and
- * a `$defs`/anchor target (a property's `$ref` resolves there). */
-const READ_BLOCK_KEYS = new Set(['allOf', '$defs', 'definitions']);
-
 /**
  * Find an `x-entity` block the entity walk would never read — nested
  * inside a property's `properties`, `items`, `anyOf`, … — so it fails
@@ -191,7 +181,7 @@ const READ_BLOCK_KEYS = new Set(['allOf', '$defs', 'definitions']);
  * @returns {string | null} the docPath of an unread block
  */
 function unreadEntityBlock(node, path, read) {
-  if (node === null || typeof node !== 'object') return null;
+  if (!isJsonContainer(node)) return null;
   if (Array.isArray(node)) {
     for (let i = 0; i < node.length; i++) {
       const found = unreadEntityBlock(node[i], `${path}/${i}`, read);
@@ -204,10 +194,18 @@ function unreadEntityBlock(node, path, read) {
       if (!read) return `${path}/x-entity`;
       continue;
     }
-    // a block one level under a read position is read only through
-    // `allOf`/`$defs`; under anything else it is out of the walk
-    const found = unreadEntityBlock(node[key], `${path}/${key}`, read && READ_BLOCK_KEYS.has(key));
-    if (found !== null) return found;
+    const position = schemaPosition(key);
+    const value = node[key];
+    if (position === 2 && isJsonObject(value)) {
+      for (const name of Object.keys(value)) {
+        const found = unreadEntityBlock(value[name], `${path}/${key}/${name}`, false);
+        if (found !== null) return found;
+      }
+    }
+    else if (position === 1) {
+      const found = unreadEntityBlock(value, `${path}/${key}`, read && key === 'allOf');
+      if (found !== null) return found;
+    }
   }
   return null;
 }
@@ -220,7 +218,7 @@ function unreadEntityBlock(node, path, read) {
 export function normalizeEntities(model) {
   const declared = model?.entities;
   if (declared === undefined) return new Map();
-  if (declared === null || typeof declared !== 'object' || Array.isArray(declared)
+  if (!isJsonObject(declared)
     || Object.keys(declared).length === 0)
     throw modelError('entities must be a non-empty object', '/entities');
 
@@ -231,10 +229,10 @@ export function normalizeEntities(model) {
     if (!ENTITY_NAME.test(name))
       throw modelError(`entity names are identifiers, got '${name}'`, '/entities');
     const spec = declared[name];
-    if (spec === null || typeof spec !== 'object' || Array.isArray(spec))
+    if (!isJsonObject(spec))
       throw modelError('an entity must be an object', docPath);
     const schema = spec.schema;
-    if (schema === null || typeof schema !== 'object' || Array.isArray(schema)
+    if (!isJsonObject(schema)
       || schema.properties === null || typeof schema.properties !== 'object')
       throw modelError('an entity needs an object schema with properties',
         `${docPath}/schema`);
@@ -248,7 +246,7 @@ export function normalizeEntities(model) {
       const raw = schema.properties[propertyName];
       const effective = effectiveSchema(raw, schema, anchors, propertyPath);
       const entityBlock = normalizeEntityBlock(
-        effective['x-entity'] ?? (raw !== null && typeof raw === 'object'
+        effective['x-entity'] ?? (isJsonContainer(raw)
           ? raw['x-entity'] : undefined),
         `${propertyPath}/x-entity`);
 
@@ -298,15 +296,12 @@ export function normalizeEntities(model) {
           : `'${propertyName}' declares ${needsColumn.join('/')} but has no column — ${why}`,
           propertyPath);
       }
-      for (const key of Object.keys(raw !== null && typeof raw === 'object' ? raw : {})) {
-        if (key === 'x-entity') continue;
-        const unread = unreadEntityBlock(raw[key], `${propertyPath}/${key}`, READ_BLOCK_KEYS.has(key));
-        if (unread !== null) {
-          throw new DbCompileError('JD0030',
-            'x-entity applies to an entity\'s top-level properties (and their allOf/$ref '
-            + 'targets) only — a nested block is never read, so it is refused rather than ignored',
-            unread);
-        }
+      const unread = unreadEntityBlock(raw, propertyPath, true);
+      if (unread !== null) {
+        throw new DbCompileError('JD0030',
+          'x-entity applies to an entity\'s top-level properties (and their allOf/$ref '
+          + 'targets) only — a nested block is never read, so it is refused rather than ignored',
+          unread);
       }
       if (entityBlock.column !== undefined
         && entityBlock.column !== 'integer' && entityBlock.column !== 'json') {

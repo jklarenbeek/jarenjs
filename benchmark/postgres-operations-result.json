@@ -1,13 +1,24 @@
 {
   "format": "jaren-postgres-operations/1",
-  "measuredAt": "2026-09-16T14:25:09.462282+00:00",
+  "measuredAt": "2026-10-06T18:17:34.714730+00:00",
   "sourceHashes": {
     "scripts/check-postgres-operations.js": "6fd0cc1f4a666b6c0e4c3b61354951e8195516a0fcb43db44e87586d3a7ba853",
     "scripts/check-postgres-recovery.js": "39717e0f0ee57fffd0e3d217bd0e25c232368f959be0f4b1259c381050898504",
     "docker/postgres/compose.recovery.yaml": "f0eb842a3edee7746ebe4622498e62eb2a1f7532c8abb9b503c23a711dbd4ad7",
     "test/consumer/postgres-recovery.js": "2a36dbc43dee75b018554423944a4bb6ac3cd8dd1809809886177f25233fd1bf",
     "test/consumer/backend-app.js": "0d206522d0fe197e8d3dbbec5d5dc63434fac63941938b613dee6b10c3c63068",
-    "scripts/lib/postgres-pool.js": "6aacd4804a22d6f75ac291ef60bc1e30c263b5be32bf71ce2b15ff0b0848bd80"
+    "scripts/lib/postgres-pool.js": "6aacd4804a22d6f75ac291ef60bc1e30c263b5be32bf71ce2b15ff0b0848bd80",
+    "docker/postgres/matrix.json": "4887520a244b2853b5e30454c3ca8069f21c5126ee3bf44dcea384d69c215f0c",
+    "packages/db/src/migrate.js": "0cb7749cf3429c9ab72f333f61ef07e482b77d62db85923acfb3f1f3c324d9a6",
+    "packages/db/src/migration-history.js": "007a6c3943db1ecd8a58fdfc312c343f0b032c3226d849cf59652aaaa0710b62",
+    "packages/db/src/migration-target.js": "5000be9339c3a095aae66a1662d2da54a8049df14149d2dab1a9077bd750c89f",
+    "packages/db/src/model.js": "5c289a02b954a10bd11521eb1e7fa9bafbef3b88dc25c747a2601234ef8e9ae6",
+    "packages/db/src/schema-positions.js": "04c7ae34365fdc06ecb76c6e08c6813bab77e49ff0f38285d1081e731a0725c1",
+    "packages/db/src/driver.js": "34b8d4dcc543080cead405fe0bc2ebef5c6d364e4e2f4033ec90d655dd75015d",
+    "packages/db/src/drivers/postgres.js": "0ef90999ba5ab373482fe45fc2ab0d1004e5d05543caf676913ea1fd78280a5b",
+    "packages/core/src/model.js": "cd26457ba13cdb0e4a4c331f878b2e90c7f5d6c93efb6b6eab794af412a88f7c",
+    "packages/core/src/schema.js": "a4c3cc145179df2218839a7c267c7b714392efdce74253f090725ae8f9f32f7e",
+    "packages/validate/src/schema-keywords.js": "1d815df40c021e810acbe6ce8a726b57fad2c626e111ba22a49968981e271a8a"
   },
   "logicalBackups": [
     {
@@ -22,13 +33,13 @@
         "pg_dump": "pg_dump (PostgreSQL) 16.15 (Debian 16.15-1.pgdg12+2)",
         "pg_restore": "pg_restore (PostgreSQL) 16.15 (Debian 16.15-1.pgdg12+2)"
       },
-      "metadataOmissionCases": 9,
-      "archiveBytes": 24239,
-      "archiveSha256": "e6528873d1dea3d37ab9aedb940e876daee744b2dd934c196746e0db1f257c61",
-      "tables": 13,
-      "rows": 14,
-      "bytes": 2894,
-      "elapsedMs": 2329.702922,
+      "metadataOmissionCases": 10,
+      "archiveBytes": 27446,
+      "archiveSha256": "e4922b6ab99e081faf7c35f569f6142beedd5b5efc5004de91013305f5ecb2bf",
+      "tables": 14,
+      "rows": 16,
+      "bytes": 5977,
+      "elapsedMs": 1791.1387100000002,
       "result": {
         "data": true,
         "migration": true,
@@ -56,13 +67,13 @@
         "pg_dump": "pg_dump (PostgreSQL) 17.11 (Debian 17.11-1.pgdg12+2)",
         "pg_restore": "pg_restore (PostgreSQL) 17.11 (Debian 17.11-1.pgdg12+2)"
       },
-      "metadataOmissionCases": 9,
-      "archiveBytes": 24569,
-      "archiveSha256": "81efff775d9c07c88fb54d0d4a3d3be5fe35d954bd05b6d2a0dee0a18dc24cc9",
-      "tables": 13,
-      "rows": 14,
-      "bytes": 2894,
-      "elapsedMs": 1845.8854709999998,
+      "metadataOmissionCases": 10,
+      "archiveBytes": 27870,
+      "archiveSha256": "0699874271417d154bd0de7305a79cb2ee3062151948a1634b3ee714f85d82fa",
+      "tables": 14,
+      "rows": 16,
+      "bytes": 5977,
+      "elapsedMs": 1469.5319,
       "result": {
         "data": true,
         "migration": true,
@@ -90,13 +101,13 @@
         "pg_dump": "pg_dump (PostgreSQL) 18.6 (Debian 18.6-1.pgdg12+2)",
         "pg_restore": "pg_restore (PostgreSQL) 18.6 (Debian 18.6-1.pgdg12+2)"
       },
-      "metadataOmissionCases": 9,
-      "archiveBytes": 24513,
-      "archiveSha256": "9cbe4be300aa258eb17df76d40946a351ce03d6453b9bb8aaebe9745d1ac6d3f",
-      "tables": 13,
-      "rows": 14,
-      "bytes": 2894,
-      "elapsedMs": 2023.242098,
+      "metadataOmissionCases": 10,
+      "archiveBytes": 27804,
+      "archiveSha256": "4eec4a2512edae57806ca174c4e79456bafa587101f085179f321ebb051de8b9",
+      "tables": 14,
+      "rows": 16,
+      "bytes": 5977,
+      "elapsedMs": 1456.5424460000002,
       "result": {
         "data": true,
         "migration": true,
@@ -124,11 +135,11 @@
       "archive_mode": "on"
     },
     "basebackupVersion": "pg_basebackup (PostgreSQL) 17.11 (Debian 17.11-1.pgdg12+2)",
-    "targetLsn": "0/407C940",
+    "targetLsn": "0/4082630",
     "targetWal": "000000010000000000000004",
-    "tables": 13,
-    "rows": 14,
-    "bytes": 2894,
+    "tables": 14,
+    "rows": 16,
+    "bytes": 5977,
     "sourceStoppedBeforePromotion": true,
     "sequenceAdvances": [
       {
@@ -139,6 +150,11 @@
       {
         "name": "_jaren_changes_state_rid_seq",
         "before": "3",
+        "restored": "33"
+      },
+      {
+        "name": "_jaren_migration_identity_rid_seq",
+        "before": "2",
         "restored": "33"
       },
       {
@@ -168,20 +184,21 @@
       "secondReopen": true,
       "laterWriteExcluded": true
     },
-    "elapsedMs": 7632.22106,
+    "elapsedMs": 6234.6718009999995,
     "powerLoss": false,
     "fleetFailover": false,
     "clientsClosedBeforeRemoval": true
   },
   "previous": {
     "format": "jaren-postgres-operations/1",
-    "measuredAt": "2026-09-16T12:15:25.547737+00:00",
+    "measuredAt": "2026-09-16T14:25:09.462282+00:00",
     "sourceHashes": {
-      "scripts/check-postgres-operations.js": "d7b9c28b6fdfb1a0ec0715706f6142974f5a6fc561afcd308b2c145f05c8eb08",
-      "scripts/check-postgres-recovery.js": "7c9979a58f4e850c8d056894509fbc47fb182c268b73366c25805402d7d81cb7",
+      "scripts/check-postgres-operations.js": "6fd0cc1f4a666b6c0e4c3b61354951e8195516a0fcb43db44e87586d3a7ba853",
+      "scripts/check-postgres-recovery.js": "39717e0f0ee57fffd0e3d217bd0e25c232368f959be0f4b1259c381050898504",
       "docker/postgres/compose.recovery.yaml": "f0eb842a3edee7746ebe4622498e62eb2a1f7532c8abb9b503c23a711dbd4ad7",
       "test/consumer/postgres-recovery.js": "2a36dbc43dee75b018554423944a4bb6ac3cd8dd1809809886177f25233fd1bf",
-      "test/consumer/backend-app.js": "0d206522d0fe197e8d3dbbec5d5dc63434fac63941938b613dee6b10c3c63068"
+      "test/consumer/backend-app.js": "0d206522d0fe197e8d3dbbec5d5dc63434fac63941938b613dee6b10c3c63068",
+      "scripts/lib/postgres-pool.js": "6aacd4804a22d6f75ac291ef60bc1e30c263b5be32bf71ce2b15ff0b0848bd80"
     },
     "logicalBackups": [
       {
@@ -197,12 +214,12 @@
           "pg_restore": "pg_restore (PostgreSQL) 16.15 (Debian 16.15-1.pgdg12+2)"
         },
         "metadataOmissionCases": 9,
-        "archiveBytes": 24187,
-        "archiveSha256": "2bb65a66a8570cc056bf56c8c71fabe77f21f609e59ad85fc272e243ac491c92",
+        "archiveBytes": 24239,
+        "archiveSha256": "e6528873d1dea3d37ab9aedb940e876daee744b2dd934c196746e0db1f257c61",
         "tables": 13,
         "rows": 14,
         "bytes": 2894,
-        "elapsedMs": 2411.492714,
+        "elapsedMs": 2329.702922,
         "result": {
           "data": true,
           "migration": true,
@@ -215,7 +232,8 @@
           "laterWriteExcluded": true
         },
         "roleAndAclRestore": false,
-        "powerLoss": false
+        "powerLoss": false,
+        "clientsClosedBeforeRemoval": true
       },
       {
         "format": "jaren-postgres-backup/1",
@@ -230,12 +248,12 @@
           "pg_restore": "pg_restore (PostgreSQL) 17.11 (Debian 17.11-1.pgdg12+2)"
         },
         "metadataOmissionCases": 9,
-        "archiveBytes": 24517,
-        "archiveSha256": "29879214d76b359cf61ce8ceb0f2476a3d012d34917ee4a7fa1411212ff347b4",
+        "archiveBytes": 24569,
+        "archiveSha256": "81efff775d9c07c88fb54d0d4a3d3be5fe35d954bd05b6d2a0dee0a18dc24cc9",
         "tables": 13,
         "rows": 14,
         "bytes": 2894,
-        "elapsedMs": 1779.2295219999999,
+        "elapsedMs": 1845.8854709999998,
         "result": {
           "data": true,
           "migration": true,
@@ -248,7 +266,8 @@
           "laterWriteExcluded": true
         },
         "roleAndAclRestore": false,
-        "powerLoss": false
+        "powerLoss": false,
+        "clientsClosedBeforeRemoval": true
       },
       {
         "format": "jaren-postgres-backup/1",
@@ -263,12 +282,12 @@
           "pg_restore": "pg_restore (PostgreSQL) 18.6 (Debian 18.6-1.pgdg12+2)"
         },
         "metadataOmissionCases": 9,
-        "archiveBytes": 24514,
-        "archiveSha256": "86da2ddd79c1754d46ae80c0169b897138b881d2c386f5e7919734eee822168e",
+        "archiveBytes": 24513,
+        "archiveSha256": "9cbe4be300aa258eb17df76d40946a351ce03d6453b9bb8aaebe9745d1ac6d3f",
         "tables": 13,
         "rows": 14,
         "bytes": 2894,
-        "elapsedMs": 2255.8494189999997,
+        "elapsedMs": 2023.242098,
         "result": {
           "data": true,
           "migration": true,
@@ -281,7 +300,8 @@
           "laterWriteExcluded": true
         },
         "roleAndAclRestore": false,
-        "powerLoss": false
+        "powerLoss": false,
+        "clientsClosedBeforeRemoval": true
       }
     ],
     "pitr": {
@@ -339,9 +359,181 @@
         "secondReopen": true,
         "laterWriteExcluded": true
       },
-      "elapsedMs": 6049.333114,
+      "elapsedMs": 7632.22106,
       "powerLoss": false,
-      "fleetFailover": false
+      "fleetFailover": false,
+      "clientsClosedBeforeRemoval": true
+    },
+    "previous": {
+      "format": "jaren-postgres-operations/1",
+      "measuredAt": "2026-09-16T12:15:25.547737+00:00",
+      "sourceHashes": {
+        "scripts/check-postgres-operations.js": "d7b9c28b6fdfb1a0ec0715706f6142974f5a6fc561afcd308b2c145f05c8eb08",
+        "scripts/check-postgres-recovery.js": "7c9979a58f4e850c8d056894509fbc47fb182c268b73366c25805402d7d81cb7",
+        "docker/postgres/compose.recovery.yaml": "f0eb842a3edee7746ebe4622498e62eb2a1f7532c8abb9b503c23a711dbd4ad7",
+        "test/consumer/postgres-recovery.js": "2a36dbc43dee75b018554423944a4bb6ac3cd8dd1809809886177f25233fd1bf",
+        "test/consumer/backend-app.js": "0d206522d0fe197e8d3dbbec5d5dc63434fac63941938b613dee6b10c3c63068"
+      },
+      "logicalBackups": [
+        {
+          "format": "jaren-postgres-backup/1",
+          "postgres": {
+            "version": "16.15 (Debian 16.15-1.pgdg12+2)",
+            "fsync": "on",
+            "synchronous_commit": "on",
+            "full_page_writes": "on"
+          },
+          "toolVersions": {
+            "pg_dump": "pg_dump (PostgreSQL) 16.15 (Debian 16.15-1.pgdg12+2)",
+            "pg_restore": "pg_restore (PostgreSQL) 16.15 (Debian 16.15-1.pgdg12+2)"
+          },
+          "metadataOmissionCases": 9,
+          "archiveBytes": 24187,
+          "archiveSha256": "2bb65a66a8570cc056bf56c8c71fabe77f21f609e59ad85fc272e243ac491c92",
+          "tables": 13,
+          "rows": 14,
+          "bytes": 2894,
+          "elapsedMs": 2411.492714,
+          "result": {
+            "data": true,
+            "migration": true,
+            "feed": true,
+            "jobs": true,
+            "checkpoint": true,
+            "receipt": true,
+            "noEcho": true,
+            "secondReopen": true,
+            "laterWriteExcluded": true
+          },
+          "roleAndAclRestore": false,
+          "powerLoss": false
+        },
+        {
+          "format": "jaren-postgres-backup/1",
+          "postgres": {
+            "version": "17.11 (Debian 17.11-1.pgdg12+2)",
+            "fsync": "on",
+            "synchronous_commit": "on",
+            "full_page_writes": "on"
+          },
+          "toolVersions": {
+            "pg_dump": "pg_dump (PostgreSQL) 17.11 (Debian 17.11-1.pgdg12+2)",
+            "pg_restore": "pg_restore (PostgreSQL) 17.11 (Debian 17.11-1.pgdg12+2)"
+          },
+          "metadataOmissionCases": 9,
+          "archiveBytes": 24517,
+          "archiveSha256": "29879214d76b359cf61ce8ceb0f2476a3d012d34917ee4a7fa1411212ff347b4",
+          "tables": 13,
+          "rows": 14,
+          "bytes": 2894,
+          "elapsedMs": 1779.2295219999999,
+          "result": {
+            "data": true,
+            "migration": true,
+            "feed": true,
+            "jobs": true,
+            "checkpoint": true,
+            "receipt": true,
+            "noEcho": true,
+            "secondReopen": true,
+            "laterWriteExcluded": true
+          },
+          "roleAndAclRestore": false,
+          "powerLoss": false
+        },
+        {
+          "format": "jaren-postgres-backup/1",
+          "postgres": {
+            "version": "18.6 (Debian 18.6-1.pgdg12+2)",
+            "fsync": "on",
+            "synchronous_commit": "on",
+            "full_page_writes": "on"
+          },
+          "toolVersions": {
+            "pg_dump": "pg_dump (PostgreSQL) 18.6 (Debian 18.6-1.pgdg12+2)",
+            "pg_restore": "pg_restore (PostgreSQL) 18.6 (Debian 18.6-1.pgdg12+2)"
+          },
+          "metadataOmissionCases": 9,
+          "archiveBytes": 24514,
+          "archiveSha256": "86da2ddd79c1754d46ae80c0169b897138b881d2c386f5e7919734eee822168e",
+          "tables": 13,
+          "rows": 14,
+          "bytes": 2894,
+          "elapsedMs": 2255.8494189999997,
+          "result": {
+            "data": true,
+            "migration": true,
+            "feed": true,
+            "jobs": true,
+            "checkpoint": true,
+            "receipt": true,
+            "noEcho": true,
+            "secondReopen": true,
+            "laterWriteExcluded": true
+          },
+          "roleAndAclRestore": false,
+          "powerLoss": false
+        }
+      ],
+      "pitr": {
+        "format": "jaren-postgres-pitr/1",
+        "image": "postgres:17.11-bookworm@sha256:7bade6d532592ca8ce7ee32def7399dad2607c4ea5583839fc4352a095a11ea6",
+        "postgres": {
+          "version": "17.11 (Debian 17.11-1.pgdg12+2)",
+          "fsync": "on",
+          "synchronous_commit": "on",
+          "full_page_writes": "on",
+          "archive_mode": "on"
+        },
+        "basebackupVersion": "pg_basebackup (PostgreSQL) 17.11 (Debian 17.11-1.pgdg12+2)",
+        "targetLsn": "0/407C940",
+        "targetWal": "000000010000000000000004",
+        "tables": 13,
+        "rows": 14,
+        "bytes": 2894,
+        "sourceStoppedBeforePromotion": true,
+        "sequenceAdvances": [
+          {
+            "name": "_jaren_changes_rid_seq",
+            "before": "2",
+            "restored": "33"
+          },
+          {
+            "name": "_jaren_changes_state_rid_seq",
+            "before": "3",
+            "restored": "33"
+          },
+          {
+            "name": "_jaren_migrations_rid_seq",
+            "before": "1",
+            "restored": "33"
+          },
+          {
+            "name": "items_rid_seq",
+            "before": "2",
+            "restored": "33"
+          },
+          {
+            "name": "receipts_rid_seq",
+            "before": null,
+            "restored": null
+          }
+        ],
+        "result": {
+          "data": true,
+          "migration": true,
+          "feed": true,
+          "jobs": true,
+          "checkpoint": true,
+          "receipt": true,
+          "noEcho": true,
+          "secondReopen": true,
+          "laterWriteExcluded": true
+        },
+        "elapsedMs": 6049.333114,
+        "powerLoss": false,
+        "fleetFailover": false
+      }
     }
   }
 }

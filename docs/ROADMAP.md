@@ -309,16 +309,6 @@ what each does is its own documentation's job
 ([linq](../packages/linq/README.md) ·
 [db](../packages/db/README.md)). What remains open:
 
-- [ ] **Collision-safe migration history identity.** `shapeHash` and
-  `migrationChecksum` persist 32-bit FNV-1a fingerprints; distinct canonical
-  documents can collide and matching checksums alone do not prove equality.
-  An exact canonical-document or stronger versioned-digest protocol needs an
-  explicit upgrade and adoption policy for already applied histories, matching
-  SQLite/PostgreSQL verification, and fixed collision regressions. Preserve
-  existing history bytes until that protocol can distinguish and qualify old
-  records; [MIGRATION-FORMAT §5](../packages/db/docs/MIGRATION-FORMAT.md#5-history-and-checksums)
-  states the current limit.
-
 - [ ] **Entity-level indexes: composite, partial, expression.** An
   entity's index vocabulary is one single-column index per property
   marked `unique`/`index`; a collection already declares ordered

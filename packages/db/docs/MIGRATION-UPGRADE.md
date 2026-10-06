@@ -11,6 +11,15 @@ normal backup and rollout procedure. Adoption attests the artifacts and current
 model you reviewed; an old checksum cannot prove which colliding document ran.
 The protocol is specified in [MIGRATION-FORMAT §5](MIGRATION-FORMAT.md#5-history-and-checksums).
 
+A consistent backup must keep application data, `_jaren_migrations` and
+`_jaren_migration_identity` together. Preserve the normal rows' ordering values
+(SQLite `rowid` or PostgreSQL `rid`), columns and complete side payloads; an
+application-table-only export is insufficient. Use a backend-consistent snapshot,
+including committed WAL, rather than copying an open SQLite main file alone
+([native backup behavior](HOSTS.md#existing-file-adoption-and-backup)). Reopen a
+restored copy and verify its full history against the unchanged reviewed artifacts
+before using it. Do not recreate missing receipts from short checksums.
+
 ## 1. Preserve applied artifacts before upgrading
 
 Keep each applied JSON file byte-for-byte. Do not change `$migration`, add an
@@ -56,6 +65,7 @@ ran. Never silently adopt newly emitted 0.2 replacements for applied 0.1 modules
 After installing the new release:
 
 ```sh
+mkdir -p ./review
 jaren-db history --store ./app.db --out ./review/history.observed.json
 ```
 
@@ -144,8 +154,73 @@ runs the exact tail. It never copies primary receipts to skip work. Legacy
 starting/intermediate exact models remain unknown; adoption establishes the
 reviewed current boundary, not unavailable historical facts.
 
-`openStore(..., { adopt: true })` verifies an existing physical mapping and does
-not adopt migration authority. A new zero-step physical baseline starts history
-for an existing schema without applied migration records; it is also a separate
-operation. File-only `migrateDocuments`, `streamDocuments` and `jaren-db documents`
-retain structural 0.1 compatibility because they have no database history.
+These operations establish different things:
+
+| Operation | Result |
+|---|---|
+| Physical adoption: `openStore(..., { adopt: true })` | Verifies an existing physical mapping; grants no migration-history authority. |
+| Identity attestation: `adopt-history` / `adoptMigrationHistory` | Records exact receipts for the reviewed applied 0.1 prefix without rerunning its steps. |
+| New zero-step physical baseline | Starts 0.2 history for an existing schema with no applied migration records; saves a reviewed model-to-itself target. |
+| New planner or pen output | Authors a pending 0.2 artifact; the runner applies it and records both receipt families. |
+
+File-only `migrateDocuments`, `streamDocuments` and `jaren-db documents` retain
+structural 0.1 compatibility because they have no database history.
+
+## 5. Refusals to resolve before retrying
+
+| Code | Meaning and next step |
+|---|---|
+| `JD0028` | Legacy authority needs explicit observation/attestation, or pending work is 0.1. Preserve applied files; deliberately author pending replacements as 0.2. |
+| `JD0022` | The complete history, observation, exact document or side authority disagrees. Stop and compare the stored state with reviewed artifacts and backups; do not delete or regenerate receipts. |
+| `JD0020` | The baseline, adjacent exact endpoints or supplied model disagree. Select the matching model snapshots and full chain without editing applied artifacts. |
+| `JD0021` | A draft, target-data check, replay prerequisite or writer setting refuses. Read the named reason; provide the required transform/target/independent shadow or dedicated PostgreSQL `READ COMMITTED` scope. |
+| `JD0023` | A malformed migration, failed step or physical acceptance check refuses. Inspect the reason and any classified cause before changing pending work. |
+| `JL0102` | `fromPlanned` received legacy input or a model that differs from the exact planned endpoint. Keep legacy files immutable and supply the reviewed current artifact/models. |
+
+A fresh observation is a review input, not permission to repair authority
+metadata. These codes do not replace the application's restore and rollout policy.
+
+
+## Measured costs
+
+Exact identity stores complete canonical documents and model endpoints, so
+storage and comparison costs grow with their size. A short fingerprint remains
+useful for display; it does not replace this evidence. The migration pen adds <!--fact:bundle.migration-->25,931<!--/fact--> bytes to an otherwise empty
+consumer bundle; the DB-client fixture is <!--fact:bundle.db-->836,237<!--/fact--> bytes. These are complete measured
+fixture sizes, not the incremental price of identity alone.
+
+The following native SQLite workload measures current receipts and repeat
+checks. Reproduce both reports from the repository root:
+
+```sh
+node --no-warnings=ExperimentalWarning benchmark/migration-identity.js --write
+bun benchmark/migration-identity.js --write
+npm run docs:derive
+```
+
+The instrument records every sample, runtime and source hash. Documentation
+derivation refuses stale sources or incomplete evidence. Keep the JSON reports
+with the code that produced them.
+
+<!--fact:migration.costs-->
+
+10 SQL-only links; 500 calls per read/repeat loop; medians of 5 fresh-database samples. Every sample preserves exact application, normal-history and identity rows.
+
+| Native runtime / SQLite | Apply all links ms | Status loop ms | No-op apply loop ms | Observation loop ms | Measured at |
+|---|---:|---:|---:|---:|---|
+| node 24.20.0 / 3.53.4 | 12.421 | 310.476 | 301.624 | 80.446 | 2026-10-06T18:12:01.404Z |
+| bun 1.4.2 / 3.53.2 | 16.075 | 292.803 | 302.546 | 79.050 | 2026-10-06T18:12:05.228Z |
+
+| Native runtime | Current document JSON bytes | Legacy-shaped JSON projection bytes | Side rows / key+value UTF-8 bytes | SQLite page growth bytes |
+|---|---:|---:|---:|---:|
+| node | 2521 | 1311 | 11 / 5147 | 24576 |
+| bun | 2521 | 1311 | 11 / 5147 | 24576 |
+
+Ten SQL-only links on a borrowed synchronous in-memory SQLite connection; shadow replay is disabled. Each sample uses a fresh database. Timed loops include result assertions; observations compare complete receipts. All samples are retained, with medians reported. Shared-host elapsed costs are not production latency or a causal comparison with the old protocol. Legacy projection bytes compare JSON serialization only; no legacy document executes. Page growth includes both history tables and application writes, not only receipt payload.
+
+<!--/fact-->
+
+For PostgreSQL logical backup and archived-WAL recovery measurements, see
+[PostgreSQL operations](POSTGRESQL.md). Native SQLite crash and backup checks
+cover receipt/adoption rollback and publication boundaries; they do not model
+power loss or establish application-specific production recovery guarantees.

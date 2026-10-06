@@ -1,0 +1,89 @@
+{
+  "format": "jaren-migration-identity-cost/1",
+  "measuredAt": "2026-10-06T18:12:05.228Z",
+  "runtime": {
+    "name": "bun",
+    "version": "1.4.2",
+    "sqlite": "3.53.2",
+    "platform": "linux",
+    "arch": "x64",
+    "cpu": "AMD Ryzen 9 5900HX with Radeon Graphics",
+    "loadavg": [
+      8.34,
+      15.78,
+      15
+    ]
+  },
+  "sourceHashes": {
+    "benchmark/migration-identity.js": "0d608730e6720bf82cfff19f131d69ada2cf63e668b2002cf6c0bf7e80271d34",
+    "packages/core/src/model.js": "cd26457ba13cdb0e4a4c331f878b2e90c7f5d6c93efb6b6eab794af412a88f7c",
+    "packages/core/src/schema.js": "a4c3cc145179df2218839a7c267c7b714392efdce74253f090725ae8f9f32f7e",
+    "packages/json/src/canonical.js": "2ee391287c77199070a518f63bc54be4580ec3fe1e82f56d7b4ff2c41919db80",
+    "packages/linq/src/migration/define.js": "b2f8b1c2700d24224e7dbb47996cc8246f1b5c560354290c79f5c047e4030ff6",
+    "packages/linq/src/migration/steps.js": "33fc702678066cd4acc4528cbf315cabd5cc5d7da29ca0770eec40d7d0f56993",
+    "packages/db/src/migrate.js": "0cb7749cf3429c9ab72f333f61ef07e482b77d62db85923acfb3f1f3c324d9a6",
+    "packages/db/src/migration-history.js": "007a6c3943db1ecd8a58fdfc312c343f0b032c3226d849cf59652aaaa0710b62",
+    "packages/db/src/model.js": "5c289a02b954a10bd11521eb1e7fa9bafbef3b88dc25c747a2601234ef8e9ae6",
+    "packages/db/src/migration-target.js": "5000be9339c3a095aae66a1662d2da54a8049df14149d2dab1a9077bd750c89f",
+    "packages/db/src/document-steps.js": "e06988d65df6b2be42eb880a6b7443c076fc3bf56c6066ef24ed84bd762b8636",
+    "packages/db/src/schema-positions.js": "04c7ae34365fdc06ecb76c6e08c6813bab77e49ff0f38285d1081e731a0725c1",
+    "packages/validate/src/schema-keywords.js": "1d815df40c021e810acbe6ce8a726b57fad2c626e111ba22a49968981e271a8a",
+    "packages/db/src/driver.js": "34b8d4dcc543080cead405fe0bc2ebef5c6d364e4e2f4033ec90d655dd75015d",
+    "packages/db/src/drivers/bun.js": "7ff48ae024ee37b20525a594d2c5ce5ba72d7b037ec282a83d7cab38d2ad7aa9"
+  },
+  "rounds": 5,
+  "calls": 500,
+  "storage": {
+    "links": 10,
+    "currentDocumentBytes": 2521,
+    "legacyProjectionBytes": 1311,
+    "identityRows": 11,
+    "identityPayloadBytes": 5147,
+    "databaseGrowthBytes": 24576
+  },
+  "samples": [
+    {
+      "applyMs": 29.557105000000007,
+      "statusMs": 382.562428,
+      "repeatMs": 340.44217399999997,
+      "observationMs": 88.74674300000004
+    },
+    {
+      "applyMs": 13.392362999999932,
+      "statusMs": 298.3815629999999,
+      "repeatMs": 332.795153,
+      "observationMs": 86.64084899999989
+    },
+    {
+      "applyMs": 12.750600000000077,
+      "statusMs": 291.17977399999995,
+      "repeatMs": 301.06964600000015,
+      "observationMs": 79.0499789999999
+    },
+    {
+      "applyMs": 16.07485799999995,
+      "statusMs": 292.2551739999999,
+      "repeatMs": 302.5458600000002,
+      "observationMs": 73.19373199999973
+    },
+    {
+      "applyMs": 18.871752000000015,
+      "statusMs": 292.803351,
+      "repeatMs": 300.0429240000003,
+      "observationMs": 75.63702400000011
+    }
+  ],
+  "medianMs": {
+    "applyMs": 16.07485799999995,
+    "statusMs": 292.803351,
+    "repeatMs": 302.5458600000002,
+    "observationMs": 79.0499789999999
+  },
+  "checks": {
+    "exactRows": true,
+    "synchronousCalls": true,
+    "unchangedHistory": true,
+    "unchangedIdentity": true
+  },
+  "scope": "Ten SQL-only links on a borrowed synchronous in-memory SQLite connection; shadow replay is disabled. Each sample uses a fresh database. Timed loops include result assertions; observations compare complete receipts. All samples are retained, with medians reported. Shared-host elapsed costs are not production latency or a causal comparison with the old protocol. Legacy projection bytes compare JSON serialization only; no legacy document executes. Page growth includes both history tables and application writes, not only receipt payload."
+}

@@ -1,5 +1,6 @@
 //@ts-check
 import assert from 'node:assert/strict';
+import { planModelMigration, sqliteDialect } from '@jarenjs/db';
 import { defineMigration, fromPlanned } from '@jarenjs/linq/migration';
 import { qualifyMigrationIdentity } from './migration-identity.js';
 
@@ -18,5 +19,5 @@ export async function qualifyLinqMigrationIdentity() {
   legacy.$migration = '0.1';
   assert.throws(() => fromPlanned(legacy), { code: 'JL0102' });
   return qualifyMigrationIdentity((from, to, id) => fromPlanned(
-    defineMigration({ id, from, to }).document, { from, to }).document);
+    planModelMigration(from, to, { id, dialect: sqliteDialect }).migration, { from, to }).document);
 }
