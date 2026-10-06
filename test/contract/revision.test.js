@@ -167,7 +167,7 @@ describe('the host revision — an internal gate\'s identity over every operatio
     assert.strictEqual(await a.revision({ audience: 'all' }), await compileContract(doc({ type: 'string' })).revision({ audience: 'all' }),
       'stable across compiles');
     for (const options of [{ audience: 'server' }, { scope: 'all' }, 'all']) {
-      assert.throws(() => a.revision(/** @type {any} */ (options)), (e) => e.code === 'JC1008', JSON.stringify(options));
+      await assert.rejects(a.revision(/** @type {any} */ (options)), (e) => e.code === 'JC1008', JSON.stringify(options));
     }
   });
 

@@ -20,7 +20,7 @@
  * task-registry resolution (`JF0018`).
  */
 
-import { cloneJson, deepFreeze, setObjectMember, isJsonObject } from '@jarenjs/core/object';
+import { cloneJson, deepFreeze, setObjectMember, isJsonObject, isPlainOptions } from '@jarenjs/core/object';
 
 import { LinqBuildError } from '../errors.js';
 import { describeValue, requireJson, requireNameMap } from '../json-boundary.js';
@@ -166,6 +166,10 @@ export function task(run, props = undefined, options = undefined) {
   if (typeof run !== 'string' || run === '') {
     throw new LinqBuildError('JL0101',
       `task() takes the handler name as a non-empty string, got ${describeValue(run)}`, '/run');
+  }
+  if (options !== undefined) {
+    if (!isPlainOptions(options)) throw new LinqBuildError('JL0101', 'task() options must be { version? }');
+    closedTo(options, ['version'], 'task()');
   }
   const version = options?.version;
   if (version !== undefined && (typeof version !== 'string' || version === '')) {

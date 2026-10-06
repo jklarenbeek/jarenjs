@@ -1,7 +1,7 @@
 //@ts-check
 /**
  * @file The history discipline: the migration list must agree with the
- * applied records (same ids, same order, same signature-grade
+ * applied records (same ids, same order, same persisted
  * checksums — `JD0022` otherwise), the chain must anchor on the
  * database's recorded shape (`JD0020`), and the baseline is an
  * explicit requirement, never a guess.

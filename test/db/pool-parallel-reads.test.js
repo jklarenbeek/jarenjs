@@ -423,9 +423,9 @@ describe('parallel root reads on the pool host', () => {
       await assert.rejects(openStore(MODEL, { driver: nodeWorkerDriver(), path: dbPath, reads: 'parallel' }),
         (error) => error.code === 'JD0009' && /has no readers/.test(error.message));
       await assert.rejects(openStore(MODEL, { driver: nodeWorkerPoolDriver({ readers: 0 }), path: dbPath, reads: 'parallel' }),
-        (error) => error.code === 'JD0009' && /opened no reader/.test(error.message));
+        (error) => error.code === 'JD0009' && /has no readers for this open/.test(error.message));
       await assert.rejects(openStore(MODEL, { driver: nodeWorkerPoolDriver({ readers: 2 }), path: ':memory:', reads: 'parallel' }),
-        (error) => error.code === 'JD0009' && /opened no reader/.test(error.message));
+        (error) => error.code === 'JD0009' && /has no readers for this open/.test(error.message));
       await assert.rejects(openStore(MODEL, { driver: nodeWorkerPoolDriver({ readers: 2 }), path: dbPath, reads: 'yes' }),
         (error) => error.code === 'JD0009' && /'serialized' or 'parallel'/.test(error.message));
       // an explicit 'serialized' is today's behaviour on every host

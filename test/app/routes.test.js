@@ -240,3 +240,27 @@ describe('route tables: an address named by its template', () => {
     assert.equal(host.count(), 0);
   });
 });
+
+
+it('route and navigation option typos are refused before listeners or history effects', () => {
+  for (const [mode, factory] of [['hash', createHashRouteSubscription], ['history', createHistoryRouteSubscription]]) {
+    const host = windowAt(mode === 'hash' ? 'https://app.test/#/start' : 'https://app.test/start');
+    assert.throws(() => factory({ window: host.window, templats: { item: '/items/{id}' } }),
+      (error) => error.code === 'JA2023' && /templates/.test(error.message));
+    for (const options of [[], new Map(), Object.assign(new Map(), { window: host.window })]) {
+      assert.throws(() => factory(options), { code: 'JA2023' });
+    }
+    assert.equal(host.count(), 0);
+    const routes = factory(Object.assign(Object.create(null), { window: host.window }));
+    routes({ action: 'route' }, () => {});
+    const initial = [...host.history];
+    for (const navigation of [{ replac: true }, [], new Map(), { replace: 'yes' }]) {
+      assert.throws(() => routes.navigate('/next', navigation), { code: 'JA2023' });
+      assert.deepEqual(host.history, initial);
+    }
+    routes.navigate('/next', Object.assign(Object.create(null), { replace: true }));
+    assert.equal(host.history.length, 1);
+    routes.dispose();
+    assert.equal(host.count(), 0);
+  }
+});

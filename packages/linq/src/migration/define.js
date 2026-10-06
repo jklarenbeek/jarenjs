@@ -60,7 +60,7 @@ function withoutRenameHints(model) {
 }
 
 /**
- * The signature-grade identity of a model SHAPE — what a migration's
+ * The persisted 32-bit fingerprint of a model shape — what a migration's
  * `from`/`to` name, and what a database records.
  * @param {any} model
  * @returns {string}

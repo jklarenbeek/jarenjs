@@ -6,6 +6,7 @@ import { sqliteDialect } from './dialects/sqlite.js';
 import { sqliteRelationalVocabulary } from './dialects/sqlite-relational.js';
 import { chain, attempt, abortReason } from './driver.js';
 import { createCursor, createSyncCursor, admitCursor, rowClassOf } from './cursor.js';
+import { readOptions, readControls } from './options.js';
 
 /** @typedef {{ sql: string, params: any[], access: 'read'|'write' }} RelationalPlan */
 const fail = (message) => { throw new DbCompileError('JD0038', message); };
@@ -272,9 +273,12 @@ export function relationalEmitter(options = {}) {
 }
 
 /** Produce reviewable, bound native SQL; the default dialect remains SQLite.
- * @param {any} document @param {{externals?:Record<string,any>,dialect?:any}} [options]
+ * The signal belongs to execution; planning is synchronous and does not poll it.
+ * @param {any} document @param {{externals?:Record<string,any>,dialect?:any,signal?:AbortSignal}} [options]
  * @returns {RelationalPlan} */
 export function planRelational(document, options) {
+  readOptions(options, ['externals', 'dialect', 'signal'], 'planRelational()');
+  readControls(options, 'planRelational()');
   const emitter = relationalEmitter(options);
   const writing = object(document) && own(document, 'op');
   return { sql: writing ? emitter.mutation(document) : emitter.select(document),
@@ -318,7 +322,11 @@ const classified = (error) => wrapDriverError(error, { docPath: '/relational' })
  */
 export function relationalEngine(policy) {
   const { dialect } = policy;
-  const planFor = (document, options) => planRelational(document, { ...options, dialect });
+  const planFor = (document, options) => {
+    readOptions(options, ['externals', 'signal'], 'relational');
+    readControls(options, 'relational');
+    return planRelational(document, { externals: options?.externals, dialect });
+  };
   const readPlan = (document, options) => {
     policy.available();
     const plan = planFor(document, options);

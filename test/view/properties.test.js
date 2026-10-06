@@ -263,3 +263,47 @@ describe('a value the property would convert is written as the attribute the ser
     }
   });
 });
+
+
+describe('numeric and boolean reflections preserve the serialized attribute', () => {
+  it('patches zero, negative and fractional reflected numbers without destroying the mounted node', () => {
+    for (const [tag, name] of [['input', 'size'], ['img', 'width'], ['canvas', 'width'], ['progress', 'value']]) {
+      const h = host();
+      h.render([tag, { [name]: 5 }]);
+      const mounted = h.node();
+      for (const value of [0, -1, 2.5, null, 3]) {
+        const vnode = [tag, { [name]: value }];
+        h.render(vnode);
+        assert.strictEqual(h.node(), mounted, `${tag}.${name}: ${value}`);
+        assert.deepStrictEqual(attributesOf(h.node()), ssrAttributes(renderToString(vnode)), `${tag}.${name}: ${value}`);
+      }
+    }
+  });
+
+  it('a non-boolean disabled value stays present, including zero and the empty string', () => {
+    const h = host();
+    for (const value of [true, 0, '', 'false', 1, false, null]) {
+      const vnode = ['button', { disabled: value }];
+      h.render(vnode);
+      assert.deepStrictEqual(attributesOf(h.node()), ssrAttributes(renderToString(vnode)), JSON.stringify(value));
+      assert.strictEqual(h.node().disabled, value !== false && value !== null, JSON.stringify(value));
+    }
+  });
+
+  it('live numeric properties still receive numbers without a content attribute', () => {
+    const { document, container } = createReflectingHost();
+    const create = document.createElement.bind(document);
+    document.createElement = (tag) => {
+      const node = create(tag);
+      node.scrollTop = 0;
+      return node;
+    };
+    const render = createDomRenderer(container, { document });
+    for (const value of [10, 0, 2.5]) {
+      render(['div', { scrollTop: value }]);
+      assert.strictEqual(container.childNodes[0].scrollTop, value);
+      assert.strictEqual(container.childNodes[0].getAttribute('scrollTop'), null);
+    }
+    render.destroy();
+  });
+});

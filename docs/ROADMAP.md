@@ -153,13 +153,10 @@ establish registry publication or downstream acceptance.
   semantics. APP-FORMAT §8.4/§8.7 state the contracts that audit would have to
   prove.
 - [ ] **First-class awaiting action documents** — the async-task convention and `createTaskEffect` cover the pattern without a format change (`packages/app/docs/TASKS.md`); making *awaiting* expressible in the action document itself is the open half (APP-FORMAT §11).
-- [ ] **Two property writes the renderers still spell differently.** The
-  property table settles enumerated attributes and removal, and both renderers
-  read it. `true` given to a non-boolean property is still written `"true"` by
-  the DOM renderer and as a bare attribute by SSR, and a trusted inline handler
-  string (`onclick: '…'`) is dropped on the DOM property path while SSR writes
-  it as a live attribute. Each needs a rule in the table and a decision on the
-  trusted-mode handler string before either renderer changes.
+- [ ] **Trusted inline-handler strings differ between renderers.** A trusted
+  handler string (`onclick: '…'`) is dropped on the DOM property path while
+  SSR writes it as a live attribute. This needs an explicit trusted-mode
+  policy and a rule in the shared property table before either renderer changes.
 - [ ] **Native IME verification** — composition-aware controlled writes,
   caret preservation, multiple selects and the safe create/update/remove/reinsert
   corpus are exercised in Chromium, Firefox and WebKit. The automated tests
@@ -311,6 +308,16 @@ The fluent front door and the SQLite document store shipped as a pair;
 what each does is its own documentation's job
 ([linq](../packages/linq/README.md) ·
 [db](../packages/db/README.md)). What remains open:
+
+- [ ] **Collision-safe migration history identity.** `shapeHash` and
+  `migrationChecksum` persist 32-bit FNV-1a fingerprints; distinct canonical
+  documents can collide and matching checksums alone do not prove equality.
+  An exact canonical-document or stronger versioned-digest protocol needs an
+  explicit upgrade and adoption policy for already applied histories, matching
+  SQLite/PostgreSQL verification, and fixed collision regressions. Preserve
+  existing history bytes until that protocol can distinguish and qualify old
+  records; [MIGRATION-FORMAT §5](../packages/db/docs/MIGRATION-FORMAT.md#5-history-and-checksums)
+  states the current limit.
 
 - [ ] **Entity-level indexes: composite, partial, expression.** An
   entity's index vocabulary is one single-column index per property
@@ -540,9 +547,6 @@ validated command/receipt transaction with current-authority and snapshot checks
   types, and each application's helper and result policies, which decide the
   differences a translation names. Retain the application-selected trusted
   runner until every original is resolved.
-- [ ] `FormulaError` messages are English: the formula engine's 19 raise sites
-  pass their reason through `query/reason`, where the query engine's own messages
-  are catalog entries every locale pack translates.
 - [ ] A per-dimension unit registry: `$quantity` carries every dimension's unit
   table, though its words name only mass, volume and length, because the
   registry is one module.

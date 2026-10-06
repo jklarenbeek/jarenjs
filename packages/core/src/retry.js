@@ -1,5 +1,8 @@
 //@ts-check
 /** Shared backoff arithmetic, abortable waits and an explicit dispatch budget. */
+import { isPlainOptions, refuseUnknownMembers } from './object.js';
+
+const BACKOFF_OPTIONS = ['policy', 'baseMs', 'maxMs', 'random'];
 
 /**
  * Calculate a delay; strict never shortens the server's minimum wait.
@@ -14,7 +17,15 @@
  * @returns {number}
  */
 export function backoffDelay(options, attempt, retryAfterMs = undefined) {
+  if (!isPlainOptions(options)) throw new TypeError('backoffDelay options must be a plain object');
+  refuseUnknownMembers(options, BACKOFF_OPTIONS,
+    (key, hint) => new TypeError(`backoffDelay: unknown option '${key}'${hint}`));
   const { policy = 'strict', baseMs = 500, maxMs = 8000, random = Math.random } = options;
+  if (!['strict', 'equal', 'ai-compat', 'contract-compat'].includes(policy))
+    throw new TypeError('backoffDelay policy must be strict, equal, ai-compat or contract-compat');
+  if (!Number.isFinite(baseMs) || baseMs < 0 || !Number.isFinite(maxMs) || maxMs < 0)
+    throw new TypeError('backoffDelay baseMs and maxMs must be finite nonnegative numbers');
+  if (typeof random !== 'function') throw new TypeError('backoffDelay random must be a function');
   const cap = Math.min(maxMs, baseMs * 2 ** (attempt - 1));
   if (retryAfterMs !== undefined)
     return policy === 'ai-compat' ? Math.min(maxMs, retryAfterMs) : Math.max(0, retryAfterMs);

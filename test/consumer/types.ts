@@ -1509,6 +1509,11 @@ heldValidator.addSchema(heldSchema, 'https://example.com/held');
 const heldCheck = heldValidator.compile(heldSchema);
 void heldCheck('data');
 
+// @jarenjs/core/checksum — byte views produce an unsigned numeric checksum.
+import { crc32 } from '@jarenjs/core/checksum';
+const checksum: number = crc32(new Uint8Array([1, 2, 3]));
+void checksum;
+
 // @jarenjs/core/random — the seeded stream and its three draws, typed:
 // the stream is a plain `() => number`, the draws take it first.
 import { mulberry32, randomInt, shuffle, drawDistinct } from '@jarenjs/core/random';

@@ -1,18 +1,10 @@
 //@ts-check
 /** A deterministic ZIP export. Dependencies are supplied as local bundled
  * bytes, never silently replaced with mutable CDN URLs. */
+import { crc32 } from '@jarenjs/core/checksum';
 import { parseProject } from './project.js';
 
 const utf8 = new TextEncoder();
-const crc32 = (bytes) => {
-  let crc = 0xffffffff;
-  for (const byte of bytes) {
-    crc ^= byte;
-    for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
-  }
-  return (crc ^ 0xffffffff) >>> 0;
-};
-
 /** ZIP method 0 (stored), UTF-8 names, fixed DOS epoch, no ZIP64.
  * @param {Record<string, string | Uint8Array>} files @returns {Uint8Array} */
 export function createProjectZip(files) {

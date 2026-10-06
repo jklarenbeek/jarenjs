@@ -153,6 +153,7 @@ function bodyLimitUnsatisfiable(op, contract, base, findings) {
 function bodyLimitExceedable(op, contract, base, findings) {
   if (op.input === null || op.http.opaque) return;
   const effective = op.input.effective;
+  if (narrowsStringWitness(effective)) return;
   const properties = isJsonObject(effective.properties) ? effective.properties : {};
   const members = op.http.body !== null ? [op.http.body]
     : Object.keys(op.http.in).filter((m) => op.http.in[m] === 'body');
@@ -164,23 +165,33 @@ function bodyLimitExceedable(op, contract, base, findings) {
     if (found !== null && (widest === null || found.length > widest.length)) widest = found;
   }
   const limit = op.policy.limits.maxBodyBytes;
-  // the string alone, quoted: every other byte of the body only adds to it
-  if (widest === null || widest.length + 2 <= limit) return;
+  // An unrestricted string can be all U+0000: JSON escapes each code point
+  // as six ASCII bytes. The two quotes and all other body bytes add to it.
+  if (widest === null || 6 * widest.length + 2 <= limit) return;
   findings.push({
     rule: 'body-limit-exceedable',
     op: op.id,
     docPath: `${base}/policy/limits/maxBodyBytes`,
-    message: `'${widest.path}' admits strings of up to ${widest.length} characters — at least ${widest.length + 2} bytes `
-      + `encoded — over policy.limits.maxBodyBytes ${limit}, so a valid request carrying one is refused JC2003. `
+    message: `'${widest.path}' admits strings of up to ${widest.length} code points — a JSON-escaped string can need ${6 * widest.length + 2} bytes `
+      + `including its quotes — over policy.limits.maxBodyBytes ${limit}, so a request carrying such a value is refused JC2003. `
       + 'Lower the maxLength, or raise the limit',
   });
 }
 
+/** Assertions this bounded local witness analysis does not solve.
+ * @param {Record<string, any>} schema @returns {boolean} */
+function narrowsStringWitness(schema) {
+  return ['pattern', 'format', 'enum', 'const', 'allOf', 'not', 'if', 'then', 'else',
+    'contentEncoding', 'contentMediaType', 'contentSchema', '$dynamicRef', '$recursiveRef']
+    .some((keyword) => Object.hasOwn(schema, keyword));
+}
+
 /**
- * The longest string a member's own bound admits, where nothing else can
- * keep that length out of reach: a `string` type (alone or in a union),
- * an integer `maxLength`, and no `pattern`, `format`, `enum` or `const`.
- * Object members, array items and union branches are read below it.
+ * The largest local string length this conservative traversal can witness:
+ * a `string` type (alone or in a union),
+ * an integer `maxLength`, with narrowing assertions left unanalysed.
+ * Object members, array items and union branches are read below it; the
+ * local witness does not prove the whole body's satisfiability.
  * @param {unknown} schema
  * @param {string} path - a pointer into the input, for the message
  * @param {{ doc: any, seen: Set<unknown> }} scope
@@ -189,7 +200,12 @@ function bodyLimitExceedable(op, contract, base, findings) {
  */
 function widestString(schema, path, scope, depth) {
   if (depth > 32 || !isJsonObject(schema)) return null;
+  // A local witness cannot prove these assertions admit the same string;
+  // do not infer through a narrowing assertion on a member or its ancestor.
+  if (narrowsStringWitness(schema)) return null;
   if (typeof schema.$ref === 'string') {
+    if (Object.keys(schema).some((key) => !['$ref', '$defs', '$id', '$schema', '$comment',
+      'title', 'description', 'default', 'examples', 'deprecated', 'readOnly', 'writeOnly'].includes(key))) return null;
     if (!schema.$ref.startsWith('#/$defs/') || scope.seen.has(schema.$ref)) return null;
     const target = scope.doc.$defs?.[decodeURIComponent(schema.$ref.slice('#/$defs/'.length))];
     scope.seen.add(schema.$ref);
@@ -204,7 +220,6 @@ function widestString(schema, path, scope, depth) {
   };
   const types = typeof schema.type === 'string' ? [schema.type] : Array.isArray(schema.type) ? schema.type : [];
   if (types.includes('string') && Number.isInteger(schema.maxLength)
-    && !['pattern', 'format', 'enum', 'const'].some((keyword) => Object.hasOwn(schema, keyword))
     && !(Number.isInteger(schema.minLength) && schema.minLength > schema.maxLength)) {
     consider({ path, length: schema.maxLength });
   }

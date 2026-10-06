@@ -17,13 +17,17 @@ const deletion = { $migration: '0.1', id: 'delete-parent', from: shapeHash(MODEL
   steps: [{ kind: 'sql', sql: `DELETE FROM "Parent" WHERE "id" = 'p1'` }] };
 const outcome = await migrate({ driver: bunDriver(), path: file }, [deletion], { baseline: MODEL, model: MODEL });
 let orphanRefused = null;
+let orphanCause = null;
 const orphan = { $migration: '0.1', id: 'orphan', from: shapeHash(MODEL), to: shapeHash(MODEL),
-  steps: [{ kind: 'sql', sql: `INSERT INTO "Child" ("id", "parentId", "doc") VALUES ('c2', 'nobody', '{}')` }] };
+  steps: [{ kind: 'sql', sql: `INSERT INTO "Child" ("id", "parentId", "doc") VALUES ('c2', 'nobody', jsonb('{}'))` }] };
 try { await migrate({ driver: bunDriver(), path: file }, [deletion, orphan], { baseline: MODEL, model: MODEL }); }
-catch (error) { orphanRefused = { code: error.code, class: error.class }; }
+catch (error) {
+  orphanRefused = { code: error.code, class: error.class };
+  orphanCause = error.cause?.message ?? error.message;
+}
 const db = new Database(file);
 const children = db.prepare('SELECT count(*) AS n FROM "Child"').get().n;
 const violations = db.prepare('PRAGMA foreign_key_check').all();
 db.close();
 process.stdout.write(`${JSON.stringify({ runtime: `bun ${process.versions.bun}`, applied: outcome.applied, children,
-  violations, orphanRefused })}\n`);
+  violations, orphanRefused, orphanCause })}\n`);

@@ -534,6 +534,12 @@ export function finishConnection(raw, dialect, synchronous, capabilities, queueT
     }
   };
 
+  /** Statements inside an already granted live reader may drain during
+   * bounded pool close. New admissions always use requireOpen instead. */
+  const requireStatementOpen = () => {
+    if (raw.inParallelRead?.(true) !== true) requireOpen();
+  };
+
   /** Hand the connection to the next waiter, in arrival order. */
   const release = () => {
     owned = false;
@@ -689,7 +695,7 @@ export function finishConnection(raw, dialect, synchronous, capabilities, queueT
   const shared = typeof raw.parallelRead !== 'function' ? null : (fn, _what, signal, held = false) => {
     requireOpen();
     if (signal?.aborted === true) return Promise.reject(abortReason(signal));
-    return raw.parallelRead((/** @type {any} */ enter) => { requireOpen(); return fn(enter); },
+    return raw.parallelRead((/** @type {any} */ enter) => { requireStatementOpen(); return fn(enter); },
       { signal, timeoutMs: queueTimeout, borrow: !held });
   };
 
@@ -868,9 +874,9 @@ export function finishConnection(raw, dialect, synchronous, capabilities, queueT
     dialect,
     inline: life === INLINE_CALL,
     /** @param {string} sql */
-    exec: (sql) => { requireOpen(); requireLive(life); return raw.exec(sql); },
+    exec: (sql) => { requireStatementOpen(); requireLive(life); return raw.exec(sql); },
     /** @param {string} sql */
-    prepare: (sql, metadata) => { requireOpen(); requireLive(life); return chain(raw.prepare(sql, metadata), (s) => wrapStatement(s, requireOpen, activeIterators)); },
+    prepare: (sql, metadata) => { requireStatementOpen(); requireLive(life); return chain(raw.prepare(sql, metadata), (s) => wrapStatement(s, requireStatementOpen, activeIterators)); },
     /** A nested savepoint inside this transaction — or, inside a scope
      * that opened none yet (a gated call), a transaction of its own:
      * `'immediate'` then takes the writer lock before the first statement.
@@ -912,9 +918,9 @@ export function finishConnection(raw, dialect, synchronous, capabilities, queueT
     // that (MODEL-FORMAT §5.1). What the gate guarantees on top is that
     // two TRANSACTIONS never interleave, which is what made commits
     // report failure.
-    exec: (sql) => { requireOpen(); return raw.exec(sql); },
+    exec: (sql) => { requireStatementOpen(); return raw.exec(sql); },
     /** @param {string} sql */
-    prepare: (sql, metadata) => { requireOpen(); return chain(raw.prepare(sql, metadata), (s) => wrapStatement(s, requireOpen, activeIterators)); },
+    prepare: (sql, metadata) => { requireStatementOpen(); return chain(raw.prepare(sql, metadata), (s) => wrapStatement(s, requireStatementOpen, activeIterators)); },
     /** Whether a transaction issued NOW would have to queue: an owner
      * holds the connection and no owning callback is on the stack (a
      * synchronous call from inside the callback nests instead). What a

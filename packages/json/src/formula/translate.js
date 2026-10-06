@@ -61,6 +61,18 @@ const OPTION_KEYS = new Set(['argument', 'helperObject', 'helpers', 'skip', 'exp
  */
 export function translateFormulaBody(source, options = {}) {
   const opts = readOptions(options);
+  if (typeof source !== 'string') throw new TypeError('formula source must be a string');
+  try { return translateBody(source, opts); }
+  catch (error) {
+    if (!(error instanceof RangeError)) throw error;
+    return { state: 'untranslatable', differences: [], reasons: [{ kind: 'complexity', at: { offset: 0, line: 1, column: 1 },
+      message: "the body exceeds the translator's supported nesting or representation size" }] };
+  }
+}
+
+/** Translate checked host options; representation exhaustion is a review item at the public boundary.
+ * @param {string} source @param {ReturnType<typeof readOptions>} opts @returns {Translation} */
+function translateBody(source, opts) {
   /** @type {Reason[]} */
   const reasons = [];
   /** @type {Difference[]} */
@@ -405,6 +417,11 @@ export function translateFormulaBody(source, options = {}) {
 
   /** @param {any} node @param {Env} env @returns {Value} */
   function member(node, env) {
+    // A canonical static string index has the same meaning as a numeric
+    // index in JavaScript; the query's $get does not coerce it.
+    if (node.computed && node.property.type === 'Literal' && typeof node.property.value === 'string'
+      && /^(?:0|[1-9][0-9]*)$/.test(node.property.value) && Number.isSafeInteger(Number(node.property.value)))
+      node = { ...node, property: { ...node.property, value: Number(node.property.value) } };
     // text.split(separator)[0]: the text before the first separator
     if (node.computed && node.property.type === 'Literal' && node.property.value === 0 && node.object.type === 'Call'
       && node.object.callee.type === 'Member' && !node.object.callee.computed && node.object.callee.property === 'split')
@@ -413,6 +430,15 @@ export function translateFormulaBody(source, options = {}) {
     if (!node.computed && node.object.type === 'Identifier' && node.object.name === opts.helperObject && !env.vars.has(opts.helperObject))
       return identifier({ ...node, type: 'Identifier', name: node.property }, env);
     const object = tx(node.object, env);
+    if (object.type === 'regexp') {
+      reason('regex', node, 'a regular expression property read is outside the translated subset');
+      return EMPTY();
+    }
+    // Keep an object's ordinary "length" member; arrays and texts use
+    // the type-sensitive length operation, as their dot spelling does.
+    if (node.computed && node.property.type === 'Literal' && node.property.value === 'length'
+      && object.type !== 'object' && !object.table)
+      node = { ...node, computed: false, property: 'length' };
     if (!node.optional && nullish(object, env) && !(object.type === 'undefined'))
       differ('absent-receiver', node, node.destructured
         ? 'JavaScript throws a TypeError destructuring null or undefined; the query reads nothing'

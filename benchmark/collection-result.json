@@ -8,7 +8,7 @@
     "os": "7.2.6-201.nobara.fc44.x86_64"
   },
   "scope": "Node geometry/vnode/interaction plus resident synthetic array and bounded page coordinator. Browser layout/paint and real AT/OS IME are separate measurements. Historical reference heap includes other adoption workloads and is not a like-for-like collection heap comparison.",
-  "browserGzipBytes": 23274,
+  "browserGzipBytes": 23508,
   "consumers": [
     {
       "consumer": "catalog",
@@ -58,16 +58,16 @@
       },
       "metrics": {
         "grid": {
-          "interactionMs": 1.3650269999999978,
+          "interactionMs": 1.3632130000000018,
           "mountedCells": 170,
           "loadedRows": 256,
           "loadedBytes": 9732,
-          "browserGzipBytes": 23274
+          "browserGzipBytes": 23508
         },
         "resources": {
-          "sampledHeapBytes": 25323088,
-          "peakRssBytes": 130674688,
-          "teardownMs": 0.22656200000000126,
+          "sampledHeapBytes": 19065096,
+          "peakRssBytes": 119017472,
+          "teardownMs": 0.23186900000001742,
           "remainingHandles": 0
         }
       },
@@ -77,13 +77,13 @@
         "peakMeasurements": 256,
         "measurementBytes": 8192
       },
-      "freshReferenceRangeMs": 0.020533000000000357,
+      "freshReferenceRangeMs": 0.04288199999996323,
       "budgets": {
         "grid": [
           {
             "metric": "interactionMs",
             "limit": 16,
-            "value": 1.3650269999999978,
+            "value": 1.3632130000000018,
             "status": "pass"
           },
           {
@@ -107,7 +107,7 @@
           {
             "metric": "browserGzipBytes",
             "limit": 65536,
-            "value": 23274,
+            "value": 23508,
             "status": "pass"
           }
         ],
@@ -115,13 +115,13 @@
           {
             "metric": "sampledHeapBytes",
             "limit": 268435456,
-            "value": 25323088,
+            "value": 19065096,
             "status": "pass"
           },
           {
             "metric": "peakRssBytes",
             "limit": 536870912,
-            "value": 130674688,
+            "value": 119017472,
             "status": "pass"
           },
           {
@@ -133,7 +133,7 @@
           {
             "metric": "teardownMs",
             "limit": 1000,
-            "value": 0.22656200000000126,
+            "value": 0.23186900000001742,
             "status": "pass"
           },
           {
@@ -193,16 +193,16 @@
       },
       "metrics": {
         "grid": {
-          "interactionMs": 0.2563840000000255,
+          "interactionMs": 0.25317100000006576,
           "mountedCells": 160,
           "loadedRows": 256,
           "loadedBytes": 10244,
-          "browserGzipBytes": 23274
+          "browserGzipBytes": 23508
         },
         "resources": {
-          "sampledHeapBytes": 82782312,
-          "peakRssBytes": 288440320,
-          "teardownMs": 0.05545299999994313,
+          "sampledHeapBytes": 69975776,
+          "peakRssBytes": 277262336,
+          "teardownMs": 0.07018900000002759,
           "remainingHandles": 0
         }
       },
@@ -212,13 +212,13 @@
         "peakMeasurements": 256,
         "measurementBytes": 8448
       },
-      "freshReferenceRangeMs": 7.861282999999958,
+      "freshReferenceRangeMs": 8.126823000000059,
       "budgets": {
         "grid": [
           {
             "metric": "interactionMs",
             "limit": 32,
-            "value": 0.2563840000000255,
+            "value": 0.25317100000006576,
             "status": "pass"
           },
           {
@@ -242,7 +242,7 @@
           {
             "metric": "browserGzipBytes",
             "limit": 65536,
-            "value": 23274,
+            "value": 23508,
             "status": "pass"
           }
         ],
@@ -250,13 +250,13 @@
           {
             "metric": "sampledHeapBytes",
             "limit": 805306368,
-            "value": 82782312,
+            "value": 69975776,
             "status": "pass"
           },
           {
             "metric": "peakRssBytes",
             "limit": 1073741824,
-            "value": 288440320,
+            "value": 277262336,
             "status": "pass"
           },
           {
@@ -268,7 +268,7 @@
           {
             "metric": "teardownMs",
             "limit": 2000,
-            "value": 0.05545299999994313,
+            "value": 0.07018900000002759,
             "status": "pass"
           },
           {

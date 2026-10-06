@@ -5,6 +5,7 @@ import { createLiveExecutor } from './live-executor.js';
 import { readRevisionSnapshot } from './snapshot.js';
 import { isCursorBudgetError } from './cursor.js';
 import { createLatestDelivery } from '@jarenjs/core/async';
+import { ASYNC_LIVE_DEFAULTS } from './live-options.js';
 
 /** Select bounded resnapshot maintenance for asynchronous hosts. Pass the
  * returned configuration as openStore's live option. Synchronous hosts retain
@@ -12,11 +13,8 @@ import { createLatestDelivery } from '@jarenjs/core/async';
  * @param {import('../types/async-live.js').AsyncLiveOptions} [options]
  * @returns {import('../types/index.js').LiveBounds} */
 export function asyncLive(options = {}) {
-  const defaults = { maxQueries: 64, maxMaintained: 10000, maxBytes: 4194304,
-    maxInputRows: 10000, maxInputBytes: 4194304, maxObservers: 8,
-    pollMs: 1000, pageRows: 32, maxAttempts: 3 };
-  const bounds = { ...defaults, ...options };
-  for (const key of Object.keys(defaults))
+  const bounds = { ...ASYNC_LIVE_DEFAULTS, ...options };
+  for (const key of Object.keys(ASYNC_LIVE_DEFAULTS))
     if (!Number.isSafeInteger(bounds[key]) || bounds[key] < 1 || bounds[key] >= Number.MAX_SAFE_INTEGER)
       throw new TypeError(`asyncLive.${key} must be a positive safe integer`);
   if (bounds.pollMs > 2147483647) throw new TypeError('asyncLive.pollMs exceeds the timer range');

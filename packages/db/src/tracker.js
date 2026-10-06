@@ -173,6 +173,8 @@ export function createTracker(context) {
     const completed = deepFreeze(core.complete(doc, { updating: false }));
     const key = recordKeyFor(entityName, completed)
       ?? `${entityName}${UNIT_SEPARATOR}#pending${pendingSequence++}`;
+    if (removals.has(key))
+      throw contractError(entityName, 'add() cannot replace a pending removal — use put()/update() for a replacement, or save the removal before adding');
     records.set(key, {
       entity: entityName, snapshot: null, current: completed,
       pendingInsert: true, pendingKey: key,
@@ -1003,18 +1005,17 @@ export function createTracker(context) {
    * an `add()`) stays pending exactly as staged, and a later word on one
    * membership target is still the last word. */
   const restore = (undo) => {
-    // an auto-key insert was re-keyed under the key the database handed
-    // out; the rollback took that row back, so the clean record filed
-    // under it names nothing — the pending record returns to its slot
+    // Every inserted row acquired a clean replacement record, including
+    // explicit keys. Carry later edits back to its pending record before
+    // restoring map slots; auto-key slots name no row after rollback.
     /** @type {Map<any, any>} */
     const editedAfterSave = new Map();
-    for (const { key, record } of undo.rekeyed ?? []) {
-      if (undo.slots.has(key)) continue;
+    for (const { key, record } of undo.inserted ?? []) {
       // an edit staged on the saved row after the save is work staged
       // after it: the pending record the row came from carries it back
       const saved = records.get(key);
       if (saved !== undefined && saved.current !== saved.snapshot) editedAfterSave.set(record, saved.current);
-      records.delete(key);
+      if (!undo.slots.has(key)) records.delete(key);
     }
     for (const [key, entry] of undo.slots) {
       if (entry === undefined) records.delete(key);
@@ -1075,7 +1076,7 @@ export function createTracker(context) {
           // re-key under the real identity
           records.delete(record.pendingKey);
           const key = recordKeyFor(statement.entity, doc);
-          if (key !== record.pendingKey) (undo.rekeyed ??= []).push({ key, record });
+          (undo.inserted ??= []).push({ key, record });
           records.set(/** @type {string} */ (key), {
             entity: statement.entity, snapshot: doc,
             current: untouched(record) ? doc : record.current, pendingInsert: false,

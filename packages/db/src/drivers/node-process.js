@@ -31,6 +31,7 @@ export function nodeProcessDriver(configuration = {}) {
   let generation = 0;
   const driver = {
     name: 'node-process-sqlite', dialect: sqliteDialect,
+    supportsSharedReads: false,
     metrics: () => Object.freeze({ capacity: maxOwners, owners: owners.size,
       quarantined: [...owners].filter((owner) => owner.status === 'quarantined').length,
       healthy: [...owners].filter((owner) => owner.status === 'healthy').length }),

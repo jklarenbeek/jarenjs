@@ -77,7 +77,7 @@ function triggerFunction(dialect, table, name, rule, on, source) {
     sql: `CREATE TRIGGER ${q(name)} ${on.timing} ${event} ON ${q(dialect.schema)}.${q(table)} FOR EACH ${level} EXECUTE FUNCTION ${fn}()`,
     program: { timing: on.timing, events: [on.event], level, columns: on.columns, condition: false, enabled: 'O',
       deferrable: false, deferred: false, function: { schema: dialect.schema, name, language: 'plpgsql',
-        returns: 'trigger', arguments: '', securityDefiner: false, config: [`search_path=${SEARCH_PATH}`], source } } }];
+        returns: 'trigger', arguments: '', volatility: 'v', securityDefiner: false, config: [`search_path=${SEARCH_PATH}`], source } } }];
 }
 
 /** @param {any} mapping @param {any} all @param {any} dialect @param {number} limit @returns {any[]} */

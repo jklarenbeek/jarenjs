@@ -36,7 +36,7 @@ export declare class DbCompileError extends Error {
 
 /** The stable classes `classifyDriverError` assigns (MODEL-FORMAT §7). */
 export type DriverErrorClass = 'busy' | 'full' | 'readonly' | 'io' | 'corrupt' | 'cantopen'
-  | 'constraint' | 'duplicate' | 'overflow' | 'error';
+  | 'constraint' | 'duplicate' | 'overflow' | 'connection' | 'aborted' | 'cancelled' | 'data' | 'error';
 
 /** Classify a SQLite driver failure: the class, the runtime code it is
  * raised under (`null` for `overflow`, which the query path answers by
@@ -1408,6 +1408,10 @@ export interface Dialect {
 export interface Driver {
   readonly name: string;
   readonly dialect: Dialect;
+  /** Optional construction-time hint for parallel read admission. False refuses
+   * before opening; undefined leaves the decision to the opened connection.
+   * True never bypasses verification of its actual shared readers. */
+  readonly supportsSharedReads?: boolean | ((path: string, options?: { readOnly?: boolean }) => boolean | undefined);
   /** Optional storage identity for shadow isolation. Equal non-null values
    * identify the same database; private memory databases return null. Native
    * SQLite bindings use filesystem device/inode identity. */

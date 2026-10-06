@@ -11,10 +11,10 @@ Measured on v24.20.0, linux/x64, AMD Ryzen 9 5900HX with Radeon Graphics.
 
 | Consumer | Rows | Reference range ms | Native range/view/interaction p95 ms | Cells | Cached rows / bytes | Measurements / accounted bytes | Heap MiB | Teardown ms |
 |---|---:|---:|---:|---:|---|---|---:|---:|
-| catalog | 10000 | 0.021 | 1.365 | 170 | 256 / 9732 | 256 / 8192 | 24.15 | 0.227 |
-| archive-stock | 75000 | 7.861 | 0.256 | 160 | 256 / 10244 | 256 / 8448 | 78.95 | 0.055 |
+| catalog | 10000 | 0.043 | 1.363 | 170 | 256 / 9732 | 256 / 8192 | 18.18 | 0.232 |
+| archive-stock | 75000 | 8.127 | 0.253 | 160 | 256 / 10244 | 256 / 8448 | 66.73 | 0.070 |
 
-The component and coordinator browser bundle is 23274 gzip bytes. Reference range calls do less work than native vnode and interaction calls; the comparison deliberately publishes that cost rather than claiming equal workloads.
+The component and coordinator browser bundle is 23508 gzip bytes. Reference range calls do less work than native vnode and interaction calls; the comparison deliberately publishes that cost rather than claiming equal workloads.
 
 <!--/fact-->
 

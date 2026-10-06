@@ -3,16 +3,14 @@
  * @file Document migrations: two model documents diff into a
  * migration document whose steps are rendered DDL, JSLT data
  * transforms and query assertions; the migration replays on a shadow
- * database first; a history table records what ran with a
- * signature-grade checksum. This is the phase-A payoff for storing
- * documents rather than rows: a shape change is a transformation of
- * VALUES, not a table rebuild.
+ * database first; a history table records applied steps and their
+ * canonical-document fingerprints.
  *
- * Identity is a hash, not a version number: `from`/`to` are
- * `hashContent(canonicalizeJson(model))` — the identity of a SHAPE,
- * which nobody has to remember to bump. The checksum discipline is
- * `canonicalizeJson` + `hashContent` (signature-grade — throws
- * on the unserializable), never the memo-grade `contentKey`.
+ * `from`/`to` derive from `hashContent(canonicalizeJson(model))`, without
+ * a manually advanced version. These persisted 32-bit FNV-1a hashes can
+ * collide; they are not signatures or exact content identities. JSON
+ * canonicalization refuses unserializable documents. Changing the hash
+ * format requires an explicit upgrade of existing migration histories.
  *
  * Like the query emitter, this module is part of the emitter layer:
  * the structural SQL it composes (the history table's statements, the
@@ -30,6 +28,7 @@ import { compileJsonQuery } from '@jarenjs/json/query';
 import { compileJsltStylesheet } from '@jarenjs/json/jslt';
 
 import { DbCompileError, wrapDriverError } from './errors.js';
+import { readOptions, readControls } from './options.js';
 import { storedKeyMatches } from './key-text.js';
 import { chain, attempt } from './driver.js';
 import { isThenable } from '@jarenjs/core/function';
@@ -138,7 +137,7 @@ function mappingFor(connection, expressions = undefined) {
 }
 
 /**
- * The signature-grade identity of a model SHAPE.
+ * The persisted 32-bit fingerprint of a model shape; collisions are possible.
  * @param {any} model - A jaren-model document
  * @returns {string}
  */
@@ -181,7 +180,7 @@ function withoutRenameHints(model) {
 }
 
 /**
- * The signature-grade checksum of a migration document.
+ * The persisted 32-bit checksum of a canonical migration; collisions are possible.
  * @param {any} migration
  * @returns {string}
  */
@@ -613,6 +612,7 @@ function deriveStep(collection, plan, columnNames, note) {
  *   `schemaChanged` too; they are simply not in `drafts`.
  */
 export function planMigration(fromModel, toModel, options = undefined) {
+  readOptions(options, ['id', 'dialect', 'derived', 'rtree', 'expressions', 'transform'], 'planModelMigration()');
   const dialect = options?.dialect ?? null;
   if (dialect === null || typeof dialect !== 'object')
     throw new TypeError('planMigration needs { dialect } (the store dialect renders the DDL)');
@@ -1984,7 +1984,12 @@ function replayOnShadow(primary, driver, shadowPath, baseline, migrations, model
     chain(verifyShadowOwnership(primary, shadow, driver, migrations.some((migration) => migration.physical?.dialect === 'postgres')), () => chain(registerDeriveFunctions(shadow), () => chain(options.registerFunctions?.(shadow), () =>
       chain(options.shadowFixture === undefined ? createModelShape(shadow, baseline, options.expressions)
         : options.shadowFixture(shadow), () => migrate({ connection: shadow }, migrations, {
-        ...options, baseline, model, shadow: false, shadowDriver: driver,
+        batchSize: options.batchSize, assertionBounds: options.assertionBounds,
+        onProgress: options.onProgress, onAssertionPlan: options.onAssertionPlan,
+        expressions: options.expressions, compileSchema: options.compileSchema,
+        physicalTarget: options.physicalTarget, signal: options.signal,
+        deadline: options.deadline, runtime: options.runtime,
+        baseline, model, shadow: false, shadowDriver: driver,
         shadowFixture: undefined, hosts: shadowHosts(options.hosts),
         registerFunctions: options.registerFunctions === undefined ? undefined
           : (reference) => reference === shadow ? null : options.registerFunctions(reference),
@@ -2044,6 +2049,8 @@ function historyStatements(dialect) {
  */
 export function migrationStatus(target, migrations, options = {}) {
   try {
+    readOptions(options, ['model', 'physicalTarget', 'shadowDriver', 'registerFunctions', 'runtime', 'signal', 'deadline'], 'migrationStatus()');
+    readControls({ signal: options?.signal }, 'migrationStatus()');
     refuseCancelled({ signal: options.signal, deadline: options.deadline }, resolveRuntime(options.runtime).now,
       { abortCode: 'JD2080', aborted: 'it ran', passed: 'the status read ran', ran: 'no step ran' });
   }
@@ -2117,6 +2124,10 @@ export function migrationStatus(target, migrations, options = {}) {
  *   with shadow:false and synchronous hooks settle in their caller's transaction.
  */
 export function migrate(target, migrations, options) {
+  readOptions(options, ['baseline', 'model', 'compileSchema', 'dryRun', 'batchSize', 'onProgress',
+    'shadow', 'shadowPath', 'shadowDriver', 'shadowFixture', 'physicalTarget', 'registerFunctions',
+    'expressions', 'assertionBounds', 'onAssertionPlan', 'signal', 'deadline', 'runtime', 'hosts', 'atomic'], 'migrate()');
+  readControls({ signal: options?.signal }, 'migrate()');
   if (!target || typeof target !== 'object' || (target.connection === undefined && typeof target.driver?.open !== 'function'))
     throw new TypeError('migrate needs { driver, path? } or { connection }');
   if (!Array.isArray(migrations)) throw new TypeError('migrate needs the full ordered migration list');
@@ -2373,6 +2384,7 @@ export function migrate(target, migrations, options) {
  *   assertions?: { sql: string, params?: any[], expected: any[] }[],
  *   physicalTarget?: any }} options @returns {any} */
 export function planPhysicalMigration(connection, fromModel, toModel, options) {
+  readOptions(options, ['id', 'steps', 'scope', 'dispositions', 'assertions', 'physicalTarget'], 'planPhysicalMigration()');
   normalizeEntities(fromModel); normalizeEntities(toModel);
   if (!options || typeof options.id !== 'string' || !options.id || !Array.isArray(options.steps))
     throw refuse('JD0021', 'a physical plan requires id and explicit steps');

@@ -16,7 +16,8 @@
  *
  * `invoke` NEVER rejects for anything a server or a network can do; it
  * throws only for the host's own mistakes (`JC1005`: an unknown or
- * opaque operation). `bytes(op, input, ctx)` is the opaque twin: one
+ * opaque operation; `JC1008`: malformed call controls).
+ * `bytes(op, input, ctx)` is the opaque twin: one
  * request whose success value carries the status, the headers, the
  * media and the LIVE response body as a `ReadableStream` — never
  * `text()`, never collected — and whose `ctx.body` streams an upload.
@@ -35,6 +36,7 @@ import { JarenValidator } from '@jarenjs/validate';
 import { createSseEventDecoder } from '@jarenjs/core/text/sse';
 
 import { ContractHostError } from '../errors.js';
+import { admitOptions, admitSignal } from '../options.js';
 import { resolveHostRuntime } from '../runtime.js';
 import { isReadableStream, isAsyncByteSource } from '../http/body.js';
 import { compatReason } from '../compat.js';
@@ -402,7 +404,8 @@ export function openHttpClient(contract, options = {}) {
     || contract.operations === null || typeof contract.operations !== 'object' || !Array.isArray(contract.ids)) {
     throw host('JC1008', 'the first argument must be a compiled contract (compileContract)');
   }
-  if (options === null || typeof options !== 'object') throw host('JC1008', 'options must be an object');
+  admitOptions(options, ['fetch', 'baseUrl', 'headers', 'keys', 'storage', 'timeoutMs', 'sleep', 'catalog', 'wellKnown', 'now', 'validator', 'runtime'],
+    (reason) => host('JC1008', reason));
   const fetchFn = options.fetch === undefined
     ? (/** @type {string} */ url, /** @type {RequestInit} */ init) => globalThis.fetch(url, init)
     : options.fetch;
@@ -875,9 +878,9 @@ export function openHttpClient(contract, options = {}) {
     if (route.opaque) {
       throw new ContractHostError('JC1005', `client: '${route.id}' is an opaque operation (media ${route.media}); invoke carries JSON only — use client.url(op, input) and fetch the bytes yourself`);
     }
-    if (ctx === null || typeof ctx !== 'object') throw host('JC1008', 'ctx must be an object');
+    admitOptions(ctx, ['signal', 'attempt', 'idempotencyKey', 'headers', 'ifNoneMatch', 'ifMatch'], (reason) => host('JC1008', reason), 'ctx');
+    const signal = admitSignal(ctx.signal, (reason) => host('JC1008', reason), 'ctx.signal');
     const meta = newMeta(route.id, ctx.attempt);
-    const signal = ctx.signal === undefined || ctx.signal === null ? null : ctx.signal;
 
     // 1. validate — nothing leaves before the same verdict the server would reach
     let value;
@@ -1054,9 +1057,9 @@ export function openHttpClient(contract, options = {}) {
     if (!route.opaque) {
       throw new ContractHostError('JC1005', `client: '${route.id}' is a JSON operation (media ${route.media}); bytes carries opaque operations only — use invoke`);
     }
-    if (ctx === null || typeof ctx !== 'object') throw host('JC1008', 'ctx must be an object');
+    admitOptions(ctx, ['signal', 'attempt', 'headers', 'ifNoneMatch', 'ifMatch', 'body'], (reason) => host('JC1008', reason), 'ctx');
+    const signal = admitSignal(ctx.signal, (reason) => host('JC1008', reason), 'ctx.signal');
     const meta = newMeta(route.id, ctx.attempt);
-    const signal = ctx.signal === undefined || ctx.signal === null ? null : ctx.signal;
 
     // 1. validate — the transport members are the whole input of an opaque operation
     let value;
@@ -1173,7 +1176,8 @@ export function openHttpClient(contract, options = {}) {
     if (route.op.kind !== 'subscribe') {
       throw new ContractHostError('JC1010', `client: '${route.id}' is a ${route.op.kind} operation — subscribe carries streams; use invoke`);
     }
-    if (options === null || typeof options !== 'object') throw host('JC1008', 'subscribe options must be an object');
+    admitOptions(options, ['onSnapshot', 'onPatch', 'onError', 'onEnd', 'signal', 'lastSeq', 'reconnect'],
+      (reason) => host('JC1008', reason), 'subscribe options');
     for (const name of ['onSnapshot', 'onPatch', 'onError', 'onEnd']) {
       const cb = /** @type {any} */ (options)[name];
       if (cb !== undefined && typeof cb !== 'function') throw host('JC1008', `options.${name} must be a function`);
@@ -1187,12 +1191,13 @@ export function openHttpClient(contract, options = {}) {
     let reconnectMax = 0;
     if (options.reconnect !== undefined && options.reconnect !== null) {
       const r = /** @type {any} */ (options.reconnect);
-      if (typeof r !== 'object' || !Number.isInteger(r.max) || r.max < 0) {
+      admitOptions(r, ['max'], (reason) => host('JC1008', reason), 'options.reconnect');
+      if (!Number.isInteger(r.max) || r.max < 0) {
         throw host('JC1008', 'options.reconnect must be { max } with a non-negative integer number of further attempts');
       }
       reconnectMax = r.max;
     }
-    const signal = options.signal === undefined || options.signal === null ? null : options.signal;
+    const signal = admitSignal(options.signal, (reason) => host('JC1008', reason));
     const meta = newMeta(route.id, null);
     const streamPolicy = route.op.policy.stream;
     const heartbeatMs = streamPolicy === null ? 15000 : streamPolicy.heartbeatMs;
@@ -1546,7 +1551,8 @@ export function openHttpClient(contract, options = {}) {
    * @returns {Promise<Negotiation>}
    */
   async function negotiate(options = {}) {
-    const signal = options.signal === undefined || options.signal === null ? null : options.signal;
+    admitOptions(options, ['signal'], (reason) => host('JC1008', reason));
+    const signal = admitSignal(options.signal, (reason) => host('JC1008', reason));
     /**
      * @param {Negotiation['reason']} reason
      * @param {Negotiation['server']} server

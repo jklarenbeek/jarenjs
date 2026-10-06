@@ -74,7 +74,7 @@ export const DB_CODES = Object.freeze({
   JD0027: 'a physical scope is malformed or names a table the plan does not own',
   JD2001: 'insert found the key already present, or the key is stored under two spellings',
   JD2002: 'a usable key could not be resolved for the write, or an explicit key disagrees with the document',
-  JD2003: 'the write failed schema validation',
+  JD2003: 'a value or staged operation violates its data contract',
   JD2004: 'an undeclared collection was requested',
   JD2005: 'a database operation failed',
   JD2006: 'patch found no document at the key',
@@ -244,9 +244,9 @@ export class DbCompileError extends CodedError {
  *  - `JD2001` — `insert` hit a document already stored under the key
  *  - `JD2002` — the declared key pointer resolved to nothing or to a
  *    non-scalar, or an explicit key argument is not a string or number
- *  - `JD2003` — the injected validation hook rejected the document
- *    that a write would have stored; `errors` carries the hook's
- *    findings when it produced any
+ *  - `JD2003` — a value or staged operation violates its data contract;
+ *    `errors` carries the injected validation hook's findings when it
+ *    produced any, and `cause` retains a driver's unsafe-number refusal
  *  - `JD2004` — `collection()` named a collection the model does not
  *    declare
  *  - `JD2005` — the database rejected an operation for a reason that
@@ -344,6 +344,33 @@ const RESULT = Object.freeze({
   CANTOPEN: 14, CONSTRAINT: 19, NOTADB: 26,
 });
 
+/** One classification shape for either driver's condition table.
+ * @param {string} kind @param {string|null} code @param {boolean} retryable
+ * @param {string} reason */
+function classification(kind, code, retryable, reason) {
+  return { class: kind, code, retryable, reason };
+}
+
+/** SQLite matches primary result codes before reporting the same classification.
+ * @param {ReturnType<typeof classification>} result @param {number[]} primaries */
+function sqliteClass(result, primaries) {
+  return Object.freeze({ class: result.class, primaries, code: result.code,
+    retryable: result.retryable, reason: result.reason });
+}
+
+const CORRUPT = Object.freeze(classification('corrupt', 'JD2085', false, DB_CODES.JD2085));
+const IO = Object.freeze(classification('io', 'JD2084', false, DB_CODES.JD2084));
+const CONNECTION = Object.freeze(classification('connection', 'JD2087', true, DB_CODES.JD2087));
+const BUSY = Object.freeze(classification('busy', 'JD2005', true, 'the database is busy or locked'));
+const FULL = Object.freeze(classification('full', 'JD2082', false, DB_CODES.JD2082));
+const CONSTRAINT = Object.freeze(classification('constraint', 'JD2005', false, 'the database rejected the operation'));
+const READONLY = Object.freeze(classification('readonly', 'JD2083', false, DB_CODES.JD2083));
+const CANTOPEN = Object.freeze(classification('cantopen', 'JD2005', false, 'the database could not be opened'));
+
+const DUPLICATE = Object.freeze(classification('duplicate', 'JD2001', false, 'the key is already present'));
+
+const OVERFLOW = Object.freeze(classification('overflow', null, false, 'an integer aggregate overflowed int64'));
+
 /**
  * The classes, in the order they are tried; `code` is the runtime code
  * a wrapped error carries (`null` for the overflow row, which the query
@@ -351,24 +378,16 @@ const RESULT = Object.freeze({
  * raising) and `reason` the sentence the wrapped error leads with.
  */
 const CLASSES = Object.freeze([
-  Object.freeze({ class: 'busy', primaries: [RESULT.BUSY, RESULT.LOCKED], code: 'JD2005',
-    retryable: true, reason: 'the database is busy or locked' }),
-  Object.freeze({ class: 'full', primaries: [RESULT.FULL], code: 'JD2082',
-    retryable: false, reason: 'the database or its disk is full' }),
-  Object.freeze({ class: 'readonly', primaries: [RESULT.READONLY], code: 'JD2083',
-    retryable: false, reason: 'the database is read-only' }),
-  Object.freeze({ class: 'io', primaries: [RESULT.IOERR], code: 'JD2084',
-    retryable: false, reason: 'a disk I/O error' }),
-  Object.freeze({ class: 'corrupt', primaries: [RESULT.CORRUPT, RESULT.NOTADB], code: 'JD2085',
-    retryable: false, reason: 'the database file is corrupt or not a database' }),
-  Object.freeze({ class: 'cantopen', primaries: [RESULT.CANTOPEN], code: 'JD2005',
-    retryable: false, reason: 'the database file could not be opened' }),
-  Object.freeze({ class: 'constraint', primaries: [RESULT.CONSTRAINT], code: 'JD2005',
-    retryable: false, reason: 'the database rejected the operation' }),
+  sqliteClass(BUSY, [RESULT.BUSY, RESULT.LOCKED]),
+  sqliteClass(FULL, [RESULT.FULL]),
+  sqliteClass(READONLY, [RESULT.READONLY]),
+  sqliteClass(IO, [RESULT.IOERR]),
+  sqliteClass(CORRUPT, [RESULT.CORRUPT, RESULT.NOTADB]),
+  sqliteClass(classification('cantopen', 'JD2005', false, 'the database file could not be opened'), [RESULT.CANTOPEN]),
+  sqliteClass(CONSTRAINT, [RESULT.CONSTRAINT]),
 ]);
 
-const FALLBACK = Object.freeze({ class: 'error', code: 'JD2005', retryable: false,
-  reason: 'the database rejected the operation' });
+const FALLBACK = Object.freeze(classification('error', 'JD2005', false, 'the database rejected the operation'));
 
 /**
  * PostgreSQL SQLSTATEs, into the SAME classes. Exact codes first, then
@@ -382,72 +401,47 @@ const FALLBACK = Object.freeze({ class: 'error', code: 'JD2005', retryable: fals
  */
 const SQLSTATE = Object.freeze({
   // 23 — integrity constraint violation
-  '23505': { class: 'constraint', code: 'JD2005', retryable: false,
-    reason: 'the database rejected the operation' },
+  '23505': CONSTRAINT,
   // 40 — transaction rollback: both are the caller's to retry
-  '40001': { class: 'busy', code: 'JD2005', retryable: true,
-    reason: 'the transaction could not be serialized' },
-  '40P01': { class: 'busy', code: 'JD2005', retryable: true,
-    reason: 'the transaction deadlocked' },
+  '40001': classification('busy', 'JD2005', true, 'the transaction could not be serialized'),
+  '40P01': classification('busy', 'JD2005', true, 'the transaction deadlocked'),
   // 55 — object not in prerequisite state
-  '55P03': { class: 'busy', code: 'JD2005', retryable: true,
-    reason: 'the database is busy or locked' },
-  '55006': { class: 'busy', code: 'JD2005', retryable: true,
-    reason: 'the database is busy or locked' },
+  '55P03': BUSY,
+  '55006': BUSY,
   // 57 — operator intervention
-  '57014': { class: 'cancelled', code: 'JD2089', retryable: false,
-    reason: 'the statement was cancelled by the server' },
-  '57P01': { class: 'connection', code: 'JD2087', retryable: true,
-    reason: 'the connection to the database was lost' },
-  '57P02': { class: 'connection', code: 'JD2087', retryable: true,
-    reason: 'the connection to the database was lost' },
-  '57P03': { class: 'connection', code: 'JD2087', retryable: true,
-    reason: 'the connection to the database was lost' },
+  '57014': classification('cancelled', 'JD2089', false, DB_CODES.JD2089),
+  '57P01': CONNECTION,
+  '57P02': CONNECTION,
+  '57P03': CONNECTION,
   // 53 — insufficient resources
-  '53100': { class: 'full', code: 'JD2082', retryable: false,
-    reason: 'the database or its disk is full' },
-  '53300': { class: 'busy', code: 'JD2005', retryable: true,
-    reason: 'the database is busy or locked' },
+  '53100': FULL,
+  '53300': BUSY,
   // 58 — system error
-  '58030': { class: 'io', code: 'JD2084', retryable: false, reason: 'a disk I/O error' },
+  '58030': IO,
   // 25 — invalid transaction state
-  '25P02': { class: 'aborted', code: 'JD2088', retryable: false,
-    reason: 'the transaction was aborted by an earlier failure in it' },
-  '25006': { class: 'readonly', code: 'JD2083', retryable: false,
-    reason: 'the database is read-only' },
+  '25P02': classification('aborted', 'JD2088', false, DB_CODES.JD2088),
+  '25006': READONLY,
   // 3D/3F — the catalog or schema the connection named does not exist
-  '3D000': { class: 'cantopen', code: 'JD2005', retryable: false,
-    reason: 'the database could not be opened' },
-  '3F000': { class: 'cantopen', code: 'JD2005', retryable: false,
-    reason: 'the database could not be opened' },
+  '3D000': CANTOPEN,
+  '3F000': CANTOPEN,
   // 42501 — insufficient privilege reads as read-only: the operation is
   // refused for want of write rights, which is what the class means
-  '42501': { class: 'readonly', code: 'JD2083', retryable: false,
-    reason: 'the database is read-only' },
+  '42501': READONLY,
   // XX — internal error
-  'XX001': { class: 'corrupt', code: 'JD2085', retryable: false,
-    reason: 'the database file is corrupt or not a database' },
-  'XX002': { class: 'corrupt', code: 'JD2085', retryable: false,
-    reason: 'the database file is corrupt or not a database' },
+  'XX001': CORRUPT,
+  'XX002': CORRUPT,
 });
 
 /** The family fallbacks, by SQLSTATE class (the first two characters). */
 const SQLSTATE_FAMILY = Object.freeze({
-  '23': { class: 'constraint', code: 'JD2005', retryable: false,
-    reason: 'the database rejected the operation' },
-  '40': { class: 'busy', code: 'JD2005', retryable: true,
-    reason: 'the transaction could not be completed' },
-  '08': { class: 'connection', code: 'JD2087', retryable: true,
-    reason: 'the connection to the database was lost' },
-  '53': { class: 'full', code: 'JD2082', retryable: false,
-    reason: 'the database or its disk is full' },
-  '55': { class: 'busy', code: 'JD2005', retryable: true,
-    reason: 'the database is busy or locked' },
-  '57': { class: 'connection', code: 'JD2087', retryable: true,
-    reason: 'the connection to the database was lost' },
-  '58': { class: 'io', code: 'JD2084', retryable: false, reason: 'a disk I/O error' },
-  'XX': { class: 'corrupt', code: 'JD2085', retryable: false,
-    reason: 'the database file is corrupt or not a database' },
+  '23': CONSTRAINT,
+  '40': classification('busy', 'JD2005', true, 'the transaction could not be completed'),
+  '08': CONNECTION,
+  '53': FULL,
+  '55': BUSY,
+  '57': CONNECTION,
+  '58': IO,
+  'XX': CORRUPT,
 });
 
 /** A five-character SQLSTATE, or `null` for an error that carries none. */
@@ -459,9 +453,6 @@ const LOSS_ERRNO = new Set(['ECONNRESET', 'ECONNREFUSED', 'ECONNABORTED', 'EPIPE
 
 /** …or node-postgres's own sentence for a connection it lost (it sets no code). */
 const LOSS_MESSAGE = /^(Connection terminated( unexpectedly| due to connection timeout)?|Client has encountered a connection error and is not queryable|Client was closed and is not queryable)\b/;
-
-const CONNECTION = Object.freeze({ class: 'connection', code: 'JD2087', retryable: true,
-  reason: 'the connection to the database was lost' });
 
 /**
  * Whether a failure that carries no SQLSTATE is a lost connection — an
@@ -535,6 +526,12 @@ function resultCodeOf(error) {
   return null;
 }
 
+/** node:sqlite refuses to materialize an int64 that a Number would round.
+ * Other host RangeErrors remain host errors. @param {any} error */
+const isIntegerReadFailure = (error) => error?.code === 'ERR_OUT_OF_RANGE'
+  && typeof error.message === 'string'
+  && /^Value is too large to be represented as a JavaScript number: -?\d+$/.test(error.message);
+
 /** The text a database invariant's refusal starts with (MODEL-FORMAT §13). */
 export const INVARIANT_MARKER = 'jaren invariant:';
 /** The SQLSTATE a database invariant raises on PostgreSQL: class 23,
@@ -573,7 +570,7 @@ export function isDriverError(error) {
     || sqlStateOf(error) !== null
     || error?.code === 'ERR_SQLITE_ERROR'
     || error?.name === 'SQLiteError' || error?.name === 'SQLite3Error'
-    || isUncodedLoss(error);
+    || isUncodedLoss(error) || isIntegerReadFailure(error);
 }
 
 /**
@@ -588,6 +585,7 @@ export function classifyDriverError(error, unique = undefined) {
   const state = sqlStateOf(error);
   if (state !== null) return classifySqlState(state, error, unique);
   if (isUncodedLoss(error)) return { ...CONNECTION };
+  if (isIntegerReadFailure(error)) return classification('data', 'JD2003', false, 'a stored integer cannot be represented exactly as a JavaScript number');
   const extended = resultCodeOf(error);
   const primary = extended === null ? null : extended & 0xff;
   const message = typeof error?.message === 'string' ? error.message : '';
@@ -596,19 +594,18 @@ export function classifyDriverError(error, unique = undefined) {
   // another column is a constraint failure, not a duplicate key
   if (unique !== undefined && (extended === 1555
     || (message.includes('UNIQUE constraint failed') && message.includes(`${unique.table}.${unique.column}`)))) {
-    return { class: 'duplicate', code: 'JD2001', retryable: false, reason: 'the key is already present' };
+    return { ...DUPLICATE };
   }
   if (primary === RESULT.ERROR && message.includes('integer overflow')) {
-    return { class: 'overflow', code: null, retryable: false,
-      reason: 'an integer aggregate overflowed int64' };
+    return { ...OVERFLOW };
   }
   // a locked database reported by a binding that attaches no code
   if (primary === null && /database is locked|database table is locked/.test(message)) {
-    return { ...CLASSES[0] };
+    return { ...CLASSES[0], primaries: [...CLASSES[0].primaries] };
   }
   for (const row of CLASSES) {
     if (primary !== null && row.primaries.includes(primary))
-      return { class: row.class, code: row.code, retryable: row.retryable, reason: row.reason };
+      return classification(row.class, row.code, row.retryable, row.reason);
   }
   return { ...FALLBACK };
 }
@@ -628,15 +625,13 @@ function classifySqlState(state, error, unique) {
   if (state === '23505' && unique !== undefined) {
     const constraint = typeof error?.constraint === 'string' ? error.constraint : '';
     if (constraint === `${unique.table}_pkey` || constraint === `${unique.table}_${unique.column}_key`) {
-      return { class: 'duplicate', code: 'JD2001', retryable: false,
-        reason: 'the key is already present' };
+      return { ...DUPLICATE };
     }
   }
   // an integer that will not fit the column: SQLite reports it as a
   // generic error naming the overflow, PostgreSQL as numeric_value_out_of_range
   if (state === '22003') {
-    return { class: 'overflow', code: null, retryable: false,
-      reason: 'an integer aggregate overflowed int64' };
+    return { ...OVERFLOW };
   }
   const exact = SQLSTATE[state];
   if (exact !== undefined) return { ...exact };

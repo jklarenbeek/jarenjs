@@ -1113,6 +1113,10 @@ registry does.
   number and white space, one character of it or more (`"1 500 g"`: the space
   may group thousands, and neither 500 nor 1500 is guessed), after a slash (`"1/2 kg"`), at the end of a range
   (`"2-3 kg"`), in an exponent (`"1e3 g"`), or glued to a word (`"B12"`).
+  Unsupported grouping or operator punctuation also joins numeric tails:
+  `"1'500 kg"`, `"1_500 kg"` and `"1+500 kg"` do not mean 500 kg, including
+  when white space surrounds the punctuation. An independent later
+  quantity, as in `"1'500 kg; 2 kg"`, still reads as 2 kg.
 - The unit is a word read whole: a word followed by a digit or a slash names
   something else, so `"300 m2"` is an area and `"30 km/h"` a speed, never a
   length, and a word a hyphen joins to another word is part of it, so
@@ -1276,6 +1280,14 @@ its `value()` exposes that retained prefix, not the full input sequence.
 
 ### 8.12 Registered functions, operators, collations, and execution limits
 
+The options object for `compileJsonQuery` and `analyzeQuery` is plain and
+closed: `compileTypeTest`, `extensions`, `functions`, `collations`,
+`pathFunctions`, `zoneProvider`, `dateNames`, `decimalFormats`, `limits`,
+`externals`, `analysis` and `lexicalProviders` are the accepted members.
+Unknown names or malformed options refuse with `TypeError` before
+compilation; `analysis` must be boolean, and a supplied non-null
+`compileTypeTest` must be a function.
+
 Three compile options make a compilation's **trusted host capabilities**
 explicit — none of them changes the closed format: a document using them
 compiles only against a host that registered them, and a host that
@@ -1350,7 +1362,10 @@ The other two bound the **query** rather than its output:
   evaluation depth IS the document's static nesting, as analysis reads
   it: a nested `$and`/`$or` flattened into its parent (§8.6) adds no
   level. Checking it once is therefore exact, and costs nothing to
-  evaluate.
+  evaluate. The compiler also enforces a ceiling of 256 normalized
+  expression levels, even when `limits.depth` is omitted or larger.
+  Nesting is checked while compiling, before the host stack can overflow;
+  an associative chain flattened into its parent still adds no level.
 
 An unknown limit name, or a value that is not a positive integer, is a
 host programming error (`TypeError`), because an accepted-but-unenforced
@@ -1981,7 +1996,7 @@ a query error raised inside a formula keeps its own message, a reference in
 | `JQ0008` | Schema operator (`$valid`/`$assert`/`$as`) in a query compiled without a type-test compiler (§8.11) | XQST0009 |
 | `JQ0009` | Schema literal rejected by the type-test compiler (invalid embedded schema, §8.11) | XQST0059 |
 | `JQ0010` | `$call`/`$collation` naming no registered function/collation (§8.12, §6.6) | XPST0017 |
-| `JQ0011` | Expression nesting deeper than `limits.depth` (§8.12) | XPDY0130 |
+| `JQ0011` | Expression nesting deeper than `limits.depth` or the compiler ceiling (§8.12) | XPDY0130 |
 | `JQ0012` | Lexical provider missing or request declaration rejected | — |
 | `JQ0013` | Invalid versioned formula profile | — |
 | `JQ0014` | Missing or incompatible formula capability | — |

@@ -210,6 +210,29 @@ describe('the repair statement MODEL-FORMAT documents', () => {
   assert.ok(from > 0 && fence !== null, 'MODEL-FORMAT carries the repair statement');
   const statement = /** @type {RegExpExecArray} */ (fence)[1].replaceAll('<table>', 'items').replaceAll('<member>', '$.id');
 
+  it('preserves the document spelling of fractional, extreme and exponent-form numeric keys', async () => {
+    const { dbPath, cleanup } = await freshFile();
+    const cases = [[0.1 + 0.2, '0.3'], [1e20, '1.0e+20'], [-1e20, '-1.0e+20'], [1e-7, '1.0e-07'],
+      [1e21, '1.0e+21'], [Number.MIN_VALUE, '4.94065645841247e-324'],
+      [Number.MAX_VALUE, '1.79769313486232e+308'], [1.5, '1.500'], [0, '-0.0']];
+    try {
+      for (const [id, legacy] of cases) plant(dbPath, legacy, id, String(id));
+      const db = new DatabaseSync(dbPath);
+      try {
+        assert.strictEqual(Number(db.prepare(statement).run().changes), cases.length);
+        assert.strictEqual(Number(db.prepare(statement).run().changes), 0);
+      }
+      finally { db.close(); }
+      assert.deepStrictEqual(storedKeys(dbPath), cases.map(([id]) => JSON.stringify(id)).sort());
+      const store = await openStore(MODEL, { driver: nodeDriver(), path: dbPath });
+      try {
+        for (const [id] of cases) assert.strictEqual((await store.collection('items').get(id))?.label, String(id));
+      }
+      finally { await store.close(); }
+    }
+    finally { cleanup(); }
+  });
+
   it('converges a file, leaves a string key alone, and changes nothing the second time', async () => {
     const { dbPath, cleanup } = await freshFile();
     plant(dbPath, 7, 7, 'seven');

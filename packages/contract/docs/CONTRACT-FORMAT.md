@@ -455,7 +455,9 @@ const server = serveHttp(contract, {
 `@jarenjs/contract/http` reads an opaque upload whole, whatever shape
 `ctx.body` has: a string, bytes, the counting source of a streamed
 upload, or `null` for none. `as` is `'bytes'` (the default) or `'text'`;
-the options are closed.
+the options are a plain or null-prototype record with only `as` and `signal`.
+An invalid bag or signal rejects with `TypeError` before any body is pulled;
+`signal` is an `AbortSignal`, `null`, or absent.
 - Text is decoded strictly, as the JSON path decodes it: fatal, with
   the BOM stripped.
 - Invalid bytes throw `BodyEncodingError`, which the binding answers
@@ -962,7 +964,7 @@ wire response:
 | `JC1005` | a client (`invoke`, `url`) or the contract effect was asked for an operation the contract does not declare, or `invoke` for an opaque operation — reach that through `bytes()`, or `url()` for a link (§10.6; on `local`/`port` the binding cannot carry it at all — §15, §16) |
 | `JC1006` | `ctx.status(n)` with `n` not an integer in 200–299, or 204/205 over an output that never admits `null` (the value would be dropped after the handler committed), or `ctx.header(name, value)` with a header the binding derives, a name that is not a token, or a value an HTTP field cannot carry — anything but tab and visible Latin-1 (§7.1) |
 | `JC1007` | `contractAppBinding`: `ops` names an operation the contract does not declare, or `namespace`/`statePath` is malformed (§11) |
-| `JC1008` | `openHttpClient`, `openPortClient`, `client.url`, `createContractEffect`, `createContractSubscription` or a projection (`publicProjection`, `toOpenApi`, `toTypeScript`, `toMarkdown`, `contractTools`): an argument or option is malformed (§10, §11, §12, §16); and an `invoke` ctx that is not an object, on every client — http, port and local alike |
+| `JC1008` | `openHttpClient`, `openPortClient`, `client.url`, `createContractEffect`, `createContractSubscription` or a projection (`publicProjection`, `toOpenApi`, `toTypeScript`, `toMarkdown`, `contractTools`): an argument or option is malformed (§10, §11, §12, §16); and malformed call controls (including unknown members, non-record bags and invalid signals), on every client — http, port and local alike |
 | `JC1009` | the stream wire's SSE encoder was handed text the frame cannot carry: a bare carriage return inside `data`, a line terminator inside `event` or `id` (§18) |
 | `JC1010` | `client.subscribe` was asked for an operation that is not a subscribe operation (§19) |
 | `JC1011` | a ledger `commit`/`fail` named a ref that settles no started record — expired, reclaimed under a newer generation, or settled already (§8); refused by the ledger, reported to `onError` by the binding |
@@ -1081,7 +1083,7 @@ is a closed set: an unknown option (`precondition` for `preconditions`,
 which used to serve a stale `If-Match` with 200) is `JC1001`, naming the
 nearest one. `trace` (default the runtime record's `uuid`,
 `crypto.randomUUID` with no record) generates the server trace; `scope(ctx, input)` derives the idempotency scope (§8);
-`partial` allows missing handlers; `validateOutput` is `"always" |
+`partial` allows missing handlers; `head` and `partial` must be booleans when given. HTTP options are plain or null-prototype records. `validateOutput` is `"always" |
 "never"`; `preconditions` maps operation ids to pre-handler tag
 resolvers (§7.5); `errorBody(wire, ctx)` and `onError(err, ctx)` are the
 two host hooks (`ctx` is `null` before an operation is matched);
@@ -1335,8 +1337,8 @@ either, so a deliberate retry under the same key runs fresh.
 A retryable declared failure may name its backoff:
 `ctx.fail(code, params, details, { retryable: true, retryAfterMs: 1500 })`.
 The binding answers `retry-after` in whole seconds, rounded up (`2`
-here; RFC 9110 §10.2.3). `ctx.fail`'s options are closed, `retryable`
-and `retryAfterMs` only, and `retryAfterMs` is a non-negative integer of
+here; RFC 9110 §10.2.3). `ctx.fail`'s options are a plain or null-prototype
+record, `retryable` and `retryAfterMs` only (absent or `null` keeps defaults), and `retryAfterMs` is a non-negative integer of
 milliseconds; anything else is a `TypeError`, the handler's fault
 (`JC2008`). A failure that may not be retried carries no `retry-after`,
 whatever `retryAfterMs` says, and neither does its replay.
@@ -1590,8 +1592,11 @@ the platform:
     dispatcher response, SSE included, with `toNodeHandler`'s writer. It
     drains behind `drain`, aborts on disconnect, and tears the stream
     down after a `JC2096`.
-  - `from` is what `nodeRequest` built. It decides `connection: close`
-    and the linger for an upload left unread.
+  - `from` is the exact request object `nodeRequest` returned. It decides
+    `connection: close` and the linger for an upload left unread.
+  - Both Node option bags are closed plain or null-prototype records.
+    `lingerMs` is a non-negative finite number; malformed options or a
+    foreign `from` throw `TypeError` before response writes.
   - A framework guard runs in the framework's lifecycle, before the
     route dispatches, so it answers before any byte streams (the
     README's native Fastify pattern, executed by
@@ -1656,7 +1661,12 @@ binding (§11) and later the AI tools read only `invoke`, `contract` and
 **outcome** for everything a server or a network can do and rejects
 only for the host's own mistake (`JC1005`: an operation the contract
 does not declare, or an opaque one — `invoke` carries JSON; an opaque
-operation is reached through `bytes` (§10.6) and `url`).
+operation is reached through `bytes` (§10.6) and `url`; `JC1008` for
+malformed call controls). Factory options, invocation contexts, subscription
+options and negotiation options are closed plain or null-prototype records:
+unknown members refuse with `JC1008` before transport effects. A cancellation
+`signal`, when supplied, must be an `AbortSignal`. Subscription `reconnect`
+is likewise a closed record with only a non-negative integer `max`.
 
 ```jsonc
 // options — every one has a default
@@ -2579,7 +2589,7 @@ The rule ids are stable (`LINT_RULES`):
 |---|---|---|
 | `read-query-on-body-method` | a read bound to POST, PUT or PATCH whose members default to the query string: the client sends them there, and a hand-written JSON body is ignored (a read that declares a whole-body member, or an opaque read, has chosen its layout and is not reported) | bind the read to GET, or declare the members' location (`http.in`) or a whole-body member |
 | `body-limit-unsatisfiable` | the smallest body the required members can encode to exceeds `policy.limits.maxBodyBytes`, so every valid request is refused `JC2003` (an optional whole-body member can be left out, so it counts nothing; a requirement listed twice counts once) | raise the limit or relax the bounds. The size is a **lower bound**: `maxLength` counts code points and JSON escaping only adds bytes |
-| `body-limit-exceedable` | a body member's own `maxLength` admits a valid string whose encoding alone — the characters and its two quotes — exceeds `policy.limits.maxBodyBytes`, so a valid request carrying one is refused `JC2003` (members inside a body member, array items and union branches are read; a string with a `pattern`, `format`, `enum` or `const` beside its bound is not reported, since those may keep the length out of reach; the widest such member is named) | lower the `maxLength`, or raise the limit |
+| `body-limit-exceedable` | a body member's own `maxLength` admits a valid string whose encoding alone — up to six JSON-escaped bytes per code point and its two quotes — exceeds `policy.limits.maxBodyBytes`, so a valid request carrying one is refused `JC2003` (members inside a body member, array items and union branches are read; narrowing assertions such as `pattern`, `format`, `enum`, `const`, content assertions, `allOf`, `not` or conditionals on a member or ancestor are not traversed; a reference with assertion siblings is not traversed; the widest remaining member is named. This local bound does not prove that all surrounding object, array or union constraints are satisfiable) | lower the `maxLength`, or raise the limit |
 | `retry-on-undeclared` | a `policy.retry.on` entry the client can never retry: neither a code the operation declares, a `JC20xx` wire code (a failure outcome — `JC2009` is an in-progress claim), nor `JC2051` (a network loss, retried under any declared retry). `bussy`, `JC9999`, a compile or host code (`JC0003`, `JC1008`) and a client-side contract code (`JC2053`) are reported | name a declared code or a `JC20xx` wire code |
 
 A header member whose name is not an HTTP token, and an opaque operation's
@@ -2625,7 +2635,8 @@ changes, and the public revision does not. It fingerprints the whole
 surface for an internal gate (with `diffContracts(a, b, { audience:
 'all' })`, §13). It is never served on the well-known path, never
 carried in `meta.revision`, and never negotiated. The option set is
-closed (`JC1008`).
+closed: malformed options reject the returned Promise with `JC1008`. Valid
+calls for the same contract and audience return the same memoized Promise.
 
 A public projection that cannot be canonicalized has no revision:
 
@@ -2689,7 +2700,9 @@ no `negotiate`, no `pending`.
 | any handler fault — a throw, a rejection, an undeclared code, an output or error-details schema violation | kind `contract` `JC2070`, message `contract/local-handler-failed`; the distinguishing cause goes to `onError(error, { op, trace })`, never into the outcome |
 | `ctx.signal` aborted before or while running, or the client closed | kind `cancelled` `JC2052`, at once; a handler that settles later settles into nothing for the caller, while the host's `enter` still waits for it (step 3) |
 
-A malformed `ctx` (not an object) throws `JC1008`, as on every client.
+A malformed `ctx` (not a plain or null-prototype record, an unknown member,
+or an invalid signal) rejects with `JC1008`, as on the HTTP client. Local
+and port invocation contexts admit only `signal` and `attempt`.
 The options are a closed set (`JC1001`, naming the nearest). Options:
 `trace`, `runtime` (the record `trace` defaults from), `validateOutput` (`'never'` is a declared downgrade,
 reported in `capabilities.validatedOutput`; the output is validated

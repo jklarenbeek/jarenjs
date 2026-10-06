@@ -30,6 +30,8 @@ export function workerPoolDriver(configuration, driverFactory) {
   const graceMs = positiveOption('graceMs', configuration.graceMs, 5000);
   return Object.freeze({
     name: 'node-worker-pool-sqlite', dialect: sqliteDialect,
+    supportsSharedReads: (path, options) => options?.readOnly === true
+      || (path !== ':memory:' && path !== '' && readers > 0),
     open: async (path = ':memory:', options = {}) => {
       const driver = driverFactory(configuration.worker);
       const slots = [];
@@ -94,9 +96,9 @@ export function workerPoolDriver(configuration, driverFactory) {
         return read;
       };
       const withLease = async (readOnly, fn, borrow = false) => {
-        if (closed) throw new DbRuntimeError('JD2063', 'the worker pool is closed');
         const read = currentRead();
         if (read !== undefined) return execute(read.lease, fn);
+        if (closed) throw new DbRuntimeError('JD2063', 'the worker pool is closed');
         if (transaction !== null) return execute(transaction, fn);
         // bounded as a cursor's wait is: on a pool without readers an open
         // root cursor holds the writer, and a root write waiting for it
@@ -263,8 +265,12 @@ export function workerPoolDriver(configuration, driverFactory) {
             await replace(lease.slot);
           }
         },
-        /** Whether the calling async context is inside a parallel read. */
-        inParallelRead: () => parallel.getStore() !== undefined,
+        /** Whether this context belongs to a parallel read. Statement
+         * draining additionally requires its lease to remain live. */
+        inParallelRead: (activeOnly = false) => {
+          const read = parallel.getStore();
+          return read !== undefined && (!activeOnly || !read.ended && read.lease.slot.healthy);
+        },
         close: async () => {
           if (closed) return;
           closed = true;

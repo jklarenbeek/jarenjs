@@ -31,6 +31,13 @@ source can supply `destroy(client, error)` in the driver options. Cleanup failur
 is reported and repeated close shares that settlement. A host supplying a single
 client without `release` owns its final disposal.
 
+With `sessions: N`, a lost session is retired from admission without automatic
+replacement. Unpinned calls can use surviving sessions, but the Store's own
+tracked unit of work stays pinned to the first one. Losing that first session
+refuses its calls with `JD2087` and also loses any owner lock held there. Close
+and reopen the Store to regain those facilities; uncertain writes are not
+automatically replayed.
+
 A cached SELECT whose result type changes can retry unnamed only in autocommit,
 and only when the native planner rejected it before execution. Within a
 transaction, the original 0A000 is propagated; the transaction or nested
@@ -46,7 +53,9 @@ admission per pull. Return cursors promptly: a paused PostgreSQL cursor keeps an
 MVCC snapshot and may delay database maintenance.
 
 `POSTGRES_DEFAULTS` is the public finite budget record. Driver options override
-its positive integer values. Each driver admits eight sessions and queues up to
+its positive integer values; malformed bounds, including explicit `null`,
+refuse `JD0003` before acquisition. Omit a bound to keep its default.
+Each driver admits eight sessions and queues up to
 64 opens; each session queues up to 64 requests and holds at most 64 cursors and
 256 statement identities. Native fetches take up to 64 rows; `get()` fetches one.
 `windowBytes` limits a retained normalized frame to 1 MiB, and `all()` retains at
@@ -706,11 +715,11 @@ On pool-3-readers, `reads: 'parallel'` runs the Store-level mixed work 2.47× fa
 
 | Bun 1.4.2 executable | Rows written | Rows streamed | Long read ms | Event-loop max ms |
 |---|---:|---:|---:|---:|
-| worker | 20001 | 20001 | 411.00 | 2.45 |
-| pool | 20001 | 20001 | 567.05 | 5.31 |
-| in-thread | 20001 | 20001 | 111.38 | 110.44 |
+| worker | 20001 | 20001 | 327.17 | 1.79 |
+| pool | 20001 | 20001 | 404.22 | 5.87 |
+| in-thread | 20001 | 20001 | 97.29 | 96.33 |
 
-Built with `bun build --compile ./worker-app.js ./worker-endpoint.js --outfile worker-hosts-bun` and run with every source and module path removed; the long read is 5 whole-collection reads of 20001 rows. The worker host held the event loop at most 2.45 ms against the 50 ms bound and took 3.69× as long as the in-thread binding, which held the loop 110.44 ms. The pool host held the event loop at most 5.31 ms against the 50 ms bound and took 5.09× as long as the in-thread binding, which held the loop 110.44 ms. Built without the second entrypoint, the open refused: worker JD0003 (retryable: false), pool JD0003 (retryable: false). The side-effect import of `@jarenjs/db/worker-endpoint`, bundled alone, keeps the endpoint: 98528 bytes with Bun, 133413 with esbuild.
+Built with `bun build --compile ./worker-app.js ./worker-endpoint.js --outfile worker-hosts-bun` and run with every source and module path removed; the long read is 5 whole-collection reads of 20001 rows. The worker host held the event loop at most 1.79 ms against the 50 ms bound and took 3.36× as long as the in-thread binding, which held the loop 96.33 ms. The pool host held the event loop at most 5.87 ms against the 50 ms bound and took 4.15× as long as the in-thread binding, which held the loop 96.33 ms. Built without the second entrypoint, the open refused: worker JD0003 (retryable: false), pool JD0003 (retryable: false). The side-effect import of `@jarenjs/db/worker-endpoint`, bundled alone, keeps the endpoint: 96428 bytes with Bun, 131307 with esbuild.
 
 | Include accounting | Encoded bytes | Time p50 ms | Uncollected heap growth p50 MiB |
 |---|---:|---:|---:|

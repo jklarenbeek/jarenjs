@@ -794,7 +794,12 @@ accessible patterns are expressible as data.
 `createHistoryRouteSubscription(options?)` from `@jarenjs/app/routes`
 return a subscription handler with `navigate`, `replace`, `refresh`
 and `dispose` controls. One factory owns one active subscription and
-its native listeners. Stop it before reusing it for another app:
+its native listeners. Factory options are closed plain or null-prototype
+records: `window`, `basePath`, `maxLength`, `maxQueryEntries`, `maxTurns`,
+`templates`, and `onError`. `navigate(target, { replace })` admits only the
+optional boolean `replace`. Unknown or malformed controls refuse with
+`JA2023` before listeners or history writes. Stop a subscription before
+reusing its factory for another app:
 
 ```javascript
 import { createHistoryRouteSubscription } from '@jarenjs/app/routes';

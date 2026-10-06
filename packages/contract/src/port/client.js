@@ -27,6 +27,7 @@ import { compileMessageCatalog } from '@jarenjs/core/message';
 import { resolveHostRuntime } from '../runtime.js';
 
 import { ContractHostError } from '../errors.js';
+import { admitOptions, admitSignal } from '../options.js';
 import { validateOperationInput, PORT_LOCAL_ERRORS } from '../pipeline.js';
 import { renderMessage, projectValidationDetails, verdict } from '../http/wire.js';
 import { createStreamConsumer } from '../stream/client.js';
@@ -172,7 +173,7 @@ export function openPortClient(contract, options) {
     || contract.operations === null || typeof contract.operations !== 'object' || !Array.isArray(contract.ids)) {
     throw host('JC1008', 'the first argument must be a compiled contract (compileContract)');
   }
-  if (options === null || typeof options !== 'object') throw host('JC1008', 'options must be an object with the channel');
+  admitOptions(options, ['channel', 'timeoutMs', 'catalog', 'runtime'], (reason) => host('JC1008', reason));
   const channel = options.channel;
   if (!isChannel(channel)) {
     throw host('JC1008', 'options.channel must expose postMessage and a message listener surface (a MessagePort, Worker, BroadcastChannel, or the shape)');
@@ -337,9 +338,9 @@ export function openPortClient(contract, options) {
     if (route.op.kind === 'subscribe') {
       throw new ContractHostError('JC1005', `client: '${route.op.id}' is a subscribe operation — a port carries it as a stream; use client.subscribe`);
     }
-    if (ctx === null || typeof ctx !== 'object') throw host('JC1008', 'ctx must be an object');
+    admitOptions(ctx, ['signal', 'attempt'], (reason) => host('JC1008', reason), 'ctx');
+    const signal = admitSignal(ctx.signal, (reason) => host('JC1008', reason), 'ctx.signal');
     const meta = makeMeta(route.op.id, ctx.attempt, null);
-    const signal = ctx.signal === undefined || ctx.signal === null ? null : ctx.signal;
     if ((signal !== null && signal.aborted) || closed) return Promise.resolve(cancelled(route, meta));
 
     // validate before anything is posted — the same verdict the server
@@ -430,7 +431,8 @@ export function openPortClient(contract, options) {
     if (route.op.kind !== 'subscribe') {
       throw new ContractHostError('JC1010', `client: '${route.op.id}' is a ${route.op.kind} operation — subscribe carries streams; use invoke`);
     }
-    if (options === null || typeof options !== 'object') throw host('JC1008', 'subscribe options must be an object');
+    admitOptions(options, ['onSnapshot', 'onPatch', 'onError', 'onEnd', 'signal', 'lastSeq', 'reconnect'],
+      (reason) => host('JC1008', reason), 'subscribe options');
     for (const name of ['onSnapshot', 'onPatch', 'onError', 'onEnd']) {
       const cb = /** @type {any} */ (options)[name];
       if (cb !== undefined && typeof cb !== 'function') throw host('JC1008', `options.${name} must be a function`);
@@ -443,11 +445,12 @@ export function openPortClient(contract, options) {
     }
     if (options.reconnect !== undefined && options.reconnect !== null) {
       const r = /** @type {any} */ (options.reconnect);
-      if (typeof r !== 'object' || !Number.isInteger(r.max) || r.max < 0) {
+      admitOptions(r, ['max'], (reason) => host('JC1008', reason), 'options.reconnect');
+      if (!Number.isInteger(r.max) || r.max < 0) {
         throw host('JC1008', 'options.reconnect must be { max } with a non-negative integer number of further attempts');
       }
     }
-    const signal = options.signal === undefined || options.signal === null ? null : options.signal;
+    const signal = admitSignal(options.signal, (reason) => host('JC1008', reason));
     const meta = makeMeta(route.op.id, null, null);
     const id = prefix + (++seq);
 

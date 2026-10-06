@@ -25,7 +25,7 @@ import { JsonQueryCompileError } from './errors.js';
 import { queryCompileError, messageRef, renderQueryMessageId } from './messages.js';
 import { FormatRefusal, readDecimalFormat } from './format-number.js';
 import { normalizeLexical } from './lexical.js';
-import { deepFreeze, isJsonObject } from '@jarenjs/core/object';
+import { deepFreeze, isJsonObject, isPlainOptions, refuseUnknownMembers } from '@jarenjs/core/object';
 // The operator registry: `name -> { params, result, compile }`. Only
 // referenced inside functions (never at module evaluation time), so the
 // import cycle normalize.js <-> operators.js is initialization-safe.
@@ -1315,6 +1315,17 @@ function normalizeQuantifierPhrase(obj, docPath, scope, ctx) {
 
 //#region entry points
 
+const QUERY_OPTIONS = Object.freeze(['compileTypeTest', 'extensions', 'functions', 'collations', 'pathFunctions', 'zoneProvider', 'dateNames', 'decimalFormats', 'limits', 'externals', 'analysis', 'lexicalProviders']);
+
+/** Check the common compiler/analyzer host boundary before options are projected.
+ * @param {Record<string, any>} options */
+function validateQueryOptions(options) {
+  if (!isPlainOptions(options)) throw new TypeError('query options must be a plain object');
+  refuseUnknownMembers(options, QUERY_OPTIONS, (key, hint) => new TypeError(`unknown query option '${key}'${hint}`));
+  if (options.analysis !== undefined && typeof options.analysis !== 'boolean') throw new TypeError('options.analysis must be boolean');
+  if (options.compileTypeTest != null && typeof options.compileTypeTest !== 'function') throw new TypeError('options.compileTypeTest must be a function');
+}
+
 // Validate `options.extensions` (package-internal, used by the JSLT
 // layer; not a public contract): a plain object of `name -> entry`.
 // Every name must start with '$' and must not collide with the core
@@ -1522,6 +1533,14 @@ function measureDepth(node, depth, worst) {
 }
 
 function normalizeExpr(value, docPath, scope, ctx) {
+  const depth = ++ctx.depth;
+  const limit = Math.min(ctx.limits?.depth ?? 256, 256);
+  if (depth > limit) raise('JQ0011', 'query/depth-limit', { depth, limit }, docPath);
+  try { return normalizeExpression(value, docPath, scope, ctx); }
+  finally { ctx.depth--; }
+}
+
+function normalizeExpression(value, docPath, scope, ctx) {
   switch (typeof value) {
     case 'string':
       return normalizeString(value, docPath, scope, ctx);
@@ -1564,12 +1583,14 @@ function normalizeExpr(value, docPath, scope, ctx) {
  *   programming error, not a JQ0xxx document error). The published format
  *   and its schema are unchanged: without extensions, the same documents
  *   fail JQ0002.
+ * @param {boolean} [analysis] - internal schema-hook relaxation for analyzeQuery only
  * @returns {{ root: object, frameSize: number, externals: {name: string, slot: number}[] }}
  *   the AST root, the frame size, and the external parameters in order of
  *   first appearance (slot order)
  * @throws {JsonQueryCompileError} on any JQ0xxx condition
  */
-export function normalizeQuery(doc, options = {}) {
+export function normalizeQuery(doc, options = {}, analysis = options?.analysis === true) {
+  validateQueryOptions(options);
   const compileTypeTest = typeof options.compileTypeTest === 'function'
     ? options.compileTypeTest
     : null;
@@ -1591,12 +1612,12 @@ export function normalizeQuery(doc, options = {}) {
     ? undefined
     : { pathFunctions: options.pathFunctions };
   const ctx = {
-    nextSlot: 1, externals: new Map(), compileTypeTest, extensions,
+    nextSlot: 1, depth: 0, externals: new Map(), compileTypeTest, extensions,
     functions, collations, zoneProvider, dateNames, decimalFormats, limits, pathOptions, declaredExternals,
     lexicalProviders: options.lexicalProviders,
     // package-internal: set only by analyzeQuery (Appendix C.1); the
     // compile entry point never passes it
-    analysis: options.analysis === true,
+    analysis,
     usedOps: new Set(), usedFunctions: new Set(), usedCollations: new Set(),
   };
   let expr = doc;

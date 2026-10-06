@@ -83,6 +83,7 @@ export function wasmDriver(handle) {
   }
   return Object.freeze({
     name: 'wasm-sqlite',
+    supportsSharedReads: false,
     dialect: sqliteDialect,
     /**
      * @param {string} path

@@ -225,7 +225,7 @@ token defined in `:root` is redefined in `.dark`; new hues enter as tokens or no
   symmetrically). A new animation reaches for those tokens or it is not part of the
   system. Only `transform` and `opacity` animate, ever — animating a layout property
   costs a frame the compositor cannot give back.
-- **Three families, and no fourth without a reason.**
+- **Four families, and no additional family without a reason.**
   1. *Page entrance* — the shell keys `<main>` on the route, so a route swap MOUNTS the
      page container instead of patching the old one in place, and the entrance plays
      once per arrival (a reused element keeps the animation it already ran). CSS only.
@@ -237,6 +237,10 @@ token defined in `:root` is redefined in `.dark`; new hues enter as tokens or no
      rendered string verbatim: the count borrows a published figure, it never formats
      one, and a string whose leading number is a date, a version or a grouped number is
      refused rather than rewritten.
+  4. *Hero dispatch* — `.hero-stage` enters in the recorded pipeline order
+     through `stage-in`, and the focused stage shifts with the step control.
+     The stage list is keyed on the run, so dispatch replays the sequence;
+     reduced motion shows every stage immediately and moves focus instantly.
 - **The motion install lives at the committed-frame boundary** (`afterRender`, through a
   host capability the site injects), never in an effect and never in the view: an
   IntersectionObserver stamps the classes, CSS does the moving. Two guarantees ride on

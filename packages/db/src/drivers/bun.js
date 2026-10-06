@@ -164,6 +164,7 @@ export function fromBunModule(mod, path, options) {
 export function bunDriver() {
   return Object.freeze({
     name: 'bun-sqlite',
+    supportsSharedReads: false,
     dialect: sqliteDialect,
     databaseIdentity: nativeDatabaseIdentity,
     /**

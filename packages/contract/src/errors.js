@@ -26,6 +26,7 @@
  */
 
 import { CodedError } from '@jarenjs/core/errors';
+import { isPlainOptions } from '@jarenjs/core/object';
 
 /**
  * The runtime code table: one entry per code this package can raise,
@@ -239,7 +240,7 @@ const failures = new WeakSet();
 export function ContractFailure(code, params, details, options) {
   let retryAfterMs;
   if (options !== undefined && options !== null) {
-    if (typeof options !== 'object') throw new TypeError('ctx.fail: options must be an object { retryable?, retryAfterMs? }');
+    if (!isPlainOptions(options)) throw new TypeError('ctx.fail: options must be a plain object { retryable?, retryAfterMs? }');
     for (const key of Object.keys(options)) {
       if (key !== 'retryable' && key !== 'retryAfterMs') {
         throw new TypeError(`ctx.fail: options has no member '${key}' (it reads retryable and retryAfterMs)`);

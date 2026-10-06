@@ -5,7 +5,7 @@ import { semanticKey } from '@jarenjs/core/object';
 import { compileJsonQuery } from '../query/index.js';
 import { validateDateNames, validateDecimalFormats } from '../query/normalize.js';
 import { canonicalizeJson } from '../canonical.js';
-import { FormulaError, causeMessage, formulaMessage, snapshot, credit } from './shared.js';
+import { FormulaError, causeMessage, formulaMessage, snapshot, credit, FORMULA_OPTIONS, checkFormulaOptions } from './shared.js';
 
 export { FormulaError };
 export { formulaMessagesEn } from './messages.js';
@@ -106,6 +106,7 @@ function outcome(value, doc) {
  * @param {FormulaOptions} [options]
  */
 export function createFormulaCompiler(options = {}) {
+  checkFormulaOptions(options, FORMULA_OPTIONS, 'formula');
   // the host's locale data and pack registry are checked once, here: a
   // malformed one is the host's TypeError, never every document's error
   if (options.dateNames !== undefined) validateDateNames(options.dateNames);
@@ -224,6 +225,7 @@ export function compileFormula(doc, options = {}) {
  * @returns {{ rows: number, agree: number, differ: number, mismatches: { index: number, expected: any, actual: any }[], omittedMismatches: number }}
  */
 export function checkFormulaParity(formula, rows, expected, options = {}) {
+  checkFormulaOptions(options, ['context', 'maxRows', 'maxMismatches'], 'parity');
   const maxRows = credit(options.maxRows, 10000, 'maxRows');
   const maxMismatches = credit(options.maxMismatches, 20, 'maxMismatches');
   if (!formula || typeof formula.evaluate !== 'function') throw new TypeError('checkFormulaParity needs a compiled formula');

@@ -1,8 +1,7 @@
 //@ts-check
 /** Finite resource and server deadline defaults, shared by PG host owners. */
-import { positiveOption } from './worker-protocol.js';
 import { DbCompileError } from '../errors.js';
-import { refuseUnknownMembers } from '../options.js';
+import { readOptions } from '../options.js';
 
 export const POSTGRES_DEFAULTS = Object.freeze({ windowRows: 64, windowBytes: 1048576,
   maxPending: 64, maxStatements: 256, maxCursors: 64, allMaxRows: 100000,
@@ -41,9 +40,7 @@ export const POSTGRES_NOTIFICATION_OPTIONS = Object.freeze([...Object.keys(POSTG
  * @param {string} owner - how the call reads, for the message
  */
 export function refuseUnknownPostgresOptions(options, known, owner) {
-  if (options === null || typeof options !== 'object') return;
-  refuseUnknownMembers(options, known, (key, hint) =>
-    new DbCompileError('JD0003', `${owner} option '${key}' is not one it reads${hint}`));
+  readOptions(options, known, owner, 'JD0003');
 }
 
 /**
@@ -55,9 +52,12 @@ export function postgresSettings(options = {}, known = POSTGRES_DRIVER_OPTIONS, 
   refuseUnknownPostgresOptions(options, known, owner);
   const result = {};
   for (const [key, fallback] of Object.entries(POSTGRES_DEFAULTS)) {
-    result[key] = positiveOption(key, options[key], fallback);
+    const value = options[key] === undefined ? fallback : options[key];
+    if (!Number.isSafeInteger(value) || value < 1)
+      throw new DbCompileError('JD0003', `${owner} option '${key}' must be a positive safe integer`);
+    result[key] = value;
     if (key.endsWith('Ms') && result[key] > 2147483647)
-      throw new TypeError(`${key} exceeds the timer range`);
+      throw new DbCompileError('JD0003', `${owner} option '${key}' exceeds the timer range`);
   }
   // the store's own rule for the same member: `Infinity`, a negative or a
   // fraction used to become a 1 ms wait (or none) behind a transaction
@@ -66,9 +66,9 @@ export function postgresSettings(options = {}, known = POSTGRES_DRIVER_OPTIONS, 
     && (!Number.isInteger(queueTimeout) || queueTimeout < 0 || queueTimeout > 0x7fffffff))
     throw new DbCompileError('JD0003', `${owner} option 'queueTimeout' is a whole number of milliseconds from 0 to 2147483647`);
   if (options.prepared !== undefined && !['named', 'unnamed'].includes(options.prepared))
-    throw new TypeError('prepared is named or unnamed');
+    throw new DbCompileError('JD0003', 'prepared is named or unnamed');
   if (options.cursorMode !== undefined && !['native', 'buffered'].includes(options.cursorMode))
-    throw new TypeError('cursorMode is native or buffered');
+    throw new DbCompileError('JD0003', 'cursorMode is native or buffered');
   if (options.poolMode !== undefined && options.poolMode !== 'session')
     throw new DbCompileError('JD0003', 'the PostgreSQL Store requires session affinity; transaction poolers are unsupported');
   return Object.freeze(result);

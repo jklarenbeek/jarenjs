@@ -923,31 +923,31 @@ alone; writing accepted evidence requires both engines. The committed
 
 <!--fact:postgres.portability-->
 
-Measured 2026-10-04T19:59:22.147Z: 500 documents, Node 24.20.0, SQLite 3.53.4, PostgreSQL 17.11 (Debian 17.11-1.pgdg12+2), pg 8.23.0. Durability settings: fsync=on, synchronous_commit=on, full_page_writes=on.
+Measured 2026-10-06T10:21:01.615Z: 500 documents, Node 24.20.0, SQLite 3.53.4, PostgreSQL 17.11 (Debian 17.11-1.pgdg12+2), pg 8.23.0. Durability settings: fsync=on, synchronous_commit=on, full_page_writes=on.
 
 | Operation | SQLite ms | PostgreSQL ms | PG / SQLite | Client query calls per PG operation | Iterations |
 |---|---:|---:|---:|---:|---:|
-| open | 24.062 | 27.212 | 1.1× | 17 | 1 |
-| insert | 0.017 | 0.726 | 42.5× | 1 | 500 |
-| get | 0.023 | 1.045 | 45.8× | 5 | 50 |
-| indexed | 0.806 | 4.487 | 5.6× | 13 | 20 |
-| scanned | 0.777 | 3.999 | 5.1× | 13 | 20 |
-| range | 0.790 | 4.219 | 5.3× | 13 | 20 |
-| transaction | 0.175 | 1.405 | 8.0× | 3 | 20 |
-| migration (one index) | 15.439 | 105.469 | 6.8× | not separately counted | 1 |
+| open | 21.653 | 19.446 | 0.9× | 17 | 1 |
+| insert | 0.014 | 0.609 | 43.0× | 1 | 500 |
+| get | 0.018 | 0.742 | 41.3× | 5 | 50 |
+| indexed | 0.637 | 3.490 | 5.5× | 13 | 20 |
+| scanned | 0.611 | 3.036 | 5.0× | 13 | 20 |
+| range | 0.630 | 3.075 | 4.9× | 13 | 20 |
+| transaction | 0.157 | 1.082 | 6.9× | 3 | 20 |
+| migration (one index) | 12.632 | 65.651 | 5.2× | not separately counted | 1 |
 
-Sequential insert throughput: SQLite 58466, PostgreSQL 1377 documents/second.
+Sequential insert throughput: SQLite 70493, PostgreSQL 1641 documents/second.
 
 | First-row probe | SQLite | PostgreSQL |
 |---|---:|---:|
-| First row ms | 1.143 | 1.230 |
-| First row plus cleanup ms | 1.253 | 1.609 |
+| First row ms | 0.969 | 1.232 |
+| First row plus cleanup ms | 1.083 | 1.610 |
 | Returned rows | 1 | 1 |
 | Fetched native rows / normalized bytes | not instrumented | 64 / 5661 |
 | Session peak native frame rows / bytes | not instrumented | 64 / 5813 |
 | Client query calls including cleanup | no network | 5 |
-| Sampled RSS before / after MiB | 94.88 / 112.58 | 115.50 / 121.13 |
-| Sampled heap before / after MiB | 21.55 / 27.30 | 16.15 / 24.11 |
+| Sampled RSS before / after MiB | 96.96 / 114.02 | 117.15 / 122.53 |
+| Sampled heap before / after MiB | 21.72 / 27.49 | 16.19 / 24.28 |
 
 After close: driver active=0, queued=0; native cursors=0, prepared statements=0; host pool total=1, idle=1, waiting=0.
 
@@ -1017,8 +1017,10 @@ server configuration determine deployment costs.
   `openStore(model, { transactions: 'strict' })` — a mode that governs
   store-level calls; a second `store.transaction` still queues. One store
   is safe for a handler per request. A transaction's options (`mode`,
-  `signal`, `unitOfWork`) are a closed set on every surface: an unknown
-  or malformed one is `JD0013`, and a nested transaction refuses what a
+  `signal`, `unitOfWork`, `retry`, `holdTimeoutMs`, `isolation`) are a closed
+  set: an unknown or malformed one is `JD0013`. Retry and hold limits belong
+  to the async root; synchronous and nested transactions refuse unsupported
+  options as `JD0014`. A nested transaction also refuses what a
   savepoint cannot honour (`unitOfWork`, a writer lock the root did not
   take) as `JD0014`. Every `tx` view is pinned to its EXACT scope: a
   handle retained past its callback, or an outer handle used while an

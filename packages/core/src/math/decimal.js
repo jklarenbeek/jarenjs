@@ -149,7 +149,8 @@ export function decimalToNumber(d, negative) {
  * breaks toward positive infinity (`'half-up'`, F&O `fn:round`: `2.5` → 3,
  * `-2.5` → −2) or to the even neighbour (`'half-even'`, F&O
  * `fn:round-half-to-even`). A negative argument that rounds to zero is
- * `-0`; `NaN`, `±Infinity` and zero are returned as they are.
+ * `-0`; `NaN`, `±Infinity` and zero are returned as they are. A non-integer
+ * precision or an unknown rounding mode throws TypeError before rounding.
  * @param {number} x
  * @param {number} [precision] - an integer, default 0
  * @param {'half-up' | 'half-even'} [mode]
@@ -162,6 +163,8 @@ export function decimalToNumber(d, negative) {
  * roundExact(1234, -2);            // 1200
  */
 export function roundExact(x, precision = 0, mode = 'half-up') {
+  if (!Number.isInteger(precision)) throw new TypeError('roundExact precision must be an integer');
+  if (mode !== 'half-up' && mode !== 'half-even') throw new TypeError('roundExact mode must be half-up or half-even');
   if (!Number.isFinite(x) || x === 0) return x;
   const negative = x < 0;
   // toward +∞ is away from zero for a positive value, toward it for a negative one

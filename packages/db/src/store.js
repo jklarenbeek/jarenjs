@@ -24,13 +24,14 @@ import { resolveRuntime } from '@jarenjs/core/runtime';
 import { createBoundedCache } from '@jarenjs/core/cache';
 import { backoffDelay, sleep } from '@jarenjs/core/retry';
 import { applyJSONPatch } from '@jarenjs/json/patch';
+import { analyzeQuery } from '@jarenjs/json/query';
 import { parseJSONPointer, compileJSONPointer, JSONPOINTER_NOTHING } from '@jarenjs/json/pointer';
 import { equalsJson } from '@jarenjs/core/object';
 
 import { DbCompileError, DbRuntimeError, wrapDriverError, isDriverError, classifyDriverError } from './errors.js';
 import { chain, toPromise, isThenable, attempt, abortReason } from './driver.js';
 import { createSessionRouter } from './sessions.js';
-import { isPlainOptions, refuseUnknownMembers } from './options.js';
+import { isPlainOptions, refuseUnknownMembers, readOptions, readControls } from './options.js';
 import { canonicalKeyText, namesNoNumber } from './key-text.js';
 import { planCollection, planEntity, planJoinTable, verifyShape } from './ddl.js';
 import { translatePatch } from './patch-sql.js';
@@ -47,14 +48,15 @@ import { trustedSql, synchronousBody } from './sql.js';
 import { relationalEngine } from './relational.js';
 import { createTracker, membershipKeys } from './tracker.js';
 import { createCaptureEngine, DEFAULT_RETENTION } from './capture.js';
-import { createReplicationEngine } from './replication.js';
+import { createReplicationEngine, readReplicationOptions } from './replication.js';
 import { REPLICATION_DEFAULTS } from './replication-format.js';
 import { createLogicalRows } from './logical-rows.js';
 import { shapeHash } from './migrate.js';
 import { createLiveRegistry, classifyLiveQuery, LIVE_DEFAULTS } from './live.js';
+import { ASYNC_LIVE_DEFAULTS } from './live-options.js';
 import { classifyEntityLive } from './live-join.js';
 import { normalizeEventTime } from './live-time.js';
-import { createJobEngine } from './jobs.js';
+import { createJobEngine, JOB_DEFAULTS } from './jobs.js';
 import { createOwnerLease, OWNER_LEASE_DEFAULT_MS, OWNER_LEASE_MIN_MS } from './owner.js';
 import { introspectModel, readSchema } from './introspect.js';
 import { collectEntityRoots, entityRoot } from './plan.js';
@@ -657,7 +659,7 @@ function ensureEntityShape(connection, entityPlans, entities, createsNothing) {
 function readWriteOptions(collectionName, options, verb, expects) {
   if (options === undefined) return null;
   const spelling = `collection('${collectionName}').${verb}`;
-  const refuse = (/** @type {string} */ reason) => new DbCompileError('JD0013', `${spelling}: ${reason}`);
+  const refuse = (/** @type {string} */ reason) => optionError(spelling, reason);
   if (!isPlainOptions(options))
     throw refuse(`its options are ${expects ? '{ expect }' : 'an empty object'}, not ${describeValue(options)}`);
   refuseUnknownMembers(options, expects ? ['expect'] : [], (key, hint) =>
@@ -699,8 +701,7 @@ function readWriteOptions(collectionName, options, verb, expects) {
  * A patch's operations with each `value` as the JSON it is written as,
  * read back — an undefined member is no member, a Date its ISO text — so
  * the patch tests, compares and writes the document it stores. An
- * operation whose value JSON cannot carry stays as it is, for the patch
- * engine to meet.
+ * operation whose value JSON cannot carry refuses before taking a write lock.
  * @param {unknown} ops
  * @returns {unknown}
  */
@@ -712,10 +713,9 @@ function patchAsJson(ops) {
     try {
       text = JSON.stringify(op.value);
     }
-    catch {
-      return op;
-    }
-    return text === undefined ? op : { ...op, value: JSON.parse(text) };
+    catch { text = undefined; }
+    if (text === undefined) throw new DbRuntimeError('JD2003', 'a collection patch value must be JSON serializable');
+    return { ...op, value: JSON.parse(text) };
   });
 }
 
@@ -941,12 +941,9 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
    * @param {unknown} options
    */
   const readAllOptions = (options) => {
-    if (options === undefined) return;
     const spelling = `collection('${collection.name}').all`;
-    if (!isPlainOptions(options))
-      throw new DbCompileError('JD0013', `${spelling}: its options are an object, not ${describeValue(options)}`);
-    refuseUnknownMembers(options, ['signal', 'deadline', 'profile', 'strictStreaming'], (key, hint) =>
-      new DbCompileError('JD0013', `${spelling} option '${key}' is not one it reads${hint}`));
+    readOptions(options, ['signal', 'deadline', 'profile', 'strictStreaming'], spelling);
+    readControls(options, spelling);
   };
 
   // RETURNING is decoded after the server has inserted the row. Keep
@@ -1137,6 +1134,16 @@ function lift(fn) {
   };
 }
 
+/** Tracking belongs to the entity set; the lower page engine owns only reads.
+ * @param {any} options @returns {any} */
+function untrackedPageOptions(options) {
+  if (!isPlainOptions(options) || !Object.hasOwn(options, 'tracking')) return options;
+  const { tracking, ...readOptions } = options;
+  if (tracking !== undefined && typeof tracking !== 'boolean')
+    throw new DbCompileError('JD0013', "page() option 'tracking' must be true or false");
+  return readOptions;
+}
+
 /**
  * The asynchronous collection surface over a core.
  * @param {any} core
@@ -1228,6 +1235,51 @@ function refuseMalformedOpenOptions(options) {
     if (options[name] !== undefined && !isPlainOptions(options[name]))
       throw refuse(name, 'is its options object');
   }
+  if (options.statementCacheBound !== undefined
+    && (!Number.isSafeInteger(options.statementCacheBound) || options.statementCacheBound < 1))
+    throw refuse('statementCacheBound', 'is a positive safe integer');
+  for (const name of ['functions', 'extensions', 'expressions']) {
+    if (options[name] !== undefined && !isPlainOptions(options[name]))
+      throw refuse(name, 'is a plain object of declarations');
+  }
+  const nested = (name, members) => readOptions(options[name], members, `openStore ${name}`, 'JD0009');
+  const positive = (name, members, zero = []) => {
+    for (const member of members) {
+      const value = options[name]?.[member];
+      if (value !== undefined && (!Number.isSafeInteger(value) || value < (zero.includes(member) ? 0 : 1)))
+        throw refuse(name, `member '${member}' is a ${zero.includes(member) ? 'nonnegative' : 'positive'} safe integer`);
+    }
+  };
+  if (isPlainOptions(options.capture)) {
+    nested('capture', ['mode', 'log']);
+    const { mode, log } = options.capture;
+    if (mode !== undefined && !['auto', 'session', 'journal'].includes(mode))
+      throw refuse('capture', "mode is 'auto', 'session' or 'journal'");
+    if (log !== undefined && typeof log !== 'boolean' && !isPlainOptions(log))
+      throw refuse('capture', 'log is true, false or { retention }');
+    if (isPlainOptions(log)) {
+      readOptions(log, ['retention'], 'openStore capture.log', 'JD0009');
+      if (log.retention !== undefined && (!Number.isSafeInteger(log.retention) || log.retention < 1))
+        throw new TypeError('capture.log.retention must be a positive safe integer');
+    }
+  }
+  if (isPlainOptions(options.jobs)) {
+    nested('jobs', [...Object.keys(JOB_DEFAULTS), 'now', 'random']);
+    positive('jobs', Object.keys(JOB_DEFAULTS), ['pollInterval', 'backoffBase', 'backoffCap', 'stopGraceMs']);
+    for (const member of ['now', 'random']) {
+      if (options.jobs[member] !== undefined && typeof options.jobs[member] !== 'function')
+        throw refuse('jobs', `member '${member}' is a function`);
+    }
+  }
+  if (options.live !== undefined) {
+    const defaults = typeof options.live.resnapshot === 'function' ? ASYNC_LIVE_DEFAULTS : LIVE_DEFAULTS;
+    nested('live', [...Object.keys(defaults), 'resnapshot']);
+    positive('live', Object.keys(defaults));
+    if (options.live.pollMs !== undefined && options.live.pollMs > TIMER_MAX)
+      throw refuse('live', "member 'pollMs' is within the timer range");
+    if (options.live.resnapshot !== undefined && typeof options.live.resnapshot !== 'function')
+      throw refuse('live', "member 'resnapshot' is a function");
+  }
   if (options.transactions !== undefined && options.transactions !== 'wait' && options.transactions !== 'strict')
     throw refuse('transactions', "is 'wait' or 'strict'");
   if (options.reads !== undefined && options.reads !== 'serialized' && options.reads !== 'parallel')
@@ -1241,6 +1293,13 @@ function refuseMalformedOpenOptions(options) {
   if (options.isolation !== undefined && !ISOLATION_LEVELS.includes(options.isolation))
     throw refuse('isolation', "is 'read committed', 'repeatable read' or 'serializable'");
   readOwnerOption(options);
+}
+
+/** The same parallel-read contract before and after a driver's acquisition.
+ * @param {string} driverName @param {string} reason */
+function parallelReadsError(driverName, reason) {
+  return new DbCompileError('JD0009', "openStore option 'reads' is 'parallel' only on a pool host "
+    + `with readers (@jarenjs/db/node-pool on a file); this store's driver '${driverName}'${reason}`);
 }
 
 /**
@@ -1322,6 +1381,11 @@ const RETRY_MEMBERS = Object.freeze(['attempts', 'baseMs', 'maxMs']);
 /** The longest wait a timer can take — `2^31 − 1` ms. */
 const TIMER_MAX = 0x7fffffff;
 
+/** One diagnostic prefix for collection writes, transaction controls and retry policy.
+ * @param {string} spelling @param {string} reason @param {string} [code] */
+const optionError = (spelling, reason, code = 'JD0013') =>
+  new DbCompileError(code, `${spelling}: ${reason}`);
+
 /**
  * Read one transaction's options, refusing before the transaction
  * begins: anything but a plain object, an unknown member (named, with
@@ -1347,59 +1411,52 @@ const TIMER_MAX = 0x7fffffff;
 function readTransactionOptions(options, surface, spelling, enclosing) {
   if (options === undefined) return {};
   if (!isPlainOptions(options)) {
-    throw new DbCompileError('JD0013',
-      `${spelling}: its options are an object — { ${TRANSACTION_OPTIONS.join(', ')} } — `
+    throw optionError(spelling, `its options are an object — { ${TRANSACTION_OPTIONS.join(', ')} } — `
       + `not ${describeValue(options)}`);
   }
   refuseUnknownMembers(options, TRANSACTION_OPTIONS, (key, hint) =>
     new DbCompileError('JD0013', `${spelling} option '${key}' is not one a transaction reads${hint}`));
   const { mode, signal, unitOfWork, holdTimeoutMs, isolation } = options;
   if (mode !== undefined && mode !== 'deferred' && mode !== 'immediate')
-    throw new DbCompileError('JD0013', `${spelling}: mode must be 'deferred' or 'immediate'`);
+    throw optionError(spelling, `mode must be 'deferred' or 'immediate'`);
   if (isolation !== undefined && !ISOLATION_LEVELS.includes(isolation)) {
-    throw new DbCompileError('JD0013',
-      `${spelling}: isolation must be 'read committed', 'repeatable read' or 'serializable', not ${describeValue(isolation)}`);
+    throw optionError(spelling, `isolation must be 'read committed', 'repeatable read' or 'serializable', not ${describeValue(isolation)}`);
   }
   if (unitOfWork !== undefined && unitOfWork !== 'shared' && unitOfWork !== 'own')
-    throw new DbCompileError('JD0013', `${spelling}: unitOfWork must be 'shared' or 'own'`);
+    throw optionError(spelling, `unitOfWork must be 'shared' or 'own'`);
   if (signal !== undefined && (signal === null || typeof signal !== 'object'
     || typeof signal.aborted !== 'boolean' || typeof signal.addEventListener !== 'function'))
-    throw new DbCompileError('JD0013', `${spelling}: signal must be an AbortSignal`);
+    throw optionError(spelling, `signal must be an AbortSignal`);
   const retry = options.retry === undefined ? undefined : readRetry(options.retry, spelling);
   if (holdTimeoutMs !== undefined
     && (!Number.isInteger(holdTimeoutMs) || holdTimeoutMs < 1 || holdTimeoutMs > TIMER_MAX)) {
-    throw new DbCompileError('JD0013',
-      `${spelling}: holdTimeoutMs is a whole number of milliseconds from 1 to ${TIMER_MAX}, not ${describeValue(holdTimeoutMs)}`);
+    throw optionError(spelling, `holdTimeoutMs is a whole number of milliseconds from 1 to ${TIMER_MAX}, not ${describeValue(holdTimeoutMs)}`);
   }
   if (surface !== 'async') {
     const where = surface === 'sync'
       ? 'the synchronous twin — it answers values, so it cannot wait'
       : 'a nested transaction — a savepoint lives inside its root, which owns them';
     if (retry !== undefined)
-      throw new DbCompileError('JD0014', `${spelling}: retry cannot act on ${where}; retry the root transaction`);
+      throw optionError(spelling, `retry cannot act on ${where}; retry the root transaction`, 'JD0014');
     if (holdTimeoutMs !== undefined)
-      throw new DbCompileError('JD0014', `${spelling}: holdTimeoutMs cannot act on ${where}; limit the root transaction`);
+      throw optionError(spelling, `holdTimeoutMs cannot act on ${where}; limit the root transaction`, 'JD0014');
   }
   if (retry !== undefined && unitOfWork === 'shared') {
-    throw new DbCompileError('JD0014',
-      `${spelling}: retry cannot act with unitOfWork 'shared' — each attempt must start from a fresh `
-      + "unit of work, or the restored pending records of a failed attempt are saved twice; omit unitOfWork");
+    throw optionError(spelling, `retry cannot act with unitOfWork 'shared' — each attempt must start from a fresh `
+      + "unit of work, or the restored pending records of a failed attempt are saved twice; omit unitOfWork", 'JD0014');
   }
   if (surface === 'nested') {
     if (unitOfWork !== undefined) {
-      throw new DbCompileError('JD0014',
-        `${spelling}: unitOfWork cannot act on a nested transaction — a savepoint writes `
-        + 'through the unit of work of the transaction around it; choose it on the root transaction');
+      throw optionError(spelling, `unitOfWork cannot act on a nested transaction — a savepoint writes `
+        + 'through the unit of work of the transaction around it; choose it on the root transaction', 'JD0014');
     }
     if (isolation !== undefined) {
-      throw new DbCompileError('JD0014',
-        `${spelling}: isolation cannot act on a nested transaction — a savepoint runs at its root `
-        + "transaction's level; choose it on the root transaction");
+      throw optionError(spelling, `isolation cannot act on a nested transaction — a savepoint runs at its root `
+        + "transaction's level; choose it on the root transaction", 'JD0014');
     }
     if (mode === 'immediate' && enclosing !== 'immediate') {
-      throw new DbCompileError('JD0014',
-        `${spelling}: mode 'immediate' cannot act inside a transaction that did not take the `
-        + "writer lock — a savepoint cannot take it; begin the ROOT transaction with { mode: 'immediate' }");
+      throw optionError(spelling, `mode 'immediate' cannot act inside a transaction that did not take the `
+        + "writer lock — a savepoint cannot take it; begin the ROOT transaction with { mode: 'immediate' }", 'JD0014');
     }
   }
   return { mode, signal, unitOfWork, retry, holdTimeoutMs, isolation };
@@ -1417,19 +1474,28 @@ function readTransactionOptions(options, surface, spelling, enclosing) {
  */
 function readRetry(value, spelling) {
   if (!isPlainOptions(value)) {
-    throw new DbCompileError('JD0013', `${spelling}: retry is { attempts, baseMs?, maxMs? }, not ${describeValue(value)}`);
+    throw optionError(spelling, `retry is { attempts, baseMs?, maxMs? }, not ${describeValue(value)}`);
   }
   refuseUnknownMembers(value, RETRY_MEMBERS, (key, hint) =>
-    new DbCompileError('JD0013', `${spelling}: retry member '${key}' is not one it reads${hint}`));
+    optionError(spelling, `retry member '${key}' is not one it reads${hint}`));
   const { attempts, baseMs = 5 } = value;
   const maxMs = value.maxMs === undefined ? (Number.isInteger(baseMs) ? Math.max(250, baseMs) : 250) : value.maxMs;
   if (!Number.isInteger(attempts) || attempts < 1 || attempts > 32)
-    throw new DbCompileError('JD0013', `${spelling}: retry.attempts is a whole number from 1 to 32, not ${describeValue(attempts)}`);
+    throw optionError(spelling, `retry.attempts is a whole number from 1 to 32, not ${describeValue(attempts)}`);
   if (!Number.isInteger(baseMs) || baseMs < 0 || baseMs > TIMER_MAX)
-    throw new DbCompileError('JD0013', `${spelling}: retry.baseMs is a whole number of milliseconds, not ${describeValue(baseMs)}`);
+    throw optionError(spelling, `retry.baseMs is a whole number of milliseconds, not ${describeValue(baseMs)}`);
   if (!Number.isInteger(maxMs) || maxMs < baseMs || maxMs > TIMER_MAX)
-    throw new DbCompileError('JD0013', `${spelling}: retry.maxMs is a whole number of milliseconds no less than baseMs, not ${describeValue(maxMs)}`);
+    throw optionError(spelling, `retry.maxMs is a whole number of milliseconds no less than baseMs, not ${describeValue(maxMs)}`);
   return { attempts, baseMs, maxMs };
+}
+
+/** One result contract for collection and entity schema compilers.
+ * Compilation remains at the caller, preserving its receiver and argument order.
+ * @param {any} validate @returns {Function | null} */
+function validationResult(validate) {
+  if (validate !== null && typeof validate !== 'function')
+    throw new TypeError('openStore: compileSchema must return a validation function');
+  return validate;
 }
 
 /**
@@ -1608,7 +1674,24 @@ export function openStore(model, options) {
   try {
     // first: the model checks below read these switches
     refuseMalformedOpenOptions(options);
+    // The query compiler owns its registry and zone-provider grammar. Exercise
+    // that pure boundary now, before the first connection or statement exists.
+    try {
+      analyzeQuery({ $const: null }, { functions: operators?.functions,
+        extensions: operators?.extensions, zoneProvider });
+    }
+    catch (cause) {
+      throw new DbCompileError('JD0009', `openStore query configuration: ${cause.message}`, undefined, cause);
+    }
+    if (options.reads === 'parallel') {
+      const readHint = options.driver.supportsSharedReads;
+      const supportsSharedReads = typeof readHint === 'function'
+        ? options.driver.supportsSharedReads(options.path ?? ':memory:', options) : readHint;
+      if (supportsSharedReads === false)
+        throw parallelReadsError(options.driver.name, ' has no readers for this open');
+    }
     refuseSessionsHere(options);
+    if (options.replication !== undefined) readReplicationOptions(options.replication);
     ownerOption = readOwnerOption(options);
     collections = normalizeModel(model, options.expressions);
     const compiled = compileEntityModel(model);
@@ -2299,6 +2382,7 @@ export function openStore(model, options) {
       const gatedOn = (/** @type {any} */ gate) => (/** @type {() => any} */ fn, /** @type {string | undefined} */ what,
         /** @type {AbortSignal | undefined} */ signal) => {
         refuseClosed();
+        if (inParallelRead()) return refuseInParallelRead();
         if (strictTransactions && (gate.wouldWait ?? gate.mustQueue))
           throw contended("{ transactions: 'strict' } refuses to queue behind it");
         return chain(ownerGuard(false), () => withScope((inner) => gate.exclusively((/** @type {any} */ admitted) => {
@@ -2610,9 +2694,7 @@ export function openStore(model, options) {
       const refuseParallelReadsHere = () => {
         if (options.reads !== 'parallel' || (opened.shared !== null && opened.shared !== undefined
           && Number(opened.capabilities.poolReaders) > 0)) return;
-        throw new DbCompileError('JD0009', "openStore option 'reads' is 'parallel' only on a pool host "
-          + `with readers (@jarenjs/db/node-pool on a file); this store's driver '${options.driver.name}'`
-          + `${opened.capabilities.pooling === true ? ' opened no reader' : ' has no readers'}`);
+        throw parallelReadsError(options.driver.name, opened.capabilities.pooling === true ? ' opened no reader' : ' has no readers');
       };
       const opening = () => { refuseParallelReadsHere(); return openSequence(); };
       const openSequence = () => chain(pragmas(), () =>
@@ -2774,11 +2856,9 @@ export function openStore(model, options) {
                   `the model declares no collection '${name}'`,
                   { docPath: '/collections', collection: name });
               }
-              const validate = options.compileSchema !== undefined
+              const validate = validationResult(options.compileSchema !== undefined
                 ? options.compileSchema(collection.schema)
-                : null;
-              if (validate !== null && typeof validate !== 'function')
-                throw new TypeError('openStore: compileSchema must return a validation function');
+                : null);
               core = captureCollection(name, collectionCore(connection, collection,
                 plans.get(name), validate, queryState,
                 { profile: storeProfile, roots: declaredRoots }, runtime));
@@ -3174,11 +3254,9 @@ export function openStore(model, options) {
                   `the model declares no entity '${name}'`,
                   { docPath: '/entities', collection: name });
               }
-              const validate = options.compileSchema !== undefined
+              const validate = validationResult(options.compileSchema !== undefined
                 ? options.compileSchema(writeSchemaOf(entity, mapping.entities[name]))
-                : null;
-              if (validate !== null && typeof validate !== 'function')
-                throw new TypeError('openStore: compileSchema must return a validation function');
+                : null);
               core = captureEntity(name, entityCore(connection, entity,
                 mapping.entities[name], validate, runtime));
               entityCores.set(name, core);
@@ -3313,13 +3391,13 @@ export function openStore(model, options) {
               syncLoadCursor: (spec, cursorOptions) => loads.syncLoadCursor(spec, cursorOptions,
                 cursorOptions?.tracking === true
                   ? (tree, doc) => tracker.registerGraph(tree, [doc])[0] : undefined),
-              syncPage: (spec, pageOptions) => loads.syncPage(spec, pageOptions,
+              syncPage: (spec, pageOptions) => loads.syncPage(spec, untrackedPageOptions(pageOptions),
                 pageOptions?.tracking === true
                   ? (tree, doc) => tracker.registerGraph(tree, [doc])[0] : undefined),
               loadCursor: (spec, cursorOptions) => loads.loadCursor(spec, cursorOptions,
                 cursorOptions?.tracking === true
                   ? (tree, doc) => tracker.registerGraph(tree, [doc])[0] : undefined),
-              page: (spec, pageOptions) => loads.page(spec, pageOptions,
+              page: (spec, pageOptions) => loads.page(spec, untrackedPageOptions(pageOptions),
                 pageOptions?.tracking === true
                   ? (tree, doc) => tracker.registerGraph(tree, [doc])[0] : undefined),
               explainLoad: (spec, loadOptions) => loads.explainLoad(spec, loadOptions),
@@ -3566,6 +3644,7 @@ export function openStore(model, options) {
           const signalOf = (member, args) => {
             const at = OPTIONS_ARGUMENT.get(member);
             const options = at === undefined ? undefined : args[at];
+            readControls(options, member);
             const signal = options !== null && typeof options === 'object' ? options.signal : undefined;
             return signal?.aborted === true ? undefined : signal;
           };
@@ -3735,6 +3814,11 @@ export function openStore(model, options) {
           /** @type {Map<string, any>} */
           const gatedEntities = new Map();
 
+          /** A finite root job call: same admission and diagnostic for every method.
+           * @param {string} member @param {string} what */
+          const rootJobCall = (member, what) => lift((...args) =>
+            gated(() => jobsEngine[member](...args), what));
+
           const store = {
             capabilities,
             // native statements over any table (MODEL-FORMAT §5.3)
@@ -3850,6 +3934,7 @@ export function openStore(model, options) {
             // `isolation` is a floor: the level asked for, or the
             // session's stronger default, runs (`tx.isolation`).
             transaction: lift((fn, transactionOptions) => {
+              if (inParallelRead()) return refuseInParallelRead();
               // called from inside a transaction's own synchronous extent,
               // the driver nests the call as a savepoint of that transaction:
               // it IS a nested transaction, with the nested option set
@@ -3920,14 +4005,14 @@ export function openStore(model, options) {
             // transactional-outbox spelling is the explicit `tx.jobs` a
             // transaction callback receives.
             jobs: jobsEngine === null ? undefined : Object.freeze({
-              enqueue: lift((...args) => gated(() => jobsEngine.enqueue(...args), 'a root job enqueue')),
-              get: lift((...args) => gated(() => jobsEngine.get(...args), 'a root job read')),
+              enqueue: rootJobCall('enqueue', 'a root job enqueue'),
+              get: rootJobCall('get', 'a root job read'),
               counts: lift(() => gated(() => jobsEngine.counts(), 'a root job read')),
-              claim: lift((...args) => gated(() => jobsEngine.claim(...args), 'a root job claim')),
-              assertLease: lift((...args) => gated(() => jobsEngine.assertLease(...args), 'a root lease check')),
-              renew: lift((...args) => gated(() => jobsEngine.renew(...args), 'a root lease renewal')),
-              complete: lift((...args) => gated(() => jobsEngine.complete(...args), 'a root job settlement')),
-              fail: lift((...args) => gated(() => jobsEngine.fail(...args), 'a root job settlement')),
+              claim: rootJobCall('claim', 'a root job claim'),
+              assertLease: rootJobCall('assertLease', 'a root lease check'),
+              renew: rootJobCall('renew', 'a root lease renewal'),
+              complete: rootJobCall('complete', 'a root job settlement'),
+              fail: rootJobCall('fail', 'a root job settlement'),
               // a checkpoint store keeps its creator's ROOT ownership:
               // its later calls take the gate too, never a scope. They
               // stay value-or-promise like the engine's own — the gate
@@ -3955,9 +4040,9 @@ export function openStore(model, options) {
               cancel: lift((id, cancelOptions) => chain(
                 gated(() => jobsEngine.cancel(id, cancelOptions), 'a root job cancellation'),
                 (outcome) => chain(jobsEngine.settledLocally(id), () => outcome))),
-              requeue: lift((...args) => gated(() => jobsEngine.requeue(...args), 'a root job requeue')),
-              reset: lift((...args) => gated(() => jobsEngine.reset(...args), 'a root job reset')),
-              sweep: lift((...args) => gated(() => jobsEngine.sweep(...args), 'a root job sweep')),
+              requeue: rootJobCall('requeue', 'a root job requeue'),
+              reset: rootJobCall('reset', 'a root job reset'),
+              sweep: rootJobCall('sweep', 'a root job sweep'),
             }),
             /**
              * Close the store. Job workers are asked to stop and given a
@@ -4115,6 +4200,11 @@ export function openStore(model, options) {
               (error) => { settleInFlight(root); throw error; });
           };
 
+          /** A lifted operation owned by exactly this scope.
+           * @param {any} identity @param {any} handle @param {string} member */
+          const scopedCall = (identity, handle, member) => lift((...args) =>
+            runScoped(identity, () => handle[member](...args)));
+
           /**
            * Every stateful member of a scope-view handle, checked against
            * the exact scope before it runs. `lifted` members answer a
@@ -4130,8 +4220,7 @@ export function openStore(model, options) {
             const out = { ...handle };
             for (const member of lifted) {
               if (typeof handle[member] !== 'function') continue;
-              out[member] = (/** @type {any[]} */ ...args) =>
-                lift(() => runScoped(identity, () => handle[member](...args)))();
+              out[member] = scopedCall(identity, handle, member);
             }
             // a direct member answers a value: the unit-of-work bookkeeping,
             // which touches no connection, and the synchronous twins — never
@@ -4533,14 +4622,14 @@ export function openStore(model, options) {
               // scope, so an enqueue or settlement here co-commits with
               // the domain transaction — and a retained handle is JD2070
               members.jobs = onFirstUse(() => Object.freeze({
-                enqueue: lift((/** @type {any[]} */ ...args) => runScoped(identity, () => jobsEngine.enqueue(...args))),
-                get: lift((/** @type {any[]} */ ...args) => runScoped(identity, () => jobsEngine.get(...args))),
+                enqueue: scopedCall(identity, jobsEngine, 'enqueue'),
+                get: scopedCall(identity, jobsEngine, 'get'),
                 counts: lift(() => runScoped(identity, () => jobsEngine.counts())),
-                claim: lift((/** @type {any[]} */ ...args) => runScoped(identity, () => jobsEngine.claim(...args))),
-                assertLease: lift((/** @type {any[]} */ ...args) => runScoped(identity, () => jobsEngine.assertLease(...args))),
-                renew: lift((/** @type {any[]} */ ...args) => runScoped(identity, () => jobsEngine.renew(...args))),
-                complete: lift((/** @type {any[]} */ ...args) => runScoped(identity, () => jobsEngine.complete(...args))),
-                fail: lift((/** @type {any[]} */ ...args) => runScoped(identity, () => jobsEngine.fail(...args))),
+                claim: scopedCall(identity, jobsEngine, 'claim'),
+                assertLease: scopedCall(identity, jobsEngine, 'assertLease'),
+                renew: scopedCall(identity, jobsEngine, 'renew'),
+                complete: scopedCall(identity, jobsEngine, 'complete'),
+                fail: scopedCall(identity, jobsEngine, 'fail'),
                 // a checkpoint store keeps its creator's SCOPE ownership:
                 // its later calls cannot switch scopes, and outlive none
                 checkpointsFor: (/** @type {any} */ job) => {

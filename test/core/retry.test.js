@@ -36,3 +36,19 @@ describe("backoffDelay's equal-jitter policy", () => {
     }
   });
 });
+
+describe('backoff option boundaries', () => {
+  it('backoff options refuse misspellings and malformed policy values before drawing randomness', () => {
+  let draws = 0;
+  const random = () => { draws++; return 0.5; };
+  for (const options of [{ policy: 'strcit' }, { polciy: 'equal' }, { baseMs: '50' }, { baseMs: -1 },
+    { maxMs: Infinity }, { random: 42 }, null, [], new Map()]) {
+    assert.throws(() => backoffDelay(options && !Array.isArray(options) && !(options instanceof Map)
+      ? { random, ...options } : options, 1), TypeError);
+  }
+  assert.equal(draws, 0);
+  assert.equal(backoffDelay({ baseMs: 0, maxMs: 0, random }, 1), 0);
+  assert.equal(backoffDelay({ policy: 'strict', random }, 1, 10000), 10000);
+  assert.equal(draws, 1);
+});
+});

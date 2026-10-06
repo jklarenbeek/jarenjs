@@ -2,6 +2,7 @@
 /** One bounded route subscription and navigation owner over an injected Window,
  * and the route table that names an address by its template. */
 import { compileRoutes, parsePathTemplate } from '@jarenjs/core/route';
+import { isPlainOptions, refuseUnknownMembers } from '@jarenjs/core/object';
 import { AppRuntimeError, APP_CODES } from './errors.js';
 
 /**
@@ -81,7 +82,9 @@ const UNREADABLE = new Set(['JA2024', 'JA2025']);
 
 /** @param {'hash'|'history'} mode @param {RouteOptions} options @returns {RouteSubscription} */
 function createRoutes(mode, options) {
-  if (!options || typeof options !== 'object') refuse('JA2023');
+  if (!isPlainOptions(options)) refuse('JA2023');
+  refuseUnknownMembers(options, ['window', 'basePath', 'maxLength', 'maxQueryEntries', 'maxTurns', 'templates', 'onError'],
+    (key, hint) => new AppRuntimeError('JA2023', `route option '${key}' is unknown${hint}`));
   const win = options.window === undefined ? globalThis.window : options.window;
   const { maxLength = 8192, maxQueryEntries = 128, maxTurns = 64 } = options;
   const base = options.basePath === undefined ? '/' : options.basePath;
@@ -198,8 +201,10 @@ function createRoutes(mode, options) {
   };
   subscribe.navigate = (target, navigation = {}) => {
     admit();
-    if (typeof target !== 'string' || !navigation || typeof navigation !== 'object'
+    if (typeof target !== 'string' || !isPlainOptions(navigation)
       || (navigation.replace !== undefined && typeof navigation.replace !== 'boolean')) refuse('JA2023');
+    refuseUnknownMembers(navigation, ['replace'],
+      (key, hint) => new AppRuntimeError('JA2023', `navigation option '${key}' is unknown${hint}`));
     if (target.length > maxLength) refuse('JA2025');
     const current = here();
     let next;

@@ -51,6 +51,10 @@ cap. `contract-compat` preserves the HTTP client's additive integer jitter.
 The published AI/contract attempt counts and wire semantics remain unchanged;
 their transport-specific outcome loops are deliberate wrappers around this
 shared arithmetic. Strict deadline refusal belongs to the provider executor.
+The options object is closed: unknown members, an unknown policy, non-finite or
+negative delays, and a non-function `random` throw `TypeError` before randomness
+is drawn. Zero delays are supported. A supplied server minimum does not draw
+randomness and retains the policy's documented clamping behavior.
 
 `parseRetryAfter(raw, {dialect,now})` accepts HTTP seconds/date by default,
 numeric milliseconds under `milliseconds`, or nothing under `none`.

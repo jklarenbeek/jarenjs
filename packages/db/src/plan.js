@@ -2706,6 +2706,17 @@ function composeWindows(windows) {
  */
 const ROOT_SCAN = Object.freeze({ $for: Object.freeze({ it: '$[*]' }), $return: '$it' });
 
+/** The planner's complete result shape, including fresh empty collections.
+ * Field order follows the published plan result; default arrays belong to this call.
+ * @param {any} analysis @param {any} [plan]
+ * @param {'native' | 'row' | 'set' | 'knn'} [mode]
+ * @param {any[]} [reasons] @param {any} [rowReturn] @param {string[]} [udfs]
+ * @param {any[]} [prefilters] @param {any} [series] */
+function collectionResult(analysis, plan = null, mode = 'set', reasons = [],
+  rowReturn = null, udfs = [], prefilters = [], series = null) {
+  return { analysis, plan, mode, reasons, rowReturn, udfs, prefilters, series };
+}
+
 function planCollectionCore(document, shape, options = undefined) {
   if (document === '$[*]') document = ROOT_SCAN;
   const analysis = analyzeQuery(document, analyzeOptionsFor(shape?.operators));
@@ -2720,11 +2731,7 @@ function planCollectionCore(document, shape, options = undefined) {
     if (start?.kind !== 'literal' || !isWindowBound(start.value)
       || (length !== undefined && (length.kind !== 'literal' || !isWindowBound(length.value)))) {
       // non-literal bounds: the whole document is a set residual
-      return {
-        analysis, plan: null, mode: 'set',
-        reasons: [refusal('$subsequence', PLAN_REASONS.windowBounds)],
-        rowReturn: null, udfs: [], prefilters: [], series: null,
-      };
+      return collectionResult(analysis, null, 'set', [refusal('$subsequence', PLAN_REASONS.windowBounds)]);
     }
     windows.push({ offset: start.value, limit: length === undefined ? null : length.value });
     root = inner;
@@ -2749,11 +2756,7 @@ function planCollectionCore(document, shape, options = undefined) {
     ? (options?.aggregate?.(root.name) ?? null) : null;
   if (!distinct && root.kind === 'op' && (AGGREGATES.has(root.name) || registeredAggregate !== null)) {
     if (windows.length > 0) {
-      return {
-        analysis, plan: null, mode: 'set',
-        reasons: [refusal(root.name, PLAN_REASONS.windowedAggregate)],
-        rowReturn: null, udfs: [], prefilters: [], series: null,
-      };
+      return collectionResult(analysis, null, 'set', [refusal(root.name, PLAN_REASONS.windowedAggregate)]);
     }
     aggregate = registeredAggregate === null
       ? { name: root.name, fn: AGGREGATES.get(root.name) }
@@ -2775,25 +2778,14 @@ function planCollectionCore(document, shape, options = undefined) {
       // refinement the residual applies it, so the plan keeps none
       const window = windows.length === 0 ? null : composeWindows(windows);
       if (temporal.native && window !== null) temporal.plan.window = window;
-      return {
-        analysis,
-        plan: temporal.plan,
-        mode: temporal.native ? 'native' : 'set',
-        reasons: temporal.native ? [] : temporal.reasons,
-        rowReturn: null,
-        udfs: [],
-        prefilters: temporal.prefilters,
-        series: temporal.series,
-      };
+      return collectionResult(analysis, temporal.plan, temporal.native ? 'native' : 'set',
+        temporal.native ? [] : temporal.reasons, null, [], temporal.prefilters,
+        temporal.series);
     }
   }
 
   if (root.kind !== 'flwor') {
-    return {
-      analysis, plan: null, mode: 'set',
-      reasons: [refusal(root.kind, KIND_REASONS[root.kind] ?? PLAN_REASONS.notFlwor)],
-      rowReturn: null, udfs: [], prefilters: [], series: null,
-    };
+    return collectionResult(analysis, null, 'set', [refusal(root.kind, KIND_REASONS[root.kind] ?? PLAN_REASONS.notFlwor)]);
   }
 
   const flwor = planFlwor(root, shape, rawInner, options?.udf);
@@ -2815,12 +2807,9 @@ function planCollectionCore(document, shape, options = undefined) {
             nullsFirst: (term.emptyGreatest === true) === (term.desc === true) })) };
       plan.order = null;
       plan.window = windows.length === 0 ? null : composeWindows(windows);
-      return { analysis, plan, mode: 'native', reasons: [], rowReturn: null,
-        udfs: flwor.udfs, prefilters: flwor.prefilters, series: null };
+      return collectionResult(analysis, plan, 'native', [], null, flwor.udfs, flwor.prefilters);
     }
-    return { analysis, plan: null, mode: 'set',
-      reasons: [refusal('$distinct', PLAN_REASONS.distinctProjection)],
-      rowReturn: null, udfs: [], prefilters: [], series: null };
+    return collectionResult(analysis, null, 'set', [refusal('$distinct', PLAN_REASONS.distinctProjection)]);
   }
 
   if (flwor.knn !== null) {
@@ -2832,9 +2821,8 @@ function planCollectionCore(document, shape, options = undefined) {
     if (window !== null && window.limit !== null) {
       plan.rank = { ...flwor.knn, offset: window.offset, limit: window.limit,
         margin: KNN_MARGIN };
-      return { analysis, plan, mode: 'knn',
-        reasons: [refusal('$orderby', KNN_REASONS.rank), ...flwor.reasons],
-        rowReturn: null, udfs: flwor.udfs, prefilters: flwor.prefilters, series: null };
+      return collectionResult(analysis, plan, 'knn',
+        [refusal('$orderby', KNN_REASONS.rank), ...flwor.reasons], null, flwor.udfs, flwor.prefilters);
     }
     flwor.reasons.unshift(refusal('$subsequence', KNN_REASONS.window));
   }
@@ -2843,8 +2831,7 @@ function planCollectionCore(document, shape, options = undefined) {
     // aggregates need the WHOLE selection native (their input is the
     // full sequence, not a narrowed candidate set)
     if (!fullyPushed) {
-      return { analysis, plan: null, mode: 'set', reasons: flwor.reasons,
-        rowReturn: null, udfs: [], prefilters: flwor.prefilters, series: null };
+      return collectionResult(analysis, null, 'set', flwor.reasons, null, [], flwor.prefilters);
     }
     if (flwor.bucket !== null || flwor.group !== null || flwor.bucketRefusal != null) {
       if (aggregate.fn === 'count' && flwor.group !== null
@@ -2852,24 +2839,15 @@ function planCollectionCore(document, shape, options = undefined) {
         && flwor.group.aggregates.every((entry) => entry.fn === 'rows')) {
         plan.group = flwor.group;
         plan.aggregate = { fn: 'count', ref: null };
-        return { analysis, plan, mode: 'native', reasons: [], rowReturn: null,
-          udfs: flwor.udfs, prefilters: flwor.prefilters, series: null };
+        return collectionResult(analysis, plan, 'native', [], null, flwor.udfs, flwor.prefilters);
       }
       // the phrase's items are its GROUPS; a COUNT(*) over the rows
       // answered the row count for a `$count` of the groups
-      return {
-        analysis, plan: null, mode: 'set',
-        reasons: [refusal(aggregate.name, PLAN_REASONS.groupedAggregate)],
-        rowReturn: null, udfs: [], prefilters: [], series: null,
-      };
+      return collectionResult(analysis, null, 'set', [refusal(aggregate.name, PLAN_REASONS.groupedAggregate)]);
     }
     if (aggregate.fn === 'count') {
       if (!flwor.projectionNative) {
-        return {
-          analysis, plan: null, mode: 'set',
-          reasons: [refusal('$count', PLAN_REASONS.countProjection)],
-          rowReturn: null, udfs: [], prefilters: [], series: null,
-        };
+        return collectionResult(analysis, null, 'set', [refusal('$count', PLAN_REASONS.countProjection)]);
       }
       // a count over one member path counts the rows where the member
       // is PRESENT — an absent member yields no item — so the presence
@@ -2879,9 +2857,9 @@ function planCollectionCore(document, shape, options = undefined) {
           { p: 'typeIs', ref: flwor.projectedPath, types: [], positive: true });
       }
       plan.aggregate = { fn: 'count', ref: null };
-      return { analysis, plan, mode: 'native', reasons: [], rowReturn: null,
-        udfs: flwor.udfs, prefilters: flwor.prefilters,
-        series: classifySelection(plan, shape, true) };
+      return collectionResult(analysis, plan, 'native',
+        [], null, flwor.udfs, flwor.prefilters,
+        classifySelection(plan, shape, true));
     }
     const ref = pathRef(root.ret, flwor.itSlot, shape);
     // a registered aggregate declares `seq<number>`, so its input is the
@@ -2895,19 +2873,14 @@ function planCollectionCore(document, shape, options = undefined) {
       && (numeric ? isNumericType(ref.type) : ref.type !== 'unknown')
       && ref.type !== 'boolean' && !admitsNull(shape.schema, ref.segments);
     if (!acceptable) {
-      return {
-        analysis, plan: null, mode: 'set',
-        reasons: [refusal(aggregate.name, PLAN_REASONS.aggregatePath)],
-        rowReturn: null, udfs: [], prefilters: [], series: null,
-      };
+      return collectionResult(analysis, null, 'set', [refusal(aggregate.name, PLAN_REASONS.aggregatePath)]);
     }
     plan.aggregate = aggregate.fn === 'registered'
       ? { fn: 'registered', ref, operator: aggregate.name, sql: aggregate.sql }
       : { fn: /** @type {any} */ (aggregate.fn), ref };
-    return { analysis, plan, mode: 'native', reasons: [], rowReturn: null,
-      udfs: aggregate.fn === 'registered' ? [...flwor.udfs, aggregate.sql] : flwor.udfs,
-      prefilters: flwor.prefilters,
-      series: classifySelection(plan, shape, true) };
+    return collectionResult(analysis, plan, 'native',
+      [], null, aggregate.fn === 'registered' ? [...flwor.udfs, aggregate.sql] : flwor.udfs, flwor.prefilters,
+      classifySelection(plan, shape, true));
   }
 
   // windows push only onto a fully pushed selection
@@ -2921,8 +2894,7 @@ function planCollectionCore(document, shape, options = undefined) {
       || (flwor.group.tree.p === 'agg'
         && flwor.group.aggregates[flwor.group.tree.index].empty === 'zero'))) {
     plan.group = flwor.group;
-    return { analysis, plan, mode: 'native', reasons: [], rowReturn: null,
-      udfs: flwor.udfs, prefilters: flwor.prefilters, series: null };
+    return collectionResult(analysis, plan, 'native', [], null, flwor.udfs, flwor.prefilters);
   }
 
   if (flwor.bucket !== null && fullyPushed && (windows.length === 0 || plan.window !== null)) {
@@ -2930,10 +2902,9 @@ function planCollectionCore(document, shape, options = undefined) {
     const facts = filterFacts(plan.filter);
     const index = seekingIndexFor(shape, plan.bucket.ref.column, facts);
     const bound = facts.bounds.get(plan.bucket.ref.column) ?? null;
-    return {
-      analysis, plan, mode: 'native', reasons: [], rowReturn: null,
-      udfs: flwor.udfs, prefilters: flwor.prefilters,
-      series: seriesRecord({
+    return collectionResult(analysis, plan, 'native',
+      [], null, flwor.udfs, flwor.prefilters,
+      seriesRecord({
         mode: 'native',
         operation: 'bucket',
         index: index === null ? null : index.name,
@@ -2942,8 +2913,7 @@ function planCollectionCore(document, shape, options = undefined) {
         ladder: { every: plan.bucket.every, origin: plan.bucket.origin, calendar: false },
         aggregates: plan.bucket.aggregates.map((a) => a.as),
         reasons: index === null ? [seriesReason('missing-series-prefix', '$groupby')] : [],
-      }),
-    };
+      }));
   }
 
   // a RECOGNIZED grouping that did not lower: the engine groups, and the
@@ -2964,9 +2934,9 @@ function planCollectionCore(document, shape, options = undefined) {
         { p: 'typeIs', ref: flwor.projectedPath, types: [], positive: true });
     }
     else if (flwor.projectedTree !== null) plan.project = flwor.projectedTree;
-    return { analysis, plan, mode: 'native', reasons: [], rowReturn: null,
-      udfs: flwor.udfs, prefilters: flwor.prefilters,
-      series: classifySelection(plan, shape, flwor.orderPushed) };
+    return collectionResult(analysis, plan, 'native',
+      [], null, flwor.udfs, flwor.prefilters,
+      classifySelection(plan, shape, flwor.orderPushed));
   }
 
   // the row residual: everything but the projection pushed
@@ -2974,24 +2944,16 @@ function planCollectionCore(document, shape, options = undefined) {
     && windows.length === 0) {
     const rawFlwor = rawInner;
     const name = flwor.itName ?? 'it';
-    return {
-      analysis,
-      plan,
-      mode: 'row',
-      reasons: flwor.reasons,
-      // a COMPLETE one-row document, not a bare expression the caller
-      // must re-wrap: the binding and the projection that references it
-      // travel together, so the two cannot be paired up wrongly
-      rowReturn: {
+    // A COMPLETE one-row document: its binding and projection travel together,
+    // so callers never have to re-wrap or pair them.
+    return collectionResult(analysis, plan, 'row',
+      flwor.reasons, {
         $for: { [name]: '$[*]' },
         $return: [rawFlwor?.$return ?? `$${name}`],
-      },
-      udfs: flwor.udfs,
-      prefilters: flwor.prefilters,
-      series: flwor.bucketRefusal == null
+      }, flwor.udfs, flwor.prefilters,
+      flwor.bucketRefusal == null
         ? classifySelection(plan, shape, flwor.orderPushed)
-        : refinedGrouping(plan, shape, flwor.bucketRefusal, '$groupby'),
-    };
+        : refinedGrouping(plan, shape, flwor.bucketRefusal, '$groupby'));
   }
 
   // the set residual: pushed conjuncts narrow, the engine answers — so
@@ -3003,8 +2965,7 @@ function planCollectionCore(document, shape, options = undefined) {
     : refinedGrouping(plan, shape, flwor.bucketRefusal, '$groupby');
   plan.order = null;
   plan.window = null;
-  return { analysis, plan, mode: 'set', reasons: flwor.reasons, rowReturn: null,
-    udfs: flwor.udfs, prefilters: flwor.prefilters, series: narrowing };
+  return collectionResult(analysis, plan, 'set', flwor.reasons, null, flwor.udfs, flwor.prefilters, narrowing);
 }
 
 /**

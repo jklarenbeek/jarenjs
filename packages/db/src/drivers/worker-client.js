@@ -53,7 +53,12 @@ export async function createWorkerConnection(worker, settings) {
     else unstarted(cause);
   });
   worker.on('message', (message) => {
-    if (!validResponse(message, epoch)) { lose(new Error('invalid worker response')); return; }
+    if (!validResponse(message, epoch)) {
+      const error = new Error('invalid worker response');
+      if (started) lose(error);
+      else unstarted(error);
+      return;
+    }
     if (message.kind === 'ready') { started = true; readyResolve(message.capabilities); return; }
     if (message.kind === 'failure' && message.id === 0) {
       readyReject(Object.assign(new Error(message.error.message), message.error)); return;

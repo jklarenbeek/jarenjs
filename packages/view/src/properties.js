@@ -43,8 +43,13 @@
  * `download = true` names the file `true`, `title = true` shows `true`, and
  * `popover = true` writes the `manual` state where the markup's `popover`
  * is `auto`. A string on a number-typed property is that string: through the
- * property, `width = '100px'` writes `width="0"`. Numbers, strings on string
- * properties and boolean properties are assigned. The trade: a
+ * property, `width = '100px'` writes `width="0"`. Numbers on reflected
+ * numeric properties also write attributes: `size = 0` otherwise throws,
+ * and a negative or fractional width is converted to an unsigned integer.
+ * A non-boolean value on a boolean property keeps the attribute spelling
+ * (`disabled: 0` and `disabled: ''` both mean present, hence disabled).
+ * Other numbers, strings on string properties and booleans are assigned.
+ * The trade: a
  * string on a number-typed property that reflects no attribute
  * (`scrollTop: '100'`) becomes an attribute of that name, as the serializer
  * writes it; pass a number to reach the property.
@@ -171,21 +176,57 @@ const REFLECTED_ELSEWHERE = Object.freeze(Object.assign(Object.create(null), {
 }));
 
 /**
+ * Numeric HTML content reflections, by IDL spelling. `tabIndex` applies to
+ * every HTML element; the other names reflect only on their named tags.
+ * Live numeric state (`scrollTop`, `valueAsNumber`, media playback, …)
+ * stays a property write. Reading the property type also leaves SVG animated
+ * values and string-valued width/height reflections on their existing path.
+ * @type {Readonly<Record<string, readonly string[]>>}
+ */
+const NUMERIC_REFLECTIONS = Object.freeze(Object.assign(Object.create(null), {
+  size: ['input', 'select'],
+  width: ['canvas', 'img', 'input', 'video'],
+  height: ['canvas', 'img', 'input', 'video'],
+  rows: ['textarea'], cols: ['textarea'],
+  maxLength: ['input', 'textarea'], minLength: ['input', 'textarea'],
+  span: ['col', 'colgroup'], colSpan: ['td', 'th'], rowSpan: ['td', 'th'],
+  start: ['ol'], value: ['li', 'meter', 'progress'],
+  min: ['meter'], max: ['meter', 'progress'],
+  low: ['meter'], high: ['meter'], optimum: ['meter'],
+  hspace: ['img', 'object'], vspace: ['img', 'object'],
+  loop: ['marquee'], scrollAmount: ['marquee'], scrollDelay: ['marquee'],
+}));
+
+/** @param {any} node @param {string} name @returns {boolean} */
+function reflectsNumber(node, name) {
+  return name === 'tabIndex' || NUMERIC_REFLECTIONS[name]?.includes(String(node.localName ?? node.tagName).toLowerCase()) === true;
+}
+
+/**
  * Write a property the DOM renderer writes through the node (the writing
  * rule above). A value the property would convert into something the
  * serializer never writes is written as that attribute instead: `true` on
  * a property that is not boolean is the empty attribute (`download`,
  * `title`, `popover`, where the property writes `"true"`), and a string on
  * a number-typed property is the string (`width: '100px'`, where the
- * property writes `0`). Every other value is assigned.
+ * property writes `0`). Reflected numbers and non-boolean values on boolean
+ * properties also retain their attribute spelling. Other values are assigned.
  * @param {any} node - an HTML element that has the property
  * @param {string} name - the property name
  * @param {any} value - the prop value, neither nullish nor `false`
  */
 export function writeProperty(node, name, value) {
-  if (value === true ? typeof node[name] !== 'boolean'
-    : typeof value === 'string' && typeof node[name] === 'number') {
-    node.setAttribute(name, value === true ? '' : value);
+  const type = typeof node[name];
+  if (type === 'boolean') {
+    // Presence is true even for 0 or ''. Also update live booleans such as
+    // selected/muted, whose dirty state need not follow their attribute.
+    node[name] = true;
+    node.setAttribute(name, value === true ? '' : String(value));
+    return;
+  }
+  if (value === true || (type === 'number'
+    && (typeof value === 'string' || (typeof value === 'number' && reflectsNumber(node, name))))) {
+    node.setAttribute(name, value === true ? '' : String(value));
     return;
   }
   node[name] = value;
@@ -204,6 +245,7 @@ export function writeProperty(node, name, value) {
 export function removeProperty(node, name, oldValue) {
   if (typeof node[name] === 'boolean') {
     node[name] = false;
+    node.removeAttribute(name);
     return;
   }
   const attribute = REFLECTED_ELSEWHERE[name] ?? name;

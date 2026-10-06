@@ -202,3 +202,53 @@ test("controlled: 'focus' keeps what the operator types through a refresh until 
   }
   await page.evaluate(() => window.view.destroy());
 });
+
+
+test('reflected zero, negative and fractional numbers and non-boolean flags match SSR through patch and hydration', async ({ page }) => {
+  const failures = await page.evaluate(() => {
+    const { createDomRenderer, renderToString } = window.JarenTest;
+    const host = document.getElementById('host');
+    const parsed = document.createElement('div');
+    const failures = [];
+    const cases = [
+      ['input', 'size', [0, -1, 2.5]],
+      ['select', 'size', [0, -1, 2.5]],
+      ['textarea', 'rows', [0, -1, 2.5]],
+      ['img', 'width', [0, -1, 2.5]],
+      ['canvas', 'height', [0, -1, 2.5]],
+      ['ol', 'start', [0, -1, 2.5]],
+      ['progress', 'value', [0, -1, 2.5]],
+      ['meter', 'max', [0, -1, 2.5]],
+      ['button', 'disabled', [0, '', 'false', false, true]],
+      ['option', 'selected', [true, false, 0, '', 'false', null]],
+      ['audio', 'muted', [true, false, 0, '', 'false', null]],
+    ];
+    for (const safe of [false, true]) {
+      for (const [tag, name, values] of cases) {
+        const render = createDomRenderer(host, { safe });
+        render([tag, { [name]: 5 }]);
+        const mounted = host.firstChild;
+        for (const value of values) {
+          const vnode = [tag, { [name]: value }];
+          render(vnode);
+          parsed.innerHTML = renderToString(vnode, { safe });
+          if (host.firstChild !== mounted || host.innerHTML !== parsed.innerHTML) {
+            failures.push({ safe, tag, name, value, phase: 'patch', dom: host.innerHTML, ssr: parsed.innerHTML });
+          }
+          if (!safe && typeof host.firstChild[name] === 'boolean' && host.firstChild[name] !== parsed.firstChild[name]) {
+            failures.push({ tag, name, value, phase: 'live-property', dom: host.firstChild[name], ssr: parsed.firstChild[name] });
+          }
+          const hydrate = createDomRenderer(parsed, { safe, hydrate: true });
+          hydrate(vnode);
+          if (host.innerHTML !== parsed.innerHTML) {
+            failures.push({ safe, tag, name, value, phase: 'hydrate', dom: host.innerHTML, ssr: parsed.innerHTML });
+          }
+          hydrate.destroy();
+        }
+        render.destroy();
+      }
+    }
+    return failures;
+  });
+  expect(failures).toEqual([]);
+});

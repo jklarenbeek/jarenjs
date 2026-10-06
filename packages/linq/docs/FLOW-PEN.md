@@ -97,7 +97,7 @@ section.
 | `constant(value)` | `{ kind: 'const', value }` | `NodeDeclaration<'const'>` | native; `undefined`, or a value that is not JSON, `JL0101` |
 | `query(fn \| document)` | `{ kind: 'query', query }` | `NodeDeclaration<'query'>` | native; nothing passed, or a document that is not JSON, `JL0101`; any external `JL0104` |
 | `jslt(stylesheet)` | `{ kind: 'jslt', stylesheet }` — the JSLT pen's document ([JSLT-PEN.md](JSLT-PEN.md)), or one by hand | `NodeDeclaration<'jslt'>` | native; nothing passed, or a value that is not JSON, `JL0101` |
-| `task(run, with?)` | `{ kind: 'task', run, with? }` | `NodeDeclaration<'task', Run>` — `Run` is a literal | native; an empty `run` `JL0101`; any external in `with` `JL0104` |
+| `task(run, with?, options?)` | `{ kind: 'task', run, with?, version? }` | `NodeDeclaration<'task', Run>` — `Run` is a literal | native; an empty `run` `JL0101`; any external in `with` `JL0104` |
 | `.checkpoint()` | `checkpoint: true`, written last (§7.6) | a new declaration; the one it came from is unchanged | native |
 | `edge(from, to, { port?, select? })` | `{ from, to, port?, select? }` | `EdgeDeclaration<From, To>` | native; an empty end, an empty `port`, another member `JL0101`; any external in `select` `JL0104` |
 | `typedTasks(graph, tasks)` | — (identity) | the registry `compileDag` resolves must carry one handler per declared task name | native; a missing or misspelled name does not compile |
@@ -358,7 +358,10 @@ is replayed on a later run only while the handler that produced it is the
 same one, so that identity is DECLARED — the registry must hand
 `compileDag` the same token as `{ run, version }`, and a disagreement is
 `JF0019` before any node runs. `.checkpoint()` refuses a task that has
-not declared one.
+not declared one. The third `task()` argument is a plain options object
+whose only member is `version`; an unknown member or a malformed object
+refuses with `JL0101`, so a misspelled version cannot silently lose the
+handler identity.
 
 `review`'s `with` is `{ "text": "$" }`: the callback returned the scope
 value itself, and the scope value of a node with one unported inbound

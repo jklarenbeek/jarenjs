@@ -2,7 +2,7 @@
 /** Explicit migration of saved sources; stored originals are never executed here. */
 import { canonicalSha256, canonicalizeJson } from '../canonical.js';
 import { formulaDocument, compileFormula } from './index.js';
-import { snapshot, credit } from './shared.js';
+import { snapshot, credit, FORMULA_OPTIONS, checkFormulaOptions } from './shared.js';
 import { translateFormulaBody } from './translate.js';
 
 export { translateFormulaBody };
@@ -50,6 +50,7 @@ function translate(source, options) {
  *   translation must compile under
  */
 export async function migrateFormulas(sources, previous = [], options = {}) {
+  checkFormulaOptions(options, ['maxRecords', 'maxSourceChars', 'translate', 'formula'], 'migration');
   const maxRecords = credit(options.maxRecords, 10000, 'maxRecords');
   const maxSourceChars = credit(options.maxSourceChars, 65536, 'maxSourceChars');
   if (!Array.isArray(sources) || sources.length > maxRecords || !Array.isArray(previous) || previous.length > maxRecords)
@@ -120,6 +121,7 @@ export async function rollbackFormula(record, currentSource, currentNative) {
  * @param {import('./index.js').FormulaOptions} [options]
  */
 export async function resolveFormulaMigration(record, native, review, options = {}) {
+  checkFormulaOptions(options, FORMULA_OPTIONS, 'formula');
   record = snapshot(record); native = snapshot(native); review = snapshot(review);
   if (review.sourceHash !== record.sourceHash || review.expectedNativeHash !== record.nativeHash || record.state === 'conflict')
     return snapshot({ state: 'conflict', reason: 'review-revision', changed: 0, record });

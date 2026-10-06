@@ -13,6 +13,7 @@
  */
 
 import { canonicalSha256 } from '@jarenjs/json/canonical';
+import { isPlainOptions } from '@jarenjs/core/object';
 
 import { ContractCompileError, ContractHostError } from './errors.js';
 import { hostProjection, publicProjection } from './public.js';
@@ -55,7 +56,9 @@ const hostRevisions = new WeakMap();
  * await contract.revision({ audience: 'all' }); // the host revision
  */
 export function contractRevision(contract, options = undefined) {
-  const all = revisionAudience(options) === 'all';
+  let all;
+  try { all = revisionAudience(options) === 'all'; }
+  catch (error) { return Promise.reject(error); }
   const memos = all ? hostRevisions : revisions;
   const memo = memos.get(contract);
   if (memo !== undefined) return memo.promise;
@@ -74,8 +77,7 @@ export function contractRevision(contract, options = undefined) {
  */
 function revisionAudience(options) {
   if (options === undefined) return 'public';
-  if (options === null || typeof options !== 'object' || Array.isArray(options)
-    || Object.keys(options).some((key) => key !== 'audience')) {
+  if (!isPlainOptions(options) || Object.keys(options).some((key) => key !== 'audience')) {
     throw new ContractHostError('JC1008', "revision: options is { audience?: 'public' | 'all' }");
   }
   const audience = /** @type {any} */ (options).audience;

@@ -20,7 +20,7 @@ describe('PostgreSQL rule lowering', () => {
     const { source, ...function_ } = trigger.program.function;
     assert.deepEqual({ ...trigger.program, function: function_ }, { timing: 'AFTER', events: ['UPDATE'], level: 'ROW', columns: [],
       condition: false, enabled: 'O', deferrable: false, deferred: false, function: { schema: 'tenant', name: '_jaren_rule_5_entry_update',
-        language: 'plpgsql', returns: 'trigger', arguments: '', securityDefiner: false, config: ['search_path=pg_catalog, pg_temp'] } });
+        language: 'plpgsql', returns: 'trigger', arguments: '', volatility: 'v', securityDefiner: false, config: ['search_path=pg_catalog, pg_temp'] } });
     // the function is installed from the very source its trigger is verified
     // against, under a search path no writer's schema can come ahead of
     assert.equal(fn.sql, `CREATE FUNCTION "tenant"."_jaren_rule_5_entry_update"() RETURNS trigger LANGUAGE plpgsql SET search_path = pg_catalog, pg_temp AS $jaren$${source}$jaren$`);
@@ -106,13 +106,15 @@ describe('PostgreSQL rule lowering', () => {
     const connection = { dialect, prepare: (/** @type {string} */ sql) => ({ all: async () => { read.push(sql); return rows; } }) };
     await verifyPhysical(connection, mapping, schema);
     assert.match(read[0], /FROM pg_catalog\.pg_trigger t JOIN pg_catalog\.pg_class c/);
+    assert.match(read[0], /'volatility', p\.provolatile/);
     const at = rows.findIndex((row) => row.name === '_jaren_rule_5_entry_update');
     const tampered = JSON.parse(rows[at].program);
     tampered.level = 'STATEMENT';
     tampered.function.config = ['search_path=public'];
+    tampered.function.volatility = 's';
     rows[at] = { ...rows[at], program: JSON.stringify(tampered) };
     await assert.rejects(async () => verifyPhysical(connection, mapping, schema), { code: 'JD0002',
-      message: /invariant trigger '_jaren_rule_5_entry_update' is missing or changed \(level, function\.config\)/ });
+      message: /invariant trigger '_jaren_rule_5_entry_update' is missing or changed \(level, function\.volatility, function\.config\)/ });
   });
 
   it('names a long table by a hash and quotes a body that contains its own dollar tag', () => {
@@ -224,6 +226,7 @@ describe('PostgreSQL database invariants', { skip: !url && 'JAREN_PG_URL is not 
         [`ALTER TABLE entry DISABLE TRIGGER "${name}"`, 'enabled'],
         [`ALTER FUNCTION "${name}"() SET search_path = public`, 'function.config'],
         [`ALTER FUNCTION "${name}"() SECURITY DEFINER`, 'function.securityDefiner'],
+        [`ALTER FUNCTION "${name}"() STABLE`, 'function.volatility'],
       ]) {
         await fixture.exec(change);
         await reopen(new RegExp(`\\(${field.replace('.', '\\.')}\\)`));

@@ -225,10 +225,10 @@ export function compileJsonQuery(doc, options = {}) {
   // `analysis: true` additionally exposes the normalized-form record at
   // `query.analysis` (QUERY-FORMAT.md Appendix C.1) from the SAME
   // normalization — but compilation itself stays strict (the flag is
-  // stripped before normalizeQuery, so schema hooks stay required).
+  // passed separately to normalizeQuery, so schema hooks stay required).
   const wantAnalysis = options.analysis === true;
   const normalized =
-    normalizeQuery(doc, wantAnalysis ? { ...options, analysis: false } : options);
+    normalizeQuery(doc, options, false);
   const { root, frameSize, externals, limits, stepSlot, usedOps, usedFunctions, usedCollations } =
     normalized;
   const get = compileQueryRoot(root,
@@ -377,7 +377,7 @@ function analysisRecord(normalized) {
  *   JQ0008, which analysis does not raise)
  */
 export function analyzeQuery(doc, options = {}) {
-  return analysisRecord(normalizeQuery(doc, { ...options, analysis: true }));
+  return analysisRecord(normalizeQuery(doc, options, true));
 }
 
 const OBJECT_CACHE = createWeakCache();

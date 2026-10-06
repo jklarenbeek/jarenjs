@@ -4,7 +4,7 @@ import { createBoundedCache } from '@jarenjs/core/cache';
 import { setObjectMember, semanticKey } from '@jarenjs/core/object';
 import { canonicalizeJson } from '../canonical.js';
 import { createFormulaCompiler } from './index.js';
-import { FormulaError, formulaMessage, snapshot, credit } from './shared.js';
+import { FormulaError, formulaMessage, snapshot, credit, FORMULA_OPTIONS, checkFormulaOptions } from './shared.js';
 
 /** Copy a bounded diagnostic; arbitrary host rejection values never escape into JSON. */
 function diagnostic(error, targetId, maxChars) {
@@ -54,6 +54,7 @@ function batchSchemas(list, given) {
  * @param {import('./index.js').FormulaOptions & {maxRows?:number,maxCells?:number,maxErrors?:number,maxMessageChars?:number,memoSize?:number}} [options]
  */
 export function compileFormulaBatch(targets, options = {}) {
+  checkFormulaOptions(options, [...FORMULA_OPTIONS, 'maxRows', 'maxCells', 'maxErrors', 'maxMessageChars', 'memoSize'], 'batch');
   const maxRows = credit(options.maxRows, 10000, 'maxRows');
   const maxCells = credit(options.maxCells, 100000, 'maxCells');
   const maxErrors = credit(options.maxErrors, 100, 'maxErrors');
@@ -61,7 +62,8 @@ export function compileFormulaBatch(targets, options = {}) {
   const memo = createBoundedCache(credit(options.memoSize, 10000, 'memoSize'));
   const list = snapshot(targets);
   if (!Array.isArray(list) || list.length > maxCells) throw new FormulaError('JQ0015', formulaMessage('query/formula/targets-invalid'), '', '/targets');
-  const compiler = createFormulaCompiler({ ...options, schemas: batchSchemas(list, options.schemas) });
+  const compilerOptions = Object.fromEntries(FORMULA_OPTIONS.filter(key => Object.hasOwn(options, key)).map(key => [key, options[key]]));
+  const compiler = createFormulaCompiler({ ...compilerOptions, schemas: batchSchemas(list, options.schemas) });
   const nodes = new Map();
   for (const [i, target] of list.entries()) {
     if (!target || typeof target.id !== 'string' || !target.id || target.id.length > 256 || nodes.has(target.id)

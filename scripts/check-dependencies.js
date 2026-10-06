@@ -50,6 +50,10 @@ const KNOWN_TOOLING_ADVISORIES = {
   'langium': 'transitive under @mermaid-js/parser (benchmark rival)',
   '@mermaid-js/parser': 'benchmark rival; pinned to the version the parse benchmark measures',
   'mermaid': 'the mermaid benchmark rival (benchmark workspace only); jaren ships its own @jarenjs/mermaid and does not depend on this package',
+  // GHSA-238p-pmpm-9mq7: Mermaid 12.1.0 still requires KaTeX ^0.16.47;
+  // the patch is on 0.18.2, outside that range. Keep the rival's supported
+  // dependency graph instead of measuring an overridden combination.
+  'katex': 'prototype gadget in the Mermaid benchmark rival dependency; the patched 0.18.2 is outside Mermaid\'s supported range, absent from published package closures',
   'brace-expansion': 'reached through minimatch from eslint, c8 and the benchmark workspace; forcing the patched 5.0.8 onto every consumer breaks eslint, which needs the 1.x export shape',
   '@eslint/config-array': 'transitive under eslint, via the minimatch chain above',
   '@eslint/eslintrc': 'transitive under eslint, via the minimatch chain above',

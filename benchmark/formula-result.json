@@ -22,24 +22,24 @@
     {
       "consumer": "catalog",
       "rows": 10000,
-      "baselineMs": 0.9538949999999886,
-      "evaluationMs": 229.03835399999997,
-      "overhead": 240.10855911814477,
+      "baselineMs": 0.8260709999999847,
+      "evaluationMs": 222.099816,
+      "overhead": 268.8628652985084,
       "errors": 0,
       "pageRows": 256,
-      "sampledHeapBytes": 37588448,
-      "rssBytes": 121724928
+      "sampledHeapBytes": 37662216,
+      "rssBytes": 124448768
     },
     {
       "consumer": "archive-stock",
       "rows": 75000,
-      "baselineMs": 2.64549199999999,
-      "evaluationMs": 1629.397839,
-      "overhead": 615.9148615834052,
+      "baselineMs": 2.2292320000000245,
+      "evaluationMs": 1614.732916,
+      "overhead": 724.3449385259058,
       "errors": 0,
       "pageRows": 256,
-      "sampledHeapBytes": 88647584,
-      "rssBytes": 268185600
+      "sampledHeapBytes": 100720896,
+      "rssBytes": 268902400
     }
   ],
   "command": {

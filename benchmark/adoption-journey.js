@@ -45,7 +45,7 @@ try {
       adoptedPolicyFiles: sources.slice(0, 2), adoptedPolicyLines: count(sources.slice(0, 2)),
       retainedThirdPartyMechanisms: ['minisearch', '@tanstack/virtual-core'], adoptedThirdPartyMechanisms: [],
       domainSqlInAdoptedHost: 0, privateDriverBridges: 0,
-      // the saved formula sources as the translator measured them (benchmark/formula.js)
+      // Saved formula sources as qualified by benchmark/formulas.js.
       translatedSources: formulaSources.translated, sourcesWithDifferences: formulaSources.withDifferences,
       untranslatableSources: formulaSources.untranslatable, disabledPreservedSources: formulaSources.disabled },
     evidence: { library: 'pass', portable: 'pass', actualDownstream: 'pending', actualProvider: 'pending', manual: 'pending' },

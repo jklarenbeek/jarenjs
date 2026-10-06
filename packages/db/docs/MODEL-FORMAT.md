@@ -676,6 +676,19 @@ is `'serialized'` or `'parallel'` (§5.1); `sessions` is a whole number from
 without `replication` (§5.1). Each is `JD0009` naming the option and what
 it holds.
 
+The nested `capture`, `capture.log`, `jobs`, `live` and `replication`
+objects also refuse unknown members before opening. Capture mode is `auto`,
+`session` or `journal`; cache and live bounds are positive safe integers.
+Compiler registries and the zone provider are checked by the query compiler's
+own grammar at this boundary. Replication identity and its bounds are checked
+before acquisition too, preserving their existing refusal codes.
+
+Shipped drivers declare whether they can supply shared readers before opening.
+An injected driver's optional `supportsSharedReads` is either a boolean or a
+`(path, options) => boolean | undefined` hint: false refuses a parallel-read
+request before acquisition; true and undefined still require the opened
+connection to prove its actual readers.
+
 Opening retries classified busy failures of its idempotent initialization
 sequence, yielding between attempts so a competing opener can finish. The
 configured `busyTimeout` bounds admission of retries, with at most 32 total
@@ -820,7 +833,8 @@ insert — falls back to a whole-document write. The fallback is
 **counted and exposed** at `collection.stats()`
 (`{ patchTranslated, patchFallback }`), measured rather than assumed.
 A malformed patch document raises the json family's own coded errors
-unchanged; `patch` on an absent key is `JD2006`.
+unchanged; a patch value JSON cannot serialize (such as a bigint or a cycle)
+is `JD2003` before the write; `patch` on an absent key is `JD2006`.
 
 **`expect` makes a keyed write conditional.** `put(doc, key?, { expect
 })`, `patch(key, ops, { expect })` and `delete(key, { expect })` take a
@@ -1412,14 +1426,18 @@ whose documents carry numeric keys — `<table>` is the collection's name
 and `<member>` its key pointer as a JSON path (`/id` is `$.id`):
 
 ```sql
-UPDATE "<table>" SET "key" = CAST(json_extract("doc", '<member>') AS TEXT)
-WHERE json_type("doc", '<member>') = 'integer'
-  AND "key" <> CAST(json_extract("doc", '<member>') AS TEXT);
+UPDATE "<table>" SET "key" = "doc" -> '<member>'
+WHERE json_type("doc", '<member>') IN ('integer', 'real')
+  AND "key" <> ("doc" -> '<member>');
 ```
 
-It rewrites only rows whose document's key member is a JSON integer (a
-string key such as `'1.0'` is left alone) and takes the canonical text
-from the document itself. A duplicate makes it refuse as a whole (the
+It rewrites rows whose document's key member is a JSON number (a string
+key such as `'1.0'` is left alone). `->` preserves the numeric text in the
+document, including fractional and large numbers, without converting it
+through SQLite's REAL-to-TEXT spelling. Jaren writes this document text
+with `JSON.stringify`, so it is already canonical for the stored number;
+externally authored documents need their numeric spelling normalized first.
+A duplicate makes it refuse as a whole (the
 primary key rejects the moved row and nothing changes), and a second run
 changes nothing.
 
@@ -1467,7 +1485,7 @@ error.
 | `JD0053` | the live event-time declaration is invalid |
 | `JD2001` | insert found the key already present, or the key is stored under two spellings |
 | `JD2002` | a usable key could not be resolved for the write, or an explicit key disagrees with the document, or a patch rewrites the document's key member |
-| `JD2003` | the write failed schema validation |
+| `JD2003` | a value or staged operation violates its data contract |
 | `JD2004` | an undeclared collection was requested |
 | `JD2005` | a database operation failed |
 | `JD2006` | patch found no document at the key |
@@ -1551,7 +1569,10 @@ retryable), `full` (`JD2082`), `readonly` (`JD2083`), `io` (`JD2084`),
 (a UNIQUE collision on the key column → `JD2001`), `overflow` (a pushed
 integer aggregate past int64 — never raised: the query path re-runs the
 document in the engine and answers the double, and `explain().fallback`
-records it), and the fallback `error` (`JD2005`). A classified error
+records it), `data` (`JD2003`, not retryable, when Node's SQLite binding
+refuses to represent a stored integer as a JavaScript number), and the fallback
+`error` (`JD2005`). A returned classification owns its mutable metadata;
+editing it cannot change how later failures are classified. A classified error
 carries `class`, `retryable` and the driver's error as `cause`; a
 lifecycle that owns its failure code (`JD2078` for maintenance and
 backup, `JD0002` at open, `JD0023` for a migration — MIGRATION-FORMAT
@@ -2714,6 +2735,9 @@ const report = await store.saveChanges();     // one transaction
   handed to `add`/`put` are adopted and frozen. Staging is
   last-write-wins: `add()` twice under one key keeps the second document
   (like `put`), where the explicit `create()` twice is `JD2001`.
+  An `add()` after a pending `remove()` of the same key refuses `JD2003`
+  without changing that removal: use `put()`/`update()` for a replacement,
+  or save the removal before staging an insert.
 - A re-read refreshes a CLEAN record's snapshot; a DIRTY record stays
   authoritative — the read still returns the fresh row. `discard(key)`
   drops tracking without scheduling anything — a pending `remove(key)`
@@ -3276,8 +3300,13 @@ external SQL writer without such a rule must supply its own revision discipline.
 
 Audit rows and increments are writes the database makes. Journal capture never
 sees them (LIVE-FORMAT: triggers are not enrolled, and physical-table adoption
-refuses capture); the store reads an incremented revision back with the row it
-wrote. Existing unrecognized triggers remain application-owned physical objects
+refuses capture). Ordinary entity writes read the stored row back, including an
+incremented revision. Native `mutate({ ..., returning })` follows the engine's
+`RETURNING` timing: SQLite reports the statement's row before an AFTER trigger
+increments it, while PostgreSQL includes its BEFORE-trigger increment. Read the
+row afterward when the final stored revision is needed; native mutation adds no
+implicit read to its admitted statement budget (see [NATIVE-PLANS](NATIVE-PLANS.md)).
+Existing unrecognized triggers remain application-owned physical objects
 requiring preservation dispositions.
 
 ## Native column mutation documents

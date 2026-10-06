@@ -59,8 +59,8 @@
       "api": "@jarenjs/json/query",
       "role": "existing regex; lexical index pending",
       "matches": [
-        "657:// $match (anchored) / $search (free): I-Regexp (RFC 9485, D5). Literal",
-        "1537:  '$search': regexTestEntry(false),"
+        "666:// $match (anchored) / $search (free): I-Regexp (RFC 9485, D5). Literal",
+        "1546:  '$search': regexTestEntry(false),"
       ],
       "disposition": "retained"
     },

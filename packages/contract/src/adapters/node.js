@@ -31,6 +31,7 @@
  */
 
 import { discard } from '../http/body.js';
+import { admitOptions } from '../options.js';
 import { createAwaitedSink } from '@jarenjs/core/async';
 
 /**
@@ -449,8 +450,11 @@ export function nodeRequest(dispatcher, req, res) {
  * @returns {void}
  */
 export function writeNodeResponse(res, response, options = {}) {
-  if (options === null || typeof options !== 'object') throw new TypeError('writeNodeResponse: options must be an object');
-  const lingerMs = typeof options.lingerMs === 'number' && options.lingerMs >= 0 ? options.lingerMs : LINGER_MS;
+  admitOptions(options, ['from', 'lingerMs'], (reason) => new TypeError(`writeNodeResponse: ${reason}`));
+  const lingerMs = lingerOption(options.lingerMs, 'writeNodeResponse');
+  if (options.from !== undefined && !origins.has(options.from)) {
+    throw new TypeError('writeNodeResponse: options.from must be a request returned by nodeRequest');
+  }
   const source = options.from === undefined ? null : options.from.body;
   const close = source !== null && source.state.started && !source.state.ended;
   const req = options.from === undefined ? undefined : origins.get(options.from);
@@ -510,6 +514,15 @@ function lingerThenDestroy(req, lingerMs) {
   if (typeof timer.unref === 'function') timer.unref();
 }
 
+/** @param {unknown} value @param {string} owner @returns {number} */
+function lingerOption(value, owner) {
+  if (value === undefined) return LINGER_MS;
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+    throw new TypeError(`${owner}: options.lingerMs must be a non-negative finite number`);
+  }
+  return value;
+}
+
 /**
  * Put a dispatcher behind Node's `(req, res)` listener.
  * @param {HttpDispatcher} dispatcher
@@ -526,9 +539,8 @@ function lingerThenDestroy(req, lingerMs) {
  */
 export function toNodeHandler(dispatcher, options = {}) {
   requireDispatcher(dispatcher, 'toNodeHandler');
-  if (options === null || typeof options !== 'object') throw new TypeError('toNodeHandler: options must be an object');
-  const lingerMs = typeof options.lingerMs === 'number' && options.lingerMs >= 0
-    ? options.lingerMs : LINGER_MS;
+  admitOptions(options, ['lingerMs', 'request'], (reason) => new TypeError(`toNodeHandler: ${reason}`));
+  const lingerMs = lingerOption(options.lingerMs, 'toNodeHandler');
   const seed = options.request;
   if (seed !== undefined && typeof seed !== 'function') throw new TypeError('toNodeHandler: options.request must be a function (req) => unknown');
 

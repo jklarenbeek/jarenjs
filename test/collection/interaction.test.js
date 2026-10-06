@@ -87,3 +87,15 @@ it('keeps shift range intent while the endpoint is being realized',()=>{
   c.update({keyAt:()=>null});c.key({key:'ArrowDown',shiftKey:true});c.update({query:'changed'});
   assert.equal(c.state().pending,null);c.cancelPending();
 });
+
+
+it('restore refuses malformed JSON ranges without changing selection', () => {
+  const collection = createCollectionInteraction(options);
+  collection.toggle('row-3');
+  const before = collection.state().selection;
+  for (const range of [null, false, 0, '', [], {}, { fromKey: 'row-1', toKey: null }]) {
+    assert.deepEqual(collection.restore({ ...before, ranges: [range] }), { state: 'error', reason: 'invalid-selection' });
+    assert.deepEqual(collection.state().selection, before);
+  }
+  assert.deepEqual(collection.restore({ ...before, ranges: [{ fromKey: 'row-1', toKey: 'row-2' }] }), { state: 'ready' });
+});

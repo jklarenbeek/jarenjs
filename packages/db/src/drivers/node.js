@@ -109,6 +109,7 @@ export function fromNodeModule(mod, path, options) {
 export function nodeDriver() {
   return Object.freeze({
     name: 'node-sqlite',
+    supportsSharedReads: false,
     dialect: sqliteDialect,
     databaseIdentity: nativeDatabaseIdentity,
     /**

@@ -62,7 +62,7 @@ describe('lintContract', () => {
     assert.deepStrictEqual(findings.map((f) => [f.rule, f.docPath]), [
       ['body-limit-exceedable', '/operations/labels.put/policy/limits/maxBodyBytes'],
     ]);
-    assert.match(findings[0].message, /'\/text' admits strings of up to 2097152 characters — at least 2097154 bytes encoded — over policy\.limits\.maxBodyBytes 1048576/);
+    assert.match(findings[0].message, /'\/text' admits strings of up to 2097152 code points — a JSON-escaped string can need 12582914 bytes including its quotes — over policy\.limits\.maxBodyBytes 1048576/);
     assert.match(findings[0].message, /refused JC2003/);
     // a nested member, a nullable spelling and a union branch are read too; the largest bound is named
     const nested = lintContract(contract({
@@ -71,10 +71,10 @@ describe('lintContract', () => {
           tag: { anyOf: [{ type: 'string', maxLength: 99 }, { type: 'null' }] } } } },
     }));
     assert.deepStrictEqual(nested.map((f) => f.rule), ['body-limit-exceedable']);
-    assert.match(nested[0].message, /'\/meta\/note' admits strings of up to 120 characters/);
+    assert.match(nested[0].message, /'\/meta\/note' admits strings of up to 120 code points/);
     // within the limit, or a bound that a pattern, format or value set may keep out of reach: no finding
     assert.deepStrictEqual(lintContract(labels({ type: 'string', maxLength: 1000 })), []);
-    assert.deepStrictEqual(lintContract(labels({ type: 'string', maxLength: 2097152 }, { limits: { maxBodyBytes: 4 * 2097152 } })), []);
+    assert.deepStrictEqual(lintContract(labels({ type: 'string', maxLength: 2097152 }, { limits: { maxBodyBytes: 6 * 2097152 + 2 } })), []);
     for (const narrowed of [{ pattern: '^[a-z]{3}$' }, { format: 'date' }, { enum: ['a'] }, { const: 'a' }]) {
       assert.deepStrictEqual(lintContract(labels({ type: 'string', maxLength: 2097152, ...narrowed })), [], JSON.stringify(narrowed));
     }

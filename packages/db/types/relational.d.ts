@@ -80,8 +80,8 @@ export interface AsyncRelationalEngine {
  * lock. On a transaction view (`tx.relational`) every call runs as that
  * exact scope (`JD2070` once it settled, `JD2098` after a hold limit) and a
  * write is a savepoint of the transaction. A write is refused while
- * tracked changes are pending, when its table belongs to an entity with a
- * store-only invariant (`JD2095`), and under journal capture (`JD0051`);
+ * tracked changes are pending (`JD2041`), when its table belongs to an entity
+ * with a store-only invariant (`JD2095`), and under journal capture (`JD0051`);
  * session capture records it. The Store owns its lifetime: there is no
  * `dispose`.
  */

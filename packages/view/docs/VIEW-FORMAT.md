@@ -177,8 +177,14 @@ reference implementation keeps them in one **property table**
   writes, which a hydrating renderer then keeps. Through the property,
   `download: true` names the file `true`, `title: true` shows `true`,
   `popover: true` is the `manual` popover where `popover=""` is `auto`,
-  and `width: '100px'` writes `width="0"`. Numbers, strings on string
-  properties and boolean properties are assigned. A string on a
+  and `width: '100px'` writes `width="0"`. Numbers on reflected numeric
+  properties also retain their attribute spelling: `size: 0` must not throw,
+  and a negative or fractional width must not become an unsigned integer.
+  Non-boolean values on boolean properties retain their attribute spelling
+  too: `disabled: 0` and `disabled: ''` both produce a present attribute.
+  Boolean properties are also updated against native dirty state (`selected`,
+  `muted`); removing one clears both its property and attribute. Other numbers
+  and strings on string properties are assigned. A string on a
   number-typed property that reflects no attribute (`scrollTop: '100'`)
   is therefore written as an attribute of that name, as the serializer
   writes it; a number reaches the property.

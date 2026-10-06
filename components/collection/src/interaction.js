@@ -76,7 +76,7 @@ export function createCollectionInteraction(options) {
       if (!intent || !isJsonValue(intent) || typeof intent.query !== 'string' || typeof intent.snapshot !== 'string' || !['keys', 'all'].includes(intent.mode) || !Array.isArray(intent.keys) || !Array.isArray(intent.exclusions)
         || !Array.isArray(intent.ranges) || intent.keys.length + intent.exclusions.length > config.maxSelectedKeys
         || intent.ranges.length > 1 || ![...intent.keys, ...intent.exclusions].every((key) => typeof key === 'string')
-        || intent.ranges.some((range) => typeof range.fromKey !== 'string' || typeof range.toKey !== 'string'))
+        || intent.ranges.some((range) => range === null || typeof range.fromKey !== 'string' || typeof range.toKey !== 'string'))
         return { state: 'error', reason: 'invalid-selection' };
       selection = structuredClone(intent); return { state: 'ready' };
     },

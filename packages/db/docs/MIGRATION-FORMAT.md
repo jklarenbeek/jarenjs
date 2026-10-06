@@ -350,8 +350,9 @@ _jaren_migrations(id TEXT PRIMARY KEY, applied_at INTEGER,
                   from_hash TEXT, to_hash TEXT, checksum TEXT, steps INTEGER)
 ```
 
-`checksum` is `hashContent(canonicalizeJson(migration))` —
-signature-grade, never the memo-grade `contentKey`. On every
+`checksum` is `hashContent(canonicalizeJson(migration))`: a persisted 32-bit
+FNV-1a fingerprint of the canonical JSON document, written in base 36. It is
+not a cryptographic signature or collision-free identity. On every
 run, the supplied migration list MUST contain every applied migration,
 in order, with matching checksums; a migration whose recorded checksum
 differs from the document on disk is `JD0022` — someone edited an
@@ -362,7 +363,13 @@ hash of the `baseline` model when no migration has run.
 `migrationChecksum(migration)` is that checksum, exported: the hash of
 the WHOLE canonical document — every step, its SQL text, a host step's
 `run` and `version`, a physical plan's source, dispositions and scope.
-Two documents with one checksum are one migration.
+The runner treats matching recorded checksums as the same migration, but two
+different canonical documents can share a checksum. The same limitation applies
+to model `from_hash`/`to_hash` values. Keep the reviewed migration documents in
+version control; the recorded checksum alone cannot establish that their contents
+are unchanged. Existing history retains this format. An exact-identity upgrade
+requires an explicit migration/adoption protocol, tracked in the
+[roadmap](../../../docs/ROADMAP.md#jarenjslinq--jarenjsdb--the-data-pair).
 
 **Planner output is not promised stable across releases before 1.0.** A
 release may plan a different document for an unchanged pair of models —
@@ -398,6 +405,12 @@ fresh reference database. For a nested rebuild, enter
 the driver can bracket FK settings outside the transaction and use nested
 savepoints inside it. Each acquired connection has one cleanup owner;
 if the operation and cleanup both fail, both errors are retained.
+
+Migration planner, runner and status options are closed plain objects. A
+misspelled or unknown member refuses with `JD0013` before acquiring a
+connection or applying a step; for example, `atomik: true` cannot silently
+disable an intended atomic run. Signals must be AbortSignal-compatible and
+deadlines finite timestamps. Omit an optional member to use its default.
 
 The run options include:
 

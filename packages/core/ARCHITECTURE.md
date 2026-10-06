@@ -164,6 +164,10 @@ flowchart TB
             AsyncUtil["async.js<br/>Bounded ordered asynchronous map, awaited sink"]
         end
 
+        subgraph ChecksumModule["Byte checksums"]
+            ChecksumUtil["checksum.js<br/>CRC-32 for PNG and ZIP"]
+        end
+
         subgraph RandomModule["Randomness"]
             RandomUtil["random.js<br/>Seeded generator, integer draw, shuffle, distinct draw"]
         end

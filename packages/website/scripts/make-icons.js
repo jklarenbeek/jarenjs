@@ -1,18 +1,19 @@
 //@ts-check
 /**
- * Generate the PWA icons (icon-192.png, icon-512.png) with zero
- * dependencies: a full-bleed brand-purple square with a chunky white
+ * Generate the PWA icons (icon-192.png, icon-512.png) with Node APIs
+ * and the suite CRC-32 checksum: a full-bleed brand-blue square with a chunky white
  * "J" glyph, written as valid RGBA PNGs through node:zlib. Full-bleed
  * squares serve both `any` and `maskable` purposes, and iOS gets a real
- * PNG for its apple-touch-icon. Run: node scripts/make-icons.js
+ * PNG for its apple-touch-icon. Run from the repository root: node packages/website/scripts/make-icons.js
  */
 
 import { writeFileSync } from 'node:fs';
 import { deflateSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { crc32 } from '@jarenjs/core/checksum';
 
-const BG = [0x56, 0x46, 0xd6, 0xff]; // the brand accent
+const BG = [0x3b, 0x82, 0xf6, 0xff]; // docs/DESIGN.md logo blue
 const FG = [0xff, 0xff, 0xff, 0xff];
 
 /** 8×12 glyph mask. */
@@ -32,20 +33,6 @@ const GLYPH = [
 ];
 
 //#region png writing
-
-const CRC_TABLE = new Int32Array(256);
-for (let n = 0; n < 256; n++) {
-  let c = n;
-  for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
-  CRC_TABLE[n] = c;
-}
-
-function crc32(bytes) {
-  let c = 0xffffffff;
-  for (let i = 0; i < bytes.length; i++)
-    c = CRC_TABLE[(c ^ bytes[i]) & 0xff] ^ (c >>> 8);
-  return (c ^ 0xffffffff) >>> 0;
-}
 
 function chunk(type, data) {
   const out = Buffer.alloc(12 + data.length);

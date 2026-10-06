@@ -13,6 +13,8 @@
  * at most `maxBodyBytes`.
  */
 
+import { admitOptions, admitSignal } from '../options.js';
+
 /**
  * A body as the pipeline reads it: text, bytes, a pull source of byte
  * chunks, or none.
@@ -70,13 +72,10 @@ const strictUtf8 = new TextDecoder('utf-8', { fatal: true });
  * const text = await readBody(ctx.body, { as: 'text', signal: ctx.signal });
  */
 export async function readBody(body, options = {}) {
-  if (options === null || typeof options !== 'object') throw new TypeError('readBody: options must be an object');
-  for (const key of Object.keys(options)) {
-    if (key !== 'as' && key !== 'signal') throw new TypeError(`readBody: options has no member '${key}' (it reads as and signal)`);
-  }
+  admitOptions(options, ['as', 'signal'], (reason) => new TypeError(`readBody: ${reason}`));
   const as = options.as === undefined ? 'bytes' : options.as;
   if (as !== 'bytes' && as !== 'text') throw new TypeError("readBody: options.as is 'bytes' or 'text'");
-  const signal = options.signal === undefined ? null : options.signal;
+  const signal = admitSignal(options.signal, (reason) => new TypeError(`readBody: ${reason}`));
   if (signal !== null && signal.aborted) {
     if (isAsyncByteSource(body)) await discard(body);
     throw signal.reason;

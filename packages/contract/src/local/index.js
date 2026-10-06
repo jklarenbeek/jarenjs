@@ -30,10 +30,11 @@
  * `capabilities.idempotency: false` saying so.
  */
 
-import { refuseUnknownMembers } from '@jarenjs/core/object';
+import { isPlainOptions, refuseUnknownMembers } from '@jarenjs/core/object';
 import { compileMessageCatalog } from '@jarenjs/core/message';
 
 import { ContractHostError, ContractFailure } from '../errors.js';
+import { admitOptions, admitSignal } from '../options.js';
 import { validateOperationInput, settleOperation, safeTrace, PORT_LOCAL_ERRORS, classifyDeclared } from '../pipeline.js';
 import { resolveLifecycle, identify as identifyHost, acquire as acquireHost, once, RollbackCarrier } from '../host.js';
 import { resolveHostRuntime } from '../runtime.js';
@@ -223,7 +224,7 @@ export function openLocalClient(contract, handlers, options = {}) {
       throw host('JC1001', `the handler of '${id}' must be a function, got ${typeof handlers[id]}`);
     }
   }
-  if (options === null || typeof options !== 'object') throw host('JC1001', 'options must be an object');
+  if (!isPlainOptions(options)) throw host('JC1001', 'options must be a plain object');
   refuseUnknownMembers(options, LOCAL_OPTIONS, (key, hint) => host('JC1001', `option '${key}' is not one serveLocal reads${hint}`));
   const validateOutput = options.validateOutput === undefined ? 'always' : options.validateOutput;
   if (validateOutput !== 'always' && validateOutput !== 'never') {
@@ -303,9 +304,9 @@ export function openLocalClient(contract, handlers, options = {}) {
       throw new ContractHostError('JC1005', `client: '${route.outcome.id}' is a subscribe operation; the local binding cannot carry a stream (capabilities.stream is false)`);
     }
     // the same refusal every client binding answers for a malformed ctx
-    if (ctx === null || typeof ctx !== 'object') throw host('JC1008', 'ctx must be an object');
+    admitOptions(ctx, ['signal', 'attempt'], (reason) => host('JC1008', reason), 'ctx');
+    const caller = admitSignal(ctx.signal, (reason) => host('JC1008', reason), 'ctx.signal');
     const meta = makeMeta(route.outcome.id, ctx.attempt, null);
-    const caller = ctx.signal === undefined || ctx.signal === null ? null : ctx.signal;
     if ((caller !== null && caller.aborted) || closed) return cancelled(route, meta);
     const signal = caller === null ? closer.signal : AbortSignal.any([closer.signal, caller]);
     const id = safeTrace(trace);

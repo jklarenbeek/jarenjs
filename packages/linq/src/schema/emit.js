@@ -118,6 +118,7 @@ export function reachesNormalizer(builder, seen = new Set()) {
   for (const [key] of st.annotations) {
     if (NORMALIZER_KEYS.includes(key)) return true;
   }
+  if (NORMALIZER_KEYS.some(key => Object.hasOwn(st.keywords, key))) return true;
   const keywordChildren = (value) => isSchemaBuilder(value) ? reachesNormalizer(value, seen)
     : value !== null && typeof value === 'object' && Object.values(value).some(keywordChildren);
   return Object.values(st.keywords).some(keywordChildren)

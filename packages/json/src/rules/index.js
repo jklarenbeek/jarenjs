@@ -24,7 +24,10 @@ export function compileRulePlan(definition, options) {
       throw new FormulaError('JQ2015', formulaMessage('query/formula/rule-field-not-writable'), doc.id, `/targets/${i}/field`);
     pointers.set(target.id, compileJSONPointer(target.field));
   }
-  const batch = compileFormulaBatch(doc.targets, options);
+  // These policies belong to the rule plan; the batch sees only its own
+  // compiler and admission options, so misspellings still refuse there.
+  const { writableFields: _writableFields, groupKey: _groupKey, ...batchOptions } = options;
+  const batch = compileFormulaBatch(doc.targets, batchOptions);
   const maxRows = credit(options.maxRows, 10000, 'maxRows');
   const maxErrors = credit(options.maxErrors, 100, 'maxErrors');
   return Object.freeze({ doc,

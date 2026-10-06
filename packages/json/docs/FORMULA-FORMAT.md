@@ -69,6 +69,12 @@ compileFormula(defineFormula('price', { '$format-number': ['$.price', '€ #.##0
   .evaluate({ price: 1234.5 }); // {kind:'value', value:'€ 1.234,50'}
 ```
 
+Formula compiler options are a plain, closed object: `schemas`, `helpers`,
+`compileTypeTest`, `limits`, `cacheSize`, `packs`, `dateNames` and
+`decimalFormats`. Unknown members refuse with `TypeError`, including a
+misspelled limit that would otherwise be ignored. This also applies to
+`compileFormula` and `resolveFormulaMigration`.
+
 `createFormulaCompiler` retains a bounded compilation cache (default 128
 profiles): its collision-free key includes the complete profile, helper function
 identity/version/cost, the pack registry, the locale data, schema contents,
@@ -143,7 +149,9 @@ evaluations, cache hits, values, empty sequences, skips, explanations, errors an
 disabled cells. Diagnostic text/path are bounded by `maxMessageChars` (default
 256); `maxErrors` defaults to 100. `maxRows` defaults to 10000, `maxCells` to
 100000, and `memoSize` to 10000. Exceeding an admission limit refuses the batch,
-never silently reports a truncated result as complete.
+never silently reports a truncated result as complete. Batch compile options
+accept the formula compiler members plus `maxRows`, `maxCells`, `maxErrors`,
+`maxMessageChars` and `memoSize`; other members refuse with `TypeError`.
 
 `$computed.targetName` schedules named dependencies; missing targets and cycles
 refuse deterministically. A dependency with no value blocks only its dependents.
@@ -216,6 +224,10 @@ with the block: what follows reads the name as it was before it, and what the
 block assigns to an outer `let` stays. Before its declaration such a name is no
 name at all (JavaScript throws reading it): read there it is the reason
 `unknown-name`, assigned there the reason `assignment`.
+
+Migration options are a plain, closed object: `maxRecords`, `maxSourceChars`,
+`translate` and `formula`. Unknown members refuse with `TypeError`, even
+when the source list is empty.
 
 `options.translate` (closed: an unknown key is a `TypeError`) names what the body
 reads and calls:
@@ -293,7 +305,10 @@ difference, one text has a character from U+E000 to U+FFFF and the other one
 beyond U+FFFF. A literal index into a text (`s[0]`) reads its character, and
 nothing past its end, where JavaScript reads a code unit (`code-units`); an index
 into a value the translation cannot tell is text or an array is the reason
-`index`, as `.length` of one is the reason `length`.
+`index`, as `.length` of one is the reason `length`. A static canonical string
+index (`s['0']`) follows the same rules as `s[0]`; `a['length']` and
+`s['length']` follow their dot spellings. An object's ordinary `length`
+member remains a data key.
 
 Regular expressions are read as JavaScript reads them without the `u` flag (`\p`
 is the letter p, `\u{2}` a `u` twice, a brace that is no quantifier is itself) and
@@ -320,6 +335,7 @@ Every reason names what stops the translation, with a message:
 
 | Reason | What it names |
 |---|---|
+| `complexity` | source nesting or representation size exceeds the translator's capacity; positioned at the start of the body, preserved as an untranslatable record without aborting other sources |
 | `syntax` | text JavaScript does not read (or this parser does not: a class, a label); a let or const of a parameter's name |
 | `unreachable` | a statement after a `return` |
 | `return-line-break` | a line break right after `return`, where JavaScript returns undefined |
@@ -350,7 +366,7 @@ Every reason names what stops the translation, with a message:
 | `split` | `.split()` other than its first part by a literal text |
 | `replace` | a replacement function, a computed pattern, a replacement that names the match (`$&`, `$1`), or `replaceAll` of a pattern without the `g` flag |
 | `replace-first` | `.replace()` of the first match, where more than one can match |
-| `regex` | a pattern outside the rewrite: a flag other than `g` and `i`, lookaround, a lazy quantifier, a back reference, a legacy octal escape, a capital in a case-insensitive pattern, a replaced pattern that can match the empty text, `test()` of a `g` pattern kept in a name |
+| `regex` | a pattern outside the rewrite: a flag other than `g` and `i`, lookaround, a lazy quantifier, a back reference, a legacy octal escape, a capital in a case-insensitive pattern, a replaced pattern that can match the empty text, `test()` of a `g` pattern kept in a name, or a regular expression property such as `.source` or `.flags` |
 | `callback` | a callback other than an arrow of the element (and its index) |
 | `toFixed` | `.toFixed()` of anything but a literal number of digits from 0 to 20 |
 | `locale` | number formatting or case mapping in a language the translation does not describe, whose case rules are its own, or whose tag JavaScript refuses |
@@ -413,7 +429,8 @@ each rounding boundary, for every decimal option set the translation takes.
 `checkFormulaParity(formula, rows, expected, options)` from
 `@jarenjs/json/formula` checks a compiled formula against the outputs the host's
 own trusted runner produced for the same rows (`expected[i]` in the outcome
-shape); the library never runs the original. It returns `{rows, agree, differ,
+shape); the library never runs the original. Its plain, closed options are
+`context`, `maxRows` and `maxMismatches`; unknown members refuse with `TypeError`. It returns `{rows, agree, differ,
 mismatches, omittedMismatches}`, at most `maxMismatches` (default 20) mismatches
 listed. Outcomes compare as canonical JSON; two errors agree whatever their
 messages, since a JavaScript TypeError and a query refusal word one failure
@@ -480,6 +497,13 @@ and unmounted inventory rows; stale values never authorize writes.
 
 ## Measured qualification
 
+The focused translator exactness corpus checks every integer from 1000 to
+99999 for each shipped number locale and option set, plus rounding boundaries.
+Keep the corpus intact when running it under Bun: use
+`bun test --timeout 120000 test/json/formula-translate-edges.test.js`, matching
+the repository's `npm test` per-test allowance. Bun's default five-second
+allowance is too short for this exhaustive test.
+
 The original fixture freeze and budgets are unchanged. Measurements include
 compilation/snapshot overhead beside the retained static arithmetic loop; slower
 native execution is reported. Evaluation pages are bounded and real worker
@@ -494,8 +518,8 @@ Measured on v24.20.0, linux/x64, AMD Ryzen 9 5900HX with Radeon Graphics.
 
 | Consumer | Rows | Static arithmetic ms | Native formula ms | Added cost ratio | Errors | Page rows | Heap / RSS MiB |
 |---|---:|---:|---:|---:|---:|---:|---|
-| catalog | 10000 | 0.95 | 229.04 | 240.11x | 0 | 256 | 35.85 / 116.09 |
-| archive-stock | 75000 | 2.65 | 1629.40 | 615.91x | 0 | 256 | 84.54 / 255.76 |
+| catalog | 10000 | 0.83 | 222.10 | 268.86x | 0 | 256 | 35.92 / 118.68 |
+| archive-stock | 75000 | 2.23 | 1614.73 | 724.34x | 0 | 256 | 96.05 / 256.45 |
 
 Sources: 8 preserved, 5 translated (1 with named differences), 2 untranslatable, 1 disabled. Original byte changes: 0; repeat migration changes: 0. Preview writes: 0; replay writes/revisions: 0/0.
 

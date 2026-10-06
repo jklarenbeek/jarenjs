@@ -22,7 +22,7 @@ describe('bounded PostgreSQL host protocol', () => {
     const source = { connect: () => { throw new Error('must not acquire'); } };
     for (const key of Object.keys(POSTGRES_DEFAULTS)) {
       for (const value of [0, -1, Infinity, NaN, 1.5])
-        assert.throws(() => postgresDriver(source, { [key]: value }), TypeError);
+        assert.throws(() => postgresDriver(source, { [key]: value }), { code: 'JD0003' });
     }
     assert.throws(() => postgresDriver(source, { closeTimeoutMs: 2147483648 }), /timer range/);
     assert.throws(() => postgresDriver(source, { poolMode: 'transaction' }), code('JD0003'));

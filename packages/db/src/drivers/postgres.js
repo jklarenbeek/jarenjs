@@ -36,7 +36,7 @@ import { createAsyncContext } from './async-context.js';
 import { postgresDialect } from '../dialects/postgres.js';
 import { DbCompileError, DbRuntimeError, wrapDriverError, connectionLost, isConnectionLoss } from '../errors.js';
 import { workerQueue } from './worker-queue.js';
-import { rowBytes } from './worker-protocol.js';
+import { rowBytes, queueFailure } from './worker-protocol.js';
 import { postgresSettings, postgresChannel, POSTGRES_DEFAULTS, POSTGRES_ADAPTER_OPTIONS } from './postgres-options.js';
 import { postgresCursors } from './postgres-cursor.js';
 import { createPostgresNotifications } from './postgres-notifications.js';
@@ -585,6 +585,7 @@ export function postgresDriver(source, options = undefined) {
 
   return Object.freeze({
     name: 'postgres',
+    supportsSharedReads: false,
     dialect,
     metrics: () => admissions.metrics(),
     /** The sessions this driver admits at once — the most a Store opened
@@ -628,6 +629,8 @@ export function postgresDriver(source, options = undefined) {
             lease.release();
           }, () => lease.release()).catch(() => {});
           else lease.release();
+          if (error?.code === undefined && error?.message === 'timeout exceeded when trying to connect')
+            throw Object.assign(queueFailure('the PostgreSQL pool source exceeded its acquisition deadline', admissions.metrics().queued), { cause: error });
           throw error;
         }
         finally { clearTimeout(timer); openOptions?.signal?.removeEventListener('abort', abandon); }

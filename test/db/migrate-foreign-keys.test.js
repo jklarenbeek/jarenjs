@@ -39,7 +39,7 @@ const MODEL = { $model: '0.1', entities: {
 const step = (/** @type {string} */ id, /** @type {string} */ sql) =>
   ({ $migration: '0.1', id, from: shapeHash(MODEL), to: shapeHash(MODEL), steps: [{ kind: 'sql', sql }] });
 const DELETE_PARENT = step('delete-parent', `DELETE FROM "Parent" WHERE "id" = 'p1'`);
-const ORPHAN = step('orphan', `INSERT INTO "Child" ("id", "parentId", "doc") VALUES ('c2', 'nobody', '{}')`);
+const ORPHAN = step('orphan', `INSERT INTO "Child" ("id", "parentId", "doc") VALUES ('c2', 'nobody', jsonb('{}'))`);
 
 /** The model with the child entity renamed to `Kid`, and the one with the parent renamed to `Folk`. */
 const KID = { $model: '0.1', entities: {
@@ -87,11 +87,23 @@ describe(`a migration enforces foreign keys (${process.versions.bun ? 'bun' : 'n
     try {
       await assert.rejects(migrate({ driver: await driver(), path: dbPath }, [ORPHAN], { baseline: MODEL, model: MODEL, shadow: false }),
         (/** @type {any} */ error) => error.code === 'JD0023' && error.class === 'constraint' && error.retryable === false
-          && /step 0 \(sql\)/.test(error.message));
+          && /step 0 \(sql\)/.test(error.message) && /FOREIGN KEY constraint failed/.test(error.cause?.message ?? error.message));
       assert.deepEqual(await facts(dbPath), { children: 1, violations: 0 });
       assert.deepEqual((await migrationStatus({ driver: await driver(), path: dbPath }, [ORPHAN], {})).applied, []);
     }
     finally { cleanup(); }
+  });
+
+  it('the missing-parent fixture is otherwise valid when enforcement is explicitly off', async () => {
+    const { dbPath, cleanup } = await seeded();
+    const db = await raw(dbPath);
+    try {
+      db.exec('PRAGMA foreign_keys = OFF');
+      db.exec(ORPHAN.steps[0].sql);
+      assert.equal(Number(db.prepare('SELECT count(*) AS n FROM "Child"').get().n), 2);
+      assert.equal(db.prepare('PRAGMA foreign_key_check').all().length, 1);
+    }
+    finally { db.close(); cleanup(); }
   });
 
   it("a borrowed connection keeps its caller's setting, and the link's check refuses the orphan it would leave", async () => {
@@ -232,6 +244,7 @@ describe('the same migration under Bun, spawned', { skip: process.versions.bun !
       assert.equal(report.children, 0, 'the cascade ran under Bun');
       assert.deepEqual(report.violations, []);
       assert.deepEqual(report.orphanRefused, { code: 'JD0023', class: 'constraint' });
+      assert.match(report.orphanCause, /FOREIGN KEY constraint failed/);
     }
     finally { cleanup(); }
   });

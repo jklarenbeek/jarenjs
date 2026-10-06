@@ -463,10 +463,11 @@ function quantityPattern(format) {
     const g = escapeRegExp(format.groupingSeparator);
     const d = escapeRegExp(format.decimalSeparator);
     const minus = `[\\x2d\\u2212${escapeRegExp(format.minusSign)}]`;
-    pattern = new RegExp(`(?<![${family}${g}${d}\\p{L}])(?<![${family}]\\s+)(?<![${family}][eE]${minus}?)`
-      + `(?<!\\/\\s*)(?<![\\p{Pd}\\u2212${escapeRegExp(format.minusSign)}]\\s*)(${minus})?`
+    const number = new RegExp(`(?<![${family}${g}${d}\\p{L}])(${minus})?`
       + `([${family}]{1,3}(?:${g}[${family}]{3})+|[${family}]+)`
       + `(?:${d}([${family}]+))?\\s*(\\p{L}[\\p{L}\\p{N}]*)(?![\\p{L}\\p{N}/]|[\\x2d\\u2010\\u2011]\\p{L})`, 'gu');
+    pattern = { number, digit: new RegExp(`[${family}]$`, 'u'),
+      dash: new RegExp(`[\\p{Pd}\\u2212${escapeRegExp(format.minusSign)}]$`, 'u') };
     quantityPatterns.set(format, pattern);
   }
   return pattern;
@@ -500,8 +501,16 @@ function unitOf(value, op, docPath, compileTime) {
 function readQuantity(text, unit, format) {
   const dimension = dimensionOf(unit);
   const pattern = quantityPattern(format);
-  pattern.lastIndex = 0;
-  for (const m of text.matchAll(pattern)) {
+  pattern.number.lastIndex = 0;
+  for (const m of text.matchAll(pattern.number)) {
+    // Check context only at actual numeric candidates. Repeating an unbounded
+    // lookbehind at every whitespace character makes a blank field quadratic.
+    let before = m.index - 1;
+    while (before >= 0 && /\s/u.test(text[before])) before--;
+    if (before >= 0 && (pattern.dash.test(text.slice(Math.max(0, before - 1), before + 1)) || text[before] === '/')) continue;
+    while (before >= 0 && /[\s'’_·#%+*]/u.test(text[before])) before--;
+    if (before >= 0 && pattern.digit.test(text.slice(Math.max(0, before - 1), before + 1))) continue;
+    if (before >= 1 && /[eE]/.test(text[before]) && pattern.digit.test(text.slice(Math.max(0, before - 2), before))) continue;
     const from = unitOfAlias(m[4]);
     if (from === undefined || dimensionOf(from) !== dimension)
       continue;

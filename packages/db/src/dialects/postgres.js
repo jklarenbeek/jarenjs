@@ -694,7 +694,7 @@ export function postgresDialect(options = undefined) {
         + "'condition', t.tgqual IS NOT NULL, 'enabled', t.tgenabled::text, 'deferrable', t.tgdeferrable, 'deferred', t.tginitdeferred, "
         + "'function', pg_catalog.jsonb_build_object('schema', pn.nspname, 'name', p.proname, 'language', l.lanname, "
         + "'returns', pg_catalog.format_type(p.prorettype, NULL), 'arguments', pg_catalog.pg_get_function_identity_arguments(p.oid), "
-        + "'securityDefiner', p.prosecdef, 'config', p.proconfig, 'source', p.prosrc))::text AS program "
+        + "'volatility', p.provolatile, 'securityDefiner', p.prosecdef, 'config', p.proconfig, 'source', p.prosrc))::text AS program "
         + 'FROM pg_catalog.pg_trigger t JOIN pg_catalog.pg_class c ON c.oid = t.tgrelid '
         + 'JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace JOIN pg_catalog.pg_proc p ON p.oid = t.tgfoid '
         + 'JOIN pg_catalog.pg_namespace pn ON pn.oid = p.pronamespace JOIN pg_catalog.pg_language l ON l.oid = p.prolang '

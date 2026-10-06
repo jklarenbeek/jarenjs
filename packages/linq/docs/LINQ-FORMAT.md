@@ -37,13 +37,13 @@ is the index of those guides, and it is how a reader reaches any of them.
 | Document | Lines | What it writes, and when to open it |
 |---|---:|---|
 | [LINQ-FORMAT.md](LINQ-FORMAT.md) | 951 | this file, the binder and the family's **normative reference**: what a pen is, the rules all of them keep, the shared `JL01xx` table, and the cross-pen views derived from the guides it indexes. **Read it when** you want a rule that is true of every pen, an index of the documents, or one place to look up a method without knowing which pen owns it |
-| [QUERY-PEN.md](QUERY-PEN.md) | 1,825 | the chain, `.` — query documents (`jaren-query`) and the provider seam. **Read it when** you are querying data, or implementing a provider that answers a query document |
+| [QUERY-PEN.md](QUERY-PEN.md) | 1,830 | the chain, `.` — query documents (`jaren-query`) and the provider seam. **Read it when** you are querying data, or implementing a provider that answers a query document |
 | [SCHEMA-PEN.md](SCHEMA-PEN.md) | 1,250 | `./schema` — JSON Schema 2020-12: the structural keywords, the constraints and the annotations, each with a method of its own, plus `$query`, `$defs`/`$ref` recursion and the normalizer's per-field predicates. **Read it when** you are describing the shape of data — for validation, for a form, or as the base of an entity |
 | [MODEL-PEN.md](MODEL-PEN.md) | 1,117 | `./model` — the `x-entity` vocabulary on JSON Schema, and the `$model` 0.1 document `openStore` accepts unchanged. **Read it when** you are declaring a store's entities, their keys and their relations |
 | [JSLT-PEN.md](JSLT-PEN.md) | 965 | `./jslt` — `$jslt` 0.1 stylesheets: the envelope and its rules, whose bodies are captured over the matched value. **Read it when** you are transforming one document into another |
 | [MIGRATION-PEN.md](MIGRATION-PEN.md) | 810 | `./migration` — `$migration` 0.1 documents: the two shape hashes and the ordered steps the runner takes. **Read it when** you are moving a store from one model to the next |
 | [CONTRACT-PEN.md](CONTRACT-PEN.md) | 1,222 | `./contract` — `$contract` 0.1 documents: the operations, their schemas, their declared behavior and their REST binding. **Read it when** you are declaring an API and want its client, its server and its tools typed from one document |
-| [FLOW-PEN.md](FLOW-PEN.md) | 1,041 | `./flow` — `jaren-fsm` 0.1 machines and `jaren-dag` 0.1 dataflows, every query-valued member captured. **Read it when** you are declaring a state machine or a dependency graph of tasks |
+| [FLOW-PEN.md](FLOW-PEN.md) | 1,044 | `./flow` — `jaren-fsm` 0.1 machines and `jaren-dag` 0.1 dataflows, every query-valued member captured. **Read it when** you are declaring a state machine or a dependency graph of tasks |
 | [APP-PEN.md](APP-PEN.md) | 1,307 | `./app` — the `jaren-app` 0.1 document `createApp` runs, and the JSON Schema of its state beside it. **Read it when** you are declaring a whole application: state, view, actions, effects |
 | [FORMS-PEN.md](FORMS-PEN.md) | 940 | `./forms` — the `x-form` vocabulary on JSON Schema, and `assertOnSubmit()`, the same rules' layer-3 `$query` twin. **Read it when** you are turning a schema into a form |
 | [MESSAGES-PEN.md](MESSAGES-PEN.md) | 105 | `./messages` — JSON message catalogs and message references. **Read it when** you want checked translation keys, placeholders and explicit completeness. |
@@ -205,22 +205,22 @@ and the bundle is the byte count the tree-shaking probe builds.
 | Document | Subpath | Lines | Mapping rows | Worked examples | Refusals | Bundle |
 |---|---|---:|---:|---:|---:|---:|
 | [LINQ-FORMAT.md](LINQ-FORMAT.md) | — | 951 | — | — | — | — |
-| [QUERY-PEN.md](QUERY-PEN.md) | `.` | 1,825 | 34 | 8 | 16 | 210,608 B |
-| [SCHEMA-PEN.md](SCHEMA-PEN.md) | `./schema` | 1,250 | 82 | 10 | 4 | 36,956 B |
-| [MODEL-PEN.md](MODEL-PEN.md) | `./model` | 1,117 | 30 | 6 | 3 | 46,300 B |
+| [QUERY-PEN.md](QUERY-PEN.md) | `.` | 1,830 | 34 | 8 | 16 | 211,082 B |
+| [SCHEMA-PEN.md](SCHEMA-PEN.md) | `./schema` | 1,250 | 82 | 10 | 4 | 37,008 B |
+| [MODEL-PEN.md](MODEL-PEN.md) | `./model` | 1,117 | 30 | 6 | 3 | 46,352 B |
 | [JSLT-PEN.md](JSLT-PEN.md) | `./jslt` | 965 | 17 | 8 | 3 | 19,927 B |
 | [MIGRATION-PEN.md](MIGRATION-PEN.md) | `./migration` | 810 | 13 | 5 | 4 | 25,749 B |
-| [CONTRACT-PEN.md](CONTRACT-PEN.md) | `./contract` | 1,222 | 38 | 6 | 3 | 50,201 B |
-| [FLOW-PEN.md](FLOW-PEN.md) | `./flow` | 1,041 | 16 | 7 | 3 | 19,984 B |
-| [APP-PEN.md](APP-PEN.md) | `./app` | 1,307 | 24 | 7 | 4 | 52,114 B |
-| [FORMS-PEN.md](FORMS-PEN.md) | `./forms` | 940 | 18 | 6 | 3 | 41,112 B |
+| [CONTRACT-PEN.md](CONTRACT-PEN.md) | `./contract` | 1,222 | 38 | 6 | 3 | 50,253 B |
+| [FLOW-PEN.md](FLOW-PEN.md) | `./flow` | 1,044 | 16 | 7 | 3 | 19,984 B |
+| [APP-PEN.md](APP-PEN.md) | `./app` | 1,307 | 24 | 7 | 4 | 52,166 B |
+| [FORMS-PEN.md](FORMS-PEN.md) | `./forms` | 940 | 18 | 6 | 3 | 41,164 B |
 | [MESSAGES-PEN.md](MESSAGES-PEN.md) | `./messages` | 105 | 9 | 2 | 1 | 24,679 B |
 | [JTLT-PEN.md](JTLT-PEN.md) | `./jtlt` | 83 | 13 | 1 | 2 | 16,796 B |
 | [PROJECT-PEN.md](PROJECT-PEN.md) | `./project` | 81 | 9 | 1 | 1 | 15,226 B |
 | [CHARTS-PEN.md](CHARTS-PEN.md) | `./charts` | 94 | 21 | 1 | 1 | 17,015 B |
-| [DB-CLIENT.md](DB-CLIENT.md) | `./db` | 1,144 | 45 | 4 | 2 | 835,920 B |
-| [FORMULA-PEN.md](FORMULA-PEN.md) | `./formula` | 41 | 2 | — | — | 21,572 B |
-| **16 documents** | | **12,976** | **371** | **72** | | |
+| [DB-CLIENT.md](DB-CLIENT.md) | `./db` | 1,144 | 45 | 4 | 2 | 836,103 B |
+| [FORMULA-PEN.md](FORMULA-PEN.md) | `./formula` | 41 | 2 | — | — | 21,692 B |
+| **16 documents** | | **12,984** | **371** | **72** | | |
 <!--/fact-->
 
 A pen whose mapping rows are far below its worked examples is a pen
@@ -263,21 +263,21 @@ it and each document publishes it. The rounded column is what
 <!--fact:pens.cost-->
 | Subpath | Document | Bundle | Rounded |
 |---|---|---:|---:|
-| `@jarenjs/linq` | [QUERY-PEN.md](QUERY-PEN.md) | 210,608 B | 211 kB |
-| `@jarenjs/linq/schema` | [SCHEMA-PEN.md](SCHEMA-PEN.md) | 36,956 B | 37 kB |
-| `@jarenjs/linq/model` | [MODEL-PEN.md](MODEL-PEN.md) | 46,300 B | 46 kB |
+| `@jarenjs/linq` | [QUERY-PEN.md](QUERY-PEN.md) | 211,082 B | 211 kB |
+| `@jarenjs/linq/schema` | [SCHEMA-PEN.md](SCHEMA-PEN.md) | 37,008 B | 37 kB |
+| `@jarenjs/linq/model` | [MODEL-PEN.md](MODEL-PEN.md) | 46,352 B | 46 kB |
 | `@jarenjs/linq/jslt` | [JSLT-PEN.md](JSLT-PEN.md) | 19,927 B | 20 kB |
 | `@jarenjs/linq/migration` | [MIGRATION-PEN.md](MIGRATION-PEN.md) | 25,749 B | 26 kB |
-| `@jarenjs/linq/contract` | [CONTRACT-PEN.md](CONTRACT-PEN.md) | 50,201 B | 50 kB |
+| `@jarenjs/linq/contract` | [CONTRACT-PEN.md](CONTRACT-PEN.md) | 50,253 B | 50 kB |
 | `@jarenjs/linq/flow` | [FLOW-PEN.md](FLOW-PEN.md) | 19,984 B | 20 kB |
-| `@jarenjs/linq/app` | [APP-PEN.md](APP-PEN.md) | 52,114 B | 52 kB |
-| `@jarenjs/linq/forms` | [FORMS-PEN.md](FORMS-PEN.md) | 41,112 B | 41 kB |
+| `@jarenjs/linq/app` | [APP-PEN.md](APP-PEN.md) | 52,166 B | 52 kB |
+| `@jarenjs/linq/forms` | [FORMS-PEN.md](FORMS-PEN.md) | 41,164 B | 41 kB |
 | `@jarenjs/linq/messages` | [MESSAGES-PEN.md](MESSAGES-PEN.md) | 24,679 B | 25 kB |
 | `@jarenjs/linq/jtlt` | [JTLT-PEN.md](JTLT-PEN.md) | 16,796 B | 17 kB |
 | `@jarenjs/linq/project` | [PROJECT-PEN.md](PROJECT-PEN.md) | 15,226 B | 15 kB |
 | `@jarenjs/linq/charts` | [CHARTS-PEN.md](CHARTS-PEN.md) | 17,015 B | 17 kB |
-| `@jarenjs/linq/db` | [DB-CLIENT.md](DB-CLIENT.md) | 835,920 B | 836 kB |
-| `@jarenjs/linq/formula` | [FORMULA-PEN.md](FORMULA-PEN.md) | 21,572 B | 22 kB |
+| `@jarenjs/linq/db` | [DB-CLIENT.md](DB-CLIENT.md) | 836,103 B | 836 kB |
+| `@jarenjs/linq/formula` | [FORMULA-PEN.md](FORMULA-PEN.md) | 21,692 B | 22 kB |
 <!--/fact-->
 
 Read these as prices, not as scores. `./db` is the largest by an order of
@@ -674,7 +674,7 @@ it says.
 |---|---|---|---|
 | `typedClient(client, contract)` | — (identity) | `TypedClient<C>`: `invoke` over the invokable operations, `subscribe` over the subscribe ones, `url` over all of them | native |
 | `typedHttpClient(client, contract)` | — (identity) | `TypedHttpClient<C>`: `TypedClient<C>` plus `bytes` over `OpaqueOf<C>` — the opaque operations, whose success is a `ByteResponse` (a live stream) rather than the output type; for an `openHttpClient` client only, a local or port client has no `bytes` | native |
-| `typedHandlers(contract, handlers)` | — (identity) | `TypedHandlerTable<C, Host = null, Carrier = 'http'>`: one handler per invokable operation, `(input, ctx) => output \| Failure`. `ctx` is `HandlerContext<Host, Carrier>`: the HTTP context by default, `Host` the host lifecycle's `ctx.host`, and a carrier union a discriminated union to narrow on `ctx.carrier` (CONTRACT-FORMAT §7.7). `ctx.op` is `OperationInfo`, the structural subset of the compiled operation: `id`, `kind`, `doc`, `errors` (`status` per declared code), `policy` and `http`. "Does my operation declare this failure?" is `Object.hasOwn(ctx.op.errors, code)`, with no runtime member added. `ctx.header(name, value)` arms a response header on HTTP and is `null` on port and local. An `onError(error, ctx)` observer takes `ErrorContext<Host>`: the handler context, or `null` | native; a missing or misspelled operation does not compile, and an HTTP-only member on a port/local context does not either. `op.id` stays `string`, because a table whose handlers demanded a literal id would no longer be the `Handler` a binding accepts |
+| `typedHandlers(contract, handlers)` | — (identity) | `TypedHandlerTable<C, Host = null, Carrier = 'http'>`: one handler per invokable operation, `(input, ctx) => output \| Failure`. `ctx` is `HandlerContext<Host, Carrier>`: the HTTP context by default, `Host` the host lifecycle's `ctx.host`, and a carrier union a discriminated union to narrow on `ctx.carrier` (CONTRACT-FORMAT §7.7). `ctx.op` is `OperationInfo`, the structural subset of the compiled operation: `id`, `kind`, `doc`, `errors` (`status` per declared code), `policy` and `http`. "Does my operation declare this failure?" is `Object.hasOwn(ctx.op.errors, code)`, with no runtime member added. `ctx.header(name, value)` arms a response header on HTTP and is `null` on port and local. An `onError(error, ctx)` observer takes `ErrorContext<Host>`: the HTTP handler context, a local/port `{ op, trace }` context, or `null` | native; a missing or misspelled operation does not compile, and an HTTP-only member on a port/local context does not either. `op.id` stays `string`, because a table whose handlers demanded a literal id would no longer be the `Handler` a binding accepts |
 | `typedTools(tools, contract)` | — (identity) | `TypedTool<C>[]`: `name` is the id with `.` → `_`, and `execute(args, ctx?)` takes the operation's ACCEPTED input. `ctx` is a `ToolCallContext` (`signal`, `attempt`): aborting the signal cancels the call, and nothing else reaches the operation. `execute` is always a function: an operation without input ignores its argument | native |
 
 **What the pen does not judge**
@@ -706,7 +706,7 @@ it says.
 | `constant(value)` | `{ kind: 'const', value }` | `NodeDeclaration<'const'>` | native; `undefined`, or a value that is not JSON, `JL0101` |
 | `query(fn \| document)` | `{ kind: 'query', query }` | `NodeDeclaration<'query'>` | native; nothing passed, or a document that is not JSON, `JL0101`; any external `JL0104` |
 | `jslt(stylesheet)` | `{ kind: 'jslt', stylesheet }` — the JSLT pen's document ([JSLT-PEN.md](JSLT-PEN.md)), or one by hand | `NodeDeclaration<'jslt'>` | native; nothing passed, or a value that is not JSON, `JL0101` |
-| `task(run, with?)` | `{ kind: 'task', run, with? }` | `NodeDeclaration<'task', Run>` — `Run` is a literal | native; an empty `run` `JL0101`; any external in `with` `JL0104` |
+| `task(run, with?, options?)` | `{ kind: 'task', run, with?, version? }` | `NodeDeclaration<'task', Run>` — `Run` is a literal | native; an empty `run` `JL0101`; any external in `with` `JL0104` |
 | `.checkpoint()` | `checkpoint: true`, written last (§7.6) | a new declaration; the one it came from is unchanged | native |
 | `edge(from, to, { port?, select? })` | `{ from, to, port?, select? }` | `EdgeDeclaration<From, To>` | native; an empty end, an empty `port`, another member `JL0101`; any external in `select` `JL0104` |
 | `typedTasks(graph, tasks)` | — (identity) | the registry `compileDag` resolves must carry one handler per declared task name | native; a missing or misspelled name does not compile |

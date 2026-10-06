@@ -30,10 +30,11 @@ import { createSortedWindow } from './window.js';
 import { classifyEventTime, bucketStrategy, rollingStrategy } from './live-time.js';
 import { joinStrategy } from './live-join.js';
 import { classifyNestedGroup, nestedGroupStrategy } from './live-nested.js';
+import { LIVE_DEFAULTS } from './live-options.js';
 
 /** The store-level live bounds and their defaults (§12: printed,
  * never silent). */
-export const LIVE_DEFAULTS = Object.freeze({ maxQueries: 64, maxMaintained: 10_000, maxBytes: 4194304 });
+export { LIVE_DEFAULTS };
 
 const AGGREGATE_MEMBERS = new Map([
   ['$count', 'count'], ['$sum', 'sum'], ['$avg', 'avg'],

@@ -38,6 +38,7 @@ import { analyzeQuery, JsonQueryRuntimeError, renderQueryMessage } from '@jarenj
 
 import { DbCompileError, DbRuntimeError, wrapDriverError, classifyDriverError } from './errors.js';
 import { chain, attempt, isThenable } from './driver.js';
+import { readOptions, readControls } from './options.js';
 import {
   planQuery, planEntityQuery, entityShape, planEntityPredicate, entityPathRef,
   isRootScanSource, isEntityRootSource, BIND_REASONS,
@@ -2999,6 +3000,9 @@ export function createLoadEngine(context, entityName) {
      * @param {((tree: any, doc: any) => any) | undefined} [register]
      */
     page(spec, options = undefined, register = undefined, cursorFactory = createCursor) {
+      readOptions(options, ['limit', 'after', 'maxBytes', 'consistency', 'signal', 'deadline', 'lookahead', 'profile',
+        'externals', 'strict', 'pushdown', 'strictStreaming'], 'page()');
+      readControls(options, 'page()');
       requireCallable(options, state.now);
       const limit = options?.limit ?? PAGE_LIMIT_DEFAULT;
       if (!Number.isSafeInteger(limit) || limit < 1)

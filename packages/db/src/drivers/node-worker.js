@@ -41,6 +41,7 @@ export function nodeWorkerDriver(configuration = {}) {
   let generation = 0;
   const driver = {
     name: 'node-worker-sqlite', dialect: sqliteDialect,
+    supportsSharedReads: false,
     open: (path = ':memory:', options = {}) => lazyOpen('node:worker_threads',
       'Node worker threads are unavailable on this runtime', async ({ Worker }) => {
         const epoch = ++generation;

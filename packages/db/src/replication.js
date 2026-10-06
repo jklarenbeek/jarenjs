@@ -10,6 +10,7 @@ import { refuseCancelled } from './cancellation.js';
 import { normalizeReplication, normalizeReplicationSnapshot, normalizeFrontier, replicationIdentity, REPLICATION_DEFAULTS } from './replication-format.js';
 import { REPLICATION_TABLES } from './replication-tables.js';
 import { replicationSchema } from './dialects/replication.js';
+import { readOptions } from './options.js';
 
 const equal = (a, b) => stableStringify(a) === stableStringify(b);
 const position = (frontier, id) => Object.hasOwn(frontier, id) ? frontier[id] : 0;
@@ -29,10 +30,11 @@ const each = (items, fn) => {
   return next();
 };
 
-/** @param {any} options */
-export function createReplicationEngine(options) {
-  const { connection, rows, capture, model, now, bracket } = options;
-  const config = { ...REPLICATION_DEFAULTS, ...options.config };
+/** Pure preflight shared by store construction and the engine.
+ * @param {any} options @returns {any} */
+export function readReplicationOptions(options) {
+  readOptions(options, ['replica', 'retention', 'maxOperations', 'maxBytes', 'resolver'], 'replication', 'JD0009');
+  const config = { ...REPLICATION_DEFAULTS, ...options };
   replicationIdentity(config.replica, 1);
   for (const member of ['retention', 'maxOperations', 'maxBytes']) {
     if (!Number.isSafeInteger(config[member]) || config[member] < 1)
@@ -40,6 +42,13 @@ export function createReplicationEngine(options) {
   }
   if (config.resolver !== undefined && (typeof config.resolver?.id !== 'string' || !config.resolver.id
     || typeof config.resolver.resolve !== 'function')) throw new TypeError('replication.resolver needs a stable id and pure resolve function');
+  return config;
+}
+
+/** @param {any} options */
+export function createReplicationEngine(options) {
+  const { connection, rows, capture, model, now, bracket } = options;
+  const config = readReplicationOptions(options.config);
   const dialect = connection.dialect;
   const p = (i) => dialect.parameterRef(i, 'replica');
   const schema = replicationSchema(dialect);

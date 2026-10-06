@@ -240,7 +240,7 @@ they exist so a mismatch is a compile error rather than a 404.
 |---|---|---|---|
 | `typedClient(client, contract)` | — (identity) | `TypedClient<C>`: `invoke` over the invokable operations, `subscribe` over the subscribe ones, `url` over all of them | native |
 | `typedHttpClient(client, contract)` | — (identity) | `TypedHttpClient<C>`: `TypedClient<C>` plus `bytes` over `OpaqueOf<C>` — the opaque operations, whose success is a `ByteResponse` (a live stream) rather than the output type; for an `openHttpClient` client only, a local or port client has no `bytes` | native |
-| `typedHandlers(contract, handlers)` | — (identity) | `TypedHandlerTable<C, Host = null, Carrier = 'http'>`: one handler per invokable operation, `(input, ctx) => output \| Failure`. `ctx` is `HandlerContext<Host, Carrier>`: the HTTP context by default, `Host` the host lifecycle's `ctx.host`, and a carrier union a discriminated union to narrow on `ctx.carrier` (CONTRACT-FORMAT §7.7). `ctx.op` is `OperationInfo`, the structural subset of the compiled operation: `id`, `kind`, `doc`, `errors` (`status` per declared code), `policy` and `http`. "Does my operation declare this failure?" is `Object.hasOwn(ctx.op.errors, code)`, with no runtime member added. `ctx.header(name, value)` arms a response header on HTTP and is `null` on port and local. An `onError(error, ctx)` observer takes `ErrorContext<Host>`: the handler context, or `null` | native; a missing or misspelled operation does not compile, and an HTTP-only member on a port/local context does not either. `op.id` stays `string`, because a table whose handlers demanded a literal id would no longer be the `Handler` a binding accepts |
+| `typedHandlers(contract, handlers)` | — (identity) | `TypedHandlerTable<C, Host = null, Carrier = 'http'>`: one handler per invokable operation, `(input, ctx) => output \| Failure`. `ctx` is `HandlerContext<Host, Carrier>`: the HTTP context by default, `Host` the host lifecycle's `ctx.host`, and a carrier union a discriminated union to narrow on `ctx.carrier` (CONTRACT-FORMAT §7.7). `ctx.op` is `OperationInfo`, the structural subset of the compiled operation: `id`, `kind`, `doc`, `errors` (`status` per declared code), `policy` and `http`. "Does my operation declare this failure?" is `Object.hasOwn(ctx.op.errors, code)`, with no runtime member added. `ctx.header(name, value)` arms a response header on HTTP and is `null` on port and local. An `onError(error, ctx)` observer takes `ErrorContext<Host>`: the HTTP handler context, a local/port `{ op, trace }` context, or `null` | native; a missing or misspelled operation does not compile, and an HTTP-only member on a port/local context does not either. `op.id` stays `string`, because a table whose handlers demanded a literal id would no longer be the `Handler` a binding accepts |
 | `typedTools(tools, contract)` | — (identity) | `TypedTool<C>[]`: `name` is the id with `.` → `_`, and `execute(args, ctx?)` takes the operation's ACCEPTED input. `ctx` is a `ToolCallContext` (`signal`, `attempt`): aborting the signal cancels the call, and nothing else reaches the operation. `execute` is always a function: an operation without input ignores its argument | native |
 
 All of them are `void contract; return x;` at run time — they add
@@ -1189,7 +1189,7 @@ to write, and reaching them means one import of `@jarenjs/contract` over
 
 ## 7. Cost
 
-`@jarenjs/linq/contract` builds to **<!--fact:bundle.contract-->50,201<!--/fact--> bytes** as a minified,
+`@jarenjs/linq/contract` builds to **<!--fact:bundle.contract-->50,253<!--/fact--> bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
 measures and `npm run test:tree-shaking` reports, published rounded
 (<!--fact:bundle.contract.kb-->50<!--/fact--> kB) beside the other nine subpath prices in
@@ -1201,7 +1201,7 @@ them:
 
 - **the schema pen is included, and that is the ceiling.** A contract's
   inputs and outputs are schemas, so the two are measured together and
-  the bundle carries <!--fact:bundle.schema-->36,956<!--/fact--> of its <!--fact:bundle.contract-->50,201<!--/fact--> bytes as the schema pen's own.
+  the bundle carries <!--fact:bundle.schema-->37,008<!--/fact--> of its <!--fact:bundle.contract-->50,253<!--/fact--> bytes as the schema pen's own.
   The contract pen's own share is the remaining ~12 kB, most of it the
   refusal messages §4 lists;
 - **no chain module** — none of `sequence.js`, `document.js`, `async.js`,

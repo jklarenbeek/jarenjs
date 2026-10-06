@@ -1,6 +1,6 @@
 //@ts-check
 /** JSON snapshots and diagnostics shared by formula, migration and review compilers. */
-import { cloneJson, deepFreeze, isJsonObject } from '@jarenjs/core/object';
+import { cloneJson, deepFreeze, isJsonObject, isPlainOptions, refuseUnknownMembers } from '@jarenjs/core/object';
 import { canonicalizeJson } from '../canonical.js';
 import { CodedDocPathError } from '../errors.js';
 import { messageRef, renderMessageId } from '../message-ref.js';
@@ -77,4 +77,14 @@ export function credit(value, fallback, name) {
   const n = value ?? fallback;
   if (!Number.isSafeInteger(n) || n < 1) throw new TypeError(`${name} must be a positive safe integer`);
   return n;
+}
+
+/** Host settings consumed by the reusable formula compiler, before any profile compiles. */
+export const FORMULA_OPTIONS = Object.freeze(['schemas', 'helpers', 'compileTypeTest', 'limits', 'cacheSize', 'packs', 'dateNames', 'decimalFormats']);
+
+/** One closed host-options boundary for formula compiler, batch, parity and migration.
+ * @param {any} options @param {readonly string[]} known @param {string} name */
+export function checkFormulaOptions(options, known, name) {
+  if (!isPlainOptions(options)) throw new TypeError(`${name} options must be a plain object`);
+  refuseUnknownMembers(options, known, (key, hint) => new TypeError(`unknown ${name} option '${key}'${hint}`));
 }

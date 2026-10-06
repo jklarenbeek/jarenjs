@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/core",
   "private": false,
-  "version": "0.100.1",
+  "version": "0.101.0",
   "type": "module",
   "main": "./src/index.js",
   "types": "./dist/types/index.d.ts",
@@ -55,6 +55,10 @@
     "./cache": {
       "types": "./dist/types/cache.d.ts",
       "default": "./src/cache.js"
+    },
+    "./checksum": {
+      "types": "./dist/types/checksum.d.ts",
+      "default": "./src/checksum.js"
     },
     "./chunk": {
       "types": "./dist/types/chunk.d.ts",

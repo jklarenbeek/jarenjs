@@ -16,7 +16,7 @@
  * decided here, once, into a `Route` per operation.
  */
 
-import { refuseUnknownMembers } from '@jarenjs/core/object';
+import { isPlainOptions, refuseUnknownMembers } from '@jarenjs/core/object';
 import { compileMessageCatalog } from '@jarenjs/core/message';
 
 import { ContractHostError } from '../errors.js';
@@ -248,10 +248,15 @@ export function serveHttp(contract, handlers, options = {}) {
   if (handlers === null || typeof handlers !== 'object' || Array.isArray(handlers)) {
     throw host('JC1001', 'handlers must be an object of operation id → function');
   }
-  if (options === null || typeof options !== 'object') throw host('JC1001', 'options must be an object');
+  if (!isPlainOptions(options)) throw host('JC1001', 'options must be a plain object');
   // a CLOSED set: a typo'd option used to vanish — `precondition` served
   // a stale If-Match with 200
   refuseUnknownMembers(options, HTTP_OPTIONS, (key, hint) => host('JC1001', `option '${key}' is not one serveHttp reads${hint}`));
+  for (const name of ['partial', 'head']) {
+    if (options[name] !== undefined && typeof options[name] !== 'boolean') {
+      throw host('JC1001', `options.${name} must be a boolean`);
+    }
+  }
   const partial = options.partial === true;
   const ledger = options.ledger === undefined ? null : options.ledger;
   if (ledger !== null && (typeof ledger !== 'object' || typeof ledger.claim !== 'function'
