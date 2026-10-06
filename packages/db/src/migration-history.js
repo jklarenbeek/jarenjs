@@ -99,10 +99,17 @@ function verifyNativeTable(dialect, table, columns, catalog) {
       || type === 'TEXT' && (metadata.collation !== 'C' || metadata.collationDeterministic !== true)) bad();
   }
   const constraints = facts.filter((object) => object.type === 'constraint');
-  if (constraints.length !== 1 || constraints[0].metadata.kind !== 'p'
-    || constraints[0].metadata.deferrable || constraints[0].metadata.initiallyDeferred
-    || !constraints[0].metadata.validated
-    || canonicalizeJson(constraints[0].metadata.columns) !== canonicalizeJson([columns[0].name])) bad();
+  if (constraints.filter((object) => object.metadata.kind === 'p').length !== 1) bad();
+  // PostgreSQL 18+ also describes the required column nullability as constraints.
+  const notNull = new Set([columns[0].name, dialect.identityColumn.name]);
+  for (const { metadata } of constraints) {
+    if (metadata.deferrable || metadata.initiallyDeferred || !metadata.validated) bad();
+    if (metadata.kind === 'p') {
+      if (canonicalizeJson(metadata.columns) !== canonicalizeJson([columns[0].name])) bad();
+    }
+    else if (metadata.kind !== 'n' || metadata.noInherit || metadata.columns?.length !== 1
+      || !notNull.delete(metadata.columns[0])) bad();
+  }
   const indexes = facts.filter((object) => object.type === 'index');
   if (indexes.length !== 1 || !indexes[0].metadata.primary || !indexes[0].metadata.unique
     || !indexes[0].metadata.valid || !indexes[0].metadata.ready
