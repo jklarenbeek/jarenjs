@@ -1369,7 +1369,8 @@ The other two bound the **query** rather than its output:
 
 An unknown limit name, or a value that is not a positive integer, is a
 host programming error (`TypeError`), because an accepted-but-unenforced
-limit would be a silent false guarantee.
+limit would be a silent false guarantee; the message names the nearest
+known limit (`step` → `steps`) or, when none is close, lists them.
 
 Together these make trusted, developer-authored rules diagnosable, and
 give user- or model-authored queries a deterministic work bound. They
@@ -1411,10 +1412,14 @@ a bare `full-date` offset-less.
 
 Asking a value for a component of a half it does not have — the `$hours` of a
 `full-date`, the `$year` of a `full-time` — is runtime error `JQ2001`, as is
-an operand that is not an RFC 3339 value at all.
+an operand that is not an RFC 3339 value at all. That includes a leap second
+anywhere but 23:59:60 UTC with its local hour and minute in range:
+`2016-12-31T47:59:60Z` used to read as hour 47 (and `$epoch` placed it at
+2017-01-02T00:00:00Z), and is now `JQ2001`.
 
 **Instants.** Unary `$epoch` maps a value carrying a date to **milliseconds
-since 1970-01-01T00:00:00Z**, and `$datetime` maps such a number back to a
+since 1970-01-01T00:00:00Z** (a fractional second of any length rounds to
+the nearest millisecond), and `$datetime` maps such a number back to a
 canonical UTC `date-time` string. `$epoch` is the one place a value is
 shifted to UTC, which makes it the way to compare or subtract across
 offsets — as *strings*, `"…T14:00:00+02:00"` sorts after `"…T12:00:00Z"`
@@ -1483,7 +1488,12 @@ one computed at runtime, the message naming the option.
 Every operator that *produces* a date produces it in the same canonical
 spelling, so one query can never emit two forms of one instant: a fractional
 second appears only when non-zero and without trailing zeros
-(`…:05.5Z`, never `…:05.500Z`).
+(`…:05.5Z`, never `…:05.500Z`), and to at most six digits — a longer one
+is cut at the sixth, never rounded into the next second. It used to be
+rounded, which changes `$datetime` for an epoch number that carries a
+fraction of a microsecond: `{"$datetime": 1.0006}` is now
+`"1970-01-01T00:00:00.001Z"`, where it used to be
+`"1970-01-01T00:00:00.001001Z"`.
 
 Durations are recognized and applied, but never *decomposed* into a number:
 `P1M` is not a fixed count of milliseconds, so there is no honest length to

@@ -4,6 +4,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { compileEmitModel } from '@jarenjs/emit/model';
 import { renderTypeScript } from '@jarenjs/emit/typescript';
+import { isMainModule } from './lib/main-module.js';
 
 const root = resolve(import.meta.dirname, '..');
 const grammar = JSON.parse(readFileSync(resolve(root, 'components/charts/schemas/chart-definition.schema.json'), 'utf8'));
@@ -50,7 +51,7 @@ export function from<K extends ChartKind>(document: ChartDefinitions[K]): ChartP
   return { declarations, vocabulary };
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === import.meta.filename) {
+if (isMainModule(import.meta.url)) {
   const { declarations, vocabulary } = chartPenArtifacts();
   writeFileSync(resolve(root, 'packages/linq/types/charts.d.ts'), declarations);
   writeFileSync(resolve(root, 'packages/linq/src/charts/vocabulary.js'), vocabulary);

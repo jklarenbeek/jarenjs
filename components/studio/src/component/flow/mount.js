@@ -25,7 +25,7 @@ export function createFlowEditor(node, options) {
     ] },
   }, {
     node, document: node?.ownerDocument, schedule: options.schedule,
-    compileTypeTest: createTypeTestCompiler(), eventFields: formEventFields,
+    compileTypeTest: createTypeTestCompiler(), eventFields: formEventFields(),
     viewModel: state => ({ ui: { flow: flowPageViewModel(state.flow, options.templates) } }),
     widgets: { 'flow-doc': runtime.widget },
     effects: { ...runtime.effects, ...controller.effects,

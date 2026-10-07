@@ -111,7 +111,7 @@ naming the reason).
 | `.host(run, version, note?)` | `{ kind: 'host', run, version, note? }` — application code in the migration's transaction: the host the run registers under `run` (`migrate(…, { hosts })`), at the version it was reviewed at (MIGRATION-FORMAT §2) | — | native; an empty `run` or `version` `JL0101` |
 | `.transform(name, (row, x) => …)` | `{ kind: 'jslt', collection: name, stylesheet: [{ match: '$', body }] }` — one root rule, the body captured through the JSLT pen's `body()` over the WHOLE row, `x.root`/`x.path` the externals the engine binds (JSLT-FORMAT §8.2) | `row` is `Expr<Old>` (`DocOf<From, name>`); the result must spell `New` — a dropped, mistyped or foreign member does not compile; the honest top (`get()`) is admitted where a precise value is | native; a table the target model does not declare `JL0106`; an undeclared external `JL0104` |
 | `.transform(name, stylesheet(…))`, `.transform(name, rules)` | the rules ARRAY — a `jslt` step carries the array, so the envelope's `unmatched`/`modes` have no place in it | a typed stylesheet's or first rule's `Out` must be `New`; a hand-written rule is the honest top | native; a disposition or a mode table `JL0102`; not JSON `JL0101` |
-| `.assert(name, (row) => …, { expect? })` | `{ kind: 'query', collection: name, assert: { $for: { it: '$[*]' }, $where: <predicate>, $return: '$it' }, expect? }` — the format's own `$for` over the rows; the predicate names the VIOLATION (`expect: 'empty'`, the default, absent from the document) or the witness (`expect: 'ebv'`) | `row` is the members the two shapes share — a precondition sees old rows, a postcondition new ones, and what both agree on is what neither lies about; annotate (`(row: Expr<User>) => …`) when one shape is meant | native; another `expect` `JL0101`; an external `JL0104`; an undeclared table `JL0106` |
+| `.assert(name, (row) => …, { expect? })` | `{ kind: 'query', collection: name, assert: { $for: { it: '$[*]' }, $where: <predicate>, $return: '$it' }, expect? }` — the format's own `$for` over the rows; the predicate names the VIOLATION (`expect: 'empty'`, the default, absent from the document) or the witness (`expect: 'ebv'`) | `row` is the members the two shapes share — a precondition sees old rows, a postcondition new ones, and what both agree on is what neither lies about; annotate (`(row: Expr<User>) => …`) when one shape is meant | native; another `expect` `JL0101`; an external, or the externals argument as a value, `JL0104`; an undeclared table `JL0106` |
 | `.assert(name, query, { expect?, model? })` | the query document verbatim, plus an optional current model | — | native |
 | `.transform(name, spelling, { model })`, `.assert(name, spelling, { model, expect? })` | the ordinary step plus an immutable current `$model` document | transform input/output and assertion rows use this model's layout; names may be absent from the final model | native; an invalid model `JL0101`; a name absent from the selected model `JL0106` |
 | `.derive(name, columns)` | `{ kind: 'derive', collection: name, columns }` — a backfill of stored derived columns (§2.1), the columns verbatim | `readonly DeriveColumn[]` | native; no columns `JL0101`; an undeclared table `JL0106` |
@@ -563,7 +563,7 @@ no other pen in the family raises it.
 |---|---|
 | `JL0101` | a value this pen cannot spell, an option it does not know, or a step whose kind or required members the runner's own structural check would reject |
 | `JL0102` | a construct a `jslt` step cannot carry, or a model that is not the one the planner planned |
-| `JL0104` | an external a captured transform body or assertion predicate named |
+| `JL0104` | an external a captured transform body or assertion predicate named, or its externals argument embedded or spread as a value |
 | `JL0106` | a step naming an entity or collection the target model does not declare; or a `transform` over a planned document that finds no draft to replace, or two |
 
 Every message below is the one the pen raised when the spelling beside it
@@ -638,6 +638,13 @@ whose failure means the author edited a model after planning against it.
 |---|---|---|
 | `m().transform('User', (u, x) => ({ …, handle: x.rate }))` | `a body() rule cannot bind 'rate' — its query evaluates with exactly 2 externals, 'root' and 'path'; anything else has nothing to bind to — a stylesheet parameter is declared first: body(fn, { externals: ['rate'] })` | `x.root` and `x.path` |
 | `m().assert('User', (u, x) => x.limit.gt(1))` | `an assert() predicate cannot bind 'limit' — a query assertion runs over the table's rows with no externals (MIGRATION-FORMAT §2)` | compare against a literal, or against another member |
+| `m().transform('User', (u, x) => ({ …, meta: x }))` | `a body() rule's externals argument is not a value — read one by name: root, path` | `x.root` or `x.path`, by name |
+| `m().assert('User', (u, x) => u.email.eq(x))`, `u.email.eq({ ...x })` | `an assert() predicate's externals argument is not a value — a query assertion runs over the table's rows with no externals (MIGRATION-FORMAT §2)` | compare against a literal, or against another member |
+
+The externals argument is not a value in either capture: embedded or
+spread, it is refused at the call that captures it. The assertion's
+used to be embedded as a `$const` and refused only when the document was
+copied, as a `toJSON` it could not bind.
 
 The two are deliberately different, and the difference is the engine's:
 a `jslt` step's body is evaluated by the stylesheet engine, which binds
@@ -914,10 +921,10 @@ from a drop plus a create, and guessing risks silent data loss.
 
 ## 7. Cost
 
-`@jarenjs/linq/migration` builds to **<!--fact:bundle.migration-->25,931<!--/fact--> bytes** as a minified,
+`@jarenjs/linq/migration` builds to **<!--fact:bundle.migration-->26,807<!--/fact--> bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
 measures and `npm run test:tree-shaking` reports, published rounded
-(<!--fact:bundle.migration.kb-->26<!--/fact--> kB) beside the other nine subpath prices in
+(<!--fact:bundle.migration.kb-->27<!--/fact--> kB) beside the other subpath prices in
 [docs/CONSUMING.md](../../../docs/CONSUMING.md).
 
 The probe is a gate, not a report: building a two-step migration as a
@@ -947,4 +954,4 @@ proxy behind it, and the canonicalizer — and the two model documents
 themselves arrive as data, deep-frozen JSON that the consumer's own model
 module built. So a consumer who ships migrations to a browser does not
 ship the model pen with them; a consumer who OPENS a store does, and pays
-`./model`'s <!--fact:bundle.model-->46,352<!--/fact--> bytes for it.
+`./model`'s <!--fact:bundle.model-->47,317<!--/fact--> bytes for it.

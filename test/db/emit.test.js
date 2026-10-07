@@ -129,9 +129,18 @@ describe('golden SQL (the truth-table forms)', () => {
     const count = emitFor(
       { $count: { $for: { it: '$[*]' }, $return: '$it' } }, sqliteDialect);
     assert.strictEqual(count.sql, 'SELECT COUNT(*) AS "value" FROM "users"');
+    // an integer sum folds as a double beside its exactness guard: every
+    // partial sum is exact while the largest magnitude times the count
+    // fits 2^53 - 1, and a term past that bound is left out of the fold,
+    // so no accumulator — integer or double — can overflow first
     const sum = emitFor(
       { $sum: { $for: { it: '$[*]' }, $return: '$it.age' } }, sqliteDialect);
-    assert.strictEqual(sum.sql, 'SELECT SUM("gx_age") AS "value" FROM "users"');
+    assert.strictEqual(sum.sql, 'SELECT SUM(CAST(CASE WHEN "gx_age" BETWEEN -9007199254740991 AND 9007199254740991 '
+      + 'THEN "gx_age" END AS REAL)) AS "value", (COUNT("gx_age") = 0 OR '
+      + 'MAX(ABS(CAST("gx_age" AS REAL))) <= 9007199254740991 / COUNT("gx_age")) AS "_safe" FROM "users"');
+    const max = emitFor(
+      { $max: { $for: { it: '$[*]' }, $return: '$it.age' } }, sqliteDialect);
+    assert.strictEqual(max.sql, 'SELECT MAX("gx_age") AS "value" FROM "users"');
   });
 });
 

@@ -136,8 +136,10 @@ the shape itself is written down once in [DESIGN.md](../../docs/DESIGN.md) §5.
 > **Local runs on a host without Playwright's shared libraries** (common on
 > Fedora-family and other non-Debian distributions) fail at browser launch,
 > not in the test. Run the suite inside an Ubuntu container instead — e.g.
-> `distrobox enter ubuntu-playwright -- npm run test:browser`. CI uses the
-> Playwright image and needs no such workaround.
+> `distrobox enter ubuntu-playwright -- npm run test:browser`. CI needs no
+> such workaround: its browser job runs on `ubuntu-latest`, where
+> `playwright install --with-deps` installs the locked browsers together
+> with their shared libraries.
 
 `e2e/motion.spec.js` pins the other thing only a real engine can answer:
 that the site moves, and that it stops when the reader asks. Under an

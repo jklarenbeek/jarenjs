@@ -407,6 +407,30 @@ export function combineIndependent(validators) {
   };
 }
 
+/**
+ * Compose validators that must all pass, stopping at the first that does
+ * not: `undefined` when there are none, the one validator itself when
+ * there is one, so the common single-keyword case adds no wrapper.
+ * @param {Function[]} validators - The validators, in evaluation order
+ * @returns {Function|undefined} The composed validator, or undefined
+ */
+export function allValidatorsPass(validators) {
+  if (validators.length === 0) {
+    return undefined;
+  }
+  if (validators.length === 1) {
+    return validators[0];
+  }
+  return function validateAll(data, dataPath, dataRoot) {
+    for (let i = 0; i < validators.length; i++) {
+      if (!validators[i](data, dataPath, dataRoot)) {
+        return false;
+      }
+    }
+    return true;
+  };
+}
+
 export class ValidationResult {
   static undefThat() {
     return new ValidationResult();

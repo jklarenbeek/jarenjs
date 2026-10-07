@@ -195,18 +195,24 @@ for (const [name, document, options, kind, count, input] of [
   finally { await f.store.close(); }
 });
 
-it('an overflow diversion first prepared after eviction is released with the admitted call', { timeout: 5000 }, async () => {
+it('an accumulation fallback first prepared after eviction is released with the admitted call', { timeout: 5000 }, async () => {
   const f = await fixture(true);
   try {
+    // a term past the sum's exactness bound: the engine answers this run
+    // over the rows the plan selects, read by a statement of its own
+    const past = { id: 'c', n: 9007199254740991 };
+    await f.store.collection('notes').insert(past);
+    const before = f.records.length;
     const held = f.hold('get');
     const answer = f.notes.execute(sum);
     const main = await atBoundary(held, answer);
     await f.evict();
     assert.equal(main.finalized, 0);
-    held.release.reject(Object.assign(new Error('integer overflow'), { code: 'SQLITE_ERROR', errcode: 1 }));
-    assert.equal(await answer, oracle(sum));
-    assert.equal(f.records.length, 2);
-    assert.ok(f.records.every((record) => record.finalized === 1));
+    held.release.resolve();
+    assert.equal(await answer, oracle(sum, [...rows, past]));
+    const reads = f.records.slice(before);
+    assert.equal(reads.length, 2);
+    assert.ok(reads.every((record) => record.finalized === 1));
   }
   finally { await f.store.close(); }
 });

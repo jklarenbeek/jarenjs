@@ -46,18 +46,17 @@ const ADVICE = () => ' — the document being edited is the context\'s root (c.r
  * The rule context: one object over the capture's document root and its
  * two externals. `root` is the value proxy (`$`), so `c.root.company`
  * writes `"$.company"`; anything the evaluator does not bind falls
- * through to the externals proxy, which refuses it by name.
+ * through to the externals proxy, which refuses it by name. The context
+ * is no more a value than that proxy is: embedded or spread, it answers
+ * the externals proxy's own refusal rather than reading as `{}`.
  * @param {any} doc - the `$` proxy
  * @param {any} externals - the externals proxy (`value`, `pointer`)
  * @returns {any}
  */
 function contextProxy(doc, externals) {
   return new Proxy(Object.freeze({}), {
-    get(_target, prop) {
-      if (prop === 'root') return doc;
-      if (typeof prop === 'symbol') return undefined;
-      return externals[prop];
-    },
+    ownKeys: () => Reflect.ownKeys(externals),
+    get: (_target, prop) => (prop === 'root' ? doc : externals[prop]),
   });
 }
 

@@ -9,6 +9,7 @@
  */
 
 import { svgRoot, rect, group, textAt, num, polarPoint, textWidth } from '@jarenjs/view/helpers';
+import { measurableUnit } from '../core/domain.js';
 import { CATEGORICAL } from '../core/palette.js';
 import { normalizeTooltip, markProps } from '../core/marks.js';
 
@@ -24,7 +25,8 @@ import { normalizeTooltip, markProps } from '../core/marks.js';
  * @typedef {object} PieAST
  * @property {'pie'} type
  * @property {string|null} title
- * @property {number} total
+ * @property {number} total the slices' sum (1 when it is 0); `Infinity`
+ *  when the sum passes the largest double, which the shares do not
  * @property {number|null} inner donut hole radius as a fraction of the outer radius (null = solid pie)
  * @property {PieSliceAST[]} slices
  */
@@ -34,17 +36,25 @@ import { normalizeTooltip, markProps } from '../core/marks.js';
  * accumulated start/end angles, starting at 12 o'clock. `config.donut`
  * turns the pie into a donut: `true` uses the default hole fraction,
  * a number in (0, 1) sets it directly.
+ *
+ * A slice whose value is not a finite number of at least zero is dropped,
+ * as bar and line drop values they cannot draw: a share of a total that
+ * holds `NaN` or a negative is not one a reader can trust. Slices that
+ * sum past the largest double are shared out in the unit
+ * `measurableUnit` picks, so their angles still close the circle.
  * @param {{slices?: {label: string, value: number}[]}} data
  * @param {{title?: string|null, donut?: boolean|number}} [config]
  * @returns {PieAST}
  */
 export function buildPieAST(data, config = {}) {
-  const input = data?.slices ?? [];
-  const total = input.reduce((s, x) => s + x.value, 0) || 1;
+  const input = (data?.slices ?? []).filter((s) =>
+    typeof s?.value === 'number' && Number.isFinite(s.value) && s.value >= 0);
+  const unit = measurableUnit(input.map((s) => s.value));
+  const sum = input.reduce((s, x) => s + x.value / unit, 0) || 1;
   const slices = [];
   let angle = -Math.PI / 2;
   for (let i = 0; i < input.length; i++) {
-    const frac = input[i].value / total;
+    const frac = input[i].value / unit / sum;
     const next = angle + frac * Math.PI * 2;
     slices.push({
       label: input[i].label,
@@ -62,7 +72,7 @@ export function buildPieAST(data, config = {}) {
   return {
     type: 'pie',
     title: config.title ?? null,
-    total,
+    total: sum * unit,
     inner,
     slices,
   };

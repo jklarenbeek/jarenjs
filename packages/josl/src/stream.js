@@ -9,6 +9,7 @@
 import { JoslMachine } from './machine.js';
 import { JoslSyntaxError } from './errors.js';
 import { closeIterator, abortedError } from './pull.js';
+import { admitOptions, JOSL_READ, JOSL_ITERATE } from './options.js';
 
 /**
  * Create an incremental JOSL/TOML reader.
@@ -27,7 +28,7 @@ import { closeIterator, abortedError } from './pull.js';
  *  returns the completed root, `root` peeks at the partial result.
  */
 export function createStreamReader(options = undefined) {
-  const machine = new JoslMachine(options);
+  const machine = new JoslMachine(admitOptions(options, JOSL_READ, 'createStreamReader'));
   return {
     feed(chunk) {
       machine.feed(chunk);
@@ -48,7 +49,7 @@ export function createStreamReader(options = undefined) {
  * @returns {Promise<*>} The completed root value
  */
 export async function parseJoslStream(chunks, options = undefined) {
-  const machine = new JoslMachine(options);
+  const machine = new JoslMachine(admitOptions(options, JOSL_READ, 'parseJoslStream'));
   for await (const chunk of chunks)
     machine.feed(chunk);
   return machine.end();
@@ -75,11 +76,12 @@ export async function parseJoslStream(chunks, options = undefined) {
 export async function* iterateJoslStream(chunks, options = undefined) {
   /** @type {object[]} */
   const completed = [];
+  const admitted = admitOptions(options, JOSL_ITERATE, 'iterateJoslStream');
   const machine = new JoslMachine({
-    ...(options ?? {}),
+    ...admitted,
     detachRoot: (item) => { completed.push(item); },
   });
-  const signal = options?.signal ?? null;
+  const signal = admitted.signal ?? null;
   const iterator = chunks[Symbol.asyncIterator]?.() ?? chunks[Symbol.iterator]();
   let finished = false;
   try {

@@ -102,24 +102,31 @@ function parseArgs(argv) {
   };
   for (let i = 2; i < argv.length; i++) {
     if (argv[i].startsWith('--') && argv[i] !== '--help') options.given.push(argv[i]);
+    // The value of the option at `i`. A missing value, or one that starts
+    // with '-', is a usage error: `--out --check` must never write a file
+    // named `--check` (the wording is jaren-emit's for the same mistake).
+    const value = (message = `${argv[i]} requires a value`) => {
+      const next = argv[i + 1];
+      if (next === undefined || next.startsWith('-')) throw new Error(message);
+      i++;
+      return next;
+    };
     switch (argv[i]) {
-      case '--contract': options.contract = argv[++i] ?? null; break;
-      case '--from': options.from = argv[++i] ?? null; break;
-      case '--to': options.to = argv[++i] ?? null; break;
+      case '--contract': options.contract = value(); break;
+      case '--from': options.from = value(); break;
+      case '--to': options.to = value(); break;
       case '--fail-on':
-        if (argv[i + 1] === undefined || argv[i + 1].startsWith('-'))
-          throw new Error('--fail-on needs a value: change classes for diff, lint rules (or all) for lint');
-        options.failOn = argv[++i];
+        options.failOn = value('--fail-on needs a value: change classes for diff, lint rules (or all) for lint');
         break;
       case '--audience':
         if (argv[i + 1] !== 'all' && argv[i + 1] !== 'public') throw new Error("--audience is 'all' or 'public'");
-        options.audience = argv[++i];
+        options.audience = value();
         break;
-      case '--out': options.out = argv[++i] ?? null; break;
+      case '--out': options.out = value(); break;
       case '--check': options.check = true; break;
       case '--lenient': options.lenient = true; break;
-      case '--info-title': options.infoTitle = argv[++i] ?? null; break;
-      case '--info-version': options.infoVersion = argv[++i] ?? null; break;
+      case '--info-title': options.infoTitle = value(); break;
+      case '--info-version': options.infoVersion = value(); break;
       case '--help': case '-h': options.help = true; break;
       default:
         if (argv[i].startsWith('-')) throw new Error(`unknown option: ${argv[i]}`);

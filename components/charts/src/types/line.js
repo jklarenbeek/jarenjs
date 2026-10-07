@@ -52,6 +52,7 @@ import { cartesianFrame, annotateChart } from '../core/cartesian.js';
 import { numOf } from '../core/stream-adapter.js';
 import {
   normalizeDomainPolicy, resolveWindowX, resolveStepY, resolveStepYLog, resolvePinnedY,
+  measurableSpan, measurableDecades,
 } from '../core/domain.js';
 import { CATEGORICAL, seriesColor } from '../core/palette.js';
 import { normalizeTooltip, markProps } from '../core/marks.js';
@@ -141,6 +142,8 @@ export function resolveLineDomains(ext, policy, time, log) {
   }
   if (!Number.isFinite(x0)) { x0 = 0; x1 = 1; }
   if (!Number.isFinite(y0)) { y0 = log ? 0.1 : 0; y1 = log ? 1 : 1; }
+  [x0, x1] = measurableSpan(x0, x1);
+  [y0, y1] = measurableSpan(y0, y1);
 
   let yTickValues;
   let yLo;
@@ -150,6 +153,7 @@ export function resolveLineDomains(ext, policy, time, log) {
     else if (policy.pin !== null) [yLo, yHi] = resolvePinnedY(y0, y1, policy.pin, true);
     else { yLo = y0; yHi = y1; }
     if (yHi === yLo) yHi = yLo * 10;
+    [yLo, yHi] = measurableDecades(yLo, yHi);
     yTickValues = axisTicksLog(yLo, yHi);
   }
   else if (policy.step || policy.pin !== null) {

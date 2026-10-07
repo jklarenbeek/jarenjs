@@ -100,7 +100,7 @@ decides which document answers a question about behaviour.
 | `where`, `select`, `orderBy`, …, `toArray`, `first`, `count`, … | the chain: `fromAsync(handle)` ([QUERY-PEN.md](QUERY-PEN.md) §8, §10) | every `AsyncSequence` operator and terminal, delegated — nothing is duplicated, every read is the chain's document and pushes down; the handle is iterable (`for await`); two handles of one client share a `scope`, so a join's inner may be `fromAsync(otherHandle)` |
 | `include(pick, spec?)` | the store's `load(spec)` (MODEL-FORMAT §10.4, §10.5) | opens a graph that EMITS the spec (§2.4, §3), typed `Loaded<>` by what it included |
 | `link(own, member, target)`, `unlink(…)` | the store's membership API (MODEL-FORMAT §11.7) | reads the relation table first — the member must be a many-to-many relation (`JL0107`, naming the kind it is, or the members that are) — then records through the store; `saveChanges()` writes the join rows |
-| `live(chain \| document, options?)` | the store's registration — `store.live` for an entity root, `collection.live` for a collection (LIVE-FORMAT §7) | hands over the chain's document and its `explain().bindings` as the externals (`options.externals` merge over them); the strategy, the reason and the maintenance are the store's |
+| `live(chain \| document, options?)` | the store's registration — `store.live` for an entity root, `collection.live` for a collection (LIVE-FORMAT §7) | hands over the chain's document and its `params()` bindings as the externals (`options.externals` merge over them, and a parameter an `in()` reads whole must be an array in the merged set — `JL0004`, so a placeholder the options override registers and a non-array override, which used to register unchecked, does not); the strategy, the reason and the maintenance are the store's |
 | `client.collections.<name>` | the store's collection | the same chain start and `live`, typed from the pen's collection schema (§2.5) |
 | `saveChanges()`, `transaction(fn, options?)`, `close()`, `capabilities`, `store` | the store's | pass-throughs; `saveChanges` and `live` exist exactly when the model declares entities, as on the store; `store` is the escape hatch, typed `TypedStore` |
 
@@ -109,7 +109,11 @@ options)` hands `mode`, `signal`, `unitOfWork`, `retry`, `holdTimeoutMs`
 and `isolation` to the store as they are — the set is the store's closed
 one, so an unknown or malformed option is `JD0013` and one the scope
 cannot honour is `JD0014` (MODEL-FORMAT §5.1) — with one default of the
-client's own: a root transaction gets its own unit of work. The client
+client's own: a root transaction gets its own unit of work. Only an
+absent `unitOfWork` (or `undefined`) takes that default; any other value
+is the caller's choice and reaches the store as given, so
+`{ unitOfWork: null }` is the store's `JD0013`, as `store.transaction`
+gives it — the client used to run it as `'own'`. The client
 the callback receives carries the store's `attempt`, 1-based and above 1
 only under `retry`, whose attempts each start on a fresh unit of work,
 and its `isolation`, the level the transaction runs at; a body held past
@@ -893,13 +897,13 @@ never builds one; the migration between two of them is
 
 ## 7. Cost
 
-`@jarenjs/linq/db` builds to **<!--fact:bundle.db-->836,237<!--/fact--> bytes** as a minified,
+`@jarenjs/linq/db` builds to **<!--fact:bundle.db-->855,906<!--/fact--> bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
 measures and `npm run test:tree-shaking` reports, published rounded
-(<!--fact:bundle.db.kb-->836<!--/fact--> kB) beside the other nine subpath prices in
+(<!--fact:bundle.db.kb-->856<!--/fact--> kB) beside the other subpath prices in
 [docs/CONSUMING.md](../../../docs/CONSUMING.md).
 
-It is by far the largest of the ten, and the reason is §1.1's edge rather
+It is by far the largest of them, and the reason is §1.1's edge rather
 than the client itself: the store, the validator and the formats ride by
 construction, because they are what the client opens. The client's own
 six modules are under 600 source lines. Taking `./db` means taking a SQL
@@ -927,7 +931,7 @@ What the probe asserts, and fails the build on:
   asserts the same exclusion.
 
 A consumer who wants the model pen's types without the store pays
-`./model`'s <!--fact:bundle.model-->46,352<!--/fact--> bytes and installs no peer; one who wants to run
+`./model`'s <!--fact:bundle.model-->47,317<!--/fact--> bytes and installs no peer; one who wants to run
 queries against an array rather than a database pays the chain's price
 (§17 of [QUERY-PEN.md](QUERY-PEN.md)) and installs no peer. `./db` is
 the one subpath whose `package.json` entry carries an optional peer at

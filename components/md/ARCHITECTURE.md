@@ -173,8 +173,9 @@ character of English prose; an email address begins to the LEFT of its
 trigger, which a forward scanner cannot see; and the rule that pulls
 `&hl;` back out of a link is only meaningful once character references
 have been resolved, because a REAL entity is no longer spelled `&…;` by
-then. It costs ~0.27 ms on a 100 kB GFM document, measured A/B, and
-nothing at all with `gfm: false`.
+then. It is linear in the text — a run of domain characters is scanned
+once, however many triggers fall inside it — and costs nothing at all
+with `gfm: false`.
 
 ### Plugin tables
 
@@ -248,15 +249,15 @@ entry deletion and eviction have one implementation in core.
 - **Honest numbers.** `npm run benchmark:markdown` measures against
   marked/markdown-it/micromark and scores the official CommonMark
   examples; the README quotes the results with date and Node version.
-  The one-shot parse+render row is within ~1.1–1.5x of the fastest
-  mainstream parsers; the compiled/shared re-render path — this
-  package's actual job in the suite — has no equivalent there.
+  The compiled/shared re-render path — this package's actual job in the
+  suite — has no equivalent among them.
 
 ## Known limits (v0.1)
 
-- The dialect is pragmatic, not fully CommonMark-conformant (87.2% of
-  spec examples, 571 of 655; the scorecard attributes the rest, raw-HTML
-  pass-through being the largest deliberate class).
+- Conformance is published per path in the README's CommonMark
+  scorecard. The vnode path misses only examples that contain raw HTML,
+  because a vnode tree cannot hold half an element;
+  `test/md/to-html.test.js` asserts that reason.
 - Inline HTML and HTML blocks are preserved in the AST but not rendered
   to vnodes by default (`html: 'text'` shows them literally).
 - Streaming resolves inlines per yielded block, so a reference

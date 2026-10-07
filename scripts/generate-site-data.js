@@ -28,7 +28,7 @@
  * a half-migrated repository renders honestly instead of dropping the
  * packages that have not moved. A `site.md` that cannot be trusted —
  * malformed frontmatter, a member the grammar does not know, a package
- * name that is not the one beside it, a body the parser cannot read —
+ * name that is not the one beside it, a document the parser fails on —
  * is a refusal naming the path, never a silently omitted package.
  *
  * The bodies are the bulk of it, and only the documentation page renders
@@ -52,12 +52,13 @@
 
 import { existsSync, writeFileSync, readFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 import { parseMarkdown, MdFrontmatterError } from '@jarenjs/md';
 import { JarenValidator } from '@jarenjs/validate';
 
 import { headCommit } from './lib/git.js';
+import { isMainModule } from './lib/main-module.js';
 import { assertSiteOutput } from './lib/site-contract.js';
 import { readSpatialCorpus, buildSpatialCorpus } from './lib/spatial-corpus.js';
 
@@ -226,9 +227,13 @@ export function readSiteDocument(dir, source, packageName) {
   }
   catch (error) {
     const message = /** @type {Error} */ (error).message;
+    // anything else the parser throws is named as the parser's failure,
+    // not the body's: the parser bounds every nesting it reads, so no
+    // document reaches this today, and a failure that did would as likely
+    // start in the frontmatter of a document with no body at all
     throw error instanceof MdFrontmatterError
       ? refuse(dir, 'the frontmatter is malformed', message)
-      : refuse(dir, 'the body is not readable as markdown', message);
+      : refuse(dir, 'the markdown parser could not read it', message);
   }
   const front = doc.frontmatter;
   if (front === null || typeof front !== 'object' || Array.isArray(front)) {
@@ -390,7 +395,7 @@ export function serializeSpatialCorpus(corpus) {
   return `${JSON.stringify(corpus)}\n`;
 }
 
-if (process.argv[1] !== undefined && pathToFileURL(process.argv[1]).href === import.meta.url) {
+if (isMainModule(import.meta.url)) {
   let census;
   let censusText;
   let content;

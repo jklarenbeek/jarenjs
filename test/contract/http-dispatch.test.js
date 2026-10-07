@@ -358,6 +358,9 @@ describe('dispatch — HEAD, entity tags, status override, opaque, well-known', 
       { revision: 1, product: { id: 1, name: 'x', price: 1 } }, { 'idempotency-key': 'e1', 'if-none-match': '"p9"' }));
     assert.strictEqual(put.status, 412);
     assert.strictEqual(put.headers.etag, '"p9"');
+    // one code answers both headers, so its message names neither
+    assert.strictEqual(json(miss).message, 'the entity-tag precondition of operation catalog.load failed');
+    assert.strictEqual(json(put).message, 'the entity-tag precondition of operation product.save failed');
     // without a tag armed, the conditionals are the handler's business: nothing fires
     const plain = serve();
     assert.strictEqual((await plain.dispatch(req('GET', '/api/catalog', { 'if-match': '"nope"', 'if-none-match': '*' }))).status, 200);

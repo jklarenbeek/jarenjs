@@ -22,7 +22,7 @@
 import { isJsonObject } from '@jarenjs/core/object';
 import { LinqBuildError } from '../errors.js';
 import { effectDescriptor, readEffects } from '../effect.js';
-import { describeValue } from '../json-boundary.js';
+import { closedTo, describeValue } from '../json-boundary.js';
 import { isSchemaBuilder } from '../schema/brand.js';
 import { captureAction } from './capture.js';
 import { refuseConditional } from './conditional.js';
@@ -53,21 +53,6 @@ const EXCLUDED_FIELDS = new Set([
   'files', 'dataTransfer', 'touches', 'targetTouches', 'changedTouches',
   'path', 'composedPath', 'clipboardData', 'submitter',
 ]);
-
-/**
- * A member set the pen knows, or `JL0101` naming the one it does not.
- * @param {any} spec
- * @param {readonly string[]} members
- * @param {string} what
- */
-function closedTo(spec, members, what) {
-  for (const key of Object.keys(spec)) {
-    if (!members.includes(key)) {
-      throw new LinqBuildError('JL0101',
-        `${what} does not take '${key}' — it takes ${members.join(', ')}`, `/${key}`);
-    }
-  }
-}
 
 /**
  * A schema builder that TYPES something the document does not carry.

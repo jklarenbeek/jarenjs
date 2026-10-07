@@ -576,10 +576,12 @@ value. Write `.eq(null)`, `.exists()`, `.isEmpty()` or `a.eq(b)`.
 | `JL0102` | a guard given as a plain STRING, or a state or node id no declaration carries |
 | `JL0104` | any external at all: both engines evaluate with one `$` and nothing else |
 
-`packages/linq/src/flow/` carries **33 throw sites** — 30 `JL0101` and 3
-`JL0102`. Two families of condition reach a caller through this pen
+`packages/linq/src/flow/` carries **34 throw sites** — 31 `JL0101` and 3
+`JL0102`. Three families of condition reach a caller through this pen
 without being thrown in its directory: the effect descriptor and its list
-(`packages/linq/src/effect.js`, shared with the app pen) and the shared
+(`packages/linq/src/effect.js`, shared with the app pen), the member-set
+check a machine and a dag spec share with every other pen
+(`closedTo`, `packages/linq/src/json-boundary.js`), and the shared
 capture's external check (`packages/linq/src/capture-root.js`), which is
 where every one of this pen's `JL0104`s comes from — the code appears in
 `src/flow/` only in the comments that explain it, and the refusal gate
@@ -996,10 +998,10 @@ meaning is a `$return` that constructs an array explicitly.
 
 ## 7. Cost
 
-`@jarenjs/linq/flow` builds to **<!--fact:bundle.flow-->19,984<!--/fact--> bytes** as a minified,
+`@jarenjs/linq/flow` builds to **<!--fact:bundle.flow-->20,726<!--/fact--> bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
 measures and `npm run test:tree-shaking` reports, published rounded
-(<!--fact:bundle.flow.kb-->20<!--/fact--> kB) beside the other nine subpath prices in
+(<!--fact:bundle.flow.kb-->21<!--/fact--> kB) beside the other subpath prices in
 [docs/CONSUMING.md](../../../docs/CONSUMING.md).
 
 The probe is a gate, not a report. Building a machine with a guard and
@@ -1025,8 +1027,8 @@ two effects as a consumer would — `defineFsm`, `state`, `on` and
   chain's bundle nor the schema pen's carries a byte of
   `packages/linq/src/flow/`.
 
-Two documents, two grammars, thirteen exported names — and a bundle of <!--fact:bundle.flow-->19,984<!--/fact-->
-bytes beside `./jslt`'s <!--fact:bundle.jslt-->19,927<!--/fact-->, which writes one. The reason is that most of
+Two documents, two grammars, thirteen exported names — and a bundle of <!--fact:bundle.flow-->20,726<!--/fact-->
+bytes beside `./jslt`'s <!--fact:bundle.jslt-->20,668<!--/fact-->, which writes one. The reason is that most of
 both prices is the same shared machinery: the recording proxy
 (`expression.js`), the root capture (`capture-root.js`) and the JSON
 boundary (`json-boundary.js`). What this pen adds on top of them is its
@@ -1038,7 +1040,8 @@ What a consumer actually pays for §3.6's graph is both subpaths, since
 the stylesheet has to be written by something — but not the sum: the
 recording proxy, the root capture and the JSON boundary are shared, so
 the second subpath adds only its own files. Every figure on this page is
-measured rather than typed: the probe compares `docs/CONSUMING.md`'s ten
-rounded prices AND every pen document's exact §7 byte count to the bundle
-it just built, so a stale number is a red gate rather than a wrong
+measured rather than typed: the probe commits what it measured, and
+`npm run docs:derive` bakes that one measurement into
+`docs/CONSUMING.md`'s rounded prices AND every pen document's exact §7
+byte count, so a stale number is a red gate rather than a wrong
 sentence.

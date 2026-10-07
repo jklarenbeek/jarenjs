@@ -26,7 +26,7 @@ import { utf8ByteLength } from '@jarenjs/core/string';
 
 import { ContractHostError, ContractFailure } from '../errors.js';
 import { validateOperationInput, settleOperation, safeTrace, PORT_LOCAL_ERRORS, classifyDeclared } from '../pipeline.js';
-import { resolveLifecycle, identify as identifyHost, acquire as acquireHost, once, RollbackCarrier } from '../host.js';
+import { resolveLifecycle, identify as identifyHost, acquire as acquireHost, once, releaseLeases, RollbackCarrier } from '../host.js';
 import { resolveHostRuntime } from '../runtime.js';
 import { isSubscriptionLike, runSubscription, resolveStreamLimits, STREAM_ERRORS } from '../stream/server.js';
 import { HTTP_ERRORS, renderMessage, declaredMessage } from '../http/wire.js';
@@ -270,7 +270,7 @@ export function servePort(contract, handlers, options) {
     const identity = once(identified.lease.release, observed);
     /** @type {(() => Promise<boolean>) | null} */
     let acquired = null;
-    const release = () => (acquired === null ? identity() : acquired().then((a) => identity().then((b) => a && b)));
+    const release = () => releaseLeases(acquired, identity);
     const invalid = validateOperationInput(route, value);
     if (invalid !== null && invalid.kind === 'contract') {
       refuse('JC2006', invalid.details, invalid.cause);

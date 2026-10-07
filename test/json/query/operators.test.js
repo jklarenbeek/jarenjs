@@ -898,6 +898,30 @@ describe('section 8.13 — dates and times', () => {
     assert.throws(() => run({ '$datetime': '$.at' }), (e) => e.code === 'JQ2001');
   });
 
+  it('should refuse a leap second whose hour is out of range (RFC 3339 time-hour 00-23)', () => {
+    for (const t of ['2016-12-31T47:59:60Z', '2016-12-31T71:59:60Z', '2016-12-31T24:59:60+01:00']) {
+      assert.throws(() => run({ '$hours': '$.t' }, { t }), (e) => e.code === 'JQ2001', t);
+      assert.throws(() => run({ '$epoch': '$.t' }, { t }), (e) => e.code === 'JQ2001', t);
+      assert.strictEqual(run({ '$is-datetime': '$.t' }, { t }), false, t);
+    }
+    assert.strictEqual(run({ '$hours': '$.t' }, { t: '2016-12-31T23:59:60Z' }), 23);
+    assert.strictEqual(run({ '$epoch': '$.t' }, { t: '2016-12-31T23:59:60Z' }), 1483228800000);
+  });
+
+  it('should read a fraction of any length, rounding $epoch to the millisecond', () => {
+    const t = '2026-01-01T00:00:00.1234567Z';
+    assert.strictEqual(run({ '$is-datetime': '$.t' }, { t }), true);
+    assert.strictEqual(run({ '$seconds': '$.t' }, { t }), 0.1234567);
+    // $epoch rounds to the nearest millisecond for every digit count, as it
+    // did for six (.999999 carries into the next second)
+    assert.strictEqual(run({ '$epoch': '$.t' }, { t }), 1767225600123);
+    assert.strictEqual(run({ '$epoch': '$.t' }, { t: '2026-01-01T00:00:00.123456789Z' }), 1767225600123);
+    assert.strictEqual(run({ '$epoch': '$.t' }, { t: '2026-01-01T00:00:00.9999999Z' }), 1767225601000);
+    assert.strictEqual(run({ '$is-time': '$.t' }, { t: '13:45:30.0000000Z' }), true);
+    // a rendered fraction is cut at six digits, never carried into the next second
+    assert.strictEqual(run({ '$datetime': 999.9996 }), '1970-01-01T00:00:00.999999Z');
+  });
+
   it('should compare across offsets through $epoch', () => {
     // the same instant, spelled in two offsets: string order disagrees,
     // epoch order does not

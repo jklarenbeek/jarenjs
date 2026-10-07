@@ -39,9 +39,9 @@ export type DriverErrorClass = 'busy' | 'full' | 'readonly' | 'io' | 'corrupt' |
   | 'constraint' | 'duplicate' | 'overflow' | 'connection' | 'aborted' | 'cancelled' | 'data' | 'error';
 
 /** Classify a SQLite driver failure: the class, the runtime code it is
- * raised under (`null` for `overflow`, which the query path answers by
- * re-running in the engine), whether a retry can succeed, and the
- * sentence the wrapped error leads with. */
+ * raised under (`null` for `overflow`, which has no code of its own and is
+ * wrapped as `JD2005`), whether a retry can succeed, and the sentence the
+ * wrapped error leads with. */
 export declare function classifyDriverError(error: unknown,
   unique?: { table: string; column: string }):
   { class: DriverErrorClass; code: string | null; retryable: boolean; reason: string };

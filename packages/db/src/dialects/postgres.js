@@ -52,6 +52,7 @@ import { postgresReplication } from './postgres-replication.js';
 import { POSTGRES_LOCK_CLASSES, OWNER_LOCK, transactionLock } from './postgres-locks.js';
 import { readExpression } from './expression-read.js';
 import { postgresChecks } from './check-read.js';
+import { modelPath } from '../model-path.js';
 
 /** PostgreSQL truncates an identifier past this many BYTES, silently
  * and with only a notice — so two long generated names would collide
@@ -363,23 +364,12 @@ function expressionOf(expression, byName) {
       // typed forms belong to a plain path index, not to an expression
       if (!/#>>/.test(text)) return null;
       const segments = memberPathOf(text);
-      return segments === null ? null : { member: pathOf(segments) };
+      return segments === null ? null : { member: modelPath(segments) };
     },
     nameOf: (name) => byName[name] ?? null,
     stringOf: (text) => (/^'(?:[^']|'')*'(?:::text)?$/.test(text)
       ? text.replace(/::text$/, '').slice(1, -1).replace(/''/g, "'") : null),
   });
-}
-
-/** A recovered segment list, in the spelling a model's path takes. */
-function pathOf(segments) {
-  let text = '$';
-  for (const segment of segments) {
-    if ('index' in segment) { text += `[${segment.index}]`; continue; }
-    text += /^[A-Za-z_][A-Za-z0-9_]*$/.test(segment.name)
-      ? `.${segment.name}` : `[${JSON.stringify(segment.name)}]`;
-  }
-  return text;
 }
 
 /**
@@ -466,6 +456,8 @@ export function postgresDialect(options = undefined) {
     // integer key needs that slot for its key
     identityColumn: { name: 'rid', type: 'bigserial' },
     autoKeyType: 'bigserial',
+    maxIdentifierBytes: IDENTIFIER_BYTES,
+    ownRelationNames: (table, columns) => [`${table}_pkey`, ...columns.filter((column) => /serial$/i.test(column.type)).map((column) => `${table}_${column.name}_seq`)],
     epochFromRfc3339: (valueSql) =>
       `round(EXTRACT(EPOCH FROM (${valueSql})::timestamptz) * 1000)::bigint`,
     docColumnType: 'jsonb',

@@ -31,6 +31,12 @@ import { GROUP_ITEMS } from './document.js';
 /** The unwrap key: proxy → its internal record. */
 const NODE = Symbol('jaren-linq-node');
 
+/** The key a callback's parameters argument answers — the chain's
+ * parameters proxy, a pen's externals proxy — with its own coded refusal:
+ * the argument NAMES values (`p.tenantId`) and is not one, so embedding it
+ * must fail by name rather than as the `{}` its empty target would read. */
+export const PARAMETERS = Symbol();
+
 /** RFC 9535 shorthand member names travel as `.name`; everything else
  * goes through a bracketed, single-quoted selector. */
 const SHORTHAND_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -62,6 +68,11 @@ const foldStack = [];
  * that only an action can carry (a `when()` transition) asks it.
  * @type {(string | null)[]} */
 const kindStack = [];
+/** Each capture's record of the parameters an `in()` reads whole as its
+ * list, beside its epoch — `null` where nothing runs the capture. The
+ * chain checks those bindings when it runs ({@link requireListBindings}).
+ * @type {(string[] | null)[]} */
+const listStack = [];
 
 /**
  * Whether the innermost capture folds a pure data tree into one `$const`
@@ -149,6 +160,14 @@ function embedString(s) {
 }
 
 /**
+ * The `JL0005` for a value no document can carry, every one of them
+ * worded from the same opening.
+ * @param {string} what - the value, and why it cannot embed
+ * @returns {LinqBuildError}
+ */
+const cannotEmbed = (what) => new LinqBuildError('JL0005', `a captured expression cannot embed ${what}`);
+
+/**
  * True when `value` is a plain JSON tree (no proxies) that can embed
  * verbatim.
  *
@@ -162,7 +181,8 @@ function embedString(s) {
  * `0` while dividing to the opposite infinity. So the prototype is
  * required to be plain and the numeric domain is required to be finite,
  * and a captured constant outside that boundary is refused at capture —
- * where the caller can see which value it was.
+ * where the caller can see which value it was. An array must be dense:
+ * `every` skips a hole, and JSON has none to carry.
  * @param {any} value
  */
 export function isPlainJson(value) {
@@ -171,16 +191,45 @@ export function isPlainJson(value) {
   if (type === 'string' || type === 'boolean') return true;
   if (type === 'number') return Number.isFinite(value) && !Object.is(value, -0);
   if (type !== 'object') return false; // undefined, function, symbol, bigint
-  if (value[NODE] !== undefined) return false;
+  if (value[NODE] !== undefined || value[PARAMETERS] !== undefined) return false;
   const proto = Object.getPrototypeOf(value);
   if (Array.isArray(value)) {
-    return proto === Array.prototype && value.every(isPlainJson);
+    return proto === Array.prototype && holeIn(value) < 0 && value.every(isPlainJson);
   }
   if (proto !== Object.prototype && proto !== null) return false;
   for (const key of Object.keys(value)) {
     if (!isPlainJson(value[key])) return false;
   }
   return true;
+}
+
+/**
+ * The index of an array's first hole, or -1 when it is dense. Looked for
+ * by index, because `every` and `map` step over a hole as if it were not
+ * there — `map` even keeps it in the array it answers.
+ * @param {readonly any[]} array
+ * @returns {number}
+ */
+function holeIn(array) {
+  for (let i = 0; i < array.length; i++) {
+    if (!(i in array)) return i;
+  }
+  return -1;
+}
+
+/**
+ * The array, when it is dense; `JL0005` naming its first hole otherwise.
+ * Embedded, a hole would read as `null` in a `$const` and reach the
+ * engine as `undefined` from a constructor or an `in()` list — a refusal
+ * at RUN time rather than here.
+ * @template T
+ * @param {T[]} array
+ * @returns {T[]}
+ */
+function requireDense(array) {
+  const hole = holeIn(array);
+  if (hole < 0) return array;
+  throw cannotEmbed(`a sparse array — index ${hole} is a hole, which JSON cannot carry; write null there`);
 }
 
 /**
@@ -194,13 +243,38 @@ export function isPlainJson(value) {
  */
 export function requireJsonBinding(name, value) {
   if (isPlainJson(value)) return;
-  const what = value !== null && typeof value === 'object'
-    ? `a ${value.constructor?.name ?? 'non-plain'} instance`
-    : typeof value === 'number' ? (Object.is(value, -0) ? '-0' : String(value))
-      : `a ${typeof value}`;
+  const hole = Array.isArray(value) ? holeIn(value) : -1;
+  const what = hole >= 0 ? `a sparse array (index ${hole} is a hole)`
+    : value !== null && typeof value === 'object'
+      ? `a ${value.constructor?.name ?? 'non-plain'} instance`
+      : typeof value === 'number' ? (Object.is(value, -0) ? '-0' : String(value))
+        : `a ${typeof value}`;
   throw new LinqBuildError('JL0004',
-    `parameter '${name}' is bound to ${what}, which is not query data — convert it `
-    + 'first (a Date to its ISO string or epoch number, a Map to an object, NaN or -0 to a number)');
+    `parameter '${name}' is bound to ${what}, which is not query data — convert it first (a Date `
+    + 'to its ISO string or epoch number, a Map to an object, NaN or -0 to a number, a hole to null)');
+}
+
+/**
+ * Refuse to run a chain whose `in()` reads a parameter WHOLE as its list
+ * (`x.in(p.ids)`, `x.in(p.ids.all())`) while that parameter is bound to
+ * anything but an array. The list is every item of the binding, so a
+ * scalar would match nothing and an object its member values — both
+ * silently. Checked when the chain runs, because a `params()` after the
+ * capture may rebind the name; a member path below a parameter
+ * (`p.cfg.ids`) is the binding's own shape and is not checked.
+ * @param {Iterable<string>} names - the parameters read as whole lists
+ * @param {ReadonlyMap<string, any>} params - the bindings
+ */
+export function requireListBindings(names, params) {
+  for (const name of names) {
+    const value = params.get(name);
+    if (!Array.isArray(value)) {
+      throw new LinqBuildError('JL0004',
+        `parameter '${name}' is the list an in() reads, so its binding must be an array, got `
+        + `${value === null ? 'null' : typeof value === 'object' ? 'an object' : `a ${typeof value}`}`
+        + ` — bind one value as [value]`);
+    }
+  }
 }
 
 /**
@@ -225,14 +299,12 @@ export function toExpression(value, fold = true) {
   if (t === 'boolean') return value;
   if (t === 'number') {
     if (!Number.isFinite(value)) {
-      throw new LinqBuildError('JL0005',
-        `a captured expression cannot embed ${String(value)} — the query data model is `
+      throw cannotEmbed(`${String(value)} — the query data model is `
         + 'JSON, which has no NaN or Infinity, and lenient serialization would fold it '
         + 'into null');
     }
     if (Object.is(value, -0)) {
-      throw new LinqBuildError('JL0005',
-        'a captured expression cannot embed -0 — it shares its JSON text with 0 while '
+      throw cannotEmbed('-0 — it shares its JSON text with 0 while '
         + 'dividing to the opposite infinity, so a document holding it cannot be '
         + 'keyed, stored or compared faithfully; use 0, or negate at query time');
     }
@@ -244,6 +316,8 @@ export function toExpression(value, fold = true) {
       assertLive(record);
       return record.doc;
     }
+    // a parameters argument names values and is not one: its own refusal
+    value[PARAMETERS]?.();
     if (fold && isPlainJson(value)) {
       // verbatim data: cheaper and clearer than a constructor tree
       return { $const: value };
@@ -251,18 +325,15 @@ export function toExpression(value, fold = true) {
     const proto = Object.getPrototypeOf(value);
     if (Array.isArray(value)) {
       if (proto !== Array.prototype) {
-        throw new LinqBuildError('JL0005',
-          'a captured expression cannot embed an Array subclass instance — its behaviour '
-          + 'is not expressible as query data');
+        throw cannotEmbed('an Array subclass instance — its behaviour is not expressible as query data');
       }
-      return value.map((v) => toExpression(v, fold));
+      return requireDense(value).map((v) => toExpression(v, fold));
     }
     if (proto !== Object.prototype && proto !== null) {
       // a Date, Map, Set, RegExp or class instance: `Object.keys` reports
       // nothing for it, so embedding it verbatim produced `{}` and the
       // query silently compared against an empty object
-      throw new LinqBuildError('JL0005',
-        `a captured expression cannot embed a ${value.constructor?.name ?? 'non-plain'} `
+      throw cannotEmbed(`a ${value.constructor?.name ?? 'non-plain'} `
         + 'instance — it carries no own enumerable members, so it would embed as {}. '
         + 'Convert it to query data first (a Date to its ISO string or epoch number, a '
         + 'Map to an object), or bind it through params().');
@@ -284,10 +355,9 @@ export function toExpression(value, fold = true) {
     }
     return out;
   }
-  throw new LinqBuildError('JL0005',
-    // `typeof undefined` IS 'undefined', so the two arms of the article
-    // are what differ here — not the noun
-    `a captured expression cannot embed ${t === 'undefined' ? 'an' : 'a'} ${t} value`);
+  // `typeof undefined` IS 'undefined', so the two arms of the article
+  // are what differ here — not the noun
+  throw cannotEmbed(`${t === 'undefined' ? 'an' : 'a'} ${t} value`);
 }
 
 /** Binary operator helper. @param {string} op */
@@ -323,7 +393,9 @@ const associative = (op) => function (/** @type {any} */ record, /** @type {any}
  * `$it.items[*].sku`) is a sequence of those items, and is the list as
  * it stands — fanning it again would fan each item. Whether it fans is
  * the record's own `fanned` mark, never a scan of the path text: a
- * member NAMED `a[*]` is one bracketed step that fans nothing.
+ * member NAMED `a[*]` is one bracketed step that fans nothing. A
+ * parameter read whole as the list is recorded for the capture's runner,
+ * which requires its binding to be an array ({@link requireListBindings}).
  * @param {any} record @param {any} values
  */
 function membership(record, values) {
@@ -335,6 +407,7 @@ function membership(record, values) {
         'in() takes an array of values or a PATH to one (a parameter p.ids, a member it.tags); '
         + 'it cannot follow an operator result or a relation');
     }
+    if (list.param !== undefined) listStack[listStack.length - 1]?.push(list.param);
     const items = list.seq ?? (list.fanned ? list.doc : `${list.doc}[*]`);
     return makeExpr({ $eq: [record.doc, items] }, record.epoch, false);
   }
@@ -342,7 +415,7 @@ function membership(record, values) {
     throw new LinqBuildError('JL0005',
       'in() takes an array of values — x.in([a, b, c]) — or a path to one: x.in(p.ids)');
   }
-  const items = values.map((value) => {
+  const items = requireDense(values).map((value) => {
     if (value !== null && typeof value === 'object' && value[NODE] === undefined) {
       throw new LinqBuildError('JL0005',
         'in() takes scalar values — a string, a number, a boolean or null, or a captured one');
@@ -409,34 +482,38 @@ function literalSpec(spec, method) {
  * The operator methods, name → builder(record, ...args). One table so
  * the mapping in QUERY-PEN.md §4 has exactly one code counterpart.
  * Null prototype: `constructor`/`toString` must read as member access,
- * never as inherited "methods".
+ * never as inherited "methods". Every builder factory call is marked
+ * pure, so a bundle that never captures — one that only asks
+ * {@link isExpression} — drops the table and the machinery behind it.
  */
 const METHODS = {
   __proto__: null,
   // §8.4 comparisons
-  eq: binary('$eq'), ne: binary('$ne'),
-  lt: binary('$lt'), le: binary('$le'),
-  gt: binary('$gt'), ge: binary('$ge'),
+  eq: /* @__PURE__ */ binary('$eq'), ne: /* @__PURE__ */ binary('$ne'),
+  lt: /* @__PURE__ */ binary('$lt'), le: /* @__PURE__ */ binary('$le'),
+  gt: /* @__PURE__ */ binary('$gt'), ge: /* @__PURE__ */ binary('$ge'),
   // §8.6 logic
-  and: associative('$and'), or: associative('$or'), not: unary('$not'),
+  and: /* @__PURE__ */ associative('$and'), or: /* @__PURE__ */ associative('$or'),
+  not: /* @__PURE__ */ unary('$not'),
   // §8.4 membership: `$eq` against a sequence of scalars
   in: membership,
   // §8.5 arithmetic
-  add: binary('$add'), sub: binary('$sub'), mul: binary('$mul'),
-  div: binary('$div'), idiv: binary('$idiv'), mod: binary('$mod'),
-  neg: unary('$neg'),
+  add: /* @__PURE__ */ binary('$add'), sub: /* @__PURE__ */ binary('$sub'),
+  mul: /* @__PURE__ */ binary('$mul'), div: /* @__PURE__ */ binary('$div'),
+  idiv: /* @__PURE__ */ binary('$idiv'), mod: /* @__PURE__ */ binary('$mod'),
+  neg: /* @__PURE__ */ unary('$neg'),
   // §8.2 existence
-  exists: fanned('$exists'), isEmpty: fanned('$empty'),
+  exists: /* @__PURE__ */ fanned('$exists'), isEmpty: /* @__PURE__ */ fanned('$empty'),
   // §8.7 strings
-  startsWith: binary('$starts-with'), endsWith: binary('$ends-with'),
-  contains: binary('$contains'), matches: binary('$match'),
+  startsWith: /* @__PURE__ */ binary('$starts-with'), endsWith: /* @__PURE__ */ binary('$ends-with'),
+  contains: /* @__PURE__ */ binary('$contains'), matches: /* @__PURE__ */ binary('$match'),
   lexical(record, provider, spec = {}) {
     if (typeof provider !== 'string' || !provider) throw new LinqBuildError('JL0005', 'Lexical name');
     return makeExpr({ $lexical: [provider, record.doc, literalSpec(spec, 'lexical')] }, record.epoch, false);
   },
-  upper: unary('$upper'), lower: unary('$lower'),
-  length: unary('$string-length'),
-  concat: binary('$concat'),
+  upper: /* @__PURE__ */ unary('$upper'), lower: /* @__PURE__ */ unary('$lower'),
+  length: /* @__PURE__ */ unary('$string-length'),
+  concat: /* @__PURE__ */ binary('$concat'),
   substring(record, start, len) {
     const args = len === undefined
       ? [record.doc, toExpression(start)]
@@ -450,8 +527,9 @@ const METHODS = {
   },
   // §8.8 aggregates as EXPRESSIONS (a group inside a projection:
   // `(u, g) => ({ n: g.count() })`)
-  count: fanned('$count'), sum: fanned('$sum'), avg: fanned('$avg'),
-  min: fanned('$min'), max: fanned('$max'),
+  count: /* @__PURE__ */ fanned('$count'), sum: /* @__PURE__ */ fanned('$sum'),
+  avg: /* @__PURE__ */ fanned('$avg'), min: /* @__PURE__ */ fanned('$min'),
+  max: /* @__PURE__ */ fanned('$max'),
   // §8.13 dates — the whole family, not a corner of it. A date in this
   // suite is an RFC 3339 STRING, so every one of these is an ordinary
   // string operator with a calendar's worth of rules behind it, and
@@ -464,15 +542,17 @@ const METHODS = {
   // the same reason §8.14 spells `geoArea`. Where no method name is
   // taken, the operator's own name is used unprefixed (`week`,
   // `quarter`, `startOf`).
-  year: unary('$year'), month: unary('$month'), day: unary('$day'),
-  hours: unary('$hours'), minutes: unary('$minutes'), seconds: unary('$seconds'),
-  offset: unary('$offset'), epoch: unary('$epoch'), datetime: unary('$datetime'),
-  week: unary('$week'), weekYear: unary('$week-year'),
-  quarter: unary('$quarter'), weekday: unary('$weekday'),
-  isDate: unary('$is-date'), isTime: unary('$is-time'),
-  isDatetime: unary('$is-datetime'), isDuration: unary('$is-duration'),
-  startOf: binary('$start-of'), endOf: binary('$end-of'),
-  dateFormat: binary('$date-format'),
+  year: /* @__PURE__ */ unary('$year'), month: /* @__PURE__ */ unary('$month'),
+  day: /* @__PURE__ */ unary('$day'), hours: /* @__PURE__ */ unary('$hours'),
+  minutes: /* @__PURE__ */ unary('$minutes'), seconds: /* @__PURE__ */ unary('$seconds'),
+  offset: /* @__PURE__ */ unary('$offset'), epoch: /* @__PURE__ */ unary('$epoch'),
+  datetime: /* @__PURE__ */ unary('$datetime'),
+  week: /* @__PURE__ */ unary('$week'), weekYear: /* @__PURE__ */ unary('$week-year'),
+  quarter: /* @__PURE__ */ unary('$quarter'), weekday: /* @__PURE__ */ unary('$weekday'),
+  isDate: /* @__PURE__ */ unary('$is-date'), isTime: /* @__PURE__ */ unary('$is-time'),
+  isDatetime: /* @__PURE__ */ unary('$is-datetime'), isDuration: /* @__PURE__ */ unary('$is-duration'),
+  startOf: /* @__PURE__ */ binary('$start-of'), endOf: /* @__PURE__ */ binary('$end-of'),
+  dateFormat: /* @__PURE__ */ binary('$date-format'),
   dateAdd(record, amount, unit) {
     return makeExpr({ '$date-add': shiftArgs(record, amount, unit) }, record.epoch, false);
   },
@@ -488,7 +568,7 @@ const METHODS = {
   // VERBATIM spec literal, so the argument is embedded with `$const`'s
   // discipline - it is captured data, never an expression - and the
   // compiler owns every rule about what it may say.
-  overlaps: binary('$overlaps'),
+  overlaps: /* @__PURE__ */ binary('$overlaps'),
   timeBucket(record, every, origin, context) {
     const args = [record.doc, toExpression(every)];
     if (origin !== undefined || context !== undefined)
@@ -518,27 +598,32 @@ const METHODS = {
   // arithmetic. The prefix names the family the way `geoParse`/`geoText`
   // do, and it is the same reason `$length` and `$string-length` are two
   // operators in the first place.
-  bbox: unary('$bbox'), geoArea: unary('$area'),
-  geoLength: unary('$length'), centroid: unary('$centroid'),
-  distance: binary('$distance'), within: binary('$within'),
-  bboxIntersects: binary('$bbox-intersects'),
-  geoParse: unary('$geo-parse'), geoText: unary('$geo-text'),
-  geohashBounds: unary('$geohash-bounds'),
-  geohashNeighbours: unary('$geohash-neighbours'),
-  geoSimplify: binary('$geo-simplify'),
+  bbox: /* @__PURE__ */ unary('$bbox'), geoArea: /* @__PURE__ */ unary('$area'),
+  geoLength: /* @__PURE__ */ unary('$length'), centroid: /* @__PURE__ */ unary('$centroid'),
+  distance: /* @__PURE__ */ binary('$distance'), within: /* @__PURE__ */ binary('$within'),
+  bboxIntersects: /* @__PURE__ */ binary('$bbox-intersects'),
+  geoParse: /* @__PURE__ */ unary('$geo-parse'), geoText: /* @__PURE__ */ unary('$geo-text'),
+  geohashBounds: /* @__PURE__ */ unary('$geohash-bounds'),
+  geohashNeighbours: /* @__PURE__ */ unary('$geohash-neighbours'),
+  geoSimplify: /* @__PURE__ */ binary('$geo-simplify'),
   // §8.15 vectors. One method for one operator: the metric is cosine
   // and there is no distance spelling to choose between. A member
   // literally named `similarity` is read with `get('similarity')`, the
   // same escape every method name needs.
-  similarity: binary('$similarity'),
+  similarity: /* @__PURE__ */ binary('$similarity'),
   geohash(record, precision) {
     const args = precision === undefined
       ? record.doc
       : [record.doc, toExpression(precision)];
     return makeExpr({ $geohash: args }, record.epoch, false);
   },
-  // path navigation
+  // path navigation. An integer index beyond ±(2^53 − 1) names no element
+  // of any array, and the path text cannot spell it (`[1e+21]`, an index
+  // outside the interoperable range): refused here, not at run time
   at(record, index) {
+    if (Number.isInteger(index) && !Number.isSafeInteger(index)) {
+      throw new LinqBuildError('JL0005', `at() takes a safe integer index, got ${index}`);
+    }
     if (record.pathable && Number.isInteger(index)) {
       return makeExpr(`${record.doc}[${index}]`, record.epoch, true, { fanned: record.fanned });
     }
@@ -554,7 +639,8 @@ const METHODS = {
       throw new LinqBuildError('JL0005',
         "all() fans out a PATH ('$it.tags[*]'); it cannot follow an operator result");
     }
-    return makeExpr(`${record.doc}[*]`, record.epoch, true, { fanned: true });
+    // a parameter's fan is still the parameter, read whole as a list
+    return makeExpr(`${record.doc}[*]`, record.epoch, true, { fanned: true, param: record.param });
   },
   get(record, name) {
     if (typeof name === 'string') {
@@ -803,24 +889,6 @@ export function groupRoot(relations, sink) {
 
 //#endregion
 
-/**
- * Build one expression proxy.
- * @param {any} doc - the expression JSON so far
- * @param {number} epoch - the owning capture
- * @param {boolean} pathable - whether `doc` is a pure path string that
- *   member access may extend
- * @param {{ seq?: any, nav?: any, navOnFan?: boolean, hop?: any,
- *   group?: string, fanned?: boolean }} [extra] -
- *   `seq`: for a value standing for an array or a hop, the fanned form
- *   its aggregates range over (`'$g[*]'`, a hop's phrase); `nav`: the
- *   relation table of the rows the value stands for, with the resolver
- *   for the other roots and the capture's hop sink; `navOnFan`: the
- *   table applies to the fan, not the value; `hop`: the hop chain;
- *   `group`: the member this value carries a GROUP's rows in, whose
- *   aggregates therefore range over the rows; `fanned`: the path fans
- *   (`all()`) somewhere along it, so it is already a sequence
- * @returns {any}
- */
 /** The capture proxy's `Symbol.toPrimitive`: always a refusal (JL0108). */
 function toPrimitive() {
   throw new LinqBuildError('JL0108',
@@ -830,11 +898,30 @@ function toPrimitive() {
     + 'if (v) cannot be trapped: they compare or test the proxy, never the value)');
 }
 
+/**
+ * Build one expression proxy.
+ * @param {any} doc - the expression JSON so far
+ * @param {number} epoch - the owning capture
+ * @param {boolean} pathable - whether `doc` is a pure path string that
+ *   member access may extend
+ * @param {{ seq?: any, nav?: any, navOnFan?: boolean, hop?: any,
+ *   group?: string, fanned?: boolean, param?: string }} [extra] -
+ *   `seq`: for a value standing for an array or a hop, the fanned form
+ *   its aggregates range over (`'$g[*]'`, a hop's phrase); `nav`: the
+ *   relation table of the rows the value stands for, with the resolver
+ *   for the other roots and the capture's hop sink; `navOnFan`: the
+ *   table applies to the fan, not the value; `hop`: the hop chain;
+ *   `group`: the member this value carries a GROUP's rows in, whose
+ *   aggregates therefore range over the rows; `fanned`: the path fans
+ *   (`all()`) somewhere along it, so it is already a sequence; `param`:
+ *   the declared parameter this value reads whole (`p.ids`, its fan)
+ * @returns {any}
+ */
 function makeExpr(doc, epoch, pathable, extra = undefined) {
   const record = {
     doc, epoch, pathable,
     seq: extra?.seq, nav: extra?.nav, navOnFan: extra?.navOnFan === true, hop: extra?.hop,
-    group: extra?.group, fanned: extra?.fanned === true,
+    group: extra?.group, fanned: extra?.fanned === true, param: extra?.param,
   };
   return new Proxy(record, {
     get(target, prop) {
@@ -860,7 +947,9 @@ function makeExpr(doc, epoch, pathable, extra = undefined) {
 /**
  * Member access: a relation name records a hop; a hop's target extends
  * the phrase's return path; a pathable path extends; anything else is
- * a `$get` over the operator result.
+ * a `$get` over the operator result, its key embedded as `get()` embeds
+ * one — a name starting `$` escaped `$$`, so it stays the member's name
+ * rather than a reference to a variable or a parameter.
  * @param {any} target
  * @param {string} prop
  */
@@ -868,7 +957,7 @@ function member(target, prop) {
   if (navigates(target, prop)) return startHop(target, prop);
   if (target.hop !== undefined) return extendHop(target, memberSegment(prop));
   if (target.pathable) return pathStep(target, prop, memberSegment(prop));
-  return makeExpr({ $get: [target.doc, prop] }, target.epoch, false);
+  return makeExpr({ $get: [target.doc, embedString(prop)] }, target.epoch, false);
 }
 
 /**
@@ -889,23 +978,36 @@ function pathStep(target, prop, segment) {
     ? { seq: `${doc}[*]`, fanned: target.fanned } : { fanned: target.fanned });
 }
 
+/** The parameters proxy embedded as a value — a select member, an
+ * operand, an array item — or spread: always a refusal (JL0004). */
+function refuseParameters() {
+  throw new LinqBuildError('JL0004',
+    'the parameters argument is not a value — read a declared parameter by name (p.tenantId); '
+    + 'a chain callback receives no element index');
+}
+
 /**
  * The parameters proxy: `p.tenantId` emits the external `$tenantId` —
  * when the name was declared via `.params({...})`. Undeclared use is
  * `JL0004` at BUILD time, with the fix in the message (the engine
  * would say JQ0005 at compile time; earlier and clearer beats later).
+ * The proxy itself is not a value: its empty target would embed as `{}`,
+ * so it answers {@link PARAMETERS} with its refusal — and so does asking
+ * for its keys, which a spread (`{ ...p }`) or `Object.keys(p)` does.
  * @param {Set<string>} declared
  * @param {number} epoch
  */
 function makeParams(declared, epoch) {
   return new Proxy({}, {
+    ownKeys: refuseParameters,
     get(_target, prop) {
+      if (prop === PARAMETERS) return refuseParameters;
       if (typeof prop === 'symbol') return undefined;
       if (!declared.has(prop)) {
         throw new LinqBuildError('JL0004',
           `parameter '${prop}' is not declared — declare it first: .params({ ${prop}: value })`);
       }
-      return makeExpr('$' + prop, epoch, true);
+      return makeExpr('$' + prop, epoch, true, { param: prop });
     },
   });
 }
@@ -928,9 +1030,12 @@ function makeParams(declared, epoch) {
  *   `$const` (the chain's spelling) or is a constructor tree (a pen's)
  * @param {string | null} [kind] - what the capture writes, for a pen value
  *   only one kind can carry (`'action'`, see {@link captureKind})
+ * @param {string[] | null} [lists] - where the capture records each
+ *   parameter an `in()` reads whole as its list, for the runner that binds
+ *   the parameters to check ({@link requireListBindings})
  * @returns {any} the captured expression (plain JSON)
  */
-export function captureExpression(fn, roots, declaredParams, fold = true, kind = null) {
+export function captureExpression(fn, roots, declaredParams, fold = true, kind = null, lists = null) {
   const epoch = ++epochCounter;
   const proxies = roots.map((root) => (typeof root === 'string'
     ? makeExpr('$' + root, epoch, true)
@@ -939,6 +1044,7 @@ export function captureExpression(fn, roots, declaredParams, fold = true, kind =
   captureStack.push(epoch);
   foldStack.push(fold);
   kindStack.push(kind);
+  listStack.push(lists);
   try {
     return toExpression(fn(...proxies), fold);
   }
@@ -946,6 +1052,7 @@ export function captureExpression(fn, roots, declaredParams, fold = true, kind =
     captureStack.pop(); // every proxy of this capture is now dead
     foldStack.pop();
     kindStack.pop();
+    listStack.pop();
   }
 }
 

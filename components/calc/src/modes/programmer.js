@@ -28,13 +28,36 @@ export const KEYPAD = [
 ];
 
 /**
+ * The word a finite value stands for: truncated toward zero, then wrapped
+ * to `wordBits` (two's complement when `signed`). The value arrives as a
+ * Number, so above 2^53 it is already rounded before it is wrapped.
+ * @param {number} value @param {number} wordBits @param {boolean} signed
+ * @returns {bigint}
+ */
+function wordOf(value, wordBits, signed) {
+  return toWord(BigInt(Math.trunc(value)), wordBits, signed);
+}
+
+/**
+ * The word the display shows for `value`, as a Number — what a
+ * programmer-mode result commits as `ans`, so the next calculation uses
+ * the value the user saw rather than the unwrapped float. A non-finite
+ * value has no word and is returned as it is.
+ * @param {number} value @param {number} [wordBits] @param {boolean} [signed]
+ * @returns {number}
+ */
+export function wordValue(value, wordBits = 32, signed = false) {
+  return Number.isFinite(value) ? Number(wordOf(value, wordBits, signed)) : value;
+}
+
+/**
  * The live four-base view of an integer value at the given word size.
  * @param {number} value @param {number} [wordBits] @param {boolean} [signed]
  * @returns {{ hex: string, dec: string, oct: string, bin: string }}
  */
 export function wordViews(value, wordBits = 32, signed = false) {
   if (!Number.isFinite(value)) return { hex: '—', dec: '—', oct: '—', bin: '—' };
-  const w = toWord(BigInt(Math.trunc(value)), wordBits, signed);
+  const w = wordOf(value, wordBits, signed);
   // unsigned view for hex/oct/bin so the two's-complement bit pattern shows
   const u = toWord(w, wordBits, false);
   return {

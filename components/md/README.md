@@ -153,6 +153,17 @@ mdToVnode(doc, { headingIds: true, slugPrefix: 'user-content-' });
 // author, so its ids cannot collide with your own page's
 ```
 
+The option sets of `mdToVnode`, `toHtml` and `createMdRenderer` are
+closed. A misspelt member (`slugprefix`) or one of the wrong type
+(`slugPrefix: 5`, `html: 'Vnode'`, `sanitizeUrl: null`) used to be
+ignored — rendering bare ids where a prefix was asked for — and is now
+refused with a `TypeError` that names the member and the one it most
+likely meant (`md mdToVnode: unknown option 'slugprefix' — did you mean
+'slugPrefix'?`); so are options that are not a plain object, and a
+`createMdRenderer` member it does not forward (`footnotesLabel`,
+`keyed`, `parseHtml`). A member passed as `undefined` still counts as
+absent.
+
 Repeated headings are numbered the way GitHub numbers them (`setup`,
 `setup-1`, `setup-2`), and a heading with no slug-worthy text (`## ***`)
 lands on `section`. Numbered ids are reserved too: headings `Foo`, `Foo`,
@@ -277,7 +288,7 @@ diagram or chart code, bundled or not. Since 0.96.0 `@jarenjs/md/plugins`
 exports no `mermaidPlugin`: import it from `@jarenjs/mermaid/plugin`, and
 hand it charts' `mermaidPieRenderer` as `renderers.pie`, or a pie renders
 a placeholder. Parsing and rendering to vnodes
-costs a consumer **<!--fact:bundle.md-->78,499<!--/fact--> bytes**
+costs a consumer **<!--fact:bundle.md-->87,255<!--/fact--> bytes**
 minified and tree-shaken. `npm run test:tree-shaking` measures it and
 holds both import graphs (`@jarenjs/md` and `@jarenjs/md/component`) free
 of mermaid and charts modules.
@@ -492,18 +503,39 @@ active policy ([PLUGINS.md](docs/PLUGINS.md) §5, [MD-FORMAT.md](docs/MD-FORMAT.
 Measured, not claimed — `npm run benchmark:markdown`, <!--fact:md.measured-->2026-08-11, Node v24.19.0<!--/fact-->
 (run it yourself; micro-timings vary ±15%):
 
-- **Parse to AST**: <!--fact:md.parseTimes-->~0.099 ms for a typical ~2 kB document, ~0.51 ms for ~10 kB, ~4.8 ms for ~100 kB<!--/fact--> — linear in input. A CPU profile puts the
-  inline phase at ~36% of that and the source hash for `meta.hash` at
-  ~10%; the block scan, the obvious suspect, is ~14%. (Replacing one
-  `/\s+$/` regex at paragraph close with a scan was worth 4–17%
-  depending on how paragraph-dense the document is — measured as an A/B
-  on this corpus, because the same change looked like noise on a
-  differently shaped one.)
+- **Parse to AST**: <!--fact:md.parseTimes-->~0.099 ms for a typical ~2 kB document, ~0.51 ms for ~10 kB, ~4.8 ms for ~100 kB<!--/fact--> — linear in input.
+- **Hostile input is linear too.** The shapes that make a naive parser
+  rescan the rest of the text from every position — unclosed link
+  destinations, runs of `www.a_`, unterminated comments and
+  declarations, emphasis closers that never pair, unterminated tags
+  under `html: 'vnode'` — parse in time proportional to their length;
+  [`test/md/linear-time.test.js`](../../test/md/linear-time.test.js)
+  holds each to growing its time at most eightfold when its input grows
+  fourfold — linear work grows about fourfold, quadratic sixteenfold.
+- **Nesting is bounded.** Block containers (block quotes, lists, list
+  items, footnote definitions), inline containers (emphasis, strong,
+  strikethrough, links), the raw-HTML elements `html: 'vnode'` keeps,
+  frontmatter flow collections, YAML frontmatter's block maps and
+  sequences and TOML frontmatter's tables each nest at most 256 deep,
+  and JSON frontmatter at most 512, as deep as the other two reach: a
+  marker past the bound is read as literal text, and a frontmatter
+  collection past it is refused with `MdFrontmatterError`. That keeps
+  the deepest tree the parser can build one that `mdToVnode`, `toHtml`
+  and `@jarenjs/view`'s renderers walk without exhausting the stack — a
+  megabyte of `- `, `> `, `*` or `[` renders, and a few thousand nested
+  YAML keys are refused, where both used to throw a `RangeError` — and
+  frontmatter that `toMarkdown`, `JSON.stringify` and `structuredClone`
+  copy whole: a 9 kB dotted TOML key used to build 4,458 levels they
+  could not. (A lone `-` in YAML frontmatter is an
+  empty entry unless a deeper block follows it: `-`, `-`, `-` reads as
+  three `null` entries, where it used to nest them.) A link
+  destination nests parentheses at most 32 deep, the limit cmark and
+  commonmark.js apply; MD-FORMAT.md §1.4 states the bounds normatively.
 - **Parse + render to HTML** (the cross-engine row, `toHtml`): takes <!--fact:md.vsPeers-->0.6–1.1<!--/fact-->x the time `marked` and `markdown-it` take — <!--fact:md.vsPeersDetail-->faster than both at every size measured except one — `markdown-it` is ahead at ~10 kB (1.1x)<!--/fact--> — and is <!--fact:md.vsMicromark-->12.9–21.4<!--/fact-->x faster than `micromark`, on the same GFM documents.
-  Through the **vnode** path the same documents cost roughly twice that
-  — keys, memoization and a tree the patcher can reconcile are not free,
-  and the benchmark publishes that row beside this one rather than
-  quoting only the flattering half.
+  Through the **vnode** path the same documents cost more — keys,
+  memoization and a tree the patcher can reconcile are not free — and
+  the benchmark publishes that row beside this one rather than quoting
+  only the flattering half.
 - **Where the time goes** (~100 kB, the phase split the benchmark now
   prints and publishes): <!--fact:md.phaseSplit-->parse 35%, AST→vnode 50%, vnode→HTML 16%<!--/fact-->. The projection, not
   the parse, is the expensive half — and <!--fact:md.keyCost-->53%<!--/fact--> of the projection is

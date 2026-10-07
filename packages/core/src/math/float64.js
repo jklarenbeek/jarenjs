@@ -378,7 +378,13 @@ export class Float64 {
   }
 
   /**
-   * Round `value` to `digits` decimal places (banker-free, half-up).
+   * Round `value` to `digits` decimal places the fast way: `value · 10^digits`
+   * rounded half up (a tie goes toward +∞, as `Math.round`), then scaled
+   * back. The product is itself a rounded double, so this is neither the
+   * exact rounding of the double nor of its decimal spelling —
+   * `roundTo(2.675, 2)` is 2.68 though the double is 2.67499…, and
+   * `roundTo(1.005, 2)` is 1. Fine for display and drawing coordinates;
+   * `roundExact` (`@jarenjs/core/math`) rounds the exact value.
    * @param {number} value
    * @param {number} [digits]
    * @returns {number}
@@ -486,6 +492,9 @@ export function remap(v, smin, smax, dmin, dmax) {
 export function niceStep(span, count = 1) {
   const raw = span / Math.max(1, count);
   const base = Math.pow(10, Math.floor(Math.log10(raw)));
+  // below the smallest power of ten a double holds there is no ladder to
+  // climb: the step is the span's own share
+  if (base === 0 && raw > 0) return raw;
   const unit = raw / base;
   const factor = unit < 1.5 ? 1 : unit < 3 ? 2 : unit < 7 ? 5 : 10;
   return factor * base;
@@ -496,7 +505,9 @@ export function niceStep(span, count = 1) {
  * multiple of the step the domain contains, rounded to the step's own
  * precision so an axis never shows `0.30000000000000004`. A degenerate
  * domain yields a single tick, a reversed one reads the same as its
- * forward twin, and a non-finite bound yields nothing.
+ * forward twin, a non-finite bound yields nothing and a span no ladder
+ * fits (below the smallest double power of ten, or beyond the largest
+ * double) yields the two bounds.
  *
  * @param {number} min - Domain minimum
  * @param {number} max - Domain maximum
@@ -511,12 +522,16 @@ export function axisTicksLinear(min, max, count = 5) {
   if (min > max)
     return axisTicksLinear(max, min, count);
   const step = niceStep(max - min, count);
+  // a span a double cannot divide or hold has no ladder: its two ends
+  if (!(step > 0) || !Number.isFinite(step))
+    return [min, max];
   const decimals = Math.max(0, -Math.floor(Math.log10(step)));
   const ticks = [];
   const first = Math.ceil(min / step);
   const last = Math.floor(max / step);
+  // `toFixed` stops at 100 digits: a step below 1e-100 rounds by significance
   for (let i = first; i <= last; ++i)
-    ticks.push(Number((i * step).toFixed(decimals)));
+    ticks.push(Number(decimals > 100 ? (i * step).toPrecision(15) : (i * step).toFixed(decimals)));
   return ticks;
 }
 

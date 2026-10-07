@@ -14,8 +14,8 @@
     "test/consumer/journey.js": "38010d72aabaeb2c840f091ec1f7f8781f2d357eb4ce9f393b05770259132d3a",
     "scripts/lib/adoption-journey.js": "ac4f3c24a0d7edddaf08bbd012d38dbf0c4b0effa4443f17333b543948e7efc6",
     "benchmark/adoption-journey.js": "d3cd525bea09a984c908cfdb0581c6a5014de703b484251245d2ba900895bf47",
-    "packages/db/src/jobs.js": "55b287e58ac90433bf615b411423e50b053ca71870c995bb9d4052f094392474",
-    "packages/db/src/store.js": "350a9522793bbab6bea67d2a74133d252c57b229d8194d2f44238917da311fce"
+    "packages/db/src/jobs.js": "a357b08fba60757d4b879068e8f25021e90559a18fd023fc6f5407a970274970",
+    "packages/db/src/store.js": "0f0f807faf72e8e2b9905b55e59a1fb569459dee2be2a88757e4e0d7bdc6ebac"
   },
   "hosts": [
     {
@@ -30,7 +30,7 @@
           "secondWrites": 0,
           "secondRevisions": 0,
           "changes": 256,
-          "searchMs": 373.210476,
+          "searchMs": 348.589957,
           "searchHash": "e1a757541681300c320a4f07aa0742b817d9363eb284bfd0d061691e76de93bf",
           "startupDDL": 0,
           "history": 3,
@@ -61,11 +61,11 @@
               "body": "{\"id\":\"catalog-1022\"}"
             }
           ],
-          "elapsedMs": 843.657989,
-          "teardownMs": 0.22237099999983911,
+          "elapsedMs": 789.968344,
+          "teardownMs": 0.224187000000029,
           "runtime": "v24.20.0",
-          "heapBytes": 70981216,
-          "peakRssBytes": 288161792
+          "heapBytes": 72994840,
+          "peakRssBytes": 299241472
         },
         {
           "consumer": "archive-stock",
@@ -76,7 +76,7 @@
           "secondWrites": 0,
           "secondRevisions": 0,
           "changes": 512,
-          "searchMs": 4041.704556,
+          "searchMs": 2663.270598,
           "searchHash": "51902a33caf8dad05035c9e56096dde0af6c44bb7491692213654b689fcd58ae",
           "startupDDL": 0,
           "history": 1,
@@ -112,11 +112,11 @@
               "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":\"430\"}}"
             }
           ],
-          "elapsedMs": 5589.667284,
-          "teardownMs": 0.23354599999947823,
+          "elapsedMs": 4117.898327,
+          "teardownMs": 0.2358509999994567,
           "runtime": "v24.20.0",
-          "heapBytes": 396994696,
-          "peakRssBytes": 906227712
+          "heapBytes": 319468488,
+          "peakRssBytes": 933851136
         },
         {
           "consumer": "catalog",
@@ -130,11 +130,11 @@
           "startupDDL": 0,
           "history": 3,
           "wire": [],
-          "elapsedMs": 112.85276800000003,
-          "teardownMs": 1.0149890000000141,
+          "elapsedMs": 98.65053700000001,
+          "teardownMs": 0.7139769999999999,
           "runtime": "v24.20.0",
-          "heapBytes": 30214560,
-          "peakRssBytes": 129687552
+          "heapBytes": 31993152,
+          "peakRssBytes": 146444288
         }
       ],
       "crashExit": 73,
@@ -153,7 +153,7 @@
           "secondWrites": 0,
           "secondRevisions": 0,
           "changes": 256,
-          "searchMs": 300.430952,
+          "searchMs": 276.327142,
           "searchHash": "e1a757541681300c320a4f07aa0742b817d9363eb284bfd0d061691e76de93bf",
           "startupDDL": 0,
           "history": 3,
@@ -184,11 +184,11 @@
               "body": "{\"id\":\"catalog-1022\"}"
             }
           ],
-          "elapsedMs": 703.184082,
-          "teardownMs": 0.41219699999999193,
+          "elapsedMs": 647.7160140000001,
+          "teardownMs": 0.26322700000002897,
           "runtime": "1.4.2",
-          "heapBytes": 52482810,
-          "peakRssBytes": 262377472
+          "heapBytes": 95501723,
+          "peakRssBytes": 305889280
         },
         {
           "consumer": "archive-stock",
@@ -199,7 +199,7 @@
           "secondWrites": 0,
           "secondRevisions": 0,
           "changes": 512,
-          "searchMs": 2634.426302,
+          "searchMs": 1966.784267,
           "searchHash": "51902a33caf8dad05035c9e56096dde0af6c44bb7491692213654b689fcd58ae",
           "startupDDL": 0,
           "history": 1,
@@ -235,11 +235,11 @@
               "body": "{\"query\":\"query Items($after: String) { items(after: $after) { id } }\",\"variables\":{\"after\":\"430\"}}"
             }
           ],
-          "elapsedMs": 4009.0345930000003,
-          "teardownMs": 0.43433700000059616,
+          "elapsedMs": 3189.3449610000002,
+          "teardownMs": 0.3482930000000124,
           "runtime": "1.4.2",
-          "heapBytes": 346594620,
-          "peakRssBytes": 1042923520
+          "heapBytes": 344716064,
+          "peakRssBytes": 1021468672
         },
         {
           "consumer": "catalog",
@@ -253,11 +253,11 @@
           "startupDDL": 0,
           "history": 3,
           "wire": [],
-          "elapsedMs": 85.039151,
-          "teardownMs": 0.9791609999999764,
+          "elapsedMs": 74.8344,
+          "teardownMs": 0.8330540000000042,
           "runtime": "1.4.2",
-          "heapBytes": 9027080,
-          "peakRssBytes": 80134144
+          "heapBytes": 9161353,
+          "peakRssBytes": 83025920
         }
       ],
       "crashExit": 73,
@@ -273,25 +273,25 @@
         {
           "metric": "startupMs",
           "limit": 15000,
-          "value": 373.210476,
+          "value": 348.589957,
           "status": "pass"
         },
         {
           "metric": "sampledHeapBytes",
           "limit": 268435456,
-          "value": 70981216,
+          "value": 72994840,
           "status": "pass"
         },
         {
           "metric": "peakRssBytes",
           "limit": 536870912,
-          "value": 288161792,
+          "value": 299241472,
           "status": "pass"
         },
         {
           "metric": "teardownMs",
           "limit": 1000,
-          "value": 0.22237099999983911,
+          "value": 0.224187000000029,
           "status": "pass"
         },
         {
@@ -309,25 +309,25 @@
         {
           "metric": "startupMs",
           "limit": 45000,
-          "value": 4041.704556,
+          "value": 2663.270598,
           "status": "pass"
         },
         {
           "metric": "sampledHeapBytes",
           "limit": 805306368,
-          "value": 396994696,
+          "value": 319468488,
           "status": "pass"
         },
         {
           "metric": "peakRssBytes",
           "limit": 1073741824,
-          "value": 906227712,
+          "value": 933851136,
           "status": "pass"
         },
         {
           "metric": "teardownMs",
           "limit": 2000,
-          "value": 0.23354599999947823,
+          "value": 0.2358509999994567,
           "status": "pass"
         },
         {
@@ -345,25 +345,25 @@
         {
           "metric": "startupMs",
           "limit": 15000,
-          "value": 300.430952,
+          "value": 276.327142,
           "status": "pass"
         },
         {
           "metric": "sampledHeapBytes",
           "limit": 268435456,
-          "value": 52482810,
+          "value": 95501723,
           "status": "pass"
         },
         {
           "metric": "peakRssBytes",
           "limit": 536870912,
-          "value": 262377472,
+          "value": 305889280,
           "status": "pass"
         },
         {
           "metric": "teardownMs",
           "limit": 1000,
-          "value": 0.41219699999999193,
+          "value": 0.26322700000002897,
           "status": "pass"
         },
         {
@@ -381,25 +381,25 @@
         {
           "metric": "startupMs",
           "limit": 45000,
-          "value": 2634.426302,
+          "value": 1966.784267,
           "status": "pass"
         },
         {
           "metric": "sampledHeapBytes",
           "limit": 805306368,
-          "value": 346594620,
+          "value": 344716064,
           "status": "pass"
         },
         {
           "metric": "peakRssBytes",
           "limit": 1073741824,
-          "value": 1042923520,
+          "value": 1021468672,
           "status": "pass"
         },
         {
           "metric": "teardownMs",
           "limit": 2000,
-          "value": 0.43433700000059616,
+          "value": 0.3482930000000124,
           "status": "pass"
         },
         {
@@ -428,7 +428,7 @@
       "packages/flow/src/runs.js",
       "packages/db/src/jobs.js"
     ],
-    "output": "packages/db/src/jobs.js:2:import { JOBS_TABLE, JOB_CHECKPOINTS_TABLE } from './engine-metadata.js';\npackages/db/src/jobs.js:43:import { resolveRuntime } from '@jarenjs/core/runtime';\npackages/db/src/jobs.js:44:import { backoffDelay } from '@jarenjs/core/retry';\npackages/db/src/jobs.js:45:import { chain, attempt } from './driver.js';\npackages/db/src/jobs.js:46:import { DbCompileError, DbRuntimeError, wrapDriverError } from './errors.js';\npackages/db/src/jobs.js:47:import { createCursor, rowClassOf, PAGE_LIMIT_DEFAULT } from './cursor.js';\npackages/db/src/jobs.js:48:import { refuseCancelled } from './cancellation.js';\npackages/db/src/jobs.js:49:import { jobStatements } from './dialects/jobs.js';\npackages/db/src/jobs.js:169:export function createJobEngine(options) {\npackages/flow/src/runs.js:3:import { canonicalizeJson } from '@jarenjs/json/canonical';\npackages/flow/src/runs.js:4:import { compileWorkflow } from './workflow.js';\npackages/flow/src/runs.js:12:export function createDomainRun(document, options) {\npackages/linq/src/db/effects.js:3:import { canonicalizeJson } from '@jarenjs/json/canonical';\npackages/linq/src/db/effects.js:4:import { mappedRecords, recordTransaction, copyRecord, refuseRecord } from './records.js';\npackages/linq/src/db/effects.js:13:export function createDbEffectStore(client, options) {\npackages/linq/src/db/receipts.js:3:import { canonicalizeJson } from '@jarenjs/json/canonical';\npackages/linq/src/db/receipts.js:4:import { resolveRuntime } from '@jarenjs/core/runtime';\npackages/linq/src/db/receipts.js:5:import { mappedRecords, recordTransaction, copyRecord, refuseRecord } from './records.js';\npackages/linq/src/db/receipts.js:25:export function createDbReceipts(client, options) {\npackages/flow/src/ingest.js:3:import { canonicalizeJson } from '@jarenjs/json/canonical';\npackages/flow/src/ingest.js:4:import { compileWorkflow } from './workflow.js';\npackages/flow/src/ingest.js:21:export function createIngestion(options) {\npackages/contract/src/command.js:3:import { deepFreeze } from '@jarenjs/core/object';\npackages/contract/src/command.js:4:import { canonicalizeJson } from '@jarenjs/json/canonical';\npackages/contract/src/command.js:5:import { ContractFailure, ContractHostError, ContractRuntimeError } from './errors.js';\npackages/contract/src/command.js:6:import { runOperation, validateOperationInput } from './pipeline.js';\npackages/contract/src/command.js:19:export function createCommand(operation, options) {\npackages/json/src/rules/index.js:3:import { canonicalizeJson, canonicalSha256 } from '../canonical.js';\npackages/json/src/rules/index.js:4:import { compileJSONPointer, JSONPOINTER_NOTHING } from '../pointer.js';\npackages/json/src/rules/index.js:5:import { compileFormulaBatch } from '../formula/batch.js';\npackages/json/src/rules/index.js:6:import { FormulaError, formulaDiagnostic, formulaMessage, snapshot, credit } from '../formula/shared.js';\npackages/json/src/rules/index.js:15:export function compileRulePlan(definition, options) {\npackages/app/src/collection.js:3:import { deepFreeze } from '@jarenjs/core/object';\npackages/app/src/collection.js:4:import { rangeBytes as bytesOf, rangeIdentity as identityOf, validRangeCredits as validCredits, validLogicalRange as validRange } from '@jarenjs/core/range';\npackages/app/src/collection.js:12:export function createCollectionCoordinator(provider, options = {}) {\npackages/core/src/search/index.js:3:import { lexicalConfig, lexicalTokens, lexicalDistance } from './config.js';\npackages/core/src/search/index.js:4:import { utf8ByteLength as textBytes, hashContent } from '../string.js';\npackages/core/src/search/index.js:5:import { lexicalVocabulary } from './vocabulary.js';\npackages/core/src/search/index.js:15:export function compileLexical(definition) {\npackages/website/src/examples/adoption.js:3:import { open, createDbReceipts, createDbIngestionStore, createDbEffectStore, createDbRunStore } from '@jarenjs/linq/db';\npackages/website/src/examples/adoption.js:4:import { compileLexical } from '@jarenjs/core/search';\npackages/website/src/examples/adoption.js:5:import { createArrayRangeProvider } from '@jarenjs/core/range';\npackages/website/src/examples/adoption.js:6:import { canonicalizeJson, canonicalSha256 } from '@jarenjs/json/canonical';\npackages/website/src/examples/adoption.js:7:import { compileRulePlan, selectRuleChanges } from '@jarenjs/json/rules';\npackages/website/src/examples/adoption.js:8:import { migrateFormulas } from '@jarenjs/json/formula/migrate';\npackages/website/src/examples/adoption.js:9:import { compileContract } from '@jarenjs/contract';\npackages/website/src/examples/adoption.js:10:import { createCommand } from '@jarenjs/contract/command';\npackages/website/src/examples/adoption.js:11:import { compileProvider, createProviderExecutor } from '@jarenjs/contract/provider';\npackages/website/src/examples/adoption.js:12:import { createIngestion, createExternalEffects, createDomainRun } from '@jarenjs/flow';\npackages/website/src/examples/adoption.js:13:import { createTypeTestCompiler } from '@jarenjs/validate/query';\npackages/website/src/examples/adoption.js:14:import { adoptionModel, adoptionItemKey, adoptionFields } from './adoption-model.js';\n"
+    "output": "packages/db/src/jobs.js:2:import { JOBS_TABLE, JOB_CHECKPOINTS_TABLE } from './engine-metadata.js';\npackages/db/src/jobs.js:43:import { resolveRuntime } from '@jarenjs/core/runtime';\npackages/db/src/jobs.js:44:import { backoffDelay } from '@jarenjs/core/retry';\npackages/db/src/jobs.js:45:import { chain, attempt } from './driver.js';\npackages/db/src/jobs.js:46:import { DbCompileError, DbRuntimeError, wrapDriverError } from './errors.js';\npackages/db/src/jobs.js:47:import { createCursor, rowClassOf, PAGE_LIMIT_DEFAULT } from './cursor.js';\npackages/db/src/jobs.js:48:import { refuseCancelled } from './cancellation.js';\npackages/db/src/jobs.js:49:import { readOptions } from './options.js';\npackages/db/src/jobs.js:50:import { jobStatements } from './dialects/jobs.js';\npackages/db/src/jobs.js:172:export function createJobEngine(options) {\npackages/flow/src/runs.js:3:import { canonicalizeJson } from '@jarenjs/json/canonical';\npackages/flow/src/runs.js:4:import { compileWorkflow } from './workflow.js';\npackages/flow/src/runs.js:12:export function createDomainRun(document, options) {\npackages/linq/src/db/effects.js:3:import { canonicalizeJson } from '@jarenjs/json/canonical';\npackages/linq/src/db/effects.js:4:import { mappedRecords, recordTransaction, copyRecord, refuseRecord } from './records.js';\npackages/linq/src/db/effects.js:13:export function createDbEffectStore(client, options) {\npackages/flow/src/ingest.js:3:import { canonicalizeJson } from '@jarenjs/json/canonical';\npackages/flow/src/ingest.js:4:import { compileWorkflow } from './workflow.js';\npackages/flow/src/ingest.js:21:export function createIngestion(options) {\npackages/linq/src/db/receipts.js:3:import { canonicalizeJson } from '@jarenjs/json/canonical';\npackages/linq/src/db/receipts.js:4:import { resolveRuntime } from '@jarenjs/core/runtime';\npackages/linq/src/db/receipts.js:5:import { mappedRecords, recordTransaction, copyRecord, refuseRecord } from './records.js';\npackages/linq/src/db/receipts.js:25:export function createDbReceipts(client, options) {\npackages/contract/src/command.js:3:import { deepFreeze } from '@jarenjs/core/object';\npackages/contract/src/command.js:4:import { canonicalizeJson } from '@jarenjs/json/canonical';\npackages/contract/src/command.js:5:import { ContractFailure, ContractHostError, ContractRuntimeError } from './errors.js';\npackages/contract/src/command.js:6:import { runOperation, validateOperationInput } from './pipeline.js';\npackages/contract/src/command.js:19:export function createCommand(operation, options) {\npackages/json/src/rules/index.js:3:import { canonicalizeJson, canonicalSha256 } from '../canonical.js';\npackages/json/src/rules/index.js:4:import { compileJSONPointer, JSONPOINTER_NOTHING } from '../pointer.js';\npackages/json/src/rules/index.js:5:import { compileFormulaBatch } from '../formula/batch.js';\npackages/json/src/rules/index.js:6:import { FormulaError, formulaDiagnostic, formulaMessage, snapshot, credit } from '../formula/shared.js';\npackages/json/src/rules/index.js:15:export function compileRulePlan(definition, options) {\npackages/app/src/collection.js:3:import { deepFreeze, isPlainOptions, refuseUnknownMembers } from '@jarenjs/core/object';\npackages/app/src/collection.js:4:import { rangeBytes as bytesOf, rangeIdentity as identityOf, validRangeCredits as validCredits, validLogicalRange as validRange } from '@jarenjs/core/range';\npackages/app/src/collection.js:5:import { describeValue, describeOption } from './errors.js';\npackages/app/src/collection.js:37:export function createCollectionCoordinator(provider, options = {}) {\npackages/core/src/search/index.js:3:import { lexicalConfig, lexicalTokens, lexicalDistance } from './config.js';\npackages/core/src/search/index.js:4:import { utf8ByteLength as textBytes, hashContent } from '../string.js';\npackages/core/src/search/index.js:5:import { lexicalVocabulary } from './vocabulary.js';\npackages/core/src/search/index.js:15:export function compileLexical(definition) {\npackages/website/src/examples/adoption.js:3:import { open, createDbReceipts, createDbIngestionStore, createDbEffectStore, createDbRunStore } from '@jarenjs/linq/db';\npackages/website/src/examples/adoption.js:4:import { compileLexical } from '@jarenjs/core/search';\npackages/website/src/examples/adoption.js:5:import { createArrayRangeProvider } from '@jarenjs/core/range';\npackages/website/src/examples/adoption.js:6:import { canonicalizeJson, canonicalSha256 } from '@jarenjs/json/canonical';\npackages/website/src/examples/adoption.js:7:import { compileRulePlan, selectRuleChanges } from '@jarenjs/json/rules';\npackages/website/src/examples/adoption.js:8:import { migrateFormulas } from '@jarenjs/json/formula/migrate';\npackages/website/src/examples/adoption.js:9:import { compileContract } from '@jarenjs/contract';\npackages/website/src/examples/adoption.js:10:import { createCommand } from '@jarenjs/contract/command';\npackages/website/src/examples/adoption.js:11:import { compileProvider, createProviderExecutor } from '@jarenjs/contract/provider';\npackages/website/src/examples/adoption.js:12:import { createIngestion, createExternalEffects, createDomainRun } from '@jarenjs/flow';\npackages/website/src/examples/adoption.js:13:import { createTypeTestCompiler } from '@jarenjs/validate/query';\npackages/website/src/examples/adoption.js:14:import { adoptionModel, adoptionItemKey, adoptionFields } from './adoption-model.js';\n"
   },
   "ownership": {
     "retainedOracleFiles": [

@@ -123,7 +123,12 @@ generation/request fencing and caches. Defaults: 64 rows/page, 4 cached pages,
 256 cached rows, 262144 cached bytes, 2 in-flight requests, 256 work credits/request,
 one simultaneous output (`maxOutputs`), eight subscribers (`maxSubscriptions`),
 and zero prefetch pages. `prefetchPages` is finite, below the page limit and clamped
-to row credits. `requestRange({start,end},signal)` refuses oversized ranges before
+to row credits. The options are a closed set — the nine bounds, `onChange`,
+`onError` and `disposeProvider` — refused with a `TypeError` when they are not a
+plain object, name another member (`maxrows` is refused naming `maxRows`) or give a
+callback that is not a function or a `disposeProvider` that is not a boolean; such a
+member used to be ignored, and `disposeProvider: 'false'` disposed the host's
+provider. A bound that is not a positive safe integer is still a `RangeError`. `requestRange({start,end},signal)` refuses oversized ranges before
 source work. Every response must echo all four identities and fit row/byte/work
 credits before it can publish. A provider that ignores cancellation still cannot
 replace current rows. An empty page beyond the end retains the provider's known,

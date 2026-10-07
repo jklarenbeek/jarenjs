@@ -4,7 +4,7 @@
  * errors?: any[], valid?: boolean, total?: number, code?: string, result?: any, explain?: any, model?: any }} EditorReceipt */
 /** Data document publication and execution use the same queued actions as the UI. */
 import { semanticKey } from '@jarenjs/core/object';
-import { applyJSONPatch } from '@jarenjs/json/patch';
+import { applyPatchThrough } from '../editor-patch.js';
 import { validateFile } from '../validate.js';
 
 /** @param {{ getApp: () => any, runtime: any, operators?: { toOptions: () => any } }} env */
@@ -46,12 +46,11 @@ export function createDataController(env) {
         modelText: JSON.stringify(candidate.model, null, 2), queryText: JSON.stringify(candidate.query, null, 2) });
     });
   }
-  /** @param {Parameters<typeof applyJSONPatch>[1]} patch @param {{ expectedRevision?: string }} [options]
+  /** @param {Parameters<typeof applyPatchThrough>[2]} patch @param {{ expectedRevision?: string }} [options]
    * @returns {Promise<EditorReceipt>}
    */
   function apply(patch, options) {
-    try { return replace(applyJSONPatch(read().document, patch), options); }
-    catch (error) { return Promise.resolve({ ok: false, error: error.message, code: error.code }); }
+    return applyPatchThrough(read, replace, patch, options);
   }
   /** Query the open store, or explicitly recreate it through the owning host.
    * @param {{ operation?: 'query'|'open', externals?: Record<string, any> }} [options]

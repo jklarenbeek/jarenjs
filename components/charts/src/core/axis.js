@@ -23,14 +23,15 @@ export { niceStep, axisTicksLinear, niceTimeStep, axisTicksTime };
 /**
  * Log ticks: the decade powers (… 0.1, 1, 10, 100 …) inside
  * `[min, max]`. When the domain sits within a single decade the
- * endpoints are returned so the axis is never empty.
- * @param {number} min - Domain minimum (> 0)
- * @param {number} max - Domain maximum (> 0)
+ * endpoints are returned so the axis is never empty. An infinite bound
+ * is refused like a non-positive one: there is no last decade to lay.
+ * @param {number} min - Domain minimum (> 0, finite)
+ * @param {number} max - Domain maximum (> 0, finite)
  * @returns {number[]}
  */
 export function axisTicksLog(min, max) {
-  if (!(min > 0) || !(max > 0))
-    throw new RangeError(`axisTicksLog domain must be positive, got [${min}, ${max}]`);
+  if (!(min > 0) || !(max > 0) || !Number.isFinite(min) || !Number.isFinite(max))
+    throw new RangeError(`axisTicksLog domain must be positive and finite, got [${min}, ${max}]`);
   if (min > max)
     return axisTicksLog(max, min);
   const ticks = [];

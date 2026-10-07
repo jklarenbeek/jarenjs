@@ -29,6 +29,9 @@ import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { readFileSync } from 'node:fs';
 
+import { changedPaths } from './lib/git.js';
+import { isMainModule } from './lib/main-module.js';
+
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 
 /** The worker, and the assets its name governs. */
@@ -45,18 +48,14 @@ const pathUrl = (/** @type {string} */ dir) => new URL(`file://${resolve(dir)}/`
 const CACHE_NAME = /\bCACHE\s*=\s*'([^']+)'/;
 
 /**
- * The `public/` assets a `git status --porcelain` run reports as differing
- * from HEAD, minus the ones the cache name does not govern.
- * @param {string} status - porcelain output, paths relative to the root.
+ * The changed `public/` assets the cache name governs: every path the
+ * status reader reports as differing from HEAD (a rename by the file that
+ * would ship), minus the worker itself and the revalidated data.
+ * @param {string[]} changed - repo-relative paths, verbatim, as `changedPaths` reads them
  * @returns {string[]}
  */
-export function governedAssets(status) {
-  return status.split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line !== '')
-    // `XY path` — a rename carries ` -> `, whose destination is the one that ships
-    .map((line) => line.slice(2).trim().split(' -> ').pop() ?? '')
-    .filter((path) => path !== WORKER && !EXEMPT.some((prefix) => path.startsWith(prefix)));
+export function governedAssets(changed) {
+  return changed.filter((path) => path !== WORKER && !EXEMPT.some((prefix) => path.startsWith(prefix)));
 }
 
 /**
@@ -97,16 +96,14 @@ export function decideCacheBump({ changed, cache, head }) {
  */
 export function checkServiceWorkerCache(options = {}) {
   const cwd = options.root ?? ROOT;
-  /** @param {string[]} args */
-  const run = (args) => execFileSync('git', args, { cwd, encoding: 'utf8' });
-  let status;
+  let changed;
   let headWorker;
   try {
-    status = run(['status', '--porcelain', '--untracked-files=all', '--', PUBLIC]);
+    changed = changedPaths(cwd, ['--untracked-files=all', '--', PUBLIC]);
     // a worker with no committed side is new: there is nothing it could
     // be serving stale bytes against
     try {
-      headWorker = run(['show', `HEAD:${WORKER}`]);
+      headWorker = execFileSync('git', ['show', `HEAD:${WORKER}`], { cwd, encoding: 'utf8' });
     }
     catch {
       headWorker = null;
@@ -119,13 +116,13 @@ export function checkServiceWorkerCache(options = {}) {
     };
   }
   return decideCacheBump({
-    changed: governedAssets(status),
+    changed: governedAssets(changed),
     cache: cacheNameOf(readFileSync(new URL(WORKER, pathUrl(cwd)), 'utf8')),
     head: headWorker === null ? null : cacheNameOf(headWorker),
   });
 }
 
-if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMainModule(import.meta.url)) {
   const report = checkServiceWorkerCache();
   if (report.code === 2) {
     console.error(`cannot read the service worker's cache state: ${report.reason}`);

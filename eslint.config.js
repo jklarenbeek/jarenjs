@@ -42,7 +42,7 @@ export default [
   },
   {
     // CLI tooling: reporting to stdout is the whole point of these programs
-    files: ['scripts/**/*.js', 'benchmark/**/*.js', 'esbuild.config.js',
+    files: ['scripts/**/*.js', 'benchmark/**/*.js',
       'packages/emit/src/cli.js', 'packages/db/src/cli.js', 'packages/contract/src/cli.js'],
     rules: {
       'no-console': 'off',

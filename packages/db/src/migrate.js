@@ -24,7 +24,7 @@ import { canonicalizeJson } from '@jarenjs/json/canonical';
 import { hashContent } from '@jarenjs/core/string';
 import { resolveRuntime } from '@jarenjs/core/runtime';
 import { refuseCancelled } from './cancellation.js';
-import { cloneJson, setObjectMember } from '@jarenjs/core/object';
+import { cloneJson, setObjectMember, isPlainOptions } from '@jarenjs/core/object';
 import { withoutModelRenameHints } from '@jarenjs/core/model';
 import { schemaPosition } from './schema-positions.js';
 import { compileJsonQuery } from '@jarenjs/json/query';
@@ -54,7 +54,7 @@ import { sqlTokens } from './dialects/check-read.js';
 import { comparableDeclaredSql } from './schema-sql.js';
 import { applyTableMigration } from './table-migration.js';
 import { withForeignKeySettings } from './foreign-key-scope.js';
-import { withMigrationConnection, physicalTargetOf, comparePhysicalTarget, verifyShadowOwnership, physicalObjectKey, migrationOwnerOf, lockMigration, migrationWriterSettings, preservationSchemaOf, verifyPreservation, checkPhysicalPreservation } from './migration-target.js';
+import { withMigrationConnection, checkMigrationTarget, physicalTargetOf, comparePhysicalTarget, verifyShadowOwnership, physicalObjectKey, migrationOwnerOf, lockMigration, migrationWriterSettings, preservationSchemaOf, verifyPreservation, checkPhysicalPreservation } from './migration-target.js';
 import { readSchema } from './introspect.js';
 import { verifyPhysical } from './physical.js';
 import { walkPhysicalRows, transformPhysicalRows } from './physical-transform.js';
@@ -121,6 +121,21 @@ function isWidening(from, to) {
 }
 
 /**
+ * Whether an index planned under one model must be rebuilt for its
+ * declaration under the other: its uniqueness or its column list changed.
+ * The collection and entity diffs share this one comparison. Columns compare
+ * element by element, so a column name containing a comma never equals a
+ * split of it (`['a,b']` is not `['a', 'b']`).
+ * @param {{ unique: boolean, columns: readonly string[] }} from
+ * @param {{ unique: boolean, columns: readonly string[] }} to
+ * @returns {boolean}
+ */
+export function indexChanged(from, to) {
+  return from.unique !== to.unique || from.columns.length !== to.columns.length
+    || from.columns.some((column, at) => column !== to.columns[at]);
+}
+
+/**
  * The physical mapping a connection's driver imposes on derived index
  * columns. A driver that can index a registered deterministic function
  * generates them; one that cannot has them written, which is why the
@@ -177,6 +192,108 @@ function snapshotMigrationInputs(migrations, options) {
  */
 function refuse(code, reason, cause) {
   return new DbCompileError(code, reason, undefined, cause);
+}
+
+/**
+ * An admission refusal, answered through the boundary its target promises: a
+ * borrowed `{ connection }` caller gets the throw, an owned `{ driver, path? }`
+ * caller, documented to receive a promise, a rejected one.
+ * @param {any} target @param {unknown} error @returns {Promise<never>}
+ */
+function admissionRefused(target, error) {
+  if (target.connection !== undefined) throw error;
+  return Promise.reject(error);
+}
+
+/** The hook options of the migration entry points: host code, never data. */
+const MIGRATION_HOOKS = ['registerFunctions', 'compileSchema', 'onProgress', 'onAssertionPlan', 'shadowFixture'];
+
+/**
+ * Refuse a malformed control of a migration entry point (`JD0013`) before a
+ * connection is acquired, so a refused owned call creates no file and runs no
+ * hook. Its closed set has already refused unknown names; this reads values:
+ * the cancellation controls, every hook a function, `expressions` a plain
+ * object of declarations, `shadowDriver` a driver with `open()`, `dryRun` and
+ * `shadow` booleans (a string `'true'` must not run a migration for real) and
+ * `shadowPath` a path. A `physicalTarget` is the physical-target owner's to
+ * admit (`JD0021`), `null` included: it is a wrong value, not an absent target.
+ * @param {any} options @param {string} owner @returns {void}
+ */
+function readMigrationControls(options, owner) {
+  readControls(options, owner);
+  if (options === undefined) return;
+  const malformed = (/** @type {string} */ name, /** @type {string} */ rule) =>
+    refuse('JD0013', `${owner} option '${name}' ${rule}`);
+  for (const name of MIGRATION_HOOKS) {
+    if (options[name] !== undefined && typeof options[name] !== 'function') throw malformed(name, 'must be a function');
+  }
+  if (options.expressions !== undefined && !isPlainOptions(options.expressions))
+    throw malformed('expressions', 'must be a plain object of declarations');
+  if (options.shadowDriver !== undefined && typeof options.shadowDriver?.open !== 'function')
+    throw malformed('shadowDriver', 'must be a driver with open()');
+  for (const name of ['dryRun', 'shadow']) {
+    if (options[name] !== undefined && typeof options[name] !== 'boolean') throw malformed(name, 'must be true or false');
+  }
+  if (options.shadowPath !== undefined && typeof options.shadowPath !== 'string')
+    throw malformed('shadowPath', 'must be a database path');
+}
+
+/**
+ * Refuse a migration list that repeats an id (`JD0013`) before anything runs.
+ * A history row is keyed by its id, so a repeated link could never be
+ * recorded: it would run its steps after the earlier links committed and then
+ * fail on the key, and status would report it pending forever. Ids compare
+ * exactly; a document without a string id is the structural check's to refuse.
+ * @param {any[]} migrations @param {string} owner @returns {void}
+ */
+function refuseRepeatedIds(migrations, owner) {
+  /** @type {Map<string, number>} */
+  const positions = new Map();
+  for (const [at, migration] of migrations.entries()) {
+    const id = migration?.id;
+    if (typeof id !== 'string') continue;
+    const first = positions.get(id);
+    if (first !== undefined) {
+      throw refuse('JD0013', `${owner} migration list repeats the id '${id}' at positions ${first} and ${at}; `
+        + 'each migration in a list needs its own id');
+    }
+    positions.set(id, at);
+  }
+}
+
+/** A receipt stamp's magnitude bound: SQLite keeps `applied_at` in a 64-bit
+ * INTEGER column, where a number of 2^63 or more can only be a REAL. */
+const RECEIPT_STAMP_BOUND = 2 ** 63;
+
+/**
+ * Read a receipt stamp from the run's clock: `applied_at` holds integer epoch
+ * milliseconds, and SQLite's 64-bit INTEGER column holds every integer below
+ * 2^63 in magnitude. A clock answering anything else (a fraction, a
+ * non-finite value, one beyond that range) is refused (`JD0013`) on both
+ * dialects, instead of failing as the database's own error on SQLite or
+ * storing the fraction on PostgreSQL. A run reads it before its first link,
+ * so a clock that cannot stamp refuses before any step runs, and again for
+ * every receipt, before its insert, so one that stops being an integer
+ * mid-run refuses that link: rolled back whole, with the links before it
+ * standing, or the whole chain in an atomic run. The shadow's replay is a
+ * run of its own and reads the clock first, so a refusal there comes before
+ * the database runs any step. Below 2^53 both dialects
+ * store the integer exactly; beyond it SQLite keeps the number's own integer
+ * and PostgreSQL's numeric the shortest decimal that reads back as the same
+ * number (2^60 is stored as 1152921504606847000).
+ * @param {{ now: () => number }} runtime @param {string} owner
+ * @param {string} undone - what the refusal leaves unapplied
+ * @returns {number}
+ */
+function receiptStamp(runtime, owner, undone) {
+  const stamp = runtime.now();
+  if (!Number.isInteger(stamp) || Math.abs(stamp) >= RECEIPT_STAMP_BOUND) {
+    const answered = typeof stamp === 'number' || stamp === null || stamp === undefined ? String(stamp)
+      : `${typeof stamp === 'object' ? 'an' : 'a'} ${typeof stamp}`;
+    throw refuse('JD0013', `${owner} option 'runtime': runtime.now() answered ${answered}, `
+      + `and a migration receipt stamps applied_at in integer epoch milliseconds; ${undone}`);
+  }
+  return stamp;
 }
 
 /** A Jaren coded error: it already names its failure. @param {any} error */
@@ -706,8 +823,6 @@ export function planMigration(fromModel, toModel, options = undefined) {
     const columnChanged = (a, b) => a.type !== b.type || a.pathText !== b.pathText
       || (a.expression ?? null) !== (b.expression ?? null)
       || (a.stored === true) !== (b.stored === true);
-    const indexChanged = (a, b) => a.unique !== b.unique
-      || a.columns.join(',') !== b.columns.join(',');
 
     // columns first decide their fate; an index rebuilds when it
     // changes OR when any column it covers is dropped or changed (the
@@ -1110,8 +1225,6 @@ function planEntityChanges(fromModel, toModel, dialect, steps, report, transform
       const disturbed = new Set(droppedColumns);
       const toIndexByName = new Map(toPlanIndexes.map((index) => [index.name, index]));
       const fromIndexByName = new Map(fromPlanIndexes.map((index) => [index.name, index]));
-      const indexChanged = (a, b) => a.unique !== b.unique
-        || a.columns.join(',') !== b.columns.join(',');
       const indexDies = (index) => !toIndexByName.has(index.name)
         || indexChanged(index, toIndexByName.get(index.name))
         || index.columns.some((column) => disturbed.has(column));
@@ -1260,9 +1373,132 @@ function planEntityChanges(fromModel, toModel, dialect, steps, report, transform
   }
 }
 
+const UTF8 = new TextEncoder();
+
+/**
+ * The name PostgreSQL gives a primary key a CREATE leaves unnamed:
+ * `<table>_pkey`, the table's name clipped at a character boundary so the
+ * whole fits the dialect's identifier bound (`maxIdentifierBytes`), as
+ * PostgreSQL's own naming clips it.
+ * @param {string} table @param {number} limit - the identifier bound, in bytes
+ * @returns {string}
+ */
+function postgresKeyName(table, limit) {
+  let kept = '', bytes = 0;
+  for (const character of table) {
+    bytes += UTF8.encode(character).length;
+    if (bytes > limit - '_pkey'.length) break;
+    kept += character;
+  }
+  return `${kept}_pkey`;
+}
+
+/**
+ * The first statement of a PostgreSQL rebuild: the old table locked against
+ * writes for the rest of the link's transaction (reads go on until the old
+ * table is dropped). Without it a write another session commits after the
+ * copy read the table is dropped with the old table, and a key drawn from
+ * the old sequence after the carry read it could be handed out again. A
+ * waiting writer continues once the link commits, against the rebuilt
+ * table: PostgreSQL resolves the name again when the lock it waited for
+ * belongs to a table that is gone. The statement check admits exactly this
+ * statement, as a rebuild step's first (`isRebuildLock`).
+ * @param {any} dialect @param {string} table @returns {string}
+ */
+function rebuildLockSql(dialect, table) {
+  return `LOCK TABLE ${dialect.quoteIdentifier(table)} IN SHARE ROW EXCLUSIVE MODE`;
+}
+
+/**
+ * Whether `sql` is the lock a PostgreSQL rebuild step opens with
+ * (`rebuildLockSql` of the step's own table), the one LOCK a migration
+ * statement may be. @param {any} dialect @param {any} step @param {unknown} sql
+ * @returns {boolean}
+ */
+function isRebuildLock(dialect, step, sql) {
+  if (!dialect?.migration || typeof step?.table !== 'string') return false;
+  try { return sql === rebuildLockSql(dialect, step.table); }
+  catch { return false; }
+}
+
+/**
+ * The statement, in a PostgreSQL rebuild's `create`, that carries a serial
+ * column's allocation from the old table's sequence to the temporary
+ * table's, while both exist. PostgreSQL reads a sequence's position only
+ * from the sequence itself, by a name the plan cannot know (a renamed table
+ * keeps its sequence's old name, an earlier rebuild left a temporary one),
+ * and `pg_sequence_last_value` answers nothing for a sequence whose next
+ * value was set rather than handed out. So the old sequence is asked:
+ * `nextval` answers the value it would hand out next, and `setval(…, false)`
+ * makes that value its next again, so it still hands out the same value
+ * next, also when the step rolls back (a sequence change is never rolled
+ * back). A column without a sequence answers NULL, and nothing is set.
+ * @param {any} dialect @param {string} from - the old table @param {string} to - the temporary table
+ * @param {string} column @returns {string}
+ */
+function carriedSequenceSql(dialect, from, to, column) {
+  const q = dialect.quoteIdentifier;
+  const sequenceOf = (/** @type {string} */ table) => 'pg_catalog.pg_get_serial_sequence('
+    + `${dialect.stringLiteral(q(table))}, ${dialect.stringLiteral(column)})`;
+  return `WITH ${q('_jaren_sequence')} AS (SELECT ${sequenceOf(from)} AS ${q('old')}) `
+    + `SELECT pg_catalog.setval(${sequenceOf(to)}, pg_catalog.setval(${q('old')}, `
+    + `pg_catalog.nextval(${q('old')}), false), false) FROM ${q('_jaren_sequence')}`;
+}
+
+/**
+ * The statement, in a PostgreSQL rebuild's `indexes`, that leaves the
+ * rebuilt table's serial column allocating the greatest of the value the
+ * old table's sequence would have handed out next (carried into this one),
+ * the highest copied value plus one, and 1: never a value the table already
+ * handed out, never one it holds, and never below the sequence's minimum
+ * (a table holding only keys at or below zero allocates 1 next).
+ * @param {any} dialect @param {string} table @param {string} column @returns {string}
+ */
+function advancedSequenceSql(dialect, table, column) {
+  const q = dialect.quoteIdentifier;
+  const sequence = `pg_catalog.pg_get_serial_sequence(${dialect.stringLiteral(q(table))}, ${dialect.stringLiteral(column)})`;
+  return `WITH ${q('_jaren_sequence')} AS (SELECT GREATEST(pg_catalog.nextval(${sequence}), `
+    + `COALESCE(MAX(${q(column)}) + 1, 1), 1) AS ${q('next')} FROM ${q(table)}) `
+    + `SELECT pg_catalog.setval(${sequence}, ${q('next')}, false) FROM ${q('_jaren_sequence')}`;
+}
+
+/** A rebuilt table's primary key, with its schema, when it is not yet under
+ * the name `$2` and no relation of its schema, nor a constraint of its own
+ * table, holds that name. */
+const REBUILT_KEY_SQL = 'SELECT n.nspname AS "schema", i.relname AS "key" FROM pg_catalog.pg_index x '
+  + 'JOIN pg_catalog.pg_class t ON t.oid = x.indrelid JOIN pg_catalog.pg_class i ON i.oid = x.indexrelid '
+  + 'JOIN pg_catalog.pg_namespace n ON n.oid = t.relnamespace '
+  + 'WHERE x.indrelid = pg_catalog.to_regclass($1) AND x.indisprimary AND i.relname <> $2 '
+  + 'AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_class c WHERE c.relnamespace = t.relnamespace AND c.relname = $2) '
+  + 'AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_constraint k WHERE k.conrelid = t.oid AND k.conname = $2)';
+
+/**
+ * The last part of a PostgreSQL rebuild, the runner's: the primary key takes
+ * the name a create gives it, `<table>_pkey`, where no other relation holds
+ * that name. PostgreSQL named it after the temporary table
+ * (`<table>__rebuild_pkey`, with a number appended where that name was
+ * taken), and no statement renames only to a free name, so the runner looks
+ * the names up. Where `<table>_pkey` is held — by the key of a table renamed
+ * away from this name, say — the key keeps its name, which the duplicate-key
+ * classification also reads as this table's.
+ * @param {any} connection @param {string} table @returns {any} value-or-promise
+ */
+function nameRebuiltKey(connection, table) {
+  const q = connection.dialect.quoteIdentifier;
+  const natural = postgresKeyName(table, connection.dialect.maxIdentifierBytes);
+  return chain(useStatementOnce(connection, REBUILT_KEY_SQL, (statement) => statement.all([q(table), natural])),
+    (/** @type {any[]} */ rows) => (rows.length === 0 ? null
+      : connection.exec(`ALTER INDEX ${q(String(rows[0].schema))}.${q(String(rows[0].key))} RENAME TO ${q(natural)}`)));
+}
+
 /**
  * Render one rebuild step (§10): self-contained SQL — the temporary
- * table, the column-mapped copy, the final-name indexes.
+ * table, the column-mapped copy, the final-name indexes. On PostgreSQL
+ * the step opens by locking the old table against writes (`rebuildLockSql`),
+ * the copy also carries each row's `rid` (the order an entity reads in),
+ * and every serial column — an allocated key, the `rid` — continues from
+ * the old table's sequence: `create` carries its position across before the
+ * old table is dropped, and `indexes` advances it past the copied values.
  */
 function renderRebuild(name, fromName, fm, tm, fromMapping, toMapping, dialect, report) {
   const q = dialect.quoteIdentifier;
@@ -1370,6 +1606,30 @@ function renderRebuild(name, fromName, fm, tm, fromMapping, toMapping, dialect, 
   }
   targets.push(q('doc'));
   sources.push(docExpr);
+  if (dialect.name === 'postgres') {
+    // writers wait from the first statement on: nothing committed after the
+    // copy read the table is dropped with it, and no key is drawn from the
+    // old sequence after the carry read it
+    create.unshift(rebuildLockSql(dialect, name));
+    // PostgreSQL's serial columns: an allocated key, and the `rid` every
+    // table carries, by which an entity's rows read in the order they were
+    // written. The copy keeps each row's `rid`, and every serial column's
+    // sequence continues from the old table's: `create` carries the old
+    // position across while both tables exist (a key column the old table
+    // lacked had none to carry), `indexes` advances it past the copied values
+    const identity = dialect.identityColumn?.name;
+    const serials = tm.columns.filter((/** @type {any} */ c) => c.key && c.auto === true)
+      .map((/** @type {any} */ c) => c.name);
+    if (identity !== undefined && !ordered.some((entry) => entry.name === identity)) {
+      targets.push(q(identity));
+      sources.push(q(identity));
+      serials.push(identity);
+    }
+    for (const column of serials) {
+      if (column === identity || fromColumns.has(column)) create.push(carriedSequenceSql(dialect, name, temporary, column));
+      indexes.push(advancedSequenceSql(dialect, name, column));
+    }
+  }
 
   if (lost.length > 0) report.destructive = true;
   const copy = `INSERT INTO ${q(temporary)} (${targets.join(', ')}) `
@@ -1712,7 +1972,8 @@ function runSteps(connection, migration, options) {
         // transaction — a reference the rebuild broke fails the migration,
         // one broken before it began is not the rebuild's doing, and
         // neither is a parent an earlier step renamed, which the rebuilt
-        // REFERENCES clause names by its new name
+        // REFERENCES clause names by its new name. PostgreSQL has no such
+        // check and names the primary key afterwards (nameRebuiltKey)
         const temporary = `${current.table}__rebuild`;
         const renamedSoFar = renamesOf(migration.steps.slice(0, i));
         const statements = [
@@ -1722,11 +1983,21 @@ function runSteps(connection, migration, options) {
           dialect.ddl.renameTable(temporary, current.table),
           ...current.indexes,
         ];
+        const dropAt = current.create.length + 1;
+        // PostgreSQL refuses to drop a table another object depends on, and a
+        // rebuild re-points nothing: a foreign key (another entity's, or the
+        // temporary table's copy of a self-reference), a view, a rule — the
+        // server's own detail names it, whatever its kind
+        const referenced = (/** @type {any} */ cause) => (cause?.code !== '2BP01' ? cause : Object.assign(refuse('JD0023',
+          `migration '${migration.id}' step ${i} (rebuild) failed: a PostgreSQL rebuild of an entity that another object `
+          + `depends on is not supported: the old '${current.table}' cannot be dropped while `
+          + `${typeof cause.detail === 'string' && cause.detail !== '' ? cause.detail.split('\n').join('; ') : 'other objects depend on it'}`,
+          cause), verdictOf(cause)));
         /** @type {any[] | null} */
         let before = null;
         const runNext = (j) => {
           if (j >= statements.length) {
-            if (before === null) return null;
+            if (before === null) return dialect.name === 'postgres' ? nameRebuiltKey(connection, current.table) : null;
             return chain(foreignKeyViolations(connection), (after) => {
               const violations = introducedViolations(before, /** @type {any[]} */ (after), { parent: renamedSoFar });
               if (violations.length > 0) {
@@ -1738,7 +2009,8 @@ function runSteps(connection, migration, options) {
             });
           }
           try {
-            return chain(connection.exec(statements[j]), () => runNext(j + 1));
+            return chain(attempt(() => connection.exec(statements[j]), (cause) => (j === dropAt ? referenced(cause) : cause)),
+              () => runNext(j + 1));
           }
           catch (cause) {
             return fail(/** @type {Error} */ (cause).message, /** @type {Error} */ (cause));
@@ -1972,18 +2244,20 @@ function acceptMigrationModel(connection, model, options, driver, physical, targ
  * Numeric fields are database-produced decimal text, including rowid/rid.
  * @param {{driver?: any, path?: string, connection?: any}} target
  * @param {{signal?: AbortSignal, deadline?: number, runtime?: any}} [options]
- * @returns {any} Synchronous for borrowed synchronous connections; promised when owned. */
+ * @returns {any} Synchronous for borrowed synchronous connections; promised when owned,
+ *   every admission refusal included. */
 export function migrationHistory(target, options = {}) {
+  checkMigrationTarget(target);
   let check;
   try {
     readOptions(options, ['runtime', 'signal', 'deadline'], 'migrationHistory()');
-    readControls({ signal: options?.signal }, 'migrationHistory()');
+    readMigrationControls(options, 'migrationHistory()');
     const runtime = resolveRuntime(options.runtime);
     check = () => refuseCancelled({ signal: options.signal, deadline: options.deadline }, runtime.now,
       { abortCode: 'JD2080', aborted: 'it ran', passed: 'the history read ran', ran: 'no receipt changed' });
     check();
   }
-  catch (error) { if (target?.connection !== undefined) throw error; return Promise.reject(error); }
+  catch (error) { return admissionRefused(target, error); }
   return attempt(() => withMigrationConnection(target, (connection) => {
     if (connection.mustQueue) throw refuse('JD0021', 'history needs an exclusively available connection or its owning transaction scope');
     return chain(readMigrationHistory(connection), (observed) => { check(); return observed; });
@@ -1998,20 +2272,25 @@ export function migrationHistory(target, options = {}) {
  * @param {{observed: any, model: any, physicalTarget?: any, shadowDriver?: any,
  * registerFunctions?: Function, compileSchema?: Function, expressions?: any,
  * batchSize?: number, runtime?: any, signal?: AbortSignal, deadline?: number}} options
- * @returns {any} `{adopted, unchanged}` receipt counts, value-or-promise. */
+ * @returns {any} `{adopted, unchanged}` receipt counts, value-or-promise; promised when
+ *   owned, every admission refusal included. */
 export function adoptMigrationHistory(target, migrations, options) {
-  readOptions(options, ['observed', 'model', 'physicalTarget', 'shadowDriver', 'registerFunctions',
-    'compileSchema', 'expressions', 'batchSize', 'runtime', 'signal', 'deadline'], 'adoptMigrationHistory()');
-  readControls({ signal: options?.signal }, 'adoptMigrationHistory()');
-  if (!Array.isArray(migrations) || migrations.length === 0)
-    throw new TypeError('adoptMigrationHistory needs the complete nonempty applied legacy migration list');
-  if (options?.model === undefined || options?.observed === undefined)
-    throw new TypeError('adoptMigrationHistory needs { observed, model }: a reviewed history observation and its current model');
-  const batchSize = options.batchSize ?? 500;
-  if (!Number.isSafeInteger(batchSize) || batchSize < 1) throw new TypeError('batchSize must be a positive safe integer');
-  let check, header, expected, selectedTarget;
+  checkMigrationTarget(target);
+  let check, header, expected, selectedTarget, batchSize;
   try {
+    readOptions(options, ['observed', 'model', 'physicalTarget', 'shadowDriver', 'registerFunctions',
+      'compileSchema', 'expressions', 'batchSize', 'runtime', 'signal', 'deadline'], 'adoptMigrationHistory()');
+    readMigrationControls(options, 'adoptMigrationHistory()');
+    if (!Array.isArray(migrations) || migrations.length === 0)
+      throw new TypeError('adoptMigrationHistory needs the complete nonempty applied legacy migration list');
+    if (options?.model === undefined || options?.observed === undefined)
+      throw new TypeError('adoptMigrationHistory needs { observed, model }: a reviewed history observation and its current model');
+    batchSize = options.batchSize ?? 500;
+    if (!Number.isSafeInteger(batchSize) || batchSize < 1) throw new TypeError('batchSize must be a positive safe integer');
     [migrations, options] = snapshotMigrationInputs(migrations, options);
+    refuseRepeatedIds(migrations, 'adoptMigrationHistory()');
+    // an explicit target is admitted as given: `null` is refused, never read as absent
+    if (options.physicalTarget !== undefined) physicalTargetOf(options.physicalTarget);
     checkHistoryObservation(options.observed);
     if (migrations.length !== options.observed.history.rows.length || migrations.some((migration) => migration?.$migration !== '0.1'))
       throw refuse('JD0022', 'adoption requires exactly the complete applied legacy 0.1 prefix, with no pending tail');
@@ -2033,7 +2312,7 @@ export function adoptMigrationHistory(target, migrations, options) {
       { abortCode: 'JD2080', aborted: 'its next receipt', passed: 'its next receipt', ran: 'no partial adoption committed' });
     check();
   }
-  catch (error) { if (target?.connection !== undefined) throw error; return Promise.reject(error); }
+  catch (error) { return admissionRefused(target, error); }
   return attempt(() => withMigrationConnection(target, (connection) => {
     if (connection.mustQueue) throw refuse('JD0021', 'adoption needs an exclusively available connection or its owning transaction scope');
     return chain(migrationWriterSettings(connection, check), () => chain(registerDeriveFunctions(connection), () =>
@@ -2111,7 +2390,7 @@ function replayOnShadow(primary, driver, shadowPath, baseline, migrations, model
         shadowFixture: undefined, hosts: shadowHosts(options.hosts),
         registerFunctions: options.registerFunctions === undefined ? undefined
           : (reference) => reference === shadow ? null : options.registerFunctions(reference),
-      }, replay))))))));
+      }, replay, true))))))));
 }
 
 /** A fixture can seed application data, never receipts that skip replay. */
@@ -2132,11 +2411,13 @@ function shadowHosts(hosts) {
 
 /**
  * Report a database's migration state without touching it — the
- * history table is probed, never created, so a fresh file stays byte
+ * history table is probed, never created, so an existing file stays byte
  * for byte what it was: what is applied, what is pending, whether an
  * applied migration was edited, and — once the chain is fully applied —
  * whether the physical shape DRIFTED from the model (someone changed
- * the database by hand, §12).
+ * the database by hand, §12). An owned SQLite target opens its `path`
+ * through its driver, which creates a file that does not exist; a
+ * PostgreSQL target is the schema its driver names.
  * @param {{ driver?: any, path?: string, connection?: any }} target
  * @param {any[]} migrations - the full ordered list
  * @param {{ model?: any, physicalTarget?: any, shadowDriver?: any,
@@ -2146,18 +2427,24 @@ function shadowHosts(hosts) {
  *   - `signal`/`deadline` refuse a call already cancelled (`JD2080`) or
  *   past its deadline (`JD2075`) on the runtime record's clock
  * @returns {any} value-or-promise of applied/pending/drift/upToDate;
- *   a borrowed synchronous connection stays synchronous with a physical target
+ *   a borrowed synchronous connection stays synchronous with a physical target;
+ *   promised when owned, every admission refusal included
  */
 export function migrationStatus(target, migrations, options = {}) {
+  checkMigrationTarget(target);
   try {
     readOptions(options, ['model', 'physicalTarget', 'shadowDriver', 'registerFunctions', 'runtime', 'signal', 'deadline'], 'migrationStatus()');
-    readControls({ signal: options?.signal }, 'migrationStatus()');
-    if (Array.isArray(migrations)) [migrations, options] = snapshotMigrationInputs(migrations, options);
+    readMigrationControls(options, 'migrationStatus()');
+    if (!Array.isArray(migrations)) throw new TypeError('migrationStatus needs the full ordered migration list');
+    [migrations, options] = snapshotMigrationInputs(migrations, options);
+    refuseRepeatedIds(migrations, 'migrationStatus()');
+    // an explicit target is admitted as given, pending work or not: `null` is
+    // refused, never read as absent
+    if (options.physicalTarget !== undefined) physicalTargetOf(options.physicalTarget);
     refuseCancelled({ signal: options.signal, deadline: options.deadline }, resolveRuntime(options.runtime).now,
       { abortCode: 'JD2080', aborted: 'it ran', passed: 'the status read ran', ran: 'no step ran' });
   }
-  catch (error) { if (target?.connection !== undefined) throw error; return Promise.reject(error); }
-  if (!Array.isArray(migrations)) throw new TypeError('migrationStatus needs the full ordered migration list');
+  catch (error) { return admissionRefused(target, error); }
   // a driver failure — a file that will not open, one that is not a
   // database — is classified as a run's is (JD0023), never the binding's own
   return attempt(() => withMigrationConnection(target, (connection) => {
@@ -2217,52 +2504,60 @@ export function migrationStatus(target, migrations, options = {}) {
  *   clock); a cancelled migration rolls back whole and the completed
  *   ones stand.
  *   `runtime` is the host's runtime record: the clock every applied
- *   migration is stamped with, and the clock and identifiers an entity
- *   step's `default: 'now'` / `default: 'uuid'` fill; the platform's own
- *   when absent
- * @returns {any} Owned targets return a promise. Borrowed synchronous targets
- *   with shadow:false and synchronous hooks settle in their caller's transaction.
+ *   migration is stamped with (integer epoch milliseconds; a clock that
+ *   answers anything else is refused `JD0013` before the first link runs,
+ *   or before the receipt of a link it can no longer stamp, which rolls
+ *   back whole — the whole chain in an atomic run; the shadow's replay
+ *   reads it first, and a refusal there leaves the database without a
+ *   step run), and the clock and identifiers an entity step's `default: 'now'` /
+ *   `default: 'uuid'` fill; the platform's own when absent
+ * @returns {any} Owned targets return a promise, every refusal included. Borrowed
+ *   synchronous targets with shadow:false and synchronous hooks settle in their
+ *   caller's transaction, and throw their refusals.
  */
 export function migrate(target, migrations, options) {
   return runMigration(target, migrations, options);
 }
 
-/** The replay authority is created only after primary exact receipt verification. */
-function runMigration(target, migrations, options, replay = undefined) {
-  readOptions(options, ['baseline', 'model', 'compileSchema', 'dryRun', 'batchSize', 'onProgress',
-    'shadow', 'shadowPath', 'shadowDriver', 'shadowFixture', 'physicalTarget', 'registerFunctions',
-    'expressions', 'assertionBounds', 'onAssertionPlan', 'signal', 'deadline', 'runtime', 'hosts', 'atomic'], 'migrate()');
-  readControls({ signal: options?.signal }, 'migrate()');
-  if (!target || typeof target !== 'object' || (target.connection === undefined && typeof target.driver?.open !== 'function'))
-    throw new TypeError('migrate needs { driver, path? } or { connection }');
-  if (!Array.isArray(migrations)) throw new TypeError('migrate needs the full ordered migration list');
-  if (!options || typeof options !== 'object' || options.baseline === undefined)
-    throw new TypeError('migrate needs { baseline }: the model the store was first created with');
-  const batchSize = options.batchSize ?? 500;
-  if (!Number.isSafeInteger(batchSize) || batchSize < 1) throw new TypeError('batchSize must be a positive safe integer');
-  if (options.shadowFixture !== undefined && typeof options.shadowFixture !== 'function') throw new TypeError('shadowFixture must initialize a disposable connection');
-  try { [migrations, options] = snapshotMigrationInputs(migrations, options); }
-  catch (error) { if (target.connection !== undefined) throw error; return Promise.reject(error); }
-  const runtime = resolveRuntime(options.runtime);
-  const check = () => refuseCancelled({ signal: options.signal, deadline: options.deadline }, runtime.now, {
-    abortCode: 'JD2080', aborted: 'its next step', passed: 'its next step',
-    ran: 'no further step ran; a migration in flight rolled back whole and a rerun resumes from the recorded position',
-  });
-  const hosts = readHosts(options.hosts);
-  if (options.atomic !== undefined && typeof options.atomic !== 'boolean') throw new TypeError('atomic must be a boolean');
-  const atomic = options.atomic === true;
-  // what the steps and the shadow's replay read; the shadow replays link by
-  // link — its last link makes the same final check an atomic run makes at
-  // its end — so `atomic` stays the primary's
-  const runOptions = { batchSize, assertionBounds: normalizeAssertionBounds(options.assertionBounds),
-    onProgress: options.onProgress, onAssertionPlan: options.onAssertionPlan,
-    registerFunctions: options.registerFunctions, expressions: options.expressions,
-    compileSchema: options.compileSchema, physicalTarget: options.physicalTarget,
-    shadowFixture: options.shadowFixture, model: options.model, hosts,
-    signal: options.signal, deadline: options.deadline, runtime, check };
-  try { check(); }
-  catch (error) { if (target.connection !== undefined) throw error; return Promise.reject(error); }
-  if (options.physicalTarget !== undefined) physicalTargetOf(options.physicalTarget);
+/** The replay authority is created only after primary exact receipt verification.
+ * `shadowReplay` marks the shadow's own run, so its refusals say the database ran nothing. */
+function runMigration(target, migrations, options, replay = undefined, shadowReplay = false) {
+  checkMigrationTarget(target);
+  // admission: every refusal before acquisition answers through the target's boundary
+  let batchSize, runtime, check, hosts, atomic, runOptions;
+  try {
+    readOptions(options, ['baseline', 'model', 'compileSchema', 'dryRun', 'batchSize', 'onProgress',
+      'shadow', 'shadowPath', 'shadowDriver', 'shadowFixture', 'physicalTarget', 'registerFunctions',
+      'expressions', 'assertionBounds', 'onAssertionPlan', 'signal', 'deadline', 'runtime', 'hosts', 'atomic'], 'migrate()');
+    readMigrationControls(options, 'migrate()');
+    if (!Array.isArray(migrations)) throw new TypeError('migrate needs the full ordered migration list');
+    if (!options || typeof options !== 'object' || options.baseline === undefined)
+      throw new TypeError('migrate needs { baseline }: the model the store was first created with');
+    batchSize = options.batchSize ?? 500;
+    if (!Number.isSafeInteger(batchSize) || batchSize < 1) throw new TypeError('batchSize must be a positive safe integer');
+    [migrations, options] = snapshotMigrationInputs(migrations, options);
+    refuseRepeatedIds(migrations, 'migrate()');
+    runtime = resolveRuntime(options.runtime);
+    check = () => refuseCancelled({ signal: options.signal, deadline: options.deadline }, runtime.now, {
+      abortCode: 'JD2080', aborted: 'its next step', passed: 'its next step',
+      ran: 'no further step ran; a migration in flight rolled back whole and a rerun resumes from the recorded position',
+    });
+    hosts = readHosts(options.hosts);
+    if (options.atomic !== undefined && typeof options.atomic !== 'boolean') throw new TypeError('atomic must be a boolean');
+    atomic = options.atomic === true;
+    // what the steps and the shadow's replay read; the shadow replays link by
+    // link — its last link makes the same final check an atomic run makes at
+    // its end — so `atomic` stays the primary's
+    runOptions = { batchSize, assertionBounds: normalizeAssertionBounds(options.assertionBounds),
+      onProgress: options.onProgress, onAssertionPlan: options.onAssertionPlan,
+      registerFunctions: options.registerFunctions, expressions: options.expressions,
+      compileSchema: options.compileSchema, physicalTarget: options.physicalTarget,
+      shadowFixture: options.shadowFixture, model: options.model, hosts,
+      signal: options.signal, deadline: options.deadline, runtime, check };
+    check();
+    if (options.physicalTarget !== undefined) physicalTargetOf(options.physicalTarget);
+  }
+  catch (error) { return admissionRefused(target, error); }
   const referenceDriver = options.shadowDriver ?? target.driver;
   // whatever a run meets leaves migrate() classified: a driver error is
   // JD0023 with its class, never the binding's own error
@@ -2342,6 +2637,10 @@ function runMigration(target, migrations, options, replay = undefined) {
                     migrationStep.copy, dialect.ddl.dropTable(migrationStep.table),
                     dialect.ddl.renameTable(`${migrationStep.table}__rebuild`, migrationStep.table), ...migrationStep.indexes);
                   if (dialect.capabilities.foreignKeysAlwaysOn !== true) rendered.push(dialect.pragma.foreignKeyCheck());
+                  if (dialect.name === 'postgres') {
+                    rendered.push(`-- the primary key is renamed to ${dialect.quoteIdentifier(postgresKeyName(migrationStep.table,
+                      dialect.maxIdentifierBytes))} where no other relation holds that name`);
+                  }
                 }
                 else if (migrationStep.kind === 'jslt') rendered.push(`-- jslt transform over '${migrationStep.collection}'`);
                 else if (migrationStep.kind === 'host') {
@@ -2442,9 +2741,19 @@ function runMigration(target, migrations, options, replay = undefined) {
               work = chain(work, () => chain(acceptTarget(scope, legacyTarget), () =>
                 acceptMigrationModel(scope, JSON.parse(header.legacyModelSource), runOptions, referenceDriver, migration.physical, legacyTarget)));
             }
-            return chain(work, () => chain(useStatementOnce(scope, statements.insert, (insert) =>
-              insert.run([migration.id, runtime.now(), migration.from, migration.to, migrationChecksum(migration), migration.steps.length])),
-            () => record(scope, migration)));
+            return chain(work, () => {
+              // the receipt's own stamp, admitted before its insert: a clock
+              // that stopped answering an integer refuses this link whole —
+              // the whole chain in an atomic run, and in the shadow's replay
+              // before the database runs any step
+              const stamp = receiptStamp(runtime, 'migrate()', shadowReplay
+                ? `the shadow's replay refused migration '${migration.id}', and no step ran on the database`
+                : atomic ? `the atomic run rolled back whole, migration '${migration.id}' and every link before it`
+                  : `migration '${migration.id}' rolled back whole, and the links before it stand`);
+              return chain(useStatementOnce(scope, statements.insert, (insert) =>
+                insert.run([migration.id, stamp, migration.from, migration.to, migrationChecksum(migration), migration.steps.length])),
+              () => record(scope, migration));
+            });
           };
           // link by link: each commits on its own, and the last makes the final checks
           const applyNext = (i) => {
@@ -2487,6 +2796,9 @@ function runMigration(target, migrations, options, replay = undefined) {
             return attempt(() => connection.transaction(body, options.signal, 'immediate'),
               (error) => runFailure(error, 'the atomic migration run failed'));
           };
+          // every link this run applies is stamped by this clock: one it
+          // cannot store refuses here, before the first link's steps
+          receiptStamp(runtime, 'migrate()', 'no step ran');
           return chain(atomic ? applyAtomically() : applyNext(0),
             () => ({ applied, skipped: appliedRows.map((row) => row.id), shape: expectedFrom }));
         });
@@ -2541,10 +2853,13 @@ function checkPreservationPlan(migration, dialect) {
 }
 
 /** A saved step is one statement or one trigger program. Transaction aliases
- * and trailing statements cannot escape its savepoint or publish partial work. */
+ * and trailing statements cannot escape its savepoint or publish partial work.
+ * A PostgreSQL rebuild step's first statement may be its own table's lock
+ * (`rebuildLockSql`), exactly; no other LOCK passes. */
 function checkMigrationStatements(migration, dialect) {
   const fragments = migration.steps.flatMap((step) => step.kind === 'rebuild'
-    ? [...(step.create ?? []), step.copy, ...(step.indexes ?? [])] : step.kind === 'table'
+    ? [...(step.create ?? []).filter((sql, at) => at !== 0 || !isRebuildLock(dialect, step, sql)),
+      step.copy, ...(step.indexes ?? [])] : step.kind === 'table'
       ? [...step.plan.statements, ...step.plan.finish] : ['ddl', 'sql'].includes(step.kind) ? [step.sql] : []);
   for (const sql of fragments) {
     if (dialect?.migration) { dialect.migration.checkSql(sql); continue; }

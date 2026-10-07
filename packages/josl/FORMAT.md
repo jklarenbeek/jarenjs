@@ -155,7 +155,7 @@ the text is still in cutter, token or container state; a crossing is a
 | JOSL / TOML | `maxTotalBytes` | `JOSL2001` |
 | JOSL / TOML | `maxRecordBytes` — one logical line | `JOSL2002` |
 | JOSL / TOML | `maxTokenBytes` — a string or key as written, quotes included | `JOSL2003` |
-| JOSL / TOML | `maxDepth` — inline nesting and header path depth | `JOSL2004` |
+| JOSL / TOML | `maxDepth` — inline nesting, header path depth, and the tables a dotted key opens (counted from its table) | `JOSL2004` |
 | JOSL / TOML | `maxRetainedValues` — values the root holds, starting over per detached `[[]]` item | `JOSL2005` |
 | JSONX / JSON (stream reader) | `maxTotalBytes` | `JSONX2001` |
 | JSONX / JSON (stream reader) | `maxTokenBytes` — a string, key, number or regexp as written | `JSONX2002` |

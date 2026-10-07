@@ -213,7 +213,7 @@ by.
 
 | Method | Emits | `Infer` / `Input` | Status |
 |---|---|---|---|
-| `.form({ visible?, enabled?, assert?, computed?, message? })` | one `x-form` annotation, its members in the README's own order whatever order the author wrote; a second call MERGES into the same annotation rather than replacing it | `this` — the builder's phantoms are untouched, because a rule is an annotation | native; a member `x-form` does not define, or a `message` that is neither a string nor a MessageSpec, `JL0101`; `preview` `JL0102`; a name the context does not bind `JL0104` |
+| `.form({ visible?, enabled?, assert?, computed?, message? })` | one `x-form` annotation, its members in the README's own order whatever order the author wrote; a second call MERGES into the same annotation rather than replacing it | `this` — the builder's phantoms are untouched, because a rule is an annotation | native; a member `x-form` does not define, or a `message` that is neither a string nor a MessageSpec, `JL0101`; `preview` `JL0102`; a name the context does not bind, or the context itself as a value, `JL0104` |
 | `withForm(Base)` | nothing: a NEW class, `Base` plus `form()` and the overriding `meta()`. The route by which a third pen — or a project's own vocabulary — carries `x-form` (§3.5) | `B` (the base class's own type) | native; a non-constructor argument is JavaScript's own `TypeError` from the `extends` clause, not a `LinqBuildError` |
 | `assertOnSubmit(root)` | the root document with one `allOf` branch `{ $query, errorMessage }` per `x-form.assert` in it; a document with no assert answers ITSELF, because a needless `allOf` would be a second spelling of the same schema | `JsonSchema` | native; a value that is neither a builder nor an object schema is `JL0101` |
 
@@ -604,7 +604,7 @@ code states across every pen is the binder's,
 |---|---|
 | `JL0101` | a value this pen cannot spell, or a name → value map it cannot read |
 | `JL0102` | a construct the format cannot carry |
-| `JL0104` | a pen-owned keyword written through `meta()`, or an external a captured rule did not declare |
+| `JL0104` | a pen-owned keyword written through `meta()`, an external a captured rule did not declare, or the rule context itself embedded or spread as a value |
 
 Thirteen sites, the fewest of any pen — which is the same fact §2 states
 from the other side: 27 of 31 names refuse what
@@ -679,6 +679,13 @@ nothing is assignable to, so both spellings are compile errors as well
 |---|---|---|
 | `f.string().meta({ 'x-form': { visible: '$.a' } })` | `meta() cannot write 'x-form' — the forms pen owns that keyword; spell it through form()` | `f.string().form({ visible: … })` |
 | `f.string().form({ assert: (c) => c.nope })` | `a form() assert rule cannot bind 'nope' — its query evaluates with exactly 2 externals, 'value' and 'pointer'; anything else has nothing to bind to — the document being edited is the context's root (c.root), the field's own value c.value and its pointer c.pointer` | `c.root`, `c.value`, `c.pointer` |
+| `f.string().form({ computed: (c) => c })`, `visible: (c) => [c.value, c]`, `computed: (c) => ({ ...c })` | `a form() computed rule's externals argument is not a value — read one by name: value, pointer` | `c.root`, `c.value` or `c.pointer`, by name |
+
+The context is not a value: it NAMES the document and the two externals,
+and the pen used to write it, embedded whole, as an empty object `{}`
+(`{ "computed": {} }`). That refusal is the shared capture's own, so it
+names the two externals and not `c.root`, exactly as the unbound-name
+message's first sentence does.
 
 The unbound-name message opens with the shared capture's own sentence —
 "exactly 2 externals" is a count of the EXTERNALS `compileFormRules`
@@ -925,16 +932,16 @@ for this pen at all.
 
 ## 7. Cost
 
-`@jarenjs/linq/forms` builds to **<!--fact:bundle.forms-->41,164<!--/fact--> bytes** as a minified,
+`@jarenjs/linq/forms` builds to **<!--fact:bundle.forms-->41,903<!--/fact--> bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
 measures and `npm run test:tree-shaking` reports, published rounded
-beside the other nine subpath prices in
+beside the other subpath prices in
 [docs/CONSUMING.md](../../../docs/CONSUMING.md). It carries the schema
 pen it subclasses, and no chain module, no `@jarenjs/forms` byte and no
 model pen.
 
 Most of that figure is the schema pen: `@jarenjs/linq/schema` alone
-is <!--fact:bundle.schema-->37,008<!--/fact--> bytes, so the whole `x-form` vocabulary — the mixin, the rule
-capture, the submit transform and their refusal messages — is about 4 kB
-on top of a pen a form-shaped consumer usually already carries. A
+is <!--fact:bundle.schema-->37,748<!--/fact--> bytes, so the whole `x-form` vocabulary — the mixin, the rule
+capture, the submit transform and their refusal messages — is the
+remainder, on top of a pen a form-shaped consumer usually already carries. A
 consumer importing both subpaths pays the schema pen once.

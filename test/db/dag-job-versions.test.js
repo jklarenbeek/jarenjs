@@ -207,7 +207,7 @@ describe('the legacy upgrade rule is deterministic', () => {
       const raw = new DatabaseSync(dbPath);
       const legacy = JSON.stringify({ revision: 'unknown', inputHash: 'unknown' });
       raw.prepare(`INSERT INTO "${JOB_CHECKPOINTS_TABLE}" (run_id, node_id, value) VALUES (?, ?, ?)`)
-        .run('r', 'identity', legacy);
+        .run('r', '\x1fidentity', legacy);
       raw.close();
 
       runner.start();
@@ -256,7 +256,7 @@ describe('the legacy upgrade rule is deterministic', () => {
       const raw = new DatabaseSync(dbPath);
       raw.prepare(`UPDATE "${JOB_CHECKPOINTS_TABLE}" SET value = ? WHERE run_id = ? AND node_id = ?`)
         .run(JSON.stringify({ revision: stored.value.revision, inputHash: stored.value.inputHash }),
-          'r', 'identity');
+          'r', '\x1fidentity');
       raw.close();
 
       const storeB = await open();

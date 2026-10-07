@@ -163,7 +163,7 @@ repair, because a document that is too large is not damaged.
 | JOSL / TOML | `maxTotalBytes` | `JOSL2001` |
 | JOSL / TOML | `maxRecordBytes` (one logical line) | `JOSL2002` |
 | JOSL / TOML | `maxTokenBytes` (a key or scalar token as written, quotes and regexp flags included) | `JOSL2003` |
-| JOSL / TOML | `maxDepth` (inline nesting, header path depth) | `JOSL2004` |
+| JOSL / TOML | `maxDepth` (inline nesting, header path depth, and a dotted key's tables counted from its table — `a.b.c = 1` opens two levels, like `[a.b]`; dotted keys used to go uncounted) | `JOSL2004` |
 | JOSL / TOML | `maxRetainedValues` (values the root holds; starts over per detached `[[]]` item) | `JOSL2005` |
 | JSONX / JSON stream | `maxTotalBytes` | `JSONX2001` |
 | JSONX / JSON stream | `maxTokenBytes` (a string, key, number or regexp as written) | `JSONX2002` |
@@ -172,8 +172,27 @@ repair, because a document that is too large is not damaged.
 
 The CSV and JOSL limits guard the whole-document parsers too, which run
 the same machines; the JSONX limits are the stream reader's, which is
-where a document arrives a chunk at a time. `CSV_LIMIT_CODES`,
-`JOSL_LIMIT_CODES` and `JSONX_LIMIT_CODES` are the tables as data.
+where a document arrives a chunk at a time — `parseJsonx` refuses them
+with a `TypeError` naming `createJsonxStreamReader`/`parseJsonxStream`,
+where it used to accept and ignore them. A CST (`parseJoslCst`,
+`parseTomlCst`) enforces no limits, so it does not take them either.
+`CSV_LIMIT_CODES`, `JOSL_LIMIT_CODES` and `JSONX_LIMIT_CODES` are the
+tables as data.
+
+**Options are closed.** Every parse, stringify and stream entry point
+(and `toGbnf`) takes exactly its own option set and refuses anything else
+with a `TypeError` before it reads a byte — the low-level formatters
+`formatValue` and `formatSection` read only `mode`, `onNull` and
+`onRegExp`. An unknown member names the nearest valid one
+(`maxDepht` → `maxDepth`, `delimeter` → `delimiter`, `heder` → `header`),
+and a value of the wrong type says what it must be (`headers: 'yes'`,
+`mode: 'JSON'`, `onNull: 'skip'`). These used to be ignored, so a typo
+could silently change a parse or switch off a hostile-input limit. A
+writer's members (`newline`, `fields`, `neutralizeFormulas`) are not a
+reader's — hand a reader only the dialect it reads (`delimiter`,
+`quote`). `parseToml`, `stringifyToml` and `parseTomlCst` refuse `mode`
+(it is always `'toml'`), and `null` options mean none, where several
+entry points used to throw on them.
 
 Field and token limits bound those spans, not an entire record containing many
 small spans. Use `maxRecordBytes` or `maxTotalBytes` as well when the buffered
@@ -515,7 +534,7 @@ has two possible shapes, and they serve different providers:
 1. **A JSON Schema over the data model** — the model emits JSON, and
    `stringifyJosl` renders canonical JOSL text. This works with every
    `json_schema`-capable provider today and composes directly with
-   Tangle's `createStructuredOutput`. It is what this package
+   a host's structured-output helper. It is what this package
    ships: [`schemas/jaren-josl-data.schema.json`](./schemas/jaren-josl-data.schema.json)
    describes the JSON-safe JOSL document (a root table of strings,
    finite numbers, booleans, `null`, arrays and nested tables), and

@@ -130,6 +130,8 @@ function normalizeCapabilities(declared) {
  *   booleanLiteral: (b: boolean) => string,
  *   typeFor: (schemaType: string | undefined, hint: string) => string,
  *   autoKeyType?: string,
+ *   maxIdentifierBytes?: number,
+ *   ownRelationNames?: (table: string, columns: { name: string, type: string }[]) => string[],
  *   comparableColumnType?: (declaredType: string) => string,
  *   columnUsableFor?: (declaredType: string | undefined, kind: string) => boolean,
  *   generatedStorage: string,
@@ -573,6 +575,22 @@ export function createDialect(spec) {
      * than a consequence of the key's type spells it here.
      */
     autoKeyType: spec.autoKeyType,
+    /**
+     * The UTF-8 bytes of an identifier this engine keeps whole — it
+     * truncates a longer one silently (PostgreSQL's 63) — so the plan
+     * refuses a longer name (`JD0004`) before any SQL names it. `Infinity`
+     * where the engine holds a name of any length.
+     */
+    maxIdentifierBytes: spec.maxIdentifierBytes ?? Infinity,
+    /**
+     * The relation names the engine gives a table's own objects when the
+     * CREATE leaves them unnamed — PostgreSQL's primary-key index
+     * `<table>_pkey` and a serial column's sequence `<table>_<column>_seq`
+     * — given the columns the table is created with. They share one
+     * namespace with the indexes the plan names, so the plan refuses an
+     * index under one of them (`JD0004`). None where the engine names none.
+     */
+    ownRelationNames: spec.ownRelationNames ?? (() => []),
     /**
      * One declared column type reduced to the form the catalog reports
      * it as, so the shape check compares like with like: an auto-key's

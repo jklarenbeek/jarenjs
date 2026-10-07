@@ -42,6 +42,14 @@ it('validates and applies JSON patches against an expected revision', async t =>
   assert.equal(result.ok, true); assert.equal(editor.read().document.states.at(-1), 'c');
   assert.equal((await editor.apply([{ op: 'remove', path: '/absent' }], { expectedRevision: result.revision })).ok, false);
 });
+it('commits the JSON an inspector editor holds as the parsed value, through the form event field', t => {
+  const { container, editor } = fixture(t);
+  fire(find(container, n => n.getAttribute?.('aria-label') === 'transition 0'), 'click');
+  const editorOf = pointer => find(find(container, n => n.getAttribute?.('data-pointer') === pointer), n => n.tagName === 'textarea');
+  const guard = editorOf('/guard'); guard.value = '{ "$eq": ["$.ready", true] }'; fire(guard, 'change');
+  const effects = editorOf('/effects'); effects.value = '[{ "run": "log" }]'; fire(effects, 'change');
+  assert.deepEqual(editor.read().document.transitions, [{ from: 'a', event: 'go', to: 'b', guard: { $eq: ['$.ready', true] }, effects: [{ run: 'log' }] }]);
+});
 it('rejects a candidate when an earlier queued manual edit changes its revision', async t => {
   let app, pending;
   const runtime = createFlowRuntime({ getFlow: () => app.getState().flow });

@@ -25,7 +25,9 @@ import { registerLive } from './live.js';
  * A client transaction's options with the client's default unit of work:
  * `'own'` unless the caller NAMED one — an explicit `unitOfWork:
  * undefined` is no choice, so it keeps the default rather than silently
- * sharing the client's tracker (a spread let it override `'own'`).
+ * sharing the client's tracker (a spread let it override `'own'`). Any
+ * other value is a choice and reaches the store as given: a `null` is the
+ * store's to refuse (`JD0013`), exactly as `store.transaction` refuses it.
  * Options the store reads as plain — an object literal or a
  * null-prototype record (`isPlainOptions`, the store's own test) — get the
  * default; anything else passes through untouched, for the store to refuse
@@ -35,7 +37,8 @@ import { registerLive } from './live.js';
 function ownByDefault(transactionOptions) {
   if (transactionOptions === undefined) return { unitOfWork: 'own' };
   if (!isPlainOptions(transactionOptions)) return transactionOptions;
-  return { ...transactionOptions, unitOfWork: transactionOptions.unitOfWork ?? 'own' };
+  const { unitOfWork } = transactionOptions;
+  return { ...transactionOptions, unitOfWork: unitOfWork === undefined ? 'own' : unitOfWork };
 }
 
 /**

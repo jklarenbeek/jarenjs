@@ -75,12 +75,27 @@ The store runs over SQLite — on Node (`@jarenjs/db/node`), on Bun
   non-singular path is rejected at open with `JD0004` naming the
   expression. A composite index takes a non-empty array of paths.
 - Index names MUST be identifiers, unique within their collection.
+- `indexes[].unique` is `true` or `false` (the default).
 - `indexes[].derive` declares a **derived** index: the columns are
   computed FROM the selected member rather than being the member.
   See §2.1.
 
 An invalid model document is `JD0005` with a `docPath` pointing at the
 offending member. Model checking happens before any database work.
+
+**Every declaration is a closed set**, and the runtime and the canonical
+schema (`schemas/jaren-model.schema.json`, `additionalProperties: false`
+at each) agree on it: the root takes `$model`, `collections` and
+`entities`; a collection `schema`, `key`, `identity`, `indexes` and
+`x-rename`; an index `name`, `path`, `expression`, `unique`, `derive`,
+`precision`, `dims` and `physical`; an entity `schema`, `physical`,
+`invariants` and `x-rename` (§9); an invariant the members of §13. Any
+other member — `uniqe` for `unique`, a `where` no collection index
+declares, a `$schema` — is `JD0005` at the member itself
+(`/collections/c/indexes/0/uniqe`), naming the nearest member and the
+declaration's set, checked before any other rule of that declaration.
+An unknown member used to be ignored: a misspelt `unique` opened a store
+whose index was not unique.
 
 **A time series needs no new declaration.** A composite index whose
 LAST path is a finite numeric epoch member is the whole physical
@@ -348,7 +363,29 @@ inference.
 
 Two indexes over the same path share one generated column. A member
 name the dialect's JSON path grammar cannot carry (an embedded `"` or
-a control character, on SQLite) is `JD0004`.
+a control character, on SQLite) is `JD0004`. A backslash in a name is
+written escaped, so the path names the member literally — never the
+member a JSON escape spelled in the name would decode to.
+
+A name the plan gives a table, a column or an index is held whole or
+refused. PostgreSQL keeps 63 bytes of an identifier and truncates a
+longer one silently, so two names that share a prefix would be one: on
+PostgreSQL a planned name past 63 bytes — `gx_<member>` for an indexed
+member, `<collection>_<index name>`, an entity's table, columns,
+`<entity>_<property>` indexes, join tables and their `<Entity>_key`
+columns (§9.3) — is `JD0004` at the model member it comes from, before
+any statement; a join table, a join column and the column of a `via`
+reference the schema does not declare come from no member of their own
+and name their entity (`/entities/<Entity>`). SQLite holds a
+name of any length. An index name PostgreSQL already gives one of the
+table's own objects — its primary key's index `<table>_pkey`, a serial
+column's sequence `<table>_<column>_seq` (`rid`, an allocated key) — is
+`JD0004` at the member or index too: the table is created first, so the
+index would never be. A foreign key's or a check constraint's name
+(`<table>_<column>_fkey`, `_check`) is no relation and takes none.
+PostgreSQL clips the names it gives a table's own objects to its bound, so
+a table named in 59 to 63 bytes keys by `<table, clipped>_pkey`; a
+duplicate key under that name is `JD2001`, as under any other (§7).
 
 **Opening an existing database verifies, never alters.** If a declared
 collection's table already exists it MUST match what the model would
@@ -695,10 +732,12 @@ to own their own statements, independently of the plan cache.
 
 This setting is not a physical statement limit. A remote connection's
 `maxStatements` must also accommodate fixed schema/CRUD statements, each
-plan's auxiliary reads, the finite KNN identity-fetch cache, active cursors
-and reads still finishing after eviction. Set the plan bound with this
-working capacity in mind. Repeated explanations and full-scan refusals
-release their temporary EXPLAIN statements; a refused scan remains `JD0011`.
+plan's auxiliary reads, the finite KNN identity-fetch cache, each entity's
+up to 64 cached native mutation statements (an evicted one is released once
+its use settles), active cursors and reads still finishing after eviction.
+Set the plan bound with this working capacity in mind. Repeated
+explanations and full-scan refusals release their temporary EXPLAIN
+statements; a refused scan remains `JD0011`.
 Counter polling, membership writes and journal reads, and replication's internal
 SQL also release their per-operation statements. A bounded read keeps its statement
 until its cursor has drained or been returned, including on a refused row or byte
@@ -1410,6 +1449,38 @@ string or a number, and a number that is not finite (NaN and ±Infinity
 have no key spelling). On a numeric key column a string that is no decimal
 number (`'abc'`, `'0x7'`) names no row on either engine: `get` answers
 `undefined`, `delete` `false`, `patch` `JD2006` — PostgreSQL never sees it.
+A write under such a key (`insert`, `put`, an entity's `create` or `add`)
+is `JD2002` on both engines before any statement: no read could find the
+row, and PostgreSQL's numeric input would have stored `'0x10'` under 16 —
+replacing the document kept there — and `'NaN'` under a key nothing reads.
+It used to reach the database: SQLite refused it `JD2005`, PostgreSQL wrote
+it. The unit of work refuses it alike: `remove`, `link` and `unlink` (own
+key or target) as they stage it, and a membership array when the save plans
+it — PostgreSQL deleted row 16 for `remove('0x10')` and linked it for
+`link(16, 'tags', '0x10')`, while SQLite deleted nothing. So does `create()`
+with a membership array carrying one, before its insert (PostgreSQL linked
+tag 16, SQLite failed the join row `JD2005`); a key a membership names is
+refused naming the member (`the key "0x10" in 'tags'`). Decimal text
+(`'16'`, `' 7'`) still names its number — in the unit of work too, which
+files and compares a key as the number it names: `remove(16)` after
+`add({ id: '16' })` cancels it, `unlink(2, 'tags', '16')` removes the
+membership to tag 16, and a `link()` of a membership held, in either
+spelling, changes nothing (the unlink was a silent no-op, and such a link
+failed every save on the join table's key). Text spelling a number no
+double holds exactly (`'9007199254740993'`), or none (`'1e400'`), is no
+key the engines agree on: PostgreSQL stores the exact value and reads back
+another (or `null`), SQLite fails every later load `JD2003` or refuses the
+write `JD2005` — keep a numeric key within the safe integer range. An
+entity document whose key member is absent is `JD2002` before any
+statement unless the key is `default: "auto"` (or a generated column of a
+`physical` layout): SQLite stored a single integer key's row under a rowid
+of its own choosing, which no tracked record named, PostgreSQL refused the
+NULL `JD2005`, and a `physical` layout's codec refused it at every save of
+a pending insert no key could discard. Under a `physical` layout the key
+column's codec decides (§12): a key it refuses is its `JD2003` where
+`remove` stages it — the save failed on it every time until `discard` —
+and a read by it answers absent (a `physical` entity is no membership's
+endpoint, so no `link` names one).
 For allocated identities, `put(doc, key)` updates
 a known document and `put(doc)` allocates. On a caller-keyed collection
 the document's key is the key: `put(doc, key)` whose `key` names another
@@ -1482,7 +1553,7 @@ error.
 | `JD0001` | the SQLite library is below the supported floor |
 | `JD0002` | the existing database disagrees with the declared model, or the open failed in the driver |
 | `JD0003` | the driver binding is unavailable on this runtime |
-| `JD0004` | a declared index cannot be mapped to a column |
+| `JD0004` | a declared index cannot be mapped to a column, or a planned table, column or index name is longer than the engine holds (PostgreSQL: 63 bytes, refused when the model is planned; §3), or an index would take a name PostgreSQL gives one of the table's own objects (`<table>_pkey`, `<table>_<column>_seq`; §3) |
 | `JD0005` | the model document is invalid |
 | `JD0006` | an open option named a pragma this store does not configure |
 | `JD0007` | the pragma cannot be applied on this driver or store |
@@ -1591,12 +1662,25 @@ under the same code with the same `class` and `retryable` verdict
 whichever path met it: `busy` (SQLITE_BUSY/LOCKED → `JD2005`,
 retryable), `full` (`JD2082`), `readonly` (`JD2083`), `io` (`JD2084`),
 `corrupt` (`JD2085`), `cantopen` and `constraint` (`JD2005`), `duplicate`
-(a UNIQUE collision on the key column → `JD2001`), `overflow` (a pushed
-integer aggregate past int64 — never raised: the query path re-runs the
-document in the engine and answers the double, and `explain().fallback`
-records it), `data` (`JD2003`, not retryable, when Node's SQLite binding
+(a UNIQUE collision on the key column → `JD2001`), `overflow` (`JD2005`: a
+numeric result past the range of its type, such as an integer a PostgreSQL
+`bigint` column cannot hold), `data` (`JD2003`, not retryable, when Node's SQLite binding
 refuses to represent a stored integer as a JavaScript number), and the fallback
-`error` (`JD2005`). A returned classification owns its mutable metadata;
+`error` (`JD2005`). No pushed `$sum` or `$avg` over an `integer` member —
+in a collection, an entity or a native temporal bucket — raises `overflow`
+or `data` over the values the store writes, which are JavaScript numbers and
+so within the double range: it folds as a double beside its exactness guard
+(§10.6) and leaves any term past `2^53 − 1` out of the fold, so neither
+engine's accumulator can overflow and no statement fails, inside a
+transaction or out of one; a run past the guard is the `'accumulation'`
+fallback, which strict mode refuses. A JSON number past the double range
+that reached a document another way (trusted SQL, another writer) reads
+back as `Infinity`: SQLite then answers the engine's `Infinity`, while
+PostgreSQL's guard cannot read it as a double and refuses the call
+(`JD2005`, class `overflow`), which inside a transaction aborts it
+(`JD2088`). A native bucket over a `number` member keeps the database's own sum
+(§10.6), which on SQLite can still raise either over integer-valued
+readings. A returned classification owns its mutable metadata;
 editing it cannot change how later failures are classified. A classified error
 carries `class`, `retryable` and the driver's error as `cause`; a
 lifecycle that owns its failure code (`JD2078` for maintenance and
@@ -1744,6 +1828,22 @@ graph caps are hard maxima an include's own declaration cannot exceed:
 (or `Infinity`), `maxDepth` refuses a deeper load, and `maxBytes`
 refuses any one item — a document, an entity row, a loaded root graph —
 larger than that many serialised bytes (`JD2076`).
+
+**The call options are a closed set.** A collection's `execute` and
+`query` read `externals`, `strict`, `pushdown`, `profile`, `signal`,
+`deadline` and `strictStreaming`; any other member is `JD0013` naming
+the nearest one, as on `all()` and `page()`, so a misspelt `profile`
+never runs unbounded. `strictStreaming: true` on `execute` is `JD0013`
+too: a whole answer has no stream to hold to. An entity's `load` reads
+`signal`, `deadline` and `profile`, and its specification is closed as
+well (§10.4). The same holds for every other read call: a collection's
+`explain` and an entity query's `execute` read the set above, an entity
+cursor and an entity `explain` read it and the `tracking` its set reads,
+and `loadCursor` reads `signal`, `deadline`, `profile` and `tracking`.
+Each of these calls also refuses a malformed value of a control it reads
+(`JD0013`): a `signal` that is not an `AbortSignal`, a `deadline` that is
+not a finite number, a `strictStreaming` that is not a boolean, and
+`externals` that are not a plain object.
 
 **The member allow-list.** `collections` says which roots a document
 may read; `members` says which MEMBERS of a root it may read. It is
@@ -2002,8 +2102,9 @@ The token is a promise about the FOLD, and three rules enforce it:
   is therefore `pushable: false` and folds in the engine.
 - **a numeric member that cannot hold `null`.** SQL cannot tell a
   stored `null` from an absent member and the engine's sequence can, so
-  the promotion needs the same schema-typed path the core `$sum` and
-  `$avg` need. An absent member contributes nothing on either side.
+  the promotion needs a schema-typed numeric path that admits no `null`,
+  as the core `$sum` and `$avg` do (which push only over an `integer`
+  path, §10.6). An absent member contributes nothing on either side.
 
 A registered fold inside a `$groupby` return is not promoted — the
 grouped SQL fold currently handles the built-in aggregate set only — and
@@ -2115,13 +2216,18 @@ be declared on an entity, and §13's invariants cannot express it
 either: a rule sees `{ old, new, op }` and never another row. Such a
 guarantee lives in application code inside the writing transaction
 until entity-level `indexes` exist. This is stated here so a model
-author meets it while writing the model rather than at `openStore`.
+author meets it while writing the model rather than at `openStore` —
+where an `indexes` member on an entity is `JD0005` (§2), never dropped.
 
 **An unknown member of `x-entity` is `JD0030` with a `docPath`.** A
 silently ignored mapping directive is a data-loss bug waiting to
 happen, so this vocabulary is deliberately stricter than the
 validator's ignore-unknown posture — the strictness is local to the
-one namespace this package owns.
+one namespace this package owns. The flags `key`, `unique`, `index`
+and `version`, and a relation's `many`, are `true` or `false`: any other
+value is `JD0005` at the member (`'true'` used to read as `false`,
+dropping a property from a composite key or an entity's version guard).
+The entity declaration around the schema is closed as well (§2).
 
 The vocabulary is closed in POSITION as well as in name: `x-entity` is
 read on an entity's top-level property schemas, including their `allOf`
@@ -2270,6 +2376,33 @@ caller-supplied (any scalar key, composite included);
 an index-locality choice, documented as NOT a sortable-id guarantee).
 Composite keys are ordinary: mark several properties `key: true`;
 reads and deletes take `{ prop: value, … }`.
+
+**An `auto` key is allocated on both engines, differently.** SQLite
+allocates through the key's `INTEGER PRIMARY KEY` (the rowid), PostgreSQL
+through a `bigserial` key column; a foreign-key or join-table column that
+references such a key is `bigint` there, so the constraint stays
+implementable. SQLite hands out the largest key plus one: a number a
+rolled-back insert drew is handed out again, and a key written explicitly
+is never met. A PostgreSQL sequence lives outside the transaction: a
+rolled-back insert leaves a gap, and it does not see a key written
+explicitly — the allocation that reaches one is `JD2001` ("under the key
+the database allocated") and the next moves past it, so explicit keys
+beside allocated ones belong outside the range the sequence will reach. A
+PostgreSQL table an earlier release created declared the key `numeric`
+with no allocation; it still opens, explicit keys work, and an insert
+that leaves the key to the database is refused by it (`JD2005`) until the
+column gets its sequence
+([upgrade](MIGRATION-UPGRADE.md#allocated-entity-keys-on-postgresql)).
+The other way round, a key that no longer declares `auto` keeps the
+allocated columns a PostgreSQL database created for it: the store opens
+it under the model as it now stands, every insert carries its key, and
+the sequence stays on the column unused — declared `auto` again, the key
+resumes it, which never saw the explicit keys written meanwhile. An
+entity or a join table the same edit adds, referencing that key, would be
+created `numeric` against the `bigint` key, which PostgreSQL refuses
+(`JD0002` at open, `JD0023` from `migrate()`): add it while the key still
+declares `auto`, or convert the
+key first ([upgrade](MIGRATION-UPGRADE.md#allocated-entity-keys-on-postgresql)).
 
 ### 9.6 Defaults
 
@@ -2511,6 +2644,16 @@ query through `execute()` with externals.
 Include depth is bounded (default 3, override with `maxDepth`);
 exceeding it is `JD0032` with the bound printed. A cyclic include
 specification is rejected. Unknown relation names are `JD0032` too.
+The specification is a closed vocabulary: a plain object whose root
+reads `where`, `orderBy`, `take`, `skip`, `include`, `after` and
+`maxDepth`, and whose include entries are `true` or a plain object
+reading `where`, `orderBy`, `take`, `skip`, `include`, `count`,
+`maxRows` and `maxBytes`. Any other member — `wher` for `where` — is
+`JD0032` naming the nearest one, as is a specification that is not a
+plain object, so a misspelt filter never loads (and tracks) every row;
+`load` and `page`, `loadCursor` and `explainLoad` read it alike. A
+member name the dialect's path grammar cannot spell (a `"` on SQLite)
+is `JD0032` too, since a load has no residual to run it in.
 
 **Every include is bounded per root.** One root graph is the unit a
 graph cursor yields and a page counts, and "one root" is no bound at
@@ -2693,15 +2836,47 @@ keys stays residual to preserve `JQ2005`. Group ordering is stable under ties.
 Literal windows over singleton group constructors lower directly, and the
 proven constructor count wraps the grouped statement in `COUNT(*)`.
 
+A collection `$sum` or `$avg` — over the whole selection or in a
+`$groupby` return — over a `number` path runs in the engine, named
+`plan.floatingAccumulation`: the engine adds left to right in doubles,
+while SQLite sums with Kahan–Babuška compensation and PostgreSQL in
+exact `numeric`, so over `0.1, 0.2, 0.3` a pushed sum would answer `0.6`
+where the engine answers `0.6000000000000001`, and over `1e16, 1, -1e16`
+`1` where it answers `0` — as an entity's floating sums already did.
+One over an `integer` path pushes beside a guard: every partial sum is
+exact while the largest magnitude times the number of terms stays
+within `2^53 − 1`, and a group or total that crosses it is answered by
+the engine over the rows the plan selects — the fetch the floating twin
+reads, so a profile's `maxRows` and `refuseFullScan` bound the SELECTED
+rows, not the collection. `explain().fallback` then reads
+`{ construct: 'accumulation', runs, reason }` (`bind.accumulation`, the
+reason an entity grouping names after the same fallback), and strict
+mode refuses such a run (`JD0010`). The terms fold as doubles and a term
+past the bound is left out of the fold, so over the values the store
+writes the pushed statement itself never fails, on either engine (a JSON
+number past the double range is §7's exception). Because any run can take
+that fallback, a cursor over a whole integer `$sum` or `$avg` — a
+collection's, or a physical entity's column — is `buffered`
+(`bind.accumulationWhole`), and `strictStreaming` declines it (`JD0037`)
+as it declines the floating twin. A native temporal bucket's `$sum` or
+`$avg` over `integer` readings carries the same guard and the same
+fallback.
+
 Two deviations between a pushed answer and the engine's are DECLARED
 rather than refused, because in both the database is right by its own
 arithmetic:
 
-- `$sum`/`$avg` over `number` paths — SQLite sums with Kahan–Babuška
-  compensation and the engine sums naively, so over `0.1, 0.2, 0.3`
-  the store answers `0.6` and the residual `0.6000000000000001`: equal
-  to within an ulp, never equal by `===` (the differential oracle
-  draws dyadic fractions, which are exact on both sides).
+- `$sum`/`$avg` over `number` readings in a native temporal bucket (a
+  `$time-bucket` `$groupby`, and `$resample`'s `sum` and `mean`) — SQL
+  sums with compensation (SQLite) or exactly (PostgreSQL) and the
+  series kernel naively, so over `0.1, 0.2, 0.3` the store answers `0.6`
+  where the kernel answers `0.6000000000000001`: equal to within an
+  ulp, never equal by `===` (the temporal corpus draws dyadic readings,
+  which are exact on both sides). The sum is the database's own, so on
+  SQLite a `number` member holding integer-valued readings sums them as
+  integers: past int64 that bucket is `JD2005` (class `overflow`), and a
+  total past `2^53` is `JD2003` on Node's binding. A member the schema
+  types `integer` carries the exactness guard instead (above).
 - a `$time-bucket` `$groupby` whose aggregated path admits `null`
   (`['number', 'null']`): the pushed `AVG` skips a `null` reading
   exactly as the series kernel — and therefore the `$resample`
@@ -2710,6 +2885,14 @@ arithmetic:
   where the in-memory engine refuses. Everywhere else an ordering or
   an aggregate over a path that admits `null`, or over a boolean path,
   is a named residual, so the two paths keep answering alike.
+
+An ordering over a member declared with more than one type
+(`['integer', 'string']`) is a named residual as well, since the engine
+compares no number with a string (`JQ2005`); a graph load, which has no
+residual, refuses it (`JD0032`). So is a `$sum`, `$avg`, `$min` or `$max`
+over such a member — whole, grouped or in a temporal bucket, over a
+collection or an entity — since SQL would read it as its first type where
+the engine refuses the mixed sequence (`JQ2001`).
 
 ### 10.7 The join table as a query root
 
@@ -2763,24 +2946,86 @@ const report = await store.saveChanges();     // one transaction
 - `put(next)` requires the key to be tracked (`JD2006` otherwise) and
   validates through the injected hook. `add()` completes defaults and
   validates immediately; an `auto` key stays absent until the save
-  allocates it. `remove()` of a pending add cancels it. Documents
+  allocates it. `remove()` of a pending add cancels it, with the
+  `link()`s and `unlink()`s staged under its key before the add or after
+  it (§11.7) — the save used to write their join rows for a row it never
+  inserted, a foreign-key `JD2005`. Documents
   handed to `add`/`put` are adopted and frozen. Staging is
   last-write-wins: `add()` twice under one key keeps the second document
   (like `put`), where the explicit `create()` twice is `JD2001`.
   An `add()` after a pending `remove()` of the same key refuses `JD2003`
   without changing that removal: use `put()`/`update()` for a replacement,
-  or save the removal before staging an insert.
+  or save the removal before staging an insert. A `put()` of a tracked row
+  whose removal is pending IS that replacement: it cancels the removal and
+  the save updates the row (it used to be returned while the save deleted
+  the row anyway), and a `remove()` after it is the last word again. The
+  explicit `update()` is an immediate statement (§11.2) and leaves a
+  pending removal staged.
 - A re-read refreshes a CLEAN record's snapshot; a DIRTY record stays
   authoritative — the read still returns the fresh row. `discard(key)`
   drops tracking without scheduling anything — a pending `remove(key)`
   included; it is the recovery step after a `JD2040` conflict (discard,
   re-read, reapply, save again), on a guarded delete as on an update.
+  A row the database changes through a foreign-key action of a save — a
+  `setNull` reference cleared under a deleted parent — keeps the snapshot
+  it is tracked under: a later `put()` is diffed against that snapshot, so
+  a member it held there (the reference to a parent added back) is not
+  written again. Re-read such a row after the save, then stage the change.
 - A save inside a transaction that later rolls back withdraws exactly
   what it advanced: the records it wrote become pending again (an `auto`
   key's allocated identity is dropped with its row), and the removals and
   membership changes it ran are staged again — while anything staged
   after the save (`add`, `put`, `remove`, `link`, `unlink`) stays as it
-  was staged, the later word on a membership target winning.
+  was staged, the later word on a membership target winning. A key the
+  save deleted and an `add()` staged after it inserted holds both again
+  (the add used to vanish under the restored removal): the next save
+  runs that delete ahead of its inserts, then the insert (§11.4), so the
+  row ends as the add left it. The opposite pair is a `remove()` of a
+  pending add: a row the save inserted and a `remove()` staged after the
+  save deleted are both withdrawn, with the memberships staged against
+  that insert, so the tracker holds what `add(); remove()` leaves —
+  nothing, a later `put()` of the key is `JD2006`, and a removal the save
+  ran under the key comes back. (The row was inserted, then deleted, by the
+  next save, and a later `remove()` of a versioned key failed every save
+  `JD2040`.) The memberships withdrawn with it include those staged under
+  either of its keys — the one the caller gave, or the one the save
+  allocated — before the save or after it.
+  One rule holds all of this: after a rolled-back save the tracker holds
+  exactly what it held before the save plus whatever was staged after
+  it, each later word with the row it belongs to. A word names its row by
+  the key the save gave it — the key an INSERT allocated, the record a
+  re-read filed in place of the one the save advanced — and the rollback
+  takes that key back, so the word moves onto the row as it stood before
+  the save. An edit of a row the save inserted is the pending insert's
+  document again, without the `auto` key the save allocated (on SQLite the
+  next save inserted it under that key and gave the same key to another
+  insert, `JD2001`), and the document `add()` returned still names that
+  insert. A `link()` or `unlink()` by the allocated key is filed against
+  the pending insert (it stayed filed under the dropped key: SQLite linked
+  whichever row the next save allocated it to, PostgreSQL failed every
+  save `JD2005`, and an `unlink` was lost on both). A `remove()` of a row
+  the save updated is guarded by the version the row had before the save
+  (it carried the save's own, `JD2040` on every save). A re-read or a
+  `discard()` after the save drops only what was staged after it: the
+  update or removal the save ran is pending again (a staged update the
+  transaction read again used to be lost, the next save reporting nothing
+  to do). A `link()` staged after the `add()` that follows a saved removal
+  attaches to the added row, a target the removed row held included: the
+  delete takes the old row's join rows along. A row `create()` or
+  `update()` wrote inside the rolled-back transaction, with nothing staged
+  on it since, is no longer tracked, so a `put()` of it is `JD2006`, as of
+  a key never read (it was accepted, and every save failed `JD2040`); the
+  `link()`s and `unlink()`s staged on a row `create()` wrote go with it
+  (they failed every save `JD2005`). A `put()` staged after the save on the
+  row the save deleted — written again by a `create()` inside the
+  transaction — is the replacement of a row whose removal is pending: it
+  cancels the restored removal and the next save updates the row (the
+  removal won, and the put was lost); where no row held the key, the put
+  stays staged and the save meets the row's absence (`JD2040`) rather than
+  dropping it. An `add()` staged after the save over a key the save wrote,
+  then a `remove()` of it, leaves nothing for that key, as `add();
+  remove()` does: the rollback no longer brings back what the save had
+  written there (the next save inserted or updated it again).
 - `asNoTracking()` returns a read-only surface (`get`, `load`) whose
   results are plain UNfrozen data, registered nowhere — a 100k-row
   report retains no snapshots (proven by a forced-GC live-set test).
@@ -2831,7 +3076,38 @@ edges among the inserted entities) → updates → join-table rows (both
 endpoints exist by then) → deletes child-first. An update may
 reference a parent inserted in the same save. A foreign-key cycle —
 self-references included — among the entities being inserted or
-deleted is **`JD0040`** naming the cycle; break the save in two.
+deleted is **`JD0040`** naming the cycle; break the save in two. One
+delete runs first: the removal a rolled-back save staged again under a
+key an `add()` staged after it now holds (§11.1) precedes every insert,
+child-first among its kind, so that key is deleted, then inserted. The
+removals of the rows that reference a row deleted that way come along,
+transitively and child-first: a row read before its `remove()` by the
+reference in its snapshot, a row removed unread by its entity's reference
+alone. A `restrict` reference would refuse the delete ahead, and a
+`cascade` one would delete the row under its own guarded delete (`JD2040`)
+— a parent removed with its children, saved, added back and rolled back
+failed every later save that way until `discard`. A `setNull` reference
+keeps its place: the delete ahead only clears it. The update of a row
+that references a row deleted ahead — by the reference it holds or the
+one it writes — takes its place by the references it changes. One whose
+changed references name rows that exist before the deletes ahead (a
+parent that stays, or none) runs before them, as the updates of any save
+run before its deletes: a child moved to a parent that stays leaves the
+deleted row first, and one edited under it meets the delete as a straight
+save has it meet it (a moved child met the delete first and failed every
+save, `JD2005` or `JD2040`). One that changes a reference to a row this
+save inserts — a new parent, or one deleted ahead and added back — follows
+that insert, which runs first (after the delete ahead of its own key), and
+still precedes the delete of the row it leaves: a child moved between two
+parents both deleted ahead and added back lands on the one added back,
+where it was cascaded away or set null, and one moved to a parent added
+in the same save lands there, where it failed every save `JD2040`. Where
+no order serves every such update — two children swapped between two
+parents both deleted ahead and added back — the updates that need an
+insert keep their place after every insert and meet the deletes ahead
+first: a restricting reference refuses (`JD2005`), a cascading one deletes
+the row under its update (`JD2040`), a set-null one clears the reference
+the update then writes. Save such moves on their own first.
 
 Same-shape inserts of one entity coalesce into multi-row `VALUES`
 statements, bounded by `min(100 rows, ⌊900 parameters / row width⌋)`
@@ -2855,7 +3131,16 @@ version property there is no concurrency check and the report says so:
 `concurrency.unversioned` names every touched entity that has none —
 never a silent last-write-wins the reader believes is protected. (A
 row that vanished entirely still conflicts an update: zero rows is
-zero rows.) An unguarded delete of a missing row is a no-op.
+zero rows.) An unguarded delete of a missing row is a no-op. On SQLite,
+which allocates the largest key plus one, the key a rolled-back save
+allocated — or the highest row's, deleted by another writer — can be
+allocated again, so a `remove()` by such a stale key beside an `add()`
+deletes the row that save inserts under it (inserts run before deletes);
+a PostgreSQL sequence never repeats a key, and the delete finds nothing.
+Discard a key a rollback dropped rather than removing by it. A `put()`
+replacing a pending insert's document keeps the version `add()` started
+the row at when the replacement carries none (it stored SQL `NULL`, and
+every later tracked update failed `JD2040`).
 
 `JD2040` means one thing across the store: an optimistic precondition
 did not hold. For an entity it is the version guard above; for a plain
@@ -2907,16 +3192,25 @@ const report = await store.saveChanges();      // { joinInserted: 1, joinDeleted
   otherwise, naming the relation's kind or the missing declaration. The
   target is read exactly as a membership array's element is: a key, or
   a document carrying the target's key (`JD2003` when it carries none).
-- The own side needs the entity's key. A pending insert whose `auto`
-  key the save allocates has none to attach to and is refused (`JD2003`:
-  "save the entity first, then attach"); a pending insert with a
-  caller-supplied key may be linked in the same save, since join rows
-  run after the inserts (§11.4).
+  A key on either side that names no number under a numeric key column
+  is `JD2002` as the call stages it (§6).
+- The own side needs the entity's key — or, for a pending insert whose
+  `auto` key the save allocates, the document `add()` returned: the delta
+  is filed against that insert, and the join row takes the key its INSERT
+  returns. A document carrying no key that names no pending insert is
+  refused (`JD2003`: "save the entity first, then attach"); a pending
+  insert with a caller-supplied key may be linked in the same save, since
+  join rows run after the inserts (§11.4).
 - The baseline is the join table **as read at save time**, not a
   snapshot: linking a member that already exists and unlinking one that
   does not are no-ops, so a save repeated with the same calls changes
   nothing (asserted). The last word on one target wins — `unlink` after
-  `link` means unlink.
+  `link` means unlink. Such a no-op is settled by the save that finds it
+  so, whether or not the save writes anything else: it stayed pending,
+  counted by `stats()`, refusing SQL the store did not plan (`JD2041`) and
+  writing over a membership changed elsewhere meanwhile. An enclosing
+  rollback stages it again. A target key in decimal text names its number
+  (§6).
 - A `link`/`unlink` beside a `put` carrying the SAME member's membership
   array folds into that array's key-set difference (§11.3): one intent
   per entity, own key and member, never two statements racing for one
@@ -2926,6 +3220,11 @@ const report = await store.saveChanges();      // { joinInserted: 1, joinDeleted
   re-read (`load({ include })`) to see the membership. `discard(key)`
   drops the key's pending membership changes together with its
   tracking, and a failed save leaves them pending, as §11.6 promises.
+  A `remove()` of a pending add cancels the changes filed under its own
+  key (§11.1), not a `link()` naming it as the TARGET — nor does a
+  `discard()` of the add, or the rollback of a `create()` that wrote the
+  target inside a transaction: that join row's foreign key fails the save
+  `JD2005` until the linking side's change is `unlink`ed or `discard`ed.
 - The report counts the rows written under `joinInserted`/`joinDeleted`
   and `stats().tracker.pendingMemberships` counts the pending
   (entity, key, member) records.
@@ -2972,7 +3271,10 @@ codec and SQL NULL policy. `physical.keys` orders the declared key properties;
 without it, property declaration order applies. The physical primary key must
 agree in order. `kind: "view"` requires declared logical keys and refuses writes.
 Join tables can be declared as ordinary entities with ordered composite keys;
-relation navigation across physical layouts is not qualified.
+relation navigation across physical layouts is not qualified, so a model
+whose entity with a layout declares a relation, or whose relation targets
+an entity with a layout, is `JD0005` at open (the second one used to open
+and fail at its first `load({ include })` with a raw `JD2005`).
 
 | Codec | Public representation | Required SQLite affinity |
 |---|---|---|
@@ -3115,7 +3417,17 @@ An entity may declare `invariants`: each has `name`, `on` (insert/update/delete)
 `assert` (a Query expression), and explicit `enforcement` (`database` or `store`).
 The evaluator receives `{ old, new, op }`; the missing record is null. A rule
 passes only on boolean true. Failed rules use `JD2096`, with constraint
-classification.
+classification. A rule's members are the closed set below: an unknown one,
+and every one the model checks refuse, is `JD0005` whose `docPath` names the
+rule and the member (`/entities/Entry/invariants/1/enforcement`) — an
+`assert` that does not compile (the engine's reason quoted; it used to
+escape as the engine's own `JQ` error with an empty `docPath`), a database
+rule on a store-owned layout or a view (at `enforcement`, §13.4) and an
+`audit` into an entity with no writable column layout (at `audit`, §13.5)
+among them. A database rule the trigger lowering cannot translate (an
+operator outside the bounded subset, a column codec it cannot compare,
+§13.4) is refused when the programs are planned — by `openStore` and
+`planInvariants` — still `JD0005` naming the reason, but with no member.
 
 | Member | Meaning |
 |---|---|
@@ -3213,9 +3525,12 @@ every call, so its update rules are checked on every call.
 Database enforcement requires a writable physical layout — in practice
 `physical: { table, columns }` (§12), an explicitly owned column layout.
 A model that lets the store own its layout is refused (`JD0005`,
-"database rules require a writable explicit column layout") however
-simple the rule, so `enforcement: "database"` implies `.physical()`
-today. A store-owned model's rules are `enforcement: "store"`, which
+"database rules require a writable explicit column layout", at the
+rule's `enforcement`) however simple the rule — by `openStore`, the
+model checks and `planInvariants` alike — so `enforcement: "database"`
+implies `.physical()` today. (Such a model used to open with no trigger
+installed, its rule enforced by nothing.) A `kind: "view"` layout takes no
+writes and is refused the same way, at the same member. A store-owned model's rules are `enforcement: "store"`, which
 covers direct and tracked writes but not an external SQL writer.
 Lowering rules over a store-owned layout is open work, not a
 limitation of the rule language.
@@ -3302,7 +3617,8 @@ codec's type, a safe integer, a finite number within ±(2^53−1), a date of yea
 
 An optional database `audit: { entity, values }` inserts into an
 application-owned mapped table after the accepted mutation, after identity
-allocation. Values use old/new scalar references. Self-referential or chained
+allocation; an `entity` the model lacks, or one without a writable column
+layout (store-owned, or a view), is `JD0005` at the rule's `audit`. Values use old/new scalar references. Self-referential or chained
 audit effects refuse — judged by table, so a second entity mapped to the rule's
 own table is that table; all effects share the writer transaction. On
 PostgreSQL an integer audit member fed by a `number` column or a non-integer

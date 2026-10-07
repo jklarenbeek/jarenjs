@@ -30,7 +30,7 @@ export const DB_CODES = Object.freeze({
   JD0001: 'the SQLite library is below the supported floor',
   JD0002: 'the existing database disagrees with the declared model, or the open failed in the driver',
   JD0003: 'the driver binding is unavailable on this runtime',
-  JD0004: 'a declared index cannot be mapped to a column',
+  JD0004: 'a declared index cannot be mapped to a column, or a planned name is longer than the engine holds (PostgreSQL: 63 bytes, refused when the model is planned), or an index would take a name PostgreSQL gives one of the table\'s own objects',
   JD0005: 'the model document is invalid',
   JD0006: 'an open option named a pragma this store does not configure',
   JD0007: 'the pragma cannot be applied on this driver or store',
@@ -70,7 +70,7 @@ export const DB_CODES = Object.freeze({
   JD0023: 'a migration step failed',
   JD0024: 'a document source or target could not be read or written',
   JD0025: 'a migration host step is unknown, its version differs, or it appears where it cannot run',
-  JD0026: 'an atomic migration run contains a rebuild link',
+  JD0026: 'an atomic migration run on SQLite contains a rebuild link',
   JD0027: 'a physical scope is malformed or names a table the plan does not own',
   JD0028: 'legacy migration authority needs attestation',
   JD2001: 'insert found the key already present, or the key is stored under two spellings',
@@ -150,7 +150,15 @@ export const DB_CODES = Object.freeze({
  *    path does not select exactly one member (wildcards, slices,
  *    filters and descendants are not indexable), or its `derive`
  *    declaration is not one the storage vocabulary carries; the reason
- *    names the expression or the member and `docPath` points at it
+ *    names the expression or the member and `docPath` points at it. It is
+ *    also a name the plan gives a table, a column or an index that the
+ *    engine cannot hold whole (`dialect.maxIdentifierBytes`: PostgreSQL
+ *    keeps 63 bytes of an identifier and truncates a longer one silently),
+ *    refused when the model is planned — before any statement — at the
+ *    model member the name comes from; SQLite holds a name of any length.
+ *    So is an index the plan would name as the engine names one of the
+ *    table's own objects (`dialect.ownRelationNames`: PostgreSQL's
+ *    `<table>_pkey` and `<table>_<column>_seq`), which the open would skip
  *  - `JD0005` — the model document is invalid; `docPath` points at
  *    the offending member
  *  - `JD0006` — an `openStore` option named a pragma outside the closed
@@ -189,9 +197,9 @@ export const DB_CODES = Object.freeze({
  *    silently ignored mapping directive is a data-loss bug waiting
  *  - `JD0031` — two relation declarations whose inverses contradict
  *    (different `via`, impossible `many` pairings)
- *  - `JD0033` — a document handed to `store.execute()` over entities
- *    ranges over no declared entity array (`$.<Entity>[*]`); the root
- *    is the map of entity arrays, so there are no rows to answer
+ *  - `JD0033` — a document handed to `store.execute()` or `store.live()`
+ *    over entities ranges over no declared entity array (`$.<Entity>[*]`);
+ *    the root is the map of entity arrays, so there are no rows to answer
  *  - `JD0032` — a graph-load include specification is invalid: an
  *    unknown relation, a cycle, an untranslatable filter, or the
  *    depth bound exceeded (the bound is printed, never silent)
@@ -219,8 +227,8 @@ export const DB_CODES = Object.freeze({
  *  - `JD0025` — a migration host step has no registered host, a host
  *    whose version differs, or runs where there is no transaction (a
  *    documents-only migration)
- *  - `JD0026` — an `atomic` run holds a link that rebuilds a table (the
- *    rebuild changes connection settings outside any transaction)
+ *  - `JD0026` — an `atomic` run on SQLite holds a link that rebuilds a table
+ *    (the rebuild changes connection settings outside any transaction)
  *  - `JD0027` — a physical plan's `scope` is malformed, or names a table
  *    the plan does not own
  *  - `JD0028` — legacy history needs explicit attestation, or pending
@@ -372,13 +380,15 @@ const CANTOPEN = Object.freeze(classification('cantopen', 'JD2005', false, 'the 
 
 const DUPLICATE = Object.freeze(classification('duplicate', 'JD2001', false, 'the key is already present'));
 
-const OVERFLOW = Object.freeze(classification('overflow', null, false, 'an integer aggregate overflowed int64'));
+const OVERFLOW = Object.freeze(classification('overflow', null, false, 'a numeric result left the range of its type'));
 
 /**
  * The classes, in the order they are tried; `code` is the runtime code
- * a wrapped error carries (`null` for the overflow row, which the query
- * path answers by re-running the document in the engine rather than by
- * raising) and `reason` the sentence the wrapped error leads with.
+ * a wrapped error carries (`null` for the overflow row, which has no code
+ * of its own: a wrapped overflow is `JD2005`, and over the values the store
+ * writes no pushed integer sum or average raises one, since each folds only
+ * the terms its exactness guard admits)
+ * and `reason` the sentence the wrapped error leads with.
  */
 const CLASSES = Object.freeze([
   sqliteClass(BUSY, [RESULT.BUSY, RESULT.LOCKED]),
@@ -577,6 +587,18 @@ export function isDriverError(error) {
 }
 
 /**
+ * Whether a SQLite UNIQUE message lists `table.column` as one of the
+ * columns it names — whole, never as the prefix of a longer column name
+ * (`m.pid_seq` does not name `m.pid`).
+ * @param {string} message @param {string} qualified
+ * @returns {boolean}
+ */
+function listsColumn(message, qualified) {
+  const at = message.indexOf('UNIQUE constraint failed:');
+  return message.slice(at + 'UNIQUE constraint failed:'.length).split(',').some((part) => part.trim() === qualified);
+}
+
+/**
  * Classify a driver failure.
  * @param {any} error - the driver's error
  * @param {{ table: string, column: string }} [unique] - the unique key
@@ -596,7 +618,7 @@ export function classifyDriverError(error, unique = undefined) {
   // conflict whose message names the key column — a unique INDEX over
   // another column is a constraint failure, not a duplicate key
   if (unique !== undefined && (extended === 1555
-    || (message.includes('UNIQUE constraint failed') && message.includes(`${unique.table}.${unique.column}`)))) {
+    || (message.includes('UNIQUE constraint failed') && listsColumn(message, `${unique.table}.${unique.column}`)))) {
     return { ...DUPLICATE };
   }
   if (primary === RESULT.ERROR && message.includes('integer overflow')) {
@@ -613,12 +635,58 @@ export function classifyDriverError(error, unique = undefined) {
   return { ...FALLBACK };
 }
 
+const UTF8 = new TextEncoder();
+
+/** PostgreSQL's identifier bound in bytes (`NAMEDATALEN` − 1), the one
+ * `dialects/postgres.js` declares as `maxIdentifierBytes`. */
+const POSTGRES_NAME_BYTES = 63;
+
+/** The longest prefix of `text`, whole characters, within `room` bytes.
+ * @param {string} text @param {number} room */
+function clipBytes(text, room) {
+  let kept = '';
+  let used = 0;
+  for (const character of text) {
+    used += UTF8.encode(character).length;
+    if (used > room) break;
+    kept += character;
+  }
+  return kept;
+}
+
+/**
+ * The name PostgreSQL gives an object it names itself (its
+ * `makeObjectName`): `<name1>[_<name2>]_<label>`, the longer of the two
+ * names shortened first, byte by byte, until the whole fits the
+ * identifier bound, each then clipped at a character boundary. A table of
+ * 59–63 bytes names its key `<table clipped>_pkey`.
+ * @param {string} name1 @param {string | null} name2 @param {string} label
+ */
+function postgresObjectName(name1, name2, label) {
+  let room1 = UTF8.encode(name1).length;
+  let room2 = name2 === null ? 0 : UTF8.encode(name2).length;
+  const available = POSTGRES_NAME_BYTES - (name2 === null ? 0 : 1) - UTF8.encode(label).length - 1;
+  while (room1 + room2 > available) {
+    if (room1 > room2) room1--;
+    else room2--;
+  }
+  return `${clipBytes(name1, room1)}${name2 === null ? '' : `_${clipBytes(name2, room2)}`}_${label}`;
+}
+
 /**
  * The PostgreSQL half: a SQLSTATE into the same closed classes. The
  * server names the constraint it rejected against, so the key's own
  * collision is decided by NAME rather than by parsing a message —
  * `<table>_pkey` is the primary key a collection's key column carries,
  * and a unique INDEX over another column stays a constraint failure.
+ * PostgreSQL appends a number to a key name another relation already
+ * holds (`Post_pkey1`), and a rebuild leaves the key under its temporary
+ * table's name (`Post__rebuild_pkey`) where `<table>_pkey` is held: each
+ * is the table's own key, matched as written. A table renamed since its
+ * key was named keeps the old name, which is not read as its key. Each
+ * name is the one PostgreSQL builds, clipped to its identifier bound as
+ * it clips it ({@link postgresObjectName}), so a long table name keeps
+ * its duplicate key `JD2001`.
  * @param {string} state
  * @param {any} error
  * @param {{ table: string, column: string }} [unique]
@@ -627,7 +695,13 @@ export function classifyDriverError(error, unique = undefined) {
 function classifySqlState(state, error, unique) {
   if (state === '23505' && unique !== undefined) {
     const constraint = typeof error?.constraint === 'string' ? error.constraint : '';
-    if (constraint === `${unique.table}_pkey` || constraint === `${unique.table}_${unique.column}_key`) {
+    // the number PostgreSQL appends to a label whose name was taken
+    const pass = /[1-9]\d*$/.exec(constraint)?.[0] ?? '';
+    const named = (/** @type {string} */ name1, /** @type {string | null} */ name2, /** @type {string} */ label) =>
+      constraint === postgresObjectName(name1, name2, label)
+      || (pass !== '' && constraint === postgresObjectName(name1, name2, `${label}${pass}`));
+    if (named(unique.table, null, 'pkey') || named(clipBytes(`${unique.table}__rebuild`, POSTGRES_NAME_BYTES), null, 'pkey')
+      || named(unique.table, unique.column, 'key')) {
       return { ...DUPLICATE };
     }
   }

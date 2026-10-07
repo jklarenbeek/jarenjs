@@ -23,7 +23,7 @@
 import { cloneJson, deepFreeze, setObjectMember, isJsonObject, isPlainOptions } from '@jarenjs/core/object';
 
 import { LinqBuildError } from '../errors.js';
-import { describeValue, requireJson, requireNameMap } from '../json-boundary.js';
+import { closedTo, describeValue, requireJson, requireNameMap } from '../json-boundary.js';
 import { queryMember } from './capture.js';
 
 const DAG_VERSION = '0.1';
@@ -40,21 +40,6 @@ const EDGE = Symbol.for('@jarenjs/linq/flow-edge');
 const EDGE_MEMBERS = Object.freeze(['port', 'select']);
 /** The members `defineDag()` takes. */
 const DAG_MEMBERS = Object.freeze(['nodes', 'edges']);
-
-/**
- * A member set the pen knows, or `JL0101` naming the one it does not.
- * @param {any} spec
- * @param {readonly string[]} members
- * @param {string} what
- */
-function closedTo(spec, members, what) {
-  for (const key of Object.keys(spec)) {
-    if (!members.includes(key)) {
-      throw new LinqBuildError('JL0101',
-        `${what} does not take '${key}' — it takes ${members.join(', ')}`, `/${key}`);
-    }
-  }
-}
 
 /**
  * One node declaration: immutable, its emitted members carried under

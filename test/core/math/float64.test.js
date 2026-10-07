@@ -17,6 +17,7 @@ import {
   Float64,
   remap,
   clamp01,
+  roundExact,
 } from '@jarenjs/core/math'
   //from '../../../packages/core/src/calc/float64.js';
 
@@ -313,5 +314,24 @@ describe('#clamp01', () => {
 
   it('passes NaN through instead of collapsing it to a boundary', () => {
     assert.ok(Number.isNaN(clamp01(NaN)));
+  });
+});
+
+describe('#Float64.roundTo (rounding the scaled double, not the exact value)', () => {
+  it('rounds value * 10^digits half up, then scales back', () => {
+    // the product is itself a rounded double: 2.675 is stored as
+    // 2.67499..., but 2.675 * 100 rounds to exactly 267.5
+    assert.equal(Float64.roundTo(2.675, 2), 2.68);
+    assert.equal(Float64.roundTo(1.45, 1), 1.5);
+    assert.equal(Float64.roundTo(1.005, 2), 1, 'not the decimal spelling either: 1.005 * 100 is 100.49999...');
+    assert.equal(Float64.roundTo(-2.5, 0), -2, 'a tie goes toward +Infinity');
+    assert.equal(Float64.roundTo(8.345, 2), 8.35);
+  });
+
+  it('differs from roundExact, which rounds the exact value of the double', () => {
+    assert.equal(roundExact(2.675, 2), 2.67);
+    assert.equal(roundExact(1.45, 1), 1.4);
+    assert.equal(roundExact(1.005, 2), 1);
+    assert.equal(roundExact(8.345, 2), 8.35);
   });
 });

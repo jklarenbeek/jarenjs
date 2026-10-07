@@ -9,7 +9,11 @@
  * captures nest, `selectMany` flattens as typed, a `groupJoin` group is
  * the array its type says, the ordered `mapAsync` window fails closed,
  * `get()` reaches every key, and a push queue fed after its end says so
- * with a runtime code.
+ * with a runtime code. A capture also means what it says: a `$`-leading
+ * member read off an operator result is that member, a callback's
+ * parameters argument is refused as a value, a sparse array is refused
+ * rather than embedded with a hole, and an `at()` index the engine cannot
+ * read as a path index is refused at build time.
  */
 
 import { describe, it } from 'node:test';
@@ -18,7 +22,12 @@ import * as assert from 'node:assert';
 import {
   from, fromAsync, fromDocument, createPushQueue, LinqBuildError, LinqRuntimeError,
 } from '@jarenjs/linq';
+import * as s from '@jarenjs/linq/schema';
+import * as j from '@jarenjs/linq/jslt';
+import * as f from '@jarenjs/linq/forms';
+import { defineMigration } from '@jarenjs/linq/migration';
 import { queryJson } from '@jarenjs/json/query';
+import { JarenValidator } from '@jarenjs/validate';
 
 const USERS = [{ id: 1, name: 'ada' }, { id: 2, name: 'kid' }, { id: 3, name: 'lin' }];
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -58,13 +67,21 @@ describe('an item is an item (the C# element contract on both surfaces)', () => 
     assert.deepStrictEqual(doc, { $for: { it: ['$[*]'] }, $where: true, $return: '$it' });
     assert.deepStrictEqual(queryJson(doc, ROWS), [[1, 2], [3]]);
     // the join shape packs both sides; the rewrite is keyed on the
-    // bindings, so 3000×3000 answers in milliseconds, not seconds
+    // bindings, so 3000×3000 reads each row's key once per side, never
+    // once per pair — counted, not timed, so a loaded host cannot fail it
     const n = 3000;
-    const L = Array.from({ length: n }, (_, i) => ({ id: i, side: 'l' }));
+    let reads = 0;
+    const L = Array.from({ length: n }, (_, i) => {
+      const row = { side: 'l' };
+      Object.defineProperty(row, 'id', { enumerable: true, get() { reads++; return i; } });
+      return row;
+    });
     const q = from(L).join(from(L), (a) => a.id, (b) => b.id, (a, b) => ({ a: a.id, b: b.id }));
-    const started = performance.now();
+    reads = 0;
     assert.strictEqual(q.toArray().length, n);
-    assert.ok(performance.now() - started < 500, 'the hash join rewrite still applies to packed sources');
+    // a key read and a result read per side: four per row, where a nested
+    // loop reads the key 2 × n × n times
+    assert.ok(reads <= 4 * n, `the hash join rewrite still applies to packed sources (${reads} reads of id for ${n} rows)`);
   });
 
   it('a provider’s own root stays bare; a reseat over it is packed', () => {
@@ -245,10 +262,10 @@ describe('streamed constants are copies', () => {
 
 describe('get() reaches every key', () => {
   it('control characters in a key are escaped into the bracket selector', () => {
-    const rows = [{ 'a\tb': 1, 'a\nb': 2, 'ab': 3, "it's": 4, 'back\\slash': 5 }];
+    const rows = [{ 'a\tb': 1, 'a\nb': 2, 'a\x01b': 3, "it's": 4, 'back\\slash': 5 }];
     assert.deepStrictEqual(from(rows).select((r) => r.get('a\tb')).toArray(), [1]);
     assert.deepStrictEqual(from(rows).select((r) => r['a\nb']).toArray(), [2]);
-    assert.deepStrictEqual(from(rows).select((r) => r.get('ab')).toArray(), [3]);
+    assert.deepStrictEqual(from(rows).select((r) => r.get('a\x01b')).toArray(), [3]);
     assert.deepStrictEqual(from(rows).select((r) => r.get("it's")).toArray(), [4]);
     assert.deepStrictEqual(from(rows).select((r) => r.get('back\\slash')).toArray(), [5]);
     assert.strictEqual(from(rows).select((r) => r.get('a\tb')).toDocument().$return, "$it['a\\tb']");
@@ -287,5 +304,147 @@ describe('what the surface says of itself', () => {
     const q = from([1, 2]).where((x) => { calls++; return x.gt(0); });
     q.toArray(); q.toArray(); q.toDocument(); q.count();
     assert.strictEqual(calls, 1);
+  });
+});
+
+/** @param {string} code @param {RegExp} pattern */
+const coded = (code, pattern) => (/** @type {any} */ error) =>
+  error instanceof LinqBuildError && error.code === code && pattern.test(error.message);
+
+describe('a $-leading member read off an operator result is that member', () => {
+  // the item at a computed index carries a member named `$id`; `abc` is
+  // what the unescaped key read as a variable reference resolved to
+  const ROWS = [{ items: [{ $id: 'A', abc: 'WRONG' }], idx: 0 }];
+
+  it('answers the member on both surfaces, with or without a parameter named like it', async () => {
+    assert.deepStrictEqual(from(ROWS).select((x) => x.items.at(x.idx).$id).toArray(), ['A']);
+    assert.deepStrictEqual(
+      from(ROWS).params({ id: 'abc' }).select((x) => x.items.at(x.idx).$id).toArray(), ['A']);
+    assert.deepStrictEqual(
+      await fromAsync(ROWS).params({ id: 'abc' }).select((x) => x.items.at(x.idx).$id).toArray(), ['A']);
+    // the path arm and get() always answered it
+    assert.deepStrictEqual(from(ROWS).select((x) => x.items.at(0).$id).toArray(), ['A']);
+  });
+
+  it('writes the escaped key get() writes', () => {
+    const viaMember = from(ROWS).select((x) => x.items.at(x.idx).$id).toDocument();
+    assert.deepStrictEqual(viaMember.$return, { $get: [{ $get: ['$it.items', '$it.idx'] }, '$$id'] });
+    assert.deepStrictEqual(viaMember, from(ROWS).select((x) => x.items.at(x.idx).get('$id')).toDocument());
+  });
+
+  it('a check() rule reading it compiles and validates through the validator', () => {
+    const Item = s.object({ $id: s.string() });
+    const rule = s.object({ items: s.array(Item), i: s.integer() })
+      .check((v) => v.items.at(v.i).$id.eq('A'));
+    assert.deepStrictEqual(rule.schema.$query,
+      { $eq: [{ $get: [{ $get: ['$.items', '$.i'] }, '$$id'] }, 'A'] });
+    const validate = new JarenValidator().compile(rule.schema);
+    assert.strictEqual(validate({ items: [{ $id: 'A' }], i: 0 }), true);
+    assert.strictEqual(validate({ items: [{ $id: 'B' }], i: 0 }), false);
+  });
+});
+
+describe('a callback\'s parameters argument is not a value', () => {
+  const ROWS = [{ a: 1 }, { a: {} }, { a: 3 }];
+
+  it('the chain refuses it as a value with JL0004 — the C# index idiom included — instead of embedding {}', async () => {
+    const notValue = coded('JL0004', /parameters argument is not a value/);
+    assert.throws(() => from(ROWS).select((x, i) => ({ v: x.a, i })), notValue);
+    assert.throws(() => from(ROWS).params({ k: 1 }).where((x, p) => x.a.eq(p)), notValue);
+    assert.throws(() => from(ROWS).params({ k: 1 }).select((x, p) => [x.a, p]), notValue);
+    assert.throws(() => fromAsync(ROWS).select((x, p) => ({ p })), notValue);
+    // reading a declared parameter by name is unchanged
+    assert.deepStrictEqual(from(ROWS).params({ k: 1 }).where((x, p) => x.a.eq(p.k)).toArray(), [{ a: 1 }]);
+  });
+
+  it('a pen\'s externals argument is refused as a value with JL0104 — folded or not', () => {
+    const notValue = coded('JL0104', /externals argument is not a value/);
+    assert.throws(() => j.body((v, x) => ({ a: x })), notValue);
+    assert.throws(() => j.body((v, x) => [v.a, x]), notValue);
+    assert.throws(() => s.object({ a: s.number() }).check((v, x) => v.a.eq(x)), notValue);
+    // reading one external by name is unchanged
+    assert.deepStrictEqual(j.body((v, x) => ({ a: x.root })), { a: '$root' });
+  });
+
+  it('the forms pen\'s rule context is refused as a value with JL0104 — it used to be written as {}', () => {
+    const notValue = coded('JL0104', /^JL0104: a form\(\) (computed|visible) rule's externals argument is not a value — read one by name: value, pointer$/);
+    assert.throws(() => f.string().form({ computed: (c) => c }), notValue);
+    assert.throws(() => f.string().form({ visible: (c) => [c.value, c] }), notValue);
+    assert.throws(() => f.string().form({ computed: (c) => ({ ctx: c }) }), notValue);
+    // reading the context by name is unchanged
+    assert.deepStrictEqual(f.string().form({ computed: (c) => c.pointer, visible: (c) => c.root.a.eq(c.value) })
+      .schema['x-form'], { visible: { $eq: ['$.a', '$value'] }, computed: '$pointer' });
+  });
+
+  it('a migration assertion\'s externals argument is refused by name, not as a toJSON it cannot bind', () => {
+    const model = { $model: '0.1', collections: { t: { schema: { type: 'object' }, key: '/id' } } };
+    const migration = () => defineMigration({ id: 'm', from: model, to: model });
+    const notValue = coded('JL0104', /^JL0104: an assert\(\) predicate's externals argument is not a value — a query assertion runs over the table's rows with no externals \(MIGRATION-FORMAT §2\)$/);
+    assert.throws(() => migration().assert('t', (it, x) => it.a.eq(x)), notValue);
+    assert.throws(() => migration().assert('t', (it, x) => x), notValue);
+    assert.deepStrictEqual(migration().assert('t', (it) => it.a.isEmpty()).document.steps[0].assert.$where,
+      { $empty: '$it.a' });
+  });
+
+  it('spread or listed, the argument is refused the same way — it used to embed as {}', () => {
+    const chainArg = coded('JL0004', /parameters argument is not a value/);
+    assert.throws(() => from(ROWS).params({ k: 1 }).select((x, p) => ({ ...p })), chainArg);
+    assert.throws(() => from(ROWS).select((x, p) => ({ v: x.a, ...p })), chainArg);
+    assert.throws(() => from(ROWS).params({ k: 1 }).select((x, p) => Object.assign({}, p)), chainArg);
+    assert.throws(() => from(ROWS).params({ k: 1 }).select((x, p) => Object.keys(p)), chainArg);
+    const penArg = coded('JL0104', /externals argument is not a value/);
+    assert.throws(() => j.body((v, x) => ({ ...x })), penArg);
+    assert.throws(() => f.string().form({ computed: (c) => ({ ...c }) }), penArg);
+    const model = { $model: '0.1', collections: { t: { schema: { type: 'object' }, key: '/id' } } };
+    assert.throws(() => defineMigration({ id: 'm', from: model, to: model })
+      .assert('t', (it, x) => it.a.eq({ ...x })), penArg);
+  });
+});
+
+describe('a sparse array is refused at capture, never embedded with a hole', () => {
+  /** [first, <hole>, last] — built, not written, so no lint rule rewrites it. */
+  const holed = (/** @type {any} */ first, /** @type {any} */ last) => {
+    const items = [first, null, last];
+    delete items[1];
+    return items;
+  };
+  const sparse = coded('JL0005', /sparse array — index 1 is a hole/);
+
+  it('in a constant, a constructor, an in() list, a concat array and a fallback', async () => {
+    assert.throws(() => from([{}]).select(() => holed(1, 3)), sparse);
+    assert.throws(() => from([{ v: 9 }]).select((x) => holed(x.v, 3)), sparse);
+    assert.throws(() => from([{ a: 1 }]).where((x) => x.a.in(holed(1, 3))), sparse);
+    assert.throws(() => from([1]).concat(holed(1, 3)), sparse);
+    assert.throws(() => fromAsync([1]).concat(holed(1, 3)), sparse);
+    assert.throws(() => from([]).defaultIfEmpty(holed(1, 3)), sparse);
+    assert.throws(() => j.body(() => holed(1, 3)), sparse);
+    // a dense array is unchanged
+    assert.deepStrictEqual(from([{}]).select(() => [1, null, 3]).toArray(), [[1, null, 3]]);
+  });
+
+  it('as a binding: JL0004 naming the hole, on both surfaces', () => {
+    const binding = coded('JL0004', /'ids' is bound to a sparse array \(index 1 is a hole\)/);
+    assert.throws(() => from([{ a: 1 }]).params({ ids: holed(1, 3) }), binding);
+    assert.throws(() => fromAsync([{ a: 1 }]).params({ ids: holed(1, 3) }), binding);
+  });
+});
+
+describe('an at() index is a safe integer', () => {
+  const ROWS = [{ tags: ['a', 'b', 'c'], m: 1 }];
+
+  it('an index outside ±(2^53 − 1) is JL0005 at build, on the path arm and the $get arm', () => {
+    const unsafe = coded('JL0005', /at\(\) takes a safe integer index/);
+    for (const index of [2 ** 53, -(2 ** 53), 1e21]) {
+      assert.throws(() => from(ROWS).select((x) => x.tags.at(index)), unsafe);
+      assert.throws(() => from(ROWS).select((x) => x.tags.at(x.m).concat('').at(index)), unsafe);
+    }
+  });
+
+  it('a safe index still writes its path, negative ones counting from the end', () => {
+    assert.strictEqual(from(ROWS).select((x) => x.tags.at(2 ** 53 - 1)).toDocument().$return,
+      '$it.tags[9007199254740991]');
+    assert.deepStrictEqual(from(ROWS).select((x) => x.tags.at(2 ** 53 - 1)).toArray(), []);
+    assert.deepStrictEqual(from(ROWS).select((x) => x.tags.at(-1)).toArray(), ['c']);
+    assert.deepStrictEqual(from(ROWS).select((x) => x.tags.at(x.m)).toArray(), ['b']);
   });
 });

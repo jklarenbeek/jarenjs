@@ -200,7 +200,13 @@ if (chainEdgeLeak.length > 0)
 // the decimal its text writes exactly — the core decimal helpers and a unit
 // index (the exact path) — and $max/$min ordered signed zeros as IEEE 754:
 // 826 bytes.
-if (chainBytes > 211300)
+// Measured 213563 once the capture recorded faithfully and the options of
+// the chain's modules became closed vocabularies (each refusal names the
+// nearest member): the capture root and expression recording add 1113
+// (expression 911, capture-root 202), the document, sequence, async and
+// concurrency modules 1417, the JSONPath filter depth counter 91 and the
+// RFC 3339 edges 90, less 85 in the query operators.
+if (chainBytes > 214300)
   throw new Error(`The chain bundle grew to ${chainBytes} bytes.`);
 
 console.log(`Tree-shaking smoke test passed (${chainBytes} byte chain bundle; no schema-pen module, no client module, no store/validator/formats bytes).`);
@@ -269,7 +275,9 @@ if (modelEngineLeak.length > 0)
 // versions, the closed entity vocabulary, and valid rename hints), with
 // diagnostics that explain the accepted spelling at build time. It also
 // includes the same many-to-many relation lowering as the schema pen.
-if (modelBytes > 46500)
+// Raised to 47,500 (measured 47317): the capture every pen shares records
+// faithfully (740) and the entity vocabulary refuses more spellings (225).
+if (modelBytes > 47500)
   throw new Error(`The model pen bundle grew to ${modelBytes} bytes.`);
 const schemaModelLeak = Object.entries(schemaInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/model/') && info.bytesInOutput > 0);
@@ -319,7 +327,9 @@ const jsltEngineLeak = Object.entries(jsltInputs)
   .filter(([file, info]) => /packages\/(json|validate|emit|db|formats|refs)\//.test(file) && info.bytesInOutput > 0);
 if (jsltEngineLeak.length > 0)
   throw new Error(`The JSLT pen pulled an engine into the bundle: ${jsltEngineLeak.map(([file]) => file).join(', ')}`);
-if (jsltBytes > 20000)
+// Raised to 21,000 (measured 20668): the shared capture's faithful
+// recording (740).
+if (jsltBytes > 21000)
   throw new Error(`The JSLT pen bundle grew to ${jsltBytes} bytes.`);
 const chainJsltLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/jslt/') && info.bytesInOutput > 0);
@@ -379,7 +389,9 @@ if (migrationEngineLeak.length > 0)
 // checks ride in the pen, and the document snapshot every pen shares
 // copies by an explicit stack (a grouping nested thousands deep by hand no
 // longer overflows it). Measured 25601.
-if (migrationBytes > 26000)
+// Raised to 27,200 (measured 26807): the shared capture's faithful
+// recording (740) and the migration pen's own refusals (136).
+if (migrationBytes > 27200)
   throw new Error(`The migration pen bundle grew to ${migrationBytes} bytes.`);
 const chainMigrationLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/migration/') && info.bytesInOutput > 0);
@@ -464,7 +476,16 @@ if (asyncLiveLeak.length)
 // an inline call, a cursor cut short by close refusing its next pull, the
 // locked row a store rule judges, a numeric key's text that names no row,
 // and the engine's exact quantity conversion (826, the chain's) add 1920.
-if (clientBytes > 836300)
+// Measured 855906 once the store core and the query engine were hardened:
+// the tracker's rollback restore, iterative save and key handling add 5257,
+// the query engine (closed option bags, the exactness guard with its
+// fallback, ordering by declared type) 3007 and the planner 1109 and
+// emitter 707, the DDL planner (own relation names, identifier limit, key
+// column types) 2105, the entity writer's key checks 1261, rule refusals
+// 804, the error table 762, the model normalizer 618, the store 520, jobs
+// 384, option vocabularies 269 and JSON patch options 456, and the pens'
+// shared capture and closed option bags 1589.
+if (clientBytes > 856000)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 
@@ -510,7 +531,9 @@ const contractPenLeak = Object.entries(contractPenInputs)
   .filter(([file, info]) => /packages\/linq\/src\/(model|jslt|migration|flow|app|forms|db)\//.test(file) && info.bytesInOutput > 0);
 if (contractPenLeak.length > 0)
   throw new Error(`The contract pen pulled another pen into the bundle: ${contractPenLeak.map(([file]) => file).join(', ')}`);
-if (contractPenBytes > 50500)
+// Raised to 51,300 (measured 51005): the shared capture's faithful
+// recording (740).
+if (contractPenBytes > 51300)
   throw new Error(`The contract pen bundle grew to ${contractPenBytes} bytes.`);
 const chainContractLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/contract/') && info.bytesInOutput > 0);
@@ -567,7 +590,9 @@ const flowPenLeak = Object.entries(flowPenInputs)
   .filter(([file, info]) => /packages\/linq\/src\/(model|jslt|migration|contract|app|forms|db)\//.test(file) && info.bytesInOutput > 0);
 if (flowPenLeak.length > 0)
   throw new Error(`The flow pen pulled another pen into the bundle: ${flowPenLeak.map(([file]) => file).join(', ')}`);
-if (flowPenBytes > 20000)
+// Raised to 21,000 (measured 20726): the shared capture's faithful
+// recording (740).
+if (flowPenBytes > 21000)
   throw new Error(`The flow pen bundle grew to ${flowPenBytes} bytes.`);
 const chainFlowLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/flow/') && info.bytesInOutput > 0);

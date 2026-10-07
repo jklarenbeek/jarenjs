@@ -41,7 +41,7 @@ export const contractMessagesEn = Object.freeze({
   'contract/malformed-path': 'the request path carries a malformed percent-escape, or a segment that is . or ..',
   'contract/malformed-query': 'the query string is not decodable',
   'contract/not-implemented': 'operation {op} is not implemented on this server',
-  'contract/precondition-failed': 'the If-Match precondition of operation {op} failed',
+  'contract/precondition-failed': 'the entity-tag precondition of operation {op} failed',
   'contract/invalid-header': 'the {header} header of operation {op} is invalid',
   'contract/handler-error': 'operation {op} failed with {code}',
   'contract/client-invalid-input': 'the input of operation {op} is invalid; nothing was sent',

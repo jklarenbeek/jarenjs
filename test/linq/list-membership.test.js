@@ -102,6 +102,63 @@ describe('in(values)', () => {
   });
 });
 
+describe('a parameter read as an in() list is bound to an array', () => {
+  const PAIR = [{ a: 5 }, { a: 6 }];
+  /** The chain whose list is the parameter `ids`, bound to `ids`. @param {any} ids */
+  const listed = (ids) => from(PAIR).params({ ids })
+    .where((/** @type {any} */ it, /** @type {any} */ p) => it.a.in(p.ids));
+  const notList = coded('JL0004', /parameter 'ids' is the list an in\(\) reads, so its binding must be an array/);
+
+  it('a scalar or an object binding is JL0004 when the chain runs — it matched nothing, or the object\'s values', () => {
+    for (const ids of [5, { k: 5 }, 'x', null, true]) {
+      assert.throws(() => listed(ids).toArray(), notList, JSON.stringify(ids));
+    }
+    assert.throws(() => listed(5).count(), notList);
+    assert.throws(() => listed(5).first(), notList);
+    assert.throws(() => [...listed(5)], notList);
+    assert.throws(() => listed(5).explain(), notList);
+    assert.throws(() => from(PAIR).params({ ids: 5 }).any((/** @type {any} */ it, /** @type {any} */ p) => it.a.in(p.ids)), notList);
+    assert.throws(() => from(PAIR).params({ ids: 5 })
+      .where((/** @type {any} */ it, /** @type {any} */ p) => it.a.in(p.ids.all())).toArray(), notList);
+    // the document itself is binding-agnostic
+    assert.deepEqual(listed(5).toDocument().$where, { $eq: ['$it.a', '$ids[*]'] });
+  });
+
+  it('on the async surface, over a provider and through a mapAsync prefix — before anything executes', async () => {
+    let executed = 0;
+    const provider = { execute() { executed++; return [[]]; } };
+    const async = (/** @type {any} */ source) => fromAsync(source).params({ ids: 5 })
+      .where((/** @type {any} */ it, /** @type {any} */ p) => it.a.in(p.ids));
+    await assert.rejects(async () => async(PAIR).toArray(), notList);
+    await assert.rejects(async () => async(PAIR).count(), notList);
+    await assert.rejects(async () => async(provider).toArray(), notList);
+    await assert.rejects(async () => async(provider).all((/** @type {any} */ it) => it.a.gt(0)), notList);
+    assert.throws(() => async(provider).explain(), notList);
+    await assert.rejects(async () => listed(5).mapAsync(async (/** @type {any} */ row) => row, { concurrency: 1 }).toArray(), notList);
+    assert.equal(executed, 0);
+  });
+
+  it('explain() checks a mapAsync prefix\'s lists as its runs do — it used to report the scalar binding', () => {
+    const echo = async (/** @type {any} */ row) => row;
+    assert.throws(() => listed(5).mapAsync(echo, { concurrency: 1 }).explain(), notList);
+    assert.throws(() => listed([5]).mapAsync(echo, { concurrency: 1 }).params({ ids: 5 }).explain(), notList);
+    const split = listed([5]).mapAsync(echo, { concurrency: 1 }).explain();
+    assert.deepEqual(split.bindings, { ids: [5] });
+    assert.deepEqual(split.split.residual, ['mapAsync']);
+  });
+
+  it('an array binding answers, and a rebinding is held to the same rule', async () => {
+    assert.deepEqual(listed([5]).toArray(), [{ a: 5 }]);
+    assert.deepEqual(listed(5).params({ ids: [6] }).toArray(), [{ a: 6 }]);
+    assert.throws(() => listed([5]).params({ ids: 5 }).toArray(), notList);
+    assert.deepEqual(await fromAsync(PAIR).params({ ids: [6, 5] })
+      .where((/** @type {any} */ it, /** @type {any} */ p) => it.a.in(p.ids)).toArray(), [{ a: 5 }, { a: 6 }]);
+    // a member path below a parameter is the binding's own shape, not the list's
+    assert.deepEqual(from(PAIR).params({ cfg: { ids: [6] } })
+      .where((/** @type {any} */ it, /** @type {any} */ p) => it.a.in(p.cfg.ids)).toArray(), [{ a: 6 }]);
+  });
+});
+
 describe('chained .or() and .and() are one flat operator', () => {
   it('a chain extends one argument list; a grouped operand keeps its own', () => {
     assert.deepEqual(emitted((/** @type {any} */ it) => it.a.eq(1).or(it.b.eq(2)).or(it.c.eq(3))),

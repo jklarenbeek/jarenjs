@@ -65,7 +65,7 @@ import {
 } from '@jarenjs/core/scan';
 
 import { setObjectMember } from '@jarenjs/core/object';
-import { LabeledSyntaxError } from '../errors.js';
+import { LabeledSyntaxError, NESTING_CEILING } from '../errors.js';
 
 const CC_BACKTICK = 0x60;
 
@@ -247,7 +247,8 @@ function isXmlNameCharCode(c) {
  * @param {string} source - the XQuery text (e.g. `for $b in $doc?store?book?* return $b?title`)
  * @returns {any} a valid query document for `compileJsonQuery` (envelope omitted)
  * @throws {XQuerySyntaxError} when the text is invalid or uses a construct
- *   outside the subset (named `unsupported ...` messages)
+ *   outside the subset (named `unsupported ...` messages), or when it nests
+ *   deeper than the query compiler's ceiling of 256 levels
  */
 export function parseXQuery(source) {
   if (typeof source !== 'string')
@@ -255,9 +256,20 @@ export function parseXQuery(source) {
 
   const len = source.length;
   let pos = 0;
+  // expression nesting: every ExprSingle, and every phrase a FLWOR's
+  // clauses nest into, is one level of the emitted document
+  let depth = 0;
 
   function fail(message, at = pos) {
     throw new XQuerySyntaxError(message, source, at);
+  }
+
+  // One level deeper; past the ceiling the text is refused by position
+  // rather than by a stack overflow further down the recursive descent.
+  // Not an `unsupported ...` message: nothing outside the subset is used.
+  function enter(at) {
+    if (++depth > NESTING_CEILING)
+      fail(`the expression nests deeper than ${NESTING_CEILING} levels`, at);
   }
 
   function cc(at) {
@@ -459,10 +471,20 @@ export function parseXQuery(source) {
     return { '$seq': items };
   }
 
+  // Every nested expression enters here, so this is where nesting is
+  // counted against the ceiling.
+  function parseExprSingle() {
+    skipWS();
+    enter(pos);
+    const expr = parseExprSingleBody();
+    depth--;
+    return expr;
+  }
+
   // ExprSingle ::= FLWORExpr | QuantifiedExpr | IfExpr | OrExpr
   // (SwitchExpr, TypeswitchExpr and TryCatchExpr are recognized and
   // rejected by name)
-  function parseExprSingle() {
+  function parseExprSingleBody() {
     skipWS();
     const at = pos;
     if (isNameStartCode(cc(pos))) {
@@ -1396,6 +1418,14 @@ export function parseXQuery(source) {
   function buildChain(clauses, i, ret, enclosingMulti) {
     if (i >= clauses.length)
       return ret;
+    // each phrase (or leading $if) the clauses nest into is one level
+    enter(clauses[i].at);
+    const chain = buildLevel(clauses, i, ret, enclosingMulti);
+    depth--;
+    return chain;
+  }
+
+  function buildLevel(clauses, i, ret, enclosingMulti) {
     const c = clauses[i];
     if (c.kind === 'where') // a leading tuple filter is $if
       return { '$if': [c.expr, buildChain(clauses, i + 1, ret, enclosingMulti)] };

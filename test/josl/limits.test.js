@@ -277,6 +277,27 @@ describe('limits: JOSL', () => {
     strictEqual(codeOf(() => fedByOne(make, 'k = [[[[1]]]]\n', { maxDepth: 3 })), 'JOSL2004');
   });
 
+  it('JOSL2004 counts a dotted key\'s tables like the header path that would open them', () => {
+    // a.b.c = 1 opens the tables a and a.b, exactly as [a.b] + c = 1 does
+    deepStrictEqual(parseJosl('a.b.c = 1\n', { maxDepth: 2 }), { a: { b: { c: 1 } } });
+    strictEqual(codeOf(() => parseJosl('a.b.c.d = 1\n', { maxDepth: 2 })), 'JOSL2004');
+    strictEqual(codeOf(() => parseJosl('[a.b.c.d]\ne = 1\n', { maxDepth: 3 })), 'JOSL2004');
+    strictEqual(codeOf(() => parseJosl('[a.b.c]\nd.e = 1\n', { maxDepth: 3 })), 'JOSL2004');
+    // the current table's own depth counts; a plain key adds no table
+    deepStrictEqual(parseJosl('[a.b.c]\nx = 1\n', { maxDepth: 3 }), { a: { b: { c: { x: 1 } } } });
+    deepStrictEqual(parseJosl('[[t]]\nx.y = 1\n', { maxDepth: 2 }), { t: [{ x: { y: 1 } }] });
+    strictEqual(codeOf(() => parseJosl('[[t]]\nx.y.z = 1\n', { maxDepth: 2 })), 'JOSL2004');
+    deepStrictEqual(parseJosl('[[]]\nx.y = 1\n', { maxDepth: 1 }), [{ x: { y: 1 } }]);
+    // inside an inline table the segments add to its nesting
+    deepStrictEqual(parseJosl('k = { a.b = 1 }\n', { maxDepth: 2 }), { k: { a: { b: 1 } } });
+    strictEqual(codeOf(() => parseJosl('k = { a.b.c = 1 }\n', { maxDepth: 2 })), 'JOSL2004');
+    // one key/value line can no longer build a document deeper than the limit
+    const deep = Array(200).fill('a').join('.') + ' = 1\n';
+    strictEqual(codeOf(() => parseJosl(deep, { maxDepth: 64 })), 'JOSL2004');
+    strictEqual(codeOf(() => fedByOne(make, deep, { maxDepth: 64 })), 'JOSL2004');
+    ok(parseJosl(deep) !== null, 'unlimited by default');
+  });
+
   it('JOSL2005 maxRetainedValues counts what the root holds: pairs, array elements, tables, root items', () => {
     deepStrictEqual(parseJosl('a = 1\nb = [1, 2]\n', { maxRetainedValues: 4 }), { a: 1, b: [1, 2] });
     strictEqual(codeOf(() => parseJosl('a = 1\nb = [1, 2]\n', { maxRetainedValues: 3 })), 'JOSL2005');

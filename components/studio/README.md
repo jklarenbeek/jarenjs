@@ -76,7 +76,7 @@ tracks dependencies and writes diagram edits back into their source files.
 Explicit `input`, `model` and `collection` metadata route queries and model
 seeds; the [format](docs/PROJECT-FORMAT.md) specifies ownership and lifetimes.
 
-Hosts can propose validated candidates through the shared editor controllers. Model-assisted authoring is provided by [Tangle’s Jaren integration](https://github.com/jklarenbeek/tangleai/blob/main/packages/jaren/README.md).
+Hosts can propose validated candidates through the shared editor controllers; model-assisted authoring is a host's concern and is not part of this package.
 
 `@jarenjs/studio/export` exposes `exportProject(project, assets)` and
 `createProjectZip(files)`. The website's **Offline ZIP** includes a standalone

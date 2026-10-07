@@ -5,6 +5,7 @@
 
 import { CsvMachine, CSV_CODES, coerceCsvValue } from './csv-machine.js';
 import { CsvSyntaxError } from './errors.js';
+import { admitOptions, CSV_READ, CSV_DOCUMENT, CSV_WRITE } from './options.js';
 
 /**
  * @typedef {Object} CsvWriterOptions
@@ -46,12 +47,14 @@ import { CsvSyntaxError } from './errors.js';
  * @param {(repair: object) => void} [options.onRepair] - Repair sink
  * @returns {Array<string[]|object>} The records
  * @throws {CsvSyntaxError} On malformed input, unless `repair` is set
+ * @throws {TypeError} On an option the reader does not take, or a value of
+ *  the wrong type (the hostile-input limits are listed under `limits.js`)
  * @example
  * parseCsv('a,b\n1,2');            // [['a','b'], ['1','2']]
  * parseCsv('a,b\n1,2', { headers: true }); // [{ a: '1', b: '2' }]
  */
 export function parseCsv(text, options = undefined) {
-  return new CsvMachine(options).parseAll(text);
+  return new CsvMachine(admitOptions(options, CSV_READ, 'parseCsv')).parseAll(text);
 }
 
 /**
@@ -70,7 +73,7 @@ export function parseCsv(text, options = undefined) {
  * doc.rows;              // [{ a: '1', b: '2' }]
  */
 export function parseCsvDocument(text, options = undefined) {
-  let opts = options ?? {};
+  let opts = admitOptions(options, CSV_DOCUMENT, 'parseCsvDocument');
   let dialect;
   if (opts.delimiter === 'auto') {
     dialect = sniffCsvDialect(text, opts);
@@ -163,7 +166,9 @@ function probeDelimiter(sample, delimiter, options) {
  * rather than carrying data.
  *
  * @param {string} text - CSV source text (a prefix is enough)
- * @param {object} [options] - Reader options that affect parsing (`quote`, `comment`)
+ * @param {object} [options] - Reader options, as `parseCsvDocument` takes
+ *  them; those that affect parsing (`quote`, `comment`, and a `delimiter`
+ *  other than `'auto'`, which fixes the candidate) shape the guess
  * @returns {{delimiter: string, quote: string|null, headers: boolean, width: number, confidence: number}}
  *  The guess, with `confidence` in 0..1
  * @example
@@ -171,7 +176,7 @@ function probeDelimiter(sample, delimiter, options) {
  */
 export function sniffCsvDialect(text, options = undefined) {
   const sample = text.length > SNIFF_BYTES ? text.slice(0, text.lastIndexOf('\n', SNIFF_BYTES) + 1 || SNIFF_BYTES) : text;
-  const opts = options ?? {};
+  const opts = admitOptions(options, CSV_DOCUMENT, 'sniffCsvDialect');
   let bestDelim = opts.delimiter && opts.delimiter !== 'auto' ? opts.delimiter : ',';
   let bestScore = -1;
   let bestWidth = 0;
@@ -304,7 +309,7 @@ export function formatCsvValue(value) {
  */
 export function stringifyCsv(rows, options = {}) {
   let out = '';
-  for (const chunk of stringifyCsvChunks(rows, options))
+  for (const chunk of stringifyCsvChunks(rows, admitOptions(options, CSV_WRITE, 'stringifyCsv')))
     out += chunk;
   return out;
 }
@@ -323,6 +328,7 @@ export function stringifyCsv(rows, options = {}) {
  *   ever written, `fields` the columns as decided
  */
 export function createCsvRowFormatter(options = {}) {
+  options = admitOptions(options, CSV_WRITE, 'createCsvRowFormatter');
   const delimiter = options.delimiter ?? ',';
   const quote = options.quote ?? '"';
   const newline = options.newline ?? '\r\n';
@@ -385,7 +391,7 @@ export function createCsvRowFormatter(options = {}) {
  * @yields {string} One record (or the header) at a time
  */
 export function* stringifyCsvChunks(rows, options = {}) {
-  const formatter = createCsvRowFormatter(options);
+  const formatter = createCsvRowFormatter(admitOptions(options, CSV_WRITE, 'stringifyCsvChunks'));
   for (const row of rows)
     yield* formatter.lines(row);
   const tail = formatter.tail();

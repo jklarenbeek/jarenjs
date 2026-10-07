@@ -208,10 +208,10 @@ describe('the migration runner over the runtime record', () => {
     }
   });
 
-  it('refuses a malformed record before touching the database', () => {
+  it('refuses a malformed record before touching the database', async () => {
     const target = tempDbPath();
     try {
-      assert.throws(() => migrate({ driver: nodeDriver(), path: target.dbPath }, chain(),
+      await assert.rejects(migrate({ driver: nodeDriver(), path: target.dbPath }, chain(),
         { baseline: M0, runtime: /** @type {any} */ ({ now: 'later' }) }), /runtime\.now is a function/);
     }
     finally {

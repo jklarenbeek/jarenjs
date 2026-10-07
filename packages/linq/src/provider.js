@@ -83,6 +83,11 @@ export const COMPILE_OPTION_KEYS = Object.freeze([
   'compileTypeTest', 'functions', 'collations', 'pathFunctions', 'limits',
 ]);
 
+/** Every member `from()`/`fromAsync()`/`fromDocument()` options carry:
+ * the forwarded compile options and the cache-partition key. A closed
+ * set — a misspelt `limits` is refused, never a silently unbounded run. */
+export const SOURCE_OPTION_KEYS = Object.freeze([...COMPILE_OPTION_KEYS, 'registry']);
+
 /**
  * Pick the forwarded compile options out of a sequence's options bag.
  * @param {Record<string, any>} options

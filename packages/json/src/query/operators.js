@@ -1207,19 +1207,6 @@ function asOfSpec(spec, docPath) {
 
 //#endregion
 
-// the RFC 3339 type tests, shaped like the section 8.10 $is-* family:
-// one item of the right lexical form, never an error
-function dateTestEntry(test) {
-  return {
-    params: UNARY,
-    result: RESULT_ONE,
-    compile: (gets) => {
-      const get = gets[0];
-      return (f) => test(get(f));
-    },
-  };
-}
-
 //#endregion
 
 //#region the registry
@@ -1943,10 +1930,12 @@ export const OPERATORS = Object.freeze({
 
   //#region section 8.13 - dates and times
 
-  '$is-date': dateTestEntry(isDateOnlyRFC3339),
-  '$is-time': dateTestEntry(isTimeOnlyRFC3339),
-  '$is-datetime': dateTestEntry(isDateTimeRFC3339),
-  '$is-duration': dateTestEntry(isValidDuration),
+  // the RFC 3339 type tests are the section 8.10 $is-* family: one item
+  // of the right lexical form, never an error
+  '$is-date': isTypeEntry(isDateOnlyRFC3339),
+  '$is-time': isTypeEntry(isTimeOnlyRFC3339),
+  '$is-datetime': isTypeEntry(isDateTimeRFC3339),
+  '$is-duration': isTypeEntry(isValidDuration),
 
   //#endregion
 

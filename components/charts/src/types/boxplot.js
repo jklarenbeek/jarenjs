@@ -20,6 +20,7 @@ import { clamp01 } from '@jarenjs/core/math';
 import { scaleLinear, scaleBand } from '../core/scale.js';
 import { axisTicksLinear, formatTickValue } from '../core/axis.js';
 import { cartesianFrame, annotateChart } from '../core/cartesian.js';
+import { measurableSpan } from '../core/domain.js';
 import { CATEGORICAL, seriesColor } from '../core/palette.js';
 import { normalizeTooltip, valueMark } from '../core/marks.js';
 
@@ -44,7 +45,11 @@ import { normalizeTooltip, valueMark } from '../core/marks.js';
  */
 
 /**
- * Quantile of an ascending-sorted sample by linear interpolation.
+ * Quantile of an ascending-sorted sample by linear interpolation. Two
+ * neighbours further apart than a double measures (-1e308 and 1e308)
+ * interpolate as a weighted mean, whose terms never exceed the samples:
+ * their difference would overflow to `Infinity` and put the quantile
+ * there.
  * @param {number[]} sorted - Ascending finite samples (non-empty)
  * @param {number} p - Quantile in [0, 1]
  * @returns {number}
@@ -53,7 +58,9 @@ export function quantileSorted(sorted, p) {
   const at = (sorted.length - 1) * p;
   const lo = Math.floor(at);
   const hi = Math.ceil(at);
-  return sorted[lo] + (sorted[hi] - sorted[lo]) * (at - lo);
+  const t = at - lo;
+  const gap = sorted[hi] - sorted[lo];
+  return Number.isFinite(gap) ? sorted[lo] + gap * t : sorted[lo] * (1 - t) + sorted[hi] * t;
 }
 
 /**
@@ -112,6 +119,7 @@ export function buildBoxplotAST(data, config = {}) {
     if (max > hi) hi = max;
   }
   if (!Number.isFinite(lo)) { lo = 0; hi = 1; }
+  [lo, hi] = measurableSpan(lo, hi);
   const ticks = axisTicksLinear(lo, hi, 5);
   const sLo = Math.min(lo, ticks[0] ?? lo);
   const sHi = Math.max(hi, ticks[ticks.length - 1] ?? hi);

@@ -29,6 +29,7 @@ import { h, createDomRenderer } from '@jarenjs/view';
 import { sanitizeUrl as defaultSanitizeUrl, encodeUrlAttribute } from '@jarenjs/view/helpers';
 import {
   hashContent, fnv1a, FNV1A_OFFSET_BASIS, headingId, permalinkLabel,
+  MAX_NESTING, OPTION_RULES, compileOptionCheck,
 } from './utils.js';
 import { parseHtmlFragment, parseHtmlTag } from './html.js';
 import { textOf } from './ast.js';
@@ -92,6 +93,33 @@ import {
  *   statement about the caller, which is why every caller in this
  *   repository that passes `false` says why.
  */
+
+/** The rendering members `mdToVnode` and `createMdRenderer` share. */
+const RENDER_RULES = {
+  plugins: OPTION_RULES.array,
+  html: OPTION_RULES.oneOf('skip', 'text', 'vnode'),
+  sanitizeUrl: OPTION_RULES.function,
+  headingIds: OPTION_RULES.boolean,
+  slugPrefix: OPTION_RULES.string,
+  headingAnchors: OPTION_RULES.boolean,
+};
+
+/** {@link MdVnodeOptions}, closed: a misspelt or mistyped member is refused. */
+const checkVnodeOptions = compileOptionCheck('mdToVnode', {
+  ...RENDER_RULES,
+  parseHtml: OPTION_RULES.function,
+  footnotesLabel: OPTION_RULES.string,
+  keyed: OPTION_RULES.boolean,
+});
+
+/** `createMdRenderer`'s options, closed: the rendering members it forwards and its host's own. */
+const checkRendererOptions = compileOptionCheck('createMdRenderer', {
+  container: OPTION_RULES.object,
+  document: OPTION_RULES.object,
+  ...RENDER_RULES,
+  onEvent: OPTION_RULES.function,
+  onHydrateError: OPTION_RULES.function,
+});
 
 /**
  * One raw-HTML node, under whichever policy is in force.
@@ -162,7 +190,9 @@ function inlineChildren(nodes, rctx) {
  */
 function intoVnode(vnode, nodes, rctx) {
   if (rctx.html === 'vnode' && hasInlineHtml(nodes)) {
-    vnode.push(...pairInlineHtml(nodes, rctx));
+    // one at a time: a paragraph may hold more nodes than a call takes arguments
+    const paired = pairInlineHtml(nodes, rctx);
+    for (let i = 0; i < paired.length; i++) vnode.push(paired[i]);
     return vnode;
   }
   for (let i = 0; i < nodes.length; i++) {
@@ -193,11 +223,21 @@ function hasInlineHtml(nodes) {
  * Only the default parser can be asked to classify a lone tag; an
  * injected `parseHtml` keeps the simple path (parse each node on its
  * own), because a host's parser answers a different question.
+ *
+ * As in a fragment, elements nest at most `MAX_NESTING` deep — one
+ * opened deeper keeps its content and loses its markup — and an end tag
+ * that matches no open element is dropped without walking the frames.
  * @param {MdNode[]} nodes @param {RenderCtx} rctx
  * @returns {any[]}
  */
 function pairInlineHtml(nodes, rctx) {
-  const stack = [{ tag: null, props: null, children: /** @type {any[]} */ ([]) }];
+  const frames = {
+    stack: [{ tag: null, props: null, children: /** @type {any[]} */ ([]) }],
+    kept: 0,
+    /** @type {Map<string, number>} */
+    open: new Map(),
+  };
+  const stack = frames.stack;
   const top = () => stack[stack.length - 1].children;
   for (let i = 0; i < nodes.length; i++) {
     const node = nodes[i];
@@ -210,41 +250,61 @@ function pairInlineHtml(nodes, rctx) {
       // not one plain tag (a comment, a whole element, an injected
       // parser): whatever the parser makes of it stands on its own
       const parsed = rctx.parseHtml(node.value);
-      if (Array.isArray(parsed)) top().push(...parsed);
+      if (Array.isArray(parsed)) {
+        const into = top();
+        for (let k = 0; k < parsed.length; k++) into.push(parsed[k]);
+      }
       else if (parsed !== null && parsed !== undefined) top().push(parsed);
       continue;
     }
     if (tag.closing) {
       // close the nearest frame this end tag matches; an unmatched one
       // is dropped, like a stray `</div>` in a fragment
-      for (let depth = stack.length - 1; depth > 0; depth--) {
-        if (stack[depth].tag !== tag.name) continue;
-        while (stack.length > depth) closeInlineFrame(stack);
-        break;
-      }
+      if ((frames.open.get(tag.name) ?? 0) === 0) continue;
+      let depth = stack.length - 1;
+      while (stack[depth].tag !== tag.name) depth--;
+      while (stack.length > depth) closeInlineFrame(frames);
       continue;
     }
     if (tag.complete) {
       if (tag.props !== null) top().push([tag.name, tag.props]);
       continue;
     }
-    stack.push({ tag: tag.name, props: tag.props, drop: tag.drop, children: [] });
+    let props = tag.props;
+    if (props !== null) {
+      if (frames.kept < MAX_NESTING) frames.kept++;
+      else props = null;
+    }
+    frames.open.set(tag.name, (frames.open.get(tag.name) ?? 0) + 1);
+    stack.push({ tag: tag.name, props, drop: tag.drop, children: [] });
   }
-  while (stack.length > 1) closeInlineFrame(stack);
+  while (stack.length > 1) closeInlineFrame(frames);
   return stack[0].children;
 }
 
 /**
  * Pop one inline frame into its parent: a known element keeps its props
  * and children, an unknown one keeps only its children, and one whose
- * content is not prose (`<script>`) keeps neither.
+ * content is not prose (`<script>`) keeps neither. Children move one at
+ * a time: a frame may hold more of them than a call takes arguments.
+ * @param {{ stack: any[], kept: number, open: Map<string, number> }} frames
  */
-function closeInlineFrame(stack) {
+function closeInlineFrame(frames) {
+  const stack = frames.stack;
   const frame = stack.pop();
+  frames.open.set(frame.tag, (frames.open.get(frame.tag) ?? 1) - 1);
+  if (frame.props !== null) frames.kept--;
   const parent = stack[stack.length - 1].children;
   if (frame.drop === true) return;
-  if (frame.props !== null) parent.push([frame.tag, frame.props, ...frame.children]);
-  else parent.push(...frame.children);
+  const children = frame.children;
+  if (frame.props !== null) {
+    const element = [frame.tag, frame.props];
+    for (let i = 0; i < children.length; i++) element.push(children[i]);
+    parent.push(element);
+  }
+  else {
+    for (let i = 0; i < children.length; i++) parent.push(children[i]);
+  }
 }
 
 /** @type {Record<string, (node: MdNode, rctx: RenderCtx) => any>} */
@@ -460,9 +520,12 @@ function listItemVnode(item, rctx, tight) {
     // paragraphs unwrapped there is no element boundary left to do it,
     // and `<h2>Bar</h2>baz` would run a heading into the text below it.
     if (i > 0) content.push('\n');
-    // Tight lists unwrap their paragraphs (standard HTML rendering).
+    // Tight lists unwrap their paragraphs (standard HTML rendering) —
+    // one node at a time, since a paragraph may hold more of them than a
+    // call takes arguments.
     if (tight && child.type === 'paragraph') {
-      content.push(...inlineChildren(child.children, rctx));
+      const inline = inlineChildren(child.children, rctx);
+      for (let k = 0; k < inline.length; k++) content.push(inline[k]);
     }
     else {
       content.push(blockVnode(child, rctx, false));
@@ -632,10 +695,13 @@ function withKey(vnode, key) {
  * // ['article', { class: 'md' }, [['h1', { key: '…' }, 'Hi']]]
  *
  * @param {any} docOrCompiled MdDocument, CompiledMd or MdNode[]
- * @param {MdVnodeOptions} [options]
+ * @param {MdVnodeOptions} [options] a closed set: an unknown member or one
+ *   of the wrong type is refused with a `TypeError` naming it (and the
+ *   member it most likely meant); a member passed as `undefined` is absent
  * @returns {any}
  */
 export function mdToVnode(docOrCompiled, options = {}) {
+  checkVnodeOptions(options);
   const ast = Array.isArray(docOrCompiled)
     ? docOrCompiled
     : Array.isArray(docOrCompiled.ast) ? docOrCompiled.ast : [docOrCompiled];
@@ -674,10 +740,17 @@ export function mdToVnode(docOrCompiled, options = {}) {
  * plugin `hydrate` hooks after mount (PLUGINS.md §5). Returns a
  * `render(docOrCompiled)` function.
  *
+ * The options are a closed set, checked when the renderer is created: an
+ * unknown member — `mdToVnode`'s `footnotesLabel`, `keyed` and
+ * `parseHtml` included, which this renderer does not forward — or one of
+ * the wrong type is refused with a `TypeError`, and `container` is
+ * required.
+ *
  * @param {{
  *   container: any,
  *   plugins?: any[],
- *   html?: 'skip'|'text',
+ *   html?: 'skip'|'text'|'vnode',
+ *   sanitizeUrl?: (url: string) => (string|null),
  *   headingIds?: boolean,
  *   slugPrefix?: string,
  *   headingAnchors?: boolean,
@@ -688,6 +761,10 @@ export function mdToVnode(docOrCompiled, options = {}) {
  * @returns {(docOrCompiled: any) => void}
  */
 export function createMdRenderer(options) {
+  checkRendererOptions(options);
+  if (options.container === undefined) {
+    throw new TypeError("md createMdRenderer: option 'container' is required");
+  }
   // Loaded lazily so SSR-only consumers never touch the DOM module.
   /** @type {any} */
   let domRender = null;

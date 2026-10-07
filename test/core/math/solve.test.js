@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { newtonRaphson, bisect, secant } from '@jarenjs/core/math';
+import { newtonRaphson, bisect, secant, centralDifference } from '@jarenjs/core/math';
 
 const close = (a, b, eps = 1e-6) => assert.ok(Math.abs(a - b) <= eps, `${a} !~= ${b}`);
 
@@ -41,5 +41,13 @@ describe('#numeric root finders', function () {
   it('non-convergence guard caps iterations', () => {
     const r = newtonRaphson((x) => Math.exp(x) + 1, (x) => Math.exp(x), 0, { maxIter: 8 });
     assert.equal(r.iterations <= 8, true);
+  });
+
+  it('centralDifference approximates the derivative newtonRaphson takes', () => {
+    close(centralDifference(f)(3), 6);
+    assert.equal(centralDifference((x) => x, 0.5)(10), 1);
+    const r = newtonRaphson(f, centralDifference(f), 1);
+    assert.ok(r.converged);
+    close(r.root, Math.SQRT2);
   });
 });

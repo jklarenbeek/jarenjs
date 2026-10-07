@@ -88,7 +88,7 @@ export const CONTRACT_CODES = Object.freeze({
   JC2011: 'the request path carries a malformed percent-escape, or a segment that decodes to . or .. (400)',
   JC2012: 'the query string is not decodable (400)',
   JC2013: 'the operation has no handler on this partial server (501)',
-  JC2014: 'the If-Match precondition does not match the entity tag the handler armed (412)',
+  JC2014: 'an entity-tag precondition failed: If-Match does not match the tag the handler armed, or If-None-Match matches it on a method other than GET and HEAD (412)',
   JC2015: 'a declared header member is repeated when its schema is scalar, or fails transport decoding (400)',
   JC2016: 'an opaque operation\'s body read as text (readBody) is not valid UTF-8 (400)',
   // ——— client-side (outcomes of invoke; never thrown) ———

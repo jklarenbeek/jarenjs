@@ -15,9 +15,12 @@ import { createServer } from 'node:http';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-import { npmMismatch, pinnedNpm, resolveNpmCommand, bump } from '../../scripts/release-bump.js';
+import { npmMismatch, pinnedNpm, resolveNpmCommand, bump, bumpArguments } from '../../scripts/release-bump.js';
+import { packageFiles } from '../../scripts/version-packages.js';
 import { npmCliPath } from '../../scripts/lib/portable.js';
 import { checkBenchmarkDrift } from '../../scripts/check-benchmark-drift.js';
+import { checkServiceWorkerCache } from '../../scripts/check-sw-cache.js';
+import { statusEntries } from '../../scripts/lib/git.js';
 import { verifyLiveSite } from '../../scripts/verify-live-site.js';
 import { checkDocuments, fencesOf } from '../../scripts/check-documents.js';
 import { checkSiteDesign, BANNED_HUES } from '../../scripts/check-site-design.js';
@@ -97,7 +100,9 @@ describe('release:bump runs the npm that launched it, through the current Node',
       return '';
     };
     const logs = [];
-    const code = bump({ release: 'minor', env: env('/opt/npm with space/npm-cli.js'), execPath: '/opt/node dir/node', exec, log: (l) => logs.push(l), error: (l) => logs.push(l) });
+    // HEAD carries the version the tree does: an unbumped tree, whatever this checkout's state
+    const head = () => JSON.parse(read('package.json')).version;
+    const code = bump({ release: 'minor', env: env('/opt/npm with space/npm-cli.js'), execPath: '/opt/node dir/node', exec, head, log: (l) => logs.push(l), error: (l) => logs.push(l) });
     assert.strictEqual(code, 0);
     assert.deepStrictEqual(calls.map((c) => [c.file, ...c.args]), [
       ['/opt/node dir/node', '/opt/npm with space/npm-cli.js', '--version'],
@@ -120,6 +125,97 @@ describe('release:bump runs the npm that launched it, through the current Node',
     // an unknown release word
     assert.strictEqual(bump({ release: 'huge', env: env('/x/npm-cli.js'), execPath: '/x/node', exec: () => { nothing.push(1); return ''; }, log: () => {}, error: () => {} }), 2);
     assert.deepStrictEqual(nothing, []);
+  });
+});
+
+describe('release:bump refuses a half-bumped tree and finishes one it is told to', function () {
+  const pin = pinnedNpm();
+  /** A disposable tree of the manifests a bump writes, every one at `version`. */
+  function tree(version) {
+    const dir = mkdtempSync(join(tmpdir(), 'jaren-bump-'));
+    const write = (/** @type {string} */ file, /** @type {object} */ value) => {
+      mkdirSync(join(dir, file, '..'), { recursive: true });
+      writeFileSync(join(dir, file), `${JSON.stringify(value, null, 2)}\n`);
+    };
+    write('package.json', { name: 'suite', version, packageManager: `npm@${pin}` });
+    for (const file of packageFiles) write(file, { name: file, version });
+    return { dir, write, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+  }
+  /** A bump over `dir` whose steps are recorded, and `fail` throws when its step runs. */
+  function run(dir, { head, resume = false, fail = '', onVersion = () => {} }) {
+    const calls = [], errors = [];
+    const exec = (/** @type {string} */ _file, /** @type {string[]} */ args) => {
+      const step = args[1] === '--version' ? '--version' : args.slice(args[0].endsWith('npm-cli.js') ? 1 : 0).join(' ');
+      calls.push(step);
+      if (step === '--version') return `${pin}\n`;
+      if (step.startsWith('./scripts/version-packages.js')) onVersion();
+      if (step === fail) throw new Error(`${step} failed`);
+      return '';
+    };
+    const code = bump({ release: 'patch', resume, head: () => head, root: dir, env: { npm_execpath: '/x/npm-cli.js' },
+      execPath: '/x/node', exec, log: () => {}, error: (/** @type {string} */ line) => errors.push(line) });
+    return { code, calls, errors: errors.join('\n') };
+  }
+
+  it('refuses a tree whose version already differs from HEAD, before it writes anything', function () {
+    const t = tree('1.2.4');
+    try {
+      const result = run(t.dir, { head: '1.2.3' });
+      assert.strictEqual(result.code, 2);
+      assert.deepStrictEqual(result.calls, ['--version'], 'only the npm probe ran');
+      assert.match(result.errors, /already bumped: package\.json carries 1\.2\.4 and HEAD carries 1\.2\.3/);
+      assert.match(result.errors, /npm run release:bump -- --resume/);
+    }
+    finally { t.cleanup(); }
+  });
+
+  it('stops with the way out when a step fails after the manifests were written', function () {
+    const t = tree('1.2.3');
+    try {
+      const result = run(t.dir, { head: '1.2.3', fail: 'install',
+        onVersion: () => t.write('package.json', { name: 'suite', version: '1.2.4', packageManager: `npm@${pin}` }) });
+      assert.strictEqual(result.code, 1);
+      assert.deepStrictEqual(result.calls, ['--version', './scripts/version-packages.js patch', 'install']);
+      assert.match(result.errors, /stopped at `npm install`, after the manifests were set to 1\.2\.4 \(HEAD carries 1\.2\.3\)/);
+      assert.match(result.errors, /npm run release:bump -- --resume/);
+    }
+    finally { t.cleanup(); }
+  });
+
+  it('resumes a bumped tree from the install, without bumping it again', function () {
+    const t = tree('1.2.4');
+    try {
+      const result = run(t.dir, { head: '1.2.3', resume: true });
+      assert.strictEqual(result.code, 0, result.errors);
+      assert.deepStrictEqual(result.calls, ['--version', 'install', 'run test:lock', 'run build']);
+    }
+    finally { t.cleanup(); }
+  });
+
+  it('refuses to resume a tree that is not bumped, or bumped only in part, and a HEAD it cannot read', function () {
+    const t = tree('1.2.4');
+    try {
+      const same = run(t.dir, { head: '1.2.4', resume: true });
+      assert.strictEqual(same.code, 2);
+      assert.match(same.errors, /nothing to resume: package\.json carries 1\.2\.4, which HEAD already carries/);
+      t.write(packageFiles[0], { name: packageFiles[0], version: '1.2.3' });
+      const partial = run(t.dir, { head: '1.2.3', resume: true });
+      assert.strictEqual(partial.code, 2);
+      assert.match(partial.errors, new RegExp(`1 manifest does not carry 1\\.2\\.4: ${packageFiles[0].replace(/[./]/g, '\\$&')}`));
+      assert.deepStrictEqual([same.calls, partial.calls], [['--version'], ['--version']], 'nothing ran past the probe');
+      const unknown = run(t.dir, { head: null });
+      assert.strictEqual(unknown.code, 2);
+      assert.match(unknown.errors, /cannot say what HEAD carries/);
+    }
+    finally { t.cleanup(); }
+  });
+
+  it('reads --resume as the one flag, with no release word beside it', function () {
+    assert.deepStrictEqual(bumpArguments([]), { release: 'patch', resume: false });
+    assert.deepStrictEqual(bumpArguments(['minor']), { release: 'minor', resume: false });
+    assert.deepStrictEqual(bumpArguments(['--resume']), { release: 'patch', resume: true });
+    assert.match(String(/** @type {any} */ (bumpArguments(['minor', '--resume'])).refusal), /takes no release word/);
+    assert.match(String(/** @type {any} */ (bumpArguments(['minor', 'major'])).refusal), /one release word/);
   });
 });
 
@@ -205,6 +301,127 @@ describe('the deploy guard reads the tracked measurements of a checkout', functi
     // registered or remeasured suite can pass `npm test` before its commit
     assert.ok(!/checkBenchmarkDrift\(\)/.test(read('test/scripts/release-tooling.test.js')),
       'no test reads this checkout\'s own measurement state');
+  });
+});
+
+describe('the gates say what they enforce, and the build does no dead work', function () {
+  const manifest = JSON.parse(read('package.json'));
+  /** Every workspace manifest the root declares, with its directory. */
+  const workspaces = manifest.workspaces.map((/** @type {string} */ dir) => ({
+    dir: dir.replace(/^\.\//, ''), pkg: JSON.parse(read(`${dir.replace(/^\.\//, '')}/package.json`)),
+  }));
+
+  it('lint fails on a warning: the one entry the hook, CI and site:gate call carries --max-warnings 0', function () {
+    const lint = String(manifest.scripts.lint);
+    assert.match(lint, /^eslint --max-warnings 0 /, lint);
+    // and every path it names exists, or eslint refuses the pattern and the gate is red for nothing
+    const paths = lint.split(/\s+/).slice(1).filter((token, i, all) => !token.startsWith('-') && all[i - 1] !== '--max-warnings');
+    assert.ok(paths.length > 0);
+    for (const path of paths) assert.ok(existsSync(fileURLToPath(new URL(path, root))), `the lint command names ${path}, which does not exist`);
+  });
+
+  it('every publishable workspace builds exactly its type declarations: no bundle that nothing imports', function () {
+    for (const { dir, pkg } of workspaces) {
+      if (pkg.private === true) continue;
+      assert.strictEqual(pkg.scripts?.build, 'npm run build:types', `${dir}/package.json build`);
+      assert.strictEqual(pkg.scripts?.prepack, 'npm run build:types', `${dir}/package.json prepack`);
+    }
+  });
+
+  it('every script that runs `node <file>` names a file that exists', function () {
+    for (const { dir, pkg } of [{ dir: '.', pkg: manifest }, ...workspaces]) {
+      for (const [name, script] of Object.entries(pkg.scripts ?? {})) {
+        // a script runs from its workspace, and a `cd` moves the rest of it
+        let at = join(fileURLToPath(root), dir);
+        for (const command of String(script).split(/&&|\|\||;/)) {
+          const words = command.trim().split(/\s+/);
+          if (words[0] === 'cd' && words[1] !== undefined) at = join(at, words[1]);
+          if (words[0] !== 'node') continue;
+          const file = words.slice(1).find((word) => !word.startsWith('-'));
+          if (file === undefined || !/\.[cm]?js$/.test(file)) continue;
+          assert.ok(existsSync(join(at, file)), `${dir}/package.json script '${name}' runs ${file}, which does not exist`);
+        }
+      }
+    }
+  });
+
+  it('CI scans the built site for banned hues between the one build and the browser matrix, as site:gate does', function () {
+    const workflow = read('.github/workflows/ci.yml');
+    const start = workflow.search(/^ {2}browser:$/m);
+    assert.ok(start >= 0, 'the workflow has a browser job');
+    const rest = workflow.slice(start + 1);
+    const end = rest.search(/^ {2}[a-z][\w-]*:$/m);
+    const job = end < 0 ? rest : rest.slice(0, end);
+    const runs = [...job.matchAll(/^\s+(?:- )?run: (.+)$/gm)].map((match) => match[1].trim());
+    const at = (/** @type {string} */ command) => runs.indexOf(command);
+    assert.ok(at('npm run website:build') >= 0, runs.join(' | '));
+    assert.ok(at('npm run test:design') > at('npm run website:build'), runs.join(' | '));
+    assert.ok(at('npm run test:browser:prebuilt') > at('npm run test:design'), runs.join(' | '));
+    assert.ok(!runs.includes('npm run test:browser'), 'the matrix runs over the build the design sweep read, not a second one');
+  });
+});
+
+describe('the two deploy guards read git status the same way', function () {
+  /** A disposable repository whose committed site carries a worker and one measurement. */
+  function site() {
+    const root = mkdtempSync(join(tmpdir(), 'jaren-status-'));
+    const config = join(root, 'empty-gitconfig');
+    writeFileSync(config, '');
+    const env = { ...process.env, GIT_CONFIG_GLOBAL: config, GIT_CONFIG_NOSYSTEM: '1' };
+    const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8', env, stdio: ['ignore', 'pipe', 'ignore'] });
+    git('init', '-q');
+    git('config', 'user.email', 'test@example.test');
+    git('config', 'user.name', 'test');
+    const pub = join(root, 'packages', 'website', 'public');
+    mkdirSync(join(pub, 'benchmarks'), { recursive: true });
+    mkdirSync(join(pub, 'site'), { recursive: true });
+    writeFileSync(join(pub, 'sw.js'), "const CACHE = 'jaren-website-v1';\n");
+    writeFileSync(join(pub, 'benchmarks', 'alpha.json'), '{"rows":1}\n');
+    git('add', '-A');
+    git('commit', '-q', '-m', 'site');
+    return { pub, root, cleanup: () => rmSync(root, { recursive: true, force: true }) };
+  }
+
+  it('keeps an exempt measurement exempt whatever its name: a space or a non-ASCII character is still one path', function () {
+    const repo = site();
+    try {
+      writeFileSync(join(repo.pub, 'benchmarks', 'my file.json'), '{}\n');
+      writeFileSync(join(repo.pub, 'site', 'café.json'), '{}\n');
+      assert.deepStrictEqual(checkServiceWorkerCache({ root: repo.root }),
+        { code: 0, changed: [], cache: 'jaren-website-v1', head: 'jaren-website-v1' });
+      // and the measurement guard names the same file, unquoted
+      assert.deepStrictEqual(checkBenchmarkDrift({ root: repo.root }),
+        { code: 1, changed: ['packages/website/public/benchmarks/my file.json'] });
+    }
+    finally {
+      repo.cleanup();
+    }
+  });
+
+  it('names a governed asset with a space or a non-ASCII name as the path that ships', function () {
+    const repo = site();
+    try {
+      writeFileSync(join(repo.pub, 'icon one.png'), 'x');
+      writeFileSync(join(repo.pub, 'ícone.png'), 'x');
+      const report = checkServiceWorkerCache({ root: repo.root });
+      assert.strictEqual(report.code, 1);
+      assert.deepStrictEqual([...report.changed].sort(),
+        ['packages/website/public/icon one.png', 'packages/website/public/ícone.png']);
+    }
+    finally {
+      repo.cleanup();
+    }
+  });
+
+  it('reads a rename or a copy by the path that would ship, its origin in the next field', function () {
+    const output = 'R  public/new name.png\0public/old.png\0 M a "quoted" b.json\0C  copy.js\0orig.js\0?? café.json\0';
+    assert.deepStrictEqual(statusEntries(output), [
+      { status: 'R ', path: 'public/new name.png', from: 'public/old.png' },
+      { status: ' M', path: 'a "quoted" b.json' },
+      { status: 'C ', path: 'copy.js', from: 'orig.js' },
+      { status: '??', path: 'café.json' },
+    ]);
+    assert.deepStrictEqual(statusEntries(''), []);
   });
 });
 
@@ -380,9 +597,11 @@ describe('the design sweep', function () {
 
   it('the CLI exits unrunnable for incomplete input and reports any observed hue', t => {
     const root = fixture(t, { 'packages/website/dist': { 'app.js': "const color = '#5646d6';" } });
-    mkdirSync(join(root, 'scripts'));
+    mkdirSync(join(root, 'scripts', 'lib'), { recursive: true });
     const script = join(root, 'scripts', 'check-site-design.js');
-    writeFileSync(script, read('scripts/check-site-design.js'));
+    // the script and the one local module it imports
+    for (const file of ['check-site-design.js', 'lib/main-module.js'])
+      writeFileSync(join(root, 'scripts', file), read(`scripts/${file}`));
     writeFileSync(join(root, 'package.json'), '{"type":"module"}');
     const result = spawnSync(process.execPath, [script], { encoding: 'utf8' });
     assert.strictEqual(result.error, undefined);

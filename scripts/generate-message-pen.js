@@ -9,6 +9,7 @@ import { messagesEn } from '@jarenjs/validate';
 import { formsMessagesEn } from '@jarenjs/forms';
 import { contractMessagesEn } from '@jarenjs/contract';
 import { queryMessagesEn } from '@jarenjs/json';
+import { isMainModule } from './lib/main-module.js';
 
 /** Derive parameter reads from a render closure, refusing unfamiliar code shapes.
  * This is static JavaScript analysis, not a template parser or code execution. */
@@ -69,7 +70,7 @@ export function messagePenArtifacts() {
   return { vocabulary, declarations };
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === import.meta.filename) {
+if (isMainModule(import.meta.url)) {
   const root = resolve(import.meta.dirname, '..');
   const out = messagePenArtifacts();
   writeFileSync(resolve(root, 'packages/linq/src/messages/vocabulary.js'), out.vocabulary);

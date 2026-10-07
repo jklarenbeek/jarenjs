@@ -64,7 +64,11 @@ because jobs rows are live work and a rebuild would drop a queue.
 `enqueue`'s options are validated as
 they are stored: `runAt` must be a finite epoch in milliseconds and
 `maxAttempts` a positive integer (`TypeError`) — a `NaN` eligibility
-was once stored, and that job was pending forever.
+was once stored, and that job was pending forever. They are a closed
+set — `id`, `runAt`, `maxAttempts` — in a plain object: any other
+member is `JD0013` naming the nearest one (a misspelt `runat` used to be
+dropped, and the job ran at once), as are options that are not a plain
+object and an `id` that is not a non-empty string.
 
 PostgreSQL stores epochs and counters as NUMERIC, preserving finite JavaScript
 epoch values including fractional milliseconds and attempt budgets beyond
@@ -481,7 +485,9 @@ The fence adds five, all in the package's single runtime table
 
 Otherwise: API misuse (a malformed handler map, a
 non-string kind, a worker started twice) is a `TypeError` at the
-call, matching the capture and live precedents; storage failures ride
+call, matching the capture and live precedents — except `enqueue`'s
+closed option set, whose unknown or malformed members are `JD0013`
+(§2), the code every store operation's options refuse with; storage failures ride
 the store's one driver-failure classification (MODEL-FORMAT §7 — a
 locked or read-only file arrives classed) and a coded error passes
 through it

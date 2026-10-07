@@ -27,6 +27,8 @@ import {
   cloneJson,
   isJsonContainer,
   isJsonObject,
+  isPlainOptions,
+  refuseUnknownMembers,
   setObjectMember,
 } from '@jarenjs/core/object';
 
@@ -495,6 +497,30 @@ function compileNode(node, ctx) {
   return built === null ? null : deferred;
 }
 
+/** The members of `NormalizeOptions`; any other is refused. */
+const NORMALIZE_OPTIONS = Object.freeze(['useDefaults', 'removeAdditional', 'coerceTypes', 'trimStrings']);
+
+/**
+ * Refuse a malformed options object before anything compiles: every
+ * switch is opt-in, so a misspelt or mistyped one would leave the
+ * normalization off without a word. A host programming error, so a
+ * `TypeError` naming the nearest member.
+ * @param {unknown} options
+ */
+function admitNormalizeOptions(options) {
+  if (!isPlainOptions(options)) throw new TypeError('compileNormalizer: options must be a plain object');
+  refuseUnknownMembers(options, NORMALIZE_OPTIONS,
+    (key, hint) => new TypeError(`compileNormalizer: unknown option '${key}'${hint}`));
+  for (const name of ['useDefaults', 'coerceTypes', 'trimStrings']) {
+    const value = options[name];
+    if (value !== undefined && typeof value !== 'boolean' && typeof value !== 'function')
+      throw new TypeError(`compileNormalizer: '${name}' must be true, false or a function of the schema node`);
+  }
+  const strip = options.removeAdditional;
+  if (strip !== undefined && typeof strip !== 'boolean' && strip !== 'all')
+    throw new TypeError("compileNormalizer: 'removeAdditional' must be true, false or 'all'");
+}
+
 /**
  * Compile a JSON Schema into a normalizer: a function that returns a
  * normalized copy of its input, leaving the input untouched.
@@ -528,6 +554,9 @@ function compileNode(node, ctx) {
  * @param {object|boolean} schema - The schema to compile
  * @param {NormalizeOptions} [options] - Which normalizations to apply
  * @returns {Normalizer<In, Out>} The compiled normalizer
+ * @throws {TypeError} When `options` is not a plain object, names a member
+ *   outside `NormalizeOptions`, or gives one a value of the wrong type - a
+ *   misspelt switch would otherwise compile a normalizer that does nothing
  * @example
  * const normalize = compileNormalizer({
  *   type: 'object',
@@ -543,6 +572,7 @@ function compileNode(node, ctx) {
  * input;             // { name: '  jaren  ', port: '9000', stray: 1 } - untouched
  */
 export function compileNormalizer(schema, options = {}) {
+  admitNormalizeOptions(options);
   const resolved = {
     useDefaults: options.useDefaults,
     removeAdditional: options.removeAdditional === 'all'

@@ -6,6 +6,7 @@
 import { compileJsonQuery } from '@jarenjs/json/query';
 import { chain } from './driver.js';
 import { DbCompileError, DbRuntimeError } from './errors.js';
+import { refuseUnknownModelMembers } from './options.js';
 
 const MEMBERS = ['name', 'on', 'assert', 'enforcement', 'audit', 'when', 'columns', 'effects'];
 /** The codecs a rule compares, as SQL and as JSON alike. */
@@ -63,34 +64,47 @@ export function normalizeInvariants(rules, path) {
   if (rules === undefined) return [];
   if (!Array.isArray(rules)) throw new DbCompileError('JD0005', 'invariants must be an array', path);
   const names = new Set();
-  return rules.map((rule) => {
-    const fail = (reason) => { throw new DbCompileError('JD0005', reason, path); };
+  return rules.map((rule, index) => {
+    const at = `${path}/${index}`;
+    /** A refusal at this rule, or at one of its members. @param {string} reason @param {string} [member] @returns {never} */
+    const fail = (reason, member = undefined) => {
+      throw new DbCompileError('JD0005', reason, member === undefined ? at : `${at}/${member}`);
+    };
     if (!rule || typeof rule !== 'object' || Array.isArray(rule)) fail('an invariant must be an object');
-    for (const key of Object.keys(rule))
-      if (!MEMBERS.includes(key)) fail(`unknown invariant member '${key}'`);
-    if (typeof rule.name !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(rule.name) || names.has(rule.name)) fail('invariant names must be distinct identifiers');
+    refuseUnknownModelMembers(rule, MEMBERS, at, 'invariant');
+    if (typeof rule.name !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(rule.name) || names.has(rule.name)) fail('invariant names must be distinct identifiers', 'name');
     names.add(rule.name);
-    if (!['database', 'store'].includes(rule.enforcement)) fail('invariant enforcement must be database or store');
+    if (!['database', 'store'].includes(rule.enforcement)) fail('invariant enforcement must be database or store', 'enforcement');
     if (!Array.isArray(rule.on) || !rule.on.length || new Set(rule.on).size !== rule.on.length
-      || rule.on.some((op) => !['insert', 'update', 'delete'].includes(op))) fail('invariant on must name distinct insert/update/delete operations');
-    if (rule.assert === undefined) fail('invariant assert is required');
+      || rule.on.some((op) => !['insert', 'update', 'delete'].includes(op))) fail('invariant on must name distinct insert/update/delete operations', 'on');
+    if (rule.assert === undefined) fail('invariant assert is required', 'assert');
     if (rule.audit !== undefined && (rule.enforcement !== 'database' || !rule.audit
       || typeof rule.audit.entity !== 'string' || !rule.audit.values || typeof rule.audit.values !== 'object'
-      || Array.isArray(rule.audit.values) || Object.keys(rule.audit).some((k) => !['entity', 'values'].includes(k)))) fail('audit is a database effect with an entity and values');
+      || Array.isArray(rule.audit.values) || Object.keys(rule.audit).some((k) => !['entity', 'values'].includes(k)))) fail('audit is a database effect with an entity and values', 'audit');
     if (rule.when !== undefined && (!['changed', 'assigned'].includes(rule.when) || !rule.on.includes('update')))
-      fail("invariant when is 'changed' or 'assigned', on a rule that includes update");
+      fail("invariant when is 'changed' or 'assigned', on a rule that includes update", 'when');
     if (rule.columns !== undefined && (!rule.on.includes('update') || !Array.isArray(rule.columns) || rule.columns.length === 0
       || new Set(rule.columns).size !== rule.columns.length || rule.columns.some((c) => typeof c !== 'string' || c === '')))
-      fail('invariant columns name distinct members, on a rule that includes update');
-    if (rule.columns !== undefined && rule.when === 'changed') fail("invariant columns fire on assignment, which when: 'changed' contradicts");
+      fail('invariant columns name distinct members, on a rule that includes update', 'columns');
+    if (rule.columns !== undefined && rule.when === 'changed') fail("invariant columns fire on assignment, which when: 'changed' contradicts", 'columns');
     if (rule.effects !== undefined && (rule.enforcement !== 'database' || !rule.on.includes('update') || !Array.isArray(rule.effects)
       || rule.effects.length === 0 || rule.effects.some((e) => !e || typeof e !== 'object' || Array.isArray(e)
         || Object.keys(e).length !== 1 || typeof e.increment !== 'string' || e.increment === '')))
-      fail('effects are database effects of a rule that includes update: [{ increment: <member> }]');
-    if (rule.effects !== undefined && rule.columns !== undefined) fail('an increment runs on every update of the row, never on columns alone');
+      fail('effects are database effects of a rule that includes update: [{ increment: <member> }]', 'effects');
+    if (rule.effects !== undefined && rule.columns !== undefined) fail('an increment runs on every update of the row, never on columns alone', 'columns');
     const probes = [];
-    const expression = withProbes(rule.assert, probes, fail);
-    return { ...rule, probes, evaluate: compileJsonQuery(expression) };
+    const expression = withProbes(rule.assert, probes, (reason) => fail(reason, 'assert'));
+    let evaluate;
+    try {
+      evaluate = compileJsonQuery(expression);
+    }
+    catch (cause) {
+      // compiled where the model is checked, as a `{ query }` default is: the
+      // engine's reason travels with the rule's position
+      throw new DbCompileError('JD0005', `invariant assert does not compile: ${/** @type {Error} */ (cause).message}`,
+        `${at}/assert`, /** @type {Error} */ (cause));
+    }
+    return { ...rule, probes, evaluate };
   });
 }
 
@@ -116,70 +130,87 @@ function pathsOf(node, out = []) {
  */
 export function resolveInvariants(entities, codecOf) {
   for (const entity of entities.values()) {
-    const fail = (reason) => { throw new DbCompileError('JD0005', reason, `${entity.docPath}/invariants`); };
     const layout = entity.physical;
     const columnOf = (member) => layout?.columns.find((c) => c.name === member);
     const increments = new Set();
-    for (const rule of entity.invariants) {
+    for (const [index, rule] of entity.invariants.entries()) {
+      /** A refusal at one member of this rule. @param {string} reason @param {string} member @returns {never} */
+      const fail = (reason, member) => {
+        throw new DbCompileError('JD0005', reason, `${entity.docPath}/invariants/${index}/${member}`);
+      };
+      // a store-owned layout gets no trigger, so a database rule on one was
+      // enforced by nothing at all, and a view takes no writes: refused at the
+      // member, as `planInvariants` refuses them; so is an audit into a table
+      // no entity maps for writing
+      if ((layout === null || layout.kind === 'view') && rule.enforcement === 'database')
+        fail('database invariant: database rules require a writable explicit column layout', 'enforcement');
+      const audited = rule.audit === undefined ? undefined : entities.get(rule.audit.entity)?.physical;
+      if (rule.audit !== undefined && (audited === undefined || audited === null || audited.kind === 'view'))
+        fail('database invariant: audit target must be a mapped application table', 'audit');
       if (rule.columns !== undefined) {
-        if (layout === null) fail('invariant columns name the columns of a physical layout; a document is written whole');
+        if (layout === null) fail('invariant columns name the columns of a physical layout; a document is written whole', 'columns');
         for (const member of rule.columns)
-          if (!columnOf(member) || columnOf(member).generated) fail(`invariant column '${member}' must name a writable mapped column`);
+          if (!columnOf(member) || columnOf(member).generated) fail(`invariant column '${member}' must name a writable mapped column`, 'columns');
       }
       for (const effect of rule.effects ?? []) {
         const column = columnOf(effect.increment);
         if (layout === null || !column || column.codec !== 'integer' || column.null !== 'reject' || column.generated || entity.keys.includes(effect.increment))
-          fail(`increment '${effect.increment}' must name a non-key, non-null integer column`);
-        if (increments.has(effect.increment)) fail(`'${effect.increment}' is incremented by one rule only`);
+          fail(`increment '${effect.increment}' must name a non-key, non-null integer column`, 'effects');
+        if (increments.has(effect.increment)) fail(`'${effect.increment}' is incremented by one rule only`, 'effects');
         increments.add(effect.increment);
       }
       for (const probe of rule.probes) {
+        const refuse = (/** @type {string} */ reason) => fail(reason, 'assert');
         const target = entities.get(probe.entity);
-        if (!target || target.physical === null) fail(`$exists-row reads a physical layout; '${probe.entity}' has none`);
-        if (target.physical.kind === 'view') fail(`$exists-row reads a table by its primary key; '${probe.entity}' is a view, which has none`);
+        if (!target || target.physical === null) refuse(`$exists-row reads a physical layout; '${probe.entity}' has none`);
+        if (target.physical.kind === 'view') refuse(`$exists-row reads a table by its primary key; '${probe.entity}' is a view, which has none`);
         // two entities can map one table: the table decides, not the entity
         if (sameTable(target.physical, layout ?? { table: entity.name }))
-          fail("$exists-row reads another table: PostgreSQL's row triggers run at statement end, SQLite's per row");
+          refuse("$exists-row reads another table: PostgreSQL's row triggers run at statement end, SQLite's per row");
         for (const key of target.keys)
-          if (!Object.hasOwn(probe.match, key)) fail(`$exists-row on '${probe.entity}' must match its key member '${key}'`);
+          if (!Object.hasOwn(probe.match, key)) refuse(`$exists-row on '${probe.entity}' must match its key member '${key}'`);
         for (const [member, value] of Object.entries(probe.match)) {
           const column = target.physical.columns.find((c) => c.name === member);
-          if (!column || column.null === 'absent' || !RULE_CODECS.includes(column.codec)) fail(`$exists-row member '${member}' needs a scalar column codec`);
+          if (!column || column.null === 'absent' || !RULE_CODECS.includes(column.codec)) refuse(`$exists-row member '${member}' needs a scalar column codec`);
           const escaped = typeof value === 'string' && value.startsWith('$') && !value.startsWith('$$');
           const path = escaped ? RECORD_PATH.exec(value) : null;
-          if (escaped && path === null) fail(`$exists-row value '${value}' must read $.old.<member> or $.new.<member>; a text that starts with $ is written $$`);
+          if (escaped && path === null) refuse(`$exists-row value '${value}' must read $.old.<member> or $.new.<member>; a text that starts with $ is written $$`);
           if (path !== null) {
             const name = path[2];
             if (layout === null) {
               if (entity.properties.get(name)?.relation !== undefined || !entity.properties.has(name))
-                fail(`$exists-row value '${value}': '${entity.name}' has no stored property '${name}'`);
+                refuse(`$exists-row value '${value}': '${entity.name}' has no stored property '${name}'`);
               continue;
             }
             const source = columnOf(name);
-            if (source === undefined) fail(`$exists-row value '${value}': '${entity.name}' has no column '${name}'`);
+            if (source === undefined) refuse(`$exists-row value '${value}': '${entity.name}' has no column '${name}'`);
             // the two engines compare a match as the target's type: one codec
             // on both sides (an integer into a number column is exact) or the
             // database and the store would round or reparse it differently
             if (source.codec !== column.codec && !(source.codec === 'integer' && column.codec === 'number'))
-              fail(`$exists-row matches ${column.codec} column '${member}' with ${source.codec} column '${name}'; a match compares one codec`);
+              refuse(`$exists-row matches ${column.codec} column '${member}' with ${source.codec} column '${name}'; a match compares one codec`);
             continue;
           }
           const literal = ruleLiteral(value);
           if (literal === null) continue;
-          if (!['string', 'number', 'boolean'].includes(typeof literal)) fail(`$exists-row value for '${member}' must be a scalar`);
+          if (!['string', 'number', 'boolean'].includes(typeof literal)) refuse(`$exists-row value for '${member}' must be a scalar`);
           try { codecOf(column).encode(literal); }
-          catch { fail(`$exists-row value ${JSON.stringify(literal)} is not one the ${column.codec} column '${member}' holds`); }
+          catch { refuse(`$exists-row value ${JSON.stringify(literal)} is not one the ${column.codec} column '${member}' holds`); }
         }
         probe.target = target.physical;
         probe.keys = target.keys;
       }
     }
-    if (increments.size > 0) for (const rule of entity.invariants) {
+    if (increments.size > 0) for (const [index, rule] of entity.invariants.entries()) {
       if (!rule.on.includes('update')) continue;
-      const read = [...pathsOf(rule.assert), ...pathsOf(rule.audit?.values ?? {})];
+      const at = `${entity.docPath}/invariants/${index}`;
       for (const member of increments) {
-        if (read.includes(`$.new.${member}`)) fail(`'${member}' is incremented by the database: an update rule cannot read $.new.${member}`);
-        if (rule.columns?.includes(member)) fail(`'${member}' is incremented by the database and cannot be a rule column`);
+        const readIn = pathsOf(rule.assert).includes(`$.new.${member}`) ? 'assert'
+          : pathsOf(rule.audit?.values ?? {}).includes(`$.new.${member}`) ? 'audit' : null;
+        if (readIn !== null)
+          throw new DbCompileError('JD0005', `'${member}' is incremented by the database: an update rule cannot read $.new.${member}`, `${at}/${readIn}`);
+        if (rule.columns?.includes(member))
+          throw new DbCompileError('JD0005', `'${member}' is incremented by the database and cannot be a rule column`, `${at}/columns`);
       }
     }
   }

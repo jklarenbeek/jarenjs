@@ -6,10 +6,11 @@
      provenance): stale-while-revalidate
    Every cache.put is gated on response.ok: a 404/502 must never be
    cached forever, and a bad navigation response must never replace the
-   shell. */
+   shell — nor may a navigation to anything but the shell itself. */
 
 const CACHE = 'jaren-website-v29';
 const BASE = self.registration.scope; // e.g. https://host/jarenjs/
+const SHELL_PATH = new URL(BASE).pathname;
 
 /* Precached at install AND served by the fetch handler's cache-first
    branch below — a precache no branch serves is unreachable (the fonts
@@ -54,9 +55,14 @@ self.addEventListener('fetch', (event) => {
   if (request.method !== 'GET' || !request.url.startsWith(BASE)) return;
 
   if (request.mode === 'navigate') {
+    /* Only a navigation to the shell's own path refreshes the cached
+       shell: any other page in scope — a raw benchmarks/*.json opened in
+       a tab — is not the app, and must not become what the site root
+       serves offline. */
+    const isShell = new URL(request.url).pathname === SHELL_PATH;
     event.respondWith(
       fetch(request)
-        .then((response) => putOk(BASE, response))
+        .then((response) => (isShell ? putOk(BASE, response) : response))
         .catch(() => caches.match(BASE)));
     return;
   }

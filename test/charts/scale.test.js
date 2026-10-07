@@ -83,6 +83,13 @@ describe('axis ticks', function () {
     assert.deepEqual(axisTicksLinear(NaN, 1), []);
   });
 
+  it('the ladder survives spans a double cannot divide or hold', function () {
+    assert.equal(niceStep(5e-324), 5e-324);
+    assert.deepEqual(axisTicksLinear(0, 5e-324), [0, 5e-324]);
+    assert.deepEqual(axisTicksLinear(0, 1e-300), [0, 2e-301, 4e-301, 6e-301, 8e-301, 1e-300]);
+    assert.deepEqual(axisTicksLinear(-1e308, 1e308), [-1e308, 1e308]);
+  });
+
   it('niceStep picks 1/2/5 x 10^k', function () {
     assert.equal(niceStep(51, 5), 10);
     assert.equal(niceStep(10, 5), 2);

@@ -117,6 +117,26 @@ describe('jaren-contract — failure exits', () => {
     assert.match(checkless.stderr, /--check needs --out/);
   });
 
+  it('refuses a value option followed by a flag or by nothing, writing nothing (the jaren-emit wording)', () => {
+    for (const [args, option] of /** @type {[string[], string][]} */ ([
+      [['types', '--out', '--check', '--contract', 'shop.json'], '--out'],
+      [['describe', '--contract', 'shop.json', '--out', '--check'], '--out'],
+      [['types', '--contract', 'shop.json', '--out'], '--out'],
+      [['describe', '--contract', '--check'], '--contract'],
+      [['describe', '--contract'], '--contract'],
+      [['openapi', '--contract', 'shop.json', '--info-title', '--lenient'], '--info-title'],
+      [['openapi', '--contract', 'shop.json', '--info-version', '-x'], '--info-version'],
+      [['diff', '--from', '--to', 'shop.json'], '--from'],
+      [['diff', '--from', 'shop.json', '--to', '--audience', 'all'], '--to'],
+    ])) {
+      const r = run(args);
+      assert.strictEqual(r.status, 2, args.join(' '));
+      assert.match(r.stderr, new RegExp(`^jaren-contract: ${option} requires a value$`, 'm'), args.join(' '));
+      assert.strictEqual(r.stdout, '', args.join(' '));
+      assert.deepStrictEqual(Object.keys(r.files), ['shop.json'], `${args.join(' ')} wrote nothing`);
+    }
+  });
+
   it('reports dropped keywords on stderr under openapi --lenient and refuses without it', () => {
     const doc = {
       $contract: '0.1',

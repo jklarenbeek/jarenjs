@@ -6,12 +6,38 @@
  * caller most plausibly meant. `openStore` (`JD0009`), the transaction
  * surfaces (`JD0013`) and the PostgreSQL driver (`JD0003`) each raise
  * their own code; the nearest-name judgement is `@jarenjs/core/object`'s,
- * shared with every other closed option set in the suite.
+ * shared with every other closed option set in the suite. The model
+ * document's declarations are closed sets too (MODEL-FORMAT §2), refused
+ * as an invalid model (`JD0005`) at the member itself.
  */
 
-import { isPlainOptions, refuseUnknownMembers } from '@jarenjs/core/object';
+import { isPlainOptions, nearestName, refuseUnknownMembers } from '@jarenjs/core/object';
+import { encodeJSONPointerSegment } from '@jarenjs/json/pointer';
 import { DbCompileError } from './errors.js';
 export { isPlainOptions, nearestName, refuseUnknownMembers } from '@jarenjs/core/object';
+
+/**
+ * Refuse the first member of a model declaration outside its closed set:
+ * `JD0005` whose `docPath` points at the member, naming the nearest member
+ * and the set. Called before any other rule of the declaration, so a typo
+ * is reported as the typo it is — a misspelt `unique` used to be dropped,
+ * and the index it declared was created without it.
+ * @param {Record<string, any>} declaration
+ * @param {readonly string[]} members - the closed set, in its documented order
+ * @param {string} docPath - the declaration's own pointer into the model
+ * @param {string} what - what the declaration is (`'index'`, `'physical layout'`)
+ * @returns {void}
+ */
+export function refuseUnknownModelMembers(declaration, members, docPath, what) {
+  for (const key of Object.keys(declaration)) {
+    if (members.includes(key)) continue;
+    const near = nearestName(key, members);
+    throw new DbCompileError('JD0005',
+      `unknown ${what} member '${key}'${near === undefined ? '' : ` — did you mean '${near}'?`} `
+      + `(${/^[aeiou]/.test(what) ? 'an' : 'a'} ${what} declares ${members.join(', ')})`,
+      `${docPath}/${encodeJSONPointerSegment(key)}`);
+  }
+}
 
 /** Refuse a malformed or misspelt option before its owner takes any resource.
  * @param {any} options @param {readonly string[]} members @param {string} owner

@@ -15,7 +15,10 @@ Free aliases `mathf64_log`, `mathf64_log2`, `mathf64_log10`, `mathf64_exp`,
 
 Statics on `Float64`: `factorial(n)` (exact for integers, `gamma(n+1)`
 otherwise), `gamma(x)` (Lanczos, whole real line), `hypot(...args)`,
-`roundTo(value, digits)` (decimal places),
+`roundTo(value, digits)` (decimal places, by rounding the scaled double
+`value · 10^digits` half up — fast, and not exact: `roundTo(2.675, 2)` is
+2.68 though the double is 2.67499…; `roundExact(x, precision, mode)` from
+`decimal.js` rounds the exact value, half up or half to even),
 `roundToPrecision(value, digits)` (significant figures — the numeric
 value of `toPrecision`, without its exponential string formatting),
 `nthroot(x, n)` (odd roots of negatives), `sign(x)`,
@@ -46,8 +49,10 @@ bits, signed)` masks and sign-extends into an 8/16/32/64-bit word;
 
 Domain-free `newtonRaphson(f, df, x0, opts)`, `bisect(f, a, b, opts)`,
 `secant(f, x0, x1, opts)`. Each returns `{ root, iterations, converged }`
-and never throws on non-convergence. `@jarenjs/core/finance` builds
-`irr`/`rate` on top.
+and never throws on non-convergence. `centralDifference(f, h = 1e-6)` is
+the derivative to hand Newton when `f` has none in closed form,
+`(f(x + h) − f(x − h)) / 2h`. `@jarenjs/core/finance` builds
+`irr`/`rate` (and the bond yield) on top.
 
 ## 3D kernel — `mat4.js` + `project.js`
 

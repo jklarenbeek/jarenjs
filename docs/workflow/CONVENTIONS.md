@@ -220,7 +220,9 @@ code — a step that exists only as prose is a step that gets skipped:
    capability line. It refuses under an npm that is not the `packageManager` pin
    (a lockfile written by another npm is one the pinned npm then rejects, in CI
    rather than here), bumps every manifest and internal range, syncs the
-   lockfile, runs `npm run test:lock` and rebuilds.
+   lockfile, runs `npm run test:lock` and rebuilds. It refuses a tree that is
+   already bumped against HEAD; one whose bump stopped part-way is finished
+   with `npm run release:bump -- --resume`, never by bumping again.
 3. **Commit**, as the repo user, with a **single short one-line message**
    describing the change (`Deduplicated shared helpers into core and view`). ONE
    line: no body, no `Co-authored-by`, no "Generated with", no AI attribution, no
@@ -279,4 +281,6 @@ commit, so the deployed site and the commit carry one version between them.
 3. The operator reviews on `main` and runs §6 when satisfied.
 
 Each template in [`templates/`](templates/) carries a real work order executed
-by a fresh session against this repository, and the record it produced.
+by a fresh session against this repository, and the record it produced —
+restated against the module that carries its code today, so every path and
+command they name exists.

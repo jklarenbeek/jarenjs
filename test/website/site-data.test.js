@@ -213,8 +213,11 @@ describe('a workspace\'s own site document (site.md)', function () {
   });
 
   /**
-   * The four ways a document is refused. Each names the path, because
+   * Three of the ways a document is refused. Each names the path, because
    * "the site build failed" without one is a hunt through 22 workspaces.
+   * The fourth, a parser failure that is not a frontmatter error ("the
+   * markdown parser could not read it"), has no fixture: the parser bounds
+   * every nesting it reads, so no plugin-free document reaches it.
    */
   const REFUSALS = [
     ['broken frontmatter', withLine('  title: Play', '  title: [unclosed'), 'the frontmatter is malformed'],
@@ -222,9 +225,15 @@ describe('a workspace\'s own site document (site.md)', function () {
       'does not match packages/website/schemas/site-document.schema.json'],
     ['a package name that is not the one beside it', OK.replace('@jarenjs/play', '@jarenjs/core'),
       "names package '@jarenjs/core', but the manifest beside it is '@jarenjs/play'"],
-    ['a body the parser cannot read', `${OK}${'>'.repeat(50000)} x\n`,
-      'the body is not readable as markdown'],
   ];
+
+  it('reads a body nested past the parser\'s bound instead of failing on it', function () {
+    // the parser bounds nesting and reads the excess as text, so fifty
+    // thousand quote markers are a document, not a crash to refuse
+    const entry = parse(`${OK}${'>'.repeat(50000)} x\n`);
+    assert.deepStrictEqual(entry.docs.ast.map((/** @type {any} */ n) => n.type),
+      ['heading', 'paragraph', 'blockquote']);
+  });
 
   for (const [what, source, reason] of REFUSALS) {
     it(`refuses ${what}, naming the document`, function () {

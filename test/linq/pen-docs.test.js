@@ -20,6 +20,8 @@ import * as path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { schemaOf } from '@jarenjs/linq/schema';
+import { from } from '@jarenjs/linq';
+import { fencesOf } from '../../scripts/check-documents.js';
 
 /**
  * One TOP-LEVEL section of a pen document — its `## N. Title` heading to
@@ -459,5 +461,44 @@ describe('QUERY-PEN.md — the chain\'s surface and its codes', () => {
     const documented = [...section.matchAll(/^\| `(JL\d{4})` \|/gm)].map((m) => m[1]);
     assert.deepStrictEqual(documented, [...raised].sort(),
       'QUERY-PEN.md §14 and the chain\'s modules disagree');
+  });
+});
+
+// ——— what every linq document says of the code ———
+
+describe('the linq documents describe the refusals the code raises', () => {
+  const LINQ = new URL('../../packages/linq/', import.meta.url);
+  const FILES = ['README.md', 'ARCHITECTURE.md',
+    ...fs.readdirSync(DOCS_DIR).filter((name) => name.endsWith('.md')).map((name) => `docs/${name}`)];
+  const read = (/** @type {string} */ file) => fs.readFileSync(new URL(file, LINQ), 'utf8');
+
+  it('a passage that says >, < or + over a capture is an uncoded TypeError names JL0108 instead', () => {
+    // what the capture raises, read from the code rather than assumed
+    assert.throws(() => from([{ a: 1 }]).where((x) => /** @type {any} */ (x.a) > 2),
+      (/** @type {any} */ e) => e.code === 'JL0108');
+    assert.throws(() => from([{ a: 1 }]).select((x) => /** @type {any} */ (x.a) + 1),
+      (/** @type {any} */ e) => e.code === 'JL0108');
+    const stale = [];
+    for (const file of FILES) {
+      for (const paragraph of read(file).split(/\n\s*\n/)) {
+        if (/plain `TypeError`|uncoded|not coded/.test(paragraph)
+          && /`[^`\n]*[<>+][^`\n]*`/.test(paragraph) && !/JL0108/.test(paragraph)) {
+          stale.push(`${file}: ${paragraph.replace(/\s+/g, ' ').slice(0, 72)}`);
+        }
+      }
+    }
+    assert.deepStrictEqual(stale, []);
+  });
+
+  it('a js fence carries no TypeScript-only line (that is a ts fence)', () => {
+    const typed = [];
+    for (const file of FILES) {
+      for (const fence of fencesOf(read(file))) {
+        if (fence.lang === 'js' && /^\s*(import type |type \w+\s*=|interface \w)/m.test(fence.body)) {
+          typed.push(`${file}:${fence.line}`);
+        }
+      }
+    }
+    assert.deepStrictEqual(typed, []);
   });
 });

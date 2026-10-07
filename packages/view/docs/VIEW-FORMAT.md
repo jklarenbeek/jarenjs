@@ -326,6 +326,17 @@ patching renderer would build: text and attribute values escaped (`&`,
 no output, boolean and style props serialized per §3. Serialization is
 pure: no state, no DOM, safe in any runtime.
 
+The text of an HTML `style` or `script` element (its tag in any case) is
+raw text, which an HTML parser never decodes, so it is written verbatim —
+the characters the DOM renderer puts in its text node. Text that raw text
+cannot carry — the element's own end tag as a parser recognizes one
+(`</style` or `</script`, in any case, followed by whitespace, `/` or
+`>`), or `<!--` in a script — is refused with a `TypeError` naming where
+the element sits; it used to be escaped, which shipped `&gt;` and `&amp;`
+to the browser as CSS or script source. Inside `svg` (back in HTML under
+`foreignObject`), where a parser reads `style` and `script` as foreign
+elements and decodes their text, it stays escaped.
+
 In trusted mode, a `textarea` carrying a `value` prop serializes that
 value as escaped text content, overriding its children; nullish values
 produce empty text. A leading newline is preserved through HTML parsing.

@@ -325,8 +325,10 @@ must match — mermaid (`components/mermaid/src/theme.js` ↔ the `--mm-*` fallb
   `public/` asset requires bumping the `CACHE` name** in `sw.js` or clients keep the old
   bytes. That is a gate, not a thing to remember: `scripts/check-sw-cache.js` compares
   the changed assets against HEAD's cache name and refuses the deploy that would ship
-  them under it. The generated measurements are exempt — they are served
-  stale-while-revalidate, so a cached copy is replaced rather than kept.
+  them under it. Two things are exempt: the generated measurements, which are served
+  stale-while-revalidate so a cached copy is replaced rather than kept, and `sw.js`
+  itself, because the browser compares the worker's own bytes on every navigation and
+  the new worker's `install` re-fetches the whole precache under the same name.
 
 ## 10. Verification method
 

@@ -4,6 +4,8 @@ import { getEpochOfDateTimeRFC3339, getEpochOfDateOnlyRFC3339 } from '@jarenjs/c
 import { DbCompileError, DbRuntimeError } from './errors.js';
 import { chain, useStatementOnce } from './driver.js';
 import { canonicalizeJson } from '@jarenjs/json/canonical';
+import { encodeJSONPointerSegment } from '@jarenjs/json/pointer';
+import { refuseUnknownModelMembers } from './options.js';
 import { planTable } from './dialects/sqlite-schema.js';
 import { sqlitePhysicalColumnType, sqliteTableMigration } from './dialects/sqlite.js';
 
@@ -13,6 +15,10 @@ const STORAGE = { text: 'string', integer: 'integer', number: 'number', boolean:
   uuid: 'string', 'local-timestamp': 'string', instant: 'string' };
 const identifier = (v) => typeof v === 'string' && v.length > 0 && !v.includes('\0');
 const PROGRAMS = ['constraints', 'indexes', 'triggers', 'strict', 'withoutRowid'];
+/** The closed members of a layout and of one of its columns. */
+const LAYOUT_MEMBERS = ['table', 'schema', 'kind', 'keys', 'columns', ...PROGRAMS];
+const COLUMN_MEMBERS = ['name', 'codec', 'null', 'default', 'generated', 'type', 'defaultValue', 'collation', 'identity', 'check',
+  'generatedExpression', 'stored'];
 
 /** Normalize a declared layout; implicit conversions are never adoption policy.
  * @param {any} physical @param {Map<string, any>} properties @param {string[]} keys
@@ -21,8 +27,7 @@ export function normalizePhysical(physical, properties, keys, path) {
   if (physical === undefined) return null;
   const fail = (reason) => { throw new DbCompileError('JD0005', reason, `${path}/physical`); };
   if (!physical || typeof physical !== 'object' || Array.isArray(physical)) fail('physical must be an object');
-  for (const key of Object.keys(physical))
-    if (!['table', 'schema', 'kind', 'keys', 'columns', ...PROGRAMS].includes(key)) fail(`unknown physical member '${key}'`);
+  refuseUnknownModelMembers(physical, LAYOUT_MEMBERS, `${path}/physical`, 'physical layout');
   if (!identifier(physical.table)) fail('physical.table must be a nonempty SQL identifier');
   if (physical.schema !== undefined && !identifier(physical.schema)) fail('physical.schema must be a nonempty SQL identifier');
   if (physical.kind !== undefined && !['table', 'view'].includes(physical.kind)) fail('physical.kind is table or view');
@@ -41,9 +46,9 @@ export function normalizePhysical(physical, properties, keys, path) {
   for (const name of names) {
     const property = properties.get(name);
     const c = physical.columns[name];
-    if (!c || typeof c !== 'object' || Array.isArray(c) || !Object.hasOwn(STORAGE, c.codec)) fail(`'${name}' needs an explicit supported column codec`);
-    for (const key of Object.keys(c))
-      if (!['name', 'codec', 'null', 'default', 'generated', 'type', 'defaultValue', 'collation', 'identity', 'check', 'generatedExpression', 'stored'].includes(key)) fail(`unknown column member '${key}'`);
+    if (!c || typeof c !== 'object' || Array.isArray(c)) fail(`'${name}' needs an explicit supported column codec`);
+    refuseUnknownModelMembers(c, COLUMN_MEMBERS, `${path}/physical/columns/${encodeJSONPointerSegment(name)}`, 'physical column');
+    if (!Object.hasOwn(STORAGE, c.codec)) fail(`'${name}' needs an explicit supported column codec`);
     if (!identifier(c.name) || used.has(c.name.toLowerCase())) fail(`'${name}' needs a distinct physical column name`);
     if (!['null', 'absent', 'reject'].includes(c.null)) fail(`'${name}' must declare SQL NULL as null, absent or reject`);
     if (c.type !== undefined && (physical.schema === undefined

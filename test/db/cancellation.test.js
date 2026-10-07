@@ -156,7 +156,7 @@ describe('migration cancellation', () => {
         { deadline: Date.now() + 60_000, runtime: { now: () => Date.now() + 120_000 } });
       await assert.rejects(status, (error) => error.code === 'JD2075');
       await assert.rejects(migrate({ driver: nodeDriver(), path: dbPath }, chainFor(),
-        { baseline: M0, model: M2, deadline: 'soon' }), TypeError);
+        { baseline: M0, model: M2, deadline: 'soon' }), { code: 'JD0013' });
     }
     finally {
       cleanup();

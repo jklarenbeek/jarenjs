@@ -39,6 +39,14 @@ The [host contract](HOSTS.md#postgresql-sessions), [physical format](MODEL-FORMA
 [jobs contract](JOBS-FORMAT.md) and [replication contract](REPLICATION-FORMAT.md)
 define the options, refusal codes and resource owners.
 
+Row order is each engine's own row identity, and for an entity whose key is an
+`integer` the two differ: SQLite keeps such rows in key order, because that key
+IS its `rowid`, while PostgreSQL keeps them in insertion order through the
+separate `rid`. A query, include or graph load without a total order — rows that
+tie on every ordering term, or a plain `$.Entity[*]` — answers in that order on
+each engine, so order by the key where both must answer alike. A collection, and
+a managed entity with any other key, is in insertion order on both.
+
 ## The writer lock and the lock family
 
 `store.transaction(fn, { mode: 'immediate' })` runs `BEGIN`, then takes the
@@ -130,16 +138,16 @@ column is what being one Store costs (below 1×) or gains (above):
 
 <!--fact:postgres.sessions-->
 
-Measured 2026-10-06T13:34:50.453Z: PostgreSQL 17.11 (Debian 17.11-1.pgdg12+2) (fsync=on, synchronous_commit=on, full_page_writes=on), Node 24.20.0, pg 8.23.0; 8 clients at once, each 40 one-document write transactions on keys of its own; the median of 5 rounds, each measuring every shape once.
+Measured 2026-10-07T21:57:58.308Z: PostgreSQL 17.11 (Debian 17.11-1.pgdg12+2) (fsync=on, synchronous_commit=on, full_page_writes=on), Node 24.20.0, pg 8.23.0; 8 clients at once, each 40 one-document write transactions on keys of its own; the median of 5 rounds, each measuring every shape once.
 
 | N | One store on N sessions, tx/s | N stores of one session, tx/s | One store over N stores |
 |---:|---:|---:|---:|
-| 1 | 1170 | 1130 | 1.04× |
-| 2 | 2007 | 2335 | 0.86× |
-| 4 | 3050 | 3475 | 0.88× |
-| 8 | 4720 | 5569 | 0.85× |
+| 1 | 1162 | 1163 | 1.00× |
+| 2 | 2594 | 2714 | 0.96× |
+| 4 | 3954 | 3894 | 1.02× |
+| 8 | 5999 | 6414 | 0.94× |
 
-One transaction with nothing beside it: 0.854 ms on a store of one session, 0.848 ms through the router of a store on two (-0.7%). A store on one session has no router.
+One transaction with nothing beside it: 0.834 ms on a store of one session, 0.887 ms through the router of a store on two (6.3%). A store on one session has no router.
 
 One host, client and server on one machine; each client a run of one-document transactions on keys of its own (no conflicts), every commit durable, so it waits on a disk the host shares with whatever else runs there. A store on one session runs them in turn; several sessions and separate stores let the server work on them together. No production throughput claim.
 
@@ -271,11 +279,11 @@ records matching tool versions and each recovery assertion:
 
 | Logical backup / restore server | Tables / rows | Archive bytes | Omitted metadata cases detected | Elapsed ms |
 |---|---:|---:|---:|---:|
-| 16.15 (Debian 16.15-1.pgdg12+2) | 14 / 16 | 27446 | 10 | 1791.14 |
-| 17.11 (Debian 17.11-1.pgdg12+2) | 14 / 16 | 27870 | 10 | 1469.53 |
-| 18.6 (Debian 18.6-1.pgdg12+2) | 14 / 16 | 27804 | 10 | 1456.54 |
+| 16.15 (Debian 16.15-1.pgdg12+2) | 14 / 16 | 27444 | 10 | 1109.97 |
+| 17.11 (Debian 17.11-1.pgdg12+2) | 14 / 16 | 27927 | 10 | 1035.95 |
+| 18.6 (Debian 18.6-1.pgdg12+2) | 14 / 16 | 27806 | 10 | 1090.53 |
 
-Archived WAL: 17.11 (Debian 17.11-1.pgdg12+2), 14 tables / 16 rows, 6234.67 ms; source stopped before promotion: true. Physical sequence advances are retained in the result. Power loss and fleet failover were not tested.
+Archived WAL: 17.11 (Debian 17.11-1.pgdg12+2), 14 tables / 16 rows, 5753.40 ms; source stopped before promotion: true. Physical sequence advances are retained in the result. Power loss and fleet failover were not tested.
 
 <!--/fact-->
 
@@ -290,10 +298,10 @@ retains earlier Bun memory-budget losses even when a later sample passes.
 
 | Existing SQLite adoption executable | Workload | RSS bytes | Frozen reference bytes | RSS disposition |
 |---|---|---:|---:|---|
-| bun-executable | catalog | 268414976 | 536870912 | within reference |
-| bun-executable | archive-stock | 981901312 | 1073741824 | within reference |
-| node-executable | catalog | 290660352 | 536870912 | within reference |
-| node-executable | archive-stock | 833105920 | 1073741824 | within reference |
+| bun-executable | catalog | 264462336 | 536870912 | within reference |
+| bun-executable | archive-stock | 1070985216 | 1073741824 | within reference |
+| node-executable | catalog | 294166528 | 536870912 | within reference |
+| node-executable | archive-stock | 825335808 | 1073741824 | within reference |
 
 These larger physical SQLite workloads are separate from the small build-selected managed application. Functional recovery success does not imply memory-budget success. Earlier samples remain in the resource history.
 

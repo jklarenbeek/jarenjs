@@ -252,7 +252,7 @@ function partialsOf(doc, size = 1) {
 
 function joinedText(events, path) {
   return events
-    .filter((e) => e.type === 'text-partial' && e.path.join(' ') === path.join(' '))
+    .filter((e) => e.type === 'text-partial' && e.path.join('\0') === path.join('\0'))
     .map((e) => e.text)
     .join('');
 }

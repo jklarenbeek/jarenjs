@@ -365,7 +365,7 @@ describe('strictStreaming refuses a buffered plan before any statement runs', ()
       { strictStreaming: true })) streamed.push(row.n);
     assert.deepStrictEqual(streamed, [4, 5]);
     // a whole answer has no stream to hold to: execute refuses the option as misuse
-    assert.throws(() => users.execute(set, { strictStreaming: true }), TypeError);
+    assert.throws(() => users.execute(set, { strictStreaming: true }), codeIs('JD0013', /'strictStreaming' applies to a cursor/));
     await store.close();
   });
 });

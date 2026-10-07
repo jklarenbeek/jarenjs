@@ -39,7 +39,15 @@
  *   final event from a stream that never sent its closing blank line.
  */
 export function createSseEventDecoder() {
-  let tail = '';
+  // The open line - the text since the last terminator - is held as the
+  // pieces it arrived in and joined once, when its terminator arrives.
+  // Only a new chunk can carry a terminator, so each chunk is scanned
+  // once and a long line fed in small chunks costs time linear in its
+  // bytes, never a rescan of everything held.
+  /** @type {string[]} */
+  let pending = [];
+  // the open line ended in a CR whose LF, if one comes, opens the next chunk
+  let heldCR = false;
   /** @type {string[]} */
   let data = [];
   /** @type {string | null} */
@@ -87,40 +95,60 @@ export function createSseEventDecoder() {
     }
   }
 
+  /**
+   * The open line completed by `piece`; the held pieces are released.
+   * @param {string} piece
+   * @returns {string}
+   */
+  function takeLine(piece) {
+    if (pending.length === 0) return piece;
+    pending.push(piece);
+    const line = pending.join('');
+    pending = [];
+    return line;
+  }
+
   return {
     feed(chunk) {
       /** @type {SseEvent[]} */
       const out = [];
-      const text = tail + chunk;
-      const length = text.length;
-      // a trailing CR is held: the next chunk may complete a CRLF
-      const limit = length > 0 && text.charCodeAt(length - 1) === 0x0D ? length - 1 : length;
-      let start = 0;
+      const length = chunk.length;
+      if (length === 0) return out;
       let i = 0;
+      if (heldCR) {
+        // the held CR ends the open line; an LF opening this chunk is its CRLF
+        heldCR = false;
+        consumeLine(takeLine(''), out);
+        if (chunk.charCodeAt(0) === 0x0A) i = 1;
+      }
+      // a trailing CR is held: the next chunk may complete a CRLF
+      const limit = chunk.charCodeAt(length - 1) === 0x0D ? length - 1 : length;
+      let start = i;
       while (i < limit) {
-        const c = text.charCodeAt(i);
+        const c = chunk.charCodeAt(i);
         if (c === 0x0A) {
-          consumeLine(text.slice(start, i), out);
+          consumeLine(takeLine(chunk.slice(start, i)), out);
           i += 1;
           start = i;
         }
         else if (c === 0x0D) {
-          consumeLine(text.slice(start, i), out);
+          consumeLine(takeLine(chunk.slice(start, i)), out);
           i += 1;
-          if (i < length && text.charCodeAt(i) === 0x0A) i += 1;
+          if (i < length && chunk.charCodeAt(i) === 0x0A) i += 1;
           start = i;
         }
         else i += 1;
       }
-      tail = text.slice(start);
+      if (start < limit) pending.push(chunk.slice(start, limit));
+      heldCR = limit < length;
       return out;
     },
     end() {
       /** @type {SseEvent[]} */
       const out = [];
-      if (tail !== '') {
-        consumeLine(tail.charCodeAt(tail.length - 1) === 0x0D ? tail.slice(0, -1) : tail, out);
-        tail = '';
+      if (heldCR || pending.length !== 0) {
+        heldCR = false;
+        consumeLine(takeLine(''), out);
       }
       if (data.length > 0) {
         out.push({ event: eventType, id: lastId, data: data.join('\n'), retry });

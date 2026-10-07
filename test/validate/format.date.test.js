@@ -4,6 +4,7 @@ import * as assert from '../assert.node.js';
 
 import {
   JarenValidator,
+  ValidatorOptions,
 } from '@jarenjs/validate';
 
 import * as formats from '@jarenjs/formats';
@@ -207,6 +208,43 @@ describe('Schema Date Formats', function () {
       assert.isFalse(validate('17:00:01Z'), 'a time above the maximum');
       assert.isFalse(validate(new Date(Date.parse('1970-01-01T07:59:59Z'))), 'a datetype under the minimum');
       assert.isFalse(validate('25:00:00Z'), 'an invalid time string');
+    });
+  });
+
+  // RFC 3339 section 5.6/5.7: time-hour is 00-23 even for a leap second,
+  // which is valid only at 23:59:60 UTC; time-secfrac is "." 1*DIGIT
+  describe('RFC 3339 leap seconds and long fractions', function () {
+    const asserting = new JarenValidator(new ValidatorOptions({ formatAssertion: true }))
+      .addFormats(formats.dateTimeFormats);
+    const time = asserting.compile({ type: 'string', format: 'time' });
+    const dateTime = asserting.compile({ type: 'string', format: 'date-time' });
+
+    it('refuses a leap second whose hour is out of range', function () {
+      for (const value of ['47:59:60Z', '71:59:60Z', '95:59:60Z', '24:59:60+01:00', '23:60:60+00:01']) {
+        assert.isFalse(time(value), value);
+        assert.isFalse(dateTime('2016-12-31T' + value), value);
+      }
+      assert.isTrue(time('23:59:60Z'));
+      assert.isTrue(dateTime('1990-12-31T15:59:60-08:00'));
+    });
+
+    it('accepts a fraction of more than six digits', function () {
+      for (const fraction of ['1234567', '12345678', '123456789', '0000000']) {
+        assert.isTrue(time(`13:45:30.${fraction}Z`), fraction);
+        assert.isTrue(dateTime(`2026-01-01T00:00:00.${fraction}Z`), fraction);
+      }
+      assert.isFalse(time('13:45:30.Z'));
+    });
+
+    it('compares a long fraction against bounds at millisecond precision', function () {
+      const bounded = asserting.compile({
+        type: 'string', format: 'date-time',
+        formatMinimum: '2026-01-01T00:00:00.123Z', formatMaximum: '2026-01-01T00:00:00.123Z',
+      });
+      // the engine keeps three fraction digits, so all three read as .123
+      assert.isTrue(bounded('2026-01-01T00:00:00.1234567Z'));
+      assert.isTrue(bounded('2026-01-01T00:00:00.123999999Z'));
+      assert.isFalse(bounded('2026-01-01T00:00:00.1240000Z'));
     });
   });
 });

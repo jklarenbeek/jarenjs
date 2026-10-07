@@ -116,14 +116,15 @@ describe('a refused or pointless release', () => {
       now.advance(-999);
       const returned = open();
       await returned.return();
-      const hold = defer();
-      const tx = store.transaction(async () => { await hold.promise; });
-      await new Promise((resolve) => setTimeout(resolve, 5));
-      const started = Date.now();
-      assert.deepStrictEqual(await returned.next(), { done: true, value: undefined });
-      assert.deepStrictEqual(await returned.return(), { done: true, value: undefined });
-      assert.deepStrictEqual(await drained.return(), { done: true, value: undefined });
-      assert.ok(Date.now() - started < 50, 'nothing waited for the open transaction');
+      const hold = defer(), entered = defer();
+      const tx = store.transaction(async () => { entered.resolve(); await hold.promise; });
+      await entered.promise;
+      // the open transaction holds the gate until `hold` resolves, below: a
+      // call that waited for the gate could only end refused (JD0012) when
+      // its wait timed out, so each settling with `done` while it is held is
+      // the proof
+      for (const call of [() => returned.next(), () => returned.return(), () => drained.return()])
+        assert.deepStrictEqual(await settle(call()), { value: { done: true, value: undefined } }, 'nothing waited for the open transaction');
       hold.resolve();
       await tx;
     }

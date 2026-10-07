@@ -30,6 +30,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { isMainModule } from './lib/main-module.js';
 import {
   SERIES_ORIGIN, SERIES_STEP_MS, SERIES_SEED, VALUE_SCALE, VALUE_LAW,
   QUERY_SIZE, GAP_PERIOD, GAP_RUN, CALENDAR_MONTHS,
@@ -365,7 +366,7 @@ export function serializeCorpus(corpus) {
   return `${JSON.stringify(corpus, null, 2)}\n`;
 }
 
-if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMainModule(import.meta.url)) {
   const argv = process.argv.slice(2);
   const outIndex = argv.indexOf('--out');
   const out = outIndex >= 0 ? resolve(argv[outIndex + 1]) : OUT;

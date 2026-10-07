@@ -60,12 +60,18 @@ export const LINQ_CODES = /* @__PURE__ */ Object.freeze({
  *  - `JL0004` — a parameter was referenced without being declared via
  *    `.params({...})`, a declared name is reserved (`it`, `it2`, `acc`,
  *    `g`, and the relation-hop bindings `r1`, `r2`, … — the document's
- *    own binding names), a binding is not query data, or the two sides
- *    of a `join`/`groupJoin`/`concat` bind one name to different values
+ *    own binding names), a binding is not query data, the two sides
+ *    of a `join`/`groupJoin`/`concat` bind one name to different values,
+ *    a parameter an `in()` reads whole as its list is bound to something
+ *    other than an array when the chain runs (or, for a live
+ *    registration, in the externals it registers), or the parameters
+ *    argument itself was embedded as a value or spread
  *  - `JL0005` — an operator was used invalidly at build time (`thenBy`
  *    without `orderBy`, `all()` off an operator result rather than a
  *    path, a member read off a to-many relation before `all()`, a
- *    negative `skip`/`take`, a value that cannot embed in a document)
+ *    negative `skip`/`take`, an `at()` index beyond a safe integer, a
+ *    value that cannot embed in a document — a sparse array among them —
+ *    or an option outside one of the chain's closed option bags)
  *  - `JL0006` — an operator the mapping table records as
  *    `unsupported` was invoked (`zip`); the table names the reason
  *  - `JL0007` — `from()`/`fromAsync()` received a provider that serves
@@ -95,7 +101,9 @@ export const LINQ_CODES = /* @__PURE__ */ Object.freeze({
  *    or `body()` external other than `root`/`path` and, for a body,
  *    its declared parameters; a `compute()` external at all, or a flow
  *    guard/`with`/node-query/`select` external at all — both flow
- *    engines evaluate with one `$` and nothing else)
+ *    engines evaluate with one `$` and nothing else), or a captured
+ *    rule's externals argument — a form rule's context, a migration
+ *    assertion's argument — embedded whole, as a value, or spread
  *  - `JL0105` — a relation hop on the chain (the query pen) cannot
  *    lower: the member is a many-to-many relation, whose join table is
  *    not a queryable root in this version (`load({ include })` reads the

@@ -304,7 +304,8 @@ describe('the drift gates', () => {
     const start = source.indexOf(from);
     assert.ok(start >= 0, `${from} exists`);
     const end = source.indexOf(to, start);
-    return source.slice(start, end < 0 ? undefined : end);
+    assert.ok(end >= 0, `${to} exists after ${from}`);
+    return source.slice(start, end);
   };
 
   it('the graph cursor path calls no .all() and no toArray(); it opens its iterator as a cursor source', () => {
@@ -314,7 +315,7 @@ describe('the drift gates', () => {
     const source = between(query, 'const openCursor = (', 'const continuationOf =');
     assert.doesNotMatch(source, /\.all\(|toArray/);
     assert.match(source, /open: \(\) =>/);
-    const load = between(query, 'loadCursor(spec, options = undefined, register = undefined,', 'explainLoad(spec) {');
+    const load = between(query, 'loadCursor(spec, options = undefined, register = undefined,', 'explainLoad(spec, options = undefined) {');
     assert.doesNotMatch(load, /\.all\(|toArray/);
     assert.strictEqual((load.match(/openCursor\(/g) ?? []).length, 2, 'the cursor and the page open the same source');
     const graph = between(code('packages/linq/src/db/include.js'), 'cursor(options) {', 'toSpec()');
@@ -323,9 +324,9 @@ describe('the drift gates', () => {
   });
 
   it('every row-projecting include carries both bounds: the tree builder sets them once, for every kind', () => {
-    const builder = between(code('packages/db/src/query.js'), 'const include = {', 'node.includes.push(include);');
-    assert.match(builder, /maxRows:/);
-    assert.match(builder, /maxBytes:/);
+    const builder = between(code('packages/db/src/query.js'), 'const include = {', 'shaped.includes.push(include);');
+    assert.match(builder, /\n\s*maxRows,\n/);
+    assert.match(builder, /\n\s*maxBytes:/);
     // and the one parser enforces them — for the root row and for a nested child alike
     const parser = code('packages/db/src/graph.js');
     assert.strictEqual((parser.match(/checkBounds\(/g) ?? []).length, 3, 'one definition, two call sites');

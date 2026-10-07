@@ -9,7 +9,9 @@
  * mode and word size are read at evaluation time.
  *
  * Binding shapes (all monomorphic): `func(args[], scope)`,
- * `binop(a, b, scope)`, `unop(a, scope)`, `postop(a, scope)`.
+ * `binop(a, b, scope)`, `unop(a, scope)`, `postop(a, scope)`. Each
+ * environment also carries an `arity` table, `[min, max]` per function,
+ * which the compiler checks every call against.
  */
 
 import {
@@ -38,9 +40,22 @@ function fromRad(x, scope) {
   return x;
 }
 
+/**
+ * A word operand as a BigInt integer. A non-finite one has no integer to
+ * become, and is refused in the calculator's terms rather than in the
+ * engine's ("cannot be converted to a BigInt").
+ * @param {number} v
+ * @returns {bigint}
+ */
+function integer(v) {
+  const n = +v;
+  if (!Number.isFinite(n)) throw new RangeError(`a word operand must be a finite number, got ${n}`);
+  return BigInt(Math.trunc(n));
+}
+
 /** Coerce to a BigInt word using the scope's word size/sign. */
 function big(v, scope) {
-  return toWord(BigInt(Math.trunc(+v)), scope?.wordBits ?? 32, scope?.signed ?? false);
+  return toWord(integer(v), scope?.wordBits ?? 32, scope?.signed ?? false);
 }
 
 /** @type {Record<string, (args: number[], scope: any) => number>} */
@@ -79,6 +94,31 @@ const FLOAT_FUNCS = {
   mod: (a) => a[0] % a[1],
 };
 
+/** @type {readonly [number, number]} */
+const ONE = Object.freeze([1, 1]);
+/** @type {readonly [number, number]} */
+const TWO = Object.freeze([2, 2]);
+/** @type {readonly [number, number]} */
+const ONE_OR_TWO = Object.freeze([1, 2]);
+/** @type {readonly [number, number]} */
+const ONE_OR_MORE = Object.freeze([1, Infinity]);
+
+/**
+ * How many arguments each function takes, as `[min, max]`; the compiler
+ * refuses a call outside it, so a surplus argument is never dropped and a
+ * missing one never read as `NaN`. `log` and `round` take an optional
+ * second argument; `min`, `max` and `hypot` take one or more.
+ * @type {Readonly<Record<string, readonly [number, number]>>}
+ */
+const FLOAT_ARITY = Object.freeze({
+  sin: ONE, cos: ONE, tan: ONE, asin: ONE, acos: ONE, atan: ONE, atan2: TWO,
+  sinh: ONE, cosh: ONE, tanh: ONE,
+  ln: ONE, log: ONE_OR_TWO, log2: ONE, log10: ONE, exp: ONE, expm1: ONE,
+  sqrt: ONE, cbrt: ONE, root: TWO, abs: ONE, sign: ONE, floor: ONE, ceil: ONE,
+  round: ONE_OR_TWO, trunc: ONE, min: ONE_OR_MORE, max: ONE_OR_MORE, hypot: ONE_OR_MORE,
+  fact: ONE, gamma: ONE, pow: TWO, mod: TWO,
+});
+
 /** @type {Record<string, (a: number, b: number, scope: any) => number>} */
 const FLOAT_BINOPS = {
   '+': (a, b) => a + b,
@@ -113,6 +153,7 @@ export function defaultEnv() {
   return {
     constants: { ...CONSTANTS },
     funcs: FLOAT_FUNCS,
+    arity: FLOAT_ARITY,
     binops: FLOAT_BINOPS,
     unops: FLOAT_UNOPS,
     postops: FLOAT_POSTOPS,
@@ -126,19 +167,25 @@ const WORD_FUNCS = {
   or: (a, s) => Number(wOr(big(a[0], s), big(a[1], s), s?.wordBits ?? 32, s?.signed ?? false)),
   xor: (a, s) => Number(wXor(big(a[0], s), big(a[1], s), s?.wordBits ?? 32, s?.signed ?? false)),
   not: (a, s) => Number(wNot(big(a[0], s), s?.wordBits ?? 32, s?.signed ?? false)),
-  shl: (a, s) => Number(wShl(big(a[0], s), BigInt(Math.trunc(a[1])), s?.wordBits ?? 32, s?.signed ?? false)),
-  shr: (a, s) => Number(wShr(big(a[0], s), BigInt(Math.trunc(a[1])), s?.wordBits ?? 32, s?.signed ?? false)),
-  rol: (a, s) => Number(wRol(big(a[0], s), BigInt(Math.trunc(a[1])), s?.wordBits ?? 32, s?.signed ?? false)),
-  ror: (a, s) => Number(wRor(big(a[0], s), BigInt(Math.trunc(a[1])), s?.wordBits ?? 32, s?.signed ?? false)),
+  shl: (a, s) => Number(wShl(big(a[0], s), integer(a[1]), s?.wordBits ?? 32, s?.signed ?? false)),
+  shr: (a, s) => Number(wShr(big(a[0], s), integer(a[1]), s?.wordBits ?? 32, s?.signed ?? false)),
+  rol: (a, s) => Number(wRol(big(a[0], s), integer(a[1]), s?.wordBits ?? 32, s?.signed ?? false)),
+  ror: (a, s) => Number(wRor(big(a[0], s), integer(a[1]), s?.wordBits ?? 32, s?.signed ?? false)),
   mod: (a, s) => Number(wMod(big(a[0], s), big(a[1], s), s?.wordBits ?? 32, s?.signed ?? false)),
 };
+
+/** The word functions' arity: each takes its fixed operands. */
+const WORD_ARITY = Object.freeze({
+  ...FLOAT_ARITY,
+  and: TWO, or: TWO, xor: TWO, not: ONE, shl: TWO, shr: TWO, rol: TWO, ror: TWO, mod: TWO,
+});
 
 const WORD_BINOPS = {
   ...FLOAT_BINOPS,
   '&': (a, b, s) => Number(wAnd(big(a, s), big(b, s), s?.wordBits ?? 32, s?.signed ?? false)),
   '|': (a, b, s) => Number(wOr(big(a, s), big(b, s), s?.wordBits ?? 32, s?.signed ?? false)),
-  '<<': (a, b, s) => Number(wShl(big(a, s), BigInt(Math.trunc(b)), s?.wordBits ?? 32, s?.signed ?? false)),
-  '>>': (a, b, s) => Number(wShr(big(a, s), BigInt(Math.trunc(b)), s?.wordBits ?? 32, s?.signed ?? false)),
+  '<<': (a, b, s) => Number(wShl(big(a, s), integer(b), s?.wordBits ?? 32, s?.signed ?? false)),
+  '>>': (a, b, s) => Number(wShr(big(a, s), integer(b), s?.wordBits ?? 32, s?.signed ?? false)),
 };
 
 const WORD_UNOPS = {
@@ -156,6 +203,7 @@ export function programmerEnv() {
   return {
     constants: { ...CONSTANTS },
     funcs: WORD_FUNCS,
+    arity: WORD_ARITY,
     binops: WORD_BINOPS,
     unops: WORD_UNOPS,
     postops: FLOAT_POSTOPS,

@@ -179,6 +179,9 @@ export class JoslMachine {
     this.rootIsArray = false;
     this.current = null; // current [table] target
     this.currentPath = []; // absolute path of `current` (indices for [[..]])
+    // the header path depth of `current` (0 at the root and in a [[]] item):
+    // the depth a dotted key's tables are counted from against maxDepth
+    this.currentDepth = 0;
     this.meta = new WeakMap(); // container flags, see assign/open methods
     // per-logical-line parse context (for error positions)
     this.line = '';
@@ -756,6 +759,7 @@ export class JoslMachine {
     else
       this.err(pos, `key '${keys.join('.')}' conflicts with an existing value`);
     this.currentPath = path.concat(k);
+    this.currentDepth = keys.length;
     this.emit({ type: 'table', path: this.currentPath, line: this.startLine });
   }
 
@@ -775,6 +779,7 @@ export class JoslMachine {
     arr.push(el);
     this.current = el;
     this.currentPath = path.concat(k, arr.length - 1);
+    this.currentDepth = keys.length;
     this.emit({ type: 'table-array', path: this.currentPath, line: this.startLine });
   }
 
@@ -800,6 +805,7 @@ export class JoslMachine {
     this.rootCount++;
     this.current = el;
     this.currentPath = [this.rootCount - 1];
+    this.currentDepth = 0;
     this.emit({
       type: 'root-item',
       path: this.currentPath,
@@ -844,6 +850,9 @@ export class JoslMachine {
   }
 
   assignPair(keys, value, pos) {
+    // a dotted key's leading segments are tables, nested under the current
+    // one exactly as a header path would open them
+    if (keys.length > 1) this.deeper(this.currentDepth + keys.length - 1);
     let t = this.current;
     for (let i = 0; i < keys.length - 1; ++i) {
       const k = keys[i];
@@ -1243,6 +1252,8 @@ export class JoslMachine {
   }
 
   assignInline(obj, keys, value, pos) {
+    // inside an inline table the dotted segments nest under its own level
+    if (keys.length > 1) this.deeper(this.depth + keys.length - 1);
     let t = obj;
     for (let i = 0; i < keys.length - 1; ++i) {
       const k = keys[i];

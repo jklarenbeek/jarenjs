@@ -20,9 +20,10 @@
  * accident (reset it).
  */
 
-import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { resolve } from 'node:path';
+
+import { changedPaths } from './lib/git.js';
+import { isMainModule } from './lib/main-module.js';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const TRACKED = 'packages/website/public/benchmarks';
@@ -38,36 +39,25 @@ const TRACKED = 'packages/website/public/benchmarks';
  * Which measurements in the tracked directory differ from HEAD: modified,
  * staged, deleted, newly added, untracked — and IGNORED, because a file an
  * ignore rule hides is copied into the site build all the same and is as
- * unreviewed as any other. Read NUL-separated, so a path with a space or
- * a quote is one path and a rename is two.
+ * unreviewed as any other. Read through the shared NUL-separated status
+ * reader, so a path with a space, a quote or a non-ASCII character is one
+ * verbatim path and a rename is named by the file that would ship.
  * @param {{ root?: string }} [options]
  * @returns {DriftReport}
  */
 export function checkBenchmarkDrift(options = {}) {
   const cwd = options.root ?? ROOT;
-  let out;
+  let changed;
   try {
-    out = execFileSync('git', ['status', '--porcelain', '-z', '--untracked-files=all', '--ignored=matching', '--', TRACKED],
-      { cwd, encoding: 'utf8' });
+    changed = changedPaths(cwd, ['--untracked-files=all', '--ignored=matching', '--', TRACKED]);
   }
   catch (err) {
     return { code: 2, changed: [], reason: String(/** @type {any} */ (err)?.message ?? err) };
   }
-  const fields = out.split('\0').filter((field) => field !== '');
-  /** @type {string[]} */
-  const changed = [];
-  for (let i = 0; i < fields.length; i++) {
-    const entry = fields[i];
-    const status = entry.slice(0, 2);
-    // `XY path` — a rename or copy carries the ORIGINAL path in the next
-    // field; the destination is the one that would ship
-    changed.push(entry.slice(3));
-    if (status.includes('R') || status.includes('C')) i++;
-  }
   return { code: changed.length > 0 ? 1 : 0, changed };
 }
 
-if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMainModule(import.meta.url)) {
   const report = checkBenchmarkDrift();
   if (report.code === 2) {
     console.error(`cannot read the measurement state: ${report.reason}`);

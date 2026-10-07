@@ -48,6 +48,21 @@ export function newtonRaphson(f, df, x0, opts = {}) {
 }
 
 /**
+ * The central-difference derivative of `f`, `(f(x + h) − f(x − h)) / 2h`:
+ * the `df` {@link newtonRaphson} takes when `f` has no closed-form
+ * derivative (the finance solvers' bond yield and periodic rate).
+ *
+ * @param {(x: number) => number} f
+ * @param {number} [h] - the half-step, `1e-6` by default
+ * @returns {(x: number) => number}
+ * @example
+ * centralDifference((x) => x * x)(3); // ≈ 6
+ */
+export function centralDifference(f, h = 1e-6) {
+  return (x) => (f(x + h) - f(x - h)) / (2 * h);
+}
+
+/**
  * Bisection on a sign-changing bracket `[a, b]`. Guaranteed to converge
  * when `f(a)` and `f(b)` straddle a root; returns `converged: false` if
  * the bracket does not (rather than throwing).

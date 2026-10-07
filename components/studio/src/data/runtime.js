@@ -46,6 +46,18 @@ const recorded = (/** @type {any} */ entry) => (entry.empty === true
   ? 'the empty sequence' : JSON.stringify(entry.expected));
 
 /**
+ * A failed store request: shown in the Data pane, and answered as the
+ * refused receipt the request's caller branches on.
+ * @param {(name: string, payload?: any) => void} dispatch
+ * @returns {(error: any) => { ok: false, error: string, code: any }}
+ */
+const failedRequest = (dispatch) => (error) => {
+  const message = String(error.message ?? error);
+  dispatch('data/error', { message });
+  return { ok: false, error: message, code: error.code };
+};
+
+/**
  * The runtime: effects plus the exported view model.
  * @param {any} env - explicit seed documents, transport, lifecycle and optional worked examples.
  */
@@ -266,7 +278,7 @@ export function createDataRuntime(env = {}) {
           subscribeLive(dispatch);
           return refreshRows(dispatch).then(() => ({ ok: true, model: model.value }));
         })
-        .catch(error => { const message = String(error.message ?? error); dispatch('data/error', { message }); return { ok: false, error: message, code: error.code }; });
+        .catch(failedRequest(dispatch));
     },
     'data-insert': (props, dispatch) => {
       if (!withStore(dispatch)) return;
@@ -299,10 +311,7 @@ export function createDataRuntime(env = {}) {
           dispatch('data/results', { results, explain: plan });
           return { ok: true, result: value, explain: plan };
         })
-        .catch(error => {
-          const message = String(error.message ?? error); dispatch('data/error', { message });
-          return { ok: false, error: message, code: error.code };
-        });
+        .catch(failedRequest(dispatch));
     },
     // the third runner of the spatial corpus: every entry the site ships
     // (the committed fixture, projected for a store) runs through THIS

@@ -271,7 +271,7 @@ are on the [benchmarks page](https://jklarenbeek.github.io/jarenjs/#/benchmarks?
 
 ## Validating authored documents
 
-A jaren-fsm or jaren-dag document is JSON published as a schema. Validate its shape, then compile it: coded errors identify the offending document path. `composeChecks` from `@jarenjs/core/check` combines these gates. Model-assisted generation is owned by [Tangle’s authoring integration](https://github.com/jklarenbeek/tangleai/blob/main/packages/jaren/docs/AUTHORING.md). A model invocation is an ordinary injected DAG task; the Flow engine has no model dependency.
+A jaren-fsm or jaren-dag document is JSON published as a schema. Validate its shape, then compile it: coded errors identify the offending document path. `composeChecks` from `@jarenjs/core/check` combines these gates. Model-assisted generation is a host's concern: a model invocation is an ordinary injected DAG task, and the Flow engine has no model dependency.
 
 ## Authoring by code
 

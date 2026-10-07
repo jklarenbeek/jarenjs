@@ -25,7 +25,7 @@
 import { escapeText, escapeAttribute } from '@jarenjs/view';
 import { sanitizeUrl as defaultSanitizeUrl, encodeUrlAttribute } from '@jarenjs/view/helpers';
 
-import { headingId, permalinkLabel } from './utils.js';
+import { headingId, permalinkLabel, OPTION_RULES, compileOptionCheck } from './utils.js';
 import { textOf } from './ast.js';
 import { buildPluginTables } from './parser.js';
 import {
@@ -75,6 +75,18 @@ import {
  *   footnotes: import('./footnotes.js').Footnotes|null,
  *   footnotePrefix: string, footnotesLabel: string }} HtmlCtx
  */
+
+/** {@link MdHtmlOptions}, closed: a misspelt or mistyped member is refused. */
+const checkHtmlOptions = compileOptionCheck('toHtml', {
+  html: OPTION_RULES.oneOf('escape', 'skip', 'raw'),
+  sanitizeUrl: OPTION_RULES.function,
+  plugins: OPTION_RULES.array,
+  headingIds: OPTION_RULES.boolean,
+  slugPrefix: OPTION_RULES.string,
+  headingAnchors: OPTION_RULES.boolean,
+  footnotesLabel: OPTION_RULES.string,
+  wrap: { expects: 'a string or null', test: (value) => value === null || typeof value === 'string' },
+});
 
 /**
  * One raw-HTML node under the policy in force. `'escape'` shows the
@@ -393,10 +405,13 @@ function blockHtml(node, ctx) {
  * toHtml(doc, { wrap: 'article class="md"' });      // wrapped
  *
  * @param {any} docOrAst MdDocument, CompiledMd, MdNode[] or MdNode
- * @param {MdHtmlOptions} [options]
+ * @param {MdHtmlOptions} [options] a closed set: an unknown member or one
+ *   of the wrong type is refused with a `TypeError` naming it (and the
+ *   member it most likely meant); a member passed as `undefined` is absent
  * @returns {string}
  */
 export function toHtml(docOrAst, options = {}) {
+  checkHtmlOptions(options);
   const ast = Array.isArray(docOrAst)
     ? docOrAst
     : (docOrAst !== null && typeof docOrAst === 'object' && Array.isArray(docOrAst.ast))

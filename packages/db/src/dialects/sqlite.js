@@ -14,6 +14,7 @@ import { readExpression } from './expression-read.js';
 import { sqliteInvariantTriggers } from './invariant-sql.js';
 import { sqliteChecks } from './check-read.js';
 import { OWNER_TABLE } from '../engine-metadata.js';
+import { modelPath } from '../model-path.js';
 
 /** @param {string} s */
 function quoteIdentifier(s) {
@@ -27,10 +28,16 @@ function stringLiteral(s) {
 
 /**
  * SQLite JSON path text from typed segments. Object members are always
- * quoted (`$."name"`), which covers spaces, dots and leading digits; a
- * member name SQLite's path grammar cannot carry (an embedded `"` or a
- * control character) returns `null` so the caller falls back to a
- * whole-document strategy instead of emitting a wrong path.
+ * quoted (`$."name"`), which covers spaces, dots and leading digits.
+ * SQLite decodes JSON escapes inside a quoted label, so a backslash is
+ * written doubled and the path addresses the member literally named —
+ * never the member an escape spelled in the name would decode to, and
+ * never an invalid escape stored into the document. A member name
+ * SQLite's path grammar cannot carry on every qualified version — an
+ * embedded `"`, since the earliest qualified SQLite ends a quoted label
+ * at its first quote, escaped or not, or a control character — returns
+ * `null` so the caller falls back to a whole-document strategy instead
+ * of emitting a wrong path.
  * @param {import('../dialect.js').JsonPathSegment[]} segments
  * @returns {string | null}
  */
@@ -44,7 +51,7 @@ function jsonPathText(segments) {
     }
     // eslint-disable-next-line no-control-regex
     if (/["\u0000-\u001f]/.test(segment.name)) return null;
-    text += `."${segment.name}"`;
+    text += `."${segment.name.replace(/\\/g, '\\\\')}"`;
   }
   return text;
 }
@@ -159,7 +166,11 @@ function parsePathText(text) {
       if (text[i + 1] !== '"') return null;
       const end = text.indexOf('"', i + 2);
       if (end < 0) return null;
-      segments.push({ name: text.slice(i + 2, end) });
+      const label = text.slice(i + 2, end);
+      // the one escape this module writes is a doubled backslash; SQLite
+      // decodes any other, so such a label reads a member it did not name
+      if (!/^(?:[^\\]|\\\\)*$/.test(label)) return null;
+      segments.push({ name: label.replace(/\\\\/g, '\\') });
       i = end + 1;
       continue;
     }
@@ -192,23 +203,12 @@ function expressionOf(expression, byName) {
   return readExpression(expression, {
     memberOf: (text) => {
       const segments = memberPathOf(text);
-      return segments === null ? null : { member: pathOf(segments) };
+      return segments === null ? null : { member: modelPath(segments) };
     },
     nameOf: (name) => byName[name] ?? null,
     stringOf: (text) => (/^'(?:[^']|'')*'$/.test(text)
       ? text.slice(1, -1).replace(/''/g, "'") : null),
   });
-}
-
-/** A recovered segment list, in the spelling a model's path takes. */
-function pathOf(segments) {
-  let text = '$';
-  for (const segment of segments) {
-    if ('index' in segment) { text += `[${segment.index}]`; continue; }
-    text += /^[A-Za-z_][A-Za-z0-9_]*$/.test(segment.name)
-      ? `.${segment.name}` : `[${JSON.stringify(segment.name)}]`;
-  }
-  return text;
 }
 
 /**

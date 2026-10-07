@@ -75,6 +75,9 @@ Set `collectErrors: true` and the compiled validator returns a result object
 instead of a boolean:
 
 ```javascript
+import { JarenValidator } from '@jarenjs/validate';
+import * as formats from '@jarenjs/formats';
+
 const jaren = new JarenValidator({
   collectErrors: true  // return { valid, errors } instead of a boolean
 }).addFormats(formats.stringFormats);
@@ -167,6 +170,8 @@ console.log(validate({ count: 42, name: 'test' })); // true
 ### JarenValidator Options
 
 ```javascript
+import { JarenValidator } from '@jarenjs/validate';
+
 const jaren = new JarenValidator({
   // Return { valid, errors } instead of a boolean (default: false)
   collectErrors: true,
@@ -209,6 +214,8 @@ format registration — are documented together, with a migration recipe, under
 The `useGrapheme` option affects how string lengths are calculated:
 
 ```javascript
+import { JarenValidator } from '@jarenjs/validate';
+
 // With useGrapheme: true (default)
 const jaren = new JarenValidator({ useGrapheme: true });
 const validate = jaren.compile({ type: 'string', maxLength: 2 });
@@ -244,6 +251,7 @@ answers, and treat the switch to graphemes as its own reviewed change.
 The `@jarenjs/formats` package provides validators for common string formats:
 
 ```javascript
+import { JarenValidator } from '@jarenjs/validate';
 import * as formats from '@jarenjs/formats';
 
 const jaren = new JarenValidator()
@@ -266,6 +274,7 @@ const validate = jaren.compile({
 To reduce bundle size, load only the formats you need:
 
 ```javascript
+import { JarenValidator } from '@jarenjs/validate';
 import { stringFormats } from '@jarenjs/formats';
 
 const jaren = new JarenValidator()
@@ -281,6 +290,8 @@ const jaren = new JarenValidator()
 You can register custom format validators:
 
 ```javascript
+import { JarenValidator } from '@jarenjs/validate';
+
 const jaren = new JarenValidator();
 
 // Register a custom format
@@ -311,6 +322,8 @@ console.log(validate('invalid-uuid')); // false
 #### Internal References
 
 ```javascript
+import { JarenValidator } from '@jarenjs/validate';
+
 const jaren = new JarenValidator();
 
 const validate = jaren.compile({
@@ -334,6 +347,7 @@ const validate = jaren.compile({
 #### External Schema References
 
 ```javascript
+import { JarenValidator } from '@jarenjs/validate';
 import { getSchemaDraftByVersion } from '@jarenjs/refs';
 
 const defaultSchema = getSchemaDraftByVersion(7);
@@ -361,6 +375,8 @@ const validate = jaren.compile({
 Validators can be reused across multiple validations:
 
 ```javascript
+import { JarenValidator } from '@jarenjs/validate';
+
 const jaren = new JarenValidator();
 
 // Compile once
@@ -390,6 +406,8 @@ for (const user of users) {
 Using `if/then/else` for conditional schemas:
 
 ```javascript
+import { JarenValidator } from '@jarenjs/validate';
+
 const jaren = new JarenValidator();
 
 const validate = jaren.compile({
@@ -421,6 +439,8 @@ console.log(validate({ type: 'person', name: 'John' })); // false - missing age
 For tree structures like file systems or org charts:
 
 ```javascript
+import { JarenValidator } from '@jarenjs/validate';
+
 const jaren = new JarenValidator();
 
 const validate = jaren.compile({
@@ -457,11 +477,13 @@ console.log(validate(tree)); // true
 Jaren supports multiple JSON Schema drafts:
 
 ```javascript
+import { JarenValidator } from '@jarenjs/validate';
 import { getSchemaDraftByVersion } from '@jarenjs/refs';
 
-// Create validators for different drafts
+// Create validators for different drafts (the version is a number;
+// getSchemaDraftByName('draft2019-09') takes the name instead)
 const draft7Schema = getSchemaDraftByVersion(7);
-const draft2019Schema = getSchemaDraftByVersion('draft2019-09');
+const draft2019Schema = getSchemaDraftByVersion(2019);
 
 const validator7 = new JarenValidator()
   .addSchema(draft7Schema.schema);
@@ -512,6 +534,8 @@ Error collection costs allocation and defeats first-failure short-circuiting,
 so pay for it only where a human or an API response actually reads the result:
 
 ```javascript
+import { JarenValidator } from '@jarenjs/validate';
+
 // Reporting a 400 to a caller: collect
 const requestValidator = new JarenValidator({ collectErrors: true });
 
@@ -535,6 +559,8 @@ characters (combining marks, ZWJ emoji sequences, flags, ...) pay for
 units instead:
 
 ```javascript
+import { JarenValidator } from '@jarenjs/validate';
+
 const jaren = new JarenValidator({ useGrapheme: false });
 ```
 
@@ -542,6 +568,7 @@ const jaren = new JarenValidator({ useGrapheme: false });
 
 ```javascript
 // Load only needed formats
+import { JarenValidator } from '@jarenjs/validate';
 import { stringFormats } from '@jarenjs/formats';
 
 const jaren = new JarenValidator()
@@ -658,6 +685,8 @@ option list, the coercion table, and what it deliberately does not walk.
 ### Pitfall 4: Format Validation Without Adding Formats
 
 ```javascript
+import { JarenValidator } from '@jarenjs/validate';
+
 // This won't validate email format!
 const jaren = new JarenValidator();  // No formats added
 const validate = jaren.compile({
@@ -671,6 +700,9 @@ console.log(validate('not-an-email'));  // Returns true!
 **Solution**: Always add formats if using the `format` keyword:
 
 ```javascript
+import { JarenValidator } from '@jarenjs/validate';
+import * as formats from '@jarenjs/formats';
+
 const jaren = new JarenValidator()
   .addFormats(formats.stringFormats);
 ```
@@ -774,6 +806,8 @@ boundary. Probe the neighbourhood instead, then narrow with the exact
 distance:
 
 ```javascript
+import { queryJson } from '@jarenjs/json/query';
+
 queryJson({
   $let: { cells: { '$geohash-neighbours': { $geohash: ['$.here', 6] } } },
   $return: {
@@ -797,6 +831,8 @@ stays closed and a line keeps both endpoints, so what was valid stays
 valid. The tolerance is in **degrees**, not metres:
 
 ```javascript
+import { queryJson } from '@jarenjs/json/query';
+
 queryJson({ '$geo-simplify': ['$.route', 0.001] }, { route });
 ```
 
@@ -896,7 +932,7 @@ whole-collection residual with the reason in `explain()` — the answers
 stay right and the cost does not, and the only thing that tells you is
 the mode.
 
-Embedding clients and ledger recall are owned by [Tangle’s vectors and recall guide](https://github.com/jklarenbeek/tangleai/blob/main/docs/VECTORS-AND-RECALL.md).
+Embedding clients and ledger recall are the application's concern: the store holds and ranks the vectors it is given, and does not call an embedding model.
 
 ## API Reference
 
@@ -904,7 +940,7 @@ Embedding clients and ledger recall are owned by [Tangle’s vectors and recall 
 
 #### Constructor
 
-```javascript
+```ts
 new JarenValidator(options?: ValidationOptions)
 ```
 
@@ -940,6 +976,8 @@ jaren.addSchema({
 Register format validators.
 
 ```javascript
+import * as formats from '@jarenjs/formats';
+
 jaren
   .addFormats(formats.stringFormats)   // email, uri, uuid, ...
   .addFormats(formats.numberFormats)   // int8 ... float64
@@ -978,6 +1016,8 @@ with `collectErrors: true` — a result object. The validator instance never
 holds errors:
 
 ```javascript
+import { JarenValidator } from '@jarenjs/validate';
+
 const jaren = new JarenValidator({ collectErrors: true });
 const validate = jaren.compile({ type: 'string', minLength: 2 });
 

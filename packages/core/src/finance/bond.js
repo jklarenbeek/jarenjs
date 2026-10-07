@@ -7,7 +7,7 @@
  * Rates and the coupon rate are annual; `freq` coupons are paid per year.
  */
 
-import { newtonRaphson, bisect } from '../math/solve.js';
+import { newtonRaphson, bisect, centralDifference } from '../math/solve.js';
 
 /**
  * Clean price of a coupon bond.
@@ -36,11 +36,7 @@ export function bondPrice(face, couponRate, ytm, years, freq = 2) {
  */
 export function bondYTM(price, face, couponRate, years, freq = 2) {
   const f = (y) => bondPrice(face, couponRate, y, years, freq) - price;
-  const df = (y) => {
-    const h = 1e-6;
-    return (f(y + h) - f(y - h)) / (2 * h);
-  };
-  const n = newtonRaphson(f, df, couponRate || 0.05, { tol: 1e-9, maxIter: 100 });
+  const n = newtonRaphson(f, centralDifference(f), couponRate || 0.05, { tol: 1e-9, maxIter: 100 });
   if (n.converged && isFinite(n.root) && n.root > -1) return n.root;
   const b = bisect(f, -0.9999, 5, { tol: 1e-9, maxIter: 300 });
   return b.converged ? b.root : NaN;

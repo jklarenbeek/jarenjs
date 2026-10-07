@@ -46,6 +46,8 @@ import { fileURLToPath } from 'node:url';
 import { queryJson } from '@jarenjs/json/query';
 import { mulberry32 } from '@jarenjs/core/random';
 
+import { isMainModule } from './lib/main-module.js';
+
 const OUT = fileURLToPath(new URL('../test/json/fixtures/vector-corpus.json', import.meta.url));
 
 /** The seed every generated vector in this corpus comes from. */
@@ -360,7 +362,7 @@ export function serializeCorpus(corpus) {
   return `${JSON.stringify({ seed: CORPUS_SEED, dims: DIMS, externals: EXTERNALS, entries: corpus }, null, 2)}\n`;
 }
 
-if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMainModule(import.meta.url)) {
   const argv = process.argv.slice(2);
   const outIndex = argv.indexOf('--out');
   const out = outIndex >= 0 ? resolve(argv[outIndex + 1]) : OUT;

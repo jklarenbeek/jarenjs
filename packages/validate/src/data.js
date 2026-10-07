@@ -36,6 +36,7 @@ import {
 import {
   resolveNothing,
   createDataRefCompilers,
+  allValidatorsPass,
 } from './tools.js';
 
 function compileRefResolver(ref) {
@@ -82,20 +83,5 @@ export function compileDataSchema(schemaObj, jsonSchema) {
     }
   }
 
-  if (validators.length === 0) {
-    return undefined;
-  }
-
-  if (validators.length === 1) {
-    return validators[0];
-  }
-
-  return function validateDataSchema(data, dataPath, dataRoot) {
-    for (let i = 0; i < validators.length; i++) {
-      if (!validators[i](data, dataPath, dataRoot)) {
-        return false;
-      }
-    }
-    return true;
-  };
+  return allValidatorsPass(validators);
 }

@@ -233,10 +233,12 @@ describe('PostgreSQL store on several sessions', { skip: !url && 'JAREN_PG_URL i
         const cursor = /** @type {any} */ (store).collection('notes').query(stream);
         assert.equal(cursor.streaming, 'row');
         assert.equal((await cursor.next()).value, 'n0');
-        const started = performance.now();
+        // the paused cursor pins its session until its return, below: on one
+        // session a call waits for it and is refused (JD0012) when its wait
+        // times out, so on several, settling with the row while the cursor
+        // is still paused is the proof that nothing waited for it
         if (waits) await assert.rejects(/** @type {any} */ (store).collection('notes').get('n1'), { code: 'JD0012' });
-        else assert.deepEqual(await /** @type {any} */ (store).collection('notes').get('n1'), { id: 'n1', n: 1 });
-        if (!waits) assert.ok(performance.now() - started < 250, 'an unrelated call did not wait for the cursor');
+        else assert.deepEqual(await /** @type {any} */ (store).collection('notes').get('n1'), { id: 'n1', n: 1 }, 'an unrelated call did not wait for the cursor');
         assert.equal((await cursor.next()).value, 'n1');
         await cursor.return();
       }
@@ -285,17 +287,20 @@ describe('PostgreSQL store on several sessions', { skip: !url && 'JAREN_PG_URL i
       const items = /** @type {any} */ (store).entity('Item');
       await items.create({ id: 'a', title: 'one' });
       const release = Promise.withResolvers();
+      const entered = [1, 2, 3].map(() => Promise.withResolvers());
       const holding = [1, 2, 3].map((i) => store.transaction(async (tx) => {
         await tx.collection('notes').put({ id: `h${i}`, n: i });
+        entered[i - 1].resolve(undefined);
         await release.promise;
       }));
-      await delay(50);
-      // three sessions are held; the first still serves root tracked work
-      const started = performance.now();
+      await Promise.all(entered.map((each) => each.promise));
+      // three sessions are held until `release` resolves, below, and the
+      // first still serves root tracked work: work that waited for a session
+      // would be refused (JD0012) when its wait timed out, so saving while
+      // they are held is the proof that it did not wait
       const tracked = await items.get('a');
       items.put({ ...tracked, title: 'two' });
-      await store.saveChanges();
-      assert.ok(performance.now() - started < 500, 'tracked work did not wait for the transactions');
+      assert.equal((await store.saveChanges()).updated, 1, 'tracked work did not wait for the transactions');
       // a transaction saves its own unit of work, never the store's, and its
       // trusted SQL is not refused for the store's pending changes
       items.put({ ...(await items.get('a')), title: 'pending at the root' });

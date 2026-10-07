@@ -100,7 +100,7 @@ const EXPECTED = SEED.map((d) => ({ id: d.id, name: `${d.first} ${d.last}` }));
 
 /** @type {string} */
 let dir = '';
-before(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'replaysafe-e2e-')); });
+before(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jaren-document-hosts-')); });
 after(() => fs.rmSync(dir, { recursive: true, force: true }));
 
 const jsonl = (documents) => `${documents.map((d) => JSON.stringify(d)).join('\n')}\n`;

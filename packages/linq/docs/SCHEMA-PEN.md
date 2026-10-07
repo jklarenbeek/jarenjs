@@ -911,6 +911,7 @@ JSON are still two, and still a collision.
 |---|---|---|
 | `s.string().meta({ type: 'x' })` | `meta() cannot write 'type' — the pen owns that keyword; spell it through the builder method that emits it, keyword('type', value) where no method does, or wrap a hand-written schema with from()` | the method that emits it — or, for a raw value, `.keyword(…)` or `s.from({ … })` |
 | `.check((o, x) => x.foo.eq(1))` | `a check() rule cannot bind 'foo' — its query evaluates with exactly 2 externals, 'root' and 'path'; anything else has nothing to bind to` | `x.root` and `x.path`, and nothing else |
+| `.check((o, x) => o.a.eq(x))` | `a check() rule's externals argument is not a value — read one by name: root, path` | `x.root` or `x.path`, by name |
 
 The owned set is the vocabulary written by the dedicated methods. `meta()`
 refuses those names so an annotation never changes the schema's assertions.
@@ -1212,10 +1213,10 @@ hand, or generate it some other way, when:
 
 ## 7. Cost
 
-`@jarenjs/linq/schema` builds to **<!--fact:bundle.schema-->37,008<!--/fact--> bytes** as a minified,
+`@jarenjs/linq/schema` builds to **<!--fact:bundle.schema-->37,748<!--/fact--> bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
 measures and `npm run test:tree-shaking` reports, published rounded
-(<!--fact:bundle.schema.kb-->37<!--/fact--> kB) beside the other nine subpath prices in
+(<!--fact:bundle.schema.kb-->38<!--/fact--> kB) beside the other subpath prices in
 [docs/CONSUMING.md](../../../docs/CONSUMING.md).
 
 The probe is a gate, not a report: building

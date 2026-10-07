@@ -135,6 +135,8 @@ const PLAN_REASONS = {
   windowedGroup: 'a window over groups whose return can omit an item needs the engine cardinality',
   aggregatePath: 'aggregates translate only over a singular schema-typed path '
     + '(the engine ERRORS on non-conforming operands)',
+  floatingAccumulation: 'a floating sum or average runs in the engine, whose left-to-right '
+    + 'addition decides the rounding a native sum would not reproduce',
 };
 
 /**
@@ -150,8 +152,21 @@ export const BIND_REASONS = Object.freeze({
   wrappedWindow: "a chain's element window is one item — the whole array — "
     + 'whatever the plan mode',
   bucketWhole: 'a native bucket answers its groups whole: the groups are the result',
-  overflow: 'the pushed aggregate overflowed int64; the engine answered the document '
-    + 'over the fetched rows',
+  // an integer sum is native only while every partial sum is exact: the
+  // statement reports when the largest magnitude times the term count
+  // passed 2^53 - 1, and that call is answered by the engine (a
+  // collection's over the rows the plan selects, an entity's over its root)
+  accumulation: 'integer accumulation exceeded its runtime exactness bound',
+  // which is why a cursor over a whole sum or average holds its answer
+  // whole: the run that crosses the bound answers the engine's items
+  accumulationWhole: 'an integer sum or average answers whole: past its exactness bound '
+    + 'the engine answers it',
+  // the entity engine's grouping and scalar-aggregate guards (validity,
+  // exactness) are qualified on SQLite, and on a PostgreSQL column layout
+  // with no document column
+  entityGrouping: 'entity grouping runtime guards are qualified for SQLite',
+  // an entity grouping is validated and rebuilt over all its rows at once
+  entityGroupWhole: 'group results are validated and reconstructed together',
   /**
    * A value the database cannot bind: the call reads its whole source
    * and the engine answers. `over` names what that source is — a
@@ -232,6 +247,15 @@ function isWindowBound(value) {
   return Number.isSafeInteger(value) && value >= 0;
 }
 
+/** Whether an aggregate accumulates floating values: a sum or an average
+ * over a member the schema does not type `integer`. The engine adds left
+ * to right in doubles; SQLite's compensated sum and PostgreSQL's exact
+ * numeric sum round differently, so such an aggregate stays the engine's.
+ * @param {{ fn: string, ref: any }} entry @returns {boolean} */
+function floatingAccumulation(entry) {
+  return (entry.fn === 'sum' || entry.fn === 'avg') && entry.ref?.type !== 'integer';
+}
+
 /** Whether a schema node admits `null` beside its scalar type. A present
  * null orders and aggregates in SQL (NULLS FIRST, skipped by SUM) where
  * the engine refuses it (`JQ2005`, `JQ2001`), so a promotion over such a
@@ -241,11 +265,26 @@ function admitsNull(schema, segments) {
   return Array.isArray(node?.type) && node.type.includes('null');
 }
 
-/** Whether a typed reference orders natively: numbers and strings that
- * cannot hold a null. A boolean orders as 0/1 in SQL and is `JQ2005` in
- * the engine. */
+/** Whether a schema node admits values of more than one comparable kind
+ * (`['integer', 'string']`; `integer` and `number` are one kind). The
+ * planner types such a member by its first type, so SQL would order the
+ * values of the other type as no value at all, where the engine refuses
+ * to compare the two (`JQ2005`).
+ * @param {any} schema @param {import('./dialect.js').JsonPathSegment[]} segments
+ * @returns {boolean} */
+export function admitsMixedTypes(schema, segments) {
+  const node = schemaNodeAt(schema, segments);
+  if (!Array.isArray(node?.type)) return false;
+  return new Set(node.type.filter((type) => type !== 'null')
+    .map((type) => (type === 'integer' ? 'number' : type))).size > 1;
+}
+
+/** Whether a typed reference orders natively: numbers and strings of one
+ * type that cannot hold a null. A boolean orders as 0/1 in SQL and is
+ * `JQ2005` in the engine. */
 function orderable(ref, schema) {
-  return ref.type !== 'unknown' && ref.type !== 'boolean' && !admitsNull(schema, ref.segments);
+  return ref.type !== 'unknown' && ref.type !== 'boolean' && !admitsNull(schema, ref.segments)
+    && !admitsMixedTypes(schema, ref.segments);
 }
 
 /**
@@ -1623,7 +1662,10 @@ function resampleBucket(spec, shape) {
   if (instantBad !== null) return { code: instantBad };
   const value = memberRef(shape, valueName);
   if (fn !== 'rows') {
-    const valueBad = valueRefusal(value);
+    // a reading of two types folds as its first in SQL, where the engine
+    // refuses the mixed sequence
+    const valueBad = valueRefusal(value)
+      ?? (admitsMixedTypes(shape.schema, value.segments) ? 'value-not-numeric' : null);
     if (valueBad !== null) return { code: valueBad };
   }
   // The bucket shape, exactly: the bucket's start, its reading, and the count
@@ -1707,7 +1749,8 @@ function bucketProjection(ret, itSlot, keySlot, shape) {
     const fn = { $sum: 'sum', $avg: 'avg', $min: 'min', $max: 'max' }[expr.name];
     if (fn === undefined) return { code: 'nonnative-grouping' };
     const ref = pathRef(expr.args[0], itSlot, shape);
-    const valueBad = valueRefusal(ref);
+    const valueBad = valueRefusal(ref)
+      ?? (admitsMixedTypes(shape.schema, ref.segments) ? 'value-not-numeric' : null);
     if (valueBad !== null) return { code: valueBad };
     // what an aggregate over NO numbers says, in the ENGINE's words:
     // `$sum` of an empty sequence is 0 and the other three are the
@@ -2282,7 +2325,8 @@ function groupAggregate(node, itSlot, shape, resolve = pathRef) {
       if (!isItVar(unpacked(binding.expr), itSlot) || binding.window !== null || binding.atSlot !== -1 || binding.allowingEmpty) return null;
       const ref = resolve(phrase.ret, binding.slot, shape);
       const where = phrase.where;
-      if (ref === null || !isNumericType(ref.type) || where?.name !== '$ne') return null;
+      if (ref === null || !isNumericType(ref.type) || admitsMixedTypes(shape.schema, ref.segments)
+        || where?.name !== '$ne') return null;
       const other = resolve(where.args[0], binding.slot, shape);
       return other !== null && canonicalOf(other.segments) === canonicalOf(ref.segments)
         && where.args[1]?.kind === 'literal' && where.args[1].value === null ? ref : null;
@@ -2300,9 +2344,12 @@ function groupAggregate(node, itSlot, shape, resolve = pathRef) {
   if (fn === undefined || fn === 'count') return null;
   const ref = resolve(node.args[0], itSlot, shape);
   const numeric = fn === 'sum' || fn === 'avg';
+  // a member of two types folds as its first in SQL, where the engine
+  // refuses the mixed sequence (`JQ2001`)
   const acceptable = ref !== null
     && (numeric ? isNumericType(ref.type) : ref.type !== 'unknown')
-    && ref.type !== 'boolean' && !admitsNull(shape.schema, ref.segments);
+    && ref.type !== 'boolean' && !admitsNull(shape.schema, ref.segments)
+    && !admitsMixedTypes(shape.schema, ref.segments);
   if (!acceptable) return null;
   // what an aggregate over NO values says, in the ENGINE's words
   return { fn, ref, empty: fn === 'sum' ? 'zero' : 'omit' };
@@ -2466,9 +2513,13 @@ function planFlwor(node, shape, rawFlwor, udfHook) {
       // not the fixed temporal ladder: the GENERAL grouping is the next
       // question, and only when it refuses too does the engine group
       group = planGeneralGrouping(node, itSlot, shape);
-      if (group === null) {
+      if (group === null || group.aggregates.some(floatingAccumulation)) {
+        // the engine groups — and when the grouping itself translated, a
+        // floating sum or average among its aggregates is the named cause
         bucketRefusal = grouped.code;
-        reasons.push(seriesReason(grouped.code, '$groupby'));
+        reasons.push(group === null ? seriesReason(grouped.code, '$groupby')
+          : refusal('$groupby', PLAN_REASONS.floatingAccumulation));
+        group = null;
       }
     }
   }
@@ -2866,14 +2917,25 @@ function planCollectionCore(document, shape, options = undefined) {
     // numeric family too — and a path that admits `null` is refused for
     // every aggregate alike: SQL cannot tell a stored null from an
     // absent member, and the engine's sequence has an item for one and
-    // not the other
+    // not the other; so is a path of two types, which SQL reads as its
+    // first where the engine refuses the mixed sequence
     const numeric = aggregate.fn === 'sum' || aggregate.fn === 'avg'
       || aggregate.fn === 'registered';
     const acceptable = ref !== null
       && (numeric ? isNumericType(ref.type) : ref.type !== 'unknown')
-      && ref.type !== 'boolean' && !admitsNull(shape.schema, ref.segments);
+      && ref.type !== 'boolean' && !admitsNull(shape.schema, ref.segments)
+      && !admitsMixedTypes(shape.schema, ref.segments);
     if (!acceptable) {
       return collectionResult(analysis, null, 'set', [refusal(aggregate.name, PLAN_REASONS.aggregatePath)]);
+    }
+    if (floatingAccumulation({ fn: aggregate.fn, ref })) {
+      // the engine adds, but only over the rows the pushed selection
+      // keeps: the set residual's narrowed fetch, in collection order
+      const narrowing = underSetMode(classifySelection(plan, shape, false));
+      plan.order = null;
+      plan.window = null;
+      return collectionResult(analysis, plan, 'set', [refusal(aggregate.name, PLAN_REASONS.floatingAccumulation)],
+        null, flwor.udfs, flwor.prefilters, narrowing);
     }
     plan.aggregate = aggregate.fn === 'registered'
       ? { fn: 'registered', ref, operator: aggregate.name, sql: aggregate.sql }
@@ -3586,7 +3648,8 @@ function planEntityQueryCore(document, entities, mapping, operators) {
     const leaf = projection?.tree.p === 'leaf' ? projection.leaves[projection.tree.index] : null;
     if (bindings.length !== 1 || !leaf?.ref || leaf.ref.flavor !== 'entity-column'
       || !['text', 'integer', 'number'].includes(leaf.ref.codec)
-      || (['sum', 'avg'].includes(aggregate) && leaf.ref.type !== 'integer'))
+      || (['sum', 'avg'].includes(aggregate) && leaf.ref.type !== 'integer')
+      || admitsMixedTypes(bindings[0].shape.schema, leaf.ref.segments))
       return residual(`$${aggregate}`, ENTITY_REASONS.scalarAggregate);
     scalarAggregate = { fn: aggregate, ref: leaf.ref };
   }
@@ -3608,12 +3671,14 @@ function planEntityQueryCore(document, entities, mapping, operators) {
       const ref = binding === undefined
         ? null : entityPathRef(spec.key, slot, binding.shape);
       // a boolean orders in SQL and is `JQ2005` in the engine on either
-      // flavor; a document path that admits null stores a present null
-      // (a COLUMN stores it absent, §9.3, so a nullable column pushes)
+      // flavor, and so does a member of two types; a document path that
+      // admits null stores a present null (a COLUMN stores it absent,
+      // §9.3, so a nullable column pushes)
       if (ref === null || (ref.flavor === 'entity-doc' && ref.type === 'unknown')
         || ref.type === 'boolean'
         || ref.nullPolicy === 'null'
         || (ref.flavor === 'entity-doc' && admitsNull(binding.shape.schema, ref.segments))
+        || admitsMixedTypes(binding.shape.schema, ref.segments)
         || spec.collation !== null || spec.collationName !== null) {
         orderPushed = false;
         reasons.push(refusal('$orderby', ENTITY_REASONS.order));

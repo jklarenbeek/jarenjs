@@ -33,6 +33,8 @@ import { resolve } from 'node:path';
 import { parseMermaid } from '@jarenjs/mermaid';
 import { parseMarkdown, parseFrontmatter, walkAst } from '@jarenjs/md';
 
+import { isMainModule } from './lib/main-module.js';
+
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 
 /**
@@ -147,7 +149,7 @@ export function checkDocuments(options = {}) {
   return { code: failures.length > 0 ? 1 : 0, files: files.length, mermaid, json, failures };
 }
 
-if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMainModule(import.meta.url)) {
   const report = checkDocuments();
   if (report.failures.length > 0) {
     console.error(`documents that do not parse (${report.failures.length}):\n\n`

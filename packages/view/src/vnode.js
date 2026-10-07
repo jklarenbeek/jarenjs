@@ -97,11 +97,38 @@ export function isElementName(tag) {
  * @returns {TypeError}
  */
 export function elementNameError(root, vnode, tag) {
-  const pointer = pointerTo(root, vnode);
-  const where = pointer === null ? 'inside a widget\'s ssr vnode' : pointer === '' ? 'at the root' : `at ${pointer}`;
-  return new TypeError(`view: the tag ${JSON.stringify(tag)} ${where} is not an element name (a letter, then `
+  return new TypeError(`view: the tag ${JSON.stringify(tag)} ${whereIs(root, vnode)} is not an element name (a letter, then `
     + 'letters, digits or hyphens). An array whose first item is a string is an element; to splice text '
     + 'before an element, start the list with null: [null, \' \', [\'b\', {}, \'x\']]');
+}
+
+/**
+ * The refusal of `<style>` or `<script>` text that serialized markup cannot
+ * carry: raw text is written verbatim, so `found` — an end tag of the
+ * element, or `<!--` in a script — would end the element (or change how
+ * the script is read) where the document did not. Located like
+ * {@link elementNameError}.
+ * @param {any} root - the document being rendered
+ * @param {any} vnode - the `style` or `script` element vnode
+ * @param {string} tag - its tag, as written
+ * @param {string} found - the sequence the text may not contain
+ * @returns {TypeError}
+ */
+export function rawTextError(root, vnode, tag, found) {
+  return new TypeError(`view: the text of the <${tag}> ${whereIs(root, vnode)} contains ${JSON.stringify(found)}, `
+    + 'which raw text cannot carry: an HTML parser would end the element there. Escape it inside the '
+    + (tag.toLowerCase() === 'script' ? 'script, as "<\\/script>" or "\\x3C!--"' : 'stylesheet, as "\\3C /style>"'));
+}
+
+/**
+ * Where `vnode` sits in `root`, as a refusal names it.
+ * @param {any} root
+ * @param {any} vnode
+ * @returns {string}
+ */
+function whereIs(root, vnode) {
+  const pointer = pointerTo(root, vnode);
+  return pointer === null ? 'inside a widget\'s ssr vnode' : pointer === '' ? 'at the root' : `at ${pointer}`;
 }
 
 /**

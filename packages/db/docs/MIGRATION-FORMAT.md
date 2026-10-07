@@ -262,6 +262,12 @@ the CLI's snapshot discipline (§11), the committed `model.snapshot.json`
 the last `plan` advanced: the previous reviewed model remains the planning input,
 so the previous shape lives beside the code, where a diff can read it.
 
+Without `id`, the document's id is `to-` followed by the target fingerprint
+(`to`) alone. Two links that reach one shape — a revert and its redo, or two
+targets whose 32-bit fingerprints collide — therefore get the same default id,
+and ids are distinct within a migration list (§5): plan such a chain with an
+explicit `id` (`jaren-db plan --id`).
+
 - An added collection becomes its full CREATE DDL; a removed
   collection becomes a `DROP TABLE` step whose note says
   **DESTRUCTIVE** plainly, and `report.destructive` is `true` — the
@@ -409,9 +415,34 @@ in order, with matching ids, checksums, from/to hashes and step counts.
 A disagreement is `JD0022`; the writer checks these fields again after
 acquiring its lock, before executing any pending step. These comparisons
 do not rewrite existing receipts or normalize their stored values.
+Ids are distinct within a list: a history row is keyed by its id, so
+`migrate`, `migrationStatus` and `adoptMigrationHistory` refuse a list that
+repeats one (`JD0013`, naming the id and both positions) before any link runs
+or any connection opens.
 The six normal fields and SQLite rowid/PostgreSQL rid ordering remain unchanged.
 PostgreSQL stores `applied_at` and `steps` as numeric and adds a BIGSERIAL `rid`;
 no upgrade rewrites old columns or adjusts their sequences.
+
+`applied_at` is the run's `runtime.now()` in integer epoch milliseconds, read
+when each link records its receipt. A clock that answers anything else — a
+fraction (`performance.timeOrigin + performance.now()`, say), a non-finite
+value, or one of 2^63 or more in magnitude, which SQLite's 64-bit INTEGER
+cannot hold — is refused `JD0013` on SQLite and PostgreSQL alike. The clock is
+read immediately before the run's first link, so one that cannot stamp refuses
+before any step runs, and every receipt's own stamp is checked before its
+insert. Without the shadow (`shadow: false`), a clock that stops answering an
+integer mid-run refuses that link, rolled back whole, while the links before
+it stand (an atomic run rolls the whole chain back, §6). With the shadow (the
+default), its replay is a run of its own, on the shadow, before the
+database's: it reads the clock first, before its first link and for each of
+its receipts, so a clock it cannot use is refused before the database runs
+any step, and one that stops answering an integer only during the database's
+own run refuses as without the shadow. A run that stamps nothing
+(nothing pending, or a dry run without the shadow) does not read it. Below 2^53
+both dialects store the stamp exactly; beyond it SQLite stores the number's own
+integer and PostgreSQL's numeric the shortest decimal that reads back as the
+same number (`2^60` is `1152921504606846976` on SQLite and
+`1152921504606847000` on PostgreSQL).
 
 `_jaren_migration_identity` separately records a canonical version-1 header and
 ordinal receipts. The header pins the adopted legacy count and exact model and
@@ -515,10 +546,11 @@ documents — makes such a change impossible to ship unnoticed.
 
 | Target | Ownership and return boundary |
 |---|---|
-| `{ driver, path?, busyTimeout? }` | Opens and closes its own connection; returns a Promise. Acquired resources close even if function registration or initialization fails. |
-| `{ connection }` | Borrows an existing driver connection and leaves it open on success or failure; returns a value or Promise. Synchronous work with `shadow: false` stays synchronous when its connection and hooks do. |
+| `{ driver, path?, busyTimeout? }` | Opens and closes its own connection; returns a Promise, and answers every refusal by rejecting it: admission refusals, a refusal met after a driver whose `open()` answers synchronously, and an `open()` that throws. On a SQLite driver a target without `path` is a private in-memory database (`':memory:'`), so nothing persists between calls, and a `path` that does not exist is created by the driver's open. A PostgreSQL driver's target is the schema the driver names, which persists between calls; a `path` other than `':memory:'` or that schema is refused (`JD0003`) and creates nothing. Acquired resources close even if function registration or initialization fails. |
+| `{ connection }` | Borrows an existing driver connection and leaves it open on success or failure; returns a value or Promise, and throws an admission refusal synchronously. Synchronous work with `shadow: false` stays synchronous when its connection and hooks do. |
 
-A borrowed target cannot also carry `driver`, `path` or `busyTimeout`.
+A borrowed target cannot also carry `driver`, `path` or `busyTimeout`; a target
+of neither form is a `TypeError`, thrown before anything else is read.
 `migrationStatus`, `migrationHistory` and `adoptMigrationHistory` use the same ownership forms. Borrowed model-only status
 comparison needs `shadowDriver`; a complete `physicalTarget` needs no
 fresh reference database. Temporary history and physical-inspection statements
@@ -547,8 +579,17 @@ view and do not claim to bypass PostgreSQL MVCC.
 Migration planner, runner, status, observation and adoption options are closed plain objects. A
 misspelled or unknown member refuses with `JD0013` before acquiring a
 connection or applying a step; for example, `atomik: true` cannot silently
-disable an intended atomic run. Signals must be AbortSignal-compatible and
-deadlines finite timestamps. Omit an optional member to use its default.
+disable an intended atomic run. The runner, status, observation and adoption
+entry points admit the values they read the same way: signals must be
+AbortSignal-compatible and deadlines finite timestamps; the hooks
+`registerFunctions`, `compileSchema`, `onProgress`, `onAssertionPlan` and
+`shadowFixture` must be functions, `expressions` a plain object of
+declarations, `shadowDriver` a driver with `open()`, `dryRun` and `shadow`
+booleans and `shadowPath` a path, each refused `JD0013` otherwise. An explicit
+`physicalTarget` is admitted as given, `JD0021` when it is not a complete
+target: `null` is refused, never read as an absent target. All of these refuse
+before a connection is acquired, so a refused owned call creates no file and
+runs no hook. Omit an optional member to use its default.
 
 The run options include:
 
@@ -576,9 +617,13 @@ The run options include:
   run; a CLI SHOULD default to the dry run.
 - `migrationStatus` (and the CLI's `status`/`check`) write nothing
   either: the history table is probed, never created, and an absent one
-  reads as an empty history, so a fresh file answers `applied: (none)`
-  and stays byte for byte what it was. The history table is created by
-  the real run alone, before its first migration is recorded.
+  reads as an empty history, so an existing file without one answers
+  `applied: (none)` and stays byte for byte what it was. The history table
+  is created by the real run alone, before its first migration is recorded.
+  An owned SQLite target opens its `path` through its driver, which creates
+  a file that does not exist (a PostgreSQL target is its driver's schema);
+  the CLI's read commands refuse a `--store` that does not exist instead
+  (§11).
 - Each pending migration runs in ONE exclusive transaction
   (`BEGIN IMMEDIATE` on SQLite — concurrent writers wait or time out
   under the busy timeout) with a savepoint per step; any failure rolls
@@ -591,11 +636,12 @@ The run options include:
   checks (§3's validation, the physical target, the model's shape) once
   after the last — so the chain commits whole or not at all, a repair
   link after a narrowing lands before the check, and a cancellation rolls
-  the whole chain back. A link that rebuilds a table changes the
+  the whole chain back. On SQLite a link that rebuilds a table changes the
   connection's foreign-key setting outside any transaction (§10), so it
   cannot be held: an atomic run with one is `JD0026`, before anything
-  runs. The shadow replays link by link either way; its last link makes
-  the same final check.
+  runs. PostgreSQL has no such setting to change, and an atomic run holds
+  its rebuilds like any other step. The shadow replays link by link either
+  way; its last link makes the same final check.
 - **Foreign keys are enforced on every driver.** A migration's own
   connection — `{ driver, path }`, and the shadow's — switches enforcement
   ON when it opens, whatever the binding's default (`bun:sqlite` leaves it
@@ -759,13 +805,22 @@ Two limits are the single pass's, and are stated rather than hidden:
 | `JD0023` | a migration step failed (classified: `class` and `retryable`, the driver's error as `cause`) |
 | `JD0024` | a document source or target could not be read or written |
 | `JD0025` | a migration host step is unknown, its version differs, or it appears where it cannot run |
-| `JD0026` | an atomic migration run contains a rebuild link |
+| `JD0026` | an atomic migration run on SQLite contains a rebuild link |
 | `JD0027` | a physical scope is malformed or names a table the plan does not own |
 | `JD0028` | legacy history needs explicit observation/adoption, or newly pending work is 0.1 |
 
 These live in the same runtime `DB_CODES` table as the storage codes
 (MODEL-FORMAT §7); the union of both documents is proven in sync with
-the runtime table by a test.
+the runtime table by a test. An entry point refuses a malformed call with the
+store's option code, `JD0013`: a misspelt option or a malformed control named
+in §6, and a list that repeats an id (§5), before any connection is acquired;
+a receipt clock the history cannot store (§5), before the run's first link, or
+before the receipt of the link it can no longer stamp, which rolls back whole
+(the whole chain in an atomic run; in the shadow's replay, before the database
+runs any step).
+A malformed `batchSize`, `atomic`, `hosts`, `assertionBounds` or runtime
+record is still a `TypeError`, as is a target of neither form or a list that
+is not an array, and a document that is not a valid migration is `JD0023`.
 
 ## 9. Relational changes (entities)
 
@@ -835,6 +890,70 @@ the transaction** — a reference the rebuild broke fails the migration
 rather than shipping (compared against the same check taken before it
 began, as a link's is, §6; a parent an earlier step of the link renamed
 counts under its new name, which the rebuilt `REFERENCES` clause spells).
+
+On PostgreSQL the step keeps what the old table held, where a new table can:
+
+- **Writers wait.** The step's first statement is
+  `LOCK TABLE "<table>" IN SHARE ROW EXCLUSIVE MODE` — the one `LOCK` the
+  statement check admits, and only there; a dry run prints it first. From then
+  until the link commits (the whole chain, in an atomic run) every write to
+  the table waits, while reads go on until the old table is dropped, so no
+  write another session commits is dropped with the old table: one committed
+  before the lock is granted is in the copy, and a waiting one continues once
+  the link commits, against the rebuilt table (PostgreSQL resolves the name
+  again). A waiting writer's own `lock_timeout` may end its wait first: through
+  a store, whose PostgreSQL driver sets it (`lockTimeoutMs`, 5000 by default),
+  the write is refused `JD2005` with `class: 'busy'`, `retryable: true`, and
+  its retry lands. The migration's own wait for the lock is bounded the same
+  way: a write transaction that holds the table past it fails the step
+  `JD0023`, `class: 'busy'`, `retryable: true`, with nothing changed.
+- **Allocation continues.** Every serial column — an allocated
+  (`default: "auto"`) key, and the `rid` every table carries — continues from
+  the old table's sequence. A statement of `create` carries the old sequence's
+  next value to the temporary table's while both exist: it asks the old
+  sequence with `nextval` and sets that value back as its next, so the old
+  sequence hands out the same value next, also when the step rolls back. A
+  statement of `indexes` then sets the next value to the greatest of that
+  value, the highest copied value plus one, and 1. A key the table handed out
+  is not handed out again, through any number of rebuilds, and the next value
+  is never below 1, so a table holding only explicit keys at or below zero
+  rebuilds too.
+- **Rows keep their `rid`.** The copy carries it, so an entity read with no
+  ordering answers its rows in the order they were written, as before.
+- **The primary key takes `<table>_pkey`** where no other relation of the
+  schema holds that name. PostgreSQL names the temporary table's key after the
+  temporary table (`<table>__rebuild_pkey`, with a number appended where that
+  name is taken), and no statement can rename only to a free name, so once
+  the table is in place the runner looks the name up and renames the key —
+  its own work, as SQLite's `foreign_key_check` is; a dry run prints it as a
+  comment. Where the name is held, by the key of a table renamed away from
+  this name for instance, the key keeps its name, which the duplicate-key
+  classification also reads as this table's key.
+- **Every other generated name keeps the temporary table's.** Its constraints
+  (`<table>__rebuild_<column>_check`, `<table>__rebuild_<column>_fkey`), its
+  sequences (`<table>__rebuild_<column>_seq`) and the column defaults that name
+  them keep `__rebuild`, and a later rebuild that finds such a name taken
+  appends a number to it. The managed path never addresses them by name, but
+  a native acceptance reference (`physicalTarget`,
+  [PostgreSQL native preservation](#postgresql-native-preservation)) prepared
+  by a fresh create of the target model does not match them: prepare the
+  reference by replaying the same chain from the same baseline instead.
+- **An entity that another object depends on cannot be rebuilt.** PostgreSQL
+  refuses to drop a table another object depends on, and the rebuild
+  re-points nothing: another entity's foreign key to the table, the table's
+  own reference to itself, or an application's view over it keeps the old
+  table from being dropped. The step fails `JD0023`,
+  naming the dependent as the server's detail does (`view post_titles depends
+  on table "Post"`), and the link rolls back whole. A rebuild of an entity
+  nothing depends on applies.
+- **The temporary names must fit too.** Planning a rebuild names the
+  temporary table `<entity>__rebuild` and checks its index names as
+  `<entity>__rebuild_<member>` as well, although the step creates the indexes
+  only under their final names, `<entity>_<member>`, after the rename. Where
+  such a name passes PostgreSQL's 63 bytes, planning is refused `JD0004`,
+  naming the temporary entity (`docPath` `/entities/<entity>__rebuild/…`), even
+  though the final name fits. The shortest remedy is a shorter member name: a
+  rebuildable entity's `<entity>_<member>` index names fit in 54 bytes.
 
 Two deviations from the cited twelve steps, recorded: (1) the
 procedure's `PRAGMA foreign_keys=OFF/ON` bracket is honoured
@@ -938,13 +1057,32 @@ jaren-db documents --migrations <dir> --in <file|-> (--out <file|-> | --in-place
   instead of refusing. The shadow's verdict comes with the real `apply`.
   With nothing pending, real `apply` checks the supplied model or saved
   physical target for drift and passes the chain through the runner before
-  reporting `up to date`. A no-op needs no confirmation and changes no
-  history or application rows. A no-pending `--dry-run` reports only the
-  preview; it does not claim target acceptance.
+  reporting `up to date`. With pending work it applies, reports
+  `applied: …`, then runs the same drift check: the links stay committed,
+  and a database that drifted from the target exits 1 with the message the
+  identical no-op rerun gives (`the database drifted from the target: …`),
+  so one database state gets one verdict. A no-op needs no confirmation and
+  changes no history or application rows. A no-pending `--dry-run` reports
+  only the preview; it does not claim target acceptance.
 - `status` lists applied/pending and reports drift (§12); on a
   database without a history table it creates nothing (§6). Normal status,
   check and apply (including `--dry-run`) refuse unverifiable legacy history
   and pending 0.1 with `JD0028`; a printout is not a legacy bypass.
+- `status`, `check`, `history`, `apply --dry-run`, `plan --store` and
+  `adopt-history` never create a `--store` database named by a plain path: a
+  `--store` naming a file that does not exist is refused (`the database file
+  does not exist: <path>`, exit 1) and no file is left behind, because opening
+  it would create an empty file and report it as an empty history. They open
+  an existing file without the right to create it (a `file:` URI with
+  `mode=rw`), so a file removed in between fails the open instead of coming
+  back empty. `:memory:` is an empty database. A `--store` that is already a
+  `file:` URI reaches SQLite as written, so its own `mode` decides: without
+  `mode=ro` or `mode=rw` every command opens it with the right to create, and
+  a missing file is created. A real `apply` reads a plain-path store that does
+  not exist yet as the empty database it is about to create, so an apply that
+  is only printed or declined creates nothing, and neither does one without
+  `--yes` that finds nothing pending (the chain is then empty, and the report
+  is all it does); confirmed, or given `--yes`, it may create the new store.
 - `history` emits one JSON observation to stdout, or writes exactly that
   JSON with `--out`. It creates neither history table.
 - `adopt-history` requires the reviewed complete applied prefix, observation

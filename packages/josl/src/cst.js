@@ -15,6 +15,7 @@
 import { JoslMachine } from './machine.js';
 import { formatValue, formatKeyPath } from './stringify.js';
 import { countCharCode } from '@jarenjs/core/string';
+import { admitOptions, CST_READ, TOML_CST_READ } from './options.js';
 
 const KIND_TRIVIA = 'trivia';
 const KIND_PAIR = 'pair';
@@ -196,14 +197,18 @@ export class JoslCstDocument {
  * @param {string} text - JOSL source text
  * @param {object} [options] - Reader options
  * @param {'josl'|'toml'} [options.mode] - 'toml' rejects JOSL extensions
+ * @param {(event: object) => void} [options.onEvent] - Document-order
+ *  event sink; a CST takes no limits (it enforces none)
  * @returns {JoslCstDocument} The document
  * @throws {import('./errors.js').JoslSyntaxError} On invalid input
+ * @throws {TypeError} On an option other than `mode` and `onEvent`
  */
 export function parseJoslCst(text, options = undefined) {
+  const admitted = admitOptions(options, CST_READ, 'parseJoslCst');
   // the document keeps only the grammar-selecting options: re-reading its
   // own text after an edit must not re-fire the caller's event sinks
-  const opts = options?.mode === undefined ? {} : { mode: options.mode };
-  const userEvent = options?.onEvent ?? null;
+  const opts = admitted.mode === undefined ? {} : { mode: admitted.mode };
+  const userEvent = admitted.onEvent ?? null;
   const nodes = [];
   const pending = [];
   let line = 1;
@@ -248,7 +253,7 @@ export function parseJoslCst(text, options = undefined) {
  * @returns {JoslCstDocument} The document
  */
 export function parseTomlCst(text, options = undefined) {
-  return parseJoslCst(text, { ...options, mode: 'toml' });
+  return parseJoslCst(text, { ...admitOptions(options, TOML_CST_READ, 'parseTomlCst'), mode: 'toml' });
 }
 
 export { JoslSyntaxError } from './errors.js';

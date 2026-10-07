@@ -40,17 +40,29 @@ function enforceForeignKeys(connection) {
     })));
 }
 
-/** Keep synchronous borrowed work synchronous; close only acquired resources.
- * Cleanup failures retain the original failure as well as the close failure.
- * An owned connection enforces foreign keys before anything runs on it.
- * @param {any} target @param {(connection:any)=>any} run @returns {any} */
-export function withMigrationConnection(target, run) {
-  const borrowed = target?.connection !== undefined;
-  if (!target || typeof target !== 'object' || (borrowed
+/** The two ownership forms a migration target takes: owned `{ driver, path?,
+ * busyTimeout? }` or borrowed `{ connection }`, never a mix. A target of
+ * neither form has no promise boundary to answer through, so it is a
+ * `TypeError`, thrown before anything else about the call is read.
+ * @param {any} target @returns {void} */
+export function checkMigrationTarget(target) {
+  if (!target || typeof target !== 'object' || (target.connection !== undefined
     ? target.driver !== undefined || target.path !== undefined || target.busyTimeout !== undefined
       || typeof target.connection?.prepare !== 'function' || typeof target.connection?.transaction !== 'function'
     : typeof target.driver?.open !== 'function'))
     throw new TypeError('migration target needs { driver, path? } or { connection }');
+}
+
+/** Keep synchronous borrowed work synchronous; close only acquired resources.
+ * Cleanup failures retain the original failure as well as the close failure.
+ * An owned connection enforces foreign keys before anything runs on it.
+ * An owned target always answers a promise: a driver whose `open()` answers
+ * synchronously runs the whole chain synchronously, so a refusal it meets, or
+ * an `open()` that throws, is turned into the rejection the target promises.
+ * @param {any} target @param {(connection:any)=>any} run @returns {any} */
+export function withMigrationConnection(target, run) {
+  checkMigrationTarget(target);
+  const borrowed = target.connection !== undefined;
   const ownedRun = (connection) => connection.dialect?.migration && typeof connection.exclusively === 'function'
     ? connection.exclusively((scope) => {
       const facade = { ...connection, ...scope, mustQueue: false, exclusively: undefined };
@@ -59,21 +71,24 @@ export function withMigrationConnection(target, run) {
     }, 'a migration')
     : run(connection);
   if (borrowed) return ownedRun(target.connection);
-  return toPromise(chain(target.driver.open(target.path ?? ':memory:', { timeout: target.busyTimeout ?? 5000 }), (connection) => {
-    const finish = (value) => chain(connection.close(), () => value);
-    const fail = (error) => {
-      const both = (closeError) => { throw new AggregateError([error, closeError], 'migration failed and its connection could not close', { cause: error }); };
-      let closed;
-      try { closed = connection.close(); }
-      catch (closeError) { return both(closeError); }
-      if (isThenable(closed)) return closed.then(() => { throw error; }, both);
-      throw error;
-    };
-    let result;
-    try { result = chain(enforceForeignKeys(connection), () => ownedRun(connection)); }
-    catch (error) { return fail(error); }
-    return isThenable(result) ? result.then(finish, fail) : finish(result);
-  }));
+  try {
+    return toPromise(chain(target.driver.open(target.path ?? ':memory:', { timeout: target.busyTimeout ?? 5000 }), (connection) => {
+      const finish = (value) => chain(connection.close(), () => value);
+      const fail = (error) => {
+        const both = (closeError) => { throw new AggregateError([error, closeError], 'migration failed and its connection could not close', { cause: error }); };
+        let closed;
+        try { closed = connection.close(); }
+        catch (closeError) { return both(closeError); }
+        if (isThenable(closed)) return closed.then(() => { throw error; }, both);
+        throw error;
+      };
+      let result;
+      try { result = chain(enforceForeignKeys(connection), () => ownedRun(connection)); }
+      catch (error) { return fail(error); }
+      return isThenable(result) ? result.then(finish, fail) : finish(result);
+    }));
+  }
+  catch (error) { return Promise.reject(error); }
 }
 
 /** SQLite supplies the main database's canonical filename; private in-memory

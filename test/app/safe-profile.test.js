@@ -10,7 +10,7 @@ it('forwards the safe renderer and grants no host capabilities by default', () =
     ['script', {}, 'attack'], ['jaren-widget', { name: 'danger' }]] }],
   actions: { run: { effects: [{ run: 'network' }] } },
   subs: [{ run: 'network', when: true }],
-  }, { ...host, node: host.container, safe: true, onUnsafe: (x) => stripped.push(x), onError: (e) => errors.push(e),
+  }, { document: host.document, node: host.container, safe: true, onUnsafe: (x) => stripped.push(x), onError: (e) => errors.push(e),
     effects: { network: () => called.push('effect') }, subs: { network: () => called.push('sub') },
     widgets: { danger: { mount: () => called.push('widget') } },
   });

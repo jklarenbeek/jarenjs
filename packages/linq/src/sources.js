@@ -13,6 +13,7 @@
  */
 
 import { LinqBuildError, LinqRuntimeError } from './errors.js';
+import { readOptions } from './document.js';
 
 /**
  * Normalize an async source into an iterator factory, or throw
@@ -47,13 +48,14 @@ export function adaptAsyncSource(source) {
  * where one appears): `feed(value)` enqueues and returns `false` once
  * the queue holds more than `highWaterMark` items — a HINT to pause,
  * never a hard stop — and `end(error?)` closes the stream. The queue
- * itself is the async-iterable to hand to `fromAsync`.
+ * itself is the async-iterable to hand to `fromAsync`. The options are a
+ * closed set: a misspelt mark is `JL0005`, never the default in silence.
  * @param {{ highWaterMark?: number }} [options]
  * @returns {{ feed: (value: any) => boolean, end: (error?: unknown) => void,
  *   [Symbol.asyncIterator]: () => AsyncIterator<any> }}
  */
-export function createPushQueue(options = {}) {
-  const highWaterMark = options.highWaterMark ?? 1024;
+export function createPushQueue(options) {
+  const highWaterMark = readOptions(options, ['highWaterMark'], 'createPushQueue()').highWaterMark ?? 1024;
   if (!Number.isInteger(highWaterMark) || highWaterMark < 1) {
     throw new LinqBuildError('JL0005', 'highWaterMark must be a positive integer');
   }

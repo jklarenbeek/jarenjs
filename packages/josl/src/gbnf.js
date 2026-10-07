@@ -21,6 +21,8 @@
 // that would need deeper nesting is not expressible here. Constrained
 // output is a subset of what the parser accepts, never a superset.
 
+import { admitOptions, GBNF } from './options.js';
+
 const CORE = [
   ['root', 'expression ( newline expression )*'],
   ['expression', 'ws ( keyval ws | table ws )? comment?'],
@@ -149,7 +151,7 @@ const JOSL_ONLY = [
  * @returns {string} The GBNF grammar
  */
 export function toGbnf(options = undefined) {
-  const toml = options?.mode === 'toml';
+  const toml = admitOptions(options, GBNF, 'toGbnf').mode === 'toml';
   const rules = [
     ...CORE,
     ['val', toml ? VAL_CORE : VAL_JOSL],

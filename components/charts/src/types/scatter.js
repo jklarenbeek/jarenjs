@@ -14,6 +14,7 @@ import { clamp01 } from '@jarenjs/core/math';
 import { scaleLinear, scaleLog } from '../core/scale.js';
 import { axisTicksLinear, axisTicksLog, formatTickValue } from '../core/axis.js';
 import { cartesianFrame, toneColor, annotateChart, FS_TICK } from '../core/cartesian.js';
+import { measurableSpan, measurableDecades } from '../core/domain.js';
 import { CATEGORICAL } from '../core/palette.js';
 import { normalizeTooltip, valueMark } from '../core/marks.js';
 
@@ -38,35 +39,29 @@ export function buildScatterAST(data, config = {}) {
   const input = data?.points ?? [];
   const xLog = config.xLog === true;
   const yLog = config.yLog === true;
+  /** A value an axis can place: finite, and positive on a log axis. */
+  const placeable = (/** @type {any} */ v, /** @type {boolean} */ log) => Number.isFinite(v) && (!log || v > 0);
 
   const xs = [];
   const ys = [];
   for (const p of input) {
-    if (!Number.isFinite(p?.x) || !Number.isFinite(p?.y)) continue;
-    if (xLog && p.x <= 0) continue;
-    if (yLog && p.y <= 0) continue;
+    if (!placeable(p?.x, xLog) || !placeable(p?.y, yLog)) continue;
     xs.push(p.x);
     ys.push(p.y);
   }
-  if (typeof config.refY === 'number' && Number.isFinite(config.refY)
-    && (!yLog || config.refY > 0)) {
-    ys.push(config.refY);
-  }
+  const refY = typeof config.refY === 'number' && placeable(config.refY, yLog) ? config.refY : null;
+  if (refY !== null) ys.push(refY);
   const [xScale, xTicks] = axisFor(xs, xLog);
   const [yScale, yTicks] = axisFor(ys, yLog);
 
+  // every placeable sample is drawn; one beyond a clamped domain pins to the edge
   const points = [];
   for (const p of input) {
-    if (!Number.isFinite(p?.x) || !Number.isFinite(p?.y)) continue;
-    const u = xScale(p.x);
-    const v = yScale(p.y);
-    if (!Number.isFinite(u) || !Number.isFinite(v)) continue;
-    points.push({ u: clamp01(u), v: clamp01(v), tone: p.tone ?? null, x: p.x, y: p.y });
+    if (!placeable(p?.x, xLog) || !placeable(p?.y, yLog)) continue;
+    points.push({ u: clamp01(xScale(p.x)), v: clamp01(yScale(p.y)), tone: p.tone ?? null, x: p.x, y: p.y });
   }
 
-  const ref = typeof config.refY === 'number' && Number.isFinite(yScale(config.refY))
-    ? { v: clamp01(yScale(config.refY)), label: config.refLabel ?? null }
-    : null;
+  const ref = refY !== null ? { v: clamp01(yScale(refY)), label: config.refLabel ?? null } : null;
 
   return {
     type: 'scatter',
@@ -87,11 +82,13 @@ function axisFor(values, log) {
   }
   if (!Number.isFinite(lo)) { lo = log ? 0.1 : 0; hi = 1; }
   if (log) {
-    const d0 = Math.pow(10, Math.floor(Math.log10(lo)));
+    let d0 = Math.pow(10, Math.floor(Math.log10(lo)));
     const d1 = Math.pow(10, Math.ceil(Math.log10(hi)));
-    const top = d1 === d0 ? d0 * 10 : d1;
+    let top = d1 === d0 ? d0 * 10 : d1;
+    [d0, top] = measurableDecades(d0, top);
     return [scaleLog(d0, top), axisTicksLog(d0, top)];
   }
+  [lo, hi] = measurableSpan(lo, hi);
   const ticks = axisTicksLinear(lo, hi, 5);
   const min = Math.min(lo, ticks[0] ?? lo);
   const max = Math.max(hi, ticks[ticks.length - 1] ?? hi);

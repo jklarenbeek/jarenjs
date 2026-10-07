@@ -32,13 +32,13 @@
  * the queue always drains, cleanups are never skipped.
  */
 
-import { stableStringify } from '@jarenjs/core/object';
+import { isPlainOptions, nearestName, refuseUnknownMembers, stableStringify } from '@jarenjs/core/object';
 import { compileJsltStylesheet } from '@jarenjs/json/jslt';
 import { applyJSONPatch } from '@jarenjs/json/patch';
 import { createDomRenderer } from '@jarenjs/view';
 
 import { compileActions, compileSubs } from './actions.js';
-import { AppCompileError, AppRuntimeError, toError, safeErrorMessage } from './errors.js';
+import { AppCompileError, AppRuntimeError, toError, safeErrorMessage, describeValue, describeOption } from './errors.js';
 
 /**
  * @typedef {Object} AppOptions
@@ -175,6 +175,182 @@ import { AppCompileError, AppRuntimeError, toError, safeErrorMessage } from './e
  * failures (see `safeError`); exact-match tested so nesting flattens. */
 const MULTIPLE_SINK_FAILURES = 'multiple failures surfaced in one drain';
 
+/** @type {(value: unknown) => boolean} */
+const isFunction = (value) => typeof value === 'function';
+/** @type {(value: unknown) => boolean} */
+const isBoolean = (value) => typeof value === 'boolean';
+
+/**
+ * Whether `value` carries the internal slot `method` checks for — a
+ * `Map` or `Set` of any realm or subclass — read without running host
+ * code: the check throws for anything else, a proxy included.
+ * @param {(this: any, key: unknown) => boolean} method
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+function hasSlotOf(method, value) {
+  try {
+    method.call(value, undefined);
+    return true;
+  }
+  catch {
+    return false;
+  }
+}
+
+/**
+ * Why `value` cannot be a host registry (`effects`, `subs`,
+ * `eventFields`, `widgets`), as a refusal names what was given, or `null`
+ * when it can be one. A registry is any object of named members — a
+ * proxy or an object with accessors included — so what is refused is
+ * what would read as an empty registry and fail only at first use: a
+ * function (a factory passed uncalled: `eventFields: formEventFields`), a
+ * primitive, an array, a `Map` or `Set` (their entries are not members),
+ * and a promise or other thenable (an async factory called but not
+ * awaited) — an object whose `then` is inherited, since an own `then` is
+ * a registered name. An object that cannot be looked at is left to the
+ * boundary that reads its members.
+ * @param {unknown} value
+ * @returns {string | null}
+ */
+function notARegistry(value) {
+  if (value === null || typeof value !== 'object') return describeValue(value);
+  try {
+    if (Array.isArray(value)) return 'an array';
+    if (hasSlotOf(Map.prototype.has, value) || hasSlotOf(Set.prototype.has, value)) return describeOption(value);
+    if (typeof (/** @type {any} */ (value)).then === 'function' && !Object.hasOwn(value, 'then')) {
+      return value instanceof Promise ? 'a Promise' : 'a thenable';
+    }
+  }
+  catch {
+    // a revoked or hostile proxy: its first read reports under the registry's own code
+  }
+  return null;
+}
+
+/**
+ * The rule a present option must satisfy: what it `expects`, as a
+ * refusal names it, and `given`, which returns what a value that breaks
+ * the rule is, or `null` for one that keeps it. `null` passes where the
+ * loop has always read it as absent (`orNull`).
+ * @typedef {{ expects: string, given: (value: unknown) => string | null, orNull?: boolean }} AppOptionRule
+ */
+
+/**
+ * @param {string} expects
+ * @param {(value: unknown) => boolean} test
+ * @param {boolean} [orNull]
+ * @returns {AppOptionRule}
+ */
+const optionRule = (expects, test, orNull = false) => ({ expects, given: (value) => (test(value) ? null : describeOption(value)), orNull });
+
+/**
+ * A host registry's rule, naming its entries.
+ * @param {string} entries
+ * @returns {AppOptionRule}
+ */
+const registryRule = (entries) => ({ expects: `an object of ${entries} by name`, given: notARegistry, orNull: true });
+
+/** The registries `capabilities` grants names from: its closed member set. */
+const CAPABILITY_KINDS = ['effects', 'subs', 'widgets', 'eventFields'];
+
+/**
+ * {@link AppOptions}, closed: each member with the kind a present value
+ * must be. The three members checked with their own messages
+ * (`controlled`, `maxTurns`, `maxSubInstances`) carry no kind here.
+ * @type {Record<string, AppOptionRule | null>}
+ */
+const APP_OPTIONS = {
+  node: optionRule('an object', (value) => value !== null && typeof value === 'object'),
+  document: optionRule('an object', (value) => typeof value === 'object', true),
+  hydrate: optionRule('a boolean', isBoolean, true),
+  controlled: null,
+  safe: optionRule('a boolean', isBoolean, true),
+  onUnsafe: optionRule('a function', isFunction, true),
+  capabilities: optionRule('a plain object', isPlainOptions, true),
+  effects: registryRule('handlers'),
+  subs: registryRule('handlers'),
+  eventFields: registryRule('extractors'),
+  widgets: registryRule('widget definitions'),
+  compileTypeTest: optionRule('a function', isFunction, true),
+  validateState: optionRule('a function', isFunction),
+  viewModel: optionRule('a function', isFunction, true),
+  onError: optionRule('a function', isFunction, true),
+  schedule: optionRule('a function', isFunction, true),
+  afterRender: optionRule('a function', isFunction, true),
+  maxTurns: null,
+  maxSubInstances: null,
+  capturePayloads: optionRule('a boolean', isBoolean, true),
+};
+const APP_OPTION_NAMES = Object.keys(APP_OPTIONS);
+
+/**
+ * Refuse `createApp` options that are not a plain object, a member
+ * outside {@link AppOptions} (naming the nearest one: a misspelt `onerror`
+ * would leave every failure throwing past the handler meant to see it),
+ * a member of the wrong kind, and a `capabilities` member that names no
+ * registry (a misspelt `efects` would grant nothing). A member passed as
+ * `undefined` is absent.
+ * @param {unknown} options
+ */
+function checkAppOptions(options) {
+  if (!isPlainOptions(options)) {
+    throw new TypeError(`createApp: options must be a plain object, got ${describeOption(options)}`);
+  }
+  refuseUnknownMembers(options, APP_OPTION_NAMES,
+    (key, hint) => new TypeError(`createApp: unknown option '${key}'${hint}`));
+  for (const key of APP_OPTION_NAMES) {
+    const rule = APP_OPTIONS[key];
+    const value = options[key];
+    if (rule === null || value === undefined || (value === null && rule.orNull === true)) continue;
+    const given = rule.given(value);
+    if (given !== null) {
+      throw new TypeError(`createApp: options.${key} must be ${rule.expects}, got ${given}`);
+    }
+  }
+  if (isPlainOptions(options.capabilities)) {
+    refuseUnknownMembers(options.capabilities, CAPABILITY_KINDS,
+      (key, hint) => new TypeError(`createApp: unknown capabilities member '${key}'${hint}`));
+  }
+}
+
+/**
+ * The entry `registry` holds under a name the document chose, or
+ * `undefined`. A registered name is an OWN member — the reading a
+ * capability grant, the widget and event-field lookups already apply — so
+ * a name every object inherits (`toString`, `constructor`, `__proto__`)
+ * or a method a class instance inherits is not registered: it never runs
+ * as a handler. The member is read before ownership is asked, so a
+ * throwing getter or proxy `get` fails the read itself, under the
+ * caller's code for a failed lookup.
+ * @param {any} registry
+ * @param {string} name
+ * @returns {any}
+ */
+function registered(registry, name) {
+  const entry = registry[name];
+  return entry !== undefined && Object.hasOwn(registry, name) ? entry : undefined;
+}
+
+/**
+ * The hint a refused grant carries: ` — did you mean 'x'?` for the
+ * registry name nearest the one granted, or nothing. A registry whose
+ * names cannot be listed (a proxy may refuse) gets no hint.
+ * @param {string} name
+ * @param {object} registry
+ * @returns {string}
+ */
+function grantHint(name, registry) {
+  let near;
+  try {
+    near = nearestName(name, Object.keys(registry));
+  }
+  catch {
+    near = undefined;
+  }
+  return near === undefined ? '' : ` — did you mean '${near}'?`;
+}
+
 /**
  * Compile an app document and start the loop.
  *
@@ -193,10 +369,14 @@ const MULTIPLE_SINK_FAILURES = 'multiple failures surfaced in one drain';
  * a successful boot the returned app never throws from `createApp`
  * paths again.
  *
+ * The options are a closed set: an unknown member or one of the wrong
+ * kind is refused with a `TypeError` before anything is compiled.
+ *
  * @param {any} appDoc
  * @param {AppOptions} [options]
  */
 export function createApp(appDoc, options = {}) {
+  checkAppOptions(options);
   if (appDoc === null || typeof appDoc !== 'object' || Array.isArray(appDoc)) {
     throw new AppCompileError('JA0001', 'the app document must be an object', '');
   }
@@ -229,7 +409,7 @@ export function createApp(appDoc, options = {}) {
     if (!Array.isArray(names) || names.some((name) => typeof name !== 'string'))
       throw new TypeError(`createApp: capabilities.${kind} must be a list of names`);
     return Object.fromEntries(names.map((name) => {
-      if (!Object.hasOwn(registry, name)) throw new TypeError(`createApp: unknown ${kind} capability '${name}'`);
+      if (!Object.hasOwn(registry, name)) throw new TypeError(`createApp: unknown ${kind} capability '${name}'${grantHint(name, registry)}`);
       return [name, registry[name]];
     }));
   };
@@ -797,7 +977,7 @@ export function createApp(appDoc, options = {}) {
       // share one boundary and one failure policy (JA2007)
       let handler;
       try {
-        handler = typeof run === 'string' ? effectHandlers[run] : undefined;
+        handler = typeof run === 'string' ? registered(effectHandlers, run) : undefined;
       }
       catch (err) {
         const cause = toError(err);
@@ -863,7 +1043,7 @@ export function createApp(appDoc, options = {}) {
   function lookupSubHandler(sub) {
     let handler;
     try {
-      handler = subHandlers[sub.run];
+      handler = registered(subHandlers, sub.run);
     }
     catch (err) {
       const cause = toError(err);

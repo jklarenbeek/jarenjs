@@ -2,7 +2,7 @@
 /** Bounded column mutation documents, lowered through the entity's writer plan. */
 import { analyzeQuery } from '@jarenjs/json/query';
 import { createBoundedCache } from '@jarenjs/core/cache';
-import { chain, attempt } from './driver.js';
+import { chain, attempt, createStatementOwner } from './driver.js';
 import { DbCompileError, DbRuntimeError, wrapDriverError } from './errors.js';
 import { entityShape, planEntityPredicate } from './plan.js';
 import { createEntityPredicateEmitters } from './emit.js';
@@ -15,8 +15,12 @@ import { relationalEmitter } from './relational.js';
 export function createEntityMutation(connection, entity, mapping, core) {
   const dialect = connection.dialect;
   const q = dialect.quoteIdentifier;
-  // Cache executable structure, never a value-bearing document or its bindings.
-  const statements = createBoundedCache(64);
+  // Cache executable structure, never a value-bearing document or its
+  // bindings. A worker, pool or process host keeps every prepared statement
+  // until it is finalized, so an evicted statement is retired: released
+  // once the uses already admitted to it settle.
+  const statements = createBoundedCache(64,
+    (/** @type {string} */ _sql, /** @type {ReturnType<typeof createStatementOwner>} */ owner) => owner.retire());
   const fail = (reason) => { throw new DbCompileError('JD0038', reason, entity.docPath); };
   const column = (name) => {
     const c = mapping.columns.find((entry) => entry.name === name);
@@ -203,20 +207,24 @@ export function createEntityMutation(connection, entity, mapping, core) {
   };
   return (document) => {
     const plan = compile(document);
+    const details = { collection: entity.name, docPath: entity.docPath };
     return connection.transaction(() => {
-      const prepared = statements.getOrCreate(plan.sql, (text) => {
-        let made;
-        made = attempt(() => connection.prepare(text), (error) => {
-          // A rejected preparation owns no statement; preserve any newer entry.
-          if (statements.get(text) === made) statements.delete(text);
-          return wrapDriverError(error, { collection: entity.name, docPath: entity.docPath });
-        });
-        return made;
-      });
-      return chain(prepared, (statement) => chain(attempt(() => statement.all(plan.params),
+      let owner = statements.get(plan.sql);
+      if (owner === undefined) {
+        // Preparation starts with the owner, so a synchronous refusal is
+        // classified before the cache holds anything. A rejected one owns
+        // no statement and leaves the cache; a newer entry is preserved.
+        const made = attempt(() => createStatementOwner(connection, plan.sql, undefined, () => {
+          if (statements.get(plan.sql) === made) statements.delete(plan.sql);
+        }), (error) => wrapDriverError(error, details));
+        statements.set(plan.sql, made);
+        owner = made;
+      }
+      const held = owner;
+      return chain(attempt(() => held.use((statement) => statement.all(plan.params)),
         (error) => String(error?.message).includes('jaren-mutation-row-bound')
           ? new DbRuntimeError('JD2007', 'insert-select exceeded its source row bound', { cause: error })
-          : wrapDriverError(error, { collection: entity.name, docPath: entity.docPath })), (rows) => {
+          : wrapDriverError(error, details)), (rows) => {
         const stored = rows.map(core.plan.merge);
         if (rows.length > plan.maxRows || utf8Length(JSON.stringify(stored)) > plan.maxBytes)
           throw new DbRuntimeError('JD2007', 'native mutation exceeded its returned row or byte bound');
@@ -225,7 +233,7 @@ export function createEntityMutation(connection, entity, mapping, core) {
           .filter((name) => Object.hasOwn(row, name)).map((name) => [name, row[name]])));
         return { mode: 'native', affected: rows.length, rows: returned,
           admitted: { statements: 1, rows: rows.length, bytes: utf8Length(JSON.stringify(stored)) } };
-      }));
+      });
     });
   };
 }

@@ -80,7 +80,7 @@ import {
 } from '@jarenjs/core/scan';
 import { deepFreeze } from '@jarenjs/core/object';
 import { createBoundedCache, createWeakCache } from '@jarenjs/core/cache';
-import { LabeledSyntaxError } from './errors.js';
+import { LabeledSyntaxError, NESTING_CEILING } from './errors.js';
 
 /**
  * Sentinel for the absence of a value ("Nothing" in RFC 9535 terms), as
@@ -302,7 +302,9 @@ function functionTableOf(options) {
  * @param {string} source - The JSONPath expression (e.g. `$.store.book[?@.price < 10].title`)
  * @param {JSONPathOptions} [options] - Parse options
  * @returns {JSONPathAst} The parsed query AST
- * @throws {JSONPathSyntaxError} When the query violates the RFC 9535 grammar
+ * @throws {JSONPathSyntaxError} When the query violates the RFC 9535 grammar,
+ *   or a filter nests deeper than 256 levels (logical groups and function
+ *   calls each count one)
  * @throws {TypeError} When `options.pathFunctions` is not a valid registry
  */
 export function parseJSONPath(source, options = undefined) {
@@ -312,9 +314,19 @@ export function parseJSONPath(source, options = undefined) {
   const FUNCS = functionTableOf(options);
   const len = source.length;
   let pos = 0;
+  // filter nesting: every logical expression (a filter, a parenthesized
+  // group, a LogicalType argument) and every function call is one level
+  let depth = 0;
 
   function fail(message, at = pos) {
     throw new JSONPathSyntaxError(message, source, at);
+  }
+
+  // One level deeper; past the ceiling the filter is refused here rather
+  // than by a stack overflow further down the recursive descent.
+  function enter() {
+    if (++depth > NESTING_CEILING)
+      fail(`the filter expression nests deeper than ${NESTING_CEILING} levels`);
   }
 
   function cc(at) {
@@ -641,6 +653,7 @@ export function parseJSONPath(source, options = undefined) {
   //#region filter expressions
 
   function parseLogicalOr() {
+    enter();
     let expr = parseLogicalAnd();
     for (;;) {
       const save = pos;
@@ -655,6 +668,7 @@ export function parseJSONPath(source, options = undefined) {
       }
       else {
         pos = save;
+        depth--;
         return expr;
       }
     }
@@ -879,6 +893,7 @@ export function parseJSONPath(source, options = undefined) {
     const def = FUNCS[name];
     if (def === undefined)
       fail(`unknown function '${name}'`, at);
+    enter();
     pos++; // consume '('
     skipWS();
     const args = [];
@@ -933,6 +948,7 @@ export function parseJSONPath(source, options = undefined) {
       node.params = def.params;
       node.evaluate = def.evaluate;
     }
+    depth--;
     return node;
   }
 

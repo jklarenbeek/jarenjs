@@ -73,9 +73,10 @@ about them are worth knowing before editing one:
 
 1. **Rules match by SCHEMA, not by path.** `$apply` on the current node
    dispatches *location-less*, so a path match like `$..[?@.kind == 'union']`
-   silently never fires for a re-dispatched node. `isKind()` builds the schema
-   match instead, which is location-independent — and shape is what the rules
-   mean anyway. This is the single easiest way to break these files.
+   silently never fires for a re-dispatched node. `isKind()` (`match.js`,
+   shared by both emitters) builds the schema match instead, which is
+   location-independent — and shape is what the rules mean anyway. This is
+   the single easiest way to break these files.
 2. **`$if` is an expression segment.** It interpolates a value; it cannot
    contain a segment list. Conditional *rendering* is done by dispatching a
    path that may be empty, never by `$if`.

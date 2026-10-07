@@ -18,23 +18,24 @@ import { readFileSync } from 'node:fs';
 import {
   governedAssets, cacheNameOf, decideCacheBump, checkServiceWorkerCache,
 } from '../../scripts/check-sw-cache.js';
+import { statusEntries } from '../../scripts/lib/git.js';
 
 const WORKER = new URL('../../packages/website/public/sw.js', import.meta.url);
 
 describe('the assets a cache name governs', function () {
   it('takes the cache-first assets and leaves the revalidated data out', function () {
     assert.deepStrictEqual(governedAssets([
-      ' M packages/website/public/manifest.webmanifest',
-      '?? packages/website/public/fonts/inter-latin-400-normal.woff2',
-      ' D packages/website/public/icon-192.png',
+      'packages/website/public/manifest.webmanifest',
+      'packages/website/public/fonts/inter-latin-400-normal.woff2',
+      'packages/website/public/icon-192.png',
       // the measurements have their own guard, and are served
       // stale-while-revalidate: a cached copy is replaced, never kept
-      ' M packages/website/public/benchmarks/validate.json',
-      '?? packages/website/public/site/cards.json',
-      ' M packages/website/public/build.json',
+      'packages/website/public/benchmarks/validate.json',
+      'packages/website/public/site/cards.json',
+      'packages/website/public/build.json',
       // and the worker itself is the thing being bumped
-      ' M packages/website/public/sw.js',
-    ].join('\n')), [
+      'packages/website/public/sw.js',
+    ]), [
       'packages/website/public/manifest.webmanifest',
       'packages/website/public/fonts/inter-latin-400-normal.woff2',
       'packages/website/public/icon-192.png',
@@ -43,7 +44,8 @@ describe('the assets a cache name governs', function () {
 
   it('follows a rename to the file that would actually ship', function () {
     assert.deepStrictEqual(
-      governedAssets('R  packages/website/public/old.png -> packages/website/public/new.png'),
+      governedAssets(statusEntries('R  packages/website/public/new.png\0packages/website/public/old.png\0')
+        .map((entry) => entry.path)),
       ['packages/website/public/new.png']);
   });
 

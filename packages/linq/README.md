@@ -125,9 +125,9 @@ you out of the traps:
 
 1. **Spell comparisons and logic as methods.** `u.age.gt(21)`,
    `a.and(b)`, `x.not()`, `s.eq('')`. A proxy cannot overload
-   JavaScript's own operators: `u.age > 21` throws a plain `TypeError`,
-   and `a && b` or `cond ? x : y` evaluate against the proxy object and
-   produce a wrong document silently.
+   JavaScript's own operators: `u.age > 21` is refused with `JL0108`,
+   and `a && b`, `cond ? x : y` or `a === b` evaluate against the proxy
+   object and produce a wrong document silently.
 2. **Reach for the builder where you would write a schema.** Every pen
    that carries a schema takes a schema-pen builder in that position —
    a contract's `input`, a machine's `payload`, an app's `state`.
@@ -235,7 +235,7 @@ recursion and the normalizer's per-field predicates — with
 generated declarations. Reach for it when you are describing the shape
 of data: for validation, for a form, or as the base of an entity.
 
-```js
+```ts
 import * as s from '@jarenjs/linq/schema';
 import type { Infer } from '@jarenjs/linq/schema';
 import { JarenValidator } from '@jarenjs/validate';
@@ -281,7 +281,7 @@ store's entities, keys and relations should be declared once and typed
 everywhere: `InferMeta<>` is the `EntityMetaMap` `typedStore<E>` wants,
 with no generate step.
 
-```js
+```ts
 import * as m from '@jarenjs/linq/model';
 import type { InferMeta } from '@jarenjs/linq/model';
 import { openStore } from '@jarenjs/db';
@@ -617,9 +617,11 @@ graph in ONE statement; a write is the unit of work — get an entity,
 mutate it, `saveChanges()` — and `live` re-answers a chain when the
 store changes.
 
-Every large read is a real cursor or a bounded page. A `for await`
-over a chain pulls one row per item from an open statement and a
-`break` releases it (three rows of twenty thousand cost three rows);
+Every large entity read is a real cursor or a bounded page. A
+`for await` over an entity chain pulls one row per item from an open
+statement and a `break` releases it (three rows of twenty thousand cost
+three rows) — a collection's chain has no cursor and iterates the one
+window the store answers;
 `graph.cursor()` yields one root graph per pull with its includes
 attached, every include bounded per root (`maxRows`, `maxBytes`, a
 coded refusal — never a truncated graph); and `graph.page({ limit,
@@ -708,12 +710,12 @@ the store never imports this package).
 Not expression trees over arbitrary methods — the vocabulary is the
 query engine's, and an unknown METHOD fails loudly at build time with
 a coded error (`JL0001`–`JL0007`; the pens' and the client's refusals are `JL0101`–`JL0107`)
-rather than guessing. JavaScript's own
-operators are the one thing a proxy cannot trap: `&&`, `||`, `!`, `?:`
-and `===` evaluate against the proxy object and yield a wrong document
-silently (use `.and()`/`.or()`/`.not()`), and `u.age > 21` or `u.age + 1`
-throw a plain `TypeError` — the format doc's §3 lists them. Not a
-general lazy-iterable library — if you don't want a query document,
+rather than guessing. Some of JavaScript's own
+operators are the one thing a proxy cannot trap: `&&`, `||`, `!`, `?:`,
+truthiness and `===` evaluate against the proxy object and yield a wrong
+document silently (use `.and()`/`.or()`/`.not()`), while `u.age > 21` or
+`u.age + 1` are refused with `JL0108` — the pen doc's §3 lists them. Not
+a general lazy-iterable library — if you don't want a query document,
 you don't want this package.
 
 The normative mapping — every operator, its emitted phrase, and the

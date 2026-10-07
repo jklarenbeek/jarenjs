@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/refs",
   "private": false,
-  "version": "0.104.2",
+  "version": "0.105.0",
   "type": "module",
   "main": "./src/index.js",
   "types": "./dist/types/index.d.ts",
@@ -53,11 +53,11 @@
     "./package.json": "./package.json"
   },
   "scripts": {
-    "build": "node esbuild.config.js && npm run build:types",
+    "build": "npm run build:types",
     "build:types": "tsc -p tsconfig.json",
     "prepack": "npm run build:types"
   },
   "dependencies": {
-    "@jarenjs/core": "0.104.2"
+    "@jarenjs/core": "0.105.0"
   }
 }

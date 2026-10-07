@@ -14,7 +14,7 @@
  * Pure and zero-dep except `math/solve` for the iterative `rate`.
  */
 
-import { newtonRaphson, bisect } from '../math/solve.js';
+import { newtonRaphson, bisect, centralDifference } from '../math/solve.js';
 
 /**
  * Future value.
@@ -83,11 +83,7 @@ export function rate(nperv, pmtv, pval, fval = 0, type = 0, guess = 0.1) {
     const g = Math.pow(1 + r, nperv);
     return pval * g + pmtv * (1 + r * type) * (g - 1) / r + fval;
   };
-  const df = (r) => {
-    const h = 1e-6;
-    return (f(r + h) - f(r - h)) / (2 * h);
-  };
-  const n = newtonRaphson(f, df, guess, { tol: 1e-9, maxIter: 100 });
+  const n = newtonRaphson(f, centralDifference(f), guess, { tol: 1e-9, maxIter: 100 });
   if (n.converged && isFinite(n.root)) return n.root;
   const b = bisect(f, -0.9999, 1e6, { tol: 1e-9, maxIter: 200 });
   return b.converged ? b.root : NaN;

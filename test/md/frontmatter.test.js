@@ -104,6 +104,15 @@ describe('parseYamlSubset', function () {
       { items: [{ name: 'a', n: 1 }, { name: 'b' }] });
   });
 
+  it('reads a lone dash as an empty entry unless a deeper block follows it', function () {
+    assert.deepEqual(parseYamlSubset('-\n-\n-\n'), [null, null, null]);
+    assert.deepEqual(parseYamlSubset('-\n- b\n'), [null, 'b']);
+    assert.deepEqual(parseYamlSubset('- # empty\n-\n  - a\n-\n  b: 1\n'), [null, ['a'], { b: 1 }]);
+    // a sequence at the same indent belongs to a parent KEY, never to a dash
+    assert.deepEqual(parseYamlSubset('key:\n-\n- b\n'), { key: [null, 'b'] });
+    assert.deepEqual(parseMarkdown('---\n-\n-\n-\n---\nbody').frontmatter, [null, null, null]);
+  });
+
   it('parses flow collections, multi-line included', function () {
     assert.deepEqual(parseYamlSubset('tags: [a, b, "c d"]\n'), { tags: ['a', 'b', 'c d'] });
     assert.deepEqual(parseYamlSubset('map: {x: 1, y: [2, 3]}\n'), { map: { x: 1, y: [2, 3] } });
@@ -141,6 +150,120 @@ describe('parseYamlSubset', function () {
   it('strips comments outside quotes', function () {
     assert.deepEqual(parseYamlSubset('# top\na: 1 # tail\nb: "no # comment"\n'),
       { a: 1, b: 'no # comment' });
+  });
+
+  it('strips comments on every line of a multi-line flow collection, never inside quotes', function () {
+    assert.deepEqual(parseYamlSubset('k: [a, # first\n  b]\n'), { k: ['a', 'b'] });
+    assert.deepEqual(parseYamlSubset('k: [a,\n  # a whole line\n  b, # tail\n  ] # after\n'), { k: ['a', 'b'] });
+    assert.deepEqual(parseYamlSubset('k: {x: 1, # c\n  y: 2}\n'), { k: { x: 1, y: 2 } });
+    assert.deepEqual(parseYamlSubset('k: [\n  # only a comment\n]\n'), { k: [] });
+    assert.deepEqual(parseYamlSubset('- [a, # c\n   b]\n'), [['a', 'b']]);
+    // a quoted `#` is text, also in a quote spanning lines; `a#b` is one plain value
+    assert.deepEqual(parseYamlSubset('k: ["a # not", \'it\'\'s # too\', # c\n  b#c]\n'),
+      { k: ['a # not', "it's # too", 'b#c'] });
+    assert.deepEqual(parseYamlSubset('k: ["multi\n  line # x", b]\n'), { k: ['multi line # x', 'b'] });
+  });
+
+  it('reads a dash after a dash as a nested sequence', function () {
+    assert.deepEqual(parseYamlSubset('- - a\n'), [['a']]);
+    assert.deepEqual(parseYamlSubset('- - a\n  - b\n- c\n'), [['a', 'b'], 'c']);
+    assert.deepEqual(parseYamlSubset('- - - a\n- - b\n'), [[['a']], ['b']]);
+    assert.deepEqual(parseYamlSubset('-   - a\n    - b\n'), [['a', 'b']]);
+    assert.deepEqual(parseYamlSubset('- - k: v\n    j: w\n'), [[{ k: 'v', j: 'w' }]]);
+    assert.deepEqual(parseYamlSubset('- - a: b\n'), [[{ a: 'b' }]]);
+    assert.deepEqual(parseYamlSubset('- -\n  - b\n'), [[null, 'b']]);
+    assert.deepEqual(parseYamlSubset('k:\n- - a\n'), { k: [['a']] });
+    assert.throws(() => parseYamlSubset('- - a\n - b\n'), MdFrontmatterError);
+  });
+
+  it('reads a block scalar as a sequence item', function () {
+    assert.deepEqual(parseYamlSubset('- |\n  text\n'), ['text\n']);
+    assert.deepEqual(parseYamlSubset('- >-\n  a\n  b\n- c\n'), ['a b', 'c']);
+    assert.deepEqual(parseYamlSubset('- | # note\n  x\n'), ['x\n']);
+    assert.deepEqual(parseYamlSubset('k:\n  - >\n    a\n    b\n'), { k: ['a b\n'] });
+    assert.deepEqual(parseYamlSubset('- - |\n    x\n'), [['x\n']]);
+    assert.deepEqual(parseYamlSubset('- |\n'), ['']);
+  });
+
+  it('refuses content after a flow collection, at its line', function () {
+    for (const [source, line] of [
+      ['k: [a, b] junk\n', 0], ['k: {a: 1} junk\n', 0], ['k: [a], [b]\n', 0], ['- [a] x\n', 0],
+      ['ok: 1\nk: [a,\n  b] junk\n', 2],
+    ]) {
+      assert.throws(() => parseYamlSubset(/** @type {string} */ (source)), (/** @type {any} */ error) => error instanceof MdFrontmatterError
+        && error.line === line && error.message.includes('trailing content after a flow collection'), String(source));
+    }
+    assert.deepEqual(parseYamlSubset('k: [a, b] # fine\n'), { k: ['a', 'b'] });
+  });
+
+  it('reads a tab after the colon as separation, not as part of the value', function () {
+    assert.deepEqual(parseYamlSubset('k:\tv\nl: \tw\n'), { k: 'v', l: 'w' });
+    assert.deepEqual(parseYamlSubset('k:\t[a]\nq:\t"x"\n'), { k: ['a'], q: 'x' });
+    assert.deepEqual(parseYamlSubset('- k:\tv\n'), [{ k: 'v' }]);
+    assert.deepEqual(parseYamlSubset('k:\t# c\n  x: 1\n'), { k: { x: 1 } });
+  });
+
+  it('reads an empty block scalar as the empty string', function () {
+    for (const header of ['|', '>', '|-', '>-']) {
+      assert.deepEqual(parseYamlSubset(`k: ${header}\n`), { k: '' }, header);
+      assert.deepEqual(parseYamlSubset(`k: ${header}\n\n  \nj: 1\n`), { k: '', j: 1 }, header);
+    }
+  });
+
+  it('folds a > block scalar as YAML does: an empty line is one break, an indented line keeps its breaks', function () {
+    assert.deepEqual(parseYamlSubset('k: >\n  a\n\n  b\n'), { k: 'a\nb\n' });
+    assert.deepEqual(parseYamlSubset('k: >\n  a\n\n\n  b\n'), { k: 'a\n\nb\n' });
+    assert.deepEqual(parseYamlSubset('k: >-\n  a\n\n  b\n'), { k: 'a\nb' });
+    assert.deepEqual(parseYamlSubset('k: >\n\n  a\n  b\n'), { k: '\na b\n' });
+    assert.deepEqual(parseYamlSubset('k: >\n  a\n  b\n    c\n  d\n'), { k: 'a b\n  c\nd\n' });
+    assert.deepEqual(parseYamlSubset('k: >\n  a\n\n    b\n\n  c\n'), { k: 'a\n\n  b\n\nc\n' });
+    assert.deepEqual(parseYamlSubset('- >\n   a\n\n   b\n- c\n'), ['a\nb\n', 'c']);
+  });
+
+  it('keeps the blanks a blank line holds past the block scalar\'s indentation', function () {
+    assert.deepEqual(parseYamlSubset('k: |\n  a\n   \nj: 1\n'), { k: 'a\n \n', j: 1 });
+    assert.deepEqual(parseYamlSubset('k: |-\n  a\n   \n'), { k: 'a\n ' });
+    assert.deepEqual(parseYamlSubset('k: >\n  a\n\n   \n  b\n'), { k: 'a\n\n \nb\n' });
+    assert.deepEqual(parseYamlSubset('k: >\n    x\n  \n    y\n'), { k: 'x\ny\n' });
+  });
+
+  it('refuses a block scalar whose leading blank line reaches past its first line', function () {
+    for (const [source, line] of [['k: >\n  \n a\n', 1], ['k: |\n    \n\n  a\n', 1], ['- |\n  \n a\n', 1]]) {
+      assert.throws(() => parseYamlSubset(/** @type {string} */ (source)), (/** @type {any} */ error) => error instanceof MdFrontmatterError
+        && error.line === line && error.message.includes('blank line before the first line of a block scalar'), String(source));
+    }
+    assert.deepEqual(parseYamlSubset('k: |\n  \n  a\n'), { k: '\na\n' });
+  });
+
+  it('refuses a sequence entry where YAML allows none: on its key\'s line, or inside a flow collection', function () {
+    for (const source of ['k: - a\n', 'k: -\n', 'k: -  # c\n', '- k: - a\n']) {
+      assert.throws(() => parseYamlSubset(source), (/** @type {any} */ error) => error instanceof MdFrontmatterError
+        && error.message.includes('a sequence entry cannot start on the line of its key'), source);
+    }
+    for (const source of ['k: [- a]\n', 'k: {a: - v}\n', 'k: [a,\n  -\n  b]\n']) {
+      assert.throws(() => parseYamlSubset(source), (/** @type {any} */ error) => error instanceof MdFrontmatterError
+        && error.message.includes('a sequence entry inside a flow collection'), source);
+    }
+    // a dash that opens no entry is text
+    assert.deepEqual(parseYamlSubset('k: [-, -1, -a, a - b, --]\nj: {a: -}\nl: -a\n'),
+      { k: ['-', -1, '-a', 'a - b', '--'], j: { a: '-' }, l: '-a' });
+  });
+
+  it('ends a block scalar at a line indented less than its first one', function () {
+    // a comment there is a comment; anything else is out of place
+    assert.deepEqual(parseYamlSubset('k: |\n   a\n  # a comment\nj: 1\n'), { k: 'a\n', j: 1 });
+    for (const source of ['k: |\n   a\n  b\n', 'k: |\n  a\n b\nj: 1\n', 'k: >\n   a\n  b\n', '- |\n   a\n  b\n', '- |\n  a\n - b\n']) {
+      assert.throws(() => parseYamlSubset(source), MdFrontmatterError, JSON.stringify(source));
+    }
+  });
+
+  it('refuses content after a quoted scalar, at its line', function () {
+    for (const [source, line] of [['k: "a" junk\n', 0], ["ok: 1\nk: 'a' b\n", 1], ['- "a" b\n', 0]]) {
+      assert.throws(() => parseYamlSubset(/** @type {string} */ (source)), (/** @type {any} */ error) => error instanceof MdFrontmatterError
+        && error.line === line && error.message.includes('trailing content after a quoted string'), String(source));
+    }
+    // a comment may follow, even with no blank before its `#`
+    assert.deepEqual(parseYamlSubset('k: "a" # c\nj: \'b\'  \nl: "c"#d\n'), { k: 'a', j: 'b', l: 'c' });
   });
 
   it('does not fall into the __proto__ trap', function () {

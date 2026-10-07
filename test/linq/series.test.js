@@ -259,8 +259,9 @@ describe('the date and series surfaces are documented exactly once', () => {
     return found;
   }
 
-  /** Every METHODS member that lowers to an operator, from the source. */
-  const emits = new Map([...source.matchAll(/\b(\w+): (?:unary|binary)\('(\$[a-z0-9-]+)'\)/g)]
+  /** Every METHODS member that lowers to an operator, from the source
+   * (each factory call marked pure, so a bundle that never captures drops it). */
+  const emits = new Map([...source.matchAll(/\b(\w+): (?:\/\* @__PURE__ \*\/ )?(?:unary|binary)\('(\$[a-z0-9-]+)'\)/g)]
     .map((m) => [m[1], m[2]]));
   // the arity-taking methods spell their operator inside their body
   for (const [, name, op] of source.matchAll(/\b(\w+)\(record[^)]*\) \{[\s\S]{0,400}?'?(\$[a-z0-9-]+)'?:/g))

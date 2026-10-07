@@ -285,7 +285,8 @@ describe('signal and deadline are declared per call and honoured', () => {
     assert.throws(() => store.entity('User').cursor(document, { deadline: now - 1 }), codeIs('JD2075', /passed before the call ran/));
     await assert.rejects(() => store.entity('User').page({}, { deadline: now - 1 }), codeIs('JD2075'));
     assert.strictEqual(counters.all + counters.iterate, 0, 'no statement ran for any of them');
-    assert.throws(() => store.entity('User').cursor(document, { deadline: /** @type {any} */ ('soon') }), TypeError);
+    assert.throws(() => store.entity('User').cursor(document, { deadline: /** @type {any} */ ('soon') }),
+      codeIs('JD0013', /'deadline' must be a finite timestamp/));
     const soon = store.entity('User').cursor(document, { deadline: now + 40 });
     assert.strictEqual((await soon.next()).done, false);
     now += 60;

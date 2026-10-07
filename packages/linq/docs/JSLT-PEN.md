@@ -95,9 +95,13 @@ consequences, in the order a writer meets them:
 2. **The callback runs exactly once, with no data — so JavaScript's own
    logic is not the document's.** There is no input value to branch on,
    and the ways that goes wrong divide in two. `>`, `<`, `+` and template
-   interpolation throw a plain `TypeError` ("Cannot convert object to
-   primitive value"): loud, uncoded, and impossible to miss. But `!`,
-   `&&`, `||`, the ternary, `in`, `typeof` and `Object.keys` all evaluate
+   interpolation ask the proxy for a primitive it does not have, and the
+   capture refuses them with `JL0108` — one message, naming the comparison
+   methods and `.concat()`; [QUERY-PEN.md](QUERY-PEN.md) §14.9 gives the
+   spelling that works for each (`.gt()`, `.lt()`, `.add()`,
+   `.concat()`): loud, coded, and impossible to miss. But `!`, `&&`,
+   `||`, the ternary, `in`, `typeof`, `Object.keys`, truthiness and `===`
+   all evaluate
    against the PROXY and silently write the wrong document —
    `() => ({ live: !v.deleted })` writes `{ "live": false }`,
    `() => ({ both: v.a && v.b })` keeps only the right operand
@@ -113,7 +117,9 @@ consequences, in the order a writer meets them:
    time, where the fix can be named — see §4.3. That is the whole reason
    the argument is a proxy and not an object: an object would answer
    `undefined` and the mistake would surface at run time as a missing
-   binding.
+   binding. The argument itself is not a value either: returned or
+   embedded whole (`(v, x) => ({ a: x })`), or spread (`({ ...x })`), it
+   is `JL0104`, where it used to be written as an empty object `{}`.
 4. **A returned literal is a CONSTRUCTOR, not a constant.** The chain
    folds a pure data tree into one `$const` ([QUERY-PEN.md](QUERY-PEN.md)
    §3, expression capture); a body does not. `() => ({ level: 'unknown' })`
@@ -532,15 +538,15 @@ value. Write `.eq(null)`, `.exists()`, `.isEmpty()` or `a.eq(b)`.
 |---|---|
 | `JL0101` | a value this pen cannot spell, an option it does not know, or a name → value map it cannot read |
 | `JL0102` | a construct the format cannot carry: an `apply()` as a bare object member, a `match` of `{}`, an `apply()` outside a body |
-| `JL0104` | an external a captured body did not declare, or `root`/`path` declared as one |
+| `JL0104` | an external a captured body did not declare, `root`/`path` declared as one, or the externals argument embedded as a value |
 
 `packages/linq/src/jslt/` carries **28 throw sites** — 24 `JL0101`, 3
-`JL0102` and 1 `JL0104` — and they collapse to the conditions below. Two
-further conditions reach a caller through this pen without being thrown
+`JL0102` and 1 `JL0104` — and they collapse to the conditions below.
+Further conditions reach a caller through this pen without being thrown
 in its directory: the JSON boundary (`requireJson`, `requireNameMap`) and
-the shared capture's undeclared-external check
-(`packages/linq/src/capture-root.js`), which is where the second
-`JL0104` comes from.
+the shared capture's undeclared-external check and externals-as-value
+refusal (`packages/linq/src/capture-root.js`), which is where the other
+`JL0104`s come from.
 
 Every message below is the one the pen raised when the spelling beside it
 was run, with the code prefix (`JL0101: `) removed. `docPath`, where the
@@ -652,6 +658,7 @@ run time as an unbound reference (`JQ2006`, wrapped as `JT2004`).
 | `body((v, x) => v.mul(x.rate))` | `a body() rule cannot bind 'rate' — its query evaluates with exactly 2 externals, 'root' and 'path'; anything else has nothing to bind to — a stylesheet parameter is declared first: body(fn, { externals: ['rate'] })` | declare it: `body(fn, { externals: ['rate'] })` |
 | `body((v, x) => x.limit, { externals: ['rate'] })` | `a body() rule cannot bind 'limit' — its query evaluates with exactly 3 externals, 'root' and 'path' and 'rate'; anything else has nothing to bind to — a stylesheet parameter is declared first: body(fn, { externals: ['limit'] })` | add it: `{ externals: ['rate', 'limit'] }` |
 | `body(fn, { externals: ['root'] })`, `['path']` | `'root' is engine-bound on every dispatch (JSLT-FORMAT §8.2) — it needs no declaration and is always present on the externals argument` | drop the declaration; read `x.root` directly |
+| `body((v, x) => ({ a: x }))` | `a body() rule's externals argument is not a value — read one by name: root, path` | `x.root`, `x.path` or a declared parameter, by name |
 
 The second message's advice names the ONE name that was missing, which is
 the fix in a body that declared nothing else; a body that already
@@ -903,8 +910,8 @@ non-judgement is itself gated.
 ### 6.6 When not to reach for this pen
 
 - **The stylesheet is data.** A `$jslt` document loaded from a file,
-  authored by a model ([Tangle authoring](https://github.com/jklarenbeek/tangleai/blob/main/packages/jaren/docs/AUTHORING.md)'s authoring
-  profile writes them) or edited in the studio is a value;
+  authored by a model (the authoring profile of `@jarenjs/json` is the
+  grammar for that) or edited in the studio is a value;
   `compileJsltStylesheet` takes it directly and nothing here has to be in
   the path.
 - **You are transforming one value, once, in JavaScript.** A stylesheet
@@ -929,10 +936,10 @@ non-judgement is itself gated.
 
 ## 7. Cost
 
-`@jarenjs/linq/jslt` builds to **<!--fact:bundle.jslt-->19,927<!--/fact--> bytes** as a minified,
+`@jarenjs/linq/jslt` builds to **<!--fact:bundle.jslt-->20,668<!--/fact--> bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
 measures and `npm run test:tree-shaking` reports, published rounded
-(<!--fact:bundle.jslt.kb-->20<!--/fact--> kB) beside the other nine subpath prices in
+(<!--fact:bundle.jslt.kb-->21<!--/fact--> kB) beside the other subpath prices in
 [docs/CONSUMING.md](../../../docs/CONSUMING.md).
 
 The probe is a gate, not a report. Building a stylesheet as a consumer
@@ -953,13 +960,13 @@ would, it asserts that the bundle carries:
 
 What it does carry is the recording proxy (`expression.js`), the shared
 root capture (`capture-root.js`), the JSON boundary
-(`json-boundary.js`), and this pen's own three files — 414 lines of
-source. That makes it the SMALLEST of the nine pen bundles, and the
-reason is that a stylesheet is mostly bodies, and a body is the shared
-machine every pen already pays for.
+(`json-boundary.js`), and this pen's own three files — 451 lines of
+source. That makes it one of the smallest pen bundles, and the reason is
+that a stylesheet is mostly bodies, and a body is the shared machine
+every capturing pen already pays for.
 
-Two figures worth reading beside it: `./migration` (<!--fact:bundle.migration-->25,931<!--/fact--> bytes)
+Two figures worth reading beside it: `./migration` (<!--fact:bundle.migration-->26,807<!--/fact--> bytes)
 carries this pen's `body()` and pays for it, which is why the two prices
-sit so close; and `./flow` (<!--fact:bundle.flow-->19,984<!--/fact--> bytes) is within 60 bytes of this one
+sit so close; and `./flow` (<!--fact:bundle.flow-->20,726<!--/fact--> bytes) is within 60 bytes of this one
 despite writing two formats, because it shares the same capture and adds
 almost nothing but member checks and their messages.

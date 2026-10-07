@@ -393,8 +393,11 @@ refuses near a thousand); `$exists`/`$empty`; `$starts-with`/`$ends-with`/
 `$contains` on schema-typed string paths with literal patterns;
 `$orderby` over singular schema-typed paths (`$dir`, `$empty`, no
 collation); a top-level `$subsequence` window with literal bounds; the
-top-level aggregates `$count` and `$sum`/`$avg`/`$min`/`$max` over a
-singular schema-typed path; the whole-document projection that returns
+top-level aggregates `$count` and `$min`/`$max` over a singular
+schema-typed path, and `$sum`/`$avg` over a singular `integer` path,
+folded as a double beside a guard that every partial sum is exact (a
+`number` path keeps the engine's left-to-right accumulation, over the
+rows the pushed `$where` selects); the whole-document projection that returns
 the bare binding; ONE member path, projected as its value beside its
 JSON type; and a nested SHAPE of objects, arrays, literals, whole collection bindings and member
 paths, projected as one value/type pair per distinct leaf and rebuilt
@@ -411,7 +414,10 @@ value/type pairs. Null and boolean keys may group, but ordering them stays
 residual to preserve `JQ2005`. Explicit group ordering accepts orderable keys and proven count/min/max
 expressions, including aggregates absent from the return; first appearance
 breaks ties. SUM/AVG ordering remains residual: compensated or differently
-ordered SQL accumulation can change which group sorts first. Literal windows lower over singleton group constructors;
+ordered SQL accumulation can change which group sorts first. A grouped
+SUM/AVG over a `number` member stays in the engine for the same reason; over
+an `integer` member each group carries the exactness guard, and a group past
+it sends the run to the engine. Literal windows lower over singleton group constructors;
 `$count` over such constructors with only row-count aggregates counts a grouped
 subquery. `$distinct` over a typed scalar projection uses the same key relation, with
 absent members removed first. Unordered inputs retain first appearance; an
@@ -986,15 +992,39 @@ document IS the snapshot — one retained reference, structural sharing
 made safe by the freeze. `saveChanges()` diffs with the suite's own
 diff engine and maps operations to minimal statements (column writes,
 `jsonb_set` chains, join-table key-set sync, a counted whole-row
-fallback); inserts batch parent-first, deletes run child-first,
+fallback); inserts batch parent-first, deletes run child-first (a
+removal that a rollback staged again under a later `add()` of its key
+runs ahead of the inserts, keeping the staged order),
 foreign-key cycles among the changed set are `JD0040`, and a declared
 `version` property turns every update into an optimistic
-`WHERE version = ?` with `JD2040` on conflict. A save that FAILS leaves
+`WHERE version = ?` with `JD2040` on conflict. Which removals run ahead
+is decided when the save is planned: one a rollback flagged while an
+`add()` of its key is still pending, and with it, child before parent
+and transitively, the removals of the rows that reference the row it
+deletes (a `setNull` reference keeps its place — the delete ahead only
+clears it); this is why a restore can cancel a pending insert outright —
+an insert whose row a `remove()` staged after the save withdrew, with
+the links staged under its key — and leave the removal it followed to
+run in its child-first place. A save that FAILS leaves
 the tracker exactly as it was, so it retries; a save whose statements
 all succeed advances at once — inside an enclosing transaction too,
 where the database already holds the rows — and registers the exact
 withdrawal of that advance on the owning scope, whose rollback takes it
-back so the retry plans the same statements again.
+back so the retry plans the same statements again. The withdrawal keeps
+one invariant: the tracker then holds what it held before the save plus
+whatever was staged after it, each later word with the row it belongs to
+— a word that named its row by the key the save gave it (an allocated key,
+a record a re-read filed in place of the saved one) moves onto that row as
+it stood before the save. Beside a delete run ahead, the update of a row
+that references the deleted row runs before it when the references it
+changes name rows that exist already, as the updates of any save run
+before its deletes; one that changes a reference to a row the save inserts
+follows that insert — run first, after the delete ahead of its own key —
+and still precedes the delete it leaves, or, where no order allows both,
+keeps its place after every insert. A save that writes nothing still
+settles the membership deltas it resolved to no change, and a save of any
+size runs its statements one after another without the stack growing
+with their number.
 
 ## The migration engine, relationally (`src/migrate.js`, `src/cli.js`)
 
@@ -1204,9 +1234,11 @@ consumed by `src/store.js` and never reached by a query:
 - `src/errors.js` — `classifyDriverError`, the one table every path
   consults (writes, the query engines through their boundary and the
   cursor's `wrap`, maintenance and backup under their own code, the open
-  sequence): class, retryability, code. The query path's only special
-  case is the int64 overflow of a pushed aggregate, answered by the
-  engine as a coded residual. A lost connection has one rule wherever
+  sequence): class, retryability, code. The query path has no special
+  case: a pushed integer sum or average folds only the terms its exactness
+  guard admits, so over the values the store writes no statement of one
+  fails with an overflow, and a run past the guard is answered by the
+  engine. A lost connection has one rule wherever
   it surfaces — SQLSTATE `57P01`–`57P03` and class `08`, the socket
   errnos, the PostgreSQL client's uncoded sentences — `JD2087`, class
   `connection`, retryable only while no transaction outcome is at stake.

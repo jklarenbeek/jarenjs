@@ -761,17 +761,24 @@ export function diffContracts(a, b, options = undefined) {
     const marks = CLASSES.map((name) => diff[name].length);
     const server = compareOperation(diff, id, aOp, bOp, sideA, sideB, audience);
     // under `audience: 'all'`, every change of a server operation says so
-    if (server) {
-      CLASSES.forEach((name, i) => {
-        for (let j = marks[i]; j < diff[name].length; j++) diff[name][j].audience = 'server';
-      });
-    }
+    if (server) markServerChanges(diff, marks);
   }
   return diff;
 }
 
 /** The four classes, in the order a diff lists them. */
 const CLASSES = /** @type {const} */ (['breaking', 'additive', 'neutral', 'unknown']);
+
+/**
+ * Label every change recorded since `marks` (each class's length when
+ * the operation's comparison began) as a server operation's.
+ * @param {any} diff @param {number[]} marks
+ */
+function markServerChanges(diff, marks) {
+  CLASSES.forEach((name, i) => {
+    for (let j = marks[i]; j < diff[name].length; j++) diff[name][j].audience = 'server';
+  });
+}
 
 /**
  * The audience a diff reads: `'public'` by default (server-audience
@@ -836,9 +843,7 @@ function compareOperation(diff, id, aOp, bOp, sideA, sideB, audience) {
     if (!all) return false;
     const marks = CLASSES.map((name) => diff[name].length);
     compareInside(diff, id, aOp, bOp, sideA, sideB);
-    CLASSES.forEach((name, i) => {
-      for (let j = marks[i]; j < diff[name].length; j++) diff[name][j].audience = 'server';
-    });
+    markServerChanges(diff, marks);
     return false;
   }
   if (aOp.policy.audience === 'server' && !all) return false; // invisible on both sides

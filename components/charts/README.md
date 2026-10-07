@@ -69,6 +69,13 @@ separate `data` argument). The type-specific fields, briefly:
 | `line` | `series: [{name, points: [{x, y}]}]`; `x: 'time'`, `log`, `markers` |
 | `scatter` | `points: [{x, y, tone?}]`; `xLog`/`yLog`, `refY`/`refLabel` |
 | `candlestick` | `candles: [{t, open, high, low, close}]` |
+| `radar` | `axes: string[]`, `series: [{name, values}]`; `max` pins the domain, `labelEvery` the spoke-label stride |
+| `gauge` | `value`; `min`/`max` (0..100 default), `unit`, `tone` |
+| `boxplot` | `boxes: [{label, values}]` raw, or `{label, min, q1, med, q3, max, outliers?}` |
+| `heatmap` | `xLabels`, `yLabels`, `values[yi][xi]` (row-major from the top); `log` |
+| `treemap` | `items: [{label, value}]` or `[{label, children: [{label, value}]}]`; `aspect` (default 1.6) |
+| `streamgraph` | `series: [{name, values}]`, optional numeric `xs` |
+| `sankey` | `links: [{source, target, value}]` by name or index; `nodes` optional |
 
 **Time axes.** An `x: 'time'` axis (and every `candlestick`) accepts epoch milliseconds, a `Date`, or an **RFC 3339 string** — a date in a JSON document plots without being pre-converted, and a bare `2026-07-27` reads as UTC midnight. A *numeric* string still does not coerce: accepting `"5"` where the config asked for a number is a type confusion, not a date.
 
@@ -81,15 +88,29 @@ axisTicksTime(Date.UTC(1970, 0, 1), Date.UTC(5000, 0, 1));  // → 2000, 3000, 4
 ```
 
 `axisTicksTime`, `niceTimeStep`, `axisTicksLinear` and `niceStep` are the kernel's (`@jarenjs/core/dates`, `@jarenjs/core/math`) and are re-exported here as part of this module's tick vocabulary: a timeline that is not a chart wants the same boundaries, and a second copy of either ladder would be a second set of answers.
-| `radar` | `axes: string[]`, `series: [{name, values}]`; `max` pins the domain, `labelEvery` the spoke-label stride |
-| `gauge` | `value`; `min`/`max` (0..100 default), `unit`, `tone` |
-| `boxplot` | `boxes: [{label, values}]` raw, or `{label, min, q1, med, q3, max, outliers?}` |
-| `heatmap` | `xLabels`, `yLabels`, `values[yi][xi]` (row-major from the top); `log` |
-| `treemap` | `items: [{label, value}]` or `[{label, children: [{label, value}]}]`; `aspect` (default 1.6) |
-| `streamgraph` | `series: [{name, values}]`, optional numeric `xs` |
-| `sankey` | `links: [{source, target, value}]` by name or index; `nodes` optional |
 
 The full contract is `schemas/chart-definition.schema.json`.
+
+**Values a chart cannot draw are dropped, not printed.** Bar and line skip
+a non-finite value; a pie drops every slice whose value is not a finite
+number of at least zero, so the shares are of what is left — such a slice
+used to be summed into the total and printed as `a: NaN (NaN%)` or as a
+share above 100%. A domain wider than a double can measure — data at
+±1e308, a pinned or `'step'` domain over it, a bar or radar top rounded
+up past `Number.MAX_VALUE`, a stacked total that overflows — is clamped
+to ±`Number.MAX_VALUE / 2` by every type that lays ticks over its values
+(line, scatter, candlestick, boxplot, streamgraph, gauge, bar, radar),
+and marks beyond the clamp pin to the plot's edge; such a domain used to
+label a `NaN` tick, or lose its value axis and draw every mark at one
+edge. Totals beyond 1.79e308 are shown by proportion: a pie, treemap,
+sankey or streamgraph whose values sum past `Number.MAX_VALUE` measures
+them in units of the largest, so every slice, tile, ribbon and band
+keeps its share and only the AST's `total` reads `Infinity`; such a sum
+used to shrink every slice to 0%, flatten a streamgraph column and put
+tiles and ribbons at `NaN`. A log axis tops out at 1e308: rounding data
+near the largest double up a decade used to lay decades toward
+`Infinity` until the tick array overflowed, and `axisTicksLog` now
+refuses an infinite bound with a `RangeError` at once.
 
 ## Hover text and tooltips
 

@@ -28,6 +28,7 @@
 import { svgRoot, textAt, textWidth, coord } from '@jarenjs/view/helpers';
 import { clamp01 } from '@jarenjs/core/math';
 import { FS_LABEL, annotateChart, chartTitle, fitLabel } from '../core/cartesian.js';
+import { measurableUnit } from '../core/domain.js';
 import { CATEGORICAL, seriesColor, inkFor } from '../core/palette.js';
 import { normalizeTooltip, valueMark } from '../core/marks.js';
 
@@ -44,7 +45,7 @@ import { normalizeTooltip, valueMark } from '../core/marks.js';
 /**
  * @typedef {object} TreemapGroupAST
  * @property {string} label
- * @property {number} value the children's sum
+ * @property {number} value the children's sum (`Infinity` past the largest double)
  * @property {number} frac fraction of the total (0..1)
  * @property {number} x0 @property {number} y0
  * @property {number} x1 @property {number} y1
@@ -57,7 +58,8 @@ import { normalizeTooltip, valueMark } from '../core/marks.js';
  * @property {'treemap'} type
  * @property {string|null} title
  * @property {number} aspect layout width:height ratio
- * @property {number} total
+ * @property {number} total the leaves' sum; `Infinity` when it passes the
+ *  largest double, which the fractions do not
  * @property {TreemapTileAST[]} tiles value-descending, grouped when
  *  `groups` is non-empty (descending inside each group)
  * @property {TreemapGroupAST[]} groups empty for a flat treemap
@@ -74,7 +76,9 @@ import { normalizeTooltip, valueMark } from '../core/marks.js';
 const HEADER_FRAC = 0.06;
 
 /**
- * Build the geometry-free treemap AST.
+ * Build the geometry-free treemap AST. Leaves that sum past the largest
+ * double are laid out in the unit `measurableUnit` picks over all of
+ * them, so tiles and groups keep the proportions of their values.
  * @param {any} data
  * @param {any} [config]
  * @returns {TreemapAST}
@@ -99,24 +103,25 @@ function leavesOf(items) {
 
 /** A flat treemap: every leaf squarified against every other. */
 function buildFlat(input, aspect, config) {
-  const total = input.reduce((s, item) => s + item.value, 0);
+  const unit = measurableUnit(input.map((item) => item.value));
+  const sum = input.reduce((s, item) => s + item.value / unit, 0);
   const tiles = [];
-  if (total > 0) {
+  if (sum > 0) {
     // Squarify in aspect-scaled space (width = aspect, height = 1, area
     // = aspect) so the optimized ratios are the ratios the reader sees.
-    const rects = squarify(input.map((item) => (item.value / total) * aspect), 0, 0, aspect, 1);
+    const rects = squarify(input.map((item) => (item.value / unit / sum) * aspect), 0, 0, aspect, 1);
     for (let i = 0; i < input.length; i++) {
       tiles.push({
         label: input[i].label,
         value: input[i].value,
-        frac: input[i].value / total,
+        frac: input[i].value / unit / sum,
         ...unitRect(rects[i], aspect),
         group: null,
         swatch: i,
       });
     }
   }
-  return { type: 'treemap', title: config.title ?? null, aspect, total, tiles, groups: [] };
+  return { type: 'treemap', title: config.title ?? null, aspect, total: sum * unit, tiles, groups: [] };
 }
 
 /**
@@ -129,19 +134,19 @@ function buildGrouped(items, aspect, config) {
     // a childless item is a group of one, so nothing is dropped
     const children = Array.isArray(item?.children) ? leavesOf(item.children) : leavesOf([item]);
     if (children.length === 0) continue;
-    input.push({
-      label: String(item?.label ?? ''),
-      children,
-      value: children.reduce((s, c) => s + c.value, 0),
-    });
+    input.push({ label: String(item?.label ?? ''), children, value: 0 });
   }
+  // one unit over every leaf, so the groups' sums compare
+  const unit = measurableUnit(input.flatMap((g) => g.children.map((c) => c.value)));
+  for (const group of input)
+    group.value = group.children.reduce((s, c) => s + c.value / unit, 0);
   input.sort((a, b) => b.value - a.value);
-  const total = input.reduce((s, g) => s + g.value, 0);
+  const sum = input.reduce((s, g) => s + g.value, 0);
 
   const tiles = [];
   const groups = [];
-  if (total > 0) {
-    const rects = squarify(input.map((g) => (g.value / total) * aspect), 0, 0, aspect, 1);
+  if (sum > 0) {
+    const rects = squarify(input.map((g) => (g.value / sum) * aspect), 0, 0, aspect, 1);
     for (let gi = 0; gi < input.length; gi++) {
       const group = input[gi];
       const rect = rects[gi];
@@ -151,21 +156,21 @@ function buildGrouped(items, aspect, config) {
       const inner = { x0: rect.x0, y0: rect.y0 + header, x1: rect.x1, y1: rect.y1 };
       groups.push({
         label: group.label,
-        value: group.value,
-        frac: group.value / total,
+        value: group.value * unit,
+        frac: group.value / sum,
         ...unitRect(rect, aspect),
         header,
         swatch: gi,
       });
       const area = (inner.x1 - inner.x0) * (inner.y1 - inner.y0);
       const childRects = squarify(
-        group.children.map((c) => (c.value / group.value) * area),
+        group.children.map((c) => (c.value / unit / group.value) * area),
         inner.x0, inner.y0, inner.x1 - inner.x0, inner.y1 - inner.y0);
       for (let ci = 0; ci < group.children.length; ci++) {
         tiles.push({
           label: group.children[ci].label,
           value: group.children[ci].value,
-          frac: group.children[ci].value / total,
+          frac: group.children[ci].value / unit / sum,
           ...unitRect(childRects[ci], aspect),
           group: group.label,
           swatch: gi,
@@ -173,7 +178,7 @@ function buildGrouped(items, aspect, config) {
       }
     }
   }
-  return { type: 'treemap', title: config.title ?? null, aspect, total, tiles, groups };
+  return { type: 'treemap', title: config.title ?? null, aspect, total: sum * unit, tiles, groups };
 }
 
 /**
@@ -200,11 +205,13 @@ function squarify(areas, x, y, w, h) {
       best = nextWorst;
       end++;
     }
-    // Lay the row along the shorter side.
-    const thickness = sum / side;
+    // Lay the row along the shorter side. A row with no area (shares
+    // below the smallest double) or no side left to lay it along gets
+    // tiles of no size where it would divide by zero.
+    const thickness = side > 0 ? sum / side : 0;
     let offset = 0;
     for (let i = start; i < end; i++) {
-      const length = areas[i] / thickness;
+      const length = thickness > 0 ? areas[i] / thickness : 0;
       rects.push(w <= h
         ? { x0: x + offset, y0: y, x1: x + offset + length, y1: y + thickness }
         : { x0: x, y0: y + offset, x1: x + thickness, y1: y + offset + length });

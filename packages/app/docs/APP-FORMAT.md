@@ -240,7 +240,12 @@ resolves `name` in the registered effect handlers
 Effects are fire-and-forget from the loop's perspective; asynchronous
 completion re-enters through `dispatch`. An unregistered name is
 `JA2006`; a throwing handler is `JA2007`; neither aborts the loop or
-the remaining effects. For asynchronous work, the shipped task
+the remaining effects. A registered name is an OWN member of the
+registry — in every registry, effects, subscriptions (§5.3), event
+fields (§5.4) and widgets (§5.5) alike: a name every object inherits
+(`toString`, `constructor`, `__proto__`, `hasOwnProperty`) or a method
+a class instance inherits is unregistered, safe or not, and never runs
+as a handler. For asynchronous work, the shipped task
 convention — request identity, stale-response rejection, cancellation,
 and the `createTaskEffect` helper — is documented in
 [TASKS.md](TASKS.md).
@@ -514,6 +519,32 @@ action→effect→action loop is diagnosed as `JA2010` after
 `maxTurns` MUST be a positive finite integer — `createApp` rejects
 anything else (a guard that silently coerces is no guard).
 
+The options object itself is a closed set, checked before anything
+compiles: a member `createApp` does not take, or one of the wrong kind
+— a callback (`onError`, `schedule`, `afterRender`, `validateState`,
+`viewModel`, `compileTypeTest`, `onUnsafe`) that is not a function, a
+flag (`safe`, `hydrate`, `capturePayloads`) that is not a boolean,
+a registry (`effects`, `subs`, `eventFields`, `widgets`) that is not an
+object of named members (a function, an array, a `Map` or `Set`, a
+promise), `capabilities` that is not a plain object or has a member other
+than those four — is refused with a `TypeError` naming it
+(`createApp: unknown option 'onerror' — did you mean 'onError'?`), and
+so are options that are not a plain object. The refusal names what it
+was given: `createApp: options.effects must be an object of handlers by
+name, got a Promise`, or the class of an instance where a plain object
+belongs (`options.capabilities must be a plain object, got a Map`). A
+registry may still be a proxy, carry accessors, be frozen, have a null
+prototype or be a class instance, and an own member named `then` is an
+ordinary registered name. Such a member used to be
+ignored or accepted: a misspelt `onerror` left every failure throwing
+past the handler meant to receive it, `safe: 'false'` switched the safe
+profile on, a registry factory passed uncalled
+(`eventFields: formEventFields`) — or an async one called but not
+awaited — registered nothing, and a misspelt
+grant list (`capabilities: { efects: […] }`) granted nothing. `null` is
+still read as absent wherever it always was, and a member passed as
+`undefined` is absent.
+
 `validateState` is host code and may itself fail: a throwing validator
 is isolated as `JA2015` — the transaction fails (its observer record
 carries the code), the original cause is preserved, and the queue
@@ -616,7 +647,11 @@ const app = createApp(doc, {
 ```
 
 When `safe: true` or `capabilities` is supplied, omitted grant lists are empty.
-Unknown or inherited registry names are refused at construction. Only granted
+Unknown or inherited registry names are refused at construction, naming the
+nearest registered name when one is close (`createApp: unknown effects
+capability 'lgo' — did you mean 'log'?`); a document that names an inherited
+member at run time (`{ "run": "toString" }`) meets the refusal an unknown
+name meets (§5.1). Only granted
 effects belong to this app's disposal lifecycle. Without either option, the
 existing registered capabilities remain available. Safe mode still removes
 DOM event bindings and widgets; a widget grant does not override that display

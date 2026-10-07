@@ -16,7 +16,10 @@
  */
 
 /**
- * Linear scale. A zero-span domain maps every value to 0.5.
+ * Linear scale. A zero-span domain maps every value to 0.5. Finite bounds
+ * further apart than a double measures (-1e308 to 1e308) have no finite
+ * span — the top of the domain would map to `NaN` — so they are measured
+ * at half scale: halving a double is exact, and half of their span fits.
  * @param {number} min - Domain minimum
  * @param {number} max - Domain maximum
  * @returns {UnitScale}
@@ -25,6 +28,11 @@ export function scaleLinear(min, max) {
   const span = max - min;
   if (span === 0)
     return () => 0.5;
+  if (!Number.isFinite(span)) {
+    const lo = min / 2;
+    const half = max / 2 - lo;
+    return (v) => (v / 2 - lo) / half;
+  }
   return (v) => (v - min) / span;
 }
 

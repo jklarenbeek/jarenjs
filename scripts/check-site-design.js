@@ -18,6 +18,8 @@ import { readFileSync, globSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { resolve, join } from 'node:path';
 
+import { isMainModule } from './lib/main-module.js';
+
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 
 /**
@@ -98,7 +100,7 @@ export function checkSiteDesign(options = {}) {
   return { code: unrunnable ? 2 : (hits.length > 0 ? 1 : 0), files, hits, notes };
 }
 
-if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMainModule(import.meta.url)) {
   const report = checkSiteDesign();
   for (const note of report.notes) console.warn(`WARNING: ${note}`);
   if (report.hits.length > 0) {

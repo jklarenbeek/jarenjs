@@ -22,7 +22,7 @@
 
 import { isJsonObject } from '@jarenjs/core/object';
 import { LinqBuildError } from '../errors.js';
-import { describeValue } from '../json-boundary.js';
+import { closedTo, describeValue } from '../json-boundary.js';
 
 /** The operation brand: how `defineContract` tells a declaration apart. */
 export const OPERATION = Symbol.for('@jarenjs/linq/contract-operation');
@@ -60,22 +60,6 @@ export const POLICY_VALUES = Object.freeze({
  * core and json only; test/linq/contract-pen.test.js holds it equal to
  * `CONTRACT_GRAMMARS` from @jarenjs/contract. */
 const CODE = /^[a-z][a-z0-9_-]*(\.[a-z][a-z0-9_-]*)*$/;
-
-/**
- * A member set the pen knows, or `JL0101` naming the one it does not.
- * @param {any} spec
- * @param {readonly string[]} members
- * @param {string} what
- * @param {string} at
- */
-function closedTo(spec, members, what, at) {
-  for (const key of Object.keys(spec)) {
-    if (!members.includes(key)) {
-      throw new LinqBuildError('JL0101',
-        `${what} does not take '${key}' — it takes ${members.join(', ')}`, `${at}/${key}`);
-    }
-  }
-}
 
 /**
  * One entry of `policy.retry`/`policy.stream`/`policy.limits`/

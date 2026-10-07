@@ -1,20 +1,50 @@
 //@ts-check
 /** Injected range coordination. Rows and handles remain private; observations contain JSON only. */
-import { deepFreeze } from '@jarenjs/core/object';
+import { deepFreeze, isPlainOptions, refuseUnknownMembers } from '@jarenjs/core/object';
 import { rangeBytes as bytesOf, rangeIdentity as identityOf, validRangeCredits as validCredits, validLogicalRange as validRange } from '@jarenjs/core/range';
+import { describeValue, describeOption } from './errors.js';
 export { createArrayRangeProvider } from '@jarenjs/core/range';
+
+/** The coordinator's options: its credit bounds, two callbacks and provider ownership. */
+const COORDINATOR_OPTIONS = ['pageRows', 'maxPages', 'maxRows', 'maxBytes', 'maxInFlight', 'maxOutputs',
+  'maxSubscriptions', 'prefetchPages', 'work', 'onChange', 'onError', 'disposeProvider'];
+
+/**
+ * Refuse options that are not a plain object, a member outside the closed set (naming the
+ * nearest one), and a callback or `disposeProvider` of the wrong type — a string `'false'` would
+ * otherwise read as "dispose". `null` and `undefined` are absent, as the coordinator reads them.
+ * @param {unknown} options
+ */
+function checkCoordinatorOptions(options) {
+  const refuse = (/** @type {string} */ reason) => new TypeError(`createCollectionCoordinator: ${reason}`);
+  if (!isPlainOptions(options)) throw refuse(`options must be a plain object, got ${describeOption(options)}`);
+  refuseUnknownMembers(options, COORDINATOR_OPTIONS, (key, hint) => refuse(`unknown option '${key}'${hint}`));
+  for (const name of ['onChange', 'onError']) {
+    if (options[name] != null && typeof options[name] !== 'function')
+      throw refuse(`options.${name} must be a function, got ${describeValue(options[name])}`);
+  }
+  if (options.disposeProvider != null && typeof options.disposeProvider !== 'boolean')
+    throw refuse(`options.disposeProvider must be a boolean, got ${describeValue(options.disposeProvider)}`);
+}
 
 /**
  * Coordinate an injected provider with finite pages, bytes, requests and prefetch. The host owns
- * provider construction; by default coordinator disposal also drains the provider.
+ * provider construction; by default coordinator disposal also drains the provider. The options are
+ * a closed set: an unknown member, or a callback or `disposeProvider` of the wrong type, is refused
+ * with a `TypeError`; a bound that is not a positive safe integer with a `RangeError`.
  * @param {any} provider @param {any} [options]
  */
 export function createCollectionCoordinator(provider, options = {}) {
+  checkCoordinatorOptions(options);
   const bounds = { pageRows: 64, maxPages: 4, maxRows: 256, maxBytes: 262144, maxInFlight: 2, maxOutputs: 1, maxSubscriptions: 8, prefetchPages: 0, work: 256, ...options };
+  const outOfRange = (/** @type {string} */ reason) => new RangeError(`createCollectionCoordinator: ${reason}`);
   for (const name of ['pageRows', 'maxPages', 'maxRows', 'maxBytes', 'maxInFlight', 'maxOutputs', 'maxSubscriptions', 'work'])
-    if (!Number.isSafeInteger(bounds[name]) || bounds[name] <= 0) throw new RangeError(`Invalid ${name}`);
-  if (!Number.isSafeInteger(bounds.prefetchPages) || bounds.prefetchPages < 0 || bounds.prefetchPages >= bounds.maxPages
-    || bounds.pageRows > bounds.maxRows) throw new RangeError('Invalid prefetch credits');
+    if (!Number.isSafeInteger(bounds[name]) || bounds[name] <= 0)
+      throw outOfRange(`options.${name} must be a positive safe integer, got ${describeValue(bounds[name])}`);
+  if (!Number.isSafeInteger(bounds.prefetchPages) || bounds.prefetchPages < 0 || bounds.prefetchPages >= bounds.maxPages)
+    throw outOfRange(`options.prefetchPages must be a safe integer from 0 below options.maxPages (${bounds.maxPages}), got ${describeValue(bounds.prefetchPages)}`);
+  if (bounds.pageRows > bounds.maxRows)
+    throw outOfRange(`options.pageRows (${bounds.pageRows}) must not exceed options.maxRows (${bounds.maxRows})`);
   let query = provider.query, snapshot = provider.snapshot, generation = 1, ticket = 0, disposed = false, revision = -1;
   let observation = { state: 'loading', query, snapshot, generation, total: { kind: 'unknown' }, loadedRows: 0, loadedBytes: 0 };
   let cursor = null, frontier = 0, exhausted = false;

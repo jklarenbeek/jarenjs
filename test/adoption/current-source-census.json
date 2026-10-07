@@ -11,9 +11,9 @@
       "role": "physical discovery and preserve/refuse",
       "matches": [
         "3: * @file Database → model: `introspectModel(connection)` reads a live",
-        "157:export function readSchema(connection, options = undefined) {",
-        "566:export function introspectModel(connection, options = undefined) {",
-        "577:  return chain(readSchema(connection, options), (schema) => {"
+        "158:export function readSchema(connection, options = undefined) {",
+        "558:export function introspectModel(connection, options = undefined) {",
+        "569:  return chain(readSchema(connection, options), (schema) => {"
       ],
       "disposition": "retained"
     },
@@ -60,7 +60,7 @@
       "role": "existing regex; lexical index pending",
       "matches": [
         "666:// $match (anchored) / $search (free): I-Regexp (RFC 9485, D5). Literal",
-        "1546:  '$search': regexTestEntry(false),"
+        "1533:  '$search': regexTestEntry(false),"
       ],
       "disposition": "retained"
     },
@@ -110,8 +110,8 @@
       "category": "providers",
       "originalPath": "packages/ai/src/retry.js",
       "disposition": "moved",
-      "owner": "@tangleai/models/retry",
-      "reason": "Model transport retry belongs to Tangle; generic concurrency and provider execution remain in Jaren."
+      "owner": "the application that owns model transport",
+      "reason": "Model transport retry belongs to the application; generic concurrency and provider execution remain in Jaren."
     }
   ]
 }

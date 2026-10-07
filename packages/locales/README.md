@@ -90,7 +90,7 @@ The msgids are closed and mechanical, so a pack cannot half-cover them:
 | day period | `date/meridiem/am`, `date/meridiem/pm` |
 | relative | `date/relative/{second,minute,hour,day,week,month,year}/{past,future}` |
 | named days | `date/relative/{now,yesterday,today,tomorrow}` |
-| format names | `format/name/{date,time,date-time,iso-date,iso-time,iso-date-time}` |
+| format names | `format/name/{date,time,date-time,duration,iso-date,iso-time,iso-date-time}` |
 
 `dateMessagesEn` is the English set and the canonical key list. Name
 entries take no parameters; a relative entry receives the **absolute**

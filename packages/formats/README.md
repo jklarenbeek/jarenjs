@@ -49,6 +49,8 @@ These format validators are based on the [json-schema.org](https://json-schema.o
 
 *Note: All date time formats can use formatMinimum / formatMaximum and formatExclusiveMinimum and formatExclusiveMaximum. The bounds are folded to epoch milliseconds at compile time and string values compare as numbers, so a validation allocates no `Date`; a raw `Date` instance as the value is still accepted and compares numerically.*
 
+*Note: `date-time` and `time` take a fraction of any number of digits and a leap second (`:60`) only at 23:59:60 UTC — `12:59:60Z` and `47:59:60Z` are refused. `iso-date-time` and `iso-time` cap the fraction at six digits and refuse `:60`.*
+
 #### 🗨 Formats for url's, hostnames and emails
 
 - `url` | http/https URL — a `uri` narrowed to the web schemes, so it must carry an authority and the RFC 3986 grammar still applies (`http://localhost:8080` and `http://127.0.0.1/` are URLs; `http://x/a|b` is not)

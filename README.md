@@ -258,7 +258,7 @@ We welcome contributions from the community! Here's how you can help:
 3. Add Tests: Increase our test coverage.
 4. Implement New Features: Pick an item from our [roadmap](docs/ROADMAP.md) and submit a pull request.
 
-Run the test suite with `npm test` (per package: `npm run test:core`, `npm run test:json`, `npm run test:validate`) and lint with `npm run lint` — the lint gate covers `packages`, `components`, `test`, `benchmark`, `scripts` and the root config files, and is expected to pass at **zero errors and zero warnings**, so a new warning is a finding to fix rather than noise to live with. `npm run test:browser` additionally drives the built website through real Chromium, Firefox and WebKit ([how to run it](packages/website/README.md#browser-tests)). The [benchmark workspace](benchmark/README.md) documents how to reproduce every performance and conformance claim.
+Run the test suite with `npm test` (per package: `npm run test:core`, `npm run test:json`, `npm run test:validate`) and lint with `npm run lint` — the lint gate covers `packages`, `components`, `test`, `benchmark`, `scripts`, the root `src` and `eslint.config.js`, and passes only at **zero errors and zero warnings** (`--max-warnings 0`, so a single warning fails it), so a new warning is a finding to fix rather than noise to live with. `npm run test:browser` additionally drives the built website through real Chromium, Firefox and WebKit ([how to run it](packages/website/README.md#browser-tests)). The [benchmark workspace](benchmark/README.md) documents how to reproduce every performance and conformance claim.
 
 ## ❓ Frequently Asked Questions
 

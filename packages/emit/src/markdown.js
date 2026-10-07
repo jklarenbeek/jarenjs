@@ -8,12 +8,7 @@ import { createTypeTestCompiler } from '@jarenjs/validate/query';
 
 import { compileEmitModel } from './model.js';
 import { fileOutput } from './output.js';
-
-/** Match a model node by its `kind` — a schema match, so it survives the
- * location-less dispatch of `$apply` on the current node. */
-const isKind = (kind) => ({
-  schema: { type: 'object', properties: { kind: { const: kind } }, required: ['kind'] },
-});
+import { isKind } from './match.js';
 
 /** Reference documentation for a type model. */
 export const MARKDOWN_STYLESHEET = {

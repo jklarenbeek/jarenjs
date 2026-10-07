@@ -15,7 +15,7 @@
  * blocks while later chunks are still arriving (docs/LOADER.md §4).
  */
 
-import { countIndent, expandTabs, hashContent, fnv1a, FNV1A_OFFSET_BASIS } from './utils.js';
+import { countIndent, expandTabs, hashContent, fnv1a, FNV1A_OFFSET_BASIS, MAX_NESTING } from './utils.js';
 import { parseFrontmatter } from './frontmatter.js';
 import {
   scanThematicBreak,
@@ -417,6 +417,20 @@ class BlockParser {
   }
 
   /**
+   * May `entries` more containers open here without nesting past
+   * `MAX_NESTING`? A list on top of the stack is closed (or continued)
+   * before anything opens, so it does not count against the room.
+   * @param {number} entries
+   * @returns {boolean}
+   */
+  hasRoom(entries) {
+    const stack = this.stack;
+    const top = stack[stack.length - 1];
+    const base = top !== undefined && top.type === 'list' ? stack.length - 1 : stack.length;
+    return base + entries <= MAX_NESTING;
+  }
+
+  /**
    * Open new blocks in `rest` (recursing through fresh containers).
    * @param {string} rest
    */
@@ -522,7 +536,9 @@ class BlockParser {
         return;
       }
 
-      if (c === 0x3E /* > */) {
+      // A container marker past the nesting bound opens nothing; it falls
+      // through to be read as paragraph text.
+      if (c === 0x3E /* > */ && this.hasRoom(1)) {
         this.closeLeaf();
         this.closeList();
         const node = blockquote([]);
@@ -533,7 +549,8 @@ class BlockParser {
 
       const marker = scanListMarker(rest, indent);
       if (marker !== null
-        && !(para !== null && !this.interruptsParagraph(rest))) {
+        && !(para !== null && !this.interruptsParagraph(rest))
+        && this.hasRoom(2)) {
         this.closeLeaf();
         const top = this.stack[this.stack.length - 1];
         let entry = top !== undefined && top.type === 'list' ? top : null;
@@ -572,7 +589,7 @@ class BlockParser {
       // BEFORE the paragraph closes, which is what keeps `[^1]: x` from
       // reaching `extractDefinitions` and becoming a link reference
       // named `^1`.
-      if (this.gfm && c === 0x5B /* [ */) {
+      if (this.gfm && c === 0x5B /* [ */ && this.hasRoom(1)) {
         const note = scanFootnoteDefinition(rest, indent);
         if (note !== null) {
           this.closeLeaf();
@@ -816,7 +833,72 @@ function isBlankFrom(line, from) {
 // eslint-disable-next-line no-control-regex -- the spec excludes all control characters
 const RE_AUTOLINK_URI = /^<([a-zA-Z][a-zA-Z0-9+.-]{1,31}:[^<>\x00-\x20]*)>/;
 const RE_AUTOLINK_EMAIL = /^<([a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+)>/;
-const RE_INLINE_HTML = /^<(?:[a-zA-Z][a-zA-Z0-9-]*(?:\s+[a-zA-Z_:][a-zA-Z0-9_.:-]*(?:\s*=\s*(?:[^\s"'=<>`]+|'[^']*'|"[^"]*"))?)*\s*\/?>|\/[a-zA-Z][a-zA-Z0-9-]*\s*>|!--->|!-->|!--[\s\S]*?-->|\?[^>]*\?>|![A-Za-z][^>]*>|!\[CDATA\[[\s\S]*?\]\]>)/;
+/** An inline open or closing tag (the inline raw-HTML forms that begin with a letter or `/`). */
+const RE_INLINE_TAG = /^<(?:[a-zA-Z][a-zA-Z0-9-]*(?:\s+[a-zA-Z_:][a-zA-Z0-9_.:-]*(?:\s*=\s*(?:[^\s"'=<>`]+|'[^']*'|"[^"]*"))?)*\s*\/?>|\/[a-zA-Z][a-zA-Z0-9-]*\s*>)/;
+
+/**
+ * A search for the first occurrence of `needle` at or after `from`,
+ * remembered per needle. The inline phase asks it from every `<` in turn,
+ * always further right, so a search that found nothing — or found an
+ * occurrence further on — answers each later question up to that point
+ * without scanning again: the scans of one source add up to one pass.
+ * @param {string} src
+ * @returns {(needle: string, from: number) => number}
+ */
+function createFinder(src) {
+  /** @type {Map<string, [number, number]>} */
+  const seen = new Map();
+  return (needle, from) => {
+    const last = seen.get(needle);
+    if (last !== undefined && from >= last[0] && (last[1] === -1 || last[1] >= from)) return last[1];
+    const at = src.indexOf(needle, from);
+    seen.set(needle, [from, at]);
+    return at;
+  };
+}
+
+/**
+ * The end of the inline raw HTML at `pos` (a `<`), or -1. Tags go through
+ * {@link RE_INLINE_TAG}; the four forms that run to a terminator — a
+ * comment to `-->`, a processing instruction to `?>`, a declaration to
+ * `>`, a CDATA section to `]]>` — are matched by finding that terminator,
+ * so an unterminated one costs one remembered search instead of a scan to
+ * the end of the paragraph from every `<`.
+ * @param {string} src @param {number} pos @param {string} rest `src` from `pos`
+ * @param {InlineRun} inline the run's state, which keeps the search
+ * @returns {number}
+ */
+function inlineHtmlEnd(src, pos, rest, inline) {
+  const next = src.charCodeAt(pos + 1);
+  if (next !== 0x21 /* ! */ && next !== 0x3F /* ? */) {
+    const m = RE_INLINE_TAG.exec(rest);
+    return m === null ? -1 : pos + m[0].length;
+  }
+  if (inline.find === null) inline.find = createFinder(src);
+  const find = inline.find;
+  if (next === 0x21) {
+    // `<!-->` and `<!--->` are complete comments, so the terminator may
+    // overlap the opener
+    if (src.startsWith('<!--', pos)) {
+      const close = find('-->', pos + 2);
+      return close === -1 ? -1 : close + 3;
+    }
+    if (src.startsWith('<![CDATA[', pos)) {
+      const close = find(']]>', pos + 9);
+      return close === -1 ? -1 : close + 3;
+    }
+    const letter = src.charCodeAt(pos + 2) | 0x20;
+    if (letter >= 0x61 && letter <= 0x7A) {
+      const close = find('>', pos + 3);
+      return close === -1 ? -1 : close + 1;
+    }
+    return -1;
+  }
+  // a processing instruction ends at the first `>`, and only if a `?` of
+  // its own (not the opener's) stands right before it
+  const close = find('>', pos + 2);
+  return close !== -1 && close - 1 >= pos + 2 && src.charCodeAt(close - 1) === 0x3F ? close + 1 : -1;
+}
 
 /** Characters the inline scanner dispatches on; the rest fast-skip. */
 const INLINE_SPECIAL = new Uint8Array(128);
@@ -832,6 +914,28 @@ for (const ch of '\\`*_~[!]<&\n') INLINE_SPECIAL[ch.charCodeAt(0)] = 1;
  */
 
 /**
+ * How many inline containers each container node holds at its deepest,
+ * counting itself — recorded when the parser builds one, so the nesting
+ * bound is checked without walking a subtree. A node with no entry
+ * (text, code, raw HTML) holds none.
+ * @type {WeakMap<MdNode, number>}
+ */
+const INLINE_DEPTH = new WeakMap();
+
+/** @param {MdNode} node @returns {number} */
+function inlineDepth(node) {
+  return INLINE_DEPTH.get(node) ?? 0;
+}
+
+/**
+ * The state of one inline run that the bracket closer shares:
+ * `links` counts the links formed so far — an opener is inactive once one
+ * formed after it, because links do not nest — and `find` is the run's
+ * remembered terminator search, built on the first raw HTML that needs it.
+ * @typedef {{ links: number, find: ((needle: string, from: number) => number) | null }} InlineRun
+ */
+
+/**
  * Parse inline Markdown text into inline AST nodes.
  * @param {string} src
  * @param {InlineCtx} ictx
@@ -843,9 +947,15 @@ export function parseInlines(src, ictx) {
   /** Emphasis delimiter entries: { node, marker, canOpen, canClose }. */
   /** @type {any[]} */
   const delims = [];
-  /** Bracket entries: { index, delimIndex, image, active }. */
-  /** @type {any[]} */
+  /**
+   * Bracket entries: { index, delims, image, links, bracketAfter, start } —
+   * `links` is the run's link count when the bracket opened, and
+   * `bracketAfter` is set once another bracket opens after it.
+   * @type {any[]}
+   */
   const brackets = [];
+  /** @type {InlineRun} */
+  const inline = { links: 0, find: null };
   let pos = 0;
   let textStart = 0;
   const hasPluginInlines = ictx.inlines.size > 0;
@@ -996,7 +1106,8 @@ export function parseInlines(src, ictx) {
         flush(pos);
         const node = text('[');
         nodes.push(node);
-        brackets.push({ index: nodes.length - 1, delims: delims.length, image: false, active: true, start: pos + 1 });
+        openBracket(brackets, { index: nodes.length - 1, delims: delims.length, image: false,
+          links: inline.links, bracketAfter: false, start: pos + 1 });
         pos++;
         textStart = pos;
         continue;
@@ -1005,7 +1116,8 @@ export function parseInlines(src, ictx) {
         if (src.charCodeAt(pos + 1) === 0x5B) {
           flush(pos);
           nodes.push(text('!['));
-          brackets.push({ index: nodes.length - 1, delims: delims.length, image: true, active: true, start: pos + 2 });
+          openBracket(brackets, { index: nodes.length - 1, delims: delims.length, image: true,
+            links: inline.links, bracketAfter: false, start: pos + 2 });
           pos += 2;
           textStart = pos;
           continue;
@@ -1014,7 +1126,7 @@ export function parseInlines(src, ictx) {
         continue;
       }
       case 0x5D /* ] */: {
-        const closed = closeBracket(src, pos, nodes, delims, brackets, ictx, flush);
+        const closed = closeBracket(src, pos, nodes, delims, brackets, ictx, flush, inline);
         if (closed !== -1) { pos = closed; textStart = pos; continue; }
         pos++;
         continue;
@@ -1024,7 +1136,7 @@ export function parseInlines(src, ictx) {
         let m = RE_AUTOLINK_URI.exec(rest);
         if (m !== null) {
           flush(pos);
-          nodes.push(link(m[1], null, [text(m[1])]));
+          nodes.push(depthOne(link(m[1], null, [text(m[1])])));
           pos += m[0].length;
           textStart = pos;
           continue;
@@ -1032,16 +1144,16 @@ export function parseInlines(src, ictx) {
         m = RE_AUTOLINK_EMAIL.exec(rest);
         if (m !== null) {
           flush(pos);
-          nodes.push(link('mailto:' + m[1], null, [text(m[1])]));
+          nodes.push(depthOne(link('mailto:' + m[1], null, [text(m[1])])));
           pos += m[0].length;
           textStart = pos;
           continue;
         }
-        m = RE_INLINE_HTML.exec(rest);
-        if (m !== null) {
+        const end = inlineHtmlEnd(src, pos, rest, inline);
+        if (end !== -1) {
           flush(pos);
-          nodes.push({ type: 'html', value: m[0] });
-          pos += m[0].length;
+          nodes.push({ type: 'html', value: src.slice(pos, end) });
+          pos = end;
           textStart = pos;
           continue;
         }
@@ -1077,9 +1189,29 @@ export function parseInlines(src, ictx) {
     }
   }
   flush(src.length);
-  resolveEmphasis(nodes, delims, 0);
+  resolveEmphasis(nodes, delims, MAX_NESTING);
   const out = mergeText(nodes);
-  return ictx.gfm && mayAutolink(src) ? linkifyLiterals(out) : out;
+  return ictx.gfm && mayAutolink(src) ? linkifyLiterals(out, 0) : out;
+}
+
+/**
+ * Push a bracket opener, marking the one below it: a label that holds
+ * another bracket can name no definition.
+ * @param {any[]} brackets @param {any} entry
+ */
+function openBracket(brackets, entry) {
+  if (brackets.length > 0) brackets[brackets.length - 1].bracketAfter = true;
+  brackets.push(entry);
+}
+
+/**
+ * Record a link around plain text as one inline level deep.
+ * @param {MdNode} node
+ * @returns {MdNode}
+ */
+function depthOne(node) {
+  INLINE_DEPTH.set(node, 1);
+  return node;
 }
 
 /**
@@ -1115,17 +1247,19 @@ function mayAutolink(src) {
  *
  * Link subtrees are skipped — links do not nest — and only `text` nodes
  * are examined, so code spans and raw HTML are untouched by
- * construction.
+ * construction. Text already `MAX_NESTING` inline containers deep stays
+ * text: a link there would nest one level past the bound.
  * @param {MdNode[]} nodes
+ * @param {number} depth how many inline containers hold `nodes`
  * @returns {MdNode[]}
  */
-function linkifyLiterals(nodes) {
+function linkifyLiterals(nodes, depth) {
   /** @type {MdNode[] | null} */
   let out = null;
   for (let i = 0; i < nodes.length; i++) {
     const node = nodes[i];
     if (node.type === 'text') {
-      const hits = scanAutolinkLiterals(node.value);
+      const hits = depth < MAX_NESTING ? scanAutolinkLiterals(node.value) : null;
       if (hits === null) {
         if (out !== null) out.push(node);
         continue;
@@ -1143,7 +1277,7 @@ function linkifyLiterals(nodes) {
       continue;
     }
     if (node.type !== 'link' && Array.isArray(node.children)) {
-      node.children = linkifyLiterals(node.children);
+      node.children = linkifyLiterals(node.children, depth + 1);
     }
     if (out !== null) out.push(node);
   }
@@ -1160,16 +1294,18 @@ function linkifyLiterals(nodes) {
  * @param {any[]} brackets
  * @param {InlineCtx} ictx
  * @param {(end: number) => void} flush
+ * @param {InlineRun} inline
  * @returns {number}
  */
-function closeBracket(src, pos, nodes, delims, brackets, ictx, flush) {
-  // Only the MOST RECENT opener may close here. An inactive one (a link
-  // opener deactivated because links do not nest) is discarded and the
-  // `]` stays literal — walking outward to an older active opener would
-  // let `![[[a](u1)](u2)](u3)` close the image on the wrong bracket.
+function closeBracket(src, pos, nodes, delims, brackets, ictx, flush, inline) {
+  // Only the MOST RECENT opener may close here. An inactive one — a link
+  // opener with a link formed after it, because links do not nest — is
+  // discarded and the `]` stays literal: walking outward to an older
+  // active opener would let `![[[a](u1)](u2)](u3)` close the image on the
+  // wrong bracket.
   const opener = brackets[brackets.length - 1];
   if (opener === undefined) return -1;
-  if (!opener.active) {
+  if (!opener.image && opener.links !== inline.links) {
     brackets.pop();
     return -1;
   }
@@ -1214,16 +1350,21 @@ function closeBracket(src, pos, nodes, delims, brackets, ictx, flush) {
         }
       }
     }
+    // Collapsed / shortcut: the label is the bracketed text, taken from
+    // the SOURCE — a definition matches on what the author wrote, so
+    // `[foo\!]` and `[foo!]` are different labels even though they render
+    // the same. Bracketed text that holds another bracket names no
+    // definition (a definition's label cannot hold an unescaped one), so
+    // it is not normalized at all: nested brackets would otherwise
+    // normalize a label per level, each longer than the last.
+    let unnamed = false;
     if (label === null) {
-      // Collapsed / shortcut: the label is the bracketed text, taken
-      // from the SOURCE — a definition matches on what the author
-      // wrote, so `[foo\!]` and `[foo!]` are different labels even
-      // though they render the same.
       flush(pos);
       label = src.slice(opener.start, pos);
+      unnamed = opener.bracketAfter === true;
       if (end === -1) end = pos + 1;
     }
-    const def = ictx.defs.get(normalizeLabel(label));
+    const def = unnamed ? undefined : ictx.defs.get(normalizeLabel(label));
     if (def === undefined) {
       // A definition may still arrive: the incremental parser notes the
       // miss so it can re-resolve this block once the stream ends.
@@ -1238,99 +1379,206 @@ function closeBracket(src, pos, nodes, delims, brackets, ictx, flush) {
   flush(pos);
   const children = nodes.splice(opener.index + 1);
   nodes.pop(); // the `[` / `![` marker text node
-  // Delimiters inside the label resolve within the children scope.
+  // Delimiters inside the label resolve within the children scope, one
+  // level short of the bound: the link itself is a level.
   const innerDelims = delims.splice(opener.delims);
-  resolveEmphasis(children, innerDelims, 0);
-  const node = opener.image
-    ? image(/** @type {string} */ (url), title, textOf(children))
-    : link(/** @type {string} */ (url), title, mergeText(children));
+  resolveEmphasis(children, innerDelims, MAX_NESTING - 1);
+  let node;
+  if (opener.image) {
+    node = image(/** @type {string} */ (url), title, textOf(children));
+  }
+  else {
+    const content = mergeText(children);
+    node = link(/** @type {string} */ (url), title, content);
+    let deepest = 0;
+    for (let i = 0; i < content.length; i++) deepest = Math.max(deepest, inlineDepth(content[i]));
+    INLINE_DEPTH.set(node, deepest + 1);
+    // links do not nest: every opener still waiting is now inactive
+    inline.links++;
+  }
   nodes.push(node);
   brackets.pop();
-  if (!opener.image) {
-    // Links do not nest: deactivate earlier link openers.
-    for (let i = 0; i < brackets.length; i++) {
-      if (!brackets[i].image) brackets[i].active = false;
-    }
-  }
   return end;
+}
+
+/**
+ * The closer kinds the opener search keeps a floor for: the marker, and
+ * for `*`/`_` whether the closer can also open and its length modulo 3 —
+ * exactly the facts the rule of three reads.
+ * @param {any} closer
+ * @returns {number} 0..12
+ */
+function closerKind(closer) {
+  if (closer.marker === 0x7E) return 12;
+  return (closer.marker === 0x5F ? 6 : 0) + (closer.canOpen ? 3 : 0) + closer.node.value.length % 3;
 }
 
 /**
  * Resolve emphasis/strong/strikethrough delimiters over a node list
  * (the classic delimiter-stack pairing, `*`/`_` with the rule of
- * three, `~~` for strikethrough).
- * @param {MdNode[]} nodes
- * @param {any[]} delims
- * @param {number} floor
+ * three, `~~` for strikethrough) in time linear in the run.
+ *
+ * Closers are taken in order, each pairing with the nearest opener below
+ * it that the rules allow; a closer with characters left is retried, and
+ * an opener left over once its closer is spent is retried as a closer.
+ * Two structures keep that linear. The run is a doubly linked list while
+ * delimiters pair, so wrapping a span relinks two cells instead of
+ * splicing — and searching — an array. And the opener search has a floor
+ * per closer kind ({@link closerKind}): once a closer of one kind finds no
+ * opener, a later closer of that kind does not look below the same point
+ * again, so a paragraph of closers that never pair stays linear.
+ *
+ * A pairing that would nest its wrapper deeper than `limit` inline
+ * containers is not made; those delimiters stay literal text.
+ * @param {MdNode[]} nodes the run, rewritten in place
+ * @param {any[]} delims its delimiters, in node order
+ * @param {number} limit the deepest a wrapper may nest
  */
-function resolveEmphasis(nodes, delims, floor) {
-  let ci = floor;
-  while (ci < delims.length) {
+function resolveEmphasis(nodes, delims, limit) {
+  if (delims.length === 0) return;
+  /**
+   * The list, built on the first pairing — a run whose delimiters never
+   * pair allocates none of it: cell `i` holds `cell[i]` (wrappers are
+   * appended as cells), and `cellOf[d]` is delimiter `d`'s cell.
+   * @type {MdNode[] | null}
+   */
+  let cell = null;
+  /** @type {number[]} */
+  const prev = [];
+  /** @type {number[]} */
+  const next = [];
+  /** @type {number[]} */
+  const cellOf = [];
+  let head = -1;
+  const build = () => {
+    const count = nodes.length;
+    cell = nodes.slice();
+    for (let i = 0; i < count; i++) {
+      prev.push(i - 1);
+      next.push(i + 1 < count ? i + 1 : -1);
+    }
+    head = count > 0 ? 0 : -1;
+    // one walk maps every delimiter: both lists are in node order
+    for (let d = 0; d < delims.length; d++) cellOf.push(-1);
+    for (let i = 0, d = 0; i < count && d < delims.length; i++) {
+      if (cell[i] === delims[d].node) cellOf[d++] = i;
+    }
+  };
+  /** @param {number} c */
+  const unlink = (c) => {
+    const p = prev[c];
+    const q = next[c];
+    if (p === -1) head = q;
+    else next[p] = q;
+    if (q !== -1) prev[q] = p;
+  };
+  /** Per closer kind, the opener-stack height below which none pairs. */
+  const floors = new Array(13).fill(0);
+  /** Delimiters that may still open, by index, nearest last. */
+  const openers = [];
+  let following = 0;
+  let retry = -1;
+  for (;;) {
+    let ci;
+    if (retry !== -1) {
+      ci = retry;
+      retry = -1;
+    }
+    else if (following < delims.length) ci = following++;
+    else break;
     const closer = delims[ci];
-    if (!closer.canClose || closer.node.value.length === 0) {
-      ci++;
+    const closeLength = closer.node.value.length;
+    if (closeLength === 0) continue;
+    if (!closer.canClose) {
+      if (closer.canOpen) openers.push(ci);
       continue;
     }
-    let oi = ci - 1;
-    while (oi >= floor) {
-      const opener = delims[oi];
-      if (opener.canOpen && opener.marker === closer.marker
-        && opener.node.value.length > 0) {
-        // Rule of three (only for * and _).
-        if (closer.marker !== 0x7E
-          && (opener.canClose || closer.canOpen)
-          && (opener.node.value.length + closer.node.value.length) % 3 === 0
-          && (opener.node.value.length % 3 !== 0 || closer.node.value.length % 3 !== 0)) {
-          oi--;
-          continue;
-        }
-        break;
+    const kind = closerKind(closer);
+    let k = openers.length - 1;
+    for (; k >= floors[kind]; k--) {
+      const opener = delims[openers[k]];
+      if (opener.marker !== closer.marker) continue;
+      const openLength = opener.node.value.length;
+      // the rule of three (only for * and _)
+      if (closer.marker !== 0x7E && (opener.canClose || closer.canOpen)
+        && (openLength + closeLength) % 3 === 0
+        && (openLength % 3 !== 0 || closeLength % 3 !== 0)) continue;
+      break;
+    }
+    /** @type {MdNode[]} */
+    const children = [];
+    let deepest = 0;
+    let paired = k >= floors[kind];
+    if (paired) {
+      if (cell === null) build();
+      const openCell = cellOf[openers[k]];
+      const closeCell = cellOf[ci];
+      // every delimiter maps to a cell; one that did not could not pair
+      paired = openCell !== -1 && closeCell !== -1;
+      for (let c = paired ? next[openCell] : closeCell; c !== closeCell; c = next[c]) {
+        const child = /** @type {MdNode[]} */ (cell)[c];
+        children.push(child);
+        deepest = Math.max(deepest, inlineDepth(child));
       }
-      oi--;
     }
-    if (oi < floor) {
-      ci++;
+    if (!paired || deepest + 1 > limit) {
+      // no opener for this kind at or above the floor — or only one whose
+      // wrapper would nest too deep, and every opener below it would wrap
+      // more — so the floor rises to here
+      floors[kind] = openers.length;
+      if (closer.canOpen) openers.push(ci);
       continue;
     }
+    const cells = /** @type {MdNode[]} */ (cell);
+    const oi = openers[k];
     const opener = delims[oi];
+    const openCell = cellOf[oi];
+    const closeCell = cellOf[ci];
+    // the opener's length is about to change: no floor stays above it
+    for (let f = 0; f < floors.length; f++) {
+      if (floors[f] > k) floors[f] = k;
+    }
     const use = closer.marker === 0x7E
       ? 2
-      : opener.node.value.length >= 2 && closer.node.value.length >= 2 ? 2 : 1;
-    const openIdx = nodes.indexOf(opener.node);
-    const closeIdx = nodes.indexOf(closer.node);
-    if (openIdx === -1 || closeIdx === -1 || closeIdx <= openIdx) {
-      ci++;
-      continue;
-    }
-    const children = mergeText(nodes.slice(openIdx + 1, closeIdx));
+      : opener.node.value.length >= 2 && closeLength >= 2 ? 2 : 1;
+    const merged = mergeText(children);
     const wrapper = closer.marker === 0x7E
-      ? strikethrough(children)
-      : use === 2 ? strong(children) : emphasis(children);
+      ? strikethrough(merged)
+      : use === 2 ? strong(merged) : emphasis(merged);
+    INLINE_DEPTH.set(wrapper, deepest + 1);
     opener.node.value = opener.node.value.slice(0, -use);
     closer.node.value = closer.node.value.slice(use);
-    if (opener.node.value.length === 0) {
-      nodes.splice(openIdx, closeIdx - openIdx + 1, wrapper);
-    }
-    else {
-      nodes.splice(openIdx + 1, closeIdx - openIdx, wrapper);
+    // opener · wrapper · closer: the span between is now the wrapper's
+    const w = cells.length;
+    cells.push(wrapper);
+    prev.push(openCell);
+    next.push(closeCell);
+    next[openCell] = w;
+    prev[closeCell] = w;
+    // delimiters between the pair can never pair outward
+    openers.length = k + 1;
+    const openerSpent = opener.node.value.length === 0;
+    if (openerSpent) {
+      unlink(openCell);
+      openers.length = k;
     }
     if (closer.node.value.length > 0) {
-      nodes.splice(nodes.indexOf(wrapper) + 1, 0, closer.node);
+      retry = ci;
     }
-    // Delimiters strictly between the pair can never match outward;
-    // spent delimiters leave the list. The closer (when it still has
-    // characters) is retried from its new position.
-    delims.splice(oi + 1, ci - oi - 1);
-    if (closer.node.value.length === 0) {
-      const at = delims.indexOf(closer);
-      if (at !== -1) delims.splice(at, 1);
+    else {
+      unlink(closeCell);
+      if (!openerSpent) {
+        // what is left of the opener is tried as a closer in turn
+        openers.length = k;
+        retry = oi;
+      }
     }
-    if (opener.node.value.length === 0) {
-      delims.splice(oi, 1);
-    }
-    const next = delims.indexOf(closer);
-    ci = next === -1 ? oi : next;
   }
+  // nothing paired, nothing moved
+  if (cell === null) return;
+  const cells = /** @type {MdNode[]} */ (cell);
+  nodes.length = 0;
+  for (let c = head; c !== -1; c = next[c]) nodes.push(cells[c]);
 }
 
 /**

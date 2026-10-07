@@ -34,6 +34,7 @@
 
 import { sanitizeUrl } from '@jarenjs/view/helpers';
 import { decodeReferences } from './entities.js';
+import { MAX_NESTING } from './utils.js';
 
 /** Elements that carry no content and never take an end tag. */
 const VOID = new Set([
@@ -97,6 +98,10 @@ const URL_ATTRS = new Set(['href', 'src']);
  * Parse an HTML fragment into vnodes, keeping only what the allow-list
  * recognises.
  *
+ * Elements nest at most `MAX_NESTING` deep in the result: one opened
+ * deeper keeps its content and loses its markup, as an unknown element
+ * does, so no fragment builds a tree too deep to render.
+ *
  * @param {string} source the raw HTML of one Markdown html node
  * @param {HtmlParseOptions} [options]
  * @returns {any[]} vnodes and strings; empty when nothing survived
@@ -107,7 +112,12 @@ const URL_ATTRS = new Set(['href', 'src']);
 export function parseHtmlFragment(source, options = {}) {
   const urlPolicy = options.sanitizeUrl ?? sanitizeUrl;
   /** Open elements; the root frame collects the result. */
-  const stack = [{ tag: '', children: /** @type {any[]} */ ([]) }];
+  const frames = createFrames();
+  const stack = frames.stack;
+  /** @type {Set<number>} attribute-loop offsets a tag scan never ends from */
+  const unended = new Set();
+  /** @type {TagStops} */
+  let stops = SCANNED_STOPS;
   let i = 0;
   let text = '';
 
@@ -135,8 +145,11 @@ export function parseHtmlFragment(source, options = {}) {
       i = close === -1 ? source.length : close + 1;
       continue;
     }
-    const tag = scanTag(source, i);
+    const tag = scanTag(source, i, stops, unended);
     if (tag === null) {
+      // A scan that ran on and ended nowhere may be the first of many
+      // (a `<` that never closes), so later scans read runs from tables.
+      if (stops === SCANNED_STOPS && unended.size > 0) stops = tabledStops(source);
       // not a tag at all: a literal `<` in prose
       text += source[i];
       i++;
@@ -147,11 +160,7 @@ export function parseHtmlFragment(source, options = {}) {
     if (tag.closing) {
       // close the nearest matching open element; an end tag that matches
       // nothing is noise and is dropped
-      for (let depth = stack.length - 1; depth > 0; depth--) {
-        if (stack[depth].tag !== tag.name) continue;
-        for (let k = stack.length - 1; k >= depth; k--) closeFrame(stack);
-        break;
-      }
+      closeElement(frames, tag.name);
       continue;
     }
     const known = ELEMENTS.has(tag.name);
@@ -161,7 +170,7 @@ export function parseHtmlFragment(source, options = {}) {
     }
     // An unknown element still opens a frame: its CHILDREN are content
     // the reader wrote and should keep, its own markup is what goes.
-    stack.push({
+    openFrame(frames, {
       tag: tag.name,
       children: [],
       props: known ? attrsFor(tag, urlPolicy) : null,
@@ -170,8 +179,48 @@ export function parseHtmlFragment(source, options = {}) {
     });
   }
   flushText();
-  while (stack.length > 1) closeFrame(stack);
+  while (stack.length > 1) closeFrame(frames);
   return stack[0].children;
+}
+
+/**
+ * The open-element frames of one parse: the stack (its root frame
+ * collects the result), how many open frames will become elements, and
+ * how many are open per tag name — so an end tag that matches nothing is
+ * dropped without walking the stack.
+ * @typedef {{ stack: any[], kept: number, open: Map<string, number> }} Frames
+ */
+
+/** @returns {Frames} */
+function createFrames() {
+  return { stack: [{ tag: '', children: [] }], kept: 0, open: new Map() };
+}
+
+/**
+ * Open a frame. Past `MAX_NESTING` kept elements it keeps its content
+ * and loses its markup, as an unknown element does.
+ * @param {Frames} frames @param {any} frame
+ */
+function openFrame(frames, frame) {
+  if (frame.keep) {
+    if (frames.kept < MAX_NESTING) frames.kept++;
+    else frame.keep = false;
+  }
+  frames.open.set(frame.tag, (frames.open.get(frame.tag) ?? 0) + 1);
+  frames.stack.push(frame);
+}
+
+/**
+ * Close the innermost open element named `name` and every frame inside
+ * it; nothing when no such element is open.
+ * @param {Frames} frames @param {string} name
+ */
+function closeElement(frames, name) {
+  if ((frames.open.get(name) ?? 0) === 0) return;
+  const stack = frames.stack;
+  let depth = stack.length - 1;
+  while (stack[depth].tag !== name) depth--;
+  while (stack.length > depth) closeFrame(frames);
 }
 
 /**
@@ -184,7 +233,7 @@ export function parseHtmlFragment(source, options = {}) {
  *   drop: boolean, props: Record<string, any>|null} | null}
  */
 export function parseHtmlTag(source, options = {}) {
-  const tag = scanTag(source, 0);
+  const tag = scanTag(source, 0, SCANNED_STOPS);
   if (tag === null || tag.end !== source.length) return null;
   const known = ELEMENTS.has(tag.name);
   return {
@@ -197,13 +246,28 @@ export function parseHtmlTag(source, options = {}) {
   };
 }
 
-/** Pop the innermost frame into its parent, dropping unknown elements. */
-function closeFrame(stack) {
+/**
+ * Pop the innermost frame into its parent, dropping unknown elements.
+ * Children are moved one at a time: a frame may hold more of them than a
+ * call can take as arguments.
+ * @param {Frames} frames
+ */
+function closeFrame(frames) {
+  const stack = frames.stack;
   const frame = stack.pop();
+  frames.open.set(frame.tag, (frames.open.get(frame.tag) ?? 1) - 1);
+  if (frame.keep) frames.kept--;
   const parent = stack[stack.length - 1].children;
   if (frame.drop) return;
-  if (frame.keep) parent.push([frame.tag, frame.props, ...frame.children]);
-  else parent.push(...frame.children);
+  const children = frame.children;
+  if (frame.keep) {
+    const element = [frame.tag, frame.props];
+    for (let i = 0; i < children.length; i++) element.push(children[i]);
+    parent.push(element);
+  }
+  else {
+    for (let i = 0; i < children.length; i++) parent.push(children[i]);
+  }
 }
 
 /** The allow-listed attributes of one tag, as vnode props. */
@@ -228,12 +292,101 @@ function attrsFor(tag, urlPolicy) {
 const RE_TAG = /^<(\/?)([a-zA-Z][a-zA-Z0-9-]*)/;
 
 /**
+ * Where the runs a tag scan reads end, from any offset of `source`: past
+ * spaces, an attribute name, a bare value, and the next quote of a kind
+ * (`-1` for none).
+ * @typedef {object} TagStops
+ * @property {(source: string, i: number) => number} space
+ * @property {(source: string, i: number) => number} name
+ * @property {(source: string, i: number) => number} value
+ * @property {(source: string, quote: number, i: number) => number} quote
+ */
+
+/** @param {number} code */
+function isSpace(code) {
+  return code === 0x20 || code === 0x09 || code === 0x0A || code === 0x0D || code === 0x0C;
+}
+
+/** @param {number} code a character that ends an attribute name */
+function endsName(code) {
+  return isSpace(code) || code === 0x3D /* = */ || code === 0x3E /* > */ || code === 0x2F /* / */;
+}
+
+/** @param {number} code a character that ends a bare attribute value */
+function endsValue(code) {
+  return isSpace(code) || code === 0x3E /* > */;
+}
+
+/**
+ * Stops found by scanning forward: the cheap answer for a tag that ends,
+ * since the scan then reads only the tag.
+ * @type {TagStops}
+ */
+const SCANNED_STOPS = {
+  space: (source, i) => {
+    while (i < source.length && isSpace(source.charCodeAt(i))) i++;
+    return i;
+  },
+  name: (source, i) => {
+    while (i < source.length && !endsName(source.charCodeAt(i))) i++;
+    return i;
+  },
+  value: (source, i) => {
+    while (i < source.length && !endsValue(source.charCodeAt(i))) i++;
+    return i;
+  },
+  quote: (source, quote, i) => source.indexOf(String.fromCharCode(quote), i),
+};
+
+/**
+ * Stops read from tables built in one backward pass: the answer once a
+ * fragment's tags stop ending, when every `<` after would otherwise read
+ * the same runs again.
+ * @param {string} source
+ * @returns {TagStops}
+ */
+function tabledStops(source) {
+  const n = source.length;
+  const space = new Int32Array(n + 1);
+  const name = new Int32Array(n + 1);
+  const value = new Int32Array(n + 1);
+  const double = new Int32Array(n + 1);
+  const single = new Int32Array(n + 1);
+  space[n] = name[n] = value[n] = n;
+  double[n] = single[n] = -1;
+  for (let i = n - 1; i >= 0; i--) {
+    const code = source.charCodeAt(i);
+    space[i] = isSpace(code) ? space[i + 1] : i;
+    name[i] = endsName(code) ? i : name[i + 1];
+    value[i] = endsValue(code) ? i : value[i + 1];
+    double[i] = code === 0x22 ? i : double[i + 1];
+    single[i] = code === 0x27 ? i : single[i + 1];
+  }
+  const at = (/** @type {Int32Array} */ table, /** @type {number} */ i) => table[Math.min(i, n)];
+  return {
+    space: (_, i) => at(space, i),
+    name: (_, i) => at(name, i),
+    value: (_, i) => at(value, i),
+    quote: (_, quote, i) => at(quote === 0x22 ? double : single, i),
+  };
+}
+
+/**
  * Scan one tag at `pos`. Attribute values may be double-quoted,
  * single-quoted or bare; an unterminated tag is not a tag.
+ *
+ * From the top of the attribute loop a scan is a function of where it
+ * stands and nothing else, so `unended` — the loop offsets earlier scans
+ * found leading nowhere — ends a scan the moment it reaches one, and a
+ * failing scan adds the offsets it visited. With tabled stops that makes
+ * every scan of one fragment, from every `<`, add up to a single pass.
+ * @param {string} source @param {number} pos
+ * @param {TagStops} stops
+ * @param {Set<number>} [unended]
  * @returns {{name: string, closing: boolean, selfClosing: boolean,
  *   attrs: [string, string][], end: number} | null}
  */
-function scanTag(source, pos) {
+function scanTag(source, pos, stops, unended) {
   const m = RE_TAG.exec(source.slice(pos, pos + 64));
   if (m === null) return null;
   const closing = m[1] === '/';
@@ -241,41 +394,43 @@ function scanTag(source, pos) {
   let i = pos + m[0].length;
   /** @type {[string, string][]} */
   const attrs = [];
+  /** @type {number[]} */
+  const visited = [];
+  const fail = () => {
+    if (unended !== undefined) for (const top of visited) unended.add(top);
+    return null;
+  };
   while (i < source.length) {
-    while (i < source.length && isSpace(source.charCodeAt(i))) i++;
+    if (unended !== undefined) {
+      if (unended.has(i)) return fail();
+      visited.push(i);
+    }
+    i = stops.space(source, i);
     const c = source.charCodeAt(i);
     if (c === 0x3E /* > */) return { name, closing, selfClosing: false, attrs, end: i + 1 };
     if (c === 0x2F /* / */ && source.charCodeAt(i + 1) === 0x3E)
       return { name, closing, selfClosing: true, attrs, end: i + 2 };
     const start = i;
-    while (i < source.length && !isSpace(source.charCodeAt(i))
-      && source.charCodeAt(i) !== 0x3D && source.charCodeAt(i) !== 0x3E
-      && source.charCodeAt(i) !== 0x2F) i++;
-    if (i === start) return null; // a character no attribute name may start with
+    i = stops.name(source, i);
+    if (i === start) return fail(); // a character no attribute name may start with
     const attrName = source.slice(start, i);
-    while (i < source.length && isSpace(source.charCodeAt(i))) i++;
+    i = stops.space(source, i);
     if (source.charCodeAt(i) !== 0x3D /* = */) {
       attrs.push([attrName, '']);
       continue;
     }
-    i++;
-    while (i < source.length && isSpace(source.charCodeAt(i))) i++;
+    i = stops.space(source, i + 1);
     const quote = source.charCodeAt(i);
     if (quote === 0x22 || quote === 0x27) {
-      const close = source.indexOf(String.fromCharCode(quote), i + 1);
-      if (close === -1) return null;
+      const close = stops.quote(source, quote, i + 1);
+      if (close === -1) return fail();
       attrs.push([attrName, source.slice(i + 1, close)]);
       i = close + 1;
       continue;
     }
     const valueStart = i;
-    while (i < source.length && !isSpace(source.charCodeAt(i))
-      && source.charCodeAt(i) !== 0x3E) i++;
+    i = stops.value(source, i);
     attrs.push([attrName, source.slice(valueStart, i)]);
   }
-  return null; // never terminated
-}
-
-function isSpace(code) {
-  return code === 0x20 || code === 0x09 || code === 0x0A || code === 0x0D || code === 0x0C;
+  return fail(); // never terminated
 }

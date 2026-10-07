@@ -95,6 +95,11 @@ export function isTimeOnlyInRange(hrs = 0, min = 0, sec = 0, tzh = 0, tzm = 0, t
   // For leap seconds (sec === 60), we need to check if the corresponding UTC time
   // is 23:59:60. A leap second is only valid at the very end of a UTC day.
   if (sec === 60) {
+    // The local clock is range-checked first, as for any other second:
+    // the wrap below works modulo 24, so an hour of 47 (or a minute of 60
+    // beside a one-minute offset) would otherwise land on 23:59 UTC.
+    if (hrs < 0 || hrs > 23 || min < 0 || min > 59)
+      return false;
     // Calculate what the UTC time would be
     // UTC = local - offset (if offset is positive, local is ahead of UTC)
     // So: UTC = local + (tzSign * tzh) hours + (tzSign * tzm) minutes
@@ -127,7 +132,8 @@ export function isTimeOnlyInRange(hrs = 0, min = 0, sec = 0, tzh = 0, tzm = 0, t
 
 /**
  * Validates the tail of str starting at index from as an RFC 3339
- * full-time (HH:MM:SS with an optional 1-6 digit fraction and a required
+ * full-time (HH:MM:SS with an optional fraction of one or more digits -
+ * `time-secfrac = "." 1*DIGIT` sets no upper bound - and a required
  * z/Z or +HH:MM/-HH:MM offset) without allocating.
  * @param {string} str - The string containing the time
  * @param {number} from - Start of the time (inclusive; runs to the end)
@@ -143,15 +149,14 @@ function isTimeOnlyRegion(str, from) {
   if (s < 0) return false;
 
   let i = from + 8;
-  if (str.charCodeAt(i) === 46) { // '.' starts a 1-6 digit fraction
+  if (str.charCodeAt(i) === 46) { // '.' starts a fraction of 1 or more digits
     const start = ++i;
     while (i < len) {
       const c = str.charCodeAt(i);
       if (c >= 48 && c <= 57) i++;
       else break;
     }
-    const digits = i - start;
-    if (digits < 1 || digits > 6) return false;
+    if (i === start) return false;
   }
 
   const c = str.charCodeAt(i);
@@ -234,7 +239,9 @@ export function getDateTypeOfDateTimeRFC3339(str, def = undefined) {
 // caller comparing against precomputed epoch bounds allocates no Date.
 // A string the grammar accepts but the engine cannot parse (a leap
 // second's `:60`) reads as NaN, exactly as its Date twin reads as an
-// invalid Date - every comparison against it is false.
+// invalid Date - every comparison against it is false. The engine keeps
+// the first three fraction digits of any length, so these truncate to
+// the millisecond (`epochOfRFC3339Parts` rounds instead).
 
 export function getEpochOfDateOnlyRFC3339(str, def = undefined) {
   return isDateOnlyRFC3339(str)
@@ -269,10 +276,16 @@ function readDateParts(str, from) {
   };
 }
 
+/** The fraction digits a parts record keeps: nanoseconds. A double holding
+ * up to 60.999… cannot carry fifteen fraction digits - `59 + .999999999999999`
+ * already rounds to 60 - so the digits past the ninth are dropped (truncated)
+ * rather than allowed to carry the value into the next second. */
+const FRACTION_DIGITS_KEPT = 9;
+
 /**
  * Reads the full-time at index from as {hours, minutes, seconds, offset}.
- * `seconds` carries the fraction, `offset` is minutes east of UTC. The
- * region must already have passed isTimeOnlyRegion.
+ * `seconds` carries the fraction (to nine digits), `offset` is minutes
+ * east of UTC. The region must already have passed isTimeOnlyRegion.
  * @param {string} str - The string containing the time
  * @param {number} from - Index of the first digit
  * @returns {{ hours: number, minutes: number, seconds: number, offset: number }}
@@ -289,7 +302,8 @@ function readTimeParts(str, from) {
       if (c < 48 || c > 57) break;
       i++;
     }
-    seconds += Number(str.slice(start - 1, i)); // '.ddd' as a fraction
+    // '.ddd' as a fraction
+    seconds += Number(str.slice(start - 1, Math.min(i, start + FRACTION_DIGITS_KEPT)));
   }
   const c = str.charCodeAt(i);
   let offset = 0;
@@ -354,6 +368,8 @@ export function parseRFC3339Parts(str) {
  *
  * A bare full-date has no offset and is read as UTC midnight. Note JS
  * has no leap seconds: a `:60` second rolls into the following minute.
+ * The fraction rounds to the nearest millisecond, so `.9996` carries
+ * into the next second (the `getEpochOf…RFC3339` readers truncate).
  *
  * @param {{ year: number, month: number, day: number, hours: number,
  *   minutes: number, seconds: number, offset: number | null }} parts -

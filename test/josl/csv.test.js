@@ -265,6 +265,122 @@ describe('csv: repair mode heals and reports', () => {
   });
 });
 
+// The header naming as it was when every column rescanned the header: the
+// oracle the linear naming must reproduce name for name and repair for
+// repair. A candidate is free only when no column - processed or still
+// raw, to its right - spells it.
+function oracleUniqueName(taken, base) {
+  if (!taken.includes(base))
+    return base;
+  let n = 2;
+  let name = `${base}_${n}`;
+  while (taken.includes(name)) {
+    n++;
+    name = `${base}_${n}`;
+  }
+  return name;
+}
+
+function oracleNameHeader(raw) {
+  const names = [...raw];
+  const heals = [];
+  for (let i = 0; i < names.length; i++) {
+    let name = names[i];
+    if (name.length === 0) {
+      heals.push(['CSV1008', i + 1, 'an empty header name']);
+      name = oracleUniqueName(names, `column_${i + 1}`);
+    }
+    if (i > 0 && names.lastIndexOf(name, i - 1) >= 0) {
+      heals.push(['CSV1007', i + 1, `a duplicate header name (${name})`]);
+      name = oracleUniqueName(names, name);
+    }
+    names[i] = name;
+  }
+  return { names, heals };
+}
+
+/** A seeded generator (mulberry32), so a failing header can be replayed. @param {number} seed */
+function seeded(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6D2B79F5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+describe('csv: header naming', () => {
+  const quote = (name) => '"' + name.replace(/"/g, '""') + '"';
+
+  it('names every generated header exactly as the rescanning algorithm did', () => {
+    const random = seeded(4180);
+    const pool = ['a', 'a', 'a_1', 'a_2', 'a_3', 'a_2_2', 'b', '', '', 'column_1', 'column_2', 'column_3',
+      'column_3_2', 'column_10', 'é', '😀', '__proto__', 'x"y'];
+    for (let round = 0; round < 400; round++) {
+      const width = 1 + Math.floor(random() * (round % 10 === 0 ? 300 : 12));
+      const raw = Array.from({ length: width }, () => {
+        const base = pool[Math.floor(random() * pool.length)];
+        return random() < 0.15 ? `${base}_${Math.floor(random() * 4)}` : base;
+      });
+      const expected = oracleNameHeader(raw);
+      const label = JSON.stringify(raw);
+      // a one-column empty header would otherwise be dropped as a blank line
+      const options = { headers: true, repair: true, skipEmptyLines: false };
+      const read = parseCsvDocument(raw.map(quote).join(',') + '\n', options);
+      deepStrictEqual(read.fields, expected.names, label);
+      deepStrictEqual(read.repairs.map((r) => [r.code, r.column, r.message]), expected.heals, label);
+      // the same names given as an array take the same path
+      deepStrictEqual(parseCsvDocument('', { headers: raw, repair: true }).fields, expected.names, label);
+      // a wider record extends the named header with column_N names
+      const extra = 1 + Math.floor(random() * 4);
+      const widened = oracleNameHeader(raw).names;
+      for (let i = widened.length; i < width + extra; i++)
+        widened.push(oracleUniqueName(widened, `column_${i + 1}`));
+      const wide = parseCsvDocument(raw.map(quote).join(',') + '\n' + Array(width + extra).fill('v').join(',') + '\n',
+        options);
+      deepStrictEqual(wide.fields, widened, label);
+    }
+  });
+
+  it('names a header in time linear in its columns', () => {
+    // relative, not absolute: twice the columns within about three times
+    // the time (3.5x, a 5 ms floor) - linear naming measures about 2.3x
+    // here, the rescanning algorithm 4.6x on distinct names and 8x on
+    // repeated ones. The two sizes alternate, best of five each, so a load
+    // spike lands on both alike, and a loaded host gets three attempts: a
+    // quadratic namer fails every one.
+    const scales = (small, large, options) => {
+      let once = Infinity;
+      let twice = Infinity;
+      for (let k = 0; k < 5; k++) {
+        let start = performance.now();
+        parseCsv(small, options);
+        once = Math.min(once, performance.now() - start);
+        start = performance.now();
+        parseCsv(large, options);
+        twice = Math.min(twice, performance.now() - start);
+      }
+      return { once, twice, linear: twice < 3.5 * Math.max(once, 5) };
+    };
+    const distinct = (n) => Array.from({ length: n }, (_, i) => 'c' + i).join(',') + '\n';
+    const repeated = (n) => Array(n).fill('a').join(',') + '\n';
+    for (const [make, n, options] of [
+      [distinct, 20000, { headers: true }],
+      [repeated, 1500, { headers: true, repair: true }],
+      [(m) => 'a\n' + Array(m).fill('x').join(',') + '\n', 6000, { headers: true, repair: true }],
+    ]) {
+      const small = make(n);
+      const large = make(2 * n);
+      let run = scales(small, large, options);
+      for (let attempt = 1; attempt < 3 && !run.linear; attempt++)
+        run = scales(small, large, options);
+      ok(run.linear, `${2 * n} columns took ${run.twice.toFixed(1)} ms, ${n} took ${run.once.toFixed(1)} ms`);
+    }
+  });
+});
+
 //#endregion
 
 //#region dialect sniffing

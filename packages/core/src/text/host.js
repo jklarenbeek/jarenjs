@@ -1,6 +1,7 @@
 //@ts-check
 import {
   domainToASCII,
+  hasAcePrefix,
   punycodeEncode,
   punycodeDecode,
 } from './punycode.js';
@@ -76,21 +77,6 @@ function isValidAceForm(ace) {
 // The encoded body of an ACE (xn--) label: alphanumerics and hyphens only
 const CONST_REGEXP_ACE_BODY = /^[a-zA-Z0-9-]+$/;
 
-/**
- * Whether the label carries the ACE prefix, in any case. Compared by
- * character code because this runs per label and a `toLowerCase()` would
- * allocate a copy of every one of them just to read four characters.
- * @param {string} label - A hostname label
- * @returns {boolean} True when the label starts with `xn--`
- */
-function startsWithAcePrefix(label) {
-  return label.length >= 4
-    && (label.charCodeAt(0) | 0x20) === 0x78 // 'x'
-    && (label.charCodeAt(1) | 0x20) === 0x6E // 'n'
-    && label.charCodeAt(2) === 0x2D // '-'
-    && label.charCodeAt(3) === 0x2D;
-}
-
 export function isValidIdnHostname(str) {
   // Empty string check
   if (!str || str.length === 0) {
@@ -105,7 +91,7 @@ export function isValidIdnHostname(str) {
   // Fast path: ASCII-only hostnames without ACE prefix
   // Most hostnames are ASCII-only, so we can validate them quickly
   let isAsciiOnly = true;
-  let hasAcePrefix = false;
+  let anyAceLabel = false;
   for (let i = 0; i < str.length; i++) {
     const code = str.charCodeAt(i);
     if (code > 127) {
@@ -119,14 +105,14 @@ export function isValidIdnHostname(str) {
         str.charCodeAt(i + 2) === 45 && str.charCodeAt(i + 3) === 45) { // '--'
       // Only count as ACE prefix if it's at start or after a dot
       if (i === 0 || str.charCodeAt(i - 1) === 46) { // dot = 46
-        hasAcePrefix = true;
+        anyAceLabel = true;
       }
     }
   }
 
   // An ASCII-only hostname without an ACE prefix has no U-label to
   // decode and no label to encode, so it is already its own ACE form.
-  if (isAsciiOnly && !hasAcePrefix) {
+  if (isAsciiOnly && !anyAceLabel) {
     return isValidAceForm(str);
   }
 
@@ -170,7 +156,7 @@ export function isValidIdnHostname(str) {
     }
 
     // Check for ACE prefix (xn--)
-    const isAce = startsWithAcePrefix(label);
+    const isAce = hasAcePrefix(label);
 
     // For ACE labels, decode first then validate the decoded form
     let decodedLabel = label;
@@ -208,7 +194,7 @@ export function isValidIdnHostname(str) {
       // Raw ACE labels (xn--) legitimately have "--" at 2-3
       // But if an ACE label decodes to something with "--" at 2-3, it's invalid
       // because the decoded form shouldn't look like an ACE label
-      const decodedStartsWithACE = startsWithAcePrefix(decodedLabel);
+      const decodedStartsWithACE = hasAcePrefix(decodedLabel);
       if (!decodedStartsWithACE) {
         // Non-ACE form with "--" at 2-3 is invalid
         return false;

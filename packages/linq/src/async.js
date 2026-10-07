@@ -42,15 +42,17 @@
 
 import {
   compileDocument, isProviderSource, providerRoot, providerRelations, sharesScope,
+  SOURCE_OPTION_KEYS,
 } from './provider.js';
 import {
   emitDocument, wrapTerminal, snapshot, fanProjection, isReservedBinding, RESERVED_BINDINGS_TEXT,
-  PROJECTING_STAGES, requireNonNegativeInteger,
+  PROJECTING_STAGES, requireNonNegativeInteger, readOptions, orderSpec, RUN_BINDINGS,
 } from './document.js';
 import { adaptAsyncSource } from './sources.js';
 import { applyMapAsync, normalizeMapAsyncOptions } from './concurrency.js';
 import {
-  captureExpression, toExpression, requireJsonBinding, createHopSink, rowRoot, groupRoot,
+  captureExpression, toExpression, requireJsonBinding, requireListBindings, createHopSink, rowRoot,
+  groupRoot,
 } from './expression.js';
 import { LinqBuildError, LinqRuntimeError } from './errors.js';
 import { schemaOf } from './schema-of.js';
@@ -111,7 +113,9 @@ export class AsyncSequence {
    * @param {{ kind: 'source', iterate: () => AsyncIterator<any> }
    *   | { kind: 'provider', source: any, root: string }
    *   | { kind: 'sequence', runPrefix: (params: ReadonlyMap<string, any>) => any[],
-   *       prefixDocument: () => any }} origin
+   *       prefixDocument: () => any, lists: readonly string[] }} origin -
+   *   a `sequence` origin carries the parameters its prefix's `in()` calls
+   *   read whole as lists
    * @param {readonly any[]} stages
    * @param {ReadonlyMap<string, any>} params
    * @param {{ compileTypeTest?: any, functions?: any, collations?: any,
@@ -137,20 +141,23 @@ export class AsyncSequence {
   }
 
   /**
-   * Capture one callback over this sequence's items — the expression and
-   * the relation hops it navigated — exactly as the synchronous surface
-   * does, so the two emit one document.
+   * Capture one callback over this sequence's items — the expression, the
+   * relation hops it navigated and the parameters its `in()` calls read
+   * whole as lists — exactly as the synchronous surface does, so the two
+   * emit one document.
    * @param {any} fn
    * @param {(sink: ReturnType<typeof createHopSink>) => readonly any[]} [rootsOf]
-   * @returns {{ expression: any, hops: readonly any[] }}
+   * @returns {{ expression: any, hops: readonly any[], lists: string[] }}
    */
   #capture(fn, rootsOf = (sink) => [this.#rowRoot('it', sink)]) {
     if (typeof fn !== 'function') {
       throw new LinqBuildError('JL0005', 'this operator takes a callback function');
     }
     const sink = createHopSink();
-    const expression = captureExpression(fn, rootsOf(sink), new Set(this.#params.keys()));
-    return { expression, hops: sink.hops };
+    /** @type {string[]} */
+    const lists = [];
+    const expression = captureExpression(fn, rootsOf(sink), new Set(this.#params.keys()), true, null, lists);
+    return { expression, hops: sink.hops, lists };
   }
 
   /** Whether this sequence's items are a `groupBy`'s `{ key, items }`,
@@ -173,7 +180,18 @@ export class AsyncSequence {
     return this.#stages.flatMap((stage) => stage.hops ?? []);
   }
 
-  #externals() {
+  /** The parameters an `in()` of some stage — or of the synchronous
+   * prefix a `mapAsync` split off — reads whole as its list. */
+  #lists() {
+    const prefix = this.#origin.kind === 'sequence' ? this.#origin.lists : [];
+    return [...prefix, ...this.#stages.flatMap((stage) => stage.lists ?? [])];
+  }
+
+  /** The declared names and bound values a run hands over, once every
+   * parameter read as an `in()` list holds an array (`JL0004` otherwise).
+   * @param {readonly string[]} [lists] - a terminal predicate's own */
+  #externals(lists = []) {
+    requireListBindings([...this.#lists(), ...lists], this.#params);
     return {
       names: [...this.#params.keys()],
       values: Object.fromEntries(this.#params),
@@ -208,9 +226,10 @@ export class AsyncSequence {
   }
 
   /** Hand one document to the provider, whole, with the bound
-   * externals; `execute` may answer a value or a promise here. */
-  async #push(document) {
-    return this.#origin.source.execute(document, { externals: this.#externals().values });
+   * externals; `execute` may answer a value or a promise here.
+   * @param {any} document @param {readonly string[]} [lists] - a terminal predicate's own */
+  async #push(document, lists = []) {
+    return this.#origin.source.execute(document, { externals: this.#externals(lists).values });
   }
 
   /** A pushed element window over `stages`: the provider must answer
@@ -226,9 +245,11 @@ export class AsyncSequence {
     return /** @type {any[]} */ (result);
   }
 
-  /** A pushed aggregate or quantifier over the whole chain. */
-  #pushTerminal(terminal, args = undefined) {
-    return this.#push(wrapTerminal(this.#documentOf(this.#stages), terminal, args));
+  /** A pushed aggregate or quantifier over the whole chain.
+   * @param {string} terminal @param {readonly any[]} [args]
+   * @param {readonly string[]} [lists] - the quantifier predicate's own */
+  #pushTerminal(terminal, args = undefined, lists = []) {
+    return this.#push(wrapTerminal(this.#documentOf(this.#stages), terminal, args), lists);
   }
 
   /** Compile one per-item evaluator: the stage expression under
@@ -244,11 +265,12 @@ export class AsyncSequence {
   where(predicate) { return this.#chainCaptured('where', 'predicate', predicate); }
   select(projection) { return this.#chainCaptured('select', 'projection', projection); }
   selectMany(selector) {
-    const { expression, hops } = this.#capture(selector);
+    const { expression, hops, lists } = this.#capture(selector);
     return this.#with({
       kind: 'select', name: 'selectMany',
       projection: fanProjection(expression),
       hops,
+      lists,
     });
   }
 
@@ -256,8 +278,8 @@ export class AsyncSequence {
   #chainCaptured(kind, slot, fn) {
     // reuse the sync Sequence's capture through a local import-free
     // seam: capture lives in expression.js and is stage-agnostic
-    const { expression, hops } = this.#capture(fn);
-    return this.#with({ kind, [slot]: expression, hops });
+    const { expression, hops, lists } = this.#capture(fn);
+    return this.#with({ kind, [slot]: expression, hops, lists });
   }
 
   orderBy(key, options) { return this.#orderStage('orderBy', key, false, options); }
@@ -266,28 +288,24 @@ export class AsyncSequence {
   thenByDescending(key, options) { return this.#orderStage('thenBy', key, true, options); }
 
   #orderStage(kind, key, desc, options) {
-    const { expression, hops } = this.#capture(key);
-    const spec = { $key: expression };
-    if (desc) spec.$dir = 'desc';
-    if (options !== undefined) {
-      if (options.empty !== undefined) spec.$empty = options.empty;
-      if (options.collation !== undefined) spec.$collation = options.collation;
-    }
-    return this.#with({ kind, name: desc ? `${kind}Descending` : kind, spec, hops });
+    const { expression, hops, lists } = this.#capture(key);
+    const name = desc ? `${kind}Descending` : kind;
+    return this.#with({ kind, name, spec: orderSpec(expression, desc, options, `${name}()`), hops, lists });
   }
 
   groupBy(key) {
-    const { expression, hops } = this.#capture(key);
-    return this.#with({ kind: 'groupBy', key: expression, hops });
+    const { expression, hops, lists } = this.#capture(key);
+    return this.#with({ kind: 'groupBy', key: expression, hops, lists });
   }
 
   aggregate(seed, step) {
-    const { expression, hops } = this.#capture(step, (sink) => ['acc', this.#rowRoot('it', sink)]);
+    const { expression, hops, lists } = this.#capture(step, (sink) => ['acc', this.#rowRoot('it', sink)]);
     return this.#with({
       kind: 'aggregate',
       seed: toExpression(seed),
       step: expression,
       hops,
+      lists,
     });
   }
 
@@ -344,6 +362,7 @@ export class AsyncSequence {
       on: { $eq: [outer.expression, key.expression] },
       result: projection.expression,
       hops: [...inner.#hops(), ...outer.hops, ...key.hops, ...projection.hops],
+      lists: [...inner.#lists(), ...outer.lists, ...key.lists, ...projection.lists],
     }, params);
   }
 
@@ -366,6 +385,7 @@ export class AsyncSequence {
       group,
       projection: projection.expression,
       hops: [...inner.#hops(), ...outer.hops, ...key.hops, ...projection.hops],
+      lists: [...inner.#lists(), ...outer.lists, ...key.lists, ...projection.lists],
     }, params);
   }
 
@@ -482,6 +502,12 @@ export class AsyncSequence {
       };
     }
     return out;
+  }
+
+  /** What a run binds, unchecked ({@link RUN_BINDINGS}): for `live()`,
+   * which checks the list rule against the externals it registers. */
+  [RUN_BINDINGS]() {
+    return { bindings: Object.fromEntries(this.#params), lists: this.#lists() };
   }
 
   //#endregion
@@ -780,9 +806,9 @@ export class AsyncSequence {
   /** @param {any} [predicate] */
   async any(predicate) {
     if (this.#pushable()) {
-      return predicate === undefined
-        ? this.#pushTerminal('exists')
-        : this.#pushTerminal('some', [this.#capture(predicate).expression]);
+      if (predicate === undefined) return this.#pushTerminal('exists');
+      const { expression, lists } = this.#capture(predicate);
+      return this.#pushTerminal('some', [expression], lists);
     }
     const seq = predicate === undefined ? this : this.where(predicate);
     for await (const item of seq) {
@@ -794,10 +820,12 @@ export class AsyncSequence {
 
   /** @param {any} predicate */
   async all(predicate) {
-    if (this.#pushable()) return this.#pushTerminal('every', [this.#capture(predicate).expression]);
-    const q = this.#evaluator(this.#capture(predicate).expression);
+    const { expression, lists } = this.#capture(predicate);
+    if (this.#pushable()) return this.#pushTerminal('every', [expression], lists);
+    const values = this.#externals(lists).values;
+    const q = this.#evaluator(expression);
     for await (const item of this) {
-      if (!q.ebv(item, this.#externals().values)) return false;
+      if (!q.ebv(item, values)) return false;
     }
     return true;
   }
@@ -857,35 +885,36 @@ function validateParams(bindings) {
  *   queue, or a provider
  * @param {{ compileTypeTest?: any, functions?: any, collations?: any,
  *   pathFunctions?: any, limits?: any, registry?: object }} [options] -
- *   the engine registries, as `from()` takes them
+ *   the engine registries, as `from()` takes them — the same closed set
  * @returns {AsyncSequence}
  */
-export function fromAsync(source, options = {}) {
+export function fromAsync(source, options) {
   if (isProviderSource(source)) {
     return new AsyncSequence(
       { kind: 'provider', source, root: providerRoot(source) },
-      [], new Map(), options, providerRelations(source));
+      [], new Map(), readOptions(options, SOURCE_OPTION_KEYS, 'fromAsync()'), providerRelations(source));
   }
-  return new AsyncSequence(
-    { kind: 'source', iterate: adaptAsyncSource(source) },
-    [], new Map(), options);
+  const iterate = adaptAsyncSource(source);
+  return new AsyncSequence({ kind: 'source', iterate }, [], new Map(),
+    readOptions(options, SOURCE_OPTION_KEYS, 'fromAsync()'));
 }
 
 /**
  * The `Sequence.prototype.mapAsync` seam: the sync chain becomes the
  * PREFIX (compiled in memory or pushed WHOLE to its provider), and the
  * async surface continues locally from its rows. `explain()` reports
- * the split (the residual honesty, applied to the async boundary).
+ * the split (the residual honesty, applied to the async boundary), and
+ * holds the prefix's `in()` lists to the bindings as its runs do.
  * @param {{ runPrefix: (params: ReadonlyMap<string, any>) => any[],
  *   prefixDocument: () => any, params: ReadonlyMap<string, any>,
- *   options: { compileTypeTest?: any } }} carrier
+ *   options: { compileTypeTest?: any }, lists: readonly string[] }} carrier
  * @param {any} fn
  * @param {any} options
  * @returns {AsyncSequence}
  */
 export function asyncFromSequence(carrier, fn, options) {
-  const base = new AsyncSequence(
-    { kind: 'sequence', runPrefix: carrier.runPrefix, prefixDocument: carrier.prefixDocument },
+  const { runPrefix, prefixDocument, lists } = carrier;
+  const base = new AsyncSequence({ kind: 'sequence', runPrefix, prefixDocument, lists },
     [], carrier.params, carrier.options);
   return base.mapAsync(fn, options);
 }

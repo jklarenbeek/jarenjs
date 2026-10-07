@@ -14,6 +14,8 @@
  * not a value the document cannot carry but a member that never arrived —
  * `{ __proto__: builder }` sets the object's prototype instead of adding
  * a key — and the prototype is the only trace of it left to refuse by.
+ * And one check for the members a pen's spec or options object may carry
+ * at all (`closedTo`): a member outside the set is refused by name.
  */
 
 import { isJsonValue } from '@jarenjs/core/object';
@@ -87,4 +89,20 @@ export function requireNameMap(value, what, at) {
     `${what} received a map whose prototype was replaced: a '__proto__:' key in an object `
     + 'literal sets the prototype instead of adding a member, so that member is not there to '
     + "emit — spell it { ['__proto__']: … }, which is an own key", at);
+}
+
+/**
+ * A member set the pen knows, or `JL0101` naming the one it does not.
+ * @param {any} spec
+ * @param {readonly string[]} members
+ * @param {string} what - the method, for the message
+ * @param {string} [at] - the docPath of the node being assembled
+ */
+export function closedTo(spec, members, what, at = '') {
+  for (const key of Object.keys(spec)) {
+    if (!members.includes(key)) {
+      throw new LinqBuildError('JL0101',
+        `${what} does not take '${key}' — it takes ${members.join(', ')}`, `${at}/${key}`);
+    }
+  }
 }

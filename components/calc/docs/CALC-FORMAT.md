@@ -53,8 +53,24 @@ overrides `& | << >> ~` with word-masked BigInt math from
 
 > Bitwise **XOR** is the `xor(a, b)` function (not an infix operator), so
 > `^` stays exponentiation everywhere. Programmer results are surfaced as
-> `Number`; values beyond 2^53 lose precision when read back as a float —
-> the four-base display uses `word.js` on BigInt directly and stays exact.
+> `Number`, and the four-base display is derived from that Number: it is
+> truncated, converted to BigInt and wrapped to the word by `word.js`. It is
+> therefore exact for values within ±2^53 and shows the float-rounded value
+> beyond — `0xFFFFFFFFFFFFFFFF` evaluates to 2^64, which a 64-bit word
+> displays, wrapped, as `0x0`. The `ans` a programmer result commits is the
+> word the display shows (truncated and wrapped), not the unwrapped float.
+
+Every function declares how many arguments it takes — the environment's
+`arity` table, `[min, max]` per function name — and a call outside that range
+is a `CalcParseError` when the expression compiles (`or() expected 2
+arguments, got 3`); a surplus argument used to be ignored and a missing one
+read as `NaN`. `log` and `round` take an optional second argument; `min`, `max`
+and `hypot` take one or more (an empty `min()`, `max()` or `hypot()`, which
+answered `Infinity`, `-Infinity` or `0`, is refused). A function name resolves only through the
+environment's own members, never through `Object.prototype`, and a word
+operation on a non-finite operand is refused (`a word operand must be a finite
+number, got NaN`) rather than failing with the engine's BigInt message. An
+environment without an `arity` table is not checked.
 
 ## Modes
 

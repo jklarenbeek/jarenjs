@@ -17,6 +17,7 @@ import {
   JoslSyntaxError,
   JoslStringifyError,
 } from '@jarenjs/josl';
+import { JoslMachine } from '../../packages/josl/src/machine.js';
 
 /**
  * A pull source over the given items that counts pulls and closes, and
@@ -217,14 +218,16 @@ describe('pull: iterateJoslStream', () => {
         seen.push(item);
       deepStrictEqual(seen, [{ id: 1, tags: ['x'] }, { id: 2, nested: { v: 1 } }, { id: 3 }], `size ${size}`);
     }
-    // the machine behind it retains at most the item in progress
-    const reader = createStreamReader({ detachRoot: () => {} });
+    // the machine behind it retains at most the item in progress (its
+    // root-item hook is internal: no public reader takes it)
+    const reader = new JoslMachine({ detachRoot: () => {} });
     reader.feed(DOC + '\n');
     deepStrictEqual(reader.root(), [{ id: 3 }], 'only the item in progress is held');
     reader.end();
     deepStrictEqual(reader.root(), [], 'and the last one leaves at the end');
+    throws(() => createStreamReader({ detachRoot: () => {} }), TypeError);
     const events = [];
-    const indexed = createStreamReader({ detachRoot: () => {}, onEvent: (e) => events.push(e.type === 'root-item' ? e.index : e.path.join('/')) });
+    const indexed = new JoslMachine({ detachRoot: () => {}, onEvent: (e) => events.push(e.type === 'root-item' ? e.index : e.path.join('/')) });
     indexed.feed(DOC);
     indexed.end();
     deepStrictEqual(events, [0, '0/id', '0/tags', 1, '1/id', '1/nested', '1/nested/v', 2, '2/id'], 'indices survive detachment');

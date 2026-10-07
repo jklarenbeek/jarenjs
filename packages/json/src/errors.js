@@ -9,6 +9,16 @@
 import { CodedError } from '@jarenjs/core/errors';
 
 /**
+ * The deepest expression nesting the package compiles or parses: the
+ * JSON Query compiler's ceiling (`JQ0011` past it), shared by the
+ * recursive-descent front-ends whose texts become query or path
+ * expressions - the JSONPath filter grammar and the XQuery front-end -
+ * so hostile nesting is refused by position with the parser's own syntax
+ * error before the host stack can overflow.
+ */
+export const NESTING_CEILING = 256;
+
+/**
  * Base for errors that carry a stable `code` and a `docPath`, an RFC
  * 6901 JSON Pointer into the offending document. A wrapped error is
  * exposed through the native `cause` option when one is given. This is

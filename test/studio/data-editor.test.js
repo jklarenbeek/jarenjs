@@ -79,7 +79,7 @@ it('applying a model does not recreate storage; explicit open uses the existing 
 it('checks queued manual edits before applying a candidate', async t => {
   let app, proposal;
   const runtime = { dispose() {}, effects: {} }, controller = createDataController({ getApp: () => app, runtime });
-  app = createApp({ state: { data: { ...createDataState(), modelText: JSON.stringify(model), queryText: JSON.stringify(query) } }, actions: DATA_ACTIONS, view: [] }, { schedule: f => f(), eventFields: formEventFields, effects: controller.effects });
+  app = createApp({ state: { data: { ...createDataState(), modelText: JSON.stringify(model), queryText: JSON.stringify(query) } }, actions: DATA_ACTIONS, view: [] }, { schedule: f => f(), eventFields: formEventFields(), effects: controller.effects });
   controller.attach(); t.after(() => { controller.dispose(); app.destroy(); });
   const before = controller.read();
   app.subscribe((_state, changes) => {

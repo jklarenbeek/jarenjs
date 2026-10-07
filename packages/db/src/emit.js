@@ -59,10 +59,98 @@ const physicalValueType = (ref, sql, dialect) => ref.codec !== undefined
 /**
  * A promoted path the dialect's JSON path grammar cannot spell (a
  * member name holding a double quote or a control character). The
- * planner promotes by SCHEMA, not by grammar, so the query engine
- * catches this and runs the document in the set residual instead.
+ * planner promotes by SCHEMA, not by grammar, so the query engines
+ * catch this and run the document in the set residual instead; a
+ * statement that has no residual (a graph load) refuses it with its
+ * own code.
  */
 export class UnrepresentablePath extends Error {}
+
+/**
+ * The one spelling of a promoted ref's member path, for every emitter:
+ * the dialect's path text, or {@link UnrepresentablePath}.
+ * @param {any} dialect
+ * @param {{ segments: import('./dialect.js').JsonPathSegment[] }} ref
+ * @returns {string}
+ */
+export function pathTextOf(dialect, ref) {
+  const text = dialect.jsonPathText(ref.segments);
+  if (text === null) {
+    throw new UnrepresentablePath('a member name the dialect\'s JSON path grammar cannot '
+      + 'carry (a double quote or a control character) runs in the residual');
+  }
+  return text;
+}
+
+/**
+ * The comparison kind a member's DECLARED schema type implies — what a
+ * fold or an ordering over it reads the member as, on every emitter. An
+ * undeclared type has none, and the member is read whole. A document
+ * member read at another kind is no value at all on an engine whose JSON
+ * extraction is typed (PostgreSQL's text form of a number is `NULL`).
+ * @param {{ type?: string } | null | undefined} ref
+ * @returns {'number' | 'text' | 'boolean' | 'any'}
+ */
+export function kindOf(ref) {
+  switch (ref?.type) {
+    case 'integer': case 'number': return 'number';
+    case 'string': return 'text';
+    case 'boolean': return 'boolean';
+    default: return 'any';
+  }
+}
+
+/**
+ * Whether an integer sum over `valueSql` is exact in double arithmetic,
+ * as a column beside the aggregate: every partial sum is exact when the
+ * largest magnitude times the number of terms fits in ±(2^53 - 1). The
+ * magnitude is read as a double, so the guard itself cannot overflow an
+ * integer; a query engine answers a group or total that fails it from the
+ * engine instead. A JSON number past the double range, which only a writer
+ * other than the store can put in a document, has no double to be read
+ * as: PostgreSQL refuses that cast, where SQLite reads an infinity.
+ * @param {any} dialect
+ * @param {string} valueSql
+ * @returns {string}
+ */
+function exactSum(dialect, valueSql) {
+  return `(COUNT(${valueSql}) = 0 OR `
+    + `MAX(ABS(${dialect.numberCast(valueSql)})) <= 9007199254740991 / COUNT(${valueSql}))`;
+}
+
+/**
+ * One term of an integer sum or average, folded as a double. A term past
+ * ±(2^53 - 1) is left out of the fold: {@link exactSum} reads the term
+ * itself, so a run holding one fails its guard and is answered by the
+ * engine, and the accumulator never meets a magnitude that could overflow
+ * it — PostgreSQL raises that overflow, aborting an open transaction,
+ * where SQLite answers an infinity. Inside the guard every term passes
+ * unchanged, so an answer the guard admits is the plain double sum.
+ * @param {any} dialect
+ * @param {string} valueSql
+ * @returns {string}
+ */
+function exactTerm(dialect, valueSql) {
+  return dialect.numberCast(
+    `CASE WHEN ${valueSql} BETWEEN -9007199254740991 AND 9007199254740991 THEN ${valueSql} END`);
+}
+
+/**
+ * The exactness guards of a native temporal bucket, by aggregate: a column
+ * name for each sum or average over an `integer` member, `null` for every
+ * other aggregate (a floating one keeps the database's own sum). The
+ * bucket's members are named by the document, so the names are clear of
+ * every one of them rather than fixed.
+ * @param {{ as: string, aggregates: { fn: string, ref: any, as: string }[] }} bucket
+ * @returns {(string | null)[]}
+ */
+export function bucketGuards(bucket) {
+  const taken = new Set([bucket.as, ...bucket.aggregates.map((entry) => entry.as)]);
+  let prefix = '_safe';
+  while (bucket.aggregates.some((_, i) => taken.has(`${prefix}${i}`))) prefix = `_${prefix}`;
+  return bucket.aggregates.map((entry, i) => ((entry.fn === 'sum' || entry.fn === 'avg')
+    && entry.ref?.type === 'integer' ? `${prefix}${i}` : null));
+}
 
 /** A comparison of schema-compatible paths is false if either is absent.
  * @param {any} pred @param {(ref: any) => { value: string, present: string }} read */
@@ -202,26 +290,19 @@ export function emitPlan(plan, dialect, physical) {
   const valueOf = (ref, kind = 'any') =>
     (ref.column !== null && dialect.columnUsableFor(ref.type, kind)
       ? q(ref.column)
-      : dialect.jsonExtract(docColumn, pathTextOf(ref), kind));
-  const pathTextOf = (ref) => {
-    const text = dialect.jsonPathText(ref.segments);
-    if (text === null) {
-      throw new UnrepresentablePath('a member name the dialect\'s JSON path grammar cannot '
-        + 'carry (a double quote or a control character) runs in the residual');
-    }
-    return text;
-  };
+      : dialect.jsonExtract(docColumn, pathText(ref), kind));
+  const pathText = (ref) => pathTextOf(dialect, ref);
   /** The presence/type discriminator, always over the document column. */
-  const typeOf = (ref) => dialect.jsonTypeOf(docColumn, pathTextOf(ref));
+  const typeOf = (ref) => dialect.jsonTypeOf(docColumn, pathText(ref));
   /** One projected member: its value beside its JSON type, under a
    * suffixed pair of names the decoder reads back. */
   const projectedPair = (ref, suffix) =>
     `CASE WHEN ${typeOf(ref)} IN (${sl('object')}, ${sl('array')}) `
-    + `THEN ${dialect.jsonText(dialect.jsonExtract(docColumn, pathTextOf(ref)))} `
+    + `THEN ${dialect.jsonText(dialect.jsonExtract(docColumn, pathText(ref)))} `
     // a SCALAR leaf comes back as the value the decoder reads: the
     // engine's own scalar where it has one, its text where every
     // member is one JSON type and a CASE could not answer two
-    + `ELSE ${dialect.jsonExtract(docColumn, pathTextOf(ref), 'scalar')} `
+    + `ELSE ${dialect.jsonExtract(docColumn, pathText(ref), 'scalar')} `
     + `END AS ${q(`v${suffix}`)}, ${typeOf(ref)} AS ${q(`t${suffix}`)}`;
 
   const sl = dialect.stringLiteral;
@@ -229,18 +310,6 @@ export function emitPlan(plan, dialect, physical) {
    * answers them: SQLite keeps `integer` and `real` apart, an engine
    * with one JSON number type answers one name. */
   const NUMERIC = () => `(${dialect.numericTypeNames.map(sl).join(', ')})`;
-
-  /** The comparison kind a member's DECLARED schema type implies —
-   * what a fold or an ordering over it reads the member as. An
-   * undeclared type has none, and the member is read whole. */
-  const kindOf = (ref) => {
-    switch (ref?.type) {
-      case 'integer': case 'number': return 'number';
-      case 'string': return 'text';
-      case 'boolean': return 'boolean';
-      default: return 'any';
-    }
-  };
 
   /**
    * One aggregate's argument, read at the kind the FOLD needs rather
@@ -263,6 +332,23 @@ export function emitPlan(plan, dialect, physical) {
         `a ${fn} over a member the schema does not type has no fold on this engine`);
     }
     return valueOf(ref, kind);
+  };
+
+  /**
+   * A whole or grouped aggregate's argument: a sum or an average folds
+   * its terms as doubles ({@link exactTerm}), as the entity emitter folds
+   * them. Inside the exactness guard every partial sum is exact in
+   * doubles, so an answer the guard admits is unchanged; outside it, over
+   * the values the store writes, the statement still raises nothing — no
+   * integer accumulator overflows, no double one either, and no integer
+   * comes back that the host cannot read — and the engine answers the call.
+   * @param {string} fn
+   * @param {any} ref
+   * @returns {string | null}
+   */
+  const accumulated = (fn, ref) => {
+    const value = foldValue(fn, ref);
+    return value !== null && (fn === 'sum' || fn === 'avg') ? exactTerm(dialect, value) : value;
   };
 
   /**
@@ -516,6 +602,7 @@ export function emitPlan(plan, dialect, physical) {
       param({ literal: plan.bucket.every }),
       param({ literal: plan.bucket.every }),
       param({ literal: plan.bucket.every }));
+  const bucketGuardNames = plan.bucket === null ? [] : bucketGuards(plan.bucket);
 
   const selection = plan.rank !== null
     // the k-nearest fetch: the row identity and the packed column
@@ -530,16 +617,24 @@ export function emitPlan(plan, dialect, physical) {
     : plan.group !== null
       ? [...plan.group.keys.map((key, i) => projectedPair(key.ref, `k${i}`)),
         ...plan.group.aggregates.map((entry, i) => {
-          const value = dialect.groupAggregate(entry.fn, foldValue(entry.fn, entry.ref));
+          const value = dialect.groupAggregate(entry.fn, accumulated(entry.fn, entry.ref));
           // Empty sums order as zero, the same value reconstruction
           // returns. Naming that value also works in PostgreSQL ORDER BY.
           return `${entry.empty === 'zero' ? `COALESCE(${value}, 0)` : value} AS ${q(`a${i}`)}`;
-        })].join(', ')
+        }),
+        // an integer sum or average answers only beside its exactness guard
+        ...plan.group.aggregates.flatMap((entry, i) => (entry.fn === 'sum' || entry.fn === 'avg'
+          ? [`${exactSum(dialect, foldValue(entry.fn, entry.ref))} AS ${q(`_safe${i}`)}`] : []))].join(', ')
       : plan.bucket !== null
         ? [`${bucketSql} AS ${q(plan.bucket.as)}`,
-        ...plan.bucket.aggregates.map((entry) =>
-          `${dialect.groupAggregate(entry.fn, foldValue(entry.fn, entry.ref))} `
-          + `AS ${q(entry.as)}`)].join(', ')
+        ...plan.bucket.aggregates.map((entry, i) =>
+          `${dialect.groupAggregate(entry.fn, bucketGuardNames[i] === null
+            ? foldValue(entry.fn, entry.ref) : accumulated(entry.fn, entry.ref))} `
+          + `AS ${q(entry.as)}`),
+        // an integer sum or average answers only beside its exactness
+        // guard, as it does in any other grouping
+        ...plan.bucket.aggregates.flatMap((entry, i) => (bucketGuardNames[i] === null ? []
+          : [`${exactSum(dialect, foldValue(entry.fn, entry.ref))} AS ${q(bucketGuardNames[i])}`]))].join(', ')
       : plan.aggregate === null
         ? (plan.project === 'document'
           ? `${dialect.jsonText(docColumn)} AS ${q('doc')}`
@@ -564,7 +659,9 @@ export function emitPlan(plan, dialect, physical) {
             ? `${plan.aggregate.sql}(${valueOf(plan.aggregate.ref,
               kindOf(plan.aggregate.ref))}) AS ${q('value')}`
             : `${plan.aggregate.fn.toUpperCase()}(`
-              + `${foldValue(plan.aggregate.fn, plan.aggregate.ref)}) AS ${q('value')}`;
+              + `${accumulated(plan.aggregate.fn, plan.aggregate.ref)}) AS ${q('value')}`
+              + (plan.aggregate.fn === 'sum' || plan.aggregate.fn === 'avg'
+                ? `, ${exactSum(dialect, foldValue(plan.aggregate.fn, plan.aggregate.ref))} AS ${q('_safe')}` : '');
 
   let sql = `SELECT ${selection} FROM ${q(physical.table)}`;
   if (plan.filter !== null) sql += ` WHERE ${emitPred(plan.filter)}`;
@@ -679,21 +776,16 @@ export function createEntityPredicateEmitters(dialect, param) {
     ? { external: name, json: true }
     : { external: name });
 
-  const pathTextOf = (ref) => {
-    const text = dialect.jsonPathText(ref.segments);
-    if (text === null)
-      throw new Error('emit: a promoted entity path is not representable');
-    return text;
-  };
+  const pathText = (ref) => pathTextOf(dialect, ref);
 
   /** The member at a ref, read as the SQL a comparison of that KIND
    * needs. On a dynamically typed engine every kind is the same read;
    * on one whose columns carry a real type they are four. */
   const memberAt = (docSql, ref, kind) =>
-    dialect.jsonExtract(docSql, pathTextOf(ref), kind);
+    dialect.jsonExtract(docSql, pathText(ref), kind);
 
   const emitDocPred = (docSql, pred) => {
-    const jt = dialect.jsonTypeOf(docSql, pathTextOf(pred.ref));
+    const jt = dialect.jsonTypeOf(docSql, pathText(pred.ref));
     if (pred.p === 'in') {
       // the collection's membership form, over the entity's document
       const branch = (/** @type {'text' | 'number'} */ kind, /** @type {string} */ listSql) => {
@@ -838,7 +930,7 @@ export function createEntityPredicateEmitters(dialect, param) {
       }
       // Epoch columns retain the document's lexical comparison rule.
       return { value: memberAt(docSql, ref, ref.type === 'string' ? 'text' : 'number'),
-        present: `${dialect.jsonTypeOf(docSql, pathTextOf(ref))} IS NOT NULL` };
+        present: `${dialect.jsonTypeOf(docSql, pathText(ref))} IS NOT NULL` };
     });
     if (pred.p === 'and')
       return balancedJoin(pred.items.map((item) => emitPred(aliasSql, docSql, item)), 'AND');
@@ -893,13 +985,7 @@ export function emitEntityPlan(plan, dialect, physicalOf) {
   ]));
   const aliasOf = (bindingName) => aliases.get(bindingName).alias;
   const docOf = (bindingName) => `${aliasOf(bindingName)}.${q('doc')}`;
-
-  const pathTextOf = (ref) => {
-    const text = dialect.jsonPathText(ref.segments);
-    if (text === null)
-      throw new Error('emit: a promoted entity path is not representable');
-    return text;
-  };
+  const pathText = (ref) => pathTextOf(dialect, ref);
 
   const entityOf = new Map(plan.bindings.map((binding) => [binding.name, binding.entity]));
   const emitters = createEntityPredicateEmitters(dialect, param);
@@ -955,7 +1041,7 @@ export function emitEntityPlan(plan, dialect, physicalOf) {
       return `${column} AS ${names}, ${type} AS ${typeName}`;
     }
     const docSql = docOf(leaf.binding);
-    const text = pathTextOf(leaf.ref);
+    const text = pathText(leaf.ref);
     const type = dialect.jsonTypeOf(docSql, text);
     return `CASE WHEN ${type} IN (${sl('object')}, ${sl('array')}) `
       + `THEN ${dialect.jsonText(dialect.jsonExtract(docSql, text))} `
@@ -970,12 +1056,11 @@ export function emitEntityPlan(plan, dialect, physicalOf) {
   const group = plan.group;
   const groupValue = (ref) => physicalComparable(ref,
     `${aliasOf(plan.bindings[0].name)}.${q(ref.column)}`, dialect);
-  // Every integer addition is exact when the largest magnitude times
-  // the number of terms fits in the safe range. Sum as REAL so even a
-  // rejected group cannot overflow SQLite's integer accumulator first.
+  // A sum or an average folds its terms as doubles past which nothing
+  // overflows, so even a group its guard rejects raises nothing first.
   const numericGroup = (entry) => ['sum', 'avg'].includes(entry.fn);
-  const groupSafe = (entry) => `(COUNT(${groupValue(entry.ref)}) = 0 OR `
-    + `MAX(ABS(${dialect.numberCast(groupValue(entry.ref))})) <= 9007199254740991 / COUNT(${groupValue(entry.ref)}))`;
+  const groupTerm = (entry) => exactTerm(dialect, groupValue(entry.ref));
+  const groupSafe = (entry) => exactSum(dialect, groupValue(entry.ref));
   const groupValid = (ref) => {
     const value = groupValue(ref);
     const type = physicalValueType(ref, value, dialect);
@@ -989,13 +1074,14 @@ export function emitEntityPlan(plan, dialect, physicalOf) {
   const selection = group
     ? [...group.keys.map((key, i) => projectedPair({ binding: plan.bindings[0].name, ref: key.ref }, `k${i}`)),
       ...group.aggregates.map((entry, i) => `${entry.fn === 'rows' ? 'COUNT(*)'
-        : dialect.groupAggregate(entry.fn, numericGroup(entry) || entry.ref.codec === 'integer'
+        : dialect.groupAggregate(entry.fn, numericGroup(entry) ? groupTerm(entry) : entry.ref.codec === 'integer'
           ? dialect.numberCast(groupValue(entry.ref)) : groupValue(entry.ref))} AS ${q(`a${i}`)}`),
       ...group.aggregates.flatMap((entry, i) => numericGroup(entry) ? [`${groupSafe(entry)} AS ${q(`_safe${i}`)}`] : []),
       ...(groupRefs.length ? [`${groupRefs.map(groupValid).join(' AND ')} AS ${q('_valid')}`] : [])].join(', ')
     : plan.scalarAggregate
     ? `${dialect.groupAggregate(plan.scalarAggregate.fn, plan.scalarAggregate.ref.type === 'string'
-      ? groupValue(plan.scalarAggregate.ref) : dialect.numberCast(groupValue(plan.scalarAggregate.ref)))} AS ${q('value')}, `
+      ? groupValue(plan.scalarAggregate.ref) : numericGroup(plan.scalarAggregate) ? groupTerm(plan.scalarAggregate)
+        : dialect.numberCast(groupValue(plan.scalarAggregate.ref)))} AS ${q('value')}, `
       + `${groupValid(plan.scalarAggregate.ref)} AS ${q('_valid')}, `
       + `${plan.scalarAggregate.ref.nullPolicy === 'null' ? `COUNT(*) - COUNT(${groupValue(plan.scalarAggregate.ref)})` : '0'} AS ${q('_nulls')}, `
       + `${numericGroup(plan.scalarAggregate) ? groupSafe(plan.scalarAggregate) : '1'} AS ${q('_safe')}`
@@ -1054,10 +1140,11 @@ export function emitEntityPlan(plan, dialect, physicalOf) {
       // only a plain mapped column orders by its column; an epoch
       // path orders by the document string — codepoint order, exactly
       // the engine's — because mixed stored precisions would let the
-      // integer column sort differently
+      // integer column sort differently; any other document member
+      // orders as its declared type, a number numerically
       const value = term.ref.flavor === 'entity-column'
         ? physicalComparable(term.ref, `${aliasOf(term.binding)}.${q(term.ref.column)}`, dialect)
-        : dialect.jsonExtract(docOf(term.binding), pathTextOf(term.ref), 'text');
+        : dialect.jsonExtract(docOf(term.binding), pathText(term.ref), kindOf(term.ref));
       const nullsFirst = term.emptyGreatest === term.desc;
       return `${value} ${term.desc ? 'DESC' : 'ASC'}${dialect.orderNulls(nullsFirst)}`;
     });

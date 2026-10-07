@@ -17,8 +17,22 @@
  */
 
 import { slugify } from '@jarenjs/core/string';
+import { isPlainOptions, nearestName, refuseUnknownMembers } from '@jarenjs/core/object';
 
 export { hashContent, fnv1a, FNV1A_OFFSET_BASIS, slugify } from '@jarenjs/core/string';
+
+/**
+ * How deep any construct nests. Block containers (block quotes, lists,
+ * list items, footnote definitions), inline containers (emphasis, strong
+ * emphasis, strikethrough, links), the raw-HTML elements `html: 'vnode'`
+ * keeps, frontmatter flow collections, YAML block collections and TOML
+ * tables each nest at most this deep (JSON frontmatter, twice as deep):
+ * a marker past the bound is read as text, and a frontmatter collection
+ * past it is refused. The bound is what keeps the deepest tree the
+ * parser can build one that every emitter, and the view renderers after
+ * them, can walk recursively — whatever the input.
+ */
+export const MAX_NESTING = 256;
 
 /**
  * The `id` for one heading, unique within one emission.
@@ -109,4 +123,87 @@ export function expandTabs(line, startColumn = 0) {
     }
   }
   return out;
+}
+
+/**
+ * The rule one member of a closed option set must satisfy: what it
+ * `expects`, as a refusal names it, the `test` a present value passes,
+ * and — for a closed list of values — the `values` a refusal names the
+ * nearest of.
+ * @typedef {{ expects: string, test: (value: any) => boolean, values?: readonly string[] }} OptionRule
+ */
+
+/** The option kinds the emitters take. */
+export const OPTION_RULES = Object.freeze({
+  /** @type {OptionRule} */
+  boolean: { expects: 'a boolean', test: (value) => typeof value === 'boolean' },
+  /** @type {OptionRule} */
+  string: { expects: 'a string', test: (value) => typeof value === 'string' },
+  /** @type {OptionRule} */
+  function: { expects: 'a function', test: (value) => typeof value === 'function' },
+  /** @type {OptionRule} */
+  array: { expects: 'an array', test: (value) => Array.isArray(value) },
+  /** @type {OptionRule} */
+  object: { expects: 'an object', test: (value) => value !== null && typeof value === 'object' },
+  /**
+   * @param {...string} values
+   * @returns {OptionRule}
+   */
+  oneOf: (...values) => ({
+    expects: values.slice(0, -1).map((v) => `'${v}'`).join(', ') + ` or '${values[values.length - 1]}'`,
+    test: (value) => values.includes(value),
+    values: Object.freeze(values),
+  }),
+});
+
+/**
+ * A value as a refusal names it, without calling anything on it.
+ * @param {unknown} value
+ * @returns {string}
+ */
+function describeValue(value) {
+  if (value === null) return 'null';
+  if (Array.isArray(value)) return 'an array';
+  switch (typeof value) {
+    case 'string': return JSON.stringify(value.length > 40 ? value.slice(0, 40) + '…' : value);
+    case 'number':
+    case 'boolean':
+    case 'bigint':
+    case 'undefined': return String(value);
+    case 'function': return 'a function';
+    case 'symbol': return 'a symbol';
+    default: return 'an object';
+  }
+}
+
+/**
+ * Compile the check for one function's closed option set. The returned
+ * check refuses — with a `TypeError` naming the function — options that
+ * are not a plain object, a member outside `rules` (naming the nearest
+ * one), and a present member that breaks its rule (naming the nearest
+ * value of a closed list, when one is close); it returns nothing and
+ * changes nothing. A member passed as `undefined` is absent: that is the
+ * shape a caller forwarding its own optional options builds.
+ * @param {string} surface the function the options belong to
+ * @param {Record<string, OptionRule>} rules
+ * @returns {(options: unknown) => void}
+ */
+export function compileOptionCheck(surface, rules) {
+  const names = Object.freeze(Object.keys(rules));
+  return (options) => {
+    if (!isPlainOptions(options)) {
+      throw new TypeError(`md ${surface}: options must be a plain object, got ${describeValue(options)}`);
+    }
+    refuseUnknownMembers(options, names,
+      (key, hint) => new TypeError(`md ${surface}: unknown option '${key}'${hint}`));
+    for (const key of Object.keys(options)) {
+      const value = options[key];
+      const rule = rules[key];
+      if (value !== undefined && !rule.test(value)) {
+        const near = typeof value === 'string' && rule.values !== undefined ? nearestName(value, rule.values) : undefined;
+        throw new TypeError(`md ${surface}: option '${key}' must be ${rule.expects}, got ${describeValue(value)}`
+          + (near === undefined ? '' : ` — did you mean '${near}'?`));
+      }
+    }
+  };
 }

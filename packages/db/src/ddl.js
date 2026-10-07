@@ -30,6 +30,62 @@ const MANAGED_SQL_OPTIONS = Object.freeze({ columnOrder: /** @type {const} */ ('
 export const KEY_COLUMN = 'key';
 export const DOC_COLUMN = 'doc';
 
+const UTF8 = new TextEncoder();
+
+/**
+ * Refuse (`JD0004`) a name the plan gives a table, a column or an index that
+ * the engine cannot hold, at the model member it comes from — before any SQL
+ * names it. The dialect owns the bound (`maxIdentifierBytes`: PostgreSQL
+ * keeps 63 bytes and truncates a longer name silently, and its dialect would
+ * refuse one only as SQL is rendered, with a TypeError that names no member
+ * of the model); SQLite holds a name of any length.
+ * @param {any} dialect
+ * @param {string} name - the planned name
+ * @param {string} what - what takes the name, for the reason
+ * @param {string} docPath - the model member the name comes from
+ */
+function refuseLongName(dialect, name, what, docPath) {
+  const limit = dialect.maxIdentifierBytes;
+  if (!Number.isFinite(limit)) return;
+  const bytes = UTF8.encode(name).length;
+  if (bytes > limit) {
+    throw new DbCompileError('JD0004',
+      `${what} would be named '${name}', ${bytes} bytes; the ${dialect.name} engine keeps ${limit} bytes `
+      + 'of an identifier and truncates a longer one silently, so two names that share a prefix would be one — '
+      + 'shorten the name', docPath);
+  }
+}
+
+/**
+ * A refusal (`JD0004`) of an index the plan would name as the engine names
+ * one of the table's own objects (`dialect.ownRelationNames`: PostgreSQL's
+ * primary-key index `<table>_pkey` and a serial column's sequence
+ * `<table>_<column>_seq`, the identity column's included). Indexes and those
+ * objects share one namespace and the table is created first, so the open's
+ * `CREATE INDEX IF NOT EXISTS` skipped the planned index: a unique member
+ * went unenforced, and the next open refused the table (`JD0002`). A foreign
+ * key or a check constraint is no relation: its name (`<table>_<column>_fkey`,
+ * `<table>_<column>_check`) takes none from an index. The names are the
+ * engine's as it gives them unclipped — a clipped one needs a table name
+ * within a few bytes of the identifier bound.
+ * @param {any} dialect
+ * @param {string} table
+ * @param {{ name: string, type: string }[]} columns - the columns the plan creates the table with
+ * @returns {(name: string, what: string, rename: string, docPath: string) => void}
+ */
+function ownNameGuard(dialect, table, columns) {
+  const own = new Set(dialect.ownRelationNames(table,
+    dialect.identityColumn === undefined ? columns : [...columns, dialect.identityColumn]));
+  return (name, what, rename, docPath) => {
+    if (own.has(name)) {
+      throw new DbCompileError('JD0004',
+        `${what} would be named '${name}', which the ${dialect.name} engine already gives one of the table's own `
+        + 'objects (its primary key\'s index, or a serial column\'s sequence): the index would never be created — '
+        + `rename ${rename}`, docPath);
+    }
+  };
+}
+
 /**
  * Analyze one index path expression down to typed segments.
  * @param {string} expression - A JSONPath expression (`$.email`)
@@ -467,8 +523,11 @@ export function planCollection(name, collection, dialect, options = undefined) {
   const physicalByKey = new Map();
   /** @type {{ column: string, canonical: string, functions: string[] }[]} */
   const expressions = [];
+  /** Where each index's own generated columns start in `generated`. @type {number[]} */
+  const firstColumn = [];
 
   for (const index of collection.indexes) {
+    firstColumn.push(generated.length);
     // an EXPRESSION index: one column over the declared computation,
     // shared by every index that declares the same canonical expression
     if (index.expression !== undefined) {
@@ -550,6 +609,24 @@ export function planCollection(name, collection, dialect, options = undefined) {
       columns,
     });
   }
+  firstColumn.push(generated.length);
+  // every name the table, its columns and its indexes take, at the member
+  // each one comes from (see `refuseLongName`)
+  refuseLongName(dialect, name, `the table for collection '${name}'`, collection.docPath ?? `/collections/${name}`);
+  // — and no index under a name the engine gives the table's own objects
+  // (see `ownNameGuard`)
+  const ownName = ownNameGuard(dialect, name,
+    [{ name: KEY_COLUMN, type: keyType }, { name: DOC_COLUMN, type: dialect.docColumnType }, ...generated]);
+  collection.indexes.forEach((index, i) => {
+    for (const column of generated.slice(firstColumn[i], firstColumn[i + 1])) {
+      refuseLongName(dialect, column.name, `the column for '${index.expression === undefined ? `$${column.canonical}` : index.name}'`,
+        `${index.docPath}/${index.expression === undefined ? 'path' : 'expression'}`);
+    }
+    if (indexes.some((planned) => planned.name === `${name}_${index.name}`)) {
+      refuseLongName(dialect, `${name}_${index.name}`, `index '${index.name}'`, `${index.docPath}/name`);
+      ownName(`${name}_${index.name}`, `index '${index.name}'`, 'the index', `${index.docPath}/name`);
+    }
+  });
 
   const tableShape = {
     table: name,
@@ -740,7 +817,8 @@ export function verifyShape(connection, plan, collection, docPath) {
         }))
         .sort((a, b) => (a.name < b.name ? -1 : 1));
       const expected = [...plan.expected.columns]
-        .map((c) => ({ ...c, type: comparableType(c.type) }))
+        .map((c) => ({ ...c, type: comparableType(c.type),
+          ...(c.legacyType === undefined ? {} : { legacyType: comparableType(c.legacyType) }) }))
         .sort((a, b) => (a.name < b.name ? -1 : 1));
       if (actual.length !== expected.length) {
         // name what is missing or extra: a count alone sends the reader
@@ -756,7 +834,9 @@ export function verifyShape(connection, plan, collection, docPath) {
       for (let i = 0; i < expected.length; i++) {
         const want = expected[i];
         const have = actual[i];
-        if (want.name !== have.name || want.type !== have.type
+        // a column an earlier release declared otherwise (`legacyType`, a key
+        // it left to the caller) is still the declared shape of that table
+        if (want.name !== have.name || (want.type !== have.type && want.legacyType !== have.type)
           || want.generated !== have.generated) {
           disagree(`column '${have.name}' is ${have.type}${have.generated ? ' generated' : ''}, `
             + `the model declares '${want.name}' ${want.type}${want.generated ? ' generated' : ''}`);
@@ -810,6 +890,60 @@ export function verifyShape(connection, plan, collection, docPath) {
     }));
 }
 
+/**
+ * How a column holding an entity's key is declared — the key column itself
+ * or one that references it: the key's storage type, unless the database
+ * allocates the key (`default: 'auto'`) on an engine whose allocation is a
+ * column property (`dialect.autoKeyType`, PostgreSQL's `bigserial`). Then
+ * the key column declares that allocation, and a referencing column the
+ * type it amounts to in the catalog, so the foreign key stays
+ * implementable. `legacyType` is the other declaration a database this
+ * model opens can hold for the column, which `verifyShape` accepts too: for
+ * an allocated key, the storage type an earlier release declared with no
+ * allocation; for a single integer key the caller supplies, the allocation
+ * a database created while the key was still `auto` keeps — explicit keys
+ * are written into it just the same.
+ * @param {any} keyColumn - the key column's mapping
+ * @param {any} dialect
+ * @param {boolean} referencing
+ * @param {boolean} [single] - whether it is the entity's only key column
+ *   (a composite key is never allocated)
+ * @returns {{ type: string, legacyType?: string }}
+ */
+function keyColumnType(keyColumn, dialect, referencing, single = true) {
+  const stored = dialect.typeFor(keyColumn.storage, 'generated');
+  if (dialect.autoKeyType === undefined || (keyColumn.auto !== true && (!single || keyColumn.storage !== 'integer')))
+    return { type: stored };
+  const allocated = referencing ? dialect.comparableColumnType(dialect.autoKeyType).toLowerCase() : dialect.autoKeyType;
+  return keyColumn.auto === true ? { type: allocated, legacyType: stored } : { type: stored, legacyType: allocated };
+}
+
+/**
+ * The foreign keys an existing table must carry, from the planned columns:
+ * the ACTION, not just the edge — SET NULL and CASCADE are both "a foreign
+ * key exists" and mean opposite things for the row.
+ * @param {any[]} columns
+ */
+const expectedForeignKeysOf = (columns) => columns
+  .filter((column) => column.references !== undefined)
+  .map((column) => ({
+    column: column.name,
+    references: column.references.table,
+    onDelete: column.references.onDelete ?? null,
+    onUpdate: column.references.onUpdate ?? null,
+    targetColumn: column.references.column ?? null,
+  }));
+
+/**
+ * The columns an existing table must hold, sorted by name, each with the
+ * type an earlier release declared where it differs (see `keyColumnType`).
+ * @param {any[]} columns @param {Map<string, string>} legacyTypes @param {any} dialect
+ */
+const expectedColumnsOf = (columns, legacyTypes, dialect) => [...columns
+  .map((column) => ({ name: column.name, type: column.type, generated: false,
+    ...(legacyTypes.has(column.name) ? { legacyType: legacyTypes.get(column.name) } : {}) })),
+...identityColumnExpected(dialect)]
+  .sort((a, b) => (a.name < b.name ? -1 : 1));
 
 /**
  * Plan one ENTITY's physical shape from the mapping data
@@ -835,11 +969,26 @@ export function planEntity(name, entityMapping, entities, dialect) {
       createSql: declared?.createSql ?? [], expected: declared?.expected ?? { columns: [], indexes: [] },
       columnNames: new Set(entityMapping.columns.map((c) => c.physical)) };
   }
+  // every name the table, its columns and its indexes take, at the member
+  // each one comes from, before any SQL names one (see `refuseLongName`)
+  const entityPath = `/entities/${name}`;
+  const memberPath = (/** @type {string} */ column) => (entityMapping.columns.some((/** @type {any} */ c) => c.name === column)
+    ? `${entityPath}/schema/properties/${column}` : entityPath);
+  const viaColumns = entityMapping.foreignKeys.map((/** @type {any} */ fk) => fk.column);
+  refuseLongName(dialect, name, `the table for entity '${name}'`, entityPath);
+  for (const column of [...entityMapping.columns.map((/** @type {any} */ c) => c.name), ...viaColumns])
+    refuseLongName(dialect, column, `the column for '${column}'`, memberPath(column));
+  for (const column of [...entityMapping.indexes.map((/** @type {any} */ index) => index.property), ...viaColumns])
+    refuseLongName(dialect, `${name}_${column}`, `the index over '${column}'`, memberPath(column));
   const storageType = (storage) => dialect.typeFor(storage, 'generated');
-  const keyType = (entityName) => {
-    const target = entities.entities[entityName];
-    const keyColumn = target.columns.find((column) => column.key);
-    return storageType(keyColumn.storage);
+  /** @type {Map<string, string>} */
+  const legacyTypes = new Map();
+  const singleKey = entityMapping.keys.length === 1;
+  /** The declared type of a column holding a key (see `keyColumnType`). */
+  const keyHolding = (/** @type {string} */ columnName, /** @type {any} */ keyColumn, /** @type {boolean} */ referencing) => {
+    const { type, legacyType } = keyColumnType(keyColumn, dialect, referencing, referencing || singleKey);
+    if (legacyType !== undefined) legacyTypes.set(columnName, legacyType);
+    return type;
   };
   const renderCheck = (columnName, values) => {
     const rendered = values.map((value) => (typeof value === 'string'
@@ -848,7 +997,6 @@ export function planEntity(name, entityMapping, entities, dialect) {
     return `${dialect.quoteIdentifier(columnName)} IN (${rendered.join(', ')})`;
   };
 
-  const singleKey = entityMapping.keys.length === 1;
   // a declared `via` property and its foreign key are ONE column: the
   // FK definition claims it, so the scalar list must not repeat it
   const fkNames = new Set(entityMapping.foreignKeys.map((fk) => fk.column));
@@ -857,7 +1005,7 @@ export function planEntity(name, entityMapping, entities, dialect) {
     if (fkNames.has(column.name)) continue;
     columns.push({
       name: column.name,
-      type: storageType(column.storage),
+      type: column.key ? keyHolding(column.name, column, false) : storageType(column.storage),
       primaryKey: singleKey && column.key,
       notNull: column.key && !singleKey,
       check: column.check !== undefined ? renderCheck(column.name, column.check) : undefined,
@@ -866,7 +1014,7 @@ export function planEntity(name, entityMapping, entities, dialect) {
   for (const fk of entityMapping.foreignKeys) {
     columns.push({
       name: fk.column,
-      type: keyType(fk.references),
+      type: keyHolding(fk.column, entities.entities[fk.references].columns.find((/** @type {any} */ column) => column.key), true),
       references: { table: fk.references, column: fk.referencesKey, onDelete: fk.onDelete },
     });
   }
@@ -892,8 +1040,11 @@ export function planEntity(name, entityMapping, entities, dialect) {
     indexUnique.set(fk.column, (indexUnique.get(fk.column) ?? false) || fk.unique);
   }
   const expectedIndexes = [];
+  // no index under a name the engine gives the table's own objects (see `ownNameGuard`)
+  const ownName = ownNameGuard(dialect, name, columns);
   for (const [column, unique] of indexUnique) {
     const indexName = `${name}_${column}`;
+    ownName(indexName, `the index over '${column}'`, `the member '${column}'`, memberPath(column));
     createSql.push(dialect.ddl.createIndex({
       name: indexName, table: name, columns: [column], unique,
     }));
@@ -904,22 +1055,9 @@ export function planEntity(name, entityMapping, entities, dialect) {
     table: name,
     createSql,
     columnNames: new Set(columns.map((column) => column.name)),
-    expectedForeignKeys: columns
-      .filter((column) => column.references !== undefined)
-      .map((column) => ({
-        column: column.name,
-        references: column.references.table,
-        // the ACTION, not just the edge: SET NULL and CASCADE are both
-        // "a foreign key exists" and mean opposite things for the row
-        onDelete: column.references.onDelete ?? null,
-        onUpdate: column.references.onUpdate ?? null,
-        targetColumn: column.references.column ?? null,
-      })),
+    expectedForeignKeys: expectedForeignKeysOf(columns),
     expected: {
-      columns: [...columns
-        .map((column) => ({ name: column.name, type: column.type, generated: false })),
-      ...identityColumnExpected(dialect)]
-        .sort((a, b) => (a.name < b.name ? -1 : 1)),
+      columns: expectedColumnsOf(columns, legacyTypes, dialect),
       indexes: expectedIndexes.sort((a, b) => (a.name < b.name ? -1 : 1)),
     },
   };
@@ -934,23 +1072,25 @@ export function planEntity(name, entityMapping, entities, dialect) {
  * @returns {{ table: string, createSql: string[], expected: any }}
  */
 export function planJoinTable(tableName, join, entities, dialect) {
-  const keyType = (entityName) => {
-    const target = entities.entities[entityName];
-    const keyColumn = target.columns.find((column) => column.key);
-    return dialect.typeFor(keyColumn.storage, 'generated');
+  // the join table and its columns are named from the two entities
+  // (see `refuseLongName`)
+  refuseLongName(dialect, tableName, `the join table of '${join.left.entity}' and '${join.right.entity}'`, `/entities/${join.left.entity}`);
+  for (const side of [join.left, join.right])
+    refuseLongName(dialect, side.column, `the join column for '${side.entity}'`, `/entities/${side.entity}`);
+  /** @type {Map<string, string>} */
+  const legacyTypes = new Map();
+  /** The endpoint column referencing `side`'s key (see `keyColumnType`). @param {any} side */
+  const endpoint = (side) => {
+    const { type, legacyType } = keyColumnType(
+      entities.entities[side.entity].columns.find((/** @type {any} */ column) => column.key), dialect, true);
+    if (legacyType !== undefined) legacyTypes.set(side.column, legacyType);
+    return {
+      name: side.column,
+      type,
+      references: { table: side.entity, column: side.referencesKey, onDelete: 'cascade' },
+    };
   };
-  const columns = [
-    {
-      name: join.left.column,
-      type: keyType(join.left.entity),
-      references: { table: join.left.entity, column: join.left.referencesKey, onDelete: 'cascade' },
-    },
-    {
-      name: join.right.column,
-      type: keyType(join.right.entity),
-      references: { table: join.right.entity, column: join.right.referencesKey, onDelete: 'cascade' },
-    },
-  ];
+  const columns = [endpoint(join.left), endpoint(join.right)];
   return {
     table: tableName,
     createSql: [dialect.ddl.createRelationalTable({
@@ -958,18 +1098,9 @@ export function planJoinTable(tableName, join, entities, dialect) {
       columns,
       compositeKey: [join.left.column, join.right.column],
     })],
-    expectedForeignKeys: columns.map((column) => ({
-      column: column.name,
-      references: column.references.table,
-      onDelete: column.references.onDelete ?? null,
-      onUpdate: column.references.onUpdate ?? null,
-      targetColumn: column.references.column ?? null,
-    })),
+    expectedForeignKeys: expectedForeignKeysOf(columns),
     expected: {
-      columns: [...columns
-        .map((column) => ({ name: column.name, type: column.type, generated: false })),
-      ...identityColumnExpected(dialect)]
-        .sort((a, b) => (a.name < b.name ? -1 : 1)),
+      columns: expectedColumnsOf(columns, legacyTypes, dialect),
       indexes: [],
     },
   };

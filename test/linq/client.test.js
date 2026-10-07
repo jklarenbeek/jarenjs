@@ -425,6 +425,34 @@ describe('live(): the store\'s registration with the chain\'s document and bindi
     await live.close();
   });
 
+  it('an in() list parameter is held to the externals the store registers, not the chain\'s own binding', async () => {
+    const { client: live } = await seeded({ capture: true });
+    const notList = codeIs('JL0004', /^JL0004: parameter 'ids' is the list an in\(\) reads, so its binding must be an array/);
+    const titles = (/** @type {any} */ query) => query.result.rows.map((/** @type {any} */ r) => r.title).sort();
+    try {
+      const byStars = (/** @type {any} */ ids) => live.entities.Post.params({ ids }).where((p, q) => p.stars.in(q.ids));
+      const syncByStars = (/** @type {any} */ ids) => from(live.store.sync.entity('Post')).params({ ids })
+        .where((/** @type {any} */ p, /** @type {any} */ q) => p.stars.in(q.ids));
+      // a placeholder the options override is not what runs: it registers, on both surfaces
+      for (const chain of [byStars(null), syncByStars(null)]) {
+        const query = await live.live(chain, { externals: { ids: [4, 5] } });
+        assert.deepStrictEqual(titles(query), ['p3', 'p4']);
+        query.close();
+      }
+      // an override that is not a list is what would run, and is refused
+      await assert.rejects(async () => live.live(byStars([]), { externals: { ids: 5 } }), notList);
+      await assert.rejects(async () => live.live(syncByStars([1]), { externals: { ids: { k: 5 } } }), notList);
+      // with nothing overriding it, the chain's own binding runs and is held to the rule
+      await assert.rejects(async () => live.live(byStars(null)), notList);
+      const own = await live.live(byStars([3]));
+      assert.deepStrictEqual(titles(own), ['p1']);
+      own.close();
+      // explain() still checks the bindings it can see
+      assert.throws(() => byStars(null).explain(), notList);
+    }
+    finally { await live.close(); }
+  });
+
   it('a collection handle chains, explains and maintains its own live query', async () => {
     const places = await open(placesModel, { driver: nodeDriver(), capture: true });
     const handle = places.collections.places;
@@ -613,6 +641,18 @@ describe('transaction(): a typed client bound to the transaction', () => {
     assert.strictEqual(report.updated, 0, "the client's staged change is not the transaction's");
     assert.strictEqual((await client.entities.User.asNoTracking().get(ada.id)).age, 36);
     await client.close();
+  });
+
+  it("an explicit unitOfWork: null reaches the store, which refuses it JD0013 — only undefined keeps 'own'", async () => {
+    const { client } = await seeded();
+    try {
+      const refused = (/** @type {any} */ error) => error.code === 'JD0013' && /unitOfWork/.test(error.message);
+      await assert.rejects(async () => client.transaction(async () => 'ran', { unitOfWork: null }), refused);
+      await assert.rejects(async () => client.store.transaction(async () => 'ran', { unitOfWork: null }), refused);
+      assert.strictEqual(await client.transaction(async () => 'ran', { unitOfWork: undefined }), 'ran');
+      assert.strictEqual(await client.transaction(async () => 'ran'), 'ran');
+    }
+    finally { await client.close(); }
   });
 
   it('a root handle awaited from inside the transaction is JD0012, naming the fix', async () => {

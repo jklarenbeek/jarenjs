@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { deriveAuthoringProfile, JSLT_AUTHORING_OPEN } from './lib/schema-profiles.js';
 import { contentHash } from './lib/content-hash.js';
+import { isMainModule } from './lib/main-module.js';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const QUERY = 'A Jaren query expression; validate against the full grammar and compile locally.';
@@ -76,11 +77,11 @@ export function generateAuthoringProfiles(options = {}) {
       profileHash: contentHash(profile), open: Object.keys(entry.open), full, profile: schemaComplexity(profile) });
     save(base + '.authoring.schema.json', profile);
   }
-  save('benchmark/programmind-profiles.json', { version: 1, rows });
+  save('benchmark/authoring-profiles.json', { version: 1, rows });
   return drift;
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMainModule(import.meta.url)) {
   const drift = generateAuthoringProfiles({ check: process.argv.includes('--check') });
   if (drift.length) { console.error('Authoring profile drift:', drift.join(', ')); process.exitCode = 1; }
 }

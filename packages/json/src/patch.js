@@ -40,6 +40,8 @@ import {
   equalsJson,
   isJsonContainer,
   isJsonObject,
+  isPlainOptions,
+  refuseUnknownMembers,
   setObjectMember,
   stableStringify,
 } from '@jarenjs/core/object';
@@ -469,6 +471,32 @@ function compileOperation(op, index, fresh) {
   }
 }
 
+/** The members `compileJSONPatch` / `applyJSONPatch` read; any other is refused. */
+const PATCH_OPTIONS = Object.freeze(['mutate', 'values', 'changes']);
+/** The members `createJSONPatch` reads. */
+const DIFF_OPTIONS = Object.freeze(['arrayDiff']);
+
+/**
+ * Refuse an options object that is not plain, or that carries a member
+ * outside `known` - a misspelt `mutated` would otherwise silently leave
+ * the document copied, a misspelt `change` the bare result unwrapped. A
+ * host programming error, so a `TypeError` naming the nearest member.
+ * @param {unknown} options @param {readonly string[]} known @param {string} owner
+ */
+function admitPatchOptions(options, known, owner) {
+  if (!isPlainOptions(options)) throw new TypeError(`${owner}: options must be a plain object`);
+  refuseUnknownMembers(options, known, (key, hint) => new TypeError(`${owner}: unknown option '${key}'${hint}`));
+}
+
+/** A boolean switch: absent (undefined) is off, anything but a boolean is refused.
+ * @param {Record<string, any>} options @param {string} name @returns {boolean} */
+function readSwitch(options, name) {
+  const value = options[name];
+  if (value === undefined) return false;
+  if (typeof value !== 'boolean') throw new TypeError(`compileJSONPatch: '${name}' must be true or false`);
+  return value;
+}
+
 /**
  * Compile a JSON Patch (RFC 6902) into a reusable applier.
  *
@@ -493,6 +521,9 @@ function compileOperation(op, index, fresh) {
  *   returning the patched document (or `{ doc, changes }` with the
  *   `changes` option)
  * @throws {JsonPatchCompileError} When the patch document is invalid
+ * @throws {TypeError} When `options` is not a plain object, names a member
+ *   other than `mutate`, `values` and `changes`, or gives one a value of the
+ *   wrong type
  * @example
  * const apply = compileJSONPatch([
  *   { op: 'test', path: '/version', value: 5 },
@@ -512,13 +543,14 @@ export function compileJSONPatch(patch, options = undefined) {
   let values = 'share';
   let changes = false;
   if (options !== undefined && options !== null) {
-    mutate = options.mutate === true;
+    admitPatchOptions(options, PATCH_OPTIONS, 'compileJSONPatch');
+    mutate = readSwitch(options, 'mutate');
     if (options.values !== undefined) {
       if (options.values !== 'share' && options.values !== 'fresh')
         throw new TypeError(`compileJSONPatch: unknown 'values' option '${options.values}'`);
       values = options.values;
     }
-    changes = options.changes === true;
+    changes = readSwitch(options, 'changes');
   }
   const fresh = mutate || values === 'fresh';
   if (!Array.isArray(patch))
@@ -568,6 +600,7 @@ export function compileJSONPatch(patch, options = undefined) {
  *   `options.changes` is set
  * @throws {JsonPatchCompileError} When the patch document is invalid
  * @throws {JsonPatchRuntimeError} When an operation fails to apply
+ * @throws {TypeError} When `options` is malformed, as for `compileJSONPatch`
  */
 export function applyJSONPatch(doc, patch, options = undefined) {
   return compileJSONPatch(patch, options)(doc);
@@ -829,7 +862,8 @@ function diffValue(src, tgt, path, out, lcs) {
  * @param {{ arrayDiff?: 'index' | 'minimal' }} [options] - `arrayDiff`
  *   selects the array strategy: `'index'` (default) or `'minimal'`
  * @returns {JsonPatchOperation[]} The patch document (empty when equal)
- * @throws {TypeError} When `arrayDiff` is not a known mode
+ * @throws {TypeError} When `options` is not a plain object, names a member
+ *   other than `arrayDiff`, or `arrayDiff` is not a known mode
  * @example
  * createJSONPatch({ a: 1, b: 2 }, { a: 1, b: 3, c: 4 });
  * // [{ op: 'replace', path: '/b', value: 3 },
@@ -842,6 +876,7 @@ function diffValue(src, tgt, path, out, lcs) {
  * //  { op: 'replace', path: '/3/n', value: 1 }]
  */
 export function createJSONPatch(source, target, options = undefined) {
+  if (options != null) admitPatchOptions(options, DIFF_OPTIONS, 'createJSONPatch');
   const mode = options == null || options.arrayDiff === undefined
     ? 'index'
     : options.arrayDiff;

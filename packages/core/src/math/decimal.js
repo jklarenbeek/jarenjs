@@ -151,6 +151,10 @@ export function decimalToNumber(d, negative) {
  * `fn:round-half-to-even`). A negative argument that rounds to zero is
  * `-0`; `NaN`, `±Infinity` and zero are returned as they are. A non-integer
  * precision or an unknown rounding mode throws TypeError before rounding.
+ * This is the exact counterpart of `Float64.roundTo`, which rounds the
+ * scaled double `x · 10^precision` instead: the two differ where that
+ * product rounds onto a tie — `roundExact(2.675, 2)` is 2.67 (the double is
+ * 2.67499…), `Float64.roundTo(2.675, 2)` is 2.68.
  * @param {number} x
  * @param {number} [precision] - an integer, default 0
  * @param {'half-up' | 'half-even'} [mode]

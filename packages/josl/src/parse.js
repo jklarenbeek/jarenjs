@@ -5,6 +5,7 @@
 // stream needs the cutter's side-effect-free pre-pass first.
 
 import { JoslMachine } from './machine.js';
+import { admitOptions, JOSL_READ, TOML_READ } from './options.js';
 
 /**
  * Parse a complete JOSL document.
@@ -16,19 +17,21 @@ import { JoslMachine } from './machine.js';
  *  event sink; see `createStreamReader`
  * @returns {object|Array} The root table, or root array for [[]] documents
  * @throws {import('./errors.js').JoslSyntaxError} On invalid input
+ * @throws {TypeError} On an option the reader does not take (the
+ *  `JOSL2xxx` limits included), or a value of the wrong type
  */
 export function parseJosl(text, options = undefined) {
-  return new JoslMachine(options).parseAll(text);
+  return new JoslMachine(admitOptions(options, JOSL_READ, 'parseJosl')).parseAll(text);
 }
 
 /**
  * Parse a complete document in strict TOML 1.0 mode.
  * @param {string} text - TOML source text
- * @param {object} [options] - Reader options minus `mode`
+ * @param {object} [options] - Reader options minus `mode`, which is always `'toml'`
  * @returns {object} The root table
  */
 export function parseToml(text, options = undefined) {
-  return new JoslMachine({ ...options, mode: 'toml' }).parseAll(text);
+  return new JoslMachine({ ...admitOptions(options, TOML_READ, 'parseToml'), mode: 'toml' }).parseAll(text);
 }
 
 export { JoslSyntaxError } from './errors.js';

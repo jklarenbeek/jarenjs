@@ -651,7 +651,16 @@ const result = validate(shaped);
 
 Every option is **off by default** — each one changes what your data means,
 so each is a decision you make rather than one you inherit.
-`compileNormalizer(schema)` with no options is the identity.
+`compileNormalizer(schema)` with no options is the identity. The option set
+is closed, and each refusal is a `TypeError` that says what is wrong: a
+member other than `useDefaults`, `removeAdditional`, `coerceTypes` and
+`trimStrings` names the nearest one (`coerceType` — did you mean
+`coerceTypes`?), a value of the wrong type names the member and what it takes
+(`coerceTypes: 'yes'`, a member set to `null`, a `removeAdditional` other
+than `true`, `false` or `'all'`), and options that are not a plain object —
+`null` among them — are refused as such. A misspelt or mistyped switch used
+to compile a normalizer with that switch off, in silence, and `null` options
+used to throw a raw `TypeError` (`Cannot read properties of null`).
 
 ### Per-field control, not just a global switch
 

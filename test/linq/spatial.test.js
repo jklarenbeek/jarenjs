@@ -148,8 +148,9 @@ describe('the spatial surface is documented exactly once, in QUERY-PEN §4', () 
   const spatialOperators = new Set([...spatialSection
     .matchAll(/^\| `(\$[a-z-]+)` \|/gm)].map((m) => m[1]));
 
-  /** Every METHODS member that emits an operator, from the source. */
-  const emitted = new Map([...source.matchAll(/\b(\w+): (?:unary|binary)\('(\$[a-z-]+)'\)/g)]
+  /** Every METHODS member that emits an operator, from the source (each
+   * factory call marked pure, so a bundle that never captures drops it). */
+  const emitted = new Map([...source.matchAll(/\b(\w+): (?:\/\* @__PURE__ \*\/ )?(?:unary|binary)\('(\$[a-z-]+)'\)/g)]
     .map((m) => [m[1], m[2]]));
   emitted.set('geohash', '$geohash'); // the optional-arity method is hand-written
   const spatialMethods = [...emitted].filter(([, op]) => spatialOperators.has(op)).map(([name]) => name);

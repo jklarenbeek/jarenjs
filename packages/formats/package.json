@@ -1,7 +1,7 @@
 {
   "name": "@jarenjs/formats",
   "private": false,
-  "version": "0.104.2",
+  "version": "0.105.0",
   "type": "module",
   "main": "./src/index.js",
   "types": "./dist/types/index.d.ts",
@@ -38,12 +38,12 @@
     "formats"
   ],
   "scripts": {
-    "build": "node esbuild.config.js && npm run build:types",
+    "build": "npm run build:types",
     "build:types": "tsc -p tsconfig.json",
     "prepack": "npm run build:types"
   },
   "dependencies": {
-    "@jarenjs/core": "0.104.2",
-    "@jarenjs/json": "0.104.2"
+    "@jarenjs/core": "0.105.0",
+    "@jarenjs/json": "0.105.0"
   }
 }

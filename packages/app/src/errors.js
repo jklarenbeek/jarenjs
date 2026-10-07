@@ -162,7 +162,7 @@ export class AppRuntimeError extends CodedError {
 export class HostValueError extends Error {
   /** @param {unknown} value - The value host code threw. */
   constructor(value) {
-    super(`host code threw a non-Error value (${describeThrown(value)})`);
+    super(`host code threw a non-Error value (${describeValue(value)})`);
     this.name = 'HostValueError';
     Object.defineProperty(this, 'cause', {
       value, writable: true, enumerable: false, configurable: true,
@@ -171,16 +171,17 @@ export class HostValueError extends Error {
 }
 
 /**
- * Describe a thrown non-Error value without observing it: only
- * conversions no host code can trap are used — never a `toString`,
- * never `Symbol.toPrimitive`, and never proxy-observable reflection
- * (`Array.isArray` runs the proxy-sensitive IsArray operation, so a
- * revoked proxy is simply "an object"). `typeof` and identity
- * comparisons are untrappable, which is the whole vocabulary here.
+ * Describe a value host code handed over — a thrown non-Error value, a
+ * mistyped option — without observing it: only conversions no host code
+ * can trap are used — never a `toString`, never `Symbol.toPrimitive`, and
+ * never proxy-observable reflection (`Array.isArray` runs the
+ * proxy-sensitive IsArray operation, so a revoked proxy is simply "an
+ * object"). `typeof` and identity comparisons are untrappable, which is
+ * the whole vocabulary here.
  * @param {unknown} value
  * @returns {string}
  */
-function describeThrown(value) {
+export function describeValue(value) {
   if (value === null) return 'null';
   if (value === undefined) return 'undefined';
   switch (typeof value) {
@@ -198,6 +199,36 @@ function describeThrown(value) {
       return 'a function';
     default:
       return 'an object';
+  }
+}
+
+/**
+ * A mistyped option as a refusal names it: `describeValue`'s words for a
+ * primitive, a function or a plain object, and for any other object what
+ * it is — `an array`, or an instance as its constructor names it (`a
+ * Map`, `a Promise`, `a Grants`), or another realm's plain object. The
+ * look may run a proxy's traps; an object it cannot look at is "an
+ * object".
+ * @param {unknown} value
+ * @returns {string}
+ */
+export function describeOption(value) {
+  if (value === null || typeof value !== 'object') return describeValue(value);
+  try {
+    if (Array.isArray(value)) return 'an array';
+    const proto = Object.getPrototypeOf(value);
+    if (proto === null || proto === Object.prototype) return 'an object';
+    const constructor = Object.getOwnPropertyDescriptor(proto, 'constructor')?.value;
+    const name = typeof constructor === 'function'
+      ? Object.getOwnPropertyDescriptor(constructor, 'name')?.value
+      : undefined;
+    if (typeof name !== 'string' || !/^[A-Za-z_$][\w$]*$/.test(name)) return 'an object with a custom prototype';
+    // a plain object made in another realm inherits that realm's Object.prototype
+    if (name === 'Object') return 'an object from another realm';
+    return (/^[AEIO]/.test(name) ? 'an ' : 'a ') + name;
+  }
+  catch {
+    return 'an object';
   }
 }
 

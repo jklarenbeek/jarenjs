@@ -32,6 +32,7 @@ import { DbCompileError } from './errors.js';
 import { KEY_COLUMN, DOC_COLUMN } from './ddl.js';
 import { MODEL_VERSION, ENGINE_TABLES } from './engine-metadata.js';
 import { registeredName, expressionMembers } from './expression.js';
+import { modelPath } from './model-path.js';
 
 /**
  * Every code the loss report uses, with what it means. Closed, and
@@ -170,14 +171,17 @@ export function readSchema(connection, options = undefined) {
     }
     const readObjects = dialect.introspect.objects === undefined ? []
       : useStatementOnce(connection, dialect.introspect.objects(), (s) => s.all([]));
+    /** An object of an inspected table, its own or the table itself: never
+     * the engine's, and within the requested tables. @param {any} row */
+    const inspected = (row) => !engine.has(String(row.owner))
+      && (wanted === null || wanted.has(String(row.owner)) || wanted.has(String(row.name)));
     return chain(readObjects, (catalog) => {
       const complete = [...catalog];
       for (const row of rows) {
         if (!complete.some((o) => o.type === row.type && o.name === row.name))
           complete.push({ ...row, owner: row.name, sql: null });
       }
-      const objects = complete.filter((row) => !engine.has(String(row.owner))
-        && (wanted === null || wanted.has(String(row.owner)) || wanted.has(String(row.name))))
+      const objects = complete.filter(inspected)
         .map((row) => ({ type: String(row.type), name: String(row.name),
           owner: String(row.owner), sql: row.sql ?? null }));
       const step = (i, out) => (i >= names.length
@@ -186,8 +190,7 @@ export function readSchema(connection, options = undefined) {
       return chain(step(0, []), (schema) => dialect.introspect.catalog === undefined ? schema
         : useStatementOnce(connection, dialect.introspect.catalog(), (statement) =>
           chain(statement.all([]), (native) => ({ ...schema, catalog: native
-            .filter((row) => !engine.has(String(row.owner))
-              && (wanted === null || wanted.has(String(row.owner)) || wanted.has(String(row.name))))
+            .filter(inspected)
             .map((row) => ({ type: String(row.type), name: String(row.name), owner: String(row.owner),
               schema: String(row.schema), sql: row.sql ?? null,
               metadata: typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata })) }))));
@@ -263,7 +266,7 @@ function deriveCollection(dialect, table, report, keys, functionNames) {
         `the column type '${column.type}' maps back to no schema type, so the member `
         + 'is left untyped'));
     }
-    paths.set(column.name, { path: pathExpression(segments), type, segments });
+    paths.set(column.name, { path: modelPath(segments), type, segments });
   }
 
   const indexes = [];
@@ -386,17 +389,6 @@ function placeType(node, segments, type) {
     if (current.properties[segment.name] === undefined) current.properties[segment.name] = {};
     current = current.properties[segment.name];
   }
-}
-
-/** `$.a.b[0]`, in the spelling a model's index path takes. */
-function pathExpression(segments) {
-  let text = '$';
-  for (const segment of segments) {
-    if ('index' in segment) { text += `[${segment.index}]`; continue; }
-    text += /^[A-Za-z_][A-Za-z0-9_]*$/.test(segment.name)
-      ? `.${segment.name}` : `[${JSON.stringify(segment.name)}]`;
-  }
-  return text;
 }
 
 /**

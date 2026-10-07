@@ -19,8 +19,9 @@
 
 import { svgRoot, coord } from '@jarenjs/view/helpers';
 import { clamp01 } from '@jarenjs/core/math';
+import { scaleLinear, scaleLog } from '../core/scale.js';
 import { formatTickValue } from '../core/axis.js';
-import { cartesianFrame, annotateChart } from '../core/cartesian.js';
+import { cartesianFrame, annotateChart, rampLegend } from '../core/cartesian.js';
 import { SEQUENTIAL, sequentialColor } from '../core/palette.js';
 import { normalizeTooltip, valueMark } from '../core/marks.js';
 
@@ -69,14 +70,14 @@ export function buildHeatmapAST(data, config = {}) {
     }
   }
   const domain = Number.isFinite(min) ? { min, max } : null;
-  const span = domain === null ? 0
-    : log ? Math.log10(max) - Math.log10(min)
-      : max - min;
+  // the extent in decades under log; one wider than a double still spreads
+  // over the ramp, since the linear scale measures it at half scale
+  const shade = domain === null ? null : log ? scaleLog(min, max) : scaleLinear(min, max);
 
   const xStep = xLabels.length === 0 ? 1 : 1 / xLabels.length;
   const yStep = yLabels.length === 0 ? 1 : 1 / yLabels.length;
   const cells = [];
-  if (domain !== null) {
+  if (shade !== null) {
     for (let yi = 0; yi < yLabels.length; yi++) {
       const row = values[yi];
       if (!Array.isArray(row)) continue;
@@ -84,9 +85,7 @@ export function buildHeatmapAST(data, config = {}) {
         const v = row[xi];
         if (typeof v !== 'number' || !Number.isFinite(v)) continue;
         if (log && v <= 0) continue;
-        const t = span === 0 ? 0.5
-          : log ? (Math.log10(v) - Math.log10(min)) / span
-            : (v - min) / span;
+        const t = shade(v);
         cells.push({
           xi, yi,
           u0: xi * xStep,
@@ -135,12 +134,7 @@ export function renderHeatmapAST(ast, theme, hash, options = {}) {
   const tooltip = normalizeTooltip(options.tooltip);
   // The ramp key rides the frame's legend mechanism: five sequential
   // stops as swatches, the extent values as the end labels.
-  const rampStops = [0, 0.25, 0.5, 0.75, 1].map((t) => sequentialColor(t, ramp));
-  const legend = ast.domain === null ? null : rampStops.map((_, i) => ({
-    name: i === 0 ? formatTickValue(ast.domain.min)
-      : i === rampStops.length - 1 ? formatTickValue(ast.domain.max) : '',
-    swatch: i,
-  }));
+  const { stops: rampStops, legend } = rampLegend(ast.domain, ramp);
   const frame = cartesianFrame({
     title: ast.title,
     legend,

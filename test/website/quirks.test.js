@@ -1,13 +1,15 @@
 //@ts-check
 /**
  * The service worker, proven in Node: sw.js runs in a vm sandbox against
- * a fake cache + fetch, so its two contracts hold without a browser —
+ * a fake cache + fetch, so its three contracts hold without a browser —
  *  (a) every URL the install handler precaches is served by a fetch
  *      branch (the old worker precached fonts and root statics no branch
- *      ever matched, so they died offline), and
+ *      ever matched, so they died offline),
  *  (b) every cache.put is gated on `response.ok` (a 404/502 must never
  *      be cached forever, and a bad navigation response must never
- *      replace the shell).
+ *      replace the shell), and
+ *  (c) only a navigation to the shell's own path refreshes the shell, so
+ *      a raw file opened in a tab never becomes the offline site root.
  */
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
@@ -116,5 +118,25 @@ describe('website — the service worker (Node vm harness)', function () {
       SCOPE, `${SCOPE}assets/index-abc123.js`, `${SCOPE}benchmarks/meta.json`,
       `${SCOPE}site/packages.json`, `${SCOPE}build.json`,
     ], 'ok responses cache at every generated-data site, so the docs rail survives offline');
+  });
+
+  it('only a navigation to the shell refreshes the shell — a raw file opened in a tab does not', async function () {
+    let online = true;
+    const sw = bootSw((/** @type {any} */ request) => (online
+      ? Promise.resolve(response(`network:${keyUrl(request)}`, true))
+      : Promise.reject(new Error('offline'))));
+    await runInstall(sw.listeners);
+    // a reader opens a generated file the site serves: a successful navigation in scope
+    await dispatchFetch(sw.listeners, `${SCOPE}benchmarks/meta.json`, 'navigate');
+    assert.strictEqual(sw.store.get(SCOPE).body, `precached:${SCOPE}`, 'the shell entry is untouched');
+    online = false;
+    let offline = await dispatchFetch(sw.listeners, SCOPE, 'navigate');
+    assert.strictEqual(offline.body, `precached:${SCOPE}`, 'offline, the site root is still the app shell');
+    // the shell itself, with or without a query, still refreshes it
+    online = true;
+    await dispatchFetch(sw.listeners, `${SCOPE}?from=pwa`, 'navigate');
+    online = false;
+    offline = await dispatchFetch(sw.listeners, SCOPE, 'navigate');
+    assert.strictEqual(offline.body, `network:${SCOPE}?from=pwa`);
   });
 });

@@ -230,9 +230,9 @@ describe('compileJSONPathSetter', () => {
   });
 
   it('handles member names needing normalized-path escapes', () => {
-    const doc = { "it's": { 'a\\b': { '\n\t': 1, '': 2 } } };
+    const doc = { "it's": { 'a\\b': { '\n\t': 1, '\x01': 2 } } };
     const out = setAtJSONPath(doc, "$['it\\'s']['a\\\\b'].*", (v) => v * 10);
-    deepStrictEqual(out, { "it's": { 'a\\b': { '\n\t': 10, '': 20 } } });
+    deepStrictEqual(out, { "it's": { 'a\\b': { '\n\t': 10, '\x01': 20 } } });
   });
 
   it('mutates in place with { mutate: true }', () => {

@@ -50,13 +50,15 @@ export async function qualifyCsvWriters() {
     const chunks = [], sink = createCsvStreamWriter({ ...options, onChunk: chunk => chunks.push(chunk) });
     for (const record of rows) sink.write(record);
     assert.equal(sink.end(), ''); assert.equal(chunks.join(''), whole);
-    const bytes = new TextEncoder().encode(whole), expected = parseCsv(whole, options);
+    // the readers take the dialect only: the formula, field and newline options belong to the writers
+    const dialect = { ...(options.delimiter === undefined ? {} : { delimiter: options.delimiter }), ...(options.quote === undefined ? {} : { quote: options.quote }) };
+    const bytes = new TextEncoder().encode(whole), expected = parseCsv(whole, dialect);
     // Independent reader oracle across every byte split, including UTF-8,
     // embedded CR/LF, quote escapes and the apostrophe prefix boundary.
     for (let split = 0; split <= bytes.length; split++) {
       const actual = [], decoder = new TextDecoder();
       const chunks = [decoder.decode(bytes.slice(0, split), { stream: true }), decoder.decode(bytes.slice(split))];
-      for await (const parsed of iterateCsvStream(chunks, options)) actual.push(parsed);
+      for await (const parsed of iterateCsvStream(chunks, dialect)) actual.push(parsed);
       assert.deepEqual(actual, expected);
     }
   }

@@ -46,7 +46,10 @@ import { chain, attempt } from './driver.js';
 import { DbCompileError, DbRuntimeError, wrapDriverError } from './errors.js';
 import { createCursor, rowClassOf, PAGE_LIMIT_DEFAULT } from './cursor.js';
 import { refuseCancelled } from './cancellation.js';
+import { readOptions } from './options.js';
 import { jobStatements } from './dialects/jobs.js';
+/** What `enqueue` reads from its options (§2). */
+const ENQUEUE_OPTIONS = ['id', 'runAt', 'maxAttempts'];
 /** §4 defaults, all overridable per worker. */
 export const JOB_DEFAULTS = Object.freeze({
   maxAttempts: 5,
@@ -270,6 +273,13 @@ export function createJobEngine(options) {
   const enqueue = (kind, payload, enqueueOptions) => {
     if (typeof kind !== 'string' || kind === '') {
       throw new TypeError('enqueue: "kind" must be a non-empty string');
+    }
+    // a closed option set (§2): a misspelt `runAt` was dropped, and the job
+    // it should have deferred ran at once
+    readOptions(enqueueOptions, ENQUEUE_OPTIONS, 'jobs.enqueue');
+    if (enqueueOptions?.id !== undefined && (typeof enqueueOptions.id !== 'string' || enqueueOptions.id === '')) {
+      throw new DbCompileError('JD0013',
+        `jobs.enqueue option 'id' must be a non-empty string — the job's idempotency key — got ${JSON.stringify(enqueueOptions.id)}`);
     }
     const id = enqueueOptions?.id ?? uuid();
     // a `runAt` that is not a number stored as NaN and left the job

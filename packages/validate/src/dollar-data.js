@@ -55,6 +55,7 @@ import {
 
 import {
   createDataRefCompilers,
+  allValidatorsPass,
 } from './tools.js';
 
 /**
@@ -188,22 +189,7 @@ export function compileDollarDataSchema(schemaObj, jsonSchema) {
     if (validator) validators.push(validator);
   }
 
-  if (validators.length === 0) {
-    return undefined;
-  }
-
-  if (validators.length === 1) {
-    return validators[0];
-  }
-
-  return function validateDollarDataSchema(data, dataPath, dataRoot) {
-    for (let i = 0; i < validators.length; i++) {
-      if (!validators[i](data, dataPath, dataRoot)) {
-        return false;
-      }
-    }
-    return true;
-  };
+  return allValidatorsPass(validators);
 }
 
 export function isDollarDataReference(jsonSchema) {

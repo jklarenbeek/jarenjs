@@ -70,14 +70,35 @@ function build(node, env) {
       return (scope) => op(l(scope), r(scope), scope);
     }
     case 'call': {
-      const fn = env.funcs[node.name];
+      // own members only: a name inherited from Object.prototype is no function of ours
+      const fn = Object.hasOwn(env.funcs, node.name) ? env.funcs[node.name] : undefined;
       if (fn === undefined) throw new CalcParseError(`unknown function '${node.name}'`);
+      checkArity(node.name, node.args.length, env.arity);
       const args = node.args.map((a) => build(a, env));
       return (scope) => fn(args.map((a) => a(scope)), scope);
     }
     default:
       throw new CalcParseError(`cannot compile node '${node.type}'`);
   }
+}
+
+/**
+ * Refuse a call with an argument count outside the function's declared
+ * `[min, max]`. An environment without an `arity` table, or a function
+ * without an entry in it, is not checked.
+ * @param {string} name
+ * @param {number} count
+ * @param {Record<string, readonly [number, number]> | undefined} arity
+ */
+function checkArity(name, count, arity) {
+  if (arity === undefined || !Object.hasOwn(arity, name)) return;
+  const [min, max] = arity[name];
+  if (count >= min && count <= max) return;
+  const noun = (/** @type {number} */ n) => (n === 1 ? 'argument' : 'arguments');
+  const expected = max === Infinity ? `at least ${min} ${noun(min)}`
+    : min === max ? `${min} ${noun(min)}`
+      : `${min} or ${max} arguments`;
+  throw new CalcParseError(`${name}() expected ${expected}, got ${count}`);
 }
 
 /**

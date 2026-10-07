@@ -164,11 +164,19 @@ describe('contractTools — named operations and the call context', () => {
     const seen = [];
     let release = () => {};
     const handlerDone = new Promise((r) => { release = r; });
+    // the handler runs until this test lets it go, so the order of the two
+    // settlements is the assertion, whatever the host's speed
+    let entered = () => {}, unblock = () => {};
+    const running = new Promise((r) => { entered = r; });
+    const blocked = new Promise((r) => { unblock = r; });
+    let finished = false;
     const client = openLocalClient(contract, {
       'admin.purge': () => true,
       'slow.run': async (_input, ctx) => {
-        await new Promise((r) => setTimeout(r, 300));
+        entered();
+        await blocked;
         seen.push({ aborted: ctx.signal?.aborted === true });
+        finished = true;
         release();
         return true;
       },
@@ -176,11 +184,17 @@ describe('contractTools — named operations and the call context', () => {
     });
     const tool = contractTools(contract, client).find((t) => t.name === 'slow_run');
     const ac = new AbortController();
-    setTimeout(() => ac.abort(), 20);
-    const started = performance.now();
-    const outcome = await tool.execute({}, { signal: ac.signal });
+    const execution = tool.execute({}, { signal: ac.signal });
+    await running;
+    ac.abort();
+    // a call that waited for the handler could not settle at all: the
+    // backstop lets the handler go late, and the check below names the wait
+    const backstop = setTimeout(unblock, 5000);
+    const outcome = await execution;
+    clearTimeout(backstop);
     assert.ok(!outcome.ok && outcome.error.code === 'JC2052', JSON.stringify(outcome));
-    assert.ok(performance.now() - started < 250, 'resolved at the abort, not at the handler\'s end');
+    assert.strictEqual(finished, false, 'resolved at the abort, not at the handler\'s end');
+    unblock();
     await handlerDone;
     assert.deepStrictEqual(seen, [{ aborted: true }], 'the handler saw the abort');
 

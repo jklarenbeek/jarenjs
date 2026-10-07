@@ -46,7 +46,7 @@ import { cartesianFrame, annotateChart } from '../core/cartesian.js';
 import { normalizeTooltip, markProps } from '../core/marks.js';
 import { numOf } from '../core/stream-adapter.js';
 import {
-  normalizeDomainPolicy, resolveWindowX, resolveStepY, resolvePinnedY,
+  normalizeDomainPolicy, resolveWindowX, resolveStepY, resolvePinnedY, measurableSpan,
 } from '../core/domain.js';
 
 /**
@@ -119,6 +119,8 @@ export function resolveCandleDomains(ext, policy) {
     [t0, t1] = resolveWindowX(ext.t1, policy.window, policy.slide);
   if (!Number.isFinite(t0)) { t0 = 0; t1 = 1; }
   if (!Number.isFinite(lo)) { lo = 0; hi = 1; }
+  [t0, t1] = measurableSpan(t0, t1);
+  [lo, hi] = measurableSpan(lo, hi);
 
   const xHi = t1 === t0 ? t0 + 1 : t1;
   let yTickValues;

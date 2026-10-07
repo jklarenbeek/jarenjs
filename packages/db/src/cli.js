@@ -12,6 +12,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as readline from 'readline';
+import { pathToFileURL } from 'url';
 
 import { loadDocument as loadDocumentFile, isDocumentFile } from '@jarenjs/json/node';
 
@@ -69,6 +70,8 @@ status    Applied, pending, drift (a hand-modified database) and — with
 apply     Print every statement, then apply. Destructive steps (drop
           table/column, rebuild) require --yes or an interactive
           confirmation naming what is lost. --dry-run only prints.
+          A database that drifted from the target exits 1, also after
+          pending links applied (they stay committed).
 check     The CI command: exit 1 on an unplanned model change, pending
           migrations or drift.
 shape     Print the physical mapping a model produces.
@@ -92,6 +95,13 @@ documents Run a migration's DOCUMENT steps (jslt, query) over a file of
           for byte), and --check transforms and validates everything
           while writing nothing. Exit: 0 applicable and valid, 1 a
           migration or source failure, 2 a misuse of this command line.
+
+status, check, history, apply --dry-run, plan --store and adopt-history
+never create a --store database named by a plain path: one that does not
+exist is refused (exit 1). An apply that is only printed, or that finds
+nothing pending without --yes, creates nothing either. :memory: is an
+empty database. A file: URI reaches SQLite as written, so its own mode
+decides: without mode=ro or mode=rw, every command creates a missing file.
 `;
 
 function fail(message) {
@@ -218,6 +228,38 @@ const writeIfChanged = (file, text) => {
   return same;
 };
 
+/**
+ * Whether --store names a plain file path with no file behind it. SQLite
+ * reads ':memory:' (and '') as a private database and a `file:` name as a
+ * URI it resolves itself, so neither is a missing file.
+ */
+const storeMissing = (store) => store !== '' && store !== ':memory:' && !store.startsWith('file:')
+  && !fs.existsSync(store);
+
+/**
+ * A command that reads, plans against or attests the database it names never
+ * creates one: the driver's open creates a missing file, so a mistyped --store
+ * would be reported as an empty, reviewable history. It is refused before
+ * anything opens it.
+ */
+const requireStore = (store) => {
+  if (storeMissing(store)) fail(`the database file does not exist: ${store}`);
+};
+
+/**
+ * The spelling under which those commands open --store: a plain path becomes
+ * a `file:` URI with `mode=rw`, which SQLite opens for reading and writing but
+ * never creates, so a file removed after `requireStore` looked fails the open
+ * instead of being created again. ':memory:', '' and a `file:` URI reach
+ * SQLite as written, and so does a network path, whose URI would name an
+ * authority SQLite does not open.
+ */
+const existingStore = (store) => {
+  if (store === '' || store === ':memory:' || store.startsWith('file:')) return store;
+  const url = pathToFileURL(path.resolve(store));
+  return url.host === '' ? `${url.href}?mode=rw` : store;
+};
+
 /** What a migration will destroy, by note — the confirmation names it. */
 const lossesOf = (migration) => migration.steps
   .filter((step) => /DESTRUCTIVE/.test(step.note ?? '') || step.kind === 'rebuild')
@@ -267,8 +309,9 @@ async function commandPlan(options) {
     // asking the history with an empty chain refused every database
     // that had applied a migration (JD0022), which is every database
     // one plans a second migration for
+    requireStore(options.store);
     const driver = nodeDriver();
-    const connection = await driver.open(options.store, {}).catch((error) => fail(error.message));
+    const connection = await driver.open(existingStore(options.store), {}).catch((error) => fail(error.message));
     const drift = await Promise.resolve(compareShapeToModel(driver, connection, fromModel, undefined))
       .catch((error) => fail(error.message));
     await connection.close();
@@ -314,6 +357,7 @@ async function commandStatus(options, { asCheck }) {
   // `check` without the model verified nothing and printed "in sync"
   if (asCheck && options.model === null)
     fail('check needs --model — drift is measured against the model the code carries');
+  requireStore(options.store);
   const model = options.model !== null ? await loadDocument(options.model, 'model', 'model') : undefined;
   const migrations = await loadMigrationsDir(options.migrations);
   // the snapshot discipline, when it is in use: a model that moved
@@ -331,7 +375,7 @@ async function commandStatus(options, { asCheck }) {
   }
   let status;
   try {
-    status = await migrationStatus({ driver: nodeDriver(), path: options.store },
+    status = await migrationStatus({ driver: nodeDriver(), path: existingStore(options.store) },
       migrations, unplanned === null ? { model } : {});
   }
   catch (error) {
@@ -367,7 +411,8 @@ const confirm = (question) => new Promise((resolve) => {
 
 async function commandHistory(options) {
   if (options.store === null) misuse('history needs --store');
-  const observed = await migrationHistory({ driver: nodeDriver(), path: options.store });
+  requireStore(options.store);
+  const observed = await migrationHistory({ driver: nodeDriver(), path: existingStore(options.store) });
   const json = `${JSON.stringify(observed, null, 2)}\n`;
   if (options.out === null) process.stdout.write(json);
   else writeIfChanged(options.out, json);
@@ -376,6 +421,8 @@ async function commandHistory(options) {
 async function commandAdoptHistory(options) {
   if ([options.store, options.migrations, options.observed, options.model].some((value) => value === null))
     misuse('adopt-history needs --store, --migrations, --observed and --model');
+  // an attestation is of a database that holds the observed history
+  requireStore(options.store);
   const observed = readJson(options.observed, 'history observation');
   const model = await loadDocument(options.model, 'current model', 'model');
   const migrations = await loadMigrationsDir(options.migrations);
@@ -385,7 +432,7 @@ async function commandAdoptHistory(options) {
     const answer = await confirm(`Attest ${migrations.length} reviewed legacy migration(s) without executing steps? [y/N] `);
     if (!answer) fail('aborted — nothing was adopted');
   }
-  const outcome = await adoptMigrationHistory({ driver: nodeDriver(), path: options.store }, migrations,
+  const outcome = await adoptMigrationHistory({ driver: nodeDriver(), path: existingStore(options.store) }, migrations,
     { observed, model, ...(physicalTarget === undefined ? {} : { physicalTarget }) });
   console.log(JSON.stringify(outcome));
 }
@@ -393,12 +440,19 @@ async function commandAdoptHistory(options) {
 async function commandApply(options) {
   if (options.store === null || options.baseline === null || options.migrations === null)
     fail('apply needs --store, --baseline and --migrations');
+  // a dry run only reads; a real apply may create a new store
+  if (options.dryRun) requireStore(options.store);
   const baseline = await loadDocument(options.baseline, 'baseline model', 'model');
   const model = options.model !== null ? await loadDocument(options.model, 'model', 'model') : undefined;
   const migrations = await loadMigrationsDir(options.migrations);
   const target = { driver: nodeDriver(), path: options.store };
 
-  const status = await migrationStatus(target, migrations, options.dryRun ? {} : { model })
+  // the printout reads the store without creating it: a store that does not
+  // exist yet reads as the empty database a confirmed apply creates, so an
+  // apply that is only printed, or declined, leaves no file behind
+  const reading = storeMissing(options.store) ? { driver: nodeDriver() }
+    : { driver: nodeDriver(), path: existingStore(options.store) };
+  const status = await migrationStatus(reading, migrations, options.dryRun ? {} : { model })
     .catch((error) => fail(error.message));
   if (status.pending.length === 0) {
     if (options.dryRun) {
@@ -407,8 +461,13 @@ async function commandApply(options) {
     }
     if (status.drift !== null)
       fail(`the database drifted from the target: ${status.drift}`);
-    await migrate(target, migrations, { baseline, model })
-      .catch((error) => fail(error.message));
+    // nothing pending on a store that does not exist is an empty chain, which
+    // the runner has nothing to check against: without --yes, nothing
+    // confirms creating the store, so the report is all this apply does
+    if (options.yes || !storeMissing(options.store)) {
+      await migrate(target, migrations, { baseline, model })
+        .catch((error) => fail(error.message));
+    }
     console.log('nothing to apply — up to date');
     return;
   }
@@ -438,13 +497,18 @@ async function commandApply(options) {
     if (!answer) fail('aborted — nothing was applied');
   }
 
+  let outcome;
   try {
-    const outcome = await migrate(target, migrations, { baseline, model });
-    console.log(`applied: ${outcome.applied.join(', ')}`);
+    outcome = await migrate(target, migrations, { baseline, model });
   }
   catch (error) {
     fail(error.message);
   }
+  console.log(`applied: ${outcome.applied.join(', ')}`);
+  // the verdict the identical no-op rerun gives: the links stay committed,
+  // and a database that drifted from the target still fails the command
+  const after = await migrationStatus(target, migrations, { model }).catch((error) => fail(error.message));
+  if (after.drift !== null) fail(`the database drifted from the target: ${after.drift}`);
 }
 
 async function commandSnapshot(options) {

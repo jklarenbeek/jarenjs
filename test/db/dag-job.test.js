@@ -333,7 +333,7 @@ describe('the DAG runner over the fence', () => {
       await runnerA.stop();
       await storeA.close();
       assert.deepStrictEqual(rowsOf(dbPath, 'r').map((row) => row.node_id).sort(),
-        ['identity', 'first'], 'the identity rides with the checkpoints');
+        ['\x1fidentity', 'first'], 'the identity rides with the checkpoints');
 
       // a DIFFERENT workflow now claims the same run
       const storeB = await open();
@@ -439,7 +439,7 @@ describe('the DAG runner over the fence', () => {
       assert.deepStrictEqual(ran, ['first', 'second']);
       const before = rowsOf(dbPath, 'r');
       assert.deepStrictEqual(before.map((row) => row.node_id).sort(),
-        ['identity', 'first']);
+        ['\x1fidentity', 'first']);
 
       // the SAME workflow, the SAME input, resumed: `first` is restored
       // rather than run, nothing is written and nothing is pruned

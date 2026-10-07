@@ -626,7 +626,15 @@ that did not change.
 
 `describe` and `public` print JSON; exit 0 current/written, 1 drift
 under `--check`, 2 on a compile refusal printed as `code docPath reason`
-or an unreadable, impure or undocumented input.
+or an unreadable, impure or undocumented input. A value option
+(`--contract`, `--out`, `--from`, `--to`, `--info-title`,
+`--info-version`) followed by nothing or by an argument starting with `-`
+is a usage error (exit 2, `<option> requires a value`, such as
+`--out requires a value`, the `jaren-emit` wording). It used to take a
+following flag as its value, so `types --out --check` wrote a file named
+`--check`, and to act as if absent when nothing followed. `--fail-on`
+always refused both, with its own message, and `--audience` takes only
+`all` or `public`.
 The normative projection rules — the public projection's member order
 (the revision hashes those bytes), the OpenAPI mapping and keyword
 policy, the tool naming — are

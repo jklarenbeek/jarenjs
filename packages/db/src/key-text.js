@@ -30,14 +30,32 @@ const DECIMAL_TEXT = /^[ \t\n\v\f\r]*[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+
 /**
  * Whether a key names no row of a NUMERIC key column: a string that is no
  * decimal number. SQLite compares such text with the column's numbers and
- * finds nothing, while PostgreSQL refuses to read it as a number at all
- * (and on a transaction spends the transaction), so a lookup binds it as
- * NULL — which matches no row on either engine — and answers absent.
+ * finds nothing, while PostgreSQL's numeric input reads some of it as a
+ * number after all (`'0x10'` as 16, `'1_000'` as 1000, `'NaN'` and
+ * `'Infinity'` as themselves) and refuses the rest (spending the
+ * transaction it runs in). So a lookup binds it as NULL — which matches no
+ * row on either engine — and answers absent, and a write refuses it
+ * ({@link noNumberKeyReason}).
  * @param {unknown} key
  * @returns {boolean}
  */
 export function namesNoNumber(key) {
   return typeof key === 'string' && !DECIMAL_TEXT.test(key);
+}
+
+/**
+ * Why a write refuses a key that {@link namesNoNumber} under a numeric key
+ * column (`JD2002`, before any statement, on every engine): no read could
+ * find the row it wrote, and PostgreSQL would store `'0x10'` under 16 —
+ * the key of another row.
+ * @param {unknown} key
+ * @param {string} [member] - the many-to-many member the key came from, when
+ *   a membership names it rather than the row's own key
+ * @returns {string}
+ */
+export function noNumberKeyReason(key, member = undefined) {
+  return `the key ${JSON.stringify(key)}${member === undefined ? '' : ` in '${member}'`} is text that names no number, `
+    + 'and the key column is numeric — no read could find the row it would write; pass the key as a number';
 }
 
 /**

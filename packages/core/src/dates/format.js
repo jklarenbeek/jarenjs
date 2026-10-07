@@ -40,11 +40,17 @@ import {
 const D2 = (n) => (n < 10 ? '0' + n : '' + n);
 const D3 = (n) => (n < 10 ? '00' + n : n < 100 ? '0' + n : '' + n);
 
-// The parser retains up to six fractional digits. Round the whole seconds
-// before extracting them, so subtraction does not expose binary noise.
+// Six fraction digits are rendered, cut rather than rounded: a fraction
+// written with more (the parser keeps nine) loses its tail, and one just
+// short of the next second stays in its own second (.9999997 renders
+// .999999, never the .000000 rounding would carry into). A fraction of
+// six digits or fewer sits a hair off its decimal value in binary (5.1 is
+// 5.0999999999999996); the millionth-of-a-unit allowance absorbs that
+// noise, so those digits come back exactly as written.
 /** @param {number} seconds */
 function fractionDigits(seconds) {
-  return seconds.toFixed(6).slice(-6);
+  const micros = Math.floor((seconds - Math.trunc(seconds)) * 1e6 + 1e-6);
+  return pad(micros > 999999 ? 999999 : micros, 6);
 }
 
 function pad(n, width) {
@@ -212,8 +218,9 @@ const FORMAT_TIME = compileDateFormat('HH:mm:ssXXX');
  * `full-time`, and the offset is the record's own rather than UTC.
  *
  * The round trip preserves the *value*, not necessarily the spelling: a
- * fractional second keeps the parser's six-digit precision and is emitted
- * only when non-zero and without trailing
+ * fractional second is written to six digits - a longer one is cut at
+ * the sixth, never rounded into the next second - and is emitted only
+ * when non-zero and without trailing
  * zeros, so `…:05.250Z` comes back `…:05.25Z`. The parts record holds
  * the fraction as a number, so the original digit count is not
  * recoverable — a consumer that must reproduce the input byte for byte

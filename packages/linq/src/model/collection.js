@@ -4,14 +4,17 @@
  * indexes })` and `index(path, options)`. A key is an RFC 6901 pointer
  * or a captured member path (`(d) => d.id` → `/id`); an index path is a
  * captured lambda (`(p) => p.embedding` → `$.embedding`), a composite
- * array of them, or a JSONPath string; the options ride verbatim, the
- * store's model walk being the judge of `derive`/`precision`/`dims`/
- * `physical`. The default index name is `by_<segments>`.
+ * array of them, or a JSONPath string; each option is checked for the
+ * JSON type the grammar declares (`unique` a boolean, `derive` and
+ * `physical` strings, `precision` and `dims` numbers), the store's model
+ * walk being the judge of their values. The default index name is
+ * `by_<segments>`.
  */
 
 import { LinqBuildError } from '../errors.js';
+import { closedTo } from '../json-boundary.js';
 import { isSchemaBuilder } from '../schema/brand.js';
-import { requireJson, requireName } from '../schema/builders.js';
+import { describeValue, requireJson, requireName } from '../schema/builders.js';
 import { captureQuery } from '../schema/check.js';
 import { DOCUMENT_SCOPE, refuseStrandedRename } from './entity.js';
 
@@ -21,6 +24,33 @@ const INDEX_OPTIONS = new Set(['name', 'unique', 'derive', 'precision', 'dims', 
 /** The options an EXPRESSION index takes: it names the members it reads
  * itself, so nothing that describes a member's storage belongs here. */
 const EXPRESSION_OPTIONS = new Set(['name', 'unique']);
+
+/** Every member an index entry carries — a path index's or an expression
+ * index's: a raw entry handed to `collection()` is held to this set. */
+const ENTRY_MEMBERS = Object.freeze(['name', 'path', 'expression', 'unique', 'derive', 'precision',
+  'dims', 'physical']);
+
+/** The JSON type each typed index option takes. The store reads only
+ * `true` as unique, so a `unique: 1` would open a NON-unique index.
+ * @type {Readonly<Record<string, string>>} */
+const OPTION_TYPES = Object.freeze({
+  __proto__: null, unique: 'boolean', derive: 'string', physical: 'string', precision: 'number',
+  dims: 'number',
+});
+
+/**
+ * One typed index option: JSON, and of the type the grammar declares;
+ * `JL0101` naming the member otherwise.
+ * @param {any} value
+ * @param {string} key - the option, a key of {@link OPTION_TYPES}
+ * @param {string} what - the method or entry, for the message
+ * @returns {any} the value
+ */
+function indexOption(value, key, what) {
+  const type = OPTION_TYPES[key];
+  if (typeof requireJson(value, `${what} ${key}`) === type) return value;
+  throw new LinqBuildError('JL0101', `${what} ${key} takes a ${type}, got ${describeValue(value)}`);
+}
 
 /** The marker a collection spec carries so `defineModel` can tell it apart. */
 export const COLLECTION = Symbol.for('@jarenjs/linq/model-collection');
@@ -107,7 +137,7 @@ export function index(path, options = {}) {
     path: resolved,
   };
   for (const key of ['unique', 'derive', 'precision', 'dims', 'physical']) {
-    if (options[key] !== undefined) out[key] = requireJson(options[key], `index() ${key}`);
+    if (options[key] !== undefined) out[key] = indexOption(options[key], key, 'index()');
   }
   return Object.freeze(out);
 }
@@ -191,7 +221,7 @@ export function expressionIndex(expression, options = {}) {
     expression: resolved,
   };
   if (options.unique !== undefined)
-    out.unique = requireJson(options.unique, 'expressionIndex() unique');
+    out.unique = indexOption(options.unique, 'unique', 'expressionIndex()');
   return Object.freeze(out);
 }
 
@@ -263,7 +293,14 @@ export function collection(builder, options = {}) {
       if (one === null || typeof one !== 'object' || typeof one.name !== 'string') {
         throw new LinqBuildError('JL0101', `collection() indexes[${i}] is not an index() entry`);
       }
-      return requireJson(one, `collection() indexes[${i}]`);
+      // a raw entry rides verbatim, so it is held to what index() writes:
+      // the grammar's members, each of its declared type
+      const what = `collection() indexes[${i}]`;
+      closedTo(one, ENTRY_MEMBERS, what);
+      for (const key of Object.keys(one)) {
+        if (OPTION_TYPES[key] !== undefined && one[key] !== undefined) indexOption(one[key], key, what);
+      }
+      return requireJson(one, what);
     });
   }
   const renamed = options.renamedFrom ?? builder.state.renamedFrom;

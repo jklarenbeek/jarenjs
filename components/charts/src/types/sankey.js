@@ -18,6 +18,7 @@
 
 import { svgRoot, textAt, coord } from '@jarenjs/view/helpers';
 import { FS_LABEL, annotateChart, chartTitle } from '../core/cartesian.js';
+import { measurableUnit } from '../core/domain.js';
 import { CATEGORICAL, seriesColor } from '../core/palette.js';
 import { normalizeTooltip, valueMark } from '../core/marks.js';
 
@@ -118,12 +119,17 @@ export function buildSankeyAST(data, config = {}) {
     return links.some((l) => l.source === i || l.target === i);
   }
 
-  // Throughput per node; one global value→height scale.
+  // Throughput per node; one global value→height scale. The layout runs
+  // on flows, the links' values in the unit `measurableUnit` picks, so a
+  // node or a layer whose links sum past the largest double keeps its
+  // proportions; every ribbon still reports its own value.
+  const unit = measurableUnit(links.map((link) => link.value));
+  const flows = links.map((link) => ({ ...link, value: link.value / unit }));
   const inFlow = new Array(names.length).fill(0);
   const outFlow = new Array(names.length).fill(0);
-  for (const link of links) {
-    outFlow[link.source] += link.value;
-    inFlow[link.target] += link.value;
+  for (const flow of flows) {
+    outFlow[flow.source] += flow.value;
+    inFlow[flow.target] += flow.value;
   }
   const size = names.map((_, i) => Math.max(inFlow[i], outFlow[i]));
 
@@ -135,7 +141,7 @@ export function buildSankeyAST(data, config = {}) {
     if (list === undefined) byLayer.set(layer[i], list = []);
     list.push(i);
   }
-  reduceCrossings(byLayer, links);
+  reduceCrossings(byLayer, flows);
   /** @type {Map<number, number>} node → its position within its layer */
   const rank = new Map();
   for (const list of byLayer.values())
@@ -177,20 +183,20 @@ export function buildSankeyAST(data, config = {}) {
   const inAt = names.map((_, i) => nodeAt[i] === -1 ? 0 : nodes[nodeAt[i]].y0);
   const sy = new Array(links.length);
   const ty = new Array(links.length);
-  for (const at of orderedFaces(links, (l) => l.source, (l) => rank.get(l.target) ?? 0)) {
-    sy[at] = outAt[links[at].source];
-    outAt[links[at].source] += links[at].value * scale;
+  for (const at of orderedFaces(flows, (l) => l.source, (l) => rank.get(l.target) ?? 0)) {
+    sy[at] = outAt[flows[at].source];
+    outAt[flows[at].source] += flows[at].value * scale;
   }
-  for (const at of orderedFaces(links, (l) => l.target, (l) => rank.get(l.source) ?? 0)) {
-    ty[at] = inAt[links[at].target];
-    inAt[links[at].target] += links[at].value * scale;
+  for (const at of orderedFaces(flows, (l) => l.target, (l) => rank.get(l.source) ?? 0)) {
+    ty[at] = inAt[flows[at].target];
+    inAt[flows[at].target] += flows[at].value * scale;
   }
   const linkAsts = links.map((link, at) => ({
     source: nodeAt[link.source],
     target: nodeAt[link.target],
     value: link.value,
-    sy0: sy[at], sy1: sy[at] + link.value * scale,
-    ty0: ty[at], ty1: ty[at] + link.value * scale,
+    sy0: sy[at], sy1: sy[at] + flows[at].value * scale,
+    ty0: ty[at], ty1: ty[at] + flows[at].value * scale,
   }));
 
   return {

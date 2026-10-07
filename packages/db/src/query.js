@@ -36,14 +36,16 @@ import { physicalSelection, columnCodec, textKeyPlan, textKeyDecoding, checkText
 import { createSemanticCache } from '@jarenjs/core/cache';
 import { analyzeQuery, JsonQueryRuntimeError, renderQueryMessage } from '@jarenjs/json/query';
 
-import { DbCompileError, DbRuntimeError, wrapDriverError, classifyDriverError } from './errors.js';
-import { chain, attempt, isThenable, createStatementOwner, useStatementOnce } from './driver.js';
-import { readOptions, readControls } from './options.js';
+import { DbCompileError, DbRuntimeError, wrapDriverError } from './errors.js';
+import { chain, attempt, createStatementOwner, useStatementOnce } from './driver.js';
+import { readOptions, readControls, isPlainOptions, refuseUnknownMembers } from './options.js';
 import {
   planQuery, planEntityQuery, entityShape, planEntityPredicate, entityPathRef,
-  isRootScanSource, isEntityRootSource, BIND_REASONS,
+  isRootScanSource, isEntityRootSource, BIND_REASONS, admitsMixedTypes,
 } from './plan.js';
-import { emitPlan, emitEntityPlan, createEntityPredicateEmitters, UnrepresentablePath, physicalComparable } from './emit.js';
+import { emitPlan, emitEntityPlan, createEntityPredicateEmitters, UnrepresentablePath, physicalComparable,
+  pathTextOf, kindOf, bucketGuards } from './emit.js';
+import { modelPath } from './model-path.js';
 import { selectPlan, conjoin, effectiveOrder, planOrder, ordersByColumn } from './algebra.js';
 import {
   compileSetResidual, compileRowResidual, compilePackedResidual, sequenceResult,
@@ -281,35 +283,51 @@ function requireCallable(options, now) {
   refuseCancelled(options, now, { abortCode: 'JD2072', aborted: 'it ran', passed: 'the call ran' });
 }
 
-/**
- * Run a call whose driver failure classes as an int64 overflow through
- * `fallback` instead — the pushed aggregate's coded residual — and let
- * every other failure propagate. Value-or-promise aware.
- * @param {() => any} call
- * @param {() => any} fallback
- * @returns {any}
- */
-function recoverOverflow(call, fallback) {
-  let out;
-  try {
-    out = call();
-  }
-  catch (error) {
-    if (classifyDriverError(error).class === 'overflow') return fallback();
-    throw error;
-  }
-  return isThenable(out)
-    ? out.then(undefined, (error) => (classifyDriverError(error).class === 'overflow'
-      ? fallback()
-      : Promise.reject(error)))
-    : out;
-}
-
 /** The boundary every engine member answers through: a driver failure
  * arrives classified, anything else as it is.
  * @param {(...args: any[]) => any} fn
  * @param {(error: any) => Error} wrap */
 const bounded = (fn, wrap) => (...args) => attempt(() => fn(...args), wrap);
+
+/** What a collection's `execute` and `query` read from their options: a
+ * closed set, refused member by member (`JD0013`) as `all()` refuses its own.
+ * `strictStreaming` precedes `strict`, so a misspelling of the longer name
+ * is not answered with its prefix. */
+const DOCUMENT_CALL_OPTIONS = Object.freeze(['externals', 'strictStreaming', 'strict', 'profile', 'pushdown',
+  'signal', 'deadline']);
+/** An entity cursor's options: a collection cursor's, and the `tracking`
+ * its set reads off the same bag. An entity `explain` takes either call's. */
+const ENTITY_CURSOR_OPTIONS = Object.freeze([...DOCUMENT_CALL_OPTIONS, 'tracking']);
+/** A graph cursor's options: a load's, and its set's `tracking`. */
+const LOAD_CURSOR_OPTIONS = Object.freeze(['signal', 'deadline', 'profile', 'tracking']);
+
+/**
+ * One read call's options, before anything runs: a closed member set,
+ * then the value of each control it carries — `JD0013` either way, as
+ * `all()` and `page()` refuse their own.
+ * @param {any} options @param {readonly string[]} members @param {string} spelling
+ */
+function readCallOptions(options, members, spelling) {
+  readOptions(options, members, spelling);
+  readControls(options, spelling);
+}
+
+/** `strictStreaming: true` on a call that answers whole: there is no
+ * stream to hold it to (`JD0013`).
+ * @param {any} options @param {string} spelling @param {string} cursor */
+function refuseWholeStreaming(options, spelling, cursor) {
+  if (options?.strictStreaming === true) {
+    throw new DbCompileError('JD0013', `${spelling} option 'strictStreaming' applies to a cursor `
+      + `(${cursor}); execute() answers the whole result by contract, so there is no stream to hold it to`);
+  }
+}
+
+/** The members a graph-load specification reads, per node: the root's,
+ * which also bound the whole graph and seek by keyset, and an include's,
+ * which bound or count the related rows of each parent (§10.4). */
+const ROOT_LOAD_MEMBERS = Object.freeze(['where', 'orderBy', 'take', 'skip', 'include', 'after', 'maxDepth']);
+const INCLUDE_LOAD_MEMBERS = Object.freeze(['where', 'orderBy', 'take', 'skip', 'include', 'after', 'count',
+  'maxRows', 'maxBytes']);
 
 /**
  * The budget provenance `explain()` carries: which profile applied
@@ -534,23 +552,44 @@ export function createQueryEngine(context) {
    * collection it belongs to. */
   const driverWrap = (/** @type {any} */ error) =>
     wrapDriverError(error, { docPath: collection.docPath, collection: collection.name });
-  /**
-   * The coded residual for a pushed aggregate that overflowed int64:
-   * the engine answers the caller's document over the fetched rows —
-   * exactly what an unpushed run always answered — and the entry
-   * remembers that it did, for `explain()`. The fetch is a full scan,
-   * so a profile that refuses one refuses here too.
-   * @param {any} entry @param {any} externals @param {any} document
-   */
-  const overflowResidual = (entry, externals, document) => {
-    if (entry.needsScanCheck) {
-      throw profileRefusal(`the profile refuses a full-table scan of '${collection.name}' `
-        + '(the pushed aggregate overflowed int64 and the engine would read the whole collection)');
+
+  /** Whether a pushed sum or average left its exactness bound: the guard
+   * the emitter writes beside each one (`_safe`, `_safe<i>`, a bucket's
+   * own names) did not hold.
+   * @param {any} entry @param {any[]} rows */
+  const inexact = (entry, rows) => {
+    if (entry.plan.aggregate !== null)
+      return ['sum', 'avg'].includes(entry.plan.aggregate.fn) && rows.some((row) => row?._safe !== 1);
+    if (entry.plan.bucket !== null) {
+      const guards = bucketGuards(entry.plan.bucket);
+      return rows.some((row) => guards.some((name) => name !== null && row[name] !== 1));
     }
-    entry.overflowRuns = (entry.overflowRuns ?? 0) + 1;
-    return fullScanOf(entry, (statement) =>
-      chain(statement.all(fullScanParams(entry)), (rows) =>
-        setResidualOf(entry, document)(rowsToDocs(checkRowBound(entry, rows)), externals)));
+    return rows.some((row) => entry.plan.group.aggregates.some((aggregate, i) =>
+      ['sum', 'avg'].includes(aggregate.fn) && row[`_safe${i}`] !== 1));
+  };
+
+  /**
+   * The engine's answer for a pushed sum or average whose terms left the
+   * range in which every partial sum is exact, as its guard reported: the
+   * residual over the rows the plan selects — what the set residual of the
+   * same document reads, so a profile bounds the selected rows, not the
+   * collection — remembered for `explain()` and refused by strict mode.
+   * `packed` answers a cursor's items rather than the result shape.
+   * @param {any} entry @param {any} externals @param {any} document
+   * @param {boolean} strict @param {boolean} packed
+   */
+  const accumulationResidual = (entry, externals, document, strict, packed) => {
+    if (strict) {
+      throw new DbCompileError('JD0010',
+        `strict mode refused a residual: 'accumulation' — ${BIND_REASONS.accumulation}`, collection.docPath);
+    }
+    entry.accumulationRuns = (entry.accumulationRuns ?? 0) + 1;
+    return chain(selectedDocs(entry, externals), (docs) => {
+      const answer = packed ? packedResidualOf(entry, document)(docs, externals)
+        : setResidualOf(entry, document)(docs, externals);
+      countSeries(entry, 2 * statementCost(entry), docs.length, itemCount(answer));
+      return answer;
+    });
   };
 
   /**
@@ -737,6 +776,8 @@ export function createQueryEngine(context) {
         : null,
       fullScanSql: null,
       fullScanShape: () => shapePlan(selectPlan(collection.name)),
+      // the fetch a pushed sum's fallback reads, emitted on first use
+      selectionSql: null,
       // the LAST actual execution's numbers, never an estimate: `null`
       // until this document has run once
       seriesCounts: null,
@@ -776,6 +817,31 @@ export function createQueryEngine(context) {
   const fullScanOf = (entry, use) => useRead(connection, fullScanEmitted(entry), use, entry);
   const fullScanParams = (entry) =>
     fullScanEmitted(entry).slots.map((slot) => ('literal' in slot ? slot.literal : null));
+  /**
+   * The rows a pushed sum or average selects, as whole documents: the
+   * plan's own filter — the profile's mandatory predicate already in it —
+   * under the profile's row bound, in collection order. It is the fetch
+   * the set residual of the same document reads, so a fallback reads what
+   * the document selects and no more.
+   */
+  const selectionEmitted = (entry) => {
+    if (entry.selectionSql === null) {
+      const plan = { ...entry.plan, aggregate: null, group: null, bucket: null, order: null, window: null,
+        project: /** @type {const} */ ('document') };
+      const emitted = emitPlan(entry.rowBound === null ? plan : applyRowBound(plan, entry.rowBound), dialect, physical);
+      entry.selectionSql = { sql: emitted.sql, slots: emitted.slots, statement: null, scanChecked: false };
+    }
+    return entry.selectionSql;
+  };
+  /** The selected documents of one call, bound as the native statement
+   * was — the call's externals, the plan's own seeks — and, under a
+   * profile that refuses full scans, refused by their own plan. */
+  const selectedDocs = (entry, externals) => {
+    const selection = selectionEmitted(entry);
+    return chain(guardScan(entry, selection), () => chain(bindSlots(entry, selection.slots, externals), (params) =>
+      useRead(connection, selection, (statement) =>
+        chain(statement.all(params), (rows) => rowsToDocs(checkRowBound(entry, rows))), entry)));
+  };
 
   /** Refuse a fetch that crossed the profile's row bound (JD2007), or
    * a row whose document is larger than its byte bound (JD2076). */
@@ -801,11 +867,12 @@ export function createQueryEngine(context) {
 
   /** The optional plan-shape refusal: a full-table SCAN of a profiled
    * collection is refused when the profile says so, verified against
-   * the database's own plan output. */
-  const guardScan = (entry) => {
-    if (!entry.needsScanCheck || entry.scanChecked) return null;
-    const eqpParams = entry.slots.map((slot) => ('literal' in slot ? slot.literal : null));
-    return useStatementOnce(connection, dialect.explainQuery(entry.sql), (statement) =>
+   * the database's own plan output — of the entry's statement, or of
+   * another statement the entry runs (`emitted`, checked once as well). */
+  const guardScan = (entry, emitted = entry) => {
+    if (!entry.needsScanCheck || emitted.scanChecked) return null;
+    const eqpParams = emitted.slots.map((slot) => ('literal' in slot ? slot.literal : null));
+    return useStatementOnce(connection, dialect.explainQuery(emitted.sql), (statement) =>
       chain(statement.all(eqpParams), (rows) => {
         const lines = dialect.explainLines(rows);
         if (lines.some((line) => dialect.isFullScan(line, [physical.table]))) {
@@ -813,7 +880,7 @@ export function createQueryEngine(context) {
             `the profile refuses a full-table scan of '${collection.name}' `
             + `(${lines.join('; ')})`);
         }
-        entry.scanChecked = true;
+        emitted.scanChecked = true;
         return null;
       }), { readOnly: true });
   };
@@ -878,12 +945,15 @@ export function createQueryEngine(context) {
     return value;
   };
 
-  /** Bind slots against the call's externals, and the seeks' anchors. */
-  const bindParams = (entry, externals) =>
+  /** Bind slots against the call's externals, and the seeks' anchors:
+   * the entry's own, or another statement's of the same plan (`slots`),
+   * whose typed slots name the same seeks. */
+  const bindSlots = (entry, slots, externals) =>
     (entry.seeks.length === 0
-      ? entry.slots.map((slot) => slotValue(slot, externals))
+      ? slots.map((slot) => slotValue(slot, externals))
       : chain(seekAnchors(entry), (anchors) =>
-        entry.slots.map((slot) => slotValue(slot, externals, anchors))));
+        slots.map((slot) => slotValue(slot, externals, anchors))));
+  const bindParams = (entry, externals) => bindSlots(entry, entry.slots, externals);
 
   /** Run a bound statement: the bind itself may have to READ first. */
   const runAll = (entry, externals, statement) =>
@@ -1131,10 +1201,9 @@ export function createQueryEngine(context) {
    *   synchronous driver synchronous)
    */
   const execute = (document, options = undefined) => {
-    if (options?.strictStreaming === true) {
-      throw new TypeError('strictStreaming applies to a cursor (query()); execute() answers '
-        + 'the whole result by contract, so there is no stream to hold it to');
-    }
+    const spelling = `collection('${collection.name}').execute`;
+    readCallOptions(options, DOCUMENT_CALL_OPTIONS, spelling);
+    refuseWholeStreaming(options, spelling, 'query()');
     requireCallable(options, state.now);
     const { externals, strict, profile, pushdown } = callState(options);
     const entry = entryFor(document, strict, profile, pushdown);
@@ -1164,20 +1233,25 @@ export function createQueryEngine(context) {
       }
       return statementOf(entry, (statement) => {
         if (entry.plan.aggregate !== null) {
-          return recoverOverflow(() => chain(runGet(entry, externals, statement), (row) => {
+          return chain(runGet(entry, externals, statement), (row) => {
+            if (inexact(entry, [row])) return accumulationResidual(entry, externals, document, strict, false);
             const value = aggregateResult(entry, row);
             countSeries(entry, statementCost(entry), null, value === undefined ? 0 : 1);
             return wrapValue(entry, value);
-          }), () => overflowResidual(entry, externals, document));
+          });
         }
         if (entry.plan.group !== null) {
-          return chain(runAll(entry, externals, statement), (rows) =>
-            answerOf(entry, groupItems(entry.plan.group, checkRowBound(entry, rows))));
+          return chain(runAll(entry, externals, statement), (rows) => {
+            checkRowBound(entry, rows);
+            return inexact(entry, rows) ? accumulationResidual(entry, externals, document, strict, false)
+              : answerOf(entry, groupItems(entry.plan.group, rows));
+          });
         }
         if (entry.plan.bucket !== null) {
           return chain(runAll(entry, externals, statement), (rows) => {
             const items = bucketItems(entry, checkRowBound(entry, rows));
             if (items === null) return divertBucket(entry, document, externals);
+            if (inexact(entry, rows)) return accumulationResidual(entry, externals, document, strict, false);
             countSeries(entry, statementCost(entry), rows.length, items.length);
             return answerOf(entry, items);
           });
@@ -1228,6 +1302,11 @@ export function createQueryEngine(context) {
     if (entry.plan.bucket !== null || entry.plan.group !== null) {
       return buffered('$groupby', BIND_REASONS.bucketWhole);
     }
+    // past its exactness bound a sum or an average is answered by the
+    // engine over the rows it selects, which the cursor then holds whole
+    if (entry.plan.aggregate !== null && ['sum', 'avg'].includes(entry.plan.aggregate.fn)) {
+      return buffered(`$${entry.plan.aggregate.fn}`, BIND_REASONS.accumulationWhole);
+    }
     return rowClassOf(connection);
   };
 
@@ -1247,6 +1326,7 @@ export function createQueryEngine(context) {
    *   synchronous twin); the asynchronous one otherwise
    */
   const query = (document, options = undefined, cursorFactory = createCursor) => {
+    readCallOptions(options, DOCUMENT_CALL_OPTIONS, `collection('${collection.name}').query`);
     requireCallable(options, state.now);
     const { externals, strict, profile, pushdown } = callState(options);
     const entry = entryFor(document, strict, profile, pushdown);
@@ -1276,8 +1356,11 @@ export function createQueryEngine(context) {
       // a native grouping is a barrier: the groups are the answer
       return cursorFactory({ ...classified, signal, deadline, now: state.now, wrap: driverWrap,
         materialize: () => chain(guardScan(entry), () => statementOf(entry, (statement) =>
-          chain(runAll(entry, externals, statement), (rows) =>
-            groupItems(entry.plan.group, checkRowBound(entry, rows))))) });
+          chain(runAll(entry, externals, statement), (rows) => {
+            checkRowBound(entry, rows);
+            return inexact(entry, rows) ? accumulationResidual(entry, externals, document, strict, true)
+              : groupItems(entry.plan.group, rows);
+          }))) });
     }
     if (entry.plan.bucket !== null) {
       // a native bucket is a barrier: the groups are the answer
@@ -1289,21 +1372,22 @@ export function createQueryEngine(context) {
               return chain(divertBucket(entry, document, externals), (value) =>
                 (value === undefined ? [] : Array.isArray(value) ? value : [value]));
             }
+            if (inexact(entry, rows)) return accumulationResidual(entry, externals, document, strict, true);
             countSeries(entry, statementCost(entry), rows.length, items.length);
             return items;
           }))) });
     }
     if (entry.plan.aggregate !== null) {
-      // a native aggregate yields exactly one item; an int64 overflow
-      // answers the engine's item instead
+      // a native aggregate yields exactly one item; a sum past its
+      // exactness bound answers the engine's items instead
       return cursorFactory({ ...classified, signal, deadline, now: state.now, wrap: driverWrap,
         materialize: () => chain(guardScan(entry), () => statementOf(entry, (statement) =>
-          recoverOverflow(() => chain(runGet(entry, externals, statement), (row) => {
+          chain(runGet(entry, externals, statement), (row) => {
+            if (inexact(entry, [row])) return accumulationResidual(entry, externals, document, strict, true);
             const value = aggregateResult(entry, row);
             countSeries(entry, statementCost(entry), null, value === undefined ? 0 : 1);
             return value === undefined ? [] : [value];
-          }), () => chain(overflowResidual(entry, externals, document), (answer) =>
-            (answer === undefined ? [] : Array.isArray(answer) ? answer : [answer]))))) });
+          }))) });
     }
     let pulledRows = 0;
     const tally = seriesTally(entry);
@@ -1346,6 +1430,8 @@ export function createQueryEngine(context) {
    * @param {{ externals?: any, strict?: boolean }} [options]
    */
   const explain = (document, options = undefined) => {
+    // the options of the call it explains, an execute's or a cursor's
+    readCallOptions(options, DOCUMENT_CALL_OPTIONS, `collection('${collection.name}').explain`);
     const { externals, strict, profile, profileSource, pushdown } = callState(options);
     const entry = entryFor(document, strict, profile, pushdown);
     // the run this call would make: bound against the externals it was
@@ -1509,13 +1595,10 @@ export function createQueryEngine(context) {
           ? reasons.map((r) => ({ operator: r.construct, reason: r.reason }))
           : [],
         udfs: [...entry.planned.udfs],
-        // a pushed aggregate that overflowed int64 at run time: the
-        // engine answered the document instead, and says so here
-        fallback: entry.overflowRuns === undefined ? null : {
-          construct: 'overflow',
-          runs: entry.overflowRuns,
-          reason: BIND_REASONS.overflow,
-        },
+        // a pushed sum or average whose run the engine answered instead,
+        // past its exactness bound, and how many runs it took
+        fallback: entry.accumulationRuns === undefined ? null
+          : { construct: 'accumulation', runs: entry.accumulationRuns, reason: BIND_REASONS.accumulation },
         // the temporal record: what the document asked, which declared
         // index the fetch seeks through, and which kernel finished it.
         // The counts are the LAST ACTUAL execution's — `null` before
@@ -1731,7 +1814,7 @@ export function createEntityQueryEngine(context) {
     if ((planned.plan?.group || planned.plan?.scalarAggregate) && dialect.name !== 'sqlite'
       && !(dialect.physicalValueType && mapping.entities[planned.plan.bindings[0].entity]?.document === false)) {
       planned = { ...planned, mode: 'set', plan: null,
-        reasons: [{ construct: '$groupby', reason: 'entity grouping runtime guards are qualified for SQLite' }] };
+        reasons: [{ construct: '$groupby', reason: BIND_REASONS.entityGrouping }] };
     }
     const docPath = entities.get(planned.referenced[0])?.docPath;
     // the profile, applied exactly as on a collection (MODEL-FORMAT §8):
@@ -1811,9 +1894,23 @@ export function createEntityQueryEngine(context) {
         plan = { ...plan, window: plan.window === null ? { offset: 0, limit: cap }
           : { offset: plan.window.offset, limit: plan.window.limit === null ? cap : Math.min(plan.window.limit, cap) } };
       }
-      const emitted = emitEntityPlan(plan, dialect, physicalOf);
-      entry.sql = emitted.sql;
-      entry.slots = emitted.slots;
+      try {
+        const emitted = emitEntityPlan(plan, dialect, physicalOf);
+        entry.sql = emitted.sql;
+        entry.slots = emitted.slots;
+      }
+      catch (error) {
+        if (!(error instanceof UnrepresentablePath)) throw error;
+        // a member name the dialect cannot spell: the whole document runs
+        // in the set residual, named, as on a collection — and strict
+        // mode and a profile refusing full scans refuse it by name
+        entry.planned = { ...planned, mode: 'set', plan: null,
+          reasons: [{ construct: 'path', reason: error.message }, ...planned.reasons] };
+        if (profile !== null && profile.refuseFullScan === true) {
+          throw profileEntityRefusal('the profile refuses a full-table scan, and the residual this '
+            + `document needs fetches every row of ${planned.referenced.join(', ')} ('path' — ${error.message})`, docPath);
+        }
+      }
     }
     return retainEntry(state, key, entry);
   };
@@ -1887,8 +1984,18 @@ export function createEntityQueryEngine(context) {
           return dialect.parameterRef(slots.length, 'v');
         });
         const predicate = entry.mandatory.get(name);
-        const where = predicate === undefined ? ''
-          : ` WHERE ${emitters.emitPred(q('t'), `${q('t')}.${q('doc')}`, predicate)}`;
+        let where = '';
+        if (predicate !== undefined) {
+          try {
+            where = ` WHERE ${emitters.emitPred(q('t'), `${q('t')}.${q('doc')}`, predicate)}`;
+          }
+          catch (error) {
+            if (!(error instanceof UnrepresentablePath)) throw error;
+            throw profileEntityRefusal(`the profile's predicate for '${name}' reads a member name the `
+              + 'dialect\'s JSON path grammar cannot carry, and a mandatory predicate runs in the database '
+              + 'or not at all', entities.get(name)?.docPath);
+          }
+        }
         const limit = entry.rowBound === null ? '' : ` ${dialect.limitClause(entry.rowBound + 1, undefined)}`;
         return {
           name,
@@ -1898,8 +2005,9 @@ export function createEntityQueryEngine(context) {
             + `FROM ${dialect.tableName(mapping.entities[name].table, mapping.entities[name].schema)} AS ${q('t')}${where} `
             + `ORDER BY ${entities.get(name)?.physical != null ? mapping.entities[name].keys.map((k) => {
               const column = mapping.entities[name].columns.find((c) => c.name === k);
-              const value = `${q('t')}.${q(column.physical)}`;
-              return column.codec === 'text' ? dialect.codepoint(value) : value;
+              // the key's codec comparison, as the native plan orders it: a
+              // text key in code-point order on every dialect
+              return physicalComparable(column, `${q('t')}.${q(column.physical)}`, dialect);
             }).join(', ') : `${q('t')}.${dialect.rowIdentity()}`}${limit}`,
           slots,
           statement: null,
@@ -1936,7 +2044,20 @@ export function createEntityQueryEngine(context) {
     return chain(fetchRoot(entry, externals), (root) => entry.setResidual(root, externals));
   };
 
+  /**
+   * Run the document and answer in the engine's result shape. Its options
+   * are a collection's `execute` set, read before anything runs (`JD0013`).
+   * @param {any} document @param {any} [options]
+   */
   const execute = (document, options = undefined) => {
+    readCallOptions(options, DOCUMENT_CALL_OPTIONS, 'entity execute()');
+    refuseWholeStreaming(options, 'entity execute()', 'cursor()');
+    return run(document, options);
+  };
+
+  /** {@link execute} past its option check — and a cursor's own whole
+   * answer, run under the cursor's options. */
+  const run = (document, options = undefined) => {
     requireCallable(options, state.now);
     const { externals, strict, pushdown, profile } = callState(options);
     const entry = entryFor(document, pushdown, profile);
@@ -1971,7 +2092,7 @@ export function createEntityQueryEngine(context) {
         if (row?._valid === 0) throw new DbRuntimeError('JD2003', 'an aggregate column refuses a lossy or invalid value');
         if (row?._nulls > 0) throw aggregateNullError();
         if (row?._safe === 0) {
-          entry.runtimeReason = { construct: 'aggregate', reason: 'integer accumulation exceeded its runtime exactness bound' };
+          entry.runtimeReason = { construct: 'aggregate', reason: BIND_REASONS.accumulation };
           if (strict) throw new DbCompileError('JD0010', entry.runtimeReason.reason);
           if (profile?.refuseFullScan) throw profileEntityRefusal('the profile refuses the decoded scan required by integer accumulation', '/entities');
           return runResidual(entry, document, externals);
@@ -1989,7 +2110,7 @@ export function createEntityQueryEngine(context) {
             throw new DbRuntimeError('JD2003', 'a grouped physical column refuses a lossy or invalid value');
           if (rows.some((row) => group.aggregates.some((aggregate, i) =>
             ['sum', 'avg'].includes(aggregate.fn) && row[`_safe${i}`] !== 1))) {
-            entry.runtimeReason = { construct: '$groupby', reason: 'integer accumulation exceeded its runtime exactness bound' };
+            entry.runtimeReason = { construct: '$groupby', reason: BIND_REASONS.accumulation };
             if (strict) throw new DbCompileError('JD0010', entry.runtimeReason.reason);
             if (profile?.refuseFullScan) throw profileEntityRefusal(
               'the profile refuses the decoded scan required by the integer accumulation bound', '/entities');
@@ -2063,7 +2184,7 @@ export function createEntityQueryEngine(context) {
       return buffered({ construct: 'window', reason: BIND_REASONS.wrappedWindow });
     }
     if (entry.planned.plan?.group)
-      return buffered({ construct: '$groupby', reason: 'group results are validated and reconstructed together' });
+      return buffered({ construct: '$groupby', reason: BIND_REASONS.entityGroupWhole });
     if (entry.planned.mode !== 'native') {
       const forcing = entry.planned.reasons[0]
         ?? { construct: 'residual', reason: BIND_REASONS.untranslated };
@@ -2071,7 +2192,14 @@ export function createEntityQueryEngine(context) {
     }
     // `null` externals is the abstract question: the plan as planned
     const diverted = externals === null ? null : divertReason(entry, externals);
-    return diverted === null ? rowClassOf(connection) : buffered(diverted);
+    if (diverted !== null) return buffered(diverted);
+    // past its exactness bound a whole sum or average is answered by the
+    // engine over the fetched root, which the cursor then holds whole — as
+    // a collection's is
+    const scalar = entry.planned.plan?.scalarAggregate;
+    if (scalar && ['sum', 'avg'].includes(scalar.fn))
+      return buffered({ construct: `$${scalar.fn}`, reason: BIND_REASONS.accumulationWhole });
+    return rowClassOf(connection);
   };
 
   /**
@@ -2091,6 +2219,7 @@ export function createEntityQueryEngine(context) {
    * @param {((entity: string, doc: any) => any) | undefined} [register]
    */
   const query = (document, options = undefined, register = undefined, cursorFactory = createCursor) => {
+    readCallOptions(options, ENTITY_CURSOR_OPTIONS, 'entity cursor()');
     requireCallable(options, state.now);
     const { externals, strict, pushdown, profile } = callState(options);
     const entry = entryFor(document, pushdown, profile);
@@ -2122,7 +2251,7 @@ export function createEntityQueryEngine(context) {
     const deadline = options?.deadline;
     if (entry.planned.wrapped === true || entry.planned.plan?.group || entry.planned.plan?.scalarAggregate) {
       return cursorFactory({ ...classified, signal, deadline, now: state.now, wrap: driverWrap,
-        materialize: () => chain(execute(document, options), (value) => entry.planned.wrapped === true
+        materialize: () => chain(run(document, options), (value) => entry.planned.wrapped === true
           ? [value] : value === undefined ? [] : Array.isArray(value) ? value : [value]) });
     }
     if (classified.barrier !== null) {
@@ -2174,6 +2303,8 @@ export function createEntityQueryEngine(context) {
   };
 
   const explain = (document, options = undefined) => {
+    // the options of the call it explains, an execute's or a cursor's
+    readCallOptions(options, ENTITY_CURSOR_OPTIONS, 'entity explain()');
     const { pushdown, profile, profileSource } = callState(options);
     const entry = entryFor(document, pushdown, profile);
     // bound against the externals it was given: a value the database
@@ -2264,6 +2395,18 @@ export function createLoadEngine(context, entityName) {
   const refuse = (reason, path) => new DbCompileError('JD0032',
     `${reason} (include path: ${path.join('.') || '<root>'})`,
     entities.get(entityName)?.docPath);
+  /** One node of a load specification: a plain object of the members
+   * that node reads, so a misspelt filter refuses instead of loading
+   * every row. @param {any} spec @param {readonly string[]} members
+   * @param {string[]} path */
+  const readSpec = (spec, members, path) => {
+    if (!isPlainOptions(spec)) {
+      throw refuse(`a load specification is a plain object${path.length === 0 ? ''
+        : ' (or true, for an include taken whole)'}`, path);
+    }
+    refuseUnknownMembers(spec, members, (key, hint) =>
+      refuse(`the load specification has no member '${key}'${hint}`, path));
+  };
   const isWindowBound = (value) => Number.isSafeInteger(value) && value >= 0;
   /** A per-root bound as declared: a positive integer, or `Infinity` /
    * `null` for the unbounded case a caller spelled on purpose. */
@@ -2344,6 +2487,12 @@ export function createLoadEngine(context, entityName) {
       const ref = entityPathRef(spec.key, slot, shape);
       if (ref === null || (ref.flavor === 'entity-doc' && ref.type === 'unknown'))
         throw refuse('orderBy must address typed entity paths', path);
+      // the engine compares no number with a string, and a load has no
+      // residual to leave such an ordering to
+      if (admitsMixedTypes(shape.schema, ref.segments)) {
+        throw refuse(`orderBy must address typed entity paths of one type — '${modelPath(ref.segments)}' `
+          + 'declares several, and the engine does not order one against another', path);
+      }
       terms.push({ ref, desc: spec.desc === true, emptyGreatest: spec.emptyGreatest === true });
     }
     return terms;
@@ -2372,6 +2521,8 @@ export function createLoadEngine(context, entityName) {
     const shaped = applyProfileToNode(node, name, profile, path);
     const includeSpec = spec?.include;
     if (includeSpec === undefined) return shaped;
+    if (!isPlainOptions(includeSpec))
+      throw refuse('include is a plain object from relation names to their specifications', path);
     if (seen.has(includeSpec))
       throw refuse('the include specification cycles', path);
     seen.add(includeSpec);
@@ -2383,6 +2534,7 @@ export function createLoadEngine(context, entityName) {
           [...path, relationName]);
       }
       const childSpec = includeSpec[relationName] === true ? {} : includeSpec[relationName];
+      readSpec(childSpec, INCLUDE_LOAD_MEMBERS, [...path, relationName]);
       if (childSpec.count === true) {
         // a count counts EVERY related row; a where/take beside it was
         // dropped without a word, and the number answered was the total
@@ -2516,10 +2668,11 @@ export function createLoadEngine(context, entityName) {
       conditions.push(emitters.emitPred(rendered.aliasSql, rendered.docSql, child.where));
     const orderSql = (child.order ?? []).map((term) => {
       // epoch paths order by the document string (codepoint = the
-      // engine's order); only plain mapped columns order natively
+      // engine's order); only plain mapped columns order natively, and
+      // any other document member orders as its declared type
       const value = term.ref.flavor === 'entity-column'
         ? `${rendered.aliasSql}.${q(term.ref.column)}`
-        : dialect.jsonExtract(rendered.docSql, dialect.jsonPathText(term.ref.segments), 'text');
+        : dialect.jsonExtract(rendered.docSql, pathTextOf(dialect, term.ref), kindOf(term.ref));
       const nullsFirst = term.emptyGreatest === term.desc;
       return `${value} ${term.desc ? 'DESC' : 'ASC'}${dialect.orderNulls(nullsFirst)}`;
     });
@@ -2566,7 +2719,7 @@ export function createLoadEngine(context, entityName) {
     const terms = order.map((term) => {
       if (term.ref.flavor !== 'entity-column') {
         throw refuse('a keyset orders by mapped columns — '
-          + `'${term.ref.segments.join('.')}' is a document path`, []);
+          + `'${modelPath(term.ref.segments)}' is a document path`, []);
       }
       return { column: columnOfPhysical(term.ref.column)?.name ?? term.ref.column, desc: term.desc,
         nullsFirst: term.emptyGreatest === term.desc };
@@ -2633,7 +2786,7 @@ export function createLoadEngine(context, entityName) {
    * @param {any} spec
    * @param {boolean} [keyset]
    */
-  const buildLoad = (spec, keyset = false, profile = null) => {
+  const compileLoad = (spec, keyset = false, profile = null) => {
     // a cyclic specification cannot be keyed, so the cache reports a
     // permanent miss and buildTree gets to NAME the cycle
     const key = ['L', entityName, spec ?? {}, dialect.name, keyset, profile];
@@ -2819,9 +2972,12 @@ export function createLoadEngine(context, entityName) {
       ? identity.map((term) => `${termSql(term.column)} `
         + `${term.desc ? 'DESC' : 'ASC'}${dialect.orderNulls(term.nullsFirst)}`)
       : order.map((term) => {
+        // a document member orders as its declared type, as an include's
+        // and a query's do: a string by code point, a JSON null and a
+        // missing member as one empty key
         const value = term.ref.flavor === 'entity-column'
           ? termSql(propertyOfPhysical(term.ref.column))
-          : dialect.jsonExtract(rendered.docSql, dialect.jsonPathText(term.ref.segments));
+          : dialect.jsonExtract(rendered.docSql, pathTextOf(dialect, term.ref), kindOf(term.ref));
         const nullsFirst = term.emptyGreatest === term.desc;
         return `${value} ${term.desc ? 'DESC' : 'ASC'}${dialect.orderNulls(nullsFirst)}`;
       });
@@ -2862,6 +3018,25 @@ export function createLoadEngine(context, entityName) {
       snapshot: identity === null ? null : identity.every((term) => keyColumns.includes(term.column)),
     };
     return retainEntry(state, key, entry);
+  };
+  /**
+   * {@link compileLoad}, for every load surface. A graph load runs in the
+   * database alone, so a member name the dialect's path grammar cannot
+   * spell is refused by code instead of reaching a statement.
+   * @param {any} spec
+   * @param {boolean} [keyset]
+   */
+  const buildLoad = (spec, keyset = false, profile = null) => {
+    if (spec !== undefined) readSpec(spec, ROOT_LOAD_MEMBERS, []);
+    try {
+      return compileLoad(spec, keyset, profile);
+    }
+    catch (error) {
+      if (!(error instanceof UnrepresentablePath)) throw error;
+      throw new DbCompileError('JD0032', 'a member name the dialect\'s JSON path grammar cannot carry '
+        + '(a double quote or a control character) has no spelling in a graph load, which has no residual',
+      entities.get(entityName)?.docPath, error);
+    }
   };
 
   /**
@@ -2958,6 +3133,7 @@ export function createLoadEngine(context, entityName) {
       return buildLoad(spec).tree;
     },
     load(spec, options = undefined) {
+      readCallOptions(options, ['signal', 'deadline', 'profile'], `entity('${entityName}').load`);
       requireCallable(options, state.now);
       const entry = buildLoad(spec, false, profileOf(options));
       const params = entry.slots.map((slot) => slot.literal);
@@ -2977,6 +3153,7 @@ export function createLoadEngine(context, entityName) {
      * @param {((tree: any, doc: any) => any) | undefined} [register]
      */
     loadCursor(spec, options = undefined, register = undefined, cursorFactory = createCursor) {
+      readCallOptions(options, LOAD_CURSOR_OPTIONS, `entity('${entityName}').loadCursor`);
       requireCallable(options, state.now);
       return openCursor(buildLoad(spec, false, profileOf(options)), options?.signal, register,
         options?.deadline, cursorFactory);
@@ -3010,6 +3187,7 @@ export function createLoadEngine(context, entityName) {
       const consistency = options?.consistency ?? 'live';
       if (consistency !== 'live' && consistency !== 'snapshot')
         throw refuse("page() consistency is 'live' or 'snapshot'", []);
+      if (spec !== undefined) readSpec(spec, ROOT_LOAD_MEMBERS, []);
       if (spec?.take !== undefined || spec?.skip !== undefined)
         throw refuse('page() windows by its limit and continuation — a take or skip in the spec is refused', []);
       const after = options?.after ?? spec?.after ?? undefined;

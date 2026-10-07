@@ -31,6 +31,8 @@ import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 
+import { isMainModule } from './lib/main-module.js';
+
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 
 /** Where the site is published. */
@@ -122,7 +124,7 @@ async function beforeDeadline(run, deadline) {
   finally { clearTimeout(timer); }
 }
 
-if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMainModule(import.meta.url)) {
   const argv = process.argv.slice(2);
   const flag = (name) => {
     const at = argv.indexOf(name);

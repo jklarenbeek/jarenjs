@@ -9,7 +9,7 @@ const original = JSON.parse(readFileSync(join(root, 'test/adoption/source-census
 const families = original.families.map(family => {
   if (!existsSync(join(root, family.path))) {
     if (family.path !== 'packages/ai/src/retry.js') throw new Error(`Unaccounted source family: ${family.path}`);
-    return { category: family.category, originalPath: family.path, disposition: 'moved', owner: '@tangleai/models/retry', reason: 'Model transport retry belongs to Tangle; generic concurrency and provider execution remain in Jaren.' };
+    return { category: family.category, originalPath: family.path, disposition: 'moved', owner: 'the application that owns model transport', reason: 'Model transport retry belongs to the application; generic concurrency and provider execution remain in Jaren.' };
   }
   const pattern = new RegExp(family.pattern);
   const matches = readFileSync(join(root, family.path), 'utf8').split(/\r?\n/)

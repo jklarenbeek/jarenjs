@@ -616,5 +616,28 @@ describe('XQuery front-end parser', () => {
     it('should reject non-string input', () => {
       failsWith(42, 'query must be a string');
     });
+
+    it('should refuse nesting past the query compiler ceiling of 256 levels, by position', () => {
+      // 255 parentheses nest the expression 256 levels deep: the ceiling itself
+      assert.strictEqual(parseXQuery('('.repeat(255) + '1' + ')'.repeat(255)), 1);
+      failsWith('('.repeat(256) + '1' + ')'.repeat(256), 'the expression nests deeper than 256 levels', 256);
+      // far past the host stack, still a positioned syntax error, never a RangeError
+      failsWith('('.repeat(10000) + '1' + ')'.repeat(10000), 'the expression nests deeper than 256 levels', 256);
+      for (const src of [
+        '['.repeat(300) + ']'.repeat(300),
+        'abs('.repeat(300) + '1' + ')'.repeat(300),
+        'map{"a":'.repeat(300) + '1' + '}'.repeat(300),
+        'if (1) then 1 else '.repeat(300) + '1',
+        'some $a in 1 satisfies '.repeat(300) + '1',
+        'for $a in 1 '.repeat(3000) + 'return 1',
+      ])
+        failsWith(src, 'the expression nests deeper than 256 levels');
+      // each rebinding of $a opens a nested phrase; 255 of them reach the ceiling
+      assert.ok(parseXQuery('for $a in 1 '.repeat(255) + 'return 1'));
+      failsWith('for $a in 1 '.repeat(256) + 'return 1', 'the expression nests deeper than 256 levels');
+      // clauses that merge into one phrase add no level
+      const lets = Array.from({ length: 400 }, (_, i) => `let $v${i} := ${i} `).join('') + 'return 1';
+      assert.strictEqual(Object.keys(parseXQuery(lets).$let).length, 400);
+    });
   });
 });

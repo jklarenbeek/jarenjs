@@ -21,6 +21,7 @@ import { clamp01 } from '@jarenjs/core/math';
 import { scaleLinear } from '../core/scale.js';
 import { axisTicksLinear, formatTickValue } from '../core/axis.js';
 import { cartesianFrame, annotateChart } from '../core/cartesian.js';
+import { measurableSpan, measurableUnit } from '../core/domain.js';
 import { CATEGORICAL, seriesColor } from '../core/palette.js';
 import { normalizeTooltip, valueMark } from '../core/marks.js';
 
@@ -52,17 +53,21 @@ export function buildStreamgraphAST(data, config = {}) {
     return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : 0;
   };
 
-  // Silhouette baseline: the stack at sample k is centered on 0.
+  // Silhouette baseline: the stack at sample k is centered on 0. It is
+  // stacked in the unit `measurableUnit` picks over every sample, so a
+  // column that sums past the largest double keeps its proportions; the
+  // y axis carries no labels, so the unit never shows.
+  const unit = measurableUnit(input.flatMap((s) => Array.from({ length: count }, (_, k) => at(s, k))));
   let yMin = Infinity;
   let yMax = -Infinity;
   const stacked = [];
   for (let k = 0; k < count; k++) {
     let total = 0;
-    for (const s of input) total += at(s, k);
+    for (const s of input) total += at(s, k) / unit;
     let running = -total / 2;
     const column = [];
     for (const s of input) {
-      const v = at(s, k);
+      const v = at(s, k) / unit;
       column.push([running, running + v]);
       running += v;
     }
@@ -73,8 +78,10 @@ export function buildStreamgraphAST(data, config = {}) {
   if (!Number.isFinite(yMin)) { yMin = 0; yMax = 1; }
   const yScale = scaleLinear(yMin, yMax === yMin ? yMin + 1 : yMax);
 
-  const uOf = xs !== null
-    ? scaleLinear(Math.min(...xs), Math.max(...xs) === Math.min(...xs) ? Math.min(...xs) + 1 : Math.max(...xs))
+  // the x extent, kept to a span a double can measure
+  const xExtent = xs !== null ? measurableSpan(Math.min(...xs), Math.max(...xs)) : null;
+  const uOf = xExtent !== null
+    ? scaleLinear(xExtent[0], xExtent[1] === xExtent[0] ? xExtent[0] + 1 : xExtent[1])
     : null;
   const uAt = (k) => xs !== null ? clamp01(uOf(xs[k]))
     : count <= 1 ? 0.5 : k / (count - 1);
@@ -88,8 +95,8 @@ export function buildStreamgraphAST(data, config = {}) {
     })),
   }));
 
-  const tickValues = xs !== null
-    ? axisTicksLinear(Math.min(...xs), Math.max(...xs), 5)
+  const tickValues = xExtent !== null
+    ? axisTicksLinear(xExtent[0], xExtent[1], 5)
     : axisTicksLinear(0, Math.max(0, count - 1), Math.min(5, Math.max(1, count - 1)));
   const ticks = tickValues.map((v) => ({
     pos: xs !== null ? clamp01(uOf(v)) : count <= 1 ? 0.5 : clamp01(v / (count - 1)),

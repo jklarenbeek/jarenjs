@@ -31,8 +31,8 @@ import { equalsJson } from '@jarenjs/core/object';
 import { DbCompileError, DbRuntimeError, wrapDriverError, isDriverError, classifyDriverError } from './errors.js';
 import { chain, toPromise, isThenable, attempt, abortReason, createStatementOwner, useStatementOnce } from './driver.js';
 import { createSessionRouter } from './sessions.js';
-import { isPlainOptions, refuseUnknownMembers, readOptions, readControls } from './options.js';
-import { canonicalKeyText, namesNoNumber } from './key-text.js';
+import { isPlainOptions, refuseUnknownMembers, refuseUnknownModelMembers, readOptions, readControls } from './options.js';
+import { canonicalKeyText, namesNoNumber, noNumberKeyReason } from './key-text.js';
 import { planCollection, planEntity, planJoinTable, verifyShape } from './ddl.js';
 import { translatePatch } from './patch-sql.js';
 import { createQueryEngine, createQueryState, createEntityQueryEngine, createLoadEngine } from './query.js';
@@ -74,6 +74,12 @@ export { MODEL_VERSION };
 
 const COLLECTION_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const IDENTITIES = new Set(['uuid', 'integer']);
+/** The closed members of the model document's declarations (MODEL-FORMAT
+ * §2): the canonical schema says `additionalProperties: false` at each, and
+ * the runtime agrees. `x-rename` is the migration planner's hint. */
+const MODEL_MEMBERS = ['$model', 'collections', 'entities'];
+const COLLECTION_MEMBERS = ['schema', 'key', 'identity', 'indexes', 'x-rename'];
+const INDEX_MEMBERS = ['name', 'path', 'expression', 'unique', 'derive', 'precision', 'dims', 'physical'];
 
 /**
  * @param {string} code
@@ -230,6 +236,7 @@ function normalizeDerive(index, paths, docPath) {
 export function normalizeModel(model, expressions = undefined) {
   if (model === null || typeof model !== 'object' || Array.isArray(model))
     throw modelError('JD0005', 'the model document must be an object', '');
+  refuseUnknownModelMembers(model, MODEL_MEMBERS, '', 'model');
   if (model.$model !== MODEL_VERSION) {
     throw modelError('JD0005',
       `the model must declare "$model": "${MODEL_VERSION}"`, '/$model');
@@ -257,6 +264,7 @@ export function normalizeModel(model, expressions = undefined) {
     const spec = collections[name];
     if (spec === null || typeof spec !== 'object' || Array.isArray(spec))
       throw modelError('JD0005', 'a collection must be an object', docPath);
+    refuseUnknownModelMembers(spec, COLLECTION_MEMBERS, docPath, 'collection');
     if (spec.schema === null || typeof spec.schema !== 'object'
       || Array.isArray(spec.schema))
       throw modelError('JD0005', 'a collection needs an object schema', `${docPath}/schema`);
@@ -309,6 +317,7 @@ export function normalizeModel(model, expressions = undefined) {
       const indexDocPath = `${docPath}/indexes/${i}`;
       if (index === null || typeof index !== 'object' || Array.isArray(index))
         throw modelError('JD0005', 'an index must be an object', indexDocPath);
+      refuseUnknownModelMembers(index, INDEX_MEMBERS, indexDocPath, 'index');
       if (typeof index.name !== 'string' || !COLLECTION_NAME.test(index.name)) {
         throw modelError('JD0005',
           'an index needs an identifier name', `${indexDocPath}/name`);
@@ -318,6 +327,12 @@ export function normalizeModel(model, expressions = undefined) {
           `duplicate index name '${index.name}'`, `${indexDocPath}/name`);
       }
       indexNames.add(index.name);
+      // a `unique` of 1 or 'true' built a plain index: uniqueness is declared
+      // exactly, or not at all
+      if (index.unique !== undefined && typeof index.unique !== 'boolean') {
+        throw modelError('JD0005',
+          `unique is true or false, got ${JSON.stringify(index.unique)}`, `${indexDocPath}/unique`);
+      }
       // an EXPRESSION index names what it computes, not which member it
       // reads, so it is mutually exclusive with both of the other two
       // ways an index is declared: an index cannot be over a member AND
@@ -517,6 +532,20 @@ function immediately(connection, fn, retry = true) {
 }
 
 /**
+ * Run a planned table's CREATE statements in order, each in the dialect's
+ * idempotent form — a collection's and an entity's alike.
+ * @param {any} connection
+ * @param {{ createSql: string[] }} plan
+ * @returns {any} value-or-promise
+ */
+function runCreate(connection, plan) {
+  const run = (/** @type {number} */ j) => (j >= plan.createSql.length
+    ? null
+    : chain(connection.exec(connection.dialect.ddl.idempotent(plan.createSql[j])), () => run(j + 1)));
+  return run(0);
+}
+
+/**
  * Create or verify every collection's physical shape, inside one
  * immediate transaction.
  * @param {any} connection
@@ -548,10 +577,7 @@ function ensureShape(connection, collections, plans, createsNothing) {
                 `collection '${name}': the table does not exist and ${createsNothing} creates nothing`,
                 collection.docPath);
             }
-            const run = (j) => (j >= plan.createSql.length
-              ? null
-              : chain(connection.exec(dialect.ddl.idempotent(plan.createSql[j])), () => run(j + 1)));
-            return chain(run(0), () => step(i + 1));
+            return chain(runCreate(connection, plan), () => step(i + 1));
           }
           return chain(verifyShape(connection, plan, name, collection.docPath),
             () => step(i + 1));
@@ -593,10 +619,7 @@ function ensureEntityShape(connection, entityPlans, entities, createsNothing) {
                 `entity '${name}': the table does not exist and ${createsNothing} creates nothing`,
                 docPath);
             }
-            const run = (j) => (j >= plan.createSql.length
-              ? null
-              : chain(connection.exec(dialect.ddl.idempotent(plan.createSql[j])), () => run(j + 1)));
-            return chain(run(0), () => step(i + 1));
+            return chain(runCreate(connection, plan), () => step(i + 1));
           }
           return chain(verifyShape(connection, plan, name, docPath), () =>
             chain(connection.prepare(dialect.introspect.foreignKeyList(name)), (fkStatement) =>
@@ -813,12 +836,22 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
           + "document's own key; pass none, or the same one",
           { docPath: collection.docPath, collection: collection.name, key: explicitKey });
       }
-      return own;
+      return numberedKey(own);
     }
     if (explicitKey !== undefined)
-      return requireKey(explicitKey, collection.name, collection.docPath);
+      return numberedKey(requireKey(explicitKey, collection.name, collection.docPath));
     if (collection.identity === 'uuid') return runtime.uuid();
     return null; // integer: the database allocates
+  };
+  /** A write's key, refused (`JD2002`) when it is a string that names no
+   * number under a numeric key column — see `noNumberKeyReason`.
+   * @param {string | number} key */
+  const numberedKey = (key) => {
+    if (!textKey && namesNoNumber(key)) {
+      throw new DbRuntimeError('JD2002', noNumberKeyReason(key),
+        { docPath: collection.docPath, collection: collection.name, key });
+    }
+    return key;
   };
 
   // ONE spelling per numeric key over a TEXT key column (MODEL-FORMAT
@@ -830,8 +863,8 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
   const textKey = plan.keyType === dialect.typeFor('string', 'key');
   const bindKey = (/** @type {string | number} */ key) => (textKey ? canonicalKeyText(key) : key);
   // a lookup of a string that is no number on a numeric key column names no
-  // row on either engine (see `namesNoNumber`); a WRITE keeps its key, which
-  // both engines refuse alike
+  // row on either engine (see `namesNoNumber`); a WRITE under such a key is
+  // refused before it binds anything (`numberedKey`)
   const whereKey = (/** @type {string | number} */ key) => (!textKey && namesNoNumber(key) ? null : bindKey(key));
   // A collection without a key member has no document that could confirm
   // a legacy spelling, so a number names its canonical row only and a
@@ -2031,6 +2064,12 @@ export function openStore(model, options) {
           if (ctx().settlements === null) effects.commit?.();
           else ctx().settlements.push(effects);
         },
+        /** Whether a transaction the caller opened is in force, so that a
+         * rollback effect registered now could still run: what one would
+         * need is worth taking only then. (A root operation's own scope
+         * collects effects too, but nothing it wrote can roll back after it
+         * returns.) */
+        get settling() { return ctx().currentRoot !== null; },
         registerFunction: opened.registerFunction === null ? null
           : (/** @type {string} */ name, /** @type {any} */ o, /** @type {Function} */ fn) =>
             opened.registerFunction(name, o, fn),
@@ -3320,10 +3359,15 @@ export function openStore(model, options) {
                 const join = mapping.joinTables[relation.joinTable];
                 const own = join.left.entity === name ? join.left : join.right;
                 const target = own === join.left ? join.right : join.left;
+                // each key one the target could hold, as the unit of work
+                // reads it: refused before the insert, never linked as
+                // another row's (PostgreSQL reads '0x10' as 16), and two
+                // spellings of one key ('16', 16) linked once
                 const keys = [...new Set(membershipKeys(doc?.[property.name],
                   target.referencesKey, property.name,
                   (reason) => new DbRuntimeError('JD2003', reason,
-                    { docPath: entities.get(name).docPath, collection: name })))];
+                    { docPath: entities.get(name).docPath, collection: name }),
+                  entityCoreFor(relation.to).plan.memberKey))];
                 if (keys.length > 0) out.push({ table: relation.joinTable, join, own, target, keys });
               }
               return out;
@@ -3339,15 +3383,12 @@ export function openStore(model, options) {
                 return useStatementOnce(connection, sql, (statement) => {
                   const row = (j) => {
                     if (j >= keys.length) return next(i + 1);
-                    let ran;
-                    try {
-                      ran = statement.run([ownKey, keys[j]]);
-                    }
-                    catch (error) {
-                      throw new DbRuntimeError('JD2005',
-                        `the database rejected the operation: ${/** @type {any} */ (error)?.message ?? String(error)}`,
-                        { docPath: entities.get(name).docPath, collection: name, key: ownKey, cause: error });
-                    }
+                    // the one classification of a driver failure, thrown
+                    // or rejected: a membership naming no target row is
+                    // JD2005 (class constraint) on both engines
+                    const ran = attempt(() => statement.run([ownKey, keys[j]]),
+                      (error) => wrapDriverError(error,
+                        { docPath: entities.get(name).docPath, collection: name, key: ownKey }));
                     return chain(ran, () => {
                       if (capture !== null && capture.mode === 'journal') {
                         const value = { [own.column]: ownKey, [target.column]: keys[j] };
@@ -3364,23 +3405,35 @@ export function openStore(model, options) {
               };
               return next(0);
             };
+            /** Track the row an immediate write stored. Inside a transaction
+             * that rolls back, the row as written is gone again, and so is
+             * its tracking: a `put()` of it is then refused as of any key
+             * never read, and the memberships staged on a row the write
+             * created go with it. What that rollback needs is taken only
+             * while a transaction is open. @param {boolean} created */
+            const registerWritten = (created) => (/** @type {any} */ doc) => {
+              const registered = tracker.register(name, doc);
+              if (connection.settling) connection.onSettle({ rollback: tracker.unwritten(name, doc, created) });
+              return registered;
+            };
+            const registerCreated = registerWritten(true);
+            const registerUpdated = registerWritten(false);
             ops = {
               mutate: (document) => core.mutate(document),
               create: (doc) => {
                 const memberships = membershipsOf(doc);
                 if (memberships.length === 0)
-                  return chain(core.create(doc), (made) => tracker.register(name, made));
+                  return chain(core.create(doc), registerCreated);
                 // one capture scope and one transaction around the row and
                 // its join rows: a membership the database refuses rolls the
                 // row back too, and journal capture records the join rows
                 return chain(guard(() => connection.transaction(() =>
                   chain(core.create(doc), (made) => chain(attach(made, memberships), () => made)))),
-                (made) => tracker.register(name, made));
+                registerCreated);
               },
               get: (key) => chain(core.get(key), (doc) =>
                 (doc === undefined ? undefined : tracker.register(name, doc))),
-              update: (key, changes) => chain(core.update(key, changes),
-                (next) => tracker.register(name, next)),
+              update: (key, changes) => chain(core.update(key, changes), registerUpdated),
               delete: (key) => chain(core.delete(key), (done) => {
                 tracker.discard(name, key);
                 return done;
@@ -3579,9 +3632,12 @@ export function openStore(model, options) {
             }
             const roots = collectEntityRoots(document, new Map([...entities, ...joinTableRoots(entities, mapping).entities]));
             if (roots.size === 0) {
-              throw new TypeError(
-                'store.live takes an entity-root document — for a collection, '
-                + 'use store.collection(name).live');
+              // the fact `store.execute` refuses the same document with: a
+              // load specification (`{ include }`) is one, and is no live query
+              throw new DbCompileError('JD0033',
+                'store.live takes an entity-root document ($.<Entity>[*]); this document names none — '
+                + "a load specification is not a query document, and a collection's live query is "
+                + 'store.collection(name).live', '/entities');
             }
             const logicalRows = createLogicalRows({ connection, shapes: captureShapes, capture,
               collectionCore: coreFor, entityCore: entityCoreFor });
@@ -3719,11 +3775,18 @@ export function openStore(model, options) {
             const root = /** @type {any} */ (ctx().currentRoot);
             const { signal } = readTransactionOptions(transactionOptions, 'nested', spelling, root.mode);
             if (signal?.aborted === true) throw abortReason(signal);
-            const driverScope = /** @type {any} */ (ctx().scope);
-            return withScope(driverScope.transaction, (inner, innerIdentity) => (capture === null
+            return runNested(/** @type {any} */ (ctx().scope), fn);
+          };
+          /**
+           * A savepoint of `driverScope`'s transaction with `fn` over its own
+           * transaction view — inside a capture nest, so journal capture keeps
+           * or drops exactly the savepoint's writes.
+           * @param {any} driverScope @param {(tx: any) => any} fn
+           */
+          const runNested = (driverScope, fn) => withScope(driverScope.transaction,
+            (inner, innerIdentity) => (capture === null
               ? fn(scopedStore(inner, innerIdentity))
               : capture.nest(() => fn(scopedStore(inner, innerIdentity)))));
-          };
 
           // ————— the relational engine, bound to the store (MODEL-FORMAT §5.3) —————
           // One engine (relational.js) over the store's admission: here the
@@ -4378,10 +4441,7 @@ export function openStore(model, options) {
               if (signal?.aborted === true) throw abortReason(signal);
               // its savepoint takes the scope's turn: it never wraps an
               // operation of the scope still in flight
-              return inTurn(identity, () => withScope(driverScope.transaction,
-                (inner, innerIdentity) => (capture === null
-                  ? fn(scopedStore(inner, innerIdentity))
-                  : capture.nest(() => fn(scopedStore(inner, innerIdentity))))));
+              return inTurn(identity, () => runNested(driverScope, fn));
             };
 
             // ————— named savepoints (MODEL-FORMAT §5.2) —————

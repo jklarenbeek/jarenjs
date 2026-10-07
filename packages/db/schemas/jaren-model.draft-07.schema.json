@@ -432,6 +432,23 @@
                   "store"
                 ]
               },
+              "when": {
+                "description": "What an update rule judges: 'changed' (the default), an update that changes a counted column, or 'assigned', every update that assigns one. Only on a rule whose on includes update.",
+                "enum": [
+                  "changed",
+                  "assigned"
+                ]
+              },
+              "columns": {
+                "description": "The members whose assignment fires an update rule: writable columns of a physical layout. Only on a rule whose on includes update, never beside when: 'changed' or effects.",
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
               "audit": {
                 "type": "object",
                 "required": [
@@ -447,6 +464,24 @@
                   }
                 },
                 "additionalProperties": false
+              },
+              "effects": {
+                "description": "Database effects of a rule whose on includes update: each increments one non-key, non-null integer column of the row.",
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "increment"
+                  ],
+                  "properties": {
+                    "increment": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "additionalProperties": false
+                }
               }
             },
             "additionalProperties": false

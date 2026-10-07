@@ -11,6 +11,7 @@
 import { CsvMachine } from './csv-machine.js';
 import { stringifyCsvChunks, formatCsvValue, createCsvRowFormatter } from './csv.js';
 import { closeIterator, abortedError } from './pull.js';
+import { admitOptions, CSV_READ, CSV_ITERATE, CSV_STREAM_WRITE, CSV_PULL_WRITE } from './options.js';
 
 //#region reading
 
@@ -34,7 +35,7 @@ import { closeIterator, abortedError } from './pull.js';
  * reader.end(); // [{ a: '1', b: '2' }]
  */
 export function createCsvStreamReader(options = undefined) {
-  const machine = new CsvMachine(options);
+  const machine = new CsvMachine(admitOptions(options, CSV_READ, 'createCsvStreamReader'));
   return {
     feed(chunk) {
       machine.feed(chunk);
@@ -62,7 +63,7 @@ export function createCsvStreamReader(options = undefined) {
  * @returns {Promise<Array>} Every record
  */
 export async function parseCsvStream(chunks, options = undefined) {
-  const machine = new CsvMachine(options);
+  const machine = new CsvMachine(admitOptions(options, CSV_READ, 'parseCsvStream'));
   for await (const chunk of chunks)
     machine.feed(chunk);
   return machine.end();
@@ -83,8 +84,9 @@ export async function parseCsvStream(chunks, options = undefined) {
  *   await save(row);
  */
 export async function* iterateCsvStream(chunks, options = undefined) {
-  const machine = new CsvMachine(options);
-  const signal = options?.signal ?? null;
+  const admitted = admitOptions(options, CSV_ITERATE, 'iterateCsvStream');
+  const machine = new CsvMachine(admitted);
+  const signal = admitted.signal ?? null;
   const pending = machine.rows();
   const iterator = chunks[Symbol.asyncIterator]?.() ?? chunks[Symbol.iterator]();
   let finished = false;
@@ -135,8 +137,8 @@ export async function* iterateCsvStream(chunks, options = undefined) {
  * response.body = stringifyCsvStream(store.collection('rows').query(doc), { signal });
  */
 export async function* stringifyCsvStream(rows, options = {}) {
-  const formatter = createCsvRowFormatter(options);
-  const signal = options.signal ?? null;
+  const { signal = null, ...policy } = admitOptions(options, CSV_PULL_WRITE, 'stringifyCsvStream');
+  const formatter = createCsvRowFormatter(policy);
   const iterator = rows[Symbol.asyncIterator]?.() ?? rows[Symbol.iterator]();
   let finished = false;
   try {
@@ -172,10 +174,13 @@ export class CsvStreamWriter {
    * @param {import('./csv.js').CsvWriterOptions & {onChunk?:(chunk:string)=>void}} [options] - Shared writer policy, plus an optional chunk sink.
    */
   constructor(options = {}) {
-    this.options = options;
+    // admitted unchanged, so the caller's options keep their declared type
+    this.options = /** @type {import('./csv.js').CsvWriterOptions & {onChunk?:(chunk:string)=>void}} */ (
+      admitOptions(options, CSV_STREAM_WRITE, 'createCsvStreamWriter'));
+    const { onChunk = null, ...policy } = this.options;
     this.chunks = [];
-    this.onChunk = options.onChunk ?? null;
-    this.formatter = createCsvRowFormatter(options);
+    this.onChunk = onChunk;
+    this.formatter = createCsvRowFormatter(policy);
   }
 
   #emit(text) {

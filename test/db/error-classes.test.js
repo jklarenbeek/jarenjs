@@ -123,6 +123,12 @@ describe('the table', () => {
       'a unique INDEX over another column is a constraint failure, not the key collision');
     const keyed = { errcode: 2067, message: 'UNIQUE constraint failed: m.key' };
     assert.strictEqual(classifyDriverError(keyed, { table: 'm', column: 'key' }).class, 'duplicate');
+    const longer = { errcode: 2067, message: 'UNIQUE constraint failed: m.key_seq' };
+    assert.strictEqual(classifyDriverError(longer, { table: 'm', column: 'key' }).class, 'constraint',
+      'a column whose name merely begins with the key column is another column');
+    const composite = { errcode: 2067, message: 'UNIQUE constraint failed: m.a, m.key' };
+    assert.strictEqual(classifyDriverError(composite, { table: 'm', column: 'key' }).class, 'duplicate',
+      'the key column among several named ones is still named');
   });
 
   it('wrapDriverError attaches class, retryable and cause, keeps a lifecycle code, and passes non-driver errors through', () => {
@@ -198,16 +204,20 @@ describe('the query path', () => {
     assert.strictEqual(await m.execute(document, { pushdown: false }), engine);
     const explained = await m.explain(document);
     assert.strictEqual(explained.mode, 'native', 'the plan still pushes the aggregate');
+    // the sum folds as a double, so the database never overflows: its
+    // exactness guard sends the run to the engine
     assert.deepStrictEqual(explained.fallback, {
-      construct: 'overflow', runs: 1,
-      reason: 'the pushed aggregate overflowed int64; the engine answered the document over the fetched rows',
+      construct: 'accumulation', runs: 1,
+      reason: 'integer accumulation exceeded its runtime exactness bound',
     });
     // the cursor form answers the same single item
     const items = [];
     for await (const item of m.query(document)) items.push(item);
     assert.deepStrictEqual(items, [engine]);
     assert.strictEqual((await m.explain(document)).fallback.runs, 2);
-    // a document that never overflowed records no fallback
+    // strict mode refuses the residual such a run needs
+    await assert.rejects(Promise.resolve().then(() => m.execute(document, { strict: true })), { code: 'JD0010' });
+    // a document that never left its bound records no fallback
     assert.strictEqual((await m.explain({ $count: { $for: { it: '$[*]' }, $return: '$it' } })).fallback, null);
     await store.close();
   });

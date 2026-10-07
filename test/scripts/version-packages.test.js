@@ -23,9 +23,9 @@ import assert from 'node:assert';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 
-import { dependencyFields, packageFiles, rangeOnlyFiles, rootFile, updateInternalRanges } from '../../scripts/version-packages.js';
+import { compareVersions, dependencyFields, packageFiles, rangeOnlyFiles, rootFile, updateInternalRanges } from '../../scripts/version-packages.js';
 
 /**
  * Every internal edge of the given manifests that is not the exact suite version.
@@ -186,6 +186,81 @@ describe('internal edges are the exact suite version', () => {
       assert.deepStrictEqual(bytes(), after, 'the second run changes nothing');
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('an explicit version moves the suite forward or is refused', () => {
+  const script = path.resolve('scripts/version-packages.js');
+  /** A disposable tree of every manifest the script writes, all at `version`. */
+  function tree(/** @type {string} */ version) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jaren-version-'));
+    const write = (/** @type {string} */ file, /** @type {object} */ value) => {
+      fs.mkdirSync(path.dirname(path.join(dir, file)), { recursive: true });
+      fs.writeFileSync(path.join(dir, file), `${JSON.stringify(value, null, 2)}\n`);
+    };
+    write(rootFile, { name: 'suite', version });
+    for (const file of packageFiles) write(file, { name: `@jarenjs/${path.basename(path.dirname(file))}`, version });
+    const bytes = () => [rootFile, ...packageFiles].map((file) => fs.readFileSync(path.join(dir, file), 'utf8'));
+    return { dir, bytes, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) };
+  }
+
+  it('orders versions by semantic-version precedence, a pre-release before its release', () => {
+    const ordered = ['0.9.9', '1.2.3-alpha', '1.2.3-alpha.1', '1.2.3-alpha.beta', '1.2.3-beta.2', '1.2.3-beta.11', '1.2.3-rc.1', '1.2.3', '1.2.10', '1.10.0', '2.0.0'];
+    for (let i = 0; i < ordered.length; i++) {
+      assert.strictEqual(compareVersions(ordered[i], ordered[i]), 0, ordered[i]);
+      for (let j = i + 1; j < ordered.length; j++) {
+        assert.ok(compareVersions(ordered[i], ordered[j]) < 0, `${ordered[i]} < ${ordered[j]}`);
+        assert.ok(compareVersions(ordered[j], ordered[i]) > 0, `${ordered[j]} > ${ordered[i]}`);
+      }
+    }
+  });
+
+  it('refuses a downgrade, the current version, a pre-release of it and a non-version, writing nothing', () => {
+    const t = tree('1.2.3');
+    try {
+      const before = t.bytes();
+      for (const target of ['0.1.0', '1.2.2', '1.2.3', '1.2.3-rc.1']) {
+        const result = spawnSync(process.execPath, [script, target], { cwd: t.dir, encoding: 'utf8' });
+        assert.strictEqual(result.status, 2, `${target}: ${result.stdout}${result.stderr}`);
+        assert.match(result.stderr, new RegExp(`refusing ${target.replace(/\./g, '\\.')}: a release must be greater than the current 1\\.2\\.3`));
+      }
+      for (const target of ['v1.3.0', '1.3', 'latest']) {
+        const result = spawnSync(process.execPath, [script, target], { cwd: t.dir, encoding: 'utf8' });
+        assert.strictEqual(result.status, 2, target);
+        assert.match(result.stderr, /Usage: node scripts\/version-packages\.js patch\|minor\|major\|<version>\|pin/);
+      }
+      assert.deepStrictEqual(t.bytes(), before, 'nothing was written');
+    }
+    finally { t.cleanup(); }
+  });
+
+  it('refuses a target the semantic-version grammar does not admit, though it would sort higher', () => {
+    // each sorts above 1.2.3, so only the grammar can refuse it: a leading
+    // zero in a numeric part or a numeric pre-release identifier, an empty
+    // identifier
+    const t = tree('1.2.3');
+    try {
+      const before = t.bytes();
+      for (const target of ['01.3.0', '1.03.0', '1.3.00', '1.3.0-a..b', '1.3.0-01', '1.3.0-rc.01', '1.3.0-rc.', '1.3.0-']) {
+        const result = spawnSync(process.execPath, [script, target], { cwd: t.dir, encoding: 'utf8' });
+        assert.strictEqual(result.status, 2, `${target}: ${result.stdout}${result.stderr}`);
+        assert.match(result.stderr, new RegExp(`'${target.replace(/\./g, '\\.')}' is not a semantic version`), target);
+        assert.match(result.stderr, /Usage: node scripts\/version-packages\.js patch\|minor\|major\|<version>\|pin/);
+      }
+      assert.deepStrictEqual(t.bytes(), before, 'nothing was written');
+    }
+    finally { t.cleanup(); }
+  });
+
+  it('takes a greater version, a pre-release of the next release included', () => {
+    for (const target of ['1.2.4', '1.3.0-rc.1', '1.3.0-0', '1.3.0-0a.x-y', '2.0.0']) {
+      const t = tree('1.2.3');
+      try {
+        execFileSync(process.execPath, [script, target], { cwd: t.dir, encoding: 'utf8' });
+        for (const text of t.bytes()) assert.strictEqual(JSON.parse(text).version, target);
+      }
+      finally { t.cleanup(); }
     }
   });
 });

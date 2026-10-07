@@ -385,6 +385,46 @@ describe('compileNormalizer — composed with a validator', () => {
   });
 });
 
+describe('compileNormalizer — a closed option set', () => {
+  const schema = { type: 'object', properties: { a: { type: 'integer' }, b: { default: 1 } } };
+  const refuses = (options, message) => {
+    let thrown = null;
+    try { compileNormalizer(schema, options); }
+    catch (e) { thrown = e; }
+    strictEqual(thrown instanceof TypeError, true, String(thrown));
+    strictEqual(thrown.message, message);
+  };
+
+  it('refuses a misspelt option instead of compiling an identity normalizer', () => {
+    refuses({ coerceType: true }, "compileNormalizer: unknown option 'coerceType' — did you mean 'coerceTypes'?");
+    refuses({ useDefault: true }, "compileNormalizer: unknown option 'useDefault' — did you mean 'useDefaults'?");
+    refuses({ strip: true },
+      "compileNormalizer: unknown option 'strip'; the options are useDefaults, removeAdditional, coerceTypes, trimStrings");
+  });
+
+  it('refuses a mistyped option value', () => {
+    refuses({ coerceTypes: 'yes' }, "compileNormalizer: 'coerceTypes' must be true, false or a function of the schema node");
+    refuses({ useDefaults: 1 }, "compileNormalizer: 'useDefaults' must be true, false or a function of the schema node");
+    refuses({ trimStrings: null }, "compileNormalizer: 'trimStrings' must be true, false or a function of the schema node");
+    refuses({ removeAdditional: 'yes' }, "compileNormalizer: 'removeAdditional' must be true, false or 'all'");
+  });
+
+  it('refuses options that are not a plain object, null included', () => {
+    refuses(null, 'compileNormalizer: options must be a plain object');
+    refuses([], 'compileNormalizer: options must be a plain object');
+    refuses('coerceTypes', 'compileNormalizer: options must be a plain object');
+  });
+
+  it('keeps every valid spelling and the defaults', () => {
+    deepStrictEqual(compileNormalizer(schema, { coerceTypes: true, useDefaults: true })({ a: '5' }), { a: 5, b: 1 });
+    deepStrictEqual(compileNormalizer(schema)({ a: '5' }), { a: '5' });
+    deepStrictEqual(compileNormalizer(schema, undefined)({ a: '5' }), { a: '5' });
+    deepStrictEqual(compileNormalizer(schema, { coerceTypes: undefined, removeAdditional: false })({ a: '5' }), { a: '5' });
+    deepStrictEqual(compileNormalizer(schema, { coerceTypes: () => true })({ a: '5' }), { a: 5 });
+    deepStrictEqual(compileNormalizer(schema, Object.assign(Object.create(null), { useDefaults: true }))({}), { b: 1 });
+  });
+});
+
 describe('validator options — an unset option keeps its per-draft default', () => {
   // Constructing with an options object must not silently change a default
   // the caller never mentioned.

@@ -40,6 +40,7 @@ import {
   isAsciiLetterCode,
 } from '@jarenjs/core/scan';
 import { columnOf } from './util.js';
+import { admitOptions, JSONX_READ, JSONX_WRITE } from './options.js';
 import { setObjectMember } from '@jarenjs/core/object';
 import { countCharCode } from '@jarenjs/core/string';
 import {
@@ -104,14 +105,107 @@ class JsonxParser {
     return value;
   }
 
+  /**
+   * Parse one value. Containers are walked with an explicit stack of the
+   * open ones rather than by recursion, so nesting depth is bounded by
+   * memory - as it is for `JSON.parse` - and not by the call stack. While
+   * a member's value is parsed, `this.path` ends with that member's key or
+   * index: the path holds one entry per open container.
+   * @returns {*} The value
+   */
   parseValue() {
-    if (this.pos >= this.text.length)
-      this.err('unexpected end of input');
-    const c = this.text.charCodeAt(this.pos);
-    if (c === CC_LBRACE)
-      return this.parseObject();
-    if (c === CC_LBRACKET)
-      return this.parseArray();
+    const text = this.text;
+    const path = this.path;
+    const outer = []; // the open containers around `container`, outermost first
+    let container = null; // the innermost open container
+    let isArray = false;
+    for (;;) {
+      if (this.pos >= text.length)
+        this.err('unexpected end of input');
+      const c = text.charCodeAt(this.pos);
+      let value;
+      if (c === CC_LBRACE || c === CC_LBRACKET) {
+        this.pos++; // consume '{' or '['
+        const array = c === CC_LBRACKET;
+        this.emit('open', array ? 'array' : 'object');
+        value = array ? [] : {};
+        this.skipWs();
+        if (this.pos >= text.length || text.charCodeAt(this.pos) !== (array ? CC_RBRACKET : CC_RBRACE)) {
+          if (container !== null)
+            outer.push(container);
+          container = value;
+          isArray = array;
+          this.enterMember(container, isArray);
+          continue; // parse the value of its first member
+        }
+        this.pos++; // an empty container is complete at once
+        this.emit('close', value);
+      }
+      else
+        value = this.parseScalar(c);
+      // `value` is complete: add it to its container, then close every
+      // container that ends with it
+      for (;;) {
+        if (container === null)
+          return value;
+        const key = path.pop();
+        if (isArray)
+          container.push(value);
+        else
+          setObjectMember(container, key, value);
+        this.skipWs();
+        if (this.pos >= text.length) {
+          if (isArray)
+            this.err('unterminated array', "close the array with ']'");
+          this.err('unterminated object', "close the object with '}'");
+        }
+        const d = text.charCodeAt(this.pos);
+        if (d === CC_COMMA) {
+          this.pos++;
+          this.enterMember(container, isArray);
+          break; // parse the value of the next member
+        }
+        if (d !== (isArray ? CC_RBRACKET : CC_RBRACE))
+          this.err(isArray ? "expected ',' or ']' in array" : "expected ',' or '}' in object");
+        this.pos++;
+        this.emit('close', container);
+        value = container;
+        container = outer.length === 0 ? null : outer.pop();
+        isArray = Array.isArray(container);
+      }
+    }
+  }
+
+  /**
+   * Read up to the value of an open container's next member - for an
+   * object its key and the ':' - and put the member's key, or the array
+   * element's index, on the path.
+   * @param {object|Array} container - The open container
+   * @param {boolean} isArray - Whether it is an array
+   */
+  enterMember(container, isArray) {
+    this.skipWs();
+    if (isArray) {
+      this.path.push(container.length);
+      return;
+    }
+    if (this.pos >= this.text.length || this.text.charCodeAt(this.pos) !== CC_DQUOTE)
+      this.err('expected a string key');
+    const key = this.parseString();
+    this.skipWs();
+    if (this.pos >= this.text.length || this.text.charCodeAt(this.pos) !== CC_COLON)
+      this.err("expected ':' after key");
+    this.pos++;
+    this.skipWs();
+    this.path.push(key);
+  }
+
+  /**
+   * Parse the scalar at `this.pos`.
+   * @param {number} c - Its first char code
+   * @returns {*} The value
+   */
+  parseScalar(c) {
     if (c === CC_DQUOTE)
       return this.scalar(this.parseString());
     if (c === CC_SLASH) {
@@ -154,80 +248,6 @@ class JsonxParser {
       this.err('unexpected character after value');
   }
 
-  parseObject() {
-    this.pos++; // consume '{'
-    this.emit('open', 'object');
-    const obj = {};
-    this.skipWs();
-    if (this.pos < this.text.length && this.text.charCodeAt(this.pos) === CC_RBRACE) {
-      this.pos++;
-      this.emit('close', obj);
-      return obj;
-    }
-    for (;;) {
-      this.skipWs();
-      if (this.pos >= this.text.length || this.text.charCodeAt(this.pos) !== CC_DQUOTE)
-        this.err('expected a string key');
-      const key = this.parseString();
-      this.skipWs();
-      if (this.pos >= this.text.length || this.text.charCodeAt(this.pos) !== CC_COLON)
-        this.err("expected ':' after key");
-      this.pos++;
-      this.skipWs();
-      this.path.push(key);
-      const value = this.parseValue();
-      this.path.pop();
-      setObjectMember(obj, key, value);
-      this.skipWs();
-      if (this.pos >= this.text.length)
-        this.err('unterminated object', "close the object with '}'");
-      const c = this.text.charCodeAt(this.pos);
-      if (c === CC_RBRACE) {
-        this.pos++;
-        this.emit('close', obj);
-        return obj;
-      }
-      if (c === CC_COMMA) {
-        this.pos++;
-        continue;
-      }
-      this.err("expected ',' or '}' in object");
-    }
-  }
-
-  parseArray() {
-    this.pos++; // consume '['
-    this.emit('open', 'array');
-    const arr = [];
-    this.skipWs();
-    if (this.pos < this.text.length && this.text.charCodeAt(this.pos) === CC_RBRACKET) {
-      this.pos++;
-      this.emit('close', arr);
-      return arr;
-    }
-    for (;;) {
-      this.skipWs();
-      this.path.push(arr.length);
-      const value = this.parseValue();
-      this.path.pop();
-      arr.push(value);
-      this.skipWs();
-      if (this.pos >= this.text.length)
-        this.err('unterminated array', "close the array with ']'");
-      const c = this.text.charCodeAt(this.pos);
-      if (c === CC_RBRACKET) {
-        this.pos++;
-        this.emit('close', arr);
-        return arr;
-      }
-      if (c === CC_COMMA) {
-        this.pos++;
-        continue;
-      }
-      this.err("expected ',' or ']' in array");
-    }
-  }
-
   parseString() {
     const [value, end] = decodeString(this.text, this.pos, this.errCb);
     this.pos = end;
@@ -256,9 +276,27 @@ class JsonxParser {
  *  {type:'close', path, value} — paths are absolute (JSON-Pointer-able)
  * @returns {*} The parsed value
  * @throws {JsonxSyntaxError} On invalid input
+ * @throws {TypeError} On an option other than `mode` and `onEvent` - a
+ *  `JSONX2xxx` limit is refused by naming the stream reader that enforces
+ *  it - or a value of the wrong type
  */
 export function parseJsonx(text, options = undefined) {
-  return new JsonxParser(String(text), options ?? {}).parse();
+  return new JsonxParser(String(text), admitOptions(options, JSONX_READ, 'parseJsonx', refuseJsonxOption)).parse();
+}
+
+/** The JSONX limits are the stream reader's: `parseJsonx` holds the whole text already. */
+const STREAM_LIMITS = Object.freeze(['maxTotalBytes', 'maxTokenBytes', 'maxDepth', 'maxRetainedValues']);
+
+/**
+ * The refusal of a member `parseJsonx` does not take: a stream limit names
+ * the API that enforces it rather than the nearest member.
+ * @param {string} key @param {string} hint @returns {TypeError}
+ */
+function refuseJsonxOption(key, hint) {
+  return STREAM_LIMITS.includes(key)
+    ? new TypeError(`parseJsonx: '${key}' is a limit of the JSONX stream reader`
+      + ' — read with createJsonxStreamReader or parseJsonxStream to enforce it')
+    : new TypeError(`parseJsonx: unknown option '${key}'${hint}`);
 }
 
 function stringifyValue(value, seen, gap, depth) {
@@ -325,8 +363,11 @@ function stringifyValue(value, seen, gap, depth) {
  * @param {'jsonx'|'json'} [options.mode] - Output dialect
  * @param {number|string} [options.indent] - Pretty-print indentation
  * @returns {string|undefined} The text, or undefined for undefined input
+ * @throws {TypeError} On an option other than `mode` and `indent`, or a
+ *  value of the wrong type
  */
 export function stringifyJsonx(value, options = {}) {
+  options = admitOptions(options, JSONX_WRITE, 'stringifyJsonx');
   if (options.mode === 'json')
     return JSON.stringify(value, null, options.indent);
   const indent = options.indent ?? 0;

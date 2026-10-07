@@ -8,27 +8,23 @@
 // model, and any array whose elements are all plain objects is emitted in
 // array-of-tables form.
 
+import { isPlainOptions } from '@jarenjs/core/object';
 import { JoslStringifyError } from './errors.js';
 import { LocalDate, LocalTime, LocalDateTime } from './values.js';
+import { admitOptions, JOSL_WRITE, TOML_WRITE } from './options.js';
 
 const RE_BARE_KEY = /^[A-Za-z0-9_-]+$/;
 const TOML_INT_MIN = -(2n ** 63n);
 const TOML_INT_MAX = 2n ** 63n - 1n;
 
 /**
- * Whether a value serializes as a table (a plain object).
+ * Whether a value serializes as a table: a plain object - an object
+ * literal or a null-prototype record, never an array or a class instance.
  * @param {*} v - The value
  * @returns {boolean} True for plain objects
  */
 export function isPlainTable(v) {
-  return isPlainObject(v);
-}
-
-function isPlainObject(v) {
-  if (v === null || typeof v !== 'object' || Array.isArray(v))
-    return false;
-  const proto = Object.getPrototypeOf(v);
-  return proto === Object.prototype || proto === null;
+  return isPlainOptions(v);
 }
 
 // eslint-disable-next-line no-control-regex
@@ -144,7 +140,7 @@ function fmtValue(ctx, v) {
     ctx.seen.delete(v);
     return v.length === 0 ? '[]' : out + ' ]';
   }
-  if (isPlainObject(v)) {
+  if (isPlainOptions(v)) {
     if (ctx.seen.has(v))
       throw new JoslStringifyError('circular reference', ctx.path.slice());
     ctx.seen.add(v);
@@ -185,9 +181,9 @@ function emitTable(ctx, header, obj) {
       continue;
     if (v === null && ctx.mode === 'toml' && ctx.onNull === 'omit')
       continue;
-    if (isPlainObject(v))
+    if (isPlainOptions(v))
       (tables ??= []).push(k, v);
-    else if (Array.isArray(v) && v.length !== 0 && v.every(isPlainObject))
+    else if (Array.isArray(v) && v.length !== 0 && v.every(isPlainOptions))
       (aots ??= []).push(k, v);
     else {
       ctx.path.push(k);
@@ -298,14 +294,16 @@ export function formatSection(obj, options = {}, headerPath = []) {
  *  regexps as strings, or error
  * @returns {string} The serialized document, newline terminated
  * @throws {JoslStringifyError} When the value cannot be represented
+ * @throws {TypeError} On an option the writer does not take, or a value of
+ *  the wrong type
  */
 export function stringifyJosl(value, options = {}) {
-  const ctx = makeCtx(options);
+  const ctx = makeCtx(admitOptions(options, JOSL_WRITE, 'stringifyJosl'));
   if (Array.isArray(value)) {
     if (ctx.mode === 'toml')
       throw new JoslStringifyError('a TOML root must be a table; root arrays are a JOSL extension');
     for (let i = 0; i < value.length; ++i) {
-      if (!isPlainObject(value[i]))
+      if (!isPlainOptions(value[i]))
         throw new JoslStringifyError('root array elements must be tables', [i]);
       if (ctx.out.length !== 0)
         ctx.out.push('');
@@ -317,7 +315,7 @@ export function stringifyJosl(value, options = {}) {
     if (value.length === 0)
       return '';
   }
-  else if (isPlainObject(value))
+  else if (isPlainOptions(value))
     emitTable(ctx, '', value);
   else
     throw new JoslStringifyError(ctx.mode === 'toml'
@@ -329,11 +327,11 @@ export function stringifyJosl(value, options = {}) {
 /**
  * Serialize a value to strict TOML 1.0 text.
  * @param {object} value - A plain object root
- * @param {object} [options] - Writer options minus `mode`
+ * @param {object} [options] - Writer options minus `mode`, which is always `'toml'`
  * @returns {string} The serialized document
  */
 export function stringifyToml(value, options = {}) {
-  return stringifyJosl(value, { ...options, mode: 'toml' });
+  return stringifyJosl(value, { ...admitOptions(options, TOML_WRITE, 'stringifyToml'), mode: 'toml' });
 }
 
 export { JoslStringifyError } from './errors.js';

@@ -14,7 +14,7 @@
  */
 
 import { isJsonObject } from '@jarenjs/core/object';
-import { captureExpression } from '../expression.js';
+import { captureExpression, PARAMETERS } from '../expression.js';
 import { body } from '../jslt/body.js';
 import { describeValue, requireJson } from '../json-boundary.js';
 import { LinqBuildError } from '../errors.js';
@@ -70,13 +70,22 @@ function withModel(step, model) {
   return { ...step, model: copy(doc) };
 }
 
+/** Why an assertion's predicate binds nothing, for both its refusals. */
+const BINDS_NOTHING = " — a query assertion runs over the table's rows with no externals (MIGRATION-FORMAT §2)";
+
+/** The predicate's externals argument embedded or spread: it is not a
+ * value, and its empty target would otherwise be written as `{}`. */
+const externalsNotValue = () => {
+  throw new LinqBuildError('JL0104', `an assert() predicate's externals argument is not a value${BINDS_NOTHING}`);
+};
+
 /** The externals proxy an assertion's predicate sees: nothing. */
 const NO_EXTERNALS = new Proxy(Object.freeze({}), {
+  ownKeys: externalsNotValue,
   get(_target, prop) {
+    if (prop === PARAMETERS) return externalsNotValue;
     if (typeof prop === 'symbol') return undefined;
-    throw new LinqBuildError('JL0104',
-      `an assert() predicate cannot bind '${String(prop)}' — a query assertion runs over the `
-      + "table's rows with no externals (MIGRATION-FORMAT §2)");
+    throw new LinqBuildError('JL0104', `an assert() predicate cannot bind '${String(prop)}'${BINDS_NOTHING}`);
   },
 });
 

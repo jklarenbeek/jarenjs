@@ -210,6 +210,13 @@ function compileObject(node) {
         };
     }
   }
+  return buildObject(appliers);
+}
+
+// the object both constructors build: a fresh one per evaluation, each
+// member applier run in order (so in a map, later pairs win on duplicate
+// keys)
+function buildObject(appliers) {
   const alen = appliers.length;
   return (f) => {
     const out = {};
@@ -245,13 +252,7 @@ function compileMap(node) {
         setObjectMember(out, k, memberValue(v, k, valPath));
     };
   }
-  const alen = appliers.length;
-  return (f) => {
-    const out = {};
-    for (let i = 0; i < alen; i++)
-      appliers[i](f, out); // later pairs win on duplicate keys
-    return out;
-  };
+  return buildObject(appliers);
 }
 
 // shared flattening accumulator of array constructors and $seq

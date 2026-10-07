@@ -233,7 +233,7 @@ establish registry publication or downstream acceptance.
 ## @jarenjs/calc
 
 - [ ] **Interactive plots** — drag-to-rotate for x·y·z and pan/zoom for x·y are a `hydrate` enhancement (out of scope for v1; the static SVG render is complete).
-- [ ] **Programmer 64-bit precision** — the expression evaluator surfaces programmer-mode results as `Number` (values beyond 2^53 lose precision on read-back); the four-base display already stays exact via `word.js` BigInt. A BigInt-valued evaluation path would close the gap.
+- [ ] **Programmer 64-bit precision** — the expression evaluator surfaces programmer-mode results as `Number`, so a result beyond 2^53 is rounded before the four-base display wraps it to the word (`0xFFFFFFFFFFFFFFFF` displays `0x0`; [CALC-FORMAT](../components/calc/docs/CALC-FORMAT.md) says so). A BigInt-valued evaluation path would close the gap.
 - [ ] **More converter dimensions & rate providers** — fuel economy (non-affine) and additional API-key-free tickers; websocket/streaming rates are deliberately out of v1 (REST polling only).
 
 ## @jarenjs/play
@@ -322,7 +322,9 @@ what each does is its own documentation's job
   can slip past it. Wanted: an entity-level `indexes` array with the
   collection's vocabulary, carried through `planEntity`, the migration
   planner's index diff, and the introspection comparison that verifies
-  a partial predicate. MODEL-FORMAT §9.2 states the absence today.
+  a partial predicate. MODEL-FORMAT §9.2 states the absence today, and a
+  model that names an entity `indexes` member is refused (`JD0005`) rather
+  than silently ignored until it ships.
 - [ ] **Database invariants over a store-owned layout.** `enforcement:
   "database"` refuses (`JD0005`) unless the entity declares
   `physical: { table, columns }` — hand-owning every column name and
@@ -412,10 +414,14 @@ what each does is its own documentation's job
   proves five adopted-column read families and three SQLite mutation families
   ([native contracts](../packages/db/docs/NATIVE-PLANS.md)). Receipt history
   retains SQL because its table has no declared primary key. The explicit SQLite surface now supports correlated/computed selections,
-  cross-table insert-select and partial/expression conflicts. Promotions into the
-  JSON query semantic contract, store-invariant bulk preimages and PostgreSQL
-  column mutations remain open. Additional promotions need retained SQL/decoded-row parity, no-op and
-  rollback proofs, and explicit work costs; fluent syntax alone is not evidence.
+  cross-table insert-select and partial/expression conflicts. Entity `mutate`
+  also admits adopted PostgreSQL column layouts, but the frozen census, its
+  parity, no-op and rollback proofs and the benchmark are SQLite-only: the same
+  three families on PostgreSQL, with PostgreSQL reference SQL, remain open, as
+  do promotions into the JSON query semantic contract and store-invariant bulk
+  preimages. Additional promotions need retained SQL/decoded-row parity, no-op
+  and rollback proofs, and explicit work costs; fluent syntax alone is not
+  evidence.
 - [ ] **Relational recovery beyond the qualified SQLite hosts.** Explicit
   preservation plans, consistent committed-WAL backups, interrupted rebuild and
   publication recovery, and forward repair from the newest file are exercised
@@ -428,8 +434,39 @@ what each does is its own documentation's job
   Physical-schema cutover, power-loss durability, deployment beyond the qualified
   Linux executables and actual downstream cutover still require named evidence.
   Both host entries now provide disk-backed standalone snapshots and Bun backup
-  no longer serializes the full database into JavaScript. Incremental progress,
-  page-identical unaliased rowid preservation and interruption remain separate work.
+  no longer serializes the full database into JavaScript. Node backups report
+  progress and abort on a signal (`JD2079`); Bun's `VACUUM INTO` path reports
+  one event and aborts only after the copy, and only an online backup is
+  page-identical (every path preserves unaliased rowids). A Bun online-backup
+  path with one progress contract and a page-identical `snapshotDatabase`
+  remain separate work.
+- [ ] **PostgreSQL entity changes beyond an unreferenced table.** A change
+  the planner expresses as a rebuild (a key declaration, an `enum`, a type, a
+  relation) rebuilds the table on PostgreSQL under a table lock, which holds for
+  an entity no foreign key references, its own included: a referenced or
+  self-referencing entity is refused at the drop (`JD0023`, naming what depends
+  on it) and the link rolls back whole
+  ([MIGRATION-FORMAT §10](../packages/db/docs/MIGRATION-FORMAT.md)). Also open
+  on PostgreSQL: a key that gains `default: 'auto'` after creation opens but
+  cannot allocate (no sequence), a key that drops it and is then referenced by a
+  new entity cannot create the foreign key, and folding a numeric or text column
+  into the document fails. Wanted: foreign keys re-pointed through the rebuild,
+  or in-place `ALTER`s where PostgreSQL has them, key allocation converted by a
+  planned step, and the same chain qualified on both engines.
+- [ ] **Duplicate keys classified by the key's own constraint.** PostgreSQL
+  reports a duplicate key by the constraint's generated name; the classifier
+  recognizes `<table>_pkey` with the server's clipping and numeric suffix, so a
+  table renamed by a migration keeps its old name and reports `JD2005` where a
+  fresh store reports `JD2001`, and a unique member literally named `pkey<N>`
+  reads as the key. Wanted: the key constraint read from the catalog at open.
+- [ ] **Native temporal buckets sum floating readings in SQL.** Collection and
+  entity sums over `number` members run in the engine, left to right in doubles;
+  a `$time-bucket` or `$resample` sum over a `number` member is still summed by
+  the database (`1e16, 1, -1e16` answers `1` where the engine answers `0`), and
+  over integer-valued `number` readings Node's SQLite binding can raise `JD2005`
+  or `JD2003` ([MODEL-FORMAT §10.6](../packages/db/docs/MODEL-FORMAT.md)).
+  Wanted: the series planner keeps these sums residual with a named reason, as
+  the collection planner does.
 - [ ] **Federation merge strategy and spilling.** Connected N-way joins and
   nested fluent joins now have an explicit fetch order and combined admission
   credits (QUERY-PEN §12.1). A merge strategy still needs a provider ordering
@@ -453,7 +490,7 @@ what each does is its own documentation's job
 - [ ] **Remaining incremental live shapes.**
   [The matrix](../packages/db/docs/LIVE-FORMAT.md) retains self joins,
   non-equality and unindexed joins, reverse many-to-many edges without an
-  index, ordered/windowed entity joins, load-spec graphs, global-root graph
+  index, ordered/windowed entity joins, global-root graph
   projections, ordered/windowed distinct projections, non-canonical aggregates
   over groups and LINQ group-of-groups emission. **Maintenance boundary:**
   entity caches currently evaluate subsets keyed by distinct entity roots;
@@ -784,7 +821,7 @@ the CSV recipe in QUERY-FORMAT §8.14, the `@jarenjs/json` README and
 `docs/HOWTO.md`; the fluent surface in QUERY-PEN §4; derived spatial index
 kinds, the two-stage plan with its truth table, the geofence and the storage
 numbers with their loss in the `@jarenjs/db` README, ARCHITECTURE, MODEL-FORMAT
-and LIVE-FORMAT; AI spatial authoring obligations now belong to [Tangle](https://github.com/jklarenbeek/tangleai/blob/main/docs/AI-MECHANISM-ROADMAP.md); the `geojson` preview hint in the `@jarenjs/forms` README;
+and LIVE-FORMAT; AI spatial authoring obligations belong to the application that hosts the model; the `geojson` preview hint in the `@jarenjs/forms` README;
 and the one-document-three-executors claim in `docs/ARCHITECTURE.md`. What is
 still open is listed here, each with its reason.
 

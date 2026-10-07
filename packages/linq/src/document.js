@@ -37,6 +37,7 @@
  * construction, so the two surfaces agree on every row shape.
  */
 
+import { isPlainOptions, refuseUnknownMembers } from '@jarenjs/core/object';
 import { LinqBuildError } from './errors.js';
 
 /**
@@ -50,6 +51,57 @@ export function requireNonNegativeInteger(value, what) {
     throw new LinqBuildError('JL0005', `${what} takes a non-negative integer, got ${value}`);
   }
   return value;
+}
+
+/**
+ * One of the chain's closed option bags (QUERY-PEN §8.1, §11, §12):
+ * `undefined` is the defaults; anything but a plain object, or a member
+ * outside `known`, is `JL0005` naming the nearest member — a misspelt
+ * bound dropped in silence would leave the query unbounded.
+ * @param {any} options
+ * @param {readonly string[]} known - the members the operator reads
+ * @param {string} what - the operator, for the message
+ * @returns {Record<string, any>} the options as given, or `{}`
+ */
+export function readOptions(options, known, what) {
+  if (options === undefined) return {};
+  if (!isPlainOptions(options)) throw new LinqBuildError('JL0005', `${what} takes a plain options object`);
+  refuseUnknownMembers(options, known, (key, hint) =>
+    new LinqBuildError('JL0005', `${what} does not take '${key}'${hint}`));
+  return options;
+}
+
+/**
+ * The key both chain classes answer, unchecked, with what a run of the
+ * chain binds: `{ bindings, lists }` — its own parameter bindings and the
+ * parameters its `in()` calls read whole as lists. The caller is `live()`,
+ * which registers the chain under externals of its own merged over those
+ * bindings, so it holds the list rule to the merged set; `explain()` and
+ * the terminals check the bindings they run with themselves.
+ */
+export const RUN_BINDINGS = Symbol();
+
+/** The members an ordering stage's options carry. */
+const ORDER_OPTIONS = Object.freeze(['empty', 'collation']);
+
+/**
+ * One `$orderby` key spec, as both surfaces emit it: the key, the
+ * direction, and the two options. What their VALUES may be is the
+ * engine's to judge (`JQ0003`); the set itself is closed here.
+ * @param {any} key - the captured key expression
+ * @param {boolean} desc
+ * @param {any} options
+ * @param {string} what - the operator as written, for the message
+ * @returns {any} the key spec
+ */
+export function orderSpec(key, desc, options, what) {
+  const { empty, collation } = readOptions(options, ORDER_OPTIONS, what);
+  /** @type {Record<string, any>} */
+  const spec = { $key: key };
+  if (desc) spec.$dir = 'desc';
+  if (empty !== undefined) spec.$empty = empty;
+  if (collation !== undefined) spec.$collation = collation;
+  return spec;
 }
 
 /** The binding names the emitted documents own (QUERY-PEN §7): the

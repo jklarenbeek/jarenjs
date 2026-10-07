@@ -18,6 +18,7 @@ import {
   isPlainTable,
 } from './stringify.js';
 import { closeIterator, abortedError } from './pull.js';
+import { admitOptions, JOSL_WRITE, JOSL_STREAM_WRITE, JOSL_PULL_WRITE } from './options.js';
 
 class JoslStreamWriter {
   constructor(options = {}) {
@@ -202,7 +203,7 @@ class JoslStreamWriter {
  * @returns {JoslStreamWriter} The writer
  */
 export function createStreamWriter(options = undefined) {
-  return new JoslStreamWriter(options ?? {});
+  return new JoslStreamWriter(admitOptions(options, JOSL_STREAM_WRITE, 'createStreamWriter'));
 }
 
 /**
@@ -214,6 +215,7 @@ export function createStreamWriter(options = undefined) {
  * @yields {string} Document chunks, in order
  */
 export function* stringifyJoslChunks(value, options = {}) {
+  options = admitOptions(options, JOSL_WRITE, 'stringifyJoslChunks');
   if (Array.isArray(value)) {
     if (options.mode === 'toml')
       throw new JoslStringifyError('a TOML root must be a table; root arrays are a JOSL extension');
@@ -262,6 +264,7 @@ function rootItemChunk(record, index, options) {
  * response.body = stringifyJoslStream(store.collection('rows').query(doc), { signal });
  */
 export async function* stringifyJoslStream(records, options = {}) {
+  options = admitOptions(options, JOSL_PULL_WRITE, 'stringifyJoslStream');
   if (options.mode === 'toml')
     throw new JoslStringifyError('a TOML root must be a table; root arrays are a JOSL extension');
   const signal = options.signal ?? null;

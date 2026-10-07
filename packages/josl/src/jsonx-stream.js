@@ -80,6 +80,7 @@ import {
 
 import { JsonxSyntaxError } from './errors.js';
 import { JoslLimitError, limitOption, chunkByteLength, feedBounded } from './limits.js';
+import { admitOptions, JSONX_STREAM_READ } from './options.js';
 import { setObjectMember } from '@jarenjs/core/object';
 import { utf8ByteLength } from '@jarenjs/core/string';
 import {
@@ -842,7 +843,7 @@ export class JsonxMachine {
  * @throws {TypeError} On a malformed `detach` pattern
  */
 export function createJsonxStreamReader(options = undefined) {
-  const machine = new JsonxMachine(options ?? {});
+  const machine = new JsonxMachine(admitOptions(options, JSONX_STREAM_READ, 'createJsonxStreamReader'));
   return {
     feed(chunk) {
       machine.feed(chunk);
@@ -863,7 +864,7 @@ export function createJsonxStreamReader(options = undefined) {
  * @returns {Promise<*>} The completed root value
  */
 export async function parseJsonxStream(chunks, options = undefined) {
-  const machine = new JsonxMachine(options ?? {});
+  const machine = new JsonxMachine(admitOptions(options, JSONX_STREAM_READ, 'parseJsonxStream'));
   for await (const chunk of chunks)
     machine.feed(chunk);
   return machine.end();

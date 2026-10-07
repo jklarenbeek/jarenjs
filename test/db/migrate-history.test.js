@@ -95,9 +95,10 @@ describe('shape anchoring (JD0020)', () => {
     }
   });
 
-  it('the baseline is required, and compatibility fingerprints are stable', () => {
-    assert.throws(
-      () => migrate({ driver: driver() }, [], /** @type {any} */ ({})),
+  it('the baseline is required, and compatibility fingerprints are stable', async () => {
+    // an owned target answers its refusal as a rejected promise
+    await assert.rejects(
+      migrate({ driver: driver() }, [], /** @type {any} */ ({})),
       /baseline/);
     assert.strictEqual(shapeHash(M0), shapeHash(structuredClone(M0)),
       'canonicalization makes the hash member-order-proof');

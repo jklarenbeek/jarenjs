@@ -9,7 +9,8 @@
  */
 
 import { line as svgLine, textAt, textWidth, num } from '@jarenjs/view/helpers';
-import { seriesColor } from './palette.js';
+import { seriesColor, sequentialColor } from './palette.js';
+import { formatTickValue } from './axis.js';
 
 export const FS_TICK = 11;
 export const FS_LABEL = 12;
@@ -96,6 +97,25 @@ export function legendRow(legend, right, y, theme, palette) {
     x -= 14;
   }
   return entries;
+}
+
+/**
+ * The ramp key a shaded chart (heatmap, map) puts in the legend slot:
+ * five stops sampled along `ramp` as swatches, labelled only at the ends
+ * with the extent of the values. `stops` is the swatch palette the legend
+ * row draws from; `legend` is null when there is no domain to key.
+ * @param {{min: number, max: number} | null} domain
+ * @param {readonly string[]} ramp
+ * @returns {{ stops: string[], legend: LegendEntry[] | null }}
+ */
+export function rampLegend(domain, ramp) {
+  const stops = [0, 0.25, 0.5, 0.75, 1].map((t) => sequentialColor(t, ramp));
+  const legend = domain === null ? null : stops.map((_, i) => ({
+    name: i === 0 ? formatTickValue(domain.min)
+      : i === stops.length - 1 ? formatTickValue(domain.max) : '',
+    swatch: i,
+  }));
+  return { stops, legend };
 }
 
 /**

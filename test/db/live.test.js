@@ -520,10 +520,10 @@ describe('entity live queries re-run (declared, not attempted)', () => {
     await store.close();
   });
 
-  it('a document naming no entity root is API misuse', async () => {
+  it('a document naming no entity root is JD0033, as store.execute refuses it', async () => {
     const store = await openStore(ENTITY_MODEL,
       { driver: nodeDriver(), capture: true });
-    await assert.rejects(() => store.live([WHERE_ADULT]), TypeError);
+    await assert.rejects(() => store.live([WHERE_ADULT]), { code: 'JD0033' });
     await store.close();
   });
 
@@ -564,7 +564,7 @@ describe('entity live queries re-run (declared, not attempted)', () => {
     assert.deepStrictEqual(live.result.rows, [{ User: ['ada', 'cyd'] }], 'the earlier registration was maintained by the commit');
     assert.strictEqual(store.stats().liveQueries, 2);
     // a refused registration leaves the registry unchanged
-    await assert.rejects(() => store.live([WHERE_ADULT]), TypeError);
+    await assert.rejects(() => store.live([WHERE_ADULT]), { code: 'JD0033' });
     await assert.rejects(() => store.live({ Nope: [{ $for: { n: '$.Nope[*]' }, $return: '$n' }] }));
     assert.strictEqual(store.stats().liveQueries, 2);
     live.close();

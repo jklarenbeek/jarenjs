@@ -65,6 +65,17 @@ describe('query execution limits', function () {
     assert.throws(() => compileJsonQuery('$', { limits: { resultItems: 0 } }), TypeError);
     assert.throws(() => compileJsonQuery('$', { limits: { steps: 1.5 } }), TypeError);
   });
+
+  it('names the known limits when it refuses an unknown one', function () {
+    const refuses = (/** @type {any} */ limits, /** @type {string} */ message) =>
+      assert.throws(() => compileJsonQuery('$', { limits }), (err) => err instanceof TypeError && err.message === message);
+    refuses({ maxSteps: 3 },
+      'options.limits.maxSteps is not a known limit; the options are sequenceItems, resultItems, steps, depth');
+    refuses({ step: 3 }, "options.limits.step is not a known limit — did you mean 'steps'?");
+    refuses({ resultItem: 3 }, "options.limits.resultItem is not a known limit — did you mean 'resultItems'?");
+    refuses({ steps: '3' }, 'options.limits.steps must be a positive integer');
+    assert.strictEqual(compileJsonQuery({ $count: '$[*]' }, { limits: { steps: 10 } })([1, 2]), 2);
+  });
 });
 
 describe('closed-world compilation (options.externals)', function () {

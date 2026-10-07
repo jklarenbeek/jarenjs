@@ -20,12 +20,18 @@ import { compileJsonQuery } from '@jarenjs/json/query';
 import { isJsonObject, isJsonContainer } from '@jarenjs/core/object';
 
 import { DbCompileError } from './errors.js';
+import { refuseUnknownModelMembers } from './options.js';
 import { columnCodec, normalizePhysical } from './physical.js';
 import { normalizeInvariants, resolveInvariants } from './invariants.js';
 import { schemaPosition } from './schema-positions.js';
 
 /** The closed `x-entity` vocabulary; anything else is `JD0030`. */
 const ENTITY_MEMBERS = new Set(['key', 'unique', 'index', 'default', 'column', 'relation', 'version']);
+/** The `x-entity` members that are flags. */
+const BOOLEAN_MEMBERS = ['key', 'unique', 'index', 'version'];
+/** The closed members of an entity declaration (MODEL-FORMAT §9); `x-rename`
+ * is the migration planner's hint. */
+const DECLARATION_MEMBERS = ['schema', 'physical', 'invariants', 'x-rename'];
 const RELATION_MEMBERS = new Set(['to', 'many', 'via', 'through', 'onDelete']);
 const ON_DELETE = new Set(['cascade', 'restrict', 'setNull']);
 const ENTITY_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -123,6 +129,12 @@ function normalizeEntityBlock(block, docPath) {
         `${docPath}/${member}`);
     }
   }
+  // a flag that is not a boolean was read as false: `key: 'true'` dropped a
+  // member from a composite key, `version: 1` the optimistic guard
+  for (const member of BOOLEAN_MEMBERS) {
+    if (block[member] !== undefined && typeof block[member] !== 'boolean')
+      throw modelError(`x-entity.${member} is true or false`, `${docPath}/${member}`);
+  }
   if (block.relation !== undefined) {
     const relation = block.relation;
     if (!isJsonObject(relation))
@@ -134,6 +146,8 @@ function normalizeEntityBlock(block, docPath) {
           `${docPath}/relation/${member}`);
       }
     }
+    if (relation.many !== undefined && typeof relation.many !== 'boolean')
+      throw modelError('x-entity.relation.many is true or false', `${docPath}/relation/many`);
   }
   return block;
 }
@@ -231,6 +245,7 @@ export function normalizeEntities(model) {
     const spec = declared[name];
     if (!isJsonObject(spec))
       throw modelError('an entity must be an object', docPath);
+    refuseUnknownModelMembers(spec, DECLARATION_MEMBERS, docPath, 'entity');
     const schema = spec.schema;
     if (!isJsonObject(schema)
       || schema.properties === null || typeof schema.properties !== 'object')
@@ -385,8 +400,17 @@ export function normalizeEntities(model) {
     });
   }
 
-  for (const entity of entities.values())
+  for (const entity of entities.values()) {
     if (entity.physical !== null && entity.relations.length) throw modelError('physical join tables are declared as entities; relation navigation is not qualified for column layouts', entity.docPath);
+    // the other direction too: an include over a relation whose TARGET has a
+    // column layout read its columns by property name and failed at run time
+    for (const property of entity.relations) {
+      const target = entities.get(property.relation.to);
+      if (target === undefined || target.physical === null) continue;
+      throw modelError(`'${property.name}' relates to '${property.relation.to}', which declares a physical layout; `
+        + 'relation navigation is not qualified for column layouts', entity.docPath);
+    }
+  }
   resolveRelations(entities);
   resolveInvariants(entities, columnCodec);
   return entities;
@@ -639,6 +663,9 @@ function mappingOf(model, entities) {
         storage: epoch ? 'integer' : property.type,
         source: epoch ? 'epoch(document)' : 'document',
         key: property.key,
+        // the database allocates it (`default: 'auto'`): on an engine whose
+        // allocation is a column property, that property is the column type
+        ...(property.default === 'auto' ? { auto: true } : {}),
       };
       if (property.enum !== undefined) {
         // `null` never fails a CHECK (NULL IN (…) is unknown, which

@@ -1,10 +1,10 @@
 //@ts-check
 /** Preview JSON-supplied file edits; validate JavaScript through an owned Node process. */
 import { readFileSync } from 'node:fs';
-import { pathToFileURL } from 'node:url';
 import { compileTextEdits, applyTextEdits } from '@jarenjs/core/text/edits';
 import { createGuardedRefiner } from '@jarenjs/core/guarded';
 import { createProcessExecutor } from '@jarenjs/core/process-node';
+import { isMainModule } from './lib/main-module.js';
 
 /** No target files are written. The host supplies hashes and owns later persistence.
  * @param {import('@jarenjs/core/text/edits').TextFile[]} files
@@ -34,7 +34,7 @@ export async function previewTextEdits(files, edits) {
   finally { await executor.close(); }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   const input = JSON.parse(readFileSync(process.argv[2], 'utf8'));
   const result = await previewTextEdits(input.files, input.edits);
   process.stdout.write(JSON.stringify(result, null, 2) + '\n');

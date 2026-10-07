@@ -23,7 +23,9 @@ import {
   ar,
   ja,
   ru,
+  fr, es, pt, de, ko, zhTW, tr,
 } from '@jarenjs/locales';
+import { dateTimeFormats } from '@jarenjs/formats';
 import { compileMessageCatalog } from '@jarenjs/core/message';
 import { compileDateFormat, parseRFC3339Parts } from '@jarenjs/core/dates';
 
@@ -39,9 +41,9 @@ function runNode(source, env = {}) {
 }
 
 describe('@jarenjs/locales date messages', () => {
-  it('is a closed key set: 12 months, 7 weekdays, 2 markers, 7 units, 4 named days, 6 formats', () => {
+  it('is a closed key set: 12 months, 7 weekdays, 2 markers, 7 units, 4 named days, 7 formats', () => {
     const keys = Object.keys(dateMessagesEn);
-    assert.strictEqual(keys.length, 64);
+    assert.strictEqual(keys.length, 65);
 
     const months = keys.filter((k) => k.startsWith('date/month/'));
     const weekdays = keys.filter((k) => k.startsWith('date/weekday/'));
@@ -52,7 +54,7 @@ describe('@jarenjs/locales date messages', () => {
     assert.strictEqual(weekdays.length, 14);
     assert.strictEqual(meridiem.length, 2);
     assert.strictEqual(relative.length, 18);
-    assert.strictEqual(formats.length, 6);
+    assert.strictEqual(formats.length, 7);
     assert.strictEqual(months.length + weekdays.length + meridiem.length
       + relative.length + formats.length, keys.length);
 
@@ -139,9 +141,9 @@ describe('@jarenjs/locales compileDateLocale — the name tokens', () => {
 
     const locale = compileDateLocale(counting);
     const afterCompile = reads;
-    // 24 month + 14 weekday + 2 meridiem + 4 named day + 6 format names,
+    // 24 month + 14 weekday + 2 meridiem + 4 named day + 7 format names,
     // each read exactly once; the 14 relative phrases stay closures
-    assert.strictEqual(afterCompile, 50);
+    assert.strictEqual(afterCompile, 51);
 
     const format = compileDateFormat('EEEE d MMMM yyyy a', locale.names);
     for (let i = 0; i < 1000; ++i) {
@@ -313,6 +315,24 @@ describe('@jarenjs/locales compileDateLocale — validation and fallback', () =>
     assert.strictEqual(en.formatName('constructor'), undefined);
     assert.strictEqual(en.formatName(/** @type {any} */ (undefined)), undefined);
     assert.strictEqual(compileDateLocale(nl).formatName('date-time'), 'datum en tijd');
+  });
+
+  it('names every date/time format the format registry has, duration included, in every pack', () => {
+    const registered = Object.keys(dateTimeFormats);
+    assert.ok(registered.includes('duration'));
+    const en = compileDateLocale();
+    for (const format of registered)
+      assert.ok(typeof en.formatName(format) === 'string', format);
+    assert.strictEqual(en.formatName('duration'), 'duration');
+    const packs = { nl, fr, es, pt, de, ja, ko, zhTW, ru, tr, ar };
+    for (const [code, pack] of Object.entries(packs)) {
+      // the pack's own word, not the English fallback
+      const own = /** @type {any} */ (pack)['format/name/duration'];
+      assert.ok(typeof own === 'string' && own !== '' && own !== 'duration', `${code}: ${own}`);
+      assert.strictEqual(compileDateLocale(pack).formatName('duration'), own, code);
+    }
+    assert.strictEqual(compileDateLocale(nl).formatName('duration'), 'duur');
+    assert.strictEqual(compileDateLocale(de).formatName('duration'), 'Dauer');
   });
 });
 

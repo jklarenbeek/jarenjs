@@ -295,7 +295,12 @@ live.close();
 ```
 
 `store.live(document, options)` registers an entity-root document (the
-multi-entity shape of MODEL-FORMAT §10) the same way. Live queries
+multi-entity shape of MODEL-FORMAT §10) the same way. A document that
+ranges over no entity array is `JD0033`, as `store.execute` refuses it —
+a load specification (`load({ include })`'s argument, which a
+`@jarenjs/linq` `include()` chain hands over) is one: a graph is
+maintained as the entity-root projection the table below names (it used
+to be a `TypeError`, and was listed here as a re-running graph). Live queries
 REQUIRE change capture — the patch stream is the invalidation source —
 and registering on a store opened without `capture` is `JD0050`. Both
 registrations run under the store gate through their **initial query**
@@ -326,7 +331,8 @@ plan; "extractable" below means what the pushdown planner already proves.
 | `where` whose predicates translate (the plan's filter), no order, no aggregate | **incremental rows**: per-row re-evaluation; insert / remove / replace in the result | the result rows |
 | the same with a per-row `select` projection (row-mode plan) | **incremental rows**: the affected row alone is recomputed; a source row may project to several items | result rows, grouped by source key |
 | `orderBy` over extractable paths, optional `limit`, offset 0 | **maintained window**: a sorted structure; ties broken by the collection key, appended as the final sort term; an insert sorting beyond a full window is a no-op | the window rows and their sort keys |
-| whole-query `count` / `sum` / `avg` / `min` / `max` (the plan's aggregate), optional `where` | **running accumulator** plus a per-row contribution map — a delete can only be answered from retained contributions (§3: a `remove` carries no old value). `min`/`max` removal of the last extremum holder FALLS BACK to a recompute over the retained contributions; the accumulator alone cannot answer, and this fallback is the documented cost | one contribution per matching row |
+| whole-query `count` / `min` / `max`, and `sum` / `avg` over an `integer` member (the plan's aggregate), optional `where` | **running accumulator** plus a per-row contribution map — a delete can only be answered from retained contributions (§3: a `remove` carries no old value). `min`/`max` removal of the last extremum holder FALLS BACK to a recompute over the retained contributions; the accumulator alone cannot answer, and this fallback is the documented cost | one contribution per matching row |
+| whole-query `sum` / `avg` over a `number` member | **re-run on invalidation**, the reason `plan.floatingAccumulation`: the answer is the engine's left-to-right addition over the matching rows in collection order, which a running accumulator would not reproduce, so every invalidation re-runs the whole document | the previous result, for diffing |
 | single-level `groupBy` with one or more keys and canonical returns below | **group maintenance**: reevaluate affected groups through the engine in source-row order; first surviving source occurrence determines group order | source documents and group outputs, with entry and byte credits |
 | unordered SQL-native typed scalar distinct projections | **distinct maintenance**: keep the source holders of each value; deleting its earliest holder may move the value in first-occurrence order | source documents and unique outputs, with entry and byte credits |
 | count/sum/avg/min/max over canonical unwindowed groups | **group maintenance** followed by an engine fold over the retained group outputs in first-occurrence order | source documents and group outputs, with entry and byte credits |
@@ -341,7 +347,7 @@ plan; "extractable" below means what the pushdown planner already proves.
 | indexed inner equi-joins and canonical allowing-empty left joins over mapped entity roots | **join dependency maintenance**; point-read changed keys and reevaluate their bounded outer owners | source rows, key indexes and projected tuples, bounded by `maxMaintained` and `maxBytes` |
 | nested entity graph projections with indexed equality edges and unique binding names | **graph dependency maintenance**; a child change refreshes its bounded owners | source rows, reverse key indexes and graph outputs |
 | explicit two-level collection groups with a singular parent key and bounded nested input | **nested-group maintenance**; recompute affected parents through the query engine | source leaves and parent outputs |
-| unindexed/non-equi joins, self joins, explicit entity ordering/windows, object-root documents and load-spec graphs | **re-run on invalidation**, with the dependency or planner reason | previous result for diffing |
+| unindexed/non-equi joins, self joins, explicit entity ordering/windows and object-root documents | **re-run on invalidation**, with the dependency or planner reason | previous result for diffing |
 | anything else: non-translatable predicates, `limit` without `orderBy`, `offset` > 0, windowed aggregates, `@jarenjs/linq`'s nested two-level `groupBy` emission, non-canonical group returns | **re-run on invalidation**, the reason named | the previous result, for diffing |
 
 The **physical mapping** of a `derive: 'bbox'` index (MODEL-FORMAT §2.1,
@@ -476,7 +482,7 @@ const { subscription, actions } = liveAppBinding({
 // subscription → { run: 'db/live', with: { …, statePath, action } }
 // actions      → { 'db/liveChanged': { patch: '$payload' } }
 
-createApp({ …doc, subs: [subscription], actions: { …doc.actions, ...actions } },
+createApp({ ...doc, subs: [subscription], actions: { ...doc.actions, ...actions } },
   { subs: { 'db/live': createLiveSubscription(store) } });
 ```
 

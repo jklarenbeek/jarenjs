@@ -974,3 +974,28 @@ describe('custom function extensions (RFC 9535 section 2.4)', () => {
       ['kind', 'name', 'args', 'returns']);
   });
 });
+
+describe('filter nesting ceiling', () => {
+  // the JSON Query compiler's ceiling of 256 levels bounds the filter
+  // grammar's recursion too, so hostile nesting is a positioned syntax
+  // error instead of a host stack overflow
+  const parens = (n) => '$[?' + '('.repeat(n) + '@' + ')'.repeat(n) + ']';
+  const refusedAt = (src, position) => assert.throws(() => parseJSONPath(src), (e) =>
+    e instanceof JSONPathSyntaxError
+    && e.message.includes('the filter expression nests deeper than 256 levels')
+    && (position === undefined || e.position === position));
+
+  it('accepts 256 levels and refuses the 257th by position', () => {
+    // the filter itself is the first level, each parenthesis one more
+    assert.deepEqual(queryJSONPath(parens(255), [{ a: 1 }]), [{ a: 1 }]);
+    refusedAt(parens(256), 259);
+    refusedAt(parens(10000), 259);
+  });
+
+  it('counts nested function calls, nested filters and negated groups', () => {
+    refusedAt('$[?' + 'length('.repeat(300) + '@' + ')'.repeat(300) + '==1]');
+    refusedAt('$' + '[?@'.repeat(300) + ']'.repeat(300));
+    refusedAt('$[?' + '!('.repeat(300) + '@' + ')'.repeat(300) + ']');
+    assert.ok(compileJSONPath('$' + '[?@'.repeat(200) + ']'.repeat(200)));
+  });
+});

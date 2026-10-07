@@ -724,14 +724,13 @@ export class ValidationRoot {
   /**
    * Get the outermost validator for a recursive anchor.
    * Used by $recursiveRef for runtime resolution.
-   * Returns the bottom of the stack (first/outermost registered validator).
+   * Returns the bottom of the stack (first/outermost registered validator) -
+   * the same resolution `$dynamicRef` makes, so it delegates.
    * @param {string} anchorName - The anchor name (empty string for $recursiveRef)
    * @returns {Function|null} The validator function or null if not set
    */
   getOutermostDynamicAnchorValidator(anchorName) {
-    const stack = this.#dynamicAnchors.get(anchorName);
-    if (!stack || stack.length === 0) return null;
-    return stack[0];
+    return this.getDynamicAnchorValidator(anchorName);
   }
 
   /**

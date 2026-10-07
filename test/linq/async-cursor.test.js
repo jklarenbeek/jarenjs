@@ -19,6 +19,7 @@ import { execFileSync } from 'node:child_process';
 import { open } from '@jarenjs/linq/db';
 import { fromAsync } from '@jarenjs/linq';
 import * as m from '@jarenjs/linq/model';
+import { nodeDriver } from '@jarenjs/db/node';
 
 import { statementCountingDriver } from '../db/helpers.js';
 
@@ -282,6 +283,26 @@ describe('a provider without cursor() keeps the element window it always had', (
     assert.strictEqual(calls.length, 1);
     assert.deepStrictEqual(calls[0].document,
       [{ $for: { it: '$[*]' }, $where: { $gt: ['$it.id', 1] }, $return: '$it' }]);
+  });
+
+  it('a store collection is such a provider, and the documents name only the entity sets as streaming', async () => {
+    const Doc = m.object({ id: m.string(), n: m.integer() });
+    const both = m.defineModel({ entities: { Row }, collections: { docs: m.collection(Doc, { key: '/id' }) } });
+    const client = await open(both, { driver: nodeDriver(), path: ':memory:', validator: null });
+    try {
+      assert.strictEqual(typeof client.store.entity('Row').cursor, 'function');
+      assert.strictEqual(typeof client.store.collection('docs').cursor, 'undefined');
+    }
+    finally { await client.close(); }
+    const flat = (/** @type {string} */ file) => fs.readFileSync(file, 'utf8').replace(/\s+/g, ' ');
+    const named = /A provider that offers `cursor\(document, options\)` — ([^—]*) —/
+      .exec(flat('packages/linq/docs/QUERY-PEN.md'));
+    assert.ok(named, 'QUERY-PEN §12 names the providers that offer a cursor');
+    assert.match(named[1], /entity sets/);
+    assert.doesNotMatch(named[1], /collection/, 'a collection offers no cursor()');
+    const readme = /[^.]*pulls one row per item from an open statement[^.]*\./.exec(flat('packages/linq/README.md'));
+    assert.ok(readme, 'the README says which reads stream');
+    assert.match(readme[0], /entit/, 'the README\'s streaming claim is the entity chains\'');
   });
 });
 

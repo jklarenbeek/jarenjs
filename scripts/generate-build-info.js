@@ -36,9 +36,10 @@
 
 import { writeFileSync, readFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 import { headCommit, isDirty } from './lib/git.js';
+import { isMainModule } from './lib/main-module.js';
 import { assertSiteOutput } from './lib/site-contract.js';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
@@ -89,7 +90,7 @@ export function serializeBuildInfo(info) {
   return `${JSON.stringify(info, null, 2)}\n`;
 }
 
-if (process.argv[1] !== undefined && pathToFileURL(process.argv[1]).href === import.meta.url) {
+if (isMainModule(import.meta.url)) {
   const info = buildInfo();
   let text;
   try {

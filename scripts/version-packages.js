@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync } from 'node:fs';
-import { pathToFileURL } from 'node:url';
+
+import { isMainModule } from './lib/main-module.js';
 
 /**
  * The publishable manifests this script bumps — a hand-maintained list.
@@ -46,6 +47,13 @@ export const rootFile = 'package.json';
 export const dependencyFields = ['dependencies', 'devDependencies', 'peerDependencies'];
 
 /**
+ * The semver.org grammar of a release or pre-release version (build metadata
+ * is not taken): numeric parts and numeric pre-release identifiers carry no
+ * leading zero, and no identifier is empty.
+ */
+const SEMANTIC_VERSION = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*)?$/;
+
+/**
  * Rewrite every internal edge of one dependency map to the suite version,
  * exactly — never a range. The suite is released in lockstep (every
  * package at one version, every release), so a caret bought nothing and
@@ -75,11 +83,20 @@ export function updateInternalRanges(dependencies, names, version) {
 //   node scripts/version-packages.js pin
 //     rewrites every internal edge to the root's current version and changes
 //     no version — for a tree whose edges drifted from the version it carries.
-if (process.argv[1] !== undefined && pathToFileURL(process.argv[1]).href === import.meta.url) {
+//   A refused target (a downgrade, the current version, a non-version) exits 2
+//   before anything is written.
+if (isMainModule(import.meta.url)) {
   const rootPackage = readPackage(rootFile);
   const requested = process.argv[2];
   const pinOnly = requested === 'pin';
-  const nextVersion = pinOnly ? rootPackage.version : resolveVersion(rootPackage.version, requested);
+  let nextVersion;
+  try {
+    nextVersion = pinOnly ? rootPackage.version : resolveVersion(rootPackage.version, requested);
+  }
+  catch (error) {
+    console.error(`version-packages: ${/** @type {Error} */ (error).message}`);
+    process.exit(2);
+  }
   const packageNames = new Set(packageFiles.map((file) => readPackage(file).name));
   let changed = 0;
 
@@ -126,8 +143,46 @@ function resolveVersion(current, value) {
       major += 1;
       return `${major}.0.0`;
     default:
-      if (/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(value ?? ''))
-        return value;
-      throw new Error('Usage: node scripts/version-packages.js patch|minor|major|<version>|pin');
+      if (value === undefined)
+        throw new Error('Usage: node scripts/version-packages.js patch|minor|major|<version>|pin');
+      if (!SEMANTIC_VERSION.test(value)) {
+        throw new Error(`'${value}' is not a semantic version x.y.z[-pre] (no leading zeros, no empty identifiers). `
+          + 'Usage: node scripts/version-packages.js patch|minor|major|<version>|pin');
+      }
+      // a release only moves forward: an equal version would publish over
+      // the current one, and a pre-release of it sorts before it
+      if (compareVersions(value, current) <= 0)
+        throw new Error(`refusing ${value}: a release must be greater than the current ${current}`);
+      return value;
   }
+}
+
+/**
+ * Semantic-version precedence (semver.org §11) of two `x.y.z[-pre]`
+ * versions: negative when `a` sorts first, positive when `b` does, zero when
+ * they are equal. A pre-release sorts before its release; pre-release
+ * identifiers compare numerically when both are numeric, numbers before
+ * words, and a shorter list before a longer one it prefixes.
+ * @param {string} a
+ * @param {string} b
+ * @returns {number}
+ */
+export function compareVersions(a, b) {
+  const split = (/** @type {string} */ version) => {
+    const at = version.indexOf('-');
+    return { core: (at < 0 ? version : version.slice(0, at)).split('.').map(Number), pre: at < 0 ? null : version.slice(at + 1).split('.') };
+  };
+  const left = split(a), right = split(b);
+  for (let i = 0; i < 3; i++) if (left.core[i] !== right.core[i]) return left.core[i] - right.core[i];
+  if (left.pre === null || right.pre === null) return left.pre === right.pre ? 0 : left.pre === null ? 1 : -1;
+  for (let i = 0; i < Math.max(left.pre.length, right.pre.length); i++) {
+    const x = left.pre[i], y = right.pre[i];
+    if (x === undefined) return -1;
+    if (y === undefined) return 1;
+    const xNumeric = /^\d+$/.test(x), yNumeric = /^\d+$/.test(y);
+    if (xNumeric && yNumeric) { if (Number(x) !== Number(y)) return Number(x) - Number(y); }
+    else if (xNumeric !== yNumeric) return xNumeric ? -1 : 1;
+    else if (x !== y) return x < y ? -1 : 1;
+  }
+  return 0;
 }

@@ -19,6 +19,7 @@ import {
 import { clamp01 } from '@jarenjs/core/math';
 import { axisTicksLinear, formatTickValue } from '../core/axis.js';
 import { FS_TICK, toneColor, annotateChart, chartTitle } from '../core/cartesian.js';
+import { measurableSpan } from '../core/domain.js';
 import { CATEGORICAL } from '../core/palette.js';
 import { normalizeTooltip, markProps } from '../core/marks.js';
 
@@ -46,6 +47,7 @@ export function buildGaugeAST(data, config = {}) {
   let min = typeof config.min === 'number' && Number.isFinite(config.min) ? config.min : 0;
   let max = typeof config.max === 'number' && Number.isFinite(config.max) ? config.max : 100;
   if (max <= min) max = min + 1;
+  [min, max] = measurableSpan(min, max);
   const frac = clamp01((value - min) / (max - min));
   const ticks = axisTicksLinear(min, max, 4).map((v) => ({
     frac: clamp01((v - min) / (max - min)),

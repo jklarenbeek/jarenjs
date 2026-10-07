@@ -414,8 +414,17 @@ export function scanLinkDefinition(text, pos) {
 }
 
 /**
+ * How deep an unwrapped link destination may nest parentheses.
+ * CommonMark leaves the limit to the implementation; cmark and
+ * commonmark.js both stop at 32, and without one an unbalanced run of `(`
+ * makes every `](` in a paragraph scan to its end.
+ */
+const MAX_DESTINATION_PARENS = 32;
+
+/**
  * Scan a link destination at `pos`: `<...>` wrapped or a run of
- * non-space characters with balanced parens.
+ * non-space characters with balanced parens, nested at most
+ * {@link MAX_DESTINATION_PARENS} deep.
  * @param {string} text
  * @param {number} pos
  * @returns {{ url: string, end: number } | null}
@@ -443,7 +452,7 @@ export function scanLinkDestination(text, pos) {
       i += 2;
       continue;
     }
-    if (c === 0x28 /* ( */) depth++;
+    if (c === 0x28 /* ( */ && ++depth > MAX_DESTINATION_PARENS) return null;
     if (c === CC_RPAREN) {
       if (depth === 0) break;
       depth--;
@@ -644,6 +653,57 @@ function isAutolinkStart(text, pos) {
 }
 
 /**
+ * One run of domain characters and periods, scanned once, with the facts
+ * that decide whether a domain starting anywhere inside it is valid.
+ * Every start inside a run scans to the same end, so the facts are
+ * shared: a bare `www.` may begin after any `_` of a rejected run, and
+ * rescanning (and splitting) the rest of the run from each of those
+ * starts made the scan quadratic in the run's length.
+ *
+ * Offsets are absolute; `-1` means none inside the run.
+ * @typedef {object} DomainRun
+ * @property {number} start where the run was first scanned from
+ * @property {number} end the first offset past it
+ * @property {number} trimmed `end` without the trailing periods (at least `start`)
+ * @property {number} lastDot the last period before `trimmed`
+ * @property {number} prevDot the last period before `lastDot`
+ * @property {boolean} lastHasUnderscore an `_` between `lastDot` and `trimmed`
+ * @property {number} lastUnderscore the last `_` between `prevDot` and `lastDot`
+ */
+
+/**
+ * Scan the domain run at `pos` and gather its facts.
+ * @param {string} text @param {number} pos
+ * @returns {DomainRun}
+ */
+function scanDomainRun(text, pos) {
+  let end = pos;
+  while (end < text.length) {
+    const c = text.charCodeAt(end);
+    if (c !== 0x2E /* . */ && !isDomainChar(c)) break;
+    end++;
+  }
+  let trimmed = end;
+  while (trimmed > pos && text.charCodeAt(trimmed - 1) === 0x2E) trimmed--;
+  let lastDot = -1;
+  let prevDot = -1;
+  let lastHasUnderscore = false;
+  let lastUnderscore = -1;
+  for (let i = trimmed - 1; i >= pos; i--) {
+    const c = text.charCodeAt(i);
+    if (c === 0x2E) {
+      if (lastDot === -1) lastDot = i;
+      else { prevDot = i; break; }
+    }
+    else if (c === 0x5F /* _ */) {
+      if (lastDot === -1) lastHasUnderscore = true;
+      else if (lastUnderscore === -1) lastUnderscore = i;
+    }
+  }
+  return { start: pos, end, trimmed, lastDot, prevDot, lastHasUnderscore, lastUnderscore };
+}
+
+/**
  * A valid domain at `pos`: segments of domain characters separated by
  * periods, at least one period, no underscore in the last two segments.
  * A trailing period is not part of the domain. Returns the end offset,
@@ -653,25 +713,29 @@ function isAutolinkStart(text, pos) {
  * grammar, which states only that the last character may not be `-` or
  * `_` — the two grammars really do differ, and `foo@a_b.example` is a
  * link while `www.a_b.example` is not.
+ *
+ * `cache` holds the run the previous call scanned; a start inside it
+ * reuses its facts, which is what keeps one text's scan linear.
  * @param {string} text @param {number} pos @param {boolean} underscores
+ * @param {{ run: DomainRun | null }} cache
  * @returns {number}
  */
-function scanAutolinkDomain(text, pos, underscores) {
-  let i = pos;
-  while (i < text.length) {
-    const c = text.charCodeAt(i);
-    if (c !== 0x2E /* . */ && !isDomainChar(c)) break;
-    i++;
+function scanAutolinkDomain(text, pos, underscores, cache) {
+  let run = cache.run;
+  if (run === null || pos < run.start || pos >= run.end) {
+    run = scanDomainRun(text, pos);
+    cache.run = run;
   }
-  while (i > pos && text.charCodeAt(i - 1) === 0x2E) i--;
-  if (i === pos) return -1;
-  const segments = text.slice(pos, i).split('.');
-  if (segments.length < 2 || segments[segments.length - 1] === '') return -1;
+  // nothing but periods from here: the domain trims away to nothing
+  if (run.trimmed <= pos) return -1;
+  // no period inside the domain: one segment is not a domain
+  if (run.lastDot < pos) return -1;
   if (!underscores) {
-    if (segments[segments.length - 1].indexOf('_') !== -1) return -1;
-    if (segments[segments.length - 2].indexOf('_') !== -1) return -1;
+    if (run.lastHasUnderscore) return -1;
+    // the second-to-last segment starts after `prevDot`, or at `pos`
+    if (run.lastUnderscore >= pos) return -1;
   }
-  return i;
+  return run.trimmed;
 }
 
 /**
@@ -679,11 +743,16 @@ function scanAutolinkDomain(text, pos, underscores) {
  * punctuation back out of the link. `?!.,:*_~` always; a `)` only while
  * the link holds more of them than `(`; a `;` only when it closes an
  * entity-shaped tail (`&copy;`), which is why the whole `&…;` goes and
- * not just the semicolon.
+ * not just the semicolon. The parentheses are counted once, at the first
+ * `)`: nothing else this trims is a parenthesis, so removing a `)` is the
+ * only change to the counts, and recounting per `)` made a run of them
+ * quadratic.
  * @param {string} text @param {number} start @param {number} end
  * @returns {number}
  */
 function trimAutolinkEnd(text, start, end) {
+  let open = -1;
+  let close = 0;
   while (end > start) {
     const c = text.charCodeAt(end - 1);
     if (c === 0x3F || c === 0x21 || c === 0x2E || c === 0x2C
@@ -701,15 +770,17 @@ function trimAutolinkEnd(text, start, end) {
       break;
     }
     if (c === 0x29 /* ) */) {
-      let open = 0;
-      let close = 0;
-      for (let k = start; k < end; k++) {
-        const d = text.charCodeAt(k);
-        if (d === 0x28) open++;
-        else if (d === 0x29) close++;
+      if (open === -1) {
+        open = 0;
+        for (let k = start; k < end; k++) {
+          const d = text.charCodeAt(k);
+          if (d === 0x28) open++;
+          else if (d === 0x29) close++;
+        }
       }
       if (close <= open) break;
       end--;
+      close--;
       continue;
     }
     break;
@@ -755,18 +826,20 @@ export function scanAutolinkLiterals(value) {
   let out = null;
   let i = 0;
   let floor = 0;
+  /** @type {{ run: DomainRun | null }} */
+  const cache = { run: null };
   while (i < value.length) {
     const c = value.charCodeAt(i);
     /** @type {{ start: number, end: number, url: string } | null} */
     let hit = null;
     if (c === 0x40 /* @ */) {
-      hit = matchEmail(value, i, floor);
+      hit = matchEmail(value, i, floor, cache);
     }
     else if (c === 0x77 /* w */ && isAutolinkStart(value, i)) {
-      hit = matchWww(value, i);
+      hit = matchWww(value, i, cache);
     }
     else if ((c === 0x68 /* h */ || c === 0x66 /* f */) && isAutolinkStart(value, i)) {
-      hit = matchScheme(value, i);
+      hit = matchScheme(value, i, cache);
     }
     if (hit === null) {
       i++;
@@ -785,10 +858,11 @@ export function scanAutolinkLiterals(value) {
  * AST holds the destination a browser would follow and no consumer has
  * to re-derive it.
  * @param {string} value @param {number} pos
+ * @param {{ run: DomainRun | null }} cache
  */
-function matchWww(value, pos) {
+function matchWww(value, pos, cache) {
   if (!value.startsWith('www.', pos)) return null;
-  const domain = scanAutolinkDomain(value, pos + 4, false);
+  const domain = scanAutolinkDomain(value, pos + 4, false, cache);
   if (domain === -1) return null;
   const end = trimAutolinkEnd(value, pos, scanAutolinkTail(value, domain));
   if (end <= pos + 4) return null;
@@ -798,12 +872,13 @@ function matchWww(value, pos) {
 /**
  * `http://`, `https://` or `ftp://` + a valid domain + a path tail.
  * @param {string} value @param {number} pos
+ * @param {{ run: DomainRun | null }} cache
  */
-function matchScheme(value, pos) {
+function matchScheme(value, pos, cache) {
   for (let s = 0; s < AUTOLINK_SCHEMES.length; s++) {
     const scheme = AUTOLINK_SCHEMES[s];
     if (!value.startsWith(scheme, pos)) continue;
-    const domain = scanAutolinkDomain(value, pos + scheme.length, false);
+    const domain = scanAutolinkDomain(value, pos + scheme.length, false, cache);
     if (domain === -1) continue;
     const end = trimAutolinkEnd(value, pos, scanAutolinkTail(value, domain));
     if (end <= pos + scheme.length) continue;
@@ -819,12 +894,13 @@ function matchScheme(value, pos) {
  * match. The path-validation trim does not apply: the grammar rejects an
  * address ending in `-` or `_` outright rather than shortening it.
  * @param {string} value @param {number} at @param {number} floor
+ * @param {{ run: DomainRun | null }} cache
  */
-function matchEmail(value, at, floor) {
+function matchEmail(value, at, floor, cache) {
   let start = at;
   while (start > floor && isEmailLocalChar(value.charCodeAt(start - 1))) start--;
   if (start === at || !isAutolinkStart(value, start)) return null;
-  const end = scanAutolinkDomain(value, at + 1, true);
+  const end = scanAutolinkDomain(value, at + 1, true, cache);
   if (end === -1) return null;
   const last = value.charCodeAt(end - 1);
   if (last === 0x2D /* - */ || last === 0x5F /* _ */) return null;

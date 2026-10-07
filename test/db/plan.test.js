@@ -622,6 +622,9 @@ describe('the planner\'s reason vocabulary', () => {
       { $for: { it: '$[*]' }, $return: { a: { $sqrt: '$it.f' } } }],
     'plan.aggregatePath': [collection,
       { $sum: { $for: { it: '$[*]' }, $return: '$it.s' } }],
+    // `f` is a `number`: the engine's left-to-right addition decides it
+    'plan.floatingAccumulation': [collection,
+      { $sum: { $for: { it: '$[*]' }, $return: '$it.f' } }],
     // A bare key can omit an absent group's item, so its window still
     // needs the engine's output cardinality.
     'plan.windowedGroup': [collection, { $subsequence: [
@@ -681,7 +684,11 @@ describe('the planner\'s reason vocabulary', () => {
     'bind.external': 'a bind-time diversion on a query engine, not a plan (the explain suites)',
     'bind.wrappedWindow': "a chain's element window, classified by a cursor (the explain suites)",
     'bind.bucketWhole': 'a native temporal bucket (the series suites)',
-    'bind.overflow': 'an int64 overflow at run time (the aggregate suites)',
+    'bind.accumulation': 'an integer sum past its exactness bound, found by a run (the accumulation suite)',
+    'bind.accumulationWhole': "a whole integer sum's cursor barrier, classified by a cursor (the accumulation suite)",
+    'bind.entityGrouping': 'an entity grouping on a dialect whose guards are not qualified, decided by the '
+      + 'entity engine (the accumulation suite, over PostgreSQL)',
+    'bind.entityGroupWhole': "an entity grouping's cursor barrier, classified by the entity engine",
     'bind.path': 'a member name the dialect cannot spell (the hostile suite)',
     'interval.overlap': 'the promotion itself needs a declared interval (the interval suite)',
     'interval.noColumns': 'an interval the schema declares and the model does not map '

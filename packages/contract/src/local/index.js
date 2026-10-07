@@ -36,7 +36,7 @@ import { compileMessageCatalog } from '@jarenjs/core/message';
 import { ContractHostError, ContractFailure } from '../errors.js';
 import { admitOptions, admitSignal } from '../options.js';
 import { validateOperationInput, settleOperation, safeTrace, PORT_LOCAL_ERRORS, classifyDeclared } from '../pipeline.js';
-import { resolveLifecycle, identify as identifyHost, acquire as acquireHost, once, RollbackCarrier } from '../host.js';
+import { resolveLifecycle, identify as identifyHost, acquire as acquireHost, once, releaseLeases, RollbackCarrier } from '../host.js';
 import { resolveHostRuntime } from '../runtime.js';
 import { renderMessage, declaredMessage } from '../http/wire.js';
 import {
@@ -350,7 +350,7 @@ export function openLocalClient(contract, handlers, options = {}) {
     const identity = once(identified.lease.release, observed);
     /** @type {(() => Promise<boolean>) | null} */
     let acquired = null;
-    const release = () => (acquired === null ? identity() : acquired().then((a) => identity().then((b) => a && b)));
+    const release = () => releaseLeases(acquired, identity);
     /** Release, then answer: a release that fails before the outcome is exposed is the host's fault — its cause was observed as it failed. @param {import('../client/outcome.js').Outcome} outcome */
     const expose = async (outcome) => ((await release()) ? outcome : failedOutcome('contract', outcomeError('JC2070',
       renderMessage(catalog, PORT_LOCAL_ERRORS.JC2070.msgid, { op: opId }), null, null, false), meta));

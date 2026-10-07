@@ -196,15 +196,24 @@ no relations (MODEL-FORMAT §9.1); one physical engine sits under both.
 
 | Method | Emits | Type reading | Status |
 |---|---|---|---|
-| `collection(schema, { key?, identity?, indexes?, renamedFrom? })` | `{ schema, key?, identity?, indexes?, 'x-rename'? }` — `key` is an RFC 6901 pointer, a captured member path (`(d) => d.id` → `/id`) or `null` (the store allocates, `identity` says how); the other options ride verbatim | `CollectionSpec<Infer<B>>`, carrying the document shape its paths are checked against | native; an option outside the four, a key that is neither pointer nor lambda nor `null`, an `indexes` that is not an array of `index()` entries, all `JL0101` |
-| `index(path, options?)` | `{ name, path, unique?, derive?, precision?, dims?, physical? }` — `path` is a captured lambda (`(p) => p.cell` → `$.cell`), a non-empty array of them (a composite), or a JSONPath string; `name` defaults to `by_<segments>`; the rest ride verbatim for the store's model walk to judge (§2.1) | `IndexPath<D>` over the collection's shape: a member the shape lacks does not compile | native; an option outside the six is `JL0101`; a lambda that answers an operator result or a surface method is `JL0102` |
+| `collection(schema, { key?, identity?, indexes?, renamedFrom? })` | `{ schema, key?, identity?, indexes?, 'x-rename'? }` — `key` is an RFC 6901 pointer, a captured member path (`(d) => d.id` → `/id`) or `null` (the store allocates, `identity` says how); the other options ride verbatim, and an `indexes` entry written by hand rather than by `index()` is held to what `index()` writes | `CollectionSpec<Infer<B>>`, carrying the document shape its paths are checked against | native; an option outside the four, a key that is neither pointer nor lambda nor `null`, an `indexes` that is not an array of `index()` entries, an entry member outside the index grammar or of the wrong type, all `JL0101` |
+| `index(path, options?)` | `{ name, path, unique?, derive?, precision?, dims?, physical? }` — `path` is a captured lambda (`(p) => p.cell` → `$.cell`), a non-empty array of them (a composite), or a JSONPath string; `name` defaults to `by_<segments>`; each of the rest is the JSON type the grammar declares — `unique` a boolean, `derive` and `physical` strings, `precision` and `dims` numbers — and rides verbatim for the store's model walk to judge its value (§2.1) | `IndexPath<D>` over the collection's shape: a member the shape lacks does not compile | native; an option outside the six, or of the wrong type, is `JL0101`; a lambda that answers an operator result or a surface method is `JL0102` |
 
-| `expressionIndex(expression, options?)` | `{ name, expression, unique? }` — an index over a COMPUTED value: a `{ call, args }` node whose arguments are member lambdas, JSONPath strings, JSON scalars or further calls; `name` defaults to `by_<call>_<members>` | the expression's member lambdas are checked against the collection's shape | native; a node outside the vocabulary, an option outside the two, and anything that looks like SQL text are all `JL0101` |
+| `expressionIndex(expression, options?)` | `{ name, expression, unique? }` — an index over a COMPUTED value: a `{ call, args }` node whose arguments are member lambdas, JSONPath strings, JSON scalars or further calls; `name` defaults to `by_<call>_<members>` | the expression's member lambdas are checked against the collection's shape | native; a node outside the vocabulary, an option outside the two, a `unique` that is not a boolean, and anything that looks like SQL text are all `JL0101` |
 
 The option set for `index()` is exactly `name`, `unique`, `derive`,
-`precision`, `dims`, `physical` (`src/model/collection.js:18`); the
-default name is `by_` plus the path's member segments, identifier-safe
-(`collection.js:76-80`) — `by_series_t`, `by_x_y`.
+`precision`, `dims`, `physical` (`INDEX_OPTIONS` in
+`src/model/collection.js`); the default name is `by_` plus the path's
+member segments, identifier-safe (`defaultName`) — `by_series_t`,
+`by_x_y`. Each typed option is checked for the JSON type the grammar
+declares — `unique` a boolean, `derive` and `physical` strings,
+`precision` and `dims` numbers — and its VALUE is left to the store's
+model walk (`JD0004` names a `derive` outside its set, a precision out of
+range). `unique: 1` or `'true'` used to be emitted verbatim, and the
+store, which reads only `true` as unique, opened a NON-unique index and
+accepted the duplicates; it is `JL0101` now, in `index()`,
+`expressionIndex()` and a raw entry handed to `collection()` alike, and a
+raw entry's member outside the grammar (`uniqe`) is `JL0101` too.
 
 `expressionIndex()` takes only `name` and `unique`, because an
 expression names the members it reads itself — nothing that describes a
@@ -738,12 +747,16 @@ This section is the vocabulary this pen adds.
 | `m.index([42])` | `index()[0] is neither a path lambda nor a JSONPath string` | a lambda or a path string per position |
 | `m.index((p) => p.a, { derived: 'bbox' })` | `index() does not take 'derived' — the options are name, unique, derive, precision, dims, physical` | `{ derive: 'bbox' }` |
 | `m.index((p) => p.a, null)` | `index() takes an options object` | `{}`, or no second argument |
+| `m.index((p) => p.a, { unique: 1 })` | `index() unique takes a boolean, got 1` | `{ unique: true }` — the same refusal from `expressionIndex()` |
+| `m.index((p) => p.loc, { derive: 'geohash', precision: '7' })` | `index() precision takes a number, got a string` | `{ precision: 7 }` |
 | `m.index((p) => p.a, { name: '9 x' })` | `index() name takes a definition name (letters, digits, '_', '.', '-', not starting with a digit), got a string` | an identifier-shaped name |
 | `m.collection(m.object({}), { key: 'id' })` | `collection() key is an RFC 6901 pointer, a member path lambda, or null` | `'/id'`, or `(d) => d.id` |
 | `m.collection({}, {})` | `collection() takes a schema builder as its document schema` | a builder |
 | `m.collection(b, { keys: [] })` | `collection() does not take 'keys' — the options are key, identity, indexes, renamedFrom` | `key` |
 | `m.collection(b, { indexes: {} })` | `collection() indexes is an array of index() entries` | an array |
 | `m.collection(b, { indexes: [{ path: '$.a' }] })` | `collection() indexes[0] is not an index() entry` | `m.index('$.a')` |
+| `m.collection(b, { indexes: [{ name: 'by_a', path: '$.a', uniqe: true }] })` | `collection() indexes[0] does not take 'uniqe' — it takes name, path, expression, unique, derive, precision, dims, physical` — `docPath` `/uniqe` | `unique`, or `m.index('$.a', { unique: true })` |
+| `m.collection(b, { indexes: [{ name: 'by_a', path: '$.a', unique: 1 }] })` | `collection() indexes[0] unique takes a boolean, got 1` | `unique: true` |
 | `m.defineModel({})` | `defineModel() needs entities, collections, or both` | declare one of the two |
 | `m.defineModel({ tables: {} })` | `defineModel() does not take 'tables'` | `entities` or `collections` |
 | `m.defineModel({ entities: [] })` | `defineModel() entities is a plain object of declarations` | a plain object |
@@ -1065,10 +1078,10 @@ catch them:
 
 ## 7. Cost
 
-`@jarenjs/linq/model` builds to **<!--fact:bundle.model-->46,352<!--/fact--> bytes** as a minified,
+`@jarenjs/linq/model` builds to **<!--fact:bundle.model-->47,317<!--/fact--> bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
 measures and `npm run test:tree-shaking` reports, published rounded
-(<!--fact:bundle.model.kb-->46<!--/fact--> kB) beside the other nine subpath prices in
+(<!--fact:bundle.model.kb-->47<!--/fact--> kB) beside the other subpath prices in
 [docs/CONSUMING.md](../../../docs/CONSUMING.md).
 
 The probe is a gate, not a report: building a two-member model as a
@@ -1086,7 +1099,7 @@ them:
   byte of `packages/linq/src/model/`, because the subclasses are built by
   this subpath rather than patched onto the base classes.
 
-The price above the schema pen's <!--fact:bundle.schema-->37,008<!--/fact--> is about 8 kB: the mixin, the
+The price above the schema pen's <!--fact:bundle.schema-->37,748<!--/fact--> is about 10 kB: the mixin, the
 three relation factories, `collection()`/`index()` with their capture,
 `defineModel()` — and the refusal MESSAGES, which are most of what §4
 costs. That is a deliberate trade: naming the rule and the spelling that

@@ -191,6 +191,50 @@ describe('the model pen — refusals, each with the fix in the message', () => {
     assert.throws(() => m.integer().enumOf([1.5]), (e) => e.code === 'JL0101');
   });
 
+  it('JL0101 — an index option is the JSON type the grammar declares, never a truthy stand-in', async () => {
+    // `unique: 1` used to be emitted verbatim, and the store opened it as a
+    // NON-unique index: the duplicate below was accepted with no error
+    for (const unique of [1, 'true', 'yes', 0, null]) {
+      const notBoolean = (/** @type {any} */ e) => e.code === 'JL0101' && /unique takes a boolean/.test(e.message);
+      assert.throws(() => m.index('$.a', { unique }), notBoolean, JSON.stringify(unique));
+      assert.throws(() => m.expressionIndex((d) => d.a, { unique }), notBoolean, JSON.stringify(unique));
+    }
+    for (const [key, value, type] of [['derive', 1, 'a string'], ['physical', true, 'a string'],
+      ['precision', '7', 'a number'], ['dims', '4', 'a number']]) {
+      assert.throws(() => m.index('$.a', { [key]: value }),
+        (/** @type {any} */ e) => e.code === 'JL0101' && e.message.includes(`index() ${key} takes ${type}`), key);
+    }
+    // the declared types still ride verbatim, for the store's walk to judge their values
+    assert.deepStrictEqual(m.index('$.a', { unique: false }), { name: 'by_a', path: '$.a', unique: false });
+    assert.deepStrictEqual(m.index('$.loc', { derive: 'geohash', precision: 7 }),
+      { name: 'by_loc', path: '$.loc', derive: 'geohash', precision: 7 });
+
+    const Doc = s.object({ id: s.string(), a: s.string() });
+    const store = async (/** @type {any} */ indexes) => openStore(
+      m.defineModel({ collections: { items: m.collection(Doc, { key: '/id', indexes }) } }),
+      { driver: nodeDriver(), path: ':memory:' });
+    const unique = await store([m.index('$.a', { unique: true })]);
+    try {
+      await unique.collection('items').put({ id: '1', a: 'x' });
+      await assert.rejects(async () => unique.collection('items').put({ id: '2', a: 'x' }),
+        (/** @type {any} */ e) => e.code === 'JD2005');
+    }
+    finally { await unique.close(); }
+  });
+
+  it('JL0101 — a raw index entry handed to collection() is held to the same closed set and types', () => {
+    const Doc = s.object({ id: s.string(), a: s.string() });
+    assert.throws(() => m.collection(Doc, { key: '/id', indexes: [{ name: 'by_a', path: '$.a', uniqe: true }] }),
+      (/** @type {any} */ e) => e.code === 'JL0101' && /indexes\[0\] does not take 'uniqe'/.test(e.message));
+    assert.throws(() => m.collection(Doc, { key: '/id', indexes: [{ name: 'by_a', path: '$.a', unique: 1 }] }),
+      (/** @type {any} */ e) => e.code === 'JL0101' && /indexes\[0\] unique takes a boolean/.test(e.message));
+    // an entry the pen wrote, or a raw one inside the grammar, rides verbatim
+    assert.deepStrictEqual(m.collection(Doc, { key: '/id', indexes: [{ name: 'by_a', path: '$.a', unique: true }] }).indexes,
+      [{ name: 'by_a', path: '$.a', unique: true }]);
+    assert.deepStrictEqual(m.collection(Doc, { key: '/id', indexes: [m.expressionIndex((d) => d.a, { unique: true })] }).indexes,
+      [{ name: 'by_x_a', expression: { member: '$.a' }, unique: true }]);
+  });
+
   it('JL0102 — key()/unique()/index() on a kind that can never hold a column', () => {
     // the store's own rule (JD0005, "only a top-level scalar takes a
     // column"), seen at build: the pen refuses the kinds it is CERTAIN

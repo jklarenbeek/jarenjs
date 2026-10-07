@@ -30,8 +30,9 @@
 import { svgRoot, coord } from '@jarenjs/view/helpers';
 import { clamp01 } from '@jarenjs/core/math';
 import { bboxOf, bboxUnion, fitMercator, simplifyLine, simplifyRing } from '@jarenjs/core/geo';
+import { scaleLinear, scaleLog } from '../core/scale.js';
 import { formatTickValue } from '../core/axis.js';
-import { FS_TITLE, annotateChart, chartTitle, legendRow } from '../core/cartesian.js';
+import { FS_TITLE, annotateChart, chartTitle, legendRow, rampLegend } from '../core/cartesian.js';
 import { SEQUENTIAL, sequentialColor } from '../core/palette.js';
 import { normalizeTooltip, valueMark } from '../core/marks.js';
 
@@ -101,9 +102,8 @@ export function buildMapAST(data, config = {}) {
     if (v > max) max = v;
   }
   const domain = Number.isFinite(min) ? { min, max } : null;
-  const span = domain === null ? 0
-    : log ? Math.log10(max) - Math.log10(min)
-      : max - min;
+  // the heatmap's shading: decades under log, half scale past a double
+  const shade = domain === null ? null : log ? scaleLog(min, max) : scaleLinear(min, max);
 
   const shapes = [];
   const counts = { source: 0, drawn: 0 };
@@ -113,11 +113,8 @@ export function buildMapAST(data, config = {}) {
       const shape = {
         label: entry.label,
         value: entry.value,
-        t: entry.value === null || domain === null || (log && entry.value <= 0) ? null
-          : span === 0 ? 0.5
-            : clamp01(log
-              ? (Math.log10(entry.value) - Math.log10(min)) / span
-              : (entry.value - min) / span),
+        t: entry.value === null || shade === null || (log && entry.value <= 0) ? null
+          : clamp01(shade(entry.value)),
         rings: [],
         lines: [],
         dots: [],
@@ -302,12 +299,7 @@ export function renderMapAST(ast, theme, hash, options = {}) {
 
   // The ramp key rides the frame's legend mechanism, exactly as the
   // heatmap's does: five stops as swatches, the extent as end labels.
-  const rampStops = [0, 0.25, 0.5, 0.75, 1].map((v) => sequentialColor(v, ramp));
-  const legend = ast.domain === null ? null : rampStops.map((_, i) => ({
-    name: i === 0 ? formatTickValue(ast.domain.min)
-      : i === rampStops.length - 1 ? formatTickValue(ast.domain.max) : '',
-    swatch: i,
-  }));
+  const { stops: rampStops, legend } = rampLegend(ast.domain, ramp);
 
   // A map has no axes, no ticks and no gridlines, so it does not use the
   // cartesian frame — only its title and legend chrome. That also lets

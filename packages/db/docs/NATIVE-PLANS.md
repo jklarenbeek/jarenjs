@@ -45,9 +45,24 @@ Physical integer sums/averages also prove the group's magnitude/count bound
 inside SQL. When intermediate exactness cannot be guaranteed, ordinary execution
 uses the existing decoded evaluator and reports that diversion; strict execution
 refuses `JD0010`. This can cost an additional statement and full decoded scans.
-Floating sums/averages and date/datetime grouping remain residual. Physical text
+Floating sums/averages and date/datetime grouping remain residual. Collection
+sums and averages follow the same rules: a `number` member stays in the engine
+(`plan.floatingAccumulation`), which adds the rows the pushed `$where` still
+selects through its index, and an `integer` one folds as a double beside the same
+magnitude/count bound, its run answered by the engine past it over those same
+selected rows (`explain().fallback.construct` `'accumulation'`); a term past the
+bound is left out of the fold, so over the values the store writes no accumulator
+overflows and the statement never fails, inside a PostgreSQL transaction or out of
+one (a JSON number past the double range, written by trusted SQL, is refused on
+PostgreSQL: MODEL-FORMAT §7). A native temporal
+bucket over `integer` readings carries the same bound. An entity ordering over a
+document member reads it as its declared type, so a number orders numerically on
+PostgreSQL as on SQLite, in a query's `$orderby`, a load's include and a root
+load alike; a member declared with more than one type orders in the engine (a
+load refuses it). Physical text
 comparisons explicitly use codepoint collation, independent of a column's declared
-collation; an incompatible index may therefore stop helping that query.
+collation — and the decoded evaluator fetches a root in that key order too, on
+PostgreSQL as on SQLite; an incompatible index may therefore stop helping that query.
 
 Safe identity/object projection chains, including a projected join followed by
 filtering and ordering, flatten without crossing windows, grouping or inner

@@ -12,7 +12,13 @@ resolver policy. A replica id must remain unique to its writer lineage. The
 runtime works on SQLite Node, worker and wasm hosts through session or journal
 capture, and on PostgreSQL through journal capture and native bounded cursors.
 The same envelopes apply PostgreSQL → SQLite, SQLite → PostgreSQL and
-PostgreSQL → PostgreSQL. Drivers without `changeCapture`, and PostgreSQL's
+PostgreSQL → PostgreSQL — for documents both engines can store. SQLite
+stores a string holding U+0000 or an unpaired surrogate; PostgreSQL's
+`jsonb` cannot (`JD2005`), so a SQLite-origin envelope carrying such a
+document does not apply to a PostgreSQL replica: its apply is `JD2005`,
+every later envelope of that origin `JD2100` (the gap it left), and a
+`reset` from a snapshot holding the document `JD2005` again. Keep such
+values out of documents that replicate to PostgreSQL. Drivers without `changeCapture`, and PostgreSQL's
 buffered cursor mode, refuse at open. Journal replication refuses models with cascading or set-null
 child foreign keys (`JD0051`), because the journal cannot observe those effects.
 Session capture includes them. Both modes support membership cascades and
@@ -212,31 +218,31 @@ allocations observed after initialization, not precise retained-heap sizes.
 
 <!--fact:db.changeflow-->
 
-Measured 2026-09-09, v24.20.0, AMD Ryzen 9 5900HX with Radeon Graphics; 15 mutations per case.
+Measured 2026-10-07, v24.20.0, AMD Ryzen 9 5900HX with Radeon Graphics; 15 mutations per case.
 
 | Shape | Strategy | Initialize ms | Mutation p50 ms | Mutation p95 ms | Initialization heap bytes |
 |---|---|---:|---:|---:|---:|
-| selective join | join | 15.740 | 0.349 | 2.173 | 4854712 |
-| selective join | rerun | 1.040 | 0.850 | 1.321 | 347640 |
-| high fan-out join | join | 8.115 | 1.984 | 3.040 | 4769632 |
-| high fan-out join | rerun | 0.744 | 0.973 | 1.303 | 353768 |
-| graph | graph | 7.742 | 0.429 | 0.728 | 4811904 |
-| graph | rerun | 4.606 | 4.170 | 7.953 | 1418576 |
-| multiple-key groups | group | 8.417 | 0.285 | 0.882 | 2107240 |
-| multiple-key groups | rerun | 0.663 | 0.405 | 0.464 | 116960 |
-| group aggregate | group | 3.839 | 0.236 | 0.398 | 1932544 |
-| group aggregate | rerun | 0.846 | 0.449 | 0.670 | 275560 |
-| distinct | distinct | 3.731 | 0.179 | 0.317 | 1616800 |
-| distinct | rerun | 0.480 | 0.238 | 0.333 | 86128 |
-| nested groups | nested-group | 4.565 | 0.206 | 0.377 | 1757528 |
-| nested groups | rerun | 0.779 | 0.551 | 0.675 | 293560 |
-| offset groups | rerun | 1.274 | 0.474 | 0.623 | 383792 |
-| offset groups | rerun | 0.773 | 0.527 | 1.158 | 299416 |
+| selective join | join | 17.956 | 0.388 | 2.542 | 5308632 |
+| selective join | rerun | 1.125 | 0.845 | 1.365 | 394016 |
+| high fan-out join | join | 7.760 | 2.192 | 2.957 | 5015568 |
+| high fan-out join | rerun | 0.879 | 0.835 | 1.220 | 404168 |
+| graph | graph | 7.985 | 0.301 | 0.640 | 5179712 |
+| graph | rerun | 4.385 | 4.075 | 4.648 | 1505048 |
+| multiple-key groups | group | 7.964 | 0.261 | 1.102 | 2253296 |
+| multiple-key groups | rerun | 0.903 | 0.520 | 0.625 | 307712 |
+| group aggregate | group | 3.767 | 0.248 | 0.379 | 2009520 |
+| group aggregate | rerun | 0.735 | 0.453 | 0.542 | 272248 |
+| distinct | distinct | 3.564 | 0.177 | 0.305 | 1764384 |
+| distinct | rerun | 0.664 | 0.241 | 0.388 | 87656 |
+| nested groups | nested-group | 3.815 | 0.210 | 0.313 | 1915256 |
+| nested groups | rerun | 0.820 | 0.530 | 0.634 | 306696 |
+| offset groups | rerun | 1.252 | 0.462 | 0.652 | 376872 |
+| offset groups | rerun | 0.865 | 0.512 | 0.586 | 294328 |
 
 | Capture | Envelopes | Operations | Bytes | Apply p50 ms | Replay p50 ms | Conflict p50 ms |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| session | 15 | 15 | 3169 | 0.463 | 0.119 | 0.213 |
-| journal | 15 | 15 | 3169 | 0.333 | 0.097 | 0.160 |
+| session | 15 | 15 | 3169 | 0.472 | 0.121 | 0.214 |
+| journal | 15 | 15 | 3169 | 0.301 | 0.099 | 0.174 |
 
 Selective maintenance avoids repeated full SQL evaluation. Initialization and high-fan-out maintenance can cost more than rerunning; the table includes both. Offset groups remain rerun in both requested modes.
 

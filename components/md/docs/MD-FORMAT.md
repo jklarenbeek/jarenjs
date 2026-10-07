@@ -53,6 +53,38 @@ this package deliberately differs from the GFM reference implementation
 are stated with their reasons in the package README's scorecard section;
 neither is a dialect gap a document can fall into.
 
+### 1.4 Limits (normative)
+
+CommonMark lets an implementation bound nesting; this parser does, so
+that any input — untrusted Markdown included — parses in time linear in
+its length and builds a tree every consumer can walk recursively:
+
+- **Block containers** — block quotes, lists, list items and footnote
+  definitions, each counting one — nest at most **256** deep (so 128
+  levels of nested lists, each a list and an item). A marker that would
+  open a container past the bound opens nothing and is read as
+  paragraph text.
+- **Inline containers** — emphasis, strong emphasis, strikethrough and
+  links, each counting one — nest at most **256** deep within a block.
+  Delimiters whose pairing would nest past the bound stay literal text;
+  a link counts one level, so its label nests one level less, and a
+  literal autolink (§4.7) is not formed inside text already 256 levels
+  deep.
+- **Raw HTML parsed under `html: 'vnode'`** (§4.4a) keeps at most
+  **256** nested elements; an element opened deeper keeps its content
+  and loses its markup, as an element outside the allow-list does.
+- **Link destinations** nest parentheses at most **32** deep — the
+  limit cmark and commonmark.js apply — so `[a](` followed by 33
+  unbalanced `(` is not a link.
+- **Frontmatter collections** — flow collections (§3.1, §3.3), the
+  YAML subset's block maps and sequences (§3.1) and TOML tables (§3.3)
+  — each nest at most 256 deep; a deeper one is a located frontmatter
+  error. A block collection or table that deep may hold a flow
+  collection as deep again, so frontmatter data nests at most 512 deep
+  in all, and JSON frontmatter (§3.2) — like the value a TOML parser
+  passed in returns — is held to those 512: the `---json` frontmatter
+  `toMarkdown` prints (§5) for any document parses back.
+
 ## 2. The document envelope
 
 ```json
@@ -104,22 +136,46 @@ The built-in parser handles, from scratch and dependency-free:
 - **Quoted strings** — double quotes with JSON-style escapes
   (`\n \t \r \b \f \0 \\ \" \uXXXX`), single quotes with `''` → `'`.
   An opening quote requires a closing quote; an unterminated string is
-  a located frontmatter error.
-- **Block maps and sequences** by indentation (spaces only). A sequence
+  a located frontmatter error, and so is anything but a comment after
+  the closing quote (`trailing content after a quoted string`).
+- **Block maps and sequences** by indentation (spaces only; a space or
+  tab separates a value from its key's colon). A sequence
   MAY sit at the same indent as its parent key. `- key: value` opens an
-  inline map item.
-- **Flow collections** — `[a, b]` and `{a: 1}`, nesting freely, spanning
-  multiple lines while brackets remain open. Plain values retain internal
-  colons (`[a:b]`, `{url: http://host}`); shorthand map entries inside
-  sequences (`[a: b]`) are outside the subset and are rejected.
+  inline map item, and `- - a` an inline sequence item (`[["a"]]`),
+  whose later entries sit at its dash's column; a sequence cannot start
+  on its key's line (`key: - a` is an error, never the string `- a`).
+  A lone `-` holds the block indented deeper beneath it,
+  or `null`: an entry at the dash's own indent is its sibling, so `-`,
+  `-` is two empty entries. Block collections nest up to 256 deep; a
+  deeper one is a located frontmatter error (`block collections nest
+  deeper than 256`).
+- **Flow collections** — `[a, b]` and `{a: 1}`, nesting up to 256 deep,
+  spanning multiple lines while brackets remain open; a comment may end
+  any of those lines. Plain values retain
+  internal colons (`[a:b]`, `{url: http://host}`); shorthand map entries
+  inside sequences (`[a: b]`) are outside the subset and are rejected. A
+  collection nested deeper than 256 is a located frontmatter error
+  (`flow collections nest deeper than 256`), and so are anything but a
+  comment after its closing bracket (`trailing content after a flow
+  collection`) and a `-` followed by a blank or a line break inside it,
+  which would open a block sequence (`-`, `-1` and `-a` are text).
 - **Block scalars** — literal `|` and folded `>`, each with the `-`
-  chomp (drop the final newline). The `+` chomp and explicit indent
-  indicators are not supported.
+  chomp (drop the final newline), as a map value or a sequence item
+  (`- |`). The first line with content sets the block's indentation: a
+  line indented less ends the block, and a blank line before it may not
+  be indented deeper. `>` folds as YAML does: one line
+  break between two lines of text becomes a space, the empty lines
+  between two lines remain one line break each, and a line indented
+  deeper than the block keeps the line breaks around it. A block
+  scalar without content lines is the empty string. The `+` chomp and
+  explicit indent indicators are not supported.
 - **Comments** — `#` to end of line, outside quotes.
 
 Deliberately outside the subset: anchors/aliases (`&`/`*`), tags (`!!`),
 multi-document streams (`---` separators inside the block), complex
-(non-scalar) keys, and the `?` key indicator. Duplicate keys: last one
+(non-scalar) keys, the `?` key indicator, and a plain or quoted scalar
+continued on a following line outside a flow collection (a located
+frontmatter error). Duplicate keys: last one
 wins. A key named `__proto__` becomes an ordinary own property.
 
 ### 3.2 JSON frontmatter
@@ -127,7 +183,9 @@ wins. A key named `__proto__` becomes an ordinary own property.
 The `---json` fence body and the leading-`{` form are parsed with
 `JSON.parse`. The leading-`{` form closes at the **first line that is
 exactly `}`**; if that slice fails to parse the opener is ordinary
-Markdown text, not an error.
+Markdown text, not an error. Either form nests at most 512 deep
+(§1.4); a deeper value is a frontmatter error at the line of the first
+`[` or `{` past the bound (`objects and arrays nest deeper than 512`).
 
 ### 3.3 TOML frontmatter
 
@@ -142,7 +200,16 @@ unrecognized value are kept as verbatim **strings**; multi-line strings
 are not supported. Comments end at each physical line, including within
 multi-line arrays. Dotted keys in an inline table preserve sibling
 members, and table names such as `__proto__` are ordinary own properties.
-An unterminated quoted string is a located frontmatter error.
+An unterminated quoted string is a located frontmatter error, and so are
+arrays and inline tables nested deeper than 256 — a dotted key inside an
+inline table nests one table deeper per segment before its last — and
+tables nested deeper than 256 (`tables nest deeper than 256`): the root
+table counts one, a header one more per segment, a dotted key one more
+per segment before its last, and `[[…]]` one more for the array its last
+segment names (`[[a]]` is three deep). md cannot see the lines a parser
+passed in through `options.toml` read, so the value it returns is held
+to the 512 levels of JSON frontmatter instead (`the TOML parser's
+result nests deeper than 512`).
 
 ### 3.4 Frontmatter as ambient variables
 

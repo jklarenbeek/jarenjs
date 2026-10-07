@@ -20,10 +20,18 @@
 import { LinqBuildError, LinqRuntimeError } from './errors.js';
 import { compileDocument, isProviderSource, providerRoot } from './provider.js';
 import { memberSegment } from './expression.js';
+import { readOptions } from './document.js';
 import { parseJSONPath } from '@jarenjs/json/path';
 
 /** The strategies this boundary knows. One, for now, and it says so. */
 const STRATEGIES = new Set(['hash']);
+
+/** The members a federation spec carries: a closed set, so a misspelt
+ * budget is refused rather than silently replaced by its default. */
+const SPEC_MEMBERS = Object.freeze(['sources', 'maxRows', 'maxBytes', 'maxTotalRows', 'maxTotalBytes', 'strategy']);
+
+/** The members a described source carries beside its provider. */
+const SOURCE_MEMBERS = Object.freeze(['provider', 'estimatedRows']);
 
 /**
  * A positive integer budget, or the refusal that names it.
@@ -364,6 +372,7 @@ export function federate(spec) {
     throw new LinqBuildError('JL0005',
       'federate() takes its sources as an object of name → provider');
   }
+  readOptions(spec, SPEC_MEMBERS, 'federate()');
   const names = Object.keys(sources);
   if (names.length < 2) {
     throw new LinqBuildError('JL0005',
@@ -393,8 +402,9 @@ export function federate(spec) {
 
   for (const name of names) {
     const declared = sources[name];
-    const provider = declared !== null && typeof declared === 'object'
-      && 'provider' in declared ? declared.provider : declared;
+    const described = declared !== null && typeof declared === 'object' && 'provider' in declared;
+    if (described) readOptions(declared, SOURCE_MEMBERS, `federate()'s source '${name}'`);
+    const provider = described ? declared.provider : declared;
     if (!isProviderSource(provider)) {
       throw new LinqBuildError('JL0001',
         `federate()'s source '${name}' is not a provider: it exposes no execute(document, options)`);

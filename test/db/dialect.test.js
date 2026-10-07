@@ -100,7 +100,7 @@ describe('SQLite dialect goldens', () => {
     assert.strictEqual(sqliteDialect.jsonPathText([{ name: 'a b.c' }, { index: 0 }]),
       '$."a b.c"[0]');
     assert.strictEqual(sqliteDialect.jsonPathText([{ name: 'has"quote' }]), null);
-    assert.strictEqual(sqliteDialect.jsonPathText([{ name: 'ctl' }]), null);
+    assert.strictEqual(sqliteDialect.jsonPathText([{ name: 'ctl\x01' }]), null);
   });
 
   it('the expression primitives', () => {

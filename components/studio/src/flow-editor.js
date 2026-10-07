@@ -4,7 +4,7 @@
  * errors?: any[], valid?: boolean, total?: number, code?: string, output?: any, started?: boolean }} EditorReceipt */
 /** Revision-checked Flow publication over the editor's own queued actions. */
 import { semanticKey } from '@jarenjs/core/object';
-import { applyJSONPatch } from '@jarenjs/json/patch';
+import { applyPatchThrough } from './editor-patch.js';
 import { validateFlowDocument } from './flow-document.js';
 
 /** @param {{ kind?: 'fsm'|'dag'|null, document?: any, input?: any }} [options] */
@@ -45,12 +45,11 @@ export function createFlowController(env) {
       env.getApp().dispatch('flow/replace', { requestId: id, expected: { kind: before.kind, doc: before.document }, kind, doc: copy(candidate) });
     });
   }
-  /** @param {Parameters<typeof applyJSONPatch>[1]} patch @param {{ expectedRevision?: string, kind?: 'fsm'|'dag' }} [options]
+  /** @param {Parameters<typeof applyPatchThrough>[2]} patch @param {{ expectedRevision?: string, kind?: 'fsm'|'dag' }} [options]
    * @returns {Promise<EditorReceipt>}
    */
   function apply(patch, options) {
-    try { return replace(applyJSONPatch(read().document, patch), options); }
-    catch (error) { return Promise.resolve({ ok: false, error: error.message, code: error.code }); }
+    return applyPatchThrough(read, replace, patch, options);
   }
   /** Execute with the host's task registry and explicit input; return the settled DAG result or machine start receipt.
    * @param {{ input?: any, event?: string }} [options]

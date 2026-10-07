@@ -21,6 +21,7 @@
 import { parseJSONPath, JSONPathSyntaxError, RE_JSONPATH_VARIABLE_HEAD } from '../path.js';
 import { isSingularSegments } from '../segments.js';
 import { encodeJSONPointerSegment } from '../pointer.js';
+import { NESTING_CEILING } from '../errors.js';
 import { JsonQueryCompileError } from './errors.js';
 import { queryCompileError, messageRef, renderQueryMessageId } from './messages.js';
 import { FormatRefusal, readDecimalFormat } from './format-number.js';
@@ -1424,15 +1425,15 @@ export function validateDecimalFormats(value) {
 
 // The known limits (section 8.12). Only limits the engine actually
 // enforces are accepted - an accepted-but-unenforced limit would be a
-// silent false guarantee.
-const LIMIT_NAMES = new Set(['sequenceItems', 'resultItems', 'steps', 'depth']);
+// silent false guarantee - and a refusal names the nearest known one.
+const LIMIT_NAMES = Object.freeze(['sequenceItems', 'resultItems', 'steps', 'depth']);
 
 function validateLimits(value) {
   if (!isJsonObject(value))
     throw new TypeError('options.limits must be a plain object');
+  refuseUnknownMembers(value, LIMIT_NAMES,
+    (name, hint) => new TypeError(`options.limits.${name} is not a known limit${hint}`));
   for (const name in value) {
-    if (!LIMIT_NAMES.has(name))
-      throw new TypeError(`options.limits.${name} is not a known limit`);
     const v = value[name];
     if (!Number.isInteger(v) || v < 1)
       throw new TypeError(`options.limits.${name} must be a positive integer`);
@@ -1534,7 +1535,7 @@ function measureDepth(node, depth, worst) {
 
 function normalizeExpr(value, docPath, scope, ctx) {
   const depth = ++ctx.depth;
-  const limit = Math.min(ctx.limits?.depth ?? 256, 256);
+  const limit = Math.min(ctx.limits?.depth ?? NESTING_CEILING, NESTING_CEILING);
   if (depth > limit) raise('JQ0011', 'query/depth-limit', { depth, limit }, docPath);
   try { return normalizeExpression(value, docPath, scope, ctx); }
   finally { ctx.depth--; }

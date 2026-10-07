@@ -12,7 +12,7 @@
  * point.
  */
 
-import { captureExpression } from './expression.js';
+import { captureExpression, PARAMETERS } from './expression.js';
 import { LinqBuildError } from './errors.js';
 
 /** No parameters are declared for a rule: `p.x` cannot appear. */
@@ -33,6 +33,11 @@ const article = (/** @type {string} */ what) =>
  * step scope at step time), and naming one pen's answer here made the
  * message contradict its own advice for every other pen. A caller that
  * has a scope to name passes it as `advice`.
+ *
+ * The argument itself is not a value — its frozen empty target would embed
+ * as `{}` — so it answers the capture's {@link PARAMETERS} key with a
+ * refusal of its own, and asking for its keys (a spread, `Object.keys`)
+ * is the same refusal.
  * @param {string} what - the method, for the message
  * @param {readonly string[]} names - the externals bound
  * @param {readonly any[]} proxies - one expression proxy per name
@@ -40,8 +45,15 @@ const article = (/** @type {string} */ what) =>
  * @param {string} noun - what this pen calls the callback
  */
 function externalsProxy(what, names, proxies, advice, noun) {
+  const notValue = () => {
+    throw new LinqBuildError('JL0104',
+      `${article(what)} ${what} ${noun}'s externals argument is not a value — `
+      + (names.length === 0 ? 'it binds no externals' : `read one by name: ${names.join(', ')}`));
+  };
   return new Proxy(Object.freeze({}), {
+    ownKeys: notValue,
     get(_target, prop) {
+      if (prop === PARAMETERS) return notValue;
       if (typeof prop === 'symbol') return undefined;
       const index = names.indexOf(/** @type {string} */ (prop));
       if (index !== -1) return proxies[index];

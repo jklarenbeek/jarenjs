@@ -256,6 +256,11 @@ export class CsvMachine {
     this.byteTail = undefined;
     this.scanFieldStart = 0;
 
+    // the repair log exists before an array header is named: naming it
+    // may heal a duplicate or an empty name
+    this.repairLog = [];
+    /** @type {HeaderNames | null} the names the header holds, once named */
+    this.headerNames = null;
     const headers = options.headers;
     this.wantHeader = headers === true;
     this.headerFields = Array.isArray(headers)
@@ -285,7 +290,6 @@ export class CsvMachine {
 
     // document state
     this.outRows = [];
-    this.repairLog = [];
     this.cells = [];
     this.recordIndex = 0;
     this.dropRecord = false; // set for a line that carries no record (a comment)
@@ -888,31 +892,46 @@ export class CsvMachine {
     if (n > width) {
       // Widen the header once, so the extra columns have somewhere to go
       // and every later record agrees on the shape.
+      const taken = /** @type {HeaderNames} */ (this.headerNames);
       for (let i = width; i < n; i++) {
-        const name = uniqueName(fields, `column_${i + 1}`);
+        const name = taken.unique(`column_${i + 1}`);
+        taken.add(name);
         fields.push(name);
         setObjectMember(row, name, values[i]);
       }
-      this.protoSafe = this.protoSafe || fields.includes('__proto__');
+      this.protoSafe = this.protoSafe || taken.has('__proto__');
     }
     return row;
   }
 
+  // Name the header in place: an empty name becomes `column_N`, a name an
+  // earlier column already holds gets the first free suffix. A candidate
+  // is free only when no column spells it - an earlier one as named, the
+  // current one or a later one as written - so `a, a, a_2` names
+  // `a, a_3, a_2`.
   #nameHeader(names, line) {
+    const taken = new HeaderNames(names);
+    /** the names the columns before the current one ended up with */
+    const seen = new Set();
     for (let i = 0; i < names.length; i++) {
-      let name = names[i];
+      const written = names[i];
+      let name = written;
       if (name.length === 0) {
         this.heal('CSV1008', line, i + 1);
-        name = uniqueName(names, `column_${i + 1}`);
+        name = taken.unique(`column_${i + 1}`);
       }
-      // `lastIndexOf(name, -1)` would search from the END, so the first
-      // column would always look like a duplicate of itself
-      if (i > 0 && names.lastIndexOf(name, i - 1) >= 0) {
+      if (seen.has(name)) {
         this.heal('CSV1007', line, i + 1, name);
-        name = uniqueName(names, name);
+        name = taken.unique(name);
       }
-      names[i] = name;
+      if (name !== written) {
+        taken.remove(written);
+        taken.add(name);
+        names[i] = name;
+      }
+      seen.add(name);
     }
+    this.headerNames = taken;
     return names;
   }
 
@@ -960,19 +979,62 @@ function trimAscii(s) {
   return a === 0 && b === s.length ? s : s.slice(a, b);
 }
 
-// The first free name in the `base`, `base_2`, `base_3`, ... series. A
-// synthesized column keeps its plain name when nothing else claims it;
-// only a genuine collision gets a suffix.
-function uniqueName(taken, base) {
-  if (!taken.includes(base))
-    return base;
-  let n = 2;
-  let name = `${base}_${n}`;
-  while (taken.includes(name)) {
-    n++;
-    name = `${base}_${n}`;
+// The names a header holds, counted - a written name may repeat until it
+// is renamed - with the next suffix worth trying per base. A held name
+// stays held (a renamed duplicate leaves its first spelling in place, and
+// an empty name is never a candidate), so every `base_k` below the
+// remembered suffix is still taken and `unique` resumes there: naming a
+// header costs time linear in its columns, not a scan of the header per
+// candidate.
+class HeaderNames {
+  /** @param {string[]} names - the header as written */
+  constructor(names) {
+    /** @type {Map<string, number>} */
+    this.count = new Map();
+    /** @type {Map<string, number>} */
+    this.suffix = new Map();
+    for (let i = 0; i < names.length; i++)
+      this.add(names[i]);
   }
-  return name;
+
+  /** @param {string} name */
+  has(name) {
+    return this.count.has(name);
+  }
+
+  /** @param {string} name */
+  add(name) {
+    this.count.set(name, (this.count.get(name) ?? 0) + 1);
+  }
+
+  /** @param {string} name - a name held at least once */
+  remove(name) {
+    const n = /** @type {number} */ (this.count.get(name));
+    if (n === 1)
+      this.count.delete(name);
+    else
+      this.count.set(name, n - 1);
+  }
+
+  /**
+   * The first free name in the `base`, `base_2`, `base_3`, ... series. A
+   * synthesized column keeps its plain name when nothing else claims it;
+   * only a genuine collision gets a suffix.
+   * @param {string} base
+   * @returns {string}
+   */
+  unique(base) {
+    if (!this.count.has(base))
+      return base;
+    let n = this.suffix.get(base) ?? 2;
+    let name = `${base}_${n}`;
+    while (this.count.has(name)) {
+      n++;
+      name = `${base}_${n}`;
+    }
+    this.suffix.set(base, n + 1);
+    return name;
+  }
 }
 
 //#endregion

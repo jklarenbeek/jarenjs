@@ -32,7 +32,7 @@ import {
   solveTvm, convertValue, unitOptions, converterDimensions,
 } from '../index.js';
 import { standardMode } from '../modes/standard.js';
-import { BASES, WORD_SIZES } from '../modes/programmer.js';
+import { BASES, WORD_SIZES, wordValue } from '../modes/programmer.js';
 import { financialMode } from '../modes/financial.js';
 import { converterMode } from '../modes/converter.js';
 import { createRatesLayer, FALLBACK_RATES } from './rates/index.js';
@@ -224,8 +224,13 @@ export const calcEditEffects = {
     const display = desc.format
       ? desc.format(res.value, { angleMode: props.angleMode, wordBits: props.wordBits, signed: props.signed, base: props.base })
       : String(res.value);
+    // The display shows a programmer result as its word, so `ans` is that
+    // word too: the next calculation uses the value the user saw.
+    const value = mode === 'programmer'
+      ? wordValue(res.value, props.wordBits ?? 32, props.signed ?? false)
+      : res.value;
     // Grouping belongs on the tape/display; expression literals contain no spaces.
-    dispatch('calc/commit', { value: res.value, display, expr: entry,
+    dispatch('calc/commit', { value, display, expr: entry,
       entry: mode === 'programmer' ? display.replaceAll(' ', '') : display });
   },
 };

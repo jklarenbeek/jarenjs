@@ -122,6 +122,31 @@ describe('compileJSONPatch validation', () => {
     assert.throws(() => compileJSONPatch([], { values: 'copy' }), TypeError);
   });
 
+  it('refuses a misspelt or mistyped option instead of ignoring it', () => {
+    const ops = [{ op: 'replace', path: '/a', value: 2 }];
+    const refuses = (fn, message) => assert.throws(fn, (e) => e instanceof TypeError && e.message === message);
+    refuses(() => applyJSONPatch({ a: 1 }, ops, { mutated: true }),
+      "compileJSONPatch: unknown option 'mutated' — did you mean 'mutate'?");
+    refuses(() => applyJSONPatch({ a: 1 }, ops, { change: true }),
+      "compileJSONPatch: unknown option 'change' — did you mean 'changes'?");
+    refuses(() => compileJSONPatch(ops, { order: 1 }),
+      "compileJSONPatch: unknown option 'order'; the options are mutate, values, changes");
+    refuses(() => applyJSONPatch({ a: 1 }, ops, { mutate: 'yes' }), "compileJSONPatch: 'mutate' must be true or false");
+    refuses(() => applyJSONPatch({ a: 1 }, ops, { changes: 1 }), "compileJSONPatch: 'changes' must be true or false");
+    refuses(() => compileJSONPatch(ops, 'mutate'), 'compileJSONPatch: options must be a plain object');
+    refuses(() => createJSONPatch([1, 2], [9, 1, 2], { arrayDif: 'minimal' }),
+      "createJSONPatch: unknown option 'arrayDif' — did you mean 'arrayDiff'?");
+    refuses(() => createJSONPatch([1], [2], ['minimal']), 'createJSONPatch: options must be a plain object');
+    // absent, undefined and null options keep the defaults
+    const doc = { a: 1 };
+    deepStrictEqual(applyJSONPatch(doc, ops, { mutate: undefined, changes: false }), { a: 2 });
+    deepStrictEqual(doc, { a: 1 });
+    deepStrictEqual(applyJSONPatch(doc, ops, null), { a: 2 });
+    deepStrictEqual(createJSONPatch([1], [2], null), [{ op: 'replace', path: '/0', value: 2 }]);
+    deepStrictEqual(applyJSONPatch({}, [{ op: 'add', path: '/b', value: 1 }],
+      Object.assign(Object.create(null), { values: 'fresh' })), { b: 1 });
+  });
+
   it('isValidJSONPatch mirrors compile validation', () => {
     assert.isTrue(isValidJSONPatch([]));
     assert.isTrue(isValidJSONPatch([{ op: 'test', path: '', value: null }]));

@@ -4,8 +4,8 @@
  * errors?: any[], valid?: boolean, total?: number, code?: string, result?: any, stale?: boolean, requested?: boolean }} EditorReceipt */
 /** Project actions, effects, change feeds and candidate publication share one controller. */
 import { semanticKey } from '@jarenjs/core/object';
-import { applyJSONPatch } from '@jarenjs/json/patch';
 import { renameProjectFile, writeProjectArtifact, resolveProjectFile, fileSkeleton } from '../index.js';
+import { applyPatchThrough } from '../editor-patch.js';
 
 /** @param {{ getApp: () => any, host: any, projectData?: any, projectTemplate?: Function, download?: Function, exportProject?: Function, debounceMs?: number }} env */
 export function createProjectController(env) {
@@ -55,12 +55,11 @@ export function createProjectController(env) {
       catch (error) { requests.delete(id); resolve({ ok: false, error: error.message }); }
     });
   }
-  /** @param {Parameters<typeof applyJSONPatch>[1]} patch @param {{ expectedRevision?: string }} [options]
+  /** @param {Parameters<typeof applyPatchThrough>[2]} patch @param {{ expectedRevision?: string }} [options]
    * @returns {Promise<EditorReceipt>}
    */
   function apply(patch, options) {
-    try { return replace(applyJSONPatch(read().document, patch), options); }
-    catch (error) { return Promise.resolve({ ok: false, error: error.message, code: error.code }); }
+    return applyPatchThrough(read, replace, patch, options);
   }
   /** Run a file through the shared host. Computational runs return their settled
    * render result; interactive app files acknowledge their stage restart.

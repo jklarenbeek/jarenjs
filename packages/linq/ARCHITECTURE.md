@@ -15,7 +15,10 @@ proxies. Every member access, comparison and operator call is recorded
 as plain query-document JSON — never `Function.prototype.toString()`,
 which breaks under minification and cannot see closures honestly. The
 table of recordable methods (`METHODS`) is null-prototyped so
-`constructor` and `toString` read as member access; methods shadow
+`constructor` and `toString` read as member access, and its builder
+factories are marked pure, so a bundle that only asks `isExpression`
+(the charts, project, messages and formula pens) drops the whole
+capture; methods shadow
 members by design, with `get('name')` as the escape for collisions and
 non-identifier keys. A proxy that escapes its callback (stored and
 reused later) is detected by a stack of capture epochs and refused
@@ -174,7 +177,10 @@ same recording proxy with no parameters, the nested includes resolved
 over the scope's relation tables, the spec deep-frozen in a fixed
 member order. `membership.js` reads the relation table before the store
 records a link (`JL0107` names the kind); `live.js` hands a chain's
-document and `explain().bindings` to the store's own registration.
+document and bindings, the registration's own `externals` merged over
+them, to the store's own registration — holding a parameter an `in()`
+reads whole to an array in that merged set, which is what the store
+runs.
 Nothing here runs a query, plans one or keeps state: the store stays
 the engine, and every read is one its `explain()` can name.
 

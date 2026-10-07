@@ -162,7 +162,20 @@ jobs:
       - run: npm ci --include=optional
       # The LOCKED local Playwright, not whatever `npx` would fetch today.
       - run: npm exec -- playwright install --with-deps chromium firefox webkit
-      - run: npm run test:browser
+      # site:gate's order: ONE build, then the two stages that read it. The
+      # design sweep scans the built dist/ as well as the source, because a
+      # banned hue can arrive through a dependency stylesheet only the build
+      # carries; the matrix then runs over that same build. A red sweep does
+      # not suppress the matrix's evidence.
+      - name: Build the site
+        id: site
+        run: npm run website:build
+      - name: Design sweep
+        if: ${{ !cancelled() && steps.site.outcome == 'success' }}
+        run: npm run test:design
+      - name: Browser matrix
+        if: ${{ !cancelled() && steps.site.outcome == 'success' }}
+        run: npm run test:browser:prebuilt
 
   # Consumption evidence, split by what it proves:
   #  - dependency-policy: the dependency closure a consumer inherits, plus

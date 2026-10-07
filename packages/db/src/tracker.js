@@ -17,6 +17,12 @@
  * parent-first, deletes child-first, updates in between, join rows
  * after both endpoints exist. A foreign-key cycle among the entities
  * being inserted or deleted is `JD0040`, reported, never a deadlock.
+ * One delete keeps the order it was staged in instead: a removal a
+ * rollback staged again under a key an `add()` staged after it holds
+ * runs ahead of the inserts, so that key is deleted, then inserted —
+ * child-first after the removals of the rows that reference it, and after
+ * the updates that move rows off it (one that moves a row onto a row the
+ * save inserts follows that insert, which then runs first).
  * The whole save is one transaction, and the tracker is mutated only
  * after its statements have run — so a save that FAILS leaves the
  * tracker exactly as it was and a retry is possible. A save that
@@ -32,7 +38,7 @@ import { createJSONPatch } from '@jarenjs/json/patch';
 import { parseJSONPointer } from '@jarenjs/json/pointer';
 
 import { DbCompileError, DbRuntimeError, wrapDriverError } from './errors.js';
-import { chain, attempt, useStatementOnce } from './driver.js';
+import { chain, attempt, isThenable, useStatementOnce } from './driver.js';
 import { translatePatch } from './patch-sql.js';
 
 /** Rows per batched INSERT: bounded by the portable parameter budget. */
@@ -47,9 +53,16 @@ export const BATCH_ROW_BOUND = 100;
  * @param {string} targetKey - the target entity's key property
  * @param {string} member
  * @param {(reason: string) => Error} refuse
+ * @param {(parts: (string | number)[], member: string) => (string | number)[]} [checkKey] -
+ *   the target's own reading of a key (its entity core's `plan.memberKey`):
+ *   the refusal of one no write could hold — text that names no number
+ *   under a numeric key column (`JD2002`, naming the member), which
+ *   PostgreSQL would read as another row's — and otherwise the value the
+ *   key names, which is what each element becomes. Every caller that
+ *   writes the keys passes it.
  * @returns {(string | number)[]}
  */
-export function membershipKeys(value, targetKey, member, refuse) {
+export function membershipKeys(value, targetKey, member, refuse, checkKey = undefined) {
   if (value === undefined || value === null) return [];
   if (!Array.isArray(value)) throw refuse(`'${member}' must be an array to synchronise its join table`);
   return value.map((element) => {
@@ -59,11 +72,30 @@ export function membershipKeys(value, targetKey, member, refuse) {
         ? element[targetKey] : undefined;
     if (typeof key !== 'string' && typeof key !== 'number')
       throw refuse(`an element of '${member}' carries no usable '${targetKey}' key`);
-    return key;
+    return checkKey === undefined ? key : checkKey([key], member)[0];
   });
 }
 
-const UNIT_SEPARATOR = '';
+const UNIT_SEPARATOR = '\x1f';
+
+/**
+ * Run `step(at)` for each `at` from `from` up to `count`, one after another,
+ * without the stack growing with `count`: a step that answers a value lets
+ * the loop go on at once, and one that answers a promise resumes the loop
+ * when it settles. A save runs one statement per staged row — tens of
+ * thousands — on a synchronous driver too, where chaining each step into
+ * the next overflowed the stack. Answers `undefined`, or a promise of it
+ * once a step was asynchronous.
+ * @param {number} count @param {(at: number) => any} step @param {number} [from]
+ * @returns {any}
+ */
+function inOrder(count, step, from = 0) {
+  for (let at = from; at < count; at++) {
+    const out = step(at);
+    if (isThenable(out)) return out.then(() => inOrder(count, step, at + 1));
+  }
+  return undefined;
+}
 
 /**
  * Deep-freeze a JSON value in place and return it. Idempotent; shared
@@ -107,18 +139,27 @@ export function createTracker(context) {
    * @type {Map<string, { entity: string, member: string, ownKey: string | number,
    *   links: Set<string | number>, unlinks: Set<string | number> }>} */
   const memberships = new Map();
+  /** Records an add() replaced whose add a remove() then cancelled:
+   * `add(); remove()` leaves nothing, so a rollback that would put one of
+   * them back leaves its key empty instead (see `restore`).
+   * @type {WeakSet<any>} */
+  const withdrawn = new WeakSet();
   let pendingSequence = 0;
 
   // Keys may contain the membership separator themselves. Encode the
   // whole tuple so its component boundaries and entity remain distinct.
-  const keyOf = (entityName, parts) => JSON.stringify([entityName, ...parts]);
+  // Each part is filed as the value it names: decimal text under a numeric
+  // key column is its number (§6), so `'16'` and `16` file one row.
+  /** @param {string} entityName @param {any} plan - the entity's @param {any[]} parts */
+  const keyFor = (entityName, plan, parts) => JSON.stringify([entityName, ...plan.keyValues(parts)]);
+  const keyOf = (entityName, parts) => keyFor(entityName, coreFor(entityName).plan, parts);
 
   const recordKeyFor = (entityName, doc) => {
     const plan = coreFor(entityName).plan;
     const parts = plan.keys.map((k) => doc[k]);
     if (parts.some((part) => typeof part !== 'string' && typeof part !== 'number'))
       return null;
-    return keyOf(entityName, parts);
+    return keyFor(entityName, plan, parts);
   };
 
   const contractError = (entityName, reason) => new DbRuntimeError('JD2003',
@@ -143,7 +184,7 @@ export function createTracker(context) {
     if (existing === undefined
       || (existing.current === existing.snapshot && existing.pendingInsert !== true)) {
       records.set(key, {
-        entity: entityName, snapshot: doc, current: doc, pendingInsert: false,
+        entity: entityName, snapshot: doc, current: doc, pendingInsert: false, key,
       });
     }
     return doc;
@@ -177,9 +218,30 @@ export function createTracker(context) {
       throw contractError(entityName, 'add() cannot replace a pending removal — use put()/update() for a replacement, or save the removal before adding');
     records.set(key, {
       entity: entityName, snapshot: null, current: completed,
-      pendingInsert: true, pendingKey: key,
+      // the document handed back names the pending insert for as long as
+      // it is one, a replacement of its content included
+      pendingInsert: true, pendingKey: key, added: completed,
+      replaced: records.get(key),
     });
     return completed;
+  };
+
+  /** A pending insert's replacement document, which keeps the version
+   * `add()` started the row at when it carries none: a row is inserted at
+   * `0`, never SQL `NULL` (§11.5). @param {string} entityName @param {any} next
+   * @param {any} base - the document `add()` completed, or one replacing it */
+  const keepVersion = (entityName, next, base) => {
+    const version = coreFor(entityName).plan.version;
+    return version === null || next[version] !== undefined || base?.[version] === undefined
+      ? next : { ...next, [version]: base[version] };
+  };
+
+  /** A saved row's document without the key the save allocated it: the
+   * key names no row once that save is rolled back. @param {string} entityName @param {any} doc */
+  const withoutKey = (entityName, doc) => {
+    const rest = { ...doc };
+    delete rest[coreFor(entityName).plan.autoKey];
+    return rest;
   };
 
   const put = (entityName, next) => {
@@ -195,17 +257,40 @@ export function createTracker(context) {
         { docPath: entities.get(entityName)?.docPath, collection: entityName });
     }
     core.validateOnly(next);
-    record.current = deepFreeze(next);
+    // the last staged word wins: a put of a tracked row is the replacement
+    // the add() refusal names, so it cancels the row's pending removal; a
+    // pending insert keeps the removal it follows (the save deletes, then
+    // inserts — see `restore`)
+    if (record.pendingInsert !== true) removals.delete(/** @type {string} */ (key));
+    record.current = deepFreeze(record.pendingInsert === true ? keepVersion(entityName, next, record.current) : next);
     return record.current;
+  };
+
+  /** Drop the pending membership changes that belong to a row: those filed
+   * under one of its `keys` (the own key a `link()`/`unlink()` named, or a
+   * pending insert's own identity) and, given the pending insert `record`,
+   * those filed against that record. @param {string[]} keys @param {any} [record] */
+  const dropMemberships = (keys, record = undefined) => {
+    for (const [id, pending] of memberships) {
+      if ((record !== undefined && pending.ownRecord === record)
+        || keys.some((key) => id.startsWith(`${key}${UNIT_SEPARATOR}`))) memberships.delete(id);
+    }
   };
 
   const remove = (entityName, keyOrDoc) => {
     const core = coreFor(entityName);
-    const parts = core.normalizeKey(keyOrDoc);
+    // a key no write could hold (text that names no number, under a numeric
+    // key column) is refused as add() refuses it, never bound to a DELETE
+    const parts = core.plan.refuseUnnumbered(core.normalizeKey(keyOrDoc));
     const key = keyOf(entityName, parts);
     const record = records.get(key);
     if (record !== undefined && record.pendingInsert === true) {
-      records.delete(key); // added then removed: a no-op
+      // added then removed: a no-op — and so is every link()/unlink() staged
+      // under the key, before the add or after it: the save wrote those join
+      // rows for a row it never inserted, and failed on the foreign key
+      records.delete(key);
+      dropMemberships([key], record);
+      for (let replaced = record.replaced; replaced !== undefined; replaced = replaced.replaced) withdrawn.add(replaced);
       return;
     }
     removals.set(key, {
@@ -215,13 +300,18 @@ export function createTracker(context) {
     });
   };
 
+  /** The target's own reading of a membership key: refused where no write
+   * could hold it, otherwise the value it names (see `membershipKeys`).
+   * @param {any} relation */
+  const targetKeyCheck = (relation) => coreFor(relation.to).plan.memberKey;
+
   /** The pending insert a caller is holding, found by the identity of
    * the document `add()` handed back: a record whose key the save has
    * yet to allocate has nothing else to be found by. */
   const pendingInsertHolding = (entityName, doc) => {
     for (const record of records.values()) {
       if (record.pendingInsert === true && record.entity === entityName
-        && record.current === doc) return record;
+        && (record.current === doc || record.added === doc)) return record;
     }
     return undefined;
   };
@@ -267,9 +357,10 @@ export function createTracker(context) {
     else {
       ownKey = coreFor(entityName).normalizeKey(own)[0];
     }
+    if (ownRecord === undefined) [ownKey] = plan.keyValues(plan.refuseUnnumbered([ownKey]));
     const targetKey = mapping.entities[relation.to].keys[0];
     const [key] = membershipKeys([target], targetKey, member,
-      (reason) => contractError(entityName, reason));
+      (reason) => contractError(entityName, reason), targetKeyCheck(relation));
     const id = `${ownToken(entityName, ownKey, ownRecord)}${UNIT_SEPARATOR}${member}`;
     let pending = memberships.get(id);
     if (pending === undefined) {
@@ -441,14 +532,17 @@ export function createTracker(context) {
       targetColumn: target.column,
       tableColumns: [join.left.column, join.right.column],
       targetKey: mapping.entities[relation.to].keys[0],
+      // a target key as the value it names, whichever spelling holds it,
+      // so a membership's key sets compare by value (§6)
+      targetValue: (/** @type {any} */ key) => coreFor(relation.to).plan.keyValues([key])[0],
     };
   };
 
   /** Compute a many-to-many member's join-row difference by key sets. */
   const joinDiff = (entityName, before, after, ownKey, member) => {
     const endpoints = joinEndpoints(entityName, member);
-    const extract = (value) => membershipKeys(value, endpoints.targetKey, member,
-      (reason) => contractError(entityName, reason));
+    const extract = (value, checkKey = undefined) => membershipKeys(value, endpoints.targetKey, member,
+      (reason) => contractError(entityName, reason), checkKey);
     // a snapshot that never LOADED the member knows nothing about the
     // current membership — treating unknown as empty would re-insert
     // existing rows (a UNIQUE violation the seeded corpus found); the
@@ -456,12 +550,14 @@ export function createTracker(context) {
     const memberValue = before === null ? [] : before[member];
     const beforeKeys = before !== null && memberValue === undefined
       ? null
-      : [...new Set(extract(memberValue))];
+      : [...new Set(extract(memberValue).map(endpoints.targetValue))];
     return {
       ...endpoints,
       ownKey,
       beforeKeys,
-      afterKeys: [...new Set(extract(after[member]))],
+      // the keys the save writes, each one the target could hold
+      afterKeys: [...new Set(extract(after[member],
+        targetKeyCheck(entities.get(entityName).properties.get(member).relation)))],
     };
   };
 
@@ -473,8 +569,11 @@ export function createTracker(context) {
     ownKey: pending.ownKey,
     ownRecord: pending.ownRecord,
     // a row the save is about to INSERT has no memberships to read: the
-    // key does not exist yet, so its baseline is empty rather than unknown
-    beforeKeys: pending.ownRecord === undefined ? null : [],
+    // key does not exist yet — or, where a removal of the key runs ahead of
+    // that insert, the delete takes the old row's join rows along — so its
+    // baseline is empty rather than unknown
+    beforeKeys: pending.ownRecord !== undefined
+      || records.get(keyOf(pending.entity, [pending.ownKey]))?.pendingInsert === true ? [] : null,
     links: [...pending.links],
     unlinks: [...pending.unlinks],
   });
@@ -553,7 +652,7 @@ export function createTracker(context) {
       // a record with a pending removal is deleted, not updated: planning
       // both bumped the version on the UPDATE and left the DELETE's
       // snapshot guard matching nothing (JD2040), so the row survived
-      if (removals.has(recordKeyFor(record.entity, record.snapshot) ?? '')) continue;
+      if (removals.has(record.key ?? recordKeyFor(record.entity, record.snapshot) ?? '')) continue;
       // a column-only row compares as its codecs store it: a value that
       // stores as the one already there is no change and no write
       const current = core.plan.document === false ? core.plan.normalize(record.current) : record.current;
@@ -614,17 +713,15 @@ export function createTracker(context) {
     }
 
     // resolve unknown membership baselines, then finalize each op
-    const resolveJoins = (i) => {
-      if (i >= joinOps.length) return null;
+    const resolveJoins = () => inOrder(joinOps.length, (i) => {
       const op = joinOps[i];
-      if (op.beforeKeys !== null) return resolveJoins(i + 1);
+      if (op.beforeKeys !== null) return undefined;
       const sql = `SELECT ${q(op.targetColumn)} AS ${q('t')} FROM ${q(op.joinTable)} `
         + `WHERE ${q(op.ownColumn)} = ${parameterAt(1)}`;
       return chain(useStatementOnce(connection, sql, (statement) => statement.all([op.ownKey])), (rows) => {
-        op.beforeKeys = rows.map((row) => row.t);
-        return resolveJoins(i + 1);
+        op.beforeKeys = rows.map((row) => op.targetValue(row.t));
       });
-    };
+    });
     const finalizeJoins = () => {
       for (const op of joinOps) {
         const before = new Set(op.beforeKeys);
@@ -642,54 +739,150 @@ export function createTracker(context) {
     const assemble = () => {
       finalizeJoins();
       const insertOrder = orderEntities([...inserts.keys()], 'inserts');
-      const deleteOrder = orderEntities(
-        [...new Set(deletes.map((removal) => removal.entity))], 'deletes').reverse();
+      // a removal that a rolled-back save staged again, under a key an add()
+      // staged after that save holds, runs ahead of every insert: the delete
+      // and the insert keep the order they were staged in (see `restore`)
+      const ahead = deletes.filter((removal) => removal.beforeInserts === true
+        && records.get(keyOf(removal.entity, removal.parts))?.pendingInsert === true);
+      // and so, child-first, does the removal of a row that references a row
+      // deleted ahead — by its snapshot, or by its entity alone when it was
+      // never read: a restricting reference would refuse that delete, and a
+      // cascading one delete the row under its own guarded delete (JD2040).
+      // A set-null reference keeps its place: the delete ahead only clears it
+      /** The key of the row a reference names, as the tracker files it, or
+       * null for none. @param {any} fk @param {any} value */
+      const named = (fk, value) => (value === null || value === undefined ? null : keyOf(fk.references, [value]));
+      /** Whether `removal` must be deleted before `parent`: it references
+       * that row, by its snapshot's reference, or by its entity's when it
+       * was never read; a set-null reference only clears.
+       * @param {any} removal @param {any} parent */
+      const under = (removal, parent) => mapping.entities[removal.entity].foreignKeys.some((/** @type {any} */ fk) =>
+        fk.references === parent.entity && fk.onDelete !== 'setNull'
+        && (removal.snapshot === null || named(fk, removal.snapshot[fk.column]) === keyOf(parent.entity, parent.parts)));
+      const isAhead = new Set(ahead);
+      for (let at = 0; at < ahead.length; at++) {
+        const parent = ahead[at];
+        for (const removal of deletes) {
+          if (isAhead.has(removal) || records.get(keyOf(removal.entity, removal.parts))?.pendingInsert === true) continue;
+          if (under(removal, parent)) {
+            isAhead.add(removal);
+            ahead.push(removal);
+          }
+        }
+      }
+      const behind = ahead.length === 0 ? deletes : deletes.filter((removal) => !isAhead.has(removal));
+      const childFirst = (/** @type {any[]} */ list) => orderEntities(
+        [...new Set(list.map((removal) => removal.entity))], 'deletes').reverse();
+      const deleteOrder = childFirst(behind);
+      // The updates around the deletes ahead: those whose row references a
+      // row deleted ahead, by the reference it holds or the one it writes.
+      // Where each runs follows from the references it CHANGES:
+      //  - every changed reference names a row that exists before the deletes
+      //    ahead — one that stays, or one deleted and not inserted again —
+      //    (or it changes none): the update runs before those deletes, as the
+      //    updates of any save run before its deletes. A child moved to a
+      //    parent that stays leaves the deleted row first; one edited under it
+      //    meets the delete as a straight save has it meet it.
+      //  - a changed reference names a row this save inserts — a new one, or
+      //    one deleted ahead and inserted again: the update must follow that
+      //    insert and still precede the delete of the row it leaves. So that
+      //    insert runs first — after the delete ahead of its own key and the
+      //    removals that come along with that delete — then the update, then
+      //    the other deletes ahead. Where no such order exists (an update
+      //    leaves a row whose delete must come first: two children swapped
+      //    between two re-added parents), these updates keep their usual
+      //    place after every insert, and meet the deletes ahead first.
+      /** @type {Map<string, any>} */
+      const aheadAt = new Map(ahead.map((removal) => [keyOf(removal.entity, removal.parts), removal]));
+      /** @type {Map<string, any>} the pending inserts that carry their key */
+      const insertAt = new Map();
+      if (ahead.length > 0) {
+        for (const list of inserts.values()) {
+          for (const record of list) {
+            const key = recordKeyFor(record.entity, record.current);
+            if (key !== null) insertAt.set(key, record);
+          }
+        }
+      }
+      /** @type {any[]} */
+      const first = [];
+      /** @type {{ update: any, needs: string[] }[]} */
+      const around = [];
+      for (const update of ahead.length === 0 ? [] : updates) {
+        let touches = false;
+        /** @type {string[]} */
+        const needs = [];
+        for (const fk of mapping.entities[update.record.entity].foreignKeys) {
+          const was = named(fk, update.record.snapshot[fk.column]);
+          const now = named(fk, update.record.stamped[fk.column]);
+          if (aheadAt.has(/** @type {string} */ (was)) || aheadAt.has(/** @type {string} */ (now))) touches = true;
+          if (now !== null && now !== was && insertAt.has(now)) needs.push(now);
+        }
+        if (!touches) continue;
+        if (needs.length === 0) first.push(update);
+        else around.push({ update, needs });
+      }
+      // what the `around` updates need first: the inserts they name, the
+      // deletes ahead of those keys and the removals that come along
+      const needed = new Set(around.flatMap(({ needs }) => needs));
+      const earlyRemovals = new Set();
+      for (const key of needed) {
+        const removal = aheadAt.get(key);
+        if (removal === undefined || earlyRemovals.has(removal)) continue;
+        earlyRemovals.add(removal);
+        for (let at = 0, pulled = [removal]; at < pulled.length; at++) {
+          for (const child of ahead) {
+            if (!earlyRemovals.has(child) && under(child, pulled[at])) { earlyRemovals.add(child); pulled.push(child); }
+          }
+        }
+      }
+      const earlyRecords = new Set([...needed].map((key) => insertAt.get(key)));
+      // ... possible unless an update leaves a row deleted among them, or an
+      // insert among them references a row inserted later, or one they
+      // delete (a row deleted ahead later still exists when they run)
+      const early = around.length > 0
+        && around.every(({ update }) => mapping.entities[update.record.entity].foreignKeys.every((/** @type {any} */ fk) => {
+          const was = named(fk, update.record.snapshot[fk.column]);
+          return was === null || !earlyRemovals.has(aheadAt.get(was));
+        }))
+        && [...earlyRecords].every((record) => mapping.entities[record.entity].foreignKeys.every((/** @type {any} */ fk) => {
+          const ref = named(fk, record.current[fk.column]);
+          return ref === null || (insertAt.has(ref) ? needed.has(ref) : !earlyRemovals.has(aheadAt.get(ref)));
+        }));
+      const placed = new Set([...first, ...(early ? around.map(({ update }) => update) : [])]);
+      const updatesAfter = placed.size === 0 ? updates : updates.filter((update) => !placed.has(update));
 
       /** @type {any[]} */
       const statements = [];
 
-      // 1. inserts, parent-first, batched per column-name signature
-      for (const entityName of insertOrder) {
-        const plan = coreFor(entityName).plan;
-        /** @type {Map<string, any[]>} */
-        const shapes = new Map();
-        for (const record of inserts.get(entityName)) {
-          const split = plan.split(record.current);
-          const signature = split.values.map((value) => value.name).join(',');
-          let group = shapes.get(signature);
-          if (group === undefined) {
-            shapes.set(signature, group = []);
-          }
-          group.push({ record, split });
-        }
-        for (const group of shapes.values()) {
-          const names = group[0].split.values.map((value) => value.name);
-          const paramsPerRow = names.length + (plan.document === false ? 0 : 1);
-          const rowsPerBatch = names.length === 0 ? 1 : Math.max(1, Math.min(BATCH_ROW_BOUND,
-            Math.floor(BATCH_PARAM_BUDGET / paramsPerRow)));
-          for (let at = 0; at < group.length; at += rowsPerBatch) {
-            const batch = group.slice(at, at + rowsPerBatch);
-            const returning = plan.autoKey !== null && !names.includes(plan.autoKey);
-            const rowSql = (base) => `(${[...names.map((_, i) => parameterAt(base + i + 1)),
-              ...(plan.document === false ? [] : [dialect.jsonEncode(parameterAt(base + names.length + 1))])].join(', ')})`;
-            const sql = (plan.document === false && names.length === 0 ? `INSERT INTO ${plan.tableSql} DEFAULT VALUES` : `INSERT INTO ${plan.tableSql} `
-              + `(${[...names.map((n) => q(plan.physicalName(n))), ...(plan.document === false ? [] : [q('doc')])].join(', ')}) VALUES `
-              + batch.map((_, i) => rowSql(i * paramsPerRow)).join(', '))
-              + (returning ? ` RETURNING ${q(plan.physicalName(plan.autoKey))} AS ${q('key')}` : '');
-            const params = batch.flatMap(({ split }) => [
-              ...split.values.map((value) => value.value),
-              ...(plan.document === false ? [] : [JSON.stringify(split.rest)]),
-            ]);
+      /** One guarded (or plain) DELETE per removal, entity by entity.
+       * @param {string[]} order @param {any[]} list */
+      const pushDeletes = (order, list) => {
+        for (const entityName of order) {
+          const plan = coreFor(entityName).plan;
+          for (const removal of list) {
+            if (removal.entity !== entityName) continue;
+            const params = removal.parts.map((v, i) => plan.encodeColumn(plan.keys[i], v));
+            const wheres = plan.keys.map((key, i) => `${q(plan.physicalName(key))} = ${parameterAt(i + 1)}`);
+            const snapshotVersion = plan.version !== null && removal.snapshot !== null
+              ? Number(removal.snapshot[plan.version]) || 0 : null;
+            if (snapshotVersion !== null) {
+              params.push(snapshotVersion);
+              wheres.push(`${q(plan.physicalName(plan.version))} = ${parameterAt(params.length)}`);
+            }
             statements.push({
-              kind: 'insert', entity: entityName, sql, params, returning,
-              records: batch.map(({ record }) => record),
+              kind: 'delete', entity: entityName, removal,
+              sql: `DELETE FROM ${plan.tableSql} WHERE ${wheres.join(' AND ')}`,
+              params,
+              guarded: snapshotVersion !== null,
             });
           }
         }
-      }
+      };
 
-      // 2. updates (inserts already exist; deletes still ahead)
-      for (const { record, parts } of updates) {
+      /** One UPDATE, guarded by the snapshot's version where there is one.
+       * @param {{ record: any, parts: any }} update */
+      const pushUpdate = ({ record, parts }) => {
         const plan = coreFor(record.entity).plan;
         const params = [];
         const assignments = [];
@@ -743,7 +936,71 @@ export function createTracker(context) {
           guarded: plan.version !== null,
           newVersion: plan.version === null ? null : snapshotVersion + 1,
         });
+      };
+
+      /** The INSERTs of the pending records `keep` admits, parent-first,
+       * batched per column-name signature. @param {(record: any) => boolean} keep */
+      const pushInserts = (keep) => {
+        for (const entityName of insertOrder) {
+          const plan = coreFor(entityName).plan;
+          /** @type {Map<string, any[]>} */
+          const shapes = new Map();
+          for (const record of inserts.get(entityName)) {
+            if (!keep(record)) continue;
+            const split = plan.split(record.current);
+            const signature = split.values.map((value) => value.name).join(',');
+            let group = shapes.get(signature);
+            if (group === undefined) {
+              shapes.set(signature, group = []);
+            }
+            group.push({ record, split });
+          }
+          for (const group of shapes.values()) {
+            const names = group[0].split.values.map((value) => value.name);
+            const paramsPerRow = names.length + (plan.document === false ? 0 : 1);
+            const rowsPerBatch = names.length === 0 ? 1 : Math.max(1, Math.min(BATCH_ROW_BOUND,
+              Math.floor(BATCH_PARAM_BUDGET / paramsPerRow)));
+            for (let at = 0; at < group.length; at += rowsPerBatch) {
+              const batch = group.slice(at, at + rowsPerBatch);
+              const returning = plan.autoKey !== null && !names.includes(plan.autoKey);
+              const rowSql = (base) => `(${[...names.map((_, i) => parameterAt(base + i + 1)),
+                ...(plan.document === false ? [] : [dialect.jsonEncode(parameterAt(base + names.length + 1))])].join(', ')})`;
+              const sql = (plan.document === false && names.length === 0 ? `INSERT INTO ${plan.tableSql} DEFAULT VALUES` : `INSERT INTO ${plan.tableSql} `
+                + `(${[...names.map((n) => q(plan.physicalName(n))), ...(plan.document === false ? [] : [q('doc')])].join(', ')}) VALUES `
+                + batch.map((_, i) => rowSql(i * paramsPerRow)).join(', '))
+                + (returning ? ` RETURNING ${q(plan.physicalName(plan.autoKey))} AS ${q('key')}` : '');
+              const params = batch.flatMap(({ split }) => [
+                ...split.values.map((value) => value.value),
+                ...(plan.document === false ? [] : [JSON.stringify(split.rest)]),
+              ]);
+              statements.push({
+                kind: 'insert', entity: entityName, sql, params, returning,
+                records: batch.map(({ record }) => record),
+              });
+            }
+          }
+        }
+      };
+
+      // 0. around the deletes an insert of the same key follows: the updates
+      // that run before them; where an update needs an insert first, that
+      // insert (its own delete ahead first) and the update; then the other
+      // deletes ahead, child-first
+      first.forEach(pushUpdate);
+      if (early) {
+        const removals = ahead.filter((removal) => earlyRemovals.has(removal));
+        pushDeletes(childFirst(removals), removals);
+        pushInserts((record) => earlyRecords.has(record));
+        around.forEach(({ update }) => pushUpdate(update));
       }
+      const later = early ? ahead.filter((removal) => !earlyRemovals.has(removal)) : ahead;
+      pushDeletes(childFirst(later), later);
+
+      // 1. inserts, parent-first, batched per column-name signature
+      pushInserts(early ? (record) => !earlyRecords.has(record) : () => true);
+
+      // 2. updates (inserts already exist; deletes still ahead)
+      updatesAfter.forEach(pushUpdate);
 
       // 3. join-table rows: after both endpoints exist, before deletes
       for (const op of joinOps) {
@@ -776,30 +1033,11 @@ export function createTracker(context) {
       }
 
       // 4. deletes, child-first
-      for (const entityName of deleteOrder) {
-        const plan = coreFor(entityName).plan;
-        for (const removal of deletes) {
-          if (removal.entity !== entityName) continue;
-          const params = removal.parts.map((v, i) => plan.encodeColumn(plan.keys[i], v));
-          const wheres = plan.keys.map((key, i) => `${q(plan.physicalName(key))} = ${parameterAt(i + 1)}`);
-          const snapshotVersion = plan.version !== null && removal.snapshot !== null
-            ? Number(removal.snapshot[plan.version]) || 0 : null;
-          if (snapshotVersion !== null) {
-            params.push(snapshotVersion);
-            wheres.push(`${q(plan.physicalName(plan.version))} = ${parameterAt(params.length)}`);
-          }
-          statements.push({
-            kind: 'delete', entity: entityName, removal,
-            sql: `DELETE FROM ${plan.tableSql} WHERE ${wheres.join(' AND ')}`,
-            params,
-            guarded: snapshotVersion !== null,
-          });
-        }
-      }
+      pushDeletes(deleteOrder, behind);
 
       return { statements, fallbacks, joinOnly, unversioned: [...unversioned].sort(), deferred };
     };
-    return chain(resolveJoins(0), assemble);
+    return chain(resolveJoins(), assemble);
   };
 
   // ————— execution —————
@@ -822,20 +1060,21 @@ export function createTracker(context) {
       });
   };
 
-  const wrapDb = (error, statement) => {
-    return wrapDriverError(error, {
-        docPath: entities.get(statement.entity)?.docPath,
-        collection: statement.entity,
-      });
-  };
+  const wrapDb = (error, statement) => (statement.kind === 'insert'
+    // the entity core's own classification, so a duplicate key is JD2001
+    // here exactly as it is on create()
+    ? coreFor(statement.entity).plan.wrapInsert(error, statement.records.map((/** @type {any} */ record) => record.current))
+    : wrapDriverError(error, {
+      docPath: entities.get(statement.entity)?.docPath,
+      collection: statement.entity,
+    }));
 
   /** The key argument `get` takes for a key's parts. @param {any} plan @param {any[]} parts */
   const keyArgument = (plan, parts) => (plan.keys.length === 1 ? parts[0]
     : Object.fromEntries(plan.keys.map((/** @type {string} */ key, /** @type {number} */ i) => [key, parts[i]])));
 
   /** Run checks one after another. @param {(() => any)[]} runs @returns {any} */
-  const settleChecks = (runs, at = 0) => (at >= runs.length ? null
-    : chain(runs[at](), () => settleChecks(runs, at + 1)));
+  const settleChecks = (runs) => inOrder(runs.length, (at) => runs[at]());
 
   /**
    * Run the save's statements in order. Each store rule is judged at its own
@@ -865,20 +1104,19 @@ export function createTracker(context) {
         return settleChecks(runs);
       });
     };
-    const next = (i) => {
-      if (i >= statements.length) return chain(settleChecks(joinOnly.flatMap((record) => deferred.get(record) ?? [])), () => report);
+    /** Run statement `i`, its rules and its read-back. @param {number} i */
+    const run = (i) => {
       const statement = statements[i];
       const advance = () => {
         if (statement.kind === 'delete') {
-          if (statement.before === undefined || !(statement.deletedRows > 0)) return next(i + 1);
-          return chain(coreFor(statement.entity).plan.checkMutation('delete', statement.before, null), () => next(i + 1));
+          if (statement.before === undefined || !(statement.deletedRows > 0)) return undefined;
+          return coreFor(statement.entity).plan.checkMutation('delete', statement.before, null);
         }
-        if (!['insert', 'update'].includes(statement.kind) || coreFor(statement.entity).plan.document !== false) return next(i + 1);
+        if (!['insert', 'update'].includes(statement.kind) || coreFor(statement.entity).plan.document !== false) return undefined;
         const core = coreFor(statement.entity);
         const records = recordsOf(statement);
         statement.stored = [];
-        const refresh = (at) => {
-          if (at >= records.length) return next(i + 1);
+        return inOrder(records.length, (at) => {
           const record = records[at];
           const key = statement.returning ? { ...record.current, [core.plan.autoKey]: statement.generatedKeys[at] } : record.current;
           return chain(core.get(key), (stored) => {
@@ -886,11 +1124,9 @@ export function createTracker(context) {
             return chain(statement.kind === 'insert' ? core.plan.checkStored('insert', null, stored)
               : core.plan.checkStored('update', statement.before, stored, statement.assigned), () => {
               statement.stored.push(deepFreeze(stored));
-              return refresh(at + 1);
             });
           });
-        };
-        return refresh(0);
+        });
       };
       // a join row whose own key the save allocates: the INSERT that
       // allocates it has already run (inserts precede join rows), so the
@@ -941,15 +1177,19 @@ export function createTracker(context) {
           return advance();
         })));
     };
-    return next(0);
+    return chain(inOrder(statements.length, run),
+      () => chain(settleChecks(joinOnly.flatMap((record) => deferred.get(record) ?? [])), () => report));
   };
 
   /**
    * The tracker state a save's commit will advance, exactly as it stands
-   * before the save runs: the map slot behind every record the commit
-   * may re-key or drop, the fields it may overwrite on a record it
-   * keeps, and the pending removals and membership deltas, which it
-   * clears whole. Bounded by the save, never by the tracker's size.
+   * before the save runs: the map slot of every row the save writes — one
+   * it inserts, updates, deletes, or advances through its join table
+   * alone — with the fields of the record in it, and the pending removals
+   * and membership deltas, which it clears whole. A slot is taken for an
+   * update too: a re-read or a `discard()` after the save replaces or
+   * drops the record the save advanced, and {@link restore} puts that
+   * record back. Bounded by the save, never by the tracker's size.
    *
    * `planSave` names the join-only records because they carry no
    * statement of their own and the commit still advances them.
@@ -961,29 +1201,31 @@ export function createTracker(context) {
     const slots = new Map();
     /** @type {Map<any, any>} */
     const fields = new Map();
-    const takeSlot = (key) => {
-      if (!slots.has(key)) slots.set(key, records.get(key));
-    };
+    /** @param {any} record */
     const takeFields = (record) => {
       if (record === undefined || fields.has(record)) return;
       fields.set(record, {
         snapshot: record.snapshot, current: record.current,
         stamped: record.stamped, joinOnly: record.joinOnly,
         pendingInsert: record.pendingInsert, saved: record.saved,
+        allocatedKey: record.allocatedKey,
       });
+    };
+    /** @param {string} key @param {any} record */
+    const take = (key, record) => {
+      if (!slots.has(key)) slots.set(key, records.get(key));
+      takeFields(record);
     };
     for (const statement of statements) {
       if (statement.kind === 'insert') {
-        for (const record of statement.records) {
-          takeSlot(record.pendingKey);
-          takeFields(record);
-        }
+        for (const record of statement.records) take(record.pendingKey, record);
       }
+      // a record the save updates is the one filed under its own key, so
+      // `restore` puts it back there (`slotsOf`): no slot to take for it
       else if (statement.kind === 'update') takeFields(statement.record);
       else if (statement.kind === 'delete') {
         const key = keyOf(statement.removal.entity, statement.removal.parts);
-        takeSlot(key);
-        takeFields(records.get(key));
+        take(key, records.get(key));
       }
     }
     for (const record of joinOnly) takeFields(record);
@@ -998,50 +1240,167 @@ export function createTracker(context) {
     };
   };
 
-  /** Put back what {@link undoFor} took a copy of: the save's statements
-   * were rolled back, so every claim they made about the database is
-   * withdrawn and a retry plans them again. Only what the save cleared
-   * comes back — work staged AFTER the save (a `remove()`, a `link()`,
-   * an `add()`) stays pending exactly as staged, and a later word on one
-   * membership target is still the last word. */
-  const restore = (undo) => {
-    // Every inserted row acquired a clean replacement record, including
-    // explicit keys. Carry later edits back to its pending record before
-    // restoring map slots; auto-key slots name no row after rollback.
-    /** @type {Map<any, any>} */
-    const editedAfterSave = new Map();
-    for (const { key, record } of undo.inserted ?? []) {
-      // an edit staged on the saved row after the save is work staged
-      // after it: the pending record the row came from carries it back
-      const saved = records.get(key);
-      if (saved !== undefined && saved.current !== saved.snapshot) editedAfterSave.set(record, saved.current);
-      if (!undo.slots.has(key)) records.delete(key);
+  /** The slots a save's undo puts back: those it took (inserted and deleted
+   * rows), and the slot of each record it advanced in place (updated, or
+   * advanced through its join table alone), which held that record.
+   * @param {any} undo @returns {[string, any][]} */
+  const slotsOf = (undo) => {
+    const out = [...undo.slots];
+    for (const [record, was] of undo.fields) {
+      if (was.pendingInsert === true) continue;
+      const key = record.key ?? recordKeyFor(record.entity, was.snapshot);
+      if (key !== null && !undo.slots.has(key)) out.push([key, record]);
     }
-    for (const [key, entry] of undo.slots) {
-      if (entry === undefined) records.delete(key);
-      else records.set(key, entry);
+    return out;
+  };
+
+  /** Merge a later delta's words into an earlier one: the later word on
+   * each target wins. @param {any} earlier @param {any} later */
+  const mergeLater = (earlier, later) => {
+    for (const key of later.links) { earlier.unlinks.delete(key); earlier.links.add(key); }
+    for (const key of later.unlinks) { earlier.links.delete(key); earlier.unlinks.add(key); }
+  };
+
+  /**
+   * Withdraw a save's advance once the transaction around it rolled back:
+   * its statements are gone, so every claim they made about the database
+   * is withdrawn and a retry plans them again.
+   *
+   * The invariant: after a rolled-back save the tracker holds exactly what
+   * it held before the save plus whatever was staged after it, and every
+   * word staged after it stays with the row it belongs to. A word names
+   * its row by the key the save gave it — the key an INSERT allocated, or
+   * the record a re-read filed in place of the one the save advanced — and
+   * the rollback takes that key back, so each word moves onto the row as
+   * it stood before the save:
+   * - an edit (`put`) is the pre-save record's current document again — a
+   *   pending insert's too, without the key the save allocated, which names
+   *   no row any more, and with the version `add()` started it at;
+   * - a `remove()` of a row the save inserted is a `remove()` of a pending
+   *   insert, which cancels both and the memberships filed for the row; a
+   *   removal of a row the save updated is guarded by the version the row
+   *   had before the save, and a removal of a row it deleted is the save's
+   *   own removal again;
+   * - a `link()`/`unlink()` filed under an allocated key is filed against
+   *   the pending insert again, after the save's own deltas, so a later word
+   *   on one target is still the last word;
+   * - a `discard()` or a re-read after the save drops only what was staged
+   *   after it: what the save cleared is pending again;
+   * - an `add()` staged after the save holds its key as staged — behind the
+   *   removal of a key the save deleted (the next save deletes, then
+   *   inserts), and with the deltas filed under that key.
+   * The document `add()` returned still names its pending insert.
+   * @param {any} undo
+   */
+  const restore = (undo) => {
+    /** @type {{ key: string, record: any }[]} */
+    const inserted = undo.inserted ?? [];
+    /** Whether `key` holds an insert an add() staged after the save:
+     * nothing the save took, so it stays exactly as it was staged. */
+    const stagedAfter = (/** @type {string} */ key) => {
+      const now = records.get(key);
+      return now !== undefined && now.pendingInsert === true && !undo.fields.has(now);
+    };
+    /** The edit staged after the save, by the pre-save record it belongs to.
+     * @type {Map<any, any>} */
+    const later = new Map();
+    /** The pre-save pending insert behind each key the save allocated.
+     * @type {Map<string, any>} */
+    const allocated = new Map();
+    // a row the save inserted: its key holds the saved record, a re-read
+    // of it, or nothing after a discard() — an allocated one names no row
+    for (const { key, record } of inserted) {
+      const now = records.get(key);
+      const auto = key !== record.pendingKey;
+      if (now !== undefined && now.pendingInsert !== true && now.current !== now.snapshot)
+        later.set(record, auto ? withoutKey(record.entity, now.current) : now.current);
+      if (!auto || stagedAfter(key)) continue;
+      allocated.set(key, record);
+      records.delete(key);
+    }
+    /** The keys of the rows an edit staged after the save names. @type {Set<string>} */
+    const editedAfter = new Set();
+    /** The record the save gave each row it inserted. @type {Map<any, any>} */
+    const savedOf = new Map(inserted.map(({ record, saved }) => [record, saved]));
+    /** Whether a later add() replaced the pre-save record at a key — or the
+     * record the save gave its row — and a remove() then cancelled that add.
+     * @param {any} entry */
+    const isWithdrawn = (entry) => withdrawn.has(entry) || withdrawn.has(savedOf.get(entry));
+    /** @type {{ key: string, record: any }[]} */
+    const cancelled = [];
+    // every slot the save took holds its pre-save record again, with the
+    // edit made after the save on whatever record replaced it there; a slot
+    // that held none keeps a record holding such an edit, and the next save
+    // meets whether its row exists
+    for (const [key, entry] of slotsOf(undo)) {
+      if (stagedAfter(key)) continue;
+      const now = records.get(key);
+      const edited = now !== undefined && now.pendingInsert !== true && now.current !== now.snapshot;
+      if (edited) editedAfter.add(key);
+      if (entry !== undefined && edited && !later.has(entry)) later.set(entry, now.current);
+      if (entry !== undefined && now === undefined && isWithdrawn(entry)) {
+        // `add(); remove()` after the save, of a key the save wrote: the
+        // add replaced what the save left there, and the remove() cancelled
+        // both — as it would have cancelled the pre-save record's staging
+        cancelled.push({ key, record: entry });
+        continue;
+      }
+      if (entry !== undefined) records.set(key, entry);
+      else if (!edited) records.delete(key);
     }
     for (const [record, was] of undo.fields) {
-      // an update the save left clean (current IS snapshot) and that was
-      // edited afterwards keeps the later edit: work staged after the save
-      const editedAfter = !was.pendingInsert && record.current !== record.snapshot;
+      const edit = later.get(record);
       record.snapshot = was.snapshot;
-      record.current = editedAfterSave.get(record) ?? (editedAfter ? record.current : was.current);
+      record.current = edit === undefined ? was.current
+        : was.pendingInsert === true ? deepFreeze(keepVersion(record.entity, edit, was.current)) : edit;
       record.stamped = was.stamped;
       record.joinOnly = was.joinOnly;
       record.pendingInsert = was.pendingInsert;
       record.saved = was.saved;
+      record.allocatedKey = was.allocatedKey;
+    }
+    // a removal staged after the save, on its row
+    const insertedAt = new Map(inserted.map(({ key, record }) => [key, record]));
+    for (const [key, removal] of [...removals]) {
+      const record = insertedAt.get(key);
+      if (record !== undefined && record.pendingInsert === true) {
+        removals.delete(key);
+        if (records.get(record.pendingKey) === record) records.delete(record.pendingKey);
+        cancelled.push({ key, record });
+        continue;
+      }
+      const row = records.get(key);
+      if (row !== undefined && row.pendingInsert !== true && undo.fields.has(row))
+        removals.set(key, { ...removal, snapshot: row.snapshot });
     }
     for (const [key, removal] of undo.removals) {
-      if (!removals.has(key)) removals.set(key, removal);
+      // an edit staged after the save, of the row it deleted, is a put() of
+      // a row whose removal is pending: the replacement, which cancels the
+      // removal — unless a removal staged later still is the last word
+      const row = records.get(key);
+      if (editedAfter.has(key) && row !== undefined && row.pendingInsert !== true && !removals.has(key)) continue;
+      // the save deleted the key before an add() staged after it inserted
+      // it again: the next save runs this delete ahead of its inserts
+      if (stagedAfter(key) || removals.get(key)?.beforeInserts === true) removal.beforeInserts = true;
+      removals.set(key, removal);
+    }
+    for (const [id, pending] of [...memberships]) {
+      if (pending.ownRecord !== undefined) continue;
+      const record = allocated.get(keyOf(pending.entity, [pending.ownKey]));
+      if (record === undefined) continue;
+      memberships.delete(id);
+      const refiled = `${record.pendingKey}${UNIT_SEPARATOR}${pending.member}`;
+      const there = memberships.get(refiled);
+      if (there === undefined) memberships.set(refiled, { ...pending, ownKey: undefined, ownRecord: record });
+      else mergeLater(there, pending);
     }
     for (const [id, planned] of undo.memberships) {
-      const later = memberships.get(id);
-      if (later !== undefined) {
-        for (const key of later.links) { planned.unlinks.delete(key); planned.links.add(key); }
-        for (const key of later.unlinks) { planned.links.delete(key); planned.unlinks.add(key); }
-      }
+      const live = memberships.get(id);
+      if (live !== undefined) mergeLater(planned, live);
       memberships.set(id, planned);
+    }
+    for (const { key, record } of cancelled) {
+      dropMemberships([key, record.pendingKey].filter((one) => one !== undefined && !stagedAfter(one)), record);
     }
   };
 
@@ -1073,14 +1432,17 @@ export function createTracker(context) {
           const doc = statement.stored?.[i] ?? (statement.returning === true
             ? deepFreeze({ ...planned, [plan.autoKey]: statement.generatedKeys[i] })
             : planned);
-          // re-key under the real identity
+          // re-key under the real identity: the key it was staged under,
+          // unless the database allocated it or a read-back stored the row
           records.delete(record.pendingKey);
-          const key = recordKeyFor(statement.entity, doc);
-          (undo.inserted ??= []).push({ key, record });
-          records.set(/** @type {string} */ (key), {
+          const key = statement.returning === true || statement.stored !== undefined
+            ? recordKeyFor(statement.entity, doc) : record.pendingKey;
+          const saved = {
             entity: statement.entity, snapshot: doc,
-            current: untouched(record) ? doc : record.current, pendingInsert: false,
-          });
+            current: untouched(record) ? doc : record.current, pendingInsert: false, key,
+          };
+          (undo.inserted ??= []).push({ key, record, saved });
+          records.set(/** @type {string} */ (key), saved);
           record.saved = doc;
           captureRecord?.(statement.entity,
             plan.keys.map((k) => doc[k]), null, doc);
@@ -1165,7 +1527,14 @@ export function createTracker(context) {
       },
       elapsedMs: 0,
     };
-    if (statements.length === 0) {
+    // A save with nothing to write still settles what it resolved: a
+    // membership delta that is a no-op against the join table (a link() of a
+    // member there, an unlink() of one not there) and a join-only record
+    // whose member already holds what it carries stay pending no longer,
+    // and an enclosing rollback stages them again. With nothing to settle
+    // either, the save is over.
+    const writes = statements.length > 0;
+    if (!writes && memberships.size === 0 && joinOnly.length === 0) {
       return chain(settleChecks(joinOnly.flatMap((record) => deferred.get(record) ?? [])), () => {
         report.elapsedMs = performance.now() - startedAt;
         return report;
@@ -1176,7 +1545,8 @@ export function createTracker(context) {
     // a commit, so the right to KEEP what they justify waits for one
     const undo = undoFor(statements, joinOnly);
     return chain(
-      connection.transaction(() => runStatements(statements, report, deferred, joinOnly)),
+      writes ? connection.transaction(() => runStatements(statements, report, deferred, joinOnly))
+        : chain(settleChecks(joinOnly.flatMap((record) => deferred.get(record) ?? [])), () => report),
       (finished) => {
         // The advance itself lands now, because inside the transaction the
         // database DOES hold these rows: every later read, plan and
@@ -1203,9 +1573,38 @@ export function createTracker(context) {
     records.delete(key);
     removals.delete(key);
     // a pending membership change belongs to the key it attaches to
-    for (const id of memberships.keys()) {
-      if (id.startsWith(`${key}${UNIT_SEPARATOR}`)) memberships.delete(id);
-    }
+    dropMemberships([key]);
+  };
+
+  /** What withdraws the tracking of a row an immediate write stored inside
+   * a transaction, once that transaction rolls back: the row as written is
+   * gone, so its clean record goes — and, for a row the write created, the
+   * `link()`/`unlink()` changes staged on it since, which belonged to that
+   * row. A record holding staged work stays, with its changes, and the save
+   * meets the row's absence. Taken when the write lands.
+   * @param {string} entityName @param {any} doc @param {boolean} created
+   * @returns {() => void} */
+  const unwritten = (entityName, doc, created) => {
+    const key = recordKeyFor(entityName, doc);
+    if (key === null) return () => {};
+    const members = created ? [...entities.get(entityName).properties.values()]
+      .filter((property) => property.relation?.kind === 'manyToMany').map((property) => property.name) : [];
+    /** the changes staged on the row before the write, by member */
+    const was = new Map(members.flatMap((member) => {
+      const pending = memberships.get(`${key}${UNIT_SEPARATOR}${member}`);
+      return pending === undefined ? [] : [[member, { ...pending, links: new Set(pending.links), unlinks: new Set(pending.unlinks) }]];
+    }));
+    return () => {
+      const record = records.get(key);
+      if (record !== undefined && (record.pendingInsert === true || record.current !== record.snapshot)) return;
+      records.delete(key);
+      for (const member of members) {
+        const id = `${key}${UNIT_SEPARATOR}${member}`;
+        const before = was.get(member);
+        if (before === undefined) memberships.delete(id);
+        else memberships.set(id, { ...before, links: new Set(before.links), unlinks: new Set(before.unlinks) });
+      }
+    };
   };
 
   const assertSqlWritable = () => {
@@ -1215,6 +1614,6 @@ export function createTracker(context) {
   const invalidate = () => { assertSqlWritable(); records.clear(); };
   return {
     assertSqlWritable, invalidate,
-    register, registerGraph, add, put, remove, discard, link, unlink, counts, saveChanges,
+    register, registerGraph, add, put, remove, discard, unwritten, link, unlink, counts, saveChanges,
   };
 }

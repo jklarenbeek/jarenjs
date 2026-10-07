@@ -800,6 +800,38 @@ complete read-only observations and unchanged receipts. They do not estimate
 production latency or claim a speedup over legacy admission. Code-size figures
 come from the existing tree-shaking instrument and keep its fixed ceilings.
 
+## PostgreSQL backup and recovery evidence
+
+`postgres-operations-result.json` records a logical dump and restore on each
+major of `docker/postgres/matrix.json` and one archived-WAL recovery; the
+[PostgreSQL guide](../packages/db/docs/POSTGRESQL.md) derives its recovery
+table from it. The result pins the SHA-256 of every input that determines it,
+so a change to any one of them makes `npm run docs:check` refuse it until it is
+measured again: on the durable profile (fsync, synchronous commit and full-page
+writes on), from an empty data directory for each major.
+
+```sh
+reports=$(mktemp -d); durable() { docker compose -f docker/postgres/compose.durable.yaml "$@"; }
+matrix="require('./docker/postgres/matrix.json').servers"
+for major in $(node -p "$matrix.map((s) => s.major).join(' ')"); do
+  durable down -v
+  JAREN_PG_IMAGE=$(node -p "$matrix.find((s) => s.major === $major).image") durable up -d --wait
+  JAREN_PG_URL=postgres://jaren:jaren@127.0.0.1:55433/jaren JAREN_PG_CONTAINER=jaren-postgres-durable-postgres-1 \
+    JAREN_PG_OPERATION_REPORT=$reports/backup-$major.json npm run test:postgres:operations
+done
+durable down -v
+JAREN_PG_RECOVERY_REPORT=$reports/recovery.json npm run test:postgres:recovery
+node scripts/generate-postgres-operations-evidence.js --recovery $reports/recovery.json \
+  $(printf -- '--backup %s ' "$reports"/backup-*.json)
+npm run docs:derive
+```
+
+The recovery check starts and removes its own two servers. The producer
+refuses reports that do not cover each matrix major exactly once, writes the
+result whole or not at all, and keeps the two previous measurements in it.
+The figures come from a Linux x64 host and exercise logical dump/restore and
+archived-WAL recovery only; power loss and fleet failover are not tested.
+
 ## Forms composition addressing
 
 Run `node benchmark/forms-composition.js` to reproduce

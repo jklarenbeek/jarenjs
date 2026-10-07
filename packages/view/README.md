@@ -85,7 +85,7 @@ renderToString(['p', { class: 'note' }, 'a < b'])
 // '<p class="note">a &lt; b</p>'
 ```
 
-Text and attribute values are escaped, void elements render without end tags, `key` and `on` produce no markup. On the client, `hydrate: true` adopts matching server DOM on the first trusted render, repairs local mismatches and gives widgets fresh hosts. Safe mode rebuilds existing DOM.
+Text and attribute values are escaped, void elements render without end tags, `key` and `on` produce no markup. The text of an HTML `<style>` or `<script>` is the exception: it is raw text a browser never decodes, so it is written verbatim, and text holding the element's own end tag (or, in a script, an HTML comment opener) is refused with a `TypeError` where it used to be escaped into broken CSS or script (VIEW-FORMAT §6). On the client, `hydrate: true` adopts matching server DOM on the first trusted render, repairs local mismatches and gives widgets fresh hosts. Safe mode rebuilds existing DOM.
 
 ### With JavaScript in the middle
 

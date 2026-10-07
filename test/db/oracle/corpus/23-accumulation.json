@@ -1,0 +1,410 @@
+{
+ "group": "accumulation order and exactness",
+ "schema": {
+  "type": "object",
+  "properties": {
+   "id": {
+    "type": "string"
+   },
+   "g": {
+    "type": "string"
+   },
+   "n": {
+    "type": "number"
+   },
+   "i": {
+    "type": "integer"
+   }
+  }
+ },
+ "indexes": [
+  {
+   "name": "by_g",
+   "path": "$.g"
+  },
+  {
+   "name": "by_n",
+   "path": "$.n"
+  },
+  {
+   "name": "by_i",
+   "path": "$.i"
+  }
+ ],
+ "documents": [
+  {
+   "id": "a",
+   "g": "x",
+   "n": 1e16,
+   "i": 9007199254740991
+  },
+  {
+   "id": "b",
+   "g": "x",
+   "n": 1,
+   "i": 2
+  },
+  {
+   "id": "c",
+   "g": "x",
+   "n": -1e16,
+   "i": -9007199254740991
+  },
+  {
+   "id": "d",
+   "g": "z",
+   "n": 0.1,
+   "i": 5
+  },
+  {
+   "id": "e",
+   "g": "z",
+   "n": 0.2,
+   "i": 7
+  },
+  {
+   "id": "f",
+   "g": "z",
+   "n": 0.3,
+   "i": 11
+  },
+  {
+   "id": "t1",
+   "g": "t",
+   "i": 9007199254740991
+  },
+  {
+   "id": "t2",
+   "g": "t",
+   "i": 2
+  },
+  {
+   "id": "t3",
+   "g": "t",
+   "i": 3
+  },
+  {
+   "id": "w1",
+   "g": "w",
+   "i": 4611686018427387904
+  },
+  {
+   "id": "w2",
+   "g": "w",
+   "i": 4611686018427387904
+  },
+  {
+   "id": "v1",
+   "g": "v",
+   "i": 2
+  },
+  {
+   "id": "v2",
+   "g": "v",
+   "i": 1
+  },
+  {
+   "id": "v3",
+   "g": "v",
+   "i": 1
+  },
+  {
+   "id": "v4",
+   "g": "v",
+   "i": 1
+  },
+  {
+   "id": "v5",
+   "g": "v",
+   "i": 1
+  },
+  {
+   "id": "v6",
+   "g": "v",
+   "i": 1
+  },
+  {
+   "id": "v7",
+   "g": "v",
+   "i": 1
+  },
+  {
+   "id": "v8",
+   "g": "v",
+   "i": 1
+  },
+  {
+   "id": "v9",
+   "g": "v",
+   "i": 2
+  }
+ ],
+ "cases": [
+  {
+   "name": "a floating group sum adds left to right",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$groupby": {
+     "g": "$it.g"
+    },
+    "$return": {
+     "g": "$g",
+     "v": {
+      "$sum": "$it.n"
+     }
+    }
+   }
+  },
+  {
+   "name": "a floating group average adds left to right",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$groupby": {
+     "g": "$it.g"
+    },
+    "$return": {
+     "g": "$g",
+     "v": {
+      "$avg": "$it.n"
+     }
+    }
+   }
+  },
+  {
+   "name": "a floating sum of the whole collection",
+   "query": {
+    "$sum": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": "$it.n"
+    }
+   }
+  },
+  {
+   "name": "a floating average of the whole collection",
+   "query": {
+    "$avg": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": "$it.n"
+    }
+   }
+  },
+  {
+   "name": "a floating sum over a selection",
+   "query": {
+    "$sum": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$where": {
+      "$eq": [
+       "$it.g",
+       "x"
+      ]
+     },
+     "$return": "$it.n"
+    }
+   }
+  },
+  {
+   "name": "an integer group sum past the exact range",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$groupby": {
+     "g": "$it.g"
+    },
+    "$return": {
+     "g": "$g",
+     "v": {
+      "$sum": "$it.i"
+     }
+    }
+   }
+  },
+  {
+   "name": "an integer group average past the exact range",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$groupby": {
+     "g": "$it.g"
+    },
+    "$return": {
+     "g": "$g",
+     "v": {
+      "$avg": "$it.i"
+     }
+    }
+   }
+  },
+  {
+   "name": "an integer sum of the whole collection past the exact range",
+   "query": {
+    "$sum": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": "$it.i"
+    }
+   }
+  },
+  {
+   "name": "an integer average of the whole collection past the exact range",
+   "query": {
+    "$avg": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": "$it.i"
+    }
+   }
+  },
+  {
+   "name": "an integer sum inside the exact range",
+   "query": {
+    "$sum": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$where": {
+      "$eq": [
+       "$it.g",
+       "z"
+      ]
+     },
+     "$return": "$it.i"
+    }
+   }
+  },
+  {
+   "name": "an integer total past 2^53 answers the engine",
+   "query": {
+    "$sum": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$where": {
+      "$eq": [
+       "$it.g",
+       "t"
+      ]
+     },
+     "$return": "$it.i"
+    }
+   }
+  },
+  {
+   "name": "an integer group total past 2^53 answers the engine",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.g",
+      "t"
+     ]
+    },
+    "$groupby": {
+     "g": "$it.g"
+    },
+    "$return": {
+     "g": "$g",
+     "v": {
+      "$sum": "$it.i"
+     }
+    }
+   }
+  },
+  {
+   "name": "an integer sum past int64 answers the engine",
+   "query": {
+    "$sum": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$where": {
+      "$eq": [
+       "$it.g",
+       "w"
+      ]
+     },
+     "$return": "$it.i"
+    }
+   }
+  },
+  {
+   "name": "an integer group sum past int64 answers the engine",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.g",
+      "w"
+     ]
+    },
+    "$groupby": {
+     "g": "$it.g"
+    },
+    "$return": {
+     "g": "$g",
+     "v": {
+      "$sum": "$it.i"
+     }
+    }
+   }
+  },
+  {
+   "name": "an integer average inside the exact range divides a double sum",
+   "query": {
+    "$avg": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$where": {
+      "$eq": [
+       "$it.g",
+       "v"
+      ]
+     },
+     "$return": "$it.i"
+    }
+   }
+  },
+  {
+   "name": "an integer group average inside the exact range divides a double sum",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.g",
+      "v"
+     ]
+    },
+    "$groupby": {
+     "g": "$it.g"
+    },
+    "$return": {
+     "g": "$g",
+     "v": {
+      "$avg": "$it.i"
+     }
+    }
+   }
+  }
+ ]
+}

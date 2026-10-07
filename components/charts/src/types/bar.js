@@ -20,6 +20,7 @@ import { clamp01 } from '@jarenjs/core/math';
 import { scaleLinear, scaleLog, scaleBand } from '../core/scale.js';
 import { axisTicksLinear, axisTicksLog, niceStep, formatTickValue } from '../core/axis.js';
 import { cartesianFrame, toneColor, annotateChart } from '../core/cartesian.js';
+import { measurableSpan, measurableDecades } from '../core/domain.js';
 import { CATEGORICAL } from '../core/palette.js';
 import { normalizeTooltip, valueMark } from '../core/marks.js';
 
@@ -82,7 +83,8 @@ export function scanBarExtremes(data, stacked, log) {
  * Resolve the value-axis bounds and tick values from the scanned
  * extremes: a nice-number top over a zero base, or whole decades under
  * `log`. The AST records the bounds so a later build — or the session —
- * can detect "unchanged".
+ * can detect "unchanged". A top rounded up past what a double holds is
+ * clamped (`measurableSpan`, `measurableDecades`).
  * @param {{maxVal: number, minPos: number}} ext
  * @param {boolean} log
  * @returns {{domain: [number, number], tickValues: number[]}}
@@ -91,12 +93,14 @@ export function resolveBarDomains(ext, log) {
   if (log) {
     const lo = Math.pow(10, Math.floor(Math.log10(ext.minPos)));
     const raw = Math.pow(10, Math.ceil(Math.log10(ext.maxVal)));
-    const hi = raw === lo ? lo * 10 : raw;
-    return { domain: [lo, hi], tickValues: axisTicksLog(lo, hi) };
+    const domain = measurableDecades(lo, raw === lo ? lo * 10 : raw);
+    return { domain, tickValues: axisTicksLog(domain[0], domain[1]) };
   }
-  const step = niceStep(ext.maxVal, 5);
-  const top = step * Math.ceil(ext.maxVal / step);
-  return { domain: [0, top], tickValues: axisTicksLinear(0, top, 5) };
+  // a stacked total can overflow to Infinity: it tops out at the largest double
+  const max = Math.min(ext.maxVal, Number.MAX_VALUE);
+  const step = niceStep(max, 5);
+  const domain = measurableSpan(0, step * Math.ceil(max / step));
+  return { domain, tickValues: axisTicksLinear(domain[0], domain[1], 5) };
 }
 
 /**

@@ -25,7 +25,7 @@ import { chain, attempt, useStatementOnce, releaseStatements as releasePrepared 
 import { checkInvariants, existsRowSql, RECORD_PATH, ruleLiteral } from './invariants.js';
 import { columnCodec, physicalRead } from './physical.js';
 import { mergeEntityRow } from './graph.js';
-import { namesNoNumber } from './key-text.js';
+import { namesNoNumber, noNumberKeyReason } from './key-text.js';
 import { createJSONPatch } from '@jarenjs/json/patch';
 import { canonicalizeJson } from '@jarenjs/json/canonical';
 import { createEntityMutation } from './mutation.js';
@@ -312,11 +312,79 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
   };
 
   // a lookup of a string that is no number on a numeric key column names no
-  // row on either engine (see `namesNoNumber`)
+  // row on either engine (see `namesNoNumber`), and a write under one — an
+  // insert, a staged removal, a membership — is refused before any statement
   const numericKey = keys.map((name) => ['integer', 'number'].includes(entity.properties.get(name)?.type));
+  /** A physical key column's encoding of one key part, or NULL — which
+   * matches no row — for a part its codec refuses (`JD2003`): no row is
+   * stored under a key the column could not hold, so a read answers absent
+   * (§6). @param {number} i @param {any} part */
+  const encodedKeyOrNull = (i, part) => {
+    try { return columnByName.get(keys[i]).codecPlan.encode(part); }
+    catch (error) {
+      if (/** @type {any} */ (error)?.code === 'JD2003') return null;
+      throw error;
+    }
+  };
   /** The parameters a statement names a row by. @param {any} key */
-  const keyParts = (key) => normalizeKeyArg(key).map((v, i) => (physical ? columnByName.get(keys[i]).codecPlan.encode(v)
+  const keyParts = (key) => normalizeKeyArg(key).map((v, i) => (physical ? encodedKeyOrNull(i, v)
     : numericKey[i] && namesNoNumber(v) ? null : v));
+  /** Refuse the parts of a key to write that no write could hold, and answer
+   * them: under a numeric key column, a string that names no number
+   * (`JD2002` — see `noNumberKeyReason`); under a physical key column, a
+   * value its codec refuses (its own `JD2003`, as an insert meets it) — at
+   * the call that stages the write, never at every save after it. `member`
+   * names the many-to-many member of another entity a membership key came
+   * from. @param {any[]} parts @param {string} [member] @returns {any[]} */
+  const refuseUnnumbered = (parts, member = undefined) => {
+    for (let i = 0; i < parts.length; i++) refusePart(parts[i], i, member);
+    return parts;
+  };
+  /** {@link refuseUnnumbered} for one part. @param {any} part @param {number} i @param {string} [member] */
+  const refusePart = (part, i, member = undefined) => {
+    if (!physical) {
+      if (numericKey[i] && namesNoNumber(part))
+        throw new DbRuntimeError('JD2002', noNumberKeyReason(part, member), { docPath, collection: entity.name, key: part });
+    }
+    else if (part !== undefined) columnByName.get(keys[i]).codecPlan.encode(part);
+  };
+  /** {@link refuseUnnumbered} for a document to insert, which refuses
+   * (`JD2002`) a key member left absent too, unless the database allocates
+   * it (`default: "auto"`, or a generated column of a physical layout):
+   * SQLite would otherwise store a single integer key's row under a rowid
+   * of its own choosing that no tracked record names, PostgreSQL refuses
+   * the NULL, and a physical layout's codec refused it at every save of a
+   * pending insert no key could discard. @param {any} doc */
+  const refuseUnnumberedKey = (doc) => {
+    for (let i = 0; i < keys.length; i++) {
+      const name = keys[i];
+      const part = doc[name];
+      if ((part === undefined || part === null) && name !== autoKey && !(physical && columnByName.get(name)?.generated)) {
+        throw new DbRuntimeError('JD2002', `the key member '${name}' is missing — only a key declared `
+          + '"default": "auto" is the database\'s to allocate', { docPath, collection: entity.name });
+      }
+      refusePart(part, i);
+    }
+  };
+  const decimalKeys = !physical && numericKey.some(Boolean);
+  /** The parts of a key as the values they name (§6): decimal text under a
+   * numeric key column is the number it spells, so `'16'`, `' 16'`, `'16.0'`
+   * and `16` are one key wherever the unit of work files or compares one.
+   * Text spelling a number no double holds exactly stays as it is.
+   * @param {any[]} parts @returns {any[]} */
+  const keyValues = (parts) => {
+    if (!decimalKeys) return parts;
+    let out = parts;
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i];
+      if (typeof part !== 'string' || !numericKey[i] || namesNoNumber(part)) continue;
+      const value = Number(part);
+      if (!Number.isFinite(value) || (Number.isInteger(value) && !Number.isSafeInteger(value))) continue;
+      if (out === parts) out = [...parts];
+      out[i] = value;
+    }
+    return out;
+  };
 
   const normalizeKeyArg = (key) => {
     if (keys.length === 1) {
@@ -337,10 +405,22 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
       { docPath, collection: entity.name });
   };
 
-  const wrapWrite = (error, key) => wrapDriverError(error, {
+  /**
+   * A write's failure through the one classification: a collision on the
+   * single key column is `JD2001` naming the key — or, for a batch the unit
+   * of work inserts, every key the statement carried.
+   * @param {any} error @param {any} key @param {any[]} [carried]
+   */
+  const wrapWrite = (error, key, carried = undefined) => wrapDriverError(error, {
     docPath, collection: entity.name, ...(key === undefined ? undefined : { key }),
     ...(keys.length === 1 ? { unique: { table, column: keys[0] } } : undefined),
-    duplicateReason: `a '${entity.name}' already exists under key ${JSON.stringify(key)}`,
+    // a key the database allocated is not known here: a sequence does not
+    // see a key written explicitly, and can hand it out again
+    duplicateReason: (carried ?? [key]).every((one) => one === undefined)
+      ? `a '${entity.name}' already exists under the key the database allocated`
+      : carried !== undefined && carried.length > 1
+        ? `a '${entity.name}' already exists under one of the keys ${carried.map((one) => JSON.stringify(one)).join(', ')}`
+        : `a '${entity.name}' already exists under key ${JSON.stringify(key)}`,
   });
 
   /**
@@ -435,6 +515,19 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
       split,
       merge,
       encodeColumn,
+      refuseUnnumbered,
+      keyValues,
+      /** A membership's key to this entity, as a write names it: refused
+       * where no write could hold it ({@link refuseUnnumbered}), otherwise
+       * the value it names ({@link keyValues}).
+       * @param {any[]} parts @param {string} [member] */
+      memberKey: (parts, member = undefined) => keyValues(refuseUnnumbered(parts, member)),
+      /** A failed INSERT of these documents, classified as `create()`'s is.
+       * @param {any} error @param {any[]} docs */
+      wrapInsert: (error, docs) => {
+        const carried = docs.map((doc) => doc[keys[0]]);
+        return wrapWrite(error, carried.length === 1 ? carried[0] : undefined, carried);
+      },
     },
     complete: (doc, { updating }) => {
       writable();
@@ -442,6 +535,7 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
         throw new DbRuntimeError('JD2003', 'generated columns are database-owned');
       const completed = applyDefaults(normalizePhysicalDoc(doc), { updating });
       checkValid(completed);
+      if (!updating) refuseUnnumberedKey(completed);
       return asStored(completed);
     },
     validateOnly: (doc) => checkValid(doc),
@@ -457,6 +551,7 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
       refuseProjections(doc, 'create', true);
       const completed = applyDefaults(doc, { updating: false });
       checkValid(completed);
+      refuseUnnumberedKey(completed);
       if (physical && scalarColumns.some((c) => c.generated && Object.hasOwn(doc, c.name)))
         throw new DbRuntimeError('JD2003', 'generated columns are database-owned');
       const { values, rest } = split(completed);

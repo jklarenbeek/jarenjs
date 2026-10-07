@@ -15,6 +15,7 @@ import {
   isElementNode,
   isElementName,
   elementNameError,
+  rawTextError,
   propsOf,
   childrenOf,
   WIDGET_TAG,
@@ -38,6 +39,18 @@ const OPTION_SKIP_PROPS = new Set([...SKIP_PROPS, 'selected']);
 
 /** Widget-vnode props that configure the widget, not the host element. */
 const WIDGET_SKIP_PROPS = new Set(['key', 'on', 'memo', 'name', 'props', 'tag']);
+
+/**
+ * What raw text may not contain, per raw-text element: the element's own
+ * end tag as an HTML tokenizer recognizes one (the name in any case, then
+ * whitespace, `/` or `>`), and in a script `<!--`, which changes how the
+ * tokenizer reads the end tag after it.
+ * @type {Map<string, RegExp>}
+ */
+const RAW_TEXT_BREAKOUT = new Map([
+  ['script', /<\/script[\t\n\f\r />]|<!--/i],
+  ['style', /<\/style[\t\n\f\r />]/i],
+]);
 
 /** The text of an option whose value attribute is absent. @param {any} vnode */
 function optionText(vnode) {
@@ -152,7 +165,7 @@ function serializeProps(props, skip, policy, onUnsafe) {
 export function renderToString(vnode, options = {}) {
   const policy = options.safe ? createSafePolicy() : null;
   const onUnsafe = typeof options.onUnsafe === 'function' ? options.onUnsafe : null;
-  return renderNode(vnode, options.widgets, policy, onUnsafe, null, vnode);
+  return renderNode(vnode, options.widgets, policy, onUnsafe, null, vnode, false);
 }
 
 /**
@@ -166,15 +179,17 @@ export function renderToString(vnode, options = {}) {
  * @param {{values: Set<string>, multiple: boolean, matched: boolean} | null} selection
  * @param {any} root - the document `renderToString` was handed, where a
  *   refused tag is located
+ * @param {boolean} svg - inside an `svg` element (and not back in HTML
+ *   under a `foreignObject`), where the DOM renderer builds SVG elements
  * @returns {string}
  */
-function renderNode(vnode, widgets, policy, onUnsafe, selection, root) {
+function renderNode(vnode, widgets, policy, onUnsafe, selection, root, svg) {
   if (isTextNode(vnode)) {
     return escapeText(String(vnode));
   }
   if (!isElementNode(vnode)) {
     if (Array.isArray(vnode)) return childrenOf(['root', {}, vnode])
-      .map((child) => renderNode(child, widgets, policy, onUnsafe, selection, root)).join('');
+      .map((child) => renderNode(child, widgets, policy, onUnsafe, selection, root, svg)).join('');
     return '';
   }
   const tag = vnode[0];
@@ -197,7 +212,8 @@ function renderNode(vnode, widgets, policy, onUnsafe, selection, root) {
     // `ssr()` (the documented behavior for both)
     const ssr = def !== undefined ? def.ssr : undefined;
     const inner = ssr !== undefined
-      ? renderNode(ssr.call(def, props.props ?? null), widgets, policy, onUnsafe, selection, root)
+      ? renderNode(ssr.call(def, props.props ?? null), widgets, policy, onUnsafe, selection, root,
+        hostTag === 'foreignObject' ? false : svg || hostTag === 'svg')
       : '';
     return '<' + hostTag + serializeProps(props, WIDGET_SKIP_PROPS, policy, onUnsafe) + '>'
       + inner + '</' + hostTag + '>';
@@ -251,8 +267,28 @@ function renderNode(vnode, widgets, policy, onUnsafe, selection, root) {
     return out + (/^[\r\n]/.test(value) ? '\n' : '') + escapeText(value) + '</' + tag + '>';
   }
   const children = childrenOf(vnode);
+  // the namespace the DOM renderer builds the children in: SVG from an
+  // `svg` element down, HTML again under a `foreignObject`
+  const inSvg = tag === 'foreignObject' ? false : svg || tag === 'svg';
+  const breakout = svg ? undefined : RAW_TEXT_BREAKOUT.get(tag.toLowerCase());
+  if (breakout !== undefined) {
+    // An HTML `style` or `script` holds raw text: a parser decodes no
+    // character reference in it, so its text is written as the DOM
+    // renderer's text node holds it — and refused when it holds what
+    // would end the element early.
+    let inner = '';
+    for (let i = 0; i < children.length; i++) {
+      const child = children[i];
+      inner += isTextNode(child)
+        ? String(child)
+        : renderNode(child, widgets, policy, onUnsafe, selection, root, inSvg);
+    }
+    const found = breakout.exec(inner);
+    if (found !== null) throw rawTextError(root, vnode, tag, found[0]);
+    return out + inner + '</' + tag + '>';
+  }
   for (let i = 0; i < children.length; i++) {
-    out += renderNode(children[i], widgets, policy, onUnsafe, selection, root);
+    out += renderNode(children[i], widgets, policy, onUnsafe, selection, root, inSvg);
   }
   return out + '</' + tag + '>';
 }

@@ -15,11 +15,18 @@
  */
 
 import { LinqBuildError } from './errors.js';
+import { readOptions } from './document.js';
 
 const MODES = new Set(['parallel', 'concat', 'switch', 'exhaust']);
 
+/** The members a mapAsync options bag carries. */
+const MAP_ASYNC_OPTIONS = Object.freeze(['concurrency', 'mode', 'ordered']);
+
 /**
- * Validate a mapAsync options bag at BUILD time.
+ * Validate a mapAsync options bag at BUILD time: a closed set, and
+ * `ordered` a boolean — the string `'false'` would read as ordered. Only
+ * an absent (or `undefined`) `ordered` takes the default; `null` is not a
+ * boolean either.
  * @param {any} options
  * @returns {{ concurrency: number, mode: string, ordered: boolean }}
  */
@@ -29,12 +36,19 @@ export function normalizeMapAsyncOptions(options) {
     throw new LinqBuildError('JL0005',
       'mapAsync requires { concurrency: <positive integer> } — an unbounded default is a denial of service waiting for a slow downstream');
   }
+  readOptions(options, MAP_ASYNC_OPTIONS, 'mapAsync()');
   const mode = options.mode ?? 'parallel';
   if (!MODES.has(mode)) {
     throw new LinqBuildError('JL0005',
       `mapAsync mode must be one of parallel|concat|switch|exhaust, got '${mode}'`);
   }
-  return { concurrency: options.concurrency, mode, ordered: options.ordered !== false };
+  const ordered = options.ordered === undefined ? true : options.ordered;
+  if (typeof ordered !== 'boolean') {
+    throw new LinqBuildError('JL0005', 'mapAsync ordered must be a boolean, got '
+      + (typeof ordered === 'string' ? JSON.stringify(ordered) : ordered === null ? 'null'
+        : typeof ordered === 'object' ? 'an object' : `a ${typeof ordered}`));
+  }
+  return { concurrency: options.concurrency, mode, ordered };
 }
 
 /**

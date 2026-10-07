@@ -13,20 +13,42 @@ or a single module.
 
 Validation: `isDateOnlyRFC3339`, `isTimeOnlyRFC3339`,
 `isDateTimeRFC3339` (strict RFC 3339 — an offset is required), and the
-lenient ISO twins `isValidISODateTime` / `isValidISOTime` (offset
-optional — what HTML's `datetime-local` control emits). Leap years and
-month lengths are checked, not just shape.
+ISO twins `isValidISODateTime` / `isValidISOTime` (offset optional —
+what HTML's `datetime-local` control emits). Leap years and month
+lengths are checked, not just shape. `isTimeOnlyRFC3339` and
+`isDateTimeRFC3339` take a fractional second of any number of digits
+(`time-secfrac = "." 1*DIGIT`),
+and a leap second (`:60`) only where the clock reads 23:59:60 UTC with
+the local hour still 00–23 and the minute 00–59. A local clock outside
+that range used to pass whenever its offset wrapped it onto 23:59 UTC
+(`47:59:60Z`, `24:00:60+00:01`, `23:60:60+00:01`); it is now refused
+like `47:59:59Z`, and so by the `date-time` and `time` formats and the
+query engine's date operators built on these validators. The ISO twins
+are lenient about the offset only: they cap the fraction at six digits
+and take no leap second, so `2016-12-31T23:59:60Z` and
+`2026-01-01T00:00:00.1234567Z` pass `isDateTimeRFC3339` but not
+`isValidISODateTime`.
 
 Parsing: `parseRFC3339Parts(str)` → a flat **parts** record
 `{year, month, day, hours, minutes, seconds, offset}`. Absent fields are
 `-1` sentinels; `offset` is minutes east of UTC, `0` for `Z` and `null`
-when the string carried none. The inverse is `formatRFC3339Parts(parts)`
-(round-trips the offset and up to six fractional-second digits, dropping
-trailing zeros). The `SSS` formatting token writes the first three fraction
-digits. `epochOfRFC3339Parts(parts)` → epoch ms: a
+when the string carried none; `seconds` keeps nine fraction digits. The
+inverse is `formatRFC3339Parts(parts)` (round-trips the offset and up to
+six fractional-second digits, dropping trailing zeros; a longer fraction
+is cut at the sixth digit, never rounded into the next second). The `S`
+and `SSS` formatting tokens write the first one and three of those six
+digits. Both used to round at the sixth digit instead, so a fraction
+longer than six digits can render differently:
+`partsFromEpoch(1.0006)` formats as `…:00.001Z` where it used to give
+`…:00.001001Z`, and a fraction within half a microsecond of the next
+second (`5.9999996` seconds) gives `…:05.999999Z` and `SSS` `999` where
+it used to lose the whole fraction (`…:05Z`, `000`).
+`epochOfRFC3339Parts(parts)` → epoch ms, the fraction rounded to the
+nearest millisecond: a
 date-only reads as UTC midnight, an offset shifts to its instant, and a
 time-only has **no** instant — it returns `NaN` rather than inventing a
-day. `getDateTypeOf*` variants produce a `Date` for callers that want
+day. The `getEpochOf…RFC3339` readers go through `Date.parse`, which
+truncates the fraction to the millisecond. `getDateTypeOf*` variants produce a `Date` for callers that want
 one; `isDateType` / `isDateishType` classify values.
 
 ## Calendar arithmetic — `civil.js`

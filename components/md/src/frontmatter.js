@@ -17,14 +17,16 @@
  *
  * The YAML subset (normative limits in docs/MD-FORMAT.md §3):
  * scalars (null/booleans/numbers/strings), single- and double-quoted
- * strings, block maps and sequences by indentation, flow arrays and
- * maps (multi-line while brackets are open), literal `|` and folded `>`
- * block scalars with `-` chomping, and `#` comments. No anchors, no
- * aliases, no tags, no multi-document streams, no complex keys.
+ * strings, block maps and sequences by indentation (`- - a` included),
+ * flow arrays and maps (multi-line while brackets are open), literal `|`
+ * and folded `>` block scalars with `-` chomping, and `#` comments. No
+ * anchors, no aliases, no tags, no multi-document streams, no complex
+ * keys. Every syntax bounds its nesting (MD-FORMAT §1.4), so any
+ * frontmatter value can be walked recursively.
  */
 
 import { setObjectMember } from '@jarenjs/core/object';
-import { countIndent, isBlankLine } from './utils.js';
+import { countIndent, isBlankLine, MAX_NESTING } from './utils.js';
 
 /** Raised for malformed frontmatter inside a detected fence. */
 export class MdFrontmatterError extends Error {
@@ -69,10 +71,10 @@ export function parseFrontmatter(source, options = undefined) {
   else if (c0 === 0x2B /* + */ && startsWithLine(source, '+++')) {
     const block = sliceFenced(source, 3, '+++');
     if (block !== null) {
-      const toml = options !== undefined && typeof options.toml === 'function'
-        ? options.toml
-        : parseTomlSubset;
-      return { data: toml(block.text), body: block.body, lang: 'toml' };
+      const data = options !== undefined && typeof options.toml === 'function'
+        ? refuseDeepValue(options.toml(block.text))
+        : parseTomlSubset(block.text);
+      return { data, body: block.body, lang: 'toml' };
     }
   }
   else if (c0 === 0x7B /* { */) {
@@ -113,7 +115,7 @@ function sliceFenced(source, openLength, ...closers) {
     const lineStart = pos + 1;
     let lineEnd = source.indexOf('\n', lineStart);
     const hardEnd = lineEnd === -1 ? source.length : lineEnd;
-    const line = source.slice(lineStart, hardEnd).replace(/[ \t\r]+$/, '');
+    const line = source.slice(lineStart, trimmedEnd(source, lineStart, hardEnd));
     if (closers.includes(line)) {
       return {
         text: source.slice(start, lineStart),
@@ -137,17 +139,18 @@ function sliceJsonObject(source) {
   while (pos < source.length) {
     let lineEnd = source.indexOf('\n', pos);
     const hardEnd = lineEnd === -1 ? source.length : lineEnd;
-    const line = source.slice(pos, hardEnd).replace(/[ \t\r]+$/, '');
+    const line = source.slice(pos, trimmedEnd(source, pos, hardEnd));
     if (line === '}') {
+      const text = source.slice(0, hardEnd);
+      let data;
       try {
-        return {
-          data: JSON.parse(source.slice(0, hardEnd)),
-          body: lineEnd === -1 ? '' : source.slice(lineEnd + 1),
-        };
+        data = JSON.parse(text);
       }
       catch {
         return null;
       }
+      refuseDeepJson(text);
+      return { data, body: lineEnd === -1 ? '' : source.slice(lineEnd + 1) };
     }
     if (lineEnd === -1) break;
     pos = lineEnd + 1;
@@ -156,18 +159,114 @@ function sliceJsonObject(source) {
 }
 
 /**
+ * Where the line `[start, end)` of `source` ends once its trailing
+ * spaces, tabs and carriage returns are dropped. Scanning back from the
+ * end touches only those; a `/[ \t\r]+$/` replace retried from every
+ * blank inside the line, so a long run of blanks before a word cost time
+ * quadratic in its length.
+ * @param {string} source
+ * @param {number} start
+ * @param {number} end
+ * @returns {number}
+ */
+function trimmedEnd(source, start, end) {
+  while (end > start) {
+    const c = source.charCodeAt(end - 1);
+    if (c !== 0x20 && c !== 0x09 && c !== 0x0D) break;
+    end--;
+  }
+  return end;
+}
+
+/**
  * Parse a `---json` block (JSON.parse with a located error).
  * @param {string} text
  * @returns {any}
  */
 function parseJsonBlock(text) {
+  let data;
   try {
-    return JSON.parse(text);
+    data = JSON.parse(text);
   }
   catch (err) {
     throw new MdFrontmatterError(
       `invalid JSON: ${/** @type {Error} */ (err).message}`, 0);
   }
+  refuseDeepJson(text);
+  return data;
+}
+
+/**
+ * How deep JSON frontmatter, and the value an injected TOML parser
+ * returns, may nest: twice `MAX_NESTING`, the deepest a YAML or TOML
+ * block builds — block collections or tables `MAX_NESTING` deep holding
+ * flow collections as deep again. Any frontmatter md parsed therefore
+ * parses back from the `---json` block `toMarkdown` prints for it.
+ */
+const MAX_DATA_NESTING = 2 * MAX_NESTING;
+
+/**
+ * Refuse JSON text that nests deeper than {@link MAX_DATA_NESTING}, at
+ * the line of the first opener past the bound. The text has already
+ * parsed, so outside its strings every `[` and `{` opens one level and
+ * every `]` and `}` closes one: a count, never a stack or a recursion,
+ * however deep the text.
+ * @param {string} text
+ */
+function refuseDeepJson(text) {
+  // fewer characters than a bound's worth of openers and closers
+  if (text.length <= 2 * MAX_DATA_NESTING) return;
+  let depth = 0;
+  let line = 0;
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    if (c === 0x22 /* " */) {
+      // a string: on to its closing quote (it cannot hold a raw newline)
+      for (i++; i < text.length; i++) {
+        const s = text.charCodeAt(i);
+        if (s === 0x5C /* \ */) i++;
+        else if (s === 0x22) break;
+      }
+    }
+    else if (c === 0x5B || c === 0x7B) {
+      if (++depth > MAX_DATA_NESTING) {
+        throw new MdFrontmatterError(`objects and arrays nest deeper than ${MAX_DATA_NESTING}`, line);
+      }
+    }
+    else if (c === 0x5D || c === 0x7D) depth--;
+    else if (c === 0x0A) line++;
+  }
+}
+
+/**
+ * The value an injected TOML parser returned, refused when it nests
+ * deeper than {@link MAX_DATA_NESTING}: md cannot see the text's lines
+ * through a host parser, so the walk measures the value itself — with an
+ * explicit stack, stopping at the first level past the bound, so neither
+ * a value too deep to recurse over nor a cyclic one escapes it.
+ * @param {any} value
+ * @returns {any}
+ */
+function refuseDeepValue(value) {
+  /** @type {unknown[]} */
+  const nodes = [value];
+  /** @type {number[]} */
+  const depths = [1];
+  while (nodes.length > 0) {
+    const node = nodes.pop();
+    const depth = /** @type {number} */ (depths.pop());
+    if (node === null || typeof node !== 'object') continue;
+    if (depth > MAX_DATA_NESTING) {
+      throw new MdFrontmatterError(`the TOML parser's result nests deeper than ${MAX_DATA_NESTING}`, 0);
+    }
+    for (const child of Array.isArray(node) ? node : Object.values(node)) {
+      if (child !== null && typeof child === 'object') {
+        nodes.push(child);
+        depths.push(depth + 1);
+      }
+    }
+  }
+  return value;
 }
 
 // ------------------------------------------------------------------
@@ -185,7 +284,7 @@ export function parseYamlSubset(text) {
     const line = lines[i];
     if (line.endsWith('\r')) lines[i] = line.slice(0, -1);
   }
-  const state = { lines, pos: 0 };
+  const state = { lines, pos: 0, depth: 0 };
   skipYamlVoid(state);
   if (state.pos >= lines.length) return {};
   const value = parseYamlNode(state, countIndent(lines[state.pos]));
@@ -197,8 +296,23 @@ export function parseYamlSubset(text) {
 }
 
 /**
- * @typedef {{ lines: string[], pos: number }} YamlState
+ * `depth` counts the block collections (maps and sequences) open around
+ * the line at `pos`.
+ * @typedef {{ lines: string[], pos: number, depth: number }} YamlState
  */
+
+/**
+ * Open one more block collection at `state.pos`. Past `MAX_NESTING` the
+ * subset refuses, as it does for flow collections, before the recursive
+ * descent can run out of stack; the caller closes it with
+ * `state.depth--` once its collection is read.
+ * @param {YamlState} state
+ */
+function openBlock(state) {
+  if (++state.depth > MAX_NESTING) {
+    throw new MdFrontmatterError(`block collections nest deeper than ${MAX_NESTING}`, state.pos);
+  }
+}
 
 /**
  * Advance past blank and comment-only lines.
@@ -245,6 +359,7 @@ function isSeqDash(content) {
  * @returns {Record<string, any>}
  */
 function parseYamlMap(state, indent) {
+  openBlock(state);
   /** @type {Record<string, any>} */
   const out = {};
   while (state.pos < state.lines.length) {
@@ -261,33 +376,45 @@ function parseYamlMap(state, indent) {
     state.pos++;
     setObjectMember(out, entry.key, parseYamlValue(state, entry.rest, indent));
   }
+  state.depth--;
   return out;
 }
 
 /**
- * Parse a block sequence at `indent`.
+ * Parse a block sequence at `indent`. With `inline`, its first entry
+ * starts on the current line at that column, after the dash of the entry
+ * that holds the sequence (`- - a`): that line is indented less than
+ * `indent`, so only the entries after it are matched by their indentation.
  * @param {YamlState} state
  * @param {number} indent
+ * @param {boolean} [inline=false]
  * @returns {any[]}
  */
-function parseYamlSeq(state, indent) {
+function parseYamlSeq(state, indent, inline = false) {
+  openBlock(state);
   /** @type {any[]} */
   const out = [];
-  while (state.pos < state.lines.length) {
-    skipYamlVoid(state);
-    if (state.pos >= state.lines.length) break;
+  for (let first = inline; state.pos < state.lines.length; first = false) {
+    if (!first) {
+      skipYamlVoid(state);
+      if (state.pos >= state.lines.length) break;
+      const line = state.lines[state.pos];
+      if (countIndent(line) !== indent || !isSeqDash(line.slice(indent))) break;
+    }
     const line = state.lines[state.pos];
-    const li = countIndent(line);
-    if (li < indent) break;
-    const content = line.slice(indent);
-    if (li > indent || !isSeqDash(content)) break;
     let restColumn = indent + 1;
     while (restColumn < line.length && line.charCodeAt(restColumn) === 0x20) restColumn++;
     const rest = line.slice(restColumn);
     if (rest === '' || rest.charCodeAt(0) === 0x23 /* # */) {
-      // `-` alone: the item is the following deeper block (or null).
+      // `-` alone: the item is the following deeper block, or null — an
+      // entry at the dash's own indent is its sibling, not its value.
       state.pos++;
-      out.push(parseYamlNested(state, indent, null));
+      out.push(parseYamlNested(state, indent, null, false));
+    }
+    else if (isSeqDash(rest)) {
+      // `- - a`: the item is a sequence whose first entry is the second
+      // dash; the entries after it sit at that dash's column.
+      out.push(parseYamlSeq(state, restColumn, true));
     }
     else if (findKeyColon(rest) !== -1) {
       // `- key: value`: an inline map item; re-enter the map parser at
@@ -297,9 +424,10 @@ function parseYamlSeq(state, indent) {
     }
     else {
       state.pos++;
-      out.push(parseYamlFlowOrScalar(state, rest, state.pos - 1));
+      out.push(parseYamlInline(state, rest, indent));
     }
   }
+  state.depth--;
   return out;
 }
 
@@ -313,8 +441,21 @@ function parseYamlSeq(state, indent) {
  */
 function parseYamlValue(state, rest, indent) {
   if (rest === '' || rest.charCodeAt(0) === 0x23 /* # */) {
-    return parseYamlNested(state, indent, null);
+    return parseYamlNested(state, indent, null, true);
   }
+  return parseYamlInline(state, rest, indent);
+}
+
+/**
+ * Parse a value that starts on the line just read, after a key or a
+ * dash: a block scalar whose lines are indented deeper than `indent`, or
+ * an inline flow collection or scalar.
+ * @param {YamlState} state
+ * @param {string} rest the value's text on its first line (left-trimmed)
+ * @param {number} indent the indent of the owning key or dash
+ * @returns {any}
+ */
+function parseYamlInline(state, rest, indent) {
   const c0 = rest.charCodeAt(0);
   if (c0 === 0x7C /* | */ || c0 === 0x3E /* > */) {
     const header = rest.split('#')[0].trim();
@@ -326,21 +467,24 @@ function parseYamlValue(state, rest, indent) {
 }
 
 /**
- * Parse the nested block value after a key (or lone dash) at `indent`:
- * a deeper block node, a sequence at the same indent, or `fallback`.
+ * Parse the nested block value after a key or a lone dash at `indent`: a
+ * deeper block node; after a key, also a sequence at the key's own indent
+ * (a sequence MAY sit at its parent key's indent); else `fallback`. After
+ * a lone dash, an entry at the dash's indent is the dash's sibling.
  * @param {YamlState} state
  * @param {number} indent
  * @param {any} fallback
+ * @param {boolean} afterKey whether a key, rather than a dash, owns the value
  * @returns {any}
  */
-function parseYamlNested(state, indent, fallback) {
+function parseYamlNested(state, indent, fallback, afterKey) {
   const mark = state.pos;
   skipYamlVoid(state);
   if (state.pos < state.lines.length) {
     const line = state.lines[state.pos];
     const li = countIndent(line);
     if (li > indent) return parseYamlNode(state, li);
-    if (li === indent && isSeqDash(line.slice(li))) return parseYamlSeq(state, li);
+    if (afterKey && li === indent && isSeqDash(line.slice(li))) return parseYamlSeq(state, li);
   }
   state.pos = mark;
   return fallback;
@@ -348,8 +492,12 @@ function parseYamlNested(state, indent, fallback) {
 
 /**
  * Parse a `|`/`>` block scalar. The chomp `-` drops the final newline.
+ * The first line with content sets the block's indentation: a line
+ * indented less ends the block (as one no deeper than the owner does),
+ * a blank line reaching past it keeps the blanks beyond it, and a blank
+ * line before it may not reach past it.
  * @param {YamlState} state
- * @param {number} indent indent of the owning key
+ * @param {number} indent indent of the owning key or dash
  * @param {string} header `|`, `|-`, `>` or `>-`
  * @returns {string}
  */
@@ -357,33 +505,74 @@ function parseYamlBlockScalar(state, indent, header) {
   /** @type {string[]} */
   const raw = [];
   let blockIndent = -1;
+  // the deepest blank line before the first line with content, and where it is
+  let leadingDepth = 0;
+  let leadingLine = -1;
   while (state.pos < state.lines.length) {
     const line = state.lines[state.pos];
     if (isBlankLine(line)) {
-      raw.push('');
+      if (blockIndent === -1 && countIndent(line) > leadingDepth) {
+        leadingDepth = countIndent(line);
+        leadingLine = state.pos;
+      }
+      raw.push(blockIndent !== -1 && line.length > blockIndent ? line.slice(blockIndent) : '');
       state.pos++;
       continue;
     }
     const li = countIndent(line);
-    if (li <= indent) break;
-    if (blockIndent === -1) blockIndent = li;
-    raw.push(line.slice(Math.min(li, blockIndent)));
+    if (li <= indent || (blockIndent !== -1 && li < blockIndent)) break;
+    if (blockIndent === -1) {
+      if (leadingDepth > li) {
+        throw new MdFrontmatterError('a blank line before the first line of a block scalar is indented deeper than it', leadingLine);
+      }
+      blockIndent = li;
+    }
+    raw.push(line.slice(blockIndent));
     state.pos++;
   }
   while (raw.length > 0 && raw[raw.length - 1] === '') raw.pop();
-  let text;
-  if (header.charCodeAt(0) === 0x7C /* | */) {
-    text = raw.join('\n');
-  }
-  else {
-    text = '';
-    for (let i = 0; i < raw.length; i++) {
-      if (i === 0) text = raw[0];
-      else if (raw[i] === '' || raw[i - 1] === '') text += '\n' + raw[i];
-      else text += ' ' + raw[i];
-    }
-  }
+  // no content: no final line break for the chomp to keep
+  if (raw.length === 0) return '';
+  const text = header.charCodeAt(0) === 0x7C /* | */ ? raw.join('\n') : foldLines(raw);
   return header.length === 2 ? text : text + '\n';
+}
+
+/**
+ * Fold the lines of a `>` block scalar as YAML does: a line break between
+ * two lines of text becomes a space, but where empty lines come between
+ * them only those remain, one line break each; a break next to a line
+ * that starts with a blank — more indented than the block — is kept, and
+ * so are the empty lines after it.
+ * @param {string[]} lines the block's lines, its indentation removed
+ * @returns {string}
+ */
+function foldLines(lines) {
+  let text = '';
+  let empty = 0;
+  /** @type {string | null} */
+  let previous = null;
+  for (const line of lines) {
+    if (line === '') {
+      empty++;
+      continue;
+    }
+    if (previous === null) text = '\n'.repeat(empty) + line;
+    else if (isSpacedLine(previous) || isSpacedLine(line)) text += '\n'.repeat(empty + 1) + line;
+    else text += empty === 0 ? ' ' + line : '\n'.repeat(empty) + line;
+    previous = line;
+    empty = 0;
+  }
+  return text;
+}
+
+/**
+ * Does a block scalar line (its indentation removed) start with a blank?
+ * @param {string} line
+ * @returns {boolean}
+ */
+function isSpacedLine(line) {
+  const c = line.charCodeAt(0);
+  return c === 0x20 || c === 0x09;
 }
 
 /**
@@ -406,8 +595,10 @@ function splitYamlKey(line, indent, lineNo) {
       key = String(parseQuoted(key, 0, /** @type {'"'|"'"} */ (key[0]), lineNo).value);
     }
   }
+  // spaces or tabs separate the value from the colon
   let restColumn = indent + colon + 1;
-  while (restColumn < line.length && line.charCodeAt(restColumn) === 0x20) restColumn++;
+  while (restColumn < line.length
+    && (line.charCodeAt(restColumn) === 0x20 || line.charCodeAt(restColumn) === 0x09)) restColumn++;
   return { key, rest: line.slice(restColumn), restColumn };
 }
 
@@ -451,38 +642,80 @@ function findKeyColon(content) {
 function parseYamlFlowOrScalar(state, rest, lineNo) {
   const c0 = rest.charCodeAt(0);
   if (c0 === 0x5B /* [ */ || c0 === 0x7B /* { */) {
-    let text = rest;
-    while (flowDepth(text) > 0 && state.pos < state.lines.length) {
-      text += ' ' + state.lines[state.pos].trim();
-      state.pos++;
+    // every line, the first included, loses its comment before it joins
+    const scan = flowScan(true);
+    let text = rest.slice(0, scanFlowLine(scan, rest));
+    let last = lineNo;
+    while (scan.depth > 0 && state.pos < state.lines.length) {
+      const more = ' ' + state.lines[state.pos].trim();
+      text += more.slice(0, scanFlowLine(scan, more));
+      last = state.pos++;
     }
-    if (flowDepth(text) !== 0) {
+    if (scan.depth !== 0) {
       throw new MdFrontmatterError('unterminated flow collection', lineNo);
     }
     const flow = parseFlowValue(text, 0, lineNo);
+    if (text.slice(flow.end).trim() !== '') {
+      throw new MdFrontmatterError('trailing content after a flow collection', last);
+    }
     return flow.value;
   }
-  return parseYamlScalar(stripComment(rest), lineNo);
+  const scalar = stripComment(rest);
+  if (isSeqDash(scalar)) {
+    // `key: - a` is no string: YAML refuses a sequence on its key's line
+    // (a dash after a dash is a nested sequence, read before this)
+    throw new MdFrontmatterError('a sequence entry cannot start on the line of its key', lineNo);
+  }
+  return parseYamlScalar(scalar, lineNo);
 }
 
 /**
- * Net bracket depth of a line, ignoring brackets inside quotes.
- * @param {string} text
- * @returns {number}
+ * The reading of a flow collection that spans lines: its net bracket
+ * depth, brackets inside quotes ignored, and the quote it is inside,
+ * which a quoted scalar may carry onto the next line.
+ * @typedef {{ depth: number, quote: number, previous: number, comments: boolean }} FlowScan
  */
-function flowDepth(text) {
-  let depth = 0;
-  let quote = 0;
-  for (let i = 0; i < text.length; i++) {
-    const c = text.charCodeAt(i);
+
+/**
+ * Start reading a flow collection. With `comments`, a `#` outside
+ * quotes that starts a line or follows a space or tab begins a YAML
+ * comment, which runs to the end of its line.
+ * @param {boolean} comments
+ * @returns {FlowScan}
+ */
+function flowScan(comments) {
+  return { depth: 0, quote: 0, previous: 0x20, comments };
+}
+
+/**
+ * Read one more line of a flow collection into `scan`. Only the new line
+ * is read: rescanning the joined text after every continuation line made
+ * a long flow collection quadratic.
+ * @param {FlowScan} scan
+ * @param {string} segment
+ * @returns {number} the length of `segment` before its comment
+ */
+function scanFlowLine(scan, segment) {
+  let { depth, quote, previous } = scan;
+  let end = segment.length;
+  for (let i = 0; i < segment.length; i++) {
+    const c = segment.charCodeAt(i);
     if (quote !== 0) {
-      if (c === quote && !(quote === 0x22 && text.charCodeAt(i - 1) === 0x5C)) quote = 0;
+      if (c === quote && !(quote === 0x22 && previous === 0x5C)) quote = 0;
+    }
+    else if (c === 0x23 /* # */ && scan.comments && (previous === 0x20 || previous === 0x09)) {
+      end = i;
+      break;
     }
     else if (c === 0x22 || c === 0x27) quote = c;
     else if (c === 0x5B || c === 0x7B) depth++;
     else if (c === 0x5D || c === 0x7D) depth--;
+    previous = c;
   }
-  return depth;
+  scan.depth = depth;
+  scan.quote = quote;
+  scan.previous = previous;
+  return end;
 }
 
 /**
@@ -516,7 +749,13 @@ function parseYamlScalar(text, lineNo) {
   if (text === '') return null;
   const c0 = text.charCodeAt(0);
   if (c0 === 0x22 || c0 === 0x27) {
-    return parseQuoted(text, 0, /** @type {'"'|"'"} */ (text[0]), lineNo).value;
+    const quoted = parseQuoted(text, 0, /** @type {'"'|"'"} */ (text[0]), lineNo);
+    // after the closing quote, only a comment (its `#` may follow the quote directly)
+    const tail = text.slice(quoted.end).trimStart();
+    if (tail !== '' && tail.charCodeAt(0) !== 0x23 /* # */) {
+      throw new MdFrontmatterError('trailing content after a quoted string', lineNo);
+    }
+    return quoted.value;
   }
   switch (text) {
     case 'null': case 'Null': case 'NULL': case '~': return null;
@@ -575,31 +814,48 @@ function parseQuoted(text, pos, quote, lineNo) {
 }
 
 /**
+ * The refusal of a flow collection nested past `MAX_NESTING`: the bound
+ * the Markdown body nests by, applied before the recursive descent can
+ * run out of stack.
+ * @param {number} lineNo
+ * @returns {MdFrontmatterError}
+ */
+function nestedTooDeep(lineNo) {
+  return new MdFrontmatterError(`flow collections nest deeper than ${MAX_NESTING}`, lineNo);
+}
+
+/**
  * Parse a flow value (`[...]`, `{...}`, quoted or plain scalar) inside a
  * single-line flow text.
  * @param {string} text
  * @param {number} pos
  * @param {number} lineNo
  * @param {boolean} [key=false] whether a colon ends a map key
+ * @param {number} [depth=0] how many flow collections enclose the value
  * @returns {{ value: any, end: number }}
  */
-function parseFlowValue(text, pos, lineNo, key = false) {
+function parseFlowValue(text, pos, lineNo, key = false, depth = 0) {
   while (pos < text.length && text.charCodeAt(pos) === 0x20) pos++;
   const c = text.charCodeAt(pos);
-  if (c === 0x5B /* [ */) return parseFlowSeq(text, pos, lineNo);
-  if (c === 0x7B /* { */) return parseFlowMap(text, pos, lineNo);
+  if (c === 0x5B /* [ */) return parseFlowSeq(text, pos, lineNo, depth + 1);
+  if (c === 0x7B /* { */) return parseFlowMap(text, pos, lineNo, depth + 1);
   if (c === 0x22 || c === 0x27) {
     return parseQuoted(text, pos, /** @type {'"'|"'"} */ (text[pos]), lineNo);
   }
+  // `-` then a blank (a line break joins as one) opens a block sequence
+  // entry, which a flow collection cannot hold; `-`, `-1` and `-a` are text
+  if (c === 0x2D /* - */ && (text.charCodeAt(pos + 1) === 0x20 || text.charCodeAt(pos + 1) === 0x09)) {
+    throw new MdFrontmatterError('a sequence entry inside a flow collection', lineNo);
+  }
   let end = pos;
-  let depth = 0;
+  let open = 0;
   while (end < text.length) {
     const cc = text.charCodeAt(end);
-    if (depth === 0 && (cc === 0x2C || cc === 0x5D || cc === 0x7D)) break;
-    if (depth === 0 && cc === 0x3A
+    if (open === 0 && (cc === 0x2C || cc === 0x5D || cc === 0x7D)) break;
+    if (open === 0 && cc === 0x3A
       && (key || end + 1 === text.length || /[\s,[\]{}]/.test(text[end + 1]))) break;
-    if (cc === 0x5B || cc === 0x7B) depth++;
-    else if (cc === 0x5D || cc === 0x7D) depth--;
+    if (cc === 0x5B || cc === 0x7B) open++;
+    else if (cc === 0x5D || cc === 0x7D) open--;
     end++;
   }
   return { value: parseYamlScalar(text.slice(pos, end).trim(), lineNo), end };
@@ -612,11 +868,13 @@ function parseFlowValue(text, pos, lineNo, key = false) {
  * @param {string} text
  * @param {number} pos index of `[`
  * @param {number} lineNo
- * @param {(text: string, pos: number, lineNo: number) => { value: any, end: number }} parseItem
+ * @param {(text: string, pos: number, lineNo: number, depth: number) => { value: any, end: number }} parseItem
  * @param {string} unterminated - error message for a missing `]`
+ * @param {number} depth the array's own nesting depth (1 at the top)
  * @returns {{ value: any[], end: number }}
  */
-function parseFlowArray(text, pos, lineNo, parseItem, unterminated) {
+function parseFlowArray(text, pos, lineNo, parseItem, unterminated, depth) {
+  if (depth > MAX_NESTING) throw nestedTooDeep(lineNo);
   /** @type {any[]} */
   const out = [];
   let i = pos + 1;
@@ -624,7 +882,7 @@ function parseFlowArray(text, pos, lineNo, parseItem, unterminated) {
     while (i < text.length && (text.charCodeAt(i) === 0x20 || text.charCodeAt(i) === 0x2C)) i++;
     if (i >= text.length) throw new MdFrontmatterError(unterminated, lineNo);
     if (text.charCodeAt(i) === 0x5D /* ] */) return { value: out, end: i + 1 };
-    const item = parseItem(text, i, lineNo);
+    const item = parseItem(text, i, lineNo, depth);
     if (item.end <= i) throw new MdFrontmatterError('expected a flow array item', lineNo);
     out.push(item.value);
     i = item.end;
@@ -632,14 +890,25 @@ function parseFlowArray(text, pos, lineNo, parseItem, unterminated) {
 }
 
 /**
+ * One item of a flow sequence (never a map key).
+ * @param {string} text @param {number} pos @param {number} lineNo
+ * @param {number} depth the enclosing sequence's depth
+ * @returns {{ value: any, end: number }}
+ */
+function parseFlowItem(text, pos, lineNo, depth) {
+  return parseFlowValue(text, pos, lineNo, false, depth);
+}
+
+/**
  * Parse a flow sequence `[a, b, ...]`.
  * @param {string} text
  * @param {number} pos index of `[`
  * @param {number} lineNo
+ * @param {number} depth the sequence's own nesting depth
  * @returns {{ value: any[], end: number }}
  */
-function parseFlowSeq(text, pos, lineNo) {
-  return parseFlowArray(text, pos, lineNo, parseFlowValue, 'unterminated flow sequence');
+function parseFlowSeq(text, pos, lineNo, depth) {
+  return parseFlowArray(text, pos, lineNo, parseFlowItem, 'unterminated flow sequence', depth);
 }
 
 /**
@@ -647,9 +916,11 @@ function parseFlowSeq(text, pos, lineNo) {
  * @param {string} text
  * @param {number} pos index of `{`
  * @param {number} lineNo
+ * @param {number} depth the map's own nesting depth
  * @returns {{ value: Record<string, any>, end: number }}
  */
-function parseFlowMap(text, pos, lineNo) {
+function parseFlowMap(text, pos, lineNo, depth) {
+  if (depth > MAX_NESTING) throw nestedTooDeep(lineNo);
   /** @type {Record<string, any>} */
   const out = {};
   let i = pos + 1;
@@ -657,13 +928,13 @@ function parseFlowMap(text, pos, lineNo) {
     while (i < text.length && (text.charCodeAt(i) === 0x20 || text.charCodeAt(i) === 0x2C)) i++;
     if (i >= text.length) throw new MdFrontmatterError('unterminated flow map', lineNo);
     if (text.charCodeAt(i) === 0x7D /* } */) return { value: out, end: i + 1 };
-    const key = parseFlowValue(text, i, lineNo, true);
+    const key = parseFlowValue(text, i, lineNo, true, depth);
     i = key.end;
     while (i < text.length && text.charCodeAt(i) === 0x20) i++;
     if (text.charCodeAt(i) !== 0x3A /* : */) {
       throw new MdFrontmatterError("expected ':' in flow map", lineNo);
     }
-    const value = parseFlowValue(text, i + 1, lineNo);
+    const value = parseFlowValue(text, i + 1, lineNo, false, depth);
     setObjectMember(out, String(key.value), value.value);
     i = value.end;
   }
@@ -688,6 +959,8 @@ export function parseTomlSubset(text) {
   /** @type {Record<string, any>} */
   const root = {};
   let table = root;
+  // how many tables (and arrays of tables) enclose `table`'s keys, the root included
+  let tableDepth = 1;
   const lines = text.split('\n');
   for (let no = 0; no < lines.length; no++) {
     let line = lines[no];
@@ -699,16 +972,22 @@ export function parseTomlSubset(text) {
       const close = line.indexOf(isArray ? ']]' : ']');
       if (close === -1) throw new MdFrontmatterError('unterminated table header', no);
       const path = parseTomlKeyPath(line.slice(isArray ? 2 : 1, close), no);
-      table = descendTomlTable(root, path, isArray, no);
+      ({ table, depth: tableDepth } = descendTomlTable(root, path, isArray, no));
       continue;
     }
     const eq = findTomlEquals(line);
     if (eq === -1) throw new MdFrontmatterError(`expected 'key = value', got '${line}'`, no);
     const path = parseTomlKeyPath(line.slice(0, eq), no);
+    // every segment before the last opens (or enters) one table deeper
+    if (tableDepth + path.length - 1 > MAX_NESTING) throw tablesTooDeep(no);
     let valueText = stripTomlComment(line.slice(eq + 1)).trim();
     // Comments end at each physical line, before continuation lines join.
-    while (flowDepth(valueText) > 0 && no + 1 < lines.length) {
-      valueText += ' ' + stripTomlComment(lines[++no]).trim();
+    const scan = flowScan(false);
+    scanFlowLine(scan, valueText);
+    while (scan.depth > 0 && no + 1 < lines.length) {
+      const more = ' ' + stripTomlComment(lines[++no]).trim();
+      valueText += more;
+      scanFlowLine(scan, more);
     }
     let target = table;
     for (let i = 0; i < path.length - 1; i++) {
@@ -805,16 +1084,29 @@ function parseTomlKeyPath(text, no) {
 }
 
 /**
+ * The refusal of tables — opened by headers, arrays of tables and dotted
+ * keys — nested past `MAX_NESTING`, the root table included: the bound
+ * YAML's block collections keep.
+ * @param {number} lineNo
+ * @returns {MdFrontmatterError}
+ */
+function tablesTooDeep(lineNo) {
+  return new MdFrontmatterError(`tables nest deeper than ${MAX_NESTING}`, lineNo);
+}
+
+/**
  * Walk (creating) the table a `[header]` names; `[[header]]` appends a
- * fresh table to the named array.
+ * fresh table to the named array. The depth counts every table and array
+ * of tables from the root (1) down to the table returned.
  * @param {Record<string, any>} root
  * @param {string[]} path
  * @param {boolean} isArray
  * @param {number} no
- * @returns {Record<string, any>}
+ * @returns {{ table: Record<string, any>, depth: number }}
  */
 function descendTomlTable(root, path, isArray, no) {
   let target = root;
+  let depth = 1;
   for (let i = 0; i < path.length - 1; i++) {
     const step = path[i];
     let next = Object.hasOwn(target, step) ? target[step] : undefined;
@@ -824,10 +1116,12 @@ function descendTomlTable(root, path, isArray, no) {
     }
     else if (Array.isArray(next)) {
       next = next[next.length - 1];
+      depth++;
     }
     if (typeof next !== 'object' || next === null) {
       throw new MdFrontmatterError(`'${step}' is not a table`, no);
     }
+    if (++depth > MAX_NESTING) throw tablesTooDeep(no);
     target = next;
   }
   const leaf = path[path.length - 1];
@@ -838,9 +1132,10 @@ function descendTomlTable(root, path, isArray, no) {
       setObjectMember(target, leaf, arr);
     }
     if (!Array.isArray(arr)) throw new MdFrontmatterError(`'${leaf}' is not an array of tables`, no);
+    if (depth + 2 > MAX_NESTING) throw tablesTooDeep(no);
     const fresh = {};
     arr.push(fresh);
-    return fresh;
+    return { table: fresh, depth: depth + 2 };
   }
   let next = Object.hasOwn(target, leaf) ? target[leaf] : undefined;
   if (next === undefined) {
@@ -849,11 +1144,13 @@ function descendTomlTable(root, path, isArray, no) {
   }
   else if (Array.isArray(next)) {
     next = next[next.length - 1];
+    depth++;
   }
   if (typeof next !== 'object' || next === null) {
     throw new MdFrontmatterError(`'${leaf}' is not a table`, no);
   }
-  return next;
+  if (++depth > MAX_NESTING) throw tablesTooDeep(no);
+  return { table: next, depth };
 }
 
 /**
@@ -868,8 +1165,8 @@ function parseTomlValue(text, no) {
   if (c0 === 0x22 || c0 === 0x27) {
     return parseQuoted(text, 0, /** @type {'"'|"'"} */ (text[0]), no).value;
   }
-  if (c0 === 0x5B /* [ */) return parseTomlArray(text, no).value;
-  if (c0 === 0x7B /* { */) return parseTomlInline(text, no).value;
+  if (c0 === 0x5B /* [ */) return parseTomlArray(text, no, 1).value;
+  if (c0 === 0x7B /* { */) return parseTomlInline(text, no, 1).value;
   if (text === 'true') return true;
   if (text === 'false') return false;
   if (RE_TOML_NUMBER.test(text)) {
@@ -885,19 +1182,22 @@ function parseTomlValue(text, no) {
  * Parse a flow array `[a, b, ...]`.
  * @param {string} text
  * @param {number} no
+ * @param {number} depth the array's own nesting depth
  * @returns {{ value: any[], end: number }}
  */
-function parseTomlArray(text, no) {
-  return parseFlowArray(text, 0, no, parseTomlItem, 'unterminated array');
+function parseTomlArray(text, no, depth) {
+  return parseFlowArray(text, 0, no, parseTomlItem, 'unterminated array', depth);
 }
 
 /**
  * Parse an inline table `{a = 1, b = 2}`.
  * @param {string} text
  * @param {number} no
+ * @param {number} depth the table's own nesting depth
  * @returns {{ value: Record<string, any>, end: number }}
  */
-function parseTomlInline(text, no) {
+function parseTomlInline(text, no, depth) {
+  if (depth > MAX_NESTING) throw nestedTooDeep(no);
   /** @type {Record<string, any>} */
   const out = {};
   let i = 1;
@@ -909,7 +1209,11 @@ function parseTomlInline(text, no) {
     while (end < text.length && text.charCodeAt(end) !== 0x3D) end++;
     if (end >= text.length) throw new MdFrontmatterError("expected '=' in inline table", no);
     const path = parseTomlKeyPath(text.slice(i, end).trim(), no);
-    const item = parseTomlItem(text, end + 1, no);
+    // every segment before the last nests one more table in this one,
+    // and the value sits in the last of them
+    const keyDepth = depth + path.length - 1;
+    if (keyDepth > MAX_NESTING) throw nestedTooDeep(no);
+    const item = parseTomlItem(text, end + 1, no, keyDepth);
     let target = out;
     for (let p = 0; p < path.length - 1; p++) {
       const step = path[p];
@@ -932,17 +1236,18 @@ function parseTomlInline(text, no) {
  * @param {string} text
  * @param {number} pos
  * @param {number} no
+ * @param {number} depth the enclosing array's or table's depth
  * @returns {{ value: any, end: number }}
  */
-function parseTomlItem(text, pos, no) {
+function parseTomlItem(text, pos, no, depth) {
   while (pos < text.length && text.charCodeAt(pos) === 0x20) pos++;
   const c = text.charCodeAt(pos);
   if (c === 0x5B /* [ */) {
-    const inner = parseTomlArray(text.slice(pos), no);
+    const inner = parseTomlArray(text.slice(pos), no, depth + 1);
     return { value: inner.value, end: pos + inner.end };
   }
   if (c === 0x7B /* { */) {
-    const inner = parseTomlInline(text.slice(pos), no);
+    const inner = parseTomlInline(text.slice(pos), no, depth + 1);
     return { value: inner.value, end: pos + inner.end };
   }
   if (c === 0x22 || c === 0x27) {

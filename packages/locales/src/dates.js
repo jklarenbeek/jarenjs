@@ -85,6 +85,7 @@ export const dateMessagesEn = {
   'format/name/date': 'date',
   'format/name/time': 'time',
   'format/name/date-time': 'date and time',
+  'format/name/duration': 'duration',
   'format/name/iso-date': 'ISO date',
   'format/name/iso-time': 'ISO time',
   'format/name/iso-date-time': 'ISO date and time',

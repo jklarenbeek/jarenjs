@@ -8,24 +8,32 @@
  * declared, and a store opened without capture refuses (`JD0050`)
  * exactly as it does for a document. The chain's `params()` bindings are
  * the externals, fixed at registration; `options.externals` adds to them.
+ * The merged set is what the store runs, so it is the set a parameter an
+ * `in()` reads whole as its list must be an array in (`JL0004`): a
+ * placeholder the options override is not checked, and an override is.
  */
+
+import { RUN_BINDINGS } from '../document.js';
+import { requireListBindings } from '../expression.js';
 
 /** Whether a source is a chain: a document and an explanation to give. */
 const isChain = (source) => source !== null && typeof source === 'object'
   && typeof source.toDocument === 'function' && typeof source.explain === 'function';
 
 /**
- * The document a source stands for, with the values it bound.
+ * The document a source stands for, the values it bound and the
+ * parameters its `in()` calls read whole as lists — unchecked, because
+ * what the store runs is decided only once the options are merged in.
  * @param {any} source - a chain (either surface) or a query document
- * @returns {{ document: any, bindings: Record<string, unknown> }}
+ * @returns {{ document: any, bindings: Record<string, unknown>, lists: readonly string[] }}
  */
 function documentOf(source) {
-  if (!isChain(source)) return { document: source, bindings: {} };
-  const explained = source.explain();
+  if (!isChain(source)) return { document: source, bindings: {}, lists: [] };
   // a chain split by a host callback has no document; its own refusal
   // (`JL0005`) names why
-  if (explained.document === undefined) source.toDocument();
-  return { document: explained.document, bindings: explained.bindings };
+  const document = source.toDocument();
+  // a chain-like this package did not build gives its own explanation
+  return { document, ...(source[RUN_BINDINGS]?.() ?? { bindings: source.explain().bindings, lists: [] }) };
 }
 
 /**
@@ -38,6 +46,8 @@ function documentOf(source) {
  * @returns {Promise<any>} the store's live query
  */
 export function registerLive(register, source, options = {}) {
-  const { document, bindings } = documentOf(source);
-  return register(document, { ...options, externals: { ...bindings, ...(options.externals ?? {}) } });
+  const { document, bindings, lists } = documentOf(source);
+  const externals = { ...bindings, ...(options.externals ?? {}) };
+  requireListBindings(lists, new Map(Object.entries(externals)));
+  return register(document, { ...options, externals });
 }

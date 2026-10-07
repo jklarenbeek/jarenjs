@@ -269,11 +269,15 @@ function mapLabels(domain, convert) {
 }
 
 /**
- * Whether the label carries the ACE prefix, in any case.
+ * Whether the label carries the ACE prefix (`xn--`), in any case — the
+ * one test both the domain converters and the IDN hostname validator use.
+ * Compared by character code because it runs per label, and a
+ * `toLowerCase()` would allocate a copy of each just to read four
+ * characters.
  * @param {string} label - A domain label
  * @returns {boolean} True when the label starts with `xn--`
  */
-function hasAcePrefix(label) {
+export function hasAcePrefix(label) {
   return label.length >= 4
     && (label.charCodeAt(0) | 0x20) === 0x78 // 'x'
     && (label.charCodeAt(1) | 0x20) === 0x6E // 'n'

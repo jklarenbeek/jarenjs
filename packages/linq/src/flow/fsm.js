@@ -26,7 +26,7 @@ import { deepFreeze, isJsonObject } from '@jarenjs/core/object';
 
 import { LinqBuildError } from '../errors.js';
 import { effectDescriptor, readEffects } from '../effect.js';
-import { describeValue } from '../json-boundary.js';
+import { closedTo, describeValue } from '../json-boundary.js';
 import { isSchemaBuilder } from '../schema/brand.js';
 import { queryMember } from './capture.js';
 
@@ -46,22 +46,6 @@ const STATE_MEMBERS = Object.freeze(['entry', 'exit', 'final']);
 const ON_MEMBERS = Object.freeze(['payload']);
 /** The members `defineFsm()` takes. */
 const FSM_MEMBERS = Object.freeze(['initial', 'states', 'transitions', 'context']);
-
-/**
- * A member set the pen knows, or `JL0101` naming the one it does not.
- * @param {any} spec
- * @param {readonly string[]} members
- * @param {string} what
- * @param {string} [at]
- */
-function closedTo(spec, members, what, at = '') {
-  for (const key of Object.keys(spec)) {
-    if (!members.includes(key)) {
-      throw new LinqBuildError('JL0101',
-        `${what} does not take '${key}' — it takes ${members.join(', ')}`, `${at}/${key}`);
-    }
-  }
-}
 
 /**
  * A state id: a non-empty string, or `JL0101`.

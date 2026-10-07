@@ -14,7 +14,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert';
 
 import {
-  fr, es, pt, de, ja, ko, zhTW, ru, tr, ar,
+  fr, es, pt, de, ja, ko, zhTW, ru, tr, ar, nl,
   dateMessagesEn,
   compileDateLocale,
   numberMessagesEn,
@@ -337,6 +337,18 @@ const PACKS = [
 
 /** 2026-07-05 is a Sunday, so weekday index 0 renders too. */
 const SUNDAY = parseRFC3339Parts('2026-07-05T14:30:05Z');
+
+describe('@jarenjs/locales — the entity-tag precondition (JC2014)', () => {
+  it('names neither header in any language: one code answers a failed If-Match and a matching If-None-Match', () => {
+    assert.strictEqual(contractMessagesEn['contract/precondition-failed'],
+      'the entity-tag precondition of operation {op} failed');
+    for (const [code, pack] of Object.entries({ nl, fr, es, pt, de, ja, ko, zhTW, ru, tr, ar })) {
+      const text = /** @type {string} */ (/** @type {any} */ (pack)['contract/precondition-failed']);
+      assert.ok(!/If-(None-)?Match/.test(text), `${code}: ${text}`);
+      assert.ok(text.includes('{op}'), `${code}: ${text}`);
+    }
+  });
+});
 
 describe('@jarenjs/locales fr/es/pt/de/ja', () => {
   for (const { code, pack, ...expected } of PACKS) {

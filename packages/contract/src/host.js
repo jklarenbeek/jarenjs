@@ -170,6 +170,19 @@ export function once(release, observed) {
 }
 
 /**
+ * Release one request's leases in order — the acquired lease's once it
+ * was entered, then the identity's — and answer whether both were clean.
+ * Each release is a {@link once}, so every exit of a request may call this.
+ * @param {(() => Promise<boolean>) | null} acquired - the acquired lease's
+ *   release, `null` until `acquire` entered
+ * @param {() => Promise<boolean>} identity - the identity lease's release
+ * @returns {Promise<boolean>}
+ */
+export function releaseLeases(acquired, identity) {
+  return acquired === null ? identity() : acquired().then((a) => identity().then((b) => a && b));
+}
+
+/**
  * Classify a hook's settled answer: a lease, a declared failure, or a
  * host fault. Total for hostile values.
  * @param {unknown} value

@@ -3,6 +3,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { downlevelDraft07 } from '../test/json/schema-artifact-helpers.js';
+import { isMainModule } from './lib/main-module.js';
 
 const root = resolve(import.meta.dirname, '..');
 
@@ -59,7 +60,7 @@ export function jtltSchemaArtifacts() {
   return { latest: schema, draft07: downlevelDraft07(schema) };
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === import.meta.filename) {
+if (isMainModule(import.meta.url)) {
   const { latest, draft07 } = jtltSchemaArtifacts();
   for (const [suffix, schema] of [['schema', latest], ['draft-07.schema', draft07]])
     writeFileSync(resolve(root, `packages/json/schemas/jaren-jtlt.${suffix}.json`), JSON.stringify(schema, null, 2) + '\n');

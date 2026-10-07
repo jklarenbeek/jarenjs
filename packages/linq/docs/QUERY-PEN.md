@@ -150,10 +150,15 @@ path segment; a method call records an operator; the callback's return
 value becomes the expression:
 
 - `u.a.b` records the path `$it.a.b`; `u.list.at(0)` records
-  `$it.list[0]` (negative integers count from the end);
+  `$it.list[0]` (negative integers count from the end; an integer
+  beyond ±(2^53 − 1) is `JL0005` at build time — no array has an element
+  there, and the path text cannot spell it);
   `u.list.all()` records `$it.list[*]`; a key that is not an
   identifier — or one that collides with a method name — goes through
-  `u.get('odd key')`.
+  `u.get('odd key')`. A member read off an operator result is that
+  member too: `u.items.at(u.i).$id` writes the key `get('$id')` writes
+  (`{ "$get": [ …, "$$id" ] }`), never a reference to a variable or a
+  parameter named `id`.
 - Method names SHADOW member access: `u.eq` is the operator, never
   the member. `u.get('eq')` reaches the member.
 - Returned object literals become constructors: plain-keyed objects
@@ -170,21 +175,35 @@ value becomes the expression:
   name — the inner document rebinds `$it`, so a correlated subquery
   cannot be spelled this way. (`===` between proxies is untrappable and
   therefore undetectable; do not compare proxies.)
-- **JavaScript's own operators are not trappable, and they do not
-  fail loudly.** A proxy is an object, so `&&`, `||`, `!`, `?:`, `in`,
-  `typeof`, `Object.keys` and `===` evaluate against the PROXY and
-  yield a silently wrong document: `u.age.gt(21) && u.name.eq('x')`
-  captures only the right operand, `!u.deleted` is the constant
-  `false`, `u.deleted ? 'a' : 'b'` is always `'a'`. Use the expression
-  surface — `.and()`, `.or()`, `.not()` — for logic. Arithmetic and
-  comparison operators (`u.age > 21`, `u.age + 1`, `${u.name}`) throw a
-  plain `TypeError` (a proxy cannot be converted to a primitive): loud,
-  but not coded. Host method calls and JSON serialization are outside
-  the capture DSL too: `u.toString()` can raise a plain `TypeError`, and
-  `JSON.stringify(u)` can recurse until a `RangeError`. `toString` and
-  `toJSON` remain ordinary data-member names. Serialize the finished
-  chain's `toDocument()` result, after capture, to inspect or persist a
-  query.
+- **Some of JavaScript's own operators cannot be trapped, and they do
+  not fail.** A proxy is an object, so `&&`, `||`, `!`, `?:`, `in`,
+  `typeof`, `Object.keys`, truthiness (`if (u.deleted)`), `===` and
+  `!==` — and `==`/`!=` against `null` or `undefined` — evaluate against
+  the PROXY and yield a silently wrong document:
+  `u.age.gt(21) && u.name.eq('x')` captures only the right operand,
+  `!u.deleted` is the constant `false`, `u.deleted ? 'a' : 'b'` is
+  always `'a'`. Use the expression surface — `.and()`, `.or()`,
+  `.not()` — for logic. The
+  arithmetic and comparison operators (`u.age > 21`, `u.age + 1`,
+  `${u.name}`, and `==` against a string, a number or a boolean) do ask
+  the proxy for a primitive, and the capture refuses them with `JL0108`:
+  one message, naming the comparison methods and `.concat()`; §14.9 gives
+  the spelling that works for each. Host method calls and JSON
+  serialization are outside the capture DSL too: `u.toString()` can raise
+  a plain `TypeError`, and `JSON.stringify(u)` can recurse until a
+  `RangeError`. `toString` and `toJSON` remain ordinary data-member
+  names. Serialize the finished chain's `toDocument()` result, after
+  capture, to inspect or persist a query.
+- **The parameters argument is not a value.** A callback's last
+  argument is the parameters proxy (§7): `p.tenantId` reads one declared
+  parameter, and the proxy itself embedded anywhere — a projection
+  member, an operand, an array item — is `JL0004`. That covers the C#
+  index idiom `select((x, i) => ({ v: x.a, i }))` too: a chain callback
+  receives no element index, and the `i` there, the parameters proxy,
+  used to embed as an empty object `{}`. Asking it for its keys is the
+  same refusal, so a spread (`({ ...p })`), `Object.assign({}, p)` and
+  `Object.keys(p)` — which used to read as `{}` and `[]` — are `JL0004`
+  too.
 - The item binding is always named `it` in the emitted document
   (nested phrases shadow it legally), so captured expressions read
   `$it.…` at every depth and the document stays hand-readable.
@@ -288,7 +307,17 @@ it equals any of them — while `u.sku.eq(['a', 'b'])` embeds the array as
 ONE value (`$const`), which only an array-valued member equals. A list
 bound at call time is a path: `.params({ skus })` with `u.sku.in(p.skus)`
 emits `{ "$eq": ["$it.sku", "$skus[*]"] }`, one document for every list,
-and `u.sku.in(u.tags)` is membership in an array member. A path that
+and `u.sku.in(u.tags)` is membership in an array member. A parameter
+read whole as the list — `p.skus`, or `p.skus.all()` — must be bound to
+an array when the chain runs (a terminal, an iteration, `explain()` —
+over a `mapAsync` split too, whose prefix's lists count):
+anything else is `JL0004` naming the parameter, where a scalar used to
+match nothing and an object its member values, both silently; a member
+path below a parameter (`p.cfg.skus`) is the binding's own shape and is
+not checked. A client's `live(chain, { externals })` holds the rule to
+what it registers — the chain's bindings with `externals` merged over
+them — so a placeholder the options override is not refused, and an
+override that is not an array is ([DB-CLIENT.md](DB-CLIENT.md) §2.1). A path that
 already fans is the list as it stands, wherever along it the fan is:
 `u.sku.in(u.tags.all())` emits `"$it.tags[*]"`, as `u.sku.in(u.tags)`
 does, and `u.sku.in(u.items.all().sku)` emits `"$it.items[*].sku"`,
@@ -394,11 +423,15 @@ for them, so they would embed as `{}` and the query would compare against
 an empty object. `NaN` and `±Infinity` are refused for the same reason
 (JSON has neither, and lenient serialization folds them into `null`), and
 so is `-0`, which shares its JSON text with `0` while dividing to the
-opposite infinity. Convert first — a `Date` to its ISO string or epoch
-number. The boundary is the same for a `concat` array and for a
-`params()` binding (`JL0004`): a parameter becomes an external and, on a
-provider, a bound SQL parameter, so a `Date` there would compare against
-nothing and answer `[]` with no error anywhere.
+opposite infinity. So is a sparse array (`[1, , 3]`): JSON has no holes,
+and a hole used to become `null` inside a `$const` and reach the engine
+as `undefined` from a constructor or an `in()` list — a refusal at run
+time instead of at capture. Convert first — a `Date` to its ISO string
+or epoch number, a hole to `null`. The boundary is the same for a
+`concat` array and for a `params()` binding (`JL0004`): a parameter
+becomes an external and, on a provider, a bound SQL parameter, so a
+`Date` there would compare against nothing and answer `[]` with no error
+anywhere.
 
 ## 6. Terminal semantics
 
@@ -448,7 +481,10 @@ emitted document's own binding names — and so are `r1`, `r2`, … (`r`
 followed by a positive integer): the bindings a relation hop allocates,
 numbered per capture (§3, §4 "relation navigation"). Declaring any of
 them is `JL0004`. A binding must be query data (§5): a `Date`, `Map`,
-`NaN` or `-0` is `JL0004` with the conversion named.
+`NaN`, `-0` or a sparse array is `JL0004` with the conversion named. A
+parameter an `in()` reads whole as its list must be bound to an array
+when the chain runs (§4), and the parameters argument itself is not a
+value (§3): both are `JL0004` too.
 
 The inner side of a `join`, `groupJoin` or `concat` contributes its
 document WHOLE, so its declared parameters ride along into the new
@@ -561,6 +597,17 @@ Compiled documents are cached per registry COMBINATION, not per document
 alone: the same document compiles to different code with and without a
 collation registry, so sharing one partition would answer a caller who
 passed no collations with the compiled-with version.
+
+The six are a CLOSED set, on `from`, `fromAsync` and `fromDocument`
+alike: any other member is `JL0005`, naming the nearest one when it is
+close (`from(rows, { limit })` — `did you mean 'limits'?`), and an
+options argument that is not a plain object (a string, `null`, an array)
+is `JL0005` too. Both used to be ignored: a misspelt `limits` left the
+query unbounded, with no error anywhere. An ordering's options are
+closed the same way — `empty` and `collation`, on `orderBy`,
+`orderByDescending`, `thenBy` and `thenByDescending` — and a `null` there
+used to escape as a raw `TypeError`; their VALUES stay the engine's to
+judge (`JQ0003`).
 
 ## 9. Error codes
 
@@ -691,7 +738,11 @@ operators; a per-element async *predicate* is `mapAsync` then `where`.
   pulled eagerly under `switch`/`exhaust` — that race IS the mode.
 - `ordered: true` (default) preserves source order and buffers at most
   `concurrency` results — the stated cost; `ordered: false` yields on
-  completion.
+  completion. `ordered` is a boolean (`JL0005` otherwise — the string
+  `'false'` and `null` used to read as ordered; only an absent or
+  `undefined` member takes the default), and the three are a closed set: a
+  misspelt member (`ordred`) is `JL0005` naming the nearest, where it
+  used to be ignored.
 - An `AbortSignal` is threaded to every callback and aborted on early
   termination and on failure. A rejected callback FAILS CLOSED: the
   first rejection aborts every in-flight sibling and closes the source,
@@ -728,16 +779,21 @@ operators; a per-element async *predicate* is `mapAsync` then `where`.
 - a **cursor**: `{ next(): Promise<{done, value}>, return?() }` — the
   shape the store's own row cursor implements (`QueryCursor`), adopted
   as-is. A provider that offers `cursor(document, options)` — the
-  store's collections and entity sets do — is handed the pushed
-  document there when the chain is ITERATED, so a `for await` pulls
-  one row at a time from an open statement and a `break` releases it;
-  `toArray()` and the other terminals still push one whole window;
+  store's entity sets do — is handed the pushed document there when the
+  chain is ITERATED, so a `for await` pulls one row at a time from an
+  open statement and a `break` releases it; `toArray()` and the other
+  terminals still push one whole window. A store's collection offers no
+  `cursor()`: a chain over one is pushed as that one window when it is
+  iterated too, and the `for await` walks the rows it answered;
 - a **push queue** (`createPushQueue({ highWaterMark = 1024 })`) for
   feed/end-style readers with no pull protocol of their own (josl's
   push parsers deliberately have no backpressure protocol; the queue
   is where one appears): `feed(value)` returns `false` once the queue
   exceeds the mark — a pause HINT, never a hard stop — and
-  `end(error?)` closes (or fails) the stream. Anything else is
+  `end(error?)` closes (or fails) the stream. The options are a closed
+  set: a misspelt mark (`highWatermark`) is `JL0005` naming the nearest,
+  and `null` or a non-object is `JL0005` — the first used to be ignored
+  and the second to escape as a raw `TypeError`. Anything else is
   `JL0001` at `fromAsync()` time.
 
 What this surface does NOT do, by design: it does not make the query
@@ -802,6 +858,11 @@ retained source and intermediate admissions in the entire call, and default
 to twice their corresponding per-side budget. All four are positive safe
 integers. Credits are cumulative: freeing an intermediate's inputs does not
 refund them. This conservative rule makes a nested plan's total explicit.
+The spec is a closed set — `sources`, `maxRows`, `maxBytes`,
+`maxTotalRows`, `maxTotalBytes` and `strategy` — and so is a described
+source, `{ provider, estimatedRows? }`: any other member is `JL0005`
+naming the nearest one, where a misspelt `maxTotalRow` used to leave the
+combined budget at its default with no error.
 
 A cursor refuses with `JL2008` before retaining the row that would exceed a
 credit. Buffered sources are checked after they produce their array. Nested
@@ -1235,8 +1296,8 @@ proves that too, so the exclusion cannot hide a chain refusal).
 | `JL0001` | `from()`/`fromAsync()` received a source that is neither a supported shape nor a provider |
 | `JL0002` | an expression proxy was used outside the capture it belongs to |
 | `JL0003` | `ofType`/`cast` compiled a schema operator with no type-test compiler injected |
-| `JL0004` | a parameter was read undeclared, declared under a reserved or invalid name, bound to a non-JSON value, or bound to two values by one join |
-| `JL0005` | an operator was used invalidly at build time: a value the document cannot carry, a stage in the wrong place, a bad argument, an async-surface rule |
+| `JL0004` | a parameter was read undeclared, declared under a reserved or invalid name, bound to a non-JSON value, bound to two values by one join, or read whole as an `in()` list while bound to something other than an array; or the parameters argument itself was embedded as a value or spread |
+| `JL0005` | an operator was used invalidly at build time: a value the document cannot carry, a stage in the wrong place, a bad argument, an option outside a closed option bag, an async-surface rule |
 | `JL0006` | an operator §4 records as `unsupported` was invoked |
 | `JL0007` | a provider serves several entity roots and has none of its own |
 | `JL0105` | a relation hop cannot lower to a phrase |
@@ -1316,14 +1377,23 @@ in every case: fix the `params()` call.
 | `from(rows).params({ 'a-b': 1 })` | `'a-b' is not a valid parameter name` | an identifier: letters, digits and `_`, not starting with a digit |
 | `from(rows).params({ it: 1 })` | `'it' is reserved (the emitted document's own binding names: it, it2, acc, g, and r1, r2, … for relation hops)` | any other name |
 | `from(rows).params({ r1: 1 })` | the same message | `r`-plus-digits is reserved for the bindings a hop allocates (§13.4) |
-| `from(rows).params({ d: new Date() })` | `parameter 'd' is bound to a Date instance, which is not query data — convert it first (a Date to its ISO string or epoch number, a Map to an object, NaN or -0 to a number)` | `d: date.toISOString()` |
+| `from(rows).params({ d: new Date() })` | `parameter 'd' is bound to a Date instance, which is not query data — convert it first (a Date to its ISO string or epoch number, a Map to an object, NaN or -0 to a number, a hole to null)` | `d: date.toISOString()` |
 | `from(rows).params({ z: -0 })` | `parameter 'z' is bound to -0, which is not query data — …` (the same tail) | `0`, or negate at query time — and note the message names `-0`, not the `0` its JSON text would suggest |
+| `from(rows).params({ ids: [1, , 3] })` | `parameter 'ids' is bound to a sparse array (index 1 is a hole), which is not query data — …` (the same tail) | `[1, null, 3]` |
 | `a.params({ k: 1 }).join(b.params({ k: 2 }), …)` | `parameter 'k' is bound to different values by the two sides of join — one document carries one binding per name; bind it once, or rename one side` | bind it once on the outer side, or rename one |
+| `from(rows).select((x, i) => ({ v: x.a, i }))`, `where((x, p) => x.a.eq(p))` | `the parameters argument is not a value — read a declared parameter by name (p.tenantId); a chain callback receives no element index` | `p.k`, a declared parameter read by name — there is no element index to read (§3) |
+| `select((x, p) => ({ ...p }))`, `Object.keys(p)` | the same message | `p.k`, by name — the proxy has no keys to list |
+| `from(rows).params({ ids: 5 }).where((x, p) => x.a.in(p.ids)).toArray()` | `parameter 'ids' is the list an in() reads, so its binding must be an array, got a number — bind one value as [value]` | `.params({ ids: [5] })` |
+| `client.live(chain.params({ ids: [] }), { externals: { ids: 5 } })` | the same message — the override is what the store would run | `externals: { ids: [5] }` |
 
 A binding is not a captured constant: it becomes an external, and later a
 bound SQL parameter. A `Date` there would compare against nothing and
 answer `[]` with no error anywhere — which is why the check is at
-`params()` time and not at the boundary.
+`params()` time and not at the boundary. The `in()` list is the one
+binding checked later, when the chain RUNS — a terminal, an iteration,
+`explain()`, a live registration against the externals it registers —
+because a `params()` after the capture, or a registration's own
+`externals`, may rebind the name (§4).
 
 ### 14.5 `JL0005` — the build-time catch-all
 
@@ -1342,6 +1412,7 @@ They group into four families.
 | `where((u) => u.at.eq(new Date()))` | `a captured expression cannot embed a Date instance — it carries no own enumerable members, so it would embed as {}. Convert it to query data first (a Date to its ISO string or epoch number, a Map to an object), or bind it through params().` | the ISO string, or `.params({ when })` |
 | `select(() => new Map())` | the same message, naming `Map` | a plain object |
 | `select(() => MyArray.from([1]))` | `a captured expression cannot embed an Array subclass instance — its behaviour is not expressible as query data` | a plain array |
+| `select(() => [1, , 3])`, `where((u) => u.a.in([1, , 3]))` | `a captured expression cannot embed a sparse array — index 1 is a hole, which JSON cannot carry; write null there` | `[1, null, 3]` |
 | `select(() => undefined)` | `a captured expression cannot embed an undefined value` | `null`, which IS a value (§5) — a callback that forgot its `return` is the usual cause |
 
 `-0` is the one nobody guesses, and it is worth the sentence. It is
@@ -1367,6 +1438,12 @@ that preserves it, so there is no spelling that is allowed to.
 | `from(a).join(from(b), …)` | `join's other side must derive from the same source, or from two providers sharing one scope (one store's entity sets) — a query document reads one input; load both collections under one root, or join two entity sets of one store` | one source, or one store's two entity sets (§13.2) |
 | `from(rows).concat(42)` | `concat takes a sequence or a constant array` | a sequence over the same source, or an array |
 | `select((r) => r.v.all().rolling(spec))` where `spec` reads the row | `rolling() takes a plain literal spec object, not an expression or captured value` | a literal spec |
+| `select((u) => u.tags.at(2 ** 53))` | `at() takes a safe integer index, got 9007199254740992` | an index within ±(2^53 − 1), which an array can have |
+| `from(rows, { limit: { steps: 3 } })` | `from() does not take 'limit' — did you mean 'limits'?` | `{ limits: { steps: 3 } }` |
+| `from(rows, { bogus: 1 })` | `from() does not take 'bogus'; the options are compileTypeTest, functions, collations, pathFunctions, limits, registry` | one of the six (§8.1); `fromAsync()` and `fromDocument()` refuse the same way, by their own names |
+| `from(rows, 'x')`, `from(rows, null)` | `from() takes a plain options object` | an object literal, or no second argument |
+| `orderBy((u) => u.n, { emtpy: 'greatest' })` | `orderBy() does not take 'emtpy' — did you mean 'empty'?` | `{ empty: 'greatest' }` |
+| `orderBy((u) => u.n, null)` | `orderBy() takes a plain options object` | `{}`, or no second argument |
 
 **A provider or a document that is not shaped as the contract says.**
 
@@ -1374,6 +1451,8 @@ that preserves it, so there is no spelling that is allowed to.
 |---|---|---|
 | `from({ execute, root: 7 })` | `a provider's root is a path expression string ('$.Post[*]'), got number` | a path expression, or no `root` at all |
 | `createPushQueue({ highWaterMark: 0 })` | `highWaterMark must be a positive integer` | a positive integer (1024 by default) |
+| `createPushQueue({ highWatermark: 5 })` | `createPushQueue() does not take 'highWatermark' — did you mean 'highWaterMark'?` | `{ highWaterMark: 5 }` |
+| `createPushQueue(null)` | `createPushQueue() takes a plain options object` | `{}`, or no argument |
 
 A malformed VERSION envelope is not this code: `fromDocument(rows,
 { $query: '0.2', $expr })` is compiled by the engine first, so the
@@ -1389,7 +1468,12 @@ $expr: … } (QUERY-FORMAT §4.1)`).
 |---|---|---|
 | `fromAsync(rows).mapAsync(fn, {})` | `mapAsync requires { concurrency: <positive integer> } — an unbounded default is a denial of service waiting for a slow downstream` | `{ concurrency: 8 }` |
 | `mapAsync(fn, { concurrency: 2, mode: 'x' })` | `mapAsync mode must be one of parallel\|concat\|switch\|exhaust, got 'x'` | one of the four |
+| `mapAsync(fn, { concurrency: 2, ordered: 'false' })` | `mapAsync ordered must be a boolean, got "false"` | `ordered: false` |
+| `mapAsync(fn, { concurrency: 2, ordered: null })` | `mapAsync ordered must be a boolean, got null` (`got an object` for `{}`, `got a number` for `1`) | `ordered: true`, or leave it out |
+| `mapAsync(fn, { concurrency: 2, ordred: false })` | `mapAsync() does not take 'ordred' — did you mean 'ordered'?` | `ordered` — the members are `concurrency`, `mode` and `ordered` |
 | `mapAsync(42, { concurrency: 1 })` | `mapAsync takes an async callback` | a callback |
+| `federate({ sources, maxRows, maxBytes, maxTotalRow: 1 })` | `federate() does not take 'maxTotalRow' — did you mean 'maxTotalRows'?` | `maxTotalRows` (§12.1) |
+| `federate({ sources: { a: { provider, estimateRows: 5 }, … }, … })` | `federate()'s source 'a' does not take 'estimateRows' — did you mean 'estimatedRows'?` | `{ provider, estimatedRows }` |
 | `fromAsync(rows).concat(fromAsync(rows))` | `concat on an async sequence takes a constant array — an async source cannot be re-iterated for a second sequence` | a constant array, or `concat` on the sync surface |
 | `fromAsync(rows).join(fromAsync(rows), …)` | `join on the async surface is pushed whole to a provider — it needs a provider source and comes before any mapAsync; over an iterable, a cursor or a push queue there is no join, because a single-pass source cannot be read twice (QUERY-PEN.md §10)` | join over a provider, join on the sync surface, or collect the stream first |
 | `fromAsync(rows).mapAsync(fn, { concurrency: 1 }).toDocument()` | `toDocument() cannot represent mapAsync (a host callback); explain() reports the split` | `explain()`, which reports `{ split: { pushed, residual } }` |
@@ -1682,9 +1766,10 @@ Each of these is a design commitment, checkable in the source:
   time, produces an expression, and the engine evaluates that expression
   per row. This is why a JavaScript operator inside a callback is a trap
   rather than a slow path (§3): `&&`, `||`, `!`, `?:`, `in`, `typeof`,
-  `Object.keys` and `===` evaluate against the proxy and yield a
-  silently wrong document, while `>` and `+` throw a plain `TypeError`.
-  Use `.and()`, `.or()`, `.not()` and the comparison methods.
+  `Object.keys`, truthiness and `===` evaluate against the proxy and
+  yield a silently wrong document, while `>`, `<`, `+` and a template
+  literal are refused with `JL0108` (§14.9). Use `.and()`, `.or()`,
+  `.not()` and the comparison methods.
 - **No second grammar.** The chain emits the published query language
   and nothing else; `toDocument()` is compilable by a bare
   `compileJsonQuery` with no linq involvement, which is what makes a
@@ -1752,16 +1837,16 @@ are shorter:
 ## 17. Cost
 
 A consumer importing `from` from `@jarenjs/linq` and calling one
-terminal bundles **<!--fact:bundle.chain-->211,082<!--/fact--> bytes** (esbuild, ESM, minified, tree-shaken,
+terminal bundles **<!--fact:bundle.chain-->213,563<!--/fact--> bytes** (esbuild, ESM, minified, tree-shaken,
 `platform: 'neutral'`). The figure is measured by
 `scripts/check-tree-shaking.js`'s chain probe and compared with this
 section on every `npm run test:tree-shaking`: it is derived, never typed,
 and a stale one is red here rather than wrong in a document somebody
 reads.
 
-Of that, **<!--fact:bundle.chain.own-->40,780<!--/fact--> bytes** are the chain's own modules — `sequence.js`,
+Of that, **<!--fact:bundle.chain.own-->43,145<!--/fact--> bytes** are the chain's own modules — `sequence.js`,
 `async.js`, `expression.js`, `document.js`, `provider.js`,
-`concurrency.js`, `errors.js` and `schema-of.js`. The remaining ~134 kB
+`concurrency.js`, `errors.js` and `schema-of.js`. The remaining ~170 kB
 is the query ENGINE and the core it stands on: a chain's document has to
 run somewhere, and the in-memory runner is the reference semantics every
 provider is measured against (§8). A consumer that only ever hands
@@ -1780,13 +1865,13 @@ making:
   `@jarenjs/formats`** — the client's optional peers. A consumer of the
   chain alone installs nothing new;
 - **no pen bytes at all**, in either direction: the pens carry no chain
-  module either, which is what keeps a <!--fact:bundle.jslt.kb-->20<!--/fact--> kB JSLT
-  pen <!--fact:bundle.jslt.kb-->20<!--/fact--> kB.
+  module either, which is what keeps a <!--fact:bundle.jslt.kb-->21<!--/fact--> kB JSLT
+  pen <!--fact:bundle.jslt.kb-->21<!--/fact--> kB.
 
-`docs/CONSUMING.md` states the rounded price of all ten subpaths in one
+`docs/CONSUMING.md` states the rounded price of every subpath in one
 table, each figure held equal to the same measurements. Two of its rows
-are the ones to read together: the chain at <!--fact:bundle.chain.kb-->211<!--/fact--> kB and
-`./db` at <!--fact:bundle.db.kb-->836<!--/fact--> kB.
+are the ones to read together: the chain at <!--fact:bundle.chain.kb-->214<!--/fact--> kB and
+`./db` at <!--fact:bundle.db.kb-->856<!--/fact--> kB.
 The client costs what the store costs, by construction, and the chain
 costs what running a query costs.
 
@@ -1795,7 +1880,7 @@ the reason is worth knowing: a bundler counts a shared module once, and
 the chain and every pen share the expression capture (`expression.js`)
 and the coded errors under it (`errors.js`, and `@jarenjs/core`'s error
 and object helpers). A consumer importing the chain AND the schema pen
-bundles **<!--fact:bundle.chain.withSchemaPen-->235,469<!--/fact--> bytes** — **<!--fact:bundle.chain.shared-->12,621<!--/fact--> bytes** less than the sum of the
+bundles **<!--fact:bundle.chain.withSchemaPen-->238,141<!--/fact--> bytes** — **<!--fact:bundle.chain.shared-->13,170<!--/fact--> bytes** less than the sum of the
 figure above and [SCHEMA-PEN.md](SCHEMA-PEN.md#7-cost) §7's, which is
 what those shared modules weigh. The probe measures that pair too, so
 the saving is derived like everything else here. What the chain does NOT

@@ -17,14 +17,7 @@ import { createTypeTestCompiler } from '@jarenjs/validate/query';
 
 import { compileEmitModel } from './model.js';
 import { fileOutput } from './output.js';
-
-/** Match a model node by its `kind`. A SCHEMA match, not a path match:
- * `$apply` on the current node dispatches location-less, so a path match
- * would silently never fire for a re-dispatched node. Shape is what these
- * rules mean anyway. */
-const isKind = (kind) => ({
-  schema: { type: 'object', properties: { kind: { const: kind } }, required: ['kind'] },
-});
+import { isKind } from './match.js';
 
 /**
  * The stylesheet. Every rule dispatches on a node's `kind`, so the model's

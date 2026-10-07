@@ -20,6 +20,7 @@ import {
 import { clamp01 } from '@jarenjs/core/math';
 import { axisTicksLinear, niceStep, formatTickValue } from '../core/axis.js';
 import { FS_TICK, FS_LABEL, annotateChart, chartTitle } from '../core/cartesian.js';
+import { measurableSpan } from '../core/domain.js';
 import { CATEGORICAL, seriesColor } from '../core/palette.js';
 import { normalizeTooltip, valueMark } from '../core/marks.js';
 
@@ -62,7 +63,8 @@ export function buildRadarAST(data, config = {}) {
   else {
     if (maxVal === 0) maxVal = 1;
     const step = niceStep(maxVal, 4);
-    top = step * Math.ceil(maxVal / step);
+    // rounded up past the largest double, the outer ring is clamped
+    [, top] = measurableSpan(0, step * Math.ceil(maxVal / step));
   }
 
   const angleOf = (i) => -Math.PI / 2 + (i / Math.max(1, n)) * Math.PI * 2;

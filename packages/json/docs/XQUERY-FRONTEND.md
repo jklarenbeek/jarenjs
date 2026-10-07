@@ -46,7 +46,19 @@ q(null, { doc: data }); // parse + compile convenience; returns the engine's com
   | `unsupported variable name '<name>'`, `unsupported lookup index 0 ...` | lexeme outside the JSON format's rules |
 
   Anything *not* prefixed `unsupported` is a plain syntax error — text that
-  is not valid XQuery 3.1 to begin with.
+  is not valid XQuery 3.1 to begin with — with one exception: text that
+  nests deeper than 256 levels is refused by position as
+  `the expression nests deeper than 256 levels`. The levels are the
+  source text's: every nested expression (a parenthesized one included)
+  and every phrase a FLWOR's clauses nest into counts one. 256 is the
+  number `compileJsonQuery` enforces on a document's nesting (`JQ0011`),
+  but the two counts differ: 256 parentheses around `1` mean just `1`, a
+  document that compiles, and are refused here all the same, while a long
+  `1 + 1 + …` chain parses and is refused by `compileJsonQuery` instead.
+  Text from 257 levels up to the host's stack limit (about 500 to 600
+  nested parentheses, arrays or maps on Node's default stack) used to
+  parse and is now refused; only deeper text used to escape as a
+  `RangeError`.
 
 ## 2. Accessing the input document
 

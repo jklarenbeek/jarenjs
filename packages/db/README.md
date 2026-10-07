@@ -719,14 +719,7 @@ opinion: <!--fact:vector.ceiling-->5.142 ns per vector component — one query r
 Past that this design is the wrong tool and no margin changes it; what
 lies beyond is an approximate index, and this store does not have one.
 
-The [labelled retrieval comparison](../../benchmark/README.md#labelled-recall-and-repeated-refinement)
-also scores an optional storage adapter with approximate candidates against
-exact cosine on cached live embeddings. The AI ledger reports the adapter's
-algorithm, exhaustive flag and returned candidate count, validates candidate
-identity/vector shape, and re-scores candidates itself. The DB ledger recipe
-continues to normalize as an exact adapter. No ANN runtime dependency is added.
-
-The benchmark decision and its measured limits are maintained by [Tangle’s recall instruments](https://github.com/jklarenbeek/tangleai/blob/main/benchmark/MIGRATED-JAREN.md#labelled-recall-and-repeated-refinement). The generic store retains exact ranking; external ANN adapters must meet the declared oracle and lifecycle contract.
+The recall and refinement benchmarks that decide whether an approximate index is worth adding belong to the application that measures them, not to this repository. The generic store retains exact ranking; external ANN adapters must meet the declared oracle and lifecycle contract.
 
 **One document, three executors, proven to agree.** As with the spatial
 family, the k-nearest shapes of a committed corpus
@@ -889,6 +882,8 @@ oracle run on both. What differs is declared rather than discovered:
 | an indexed path | a `VIRTUAL` generated column | a `STORED` one, guarded by `jsonb_typeof` |
 | text ordering | the default `BINARY` collation | `COLLATE "C"`, which is the same bytes |
 | a collection's order | the implicit `rowid` | a declared `rid bigserial` |
+| an entity's row order (ties, and a plain `$.E[*]`) | its `rowid`: insertion order, but KEY order for an `integer` key, which is the `rowid` | its `rid`: insertion order, whatever the key — order by the key to answer alike |
+| an entity key with `default: "auto"` | the `INTEGER PRIMARY KEY`: the largest key plus one, so a rolled-back number is handed out again | a `bigserial` sequence: a rolled-back insert leaves a gap, and an explicit key is not seen — the allocation that meets one is `JD2001` |
 | `integer` and `number` | `INTEGER` and `REAL` | both `numeric` |
 | a `boolean` member | `INTEGER` 1/0 | `smallint` 1/0 |
 | an untyped indexed path | `ANY` — compares with anything | `jsonb` — the predicate reads the document instead |
@@ -900,7 +895,8 @@ oracle run on both. What differs is declared rather than discovered:
 | maintenance (checkpoint, integrity, optimize) | yes | no — every one of them IS a pragma |
 | a spatial `physical: 'rtree'` | an R\*Tree virtual table | the B-tree over the four edge columns, and `explain().prefilters[].via` says so |
 | a transaction a statement failed in | continues | is aborted until it ends (`JD2088`, its COMMIT included, so nothing in it commits); catch-and-continue needs a nested `transaction()` |
-| `ALTER TABLE` | additive only | full, so a rebuild is never needed |
+| `ALTER TABLE` | additive only | additive changes alter the table in place; a change the planner expresses as a rebuild (a key, an enum, a type, a relation) rebuilds the table, writers waiting until it commits, which PostgreSQL supports only for an entity nothing else depends on: no foreign key references it, its own included, and no view reads it ([§10](docs/MIGRATION-FORMAT.md#10-the-rebuild-procedure)) |
+| a string holding U+0000, or an unpaired surrogate | stored and read back as written | refused by `jsonb` (`JD2005`) — in a document, and in a key a point read looks up — so a replicated SQLite document carrying one cannot be applied ([replication](docs/REPLICATION-FORMAT.md)) |
 
 PostgreSQL has bounded native cursors, finite admission and a read-back server
 **statement timeout**; SQLite's `statementTimeout` remains `false`. Neither
@@ -925,31 +921,31 @@ alone; writing accepted evidence requires both engines. The committed
 
 <!--fact:postgres.portability-->
 
-Measured 2026-10-06T18:12:08.998Z: 500 documents, Node 24.20.0, SQLite 3.53.4, PostgreSQL 17.11 (Debian 17.11-1.pgdg12+2), pg 8.23.0. Durability settings: fsync=on, synchronous_commit=on, full_page_writes=on.
+Measured 2026-10-07T21:57:42.829Z: 500 documents, Node 24.20.0, SQLite 3.53.4, PostgreSQL 17.11 (Debian 17.11-1.pgdg12+2), pg 8.23.0. Durability settings: fsync=on, synchronous_commit=on, full_page_writes=on.
 
 | Operation | SQLite ms | PostgreSQL ms | PG / SQLite | Client query calls per PG operation | Iterations |
 |---|---:|---:|---:|---:|---:|
-| open | 25.562 | 27.197 | 1.1× | 17 | 1 |
-| insert | 0.017 | 1.907 | 111.5× | 1 | 500 |
-| get | 0.021 | 1.007 | 48.1× | 5 | 50 |
-| indexed | 0.760 | 4.248 | 5.6× | 13 | 20 |
-| scanned | 0.754 | 4.281 | 5.7× | 13 | 20 |
-| range | 0.772 | 3.862 | 5.0× | 13 | 20 |
-| transaction | 0.181 | 2.717 | 15.0× | 3 | 20 |
-| migration (one index) | 22.576 | 193.949 | 8.6× | not separately counted | 1 |
+| open | 19.267 | 20.147 | 1.0× | 17 | 1 |
+| insert | 0.013 | 0.666 | 53.2× | 1 | 500 |
+| get | 0.014 | 0.743 | 52.1× | 5 | 50 |
+| indexed | 0.610 | 3.148 | 5.2× | 13 | 20 |
+| scanned | 0.637 | 2.944 | 4.6× | 13 | 20 |
+| range | 0.508 | 2.856 | 5.6× | 13 | 20 |
+| transaction | 0.138 | 0.922 | 6.7× | 3 | 20 |
+| migration (one index) | 17.965 | 165.875 | 9.2× | not separately counted | 1 |
 
-Sequential insert throughput: SQLite 58471, PostgreSQL 524 documents/second.
+Sequential insert throughput: SQLite 79854, PostgreSQL 1502 documents/second.
 
 | First-row probe | SQLite | PostgreSQL |
 |---|---:|---:|
-| First row ms | 1.219 | 1.300 |
-| First row plus cleanup ms | 1.335 | 1.757 |
+| First row ms | 0.941 | 0.927 |
+| First row plus cleanup ms | 1.046 | 1.253 |
 | Returned rows | 1 | 1 |
 | Fetched native rows / normalized bytes | not instrumented | 64 / 5661 |
 | Session peak native frame rows / bytes | not instrumented | 64 / 5813 |
 | Client query calls including cleanup | no network | 5 |
-| Sampled RSS before / after MiB | 105.18 / 121.65 | 126.59 / 129.68 |
-| Sampled heap before / after MiB | 22.84 / 29.01 | 16.49 / 24.45 |
+| Sampled RSS before / after MiB | 107.24 / 122.93 | 128.05 / 131.43 |
+| Sampled heap before / after MiB | 22.94 / 29.51 | 16.74 / 24.83 |
 
 After close: driver active=0, queued=0; native cursors=0, prepared statements=0; host pool total=1, idle=1, waiting=0.
 
@@ -1084,7 +1080,9 @@ the separate relational SQL cache. Evicted plans release their main and auxiliar
 statements after active reads finish; lazy cursors remain usable. Explanations,
 scan checks and completed `dataVersion()` reads release temporary statements.
 A host's `maxStatements` counts physical handles, so allow capacity for fixed
-CRUD statements, auxiliaries and active cursors as well as cached plans. See the
+CRUD statements, auxiliaries, each entity's up to 64 cached mutation statements
+(an evicted one is released once its use settles) and active cursors as well as
+cached plans. See the
 [Store resource contract](docs/MODEL-FORMAT.md#4-the-driver-contract-and-the-synchronous-fast-path).
 
 On the pool, `reads: 'parallel'` runs the classified root reads on the readers,
@@ -1684,7 +1682,8 @@ its side-effect-free status read are in
   relay. No priority classes, no cron, no workflow compensation.
 - **Live-query maintenance is limited to the declared table** (§7);
   indexed joins and graph projections require bounded dependencies. Offset
-  windows, unindexed joins, load-spec graphs and non-canonical shapes re-run, reported.
+  windows, unindexed joins and non-canonical shapes re-run, reported; a load
+  specification is no live document (`JD0033`).
 - **`eventTime.retention` bounds repair work, not memory.** It is the
   horizon a view claims and is checked against the window it maintains;
   the maintained state is still bounded by `live.maxMaintained`, and no

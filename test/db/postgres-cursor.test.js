@@ -279,9 +279,17 @@ describe('PostgreSQL native cursor and deadline execution', { skip: !url && 'JAR
     finally { await store.close(); }
     assert.equal(pool.totalCount, pool.idleCount);
   });
-  it('expires abandoned root and direct cursors and refuses queued aborts without opening them', async () => {
-    const store = await openStore(model, { driver: postgresDriver(pool, { schema, cursorLifetimeMs: 40 }) });
+  it('refuses queued aborts without opening them, and expires abandoned root and direct cursors whatever a round trip costs', async () => {
+    // admission: under the default lifetime no round trip comes near it, so
+    // the held cursor's first pull is certain and the queued one can only wait
+    const opening = performance.now();
+    const store = await openStore(model, { driver: postgresDriver(pool, { schema }) });
+    // a lifetime short enough to pass inside the test, yet far above what this
+    // host takes to open a store and pull: that is several round trips, and a
+    // store whose lifetime is shorter cannot even open
+    const lifetime = Math.max(40, Math.ceil(4 * (performance.now() - opening)));
     try {
+      await store.collection('notes').put({ id: 'one' });
       const held = store.collection('notes').query(document);
       await held.next();
       const controller = new AbortController();
@@ -289,18 +297,33 @@ describe('PostgreSQL native cursor and deadline execution', { skip: !url && 'JAR
       const rejected = assert.rejects(queued.next(), (e) => ['JD2064', 'JD2072'].includes(e.code));
       controller.abort();
       await rejected;
-      await delay(65);
-      await assert.rejects(held.next(), code('JD2075'));
-      assert.deepEqual(await store.collection('notes').get('one'), { id: 'one' });
+      await held.return();
     }
     finally { await store.close(); }
-    const connection = await postgresDriver(pool, { schema, cursorLifetimeMs: 20 }).open();
+    // expiry runs from admission (a root cursor) or the declaration (a direct
+    // one), so a first pull may itself outlive the lifetime and be refused;
+    // once the lifetime has surely passed every pull is refused, a buffered
+    // row included, and the cursor lets go without the consumer's help
+    const short = await openStore(model, { driver: postgresDriver(pool, { schema, cursorLifetimeMs: lifetime }) });
+    try {
+      const held = short.collection('notes').query(document);
+      const first = await held.next().then((step) => (step.done ? 'done' : 'row'), (error) => error.code);
+      assert.ok(first === 'row' || first === 'JD2075', `the first pull answers a row or the expiry, not ${first}`);
+      await delay(lifetime + 10);
+      await assert.rejects(held.next(), code('JD2075'));
+      assert.deepEqual(await short.collection('notes').get('one'), { id: 'one' }, 'the expired cursor released the gate');
+    }
+    finally { await short.close(); }
+    const connection = await postgresDriver(pool, { schema, cursorLifetimeMs: lifetime }).open();
     try {
       const cursor = await (await connection.prepare('SELECT n FROM generate_series(1,3) n')).iterate();
-      await cursor.next();
-      await delay(40);
+      const first = await cursor.next().then((step) => step.value?.n, (error) => error.code);
+      assert.ok(first === 1 || first === 'JD2075', `the first pull answers row 1 or the expiry, not ${first}`);
+      await delay(lifetime + 10);
       await assert.rejects(cursor.next(), code('JD2075'));
-      assert.equal(connection.metrics().cursors, 0);
+      // the deadline is a backstop for a cursor that never lets go, not a window
+      for (const until = Date.now() + 10_000; connection.metrics().cursors !== 0 && Date.now() < until;) await delay(5);
+      assert.equal(connection.metrics().cursors, 0, 'the expired cursor closed without the consumer');
     }
     finally { await connection.close(); }
   });
