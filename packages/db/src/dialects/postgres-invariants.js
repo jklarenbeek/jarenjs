@@ -13,19 +13,28 @@ const SAFE_RANGE = 'BETWEEN -9007199254740991 AND 9007199254740991';
 /** The search path every rule function runs under, as the catalog keeps it. */
 const SEARCH_PATH = 'pg_catalog, pg_temp';
 
-/** Every PostgreSQL column is typed, so an operand's domain is what its codec
- * reads back: a safe integer, a finite number inside that range, a date of
- * years 1–9999. Text compares by code point, as SQLite's BINARY does. */
-const POSTGRES = {
+/** PostgreSQL's flavor of the row-predicate lowering. Every PostgreSQL column
+ * is typed, so an operand's domain is what its codec reads back: a safe
+ * integer, a finite number inside that range, a date of years 1–9999. Text
+ * compares by code point, as SQLite's BINARY does. */
+export const POSTGRES = {
   true: 'TRUE',
   false: 'FALSE',
   equal: 'IS NOT DISTINCT FROM',
   different: 'IS DISTINCT FROM',
+  /** A text literal every session reads alike. A function's body is parsed
+   * in the session that runs it, whose `standard_conforming_strings` decides
+   * whether a backslash in a plain literal escapes: one that holds a
+   * backslash is an escape string with its backslashes doubled; any other
+   * keeps the plain spelling.
+   * @param {string} value @param {(value: string) => string} plain the dialect's literal */
+  text: (value, plain) => (value.includes('\\') ? `E${plain(value.replaceAll('\\', '\\\\'))}` : plain(value)),
   /** @param {any} column @param {string} ref */
   column(column, ref) {
     const checks = ['integer', 'number'].includes(column.codec) ? [`${ref} ${SAFE_RANGE}`]
       : column.codec === 'date' ? [`${ref} >= DATE '0001-01-01'`, `${ref} < DATE '10000-01-01'`] : [];
-    const domain = column.null === 'null'
+    // SQL NULL is a JSON null or an absent member, where the column admits it
+    const domain = column.null !== 'reject'
       ? checks.length === 0 ? null : `(${ref} IS NULL OR (${checks.join(' AND ')}))`
       : `(${[`${ref} IS NOT NULL`, ...checks].join(' AND ')})`;
     const value = column.codec === 'date' ? `(pg_catalog.to_char(${ref}, 'YYYY-MM-DD') COLLATE "C")`

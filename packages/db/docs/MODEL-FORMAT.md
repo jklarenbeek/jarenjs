@@ -3543,8 +3543,11 @@ own entity has — a column of its layout, or a stored property of a document �
 whose column has the target column's codec (an integer into a number column is
 exact), and a literal is a value the target column holds, so the database, its
 other engine and the store compare one value one way; anything else refuses at
-planning. A probe composes with `$not`, `$and` and `$or` — "the parent is a
-draft, or it is gone" is
+planning. A database rule's match value reads a `null` or `reject` column: a
+member that an `absent` column (§13.4) leaves missing has no value to match.
+`$exists-row` asks for a row of another table; `$exists` (§13.4) asks whether
+a member of the rule's own record is present. A probe composes with `$not`,
+`$and` and `$or` — "the parent is a draft, or it is gone" is
 
 ```json
 { "$or": [
@@ -3593,15 +3596,52 @@ covers direct and tracked writes but not an external SQL writer.
 Lowering rules over a store-owned layout is open work, not a
 limitation of the rule language.
 
-Database enforcement also requires a bounded scalar query expression: `$eq`,
-`$ne`, `$lt`, `$le`, `$gt`, `$ge`, `$and`, `$or`, `$not`, `$exists-row`, scalar
-literals, `$.op`, and `$.old.member` / `$.new.member` references over `text`,
-`integer`, `number`, `boolean`, `date` and `datetime` columns. A text literal
-that starts with `$` is written `$$`, as the query language reads it; any other
-`$` expression (a variable, a bracketed path) refuses. Unsupported expressions
-refuse at planning. A rule such as
-`{ "$le": ["$.new.start", "$.new.end"] }` declares an interval constraint without
-claiming interval indexing.
+Database enforcement also requires a bounded query expression, which one
+row-predicate compiler lowers to SQL that gives the query engine's answer over
+the row as stored, with the one exception below. Its operands are scalar
+literals, `$.op`, and `$.old.member` / `$.new.member` references to `text`,
+`integer`, `number`, `boolean`, `date` and `datetime` columns. A literal is read
+as the query language reads it: a text that starts with `$` is written `$$`,
+and `$const` quotes one level as written, so a quoted object or list (a nested
+`$const` included) is no scalar and refuses, as does a text holding U+0000,
+which SQL text cannot carry; any other `$` expression (a variable, a bracketed
+path) refuses. A column's `null` policy (§12) says what its SQL NULL is, and so
+what a rule reads there: on a `null` column a JSON null, so equality is
+null-safe (a `null` literal matches it, and `$ne` of `2` and a null holds); on
+an `absent` column a missing member, which every comparison finds false — `$ne`
+and a value of another type included; such a column never holds a JSON null,
+so a `null` literal or a `null` item of a list against it refuses at planning
+(`$eq` with it never holds, and `$ne` would only restate `$exists`, which says
+it directly); a `reject` column holds no SQL NULL. What lowers, per policy:
+
+| Shape | `null` column | `absent` column | `reject` column |
+|---|---|---|---|
+| `$eq`, `$ne` | null-safe (across JSON types, the exception below); a `null` literal is legal | false while the member is missing; a `null` literal refuses | the value's comparison |
+| `$lt`, `$le`, `$gt`, `$ge` | false against SQL NULL | false while the member is missing | the value's comparison |
+| `{ "$eq": [<path>, { "$seq": [<literal>, …] }] }` | true when the value is one of the literals; a `null` item matches SQL NULL | as `null`, false while missing; a `null` item refuses | true when the value is one of the literals |
+| `{ "$exists": "<path>" }` | true (a null is present) | true when the member is present | true |
+
+`$and`, `$or`, `$not` and `$exists-row` (§13.2) compose them; every leaf is
+true or false, never SQL NULL, so `$not` negates the engine's answer. In the
+trigger a list is `IN (…)` (with `OR … IS NULL` for a `null` item), and a leaf
+over an `absent` column holds only where that column `IS NOT NULL`. Refused at
+planning (`JD0005`, naming the reason): `$ne` and an ordered comparison against
+a `$seq` (the engine reads them as true when any one item compares); an empty
+`$seq` (it matches nothing); a `$seq` compared with anything but one member
+path; a `$seq` item that is not a literal its column holds — the codec's JSON
+type, a safe integer in an `integer` column, a finite number that is not an
+unsafe integer in a `number` column (a `date` or `datetime` literal compares as
+its text); `$exists` in any form but one member path (its array form tests a
+literal, which always exists); `$starts-with`, arithmetic and every other
+operator. A rule such as `{ "$le": ["$.new.start", "$.new.end"] }` declares an
+interval constraint without claiming interval indexing.
+
+The exception: `$eq` and `$ne` between two `null` columns of different JSON
+types (a `text` and an `integer` column, say) compare by type alone, so where
+both hold SQL NULL the rule finds them unequal, while the query engine finds two
+nulls equal. Installed programs are verified by their text (below), so this
+spelling stays until a reviewed migration of installed programs changes it;
+test the nulls explicitly instead (`{ "$eq": ["$.new.t", null] }` is null-safe).
 
 `planInvariants(model, { dialect })` returns reviewable statements in install
 order; an explicit migration installs them, one `ddl` step each
@@ -3621,7 +3661,12 @@ both engines:
   schema (`searchPath`, required); every table a program names carries that
   schema, and every function runs with `search_path = pg_catalog, pg_temp`, so
   no schema a writer puts ahead of `pg_catalog` can supply its operators, casts
-  or collations. `TRUNCATE` runs no row trigger, so a table whose deletes a
+  or collations. A function body is parsed in the session that runs it, whose
+  `standard_conforming_strings` decides whether a backslash in a plain literal
+  escapes, so a text literal that holds a backslash is written as an escape
+  string (`E'C:\\temp'` for the text `C:\temp`) that every session reads alike;
+  any other literal keeps its plain spelling. `TRUNCATE` runs no row trigger,
+  so a table whose deletes a
   rule judges gets one more program, a `BEFORE TRUNCATE` statement trigger that
   refuses it in the delete rule's name. A name past PostgreSQL's 63-byte
   identifier limit becomes `_jaren_rule_<hash of the table>_<op>`; two tables
@@ -3658,7 +3703,6 @@ compares each column as stored, under the column's declared collation, so on a
 `COLLATE NOCASE` column a rewrite that changes only letter case is no change,
 and an outside writer's other spelling of one json or uuid value is one;
 PostgreSQL compares by codec, and the store compares the values it reads back.
-An absent-column policy cannot be lowered to a database rule and refuses.
 SQLite's `INSERT OR REPLACE` and `UPDATE OR REPLACE` delete a conflicting row
 without running its delete trigger while `recursive_triggers` is off, as
 increments need it (§13.5), so such a writer passes a delete rule by. Store
@@ -3676,7 +3720,7 @@ codec's type, a safe integer, a finite number within ±(2^53−1), a date of yea
 An optional database `audit: { entity, values }` inserts into an
 application-owned mapped table after the accepted mutation, after identity
 allocation; an `entity` the model lacks, or one without a writable column
-layout (store-owned, or a view), is `JD0005` at the rule's `audit`. Values use old/new scalar references. Self-referential or chained
+layout (store-owned, or a view), is `JD0005` at the rule's `audit`. Values use old/new scalar references to `null` or `reject` columns (an `absent` one has no value to insert where its member is missing, and refuses). Self-referential or chained
 audit effects refuse — judged by table, so a second entity mapped to the rule's
 own table is that table; all effects share the writer transaction. On
 PostgreSQL an integer audit member fed by a `number` column or a non-integer

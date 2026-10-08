@@ -5,7 +5,7 @@ import { explainMapping, openStore, planInvariants, readSchema, sqliteDialect } 
 import { verifyPhysical } from '../../packages/db/src/physical.js';
 import { postgresDialect, postgresDriver } from '@jarenjs/db/postgres';
 import { ruleModel, truthModel, RULE_TABLES, ruleLifecycle, ruleTruthTable, ruleGrid, familyModel, familyLifecycle, FAMILY_REFUSALS,
-  sqliteEngine, storeAgreement } from './invariant-oracle.js';
+  sqliteEngine, storeAgreement, TRUTH_POLICIES } from './invariant-oracle.js';
 
 describe('PostgreSQL rule lowering', () => {
   it('plans a function and a row trigger per table and operation in the driver-owned schema, each program verified by its fields', () => {
@@ -197,6 +197,12 @@ describe('PostgreSQL database invariants', { skip: !url && 'JAREN_PG_URL is not 
   it('the null truth tables and every scalar codec give the query engine\'s verdict on both engines, and refuse what a codec cannot read', async () => {
     assert.equal(await ruleTruthTable(postgresEngine()), await ruleTruthTable(sqliteEngine()));
     assert.equal(await ruleGrid(postgresEngine()), await ruleGrid(sqliteEngine()));
+  });
+
+  it('a member read as absent compares false while missing, and refuses a null literal at planning, on PostgreSQL as on SQLite', async () => {
+    for (const policy of [TRUTH_POLICIES.absent, TRUTH_POLICIES.mixed])
+      assert.equal(await ruleTruthTable(postgresEngine(), policy), await ruleTruthTable(sqliteEngine(), policy), JSON.stringify(policy));
+    assert.equal(await ruleGrid(postgresEngine(), 'absent'), await ruleGrid(sqliteEngine(), 'absent'), 'every codec read as absent');
   });
 
   it('opens only over the installed programs it planned, field by field', async () => {

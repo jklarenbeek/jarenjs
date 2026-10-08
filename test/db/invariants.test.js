@@ -7,7 +7,7 @@ import { nodeDriver } from '@jarenjs/db/node';
 import { nodeWorkerDriver } from '@jarenjs/db/node-worker';
 import { nodeWorkerPoolDriver } from '@jarenjs/db/node-pool';
 import { ruleModel as model, truthModel, ruleLifecycle, ruleTruthTable, ruleGrid, sqliteEngine, familyModel, familyLifecycle,
-  FAMILY_TABLES, FAMILY_REFUSALS, storeAgreement, column } from './invariant-oracle.js';
+  FAMILY_TABLES, FAMILY_REFUSALS, storeAgreement, column, TRUTH_POLICIES } from './invariant-oracle.js';
 import { tempDbPath } from './helpers.js';
 
 it('fresh and upgraded rules agree for every SQL writer, allocated audit keys, nulls and frozen no-ops', async () => {
@@ -58,8 +58,21 @@ it('database predicates agree with Query null truth tables and refuse unavailabl
   }
 });
 
+it('a member whose column reads SQL NULL as absent compares false while missing, and a null literal against it refuses at planning', async () => {
+  // the refused predicates: each compares an absent member with null, or with a list holding null
+  const refused = (/** @type {string} */ verdicts) => JSON.parse(verdicts).flatMap((/** @type {any} */ v, /** @type {number} */ i) => (v === 'refused' ? [i] : []));
+  assert.deepEqual(refused(await ruleTruthTable(sqliteEngine(), TRUTH_POLICIES.absent)), [1, 4, 9, 12, 14, 15]);
+  assert.deepEqual(refused(await ruleTruthTable(sqliteEngine(), TRUTH_POLICIES.mixed)), [1, 4, 9, 12]);
+});
+
 it('every scalar codec gives the query engine\'s verdict and refuses a stored value its codec cannot read', async () => {
   await ruleGrid(sqliteEngine());
+});
+
+it('every scalar codec read as an absent member gives the query engine\'s verdict over the stored record', async () => {
+  const verdicts = JSON.parse(await ruleGrid(sqliteEngine(), 'absent'));
+  // the predicates that compare a member with null, or with a list holding one, refuse at planning
+  assert.equal(verdicts.filter((/** @type {any} */ v) => v === 'refused').length, 4);
 });
 
 it('invariant declarations refuse unspecified writer authority and duplicate names', () => {

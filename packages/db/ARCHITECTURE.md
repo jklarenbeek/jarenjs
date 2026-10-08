@@ -1357,6 +1357,21 @@ The supplied driver owns transactions and cursors. These programs are explicitly
 SQLite-semantic and never enter the JSON residual evaluator. See
 [the native SQLite contract](docs/SQLITE-RELATIONAL.md).
 
+`dialects/row-predicate.js` is the one lowering of a row predicate — a bounded
+query expression over the mapped columns of one row — to SQL that answers as the
+query engine does over the row as stored, per column `null` policy (SQL NULL as a
+JSON null, as an absent member, or refused) — except where `releasedText` keeps
+the spelling installed rule programs were planned with (two nulls of columns of
+different JSON types compare unequal there; MODEL-FORMAT §13.4). It renders a
+rule's trigger check, each column read through its codec with that codec's
+domain, and an index condition over plain columns, which assumes code-point text
+columns and a list short enough for a PostgreSQL index predicate. The caller
+passes the dialect's flavor (`SQLITE`
+beside `compileInvariants` in `invariant-sql.js`, `POSTGRES` in
+`postgres-invariants.js`, so no PostgreSQL code reaches a bundle that carries
+only SQLite) and the resolver of the paths it reads, and wraps each refusal
+reason in its own error.
+
 `relational.js` is one engine over an admission policy: planning, emission,
 execution, the result rule (`lastInsertRowid` only for an insert that inserted
 a row of a rowid table) and the classification of every driver failure are the

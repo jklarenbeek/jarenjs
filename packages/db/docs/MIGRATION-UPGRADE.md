@@ -526,6 +526,17 @@ value the store did not honor now refuse by code, before any statement:
   with no `docPath`, while `normalizeEntities` and the migration planner
   accepted them; they are now `JD0005` at `enforcement` and `audit`, by every
   model check.
+- A database rule comparing with a `$const` that quotes an object or a list (a
+  nested `{ "$const": { "$const": 3 } }`) lowered it as its innermost value,
+  which the query engine never finds equal, and one with a text holding U+0000
+  planned a program no engine could install; both are now `JD0005` when the
+  programs are planned: write the scalar itself, quoted by one `$const` at most.
+- On PostgreSQL a database rule's text literal holding a backslash was written
+  plainly, so a writer session with `standard_conforming_strings = off` read
+  the backslash as an escape and could pass the rule by; it is now written as an
+  escape string (`E'…'`), which changes that program's text, so a database that
+  installed such a rule refuses to open (`JD0002`) until an explicit migration
+  reinstalls the programs `planInvariants` plans.
 - On PostgreSQL a name the plan gives a table, a column or an index longer
   than 63 bytes (an indexed member past about 60 bytes, a long index,
   property or entity name) failed `openStore` with the dialect's raw

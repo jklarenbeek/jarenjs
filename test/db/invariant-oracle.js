@@ -148,29 +148,66 @@ const TRUTH_TABLES = {
 const TRUTH_WRONG_STORAGE = { sqlite: "INSERT INTO rows VALUES(1, 'wrong type', 4)", postgres: 'INSERT INTO rows VALUES(1, 9007199254740993, 4)' };
 export const TRUTH_PREDICATES = [{ $eq: ['$.new.a', '$.new.b'] }, { $ne: ['$.new.a', { $const: null }] },
   { $le: ['$.new.a', '$.new.b'] }, { $not: { $lt: ['$.new.a', '$.new.b'] } },
-  { $and: [{ $eq: ['$.op', 'insert'] }, { $or: [{ $gt: ['$.new.a', 0] }, { $eq: ['$.new.a', null] }] }] }];
+  { $and: [{ $eq: ['$.op', 'insert'] }, { $or: [{ $gt: ['$.new.a', 0] }, { $eq: ['$.new.a', null] }] }] },
+  // a missing member compares false with anything, a different type included
+  { $ne: ['$.new.a', '$.new.b'] }, { $ne: ['$.new.a', 2] }, { $ne: ['$.new.a', 'x'] },
+  // membership in a list of literals (a null item matches a null), existence, and each negated
+  { $eq: ['$.new.a', { $seq: [-1, 0] }] }, { $eq: ['$.new.a', { $seq: [2, null] }] }, { $exists: '$.new.a' },
+  { $not: { $eq: ['$.new.a', { $seq: [-1, 0] }] } }, { $not: { $eq: ['$.new.a', { $seq: [2, null] }] } }, { $not: { $exists: '$.new.a' } },
+  { $and: [{ $exists: '$.new.a' }, { $eq: ['$.new.b', { $seq: [null, -1] }] }] },
+  { $or: [{ $eq: ['$.new.b', { $seq: [null] }] }, { $lt: ['$.new.a', 0] }] }];
+
+/** The `null` policy of each truth column: SQL NULL is a JSON null, or an
+ * absent member in both columns, or in `a` beside a `b` that holds null. */
+export const TRUTH_POLICIES = { null: { a: 'null', b: 'null' }, absent: { a: 'absent', b: 'absent' }, mixed: { a: 'absent', b: 'null' } };
+
+/** Whether an expression compares a member its column reads as absent with a
+ * `null` literal or a list holding one: a plan refuses it, since such a member
+ * never holds null. @param {any} node @param {string[]} absent @returns {boolean} */
+function nullOfAbsent(node, absent) {
+  if (!node || typeof node !== 'object') return false;
+  if (Array.isArray(node)) return node.some((item) => nullOfAbsent(item, absent));
+  const isNull = (/** @type {any} */ value) => value === null || value?.$const === null;
+  return Object.entries(node).some(([key, args]) => (['$eq', '$ne', '$lt', '$le', '$gt', '$ge'].includes(key) && Array.isArray(args)
+    && args.some((arg) => absent.some((name) => arg === `$.new.${name}`))
+    && args.some((arg) => isNull(arg) || (Array.isArray(arg?.$seq) && arg.$seq.some(isNull))))
+    || nullOfAbsent(args, absent));
+}
 
 /**
- * Five predicates over `{ null, -1, 2 }²`: the trigger accepts exactly what
- * the query engine accepts, and refuses a row its codec cannot read.
- * @param {RuleEngine} engine @returns {Promise<string>} the verdicts
+ * Every truth predicate over `{ null, -1, 2 }²`: the trigger accepts exactly
+ * what the query engine accepts over the record as stored — a member omitted
+ * where its column reads SQL NULL as absent — and refuses a row its codec
+ * cannot read; a plan refuses a `null` literal against an absent member.
+ * @param {RuleEngine} engine @param {{ a: string, b: string }} [policy] the columns' `null` policies
+ * @returns {Promise<string>} per predicate, its verdicts or `refused`
  */
-export async function ruleTruthTable(engine) {
+export async function ruleTruthTable(engine, policy = TRUTH_POLICIES.null) {
   const verdicts = [];
+  const absent = Object.keys(policy).filter((name) => policy[/** @type {'a' | 'b'} */ (name)] === 'absent');
   for (const expression of TRUTH_PREDICATES) {
-    const spec = structuredClone(truthModel);
+    const spec = /** @type {any} */ (structuredClone(truthModel));
+    for (const name of ['a', 'b']) spec.entities.Row.physical.columns[name].null = policy[/** @type {'a' | 'b'} */ (name)];
     spec.entities.Row.invariants = [{ name: 'truth', on: ['insert'], assert: expression, enforcement: 'database' }];
     const evaluate = compileJsonQuery(expression);
     const fixture = await engine.fixture(TRUTH_TABLES);
     try {
+      if (nullOfAbsent(expression, absent)) {
+        assert.throws(() => planInvariants(spec, { dialect: fixture.dialect }), { code: 'JD0005', message: /never holds null/ }, JSON.stringify(expression));
+        verdicts.push('refused');
+        continue;
+      }
       for (const statement of planInvariants(spec, { dialect: fixture.dialect })) await fixture.exec(statement.sql);
+      const row = [];
       for (const a of [null, -1, 2]) for (const b of [null, -1, 2]) {
         const insert = () => fixture.exec(`INSERT INTO rows VALUES(1, ${a}, ${b})`);
-        const accepted = evaluate({ old: null, new: { id: 1, a, b }, op: 'insert' }) === true;
+        const stored = Object.fromEntries(Object.entries({ a, b }).filter(([name, value]) => value !== null || !absent.includes(name)));
+        const accepted = evaluate({ old: null, new: { id: 1, ...stored }, op: 'insert' }) === true;
         if (accepted) { await insert(); await fixture.exec('DELETE FROM rows'); }
-        else await assert.rejects(insert(), /jaren invariant:truth/);
-        verdicts.push(accepted);
+        else await assert.rejects(insert(), /jaren invariant:truth/, `${JSON.stringify(expression)} over ${JSON.stringify(stored)}`);
+        row.push(accepted);
       }
+      verdicts.push(row);
       await assert.rejects(fixture.exec(TRUTH_WRONG_STORAGE[engine.name]), /jaren invariant:truth/);
     }
     finally { await fixture.dispose(); }
@@ -216,6 +253,15 @@ export const GRID_PREDICATES = [
   { $or: [{ $eq: ['$.new.t', null] }, { $gt: ['$.new.t', 'B'] }] }, { $not: { $ge: ['$.new.n', '$.new.i'] } },
   // `$$` is a literal `$`; an ordered comparison over a boolean is false
   { $eq: ['$.new.t', '$$a'] }, { $ne: ['$.new.t', '$$$a'] }, { $le: ['$.new.f', true] }, { $not: { $gt: ['$.new.f', false] } },
+  // membership per codec (a null item matches a null), existence, which a null satisfies, and negations
+  { $eq: ['$.new.t', { $seq: ['a', 'é', '$$a'] }] }, { $eq: ['$.new.i', { $seq: [-1, 4, null] }] },
+  { $not: { $eq: ['$.new.n', { $seq: [-0.5, 2.25] }] } }, { $eq: ['$.new.d', { $seq: ['2020-01-01', '0001-01-01'] }] },
+  { $eq: ['$.new.s', { $seq: ['', { $const: '2020-02-02T00:00:00Z' }] }] }, { $eq: ['$.new.f', { $seq: [false] }] },
+  { $not: { $eq: ['$.new.f', { $seq: [true, null] }] } }, { $exists: '$.new.d' }, { $not: { $exists: '$.new.t' } },
+  // every spelling a list item admits: `$$` escapes a leading `$`, and `$const` quotes one level as written
+  { $eq: ['$.new.t', { $seq: [{ $const: '$a' }, { $const: 'B' }] }] }, { $eq: ['$.new.t', { $seq: [{ $const: '$$a' }] }] },
+  { $eq: ['$.new.i', { $seq: [{ $const: -1 }, { $const: null }] }] }, { $eq: ['$.new.f', { $seq: [{ $const: true }] }] },
+  { $eq: ['$.new.n', { $seq: [{ $const: 1.5 }, 4] }] },
   { $and: [{ $ne: ['$.new.i', 'x'] }, { $ne: ['$.new.n', 'x'] }, { $ne: ['$.new.t', 1] }, { $ne: ['$.new.d', 1] }, { $ne: ['$.new.s', 1] }, { $ne: ['$.new.f', 'x'] }] },
 ];
 
@@ -229,18 +275,28 @@ const values = (engine, row) => `(1, ${Object.keys(codecs).map((name) => {
 
 /**
  * Every predicate over every row: the trigger accepts exactly what the query
- * engine accepts, and a row whose storage its codec cannot read is refused.
- * Returns the verdicts, for a comparison across engines.
- * @param {RuleEngine} engine @returns {Promise<string>}
+ * engine accepts over the record as stored — with the `absent` policy, a
+ * member omitted where its column is NULL — and a row whose storage its codec
+ * cannot read is refused; a plan refuses a `null` literal against an absent
+ * member. Returns the verdicts, for a comparison across engines.
+ * @param {RuleEngine} engine @param {'null' | 'absent'} [policy] every codec column's `null` policy
+ * @returns {Promise<string>}
  */
-export async function ruleGrid(engine) {
+export async function ruleGrid(engine, policy = 'null') {
   const verdicts = [];
+  const absent = policy === 'absent' ? Object.keys(codecs) : [];
   for (const expression of GRID_PREDICATES) {
-    const spec = structuredClone(gridModel);
+    const spec = /** @type {any} */ (structuredClone(gridModel));
+    for (const name of Object.keys(codecs)) spec.entities.Row.physical.columns[name].null = policy;
     spec.entities.Row.invariants = [{ name: 'truth', on: ['insert'], assert: expression, enforcement: 'database' }];
     const evaluate = compileJsonQuery(expression);
     const fixture = await engine.fixture(GRID_TABLES);
     try {
+      if (nullOfAbsent(expression, absent)) {
+        assert.throws(() => planInvariants(spec, { dialect: fixture.dialect }), { code: 'JD0005', message: /never holds null/ }, JSON.stringify(expression));
+        verdicts.push('refused');
+        continue;
+      }
       for (const statement of planInvariants(spec, { dialect: fixture.dialect })) await fixture.exec(statement.sql);
       for (const row of GRID_ROWS) {
         const insert = fixture.exec(`INSERT INTO rows VALUES ${values(engine.name, row)}`);
@@ -248,7 +304,8 @@ export async function ruleGrid(engine) {
           assert.match(String(error?.message), /jaren invariant:truth/);
           return false;
         });
-        assert.equal(accepted, evaluate({ old: null, new: { id: 1, ...row }, op: 'insert' }) === true, `${JSON.stringify(expression)} over ${JSON.stringify(row)}`);
+        const stored = Object.fromEntries(Object.entries(row).filter(([name, value]) => value !== null || !absent.includes(name)));
+        assert.equal(accepted, evaluate({ old: null, new: { id: 1, ...stored }, op: 'insert' }) === true, `${JSON.stringify(expression)} over ${JSON.stringify(stored)}`);
         if (accepted) await fixture.exec('DELETE FROM rows');
         verdicts.push(accepted);
       }
