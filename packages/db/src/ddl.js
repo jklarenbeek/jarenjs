@@ -1211,6 +1211,21 @@ export function planEntity(name, entityMapping, entities, dialect) {
   refuseLongName(dialect, name, `the table for entity '${name}'`, entityPath);
   for (const column of [...entityMapping.columns.map((/** @type {any} */ c) => c.name), ...viaColumns])
     refuseLongName(dialect, column, `the column for '${column}'`, memberPath(column));
+  // a member's column is its own: not the table's document or row identity
+  // column, not another member's as the engine compares names (SQLite folds
+  // ASCII case) — refused at the member, never as the engine's own error
+  const compare = dialect.name === 'sqlite' ? foldIdentifier : (/** @type {string} */ column) => column;
+  const taken = new Map([[compare(DOC_COLUMN), { name: DOC_COLUMN, what: 'the document column' }]]);
+  if (dialect.identityColumn !== undefined) taken.set(compare(dialect.identityColumn.name), { name: dialect.identityColumn.name, what: 'the row identity column' });
+  for (const column of new Set([...entityMapping.columns.map((/** @type {any} */ c) => c.name), ...viaColumns])) {
+    const holder = taken.get(compare(column));
+    if (holder !== undefined) {
+      throw new DbCompileError('JD0004', `the column for '${column}' would be named '${column}', the name of ${holder.what}`
+        + (holder.name === column ? '' : ` ('${holder.name}': names are compared with ASCII case folded, as SQLite compares them)`)
+        + ' — two columns of one table cannot share a name: rename the member', memberPath(column));
+    }
+    taken.set(compare(column), { name: column, what: `the column for '${column}'` });
+  }
   for (const column of [...entityMapping.indexes.map((/** @type {any} */ index) => index.property), ...viaColumns])
     refuseLongName(dialect, `${name}_${column}`, `the index over '${column}'`, memberPath(column));
   const storageType = (storage) => dialect.typeFor(storage, 'generated');

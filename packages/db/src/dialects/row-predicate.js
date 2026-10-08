@@ -207,6 +207,8 @@ export function rowPredicate({ rendering = 'trigger', releasedText = false, flav
     if (typeof value === 'string') return text(ruleLiteral(value));
     if (typeof value === 'boolean') return trigger ? (value ? flavor.true : flavor.false) : storedBoolean(value);
     if (typeof value === 'number' && Number.isFinite(value) && (!Number.isInteger(value) || Number.isSafeInteger(value))) return String(value);
+    // a number is a scalar: one no column holds is named as written
+    if (typeof value === 'number') return fail(Number.isFinite(value) ? `number literal ${value} is an integer outside the safe range, which no column holds` : `number literal ${value} is not finite`);
     if (value && typeof value === 'object' && Object.keys(value).length === 1 && Object.hasOwn(value, '$const')) {
       const literal = value.$const;
       if (typeof literal === 'string') return text(literal);

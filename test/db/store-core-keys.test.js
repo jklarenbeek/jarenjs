@@ -599,3 +599,33 @@ describe('an index named as PostgreSQL names one of the table\'s own objects is 
     }
   });
 });
+
+describe('a member whose column the table already has is refused when the model is planned', () => {
+  /** A `Doc` with its integer key and one more member. @param {string} member */
+  const model = (member) => ({ $model: '0.1', entities: { Doc: { schema: { type: 'object', properties: {
+    id: { type: 'integer', 'x-entity': { key: true } }, [member]: { type: 'string' } } } } } });
+  /** @param {string} engine @param {any} declared @returns {Promise<any>} the open's refusal, or null */
+  const refusal = async (engine, declared) => {
+    try { await withStore(engine, declared, async () => {}); return null; }
+    catch (error) { return error; }
+  };
+  /** Each member, and on each engine the column it would take or null where the engine keeps it apart. */
+  const CASES = [
+    ['doc', { sqlite: 'the document column', postgres: 'the document column' }],
+    ['DOC', { sqlite: 'the document column', postgres: null }],
+    ['rid', { sqlite: null, postgres: 'the row identity column' }],
+    ['Id', { sqlite: "the column for 'id'", postgres: null }],
+  ];
+  for (const engine of ENGINES) {
+    it(`on ${engine}: JD0004 at the member, naming the column it would share, never the engine's own duplicate-column error`, { skip: skipFor(engine) }, async () => {
+      for (const [member, taken] of CASES) {
+        const error = await refusal(engine, model(member));
+        if (taken[engine] === null) { assert.strictEqual(error, null, `${engine}: ${member} opens: ${error?.message}`); continue; }
+        assert.ok(error !== null, `${engine}: ${member} is refused`);
+        assert.strictEqual(error.code, 'JD0004', `${engine}: ${member}: ${error.message}`);
+        assert.strictEqual(error.docPath, `/entities/Doc/schema/properties/${member}`);
+        assert.ok(error.message.includes(taken[engine]), error.message);
+      }
+    });
+  }
+});

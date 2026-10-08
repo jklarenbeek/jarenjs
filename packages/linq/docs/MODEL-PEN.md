@@ -606,7 +606,12 @@ it is optional on `EntityInput` and required on `EntityDoc` (§5.2).
 Spelling it `optional()` to "fix" the emission would make the READ shape
 wrong. `Follow` has no such member: a composite key is caller-supplied,
 both parts are required, and `EntityKey` is
-`{ follower: string; followed: string }`.
+`{ follower: string; followed: string }`. One boundary the pen cannot
+see: on PostgreSQL the store's own row identity column of a store-owned
+table is named `rid`, so this model opens on SQLite only and is `JD0004`
+at `/entities/Revision/schema/properties/rid` when planned for PostgreSQL
+(as is a member named `doc`, the document column, on both engines) — a
+model that must open on both engines names its key otherwise.
 
 Not everything in the store is an entity. A collection is a document
 schema with a key pointer, and the blog keeps two: one with a captured

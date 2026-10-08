@@ -659,6 +659,14 @@ value the store did not honor now refuse by code, before any statement:
   and failed every update of the same row, which reads the member back
   missing. A document is now judged as the store reads it back, on the insert
   as on the update, directly and tracked; test such a member with `$exists`.
+- A store-owned entity whose member was named like the table's own document
+  column (`doc`, on both engines), like its row identity column on PostgreSQL
+  (`rid`), or like another member as SQLite compares names (`Id` beside `id`)
+  never opened, and said so only in the engine's own words wrapped as `JD0002`
+  (SQLite "duplicate column name", PostgreSQL "specified more than once").
+  It is now `JD0004` at the member when the model is planned, naming
+  the column it would share (MODEL-FORMAT §9.2). What each engine opened
+  before still opens: `DOC` and `Id` on PostgreSQL, `rid` on SQLite.
 - On PostgreSQL a physical entity's `delete()` that a database rule refused
   inside `store.transaction` spent the transaction (`JD2088` at its next
   statement and its commit); it is a savepoint of its own now, as an insert
@@ -857,10 +865,12 @@ value the store did not honor now refuse by code, before any statement:
   order; a term's direction or collation, and a PostgreSQL `INCLUDE` column
   beside the keys, are not compared — and refuses `JD0002` naming the index
   and what differs; an index with a condition or an expression term is
-  compared by its CREATE text on SQLite (MODEL-FORMAT §12). Recreate the index
-  as declared — from the statement the store plans,
-  `explainMapping(model).entities.<E>.declaredIndexes[i].sql`, where its text
-  is compared — or drop the declaration. A migration step that reads such a
+  compared by its CREATE text on SQLite, token by token, so the spelling the
+  application created it in (quoting, letter case, whitespace, parentheses
+  around the condition) still verifies and another condition does not
+  (MODEL-FORMAT §12). Recreate the index as declared — the statement the
+  store plans, `explainMapping(model).entities.<E>.declaredIndexes[i].sql`,
+  always verifies — or drop the declaration. A migration step that reads such a
   layout verifies its declared indexes too: a step that runs before a later
   step creates one names the layout without it as its `model`. A
   `kind: "view"` layout that declares `indexes` is `JD0005`.

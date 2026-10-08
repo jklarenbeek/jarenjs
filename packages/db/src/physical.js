@@ -10,6 +10,7 @@ import { planTable } from './dialects/sqlite-schema.js';
 import { sqlitePhysicalColumnType, sqliteTableMigration } from './dialects/sqlite.js';
 import { comparableDeclaredSql } from './schema-sql.js';
 import { foldIdentifier } from './invariants.js';
+import { sqlTokens } from './dialects/check-read.js';
 
 const compiledCodecs = new WeakMap();
 const STORAGE = { text: 'string', integer: 'integer', number: 'number', boolean: 'boolean',
@@ -122,7 +123,8 @@ function declaredIndex(index, columns, sql) {
  * the declared order (a column an engine carries beside the keys, `INCLUDE`,
  * is a fact, as an undeclared index is). What that shape cannot see — a
  * condition's text, an expression term — is compared as SQLite keeps it, the
- * CREATE text, so such an index is created from the planned statement; an
+ * CREATE text, token by token (`sameIndexText`), so an index the application
+ * created in its own spelling verifies and another condition is drift; an
  * engine that deparses keeps no text to compare.
  * @param {any} connection
  * @param {any[]} declared - the layout's `declaredIndexes`
@@ -151,12 +153,60 @@ export function verifyDeclaredIndexes(connection, declared, existing, fail) {
         fail(`index '${index.name}' covers (${list(columns)}) in that order, the model declares (${list(index.columns)})`);
       if (text && (index.partial || index.columns.includes(null)) && have.sql !== null && have.sql !== undefined) {
         const wanted = comparableDeclaredSql(index.sql), actual = comparableDeclaredSql(String(have.sql));
-        if (wanted !== actual) fail(`index '${index.name}' is declared as\n  ${actual}\nand the model declares\n  ${wanted}`);
+        if (!sameIndexText(wanted, actual)) fail(`index '${index.name}' is declared as\n  ${actual}\nand the model declares\n  ${wanted}`);
       }
       return step(i + 1);
     });
   };
   return step(0);
+}
+
+/**
+ * Whether two CREATE INDEX texts spell one index: the same tokens, with
+ * identifiers unquoted and ASCII case folded (as SQLite compares them),
+ * keywords case folded, and whitespace, comments, an `IF NOT EXISTS` clause
+ * and the parentheses around the whole condition set aside — so an index
+ * the application created in its own spelling verifies, while another
+ * operator, literal, column or list is drift.
+ * @param {string} wanted @param {string} actual @returns {boolean}
+ */
+function sameIndexText(wanted, actual) {
+  if (wanted === actual) return true;
+  const a = indexTokens(wanted), b = indexTokens(actual);
+  return a !== null && b !== null && a.length === b.length && a.every((token, i) => token === b[i]);
+}
+
+/** @param {string} sql @returns {string[] | null} the comparable tokens; null where the text does not tokenize */
+function indexTokens(sql) {
+  const tokens = sqlTokens(sql);
+  if (tokens.length === 0) return null;
+  const word = (/** @type {number} */ i, /** @type {string} */ value) => tokens[i]?.kind === 'word' && tokens[i].value.toUpperCase() === value;
+  /** @type {string[]} */
+  const out = [];
+  for (let i = 0; i < tokens.length; i++) {
+    if (word(i, 'IF') && word(i + 1, 'NOT') && word(i + 2, 'EXISTS')) { i += 2; continue; }
+    const { kind, value } = tokens[i];
+    // SQLite also quotes an identifier as [name]
+    if (kind === 'symbol' && value === '[' && tokens[i + 1]?.kind === 'word' && tokens[i + 2]?.kind === 'symbol' && tokens[i + 2].value === ']') {
+      out.push(`i:${foldIdentifier(tokens[i + 1].value)}`); i += 2; continue;
+    }
+    out.push(kind === 'word' || kind === 'identifier' ? `i:${foldIdentifier(value)}` : kind === 'symbol' ? value : `${kind[0]}:${value}`);
+  }
+  // the planner parenthesizes the whole condition after the column list; an application need not
+  const closing = (/** @type {number} */ open) => {
+    for (let i = open, depth = 0; i < out.length; i++) {
+      if (out[i] === '(') depth++;
+      else if (out[i] === ')' && --depth === 0) return i;
+    }
+    return -1;
+  };
+  const columns = out.indexOf('(');
+  const where = columns < 0 ? -1 : closing(columns) + 1;
+  while (where > 0 && out[where] === 'i:where' && out[where + 1] === '(' && closing(where + 1) === out.length - 1) {
+    out.splice(where + 1, 1);
+    out.pop();
+  }
+  return out;
 }
 
 /** Compile one codec once, with a JSON-safe public value and a bound SQL value.

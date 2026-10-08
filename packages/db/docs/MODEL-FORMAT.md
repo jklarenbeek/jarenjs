@@ -1747,7 +1747,7 @@ error.
 | `JD0001` | the SQLite library is below the supported floor |
 | `JD0002` | the existing database disagrees with the declared model, or the open failed in the driver |
 | `JD0003` | the driver binding is unavailable on this runtime |
-| `JD0004` | a declared index cannot be mapped to a column, or a planned table, column or index name is longer than the engine holds (PostgreSQL: 63 bytes, refused when the model is planned; §3), or an index would take a name PostgreSQL gives one of the table's own objects (`<table>_pkey`, `<table>_<column>_seq`; §3) |
+| `JD0004` | a declared index cannot be mapped to a column, or a planned table, column or index name is longer than the engine holds (PostgreSQL: 63 bytes, refused when the model is planned; §3), or an index would take a name PostgreSQL gives one of the table's own objects (`<table>_pkey`, `<table>_<column>_seq`; §3), or a store-owned entity's member would take the name of the table's own document column (`doc`), of its row identity column on PostgreSQL (`rid`), or of another member's column as the engine compares names (SQLite folds ASCII case; §9.2) |
 | `JD0005` | the model document is invalid |
 | `JD0006` | an open option named a pragma this store does not configure |
 | `JD0007` | the pragma cannot be applied on this driver or store |
@@ -2559,6 +2559,12 @@ Stated once, mechanically applied, and returned as data by
 | a nullable member spelled as a union, `{ "anyOf": [{ "type": "string" }, { "type": "null" }] }` | the JSONB document, while `{ "type": ["string", "null"] }` gets a nullable column — the mapper reads the spelling, not the value set (below) |
 | nested object / array, or `column: "json"` | the JSONB document column, queryable by path exactly as in phase A |
 | relation | a foreign-key column, or a join table for many-to-many (§9.4) |
+
+A column takes its member's name, so a member named like the table's own
+document column (`doc`), like its row identity column on PostgreSQL
+(`rid`), or like another member as the engine compares names (SQLite folds
+ASCII case: `Id` beside `id`) is `JD0004` at the member when the model is
+planned, never the engine's own duplicate-column error (§7).
 
 **The two nullable spellings map differently, and stay that way.** Forms,
 the contract diff and the contract transport read `type: [T, 'null']` and
@@ -3592,10 +3598,15 @@ is a fact like an undeclared index, and a unique table constraint's index
 is the engine's own on SQLite (`sqlite_autoindex_…`, which no declaration
 names; PostgreSQL names it after the constraint). What that shape cannot
 see — a condition's text, an expression term — SQLite compares as the
-CREATE text it keeps, so such an index is created from the statement the
-store plans, `explainMapping(model).entities.<E>.declaredIndexes[i].sql`
-(§9.2); PostgreSQL, which deparses, verifies the shape alone and reads a
-changed condition's text as no drift. An index the layout does not declare
+CREATE text it keeps, token by token: identifier quoting and ASCII case,
+keyword case, whitespace and the parentheses around the whole condition
+do not count, so an index the application created in its own spelling
+verifies, while another operator, literal, column or list is `JD0002`
+(the message shows both texts); the statement the store plans,
+`explainMapping(model).entities.<E>.declaredIndexes[i].sql` (§9.2), is
+one spelling that always verifies. PostgreSQL, which deparses, verifies
+the shape alone and reads a changed condition's text as no drift. An
+index the layout does not declare
 is a physical fact. A unique index over plain column terms without a
 condition keys an existence probe (§13.2). A `kind: "view"` layout declares
 no indexes (`JD0005`), and a layout with `physical.schema` declares no
