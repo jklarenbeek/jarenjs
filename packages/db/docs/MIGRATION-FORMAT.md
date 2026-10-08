@@ -1023,8 +1023,8 @@ On PostgreSQL the step keeps what the old table held, where a new table can:
   the table is in place the runner looks the name up and renames the key —
   its own work, as SQLite's `foreign_key_check` is; a dry run prints it as a
   comment. Where the name is held, by the key of a table renamed away from
-  this name for instance, the key keeps its name, which the duplicate-key
-  classification also reads as this table's key.
+  this name for instance, the key keeps its name, which the store reads from
+  the catalog as this table's key when it opens.
 - **Every other generated name keeps the temporary table's.** Its constraints
   (`<table>__rebuild_<column>_check`, `<table>__rebuild_<column>_fkey`), its
   sequences (`<table>__rebuild_<column>_seq`) and the column defaults that name

@@ -121,11 +121,13 @@ const MODEL = {
   },
 };
 
-/** The catalog answers for a store whose table already exists. */
+/** The catalog answers for a store whose table already exists: the table
+ * probe names the primary-key constraint, which a duplicate key is the
+ * violation of. */
 const EXISTING = /** @type {[RegExp, any][]} */ ([
   VERSION,
-  [/FROM pg_class c\b/, { rows: [{ name: 'rows' }], rowCount: 1,
-    fields: [{ name: 'name', dataTypeID: 25 }] }],
+  [/FROM pg_class c\b/, { rows: [{ name: 'rows', key: 'rows_pkey' }], rowCount: 1,
+    fields: [{ name: 'name', dataTypeID: 25 }, { name: 'key', dataTypeID: 25 }] }],
   [/FROM pg_attribute a\b/, { rows: [
     { name: 'key', type: 'text', hidden: 0 },
     { name: 'doc', type: 'jsonb', hidden: 0 },

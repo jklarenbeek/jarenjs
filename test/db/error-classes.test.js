@@ -24,7 +24,7 @@ import { nodeDriver, adaptNodeDatabase } from '@jarenjs/db/node';
 import { queryJson } from '@jarenjs/json/query';
 
 import { tempDbPath } from './helpers.js';
-import { TransactionFailure } from '../../packages/db/src/errors.js';
+import { TransactionFailure, keyUndecided } from '../../packages/db/src/errors.js';
 
 const MODEL = {
   $model: '0.1',
@@ -129,6 +129,32 @@ describe('the table', () => {
     const composite = { errcode: 2067, message: 'UNIQUE constraint failed: m.a, m.key' };
     assert.strictEqual(classifyDriverError(composite, { table: 'm', column: 'key' }).class, 'duplicate',
       'the key column among several named ones is still named');
+  });
+
+  it('a composite key is the PRIMARY KEY conflict, or a message listing every key column', () => {
+    const unique = { table: 'p', column: ['a', 'b'] };
+    const key = { errcode: 1555, message: 'UNIQUE constraint failed: p.a, p.b' };
+    assert.strictEqual(classifyDriverError(key, unique).class, 'duplicate');
+    assert.strictEqual(classifyDriverError(key, { table: 'p', column: 'a' }).class, 'duplicate', 'a PRIMARY KEY conflict is the key whatever columns were named');
+    const listed = { errcode: 2067, message: 'UNIQUE constraint failed: p.b, p.a, p.s' };
+    assert.strictEqual(classifyDriverError(listed, unique).class, 'duplicate', 'every key column named, in any order');
+    const partial = { errcode: 2067, message: 'UNIQUE constraint failed: p.a, p.s' };
+    assert.strictEqual(classifyDriverError(partial, unique).class, 'constraint', 'one key column among others is another constraint');
+    const member = { errcode: 2067, message: 'UNIQUE constraint failed: p.s' };
+    assert.strictEqual(classifyDriverError(member, unique).class, 'constraint');
+  });
+
+  it('a key is undecided only after a SQLite UNIQUE failure that is not its own', () => {
+    const unique = { table: 'p', column: 'pid' };
+    const member = { errcode: 2067, message: 'UNIQUE constraint failed: p.slug' };
+    assert.strictEqual(keyUndecided(member, unique), true);
+    assert.strictEqual(keyUndecided(member, undefined), false, 'no key in play');
+    assert.strictEqual(keyUndecided({ errcode: 1555, message: 'UNIQUE constraint failed: p.pid' }, unique), false, 'the key\'s own');
+    assert.strictEqual(keyUndecided({ errcode: 2067, message: 'UNIQUE constraint failed: p.pid, p.slug' }, unique), false, 'a failure naming the key');
+    assert.strictEqual(keyUndecided({ errcode: 1299, message: 'NOT NULL constraint failed: p.slug' }, unique), false, 'another constraint');
+    assert.strictEqual(keyUndecided({ message: 'UNIQUE constraint failed: p.slug' }, unique), true, 'a binding that attaches no code');
+    assert.strictEqual(keyUndecided({ code: '23505', constraint: 'p_slug', message: 'UNIQUE constraint failed: p.slug' }, unique), false,
+      'a PostgreSQL failure names its constraint, and its transaction is aborted');
   });
 
   it('wrapDriverError attaches class, retryable and cause, keeps a lifecycle code, and passes non-driver errors through', () => {
@@ -472,8 +498,8 @@ describe('one classifier, two engines: a SQLSTATE lands in the same classes', ()
     assert.strictEqual(isDriverError({ code: 'ENOENT' }), false);
   });
 
-  it('the key\'s own collision is the constraint the server names', () => {
-    const unique = { table: 'users', column: 'key' };
+  it('the key\'s own collision is the constraint the catalog names for the key, and no other', () => {
+    const unique = { table: 'users', column: 'key', constraint: 'users_pkey' };
     assert.deepStrictEqual(
       classifyDriverError(pgError('23505', { constraint: 'users_pkey' }), unique),
       { class: 'duplicate', code: 'JD2001', retryable: false,
@@ -483,9 +509,23 @@ describe('one classifier, two engines: a SQLSTATE lands in the same classes', ()
     const other = classifyDriverError(pgError('23505', { constraint: 'users_by_email' }), unique);
     assert.strictEqual(other.class, 'constraint');
     assert.strictEqual(other.code, 'JD2005');
-    // and with no key in play at all it is a plain constraint failure
+    // the verdict is the catalog's name, never a pattern: the names a key
+    // is usually given, and a number appended to a taken one, are other
+    // constraints unless the catalog says the key holds them
+    for (const named of ['users_pkey1', 'users__rebuild_pkey', 'users_key_key', 'Users_pkey', 'users_pkey ']) {
+      assert.strictEqual(classifyDriverError(pgError('23505', { constraint: named }), unique).class, 'constraint', named);
+      assert.strictEqual(classifyDriverError(pgError('23505', { constraint: named }),
+        { table: 'users', column: 'key', constraint: named }).class, 'duplicate', `${named} as the catalog's name`);
+    }
+    // a caller that did not read the key constraint (outside the store)
+    // gets a plain constraint failure, whatever the name looks like
+    assert.strictEqual(
+      classifyDriverError(pgError('23505', { constraint: 'users_pkey' }), { table: 'users', column: 'key' }).class, 'constraint');
     assert.strictEqual(
       classifyDriverError(pgError('23505', { constraint: 'users_pkey' })).class, 'constraint');
+    // a composite key names its columns the same way, and the constraint decides
+    assert.strictEqual(classifyDriverError(pgError('23505', { constraint: 'pair_pkey' }),
+      { table: 'pair', column: ['a', 'b'], constraint: 'pair_pkey' }).class, 'duplicate');
   });
 
   it('contention is busy and retryable, whichever engine reported it', () => {

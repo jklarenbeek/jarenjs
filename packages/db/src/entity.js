@@ -20,7 +20,7 @@ import {
 } from '@jarenjs/core/dates/rfc3339';
 import { resolveRuntime } from '@jarenjs/core/runtime';
 
-import { DbRuntimeError, wrapDriverError } from './errors.js';
+import { DbRuntimeError, wrapDriverError, wrapHeldKey, keyUndecided } from './errors.js';
 import { chain, isThenable, attempt, useStatementOnce, releaseStatements as releasePrepared } from './driver.js';
 import { createCursor, createSyncCursor, rowClassOf } from './cursor.js';
 import { checkInvariants, existsRowSql, RECORD_PATH, ruleLiteral } from './invariants.js';
@@ -37,6 +37,73 @@ const UPDATE_SHAPES = 32;
 /** The top-level member a JSON Patch operation touches. @param {{ path: string }} op */
 const memberOfPatch = (op) => (op.path.split('/')[1] ?? '').replace(/~1/g, '/').replace(/~0/g, '~');
 
+/** @param {any} settled @returns {never} */
+const refuse = (settled) => { throw settled; };
+
+/**
+ * The error a failed INSERT is refused with: what `wrapDriverError` makes of
+ * it, except where SQLite names a unique constraint that is not the key's
+ * while a stored row holds the key too (it reports only the first constraint
+ * a row fails) — one read of the keys the INSERT carried then settles it, and
+ * a stored key is the `JD2001` the key's own collision is. The read runs on
+ * the connection the INSERT failed on, inside the caller's transaction when
+ * there is one, and a read that itself fails leaves the report as it was.
+ * @param {any} connection @param {any} error - the driver's
+ * @param {() => import('./errors.js').WrapDetails} details
+ * @param {() => { tableSql: string, columns: string[], rows: any[][] }} held
+ * @returns {any} the error, or a promise of it
+ */
+function failedInsert(connection, error, details, held) {
+  const wrapped = details();
+  const reported = () => wrapDriverError(error, wrapped);
+  if (!keyUndecided(error, wrapped.unique)) return reported();
+  const { tableSql, columns, rows } = held();
+  if (rows.length === 0) return reported();
+  const { dialect } = connection;
+  let bound = 0;
+  const where = rows.map((row) => {
+    const terms = row.map((_, i) => `${columns[i]} = ${dialect.parameterRef(++bound, 'v')}`).join(' AND ');
+    return rows.length === 1 ? terms : `(${terms})`;
+  }).join(' OR ');
+  const stored = (/** @type {any} */ found) => (found === undefined || found === null ? reported() : wrapHeldKey(error, wrapped));
+  try {
+    const read = useStatementOnce(connection, `SELECT 1 FROM ${tableSql} WHERE ${where} LIMIT 1`,
+      (statement) => statement.get(rows.flat()));
+    return isThenable(read) ? read.then(stored, reported) : stored(read);
+  }
+  catch {
+    return reported();
+  }
+}
+
+/**
+ * Run an INSERT. Every insert path of both stores (an entity's `create()`,
+ * the unit of work's batch, a collection's `insert()`) ends here: the result
+ * is the call's own, or its failure ({@link failedInsert}), synchronously for
+ * a synchronous driver. Nothing runs beside the call unless it fails.
+ * @param {any} connection
+ * @param {() => any} call - runs the INSERT
+ * @param {() => import('./errors.js').WrapDetails} details - what the failure
+ *   is classified by; read on failure only
+ * @param {() => { tableSql: string, columns: string[], rows: any[][] }} held -
+ *   the table, its quoted key columns and the key values the INSERT bound, one
+ *   array per row (none for a key the database allocated); read on a failure
+ *   that leaves the key undecided only
+ * @returns {any}
+ */
+export function insertAttempt(connection, call, details, held) {
+  let out;
+  try {
+    out = call();
+  }
+  catch (error) {
+    return chain(failedInsert(connection, error, details, held), refuse);
+  }
+  return isThenable(out)
+    ? out.then(undefined, (error) => chain(failedInsert(connection, error, details, held), refuse))
+    : out;
+}
+
 /**
  * The write/read machinery for one entity, prepared once.
  * @param {any} connection
@@ -46,9 +113,12 @@ const memberOfPatch = (op) => (op.path.split('/')[1] ?? '').replace(/~1/g, '/').
  * @param {Partial<import('@jarenjs/core/runtime').Runtime>} [runtime] - the
  *   host's runtime record: the clock a `default: 'now'` stamps and the
  *   identifier a `default: 'uuid'` allocates; the platform's own when absent
+ * @param {string} [keyConstraint] - the name the catalog gives the table's
+ *   primary-key constraint (PostgreSQL): the one unique violation that is a
+ *   duplicate key; without it none is
  * @returns {any}
  */
-export function entityCore(connection, entity, entityMapping, validate, runtime = undefined) {
+export function entityCore(connection, entity, entityMapping, validate, runtime = undefined, keyConstraint = undefined) {
   const host = resolveRuntime(runtime);
   const dialect = connection.dialect;
   const q = dialect.quoteIdentifier;
@@ -406,23 +476,47 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
       { docPath, collection: entity.name });
   };
 
+  const keyColumns = keys.map(physicalName);
+  /** @type {import('./errors.js').UniqueKey} */
+  const unique = { table, column: keyColumns.length === 1 ? keyColumns[0] : keyColumns,
+    ...(keyConstraint === undefined ? undefined : { constraint: keyConstraint }) };
+  /** The members of a key, as the document names them. @param {any} doc */
+  const keyOf = (doc) => keys.map((name) => doc[name]);
+  /** A key as a sentence names it: the value of a single member, the members of a composite one. @param {any[]} parts */
+  const keyText = (parts) => JSON.stringify(keys.length === 1 ? parts[0]
+    : Object.fromEntries(keys.map((name, i) => [name, parts[i]])));
   /**
-   * A write's failure through the one classification: a collision on the
-   * single key column is `JD2001` naming the key — or, for a batch the unit
-   * of work inserts, every key the statement carried.
-   * @param {any} error @param {any} key @param {any[]} [carried]
+   * What a write's failure is classified by: a collision on the key's own
+   * constraint is `JD2001` naming the key — or, for a batch the unit of work
+   * inserts, every key the statement carried.
+   * @param {any} key - the first key member, which the error carries
+   * @param {any[][]} [carried] - the keys the write named, one array of members each
    */
-  const wrapWrite = (error, key, carried = undefined) => wrapDriverError(error, {
-    docPath, collection: entity.name, ...(key === undefined ? undefined : { key }),
-    ...(keys.length === 1 ? { unique: { table, column: keys[0] } } : undefined),
+  const writeDetails = (key, carried = [[key]]) => {
     // a key the database allocated is not known here: a sequence does not
     // see a key written explicitly, and can hand it out again
-    duplicateReason: (carried ?? [key]).every((one) => one === undefined)
-      ? `a '${entity.name}' already exists under the key the database allocated`
-      : carried !== undefined && carried.length > 1
-        ? `a '${entity.name}' already exists under one of the keys ${carried.map((one) => JSON.stringify(one)).join(', ')}`
-        : `a '${entity.name}' already exists under key ${JSON.stringify(key)}`,
-  });
+    const named = carried.filter((parts) => parts.every((part) => part !== undefined));
+    return {
+      docPath, collection: entity.name, ...(key === undefined ? undefined : { key }), unique,
+      duplicateReason: named.length === 0
+        ? `a '${entity.name}' already exists under the key the database allocated`
+        : named.length > 1
+          ? `a '${entity.name}' already exists under one of the keys ${named.map(keyText).join(', ')}`
+          : `a '${entity.name}' already exists under key ${keyText(named[0])}`,
+    };
+  };
+  const wrapWrite = (error, key, carried = undefined) => wrapDriverError(error, writeDetails(key, carried));
+  /**
+   * An INSERT of these documents ({@link insertAttempt}): the key values
+   * its failure may be settled by are read on that failure only.
+   * @param {() => any} call @param {any[]} docs
+   */
+  const attemptInsert = (call, docs) => insertAttempt(connection, call,
+    () => writeDetails(docs.length === 1 ? docs[0][keys[0]] : undefined, docs.map(keyOf)),
+    () => ({ tableSql, columns: keyColumns.map(q),
+      // the values the INSERT bound; a key the database allocates, or one its codec refused, names no row
+      rows: docs.map((doc) => keys.map((name, i) => (doc[name] === undefined || doc[name] === null ? null
+        : physical ? encodedKeyOrNull(i, doc[name]) : doc[name]))).filter((row) => row.every((part) => part !== null)) }));
   /**
    * A write in a transaction of its own — a savepoint inside the caller's.
    * A bracket that cannot open, on a PostgreSQL transaction an earlier
@@ -538,12 +632,8 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
        * the value it names ({@link keyValues}).
        * @param {any[]} parts @param {string} [member] */
       memberKey: (parts, member = undefined) => keyValues(refuseUnnumbered(parts, member)),
-      /** A failed INSERT of these documents, classified as `create()`'s is.
-       * @param {any} error @param {any[]} docs */
-      wrapInsert: (error, docs) => {
-        const carried = docs.map((doc) => doc[keys[0]]);
-        return wrapWrite(error, carried.length === 1 ? carried[0] : undefined, carried);
-      },
+      /** An INSERT of these documents, classified as `create()`'s is. */
+      attemptInsert,
     },
     complete: (doc, { updating }) => {
       writable();
@@ -577,8 +667,7 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
         const params = [...values.map((value) => value.value), ...(physical ? [] : [JSON.stringify(rest)])];
         const returning = autoKey !== null && !names.includes(autoKey);
         return chain(
-          attempt(() => (returning ? statement.get(params) : statement.run(params)),
-            (error) => wrapWrite(error, completed[keys[0]])),
+          attemptInsert(() => (returning ? statement.get(params) : statement.run(params)), [completed]),
           (out) => {
             const made = returning ? { ...completed, [autoKey]: out.key } : completed;
             return physical ? chain(this.get(made), (stored) => {

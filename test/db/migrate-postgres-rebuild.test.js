@@ -10,10 +10,12 @@
  * other relation holds that name (also for a table whose temporary name
  * PostgreSQL clips to its 63-byte identifier, and for a table an earlier
  * rebuild left under the temporary key name); where another relation holds
- * it, the key keeps the name PostgreSQL gave the temporary table's. The
- * duplicate-key classification recognises the key under each name
- * PostgreSQL gives it, the number it appends to a taken name included
- * (`Post_pkey1`), and no other table's. A rebuild of an entity that
+ * it, the key keeps the name PostgreSQL gave the temporary table's. A
+ * duplicate key reads `JD2001` whatever name the server gave the key (the
+ * number it appends to a taken name, `Post_pkey1`, the temporary table's
+ * name a rebuild leaves, the name a renamed table keeps), because the store
+ * reads the key's constraint from the catalog when it opens; no other
+ * constraint is the key, however its name looks. A rebuild of an entity that
  * another object depends on (a foreign key, a view) is refused, naming the
  * dependent as the server does, and changes nothing. Writers wait for a
  * rebuild: a write committed by another session while the rebuild waits for
@@ -126,20 +128,19 @@ async function rebuildAndAllocate({ pool, schema, driver }, name, before = async
 }
 
 describe('the duplicate-key classification of a PostgreSQL key name', () => {
-  it('recognises the key under each name PostgreSQL gives it, and no other table\'s', () => {
-    /** @param {string} constraint @param {string} [table] */
-    const verdict = (constraint, table = 'Post') => classifyDriverError(Object.assign(
+  it('is the catalog\'s name for the key, matched exactly, and never a pattern', () => {
+    /** @param {string} constraint @param {string} [key] - the key constraint the catalog names */
+    const verdict = (constraint, key = undefined) => classifyDriverError(Object.assign(
       new Error('duplicate key value violates unique constraint'), { code: '23505', constraint }),
-    { table, column: 'pid' }).class;
-    // a create's name, the number PostgreSQL appends to a taken one, a rebuild's temporary name
-    const own = ['Post_pkey', 'Post_pkey1', 'Post_pkey12', 'Post__rebuild_pkey', 'Post__rebuild_pkey1', 'Post_pid_key'];
-    assert.deepEqual(own.map((name) => [name, verdict(name)]), own.map((name) => [name, 'duplicate']));
-    const other = ['Article_pkey', 'Posts_pkey', 'APost_pkey', 'Post_pkey0', 'Post_pkey01', 'Post_pkeyx', 'Post_pkey1x',
-      'Post_pkey_1', 'Post__rebuild_pkeyx', 'Post__rebuild1_pkey', 'Post__rebuild', 'Post_slug_key', ''];
-    assert.deepEqual(other.map((name) => [name, verdict(name)]), other.map((name) => [name, 'constraint']));
-    // the table's name is matched as written, never as a pattern
-    assert.deepEqual([verdict('Post_pkey', 'P.st'), verdict('P.st_pkey1', 'P.st'), verdict('Px_pkey', 'P*')],
-      ['constraint', 'duplicate', 'constraint']);
+    { table: 'Post', column: 'pid', ...(key === undefined ? {} : { constraint: key }) }).class;
+    // whatever name the server gave the key is the key when the catalog says so: a create's, the number
+    // it appends to a taken one, a rebuild's temporary name, a renamed table's old name, an adopted one
+    const names = ['Post_pkey', 'Post_pkey1', 'Post_pkey12', 'Post__rebuild_pkey', 'Post__rebuild_pkey1', 'Article_pkey', 'pk_posts'];
+    assert.deepEqual(names.map((name) => [name, verdict(name, name)]), names.map((name) => [name, 'duplicate']));
+    // no other constraint is, however much its name looks like a key's
+    assert.deepEqual(names.map((name) => [name, verdict(name, 'Post_pkey2')]), names.map((name) => [name, 'constraint']));
+    assert.equal(verdict('Post_pkey'), 'constraint', 'with no key constraint read, none is the key');
+    assert.equal(verdict('Post_pkey', ''), 'constraint', 'an empty name matches nothing');
   });
 });
 
@@ -267,7 +268,7 @@ describe('postgres: a rebuild keeps what the old table held',
             const opened = await openStore(model, { driver: driver() });
             try {
               return { keys: [await keyNames(pool, schema, 'Article'), await keyNames(pool, schema, 'Post')],
-                // the renamed table keeps the key name its old name gave it, which the classification does not read
+                // the renamed table keeps the key name its old name gave it, which the catalog names as its key
                 duplicates: [await created(opened, 'Article', { pid: 1, title: 'x' }), await created(opened, 'Post', { pid: 1, title: 'x' })] };
             }
             finally { await opened.close(); }
@@ -278,9 +279,9 @@ describe('postgres: a rebuild keeps what the old table held',
           catch (error) { outcome = /** @type {any} */ (error).message; }
           const rebuilt = Array.isArray(outcome) ? await observe(v4) : null;
           assert.deepEqual({ added, outcome, rebuilt }, {
-            added: { keys: [['Post_pkey'], [leftover ? 'Post__rebuild_pkey' : 'Post_pkey1']], duplicates: ['JD2005', 'JD2001'] },
+            added: { keys: [['Post_pkey'], [leftover ? 'Post__rebuild_pkey' : 'Post_pkey1']], duplicates: ['JD2001', 'JD2001'] },
             outcome: ['rebuild'],
-            rebuilt: { keys: [['Post_pkey'], [leftover ? 'Post__rebuild_pkey1' : 'Post__rebuild_pkey']], duplicates: ['JD2005', 'JD2001'] },
+            rebuilt: { keys: [['Post_pkey'], [leftover ? 'Post__rebuild_pkey1' : 'Post__rebuild_pkey']], duplicates: ['JD2001', 'JD2001'] },
           }, leftover ? 'the new table\'s key under the temporary key name' : 'the new table\'s key under the next free name');
         });
       }

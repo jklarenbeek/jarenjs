@@ -42,7 +42,7 @@ import { createMaintenance } from './maintenance.js';
 import { createBackup } from './backup.js';
 import { normalizeProfile, assertProfileRoots } from './profile.js';
 import { compileEntityModel, joinTableRoots } from './model.js';
-import { entityCore } from './entity.js';
+import { entityCore, insertAttempt } from './entity.js';
 import { verifyPhysical, verifyRulePrograms } from './physical.js';
 import { trustedSql, synchronousBody, RELEASE } from './sql.js';
 import { relationalEngine } from './relational.js';
@@ -633,11 +633,49 @@ function requireKey(key, collection, docPath) {
 function wrapWriteError(error, plan, collection, docPath, key) {
   // one classifier for every path: a coded error (a closed store, a
   // refused document) passes through it untouched
-  return wrapDriverError(error, {
+  return wrapDriverError(error, writeErrorDetails(plan, collection, docPath, key));
+}
+
+/**
+ * What a collection write's failure is classified by: the key's own
+ * collision is `JD2001` naming the key.
+ * @param {any} plan
+ * @param {string} collection
+ * @param {string} docPath
+ * @param {string | number} [key]
+ * @returns {import('./errors.js').WrapDetails}
+ */
+function writeErrorDetails(plan, collection, docPath, key) {
+  return {
     docPath, collection, ...(key === undefined ? undefined : { key }),
-    unique: { table: plan.table, column: plan.keyColumn },
+    unique: { table: plan.table, column: plan.keyColumn,
+      ...(plan.keyConstraint === undefined ? undefined : { constraint: plan.keyConstraint }) },
     duplicateReason: `a document already exists under key '${String(key)}'`,
-  });
+  };
+}
+
+/**
+ * Record on a table's plan the name the catalog gives its primary-key
+ * constraint, where the dialect's table probe answers it (PostgreSQL), for
+ * the duplicate-key classification: a name is the key's only because the
+ * catalog says so.
+ * @param {any} plan
+ * @param {any} row - the table probe's row
+ */
+function recordKeyConstraint(plan, row) {
+  plan.keyConstraint = typeof row?.key === 'string' ? row.key : undefined;
+}
+
+/**
+ * The name the catalog gives a physical table's primary-key constraint,
+ * from the catalog rows the open already read (PostgreSQL's; none on SQLite).
+ * @param {any} schema - `readSchema`'s answer
+ * @param {string} table
+ * @returns {string | undefined}
+ */
+function physicalKeyConstraint(schema, table) {
+  return schema.catalog?.find((/** @type {any} */ object) =>
+    object.type === 'constraint' && object.owner === table && object.metadata?.kind === 'p')?.name;
 }
 
 /**
@@ -731,8 +769,14 @@ function ensureShape(connection, collections, plans, createsNothing) {
                 `collection '${name}': the table does not exist and ${createsNothing} creates nothing`,
                 collection.docPath);
             }
-            return chain(runCreate(connection, plan), () => step(i + 1));
+            // the server numbers a key name another relation holds, so the
+            // name is read back from the table just created
+            return chain(runCreate(connection, plan), () => chain(statement.get([name]), (created) => {
+              recordKeyConstraint(plan, created);
+              return step(i + 1);
+            }));
           }
+          recordKeyConstraint(plan, row);
           return chain(verifyShape(connection, plan, name, collection.docPath),
             () => step(i + 1));
         }));
@@ -764,7 +808,10 @@ function ensureEntityShape(connection, entityPlans, entities, createsNothing) {
       const plan = entityPlans.get(name);
       const docPath = entities.get(name)?.docPath ?? `/entities/${name}`;
       if (plan.physical) return chain(readSchema(connection), (schema) =>
-        chain(verifyPhysical(connection, plan.physical, schema), () => step(i + 1)));
+        chain(verifyPhysical(connection, plan.physical, schema), () => {
+          plan.keyConstraint = physicalKeyConstraint(schema, plan.physical.table);
+          return step(i + 1);
+        }));
       return chain(connection.prepare(dialect.introspect.tableExists()), (statement) =>
         chain(statement.get([name]), (row) => {
           if (row === undefined) {
@@ -776,8 +823,12 @@ function ensureEntityShape(connection, entityPlans, entities, createsNothing) {
             // the database must hold what its rule programs compare, before they are created
             const refuse = (/** @type {string} */ why) => { throw new DbCompileError('JD0002', `entity '${name}': ${why}`, docPath); };
             return chain(verifyRulePrograms(connection, name, plan.programs ?? [], refuse, { installed: false }), () =>
-              chain(runCreate(connection, plan), () => step(i + 1)));
+              chain(runCreate(connection, plan), () => chain(statement.get([name]), (created) => {
+                recordKeyConstraint(plan, created);
+                return step(i + 1);
+              })));
           }
+          recordKeyConstraint(plan, row);
           return chain(verifyShape(connection, plan, name, docPath, 'entity'), () =>
             chain(connection.prepare(dialect.introspect.foreignKeyList(name)), (fkStatement) =>
               chain(fkStatement.all([]), (fkRows) => {
@@ -1186,8 +1237,11 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
       const key = resolveWriteKey(doc, undefined);
       if (key === null) return insertAllocated(doc);
       return keyedWrite(key, () => chain(
-        runWrite('insert', dialect.dml.insert(shape),
-          [bindKey(key), JSON.stringify(doc), ...derivedFor(doc)], key, false),
+        chain(prepared('insert', dialect.dml.insert(shape)), (statement) =>
+          insertAttempt(connection, () => statement.run([bindKey(key), JSON.stringify(doc), ...derivedFor(doc)]),
+            () => writeErrorDetails(plan, collection.name, collection.docPath, key),
+            () => ({ tableSql: dialect.quoteIdentifier(plan.table), columns: [dialect.quoteIdentifier(plan.keyColumn)],
+              rows: [[bindKey(key)]] }))),
         () => key));
     },
     put(doc, explicitKey, options) {
@@ -3469,7 +3523,7 @@ export function openStore(model, options) {
                 ? options.compileSchema(writeSchemaOf(entity, mapping.entities[name]))
                 : null);
               core = captureEntity(name, entityCore(connection, entity,
-                mapping.entities[name], validate, runtime));
+                mapping.entities[name], validate, runtime, entityPlans.get(name)?.keyConstraint));
               entityCores.set(name, core);
             }
             return core;

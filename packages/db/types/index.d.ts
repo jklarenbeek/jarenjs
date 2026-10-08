@@ -41,16 +41,19 @@ export type DriverErrorClass = 'busy' | 'full' | 'readonly' | 'io' | 'corrupt' |
 /** Classify a SQLite driver failure: the class, the runtime code it is
  * raised under (`null` for `overflow`, which has no code of its own and is
  * wrapped as `JD2005`), whether a retry can succeed, and the sentence the
- * wrapped error leads with. */
+ * wrapped error leads with. With `unique`, the key's own collision is
+ * `duplicate`: on SQLite a PRIMARY KEY conflict or a UNIQUE conflict naming
+ * every key column, on PostgreSQL a unique violation of the constraint named
+ * by `unique.constraint` and of no other (without it, none is). */
 export declare function classifyDriverError(error: unknown,
-  unique?: { table: string; column: string }):
+  unique?: { table: string; column: string | string[]; constraint?: string }):
   { class: DriverErrorClass; code: string | null; retryable: boolean; reason: string };
 /** Wrap a driver failure as the coded runtime error its class calls
  * for, `class`/`retryable`/`cause` attached; anything that is not a
  * driver's own error is returned as it is. */
 export declare function wrapDriverError(error: unknown, details?: {
   docPath?: string; collection?: string; key?: string | number;
-  unique?: { table: string; column: string }; duplicateReason?: string;
+  unique?: { table: string; column: string | string[]; constraint?: string }; duplicateReason?: string;
   code?: string; reason?: string;
   /** Wrap even a failure that is not a driver's under `code`, with
    * `class: 'error'` — for a lifecycle that promises a coded failure. */
@@ -269,8 +272,6 @@ export interface OrderIdentity {
   readonly column: string;
   readonly desc: boolean;
   readonly nullsFirst: boolean;
-  /** Set only on a term that resumes from the text its table stores (a SQLite uuid). */
-  readonly stored?: true;
 }
 
 /** One term of the order a statement actually executes under. `source`

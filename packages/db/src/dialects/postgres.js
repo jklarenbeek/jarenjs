@@ -721,9 +721,13 @@ export function postgresDialect(options = undefined) {
       catalog: () => postgresCatalog(inNamespace),
       version: () => "SELECT current_setting('server_version') AS version",
       // the table probe binds its name, so a hostile collection name is
-      // a value and never syntax
+      // a value and never syntax. It answers the name the catalog gives
+      // the table's primary-key constraint too (`key`): a duplicate key is
+      // the violation of that constraint, whatever the server called it
+      // (a renamed table keeps the name its key was created under)
       tableExists: () =>
-        'SELECT c.relname AS name FROM pg_class c '
+        'SELECT c.relname AS name, (SELECT k.conname FROM pg_constraint k '
+        + `WHERE k.conrelid = c.oid AND k.contype = 'p') AS "key" FROM pg_class c `
         + 'JOIN pg_namespace n ON n.oid = c.relnamespace '
         + `WHERE c.relkind IN ('r', 'p') AND ${inNamespace} AND c.relname = $1`,
       // `hidden` is non-zero for a GENERATED column, which is the one

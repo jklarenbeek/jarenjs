@@ -106,6 +106,22 @@ per-row byte proof runs here — and refuses `JD0032` naming any other. An
 explicit `orderBy` over a nullable text or uuid column stays refused, as every
 nullable column is for the typed path.
 
+A duplicate key is the violation of the table's primary-key constraint under
+the name the catalog gives it, read when the store opens: by the table probe for
+a table the store owns (again after it creates the table, since the server
+numbers a key name another relation holds), and from the catalog rows the open
+already reads for a physical entity. A table renamed by a migration, an adopted
+table whose key has any name and a table with a unique member called `pkey1`
+therefore answer `JD2001` for a duplicate key and `JD2005` naming the member
+for a duplicate member. A write that collides on its key and on another unique
+member is `JD2001` too: the server checks the oldest index of a table first,
+and the store creates the key's index first. One difference remains, on a table
+the store adopted rather than created: where a unique index is older than the
+primary key, the server reports that index first, and a write colliding on both
+reads `JD2005` naming it. A PostgreSQL failure aborts its transaction, so the
+store never reads the key after one; on SQLite it does, after a unique failure
+that does not name the key.
+
 ## The writer lock and the lock family
 
 `store.transaction(fn, { mode: 'immediate' })` runs `BEGIN`, then takes the

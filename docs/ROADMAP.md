@@ -463,12 +463,6 @@ what each does is its own documentation's job
   into the document fails. Wanted: foreign keys re-pointed through the rebuild,
   or in-place `ALTER`s where PostgreSQL has them, key allocation converted by a
   planned step, and the same chain qualified on both engines.
-- [ ] **Duplicate keys classified by the key's own constraint.** PostgreSQL
-  reports a duplicate key by the constraint's generated name; the classifier
-  recognizes `<table>_pkey` with the server's clipping and numeric suffix, so a
-  table renamed by a migration keeps its old name and reports `JD2005` where a
-  fresh store reports `JD2001`, and a unique member literally named `pkey<N>`
-  reads as the key. Wanted: the key constraint read from the catalog at open.
 - [ ] **Native temporal buckets sum floating readings in SQL.** Collection and
   entity sums over `number` members run in the engine, left to right in doubles;
   a `$time-bucket` or `$resample` sum over a `number` member is still summed by
@@ -566,14 +560,6 @@ what each does is its own documentation's job
   entity core, the unit of work, foreign-key and membership columns, session
   capture's key decoding and the replication writer — encodes the instant as its
   column stores it, or the model refuses an epoch key (`JD0005`).
-- [ ] **A write that collides on its key and on another unique member reads
-  two codes.** Single collisions agree on both engines (key `JD2001`, unique
-  member `JD2005`); a write colliding on both at once reads `JD2001` on
-  PostgreSQL and, under a non-integer key, `JD2005` on SQLite, because each
-  engine reports the first constraint it checks. Agreeing on `JD2001` needs a
-  key read after a SQLite unique failure that does not name the key, on every
-  insert path (entity create, unit-of-work batches, collections, the
-  replication writer).
 - [ ] **Store rules judge only the store's own statements.** A row the
   database's foreign-key actions remove or null runs none of its entity's rules
   (a child's delete rule refuses its own `delete()` yet a cascading parent

@@ -250,14 +250,13 @@ a connection is acquired or a link runs:
 ### Rebuilt PostgreSQL tables
 
 A PostgreSQL rebuild step left the table's primary key under the temporary
-table's name (`<table>__rebuild_pkey`), where a duplicate key read as `JD2005`
-instead of `JD2001`; it restarted an allocated key's sequence at 1, so the next
-allocations collided with copied keys and, once past them, could hand out
-again keys the table had handed out before; and it renumbered `rid`, so an
-entity read with no ordering could answer its rows in another order. A
-rebuild now continues every sequence from the old table's next value and past
-the copied values, keeps each row's `rid`, and gives the key `<table>_pkey`
-where no other relation holds that name
+table's name (`<table>__rebuild_pkey`); it restarted an allocated key's
+sequence at 1, so the next allocations collided with copied keys and, once
+past them, could hand out again keys the table had handed out before; and it
+renumbered `rid`, so an entity read with no ordering could answer its rows in
+another order. A rebuild now continues every sequence from the old table's
+next value and past the copied values, keeps each row's `rid`, and gives the
+key `<table>_pkey` where no other relation holds that name
 ([MIGRATION-FORMAT §10](MIGRATION-FORMAT.md#10-the-rebuild-procedure)). Plan
 an unapplied rebuild document again.
 
@@ -271,11 +270,12 @@ the link commits; through a store it is refused `JD2005`, `class: 'busy'`,
 `retryable: true`, if its wait outlasts the driver's `lockTimeoutMs` (5000 by
 default). Plan a rebuild of a table under write load with that wait in mind.
 
-A table an earlier release rebuilt needs no rename: the duplicate-key
-classification reads `<table>__rebuild_pkey` (and the number PostgreSQL
-appends to a taken key name, `Post_pkey1`) as the table's own key. Its
-allocated key's sequence needs repair once, per key, with the store's schema
-on the search path; here `Post` keys by `pid`:
+A table an earlier release rebuilt needs no rename: the store reads the name
+of the table's key constraint from the catalog when it opens, whatever the
+server called it (`<table>__rebuild_pkey`, or the number PostgreSQL appends to
+a taken key name, `Post_pkey1`). Its allocated key's sequence needs repair
+once, per key, with the store's schema on the search path; here `Post` keys by
+`pid`:
 
 ```sql
 SELECT setval(pg_get_serial_sequence('"Post"', 'pid'),
@@ -288,21 +288,11 @@ rebuild were forgotten with its old sequence: if anything outside the table
 still refers to one, advance the sequence past it by hand. The `rid` order
 that rebuild gave the rows stays.
 
-Three differences from SQLite remain. A rebuild of an entity that another
+One difference from SQLite remains. A rebuild of an entity that another
 object depends on — a foreign key, another entity's or its own, or a view —
 is refused `JD0023` naming the dependent as the server does, and the link
 rolls back whole: PostgreSQL refuses to drop a table another object depends
-on, and the rebuild re-points nothing. A table renamed with `x-rename` keeps
-the key name PostgreSQL gave it under its old name (`Post_pkey` for `Post`
-renamed to `Article`), which the duplicate-key classification does not read
-as the renamed table's key: a duplicate key there still reads `JD2005` instead
-of `JD2001`. And the classification goes by the constraint's name alone, so a
-unique member whose index name has the shape of the table's key name — a
-member named `pkey1`, `pkey2`, … or `_rebuild_pkey`, `_rebuild_pkey1`, …,
-whose index is `<entity>_<member>` — reads a duplicate value as `JD2001`
-instead of `JD2005`: by name, PostgreSQL's numbered key name (`Post_pkey1`) and
-such a member's index are one. Reading the table's key constraint from the
-catalog would tell them apart.
+on, and the rebuild re-points nothing.
 
 ## 7. Stricter reads and exact sums
 
@@ -541,6 +531,28 @@ value the store did not honor now refuse by code, before any statement:
   `JD2001`, as on `create()` and a collection insert — on PostgreSQL under a
   table name of 59 to 63 bytes too, whose key PostgreSQL names
   `<table, clipped>_pkey` (all three paths stayed `JD2005` there).
+- On PostgreSQL a duplicate key is now the violation of the table's primary-key
+  constraint as the catalog names it, which the store reads when it opens,
+  not of a name that looks like a key's. A table renamed with `x-rename`
+  (its key keeps the name it was created under: `Post_pkey` for `Post`
+  renamed to `Article`) and an adopted table whose key has another name
+  (`CONSTRAINT pk_items PRIMARY KEY`) read `JD2005` for a duplicate key; they
+  read `JD2001`. A unique member named `pkey1` (indexed `<entity>_pkey1`) read
+  a duplicate value as `JD2001` under a key that did not exist; it reads
+  `JD2005` naming the member.
+- A write colliding on its key and on another unique member at once read
+  `JD2005` naming the member on SQLite under a `string` or `number` key
+  (`create()`, a saved `add()`, a collection `insert()`), where PostgreSQL read
+  `JD2001`; both read `JD2001` now, because SQLite reads the key the insert
+  carried after such a failure. An adopted PostgreSQL table whose unique index
+  is older than its key still reports that index first: `JD2005`.
+- A duplicate composite key read `JD2005` on both engines; it reads `JD2001`
+  naming every member (`a 'Pair' already exists under key {"a":1,"b":"x"}`).
+- A caller of `classifyDriverError` or `wrapDriverError` that passes
+  `unique: { table, column }` for a PostgreSQL violation was told `duplicate`
+  for `<table>_pkey` (and its numbered and clipped forms); it is told
+  `constraint` (`JD2005`) unless it also passes `constraint`, the name of the
+  table's primary-key constraint.
 - `put()` after a pending `remove()` of the same key was returned, and the save
   deleted the row anyway; the put now cancels the removal and the save updates
   the row. A removal saved in a transaction that rolled back, under a key an

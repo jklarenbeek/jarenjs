@@ -1063,14 +1063,10 @@ export function createTracker(context) {
       });
   };
 
-  const wrapDb = (error, statement) => (statement.kind === 'insert'
-    // the entity core's own classification, so a duplicate key is JD2001
-    // here exactly as it is on create()
-    ? coreFor(statement.entity).plan.wrapInsert(error, statement.records.map((/** @type {any} */ record) => record.current))
-    : wrapDriverError(error, {
-      docPath: entities.get(statement.entity)?.docPath,
-      collection: statement.entity,
-    }));
+  const wrapDb = (error, statement) => wrapDriverError(error, {
+    docPath: entities.get(statement.entity)?.docPath,
+    collection: statement.entity,
+  });
 
   /** The key argument `get` takes for a key's parts. @param {any} plan @param {any[]} parts */
   const keyArgument = (plan, parts) => (plan.keys.length === 1 ? parts[0]
@@ -1161,9 +1157,14 @@ export function createTracker(context) {
       }
       const returning = statement.kind === 'insert' && statement.returning === true;
       // prepared for this statement alone and released as soon as it ran
-      const execute = () => useStatementOnce(connection, statement.sql, (prepared) =>
-        attempt(() => (returning ? prepared.all(statement.params) : prepared.run(statement.params)),
-          (error) => wrapDb(error, statement)));
+      const execute = () => useStatementOnce(connection, statement.sql, (prepared) => {
+        const call = () => (returning ? prepared.all(statement.params) : prepared.run(statement.params));
+        // an insert is the entity core's own, so a duplicate key is JD2001
+        // here exactly as it is on create()
+        return statement.kind === 'insert'
+          ? coreFor(statement.entity).plan.attemptInsert(call, statement.records.map((/** @type {any} */ record) => record.current))
+          : attempt(call, (error) => wrapDb(error, statement));
+      });
       // A tracked UPDATE assigns only the members the save changed, so its
       // journal images are the snapshot and the snapshot with those changes
       // only while the stored row still holds the snapshot. An earlier write

@@ -590,24 +590,74 @@ export function isDriverError(error) {
     || isUncodedLoss(error) || isIntegerReadFailure(error);
 }
 
+/** SQLite's extended result codes for a PRIMARY KEY and for a UNIQUE index conflict. */
+const SQLITE_CONSTRAINT_PRIMARYKEY = 1555;
+const SQLITE_CONSTRAINT_UNIQUE = 2067;
+
 /**
- * Whether a SQLite UNIQUE message lists `table.column` as one of the
- * columns it names — whole, never as the prefix of a longer column name
- * (`m.pid_seq` does not name `m.pid`).
- * @param {string} message @param {string} qualified
+ * Whether a SQLite UNIQUE message lists every one of `qualified`
+ * (`table.column`) among the columns it names, in any order — each whole,
+ * never as the prefix of a longer column name (`m.pid_seq` does not name
+ * `m.pid`).
+ * @param {string} message @param {string[]} qualified
  * @returns {boolean}
  */
-function listsColumn(message, qualified) {
+function listsEvery(message, qualified) {
   const at = message.indexOf('UNIQUE constraint failed:');
-  return message.slice(at + 'UNIQUE constraint failed:'.length).split(',').some((part) => part.trim() === qualified);
+  const named = message.slice(at + 'UNIQUE constraint failed:'.length).split(',').map((part) => part.trim());
+  return qualified.every((column) => named.includes(column));
+}
+
+/**
+ * The unique key a write was inserting under.
+ * @typedef {{ table: string, column: string | string[], constraint?: string }} UniqueKey
+ * `column` is the key's column, or its columns in key order; `constraint`
+ * is the name the catalog gives the key's primary-key constraint, which
+ * PostgreSQL's report is matched against.
+ */
+
+/**
+ * Whether a SQLite UNIQUE failure is the key's own collision: a PRIMARY KEY
+ * conflict, or a UNIQUE conflict whose message names every key column — a
+ * unique INDEX over another column is a constraint failure, not a duplicate
+ * key.
+ * @param {number | null} extended @param {string} message @param {UniqueKey} unique
+ * @returns {boolean}
+ */
+function ownsKey(extended, message, unique) {
+  return extended === SQLITE_CONSTRAINT_PRIMARYKEY
+    || (message.includes('UNIQUE constraint failed')
+      && listsEvery(message, [unique.column].flat().map((column) => `${unique.table}.${column}`)));
+}
+
+/**
+ * Whether a failed write left the key's own collision undecided. SQLite
+ * reports only the first unique constraint a row fails, so a UNIQUE failure
+ * that is not the key's own may hide a key that is stored too; the caller
+ * reads the key it carried and, if a row holds it, answers
+ * {@link wrapHeldKey}. PostgreSQL names the constraint it rejected against,
+ * so for it nothing is undecided.
+ * @param {any} error @param {UniqueKey | undefined} unique
+ * @returns {boolean}
+ */
+export function keyUndecided(error, unique) {
+  if (unique === undefined || sqlStateOf(error) !== null || isInvariantRefusal(error)) return false;
+  const extended = resultCodeOf(error);
+  const message = typeof error?.message === 'string' ? error.message : '';
+  return (extended === SQLITE_CONSTRAINT_UNIQUE || message.includes('UNIQUE constraint failed'))
+    && !ownsKey(extended, message, unique);
 }
 
 /**
  * Classify a driver failure.
  * @param {any} error - the driver's error
- * @param {{ table: string, column: string }} [unique] - the unique key
- *   a write was inserting under, so its collision classifies as
- *   `duplicate` (the `JD2001` every insert path reports)
+ * @param {UniqueKey} [unique] - the unique key a write was inserting under,
+ *   so its collision classifies as `duplicate` (the `JD2001` every insert
+ *   path reports): on SQLite a PRIMARY KEY conflict or a UNIQUE conflict
+ *   naming every key column; on PostgreSQL a unique violation of the
+ *   constraint named by `unique.constraint` — and of no other, whatever it
+ *   is called. Without `constraint` a PostgreSQL unique violation is a
+ *   constraint failure
  * @returns {{ class: string, code: string | null, retryable: boolean, reason: string }}
  */
 export function classifyDriverError(error, unique = undefined) {
@@ -618,13 +668,7 @@ export function classifyDriverError(error, unique = undefined) {
   const extended = resultCodeOf(error);
   const primary = extended === null ? null : extended & 0xff;
   const message = typeof error?.message === 'string' ? error.message : '';
-  // the key's own collision: a PRIMARY KEY conflict (1555), or a UNIQUE
-  // conflict whose message names the key column — a unique INDEX over
-  // another column is a constraint failure, not a duplicate key
-  if (unique !== undefined && (extended === 1555
-    || (message.includes('UNIQUE constraint failed') && listsColumn(message, `${unique.table}.${unique.column}`)))) {
-    return { ...DUPLICATE };
-  }
+  if (unique !== undefined && ownsKey(extended, message, unique)) return { ...DUPLICATE };
   if (primary === RESULT.ERROR && message.includes('integer overflow')) {
     return { ...OVERFLOW };
   }
@@ -639,75 +683,23 @@ export function classifyDriverError(error, unique = undefined) {
   return { ...FALLBACK };
 }
 
-const UTF8 = new TextEncoder();
-
-/** PostgreSQL's identifier bound in bytes (`NAMEDATALEN` − 1), the one
- * `dialects/postgres.js` declares as `maxIdentifierBytes`. */
-const POSTGRES_NAME_BYTES = 63;
-
-/** The longest prefix of `text`, whole characters, within `room` bytes.
- * @param {string} text @param {number} room */
-function clipBytes(text, room) {
-  let kept = '';
-  let used = 0;
-  for (const character of text) {
-    used += UTF8.encode(character).length;
-    if (used > room) break;
-    kept += character;
-  }
-  return kept;
-}
-
 /**
- * The name PostgreSQL gives an object it names itself (its
- * `makeObjectName`): `<name1>[_<name2>]_<label>`, the longer of the two
- * names shortened first, byte by byte, until the whole fits the
- * identifier bound, each then clipped at a character boundary. A table of
- * 59–63 bytes names its key `<table clipped>_pkey`.
- * @param {string} name1 @param {string | null} name2 @param {string} label
- */
-function postgresObjectName(name1, name2, label) {
-  let room1 = UTF8.encode(name1).length;
-  let room2 = name2 === null ? 0 : UTF8.encode(name2).length;
-  const available = POSTGRES_NAME_BYTES - (name2 === null ? 0 : 1) - UTF8.encode(label).length - 1;
-  while (room1 + room2 > available) {
-    if (room1 > room2) room1--;
-    else room2--;
-  }
-  return `${clipBytes(name1, room1)}${name2 === null ? '' : `_${clipBytes(name2, room2)}`}_${label}`;
-}
-
-/**
- * The PostgreSQL half: a SQLSTATE into the same closed classes. The
- * server names the constraint it rejected against, so the key's own
- * collision is decided by NAME rather than by parsing a message —
- * `<table>_pkey` is the primary key a collection's key column carries,
- * and a unique INDEX over another column stays a constraint failure.
- * PostgreSQL appends a number to a key name another relation already
- * holds (`Post_pkey1`), and a rebuild leaves the key under its temporary
- * table's name (`Post__rebuild_pkey`) where `<table>_pkey` is held: each
- * is the table's own key, matched as written. A table renamed since its
- * key was named keeps the old name, which is not read as its key. Each
- * name is the one PostgreSQL builds, clipped to its identifier bound as
- * it clips it ({@link postgresObjectName}), so a long table name keeps
- * its duplicate key `JD2001`.
+ * The PostgreSQL half: a SQLSTATE into the same closed classes. The server
+ * names the constraint it rejected against, and the key's own collision is
+ * the one named like the primary-key constraint the catalog gave the key
+ * (`unique.constraint`, read when the store opened): a renamed table keeps
+ * the name its key was created under, an adopted table brings its own, and
+ * a unique member may be named like a key's index, so no name is read as
+ * the key unless the catalog says it is. Any other unique violation stays a
+ * constraint failure.
  * @param {string} state
  * @param {any} error
- * @param {{ table: string, column: string }} [unique]
+ * @param {UniqueKey} [unique]
  * @returns {{ class: string, code: string | null, retryable: boolean, reason: string }}
  */
 function classifySqlState(state, error, unique) {
-  if (state === '23505' && unique !== undefined) {
-    const constraint = typeof error?.constraint === 'string' ? error.constraint : '';
-    // the number PostgreSQL appends to a label whose name was taken
-    const pass = /[1-9]\d*$/.exec(constraint)?.[0] ?? '';
-    const named = (/** @type {string} */ name1, /** @type {string | null} */ name2, /** @type {string} */ label) =>
-      constraint === postgresObjectName(name1, name2, label)
-      || (pass !== '' && constraint === postgresObjectName(name1, name2, `${label}${pass}`));
-    if (named(unique.table, null, 'pkey') || named(clipBytes(`${unique.table}__rebuild`, POSTGRES_NAME_BYTES), null, 'pkey')
-      || named(unique.table, unique.column, 'key')) {
-      return { ...DUPLICATE };
-    }
+  if (state === '23505' && typeof unique?.constraint === 'string' && error?.constraint === unique.constraint) {
+    return { ...DUPLICATE };
   }
   // an integer that will not fit the column: SQLite reports it as a
   // generic error naming the overflow, PostgreSQL as numeric_value_out_of_range
@@ -722,6 +714,13 @@ function classifySqlState(state, error, unique) {
 }
 
 /**
+ * What a path hands `wrapDriverError` about itself.
+ * @typedef {{ docPath?: string, collection?: string, key?: string | number,
+ *   unique?: UniqueKey, duplicateReason?: string, code?: string, reason?: string,
+ *   always?: boolean }} WrapDetails
+ */
+
+/**
  * Wrap a driver failure as the coded runtime error its class calls
  * for, with `class` and `retryable` as own members and the original as
  * `cause`. Anything that is not a driver's own error — a coded refusal
@@ -729,10 +728,7 @@ function classifySqlState(state, error, unique) {
  * pushed user function), an API-misuse `TypeError` — is the error, and
  * passes through untouched.
  * @param {any} error
- * @param {{ docPath?: string, collection?: string, key?: string | number,
- *   unique?: { table: string, column: string },
- *   duplicateReason?: string, code?: string, reason?: string,
- *   always?: boolean }} details - `duplicateReason` is the `JD2001`
+ * @param {WrapDetails} details - `duplicateReason` is the `JD2001`
  *   sentence the calling path composes (it names the key); `code` and
  *   `reason` let a lifecycle that owns its failure code (a maintenance
  *   operation's `JD2078`) keep its code and leading sentence while the
@@ -776,7 +772,29 @@ export function wrapDriverError(error, details = {}) {
     wrapped.class = 'constraint'; wrapped.retryable = false;
     return wrapped;
   }
-  const classified = classifyDriverError(error, details.unique);
+  return wrapClassified(error, details, classifyDriverError(error, details.unique));
+}
+
+/**
+ * A failed insert whose key a read found stored: the `JD2001` the key's own
+ * collision would have been, with the path's own sentence. The caller
+ * reached it through {@link keyUndecided} and the read, never on its own.
+ * @param {any} error - the driver's error
+ * @param {WrapDetails} details - as `wrapDriverError`'s
+ * @returns {Error}
+ */
+export function wrapHeldKey(error, details) {
+  return wrapClassified(error, details, { ...DUPLICATE });
+}
+
+/**
+ * The coded error a classification calls for, with its class and verdict
+ * and the driver's error as `cause`.
+ * @param {any} error @param {WrapDetails} details
+ * @param {{ class: string, code: string | null, retryable: boolean, reason: string }} classified
+ * @returns {Error}
+ */
+function wrapClassified(error, details, classified) {
   const message = error?.message ?? String(error);
   /** @type {any} */
   const own = { cause: error };

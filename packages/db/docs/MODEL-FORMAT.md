@@ -1888,17 +1888,42 @@ under the same code with the same `class` and `retryable` verdict
 whichever path met it: `busy` (SQLITE_BUSY/LOCKED → `JD2005`,
 retryable), `full` (`JD2082`), `readonly` (`JD2083`), `io` (`JD2084`),
 `corrupt` (`JD2085`), `cantopen` and `constraint` (`JD2005`), `duplicate`
-(a UNIQUE collision on the key column → `JD2001`), `overflow` (`JD2005`: a
+(a collision on the key's own constraint → `JD2001`), `overflow` (`JD2005`: a
 numeric result past the range of its type, such as an integer a PostgreSQL
 `bigint` column cannot hold), `data` (`JD2003`, not retryable, when Node's SQLite binding
 refuses to represent a stored integer as a JavaScript number), and the fallback
-`error` (`JD2005`). An engine reports only the first unique constraint a row
-fails, so a write colliding on its one-member key and on another unique
-constraint at once — `create()` of a stored row with its own unique values is
-one — is `JD2001` on PostgreSQL, which checks the primary key first, and on
-SQLite under an `integer` key (the rowid) or beside a one-to-one key, but on
-SQLite under a `string` or `number` key SQLite reports a unique member or a
-unique entity index instead: `JD2005`, naming it. No pushed `$sum` or `$avg` over an `integer` member —
+`error` (`JD2005`).
+
+The key's own constraint is the table's PRIMARY KEY, whatever number of
+members it keys by; a composite key's `JD2001` names every member
+(`a 'Pair' already exists under key {"a":1,"b":"x"}`). On PostgreSQL it is
+the constraint the catalog names for that primary key, which the store reads
+when it opens — the table probe answers it, once more after the store creates
+the table, and a physical entity takes it from the catalog rows its open
+already reads — and a violation is the key's when the server names that
+constraint, matched exactly and never by a pattern. A table renamed by a
+migration keeps the name its key was created under, an adopted table brings
+its own, and a unique member may carry a name shaped like a key's (a member
+named `pkey1` is indexed `<table>_pkey1`): a collision on that member is a
+constraint failure, `JD2005`, naming it. A caller outside the store, which
+read no key constraint, gets no `JD2001` from a PostgreSQL violation. A key
+constraint renamed under an open store is read again at the next open.
+
+An engine reports only the first unique constraint a row fails, so a write
+colliding on its key and on another unique constraint at once — `create()` of
+a stored row with its own unique values is one — is `JD2001` on both engines.
+PostgreSQL checks the primary key of a table the store creates first, because
+its index is the table's oldest. SQLite may name a unique member or a unique
+entity index first, so on every insert path (an entity's `create()`, the unit
+of work's batch, a collection's `insert()`) a UNIQUE failure that does not
+name every key column is followed, on the same connection, by one read of the
+keys the insert carried (inside the caller's transaction when it has one): a
+stored key is `JD2001`, otherwise the unique failure stands as `JD2005` naming
+the member. The read runs only after such a failure, and a key the database
+allocated is never carried and never read.
+One remainder: an adopted PostgreSQL table whose unique index is older than its
+key reports that index first, so a write colliding on both is `JD2005` naming
+the index ([POSTGRESQL.md](POSTGRESQL.md)). No pushed `$sum` or `$avg` over an `integer` member —
 in a collection, an entity or a native temporal bucket — raises `overflow`
 or `data` over the values the store writes, which are JavaScript numbers and
 so within the double range: it folds as a double beside its exactness guard
@@ -3373,9 +3398,7 @@ const report = await store.saveChanges();     // one transaction
   inserted, a foreign-key `JD2005`. Documents
   handed to `add`/`put` are adopted and frozen. Staging is
   last-write-wins: `add()` twice under one key keeps the second document
-  (like `put`), where the explicit `create()` twice is `JD2001` (on SQLite
-  `JD2005` when a unique member or unique entity index collides too and the
-  key is not an `integer`, §7).
+  (like `put`), where the explicit `create()` twice is `JD2001` (§7).
   An `add()` after a pending `remove()` of the same key refuses `JD2003`
   without changing that removal: use `put()`/`update()` for a replacement,
   or save the removal before staging an insert. A `put()` of a tracked row
