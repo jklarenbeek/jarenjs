@@ -29,6 +29,9 @@ export interface WorkerMetrics {
   readonly maxFrameBytes: number;
   readonly maxPending: number;
   readonly pending: number;
+  /** The prepared statements the endpoint holds right now — the count
+   * `maxStatements` bounds — as its latest answer reported it. */
+  readonly statements: number;
   readonly generation: number;
   readonly healthy: boolean;
 }

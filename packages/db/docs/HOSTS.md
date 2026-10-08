@@ -275,6 +275,10 @@ metadata. One oversized row is `JD2092`. Abort takes effect at a row boundary;
 SQL; fixed CRUD statements, auxiliary reads, each entity's up to 64 cached
 native mutation statements and active cursors need additional capacity.
 Eviction releases a plan's or a mutation's statements after its admitted uses settle.
+The change log's per-commit writes, its watermark and page reads and the owner
+lease's renewals are one-shot statements released after each use, so a store with
+journal capture — and the live registrations that read its log — holds a bounded
+number of handles however many commits it makes.
 Late materializing cursors use temporary statements, and streaming cursors keep
 their independent handles until completion or `return()`. A refused cursor releases
 its unowned temporary preparation while an already admitted cursor keeps running. See
@@ -290,8 +294,10 @@ also capped. A compiled transient cursor marks its statement ephemeral, releasin
 its remote ID on exhaustion or return. Cached statements remain subject to the
 statement cap. `all()` drains credited frames under both limits and refuses excess;
 it never receives an unbounded whole-result frame. `metrics()` on an opened driver
-connection reports pending requests, frame/row high-water marks, generation and
-health. It contains no SQL or parameter values.
+connection reports pending requests, frame/row high-water marks, the prepared
+statements the endpoint holds right now (`statements`, the count `maxStatements`
+bounds, as its latest answer reported it), generation and health. It contains no
+SQL or parameter values.
 
 Worker exit or restart fences every old statement, cursor and transaction with
 `JD2090`. The failure is retryable only outside a transaction; this is permission

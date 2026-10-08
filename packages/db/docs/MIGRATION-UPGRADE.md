@@ -1039,6 +1039,12 @@ the database's own foreign-key actions ([LIVE-FORMAT](LIVE-FORMAT.md) §4):
   to the table). So does a collection document that takes a value before the
   document releasing it (`JD2005`). A reset now writes in canonical order
   instead of the order the replica stored its rows in.
+- On the worker, pool and process hosts a store with the persisted log
+  (`capture.log`) refused `JD2092` (`worker statement capacity 1024 exceeded`)
+  after a few hundred commits — fewer with an `asyncLive` registration, whose
+  every refresh read the log — because each commit's log statements kept their
+  statement slots; they are released after each use now, as are the owner
+  lease's renewals, and such a store keeps writing.
 
 ## Measured costs
 

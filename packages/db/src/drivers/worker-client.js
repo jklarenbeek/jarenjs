@@ -15,7 +15,9 @@ export async function createWorkerConnection(worker, settings) {
   let closed = false;
   let transactionDepth = 0;
   let closePromise;
-  const metrics = { frames: 0, rows: 0, maxFrameRows: 0, maxFrameBytes: 0, maxPending: 0 };
+  // `statements` is the endpoint's own count of the prepared statements it
+  // holds (what its `maxStatements` bounds), as its latest answer reported it
+  const metrics = { frames: 0, rows: 0, maxFrameRows: 0, maxFrameBytes: 0, maxPending: 0, statements: 0 };
   let readyResolve;
   let readyReject;
   let started = false;
@@ -66,6 +68,7 @@ export async function createWorkerConnection(worker, settings) {
     const request = pending.get(message.id);
     if (request === undefined) return;
     pending.delete(message.id);
+    if (Number.isSafeInteger(message.statements) && message.statements >= 0) metrics.statements = message.statements;
     if (message.kind === 'failure') {
       hooks.failure?.(request.op, request.data, message.transaction);
       const error = message.error;

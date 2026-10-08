@@ -35,7 +35,7 @@ import { createJSONPatch } from '@jarenjs/json/patch';
 import { encodeJSONPointerSegment, decodeJSONPointerSegment } from '@jarenjs/json/pointer';
 
 import { DbCompileError, DbRuntimeError, wrapDriverError } from './errors.js';
-import { chain, attempt } from './driver.js';
+import { chain, attempt, useStatementOnce } from './driver.js';
 import { createCursor, drainPage, utf8Length, PAGE_LIMIT_DEFAULT } from './cursor.js';
 
 /** The persisted change log (LIVE-FORMAT §5). */
@@ -523,19 +523,21 @@ export function createCaptureEngine(options) {
     return ops;
   };
 
+  // Every log statement is prepared for one use and released after it,
+  // one at a time: a binding that keeps each preparation until told
+  // otherwise (a worker, up to its `maxStatements`) would otherwise hold
+  // three more slots per commit for good, and a reader's per poll.
   const persist = (patch, at) => {
     if (logStatements === null || patch.length === 0) return null;
-    return chain(connection.prepare(logStatements.allocate), (allocate) =>
-      chain(allocate.get([]), (row) => {
-        seq = Number(row.seq);
-        if (!Number.isSafeInteger(seq) || seq < 1)
-          throw new DbRuntimeError('JD2005', 'change sequence exceeds the safe positive integer range');
-        return chain(connection.prepare(logStatements.insert), (insert) =>
-          chain(insert.run([seq, at, mode, JSON.stringify(patch)]), () =>
-            chain(connection.prepare(logStatements.prune), (prune) =>
-              chain(prune.run([seq - options.retention]), () =>
-                dialect.capture?.afterLog?.(connection)))));
-      }));
+    return chain(useStatementOnce(connection, logStatements.allocate, (allocate) => allocate.get([])), (row) => {
+      seq = Number(row.seq);
+      if (!Number.isSafeInteger(seq) || seq < 1)
+        throw new DbRuntimeError('JD2005', 'change sequence exceeds the safe positive integer range');
+      return chain(useStatementOnce(connection, logStatements.insert, (insert) =>
+        insert.run([seq, at, mode, JSON.stringify(patch)])), () =>
+        chain(useStatementOnce(connection, logStatements.prune, (prune) => prune.run([seq - options.retention])), () =>
+          dialect.capture?.afterLog?.(connection)));
+    });
   };
 
   /** The collections a patch touches, in first-seen order. */
@@ -756,8 +758,8 @@ export function createCaptureEngine(options) {
     changesSince(after) {
       requireLog('changesSince');
       requireCursor(after, 'changesSince');
-      return chain(connection.prepare(logStatements.read), (statement) =>
-        chain(attempt(() => statement.all([after]), captureFailure), (rows) => rows.map(recordOf)));
+      return chain(useStatementOnce(connection, logStatements.read, (statement) =>
+        attempt(() => statement.all([after]), captureFailure)), (rows) => rows.map(recordOf));
     },
     /** Whether the persisted log exists — what decides whether the
      * bounded reader is offered at all. */
@@ -799,11 +801,11 @@ export function createCaptureEngine(options) {
    */
   function readBounds() {
     requireLog('changes.bounds');
-    return chain(connection.prepare(logStatements.bounds), (statement) =>
-      chain(attempt(() => statement.get([]), captureFailure), (row) => ({
-        earliestAvailable: row?.lo === null || row?.lo === undefined ? null : Number(row.lo),
-        highWatermark: Number(row?.hi ?? 0),
-      })));
+    return chain(useStatementOnce(connection, logStatements.bounds, (statement) =>
+      attempt(() => statement.get([]), captureFailure)), (row) => ({
+      earliestAvailable: row?.lo === null || row?.lo === undefined ? null : Number(row.lo),
+      highWatermark: Number(row?.hi ?? 0),
+    }));
   }
   /**
    * One bounded page of the log after `after`: never more than `limit`
@@ -835,17 +837,20 @@ export function createCaptureEngine(options) {
     if (deadline !== undefined && (typeof deadline !== 'number' || !Number.isFinite(deadline)))
       throw new TypeError('changes.page: deadline is an epoch-millisecond number');
     // the deadline is read against the store's clock at every record
-    // boundary, as on every other page (JD2075)
-    const cursor = createCursor({ streaming: 'row', barrier: null, signal: options?.signal, deadline, now: clock,
-      open: () => chain(connection.prepare(logStatements.readPage),
-        (statement) => statement.iterate([after, limit + 1])),
-      wrap: captureFailure,
-      items: (row) => [{ record: recordOf(row), bytes: utf8Length(String(row.patch)) }] });
-    return drainPage(cursor, {
-      limit, maxBytes, after,
-      sizeOf: (item) => item.bytes,
-      continuationOf: (item) => item.record.seq,
-    }).then((page) => chain(readBounds(), (bounds) => {
+    // boundary, as on every other page (JD2075); the page's statement is
+    // held for exactly the drain, which returns its cursor on every path
+    const page = useStatementOnce(connection, logStatements.readPage, (statement) => {
+      const cursor = createCursor({ streaming: 'row', barrier: null, signal: options?.signal, deadline, now: clock,
+        open: () => statement.iterate([after, limit + 1]),
+        wrap: captureFailure,
+        items: (row) => [{ record: recordOf(row), bytes: utf8Length(String(row.patch)) }] });
+      return drainPage(cursor, {
+        limit, maxBytes, after,
+        sizeOf: (item) => item.bytes,
+        continuationOf: (item) => item.record.seq,
+      });
+    });
+    return chain(page, (page) => chain(readBounds(), (bounds) => {
       const first = bounds.earliestAvailable ?? bounds.highWatermark + 1;
       if (after + 1 < first) {
         return { items: [], ...bounds, hasMore: false, resetRequired: true };

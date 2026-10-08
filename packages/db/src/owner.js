@@ -32,6 +32,7 @@
 import { chain, isThenable } from '@jarenjs/core/function';
 
 import { DbCompileError, DbRuntimeError } from './errors.js';
+import { useStatementOnce } from './driver.js';
 
 /** The lease's default length, in milliseconds. */
 export const OWNER_LEASE_DEFAULT_MS = 30_000;
@@ -187,10 +188,13 @@ function tableLease(strategy, context, owner, now) {
   /** Takes the timer's renewal off the gate's queue when the store closes. */
   const closing = new AbortController();
 
+  // each renewal's statement is prepared for that one use and released
+  // after it: a binding that keeps every preparation (a worker, up to its
+  // `maxStatements`) would otherwise hold one more slot per renewal
   /** @param {any} scope @param {string} sql @param {any[]} params */
-  const run = (scope, sql, params) => chain(scope.prepare(sql), (statement) => statement.run(params));
+  const run = (scope, sql, params) => useStatementOnce(scope, sql, (statement) => statement.run(params));
   /** @param {any} scope */
-  const read = (scope) => chain(scope.prepare(strategy.read), (statement) => statement.get([]));
+  const read = (scope) => useStatementOnce(scope, strategy.read, (statement) => statement.get([]));
   /** @param {any} row */
   const holderOf = (row) => (row === undefined || row === null
     ? { owner: null, expiresAt: null }

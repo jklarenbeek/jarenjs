@@ -110,12 +110,15 @@ export async function serveSqliteEndpoint(parentPort, configuration) {
         if (!validRequest(request)) throw new DbRuntimeError('JD2093', 'invalid worker protocol request');
         if (request.generation !== generation) throw generationFailure(request.generation);
         const value = dispatch(request);
+        // every answer carries the statements this endpoint holds right
+        // now: the count `maxStatements` bounds, read as the client's
+        // `metrics().statements`
         parentPort.postMessage(frame('result', request.id, { value,
-          transaction: request.op === 'close' ? null : transaction() }));
+          transaction: request.op === 'close' ? null : transaction(), statements: statements.size }));
         if (request.op === 'close') parentPort.close();
       }
       catch (error) { parentPort.postMessage(frame('failure', request?.id ?? 0, {
-        error: cloneDriverError(error), transaction: transaction() })); }
+        error: cloneDriverError(error), transaction: transaction(), statements: statements.size })); }
     });
   }
   catch (error) {
