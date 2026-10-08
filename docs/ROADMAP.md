@@ -394,8 +394,9 @@ what each does is its own documentation's job
   key (it reads back lowercase whatever the table stores, so its decoded value does
   not compare as the stored one) and over any physical table on PostgreSQL,
   pushdown beyond the qualified native census and additional PostgreSQL types remain
-  open. Application trigger/cascade capture and replication remain refused until their complete
-  writer population has an executable oracle.
+  open. Capture and replication of adopted physical tables — whose application triggers and
+  cascades the store does not write — remain refused until their complete writer population has
+  an executable oracle.
 - [ ] **Broader database invariant lowering.** Rules lower to verified triggers
   on SQLite and PostgreSQL alike ([MODEL-FORMAT §13](../packages/db/docs/MODEL-FORMAT.md#13-persistence-invariants)).
   Arbitrary trigger programs (a `TableTrigger` stays SQLite SQL), expression
@@ -477,16 +478,50 @@ what each does is its own documentation's job
 - [ ] **Replication beyond bounded managed histories.** Portable envelopes,
   causal frontiers, durable receipts, transactional apply, explicit conflicts
   and bounded snapshot resets are implemented in
-  [REPLICATION-FORMAT](../packages/db/docs/REPLICATION-FORMAT.md)
-  on SQLite and PostgreSQL. Paged snapshots need snapshot identity and continuation consistency;
-  receipt/tombstone compaction needs causal stability evidence beyond current
-  reset credits. Journal replication explicitly refuses child cascade/set-null
-  relations at open because its write journal cannot observe those database
-  side effects. Removing that refusal requires transactional child before/after
-  capture across all delete paths, including replay and unit-of-work writes.
-  Independent field merges require a declared resolver policy. A store on
+  [REPLICATION-FORMAT](../packages/db/docs/REPLICATION-FORMAT.md) on SQLite and
+  PostgreSQL, under session and journal capture alike, including the rows
+  foreign keys remove or null. Paged snapshots need snapshot identity and
+  continuation consistency; receipt/tombstone compaction needs causal stability
+  evidence beyond current reset credits. Independent field merges require a
+  declared resolver policy. Concurrent structural changes — a child added on one
+  replica under a parent another replica deletes — refuse on both sides
+  (`JD2104` where the deletion arrives, `JD2005` where the child arrives) and
+  need a reset; no structural conflict policy exists. An envelope no write order
+  can replay — values rotated between rows, or a row that must be written both
+  before a removal and after it — refuses `JD2005` or `JD2104`. A store on
   several PostgreSQL sessions (`sessions` above 1) refuses `replication`
   (`JD0009`): its pages, snapshots and applies are qualified on one session.
+- [ ] **Instant keys kept as epoch columns.** A `date-time` or `date` key
+  declared `column: "integer"` is stored — the column holds the epoch, the
+  document the string — but no later statement names its row: `get`, `update`
+  and `delete` bind the string against the integer key column, so SQLite finds
+  no row (`get` answers `undefined`, `update` refuses `JD2006`, `delete` answers
+  `false`) and PostgreSQL refuses `JD2005`; a foreign key or membership naming
+  such a row refuses `JD2005` on both engines; session capture records the row
+  under its epoch where journal capture records the string; and under
+  replication every create refuses `JD2104`. Either every key binding — the
+  entity core, the unit of work, foreign-key and membership columns, session
+  capture's key decoding and the replication writer — encodes the instant as its
+  column stores it, or the model refuses an epoch key (`JD0005`).
+- [ ] **A write that collides on its key and on another unique member reads
+  two codes.** Single collisions agree on both engines (key `JD2001`, unique
+  member `JD2005`); a write colliding on both at once reads `JD2001` on
+  PostgreSQL and, under a non-integer key, `JD2005` on SQLite, because each
+  engine reports the first constraint it checks. Agreeing on `JD2001` needs a
+  key read after a SQLite unique failure that does not name the key, on every
+  insert path (entity create, unit-of-work batches, collections, the
+  replication writer).
+- [ ] **Store rules judge only the store's own statements.** A row the
+  database's foreign-key actions remove or null runs none of its entity's rules
+  (a child's delete rule refuses its own `delete()` yet a cascading parent
+  delete removes it). Journal capture now reads exactly those rows before the
+  delete; judging them needs the same read under session capture and a decided
+  `$.old`/`$.new` for a nulled row.
+- [ ] **A `setNull` relation over a required member.** The model accepts a
+  `setNull` relation whose via member is required or non-nullable; the
+  database's set-null then stores a row that member's schema rejects (`get`
+  answers the document without the member). Wanted: the model refuses the
+  relation (`JD0005`), or reads its via member as nullable.
 - [ ] **Remaining incremental live shapes.**
   [The matrix](../packages/db/docs/LIVE-FORMAT.md) retains self joins,
   non-equality and unindexed joins, reverse many-to-many edges without an
@@ -519,13 +554,6 @@ what each does is its own documentation's job
   running after its client went away, past both `pg_cancel_backend` and
   `pg_terminate_backend`. Wanted: the typed fold a column gets, or a bound on the
   terms such a chain may compile to.
-- [ ] **A predicate callback that answers a JavaScript boolean.** A pen
-  predicate written `x => x.a === null` captures the comparison as JavaScript
-  evaluates it on the capture — a constant — because `===` cannot be trapped,
-  and a constant predicate is a legal spelling. The pens refuse the trappable
-  forms (`==`, templates, `+`) and their docs name every untrappable one;
-  refusing a callback that returns a bare boolean would change the capture's
-  contract, so it needs a decision first.
 - [ ] **An interval declaration is needed before `$overlaps` can seek.**
   The current prefilter retains malformed stored spans so the engine can raise
   the required error; that extra disjunct prevents an index seek.
