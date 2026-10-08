@@ -391,8 +391,9 @@ no continuation to emit.
   shape can shed, and a per-root MEMBER allow-list — the members a
   document may read, checked wherever it names one, where allowing a
   member allows what is under it and reading the item whole is refused
-  rather than quietly narrowed. Read-only stores refuse writes at the
-  driver.
+  rather than quietly narrowed. A live query on a profiled store re-runs
+  through these same bounds rather than maintaining past them. Read-only
+  stores refuse writes at the driver.
 - **Writes validate** through an injected hook; without one,
   `store.capabilities.validated` is `false` and the docs say what that
   costs. The public API is asynchronous (the browser's OPFS story

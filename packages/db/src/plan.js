@@ -137,6 +137,8 @@ const PLAN_REASONS = {
     + '(the engine ERRORS on non-conforming operands)',
   floatingAccumulation: 'a floating sum or average runs in the engine, whose left-to-right '
     + 'addition decides the rounding a native sum would not reproduce',
+  rootRead: 'the document reads the collection root outside its binding, so the engine answers it '
+    + 'over the whole collection',
 };
 
 /**
@@ -2771,6 +2773,114 @@ function collectionResult(analysis, plan = null, mode = 'set', reasons = [],
 function planCollectionCore(document, shape, options = undefined) {
   if (document === '$[*]') document = ROOT_SCAN;
   const analysis = analyzeQuery(document, analyzeOptionsFor(shape?.operators));
+  if (rootReads(analysis.root) < 2) return planCollectionPhrase(document, analysis, shape, options);
+  // A second read of the root sees what the engine is handed as the
+  // collection: the row residual hands it one row, and a pushed conjunct,
+  // the deterministic-function hatch or a k-nearest cut hand it the rows
+  // they keep. Planned without the hooks — nothing is registered for a
+  // narrowing this plan cannot keep — and answered over the whole
+  // collection unless the plan already fetches all of it.
+  const planned = planCollectionPhrase(document, analysis, shape, undefined);
+  if (fetchesWhole(planned)) return planned;
+  return collectionResult(analysis, null, 'set', [refusal('$', PLAN_REASONS.rootRead)], null, [], [],
+    planned.series === null ? null
+      : { ...planned.series, mode: 'engine', index: null, prefix: [], range: null, seeks: [] });
+}
+
+/**
+ * How many places a document reads the collection root: the input
+ * document itself (`$`), a path over it (`$.a`, `$[0]`, `$[*]`), and an
+ * absolute query inside any path filter (`$it.xs[?@ == $[0].n]` — a
+ * filter names no variable, so its `$` is the input document). A phrase
+ * the planner narrows reads it once, through its binding or a temporal
+ * operator's operand.
+ * @param {any} root - the analysis root node
+ * @returns {number}
+ */
+function rootReads(root) {
+  let reads = 0;
+  // an explicit stack: a document's nesting depth is the caller's
+  const pending = [root];
+  while (pending.length > 0) {
+    const node = pending.pop();
+    switch (node.kind) {
+      case 'var':
+        if (node.slot === 0 && node.external !== true) reads++;
+        break;
+      case 'path':
+        if (node.rootSlot === 0 && node.external !== true) reads++;
+        reads += filterRootReads(node.segments);
+        break;
+      case 'object':
+        for (const entry of node.entries) pending.push(entry.expr);
+        break;
+      case 'map':
+        for (const pair of node.pairs) pending.push(pair.key, pair.value);
+        break;
+      case 'array':
+        for (const element of node.elements) pending.push(element);
+        break;
+      case 'op':
+      case 'call':
+        for (const arg of node.args) pending.push(arg);
+        break;
+      case 'let':
+      case 'quant':
+        for (const binding of node.bindings) pending.push(binding.expr);
+        pending.push(node.kind === 'let' ? node.ret : node.satisfies);
+        break;
+      case 'flwor':
+        if (node.fold !== null) pending.push(node.fold.expr);
+        for (const binding of [...node.forBindings, ...node.letBindings]) pending.push(binding.expr);
+        if (node.where !== null) pending.push(node.where);
+        for (const key of node.groupby?.keys ?? []) pending.push(key.expr);
+        for (const spec of node.orderby?.specs ?? []) pending.push(spec.key);
+        pending.push(node.ret);
+        break;
+      default: // a literal, or a raw operand no evaluation reads
+        break;
+    }
+  }
+  return reads;
+}
+
+/**
+ * The absolute queries inside a path's filter selectors, nested filters
+ * included: the segment list a path node carries is plain JSON.
+ * @param {readonly any[]} segments
+ * @returns {number}
+ */
+function filterRootReads(segments) {
+  let reads = 0;
+  const pending = segments.flatMap((segment) => segment.selectors
+    .filter((selector) => selector.kind === 'filter').map((selector) => selector.expr));
+  while (pending.length > 0) {
+    const node = pending.pop();
+    if (node === null || typeof node !== 'object') continue;
+    if (node.kind === 'query' && node.query?.relative === false) reads++;
+    for (const value of Array.isArray(node) ? node : Object.values(node)) pending.push(value);
+  }
+  return reads;
+}
+
+/**
+ * Whether a plan hands the engine the whole collection: a set residual
+ * with nothing pushed that narrows the fetch.
+ * @param {any} planned
+ * @returns {boolean}
+ */
+function fetchesWhole(planned) {
+  const { mode, plan } = planned;
+  return mode === 'set' && (plan === null
+    || (plan.filter === null && plan.seeks.length === 0 && plan.rank === null && plan.window === null));
+}
+
+/**
+ * Plan one analysed document against one collection (see
+ * {@link planCollectionCore}).
+ * @param {any} document @param {any} analysis @param {any} shape @param {any} options
+ */
+function planCollectionPhrase(document, analysis, shape, options) {
   let root = analysis.root;
   assertDecidedKind(root);
 

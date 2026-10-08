@@ -1,7 +1,7 @@
 //@ts-check
 /** Collection groups use bounded per-group recomputation over maintained leaves. */
 import { compileJsonQuery } from '@jarenjs/json/query';
-import { stableStringify, semanticKey } from '@jarenjs/core/object';
+import { isJsonObject, stableStringify, semanticKey } from '@jarenjs/core/object';
 import { DbRuntimeError } from './errors.js';
 import { utf8Length } from './cursor.js';
 
@@ -20,6 +20,20 @@ const WHOLE = { whole: true, members: new Set() };
  */
 export const readsRoot = (text) => !text.startsWith('$$')
   && (/^\$(?:$|[.[])/.test(text) || (text.startsWith('$') && text.includes('$', 1)));
+
+/** Whether a document fragment never reads the collection root (`$`,
+ * `$.…`, `$[…]`, or the root inside a path filter — {@link readsRoot}): a
+ * part the maintenance evaluates over a subset of the rows — one group,
+ * one row — would see that subset as the collection. A `$const` is
+ * quoted, never read.
+ * @param {any} node
+ * @returns {boolean} */
+export function readsNoRoot(node) {
+  if (typeof node === 'string') return !readsRoot(node);
+  if (Array.isArray(node)) return node.every(readsNoRoot);
+  if (!isJsonObject(node) || Object.hasOwn(node, '$const')) return true;
+  return Object.values(node).every(readsNoRoot);
+}
 
 /** The identity a maintained result keeps an output's previous reference
  * by: its whole value, exact for the numbers JSON text cannot tell apart —

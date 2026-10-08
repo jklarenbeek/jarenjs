@@ -404,6 +404,22 @@ the query engine, now refuse by code or answer what the engine answers:
   specification, even one whose only change is clause order, as a miss), and
   a predicate pushed as a registered SQL function registers one function per
   member order.
+- A collection query whose filter or return reads the collection root
+  outside its binding — `{ $count: '$[*]' }` or `'$[0].id'` in a projection,
+  a nested query over `$[*]`, the root inside a path filter
+  (`$it.xs[?@ == $[0].n]`), a filter comparing with a count of the
+  collection — was answered over what the plan handed the engine: one row
+  at a time (a count of the collection answered 1 for every row), the rows a
+  pushed filter or window kept, or on node:sqlite the row alone inside a
+  registered SQL function; it now runs in the engine over the whole
+  collection (under a profile, the rows its mandatory predicate keeps) and
+  answers what the engine answers, `explain()` naming the reason (`'$'`)
+  where a narrowing was dropped, so `strict: true` refuses it `JD0010` (the
+  formerly native shape included), a profile's `maxRows` bounds and
+  `refuseFullScan` refuses that whole read, and a live registration that
+  would evaluate it a row at a time (rows, a window, an event-time view's
+  operand filter) re-runs, the reason named, where `mode: 'incremental'`
+  refuses it `JD0051`.
 
 ## 8. Stricter models, keys and staged writes
 
@@ -771,6 +787,18 @@ value the store did not honor now refuse by code, before any statement:
   `maxInputRows` before a statement that read nothing was refused `JD2060`; it
   now registers. A row past `maxInputBytes` that is the first its statement
   reads is `JD2060`, as any other row past it, where it was `JD2074`.
+- On a store opened with a `profile` — any profile, `'safe'` included — a
+  live registration was maintained past it: a row another tenant wrote
+  reached `result` through the mandatory predicate, and an undeclared
+  external, `maxRows`, `maxBytes` and the engine `limits` bound nothing
+  maintenance evaluated, while a join whose whole-row initial read a member
+  allow-list refused was `JD0011`; every registration there now re-runs
+  through `execute`, with the reason
+  `the store profile's predicates, member lists and limits apply to every read, which maintenance does not repeat`,
+  so a demanded `mode: 'incremental'` is `JD0051` (a stricter refusal) and
+  that join answers; and a live option a registration does not read — a
+  per-call `profile`, which `execute` reads and a registration dropped, or
+  a misspelt `mod` — is now `JD0013`, as is `null` in place of the options.
 
 ### Allocated entity keys on PostgreSQL
 

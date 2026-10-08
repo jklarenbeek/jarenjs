@@ -632,6 +632,8 @@ describe('the planner\'s reason vocabulary', () => {
     'plan.groupedAggregate': [collection, { $sum: {
       $for: { it: '$[*]' }, $groupby: { g: '$it.s' }, $return: { g: '$g' } } }],
     'plan.distinctProjection': [collection, { $distinct: F({}) }],
+    // a second read of the root sees what the engine is handed: never one row
+    'plan.rootRead': [collection, F({ $return: { x: { $count: '$[*]' } } })],
     'entity.notFlwor': [entity, { $count: '$.Person[*]' }],
     'entity.bindingRoot': [entity, { $for: { p: { $in: '$.Person[*]', $at: 'i' } }, $return: '$p' }],
     'entity.joinKey': [entity, { $for: { a: '$.Person[*]', b: '$.Pet[*]' }, $return: '$a' }],

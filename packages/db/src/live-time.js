@@ -50,6 +50,7 @@ import { compileBuckets, resampleSeries, rollingSeries, toEpoch } from '@jarenjs
 import { DbCompileError } from './errors.js';
 import { chain } from './driver.js';
 import { singularSelector } from './series.js';
+import { readsNoRoot } from './live-nested.js';
 
 /** The closed `eventTime` member set (§13.1). */
 const EVENT_TIME_MEMBERS = Object.freeze(['path', 'watermark', 'allowedLateness', 'retention']);
@@ -169,6 +170,12 @@ export function classifyEventTime(inner, windowed, keyed, eventTime) {
   }
   if (windowed) return rerun(`'${name}' — a windowed temporal view re-runs`);
   if (!keyed) return rerun('rows without a document key cannot be tracked');
+  // the state files each row alone through the operand's filter, and a
+  // filter reading the collection root would take that row for the
+  // collection the kernel's own run reads
+  if (!readsNoRoot(operand.source.$where)) {
+    return rerun(`'${name}' — a filter that reads the collection root re-runs (a row is evaluated alone)`);
+  }
 
   // the instant the state places a row by must be the instant the
   // kernel aggregates it by, or the two would disagree row for row

@@ -29,7 +29,7 @@ import { planQuery, BIND_REASONS } from './plan.js';
 import { createSortedWindow, compareCodepoint } from './window.js';
 import { classifyEventTime, bucketStrategy, rollingStrategy } from './live-time.js';
 import { joinStrategy } from './live-join.js';
-import { classifyNestedGroup, nestedGroupStrategy, readsRoot, compilesBare, valueKey } from './live-nested.js';
+import { classifyNestedGroup, nestedGroupStrategy, readsNoRoot, compilesBare, valueKey } from './live-nested.js';
 import { LIVE_DEFAULTS } from './live-options.js';
 
 /** The store-level live bounds and their defaults (§12: printed,
@@ -142,20 +142,6 @@ function documentsSource(binding, where) {
     ...(where !== undefined ? { $where: where } : {}),
     $return: `$${binding}`,
   };
-}
-
-/** Whether a document fragment never reads the collection root (`$`,
- * `$.…`, `$[…]`, or the root inside a path filter — {@link readsRoot}): a
- * part the maintenance evaluates over a subset of the rows — one group,
- * one row — would see that subset as the collection. A `$const` is
- * quoted, never read.
- * @param {any} node
- * @returns {boolean} */
-function readsNoRoot(node) {
-  if (typeof node === 'string') return !readsRoot(node);
-  if (Array.isArray(node)) return node.every(readsNoRoot);
-  if (!isJsonObject(node) || Object.hasOwn(node, '$const')) return true;
-  return Object.values(node).every(readsNoRoot);
 }
 
 /**
@@ -315,6 +301,11 @@ function refinedOnly(planned, allowReturn) {
  * strategy would hold one item per source row. */
 const WRAPPED_RERUN = 'a query inside a one-item array constructor re-runs (its one row is the whole array)';
 
+/** Why a phrase whose filter or projection reads the collection root
+ * re-runs: the rows and window strategies evaluate one row at a time,
+ * and that row alone is not the collection `execute` evaluates over. */
+const ROW_ALONE = 'a projection that reads the collection root re-runs (a row is evaluated alone)';
+
 const SPATIAL_RERUN = {
   aggregate: 'a spatial aggregate re-runs: the accumulator needs a fully translated '
     + 'selection, and a refined spatial predicate leaves the exact test to the engine',
@@ -407,6 +398,11 @@ export function classifyLiveQuery(document, queryShape, keyed, eventTime = null)
     };
   }
 
+  // a phrase over the collection that reads its root is one the per-row
+  // strategies cannot hold; a grouping keeps the reason the planner names
+  if (bindingNameOf(inner) !== null && inner.$groupby === undefined
+    && ![inner.$where, inner.$return].every(readsNoRoot)) return rerun(ROW_ALONE);
+
   // a k-nearest window is planned WITH its window (the cut needs the
   // limit), so the whole document is asked before the inner one: the
   // column cuts the candidates and the engine orders them, and no
@@ -478,9 +474,6 @@ export function classifyLiveQuery(document, queryShape, keyed, eventTime = null)
     // the window keeps one item per row and evaluates every row alone
     // through an evaluator compiled with no options
     if ((planned.analysis.root.ret?.card ?? 1) > 2) return rerun('a one-to-many projection under an order re-runs');
-    if (![inner.$where, inner.$return].every(readsNoRoot)) {
-      return rerun('a projection that reads the collection root re-runs (a row is evaluated alone)');
-    }
     if (!compilesBare(inner)) return rerun(plannerReason(planned));
     return {
       strategy: 'window',

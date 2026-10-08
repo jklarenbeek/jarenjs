@@ -1422,6 +1422,20 @@ const RETRY_MEMBERS = Object.freeze(['attempts', 'baseMs', 'maxMs']);
 /** The longest wait a timer can take — `2^31 − 1` ms. */
 const TIMER_MAX = 0x7fffffff;
 
+/** Why every live registration on a store opened with a profile re-runs
+ * (LIVE-FORMAT §7): the profile applies to every read `execute` makes —
+ * its predicates and member lists per root, its engine limits, its row
+ * and byte bounds, its declared externals — and a maintained strategy
+ * repeats none of them: it admits an inserted document from the capture
+ * record, re-reads a changed row by key, and evaluates without limits. */
+const PROFILE_RERUN = "the store profile's predicates, member lists and limits apply to every read, "
+  + 'which maintenance does not repeat';
+
+/** The options a live registration reads (LIVE-FORMAT §7). Any other is
+ * refused rather than dropped — a per-call `profile`, which `execute`
+ * reads, would otherwise leave the registration unbounded by it. */
+const LIVE_OPTIONS = Object.freeze(['externals', 'mode', 'eventTime']);
+
 /** One diagnostic prefix for collection writes, transaction controls and retry policy.
  * @param {string} spelling @param {string} reason @param {string} [code] */
 const optionError = (spelling, reason, code = 'JD0013') =>
@@ -2999,12 +3013,14 @@ export function openStore(model, options) {
               } };
           };
           const registerCollectionLive = (core, document, liveOptions) => {
+            readOptions(liveOptions, LIVE_OPTIONS, 'live');
             const externals = liveOptions?.externals ?? {};
             const keyed = core.model.keySegments !== null;
             const eventTime = normalizeEventTime(liveOptions, core.model.name);
             const classification = liveOptions?.mode === 'rerun'
               ? { strategy: 'rerun', reason: 'rerun was requested' }
-              : classifyLiveQuery(document, core.queryShape, keyed, eventTime);
+              : storeProfile !== null ? { strategy: 'rerun', reason: PROFILE_RERUN }
+                : classifyLiveQuery(document, core.queryShape, keyed, eventTime);
             return closeOnRollback(/** @type {any} */ (liveRegistry).register({
               name: core.model.name,
               tables: new Set([core.model.name]),
@@ -3621,6 +3637,7 @@ export function openStore(model, options) {
               throw new DbCompileError('JD0050',
                 'live queries require change capture — open the store with { capture: true }');
             }
+            readOptions(liveOptions, LIVE_OPTIONS, 'live');
             if (liveOptions?.eventTime !== undefined) {
               throw new DbCompileError('JD0053',
                 'live eventTime maintains a collection view — an entity document re-runs, '
@@ -3646,7 +3663,8 @@ export function openStore(model, options) {
               classification: liveOptions?.mode === 'rerun' ? {
                 strategy: 'rerun',
                 reason: 're-run mode was explicitly requested',
-              } : classifyEntityLive(document, entities, mapping, operators),
+              } : storeProfile !== null ? { strategy: 'rerun', reason: PROFILE_RERUN }
+                : classifyEntityLive(document, entities, mapping, operators),
               execute: (doc, executeOptions) => entityEngine.execute(doc, executeOptions),
               readDependency: logicalRows.read,
               dependencyPosition: logicalRows.position,

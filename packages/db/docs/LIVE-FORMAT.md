@@ -340,8 +340,8 @@ PostgreSQL, or SQLite in a worker, a pool or a process — every registration is
 
 | Construct (as planned) | Strategy | Maintained state |
 |---|---|---|
-| `where` whose predicates translate (the plan's filter), no order, no aggregate | **incremental rows**: per-row re-evaluation; insert / remove / replace in the result | the result rows |
-| the same with a per-row `select` projection (row-mode plan) | **incremental rows**: the affected row alone is recomputed; a source row may project to several items | result rows, grouped by source key |
+| `where` whose predicates translate (the plan's filter) and read no collection root, no order, no aggregate | **incremental rows**: per-row re-evaluation; insert / remove / replace in the result | the result rows |
+| the same with a per-row `select` projection (row-mode plan) that reads no collection root | **incremental rows**: the affected row alone is recomputed; a source row may project to several items | result rows, grouped by source key |
 | `orderBy` over extractable paths, an optional literal offset and limit (non-negative integers, written as numbers or quoted with `$const`; nested windows compose as the planner composes them, the innermost first), and a return that yields at most one item per row, reads no collection root and compiles without the store's registered operators | **maintained window**: a sorted structure over every matching row, the visible rows the `limit` after the first `offset`; ties broken by the collection key's text in code-point order — for a numeric key `10` sorts before `9`, which can differ from `execute`, whose ties follow row identity (declare the key as the last `orderBy` term for one tie order everywhere); an insert sorting beyond a full window is a no-op, one sorting above the offset shifts the visible rows. The window orders schema-conformant sort values: a stored `null`, or numbers beside strings, is outside that contract — the engine refuses to order it (`JQ2005`), SQL ranks a `null` where `$empty` puts an absent value, and the window ranks numbers before other values in the term's ascending order and the rest by their text | every matching row and its sort values, each an entry — the rows before the offset included (§12) |
 | whole-query `count` / `min` / `max`, and `sum` / `avg` over an `integer` member (the plan's aggregate), optional `where` | **running accumulator** plus a per-row contribution map — a delete can only be answered from retained contributions (§3: a `remove` carries no old value). `min`/`max` removal of the last extremum holder FALLS BACK to a recompute over the retained contributions; the accumulator alone cannot answer, and this fallback is the documented cost. Every aggregate but `count` skips a stored `null` term, as SQL does; a `sum` or `avg` answers from its terms only while the largest magnitude times the number of terms stays within ±(2^53 − 1) — the guard the query path checks; a term that is not an integer, which an `integer` member stores as given, counts as past it — because past it a fresh run adds left to right in the order it reads the rows (or SQL compensates a non-integer term's rounding), so from the write that crosses it the registration re-runs and `live.mode` says so (`{ strategy: 'rerun', mode: 'rerun', reason: "'accumulation' — integer accumulation exceeded its runtime exactness bound" }`; under a demanded `mode: 'incremental'` that write errors it `JD0051`, and a registration already past the bound refuses `JD0051`; beside a stored `null` term the re-run raises `JQ2001`, as `execute` does) | one contribution per matching row |
 | whole-query `sum` / `avg` over a `number` member | **re-run on invalidation**, the reason `plan.floatingAccumulation`: the answer is the engine's left-to-right addition over the matching rows in collection order, which a running accumulator would not reproduce, so every invalidation re-runs the whole document | the previous result, for diffing |
@@ -355,12 +355,13 @@ PostgreSQL, or SQLite in a worker, a pool or a process — every registration is
 | a whole-query aggregate or a `groupBy` whose `where` is a refined spatial predicate | **re-run on invalidation** — the accumulator needs a fully translated selection and a refinement is not one; the reason says so | the previous result, for diffing |
 | a spatial predicate the planner **refused** (no `derive` index on the member, an untyped member, an unbounded probe) | **re-run on invalidation**, the refusal named — it never translated, so nothing narrows the fetch | the previous result, for diffing |
 | a `$resample` or `$rolling` document over the collection, with an explicit `eventTime` and a fixed width (§13) | **event-time bucket / rolling state**: rows kept by bucket, or in instant order; only what a write can reach is folded again, through `@jarenjs/core/series` itself | the contributing rows, plus one fold per bucket |
-| the same document with no `eventTime`, a calendar width, a named zone, a `locf`/`linear` fill, a `first`/`last` aggregate, or a retention that does not cover the window | **re-run on invalidation**, the member that stopped it named (§13.2) | the previous result, for diffing |
+| the same document with no `eventTime`, a calendar width, a named zone, a `locf`/`linear` fill, a `first`/`last` aggregate, a retention that does not cover the window, or an operand `$where` that reads the collection root | **re-run on invalidation**, the member that stopped it named (§13.2) | the previous result, for diffing |
 | indexed inner equi-joins — flat self joins included (one `$for` binding an entity under several aliases, each later alias evaluated as its own input root) — and canonical allowing-empty left joins over mapped entity roots, reading no entity root outside their `$for` | **join dependency maintenance**; point-read changed keys — once per changed row, however many aliases hold it — and reevaluate their bounded outer owners | source rows (a self join's once per alias), key indexes and projected tuples, bounded by `maxMaintained` and `maxBytes` |
 | nested entity graph projections with indexed equality edges and unique binding names — a child query counted, or windowed without an ordering (literal, quoted or external bounds, each owner's window taken as `execute` takes it), included | **graph dependency maintenance**; a child change refreshes its bounded owners | source rows, reverse key indexes and graph outputs |
 | explicit two-level collection groups with a singular parent key and bounded nested input | **nested-group maintenance**; recompute affected parents through the query engine | source leaves and parent outputs |
 | unindexed/non-equi joins, a join whose `$where` or `$return` reads an entity root outside its `$for` (a nested query over `$.<Entity>[*]`, `an entity root read outside the join bindings re-runs`), self joins inside a graph projection, an allowing-empty join or a flattened projection or over a packed `$for` source (`a self join has ambiguous root invalidation`), a graph projection whose child query is ordered, windowed or not, or that reads an entity root outside its child queries (a `$count` over `$.<Entity>[*]` in its return), an entity aggregate, a graph projection or allowing-empty join that needs the store's registered operators or zone provider, explicit entity ordering/windows and object-root documents | **re-run on invalidation**, with the dependency or planner reason | previous result for diffing |
-| anything else: non-translatable predicates, `limit` without `orderBy`, a window bound that is not a literal non-negative integer, an offset or limit over a group, distinct projection, aggregate or nested group, an entity window, a query or aggregate inside a one-item array constructor, ordered or not (its one row is the whole array), an ordered query whose return yields several items per row or reads the collection root, a group whose return reads the collection root, a document the live evaluator cannot compile without the store's registered operators or zone provider (a rows, window or group document using a registered operator, or a named zone in a group key or a projection — the planner's reason names what stopped it; a zoned `$where` fails registration `JQ0003`, as `execute` fails), `@jarenjs/linq`'s nested two-level `groupBy` emission (a group of groups), and a `@jarenjs/linq` chain that orders, windows or deduplicates after `groupBy` | **re-run on invalidation**, the reason named | the previous result, for diffing |
+| any document on a store opened with a `profile` (MODEL-FORMAT §8), whatever its shape and whichever roots the profile names — its mandatory predicates, member allow-lists, engine `limits`, `maxRows` and `maxBytes` and declared externals apply to every read `execute` makes, and maintenance repeats none of them | **re-run on invalidation**, the reason `the store profile's predicates, member lists and limits apply to every read, which maintenance does not repeat`; over an asynchronous connection a resnapshot, which reads through the profile (§12.1) | the previous result, for diffing |
+| anything else: non-translatable predicates, `limit` without `orderBy`, a window bound that is not a literal non-negative integer, an offset or limit over a group, distinct projection, aggregate or nested group, an entity window, a query or aggregate inside a one-item array constructor, ordered or not (its one row is the whole array), an ordered query whose return yields several items per row, a query whose filter or return reads the collection root, ordered or not (a row is evaluated alone), a group whose return reads the collection root, a document the live evaluator cannot compile without the store's registered operators or zone provider (a rows, window or group document using a registered operator, or a named zone in a group key or a projection — the planner's reason names what stopped it; a zoned `$where` fails registration `JQ0003`, as `execute` fails), `@jarenjs/linq`'s nested two-level `groupBy` emission (a group of groups), and a `@jarenjs/linq` chain that orders, windows or deduplicates after `groupBy` | **re-run on invalidation**, the reason named | the previous result, for diffing |
 
 The **physical mapping** of a `derive: 'bbox'` index (MODEL-FORMAT §2.1,
 `physical`) does not move a query between these rows. It can change one
@@ -396,6 +397,34 @@ refuses at registration (`JD0051`), the same shape as capture's
 demanded session — an application that needs the property can refuse
 to start. A `mode` other than `'auto'`, `'incremental'`, `'rerun'` and
 `'resnapshot'` is `JD0013`, so a misspelt demand is never taken for `'auto'`.
+
+**A store profile re-runs every registration.** On a store opened with a
+`profile` (MODEL-FORMAT §8) — any profile, `'safe'` included, since a
+normalized profile always carries engine `limits` and a `maxRows` bound —
+every registration re-runs whatever its shape, with the reason
+`the store profile's predicates, member lists and limits apply to every read, which maintenance does not repeat`,
+and a demanded `mode: 'incremental'` refuses it `JD0051`. The profile
+shapes every read `execute` makes: a root's mandatory predicate is
+conjoined into its fetch, a member allow-list is checked against every
+member the document reads, the engine limits bound every evaluation,
+`maxRows` and `maxBytes` bound the rows and items, and a document may
+reference only the declared externals. A maintained strategy repeats none
+of them — it admits an inserted document as the capture record carries
+it, re-reads a changed row by its key and evaluates the projection with
+an evaluator compiled without the limits — so another tenant's row, an
+undeclared external or an unbounded evaluation would reach `result`
+where `execute` hides or refuses it. A re-run IS `execute`, so it answers
+what `execute` answers, refusals included: a document past `limits.steps`
+fails registration with `execute`'s own `JQ2009`, and errors a
+registration a later write pushes past it; a join whose whole-row initial
+read a member allow-list refused (`JD0011`) answers, while a document
+reading a member the list denies is refused as `execute` refuses it. An
+explicit `mode: 'rerun'` keeps its own reason, and over an asynchronous
+connection every registration is a resnapshot, which reads through the
+profile (§12.1). A registration reads the options `externals`, `mode` and
+`eventTime` and refuses any other `JD0013`, so a per-call `profile` —
+which `execute` reads — is never dropped silently: a profile a live query
+must honour is the store's.
 
 The **group form** the classifier recognises (the linq chain's group-of-groups emission still re-runs; explicit
 nested groups have a separate bounded strategy below), here with a return of key and aggregate members:
@@ -816,6 +845,7 @@ work and a visible lateness contract, not a smaller heap.
 | a `retention` under `width + allowedLateness` | a repair could read outside the horizon the view claims |
 | a `$subsequence` window, a projecting operand, a collection with no document key | there is no row a key can be tracked through |
 | a spec whose `at` selector is not `eventTime.path` | the state would place a row by one instant and aggregate it by another |
+| an operand `$where` that reads the collection root (`$`, `$.…`, `$[…]`, or the root inside a path filter) | the state files each row alone through the filter, and one row is not the collection the kernel's own run reads |
 
 Each of those is `live.mode.reason`, and `mode: 'incremental'` still
 refuses them at registration with `JD0051`.

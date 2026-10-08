@@ -106,6 +106,8 @@ const maintained = (strategy) => ({ strategy, mode: 'incremental' });
 const rerun = (reason) => ({ strategy: 'rerun', mode: 'rerun', reason });
 const DECODED = 'entity dependency plan: this entity return or grouping needs decoded-row evaluation';
 const SET_LEVEL = 'this grouping or distinct projection needs set-level maintenance';
+const PROFILED = "the store profile's predicates, member lists and limits apply to every read, which maintenance does not repeat";
+const ROW_ALONE = 'a projection that reads the collection root re-runs (a row is evaluated alone)';
 
 /**
  * @typedef {object} Shape
@@ -117,6 +119,7 @@ const SET_LEVEL = 'this grouping or distinct projection needs set-level maintena
  * @property {any} [reference] - the document a fresh run answers with, when it is not the registered one
  * @property {boolean} [multiset] - the result is compared as a multiset
  * @property {Record<string, unknown>} [externals] - bound at registration and in every fresh run
+ * @property {any} [profile] - the store profile the store is opened with
  */
 
 /** @type {Shape[]} */
@@ -259,6 +262,17 @@ const SHAPES = [
     document: [{ $subsequence: [ORDERED('$r.score'), 0, 3] }],
     reference: [{ $subsequence: [ORDERED(['$r.score', '$r.id']), 0, 3] }],
     row: '`orderBy` over extractable paths, an optional literal offset and limit', mode: maintained('window') },
+  { name: 'a projection that reads the collection root', on: 'rows',
+    document: [{ $for: { r: '$[*]' }, $where: { $gt: ['$r.score', 2] }, $return: { id: '$r.id', total: { $count: '$[*]' } } }],
+    row: 'a query whose filter or return reads the collection root', mode: rerun(ROW_ALONE) },
+  // a profile applies to every read execute makes, and maintenance repeats none of it
+  { name: 'rows on a store opened with a profile predicate', on: 'rows',
+    profile: { predicates: { rows: { $ne: ['$it.region', 'north'] } } },
+    document: [{ $for: { r: '$[*]' }, $where: { $gt: ['$r.score', 2] }, $return: '$r.id' }],
+    row: 'any document on a store opened with a `profile`', mode: rerun(PROFILED) },
+  { name: 'an indexed equi-join on a store opened with engine limits alone', on: 'entity',
+    profile: { limits: { steps: 100_000 } }, document: [JOIN],
+    row: 'any document on a store opened with a `profile`', mode: rerun(PROFILED) },
 ];
 
 /** The bold phrase opening the Strategy cell of a strategy's rows in the maintenance table. */
@@ -313,7 +327,8 @@ describe('the live census: each shape registers as its maintenance-table row say
       assert.ok(rows[0].strategy.startsWith(`**${STRATEGY_CELL[shape.mode.strategy]}**`),
         `the row naming '${shape.row}' states ${rows[0].strategy.slice(0, 40)}…, not ${shape.mode.strategy}`);
 
-      const store = await openStore(MODEL, { driver: nodeDriver(), capture: true });
+      const store = await openStore(MODEL, { driver: nodeDriver(), capture: true,
+        ...(shape.profile === undefined ? {} : { profile: shape.profile }) });
       try {
         await seed(store);
         const document = typeof shape.document === 'function' ? shape.document(store) : shape.document;

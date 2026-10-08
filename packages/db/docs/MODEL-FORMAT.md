@@ -1961,7 +1961,10 @@ through `ExecuteOptions.profile` on `execute`, `query`, `cursor`,
 `loadCursor`, `page` and `explain` alike — applies identically to
 collection execution, entity execution (`entity.execute`, the chain's
 cursor), graph loading (`load`, `loadCursor`, `page`, every include
-subquery) and store-root execution (`store.execute`). `collections` is
+subquery) and store-root execution (`store.execute`); a live
+registration on a store opened with a profile re-runs through `execute`
+whatever its shape (LIVE-FORMAT §7), so the profile binds every result
+it holds. `collections` is
 the one allow-list and names collections AND entity roots; a document
 that reads a name outside it is `JD0011` on every engine, with the
 same reason. `predicates` is keyed by collection or entity name, and
