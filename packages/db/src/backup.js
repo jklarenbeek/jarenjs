@@ -51,8 +51,10 @@
  */
 
 import { DbRuntimeError, wrapDriverError } from './errors.js';
-import { chain, attempt, toPromise } from './driver.js';
+import { chain, attempt, toPromise, isThenable } from './driver.js';
 import { refuseCancelled } from './cancellation.js';
+import { isAbortSignal, isPlainOptions, refuseUnknownMembers } from './options.js';
+import { CHECKPOINT_MODES } from './maintenance.js';
 
 /**
  * The temporary sibling of a target path: same directory, a marker a
@@ -68,19 +70,55 @@ export function temporaryPathFor(targetPath, random) {
 }
 
 /**
- * Refuse, with a `TypeError`, a file path SQLite reads as something else:
- * one that begins `file:` is a URI, which can name another file than the
- * one written or published, and `:memory:` is a memory database. The one
- * rule for every SQLite file this package writes (`backupTo`'s target,
- * `snapshotDatabase`'s). Lives here because this module imports no
- * builtin, so the store's client bundle can carry it.
- * @param {string} path
+ * Refuse, with a `TypeError`, a target that is not a file path SQLite
+ * reads as written: not a non-empty string; holding a NUL byte (SQLite
+ * reads a name only up to it); beginning `file:`, a URI, which can name
+ * another file than the one written or published; or `:memory:`, a memory
+ * database. The one rule for every SQLite file this package writes
+ * (`backupTo`'s target, `snapshotDatabase`'s). Lives here because this
+ * module imports no builtin, so the store's client bundle can carry it.
+ * @param {unknown} path
  * @param {string} what - the argument's name, for the message
+ * @returns {asserts path is string}
  */
-export function refuseSpecialSqlitePath(path, what) {
+export function checkSqliteTargetPath(path, what) {
+  if (typeof path !== 'string' || path === '') throw new TypeError(`${what} is a non-empty file path`);
+  if (path.includes('\0'))
+    throw new TypeError(`${what} is a file path without NUL bytes: SQLite would read it only up to the first`);
   if (path.startsWith('file:') || path === ':memory:') {
     throw new TypeError(`${what} is a file path, and SQLite reads '${path}' as `
       + `${path === ':memory:' ? 'a memory database' : 'a URI'} (write './${path}' for that relative path)`);
+  }
+}
+
+/** The options `backupTo` reads, a closed set. */
+const BACKUP_OPTIONS = Object.freeze(['rate', 'onProgress', 'signal', 'deadline', 'checkpoint']);
+
+/** The largest `rate` the platform's backup takes: a 32-bit signed count. */
+const RATE_MAX = 0x7fffffff;
+
+/**
+ * Refuse a malformed or unknown `backupTo` option before the backup waits
+ * for anything or writes anything: a `TypeError` coded `JD0013`, as every
+ * store operation codes a refused option, naming the member (and, for an
+ * unknown one, the member most plausibly meant).
+ * @param {unknown} options
+ */
+function readBackupOptions(options) {
+  if (options === undefined) return;
+  const refuse = (/** @type {string} */ reason) => Object.assign(new TypeError(`backupTo: ${reason}`), { code: 'JD0013' });
+  if (!isPlainOptions(options)) throw refuse('options must be a plain object');
+  refuseUnknownMembers(options, BACKUP_OPTIONS, (key, hint) => refuse(`option '${key}' is not one it reads${hint}`));
+  const { rate, onProgress, signal, deadline, checkpoint } = /** @type {Record<string, any>} */ (options);
+  if (rate !== undefined && (!Number.isSafeInteger(rate) || rate < 1 || rate > RATE_MAX))
+    throw refuse(`option 'rate' is a whole number of pages per step from 1 to ${RATE_MAX}, got ${JSON.stringify(rate)}`);
+  if (onProgress !== undefined && typeof onProgress !== 'function') throw refuse("option 'onProgress' must be a function");
+  if (signal !== undefined && !isAbortSignal(signal)) throw refuse("option 'signal' must be an AbortSignal");
+  if (deadline !== undefined && (typeof deadline !== 'number' || !Number.isFinite(deadline)))
+    throw refuse("option 'deadline' must be a finite epoch-millisecond timestamp");
+  if (checkpoint !== undefined && checkpoint !== false && !CHECKPOINT_MODES.includes(checkpoint)) {
+    throw refuse(`option 'checkpoint' is false or one of ${CHECKPOINT_MODES.map((mode) => `'${mode}'`).join(', ')}, `
+      + `got ${JSON.stringify(checkpoint)}`);
   }
 }
 
@@ -129,15 +167,10 @@ export function createBackup({ connection, readOnly, gated, checkpoint, random, 
      * @returns {any} value-or-promise of `{ path, pages, checkpoint }`
      */
     backupTo(targetPath, options = undefined) {
-      if (typeof targetPath !== 'string' || targetPath.length === 0)
-        throw new TypeError('backupTo: targetPath is a non-empty string');
-      refuseSpecialSqlitePath(targetPath, 'backupTo: targetPath');
+      checkSqliteTargetPath(targetPath, 'backupTo: targetPath');
+      readBackupOptions(options);
       const rate = options?.rate;
-      if (rate !== undefined && (!Number.isSafeInteger(rate) || rate < 1))
-        throw new TypeError(`backupTo: rate is a positive integer (pages per step), got ${JSON.stringify(rate)}`);
       const onProgress = options?.onProgress;
-      if (onProgress !== undefined && typeof onProgress !== 'function')
-        throw new TypeError('backupTo: onProgress is a function');
       const signal = options?.signal;
       if (!capability) {
         throw new DbRuntimeError('JD2077',
@@ -147,11 +180,8 @@ export function createBackup({ connection, readOnly, gated, checkpoint, random, 
       // the snapshot boundary: the checkpoint mode, `false` to skip it,
       // and skipped by default on a read-only store, where a checkpoint
       // is not an operation this store may run
-      const mode = options?.checkpoint === undefined
-        ? (readOnly ? false : 'passive')
-        : options.checkpoint;
-      if (mode !== false && (typeof mode !== 'string'))
-        throw new TypeError("backupTo: checkpoint is a wal_checkpoint mode or false");
+      const advisory = options?.checkpoint === undefined;
+      const mode = advisory ? (readOnly ? false : 'passive') : options.checkpoint;
       callable(options, 'no file was written');
       /** The signal leaves the gate's queue as well: a wait it abandoned
        * (`JD2064`) is the backup's own cancellation before any file. */
@@ -162,9 +192,21 @@ export function createBackup({ connection, readOnly, gated, checkpoint, random, 
         return error;
       };
 
-      const boundary = mode === false
-        ? null
-        : attempt(() => gated(() => checkpoint({ mode }), 'a backup checkpoint', signal), admitted);
+      // the default boundary is advisory: the copy reads committed log
+      // frames either way, so a checkpoint the connection cannot run now (a
+      // statement in progress on it, another connection's lock) is skipped
+      // and reported `null`; a mode the caller asked for still fails
+      const boundaryFailed = (/** @type {any} */ error) => {
+        if (advisory && error?.code === 'JD2078' && error?.class === 'busy') return null;
+        throw admitted(error);
+      };
+      const boundary = mode === false ? null : (() => {
+        try {
+          const out = gated(() => checkpoint({ mode }), 'a backup checkpoint', signal);
+          return isThenable(out) ? toPromise(out).then(undefined, boundaryFailed) : out;
+        }
+        catch (error) { return boundaryFailed(error); }
+      })();
       return chain(boundary, (checkpointed) => {
         callable(options, 'no file was written');
         const tmpPath = temporaryPathFor(targetPath, random);

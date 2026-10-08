@@ -435,11 +435,13 @@ export interface BackupProgress {
   readonly remainingPages: number;
 }
 
+/** A closed set: an unknown member or a malformed value is a `TypeError`
+ * coded `JD0013`, naming the member, before the backup waits for anything. */
 export interface BackupOptions {
-  /** Pages copied per step (the platform's `rate`, a positive integer,
-   * 100 by default); progress and the cancellation check happen between
-   * steps. On Bun every step runs before the copy returns, and
-   * `onProgress` is called synchronously during it. */
+  /** Pages copied per step (the platform's `rate`, a whole number from 1
+   * to 2,147,483,647, 100 by default); progress and the cancellation
+   * check happen between steps. On Bun every step runs before the copy
+   * returns, and `onProgress` is called synchronously during it. */
   rate?: number;
   /** A throw from it fails the backup `JD2078`, the throw as `cause`. */
   onProgress?: (progress: BackupProgress) => void;
@@ -455,7 +457,9 @@ export interface BackupOptions {
   deadline?: number;
   /** The checkpoint that fixes the snapshot boundary (default
    * `'passive'`; `false` skips it; a read-only store skips it by
-   * default and refuses an explicit one `JD2077`). */
+   * default and refuses an explicit one `JD2077`). The default is
+   * skipped, and the result's `checkpoint` is `null`, when the connection
+   * cannot checkpoint now (an open cursor); a named mode then fails. */
   checkpoint?: 'passive' | 'full' | 'restart' | 'truncate' | false;
 }
 

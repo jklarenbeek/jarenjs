@@ -350,9 +350,17 @@ failed copy — or one that left the reservation without a database (`JD2078`)
 — with every side file it left. A name SQLite reads as something else is a
 `TypeError` before the call waits for the connection: a path that begins
 `file:` (a URI, which can name another file; write `./file:…` for such a
-relative path) and `:memory:`. It takes no progress or cancellation options
+relative path), `:memory:`, and one holding a NUL byte. A target that collides
+with the database being copied — its file or one of its side files, by any
+spelling or link, or a path one of whose own side files would be one of those
+(SQLite deletes a journal it finds beside an empty file) — is refused `JD2078`
+before anything is written. A relative target is relative to the working
+directory when the call is made. It takes no progress or cancellation options
 and allocates no database-sized JavaScript image; SQLite page caches and its
-temporary storage govern native working memory.
+temporary storage govern native working memory. The copy is written in place:
+a process killed mid-copy leaves the target as a valid but empty database
+beside a hot `-journal` (the next open rolls it back), and a retry refuses it
+(`EEXIST`) until both are removed.
 
 Inside an open transaction it refuses with `JD0038` before touching the file
 system: called from a transaction callback before its first `await`, or after
@@ -363,7 +371,11 @@ waits the same way, for its own transaction, and fails `JD0012` once the queue
 timeout passes: take the snapshot after the transaction. A transaction scope
 passed as the connection has no backup primitive and fails with SQLite's own
 `VACUUM` error. A statement in progress on the connection (an open iterator)
-neither stops a snapshot nor is stopped by one.
+neither stops a snapshot nor is stopped by one. On Node a write issued through
+the connection while the copy runs (an ungated statement) is refused —
+`attempt to write a readonly database` — rather than joining the copy's read
+transaction, where it would hold every step busy and never commit; on Bun the
+copy holds the thread, so no such write can run.
 
 A connection the Node or Bun driver opened copies inside one read transaction
 (on Node the connection's own, on Bun a dedicated read-only `node:sqlite`

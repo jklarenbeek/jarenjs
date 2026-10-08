@@ -1244,7 +1244,10 @@ consumed by `src/store.js` and never reached by a query:
   arrive only between steps, and never twice alike. The root closure
   imports no builtin: the primitives are the driver's. It also holds the
   one rule refusing a target path SQLite reads as something else (`file:`
-  URIs, `:memory:`), which the standalone snapshot helper imports.
+  URIs, `:memory:`, a NUL byte), which the standalone snapshot helper
+  imports, and reads its options as a closed set before it waits. A target
+  colliding with the store's own files is refused by the binding's
+  publication primitive, which alone can compare files.
 - `src/cancellation.js` — the one check every lifecycle runs between its
   units of work (a statement, a row, a step, a batch, a page), on the
   clock the caller was given; each lifecycle owns its abort code, the
@@ -1364,8 +1367,10 @@ The standalone snapshot helper shares destination reservation, the connection's
 own backup primitive as its page copy (`VACUUM INTO` for a connection without
 one) and the cleanup of a failed copy across both hosts. On Node it holds one
 read transaction on the connection for the whole copy, so another connection's
-commits cannot restart it; a WAL source's copy is made a rollback-journal file.
-It refuses a bad target and an open transaction before it reserves anything.
+commits cannot restart it, with the connection `query_only` meanwhile, so a
+write through it is refused instead of stalling the copy; a WAL source's copy
+is made a rollback-journal file. It refuses a bad target, one colliding with
+the database's own files and an open transaction before it reserves anything.
 
 `src/search.js` composes core lexical mechanics and the JSON predicate compiler over complete bounded entity snapshots. Committed capture and data-version checks invalidate derived state; SHA-256 source content validates persisted caches across reopen. Snapshot storage uses existing collection transactions. See [search execution](docs/SEARCH.md); native full-text dialects remain unqualified.
 

@@ -31,7 +31,7 @@
 import { lazyOpen, openConnection } from '../driver.js';
 import { sqliteDialect } from '../dialects/sqlite.js';
 import { PRAGMAS, PRAGMA_NAMES } from '../pragmas.js';
-import { copyBunDatabase, publishSqliteFile, removeSqliteFile } from './snapshot.js';
+import { copyBunDatabase, mainFileOf, publishSqliteFile, removeSqliteFile } from './snapshot.js';
 import { nativeDatabaseIdentity } from './file-identity.js';
 export { snapshotDatabase } from './snapshot.js';
 
@@ -157,11 +157,12 @@ export function fromBunModule(mod, path, options) {
     catch (error) { db.close(); throw error; }
   }
   // the backup copies on a connection of its own (`snapshot`: the store
-  // holds its gate for the whole copy, which is therefore point-in-time)
+  // holds its gate for the whole copy, which is therefore point-in-time);
+  // publication refuses a target colliding with this database's own files
   const backup = {
     snapshot: true,
     copy: (target, copyOptions) => copyBunDatabase(db, target, copyOptions),
-    rename: publishSqliteFile,
+    rename: (from, to) => publishSqliteFile(from, to, mainFileOf(db)),
     remove: removeSqliteFile,
   };
   return adaptBunDatabase(db, { ...options, ...(backup ? { backup } : {}) });

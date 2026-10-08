@@ -49,6 +49,14 @@ export function readOptions(options, members, owner, code = 'JD0013') {
     new DbCompileError(code, `${owner} option '${key}' is not one it reads${hint}`));
 }
 
+/** Whether a value can stand for an `AbortSignal`: what admission reads
+ * (`aborted`) and listens on (`addEventListener`, `removeEventListener`).
+ * @param {any} signal @returns {boolean} */
+export function isAbortSignal(signal) {
+  return signal !== null && typeof signal === 'object' && typeof signal.aborted === 'boolean'
+    && typeof signal.addEventListener === 'function' && typeof signal.removeEventListener === 'function';
+}
+
 /** Validate controls before a signal enters admission or a deadline is compared.
  * This reads values only; each operation owns its closed set of names.
  * @param {any} options @param {string} owner @returns {void} */
@@ -56,9 +64,7 @@ export function readControls(options, owner) {
   if (options === undefined) return;
   const refuse = (name, rule) => new DbCompileError('JD0013', `${owner} option '${name}' ${rule}`);
   const signal = options?.signal;
-  if (signal !== undefined && (signal === null || typeof signal !== 'object'
-    || typeof signal.aborted !== 'boolean' || typeof signal.addEventListener !== 'function'
-    || typeof signal.removeEventListener !== 'function')) throw refuse('signal', 'must be an AbortSignal');
+  if (signal !== undefined && !isAbortSignal(signal)) throw refuse('signal', 'must be an AbortSignal');
   if (options?.deadline !== undefined && (typeof options.deadline !== 'number' || !Number.isFinite(options.deadline)))
     throw refuse('deadline', 'must be a finite timestamp');
   if (options?.strictStreaming !== undefined && typeof options.strictStreaming !== 'boolean')

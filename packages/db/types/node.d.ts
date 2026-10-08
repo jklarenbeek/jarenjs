@@ -89,5 +89,8 @@ export declare function openNullTarget(): DocumentTarget;
 export declare function readCollectionBundle(source: DocumentByteSource,
   bounds: { maxBytes: number | null; maxRows: number | null }): Promise<Record<string, unknown[]>>;
 
-/** Disk-backed consistent snapshot; refuses an existing destination. */
+/** A copy of every page onto a new path through the connection's online backup
+ * (a compacting `VACUUM INTO` without it), committed write-ahead log included,
+ * as a rollback-journal file; page 1's header may differ. Refuses an existing
+ * destination, a `file:` or `:memory:` name and an open transaction. */
 export declare function snapshotDatabase(connection: unknown, target: string): Promise<{ path: string; pages: number }>;

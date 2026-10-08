@@ -237,6 +237,8 @@ describe('a complete backup', () => {
     // a memory database, never the file published under that name
     await assert.rejects(store.backupTo('file:copy.db'), TypeError);
     await assert.rejects(store.backupTo(':memory:'), TypeError);
+    // SQLite reads a name as a C string: it would end at the NUL byte
+    await assert.rejects(store.backupTo('/tmp/wanted.db\0.bak'), TypeError);
     await store.close();
   });
 
@@ -570,6 +572,109 @@ describe('the temporary path', () => {
     assert.strictEqual(path.dirname(tmp), '/data');
     assert.match(path.basename(tmp), /^store\.db\.jaren-tmp-[0-9a-f]{16}$/);
     assert.strictEqual(n, 2);
+  });
+});
+
+describe('what a backup refuses', () => {
+  it('a target that is the store\'s own database or one of its side files, by any spelling, on both bindings', async () => {
+    for (const driver of [nodeDriver(), bunDouble()]) {
+      const source = tempDbPath();
+      const own = source.dbPath;
+      // the store's directory under another name
+      const alias = path.join(path.dirname(own), 'alias');
+      fs.symlinkSync(path.dirname(own), alias);
+      // a rollback journal: the side files do not exist between transactions
+      const store = await openStore(MODEL, { driver, path: own, journalMode: 'delete' });
+      try {
+        await store.collection('notes').insert({ id: 'before', body: 'b' });
+        for (const target of [own, `${own}-journal`, `${own}-wal`, `${own}-shm`, path.join(alias, path.basename(own))]) {
+          await assert.rejects(store.backupTo(target),
+            (/** @type {any} */ error) => error.code === 'JD2078' && error.message.includes(target), `${driver.name}: ${target}`);
+          assert.deepEqual(siblings(target), []);
+        }
+        // the store still owns, writes and reads its file
+        await store.collection('notes').insert({ id: 'after', body: 'a' });
+        assert.strictEqual((await store.collection('notes').get('after'))?.id, 'after');
+      }
+      finally { await store.close(); source.cleanup(); }
+    }
+  });
+
+  it('a malformed or unknown option before the backup waits for the store, naming the member', async () => {
+    const source = tempDbPath();
+    const store = await seeded(source.dbPath, 5, { queueTimeout: 100 });
+    // another caller's transaction holds the store gate throughout
+    const gate = Promise.withResolvers();
+    const held = store.transaction(() => gate.promise);
+    try {
+      const target = `${source.dbPath}.copy`;
+      const refused = (/** @type {any} */ options, /** @type {string} */ member) => assert.rejects(store.backupTo(target, options),
+        (/** @type {any} */ error) => error instanceof TypeError && error.code === 'JD0013' && error.message.includes(`'${member}'`),
+        member);
+      for (const signal of [{}, 'stop', { aborted: false }]) await refused({ signal }, 'signal');
+      await refused({ sginal: AbortSignal.abort() }, 'sginal');
+      await refused({ checkPoint: false }, 'checkPoint');
+      await refused({ rate: 2 ** 31 }, 'rate');
+      await refused({ checkpoint: 'bogus' }, 'checkpoint');
+      await refused({ deadline: 'soon' }, 'deadline');
+      for (const options of ['all', []]) {
+        await assert.rejects(store.backupTo(target, options),
+          (/** @type {any} */ error) => error instanceof TypeError && error.code === 'JD0013');
+      }
+      // nothing armed a wait that could fire after the refusal
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      assert.strictEqual(fs.existsSync(target), false);
+      assert.deepEqual(siblings(target), []);
+    }
+    finally { gate.resolve(undefined); await held; await store.close(); source.cleanup(); }
+  });
+
+  it('an open cursor does not fail a backup through its default boundary; an explicit checkpoint still does', async () => {
+    for (const options of [{}, { journalMode: 'delete' }]) {
+      const source = tempDbPath();
+      const store = await seeded(source.dbPath, 50, options);
+      const cursor = store.collection('notes').query({ $for: { it: '$[*]' }, $return: '$it.id' })[Symbol.asyncIterator]();
+      try {
+        await cursor.next();
+        const target = `${source.dbPath}.copy`;
+        const done = await store.backupTo(target);
+        assert.strictEqual(done.checkpoint, null);
+        assert.strictEqual((await idsOf(target)).length, 50);
+        await assert.rejects(store.backupTo(`${target}.second`, { checkpoint: 'passive' }), { code: 'JD2078' });
+      }
+      finally { await cursor.return?.(); await store.close(); source.cleanup(); }
+    }
+  });
+
+  it('a store closed before its copy starts rejects JD2063 on both bindings and leaves nothing', async () => {
+    for (const driver of [nodeDriver(), bunDouble()]) {
+      const source = tempDbPath();
+      const store = await openStore(MODEL, { driver, path: source.dbPath });
+      await store.collection('notes').insert({ id: 'n', body: 'b' });
+      const target = `${source.dbPath}.copy`;
+      const backup = store.backupTo(target);
+      /** @type {any} */
+      let closing;
+      queueMicrotask(() => { closing = store.close(); });
+      await assert.rejects(backup, { code: 'JD2063' }, driver.name);
+      await closing;
+      assert.strictEqual(fs.existsSync(target), false);
+      assert.deepEqual(siblings(target), []);
+      source.cleanup();
+    }
+  });
+
+  it('a target name too long for its temporary\'s journal fails without a spurious cleanupError', async () => {
+    const source = tempDbPath();
+    const store = await seeded(source.dbPath, 5);
+    try {
+      const target = path.join(path.dirname(source.dbPath), `${'n'.repeat(220)}.db`);
+      const error = await store.backupTo(target).then(() => null, (/** @type {any} */ failure) => failure);
+      assert.strictEqual(error?.code, 'JD2078');
+      assert.strictEqual(error.cleanupError, undefined);
+      assert.deepEqual(siblings(target), []);
+    }
+    finally { await store.close(); source.cleanup(); }
   });
 });
 

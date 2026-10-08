@@ -1,7 +1,7 @@
 //@ts-check
 import { it } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, readdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, readdirSync, mkdirSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -238,6 +238,92 @@ it('a snapshot of a source another connection has locked fails busy and leaves n
     assert.ok((await runtime.snapshotDatabase(source, target)).pages > 0);
   }
   finally { locker.close(); source.close(); rmSync(directory, { recursive: true, force: true }); }
+});
+
+it('a snapshot never writes over the database it copies or one of its side files', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'jaren-snapshot-'));
+  const { runtime, driver } = await host();
+  const path = join(directory, 'app.db');
+  // a rollback journal: the side files do not exist between transactions
+  const source = await driver.open(path);
+  // a database whose own name is another path's journal
+  const odd = await driver.open(join(directory, 'odd.db-journal'));
+  // the directory under another name
+  symlinkSync(directory, join(directory, 'alias'));
+  try {
+    source.exec('CREATE TABLE t(a);INSERT INTO t VALUES(1)');
+    odd.exec('CREATE TABLE precious(v);INSERT INTO precious VALUES(1)');
+    for (const target of [path, `${path}-journal`, `${path}-wal`, `${path}-shm`, join(directory, 'alias', 'app.db-journal')])
+      await assert.rejects(runtime.snapshotDatabase(source, target), { code: 'JD2078' }, target);
+    // SQLite deletes a journal it finds beside an empty file: here, the database
+    await assert.rejects(runtime.snapshotDatabase(odd, join(directory, 'odd.db')), { code: 'JD2078' });
+    assert.deepEqual(readdirSync(directory).sort(), ['alias', 'app.db', 'odd.db-journal']);
+    assert.equal(odd.prepare('SELECT count(*) AS n FROM precious').get([]).n, 1);
+  }
+  finally { odd.close(); source.close(); rmSync(directory, { recursive: true, force: true }); }
+});
+
+it('a write on the connection during a snapshot never stalls it, and the connection writes again after', async () => {
+  const { runtime, driver } = await host();
+  for (const mode of ['wal', 'delete']) {
+    const directory = mkdtempSync(join(tmpdir(), 'jaren-snapshot-'));
+    const source = await driver.open(join(directory, 'source.db'));
+    let writing = true;
+    /** @type {any} */
+    let watchdog;
+    try {
+      // about 1,000 pages: ten steps at the online backup's default rate
+      source.exec(`PRAGMA journal_mode=${mode};CREATE TABLE blobs(v BLOB);CREATE TABLE beats(v)`);
+      source.exec('WITH RECURSIVE g(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM g WHERE i<1000) INSERT INTO blobs SELECT randomblob(4000) FROM g');
+      // an ungated write through the snapshot's own connection on every turn
+      // of the event loop; one that meets the copy is refused
+      const beat = () => {
+        if (!writing) return;
+        try { source.exec('INSERT INTO beats VALUES(1)'); }
+        catch { /* refused while the copy reads */ }
+        setImmediate(beat);
+      };
+      beat();
+      const snapshot = runtime.snapshotDatabase(source, join(directory, 'copy.db'));
+      const finished = await Promise.race([snapshot.then(() => true),
+        new Promise((resolve) => { watchdog = setTimeout(resolve, 5000, false); })]);
+      writing = false;
+      // a copy that a joined write stalls waits for this commit
+      if (!finished) { try { source.exec('COMMIT'); } catch { /* nothing open */ } }
+      await snapshot.catch(() => undefined);
+      assert.equal(finished, true, `${mode}: the snapshot stalled behind a write on its own connection`);
+      assert.equal(source.transactionState(), false);
+      source.exec('INSERT INTO beats VALUES(2)');
+    }
+    finally {
+      writing = false;
+      clearTimeout(watchdog);
+      source.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }
+});
+
+it('a relative snapshot target names a file in the working directory of the call', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'jaren-snapshot-'));
+  const { runtime, driver } = await host();
+  const source = await driver.open(join(directory, 'source.db'));
+  const here = join(directory, 'here');
+  const there = join(directory, 'there');
+  mkdirSync(here);
+  mkdirSync(there);
+  const workingDirectory = process.cwd();
+  try {
+    source.exec('CREATE TABLE t(a);INSERT INTO t VALUES(1)');
+    process.chdir(here);
+    const snapshot = runtime.snapshotDatabase(source, 'copy.db');
+    // the working directory moves before the call has reserved its target
+    process.chdir(there);
+    await snapshot;
+    assert.equal(existsSync(join(here, 'copy.db')), true);
+    assert.equal(existsSync(join(there, 'copy.db')), false);
+  }
+  finally { process.chdir(workingDirectory); source.close(); rmSync(directory, { recursive: true, force: true }); }
 });
 
 it('the same file under Bun',

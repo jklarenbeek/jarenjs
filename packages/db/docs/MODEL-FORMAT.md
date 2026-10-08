@@ -846,10 +846,31 @@ process has that database open. An empty or header-only `-wal` and a
 `-journal` whose header a clean commit zeroed (journal mode `persist`)
 are never replayed and do not block publication. A target that is a
 symbolic link is replaced by the published file, as any rename does; a
-target path that begins `file:` is refused (`TypeError`) before any
-file is written, because SQLite would read it as a URI. A `checkpoint`
-mode (default `passive`; `false` skips it, and a read-only store skips
-it by default) fixes the snapshot boundary first, under the store gate.
+target path that begins `file:`, is `:memory:` or holds a NUL byte is
+refused (`TypeError`) before any file is written, because SQLite would
+read it as a URI, a memory database or a shorter name. A target that
+collides with the store's own database — the file itself or one of its
+side files, by any spelling or link, or a path one of whose own side
+files would be one of those — is refused `JD2078` at publication: the
+copy is discarded and none of the store's files changes (the binding
+compares files by device and inode, and names that may not exist yet by
+directory and name). The options are a closed set: an unknown member, a
+`signal` that is not an `AbortSignal`, a `rate` outside 1 to
+2,147,483,647, a `deadline` that is not a finite number and a
+`checkpoint` that is neither `false` nor one of `passive`, `full`,
+`restart`, `truncate` are a `TypeError` coded `JD0013`, naming the
+member, before the backup waits for anything. A `checkpoint` mode
+(default `passive`; `false` skips it, and a read-only store skips it by
+default) fixes the snapshot boundary first, under the store gate. The
+default one is advisory, since the copy reads committed log frames either
+way: when the connection cannot checkpoint now (a statement in progress
+on it, such as an open cursor, or another connection's lock) it is
+skipped and `checkpoint` answers `null`; a mode the caller names still
+fails the backup (`JD2078`). Each file operation resolves a relative
+target against the working directory of its moment, so a host that
+changes it during a backup may leave the temporary file behind; a
+process killed mid-backup leaves it too (with its `-journal`), for the
+host to remove — the target itself is never partial.
 
 Where the copy runs is the binding's. The Node binding copies on the
 store's own connection, on the platform's thread pool: the copy starts
@@ -857,6 +878,8 @@ under the store gate — so its first step never meets a write the
 store's own transaction holds — and leaves it at the first progress
 event; writers then proceed, the store's writes during the copy are
 carried into it, and the copy is the store as it stood at completion.
+Another connection's commit restarts that copy, so a source written more
+often than one copy takes may never finish: pass a `deadline`.
 The Bun binding copies on a dedicated read-only `node:sqlite` connection
 to the same file (Bun ships it on the same SQLite library), inside one
 read transaction, and holds the store gate for the whole copy: the
@@ -875,11 +898,16 @@ cookie (bytes 40–43: SQLite's backup gives every new copy the cookie 1)
 and version-valid-for number (bytes 92–95) may differ — except that under a
 rollback journal the Node copy may carry the store connection's own
 image of a free page, whose bytes then differ from the file's (the
-database it holds is the same). A Bun database without a file (memory,
+database it holds is the same). A page copy of a WAL database is itself
+a WAL-mode file: opening it, even read-only, creates `-wal` and `-shm`
+beside it, so a copy bound for read-only media first takes
+`PRAGMA journal_mode=DELETE`. A Bun database without a file (memory,
 temporary), a Bun runtime without `node:sqlite`, and a `bun:sqlite` on
 another SQLite library than `node:sqlite`'s copy with one `VACUUM INTO`
-statement instead: one step, no event, free pages dropped. The two
-libraries are compared before `node:sqlite` opens the file.
+statement instead: one step, no event, free pages dropped — and refused
+by SQLite (`JD2078`) while a statement is in progress on the store's
+connection, such as an open cursor. The two libraries are compared
+before `node:sqlite` opens the file.
 
 `onProgress` receives `{ totalPages, remainingPages }` after a step
 that leaves pages to copy (so `remainingPages >= 1`) — never after the

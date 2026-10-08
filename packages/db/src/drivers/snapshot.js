@@ -22,7 +22,9 @@
  * never at module scope, so the bindings load under any runtime.
  */
 import { DbCompileError, DbRuntimeError } from '../errors.js';
-import { refuseSpecialSqlitePath } from '../backup.js';
+import { chain, useStatementOnce } from '../driver.js';
+import { checkSqliteTargetPath } from '../backup.js';
+import { sqliteDatabasePath } from '../migration-target.js';
 
 /** The files SQLite keeps beside a database: its rollback journal, its
  * write-ahead log and that log's shared-memory index. */
@@ -30,16 +32,79 @@ const SIDE_FILES = Object.freeze(['-journal', '-wal', '-shm']);
 
 const SOURCE_ID = 'SELECT sqlite_source_id() AS id';
 
+const MAIN_FILE = "SELECT file FROM pragma_database_list WHERE name = 'main'";
+
 /**
  * Remove a SQLite file and every side file SQLite may have left beside
  * it — a copy that failed part-way leaves its `-journal` too. A path that
- * does not exist is not an error.
+ * does not exist, or is too long to name a file, is not an error.
  * @param {string} path
  * @returns {Promise<void>}
  */
 export async function removeSqliteFile(path) {
   const fs = await import('node:fs/promises');
-  for (const suffix of ['', ...SIDE_FILES]) await fs.rm(`${path}${suffix}`, { force: true });
+  for (const suffix of ['', ...SIDE_FILES]) {
+    try { await fs.rm(`${path}${suffix}`, { force: true }); }
+    catch (error) { if (error?.code !== 'ENAMETOOLONG') throw error; }
+  }
+}
+
+/**
+ * Refuse a target that collides with the database being copied: the
+ * database file itself or one of its side files, or a target one of whose
+ * own side files would be one of those (SQLite deletes a journal it finds
+ * beside an empty file and replays a log beside a full one). Files that
+ * exist are compared by device and inode, so any spelling, a symbolic or a
+ * hard link is caught; names that may not exist yet (a side file between
+ * transactions) by directory and name, folding case and Unicode form where
+ * the database's directory folds them. `JD2078`, naming both paths.
+ * @param {string | null | undefined} databaseFile - the main database's
+ *   file as SQLite reports it; none (a memory database) refuses nothing
+ * @param {string} target
+ * @param {string} what - the refused operation, for the message
+ * @returns {Promise<void>}
+ */
+export async function refuseOwnDatabase(databaseFile, target, what) {
+  if (!databaseFile) return;
+  const fs = await import('node:fs/promises');
+  const { basename, dirname, join, resolve } = await import('node:path');
+  /** @param {string} path */
+  const identity = async (path) => {
+    try {
+      const stat = await fs.stat(path, { bigint: true });
+      return `${stat.dev}:${stat.ino}`;
+    }
+    catch { return null; }
+  };
+  const own = resolve(databaseFile);
+  const ownId = await identity(own);
+  const ownDirectoryId = await identity(dirname(own));
+  const wanted = resolve(target);
+  const sameDirectory = ownDirectoryId !== null && ownDirectoryId === await identity(dirname(wanted));
+  // a directory that answers the database's name in another case with the
+  // database itself folds case
+  const flipped = basename(own).replace(/[a-z]/gi, (c) => (c === c.toLowerCase() ? c.toUpperCase() : c.toLowerCase()));
+  const folds = ownId !== null && flipped !== basename(own) && await identity(join(dirname(own), flipped)) === ownId;
+  const spelled = (/** @type {string} */ name) => (folds ? name.normalize('NFC').toLowerCase() : name);
+  const suffixes = ['', ...SIDE_FILES];
+  const ownNames = suffixes.map((suffix) => spelled(basename(own) + suffix));
+  const ownFiles = (await Promise.all(suffixes.map((suffix) => identity(own + suffix)))).filter((id) => id !== null);
+  for (const suffix of suffixes) {
+    const name = basename(wanted) + suffix;
+    const file = await identity(join(dirname(wanted), name));
+    if ((sameDirectory && ownNames.includes(spelled(name))) || (file !== null && ownFiles.includes(file))) {
+      throw new DbRuntimeError('JD2078', `${what}: '${target}' collides with the database being copied `
+        + `('${databaseFile}'): it is that file or one of its side files, or one of its own side files would be `
+        + '— choose another path');
+    }
+  }
+}
+
+/** The main database's file a raw `node:sqlite` or `bun:sqlite` handle
+ * reports (`''` for a memory or temporary database).
+ * @param {any} db @returns {string} */
+export function mainFileOf(db) {
+  return typeof db.location === 'function' ? (db.location() ?? '') : (firstRow(db, MAIN_FILE)?.file ?? '');
 }
 
 /** The first bytes of a hot rollback journal: SQLite rolls back a journal
@@ -84,12 +149,16 @@ async function headOf(fs, path, length) {
  * and is never this function's to delete. An empty or header-only log and
  * a journal whose header a clean commit zeroed (persist mode) are never
  * replayed and do not block publication. A `to` that is a symbolic link is
- * replaced by the file, as any rename does.
+ * replaced by the file, as any rename does. A `to` that collides with the
+ * database the copy was taken from is refused first (see
+ * {@link refuseOwnDatabase}): the copy is discarded and nothing changes.
  * @param {string} from
  * @param {string} to
+ * @param {string | null} [databaseFile] - the copied database's file
  * @returns {Promise<void>}
  */
-export async function publishSqliteFile(from, to) {
+export async function publishSqliteFile(from, to, databaseFile = null) {
+  await refuseOwnDatabase(databaseFile, to, 'the copy was not published');
   const fs = await import('node:fs/promises');
   const refused = (side, what) => new DbRuntimeError('JD2078', `the copy was not published: '${side}' ${what} — `
     + 'the target belongs to an open database, or to one whose writer did not finish; the target was not replaced');
@@ -204,11 +273,16 @@ function vacuumInto(db, target) {
  * @returns {Promise<number>} the copy's page count
  */
 export async function copyBunDatabase(db, target, options) {
-  const file = firstRow(db, "SELECT file FROM pragma_database_list WHERE name = 'main'")?.file ?? '';
+  const file = mainFileOf(db);
+  // all the copy reads from the handle is read before the first await: a
+  // store closed meanwhile is then refused as closed (`JD2063`) at
+  // publication, not met here as a raw closed-handle error
+  const library = file === '' ? null : firstRow(db, SOURCE_ID)?.id;
+  const timeout = file === '' ? 0 : (firstRow(db, 'PRAGMA busy_timeout')?.timeout ?? 0);
   const sqlite = file === '' ? null : await import('node:sqlite').catch(() => null);
   if (typeof sqlite?.backup === 'function' && typeof sqlite?.DatabaseSync === 'function'
-    && nodeSqliteLibrary(sqlite) === firstRow(db, SOURCE_ID)?.id) {
-    const dedicated = new sqlite.DatabaseSync(file, { readOnly: true, timeout: firstRow(db, 'PRAGMA busy_timeout')?.timeout ?? 0 });
+    && nodeSqliteLibrary(sqlite) === library) {
+    const dedicated = new sqlite.DatabaseSync(file, { readOnly: true, timeout });
     try {
       // the read transaction starts at its first read and holds the
       // snapshot every step copies from
@@ -279,20 +353,35 @@ export async function writeSqliteSnapshot(target, write) {
  * read transaction of that connection: every step then reads one snapshot,
  * so another connection's commit cannot restart the copy and a steadily
  * written source still finishes, and a source another connection has
- * locked fails busy at the first read, as SQLite reports it. The
- * transaction ends however the copy does: committed (it read only), else
- * rolled back, else with its closed connection.
+ * locked fails busy at the first read, as SQLite reports it. While it
+ * copies the connection is `query_only`: a write issued through it (an
+ * ungated statement) would join the read transaction, hold every step of
+ * the copy busy and never commit, so it is refused instead ("attempt to
+ * write a readonly database") and the copy finishes. The setting is
+ * restored and the transaction ended however the copy ends: committed (it
+ * read only), else rolled back, else with its closed connection.
  * @param {any} connection
  * @param {() => any} copy
  */
 async function insideOneRead(connection, copy) {
   connection.exec('BEGIN');
+  /** @type {number | null} */
+  let restore = null;
   try {
     // the read transaction starts at its first read
     connection.exec('SELECT count(*) FROM sqlite_schema');
+    const set = await useStatementOnce(connection, 'PRAGMA query_only', (/** @type {any} */ statement) => statement.get([]));
+    if (Number(set?.query_only ?? 0) === 0) {
+      connection.exec('PRAGMA query_only=1');
+      restore = 0;
+    }
     return await copy();
   }
   finally {
+    if (restore !== null) {
+      try { connection.exec(`PRAGMA query_only=${restore}`); }
+      catch { /* a closed connection keeps no setting */ }
+    }
     try { connection.exec('COMMIT'); }
     catch {
       try { connection.exec('ROLLBACK'); }
@@ -304,9 +393,12 @@ async function insideOneRead(connection, copy) {
 /**
  * Copy a database onto a new path, committed write-ahead log included,
  * without opening a model store. The target is a new file: an existing
- * one, even empty, is refused (`EEXIST`), and a name SQLite reads as
- * something else (`file:…`, `:memory:`) is a `TypeError` before the call
- * waits for the connection.
+ * one, even empty, is refused (`EEXIST`); a name SQLite reads as something
+ * else (`file:…`, `:memory:`, one holding a NUL byte) is a `TypeError`
+ * before the call waits for the connection; one that collides with the
+ * database itself or its side files is refused `JD2078` before anything is
+ * written. A relative target is relative to the working directory when the
+ * call is made, however long it then waits.
  *
  * A connection the Node or Bun driver opened copies through its own online
  * backup inside one read transaction (on Node the connection's own, on Bun
@@ -317,8 +409,10 @@ async function insideOneRead(connection, copy) {
  * connection's image of them — so unaliased rowids keep their values; of
  * page 1's header, the change counter and version-valid-for number may
  * differ, SQLite's backup gives the copy the schema cookie 1, and a copy of
- * a WAL database is made a rollback-journal file. On Bun the copy holds the
- * calling thread until it ends (its fallbacks are the file comment's). A
+ * a WAL database is made a rollback-journal file. On Node a write issued
+ * through the connection while it copies is refused (see `insideOneRead`);
+ * on Bun the copy holds the calling thread until it ends, so none can be
+ * (its fallbacks are the file comment's). A
  * connection without that primitive copies with one `VACUUM INTO`
  * statement, which compacts: free pages dropped, not page for page.
  * SQLite's page caches bound working memory; no JavaScript image of the
@@ -339,15 +433,15 @@ async function insideOneRead(connection, copy) {
 export async function snapshotDatabase(connection, target) {
   if (connection.dialect.name !== 'sqlite' || !connection.synchronous)
     throw new DbCompileError('JD0038', 'snapshotDatabase requires a synchronous SQLite connection');
-  if (typeof target !== 'string' || target === '' || target.includes('\0'))
-    throw new TypeError('snapshotDatabase: target is a non-empty file path without NUL bytes');
-  refuseSpecialSqlitePath(target, 'snapshotDatabase: target');
+  checkSqliteTargetPath(target, 'snapshotDatabase: target');
+  // read now: the call may wait for the connection before it reserves
+  const workingDirectory = process.cwd();
   const backup = typeof connection.backup?.copy === 'function' ? connection.backup : null;
   // a primitive that copies on a connection of its own holds its own read
   // transaction; one that copies through this connection needs one here
-  const write = backup === null ? () => connection.prepare('VACUUM INTO ?').run([target])
-    : backup.snapshot === true ? () => backup.copy(target, {})
-      : () => insideOneRead(connection, () => backup.copy(target, {}));
+  const write = (/** @type {string} */ file) => (backup === null ? connection.prepare('VACUUM INTO ?').run([file])
+    : backup.snapshot === true ? backup.copy(file, {})
+      : insideOneRead(connection, () => backup.copy(file, {})));
   // Acquire ownership before asynchronous filesystem work. Acquiring it
   // afterwards would queue behind an outer transaction awaiting this call.
   const snapshot = () => {
@@ -356,7 +450,12 @@ export async function snapshotDatabase(connection, target) {
     if (connection.transactionState?.() === true)
       throw new DbCompileError('JD0038', 'snapshotDatabase cannot run inside an open transaction: '
         + 'the copy would leave out its uncommitted writes; take the snapshot once the transaction has ended');
-    return writeSqliteSnapshot(target, write);
+    return chain(sqliteDatabasePath(connection), async (/** @type {string | null} */ databaseFile) => {
+      const { resolve } = await import('node:path');
+      const file = resolve(workingDirectory, target);
+      await refuseOwnDatabase(databaseFile, file, 'snapshotDatabase');
+      return writeSqliteSnapshot(file, () => write(file));
+    });
   };
   const pages = await (typeof connection.exclusively === 'function'
     ? connection.exclusively(snapshot, 'a database snapshot') : snapshot());

@@ -787,6 +787,45 @@ past the highest key.
   threw `bun:sqlite`'s `SQLiteError` (`code: 'SQLITE_IOERR_WRITE'`); the
   copy now runs on `node:sqlite`, whose errors are `Error` with `code:
   'ERR_SQLITE_ERROR'`.
+- A `backupTo` or `snapshotDatabase` target that collided with the copied
+  database was accepted: its own file, a side file (`-wal`, `-shm`,
+  `-journal`), the same file under another spelling or link, or a path one
+  of whose own side files would be one of those. A backup published over
+  the live database (later writes failed `JD2083`, or the database turned
+  corrupt under automatic checkpoints and lost acknowledged writes) or over
+  its log or journal, and a snapshot could delete a database named as its
+  journal. Each is now refused `JD2078`: a backup at publication, its copy
+  discarded; a snapshot before anything is written.
+- `backupTo` reads its options as a closed set before it waits: an unknown
+  member (a misspelt `signal` published a backup meant to be cancelled), a
+  `signal` that is not an `AbortSignal` (it crashed the process while the
+  store was busy), a `rate` above 2,147,483,647 (it failed `JD2078` after
+  the checkpoint), a `checkpoint` outside `false`, `passive`, `full`,
+  `restart` and `truncate` (judged only once the store was free), and
+  options that are not a plain object are a `TypeError` coded `JD0013`,
+  naming the member. The `TypeError`s for `rate`, `onProgress` and
+  `checkpoint` carry that code too, with new messages.
+- A target holding a NUL byte failed `JD2078`, or on Bun's `VACUUM INTO`
+  route wrote a full copy at the name before the NUL; it is now a
+  `TypeError` before anything is written.
+- The default checkpoint boundary failed every backup `JD2078` while a
+  statement was in progress on the store's connection, such as an open
+  cursor, and called it retryable though every retry failed; it is now
+  skipped, and the result's `checkpoint` is `null`. A mode passed
+  explicitly still fails.
+- On Node a write issued through a snapshot's own connection during its
+  copy (an ungated statement) stalled the snapshot at full CPU forever, or
+  failed it `not an error`; the write is now refused (`attempt to write a
+  readonly database`) and the snapshot finishes.
+- A relative `snapshotDatabase` target named a file in the working
+  directory of the moment the file was reserved, after the call had waited
+  for the connection; it is now the working directory of the call.
+- On Bun a store closed right after `backupTo` started (in a microtask)
+  failed `JD2078` with the platform's closed-database message; it now fails
+  `JD2063`, as on Node.
+- A backup whose temporary file's side-file name was too long for the file
+  system reported a spurious `cleanupError` (`ENAMETOOLONG`); it no longer
+  does.
 
 ## 10. Journal capture of foreign-key actions
 
