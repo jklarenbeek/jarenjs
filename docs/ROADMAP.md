@@ -575,22 +575,38 @@ what each does is its own documentation's job
   answers the document without the member). Wanted: the model refuses the
   relation (`JD0005`), or reads its via member as nullable.
 - [ ] **Remaining incremental live shapes.**
-  [The matrix](../packages/db/docs/LIVE-FORMAT.md) retains self joins,
-  non-equality and unindexed joins, reverse many-to-many edges without an
-  index, ordered/windowed entity joins, global-root graph
-  projections, ordered/windowed distinct projections, non-canonical aggregates
-  over groups and LINQ group-of-groups emission. **Maintenance boundary:**
-  entity caches currently evaluate subsets keyed by distinct entity roots;
-  self aliases need independent root addressing, ordered tuples need maintained
-  global ordering, and group-of-groups needs another dependency level. A native
-  SQL plan alone proves none of those. The bounded database range adapter publishes
-  source resets through committed capture; it does not close these incremental
-  cases. The optional durable `resnapshot` mode now covers bounded async
-  queries on PostgreSQL and Node SQLite hosts, including cross-Store commits,
-  revision races and retention resets; it does not claim incremental maintenance
-  for these remaining shapes. Offset windows remain rerun. Preserve
-  row/byte credits, transactional invalidation and equal-correctness measurements
-  when extending these strategies.
+  [The matrix](../packages/db/docs/LIVE-FORMAT.md) still re-runs ordered groups,
+  ordered or windowed distinct projections, windowed groups and windowed
+  aggregates over groups, LINQ group-of-groups emission and LINQ chains that
+  order, window or deduplicate after `groupBy`; ordered or windowed entity
+  queries; global-root graph projections and graph projections whose child
+  sequence is ordered; entity aggregates and object-root entity documents;
+  whole-query floating `sum` and `avg` over a `number` member, whose
+  left-to-right addition the engine decides; a projection that reads the
+  collection root; self joins inside a graph projection or an allowing-empty
+  join; non-equality joins; unindexed joins, reverse many-to-many edges
+  included; and every registration on a store opened with a profile.
+  **Maintenance boundary:** a group is maintained by recomputing only the groups
+  a change touches, which needs every output to depend on one group's rows —
+  ordering, windows or distinct across groups and a second grouping level break
+  that; ordered entity tuples need maintained global ordering; a nested self-join
+  binding still reads the outer root; and a profile's predicates, member lists
+  and limits must apply to every row maintenance admits, inserted documents
+  included. A native SQL plan alone proves none of those. **Position boundary:**
+  a row deleted and inserted again with an equal value in one transaction
+  reaches capture as no change, so a registration keeps its old place for the
+  row while a fresh run lists it last, until a later change to that row reaches
+  capture. **Policy, not mechanism:** a join dependency needs a primary-key
+  prefix, a declared index or a mapped foreign-key index, although maintenance
+  answers reverse lookups from its own in-memory indices; relaxing that rule
+  would maintain unindexed equi-joins and reverse many-to-many edges, and is an
+  operator decision. The bounded database range adapter publishes source resets
+  through committed capture; it does not close these incremental cases. The
+  optional durable `resnapshot` mode covers bounded async queries on PostgreSQL
+  and Node SQLite hosts, including cross-Store commits, revision races and
+  retention resets; it does not claim incremental maintenance for these shapes.
+  Preserve row/byte credits, transactional invalidation and equal-correctness
+  measurements when extending these strategies.
 - [ ] **Typed SQL migration aggregates need an intermediate schema.**
   Collection counts execute through the SQL planner; other independent
   aggregates use ordered accumulators and bounded distinct retains admitted
