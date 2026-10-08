@@ -319,22 +319,29 @@ function cascadeRows(rows, fixed) {
       + `Journal capture reads those rows before the delete runs: its delete p50 is `
       + `${ratio(journal.deleteMs.p50 / session.deleteMs.p50)}× session capture's.`];
 }
+/**
+ * The change-flow benchmark's block, from its result: the live-maintenance
+ * rows, the replication rows and, once a result has them, the cascading
+ * delete rows.
+ * @param {any} report - a `benchmark/changeflow-results.json` document
+ * @returns {string}
+ */
+export function changeflowFigures(report) {
+  const fixed = (/** @type {number} */ value) => value.toFixed(3);
+  return '\n\n' + [
+    `Measured ${report.measuredAt.slice(0, 10)}, ${report.runtime}, ${report.host.cpu}; ${report.samples} mutations per case.`,
+    '', '| Shape | Strategy | Initialize ms | Mutation p50 ms | Mutation p95 ms | Initialization heap bytes |',
+    '|---|---|---:|---:|---:|---:|',
+    ...report.live.map((row) => `| ${row.shape} | ${row.strategy.strategy} | ${fixed(row.initializationMs)} | ${fixed(row.mutationMs.p50)} | ${fixed(row.mutationMs.p95)} | ${row.retainedHeapBytes} |`),
+    '', '| Capture | Envelopes | Operations | Bytes | Apply p50 ms | Replay p50 ms | Conflict p50 ms |',
+    '|---|---:|---:|---:|---:|---:|---:|',
+    ...report.replication.map((row) => `| ${row.capture} | ${row.envelopes} | ${row.operations} | ${row.bytes} | ${fixed(row.applyMs.p50)} | ${fixed(row.replayMs.p50)} | ${fixed(row.conflictMs.p50)} |`),
+    ...(report.cascade === undefined ? [] : cascadeRows(report.cascade, fixed)),
+    '', 'Selective maintenance avoids repeated full SQL evaluation. Initialization and high-fan-out maintenance can cost more than rerunning; the table includes both. Offset groups remain rerun in both requested modes.',
+  ].join('\n') + '\n\n';
+}
 const FACTS = {
-  'db.changeflow': () => {
-    const report = JSON.parse(readFileSync(join(ROOT, 'benchmark/changeflow-results.json'), 'utf8'));
-    const fixed = (value) => value.toFixed(3);
-    return '\n\n' + [
-      `Measured ${report.measuredAt.slice(0, 10)}, ${report.runtime}, ${report.host.cpu}; ${report.samples} mutations per case.`,
-      '', '| Shape | Strategy | Initialize ms | Mutation p50 ms | Mutation p95 ms | Initialization heap bytes |',
-      '|---|---|---:|---:|---:|---:|',
-      ...report.live.map((row) => `| ${row.shape} | ${row.strategy.strategy} | ${fixed(row.initializationMs)} | ${fixed(row.mutationMs.p50)} | ${fixed(row.mutationMs.p95)} | ${row.retainedHeapBytes} |`),
-      '', '| Capture | Envelopes | Operations | Bytes | Apply p50 ms | Replay p50 ms | Conflict p50 ms |',
-      '|---|---:|---:|---:|---:|---:|---:|---:|',
-      ...report.replication.map((row) => `| ${row.capture} | ${row.envelopes} | ${row.operations} | ${row.bytes} | ${fixed(row.applyMs.p50)} | ${fixed(row.replayMs.p50)} | ${fixed(row.conflictMs.p50)} |`),
-      ...(report.cascade === undefined ? [] : cascadeRows(report.cascade, fixed)),
-      '', 'Selective maintenance avoids repeated full SQL evaluation. Initialization and high-fan-out maintenance can cost more than rerunning; the table includes both. Offset groups remain rerun in both requested modes.',
-    ].join('\n') + '\n\n';
-  },
+  'db.changeflow': () => changeflowFigures(JSON.parse(readFileSync(join(ROOT, 'benchmark/changeflow-results.json'), 'utf8'))),
   'db.hosts': () => {
     const baseline = JSON.parse(readFileSync(join(ROOT, 'benchmark/store-hosts-baseline.json'), 'utf8'));
     const report = JSON.parse(readFileSync(join(ROOT, 'benchmark/store-hosts-results.json'), 'utf8'));

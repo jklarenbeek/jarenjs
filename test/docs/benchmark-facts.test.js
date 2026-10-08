@@ -22,9 +22,35 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { NS } from '../../scripts/lib/derive.js';
+import { changeflowFigures } from '../../scripts/generate-benchmark-facts.js';
 import { scanSourceDirectives } from '@jarenjs/md';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
+
+/** The `[start, end)` spans a derivation owns in one document. One
+ * namespace, so one scan answers for every registry. @param {string} text */
+const derived = (text) => scanSourceDirectives(text, { ns: NS }).directives
+  .map((directive) => [directive.bodyStart, directive.bodyEnd]);
+
+/** Every committed Markdown document. */
+const documents = () => execFileSync('git', ['ls-files', '*.md'],
+  { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).split('\n').filter(Boolean).filter(file => existsSync(join(ROOT, file)));
+
+/** A table row's cells; an escaped `\|` stays inside its cell. @param {string} line */
+const cells = (line) => line.trim().replace(/^\|/, '').replace(/(?<!\\)\|$/, '').split(/(?<!\\)\|/).length;
+
+/** Every table of `text` (a row of pipes over a delimiter row) as `[header, delimiter]`.
+ * @param {string} text @returns {[string, string][]} */
+const tablesOf = (text) => {
+  const lines = text.split('\n');
+  /** @type {[string, string][]} */
+  const tables = [];
+  for (let i = 1; i < lines.length; i += 1) {
+    if (lines[i - 1].includes('|') && /^\|?(\s*:?-{3,}:?\s*\|)*\s*:?-{3,}:?\s*\|?$/.test(lines[i].trim()) && lines[i].includes('|'))
+      tables.push([lines[i - 1], lines[i]]);
+  }
+  return tables;
+};
 
 describe('quoted benchmark figures match the committed measurements', () => {
   it('no document drifts from the benchmark data', () => {
@@ -65,14 +91,8 @@ describe('a measured bundle size is quoted through a marker, never typed', () =>
     for (const figure of measured.keys()) assert.match(figure, /^\d{1,3},\d{3}$/);
   });
 
-  /** The `[start, end)` spans a derivation owns in one document. One
-   * namespace, so one scan answers for every registry. */
-  const derived = (text) => scanSourceDirectives(text, { ns: NS }).directives
-    .map((directive) => [directive.bodyStart, directive.bodyEnd]);
-
   it('no committed markdown types one outside a derived block', () => {
-    const files = execFileSync('git', ['ls-files', '*.md'],
-      { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).split('\n').filter(Boolean).filter(file => existsSync(join(ROOT, file)));
+    const files = documents();
     const typed = [];
     let checked = 0;
     for (const file of files) {
@@ -96,8 +116,7 @@ describe('a measured bundle size is quoted through a marker, never typed', () =>
     // The same drift, one decimal place coarser and therefore rarer —
     // which is what made a pen document sit at "(40 kB)" while the table
     // it pointed at published 41.
-    const files = execFileSync('git', ['ls-files', '*.md'],
-      { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).split('\n').filter(Boolean).filter(file => existsSync(join(ROOT, file)));
+    const files = documents();
     const typed = [];
     let checked = 0;
     for (const file of files) {
@@ -120,5 +139,59 @@ describe('a measured bundle size is quoted through a marker, never typed', () =>
     const baked = files.reduce((n, file) => n
       + [...readFileSync(join(ROOT, file), 'utf8').matchAll(/<!--fact:bundle\.[a-z]+\.kb-->/g)].length, 0);
     assert.ok(baked >= 20, `only ${baked} rounded prices are baked (${checked} typed candidates seen)`);
+  });
+});
+
+describe('a derived table renders', () => {
+  // A Markdown table renders only when its delimiter row has as many cells
+  // as its header row; one cell too many leaves the rows as plain text.
+  it('every table a derivation wrote has as many delimiter cells as header cells', () => {
+    const broken = [];
+    let tables = 0;
+    for (const file of documents()) {
+      const text = readFileSync(join(ROOT, file), 'utf8');
+      for (const [from, to] of derived(text)) {
+        for (const [header, delimiter] of tablesOf(text.slice(from, to))) {
+          tables += 1;
+          if (cells(header) !== cells(delimiter))
+            broken.push(`${file}: '${header.trim()}' has ${cells(header)} cells, its delimiter ${cells(delimiter)}`);
+        }
+      }
+    }
+    assert.deepStrictEqual(broken, []);
+    // a matcher that stopped matching finds nothing and passes everything
+    assert.ok(tables >= 100, `only ${tables} derived tables were found`);
+  });
+
+  it('the change-flow figures render the cascading delete rows a result holds', () => {
+    const result = {
+      measuredAt: '2026-01-02T03:04:05.000Z', runtime: 'v24.0.0', host: { cpu: 'a cpu' }, samples: 15,
+      live: [{ shape: 'graph', strategy: { strategy: 'graph' }, initializationMs: 1, mutationMs: { p50: 0.25, p95: 0.5 }, retainedHeapBytes: 1024 }],
+      replication: [{ capture: 'session', envelopes: 15, operations: 15, bytes: 3169, applyMs: { p50: 0.4 }, replayMs: { p50: 0.1 }, conflictMs: { p50: 0.2 } }],
+      cascade: [
+        { capture: 'session', operations: 121, bytes: 9876, removed: 100, nulled: 20, deleteMs: { p50: 0.7, p95: 0.9 }, applyMs: { p50: 1.5 } },
+        { capture: 'journal', operations: 121, bytes: 9876, removed: 100, nulled: 20, deleteMs: { p50: 1.12, p95: 1.4 }, applyMs: { p50: 1.6 } },
+      ],
+    };
+    const text = changeflowFigures(result);
+    const lines = text.split('\n');
+    const at = lines.indexOf('| Capture | Rows removed | Rows nulled | Operations | Bytes | Delete p50 ms | Delete p95 ms | Apply p50 ms |');
+    assert.ok(at > 0, text);
+    assert.deepStrictEqual(lines.slice(at + 1, at + 6), [
+      '|---|---:|---:|---:|---:|---:|---:|---:|',
+      '| session | 100 | 20 | 121 | 9876 | 0.700 | 0.900 | 1.500 |',
+      '| journal | 100 | 20 | 121 | 9876 | 1.120 | 1.400 | 1.600 |',
+      '',
+      "A parent's delete whose foreign keys remove 100 rows and null 20 replicates as the same 121-operation envelope "
+        + "from either capture mode. Journal capture reads those rows before the delete runs: its delete p50 is 1.6× session capture's.",
+    ]);
+    for (const [header, delimiter] of tablesOf(text)) assert.strictEqual(cells(delimiter), cells(header), header);
+    // envelopes that differ are not called the same
+    const differing = structuredClone(result);
+    differing.cascade[1].bytes = 9875;
+    assert.match(changeflowFigures(differing), /null 20 replicates as the envelopes above\. Journal capture/);
+    // a result measured before the cascading rows existed renders none
+    const { cascade: _cascade, ...earlier } = result;
+    assert.doesNotMatch(changeflowFigures(earlier), /Rows removed|parent's delete/);
   });
 });

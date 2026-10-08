@@ -41,14 +41,6 @@ const canonical = (a, b) => {
   return x < y ? -1 : x > y ? 1 : 0;
 };
 
-/** The members a partial index's condition reads: its `$.<member>` operands.
- * @param {any} value @param {Set<string>} [into] @returns {Set<string>} */
-const conditionMembers = (value, into = new Set()) => {
-  if (typeof value === 'string' && /^\$\.[A-Za-z_][A-Za-z0-9_]*$/.test(value)) into.add(value.slice(2));
-  else if (value !== null && typeof value === 'object') for (const item of Object.values(value)) conditionMembers(item, into);
-  return into;
-};
-
 /** A min-heap of operation positions: the earliest ready operation runs next. */
 const positions = () => {
   /** @type {number[]} */
@@ -94,16 +86,22 @@ const positions = () => {
  * - a kept row (`before` and `after` both present) whose stored `cascade` key
  *   names a row the operations remove — directly, or through removed rows
  *   whose own cascading keys lead there — is written before each of those
- *   removals, which would otherwise delete it first;
+ *   removals, which would otherwise delete it first. Each kept row gets one
+ *   edge per removal on that path, so the edges grow as the kept rows times
+ *   the path's depth, both within `maxOperations`;
  * - the operation that releases a value of an entity's unique slot (a
  *   one-to-one key, a unique member, a unique index) runs before the
- *   operation that takes it. A partial index counts the rows its condition
- *   covers, and every row lacking a member the condition reads: an edge too
- *   many moves a release earlier, which is harmless, where one missed could
- *   fail the write;
+ *   operation that takes it. A partial index holds the rows its condition is
+ *   true for as the query engine answers it, which is what both engines'
+ *   indexes hold; an edge too many is not harmless, since it can close a
+ *   cycle the envelope does not have;
  * - otherwise the given order holds: the earliest operation whose
- *   predecessors have all run goes next. Values rotated between rows, which no
- *   order can replay, fall back to the given order.
+ *   predecessors have all run goes next. A cycle has no order: values rotated
+ *   between rows, or a row moved off a removed parent that takes a value the
+ *   removal releases (only a self-referencing table, or a cascading path back
+ *   to the table, can form one). The earliest pending operation then goes
+ *   next and the replay refuses — `JD2005` when it takes a value still held,
+ *   `JD2104` when it is a removal that reaches a row which had to go first.
  * Collection documents and memberships meet neither rule and keep their order.
  * @param {any} mapping - the store's entity mapping, or `null`
  * @param {(table: string, column: string, value: any) => any} columnValue - a member as its column stores it
@@ -127,15 +125,17 @@ const replayOrder = (mapping, columnValue) => {
         slots.push({ columns, covers: null });
         return;
       }
-      // the condition answers as the query engine does over a row holding
-      // every member it reads; any other row is counted as covered
-      const reads = [...conditionMembers(where)];
+      // the index holds a row where the query engine answers its condition
+      // true, a row lacking a member it reads included (a logical row omits a
+      // null member, and the index reads that column's NULL alike). Should a
+      // condition the store accepted not compile, every row counts: an extra
+      // edge can only refuse an envelope, a missing one could let a moved row
+      // take a value before its release
       let holds = null;
       try { holds = compileJsonQuery(where); }
       catch { holds = null; }
       const condition = holds;
-      slots.push({ columns, covers: (doc) => condition === null
-        || reads.some((member) => doc[member] === undefined || doc[member] === null) || condition(doc) === true });
+      slots.push({ columns, covers: (doc) => condition === null || condition(doc) === true });
     };
     for (const fk of entity.foreignKeys ?? []) if (fk.unique) slot([fk.column]);
     for (const index of entity.indexes ?? []) if (index.unique) slot([index.property]);
@@ -224,7 +224,7 @@ const replayOrder = (mapping, columnValue) => {
       let at;
       if (ready.size > 0) at = ready.pop();
       else {
-        // a cycle: values rotated between rows, which no order replays
+        // a cycle, which no order replays: the earliest pending operation goes next
         while (done[earliest]) earliest += 1;
         at = earliest;
       }

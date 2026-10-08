@@ -21,7 +21,8 @@ import {
 import { resolveRuntime } from '@jarenjs/core/runtime';
 
 import { DbRuntimeError, wrapDriverError } from './errors.js';
-import { chain, attempt, useStatementOnce, releaseStatements as releasePrepared } from './driver.js';
+import { chain, isThenable, attempt, useStatementOnce, releaseStatements as releasePrepared } from './driver.js';
+import { createCursor, createSyncCursor, rowClassOf } from './cursor.js';
 import { checkInvariants, existsRowSql, RECORD_PATH, ruleLiteral } from './invariants.js';
 import { columnCodec, physicalRead } from './physical.js';
 import { mergeEntityRow } from './graph.js';
@@ -615,9 +616,31 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
       const sql = `SELECT ${selectColumns} FROM ${tableSql} WHERE ${q(physicalName(column))} `
         + `IN (${values.map((_, i) => parameterAt(i + 1)).join(', ')})`
         + `${limit === undefined ? '' : ` LIMIT ${parameterAt(values.length + 1)}`}${lock}`;
-      return attempt(() => useStatementOnce(connection, sql, (statement) =>
-        chain(statement.all(limit === undefined ? values : [...values, limit]), (rows) => rows.map((row) => merge(row)))),
-      (error) => wrapDriverError(error, { docPath, collection: entity.name }));
+      const params = limit === undefined ? values : [...values, limit];
+      return attempt(() => useStatementOnce(connection, sql, (statement) => {
+        // pulled through the one cursor mechanism and buffered here, named:
+        // the caller records every row once its write ran, and the LIMIT,
+        // when there is one, bounds the read
+        const cursor = (connection.synchronous ? createSyncCursor : createCursor)({ ...rowClassOf(connection),
+          open: () => statement.iterate(params), items: (/** @type {any} */ row) => [merge(row)] });
+        /** @type {any[]} */
+        const rows = [];
+        const pump = () => {
+          for (;;) {
+            const step = cursor.next();
+            if (isThenable(step)) {
+              return step.then((/** @type {any} */ pulled) => {
+                if (pulled.done) return rows;
+                rows.push(pulled.value);
+                return pump();
+              });
+            }
+            if (step.done) return rows;
+            rows.push(step.value);
+          }
+        };
+        return pump();
+      }), (error) => wrapDriverError(error, { docPath, collection: entity.name }));
     },
     update(key, changes) {
       writable();

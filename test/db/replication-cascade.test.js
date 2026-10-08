@@ -110,6 +110,9 @@ const entity = (properties, required = ['id'], rest = {}) =>
   ({ schema: { type: 'object', required, properties: { id: key, ...properties } }, ...rest });
 /** A user whose email is unique. */
 const users = { $model: '0.1', entities: { User: entity({ email: { type: 'string', 'x-entity': { unique: true } } }) } };
+/** Nodes under nodes, cascading, each with a unique value. */
+const nodes = { $model: '0.1', entities: { N: entity({ parentId: { type: ['string', 'null'] },
+  u: { type: 'string', 'x-entity': { unique: true } }, kids: many('N', 'parentId', 'cascade') }, ['id', 'u']) } };
 
 /**
  * Transactions that pass a unique value from one row to another: each
@@ -184,6 +187,28 @@ const HANDOFFS = {
     await tx.entity('Member').update('y', { clubId: 'c2', email: 'a' });
     await tx.entity('Club').delete('c1');
   }],
+  // a row outside a partial index (it lacks the member the condition reads)
+  // trades values with a row inside it: the row inside goes first
+  'partial unique index, a row outside it': [{ $model: '0.1', entities: {
+    M: entity({ p: { type: 'string' }, st: { type: 'string' } }, ['id', 'p'],
+      { indexes: [{ name: 'on_p', path: '$.p', unique: true, where: { $eq: ['$.st', 'on'] } }] }) } },
+  [['M', { id: 'X', p: 'a' }], ['M', { id: 'Y', p: 'b', st: 'on' }]],
+  async (tx) => {
+    await tx.entity('M').update('Y', { p: 'tmp' });
+    await tx.entity('M').update('X', { p: 'b', st: 'on' });
+    await tx.entity('M').update('Y', { p: 'a' });
+  }],
+  // a row moves off a parent the transaction removes and takes the parent's
+  // value, which the partial index never held: the parent lacks its member
+  'partial unique index, a moved row taking its removed parent value': [{ $model: '0.1', entities: {
+    N: entity({ parentId: { type: ['string', 'null'] }, p: { type: 'string' }, st: { type: 'string' },
+      kids: many('N', 'parentId', 'cascade') }, ['id'],
+    { indexes: [{ name: 'on_p', path: '$.p', unique: true, where: { $eq: ['$.st', 'on'] } }] }) } },
+  [['N', { id: 'a', parentId: null, p: 'x' }], ['N', { id: 'b', parentId: 'a', st: 'on' }], ['N', { id: 'q', parentId: null }]],
+  async (tx) => {
+    await tx.entity('N').update('b', { parentId: 'q', p: 'x' });
+    await tx.entity('N').delete('a');
+  }],
   // a row moves off a parent whose own parent the envelope removes first
   'two cascading levels': [{ $model: '0.1', entities: { Alpha: entity({ gammas: many('Gamma', 'alphaId', 'cascade') }),
     Gamma: entity({ alphaId: { type: 'string' }, betas: many('Beta', 'gammaId', 'cascade') }, ['id', 'alphaId']),
@@ -204,6 +229,24 @@ const HANDOFFS = {
       await tx.entity('User').delete('z8');
       await tx.entity('User').create({ id: 'a0', email: 'y' });
     }],
+  // a row must be written before its parent's removal, which cascades to it,
+  // and after it, which releases the value it takes: no order replays it, and
+  // the earliest pending write refuses — the moved row (`k` < `r`) ...
+  'a moved row taking the value its removed parent releases, the row first': [nodes,
+    [['N', { id: 'm', u: 'm' }], ['N', { id: 'r', u: 'x' }], ['N', { id: 'k', parentId: 'r', u: 'k' }]],
+    async (tx) => {
+      await tx.entity('N').update('k', { parentId: 'm' });
+      await tx.entity('N').delete('r');
+      await tx.entity('N').update('k', { u: 'x' });
+    }, 'JD2005'],
+  // ... or the removal (`p` < `q`), whose cascade then removes the moved row
+  'a moved row taking the value its removed parent releases, the parent first': [nodes,
+    [['N', { id: 'm', u: 'm' }], ['N', { id: 'p', u: 'x' }], ['N', { id: 'q', parentId: 'p', u: 'q' }]],
+    async (tx) => {
+      await tx.entity('N').update('q', { parentId: 'm' });
+      await tx.entity('N').delete('p');
+      await tx.entity('N').update('q', { u: 'x' });
+    }, 'JD2104'],
   // two rows swap their emails: no order replays a rotation
   'rotated between rows': [users, [['User', { id: 'u1', email: 'x' }], ['User', { id: 'u2', email: 'y' }]],
     async (tx) => {

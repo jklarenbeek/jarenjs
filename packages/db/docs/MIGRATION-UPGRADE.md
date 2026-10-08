@@ -942,12 +942,15 @@ the database's own foreign-key actions ([LIVE-FORMAT](LIVE-FORMAT.md) §4):
   `the stored logical row differs from the requested replicated value` and
   `reset did not store the requested logical state`.
 - Replay now also runs the write that releases a value of an entity's unique
-  slot (a one-to-one key, a unique member, a unique index) before the write
-  that takes it, so an envelope passing unique values between entity rows
-  applies and resets whatever their canonical order, where a row taking a value
-  before the row releasing it refused `JD2005`. Values rotated between rows
-  still refuse `JD2005`, and so does a collection document that takes a value
-  before the document releasing it. A reset now writes in canonical order
+  slot (a one-to-one key, a unique member, a unique index; a partial one holds
+  the rows its condition is true for) before the write that takes it, so an
+  envelope passing unique values between entity rows applies and resets where a
+  row taking a value before the row releasing it refused `JD2005`. An envelope
+  no order can replay still refuses, `JD2005` or `JD2104`: one rotating values
+  between rows, or one moving a row off a removed parent while that row takes a
+  value the removal releases (a self-referencing table, or a cascading path back
+  to the table). So does a collection document that takes a value before the
+  document releasing it (`JD2005`). A reset now writes in canonical order
   instead of the order the replica stored its rows in.
 
 ## Measured costs

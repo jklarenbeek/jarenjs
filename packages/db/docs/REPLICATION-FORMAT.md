@@ -126,13 +126,18 @@ a row it removes, directly or through removed rows whose own cascading keys
 lead there, is written before each of those removals, which the replica's own
 cascade would otherwise apply to it first. The write that releases a value of
 an entity's unique slot — a one-to-one key, a unique member, a unique index,
-composite or partial — runs before the write that takes it, because
-uniqueness is checked as each write runs. So a transaction that moves a child
-to a new parent and deletes the old one applies and resets, and so does one
-that passes unique values between entity rows, unless they are rotated
-between rows, which no order replays (`JD2005`). Collection documents keep
-canonical order: a unique value passed to a document that sorts before the one
-releasing it refuses `JD2005`. A child added on one replica under a parent
+composite or partial (a partial index holds the rows its condition is true
+for) — runs before the write that takes it, because uniqueness is checked as
+each write runs. So a transaction that moves a child to a new parent and
+deletes the old one applies and resets, and so does one that passes unique
+values between entity rows, unless no order can replay it: values rotated
+between rows, or a row moved off a removed parent that takes a value the
+removal releases (only a self-referencing table, or a cascading path that
+returns to the table, can form this). Such an envelope refuses `JD2005` when
+the replay reaches the taking write first, `JD2104` when it reaches the
+removal first, whose cascade removes the row that had to move. Collection
+documents keep canonical order: a unique value passed to a document that sorts
+before the one releasing it refuses `JD2005`. A child added on one replica under a parent
 another replica deletes refuses on both sides: `JD2104` where the deletion
 arrives (its cascade would remove a row the envelope does not name), `JD2005`
 where the child arrives (its parent is gone). Neither replica can then apply
@@ -269,7 +274,7 @@ Measured 2026-10-07, v24.20.0, AMD Ryzen 9 5900HX with Radeon Graphics; 15 mutat
 | offset groups | rerun | 0.865 | 0.512 | 0.586 | 294328 |
 
 | Capture | Envelopes | Operations | Bytes | Apply p50 ms | Replay p50 ms | Conflict p50 ms |
-|---|---:|---:|---:|---:|---:|---:|---:|
+|---|---:|---:|---:|---:|---:|---:|
 | session | 15 | 15 | 3169 | 0.472 | 0.121 | 0.214 |
 | journal | 15 | 15 | 3169 | 0.301 | 0.099 | 0.174 |
 

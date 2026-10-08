@@ -234,6 +234,26 @@ describe('PostgreSQL replication of foreign-key actions', { skip: !url && 'JAREN
         await tx.entity('Book').update('Y', { libraryId: 'L2', isbn: '1' });
         await tx.entity('Library').delete('L1');
       }],
+      // a row outside a partial index trades values with a row inside it; a row
+      // moves off a parent it then takes the unindexed value of
+      ['partial unique index, a row outside it', { $model: '0.1', entities: {
+        M: { ...entity({ p: { type: 'string' }, st: { type: 'string' } }, ['id', 'p']),
+          indexes: [{ name: 'on_p', path: '$.p', unique: true, where: { $eq: ['$.st', 'on'] } }] } } },
+      [['M', { id: 'X', p: 'a' }], ['M', { id: 'Y', p: 'b', st: 'on' }]],
+      async (tx) => {
+        await tx.entity('M').update('Y', { p: 'tmp' });
+        await tx.entity('M').update('X', { p: 'b', st: 'on' });
+        await tx.entity('M').update('Y', { p: 'a' });
+      }],
+      ['partial unique index, a moved row taking its removed parent value', { $model: '0.1', entities: {
+        N: { ...entity({ parentId: { type: ['string', 'null'] }, p: { type: 'string' }, st: { type: 'string' },
+          kids: { 'x-entity': { relation: { to: 'N', many: true, via: 'parentId', onDelete: 'cascade' } } } }),
+        indexes: [{ name: 'on_p', path: '$.p', unique: true, where: { $eq: ['$.st', 'on'] } }] } } },
+      [['N', { id: 'a', parentId: null, p: 'x' }], ['N', { id: 'b', parentId: 'a', st: 'on' }], ['N', { id: 'q', parentId: null }]],
+      async (tx) => {
+        await tx.entity('N').update('b', { parentId: 'q', p: 'x' });
+        await tx.entity('N').delete('a');
+      }],
     ];
     await fixture(async ({ open, close }) => {
       for (const [at, [shape, model, seed, change]] of shapes.entries()) for (const how of ['apply', 'reset']) {

@@ -42,6 +42,19 @@ describe('the page-bound gate', () => {
     assert.match(cursor, /items\.length >= limit/);
     assert.match(cursor, /bytes \+ size > maxBytes/);
   });
+
+  it('the closure a journal reads around a cascading delete binds the credit it has left', () => {
+    // not a page: each statement is read whole and recorded once the delete ran,
+    // so both reads bind a LIMIT of the credit left plus one (plus the rows of
+    // that table already met), and the first row past either credit refuses
+    const cascade = read('packages/db/src/cascade.js');
+    assert.match(cascade, /const limitFor = \(table\) => \(bound === null \? undefined : operations \+ 1 \+ /);
+    assert.match(cascade, /memberships\(edge, keys, limitFor\(edge\.table\)\)/);
+    assert.match(cascade, /\.referencing\(edge\.column, keys, limitFor\(edge\.child\), lock\)/);
+    assert.match(cascade, / LIMIT \$\{parameter\(values\.length \+ 1\)\}/);
+    assert.match(read('packages/db/src/entity.js'), / LIMIT \$\{parameterAt\(values\.length \+ 1\)\}/);
+    assert.match(cascade, /operations < 0 \|\| bytes < 0\)\s+throw new DbRuntimeError\('JD2106', 'a cascading delete exceeds replication capacity'\)/);
+  });
 });
 
 describe('the one-implementation gate', () => {
