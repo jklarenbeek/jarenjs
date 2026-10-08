@@ -14,6 +14,7 @@ import {
   planQuery, emitPlan, normalizeModel, planCollection,
   sqliteDialect, createDialect, createEntityPredicateEmitters,
 } from '@jarenjs/db';
+import { postgresDialect } from '@jarenjs/db/postgres';
 import { fullDoubleDialect } from './helpers.js';
 
 const MODEL = {
@@ -294,17 +295,16 @@ describe('the interval form, and the seek that binds a typed scalar', () => {
     assert.deepStrictEqual(slots.map((slot) => slot.literal), [100, 300, 200]);
   });
 
-  it('a numeric seek folds the groups and binds ONE guarded comparison', () => {
+  it('a numeric seek folds the groups and binds ONE total column comparison', () => {
     const seek = { name: 'asof.lower', kind: 'number', ref: at,
       bound: { op: 'le', lit: 1000 }, inner: 'max', outer: 'min',
       group: { segments: [{ name: 'series' }], type: 'string', column: 'gx_series' },
       keys: ['a', 'b'] };
+    // the planner binds a seek against the column that answers it
     const emitted = emit(plan(
-      { p: 'cmp', op: 'ge', ref: at, operand: { seek: 'asof.lower' } }, [seek]));
-    // the statement: one branch, no text-or-number OR, and a TYPED slot
-    assert.match(emitted.sql, new RegExp('WHERE \\(json_type\\("doc", \'\\$\\."at"\'\\) '
-      + 'IS NOT NULL AND json_type\\("doc", \'\\$\\."at"\'\\) IN \\(\'integer\', \'real\'\\) '
-      + 'AND "gx_at" >= \\?\\)'));
+      { p: 'colCmp', op: 'ge', column: 'gx_at', operand: { seek: 'asof.lower' } }, [seek]));
+    // the statement: the column's total form, no text-or-number OR, and a TYPED slot
+    assert.match(emitted.sql, /WHERE \("gx_at" IS NOT NULL AND "gx_at" >= \?\)/);
     assert.deepStrictEqual(emitted.slots, [{ typed: { seek: 'asof.lower', type: 'number' } }]);
     // the seek: the least of the groups' own last instants, at or below
     // the earliest probe, over the keys the probes name
@@ -320,14 +320,14 @@ describe('the interval form, and the seek that binds a typed scalar', () => {
     assert.strictEqual(emitted.slots.length, 1);
   });
 
-  it('an ungrouped seek IS the inner fold, and a text seek guards on text', () => {
+  it('an ungrouped seek IS the inner fold, and a text seek binds a text slot', () => {
     const stamp = { segments: [{ name: 'stamp' }], type: 'string', column: 'gx_stamp' };
     const seek = { name: 'asof.upper', kind: 'text', ref: stamp,
       bound: { op: 'ge', lit: '2026-01-01T00:00:00Z' }, inner: 'min', outer: 'max',
       group: null, keys: null };
     const emitted = emit(plan(
-      { p: 'cmp', op: 'le', ref: stamp, operand: { seek: 'asof.upper' } }, [seek]));
-    assert.match(emitted.sql, /json_type\("doc", '\$\."stamp"'\) = 'text' AND "gx_stamp" <= \?/);
+      { p: 'colCmp', op: 'le', column: 'gx_stamp', operand: { seek: 'asof.upper' } }, [seek]));
+    assert.match(emitted.sql, /WHERE \("gx_stamp" IS NOT NULL AND "gx_stamp" <= \?\)/);
     assert.deepStrictEqual(emitted.slots, [{ typed: { seek: 'asof.upper', type: 'text' } }]);
     const [first] = emitted.seeks;
     assert.strictEqual(first.kind, 'text');
@@ -445,5 +445,119 @@ describe('the entity predicate emitters (direct)', () => {
       assert.notStrictEqual(viaDouble, viaSqlite);
       assert.match(viaDouble, /\[t\]/);
     }
+  });
+});
+
+describe('PostgreSQL: a literal comparison reads the typed extraction alone', () => {
+  const pg = postgresDialect();
+  const ITEMS = {
+    $model: '0.1',
+    collections: {
+      items: {
+        schema: { type: 'object', properties: {
+          id: { type: 'string' }, sku: { type: 'string' }, n: { type: 'integer' } } },
+        key: '/id', indexes: [{ name: 'sku', path: '$.sku' }],
+      },
+    },
+  };
+  const items = normalizeModel(ITEMS).get('items');
+  const ITEMS_PHYSICAL = { table: 'items', keyColumn: 'key', docColumn: 'doc' };
+  /** The WHERE a predicate emits over the items collection through a dialect, and its slots. */
+  const whereFor = (predicate, dialect) => {
+    const layout = planCollection('items', items, dialect);
+    const shape = { collection: 'items', schema: items.schema, columnByCanonical: layout.columnByCanonical };
+    const { sql, slots } = emitPlan(
+      planQuery({ $for: { it: '$[*]' }, $where: predicate, $return: '$it.id' }, shape).plan,
+      dialect, ITEMS_PHYSICAL);
+    const where = /\sWHERE (.*) ORDER BY /s.exec(sql);
+    assert.ok(where !== null, sql);
+    return { where: where[1], slots };
+  };
+  /** The discriminator `jsonTypeOf` writes on PostgreSQL: a three-call CASE over the document. */
+  const discriminators = (text) => (text.match(/THEN 'text' WHEN jsonb_typeof/g) ?? []).length;
+  const N = '(CASE WHEN jsonb_typeof(("doc" #> \'{"n"}\')) = \'number\' THEN (("doc" #> \'{"n"}\'))::numeric END)';
+
+  it('an indexed member reads its generated column, an unindexed one its typed CASE, no discriminator beside either', () => {
+    assert.strictEqual(pg.typedExtract, true);
+    const eq = whereFor({ $eq: ['$it.sku', 's0'] }, pg);
+    assert.strictEqual(eq.where, '("gx_sku" IS NOT NULL AND "gx_sku" = $1)');
+    assert.deepStrictEqual(eq.slots, [{ literal: 's0' }]);
+    const gt = whereFor({ $gt: ['$it.n', 5] }, pg);
+    assert.strictEqual(gt.where, `(${N} IS NOT NULL AND ${N} > $1)`);
+    assert.strictEqual(discriminators(gt.where), 0);
+    // a prefix range and a bound list ride the same column
+    assert.strictEqual(whereFor({ '$starts-with': ['$it.sku', 's1'] }, pg).where,
+      '("gx_sku" IS NOT NULL AND ("gx_sku" >= $1 AND "gx_sku" < $2))');
+    const list = whereFor({ $or: [{ $eq: ['$it.sku', 's0'] }, { $eq: ['$it.sku', 's2'] }] }, pg);
+    assert.ok(list.where.startsWith('("gx_sku" IS NOT NULL AND "gx_sku" IN (SELECT '), list.where);
+    assert.strictEqual(discriminators(list.where), 0);
+    assert.deepStrictEqual(list.slots, [{ literal: '["s0","s2"]' }]);
+  });
+
+  it('$ne keeps presence through the member\'s JSON value: a null or another type differs, an absent member does not', () => {
+    assert.strictEqual(whereFor({ $ne: ['$it.sku', 's0'] }, pg).where,
+      '(("doc" #> \'{"sku"}\') IS NOT NULL AND ("gx_sku" IS NULL OR "gx_sku" <> $1))');
+    // a number against the indexed STRING member reads the numeric CASE the
+    // column cannot answer: NULL for every stored string, so a present
+    // string differs and an absent member does not
+    const NS = '(CASE WHEN jsonb_typeof(("doc" #> \'{"sku"}\')) = \'number\' THEN (("doc" #> \'{"sku"}\'))::numeric END)';
+    assert.strictEqual(whereFor({ $ne: ['$it.sku', 5] }, pg).where,
+      `(("doc" #> '{"sku"}') IS NOT NULL AND (${NS} IS NULL OR ${NS} <> $1))`);
+  });
+
+  it('a seek binds its typed slot through the column form the planner builds', () => {
+    const at = { segments: [{ name: 'at' }], type: 'integer', column: 'gx_at' };
+    const seek = { name: 'asof.lower', kind: 'number', ref: at,
+      bound: { op: 'le', lit: 1000 }, inner: 'max', outer: 'min', group: null, keys: null };
+    const emitted = emitPlan({
+      planVersion: 2, alg: 'select', collection: 'users',
+      filter: { p: 'colCmp', op: 'ge', column: 'gx_at', operand: { seek: 'asof.lower' } },
+      order: null, window: null, rank: null, bucket: null, group: null,
+      seeks: [seek], aggregate: null, project: 'document',
+    }, pg, PHYSICAL);
+    assert.match(emitted.sql, / WHERE \("gx_at" IS NOT NULL AND "gx_at" >= \$1\) /);
+    assert.strictEqual(discriminators(emitted.sql), 0);
+    assert.deepStrictEqual(emitted.slots, [{ typed: { seek: 'asof.lower', type: 'number' } }]);
+  });
+
+  it('an external operand and a type test keep the discriminator', () => {
+    assert.ok(discriminators(whereFor({ $eq: ['$it.sku', '$x'] }, pg).where) >= 2);
+    assert.strictEqual(whereFor({ $exists: '$it.sku' }, pg).where,
+      `${pg.jsonTypeOf('"doc"', '{"sku"}')} IS NOT NULL`);
+  });
+
+  it('SQLite keeps its json_type guards: its extraction is untyped', () => {
+    assert.strictEqual(sqliteDialect.typedExtract, false);
+    assert.strictEqual(whereFor({ $eq: ['$it.sku', 's0'] }, sqliteDialect).where,
+      '(json_type("doc", \'$."sku"\') IS NOT NULL AND json_type("doc", \'$."sku"\') = \'text\' AND "gx_sku" = ?)');
+    assert.strictEqual(whereFor({ $gt: ['$it.n', 5] }, sqliteDialect).where,
+      '(json_type("doc", \'$."n"\') IS NOT NULL AND json_type("doc", \'$."n"\') IN (\'integer\', \'real\')'
+      + ' AND jsonb_extract("doc", \'$."n"\') > ?)');
+    assert.strictEqual(whereFor({ $ne: ['$it.sku', 's0'] }, sqliteDialect).where,
+      '(json_type("doc", \'$."sku"\') IS NOT NULL AND (json_type("doc", \'$."sku"\') <> \'text\' OR "gx_sku" <> ?))');
+  });
+
+  it('an entity document member reads the same typed forms', () => {
+    /** @type {any[]} */
+    const slots = [];
+    const emitters = createEntityPredicateEmitters(pg,
+      (slot) => { slots.push(slot); return pg.parameterRef(slots.length, 'v'); });
+    const score = { segments: [{ name: 'profile' }, { name: 'score' }], flavor: 'entity-doc' };
+    const at = '("t"."doc" #> \'{"profile","score"}\')';
+    const NUM = `(CASE WHEN jsonb_typeof(${at}) = 'number' THEN (${at})::numeric END)`;
+    const TXT = `((CASE WHEN jsonb_typeof(${at}) = 'string' THEN "t"."doc" #>> '{"profile","score"}' END) COLLATE "C")`;
+    const emit = (pred) => emitters.emitPred('"t"', '"t"."doc"', pred);
+    assert.strictEqual(emit({ p: 'cmp', op: 'ge', ref: score, operand: { lit: 5 } }),
+      `(${NUM} IS NOT NULL AND ${NUM} >= $1)`);
+    assert.strictEqual(emit({ p: 'cmp', op: 'ne', ref: score, operand: { lit: 'x' } }),
+      `(${at} IS NOT NULL AND (${TXT} IS NULL OR ${TXT} <> $2))`);
+    const list = emit({ p: 'in', ref: score, operand: { list: ['a', 1] } });
+    assert.ok(list.startsWith(`((${TXT} IS NOT NULL AND ${TXT} IN (SELECT `), list);
+    assert.ok(list.includes(`(${NUM} IS NOT NULL AND ${NUM} IN (SELECT `), list);
+    assert.strictEqual(discriminators(list), 0);
+    assert.strictEqual(emit({ p: 'strop', kind: 'contains', ref: score, operand: { lit: 'ab' } }),
+      `(${TXT} IS NOT NULL AND strpos(${TXT}, $5::text) > 0)`);
+    assert.ok(discriminators(emit({ p: 'typeIs', positive: true, types: ['text'], ref: score })) >= 2);
+    assert.deepStrictEqual(slots.map((slot) => slot.literal), [5, 'x', '["a"]', '[1]', 'ab']);
   });
 });

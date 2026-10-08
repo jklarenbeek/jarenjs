@@ -598,6 +598,12 @@ export function postgresDialect(options = undefined) {
       typeOfJsonb(`(${columnSql} #> ${stringLiteral(pathText)})`),
     // one JSON number type, so one name
     numericTypeNames: ['number'],
+    // every typed form `jsonExtract` writes is a CASE whose NULL already
+    // means "absent, null or another JSON type" — the generated column
+    // holds the same CASE — so a literal comparison reads it alone, and
+    // the planner's selectivity estimate sees a column, not a CASE over
+    // three calls it cannot price
+    typedExtract: true,
     // An external's value is bound as its JSON TEXT. A PostgreSQL
     // parameter's type is resolved where it is used, once, for the
     // whole statement — so one placeholder cannot be a text member's

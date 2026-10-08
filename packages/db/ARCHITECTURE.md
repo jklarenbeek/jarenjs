@@ -139,7 +139,7 @@ worked around:
 | a `boolean` member is `smallint` holding 1 or 0 | the shared forms compare a boolean against those integers (a type test, a projected pair's type name); a `boolean` column would make each an operator-resolution error rather than a row | introspection reads the column back as a number |
 | a path the schema does not type is `jsonb` | there is no honest scalar type for it, and `capabilities.untypedColumns: false` says so | a comparison against such a member reads the document rather than the column: the same answer, unindexed |
 
-Two engine differences the emitter had to be taught, rather than the
+Three engine differences the emitter had to be taught, rather than the
 dialect papering over:
 
 - **The type discriminator's vocabulary.** `jsonb_typeof` answers six
@@ -156,6 +156,17 @@ dialect papering over:
   value's JSON text, and the two branches compare in a space that holds
   every scalar (text against text under `C`, number against number in
   `jsonb`'s own numeric order).
+- **The typed extraction's own NULL.** Every typed form `jsonExtract`
+  writes — and every typed generated column, which holds the same `CASE`
+  — is `NULL` for an absent member, a stored JSON `null` and every other
+  JSON type, so the dialect declares `typedExtract: true` and a literal
+  or list comparison and a string operator read the value alone: its
+  presence is the type guard, and `$ne` keeps presence through the
+  member's JSON value. An untyped (`jsonb`) column and a declared
+  expression column are not such a `CASE`, and neither takes the typed
+  form. SQLite's `jsonb_extract` reads whatever the member holds, so its
+  `json_type` guards stay load-bearing there; externals and type tests
+  keep the discriminator on both engines.
 
 An identifier longer than 63 bytes is REFUSED rather than emitted:
 PostgreSQL truncates one silently, and two generated column names that
@@ -502,7 +513,9 @@ mode, `knn`, beside native, row and set.
 Jaren compares by JSON type; SQL engines by storage class and
 affinity. `jsonb_extract` returns SQL `NULL` for a missing member AND
 for a stored JSON `null` — only `json_type` tells them apart, so every
-translated predicate is guarded by it and is therefore **total
+translated predicate is guarded by it — or, on PostgreSQL, whose
+extraction at a kind is typed, by the typed value's own `IS NOT NULL`
+(the bullet above) — and is therefore **total
 (two-valued)**: `NOT`, `AND` and `OR` compose classically and SQL's
 three-valued `NULL` logic never reaches a result row. Probed engine
 facts the table encodes: a comparison against a missing member is

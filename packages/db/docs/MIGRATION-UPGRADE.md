@@ -343,6 +343,15 @@ the query engine, now refuse by code or answer what the engine answers:
   release with an index over such a member is refused at open (`JD0002`,
   naming the generated column); rebuild the index with two planned
   migrations, one dropping it and one declaring it again.
+- On PostgreSQL a literal comparison, a bound list and a string operator over a
+  collection member or an entity's document member read the member's typed
+  extraction alone — the indexed column itself — so the planner prices the
+  value's true selectivity where a `CASE` over `jsonb_typeof` hid it: under a
+  profile with `refuseFullScan`, a value the table's statistics show to be
+  common is now refused `JD0011` as the sequential scan it always was, where
+  the old estimate of one row admitted an index plan reading the same rows.
+  A rare value still seeks; narrow the predicate or run that query without
+  the profile.
 - A collection `$sum` or `$avg` over a `number` member answered SQLite's
   compensated or PostgreSQL's exact sum; it now runs in the engine, whose
   left-to-right addition is the documented answer (`plan.floatingAccumulation`

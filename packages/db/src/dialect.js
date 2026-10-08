@@ -175,6 +175,7 @@ function normalizeCapabilities(declared) {
  *   jsonAgg: (exprSql: string) => string,
  *   jsonTypeOf: (columnSql: string, pathText: string) => string,
  *   numericTypeNames: readonly string[],
+ *   typedExtract?: boolean,
  *   jsonObject: (pairsSql: string) => string,
  *   jsonEmbed: (columnSql: string) => string,
  *   externalEncoding?: 'value' | 'json',
@@ -753,13 +754,13 @@ export function createDialect(spec) {
     /**
      * Whether {@link jsonExtract} at a kind is TYPED: SQL NULL for an
      * absent member, a stored JSON null and every other JSON type, so a
-     * literal, seek or list comparison reads the value alone and its
-     * presence is the type guard. An untyped extraction (SQLite's, which
-     * reads whatever the member holds) keeps the `json_type` guards of
-     * the truth table beside every comparison; those are load-bearing
-     * there. Externals and type tests keep the discriminator on every
-     * engine: an external's type is known only when it binds, and a type
-     * test asks for the type by name.
+     * literal or list comparison and a string operator read the value
+     * alone and its presence is the type guard. An untyped extraction
+     * (SQLite's, which reads whatever the member holds) keeps the
+     * `json_type` guards of the truth table beside every comparison;
+     * those are load-bearing there. Externals and type tests keep the
+     * discriminator on every engine: an external's type is known only
+     * when it binds, and a type test asks for the type by name.
      */
     typedExtract: spec.typedExtract === true,
     /** An object built from alternating name/value SQL — the shape a

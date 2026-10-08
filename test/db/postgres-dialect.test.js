@@ -190,6 +190,11 @@ describe('the PostgreSQL mapping', () => {
     // numeric guard reads
     assert.deepStrictEqual([...pg.numericTypeNames], ['number']);
     assert.deepStrictEqual([...sqliteDialect.numericTypeNames], ['integer', 'real']);
+    // every typed extraction here is a CASE whose NULL already means
+    // "absent, null or another JSON type", so a literal comparison reads
+    // it alone; SQLite's extraction is untyped and keeps its guards
+    assert.strictEqual(pg.typedExtract, true);
+    assert.strictEqual(sqliteDialect.typedExtract, false);
   });
 
   it('an external operand is bound as JSON and compared in JSON space', () => {

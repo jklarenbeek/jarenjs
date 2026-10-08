@@ -151,6 +151,9 @@ describe('PostgreSQL: membership over thousands of values', { skip: !url && 'JAR
     const plan = await store.collection('items').explain(short);
     assert.equal(plan.mode, 'native');
     assert.equal(plan.params.length, 300, 'one value per leaf: nothing regrouped');
+    const where = /\sWHERE (.*) ORDER BY /s.exec(plan.sql)?.[1] ?? '';
+    assert.equal((where.match(/THEN 'text' WHEN jsonb_typeof/g) ?? []).length, 0,
+      'a literal comparison reads the typed extraction alone: no discriminator per leaf');
   });
 
   it('a number list compares as numeric, the type a number column is declared as, so the column index seeks it', async () => {

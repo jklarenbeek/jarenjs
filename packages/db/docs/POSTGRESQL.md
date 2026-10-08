@@ -47,6 +47,22 @@ tie on every ordering term, or a plain `$.Entity[*]` — answers in that order o
 each engine, so order by the key where both must answer alike. A collection, and
 a managed entity with any other key, is in insertion order on both.
 
+A literal comparison, a bound membership list and a string operator over a
+collection member or an entity's document member read the member's typed
+extraction alone — the generated column where the member is indexed, else the
+`CASE` that column would hold — because that value's own SQL `NULL` already
+stands for an absent member, a stored JSON `null` and every other JSON type, so
+no `jsonb_typeof` discriminator sits beside it (the dialect declares
+`typedExtract`). `$ne` keeps presence through the member's JSON value: a stored
+`null` and a value of another type differ, an absent member does not, as the
+engine answers. An external operand and a type test keep the discriminator — an
+external's type is known only when it binds, and a type test asks for the type
+by name — and SQLite's extraction is untyped, so its `json_type` guards stay.
+The discriminator was a `CASE` over three `jsonb_typeof` calls, twice per term,
+that every row evaluated beside the typed extraction's own `CASE` and that the
+planner's selectivity estimate could not price; where the member is indexed the
+typed form is the column itself, which the planner estimates from its statistics.
+
 ## The writer lock and the lock family
 
 `store.transaction(fn, { mode: 'immediate' })` runs `BEGIN`, then takes the

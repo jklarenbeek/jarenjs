@@ -11,9 +11,10 @@
  * structurally impossible.
  *
  * Every emitted predicate is TOTAL (two-valued) by construction — the
- * `json_type` guards from the truth table in ARCHITECTURE.md — so
- * `NOT`/`AND`/`OR` compose classically and SQL's three-valued NULL
- * logic never decides a row.
+ * `json_type` guards from the truth table in ARCHITECTURE.md, or, on an
+ * engine whose extraction at a kind is typed (`typedExtract`), the
+ * value's own `IS NOT NULL` — so `NOT`/`AND`/`OR` compose classically
+ * and SQL's three-valued NULL logic never decides a row.
  */
 
 import { codePointPrefixSuccessor } from '@jarenjs/core/string';
@@ -159,6 +160,35 @@ function compareRefs(pred, read) {
   const right = read(pred.right);
   const symbol = { eq: '=', ne: '<>', lt: '<', le: '<=', gt: '>', ge: '>=' }[pred.op];
   return `(${left.present} AND ${right.present} AND ${left.value} ${symbol} ${right.value})`;
+}
+
+/**
+ * The TOTAL form of a literal or list comparison, or of a string
+ * operator, on an engine whose extraction at a kind is typed
+ * (`typedExtract`): the value's own SQL NULL already says "absent, null
+ * or another JSON type", so the comparison needs no discriminator
+ * beside it — the value's presence IS the type guard, and a row the
+ * form cannot answer is FALSE, never NULL.
+ * @param {string} valueSql - the member read at the comparison's kind
+ * @param {string} form - the comparison over `valueSql`, its slots bound
+ * @returns {string}
+ */
+function typedTotal(valueSql, form) {
+  return `(${valueSql} IS NOT NULL AND ${form})`;
+}
+
+/**
+ * The typed `ne`: presence is kept through the member's JSON value,
+ * which is NULL only for an ABSENT member, so a stored null and a value
+ * of another JSON type are present and differ while an absent member
+ * answers false — exactly the engine's answer.
+ * @param {string} presentSql - the member as JSON
+ * @param {string} valueSql - the member read at the literal's kind
+ * @param {string} paramSql - the literal's slot
+ * @returns {string}
+ */
+function typedDiffers(presentSql, valueSql, paramSql) {
+  return `(${presentSql} IS NOT NULL AND (${valueSql} IS NULL OR ${valueSql} <> ${paramSql}))`;
 }
 
 /**
@@ -385,6 +415,11 @@ export function emitPlan(plan, dialect, physical) {
       const lit = pred.operand.lit;
       const kind = typeof lit === 'number' ? 'number' : 'text';
       const value = valueOf(pred.ref, kind);
+      if (dialect.typedExtract === true) {
+        return pred.op === 'ne'
+          ? typedDiffers(dialect.jsonExtract(docColumn, pathText(pred.ref)), value, param({ literal: lit }))
+          : typedTotal(value, `${value} ${symbol} ${param({ literal: lit })}`);
+      }
       const typeGuard = kind === 'number'
         ? `${jt} IN ${NUMERIC()}`
         : `${jt} = ${sl('text')}`;
@@ -400,17 +435,8 @@ export function emitPlan(plan, dialect, physical) {
       // NULL, and a NULL escaping through a NOT flips a row's fate
       return `(${jt} IS NOT NULL AND ${typeGuard} AND ${value} ${symbol} ${param({ literal: lit })})`;
     }
-    if ('seek' in pred.operand) {
-      // a seek's scalar comes from a column of DECLARED type, so its
-      // JSON type is known here: one guarded comparison, no branch
-      const seek = (plan.seeks ?? []).find((entry) => entry.name === pred.operand.seek);
-      const value = valueOf(pred.ref, seek.kind);
-      const typeGuard = seek.kind === 'number'
-        ? `${jt} IN ${NUMERIC()}`
-        : `${jt} = ${sl('text')}`;
-      return `(${jt} IS NOT NULL AND ${typeGuard} AND ${value} ${symbol} `
-        + `${param({ typed: { seek: seek.name, type: seek.kind } })})`;
-    }
+    // a seek operand never reaches here: the planner binds a seek against
+    // the column that answers it (`colCmp`, through `slotFor`)
     // external operand: its JSON type is only knowable at bind time —
     // guard BOTH sides per branch (text with text, number with number),
     // and read the member at the branch's own kind. Both sides go
@@ -446,8 +472,13 @@ export function emitPlan(plan, dialect, physical) {
   const emitIn = (pred) => {
     const jt = typeOf(pred.ref);
     const branch = (/** @type {'text' | 'number'} */ kind, /** @type {string} */ listSql) => {
+      const value = valueOf(pred.ref, kind);
+      // an external's list is typed per branch by its own filter; the
+      // member keeps the discriminator beside it, as every external does
+      if (dialect.typedExtract === true && !('ext' in pred.operand))
+        return typedTotal(value, inListSql(dialect, value, listSql, kind));
       const guard = kind === 'number' ? `${jt} IN ${NUMERIC()}` : `${jt} = ${sl('text')}`;
-      return `(${jt} IS NOT NULL AND ${guard} AND ${inListSql(dialect, valueOf(pred.ref, kind), listSql, kind)})`;
+      return `(${jt} IS NOT NULL AND ${guard} AND ${inListSql(dialect, value, listSql, kind)})`;
     };
     if ('ext' in pred.operand) {
       const slot = () => param({ external: pred.operand.ext, json: true, list: true });
@@ -530,7 +561,9 @@ export function emitPlan(plan, dialect, physical) {
         return `${pred.name}(${dialect.jsonText(docColumn)}, ${sl(pred.mount ?? '/$where')})`;
       case 'strop': {
         const jt = typeOf(pred.ref);
-        const form = stropForm(dialect, param, valueOf(pred.ref, 'text'), pred);
+        const value = valueOf(pred.ref, 'text');
+        const form = stropForm(dialect, param, value, pred);
+        if (dialect.typedExtract === true) return typedTotal(value, form);
         return `(${jt} IS NOT NULL AND ${jt} = ${sl('text')} AND ${form})`;
       }
       case 'bboxOverlap': {
@@ -796,11 +829,14 @@ export function createEntityPredicateEmitters(dialect, param) {
 
   const emitDocPred = (docSql, pred) => {
     const jt = dialect.jsonTypeOf(docSql, pathText(pred.ref));
+    const typed = dialect.typedExtract === true;
     if (pred.p === 'in') {
       // the collection's membership form, over the entity's document
       const branch = (/** @type {'text' | 'number'} */ kind, /** @type {string} */ listSql) => {
+        const value = memberAt(docSql, pred.ref, kind);
+        if (typed) return typedTotal(value, inListSql(dialect, value, listSql, kind));
         const guard = kind === 'number' ? `${jt} IN ${NUMERIC()}` : `${jt} = ${sl('text')}`;
-        return `(${jt} IS NOT NULL AND ${guard} AND ${inListSql(dialect, memberAt(docSql, pred.ref, kind), listSql, kind)})`;
+        return `(${jt} IS NOT NULL AND ${guard} AND ${inListSql(dialect, value, listSql, kind)})`;
       };
       const texts = pred.operand.list.filter((/** @type {any} */ value) => typeof value === 'string');
       const numbers = pred.operand.list.filter((/** @type {any} */ value) => typeof value === 'number');
@@ -819,13 +855,20 @@ export function createEntityPredicateEmitters(dialect, param) {
         : `(${jt} IS NOT NULL AND ${jt} NOT IN (${list}))`;
     }
     if (pred.p === 'strop') {
-      const form = stropForm(dialect, param, memberAt(docSql, pred.ref, 'text'), pred);
+      const value = memberAt(docSql, pred.ref, 'text');
+      const form = stropForm(dialect, param, value, pred);
+      if (typed) return typedTotal(value, form);
       return `(${jt} IS NOT NULL AND ${jt} = ${sl('text')} AND ${form})`;
     }
     const lit = pred.operand.lit;
     const symbol = { eq: '=', ne: '<>', lt: '<', le: '<=', gt: '>', ge: '>=' }[pred.op];
     const kind = typeof lit === 'number' ? 'number' : 'text';
     const value = memberAt(docSql, pred.ref, kind);
+    if (typed) {
+      return pred.op === 'ne'
+        ? typedDiffers(memberAt(docSql, pred.ref, undefined), value, param({ literal: lit }))
+        : typedTotal(value, `${value} ${symbol} ${param({ literal: lit })}`);
+    }
     if (pred.op === 'ne') {
       const notType = kind === 'number'
         ? `${jt} NOT IN ${NUMERIC()}` : `${jt} <> ${sl('text')}`;
@@ -970,8 +1013,10 @@ export function createEntityPredicateEmitters(dialect, param) {
  * columns with TOTAL forms and no `json_type` guard — a column-mapped
  * property has no present-`null` (§9.3), so presence IS `IS NOT
  * NULL`; entity-EPOCH refs compare the derived integer column against
- * a plan-time epoch translation; entity-DOC refs ride the phase-A
- * guarded truth table over the entity's JSONB column. Join emission
+ * a plan-time epoch translation; entity-DOC refs ride the guarded truth
+ * table over the entity's JSONB column — the `json_type` guards, or the
+ * typed value's own `IS NOT NULL` where the dialect's extraction is
+ * typed. Join emission
  * appends BOTH bindings' row identities in binding order, which is
  * exactly the engine's nested-loop order — determinism the oracle
  * depends on.
