@@ -598,8 +598,10 @@ transaction waits for its reader for at most the connection's `queueTimeout`, th
 refuses `JD2091`, as a parallel read does: a root cursor's first pull runs inside
 the store's gate, so a cursor that finds every reader held gives the gate back
 rather than holding every other call out. Metrics report active/idle/queued,
-worker health/generation/role/executions, and wait p50/p95 over the last 1024
-admissions.
+worker health/generation/role/executions, each worker's `statements` (the
+prepared statements its own endpoint holds, as the worker host reports it — a
+leak on the writer shows in the writer's number, never in a reader's), and wait
+p50/p95 over the last 1024 admissions.
 
 Compiled operation metadata supplies read classification, and SQLite itself
 refuses a write on a read-only worker. The Store-bound relational engine

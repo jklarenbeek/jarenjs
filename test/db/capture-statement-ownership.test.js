@@ -107,6 +107,7 @@ it('worker: the owner lease renews without holding a statement slot per renewal'
     const slots = () => connections[0].metrics().statements;
     await store.collection('notes').put({ id: 'n1', n: 0 });
     const settled = slots();
+    assert.ok(settled > 0, `the endpoint reports its count, got ${settled}`);
     // a third of the lease per renewal: several of them
     await delay(1400);
     await store.collection('notes').put({ id: 'n1', n: 1 });

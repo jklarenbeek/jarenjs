@@ -296,9 +296,13 @@ export function workerPoolDriver(configuration, driverFactory) {
         poolWriters: slots.filter((slot) => !slot.readOnly).length });
       const connection = finishConnection(raw, sqliteDialect, false, capabilities, options.queueTimeout);
       return Object.freeze({ ...connection, get mustQueue() { return connection.mustQueue; },
+        // each worker's `statements` is its own endpoint's count (what its
+        // `maxStatements` bounds): a leak on the writer shows in the
+        // writer's number, never in a reader's
         metrics: () => Object.freeze({ ...queue.metrics(), workers: Object.freeze(slots.map((slot) =>
           Object.freeze({ readOnly: slot.readOnly, healthy: slot.healthy, active: slot.active,
-            generation: slot.generation, executions: slot.executions }))) }),
+            generation: slot.generation, executions: slot.executions,
+            statements: slot.connection.metrics?.().statements ?? 0 }))) }),
       });
     },
   });

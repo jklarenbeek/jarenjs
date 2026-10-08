@@ -254,6 +254,69 @@ export function useStatementOnce(connection, sql, use, options = undefined) {
 }
 
 /**
+ * Prepare `sql` for one cursor and release it once that cursor ends: on
+ * exhaustion, on `return()`, when a pull fails, or when the iteration could
+ * not be opened at all. What a cursor whose consumer pulls at its own pace
+ * takes on a binding that keeps every preparation (a worker, up to its
+ * `maxStatements`); the release follows the cursor's own return, so a host
+ * that classifies every request still knows the cursor it is for. A binding
+ * that keeps nothing releases nothing.
+ * @param {any} connection
+ * @param {string} sql
+ * @param {any[]} params
+ * @param {{ readOnly?: boolean }} [options]
+ * @returns {any} value-or-promise of the driver iterator
+ */
+export function iterateStatementOnce(connection, sql, params, options = undefined) {
+  return chain(options === undefined ? connection.prepare(sql) : connection.prepare(sql, options), (statement) => {
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      releaseStatement(statement);
+    };
+    /** Settle one iterator step: release after a final or failed one.
+     * @param {() => any} step */
+    const settled = (step) => {
+      let out;
+      try {
+        out = step();
+      }
+      catch (error) {
+        release();
+        throw error;
+      }
+      if (!isThenable(out)) {
+        if (out?.done === true) release();
+        return out;
+      }
+      return out.then((value) => { if (value?.done === true) release(); return value; },
+        (error) => { release(); throw error; });
+    };
+    const owning = (iterator) => {
+      const owned = {
+        next: () => settled(() => iterator.next()),
+        return: (value) => settled(() => iterator.return?.(value) ?? { done: true, value }),
+        [Symbol.iterator]: () => owned,
+        [Symbol.asyncIterator]: () => owned,
+      };
+      return owned;
+    };
+    let opened;
+    try {
+      opened = statement.iterate(params);
+    }
+    catch (error) {
+      release();
+      throw error;
+    }
+    return isThenable(opened)
+      ? opened.then(owning, (error) => { release(); throw error; })
+      : owning(opened);
+  });
+}
+
+/**
  * Retain one preparation and borrow it for complete operations. Retirement
  * waits for all admitted uses, including pending preparation. Later uses
  * prepare independent temporary statements, never a finalized handle.

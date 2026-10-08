@@ -1095,6 +1095,30 @@ the database's own foreign-key actions ([LIVE-FORMAT](LIVE-FORMAT.md) §4):
   statement slots; they are released after each use now, as are the owner
   lease's renewals, and such a store keeps writing.
 
+## 12. Statement slots on the worker, pool and process hosts
+
+A host that keeps every prepared statement until told otherwise (the worker,
+pool and process endpoints, up to `maxStatements`, 1024 by default) now holds
+a bounded number of them on these paths however long the store lives:
+
+- `store.jobs.page()` held one statement per page cursor for good and refused
+  `JD2092` after about a thousand pages; the statement now leaves with its
+  cursor — exhausted, returned or aborted.
+- `checkpoint()`, `optimize()`, `integrityCheck()` and `foreignKeyCheck()`
+  held one statement per call; each is prepared for that one call and
+  released after it.
+- A trusted statement (`tx.sql.prepare`) kept its slot after `close()`;
+  `close()` now gives it back, once. A statement a body never closes is still
+  held until the store closes, so close what you prepare.
+- On the process host, once a store's life had prepared more statements than
+  `maxStatements` (a few hundred journal-captured commits), a root read
+  outside any transaction reported the owner's transaction settlement as
+  `unknown`, and a connection loss during it as not retryable; the host's own
+  bookkeeping now follows its endpoint, and the settlement stays `committed`.
+- A one-shot statement's release is never refused by a full request queue: it
+  has a cursor return's reserved capacity.
+- The pool host's `metrics().workers[]` report each worker's `statements`.
+
 ## Measured costs
 
 Exact identity stores complete canonical documents and model endpoints, so

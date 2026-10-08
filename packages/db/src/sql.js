@@ -1,8 +1,16 @@
 //@ts-check
 /** Trusted prepared statements, restricted to a live transaction's authority. */
 import { sqlTokens } from './dialects/check-read.js';
-import { chain, attempt } from './driver.js';
+import { chain, attempt, releaseStatement } from './driver.js';
 import { DbRuntimeError, wrapDriverError } from './errors.js';
+
+/**
+ * The member of a scope's SQL capability that gives back every statement
+ * still open: what the store calls when the scope settles, so a statement
+ * a body never closed does not hold its slot on a binding that keeps
+ * every preparation (a worker, up to its `maxStatements`).
+ */
+export const RELEASE = Symbol('release the trusted statements of a scope');
 
 /**
  * Whether a statement's tokens write: `INSERT`, `UPDATE`, `DELETE`, or
@@ -23,7 +31,11 @@ export function writesRows(tokens) {
 
 /** @param {any} context @returns {any} a scoped SQL capability */
 export function trustedSql({ connection, requireScope, beforeWrite, afterWrite, readOnly, track }) {
+  /** The releases of the statements prepared here and not yet closed.
+   * @type {Set<() => void>} */
+  const open = new Set();
   return Object.freeze({
+    [RELEASE]: () => { for (const release of [...open]) release(); },
     /** Compile one statement. Access is explicit; this is trusted application SQL,
      * not a sandbox for untrusted query text or side-effecting host functions.
      * @param {string} sql @param {{ access: 'read' | 'write', affects?: readonly string[] }} options */
@@ -46,6 +58,16 @@ export function trustedSql({ connection, requireScope, beforeWrite, afterWrite, 
         if (closed) refuse('the prepared SQL statement is closed');
       };
       const statement = connection.prepare(sql, { readOnly: !writing });
+      // closed once, and given back then: a binding that keeps every
+      // preparation (a worker, up to its `maxStatements`) would otherwise
+      // hold one more slot per preparation for good
+      const release = () => {
+        if (closed) return;
+        closed = true;
+        open.delete(release);
+        releaseStatement(statement);
+      };
+      open.add(release);
       // one statement run is one operation of the transaction: `track`
       // counts it in flight, so a hold limit waits for it before it rolls
       // the transaction back
@@ -63,7 +85,7 @@ export function trustedSql({ connection, requireScope, beforeWrite, afterWrite, 
       });
       return Object.freeze({ run: (params) => run('run', params),
         get: (params) => run('get', params), all: (params) => run('all', params),
-        close: () => { requireScope(); closed = true; } });
+        close: () => { requireScope(); release(); } });
     },
   });
 }

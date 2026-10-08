@@ -169,8 +169,10 @@ export async function createWorkerConnection(worker, settings) {
         run: (params = []) => request('run', { statement: id, params }),
         get: (params = []) => request('get', { statement: id, params }),
         // the worker keeps every prepared statement until told otherwise,
-        // up to its `maxStatements`
-        finalize: () => request('finalize', { statement: id }),
+        // up to its `maxStatements`; the release has a cursor return's
+        // reserved capacity, so a full request queue never refuses it and
+        // the slot it gives back is never held by a swallowed refusal
+        finalize: () => request('finalize', { statement: id }, true),
         iterate,
         all: async (params = []) => {
           const iterator = await iterate(params);

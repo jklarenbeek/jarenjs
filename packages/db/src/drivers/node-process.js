@@ -63,8 +63,27 @@ export function nodeProcessDriver(configuration = {}) {
       state.pid = child.pid ?? null;
       let resolveExit, control, killPromise, active = false, closeAcknowledged = false;
       let transactionOpen = false, ambiguous = false;
+      // what the endpoint holds, mirrored exactly: a statement leaves on
+      // its `finalize`, an ephemeral one with the cursor that owned it (or
+      // with a refused `iterate` no cursor owns), a cursor when it is
+      // returned, exhausted or fails — so the map never fills with
+      // statements the endpoint already released, and a fixed statement
+      // the store keeps using is never mistaken for an unknown one
       const prepared = new Map();
       const cursors = new Map();
+      /** @type {Map<number, number>} cursor id → the statement it runs */
+      const cursorStatements = new Map();
+      const releaseCursor = (id) => {
+        cursors.delete(id);
+        const owner = cursorStatements.get(id);
+        cursorStatements.delete(id);
+        if (owner !== undefined && prepared.get(owner)?.ephemeral === true) prepared.delete(owner);
+      };
+      const releaseUnowned = (statement) => {
+        if (prepared.get(statement)?.ephemeral !== true) return;
+        for (const owner of cursorStatements.values()) if (owner === statement) return;
+        prepared.delete(statement);
+      };
       const report = () => Object.freeze({ ...state });
       const exited = new Promise((resolve) => { resolveExit = resolve; });
       child.once('exit', (code, signal) => {
@@ -137,16 +156,27 @@ export function nodeProcessDriver(configuration = {}) {
             ambiguous = true; state.transaction = 'unknown';
           }
         },
-        failure: (op, data, open) => observe(op, data, open, true),
+        failure: (op, data, open) => {
+          const statement = execution(op, data);
+          // the endpoint releases the cursor of a failed pull or return, and
+          // the ephemeral preparation of a refused iterate that no cursor owns
+          if (op === 'next' || op === 'return') releaseCursor(data.cursor);
+          else if (op === 'iterate') releaseUnowned(data.statement);
+          observe(op, data, open, true, statement);
+        },
         result: (op, data, value, open) => {
           const statement = execution(op, data);
           if (op === 'close') closeAcknowledged = true;
           if (op === 'prepare') {
             if (prepared.size >= limits.statements) prepared.delete(prepared.keys().next().value);
-            prepared.set(value, info(data.sql));
+            prepared.set(value, { ...info(data.sql), ephemeral: data.ephemeral === true });
           }
-          if (op === 'iterate') cursors.set(value, statement);
-          if (op === 'return' || op === 'next' && value.done) cursors.delete(data.cursor);
+          if (op === 'iterate') { cursors.set(value, statement); cursorStatements.set(value, data.statement); }
+          if (op === 'return' || op === 'next' && value.done) releaseCursor(data.cursor);
+          if (op === 'finalize') {
+            for (const [id, owner] of [...cursorStatements]) if (owner === data.statement) releaseCursor(id);
+            prepared.delete(data.statement);
+          }
           observe(op, data, open, false, statement);
         },
       };

@@ -42,7 +42,7 @@ export { JOBS_TABLE, JOB_CHECKPOINTS_TABLE };
 
 import { resolveRuntime } from '@jarenjs/core/runtime';
 import { backoffDelay } from '@jarenjs/core/retry';
-import { chain, attempt } from './driver.js';
+import { chain, attempt, iterateStatementOnce } from './driver.js';
 import { DbCompileError, DbRuntimeError, wrapDriverError } from './errors.js';
 import { createCursor, rowClassOf, PAGE_LIMIT_DEFAULT } from './cursor.js';
 import { refuseCancelled } from './cancellation.js';
@@ -620,12 +620,15 @@ export function createJobEngine(options) {
       throw new TypeError('page: limit is a positive integer');
     const page = sql.page(state, kind, after, limit);
     // a statement of its own per cursor: two live iterators over one
-    // cached statement invalidate each other at the driver
+    // cached statement invalidate each other at the driver. It is given
+    // back when the cursor ends — exhausted, returned or aborted — so a
+    // binding that keeps every preparation (a worker, up to its
+    // `maxStatements`) holds no more slots however many pages are drained
     return createCursor({
       ...rowClassOf(connection),
       signal: pageOptions?.signal, deadline: pageOptions?.deadline, now,
       wrap: wrapJobs,
-      open: () => chain(connection.prepare(page.sql), (statement) => statement.iterate(page.params)),
+      open: () => iterateStatementOnce(connection, page.sql, page.params),
       items: (row) => [publicJob(row)],
     });
   };

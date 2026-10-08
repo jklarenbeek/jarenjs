@@ -21,7 +21,7 @@
  */
 
 import { DbRuntimeError, wrapDriverError } from './errors.js';
-import { chain, attempt } from './driver.js';
+import { chain, attempt, useStatementOnce } from './driver.js';
 import { refuseCancelled } from './cancellation.js';
 
 /** The checkpoint modes `PRAGMA wal_checkpoint` accepts, closed. */
@@ -98,9 +98,12 @@ export function createMaintenance({ connection, readOnly, now }) {
   };
 
   /** Run one pragma statement and answer its rows, driver failures wrapped.
+   * The statement is prepared for this one call and released after it: a
+   * binding that keeps every preparation (a worker, up to its
+   * `maxStatements`) would otherwise hold one more slot per call.
    * @param {string} operation @param {string} sql */
   const rows = (operation, sql) => attempt(
-    () => chain(connection.prepare(sql), (statement) => statement.all([])),
+    () => useStatementOnce(connection, sql, (statement) => statement.all([])),
     failed(operation));
 
   return {
