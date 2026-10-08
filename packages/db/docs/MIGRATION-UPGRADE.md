@@ -720,6 +720,38 @@ past the highest key.
   do (`JD0012`), and a copy that finishes in one step (`rate` at least the
   page count) holds the gate for its whole extent, so a write issued
   meanwhile waits for it.
+- On Bun a backup of a WAL database was a rollback-journal file (`VACUUM
+  INTO` writes one); it is now a WAL-mode file, as a Node backup always
+  was: opening it, even read-only, creates `-wal` and `-shm` beside it, and
+  it cannot be opened where they cannot be created. Run `PRAGMA
+  journal_mode=DELETE` on a backup bound for read-only media.
+- `snapshotDatabase` on a connection the Node or Bun driver opened wrote a
+  compacted `VACUUM INTO` copy; it now copies every page through the
+  connection's online backup, inside one read transaction, and keeps the
+  source's free pages: a snapshot is no longer compacted. Run `VACUUM` on
+  the copy to compact it. Its schema cookie is now 1 where it was the
+  source's plus one, so its `PRAGMA schema_version` still differs from the
+  source's; a copy of a WAL database is still a rollback-journal file.
+- `snapshotDatabase` inside an open transaction — called from a
+  transaction callback before its first `await`, or after a `BEGIN` on the
+  connection — failed with SQLite's `VACUUM` error (`cannot VACUUM from
+  within a transaction`, no `JD` code); it now refuses with `JD0038` before
+  touching the file system.
+- A `snapshotDatabase` taken while a statement was in progress on the
+  connection (an open iterator) failed (`cannot VACUUM - SQL statements in
+  progress`); it now copies, and the statement goes on.
+- A `snapshotDatabase` target that begins `file:` reached SQLite as a URI
+  on Node, so the copy went to the file the URI names (or failed when that
+  file existed) while the reserved path stayed empty; Bun took the name
+  literally. A target `:memory:` copied into a discarded memory database and
+  answered `pages: NaN` (`snapshotDatabase`), or published a file SQLite
+  opens as a memory database under that name (`backupTo`). Each is now a
+  `TypeError` before the call waits for the connection or writes anything;
+  write `./file:…` or `./:memory:` for such a relative path.
+- On Bun a `snapshotDatabase` that failed inside its copy (a full disk)
+  threw `bun:sqlite`'s `SQLiteError` (`code: 'SQLITE_IOERR_WRITE'`); the
+  copy now runs on `node:sqlite`, whose errors are `Error` with `code:
+  'ERR_SQLITE_ERROR'`.
 
 ## 10. Journal capture of foreign-key actions
 

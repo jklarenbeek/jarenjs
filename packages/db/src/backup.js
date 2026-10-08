@@ -68,6 +68,23 @@ export function temporaryPathFor(targetPath, random) {
 }
 
 /**
+ * Refuse, with a `TypeError`, a file path SQLite reads as something else:
+ * one that begins `file:` is a URI, which can name another file than the
+ * one written or published, and `:memory:` is a memory database. The one
+ * rule for every SQLite file this package writes (`backupTo`'s target,
+ * `snapshotDatabase`'s). Lives here because this module imports no
+ * builtin, so the store's client bundle can carry it.
+ * @param {string} path
+ * @param {string} what - the argument's name, for the message
+ */
+export function refuseSpecialSqlitePath(path, what) {
+  if (path.startsWith('file:') || path === ':memory:') {
+    throw new TypeError(`${what} is a file path, and SQLite reads '${path}' as `
+      + `${path === ':memory:' ? 'a memory database' : 'a URI'} (write './${path}' for that relative path)`);
+  }
+}
+
+/**
  * Build `backupTo` over a connection.
  * @param {{ connection: any, readOnly: boolean,
  *   gated: (fn: () => any, what: string) => any,
@@ -114,12 +131,7 @@ export function createBackup({ connection, readOnly, gated, checkpoint, random, 
     backupTo(targetPath, options = undefined) {
       if (typeof targetPath !== 'string' || targetPath.length === 0)
         throw new TypeError('backupTo: targetPath is a non-empty string');
-      // SQLite reads a name that begins `file:` as a URI, which can name
-      // another file than the one the rename publishes
-      if (targetPath.startsWith('file:')) {
-        throw new TypeError(`backupTo: targetPath is a file path; one that begins 'file:' would reach SQLite as `
-          + `a URI (write './${targetPath}' for that relative path)`);
-      }
+      refuseSpecialSqlitePath(targetPath, 'backupTo: targetPath');
       const rate = options?.rate;
       if (rate !== undefined && (!Number.isSafeInteger(rate) || rate < 1))
         throw new TypeError(`backupTo: rate is a positive integer (pages per step), got ${JSON.stringify(rate)}`);

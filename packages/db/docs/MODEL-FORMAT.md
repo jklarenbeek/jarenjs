@@ -829,8 +829,9 @@ under an open Bun store copies what that path holds now, or fails.
 Bun's platform runs every step before it returns, so its events arrive
 synchronously during the copy and nothing else on the thread runs until
 the copy ends. Both page copies are page-identical to the source: free
-pages are kept, and only page 1's change counter (bytes 24–27) and
-version-valid-for number (bytes 92–95) may differ — except that under a
+pages are kept, and only page 1's change counter (bytes 24–27), schema
+cookie (bytes 40–43: SQLite's backup gives every new copy the cookie 1)
+and version-valid-for number (bytes 92–95) may differ — except that under a
 rollback journal the Node copy may carry the store connection's own
 image of a free page, whose bytes then differ from the file's (the
 database it holds is the same). A Bun database without a file (memory,

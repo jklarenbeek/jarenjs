@@ -344,15 +344,48 @@ Declared affinity does not determine a value's storage class. WITHOUT ROWID tabl
 and shadowed rowid aliases require an explicit different identity selection.
 
 Both host driver entries export `snapshotDatabase(connection, newPath)`. It
-reserves a new destination, refuses any existing file (even empty), includes
-committed WAL data through VACUUM INTO, syncs the output and cleans up a failed
-copy. It allocates no database-sized JavaScript image. SQLite page caches and
-its temporary storage govern native working memory. The copy runs synchronously
-inside the asynchronous filesystem operation; it is not an incremental-progress
-or interruption API. A snapshot inside an active transaction fails and cleans up.
-Explicit keys, retained histories and bytes survive; [SQLite VACUUM](https://www.sqlite.org/lang_vacuum.html)
-may renumber unaliased rowids, so this is not a page-identical archival copy. Bun store backups
-use the same disk-backed path; Node store backup keeps its online-backup binding.
+reserves a new destination, refuses any existing file (even empty), copies
+through the connection's own online backup, syncs the output and removes a
+failed copy — or one that left the reservation without a database (`JD2078`)
+— with every side file it left. A name SQLite reads as something else is a
+`TypeError` before the call waits for the connection: a path that begins
+`file:` (a URI, which can name another file; write `./file:…` for such a
+relative path) and `:memory:`. It takes no progress or cancellation options
+and allocates no database-sized JavaScript image; SQLite page caches and its
+temporary storage govern native working memory.
+
+Inside an open transaction it refuses with `JD0038` before touching the file
+system: called from a transaction callback before its first `await`, or after
+a `BEGIN` issued on the connection. The check runs once the call owns the
+connection, so a call that waits for another caller's transaction copies once
+that transaction ends. A call from an awaited part of a transaction callback
+waits the same way, for its own transaction, and fails `JD0012` once the queue
+timeout passes: take the snapshot after the transaction. A transaction scope
+passed as the connection has no backup primitive and fails with SQLite's own
+`VACUUM` error. A statement in progress on the connection (an open iterator)
+neither stops a snapshot nor is stopped by one.
+
+A connection the Node or Bun driver opened copies inside one read transaction
+(on Node the connection's own, on Bun a dedicated read-only `node:sqlite`
+connection's), so the copy is the committed database as it stood when the copy
+began, committed WAL data included: another connection's commits cannot
+restart it (under WAL they proceed; under a rollback journal they wait for the
+copy, up to their busy timeout), and a source another connection has locked
+fails busy (`database is locked`). Every page is copied in place, so unaliased rowids, explicit keys,
+retained histories and bytes are the source's and free pages are kept, though
+under a rollback journal the Node copy may carry the connection's own image of
+a free page, whose unused bytes then differ from the file's. Of page 1's
+header, the change counter and version-valid-for number may differ, SQLite's
+backup gives every new copy the schema cookie 1 — its `PRAGMA schema_version`
+is not the source's, so a schema-change plan reviewed against one refuses
+`JD0021` on the other — and a copy of a WAL database is made a rollback-journal
+file (header bytes 18–19), so it opens read-only anywhere, read-only media
+included, without creating `-wal` or `-shm` beside it. On Bun the copy holds the
+calling thread until it ends. A connection without the backup primitive (one a
+caller adapted itself) — and on Bun a database without a file, a runtime
+without `node:sqlite` or a `bun:sqlite` on another SQLite library — copies with
+one [`VACUUM INTO`](https://www.sqlite.org/lang_vacuum.html) statement instead:
+compacted, its free pages dropped, not page for page.
 
 ## Lightweight engines
 

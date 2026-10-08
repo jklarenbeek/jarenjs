@@ -1242,7 +1242,9 @@ consumed by `src/store.js` and never reached by a query:
   with its side files on every other branch. The copy's first step
   (Node) or whole extent (Bun) holds the store gate; progress events
   arrive only between steps, and never twice alike. The root closure
-  imports no builtin: the primitives are the driver's.
+  imports no builtin: the primitives are the driver's. It also holds the
+  one rule refusing a target path SQLite reads as something else (`file:`
+  URIs, `:memory:`), which the standalone snapshot helper imports.
 - `src/cancellation.js` — the one check every lifecycle runs between its
   units of work (a statement, a row, a step, a batch, a page), on the
   clock the caller was given; each lifecycle owns its abort code, the
@@ -1358,8 +1360,12 @@ on the store's own connection, Bun on a dedicated read-only `node:sqlite`
 connection, with `VACUUM INTO` only for a Bun database without a file, a Bun
 runtime without `node:sqlite`, or a `bun:sqlite` on another SQLite library) and
 refuses to publish beside a `-wal` holding frames or a hot `-journal`.
-The standalone snapshot helper shares destination reservation and cleanup across
-both hosts, including transaction failures.
+The standalone snapshot helper shares destination reservation, the connection's
+own backup primitive as its page copy (`VACUUM INTO` for a connection without
+one) and the cleanup of a failed copy across both hosts. On Node it holds one
+read transaction on the connection for the whole copy, so another connection's
+commits cannot restart it; a WAL source's copy is made a rollback-journal file.
+It refuses a bad target and an open transaction before it reserves anything.
 
 `src/search.js` composes core lexical mechanics and the JSON predicate compiler over complete bounded entity snapshots. Committed capture and data-version checks invalidate derived state; SHA-256 source content validates persisted caches across reopen. Snapshot storage uses existing collection transactions. See [search execution](docs/SEARCH.md); native full-text dialects remain unqualified.
 

@@ -233,8 +233,10 @@ describe('a complete backup', () => {
     await assert.rejects(store.backupTo('/tmp/x.db', { rate: 0 }), TypeError);
     await assert.rejects(store.backupTo('/tmp/x.db', { onProgress: /** @type {any} */ ('no') }), TypeError);
     // a path that begins `file:` would reach SQLite as a URI naming
-    // another file than the one published
+    // another file than the one published, and SQLite opens `:memory:` as
+    // a memory database, never the file published under that name
     await assert.rejects(store.backupTo('file:copy.db'), TypeError);
+    await assert.rejects(store.backupTo(':memory:'), TypeError);
     await store.close();
   });
 
@@ -600,8 +602,11 @@ describe('the Bun binding', () => {
       assert.equal(sha256(destination.dbPath), hash);
       assert.deepEqual(siblings(destination.dbPath), []);
       // each copy's connection is gone with it: no descriptor accumulates
-      // on the source (counted where /proc/self/fd lists them)
-      assert.strictEqual(descriptorsOn(source.dbPath), steady, 'a copy left its connection open on the source');
+      // on the source (counted where /proc/self/fd lists them; the one
+      // SQLite keeps for a closed connection may be gone by now)
+      const remaining = descriptorsOn(source.dbPath);
+      assert.ok(steady === null || (remaining !== null && remaining <= steady),
+        `a copy left its connection open on the source: ${remaining} descriptors, ${steady} after the first copy`);
     }
     finally { await store?.close(); source.cleanup(); destination.cleanup(); }
   });

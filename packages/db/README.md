@@ -1819,7 +1819,7 @@ Native column reads and bounded mutation documents are specified in [NATIVE-PLAN
 Column-first table definitions, native additive/object DDL, guarded same-connection rebuilds, exact matched writes,
 partial conflicts, raw-text JSON queries and byte-valued operations use
 [`@jarenjs/db/relational`](docs/SQLITE-RELATIONAL.md). Both host entries export
-`snapshotDatabase(connection, newPath)` for a disk-backed committed-WAL copy.
+`snapshotDatabase(connection, newPath)` for a page-by-page copy of a database file, committed WAL included.
 Existing-connection consumers can import `/query`, `/model` and `/entity`;
 `compileEntityModel` shares one normalization between queries and mapping.
 `sql.call('json_type', ...)` preserves native missing/null/type distinctions.
