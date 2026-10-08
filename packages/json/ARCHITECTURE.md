@@ -159,6 +159,11 @@ That leaves two hazards. A tuple the index rejects never reaches the predicate, 
 **Interval joins.** The same screened probe for `$overlaps`: the uncorrelated inner side's spans are indexed once per phrase evaluation, when the first outer tuple reaches them (`createIntervalIndex`, a static index in `@jarenjs/core/series`), and each outer span asks it for the spans it overlaps. The index answers the kernel's own half-open test over the same instants, so it removes only pairs `$overlaps` would have answered `false`, and the kernel decides what the index may hold: a span `$overlaps` would refuse goes to the always-check list, because `createIntervalIndex` refuses a whole build at its first malformed row; a missing inner span is never a candidate, because `$overlaps` answers it with the empty sequence and raises nothing; a missing outer span answers no pair for the same reason, so none is visited; and a refused outer span falls back to the full scan, which raises at its first inner span that is not missing. `$overlaps` stops at a missing first operand, so with the inner span first the outer one is read only beside an inner span that is not missing — where the scan reads it. The candidates go through the spatial probe's ascending emitter, so the join answers the nested loop's pairs in the nested loop's order and raises its first error. The nested loop grows with the product of the two sides, the probe with the sides and the pairs — measured by `benchmark/series.js`, both evaluations checked pair for pair against a plain double loop before either is timed:
 
 <!--fact:series.intervalJoinTable-->
+| spans a side | pairs | nested loop | interval index | nested loop ÷ index |
+|---|---:|---:|---:|---:|
+| 500 × 500 | 239 | 21 ms | 0.36 ms | 57.6× |
+| 1,000 × 1,000 | 975 | 83 ms | 0.78 ms | 105.4× |
+| 2,000 × 2,000 | 3,907 | 335 ms | 2.1 ms | 157.9× |
 <!--/fact-->
 
 `limits.steps` is the third compile-time switch. Instrumentation is opt-in at the `compileNode` dispatch point: with no step limit the compiler emits exactly the closures it always did, and with one it wraps every node in a counter check whose counter lives in its own frame slot. `limits.depth` needs no runtime support at all — with no recursion in the language, evaluation depth *is* the AST's static depth, so it is measured once at normalize time (`JQ0011`).

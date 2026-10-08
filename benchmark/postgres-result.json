@@ -1,6 +1,6 @@
 {
   "format": "jaren-postgres-portability/1",
-  "measuredAt": "2026-10-07T21:57:42.829Z",
+  "measuredAt": "2026-10-08T11:26:48.797Z",
   "runtime": {
     "node": "24.20.0",
     "sqlite": "3.53.4",
@@ -15,8 +15,8 @@
     "packages/db/src/drivers/postgres.js": "0ef90999ba5ab373482fe45fc2ab0d1004e5d05543caf676913ea1fd78280a5b",
     "packages/db/src/drivers/postgres-cursor.js": "18a86efbc0af9c89f23c2756254ae1d04b234646f6ccd735194b05df9560a470",
     "packages/db/src/drivers/postgres-options.js": "f2c10370ec41c0da9a268924bbc80cea5324bbf00426fffa24ef6fb176589584",
-    "packages/db/src/store.js": "0f0f807faf72e8e2b9905b55e59a1fb569459dee2be2a88757e4e0d7bdc6ebac",
-    "packages/db/src/query.js": "e60dc8836d7bb94aff8016117eee6868fd3fd6826f55e7f16ff2f3943c6b63a0",
+    "packages/db/src/store.js": "ade731b766d13ad927ca2ebcb1107ce5c0ed3f14396ff9342932a18d0a6df2c6",
+    "packages/db/src/query.js": "608a4e73390171fd786f57e9dff46a855b248234851a1f8611711f92d79a0307",
     "packages/db/src/cursor.js": "d485c06b5c83dc73ddafa7bc121d6b6ad27fca3d7cfc388a7a204ebee6501b14"
   },
   "postgres": {
@@ -29,13 +29,13 @@
   "sqlite": {
     "label": "sqlite (memory)",
     "rows": {
-      "open": 19266815,
-      "insert": 12522.906,
-      "get": 14251.58,
-      "indexed": 609855.1,
-      "scanned": 637487.35,
-      "range": 508108.4,
-      "transaction": 137889
+      "open": 19241129,
+      "insert": 12513.022,
+      "get": 16468.42,
+      "indexed": 599124.75,
+      "scanned": 616576.7,
+      "range": 513289.2,
+      "transaction": 131192.85
     },
     "queryCalls": {
       "open": 0,
@@ -251,8 +251,8 @@
       ]
     },
     "first": {
-      "firstRowMs": 0.9411669999999788,
-      "firstRowAndCleanupMs": 1.04613599999999,
+      "firstRowMs": 0.8567429999999945,
+      "firstRowAndCleanupMs": 0.9337260000000072,
       "queryCalls": 0,
       "returnedRows": 1,
       "streaming": "row",
@@ -262,33 +262,33 @@
       "sessionPeakBytes": null
     },
     "settled": null,
-    "insertPerSecond": 79853.66974726153,
+    "insertPerSecond": 79916.74593075916,
     "memoryBefore": {
-      "rss": 112451584,
-      "heapTotal": 53182464,
-      "heapUsed": 24050776,
-      "external": 2974909,
-      "arrayBuffers": 816099
+      "rss": 95911936,
+      "heapTotal": 53878784,
+      "heapUsed": 25283936,
+      "external": 3046460,
+      "arrayBuffers": 887650
     },
     "memoryAfter": {
-      "rss": 128897024,
-      "heapTotal": 59998208,
-      "heapUsed": 30947688,
-      "external": 3066236,
+      "rss": 113598464,
+      "heapTotal": 60170240,
+      "heapUsed": 32492328,
+      "external": 3137787,
       "arrayBuffers": 143883
     },
-    "migrationNs": 17964644
+    "migrationNs": 17160211
   },
   "native": {
     "label": "postgres (17.11 (Debian 17.11-1.pgdg12+2))",
     "rows": {
-      "open": 20147220,
-      "insert": 665683.94,
-      "get": 742707.2,
-      "indexed": 3148424.05,
-      "scanned": 2943921.45,
-      "range": 2855996.15,
-      "transaction": 922327.1
+      "open": 19673373,
+      "insert": 583333.86,
+      "get": 581746.06,
+      "indexed": 2531910.85,
+      "scanned": 2333053.65,
+      "range": 2322844.7,
+      "transaction": 928722.5
     },
     "queryCalls": {
       "open": 17,
@@ -504,8 +504,8 @@
       ]
     },
     "first": {
-      "firstRowMs": 0.9267800000000079,
-      "firstRowAndCleanupMs": 1.2534920000000511,
+      "firstRowMs": 0.8721010000000433,
+      "firstRowAndCleanupMs": 1.1305409999999938,
       "queryCalls": 5,
       "returnedRows": 1,
       "streaming": "row",
@@ -519,8 +519,8 @@
       "idle": 1,
       "queued": 0,
       "waitMs": {
-        "p50": 0.001886000000013155,
-        "p95": 0.0024449999999660577
+        "p50": 0.000611000000048989,
+        "p95": 0.0009019999999964057
       },
       "cursors": 0,
       "fetchedRows": 31614,
@@ -530,29 +530,29 @@
       "statements": 0,
       "transaction": "committed"
     },
-    "insertPerSecond": 1502.2143992237518,
+    "insertPerSecond": 1714.2841665320097,
     "memoryBefore": {
-      "rss": 134270976,
-      "heapTotal": 61046784,
-      "heapUsed": 17553680,
-      "external": 2605425,
-      "arrayBuffers": 210625
+      "rss": 121036800,
+      "heapTotal": 61480960,
+      "heapUsed": 18132824,
+      "external": 2539889,
+      "arrayBuffers": 145089
     },
     "memoryAfter": {
-      "rss": 137809920,
-      "heapTotal": 62357504,
-      "heapUsed": 26031368,
-      "external": 2962734,
-      "arrayBuffers": 568062
+      "rss": 123527168,
+      "heapTotal": 62529536,
+      "heapUsed": 26791608,
+      "external": 2901241,
+      "arrayBuffers": 506569
     },
-    "migrationNs": 165875289,
+    "migrationNs": 149693491,
     "admission": {
       "active": 0,
       "idle": 1,
       "queued": 0,
       "waitMs": {
-        "p50": 0.07528800000000047,
-        "p95": 0.07528800000000047
+        "p50": 0.06644399999998996,
+        "p95": 0.06644399999998996
       }
     },
     "poolCounts": {

@@ -11,9 +11,9 @@
       "role": "physical discovery and preserve/refuse",
       "matches": [
         "3: * @file Database → model: `introspectModel(connection)` reads a live",
-        "158:export function readSchema(connection, options = undefined) {",
-        "558:export function introspectModel(connection, options = undefined) {",
-        "569:  return chain(readSchema(connection, options), (schema) => {"
+        "166:export function readSchema(connection, options = undefined) {",
+        "714:export function introspectModel(connection, options = undefined) {",
+        "725:  return chain(readSchema(connection, options), (schema) => {"
       ],
       "disposition": "retained"
     },
@@ -24,9 +24,9 @@
       "api": "@jarenjs/db/node",
       "role": "prepared SQL and transaction coexistence",
       "matches": [
-        "26:export function adaptNodeDatabase(db, options) {",
-        "83:export function fromNodeModule(mod, path, options) {",
-        "109:export function nodeDriver() {"
+        "27:export function adaptNodeDatabase(db, options) {",
+        "84:export function fromNodeModule(mod, path, options) {",
+        "111:export function nodeDriver() {"
       ],
       "disposition": "retained"
     },
