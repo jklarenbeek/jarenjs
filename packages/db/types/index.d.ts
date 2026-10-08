@@ -916,8 +916,10 @@ export interface Store {
    * store's calls wait for it, and the copy is the store as it stood when
    * the copy began. */
   backupTo(targetPath: string, options?: BackupOptions): Promise<BackupResult>;
-  /** Register a live query over an entity-root document (re-run
-   * strategy in this version); present only with entities. */
+  /** Register a live query over an entity-root document; `live.mode`
+   * names the strategy — `join`, `graph` or a named `rerun`, and
+   * `resnapshot` where the connection or the demanded mode calls for it.
+   * Present only with entities. */
   live?(document: unknown, options?: LiveOptions): Promise<LiveQuery>;
   /** Close the store. Job workers are asked to stop and given
    * `graceMs` to wind up; the connection closes whether or not they

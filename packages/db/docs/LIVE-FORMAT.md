@@ -348,10 +348,10 @@ plan; "extractable" below means what the pushdown planner already proves.
 | a spatial predicate the planner **refused** (no `derive` index on the member, an untyped member, an unbounded probe) | **re-run on invalidation**, the refusal named — it never translated, so nothing narrows the fetch | the previous result, for diffing |
 | a `$resample` or `$rolling` document over the collection, with an explicit `eventTime` and a fixed width (§13) | **event-time bucket / rolling state**: rows kept by bucket, or in instant order; only what a write can reach is folded again, through `@jarenjs/core/series` itself | the contributing rows, plus one fold per bucket |
 | the same document with no `eventTime`, a calendar width, a named zone, a `locf`/`linear` fill, a `first`/`last` aggregate, or a retention that does not cover the window | **re-run on invalidation**, the member that stopped it named (§13.2) | the previous result, for diffing |
-| indexed inner equi-joins and canonical allowing-empty left joins over mapped entity roots | **join dependency maintenance**; point-read changed keys and reevaluate their bounded outer owners | source rows, key indexes and projected tuples, bounded by `maxMaintained` and `maxBytes` |
+| indexed inner equi-joins — flat self joins included (one `$for` binding an entity under several aliases, each later alias evaluated as its own input root) — and canonical allowing-empty left joins over mapped entity roots, reading no entity root outside their `$for` | **join dependency maintenance**; point-read changed keys — once per changed row, however many aliases hold it — and reevaluate their bounded outer owners | source rows (a self join's once per alias), key indexes and projected tuples, bounded by `maxMaintained` and `maxBytes` |
 | nested entity graph projections with indexed equality edges and unique binding names | **graph dependency maintenance**; a child change refreshes its bounded owners | source rows, reverse key indexes and graph outputs |
 | explicit two-level collection groups with a singular parent key and bounded nested input | **nested-group maintenance**; recompute affected parents through the query engine | source leaves and parent outputs |
-| unindexed/non-equi joins, self joins, explicit entity ordering/windows and object-root documents | **re-run on invalidation**, with the dependency or planner reason | previous result for diffing |
+| unindexed/non-equi joins, a join whose `$where` or `$return` reads an entity root outside its `$for` (a nested query over `$.<Entity>[*]`, `an entity root read outside the join bindings re-runs`), self joins inside a graph projection, an allowing-empty join or a flattened projection or over a packed `$for` source (`a self join has ambiguous root invalidation`), explicit entity ordering/windows and object-root documents | **re-run on invalidation**, with the dependency or planner reason | previous result for diffing |
 | anything else: non-translatable predicates, `limit` without `orderBy`, a window bound that is not a literal non-negative integer, an offset or limit over a group, distinct projection, aggregate or nested group, an entity window, an ordered query inside a one-item array constructor (its one row is the whole array), an ordered query whose return yields several items per row or reads the collection root, a group whose return reads the collection root, a document the live evaluator cannot compile without the store's registered operators or zone provider (a rows, window or group document using a registered operator, or a named zone in a group key or a projection — the planner's reason names what stopped it; a zoned `$where` fails registration `JQ0003`, as `execute` fails), `@jarenjs/linq`'s nested two-level `groupBy` emission (a group of groups), and a `@jarenjs/linq` chain that orders, windows or deduplicates after `groupBy` | **re-run on invalidation**, the reason named | the previous result, for diffing |
 
 The **physical mapping** of a `derive: 'bbox'` index (MODEL-FORMAT §2.1,
@@ -845,19 +845,34 @@ closes the subscription and releases dependency caches. It never relabels an
 unbounded query as incremental.
 
 Entity equality columns need a primary-key prefix, declared index or mapped
-foreign-key index. Every binding needs a key and a distinct root. The projected
+foreign-key index. Every binding needs a key; a flat inner join may bind one
+entity under several aliases, each cached and charged as its own root, so a self
+join holds the shared rows once per alias against `live.maxMaintained` and
+`live.maxBytes` — where a plain join over the same rows fits, a self join can be
+`JD2060`. A graph projection, an allowing-empty join or a flattened projection
+(one outer binding over a query) reaching one entity twice, and a self join over
+a packed `$for` source (`['$.Author[*]']`), re-run with
+`a self join has ambiguous root invalidation`. The projected
 identity is the tuple of source identities, so duplicate projected values remain
 distinct. Default entity result order follows physical row insertion order;
-point reads preserve that order even when a key is deleted and reinserted. A
+point reads preserve that order even when a key is deleted and reinserted. The
+exception is a row deleted and inserted again with identical values in one
+transaction — an `unlink` and `link` of the same pair included: capture records
+no change for it, so every live registration, maintained or re-run, keeps its
+old place while `execute` lists it last. A
 left join uses a canonical `$allowing-empty` binding over an equality-filtered
 inner subquery. Its absent child can be defaulted to null. Graph projections
 embed equality-filtered child queries in a single outer row's return object.
-Global-root reads outside those bindings re-run because changing one row can
-change every projected graph.
+A root read outside the bindings re-runs: in a join's `$where` or `$return` — a
+nested query over `$.<Entity>[*]` included — because the maintenance evaluates
+each outer row over its connected rows alone
+(`an entity root read outside the join bindings re-runs`), and in a graph
+projection because changing one row can change every projected graph.
 
 `dependencyReads`, `refreshedRoots` and `refreshedGroups` expose the work done.
-`dependencyReads` counts logical changed-row reads; a row-position lookup is an
-additional statement. No full query reruns occur under these strategy labels.
+`dependencyReads` counts logical changed-row reads — one per changed row, shared
+by every alias holding it; a row-position lookup is an additional statement. No
+full query reruns occur under these strategy labels.
 Materializing and diffing the final bounded output still costs work proportional
 to its size. See the equal-correctness [measurements](REPLICATION-FORMAT.md#measurements)
 for startup and high-fan-out losses beside selective wins.

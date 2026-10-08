@@ -483,7 +483,7 @@ describe('classification honesty (live.mode)', () => {
   });
 });
 
-describe('entity live queries re-run (declared, not attempted)', () => {
+describe('entity live registration: object-root re-runs, refusals and the store gate', () => {
   const ENTITY_MODEL = {
     $model: '0.1',
     entities: {

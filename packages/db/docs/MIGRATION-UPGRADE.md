@@ -677,6 +677,22 @@ value the store did not honor now refuse by code, before any statement:
   root inside a path filter (`$it[?@.n > $[0].n]`) was maintained over one
   group or one row at a time and answered otherwise than `execute`; it now
   re-runs, the reason named.
+- A flat inner self join over indexed columns — one `$for` binding an entity
+  under several aliases — is maintained over a synchronous connection
+  (`live.mode.strategy` `join`) instead of re-run, and `mode: 'incremental'`
+  there now accepts it (PostgreSQL resnapshots it, as every entity live
+  query); an unindexed self join now names its missing index as the re-run
+  reason, and a self join charges the shared rows once per alias against
+  `live.maxMaintained`, so where a plain join over the same rows fits it can
+  be `JD2060` (`mode: 'rerun'` still re-runs it).
+- A live entity join whose `$where` or `$return` reads an entity root outside
+  its `$for` — a nested query over `$.<Entity>[*]`, such as a correlated
+  `$count` — was maintained (`join`) over each outer row's connected rows
+  alone and answered otherwise than `execute`; it now re-runs with the reason
+  `an entity root read outside the join bindings re-runs` and
+  `mode: 'incremental'` refuses it `JD0051`, a graph projection naming the
+  root inside a path filter now re-runs with the planner's reason, and a
+  `$const` literal spelled like a root path no longer counts as a root read.
 
 ### Allocated entity keys on PostgreSQL
 

@@ -8,8 +8,16 @@ import { joinTableRoots } from './model.js';
 import { keyToken } from './capture.js';
 import { DbRuntimeError } from './errors.js';
 import { utf8Length } from './cursor.js';
+import { readsRoot } from './live-nested.js';
 
-/** Compile eligibility from the existing planner and declared mapping. @param {any} document @param {any} entities @param {any} mapping @param {any} operators */
+/**
+ * Compile eligibility from the existing planner and declared mapping: a
+ * named `rerun`, or a `join`/`graph` description — the plan's bindings, each
+ * with the input `member` it is evaluated from, and its equality edges; a
+ * flat join binding one entity under several aliases also carries the
+ * `document` that reads every later alias from its own member.
+ * @param {any} document @param {any} entities @param {any} mapping @param {any} operators
+ */
 export function classifyEntityLive(document, entities, mapping, operators) {
   const extra = joinTableRoots(entities, mapping);
   const roots = new Map([...entities, ...extra.entities]);
@@ -20,11 +28,15 @@ export function classifyEntityLive(document, entities, mapping, operators) {
   let strategy = 'join';
   const inner = Array.isArray(document) && document.length === 1 ? document[0] : document;
   const entries = Object.entries(inner?.$for ?? {});
-  const globalRead = (node) => {
-    if (typeof node === 'string') return node === '$' || node.startsWith('$.') || node.startsWith('$[');
-    if (Array.isArray(node)) return node.some(globalRead);
-    return node !== null && typeof node === 'object'
-      && Object.entries(node).some(([key, value]) => key !== '$for' && globalRead(value));
+  // Whether a fragment reads an entity root — the root itself or the root
+  // inside a path filter ({@link readsRoot}); a `$const` is quoted, never
+  // read. Nested `$for` sources count only with `sources`: a graph
+  // projection binds those itself.
+  const globalRead = (node, sources = false) => {
+    if (typeof node === 'string') return readsRoot(node);
+    if (Array.isArray(node)) return node.some((item) => globalRead(item, sources));
+    return node !== null && typeof node === 'object' && !Object.hasOwn(node, '$const')
+      && Object.entries(node).some(([key, value]) => (sources || key !== '$for') && globalRead(value, sources));
   };
   if (entries.length === 1 && typeof entries[0][1] === 'string'
     && Object.keys(inner).every((key) => ['$for', '$return'].includes(key))) {
@@ -76,8 +88,27 @@ export function classifyEntityLive(document, entities, mapping, operators) {
   if (plan.window !== null) return rerun('an entity offset or limit window re-runs');
   if (plan.aggregate !== null) return rerun('an entity aggregate has no bounded tuple accumulator');
   if (plan.order !== null) return rerun('an explicitly ordered entity join has no maintained ordering');
-  const bindings = plan.bindings.map((binding) => ({ ...binding, mapping: mapped.entities[binding.entity] }));
-  if (new Set(bindings.map((b) => b.entity)).size !== bindings.length) return rerun('a self join has ambiguous root invalidation');
+  // The evaluated document reads each binding from an input member: an
+  // entity's first binding from the entity's own, every later alias of it
+  // from a fresh member no declared root takes.
+  const taken = new Set(roots.keys());
+  const bindings = plan.bindings.map((binding, i) => {
+    let member = binding.entity;
+    if (plan.bindings.findIndex((other) => other.entity === binding.entity) < i) {
+      member = `_alias${i}`;
+      while (taken.has(member)) member += '_';
+      taken.add(member);
+    }
+    return { ...binding, member, mapping: mapped.entities[binding.entity] };
+  });
+  const aliased = bindings.some((binding) => binding.member !== binding.entity);
+  // Aliases are told apart only where the document names every binding as
+  // a top-level `$for` source path, which the join planned as written does;
+  // a graph projection or an allowing-empty join is planned through a
+  // surrogate whose bindings the evaluated document nests.
+  if (aliased && (strategy !== 'join' || surrogate !== document || entries.length !== bindings.length
+    || bindings.some((binding, i) => entries[i][0] !== binding.name || typeof entries[i][1] !== 'string')))
+    return rerun('a self join has ambiguous root invalidation');
   const indexed = (binding, column) => {
     const m = binding.mapping;
     return m.keys[0] === column || m.indexes.some((index) => index.property === column)
@@ -92,15 +123,28 @@ export function classifyEntityLive(document, entities, mapping, operators) {
     }
   }
   if (bindings.some((binding) => binding.mapping.keys.length === 0)) return rerun('a join root has no stable key');
-  return { strategy, bindings, edges };
+  // A join evaluates its document over each outer row's connected rows
+  // alone: a root read anywhere but the top-level `$for` — a nested query
+  // over an entity root included — would see that subset as the entity.
+  if (strategy === 'join' && Object.entries(inner).some(([key, value]) => key !== '$for' && globalRead(value, true)))
+    return rerun('an entity root read outside the join bindings re-runs');
+  if (!aliased) return { strategy, bindings, edges };
+  const rewritten = { ...inner, $for: Object.fromEntries(bindings.map((binding, i) =>
+    [binding.name, binding.member === binding.entity ? entries[i][1] : entityRoot(binding.member)])) };
+  return { strategy, bindings, edges, document: rewritten };
 }
 
 /** Maintain tuples through inverse key dependencies; query evaluation uses only affected root subsets.
+ * Each alias of an entity holds that entity's rows apart; a changed row is read once for all of them.
  * @param {any} description @param {any} context */
 export function joinStrategy(description, context) {
   const { bindings, edges } = description;
-  const inner = Array.isArray(context.document) ? context.document[0] : context.document;
+  const document = description.document ?? context.document;
+  const inner = Array.isArray(document) ? document[0] : document;
   const evaluate = compileJsonQuery([{ $subsequence: [inner, 0, context.maxMaintained + 1] }]);
+  /** @type {Map<string, any[]>} the bindings over each entity, in document order */
+  const aliasesOf = new Map();
+  for (const binding of bindings) aliasesOf.set(binding.entity, [...(aliasesOf.get(binding.entity) ?? []), binding]);
   const caches = new Map(bindings.map((binding) => [binding.name, new Map()]));
   const positions = new Map(bindings.map((binding) => [binding.name, new Map()]));
   const indices = new Map();
@@ -140,6 +184,20 @@ export function joinStrategy(description, context) {
       }
     }
   };
+  // Every alias of an entity caches, indexes and charges that entity's rows
+  // on its own: a row read once is held by each (`undefined` releases it).
+  const hold = (binding, token, row, position) => {
+    const cache = caches.get(binding.name);
+    const old = cache.get(token);
+    if (old !== undefined) { indexRow(binding, old, false); inputCount--; maintainedBytes -= bytesOf(old); }
+    if (row === undefined) { cache.delete(token); positions.get(binding.name).delete(token); }
+    else {
+      cache.set(token, row); indexRow(binding, row, true);
+      inputCount++; maintainedBytes += bytesOf(row);
+      positions.get(binding.name).set(token, position);
+    }
+    bound();
+  };
   // A changed row walks equality edges in both directions to its bounded
   // outer owners. The same walk works for multi-entity projection chains.
   const connected = (binding, row) => {
@@ -178,7 +236,7 @@ export function joinStrategy(description, context) {
       items.delete(key); return;
     }
     const related = connected(root, row);
-    const input = Object.fromEntries(bindings.map((binding) => [binding.entity,
+    const input = Object.fromEntries(bindings.map((binding) => [binding.member,
       binding === root ? [row] : sorted(binding, related.get(binding.name).values())]));
     const result = evaluate(input, context.externals);
     const fresh = result === undefined ? [] : Array.isArray(result) ? result : [result];
@@ -194,15 +252,13 @@ export function joinStrategy(description, context) {
     close() { for (const cache of caches.values()) cache.clear(); for (const index of indices.values()) index.clear();
       for (const position of positions.values()) position.clear(); items.clear(); },
     init() {
-      for (const binding of bindings) {
-        const document = [{ $subsequence: [{ $for: { it: entityRoot(binding.entity) }, $return: '$it' }, 0, context.maxMaintained + 1] }];
+      for (const [entity, aliases] of aliasesOf) {
+        const document = [{ $subsequence: [{ $for: { it: entityRoot(entity) }, $return: '$it' }, 0, context.maxMaintained + 1] }];
         const rows = context.execute(document, { externals: context.externals });
         for (const row of rows) {
-          const key = keyOf(binding, row);
-          caches.get(binding.name).set(key, row); indexRow(binding, row, true);
-          inputCount++; maintainedBytes += bytesOf(row);
-          bound();
-          positions.get(binding.name).set(key, context.dependencyPosition(binding.entity, key));
+          const key = keyOf(aliases[0], row);
+          const position = context.dependencyPosition(entity, key);
+          for (const binding of aliases) hold(binding, key, row, position);
         }
         bound();
       }
@@ -216,32 +272,25 @@ export function joinStrategy(description, context) {
       const affected = new Set();
       for (const operation of record.patch) {
         const [table, token] = operation.path.split('/').slice(1).map(decodeJSONPointerSegment);
-        const binding = bindings.find((b) => b.entity === table);
-        if (binding) changed.set(JSON.stringify([binding.name, token]), { binding, token });
+        if (aliasesOf.has(table)) changed.set(JSON.stringify([table, token]), { table, token });
       }
-      for (const { binding, token } of changed.values()) {
-        const old = caches.get(binding.name).get(token);
-        if (binding === root) affected.add(token);
-        if (old !== undefined) for (const key of connected(binding, old).get(root.name).keys()) affected.add(key);
-      }
-      for (const { binding, token } of changed.values()) {
-        const cache = caches.get(binding.name);
-        const old = cache.get(token);
-        if (old !== undefined) { indexRow(binding, old, false); inputCount--; maintainedBytes -= bytesOf(old); }
-        const row = context.readDependency(binding.entity, token);
-        counts.dependencyReads++;
-        if (row === undefined) { cache.delete(token); positions.get(binding.name).delete(token); }
-        else {
-          cache.set(token, row); indexRow(binding, row, true);
-          inputCount++; maintainedBytes += bytesOf(row);
-          positions.get(binding.name).set(token, context.dependencyPosition(binding.entity, token));
+      // the outer owners a changed row reaches through any alias holding it
+      const reach = () => {
+        for (const { table, token } of changed.values()) for (const binding of aliasesOf.get(table)) {
+          const row = caches.get(binding.name).get(token);
+          if (binding === root) affected.add(token);
+          if (row !== undefined) for (const key of connected(binding, row).get(root.name).keys()) affected.add(key);
         }
-        bound();
+      };
+      reach();
+      // one logical read per changed row, whatever the number of its aliases
+      for (const { table, token } of changed.values()) {
+        const row = context.readDependency(table, token);
+        counts.dependencyReads++;
+        const position = row === undefined ? undefined : context.dependencyPosition(table, token);
+        for (const binding of aliasesOf.get(table)) hold(binding, token, row, position);
       }
-      for (const { binding, token } of changed.values()) {
-        const row = caches.get(binding.name).get(token);
-        if (row !== undefined) for (const key of connected(binding, row).get(root.name).keys()) affected.add(key);
-      }
+      reach();
       for (const key of affected) refresh(key);
       const next = flatten();
       return context.diff(previousRows, next);
