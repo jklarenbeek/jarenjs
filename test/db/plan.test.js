@@ -18,6 +18,7 @@ import {
   normalizeEntities, explainMapping, sqliteDialect, assertNoSqlText,
   PLANNER_REASONS, reasonId, PLAN_VERSION,
 } from '@jarenjs/db';
+import { predicateTerms, boundPredicateTerms } from '../../packages/db/src/plan.js';
 
 const MODEL = {
   $model: '0.1',
@@ -660,6 +661,15 @@ describe('the planner\'s reason vocabulary', () => {
     // `o` is an object the schema does not type as a half-open span
     'interval.notInterval': [collection,
       F({ $where: { $overlaps: ['$it.o', { $const: { start: 1, end: 2 } }] } })],
+    // the bound is a dialect's (PostgreSQL sets 128), applied where a plan
+    // becomes a statement; the census passes its own, small one: 32 `$and`
+    // pairs over two members plus one equality on a third are 65 leaves,
+    // one past a bound of 64
+    'predicate.termBound': [(document) => boundPredicateTerms(collection(document), 64),
+      F({ $where: { $or: [
+        ...Array.from({ length: 32 }, (_, i) => ({ $and: [{ $eq: ['$it.s', `s${i}`] }, { $ge: ['$it.n', i] }] })),
+        { $eq: ['$it.id', 'x'] },
+      ] } })],
   };
 
   /**
@@ -1035,5 +1045,84 @@ describe('a disjunction regrouped by member', () => {
     const rays = filterOf({ $or: [at('$gt', B), at('$gt', A), { $gt: ['$it.n', 8] }] });
     assert.deepStrictEqual(rays.items.map((/** @type {any} */ item) => [item.p, item.op, item.epoch]),
       [['cmp', 'gt', Date.parse(A)], ['cmp', 'gt', undefined]]);
+  });
+});
+
+describe('the predicate term bound', () => {
+  const where = (/** @type {any} */ predicate, /** @type {any} */ ret = '$it') =>
+    planQuery({ $for: { it: '$[*]' }, $where: predicate, $return: ret }, SHAPE);
+  const name = (/** @type {string} */ value) => ({ $eq: ['$it.name', value] });
+  const age = (/** @type {string} */ op, /** @type {number} */ value) => ({ [op]: ['$it.age', value] });
+  /** `count` pairs over two members: two leaves each, which nothing regroups. */
+  const pairs = (/** @type {number} */ count) =>
+    Array.from({ length: count }, (_, i) => ({ $and: [name(`n${i}`), age('$ge', i)] }));
+  const BOUND_REASON = { construct: '$where', reason: PLANNER_REASONS['predicate.termBound'].text };
+
+  it('counts the leaves of a plan or a predicate: connectives are not terms, a membership list is one', () => {
+    assert.strictEqual(predicateTerms(null), 0);
+    assert.strictEqual(predicateTerms(where(age('$gt', 1)).plan), 1);
+    assert.strictEqual(predicateTerms(where({ $and: [age('$gt', 1), age('$lt', 9), name('a')] }).plan), 3);
+    assert.strictEqual(predicateTerms(where({ $not: { $or: [age('$gt', 1), name('a')] } }).plan), 2);
+    // equalities of one member regroup into one bound list, as a `$seq` is: one leaf
+    assert.strictEqual(predicateTerms(where({ $or: [name('a'), name('b'), name('c')] }).plan), 1);
+    assert.strictEqual(predicateTerms(where({ $eq: ['$it.name', { $seq: ['a', 'b', 'c'] }] }).plan), 1);
+    const planned = where({ $or: pairs(32) });
+    assert.strictEqual(planned.mode, 'native');
+    assert.strictEqual(predicateTerms(planned.plan), 64, '32 pairs are 64 leaves');
+    assert.strictEqual(predicateTerms(planned.plan.filter), 64, 'a bare predicate node counts alike');
+    assert.strictEqual(predicateTerms({ ...planned.plan, filter: null }), 0);
+  });
+
+  it('counts an entity statement over every binding filter; a join edge is not a term', () => {
+    const MODEL = { $model: '0.1', entities: {
+      Person: { schema: { type: 'object', required: ['id'], properties: {
+        id: { type: 'string', 'x-entity': { key: true } }, age: { type: 'integer', 'x-entity': { index: true } } } } },
+      Pet: { schema: { type: 'object', required: ['pid'], properties: {
+        pid: { type: 'string', 'x-entity': { key: true } }, ownerId: { type: 'string', 'x-entity': { index: true } },
+        kind: { type: 'string', 'x-entity': { index: true } } } } } } };
+    const entities = normalizeEntities(MODEL);
+    const mapping = explainMapping(MODEL);
+    const planned = planEntityQuery({ $for: { a: '$.Person[*]', b: '$.Pet[*]' },
+      $where: { $and: [{ $eq: ['$a.id', '$b.ownerId'] }, { $gt: ['$a.age', 1] }, { $lt: ['$a.age', 9] }, { $eq: ['$b.kind', 'cat'] }] },
+      $return: '$a' }, entities, mapping);
+    assert.strictEqual(planned.mode, 'native');
+    assert.strictEqual(planned.plan.joins.length, 2);
+    assert.strictEqual(predicateTerms(planned.plan), 3);
+    const demoted = boundPredicateTerms(planned, 2);
+    assert.strictEqual(demoted.mode, 'set');
+    assert.strictEqual(demoted.plan, null);
+    assert.deepStrictEqual(demoted.reasons, [BOUND_REASON]);
+    assert.deepStrictEqual(demoted.referenced, planned.referenced);
+    assert.strictEqual(boundPredicateTerms(planned, 3), planned);
+  });
+
+  it('demotes a collection plan past the bound with the reason first; at the bound, unbounded, or already in the engine it is untouched', () => {
+    const at = where({ $or: pairs(32) });
+    assert.strictEqual(boundPredicateTerms(at, 64), at);
+    assert.strictEqual(boundPredicateTerms(at, null), at, 'no bound is unbounded');
+    const above = where({ $or: [...pairs(32), { $eq: ['$it.id', 'x'] }] });
+    assert.strictEqual(predicateTerms(above.plan), 65);
+    assert.strictEqual(boundPredicateTerms(above, null), above);
+    const demoted = boundPredicateTerms(above, 64);
+    assert.strictEqual(demoted.mode, 'set');
+    assert.strictEqual(demoted.plan, null);
+    assert.deepStrictEqual([demoted.rowReturn, demoted.udfs, demoted.prefilters, demoted.series], [null, [], [], null]);
+    assert.deepStrictEqual(demoted.reasons, [BOUND_REASON, ...above.reasons]);
+    assert.strictEqual(reasonId(demoted.reasons[0].reason), 'predicate.termBound');
+    assert.strictEqual(demoted.analysis, above.analysis);
+    // what the statement carries beside the plan — a profile's mandatory predicate — counts
+    assert.strictEqual(boundPredicateTerms(at, 64, 1).mode, 'set');
+    assert.strictEqual(boundPredicateTerms(at, 65, 1), at);
+    // a per-row projection keeps its plan until the bound, then loses it with the rest
+    const row = where({ $or: [...pairs(32), { $eq: ['$it.id', 'x'] }] }, { x: { $count: '$it.name' } });
+    assert.strictEqual(row.mode, 'row');
+    const rowDemoted = boundPredicateTerms(row, 64);
+    assert.strictEqual(rowDemoted.mode, 'set');
+    assert.strictEqual(rowDemoted.rowReturn, null);
+    assert.deepStrictEqual(rowDemoted.reasons, [BOUND_REASON, ...row.reasons]);
+    // a plan already in the engine has no statement to bound
+    const set = where({ $eq: ['$it.name', { $const: { k: 1 } }] });
+    assert.strictEqual(set.mode, 'set');
+    assert.strictEqual(boundPredicateTerms(set, 64), set);
   });
 });

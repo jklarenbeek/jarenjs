@@ -195,6 +195,11 @@ describe('the PostgreSQL mapping', () => {
     // it alone; SQLite's extraction is untyped and keeps its guards
     assert.strictEqual(pg.typedExtract, true);
     assert.strictEqual(sqliteDialect.typedExtract, false);
+    // the planner prices a term per row and a long enough chain into an
+    // LLVM compile the server cannot interrupt, so one statement carries a
+    // bounded number of leaf predicates; SQLite has no JIT and no bound
+    assert.strictEqual(pg.maxPredicateTerms, 128);
+    assert.strictEqual(sqliteDialect.maxPredicateTerms, null);
   });
 
   it('an external operand is bound as JSON and compared in JSON space', () => {

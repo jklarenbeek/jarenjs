@@ -623,14 +623,16 @@ what each does is its own documentation's job
   describe documents between transform steps. Typed SQL promotion needs an
   intermediate-schema contract and equivalent numeric/order/error semantics;
   inferring that schema from either endpoint can return a wrong answer.
-- [ ] **Long membership chains over a PostgreSQL collection member.** A
-  same-member `$or` folds into one bound list, and an entity column answers a
-  chain of equalities quickly, but a chain that cannot fold over a collection's
-  document member compiles to a `CASE` over `jsonb_typeof` per term: 2,000 terms
-  over 2,000 documents take about 16 s, and a 5,000-term chain kept a backend
-  running after its client went away, past both `pg_cancel_backend` and
-  `pg_terminate_backend`. Wanted: the typed fold a column gets, or a bound on the
-  terms such a chain may compile to.
+- [ ] **A PostgreSQL statement at the term bound can still compile for
+  seconds.** One statement carries at most 128 leaf predicates
+  ([POSTGRESQL](../packages/db/docs/POSTGRESQL.md)), and the regrouped `$or`
+  and the typed extraction keep common chains far below it, but a statement the
+  server's cost model sends through JIT is compiled by LLVM, which no signal
+  interrupts. A forced compile on PostgreSQL 17 of 128 comparison pairs takes
+  about 0.6 s, of 128 inequalities about 1.6 s and of 128 comparisons against
+  external operands about 6 s (259,000 characters of SQL). Wanted: a bound on the
+  emitted statement's size, or a weight per operand kind, instead of a leaf
+  count, so that external-operand chains stop earlier and plain ones later.
 - [ ] **A join over a `$range` inner source runs as a nested loop.** The
   engine builds its hash, spatial and interval probes over an uncorrelated
   inner binding on the first outer tuple, but it declines a `$range` source and

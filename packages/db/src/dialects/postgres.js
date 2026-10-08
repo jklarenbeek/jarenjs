@@ -604,6 +604,15 @@ export function postgresDialect(options = undefined) {
     // the planner's selectivity estimate sees a column, not a CASE over
     // three calls it cannot price
     typedExtract: true,
+    // the planner prices every leaf per row, and a chain long enough to
+    // cross the JIT thresholds is compiled by LLVM, which checks for no
+    // interrupt: neither a cancel nor a statement timeout reaches the
+    // backend until the compile ends. The compile grows with the count and
+    // with the kind of leaf: at this bound a forced compile of plain
+    // comparisons takes up to about two seconds and one of external operands
+    // several more; past it a chain of a thousand terms compiles for many
+    // seconds, so a longer chain is the engine's
+    maxPredicateTerms: 128,
     // An external's value is bound as its JSON TEXT. A PostgreSQL
     // parameter's type is resolved where it is used, once, for the
     // whole statement — so one placeholder cannot be a text member's

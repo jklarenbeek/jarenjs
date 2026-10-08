@@ -6,13 +6,14 @@
  * on one member each bind the list as ONE JSON value, the entity column's
  * index seeks it, and a chain mixing equalities and ranges regroups by
  * member to two bound values. A chain nothing regroups (`$and` pairs)
- * nests in halves and costs the server per leaf and row, so it stays
- * short here. Every answer equals the residual's.
+ * costs the server per leaf and row, so one statement carries at most the
+ * dialect's bound of leaves (64): above it the engine answers, named, and
+ * a load refuses by name. Every answer equals the residual's.
  */
 import { after, before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { openStore } from '@jarenjs/db';
+import { openStore, reasonId } from '@jarenjs/db';
 import { postgresDriver } from '@jarenjs/db/postgres';
 
 const url = process.env.JAREN_PG_URL;
@@ -138,22 +139,36 @@ describe('PostgreSQL: membership over thousands of values', { skip: !url && 'JAR
     assert.equal((await store.entity('Item').load({ where: mixedChain() })).length, EXPECTED.length);
   });
 
-  it('a chain of $and pairs, which nothing regroups, nests in halves: it prepares, explains and answers', async () => {
+  it('a chain of $and pairs, which nothing regroups, is bounded: 64 leaves prepare natively, more run in the engine, and a load refuses them', async () => {
     // every leaf of an unregrouped chain reads its member's typed extraction
     // per row, so its cost is per leaf and row, and a long enough one is
-    // priced into a JIT compile the server cannot cancel: short chains here
-    assert.deepEqual(await store.execute(overItem(pairs(400))), expectedFor(400));
-    assert.equal((await store.explain(overItem(pairs(400)))).mode, 'native');
-    assert.equal((await store.entity('Item').load({ where: pairs(400) })).length, 200);
-    const short = overItems(pairs(300));
-    assert.deepEqual(sorted(await store.collection('items').execute(short)), expectedFor(300));
-    assert.deepEqual(sorted(await store.collection('items').execute(short, { pushdown: false })), expectedFor(300));
-    const plan = await store.collection('items').explain(short);
+    // priced into a JIT compile the server cannot cancel: one statement
+    // carries at most the dialect's bound of leaves, and above it the engine
+    // answers with the reason named — where a load, which has no engine
+    // path, refuses by name
+    const items = store.collection('items');
+    assert.deepEqual(await store.execute(overItem(pairs(64))), expectedFor(64));
+    assert.equal((await store.explain(overItem(pairs(64)))).mode, 'native');
+    assert.equal((await store.entity('Item').load({ where: pairs(64) })).length, 32);
+    const within = overItems(pairs(64));
+    assert.deepEqual(sorted(await items.execute(within)), expectedFor(64));
+    assert.deepEqual(sorted(await items.execute(within, { pushdown: false })), expectedFor(64));
+    const plan = await items.explain(within);
     assert.equal(plan.mode, 'native');
-    assert.equal(plan.params.length, 300, 'one value per leaf: nothing regrouped');
+    assert.equal(plan.params.length, 64, 'one value per leaf: nothing regrouped');
     const where = /\sWHERE (.*) ORDER BY /s.exec(plan.sql)?.[1] ?? '';
     assert.equal((where.match(/THEN 'text' WHEN jsonb_typeof/g) ?? []).length, 0,
       'a literal comparison reads the typed extraction alone: no discriminator per leaf');
+    const entityPlan = await store.explain(overItem(pairs(400)));
+    assert.equal(entityPlan.mode, 'set');
+    assert.equal(reasonId(entityPlan.residual.reasons[0].reason), 'predicate.termBound');
+    assert.deepEqual(await store.execute(overItem(pairs(400))), expectedFor(400));
+    const long = overItems(pairs(300));
+    assert.equal(reasonId((await items.explain(long)).residual.reasons[0].reason), 'predicate.termBound');
+    assert.deepEqual(sorted(await items.execute(long)), expectedFor(300));
+    assert.deepEqual(sorted(await items.execute(long, { pushdown: false })), expectedFor(300));
+    await assert.rejects(store.entity('Item').load({ where: pairs(400) }),
+      (/** @type {any} */ error) => error.code === 'JD0032' && /more predicate terms/.test(error.message));
   });
 
   it('a number list compares as numeric, the type a number column is declared as, so the column index seeks it', async () => {

@@ -4,7 +4,7 @@ import { analyzeQuery } from '@jarenjs/json/query';
 import { createBoundedCache } from '@jarenjs/core/cache';
 import { chain, attempt, createStatementOwner } from './driver.js';
 import { DbCompileError, DbRuntimeError, wrapDriverError } from './errors.js';
-import { entityShape, planEntityPredicate } from './plan.js';
+import { entityShape, planEntityPredicate, predicateTerms, PLANNER_REASONS } from './plan.js';
 import { createEntityPredicateEmitters } from './emit.js';
 import { physicalSelection } from './physical.js';
 import { utf8Length } from './cursor.js';
@@ -82,12 +82,20 @@ export function createEntityMutation(connection, entity, mapping, core) {
       params.push(...emitter.params);
       return result;
     };
+    // a planned predicate the statement can carry: one the planner
+    // translated whole, within the dialect's term bound — a native
+    // mutation has no engine path past either
+    const bounded = (planned) => {
+      if ('refusal' in planned) fail(planned.refusal.reason);
+      if (dialect.maxPredicateTerms !== null && predicateTerms(planned.pred) > dialect.maxPredicateTerms)
+        fail(PLANNER_REASONS['predicate.termBound'].text);
+      return planned;
+    };
     const predicate = (expression) => {
       if (typeof expression === 'boolean') return dialect.booleanLiteral(expression);
       if (expression?.$sql !== undefined || typeof expression === 'number') return sqlExpression(expression);
       const analyzed = analyzeQuery({ $for: { it: '$[*]' }, $where: expression, $return: '$it' });
-      const planned = planEntityPredicate(analyzed.root.where, analyzed.root.forBindings[0].slot, entityShape(entity, mapping));
-      if ('refusal' in planned) fail(planned.refusal.reason);
+      const planned = bounded(planEntityPredicate(analyzed.root.where, analyzed.root.forBindings[0].slot, entityShape(entity, mapping)));
       const emitter = createEntityPredicateEmitters(dialect, (slot) => {
         if (!Object.hasOwn(slot, 'literal')) return fail('mutation predicates use literal values');
         return param(slot.literal);
@@ -167,8 +175,7 @@ export function createEntityMutation(connection, entity, mapping, core) {
         const filter = document.where ?? true;
         const analyzed = analyzeQuery({ $for: { it: '$[*]' }, $where: filter, $return: '$it' });
         const predicate = typeof filter === 'boolean' ? null
-          : planEntityPredicate(analyzed.root.where, analyzed.root.forBindings[0].slot, entityShape(entity, mapping));
-        if (predicate && 'refusal' in predicate) fail(predicate.refusal.reason);
+          : bounded(planEntityPredicate(analyzed.root.where, analyzed.root.forBindings[0].slot, entityShape(entity, mapping)));
         const emitter = createEntityPredicateEmitters(dialect, (slot) => {
           if (!Object.hasOwn(slot, 'literal')) return fail('mutation predicates use literal values');
           return param(slot.literal);

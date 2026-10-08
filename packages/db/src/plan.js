@@ -111,6 +111,7 @@ const PREDICATE_REASONS = {
   emptyPattern: "the empty pattern's vacuous-truth corner (true even on a missing member) "
     + 'is not translated',
   noSpelling: 'no native spelling of this operator is proven equivalent',
+  termBound: 'the filter has more predicate terms than this dialect compiles into one statement',
 };
 
 /** Why one FLWOR clause stayed in the engine. */
@@ -1261,6 +1262,61 @@ export function reasonId(reason) {
     else if (reason.startsWith(entry.prefix)) return id;
   }
   return null;
+}
+
+/**
+ * The leaf predicates a plan or a predicate carries: every predicate
+ * node except the connectives — `and`, `or`, `not` and a `binding`
+ * scope — one bound membership list being one leaf, summed over a
+ * collection plan's filter or an entity plan's binding filters and
+ * include count filters; a join edge is not a predicate. What a
+ * statement costs the database per row, and what prices it into a JIT
+ * compile, grows with this count and never with the depth of the tree,
+ * which nests in halves.
+ * @param {any} value - a plan, a predicate node, or `null`
+ * @returns {number}
+ */
+export function predicateTerms(value) {
+  if (value === null || value === undefined) return 0;
+  if (typeof value.p === 'string') {
+    switch (value.p) {
+      case 'and': case 'or':
+        return value.items.reduce((/** @type {number} */ sum, /** @type {any} */ item) => sum + predicateTerms(item), 0);
+      case 'not': return predicateTerms(value.item);
+      case 'binding': return predicateTerms(value.filter);
+      default: return 1;
+    }
+  }
+  let terms = predicateTerms(value.filter ?? null);
+  for (const entry of value.filters ?? []) terms += predicateTerms(entry.filter);
+  for (const leaf of value.project?.leaves ?? []) terms += predicateTerms(leaf.count?.filter ?? null);
+  return terms;
+}
+
+/**
+ * A planned document against a dialect's `maxPredicateTerms`: unchanged
+ * where the dialect sets no bound, where nothing is planned natively, or
+ * where the statement's leaves — the plan's plus `extraTerms`, what the
+ * statement carries beside the plan (a profile's mandatory predicate) —
+ * stay within it; otherwise the whole document is demoted to the set
+ * residual with the reason first, as a member name the dialect cannot
+ * spell demotes it. Counted once the planner has regrouped, so a chain
+ * that folds to one membership list is one leaf however long it is.
+ * @param {any} planned - a `planQuery` or `planEntityQuery` result
+ * @param {number | null} maxTerms
+ * @param {number} [extraTerms]
+ * @returns {any}
+ */
+export function boundPredicateTerms(planned, maxTerms, extraTerms = 0) {
+  if (typeof maxTerms !== 'number' || planned.plan === null) return planned;
+  if (predicateTerms(planned.plan) + extraTerms <= maxTerms) return planned;
+  const reasons = [refusal('$where', PREDICATE_REASONS.termBound), ...planned.reasons];
+  // an entity result names what it referenced; a collection one carries
+  // the row residual, the registered fragments, the pre-filters and the
+  // temporal record its statement would have used, none of which survive
+  return 'referenced' in planned
+    ? { ...planned, plan: null, mode: 'set', reasons }
+    : { ...planned, plan: null, mode: 'set', reasons, rowReturn: null, udfs: [], prefilters: [], series: null };
 }
 
 

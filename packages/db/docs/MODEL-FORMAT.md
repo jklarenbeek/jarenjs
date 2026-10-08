@@ -2917,7 +2917,13 @@ index by an epoch range that a list of document strings cannot (its
 rays still fold, and the folded bound keeps that range). A long `$and`,
 or an `$or` nothing regroups (`$and` pairs), nests in halves (depth
 log₂ n), so 5,000 leaves prepare and explain where a flat chain met
-SQLite's expression-depth limit near 1,000 terms.
+SQLite's expression-depth limit near 1,000 terms. A dialect may bound
+the leaf predicates one statement carries (`maxPredicateTerms`:
+PostgreSQL 64, SQLite none), counted once the planner has regrouped —
+the chain that folds to one list is one leaf however long it is, and
+the count takes in every filter the statement holds, the profile's
+mandatory predicate included — and a document past the bound is the
+engine's, named `predicate.termBound` (§10.6).
 
 ### 10.2 Joins
 
@@ -3192,6 +3198,15 @@ a number appears only where `capabilities.rowEstimates` is filled):
 - externals against document paths; booleans and `null` at bind time;
   a bound membership list against a boolean column, and one holding a
   `null`, a boolean, an object or an array at bind time;
+- on a dialect with a term bound (PostgreSQL: 128 leaf predicates per
+  statement, counted once the planner has regrouped, over every filter
+  the statement carries and the profile's mandatory predicate), a
+  document past it — an `$or` of more than 64 `$and` pairs, a top-level
+  `$and` of more than 128 `$ne` — named `predicate.termBound`; a graph
+  load (`JD0032`) and a native mutation (`JD0038`), which have no engine
+  path, refuse it by name, and under a profile the residual is refused
+  where its fetch is (`JD2007` past `maxRows`, `JD0011` under
+  `refuseFullScan`);
 - everything phase A already listed (§8 of `QUERY-FORMAT.md`
   notwithstanding, the truth table is the contract).
 

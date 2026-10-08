@@ -47,7 +47,8 @@ import { chain, attempt, createStatementOwner, useStatementOnce } from './driver
 import { readOptions, readControls, isPlainOptions, refuseUnknownMembers } from './options.js';
 import {
   planQuery, planEntityQuery, entityShape, planEntityPredicate, entityPathRef,
-  isRootScanSource, isEntityRootSource, BIND_REASONS, admitsMixedTypes,
+  isRootScanSource, isEntityRootSource, BIND_REASONS, PLANNER_REASONS, admitsMixedTypes,
+  predicateTerms, boundPredicateTerms,
 } from './plan.js';
 import { emitPlan, emitEntityPlan, createEntityPredicateEmitters, UnrepresentablePath, physicalComparable,
   pathTextOf, kindOf, bucketGuards } from './emit.js';
@@ -687,6 +688,15 @@ export function createQueryEngine(context) {
           : { ...planned.series, mode: 'engine', index: null, prefix: [] },
       };
     }
+    // the profile's mandatory predicate rides the same statement, so its
+    // leaves count with the plan's against the dialect's term bound; past
+    // it the whole document is the set residual's, named, before the
+    // profile and strict mode read the mode
+    const mandatory = profile !== null
+      && profile.predicates[collection.name] !== undefined
+      ? translateProfilePredicate(profile.predicates[collection.name], shape)
+      : null;
+    planned = boundPredicateTerms(planned, dialect.maxPredicateTerms, predicateTerms(mandatory));
     if (profile !== null) {
       // the member allow-list: what the caller may OBTAIN, checked
       // against every member path the document references, before a
@@ -717,10 +727,6 @@ export function createQueryEngine(context) {
         collection.docPath);
     }
 
-    const mandatory = profile !== null
-      && profile.predicates[collection.name] !== undefined
-      ? translateProfilePredicate(profile.predicates[collection.name], shape)
-      : null;
     const maxRows = profile === null ? null : profile.maxRows;
     const shapePlan = (base) => {
       let out = applyMandatoryPredicate(base, mandatory);
@@ -1829,6 +1835,23 @@ export function createEntityQueryEngine(context) {
         reasons: [{ construct: '$groupby', reason: BIND_REASONS.entityGrouping }] };
     }
     const docPath = entities.get(planned.referenced[0])?.docPath;
+    // the profile's mandatory predicates ride the statement — once per
+    // binding over their entity, and in every count of its rows — so
+    // their leaves count with the plan's against the dialect's term
+    // bound; past it the whole document is the set residual's, named,
+    // before the profile reads the mode
+    const mandatory = new Map();
+    if (profile !== null) {
+      for (const name of planned.referenced) {
+        const predicate = mandatoryEntityPredicate(profile, entities.get(name), mapping.entities[name], analyzeOpts);
+        if (predicate !== null) mandatory.set(name, predicate);
+      }
+    }
+    const mandatoryTerms = planned.plan === null || mandatory.size === 0 ? 0
+      : planned.plan.bindings.reduce((sum, binding) => sum + predicateTerms(mandatory.get(binding.entity) ?? null), 0)
+        + (planned.plan.project?.leaves ?? []).reduce((sum, leaf) =>
+          sum + (leaf.count ? predicateTerms(mandatory.get(leaf.count.entity) ?? null) : 0), 0);
+    planned = boundPredicateTerms(planned, dialect.maxPredicateTerms, mandatoryTerms);
     // the profile, applied exactly as on a collection (MODEL-FORMAT §8):
     // the roots a document may read, the references it may make, the
     // predicate every fetch of a root must wear, the row bound every
@@ -1863,13 +1886,6 @@ export function createEntityQueryEngine(context) {
         throw profileEntityRefusal('the profile refuses a full-table scan, and the residual this '
           + `document needs fetches every row of ${planned.referenced.join(', ')} `
           + `('${planned.reasons[0]?.construct}' — ${planned.reasons[0]?.reason})`, docPath);
-      }
-    }
-    const mandatory = new Map();
-    if (profile !== null) {
-      for (const name of planned.referenced) {
-        const predicate = mandatoryEntityPredicate(profile, entities.get(name), mapping.entities[name], analyzeOpts);
-        if (predicate !== null) mandatory.set(name, predicate);
       }
     }
     const entry = {
@@ -2827,6 +2843,18 @@ export function createLoadEngine(context, entityName) {
     }
     const physicalEntity = entities.get(entityName)?.physical != null;
     const tree = buildTree(entityName, spec ?? {}, 0, maxDepth, [], new Set(), profile);
+    // one load is one statement: every node's filter, the profile's
+    // predicate conjoined, counts against the dialect's term bound, and
+    // past it the load — which has no engine path — refuses by name
+    if (dialect.maxPredicateTerms !== null) {
+      const treeTerms = (/** @type {any} */ node) => predicateTerms(node.where)
+        + node.includes.reduce((/** @type {number} */ sum, /** @type {any} */ include) =>
+          sum + (include.child === null ? 0 : treeTerms(include.child)), 0);
+      if (treeTerms(tree) > dialect.maxPredicateTerms) {
+        throw refuse(`the where expression is not translatable: ${PLANNER_REASONS['predicate.termBound'].text}; `
+          + 'execute() answers it in the engine', []);
+      }
+    }
     const rendered = render(tree, 'r', param, emitters);
 
     // anonymous placeholders bind by position, so slots must be

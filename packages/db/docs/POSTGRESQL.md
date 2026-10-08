@@ -63,6 +63,27 @@ that every row evaluated beside the typed extraction's own `CASE` and that the
 planner's selectivity estimate could not price; where the member is indexed the
 typed form is the column itself, which the planner estimates from its statistics.
 
+One statement carries at most 128 leaf predicates (the dialect's
+`maxPredicateTerms`), counted over everything the statement holds once the
+planner has regrouped: the document's filters, every include filter of a graph
+load and the profile's mandatory predicate. A membership list is one leaf
+however long it is, so a `$seq`, a same-member `$or` of equalities and a chain
+mixing equalities and ranges on two members all stay native; an `$or` of `$and`
+pairs and a top-level `$and` of `$ne` count per leaf. The bound exists because
+the planner prices every leaf per row, and a chain whose cost crosses the
+server's JIT thresholds is compiled by LLVM, whose passes check for no
+interrupt: a cancel, a termination and a `statement_timeout` all wait for that
+compile to end before the backend answers. Past the bound a query document runs
+in the engine, named `predicate.termBound` in `explain()` (strict mode refuses
+it `JD0010`), and a graph load (`JD0032`) or a native mutation (`JD0038`), which
+have no engine path, refuse it by name; under a profile the residual is refused
+where its fetch is (`JD2007` past `maxRows`, `JD0011` under `refuseFullScan`),
+and an asynchronous live registration re-snapshots through `execute()`, so its
+snapshot is the engine's answer. The price: a top-level `$and` of more than 128
+`$ne` over a PostgreSQL collection runs in the engine, and a `load({ where })`
+or native `mutate()` above the bound that ran before is refused. SQLite has no
+JIT and sets no bound.
+
 ## The writer lock and the lock family
 
 `store.transaction(fn, { mode: 'immediate' })` runs `BEGIN`, then takes the

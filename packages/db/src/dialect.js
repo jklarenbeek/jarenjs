@@ -176,6 +176,7 @@ function normalizeCapabilities(declared) {
  *   jsonTypeOf: (columnSql: string, pathText: string) => string,
  *   numericTypeNames: readonly string[],
  *   typedExtract?: boolean,
+ *   maxPredicateTerms?: number,
  *   jsonObject: (pairsSql: string) => string,
  *   jsonEmbed: (columnSql: string) => string,
  *   externalEncoding?: 'value' | 'json',
@@ -763,6 +764,17 @@ export function createDialect(spec) {
      * when it binds, and a type test asks for the type by name.
      */
     typedExtract: spec.typedExtract === true,
+    /**
+     * The most leaf predicates one statement carries, or `null` for no
+     * bound. A database whose planner prices every term per row and
+     * hands a long enough chain to a JIT compile it cannot interrupt
+     * sets one; the planner then answers a document past it in the
+     * engine, named, and a graph load or a native mutation, which have
+     * no engine path, refuse it by name. Counted once the planner has
+     * regrouped, so a chain that folds to one membership list is one
+     * term however long it is.
+     */
+    maxPredicateTerms: typeof spec.maxPredicateTerms === 'number' ? spec.maxPredicateTerms : null,
     /** An object built from alternating name/value SQL — the shape a
      * graph load's nested include answers. */
     jsonObject: spec.jsonObject,

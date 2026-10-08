@@ -352,6 +352,17 @@ the query engine, now refuse by code or answer what the engine answers:
   the old estimate of one row admitted an index plan reading the same rows.
   A rare value still seeks; narrow the predicate or run that query without
   the profile.
+- On PostgreSQL one statement now carries at most 128 leaf predicates, counted
+  once the planner has regrouped (a membership list is one leaf; an `$or` of
+  `$and` pairs or a top-level `$and` of `$ne` counts per leaf, the profile's
+  mandatory predicate included), because a longer chain is priced into an LLVM
+  compile the server cannot interrupt. A query document past the bound runs in
+  the engine where it was native (`predicate.termBound` in `explain()`,
+  `JD0010` under strict mode, and under a profile `JD2007` past `maxRows` or
+  `JD0011` under `refuseFullScan`), and a `load({ where })`, `explainLoad` or
+  native `mutate()` past it, which ran natively before, is refused `JD0032` or
+  `JD0038` naming the bound. Shorten the chain, spell equalities on one member
+  as a list, or run the read through `execute()`, where the engine answers it.
 - A collection `$sum` or `$avg` over a `number` member answered SQLite's
   compensated or PostgreSQL's exact sum; it now runs in the engine, whose
   left-to-right addition is the documented answer (`plan.floatingAccumulation`
