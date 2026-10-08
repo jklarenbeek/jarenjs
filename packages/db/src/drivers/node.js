@@ -10,6 +10,7 @@ import { lazyOpen, openConnection } from '../driver.js';
 import { sqliteDialect } from '../dialects/sqlite.js';
 import { PRAGMA_NAMES } from '../pragmas.js';
 import { nativeDatabaseIdentity } from './file-identity.js';
+import { publishSqliteFile, removeSqliteFile } from './snapshot.js';
 
 /**
  * Adapt an already-constructed `node:sqlite` `DatabaseSync` (or any
@@ -89,14 +90,14 @@ export function fromNodeModule(mod, path, options) {
     ? new mod.DatabaseSync(path, open)
     : new mod.DatabaseSync(path);
   // the online-backup primitives: the module's own `backup()` over this
-  // database, and the file system's rename and removal — imported
-  // lazily on first use, never at module scope, for the same reason the
-  // builtin itself is
+  // database, and the shared SQLite-file publication and removal, whose
+  // file system is imported lazily on first use, never at module scope,
+  // for the same reason the builtin itself is
   const backup = typeof mod.backup === 'function'
     ? {
       copy: (target, backupOptions) => mod.backup(db, target, backupOptions),
-      rename: (from, to) => import('node:fs/promises').then((fs) => fs.rename(from, to)),
-      remove: (target) => import('node:fs/promises').then((fs) => fs.rm(target, { force: true })),
+      rename: publishSqliteFile,
+      remove: removeSqliteFile,
     }
     : undefined;
   return adaptNodeDatabase(db, backup === undefined ? options : { ...options, backup });

@@ -1469,9 +1469,11 @@ committed migrations remain committed. Re-running resumes from receipts;
 forward repair plans start from the newest file, including later application
 edits, rather than replacing it with an older backup.
 
-`backupTo()` publishes a sibling temporary only after a complete snapshot.
-Node uses online backup. Bun writes a disk-backed `VACUUM INTO` snapshot under
-the store gate, then flushes and atomically renames through the same publisher.
-Bun does not build a full database image in JavaScript memory; it cannot offer
-page-granular copy cancellation. Both snapshots include committed WAL; interruption before rename
-leaves the previous destination valid, while a leftover temporary is not published.
+`backupTo()` publishes a sibling temporary only after a complete copy.
+Both hosts copy page by page through SQLite's online backup — Node on the
+store's own connection, Bun on a dedicated read-only `node:sqlite` connection
+under the store gate — and rename through the same publisher, which refuses a
+target whose `-wal` holds frames or whose `-journal` is hot. Neither builds a full
+database image in JavaScript memory. Both copies include committed WAL;
+interruption before rename leaves the previous destination valid, while a
+leftover temporary (and, from a killed copy, its `-journal`) is not published.

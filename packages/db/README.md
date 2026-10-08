@@ -1378,11 +1378,14 @@ it needs raw SQL or the raw handle. The rules, in one place:
   declares one absent). Corruption an integrity check finds is its
   RESULT, never a throw.
 - **A backup is published whole or not at all.** `backupTo(path)` copies
-  a live store while writers proceed, into a temporary sibling in the
-  same directory, and renames it onto the target only once the platform
-  reported the copy complete; a cancelled (`JD2079`) or failed copy
-  leaves neither the target nor the temporary file. Where it goes, how
-  it is named, rotated or encrypted is the host's.
+  a live store page by page — on Node while writers proceed, on Bun with
+  the store's calls waiting for the copy — into a temporary sibling in
+  the same directory, and renames it onto the target only once the
+  platform reported the copy complete; a cancelled (`JD2079`) or failed
+  copy leaves neither the target nor the temporary file, and a target
+  whose `-wal` holds frames or whose `-journal` is hot — SQLite would
+  replay either into the copy — is never replaced (`JD2078`). Where it
+  goes, how it is named, rotated or encrypted is the host's.
 - **Cancellation is honoured where the driver can honour it, and the
   report says where.** `capabilities.cancellation` states the
   granularity per lifecycle — `query: 'row'`, `queue: true`, `migration:

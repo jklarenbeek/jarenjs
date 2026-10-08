@@ -1222,10 +1222,12 @@ consumed by `src/store.js` and never reached by a query:
   declaration and, for the two that write, the store's read-only flag —
   refused by code exactly where the report says `false`.
 - `src/backup.js` — the online backup over the driver's primitive triple
-  (`copy`, `rename`, `remove`; the Node binding's), written to a
-  temporary sibling and renamed only at verified completion, cleaned up
-  on every other branch. The root closure imports no builtin: the
-  primitives are the driver's.
+  (`copy`, `rename`, `remove`; the Node and Bun drivers'), written to a
+  temporary sibling and renamed only at verified completion, removed
+  with its side files on every other branch. The copy's first step
+  (Node) or whole extent (Bun) holds the store gate; progress events
+  arrive only between steps, and never twice alike. The root closure
+  imports no builtin: the primitives are the driver's.
 - `src/cancellation.js` — the one check every lifecycle runs between its
   units of work (a statement, a row, a step, a batch, a page), on the
   clock the caller was given; each lifecycle owns its abort code, the
@@ -1335,7 +1337,11 @@ clean tracked entities; pending edits and incomplete capture populations refuse.
 a bounded database subset into ordered trigger bodies. `migrate.js` composes
 guarded table plans and codec-aware transforms in its existing receipt
 transaction, checking preservation and complete selected targets before publication.
-The backup publisher uses Node online backup and Bun disk-backed VACUUM INTO.
+The backup publisher copies through SQLite's online backup on both hosts (Node
+on the store's own connection, Bun on a dedicated read-only `node:sqlite`
+connection, with `VACUUM INTO` only for a Bun database without a file, a Bun
+runtime without `node:sqlite`, or a `bun:sqlite` on another SQLite library) and
+refuses to publish beside a `-wal` holding frames or a hot `-journal`.
 The standalone snapshot helper shares destination reservation and cleanup across
 both hosts, including transaction failures.
 

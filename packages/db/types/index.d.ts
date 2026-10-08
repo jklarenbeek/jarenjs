@@ -420,28 +420,38 @@ export interface MaintenanceCapabilities {
   readonly integrityCheck: boolean;
   readonly foreignKeyCheck: boolean;
   readonly optimize: boolean;
-  /** The online backup (`backupTo`): the Node binding's; `false`
-   * elsewhere, where the call is refused `JD2077`. */
+  /** The online backup (`backupTo`): the Node and Bun drivers'; `false`
+   * for every other binding (the wasm build, the worker hosts,
+   * PostgreSQL), where the call is refused `JD2077`. */
   readonly backup: boolean;
 }
 
-/** The platform's progress report, verbatim: the last event may still
- * carry a remainder — completion is the resolved call. */
+/** One step's progress, delivered after a step that leaves pages to copy
+ * (`remainingPages >= 1`): never after the final step, never synthesized,
+ * and never equal to the event delivered before it. A copy of one step
+ * reports nothing; completion is the resolved call. */
 export interface BackupProgress {
   readonly totalPages: number;
   readonly remainingPages: number;
 }
 
 export interface BackupOptions {
-  /** Pages copied per step (the platform's `rate`); progress and the
-   * cancellation check happen between steps. */
+  /** Pages copied per step (the platform's `rate`, a positive integer,
+   * 100 by default); progress and the cancellation check happen between
+   * steps. On Bun every step runs before the copy returns, and
+   * `onProgress` is called synchronously during it. */
   rate?: number;
+  /** A throw from it fails the backup `JD2078`, the throw as `cause`. */
   onProgress?: (progress: BackupProgress) => void;
-  /** Cancels between pages: `JD2079`, the temporary file removed, the
-   * target untouched. */
+  /** Cancels between pages, and while the backup waits for the store
+   * gate: `JD2079`, the temporary file removed, the target untouched. On
+   * Bun only an abort raised inside `onProgress` stops a copy mid-way;
+   * one raised by a timer or an I/O callback that came due during the
+   * copy lands after the copy and before publication. */
   signal?: AbortSignal;
   /** An epoch-millisecond deadline on the store's clock, honoured before
-   * the copy and between its pages (`JD2075`, same cleanup). */
+   * the copy, between its pages and before publication (`JD2075`, same
+   * cleanup). */
   deadline?: number;
   /** The checkpoint that fixes the snapshot boundary (default
    * `'passive'`; `false` skips it; a read-only store skips it by
@@ -894,7 +904,13 @@ export interface Store {
   /** An online backup published whole or not at all (MODEL-FORMAT §4):
    * copied to a temporary sibling, renamed onto `targetPath` only at
    * verified completion; a cancelled (`JD2079`) or failed (`JD2078`)
-   * copy leaves neither file. Writers proceed during the copy. */
+   * copy leaves neither file, nor the temporary's journal. Publication is
+   * refused `JD2078` while the `-wal` beside `targetPath` holds frames or
+   * its `-journal` is hot — never back up onto a database another
+   * connection has open — and a `targetPath` that begins `file:` is a
+   * `TypeError`. On Node writers proceed during the copy; on Bun the
+   * store's calls wait for it, and the copy is the store as it stood when
+   * the copy began. */
   backupTo(targetPath: string, options?: BackupOptions): Promise<BackupResult>;
   /** Register a live query over an entity-root document (re-run
    * strategy in this version); present only with entities. */

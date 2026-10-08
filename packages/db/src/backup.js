@@ -6,27 +6,48 @@
  * partial file: the copy is written to a temporary sibling in the same
  * directory (one file system, so the rename is atomic), renamed onto
  * the target only once the platform reported the copy complete, and
- * deleted on every other outcome — a cancellation, a copy failure, a
- * rename failure. An incomplete backup is never something a later
- * process could mistake for a good one.
+ * removed — with every side file the copy left beside it — on every
+ * other outcome: a cancellation, a copy failure, a refused or failed
+ * rename, a store closed mid-copy. An incomplete backup is never
+ * something a later process could mistake for a good one. The rename is
+ * refused while a non-empty write-ahead log or journal sits beside the
+ * target, which SQLite would replay into the published file; the
+ * target's own files are never deleted.
  *
- * The copy runs OFF the store gate: an online backup's whole point is
- * that writers proceed. SQLite updates the copy in place when this
- * connection writes during it and restarts the copy when another
- * connection does; only the checkpoint that fixes the snapshot boundary
- * takes the gate, exactly as the other maintenance operations do.
+ * Where the copy runs is the binding's. Node copies on the store's own
+ * connection, on the platform's thread pool: the copy starts under the
+ * store gate, so its first step never meets a write the store's own
+ * transaction holds, and leaves the gate at its first progress report —
+ * writers then proceed, and SQLite carries this connection's writes into
+ * the copy. A binding that declares `snapshot` (Bun) copies on a
+ * connection of its own and holds the gate for the whole copy: the
+ * store's calls wait, and the copy is the store as it stood when it
+ * began. Either way the copy starts a microtask after its admission,
+ * outside the gate's synchronous extent, so a store call made from
+ * `onProgress` queues behind the copy instead of running inside it — a
+ * copy that runs every step synchronously would otherwise spin on that
+ * call's held write forever.
  *
- * Cancellation is honoured BETWEEN pages, at the granularity the
- * platform reports progress (`rate` pages per step): the platform
- * itself takes no signal, so the signal is checked in the progress
- * callback and a throw there is what stops the pump. There is no
- * guaranteed terminal progress event — the platform's completion signal
- * is the resolved copy, which answers the page total. Cancellation is
- * checked again before publication, including after a terminal event.
+ * Progress: `onProgress` receives `{ totalPages, remainingPages }` after
+ * a step that leaves pages to copy — never after the final step, never
+ * synthesized — and an event equal to the last one delivered is not
+ * delivered again (a step that met a busy source is reported again with
+ * the same pair). Completion is the resolved copy, which answers the page
+ * total; a copy of one step reports nothing.
+ *
+ * Cancellation is honoured BETWEEN steps (`rate` pages each): the
+ * platform takes no signal, so the signal and the deadline — read on the
+ * store's clock — are checked before the copy, in every progress callback
+ * the platform makes (a throw there is what stops the pump), and again
+ * before publication; an abort while the backup waits for the store gate
+ * takes it out of the queue. On Bun the platform runs every step before it
+ * returns, so only an abort raised inside `onProgress` or a passed
+ * deadline stops a copy mid-way; an abort raised by a timer or an I/O
+ * callback that came due during the copy lands after the copy and before
+ * publication, and one raised later than that may come too late.
  *
  * This module imports no runtime builtin: the copy, the rename and the
- * removal are the driver's primitives (`connection.backup`), supplied by
- * Node online backup and Bun serialized snapshots.
+ * removal are the driver's primitives (`connection.backup`).
  */
 
 import { DbRuntimeError, wrapDriverError } from './errors.js';
@@ -79,15 +100,26 @@ export function createBackup({ connection, readOnly, gated, checkpoint, random, 
   return {
     capability,
     /**
+     * Copy the store to a temporary sibling of `targetPath` and publish
+     * it there by rename, under the contract of this module's comment.
      * @param {string} targetPath
      * @param {{ rate?: number, onProgress?: (progress: { totalPages: number,
      *   remainingPages: number }) => void, signal?: AbortSignal,
-     *   deadline?: number, checkpoint?: string | false }} [options]
+     *   deadline?: number, checkpoint?: string | false }} [options] -
+     *   `rate` pages per step (the platform's 100 by default); an abort
+     *   is `JD2079`, a passed deadline `JD2075`, a throw from
+     *   `onProgress` `JD2078` with the throw as its `cause`
      * @returns {any} value-or-promise of `{ path, pages, checkpoint }`
      */
     backupTo(targetPath, options = undefined) {
       if (typeof targetPath !== 'string' || targetPath.length === 0)
         throw new TypeError('backupTo: targetPath is a non-empty string');
+      // SQLite reads a name that begins `file:` as a URI, which can name
+      // another file than the one the rename publishes
+      if (targetPath.startsWith('file:')) {
+        throw new TypeError(`backupTo: targetPath is a file path; one that begins 'file:' would reach SQLite as `
+          + `a URI (write './${targetPath}' for that relative path)`);
+      }
       const rate = options?.rate;
       if (rate !== undefined && (!Number.isSafeInteger(rate) || rate < 1))
         throw new TypeError(`backupTo: rate is a positive integer (pages per step), got ${JSON.stringify(rate)}`);
@@ -109,10 +141,18 @@ export function createBackup({ connection, readOnly, gated, checkpoint, random, 
       if (mode !== false && (typeof mode !== 'string'))
         throw new TypeError("backupTo: checkpoint is a wal_checkpoint mode or false");
       callable(options, 'no file was written');
+      /** The signal leaves the gate's queue as well: a wait it abandoned
+       * (`JD2064`) is the backup's own cancellation before any file. */
+      const admitted = (error) => {
+        if (error?.code !== 'JD2064' || signal?.aborted !== true) return error;
+        try { callable(options, 'no file was written'); }
+        catch (refusal) { return refusal; }
+        return error;
+      };
 
       const boundary = mode === false
         ? null
-        : gated(() => checkpoint({ mode }), 'a backup checkpoint');
+        : attempt(() => gated(() => checkpoint({ mode }), 'a backup checkpoint', signal), admitted);
       return chain(boundary, (checkpointed) => {
         callable(options, 'no file was written');
         const tmpPath = temporaryPathFor(targetPath, random);
@@ -127,6 +167,8 @@ export function createBackup({ connection, readOnly, gated, checkpoint, random, 
           }),
           () => { throw error; });
         let aborted = null;
+        /** The last event delivered: only a changed pair is news. */
+        let delivered = null;
         const progress = (report) => {
           if (signal?.aborted === true) {
             aborted = cancelled(signal);
@@ -135,15 +177,33 @@ export function createBackup({ connection, readOnly, gated, checkpoint, random, 
           // a passed deadline stops the pump between pages exactly as an
           // abort does, under its own code
           callable(options, 'the temporary file was removed and the target path was not written');
-          onProgress?.({ totalPages: report.totalPages, remainingPages: report.remainingPages });
+          const { totalPages, remainingPages } = report;
+          if (delivered?.totalPages === totalPages && delivered.remainingPages === remainingPages) return;
+          delivered = { totalPages, remainingPages };
+          onProgress?.({ totalPages, remainingPages });
         };
-        let copying;
+        /** Start the copy a microtask after its admission (see the module
+         * comment), checking again what the wait for the gate outlived. */
+        const copy = (report) => Promise.resolve().then(() => {
+          callable(options, 'no file was written');
+          return files.copy(tmpPath, rate === undefined ? { progress: report } : { rate, progress: report });
+        });
+        let copied;
         try {
-          const copy = () => files.copy(tmpPath, rate === undefined ? { progress } : { rate, progress });
-          copying = files.snapshot === true ? gated(copy, 'a snapshot backup') : copy();
+          if (files.snapshot === true) copied = gated(() => copy(progress), 'a snapshot backup', signal);
+          else {
+            // the gate is held until the first progress report or the
+            // copy's settlement, whichever comes first
+            let copying;
+            const started = gated(() => new Promise((firstStep) => {
+              copying = copy((report) => { firstStep(); progress(report); });
+              copying.then(firstStep, firstStep);
+            }), 'a backup start', signal);
+            copied = toPromise(started).then(() => copying);
+          }
         }
         catch (error) {
-          return discard(aborted ?? failed(error));
+          return discard(aborted ?? admitted(failed(error)));
         }
         // publication: the platform's resolved copy is its completion
         // signal (it answers the page total); only then is the
@@ -153,13 +213,13 @@ export function createBackup({ connection, readOnly, gated, checkpoint, random, 
         const publish = (pages) => chain(
           attempt(() => files.rename(tmpPath, targetPath), failed),
           () => Object.freeze({ path: targetPath, pages: Number(pages), checkpoint: checkpointed ?? null }));
-        return toPromise(copying)
+        return toPromise(copied)
           .then((pages) => {
             if (signal?.aborted === true) { aborted = cancelled(signal); throw aborted; }
             callable(options, 'the temporary file was removed and the target path was not written');
             return toPromise(publish(pages));
           })
-          .catch((error) => discard(aborted ?? failed(error)));
+          .catch((error) => discard(aborted ?? admitted(failed(error))));
       });
     },
   };

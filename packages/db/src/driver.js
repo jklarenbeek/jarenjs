@@ -1121,14 +1121,16 @@ export function finishConnection(raw, dialect, synchronous, capabilities, queueT
     session: typeof raw.session === 'function'
       ? (table) => { requireOpen(); return raw.session(table); }
       : null,
-    // the backup primitives, each refused by name once the store is
-    // closed exactly as a statement is
+    // the backup primitives: the copy and the rename refused by name once
+    // the store is closed, exactly as a statement is; the removal touches
+    // only the file system and stays callable after close, so a backup
+    // the close interrupted still removes its temporary file
     backup: capabilities.backup === true
       ? Object.freeze({
         snapshot: raw.backup.snapshot === true,
         copy: (path, options) => { requireOpen(); return raw.backup.copy(path, options); },
         rename: (from, to) => { requireOpen(); return raw.backup.rename(from, to); },
-        remove: (path) => { requireOpen(); return raw.backup.remove(path); },
+        remove: (path) => raw.backup.remove(path),
       })
       : null,
   });

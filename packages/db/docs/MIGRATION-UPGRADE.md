@@ -619,6 +619,78 @@ column to `bigint` first, then the key column to `bigint`, a sequence owned
 by the key column, the key's default `nextval` of that sequence, and `setval`
 past the highest key.
 
+## 9. Backups and snapshots
+
+`backupTo` reported, published or left behind what it should not have
+([MODEL-FORMAT](MODEL-FORMAT.md) states the contract):
+
+- On Bun a backup sent one `{ totalPages, remainingPages: 0 }` event once
+  the copy had finished; it now reports progress between steps, as Node
+  does, and neither runtime sends an event after the final step: wait for
+  the returned promise, not for a zero event.
+- A step that met a busy source was reported again with the same
+  `{ totalPages, remainingPages }`, thousands of times while a write was
+  held; an event equal to the last one delivered is no longer delivered.
+- A backup onto a path whose `-wal` held frames or whose `-journal` was hot
+  published its copy, which then opened as the database that file belonged
+  to; publication is now refused `JD2078` and nothing is deleted. Remove
+  such a file only after confirming that no process has that database open.
+  An empty or header-only `-wal` and a persist-mode `-journal` (its header
+  zeroed) are never replayed and do not block publication.
+- A target path that begins `file:` reached SQLite as a URI: relative, it
+  failed `JD2078` and left its temporary under another name (Node), or was
+  published literally (Bun); it is now a `TypeError` before any file is
+  written. Write `./file:…` for such a relative path.
+- An abort raised while a backup waited for the store gate (an open
+  transaction) took effect only once the gate came free, or became
+  `JD0012` past `queueTimeout`; it now takes the backup out of the queue at
+  once, `JD2079`.
+- On Bun a backup of a file was a compacted `VACUUM INTO` copy; it is now a
+  page copy that keeps the source's free pages, so it is no smaller than
+  the source, and an abort raised inside `onProgress` or a passed deadline
+  stops it between pages.
+- A store closed during a backup failed it `JD2063` and left the temporary
+  file beside the target, its removal refused as `cleanupError`; the
+  temporary is now removed.
+- A copy that failed part-way (a full disk) left the temporary's `-journal`
+  beside the target, and a `snapshotDatabase` that failed part-way left its
+  target's; each is now removed with its file.
+- On Node a backup started while a store transaction held a write failed
+  `JD2078` (`not an error`); it now waits for that transaction, as the
+  store's other calls do. Its first step now runs under the store gate:
+  `backupTo` called from inside a transaction's callback, or under `{
+  transactions: 'strict' }` while a transaction is open (`checkpoint:
+  false` included), now waits or refuses exactly as the store's other calls
+  do (`JD0012`), and a copy that finishes in one step (`rate` at least the
+  page count) holds the gate for its whole extent, so a write issued
+  meanwhile waits for it.
+
+## 10. Journal capture of foreign-key actions
+
+Stores that capture through the write-path journal — `capture: { mode:
+'journal' }`, and `auto` wherever the binding has no sessions (Bun, the Node
+worker, pool and process hosts, some wasm builds, PostgreSQL) — now record
+the database's own foreign-key actions ([LIVE-FORMAT](LIVE-FORMAT.md) §4):
+
+- A delete's record now also names every row a `cascade` relation removed at
+  any depth, the membership rows of each removed row and the foreign-key
+  member of every row a `setNull` relation nulled, as session capture already
+  did. A consumer that compensated for the missing rows can stop; one that
+  rebuilds state from records committed before the upgrade should resnapshot
+  once. Op order within a record stays unspecified: these rows now follow the
+  delete's own `remove`, where membership removals used to precede it.
+- A delete the database refuses no longer leaves membership removals behind in
+  a transaction that catches the refusal: capture-only feeds no longer show
+  them, and replicated stores no longer refuse that transaction `JD2104`.
+- On PostgreSQL such a delete first reads the rows it will change `FOR UPDATE`,
+  so a writer outside capture that touches them waits for the commit.
+- Under replication, a delete whose root and membership rows exceed
+  `replication.maxOperations` or `maxBytes` refuses `JD2106` (`a cascading
+  delete exceeds replication capacity`) before it runs — at the bound the
+  envelope itself would have exceeded (`replication operation bound exceeded`,
+  refused at commit) — and that message replaces `membership cascade
+  exceeds replication capacity`.
+
 ## Measured costs
 
 Exact identity stores complete canonical documents and model endpoints, so

@@ -851,11 +851,33 @@ file release does not depend on a later garbage-collection cycle. Reachable
 statement cleanup and native close errors remain observable. Statements cannot
 outlive the connection, including when adapting an existing Bun database.
 
-Node backups use the built-in online snapshot. Bun uses disk-backed `VACUUM INTO`
-under the store gate, flushes a sibling temporary, then uses the shared atomic
-publisher. Both include committed WAL. Bun allocates no whole-database JavaScript
-image; native SQLite caches and temporary storage govern working memory, and
-cancellation takes effect between phases. Process-kill tests
+Both hosts back up through SQLite's online backup, page by page into a sibling
+temporary, and publish it with the shared atomic publisher; both include
+committed WAL, keep free pages, and report progress under one contract (no
+event after the final step, none repeated). Node copies on the store's own
+connection on the platform's thread pool, so the event loop keeps running and an
+abort from a timer stops the copy between pages; writers proceed during it.
+Bun copies on a dedicated read-only `node:sqlite` connection to the same file,
+inside one read transaction, under the store gate: the store's calls wait for
+the copy, which is the store as it stood when it began. Other connections'
+writes wait for the whole copy under a rollback journal (and fail once their
+busy timeout passes); under WAL they proceed, but no checkpoint passes the
+copy's snapshot until it ends. The copy reopens the file SQLite reports for the
+database, so a path renamed or replaced under an open Bun store copies what the
+path holds now, or fails. Bun's `node:sqlite` runs every step before it
+returns, so its progress events arrive synchronously, nothing else on the
+thread runs until the copy ends, and only an abort raised inside `onProgress`
+or a passed deadline stops a copy mid-way; an abort raised by a timer or an I/O
+callback that came due during the copy lands after the copy and before
+publication (the copy settles through file I/O, never a timer, so fake timers
+cannot stall it). A Bun database without a file, a Bun runtime without
+`node:sqlite`, and a `bun:sqlite` on another SQLite library than `node:sqlite`'s
+(compared before the file is opened) copy with one `VACUUM INTO` statement
+instead (one step, no event). Neither host allocates a whole-database
+JavaScript image; native SQLite caches and temporary storage govern working
+memory. Publication is refused while the target's `-wal` holds frames or its
+`-journal` is hot, and every failed backup removes its temporary with the
+temporary's side files. Process-kill tests
 cover rebuild copy, table drop, commit and backup publication on both hosts;
 these tests do not establish power-loss durability. Compiled executables are
 qualified by their own harness (see Bundled and compiled executables).

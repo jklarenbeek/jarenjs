@@ -783,25 +783,76 @@ the original as `cause`. None of them touches the change log's durable
 watermark (LIVE-FORMAT §5).
 
 **A backup is published whole or not at all.** `backupTo(targetPath,
-{ rate, onProgress, signal, checkpoint })` copies a live store through
-the platform's online-backup API — writers proceed meanwhile — and
-answers `{ path, pages, checkpoint }`. The copy is written to a
-temporary sibling of the target (`<target>.jaren-tmp-<suffix>`, in the
-same directory so the rename is one file system's) and renamed onto the
+{ rate, onProgress, signal, deadline, checkpoint })` copies a live
+store page by page through SQLite's online backup and answers
+`{ path, pages, checkpoint }`. The copy is written to a temporary
+sibling of the target (`<target>.jaren-tmp-<suffix>`, in the same
+directory so the rename is one file system's) and renamed onto the
 target only once the platform reported the copy complete; a
-cancellation (`JD2079`, honoured between pages at the `rate` the
-platform reports progress — the API takes no signal, so the check runs
-in its progress callback), a copy failure or a rename failure removes
-the temporary file and leaves the target untouched. A `checkpoint`
+cancellation, a copy failure (a full disk included), a rename failure,
+or a store closed during the copy (`JD2063`, at publication: the copy
+itself runs to its end) removes the temporary file with every side file
+the copy left (`-journal`, `-wal`, `-shm`) and leaves the target
+untouched. The rename is refused (`JD2078`, nothing
+deleted) while a side file of the target would be replayed into the
+published file, which would then open as the database that file belongs
+to: a `-wal` that holds frames (anything past its 32-byte header) or a
+hot `-journal` (one that begins with the journal magic). Such a file
+belongs to an open database or to one whose writer did not finish —
+`backupTo` must never target a database another connection has open,
+and such a file is removed only by whoever has confirmed that no
+process has that database open. An empty or header-only `-wal` and a
+`-journal` whose header a clean commit zeroed (journal mode `persist`)
+are never replayed and do not block publication. A target that is a
+symbolic link is replaced by the published file, as any rename does; a
+target path that begins `file:` is refused (`TypeError`) before any
+file is written, because SQLite would read it as a URI. A `checkpoint`
 mode (default `passive`; `false` skips it, and a read-only store skips
 it by default) fixes the snapshot boundary first, under the store gate.
-Progress events are the platform's `{ totalPages, remainingPages }`
-verbatim, and the last one may still carry a remainder: the platform
-emits no zero event, completion is the resolved copy. The capability is
-`store.capabilities.maintenance.backup` — the Node binding's; every
-other binding reports `false` and refuses `JD2077`. What is NOT
-decided here: where backups go, how they are named, encrypted, rotated
-or retained — the host's policy.
+
+Where the copy runs is the binding's. The Node binding copies on the
+store's own connection, on the platform's thread pool: the copy starts
+under the store gate — so its first step never meets a write the
+store's own transaction holds — and leaves it at the first progress
+event; writers then proceed, the store's writes during the copy are
+carried into it, and the copy is the store as it stood at completion.
+The Bun binding copies on a dedicated read-only `node:sqlite` connection
+to the same file (Bun ships it on the same SQLite library), inside one
+read transaction, and holds the store gate for the whole copy: the
+store's calls wait, and the copy is the store as it stood when the copy
+began. Another connection's writes meet that read transaction too:
+under a rollback journal they wait for the whole copy and fail once
+their busy timeout passes; under WAL they proceed, but no checkpoint
+passes the copy's snapshot until it ends. The dedicated connection opens
+the file SQLite reports for the database: a path renamed or replaced
+under an open Bun store copies what that path holds now, or fails.
+Bun's platform runs every step before it returns, so its events arrive
+synchronously during the copy and nothing else on the thread runs until
+the copy ends. Both page copies are page-identical to the source: free
+pages are kept, and only page 1's change counter (bytes 24–27) and
+version-valid-for number (bytes 92–95) may differ — except that under a
+rollback journal the Node copy may carry the store connection's own
+image of a free page, whose bytes then differ from the file's (the
+database it holds is the same). A Bun database without a file (memory,
+temporary), a Bun runtime without `node:sqlite`, and a `bun:sqlite` on
+another SQLite library than `node:sqlite`'s copy with one `VACUUM INTO`
+statement instead: one step, no event, free pages dropped. The two
+libraries are compared before `node:sqlite` opens the file.
+
+`onProgress` receives `{ totalPages, remainingPages }` after a step
+that leaves pages to copy (so `remainingPages >= 1`) — never after the
+final step, never synthesized — and an event equal to the last one
+delivered is not delivered again: a step that meets a busy source is
+reported again by the platform with the same pair, and the cancellation
+check still runs on every such report. A restart caused by another
+connection's write may raise `remainingPages`. Completion is the
+resolved `{ path, pages, checkpoint }`; a copy of one step (a source of
+at most `rate` pages, or the `VACUUM INTO` copy) reports no event, and
+a throw inside `onProgress` fails the backup `JD2078` with the throw as
+`cause`. The capability is `store.capabilities.maintenance.backup` —
+the Node and Bun drivers'; every other binding reports `false` and
+refuses `JD2077`. What is NOT decided here: where backups go, how they
+are named, encrypted, rotated or retained — the host's policy.
 
 **Cancellation is honoured where the driver can honour it, and the
 report says where.** Every operation that runs more than one unit of
@@ -816,7 +867,14 @@ the open transaction leaves the queue — `JD2064`), `migration: 'step'`
 step — `JD2080`; the migration in flight rolls back whole), `maintenance:
 'statement'` (before the one statement each operation issues —
 `JD2081`), `backup: 'page'` (between the pages the platform reports —
-`JD2079`), and `midStatement: false` — a filled slot, not an absent
+`JD2079`, also while the backup still waits for the store gate; on
+Bun, whose platform runs every step before it returns, only an abort
+raised inside `onProgress` or a passed deadline stops a copy mid-way,
+an abort raised by a timer or an I/O callback that came due during the
+copy lands after the copy and before publication — one raised later,
+by work those callbacks start, may come after publication — and a
+one-step copy is checked before and after), and `midStatement:
+false` — a filled slot, not an absent
 one; a driver that grows an interrupt flips exactly that member. A
 passed deadline is `JD2075` in every lifecycle. A cursor's own report
 is part of the same honesty: `capabilities.lazyIteration` is probed at

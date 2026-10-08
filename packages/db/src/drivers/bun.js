@@ -16,12 +16,22 @@
  * `all()`, which materialises every row first — so a query that streams
  * on Node would spike memory in a compiled Bun binary, on the same code
  * and the same data. A cursor that is not lazy is not a cursor.
+ *
+ * A backup copies pages through SQLite's online backup on a dedicated
+ * read-only `node:sqlite` connection to the same file — Bun ships it on
+ * the same SQLite library — so it reports progress between steps and
+ * stops at an abort raised in `onProgress` or a passed deadline; Bun's
+ * `backup()` runs every step before it returns, so nothing else on the
+ * thread runs during a copy. A database without a file (memory,
+ * temporary), a runtime without `node:sqlite`, and a `bun:sqlite` on
+ * another SQLite library than `node:sqlite`'s copy with one `VACUUM INTO`
+ * instead: no progress, free pages dropped.
  */
 
 import { lazyOpen, openConnection } from '../driver.js';
 import { sqliteDialect } from '../dialects/sqlite.js';
 import { PRAGMAS, PRAGMA_NAMES } from '../pragmas.js';
-import { writeSqliteSnapshot } from './snapshot.js';
+import { copyBunDatabase, publishSqliteFile, removeSqliteFile } from './snapshot.js';
 import { nativeDatabaseIdentity } from './file-identity.js';
 export { snapshotDatabase } from './snapshot.js';
 
@@ -107,6 +117,8 @@ export function adaptBunDatabase(db, options) {
       if (errors.length > 1)
         throw new AggregateError(errors, 'finalizing Bun statements and closing the database failed');
     },
+    // true inside BEGIN and inside a bare SAVEPOINT alike
+    transactionState: () => (typeof db.inTransaction === 'boolean' ? db.inTransaction : null),
   };
   return openConnection(raw, {
     dialect: sqliteDialect,
@@ -144,15 +156,13 @@ export function fromBunModule(mod, path, options) {
     try { db.run(sqliteDialect.pragma.set('busy_timeout', timeout)); }
     catch (error) { db.close(); throw error; }
   }
+  // the backup copies on a connection of its own (`snapshot`: the store
+  // holds its gate for the whole copy, which is therefore point-in-time)
   const backup = {
     snapshot: true,
-    copy: (target, copyOptions) => writeSqliteSnapshot(target, () => {
-      const statement = db.prepare('VACUUM INTO ?');
-      try { return statement.run(target); }
-      finally { statement.finalize?.(); }
-    }, copyOptions),
-    rename: (from, to) => import('node:fs/promises').then((fs) => fs.rename(from, to)),
-    remove: (target) => import('node:fs/promises').then((fs) => fs.rm(target, { force: true })),
+    copy: (target, copyOptions) => copyBunDatabase(db, target, copyOptions),
+    rename: publishSqliteFile,
+    remove: removeSqliteFile,
   };
   return adaptBunDatabase(db, { ...options, ...(backup ? { backup } : {}) });
 }
