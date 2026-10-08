@@ -1150,10 +1150,14 @@ measure what that costs sequential point reads beside what it gains concurrent o
   conflict resolver; the default preserves both contenders and rejects the write.
 - **Live queries** (LIVE-FORMAT §§7–13): `collection.live(document)`
   maintains a result as writes arrive and emits patches — incremental
-  for `where`/`select`/`orderBy`+`limit`/aggregates/single-level
-  `groupBy` and a spatial `where` over a derived index (the geofence;
-  the normative maintenance table), indexed inner/left entity joins, bounded
-  graph projections and explicit two-level groups; re-run for other shapes,
+  for `where` and `select`, an `orderBy` with or without a literal
+  offset or limit, aggregates, single-level `groupBy` (a `@jarenjs/linq`
+  `groupBy` followed by `select`/`where` steps included), unordered
+  distinct projections and a
+  spatial `where` over a derived index (the geofence; the normative
+  maintenance table), indexed inner/left entity joins (flat self joins
+  included), bounded graph projections and explicit two-level groups;
+  re-run for other shapes,
   **declared, never silent** (`live.mode` names the reason).
   Unaffected rows stay reference-identical; a seeded oracle holds the
   maintained result equal to a fresh re-query after every mutation.

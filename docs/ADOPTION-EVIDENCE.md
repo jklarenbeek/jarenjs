@@ -238,7 +238,7 @@ fixtures or public contracts, independent of any private notes or checkouts.
 | Older clause | Accountable owner | Final disposition and evidence | Preserved remainder |
 |---|---|---|---|
 | SQL pushdown, projection/distinct | `db` | Narrowed to [native shapes](../packages/db/docs/NATIVE-PLANS.md) and [projection tests](../test/db/plan-projection.test.js) | Non-reconstructible trees and broader algebra |
-| Incremental live queries | `db` | Narrowed to [qualified live strategies](../packages/db/docs/LIVE-FORMAT.md) and [range resets](../test/linq/db-range.test.js) | Offset reruns, self joins and unproved incremental strategies |
+| Incremental live queries | `db` | Narrowed to [qualified live strategies](../packages/db/docs/LIVE-FORMAT.md) and [range resets](../test/linq/db-range.test.js) | Entity windows, nested self joins and the boundary the [ROADMAP](ROADMAP.md) entry lists |
 | Introspection losses | `db` | Inventory repaired; [losses remain explicit](../test/db/physical-inventory.test.js) | A loss is never permission to drop a physical object |
 | Replication capture/cascades/snapshots | `db` | Adopted-trigger refusal preserved in [combined assertions](../test/consumer/journey.js); [replication contract](../packages/db/docs/REPLICATION-FORMAT.md) | PostgreSQL capture, causal compaction, child effects and independent field merges |
 | Interval declaration and overlap seeks | `db` | Cross-member enforcement supplied by [invariants](../test/db/invariants.test.js) | Dedicated interval declaration/index/seek proof |

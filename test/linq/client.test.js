@@ -425,6 +425,24 @@ describe('live(): the store\'s registration with the chain\'s document and bindi
     await live.close();
   });
 
+  it('an include() chain is a load specification: live() is the store\'s JD0033 and registers nothing; a projection is the live graph', async () => {
+    const { client: live, ada } = await seeded({ capture: true });
+    try {
+      const graph = live.entities.User.include((u) => u.posts, { orderBy: (p) => p.stars, take: 2 });
+      await assert.rejects(async () => live.live(graph), codeIs('JD0033', /a load specification is not a query document/));
+      assert.strictEqual(live.store.stats().liveQueries, 0);
+      // the alternative: an aggregate over the relation is a graph projection, maintained
+      const counted = await live.live(live.entities.User.select((u) => ({ id: u.id, n: u.posts.count() })));
+      assert.deepStrictEqual(counted.mode, { strategy: 'graph', mode: 'incremental' });
+      const count = () => counted.result.rows.find((/** @type {any} */ row) => row.id === ada.id).n;
+      assert.strictEqual(count(), 3);
+      await live.entities.Post.create({ title: 'p5', stars: 2, authorId: ada.id });
+      assert.strictEqual(count(), 4);
+      counted.close();
+    }
+    finally { await live.close(); }
+  });
+
   it('an in() list parameter is held to the externals the store registers, not the chain\'s own binding', async () => {
     const { client: live } = await seeded({ capture: true });
     const notList = codeIs('JL0004', /^JL0004: parameter 'ids' is the list an in\(\) reads, so its binding must be an array/);

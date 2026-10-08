@@ -302,9 +302,8 @@ live.close();
 multi-entity shape of MODEL-FORMAT §10) the same way. A document that
 ranges over no entity array is `JD0033`, as `store.execute` refuses it —
 a load specification (`load({ include })`'s argument, which a
-`@jarenjs/linq` `include()` chain hands over) is one: a graph is
-maintained as the entity-root projection the table below names (it used
-to be a `TypeError`, and was listed here as a re-running graph). Live queries
+`@jarenjs/linq` `include()` chain builds) is one: a graph is maintained
+as the entity-root projection the table below names. Live queries
 REQUIRE change capture — the patch stream is the invalidation source —
 and registering on a store opened without `capture` is `JD0050`. Both
 registrations run under the store gate through their **initial query**
@@ -323,12 +322,21 @@ A producer may hand a registration a CHAIN instead of a document: the
 `toDocument()` and its `explain().bindings` as the externals to exactly
 these two registrations (`store.live` for an entity-root chain,
 `collection.live` for a collection's), so the strategy, the reason and
-the maintenance are this table's — an entity chain re-runs, declared —
-and this document stays the only place they are decided.
+the maintenance are this table's, and this document stays the only place
+they are decided. An entity chain is classified like any entity
+document: a `where` chain over one entity whose filter the entity
+planner translates is maintained as `join`; the bare set, whose document
+is the path `$.<Entity>[*]` and not a FLWOR, and a chain that orders or
+windows re-run with the reason named; an `include()` chain is a load
+specification and `JD0033`.
 
 **This table is normative.** Every row is implemented and tested;
 nothing outside it is attempted. Classification combines canonical document shapes with the compiled selection
-plan; "extractable" below means what the pushdown planner already proves.
+plan; "extractable" below means what the pushdown planner already proves. The table is what a synchronous
+connection maintains (`@jarenjs/db/node`, `@jarenjs/db/bun`, `@jarenjs/db/wasm` over a synchronous handle); over an asynchronous one —
+PostgreSQL, or SQLite in a worker, a pool or a process — every registration is a resnapshot whatever its shape
+(with the `asyncLive()` helper and durable capture; without them it is `JD0051`), and a demanded
+`mode: 'incremental'` is `JD0051` (§12.1).
 
 | Construct (as planned) | Strategy | Maintained state |
 |---|---|---|
@@ -349,9 +357,9 @@ plan; "extractable" below means what the pushdown planner already proves.
 | a `$resample` or `$rolling` document over the collection, with an explicit `eventTime` and a fixed width (§13) | **event-time bucket / rolling state**: rows kept by bucket, or in instant order; only what a write can reach is folded again, through `@jarenjs/core/series` itself | the contributing rows, plus one fold per bucket |
 | the same document with no `eventTime`, a calendar width, a named zone, a `locf`/`linear` fill, a `first`/`last` aggregate, or a retention that does not cover the window | **re-run on invalidation**, the member that stopped it named (§13.2) | the previous result, for diffing |
 | indexed inner equi-joins — flat self joins included (one `$for` binding an entity under several aliases, each later alias evaluated as its own input root) — and canonical allowing-empty left joins over mapped entity roots, reading no entity root outside their `$for` | **join dependency maintenance**; point-read changed keys — once per changed row, however many aliases hold it — and reevaluate their bounded outer owners | source rows (a self join's once per alias), key indexes and projected tuples, bounded by `maxMaintained` and `maxBytes` |
-| nested entity graph projections with indexed equality edges and unique binding names | **graph dependency maintenance**; a child change refreshes its bounded owners | source rows, reverse key indexes and graph outputs |
+| nested entity graph projections with indexed equality edges and unique binding names — a child query counted, or windowed by literal bounds without an ordering, included | **graph dependency maintenance**; a child change refreshes its bounded owners | source rows, reverse key indexes and graph outputs |
 | explicit two-level collection groups with a singular parent key and bounded nested input | **nested-group maintenance**; recompute affected parents through the query engine | source leaves and parent outputs |
-| unindexed/non-equi joins, a join whose `$where` or `$return` reads an entity root outside its `$for` (a nested query over `$.<Entity>[*]`, `an entity root read outside the join bindings re-runs`), self joins inside a graph projection, an allowing-empty join or a flattened projection or over a packed `$for` source (`a self join has ambiguous root invalidation`), explicit entity ordering/windows and object-root documents | **re-run on invalidation**, with the dependency or planner reason | previous result for diffing |
+| unindexed/non-equi joins, a join whose `$where` or `$return` reads an entity root outside its `$for` (a nested query over `$.<Entity>[*]`, `an entity root read outside the join bindings re-runs`), self joins inside a graph projection, an allowing-empty join or a flattened projection or over a packed `$for` source (`a self join has ambiguous root invalidation`), a graph projection whose child query is ordered, windowed or not, or that reads an entity root outside its child queries (a `$count` over `$.<Entity>[*]` in its return), an entity aggregate, explicit entity ordering/windows and object-root documents | **re-run on invalidation**, with the dependency or planner reason | previous result for diffing |
 | anything else: non-translatable predicates, `limit` without `orderBy`, a window bound that is not a literal non-negative integer, an offset or limit over a group, distinct projection, aggregate or nested group, an entity window, an ordered query inside a one-item array constructor (its one row is the whole array), an ordered query whose return yields several items per row or reads the collection root, a group whose return reads the collection root, a document the live evaluator cannot compile without the store's registered operators or zone provider (a rows, window or group document using a registered operator, or a named zone in a group key or a projection — the planner's reason names what stopped it; a zoned `$where` fails registration `JQ0003`, as `execute` fails), `@jarenjs/linq`'s nested two-level `groupBy` emission (a group of groups), and a `@jarenjs/linq` chain that orders, windows or deduplicates after `groupBy` | **re-run on invalidation**, the reason named | the previous result, for diffing |
 
 The **physical mapping** of a `derive: 'bbox'` index (MODEL-FORMAT §2.1,
@@ -755,8 +763,8 @@ not a singular row selector — is `JD0053` at registration (its
 quietly ignored. `advance()` refuses a value that is not finite or that
 goes backwards (a `TypeError`), and it is absent on every view
 registered without an `eventTime`. An entity document has no collection
-to place rows in and re-runs, so an `eventTime` on `store.live` is
-`JD0053` too.
+for an event-time view to maintain, so an `eventTime` on `store.live` is
+`JD0053` too, whatever the document.
 
 ### 13.1 What is maintained
 
@@ -858,8 +866,9 @@ distinct. Default entity result order follows physical row insertion order;
 point reads preserve that order even when a key is deleted and reinserted. The
 exception is a row deleted and inserted again with identical values in one
 transaction — an `unlink` and `link` of the same pair included: capture records
-no change for it, so every live registration, maintained or re-run, keeps its
-old place while `execute` lists it last. A
+no change for it, so no live registration moves it when `execute` starts
+listing it last. A re-run takes the new place at its next record, a maintained
+join or graph when a later change to that row reaches capture. A
 left join uses a canonical `$allowing-empty` binding over an equality-filtered
 inner subquery. Its absent child can be defaulted to null. Graph projections
 embed equality-filtered child queries in a single outer row's return object.

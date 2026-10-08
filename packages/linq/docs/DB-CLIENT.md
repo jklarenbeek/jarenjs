@@ -863,6 +863,27 @@ not one query document; `live()` over such a chain is the chain's own
 `JL0005` naming the operator that split it. Register the part before the
 split, or write the document by hand.
 
+**An `include()` chain is a load specification, not a live document.**
+`live()` over one is the store's `JD0033`: a load specification names no
+entity root to maintain. Register a projection instead. A `select` that
+aggregates a relation — `client.entities.User.select((u) => ({ id: u.id,
+n: u.posts.count() }))` — is a graph projection, maintained as `graph`.
+A child list is an entity-root projection document, handed to the same
+`live()`:
+
+```json
+{ "$for": { "u": "$.User[*]" },
+  "$return": { "id": "$u.id",
+               "titles": [{ "$for": { "p": "$.Post[*]" },
+                            "$where": { "$eq": ["$p.authorId", "$u.id"] },
+                            "$return": "$p.title" }] } }
+```
+
+That is the graph row of [LIVE-FORMAT](../../db/docs/LIVE-FORMAT.md) §7.
+An ordering inside the child query, which an include spec's `orderBy`
+asks for, re-runs with the reason named (`needs decoded-row evaluation`);
+a window over an unordered child query is maintained.
+
 **The client is not the place a model is authored.** `open()` takes a
 `$model` document, from [MODEL-PEN.md](MODEL-PEN.md) or from JSON, and
 never builds one; the migration between two of them is

@@ -528,6 +528,31 @@ describe('entity live registration: object-root re-runs, refusals and the store 
     await store.close();
   });
 
+  it('a load specification is JD0033 too and registers nothing: an include names no entity root to maintain', async () => {
+    const store = await openStore({
+      $model: '0.1',
+      entities: {
+        Author: { schema: { type: 'object', required: ['id'], properties: {
+          id: { type: 'string', 'x-entity': { key: true } },
+          posts: { 'x-entity': { relation: { to: 'Post', many: true, via: 'authorId', onDelete: 'cascade' } } } } } },
+        Post: { schema: { type: 'object', required: ['id'], properties: {
+          id: { type: 'string', 'x-entity': { key: true } }, score: { type: 'number' } } } },
+      },
+    }, { driver: nodeDriver(), capture: true });
+    try {
+      await store.entity('Author').create({ id: 'a1' });
+      await store.entity('Post').create({ id: 'p1', authorId: 'a1', score: 2 });
+      await assert.rejects(async () => store.live({ include: { posts: { orderBy: '$it.score', take: 2 } } }), {
+        code: 'JD0033',
+        message: 'JD0033: store.live takes an entity-root document ($.<Entity>[*]); this document names none — '
+          + "a load specification is not a query document, and a collection's live query is "
+          + 'store.collection(name).live at /entities',
+      });
+      assert.strictEqual(store.stats().liveQueries, 0);
+    }
+    finally { await store.close(); }
+  });
+
   it('registration is admitted at the store gate: no initial result before an open transaction settles, a rolled-back row never appears, a committed one appears once', async () => {
     const store = await openStore(ENTITY_MODEL, { driver: nodeDriver(), capture: true });
     await store.entity('User').create({ id: 'u1', name: 'ada' });

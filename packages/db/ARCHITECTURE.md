@@ -1122,20 +1122,33 @@ rollback truncates the journal buffer to its checkpoint. Overhead is
 measured and published: capture off ~6µs, journal ~17µs, session ~69µs
 per single-op commit, amortizing across a transaction.
 
-## Live queries (`src/live.js`, `src/live-time.js`, `src/window.js`)
+## Live queries (`src/live.js`, `src/live-nested.js`, `src/live-join.js`, `src/window.js`, `src/live-time.js`)
 
 A live query classifies its document against the normative maintenance
 table by reading the COMPILED PLAN — translated filters, order terms
-and aggregates are exactly the planner's, never re-derived. Five
-strategies: incremental **rows** (per-key items, arrival order), the
-maintained **window** (all matching rows sorted, ties by key token, a
-delete inside the visible slice answered without re-query), running
-**accumulators** (per-row contributions retained so a capture `remove`
-— which carries no old value — is still answerable; min/max recompute
-over contributions when the extremum's holder leaves), per-group
-**deltas** (the accumulator machinery once per group), and **re-run**
+and aggregates are exactly the planner's, never re-derived. On a
+synchronous connection the strategies are: incremental **rows**
+(per-key items, arrival order); the maintained **window** (all matching
+rows sorted, ties by the key's text, a literal offset as well as a
+limit — nested windows composed by the planner — and a delete inside
+the visible slice answered without re-query); running **accumulators**
+for a whole-query aggregate (per-row contributions retained so a
+capture `remove` — which carries no old value — is still answerable;
+min/max recompute over contributions when the extremum's holder
+leaves; an integer sum past its exactness bound hands the registration
+over to re-running); **group** maintenance (the affected groups
+recomputed through the query engine from their retained rows, for any
+return that reads only the group and for `@jarenjs/linq`'s
+one-`groupBy` emissions, with an optional fold over the group
+outputs); **distinct** projections (the source holders of each value);
+**nested-group** (explicit two-level groups, refreshed per parent);
+**join** and **graph** maintenance over entity roots (changed keys
+point-read, their bounded owners evaluated again; a flat self join
+evaluates each later alias as an input root of its own); and **re-run**
 for everything else — declared, reported through `live.mode`, never
-silent. A plan that fell to the set residual ONLY for a spatial
+silent. Event time adds the **bucket** and **rolling** states, and an
+asynchronous connection **resnapshots** every registration (both
+below). A plan that fell to the set residual ONLY for a spatial
 refinement (a pushed box or cell range with the exact predicate left
 to the engine) is still the rows strategy — the geofence: the fetch is
 index-narrowed and per-row re-evaluation IS the exact test — while an
@@ -1146,8 +1159,12 @@ over-approximating toward re-evaluation (a missed update would be a
 correctness bug; an extra one is only slower). Emissions preserve
 reference identity for untouched rows — the O(k) renderer's contract —
 proven by a seeded oracle that holds the maintained result equal to a
-fresh re-query after every mutation. Incremental beats re-run 13× at
-1k rows, 51× at 10k.
+fresh re-query after every mutation, and a census pins, shape by shape,
+the strategy and reason the classifier reports against the table row
+that names the shape. What maintenance
+costs beside a re-run — the wins, and the startup and high-fan-out
+losses — is measured, not asserted: see the equal-correctness
+[measurements](docs/REPLICATION-FORMAT.md#measurements).
 
 **Event time** (`src/live-time.js`) adds two more strategies for the
 one document shape whose answer is a function of instants rather than
@@ -1341,9 +1358,10 @@ parent the transaction removes before that removal, and the write releasing a
 unique value before the write taking it.
 
 `live-join.js` compiles indexed dependency descriptors from the entity planner
-and mapping. The same cache strategy maintains inner/left joins and eligible
-nested graph projections. `live-nested.js` maintains explicit two-level groups
-by refreshing affected parents from bounded leaves. Source and result payloads
+and mapping. The same cache strategy maintains inner/left joins, flat self joins
+included, and eligible nested graph projections. `live-nested.js` maintains
+single-level groups, distinct projections and explicit two-level groups by
+recomputing the affected groups or parents from bounded leaves. Source and result payloads
 consume row and byte credits; unsupported shapes keep named reruns. See
 [the replication contract](docs/REPLICATION-FORMAT.md) and
 [the strategy matrix](docs/LIVE-FORMAT.md).
