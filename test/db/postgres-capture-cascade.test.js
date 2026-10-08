@@ -5,15 +5,18 @@
  * closure reads stays locked until the commit, as strongly as the delete's
  * own action locks it, so a writer outside capture cannot add, move or remove
  * a row of it in between while one that only references a row the delete
- * nulls is not waited for; and a tracked save records the stored row when a
- * foreign-key action of its transaction changed it.
+ * nulls is not waited for; a tracked save records the stored row when a
+ * foreign-key action of its transaction changed it; and every record a seeded
+ * random workload commits, folded over the complete logical state before its
+ * transaction, gives the state after it.
  */
 import { before, describe, it } from 'node:test';
 import * as assert from 'node:assert/strict';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { openStore } from '@jarenjs/db';
 import { postgresDriver } from '@jarenjs/db/postgres';
-import { cascadeModel, seedCascade, cascadeWorkload, canonicalPatch, CASCADE_RECORDS } from './oracle/cascade.js';
+import { cascadeModel, seedCascade, cascadeWorkload, canonicalPatch, CASCADE_RECORDS, trialModel, randomWorkload }
+  from './oracle/cascade.js';
 
 const url = process.env.JAREN_PG_URL;
 const key = { type: 'string', 'x-entity': { key: true } };
@@ -178,4 +181,15 @@ describe('PostgreSQL journal capture of foreign-key actions', { skip: !url && 'J
       assert.deepEqual(await store.entity('Note').get('n2'), { id: 'n2', body: 'edited' });
     });
   });
+
+  for (let seed = 1; seed <= 6; seed += 1) {
+    it(`seed ${seed}: every record of a random workload yields the next state`, async () => {
+      await fixture(async ({ store }) => {
+        // a refused statement aborts a PostgreSQL transaction, so a refusal
+        // inside one is taken in a savepoint of its own
+        const { records } = await randomWorkload(store, seed, 20, { savepointRefusals: true });
+        assert.ok(records.length > 0);
+      }, { model: trialModel(), seed: async () => undefined });
+    });
+  }
 });
