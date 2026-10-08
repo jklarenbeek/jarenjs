@@ -29,7 +29,10 @@
 
 import { chain, useStatementOnce } from './driver.js';
 import { DbCompileError } from './errors.js';
-import { KEY_COLUMN, DOC_COLUMN } from './ddl.js';
+import { KEY_COLUMN, DOC_COLUMN, SCALAR_CODECS, indexCondition } from './ddl.js';
+import { readPredicate, sqlTokens, SQLITE_PREDICATE } from './dialects/check-read.js';
+import { comparableDeclaredSql } from './schema-sql.js';
+import { foldIdentifier } from './invariants.js';
 import { MODEL_VERSION, ENGINE_TABLES } from './engine-metadata.js';
 import { registeredName, expressionMembers } from './expression.js';
 import { modelPath } from './model-path.js';
@@ -47,7 +50,7 @@ export const INTROSPECT_CODES = Object.freeze({
     + 'nor a generated column over a member path',
   'unmapped-type': 'a column type no schema type maps back from',
   'unmapped-index': 'an index over something the model cannot name — an expression, '
-    + 'a partial predicate, or a column that is not mapped',
+    + 'a partial predicate the condition reader does not read back exactly, or a column that is not mapped',
   'unmapped-constraint': 'a CHECK or a constraint the model has no vocabulary for',
   'lossy-type': 'two schema types share this column type, so the derived one is a choice',
   'key-source': 'the key column cannot say which document member filled it',
@@ -98,6 +101,11 @@ function readTable(connection, table, objects) {
                 partial: Number(declared[i].partial ?? 0) !== 0,
                 columns: rows.map((row) => row.name == null ? null : String(row.name)),
                 sql: objects.find((o) => o.type === 'index' && o.name === String(declared[i].name))?.sql ?? null,
+                // an engine that keeps no CREATE text reports the condition and
+                // the index's shape from its catalog, as the open reads them
+                predicate: declared[i].predicate == null ? null : String(declared[i].predicate),
+                plain: declared[i].plain == null || Number(declared[i].plain) === 1,
+                conforming: declared[i].conforming == null || String(declared[i].conforming) === 'on',
               }]));
           };
           return chain(withColumns(0, []), (indexes) =>
@@ -266,6 +274,7 @@ function deriveCollection(dialect, table, report, keys, functionNames) {
         `the column type '${column.type}' maps back to no schema type, so the member `
         + 'is left untyped'));
     }
+    else reportLossyType(dialect, table, column, report);
     paths.set(column.name, { path: modelPath(segments), type, segments });
   }
 
@@ -451,14 +460,43 @@ function deriveEntity(dialect, table, report) {
   const fkByColumn = new Map(table.foreignKeys.map((fk) => [fk.column, fk]));
   const uniqueColumns = new Set();
   const indexedColumns = new Set();
+  const readable = readableColumns(dialect, table);
+  // a one-column index named as a `unique` or `index` property's own, over a
+  // column the entity maps, is that property's when it is the very index the
+  // flag plans; every other index is an entry of the entity's `indexes`
+  const flags = [], others = [];
   for (const index of table.indexes) {
-    if (index.partial || index.columns.some((column) => column === null)
-      || index.columns.length !== 1) {
-      report(loss('unmapped-index', `${table.name}.${index.name}`,
-        'a partial, expression or composite entity index is not a property-level declaration'));
-      continue;
-    }
-    (index.unique ? uniqueColumns : indexedColumns).add(index.columns[0]);
+    const [only] = index.columns;
+    const flag = !index.partial && index.columns.length === 1 && index.name === `${table.name}_${only}`
+      && readable.some((c) => c.physical === only) && plannedDifference(dialect, table, index, undefined, readable) === null;
+    (flag ? flags : others).push(index);
+  }
+  // every name the derived entity plans is one the store accepts: compared
+  // with ASCII case folded, as it compares them, in the order it plans them —
+  // the table and the engine's own relations, the flags' indexes, the entries
+  /** @type {Map<string, string>} */
+  const taken = new Map();
+  /** The name an earlier object took, or `undefined` once this one takes it. @param {string} name */
+  const claim = (name) => {
+    const first = taken.get(foldIdentifier(name));
+    if (first === undefined) taken.set(foldIdentifier(name), name);
+    return first;
+  };
+  for (const name of [table.name, ...dialect.ownRelationNames(table.name, dialect.identityColumn === undefined ? [] : [dialect.identityColumn])]) claim(name);
+  const collision = (/** @type {any} */ index, /** @type {string} */ first) => report(loss('unmapped-index', `${table.name}.${index.name}`,
+    `its name is the name of '${first}' with ASCII case folded, as the store compares names, so a model could not declare both`));
+  for (const index of flags) {
+    const first = claim(index.name);
+    if (first === undefined) (index.unique ? uniqueColumns : indexedColumns).add(index.columns[0]);
+    else collision(index, first);
+  }
+  const indexes = [];
+  for (const index of others) {
+    const declared = entityIndexOf(dialect, table, index, readable);
+    const first = typeof declared === 'string' ? undefined : claim(index.name);
+    if (typeof declared === 'string') report(loss('unmapped-index', `${table.name}.${index.name}`, declared));
+    else if (first !== undefined) collision(index, first);
+    else indexes.push(declared);
   }
 
   const properties = {};
@@ -490,6 +528,7 @@ function deriveEntity(dialect, table, report) {
       report(loss('unmapped-type', `${table.name}.${column.name}`,
         `the column type '${column.type}' maps back to no schema type`));
     }
+    else reportLossyType(dialect, table, column, report);
     const property = type === undefined ? {} : { type };
     const entity = {};
     if (primaryKey.has(column.name)) { entity.key = true; required.push(column.name); }
@@ -523,7 +562,124 @@ function deriveEntity(dialect, table, report) {
     + 'and those are not in the physical shape'));
   const schema = { type: 'object', properties };
   if (required.length > 0) schema.required = required.sort();
-  return { schema };
+  return indexes.length > 0 ? { schema, indexes } : { schema };
+}
+
+/** An identifier a `$.<member>` path and an index name can spell. */
+const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/**
+ * The columns of an entity table an index or its condition may read: a
+ * scalar column the entity maps (a key and a foreign key included), each
+ * with the codec its type reads back as.
+ * @param {any} dialect @param {any} table
+ * @returns {{ name: string, physical: string, codec: string }[]}
+ */
+function readableColumns(dialect, table) {
+  const identity = dialect.identityColumn?.name;
+  return table.columns.flatMap((/** @type {any} */ column) => {
+    const codec = SCALAR_CODECS.get(dialect.schemaTypeOf(column.type));
+    return column.generated || column.name === DOC_COLUMN || column.name === identity
+      || codec === undefined || !IDENTIFIER.test(column.name)
+      ? [] : [{ name: column.name, physical: column.name, codec }];
+  });
+}
+
+/**
+ * The text after a CREATE INDEX statement's top-level `WHERE`, or `null`.
+ * @param {string | null} sql @returns {string | null}
+ */
+function conditionText(sql) {
+  if (sql === null) return null;
+  let depth = 0;
+  for (const token of sqlTokens(sql)) {
+    if (token.kind === 'symbol') depth += token.value === '(' ? 1 : token.value === ')' ? -1 : 0;
+    else if (depth === 0 && token.kind === 'word' && token.value.toUpperCase() === 'WHERE') return sql.slice(token.at + 5);
+  }
+  return null;
+}
+
+/**
+ * The `indexes` entry an entity table's declared index derives, or why it
+ * cannot (the `unmapped-index` detail). Its terms are columns the entity maps,
+ * its name carries the table's prefix, a condition reads back into the query
+ * grammar, and the entry plans exactly the index the database holds, compared
+ * as every open compares it — the stored CREATE text where the engine keeps
+ * one, the catalog's condition and shape where it does not — so a derived
+ * index never claims more than the database enforces.
+ * @param {any} dialect @param {any} table @param {any} index
+ * @param {{ name: string, physical: string, codec: string }[]} readable
+ * @returns {any} the entry, or the reason as a string
+ */
+function entityIndexOf(dialect, table, index, readable) {
+  const name = index.name.slice(table.name.length + 1);
+  if (!index.name.startsWith(`${table.name}_`) || !IDENTIFIER.test(name))
+    return `the index name does not start with '${table.name}_', the prefix of every index a model declares on the entity`;
+  if (index.columns.some((/** @type {string | null} */ column) => !readable.some((c) => c.physical === column)))
+    return `the index covers (${index.columns.map((/** @type {string | null} */ column) => column ?? '<expression>').join(', ')}), `
+      + 'which are not all scalar columns the entity maps';
+  /** @type {any} */
+  const declared = { name, path: index.columns.length === 1 ? `$.${index.columns[0]}` : index.columns.map((/** @type {string} */ column) => `$.${column}`),
+    ...(index.unique ? { unique: true } : {}) };
+  const keepsText = dialect.capabilities?.declaredSqlText === true;
+  /** @type {string | undefined} */
+  let rendered;
+  if (index.partial) {
+    const text = keepsText ? conditionText(index.sql) : index.predicate;
+    const member = (/** @type {string} */ identifier) => {
+      const column = readable.find((c) => c.physical === identifier);
+      return column === undefined ? null : { path: `$.${column.name}`, codec: column.codec };
+    };
+    const where = text === null ? null : keepsText ? readPredicate(text, SQLITE_PREDICATE, member)
+      : dialect.readBack?.read(text, readable, index.conforming) ?? null;
+    if (where === null) return 'the partial predicate is not one the condition reader reads back into the query grammar';
+    try { rendered = indexCondition(where, readable, dialect, `/entities/${table.name}/indexes`, (member) => `'${member}' is not mapped`); }
+    catch { return 'the partial predicate reads back as a condition the model refuses'; }
+    declared.where = where;
+  }
+  return plannedDifference(dialect, table, index, rendered, readable) ?? declared;
+}
+
+/**
+ * How a declared index differs from the one a model plans over its columns
+ * (with the rendered condition, if any), compared as every open compares it —
+ * the stored CREATE text where the engine keeps one, the catalog's shape and
+ * condition where it does not — or `null` where it is that index.
+ * @param {any} dialect @param {any} table @param {any} index
+ * @param {string | undefined} rendered - the condition as the model renders it
+ * @param {{ name: string, physical: string, codec: string }[]} readable
+ * @returns {string | null}
+ */
+function plannedDifference(dialect, table, index, rendered, readable) {
+  if (dialect.capabilities?.declaredSqlText === true) {
+    const planned = dialect.ddl.createIndex({ name: index.name, table: table.name, columns: index.columns, unique: index.unique, where: rendered });
+    let same = false;
+    try { same = index.sql !== null && comparableDeclaredSql(index.sql) === comparableDeclaredSql(planned); }
+    catch { same = false; }
+    return same ? null : 'the stored index text is not the text the derived index plans (a collation, a key order, or another spelling of its condition)';
+  }
+  if (!index.plain) return 'the index is not the plain ascending B-tree a model declares (NULLS NOT DISTINCT, a key order, collation or operator class of its own, an INCLUDE column, or a deferred check)';
+  return rendered === undefined || dialect.readBack?.condition(index.predicate, rendered, readable, index.conforming) === null
+    ? null : 'the stored condition does not compare equal to the one the derived index plans';
+}
+
+/**
+ * Report (`lossy-type`) a column whose type more than one scalar schema type
+ * is stored as: the type it maps back to and every one the dialect itself
+ * writes into a column of that type. The derived type is then a choice.
+ * @param {any} dialect @param {any} table @param {any} column @param {(row: any) => void} report
+ */
+function reportLossyType(dialect, table, column, report) {
+  const comparable = dialect.comparableColumnType(column.type);
+  const derived = dialect.schemaTypeOf(column.type);
+  const origins = new Set([derived]);
+  for (const type of SCALAR_CODECS.keys()) {
+    const stored = dialect.typeFor?.(type, 'generated');
+    if (stored !== undefined && dialect.comparableColumnType(stored) === comparable) origins.add(type);
+  }
+  if (origins.size < 2) return;
+  report(loss('lossy-type', `${table.name}.${column.name}`, `the column type '${column.type}' holds `
+    + `${[...origins].sort().join(' and ')} members alike, so the derived '${derived}' is a choice`));
 }
 
 /**

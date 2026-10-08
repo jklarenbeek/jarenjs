@@ -33,8 +33,9 @@ specification is
 `@jarenjs/db`'s `openStore(model, { driver })` accepts what this pen
 emits unchanged. A model declares `entities`, `collections`, or both: an
 entity is a JSON Schema whose members carry the `x-entity` mapping
-vocabulary (MODEL-FORMAT §9.2), a collection is a document schema with a
-key pointer and a list of indexes (§2, §2.1).
+vocabulary (MODEL-FORMAT §9.2), beside the composite or partial indexes it
+declares itself, and a collection is a document schema with a key pointer
+and a list of indexes (§2, §2.1).
 
 Four things are worth naming before the tables:
 
@@ -136,6 +137,7 @@ leaves `key` where it was and replaces `default`.
 | `.fill(value)` | `default: { value }` — a literal, filled when absent; the value crosses the JSON boundary (`requireJson`) | marks it `generated` | native; a value that is not JSON is `JL0101` |
 | `.compute(fn)`, `.compute(query)` | `default: { query }` — captured over the document being written (`$`), or a query document verbatim | marks it `generated` | native; a captured rule that binds ANY external is `JL0104` |
 | `.physical(layout)` | `physical` on the entity declaration | preserves entity types; explicit column codecs | native on an object builder |
+| `.indexes(entries)` | `indexes` on the entity declaration — composite, unique or partial `index()` entries over the entity's column-mapped members (MODEL-FORMAT §9.2), each held by `defineModel` to what an entity table carries, a member read through `get()` written `$.<member>` | each entry's paths and `where` are checked against the entity's shape | native on an entity's own object builder; not an array, or an entry outside the index grammar, `JL0101`; on another kind, on a member or in a collection's schema, an entry that needs a generated column (`derive`, `precision`, `dims`, `physical`, an expression), or a path that is not one top-level member, `JL0102` |
 | `.invariants(rules)` | `invariants` on the entity declaration | explicit writer qualification | native on an object builder |
 | `.renamedFrom(name)` | `x-rename: name` on the ENTITY (or collection) declaration — a planning hint the migration planner reads, never part of the shape (MIGRATION-FORMAT §3) | — | native on the declaration's own builder; on a member, `JL0102` (the document has no place for one) |
 | `.meta(annotations)` | as the schema pen ([SCHEMA-PEN.md](SCHEMA-PEN.md#28-annotations-and-messages)), minus one key | — | refused (`JL0104`) for `x-entity`: the pen owns that keyword |
@@ -197,12 +199,12 @@ no relations (MODEL-FORMAT §9.1); one physical engine sits under both.
 | Method | Emits | Type reading | Status |
 |---|---|---|---|
 | `collection(schema, { key?, identity?, indexes?, renamedFrom? })` | `{ schema, key?, identity?, indexes?, 'x-rename'? }` — `key` is an RFC 6901 pointer, a captured member path (`(d) => d.id` → `/id`) or `null` (the store allocates, `identity` says how); the other options ride verbatim, and an `indexes` entry written by hand rather than by `index()` is held to what `index()` writes | `CollectionSpec<Infer<B>>`, carrying the document shape its paths are checked against | native; an option outside the four, a key that is neither pointer nor lambda nor `null`, an `indexes` that is not an array of `index()` entries, an entry member outside the index grammar or of the wrong type, all `JL0101` |
-| `index(path, options?)` | `{ name, path, unique?, derive?, precision?, dims?, physical? }` — `path` is a captured lambda (`(p) => p.cell` → `$.cell`), a non-empty array of them (a composite), or a JSONPath string; `name` defaults to `by_<segments>`; each of the rest is the JSON type the grammar declares — `unique` a boolean, `derive` and `physical` strings, `precision` and `dims` numbers — and rides verbatim for the store's model walk to judge its value (§2.1) | `IndexPath<D>` over the collection's shape: a member the shape lacks does not compile | native; an option outside the six, or of the wrong type, is `JL0101`; a lambda that answers an operator result or a surface method is `JL0102` |
+| `index(path, options?)` | `{ name, path, unique?, derive?, precision?, dims?, physical?, where? }` — `path` is a captured lambda (`(p) => p.cell` → `$.cell`), a non-empty array of them (a composite), or a JSONPath string; `name` defaults to `by_<segments>`; each of the rest is the JSON type the grammar declares — `unique` a boolean, `derive` and `physical` strings, `precision` and `dims` numbers, `where` a query document — and rides verbatim for the store's model walk to judge its value (§2.1); a `where` lambda is captured into the query grammar (`(d) => d.status.in(['active', 'pending'])` → `{ $eq: ['$.status', { $seq: ['active', 'pending'] }] }`) | `IndexPath<D>` and `IndexCondition<D>` over the collection's or the entity's shape: a member the shape lacks does not compile, nor does a `where` that is neither a predicate nor a query document | native; an option outside the seven, or of the wrong type, is `JL0101`; a lambda that answers an operator result or a surface method is `JL0102`, and so is a `where` lambda that answers no predicate |
 
 | `expressionIndex(expression, options?)` | `{ name, expression, unique? }` — an index over a COMPUTED value: a `{ call, args }` node whose arguments are member lambdas, JSONPath strings, JSON scalars or further calls; `name` defaults to `by_<call>_<members>` | the expression's member lambdas are checked against the collection's shape | native; a node outside the vocabulary, an option outside the two, a `unique` that is not a boolean, and anything that looks like SQL text are all `JL0101` |
 
 The option set for `index()` is exactly `name`, `unique`, `derive`,
-`precision`, `dims`, `physical` (`INDEX_OPTIONS` in
+`precision`, `dims`, `physical`, `where` (`INDEX_OPTIONS` in
 `src/model/collection.js`); the default name is `by_` plus the path's
 member segments, identifier-safe (`defaultName`) — `by_series_t`,
 `by_x_y`. Each typed option is checked for the JSON type the grammar
@@ -214,6 +216,17 @@ store, which reads only `true` as unique, opened a NON-unique index and
 accepted the duplicates; it is `JL0101` now, in `index()`,
 `expressionIndex()` and a raw entry handed to `collection()` alike, and a
 raw entry's member outside the grammar (`uniqe`) is `JL0101` too.
+
+`where` is the condition of a partial index (MODEL-FORMAT §2): a query
+document rides verbatim, and a lambda is captured over the record as
+stored, as the query pen captures a predicate — one capture, no second
+builder — with a member read through `get()` written `$.<member>`, the
+path a condition reads. `in()` writes membership as `$eq` against a
+`$seq` and accepts a `null` item, which the store refuses in a condition
+(`JD0004`); every other judgement of the condition is the store's. A
+lambda that answers no predicate — a member read alone — is `JL0102`; the
+types refuse one that answers no boolean expression, so only a boolean
+member read alone compiles and meets that refusal at build.
 
 `expressionIndex()` takes only `name` and `unique`, because an
 expression names the members it reads itself — nothing that describes a
@@ -229,7 +242,7 @@ collection declaration inside it, and the index declaration inside that.
 
 | Method | Emits | Type reading | Status |
 |---|---|---|---|
-| `defineModel({ entities?, collections? })` | `{ $model: '0.1', collections?, entities? }`, deep-frozen; each entity is `{ schema, 'x-rename'? }` | `ModelDocument<E, C>`, whose phantoms `InferMeta<>` and the migration pen read | native; neither member given, a member outside the two, a name that is not an identifier, or a declaration of the wrong kind, all `JL0101`; an undeclared relation target or a `collection()` under `entities`, `JL0102` |
+| `defineModel({ entities?, collections? })` | `{ $model: '0.1', collections?, entities? }`, deep-frozen; each entity is `{ schema, indexes?, invariants?, physical?, 'x-rename'? }` | `ModelDocument<E, C>`, whose phantoms `InferMeta<>` and the migration pen read | native; neither member given, a member outside the two, a name that is not an identifier, or a declaration of the wrong kind, all `JL0101`; an undeclared relation target or a `collection()` under `entities`, `JL0102` |
 | `document(root, { draft? })` | as [SCHEMA-PEN.md](SCHEMA-PEN.md#210-the-document-and-the-builder-itself) — a standalone JSON Schema, with `x-entity` blocks riding as annotations. It writes a schema, never a `$model` | — | native |
 | `schemaOf(value)` | as [SCHEMA-PEN.md](SCHEMA-PEN.md#210-the-document-and-the-builder-itself) — the document of a builder, or the value as given | `unknown` | native |
 | `withEntity(Base)` | nothing: a NEW class, `Base` plus §2.1's vocabulary. The eight exported classes are made with it at module scope, and a consumer subclassing one takes the same route | `B` — the base class's own type | native |
@@ -290,11 +303,13 @@ column of its own in any case (§6).
   Inverse agreement, foreign-key types and the join-table rules stay the
   store's (`JD0031`, `JD0005`): two declarations that name the same `via`
   and disagree are refused by `normalizeEntities`, not here.
-- **An entity has no `indexes` option.** Its indexes are `unique()` and
-  `index()` per member — the vocabulary has no composite and no derived
-  entity index — so a `collection()` declaration handed to `entities` is
-  refused (`JL0102`) rather than emitted as a document the store would
-  reject.
+- **An entity's indexes are on its builder, never a `collection()`.** A
+  one-column index is `unique()` or `index()` on the member, and a
+  composite, unique or partial one is `.indexes([m.index(…)])` on the
+  entity's object builder — over members with a column of their own, and
+  never derived, because an entity table has no generated column. A
+  `collection()` declaration handed to `entities` is refused (`JL0102`)
+  rather than emitted as a document the store would reject.
 - **`uuid()` is the format, `identity('uuid')` is the key.** The schema
   pen's `.uuid()` writes `format: 'uuid'` here as everywhere; the
   store-allocated key is `identity('uuid')`, MODEL-FORMAT §9.5's own
@@ -702,6 +717,62 @@ member. `derive`, `precision` and `dims` ride verbatim — the pen does not
 know whether a driver has R\*Tree, and `normalizeModel` is the judge
 (MODEL-FORMAT §2.1, §3.1).
 
+**An entity's own index**, where a rule spans rows: one active or pending
+shift per employee and day, which SQLite and PostgreSQL then refuse for
+every writer, the store and a raw SQL client alike (MODEL-FORMAT §9.2):
+
+```js
+import * as m from '@jarenjs/linq/model';
+
+export const model = m.defineModel({
+  entities: {
+    Shift: m.object({
+      id: m.string().key(),
+      employeeId: m.string(),
+      day: m.string(),
+      status: m.string().optional(),
+    }).indexes([
+      m.index([(s) => s.employeeId, (s) => s.get('day')], {
+        name: 'one_active',
+        unique: true,
+        where: (s) => s.status.in(['active', 'pending']),
+      }),
+    ]),
+  },
+});
+```
+
+```json
+{
+  "$model": "0.1",
+  "entities": {
+    "Shift": {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "x-entity": { "key": true } },
+          "employeeId": { "type": "string" },
+          "day": { "type": "string" },
+          "status": { "type": "string" }
+        },
+        "required": ["id", "employeeId", "day"],
+        "additionalProperties": false
+      },
+      "indexes": [
+        { "name": "one_active", "path": ["$.employeeId", "$.day"], "unique": true,
+          "where": { "$eq": ["$.status", { "$seq": ["active", "pending"] }] } }
+      ]
+    }
+  }
+}
+```
+
+`day` is a surface method on the capture, so the member is read with
+`get('day')`, which an entity index writes `$.day`; the condition is
+captured the way the query pen captures a predicate, and `in()` writes the
+membership the store lowers to `"status" IN ('active', 'pending')`. A
+cancelled shift, and one without a status, stays outside the index.
+
 ## 4. Refusals
 
 The model pen raises these three `LinqBuildError` codes and no others —
@@ -745,7 +816,9 @@ This section is the vocabulary this pen adds.
 | `m.rel.hasMany(42, { … })` | `rel.hasMany() takes a definition name (letters, digits, '_', '.', '-', not starting with a digit), got 42` | an entity name |
 | `m.index(42)`, `m.index([])` | `index() takes a path lambda, a JSONPath string, or a non-empty array of them` | `m.index((p) => p.cell)` |
 | `m.index([42])` | `index()[0] is neither a path lambda nor a JSONPath string` | a lambda or a path string per position |
-| `m.index((p) => p.a, { derived: 'bbox' })` | `index() does not take 'derived' — the options are name, unique, derive, precision, dims, physical` | `{ derive: 'bbox' }` |
+| `m.index((p) => p.a, { derived: 'bbox' })` | `index() does not take 'derived' — the options are name, unique, derive, precision, dims, physical, where` | `{ derive: 'bbox' }` |
+| `m.index((p) => p.a, { where: '"a" = 1' })` | `index() where takes a query document, got a string` | `{ where: (p) => p.a.eq(1) }`, or `{ where: { $eq: ['$.a', 1] } }` |
+| `m.object({ … }).indexes({})` | `indexes() takes an array of index() entries` | an array |
 | `m.index((p) => p.a, null)` | `index() takes an options object` | `{}`, or no second argument |
 | `m.index((p) => p.a, { unique: 1 })` | `index() unique takes a boolean, got 1` | `{ unique: true }` — the same refusal from `expressionIndex()` |
 | `m.index((p) => p.loc, { derive: 'geohash', precision: '7' })` | `index() precision takes a number, got a string` | `{ precision: 7 }` |
@@ -755,7 +828,7 @@ This section is the vocabulary this pen adds.
 | `m.collection(b, { keys: [] })` | `collection() does not take 'keys' — the options are key, identity, indexes, renamedFrom` | `key` |
 | `m.collection(b, { indexes: {} })` | `collection() indexes is an array of index() entries` | an array |
 | `m.collection(b, { indexes: [{ path: '$.a' }] })` | `collection() indexes[0] is not an index() entry` | `m.index('$.a')` |
-| `m.collection(b, { indexes: [{ name: 'by_a', path: '$.a', uniqe: true }] })` | `collection() indexes[0] does not take 'uniqe' — it takes name, path, expression, unique, derive, precision, dims, physical` — `docPath` `/uniqe` | `unique`, or `m.index('$.a', { unique: true })` |
+| `m.collection(b, { indexes: [{ name: 'by_a', path: '$.a', uniqe: true }] })` | `collection() indexes[0] does not take 'uniqe' — it takes name, path, expression, unique, derive, precision, dims, physical, where` — `docPath` `/uniqe` | `unique`, or `m.index('$.a', { unique: true })` |
 | `m.collection(b, { indexes: [{ name: 'by_a', path: '$.a', unique: 1 }] })` | `collection() indexes[0] unique takes a boolean, got 1` | `unique: true` |
 | `m.defineModel({})` | `defineModel() needs entities, collections, or both` | declare one of the two |
 | `m.defineModel({ tables: {} })` | `defineModel() does not take 'tables'` | `entities` or `collections` |
@@ -796,7 +869,11 @@ the pen raises it earlier, at build, with the same meaning.
 | `m.number().identity('auto')` | `identity('auto') is allocated by the database for a single integer key only — the member is a number; spell it integer()` | `m.integer().identity('auto')` |
 | `m.defineModel({ entities: { A: m.object({ a: m.integer().identity('auto'), b: m.string().key() }) } })` | `identity('auto') on A.a: a store-allocated key is a SINGLE key, and A declares a composite one (a, b)` — `docPath` `/entities/A/schema/properties/a/x-entity/default` | one `key()`, or a caller-supplied composite |
 | `m.defineModel({ entities: { User: m.object({ posts: m.rel.hasMany('Psot', …) }), Post: … } })` | `relation target 'Psot' on User.posts is not a declared entity — the model declares 'User', 'Post'` — `docPath` `/entities/User/schema/properties/posts/x-entity/relation/to` | the declared name |
-| `m.defineModel({ entities: { A: m.collection(b, { key: '/id', indexes: [] }) } })` | `entities.A is a collection() declaration — an entity has no key pointer and no indexes option: its key is key() on a member and its indexes are unique()/index() per member (the vocabulary has no composite or derived entity index)` — `docPath` `/entities/A` | put it under `collections`, or spell the entity as a builder |
+| `m.defineModel({ entities: { A: m.collection(b, { key: '/id', indexes: [] }) } })` | `entities.A is a collection() declaration — an entity has no key pointer and no indexes option: its key is key() on a member, and its indexes are unique()/index() on a member or .indexes([index(…)]) on its object builder (no derived index: an entity table has no generated column)` — `docPath` `/entities/A` | put it under `collections`, or spell the entity as a builder |
+| `m.object({ … }).indexes([m.index((p) => p.loc, { derive: 'geohash' })])`, `.indexes([m.expressionIndex(…)])` | `indexes()[0] takes no 'derive': an entity table has no generated column — index the member itself, or declare the index on a collection` — `docPath` `/entities/A/indexes/0/derive` | a plain `m.index()` over a column-mapped member, or the index on a collection |
+| `m.object({ … }).indexes([m.index((p) => p.profile.city)])` | `indexes()[0] path $.profile.city is not one top-level member: (d) => d.member, or '$.member'` — `docPath` `/entities/A/indexes/0/path` | map the member as a top-level scalar and index it |
+| `m.index((p) => p.a, { where: (p) => p.status })` | `index() where takes a predicate — an operator result such as (d) => d.status.eq('active') — not a string` | `(p) => p.status.eq('active')` |
+| `m.defineModel({ entities: { A: m.object({ id: m.string().key(), p: m.object({ c: m.string() }).indexes([…]) }) } })`, `m.collection(m.object({ … }).indexes([…]), …)` | `indexes() on entities.A.p is not written — an entity declares its indexes on its own object builder, and a collection in collection()'s indexes option` — `docPath` `/entities/A` | `.indexes()` on the entity's own builder, or `collection()`'s `indexes` |
 | `m.object({}).key()`, `m.array(m.string()).index()`, `m.rel.hasMany(…).key()` | `key() applies to a member with a column of its own — this one's kind is 'object', and only a top-level scalar (string, number, integer, boolean, null) is column-mapped; everything else lives in the JSON document` | a top-level scalar member |
 | `m.enumOf(['a', 1]).index()` | `index() applies to a member with a column of its own — this enum mixes JSON types, so it has no one column type and stays in the JSON document; an enum of one scalar type is column-mapped and takes it` | one scalar type per set — `m.enumOf(['a', 'b'])`, or `m.string().enumOf([…])` |
 | `m.string().version()`, `m.number().version()` | `version() is the optimistic-concurrency token and lives in a plain integer column — this member's kind is 'string'; spell it integer()` | `m.integer().version()` |
@@ -967,6 +1044,9 @@ void m.string().column('integer');       // the epoch column is a date's
 void m.string().meta({ 'x-entity': { key: true } });   // owned here
 void m.collection(Place, { indexes: [m.index((p) => p.nope)] });  // not a member
 void m.defineModel({ entities: { Place: m.collection(Place, { indexes: [] }) } });
+const A = m.object({ id: m.string().key(), a: m.string() });
+void A.indexes([m.index((s) => s.a, { where: '"a" = 1' })]);     // a predicate, never SQL text
+void A.indexes([m.index((s) => s.a, { where: (s) => s.nope.eq(1) })]);  // not a member
 void (await import('@jarenjs/linq/schema')).string().key();  // no vocabulary there
 ```
 
@@ -986,14 +1066,19 @@ is not to reach for this pen at all.
 
 ### 6.1 What the format cannot carry — refused here, at build
 
-- **A composite or derived index on an entity, or a key pointer.** The
-  vocabulary is `unique: true` and `index: true` per member, and nothing
-  else: no multi-member entity index, no `derive: 'geohash'`, no
-  `physical` choice, and no pointer key — an entity's key is `key()` on
-  the members that make it. All four belong to a collection (§2.3), so
-  the alternative is a collection, or a stored member the index can be
-  single-column over. It is why a `collection()` under `entities` is
-  refused by name rather than silently emitted.
+- **A derived index on an entity, an index nothing carries, or a key
+  pointer.** An entity's indexes are `unique()`/`index()` per member and
+  `.indexes([m.index(…)])` on its own object builder — composite, unique
+  or partial — over members with a column of their own, and none is
+  derived: `derive`, `precision`, `dims`, `physical` and an expression
+  each need a generated column, which an entity table never has. They
+  are `JL0102` at `defineModel`; the types accept them, because an
+  `index()` entry does not record which options it was given. `.indexes()`
+  on a member, or anywhere in a collection's schema, is `JL0102` too:
+  nothing would carry it. An entity's key is `key()` on the members that
+  make it, never a pointer. A derived index belongs to a collection
+  (§2.3), which is why a `collection()` under `entities` is refused by
+  name rather than silently emitted.
 - **An epoch column off a date.** `column('integer')` derives its value
   from RFC 3339 text; there is nothing to derive from an integer or a
   bare string. Spell the member `datetime()` or `date()`.
@@ -1009,7 +1094,7 @@ is not to reach for this pen at all.
   top-level scalar gets one (MODEL-FORMAT §9.3); `version()` needs an
   integer one. Put the directive on a scalar member — or, for a
   collection, use an `index()` over the path (§2.3), which is the one
-  place a composite or derived index exists.
+  place a derived index exists.
 - **A `renamedFrom()` anywhere but a declaration's own builder.**
   `$model` 0.1 carries `x-rename` on an entity or a collection and
   nowhere else, so a hint on a member has nothing to be written into and
@@ -1042,6 +1127,12 @@ catch them:
 - **Anything about a `derive`, `precision`, `dims` or `physical`
   option.** They ride verbatim from `index()`; the model walk decides
   whether the driver can honour them.
+- **What an entity index reads, and its condition's grammar.** A path
+  naming a member the entity keeps in its document or does not declare, a
+  `where` reading an epoch member, a `null` literal or item, arithmetic,
+  or a condition the lowering folds to a constant (`true`, a comparison
+  across types) — each needs the whole mapping in view, and the store
+  answers `JD0004` at the member.
 - **An `x-entity` block written through the schema pen's `annotate()`.**
   `entity()` holds the closed vocabulary and `meta()` refuses the keyword
   outright (§4.3), but `annotate('x-entity', …)` is the low-level

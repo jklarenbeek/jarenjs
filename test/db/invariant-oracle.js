@@ -79,7 +79,8 @@ export function postgresEngine() {
   return { name: 'postgres', async fixture(tables) {
     const { default: pg } = await import('pg');
     const schema = `jaren_rules_${process.pid}_${++fixtures}`;
-    const pool = new pg.Pool({ connectionString: url, max: 6 });
+    // two pooled sessions and the fixture's own: three at most
+    const pool = new pg.Pool({ connectionString: url, max: 2 });
     const client = new pg.Client({ connectionString: url });
     await client.connect();
     try { await client.query(`CREATE SCHEMA "${schema}"; SET search_path TO "${schema}"; ${tables.postgres}`); }

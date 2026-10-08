@@ -25,6 +25,8 @@ import {
 } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';
 import { postgresDialect } from '@jarenjs/db/postgres';
+import { tempDbPath } from './helpers.js';
+import { ONE_ACTIVE, SHIFT_SCHEMA } from './invariant-oracle.js';
 
 /** A model with every shape the derivation has an answer for. */
 const MODEL = {
@@ -119,7 +121,7 @@ describe('introspectModel — the derivation', () => {
     finally { await connection.close(); }
   });
 
-  it('never strengthens partial uniqueness or silently drops expression index terms', async () => {
+  it('captures a partial predicate as the index condition, never strengthening uniqueness or dropping expression terms', async () => {
     const connection = handMade([
       'CREATE TABLE "Choice" ("id" TEXT PRIMARY KEY, "state" TEXT, "level" INTEGER)',
       `CREATE UNIQUE INDEX "Choice_partial" ON "Choice" ("state") WHERE "level" > 0`,
@@ -128,7 +130,89 @@ describe('introspectModel — the derivation', () => {
     try {
       const { model, report } = await introspectModel(connection);
       assert.deepStrictEqual(model.entities.Choice.schema.properties.state, { type: 'string' });
-      assert.deepStrictEqual(of(report, 'unmapped-index'), ['Choice.Choice_expr', 'Choice.Choice_partial']);
+      assert.deepStrictEqual(model.entities.Choice.indexes,
+        [{ name: 'partial', path: '$.state', unique: true, where: { $gt: ['$.level', 0] } }]);
+      assert.deepStrictEqual(of(report, 'unmapped-index'), ['Choice.Choice_expr']);
+    }
+    finally { await connection.close(); }
+  });
+
+  it('keeps an index whose text the model would not write again as unmapped-index', async () => {
+    const connection = handMade([
+      'CREATE TABLE "Choice" ("id" TEXT PRIMARY KEY, "state" TEXT, "level" INTEGER)',
+      'CREATE UNIQUE INDEX "Choice_bare" ON "Choice" ("state") WHERE level > 0',
+      'CREATE UNIQUE INDEX "Choice_length" ON "Choice" ("level") WHERE length("state") > 2',
+      'CREATE INDEX "Choice_nocase" ON "Choice" ("state" COLLATE NOCASE, "level")',
+      'CREATE INDEX "by_level" ON "Choice" ("level", "state")',
+    ]);
+    try {
+      const { model, report } = await introspectModel(connection);
+      assert.strictEqual(model.entities.Choice.indexes, undefined);
+      assert.deepStrictEqual(of(report, 'unmapped-index'),
+        ['Choice.Choice_bare', 'Choice.Choice_length', 'Choice.Choice_nocase', 'Choice.by_level']);
+    }
+    finally { await connection.close(); }
+  });
+
+  it('derives a property flag only from the very index the flag plans', async () => {
+    const connection = handMade([
+      'CREATE TABLE "T" ("id" TEXT PRIMARY KEY, "a" TEXT, "b" TEXT, "doc" BLOB NOT NULL) STRICT',
+      'CREATE UNIQUE INDEX "T_doc" ON "T" ("doc")',
+      'CREATE UNIQUE INDEX "T_a" ON "T" ("a" COLLATE NOCASE)',
+      'CREATE INDEX "T_b" ON "T" ("b")',
+    ]);
+    try {
+      const { model, report } = await introspectModel(connection);
+      assert.deepStrictEqual([model.entities.T.schema.properties.a, model.entities.T.schema.properties.b],
+        [{ type: 'string' }, { type: 'string', 'x-entity': { index: true } }]);
+      assert.strictEqual(model.entities.T.indexes, undefined);
+      assert.deepStrictEqual(of(report, 'unmapped-index'), ['T.T_a', 'T.T_doc']);
+    }
+    finally { await connection.close(); }
+  });
+
+  it('round-trips entity indexes: the one-column shorthand by its name, a composite and a partial one', async () => {
+    const { dbPath: path, cleanup } = tempDbPath();
+    const model = { $model: '0.1', entities: { Shift: { schema: { ...SHIFT_SCHEMA, properties: { ...SHIFT_SCHEMA.properties,
+      employeeId: { type: 'string', 'x-entity': { index: true } } } },
+    indexes: [ONE_ACTIVE, { name: 'by_day', path: '$.day' }] } } };
+    try {
+      const store = await openStore(model, { driver: nodeDriver(), path });
+      const { model: derived, report } = await store.introspect();
+      await store.close();
+      assert.deepStrictEqual(derived.entities.Shift.indexes, [{ name: 'by_day', path: '$.day' }, ONE_ACTIVE]);
+      assert.deepStrictEqual(derived.entities.Shift.schema.properties.employeeId, { type: 'string', 'x-entity': { index: true } });
+      assert.deepStrictEqual(of(report, 'unmapped-index'), []);
+      // the derived model plans the same indexes and opens the database it was read from; its schema
+      // requires only the key, so the plan back to the authored model is one drafted transform and no DDL
+      const back = planMigration(derived, model, { dialect: sqliteDialect });
+      assert.deepStrictEqual(back.migration.steps.map((step) => `${step.kind}${step.draft === true ? ' (draft)' : ''}`), ['jslt (draft)']);
+      assert.deepStrictEqual(back.report.schemaChanged, ['Shift']);
+      const reopened = await openStore(derived, { driver: nodeDriver(), path });
+      try {
+        await reopened.entity('Shift').create({ id: 's1', employeeId: 'e1', day: 'd1', status: 'active' });
+        await assert.rejects(reopened.entity('Shift').create({ id: 's2', employeeId: 'e1', day: 'd1', status: 'pending' }),
+          (/** @type {any} */ error) => error.code === 'JD2005' && error.class === 'constraint');
+      }
+      finally { await reopened.close(); }
+    }
+    finally { cleanup(); }
+  });
+
+  it('reports lossy-type where two schema types share the column type', async () => {
+    const connection = handMade([
+      'CREATE TABLE "T" ("id" TEXT PRIMARY KEY, "flag" INTEGER, "n" REAL, "s" TEXT, "doc" BLOB NOT NULL)',
+      'CREATE TABLE "c" ("key" INTEGER PRIMARY KEY, "doc" BLOB NOT NULL, '
+      + '"gx_n" INTEGER GENERATED ALWAYS AS (jsonb_extract("doc", \'$."n"\')) VIRTUAL, '
+      + '"gx_s" TEXT GENERATED ALWAYS AS (jsonb_extract("doc", \'$."s"\')) VIRTUAL) STRICT',
+      'CREATE INDEX "c_by_n" ON "c" ("gx_n")',
+      'CREATE INDEX "c_by_s" ON "c" ("gx_s")',
+    ]);
+    try {
+      const { model, report } = await introspectModel(connection);
+      assert.deepStrictEqual(model.entities.T.schema.properties.flag, { type: 'integer' });
+      assert.deepStrictEqual(of(report, 'lossy-type'), ['T.flag', 'c.gx_n']);
+      assert.match(report.find((row) => row.object === 'T.flag')?.detail ?? '', /'INTEGER'.*boolean.*integer/);
     }
     finally { await connection.close(); }
   });
@@ -243,17 +327,20 @@ describe('introspectModel — the derivation', () => {
     assert.deepStrictEqual(planned.createSql.slice(1).sort(), original.createSql.slice(1).sort());
   });
 
-  it('an introspected model enters the migration planner and finds nothing to do',
+  it('an introspected model enters the migration planner and plans no DDL',
     async () => {
       const store = await sqliteStore();
       const { model } = await Promise.resolve(
         store.introspect({ keys: { users: '/id' } }));
       await store.close();
       // the derived model against the DECLARED one: the physical shapes
-      // are the same, so the plan is empty. That is the convergence
-      // claim, and it is what makes a derived model usable as a `from`
+      // are the same, so the plan holds no DDL. That is the convergence
+      // claim, and it is what makes a derived model usable as a `from`;
+      // the members no index names are not in the shape, so the schema
+      // back to the declared one is a change the planner drafts a transform for
       const { migration, report } = planMigration(model, MODEL, { dialect: sqliteDialect });
-      assert.deepStrictEqual(migration.steps.filter((step) => step.kind === 'ddl'), []);
+      assert.deepStrictEqual(migration.steps.map((step) => `${step.kind}${step.draft === true ? ' (draft)' : ''}`), ['jslt (draft)']);
+      assert.deepStrictEqual(report.schemaChanged, ['users']);
       assert.deepStrictEqual(report.added, []);
       assert.deepStrictEqual(report.removed, []);
     });
@@ -544,6 +631,23 @@ describe('introspectModel — the derivation', () => {
       assert.deepStrictEqual(props.fixed.enum, ['only']);
       assert.deepStrictEqual(of(report, 'unmapped-constraint'), ['Choice.other_check']);
       assert.deepStrictEqual(of(report, 'unmapped-index'), ['Choice.Choice_partial']);
+    });
+
+    it('reports lossy-type for the PostgreSQL column types two schema types share', async () => {
+      const connection = pgConnection({
+        'relkind IN': [{ name: 'T', type: 'table' }],
+        'FROM pg_attribute a': [
+          { name: 'doc', type: 'jsonb', hidden: 0 },
+          { name: 'flag', type: 'smallint', hidden: 0 },
+          { name: 'n', type: 'numeric', hidden: 0 },
+          { name: 's', type: 'text', hidden: 0 },
+          { name: 'k', type: 'bigint', hidden: 0 },
+        ],
+      });
+      const { model, report } = await introspectModel(connection);
+      assert.deepStrictEqual(model.entities.T.schema.properties.flag, { type: 'integer' });
+      assert.deepStrictEqual(model.entities.T.schema.properties.n, { type: 'number' });
+      assert.deepStrictEqual(of(report, 'lossy-type'), ['T.flag', 'T.n']);
     });
 
     it('equivalent fixtures derive the same logical model', async () => {

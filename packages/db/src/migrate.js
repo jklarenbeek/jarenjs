@@ -122,17 +122,21 @@ function isWidening(from, to) {
 
 /**
  * Whether an index planned under one model must be rebuilt for its
- * declaration under the other: its uniqueness or its column list changed.
- * The collection and entity diffs share this one comparison. Columns compare
- * element by element, so a column name containing a comma never equals a
- * split of it (`['a,b']` is not `['a', 'b']`).
- * @param {{ unique: boolean, columns: readonly string[] }} from
- * @param {{ unique: boolean, columns: readonly string[] }} to
+ * declaration under the other: its uniqueness, its column list or its
+ * condition changed. The collection and entity diffs share this one
+ * comparison. Columns compare element by element, so a column name containing
+ * a comma never equals a split of it (`['a,b']` is not `['a', 'b']`); a
+ * condition compares as the plan renders it, the text every open verifies,
+ * and neither engine alters one in place. An expression index's expression is
+ * its generated column's, compared with the column.
+ * @param {{ unique: boolean, columns: readonly string[], where?: string }} from
+ * @param {{ unique: boolean, columns: readonly string[], where?: string }} to
  * @returns {boolean}
  */
 export function indexChanged(from, to) {
   return from.unique !== to.unique || from.columns.length !== to.columns.length
-    || from.columns.some((column, at) => column !== to.columns[at]);
+    || from.columns.some((column, at) => column !== to.columns[at])
+    || (from.where ?? null) !== (to.where ?? null);
 }
 
 /**
@@ -825,8 +829,9 @@ export function planMigration(fromModel, toModel, options = undefined) {
       || (a.stored === true) !== (b.stored === true);
 
     // columns first decide their fate; an index rebuilds when it
-    // changes OR when any column it covers is dropped or changed (the
-    // database refuses to drop a column under a live index) — then
+    // changes OR when any column it covers or its condition reads is
+    // dropped or changed (the database refuses to drop a column under a
+    // live index, or drops the index with it) — then
     // everything runs in dependency order: drop indexes, drop columns,
     // add columns, create indexes
     // the R*Tree half of the physical shape (MODEL-FORMAT §2.1,
@@ -865,7 +870,7 @@ export function planMigration(fromModel, toModel, options = undefined) {
     const indexNeedsRebuild = (indexName, fromIndex) => {
       const target = toIndexes.get(indexName);
       return target === undefined || indexChanged(fromIndex, target)
-        || fromIndex.columns.some((column) => disturbedColumns.has(column));
+        || [...fromIndex.columns, ...(fromIndex.reads ?? [])].some((column) => disturbedColumns.has(column));
     };
     for (const [indexName, fromIndex] of fromIndexes) {
       if (indexNeedsRebuild(indexName, fromIndex)) {
@@ -906,8 +911,8 @@ export function planMigration(fromModel, toModel, options = undefined) {
       if (source === undefined || rebuilt) {
         steps.push({
           kind: 'ddl',
-          sql: dialect.ddl.createIndex(
-            { name: indexName, table: name, columns: toIndex.columns, unique: toIndex.unique }),
+          sql: dialect.ddl.createIndex({ name: indexName, table: name, columns: toIndex.columns,
+            unique: toIndex.unique, where: toIndex.where }),
           note: `create index '${indexName}' on '${name}'`,
         });
       }
@@ -1296,7 +1301,7 @@ function planEntityChanges(fromModel, toModel, dialect, steps, report, transform
         if (source === undefined || indexDies(source)) {
           steps.push({ kind: 'ddl',
             sql: dialect.ddl.createIndex({ name: index.name, table: name,
-              columns: index.columns, unique: index.unique }),
+              columns: index.columns, unique: index.unique, where: index.where }),
             note: `create index '${index.name}' on '${name}'` });
         }
       }

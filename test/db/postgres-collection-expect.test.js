@@ -6,9 +6,11 @@
  * sessions — and it locks the ROW, never the store's writer lock: a plain
  * patch neither waits for an immediate transaction nor takes the writer
  * class. A patch that changes nothing writes no row version. `all()` is
- * every document, in both cursor modes.
+ * every document, in both cursor modes. Three sessions at most: each test's
+ * stores close with it, and a check of the server's own state runs on a
+ * session of its own, ended after it.
  */
-import { after, before, describe, it } from 'node:test';
+import { after, afterEach, before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { setTimeout as delay } from 'node:timers/promises';
 
@@ -33,27 +35,29 @@ const defer = () => {
 describe('PostgreSQL: a patch reads and writes in one transaction', { skip: !url && 'JAREN_PG_URL is not set' }, () => {
   /** @type {any} */
   let pg;
-  /** @type {any} */
-  let admin;
   const schema = `jaren_expect_${process.pid}`;
   /** @type {any[]} */
   const pools = [];
   /** @type {any[]} */
   const stores = [];
+  /** One statement on a session of its own, ended after it. @param {string} sql @param {any[]} [params] */
+  const once = async (sql, params = []) => {
+    const client = new pg.Client({ connectionString: url });
+    await client.connect();
+    try { return (await client.query(sql, params)).rows; }
+    finally { await client.end(); }
+  };
 
   before(async () => {
     pg = (await import('pg')).default;
-    admin = new pg.Client({ connectionString: url });
-    await admin.connect();
-    await admin.query(`CREATE SCHEMA "${schema}"`);
+    await once(`CREATE SCHEMA "${schema}"`);
   });
-  after(async () => {
+  afterEach(async () => {
     for (const store of stores.splice(0)) await store.close().catch(() => {});
     for (const pool of pools.splice(0)) await pool.end().catch(() => {});
-    if (admin) {
-      try { await admin.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`); }
-      finally { await admin.end(); }
-    }
+  });
+  after(async () => {
+    if (pg !== undefined) await once(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
   });
 
   /** @param {Record<string, any>} [driverOptions] */
@@ -65,13 +69,13 @@ describe('PostgreSQL: a patch reads and writes in one transaction', { skip: !url
     return store;
   };
   /** @param {string} id */
-  const xminOf = async (id) => (await admin.query(`SELECT xmin::text AS v FROM "${schema}"."docs" WHERE "key" = $1`, [id])).rows[0]?.v;
+  const xminOf = async (id) => (await once(`SELECT xmin::text AS v FROM "${schema}"."docs" WHERE "key" = $1`, [id]))[0]?.v;
   // this schema's writer locks only: other files hold their own at the same
   // time (the second key is the schema's OID, shifted into int4)
-  const writerLocks = async () => (await admin.query("SELECT count(*)::int AS n FROM pg_catalog.pg_locks WHERE locktype = 'advisory' "
+  const writerLocks = async () => (await once("SELECT count(*)::int AS n FROM pg_catalog.pg_locks WHERE locktype = 'advisory' "
     + 'AND classid = $1::oid AND objid = (((SELECT n.oid FROM pg_catalog.pg_namespace n '
     + 'WHERE n.nspname = $2)::int8 - 2147483648) & 4294967295)::oid',
-  [POSTGRES_LOCK_CLASSES.writer, schema])).rows[0].n;
+  [POSTGRES_LOCK_CLASSES.writer, schema]))[0].n;
 
   it('two stores racing a leading-test patch for 300 rounds lose no update', async () => {
     const a = await storeOn();
@@ -104,7 +108,6 @@ describe('PostgreSQL: a patch reads and writes in one transaction', { skip: !url
   it('a patch locks the row it reads, never the store: an immediate transaction does not stop it, and it takes no writer lock', async () => {
     const a = await storeOn();
     const b = await storeOn();
-    const c = await storeOn();
     await a.collection('docs').put({ id: 'row-1', n: 0 });
     await a.collection('docs').put({ id: 'row-2', n: 0 });
     // an immediate transaction holds the writer lock...
@@ -128,6 +131,8 @@ describe('PostgreSQL: a patch reads and writes in one transaction', { skip: !url
     });
     await patched.promise;
     assert.equal(await writerLocks(), 0, 'a patch takes no writer lock');
+    // a third store once the checks of the server's locks are done
+    const c = await storeOn();
     let sameRowDone = false;
     const sameRow = a.collection('docs').patch('row-1', [{ op: 'replace', path: '/n', value: 3 }]).then(() => { sameRowDone = true; });
     assert.deepEqual(await c.collection('docs').patch('row-2', [{ op: 'replace', path: '/n', value: 1 }]), { id: 'row-2', n: 1 });

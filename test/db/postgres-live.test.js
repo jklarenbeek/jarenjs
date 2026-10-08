@@ -16,7 +16,8 @@
  *
  * Each run owns a disposable schema, created before and dropped whole
  * after, so a failed run leaves nothing behind but a named schema an
- * operator can drop — and two runs never see each other's tables.
+ * operator can drop — and two runs never see each other's tables. Three
+ * sessions at most: the administrative one and a pool of two.
  */
 
 import { describe, it, before, after } from 'node:test';
@@ -118,9 +119,9 @@ describe('PostgreSQL, live', { skip: SKIP }, () => {
     const model = { ...MODEL, entities: { Marker: { schema: { type: 'object', properties: {
       id: { type: 'string', 'x-entity': { key: true } }, value: { type: 'integer' },
     } } } } };
-    for (let round = 0; round < 4; round++) {
+    for (let round = 0; round < 8; round++) {
       const driver = await freshDriver();
-      const outcomes = await Promise.allSettled(Array.from({ length: 8 }, () => openStore(model, { driver })));
+      const outcomes = await Promise.allSettled(Array.from({ length: 2 }, () => openStore(model, { driver })));
       try {
         assert.deepStrictEqual(outcomes.filter((outcome) => outcome.status === 'rejected'), []);
         const stores = outcomes.map((outcome) => outcome.value);
@@ -138,7 +139,7 @@ describe('PostgreSQL, live', { skip: SKIP }, () => {
     pg = (await import('pg')).default;
     admin = new pg.Client({ connectionString: URL });
     await admin.connect();
-    pool = new pg.Pool({ connectionString: URL, max: 12 });
+    pool = new pg.Pool({ connectionString: URL, max: 2 });
   });
 
   after(async () => {

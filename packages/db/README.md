@@ -1324,19 +1324,46 @@ declared the edge (`ambiguous-relation`). `strict: true` refuses rather
 than answering a partial model.
 
 Scalar enum CHECKs on mapped entity columns are recovered from both
-catalogs. A partial index or an expression term is reported as `unmapped-index`
-without inventing unconditional uniqueness. CHECKs outside the complete scalar
+catalogs. An entity's indexes come back as a model declares them: a
+one-column index named `<Entity>_<member>` that is exactly the index the
+flag plans as that property's `unique` or `index`, every other one as an
+entry of its `indexes`, and a partial index's condition as its `where` only
+where the condition reads back into the query grammar and renders to
+exactly what the database holds. That `where` is the reader's canonical
+form — a boolean compared as the stored `1` or `0`, a one-item `$seq` as a
+plain `$eq`, nested `$and`/`$or` flattened — equal in meaning and in the SQL
+it renders to the condition as declared. An index no model could declare —
+over an expression, an unmapped column or the row identity; with an
+`INCLUDE` column, an operator class, a collation or a key order of its own;
+whose name another planned object already takes with ASCII case folded —
+and every collection's partial index is reported as `unmapped-index`,
+never derived as an index it is not. CHECKs outside the complete scalar
 enum grammar, including NULL lists, collation-dependent equality and unproven
 type conversions, remain
 `unmapped-constraint`.
 
-The derived model is usable as a migration's `from`: read a database,
-plan against your declared model, and an unchanged shape plans nothing.
-SQLite and PostgreSQL derive the same logical model from equivalent
-databases — same collections, same keys, same index names and paths,
-same report rows — with the one difference the PostgreSQL mapping
-states: `numeric` carries both JSON number types, so an `integer`
-member reads back as `number`.
+The derived model reproduces the physical shape — tables, keys, mapped
+columns, foreign keys and the indexes above — not the schema that made it:
+it requires only the keys, types each member as its column reads back, and
+leaves out what the shape does not carry. It is usable as a migration's
+`from`: read a database, plan against your declared model, and an
+unchanged shape plans no index change — but the plan still carries what
+the shape could not tell: a drafted transform where the declared schema
+requires or types more, and a table rebuild where a `lossy-type` column's
+declared type is not the derived one. A collection's partial index is not derived, nor a
+generated column only it reads, so a plan from such a model adds a column
+the database already has. SQLite and PostgreSQL derive the same logical
+model from equivalent databases — same collections, same keys, same index
+names and paths, same report rows — save the differences their mappings
+state, each a `lossy-type` row where a column type holds two schema types:
+SQLite's `INTEGER` holds `integer` and `boolean` members; PostgreSQL's
+`numeric` holds `integer` and `number`, so an `integer` member reads back
+as `number`, and its `smallint` holds a `boolean`, which reads back as an
+`integer`. On PostgreSQL a derived model whose entity has a `boolean`
+member therefore does not reopen the database it was read from (`JD0002`:
+its `integer` member plans `numeric` over the `smallint` column) until the
+member is typed `boolean` again — and an index condition's `1` or `0` on
+that member is then written `true` or `false`.
 
 ## Replication and external-write boundaries
 

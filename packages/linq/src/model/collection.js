@@ -6,9 +6,11 @@
  * captured lambda (`(p) => p.embedding` → `$.embedding`), a composite
  * array of them, or a JSONPath string; each option is checked for the
  * JSON type the grammar declares (`unique` a boolean, `derive` and
- * `physical` strings, `precision` and `dims` numbers), the store's model
- * walk being the judge of their values. The default index name is
- * `by_<segments>`.
+ * `physical` strings, `precision` and `dims` numbers, `where` a query
+ * document or a predicate lambda captured into one), the store's model walk
+ * being the judge of their values. The default index name is
+ * `by_<segments>`. An entity's own indexes are the same `index()` entries,
+ * held by `entityIndex` to what an entity table can carry.
  */
 
 import { LinqBuildError } from '../errors.js';
@@ -16,10 +18,10 @@ import { closedTo } from '../json-boundary.js';
 import { isSchemaBuilder } from '../schema/brand.js';
 import { describeValue, requireJson, requireName } from '../schema/builders.js';
 import { captureQuery } from '../schema/check.js';
-import { DOCUMENT_SCOPE, refuseStrandedRename } from './entity.js';
+import { DOCUMENT_SCOPE, refuseStrandedIndexes, refuseStrandedRename } from './entity.js';
 
 /** The index options the grammar names beside `name` and `path`. */
-const INDEX_OPTIONS = new Set(['name', 'unique', 'derive', 'precision', 'dims', 'physical']);
+const INDEX_OPTIONS = new Set(['name', 'unique', 'derive', 'precision', 'dims', 'physical', 'where']);
 
 /** The options an EXPRESSION index takes: it names the members it reads
  * itself, so nothing that describes a member's storage belongs here. */
@@ -28,14 +30,18 @@ const EXPRESSION_OPTIONS = new Set(['name', 'unique']);
 /** Every member an index entry carries — a path index's or an expression
  * index's: a raw entry handed to `collection()` is held to this set. */
 const ENTRY_MEMBERS = Object.freeze(['name', 'path', 'expression', 'unique', 'derive', 'precision',
-  'dims', 'physical']);
+  'dims', 'physical', 'where']);
+
+/** The entry members an ENTITY index cannot carry: each needs a generated
+ * column (an expression's included), which an entity table never has. */
+const GENERATED_MEMBERS = Object.freeze(['expression', 'derive', 'precision', 'dims', 'physical']);
 
 /** The JSON type each typed index option takes. The store reads only
  * `true` as unique, so a `unique: 1` would open a NON-unique index.
  * @type {Readonly<Record<string, string>>} */
 const OPTION_TYPES = Object.freeze({
   __proto__: null, unique: 'boolean', derive: 'string', physical: 'string', precision: 'number',
-  dims: 'number',
+  dims: 'number', where: 'object',
 });
 
 /**
@@ -48,8 +54,46 @@ const OPTION_TYPES = Object.freeze({
  */
 function indexOption(value, key, what) {
   const type = OPTION_TYPES[key];
-  if (typeof requireJson(value, `${what} ${key}`) === type) return value;
-  throw new LinqBuildError('JL0101', `${what} ${key} takes a ${type}, got ${describeValue(value)}`);
+  const json = requireJson(value, `${what} ${key}`);
+  if (typeof json === type && (type !== 'object' || (json !== null && !Array.isArray(json)))) return value;
+  throw new LinqBuildError('JL0101', `${what} ${key} takes ${type === 'object' ? 'a query document' : `a ${type}`}, got ${describeValue(value)}`);
+}
+
+/** What a captured index condition reads, for the `JL0104` a second callback
+ * argument raises. */
+const RECORD_SCOPE = ' — it evaluates over the record as stored, which its argument IS; there is nothing else to read';
+
+/** A member read through `get()`, which the capture spells `$['<member>']`,
+ * as the path an index condition and an entity index read: `$.<member>`.
+ * @param {string} path @returns {string} */
+const memberPath = (path) => path.replace(/^\$\['([A-Za-z_][A-Za-z0-9_]*)'\]/, '$$.$1');
+
+/**
+ * A condition with every member it reads spelled as `memberPath` spells it; a
+ * quoted literal (`$const`) is left as written.
+ * @param {any} node
+ * @returns {any}
+ */
+function memberPaths(node) {
+  if (typeof node === 'string') return memberPath(node);
+  if (node === null || typeof node !== 'object') return node;
+  if (Array.isArray(node)) return node.map(memberPaths);
+  return Object.fromEntries(Object.entries(node).map(([key, value]) => [key, key === '$const' ? value : memberPaths(value)]));
+}
+
+/**
+ * An index condition: a query document verbatim, or a predicate lambda
+ * captured into one (`(d) => d.status.in(['active', 'pending'])`).
+ * @param {any} where
+ * @param {string} what - the method or entry, for the message
+ * @returns {any}
+ */
+function condition(where, what) {
+  if (typeof where !== 'function') return indexOption(where, 'where', what);
+  const captured = memberPaths(captureQuery(`${what} where`, [], where, { advice: () => RECORD_SCOPE }));
+  if (captured !== null && typeof captured === 'object' && !Array.isArray(captured)) return captured;
+  throw new LinqBuildError('JL0102',
+    `${what} where takes a predicate — an operator result such as (d) => d.status.eq('active') — not ${describeValue(captured)}`);
 }
 
 /** The marker a collection spec carries so `defineModel` can tell it apart. */
@@ -118,7 +162,9 @@ function defaultName(path) {
  * One index declaration.
  * @param {((doc: any) => any) | string | readonly (((doc: any) => any) | string)[]} path
  * @param {{ name?: string, unique?: boolean, derive?: 'geohash' | 'bbox' | 'vector',
- *   precision?: number, dims?: number, physical?: 'columns' | 'rtree' }} [options]
+ *   precision?: number, dims?: number, physical?: 'columns' | 'rtree',
+ *   where?: ((doc: any) => any) | object }} [options] - `where` is the condition
+ *   of a partial index: a predicate lambda or a query document
  * @returns {any} the frozen index document
  */
 export function index(path, options = {}) {
@@ -128,7 +174,7 @@ export function index(path, options = {}) {
   for (const key of Object.keys(options)) {
     if (!INDEX_OPTIONS.has(key)) {
       throw new LinqBuildError('JL0101',
-        `index() does not take '${key}' — the options are name, unique, derive, precision, dims, physical`);
+        `index() does not take '${key}' — the options are name, unique, derive, precision, dims, physical, where`);
     }
   }
   const resolved = indexPath(path, 'index()');
@@ -139,7 +185,45 @@ export function index(path, options = {}) {
   for (const key of ['unique', 'derive', 'precision', 'dims', 'physical']) {
     if (options[key] !== undefined) out[key] = indexOption(options[key], key, 'index()');
   }
+  if (options.where !== undefined) out.where = condition(options.where, 'index()');
   return Object.freeze(out);
+}
+
+/** An entity index path: one top-level member. */
+const MEMBER = /^\$\.[A-Za-z_][A-Za-z0-9_]*$/;
+
+/**
+ * One entity index, as `defineModel` lifts it onto the entity declaration:
+ * an `index()` entry, or a raw one held to the same grammar and types
+ * (`JL0101`), refused what an entity table cannot carry (`JL0102`) — a member
+ * that needs a generated column, and a path that is not one top-level member —
+ * and with a member read through `get()` spelled `$.<member>`, as the store
+ * reads an entity index path.
+ * @param {any} entry
+ * @param {string} at - the entry's `docPath`
+ * @returns {any} the entry as emitted
+ */
+export function entityIndex(entry, at) {
+  const what = `indexes()[${at.slice(at.lastIndexOf('/') + 1)}]`;
+  if (entry === null || typeof entry !== 'object' || typeof entry.name !== 'string')
+    throw new LinqBuildError('JL0101', `${what} is not an index() entry`, at);
+  closedTo(entry, ENTRY_MEMBERS, what, at);
+  for (const key of Object.keys(entry)) {
+    if (GENERATED_MEMBERS.includes(key)) {
+      throw new LinqBuildError('JL0102', `${what} takes no '${key}': an entity table has no generated column — `
+        + 'index the member itself, or declare the index on a collection', `${at}/${key}`);
+    }
+    if (OPTION_TYPES[key] !== undefined) indexOption(entry[key], key, what);
+  }
+  if (Array.isArray(entry.path) && entry.path.length === 0)
+    throw new LinqBuildError('JL0101', `${what} path is a member path or a non-empty array of them`, `${at}/path`);
+  const paths = (Array.isArray(entry.path) ? entry.path : [entry.path]).map((/** @type {any} */ path) => {
+    const member = typeof path === 'string' ? memberPath(path) : '';
+    if (MEMBER.test(member)) return member;
+    throw new LinqBuildError('JL0102',
+      `${what} path ${typeof path === 'string' ? path : describeValue(path)} is not one top-level member: (d) => d.member, or '$.member'`, `${at}/path`);
+  });
+  return requireJson({ ...entry, path: Array.isArray(entry.path) ? paths : paths[0] }, what);
 }
 
 /**
@@ -273,6 +357,7 @@ export function collection(builder, options = {}) {
     throw new LinqBuildError('JL0101', 'collection() takes a schema builder as its document schema');
   }
   refuseStrandedRename(builder, 'collection()');
+  refuseStrandedIndexes(builder, 'collection()', undefined, true);
   if (options === null || typeof options !== 'object' || Array.isArray(options)) {
     throw new LinqBuildError('JL0101', 'collection() takes an options object');
   }

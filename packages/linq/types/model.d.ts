@@ -13,7 +13,7 @@
  * model rebuilt through the pen equals the generated `EntityMetaMap`.
  */
 
-import type { DateTime, Expr } from './index.js';
+import type { BoolExpr, DateTime, Expr } from './index.js';
 import type {
   AnyBuilder, Annotations, BuilderLike, CheckRule, Flag, FlagsOf, Infer, Input, Json, JsonSchema,
   NamedLike, Simplify, SchemaBuilder, StringBuilder, NumberBuilder, BooleanBuilder,
@@ -230,6 +230,9 @@ export class EntityObjectBuilder<
   N extends boolean = false, F extends Flag = never,
 > extends ObjectBuilder<P, Open, PV, PVIn, N, F> {
   physical(layout: PhysicalLayout): this;
+  /** The entity's own indexes (MODEL-FORMAT §9.2): composite, unique or partial
+   * `index()` entries over its column-mapped members, checked against its shape. */
+  indexes(entries: readonly IndexSpec<this['__out']>[]): this;
   /** Persistence rules (MODEL-FORMAT §13); `assert` is a Query expression, and may use `$exists-row`. */
   invariants(rules: readonly { name: string; on: readonly ('insert' | 'update' | 'delete')[];
     enforcement: 'database' | 'store'; assert: unknown;
@@ -333,13 +336,23 @@ export const rel: {
 
 // ————— collections —————
 
-export interface IndexOptions {
+/** A partial index's condition: a predicate over the record as stored, or a
+ * query document in the grammar the store lowers. A member read alone is no
+ * predicate and does not compile; a boolean member read alone compiles and is
+ * refused at build (`JL0102`). */
+export type IndexCondition<D = unknown> =
+  | ((doc: Expr<D>) => BoolExpr)
+  | { readonly [operator: string]: unknown };
+
+export interface IndexOptions<D = unknown> {
   name?: string;
   unique?: boolean;
   derive?: 'geohash' | 'bbox' | 'vector';
   precision?: number;
   dims?: number;
   physical?: 'columns' | 'rtree';
+  /** The condition of a partial index (MODEL-FORMAT §2). */
+  where?: IndexCondition<D>;
 }
 
 /** One index declaration; `D` is the document shape its paths are checked against. */
@@ -352,6 +365,7 @@ export interface IndexSpec<D = unknown> {
   readonly precision?: number;
   readonly dims?: number;
   readonly physical?: 'columns' | 'rtree';
+  readonly where?: { readonly [operator: string]: unknown };
 }
 
 /** A member path: a captured lambda, a JSONPath string, or a composite of either. */
@@ -359,7 +373,7 @@ export type IndexPath<D> = ((doc: Expr<D>) => unknown) | string | readonly (((do
 
 /** One index over a singular path (`(p) => p.embedding` → `$.embedding`),
  * a composite, or a JSONPath string; default name `by_<segments>`. */
-export function index<D = unknown>(path: IndexPath<D>, options?: IndexOptions): IndexSpec<D>;
+export function index<D = unknown>(path: IndexPath<D>, options?: IndexOptions<D>): IndexSpec<D>;
 
 /** One node of an index expression: a member (a lambda or a JSONPath
  * string), a JSON scalar, or a call to a function the HOST declares. */
@@ -429,7 +443,13 @@ export interface ModelDocument<E = unknown, C = unknown> {
   readonly __entities?: E;
   readonly __collections?: C;
   readonly $model: '0.1';
-  readonly entities?: { readonly [name: string]: { readonly schema: JsonSchema | boolean; readonly 'x-rename'?: string } };
+  readonly entities?: { readonly [name: string]: {
+    readonly schema: JsonSchema | boolean;
+    readonly indexes?: readonly IndexSpec[];
+    readonly physical?: PhysicalLayout;
+    readonly invariants?: readonly unknown[];
+    readonly 'x-rename'?: string;
+  } };
   readonly collections?: { readonly [name: string]: CollectionSpec };
 }
 

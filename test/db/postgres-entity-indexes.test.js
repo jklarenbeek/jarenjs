@@ -8,12 +8,14 @@
  * predicate added to an index declared without one, and a changed generated
  * column are drift (`JD0002`), as SQLite's declared-text comparison already
  * makes them; a collection index honors its `where`; a boolean condition and
- * a boolean enum compare the stored `smallint`; and a reopen changes nothing.
+ * a boolean enum compare the stored `smallint`; a reopen changes nothing; and
+ * introspection derives the indexes back, a condition read as stored.
  * Two connections at most; each test drops its schema.
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { openStore } from '@jarenjs/db';
+import { openStore, planMigration, introspectModel } from '@jarenjs/db';
+import { postgresDialect } from '@jarenjs/db/postgres';
 import { PG_URL, withPostgres } from './store-core-engines.js';
 import { ONE_ACTIVE, SHIFT_ROWS, SHIFT_SCHEMA, SHIFT_VERDICTS, createVerdicts, openRefusal, shiftModel, uniquenessAgreement,
   uniquenessModel } from './invariant-oracle.js';
@@ -221,6 +223,10 @@ describe('entity indexes on PostgreSQL', { skip: !PG_URL && 'JAREN_PG_URL is not
       ['a descending key', `DROP INDEX "S"."Shift_one_open"; ${open} ("employeeId", "day" DESC) WHERE (NOT (COALESCE("status" IN ('cancelled', 'void'), FALSE)))`, true],
       ['a key collation of its own', `DROP INDEX "S"."Shift_one_open"; ${open} ("employeeId" COLLATE "POSIX", "day") `
         + 'WHERE (NOT (COALESCE("status" IN (\'cancelled\', \'void\'), FALSE)))', true],
+      ['a key column moved into INCLUDE', `DROP INDEX "S"."Shift_one_open"; ${open} ("employeeId") INCLUDE ("day") `
+        + 'WHERE (NOT (COALESCE("status" IN (\'cancelled\', \'void\'), FALSE)))', true],
+      ['an operator class of its own', `DROP INDEX "S"."Shift_one_open"; ${open} ("employeeId" text_pattern_ops, "day") `
+        + 'WHERE (NOT (COALESCE("status" IN (\'cancelled\', \'void\'), FALSE)))', true],
     ]);
     for (const [label, sql, drift] of CASES) {
       await withPostgres(async ({ pool, schema, driver }) => {
@@ -248,6 +254,70 @@ describe('entity indexes on PostgreSQL', { skip: !PG_URL && 'JAREN_PG_URL is not
         await (await openStore(model, { driver: postgresDriver(escaped, { schema }) })).close();
       }
       finally { await escaped.end(); }
+    });
+  });
+
+  it('round-trips the motivating index through introspection, and the derived model reopens the database it was read from', async () => {
+    await withPostgres(async ({ schema, driver }) => {
+      const model = { $model: '0.1', entities: { Shift: { schema: { ...SHIFT_SCHEMA, properties: { ...SHIFT_SCHEMA.properties,
+        employeeId: { type: 'string', 'x-entity': { index: true } } } }, indexes: [ONE_ACTIVE, { name: 'by_day', path: '$.day' }] } } };
+      const store = await openStore(model, { driver: driver() });
+      const { model: derived, report } = await store.introspect();
+      await store.close();
+      assert.deepEqual(derived.entities.Shift.indexes, [{ name: 'by_day', path: '$.day' }, ONE_ACTIVE]);
+      assert.deepEqual(derived.entities.Shift.schema.properties.employeeId, { type: 'string', 'x-entity': { index: true } });
+      assert.deepEqual(report.filter((row) => row.code === 'unmapped-index'), []);
+      // the same indexes and columns: back to the authored model is one drafted transform (the
+      // derived schema requires only the key) and no DDL
+      const back = planMigration(derived, model, { dialect: postgresDialect({ searchPath: schema }) });
+      assert.deepEqual(back.migration.steps.map((step) => `${step.kind}${step.draft === true ? ' (draft)' : ''}`), ['jslt (draft)']);
+      assert.deepEqual(back.report.schemaChanged, ['Shift']);
+      const reopened = await openStore(derived, { driver: driver() });
+      try { assert.deepEqual(await createVerdicts(reopened.entity('Shift'), SHIFT_ROWS), SHIFT_VERDICTS); }
+      finally { await reopened.close(); }
+    });
+  });
+
+  it('reads a boolean condition back as the stored smallint, and reports the smallint and numeric columns lossy', async () => {
+    await withPostgres(async ({ driver }) => {
+      const model = { $model: '0.1', entities: { Shift: { schema: { ...SHIFT_SCHEMA, properties: { ...SHIFT_SCHEMA.properties,
+        flag: { type: 'boolean' }, n: { type: 'integer' } } }, indexes: [{ name: 'flagged', path: '$.n', where: { $eq: ['$.flag', true] } }] } } };
+      const store = await openStore(model, { driver: driver() });
+      try {
+        const { model: derived, report } = await store.introspect();
+        // the derived types are the columns' own: smallint reads as an integer, numeric as a number
+        assert.deepEqual(derived.entities.Shift.indexes, [{ name: 'flagged', path: '$.n', where: { $eq: ['$.flag', 1] } }]);
+        assert.deepEqual([derived.entities.Shift.schema.properties.flag, derived.entities.Shift.schema.properties.n],
+          [{ type: 'integer' }, { type: 'number' }]);
+        assert.deepEqual(report.filter((row) => row.code === 'lossy-type').map((row) => row.object).sort(), ['Shift.flag', 'Shift.n']);
+      }
+      finally { await store.close(); }
+    });
+  });
+
+  it('reports an index no model declares, and never derives a name the store would refuse', async () => {
+    await withPostgres(async ({ pool, schema, driver }) => {
+      const model = { $model: '0.1', entities: { T: { schema: { type: 'object', required: ['id'], properties: {
+        id: { type: 'string', 'x-entity': { key: true } }, a: { type: 'string' }, b: { type: 'string', 'x-entity': { index: true } },
+        m: { type: 'string' } } } } } };
+      await (await openStore(model, { driver: driver() })).close();
+      const T = `"${schema}"."T"`;
+      // a key over a alone with m only carried; an operator class of its own (twice, once under a
+      // property's own index name); the row identity; and a name the store's own index of b takes, case folded
+      await pool.query(`CREATE UNIQUE INDEX "T_incl" ON ${T} ("a") INCLUDE ("m"); CREATE INDEX "T_ops" ON ${T} ("a" text_pattern_ops, "m"); `
+        + `CREATE INDEX "T_m" ON ${T} ("m" text_pattern_ops); CREATE INDEX "T_rid" ON ${T} ("rid"); CREATE INDEX "T_B" ON ${T} ("b", "m")`);
+      const connection = await driver().open();
+      try {
+        const { model: derived, report } = await introspectModel(connection);
+        assert.equal(derived.entities.T.indexes, undefined);
+        assert.deepEqual([derived.entities.T.schema.properties.b, derived.entities.T.schema.properties.m],
+          [{ type: 'string', 'x-entity': { index: true } }, { type: 'string' }]);
+        assert.deepEqual(report.filter((row) => row.code === 'unmapped-index').map((row) => row.object).sort(),
+          ['T.T_B', 'T.T_incl', 'T.T_m', 'T.T_ops', 'T.T_rid']);
+        // the derived model plans: no two of its objects share a name
+        assert.deepEqual(planMigration(derived, derived, { dialect: postgresDialect({ searchPath: schema }) }).migration.steps, []);
+      }
+      finally { await connection.close(); }
     });
   });
 });

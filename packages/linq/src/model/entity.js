@@ -248,6 +248,16 @@ export function withEntity(Base) {
       return this.with({ physical: requireJson(layout, 'physical()') });
     }
 
+    /** The entity's own indexes — composite, unique or partial `index()`
+     * entries over its column-mapped members — lifted onto the entity
+     * declaration, where `defineModel` holds each to what an entity table
+     * carries. @param {readonly any[]} entries */
+    indexes(entries) {
+      if (this.state.kind !== 'object') throw new LinqBuildError('JL0102', 'indexes() belongs on an entity object');
+      if (!Array.isArray(entries)) throw new LinqBuildError('JL0101', 'indexes() takes an array of index() entries');
+      return this.with({ indexes: [...entries] });
+    }
+
 
     /** Declare persistence predicates, with explicit writer enforcement.
      * @param {any[]} rules */
@@ -305,15 +315,17 @@ function childrenOf(state) {
 }
 
 /**
- * The path of the first DESCENDANT carrying a `renamedFrom` hint, or
- * `null`. `$model` 0.1 puts `x-rename` on an entity or a collection
- * declaration and nowhere else (MIGRATION-FORMAT §3), so a hint anywhere
- * but the declaration's own builder is written by nobody — and a rename
- * the planner never sees is a drop plus a create.
- * @param {any} root - the declaration's builder; its OWN hint is lifted
+ * The path of the first DESCENDANT carrying a `renamedFrom` hint (or the
+ * state `key` names), or `null`. `$model` 0.1 puts `x-rename` on an entity or
+ * a collection declaration and nowhere else (MIGRATION-FORMAT §3), so a hint
+ * anywhere but the declaration's own builder is written by nobody — and a
+ * rename the planner never sees is a drop plus a create. An entity's
+ * `indexes()` are lifted from the entity's own builder alike.
+ * @param {any} root - the declaration's builder; its OWN state is lifted
+ * @param {string} [key] - the state member
  * @returns {string | null}
  */
-export function strandedRename(root) {
+export function strandedRename(root, key = 'renamedFrom') {
   const seen = new Set();
   /** @type {[string, any][]} */
   const queue = childrenOf(root.state).map(([segment, child]) => [segment, child]);
@@ -321,7 +333,7 @@ export function strandedRename(root) {
     const [path, builder] = /** @type {any} */ (queue.shift());
     if (builder === null || typeof builder !== 'object' || seen.has(builder)) continue;
     seen.add(builder);
-    if (builder.state?.renamedFrom !== undefined) return path;
+    if (builder.state?.[key] !== undefined) return path;
     for (const [segment, child] of childrenOf(builder.state)) {
       queue.push([segment.startsWith('[') ? `${path}${segment}` : `${path}.${segment}`, child]);
     }
@@ -342,4 +354,18 @@ export function refuseStrandedRename(builder, what, docPath = undefined) {
     + 'entity or a collection declaration, never on a member, so the hint would be lost and '
     + "a rename the planner cannot see is a drop plus a create; put it on the declaration's "
     + 'own builder, or rename the member with a migration transform', docPath);
+}
+
+/**
+ * Refuse `indexes()` where no declaration carries it: on a member of an
+ * entity, and anywhere in a collection's schema — `own` — whose indexes are
+ * `collection()`'s own option. An index declared there would be dropped.
+ * @param {any} builder @param {string} what @param {string} [docPath] @param {boolean} [own]
+ */
+export function refuseStrandedIndexes(builder, what, docPath = undefined, own = false) {
+  const path = own && builder.state.indexes !== undefined ? '' : strandedRename(builder, 'indexes');
+  if (path === null) return;
+  throw new LinqBuildError('JL0102',
+    `indexes() on ${what}${path === '' ? '' : `.${path}`} is not written — an entity declares its indexes on its own `
+    + "object builder, and a collection in collection()'s indexes option", docPath);
 }

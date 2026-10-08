@@ -669,9 +669,13 @@ export function postgresDialect(options = undefined) {
         + 'pg_get_expr(i.indpred, i.indrelid) AS predicate, '
         + `${CONFORMING} AS conforming, `
         // a plain index: ascending B-tree keys under their columns' own
-        // collations, nulls distinct, checked at once — what the plan creates
-        + "CASE WHEN am.amname = 'btree' AND NOT i.indnullsnotdistinct AND i.indimmediate "
+        // collations and their types' default operator classes, every column
+        // a key (an INCLUDE column is carried, not keyed), nulls distinct,
+        // checked at once — what the plan creates
+        + "CASE WHEN am.amname = 'btree' AND NOT i.indnullsnotdistinct AND i.indimmediate AND i.indnkeyatts = i.indnatts "
         + 'AND NOT EXISTS (SELECT 1 FROM unnest(i.indoption::int2[]) AS o(flags) WHERE o.flags <> 0) '
+        + 'AND NOT EXISTS (SELECT 1 FROM unnest(i.indclass::oid[]) AS c(opclass) '
+        + 'JOIN pg_opclass oc ON oc.oid = c.opclass WHERE NOT oc.opcdefault) '
         + 'AND NOT EXISTS (SELECT 1 FROM unnest(i.indcollation::oid[], i.indkey::int2[]) AS k(coll, attnum) '
         + 'JOIN pg_attribute ka ON ka.attrelid = i.indrelid AND ka.attnum = k.attnum WHERE k.coll <> ka.attcollation) '
         + 'THEN 1 ELSE 0 END AS plain '

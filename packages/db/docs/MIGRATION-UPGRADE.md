@@ -440,11 +440,33 @@ value the store did not honor now refuse by code, before any statement:
   `where`. A database an earlier release created under such a model holds the
   unconditional index and is `JD0002` at open: drop it and create it with
   its condition, as `jaren-db shape` prints the planned statement (SQLite's
-  spelling).
+  spelling), or plan a migration to the model from the same model without
+  that `where`, which drops and recreates the index.
+- The migration planner compared an index's uniqueness and columns only: an
+  added partial index planned an unconditional `CREATE INDEX`, which the
+  migration's own shape check then refused (`JD0023`), and a changed condition
+  planned no step while the next open was `JD0002`. A plan now creates an index
+  with its condition and drops and recreates one whose condition changed
+  ([MIGRATION-FORMAT §3](MIGRATION-FORMAT.md#3-planning-and-the-wideningnarrowing-rule)).
+- `introspectModel` reported every composite or partial entity index as
+  `unmapped-index` and read a one-column index as its property's `unique` or
+  `index` whatever its name. It now derives the entity's `indexes` — a
+  one-column index is a property's flag only under that property's own name,
+  `<Entity>_<member>`, and only as the flag plans it — with a partial
+  index's `where` wherever the condition reads back exactly, and reports
+  `lossy-type` for a column type two schema types share (SQLite `INTEGER`,
+  PostgreSQL `numeric` and `smallint`). A
+  caller that branches on report rows meets these; `strict: true` refused
+  every such database already (`document-members`). A derived model plans
+  back to the declared one with no index change but with a rebuild for each
+  `lossy-type` column whose declared type differs and a drafted transform
+  for the schema, and on PostgreSQL it reopens a database whose entity has a
+  `boolean` member only once that member is typed `boolean` again.
 - PostgreSQL's open compared columns, index columns and foreign keys, and
   opened a database whose index gained, lost or changed a condition, whose
-  index became `NULLS NOT DISTINCT`, descending or collated otherwise, or
-  whose generated column's expression changed outside the store. It now reads
+  index became `NULLS NOT DISTINCT`, descending or collated otherwise or
+  gained an `INCLUDE` column or an operator class of its own, or whose
+  generated column's expression changed outside the store. It now reads
   each index's condition and shape and each generated expression back from
   the catalog and compares them exactly, and such a database is `JD0002`
   until the change is reverted. An entity

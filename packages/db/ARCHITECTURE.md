@@ -185,9 +185,10 @@ stable code, an object and a detail, sorted, once:
 | `unmapped-view` | a view is not a shape a model can declare |
 | `unmapped-table` | a table with neither a document column nor a key |
 | `unmapped-column` | a generated column whose expression is not a member path this dialect wrote |
-| `unmapped-index` | an index over an expression, a predicate, or a column no member path explains |
+| `unmapped-index` | an index over an expression, a predicate the condition reader does not read back exactly, or a column no member path explains |
 | `unmapped-constraint` | a CHECK that is not a complete scalar enum of a mapped entity column |
 | `unmapped-type` | a column type no schema type maps back from — the member is derived untyped |
+| `lossy-type` | a column type two schema types are stored as (SQLite `INTEGER`; PostgreSQL `numeric`, `smallint`) — the derived type is a choice |
 | `ambiguous-relation` | a foreign key says which entity it points at; which side declared the edge, and whether the other holds many, is not in the shape |
 
 Scalar entity enum CHECKs are recovered on both dialects. SQLite reads its
@@ -196,7 +197,20 @@ its `ANY (ARRAY[...])` rendering and numeric literal casts. The parser accepts
 only the entire enum expression. Unknown predicates, NULL lists, non-binary SQLite collations, nondeterministic
 PostgreSQL collations and casts whose meaning is not proven remain `unmapped-constraint`. Partial indexes and
 expression terms retain their catalog flags; they are never converted into
-unconditional uniqueness. Optional `introspect.checks`/`readChecks` hooks leave
+unconditional uniqueness. An entity's declared index is a property's flag
+when it is the one-column index the flag plans under the property's own
+`<Entity>_<member>`, and otherwise an entry of its `indexes`, a partial one's
+condition read through the same reader the PostgreSQL open uses
+(`readPredicate`; the dialect's `readBack.read` on PostgreSQL). Either way
+it derives only where the index the model would plan is the one the database
+holds, compared as every open compares it (`plannedDifference`): the stored
+CREATE text on SQLite, with the condition `indexCondition` renders from the
+reading; on PostgreSQL the catalog's `plain` flag — a B-tree of key columns
+only, default operator classes, the columns' own collations, ascending,
+nulls distinct, immediate — and the open's condition comparison. Every name
+the derived entity plans is checked against the others as the store checks
+them, ASCII case folded, so a derived index never claims more than the
+database enforces and the derived model never names an object twice. Optional `introspect.checks`/`readChecks` hooks leave
 injected dialects compatible with the earlier catalog surface.
 
 `strict: true` refuses instead of returning a partial model, because a

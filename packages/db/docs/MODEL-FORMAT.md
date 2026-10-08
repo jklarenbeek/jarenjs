@@ -101,7 +101,9 @@ The store runs over SQLite — on Node (`@jarenjs/db/node`), on Bun
   keeps a condition inline in its catalog row (about 8 kB compressed): a
   list of long literals past that is refused by the server at every open
   (`JD0002` naming the server's reason). The same lowering serves an
-  entity index (§9.2).
+  entity index (§9.2). A changed `where` migrates as the index's own
+  `DROP INDEX` and `CREATE INDEX`
+  ([MIGRATION-FORMAT §3](MIGRATION-FORMAT.md#3-planning-and-the-wideningnarrowing-rule)).
 - `indexes[].derive` declares a **derived** index: the columns are
   computed FROM the selected member rather than being the member.
   See §2.1.
@@ -2410,10 +2412,30 @@ inside the writing transaction lets a concurrent writer slip past it.
   text, and PostgreSQL, which keeps none, reads the condition back out
   of its catalog through one exact condition reader and compares it with
   the planned one, and checks the index is the plain ascending B-tree the
-  plan creates (no `NULLS NOT DISTINCT`, no key order or collation of its
-  own, no deferred check). A changed, dropped or added condition — a
+  plan creates (no `NULLS NOT DISTINCT`, no key order, collation or
+  operator class of its own, no `INCLUDE` column, no deferred check). A
+  changed, dropped or added condition — a
   `NOT` without the `COALESCE` the rendering writes, a literal another
   decimal spells — and a condition that does not read, is `JD0002`.
+- A changed index — its uniqueness, its members or its condition — is a
+  migration: the planner drops and recreates it, a table rebuild
+  recreates it with its condition, and adding a unique index over rows
+  that violate it is the engine's refusal (`JD0023`, class `constraint`)
+  ([MIGRATION-FORMAT §9](MIGRATION-FORMAT.md#9-relational-changes-entities)).
+  `introspectModel` derives the index back: a one-column index named
+  `<Entity>_<member>` that is exactly the index the flag plans is that
+  property's `unique` or `index`, and any other one an `indexes` entry,
+  its condition read back only where it renders to exactly what the
+  database holds, in the reader's canonical form (a boolean as the stored
+  `1` or `0`, a one-item list as `$eq`, nested `$and`/`$or` flattened —
+  equal in meaning and rendered SQL). An index no model declares — an
+  `INCLUDE` column, an operator class, collation or key order of its own,
+  a name another planned object takes with case folded — stays an
+  `unmapped-index` row. The derived model types a member as its column
+  reads back, so a `lossy-type` column plans a table rebuild back to the
+  declared type, and on PostgreSQL a derived `boolean` member (`smallint`,
+  read as an `integer`) reopens the database only once it is typed
+  `boolean` again (`JD0002` until then).
 - A layout an application owns (§12) declares its indexes in
   `physical.indexes`; `indexes` beside `physical` is `JD0004`.
 
@@ -3640,6 +3662,13 @@ operator outside the bounded subset, a column codec it cannot compare,
 | `columns` | on a rule that includes `update`: the members whose assignment fires it (§13.1) |
 | `audit` | a database effect: `{ entity, values }` inserts a row (§13.5) |
 | `effects` | database effects of an update: `[{ "increment": "<member>" }]` (§13.5) |
+
+A rule judges the row it fires on, and reads another row only through
+`$exists-row`, by that row's key (§13.2). That no two rows share a value
+under a condition — one active shift per employee and day — is not a
+rule but an entity's partial unique index (§9.2): both engines enforce it
+for every writer, introspection derives it back, and the migration
+planner diffs it.
 
 ### 13.1 Updates: changed, assigned, columns
 

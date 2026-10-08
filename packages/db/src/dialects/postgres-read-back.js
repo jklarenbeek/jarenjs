@@ -272,6 +272,16 @@ export const postgresReadBack = Object.freeze({
    * @param {string} planned @param {{ name: string, physical: string, codec: string }[]} columns */
   conditionReads: (planned, columns) => readPredicate(planned, POSTGRES_PREDICATE, memberOf(columns)) !== null,
   /**
+   * A stored condition read into the query grammar, or `null` where the
+   * reader does not cover it — what introspection derives an index `where` from.
+   * @param {string} stored - the deparse
+   * @param {{ name: string, physical: string, codec: string }[]} columns - the members it may read
+   * @param {boolean} conforming - the reading session's `standard_conforming_strings`
+   * @returns {any}
+   */
+  read: (stored, columns, conforming) =>
+    readPredicate(stored, conforming ? POSTGRES_PREDICATE : POSTGRES_PREDICATE_ESCAPED, memberOf(columns)),
+  /**
    * How an index's stored condition differs from the planned one, or `null`.
    * @param {string | null} stored - the deparse, `null` for none
    * @param {string | undefined} planned - the rendered condition, `undefined` for none
@@ -282,7 +292,7 @@ export const postgresReadBack = Object.freeze({
   condition(stored, planned, columns, conforming) {
     if (stored === null) return planned === undefined ? null : `has no condition, and the model declares WHERE ${planned}`;
     if (planned === undefined) return `has the condition ${stored}, which the model does not declare`;
-    const have = readPredicate(stored, conforming ? POSTGRES_PREDICATE : POSTGRES_PREDICATE_ESCAPED, memberOf(columns));
+    const have = postgresReadBack.read(stored, columns, conforming);
     const want = readPredicate(planned, POSTGRES_PREDICATE, memberOf(columns));
     return have !== null && want !== null && JSON.stringify(have) === JSON.stringify(want)
       ? null : `has the condition ${stored}, and the model declares WHERE ${planned}`;

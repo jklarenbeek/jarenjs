@@ -287,9 +287,14 @@ explicit `id` (`jaren-db plan --id`).
   (create, `INSERT … SELECT`, drop) under its new name and no
   membership is lost.
 - Added, removed and changed indexes become index DDL — reusing the
-  store's own DDL generator, never a second implementation. A changed
-  generated column (type or path) is a drop plus an add, with its
-  dependent indexes dropped first and recreated after.
+  store's own DDL generator, never a second implementation. An index is
+  changed when its uniqueness, its columns (in order) or its condition
+  (`where`, as the store renders it) differ, and a changed index is a
+  `DROP INDEX` then a `CREATE INDEX`: neither engine alters an index
+  condition in place. A changed generated column (type or path) is a drop
+  plus an add, with its dependent indexes — those over it and those whose
+  condition reads it — dropped first and recreated after; an expression
+  index changes with its column.
 - A changed schema gets a `jslt` step with the identity stylesheet and
   `"draft": true`. The planner **cannot** infer a data transform and
   MUST NOT pretend to — a silent identity transform is how data gets
@@ -833,11 +838,26 @@ every row has a shadow-verified test that migrates seeded data:
 | add mapped column (property added, or moved out of the document) | `ALTER TABLE ADD COLUMN` — always nullable (absent reads back absent, MODEL-FORMAT §9.3) — plus a `sql` data step when the property's values already live in the document |
 | drop mapped column (property removed, or moved into the document) | fold the column back into the document first (`sql` step) when the property survives — a `NULL` column folds to ABSENT, never to JSON `null`, so §9.3's rule survives the fold, in the rebuild copy too; drop its index, then `DROP COLUMN` where SQLite's conditions hold, else rebuild |
 | change type / enum CHECK / key / epoch flavor | **rebuild** (§10) |
-| add or drop an index (`unique`/`index`/version) | plain DDL |
+| add, drop or change an index (`unique`/`index`/version, an entry of the entity's `indexes`, its `where`) | plain DDL — a changed index (uniqueness, columns or condition) is a `DROP INDEX` then a `CREATE INDEX`; a rebuild (§10) recreates every index with its condition |
 | add or drop a relation (foreign-key column, join table) | foreign keys **rebuild** the holder — an inferred foreign-key column the target model no longer declares is folded into the document when the target declares the property, else named in `report.lost` and the plan is destructive; join tables create/drop directly |
 | entity added / dropped | create / `DROP TABLE` (destructive, named), children before parents so no foreign key dangles mid-migration |
 | entity renamed | declared with `x-rename` on the target entity — never inferred; join tables renamed mechanically with their endpoints |
 | scalar ⇄ JSONB move (`column: "json"` toggled) | the first two rows: `ADD COLUMN` plus a `sql` lift out of the document, or a `sql` fold plus `DROP COLUMN` — a rebuild only where SQLite cannot drop the column in place |
+
+**A new unique index meets the stored rows.** Adding a unique or a partial
+unique index — or changing a condition so that it covers more rows — over
+rows that already violate it is the engine's own refusal: the step
+fails `JD0023` with class `constraint`, the migration rolls back, and
+`migrationStatus` keeps it pending. Nothing is dropped or merged on the
+operator's behalf. Find the colliding groups first, with the index's
+columns and its condition, and resolve them in a step of their own before
+the index arrives:
+
+```sql
+SELECT "employeeId", "day", count(*) FROM "Shift"
+WHERE "status" IN ('active', 'pending')
+GROUP BY "employeeId", "day" HAVING count(*) > 1
+```
 
 Two rules keep the diff honest:
 

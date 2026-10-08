@@ -70,6 +70,16 @@ void [noteInput, noteDoc, noRelations, noEntities];
 void m.collection(Place, { key: (d) => d.id, indexes: [m.index((p) => p.embedding, { derive: 'vector', dims: 4 })] });
 void m.collection(Place, { indexes: [m.index([(p) => p.series, (p) => p.t])] });
 
+// an entity's own indexes: composite, unique and partial, the paths and the
+// condition checked against the entity's shape
+const Shift = m.object({ id: m.string().key(), employeeId: m.string(), day: m.string(), status: m.string().optional() })
+  .indexes([m.index([(s) => s.employeeId, (s) => s.get('day')],
+    { name: 'one_active', unique: true, where: (s) => s.status.in(['active', 'pending']) })]);
+const shiftModel = m.defineModel({ entities: { Shift } });
+const shiftIndexes: readonly m.IndexSpec[] | undefined = shiftModel.entities?.['Shift']?.indexes;
+void shiftIndexes;
+void m.collection(Place, { indexes: [m.index((p) => p.series, { unique: true, where: { $exists: '$.t' } })] });
+
 // the x-entity primitive is typed to the closed vocabulary, and carries no flag
 void m.string().entity({ key: true, unique: true });
 void m.datetime().entity({ column: 'integer', default: 'now' });
@@ -87,8 +97,16 @@ void m.integer().identity('uuid');
 void m.string().identity('auto');
 // @ts-expect-error — a misspelled member is not a path into this shape
 void m.collection(Place, { indexes: [m.index((p) => p.nope)] });
-// @ts-expect-error — an entity has no indexes option: it is a builder, not a collection()
+// @ts-expect-error — a collection() is no entity: an entity's indexes are .indexes() on its builder
 void m.defineModel({ entities: { Place: m.collection(Place, { indexes: [] }) } });
+// @ts-expect-error — an index condition is a predicate or a query document, never SQL text
+void m.object({ id: m.string().key(), a: m.string() }).indexes([m.index((s) => s.a, { where: '"a" = 1' })]);
+// @ts-expect-error — an index condition reads the entity's own members
+void m.object({ id: m.string().key(), a: m.string() }).indexes([m.index((s) => s.a, { where: (s) => s.nope.eq(1) })]);
+// @ts-expect-error — an entity index path is a member of the entity
+void m.object({ id: m.string().key(), a: m.string() }).indexes([m.index((s) => s.b)]);
+// @ts-expect-error — an index condition is a predicate: a member read alone is none
+void m.object({ id: m.string().key(), a: m.string() }).indexes([m.index((s) => s.a, { where: (s) => s.a })]);
 // @ts-expect-error — column('integer') is an epoch column over a date-formatted string
 void m.string().column('integer');
 // @ts-expect-error — x-entity is owned here

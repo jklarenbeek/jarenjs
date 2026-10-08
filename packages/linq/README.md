@@ -309,7 +309,12 @@ type Meta = InferMeta<typeof model>;    // the EntityMetaMap typedStore<E> wants
 How to read it: an entity is a schema-pen object whose members carry
 store annotations; a relation is a member like any other, spelled
 `rel.hasOne` / `rel.hasMany` / `rel.belongsToMany`, and it is what lets a
-chain over this store navigate `p.author.email` as a hop. The value
+chain over this store navigate `p.author.email` as a hop. A rule that
+spans rows — one active shift per employee and day — is the entity's own
+index, `.indexes([m.index([(s) => s.employeeId, (s) => s.get('day')],
+{ unique: true, where: (s) => s.status.in(['active', 'pending']) })])` on
+its object builder, which SQLite and PostgreSQL then enforce for every
+writer. The value
 `defineModel` returns IS the `$model` document, and its shape hash equals
 the store's own, so a model written this way is a model the migration
 engine already understands. `InferMeta<>` is the point: `@jarenjs/db`'s

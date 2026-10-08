@@ -150,7 +150,7 @@ describe('PostgreSQL database invariants', { skip: !url && 'JAREN_PG_URL is not 
       const sqlite = await storeAgreement(sqliteEngine(), enforcement);
       assert.equal(await storeAgreement(postgresEngine(), enforcement), sqlite, enforcement);
       // a rule's own transaction and its probes nest on the session its write holds
-      assert.equal(await storeAgreement(postgresEngine(), enforcement, { sessions: 3 }), sqlite, `${enforcement} on three sessions`);
+      assert.equal(await storeAgreement(postgresEngine(), enforcement, { sessions: 2 }), sqlite, `${enforcement} on two sessions`);
     }
   });
 

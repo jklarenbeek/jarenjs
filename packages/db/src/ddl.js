@@ -127,15 +127,17 @@ function depthOf(value) {
  * always false as written (it declares nothing an index holds, and PostgreSQL
  * drops a true one), one nested deeper than the open can read back, and one
  * an engine that keeps no CREATE text could not read back exactly from its
- * catalog — the open would otherwise meet it as drift.
+ * catalog — the open would otherwise meet it as drift. Introspection renders a
+ * condition it read back through this same function before it derives one.
  * @param {any} where - the declared condition
  * @param {{ name: string, physical: string, codec: string }[]} columns - the members it may read
  * @param {any} dialect
  * @param {string} docPath - the condition's pointer
  * @param {(member: string) => string} unreadable - why a member that is none of `columns` cannot be read
+ * @param {Set<string>} [reads] - collects the physical columns the condition reads
  * @returns {string}
  */
-function indexCondition(where, columns, dialect, docPath, unreadable) {
+export function indexCondition(where, columns, dialect, docPath, unreadable, reads = undefined) {
   /** @param {string} reason @returns {never} */
   const fail = (reason) => { throw new DbCompileError('JD0004', `the index condition cannot be lowered: ${reason}`, docPath); };
   const flavor = dialect.rowPredicateFlavor;
@@ -147,6 +149,7 @@ function indexCondition(where, columns, dialect, docPath, unreadable) {
   /** @param {string} path */
   const resolve = (path) => {
     const read = paths(path);
+    if (read.column !== undefined) reads?.add(read.column.physical);
     return read.refused !== undefined || read.column !== undefined ? read : { ...read, refused: unreadable(String(read.name)) };
   };
   const sql = rowPredicate({ rendering: 'predicate', flavor, dialect, resolve, fail }).predicate(where);
@@ -563,7 +566,7 @@ function deriveColumns(index, context) {
  *   conditionColumns: { name: string, physical: string, codec: string }[],
  *   expected: { columns: { name: string, type: string,
  *     generated: boolean }[], indexes: { name: string, unique: boolean,
- *     columns: string[], where?: string }[] },
+ *     columns: string[], where?: string, reads?: string[] }[] },
  * }}
  */
 export function planCollection(name, collection, dialect, options = undefined) {
@@ -702,7 +705,10 @@ export function planCollection(name, collection, dialect, options = undefined) {
     : `'${member}' has no generated column: an index condition reads a member the collection indexes by its path — index '$.${member}' first`);
   for (const index of indexes) {
     if (index.declared.where === undefined) continue;
-    index.where = indexCondition(index.declared.where, conditionColumns, dialect, `${index.declared.docPath}/where`, unreadable);
+    /** @type {Set<string>} */
+    const reads = new Set();
+    index.where = indexCondition(index.declared.where, conditionColumns, dialect, `${index.declared.docPath}/where`, unreadable, reads);
+    index.reads = [...reads];
   }
   // every name the table, its columns and its indexes take, at the member
   // each one comes from (see `refuseLongName`)
@@ -787,7 +793,8 @@ export function planCollection(name, collection, dialect, options = undefined) {
           name: index.name,
           unique: index.unique,
           columns: [...index.columns],
-          ...(index.where === undefined ? {} : { where: index.where }),
+          // the columns a condition reads, for a migration that changes one of them
+          ...(index.where === undefined ? {} : { where: index.where, reads: index.reads }),
         }))
         .sort((a, b) => (a.name < b.name ? -1 : 1)),
     },
@@ -806,8 +813,8 @@ function conditionCodec(node) {
   return SCALAR_CODECS.get(types[0]);
 }
 
-/** The codec a column of each scalar schema type holds. */
-const SCALAR_CODECS = new Map([['string', 'text'], ['integer', 'integer'], ['number', 'number'], ['boolean', 'boolean']]);
+/** The codec a column of each scalar schema type holds. @type {ReadonlyMap<string, string>} */
+export const SCALAR_CODECS = new Map([['string', 'text'], ['integer', 'integer'], ['number', 'number'], ['boolean', 'boolean']]);
 
 /**
  * The declared-SQL half of verification: compare every schema object the
@@ -1004,9 +1011,11 @@ export function verifyShape(connection, plan, collection, docPath) {
                 const haveColumns = rows.map((row) => String(row.name));
                 if (haveColumns.join(',') !== want.columns.join(','))
                   disagree(`index '${have.name}' covers (${haveColumns.join(', ')}) in that order, the model declares (${want.columns.join(', ')})`);
-                // the catalog's shape flag: no NULLS NOT DISTINCT, no key order or
-                // collation of its own, not deferred — each changes what a unique index refuses
-                if (!have.plain) disagree(`index '${have.name}' is not the plain ascending B-tree the model declares (NULLS NOT DISTINCT, a key order or collation, or a deferred check)`);
+                // the catalog's shape flag: no NULLS NOT DISTINCT, no key order,
+                // collation or operator class of its own, no INCLUDE column (it reads
+                // as a key column here and keys nothing), not deferred — each changes
+                // what a unique index refuses
+                if (!have.plain) disagree(`index '${have.name}' is not the plain ascending B-tree the model declares (NULLS NOT DISTINCT, a key order, collation or operator class of its own, an INCLUDE column, or a deferred check)`);
                 const difference = readBack !== undefined
                   ? readBack.condition(have.predicate, want.where, plan.conditionColumns ?? [], have.conforming)
                   : have.predicate === null ? null : `has the condition ${have.predicate}, which the model does not declare`;
