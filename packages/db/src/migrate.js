@@ -989,9 +989,13 @@ export function planMigration(fromModel, toModel, options = undefined) {
     }
   }
 
-  planEntityChanges(fromModel, toModel, dialect, steps, report, transform);
+  const programs = planEntityChanges(fromModel, toModel, dialect, steps, report, transform);
   // a list's repair runs last: after every structural step it may read
   steps.push(...(transform?.finish() ?? []));
+  // the rule programs a table gains come after the repair: a program judges
+  // the writes after it, so a transform carries stored rows into conformance
+  // before the rule arrives (§9)
+  steps.push(...programs);
 
   const migration = {
     $migration: MIGRATION_VERSION,
@@ -1083,20 +1087,52 @@ function stripEntityVocabulary(node) {
 }
 
 /**
+ * The rule programs a store-owned table keeps through a change: by name, each
+ * whose every item (SQLite's trigger; PostgreSQL's function and trigger) is
+ * planned with the same text on both sides.
+ * @param {{ name: string, sql: string }[]} from @param {{ name: string, sql: string }[]} to
+ * @returns {Set<string>}
+ */
+function keptPrograms(from, to) {
+  /** @param {{ name: string, sql: string }[]} items */
+  const texts = (items) => {
+    /** @type {Map<string, string[]>} */
+    const byName = new Map();
+    for (const item of items) byName.set(item.name, [...(byName.get(item.name) ?? []), item.sql]);
+    return byName;
+  };
+  const after = texts(to);
+  return new Set([...texts(from)].filter(([name, sql]) => after.get(name)?.join('\u0000') === sql.join('\u0000')).map(([name]) => name));
+}
+
+/**
+ * The steps that drop a table's rule programs but the kept ones, the last
+ * installed first (a trigger before the function it calls).
+ * @param {{ name: string, type: string, drop: string }[]} programs @param {Set<string>} kept @param {string} table
+ */
+const dropPrograms = (programs, kept, table) => [...programs].reverse().filter((item) => !kept.has(item.name))
+  .map((item) => ({ kind: 'ddl', sql: item.drop, note: `drop the ${item.type} '${item.name}' of a rule on '${table}'` }));
+
+/**
  * The relational half of the diff (§9): entity add/drop/rename, the
  * additive and droppable column strategies with their data steps, the
- * rebuild for everything structural, join tables, and the stripped
- * document-change rule.
+ * rebuild for everything structural, the rules' programs, join tables, and
+ * the stripped document-change rule.
  * @param {any} fromModel
  * @param {any} toModel
  * @param {any} dialect
  * @param {any[]} steps
  * @param {any} report
+ * @returns {any[]} the steps that create the rule programs an existing table
+ *   gains, for the caller to run after every other step (a program judges
+ *   the writes after it, a transform's included)
  */
 function planEntityChanges(fromModel, toModel, dialect, steps, report, transform = null) {
+  /** @type {any[]} */
+  const programs = [];
   const fromEntities = normalizeEntities(fromModel);
   const toEntities = normalizeEntities(toModel);
-  if (fromEntities.size === 0 && toEntities.size === 0) return;
+  if (fromEntities.size === 0 && toEntities.size === 0) return programs;
   const fromMapping = fromEntities.size > 0
     ? explainMapping(fromModel) : { entities: {}, joinTables: {} };
   const toMapping = toEntities.size > 0
@@ -1122,6 +1158,8 @@ function planEntityChanges(fromModel, toModel, dialect, steps, report, transform
     }
     renamedFrom.set(name, hint);
     report.renamed.push({ from: hint, to: name });
+    // a rule program is named after its table: the old ones go before the rename
+    steps.push(...dropPrograms(planEntity(hint, fromMapping.entities[hint], fromMapping, dialect).programs ?? [], new Set(), hint));
     steps.push({ kind: 'ddl', sql: dialect.ddl.renameTable(hint, name),
       note: `rename entity '${hint}' to '${name}'` });
   }
@@ -1216,6 +1254,21 @@ function planEntityChanges(fromModel, toModel, dialect, steps, report, transform
     const needsRebuild = !keysEqual || !fksEqual || changedColumns.length > 0
       || addedColumns.some((columnName) => toColumns.get(columnName).check !== undefined);
 
+    const fromPlan = planEntity(fromName, fm, fromMapping, dialect);
+    const toPlan = planEntity(name, tm, toMapping, dialect);
+    // the rules' programs: one that changes, and all of a rebuilt table (whose
+    // triggers its DROP takes, but not a PostgreSQL function), are dropped
+    // before the table's own work and created again last of all, after the
+    // migration's transform steps (`programs`); a renamed table's were
+    // dropped before its rename. No stored row is judged
+    const kept = fromName !== name || needsRebuild ? new Set()
+      : keptPrograms(fromPlan.programs ?? [], toPlan.programs ?? []);
+    if (fromName === name) steps.push(...dropPrograms(fromPlan.programs ?? [], kept, name));
+    for (const item of toPlan.programs ?? []) {
+      if (!kept.has(item.name))
+        programs.push({ kind: 'ddl', sql: item.sql, note: `create the ${item.type} '${item.name}' of a rule on '${name}'` });
+    }
+
     if (needsRebuild) {
       steps.push(...renderRebuild(name, fromName, fm, tm,
         fromMapping, toMapping, dialect, report));
@@ -1223,10 +1276,8 @@ function planEntityChanges(fromModel, toModel, dialect, steps, report, transform
     else {
       // index diff first (a column cannot drop under a live index);
       // from-side index NAMES survive a rename with the OLD prefix
-      const fromPlanIndexes = planEntity(fromName, fm, fromMapping, dialect)
-        .expected.indexes;
-      const toPlanIndexes = planEntity(name, tm, toMapping, dialect)
-        .expected.indexes;
+      const fromPlanIndexes = fromPlan.expected.indexes;
+      const toPlanIndexes = toPlan.expected.indexes;
       const disturbed = new Set(droppedColumns);
       const toIndexByName = new Map(toPlanIndexes.map((index) => [index.name, index]));
       const fromIndexByName = new Map(fromPlanIndexes.map((index) => [index.name, index]));
@@ -1355,6 +1406,8 @@ function planEntityChanges(fromModel, toModel, dialect, steps, report, transform
   for (const name of dropOrder) {
     report.removed.push(name);
     report.destructive = true;
+    // a table's triggers go with it; a PostgreSQL function does not
+    steps.push(...dropPrograms(planEntity(name, fromMapping.entities[name], fromMapping, dialect).programs ?? [], new Set(), name));
     steps.push({ kind: 'ddl', sql: dialect.ddl.dropTable(name),
       note: `DESTRUCTIVE: drop entity '${name}' and every row in it` });
   }
@@ -1376,6 +1429,7 @@ function planEntityChanges(fromModel, toModel, dialect, steps, report, transform
     steps.push({ kind: 'ddl', sql: dialect.ddl.dropTable(finalName),
       note: `DESTRUCTIVE: drop join table '${finalName}' and its memberships` });
   }
+  return programs;
 }
 
 const UTF8 = new TextEncoder();
@@ -1498,7 +1552,10 @@ function nameRebuiltKey(connection, table) {
 
 /**
  * Render one rebuild step (§10): self-contained SQL — the temporary
- * table, the column-mapped copy, the final-name indexes. On PostgreSQL
+ * table, the column-mapped copy, the final-name indexes. The table's rule
+ * programs are not the step's: the old ones were dropped before it, the new
+ * ones are created in steps of their own after the migration's transform
+ * steps (`planEntityChanges`). On PostgreSQL
  * the step opens by locking the old table against writes (`rebuildLockSql`),
  * the copy also carries each row's `rid` (the order an entity reads in),
  * and every serial column — an allocated key, the `rid` — continues from
@@ -1510,7 +1567,9 @@ function renderRebuild(name, fromName, fm, tm, fromMapping, toMapping, dialect, 
   const pathText = (memberName) => dialect.jsonPathText([{ name: memberName }]);
   const temporary = `${name}__rebuild`;
   const create = [planEntity(temporary, tm, toMapping, dialect).createSql[0]];
-  const indexes = planEntity(name, tm, toMapping, dialect).createSql.slice(1);
+  const finalPlan = planEntity(name, tm, toMapping, dialect);
+  // the rule programs end `createSql`, and are not this step's
+  const indexes = finalPlan.createSql.slice(1, finalPlan.createSql.length - (finalPlan.programs?.length ?? 0));
 
   const fromColumns = new Map(fm.columns.map((column) => [column.name, column]));
   const fromFkOnly = fm.foreignKeys

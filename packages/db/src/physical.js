@@ -177,6 +177,56 @@ function programDifferences(want, have, at = '') {
   });
 }
 
+/**
+ * The one check of a table's rule programs against the plan. Where the server
+ * deparses a program (`trigger.program`, PostgreSQL), each planned one is read
+ * back field by field from the catalog — a trigger's function is part of its
+ * program — and, with `undeclared`, any other trigger on the table is refused,
+ * as is a rewrite rule, which changes what a write does as a trigger does;
+ * a trigger compared by its text is its caller's to compare. An increment
+ * updates its own row from inside its trigger, which runs that trigger again
+ * only while recursive triggers are on, and a rule compares text by code
+ * point, which SQLite's BINARY collation is only over UTF-8: both are checked
+ * wherever a program is planned. `installed: false` checks only those two,
+ * for programs about to be created.
+ * @param {any} connection
+ * @param {string} table
+ * @param {any[]} triggers - the planned program items
+ * @param {(why: string) => never} fail
+ * @param {{ installed?: boolean, undeclared?: boolean }} [options]
+ * @returns {any} value-or-promise
+ */
+export function verifyRulePrograms(connection, table, triggers, fail, { installed = true, undeclared = false } = {}) {
+  const dialect = connection.dialect;
+  const programs = triggers.filter((trigger) => trigger.type !== 'function' && trigger.program !== undefined);
+  const read = !installed || (programs.length === 0 && !undeclared) || dialect.introspect.invariantPrograms === undefined ? null
+    : useStatementOnce(connection, dialect.introspect.invariantPrograms(table), (s) => chain(s.all([]), (rows) => {
+      const owned = rows.filter((row) => row.owner === table);
+      const installed = owned.filter((row) => row.kind !== 'rule');
+      for (const trigger of programs) {
+        const row = installed.find((r) => r.name === trigger.name);
+        const actual = row === undefined ? undefined : typeof row.program === 'string' ? JSON.parse(row.program) : row.program;
+        const changed = actual === undefined ? [] : programDifferences(trigger.program, actual);
+        if (actual === undefined || changed.length > 0)
+          fail(`invariant trigger '${trigger.name}' is missing or changed${changed.length ? ` (${changed.join(', ')})` : ''}; apply an explicit migration`);
+      }
+      const extra = undeclared ? owned.find((row) => row.kind === 'rule' || !programs.some((trigger) => trigger.name === row.name)) : undefined;
+      if (extra !== undefined) {
+        const what = extra.kind === 'rule' ? 'rewrite rule' : 'trigger';
+        fail(`the database has the ${what} '${extra.name}', which the model does not declare — an undeclared ${what} changes what a write does`);
+      }
+    }));
+  const recursion = !triggers.some((trigger) => trigger.selfUpdate) ? null
+    : useStatementOnce(connection, dialect.introspect.pragma('recursive_triggers'), (s) => chain(s.get([]), (row) => {
+      if (Number(row?.recursive_triggers) !== 0) fail('an increment rule updates its own row, and recursive_triggers would run its trigger again; switch it off');
+    }));
+  const encoding = triggers.length === 0 || dialect.name !== 'sqlite' ? null
+    : chain(databaseEncoding(connection), (name) => {
+      if (String(name).toUpperCase() !== 'UTF-8') fail(`database rules compare text by code point, which a ${name} database does not; use a UTF-8 database`);
+    });
+  return chain(recursion, () => chain(encoding, () => read));
+}
+
 /** Verify an existing mapped object without executing DDL. Unmapped columns and
  * all application-owned programs remain physical facts, never inferred drops.
  * @param {any} connection @param {any} mapping @param {any} schema @returns {any} */
@@ -189,42 +239,18 @@ export function verifyPhysical(connection, mapping, schema) {
     fail('declared schema must equal the driver-owned schema');
   const object = schema.objects.find((o) => o.name === mapping.table && o.type === mapping.kind);
   if (!object) fail(`declared ${mapping.kind} does not exist`);
-  const programs = [];
   for (const trigger of mapping.triggers ?? []) {
-    // a deparsing server answers with its own text: its program is read field
-    // by field, and a trigger's function is part of the trigger's program
-    if (trigger.type === 'function') continue;
-    if (trigger.program !== undefined) { programs.push(trigger); continue; }
+    // a deparsing server answers with its own text, read field by field below
+    if (trigger.type === 'function' || trigger.program !== undefined) continue;
     const actual = schema.objects.find((o) => o.type === 'trigger' && o.name === trigger.name);
     if (!actual || actual.sql?.trim().replace(/;$/, '') !== trigger.sql.trim().replace(/;$/, '')) fail(`invariant trigger '${trigger.name}' is missing or changed; apply an explicit migration`);
   }
-  const installed = programs.length === 0 ? null
-    : useStatementOnce(connection, connection.dialect.introspect.invariantPrograms(), (s) => chain(s.all([]), (rows) => {
-      for (const trigger of programs) {
-        const row = rows.find((r) => r.name === trigger.name && r.owner === mapping.table);
-        const actual = row === undefined ? undefined : typeof row.program === 'string' ? JSON.parse(row.program) : row.program;
-        const changed = actual === undefined ? [] : programDifferences(trigger.program, actual);
-        if (actual === undefined || changed.length > 0)
-          fail(`invariant trigger '${trigger.name}' is missing or changed${changed.length ? ` (${changed.join(', ')})` : ''}; apply an explicit migration`);
-      }
-    }));
-  // an increment updates its own row from inside its trigger, which runs
-  // that trigger again only while recursive triggers are on
-  const recursion = !(mapping.triggers ?? []).some((trigger) => trigger.selfUpdate) ? null
-    : useStatementOnce(connection, connection.dialect.introspect.pragma('recursive_triggers'), (s) => chain(s.get([]), (row) => {
-      if (Number(row?.recursive_triggers) !== 0) fail('an increment rule updates its own row, and recursive_triggers would run its trigger again; switch it off');
-    }));
-  // a rule compares text by code point, which SQLite's BINARY collation is
-  // only over UTF-8: a UTF-16 database orders text by its code units
-  const encoding = (mapping.triggers ?? []).length === 0 || connection.dialect.name !== 'sqlite' ? null
-    : chain(databaseEncoding(connection), (name) => {
-      if (String(name).toUpperCase() !== 'UTF-8') fail(`database rules compare text by code point, which a ${name} database does not; use a UTF-8 database`);
-    });
+  const programs = verifyRulePrograms(connection, mapping.table, mapping.triggers ?? [], fail);
   const read = mapping.kind === 'view'
     ? useStatementOnce(connection, connection.dialect.introspect.columns(mapping.table), (s) =>
       chain(s.all([]), (columns) => ({ columns: columns.map((c) => ({ ...c, generated: !!c.hidden })), primaryKey: [] })))
     : schema.tables.find((t) => t.name === mapping.table);
-  return chain(recursion, () => chain(encoding, () => chain(installed, () => chain(read, (table) => {
+  return chain(programs, () => chain(read, (table) => {
     if (mapping.kind !== 'view' && JSON.stringify(table.primaryKey) !== JSON.stringify(mapping.keys.map((k) => mapping.columns.find((c) => c.name === k).physical))) fail('ordered primary key disagrees');
     for (const column of mapping.columns) {
       const actual = table.columns.find((c) => c.name === column.physical);
@@ -235,7 +261,7 @@ export function verifyPhysical(connection, mapping, schema) {
       connection.dialect.qualifyPhysicalColumn?.(column, actual, mapping.kind);
     }
     return null;
-  }))));
+  }));
 }
 
 /** Select mapped columns with their physical aliases for the shared row merger.

@@ -7,9 +7,11 @@
  * verdict over a grid of rows must agree with the query engine's.
  */
 import assert from 'node:assert/strict';
-import { openStore, planInvariants, sqliteDialect, classifyDriverError, planPhysicalMigration, migrate, readSchema, physicalObjectKey } from '@jarenjs/db';
+import { openStore, planInvariants, sqliteDialect, classifyDriverError, planPhysicalMigration, planModelMigration, migrate, readSchema,
+  physicalObjectKey } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';
 import { postgresDialect, postgresDriver } from '@jarenjs/db/postgres';
+import { withStore } from './store-core-engines.js';
 import { compileJsonQuery } from '@jarenjs/json/query';
 
 /** @param {string} name @param {string} [codec] @param {string} [nul] */
@@ -763,4 +765,387 @@ export async function uniquenessAgreement(store) {
       stored: await Promise.all(accepted.map((row) => entity.get(row.id))) });
   }
   return out;
+}
+
+/** A scenario over layouts the store owns: it creates every table itself. */
+const STORE_OWNED_TABLES = { sqlite: '', postgres: '' };
+
+/** A raw writer's document column: the members no column holds, as the engine stores JSON.
+ * @param {RuleEngine} engine @param {Record<string, unknown>} [members] */
+const rawDoc = (engine, members = {}) => (engine.name === 'sqlite'
+  ? `jsonb('${JSON.stringify(members)}')` : `'${JSON.stringify(members)}'::jsonb`);
+
+/** A raw writer's SQL literal for a member value; SQL NULL for a missing one. @param {unknown} value */
+const rawValue = (value) => (value === null || value === undefined ? 'NULL'
+  : typeof value === 'boolean' ? String(Number(value)) : typeof value === 'number' ? String(value)
+    : `'${String(value).replaceAll("'", "''")}'`);
+
+/** A row's members as the store reads them back: a missing member stays missing. @param {Record<string, unknown>} row */
+const presentOf = (row) => Object.fromEntries(Object.entries(row).filter(([, value]) => value !== null && value !== undefined));
+
+/** What a write came to on a store-owned layout: accepted, or refused by the rule `truth`. @param {() => Promise<unknown>} write */
+const accepted = (write) => write().then(() => true, (error) => {
+  assert.match(String(error?.message), /jaren invariant:truth|persistence invariant 'truth'/);
+  return false;
+});
+
+/** The truth columns on a layout the store owns: a non-key member's SQL NULL is a missing member. */
+export const hybridTruthModel = { $model: '0.1', entities: { Row: { schema: { type: 'object', properties: {
+  id: { type: 'integer', 'x-entity': { key: true } }, a: { type: 'integer' }, b: { type: 'integer' },
+} } } } };
+/** Integers a store-owned integer column holds but no integer member reads back: past the safe range, and in
+ * PostgreSQL's `numeric` column a fraction. */
+const HYBRID_WRONG_INTEGERS = { sqlite: ['9007199254740993'], postgres: ['9007199254740993', '1.5'] };
+
+/**
+ * Every truth predicate as a database rule on a store-owned layout, over
+ * `{ missing, -1, 2 }²` written by the store and by a raw SQL writer: each
+ * write is accepted exactly when the query engine accepts the record as the
+ * store reads it back, an accepted row reads back as that record, an integer
+ * no member reads back is refused, and a `null` literal against a member
+ * that is never null refuses the open.
+ * @param {RuleEngine} engine @returns {Promise<string>} per predicate, its verdicts or `refused`
+ */
+export async function hybridTruthTable(engine) {
+  const verdicts = [];
+  for (const expression of TRUTH_PREDICATES) {
+    const model = /** @type {any} */ (structuredClone(hybridTruthModel));
+    model.entities.Row.invariants = [{ name: 'truth', on: ['insert'], assert: expression, enforcement: 'database' }];
+    const evaluate = compileJsonQuery(expression);
+    const fixture = await engine.fixture(STORE_OWNED_TABLES);
+    try {
+      if (nullOfAbsent(expression, ['a', 'b'])) {
+        await assert.rejects(openStore(model, { driver: fixture.driver }), { code: 'JD0005', message: /never holds null/ }, JSON.stringify(expression));
+        verdicts.push('refused');
+        continue;
+      }
+      const store = await openStore(model, { driver: fixture.driver });
+      try {
+        const rows = store.entity('Row');
+        const row = [];
+        for (const a of [null, -1, 2]) for (const b of [null, -1, 2]) {
+          const stored = presentOf({ a, b });
+          const expected = evaluate({ old: null, new: { id: 1, ...stored }, op: 'insert' }) === true;
+          const by = { store: await accepted(() => rows.create({ id: 1, ...stored })),
+            raw: await accepted(() => fixture.exec(`INSERT INTO "Row" (id, a, b, doc) VALUES (2, ${rawValue(a)}, ${rawValue(b)}, ${rawDoc(engine)})`)) };
+          assert.deepEqual(by, { store: expected, raw: expected }, `${JSON.stringify(expression)} over ${JSON.stringify(stored)}`);
+          for (const [id, kept] of [[1, by.store], [2, by.raw]]) if (kept) assert.deepEqual(await rows.get(id), { id, ...stored });
+          await fixture.exec('DELETE FROM "Row"');
+          row.push(expected);
+        }
+        verdicts.push(row);
+        for (const value of HYBRID_WRONG_INTEGERS[/** @type {'sqlite' | 'postgres'} */ (engine.name)])
+          await assert.rejects(fixture.exec(`INSERT INTO "Row" (id, a, b, doc) VALUES (3, ${value}, 2, ${rawDoc(engine)})`), /jaren invariant:truth/, value);
+      }
+      finally { await store.close(); }
+    }
+    finally { await fixture.dispose(); }
+  }
+  return JSON.stringify(verdicts);
+}
+
+/** One member per scalar type a store-owned layout maps to a column. */
+const hybridGridModel = { $model: '0.1', entities: { Row: { schema: { type: 'object', properties: {
+  id: { type: 'integer', 'x-entity': { key: true } }, i: { type: 'integer' }, n: { type: 'number' }, t: { type: 'string' }, f: { type: 'boolean' },
+} } } } };
+/** The grid's predicates over those members, then numbers the store reads back as the double it decodes, and
+ * last one that reads every member and holds for every row that has them all. */
+export const HYBRID_GRID_PREDICATES = [
+  ...GRID_PREDICATES.slice(0, -1).filter((expression) => !/\$\.new\.[ds]"/.test(JSON.stringify(expression))),
+  { $le: ['$.new.n', 0.1] }, { $gt: ['$.new.n', 0.1] }, { $eq: ['$.new.n', 0.1] },
+  { $and: [{ $ne: ['$.new.i', 'x'] }, { $ne: ['$.new.n', 'x'] }, { $ne: ['$.new.t', 1] }, { $ne: ['$.new.f', 'x'] }] },
+];
+/** The grid's rows over those members, a missing member where the grid holds null. */
+const HYBRID_GRID_ROWS = GRID_ROWS.map(({ i, n, t, f }) => presentOf({ i, n, t, f }));
+/** Rows only a raw writer stores, as the SQL of `i, n, t, f`, each with the record the store reads back:
+ * a decimal that reads as the double 0.1. */
+const HYBRID_RAW_ROWS = [{ sql: 'NULL, 0.1000000000000000000001, NULL, NULL', record: { n: 0.1 } },
+  { sql: '1, 0.1000000000000000000001, \'a\', 0', record: { i: 1, n: 0.1, t: 'a', f: false } }];
+/** Rows each engine stores and no member reads back, all members present: a boolean 2, an integer past the
+ * safe range, a number past it; on PostgreSQL also a fraction in an integer column and NaN. */
+const HYBRID_WRONG_STORAGE = {
+  sqlite: ['1, 1, \'a\', 2', '9007199254740993, 1, \'a\', 1', '1, 9e999, \'a\', 1'],
+  postgres: ['1, 1, \'a\', 2', '1.5, 1, \'a\', 1', '9007199254740993, 1, \'a\', 1', '1, 1e400, \'a\', 1', '1, \'NaN\', \'a\', 1'],
+};
+
+/**
+ * Every grid predicate as a database rule on a store-owned layout, over every
+ * grid row written by the store and by a raw SQL writer and over rows only a
+ * raw writer stores: each write is accepted exactly when the query engine
+ * accepts the record the store reads back, and a value no member reads back
+ * is refused by the last predicate's reads.
+ * @param {RuleEngine} engine @returns {Promise<string>}
+ */
+export async function hybridGrid(engine) {
+  const verdicts = [];
+  const columns = ['i', 'n', 't', 'f'];
+  for (const expression of HYBRID_GRID_PREDICATES) {
+    const model = /** @type {any} */ (structuredClone(hybridGridModel));
+    model.entities.Row.invariants = [{ name: 'truth', on: ['insert'], assert: expression, enforcement: 'database' }];
+    const evaluate = compileJsonQuery(expression);
+    const judge = (/** @type {Record<string, unknown>} */ record) => evaluate({ old: null, new: { id: 1, ...record }, op: 'insert' }) === true;
+    const fixture = await engine.fixture(STORE_OWNED_TABLES);
+    try {
+      if (nullOfAbsent(expression, columns)) {
+        await assert.rejects(openStore(model, { driver: fixture.driver }), { code: 'JD0005', message: /never holds null/ }, JSON.stringify(expression));
+        verdicts.push('refused');
+        continue;
+      }
+      const store = await openStore(model, { driver: fixture.driver });
+      /** A raw writer's row, its members spelled as SQL. @param {number} id @param {string} sql */
+      const insert = (id, sql) => fixture.exec(`INSERT INTO "Row" (id, i, n, t, f, doc) VALUES (${id}, ${sql}, ${rawDoc(engine)})`);
+      try {
+        const rows = store.entity('Row');
+        for (const record of HYBRID_GRID_ROWS) {
+          const expected = judge(record);
+          const by = { store: await accepted(() => rows.create({ id: 1, ...record })),
+            raw: await accepted(() => insert(2, columns.map((name) => rawValue(record[name])).join(', '))) };
+          assert.deepEqual(by, { store: expected, raw: expected }, `${JSON.stringify(expression)} over ${JSON.stringify(record)}`);
+          for (const [id, kept] of [[1, by.store], [2, by.raw]]) if (kept) assert.deepEqual(await rows.get(id), { id, ...record });
+          await fixture.exec('DELETE FROM "Row"');
+          verdicts.push(expected);
+        }
+        for (const { sql, record } of HYBRID_RAW_ROWS) {
+          const expected = judge(record);
+          assert.equal(await accepted(() => insert(2, sql)), expected, `${JSON.stringify(expression)} over ${sql}`);
+          if (expected) assert.deepEqual(await rows.get(2), { id: 2, ...record });
+          await fixture.exec('DELETE FROM "Row"');
+          verdicts.push(expected);
+        }
+        if (expression === HYBRID_GRID_PREDICATES.at(-1)) for (const sql of HYBRID_WRONG_STORAGE[/** @type {'sqlite' | 'postgres'} */ (engine.name)])
+          await assert.rejects(insert(3, sql), /jaren invariant:truth/, sql);
+      }
+      finally { await store.close(); }
+    }
+    finally { await fixture.dispose(); }
+  }
+  return JSON.stringify(verdicts);
+}
+
+/** A booking whose span is ordered, and a held one no delete removes, on a layout the store owns.
+ * @param {boolean} [ruled] whether it declares its rules */
+export const bookingModel = (ruled = true) => ({ $model: '0.1', entities: { Booking: {
+  schema: { type: 'object', required: ['id', 'startsAt', 'endsAt'], properties: {
+    id: { type: 'string', 'x-entity': { key: true } }, startsAt: { type: 'integer' }, endsAt: { type: 'integer' }, room: { type: 'string' } } },
+  ...(ruled ? { invariants: [
+    { name: 'ordered', on: ['insert', 'update'], enforcement: 'database', assert: { $le: ['$.new.startsAt', '$.new.endsAt'] } },
+    { name: 'kept', on: ['delete'], enforcement: 'database', assert: { $not: { $eq: ['$.old.room', 'held'] } } },
+  ] } : {}),
+} } });
+
+/** A string key member. */
+const KEY = { type: 'string', 'x-entity': { key: true } };
+/**
+ * A parent `A` whose `kids` are `B` rows under `onDelete`, where `B` keeps a
+ * held row (`kept`, on delete) and a held row only while it has a parent
+ * (`linked`, on update), under one `enforcement`.
+ * @param {'database' | 'store'} enforcement @param {'cascade' | 'setNull'} onDelete
+ */
+export const kinshipModel = (enforcement, onDelete) => ({ $model: '0.1', entities: {
+  A: { schema: { type: 'object', required: ['id'], properties: { id: KEY, kids: { 'x-entity': { relation: { to: 'B', many: true, via: 'aRef', onDelete } } } } } },
+  B: { schema: { type: 'object', required: ['id'], properties: { id: KEY, aRef: { type: 'string' }, status: { type: 'string' } } },
+    invariants: [
+      { name: 'kept', on: ['delete'], enforcement, assert: { $ne: ['$.old.status', 'held'] } },
+      { name: 'linked', on: ['update'], enforcement, assert: { $or: [{ $exists: '$.new.aRef' }, { $ne: ['$.new.status', 'held'] }] } }] } } });
+
+/**
+ * A child's rule meets its parent's foreign-key action: under database
+ * enforcement the parent's delete is refused in the child's rule's name and
+ * reported for the parent's write, both rows staying; under store enforcement
+ * the action is no store write and runs no rule, so the parent goes.
+ * @param {'sqlite' | 'postgres'} engine @param {'cascade' | 'setNull'} onDelete
+ * @param {string} rule - the child's rule the action meets
+ */
+export async function childRuleMeetsParentAction(engine, onDelete, rule) {
+  for (const enforcement of /** @type {const} */ (['database', 'store'])) {
+    await withStore(engine, kinshipModel(enforcement, onDelete), async (store) => {
+      await store.entity('A').create({ id: 'a' });
+      await store.entity('B').create({ id: 'b', aRef: 'a', status: 'held' });
+      await assert.rejects(store.entity('B').delete('b'), { code: 'JD2096' });
+      if (enforcement === 'database') {
+        await assert.rejects(store.entity('A').delete('a'), { code: 'JD2096', class: 'constraint', collection: 'A', docPath: '/entities/A',
+          message: new RegExp(`jaren invariant:${rule}`) });
+        assert.deepEqual(await store.entity('A').get('a'), { id: 'a' });
+        assert.deepEqual(await store.entity('B').get('b'), { id: 'b', aRef: 'a', status: 'held' });
+        return;
+      }
+      await store.entity('A').delete('a');
+      assert.equal(await store.entity('A').get('a'), undefined);
+      assert.deepEqual(await store.entity('B').get('b'), onDelete === 'cascade' ? undefined : { id: 'b', status: 'held' });
+    });
+  }
+}
+
+/** `bookingModel` whose `startsAt` gained a minimum: a document change a migration must transform. */
+export const narrowedBookingModel = () => {
+  const model = /** @type {any} */ (bookingModel());
+  model.entities.Booking.schema.properties.startsAt = { type: 'integer', minimum: 1 };
+  return model;
+};
+/** The transform of that change, which carries every stored `startsAt` to 1. */
+export const BOOKING_TRANSFORM = { kind: 'jslt', collection: 'Booking', stylesheet: [{ match: '$.startsAt', body: 1 }] };
+
+/** How a migration runs against an engine's fixture: no shadow replay, and on SQLite a reference database of its own.
+ * @param {RuleEngine} engine @param {any} baseline @param {any} model */
+const migrationOptions = (engine, baseline, model) => ({ baseline, model, shadow: false,
+  ...(engine.name === 'sqlite' ? { shadowDriver: nodeDriver() } : {}) });
+
+/**
+ * The store-owned lifecycle: the rules installed by the store's own open
+ * (fresh) or by a planned migration over a table that already holds a row
+ * they would refuse (upgraded: the migration adds the programs alone, runs
+ * twice applying nothing the second time, and judges no existing row). Then
+ * every writer — create, update, a tracked save, a refused write inside a
+ * transaction that goes on to commit, a raw SQL writer — meets the same
+ * rules. Returns the outcomes and the rows left, read back through the store.
+ * @param {RuleEngine} engine @param {boolean} upgraded @returns {Promise<string>}
+ */
+export async function hybridLifecycle(engine, upgraded) {
+  const fixture = await engine.fixture(STORE_OWNED_TABLES);
+  try {
+    const model = bookingModel();
+    if (upgraded) {
+      // the table an earlier model created, holding a row the rule would refuse
+      const earlier = await openStore(bookingModel(false), { driver: fixture.target.driver });
+      try { await earlier.entity('Booking').create({ id: 'old', startsAt: 5, endsAt: 1 }); }
+      finally { await earlier.close(); }
+      const { migration } = planModelMigration(bookingModel(false), model, { dialect: fixture.dialect, id: 'install-rules' });
+      // the rules' programs and nothing else: no table work, no data step
+      assert.notEqual(migration.steps.length, 0);
+      assert.deepEqual(migration.steps.map((/** @type {any} */ step) => step.kind), migration.steps.map(() => 'ddl'));
+      assert.deepEqual(migration.steps.map((/** @type {any} */ step) => /^CREATE (TRIGGER|FUNCTION) /.test(step.sql)), migration.steps.map(() => true));
+      const options = migrationOptions(engine, bookingModel(false), model);
+      assert.deepEqual((await migrate(fixture.target, [migration], options)).applied, ['install-rules']);
+      assert.deepEqual((await migrate(fixture.target, [migration], options)).applied, []);
+    }
+    const store = await openStore(model, { driver: fixture.driver });
+    try {
+      const bookings = store.entity('Booking');
+      if (upgraded) {
+        // a row the new rule would refuse stays, and is judged only when written again
+        assert.deepEqual(await bookings.get('old'), { id: 'old', startsAt: 5, endsAt: 1 });
+        await fixture.exec('UPDATE "Booking" SET doc = doc, "startsAt" = "startsAt" WHERE id = \'old\'');
+        assert.equal(await outcome(() => bookings.update('old', { endsAt: 0 })), 'refused ordered');
+        await bookings.delete('old');
+      }
+      const writes = [];
+      for (const span of [{ id: 'a', startsAt: 5, endsAt: 1 }, { id: 'b', startsAt: 1, endsAt: 5 }, { id: 'h', startsAt: 1, endsAt: 2, room: 'held' }])
+        writes.push(await outcome(() => bookings.create(span)));
+      writes.push(await outcome(() => bookings.update('b', { startsAt: 9 })));
+      bookings.put({ ...(await bookings.get('b')), endsAt: 0 });
+      writes.push(await outcome(() => store.saveChanges()));
+      bookings.discard('b');
+      // a refused write inside a transaction leaves it usable: the next write and the commit go through
+      writes.push(await outcome(() => store.transaction(async (/** @type {any} */ tx) => {
+        const inner = await outcome(() => tx.entity('Booking').create({ id: 'c', startsAt: 3, endsAt: 2 }));
+        await tx.entity('Booking').create({ id: 'd', startsAt: 2, endsAt: 3 });
+        return inner;
+      }).then((inner) => assert.equal(inner, 'refused ordered'))));
+      writes.push(await outcome(() => bookings.delete('h')));
+      const raw = [];
+      for (const sql of [`INSERT INTO "Booking" (id, "startsAt", "endsAt", doc) VALUES ('r', 5, 1, ${rawDoc(engine)})`,
+        'UPDATE "Booking" SET "endsAt" = 0 WHERE id = \'b\'', 'UPDATE "Booking" SET "endsAt" = "endsAt" + 1 WHERE id = \'b\'',
+        'DELETE FROM "Booking" WHERE id = \'h\'', 'DELETE FROM "Booking" WHERE id = \'d\''])
+        raw.push(await outcome(() => fixture.exec(sql)));
+      const read = await Promise.all(['a', 'b', 'c', 'd', 'h', 'r'].map((id) => bookings.get(id)));
+      return JSON.stringify({ writes, raw, read });
+    }
+    finally { await store.close(); }
+  }
+  finally { await fixture.dispose(); }
+}
+
+/**
+ * `agreementModel` with only what a store-owned layout lowers: every entity's
+ * layout the store's own, no increment (`Item.counted`, `Line.revision`), no
+ * existence probe (`open_parent`, `draft_parent`, `memo_parent`), no
+ * `columns` rule (`Line.pinned`, `Tag.made_once`). A line's parent is
+ * `parent`, since a store-owned table keeps its document in `doc`.
+ * @param {'database' | 'store'} enforcement
+ */
+export const hybridAgreementModel = (enforcement) => ({ $model: '0.1', entities: {
+  Doc: { schema: { type: 'object', properties: {
+    id: { type: 'integer', 'x-entity': { key: true, default: 'auto' } }, status: { type: 'string' }, sealed: nullableText } } },
+  Line: { schema: { type: 'object', properties: {
+    id: { type: 'integer', 'x-entity': { key: true, default: 'auto' } }, parent: { type: 'integer' }, qty: { type: 'integer' },
+    note: { type: 'string' }, revision: { type: 'integer' } } },
+  invariants: [{ name: 'locked', on: ['update'], when: 'assigned', enforcement, assert: { $ne: ['$.old.note', 'locked'] } }] },
+  Memo: { schema: { type: 'object', properties: { id: { type: 'string', 'x-entity': { key: true } }, parent: { type: 'integer' } } } },
+  Item: { schema: { type: 'object', properties: {
+    id: { type: 'integer', 'x-entity': { key: true } }, note: nullableText, u: { type: 'string' },
+    ver: { type: 'integer', 'x-entity': { version: true } }, revision: { type: 'integer' } } },
+  invariants: [{ name: 'still', on: ['update'], enforcement, assert: false }] },
+  Tag: { schema: { type: 'object', properties: {
+    id: { type: 'integer', 'x-entity': { key: true } }, made: { type: 'string' }, meta: { type: 'object' } } } },
+  Wide: { schema: { type: 'object', properties: {
+    id: { type: 'integer', 'x-entity': { key: true } }, x: nullableText, 'x,y': nullableText, z: nullableText, 'y,z': nullableText } } },
+} });
+
+/**
+ * `storeAgreement`'s writes, in order, over `hybridAgreementModel`: the writes
+ * the removed rules guarded are still made and meet the rules that remain.
+ * Returns every outcome and the rows left behind, read back through the store.
+ * @param {RuleEngine} engine @param {'database' | 'store'} [enforcement] @returns {Promise<string>}
+ */
+export async function hybridAgreement(engine, enforcement = 'database') {
+  const fixture = await engine.fixture(STORE_OWNED_TABLES);
+  try {
+    const store = await openStore(hybridAgreementModel(enforcement), { driver: fixture.driver });
+    try {
+      const writes = [];
+      const save = () => outcome(() => store.saveChanges());
+      const docs = store.entity('Doc'), lines = store.entity('Line'), memos = store.entity('Memo');
+      await docs.create({ id: 1, status: 'draft', sealed: null });
+      await lines.create({ id: 1, parent: 1, qty: 1, note: 'a', revision: 0 });
+      lines.put({ ...(await lines.get(1)), qty: 5 });
+      writes.push(await outcome(() => lines.update(1, { note: 'locked' })));
+      writes.push(await save());
+      lines.discard(1);
+      await docs.create({ id: 2, status: 'draft', sealed: null });
+      await lines.create({ id: 2, parent: 2, qty: 1, note: 'a', revision: 0 });
+      docs.put({ ...(await docs.get(2)), status: 'final' });
+      lines.remove(2);
+      writes.push(await save());
+      docs.discard(2);
+      lines.discard(2);
+      await docs.update(2, { status: 'final' });
+      docs.put({ ...(await docs.get(2)), status: 'draft' });
+      lines.remove(2);
+      writes.push(await save());
+      await fixture.exec(`INSERT INTO "Doc" (id, status, doc) VALUES (3, 'draft', ${rawDoc(engine)})`);
+      await fixture.exec(`INSERT INTO "Line" (id, parent, qty, note, revision, doc) VALUES (3, 3, 1, 'a', 0, ${rawDoc(engine)})`);
+      await fixture.exec('UPDATE "Doc" SET status = \'final\' WHERE id = 3');
+      lines.remove(3);
+      writes.push(await save());
+      lines.discard(3);
+      writes.push(await outcome(() => lines.delete(99)));
+      lines.remove(98);
+      writes.push(await save());
+      docs.add({ id: 6, status: 'draft', sealed: null });
+      memos.add({ id: 'm', parent: 6 });
+      writes.push(await save());
+      const items = store.entity('Item');
+      await items.create({ id: 1, u: UUID, ver: 0, revision: 0 });
+      items.put({ ...(await items.get(1)), u: UUID.toUpperCase() });
+      writes.push(await save());
+      items.discard(1);
+      items.put({ ...(await items.get(1)), note: null });
+      writes.push(await save());
+      items.discard(1);
+      for (const changes of [{ ver: 100 }, { revision: 7 }, { note: 'b' }]) writes.push(await outcome(() => items.update(1, changes)));
+      const tags = store.entity('Tag');
+      await tags.create({ id: 1, made: '2020-01-01', meta: { a: 1, list: [1] } });
+      tags.put({ ...(await tags.get(1)), meta: { a: 2, list: [1, 2] } });
+      writes.push(await save());
+      writes.push(await outcome(() => tags.update(1, { made: '2021-01-01' })));
+      const wide = store.entity('Wide');
+      await wide.create({ id: 1, x: null, 'x,y': null, z: null, 'y,z': null });
+      for (const changes of [{ 'x,y': 'XY', z: 'Z' }, { x: 'X', 'y,z': 'YZ' }, { 'x,y': 'C' }]) writes.push(await outcome(() => wide.update(1, changes)));
+      const read = async (/** @type {string} */ name, /** @type {any[]} */ keys) => Promise.all(keys.map((key) => store.entity(name).get(key)));
+      return JSON.stringify({ writes, docs: await read('Doc', [1, 2, 3, 6]), lines: await read('Line', [1, 2, 3]), memo: await read('Memo', ['m']),
+        items: await read('Item', [1]), tags: await read('Tag', [1]), wide: await read('Wide', [1]) });
+    }
+    finally { await store.close(); }
+  }
+  finally { await fixture.dispose(); }
 }

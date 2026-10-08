@@ -889,7 +889,7 @@ oracle run on both. What differs is declared rather than discovered:
 | a `boolean` member | `INTEGER` 1/0 | `smallint` 1/0 |
 | an untyped indexed path | `ANY` — compares with anything | `jsonb` — the predicate reads the document instead |
 | configuration | the closed pragma set, read back at open | the operator's; `store.capabilities.pragmas` is all `null` |
-| drift detection | the stored `CREATE` text, exactly | the structural check (columns, indexes, foreign keys), and each index condition and generated column's expression read back from the catalog |
+| drift detection | the stored `CREATE` text, exactly | the structural check (columns, indexes, foreign keys), each index condition and generated column's expression read back from the catalog, and every trigger and rewrite rule on the table: a rule's program read field by field, any other one drift |
 | managed change ledger | journal or native sessions, according to host | journal with durable bounded pages and optional notification hints |
 | leased jobs / transactional outbox | shared queue and checkpoints | shared queue and checkpoints; concurrent row-locked claims |
 | live queries | synchronous incremental/rerun; optional async resnapshot | optional bounded resnapshot over durable journal |
@@ -1326,7 +1326,13 @@ document's unindexed members are not in the physical shape
 it (`key-source` — `options.keys` supplies the pointer), a view cannot
 be declared (`unmapped-view`), a foreign key cannot say which side
 declared the edge (`ambiguous-relation`). `strict: true` refuses rather
-than answering a partial model.
+than answering a partial model. The rule programs of a store-owned entity
+([MODEL-FORMAT §13.4](docs/MODEL-FORMAT.md#134-database-enforcement)) are
+reported as `unmapped-object` rows and left as they are: the derived model
+declares no `invariants`, so it neither opens over that table (`JD0002`, an
+undeclared trigger) nor migrates to the authored model (the plan's
+`CREATE`s meet the installed programs and fail `JD0023`) — the model that
+declares the rules is the one that opens it.
 
 Scalar enum CHECKs on mapped entity columns are recovered from both
 catalogs. An entity's indexes come back as a model declares them: a
@@ -1842,7 +1848,10 @@ Changed physical model diffs remain a specific `JD0021` policy refusal;
 structural changes are explicitly reviewed. `planInvariants` supplies the
 declared rule programs — SQLite triggers, PostgreSQL trigger functions
 ([MODEL-FORMAT §13](docs/MODEL-FORMAT.md#13-persistence-invariants)) — for
-installation through that boundary.
+installation through that boundary. On a layout the store owns, the store
+installs a database rule's programs with the table and verifies them on every
+open, and `planModelMigration` adds, replaces and drops them as the rules
+change ([§13.4](docs/MODEL-FORMAT.md#134-database-enforcement)).
 
 Native column reads and bounded mutation documents are specified in [NATIVE-PLANS](docs/NATIVE-PLANS.md), including SQL census coverage, resource accounting and refusals.
 

@@ -208,7 +208,9 @@ export function createEntityMutation(connection, entity, mapping, core) {
   return (document) => {
     const plan = compile(document);
     const details = { collection: entity.name, docPath: entity.docPath };
-    return connection.transaction(() => {
+    // the savepoint itself can refuse — a PostgreSQL transaction an earlier
+    // failure spent — and answers as the statement would (`JD2088`)
+    return attempt(() => connection.transaction(() => {
       let owner = statements.get(plan.sql);
       if (owner === undefined) {
         // Preparation starts with the owner, so a synchronous refusal is
@@ -234,6 +236,6 @@ export function createEntityMutation(connection, entity, mapping, core) {
         return { mode: 'native', affected: rows.length, rows: returned,
           admitted: { statements: 1, rows: rows.length, bytes: utf8Length(JSON.stringify(stored)) } };
       });
-    });
+    }), (error) => wrapDriverError(error, details));
   };
 }

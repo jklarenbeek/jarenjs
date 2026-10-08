@@ -445,8 +445,9 @@ value the store did not honor now refuse by code, before any statement:
   `JD0005`, now points at the member too (`/entities/<E>/physical/bogus`,
   `/entities/<E>/physical/columns/<name>/bogus`) and names the nearest one.
 - An `enforcement: "database"` rule on an entity without a `physical` layout
-  opened with no trigger and was enforced by nothing; it is now `JD0005` at its
-  `enforcement`. Declare it `store`, or give the entity an explicit layout.
+  opened with no trigger and was enforced by nothing; the store now installs
+  its programs with the table and verifies them on every open (the
+  store-owned rule bullets below say what an existing table needs).
 - A relation to an entity with a `physical` layout opened and failed at its
   first `load({ include })` with a raw `JD2005`; it is now `JD0005` at open.
 - Two schema objects a model planned under one name — an index of one
@@ -625,6 +626,54 @@ value the store did not honor now refuse by code, before any statement:
   escape string (`E'…'`), which changes that program's text, so a database that
   installed such a rule refuses to open (`JD0002`) until an explicit migration
   reinstalls the programs `planInvariants` plans.
+- A database rule on a layout the store owns (an entity without `physical`) is
+  no longer refused: the store creates its programs with the table — SQLite
+  triggers, PostgreSQL functions and triggers — and verifies them on every
+  open, so a table an earlier model created without them refuses to open
+  (`JD0002`) until a migration planned from that model adds them
+  (`planModelMigration`, which judges no stored row and creates the programs
+  after the migration's transform steps, so a transform can carry stored
+  rows into conformance). What such a rule cannot
+  lower is `JD0005` at the member: a read of an epoch, document or relation
+  member, `audit`, `effects` and `$exists-row`; `columns` keep their refusal.
+  Such a rule judges the rows the database's own foreign-key actions write,
+  where a store rule runs for none of them: switching a child's delete or
+  update rule from `store` to `database` enforcement refuses a parent's
+  `cascade` or `setNull` delete that went through before, in the child's
+  rule's name ([MODEL-FORMAT §13.4](MODEL-FORMAT.md#134-database-enforcement)).
+  `store.introspect()` reports the programs as `unmapped-object` rows and
+  derives a model without the rules, which neither opens over that table
+  (`JD0002`) nor migrates to the authored model (`JD0023`): open such a
+  table with the model that declares its rules.
+- On PostgreSQL a store-owned table with rules is created with its functions
+  and triggers by plain statements, its `CREATE TABLE` among them, so an open
+  whose rival commits the table after this open's probe retries into
+  verification; and an open now refuses (`JD0002`) a trigger, or a rewrite
+  rule (`CREATE RULE`), that the model does not declare on any table the
+  store owns — an entity's, a join table's, a collection's — as SQLite's open
+  already refused a trigger. Drop such a trigger or rule, or keep that table
+  out of the store's model. That check is one catalog read per store-owned
+  table on every PostgreSQL open, ruled or not.
+- A store rule on a store-owned layout judged an insert's document as written:
+  a member written `null` passed `{ "$eq": ["$.new.n", null] }` on the insert
+  and failed every update of the same row, which reads the member back
+  missing. A document is now judged as the store reads it back, on the insert
+  as on the update, directly and tracked; test such a member with `$exists`.
+- On PostgreSQL a physical entity's `delete()` that a database rule refused
+  inside `store.transaction` spent the transaction (`JD2088` at its next
+  statement and its commit); it is a savepoint of its own now, as an insert
+  and an update already were, and the transaction goes on.
+- On PostgreSQL a write in a savepoint of its own — one a database rule
+  judges, a store rule's probing insert, update or delete, a tracked save, a native mutation
+  — issued after an earlier failure had spent the transaction answered the
+  server's own `25P02`; it is `JD2088` (class `aborted`), as a plain
+  statement's was and as the commit is.
+- On PostgreSQL a tracked save that changed a member inside a document
+  member (`meta.b`) numbered its parameter `$0` when it assigned no column
+  (`there is no parameter $0`) and aliased the last column's parameter when
+  it assigned one or more (`inconsistent types deduced for parameter`), so
+  such a save failed `JD2005`; it writes the member, alone or beside the
+  columns and members the save assigns. SQLite was unaffected.
 - On PostgreSQL a name the plan gives a table, a column or an index longer
   than 63 bytes (an indexed member past about 60 bytes, a long index,
   property or entity name) failed `openStore` with the dialect's raw

@@ -7,7 +7,8 @@ import { nodeDriver } from '@jarenjs/db/node';
 import { nodeWorkerDriver } from '@jarenjs/db/node-worker';
 import { nodeWorkerPoolDriver } from '@jarenjs/db/node-pool';
 import { ruleModel as model, truthModel, ruleLifecycle, ruleTruthTable, ruleGrid, sqliteEngine, familyModel, familyLifecycle,
-  FAMILY_TABLES, FAMILY_REFUSALS, storeAgreement, column, TRUTH_POLICIES } from './invariant-oracle.js';
+  FAMILY_TABLES, FAMILY_REFUSALS, storeAgreement, column, TRUTH_POLICIES, hybridTruthTable, hybridGrid, HYBRID_GRID_PREDICATES,
+  hybridLifecycle, hybridAgreement } from './invariant-oracle.js';
 import { tempDbPath } from './helpers.js';
 
 it('fresh and upgraded rules agree for every SQL writer, allocated audit keys, nulls and frozen no-ops', async () => {
@@ -73,6 +74,44 @@ it('every scalar codec read as an absent member gives the query engine\'s verdic
   const verdicts = JSON.parse(await ruleGrid(sqliteEngine(), 'absent'));
   // the predicates that compare a member with null, or with a list holding one, refuse at planning
   assert.equal(verdicts.filter((/** @type {any} */ v) => v === 'refused').length, 4);
+});
+
+it('a database rule on a layout the store owns reads a missing member as absent, from the store and from raw SQL, as on an absent column', async () => {
+  // the store-owned truth table is the physical one whose columns read SQL NULL as absent
+  assert.equal(await hybridTruthTable(sqliteEngine()), await ruleTruthTable(sqliteEngine(), TRUTH_POLICIES.absent));
+  const verdicts = JSON.parse(await hybridGrid(sqliteEngine()));
+  assert.deepEqual(verdicts.filter((/** @type {any} */ v) => v === 'refused').length, 4);
+  assert.equal(verdicts.length, 4 + (HYBRID_GRID_PREDICATES.length - 4) * 9);
+});
+
+it('a store-owned layout\'s rules hold for every writer, installed by its open or by a planned migration that judges no stored row', async () => {
+  const fresh = await hybridLifecycle(sqliteEngine(), false);
+  assert.equal(await hybridLifecycle(sqliteEngine(), true), fresh);
+  assert.deepEqual(JSON.parse(fresh), {
+    // an inverted span, an ordered one, a held booking; an inverted update and save; a transaction
+    // that commits after its refused write; a held booking's delete
+    writes: ['refused ordered', 'ok', 'ok', 'refused ordered', 'refused ordered', 'ok', 'refused kept'],
+    // raw SQL: an inverted insert and update, an ordered update, a held delete, another delete
+    raw: ['refused ordered', 'refused ordered', 'ok', 'refused kept', 'ok'],
+    read: [null, { id: 'b', startsAt: 1, endsAt: 6 }, null, null, { id: 'h', startsAt: 1, endsAt: 2, room: 'held' }, null],
+  });
+});
+
+it('the agreement writes on layouts the store owns meet the rules that lower there', async () => {
+  const run = JSON.parse(await hybridAgreement(sqliteEngine()));
+  assert.deepEqual(run.writes, [
+    // a row gone stale under a direct write: the save is judged against the row it replaces
+    'ok', 'refused locked',
+    // no probe guards a parent's lines any more
+    'ok', 'ok', 'ok', 'ok', 'ok', 'ok',
+    // another uuid spelling is another text; null over absence and the version alone change nothing a rule
+    // counts; the revision and the note are changes
+    'refused still', 'ok', 'ok', 'refused still', 'refused still',
+    // no rule guards a tag or a wide row
+    'ok', 'ok', 'ok', 'ok', 'ok']);
+  assert.deepEqual(run.lines, [{ id: 1, parent: 1, qty: 1, note: 'locked', revision: 0 }, null, null]);
+  // the null save and the version update each wrote, the version token moving twice
+  assert.deepEqual(run.items, [{ id: 1, u: '0f0e0d0c-0b0a-4908-8706-050403020100', ver: 2, revision: 0 }]);
 });
 
 it('invariant declarations refuse unspecified writer authority and duplicate names', () => {

@@ -910,7 +910,8 @@ export function createTracker(context) {
             assigned.push(name);
           }
           if (parts.docBuild !== null) {
-            const built = parts.docBuild.build(q('doc'), params.length);
+            // numbered after the parameters ahead of it: a numbered engine's refs start at 1
+            const built = parts.docBuild.build(q('doc'), params.length + 1);
             assignments.push(`${q('doc')} = ${built.expression}`);
             params.push(...built.params);
           }
@@ -1589,8 +1590,10 @@ export function createTracker(context) {
     // does: the statements below run in a savepoint whose release is not
     // a commit, so the right to KEEP what they justify waits for one
     const undo = undoFor(statements, joinOnly);
+    // the savepoint itself can refuse — a PostgreSQL transaction an earlier
+    // failure spent — and answers as its statements would (`JD2088`)
     return chain(
-      writes ? connection.transaction(() => runStatements(statements, report, deferred, joinOnly))
+      writes ? attempt(() => connection.transaction(() => runStatements(statements, report, deferred, joinOnly)), (error) => wrapDriverError(error))
         : chain(settleChecks(joinOnly.flatMap((record) => deferred.get(record) ?? [])), () => report),
       (finished) => {
         // The advance itself lands now, because inside the transaction the

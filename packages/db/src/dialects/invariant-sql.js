@@ -59,9 +59,11 @@ export function compileInvariants(mapping, all, dialect, flavor) {
     const target = all.entities[args.entity];
     return existsRowSql({ match: args.match, target, keys: target.keys }, dialect, value);
   };
-  // an incremented member is the database's, like a version: never a change
+  // an incremented member is the database's, like a version: never a change;
+  // a store-owned table's document column holds the rest of the row
   const incremented = new Set(rules.flatMap((rule) => rule.enforcement === 'database' ? (rule.effects ?? []).map((e) => e.increment) : []));
-  const changed = columns.filter((c) => c.name !== mapping.version && !c.generated && !incremented.has(c.name))
+  const changed = [...columns.filter((c) => c.name !== mapping.version && !c.generated && !incremented.has(c.name)),
+    ...(mapping.documentColumn === undefined ? [] : [mapping.documentColumn])]
     .map((c) => flavor.changed(c, q, dialect)).join(' OR ') || flavor.false;
   const physicalOf = (member) => /** @type {any} */ (columns.find((c) => c.name === member)).physical;
   /** @type {Map<string, any>} */
@@ -124,12 +126,13 @@ export function compileInvariants(mapping, all, dialect, flavor) {
 
 /** An increment is the trigger's last statement, a guarded update of its own
  * row: a trigger never fires itself while `recursive_triggers` is off, which
- * the store asserts at open.
+ * the store asserts at open. Each program carries the statement that drops it.
  * @param {any} mapping @param {any} all @param {any} dialect @returns {any[]} */
 export function sqliteInvariantTriggers(mapping, all, dialect) {
   const q = dialect.quoteIdentifier;
   const sl = dialect.stringLiteral;
-  const row = mapping.keys.map((key) => {
+  // the row an increment updates, by its key columns
+  const row = () => mapping.keys.map((key) => {
     const column = q(/** @type {any} */ (mapping.columns.find((c) => c.name === key)).physical);
     return `${column} = NEW.${column}`;
   }).join(' AND ');
@@ -138,11 +141,12 @@ export function sqliteInvariantTriggers(mapping, all, dialect) {
       ...program.checks.map((check) => `SELECT RAISE(ABORT, ${sl(`${INVARIANT_MARKER}${check.rule}`)}) WHERE ${check.when};`),
       ...program.audits.map((audit) => `INSERT INTO ${audit.table} (${audit.names.join(', ')}) SELECT ${audit.values.join(', ')}${audit.when ? ` WHERE ${audit.when}` : ''};`),
       ...program.increments.map((increment) => `UPDATE ${q(mapping.table)} SET ${q(increment.column)} = OLD.${q(increment.column)} + 1 `
-        + `WHERE ${row} AND NEW.${q(increment.column)} IS OLD.${q(increment.column)}${increment.when ? ` AND ${increment.when}` : ''};`)];
+        + `WHERE ${row()} AND NEW.${q(increment.column)} IS OLD.${q(increment.column)}${increment.when ? ` AND ${increment.when}` : ''};`)];
     const name = `_jaren_rule_${mapping.table.length}_${mapping.table}_${program.name}`;
     const event = `${program.op.toUpperCase()}${program.columns.length ? ` OF ${program.columns.map(q).join(', ')}` : ''}`;
     return { type: 'trigger', name, owner: mapping.table, rule: program.rules.join(','),
       ...(program.increments.length ? { selfUpdate: true } : {}),
-      sql: `CREATE TRIGGER ${q(name)} AFTER ${event} ON ${q(mapping.table)} BEGIN ${bodies.join(' ')} END` };
+      sql: `CREATE TRIGGER ${q(name)} AFTER ${event} ON ${q(mapping.table)} BEGIN ${bodies.join(' ')} END`,
+      drop: `DROP TRIGGER ${q(name)}` };
   });
 }

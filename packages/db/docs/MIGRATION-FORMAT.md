@@ -839,6 +839,7 @@ every row has a shadow-verified test that migrates seeded data:
 | drop mapped column (property removed, or moved into the document) | fold the column back into the document first (`sql` step) when the property survives — a `NULL` column folds to ABSENT, never to JSON `null`, so §9.3's rule survives the fold, in the rebuild copy too; drop its index, then `DROP COLUMN` where SQLite's conditions hold, else rebuild |
 | change type / enum CHECK / key / epoch flavor | **rebuild** (§10) |
 | add, drop or change an index (`unique`/`index`/version, an entry of the entity's `indexes`, its `where`) | plain DDL — a changed index (uniqueness, columns or condition) is a `DROP INDEX` then a `CREATE INDEX`; a rebuild (§10) recreates every index with its condition |
+| add, drop or change a database rule of a store-owned layout (MODEL-FORMAT §13.4) | its programs as plain DDL: an added program is its `CREATE` (on PostgreSQL its function, then its trigger), a removed one its `DROP` (a trigger before its function), a changed one both, an unchanged one nothing. Every `DROP` goes before the table's other steps and every `CREATE` of a table that already exists comes last in the migration, after its transform steps: a renamed or a rebuilt table's programs are dropped before the rename or the rebuild (§10) and created again at the end; a new entity's table is created with its programs |
 | add or drop a relation (foreign-key column, join table) | foreign keys **rebuild** the holder — an inferred foreign-key column the target model no longer declares is folded into the document when the target declares the property, else named in `report.lost` and the plan is destructive; join tables create/drop directly |
 | entity added / dropped | create / `DROP TABLE` (destructive, named), children before parents so no foreign key dangles mid-migration |
 | entity renamed | declared with `x-rename` on the target entity — never inferred; join tables renamed mechanically with their endpoints |
@@ -858,6 +859,16 @@ SELECT "employeeId", "day", count(*) FROM "Shift"
 WHERE "status" IN ('active', 'pending')
 GROUP BY "employeeId", "day" HAVING count(*) > 1
 ```
+
+**A new rule judges writes, not rows.** A rule's trigger judges the
+statements that write a row, so a migration that adds a rule judges no
+row already stored: a row the rule would refuse stays, and meets the rule
+when it is next written (an update that changes nothing the rule counts
+passes, MODEL-FORMAT §13.1). A transform in the same migration runs before
+the programs arrive, so a row it rewrites into conformance is kept and a
+row it leaves violating stays, as any stored row does. Find such rows with
+the rule's condition before the rule arrives, as the colliding groups of a
+unique index are found above.
 
 Two rules keep the diff honest:
 
@@ -905,7 +916,11 @@ document, mechanical to run: create the new shape under the temporary
 name, copy (the planner renders the column mapping: surviving columns
 verbatim, new ones from the document, dropped ones already folded),
 `DROP` the old table, `RENAME` the new one into place, recreate every
-index from the target model, then **`PRAGMA foreign_key_check` inside
+index from the target model (a store-owned table's rule programs are not
+the step's: they are dropped in steps of their own before the rebuild —
+the old table's triggers would go with it, a PostgreSQL function would
+not — and created in steps of their own at the end of the migration,
+after its transform steps, §9), then **`PRAGMA foreign_key_check` inside
 the transaction** — a reference the rebuild broke fails the migration
 rather than shipping (compared against the same check taken before it
 began, as a link's is, §6; a parent an earlier step of the link renamed
@@ -1378,7 +1393,18 @@ await migrate({ driver }, [migration], { baseline: fromModel, shadow: false });
 Store verifies each program field by field. On PostgreSQL the target catalog is
 the whole acceptance: `migrate(…, { model })` reads a physical entity's stored
 rows through SQLite tables only and refuses there (`JD0021`). Removing a rule is
-a migration of its own: drop its trigger, and on PostgreSQL its function.
+a migration of its own: drop its trigger, and on PostgreSQL its function — each
+item's `drop` is the statement that removes it.
+
+A store-owned layout's rules need none of this: the store creates their
+programs with the table, and `planModelMigration` diffs them like any other
+part of the model (§9) — adding a rule to a table that exists is that
+migration, which an open that finds the table without the rule's programs
+asks for (`JD0002`). Dropping the entity through a planned migration
+removes its programs with it, a PostgreSQL function included; a `DROP
+TABLE` by hand leaves the functions, which the next open of that entity
+meets when it creates the table (`JD0002`, "already exists with same
+argument types") — remove each with its `drop` statement.
 
 ### Runnable physical lifecycle
 

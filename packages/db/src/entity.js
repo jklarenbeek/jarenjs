@@ -423,6 +423,14 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
         ? `a '${entity.name}' already exists under one of the keys ${carried.map((one) => JSON.stringify(one)).join(', ')}`
         : `a '${entity.name}' already exists under key ${JSON.stringify(key)}`,
   });
+  /**
+   * A write in a transaction of its own — a savepoint inside the caller's.
+   * A bracket that cannot open, on a PostgreSQL transaction an earlier
+   * failure spent, is classified as the write's own failure (`JD2088`),
+   * as its statement would be; a coded failure inside passes through.
+   * @param {any} key @param {() => any} run
+   */
+  const bracketed = (key, run) => attempt(() => connection.transaction(run), (error) => wrapWrite(error, key));
 
   /**
    * A store rule's `$exists-row`: the probe SQL the database's trigger runs,
@@ -451,6 +459,11 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
   const ruledOps = new Set(entity.invariants.flatMap((rule) => (rule.enforcement === 'store' ? rule.on : [])));
   /** Whether a store rule judges `op`. @param {string} op */
   const ruled = (op) => ruledOps.has(op);
+  const triggeredOps = new Set(entity.invariants.flatMap((rule) => (rule.enforcement === 'database' ? rule.on : [])));
+  /** Whether a database rule judges `op`: the write is a savepoint of its own,
+   * since a refused statement spends a PostgreSQL transaction (a physical
+   * row's insert and update are one already). @param {string} op */
+  const triggered = (op) => triggeredOps.has(op);
   /** Whether a store rule on `op` reads another row, so its check and the
    * write share one transaction. @param {string} op */
   const probing = (op) => entity.invariants.some((rule) => rule.enforcement === 'store' && rule.on.includes(op) && rule.probes.length > 0);
@@ -502,7 +515,9 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
       document: !physical,
       physicalName,
       writable,
-      checkMutation: (op, before, after, options = {}) => checkInvariants(entity.invariants, op, before, after, { probe, ...options }),
+      // a document is judged as the store reads it back: a member written null is missing
+      checkMutation: (op, before, after, options = {}) => checkInvariants(entity.invariants, op,
+        before && asStored(before), after && asStored(after), { probe, ...options }),
       checkStored,
       ruled,
       normalize: (doc) => normalizePhysicalDoc(doc),
@@ -572,9 +587,10 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
             }) : asStored(made);
           });
       });
-      if (physical) return connection.transaction(insert);
-      const write = () => chain(checkInvariants(entity.invariants, 'insert', null, completed, { probe }), insert);
-      return probing('insert') ? connection.transaction(write) : write();
+      if (physical) return bracketed(completed[keys[0]], insert);
+      // judged as the store reads the row back: a member written null is missing
+      const write = () => chain(checkInvariants(entity.invariants, 'insert', null, asStored(completed), { probe }), insert);
+      return probing('insert') || triggered('insert') ? bracketed(completed[keys[0]], write) : write();
     },
     get(key) {
       const parts = keyParts(key);
@@ -685,7 +701,7 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
         ].join(', ');
         const sql = `UPDATE ${tableSql} SET ${assignments} `
           + `WHERE ${keyWhere(values.length + (physical ? 0 : 1))}`;
-        return chain(physical ? null : checkInvariants(entity.invariants, 'update', current, next, { probe }), () =>
+        return chain(physical ? null : checkInvariants(entity.invariants, 'update', current, asStored(next), { probe }), () =>
           chain(runUpdate(values.map((value) => value.name), sql, (statement) =>
             attempt(() => statement.run([...values.map((value) => value.value),
               ...(physical ? [] : [JSON.stringify(rest)]), ...parts]), (error) => wrapWrite(error, parts[0]))),
@@ -695,14 +711,15 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
           }) : asStored(next)));
       });
       // a rule judges the row this update replaces: read and write in one transaction
-      return physical || ruled('update') ? connection.transaction(update) : update();
+      return physical || ruled('update') || triggered('update') ? bracketed(parts[0], update) : update();
     },
     delete(key) {
       writable();
-      if (!ruled('delete')) return remove(key);
+      const parts = keyParts(key);
+      if (!ruled('delete')) return triggered('delete') ? bracketed(parts[0], () => remove(key)) : remove(key);
       // judged after the delete, against the row it removed, as a database
       // rule is: a key with no row removes nothing and runs no rule
-      return connection.transaction(() => chain(this.getLocked(key), (before) => before === undefined ? remove(key)
+      return bracketed(parts[0], () => chain(this.getLocked(key), (before) => before === undefined ? remove(key)
         : chain(remove(key), (removed) => removed
           ? chain(checkInvariants(entity.invariants, 'delete', before, null, { probe }), () => removed) : removed)));
     },

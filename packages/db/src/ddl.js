@@ -21,6 +21,7 @@ import { chain } from './driver.js';
 import { BBOX_COMPONENTS, BBOX_INDEX_ORDER, derivedMappingFor } from './derive.js';
 import { expressionSql, expressionStem, expressionFunctions } from './expression.js';
 import { foldIdentifier } from './invariants.js';
+import { verifyRulePrograms } from './physical.js';
 import { rowPaths, rowPredicate, storedBoolean } from './dialects/row-predicate.js';
 import { planTable } from './dialects/sqlite-schema.js';
 import { comparableDeclaredSql } from './schema-sql.js';
@@ -907,15 +908,16 @@ function verifyDeclaredSql(connection, plan, disagree) {
  * and the migration engine's shadow validation.
  * @param {any} connection
  * @param {any} plan
- * @param {string} collection
+ * @param {string} collection - the table's collection or entity
  * @param {string} docPath
+ * @param {'collection' | 'entity'} [kind] - what `collection` names, for the refusal
  * @returns {any} value-or-promise
  */
-export function verifyShape(connection, plan, collection, docPath) {
+export function verifyShape(connection, plan, collection, docPath, kind = 'collection') {
   const dialect = connection.dialect;
   const disagree = (difference) => {
     throw new DbCompileError('JD0002',
-      `collection '${collection}': the existing table does not match the declared model (${difference}); reshaping a live database is the migration story, and nothing was altered`,
+      `${kind} '${collection}': the existing table does not match the declared model (${difference}); reshaping a live database is the migration story, and nothing was altered`,
       docPath);
   };
   // an engine that keeps no CREATE text has its catalog read back what that
@@ -1023,8 +1025,13 @@ export function verifyShape(connection, plan, collection, docPath) {
                 return collectColumns(i + 1);
               }));
           };
+          // the table's rule programs: from the catalog where the engine keeps
+          // no CREATE text, every other trigger or rewrite rule on the table
+          // undeclared drift; a CREATE text comparison covers them below
           return chain(collectColumns(0), () =>
-            verifyDeclaredSql(connection, plan, disagree));
+            chain(verifyRulePrograms(connection, plan.table, plan.programs ?? [], disagree,
+              { installed: dialect.capabilities.declaredSqlText !== true, undeclared: true }), () =>
+              verifyDeclaredSql(connection, plan, disagree)));
         }));
     }));
 }
@@ -1111,7 +1118,7 @@ const expectedColumnsOf = (columns, legacyTypes, dialect) => [...columns
  * @param {any} dialect
  * @returns {{ table: string, createSql: string[], expected: any,
  *   columnNames: Set<string>, objects?: { name: string, what: string, docPath: string }[],
- *   conditionColumns?: { name: string, physical: string, codec: string }[] }}
+ *   programs?: any[], conditionColumns?: { name: string, physical: string, codec: string }[] }}
  */
 export function planEntity(name, entityMapping, entities, dialect) {
   if (entityMapping.document === false) {
@@ -1227,6 +1234,12 @@ export function planEntity(name, entityMapping, entities, dialect) {
     createSql.push(dialect.ddl.createIndex({ ...declared, table: name }));
     expectedIndexes.push(declared);
   });
+  // the database rules' programs, created with the table and verified with it
+  const programs = (entityMapping.invariants ?? []).some((/** @type {any} */ rule) => rule.enforcement === 'database')
+    ? rulePrograms(name, entityMapping, entities, dialect, columns, conditionColumns) : [];
+  for (const program of programs) createSql.push(program.sql);
+  for (const program of new Set(programs.map((/** @type {any} */ item) => item.name)))
+    objects.push({ name: program, what: `the rule program '${program}'`, docPath: `${entityPath}/invariants`, rename: 'the entity' });
   refuseNameCollisions(objects);
 
   return {
@@ -1235,6 +1248,8 @@ export function planEntity(name, entityMapping, entities, dialect) {
     columnNames: new Set(columns.map((column) => column.name)),
     expectedForeignKeys: expectedForeignKeysOf(columns),
     objects,
+    /** The programs of the entity's database rules, in install order (their SQL ends `createSql`). */
+    programs,
     /** The members an index condition may read, by their columns. */
     conditionColumns,
     expected: {
@@ -1264,6 +1279,29 @@ function conditionColumnsOf(entityMapping, entities) {
     columns.push({ name: column.name, physical: column.name, codec: /** @type {string} */ (SCALAR_CODECS.get(column.storage)) });
   }
   return columns;
+}
+
+/**
+ * The programs of a store-owned entity's database rules: the dialect's
+ * lowering over the columns an index condition may read (a scalar member's,
+ * a foreign key's; never an epoch's), each with the type the table declares
+ * it with (`stored`), so a rule reads it as the table holds it. A key column
+ * holds no SQL NULL; any other's SQL NULL is a missing member. A rule's change
+ * test counts the document column beside them.
+ * @param {string} name @param {any} entityMapping @param {any} entities - the full mapping @param {any} dialect
+ * @param {{ name: string, type: string }[]} declared - the table's planned columns
+ * @param {{ name: string, physical: string, codec: string }[]} readable - the columns a rule may read
+ * @returns {any[]}
+ */
+function rulePrograms(name, entityMapping, entities, dialect, declared, readable) {
+  if (typeof dialect.invariantTriggers !== 'function')
+    throw new DbCompileError('JD0005', 'this dialect cannot verify declared database invariant triggers');
+  const typeOf = new Map(declared.map((column) => [column.name, column.type]));
+  const columns = readable.map((column) => ({ ...column, null: entityMapping.keys.includes(column.name) ? 'reject' : 'absent',
+    generated: false, stored: typeOf.get(column.physical) }));
+  const documentColumn = { name: DOC_COLUMN, physical: DOC_COLUMN, codec: 'json', null: 'reject', generated: false, stored: dialect.docColumnType };
+  return dialect.invariantTriggers({ table: name, keys: entityMapping.keys, columns, documentColumn, document: false,
+    version: entityMapping.version, invariants: entityMapping.invariants }, entities, dialect);
 }
 
 /**
@@ -1316,15 +1354,17 @@ export function planJoinTable(tableName, join, entities, dialect) {
 }
 
 /** Plan explicit database-enforced persistence rules; never applies them. A
- * name too long for PostgreSQL becomes a short hash of its table, so two
- * tables can meet in one name: the plan refuses that rather than install one
- * table's program over the other's.
+ * store-owned entity's programs are the ones its table is created and
+ * verified with. A name too long for PostgreSQL becomes a short hash of its
+ * table, so two tables can meet in one name: the plan refuses that rather
+ * than install one table's program over the other's.
  * @param {any} model @param {{ dialect: any }} options @returns {any[]} */
 export function planInvariants(model, options) {
   const mapping = explainMapping(model);
   const dialect = options.dialect;
   if (typeof dialect.invariantTriggers !== 'function') throw new DbCompileError('JD0005', 'this dialect cannot lower database invariants');
-  const items = Object.values(mapping.entities).flatMap((entity) => dialect.invariantTriggers(entity, mapping, dialect));
+  const items = Object.entries(mapping.entities).flatMap(([name, entity]) => (entity.document === false
+    ? dialect.invariantTriggers(entity, mapping, dialect) : planEntity(name, entity, mapping, dialect).programs ?? []));
   /** @type {Map<string, string>} */
   const owners = new Map();
   for (const item of items) {

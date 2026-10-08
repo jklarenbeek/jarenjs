@@ -5,7 +5,7 @@ import { explainMapping, openStore, planInvariants, sqliteDialect } from '@jaren
 import { verifyPhysical } from '../../packages/db/src/physical.js';
 import { postgresDialect } from '@jarenjs/db/postgres';
 import { ruleModel, truthModel, RULE_TABLES, ruleLifecycle, ruleTruthTable, ruleGrid, familyModel, familyLifecycle, FAMILY_REFUSALS,
-  postgresEngine, sqliteEngine, storeAgreement, TRUTH_POLICIES } from './invariant-oracle.js';
+  postgresEngine, sqliteEngine, storeAgreement, TRUTH_POLICIES, hybridTruthTable, hybridGrid, hybridLifecycle, hybridAgreement } from './invariant-oracle.js';
 
 describe('PostgreSQL rule lowering', () => {
   it('plans a function and a row trigger per table and operation in the driver-owned schema, each program verified by its fields', () => {
@@ -159,6 +159,17 @@ describe('PostgreSQL database invariants', { skip: !url && 'JAREN_PG_URL is not 
     assert.equal(await ruleGrid(postgresEngine()), await ruleGrid(sqliteEngine()));
   });
 
+  it('a database rule on a layout the store owns gives SQLite\'s verdicts over its real column types, from the store and from raw SQL', async () => {
+    assert.equal(await hybridTruthTable(postgresEngine()), await hybridTruthTable(sqliteEngine()));
+    assert.equal(await hybridGrid(postgresEngine()), await hybridGrid(sqliteEngine()));
+  });
+
+  it('a store-owned layout\'s rules hold for every writer as on SQLite, installed by its open or by a planned migration', async () => {
+    const sqlite = await hybridLifecycle(sqliteEngine(), false);
+    for (const upgraded of [false, true]) assert.equal(await hybridLifecycle(postgresEngine(), upgraded), sqlite, upgraded ? 'upgraded' : 'fresh');
+    assert.equal(await hybridAgreement(postgresEngine()), await hybridAgreement(sqliteEngine()));
+  });
+
   it('a member read as absent compares false while missing, and refuses a null literal at planning, on PostgreSQL as on SQLite', async () => {
     for (const policy of [TRUTH_POLICIES.absent, TRUTH_POLICIES.mixed])
       assert.equal(await ruleTruthTable(postgresEngine(), policy), await ruleTruthTable(sqliteEngine(), policy), JSON.stringify(policy));
@@ -226,10 +237,14 @@ describe('PostgreSQL database invariants', { skip: !url && 'JAREN_PG_URL is not 
         const store = await openStore(ruleModel, { driver: fixture.driver, adopt: true });
         try {
           await store.entity('Entry').create({ start: 1, end: 2, phase: 'draft' });
+          // a row no longer a draft, whose delete the frozen rule refuses
+          await store.entity('Entry').create({ start: 1, end: 2, phase: 'draft' });
+          await store.entity('Entry').update(2, { phase: 'final' });
           const raw = (/** @type {any} */ scope) => scope.sql.prepare('UPDATE entry SET starts = 3 WHERE id = 1', { access: 'write', affects: ['entry'] }).run([]);
           // each store write is its own savepoint inside the caller's transaction
           for (const refused of [(/** @type {any} */ tx) => tx.entity('Entry').update(1, { start: 3 }),
             (/** @type {any} */ tx) => tx.entity('Entry').mutate({ op: 'update', key: 1, set: { start: 3 } }),
+            (/** @type {any} */ tx) => tx.entity('Entry').delete(2),
             (/** @type {any} */ tx) => tx.transaction(raw)]) {
             await store.transaction(async (tx) => {
               await assert.rejects(async () => refused(tx), { code: 'JD2096' });
@@ -238,12 +253,18 @@ describe('PostgreSQL database invariants', { skip: !url && 'JAREN_PG_URL is not 
             assert.equal((await store.entity('Entry').get(1))?.end, 5, engine.name);
             await store.entity('Entry').update(1, { end: 2 });
           }
-          // a trusted statement is not: on PostgreSQL its failure spends the transaction (SQLSTATE 25P02)
+          // a trusted statement is not: on PostgreSQL its failure spends the transaction (SQLSTATE 25P02),
+          // and every write after it — its own savepoint included — answers the coded refusal, as the commit does
+          const aborted = { code: 'JD2088', class: 'aborted' };
           const body = store.transaction(async (tx) => {
             await assert.rejects(async () => raw(tx), { code: 'JD2096' });
-            await tx.entity('Entry').update(1, { end: 5 });
+            if (engine.name !== 'postgres') return tx.entity('Entry').update(1, { end: 5 });
+            await assert.rejects(tx.entity('Entry').update(1, { end: 5 }), aborted);
+            await assert.rejects(tx.entity('Entry').mutate({ op: 'update', key: 1, set: { end: 5 } }), aborted);
+            await assert.rejects(tx.entity('Entry').delete(1), aborted);
+            return undefined;
           });
-          if (engine.name === 'postgres') await assert.rejects(body, { code: 'JD2088' });
+          if (engine.name === 'postgres') await assert.rejects(body, aborted);
           else await body;
         }
         finally { await store.close(); }

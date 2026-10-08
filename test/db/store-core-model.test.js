@@ -8,11 +8,11 @@
  * members and the nearest one — before any DDL, so a misspelt `unique` can no
  * longer open a store with no unique index. The boolean members are booleans.
  * The schema admits what the runtime admits: an invariant's `when`, `columns`
- * and `effects`. A rule no layer would enforce is refused rather than
- * declared: a database rule on a store-owned layout, and a relation to an
- * entity with a physical layout, which no include could navigate. A rule
- * whose assert does not compile, a database rule on a view and an audit into
- * no writable table are refused at the rule's member as well.
+ * and `effects`. A declaration no layer could serve is refused rather than
+ * declared: a relation to an entity with a physical layout, which no include
+ * could navigate. A database rule on a store-owned layout is installed with
+ * its table. A rule whose assert does not compile, a database rule on a view
+ * and an audit into no writable table are refused at the rule's member.
  *
  * The PostgreSQL half runs where `JAREN_PG_URL` names a server.
  */
@@ -25,7 +25,7 @@ import { nodeDriver } from '@jarenjs/db/node';
 import { validateFile } from '@jarenjs/studio';
 import { compileArtifact } from '../json/schema-artifact-helpers.js';
 import { tempDbPath } from './helpers.js';
-import { ENGINES, skipFor, withStore, withPostgres } from './store-core-engines.js';
+import { ENGINES, skipFor, withStore } from './store-core-engines.js';
 
 const read = (/** @type {string} */ name) => JSON.parse(readFileSync(new URL(`../../packages/db/schemas/${name}`, import.meta.url), 'utf8'));
 const SCHEMAS = { '2020-12': compileArtifact(read('jaren-model.schema.json')), 'draft-07': compileArtifact(read('jaren-model.draft-07.schema.json')) };
@@ -216,21 +216,15 @@ const BOOKING = (/** @type {string} */ enforcement) => ({ $model: '0.1', entitie
   schema: { type: 'object', properties: { id: { type: 'string', 'x-entity': { key: true } }, startsAt: { type: 'integer' }, endsAt: { type: 'integer' } } },
   invariants: [{ name: 'ordered', on: ['insert', 'update'], enforcement, assert: { $le: ['$.new.startsAt', '$.new.endsAt'] } }],
 } } });
-const STORE_OWNED_REASON = /database invariant: database rules require a writable explicit column layout/;
-
 for (const engine of ENGINES) {
-  describe(`a rule no layer would enforce is refused at open (${engine})`, { skip: skipFor(engine) }, () => {
-    it('a database rule on a store-owned layout: JD0005 at its enforcement, the reason planInvariants gives', async () => {
-      assert.throws(() => planInvariants(BOOKING('database'), { dialect: sqliteDialect }), { code: 'JD0005', message: STORE_OWNED_REASON });
-      const refused = { code: 'JD0005', docPath: '/entities/Booking/invariants/0/enforcement', message: STORE_OWNED_REASON };
-      if (engine === 'sqlite') await refusesToOpen(() => openStore(BOOKING('database'), { driver: nodeDriver() }), refused);
-      else {
-        await withPostgres(async ({ pool, schema, driver }) => {
-          await refusesToOpen(() => openStore(BOOKING('database'), { driver: driver() }), refused);
-          const { rows } = await pool.query('SELECT count(*)::int AS tables FROM information_schema.tables WHERE table_schema = $1', [schema]);
-          assert.strictEqual(rows[0].tables, 0, 'nothing was created');
-        });
-      }
+  describe(`a rule on a store-owned layout is enforced (${engine})`, { skip: skipFor(engine) }, () => {
+    it('a database rule on a store-owned layout: its programs are planned and installed with the table, which refuses what it refuses', async () => {
+      assert.deepStrictEqual(planInvariants(BOOKING('database'), { dialect: sqliteDialect }).map((item) => item.name),
+        ['_jaren_rule_7_Booking_insert', '_jaren_rule_7_Booking_update']);
+      await withStore(engine, BOOKING('database'), async (store) => {
+        await store.entity('Booking').create({ id: 'a', startsAt: 1, endsAt: 5 });
+        await assert.rejects(store.entity('Booking').create({ id: 'b', startsAt: 5, endsAt: 1 }), { code: 'JD2096', class: 'constraint' });
+      });
     });
 
     it('the same rule enforced by the store keeps working', () =>

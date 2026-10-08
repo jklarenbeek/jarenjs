@@ -300,8 +300,9 @@ describe('PostgreSQL managed replication', { skip: !url && 'JAREN_PG_URL is not 
       for (const [sql, restore, code] of [
         [`ALTER TABLE "${schema}"._jaren_replica_outbox ALTER COLUMN seq TYPE INTEGER`, `ALTER TABLE "${schema}"._jaren_replica_outbox ALTER COLUMN seq TYPE BIGINT`, 'JD0002'],
         [`ALTER TABLE "${schema}"._jaren_replica_receipts ENABLE ROW LEVEL SECURITY`, `ALTER TABLE "${schema}"._jaren_replica_receipts DISABLE ROW LEVEL SECURITY`, 'JD0051'],
-        [`CREATE RULE ignore_insert AS ON INSERT TO "${schema}".notes DO INSTEAD NOTHING`, `DROP RULE ignore_insert ON "${schema}".notes`, 'JD0051'],
-        [`CREATE TRIGGER extra_effect BEFORE UPDATE ON "${schema}".notes FOR EACH ROW EXECUTE FUNCTION "${schema}".ignore_update()`, `DROP TRIGGER extra_effect ON "${schema}".notes`, 'JD0051'],
+        // a rewrite rule or a trigger the model does not declare is drift before it is an effect replication cannot see
+        [`CREATE RULE ignore_insert AS ON INSERT TO "${schema}".notes DO INSTEAD NOTHING`, `DROP RULE ignore_insert ON "${schema}".notes`, 'JD0002'],
+        [`CREATE TRIGGER extra_effect BEFORE UPDATE ON "${schema}".notes FOR EACH ROW EXECUTE FUNCTION "${schema}".ignore_update()`, `DROP TRIGGER extra_effect ON "${schema}".notes`, 'JD0002'],
         [`CREATE TABLE "${schema}".external_child(id text PRIMARY KEY, parent text REFERENCES "${schema}"."Parent"(id) ON DELETE CASCADE)`, `DROP TABLE "${schema}".external_child`, 'JD0051'],
         [`ALTER TABLE "${schema}"."Parent_Tag" ALTER CONSTRAINT ${fk} NOT DEFERRABLE`, `ALTER TABLE "${schema}"."Parent_Tag" ALTER CONSTRAINT ${fk} DEFERRABLE`, 'JD0051'],
       ]) {

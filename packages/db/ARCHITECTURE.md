@@ -1433,6 +1433,17 @@ beside `compileInvariants` in `invariant-sql.js`, `POSTGRES` in
 only SQLite) and the resolver of the paths it reads, and wraps each refusal
 reason in its own error.
 
+A store-owned entity's database rules lower through it too: `planEntity` hands
+the dialect the columns its table maps for its members (`rulePrograms` in
+`ddl.js`), each with the type the table declares, so the PostgreSQL flavor
+reads `numeric` and `smallint` as the store does, and appends the programs to
+the table's `createSql` (listed as `programs`), where the open creates them and
+the migration planner diffs them. `verifyRulePrograms` in `physical.js` is the
+one check of installed programs — on PostgreSQL each read back from the catalog
+field by field — that a physical layout's open and `verifyShape` share, the
+latter refusing any trigger or rewrite rule on a store-owned table the model
+does not declare.
+
 An index condition (MODEL-FORMAT §2, §9.2) is that lowering's index rendering,
 every operand read as an absent member and every condition written in one
 spelling per meaning, so a condition read back renders as written (one rare

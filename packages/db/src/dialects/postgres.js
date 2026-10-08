@@ -493,12 +493,17 @@ export function postgresDialect(options = undefined) {
     jsonPathText,
     jsonExtract,
     // Concurrent first opens can both observe an absent relation before
-    // either CREATE commits. Ordinary unique violations remain failures.
+    // either CREATE commits. Ordinary unique violations remain failures. A
+    // rule program's function and trigger race as measured: the function on
+    // `pg_proc`'s name index, the trigger as `CreateTriggerFiringOn`'s
+    // duplicate — which is also how an already-committed trigger answers,
+    // harmless where a trigger is created only with its own fresh table
     isCreateRace: (error) => error?.code === '42P07'
-      || error?.code === '42710' && error.routine === 'TypeCreate'
+      || error?.code === '42710' && (error.routine === 'TypeCreate' || error.routine === 'CreateTriggerFiringOn')
       || error?.code === '23505'
       && (error.constraint === 'pg_type_typname_nsp_index' && error.table === 'pg_type'
-        || error.constraint === 'pg_class_relname_nsp_index' && error.table === 'pg_class'),
+        || error.constraint === 'pg_class_relname_nsp_index' && error.table === 'pg_class'
+        || error.constraint === 'pg_proc_proname_args_nsp_index' && error.table === 'pg_proc'),
     // a DERIVED column's expression names a function the HOST supplies;
     // this dialect creates none and assumes none. Every driver this
     // package ships for PostgreSQL declares
@@ -703,9 +708,13 @@ export function postgresDialect(options = undefined) {
         + 'ORDER BY type, c.relname',
       // an installed rule program as the fields that decide what it does:
       // the trigger's timing, events, level and columns from `tgtype` and
-      // `tgattr`, and its function's language, settings and verbatim source
-      invariantPrograms: () =>
-        'SELECT t.tgname AS name, c.relname AS owner, pg_catalog.jsonb_build_object('
+      // `tgattr`, and its function's language, settings and verbatim source;
+      // every trigger of one table where a table is named — and every
+      // rewrite rule on it (a `kind: 'rule'` row with no program), which
+      // changes what a write does as a trigger does; a view's own `_RETURN`
+      // rule is the view itself
+      invariantPrograms: (/** @type {string | undefined} */ table) =>
+        "SELECT t.tgname AS name, c.relname AS owner, 'trigger' AS kind, pg_catalog.jsonb_build_object("
         + "'timing', CASE WHEN t.tgtype::integer & 2 <> 0 THEN 'BEFORE' WHEN t.tgtype::integer & 64 <> 0 THEN 'INSTEAD OF' ELSE 'AFTER' END, "
         + "'events', (SELECT pg_catalog.jsonb_agg(e.event ORDER BY e.ord) FROM (VALUES (1, 'INSERT', 4), (2, 'UPDATE', 16), "
         + "(3, 'DELETE', 8), (4, 'TRUNCATE', 32)) e(ord, event, bit) WHERE t.tgtype::integer & e.bit <> 0), "
@@ -719,7 +728,12 @@ export function postgresDialect(options = undefined) {
         + 'FROM pg_catalog.pg_trigger t JOIN pg_catalog.pg_class c ON c.oid = t.tgrelid '
         + 'JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace JOIN pg_catalog.pg_proc p ON p.oid = t.tgfoid '
         + 'JOIN pg_catalog.pg_namespace pn ON pn.oid = p.pronamespace JOIN pg_catalog.pg_language l ON l.oid = p.prolang '
-        + `WHERE NOT t.tgisinternal AND ${inNamespace} ORDER BY c.relname, t.tgname`,
+        + `WHERE NOT t.tgisinternal AND ${inNamespace}${table === undefined ? '' : ` AND c.relname = ${stringLiteral(table)}`} `
+        + "UNION ALL SELECT r.rulename, c.relname, 'rule', NULL "
+        + 'FROM pg_catalog.pg_rewrite r JOIN pg_catalog.pg_class c ON c.oid = r.ev_class '
+        + 'JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace '
+        + `WHERE r.rulename <> '_RETURN' AND ${inNamespace}${table === undefined ? '' : ` AND c.relname = ${stringLiteral(table)}`} `
+        + 'ORDER BY owner, kind, name',
       objects: () =>
         "SELECT 'trigger' AS type, t.tgname AS name, c.relname AS owner, "
         + 'pg_get_triggerdef(t.oid) AS sql FROM pg_trigger t '

@@ -120,16 +120,48 @@ function pathsOf(node, out = []) {
 }
 
 /**
+ * What a database rule on a store-owned layout cannot lower, refused at the
+ * member: an audit row or an increment (a trigger's writes are invisible to
+ * journal capture, which such an entity may run), a probe of another row, and
+ * a read of a member that has no column to compare — an epoch member, whose
+ * column holds milliseconds while the rule compares the member's text, a
+ * member the document holds, a relation. Its `columns` keep their own refusal.
+ * @param {any} entity - normalized @param {any} rule - normalized
+ * @param {(property: any) => string} storageOf @param {(reason: string, member: string) => never} fail
+ */
+function refuseStoreOwnedRule(entity, rule, storageOf, fail) {
+  const capture = 'a trigger\'s writes are invisible to journal capture';
+  if (rule.audit !== undefined) fail(`database invariant: a database rule on a store-owned layout writes no audit row: ${capture}`, 'audit');
+  if (rule.effects !== undefined) fail(`database invariant: a database rule on a store-owned layout increments no member: ${capture}`, 'effects');
+  if (rule.probes.length > 0)
+    fail('database invariant: a database rule on a store-owned layout reads no other row: $exists-row lowers from an explicit column layout', 'assert');
+  for (const path of pathsOf(rule.assert)) {
+    const name = RECORD_PATH.exec(path)?.[2];
+    const property = name === undefined ? undefined : entity.properties.get(name);
+    const storage = property === undefined ? 'column' : storageOf(property);
+    if (storage === 'epoch') fail(`database invariant: '${name}' holds an epoch (milliseconds) in its column, while a rule compares the member's text — `
+      + 'a database rule on a store-owned layout reads no epoch member', 'assert');
+    if (storage === 'document') fail(`database invariant: '${name}' lives in the entity's document: a database rule on a store-owned layout reads `
+      + 'column-mapped members — map it as a column (a top-level scalar property)', 'assert');
+    if (storage === 'relation') fail(`database invariant: '${name}' is a relation, which has no column of its own — a database rule on a store-owned `
+      + 'layout reads column-mapped members and foreign-key columns', 'assert');
+  }
+}
+
+/**
  * Resolve what a rule names in other members and entities, once the whole
  * model is known: `columns` and increments name physical columns of their own
  * entity, a probe's target is another table's physical layout, its match
  * covers the target's key, and each match value is a member the rule's own
- * entity has, of the target column's codec, or a literal that codec holds.
- * Both enforcements read the result.
+ * entity has, of the target column's codec, or a literal that codec holds; a
+ * database rule on a store-owned layout reads members its table has a column
+ * for. Both enforcements read the result.
  * @param {Map<string, any>} entities
  * @param {(column: any) => { encode: (value: any) => any }} codecOf the column codec
+ * @param {(property: any) => string} storageOf where a store-owned layout keeps a property:
+ *   `column`, `epoch`, `document` or `relation`
  */
-export function resolveInvariants(entities, codecOf) {
+export function resolveInvariants(entities, codecOf, storageOf) {
   for (const entity of entities.values()) {
     const layout = entity.physical;
     const columnOf = (member) => layout?.columns.find((c) => c.name === member);
@@ -139,12 +171,11 @@ export function resolveInvariants(entities, codecOf) {
       const fail = (reason, member) => {
         throw new DbCompileError('JD0005', reason, `${entity.docPath}/invariants/${index}/${member}`);
       };
-      // a store-owned layout gets no trigger, so a database rule on one was
-      // enforced by nothing at all, and a view takes no writes: refused at the
-      // member, as `planInvariants` refuses them; so is an audit into a table
-      // no entity maps for writing
-      if ((layout === null || layout.kind === 'view') && rule.enforcement === 'database')
+      // a view takes no writes: refused at the member, as `planInvariants`
+      // refuses it; so is an audit into a table no entity maps for writing
+      if (layout?.kind === 'view' && rule.enforcement === 'database')
         fail('database invariant: database rules require a writable explicit column layout', 'enforcement');
+      if (layout === null && rule.enforcement === 'database') refuseStoreOwnedRule(entity, rule, storageOf, fail);
       const audited = rule.audit === undefined ? undefined : entities.get(rule.audit.entity)?.physical;
       if (rule.audit !== undefined && (audited === undefined || audited === null || audited.kind === 'view'))
         fail('database invariant: audit target must be a mapped application table', 'audit');

@@ -20,7 +20,12 @@ including collations, generated expressions, predicates and trigger programs.
 PostgreSQL catalogs retain available object definitions; unavailable source table
 DDL is explicitly `null`. `introspectModel()` also returns an `inventory` with
 `derived` or `preserve` dispositions. A disposition never authorizes a drop.
-Application triggers appear as `unmapped-object` losses with their owner and SQL.
+Application triggers appear as `unmapped-object` losses with their owner and SQL,
+and so do the rule programs of a store-owned entity (§13.4): the derived model
+declares no `invariants`, so it neither opens over that table (`JD0002`, an
+undeclared trigger) nor migrates to the authored model (the plan's `CREATE`s
+meet the installed programs and fail `JD0023`); the model that declares the
+rules is the one that opens it.
 Repeated inspection is read-only; `strict: true` refuses losses with `JD0002`.
 
 A **model document** declares the collections of a store: each
@@ -3660,7 +3665,9 @@ and every one the model checks refuse, is `JD0005` whose `docPath` names the
 rule and the member (`/entities/Entry/invariants/1/enforcement`) — an
 `assert` that does not compile (the engine's reason quoted; it used to
 escape as the engine's own `JQ` error with an empty `docPath`), a database
-rule on a store-owned layout or a view (at `enforcement`, §13.4) and an
+rule on a view (at `enforcement`, §13.4), what a database rule on a
+store-owned layout cannot lower (an `audit` or `effects` at that member, a
+probe or a member with no column of its own at `assert`, §13.4) and an
 `audit` into an entity with no writable column layout (at `audit`, §13.5)
 among them. A database rule the trigger lowering cannot translate (an
 operator outside the bounded subset, a column codec it cannot compare,
@@ -3711,6 +3718,15 @@ therefore coincide for the store's own writes, except a write that sets only an
 incremented member (§13.5), which assigns it without counting as a change; they
 differ for other SQL writers (raw SQL, a native mutation with
 `reporting: "matched"`), which only a database rule meets.
+
+On a store-owned layout (§13.4) a database rule's change test counts every
+column the table maps but the version — a key's, a member's, a foreign
+key's — and the document column that holds the rest of the row, so a write
+that changes a document member is a change and one that writes back the
+document already stored is none. SQLite compares that column's bytes,
+PostgreSQL its `jsonb` value: a rewrite that only reorders a document's
+members is a change on SQLite and none on PostgreSQL. A store rule there is
+judged as §13.3 says of a document, with no change test of its own.
 
 ### 13.2 Existence probes
 
@@ -3766,25 +3782,73 @@ no rule. A row the database's own foreign-key actions remove or null — a
 entity's store rules: a delete rule that refuses the child's own `delete()`
 does not stop its parent's. A document's insert and update rules are checked before its own
 statement, against the document the unit of work holds, membership arrays
-included; a save that changes only a document's memberships writes the join
+included, as the store reads it back: a member written `null` that the table
+keeps in a column reads back missing, so a rule judges it missing on the
+insert as on every update after it; a save that changes only a document's memberships writes the join
 table, not its row, and runs its update rules after the save's other
 statements. A document entity's `update()` rewrites the whole document on
 every call, so its update rules are checked on every call.
 
 ### 13.4 Database enforcement
 
-Database enforcement requires a writable physical layout — in practice
-`physical: { table, columns }` (§12), an explicitly owned column layout.
-A model that lets the store own its layout is refused (`JD0005`,
-"database rules require a writable explicit column layout", at the
-rule's `enforcement`) however simple the rule — by `openStore`, the
-model checks and `planInvariants` alike — so `enforcement: "database"`
-implies `.physical()` today. (Such a model used to open with no trigger
-installed, its rule enforced by nothing.) A `kind: "view"` layout takes no
-writes and is refused the same way, at the same member. A store-owned model's rules are `enforcement: "store"`, which
-covers direct and tracked writes but not an external SQL writer.
-Lowering rules over a store-owned layout is open work, not a
-limitation of the rule language.
+Database enforcement requires a writable column layout: an explicitly owned
+one (`physical: { table, columns }`, §12), whose programs an explicit
+migration installs, or the layout the store owns (§9), whose programs the
+store installs with its table. A `kind: "view"` layout takes no writes and is
+refused (`JD0005`, "database rules require a writable explicit column
+layout", at the rule's `enforcement`).
+
+On a store-owned layout a rule reads the columns the table maps for its
+members — a scalar member's and a foreign key's — each as the table declares
+it: on PostgreSQL an `integer` or a `number` member is `numeric` (an
+allocated key `bigint`), whose value must be a safe one, and whole for an
+`integer`; a `number` compares as the double the store reads back, so
+`0.1000000000000000000001` in its column compares as `0.1`; a `boolean` is
+`smallint` 1 or 0; text is `text COLLATE "C"`. A key column holds no SQL
+NULL; any other column's SQL NULL is a missing member (an `absent` column,
+below), which is how a member the application writes as `null` reads back.
+Refused at the member (`JD0005`): a rule that reads an epoch member, whose
+column holds milliseconds while the rule compares the member's text
+(`…12:00:00.500Z` against `…12:00:00Z`), a member the document holds (an
+array, an object, a union, `column: "json"`) or a relation, at `assert`; an
+`audit` or `effects`, at that member, since journal capture cannot see what a
+trigger writes and such an entity may run capture, live queries or
+replication; `$exists-row`, at `assert`; and `columns` keep their own refusal
+("a document is written whole").
+
+A fresh open creates the programs with the table — on SQLite through the
+same `IF NOT EXISTS` statements as the table, on PostgreSQL, which has no
+`CREATE TRIGGER IF NOT EXISTS`, by plain statements, the table's own
+`CREATE TABLE` among them, so an open whose rival commits the table between
+this open's probe and its create retries into verification — and every open
+verifies them: SQLite by their CREATE text, PostgreSQL field by field (below),
+where any other trigger on a table the store owns, ruled or not, is drift
+(`JD0002`), as on SQLite, and so is a rewrite rule (`CREATE RULE`) on it,
+which changes what a write does as an undeclared trigger does. A table
+dropped outside the store (`DROP TABLE` by hand) takes its triggers with it
+but not its PostgreSQL functions, which the next open of that entity meets
+when it creates the table again (`JD0002`, the function "already exists with
+same argument types"): drop the functions with the function items' `drop`
+statements (`planInvariants`; the trigger items' `drop` fail, their table being
+gone), or, instead of the hand drop, drop the entity through a planned
+migration, which removes them with the table. A table that exists without a
+rule's programs is drift too: a rule added to a populated table is a planned migration
+(MIGRATION-FORMAT §9), which judges no stored row and creates the programs
+after its transform steps, so a transform can carry stored rows into
+conformance before the rule arrives. A rule's change test there
+counts the document column too (§13.1). A store rule on such a layout still
+covers the store's own writes only.
+
+A database rule judges every write of its row, the rows the database's own
+foreign-key actions write included — a `cascade` child's delete rule, a
+`setNull` member's update rule — where a store rule (§13.3) runs for none
+of them: a child's database rule refuses its parent's delete, in the
+child's rule's name, and the parent's row stays with the child's. The
+refusal is reported for the write that ran — its `collection` and `docPath`
+are the parent entity's — and its message names the child's rule
+(`jaren invariant:kept`): that message is the attribution both engines
+give (SQLite's `RAISE` carries nothing more; PostgreSQL names the raising
+function only in the `where` field of the error under `cause`).
 
 Database enforcement also requires a bounded query expression, which one
 row-predicate compiler lowers to SQL that gives the query engine's answer over
@@ -3834,10 +3898,11 @@ spelling stays until a reviewed migration of installed programs changes it;
 test the nulls explicitly instead (`{ "$eq": ["$.new.t", null] }` is null-safe).
 
 `planInvariants(model, { dialect })` returns reviewable statements in install
-order; an explicit migration installs them, one `ddl` step each
-(MIGRATION-FORMAT, "Installing database rules"), and opening verifies those
-programs (`JD0002` names what is missing or changed). One document plans for
-both engines:
+order, each with the `drop` statement that removes it; for a physical layout
+an explicit migration installs them, one `ddl` step each (MIGRATION-FORMAT,
+"Installing database rules"), a store-owned layout's are the ones its table
+is created with, and opening verifies those programs (`JD0002` names what is
+missing or changed). One document plans for both engines:
 
 - **SQLite** — one AFTER trigger per table and operation, plus one `AFTER UPDATE
   OF` trigger per distinct `columns` set (`_jaren_rule_<length>_<table>_<op>`,
@@ -3876,13 +3941,15 @@ input-syntax error quoting a value does.
 A program runs its assertions in declaration order, then its audit inserts in
 declaration order. Assertions see the allocated identity and generated columns.
 A failed assertion aborts the entire statement, including its trigger effects.
-Inside a transaction a write to a physical entity, and a write a store rule
-probes for, is its own savepoint, so a refused rule leaves the transaction body
-usable on both engines. On PostgreSQL any other failed statement spends the
+Inside a transaction a store write that a database rule judges, and one a
+store rule probes for, is its own savepoint (a physical entity's insert and
+update always are), so a refused rule leaves the transaction body usable on
+both engines. On PostgreSQL any other failed statement spends the
 transaction unless it ran in a nested transaction — a plain insert's duplicate
-key, a refused trusted `tx.sql` statement: the next statement is `JD2088`, and a
-body that catches the failure and returns is refused `JD2088` at its COMMIT,
-with nothing committed.
+key, a refused trusted `tx.sql` statement: the next statement is `JD2088` (a
+store write in a savepoint of its own included: the savepoint it can no
+longer open answers so), and a body that catches the failure and returns is
+refused `JD2088` at its COMMIT, with nothing committed.
 Existing application triggers keep their engine's ordering relative to these
 programs. Equality uses JSON-style scalar types and null equality; an ordered
 comparison involving SQL NULL is false, and so is one over a boolean, as in the

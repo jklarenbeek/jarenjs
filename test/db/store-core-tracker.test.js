@@ -24,6 +24,9 @@
  * removal is guarded by the version the row had before the save. The update
  * of a child that references a row deleted ahead runs before that delete.
  *
+ * A change inside a document member writes that member alone, its value's
+ * parameter numbered after the columns the save assigns ahead of it.
+ *
  * The PostgreSQL half runs where `JAREN_PG_URL` names a server.
  */
 import { describe, it } from 'node:test';
@@ -800,6 +803,32 @@ for (const engine of ENGINES) {
         await assert.rejects(store.saveChanges(), (/** @type {any} */ error) => error.code === 'JD2001'
           && error.key === undefined && /a 'Item' already exists under one of the keys "b", "a"/.test(error.message));
         assert.strictEqual(await items.get('a'), undefined, 'the batch rolled back whole');
+      }));
+  });
+}
+
+const TAGGED = { $model: '0.1', entities: { Tag: { schema: { type: 'object', properties: {
+  id: { type: 'integer', 'x-entity': { key: true } }, made: { type: 'string' }, n: { type: 'integer' }, meta: { type: 'object' },
+  tags: { type: 'array', items: { type: 'string' } } } } } } };
+
+for (const engine of ENGINES) {
+  describe(`a tracked change inside a document member (${engine})`, { skip: skipFor(engine) }, () => {
+    it('writes the member alone, alone or beside the columns and the other members the save assigns', () =>
+      withStore(engine, TAGGED, async (store) => {
+        const tags = store.entity('Tag');
+        await tags.create({ id: 1, made: 'a', n: 0, meta: { a: 1, list: [1] }, tags: ['x'] });
+        /** Save `change` over the stored row as one tracked update. @param {Record<string, unknown>} change */
+        const save = async (change) => {
+          tags.put({ ...(await tags.get(1)), ...change });
+          assert.deepStrictEqual(counted(await store.saveChanges()), { inserted: 0, updated: 1, deleted: 0 });
+          tags.discard(1);
+        };
+        // the nested member alone, then beside one column, two columns, and two columns with another document member
+        await save({ meta: { a: 2, list: [1, 2] } });
+        await save({ made: 'b', meta: { a: 3, list: [1, 2] } });
+        await save({ made: 'c', n: 1, meta: { a: 4, list: [1, 2] } });
+        await save({ made: 'd', n: 2, tags: ['y'], meta: { a: 4, list: [1, 2, 3] } });
+        assert.deepStrictEqual(await tags.get(1), { id: 1, made: 'd', n: 2, meta: { a: 4, list: [1, 2, 3] }, tags: ['y'] });
       }));
   });
 }

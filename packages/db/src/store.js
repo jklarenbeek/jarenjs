@@ -43,7 +43,7 @@ import { createBackup } from './backup.js';
 import { normalizeProfile, assertProfileRoots } from './profile.js';
 import { compileEntityModel, joinTableRoots } from './model.js';
 import { entityCore } from './entity.js';
-import { verifyPhysical } from './physical.js';
+import { verifyPhysical, verifyRulePrograms } from './physical.js';
 import { trustedSql, synchronousBody } from './sql.js';
 import { relationalEngine } from './relational.js';
 import { createTracker, membershipKeys } from './tracker.js';
@@ -541,15 +541,23 @@ function immediately(connection, fn, retry = true) {
 
 /**
  * Run a planned table's CREATE statements in order, each in the dialect's
- * idempotent form — a collection's and an entity's alike.
+ * idempotent form — a collection's and an entity's alike — except where an
+ * engine that keeps no CREATE text creates rule programs with the table
+ * (PostgreSQL): it has no `CREATE TRIGGER IF NOT EXISTS`, so the programs run
+ * plainly, and so does the table's own CREATE, so a rival that committed the
+ * table after this open's probe fails the CREATE TABLE — a create race the
+ * bracket retries into verification — rather than a program.
  * @param {any} connection
- * @param {{ createSql: string[] }} plan
+ * @param {{ createSql: string[], programs?: { sql: string }[] }} plan
  * @returns {any} value-or-promise
  */
 function runCreate(connection, plan) {
+  const dialect = connection.dialect;
+  const plain = new Set((plan.programs?.length ?? 0) === 0 || dialect.capabilities.declaredSqlText === true ? []
+    : [plan.createSql[0], ...(plan.programs ?? []).map((program) => program.sql)]);
   const run = (/** @type {number} */ j) => (j >= plan.createSql.length
     ? null
-    : chain(connection.exec(connection.dialect.ddl.idempotent(plan.createSql[j])), () => run(j + 1)));
+    : chain(connection.exec(plain.has(plan.createSql[j]) ? plan.createSql[j] : dialect.ddl.idempotent(plan.createSql[j])), () => run(j + 1)));
   return run(0);
 }
 
@@ -627,9 +635,12 @@ function ensureEntityShape(connection, entityPlans, entities, createsNothing) {
                 `entity '${name}': the table does not exist and ${createsNothing} creates nothing`,
                 docPath);
             }
-            return chain(runCreate(connection, plan), () => step(i + 1));
+            // the database must hold what its rule programs compare, before they are created
+            const refuse = (/** @type {string} */ why) => { throw new DbCompileError('JD0002', `entity '${name}': ${why}`, docPath); };
+            return chain(verifyRulePrograms(connection, name, plan.programs ?? [], refuse, { installed: false }), () =>
+              chain(runCreate(connection, plan), () => step(i + 1)));
           }
-          return chain(verifyShape(connection, plan, name, docPath), () =>
+          return chain(verifyShape(connection, plan, name, docPath, 'entity'), () =>
             chain(connection.prepare(dialect.introspect.foreignKeyList(name)), (fkStatement) =>
               chain(fkStatement.all([]), (fkRows) => {
                 // the whole TUPLE, not the count: a key that changed

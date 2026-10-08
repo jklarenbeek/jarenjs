@@ -475,7 +475,7 @@ export function normalizeEntities(model) {
     }
   }
   resolveRelations(entities);
-  resolveInvariants(entities, columnCodec);
+  resolveInvariants(entities, columnCodec, storageOf);
   return entities;
 }
 
@@ -724,6 +724,20 @@ function keyStorageOf(entity) {
   return key.column === 'integer' ? 'integer' : key.type;
 }
 
+/**
+ * Where a store-owned layout keeps a property's value: a column of its own
+ * (`column`), an epoch column beside the string the document keeps (`epoch`),
+ * the document (`document`: an array, an object, a union, `column: "json"`),
+ * or nowhere (`relation`, which has no storage of its own).
+ * @param {any} property - normalized
+ * @returns {'column' | 'epoch' | 'document' | 'relation'}
+ */
+function storageOf(property) {
+  if (property.relation !== undefined) return 'relation';
+  if (!SCALARS.has(property.type ?? '') || property.column === 'json') return 'document';
+  return property.column === 'integer' ? 'epoch' : 'column';
+}
+
 /** @param {any} model @param {Map<string,any>} entities @returns {any} */
 function mappingOf(model, entities) {
   /** @type {any} */
@@ -739,10 +753,10 @@ function mappingOf(model, entities) {
     const document = [];
     const indexes = [];
     for (const property of entity.properties.values()) {
-      if (property.relation !== undefined) continue; // no storage of its own
-      const isScalar = SCALARS.has(property.type ?? '');
-      const epoch = property.column === 'integer';
-      if (!isScalar || property.column === 'json') {
+      const storage = storageOf(property);
+      if (storage === 'relation') continue;
+      const epoch = storage === 'epoch';
+      if (storage === 'document') {
         document.push(property.name);
         continue;
       }
