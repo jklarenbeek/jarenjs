@@ -26,10 +26,10 @@ import { isJsonObject, stableStringify } from '@jarenjs/core/object';
 import { DbCompileError, DbRuntimeError } from './errors.js';
 import { chain, attempt } from './driver.js';
 import { planQuery, BIND_REASONS } from './plan.js';
-import { createSortedWindow } from './window.js';
+import { createSortedWindow, compareCodepoint } from './window.js';
 import { classifyEventTime, bucketStrategy, rollingStrategy } from './live-time.js';
 import { joinStrategy } from './live-join.js';
-import { classifyNestedGroup, nestedGroupStrategy, readsRoot } from './live-nested.js';
+import { classifyNestedGroup, nestedGroupStrategy, readsRoot, compilesBare, valueKey } from './live-nested.js';
 import { LIVE_DEFAULTS } from './live-options.js';
 
 /** The store-level live bounds and their defaults (§12: printed,
@@ -40,6 +40,9 @@ const AGGREGATE_MEMBERS = new Map([
   ['$count', 'count'], ['$sum', 'sum'], ['$avg', 'avg'],
   ['$min', 'min'], ['$max', 'max'],
 ]);
+
+/** The registration modes a live query accepts (§7). */
+const LIVE_MODES = ['auto', 'incremental', 'rerun', 'resnapshot'];
 
 /** Why an integer sum or average re-runs once its terms leave the bound
  * in which every partial sum is exact: the query path's own reason. */
@@ -153,22 +156,6 @@ function readsNoRoot(node) {
   if (Array.isArray(node)) return node.every(readsNoRoot);
   if (!isJsonObject(node) || Object.hasOwn(node, '$const')) return true;
   return Object.values(node).every(readsNoRoot);
-}
-
-/** Whether the live evaluators can compile `document` the way they
- * do — with no options: the registered operators, the zone provider
- * and the profile limits ride only on `execute`'s residual. A document
- * they cannot compile stays on the re-run path, which executes it.
- * @param {any} document
- * @returns {boolean} */
-function compilesBare(document) {
-  try {
-    compileJsonQuery([document]);
-    return true;
-  }
-  catch {
-    return false;
-  }
 }
 
 /**
@@ -323,6 +310,11 @@ function refinedOnly(planned, allowReturn) {
   return remaining.length === 0;
 }
 
+/** Why a query the planner read through a one-item array constructor
+ * re-runs: its result is ONE row, the whole array, where a per-row
+ * strategy would hold one item per source row. */
+const WRAPPED_RERUN = 'a query inside a one-item array constructor re-runs (its one row is the whole array)';
+
 const SPATIAL_RERUN = {
   aggregate: 'a spatial aggregate re-runs: the accumulator needs a fully translated '
     + 'selection, and a refined spatial predicate leaves the exact test to the engine',
@@ -446,6 +438,7 @@ export function classifyLiveQuery(document, queryShape, keyed, eventTime = null)
     // dropped its terms — the window is not maintainable here
     if (isJsonObject(inner) && inner.$orderby !== undefined) return rerun(SPATIAL_RERUN.order);
     if (windowed) return rerun('a limit without an order is not deterministic to maintain');
+    if (planned.wrapped) return rerun(WRAPPED_RERUN);
     if (!compilesBare(inner)) return rerun(plannerReason(planned));
     return {
       strategy: 'rows',
@@ -501,6 +494,9 @@ export function classifyLiveQuery(document, queryShape, keyed, eventTime = null)
   if (planned.plan.window !== null || windowed) {
     return rerun('a limit without an order is not deterministic to maintain');
   }
+  // as with an ordered one: the rows strategy keeps items per row, and
+  // this result is one row, the whole array
+  if (planned.wrapped) return rerun(WRAPPED_RERUN);
   if (!compilesBare(inner)) return rerun(plannerReason(planned));
   return {
     strategy: 'rows',
@@ -574,7 +570,7 @@ function diffAgainst(previousRows, nextRows) {
 /** Reuse the previous row object when a fresh one is value-equal —
  * the structural-sharing half of §9 for re-evaluated rows. */
 function sharedRow(previous, fresh) {
-  return stableStringify(previous) === stableStringify(fresh) ? previous : fresh;
+  return valueKey(previous) === valueKey(fresh) ? previous : fresh;
 }
 
 /**
@@ -590,14 +586,14 @@ function shareByValue(previousRows, nextRows) {
   const pool = new Map();
   for (const row of previousRows) {
     if (kept.has(row)) continue;
-    const key = stableStringify(row) ?? '';
+    const key = valueKey(row);
     const bucket = pool.get(key);
     if (bucket === undefined) pool.set(key, [row]);
     else bucket.push(row);
   }
   return nextRows.map((row) => {
     if (kept.has(row)) return row;
-    const bucket = pool.get(stableStringify(row) ?? '');
+    const bucket = pool.get(valueKey(row));
     return bucket !== undefined && bucket.length > 0 ? bucket.shift() : row;
   });
 }
@@ -715,14 +711,21 @@ function windowStrategy(description, context) {
   delete rowDocument.$orderby;
   const evaluate = compileJsonQuery([rowDocument]);
   const source = documentsSource(binding, inner.$where);
+  // a sort value is read as the engine walks the path: a name selects an
+  // object's own member (never one it inherits, such as `valueOf`), an
+  // index an array's item, a negative index counting from its end
   const getters = order.map((term) => {
     const steps = term.ref.segments.map((segment) =>
       ('name' in segment ? segment.name : segment.index));
     return (doc) => {
       let value = doc;
       for (const step of steps) {
-        if (value === null || typeof value !== 'object') return undefined;
-        value = value[step];
+        if (typeof step === 'number') {
+          if (!Array.isArray(value)) return undefined;
+          value = value[step < 0 ? value.length + step : step];
+        }
+        else if (isJsonObject(value) && Object.hasOwn(value, step)) value = value[step];
+        else return undefined;
       }
       return value;
     };
@@ -789,6 +792,11 @@ function accumulatorStrategy(description, context) {
   /** @type {Map<string, number | (number | null)[]>} */
   const contributions = new Map();
   const stats = { fallbacks: 0 };
+  // the extrema order text as the native aggregate does, by code point —
+  // which `<` on JS strings (UTF-16 code units) is not for astral characters
+  /** @param {any} a @param {any} b */
+  const precedes = (a, b) => (typeof a === 'string' && typeof b === 'string'
+    ? compareCodepoint(a, b) < 0 : a < b);
   const INEXACT = Symbol('past the exactness bound');
   /** @type {any} the re-run this registration answers by past the bound */
   let rerun = null;
@@ -816,7 +824,7 @@ function accumulatorStrategy(description, context) {
         // is given) has no exact running sum: SQL compensates its rounding
         largest = Math.max(largest, Number.isInteger(value) ? Math.abs(value) : Infinity);
         if (extreme === undefined
-          || (fn === 'min' ? value < extreme : value > extreme)) extreme = value;
+          || (fn === 'min' ? precedes(value, extreme) : precedes(extreme, value))) extreme = value;
       }
     }
     if (fn === 'count') return count;
@@ -943,6 +951,12 @@ export function createLiveRegistry(bounds) {
    *   re-runs pass `readRow`/`keyOf` as null and their bound tables.
    */
   const register = (definition) => {
+    // a misspelt mode must not register as 'auto': one that demands
+    // incremental maintenance relies on the refusal it would get
+    if (definition.demanded !== undefined && !LIVE_MODES.includes(definition.demanded)) {
+      throw new DbCompileError('JD0013', `live option 'mode' must be ${LIVE_MODES.map((m) => `'${m}'`).join(', ')
+        .replace(/, (?=[^,]*$)/, ' or ')}, not ${JSON.stringify(definition.demanded)}`);
+    }
     if (queries.size >= bounds.maxQueries) {
       throw new DbCompileError('JD0052',
         `the store's live.maxQueries bound of ${bounds.maxQueries} was reached`);
@@ -964,7 +978,8 @@ export function createLiveRegistry(bounds) {
     const context = {
       name: definition.name,
       document: definition.document,
-      externals: definition.externals ?? {},
+      // fixed at registration (§8): the caller's object may change later
+      externals: structuredClone(definition.externals ?? {}),
       execute: definition.execute,
       readRow: definition.readRow,
       keyOf: definition.keyOf,
@@ -1017,9 +1032,13 @@ export function createLiveRegistry(bounds) {
           { collection: definition.name });
       }
     };
+    // An emission reaches the observers subscribed when it began: one that
+    // subscribes from inside a callback starts from the result this event
+    // already produced, and one unsubscribed before its turn hears nothing.
     const emit = (event) => {
       if (strategy.emit) { strategy.emit(event); return; }
-      for (const observer of observers) {
+      for (const observer of [...observers]) {
+        if (!observers.has(observer)) continue;
         try { observer(event); }
         catch { /* Observer isolation: committed writes remain committed. */ }
       }

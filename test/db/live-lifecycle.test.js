@@ -17,6 +17,7 @@ import { spawnSync } from 'node:child_process';
 
 import { openStore } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';
+import { applyJSONPatch } from '@jarenjs/json/patch';
 
 const MODEL = {
   $model: '0.1',
@@ -77,6 +78,35 @@ describe('lifecycle', () => {
     stop();
     await rows.insert({ id: 'b', n: 1 });
     assert.deepStrictEqual(seen, [1], 'unsubscribed');
+    await store.close();
+  });
+
+  it('an emission reaches the observers subscribed when it began: one subscribing during it starts from its result', async () => {
+    const store = await openStore(MODEL, { driver: nodeDriver(), capture: true });
+    const rows = store.collection('rows');
+    const live = await rows.live(ALL);
+    // a consumer mounted by a change: the current result, then every later patch
+    /** @type {any} */
+    let mirror = null;
+    /** @type {number[]} */
+    const mounted = [];
+    live.subscribe(() => {
+      if (mirror !== null) return;
+      mirror = structuredClone(live.result);
+      live.subscribe((event) => { mounted.push(event.seq); mirror = applyJSONPatch(mirror, event.patch); });
+    });
+    let stopSibling = () => {};
+    /** @type {number[]} */
+    const sibling = [];
+    live.subscribe(() => stopSibling());
+    stopSibling = live.subscribe((event) => sibling.push(event.seq));
+    await rows.insert({ id: 'a', n: 1 });
+    assert.deepStrictEqual(mounted, [], 'the emission that mounted it is already in the result it started from');
+    assert.deepStrictEqual(mirror, live.result);
+    await rows.insert({ id: 'b', n: 2 });
+    assert.deepStrictEqual(mounted, [2]);
+    assert.deepStrictEqual(mirror, live.result);
+    assert.deepStrictEqual(sibling, [], 'unsubscribed before its turn, it heard neither emission');
     await store.close();
   });
 });

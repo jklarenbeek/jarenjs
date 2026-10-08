@@ -293,7 +293,7 @@ const live = await store.collection('users').live(document, {
   eventTime: undefined,   // a temporal view's watermark (§13)
 });
 live.result;              // the maintained result document
-live.mode;                // { strategy, mode: 'incremental'|'rerun', reason }
+live.mode;                // { strategy, mode: 'incremental'|'rerun'|'resnapshot', reason }
 const stop = live.subscribe(({ patch, seq, error }) => { /* … */ });
 live.close();
 ```
@@ -357,10 +357,10 @@ PostgreSQL, or SQLite in a worker, a pool or a process — every registration is
 | a `$resample` or `$rolling` document over the collection, with an explicit `eventTime` and a fixed width (§13) | **event-time bucket / rolling state**: rows kept by bucket, or in instant order; only what a write can reach is folded again, through `@jarenjs/core/series` itself | the contributing rows, plus one fold per bucket |
 | the same document with no `eventTime`, a calendar width, a named zone, a `locf`/`linear` fill, a `first`/`last` aggregate, or a retention that does not cover the window | **re-run on invalidation**, the member that stopped it named (§13.2) | the previous result, for diffing |
 | indexed inner equi-joins — flat self joins included (one `$for` binding an entity under several aliases, each later alias evaluated as its own input root) — and canonical allowing-empty left joins over mapped entity roots, reading no entity root outside their `$for` | **join dependency maintenance**; point-read changed keys — once per changed row, however many aliases hold it — and reevaluate their bounded outer owners | source rows (a self join's once per alias), key indexes and projected tuples, bounded by `maxMaintained` and `maxBytes` |
-| nested entity graph projections with indexed equality edges and unique binding names — a child query counted, or windowed by literal bounds without an ordering, included | **graph dependency maintenance**; a child change refreshes its bounded owners | source rows, reverse key indexes and graph outputs |
+| nested entity graph projections with indexed equality edges and unique binding names — a child query counted, or windowed without an ordering (literal, quoted or external bounds, each owner's window taken as `execute` takes it), included | **graph dependency maintenance**; a child change refreshes its bounded owners | source rows, reverse key indexes and graph outputs |
 | explicit two-level collection groups with a singular parent key and bounded nested input | **nested-group maintenance**; recompute affected parents through the query engine | source leaves and parent outputs |
-| unindexed/non-equi joins, a join whose `$where` or `$return` reads an entity root outside its `$for` (a nested query over `$.<Entity>[*]`, `an entity root read outside the join bindings re-runs`), self joins inside a graph projection, an allowing-empty join or a flattened projection or over a packed `$for` source (`a self join has ambiguous root invalidation`), a graph projection whose child query is ordered, windowed or not, or that reads an entity root outside its child queries (a `$count` over `$.<Entity>[*]` in its return), an entity aggregate, explicit entity ordering/windows and object-root documents | **re-run on invalidation**, with the dependency or planner reason | previous result for diffing |
-| anything else: non-translatable predicates, `limit` without `orderBy`, a window bound that is not a literal non-negative integer, an offset or limit over a group, distinct projection, aggregate or nested group, an entity window, an ordered query inside a one-item array constructor (its one row is the whole array), an ordered query whose return yields several items per row or reads the collection root, a group whose return reads the collection root, a document the live evaluator cannot compile without the store's registered operators or zone provider (a rows, window or group document using a registered operator, or a named zone in a group key or a projection — the planner's reason names what stopped it; a zoned `$where` fails registration `JQ0003`, as `execute` fails), `@jarenjs/linq`'s nested two-level `groupBy` emission (a group of groups), and a `@jarenjs/linq` chain that orders, windows or deduplicates after `groupBy` | **re-run on invalidation**, the reason named | the previous result, for diffing |
+| unindexed/non-equi joins, a join whose `$where` or `$return` reads an entity root outside its `$for` (a nested query over `$.<Entity>[*]`, `an entity root read outside the join bindings re-runs`), self joins inside a graph projection, an allowing-empty join or a flattened projection or over a packed `$for` source (`a self join has ambiguous root invalidation`), a graph projection whose child query is ordered, windowed or not, or that reads an entity root outside its child queries (a `$count` over `$.<Entity>[*]` in its return), an entity aggregate, a graph projection or allowing-empty join that needs the store's registered operators or zone provider, explicit entity ordering/windows and object-root documents | **re-run on invalidation**, with the dependency or planner reason | previous result for diffing |
+| anything else: non-translatable predicates, `limit` without `orderBy`, a window bound that is not a literal non-negative integer, an offset or limit over a group, distinct projection, aggregate or nested group, an entity window, a query or aggregate inside a one-item array constructor, ordered or not (its one row is the whole array), an ordered query whose return yields several items per row or reads the collection root, a group whose return reads the collection root, a document the live evaluator cannot compile without the store's registered operators or zone provider (a rows, window or group document using a registered operator, or a named zone in a group key or a projection — the planner's reason names what stopped it; a zoned `$where` fails registration `JQ0003`, as `execute` fails), `@jarenjs/linq`'s nested two-level `groupBy` emission (a group of groups), and a `@jarenjs/linq` chain that orders, windows or deduplicates after `groupBy` | **re-run on invalidation**, the reason named | the previous result, for diffing |
 
 The **physical mapping** of a `derive: 'bbox'` index (MODEL-FORMAT §2.1,
 `physical`) does not move a query between these rows. It can change one
@@ -394,7 +394,8 @@ strategy, and — for re-run — the reason. `mode: 'incremental'` in the
 options DEMANDS incrementality: a query that classifies as re-run then
 refuses at registration (`JD0051`), the same shape as capture's
 demanded session — an application that needs the property can refuse
-to start.
+to start. A `mode` other than `'auto'`, `'incremental'`, `'rerun'` and
+`'resnapshot'` is `JD0013`, so a misspelt demand is never taken for `'auto'`.
 
 The **group form** the classifier recognises (the linq chain's group-of-groups emission still re-runs; explicit
 nested groups have a separate bounded strategy below), here with a return of key and aggregate members:
@@ -417,7 +418,8 @@ path. All are maintained the same way — every output depends on one
 group's rows alone, which is what per-group recomputation needs — and
 what the key, filter and return read decides the dependencies (§8). A
 return that reads the collection root (`$`, `$.…`, `$[…]`, or the root
-named inside a path filter, as in `$it[?@.n > $[0].n]`), an `$orderby`
+named inside a path filter, as in `$it[?@.n > $[0].n]`, but not a `$$`
+literal, which reads nothing), an `$orderby`
 or any other phrase key, a window over the group, and a document the live
 evaluator cannot compile without the store's registered operators or
 zone provider re-run, named. Multiple declared keys follow the same rule.
@@ -492,7 +494,8 @@ patch; row UPDATES are minimal (§3), so maintenance issues a
 point-read of the touched row (one indexed lookup per touched key per
 record) to re-evaluate; deletes are answered entirely from maintained
 state. `externals` are fixed at registration — a query whose inputs
-change is a new registration.
+change is a new registration; the registration holds a copy, so changing
+the object it was given changes nothing.
 
 Incremental and rerun maintenance runs synchronously inside patch delivery, in commit
 order, on the store's own connection. Delivery is never re-entered: a
@@ -544,6 +547,10 @@ document and apply patches to it; ops are `add`, `remove` and
   re-derived rowid order — a consumer that needs a specific order
   declares an `orderBy`. Group rows keep first-appearance order.
 - `seq` is the capture record's `seq`; re-run emissions carry it too.
+- **An emission reaches the observers subscribed when it began.** An
+  observer subscribed from inside another's callback starts from
+  `live.result`, which already holds that emission, and hears the next
+  one; an observer unsubscribed before its turn hears nothing more.
 
 ## 10. The app binding
 
@@ -702,7 +709,8 @@ defaults are `maxQueries: 64`, `maxMaintained: 10000`, `maxBytes: 4194304`,
 `pageRows: 32`, `pollMs: 1000` and `maxAttempts: 3`; all must be positive finite
 safe integers, with the timer also within its platform range. Input credits span
 all fetched roots/statements, including a small residual result over a large
-scan. Binding bytes are bounded at registration. Result bytes and observer event
+scan; reading exactly a credit registers, and a row past it is `JD2060`,
+the first row a statement reads included. Binding bytes are bounded at registration. Result bytes and observer event
 counts are bounded separately. These are serialized payload credits plus finite driver
 prefetch and a detection row, not a total JavaScript heap or database-internal
 work limit. Native work uses the driver's declared timeout capabilities.

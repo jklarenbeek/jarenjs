@@ -90,13 +90,16 @@ export function normalizeEventTime(options, collection) {
   const member = singularSelector(declared.path);
   if (member === null)
     refuse("live eventTime.path is a singular row selector naming the instant member, like '$.at'");
-  const finite = (value, name) => {
-    if (typeof value !== 'number' || !Number.isFinite(value))
-      refuse(`live eventTime.${name} is a finite epoch in milliseconds, not ${JSON.stringify(value)}`);
+  // the watermark is an instant, the other members spans of time
+  const finite = (value, name, kind = 'span') => {
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+      refuse(`live eventTime.${name} is a finite ${kind} in milliseconds, ${value === undefined ? 'and it is missing'
+        : `not ${typeof value === 'number' ? value : JSON.stringify(value)}`}`);
+    }
     return value;
   };
-  const watermark = finite(declared.watermark, 'watermark');
-  const retention = finite(declared.retention ?? NaN, 'retention');
+  const watermark = finite(declared.watermark, 'watermark', 'epoch');
+  const retention = finite(declared.retention, 'retention');
   if (retention <= 0)
     refuse(`live eventTime.retention is a positive span, not ${retention}`);
   const allowedLateness = declared.allowedLateness === undefined

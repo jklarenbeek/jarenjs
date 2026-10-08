@@ -33,7 +33,7 @@ const MODEL = {
     scores: {
       schema: { type: 'object', properties: {
         id: { type: 'string' }, points: { type: 'integer' },
-        name: { type: 'string' } } },
+        name: { type: 'string' }, history: { type: 'array', items: { type: 'integer' } } } },
       key: '/id',
       indexes: [{ name: 'by_points', path: '$.points' }],
     },
@@ -231,6 +231,49 @@ describe('the maintained window', () => {
     await scores.insert({ id: 'c', points: 20, name: 'cy' });
     assert.deepStrictEqual(live.result.rows, [{ who: 'bob' }, { who: 'cy' }]);
     await store.close();
+  });
+
+  it('an order term that indexes an array from its end sorts by the item execute reads', async () => {
+    const store = await open();
+    const scores = store.collection('scores');
+    for (const [id, history] of [['a', [5, 1]], ['b', [2, 9]], ['c', [7, 4]]]) {
+      await scores.insert({ id, points: 0, history });
+    }
+    const document = [{ $for: { it: '$[*]' }, $orderby: ['$it.history[-1]', '$it.id'], $return: '$it.id' }];
+    const live = await scores.live(document);
+    assert.deepStrictEqual(live.mode, { strategy: 'window', mode: 'incremental' });
+    assert.deepStrictEqual(await scores.execute(document), ['a', 'c', 'b']);
+    assert.deepStrictEqual(live.result.rows, ['a', 'c', 'b']);
+    await scores.put({ id: 'b', points: 0, history: [9, 0] });
+    assert.deepStrictEqual(await scores.execute(document), ['b', 'a', 'c']);
+    assert.deepStrictEqual(live.result.rows, ['b', 'a', 'c']);
+    await store.close();
+  });
+
+  it('an order term over a member named like an inherited method reads only the row\'s own member', async () => {
+    const store = await openStore({ $model: '0.1', collections: { rows: { key: '/id', schema: { type: 'object', properties: {
+      id: { type: 'string' }, valueOf: { type: 'integer' }, constructor: { type: 'string' } } } } } },
+    { driver: nodeDriver(), capture: true });
+    try {
+      const rows = store.collection('rows');
+      await rows.insert({ id: 'a', valueOf: 5, constructor: 'm' });
+      await rows.insert({ id: 'b', valueOf: 1, constructor: 'z' });
+      const documents = [
+        [{ $for: { it: '$[*]' }, $orderby: ['$it.valueOf', '$it.id'], $return: '$it.id' }],
+        [{ $for: { it: '$[*]' }, $orderby: [{ $key: '$it.constructor', $empty: 'greatest' }, '$it.id'], $return: '$it.id' }],
+      ];
+      const lives = [];
+      for (const document of documents) lives.push(await rows.live(document));
+      // the row lacks both members: an absent sort value, not Object.prototype's
+      await rows.insert({ id: 'c' });
+      assert.deepStrictEqual(await rows.execute(documents[0]), ['c', 'b', 'a']);
+      assert.deepStrictEqual(await rows.execute(documents[1]), ['a', 'b', 'c']);
+      for (const [index, live] of lives.entries()) {
+        assert.deepStrictEqual(live.mode, { strategy: 'window', mode: 'incremental' });
+        assert.deepStrictEqual(live.result.rows, await rows.execute(documents[index]));
+      }
+    }
+    finally { await store.close(); }
   });
 
   it('the seeded window oracle: EXACT order equals the documented total order', async () => {

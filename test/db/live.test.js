@@ -434,6 +434,62 @@ describe('classification honesty (live.mode)', () => {
     await store.close();
   });
 
+  it('a query or an aggregate inside a one-item array constructor re-runs: its one row is the whole array', async () => {
+    const store = await open();
+    const users = store.collection('users');
+    await users.insert({ id: 'a', age: 30 });
+    await users.insert({ id: 'b', age: 40 });
+    const documents = [[[WHERE_ADULT]], [[{ $count: WHERE_ADULT }]], [[{ $for: { it: '$[*]' }, $return: '$it.id' }]]];
+    const lives = [];
+    for (const document of documents) {
+      const live = await users.live(document);
+      assert.deepStrictEqual(live.mode, { strategy: 'rerun', mode: 'rerun',
+        reason: 'a query inside a one-item array constructor re-runs (its one row is the whole array)' });
+      assert.deepStrictEqual(live.result.rows, await users.execute(document));
+      lives.push(live);
+    }
+    assert.deepStrictEqual(lives[1].result.rows, [[2]]);
+    await users.insert({ id: 'c', age: 50 });
+    for (const [index, live] of lives.entries()) {
+      assert.deepStrictEqual(live.result.rows, await users.execute(documents[index]));
+    }
+    assert.deepStrictEqual(lives[2].result.rows, [['a', 'b', 'c']]);
+    await store.close();
+  });
+
+  it("a mode other than 'auto', 'incremental', 'rerun' or 'resnapshot' is JD0013 and registers nothing", async () => {
+    const store = await open();
+    const users = store.collection('users');
+    for (const mode of ['incremenal', 'Incremental', true, 42, null]) {
+      await assert.rejects(async () => users.live([WHERE_ADULT], { mode }), { code: 'JD0013' });
+      await assert.rejects(async () => users.live([{ $sum: { $for: { it: '$[*]' }, $return: '$it.pay' } }], { mode }),
+        { code: 'JD0013' });
+    }
+    await assert.rejects(async () => users.live([WHERE_ADULT], { mode: 'incremenal' }), {
+      message: "JD0013: live option 'mode' must be 'auto', 'incremental', 'rerun' or 'resnapshot', not \"incremenal\"",
+    });
+    assert.strictEqual(store.stats().liveQueries, 0);
+    await store.close();
+  });
+
+  it('externals are fixed at registration: changing the object passed afterwards changes nothing', async () => {
+    const store = await open();
+    const users = store.collection('users');
+    await users.insert({ id: 'a', age: 30 });
+    const externals = { min: 20 };
+    const document = [{ $for: { it: '$[*]' }, $where: { $gt: ['$it.age', '$min'] }, $return: { id: '$it.id', min: '$min' } }];
+    const count = [{ $count: { $for: { it: '$[*]' }, $where: { $gt: ['$it.age', '$min'] }, $return: '$it' } }];
+    const lives = [await users.live(document, { externals }), await users.live(count, { externals }),
+      await users.live(count, { externals, mode: 'rerun' })];
+    externals.min = 40;
+    await users.insert({ id: 'b', age: 35 });
+    assert.deepStrictEqual(lives[0].result.rows, [{ id: 'a', min: 20 }, { id: 'b', min: 20 }]);
+    assert.deepStrictEqual(lives[0].result.rows, await users.execute(document, { externals: { min: 20 } }));
+    assert.deepStrictEqual(lives[1].result.rows, [2]);
+    assert.deepStrictEqual(lives[2].result.rows, [2]);
+    await store.close();
+  });
+
   it('rerun still maintains a correct result, with reuse for unchanged rows', async () => {
     const store = await open();
     const users = store.collection('users');

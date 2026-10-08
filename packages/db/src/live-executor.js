@@ -2,7 +2,7 @@
 /** Bounded snapshot execution through the existing collection/entity engines. */
 import { createQueryEngine, createEntityQueryEngine, createQueryState } from './query.js';
 import { SAFE_PROFILE } from './profile.js';
-import { createCursor, drainPage, utf8Length } from './cursor.js';
+import { createCursor, drainPage, isCursorBudgetError, utf8Length } from './cursor.js';
 import { DbCompileError, DbRuntimeError } from './errors.js';
 
 /** One serialized evaluator owns its counters and compiled plan. No per-call
@@ -28,9 +28,12 @@ export function createLiveExecutor(context, bounds, signal) {
   const sizeOf = (row) => utf8Length(JSON.stringify(row));
   const connection = { ...source, prepare(sql, metadata) {
     const read = async (params, one) => {
-      if (rows >= bounds.maxInputRows || bytes >= bounds.maxInputBytes) throw refused();
-      // The query owner caches this wrapper, not a native statement. Ephemeral
-      // iterator statements leave with their cursor, including failed reads.
+      // The credits are inclusive, so none is checked before a statement: one
+      // after reading exactly the bound may still read nothing, and any row it
+      // does read is past it, refused below (its page is never larger than the
+      // credit left). The query owner caches this wrapper, not a native
+      // statement. Ephemeral iterator statements leave with their cursor,
+      // including failed reads.
       const statement = await source.prepare(sql, { ...metadata, ephemeral: true });
       // EXPLAIN is a metadata command rather than a cursor-select on some hosts.
       // Its driver owns buffering bounds; its answer still spends input credit.
@@ -38,9 +41,20 @@ export function createLiveExecutor(context, bounds, signal) {
       const cursor = createCursor({ streaming: explain ? 'buffered' : 'row',
         ...(explain ? { materialize: () => statement.all(params) }
           : { open: () => statement.iterate(params), items: (row) => [row] }), signal });
-      const page = await drainPage(cursor, { limit: one ? 1 : bounds.maxInputRows - rows + 1,
-        maxBytes: bounds.maxInputBytes - bytes, lookahead: false,
-        sizeOf, continuationOf: () => null });
+      /** @type {any} */
+      let page;
+      try {
+        page = await drainPage(cursor, { limit: one ? 1 : bounds.maxInputRows - rows + 1,
+          maxBytes: bounds.maxInputBytes - bytes, lookahead: false,
+          sizeOf, continuationOf: () => null });
+      }
+      catch (error) {
+        // a row larger than the bytes left is past the credit, whether or not
+        // it is the first the statement reads (which the drain refuses as an
+        // item too large for its page)
+        if (isCursorBudgetError(error)) throw refused();
+        throw error;
+      }
       rows += page.work.rows; bytes += page.work.bytes;
       if (rows > bounds.maxInputRows || bytes > bounds.maxInputBytes || (!one && page.hasMore !== false))
         throw refused();

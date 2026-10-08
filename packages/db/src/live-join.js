@@ -8,7 +8,7 @@ import { joinTableRoots } from './model.js';
 import { keyToken } from './capture.js';
 import { DbRuntimeError } from './errors.js';
 import { utf8Length } from './cursor.js';
-import { readsRoot } from './live-nested.js';
+import { readsRoot, compilesBare, valueKey } from './live-nested.js';
 
 /**
  * Compile eligibility from the existing planner and declared mapping: a
@@ -128,6 +128,18 @@ export function classifyEntityLive(document, entities, mapping, operators) {
   // over an entity root included — would see that subset as the entity.
   if (strategy === 'join' && Object.entries(inner).some(([key, value]) => key !== '$for' && globalRead(value, true)))
     return rerun('an entity root read outside the join bindings re-runs');
+  // The maintenance evaluates the document with no options, where execute
+  // carries the registered operators and the zone provider: a document that
+  // needs them re-runs, named by the planner's reason for the operator in it
+  // as written — a graph or allowing-empty join is planned through a
+  // surrogate that leaves its return out, so the surrogate's plan cannot
+  // name it, and a named zone is not the planner's to name.
+  if (!compilesBare(inner)) {
+    const written = surrogate === document ? planned : planEntityQuery(document, roots, mapped, operators);
+    const named = written.reasons.find((reason) => !['$for', '$return'].includes(reason.construct));
+    return rerun(`entity dependency plan: ${named?.reason
+      ?? 'the document needs the store\'s registered operators or zone provider'}`);
+  }
   if (!aliased) return { strategy, bindings, edges };
   const rewritten = { ...inner, $for: Object.fromEntries(bindings.map((binding, i) =>
     [binding.name, binding.member === binding.entity ? entries[i][1] : entityRoot(binding.member)])) };
@@ -202,12 +214,14 @@ export function joinStrategy(description, context) {
   // outer owners. The same walk works for multi-entity projection chains.
   const connected = (binding, row) => {
     const found = new Map(bindings.map((b) => [b.name, new Map()]));
+    // a row is queued once per binding, however many edges reach it, so the
+    // fan-out bound counts connected rows rather than the paths to them
+    const queued = new Map(bindings.map((b) => [b.name, new Set()]));
+    queued.get(binding.name).add(keyOf(binding, row));
     const queue = [[binding, row]];
     for (let i = 0; i < queue.length; i++) {
       const [current, doc] = queue[i];
-      const key = keyOf(current, doc);
-      if (found.get(current.name).has(key)) continue;
-      found.get(current.name).set(key, doc);
+      found.get(current.name).set(keyOf(current, doc), doc);
       // When finding owners, arriving at an owner completes this path.
       // When evaluating one owner, crossing back to its siblings would
       // widen a selective dependency into the entire connected component.
@@ -219,8 +233,9 @@ export function joinStrategy(description, context) {
         if (binding === root && other.binding === root.name) continue;
         const target = bindings.find((b) => b.name === other.binding);
         for (const token of indices.get(signature(other.binding, other.column)).get(stableStringify(doc[own.column])) ?? []) {
-          const match = caches.get(other.binding).get(token);
-          if (!found.get(target.name).has(token)) queue.push([target, match]);
+          if (queued.get(target.name).has(token)) continue;
+          queued.get(target.name).add(token);
+          queue.push([target, caches.get(other.binding).get(token)]);
         }
       }
       if (queue.length > context.maxMaintained * Math.max(1, edges.length * 2))
@@ -243,7 +258,7 @@ export function joinStrategy(description, context) {
     const previous = items.get(key) ?? [];
     outputCount += fresh.length - previous.length;
     maintainedBytes += bytesOf(fresh) - (items.has(key) ? bytesOf(previous) : 0);
-    items.set(key, fresh.map((item, i) => stableStringify(previous[i]) === stableStringify(item) ? previous[i] : item));
+    items.set(key, fresh.map((item, i) => valueKey(previous[i]) === valueKey(item) ? previous[i] : item));
     counts.refreshedRoots++;
     bound();
   };

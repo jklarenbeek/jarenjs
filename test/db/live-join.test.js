@@ -3,6 +3,8 @@ import { it } from 'node:test';
 import * as assert from 'node:assert/strict';
 import { openStore } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';
+import { createJsltRegistry, statsPack } from '@jarenjs/json/jslt';
+import { createIntlZoneProvider } from '@jarenjs/locales/intl-zones';
 import { liveOracle } from './oracle/replication.js';
 
 const MODEL = { $model: '0.1', entities: {
@@ -41,6 +43,45 @@ for (const mode of ['session', 'journal']) it(`${mode}: an indexed join reconstr
   finally { await store.close(); }
 });
 
+it('a graph or allowing-empty join that needs the store\'s registered operators or zone provider re-runs, as execute answers it', async () => {
+  const child = { $for: { x: '$.Post[*]' }, $where: { $eq: ['$x.author', '$a.id'] }, $return: '$x.title' };
+  const left = (value) => [{ $for: { a: '$.Author[*]', p: { $in: { $for: { x: '$.Post[*]' },
+    $where: { $eq: ['$x.author', '$a.id'] }, $return: '$x' }, '$allowing-empty': true } }, $return: { a: '$a.id', value } }];
+  const day = (path) => ({ '$time-bucket': [path, 'P1D', null, { zone: 'Europe/Amsterdam' }] });
+  const cases = [
+    [{ operators: createJsltRegistry().use(statsPack) }, [
+      [{ $for: { a: '$.Author[*]' }, $return: { a: '$a.id', n: { $mean: [[{ $count: [child] }, 1]] } } }],
+      left({ $mean: [[{ $count: ['$p'] }, 1]] }),
+    ]],
+    [{ zoneProvider: createIntlZoneProvider() }, [
+      [{ $for: { a: '$.Author[*]' }, $return: { a: '$a.id', titles: [child], day: day('$a.since') } }],
+      left(day('$a.since')),
+    ]],
+  ];
+  for (const [options, documents] of cases) {
+    const model = structuredClone(MODEL);
+    model.entities.Author.schema.properties.since = { type: 'string', format: 'date-time' };
+    const store = await openStore(model, { driver: nodeDriver(), capture: true, ...options });
+    try {
+      await store.entity('Author').create({ id: 'a', name: 'Ada', since: '2024-03-30T23:30:00Z' });
+      await store.entity('Post').create({ id: 'p', author: 'a', title: 'one' });
+      for (const document of documents) {
+        const live = await store.live(document);
+        assert.equal(live.mode.mode, 'rerun');
+        assert.match(live.mode.reason, /^entity dependency plan: /);
+        await assert.rejects(store.live(document, { mode: 'incremental' }), { code: 'JD0051' });
+        const oracle = liveOracle(live, () => store.execute(document));
+        await oracle.check();
+        await store.entity('Post').create({ id: `q${documents.indexOf(document)}`, author: 'a', title: 'two' });
+        await oracle.check();
+        oracle.close();
+        live.close();
+      }
+    }
+    finally { await store.close(); }
+  }
+});
+
 it('an unsupported join names its reason and demanded incremental refuses', async () => {
   const model = structuredClone(MODEL); delete model.entities.Post.schema.properties.author['x-entity'];
   const store = await openStore(model, { driver: nodeDriver(), capture: true });
@@ -63,6 +104,41 @@ it('dependency caches and fan-out are charged to maxMaintained and close once on
     assert.equal(live.error.code, 'JD2060'); assert.equal(live.state, 'errored');
     await store.entity('Post').create({ id: 'r', author: 'a' });
     assert.equal(events.length, 1);
+  }
+  finally { await store.close(); }
+});
+
+it('the fan-out bound counts each connected row once: rows reached along several edges do not exhaust it', async () => {
+  const key = { 'x-entity': { key: true } };
+  const model = { $model: '0.1', entities: {
+    Owner: { schema: { type: 'object', required: ['id'], properties: { id: { type: 'string', ...key },
+      items: { 'x-entity': { relation: { to: 'Item', many: true, via: 'ownerId', onDelete: 'cascade' } } } } } },
+    Item: { schema: { type: 'object', required: ['id'], properties: { id: { type: 'string', ...key },
+      k: { type: 'string', 'x-entity': { index: true } } } } },
+    Other: { schema: { type: 'object', required: ['id'], properties: { id: { type: 'string', ...key },
+      k: { type: 'string', 'x-entity': { index: true } }, flag: { type: 'integer' } } } },
+  } };
+  // 64 items and 64 others share one value: every item reaches every other
+  const store = await openStore(model, { driver: nodeDriver(), capture: true, live: { maxMaintained: 1000 } });
+  try {
+    await store.transaction(async (tx) => {
+      await tx.entity('Owner').create({ id: 'o' });
+      for (let i = 0; i < 64; i++) await tx.entity('Item').create({ id: `i${i}`, ownerId: 'o', k: 'K' });
+      for (let i = 0; i < 64; i++) await tx.entity('Other').create({ id: `x${i}`, k: 'K', flag: i === 0 ? 1 : 0 });
+    });
+    const document = [{ $for: { o: '$.Owner[*]', i: '$.Item[*]', x: '$.Other[*]' },
+      $where: { $and: [{ $eq: ['$i.ownerId', '$o.id'] }, { $eq: ['$i.k', '$x.k'] }, { $eq: ['$x.flag', 1] }] },
+      $return: { i: '$i.id', x: '$x.id' } }];
+    // 129 source rows and 64 tuples: within live.maxMaintained
+    const live = await store.live(document);
+    assert.deepEqual(live.mode, { strategy: 'join', mode: 'incremental' });
+    const oracle = liveOracle(live, () => store.execute(document));
+    await oracle.check();
+    for (let i = 64; i < 80; i++) await store.entity('Other').create({ id: `x${i}`, k: 'K', flag: 0 });
+    await store.entity('Item').create({ id: 'i64', ownerId: 'o', k: 'K' });
+    await oracle.check();
+    assert.equal(live.result.rows.length, 65);
+    oracle.close();
   }
   finally { await store.close(); }
 });

@@ -242,6 +242,39 @@ it('counts input across entity roots even when each root is individually within 
   finally { await store.close(); }
 });
 
+it('input credits admit exactly their bound, and an oversized row refuses with the credit code wherever it comes', async () => {
+  const schema = { type: 'object', properties: { id: { type: 'string', 'x-entity': { key: true } }, text: { type: 'string' } } };
+  const twoRoots = { $model: '0.1', entities: { Item: { schema }, Other: { schema } } };
+  const query = { items: ['$.Item[*]'], other: ['$.Other[*]'] };
+  const rows = await openStore(twoRoots,
+    { driver: nodeWorkerDriver(), capture: { log: true }, live: asyncLive({ pollMs: 60000, maxInputRows: 3 }) });
+  try {
+    for (const id of ['a', 'b', 'c']) await rows.entity('Item').create({ id });
+    // three rows read, the bound, and the second root reads none
+    const live = await rows.live(query);
+    assert.equal(live.stats().inputRows, 3);
+    await live.close();
+    await rows.entity('Other').create({ id: 'x' });
+    await assert.rejects(rows.live(query), { code: 'JD2060' });
+  }
+  finally { await rows.close(); }
+  const bytes = await openStore(twoRoots,
+    { driver: nodeWorkerDriver(), capture: { log: true }, live: asyncLive({ pollMs: 60000, maxInputBytes: 300 }) });
+  try {
+    for (const id of ['a', 'b']) await bytes.entity('Item').create({ id, text: 'small' });
+    const live = await bytes.live(query);
+    // the oversized row is the first its statement reads
+    await bytes.entity('Item').update('a', { text: 'x'.repeat(400) });
+    await live.refresh();
+    assert.equal(live.state, 'errored'); assert.equal(live.error.code, 'JD2060');
+    await assert.rejects(bytes.live(query), { code: 'JD2060' });
+    await bytes.entity('Item').update('a', { text: 'small' });
+    await bytes.entity('Item').update('b', { text: 'x'.repeat(400) });
+    await assert.rejects(bytes.live(query), { code: 'JD2060' });
+  }
+  finally { await bytes.close(); }
+});
+
 it('takes a finite observer set before callbacks can register replacements', async () => {
   const store = await openStore(model, { driver: nodeDriver(), capture: { log: true }, live: asyncLive({ maxObservers: 1 }) });
   try {

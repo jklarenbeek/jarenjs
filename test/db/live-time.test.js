@@ -166,6 +166,23 @@ describe('event-time classification', function () {
     await store.close();
   });
 
+  it('a refused eventTime member is named for what it must be: an instant for the watermark, a span for the others', async function () {
+    const store = await open();
+    const readings = store.collection('readings');
+    const refusal = async (eventTime) => {
+      try { await readings.live(bucketDoc(), { eventTime }); }
+      catch (/** @type {any} */ error) { return error.message; }
+      return 'registered';
+    };
+    assert.match(await refusal({ ...EVENT_TIME, watermark: Infinity }),
+      /live eventTime\.watermark is a finite epoch in milliseconds, not Infinity /);
+    assert.match(await refusal({ ...EVENT_TIME, retention: undefined }),
+      /live eventTime\.retention is a finite span in milliseconds, and it is missing /);
+    assert.match(await refusal({ ...EVENT_TIME, allowedLateness: '5' }),
+      /live eventTime\.allowedLateness is a finite span in milliseconds, not "5" /);
+    await store.close();
+  });
+
   it('demanded incrementality refuses a shape that re-runs (JD0051)', async function () {
     const store = await open();
     await assert.rejects(

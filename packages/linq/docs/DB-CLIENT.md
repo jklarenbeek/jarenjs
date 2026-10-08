@@ -861,7 +861,9 @@ it is one change, on [docs/ROADMAP.md](../../../docs/ROADMAP.md) under
 `mapAsync` runs a JavaScript function per row, so the chain after it is
 not one query document; `live()` over such a chain is the chain's own
 `JL0005` naming the operator that split it. Register the part before the
-split, or write the document by hand.
+split, or write the document by hand. Like every refusal `live()` gives —
+the store's and the chain's own (`JL0004`, `JL0005`) alike — it is a
+rejected promise; a chain's own refusal used to be thrown at the call.
 
 **An `include()` chain is a load specification, not a live document.**
 `live()` over one is the store's `JD0033`: a load specification names no

@@ -727,6 +727,47 @@ value the store did not honor now refuse by code, before any statement:
   `mode: 'incremental'` refuses it `JD0051`, a graph projection naming the
   root inside a path filter now re-runs with the planner's reason, and a
   `$const` literal spelled like a root path no longer counts as a root read.
+- An observer subscribed to a synchronous live query from inside another
+  observer's callback also received the emission being delivered, although
+  `live.result`, which it starts from, already held it — a mirror built that
+  way applied the patch twice; an emission now reaches only the observers
+  subscribed when it began.
+- A live whole-collection `$min` or `$max` over a string member compared its
+  terms by UTF-16 code unit, so beside an astral character (`'\u{1F600}'`
+  against `'\uE000'`) it answered otherwise than `execute`; it now orders text
+  by code point, as `execute` does.
+- A maintained live window whose order term indexes an array from its end
+  (`$it.history[-1]`) ranked every row as though the term were absent, and one
+  ordered by a member named like an inherited method (`valueOf`,
+  `constructor`) ranked a row lacking it by the inherited function; both
+  answered otherwise than `execute` and now sort by the value `execute` reads.
+- A live query or aggregate inside a one-item array constructor
+  (`[[document]]`) was maintained one row per source row (`[["a"], ["b"]]`
+  where `execute` answers `[["a", "b"]]`); it now re-runs, the reason named,
+  and `mode: 'incremental'` refuses it `JD0051`.
+- A live `mode` other than `'auto'`, `'incremental'`, `'rerun'` and
+  `'resnapshot'` (a misspelt `'incremenal'`, `true`) registered as `'auto'`; it
+  is now `JD0013`.
+- A live query held the `externals` object it was registered with, so changing
+  that object afterwards changed what maintenance evaluated; it now holds a
+  copy, fixed at registration.
+- A live graph projection or allowing-empty join whose return needs the store's
+  registered operators or zone provider failed registration (`JQ0002`,
+  `JQ0003`) where `execute` answered it; it now re-runs, the reason named.
+- A live join whose rows reach one another along several equality edges
+  counted every path toward its fan-out bound, so a join whose state fit
+  `live.maxMaintained` could be refused or closed `JD2060`; each connected row
+  now counts once.
+- A maintained or re-run live result whose output turned from one non-finite
+  number into another (`NaN` into `Infinity`) kept the old value and emitted
+  nothing; the change now emits.
+- A live group, window or join whose document holds a `$$`-escaped literal
+  (`'$$USD'`) re-ran as though it read the collection root; it is now
+  maintained.
+- An asynchronous (resnapshot) registration that read exactly its
+  `maxInputRows` before a statement that read nothing was refused `JD2060`; it
+  now registers. A row past `maxInputBytes` that is the first its statement
+  reads is `JD2060`, as any other row past it, where it was `JD2074`.
 
 ### Allocated entity keys on PostgreSQL
 

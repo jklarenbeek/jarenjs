@@ -134,6 +134,27 @@ describe('group returns beyond a key or one aggregate', () => {
     finally { await store.close(); }
   });
 
+  it('an output turning from one non-finite number into another changes, maintained or re-run, as a fresh run says', async () => {
+    const store = await seeded();
+    try {
+      const users = store.collection('users');
+      // no row has an age, so every ratio divides by a sum of 0
+      const document = [byDept({ key: '$g', ratio: { $div: [{ $sum: '$it.pay' }, { $sum: '$it.age' }] } })];
+      await users.insert({ id: 'z', dept: 'z', pay: 0, name: 'zed' });
+      const lives = [await users.live(document), await users.live(document, { mode: 'rerun' })];
+      assert.deepEqual(lives[0].mode, MAINTAINED);
+      const oracles = lives.map((live) => liveOracle(live, () => users.execute(document)));
+      const ratioOfZ = () => (/** @type {any[]} */ (lives[0].result.rows)).find((row) => row.key === 'z').ratio;
+      for (const [pay, ratio] of [[0, NaN], [3, Infinity], [-3, -Infinity], [0, NaN]]) {
+        await users.put({ id: 'z', dept: 'z', pay, name: 'zed' });
+        assert.deepStrictEqual(ratioOfZ(), ratio);
+        for (const oracle of oracles) await oracle.check();
+      }
+      for (const oracle of oracles) oracle.close();
+    }
+    finally { await store.close(); }
+  });
+
   it('a return that raises for some data raises in registration and in maintenance, as execute does', async () => {
     const document = [byDept({ key: { $default: ['$g', null] }, deep: { $count: '$it' }, odd: '$it' })];
     const store = await seeded();
@@ -355,6 +376,30 @@ describe('the group maintenance boundary', () => {
         assert.deepEqual(live.result.rows, await users.execute(document));
         live.close();
       }
+    }
+    finally { await store.close(); }
+  });
+
+  it('a string escaped with $$ is a literal, not a root read: a group and a window returning one stay maintained', async () => {
+    const store = await seeded();
+    try {
+      const users = store.collection('users');
+      /** @type {[any, string][]} */
+      const cases = [
+        [[byDept({ key: '$g', currency: '$$USD', total: { $sum: '$it.pay' } })], 'group'],
+        [[{ $subsequence: [{ $for: { it: '$[*]' }, $orderby: '$it.pay', $return: { id: '$it.id', unit: '$$.pay' } }, 1, 2] }],
+          'window'],
+      ];
+      for (const [document, strategy] of cases) {
+        const live = await users.live(document);
+        assert.deepEqual(live.mode, { strategy, mode: 'incremental' });
+        const oracle = liveOracle(live, () => users.execute(document));
+        await oracle.check();
+        await users.insert({ id: `d${strategy}`, dept: 'x', pay: 7, name: 'dee' });
+        await oracle.check();
+        oracle.close();
+      }
+      assert.deepEqual((/** @type {any[]} */ (await users.execute(cases[0][0])))[0].currency, '$USD');
     }
     finally { await store.close(); }
   });

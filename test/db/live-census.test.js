@@ -83,12 +83,13 @@ const ENTITY_WRITES = [
   (s) => s.entity('Tag').update('t2', { label: 'T2x' }),
   (s) => s.entity('Author').create({ id: 'a5', name: 'A5', rank: 0, mentor: 'a1' }),
 ];
-/** Collection writes, one commit each: insert, move to another group, delete, move to a new team. */
+/** Collection writes, one commit each: insert, move to another group, delete, move to a new team, change a row that keeps matching. */
 const ROW_WRITES = [
   (s) => s.collection('rows').put({ id: 'r13', region: 'west', team: 'x', score: 3 }),
   (s) => s.collection('rows').put({ id: 'r1', region: 'east', team: 'y', score: 11 }),
   (s) => s.collection('rows').delete('r2'),
   (s) => s.collection('rows').put({ id: 'r3', region: 'north', team: 'q', score: 0 }),
+  (s) => s.collection('rows').put({ id: 'r5', region: 'east', team: 'z', score: 8 }),
 ];
 
 const JOIN = { $for: { p: '$.Post[*]', a: '$.Author[*]' }, $where: { $eq: ['$p.authorId', '$a.id'] },
@@ -115,6 +116,7 @@ const SET_LEVEL = 'this grouping or distinct projection needs set-level maintena
  * @property {{ strategy: string, mode: string, reason?: string }} mode - `live.mode` as registered
  * @property {any} [reference] - the document a fresh run answers with, when it is not the registered one
  * @property {boolean} [multiset] - the result is compared as a multiset
+ * @property {Record<string, unknown>} [externals] - bound at registration and in every fresh run
  */
 
 /** @type {Shape[]} */
@@ -144,6 +146,10 @@ const SHAPES = [
     document: [{ $for: { p: '$.Parent[*]', j: '$.Parent_Tag[*]' }, $where: { $eq: ['$j.Parent_key', '$p.id'] },
       $return: { p: '$p.id', t: '$j.Tag_key' } }],
     row: 'indexed inner equi-joins', mode: maintained('join') },
+  { name: 'an allowing-empty (left) join over a foreign key', on: 'entity',
+    document: [{ $for: { p: '$.Post[*]', a: { $in: { $for: { m: '$.Author[*]' }, $where: { $eq: ['$m.id', '$p.authorId'] },
+      $return: '$m' }, '$allowing-empty': true } }, $return: { id: '$p.id', who: { $default: ['$a.name', null] } } }],
+    row: 'canonical allowing-empty left joins', mode: maintained('join') },
   { name: 'a many-to-many join on the target\'s key', on: 'entity',
     document: [{ $for: { t: '$.Tag[*]', j: '$.Parent_Tag[*]' }, $where: { $eq: ['$j.Tag_key', '$t.id'] },
       $return: { t: '$t.id', p: '$j.Parent_key' } }],
@@ -167,7 +173,10 @@ const SHAPES = [
     row: 'a graph projection whose child query is ordered', mode: rerun(DECODED) },
   { name: 'a graph projection whose child query is windowed without an ordering', on: 'entity',
     document: [{ $for: { a: '$.Author[*]' }, $return: { id: '$a.id', first: [{ $subsequence: [CHILD_IDS[0], 1, 2] }] } }],
-    row: 'windowed by literal bounds without an ordering', mode: maintained('graph') },
+    row: 'windowed without an ordering (literal, quoted or external bounds', mode: maintained('graph') },
+  { name: 'a graph projection whose child query is windowed by external bounds', on: 'entity', externals: { from: 1, size: 1 },
+    document: [{ $for: { a: '$.Author[*]' }, $return: { id: '$a.id', next: [{ $subsequence: [CHILD_IDS[0], '$from', '$size'] }] } }],
+    row: 'windowed without an ordering (literal, quoted or external bounds', mode: maintained('graph') },
   { name: 'a graph projection counting each owner\'s children', on: 'entity',
     document: [{ $for: { a: '$.Author[*]' }, $return: { id: '$a.id', n: { $count: { $for: { p: '$.Post[*]' },
       $where: { $eq: ['$p.authorId', '$a.id'] }, $return: '$p' } } } }],
@@ -189,6 +198,18 @@ const SHAPES = [
   { name: 'the rows a translated where selects', on: 'rows', multiset: true,
     document: [{ $for: { r: '$[*]' }, $where: { $gt: ['$r.score', 2] }, $return: '$r' }],
     row: '`where` whose predicates translate', mode: maintained('rows') },
+  { name: 'the rows a translated where selects, each projected', on: 'rows', multiset: true,
+    document: [{ $for: { r: '$[*]' }, $where: { $gt: ['$r.score', 2] }, $return: { id: '$r.id', next: { $add: ['$r.score', 1] } } }],
+    row: 'per-row `select` projection (row-mode plan)', mode: maintained('rows') },
+  { name: 'a count of the rows a translated where selects', on: 'rows',
+    document: [{ $count: { $for: { r: '$[*]' }, $where: { $gt: ['$r.score', 3] }, $return: '$r' } }],
+    row: 'whole-query `count` / `min` / `max`', mode: maintained('accumulator') },
+  { name: 'the least value of a member', on: 'rows', document: [{ $min: { $for: { r: '$[*]' }, $return: '$r.score' } }],
+    row: 'whole-query `count` / `min` / `max`', mode: maintained('accumulator') },
+  { name: 'a sum over a number member', on: 'rows', document: [{ $sum: { $for: { r: '$[*]' }, $return: '$r.score' } }],
+    row: '`sum` / `avg` over a `number` member',
+    mode: rerun("'$sum' — a floating sum or average runs in the engine, whose left-to-right addition decides "
+      + 'the rounding a native sum would not reproduce') },
   { name: 'an unordered distinct projection', on: 'rows',
     document: [{ $distinct: { $for: { r: '$[*]' }, $return: '$r.team' } }],
     row: 'unordered SQL-native typed scalar distinct projections', mode: maintained('distinct') },
@@ -242,7 +263,7 @@ const SHAPES = [
 
 /** The bold phrase opening the Strategy cell of a strategy's rows in the maintenance table. */
 const STRATEGY_CELL = {
-  rows: 'incremental rows', window: 'maintained window', group: 'group maintenance',
+  rows: 'incremental rows', window: 'maintained window', accumulator: 'running accumulator', group: 'group maintenance',
   distinct: 'distinct maintenance', 'nested-group': 'nested-group maintenance',
   join: 'join dependency maintenance', graph: 'graph dependency maintenance', rerun: 're-run on invalidation',
 };
@@ -296,8 +317,9 @@ describe('the live census: each shape registers as its maintenance-table row say
       try {
         await seed(store);
         const document = typeof shape.document === 'function' ? shape.document(store) : shape.document;
+        const externals = shape.externals ?? {};
         const register = (/** @type {any} */ options) => shape.on === 'entity'
-          ? store.live(document, options) : store.collection('rows').live(document, options);
+          ? store.live(document, { ...options, externals }) : store.collection('rows').live(document, { ...options, externals });
         const live = await register({ mode: 'auto' });
         assert.deepEqual(live.mode, shape.mode);
         if (shape.mode.strategy === 'rerun') {
@@ -311,7 +333,7 @@ describe('the live census: each shape registers as its maintenance-table row say
         }
         const reference = shape.reference ?? (Array.isArray(document) ? document : [document]);
         const run = async () => shape.on === 'entity'
-          ? store.execute(reference) : store.collection('rows').execute(reference);
+          ? store.execute(reference, { externals }) : store.collection('rows').execute(reference, { externals });
         const oracle = liveOracle(live, shape.multiset ? async () => sameRowsInLiveOrder(await run(), live.result.rows) : run);
         await oracle.check();
         for (const write of shape.on === 'entity' ? ENTITY_WRITES : ROW_WRITES) {

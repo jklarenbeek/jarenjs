@@ -4,10 +4,12 @@
  * or a hand-written document — handed to the store's own registration
  * (`store.live` for an entity-root chain, `collection.live` for a
  * collection's), so the mode, the reason and the maintenance are the
- * store's (LIVE-FORMAT §7): an entity document re-runs on invalidation,
- * declared, and a store opened without capture refuses (`JD0050`)
- * exactly as it does for a document. The chain's `params()` bindings are
- * the externals, fixed at registration; `options.externals` adds to them.
+ * store's (LIVE-FORMAT §7): a chain is maintained or re-run exactly as
+ * its document would be, an `include()` chain — a load specification,
+ * not a query document — is `JD0033`, and a store opened without capture
+ * refuses (`JD0050`) as it does for a document. The chain's `params()`
+ * bindings are the externals, fixed at registration; `options.externals`
+ * adds to them.
  * The merged set is what the store runs, so it is the set a parameter an
  * `in()` reads whole as its list must be an array in (`JL0004`): a
  * placeholder the options override is not checked, and an override is.
@@ -46,8 +48,15 @@ function documentOf(source) {
  * @returns {Promise<any>} the store's live query
  */
 export function registerLive(register, source, options = {}) {
-  const { document, bindings, lists } = documentOf(source);
-  const externals = { ...bindings, ...(options.externals ?? {}) };
-  requireListBindings(lists, new Map(Object.entries(externals)));
-  return register(document, { ...options, externals });
+  try {
+    const { document, bindings, lists } = documentOf(source);
+    const externals = { ...bindings, ...(options.externals ?? {}) };
+    requireListBindings(lists, new Map(Object.entries(externals)));
+    return register(document, { ...options, externals });
+  }
+  catch (error) {
+    // the store answers its refusals by a rejected promise, so a chain's
+    // own refusal (`JL0004`, `JL0005`) is answered the same way
+    return Promise.reject(error);
+  }
 }

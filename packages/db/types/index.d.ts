@@ -1209,7 +1209,8 @@ export interface LiveMode {
   readonly strategy: 'rows' | 'window' | 'accumulator' | 'group' | 'distinct'
     | 'bucket' | 'rolling' | 'join' | 'graph' | 'nested-group' | 'rerun' | 'resnapshot';
   readonly mode: 'incremental' | 'rerun' | 'resnapshot';
-  /** Present exactly when the strategy is 'rerun': the named reason. */
+  /** Present exactly when the strategy is 'rerun' or 'resnapshot': the
+   * named reason (a resnapshot's is `durable-feed asynchronous resnapshot`). */
   readonly reason?: string;
 }
 
@@ -1243,6 +1244,8 @@ export interface LiveStats {
   refreshedRoots?: number;
   refreshedGroups?: number;
   records: number;
+  /** records that produced an emission, so always `emissions`: a record a
+   * strategy read that changed nothing counts in `records` alone. */
   matched: number;
   emissions: number;
   /** min/max extremum-removal recomputes (accumulator strategy). */

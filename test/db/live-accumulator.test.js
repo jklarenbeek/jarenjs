@@ -32,6 +32,10 @@ const MODEL = {
         id: { type: 'string' }, n: { type: 'integer' }, k: { type: 'integer' } } },
       key: '/id',
     },
+    words: {
+      schema: { type: 'object', properties: { id: { type: 'string' }, s: { type: 'string' } } },
+      key: '/id',
+    },
   },
 };
 const open = () => openStore(MODEL, { driver: nodeDriver(), capture: true });
@@ -144,6 +148,30 @@ describe('integer sums and averages past the exactness bound', () => {
       assert.equal(await nums.execute(document), 0.6);
       assert.deepEqual(live.mode, RERUN);
       assert.deepEqual(live.result.rows, [0.6]);
+    }
+    finally { await store.close(); }
+  });
+});
+
+describe('the extrema of a string member', () => {
+  it('order text by code point, as execute does: a private-use character before an astral one', async () => {
+    const store = await open();
+    try {
+      const words = store.collection('words');
+      await words.insert({ id: 'a', s: '\uE000' });
+      await words.insert({ id: 'b', s: '\u{1F600}' });
+      const STRINGS = { $for: { it: '$[*]' }, $return: '$it.s' };
+      const min = await words.live({ $min: STRINGS });
+      const max = await words.live({ $max: STRINGS });
+      assert.deepEqual([min.mode, max.mode], [MAINTAINED, MAINTAINED]);
+      const answers = async () => [[await words.execute({ $min: STRINGS })], [await words.execute({ $max: STRINGS })]];
+      assert.deepEqual(await answers(), [['\uE000'], ['\u{1F600}']]);
+      assert.deepEqual([min.result.rows, max.result.rows], await answers());
+      await words.insert({ id: 'c', s: '\uFFFD' });
+      assert.deepEqual([min.result.rows, max.result.rows], await answers());
+      await words.delete('b');
+      assert.deepEqual(await answers(), [['\uE000'], ['\uFFFD']]);
+      assert.deepEqual([min.result.rows, max.result.rows], await answers());
     }
     finally { await store.close(); }
   });

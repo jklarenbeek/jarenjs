@@ -443,6 +443,26 @@ describe('live(): the store\'s registration with the chain\'s document and bindi
     finally { await live.close(); }
   });
 
+  it('live() answers a chain\'s own refusal as the store answers its own: by a rejected promise, never a throw', async () => {
+    const { client: live } = await seeded({ capture: true });
+    try {
+      const byStars = live.entities.Post.params({ ids: [] }).where((p, q) => p.stars.in(q.ids));
+      const split = live.entities.Post.mapAsync(async (p) => p, { concurrency: 1 });
+      for (const [answer, refusal] of [
+        [() => live.live(byStars, { externals: { ids: 5 } }), codeIs('JL0004')],
+        [() => live.entities.Post.live(byStars, { externals: { ids: 5 } }), codeIs('JL0004')],
+        [() => live.live(split), codeIs('JL0005', /mapAsync/)],
+      ]) {
+        /** @type {any} */
+        let answered;
+        assert.doesNotThrow(() => { answered = answer(); });
+        await assert.rejects(answered, refusal);
+      }
+      assert.strictEqual(live.store.stats().liveQueries, 0);
+    }
+    finally { await live.close(); }
+  });
+
   it('an in() list parameter is held to the externals the store registers, not the chain\'s own binding', async () => {
     const { client: live } = await seeded({ capture: true });
     const notList = codeIs('JL0004', /^JL0004: parameter 'ids' is the list an in\(\) reads, so its binding must be an array/);

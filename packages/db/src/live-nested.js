@@ -1,7 +1,7 @@
 //@ts-check
 /** Collection groups use bounded per-group recomputation over maintained leaves. */
 import { compileJsonQuery } from '@jarenjs/json/query';
-import { stableStringify } from '@jarenjs/core/object';
+import { stableStringify, semanticKey } from '@jarenjs/core/object';
 import { DbRuntimeError } from './errors.js';
 import { utf8Length } from './cursor.js';
 
@@ -13,11 +13,45 @@ const WHOLE = { whole: true, members: new Set() };
  * `$.…`, `$[…]`) or the root named inside a path filter
  * (`$it.items[?@.n > $[0].n]`). A filter cannot name a variable, so any
  * later `$` in a path is the root — or sits in a quoted name, where
- * answering yes only costs a re-run.
+ * answering yes only costs a re-run. A string opening with `$$` is the
+ * literal escape (QUERY-FORMAT §3.2), which reads nothing.
  * @param {string} text
  * @returns {boolean}
  */
-export const readsRoot = (text) => /^\$(?:$|[.[])/.test(text) || (text.startsWith('$') && text.includes('$', 1));
+export const readsRoot = (text) => !text.startsWith('$$')
+  && (/^\$(?:$|[.[])/.test(text) || (text.startsWith('$') && text.includes('$', 1)));
+
+/** The identity a maintained result keeps an output's previous reference
+ * by: its whole value, exact for the numbers JSON text cannot tell apart —
+ * `NaN`, `±Infinity`, `-0` — which a computed output can hold, so a ratio
+ * turning from `NaN` to `Infinity` is a change. A value only a host
+ * function returns (a class instance) is compared by its JSON text.
+ * @param {any} value
+ * @returns {string} */
+export function valueKey(value) {
+  try {
+    return semanticKey(value);
+  }
+  catch {
+    return stableStringify(value) ?? '';
+  }
+}
+
+/** Whether the live evaluators can compile `document` the way they do —
+ * with no options: the registered operators, the zone provider and the
+ * profile limits ride only on `execute`'s residual. A document they cannot
+ * compile stays on the re-run path, which executes it.
+ * @param {any} document
+ * @returns {boolean} */
+export function compilesBare(document) {
+  try {
+    compileJsonQuery([document]);
+    return true;
+  }
+  catch {
+    return false;
+  }
+}
 
 /** Recognise nested groups whose parent key is a singular source member. @param {any} document */
 export function classifyNestedGroup(document) {
@@ -114,7 +148,7 @@ export function nestedGroupStrategy(description, context) {
     const previous = results.get(group);
     maintainedBytes += bytesOf(next) - (previous === undefined ? 0 : bytesOf(previous));
     resultCount += next.length - (previous?.length ?? 0);
-    results.set(group, stableStringify(previous) === stableStringify(next) ? previous : next);
+    results.set(group, valueKey(previous) === valueKey(next) ? previous : next);
     stats.refreshedGroups++;
     check();
   };
