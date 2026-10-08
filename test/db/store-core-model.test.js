@@ -73,10 +73,10 @@ const REFUSED = [
   ['an unknown collection member', collectionModel({ ...COLLECTION, bogus: 1 }), '/collections/c/bogus'],
   ['an unknown index member', collectionModel({ ...COLLECTION, indexes: [{ name: 'a', path: '$.a', bogus: 1 }] }), '/collections/c/indexes/0/bogus'],
   ['a misspelt unique', collectionModel({ ...COLLECTION, indexes: [{ name: 'a', path: '$.a', uniqe: true }] }), '/collections/c/indexes/0/uniqe'],
-  ['a partial index predicate, which collections do not declare', collectionModel({ ...COLLECTION, indexes: [{ name: 'a', path: '$.a', unique: true, where: { $eq: ['$.s', 'x'] } }] }), '/collections/c/indexes/0/where'],
   ['a unique that is not a boolean', collectionModel({ ...COLLECTION, indexes: [{ name: 'a', path: '$.a', unique: 1 }] }), '/collections/c/indexes/0/unique'],
   ['an unknown entity member', entityModel({ schema: KEYED, bogus: 1 }), '/entities/E/bogus'],
-  ['an entity indexes array', entityModel({ schema: KEYED, indexes: [{ name: 'x', path: '$.id' }] }), '/entities/E/indexes'],
+  ['an unknown entity index member', entityModel({ schema: KEYED, indexes: [{ name: 'x', path: '$.n', bogus: 1 }] }), '/entities/E/indexes/0/bogus'],
+  ['a misspelt unique on an entity index', entityModel({ schema: KEYED, indexes: [{ name: 'x', path: '$.n', uniqe: true }] }), '/entities/E/indexes/0/uniqe'],
   ['an unknown invariant member', entityModel({ schema: KEYED, invariants: [{ ...storeRule, bogus: 1 }] }), '/entities/E/invariants/0/bogus'],
 ];
 
@@ -86,6 +86,10 @@ const ACCEPTED = [
     key: '/id', identity: 'caller', 'x-rename': 'old',
     indexes: [{ name: 'a', path: '$.a', unique: true }, { name: 'ab', path: ['$.a', '$.b'], unique: false }] })],
   ['an allocated identity', collectionModel({ schema: { type: 'object' }, key: null, identity: 'integer' })],
+  ['a partial collection index', collectionModel({ schema: { type: 'object', properties: { a: { type: 'string' }, s: { type: 'string' } } }, key: '/id',
+    indexes: [{ name: 'a', path: '$.a', unique: true, where: { $eq: ['$.s', { $seq: ['x', 'y'] }] } }, { name: 's', path: '$.s' }] })],
+  ['an entity index: composite, unique and partial', entityModel({ schema: KEYED,
+    indexes: [{ name: 'x', path: ['$.n', '$.id'], unique: true, where: { $not: { $eq: ['$.n', 0] } } }] })],
   ['an entity with a rename hint and a store rule', entityModel({ schema: KEYED, 'x-rename': 'Old', invariants: [storeRule] })],
   ['an invariant when', physicalRule({ name: 'g', on: ['update'], enforcement: 'database', when: 'assigned', assert: false })],
   ['an invariant columns', physicalRule({ name: 'g', on: ['update'], enforcement: 'database', columns: ['n'], assert: false })],
@@ -136,7 +140,7 @@ describe('the model document is one closed vocabulary', () => {
 
   it('the refusal names the members of the declaration and the nearest one', () => {
     assert.throws(() => normalizeModel(collectionModel({ ...COLLECTION, indexes: [{ name: 'a', path: '$.a', uniqe: true }] })),
-      { code: 'JD0005', message: /unknown index member 'uniqe' — did you mean 'unique'\? \(an index declares name, path, expression, unique, derive, precision, dims, physical\)/ });
+      { code: 'JD0005', message: /unknown index member 'uniqe' — did you mean 'unique'\? \(an index declares name, path, expression, unique, where, derive, precision, dims, physical\)/ });
     assert.throws(() => normalizeModel({ ...collectionModel(COLLECTION), zzz: 1 }),
       { code: 'JD0005', message: /unknown model member 'zzz' \(a model declares \$model, collections, entities\)/ });
     assert.throws(() => normalizeEntities(entityModel({ schema: KEYED, invariants: [{ ...storeRule, enforcment: 'store' }] })),

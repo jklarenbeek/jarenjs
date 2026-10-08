@@ -1,9 +1,12 @@
 //@ts-check
-/** Recover only a complete scalar enum CHECK; unfamiliar SQL remains a loss. */
+/** Read catalog SQL back into the model's terms: a complete scalar enum CHECK,
+ * and an index condition in the query grammar. Both walk one tokenizer and
+ * one literal reader, and each engine injects its spelling; unfamiliar SQL
+ * remains a loss, never a guess. */
 
 /** Tokenize catalog SQL without treating quoted text or comments as syntax.
  * @param {string} sql @param {(sql:string,at:number)=>any} [nativeToken]
- * @returns {{ kind: string, value: string }[]} */
+ * @returns {{ kind: string, value: string, at: number }[]} each token with the offset it starts at */
 export function sqlTokens(sql, nativeToken) {
   const tokens = [];
   if (sql.includes('\0')) return [];
@@ -16,7 +19,7 @@ export function sqlTokens(sql, nativeToken) {
     const native = nativeToken?.(sql, i);
     if (native === null) return [];
     if (native) {
-      if (native.kind !== 'comment') tokens.push({ kind: native.kind, value: native.value });
+      if (native.kind !== 'comment') tokens.push({ kind: native.kind, value: native.value, at: i });
       i = native.end; continue;
     }
     if (sql.startsWith('/*', i)) {
@@ -27,14 +30,14 @@ export function sqlTokens(sql, nativeToken) {
     if (c === "'" || c === '"' || c === '`') {
       const quoted = quotedSqlToken(sql, i);
       if (!quoted) return [];
-      tokens.push({ kind: quoted.kind, value: quoted.value }); i = quoted.end; continue;
+      tokens.push({ kind: quoted.kind, value: quoted.value, at: i }); i = quoted.end; continue;
     }
     const number = /^(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?/.exec(sql.slice(i));
-    if (number) { tokens.push({ kind: 'number', value: number[0] }); i += number[0].length; continue; }
+    if (number) { tokens.push({ kind: 'number', value: number[0], at: i }); i += number[0].length; continue; }
     const word = /^[A-Za-z_][A-Za-z_0-9$]*/.exec(sql.slice(i));
-    if (word) { tokens.push({ kind: 'word', value: word[0] }); i += word[0].length; continue; }
+    if (word) { tokens.push({ kind: 'word', value: word[0], at: i }); i += word[0].length; continue; }
     const value = sql.startsWith('::', i) ? '::' : c;
-    tokens.push({ kind: 'symbol', value }); i += value.length;
+    tokens.push({ kind: 'symbol', value, at: i }); i += value.length;
   }
   return tokens;
 }
@@ -53,42 +56,100 @@ export function quotedSqlToken(sql, at, escaped = false) {
   return null;
 }
 
+/**
+ * A cursor over catalog tokens. `take` consumes the next token when it is
+ * the keyword or symbol named (case folded), never a quoted one.
+ * @param {{ kind: string, value: string, at?: number }[]} tokens
+ * @returns {{ tokens: { kind: string, value: string, at?: number }[], at: number, take: (value: string) => boolean }}
+ */
+function tokenCursor(tokens) {
+  const cursor = {
+    tokens,
+    at: 0,
+    /** @param {string} value */
+    take(value) {
+      const token = tokens[cursor.at];
+      if (token && token.kind !== 'string' && token.kind !== 'identifier'
+        && token.value.toUpperCase() === value) { cursor.at++; return true; }
+      return false;
+    },
+  };
+  return cursor;
+}
+
+/**
+ * The exact decimal a numeric literal spells, in one canonical form — its
+ * sign, its digits without leading or trailing zeros, and the power of ten
+ * of the last one — so `1e-7` and `0.0000001` are one value and
+ * `0.30000000000000004` and `0.300000000000000044` are two. `null` for text
+ * that spells no number.
+ * @param {string} text
+ * @returns {string | null}
+ */
+export function decimalText(text) {
+  const match = /^([+-]?)([0-9]*)(?:\.([0-9]*))?(?:[eE]([+-]?[0-9]+))?$/.exec(text);
+  if (match === null || `${match[2]}${match[3] ?? ''}` === '') return null;
+  const fraction = match[3] ?? '';
+  const digits = `${match[2]}${fraction}`.replace(/^0+/, '');
+  if (digits === '') return '0';
+  const significant = digits.replace(/0+$/, '');
+  const exponent = Number(match[4] ?? 0) - fraction.length + (digits.length - significant.length);
+  return `${match[1] === '-' ? '-' : ''}${significant}e${exponent}`;
+}
+
+/** Whether a numeric literal spells exactly the number it reads as — the
+ * shortest decimal of one double — and nothing a double rounds.
+ * @param {string} text @param {number} value */
+const spellsExactly = (text, value) => Number.isFinite(value) && decimalText(text) === decimalText(String(value));
+
+/**
+ * One scalar literal at the cursor: a number (signed), a string, and where
+ * `booleans` says so `true`/`false`, each possibly parenthesised and cast;
+ * a cast is read by the engine's `nativeCast`, and none is read without one.
+ * Where `exact` is given, a number — written as one, or a text a cast reads as
+ * one — must pass it with its text.
+ * @param {ReturnType<typeof tokenCursor>} cursor @param {any} [nativeCast] @param {boolean} [booleans]
+ * @param {(text: string, value: number) => boolean} [exact]
+ * @returns {any} the value, or `undefined`
+ */
+function scalarAt(cursor, nativeCast, booleans = true, exact = undefined) {
+  const cast = (/** @type {any} */ value) => {
+    if (!cursor.take('::')) return value;
+    const read = nativeCast?.(value, cursor.tokens[cursor.at++], cursor.take);
+    return exact !== undefined && typeof value === 'string' && typeof read === 'number' && !exact(value, read) ? undefined : read;
+  };
+  if (cursor.take('(')) {
+    const value = scalarAt(cursor, nativeCast, booleans, exact);
+    return value === undefined || !cursor.take(')') ? undefined : cast(value);
+  }
+  const negative = cursor.take('-');
+  const token = cursor.tokens[cursor.at++];
+  if (!token) return undefined;
+  let value;
+  if (token.kind === 'number') {
+    const text = `${negative ? '-' : ''}${token.value}`;
+    value = Number(text);
+    if (exact !== undefined && !exact(text, value)) return undefined;
+  }
+  else if (negative) return undefined;
+  else if (token.kind === 'string') value = token.value;
+  else if (booleans && token.kind === 'word' && /^(true|false)$/i.test(token.value)) value = token.value.toLowerCase() === 'true';
+  else return undefined;
+  if (typeof value === 'number' && !Number.isFinite(value)) return undefined;
+  return cast(value);
+}
+
 /** @param {any[]} tokens @param {any} [nativeCast] @returns {{ column: string, values: any[] } | null} */
 function enumOf(tokens, nativeCast) {
-  let at = 0;
-  const take = (value) => {
-    const token = tokens[at];
-    if (token && token.kind !== 'string' && token.kind !== 'identifier'
-      && token.value.toUpperCase() === value) { at++; return true; }
-    return false;
-  };
-  const scalar = () => {
-    if (take('(')) {
-      const value = scalar();
-      return value === undefined || !take(')') ? undefined : cast(value);
-    }
-    const negative = take('-');
-    const token = tokens[at++];
-    if (!token) return undefined;
-    let value;
-    if (token.kind === 'number') value = Number(`${negative ? '-' : ''}${token.value}`);
-    else if (negative) return undefined;
-    else if (token.kind === 'string') value = token.value;
-    else if (token.kind === 'word' && /^(true|false)$/i.test(token.value)) value = token.value.toLowerCase() === 'true';
-    else return undefined;
-    if (typeof value === 'number' && !Number.isFinite(value)) return undefined;
-    return cast(value);
-  };
-  const cast = (value) => {
-    if (!take('::')) return value;
-    return nativeCast?.(value, tokens[at++], take);
-  };
+  const cursor = tokenCursor(tokens);
+  const take = cursor.take;
+  const scalar = () => scalarAt(cursor, nativeCast);
   const expression = () => {
     if (take('(')) {
       const result = expression();
       return result === null || !take(')') ? null : result;
     }
-    const column = tokens[at++];
+    const column = tokens[cursor.at++];
     if (!column || !['identifier', 'word'].includes(column.kind)) return null;
     const any = take('=');
     // A singleton IN list is normalized to scalar equality by PostgreSQL.
@@ -107,7 +168,7 @@ function enumOf(tokens, nativeCast) {
     return { column: column.value, values };
   };
   const result = expression();
-  return at === tokens.length ? result : null;
+  return cursor.at === tokens.length ? result : null;
 }
 
 /** SQLite retains the CREATE text, including inline and table CHECKs.
@@ -159,3 +220,216 @@ function postgresCast(value, type, take) {
     && (name === 'numeric' || integer && Number.isSafeInteger(value) || name === 'double' && take('PRECISION'))) return value;
   return undefined;
 }
+
+/**
+ * How one engine spells an index condition it hands back: `truth` reads a
+ * truth constant (or answers `undefined`), `cast` reads a literal's cast,
+ * `nativeToken` reads a token of the engine's own, `bare` admits an unquoted
+ * column name, `any` the `= ANY (ARRAY[...])` form of a list.
+ * @typedef {{ truth: (token: { kind: string, value: string }) => boolean | undefined, cast?: any,
+ *   nativeToken?: (sql: string, at: number) => any, bare?: boolean, any?: boolean }} PredicateSpelling
+ */
+
+/** The comparison each operator spells. */
+const COMPARISONS = /* @__PURE__ */ Object.freeze(/** @type {Record<string, string>} */ ({ '=': '$eq', '<>': '$ne', '!=': '$ne', '<': '$lt', '<=': '$le', '>': '$gt', '>=': '$ge' }));
+
+/** How deep a condition the reader follows: a deeper one is refused where it
+ * is planned, and a stored one this deep reads as a condition that differs. */
+const READ_DEPTH = 256;
+
+/**
+ * Read an index condition back into the query grammar, from the text the
+ * predicate rendering wrote or the engine's stored form of it. The reading is
+ * exact: it covers the rendering's one spelling per meaning and the server's
+ * cosmetic rewrites of it, nothing else. A nested `$and` (`$or`) joins the one
+ * it sits in and a one-item list is an equality (the server flattens and
+ * rewrites both); a `COALESCE(…, false)` must wrap exactly the plain leaves a
+ * `NOT` encloses, as the rendering writes them (`NOT x` and `NOT COALESCE(x,
+ * false)` differ where `x` is NULL); a number must spell exactly the double it
+ * reads as; a boolean column's stored 1 or 0 is `true` or `false`, and a text
+ * starting with `$` is escaped. So two readings are equal exactly when the two
+ * conditions hold for the same rows, and rendering a reading reproduces the
+ * rendering it came from — save one rare form: two members of different types
+ * compared render as their presence test, which an enclosing `$and` joins.
+ * @param {string} sql
+ * @param {PredicateSpelling} spelling - the engine's
+ * @param {(identifier: string) => ({ path: string, codec: string } | null)} member -
+ *   the member path and codec a column of the table holds, or `null`
+ * @returns {any} the condition, or `null` for anything the spelling does not
+ *   cover, which a reader takes as a condition that differs
+ */
+export function readPredicate(sql, spelling, member) {
+  const tokens = sqlTokens(String(sql), spelling.nativeToken);
+  if (tokens.length === 0) return null;
+  const cursor = tokenCursor(tokens);
+  const take = cursor.take;
+  /** A literal as the grammar writes it beside `other`. @param {any} value @param {any} other */
+  const literal = (value, other) => {
+    if (other?.codec === 'boolean') return value === 1 ? true : value === 0 ? false : undefined;
+    return typeof value === 'string' && value.startsWith('$') ? `$${value}` : value;
+  };
+  /** A column or a literal. */
+  const operand = () => {
+    const token = tokens[cursor.at];
+    if (token === undefined) return undefined;
+    if (token.kind === 'identifier' || (token.kind === 'word' && spelling.bare === true)) {
+      const read = member(token.value);
+      if (read !== null) { cursor.at++; return { column: true, ...read }; }
+      if (token.kind === 'identifier') return undefined;
+    }
+    const value = scalarAt(cursor, spelling.cast, false, spellsExactly);
+    return value === undefined ? undefined : { value };
+  };
+  /** The comparison operator at the cursor, its two symbols adjacent. */
+  const operator = () => {
+    const token = tokens[cursor.at], next = tokens[cursor.at + 1];
+    if (token?.kind !== 'symbol') return undefined;
+    const pair = next?.kind === 'symbol' && next.at === /** @type {number} */ (token.at) + 1 ? `${token.value}${next.value}` : undefined;
+    if (pair !== undefined && Object.hasOwn(COMPARISONS, pair)) { cursor.at += 2; return COMPARISONS[pair]; }
+    if (!Object.hasOwn(COMPARISONS, token.value)) return undefined;
+    cursor.at++;
+    return COMPARISONS[token.value];
+  };
+  /** The items of a list up to `close`, as membership of the column. @param {any} column @param {string} close */
+  const membership = (column, close) => {
+    if (!column.column) return undefined;
+    const items = [];
+    do {
+      const value = scalarAt(cursor, spelling.cast, false, spellsExactly);
+      const item = value === undefined ? undefined : literal(value, column);
+      if (item === undefined) return undefined;
+      items.push(item);
+    } while (take(','));
+    if (!take(close)) return undefined;
+    return { $eq: [column.path, items.length === 1 ? items[0] : { $seq: items }] };
+  };
+  const comparison = () => {
+    const left = operand();
+    if (left === undefined) return undefined;
+    if (take('IS')) return take('NOT') && take('NULL') && left.column ? { $exists: left.path } : undefined;
+    if (take('IN')) return take('(') ? membership(left, ')') : undefined;
+    const key = operator();
+    if (key === undefined) return undefined;
+    if (key === '$eq' && spelling.any === true && take('ANY')) {
+      if (!(take('(') && take('ARRAY') && take('['))) return undefined;
+      const list = membership(left, ']');
+      return list !== undefined && take(')') ? list : undefined;
+    }
+    const right = operand();
+    if (right === undefined) return undefined;
+    const sides = [left.column ? left.path : literal(left.value, right), right.column ? right.path : literal(right.value, left)];
+    return sides.includes(undefined) ? undefined : { [key]: sides };
+  };
+  /** A comparison, possibly parenthesised. @returns {any} */
+  const leaf = () => {
+    const start = cursor.at;
+    if (take('(')) {
+      const inner = leaf();
+      if (inner !== undefined && take(')')) return inner;
+      cursor.at = start;
+    }
+    return comparison();
+  };
+  /** Whether a reading is a presence test, which is never NULL and never coalesced. @param {any} read */
+  const presence = (read) => Object.hasOwn(read, '$exists');
+  /** @param {boolean} negated whether a `NOT` encloses it @param {number} depth @returns {any} */
+  const primary = (negated, depth) => {
+    if (depth > READ_DEPTH) return undefined;
+    const start = cursor.at;
+    if (take('(')) {
+      const inner = disjunction(negated, depth + 1);
+      if (inner !== undefined && take(')')) return inner;
+      cursor.at = start;
+    }
+    if (take('COALESCE')) {
+      if (!negated || !take('(')) return undefined;
+      const inner = leaf();
+      if (inner === undefined || presence(inner) || !take(',')) return undefined;
+      const fallback = tokens[cursor.at++];
+      return fallback !== undefined && spelling.truth(fallback) === false && take(')') ? inner : undefined;
+    }
+    const found = comparison();
+    if (found !== undefined) return negated && !presence(found) ? undefined : found;
+    cursor.at = start;
+    const truth = tokens[start] === undefined ? undefined : spelling.truth(tokens[start]);
+    if (truth !== undefined) cursor.at++;
+    return truth;
+  };
+  /** @param {boolean} negated @param {number} depth @returns {any} */
+  const negation = (negated, depth) => {
+    if (!take('NOT')) return primary(negated, depth);
+    const inner = depth > READ_DEPTH ? undefined : negation(true, depth + 1);
+    return inner === undefined ? undefined : { $not: inner };
+  };
+  /** @param {'$and' | '$or'} key @param {string} word @param {() => any} next @returns {any} */
+  const joined = (key, word, next) => {
+    const first = next();
+    if (first === undefined) return undefined;
+    const operands = [first];
+    while (take(word)) {
+      const operand = next();
+      if (operand === undefined) return undefined;
+      operands.push(operand);
+    }
+    return operands.length === 1 ? first : { [key]: operands.flatMap((operand) =>
+      (operand !== null && typeof operand === 'object' && Object.hasOwn(operand, key) ? operand[key] : [operand])) };
+  };
+  /** @param {boolean} negated @param {number} depth @returns {any} */
+  const conjunction = (negated, depth) => joined('$and', 'AND', () => negation(negated, depth));
+  /** @param {boolean} negated @param {number} depth @returns {any} */
+  const disjunction = (negated, depth) => joined('$or', 'OR', () => conjunction(negated, depth));
+  const result = disjunction(false, 0);
+  return result !== undefined && cursor.at === tokens.length ? result : null;
+}
+
+/**
+ * The string tokens PostgreSQL writes back beyond the standard ones: an
+ * escape string (`E'…'`), as this package writes one too, and — in a session
+ * whose `standard_conforming_strings` is off — a plain string spelled the same
+ * way. A doubled backslash is the one escape either holds: the server writes
+ * no other, and anything else reads as text it did not write.
+ * @param {boolean} conforming - the session's `standard_conforming_strings`
+ * @returns {(sql: string, at: number) => any} a `sqlTokens` native token reader
+ */
+export function postgresStrings(conforming) {
+  return (sql, at) => {
+    const escape = (sql[at] === 'E' || sql[at] === 'e') && sql[at + 1] === "'" && !/[A-Za-z0-9_$]/.test(sql[at - 1] ?? '');
+    if (!escape && (conforming || sql[at] !== "'")) return undefined;
+    const quoted = quotedSqlToken(sql, escape ? at + 1 : at, true);
+    if (!quoted) return null;
+    let value = '';
+    for (let i = 0; i < quoted.value.length; i++) {
+      if (quoted.value[i] !== '\\') { value += quoted.value[i]; continue; }
+      if (quoted.value[i + 1] !== '\\') return null;
+      value += '\\'; i++;
+    }
+    return { kind: 'string', value, end: quoted.end };
+  };
+}
+
+/** PostgreSQL's spelling, for a session whose `standard_conforming_strings` is
+ * as given: the stored form `pg_get_expr` deparses (bare lower case names,
+ * casts, `= ANY (ARRAY[...])`, lower case truth values) and the text the
+ * PostgreSQL rendering writes (quoted names, `IN`, `TRUE`, escape strings).
+ * @param {boolean} conforming @returns {PredicateSpelling} */
+const postgresSpelling = (conforming) => ({
+  truth: (/** @type {{ kind: string, value: string }} */ token) => (token.kind === 'word' && /^(true|false)$/i.test(token.value) ? token.value.toLowerCase() === 'true' : undefined),
+  cast: postgresCast,
+  nativeToken: postgresStrings(conforming),
+  bare: true,
+  any: true,
+});
+
+/** PostgreSQL's spelling where `standard_conforming_strings` is on (the default). @type {PredicateSpelling} */
+export const POSTGRES_PREDICATE = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ postgresSpelling(true));
+
+/** PostgreSQL's spelling for a session whose `standard_conforming_strings` is
+ * off, where the server writes a backslash doubled in a plain string. @type {PredicateSpelling} */
+export const POSTGRES_PREDICATE_ESCAPED = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ postgresSpelling(false));
+
+/** SQLite's spelling: the text the SQLite rendering writes, which the engine
+ * keeps verbatim (quoted names, `IN`, the truth values 1 and 0).
+ * @type {PredicateSpelling} */
+export const SQLITE_PREDICATE = /* @__PURE__ */ Object.freeze({
+  truth: (token) => (token.kind === 'number' && (token.value === '1' || token.value === '0') ? token.value === '1' : undefined),
+});

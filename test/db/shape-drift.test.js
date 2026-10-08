@@ -22,8 +22,10 @@ import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
 import { DatabaseSync } from 'node:sqlite';
 
-import { openStore, comparableDeclaredSql } from '@jarenjs/db';
+import { openStore, comparableDeclaredSql, explainMapping, normalizeModel, planCollection, planEntity } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';
+import { postgresDialect } from '@jarenjs/db/postgres';
+import { verifyShape } from '../../packages/db/src/ddl.js';
 import { tempDbPath } from './helpers.js';
 
 const MODEL = {
@@ -197,5 +199,62 @@ describe('what is deliberately NOT drift', () => {
     assert.notStrictEqual(comparableDeclaredSql(withCheck), comparableDeclaredSql(swapped),
       'the CHECK body is compared, not reordered');
     assert.match(comparableDeclaredSql(withCheck), /CHECK\("a" IN\('x','y'\)\)/);
+  });
+});
+
+describe('PostgreSQL reads back what its catalog keeps instead of CREATE text', () => {
+  const SHIFT = { $model: '0.1', entities: { Shift: { schema: { type: 'object', properties: {
+    id: { type: 'string', 'x-entity': { key: true } }, employeeId: { type: 'string' }, day: { type: 'string' }, status: { type: 'string' } } },
+  indexes: [{ name: 'one_active', path: ['$.employeeId', '$.day'], unique: true, where: { $eq: ['$.status', { $seq: ['active', 'pending'] }] } }] } } };
+  const COLLECTION = { $model: '0.1', collections: { c: { schema: { type: 'object', properties: { a: { type: 'string' } } }, key: '/id',
+    indexes: [{ name: 'by_a', path: '$.a', unique: true }] } } };
+  const dialect = postgresDialect();
+  /**
+   * A connection whose catalog answers the plan's own shape, with one index
+   * condition and one generated expression as given.
+   * @param {any} plan @param {Record<string, string | null>} predicates @param {Record<string, string>} [expressions]
+   */
+  const catalog = (plan, predicates, expressions = {}) => ({
+    dialect,
+    prepare: (/** @type {string} */ sql) => ({
+      all: () => {
+        if (sql.includes('FROM pg_attribute a')) {
+          return plan.expected.columns.map((/** @type {any} */ column) => ({ name: column.name, type: column.type,
+            hidden: column.generated ? 1 : 0, default_value: expressions[column.name] ?? null }));
+        }
+        if (sql.includes('CASE WHEN i.indisunique')) {
+          return plan.expected.indexes.map((/** @type {any} */ index) => ({ name: index.name, uniq: index.unique ? 1 : 0, origin: 'c',
+            predicate: Object.hasOwn(predicates, index.name) ? predicates[index.name] : null }));
+        }
+        const index = plan.expected.indexes.find((/** @type {any} */ candidate) => sql.includes(`ci.relname = '${candidate.name}'`));
+        return index === undefined ? [] : index.columns.map((/** @type {string} */ name) => ({ name }));
+      },
+    }),
+  });
+  const mapping = explainMapping(SHIFT);
+  const entityPlan = planEntity('Shift', mapping.entities.Shift, mapping, dialect);
+  const collectionPlan = planCollection('c', normalizeModel(COLLECTION).get('c'), dialect);
+  /** @param {any} connection @param {any} plan */
+  const verdict = (connection, plan) => {
+    try { verifyShape(connection, plan, plan.table, '/x'); return 'clean'; }
+    catch (/** @type {any} */ error) { return `${error.code}`; }
+  };
+
+  it('an index condition: the deparsed planned one is clean; changed, missing, unreadable or added is JD0002', () => {
+    for (const [label, predicate, expected] of [
+      ['as planned', "(status = ANY (ARRAY['active'::text, 'pending'::text]))", 'clean'],
+      ['a changed list', "(status = 'active'::text)", 'JD0002'],
+      ['no condition', null, 'JD0002'],
+      ['a condition the reader does not read', "(lower(status) = 'active'::text)", 'JD0002'],
+    ]) assert.strictEqual(verdict(catalog(entityPlan, { Shift_one_active: predicate }), entityPlan), expected, String(label));
+    assert.strictEqual(verdict(catalog(collectionPlan, { c_by_a: "(gx_a <> 'x'::text)" }), collectionPlan), 'JD0002', 'a condition the model does not declare');
+  });
+
+  it("a generated column's expression: its member path read back, the other member's is JD0002", () => {
+    const path = (/** @type {string} */ member) => `((CASE WHEN (jsonb_typeof((doc #> '{${member}}'::text[])) = 'string'::text) `
+      + `THEN (doc #>> '{${member}}'::text[]) ELSE NULL::text END) COLLATE "C")`;
+    assert.strictEqual(verdict(catalog(collectionPlan, {}, { gx_a: path('a') }), collectionPlan), 'clean');
+    assert.strictEqual(verdict(catalog(collectionPlan, {}, { gx_a: path('b') }), collectionPlan), 'JD0002');
+    assert.strictEqual(verdict(catalog(collectionPlan, {}, { gx_a: `"left"(${path('a')}, 3)` }), collectionPlan), 'JD0002');
   });
 });

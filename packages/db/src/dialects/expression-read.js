@@ -48,11 +48,12 @@ function parseNode(text, spelling) {
   }
   // a CALL first: a member read and a call both start with an
   // identifier, and only the declared names are calls — trying the
-  // member first would swallow the call's own arguments
-  const match = /^([A-Za-z_][A-Za-z0-9_.]*)\s*\(/.exec(source);
-  const name = match === null ? null : spelling.nameOf(match[1]);
+  // member first would swallow the call's own arguments. A name that is
+  // also a keyword comes back quoted (`"left"(…)`), as an engine writes it
+  const match = /^(?:([A-Za-z_][A-Za-z0-9_.]*)|"((?:[^"]|"")+)")\s*\(/.exec(source);
+  const name = match === null ? null : spelling.nameOf(match[1] ?? match[2].replace(/""/g, '"'));
   if (match !== null && name !== null) {
-    source = source.slice(match[1].length).trimStart();
+    source = source.slice(match[0].length - 1);
     const inner = balanced(source);
     if (inner === null) return null;
     const args = [];

@@ -1,11 +1,11 @@
 //@ts-check
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { explainMapping, openStore, planInvariants, readSchema, sqliteDialect } from '@jarenjs/db';
+import { explainMapping, openStore, planInvariants, sqliteDialect } from '@jarenjs/db';
 import { verifyPhysical } from '../../packages/db/src/physical.js';
-import { postgresDialect, postgresDriver } from '@jarenjs/db/postgres';
+import { postgresDialect } from '@jarenjs/db/postgres';
 import { ruleModel, truthModel, RULE_TABLES, ruleLifecycle, ruleTruthTable, ruleGrid, familyModel, familyLifecycle, FAMILY_REFUSALS,
-  sqliteEngine, storeAgreement, TRUTH_POLICIES } from './invariant-oracle.js';
+  postgresEngine, sqliteEngine, storeAgreement, TRUTH_POLICIES } from './invariant-oracle.js';
 
 describe('PostgreSQL rule lowering', () => {
   it('plans a function and a row trigger per table and operation in the driver-owned schema, each program verified by its fields', () => {
@@ -131,46 +131,6 @@ describe('PostgreSQL rule lowering', () => {
 });
 
 const url = process.env.JAREN_PG_URL;
-let fixtures = 0;
-/** @returns {import('./invariant-oracle.js').RuleEngine} */
-function postgresEngine() {
-  return { name: 'postgres', async fixture(tables) {
-    const { default: pg } = await import('pg');
-    const schema = `jaren_rules_${process.pid}_${++fixtures}`;
-    const pool = new pg.Pool({ connectionString: url, max: 6 });
-    const client = new pg.Client({ connectionString: url });
-    await client.connect();
-    try { await client.query(`CREATE SCHEMA "${schema}"; SET search_path TO "${schema}"; ${tables.postgres}`); }
-    catch (error) { await client.end(); await pool.end(); throw error; }
-    const driver = postgresDriver(pool, { schema });
-    /** @type {any} */
-    let connection;
-    const open = async () => (connection ??= await driver.open());
-    return {
-      dialect: postgresDialect({ searchPath: schema }),
-      driver, target: { driver },
-      exec: async (sql) => { await client.query(sql); },
-      all: async (sql) => (await client.query(sql)).rows,
-      source: async () => (await readSchema(await open())).catalog,
-      connection: open,
-      // the reviewed target: what the steps leave behind, read inside a transaction that is rolled back
-      review: async (steps) => {
-        let target;
-        await assert.rejects((await open()).transaction(async (/** @type {any} */ tx) => {
-          for (const step of steps) await tx.exec(step.sql);
-          target = { dialect: 'postgres', schema, catalog: (await readSchema(tx)).catalog };
-          throw new Error('review only');
-        }), /review only/);
-        return target;
-      },
-      dispose: async () => {
-        try { await connection?.close(); await client.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`); }
-        finally { await client.end(); await pool.end(); }
-      },
-    };
-  } };
-}
-
 describe('PostgreSQL database invariants', { skip: !url && 'JAREN_PG_URL is not set' }, () => {
   it('fresh and upgraded rules refuse, audit and pass the same writes as SQLite, from every writer', async () => {
     const outcomes = [];

@@ -140,6 +140,11 @@ function normalizeCapabilities(declared) {
  *   limitClause: (limit: number, offset?: number) => string,
  *   jsonPathText: (segments: JsonPathSegment[]) => string | null,
  *   jsonExtract: (columnSql: string, pathText: string, kind?: string) => string,
+ *   rowPredicateFlavor?: any,
+ *   readBack?: { conditionReads: (planned: string, columns: any[]) => boolean,
+ *     condition: (stored: string | null, planned: string | undefined, columns: any[], conforming: boolean) => string | null,
+ *     expressionReads: (planned: string) => boolean,
+ *     expression: (stored: string, planned: string, conforming: boolean) => string | null },
  *   isCreateRace?: (error: any) => boolean,
  *   capture?: { check: (options: any) => void, beforeWrite: (connection: any) => any,
  *     afterLog?: (connection: any) => any },
@@ -310,13 +315,17 @@ export function createDialect(spec) {
       return `CREATE TABLE ${q(table)} (${columns.join(', ')})${spec.tableSuffix}`;
     },
     /**
+     * An index over columns, partial when it carries `where`: the condition
+     * as SQL over the table's own columns, which the row-predicate
+     * lowering renders with every literal inlined (an engine keeps no
+     * parameter in a schema object).
      * @param {{ name: string, table: string, columns: string[],
-     *   unique: boolean }} shape
+     *   unique: boolean, where?: string }} shape
      * @returns {string}
      */
-    createIndex({ name, table, columns, unique }) {
+    createIndex({ name, table, columns, unique, where }) {
       return `CREATE ${unique ? 'UNIQUE ' : ''}INDEX ${q(name)} `
-        + `ON ${q(table)} (${columns.map(q).join(', ')})`;
+        + `ON ${q(table)} (${columns.map(q).join(', ')})${where === undefined ? '' : ` WHERE ${where}`}`;
     },
     /**
      * Add one virtual generated column to an existing table (a new
@@ -617,6 +626,20 @@ export function createDialect(spec) {
     limitClause: spec.limitClause,
     jsonPathText: spec.jsonPathText,
     jsonExtract: spec.jsonExtract,
+    /**
+     * How the row-predicate lowering spells this engine's comparisons, truth
+     * values and text literals: what an index condition is rendered with.
+     */
+    rowPredicateFlavor: spec.rowPredicateFlavor,
+    /**
+     * What an engine that keeps no CREATE text reads back from its catalog in
+     * its place, compared exactly with the plan: an index's condition and a
+     * generated column's expression, each a difference to report or `null`;
+     * and, at planning, whether a planned one reads back at all — one that
+     * does not is refused there rather than met as drift at the next open.
+     * Undefined where the engine keeps the text, which the open compares.
+     */
+    readBack: spec.readBack,
     isCreateRace: spec.isCreateRace,
     capture: spec.capture,
     jobs: spec.jobs,

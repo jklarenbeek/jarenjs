@@ -75,7 +75,7 @@ FALLBACK or a coded refusal on the common path, never a skip:
 | Capability off | What the common path does instead |
 |---|---|
 | `pragmas` | no configuration statement is issued; an explicitly requested pragma is `JD0007`, a defaulted one is dropped, and the effective record reads `null` throughout |
-| `declaredSqlText` | the drift check is the structural one — columns and their types, indexes and their covered columns in order, foreign-key tuples — and an object the model never declared is no longer detectable |
+| `declaredSqlText` | the drift check is the structural one — columns and their types, indexes and their covered columns in order, foreign-key tuples — plus what the catalog reads back exactly in place of the CREATE text (the dialect's `readBack`): each index's condition and shape and each generated column's expression; an object the model never declared is no longer detectable |
 | `foreignKeysAlwaysOn` (on) | the open path neither sets nor reads back the referential-integrity switch |
 | `virtualTables` / `triggers` | a `physical: 'rtree'` column set maps back onto the B-tree over the four edge columns, and `explain().prefilters[].via` says so |
 | `untypedColumns` | a comparison against a member the schema does not type reads the member out of the document instead of the column: same answer, unindexed |
@@ -236,7 +236,7 @@ common fallback, never a skip.
 | `alterTableFull` | — | yes |
 | `virtualTables` / `triggers` | yes (the R\*Tree mapping) | — (`physical: 'rtree'` maps back onto the four edge columns) |
 | `pragmas` | yes (the closed set) | — (a server is configured by its operator) |
-| `declaredSqlText` | yes | — (the drift check is the structural one) |
+| `declaredSqlText` | yes | — (the structural check, and each index's condition and shape and each generated column's expression read back exactly) |
 | `foreignKeysAlwaysOn` | — (set and verified per connection) | yes |
 | `rowIdentity` | yes (`rowid`) | yes (the declared `rid` column) |
 | `savepointStartsTransaction` | yes | — (a top-level transaction is `BEGIN`/`COMMIT`) |
@@ -1386,18 +1386,29 @@ reason in its own error.
 
 An index condition (MODEL-FORMAT §2, §9.2) is that lowering's index rendering,
 every operand read as an absent member and every condition written in one
-spelling per meaning, so a condition read back renders as written; the dialect
-hands its flavor over as `rowPredicateFlavor`. `dialects/check-read.js` holds
-the one reader of a condition, `readPredicate(sql, spelling, member)`: one walk
-over `sqlTokens`, beside the CHECK enum recovery and sharing its literal reader,
-the engine injecting its spelling (`POSTGRES_PREDICATE` reads the server's
-deparse and the PostgreSQL rendering, `SQLITE_PREDICATE` the text SQLite keeps).
-`ddl.js` reaches it only through the dialect's `readIndexPredicate`, which only
-the PostgreSQL dialect sets — SQLite verifies by its CREATE text — so the reader
-never enters a bundle that carries only SQLite. Every planner lists the schema
-objects it names, the engine's own relations included, and
-`refuseNameCollisions` holds them to one namespace (ASCII case folded): each
-planner for its table, the store for the whole model.
+spelling per meaning, so a condition read back renders as written (one rare
+form aside: two members of different types compared, rendered as their
+presence test inside an `$and`, joins it); the dialect hands its flavor over as
+`rowPredicateFlavor`. `dialects/check-read.js` holds the one reader of a
+condition, `readPredicate(sql, spelling, member)`: one exact walk over
+`sqlTokens`, beside the CHECK enum recovery and sharing its literal reader, the
+engine injecting its spelling (`POSTGRES_PREDICATE` and, for a session without
+standard strings, `POSTGRES_PREDICATE_ESCAPED` read the server's deparse and
+the PostgreSQL rendering; `SQLITE_PREDICATE` the text SQLite keeps). A
+`COALESCE` must stand exactly where the rendering writes one and a number must
+spell the double it reads as, so two readings are equal exactly when the
+conditions hold for the same rows. `dialects/postgres-read-back.js`, imported
+only by the PostgreSQL dialect, is what the open reads back in place of CREATE
+text (`dialect.readBack`): the condition through that reader, and a generated
+column's expression through `expressionForm`, which reads the planned text and
+the server's deparse into one form — undoing literal types, `ELSE NULL`,
+parentheses, name quoting and the path array's quoting, nothing else — and
+compares them whole. The planner asks it first whether a planned condition or
+expression reads back, and refuses one that does not (`JD0004`). SQLite
+verifies by its CREATE text, so neither reader enters a bundle that carries
+only SQLite. Every planner lists the schema objects it names, the engine's own
+relations included, and `refuseNameCollisions` holds them to one namespace
+(ASCII case folded): each planner for its table, the store for the whole model.
 
 `dialects/sqlite-relational.js` owns the explicit SQLite expression and statement
 compiler; `dialects/sqlite-schema.js` reuses it for ordered tables, indexes and

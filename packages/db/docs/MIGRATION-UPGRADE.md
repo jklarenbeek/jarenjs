@@ -398,7 +398,9 @@ value the store did not honor now refuse by code, before any statement:
 - A model member outside its declaration's closed set
   ([MODEL-FORMAT §2](MODEL-FORMAT.md#2-the-model-document)) was ignored — a
   misspelt `unique` opened a store whose index was not unique, an entity
-  `indexes` array was dropped, a root `$schema` passed; `openStore`,
+  `indexes` array was dropped (it now declares entity-level indexes,
+  [MODEL-FORMAT §9.2](MODEL-FORMAT.md#92-the-x-entity-vocabulary-a-closed-set)),
+  a root `$schema` passed; `openStore`,
   `normalizeModel` and `normalizeEntities` now refuse it `JD0005` at the member,
   naming the nearest one. An index `unique`, an `x-entity` `key`, `unique`,
   `index` or `version`, and a relation's `many` that are not booleans read as
@@ -416,6 +418,39 @@ value the store did not honor now refuse by code, before any statement:
   `enforcement`. Declare it `store`, or give the entity an explicit layout.
 - A relation to an entity with a `physical` layout opened and failed at its
   first `load({ include })` with a raw `JD2005`; it is now `JD0005` at open.
+- Two schema objects a model planned under one name — an index of one
+  entity and one of another (`A_b` with a unique `c` and `A` with a unique
+  `b_c` both name `A_b_c`), two collections' indexes, a table and an index —
+  met at open, where `CREATE … IF NOT EXISTS` skipped the second: its index
+  went unenforced and the next open was `JD0002`. Every name a model plans is
+  now one namespace (MODEL-FORMAT §2), and a collision is `JD0004` at the
+  second object's member before any statement; rename one declaration.
+- The namespace compares names with ASCII case folded, as SQLite does: an
+  entity `A` and a collection `a` opened on SQLite as ONE table, and two names
+  that differ only in case opened on PostgreSQL as two objects. Both are now
+  `JD0004`; a database that holds such a pair keeps it until one declaration
+  is renamed and its table migrated.
+- An entity-level index name (`<Entity>_<name>`) longer than PostgreSQL's 63
+  bytes is `JD0004` at its `name`, as a collection index's and a `unique`
+  property's names already were, never a name the server truncates.
+- A collection index's `where` was ignored, which made a unique index
+  unconditional — it refused a cancelled row beside an active one. It is now
+  a partial index (MODEL-FORMAT §2); a `where` over a member the collection
+  does not index by its path, or whose type admits `null`, is `JD0004` at the
+  `where`. A database an earlier release created under such a model holds the
+  unconditional index and is `JD0002` at open: drop it and create it with
+  its condition, as `jaren-db shape` prints the planned statement (SQLite's
+  spelling).
+- PostgreSQL's open compared columns, index columns and foreign keys, and
+  opened a database whose index gained, lost or changed a condition, whose
+  index became `NULLS NOT DISTINCT`, descending or collated otherwise, or
+  whose generated column's expression changed outside the store. It now reads
+  each index's condition and shape and each generated expression back from
+  the catalog and compares them exactly, and such a database is `JD0002`
+  until the change is reverted. An entity
+  whose boolean member declares an `enum` could not open on PostgreSQL
+  (`smallint = boolean`); its CHECK now lists the stored `1`/`0` on both
+  engines.
 - A write under a numeric key column of a string that names no number
   (`'0x10'`, `'NaN'`) reached the database: SQLite refused it `JD2005`, and
   PostgreSQL stored `'0x10'` under 16, replacing that document. It is now

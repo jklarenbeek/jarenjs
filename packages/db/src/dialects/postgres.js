@@ -29,7 +29,8 @@
  * configuration vocabulary (`pragmas: false` — a PostgreSQL server is
  * configured by its operator, not by a store at open), no stored CREATE
  * text (`declaredSqlText: false` — the drift check is the structural
- * one), no virtual tables and no sync triggers (so a `physical: 'rtree'`
+ * one, with each index condition and generated column's expression read
+ * back from the catalog), no virtual tables and no sync triggers (so a `physical: 'rtree'`
  * column set maps back onto the B-tree over its four edge columns; the
  * database rules of MODEL-FORMAT §13 are trigger functions of their own,
  * verified through the catalog), and
@@ -43,7 +44,7 @@
 import { createDialect } from '../dialect.js';
 import { postgresPhysicalRead, postgresPhysicalCompare, postgresPhysicalValueType, postgresPhysicalDifferent, postgresPhysicalTypeMatches, qualifyPostgresPhysicalColumn } from './postgres-physical.js';
 import { postgresCatalog } from './postgres-catalog.js';
-import { postgresInvariantTriggers } from './postgres-invariants.js';
+import { POSTGRES, postgresInvariantTriggers } from './postgres-invariants.js';
 import { postgresRelational } from './postgres-relational.js';
 import { postgresMigration } from './postgres-migration.js';
 import { postgresCapture } from './postgres-capture.js';
@@ -52,6 +53,7 @@ import { postgresReplication } from './postgres-replication.js';
 import { POSTGRES_LOCK_CLASSES, OWNER_LOCK, transactionLock } from './postgres-locks.js';
 import { readExpression } from './expression-read.js';
 import { postgresChecks } from './check-read.js';
+import { postgresReadBack } from './postgres-read-back.js';
 import { modelPath } from '../model-path.js';
 
 /** PostgreSQL truncates an identifier past this many BYTES, silently
@@ -160,6 +162,10 @@ function typeFor(schemaType, hint) {
     default: return hint === 'key' ? 'text COLLATE "C"' : 'jsonb';
   }
 }
+
+/** How the reading session spells a backslash in a plain string, beside a
+ * deparse that spells one: `on` reads it as itself, `off` doubles it. */
+const CONFORMING = "(SELECT s.setting FROM pg_settings AS s WHERE s.name = 'standard_conforming_strings')";
 
 /** The catalog's own spelling of a type this dialect declares, so the
  * drift check compares like with like: a collation, an allocation
@@ -337,6 +343,8 @@ function memberPathOf(expression) {
     if (call[1] === 'jsonb_typeof' || SQL_WORDS.has(call[1].toUpperCase())) continue;
     return null;
   }
+  // a function whose name is a keyword comes back quoted: `"left"(…)`
+  if (/"(?:[^"]|"")+"\s*\(/.test(text)) return null;
   const match = /#>>?\s*'\{((?:[^']|'')*)\}'/.exec(text);
   if (match === null) return null;
   const elements = parseArrayLiteral(match[1].replace(/''/g, "'"));
@@ -423,6 +431,11 @@ export function postgresDialect(options = undefined) {
     physicalTypeMatches: postgresPhysicalTypeMatches,
     qualifyPhysicalColumn: qualifyPostgresPhysicalColumn,
     invariantTriggers: (mapping, all, dialect) => postgresInvariantTriggers(mapping, all, dialect, IDENTIFIER_BYTES),
+    rowPredicateFlavor: POSTGRES,
+    // the server keeps no CREATE text, so the open reads each index condition
+    // and generated column's expression back from its deparse and compares it
+    // with the planned one exactly
+    readBack: postgresReadBack,
     capabilities: {
       jsonb: true,
       generatedColumns: true,
@@ -637,7 +650,7 @@ export function postgresDialect(options = undefined) {
         + 'pg_get_expr(d.adbin, d.adrelid) AS default_value, n.nspname AS schema, '
         + "CASE a.attidentity WHEN 'a' THEN 'always' WHEN 'd' THEN 'by-default' ELSE '' END AS identity, "
         + 'a.attgenerated AS generated_kind, ty.typtype AS type_kind, tn.nspname AS type_schema, ty.typname AS type_name, '
-        + 'co.collname AS collation '
+        + `co.collname AS collation, ${CONFORMING} AS conforming `
         + 'FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid '
         + 'JOIN pg_type ty ON ty.oid = a.atttypid JOIN pg_namespace tn ON tn.oid = ty.typnamespace '
         + 'LEFT JOIN pg_collation co ON co.oid = a.attcollation '
@@ -647,12 +660,22 @@ export function postgresDialect(options = undefined) {
         + 'AND a.attnum > 0 AND NOT a.attisdropped ORDER BY a.attnum',
       // `origin` mirrors the vocabulary the shape check filters on:
       // only an index the model DECLARED is compared, and the primary
-      // key's is the engine's own
+      // key's is the engine's own; `predicate` is a partial index's
+      // condition as the server deparses it
       indexes: (table) =>
         'SELECT ci.relname AS name, CASE WHEN i.indisunique THEN 1 ELSE 0 END AS uniq, '
         + "CASE WHEN i.indisprimary THEN 'pk' ELSE 'c' END AS origin, "
-        + 'CASE WHEN i.indpred IS NULL THEN 0 ELSE 1 END AS partial '
-        + 'FROM pg_index i JOIN pg_class ci ON ci.oid = i.indexrelid '
+        + 'CASE WHEN i.indpred IS NULL THEN 0 ELSE 1 END AS partial, '
+        + 'pg_get_expr(i.indpred, i.indrelid) AS predicate, '
+        + `${CONFORMING} AS conforming, `
+        // a plain index: ascending B-tree keys under their columns' own
+        // collations, nulls distinct, checked at once — what the plan creates
+        + "CASE WHEN am.amname = 'btree' AND NOT i.indnullsnotdistinct AND i.indimmediate "
+        + 'AND NOT EXISTS (SELECT 1 FROM unnest(i.indoption::int2[]) AS o(flags) WHERE o.flags <> 0) '
+        + 'AND NOT EXISTS (SELECT 1 FROM unnest(i.indcollation::oid[], i.indkey::int2[]) AS k(coll, attnum) '
+        + 'JOIN pg_attribute ka ON ka.attrelid = i.indrelid AND ka.attnum = k.attnum WHERE k.coll <> ka.attcollation) '
+        + 'THEN 1 ELSE 0 END AS plain '
+        + 'FROM pg_index i JOIN pg_class ci ON ci.oid = i.indexrelid JOIN pg_am am ON am.oid = ci.relam '
         + 'JOIN pg_class ct ON ct.oid = i.indrelid '
         + 'JOIN pg_namespace n ON n.oid = ct.relnamespace '
         + `WHERE ct.relname = ${stringLiteral(table)} AND ${inNamespace} `

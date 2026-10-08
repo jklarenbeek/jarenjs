@@ -9,6 +9,7 @@
 import assert from 'node:assert/strict';
 import { openStore, planInvariants, sqliteDialect, classifyDriverError, planPhysicalMigration, migrate, readSchema, physicalObjectKey } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';
+import { postgresDialect, postgresDriver } from '@jarenjs/db/postgres';
 import { compileJsonQuery } from '@jarenjs/json/query';
 
 /** @param {string} name @param {string} [codec] @param {string} [nul] */
@@ -66,6 +67,48 @@ export function sqliteEngine() {
       source: async () => (await readSchema(connection)).objects,
       connection: async () => connection,
       dispose: async () => { if (open) connection.close(); },
+    };
+  } };
+}
+
+const url = process.env.JAREN_PG_URL;
+let fixtures = 0;
+/** The PostgreSQL engine: a schema of its own on the server `JAREN_PG_URL` names, dropped by `dispose`.
+ * @returns {RuleEngine} */
+export function postgresEngine() {
+  return { name: 'postgres', async fixture(tables) {
+    const { default: pg } = await import('pg');
+    const schema = `jaren_rules_${process.pid}_${++fixtures}`;
+    const pool = new pg.Pool({ connectionString: url, max: 6 });
+    const client = new pg.Client({ connectionString: url });
+    await client.connect();
+    try { await client.query(`CREATE SCHEMA "${schema}"; SET search_path TO "${schema}"; ${tables.postgres}`); }
+    catch (error) { await client.end(); await pool.end(); throw error; }
+    const driver = postgresDriver(pool, { schema });
+    /** @type {any} */
+    let connection;
+    const open = async () => (connection ??= await driver.open());
+    return {
+      dialect: postgresDialect({ searchPath: schema }),
+      driver, target: { driver },
+      exec: async (sql) => { await client.query(sql); },
+      all: async (sql) => (await client.query(sql)).rows,
+      source: async () => (await readSchema(await open())).catalog,
+      connection: open,
+      // the reviewed target: what the steps leave behind, read inside a transaction that is rolled back
+      review: async (steps) => {
+        let target;
+        await assert.rejects((await open()).transaction(async (/** @type {any} */ tx) => {
+          for (const step of steps) await tx.exec(step.sql);
+          target = { dialect: 'postgres', schema, catalog: (await readSchema(tx)).catalog };
+          throw new Error('review only');
+        }), /review only/);
+        return target;
+      },
+      dispose: async () => {
+        try { await connection?.close(); await client.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`); }
+        finally { await client.end(); await pool.end(); }
+      },
     };
   } };
 }
@@ -628,4 +671,95 @@ export async function storeAgreement(engine, enforcement, storeOptions = {}) {
     finally { await store.close(); }
   }
   finally { await fixture.dispose(); }
+}
+
+/** The motivating entity index: one active or pending shift per employee and day. */
+export const SHIFT_SCHEMA = { type: 'object', required: ['id', 'employeeId', 'day'], properties: {
+  id: { type: 'string', 'x-entity': { key: true } }, employeeId: { type: 'string' }, day: { type: 'string' }, status: { type: 'string' } } };
+export const ONE_ACTIVE = { name: 'one_active', path: ['$.employeeId', '$.day'], unique: true,
+  where: { $eq: ['$.status', { $seq: ['active', 'pending'] }] } };
+/** A model whose `Shift` declares the given indexes. @param {any[]} [indexes] @param {any} [schema] */
+export const shiftModel = (indexes = [ONE_ACTIVE], schema = SHIFT_SCHEMA) => ({ $model: '0.1', entities: { Shift: { schema, indexes } } });
+/** Active, a second active of one employee-day, cancelled, status-less, pending. */
+export const SHIFT_ROWS = [
+  { id: 's1', employeeId: 'e1', day: 'd1', status: 'active' },
+  { id: 's2', employeeId: 'e1', day: 'd1', status: 'active' },
+  { id: 's3', employeeId: 'e1', day: 'd1', status: 'cancelled' },
+  { id: 's4', employeeId: 'e1', day: 'd1' },
+  { id: 's5', employeeId: 'e1', day: 'd1', status: 'pending' },
+];
+export const SHIFT_VERDICTS = ['ok', 'JD2005/constraint', 'ok', 'ok', 'JD2005/constraint'];
+
+/** Each create's verdict, in order: `ok`, or the refusal's `<code>/<class>`. @param {any} entity @param {any[]} rows */
+export async function createVerdicts(entity, rows) {
+  const out = [];
+  for (const row of rows) {
+    try { await entity.create(row); out.push('ok'); }
+    catch (error) { out.push(`${/** @type {any} */ (error).code}/${/** @type {any} */ (error).class}`); }
+  }
+  return out;
+}
+
+/** The refusal an open meets, or `null` when the store opens (and is closed again).
+ * @param {any} model @param {any} options @returns {Promise<any>} */
+export async function openRefusal(model, options) {
+  return Promise.resolve().then(() => openStore(model, options))
+    .then(async (/** @type {any} */ store) => { await store.close(); return null; }, (/** @type {any} */ error) => error);
+}
+
+/** The conditions the uniqueness oracle declares, one entity each: membership, a
+ * negated one, a single-item list, presence, code-point order, booleans, numbers. */
+export const UNIQUE_WHERES = [
+  { $eq: ['$.status', { $seq: ['active', 'pending'] }] }, { $not: { $eq: ['$.status', { $seq: ['active', 'pending'] }] } },
+  { $eq: ['$.status', { $seq: ['active'] }] }, { $ne: ['$.status', 'cancelled'] }, { $exists: '$.status' }, { $not: { $exists: '$.status' } },
+  { $gt: ['$.status', 'B'] }, { $eq: ['$.flag', true] }, { $not: { $eq: ['$.flag', false] } }, { $ge: ['$.n', 2] },
+  { $or: [{ $lt: ['$.n', 0] }, { $eq: ['$.status', 'active'] }] }, { $and: [{ $exists: '$.n' }, { $not: { $gt: ['$.n', 1.5] } }] },
+  { $and: [{ $and: [{ $exists: '$.status' }, { $ne: ['$.status', 'b'] }] }, { $or: [{ $eq: ['$.flag', true] }, { $or: [{ $le: ['$.n', -1] }, { $eq: ['$.status', 'Active'] }] }] }] },
+];
+const UNIQUE_SCHEMA = { type: 'object', required: ['id', 'employeeId', 'day'], properties: {
+  id: { type: 'string', 'x-entity': { key: true } }, employeeId: { type: 'string' }, day: { type: 'string' },
+  status: { type: ['string', 'null'] }, flag: { type: ['boolean', 'null'] }, n: { type: 'number' } } };
+/** One entity per condition, each with a unique index over the employee-day where the condition holds. */
+export const uniquenessModel = { $model: '0.1', entities: Object.fromEntries(UNIQUE_WHERES.map((where, i) => [`U${i}`,
+  { schema: UNIQUE_SCHEMA, indexes: [{ name: 'one', path: ['$.employeeId', '$.day'], unique: true, where }] }])) };
+// a written null reads back as a missing member: the engine judges the record as stored
+const UNIQUE_VARIANTS = [{ status: 'active' }, { status: 'pending' }, { status: 'cancelled' }, { status: 'Active' }, {},
+  { status: 'active', flag: true }, { flag: false }, { flag: true, n: 2 }, { n: -1 }, { n: 1.5 }, { n: 3, status: 'B' }, { status: 'b', n: 0 },
+  { status: null }, { status: null, flag: null, n: 2 }];
+/** Every variant twice on one employee-day, then once on another. */
+export const UNIQUE_ROWS = [...UNIQUE_VARIANTS, ...UNIQUE_VARIANTS, ...UNIQUE_VARIANTS.map((variant) => ({ ...variant, day: 'd2' }))]
+  .map((variant, i) => ({ id: `r${i}`, employeeId: 'e1', day: 'd1', ...variant }));
+
+/** A written row as the store reads it back: a null member is a missing one. @param {Record<string, any>} row */
+const asStored = (row) => Object.fromEntries(Object.entries(row).filter(([, value]) => value !== null));
+
+/**
+ * The uniqueness oracle: for each condition, the verdict of every create in
+ * order as the query engine decides it over the record as stored — a row is
+ * refused exactly when an earlier stored row of its employee-day also
+ * satisfies the condition — beside the verdicts the store met, and every
+ * accepted row read back beside the record the engine judged.
+ * @param {any} store - a store opened over `uniquenessModel`
+ * @returns {Promise<{ where: any, expected: string[], actual: string[], judged: any[], stored: any[] }[]>}
+ */
+export async function uniquenessAgreement(store) {
+  const out = [];
+  for (const [i, where] of UNIQUE_WHERES.entries()) {
+    const holds = compileJsonQuery(where);
+    /** @type {Set<string>} */
+    const taken = new Set();
+    const expected = UNIQUE_ROWS.map((row) => {
+      if (holds(asStored(row)) !== true) return 'ok';
+      const tuple = `${row.employeeId}\u0000${row.day}`;
+      if (taken.has(tuple)) return 'JD2005/constraint';
+      taken.add(tuple);
+      return 'ok';
+    });
+    const entity = store.entity(`U${i}`);
+    const actual = await createVerdicts(entity, UNIQUE_ROWS);
+    const accepted = UNIQUE_ROWS.filter((_, at) => actual[at] === 'ok');
+    out.push({ where, expected, actual, judged: accepted.map(asStored),
+      stored: await Promise.all(accepted.map((row) => entity.get(row.id))) });
+  }
+  return out;
 }

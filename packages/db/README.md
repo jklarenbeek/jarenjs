@@ -888,7 +888,7 @@ oracle run on both. What differs is declared rather than discovered:
 | a `boolean` member | `INTEGER` 1/0 | `smallint` 1/0 |
 | an untyped indexed path | `ANY` — compares with anything | `jsonb` — the predicate reads the document instead |
 | configuration | the closed pragma set, read back at open | the operator's; `store.capabilities.pragmas` is all `null` |
-| drift detection | the stored `CREATE` text, exactly | the structural check: columns, indexes, foreign keys |
+| drift detection | the stored `CREATE` text, exactly | the structural check (columns, indexes, foreign keys), and each index condition and generated column's expression read back from the catalog |
 | managed change ledger | journal or native sessions, according to host | journal with durable bounded pages and optional notification hints |
 | leased jobs / transactional outbox | shared queue and checkpoints | shared queue and checkpoints; concurrent row-locked claims |
 | live queries | synchronous incremental/rerun; optional async resnapshot | optional bounded resnapshot over durable journal |

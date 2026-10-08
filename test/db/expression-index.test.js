@@ -235,6 +235,13 @@ describe('the column each dialect builds', () => {
     }
   });
 
+  it('PostgreSQL reads back a function whose name is a keyword, which the server quotes', () => {
+    // the deparse of `left(doc #>> '{a}', 3)`: the open reads it back on every reopen
+    assert.deepStrictEqual(postgresDialect().expressionOf('"left"((doc #>> \'{a}\'::text[]), 3)', { left: 'prefix' }),
+      { call: 'prefix', args: [{ member: '$.a' }, { value: 3 }] });
+    assert.strictEqual(postgresDialect().expressionOf('"left"((doc #>> \'{a}\'::text[]), 3)', { right: 'prefix' }), null);
+  });
+
   it('one column serves every index that declares the same expression', () => {
     const shared = {
       $model: '0.1',

@@ -123,6 +123,10 @@
           "description": "Whether the index enforces uniqueness. Defaults to false.",
           "type": "boolean"
         },
+        "where": {
+          "description": "A partial index: a bounded condition in the query grammar, and the index holds only the rows it is true for, so a unique index refuses a second row only where both satisfy it. Operands are top-level members ($.<member>) the index may read and scalar literals: $eq, $ne, $lt, $le, $gt, $ge, $eq against a $seq list of literals, $exists, $and, $or, $not. A null literal, a $seq item of a type the member does not hold, arithmetic, any other member, a condition nested deeper than 64 levels and one that lowers to a constant as written are refused at open (JD0004). A collection condition reads members the collection already indexes by their path, each of one scalar type that excludes null (a JSON null and a missing member are one SQL NULL in a generated column); a derived index takes none. It assumes conforming documents: without a validation hook a null or mistyped member reads as a missing one.",
+          "type": "object"
+        },
         "derive": {
           "description": "Derive columns from the selected member instead of indexing it: 'geohash' (one TEXT cell column, precision required), 'bbox' (four REAL columns — west, south, east, north), or 'vector' (one packed BLOB column holding the l2-normalized Float32 form of an array of numbers, dims required; stored on every driver, with no B-tree over it — a fetch-and-rank plan reads it whole). A derived index is never unique.",
           "enum": [
@@ -157,11 +161,18 @@
       "additionalProperties": false
     },
     "entity": {
-      "description": "One entity: an object schema whose top-level properties map to columns per the hybrid rule (scalars become typed columns, nested shapes stay JSONB); keys, indexes, defaults and relations are declared with x-entity inside the schema.",
+      "description": "One entity: an object schema whose top-level properties map to columns per the hybrid rule (scalars become typed columns, nested shapes stay JSONB); keys, one-column indexes, defaults and relations are declared with x-entity inside the schema, and composite, unique or partial indexes with indexes.",
       "type": "object",
       "properties": {
         "schema": {
           "type": "object"
+        },
+        "indexes": {
+          "description": "Entity-level indexes (MODEL-FORMAT §9.2): composite, unique or partial. The x-entity unique and index flags stay the one-column shorthand.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/entityIndex"
+          }
         },
         "x-rename": {
           "type": "string",
@@ -496,6 +507,47 @@
       },
       "required": [
         "schema"
+      ],
+      "additionalProperties": false
+    },
+    "entityIndex": {
+      "description": "One entity-level index over column-mapped top-level members: a mapped scalar, a foreign key's via column or an epoch column. Composite in declared order, unique or not, partial with a where. Its physical name is <Entity>_<name>, and every name a model plans shares one namespace compared with ASCII case folded (a collision is JD0004). A document member, a nested path, derive, precision, dims, physical and an expression are refused (JD0004): an entity table has no generated column.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "The index name, unique within its entity.",
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+        },
+        "path": {
+          "description": "A top-level member ($.employeeId), or a non-empty array of them for a composite index.",
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^\\$\\.[A-Za-z_][A-Za-z0-9_]*$"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^\\$\\.[A-Za-z_][A-Za-z0-9_]*$"
+              },
+              "minItems": 1
+            }
+          ]
+        },
+        "unique": {
+          "description": "Whether the index enforces uniqueness. Defaults to false.",
+          "type": "boolean"
+        },
+        "where": {
+          "description": "A partial index: a bounded condition in the query grammar, and the index holds only the rows it is true for, so a unique index refuses a second row only where both satisfy it. Operands are top-level members ($.<member>) the index may read and scalar literals: $eq, $ne, $lt, $le, $gt, $ge, $eq against a $seq list of literals, $exists, $and, $or, $not. A null literal, a $seq item of a type the member does not hold, arithmetic, any other member, a condition nested deeper than 64 levels and one that lowers to a constant as written are refused at open (JD0004). An entity condition reads column-mapped members other than epoch columns; a member absent from a row is never equal, unequal or ordered.",
+          "type": "object"
+        }
+      },
+      "required": [
+        "name",
+        "path"
       ],
       "additionalProperties": false
     },

@@ -20,6 +20,8 @@ import { DbCompileError } from './errors.js';
 import { chain } from './driver.js';
 import { BBOX_COMPONENTS, BBOX_INDEX_ORDER, derivedMappingFor } from './derive.js';
 import { expressionSql, expressionStem, expressionFunctions } from './expression.js';
+import { foldIdentifier } from './invariants.js';
+import { rowPaths, rowPredicate, storedBoolean } from './dialects/row-predicate.js';
 import { planTable } from './dialects/sqlite-schema.js';
 import { comparableDeclaredSql } from './schema-sql.js';
 export { normalizeDeclaredSql, comparableDeclaredSql } from './schema-sql.js';
@@ -57,33 +59,102 @@ function refuseLongName(dialect, name, what, docPath) {
 }
 
 /**
- * A refusal (`JD0004`) of an index the plan would name as the engine names
- * one of the table's own objects (`dialect.ownRelationNames`: PostgreSQL's
- * primary-key index `<table>_pkey` and a serial column's sequence
- * `<table>_<column>_seq`, the identity column's included). Indexes and those
- * objects share one namespace and the table is created first, so the open's
- * `CREATE INDEX IF NOT EXISTS` skipped the planned index: a unique member
- * went unenforced, and the next open refused the table (`JD0002`). A foreign
- * key or a check constraint is no relation: its name (`<table>_<column>_fkey`,
- * `<table>_<column>_check`) takes none from an index. The names are the
- * engine's as it gives them unclipped — a clipped one needs a table name
- * within a few bytes of the identifier bound.
+ * The relations an engine creates for a table unasked (`dialect.ownRelationNames`:
+ * PostgreSQL's primary-key index `<table>_pkey` and a serial column's sequence
+ * `<table>_<column>_seq`, the identity column's included), as schema objects of
+ * the plan's namespace. A foreign key or a check constraint is no relation: its
+ * name (`<table>_<column>_fkey`, `<table>_<column>_check`) takes none from an
+ * index. The names are the engine's as it gives them unclipped — a clipped one
+ * needs a table name within a few bytes of the identifier bound.
  * @param {any} dialect
  * @param {string} table
  * @param {{ name: string, type: string }[]} columns - the columns the plan creates the table with
- * @returns {(name: string, what: string, rename: string, docPath: string) => void}
+ * @param {string} docPath - the declaration that creates the table
+ * @returns {{ name: string, what: string, docPath: string }[]}
  */
-function ownNameGuard(dialect, table, columns) {
-  const own = new Set(dialect.ownRelationNames(table,
-    dialect.identityColumn === undefined ? columns : [...columns, dialect.identityColumn]));
-  return (name, what, rename, docPath) => {
-    if (own.has(name)) {
-      throw new DbCompileError('JD0004',
-        `${what} would be named '${name}', which the ${dialect.name} engine already gives one of the table's own `
-        + 'objects (its primary key\'s index, or a serial column\'s sequence): the index would never be created — '
-        + `rename ${rename}`, docPath);
-    }
+function ownObjects(dialect, table, columns, docPath) {
+  // once each: a key column that shares the identity column's name names one sequence twice
+  return [...new Set(dialect.ownRelationNames(table, dialect.identityColumn === undefined ? columns : [...columns, dialect.identityColumn]))]
+    .map((/** @type {string} */ name) => ({ name, docPath,
+      what: `the ${dialect.name} engine's own relation '${name}' of table '${table}' (its primary key's index, or a serial column's sequence)` }));
+}
+
+/**
+ * Refuse (`JD0004`) the second of two schema objects a plan gives one name.
+ * Every table, index, virtual table and trigger a model plans, and the
+ * relations an engine creates for a table unasked (`ownObjects`), share ONE
+ * namespace, compared with ASCII case folded on both engines, as SQLite
+ * compares names. Met at open instead, the
+ * second object's `CREATE … IF NOT EXISTS` is skipped: an index goes
+ * unenforced, or an entity and a collection share one table. Each planner
+ * checks its own table's objects; the store checks a model's together.
+ * @param {Iterable<{ name: string, what: string, docPath: string, rename?: string }>} objects - in plan order
+ * @returns {void}
+ */
+export function refuseNameCollisions(objects) {
+  /** @type {Map<string, { name: string, what: string }>} */
+  const seen = new Map();
+  for (const object of objects) {
+    const key = foldIdentifier(object.name);
+    const first = seen.get(key);
+    if (first === undefined) { seen.set(key, object); continue; }
+    throw new DbCompileError('JD0004',
+      `${object.what} would be named '${object.name}', the name of ${first.what}`
+      + (first.name === object.name ? '' : ` ('${first.name}': names are compared with ASCII case folded, as SQLite compares them)`)
+      + ` — two objects of one database cannot share a name: rename ${object.rename ?? 'one of them'}`, object.docPath);
+  }
+}
+
+/** How deep a condition may nest: deeper, it is refused where it is planned. */
+const CONDITION_DEPTH = 64;
+
+/** How deep a JSON value nests, counted without recursion. @param {any} value @returns {number} */
+function depthOf(value) {
+  let deepest = 0;
+  for (const stack = [[value, 0]]; stack.length > 0;) {
+    const [node, depth] = /** @type {[any, number]} */ (stack.pop());
+    deepest = Math.max(deepest, depth);
+    if (node !== null && typeof node === 'object') for (const child of Object.values(node)) stack.push([child, depth + 1]);
+  }
+  return deepest;
+}
+
+/**
+ * An index condition as SQL: the row-predicate lowering's predicate rendering
+ * in the dialect's flavor, over the columns the condition may read, each SQL
+ * NULL of which is an absent member. Refused like anything else the lowering
+ * refuses (`JD0004` at the condition): a condition that is always true or
+ * always false as written (it declares nothing an index holds, and PostgreSQL
+ * drops a true one), one nested deeper than the open can read back, and one
+ * an engine that keeps no CREATE text could not read back exactly from its
+ * catalog — the open would otherwise meet it as drift.
+ * @param {any} where - the declared condition
+ * @param {{ name: string, physical: string, codec: string }[]} columns - the members it may read
+ * @param {any} dialect
+ * @param {string} docPath - the condition's pointer
+ * @param {(member: string) => string} unreadable - why a member that is none of `columns` cannot be read
+ * @returns {string}
+ */
+function indexCondition(where, columns, dialect, docPath, unreadable) {
+  /** @param {string} reason @returns {never} */
+  const fail = (reason) => { throw new DbCompileError('JD0004', `the index condition cannot be lowered: ${reason}`, docPath); };
+  const flavor = dialect.rowPredicateFlavor;
+  if (flavor === undefined) return fail(`the ${dialect.name} dialect renders no index condition`);
+  if (dialect.capabilities.declaredSqlText !== true && dialect.readBack === undefined)
+    return fail(`the ${dialect.name} dialect keeps no CREATE text and reads no condition back, so no open could verify it`);
+  if (depthOf(where) > CONDITION_DEPTH) return fail(`it nests deeper than ${CONDITION_DEPTH} levels`);
+  const paths = rowPaths(columns.map((column) => ({ ...column, null: 'absent' })), dialect.quoteIdentifier);
+  /** @param {string} path */
+  const resolve = (path) => {
+    const read = paths(path);
+    return read.refused !== undefined || read.column !== undefined ? read : { ...read, refused: unreadable(String(read.name)) };
   };
+  const sql = rowPredicate({ rendering: 'predicate', flavor, dialect, resolve, fail }).predicate(where);
+  if (sql === flavor.true || sql === flavor.false)
+    fail(`it is always ${sql === flavor.true ? 'true' : 'false'} as written, so it declares no condition`);
+  if (dialect.readBack !== undefined && !dialect.readBack.conditionReads(sql, columns))
+    fail(`the ${dialect.name} engine keeps no CREATE text, and its stored form of ${sql} could not be read back exactly`);
+  return sql;
 }
 
 /**
@@ -488,9 +559,11 @@ function deriveColumns(index, context) {
  *   virtualTables: { stem: string, name: string, columns: string[],
  *     edges: string[], createSql: string, fillSql: string,
  *     triggers: { name: string, sql: string }[] }[],
+ *   objects: { name: string, what: string, docPath: string }[],
+ *   conditionColumns: { name: string, physical: string, codec: string }[],
  *   expected: { columns: { name: string, type: string,
  *     generated: boolean }[], indexes: { name: string, unique: boolean,
- *     columns: string[] }[] },
+ *     columns: string[], where?: string }[] },
  * }}
  */
 export function planCollection(name, collection, dialect, options = undefined) {
@@ -560,6 +633,7 @@ export function planCollection(name, collection, dialect, options = undefined) {
         name: `${name}_${index.name}`,
         unique: index.unique,
         columns: [columnName],
+        declared: index,
       });
       continue;
     }
@@ -607,25 +681,45 @@ export function planCollection(name, collection, dialect, options = undefined) {
       name: `${name}_${index.name}`,
       unique: index.unique,
       columns,
+      declared: index,
     });
   }
   firstColumn.push(generated.length);
+  // an index condition reads a top-level member the collection already maps
+  // to a generated column of a scalar type that excludes null: both a JSON
+  // null and a missing member extract to SQL NULL, which the query engine
+  // tells apart, and a member no index reads has no column at all
+  const collectionPath = collection.docPath ?? `/collections/${name}`;
+  const conditionColumns = [];
+  for (const column of generated) {
+    const member = /^\.([A-Za-z_][A-Za-z0-9_]*)$/.exec(column.pathText === null ? '' : column.canonical)?.[1];
+    const codec = member === undefined || column.derive !== undefined ? undefined : conditionCodec(schemaNodeAt(collection.schema, [{ name: member }]));
+    if (codec !== undefined) conditionColumns.push({ name: /** @type {string} */ (member), physical: column.name, codec });
+  }
+  /** @param {string} member */
+  const unreadable = (member) => (columnByCanonical.has(canonicalOf([{ name: member }]))
+    ? `'${member}' may hold null or has no one scalar type, and its generated column holds SQL NULL for a null and for a missing member alike, which the query engine tells apart`
+    : `'${member}' has no generated column: an index condition reads a member the collection indexes by its path — index '$.${member}' first`);
+  for (const index of indexes) {
+    if (index.declared.where === undefined) continue;
+    index.where = indexCondition(index.declared.where, conditionColumns, dialect, `${index.declared.docPath}/where`, unreadable);
+  }
   // every name the table, its columns and its indexes take, at the member
   // each one comes from (see `refuseLongName`)
   refuseLongName(dialect, name, `the table for collection '${name}'`, collection.docPath ?? `/collections/${name}`);
-  // — and no index under a name the engine gives the table's own objects
-  // (see `ownNameGuard`)
-  const ownName = ownNameGuard(dialect, name,
-    [{ name: KEY_COLUMN, type: keyType }, { name: DOC_COLUMN, type: dialect.docColumnType }, ...generated]);
   collection.indexes.forEach((index, i) => {
     for (const column of generated.slice(firstColumn[i], firstColumn[i + 1])) {
-      refuseLongName(dialect, column.name, `the column for '${index.expression === undefined ? `$${column.canonical}` : index.name}'`,
-        `${index.docPath}/${index.expression === undefined ? 'path' : 'expression'}`);
+      const columnPath = `${index.docPath}/${index.expression === undefined ? 'path' : 'expression'}`;
+      refuseLongName(dialect, column.name, `the column for '${index.expression === undefined ? `$${column.canonical}` : index.name}'`, columnPath);
+      // an engine that keeps no CREATE text must read the column back exactly at every open
+      const planned = dialect.readBack === undefined ? undefined : plannedExpression(dialect, { generated }, column.name);
+      if (planned !== undefined && !dialect.readBack.expressionReads(planned)) {
+        throw new DbCompileError('JD0004', `the column for '${index.name}' computes ${planned}, which the ${dialect.name} `
+          + 'engine keeps no CREATE text of and which could not be read back exactly from its catalog', columnPath);
+      }
     }
-    if (indexes.some((planned) => planned.name === `${name}_${index.name}`)) {
+    if (indexes.some((planned) => planned.name === `${name}_${index.name}`))
       refuseLongName(dialect, `${name}_${index.name}`, `index '${index.name}'`, `${index.docPath}/name`);
-      ownName(`${name}_${index.name}`, `index '${index.name}'`, 'the index', `${index.docPath}/name`);
-    }
   });
 
   const tableShape = {
@@ -642,26 +736,21 @@ export function planCollection(name, collection, dialect, options = undefined) {
       table: name,
       columns: index.columns,
       unique: index.unique,
+      ...(index.where === undefined ? {} : { where: index.where }),
     })),
     ...virtualTables.flatMap((virtual) =>
       [virtual.createSql, ...virtual.triggers.map((trigger) => trigger.sql)]),
   ];
-  // the virtual table and its triggers are named from the column stem,
-  // and an index is named from the model's own index name — two
-  // namespaces that meet in `sqlite_schema`. A collision would have one
-  // object silently standing in for another, so it is refused here
-  const objectNames = [name, ...indexes.map((index) => index.name),
-    ...virtualTables.flatMap((virtual) =>
-      [virtual.name, ...virtual.triggers.map((trigger) => trigger.name)])];
-  const seen = new Set();
-  for (const objectName of objectNames) {
-    if (seen.has(objectName)) {
-      throw new DbCompileError('JD0004',
-        `collection '${name}' would declare two schema objects named '${objectName}'`,
-        collection.docPath ?? `/collections/${name}`);
-    }
-    seen.add(objectName);
-  }
+  // the table, the relations the engine gives it, its indexes, and the
+  // virtual tables and triggers named from a column stem: one namespace
+  const objects = [
+    { name, what: `the table for collection '${name}'`, docPath: collectionPath, rename: 'the collection' },
+    ...ownObjects(dialect, name, [{ name: KEY_COLUMN, type: keyType }, { name: DOC_COLUMN, type: dialect.docColumnType }, ...generated], collectionPath),
+    ...indexes.map((index) => ({ name: index.name, what: `index '${index.declared.name}'`, docPath: `${index.declared.docPath}/name`, rename: 'the index' })),
+    ...virtualTables.flatMap((virtual) => [virtual, ...virtual.triggers].map((object) => ({ name: object.name,
+      what: `the schema object '${object.name}' of a derived index`, docPath: collectionPath }))),
+  ];
+  refuseNameCollisions(objects);
 
   return {
     table: name,
@@ -677,6 +766,9 @@ export function planCollection(name, collection, dialect, options = undefined) {
     columnByCanonical,
     virtualTables,
     createSql,
+    objects,
+    /** The members an index condition may read, by their generated columns. */
+    conditionColumns,
     expected: {
       columns: [
         { name: KEY_COLUMN, type: keyType, generated: false },
@@ -695,11 +787,27 @@ export function planCollection(name, collection, dialect, options = undefined) {
           name: index.name,
           unique: index.unique,
           columns: [...index.columns],
+          ...(index.where === undefined ? {} : { where: index.where }),
         }))
         .sort((a, b) => (a.name < b.name ? -1 : 1)),
     },
   };
 }
+
+/**
+ * The codec an index condition reads a generated column with: its member's
+ * one scalar schema type, which must exclude `null`; none otherwise.
+ * @param {any} node - the member's schema
+ * @returns {string | undefined}
+ */
+function conditionCodec(node) {
+  const types = node === undefined ? [] : Array.isArray(node.type) ? node.type : [node.type];
+  if (types.length !== 1 || (Array.isArray(node.enum) && node.enum.includes(null))) return undefined;
+  return SCALAR_CODECS.get(types[0]);
+}
+
+/** The codec a column of each scalar schema type holds. */
+const SCALAR_CODECS = new Map([['string', 'text'], ['integer', 'integer'], ['number', 'number'], ['boolean', 'boolean']]);
 
 /**
  * The declared-SQL half of verification: compare every schema object the
@@ -803,6 +911,10 @@ export function verifyShape(connection, plan, collection, docPath) {
       `collection '${collection}': the existing table does not match the declared model (${difference}); reshaping a live database is the migration story, and nothing was altered`,
       docPath);
   };
+  // an engine that keeps no CREATE text has its catalog read back what that
+  // text would carry — each index's condition and shape, each generated
+  // column's expression — through the dialect's exact read-back
+  const readBack = dialect.capabilities.declaredSqlText === true ? undefined : dialect.readBack;
   return chain(connection.prepare(dialect.introspect.columns(plan.table)), (columnsStatement) =>
     chain(columnsStatement.all([]), (columnRows) => {
       // both sides through the dialect's own reduction, so a declared
@@ -814,6 +926,8 @@ export function verifyShape(connection, plan, collection, docPath) {
           name: String(row.name),
           type: comparableType(String(row.type)),
           generated: Number(row.hidden) !== 0,
+          computes: row.default_value === null || row.default_value === undefined ? null : String(row.default_value),
+          conforming: row.conforming === undefined || row.conforming === null || String(row.conforming) === 'on',
         }))
         .sort((a, b) => (a.name < b.name ? -1 : 1));
       const expected = [...plan.expected.columns]
@@ -841,12 +955,21 @@ export function verifyShape(connection, plan, collection, docPath) {
           disagree(`column '${have.name}' is ${have.type}${have.generated ? ' generated' : ''}, `
             + `the model declares '${want.name}' ${want.type}${want.generated ? ' generated' : ''}`);
         }
+        // a catalog that reports no expression for a generated column has none to read back
+        const planned = readBack !== undefined && have.generated && have.computes !== null
+          ? plannedExpression(dialect, plan, have.name) : undefined;
+        const difference = planned === undefined ? null
+          : readBack.expression(/** @type {string} */ (have.computes), planned, have.conforming);
+        if (difference !== null) disagree(`column '${have.name}' ${difference}`);
       }
       return chain(connection.prepare(dialect.introspect.indexes(plan.table)), (indexesStatement) =>
         chain(indexesStatement.all([]), (indexRows) => {
           const created = indexRows
             .filter((row) => String(row.origin) === 'c')
-            .map((row) => ({ name: String(row.name), unique: Number(row.uniq) !== 0 }))
+            .map((row) => ({ name: String(row.name), unique: Number(row.uniq) !== 0,
+              predicate: row.predicate === null || row.predicate === undefined ? null : String(row.predicate),
+              plain: row.plain === undefined || row.plain === null || Number(row.plain) === 1,
+              conforming: row.conforming === undefined || row.conforming === null || String(row.conforming) === 'on' }))
             .sort((a, b) => (a.name < b.name ? -1 : 1));
           const wantedIndexes = plan.expected.indexes;
           if (created.length !== wantedIndexes.length) {
@@ -881,6 +1004,13 @@ export function verifyShape(connection, plan, collection, docPath) {
                 const haveColumns = rows.map((row) => String(row.name));
                 if (haveColumns.join(',') !== want.columns.join(','))
                   disagree(`index '${have.name}' covers (${haveColumns.join(', ')}) in that order, the model declares (${want.columns.join(', ')})`);
+                // the catalog's shape flag: no NULLS NOT DISTINCT, no key order or
+                // collation of its own, not deferred — each changes what a unique index refuses
+                if (!have.plain) disagree(`index '${have.name}' is not the plain ascending B-tree the model declares (NULLS NOT DISTINCT, a key order or collation, or a deferred check)`);
+                const difference = readBack !== undefined
+                  ? readBack.condition(have.predicate, want.where, plan.conditionColumns ?? [], have.conforming)
+                  : have.predicate === null ? null : `has the condition ${have.predicate}, which the model does not declare`;
+                if (difference !== null) disagree(`index '${have.name}' ${difference}`);
                 return collectColumns(i + 1);
               }));
           };
@@ -888,6 +1018,20 @@ export function verifyShape(connection, plan, collection, docPath) {
             verifyDeclaredSql(connection, plan, disagree));
         }));
     }));
+}
+
+/**
+ * The expression a planned generated column is created with — a declared
+ * expression, or the dialect's read of the member it indexes — or `undefined`
+ * for a column the store writes (a stored or derived one: a derived column
+ * computes a function the host names, read by no expression form).
+ * @param {any} dialect @param {any} plan @param {string} name - the column
+ * @returns {string | undefined}
+ */
+function plannedExpression(dialect, plan, name) {
+  const column = (plan.generated ?? []).find((/** @type {any} */ candidate) => candidate.name === name);
+  if (column === undefined || column.stored === true || column.derive !== undefined) return undefined;
+  return column.expression ?? dialect.jsonExtract(dialect.quoteIdentifier(DOC_COLUMN), column.pathText, column.kind);
 }
 
 /**
@@ -957,7 +1101,8 @@ const expectedColumnsOf = (columns, legacyTypes, dialect) => [...columns
  *   come from the referenced entity's columns)
  * @param {any} dialect
  * @returns {{ table: string, createSql: string[], expected: any,
- *   columnNames: Set<string> }}
+ *   columnNames: Set<string>, objects?: { name: string, what: string, docPath: string }[],
+ *   conditionColumns?: { name: string, physical: string, codec: string }[] }}
  */
 export function planEntity(name, entityMapping, entities, dialect) {
   if (entityMapping.document === false) {
@@ -993,7 +1138,7 @@ export function planEntity(name, entityMapping, entities, dialect) {
   const renderCheck = (columnName, values) => {
     const rendered = values.map((value) => (typeof value === 'string'
       ? dialect.stringLiteral(value)
-      : typeof value === 'boolean' ? dialect.booleanLiteral(value) : String(value)));
+      : typeof value === 'boolean' ? storedBoolean(value) : String(value)));
     return `${dialect.quoteIdentifier(columnName)} IN (${rendered.join(', ')})`;
   };
 
@@ -1040,22 +1185,49 @@ export function planEntity(name, entityMapping, entities, dialect) {
     indexUnique.set(fk.column, (indexUnique.get(fk.column) ?? false) || fk.unique);
   }
   const expectedIndexes = [];
-  // no index under a name the engine gives the table's own objects (see `ownNameGuard`)
-  const ownName = ownNameGuard(dialect, name, columns);
+  // the table, the relations the engine gives it, and every index: one namespace
+  const objects = [{ name, what: `the table for entity '${name}'`, docPath: entityPath, rename: 'the entity' },
+    ...ownObjects(dialect, name, columns, entityPath)];
   for (const [column, unique] of indexUnique) {
     const indexName = `${name}_${column}`;
-    ownName(indexName, `the index over '${column}'`, `the member '${column}'`, memberPath(column));
+    objects.push({ name: indexName, what: `the index over '${column}'`, docPath: memberPath(column), rename: `the member '${column}'` });
     createSql.push(dialect.ddl.createIndex({
       name: indexName, table: name, columns: [column], unique,
     }));
     expectedIndexes.push({ name: indexName, unique, columns: [column] });
   }
+  // the entity-level indexes: composite, unique or partial, over the columns
+  // the table maps; a condition reads them as their columns hold them
+  const conditionColumns = conditionColumnsOf(entityMapping, entities);
+  /** @param {string} member */
+  const unreadable = (member) => {
+    const column = entityMapping.columns.find((/** @type {any} */ c) => c.name === member);
+    if (column?.source === 'epoch(document)' || fkNames.has(member))
+      return `'${member}' holds an epoch (milliseconds) in its column, while a condition compares the member's text — an index condition reads no epoch member`;
+    if (entityMapping.document.includes(member))
+      return `'${member}' lives in the entity's document: an index condition reads column-mapped members — map it as a column (a top-level scalar property)`;
+    return `'${member}' has no column on entity '${name}': an index condition reads column-mapped members`;
+  };
+  (entityMapping.entityIndexes ?? []).forEach((/** @type {any} */ index, /** @type {number} */ i) => {
+    const indexPath = `${entityPath}/indexes/${i}`;
+    const indexName = `${name}_${index.name}`;
+    refuseLongName(dialect, indexName, `index '${index.name}'`, `${indexPath}/name`);
+    const where = index.where === undefined ? undefined : indexCondition(index.where, conditionColumns, dialect, `${indexPath}/where`, unreadable);
+    const declared = { name: indexName, unique: index.unique, columns: [...index.columns], ...(where === undefined ? {} : { where }) };
+    objects.push({ name: indexName, what: `index '${index.name}'`, docPath: `${indexPath}/name`, rename: 'the index' });
+    createSql.push(dialect.ddl.createIndex({ ...declared, table: name }));
+    expectedIndexes.push(declared);
+  });
+  refuseNameCollisions(objects);
 
   return {
     table: name,
     createSql,
     columnNames: new Set(columns.map((column) => column.name)),
     expectedForeignKeys: expectedForeignKeysOf(columns),
+    objects,
+    /** The members an index condition may read, by their columns. */
+    conditionColumns,
     expected: {
       columns: expectedColumnsOf(columns, legacyTypes, dialect),
       indexes: expectedIndexes.sort((a, b) => (a.name < b.name ? -1 : 1)),
@@ -1064,12 +1236,35 @@ export function planEntity(name, entityMapping, entities, dialect) {
 }
 
 /**
+ * The columns of an entity table an index condition may read, each with the
+ * codec of what it holds: a mapped scalar and a foreign key's column, never an
+ * epoch (milliseconds, where the condition would compare the member's text).
+ * @param {any} entityMapping @param {any} entities - the full mapping
+ * @returns {{ name: string, physical: string, codec: string }[]}
+ */
+function conditionColumnsOf(entityMapping, entities) {
+  // a foreign key's column holds the referenced key as that key is stored
+  /** @type {Map<string, any>} */
+  const referenced = new Map(entityMapping.foreignKeys.map((/** @type {any} */ fk) => [fk.column,
+    entities.entities[fk.references].columns.find((/** @type {any} */ column) => column.key)]));
+  /** @type {{ name: string, physical: string, codec: string }[]} */
+  const columns = [];
+  for (const column of [...entityMapping.columns.filter((/** @type {any} */ c) => !referenced.has(c.name)),
+    ...[...referenced].map(([name, key]) => ({ name, storage: key.storage, source: key.source }))]) {
+    if (column.source === 'epoch(document)') continue;
+    columns.push({ name: column.name, physical: column.name, codec: /** @type {string} */ (SCALAR_CODECS.get(column.storage)) });
+  }
+  return columns;
+}
+
+/**
  * Plan a many-to-many join table.
  * @param {string} tableName
  * @param {any} join - `explainMapping(model).joinTables[tableName]`
  * @param {any} entities - the full mapping
  * @param {any} dialect
- * @returns {{ table: string, createSql: string[], expected: any }}
+ * @returns {{ table: string, createSql: string[], expected: any,
+ *   objects: { name: string, what: string, docPath: string }[] }}
  */
 export function planJoinTable(tableName, join, entities, dialect) {
   // the join table and its columns are named from the two entities
@@ -1091,6 +1286,10 @@ export function planJoinTable(tableName, join, entities, dialect) {
     };
   };
   const columns = [endpoint(join.left), endpoint(join.right)];
+  const docPath = `/entities/${join.left.entity}`;
+  const objects = [{ name: tableName, what: `the join table of '${join.left.entity}' and '${join.right.entity}'`, docPath,
+    rename: 'the join table' }, ...ownObjects(dialect, tableName, columns, docPath)];
+  refuseNameCollisions(objects);
   return {
     table: tableName,
     createSql: [dialect.ddl.createRelationalTable({
@@ -1098,6 +1297,7 @@ export function planJoinTable(tableName, join, entities, dialect) {
       columns,
       compositeKey: [join.left.column, join.right.column],
     })],
+    objects,
     expectedForeignKeys: expectedForeignKeysOf(columns),
     expected: {
       columns: expectedColumnsOf(columns, legacyTypes, dialect),

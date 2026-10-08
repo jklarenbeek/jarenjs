@@ -15,10 +15,24 @@
  * already reads as false, so its caller reads only text columns that compare
  * by code point (SQLite BINARY, PostgreSQL COLLATE "C") and keeps a list
  * short enough for a PostgreSQL index predicate, which `pg_index` stores
- * inline. The caller supplies the dialect's flavor (how a column is read, a
- * comparison, a truth value and a text literal spelled) and the resolver of
- * the paths it reads, and wraps every refusal reason in its own error. */
+ * inline. An index condition has one spelling per meaning, so a condition read
+ * back out of the catalog renders as it was written: a nested `$and` (`$or`)
+ * joins the one it sits in, a single operand is itself, a one-item list is an
+ * equality, a lone presence test is bare, and a boolean is the stored value
+ * (`storedBoolean`). The caller supplies the dialect's flavor (how a column is
+ * read, a comparison, a truth value and a text literal spelled) and the
+ * resolver of the paths it reads, and wraps every refusal reason in its own
+ * error. */
 import { RULE_CODECS, RECORD_PATH, ruleLiteral } from '../invariants.js';
+
+/**
+ * How a store-owned layout and a collection's generated column hold a boolean
+ * on every engine: the integer 1 or 0 (a PostgreSQL one is `smallint`, never
+ * `boolean`). An index condition compares a boolean member with it and an enum
+ * CHECK lists it; the dialect's own boolean literal stays the SQL truth value.
+ * @param {boolean} value @returns {string}
+ */
+export const storedBoolean = (value) => (value ? '1' : '0');
 
 /**
  * What a resolver answers for a `$` path: a column of the row (`ref` reads it
@@ -100,6 +114,25 @@ const literalOf = (value) => {
   return quoted === null || ['string', 'number', 'boolean'].includes(typeof quoted) ? quoted : undefined;
 };
 
+/** The logical key (`$and`, `$or`) a node is, if it is one. @param {any} node */
+const logicalKey = (node) => (node !== null && typeof node === 'object' && !Array.isArray(node) && Object.keys(node).length === 1
+  ? ['$and', '$or'].find((key) => Object.hasOwn(node, key) && Array.isArray(node[key])) : undefined);
+
+/** A node, or the one operand of a logical node that has only one, however
+ * deep. @param {any} node @returns {any} */
+const alone = (node) => {
+  for (let key = logicalKey(node); key !== undefined && node[key].length === 1; key = logicalKey(node)) node = node[key][0];
+  return node;
+};
+
+/** The operands of an `$and` (`$or`), each a lone operand in place of its
+ * wrapper and every non-empty one of the same kind joined in.
+ * @param {string} key @param {any[]} args @returns {any[]} */
+const joined = (key, args) => args.flatMap((arg) => {
+  const operand = alone(arg);
+  return logicalKey(operand) === key && operand[key].length > 0 ? joined(key, operand[key]) : [operand];
+});
+
 /** A literal as a refusal names it. @param {any} literal */
 const shown = (literal) => (typeof literal === 'number' && !Number.isFinite(literal) ? String(literal) : JSON.stringify(literal));
 
@@ -155,7 +188,7 @@ export function rowPredicate({ rendering = 'trigger', releasedText = false, flav
     }
     if (value === null) return 'NULL';
     if (typeof value === 'string') return text(ruleLiteral(value));
-    if (typeof value === 'boolean') return value ? flavor.true : flavor.false;
+    if (typeof value === 'boolean') return trigger ? (value ? flavor.true : flavor.false) : storedBoolean(value);
     if (typeof value === 'number' && Number.isFinite(value) && (!Number.isInteger(value) || Number.isSafeInteger(value))) return String(value);
     if (value && typeof value === 'object' && Object.keys(value).length === 1 && Object.hasOwn(value, '$const')) {
       const literal = value.$const;
@@ -183,7 +216,9 @@ export function rowPredicate({ rendering = 'trigger', releasedText = false, flav
   const guard = (leaf, refs) => {
     if (refs.length === 0 || leaf === flavor.false) return leaf;
     const present = [...new Set(refs)].map((ref) => `${ref} IS NOT NULL`);
-    return `(${(leaf === flavor.true ? present : [...present, leaf]).join(' AND ')})`;
+    const terms = leaf === flavor.true ? present : [...present, leaf];
+    // an index condition writes a lone presence test as `$exists` does
+    return !trigger && terms.length === 1 ? terms[0] : `(${terms.join(' AND ')})`;
   };
   /** A plain leaf of an index condition reads SQL NULL as false only where it
    * is not negated. @param {string} leaf @param {boolean} negated */
@@ -248,7 +283,8 @@ export function rowPredicate({ rendering = 'trigger', releasedText = false, flav
     if (trigger) // an IN over SQL NULL is NULL, which a `$not` above must see as false
       return guard(!nullItem ? `COALESCE((${listed}), ${flavor.false})` : `(${listed === undefined ? isNull : `${listed} OR ${isNull}`})`,
         column.null === 'absent' ? [read.ref] : []);
-    if (!nullItem) return settle(/** @type {string} */ (listed), negated);
+    // a one-item list is the equality the engine stores it as
+    if (!nullItem) return settle(values.length === 1 ? `${x} = ${values[0]}` : /** @type {string} */ (listed), negated);
     return listed === undefined ? isNull : `(${listed} OR ${isNull})`;
   };
   /** A member's existence: SQL NULL is its absence on an absent column; a
@@ -267,7 +303,10 @@ export function rowPredicate({ rendering = 'trigger', releasedText = false, flav
     const [key, args] = Object.entries(node)[0];
     if (key === '$and' || key === '$or') {
       if (!Array.isArray(args) || !args.length) return fail('logical predicates require operands');
-      return `(${args.map((a) => predicate(a, negated)).join(key === '$and' ? ' AND ' : ' OR ')})`;
+      // an index condition joins a nested $and (or $or) to its parent and writes one operand as itself
+      const operands = trigger ? args : joined(key, args);
+      if (!trigger && operands.length === 1) return predicate(operands[0], negated);
+      return `(${operands.map((a) => predicate(a, negated)).join(key === '$and' ? ' AND ' : ' OR ')})`;
     }
     if (key === '$not') return `(NOT (${predicate(args, true)}))`;
     if (key === '$exists-row' && probe !== undefined) return probe(args, (expression) => scalar(expression, true));

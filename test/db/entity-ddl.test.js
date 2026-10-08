@@ -110,6 +110,36 @@ describe('golden entity DDL (SQLite)', () => {
   });
 });
 
+describe('golden entity-level indexes', () => {
+  const INDEXED = { $model: '0.1', entities: { Shift: { schema: { type: 'object', properties: {
+    id: { type: 'string', 'x-entity': { key: true } }, employeeId: { type: 'string' }, day: { type: 'string' },
+    status: { type: 'string' }, open: { type: 'boolean' } } },
+  indexes: [
+    { name: 'one_active', path: ['$.employeeId', '$.day'], unique: true, where: { $and: [{ $eq: ['$.open', true] },
+      { $not: { $eq: ['$.status', { $seq: ['cancelled', 'void'] }] } }] } },
+    { name: 'by_day', path: '$.day' },
+  ] } } };
+  const indexed = explainMapping(INDEXED);
+  const plan = (/** @type {any} */ dialect) => planEntity('Shift', indexed.entities.Shift, indexed, dialect).createSql.slice(1);
+
+  it('renders each one after the one-column indexes, its condition over plain columns', () => {
+    assert.deepStrictEqual(plan(sqliteDialect), [
+      'CREATE UNIQUE INDEX "Shift_one_active" ON "Shift" ("employeeId", "day") '
+      + 'WHERE ("open" = 1 AND (NOT (COALESCE("status" IN (\'cancelled\', \'void\'), 0))))',
+      'CREATE INDEX "Shift_by_day" ON "Shift" ("day")',
+    ]);
+  });
+
+  it('renders the same columns through the double, which lowers no condition', () => {
+    const doubled = fullDoubleDialect(createDialect);
+    const plain = explainMapping({ $model: '0.1', entities: { Shift: { ...INDEXED.entities.Shift,
+      indexes: INDEXED.entities.Shift.indexes.map(({ where: _where, ...index }) => index) } } });
+    assert.deepStrictEqual(planEntity('Shift', plain.entities.Shift, plain, doubled).createSql.slice(1),
+      ['CREATE UNIQUE INDEX [Shift_one_active] ON [Shift] ([employeeId], [day])', 'CREATE INDEX [Shift_by_day] ON [Shift] ([day])']);
+    assert.throws(() => plan(doubled), { code: 'JD0004', docPath: '/entities/Shift/indexes/0/where' });
+  });
+});
+
 describe('the dialect proof at the entity layer (D21)', () => {
   it('the same mapping renders correspondingly different DDL through the double', () => {
     const doubled = fullDoubleDialect(createDialect);

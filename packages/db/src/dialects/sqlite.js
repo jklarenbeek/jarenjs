@@ -11,7 +11,7 @@
 import { createDialect } from '../dialect.js';
 import { rtreeDdl } from './rtree-ddl.js';
 import { readExpression } from './expression-read.js';
-import { sqliteInvariantTriggers } from './invariant-sql.js';
+import { SQLITE, sqliteInvariantTriggers } from './invariant-sql.js';
 import { sqliteChecks } from './check-read.js';
 import { OWNER_TABLE } from '../engine-metadata.js';
 import { modelPath } from '../model-path.js';
@@ -455,6 +455,8 @@ export const sqliteDialect = createDialect({
     optimize: () => 'PRAGMA optimize',
   },
   invariantTriggers: sqliteInvariantTriggers,
+  // an index condition reads plain columns, its truth values 1 and 0
+  rowPredicateFlavor: SQLITE,
   // The invalid path is evaluated only on overflow and carries a distinct
   // marker through SQLite's error boundary, before any source row is written.
   codepoint: (value) => `(${value} COLLATE BINARY)`,

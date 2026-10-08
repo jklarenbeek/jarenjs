@@ -203,7 +203,7 @@ describe('the predicate rendering', () => {
       [{ $exists: '$.status' }, '"status" IS NOT NULL', '"status" IS NOT NULL'],
       [{ $exists: '$.employee' }, '1', 'TRUE'],
       // a value of another type is unequal only while there is a value
-      [{ $ne: ['$.status', 3] }, '("status" IS NOT NULL)', '("status" IS NOT NULL)'],
+      [{ $ne: ['$.status', 3] }, '"status" IS NOT NULL', '"status" IS NOT NULL'],
       [{ $eq: ['$.status', 3] }, '0', 'FALSE'],
       // a null literal compares null-safely: a member that refuses SQL NULL is never null
       [{ $ne: ['$.employee', null] }, '"employee_id" IS NOT NULL', '"employee_id" IS DISTINCT FROM NULL'],

@@ -76,6 +76,32 @@ The store runs over SQLite — on Node (`@jarenjs/db/node`), on Bun
   expression. A composite index takes a non-empty array of paths.
 - Index names MUST be identifiers, unique within their collection.
 - `indexes[].unique` is `true` or `false` (the default).
+- `indexes[].where` makes the index **partial**: it holds only the
+  documents a bounded condition is true for, so a unique index refuses a
+  second document only where both satisfy it. The condition is a query
+  expression over top-level members (`$.<member>`) the collection
+  already indexes by their path, each of one scalar schema type that
+  excludes `null` — a generated column holds SQL NULL for a JSON null
+  and for a missing member alike, which the query engine tells apart —
+  and scalar literals: `$eq`, `$ne`, `$lt`, `$le`, `$gt`, `$ge`, `$eq`
+  against a non-empty `{ "$seq": [...] }` of literals, `$exists`,
+  `$and`, `$or` and `$not`. It answers as the query engine does over a
+  stored document that holds each member it reads with the schema's type:
+  a member the document lacks is never equal, unequal or ordered, and
+  text compares by code point on both engines. A store without a
+  validation hook (§5) can hold a document whose member is `null` or of
+  another type, and the condition reads that member as a missing one —
+  where the engine sees a value (SQLite's column also keeps a mistyped
+  scalar as its text) — so the guarantee assumes conforming documents, as
+  §5's query answers do. A `null` literal, a `$seq` item of a type the
+  member does not hold, arithmetic, any other member, a condition nested
+  deeper than 64 levels, one that lowers to a constant as written (`true`,
+  or a comparison across types such as `{ "$eq": ["$.status", 3] }`), and
+  a `where` on a derived index are `JD0004` at the `where`. PostgreSQL
+  keeps a condition inline in its catalog row (about 8 kB compressed): a
+  list of long literals past that is refused by the server at every open
+  (`JD0002` naming the server's reason). The same lowering serves an
+  entity index (§9.2).
 - `indexes[].derive` declares a **derived** index: the columns are
   computed FROM the selected member rather than being the member.
   See §2.1.
@@ -87,15 +113,30 @@ offending member. Model checking happens before any database work.
 schema (`schemas/jaren-model.schema.json`, `additionalProperties: false`
 at each) agree on it: the root takes `$model`, `collections` and
 `entities`; a collection `schema`, `key`, `identity`, `indexes` and
-`x-rename`; an index `name`, `path`, `expression`, `unique`, `derive`,
-`precision`, `dims` and `physical`; an entity `schema`, `physical`,
-`invariants` and `x-rename` (§9); an invariant the members of §13. Any
-other member — `uniqe` for `unique`, a `where` no collection index
-declares, a `$schema` — is `JD0005` at the member itself
+`x-rename`; an index `name`, `path`, `expression`, `unique`, `where`,
+`derive`, `precision`, `dims` and `physical`; an entity `schema`,
+`indexes`, `physical`, `invariants` and `x-rename` (§9); an entity index
+`name`, `path`, `expression`, `unique` and `where` (§9.2); an invariant
+the members of §13. Any other member — `uniqe` for `unique`, a
+`$schema` — is `JD0005` at the member itself
 (`/collections/c/indexes/0/uniqe`), naming the nearest member and the
 declaration's set, checked before any other rule of that declaration.
 An unknown member used to be ignored: a misspelt `unique` opened a store
 whose index was not unique.
+
+**Every name a model plans is one namespace.** Tables (a collection's, an
+entity's, a join table), indexes (`<collection>_<name>`,
+`<Entity>_<name>`, `<Entity>_<member>` for a one-column `unique` or
+`index` and for a foreign key), R\*Tree tables and their triggers, and on
+PostgreSQL the relations the server creates for a table unasked
+(`<table>_pkey`, a serial column's `<table>_<column>_seq`) are compared
+with ASCII case folded on both engines, as SQLite compares names. Two
+objects that meet in one name are
+`JD0004` at the second, before any statement: met at open instead, the
+second `CREATE … IF NOT EXISTS` was skipped — an index went unenforced,
+or an entity and a collection whose names differ only in case shared
+one table. A name PostgreSQL would truncate (over 63 bytes) is `JD0004`
+at the member that names it.
 
 **A time series needs no new declaration.** A composite index whose
 LAST path is a finite numeric epoch member is the whole physical
@@ -1836,6 +1877,24 @@ expression back out of the SQL the dialect wrote (each dialect reads its
 own), so a declared expression index survives the round trip; without
 the declarations the column is REPORTED as unmapped rather than guessed.
 
+PostgreSQL keeps no CREATE text, so every open reads each generated
+column's expression back out of the catalog and compares it with the
+planned expression as a whole — every path, guard, operator, collation,
+call and literal — after undoing only what the server rewrites
+cosmetically (a type on every literal, `ELSE NULL`, parentheses, quoted
+names such as `"left"(…)`, the path array's quoting, how the reading
+session spells a backslash). A column whose expression differs in
+anything else, or that does not read, is `JD0002`; a planned expression
+that could not be read back is refused where it is planned (`JD0004`).
+SQLite compares the CREATE text itself.
+
+**An entity index takes no expression** (`JD0004` at its `expression`):
+an entity table has no generated column, and SQLite maintains an index
+over a function only on a connection that registered it — every other
+writer of the table, the raw SQL client a database rule exists for
+included, could no longer insert or delete a row. Index the member
+itself (§9.2), or declare the expression index on a collection.
+
 ## 8. The safe execution profile
 
 A query document that arrives from a tenant, a remote client or a
@@ -2264,19 +2323,71 @@ one specification.
 | `relation` | a property | `{ to, many?, via?, through?, onDelete? }` — §9.4 |
 | `version` | a property | the optimistic-concurrency token (§11.5): a plain integer column, one per entity, never the key — engine-owned and bumped on every successful write |
 
-**`unique` and `index` are PER PROPERTY, and that is the whole of an
-entity's index vocabulary.** `normalizeEntities` derives one
-single-column index per marked property; an entity declares no
-composite index, no partial (predicate) index and no expression
-index — a collection's `indexes` array (§4) is the only place that
-vocabulary exists. A rule such as "one active shift per employee per
-day" (`UNIQUE (employeeId, day) WHERE status IN (…)`) therefore cannot
-be declared on an entity, and §13's invariants cannot express it
-either: a rule sees `{ old, new, op }` and never another row. Such a
-guarantee lives in application code inside the writing transaction
-until entity-level `indexes` exist. This is stated here so a model
-author meets it while writing the model rather than at `openStore` —
-where an `indexes` member on an entity is `JD0005` (§2), never dropped.
+**`unique` and `index` are the one-column shorthand; an entity's
+`indexes` member declares the rest.** A rule such as "one active shift
+per employee per day" is one composite, partial, unique index, which
+both engines create, enforce for every writer — the store and a raw SQL
+client alike, a violation being `JD2005` of class `constraint` — and
+verify on every open:
+
+```json
+{
+  "Shift": {
+    "schema": { "type": "object", "required": ["id", "employeeId", "day"],
+      "properties": { "id": { "type": "string", "x-entity": { "key": true } },
+        "employeeId": { "type": "string" }, "day": { "type": "string" },
+        "status": { "type": "string" } } },
+    "indexes": [{ "name": "one_active", "path": ["$.employeeId", "$.day"], "unique": true,
+      "where": { "$eq": ["$.status", { "$seq": ["active", "pending"] }] } }]
+  }
+}
+```
+
+SQLite creates `CREATE UNIQUE INDEX "Shift_one_active" ON "Shift"
+("employeeId", "day") WHERE "status" IN ('active', 'pending')` — a
+plain membership, from which the engine proves the index serves a query
+that names the same list — and PostgreSQL the same index. A second
+active or pending shift of one employee-day is refused; a cancelled
+shift and one without a status are not. §13's invariants could not say
+this: a rule reaches another row only through `$exists-row` (§13.2),
+keyed by that row's primary key, and a check in application code
+inside the writing transaction lets a concurrent writer slip past it.
+
+- An entity index is a closed object: `name`, `path`, `unique` and
+  `where`; any other member is `JD0005` at the member. `derive`,
+  `precision`, `dims` and `physical` are recognized first and refused
+  `JD0004` — they need a generated column, which an entity table never
+  has — and `expression` is refused `JD0004` (§7A).
+- `name` is an identifier, unique within the entity; the index is
+  named `<Entity>_<name>`, in the one namespace every name a model
+  plans shares (§2) — the same name as a `unique` or `index`
+  property's `<Entity>_<member>` is `JD0004`.
+- `path` is `$.<member>`, or a non-empty array of them for a composite
+  index in that order, over members with a column of their own: a mapped
+  scalar, a foreign key's `via` column, an epoch (`column: "integer"`)
+  member. A member the document keeps, a nested path and a relation are
+  `JD0004` naming the member: map it as a column.
+- `where` is the condition of §2's partial index, over the same
+  members minus the epoch ones (the column holds milliseconds, the
+  condition would compare the member's text). Every operand is read as
+  stored: a member a row lacks is SQL NULL, never equal, unequal or
+  ordered; a boolean compares the stored `1` or `0`, on both engines.
+- The mapping keeps one-column entries apart: `explainMapping()`'s
+  `entities[E].indexes` lists the `unique` and `index` properties
+  exactly as before, and the entity-level indexes are
+  `entities[E].entityIndexes` (`{ name, columns, unique, where? }`). A
+  composite or partial unique index never anchors a pagination cursor
+  (§10.5): it is not a unique column.
+- Every open verifies the index: SQLite compares the stored CREATE
+  text, and PostgreSQL, which keeps none, reads the condition back out
+  of its catalog through one exact condition reader and compares it with
+  the planned one, and checks the index is the plain ascending B-tree the
+  plan creates (no `NULLS NOT DISTINCT`, no key order or collation of its
+  own, no deferred check). A changed, dropped or added condition — a
+  `NOT` without the `COALESCE` the rendering writes, a literal another
+  decimal spells — and a condition that does not read, is `JD0002`.
+- A layout an application owns (§12) declares its indexes in
+  `physical.indexes`; `indexes` beside `physical` is `JD0004`.
 
 **An unknown member of `x-entity` is `JD0030` with a `docPath`.** A
 silently ignored mapping directive is a data-loss bug waiting to
@@ -3333,7 +3444,10 @@ Join tables can be declared as ordinary entities with ordered composite keys;
 relation navigation across physical layouts is not qualified, so a model
 whose entity with a layout declares a relation, or whose relation targets
 an entity with a layout, is `JD0005` at open (the second one used to open
-and fail at its first `load({ include })` with a raw `JD2005`).
+and fail at its first `load({ include })` with a raw `JD2005`). A layout's
+indexes are its own (`physical.indexes`, in the relational `$sql`
+grammar); the entity-level `indexes` member (§9.2) plans indexes over a
+store-owned table, and beside `physical` it is `JD0004`.
 
 | Codec | Public representation | Required SQLite affinity |
 |---|---|---|

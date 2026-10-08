@@ -28,8 +28,9 @@ export function ruleLiteral(value) {
   return literal;
 }
 
-/** ASCII letters lowered, as SQLite folds an identifier. @param {string} name */
-const folded = (name) => name.replace(/[A-Z]/g, (letter) => letter.toLowerCase());
+/** ASCII letters lowered, as SQLite folds an identifier: the one comparison
+ * of two schema names a model can meet in. @param {string} name @returns {string} */
+export const foldIdentifier = (name) => name.replace(/[A-Z]/g, (letter) => letter.toLowerCase());
 
 /**
  * Whether two layouts can name one table: the same name as SQLite compares
@@ -38,8 +39,8 @@ const folded = (name) => name.replace(/[A-Z]/g, (letter) => letter.toLowerCase()
  * @param {{ table: string, schema?: string }} a @param {{ table: string, schema?: string }} b
  */
 export function sameTable(a, b) {
-  return folded(a.table) === folded(b.table)
-    && (a.schema === undefined || b.schema === undefined || folded(a.schema) === folded(b.schema));
+  return foldIdentifier(a.table) === foldIdentifier(b.table)
+    && (a.schema === undefined || b.schema === undefined || foldIdentifier(a.schema) === foldIdentifier(b.schema));
 }
 
 /** Replace each `$exists-row` with a read of its answer, collecting the probes.

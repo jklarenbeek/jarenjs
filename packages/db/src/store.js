@@ -33,10 +33,10 @@ import { chain, toPromise, isThenable, attempt, abortReason, createStatementOwne
 import { createSessionRouter } from './sessions.js';
 import { isPlainOptions, refuseUnknownMembers, refuseUnknownModelMembers, readOptions, readControls } from './options.js';
 import { canonicalKeyText, namesNoNumber, noNumberKeyReason } from './key-text.js';
-import { planCollection, planEntity, planJoinTable, verifyShape } from './ddl.js';
+import { planCollection, planEntity, planJoinTable, refuseNameCollisions, verifyShape } from './ddl.js';
 import { translatePatch } from './patch-sql.js';
 import { createQueryEngine, createQueryState, createEntityQueryEngine, createLoadEngine } from './query.js';
-import { CLOSED_UNDER, admitCursor, admitSyncCursor, createCursor, createSyncCursor, drainPage, shareCursor, utf8Length } from './cursor.js';
+import { CLOSED_UNDER, admitCursor, admitSyncCursor, createCursor, createSyncCursor, shareCursor } from './cursor.js';
 import { refuseUnsupportedPragmaKeys, resolvePragmaRequests, configurePragmas, PRAGMA_NAMES } from './pragmas.js';
 import { createMaintenance } from './maintenance.js';
 import { createBackup } from './backup.js';
@@ -79,7 +79,7 @@ const IDENTITIES = new Set(['uuid', 'integer']);
  * the runtime agrees. `x-rename` is the migration planner's hint. */
 const MODEL_MEMBERS = ['$model', 'collections', 'entities'];
 const COLLECTION_MEMBERS = ['schema', 'key', 'identity', 'indexes', 'x-rename'];
-const INDEX_MEMBERS = ['name', 'path', 'expression', 'unique', 'derive', 'precision', 'dims', 'physical'];
+const INDEX_MEMBERS = ['name', 'path', 'expression', 'unique', 'where', 'derive', 'precision', 'dims', 'physical'];
 
 /**
  * @param {string} code
@@ -357,6 +357,7 @@ export function normalizeModel(model, expressions = undefined) {
           expression,
           canonical: canonicalExpression(expression),
           unique: index.unique === true,
+          where: index.where,
           derive: null,
           precision: undefined,
           physical: undefined,
@@ -373,10 +374,17 @@ export function normalizeModel(model, expressions = undefined) {
           `${indexDocPath}/path`);
       }
       const derive = normalizeDerive(index, paths, indexDocPath);
+      // a derived column set (an R*Tree, a vector, cells) is planned per
+      // driver and read whole; a condition narrows an index over member paths
+      if (index.where !== undefined && derive.kind) {
+        throw modelError('JD0004', 'a derived index takes no where: an index condition is declared on an index over member paths',
+          `${indexDocPath}/where`);
+      }
       indexes.push({
         name: index.name,
         paths,
         unique: index.unique === true,
+        where: index.where,
         derive: derive.kind,
         precision: derive.precision,
         physical: derive.physical,
@@ -2648,6 +2656,8 @@ export function openStore(model, options) {
               planJoinTable(joinName, mapping.joinTables[joinName], mapping, dialect));
           }
         }
+        // every table and index of the model in one namespace, before any is created
+        refuseNameCollisions([...plans.values(), ...entityPlans.values()].flatMap((plan) => plan.objects ?? []));
       }
       catch (error) {
         return failClosed(error);

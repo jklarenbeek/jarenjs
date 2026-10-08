@@ -31,7 +31,17 @@ const ENTITY_MEMBERS = new Set(['key', 'unique', 'index', 'default', 'column', '
 const BOOLEAN_MEMBERS = ['key', 'unique', 'index', 'version'];
 /** The closed members of an entity declaration (MODEL-FORMAT §9); `x-rename`
  * is the migration planner's hint. */
-const DECLARATION_MEMBERS = ['schema', 'physical', 'invariants', 'x-rename'];
+const DECLARATION_MEMBERS = ['schema', 'indexes', 'physical', 'invariants', 'x-rename'];
+/** The closed members of an entity-level index (MODEL-FORMAT §9.2). */
+const ENTITY_INDEX_MEMBERS = ['name', 'path', 'expression', 'unique', 'where'];
+/** The collection index members that need a generated column, which an entity
+ * table never has: recognized, and refused by name before any other member. */
+const GENERATED_INDEX_MEMBERS = ['derive', 'precision', 'dims', 'physical'];
+/** An entity index path: one top-level member. */
+const MEMBER_PATH = /^\$\.([A-Za-z_][A-Za-z0-9_]*)$/;
+/** Why an entity index reads only what a column holds. */
+const COLUMN_MAPPED = 'an entity index reads column-mapped top-level members as their columns hold them, '
+  + 'and an entity table has no generated column — map it as a column (a top-level scalar property)';
 const RELATION_MEMBERS = new Set(['to', 'many', 'via', 'through', 'onDelete']);
 const ON_DELETE = new Set(['cascade', 'restrict', 'setNull']);
 const ENTITY_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -181,6 +191,58 @@ function checkDefault(declared, docPath) {
   throw modelError(
     "a default is 'now', 'updated', 'uuid', 'auto', { value: … } or { query: … }",
     docPath);
+}
+
+/**
+ * Normalize an entity's `indexes` (MODEL-FORMAT §9.2): each one a closed
+ * object naming an index over column-mapped top-level members, possibly
+ * unique and partial. Which members map to columns is known once relations
+ * resolve, so `mappingOf` resolves the paths; the `where` is lowered, and
+ * refused, where it is rendered.
+ * @param {any} spec - the entity declaration
+ * @param {string} docPath - the entity's pointer
+ * @returns {{ name: string, paths: string[], unique: boolean, where: any, docPath: string }[]}
+ */
+function normalizeEntityIndexes(spec, docPath) {
+  const declared = spec.indexes;
+  if (declared === undefined) return [];
+  if (!Array.isArray(declared)) throw modelError('indexes must be an array', `${docPath}/indexes`);
+  if (declared.length > 0 && spec.physical !== undefined) {
+    throw modelError('an entity with a physical layout declares its indexes in physical.indexes', `${docPath}/indexes`, 'JD0004');
+  }
+  const names = new Set();
+  return declared.map((index, i) => {
+    const indexPath = `${docPath}/indexes/${i}`;
+    if (!isJsonObject(index)) throw modelError('an index must be an object', indexPath);
+    for (const member of GENERATED_INDEX_MEMBERS) {
+      if (Object.hasOwn(index, member))
+        throw modelError(`an entity index takes no '${member}': ${COLUMN_MAPPED}`, `${indexPath}/${member}`, 'JD0004');
+    }
+    refuseUnknownModelMembers(index, ENTITY_INDEX_MEMBERS, indexPath, 'index');
+    if (typeof index.name !== 'string' || !ENTITY_NAME.test(index.name))
+      throw modelError('an index needs an identifier name', `${indexPath}/name`);
+    if (names.has(index.name)) throw modelError(`duplicate index name '${index.name}'`, `${indexPath}/name`);
+    names.add(index.name);
+    if (index.unique !== undefined && typeof index.unique !== 'boolean')
+      throw modelError(`unique is true or false, got ${JSON.stringify(index.unique)}`, `${indexPath}/unique`);
+    if (index.expression !== undefined) {
+      // SQLite maintains an index over a function only on a connection that
+      // registered it: every other writer of the table could not insert or
+      // delete a row
+      throw modelError('an entity index over an expression is not supported: SQLite maintains it only on a connection '
+        + 'that registered its function, which would leave the table unwritable for every other writer — '
+        + 'index the member itself, or declare the expression index on a collection', `${indexPath}/expression`, 'JD0004');
+    }
+    const paths = Array.isArray(index.path) ? index.path : [index.path];
+    if (paths.length === 0 || paths.some((path) => typeof path !== 'string' || path === ''))
+      throw modelError('an index path is a $.<member> string (a composite index takes a non-empty array of them)', `${indexPath}/path`);
+    for (const path of paths) {
+      if (!MEMBER_PATH.test(path))
+        throw modelError(`the index path '${path}' is not one member written $.<member>: ${COLUMN_MAPPED}`, `${indexPath}/path`, 'JD0004');
+    }
+    return { name: index.name, paths: paths.map((path) => path.slice(2)), unique: index.unique === true,
+      where: index.where, docPath: indexPath };
+  });
 }
 
 /**
@@ -395,6 +457,7 @@ export function normalizeEntities(model) {
       keys,
       relations,
       version: versions.length === 1 ? versions[0].name : null,
+      indexes: normalizeEntityIndexes(spec, docPath),
       physical: normalizePhysical(spec.physical, properties, keys, docPath),
       invariants: normalizeInvariants(spec.invariants, `${docPath}/invariants`),
     });
@@ -628,6 +691,31 @@ export function compileEntityModel(model) {
   return { entities, mapping: mappingOf(model, entities) };
 }
 
+/**
+ * An entity's declared indexes over its columns: each path's member must have
+ * a column of its own — a mapped scalar, an epoch column, or the column a
+ * foreign key adds — and the index lists those columns in declared order.
+ * @param {any} entity - normalized @param {any[]} columns @param {any[]} foreignKeys
+ * @returns {{ name: string, columns: string[], unique: boolean, where?: any }[]}
+ */
+function entityIndexesOf(entity, columns, foreignKeys) {
+  const mapped = new Set([...columns.map((column) => column.name), ...foreignKeys.map((fk) => fk.column)]);
+  return entity.indexes.map((/** @type {any} */ index) => {
+    for (const member of index.paths) {
+      if (mapped.has(member)) continue;
+      const property = entity.properties.get(member);
+      throw modelError(property === undefined
+        ? `the index path '$.${member}' names no property of entity '${entity.name}'`
+        : property.relation !== undefined
+          ? `the index path '$.${member}' names a relation, which has no column of its own — index the foreign key it declares`
+          : `the index path '$.${member}' reads '${member}', which the entity's document holds: ${COLUMN_MAPPED}`,
+      `${index.docPath}/path`, 'JD0004');
+    }
+    return { name: index.name, columns: [...index.paths], unique: index.unique,
+      ...(index.where === undefined ? {} : { where: index.where }) };
+  });
+}
+
 /** The storage an entity's key column is declared with: its property's
  * scalar type, or the epoch integer a date-time key is kept as.
  * @param {any} entity @returns {string} */
@@ -735,6 +823,9 @@ function mappingOf(model, entities) {
       indexes,
       document,
       version: entity.version ?? null,
+      // the entity-level indexes, apart from the one-column entries above:
+      // a composite or partial unique index is never a unique column
+      ...(entity.indexes.length ? { entityIndexes: entityIndexesOf(entity, columns, foreignKeys) } : {}),
       ...(entity.invariants.length ? { invariants: model.entities[entity.name].invariants } : {}),
     };
   }
