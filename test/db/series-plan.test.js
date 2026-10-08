@@ -24,7 +24,7 @@ import {
   planQuery, normalizeModel, planCollection, sqliteDialect, assertNoSqlText, PLAN_VERSION,
 } from '@jarenjs/db';
 import { emitPlan } from '../../packages/db/src/emit.js';
-import { SERIES_REASONS, singularSelector } from '../../packages/db/src/series.js';
+import { SERIES_REASONS, filterFacts, singularSelector } from '../../packages/db/src/series.js';
 
 const ORIGIN = 1767225600000;
 
@@ -495,5 +495,34 @@ describe('the plan stamp and the tripwire', () => {
     assert.strictEqual(planned.plan.rank, null);
     assert.strictEqual(planned.plan.aggregate, null);
     assertNoSqlText(planned.plan);
+  });
+});
+
+describe('what a pushed filter pins for a seek', () => {
+  const PIN_MODEL = { $model: '0.1', collections: { rows: {
+    schema: { type: 'object', properties: { id: { type: 'string' }, series: { type: 'string' }, at: { type: 'integer' } } },
+    key: '/id', indexes: [{ name: 'by_series', path: '$.series' }, { name: 'by_at', path: '$.at' }] } } };
+  const rows = normalizeModel(PIN_MODEL).get('rows');
+  const PIN_SHAPE = { collection: 'rows', schema: rows.schema,
+    columnByCanonical: planCollection('rows', rows, sqliteDialect).columnByCanonical };
+  const series = (/** @type {any} */ value) => ({ $eq: ['$it.series', value] });
+  const pinnedBy = (/** @type {any} */ predicate) => {
+    const planned = planQuery({ $for: { it: '$[*]' }, $where: predicate, $return: '$it' }, PIN_SHAPE);
+    assert.strictEqual(planned.mode, 'native');
+    return [...filterFacts(planned.plan.filter).pinned];
+  };
+
+  it('a membership list pins its column exactly as the equalities it stands for did', () => {
+    // literal and external equalities of one member: the literals regroup
+    // into one list beside the external's comparison, and the column is
+    // still the one every item reads
+    assert.deepStrictEqual(pinnedBy({ $or: [series('a'), series('b'), series('$x')] }), ['gx_series']);
+    assert.deepStrictEqual(pinnedBy({ $or: [series('a'), series('b')] }), ['gx_series']);
+    assert.deepStrictEqual(pinnedBy({ $eq: ['$it.series', { $seq: ['a', 'b'] }] }), ['gx_series']);
+    assert.deepStrictEqual(pinnedBy({ $eq: ['$it.series', '$ids[*]'] }), ['gx_series']);
+    assert.deepStrictEqual(pinnedBy({ $and: [series('a'), { $gt: ['$it.at', 5] }] }), ['gx_series']);
+    // two columns, or a ray, decide no seek
+    assert.deepStrictEqual(pinnedBy({ $or: [series('a'), { $eq: ['$it.at', 5] }] }), []);
+    assert.deepStrictEqual(pinnedBy({ $or: [series('a'), series('b'), { $gt: ['$it.at', 5] }] }), []);
   });
 });

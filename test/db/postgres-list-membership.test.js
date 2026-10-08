@@ -4,8 +4,10 @@
  * (the SQLite shapes are `list-membership.test.js`): `$eq` against a bound
  * list, a `$seq` of 5,000 literals and a 5,000-term `$or` of equalities
  * on one member each bind the list as ONE JSON value, the entity column's
- * index seeks it, and a 5,000-term chain no fold applies to nests in
- * halves — it prepares and explains. Every answer equals the residual's.
+ * index seeks it, and a chain mixing equalities and ranges regroups by
+ * member to two bound values. A chain nothing regroups (`$and` pairs)
+ * nests in halves and costs the server per leaf and row, so it stays
+ * short here. Every answer equals the residual's.
  */
 import { after, before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
@@ -38,9 +40,14 @@ const overItems = (predicate) => ({ $for: { it: '$[*]' }, $where: predicate, $re
 /** @param {any} predicate */
 const overItem = (predicate) => ({ $for: { it: '$.Item[*]' }, $where: predicate, $orderby: ['$it.id'], $return: '$it.id' });
 const orOfEqualities = () => ({ $or: IDS.map((id) => ({ $eq: ['$it.sku', id] })) });
-/** An `$or` no fold applies to, of `terms` terms: equalities on the sku, ranges on n. */
+/** An `$or` of `terms` terms mixing equalities on the sku with ranges on n: it regroups to one list and one bound. */
 const mixedChain = (terms = 5000) => ({ $or: IDS.slice(0, terms / 2).flatMap((id, i) =>
   [{ $eq: ['$it.sku', id] }, { $gt: ['$it.n', 100000 + i] }]) });
+/** An `$or` of `terms / 2` `$and` pairs, which nothing regroups: each pair compares the sku and n. */
+const pairs = (/** @type {number} */ terms) => ({ $or: IDS.slice(0, terms / 2).map((id, i) =>
+  ({ $and: [{ $eq: ['$it.sku', id] }, { $ge: ['$it.n', i] }] })) });
+/** The rows the first `terms` leaves of either chain select. @param {number} terms */
+const expectedFor = (terms) => sorted(IDS.slice(0, terms / 2).map((id) => `i${id.slice(1)}`));
 /** @param {string[]} ids */
 const sorted = (ids) => [...ids].sort();
 
@@ -112,17 +119,38 @@ describe('PostgreSQL: membership over thousands of values', { skip: !url && 'JAR
     assert.deepEqual(sorted(await store.collection('items').execute(overItems(orOfEqualities()))), sorted(EXPECTED));
   });
 
-  it('a 5,000-term chain no fold applies nests in halves: it prepares, explains and answers', async () => {
+  it('a mixed chain regroups to one list and one bound: two values bound, the residual\'s answer, on both forms', async () => {
+    const items = store.collection('items');
+    const plan = await items.explain(overItems(mixedChain(400)));
+    assert.equal(plan.mode, 'native');
+    assert.deepEqual(plan.params, [{ literal: JSON.stringify(IDS.slice(0, 200)) }, { literal: 100000 }]);
+    assert.deepEqual(sorted(await items.execute(overItems(mixedChain(400)))), expectedFor(400));
+    assert.deepEqual(sorted(await items.execute(overItems(mixedChain(400)), { pushdown: false })), expectedFor(400));
+    const entityPlan = await store.explain(overItem(mixedChain(400)));
+    assert.equal(entityPlan.mode, 'native');
+    assert.equal(placeholders(entityPlan.sql), 2);
+    assert.deepEqual(await store.execute(overItem(mixedChain(400))), expectedFor(400));
+    // the whole 5,000-term chain is the same two values
+    assert.deepEqual((await items.explain(overItems(mixedChain()))).params,
+      [{ literal: JSON.stringify(IDS.slice(0, 2500)) }, { literal: 100000 }]);
+    assert.deepEqual(sorted(await items.execute(overItems(mixedChain()))), sorted(EXPECTED));
     assert.deepEqual(await store.execute(overItem(mixedChain())), sorted(EXPECTED));
-    assert.equal((await store.explain(overItem(mixedChain()))).mode, 'native');
     assert.equal((await store.entity('Item').load({ where: mixedChain() })).length, EXPECTED.length);
-    // a collection re-derives the member's JSON type in every term, so an
-    // unfoldable chain costs per term and row here (2,000 terms over 2,000
-    // rows: about 16 s, flat or nested alike): a shorter one for the answer
-    const short = overItems(mixedChain(300));
-    const expected = IDS.slice(0, 150).map((id) => `i${id.slice(1)}`);
-    assert.deepEqual(sorted(await store.collection('items').execute(short)), sorted(expected));
-    assert.equal((await store.collection('items').explain(short)).mode, 'native');
+  });
+
+  it('a chain of $and pairs, which nothing regroups, nests in halves: it prepares, explains and answers', async () => {
+    // every leaf of an unregrouped chain reads its member's typed extraction
+    // per row, so its cost is per leaf and row, and a long enough one is
+    // priced into a JIT compile the server cannot cancel: short chains here
+    assert.deepEqual(await store.execute(overItem(pairs(400))), expectedFor(400));
+    assert.equal((await store.explain(overItem(pairs(400)))).mode, 'native');
+    assert.equal((await store.entity('Item').load({ where: pairs(400) })).length, 200);
+    const short = overItems(pairs(300));
+    assert.deepEqual(sorted(await store.collection('items').execute(short)), expectedFor(300));
+    assert.deepEqual(sorted(await store.collection('items').execute(short, { pushdown: false })), expectedFor(300));
+    const plan = await store.collection('items').explain(short);
+    assert.equal(plan.mode, 'native');
+    assert.equal(plan.params.length, 300, 'one value per leaf: nothing regrouped');
   });
 
   it('a number list compares as numeric, the type a number column is declared as, so the column index seeks it', async () => {

@@ -2868,10 +2868,34 @@ list is the present-null test and a `true`/`false` the boolean one, so
 the answer is `$eq`'s. A bound list binds when every item it reaches is
 a string or a finite number — a `null`, boolean, object or array item
 diverts the call at bind time — and against a boolean column or a
-document path a bound list stays residual. A long `$and`/`$or` that
-does not fold nests in halves (depth log₂ n), so a 5,000-term chain
-prepares and explains where a flat one met SQLite's expression-depth
-limit near 1,000 terms.
+document path a bound list stays residual.
+
+An `$or` regroups by member once each of its items is translated,
+nested `$or`s flattened first: two or more equalities of one member
+against string or number literals become that one membership list
+(strings and numbers together; each kind is compared only by its own
+kind, as a literal list is), and two or more rays (`$lt`, `$le`, `$gt`,
+`$ge`) of one member, one JSON type and one direction become one bound
+— the least lower or the greatest upper by the engine's own order
+(numbers by value, strings by code point), the inclusive operator
+winning a tie — so a chain alternating equalities on one member with
+ranges on another binds two values however long it is. A group takes
+the place of its first item; every other item — a boolean or `null`
+literal, an external, a `$ne`, a spatial or interval predicate with its
+pre-filter — keeps its place and its order; mixed types, opposite
+directions and different members never share a bound; and an `$or`
+holding an item the planner refuses (a compound literal, an operator
+over a member) stays whole in the engine with that item's reason:
+nothing is split between the statement and the engine. Three literal
+comparisons keep their place although their member regroups: one
+against a number that is not finite or a string that is no JSON text (a
+lone surrogate), which no bound could carry exactly, and an equality on
+an entity's instant column, whose own comparison narrows the column's
+index by an epoch range that a list of document strings cannot (its
+rays still fold, and the folded bound keeps that range). A long `$and`,
+or an `$or` nothing regroups (`$and` pairs), nests in halves (depth
+log₂ n), so 5,000 leaves prepare and explain where a flat chain met
+SQLite's expression-depth limit near 1,000 terms.
 
 ### 10.2 Joins
 

@@ -191,7 +191,7 @@ export function filterFacts(filter) {
   // the bare one over a declared column that a refinement pushes. A
   // seek reads the same column either way, so the facts must too
   const columnOf = (pred) => (pred.p === 'colCmp' ? pred.column
-    : pred.p === 'cmp' ? pred.ref.column : null);
+    : pred.p === 'cmp' || pred.p === 'in' ? pred.ref.column : null);
   /** @type {Set<string>} */
   const pinned = new Set();
   /** @type {Map<string, any>} */
@@ -210,15 +210,17 @@ export function filterFacts(filter) {
       pred.items.forEach(walk);
       return;
     }
-    // a disjunction of equalities over ONE column is a membership test,
-    // and a membership test still seeks — once per value. It pins the
-    // column exactly as a single equality does, which is why an as-of
-    // join over several keys reads its index rather than the table
+    // a disjunction of equalities over ONE column is a membership test
+    // — spelled as one bound list or as the equalities themselves — and
+    // a membership test still seeks, once per value. It pins the column
+    // exactly as a single equality does, which is why an as-of join
+    // over several keys reads its index rather than the table
+    const pins = (item) => item.p === 'in' || item.op === 'eq';
     if (pred.p === 'or') {
       const columns = new Set();
       for (const item of pred.items) {
         const named = columnOf(item);
-        if (named === null || item.op !== 'eq') return;
+        if (named === null || !pins(item)) return;
         columns.add(named);
       }
       if (columns.size === 1) pinned.add([...columns][0]);
@@ -226,11 +228,11 @@ export function filterFacts(filter) {
     }
     const column = columnOf(pred);
     if (column === null) return;
-    const operand = 'lit' in pred.operand ? pred.operand.lit : undefined;
-    if (pred.op === 'eq') {
+    if (pins(pred)) {
       pinned.add(column);
       return;
     }
+    const operand = 'lit' in pred.operand ? pred.operand.lit : undefined;
     if (pred.op === 'ge' || pred.op === 'gt') {
       const entry = boundOf(column);
       entry.from = operand ?? null;

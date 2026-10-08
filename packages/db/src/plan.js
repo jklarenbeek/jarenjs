@@ -41,6 +41,7 @@ import { analyzeQuery, AST_VERSION, NODE_KINDS } from '@jarenjs/json/query';
 import {
   getEpochOfDateTimeRFC3339, getEpochOfDateOnlyRFC3339,
 } from '@jarenjs/core/dates/rfc3339';
+import { compareJsonScalarLt } from '@jarenjs/core/object';
 import { compileBuckets, resampleSeries, toEpoch } from '@jarenjs/core/series';
 
 import { selectPlan, conjoin, PLAN_VERSION } from './algebra.js';
@@ -477,10 +478,11 @@ function isScalarLiteral(value) {
 // one side equals any item of the other. Against a sequence of scalar
 // literals (`{ $seq: [...] }`) or every item of an external
 // (`'$ids[*]'`), a singular member is therefore a membership test — and
-// so is an `$or` whose items all compare that one member with a scalar.
-// Each plans to ONE list predicate the emitter binds as one JSON value,
-// whatever its length: a flat `OR` of n equalities is n nested
-// expressions, which SQLite refuses past about a thousand.
+// so are the equalities of one member inside an `$or`, which the
+// disjunction's regroup (`planDisjunction`) gathers into one. Each plans
+// to ONE list predicate the emitter binds as one JSON value, whatever
+// its length: a flat `OR` of n equalities is n nested expressions, which
+// SQLite refuses past about a thousand.
 
 /**
  * The list side of a membership comparison, or null: a `$seq` of scalar
@@ -535,28 +537,108 @@ function planMembership(args, itSlot, shape) {
 }
 
 /**
- * An `$or` of two or more `$eq`s, each between ONE member and a scalar
- * literal (either order), folded into that member's membership — or null.
- * @param {any[]} items @param {number} itSlot @param {any} shape
+ * The group a translated item of a disjunction regroups into, or null:
+ * an exact comparison of one member with a finite number or a
+ * well-formed string literal — an equality (one group per member), or
+ * a ray (one group per member, JSON type and direction; the planned
+ * operator already carries the direction of a literal that stood on
+ * the left). A boolean or null became a type test, an external or a
+ * list carries no literal, and a promotion carries a pre-filter: none
+ * of them regroups. Nor does a literal no bound can carry exactly —
+ * NaN and the infinities compare as nothing to the engine and have no
+ * JSON spelling, and a lone surrogate is no JSON text — or an equality
+ * on an instant column, whose own comparison narrows the column's
+ * index by an epoch range that one list of document strings cannot
+ * (its rays still fold: the folded bound keeps that range).
+ * @param {any} outcome - a translated predicate
+ * @param {any} shape - the binding's shape; an entity's names its flavors
+ * @returns {string | null}
  */
-function foldMembership(items, itSlot, shape) {
-  if (items.length < 2) return null;
-  /** @type {any} */
-  let ref = null;
-  const list = [];
-  for (const item of items) {
-    if (item.kind !== 'op' || item.name !== '$eq' || item.args.length !== 2) return null;
-    let found = null;
-    for (const [member, value] of [[item.args[0], item.args[1]], [item.args[1], item.args[0]]]) {
-      const candidate = value.kind === 'literal' && isScalarLiteral(value.value) ? pathRef(member, itSlot, shape) : null;
-      if (candidate !== null) { found = { ref: candidate, value: value.value }; break; }
-    }
-    if (found === null) return null;
-    if (ref !== null && canonicalOf(found.ref.segments) !== canonicalOf(ref.segments)) return null;
-    ref ??= found.ref;
-    list.push(found.value);
+function regroupKey(outcome, shape) {
+  const pred = outcome.pred;
+  if (pred.p !== 'cmp' || pred.op === 'ne' || !('lit' in pred.operand)
+    || outcome.prefilters.length > 0 || outcome.refinements.length > 0) return null;
+  const lit = pred.operand.lit;
+  const type = typeof lit;
+  if (type === 'number' ? !Number.isFinite(lit) : type !== 'string' || !lit.isWellFormed()) return null;
+  const member = canonicalOf(pred.ref.segments);
+  if (pred.op !== 'eq') return `${member}\n${type}\n${pred.op === 'gt' || pred.op === 'ge' ? '>' : '<'}`;
+  return shape.entityFlavors?.get(member)?.flavor === 'entity-epoch' ? null : member;
+}
+
+/**
+ * One group's translation: a lone item as it was; two or more
+ * equalities as ONE membership list; two or more rays as ONE bound —
+ * the least lower or the greatest upper by the engine's own order
+ * (numbers by value, strings by code point: `compareJsonScalarLt`,
+ * never JavaScript's `<`), the inclusive operator winning a tie.
+ * @param {{ ref: any, members: any[] }} group
+ * @returns {any}
+ */
+function foldGroup(group) {
+  const members = group.members;
+  if (members.length === 1) return members[0];
+  if (members[0].pred.op === 'eq')
+    return membershipPlan(group.ref, { list: members.map((outcome) => outcome.pred.operand.lit) });
+  const lower = members[0].pred.op === 'gt' || members[0].pred.op === 'ge';
+  let best = members[0].pred;
+  for (let i = 1; i < members.length; i++) {
+    const pred = members[i].pred;
+    const [a, b] = lower ? [pred.operand.lit, best.operand.lit] : [best.operand.lit, pred.operand.lit];
+    if (compareJsonScalarLt(a, b) || (!compareJsonScalarLt(b, a) && (pred.op === 'ge' || pred.op === 'le')))
+      best = pred;
   }
-  return membershipPlan(ref, { list });
+  return members.find((outcome) => outcome.pred === best);
+}
+
+/**
+ * A disjunction, regrouped by member. The normalizer hands the planner
+ * a flat `$or` (a nest of `$or`s is one call, its items in order), and
+ * every item is translated on its own first: one the planner refuses
+ * refuses the whole `$or` — a general comparison never raises, so no
+ * group could hide an error the engine would have reported. The exact
+ * literal comparisons then regroup ({@link regroupKey}): same-member
+ * equalities into one list (strings and numbers together — the emitter
+ * compares each kind by its own guarded branch), same-member rays of
+ * one JSON type and one direction into one bound ({@link foldGroup}).
+ * A group stands where its first item stood; everything else keeps its
+ * order. Mixed types, opposite directions and other members never
+ * share a bound, and an `$or` is never split between the statement and
+ * the engine.
+ * @param {any[]} args - the `$or`'s items
+ * @param {number} itSlot
+ * @param {any} shape
+ * @returns {any}
+ */
+function planDisjunction(args, itSlot, shape) {
+  /** @type {any[]} a translated item, or the group standing in its first item's place */
+  const slots = [];
+  /** @type {Map<string, { ref: any, members: any[] }>} */
+  const groups = new Map();
+  for (const arg of args) {
+    const outcome = planPredicate(arg, itSlot, shape);
+    if ('refusal' in outcome) return outcome;
+    const key = regroupKey(outcome, shape);
+    if (key === null) {
+      slots.push(outcome);
+      continue;
+    }
+    let group = groups.get(key);
+    if (group === undefined) {
+      group = { ref: outcome.pred.ref, members: [] };
+      groups.set(key, group);
+      slots.push(group);
+    }
+    group.members.push(outcome);
+  }
+  const outcomes = slots.map((slot) => ('members' in slot ? foldGroup(slot) : slot));
+  if (outcomes.length === 1) return outcomes[0];
+  // an implied child makes the composition a SUPERSET either way, so
+  // it still narrows honestly — it just stops deciding
+  const refinements = outcomes.flatMap((outcome) => outcome.refinements);
+  return { pred: { p: 'or', items: outcomes.map((outcome) => outcome.pred) },
+    exact: refinements.length === 0,
+    prefilters: outcomes.flatMap((outcome) => outcome.prefilters), refinements };
 }
 
 
@@ -1416,24 +1498,21 @@ function planPredicate(node, itSlot, shape) {
       KIND_REASONS[node.kind] ?? PREDICATE_REASONS.notPredicate) };
   }
 
-  if (node.name === '$or') {
-    const folded = foldMembership(node.args, itSlot, shape);
-    if (folded !== null) return folded;
-  }
-  if (node.name === '$and' || node.name === '$or') {
+  if (node.name === '$or') return planDisjunction(node.args, itSlot, shape);
+  if (node.name === '$and') {
     const items = [];
     const prefilters = [];
     const refinements = [];
     for (const arg of node.args) {
       const inner = planPredicate(arg, itSlot, shape);
-      if ('refusal' in inner) return inner; // partial $or/$and is not splittable here
+      if ('refusal' in inner) return inner; // a partial $and is not splittable here
       items.push(inner.pred);
       prefilters.push(...inner.prefilters);
       refinements.push(...inner.refinements);
     }
     // an implied child makes the composition a SUPERSET either way, so
     // it still narrows honestly — it just stops deciding
-    return { pred: { p: node.name === '$and' ? 'and' : 'or', items },
+    return { pred: { p: 'and', items },
       exact: refinements.length === 0, prefilters, refinements };
   }
   if (node.name === '$not') {

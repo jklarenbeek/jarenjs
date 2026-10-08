@@ -4,14 +4,17 @@
  * `$eq` between a member and a list — a `$seq` of scalars, every item of
  * an external (`$ids[*]`), or an `$or` of equalities on that one member —
  * plans to ONE list predicate, bound as one JSON value whatever the
- * list's length, and the member's index seeks it. A long `$or` that does
- * not fold nests in halves, so a 5,000-term chain prepares and explains;
- * as a flat chain it failed past 996 terms ("Expression tree is too
- * large"), and explain() with it. The answers are the engine's: the
- * differential oracle's membership groups hold indexed, unindexed and
- * forced-residual agreement for collections and entities on both
- * dialects. This file holds the shape — one statement, one list value,
- * an index search — at the sizes that used to refuse.
+ * list's length, and the member's index seeks it. A long `$or` regroups
+ * by member — its equalities on one member become that one list, its
+ * rays on one member one bound — so a 5,000-term chain mixing the two
+ * binds two values, nested or flat. A chain nothing regroups (`$and`
+ * pairs) nests in halves, so 5,000 leaves prepare and explain where a
+ * flat chain failed past 996 terms ("Expression tree is too large"), and
+ * explain() with it. The answers are the engine's: the differential
+ * oracle's membership groups hold indexed, unindexed and forced-residual
+ * agreement for collections and entities on both dialects. This file
+ * holds the shape — one statement, one list value, an index search — at
+ * the sizes that used to refuse.
  */
 import { after, before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
@@ -50,9 +53,14 @@ const overItems = (predicate) => ({ $for: { it: '$[*]' }, $where: predicate, $re
 const overItem = (predicate) => ({ $for: { it: '$.Item[*]' }, $where: predicate, $return: '$it.id' });
 /** An `$or` of 5,000 equalities on the sku, in the list's order. */
 const orOfEqualities = (/** @type {string} */ member) => ({ $or: IDS.map((id) => ({ $eq: [member, id] })) });
-/** A 5,000-term `$or` no fold applies to: equalities on the sku, ranges on n. */
-const mixedChain = (/** @type {string} */ it) => ({ $or: IDS.slice(0, 2500).flatMap((id, i) =>
+/** An `$or` of `terms` terms mixing equalities on the sku with ranges on n: it regroups to one list and one bound. */
+const mixedChain = (/** @type {string} */ it, terms = 5000) => ({ $or: IDS.slice(0, terms / 2).flatMap((id, i) =>
   [{ $eq: [`${it}.sku`, id] }, { $gt: [`${it}.n`, 100000 + i] }]) });
+/** The regrouped form of `mixedChain`: the one list and the least bound, in that order. */
+const regroupedChain = (/** @type {string} */ it) => ({ $or: [where(`${it}.sku`, { $seq: IDS.slice(0, 2500) }), { $gt: [`${it}.n`, 100000] }] });
+/** A 5,000-leaf `$or` of `$and` pairs, which nothing regroups: each pair compares the sku and n. */
+const pairs = (/** @type {string} */ it) => ({ $or: IDS.slice(0, 2500).map((id, i) =>
+  ({ $and: [{ $eq: [`${it}.sku`, id] }, { $ge: [`${it}.n`, i] }] })) });
 
 describe('membership over thousands of values (SQLite)', () => {
   /** @type {any} */
@@ -138,17 +146,42 @@ describe('membership over thousands of values (SQLite)', () => {
     assert.equal(loaded.length, EXPECTED.length);
   });
 
-  // the residual over 5,000 terms is the slow half: seconds on Node, longer under Bun
-  it('a 5,000-term chain no fold applies to nests in halves: it prepares, explains and answers', { timeout: 60_000 }, async () => {
+  it('a 5,000-term chain mixing equalities and ranges regroups to one list and one bound on every path', { timeout: 60_000 }, async () => {
     const items = store.collection('items');
     const mixed = overItems(mixedChain('$it'));
     assert.deepEqual(await items.execute(mixed), EXPECTED);
     assert.deepEqual(await items.execute(mixed, { pushdown: false }), EXPECTED, 'the residual agrees');
-    assert.equal((await items.explain(mixed)).mode, 'native');
+    const plan = await items.explain(mixed);
+    assert.equal(plan.mode, 'native');
+    // two values: the 2,500 skus as one JSON value, and the least of the bounds
+    assert.deepEqual(plan.params, [{ literal: JSON.stringify(IDS.slice(0, 2500)) }, { literal: 100000 }]);
+    assert.equal(plan.sql, (await items.explain(overItems(regroupedChain('$it')))).sql);
     const entityMixed = overItem(mixedChain('$it'));
     assert.deepEqual(await store.execute(entityMixed), EXPECTED);
-    assert.equal((await store.explain(entityMixed)).mode, 'native');
+    const entityPlan = await store.explain(entityMixed);
+    assert.equal(entityPlan.mode, 'native');
+    assert.equal(placeholders(entityPlan.sql), 2);
+    assert.equal(entityPlan.sql, (await store.explain(overItem(regroupedChain('$it')))).sql);
     assert.equal((await store.entity('Item').load({ where: mixedChain('$it') })).length, EXPECTED.length);
+    // a shorter chain is the same two values: its 200 skus and the least bound
+    assert.deepEqual((await items.explain(overItems(mixedChain('$it', 400)))).params,
+      [{ literal: JSON.stringify(IDS.slice(0, 200)) }, { literal: 100000 }]);
+    assert.equal(placeholders((await store.explain(overItem(mixedChain('$it', 400)))).sql), 2);
+  });
+
+  // the residual over 5,000 leaves is the slow half: seconds on Node, longer under Bun
+  it('a 5,000-leaf chain of $and pairs, which nothing regroups, nests in halves: it prepares, explains and answers', { timeout: 60_000 }, async () => {
+    const items = store.collection('items');
+    const paired = overItems(pairs('$it'));
+    assert.deepEqual(await items.execute(paired), EXPECTED);
+    assert.deepEqual(await items.execute(paired, { pushdown: false }), EXPECTED, 'the residual agrees');
+    const plan = await items.explain(paired);
+    assert.equal(plan.mode, 'native');
+    assert.equal(plan.params.length, 5000, 'one value per leaf: nothing regrouped');
+    const entityPaired = overItem(pairs('$it'));
+    assert.deepEqual(await store.execute(entityPaired), EXPECTED);
+    assert.equal((await store.explain(entityPaired)).mode, 'native');
+    assert.equal((await store.entity('Item').load({ where: pairs('$it') })).length, EXPECTED.length);
     // a conjunction nests alike: 5,000 inequalities
     const conjunction = overItem({ $and: IDS.map((id) => ({ $ne: ['$it.sku', id] })) });
     assert.equal((await store.execute(conjunction)).length, ROWS / 2);
@@ -273,6 +306,10 @@ describe('membership edges', () => {
       assert.deepEqual(await items.execute(overItems(nested)), 'i1');
       assert.deepEqual(await items.execute(overItems(nested), { pushdown: false }), 'i1');
       assert.equal((await items.explain(overItems(nested))).mode, 'native');
+      // flattened without a call per level, the chain is the one list the flat $seq binds
+      const flat = where('$it.sku', { $seq: Array.from({ length: 5000 }, (_, i) => `s${i}`) });
+      assert.equal((await items.explain(overItems(nested))).sql, (await items.explain(overItems(flat))).sql);
+      assert.equal((await store.explain(overItem(nested))).sql, (await store.explain(overItem(flat))).sql);
       assert.deepEqual(await store.execute(overItem(nested)), 'i1');
       assert.deepEqual(await store.execute(overItem(nested), { pushdown: false }), 'i1');
       assert.equal((await store.explain(overItem(nested))).mode, 'native');

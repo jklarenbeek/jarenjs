@@ -866,3 +866,174 @@ describe('a grouping the plan can rebuild lowers to a GROUP BY', () => {
     assert.strictEqual(countPath.mode, 'set');
   });
 });
+
+describe('a disjunction regrouped by member', () => {
+  const AGE = { segments: [{ name: 'age' }], type: 'integer', column: 'gx_age' };
+  const NAME = { segments: [{ name: 'name' }], type: 'string', column: null };
+  const ACTIVE = { segments: [{ name: 'active' }], type: 'boolean', column: null };
+  const age = (/** @type {string} */ op, /** @type {any} */ value) => ({ [op]: ['$it.age', value] });
+  const name = (/** @type {any} */ value) => ({ $eq: ['$it.name', value] });
+  const filterOf = (/** @type {any} */ predicate, shape = SHAPE) => planQuery(where(predicate), shape).plan.filter;
+
+  it('equalities of one member become one list and its rays one bound, each at its group\'s first position', () => {
+    const planned = planQuery(where({ $or: [age('$gt', 30), name('ann'), age('$gt', 21),
+      { $ne: ['$it.name', 'zed'] }, name('bob'), age('$ge', 21)] }), SHAPE);
+    assert.strictEqual(planned.mode, 'native');
+    assertNoSqlText(planned.plan);
+    assert.deepStrictEqual(planned.plan.filter, { p: 'or', items: [
+      { p: 'cmp', op: 'ge', ref: AGE, operand: { lit: 21 } },
+      { p: 'in', ref: NAME, operand: { list: ['ann', 'bob'] } },
+      { p: 'cmp', op: 'ne', ref: NAME, operand: { lit: 'zed' } },
+    ] });
+  });
+
+  it('the literal may sit on either side, and the bound is the engine\'s order: numbers by value, strings by code point, the inclusive operator on a tie', () => {
+    assert.deepStrictEqual(filterOf({ $or: [{ $lt: [30, '$it.age'] }, age('$gt', 40)] }),
+      { p: 'cmp', op: 'gt', ref: AGE, operand: { lit: 30 } });
+    assert.deepStrictEqual(filterOf({ $or: [age('$lt', 5), age('$le', 9), age('$lt', 9)] }),
+      { p: 'cmp', op: 'le', ref: AGE, operand: { lit: 9 } });
+    for (const items of [[age('$gt', 21), age('$ge', 21)], [age('$ge', 21), age('$gt', 21)]])
+      assert.deepStrictEqual(filterOf({ $or: items }), { p: 'cmp', op: 'ge', ref: AGE, operand: { lit: 21 } });
+    // U+FFFF sorts below U+10000 by code point and above it by UTF-16 code unit
+    assert.deepStrictEqual(filterOf({ $or: [{ $gt: ['$it.name', '\u{10000}'] }, { $gt: ['$it.name', '￿'] }] }),
+      { p: 'cmp', op: 'gt', ref: NAME, operand: { lit: '￿' } });
+  });
+
+  it('directions, JSON types and members never share a bound', () => {
+    assert.deepStrictEqual(filterOf({ $or: [age('$gt', 21), age('$lt', 65), { $gt: ['$it.name', 'm'] }, age('$gt', 'x')] }),
+      { p: 'or', items: [
+        { p: 'cmp', op: 'gt', ref: AGE, operand: { lit: 21 } },
+        { p: 'cmp', op: 'lt', ref: AGE, operand: { lit: 65 } },
+        { p: 'cmp', op: 'gt', ref: NAME, operand: { lit: 'm' } },
+        { p: 'cmp', op: 'gt', ref: AGE, operand: { lit: 'x' } },
+      ] });
+  });
+
+  it('booleans, null and externals never fold, and a lone equality keeps its place', () => {
+    const isTrue = { p: 'typeIs', ref: ACTIVE, types: ['true'], positive: true };
+    assert.deepStrictEqual(filterOf({ $or: [{ $eq: ['$it.active', true] }, { $eq: ['$it.active', true] }] }),
+      { p: 'or', items: [isTrue, isTrue] });
+    const isNull = { p: 'typeIs', ref: NAME, types: ['null'], positive: true };
+    assert.deepStrictEqual(filterOf({ $or: [name(null), name(null), name('a')] }),
+      { p: 'or', items: [isNull, isNull, { p: 'cmp', op: 'eq', ref: NAME, operand: { lit: 'a' } }] });
+    assert.deepStrictEqual(filterOf({ $or: [age('$eq', '$lo'), age('$eq', '$hi')] }), { p: 'or', items: [
+      { p: 'cmp', op: 'eq', ref: AGE, operand: { ext: 'lo' } },
+      { p: 'cmp', op: 'eq', ref: AGE, operand: { ext: 'hi' } },
+    ] });
+  });
+
+  it('a compound literal or any other refused item refuses the whole disjunction: nothing is split', () => {
+    for (const [item, id] of [
+      [{ $eq: ['$it.name', { $const: ['x'] }] }, 'predicate.compoundLiteral'],
+      [{ $gt: [{ $add: ['$it.name', 1] }, 5] }, 'predicate.operands'],
+    ]) {
+      const planned = planQuery(where({ $or: [name('a'), name('b'), item] }), SHAPE);
+      assert.strictEqual(planned.mode, 'set', id);
+      assert.strictEqual(planned.plan.filter, null, id);
+      assert.strictEqual(reasonId(planned.reasons[0].reason), id);
+    }
+  });
+
+  it('nested disjunctions flatten before the regroup, without a call per level', () => {
+    assert.deepStrictEqual(filterOf({ $or: [{ $or: [name('a'), name('b')] }, name('c')] }),
+      { p: 'in', ref: NAME, operand: { list: ['a', 'b', 'c'] } });
+    // as a client that does not flatten builds it: { $or: [acc, next] }
+    let nested = /** @type {any} */ (name('n0'));
+    for (let i = 1; i < 5000; i++) nested = { $or: [nested, name(`n${i}`)] };
+    const filter = filterOf(nested);
+    assert.strictEqual(filter.p, 'in');
+    assert.strictEqual(filter.operand.list.length, 5000);
+    assert.deepStrictEqual(filter.operand.list.slice(0, 3), ['n0', 'n1', 'n2'], 'in document order');
+  });
+
+  it('a spatial item keeps its pre-filter inside a regrouped disjunction, and the neighbourhood\'s error column is unchanged', () => {
+    const label = (/** @type {string} */ value) => ({ $eq: ['$it.label', value] });
+    const LABEL = { segments: [{ name: 'label' }], type: 'string', column: null };
+    const within = planQuery(where({ $or: [label('a'), label('b'), { $within: ['$it.at', REGION] }] }), PLACES_SHAPE);
+    assert.strictEqual(within.mode, 'set');
+    assert.deepStrictEqual(within.plan.filter, { p: 'or', items: [
+      { p: 'in', ref: LABEL, operand: { list: ['a', 'b'] } },
+      { p: 'bboxOverlap', columns: BOX_COLUMNS, probe: { box: [4, 52, 5, 53] } },
+    ] });
+    assert.strictEqual(within.prefilters.length, 1);
+    assert.strictEqual(within.prefilters[0].construct, '$within');
+    const neighbours = { $exists: { '$index-of': [{ '$geohash-neighbours': 'u173zc' }, { $geohash: ['$it.at', 6] }] } };
+    const regrouped = planQuery(where({ $or: [label('a'), label('b'), neighbours] }), PLACES_SHAPE);
+    const single = planQuery(where({ $or: [label('a'), neighbours] }), PLACES_SHAPE);
+    const errorColumn = { p: 'cellIn', column: 'gx_at_gh6', cells: [], keepEmpty: true };
+    for (const planned of [regrouped, single]) {
+      assert.strictEqual(planned.plan.filter.p, 'or');
+      assert.deepStrictEqual(planned.plan.filter.items[1], errorColumn);
+      assert.strictEqual(planned.plan.filter.items[0].items[1].p, 'cellIn');
+      assert.ok(planned.reasons.some((entry) => /empty/.test(entry.reason)));
+    }
+    assert.strictEqual(regrouped.plan.filter.items[0].items[0].p, 'in');
+    assert.strictEqual(single.plan.filter.items[0].items[0].p, 'cmp');
+  });
+
+  it('an interval item keeps its pre-filter inside a regrouped disjunction', () => {
+    const SPANS_MODEL = { $model: '0.1', collections: { spans: {
+      schema: { type: 'object', properties: { id: { type: 'string' }, label: { type: 'string' },
+        span: { type: 'object', required: ['start', 'end'], properties: { start: { type: 'integer' }, end: { type: 'integer' } } } } },
+      key: '/id', indexes: [{ name: 'from', path: '$.span.start' }, { name: 'to', path: '$.span.end' }] } } };
+    const spans = normalizeModel(SPANS_MODEL).get('spans');
+    const shape = { collection: 'spans', schema: spans.schema,
+      columnByCanonical: planCollection('spans', spans, sqliteDialect).columnByCanonical };
+    const planned = planQuery(where({ $or: [{ $eq: ['$it.label', 'a'] }, { $eq: ['$it.label', 'b'] },
+      { $overlaps: ['$it.span', { start: 1, end: 5 }] }] }), shape);
+    assert.strictEqual(planned.mode, 'set');
+    assert.strictEqual(planned.plan.filter.p, 'or');
+    assert.strictEqual(planned.plan.filter.items.length, 2);
+    assert.strictEqual(planned.plan.filter.items[0].p, 'in');
+    assert.strictEqual(planned.plan.filter.items[1].p, 'interval');
+    assert.strictEqual(planned.prefilters[0].construct, '$overlaps');
+  });
+
+  it('a non-finite number or a string a JSON list cannot carry never regroups: the item keeps its place', () => {
+    assert.deepStrictEqual(filterOf({ $or: [age('$gt', NaN), age('$gt', 5)] }), { p: 'or', items: [
+      { p: 'cmp', op: 'gt', ref: AGE, operand: { lit: NaN } },
+      { p: 'cmp', op: 'gt', ref: AGE, operand: { lit: 5 } },
+    ] });
+    assert.deepStrictEqual(filterOf({ $or: [age('$gt', 5), age('$ge', NaN)] }), { p: 'or', items: [
+      { p: 'cmp', op: 'gt', ref: AGE, operand: { lit: 5 } },
+      { p: 'cmp', op: 'ge', ref: AGE, operand: { lit: NaN } },
+    ] });
+    assert.deepStrictEqual(filterOf({ $or: [age('$lt', Infinity), age('$lt', 5), age('$eq', -Infinity), age('$eq', 3)] }), { p: 'or', items: [
+      { p: 'cmp', op: 'lt', ref: AGE, operand: { lit: Infinity } },
+      { p: 'cmp', op: 'lt', ref: AGE, operand: { lit: 5 } },
+      { p: 'cmp', op: 'eq', ref: AGE, operand: { lit: -Infinity } },
+      { p: 'cmp', op: 'eq', ref: AGE, operand: { lit: 3 } },
+    ] });
+    // a lone surrogate is no JSON text: it cannot ride the one bound list
+    assert.deepStrictEqual(filterOf({ $or: [name('\ud800'), name('b'), age('$gt', 8)] }), { p: 'or', items: [
+      { p: 'cmp', op: 'eq', ref: NAME, operand: { lit: '\ud800' } },
+      { p: 'cmp', op: 'eq', ref: NAME, operand: { lit: 'b' } },
+      { p: 'cmp', op: 'gt', ref: AGE, operand: { lit: 8 } },
+    ] });
+  });
+
+  it('equalities on an instant column keep their epoch narrowing: no list, one range per instant; its rays still fold', () => {
+    const MODEL = { $model: '0.1', entities: { Item: { schema: { type: 'object', properties: {
+      id: { type: 'string', 'x-entity': { key: true } },
+      n: { type: 'number', 'x-entity': { index: true } },
+      at: { type: 'string', format: 'date-time', 'x-entity': { column: 'integer', index: true } } } } } } };
+    const entities = normalizeEntities(MODEL);
+    const mapping = explainMapping(MODEL);
+    const at = (/** @type {string} */ op, /** @type {string} */ value) => ({ [op]: ['$it.at', value] });
+    const A = '2024-01-01T00:00:00Z';
+    const B = '2024-01-01T09:00:00Z';
+    const filterOf = (/** @type {any} */ predicate) => {
+      const planned = planEntityQuery({ $for: { it: '$.Item[*]' }, $where: predicate, $return: '$it.id' }, entities, mapping);
+      assert.strictEqual(planned.mode, 'native');
+      return planned.plan.filters[0].filter;
+    };
+    const mixed = filterOf({ $or: [at('$eq', A), at('$eq', B), { $gt: ['$it.n', 8] }] });
+    assert.deepStrictEqual(mixed.items.map((/** @type {any} */ item) => [item.p, item.op, item.epoch]),
+      [['cmp', 'eq', Date.parse(A)], ['cmp', 'eq', Date.parse(B)], ['cmp', 'gt', undefined]]);
+    const alone = filterOf({ $or: [at('$eq', A), at('$eq', B)] });
+    assert.deepStrictEqual(alone.items.map((/** @type {any} */ item) => [item.p, item.epoch]), [['cmp', Date.parse(A)], ['cmp', Date.parse(B)]]);
+    const rays = filterOf({ $or: [at('$gt', B), at('$gt', A), { $gt: ['$it.n', 8] }] });
+    assert.deepStrictEqual(rays.items.map((/** @type {any} */ item) => [item.p, item.op, item.epoch]),
+      [['cmp', 'gt', Date.parse(A)], ['cmp', 'gt', undefined]]);
+  });
+});
