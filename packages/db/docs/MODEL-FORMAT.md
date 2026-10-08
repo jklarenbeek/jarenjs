@@ -2514,7 +2514,12 @@ inside the writing transaction lets a concurrent writer slip past it.
   read as an `integer`) reopens the database only once it is typed
   `boolean` again (`JD0002` until then).
 - A layout an application owns (§12) declares its indexes in
-  `physical.indexes`; `indexes` beside `physical` is `JD0004`.
+  `physical.indexes`; `indexes` beside `physical` is `JD0004`. The mapping
+  reports them as `entities[E].declaredIndexes` (`{ name, unique, partial,
+  columns, members, sql }`): each term's column by its physical name and by
+  the member it maps (an expression term, or a column the layout does not
+  map, `null` in both), whether the index declares a condition, and the
+  statement whose text SQLite compares (§12).
 
 **An unknown member of `x-entity` is `JD0030` with a `docPath`.** A
 silently ignored mapping directive is a data-loss bug waiting to
@@ -3574,9 +3579,31 @@ relation navigation across physical layouts is not qualified, so a model
 whose entity with a layout declares a relation, or whose relation targets
 an entity with a layout, is `JD0005` at open (the second one used to open
 and fail at its first `load({ include })` with a raw `JD2005`). A layout's
-indexes are its own (`physical.indexes`, in the relational `$sql`
-grammar); the entity-level `indexes` member (§9.2) plans indexes over a
-store-owned table, and beside `physical` it is `JD0004`.
+indexes are its own (`physical.indexes`, items `{ name, terms, unique,
+where }` in the relational `$sql` grammar), and opening verifies each one
+as it verifies the columns, on both engines: the index exists — by name as
+the engine compares names, ASCII case folded on SQLite, exact on
+PostgreSQL, where a quoted mixed-case name is another object — is as
+unique and as conditional as declared, and keys a column under each plain
+column term in the declared order (`JD0002` names the index and what
+differs; a dropped index no longer reopens clean). A plain term's direction
+or collation is not compared, a PostgreSQL `INCLUDE` column beside the keys
+is a fact like an undeclared index, and a unique table constraint's index
+is the engine's own on SQLite (`sqlite_autoindex_…`, which no declaration
+names; PostgreSQL names it after the constraint). What that shape cannot
+see — a condition's text, an expression term — SQLite compares as the
+CREATE text it keeps, so such an index is created from the statement the
+store plans, `explainMapping(model).entities.<E>.declaredIndexes[i].sql`
+(§9.2); PostgreSQL, which deparses, verifies the shape alone and reads a
+changed condition's text as no drift. An index the layout does not declare
+is a physical fact. A unique index over plain column terms without a
+condition keys an existence probe (§13.2). A `kind: "view"` layout declares
+no indexes (`JD0005`), and a layout with `physical.schema` declares no
+programs at all. A migration step that reads a layout verifies its declared
+indexes too, so a step that runs before a later step creates one names the
+layout without it as its `model`, as it does for rule programs. The
+entity-level `indexes` member (§9.2) plans indexes over a store-owned
+table, and beside `physical` it is `JD0004`.
 
 | Codec | Public representation | Required SQLite affinity |
 |---|---|---|
@@ -3793,20 +3820,37 @@ judged as §13.3 says of a document, with no change test of its own.
 is true when the target entity holds a row whose members equal the values. A
 value is `$.old.member`, `$.new.member` or a scalar literal; a text literal
 that starts with `$` is written `$$`, as in any query (`"$$draft"` is the text
-`$draft`). `match` must cover the target's whole primary key, so a probe is one
-indexed read; key members compare with `=`, other members null-safely, so a
-`null` literal matches SQL NULL, and text by code point whatever the column's
-collation. The target is the physical layout of another table — not a view,
-which has no primary key to read by, and not the rule's own table, even through
-a second entity mapped to it: PostgreSQL runs row triggers at the end of a
-statement and SQLite per row, so a probe of the rule's own table would see a
-multi-row statement's other rows differently. A path names a member the rule's
-own entity has — a column of its layout, or a stored property of a document —
-whose column has the target column's codec (an integer into a number column is
-exact), and a literal is a value the target column holds, so the database, its
-other engine and the store compare one value one way; anything else refuses at
-planning. A database rule's match value reads a `null` or `reject` column: a
-member that an `absent` column (§13.4) leaves missing has no value to match.
+`$draft`). `match` covers the target's whole primary key, or every column of
+one unique index of the target that its open verifies — a `physical.indexes`
+entry (§12), or a store-owned layout's unique member or entity index (§9.2) —
+over plain column terms and without a condition, so a probe is one indexed
+read: a partial unique index, or one with an expression term, proves no row
+unique by the matched members alone and never keys a probe (`JD0005`, naming
+the index). The keyed members compare with `=`, as the target column
+compares — under its declared collation on SQLite, which is what the index
+the probe is keyed by proves unique — and a `null` literal against one
+refuses at planning (a key holds no null, and a unique index admits any
+number of them, so such a probe would match nothing); the other members
+compare null-safely, so a `null` literal matches SQL NULL, and text by code
+point whatever the column's collation. The target is another table — the physical layout of
+another entity, or the layout the store owns for one (§9), whose key columns
+hold no SQL NULL and whose other columns read it as a missing member — not a
+view, which has no primary key to read by, and not the rule's own table, even
+through a second entity mapped to it: PostgreSQL runs row triggers at the end
+of a statement and SQLite per row, so a probe of the rule's own table would
+see a multi-row statement's other rows differently. A path names a member the
+rule's own entity has — a column of its layout, or a stored property of a
+document — whose column has the target column's codec (an integer into a
+number column is exact), and a literal is a value the target column holds, so
+the database, its other engine and the store compare one value one way;
+anything else refuses at planning. A database rule's match value reads a
+`null` or `reject` column: a member that an `absent` column (§13.4) leaves
+missing has no value to match. A matched member whose target column reads SQL
+NULL as absent serves as a keyed member — `=` never meets SQL NULL, and a
+`null` literal against it refuses — and as no other; a store-owned target's
+epoch, document and boolean members (kept as 0 or 1, which no probe value is)
+refuse at planning. A database rule on a store-owned layout still reads no
+other row (§13.4).
 `$exists-row` asks for a row of another table; `$exists` (§13.4) asks whether
 a member of the rule's own record is present. A probe composes with `$not`,
 `$and` and `$or` — "the parent is a draft, or it is gone" is
@@ -3933,21 +3977,56 @@ it directly); a `reject` column holds no SQL NULL. What lowers, per policy:
 | `$lt`, `$le`, `$gt`, `$ge` | false against SQL NULL | false while the member is missing | the value's comparison |
 | `{ "$eq": [<path>, { "$seq": [<literal>, …] }] }` | true when the value is one of the literals; a `null` item matches SQL NULL | as `null`, false while missing; a `null` item refuses | true when the value is one of the literals |
 | `{ "$exists": "<path>" }` | true (a null is present) | true when the member is present | true |
+| `{ "$add": [a, b] }`, `{ "$sub": [a, b] }`, `{ "$neg": a }` as an operand | refuses at planning (a JSON null is no number) | no value while an operand is missing, so its comparison is false | the integer result, held to ±(2^53 − 1) |
 
 `$and`, `$or`, `$not` and `$exists-row` (§13.2) compose them; every leaf is
 true or false, never SQL NULL, so `$not` negates the engine's answer. In the
 trigger a list is `IN (…)` (with `OR … IS NULL` for a `null` item), and a leaf
-over an `absent` column holds only where that column `IS NOT NULL`. Refused at
-planning (`JD0005`, naming the reason): `$ne` and an ordered comparison against
-a `$seq` (the engine reads them as true when any one item compares); an empty
-`$seq` (it matches nothing); a `$seq` compared with anything but one member
-path; a `$seq` item that is not a literal its column holds — the codec's JSON
-type, a safe integer in an `integer` column, a finite number that is not an
-unsafe integer in a `number` column (a `date` or `datetime` literal compares as
-its text); `$exists` in any form but one member path (its array form tests a
-literal, which always exists); `$starts-with`, arithmetic and every other
-operator. A rule such as `{ "$le": ["$.new.start", "$.new.end"] }` declares an
-interval constraint without claiming interval indexing.
+over an `absent` column holds only where that column `IS NOT NULL`.
+
+A comparison's operand may be a sum, a difference or a negation — `$add`,
+`$sub`, `$neg` — of `integer` columns and safe-integer literals, nested at
+will. The engine counts integers exactly inside ±(2^53 − 1), so each operand
+and each result is held to that range as a domain of the write: a result past
+it refuses the write (`jaren invariant:<rule>`) rather than wrapping or
+rounding, under store enforcement (§13.3, `JD2096`) as under the trigger,
+where the query engine alone would answer with a rounded double — the one row
+on which the two enforcements and the engine part, by design. A missing
+operand (an `absent` column's SQL NULL) leaves the arithmetic without a value,
+so its comparison is false, as the engine answers a missing member; a `null`
+column's JSON null is no number to the engine, whose arithmetic over one is a
+type error rather than a verdict, so such an operand refuses at planning —
+declare the column's SQL NULL `absent`. On PostgreSQL a physical integer
+column is widened to `bigint` inside the arithmetic, which no sum of two safe
+integers leaves; a store-owned `numeric` is read as it is. The engine's other
+arithmetic (`$mul`, `$div`, `$idiv`, `$mod`) and a `number` operand are
+refused: the engine's double rounding and division are not SQL's.
+
+Refused at planning (`JD0005`, naming the reason): `$ne` and an ordered
+comparison against a `$seq` (the engine reads them as true when any one item
+compares); an empty `$seq` (it matches nothing); a `$seq` compared with
+anything but one member path; a `$seq` item that is not a literal its column
+holds — the codec's JSON type, a safe integer in an `integer` column, a finite
+number that is not an unsafe integer in a `number` column (a `date` or
+`datetime` literal compares as its text); `$exists` in any form but one member
+path (its array form tests a literal, which always exists); an arithmetic over
+a `number`, `text`, `boolean`, `date` or `datetime` column, over a column whose
+SQL NULL is a JSON null, or with a literal that is no safe integer; `$mul`,
+`$div`, `$idiv` and `$mod`; `$starts-with` — a prefix test needs a code-point
+prefix spelling on each engine and an oracle of its own, which no release has
+built — and every other operator. A rule such as
+`{ "$le": ["$.new.start", "$.new.end"] }` declares an interval constraint
+without claiming interval indexing.
+
+What stays outside the lowering is a boundary, not a gap: a probe of the
+rule's own table (PostgreSQL runs row triggers at statement end and SQLite per
+row, so a multi-row statement's other rows differ between them); an arbitrary
+trigger program (a `TableTrigger` stays SQLite SQL, which PostgreSQL does not
+run); an aggregate over other rows (no bounded expression reads them —
+`$exists-row` reads one row by a verified key); and SQLite's change test,
+which compares each column under its declared collation (below): comparing by
+code point would change the text of every installed update program, so it
+waits for a reviewed migration of installed programs.
 
 The exception: `$eq` and `$ne` between two `null` columns of different JSON
 types (a `text` and an `integer` column, say) compare by type alone, so where

@@ -8,6 +8,8 @@ import { encodeJSONPointerSegment } from '@jarenjs/json/pointer';
 import { refuseUnknownModelMembers } from './options.js';
 import { planTable } from './dialects/sqlite-schema.js';
 import { sqlitePhysicalColumnType, sqliteTableMigration } from './dialects/sqlite.js';
+import { comparableDeclaredSql } from './schema-sql.js';
+import { foldIdentifier } from './invariants.js';
 
 const compiledCodecs = new WeakMap();
 const STORAGE = { text: 'string', integer: 'integer', number: 'number', boolean: 'boolean',
@@ -31,6 +33,7 @@ export function normalizePhysical(physical, properties, keys, path) {
   if (!identifier(physical.table)) fail('physical.table must be a nonempty SQL identifier');
   if (physical.schema !== undefined && !identifier(physical.schema)) fail('physical.schema must be a nonempty SQL identifier');
   if (physical.kind !== undefined && !['table', 'view'].includes(physical.kind)) fail('physical.kind is table or view');
+  if (physical.kind === 'view' && physical.indexes !== undefined) fail('a view has no indexes to verify: declare them on the table they index');
   if (!physical.columns || typeof physical.columns !== 'object' || Array.isArray(physical.columns)) fail('physical.columns is required');
   const ordered = physical.keys ?? keys;
   if (!Array.isArray(ordered) || ordered.length !== keys.length || new Set(ordered).size !== keys.length
@@ -83,15 +86,77 @@ export function normalizePhysical(physical, properties, keys, path) {
     primaryKey: ordered.map((key) => physical.columns[key].name),
     ...Object.fromEntries(PROGRAMS
       .filter((key) => physical[key] !== undefined).map((key) => [key, physical[key]])) };
-  if (physical.schema === undefined && physical.kind !== 'view') planTable(definition);
+  const planned = physical.schema === undefined && physical.kind !== 'view' ? planTable(definition) : null;
   if (physical.schema !== undefined && PROGRAMS.some((key) => physical[key] !== undefined))
     fail('native programs require a reviewed migration');
   // Database-owned expressions must be explicit before DDL can own them.
   const ddl = physical.schema !== undefined || physical.kind === 'view' || columns.some((c, i) => (c.generated && definitions[i].generated === undefined)
     || (c.databaseDefault && !Object.hasOwn(definitions[i], 'default')))
     ? null : definition;
+  // the planned statements: the table, then each index in order, then each trigger
+  const declaredIndexes = planned === null ? []
+    : (definition.indexes ?? []).map((index, i) => declaredIndex(index, columns, planned.createSql[1 + i]));
   return { table: physical.table, ...(physical.schema === undefined ? {} : { schema: physical.schema }),
-    kind: physical.kind ?? 'table', keys: [...ordered], columns, ddl };
+    kind: physical.kind ?? 'table', keys: [...ordered], columns, ddl, declaredIndexes };
+}
+
+/**
+ * A declared index as the open verifies it and a probe reads it: each term's
+ * column by physical name and by the member it maps — an expression term, or
+ * a column the layout does not map, `null` in both — whether the index is
+ * unique and whether it declares a condition, and the statement that creates
+ * it, whose text SQLite keeps.
+ * @param {any} index @param {any[]} columns - the layout's columns @param {string} sql
+ */
+function declaredIndex(index, columns, sql) {
+  const names = index.terms.map((term) => (term?.by?.$sql === 'column' && typeof term.by.name === 'string' ? term.by.name : null));
+  return { name: index.name, unique: index.unique === true, partial: index.where !== undefined, columns: names,
+    members: names.map((name) => (name === null ? null : columns.find((column) => column.physical === name)?.name ?? null)), sql };
+}
+
+/**
+ * The one check of a layout's declared indexes against what the database
+ * holds, on every engine: each is present — by name as the engine compares
+ * names, ASCII case folded on SQLite, exact on PostgreSQL — as unique and as
+ * conditional as declared, keying its column under each plain column term in
+ * the declared order (a column an engine carries beside the keys, `INCLUDE`,
+ * is a fact, as an undeclared index is). What that shape cannot see — a
+ * condition's text, an expression term — is compared as SQLite keeps it, the
+ * CREATE text, so such an index is created from the planned statement; an
+ * engine that deparses keeps no text to compare.
+ * @param {any} connection
+ * @param {any[]} declared - the layout's `declaredIndexes`
+ * @param {any[]} existing - the table's indexes as `readSchema` reports them
+ * @param {(why: string) => never} fail
+ * @returns {any} value-or-promise
+ */
+export function verifyDeclaredIndexes(connection, declared, existing, fail) {
+  const dialect = connection.dialect;
+  const text = dialect.capabilities.declaredSqlText === true;
+  const fold = dialect.name === 'sqlite' ? foldIdentifier : (/** @type {string} */ name) => name;
+  const list = (/** @type {(string | null)[]} */ columns) => columns.map((column) => column ?? '<expression>').join(', ');
+  const step = (/** @type {number} */ i) => {
+    if (i >= declared.length) return null;
+    const index = declared[i];
+    const have = existing.find((candidate) => fold(candidate.name) === fold(index.name));
+    if (have === undefined) fail(`index '${index.name}' is missing; apply an explicit migration`);
+    if (have.unique !== index.unique) fail(`index '${index.name}' is ${have.unique ? '' : 'not '}unique, the model declares it ${index.unique ? '' : 'not '}unique`);
+    if (have.partial !== index.partial) fail(`index '${index.name}' ${have.partial ? 'has a condition the model does not declare' : 'has no condition, the model declares one'}`);
+    // the columns the index keys: an engine that carries other columns beside them reports the keys apart
+    const keyed = dialect.introspect.indexKeyColumns === undefined ? have.columns
+      : useStatementOnce(connection, dialect.introspect.indexKeyColumns(have.name), (statement) =>
+        chain(statement.all([]), (rows) => rows.map((row) => (row.name === null || row.name === undefined ? null : String(row.name)))));
+    return chain(keyed, (/** @type {(string | null)[]} */ columns) => {
+      if (columns.length !== index.columns.length || index.columns.some((column, j) => column !== null && column !== columns[j]))
+        fail(`index '${index.name}' covers (${list(columns)}) in that order, the model declares (${list(index.columns)})`);
+      if (text && (index.partial || index.columns.includes(null)) && have.sql !== null && have.sql !== undefined) {
+        const wanted = comparableDeclaredSql(index.sql), actual = comparableDeclaredSql(String(have.sql));
+        if (wanted !== actual) fail(`index '${index.name}' is declared as\n  ${actual}\nand the model declares\n  ${wanted}`);
+      }
+      return step(i + 1);
+    });
+  };
+  return step(0);
 }
 
 /** Compile one codec once, with a JSON-safe public value and a bound SQL value.
@@ -227,8 +292,9 @@ export function verifyRulePrograms(connection, table, triggers, fail, { installe
   return chain(recursion, () => chain(encoding, () => read));
 }
 
-/** Verify an existing mapped object without executing DDL. Unmapped columns and
- * all application-owned programs remain physical facts, never inferred drops.
+/** Verify an existing mapped object without executing DDL: its columns, its
+ * declared indexes and its rule programs. Unmapped columns and all
+ * application-owned programs remain physical facts, never inferred drops.
  * @param {any} connection @param {any} mapping @param {any} schema @returns {any} */
 export function verifyPhysical(connection, mapping, schema) {
   const fail = (why) => { throw new DbCompileError('JD0002', `physical '${mapping.table}': ${why}`); };
@@ -260,7 +326,7 @@ export function verifyPhysical(connection, mapping, schema) {
       if (mapping.kind !== 'view' && actual.generated !== column.generated) fail(`'${column.physical}' generated ownership disagrees`);
       connection.dialect.qualifyPhysicalColumn?.(column, actual, mapping.kind);
     }
-    return null;
+    return mapping.kind === 'view' ? null : verifyDeclaredIndexes(connection, mapping.declaredIndexes ?? [], table.indexes ?? [], fail);
   }));
 }
 

@@ -5,7 +5,8 @@ import { explainMapping, openStore, planInvariants, sqliteDialect } from '@jaren
 import { verifyPhysical } from '../../packages/db/src/physical.js';
 import { postgresDialect } from '@jarenjs/db/postgres';
 import { ruleModel, truthModel, RULE_TABLES, ruleLifecycle, ruleTruthTable, ruleGrid, familyModel, familyLifecycle, FAMILY_REFUSALS,
-  postgresEngine, sqliteEngine, storeAgreement, TRUTH_POLICIES, hybridTruthTable, hybridGrid, hybridLifecycle, hybridAgreement } from './invariant-oracle.js';
+  postgresEngine, sqliteEngine, storeAgreement, TRUTH_POLICIES, hybridTruthTable, hybridGrid, hybridLifecycle, hybridAgreement,
+  arithmeticEdge } from './invariant-oracle.js';
 
 describe('PostgreSQL rule lowering', () => {
   it('plans a function and a row trigger per table and operation in the driver-owned schema, each program verified by its fields', () => {
@@ -174,6 +175,11 @@ describe('PostgreSQL database invariants', { skip: !url && 'JAREN_PG_URL is not 
     for (const policy of [TRUTH_POLICIES.absent, TRUTH_POLICIES.mixed])
       assert.equal(await ruleTruthTable(postgresEngine(), policy), await ruleTruthTable(sqliteEngine(), policy), JSON.stringify(policy));
     assert.equal(await ruleGrid(postgresEngine(), 'absent'), await ruleGrid(sqliteEngine(), 'absent'), 'every codec read as absent');
+  });
+
+  it('integer arithmetic at the edge of the safe range refuses the same writes as on SQLite, under either enforcement', async () => {
+    for (const enforcement of /** @type {const} */ (['database', 'store']))
+      assert.equal(await arithmeticEdge(postgresEngine(), enforcement), await arithmeticEdge(sqliteEngine(), enforcement), enforcement);
   });
 
   it('opens only over the installed programs it planned, field by field', async () => {

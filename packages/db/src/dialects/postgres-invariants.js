@@ -8,8 +8,8 @@
 import { hashContent, utf8ByteLength } from '@jarenjs/core/string';
 import { DbCompileError, INVARIANT_MARKER, INVARIANT_SQLSTATE } from '../errors.js';
 import { compileInvariants } from './invariant-sql.js';
+import { safeRange } from './row-predicate.js';
 
-const SAFE_RANGE = 'BETWEEN -9007199254740991 AND 9007199254740991';
 /** The search path every rule function runs under, as the catalog keeps it. */
 const SEARCH_PATH = 'pg_catalog, pg_temp';
 
@@ -23,7 +23,7 @@ const SEARCH_PATH = 'pg_catalog, pg_temp';
  * @param {any} column @param {string} ref @returns {{ value: string, domain: string | null }}
  */
 function storeOwnedColumn(column, ref) {
-  const safe = `${ref} ${SAFE_RANGE}`;
+  const safe = safeRange(ref);
   const checks = column.codec === 'integer' ? [safe, `${ref} = pg_catalog.trunc(${ref})`]
     : column.codec === 'number' ? [safe] : column.codec === 'boolean' ? [`${ref} IN (0, 1)`] : [];
   // SQL NULL is a missing member, where the column admits it
@@ -55,7 +55,7 @@ export const POSTGRES = {
   /** @param {any} column @param {string} ref */
   column(column, ref) {
     if (column.stored !== undefined) return storeOwnedColumn(column, ref);
-    const checks = ['integer', 'number'].includes(column.codec) ? [`${ref} ${SAFE_RANGE}`]
+    const checks = ['integer', 'number'].includes(column.codec) ? [safeRange(ref)]
       : column.codec === 'date' ? [`${ref} >= DATE '0001-01-01'`, `${ref} < DATE '10000-01-01'`] : [];
     // SQL NULL is a JSON null or an absent member, where the column admits it
     const domain = column.null !== 'reject'
@@ -65,6 +65,11 @@ export const POSTGRES = {
       : ['text', 'datetime'].includes(column.codec) ? `(${ref} COLLATE "C")` : ref;
     return { value, domain };
   },
+  /** An integer operand of a rule's arithmetic: a physical column, which may be
+   * `smallint` or `integer`, is widened to `bigint`, which no sum or difference
+   * of two safe integers leaves; a store-owned `numeric` or `bigint` is read as it is.
+   * @param {any} column @param {string} ref */
+  integer: (column, ref) => (column.stored === undefined ? `${ref}::int8` : ref),
   /** One notion of a changed column: the dialect's own physical difference;
    * a store-owned column compares as it is declared (`smallint`, `numeric`,
    * `text COLLATE "C"`, the document's `jsonb` by value).

@@ -20,14 +20,15 @@ import { familyModel, ruleModel } from './invariant-oracle.js';
 /** @param {string} name @param {string} codec @param {string} nul */
 const col = (name, codec, nul) => ({ name, codec, null: nul });
 
-/** Tickets whose status and level read SQL NULL as null, whose note reads it
- * as an absent member and whose rank refuses it, under one insert rule.
+/** Tickets whose status and level read SQL NULL as null, whose note and
+ * count (`n`) read it as an absent member and whose rank refuses it, under
+ * one insert rule.
  * @param {any} rule @returns {any} */
 const tickets = (rule) => ({ $model: '0.1', entities: { Ticket: {
   schema: { type: 'object', properties: { id: { type: 'integer', 'x-entity': { key: true } },
-    status: { type: ['string', 'null'] }, note: { type: 'string' }, rank: { type: 'integer' }, level: { type: ['integer', 'null'] } } },
+    status: { type: ['string', 'null'] }, note: { type: 'string' }, rank: { type: 'integer' }, level: { type: ['integer', 'null'] }, n: { type: 'integer' } } },
   physical: { table: 'tickets', columns: { id: col('id', 'integer', 'reject'), status: col('status', 'text', 'null'),
-    note: col('note', 'text', 'absent'), rank: col('rank', 'integer', 'reject'), level: col('level', 'integer', 'null') } },
+    note: col('note', 'text', 'absent'), rank: col('rank', 'integer', 'reject'), level: col('level', 'integer', 'null'), n: col('n', 'integer', 'absent') } },
   invariants: [{ name: 'rule', on: ['insert'], enforcement: 'database', assert: rule }] } } });
 
 const DIALECTS = /** @type {const} */ ([['sqlite', sqliteDialect], ['postgres', postgresDialect({ searchPath: 'tenant' })]]);
@@ -170,6 +171,55 @@ describe('the trigger rendering', () => {
       [{ $exists: '$.new' }, /unsupported record path '\$\.new'/],
       // a member the query language reads as an object constructor names no comparison
       [{ toString: ['$.new.rank', 1] }, /unsupported predicate 'toString'/],
+    ]) for (const [name, dialect] of DIALECTS)
+      assert.throws(() => planInvariants(tickets(rule), { dialect }), { code: 'JD0005', message: reason }, `${name} ${JSON.stringify(rule)}`);
+  });
+
+  it('lowers a sum, a difference and a negation of integers, each result held to the safe range, a missing operand leaving no value', () => {
+    const range = (/** @type {string} */ expression) => `((${expression}) IS NULL OR ((${expression}) BETWEEN -9007199254740991 AND 9007199254740991))`;
+    const SQLITE_N = `(NEW."n" IS NULL OR (typeof(NEW."n") = 'integer' AND NEW."n" BETWEEN -9007199254740991 AND 9007199254740991))`;
+    const POSTGRES_N = '(NEW."n" IS NULL OR (NEW."n" BETWEEN -9007199254740991 AND 9007199254740991))';
+    for (const [rule, sqlite, postgres] of [
+      // a physical integer column is widened to bigint on PostgreSQL, where it may be a four-byte integer
+      [{ $le: [{ $add: ['$.new.rank', 1] }, 5] },
+        `${SQLITE_DOMAIN.rank} AND ${range('NEW."rank" + 1')} AND COALESCE(((NEW."rank" + 1) <= 5), 0)`,
+        `${POSTGRES_RANK} AND ${range('NEW."rank"::int8 + 1')} AND COALESCE(((NEW."rank"::int8 + 1) <= 5), FALSE)`],
+      // an absent operand guards the leaf, which a null-safe equality would otherwise find true over two SQL NULLs
+      [{ $eq: [{ $sub: ['$.new.n', '$.new.rank'] }, '$.new.n'] },
+        `${SQLITE_N} AND ${SQLITE_DOMAIN.rank} AND ${range('NEW."n" - NEW."rank"')} AND (NEW."n" IS NOT NULL AND ((NEW."n" - NEW."rank") IS (NEW."n" COLLATE BINARY)))`,
+        `${POSTGRES_N} AND ${POSTGRES_RANK} AND ${range('NEW."n"::int8 - NEW."rank"::int8')} AND (NEW."n" IS NOT NULL AND ((NEW."n"::int8 - NEW."rank"::int8) IS NOT DISTINCT FROM NEW."n"))`],
+      // every nested result has a domain of its own; a `$const` quotes a literal
+      [{ $not: { $lt: [{ $neg: { $add: ['$.new.n', { $const: 2 }] } }, 0] } },
+        `${SQLITE_N} AND ${range('NEW."n" + 2')} AND ${range('-((NEW."n" + 2))')} AND (NOT ((NEW."n" IS NOT NULL AND COALESCE(((-((NEW."n" + 2))) < 0), 0))))`,
+        `${POSTGRES_N} AND ${range('NEW."n"::int8 + 2')} AND ${range('-((NEW."n"::int8 + 2))')} AND (NOT ((NEW."n" IS NOT NULL AND COALESCE(((-((NEW."n"::int8 + 2))) < 0), FALSE))))`],
+      // a negated negative literal keeps its own parentheses: `--` would open a SQL comment
+      [{ $lt: [{ $neg: -2 }, '$.new.rank'] },
+        `${range('-(-2)')} AND ${SQLITE_DOMAIN.rank} AND COALESCE(((-(-2)) < (NEW."rank" COLLATE BINARY)), 0)`,
+        `${range('-(-2)')} AND ${POSTGRES_RANK} AND COALESCE(((-(-2)) < NEW."rank"), FALSE)`],
+    ]) for (const [name, dialect] of DIALECTS) assert.equal(condition(rule, dialect), name === 'sqlite' ? sqlite : postgres, `${name} ${JSON.stringify(rule)}`);
+    // a store-owned integer is `numeric` on PostgreSQL, read as it is
+    const owned = { $model: '0.1', entities: { T: { schema: { type: 'object', properties: { id: { type: 'integer', 'x-entity': { key: true } }, n: { type: 'integer' } } },
+      invariants: [{ name: 'rule', on: ['insert'], enforcement: 'database', assert: { $le: [{ $add: ['$.new.n', 1] }, 5] } }] } } };
+    const program = /** @type {any[]} */ (planInvariants(owned, { dialect: DIALECTS[1][1] })).find((item) => item.type === 'function');
+    assert.match(program.sql, /AND \(\(NEW\."n" \+ 1\) IS NULL OR \(\(NEW\."n" \+ 1\) BETWEEN -9007199254740991 AND 9007199254740991\)\) AND/);
+    for (const [rule, reason] of [
+      [{ $le: [{ $add: ['$.new.level', 1] }, 5] }, /'level' reads SQL NULL as a JSON null, which is no number: arithmetic reads a column whose SQL NULL is an absent member, or none/],
+      [{ $le: [{ $add: ['$.new.note', 1] }, 5] }, /'note' is no integer column: arithmetic reads integer columns and safe-integer literals/],
+      [{ $le: [{ $add: ['$.op', 1] }, 5] }, /'\$\.op' is no integer column/],
+      [{ $le: [{ $add: ['$.old.rank', 1] }, 5] }, /a property of an unavailable record is absent, not SQL NULL/],
+      [{ $le: [{ $add: ['$.new.rank', null] }, 5] }, /arithmetic reads integer columns and safe-integer literals/],
+      [{ $le: [{ $add: ['$.new.rank', 1.5] }, 5] }, /arithmetic reads integer columns and safe-integer literals/],
+      [{ $le: [{ $add: ['$.new.rank', 2 ** 53] }, 5] }, /arithmetic reads integer columns and safe-integer literals/],
+      [{ $le: [{ $add: ['$.new.rank', '1'] }, 5] }, /arithmetic reads integer columns and safe-integer literals/],
+      [{ $le: [{ $neg: ['$.new.rank'] }, 5] }, /arithmetic reads integer columns and safe-integer literals/],
+      [{ $le: [{ $add: ['$.new.rank'] }, 5] }, /invariant assert does not compile: JQ0003/],
+      [{ $le: [{ $mul: ['$.new.rank', 2] }, 5] }, /'\$mul' is not lowered: a rule's arithmetic is \$add, \$sub and \$neg over integers/],
+      [{ $le: [{ $div: ['$.new.rank', 2] }, 5] }, /'\$div' is not lowered/],
+      [{ $le: [{ $mod: ['$.new.rank', 2] }, 5] }, /'\$mod' is not lowered/],
+      [{ $eq: [{ $add: ['$.new.rank', 1] }, { $seq: [1] }] }, /a \$seq is compared with one member path/],
+      [{ $exists: { $add: ['$.new.rank', 1] } }, /\$exists takes one member path/],
+      [{ $eq: [{ $add: ['$.new.n', 1] }, null] }, /'n' reads SQL NULL as an absent member, so it never holds null/],
+      [{ $add: ['$.new.rank', 1] }, /unsupported predicate '\$add'/],
     ]) for (const [name, dialect] of DIALECTS)
       assert.throws(() => planInvariants(tickets(rule), { dialect }), { code: 'JD0005', message: reason }, `${name} ${JSON.stringify(rule)}`);
   });

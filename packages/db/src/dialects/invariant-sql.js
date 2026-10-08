@@ -6,10 +6,8 @@
  * triggers. */
 import { hashContent } from '@jarenjs/core/string';
 import { DbCompileError, INVARIANT_MARKER } from '../errors.js';
-import { existsRowSql, sameTable } from '../invariants.js';
-import { rowPredicate, rulePaths } from './row-predicate.js';
-
-const SAFE_RANGE = 'BETWEEN -9007199254740991 AND 9007199254740991';
+import { existsRowSql, probeKeys, probeTarget, sameTable } from '../invariants.js';
+import { rowPredicate, rulePaths, safeRange } from './row-predicate.js';
 
 /** SQLite's flavor of the row-predicate lowering. SQLite spells types by
  * storage class, so a rule's operand carries its own storage check: a value
@@ -23,8 +21,8 @@ export const SQLITE = {
   column(column, ref) {
     const type = `typeof(${ref})`;
     let valid = ['integer', 'number', 'boolean'].includes(column.codec)
-      ? column.codec === 'number' ? `${type} IN ('integer', 'real') AND ${ref} ${SAFE_RANGE}`
-        : `${type} = 'integer' AND ${column.codec === 'boolean' ? `${ref} IN (0, 1)` : `${ref} ${SAFE_RANGE}`}`
+      ? column.codec === 'number' ? `${type} IN ('integer', 'real') AND ${safeRange(ref)}`
+        : `${type} = 'integer' AND ${column.codec === 'boolean' ? `${ref} IN (0, 1)` : safeRange(ref)}`
       : `${type} = 'text'`;
     // SQL NULL is a JSON null or an absent member, where the column admits it
     if (column.null !== 'reject') valid = `${ref} IS NULL OR (${valid})`;
@@ -53,11 +51,13 @@ export function compileInvariants(mapping, all, dialect, flavor) {
   const fail = (why) => { throw new DbCompileError('JD0005', `database invariant: ${why}`); };
   const rules = mapping.invariants ?? [];
   const columns = mapping.columns;
-  /** A probe of another table, its match values read as the rule reads them.
-   * @param {any} args @param {(expression: any) => string} value */
+  /** A probe of another table, keyed as the model check keyed it (the target's
+   * key, or a declared unique index covering the match), its match values read
+   * as the rule reads them. @param {any} args @param {(expression: any) => string} value */
   const probe = (args, value) => {
-    const target = all.entities[args.entity];
-    return existsRowSql({ match: args.match, target, keys: target.keys }, dialect, value);
+    const target = probeTarget(all.entities[args.entity]);
+    const keys = probeKeys(target.keys, target.uniques, Object.keys(args.match), args.entity, fail);
+    return existsRowSql({ match: args.match, target, keys }, dialect, value);
   };
   // an incremented member is the database's, like a version: never a change;
   // a store-owned table's document column holds the rest of the row

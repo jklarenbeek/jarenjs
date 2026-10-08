@@ -13,6 +13,18 @@ const MEMBERS = ['name', 'on', 'assert', 'enforcement', 'audit', 'when', 'column
 export const RULE_CODECS = ['text', 'integer', 'number', 'boolean', 'date', 'datetime'];
 /** A rule value that reads the record: `$.old.<member>` or `$.new.<member>`. */
 export const RECORD_PATH = /^\$\.(old|new)\.([A-Za-z_][A-Za-z0-9_]*)$/;
+/** The bound of the safe-integer range an integer a rule reads, and every sum,
+ * difference or negation it computes, must hold to: ±(2^53 − 1), the range
+ * the engine's doubles count exactly, held by the trigger and the store alike. */
+export const SAFE_INTEGER = Number.MAX_SAFE_INTEGER;
+/** The arithmetic a rule lowers, each with its operand count: a sum, a difference, a negation. */
+export const ARITHMETIC = Object.freeze({ $add: 2, $sub: 2, $neg: 1 });
+/** The codec of a store-owned layout's column-mapped scalar, by the member's JSON type. */
+const STORE_OWNED_CODECS = Object.freeze({ string: 'text', integer: 'integer', number: 'number', boolean: 'boolean' });
+
+/** Whether a node is one of the arithmetic a rule lowers. @param {any} node */
+export const isArithmetic = (node) => node !== null && typeof node === 'object' && !Array.isArray(node)
+  && Object.keys(node).length === 1 && Object.hasOwn(ARITHMETIC, Object.keys(node)[0]);
 
 /**
  * The literal a rule value that is not a record path stands for. The query
@@ -43,6 +55,34 @@ export function sameTable(a, b) {
     && (a.schema === undefined || b.schema === undefined || foldIdentifier(a.schema) === foldIdentifier(b.schema));
 }
 
+/**
+ * A probe's target as the planner reads it from the mapping, for the probe's
+ * SQL and `probeKeys` (the model check resolved the same from the normalized
+ * entities, so a plan recomputes rather than remembers): a physical layout's
+ * table, columns and declared unique indexes, or a store-owned layout's
+ * table, its column-mapped scalars and foreign-key columns — each by the
+ * member's name, with the codec its storage holds — and its unique members
+ * and entity indexes.
+ * @param {any} entity - `explainMapping(model).entities[E]`
+ * @returns {{ table: string, schema?: string, columns: any[], keys: string[],
+ *   uniques: { name: string, members: (string | null)[], partial: boolean }[] }}
+ */
+export function probeTarget(entity) {
+  if (entity.document === false) {
+    return { table: entity.table, ...(entity.schema === undefined ? {} : { schema: entity.schema }), columns: entity.columns, keys: entity.keys,
+      uniques: (entity.declaredIndexes ?? []).filter((/** @type {any} */ index) => index.unique) };
+  }
+  const codec = (/** @type {string} */ storage) => STORE_OWNED_CODECS[/** @type {keyof typeof STORE_OWNED_CODECS} */ (storage)];
+  return { table: entity.table, keys: entity.keys,
+    columns: [...entity.columns.filter((/** @type {any} */ column) => column.source === 'document')
+      .map((/** @type {any} */ column) => ({ name: column.name, physical: column.name, codec: codec(column.storage) })),
+    ...entity.foreignKeys.map((/** @type {any} */ fk) => ({ name: fk.column, physical: fk.column, codec: codec(fk.referencesType) }))],
+    uniques: [...entity.indexes.filter((/** @type {any} */ index) => index.unique)
+      .map((/** @type {any} */ index) => ({ name: index.property, members: [index.property], partial: false })),
+    ...(entity.entityIndexes ?? []).filter((/** @type {any} */ index) => index.unique)
+      .map((/** @type {any} */ index) => ({ name: index.name, members: index.columns, partial: index.where !== undefined }))] };
+}
+
 /** Replace each `$exists-row` with a read of its answer, collecting the probes.
  * @param {any} node @param {any[]} probes @param {(why: string) => never} fail @returns {any} */
 function withProbes(node, probes, fail) {
@@ -58,6 +98,63 @@ function withProbes(node, probes, fail) {
     return { $eq: [`$.probes[${probes.length - 1}]`, true] };
   }
   return Object.fromEntries(Object.entries(node).map(([key, value]) => [key, withProbes(value, probes, fail)]));
+}
+
+/** Whether every leaf of an arithmetic node is a record path or an integer
+ * literal, through nested arithmetic. @param {any[]} operands @returns {boolean} */
+function plainArithmetic(operands) {
+  return operands.every((operand) => (typeof operand === 'string' ? RECORD_PATH.test(operand)
+    : typeof operand === 'number' ? Number.isInteger(operand)
+      : isArithmetic(operand) ? plainArithmetic([Object.values(operand)[0]].flat())
+        : operand !== null && typeof operand === 'object' && !Array.isArray(operand) && Object.keys(operand).length === 1
+          && typeof operand.$const === 'number' && Number.isInteger(operand.$const)));
+}
+
+/**
+ * The arithmetic an assertion computes, outside `$const`, each node with its
+ * evaluator, its operands' readers over the record, the members its record
+ * paths read and whether every leaf is a record path or an integer literal:
+ * the model check keeps the nodes over integer members alone for the domain
+ * store enforcement holds (`withinDomain`).
+ * @param {any} node @param {{ evaluate: Function, operands: Function[], reads: (string | undefined)[], plain: boolean }[]} [out]
+ */
+function arithmeticOf(node, out = []) {
+  if (Array.isArray(node)) for (const item of node) arithmeticOf(item, out);
+  else if (node && typeof node === 'object' && !Object.hasOwn(node, '$const')) {
+    if (isArithmetic(node)) {
+      const [key, args] = Object.entries(node)[0];
+      const operands = key === '$neg' ? [args] : args;
+      out.push({ evaluate: compileJsonQuery(node), operands: operands.map((operand) => compileJsonQuery(operand)),
+        reads: pathsOf(node).map((path) => RECORD_PATH.exec(path)?.[2]), plain: plainArithmetic(operands) });
+    }
+    for (const value of Object.values(node)) arithmeticOf(value, out);
+  }
+  return out;
+}
+
+/** @param {number} value */
+const inSafeRange = (value) => value >= -SAFE_INTEGER && value <= SAFE_INTEGER;
+
+/**
+ * The safe-integer domain of a rule's arithmetic, as the trigger holds it: a
+ * sum, difference or negation whose operands are integers refuses the write
+ * when one of them, or its result, is outside ±(2^53 − 1), where the engine's
+ * doubles would round; an operand that is missing or no integer leaves the
+ * node to the engine's own answer, and so does one the node cannot read on
+ * its own — a variable the assertion's own `$let` or `$for` binds, a nested
+ * arithmetic over no number — which only the whole assertion evaluates.
+ * @param {any} rule - normalized @param {any} record `{ old, new, op }` @returns {boolean}
+ */
+function withinDomain(rule, record) {
+  /** @param {Function} evaluate */
+  const read = (evaluate) => { try { return evaluate(record); } catch { return undefined; } };
+  for (const node of rule.arithmetic) {
+    const operands = node.operands.map(read);
+    if (!operands.every((value) => typeof value === 'number' && Number.isInteger(value))) continue;
+    const result = read(node.evaluate);
+    if (!operands.every(inSafeRange) || typeof result !== 'number' || !inSafeRange(result)) return false;
+  }
+  return true;
 }
 
 /** @param {any} rules @param {string} path @returns {any[]} */
@@ -105,7 +202,7 @@ export function normalizeInvariants(rules, path) {
       throw new DbCompileError('JD0005', `invariant assert does not compile: ${/** @type {Error} */ (cause).message}`,
         `${at}/assert`, /** @type {Error} */ (cause));
     }
-    return { ...rule, probes, evaluate };
+    return { ...rule, probes, evaluate, arithmetic: arithmeticOf(expression) };
   });
 }
 
@@ -149,13 +246,71 @@ function refuseStoreOwnedRule(entity, rule, storageOf, fail) {
 }
 
 /**
+ * The members a probe compares with `=`, which is what proves it reads at most
+ * one row: the target's key when the match covers it, else every column of a
+ * unique index of the target that its open verifies — one over plain column
+ * terms, without a condition. A partial unique index, or one with an
+ * expression term, proves nothing by the matched members alone and never keys
+ * a probe; the refusal names it.
+ * @param {string[]} keys - the target's key members
+ * @param {{ name: string, members: (string | null)[], partial: boolean }[]} uniques - the target's unique indexes,
+ *   each plain column term as the member it maps and any other term `null`
+ * @param {string[]} matched - the members the probe matches @param {string} entity - the target's name
+ * @param {(reason: string) => never} refuse
+ * @returns {string[]}
+ */
+export function probeKeys(keys, uniques, matched, entity, refuse) {
+  const missing = keys.find((key) => !matched.includes(key));
+  if (missing === undefined) return keys;
+  const covered = uniques.filter((index) => index.members.every((member) => member === null || matched.includes(member)));
+  const keyed = covered.find((index) => !index.partial && !index.members.includes(null));
+  if (keyed !== undefined) return /** @type {string[]} */ (keyed.members);
+  if (covered.length > 0) {
+    const index = covered[0];
+    refuse(`$exists-row on '${entity}' is keyed by the unique index '${index.name}', which ${index.partial
+      ? 'declares a condition: a partial unique index never keys a probe'
+      : 'has an expression term (or a column the layout does not map): a probe is keyed by plain column terms'}`);
+  }
+  return refuse(`$exists-row on '${entity}' must match its key member '${missing}', or every column of a unique index its open verifies `
+    + '(one over plain column terms, without a condition)');
+}
+
+/**
+ * The unique indexes of a probe's target, for `probeKeys`: a physical
+ * layout's declared ones, or a store-owned layout's unique members and
+ * entity indexes, each verified by the open as the key is.
+ * @param {any} entity - normalized @returns {{ name: string, members: (string | null)[], partial: boolean }[]}
+ */
+function uniqueIndexesOf(entity) {
+  if (entity.physical !== null) return entity.physical.declaredIndexes.filter((/** @type {any} */ index) => index.unique);
+  return [...[...entity.properties.values()].filter((property) => property.unique && !property.key)
+    .map((property) => ({ name: property.name, members: [property.name], partial: false })),
+  ...entity.indexes.filter((/** @type {any} */ index) => index.unique)
+    .map((/** @type {any} */ index) => ({ name: index.name, members: index.paths, partial: index.where !== undefined }))];
+}
+
+/**
+ * The columns a store-owned layout gives a probe to match: each column-mapped
+ * scalar member as the table holds it (a key never SQL NULL, any other column's
+ * SQL NULL a missing member), by the member's own name; what the document
+ * holds, an epoch column and a relation are no columns to match.
+ * @param {any} entity - normalized @param {(property: any) => string} storageOf
+ */
+function storeOwnedColumns(entity, storageOf) {
+  return [...entity.properties.values()].filter((property) => storageOf(property) === 'column')
+    .map((property) => ({ name: property.name, physical: property.name, codec: STORE_OWNED_CODECS[/** @type {keyof typeof STORE_OWNED_CODECS} */ (property.type)],
+      null: property.key ? 'reject' : 'absent' }));
+}
+
+/**
  * Resolve what a rule names in other members and entities, once the whole
  * model is known: `columns` and increments name physical columns of their own
- * entity, a probe's target is another table's physical layout, its match
- * covers the target's key, and each match value is a member the rule's own
- * entity has, of the target column's codec, or a literal that codec holds; a
- * database rule on a store-owned layout reads members its table has a column
- * for. Both enforcements read the result.
+ * entity, a probe's target is another table — a physical layout, or the
+ * layout the store owns — its match keyed by the target's key or a verified
+ * unique index, and each match value is a member the rule's own entity has,
+ * of the target column's codec, or a literal that codec holds; a database
+ * rule on a store-owned layout reads members its table has a column for.
+ * Both enforcements read the result.
  * @param {Map<string, any>} entities
  * @param {(column: any) => { encode: (value: any) => any }} codecOf the column codec
  * @param {(property: any) => string} storageOf where a store-owned layout keeps a property:
@@ -176,6 +331,13 @@ export function resolveInvariants(entities, codecOf, storageOf) {
       if (layout?.kind === 'view' && rule.enforcement === 'database')
         fail('database invariant: database rules require a writable explicit column layout', 'enforcement');
       if (layout === null && rule.enforcement === 'database') refuseStoreOwnedRule(entity, rule, storageOf, fail);
+      // the safe-integer domain store enforcement holds (`withinDomain`): the
+      // arithmetic over integer members alone, as the trigger lowers it — a
+      // number member keeps the engine's own answer
+      const integer = (/** @type {string} */ name) => (layout !== null ? columnOf(name)?.codec === 'integer'
+        : entity.properties.get(name)?.type === 'integer' && storageOf(entity.properties.get(name)) === 'column');
+      rule.arithmetic = rule.arithmetic.filter((/** @type {any} */ node) => node.plain
+        && node.reads.every((/** @type {string | undefined} */ name) => name !== undefined && integer(name)));
       const audited = rule.audit === undefined ? undefined : entities.get(rule.audit.entity)?.physical;
       if (rule.audit !== undefined && (audited === undefined || audited === null || audited.kind === 'view'))
         fail('database invariant: audit target must be a mapped application table', 'audit');
@@ -194,16 +356,36 @@ export function resolveInvariants(entities, codecOf, storageOf) {
       for (const probe of rule.probes) {
         const refuse = (/** @type {string} */ reason) => fail(reason, 'assert');
         const target = entities.get(probe.entity);
-        if (!target || target.physical === null) refuse(`$exists-row reads a physical layout; '${probe.entity}' has none`);
-        if (target.physical.kind === 'view') refuse(`$exists-row reads a table by its primary key; '${probe.entity}' is a view, which has none`);
+        if (!target) refuse(`$exists-row reads an entity of the model; '${probe.entity}' is none`);
+        if (target.physical?.kind === 'view') refuse(`$exists-row reads a table by its primary key; '${probe.entity}' is a view, which has none`);
+        const table = target.physical ?? { table: target.name };
         // two entities can map one table: the table decides, not the entity
-        if (sameTable(target.physical, layout ?? { table: entity.name }))
+        if (sameTable(table, layout ?? { table: entity.name }))
           refuse("$exists-row reads another table: PostgreSQL's row triggers run at statement end, SQLite's per row");
-        for (const key of target.keys)
-          if (!Object.hasOwn(probe.match, key)) refuse(`$exists-row on '${probe.entity}' must match its key member '${key}'`);
+        const columns = target.physical !== null ? target.physical.columns : storeOwnedColumns(target, storageOf);
+        // what each matched member is, before what keys the probe
+        for (const member of Object.keys(probe.match)) {
+          const column = columns.find((c) => c.name === member);
+          if (target.physical === null) {
+            const property = target.properties.get(member);
+            const storage = property === undefined ? 'column' : storageOf(property);
+            if (storage === 'epoch') refuse(`$exists-row member '${member}' holds an epoch (milliseconds) in its column, while a probe compares the member's text: a probe matches column-mapped members`);
+            if (storage === 'document') refuse(`$exists-row member '${member}' lives in the entity's document: a probe matches column-mapped members — map it as a column (a top-level scalar property)`);
+            if (column?.codec === 'boolean') refuse(`$exists-row member '${member}' is a boolean, which a layout the store owns keeps as 0 or 1: a probe matches no boolean member of one`);
+          }
+          if (!column || !RULE_CODECS.includes(column.codec)) refuse(`$exists-row member '${member}' needs a scalar column codec`);
+        }
+        const keys = probeKeys(target.keys, uniqueIndexesOf(target), Object.keys(probe.match), probe.entity, refuse);
         for (const [member, value] of Object.entries(probe.match)) {
-          const column = target.physical.columns.find((c) => c.name === member);
-          if (!column || column.null === 'absent' || !RULE_CODECS.includes(column.codec)) refuse(`$exists-row member '${member}' needs a scalar column codec`);
+          const column = /** @type {any} */ (columns.find((c) => c.name === member));
+          // a member the probe is keyed by compares with `=`, which SQL NULL never meets, so a column
+          // whose SQL NULL is a missing member serves there; any other member compares null-safely
+          if (column.null === 'absent' && !keys.includes(member)) refuse(`$exists-row member '${member}' needs a scalar column codec`);
+          if (column.null === 'absent' && ruleLiteral(value) === null)
+            refuse(`'${member}' reads SQL NULL as an absent member, so it never holds null: a probe matches it with a value`);
+          // a keyed member compares with `=`, which no null meets: a key holds none, a unique index admits any number
+          if (keys.includes(member) && ruleLiteral(value) === null)
+            refuse(`$exists-row member '${member}' is one the probe is keyed by, which matches a value, never null: a key holds no null and a unique index admits any number of them`);
           const escaped = typeof value === 'string' && value.startsWith('$') && !value.startsWith('$$');
           const path = escaped ? RECORD_PATH.exec(value) : null;
           if (escaped && path === null) refuse(`$exists-row value '${value}' must read $.old.<member> or $.new.<member>; a text that starts with $ is written $$`);
@@ -229,8 +411,8 @@ export function resolveInvariants(entities, codecOf, storageOf) {
           try { codecOf(column).encode(literal); }
           catch { refuse(`$exists-row value ${JSON.stringify(literal)} is not one the ${column.codec} column '${member}' holds`); }
         }
-        probe.target = target.physical;
-        probe.keys = target.keys;
+        probe.target = target.physical ?? { table: target.name, columns };
+        probe.keys = keys;
       }
     }
     if (increments.size > 0) for (const [index, rule] of entity.invariants.entries()) {
@@ -280,7 +462,7 @@ export function checkInvariants(rules, op, before, after, context = {}) {
       if (op === 'update' && rule.columns !== undefined && assigned !== null && !rule.columns.some((member) => assigned.has(member))) continue;
       if (op === 'update' && context.unchanged === true && rule.columns === undefined && rule.when !== 'assigned') continue;
       if (rule.probes.length === 0) {
-        if (rule.evaluate(record) !== true) throw invariantFailure(rule.name);
+        if (!withinDomain(rule, record) || rule.evaluate(record) !== true) throw invariantFailure(rule.name);
         continue;
       }
       if (typeof context.probe !== 'function') throw new DbRuntimeError('JD2096', `persistence invariant '${rule.name}' needs a probe of '${rule.probes[0].entity}'`);
@@ -290,7 +472,7 @@ export function checkInvariants(rules, op, before, after, context = {}) {
         const answer = (j) => j >= rule.probes.length ? null
           : chain(probe(rule.probes[j], record), (found) => { answers.push(found === true); return answer(j + 1); });
         return chain(answer(0), () => {
-          if (rule.evaluate({ ...record, probes: answers }) !== true) throw invariantFailure(rule.name);
+          if (!withinDomain(rule, record) || rule.evaluate({ ...record, probes: answers }) !== true) throw invariantFailure(rule.name);
         });
       };
       if (context.defer !== undefined) { context.defer(run); continue; }
@@ -303,8 +485,9 @@ export function checkInvariants(rules, op, before, after, context = {}) {
 }
 
 /**
- * The one existence probe: a row of the target whose key members equal their
- * values (`=`, an indexed read) and whose other members match null-safely, so a
+ * The one existence probe: a row of the target whose keyed members — its key,
+ * or the columns of the unique index that keys the probe — equal their values
+ * (`=`, an indexed read) and whose other members match null-safely, so a
  * `null` literal means IS NULL. `value` renders one match value.
  * @param {any} probe a resolved probe @param {any} dialect
  * @param {(expression: any, column: any) => string} value @returns {string}

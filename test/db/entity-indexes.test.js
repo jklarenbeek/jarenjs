@@ -150,7 +150,7 @@ describe('entity index refusals, each at its member', () => {
     ['a name that differs from another only in case', shiftModel([{ name: 'byDay', path: '$.day' }, { name: 'byday', path: '$.employeeId' }]),
       'JD0004', '/entities/Shift/indexes/1/name', /'Shift_byday'[\s\S]*'Shift_byDay'[\s\S]*case/],
     ['a where with arithmetic', shiftModel([{ ...ONE_ACTIVE, where: { $le: [{ $add: ['$.day', 1] }, 5] } }]),
-      'JD0004', '/entities/Shift/indexes/0/where', /only scalar literals/],
+      'JD0004', '/entities/Shift/indexes/0/where', /an index condition reads plain columns, not arithmetic/],
     ['a where with a null literal', shiftModel([{ ...ONE_ACTIVE, where: { $eq: ['$.status', null] } }]),
       'JD0004', '/entities/Shift/indexes/0/where', /'status' reads SQL NULL as an absent member/],
     ['a where over an epoch member', shiftWith({ ...ONE_ACTIVE, where: { $gt: ['$.at', '2026-01-01T00:00:00Z'] } },

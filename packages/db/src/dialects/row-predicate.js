@@ -19,11 +19,20 @@
  * back out of the catalog renders as it was written: a nested `$and` (`$or`)
  * joins the one it sits in, a single operand is itself, a one-item list is an
  * equality, a lone presence test is bare, and a boolean is the stored value
- * (`storedBoolean`). The caller supplies the dialect's flavor (how a column is
- * read, a comparison, a truth value and a text literal spelled) and the
+ * (`storedBoolean`). A trigger check's operand may be a sum, a difference or a
+ * negation of integer columns and safe-integer literals, computed by the engine
+ * over integers it holds exactly: each result is held to the safe range by a
+ * domain of its own, and a missing operand leaves it without a value. The
+ * caller supplies the dialect's flavor (how a column is read, a comparison, a
+ * truth value, a text literal and an integer operand spelled) and the
  * resolver of the paths it reads, and wraps every refusal reason in its own
  * error. */
-import { RULE_CODECS, RECORD_PATH, ruleLiteral } from '../invariants.js';
+import { RULE_CODECS, RECORD_PATH, SAFE_INTEGER, isArithmetic, ruleLiteral } from '../invariants.js';
+
+/** The safe-integer range as a SQL condition over a reference, the one
+ * spelling a column's domain and an arithmetic result's share on both engines.
+ * @param {string} ref @returns {string} */
+export const safeRange = (ref) => `${ref} BETWEEN -${SAFE_INTEGER} AND ${SAFE_INTEGER}`;
 
 /**
  * How a store-owned layout and a collection's generated column hold a boolean
@@ -143,6 +152,9 @@ const OPERATORS = { $eq: '=', $ne: '<>', $lt: '<', $le: '<=', $gt: '>', $ge: '>=
 const neverNull = (name) => `'${name}' reads SQL NULL as an absent member, so it never holds null: test its presence with $exists`;
 const SEQ_ITEMS = 'a $seq lists scalar literals; a text that starts with $ is written $$';
 const SCALARS = 'only scalar literals and old/new property paths can be lowered';
+/** The engine's other arithmetic, whose rounding and division the two engines
+ * and the engine's doubles do not share: named in its refusal. */
+const UNLOWERED_ARITHMETIC = ['$mul', '$div', '$idiv', '$mod'];
 
 /**
  * One lowering: the functions that lower, and the domain checks its column
@@ -150,10 +162,11 @@ const SCALARS = 'only scalar literals and old/new property paths can be lowered'
  * @param {{ rendering?: 'trigger' | 'predicate', releasedText?: boolean, flavor: any, dialect: any, resolve: PathResolver,
  *   fail: (reason: string) => never, probe?: (args: any, value: (expression: any) => string) => string }} context -
  *   `flavor` spells `true`, `false`, the null-safe `equal` and `different`, reads a column (`column(column, ref)` →
- *   `{ value, domain }`) and may spell a text literal (`text(value, plain)`, `plain` the dialect's own); `probe`
- *   lowers an `$exists-row`, its match values rendered by `value`, and without it a probe refuses; `releasedText`
- *   keeps the text installed programs were planned with, which compares two columns of different JSON types by
- *   type alone, so two JSON nulls there are unequal (installed programs are verified by their text)
+ *   `{ value, domain }`) and may spell a text literal (`text(value, plain)`, `plain` the dialect's own) and an integer
+ *   column as an arithmetic operand (`integer(column, ref)`); `probe` lowers an `$exists-row`, its match values rendered
+ *   by `value`, and without it a probe refuses; `releasedText` keeps the text installed programs were planned with,
+ *   which compares two columns of different JSON types by type alone, so two JSON nulls there are unequal (installed
+ *   programs are verified by their text)
  * @returns {{ predicate: (node: any) => string, scalar: (value: any, raw?: boolean) => string,
  *   typeOf: (value: any) => string, domains: Set<string> }}
  */
@@ -173,6 +186,10 @@ export function rowPredicate({ rendering = 'trigger', releasedText = false, flav
   // other expression is refused rather than compared as its text
   /** @param {any} value @param {boolean} [raw] @param {boolean} [operand] @returns {string} */
   const scalar = (value, raw = false, operand = false) => {
+    if (isArithmetic(value)) return operand ? arithmetic(value) : fail(SCALARS);
+    if (value !== null && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length === 1
+      && UNLOWERED_ARITHMETIC.includes(Object.keys(value)[0]))
+      return fail(`'${Object.keys(value)[0]}' is not lowered: a rule's arithmetic is $add, $sub and $neg over integers`);
     if (isPath(value)) {
       const path = resolve(value);
       if (path.refused !== undefined) return fail(path.refused);
@@ -200,8 +217,42 @@ export function rowPredicate({ rendering = 'trigger', releasedText = false, flav
     }
     return fail(SCALARS);
   };
+  /** A sum, a difference or a negation, in a trigger check: each operand an
+   * integer column read as stored, or a safe-integer literal, the result held
+   * to the safe range by a domain of its own; SQL NULL (a missing operand)
+   * leaves it without a value, so a comparison with it is false, as the
+   * engine answers a missing operand. @param {any} node @returns {string} */
+  const arithmetic = (node) => {
+    if (!trigger) return fail('an index condition reads plain columns, not arithmetic');
+    const [key, args] = Object.entries(node)[0];
+    const operands = key === '$neg' ? [args] : Array.isArray(args) && args.length === 2 ? args : fail(`'${key}' takes two operands`);
+    const sql = operands.map(integerOperand);
+    // a negated operand keeps its own parentheses: `--` would open a SQL comment
+    const expression = key === '$neg' ? `(-(${sql[0]}))` : `(${sql[0]} ${key === '$add' ? '+' : '-'} ${sql[1]})`;
+    domains.add(`(${expression} IS NULL OR (${safeRange(expression)}))`);
+    return expression;
+  };
+  /** @param {any} value @returns {string} */
+  const integerOperand = (value) => {
+    if (isArithmetic(value)) return arithmetic(value);
+    if (isPath(value)) {
+      const path = resolve(value);
+      if (path.refused !== undefined) return fail(path.refused);
+      const { column, name } = path;
+      if (path.text !== undefined || column === undefined || column.codec !== 'integer')
+        return fail(`'${path.text !== undefined ? value : name}' is no integer column: arithmetic reads integer columns and safe-integer literals`);
+      // the engine's arithmetic over a JSON null is a type error, not a verdict
+      if (column.null === 'null') return fail(`'${name}' reads SQL NULL as a JSON null, which is no number: arithmetic reads a column whose SQL NULL is an absent member, or none`);
+      const ref = scalar(value, true, true);
+      return flavor.integer === undefined ? ref : flavor.integer(column, ref);
+    }
+    const literal = literalOf(value);
+    if (typeof literal === 'number' && Number.isSafeInteger(literal)) return String(literal);
+    return fail('arithmetic reads integer columns and safe-integer literals');
+  };
   /** @param {any} value @returns {string} */
   const typeOf = (value) => {
+    if (isArithmetic(value)) return 'number';
     if (isPath(value)) {
       const path = resolve(value);
       return path.text !== undefined ? 'string' : codecType(path.column?.codec);
@@ -211,6 +262,13 @@ export function rowPredicate({ rendering = 'trigger', releasedText = false, flav
   };
   /** The column a path operand reads; nothing for a literal or a known text. @param {any} value */
   const columnRead = (value) => (isPath(value) ? resolve(value) : undefined);
+  /** The reads of absent columns an operand makes, its arithmetic's included:
+   * a leaf over them holds only where each is present. @param {any} value @returns {PathRead[]} */
+  const absentReads = (value) => {
+    if (isArithmetic(value)) return [Object.values(value)[0]].flat().flatMap(absentReads);
+    const read = columnRead(value);
+    return read?.column?.null === 'absent' ? [read] : [];
+  };
   /** A leaf over absent members is false while one of them is SQL NULL.
    * @param {string} leaf @param {(string | undefined)[]} refs @returns {string} */
   const guard = (leaf, refs) => {
@@ -228,7 +286,7 @@ export function rowPredicate({ rendering = 'trigger', releasedText = false, flav
     const left = scalar(args[0], false, true), right = scalar(args[1], false, true);
     const lt = typeOf(args[0]), rt = typeOf(args[1]);
     const reads = args.map(columnRead);
-    const absent = reads.filter((read) => read?.column?.null === 'absent');
+    const absent = args.flatMap(absentReads);
     if (absent.length > 0 && (lt === 'null' || rt === 'null')) return fail(neverNull(absent[0]?.name));
     const refs = absent.map((read) => read?.ref);
     if (lt !== rt && lt !== 'null' && rt !== 'null') {

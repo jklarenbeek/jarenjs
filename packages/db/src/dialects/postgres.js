@@ -763,6 +763,15 @@ export function postgresDialect(options = undefined) {
         + 'CROSS JOIN LATERAL unnest(i.indkey::int2[]) WITH ORDINALITY AS k(attnum, ord) '
         + 'LEFT JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.attnum '
         + `WHERE ci.relname = ${stringLiteral(index)} AND ${inNamespace} ORDER BY k.ord`,
+      // the columns the index KEYS, apart from any it carries beside them
+      // (`INCLUDE`): what a unique index proves unique, in its own order
+      indexKeyColumns: (index) =>
+        'SELECT a.attname AS name FROM pg_index i '
+        + 'JOIN pg_class ci ON ci.oid = i.indexrelid '
+        + 'JOIN pg_namespace n ON n.oid = ci.relnamespace '
+        + 'CROSS JOIN LATERAL unnest(i.indkey::int2[]) WITH ORDINALITY AS k(attnum, ord) '
+        + 'LEFT JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.attnum '
+        + `WHERE ci.relname = ${stringLiteral(index)} AND ${inNamespace} AND k.ord <= i.indnkeyatts ORDER BY k.ord`,
       // every table this store might own; a view is reported rather
       // than derived, and the engine's own schemas are never in scope
       tables: () =>

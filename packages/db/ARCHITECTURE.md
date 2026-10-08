@@ -1430,8 +1430,10 @@ JSON null, as an absent member, or refused) — except where `releasedText` keep
 the spelling installed rule programs were planned with (two nulls of columns of
 different JSON types compare unequal there; MODEL-FORMAT §13.4). It renders a
 rule's trigger check, each column read through its codec with that codec's
-domain, and an index condition over plain columns, which assumes code-point text
-columns and a list short enough for a PostgreSQL index predicate. The caller
+domain and each sum, difference or negation of integers held to the safe range
+by a domain of its own (the one range `invariants.js` names, which store
+enforcement holds too), and an index condition over plain columns, which assumes
+code-point text columns and a list short enough for a PostgreSQL index predicate. The caller
 passes the dialect's flavor (`SQLITE`
 beside `compileInvariants` in `invariant-sql.js`, `POSTGRES` in
 `postgres-invariants.js`, so no PostgreSQL code reaches a bundle that carries

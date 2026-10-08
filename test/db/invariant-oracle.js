@@ -201,7 +201,14 @@ export const TRUTH_PREDICATES = [{ $eq: ['$.new.a', '$.new.b'] }, { $ne: ['$.new
   { $eq: ['$.new.a', { $seq: [-1, 0] }] }, { $eq: ['$.new.a', { $seq: [2, null] }] }, { $exists: '$.new.a' },
   { $not: { $eq: ['$.new.a', { $seq: [-1, 0] }] } }, { $not: { $eq: ['$.new.a', { $seq: [2, null] }] } }, { $not: { $exists: '$.new.a' } },
   { $and: [{ $exists: '$.new.a' }, { $eq: ['$.new.b', { $seq: [null, -1] }] }] },
-  { $or: [{ $eq: ['$.new.b', { $seq: [null] }] }, { $lt: ['$.new.a', 0] }] }];
+  { $or: [{ $eq: ['$.new.b', { $seq: [null] }] }, { $lt: ['$.new.a', 0] }] },
+  // integer arithmetic: a missing operand leaves it without a value, so its comparison is false, as the engine answers;
+  // over a column whose SQL NULL is a JSON null it refuses at planning (a null is no number to the engine)
+  { $le: [{ $add: ['$.new.a', 1] }, '$.new.b'] }, { $eq: [{ $sub: ['$.new.b', '$.new.a'] }, 3] }, { $gt: [{ $neg: '$.new.a' }, 0] },
+  { $ne: [{ $add: ['$.new.a', '$.new.b'] }, 1] }, { $not: { $lt: [{ $add: [{ $neg: '$.new.a' }, { $const: 2 }] }, '$.new.b'] } },
+  { $or: [{ $not: { $exists: '$.new.a' } }, { $eq: [{ $add: ['$.new.a', 1] }, '$.new.b'] }] },
+  // a negated negative literal installs (its rendering must not open a SQL comment)
+  { $gt: ['$.new.a', { $neg: -1 }] }];
 
 /** The `null` policy of each truth column: SQL NULL is a JSON null, or an
  * absent member in both columns, or in `a` beside a `b` that holds null. */
@@ -218,6 +225,23 @@ function nullOfAbsent(node, absent) {
     && args.some((arg) => absent.some((name) => arg === `$.new.${name}`))
     && args.some((arg) => isNull(arg) || (Array.isArray(arg?.$seq) && arg.$seq.some(isNull))))
     || nullOfAbsent(args, absent));
+}
+
+/** Whether an expression's arithmetic reads a member whose column reads SQL
+ * NULL as a JSON null: a plan refuses it, since the engine's arithmetic over a
+ * null is a type error, not a verdict. @param {any} node @param {string[]} nulls @returns {boolean} */
+function arithmeticOverNull(node, nulls) {
+  if (!node || typeof node !== 'object') return false;
+  if (Array.isArray(node)) return node.some((item) => arithmeticOverNull(item, nulls));
+  return Object.entries(node).some(([key, args]) => (['$add', '$sub', '$neg'].includes(key)
+    && [args].flat().some((arg) => nulls.some((name) => arg === `$.new.${name}`))) || arithmeticOverNull(args, nulls));
+}
+
+/** The reason a plan refuses an expression over columns of the given `null`
+ * policies, or `null` where it plans. @param {any} node @param {Record<string, string>} policy */
+function plannedRefusal(node, policy) {
+  const of = (/** @type {string} */ wanted) => Object.keys(policy).filter((name) => policy[name] === wanted);
+  return nullOfAbsent(node, of('absent')) ? /never holds null/ : arithmeticOverNull(node, of('null')) ? /no number/ : null;
 }
 
 /**
@@ -238,8 +262,9 @@ export async function ruleTruthTable(engine, policy = TRUTH_POLICIES.null) {
     const evaluate = compileJsonQuery(expression);
     const fixture = await engine.fixture(TRUTH_TABLES);
     try {
-      if (nullOfAbsent(expression, absent)) {
-        assert.throws(() => planInvariants(spec, { dialect: fixture.dialect }), { code: 'JD0005', message: /never holds null/ }, JSON.stringify(expression));
+      const refusal = plannedRefusal(expression, policy);
+      if (refusal !== null) {
+        assert.throws(() => planInvariants(spec, { dialect: fixture.dialect }), { code: 'JD0005', message: refusal }, JSON.stringify(expression));
         verdicts.push('refused');
         continue;
       }
@@ -308,6 +333,8 @@ export const GRID_PREDICATES = [
   { $eq: ['$.new.t', { $seq: [{ $const: '$a' }, { $const: 'B' }] }] }, { $eq: ['$.new.t', { $seq: [{ $const: '$$a' }] }] },
   { $eq: ['$.new.i', { $seq: [{ $const: -1 }, { $const: null }] }] }, { $eq: ['$.new.f', { $seq: [{ $const: true }] }] },
   { $eq: ['$.new.n', { $seq: [{ $const: 1.5 }, 4] }] },
+  // integer arithmetic over the integer column, nested and compared both ways (refused where its SQL NULL is a JSON null)
+  { $lt: [{ $add: ['$.new.i', 1] }, 3] }, { $eq: [{ $neg: '$.new.i' }, { $sub: [0, '$.new.i'] }] }, { $not: { $ge: [{ $sub: [{ $add: ['$.new.i', '$.new.i'] }, 1] }, 3] } },
   { $and: [{ $ne: ['$.new.i', 'x'] }, { $ne: ['$.new.n', 'x'] }, { $ne: ['$.new.t', 1] }, { $ne: ['$.new.d', 1] }, { $ne: ['$.new.s', 1] }, { $ne: ['$.new.f', 'x'] }] },
 ];
 
@@ -338,8 +365,9 @@ export async function ruleGrid(engine, policy = 'null') {
     const evaluate = compileJsonQuery(expression);
     const fixture = await engine.fixture(GRID_TABLES);
     try {
-      if (nullOfAbsent(expression, absent)) {
-        assert.throws(() => planInvariants(spec, { dialect: fixture.dialect }), { code: 'JD0005', message: /never holds null/ }, JSON.stringify(expression));
+      const refusal = plannedRefusal(expression, Object.fromEntries(Object.keys(codecs).map((name) => [name, policy])));
+      if (refusal !== null) {
+        assert.throws(() => planInvariants(spec, { dialect: fixture.dialect }), { code: 'JD0005', message: refusal }, JSON.stringify(expression));
         verdicts.push('refused');
         continue;
       }
@@ -373,12 +401,16 @@ export async function ruleGrid(engine, policy = 'null') {
 export const familyModel = (enforcement) => ({ $model: '0.1', entities: {
   Doc: { schema: { type: 'object', properties: {
     id: { type: 'integer', 'x-entity': { key: true, default: 'auto' } }, status: { type: 'string' }, sealed: { type: ['string', 'null'] },
-  } }, physical: { table: 'docs', columns: { id: column('id'), status: column('status', 'text'), sealed: column('sealed', 'text', 'null') } } },
+    code: { type: ['string', 'null'] },
+  } }, physical: { table: 'docs', columns: { id: column('id'), status: column('status', 'text'), sealed: column('sealed', 'text', 'null'),
+    code: column('code', 'text', 'null') },
+  // the unique index over a doc's code, verified at open: a line names its parent by it
+  indexes: [{ name: 'docs_code', unique: true, terms: [{ by: { $sql: 'column', name: 'code' } }] }] } },
   Line: { schema: { type: 'object', properties: {
     id: { type: 'integer', 'x-entity': { key: true, default: 'auto' } }, doc: { type: 'integer' }, qty: { type: 'integer' },
-    note: { type: 'string' }, revision: { type: 'integer' },
+    note: { type: 'string' }, revision: { type: 'integer' }, code: { type: ['string', 'null'] },
   } }, physical: { table: 'lines', columns: { id: column('id'), doc: column('doc_id'), qty: column('qty'), note: column('note', 'text'),
-    revision: column('revision') } }, invariants: [
+    revision: column('revision'), code: column('code', 'text', 'null') } }, invariants: [
     { name: 'locked', on: ['update'], when: 'assigned', enforcement, assert: { $ne: ['$.old.note', 'locked'] } },
     { name: 'pinned', on: ['update'], columns: ['doc'], enforcement, assert: false },
     { name: 'open_parent', on: ['insert'], enforcement,
@@ -387,16 +419,20 @@ export const familyModel = (enforcement) => ({ $model: '0.1', entities: {
       { $not: { '$exists-row': { entity: 'Doc', match: { id: '$.old.doc' } } } },
       { '$exists-row': { entity: 'Doc', match: { id: '$.old.doc', status: 'draft' } } }] } },
     { name: 'revision', on: ['update'], enforcement: 'database', assert: true, effects: [{ increment: 'revision' }] },
+    // a line that names its parent by code names one that exists: the probe is keyed by the unique index over the code
+    { name: 'coded_parent', on: ['insert'], enforcement,
+      assert: { $or: [{ $eq: ['$.new.code', null] }, { '$exists-row': { entity: 'Doc', match: { code: '$.new.code' } } }] } },
   ] },
   // a document is the store's alone: its probe runs inside the write's transaction
   Memo: { schema: { type: 'object', properties: { id: { type: 'string', 'x-entity': { key: true } }, parent: { type: 'integer' } } },
     invariants: [{ name: 'memo_parent', on: ['insert'], enforcement: 'store', assert: { '$exists-row': { entity: 'Doc', match: { id: '$.new.parent' } } } }] },
 } });
 export const FAMILY_TABLES = {
-  sqlite: 'CREATE TABLE docs(id INTEGER PRIMARY KEY, status TEXT, sealed TEXT); '
-    + 'CREATE TABLE lines(id INTEGER PRIMARY KEY, doc_id INTEGER, qty INTEGER, note TEXT, revision INTEGER)',
-  postgres: 'CREATE TABLE docs(id integer GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY, status text, sealed text); '
-    + 'CREATE TABLE lines(id integer GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY, doc_id integer, qty integer, note text, revision integer)',
+  sqlite: 'CREATE TABLE docs(id INTEGER PRIMARY KEY, status TEXT, sealed TEXT, code TEXT); CREATE UNIQUE INDEX docs_code ON docs(code); '
+    + 'CREATE TABLE lines(id INTEGER PRIMARY KEY, doc_id INTEGER, qty INTEGER, note TEXT, revision INTEGER, code TEXT)',
+  postgres: 'CREATE TABLE docs(id integer GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY, status text, sealed text, code text); '
+    + 'CREATE UNIQUE INDEX docs_code ON docs(code); '
+    + 'CREATE TABLE lines(id integer GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY, doc_id integer, qty integer, note text, revision integer, code text)',
 };
 
 /** What a write came to: `ok`, or the rule that refused it, whoever enforced it.
@@ -442,13 +478,14 @@ export async function familyLifecycle(engine, { enforcement, upgraded }) {
       const writes = [], raw = [], rows = [];
       const snapshot = async () => { rows.push(await fixture.all('SELECT * FROM lines ORDER BY id')); };
       const docs = store.entity('Doc'), lines = store.entity('Line');
-      await docs.create({ id: 1, status: 'draft', sealed: null });
+      await docs.create({ id: 1, status: 'draft', sealed: null, code: 'c1' });
       await docs.create({ id: 2, status: 'final', sealed: null });
       await docs.create({ id: 3, status: 'draft', sealed: '2020-01-01' });
-      // a parent that is a draft, unsealed and present, or no insert. Keys are
-      // explicit: a refused insert spends a PostgreSQL identity value, not a rowid
-      for (const [id, doc] of [[1, 1], [2, 2], [3, 3], [4, 9], [2, 1]])
-        writes.push(await outcome(() => lines.create({ id, doc, qty: 1, note: 'a', revision: 0 })));
+      // a parent that is a draft, unsealed and present, or no insert; one named by
+      // its code, and one by a code no parent has. Keys are explicit: a refused
+      // insert spends a PostgreSQL identity value, not a rowid
+      for (const [id, doc, code] of [[1, 1, 'c1'], [2, 2], [3, 3], [4, 9], [2, 1], [7, 1, 'zz']])
+        writes.push(await outcome(() => lines.create({ id, doc, qty: 1, note: 'a', revision: 0, ...(code === undefined ? {} : { code }) })));
       // a no-op writes nothing; the parent column is pinned; a locked line takes no write
       for (const changes of [{ qty: 2 }, { qty: 2 }, { doc: 2 }, { note: 'locked' }, { qty: 3 }])
         writes.push(await outcome(() => lines.update(1, changes)));
@@ -483,7 +520,8 @@ export async function familyLifecycle(engine, { enforcement, upgraded }) {
         for (const sql of ['UPDATE lines SET qty = qty + 1 WHERE id = 3', 'UPDATE lines SET qty = qty WHERE id = 3',
           'UPDATE lines SET doc_id = doc_id WHERE id = 3', 'UPDATE lines SET qty = qty + 1, revision = 10 WHERE id = 3',
           "UPDATE lines SET note = 'locked' WHERE id = 3", 'UPDATE lines SET qty = qty WHERE id = 3',
-          "INSERT INTO lines(doc_id, qty, note, revision) VALUES (9, 1, 'x', 0)"]) {
+          "INSERT INTO lines(doc_id, qty, note, revision) VALUES (9, 1, 'x', 0)",
+          "INSERT INTO lines(doc_id, qty, note, revision, code) VALUES (4, 1, 'y', 0, 'zz')"]) {
           raw.push(await outcome(() => fixture.exec(sql)));
           await snapshot();
         }
@@ -502,9 +540,42 @@ export async function familyLifecycle(engine, { enforcement, upgraded }) {
 export const FAMILY_REFUSALS = [
   ['a probe whose match misses the key', (m) => { m.entities.Line.invariants[2].assert = { '$exists-row': { entity: 'Doc', match: { status: 'draft' } } }; }],
   ['a probe of its own table', (m) => { m.entities.Line.invariants[2].assert = { '$exists-row': { entity: 'Line', match: { id: '$.new.doc' } } }; }],
-  ['a probe of an entity without a layout', (m) => {
-    m.entities.Note = { schema: { type: 'object', properties: { id: { type: 'integer', 'x-entity': { key: true } } } } };
-    m.entities.Line.invariants[2].assert = { '$exists-row': { entity: 'Note', match: { id: '$.new.doc' } } };
+  ['a probe of a layout the store owns by a member no unique index covers', (m) => {
+    m.entities.Note = { schema: { type: 'object', properties: { id: { type: 'integer', 'x-entity': { key: true } }, ref: { type: 'integer' } } } };
+    m.entities.Line.invariants[2].assert = { '$exists-row': { entity: 'Note', match: { ref: '$.new.doc' } } };
+  }],
+  ['a probe of a layout the store owns by a member its document holds', (m) => {
+    m.entities.Note = { schema: { type: 'object', properties: { id: { type: 'integer', 'x-entity': { key: true } }, tags: { type: 'array' } } } };
+    m.entities.Line.invariants[2].assert = { '$exists-row': { entity: 'Note', match: { id: '$.new.doc', tags: 'x' } } };
+  }],
+  ['a probe keyed by a partial unique index', (m) => {
+    m.entities.Doc.physical.indexes[0].where = { $sql: 'in', value: { $sql: 'column', name: 'status' }, values: [{ $sql: 'value', value: 'draft' }], negate: false };
+  }],
+  ['a probe keyed by an index with an expression term', (m) => {
+    m.entities.Doc.physical.indexes[0].terms = [{ by: { $sql: 'collate', value: { $sql: 'column', name: 'code' }, collation: 'NOCASE' } }];
+  }],
+  ['a probe keyed by an index that is not unique', (m) => { m.entities.Doc.physical.indexes[0].unique = false; }],
+  ['arithmetic over a number column', (m) => {
+    m.entities.Line.schema.properties.share = { type: 'number' };
+    m.entities.Line.physical.columns.share = column('share', 'number');
+    m.entities.Line.invariants[0].assert = { $lt: [{ $add: ['$.new.share', 1] }, 2] };
+  }],
+  ['arithmetic over a text column', (m) => { m.entities.Line.invariants[0].assert = { $lt: [{ $add: ['$.new.note', 1] }, 2] }; }],
+  ['arithmetic over a column whose SQL NULL is a JSON null', (m) => {
+    m.entities.Line.physical.columns.qty = column('qty', 'integer', 'null');
+    m.entities.Line.invariants[0].assert = { $lt: [{ $add: ['$.new.qty', 1] }, 2] };
+  }],
+  ['a product', (m) => { m.entities.Line.invariants[0].assert = { $lt: [{ $mul: ['$.new.qty', 2] }, 2] }; }],
+  ['a quotient', (m) => { m.entities.Line.invariants[0].assert = { $lt: [{ $div: ['$.new.qty', 2] }, 2] }; }],
+  ['a remainder', (m) => { m.entities.Line.invariants[0].assert = { $lt: [{ $mod: ['$.new.qty', 2] }, 2] }; }],
+  ['a sum of a literal the column cannot hold', (m) => { m.entities.Line.invariants[0].assert = { $lt: [{ $add: ['$.new.qty', 1.5] }, 2] }; }],
+  ['a sum of a null literal', (m) => { m.entities.Line.invariants[0].assert = { $lt: [{ $add: ['$.new.qty', null] }, 2] }; }],
+  ['a sum of three operands', (m) => { m.entities.Line.invariants[0].assert = { $lt: [{ $add: ['$.new.qty', 1, 2] }, 2] }; }],
+  ['a negation of a list', (m) => { m.entities.Line.invariants[0].assert = { $lt: [{ $neg: ['$.new.qty'] }, 2] }; }],
+  ['arithmetic compared with a list', (m) => { m.entities.Line.invariants[0].assert = { $eq: [{ $add: ['$.new.qty', 1] }, { $seq: [1, 2] }] }; }],
+  ['arithmetic as a probe value', (m) => { m.entities.Line.invariants[2].assert = { '$exists-row': { entity: 'Doc', match: { id: { $add: ['$.new.doc', 1] } } } }; }],
+  ['arithmetic as an audit value', (m) => {
+    m.entities.Line.invariants[0].audit = { entity: 'Doc', values: { status: 'x', id: { $add: ['$.new.qty', 1] } } };
   }],
   ['a probe comparing a string with an integer key', (m) => { m.entities.Line.invariants[2].assert = { '$exists-row': { entity: 'Doc', match: { id: 'x' } } }; }],
   ['a probe comparing a text column with an integer key', (m) => { m.entities.Line.invariants[2].assert = { '$exists-row': { entity: 'Doc', match: { id: '$.new.note' } } }; }],
@@ -552,6 +623,47 @@ export const FAMILY_REFUSALS = [
       invariants: [{ name: 'alias', on: ['insert'], enforcement: 'database', assert: true }] };
   }],
 ];
+
+/** A rule whose arithmetic the engine answers for every integer, at the edge
+ * of the safe range: `a + 1 > 0 or a - 1 < 0`. @param {'database' | 'store'} enforcement */
+export const edgeModel = (enforcement) => ({ $model: '0.1', entities: { Row: { schema: { type: 'object', properties: {
+  id: { type: 'integer', 'x-entity': { key: true } }, a: { type: 'integer' } } },
+physical: { table: 'rows', columns: { id: column('id'), a: column('a', 'integer', 'absent') } },
+invariants: [{ name: 'edge', on: ['insert', 'update'], enforcement,
+  assert: { $or: [{ $lt: [0, { $add: ['$.new.a', 1] }] }, { $gt: [0, { $sub: ['$.new.a', 1] }] }] } }] } } });
+const EDGE_TABLES = { sqlite: 'CREATE TABLE rows(id INTEGER PRIMARY KEY, a INTEGER)', postgres: 'CREATE TABLE rows(id integer PRIMARY KEY, a bigint)' };
+/** Values inside the safe range, and the two whose sum or difference leaves it. */
+export const EDGE_VALUES = [Number.MAX_SAFE_INTEGER - 1, Number.MAX_SAFE_INTEGER, -Number.MAX_SAFE_INTEGER + 1, -Number.MAX_SAFE_INTEGER, 0];
+
+/**
+ * Integer arithmetic at the edge of the safe range: a result outside it refuses
+ * the write — the store's and, under database enforcement, a raw writer's —
+ * where the query engine's double arithmetic answers the rule. Returns the
+ * verdict of each value for the store's create, its update, and raw SQL.
+ * @param {RuleEngine} engine @param {'database' | 'store'} enforcement
+ * @returns {Promise<string>}
+ */
+export async function arithmeticEdge(engine, enforcement) {
+  const model = edgeModel(enforcement);
+  const fixture = await engine.fixture(EDGE_TABLES);
+  try {
+    for (const statement of planInvariants(model, { dialect: fixture.dialect })) await fixture.exec(statement.sql);
+    const store = await openStore(model, { driver: fixture.driver });
+    try {
+      const rows = store.entity('Row');
+      const created = [], updated = [], raw = [];
+      await rows.create({ id: 0, a: 1 });
+      for (const [i, a] of EDGE_VALUES.entries()) {
+        created.push(await outcome(() => rows.create({ id: i + 1, a })));
+        updated.push(await outcome(() => rows.update(0, { a })));
+        if (enforcement === 'database') raw.push(await outcome(() => fixture.exec(`INSERT INTO rows VALUES (${i + 10}, ${a})`)));
+      }
+      return JSON.stringify({ created, updated, raw, rows: (await fixture.all('SELECT a FROM rows ORDER BY id')).map((row) => Number(row.a)) });
+    }
+    finally { await store.close(); }
+  }
+  finally { await fixture.dispose(); }
+}
 
 const nullableText = { type: ['string', 'null'] };
 const UUID = '0f0e0d0c-0b0a-4908-8706-050403020100';

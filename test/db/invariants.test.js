@@ -8,7 +8,8 @@ import { nodeWorkerDriver } from '@jarenjs/db/node-worker';
 import { nodeWorkerPoolDriver } from '@jarenjs/db/node-pool';
 import { ruleModel as model, truthModel, ruleLifecycle, ruleTruthTable, ruleGrid, sqliteEngine, familyModel, familyLifecycle,
   FAMILY_TABLES, FAMILY_REFUSALS, storeAgreement, column, TRUTH_POLICIES, hybridTruthTable, hybridGrid, HYBRID_GRID_PREDICATES,
-  hybridLifecycle, hybridAgreement } from './invariant-oracle.js';
+  hybridLifecycle, hybridAgreement, arithmeticEdge, edgeModel, EDGE_VALUES } from './invariant-oracle.js';
+import { compileJsonQuery } from '@jarenjs/json/query';
 import { tempDbPath } from './helpers.js';
 
 it('fresh and upgraded rules agree for every SQL writer, allocated audit keys, nulls and frozen no-ops', async () => {
@@ -63,7 +64,63 @@ it('a member whose column reads SQL NULL as absent compares false while missing,
   // the refused predicates: each compares an absent member with null, or with a list holding null
   const refused = (/** @type {string} */ verdicts) => JSON.parse(verdicts).flatMap((/** @type {any} */ v, /** @type {number} */ i) => (v === 'refused' ? [i] : []));
   assert.deepEqual(refused(await ruleTruthTable(sqliteEngine(), TRUTH_POLICIES.absent)), [1, 4, 9, 12, 14, 15]);
-  assert.deepEqual(refused(await ruleTruthTable(sqliteEngine(), TRUTH_POLICIES.mixed)), [1, 4, 9, 12]);
+  // the mixed twin also refuses the arithmetic that reads `b`, whose SQL NULL is a JSON null
+  assert.deepEqual(refused(await ruleTruthTable(sqliteEngine(), TRUTH_POLICIES.mixed)), [1, 4, 9, 12, 17, 19]);
+  assert.deepEqual(refused(await ruleTruthTable(sqliteEngine())), [16, 17, 18, 19, 20, 21]);
+});
+
+it('a store rule whose own binding feeds its arithmetic is judged by the engine, inside the scope that binds it', async () => {
+  const declared = { $model: '0.1', entities: { A: { schema: { type: 'object', properties: {
+    id: { type: 'string', 'x-entity': { key: true } }, amount: { type: 'integer' },
+  } }, invariants: [{ name: 'bounded', on: ['insert', 'update'], enforcement: 'store',
+    assert: { $let: { x: '$.new.amount' }, $return: { $lt: [{ $add: ['$x', 1] }, 10] } } }] } } };
+  const store = await openStore(declared, { driver: nodeDriver() });
+  try {
+    await store.entity('A').create({ id: 'x', amount: 5 });
+    await assert.rejects(store.entity('A').create({ id: 'y', amount: 20 }), { code: 'JD2096' });
+    await assert.rejects(store.entity('A').update('x', { amount: Number.MAX_SAFE_INTEGER }), { code: 'JD2096' });
+  }
+  finally { await store.close(); }
+});
+
+it('a store rule holds the safe-integer domain over integer members only: a number member keeps the engine\'s answer, a nullable integer is held', async () => {
+  const sum = { $lt: [{ $add: ['$.new.n', '$.new.n'] }, 2e16] };
+  const rule = (/** @type {any} */ assert) => [{ name: 'r', on: ['insert', 'update'], enforcement: 'store', assert }];
+  const hybrid = { $model: '0.1', entities: { T: { schema: { type: 'object', properties: { id: { type: 'string', 'x-entity': { key: true } }, n: { type: 'number' } } },
+    invariants: rule(sum) } } };
+  const physical = { $model: '0.1', entities: { T: { schema: { type: 'object', properties: { id: { type: 'integer', 'x-entity': { key: true } }, n: { type: 'number' } } },
+    physical: { table: 't', columns: { id: column('id'), n: column('n', 'number') } }, invariants: rule(sum) } } };
+  const held = { $model: '0.1', entities: { T: { schema: { type: 'object', properties: { id: { type: 'string', 'x-entity': { key: true } }, n: { type: ['integer', 'null'] } } },
+    invariants: rule({ $lt: [0, { $add: ['$.new.n', 1] }] }) } } };
+  // 9e15 is a safe integer whose sum, 1.8e16, the engine's doubles hold exactly: a number member is the engine's alone
+  const store = await openStore(hybrid, { driver: nodeDriver() });
+  try {
+    for (const [id, n] of [['a', 9e15], ['b', 4e15], ['c', 1.5]]) await store.entity('T').create({ id, n });
+  }
+  finally { await store.close(); }
+  const connection = await nodeDriver().open(':memory:');
+  connection.exec('CREATE TABLE t(id INTEGER PRIMARY KEY, n REAL)');
+  const adopted = await openStore(physical, { driver: { ...nodeDriver(), open: async () => connection } });
+  try {
+    for (const [id, n] of [[1, 9e15], [2, 4e15], [3, 1.5]]) await adopted.entity('T').create({ id, n });
+  }
+  finally { await adopted.close(); }
+  const nullable = await openStore(held, { driver: nodeDriver() });
+  try {
+    await nullable.entity('T').create({ id: 'a', n: Number.MAX_SAFE_INTEGER - 1 });
+    await assert.rejects(nullable.entity('T').create({ id: 'b', n: Number.MAX_SAFE_INTEGER }), { code: 'JD2096' });
+  }
+  finally { await nullable.close(); }
+});
+
+it('integer arithmetic at the edge of the safe range refuses the write under either enforcement, where the engine answers', async () => {
+  const evaluate = compileJsonQuery(edgeModel('store').entities.Row.invariants[0].assert);
+  for (const a of EDGE_VALUES) assert.equal(evaluate({ old: null, new: { id: 1, a }, op: 'insert' }), true);
+  const verdicts = ['ok', 'refused edge', 'ok', 'refused edge', 'ok'];
+  assert.deepEqual(JSON.parse(await arithmeticEdge(sqliteEngine(), 'database')),
+    { created: verdicts, updated: verdicts, raw: verdicts, rows: [0, EDGE_VALUES[0], EDGE_VALUES[2], 0, EDGE_VALUES[0], EDGE_VALUES[2], 0] });
+  assert.deepEqual(JSON.parse(await arithmeticEdge(sqliteEngine(), 'store')),
+    { created: verdicts, updated: verdicts, raw: [], rows: [0, EDGE_VALUES[0], EDGE_VALUES[2], 0] });
 });
 
 it('every scalar codec gives the query engine\'s verdict and refuses a stored value its codec cannot read', async () => {
@@ -132,8 +189,8 @@ it('the trigger families: store and database enforcement refuse the same store w
   assert.deepEqual(runs['store upgraded'], runs.store);
   assert.deepEqual(runs.store.writes, runs.database.writes);
   assert.deepEqual(runs.database.writes, [
-    // inserts: a draft, unsealed, present parent only
-    'ok', 'refused open_parent', 'refused open_parent', 'refused open_parent', 'ok',
+    // inserts: a draft, unsealed, present parent only; a parent named by its code, and by a code no parent has
+    'ok', 'refused open_parent', 'refused open_parent', 'refused open_parent', 'ok', 'refused coded_parent',
     // updates: a change, a no-op that writes nothing, the pinned column, the lock, a write to a locked line
     'ok', 'ok', 'refused pinned', 'ok', 'refused locked',
     // tracked saves: a change, the pinned column
@@ -143,10 +200,10 @@ it('the trigger families: store and database enforcement refuse the same store w
     // removals: tracked under a draft parent, direct and tracked under a final one, direct under none
     'ok', 'refused draft_parent', 'refused draft_parent', 'ok']);
   // SQL writers: a change, a same-value assignment, the pinned column assigned to itself, a revision the
-  // writer sets, the lock, a same-value assignment to a locked line, a missing parent, a delete
-  assert.deepEqual(runs.database.raw, ['ok', 'ok', 'refused pinned', 'ok', 'ok', 'refused locked', 'refused open_parent', 'ok']);
+  // writer sets, the lock, a same-value assignment to a locked line, a missing parent, a parent code no doc has, a delete
+  assert.deepEqual(runs.database.raw, ['ok', 'ok', 'refused pinned', 'ok', 'ok', 'refused locked', 'refused open_parent', 'refused coded_parent', 'ok']);
   // a revision moves by one per changing update, whoever writes, and keeps a writer's own value
-  assert.deepEqual(runs.database.rows.map((/** @type {any[]} */ rows) => rows.map((row) => row.revision)), [[2, 1], [], [1], [1], [1], [10], [11], [11], [11]]);
+  assert.deepEqual(runs.database.rows.map((/** @type {any[]} */ rows) => rows.map((row) => row.revision)), [[2, 1], [], [1], [1], [1], [10], [11], [11], [11], [11]]);
   assert.deepEqual(runs.store.rows, runs.database.rows.slice(0, 2));
 });
 
@@ -309,7 +366,7 @@ it('a rule matches text by code point whatever the column\'s collation; SQLite\'
   const collated = familyModel('database');
   const connection = await nodeDriver().open(':memory:');
   connection.exec(FAMILY_TABLES.sqlite.replace('status TEXT', 'status TEXT COLLATE NOCASE').replace('note TEXT', 'note TEXT COLLATE NOCASE')
-    + "; INSERT INTO docs VALUES (1, 'DRAFT', NULL), (2, 'draft', NULL)");
+    + "; INSERT INTO docs VALUES (1, 'DRAFT', NULL, NULL), (2, 'draft', NULL, NULL)");
   for (const statement of planInvariants(collated, { dialect: sqliteDialect })) connection.exec(statement.sql);
   const store = await openStore(collated, { driver: { ...nodeDriver(), open: async () => connection } });
   try {

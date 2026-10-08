@@ -848,6 +848,36 @@ value the store did not honor now refuse by code, before any statement:
   that join answers; and a live option a registration does not read — a
   per-call `profile`, which `execute` reads and a registration dropped, or
   a misspelt `mod` — is now `JD0013`, as is `null` in place of the options.
+- A `physical.indexes` entry was never verified at open: a layout whose
+  declared index had been dropped, made non-unique, re-columned or
+  re-conditioned opened on both engines. Opening now verifies each declared
+  index as it verifies the columns — present (by name as the engine compares
+  names: ASCII case folded on SQLite, exact on PostgreSQL), as unique and as
+  conditional as declared, a column keyed under each plain column term in
+  order; a term's direction or collation, and a PostgreSQL `INCLUDE` column
+  beside the keys, are not compared — and refuses `JD0002` naming the index
+  and what differs; an index with a condition or an expression term is
+  compared by its CREATE text on SQLite (MODEL-FORMAT §12). Recreate the index
+  as declared — from the statement the store plans,
+  `explainMapping(model).entities.<E>.declaredIndexes[i].sql`, where its text
+  is compared — or drop the declaration. A migration step that reads such a
+  layout verifies its declared indexes too: a step that runs before a later
+  step creates one names the layout without it as its `model`. A
+  `kind: "view"` layout that declares `indexes` is `JD0005`.
+- A store rule's `$add`, `$sub` or `$neg` over integers accepted a result
+  outside ±(2^53 − 1), which the engine had rounded; it is now refused
+  (`JD2096`), as a database rule's trigger refuses it (MODEL-FORMAT §13.4). A
+  write whose arithmetic reads a missing or non-integer member is judged as
+  before.
+- An `$exists-row` keyed by anything but the target's key, or reading a layout
+  the store owns, was `JD0005`; a verified unique index — a `physical.indexes`
+  entry, a unique member, an entity index without a condition — and a
+  store-owned target's key now key a probe (MODEL-FORMAT §13.2). A probe keyed
+  by a partial unique index, or by one with an expression term, stays `JD0005`,
+  now naming the index. A `null` literal against a member the probe is keyed
+  by — its key, or a column of the index that keys it — planned and matched
+  nothing (`code = NULL`); it is now `JD0005` at planning: a keyed member
+  matches a value.
 
 ### Allocated entity keys on PostgreSQL
 
