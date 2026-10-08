@@ -24,7 +24,9 @@ import { CARD_ONE, CARD_MANY, hostFailureText, collectReadSlots } from './normal
 // table entry (compileOp). Only referenced inside functions, so the
 // import cycle compile.js <-> operators.js is initialization-safe.
 import { OPERATORS, checkRangeBound } from './operators.js';
+import { intervalArg } from './series.js';
 import { bboxOf, createBboxIndex } from '@jarenjs/core/geo';
+import { createIntervalIndex, overlapsInterval } from '@jarenjs/core/series';
 
 /**
  * Sentinel stored in the frame slot of an external parameter the caller
@@ -390,13 +392,15 @@ function compileLet(node) {
 //     equality would later have dropped. A hash join never forms that
 //     tuple, which would silently retract a `$as` assertion;
 //   - the probe side is the innermost $for, with no `$at` (a position
-//     would have to survive bucketing), no `$allowing-empty`, no window;
+//     would have to survive bucketing), no `$allowing-empty`, no window,
+//     and no `$range` source: the scan counts through a range, a table
+//     would have to build it, and the range guard refuses a build;
 //   - its source reads no slot bound by an outer binding;
 //   - the equality is the whole `$where`, or its FIRST `$and` conjunct,
 //     so nothing that used to be evaluated before it is skipped;
-//   - both key expressions are paths or variable references, whose only
-//     failure is JQ2006 - so moving when they are evaluated cannot move
-//     an error;
+//   - both key expressions are paths or variable references, which raise
+//     nothing but JQ2006 (an unbound external), and each is read only
+//     where the scan reads it (below);
 //   - neither key is statically MANY, because `$eq` is an existential
 //     comparison over sequences and a bucket holds one key per item.
 //
@@ -404,21 +408,126 @@ function compileLet(node) {
 // agrees with the `$eq` relation (`equalsJson`) on every JSON value
 // except NaN - and a NaN key is dropped on both sides, which is what
 // `$eq` already does, since NaN equals nothing.
+//
+// Every probe - this one and the screened ones below - also evaluates
+// what the scan evaluates WHEN the scan evaluates it, so it cannot
+// raise where the scan answers, or raise a different first error:
+//
+//   - the inner side is built at the first outer tuple that reaches the
+//     probe, which is where the scan first evaluates the inner source:
+//     an empty outer side evaluates nothing of the inner one, and an
+//     outer source that raises raises first. The source is then
+//     evaluated once per phrase evaluation rather than once per outer
+//     tuple, which only a registered `$call` function could observe,
+//     and those are pure;
+//   - the outer operand is read only when the scan's predicate reads it
+//     for some pair: never without an inner item, and - when the inner
+//     operand comes first and the predicate stops at an empty one, as
+//     `$eq` and `$overlaps` do - only beside an inner operand that is
+//     not empty;
+//   - the probe's own reads of the operands are not counted against
+//     `limits.steps`: the scan counts the same reads inside the
+//     predicate, so the probe's count never runs ahead of the scan's,
+//     and the probe never exceeds a limit the scan stays inside.
 
 function isEqOp(node) {
   return node.kind === 'op' && node.name === '$eq' && node.args.length === 2;
 }
+
+// A source the scan counts through rather than builds: `$range` with its
+// two bounds (`rangeSource`)
+function isRangeOp(expr) {
+  return expr.kind === 'op' && expr.name === '$range' && expr.args.length === 2;
+}
+
+// The predicates an index over the inner side can screen, one screen per
+// predicate family. A screen builds the index over the inner operands -
+// pushing onto `always` every position the index cannot speak for - and
+// answers, for one outer operand that is not EMPTY, the candidate
+// positions, or null when that operand cannot be screened at all.
+// `readsBoth` says whether the predicate reads both operands of every
+// pair, or stops at an EMPTY first one.
 
 // The spatial predicates a bounding box can screen. Box overlap is a
 // NECESSARY condition for both - a position inside a surface lies inside
 // that surface's box, and box intersection is what the second one tests
 // outright - so an index over boxes can only ever remove candidates that
 // would have failed anyway.
-const SPATIAL_JOIN_OPS = new Set(['$within', '$bbox-intersects']);
+const BOX_SCREEN = {
+  readsBoth: true,
+  index(values, always) {
+    const boxes = new Array(values.length);
+    for (let i = 0; i < values.length; i++) {
+      boxes[i] = bboxOf(values[i]);
+      // no box means the index cannot speak for it - a malformed operand
+      // must still reach the predicate and raise what a scan would raise
+      if (boxes[i] === null)
+        always.push(i);
+    }
+    return createBboxIndex(boxes);
+  },
+  candidates(index, v) {
+    const box = bboxOf(v);
+    return box === null ? null : index.search(box[0], box[1], box[2], box[3]);
+  },
+};
 
-function isSpatialOp(node) {
-  return node.kind === 'op' && SPATIAL_JOIN_OPS.has(node.name) && node.args.length === 2;
+// Does `$overlaps` accept `v` as an interval? Asked of the operator's own
+// rule - `intervalArg`'s record test, then the kernel's `overlapsInterval`
+// of the span against itself - so the rule lives in one place, and
+// whatever it refuses, however it refuses it, is left for the predicate
+// to raise.
+function isInterval(v) {
+  try {
+    const span = intervalArg(v, '');
+    overlapsInterval(span, span);
+    return true;
+  }
+  catch {
+    return false;
+  }
 }
+
+const SPAN_BOUNDS = { start: (w) => w.span.start, end: (w) => w.span.end };
+
+// `$overlaps`: an interval index answers exactly the spans the kernel
+// would pair with the probe's - the same half-open test over the same
+// instants. An EMPTY inner span is never a candidate: `$overlaps`
+// answers it with the empty sequence, which `$where` reads as false and
+// which raises nothing. A span the kernel refuses goes to the always
+// list rather than the index, because `createIntervalIndex` refuses the
+// whole build at the first malformed row. An outer span the kernel
+// refuses cannot be screened.
+const SPAN_SCREEN = {
+  readsBoth: false,
+  index(values, always) {
+    const spans = [];
+    for (let i = 0; i < values.length; i++) {
+      const v = values[i];
+      if (v === EMPTY)
+        continue;
+      if (isInterval(v))
+        spans.push({ i, span: v });
+      else
+        always.push(i);
+    }
+    return createIntervalIndex(spans, SPAN_BOUNDS);
+  },
+  candidates(index, v) {
+    if (!isInterval(v))
+      return null;
+    const hits = index.overlapping(v.start, v.end);
+    for (let k = 0; k < hits.length; k++)
+      hits[k] = hits[k].i;
+    return hits;
+  },
+};
+
+const SCREENS = new Map([
+  ['$within', BOX_SCREEN],
+  ['$bbox-intersects', BOX_SCREEN],
+  ['$overlaps', SPAN_SCREEN],
+]);
 
 function isKeyExpr(node) {
   return (node.kind === 'path' || node.kind === 'var') && node.card !== CARD_MANY;
@@ -438,9 +547,10 @@ function intersects(set, slots) {
   return false;
 }
 
-// Decide whether `node`'s innermost $for can become a hash-join probe.
-// Returns { inner, outerKey, innerKey, residual } or null.
-function planHashJoin(node) {
+// The innermost $for of a phrase a probe could serve, and the slots its
+// outer bindings fill - or null when serving it would be visible.
+// Returns { inner, outerSlots } or null.
+function probeBinding(node) {
   const fors = node.forBindings;
   if (fors.length < 2 || node.where === null)
     return null;
@@ -450,6 +560,8 @@ function planHashJoin(node) {
   if (inner.atSlot >= 0 || inner.allowingEmpty === true
     || (inner.window !== null && inner.window !== undefined))
     return null;
+  if (isRangeOp(inner.expr))
+    return null; // the scan counts through it; a probe would build it
 
   const outerSlots = [];
   for (let i = 0; i < fors.length - 1; i++) {
@@ -458,7 +570,18 @@ function planHashJoin(node) {
       outerSlots.push(fors[i].atSlot);
   }
   if (intersects(readsOf(inner.expr), outerSlots))
-    return null; // correlated: the table would differ per outer tuple
+    return null; // correlated: the probe would differ per outer tuple
+  return { inner, outerSlots };
+}
+
+// Decide whether `node`'s innermost $for can become a hash-join probe.
+// Returns { inner, outerKey, innerKey, residual, outerFirst, readsBoth }
+// or null.
+function planHashJoin(node) {
+  const binding = probeBinding(node);
+  if (binding === null)
+    return null;
+  const { inner, outerSlots } = binding;
 
   const where = node.where;
   let eq = null;
@@ -486,154 +609,181 @@ function planHashJoin(node) {
   if (readsOf(outerKey).has(inner.slot) || intersects(readsOf(innerKey), outerSlots))
     return null;
 
-  return { inner, outerKey, innerKey, residual: rest };
+  return {
+    inner, outerKey, innerKey, residual: rest, outerFirst: uses1,
+    // `$eq` of two singletons reads both; otherwise it stops at an empty
+    // first operand
+    readsBoth: eq.args[0].card === CARD_ONE && eq.args[1].card === CARD_ONE,
+  };
 }
 
 /**
- * Decide whether the innermost `$for` can be probed through a spatial
- * index. Returns `{ inner, innerGeo, outerGeo }` or null.
+ * Decide whether the innermost `$for` can be probed through an index
+ * that screens the predicate. Returns `{ inner, innerArg, outerArg,
+ * screen, outerFirst, readsBoth }` or null.
  *
  * Unlike the hash join this does NOT consume the predicate: the index
  * only narrows the candidate set, and `$where` still runs unchanged on
  * every candidate. That makes the rewrite correct by construction — the
  * surviving tuples are decided by the same closure either way — and
- * leaves only one thing to be careful about, which is that a tuple the
- * index rejects never reaches the predicate at all. `compileSpatialProbe`
- * handles that by keeping any item whose box cannot be computed in an
- * always-check list, so a malformed operand still raises the error a
- * scan would have raised.
+ * leaves two things to be careful about. A tuple the index rejects never
+ * reaches the predicate at all, so `compileScreenedProbe` keeps any item
+ * the index cannot speak for in an always-check list, and a malformed
+ * operand still raises the error a scan would have raised. And the
+ * candidates run in the order the scan would have reached them, so the
+ * answer's order and the first error are the scan's too.
  */
-function planSpatialJoin(node) {
-  const fors = node.forBindings;
-  if (fors.length < 2 || node.where === null)
+function planScreenedJoin(node) {
+  const binding = probeBinding(node);
+  if (binding === null)
     return null;
-  if (node.asChecks !== null || node.letBindings.length !== 0)
-    return null; // they run per tuple before $where and would see fewer
   const where = node.where;
-  if (!isSpatialOp(where))
-    return null; // only a bare spatial predicate; an $and could throw first
-  const inner = fors[fors.length - 1];
-  if (inner.atSlot >= 0 || inner.allowingEmpty === true
-    || (inner.window !== null && inner.window !== undefined))
-    return null;
+  const screen = where.kind === 'op' && where.args.length === 2
+    ? SCREENS.get(where.name)
+    : undefined;
+  if (screen === undefined)
+    return null; // only a bare screened predicate; an $and could throw first
+  const { inner, outerSlots } = binding;
 
-  const outerSlots = [];
-  for (let i = 0; i < fors.length - 1; i++) {
-    outerSlots.push(fors[i].slot);
-    if (fors[i].atSlot >= 0)
-      outerSlots.push(fors[i].atSlot);
-  }
-  if (intersects(readsOf(inner.expr), outerSlots))
-    return null; // correlated: the index would differ per outer tuple
-
-  // one operand must be the probe's geometry, the other must not mention it
+  // one operand must be the probe's own, the other must not mention it
   const [a, b] = where.args;
   if (!isKeyExpr(a) || !isKeyExpr(b))
-    return null; // paths and variables only, so evaluation cannot throw
+    return null; // paths and variables only, read where the scan reads them
   const usesA = readsOf(a).has(inner.slot);
   const usesB = readsOf(b).has(inner.slot);
   if (usesA === usesB)
     return null;
-  const innerGeo = usesA ? a : b;
-  const outerGeo = usesA ? b : a;
-  if (readsOf(outerGeo).has(inner.slot) || intersects(readsOf(innerGeo), outerSlots))
+  const innerArg = usesA ? a : b;
+  const outerArg = usesA ? b : a;
+  if (readsOf(outerArg).has(inner.slot) || intersects(readsOf(innerArg), outerSlots))
     return null;
-  return { inner, innerGeo, outerGeo };
+  return { inner, innerArg, outerArg, screen, outerFirst: usesB, readsBoth: screen.readsBoth };
+}
+
+// The items a $for over `v` iterates, unpacked exactly as the $for
+// unpacks them: an array item contributes its members, one level deep.
+function innerItems(v) {
+  const items = [];
+  if (v === EMPTY)
+    return items;
+  const list = v instanceof Seq ? v.items : [v];
+  for (let i = 0; i < list.length; i++) {
+    const item = list[i];
+    if (Array.isArray(item)) {
+      for (let j = 0; j < item.length; j++)
+        items.push(item[j]);
+    }
+    else {
+      items.push(item);
+    }
+  }
+  return items;
+}
+
+// Does the scan's predicate read the outer operand for some pair of this
+// inner side? Not without a pair; at every pair when it reads both
+// operands or the outer one first; otherwise only beside an inner
+// operand that is not EMPTY.
+function readsOuter(plan, count, someValue) {
+  return count > 0 && (plan.outerFirst || plan.readsBoth || someValue);
+}
+
+// The driver of a probe clause, around the whole tuple stream: the
+// stream runs with the probe's state unbuilt - the probe builds it at
+// the first outer tuple that arrives - and the caller's state is
+// restored after, because a registered `$call` function can re-enter the
+// same compiled query from inside the stream.
+function probeDriver(cell) {
+  return (f, out, chain) => {
+    const saved = cell.state;
+    cell.state = null;
+    try {
+      chain(f, out);
+    }
+    finally {
+      cell.state = saved;
+    }
+  };
+}
+
+const ascending = (x, y) => x - y;
+
+/**
+ * The one candidate emitter of the screened probes. `hits` are inner
+ * positions in whatever order the index answers them (a tree's leaf
+ * order, an interval index's start order); `always` is ascending by
+ * construction, and the two never share a position. Visited merged, in
+ * ascending inner position, they are the tuples the scan would reach, in
+ * the order it reaches them - so the answer's order and the first error
+ * a candidate raises are the scan's own.
+ */
+function emitAscending(hits, always, visit, f, out) {
+  hits.sort(ascending);
+  let h = 0;
+  let a = 0;
+  while (h < hits.length || a < always.length) {
+    if (a === always.length || (h < hits.length && hits[h] < always[a]))
+      visit(f, out, hits[h++]);
+    else
+      visit(f, out, always[a++]);
+  }
 }
 
 /**
- * The spatial probe clause plus the prologue that indexes the inner
- * side. Same closure-state discipline as the hash join: the index is
- * rebuilt per phrase evaluation and saved/restored around the tuple
- * stream, because a registered `$call` function can re-enter the query.
+ * The screened probe clause and its driver. The index is built at the
+ * first outer tuple that reaches the probe, once per phrase evaluation.
  */
-function compileSpatialProbe(plan, next, where, wherePath) {
+function compileScreenedProbe(plan, next, where, wherePath) {
+  const screen = plan.screen;
   const slot = plan.inner.slot;
   const srcGet = compileNode(plan.inner.expr);
-  const innerGeoGet = compileNode(plan.innerGeo);
-  const outerGeoGet = compileNode(plan.outerGeo);
+  const innerGet = compileUncounted(plan.innerArg);
+  const outerGet = compileUncounted(plan.outerArg);
   const cond = compileNode(where);
-  let items = [];
-  let always = [];
-  let index = null;
-
-  const collect = (f, item) => {
-    if (Array.isArray(item)) { // D4, exactly as a $for would unpack it
-      for (let j = 0; j < item.length; j++)
-        items.push(item[j]);
-      return;
-    }
-    items.push(item);
-  };
+  const cell = { state: null };
 
   const build = (f) => {
-    items = [];
-    always = [];
-    const v = srcGet(f);
-    if (v === EMPTY) {
-      index = null;
-      return;
-    }
-    if (v instanceof Seq) {
-      const list = v.items;
-      for (let i = 0; i < list.length; i++)
-        collect(f, list[i]);
-    }
-    else {
-      collect(f, v);
-    }
-    const boxes = new Array(items.length);
+    const items = innerItems(srcGet(f));
+    // every inner operand is evaluated, and classified, once per build
+    const values = new Array(items.length);
+    let someValue = false;
     for (let i = 0; i < items.length; i++) {
       f[slot] = items[i];
-      const box = bboxOf(innerGeoGet(f));
-      boxes[i] = box;
-      // no box means the index cannot speak for it - a malformed operand
-      // must still reach the predicate and raise what a scan would raise
-      if (box === null)
-        always.push(i);
+      values[i] = innerGet(f);
+      if (values[i] !== EMPTY)
+        someValue = true;
     }
-    index = createBboxIndex(boxes);
+    const always = [];
+    const index = screen.index(values, always);
+    return { items, always, index, readsOuter: readsOuter(plan, items.length, someValue) };
   };
 
-  const emit = (f, out, i) => {
-    f[slot] = items[i];
+  const visit = (f, out, i) => {
+    f[slot] = cell.state.items[i];
     if (ebv(cond(f), wherePath))
       next(f, out);
   };
 
   const probe = (f, out) => {
-    if (index === null)
-      return;
-    const box = bboxOf(outerGeoGet(f));
-    if (box === null) {
+    if (cell.state === null)
+      cell.state = build(f);
+    const state = cell.state;
+    if (!state.readsOuter)
+      return; // the scan reads no outer operand here: nothing matches or raises
+    const v = outerGet(f);
+    if (v === EMPTY)
+      return; // every pair answers false or empty, and none raises
+    const hits = screen.candidates(state.index, v);
+    if (hits === null) {
       // nothing to screen with: fall back to the full scan, which is
       // what this phrase would have done without an index at all
-      for (let i = 0; i < items.length; i++)
-        emit(f, out, i);
+      for (let i = 0; i < state.items.length; i++)
+        visit(f, out, i);
       return;
     }
-    const hits = index.search(box[0], box[1], box[2], box[3]);
-    for (let i = 0; i < hits.length; i++)
-      emit(f, out, hits[i]);
-    for (let i = 0; i < always.length; i++)
-      emit(f, out, always[i]);
+    emitAscending(hits, state.always, visit, f, out);
   };
-
-  const drive = (f, out, chain) => {
-    const savedItems = items;
-    const savedAlways = always;
-    const savedIndex = index;
-    build(f);
-    try {
-      chain(f, out);
-    }
-    finally {
-      items = savedItems;
-      always = savedAlways;
-      index = savedIndex;
-    }
-  };
-  return { drive, probe };
+  return { drive: probeDriver(cell), probe };
 }
 
 // The key a bucket is filed under, or null when the value cannot take
@@ -646,60 +796,45 @@ function joinKey(v) {
   return stableKeyString(v);
 }
 
-// The probe clause plus the `drive` wrapper that fills its table. The
-// table is closure state, refreshed once per phrase evaluation. The
-// language has no recursion, so a phrase cannot appear inside its own
-// subtree - but a registered `$call` function is host code, and host code
-// CAN re-enter the same compiled query from inside `$return`. `drive`
-// therefore saves and restores the table around the tuple stream, so a
-// nested evaluation cannot leave its own table behind for the outer
-// probe to read.
+// The hash-join probe clause and its driver. The table is built at the
+// first outer tuple that reaches the probe, once per phrase evaluation.
 function compileJoinProbe(plan, next) {
   const slot = plan.inner.slot;
   const srcGet = compileNode(plan.inner.expr);
-  const innerKeyGet = compileNode(plan.innerKey);
-  const outerKeyGet = compileNode(plan.outerKey);
-  let table = new Map();
-
-  const file = (f, item) => {
-    f[slot] = item;
-    const key = joinKey(innerKeyGet(f));
-    if (key === null)
-      return;
-    const bucket = table.get(key);
-    if (bucket === undefined)
-      table.set(key, [item]);
-    else
-      bucket.push(item);
-  };
-  const fileItem = (f, item) => {
-    if (Array.isArray(item)) { // D4, exactly as a $for would unpack it
-      for (let j = 0; j < item.length; j++)
-        file(f, item[j]);
-      return;
-    }
-    file(f, item);
-  };
+  const innerKeyGet = compileUncounted(plan.innerKey);
+  const outerKeyGet = compileUncounted(plan.outerKey);
+  const cell = { state: null };
 
   const build = (f) => {
-    table = new Map();
-    const v = srcGet(f);
-    if (v === EMPTY)
-      return;
-    if (v instanceof Seq) {
-      const items = v.items;
-      for (let i = 0; i < items.length; i++)
-        fileItem(f, items[i]);
-      return;
+    const items = innerItems(srcGet(f));
+    const table = new Map();
+    let someValue = false;
+    for (let i = 0; i < items.length; i++) {
+      f[slot] = items[i];
+      const v = innerKeyGet(f);
+      if (v !== EMPTY)
+        someValue = true;
+      const key = joinKey(v);
+      if (key === null)
+        continue;
+      const bucket = table.get(key);
+      if (bucket === undefined)
+        table.set(key, [items[i]]);
+      else
+        bucket.push(items[i]);
     }
-    fileItem(f, v);
+    return { table, readsOuter: readsOuter(plan, items.length, someValue) };
   };
 
   const probe = (f, out) => {
+    if (cell.state === null)
+      cell.state = build(f);
+    if (!cell.state.readsOuter)
+      return; // the scan reads no outer key here: nothing matches or raises
     const key = joinKey(outerKeyGet(f));
     if (key === null)
       return;
-    const bucket = table.get(key);
+    const bucket = cell.state.table.get(key);
     if (bucket === undefined)
       return;
     for (let i = 0; i < bucket.length; i++) {
@@ -707,17 +842,7 @@ function compileJoinProbe(plan, next) {
       next(f, out);
     }
   };
-  const drive = (f, out, chain) => {
-    const saved = table;
-    build(f);
-    try {
-      chain(f, out);
-    }
-    finally {
-      table = saved;
-    }
-  };
-  return { drive, probe };
+  return { drive: probeDriver(cell), probe };
 }
 
 //#endregion
@@ -769,7 +894,7 @@ function emitForItemAt(item, f, slot, atSlot, pos, next, out) {
 // each use site rather than shared through a callback: an indirect call
 // per iterated number would cost more than the duplication saves.
 function rangeSource(expr) {
-  if (expr.kind !== 'op' || expr.name !== '$range' || expr.args.length !== 2)
+  if (!isRangeOp(expr))
     return null;
   return {
     fromGet: compileNode(expr.args[0]),
@@ -1197,13 +1322,12 @@ function compileFlwor(node) {
   // an equijoin the planner can serve from a hash table is answered by
   // the probe clause below, so its conjunct never reaches $where
   const join = planHashJoin(node);
-  // a spatial predicate is screened by an index instead: the probe keeps
-  // $where intact and runs it on every candidate, so it installs no
-  // where-stage of its own
-  // ... and when there is one, no where-stage is installed at all: the
-  // probe evaluates the predicate itself, on the candidates
-  const spatial = join === null ? planSpatialJoin(node) : null;
-  if (spatial === null && join !== null && join.residual !== null) {
+  // a spatial or an interval predicate is screened by an index instead:
+  // the probe keeps $where intact and runs it on every candidate, so no
+  // where-stage is installed at all - the probe evaluates the predicate
+  // itself, on the candidates
+  const screened = join === null ? planScreenedJoin(node) : null;
+  if (screened === null && join !== null && join.residual !== null) {
     const conds = join.residual.map(compileNode);
     const paths = join.residual.map((a) => a.docPath);
     const clen = conds.length;
@@ -1216,7 +1340,7 @@ function compileFlwor(node) {
       next(f, out);
     };
   }
-  else if (spatial === null && join === null && node.where !== null) {
+  else if (screened === null && join === null && node.where !== null) {
     const cond = compileNode(node.where);
     const condPath = node.where.docPath;
     const next = emit;
@@ -1242,18 +1366,18 @@ function compileFlwor(node) {
   const fors = node.forBindings;
   let driveJoin = null;
   for (let i = fors.length - 1; i >= 0; i--) {
-    if (i === fors.length - 1 && (join !== null || spatial !== null)) {
+    if (i === fors.length - 1 && (join !== null || screened !== null)) {
       const probe = join !== null
         ? compileJoinProbe(join, emit)
-        : compileSpatialProbe(spatial, emit, node.where, node.where.docPath);
+        : compileScreenedProbe(screened, emit, node.where, node.where.docPath);
       driveJoin = probe.drive;
       emit = probe.probe;
       continue;
     }
     emit = compileForClause(fors[i], emit);
   }
-  // the table is filled once per phrase evaluation, before the outer
-  // loops start
+  // a probe's driver wraps the outer loops, and the probe builds its
+  // table or index at the first outer tuple that reaches it
   const head = driveJoin === null
     ? emit
     : ((chain) => (f, out) => driveJoin(f, out, chain))(emit);
@@ -1452,6 +1576,25 @@ function compileQuant(node) {
 // compile - a `compileTypeTest` hook that compiles another query - keeps
 // its own setting.
 let STEPS = null;
+
+/**
+ * A getter for a join probe's own read of an operand, compiled without
+ * the step check: the scan counts the same read inside the predicate,
+ * pair by pair, so leaving the probe's read uncounted keeps its count
+ * from ever running ahead of the scan's.
+ * @param {object} node - a path or variable reference
+ * @returns {(frame: any[]) => any}
+ */
+function compileUncounted(node) {
+  const steps = STEPS;
+  STEPS = null;
+  try {
+    return compileNode(node);
+  }
+  finally {
+    STEPS = steps;
+  }
+}
 
 /**
  * Compile a query's AST root, optionally instrumenting every node

@@ -837,6 +837,19 @@ const FACTS = {
       + 'holds two daily boundaries. What the suite gates is that the provider is consulted per '
       + 'boundary rather than per sample.';
   },
+  // -- series: the engine's interval join, the nested loop against the
+  // interval index that replaced it, at every side the suite measured -
+  // the ratio as measured, whichever way it falls
+  'series.intervalJoinTable': () => {
+    const rows = seriesJoinSides().map((n) => {
+      const loop = seriesJoinRow('joinNestedLoop', n);
+      const probe = seriesJoinRow('joinIntervalProbe', n);
+      return `| ${thousands(n)} × ${thousands(n)} | ${thousands(probe.results)} | ${ms(loop.ns / 1e6)} ms `
+        + `| ${ms(probe.ns / 1e6)} ms | ${ratio(loop.ns / probe.ns)}× |`;
+    });
+    return ['', '| spans a side | pairs | nested loop | interval index | nested loop ÷ index |',
+      '|---|---:|---:|---:|---:|', ...rows, ''].join('\n');
+  },
 
   'geo.pip2000': () => `${ratio(geoRatio('point in polygon (2000-vertex)'))}×`,
   'geo.bbox2000': () => `${ratio(geoRatio('bounding box (2000-vertex)'))}×`,
@@ -1178,6 +1191,20 @@ function seriesRows(route) {
   const leg = seriesLargest();
   return /** @type {any} */ (data('series').rows.find((r) => r.route === route && r.n === leg.n)).results;
 }
+/** The spans a side the interval join was measured at, ascending. */
+function seriesJoinSides() {
+  const sides = data('series').rows.filter((r) => r.route === 'joinIntervalProbe').map((r) => r.n);
+  if (sides.length === 0)
+    throw new Error("series.json has no 'joinIntervalProbe' row — regenerate it before quoting one");
+  return sides.sort((a, b) => a - b);
+}
+/** One interval-join route's row at one side. */
+function seriesJoinRow(route, n) {
+  const row = data('series').rows.find((r) => r.route === route && r.n === n);
+  if (row === undefined)
+    throw new Error(`series.json has no '${route}' row at ${n} — regenerate it before quoting one`);
+  return row;
+}
 
 //#region the registry
 
@@ -1217,6 +1244,7 @@ const DOCS = [
   'packages/core/ARCHITECTURE.md',
   'packages/core/docs/GEO.md',
   'packages/core/docs/SERIES.md',
+  'packages/json/ARCHITECTURE.md',
 ];
 
 /** @type {import('./lib/derive.js').Registry} */

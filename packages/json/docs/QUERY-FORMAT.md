@@ -1352,7 +1352,9 @@ The other two bound the **query** rather than its output:
 - `steps` — bounds **expression-node evaluations** (`JQ2009`). A step is
   one node evaluation, not one primitive operation: a node that loops
   internally — materializing a `$range`, a general comparison's cross
-  product, a sort's comparisons — counts once. It is the only limit that
+  product, a sort's comparisons — counts once. The operand reads of an
+  indexed join (§8.16) are not steps: the join counts the reads the nested
+  loop would count, never more. It is the only limit that
   bounds work rather than output, and the only one that costs: setting
   it compiles a counter check into every node. The counter resets per
   evaluation, so a compiled query stays reusable.
@@ -1877,6 +1879,25 @@ the row would be answering a question nobody asked.
 { "$asof": [ "$.trades[*]", "$.quotes[*]",
              { "by": "$.symbol", "direction": "backward", "tolerance": "PT1M" } ] }
 ```
+
+#### Joining two sets of spans
+
+A phrase whose `$where` is a bare `$overlaps` between two `$for` bindings —
+`{"$for": {"a": "$.bookings[*]", "b": "$.probes[*]"}, "$where": {"$overlaps":
+["$a.span", "$b.span"]}}` — need not ask every pair. When the inner binding
+reads no outer one, an engine may answer it through an interval index over
+the inner spans, built when the first outer tuple reaches the inner binding —
+where the nested loop first evaluates it — and that evaluation is held to the
+nested loop's: **the same sequence and the same first error**. The same pairs
+come back in the same order, a span `$overlaps` refuses raises its `JQ2001` at
+the pair where the nested loop reaches it, a missing span answers no pair and
+raises nothing, and nothing is raised that the nested loop would not raise:
+an empty outer side reads nothing of the inner one. Two things can tell the
+evaluations apart, and neither changes an answer. The inner source is
+evaluated once rather than once per outer tuple, which only a registered
+`$call` function could notice, and those are pure. And the indexed evaluation
+counts fewer steps, so under `limits.steps` it can finish where the nested loop
+is stopped by `JQ2009` — it is never stopped where the nested loop is not.
 
 #### Calendar boundaries and the zone seam
 

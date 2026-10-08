@@ -37,6 +37,13 @@
  * measured honestly against them rather than compared with something
  * easier.
  *
+ * One question is about two sets of spans rather than a series: which
+ * bookings overlap which probes. The engine answers a two-binding
+ * `$overlaps` phrase through an interval index over its inner side, and
+ * the same document carrying a `$let` is the nested loop that index
+ * replaced, because a `$let` makes the planner decline it. Both answer
+ * a plain double loop's pairs, in its order, before either is timed.
+ *
  * Correctness before timing, and refusal on disagreement. Every
  * committed case in `test/json/fixtures/series-corpus.json` is replayed
  * through the references, and then every pair above must answer the
@@ -83,7 +90,7 @@ import {
   generateSeries, asDocuments,
   filterRange, cutRange, bucketStart, bucketOnePass, bucketNaive,
   rollingMeanOnePass, rollingMeanNaive, asOfBackward, probeInstants, gappedSeries,
-  referenceAnswer, seriesMappings, SERIES_COLLECTION,
+  referenceAnswer, seriesMappings, SERIES_COLLECTION, overlapsNaive,
 } from '../scripts/lib/series-corpus.js';
 
 import { formatNs } from './lib/fmt.js';
@@ -501,6 +508,19 @@ const LABELLED_WINDOW_QUERY = {
   $for: { w: { $in: '$[*]', $window: 'sliding', $size: ROLLING_WIDTH } },
   $return: { at: { $max: '$w.on' }, value: { $avg: '$w.value' } },
 };
+
+// The interval join, the way a consumer writes it, and the nested loop it
+// replaced: a `$let` in the phrase makes the planner decline the index,
+// so the second document is the first one answered pair by pair.
+const JOIN_QUERY = {
+  $for: { a: '$.bookings[*]', b: '$.probes[*]' },
+  $where: { $overlaps: ['$a.span', '$b.span'] },
+  $return: { a: '$a.id', b: '$b.id' },
+};
+const JOIN_NESTED_LOOP = { ...JOIN_QUERY, $let: { scan: 1 } };
+
+/** Spans a side of the interval join. A quick run keeps the small one. */
+const JOIN_SIDES = flags.quick ? [500] : [500, 1000, 2000];
 
 //#endregion
 
@@ -937,6 +957,81 @@ async function runLeg(n) {
 
 //#endregion
 
+//#region the interval join
+
+/**
+ * Bookings and probes over one year, thirty minutes to eight hours long,
+ * drawn from one linear congruential sequence for each side in turn, so
+ * a side's spans are the same whichever sides follow it.
+ * @param {number[]} sides
+ * @returns {{ n: number, bookings: any[], probes: any[] }[]}
+ */
+function intervalJoinSides(sides) {
+  const HOUR = 3_600_000;
+  const DAY = 86_400_000;
+  let state = 3;
+  const next = () => (state = (state * 1103515245 + 12345) % 2147483648) / 2147483648;
+  const spans = (n, prefix) => Array.from({ length: n }, (_, i) => {
+    const start = Math.floor(next() * 365 * DAY);
+    return { id: `${prefix}${i}`, span: { start, end: start + 1_800_000 + Math.floor(next() * 7.5 * HOUR) } };
+  });
+  return sides.map((n) => ({ n, bookings: spans(n, 'b'), probes: spans(n, 'p') }));
+}
+
+/**
+ * Where two pair lists first disagree, or null when they do not.
+ * @param {{a: string, b: string}[]} x
+ * @param {{a: string, b: string}[]} y
+ * @returns {string | null}
+ */
+function firstPairDisagreement(x, y) {
+  if (x.length !== y.length)
+    return `${x.length} pairs against ${y.length}`;
+  for (let i = 0; i < x.length; i++) {
+    if (x[i].a !== y[i].a || x[i].b !== y[i].b)
+      return `pair ${i}: ${x[i].a}/${x[i].b} against ${y[i].a}/${y[i].b}`;
+  }
+  return null;
+}
+
+/**
+ * One side of the interval join: the plain double loop's pairs, both
+ * engine evaluations checked against them in order, and - unless the
+ * run stops at `--verify` - both timed.
+ * @param {{ n: number, bookings: any[], probes: any[] }} side
+ */
+function runJoinLeg({ n, bookings, probes }) {
+  const label = `${n.toLocaleString('en-US')} × ${n.toLocaleString('en-US')} spans`;
+  const data = { bookings, probes };
+  const reference = [];
+  for (const a of bookings) {
+    for (const b of probes) {
+      if (overlapsNaive(a.span, b.span))
+        reference.push({ a: a.id, b: b.id });
+    }
+  }
+  const pairs = (answer) => (answer === undefined ? [] : Array.isArray(answer) ? answer : [answer]);
+  const looped = pairs(queryJson(JOIN_NESTED_LOOP, data));
+  const probed = pairs(queryJson(JOIN_QUERY, data));
+  check(`${label}: the nested loop answers the plain double loop's pairs, in its order`,
+    firstPairDisagreement(looped, reference) === null,
+    firstPairDisagreement(looped, reference) ?? `${looped.length} pairs`);
+  check(`${label}: the interval index answers the nested loop's pairs, in its order`,
+    firstPairDisagreement(probed, looped) === null,
+    firstPairDisagreement(probed, looped) ?? `${probed.length} pairs`);
+
+  const results = { joinNestedLoop: looped.length, joinIntervalProbe: probed.length };
+  if (flags.verify || failures !== 0)
+    return { n, label, rows: {}, results };
+  const rows = {
+    joinNestedLoop: medianNs(() => queryJson(JOIN_NESTED_LOOP, data), ROUNDS.query),
+    joinIntervalProbe: medianNs(() => queryJson(JOIN_QUERY, data), ROUNDS.query),
+  };
+  return { n, label, rows, results };
+}
+
+//#endregion
+
 //#region run
 
 const corpusMeta = verifyCommittedCorpus();
@@ -944,6 +1039,8 @@ const corpusMeta = verifyCommittedCorpus();
 const legs = [];
 for (const n of SIZES)
   legs.push(await runLeg(n));
+
+const joinLegs = intervalJoinSides(JOIN_SIDES).map(runJoinLeg);
 
 const width = Math.max(...checks.map((c) => c.name.length)) + 2;
 console.log(`\nEquivalence — ${checks.length} checks, every one before a timing`);
@@ -1052,7 +1149,33 @@ const planTable = {
     + ' decided over what came back.',
 };
 
-const tables = [timingTable, planTable];
+/** A speed-up stated as one, and a loss as one, never a floor at parity. */
+const joinVerdict = (r) => (r === null ? '—'
+  : r >= 1 ? `${times(r)} faster than` : `${times(Math.round((1 / r) * 100) / 100)} slower than`);
+
+const JOIN_ORDER = [
+  ['joinNestedLoop', 'bookings × probes, $overlaps — query document, nested loop ($let form)'],
+  ['joinIntervalProbe', 'bookings × probes, $overlaps — query document, interval index probe'],
+];
+
+const largestJoin = joinLegs[joinLegs.length - 1];
+
+const joinTable = {
+  title: `One interval join, both ways the engine answers it — median of ${ROUNDS.query} rounds`,
+  head: ['route', ...joinLegs.map((leg) => leg.label), 'pairs'],
+  rows: JOIN_ORDER.map(([key, name]) => ({
+    cells: [name, ...joinLegs.map((leg) => ns(leg.rows[key])), count(largestJoin.results[key])],
+    strong: key === 'joinIntervalProbe',
+  })),
+  note: 'Lower is better. Both rows answered the identical pairs in the identical order, and both'
+    + ' agreed with a plain double loop, before either was timed. The nested loop asks every'
+    + ' booking about every probe, so it grows with the product of the two sides; the probe indexes'
+    + ' the probes once per evaluation and asks each booking only about the spans the index'
+    + ' returns, so it grows with the sides and the pairs. The "pairs" column is the answer size at'
+    + ' the largest side.',
+};
+
+const tables = [timingTable, planTable, joinTable];
 for (const table of tables) {
   console.log(`\n${table.title}`);
   const w = Math.max(...table.rows.map((r) => String(r.cells[0]).length),
@@ -1184,6 +1307,11 @@ const notes = [
     + ` reduction, and doing it over the gap corpus costs ${times(figures.gapRenderCost)} the dense`
     + ' one: the holes are segment boundaries, and each segment is sampled on its own budget so'
     + ' that no line is ever drawn across one.',
+  `An interval join of ${largestJoin.label} answers its`
+    + ` ${count(largestJoin.results.joinIntervalProbe)} pairs through the interval index`
+    + ` ${joinVerdict(ratio(largestJoin.rows.joinNestedLoop, largestJoin.rows.joinIntervalProbe))}`
+    + ' the nested loop it replaced, in the same order. The index is built per evaluation, so'
+    + ' the row prices the build as well as the probes.',
 ];
 
 console.log('\nDerived figures');
@@ -1239,12 +1367,14 @@ if (flags.output === 'json') {
     headline,
     checks,
     tables,
-    rows: legs.flatMap((leg) => ORDER
-      .filter(([key]) => leg.rows[key] !== undefined)
-      .map(([key, name]) => ({
-        n: leg.n, route: key, label: name, ns: leg.rows[key].ns,
-        spread: leg.rows[key].spread, results: leg.results[key],
-      }))),
+    // a join row's `n` is the spans on each side
+    rows: [...legs.map((leg) => [leg, ORDER]), ...joinLegs.map((leg) => [leg, JOIN_ORDER])]
+      .flatMap(([leg, order]) => order
+        .filter(([key]) => leg.rows[key] !== undefined)
+        .map(([key, name]) => ({
+          n: leg.n, route: key, label: name, ns: leg.rows[key].ns,
+          spread: leg.rows[key].spread, results: leg.results[key],
+        }))),
   };
   const json = JSON.stringify(payload, null, 2);
   if (flags.filepath !== null) {

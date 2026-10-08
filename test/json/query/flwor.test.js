@@ -1229,4 +1229,209 @@ describe('spatial joins are screened by an index, invisibly', () => {
     assert.ok(Array.isArray(indexed) && indexed.length === 60,
       `every point should land in one region, got ${indexed?.length}`);
   });
+
+  it('should answer in the order the scan answers', () => {
+    // forty squares around one point: the tree visits them in its own
+    // order, and the phrase still answers them in the regions' order
+    const squares = [];
+    for (let i = 0; i < 40; i++)
+      squares.push(region(`r${i}`, 4 - (i % 7) * 0.1, 4 - Math.floor(i / 7) * 0.1, 3));
+    const doc = {
+      $for: { p: '$.points[*]', r: '$.regions[*]' },
+      $where: { $within: ['$p.at', '$r.geom'] },
+      $return: '$r.id',
+    };
+    assert.deepStrictEqual(bothWays(doc, { points: [{ id: 'p', at: [5, 5] }], regions: squares }),
+      squares.map((r) => r.id));
+  });
+
+  it('should raise the error the scan reaches first', () => {
+    // the malformed region comes before the hit: the scan raises on it
+    // before any tuple reaches $return, so the probe must too
+    const doc = { ...joinDoc, $return: { $idiv: [1, 0] } };
+    const data = {
+      points: [{ id: 'p', at: [1, 1] }],
+      regions: [{ id: 'bad', geom: 'not a geometry' }, region('a', 0, 0)],
+    };
+    runtimeFails(withLet(doc), data, 'JQ2001', '/$where/$within/1');
+    runtimeFails(doc, data, 'JQ2001', '/$where/$within/1');
+  });
+});
+
+describe('index probes evaluate what the scan evaluates, when it evaluates it', () => {
+  // Every probe the planner installs - the hash join, the spatial screen
+  // and the interval screen - against the scan it replaces (a `$let` makes
+  // the planner decline), outcome for outcome: the same answer, or the
+  // same first error.
+  const withLet = (doc) => ({ ...doc, $let: { _z: 1 } });
+  const outcome = (doc, data, options = {}) => {
+    try {
+      return { value: compileJsonQuery(doc, options.compile)(data, options.externals) };
+    }
+    catch (e) {
+      if (!(e instanceof JsonQueryRuntimeError))
+        throw e;
+      return { code: e.code, docPath: e.docPath, message: e.message };
+    }
+  };
+  const bothWays = (doc, data, options) => {
+    const probed = outcome(doc, data, options);
+    assert.deepStrictEqual(probed, outcome(withLet(doc), data, options),
+      'the probe must answer exactly what the scan answers');
+    return probed;
+  };
+  const failed = (result) => ({ code: result.code, docPath: result.docPath });
+
+  const square = (x, y, w = 2) => ({
+    type: 'Polygon', coordinates: [[[x, y], [x + w, y], [x + w, y + w], [x, y + w], [x, y]]],
+  });
+  // one row shape carries an operand for every predicate
+  const outerRow = { k: 1, at: [1, 1], geom: square(0, 0), span: { start: 0, end: 10 } };
+  const innerRow = (id) => ({ id, k: 1, at: [1, 1], geom: square(0, 0), span: { start: 1, end: 2 } });
+  const many = Array.from({ length: 200 }, (_, i) => innerRow(`i${i}`));
+
+  // the three predicates, spelled with the outer operand first and with
+  // the inner one first; `o`/`i` name the operand on each side
+  const KINDS = {
+    hash: { first: (o, i) => ({ $eq: [o('k'), i('k')] }), second: (o, i) => ({ $eq: [i('k'), o('k')] }) },
+    spatial: { first: (o, i) => ({ $within: [o('at'), i('geom')] }), second: (o, i) => ({ $within: [i('at'), o('geom')] }) },
+    interval: { first: (o, i) => ({ $overlaps: [o('span'), i('span')] }), second: (o, i) => ({ $overlaps: [i('span'), o('span')] }) },
+  };
+  const OP = { hash: '$eq', spatial: '$within', interval: '$overlaps' };
+  const outerOf = (m) => `$a.${m}`;
+  const innerOf = (m) => `$b.${m}`;
+  const join = (kind, $for, extra = {}) => ({
+    $for, $where: KINDS[kind].first(outerOf, innerOf), $return: '$b.id', ...extra,
+  });
+  const raising = { $idiv: [1, 0] };
+
+  it('should evaluate nothing of the inner side when no outer tuple reaches it', () => {
+    for (const kind of Object.keys(KINDS)) {
+      assert.deepStrictEqual(bothWays(join(kind, { a: '$.outer[*]', b: raising }), { outer: [] }),
+        { value: undefined }, `${kind}: an empty outer side`);
+      assert.deepStrictEqual(bothWays(join(kind, { a: '$.outer[*]', b: raising }), {}),
+        { value: undefined }, `${kind}: a missing outer side`);
+      assert.deepStrictEqual(bothWays(join(kind, { a: '$.outer[*]', t: '$.tags[*]', b: raising }),
+        { outer: [outerRow], tags: [] }), { value: undefined }, `${kind}: an empty binding between them`);
+      assert.deepStrictEqual(bothWays(join(kind, { a: '$.outer[*]', b: { $sum: ['$.inner[*].w'] } }),
+        { outer: [], inner: [{ w: 'x' }] }), { value: undefined }, `${kind}: an inner side that cannot be summed`);
+      // the join between the middle binding and the innermost one
+      const middle = {
+        $for: { z: '$.zs[*]', a: '$.outer[*]', b: raising },
+        $where: KINDS[kind].first(outerOf, innerOf), $return: '$b.id',
+      };
+      assert.deepStrictEqual(bothWays(middle, { zs: [], outer: [outerRow] }), { value: undefined },
+        `${kind}: an empty first binding`);
+      assert.deepStrictEqual(bothWays(middle, { zs: [1, 2], outer: [] }), { value: undefined },
+        `${kind}: an empty middle binding`);
+    }
+  });
+
+  it('should raise the outer source\'s error when both sources raise', () => {
+    for (const kind of Object.keys(KINDS)) {
+      assert.deepStrictEqual(failed(bothWays(join(kind, { a: { $idiv: [2, 0] }, b: raising }), {})),
+        { code: 'JQ2002', docPath: '/$for/a/$idiv' }, kind);
+    }
+  });
+
+  it('should read the outer operand only where the scan reads it', () => {
+    // `$win` is an external nobody bound: reading it is JQ2006
+    const unbound = (where) => ({ $for: { a: '$.outer[*]', b: '$.inner' }, $where: where, $return: '$b.id' });
+    const win = () => '$win';
+    for (const [kind, spell] of Object.entries(KINDS)) {
+      // no inner item: no pair, nothing read
+      assert.deepStrictEqual(bothWays(unbound(spell.first(win, innerOf)), { outer: [1], inner: [] }),
+        { value: undefined }, `${kind}: no inner item`);
+      // read first, it is read at every pair
+      assert.deepStrictEqual(failed(bothWays(unbound(spell.first(win, innerOf)), { outer: [1], inner: [{ id: 'x' }] })),
+        { code: 'JQ2006', docPath: `/$where/${OP[kind]}/0` }, `${kind}: the outer operand first`);
+    }
+    // read second, `$eq` and `$overlaps` stop at a missing first operand
+    // and never read it; `$within` reads both of its operands
+    const second = (kind) => bothWays(unbound(KINDS[kind].second(win, innerOf)), { outer: [1], inner: [{ id: 'x' }] });
+    assert.deepStrictEqual(second('hash'), { value: undefined });
+    assert.deepStrictEqual(second('interval'), { value: undefined });
+    assert.deepStrictEqual(failed(second('spatial')), { code: 'JQ2006', docPath: '/$where/$within/1' });
+  });
+
+  it('should never spend a step the scan would not have spent', () => {
+    for (const kind of Object.keys(KINDS)) {
+      // nothing reaches the inner side, so nothing is counted for it
+      assert.deepStrictEqual(bothWays(join(kind, { a: '$.outer[*]', b: '$.inner[*]' }),
+        { outer: [], inner: many }, { compile: { limits: { steps: 50 } } }), { value: undefined }, kind);
+      // the scan raises in $return at the first pair, well inside the
+      // limit; indexing two hundred rows must not spend it first
+      assert.deepStrictEqual(failed(bothWays(join(kind, { a: '$.outer[*]', b: '$.inner[*]' }, { $return: raising }),
+        { outer: [outerRow], inner: many }, { compile: { limits: { steps: 60 } } })),
+      { code: 'JQ2002', docPath: '/$return/$idiv' }, kind);
+    }
+    // the other way round is the point: the hash join consumes the
+    // equality, so it finishes inside a limit the scan exceeds
+    const doc = join('hash', { a: '$.outer[*]', b: '$.inner[*]' });
+    const options = { compile: { limits: { steps: 600 } } };
+    assert.strictEqual(outcome(doc, { outer: [outerRow], inner: many }, options).value.length, 200);
+    assert.strictEqual(outcome(withLet(doc), { outer: [outerRow], inner: many }, options).code, 'JQ2009');
+  });
+
+  it('should run a $call inner source once, at the first outer tuple that reaches it', () => {
+    // the scan calls it once per outer tuple; registered functions are
+    // pure, so only the count can tell the two apart
+    for (const kind of Object.keys(KINDS)) {
+      let calls = 0;
+      const functions = { rows: () => { calls++; return [innerRow('x')]; } };
+      const doc = join(kind, { a: '$.outer[*]', b: { $call: ['rows'] } });
+      const counted = (data, scan) => {
+        calls = 0;
+        const result = outcome(scan ? withLet(doc) : doc, data, { compile: { functions } });
+        return { result, calls };
+      };
+      assert.deepStrictEqual(counted({ outer: [] }, false), { result: { value: undefined }, calls: 0 }, kind);
+      assert.deepStrictEqual(counted({ outer: [] }, true), { result: { value: undefined }, calls: 0 }, kind);
+      const three = { outer: [outerRow, outerRow, outerRow] };
+      assert.deepStrictEqual(counted(three, false), { result: { value: ['x', 'x', 'x'] }, calls: 1 }, kind);
+      assert.deepStrictEqual(counted(three, true), { result: { value: ['x', 'x', 'x'] }, calls: 3 }, kind);
+    }
+  });
+
+  it('should leave a $range inner source to the scan, which counts it instead of building it', () => {
+    // a phrase limit tightens the $range guard: built, the range would
+    // be refused; counted, it never is
+    const options = { compile: { limits: { sequenceItems: 10 } } };
+    const doc = (where) => ({ $for: { a: '$.outer[*]', b: { $range: [1, 20] } }, $where: where, $return: '$b' });
+    const data = { outer: [outerRow] };
+    assert.deepStrictEqual(bothWays(doc({ $eq: ['$a.k', '$b'] }), data, options), { value: 1 });
+    assert.deepStrictEqual(failed(bothWays(doc({ $within: ['$a.at', '$b'] }), data, options)),
+      { code: 'JQ2001', docPath: '/$where/$within/1' });
+    assert.deepStrictEqual(failed(bothWays(doc({ $overlaps: ['$a.span', '$b'] }), data, options)),
+      { code: 'JQ2001', docPath: '/$where/$overlaps/1' });
+  });
+
+  it('should skip every pair of an outer operand that is missing', () => {
+    // a missing operand makes every pair false (or empty) without an
+    // error, so nothing need be visited; the inner operand comes first
+    // here, so each pair the scan visits reads it
+    for (const kind of ['spatial', 'interval']) {
+      const member = kind === 'spatial' ? 'at' : 'span';
+      let reads = 0;
+      const inner = [0, 1, 2, 3].map((n) => {
+        const row = { id: `i${n}` };
+        const value = innerRow(row.id)[member];
+        Object.defineProperty(row, member, {
+          enumerable: true,
+          get() {
+            reads++;
+            return value;
+          },
+        });
+        return row;
+      });
+      const doc = { $for: { a: '$.outer[*]', b: '$.inner[*]' }, $where: KINDS[kind].second(outerOf, innerOf), $return: '$b.id' };
+      const data = { outer: [{ id: 'o1' }, { id: 'o2' }, { id: 'o3' }], inner };
+      assert.deepStrictEqual(outcome(doc, data), { value: undefined });
+      assert.strictEqual(reads, 4, `${kind}: each inner operand read once, to index it`);
+      reads = 0;
+      assert.deepStrictEqual(outcome(withLet(doc), data), { value: undefined });
+      assert.strictEqual(reads, 12, `${kind}: the scan reads one per pair`);
+    }
+  });
 });
