@@ -165,6 +165,11 @@ measured window, the middle one included.
 <!--fact:series.spanTable-->
 <!--/fact-->
 
+On PostgreSQL an array step in the span's path (`$.spans[0]`) is read through
+`#>`, which resolves the key `"0"` of an object in that position too: a
+document whose `spans` is an object keyed so is read as a span by the store,
+the CHECK and the native plan, where SQLite and the query engine read none.
+
 An invalid model document is `JD0005` with a `docPath` pointing at the
 offending member. Model checking happens before any database work.
 

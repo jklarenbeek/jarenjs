@@ -648,6 +648,34 @@ what each does is its own documentation's job
   trap for array methods, each answering a coded refusal that names the
   query-language spelling.
 
+- [ ] **A PostgreSQL index path's `[n]` step reads an object's key `n`.** The
+  dialect spells a JSONPath array step as the jsonb path element `n`, which
+  `#>` resolves as the key `"n"` of an object and as the index `n` of an array,
+  where SQLite's `json_extract` and the engine's JSONPath resolve it on arrays
+  only. A collection indexed on `$.spans[0].start` therefore answers natively
+  a document whose `spans` is an object keyed `"0"` that the engine never
+  answers (`pushdown: false` and SQLite answer without it), and a declared
+  interval on `$.spans[0]` seeks such a row exactly. The store's member walk
+  reads the same object, so the store and PostgreSQL's CHECK agree with each
+  other and disagree with SQLite. Wanted: the dialect's array-only extraction
+  for an index step (`jsonb_typeof` guarded, or `jsonb_path_query_first`),
+  with the store's member walk given the same guard.
+- [ ] **Member paths outside ASCII identifiers in entity indexes, index
+  conditions and database rules.** Entity index paths, index conditions and
+  rule operands name members as `$.<member>` over ASCII identifiers. A member
+  named otherwise (`é`, `日本`, `123`, `a b`) takes per-property
+  `index`/`unique` flags but no entity index, condition or rule operand
+  (`JD0004`/`JD0005` at the member). Wanted: a bracket spelling
+  (`$['日本']`) through the one path resolver of the row-predicate module and
+  the entity index walk, with the same oracle rows.
+- [ ] **PostgreSQL verifies a physical index's condition by shape.** A
+  recreated physical index with another condition reopens on PostgreSQL, where
+  SQLite compares the condition's text (MODEL-FORMAT §12). Wanted: read
+  `pg_get_expr(indpred)` through the relational grammar and compare it as
+  SQLite does.
+- [ ] **Two catalog tokenizers.** `schema-sql.js` and `dialects/check-read.js`
+  each tokenize catalog SQL (`tokensOf`, `sqlTokens`); one could serve both.
+
 ## Lexical search (cross-package)
 
 The [resident lexical contract](../packages/core/docs/SEARCH.md), explicit JSON/LINQ
