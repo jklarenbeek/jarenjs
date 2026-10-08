@@ -309,22 +309,17 @@ what each does is its own documentation's job
 ([linq](../packages/linq/README.md) ·
 [db](../packages/db/README.md)). What remains open:
 
-- [ ] **Entity-level indexes: composite, partial, expression.** An
-  entity's index vocabulary is one single-column index per property
-  marked `unique`/`index`; a collection already declares ordered
-  multi-path indexes, `unique`, and expression indexes. A scheduling
-  rule such as `UNIQUE (employeeId, localStartDate) WHERE status IN
-  (…)` — one active row per owner per day — can therefore not be
-  declared on an entity at all, and §13's invariants cannot express it
-  either, because a rule reads another row only by that row's primary
-  key (`$exists-row`). Until it exists the guarantee lives in application code inside
-  the writing transaction, which is exactly where a concurrent writer
-  can slip past it. Wanted: an entity-level `indexes` array with the
-  collection's vocabulary, carried through `planEntity`, the migration
-  planner's index diff, and the introspection comparison that verifies
-  a partial predicate. MODEL-FORMAT §9.2 states the absence today, and a
-  model that names an entity `indexes` member is refused (`JD0005`) rather
-  than silently ignored until it ships.
+- [ ] **Expression indexes on entities.** An entity declares composite,
+  unique and partial indexes over its members (MODEL-FORMAT §9.2), but an
+  entry with an `expression` is refused (`JD0004`, §7A): an entity table has
+  no generated column to carry the expression, and SQLite maintains an index
+  over a function only on a connection that registered it, so every other
+  writer of the table — the raw SQL client a database rule exists for
+  included — could no longer insert or delete a row. Wanted: a carrier for
+  the expression on entities as a collection has one, or an expression the
+  engine evaluates on every connection, with the row-predicate module's call
+  nodes (§7A), open verification, the migration planner's index diff and
+  introspection.
 - [ ] **Database invariants over a store-owned layout, beyond its scalar
   columns.** A store-owned entity takes `enforcement: "database"` rules over
   the scalar and foreign-key columns its table maps, installed with the table
