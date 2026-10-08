@@ -64,6 +64,12 @@ describe('entity indexes in the model pen', () => {
       { name: 'raw', path: '$.a', where: { $ne: ['$.a', 'z'] } }]);
   });
 
+  it('says what a condition callback evaluates over when it reads past the record', () => {
+    assert.throws(() => m.index((d) => d.s, { where: (d, x) => x.limit.gt(d.s) }),
+      (e) => e.code === 'JL0104' && /no externals at all/.test(e.message)
+        && /record as stored, which its argument IS/.test(e.message));
+  });
+
   it('refuses what the store would refuse and the builder can see', () => {
     const define = (/** @type {any[]} */ entries) => () => m.defineModel({ entities: { Shift: shift().indexes(entries) } });
     assert.equal(codeOf(define([{ name: 'x', path: '$.day', uniqe: true }])), 'JL0101');

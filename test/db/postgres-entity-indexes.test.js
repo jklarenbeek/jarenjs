@@ -33,6 +33,39 @@ async function indexDefinitions(pool, schema) {
   return rows;
 }
 
+/**
+ * Change a generated column's expression behind the store. PostgreSQL 17 has
+ * `ALTER COLUMN … SET EXPRESSION`; on 16 the column is dropped and added again,
+ * with the indexes that read it, in one transaction. Any other statement runs
+ * as it is.
+ * @param {any} pool @param {string} sql
+ */
+async function changeBehindTheStore(pool, sql) {
+  const version = Number((await pool.query("SELECT current_setting('server_version_num') AS v")).rows[0].v);
+  const match = /^ALTER TABLE ("[^"]+"\."[^"]+") ALTER COLUMN ("[^"]+") SET EXPRESSION AS \(([\s\S]*)\)$/.exec(sql);
+  if (version >= 170000 || match === null) return pool.query(sql);
+  const [, table, column, expression] = match;
+  const name = column.slice(1, -1);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: [{ type, attnum }] } = await client.query(
+      'SELECT format_type(atttypid, atttypmod) AS type, attnum FROM pg_attribute WHERE attrelid = $1::regclass AND attname = $2', [table, name]);
+    const { rows: indexes } = await client.query(
+      "SELECT pg_get_indexdef(d.objid) AS definition FROM pg_depend d JOIN pg_class i ON i.oid = d.objid AND i.relkind = 'i' "
+      + "WHERE d.classid = 'pg_class'::regclass AND d.refobjid = $1::regclass AND d.refobjsubid = $2", [table, attnum]);
+    await client.query(`ALTER TABLE ${table} DROP COLUMN ${column}`);
+    await client.query(`ALTER TABLE ${table} ADD COLUMN ${column} ${type} GENERATED ALWAYS AS (${expression}) STORED`);
+    for (const { definition } of indexes) await client.query(definition);
+    await client.query('COMMIT');
+  }
+  catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  }
+  finally { client.release(); }
+}
+
 describe('entity indexes on PostgreSQL', { skip: !PG_URL && 'JAREN_PG_URL is not set' }, () => {
   it('refuses the second active row of an employee-day for the store and for a raw SQL writer, as SQLite does', async () => {
     await withPostgres(async ({ pool, schema, driver }) => {
@@ -112,7 +145,7 @@ describe('entity indexes on PostgreSQL', { skip: !PG_URL && 'JAREN_PG_URL is not
         await (await openStore(model, { driver: driver(), expressions })).close();
         // the untouched table reopens
         await (await openStore(model, { driver: driver(), expressions })).close();
-        await pool.query(sql.replaceAll('"S"', `"${schema}"`));
+        await changeBehindTheStore(pool, sql.replaceAll('"S"', `"${schema}"`));
         const error = await openRefusal(model, { driver: driver(), expressions });
         assert.equal(error?.code, 'JD0002', `${label}: ${error?.message}`);
       });
@@ -231,7 +264,7 @@ describe('entity indexes on PostgreSQL', { skip: !PG_URL && 'JAREN_PG_URL is not
     for (const [label, sql, drift] of CASES) {
       await withPostgres(async ({ pool, schema, driver }) => {
         await (await openStore(model, { driver: driver(), expressions: lower })).close();
-        await pool.query(sql.replaceAll('"S"', `"${schema}"`));
+        await changeBehindTheStore(pool, sql.replaceAll('"S"', `"${schema}"`));
         const error = await openRefusal(model, { driver: driver(), expressions: lower });
         assert.equal(error?.code, drift ? 'JD0002' : undefined, `${label}: ${error?.message}`);
       });

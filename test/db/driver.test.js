@@ -182,6 +182,26 @@ describe('capability probing', () => {
     connection.close();
   });
 
+  it('the Bun adapter reports a transaction from inTransaction, in BEGIN and in a bare SAVEPOINT, and null where it cannot know', () => {
+    class Tracked extends BunShapedDatabase {
+      get inTransaction() { return this.db.isTransaction; }
+    }
+    const tracked = fromBunModule({ Database: Tracked }, ':memory:');
+    try {
+      assert.strictEqual(tracked.transactionState(), false);
+      for (const [open, close] of [['BEGIN', 'COMMIT'], ['SAVEPOINT s', 'RELEASE s']]) {
+        tracked.prepare(open).run([]);
+        assert.strictEqual(tracked.transactionState(), true, open);
+        tracked.prepare(close).run([]);
+        assert.strictEqual(tracked.transactionState(), false, close);
+      }
+    }
+    finally { tracked.close(); }
+    const silent = fromBunModule({ Database: BunShapedDatabase }, ':memory:');
+    try { assert.strictEqual(silent.transactionState(), null); }
+    finally { silent.close(); }
+  });
+
   it('Bun applies a validated timeout only when constructing a new handle', () => {
     for (const timeout of [0, 1234]) {
       const connection = fromBunModule({ Database: BunShapedDatabase }, ':memory:', { timeout });
