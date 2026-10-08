@@ -91,3 +91,22 @@ it('disposes repeatedly, aborts pending tasks, refuses publication and releases 
   assert.equal((await editor.replace(dag, { expectedRevision: editor.read().revision })).ok, false);
   assert.equal((await editor.run()).ok, false);
 });
+it('a reorder inside a query node is a new revision: announced, and a stale replace conflicts', async t => {
+  // a query node's `$for` bindings nest in key order, so the reorder is an
+  // edit: the revision moves, the change feed announces it, and a caller
+  // still holding the earlier revision can no longer overwrite it
+  const withQuery = (/** @type {any} */ bindings) => ({ $dag: '0.1', nodes: { input: { kind: 'input' },
+    q: { kind: 'query', query: { $for: bindings, $return: { x: '$x', y: '$y' } } }, out: { kind: 'output' } },
+  edges: [{ from: 'input', to: 'q' }, { from: 'q', to: 'out' }] });
+  const { editor } = fixture(t, { kind: 'dag', document: withQuery({ x: '$.xs[*]', y: '$.ys[*]' }) });
+  /** @type {any[]} */
+  const notices = []; editor.subscribe((/** @type {any} */ value) => notices.push(value));
+  const stale = editor.read();
+  const reordered = await editor.replace(withQuery({ y: '$.ys[*]', x: '$.xs[*]' }), { expectedRevision: stale.revision });
+  assert.equal(reordered.ok, true);
+  assert.notEqual(editor.read().revision, stale.revision);
+  assert.equal(notices.length, 1, 'the reorder is announced');
+  const overwrite = await editor.replace(withQuery({ x: '$.xs[*]', y: '$.ys[*]', z: '$.xs[*]' }), { expectedRevision: stale.revision });
+  assert.equal(overwrite.conflict, true);
+  assert.deepEqual(Object.keys(editor.read().document.nodes.q.query.$for), ['y', 'x']);
+});

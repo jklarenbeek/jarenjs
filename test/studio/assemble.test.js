@@ -110,6 +110,17 @@ suite('classifyChange — reboot vs. hot-update', () => {
     assert.strictEqual(classifyChange(app(XY), app(XY, { ys: ['a', 'b'], xs: [1, 2], n: 1 })).perArtifact['app.json'], 'state-only');
   });
 
+  it('moving an app member is no change: the project assembles its top level', () => {
+    // an app's members are named slots the project assembles in its own
+    // order (local members, then imports), so their order is not the
+    // document's; below them it is
+    const project = (/** @type {any} */ doc) => parseProject({ project: '0.1', files: [{ name: 'app.json', kind: 'app', text: JSON.stringify(doc) }] });
+    const actions = { bump: { $add: ['$.n', 1] } };
+    const before = project({ state: { n: 1 }, view: VIEW, actions });
+    assert.strictEqual(classifyChange(before, project({ view: VIEW, actions, state: { n: 1 } })).perArtifact['app.json'], 'none');
+    assert.strictEqual(classifyChange(before, project({ actions, view: VIEW, state: { n: 1 } })).overall, 'none');
+  });
+
   it('a non-app artifact change is structural (its whole document is structure)', () => {
     const q1 = parseProject({ project: '0.1', files: [{ name: 'q', kind: 'query', text: '{"a":"$.x"}' }] });
     const q2 = parseProject({ project: '0.1', files: [{ name: 'q', kind: 'query', text: '{"a":"$.y"}' }] });

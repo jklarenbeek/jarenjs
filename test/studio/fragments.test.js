@@ -2,7 +2,8 @@ import { it } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseProject, resolveProjectFile, assembleArtifacts, classifyChange,
   describe, projectFileContext, renameProjectFile, fileSkeleton, KINDS } from '@jarenjs/studio';
-import { commitProject } from '../../packages/website/src/boundaries/project.js';
+import { commitProject, createProjectStageWidget } from '../../packages/website/src/boundaries/project.js';
+import { createStubHost, serialize } from '../view/dom.stub.js';
 
 const file = (name, kind, doc, extra = {}) => ({ name, kind, text: JSON.stringify(doc), ...extra });
 const project = () => parseProject({ project: '0.1', active: 'app', files: [
@@ -83,4 +84,24 @@ it('an input re-sent with its members reordered is a new input, never the old mo
   assert.deepEqual(Object.keys(reordered.mount.input), ['b', 'a']);
   const same = commitProject({ project: '0.1', active: 'flow', files: files({ b: 2, a: 1 }), ...reordered });
   assert.equal(same.mount, reordered.mount, 'the same order keeps the mount');
+});
+
+it('a reorder inside an app state is dispatched into the running stage', () => {
+  // the view reads the state's member order (`$entries`), so a state-only
+  // reorder must reach the running app rather than be skipped as unchanged
+  const VIEW = [{ match: '$', body: ['p', {}, { $for: { k: { $entries: '$.items' } }, $return: '$k.key' }] }];
+  const files = (/** @type {any} */ items) => [{ name: 'app', kind: 'app', text: JSON.stringify({ state: { items }, view: VIEW, actions: {} }) }];
+  const first = commitProject({ project: '0.1', active: 'app', files: files({ a: 1, b: 2 }) });
+  const second = commitProject({ project: '0.1', active: 'app', files: files({ b: 2, a: 1 }), ...first });
+  assert.equal(second.mount.revision, first.mount.revision, 'a state-only edit keeps the revision');
+  const { container } = createStubHost();
+  const shown = () => serialize(container).replace(/<[^>]+>/g, '').trim();
+  const widget = createProjectStageWidget({ schedule: (/** @type {() => void} */ flush) => flush() });
+  const handle = widget.mount(container, first.mount, () => {});
+  const running = handle.app;
+  assert.equal(shown(), 'ab');
+  widget.update(handle, second.mount, first.mount);
+  assert.equal(handle.app, running, 'hot: the running app stays');
+  assert.equal(shown(), 'ba');
+  widget.unmount(handle);
 });

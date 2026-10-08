@@ -3,14 +3,20 @@
  * receives the editor's local effects; document effects are recorded, never
  * delegated to the website. Destroy owns the nested app and pending DAG. */
 import { semanticKey } from '@jarenjs/core/object';
+import { documentKey } from '../../resolve.js';
 import { createFlowEditor } from './mount.js';
+
+// Member order counts below a flow document's top-level slots (a query
+// node's bindings, a guard's `$let`) and in its input, which a flow reads
+// through queries: a reorder there is an edit to publish, or a new mount.
+const inputKeyOf = (input) => semanticKey(input ?? null, { ordered: true });
 
 export function createProjectFlowWidget(env = {}) {
   const boot = (handle, props) => {
     handle.name = props.name;
     handle.revision = props.revision;
-    handle.key = semanticKey(props.doc);
-    handle.inputKey = semanticKey(props.input ?? null);
+    handle.key = documentKey(props.kind, props.doc);
+    handle.inputKey = inputKeyOf(props.input);
     handle.pendingEcho = false;
     const { app, editor } = createFlowEditor(handle.host, { ...env,
       kind: props.kind, document: props.doc, input: props.input, resetDocument: true, mintFromCount: false,
@@ -18,7 +24,7 @@ export function createProjectFlowWidget(env = {}) {
     });
     handle.app = app; handle.editor = editor;
     app.subscribe((state) => {
-      const key = semanticKey(state.flow.doc);
+      const key = documentKey(state.flow.kind, state.flow.doc);
       if (key === handle.key) return;
       handle.key = key;
       handle.pendingEcho = true;
@@ -30,8 +36,8 @@ export function createProjectFlowWidget(env = {}) {
     mount(host, props, emit) { const h = { host, emit }; boot(h, props); return h; },
     update(h, props) {
       // An echo of our own edit preserves selection, undo and the run pane.
-      if (h.name === props.name && h.key === semanticKey(props.doc)
-        && h.inputKey === semanticKey(props.input ?? null)
+      if (h.name === props.name && h.key === documentKey(props.kind, props.doc)
+        && h.inputKey === inputKeyOf(props.input)
         && (h.pendingEcho || h.revision === props.revision)) {
         h.pendingEcho = false;
         h.revision = props.revision;

@@ -6,6 +6,7 @@
 import { semanticKey } from '@jarenjs/core/object';
 import { applyPatchThrough } from './editor-patch.js';
 import { validateFlowDocument } from './flow-document.js';
+import { documentKey } from './resolve.js';
 
 /** @param {{ kind?: 'fsm'|'dag'|null, document?: any, input?: any }} [options] */
 export function createFlowState(options = {}) {
@@ -22,10 +23,13 @@ export function createFlowController(env) {
   let stopped = false, detach = null, sequence = 0;
   const requests = new Map(), listeners = new Set();
   const copy = value => structuredClone(value);
-  /** @returns {FlowSnapshot} */
+  /** The revision keeps member order below the document's top-level slots
+   * (a query node's bindings, a guard's `$let`): a reorder there is a new
+   * revision, announced, and a replace built on the earlier one conflicts.
+   * @returns {FlowSnapshot} */
   function read() {
     const { kind, doc, run } = env.getApp().getState().flow;
-    return { kind, document: copy(doc), revision: semanticKey({ kind, doc }), result: copy(run) };
+    return { kind, document: copy(doc), revision: semanticKey([kind, documentKey(kind, doc)]), result: copy(run) };
   }
   /** @param {any} candidate @param {'fsm'|'dag'} [kind] */
   function validate(candidate, kind = env.getApp().getState().flow.kind) { return validateFlowDocument(kind, candidate); }

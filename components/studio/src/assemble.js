@@ -16,14 +16,15 @@
  * `contentKey` fingerprint: a classification decides whether a running
  * app reboots, so a fingerprint collision would read a changed document
  * as unchanged. The artifacts are parsed JSON, so the identity is total.
- * It is the ORDERED identity: a query's `$for` bindings nest and `$let`
- * binds in key order, so a reorder-only edit is a different document and
- * skipping it would leave the stage running the old one.
+ * It is the project's `documentKey`: member order counts (a query's
+ * `$for` bindings nest and `$let` binds in key order, so skipping a
+ * reorder would leave the stage running the old document) except at the
+ * top level of a slot kind, whose members the project assembles itself.
  */
 
-import { semanticKey, setObjectMember } from '@jarenjs/core/object';
+import { setObjectMember } from '@jarenjs/core/object';
 import { validateFile } from './validate.js';
-import { resolveProjectFile, projectFileContext } from './resolve.js';
+import { resolveProjectFile, projectFileContext, documentKey } from './resolve.js';
 
 /** Kinds that are runnable artifacts on their own (vs. `state`/`data`
  * inputs). */
@@ -64,15 +65,12 @@ export function assembleArtifacts(project) {
   return { artifacts, errors };
 }
 
-/** Member order is part of an artifact's identity. */
-const ORDERED = { ordered: true };
-
 /** The structural identity of an artifact — an `app`'s view/actions/subs
- * (its `state` excluded, in place); everything else in full. */
+ * (its `state` excluded); everything else in full. */
 function structuralKey(artifact) {
   return artifact.kind === 'app'
-    ? semanticKey({ ...artifact.doc, state: null }, ORDERED)
-    : semanticKey(artifact.doc, ORDERED);
+    ? documentKey('app', { ...artifact.doc, state: null })
+    : documentKey(artifact.kind, artifact.doc);
 }
 
 const RANK = { none: 0, 'state-only': 1, structural: 2 };
@@ -100,7 +98,7 @@ export function classifyChange(prevProject, nextProject) {
     let c;
     if (b === undefined || b.kind !== a.kind) c = 'structural';
     else if (structuralKey(b) !== structuralKey(a)) c = 'structural';
-    else if (semanticKey(b.doc, ORDERED) !== semanticKey(a.doc, ORDERED)) c = 'state-only';
+    else if (documentKey(a.kind, b.doc) !== documentKey(a.kind, a.doc)) c = 'state-only';
     else c = 'none';
     setObjectMember(perArtifact, name, c);
     bump(c);

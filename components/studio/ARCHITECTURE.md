@@ -35,7 +35,8 @@ every edit destroys the running app's state. The engine keeps the *data*
 for that decision headless and tested: `classifyChange(prev, next)`
 compares a **structural key** — an `app` document minus its `state`, via
 the suite's collision-free `semanticKey` in its ordered form, since a
-reordered `$for` or `$let` is another query — and reports `structural` / `state-only` /
+reordered `$for` or `$let` is another query (only an app's top-level slots,
+which the project assembles itself, compare without order) — and reports `structural` / `state-only` /
 `none` per artifact. The component's policy (hot-dispatch a state-only
 edit, reboot a structural one) reads this; the split keeps the policy
 thin and the datum proven.

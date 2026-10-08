@@ -89,8 +89,10 @@ unsupported members and a member supplied both locally and by import raise
 `JS0003`. Source files are never mutated. `renameProjectFile` updates all
 references atomically. `writeProjectArtifact` writes edits back into their
 source files, preserving untouched text and refusing conflicting writes to a
-shared source; member order is part of a value there, so a reorder is an edit
-that is written and two import sites differing only in order conflict. Deletion leaves dependent files with explicit reference errors.
+shared source. It compares values as `classifyChange` does, so a reorder below
+a slot kind's top level is an edit that is written, two import sites differing
+only there conflict, and a file whose top-level slots an editor merely rebuilt
+in another order keeps its text. Deletion leaves dependent files with explicit reference errors.
 
 The website keeps an app visible while editing a fragment directly imported
 by exactly one app. Imported state changes hot-update that app; structural
@@ -162,13 +164,16 @@ structural even when the JSON text stays the same. It compares an app's
 entire document except `state` (other artifacts' whole documents) via the
 suite's collision-free `semanticKey`, member order included (a query's
 `$for` bindings nest and `$let` binds in key order, so a reorder-only edit
-is `structural`, never `none`, and moving `state` to another position costs
-a reboot); a remaining document change is
+is `structural`, never `none`) except at the top level of an `app`, `fsm`,
+`dag` or `model` document: those members are slots the project assembles in
+its own order (local members, then imports), so moving one is no change; a
+remaining document change, a reorder inside `state` included, is
 `state-only`. Every filename, including `__proto__`, is an own member of
 the result map.
 An IDE reads it to decide: a `state-only` edit hot-dispatches into a
-running app (the user keeps scroll and inputs); a `structural` edit
-reboots. Keeping this datum in the tested engine, and the policy in the
+running app (the user keeps scroll and inputs; the stage compares the state
+with its member order, so a view reading it through `$entries` re-renders);
+a `structural` edit reboots. Keeping this datum in the tested engine, and the policy in the
 widget, is deliberate.
 
 ## Errors

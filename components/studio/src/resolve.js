@@ -3,15 +3,35 @@
 import { setObjectMember, semanticKey } from '@jarenjs/core/object';
 import { StudioError } from './errors.js';
 
-/** The identity a written value is compared by: member order included. */
-const ORDERED = { ordered: true };
-
 const MEMBERS = {
   app: ['view', 'actions', 'state', 'subs'],
   fsm: ['states', 'transitions', 'initial'],
   dag: ['nodes', 'edges', 'output'],
   model: ['collections', 'entities'],
 };
+
+/**
+ * The identity two versions of a project document are compared by: a
+ * reboot decision, an editor's echo, a write-back's no-op test. Member
+ * order is part of it, because a query's `$for` bindings nest and `$let`
+ * binds in key order and a constructed object keeps its members in order,
+ * so a reorder is an edit. The one exception is the top level of a kind
+ * with importable members (`app`, `fsm`, `dag`, `model`): those members are
+ * named slots the project assembles in its own order (local members, then
+ * imports), so their order is not the document's.
+ * @param {string | null | undefined} kind - the file kind
+ * @param {any} value - the document or one file's own part of it
+ * @returns {string}
+ */
+export function documentKey(kind, value) {
+  if (kind != null && Object.hasOwn(MEMBERS, kind)
+    && value !== null && typeof value === 'object' && !Array.isArray(value)) {
+    const slots = {};
+    for (const member of Object.keys(value).sort()) setObjectMember(slots, member, value[member]);
+    value = slots;
+  }
+  return semanticKey(value, { ordered: true });
+}
 
 /** Resolve one file and its transitive sources. Imported members must be
  * absent locally; a typo, cycle or collision is a refusal, never a fallback.
@@ -82,20 +102,21 @@ export function renameProjectFile(files, before, after) {
 /** Write an assembled artifact back into its source files. Imported
  * members stay in their own files; conflicting writes to a shared source
  * are refused atomically. Unchanged files keep their identity and text.
- * Member order is part of a value here (a query's `$for` bindings nest
- * and `$let` binds in key order), so a reorder is an edit that is
- * written, and two import sites differing only in order conflict.
+ * Values are compared by {@link documentKey}: a reorder below a slot
+ * kind's top level (a query's `$for` bindings, a `$let`) is an edit that
+ * is written, two import sites differing only there conflict, and a file
+ * whose slots an editor merely rebuilt in another order is unchanged.
  * @param {any} project @param {string} name @param {any} doc */
 export function writeProjectArtifact(project, name, doc) {
   resolveProjectFile(project, name); // resolve/cycle/collision check before any write
   const writes = new Map();
   const write = (name, value) => {
-    const key = semanticKey(value, ORDERED);
+    const file = project.files.find((f) => f.name === name);
+    const key = documentKey(file.kind, value);
     if (writes.has(name)) {
       if (writes.get(name).key !== key) throw new StudioError('JS0003', `conflicting values for shared source '${name}'`);
       return;
     }
-    const file = project.files.find((f) => f.name === name);
     let local = value;
     if (file.imports) {
       local = { ...value };
@@ -111,7 +132,7 @@ export function writeProjectArtifact(project, name, doc) {
   return project.files.map((file) => {
     if (!writes.has(file.name)) return file;
     const value = writes.get(file.name).local;
-    if (semanticKey(JSON.parse(file.text), ORDERED) === semanticKey(value, ORDERED)) return file;
+    if (documentKey(file.kind, JSON.parse(file.text)) === documentKey(file.kind, value)) return file;
     return { ...file, text: JSON.stringify(value, null, 2) };
   });
 }

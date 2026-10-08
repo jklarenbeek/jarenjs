@@ -235,7 +235,9 @@ function validateNodes(schemaText, dataText) {
  * @param {{ schedule?: (flush: () => void) => void }} [env]
  */
 function createProjectStageWidget(env = {}) {
-  const stateKeyOf = (doc) => (doc && typeof doc === 'object' ? contentKey(doc.state ?? null) : null);
+  // the state's member order counts, as it does for classifyChange: a view
+  // can read it (`$entries`), so a reorder is a state change to dispatch
+  const stateKeyOf = (doc) => (doc && typeof doc === 'object' ? semanticKey(doc.state ?? null, { ordered: true }) : null);
   // the document minus its state — the same datum classifyChange keys on.
   // The widget re-derives it defensively: two commits can race in at the
   // SAME revision with different documents (a project/open interleaving

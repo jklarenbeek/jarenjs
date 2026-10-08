@@ -389,10 +389,15 @@ $fold → $for → $let → $as → $where → $groupby → $orderby → $count 
 
 JSON key order is not interoperable — several ecosystems (e.g. Go maps)
 neither preserve nor guarantee it — so this format gives key order semantic
-weight in one place only: the members of a `$for` or `$let` binding object
+weight in two places only. The members of a `$for` or `$let` binding object
 bind left to right (§6.2, §6.3), which decides which binding nests inside
-which and which earlier variable a source may read. A producer on a
-key-order-hostile stack nests one binding per phrase instead.
+which and which earlier variable a source may read. And an object the
+document writes out — a map constructor (§3.1) or a `$const` literal (§3.5.1)
+— keeps its members in document order, the order a `[*]` segment (§5.1) and
+`$entries` (§8.9) read back. Clause keys apply in the fixed order above and
+an operator's named arguments are read by name. A producer on a
+key-order-hostile stack nests one binding per phrase instead, and takes the
+member order its stack gives an object it writes out.
 
 Exotic clause interleavings (a `$let` between two `$for`s, a `$where` before
 a `$for`, multiple `$where`s) are expressed by **nesting** FLWOR phrases,

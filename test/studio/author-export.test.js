@@ -7,6 +7,9 @@ import { execFileSync } from 'node:child_process';
 
 import { exportProject, createProjectZip } from '@jarenjs/studio/export';
 import { fileSkeleton, writeProjectArtifact, resolveProjectFile } from '@jarenjs/studio';
+import { createProjectFlowWidget } from '@jarenjs/studio/flow';
+import { commitProject } from '../../packages/website/src/boundaries/project.js';
+import { createStubHost } from '../view/dom.stub.js';
 
 
 
@@ -41,6 +44,44 @@ it('writes a member-order edit, and refuses import sites that differ only in mem
   ] };
   assert.throws(() => writeProjectArtifact(shared, 'model', { collections: { a: 1, b: 2 }, entities: { b: 2, a: 1 } }),
     { code: 'JS0003', message: /conflicting values for shared source 'shared'/ });
+});
+
+it('a flow edit rewrites only the files whose content changed, whatever top-level order the editor rebuilds', () => {
+  // the editor's delete rebuilds the document in its own top-level order;
+  // an fsm's top-level members are slots the project assembles itself, so
+  // the untouched local file keeps its identity and text
+  const project = { project: '0.1', active: 'm', files: [
+    { name: 'm', kind: 'fsm', text: JSON.stringify({ initial: 'idle', $fsm: '0.1' }), imports: { states: 's', transitions: 't' }, input: 'seed' },
+    { name: 's', kind: 'data', text: JSON.stringify(['idle', 'done', 'gone']) },
+    { name: 't', kind: 'data', text: JSON.stringify([{ from: 'idle', event: 'go', to: 'done' }]) },
+    { name: 'seed', kind: 'data', text: '{}' },
+  ] };
+  const first = commitProject(project);
+  const { container } = createStubHost();
+  const widget = createProjectFlowWidget({ schedule: (/** @type {() => void} */ flush) => flush() });
+  /** @type {any[]} */
+  const edits = [];
+  const handle = widget.mount(container, first.mount, (/** @type {any} */ binding) => edits.push(binding));
+  const editor = handle.app;
+  editor.dispatch('flow/pick', { type: 'state', id: 'gone' });
+  editor.dispatch('flow/delete');
+  const edit = edits.filter((e) => e.action === 'project/artifact-edit').at(-1);
+  assert.deepEqual(Object.keys(edit.with.doc), ['$fsm', 'initial', 'states', 'transitions'], 'the editor rebuilt the top level');
+  const files = writeProjectArtifact(project, 'm', edit.with.doc);
+  assert.equal(files[0], project.files[0], 'the local file is unchanged');
+  assert.deepEqual(JSON.parse(files[1].text), ['idle', 'done']);
+  assert.equal(files[2], project.files[2]);
+  // and the project's echo of the edit keeps the editor
+  widget.update(handle, commitProject({ ...project, files, ...first }).mount, first.mount);
+  assert.equal(handle.app, editor);
+  widget.unmount(handle);
+  // plain round trips stay kept, with and without imports
+  const plain = { files: [{ name: 'app', kind: 'app', text: JSON.stringify({ state: { n: 1 }, actions: {}, view: [] }) }] };
+  assert.equal(writeProjectArtifact(plain, 'app', resolveProjectFile(plain, 'app').doc)[0], plain.files[0]);
+  const imported = { files: [{ name: 'app', kind: 'app', text: JSON.stringify({ actions: {}, state: { n: 1 } }), imports: { view: 'v' } },
+    { name: 'v', kind: 'jslt', text: JSON.stringify([{ match: '$', body: ['p', { b: 1, a: 2 }] }]) }] };
+  const back = writeProjectArtifact(imported, 'app', resolveProjectFile(imported, 'app').doc);
+  assert.deepEqual(back.map((file, i) => file === imported.files[i]), [true, true]);
 });
 
 it('exports a valid deterministic ZIP with local dependencies and verbatim arbitrary-named files', () => {
