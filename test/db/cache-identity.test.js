@@ -88,9 +88,15 @@ describe('the fingerprint collision these caches must survive', () => {
     const users = store.collection('users');
     await users.insert({ id: 'u1', name: 'a' });
     await Promise.resolve(users.execute(COLLIDING[0]));
-    // a fresh object, structurally equal, and with the keys reordered
-    await Promise.resolve(users.execute({ $return: '5ln9p', $for: { it: '$[*]' } }));
+    // a fresh object, structurally equal, its members in the same order
+    await Promise.resolve(users.execute({ $for: { it: '$[*]' }, $return: '5ln9p' }));
     assert.strictEqual(store.stats().statementCache.hits, 1);
+    // member order is part of a document's identity (bindings nest in key
+    // order), so the same members in another order are a second entry
+    // that answers for itself
+    assert.strictEqual(await Promise.resolve(users.execute({ $return: '5ln9p', $for: { it: '$[*]' } })), '5ln9p');
+    assert.strictEqual(store.stats().statementCache.hits, 1);
+    assert.strictEqual(store.stats().statementCache.misses, 2);
     await store.close();
   });
 

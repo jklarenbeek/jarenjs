@@ -16,6 +16,9 @@
  * `contentKey` fingerprint: a classification decides whether a running
  * app reboots, so a fingerprint collision would read a changed document
  * as unchanged. The artifacts are parsed JSON, so the identity is total.
+ * It is the ORDERED identity: a query's `$for` bindings nest and `$let`
+ * binds in key order, so a reorder-only edit is a different document and
+ * skipping it would leave the stage running the old one.
  */
 
 import { semanticKey, setObjectMember } from '@jarenjs/core/object';
@@ -61,12 +64,15 @@ export function assembleArtifacts(project) {
   return { artifacts, errors };
 }
 
+/** Member order is part of an artifact's identity. */
+const ORDERED = { ordered: true };
+
 /** The structural identity of an artifact — an `app`'s view/actions/subs
- * (its `state` excluded); everything else in full. */
+ * (its `state` excluded, in place); everything else in full. */
 function structuralKey(artifact) {
   return artifact.kind === 'app'
-    ? semanticKey({ ...artifact.doc, state: null })
-    : semanticKey(artifact.doc);
+    ? semanticKey({ ...artifact.doc, state: null }, ORDERED)
+    : semanticKey(artifact.doc, ORDERED);
 }
 
 const RANK = { none: 0, 'state-only': 1, structural: 2 };
@@ -94,7 +100,7 @@ export function classifyChange(prevProject, nextProject) {
     let c;
     if (b === undefined || b.kind !== a.kind) c = 'structural';
     else if (structuralKey(b) !== structuralKey(a)) c = 'structural';
-    else if (semanticKey(b.doc) !== semanticKey(a.doc)) c = 'state-only';
+    else if (semanticKey(b.doc, ORDERED) !== semanticKey(a.doc, ORDERED)) c = 'state-only';
     else c = 'none';
     setObjectMember(perArtifact, name, c);
     bump(c);

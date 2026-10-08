@@ -89,7 +89,8 @@ unsupported members and a member supplied both locally and by import raise
 `JS0003`. Source files are never mutated. `renameProjectFile` updates all
 references atomically. `writeProjectArtifact` writes edits back into their
 source files, preserving untouched text and refusing conflicting writes to a
-shared source. Deletion leaves dependent files with explicit reference errors.
+shared source; member order is part of a value there, so a reorder is an edit
+that is written and two import sites differing only in order conflict. Deletion leaves dependent files with explicit reference errors.
 
 The website keeps an app visible while editing a fragment directly imported
 by exactly one app. Imported state changes hot-update that app; structural
@@ -159,7 +160,10 @@ files, so arbitrary project names cannot escape the archive directory.
 is `structural`, `state-only`, or `none`. A change of artifact kind is
 structural even when the JSON text stays the same. It compares an app's
 entire document except `state` (other artifacts' whole documents) via the
-suite's collision-free `semanticKey`; a remaining document change is
+suite's collision-free `semanticKey`, member order included (a query's
+`$for` bindings nest and `$let` binds in key order, so a reorder-only edit
+is `structural`, never `none`, and moving `state` to another position costs
+a reboot); a remaining document change is
 `state-only`. Every filename, including `__proto__`, is an own member of
 the result map.
 An IDE reads it to decide: a `state-only` edit hot-dispatches into a

@@ -78,7 +78,12 @@ misspelled limit that would otherwise be ignored. This also applies to
 `createFormulaCompiler` retains a bounded compilation cache (default 128
 profiles): its collision-free key includes the complete profile, helper function
 identity/version/cost, the pack registry, the locale data, schema contents,
-type-test function identity and limits. Recompile after replacing a capability; a
+type-test function identity and limits. The key keeps member order, because the
+expression's `$let` binds in key order and an object constructor emits its
+members in key order: two profiles differing only in member order no longer
+share a compiled entry (the second compiled to the first one's closure, answering
+its values or member order, or compiling where it must refuse an unbound name).
+Recompile after replacing a capability; a
 new compiler never shares another host's cache. `clear()` releases entries and
 `size()` reports retained profiles.
 
@@ -160,7 +165,11 @@ or nonsingular paths invalidate on any row edit. Named top-level dependencies
 invalidate only when those values change; a declared input schema conservatively
 tracks the whole row because it may constrain other fields. JSON validity is
 checked even on memo hits. Context and explicit input revision
-also join the memo key. Disabling/replacing profiles or capabilities requires a
+also join the memo key, and the key keeps the inputs' member order: an
+evaluation can read it (`$entries` pairs and an object's `[*]` values come in
+member order, and a member passed through keeps its own), so a row re-sent with
+its members reordered is evaluated afresh; the memo used to answer it in the
+earlier order. Disabling/replacing profiles or capabilities requires a
 new compiled batch. `clear()` releases memoized cells.
 
 Default Query limits are 10000 expression steps, 64 levels of expression nesting,

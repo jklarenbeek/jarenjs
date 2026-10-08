@@ -102,8 +102,11 @@ function commitProject(slice) {
     : { files: [] };
   const nextProject = { files: [{ name: active, kind: activeFile.kind, text: assembledFile.text }] };
   const policy = projectComponent.hostPolicy(prevProject, nextProject)[active] ?? 'reboot';
+  // the input's member order counts, as the document's does in the
+  // policy: a flow can read it, so a reordered input is a new input
   if (policy === 'skip' && mount && mount.name === active
-    && (!isStore || mount.files === project.files) && semanticKey(mount.input ?? null) === semanticKey(input))
+    && (!isStore || mount.files === project.files)
+    && semanticKey(mount.input ?? null, { ordered: true }) === semanticKey(input, { ordered: true }))
     return { mount, revision };
   const nextRevision = policy === 'reboot' ? revision + 1 : revision;
   return { mount: { name: active, kind: activeFile.kind, doc, input,

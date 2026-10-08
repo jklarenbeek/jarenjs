@@ -10,8 +10,14 @@
  * The identity is the tuple's COMPLETE serialization, never a
  * fingerprint of it: a 32-bit content hash collides after tens of
  * thousands of documents, and a collision here answers one query with
- * another query's plan and rows. `store.stats()` exposes hits, misses
- * and evictions so the cache is proven rather than assumed.
+ * another query's plan and rows. It is the ORDERED serialization, member
+ * order included: `$for` bindings nest and `$let` binds in key order and
+ * a `$return` object's members are the output's in that order, so two
+ * documents differing only in member order are two queries — sharing a
+ * plan would answer the second in the first one's row and member order,
+ * or answer where it must refuse an unbound name. `store.stats()`
+ * exposes hits, misses and evictions so the cache is proven rather than
+ * assumed.
  *
  * Bind-time diversion: if any referenced external is missing or not a
  * string or finite number, the call runs the always-compilable set
@@ -80,11 +86,13 @@ import {
 export function createQueryState(bound = undefined, operators = null,
   zoneProvider = undefined, now = undefined) {
   return {
+    // every entry is compiled from a query or load document, whose member
+    // order is part of its meaning: the key keeps it
     cache: createSemanticCache(bound ?? 128, (_key, entry) => {
       entry.retired = true;
       for (const statement of entry.statements ?? []) statement.retire();
       entry.statements = null;
-    }),
+    }, { ordered: true }),
     counters: { hits: 0, misses: 0, evictions: 0 },
     /** Fragment identity → the SQL function name registered for it. */
     registered: new Map(),

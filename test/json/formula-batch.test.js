@@ -85,3 +85,19 @@ it("a disabled target's schemas take no part in the batch: they neither refuse i
     typed('b', '$.price', same, { enabled: false })], options);
   assert.equal(borrowing.evaluate([{ id: 1, price: 2 }]).errors[0].code, 'JQ0014');
 });
+
+it('a memo hit needs the same input in the same member order', () => {
+  // the language reads an input's member order (`$entries` pairs come in
+  // member order, and a member passed through keeps its own), so a row
+  // re-sent with its members reordered is a new input, never the old answer
+  const targets = () => [target('pairs', { $entries: '$.obj' }), target('whole', '$.obj')];
+  const batch = compileFormulaBatch(targets());
+  batch.evaluate([{ id: 'a', obj: { x: 1, y: 2 } }]);
+  const reordered = [{ id: 'a', obj: { y: 2, x: 1 } }];
+  const again = batch.evaluate(reordered);
+  const fresh = compileFormulaBatch(targets()).evaluate(reordered);
+  assert.equal(JSON.stringify(again.results), JSON.stringify(fresh.results));
+  assert.deepEqual(fresh.results[0].outcomes.pairs, { kind: 'value', value: [{ key: 'y', value: 2 }, { key: 'x', value: 1 }] });
+  assert.equal(again.counts.cached, 0);
+  assert.equal(batch.evaluate(reordered).counts.cached, 2, 'the same order still hits');
+});

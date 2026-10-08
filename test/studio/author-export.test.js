@@ -25,6 +25,24 @@ it('writes imported artifacts atomically while retaining untouched source identi
   assert.equal(project.files[2].text, '{"n":1}');
 });
 
+it('writes a member-order edit, and refuses import sites that differ only in member order', () => {
+  // a query's `$for` bindings nest in key order: the reorder IS the edit
+  const MB = { $for: { m: '$.a[*]', b: '$.b[*]' }, $return: '$b' };
+  const BM = { $for: { b: '$.b[*]', m: '$.a[*]' }, $return: '$b' };
+  const project = { files: [{ name: 'q', kind: 'query', text: JSON.stringify(MB) }] };
+  const [written] = writeProjectArtifact(project, 'q', BM);
+  assert.deepEqual(Object.keys(JSON.parse(written.text).$for), ['b', 'm']);
+  // the same order is no edit: the file keeps its identity and text
+  assert.equal(writeProjectArtifact(project, 'q', structuredClone(MB))[0], project.files[0]);
+  // two import sites of one source disagree when only their member order does
+  const shared = { files: [
+    { name: 'model', kind: 'model', text: '{}', imports: { collections: 'shared', entities: 'shared' } },
+    { name: 'shared', kind: 'data', text: '{"a":1,"b":2}' },
+  ] };
+  assert.throws(() => writeProjectArtifact(shared, 'model', { collections: { a: 1, b: 2 }, entities: { b: 2, a: 1 } }),
+    { code: 'JS0003', message: /conflicting values for shared source 'shared'/ });
+});
+
 it('exports a valid deterministic ZIP with local dependencies and verbatim arbitrary-named files', () => {
   const project = { project: '0.1', files: [
     { name: '../🪶.json', kind: 'app', text: fileSkeleton('app') },

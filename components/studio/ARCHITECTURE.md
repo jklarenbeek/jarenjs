@@ -34,7 +34,8 @@ The IDE's hardest UX problem is that re-booting a nested `@jarenjs/app` on
 every edit destroys the running app's state. The engine keeps the *data*
 for that decision headless and tested: `classifyChange(prev, next)`
 compares a **structural key** — an `app` document minus its `state`, via
-the suite's collision-free `semanticKey` — and reports `structural` / `state-only` /
+the suite's collision-free `semanticKey` in its ordered form, since a
+reordered `$for` or `$let` is another query — and reports `structural` / `state-only` /
 `none` per artifact. The component's policy (hot-dispatch a state-only
 edit, reboot a structural one) reads this; the split keeps the policy
 thin and the datum proven.

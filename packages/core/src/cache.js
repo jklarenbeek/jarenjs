@@ -22,7 +22,8 @@
  * plain-data value IS rather than by a fingerprint of it, for the caches
  * whose entries carry meaning (a compiled query, a query plan, a
  * registered function body) and where serving the wrong entry is wrong
- * data rather than a slow repaint.
+ * data rather than a slow repaint — member order included when the cache
+ * is built `{ ordered: true }`, as one whose entries depend on it must be.
  */
 
 import { semanticKey } from './object.js';
@@ -126,6 +127,15 @@ export function createBoundedCache(limit, onEvict = undefined) {
  *    retained. Correct and slow beats fast and wrong; callers that want
  *    to *reject* such input should validate before asking the cache.
  *
+ * **Member order.** By default the identity is order-insensitive, as
+ * plain JSON data is: two values differing only in object member order
+ * share an entry. A cache whose entries depend on member order MUST be
+ * built `{ ordered: true }` — anything compiled from a JSON query
+ * document is one, since `$for` bindings nest and `$let` binds in key
+ * order and a `$return` object's members are the output's members in
+ * that order — so a reordered document is its own entry rather than
+ * another document's hit.
+ *
  * Compose with a discriminating tuple when an entry depends on more than
  * the document — `cache.getOrCreate([document, dialect, strict], …)`
  * keys the whole tuple, which a `${a}|${b}` string concatenation cannot
@@ -135,16 +145,23 @@ export function createBoundedCache(limit, onEvict = undefined) {
  * @param {(identity: string, entry: V) => void} [onEvict] - Called after
  *   a capacity eviction, with the complete semantic identity and entry.
  *   Replacement, clear and unkeyable values do not invoke it.
+ * @param {{ ordered?: boolean }} [options] - `ordered: true` keys by
+ *   {@link semanticKey}'s ordered form, member order included
  * @returns {SemanticCache<V>}
+ * @throws {TypeError} When `options` is not a plain `{ ordered?: boolean }`
  */
-export function createSemanticCache(limit, onEvict = undefined) {
+export function createSemanticCache(limit, onEvict = undefined, options = undefined) {
+  // checked once, here: inside `identify` a refusal reads as "unkeyable",
+  // which would quietly turn every lookup into a permanent miss
+  semanticKey(null, options);
+  const keyOptions = options?.ordered === true ? { ordered: true } : undefined;
   /** @type {BoundedCache<string, V>} */
   const cache = createBoundedCache(limit, onEvict);
 
   /** @param {any} value @returns {string | null} */
   const identify = (value) => {
     try {
-      return semanticKey(value);
+      return semanticKey(value, keyOptions);
     }
     catch {
       return null; // unkeyable: a permanent miss

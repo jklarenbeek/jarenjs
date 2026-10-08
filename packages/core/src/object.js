@@ -293,7 +293,8 @@ export function stableStringify(value) {
  * bucket index or a diagnostic label, and WRONG as the sole identity of
  * anything whose reuse changes a result: a compiled query, a query plan,
  * a registered SQL function body, a memoized render. For those use
- * {@link semanticKey}, which compares the whole serialization.
+ * {@link semanticKey}, which compares the whole serialization — in its
+ * ordered form when the entry depends on member order.
  *
  * Two further properties a caller must know, inherited from
  * `stableStringify`: **`undefined` members are dropped** (two values
@@ -338,9 +339,11 @@ const SEMANTIC_TOKENS = {
  * @param {*} value
  * @param {string} path - JSON-Pointer-ish trail, for the error message
  * @param {Set<object>} open - Ancestors on the current path (cycle guard)
+ * @param {boolean} ordered - Object members in enumeration order rather
+ *   than sorted
  * @returns {string}
  */
-function semanticToken(value, path, open) {
+function semanticToken(value, path, open, ordered) {
   const refuse = (what) => {
     throw new TypeError(
       `semanticKey: ${what} at ${path === '' ? 'the root' : path} cannot be a cache identity`);
@@ -383,7 +386,7 @@ function semanticToken(value, path, open) {
     }
     out = '[';
     for (let i = 0; i < items.length; i++)
-      out += (i === 0 ? '' : ',') + semanticToken(items[i], `${path}/${i}`, open);
+      out += (i === 0 ? '' : ',') + semanticToken(items[i], `${path}/${i}`, open, ordered);
     out += ']';
   }
   else {
@@ -391,12 +394,14 @@ function semanticToken(value, path, open) {
     // through `Object.keys` — a whole family collapsing onto one key
     if (proto !== Object.prototype && proto !== null)
       refuse(`a ${object.constructor?.name ?? 'non-plain'} instance`);
-    const keys = Object.keys(object).sort(compareCodePoints);
+    // the member names are distinct, so their sequence alone spells the
+    // order: an ordered key stays injective with order as part of identity
+    const keys = ordered ? Object.keys(object) : Object.keys(object).sort(compareCodePoints);
     out = '{';
     for (let i = 0; i < keys.length; i++) {
       const key = keys[i];
       out += (i === 0 ? '' : ',') + JSON.stringify(key) + ':'
-        + semanticToken(/** @type {any} */ (object)[key], `${path}/${key}`, open);
+        + semanticToken(/** @type {any} */ (object)[key], `${path}/${key}`, open, ordered);
     }
     out += '}';
   }
@@ -417,6 +422,23 @@ function semanticToken(value, path, open) {
  * bounded cache of a few hundred entries that cost is a few kilobytes
  * and the alternative is wrong data.
  *
+ * **Member order.** By default the key follows the JSON data model, where
+ * an object's members are unordered: they are sorted by code point, so
+ * two values differing only in member order share a key. With
+ * `{ ordered: true }` members keep their enumeration order (`Object.keys`
+ * order — array-index names ascending, then insertion order — the order
+ * every reader of the value sees), and two such values are two
+ * identities. A cache whose entries depend on member order MUST use the
+ * ordered form. A JSON query document is such a value — `$for` bindings
+ * nest and `$let` binds in key order, and a `$return` object's members
+ * are the output's members in that order — and so is anything compiled
+ * from one or computed by one over its input: a query plan, a registered
+ * SQL function body, a compiled formula, a memo of an evaluation. The
+ * ordered key refines the default one (values sharing an ordered key
+ * share the default key, never the reverse), so choosing it costs at
+ * most an extra miss. Both are one serializer, equally strict, with the
+ * same refusals.
+ *
  * Injective over plain data, and STRICT about the rest: it distinguishes
  * `-0` from `0`, `NaN`/`±Infinity` from `null` and from each other, and
  * a present-but-`undefined` member from an absent one — every case
@@ -433,11 +455,23 @@ function semanticToken(value, path, open) {
  * surface JSON reads. Two values differing only in a non-enumerable
  * member are one value to this key, as they are to `JSON.stringify`.
  * @param {*} value - The value to derive an identity for
+ * @param {{ ordered?: boolean }} [options] - `ordered: true` keeps object
+ *   members in enumeration order instead of sorting them
  * @returns {string} the complete deterministic serialization
- * @throws {TypeError} When the value cannot be keyed injectively
+ * @throws {TypeError} When the value cannot be keyed injectively, or
+ *   `options` is not a plain `{ ordered?: boolean }`
  */
-export function semanticKey(value) {
-  return semanticToken(value, '', new Set());
+export function semanticKey(value, options = undefined) {
+  let ordered = false;
+  if (options !== undefined) {
+    // a closed set of one: a misspelt member refuses rather than quietly
+    // keying without order
+    if (!isPlainOptions(options) || Object.keys(options).some((key) => key !== 'ordered')
+      || (options.ordered !== undefined && typeof options.ordered !== 'boolean'))
+      throw new TypeError('semanticKey: options must be a plain { ordered?: boolean }');
+    ordered = options.ordered === true;
+  }
+  return semanticToken(value, '', new Set(), ordered);
 }
 
 /**

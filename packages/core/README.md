@@ -6,12 +6,27 @@ The zero-dependency foundation of [Jaren](https://github.com/jklarenbeek/jarenjs
 
 None of it depends on JSON Schema: every module can be used standalone in any JavaScript project.
 
-`createBoundedCache(limit, onEvict?)` and `createSemanticCache(limit, onEvict?)`
+`createBoundedCache(limit, onEvict?)` and `createSemanticCache(limit, onEvict?, options?)`
 notify an owner after a capacity eviction removes an entry, before the replacement
 is inserted. The semantic hook receives the complete serialized identity and the
 stored entry. Hits, replacement of an existing key and clear do not notify;
 neither do the bounded cache's explicit deletion or the semantic cache's
 unkeyable values. The caller owns resource cleanup and any explicit clearing.
+
+`semanticKey(value, options?)` (`@jarenjs/core/object`) is the collision-free
+identity the semantic cache keys by, in two forms of one serializer with the same
+strictness and refusals. By default it is order-insensitive, as JSON data is:
+object members are sorted, so two values differing only in member order share a
+key (a `contentKey` fingerprint always does). `{ ordered: true }` keeps members
+in enumeration order, so member order is part of the identity, and
+`createSemanticCache(limit, onEvict, { ordered: true })` keys that way. A cache
+whose entries depend on member order must use the ordered form: anything compiled
+from a JSON query document (`$for` and `$let` bind in key order, and a `$return`
+object's members are the output's in that order) or computed by one over its
+input. The ordered key refines the default — values sharing an ordered key share
+the default one — so it costs at most an extra miss. The default is unchanged by
+the option's arrival; a consumer that adopts the ordered form stops serving one
+document's entry to another that differs from it only in member order.
 
 ## Modules
 
@@ -19,7 +34,7 @@ unkeyable values. The caller owns resource cleanup and any explicit clearing.
 |---|---|
 | `@jarenjs/core` | type guards and getters (`isStringType`, `isObjectClass`, `getIntegerType`, ...) |
 | `@jarenjs/core/array` | array helpers (`isUniqueArray`, `getUniqueArray`, `includesAll`, ...) |
-| `@jarenjs/core/object` | deep equality (`equalsDeep`, JSON-only `equalsJson`), the `isJsonObject` and deep `isJsonValue` predicates, `__proto__`-safe `setObjectMember`, `deepFreeze`, map/set merging |
+| `@jarenjs/core/object` | deep equality (`equalsDeep`, JSON-only `equalsJson`), the `isJsonObject` and deep `isJsonValue` predicates, `__proto__`-safe `setObjectMember`, `deepFreeze`, map/set merging, the collision-free `semanticKey` (order-insensitive, or `{ ordered: true }`) and the `contentKey` fingerprint |
 | `@jarenjs/core/string` | Unicode string helpers (`countCodePoints`, `compareCodePoints`, ...), regex compilation and repeatable `createRegExpTester` predicates, the suite's one content hash (`fnv1a` and the `hashContent` fingerprint over it) and `kebabCase` |
 | `@jarenjs/core/model` | `withoutModelRenameHints` copies a model without collection/entity rename hints, preserving nested schema annotations and declaration order |
 | `@jarenjs/core/cache` | the bounded LRU with key deletion (`createBoundedCache`), the reference-keyed `createWeakCache`, and `createSemanticCache` — keyed by what a value IS; both bounded caches accept an optional capacity-eviction hook |

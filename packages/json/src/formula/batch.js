@@ -126,7 +126,10 @@ export function compileFormulaBatch(targets, options = {}) {
               const source = dependencies.all || compiled.doc.inputSchema ? row : dependencies.source.map((name) => Object.hasOwn(row, name) ? [name, row[name]] : [name]);
               const inputs = dependencies.computed.map((id) => [id, computed[id]]);
               const cacheKey = canonicalizeJson([rowId, target.id]);
-              const inputKey = semanticKey([compiled.key, source, inputs, frozenContext, revision]);
+              // ordered: an evaluation can read its input's member order
+              // (`$entries`, an object's `[*]`, a member passed through),
+              // so a reordered row is a new input, not the previous answer
+              const inputKey = semanticKey([compiled.key, source, inputs, frozenContext, revision], { ordered: true });
               const prior = memo.get(cacheKey);
               if (prior?.inputKey === inputKey) { answer = prior.answer; counts.cached++; }
               else {

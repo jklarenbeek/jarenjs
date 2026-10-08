@@ -119,6 +119,16 @@ describe('the two hard-problem policies', () => {
     assert.strictEqual(hostPolicy(base, base)['a.json'], 'skip');
   });
 
+  it('hostPolicy reboots a member-order edit rather than skipping it', () => {
+    // `$for` bindings nest in key order, so the reorder is another query
+    const p = createStudioComponent();
+    const query = (/** @type {any} */ doc) => p.parseProject({ project: '0.1', files: [{ name: 'q', kind: 'query', text: JSON.stringify(doc) }] });
+    const MB = query({ $for: { m: '$.a[*]', b: '$.b[*]' }, $return: '$b' });
+    const BM = query({ $for: { b: '$.b[*]', m: '$.a[*]' }, $return: '$b' });
+    assert.strictEqual(hostPolicy(MB, BM).q, 'reboot');
+    assert.strictEqual(hostPolicy(MB, MB).q, 'skip');
+  });
+
   it('hostPolicy reboots when an unchanged document switches artifact kinds', () => {
     const studio = createStudioComponent();
     const project = (kind) => studio.parseProject({

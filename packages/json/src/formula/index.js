@@ -155,8 +155,10 @@ export function createFormulaCompiler(options = {}) {
         throw new FormulaError('JQ0014', formulaMessage('query/formula/schema-missing'), doc.id, `/${key}`);
       schemas[key] = snapshot(entry.schema);
     }
+    // ordered: the expression is a query document, whose `$let` binds in
+    // key order and whose object constructors emit members in key order
     const key = semanticKey([doc, capabilityKeys, schemas, options.compileTypeTest ? identity(options.compileTypeTest) : null, options.limits ?? {},
-      options.dateNames ?? null, options.decimalFormats ?? null]);
+      options.dateNames ?? null, options.decimalFormats ?? null], { ordered: true });
     const cached = cache.get(key);
     if (cached) return cached;
     const tests = {};

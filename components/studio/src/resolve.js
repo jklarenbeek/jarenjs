@@ -3,6 +3,9 @@
 import { setObjectMember, semanticKey } from '@jarenjs/core/object';
 import { StudioError } from './errors.js';
 
+/** The identity a written value is compared by: member order included. */
+const ORDERED = { ordered: true };
+
 const MEMBERS = {
   app: ['view', 'actions', 'state', 'subs'],
   fsm: ['states', 'transitions', 'initial'],
@@ -79,12 +82,15 @@ export function renameProjectFile(files, before, after) {
 /** Write an assembled artifact back into its source files. Imported
  * members stay in their own files; conflicting writes to a shared source
  * are refused atomically. Unchanged files keep their identity and text.
+ * Member order is part of a value here (a query's `$for` bindings nest
+ * and `$let` binds in key order), so a reorder is an edit that is
+ * written, and two import sites differing only in order conflict.
  * @param {any} project @param {string} name @param {any} doc */
 export function writeProjectArtifact(project, name, doc) {
   resolveProjectFile(project, name); // resolve/cycle/collision check before any write
   const writes = new Map();
   const write = (name, value) => {
-    const key = semanticKey(value);
+    const key = semanticKey(value, ORDERED);
     if (writes.has(name)) {
       if (writes.get(name).key !== key) throw new StudioError('JS0003', `conflicting values for shared source '${name}'`);
       return;
@@ -105,7 +111,7 @@ export function writeProjectArtifact(project, name, doc) {
   return project.files.map((file) => {
     if (!writes.has(file.name)) return file;
     const value = writes.get(file.name).local;
-    if (semanticKey(JSON.parse(file.text)) === semanticKey(value)) return file;
+    if (semanticKey(JSON.parse(file.text), ORDERED) === semanticKey(value, ORDERED)) return file;
     return { ...file, text: JSON.stringify(value, null, 2) };
   });
 }

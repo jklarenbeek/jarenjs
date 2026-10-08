@@ -69,3 +69,18 @@ it('an unrelated invalid input does not block an app that imports its own state'
   assert.equal(verdict.files[0].valid, false);
   assert.equal(verdict.files[1].valid, true);
 });
+
+it('an input re-sent with its members reordered is a new input, never the old mount', () => {
+  // a flow reads its input through queries that can see member order (a
+  // member passed through keeps its own), so the stage must not keep the
+  // previous input when only the order changed
+  const files = (/** @type {any} */ input) => [{ name: 'flow', kind: 'dag', text: fileSkeleton('dag'), input: 'in' },
+    { name: 'in', kind: 'data', text: JSON.stringify(input) }];
+  const first = commitProject({ project: '0.1', active: 'flow', files: files({ a: 1, b: 2 }) });
+  assert.deepEqual(Object.keys(first.mount.input), ['a', 'b']);
+  const reordered = commitProject({ project: '0.1', active: 'flow', files: files({ b: 2, a: 1 }), ...first });
+  assert.notEqual(reordered.mount, first.mount);
+  assert.deepEqual(Object.keys(reordered.mount.input), ['b', 'a']);
+  const same = commitProject({ project: '0.1', active: 'flow', files: files({ b: 2, a: 1 }), ...reordered });
+  assert.equal(same.mount, reordered.mount, 'the same order keeps the mount');
+});

@@ -941,8 +941,10 @@ collection binding, so the planner passes that binding's **name** in:
 wrapped under any other name every reference would read as an external,
 the determinism rule would reject the fragment, and the hatch would
 silently not engage — no error and no reason in `explain()`.
-Registration is keyed by `semanticKey(fragment)` (the
-order-insensitive identity from `@jarenjs/core/object`) so identical
+Registration is keyed by `semanticKey(fragment, { ordered: true })` (the
+collision-free identity from `@jarenjs/core/object`, member order
+included: a reordered `$let` can test another condition, and the
+registrations outlive any cached plan) so identical
 fragments share one registration, and the planner MUST
 produce a correct plan with the capability disabled (tested that way).
 Preference order: native SQL → deterministic function → residual, and
@@ -962,7 +964,12 @@ the profile — where the identity is the tuple's COMPLETE
 serialization, never a fingerprint of it: a 32-bit content hash
 collides after tens of thousands of documents, and a collision here
 answers one query with another query's plan and rows (the
-cache-identity test exists to keep that key abolished).
+cache-identity test exists to keep that key abolished). The cache is
+built `{ ordered: true }`, so member order is part of the identity:
+`$for` bindings nest and `$let` binds in key order and a `$return`
+object's members are the output's in that order, and two documents
+differing only there are two plans — sharing one answered the second in
+the first one's order, or answered where it must refuse an unbound name.
 `store.stats()` exposes hits, misses and evictions, so the cache is
 proven rather than assumed.
 

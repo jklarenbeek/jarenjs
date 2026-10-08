@@ -388,8 +388,11 @@ $fold → $for → $let → $as → $where → $groupby → $orderby → $count 
 ```
 
 JSON key order is not interoperable — several ecosystems (e.g. Go maps)
-neither preserve nor guarantee it — so this format MUST NOT give key order
-semantic weight anywhere, and does not.
+neither preserve nor guarantee it — so this format gives key order semantic
+weight in one place only: the members of a `$for` or `$let` binding object
+bind left to right (§6.2, §6.3), which decides which binding nests inside
+which and which earlier variable a source may read. A producer on a
+key-order-hostile stack nests one binding per phrase instead.
 
 Exotic clause interleavings (a `$let` between two `$for`s, a `$where` before
 a `$for`, multiple `$where`s) are expressed by **nesting** FLWOR phrases,
@@ -430,10 +433,15 @@ operator (§8.9).
 consecutive XQuery `for` clauses, and **may be correlated**: a later source
 may reference variables bound earlier in the same `$for` object.
 
-> **Interop caveat.** Correlation is the one place where the *relative order*
-> of keys inside a single binding object matters. Producers on
-> key-order-hostile stacks SHOULD emit one binding per phrase, nesting
-> phrases, instead of relying on multi-key binding objects.
+> **Interop caveat.** The *relative order* of keys inside a single binding
+> object matters: it decides which binding nests inside which (so the order
+> of the tuples) and which earlier variables a correlated source may read.
+> Producers on key-order-hostile stacks SHOULD emit one binding per phrase,
+> nesting phrases, instead of relying on multi-key binding objects. A
+> consumer that caches compiled documents MUST key each with its member
+> order (`semanticKey(document, { ordered: true })` from
+> `@jarenjs/core/object`), never by a sorted serialization: two documents
+> differing only in binding order are two queries.
 
 **Extended binding form** — a source written as an object with an `$in`
 member iterates `$in` like a plain source, with options:

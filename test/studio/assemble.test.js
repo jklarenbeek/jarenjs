@@ -93,6 +93,23 @@ suite('classifyChange — reboot vs. hot-update', () => {
     assert.strictEqual(classifyChange(a1, a2).perArtifact['app.json'], 'state-only');
   });
 
+  it('a member-order edit is a change, never none', () => {
+    // `$for` bindings nest in key order: two query documents differing only
+    // in binding order are two queries (another row order, or an unbound
+    // name where a correlated source moves first), so a stage must not skip
+    const XY = { $for: { x: '$.xs[*]', y: '$.ys[*]' }, $return: { x: '$x', y: '$y' } };
+    const YX = { $for: { y: '$.ys[*]', x: '$.xs[*]' }, $return: { x: '$x', y: '$y' } };
+    const query = (/** @type {any} */ doc) => parseProject({ project: '0.1', files: [{ name: 'q', kind: 'query', text: JSON.stringify(doc) }] });
+    assert.strictEqual(classifyChange(query(XY), query(YX)).perArtifact.q, 'structural');
+    assert.strictEqual(classifyChange(query(XY), query(structuredClone(XY))).perArtifact.q, 'none', 'the same order is unchanged');
+    // the app path: an action's binding order is structure, the state's member order is state
+    const STATE = { n: 1, xs: [1, 2], ys: ['a', 'b'] };
+    const app = (/** @type {any} */ pairs, state = STATE) => parseProject({ project: '0.1', files: [{ name: 'app.json', kind: 'app',
+      text: JSON.stringify({ state, view: VIEW, actions: { pair: { n: '$.n', xs: '$.xs', ys: '$.ys', pairs: [pairs] } } }) }] });
+    assert.strictEqual(classifyChange(app(XY), app(YX)).perArtifact['app.json'], 'structural');
+    assert.strictEqual(classifyChange(app(XY), app(XY, { ys: ['a', 'b'], xs: [1, 2], n: 1 })).perArtifact['app.json'], 'state-only');
+  });
+
   it('a non-app artifact change is structural (its whole document is structure)', () => {
     const q1 = parseProject({ project: '0.1', files: [{ name: 'q', kind: 'query', text: '{"a":"$.x"}' }] });
     const q2 = parseProject({ project: '0.1', files: [{ name: 'q', kind: 'query', text: '{"a":"$.y"}' }] });

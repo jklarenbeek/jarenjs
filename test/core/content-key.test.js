@@ -181,4 +181,119 @@ describe('createSemanticCache', () => {
     assert.strictEqual(cache.size(), 0);
     assert.strictEqual(cache.get({ n: 3 }), undefined);
   });
+
+  it('keys by member order when built { ordered: true }', () => {
+    const cache = createSemanticCache(8, undefined, { ordered: true });
+    let built = 0;
+    const build = () => { built += 1; return built; };
+    assert.strictEqual(cache.getOrCreate({ $for: { m: '$.a[*]', b: '$.b[*]' } }, build), 1);
+    assert.strictEqual(cache.getOrCreate({ $for: { b: '$.b[*]', m: '$.a[*]' } }, build), 2,
+      'a reordered binding object is its own entry');
+    assert.strictEqual(cache.getOrCreate({ $for: { m: '$.a[*]', b: '$.b[*]' } }, build), 1,
+      'the same order still hits');
+    assert.strictEqual(cache.get({ $for: { b: '$.b[*]', m: '$.a[*]' } }), 2);
+    assert.strictEqual(cache.size(), 2);
+    // and an unkeyable value is still a permanent miss
+    assert.strictEqual(cache.getOrCreate(new Date(0), build), 3);
+    assert.strictEqual(cache.set(new Date(0), 4), false);
+  });
+
+  it('hands an ordered cache\'s eviction hook the ordered identity', () => {
+    /** @type {string[]} */
+    const evicted = [];
+    const cache = createSemanticCache(1, (identity) => { evicted.push(identity); }, { ordered: true });
+    cache.set({ b: 1, a: 2 }, 'first');
+    cache.set({ a: 2, b: 1 }, 'second');
+    assert.deepStrictEqual(evicted, ['{"b":1,"a":2}']);
+  });
+
+  it('refuses a malformed option at construction, not as a silent miss per lookup', () => {
+    for (const options of [{ ordered: 'yes' }, { orderd: true }, null, 'ordered', [true]]) {
+      assert.throws(() => createSemanticCache(2, undefined, /** @type {any} */ (options)), TypeError,
+        JSON.stringify(options));
+    }
+    // absent and false both mean the order-insensitive key
+    for (const options of [undefined, {}, { ordered: false }]) {
+      const cache = createSemanticCache(2, undefined, options);
+      cache.set({ a: 1, b: 2 }, 'x');
+      assert.strictEqual(cache.get({ b: 2, a: 1 }), 'x', JSON.stringify(options));
+    }
+  });
+});
+
+describe('semanticKey { ordered: true }', () => {
+  const ordered = { ordered: true };
+
+  it('keeps object members in enumeration order, at every depth', () => {
+    const value = { a: 1, b: { x: [1, 2], y: 'z' } };
+    assert.strictEqual(semanticKey(value, ordered), '{"a":1,"b":{"x":[1,2],"y":"z"}}');
+    assert.strictEqual(semanticKey({ b: { y: 'z', x: [1, 2] }, a: 1 }, ordered), '{"b":{"y":"z","x":[1,2]},"a":1}');
+    assert.notStrictEqual(semanticKey({ o: { x: 1, y: 2 } }, ordered), semanticKey({ o: { y: 2, x: 1 } }, ordered),
+      'a nested reorder alone is a new identity');
+    assert.strictEqual(semanticKey(value, ordered), semanticKey({ a: 1, b: { x: [1, 2], y: 'z' } }, ordered),
+      'a fresh value in the same order is the same identity');
+  });
+
+  it('separates the binding orders the default key folds together', () => {
+    const MB = { $for: { m: '$.Author[*]', b: '$.Book[*]' }, $return: { id: '$b.id', name: '$m.name' } };
+    const BM = { $for: { b: '$.Book[*]', m: '$.Author[*]' }, $return: { id: '$b.id', name: '$m.name' } };
+    const NI = { $for: { m: '$.Author[*]', b: '$.Book[*]' }, $return: { name: '$m.name', id: '$b.id' } };
+    assert.strictEqual(semanticKey(MB), semanticKey(BM), 'the default key is order-insensitive');
+    assert.strictEqual(semanticKey(MB), semanticKey(NI));
+    assert.notStrictEqual(semanticKey(MB, ordered), semanticKey(BM, ordered));
+    assert.notStrictEqual(semanticKey(MB, ordered), semanticKey(NI, ordered));
+  });
+
+  it('reads the order the engine reads: array-index names first, ascending', () => {
+    // `Object.keys` lists index-like names before every other name, so these
+    // two literals are ONE member order to every consumer of the value
+    assert.strictEqual(semanticKey({ b: 1, 2: 'x', 1: 'y', a: 0 }, ordered), semanticKey({ 1: 'y', 2: 'x', b: 1, a: 0 }, ordered));
+    assert.strictEqual(semanticKey({ b: 1, 2: 'x', 1: 'y', a: 0 }, ordered), '{"1":"y","2":"x","b":1,"a":0}');
+  });
+
+  it('keeps every strict distinction of the default key', () => {
+    const distinct = (a, b) => assert.notStrictEqual(semanticKey(a, ordered), semanticKey(b, ordered),
+      `${stableStringify(a)} and ${stableStringify(b)} must not share an ordered identity`);
+    distinct(-0, 0);
+    distinct(NaN, null);
+    distinct(Infinity, -Infinity);
+    distinct({ a: 1, b: undefined }, { a: 1 });
+    distinct([1], [1, undefined]);
+    distinct({ a: '1' }, { a: 1 });
+    distinct(COLLIDING[0], COLLIDING[1]);
+    distinct({ a: 1, b: undefined }, { b: undefined, a: 1 });
+    for (const token of ['\u0000undef', '\u0000nan', '-0', 'null'])
+      assert.strictEqual(semanticKey({ v: token }, ordered), `{"v":${JSON.stringify(token)}}`);
+    // a value without object members keys exactly as the default does
+    for (const value of [null, 1, -0, NaN, 'text', [1, [2, 'x']], 3n, undefined])
+      assert.strictEqual(semanticKey(value, ordered), semanticKey(value), String(value));
+  });
+
+  it('gives 100k trivially different documents, in two member orders, 200k identities', () => {
+    const seen = new Set();
+    for (let i = 0; i < 100_000; i++) {
+      const literal = i.toString(36);
+      seen.add(semanticKey({ $for: { it: '$[*]' }, $return: literal }, ordered));
+      seen.add(semanticKey({ $return: literal, $for: { it: '$[*]' } }, ordered));
+    }
+    assert.strictEqual(seen.size, 200_000);
+  });
+
+  it('refuses exactly what the default key refuses', () => {
+    const cyclic = /** @type {any} */ ({ a: 1 });
+    cyclic.self = cyclic;
+    for (const value of [new Date(0), new Map(), /x/, cyclic, () => {}, Symbol('s'),
+      Object.assign([], { extra: 1 }), { [Symbol('k')]: 1 }, { nested: [new Set()] }]) {
+      assert.throws(() => semanticKey(value, ordered), TypeError, `${String(value)} must be refused`);
+    }
+    assert.strictEqual(semanticKey(Object.assign(Object.create(null), { b: 1, a: 2 }), ordered), '{"b":1,"a":2}');
+  });
+
+  it('is the order-insensitive key unless asked, and refuses a malformed option', () => {
+    const value = { b: { y: 1, x: 2 }, a: 1 };
+    for (const options of [undefined, {}, { ordered: false }])
+      assert.strictEqual(semanticKey(value, options), semanticKey(value));
+    for (const options of [{ ordered: 1 }, { orderd: true }, null, 'ordered', []])
+      assert.throws(() => semanticKey(value, /** @type {any} */ (options)), TypeError, JSON.stringify(options));
+  });
 });

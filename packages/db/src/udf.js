@@ -7,8 +7,10 @@
  * externals (their values change per call, and a deterministic
  * function must not close over changing state), no host functions, no
  * collations. Registration is keyed by the fragment's COLLISION-FREE
- * structural identity, so identical fragments share one registration
- * per store and different fragments never do. A fingerprint could not
+ * structural identity, member order included (`$let` binds in key order,
+ * so a reordered fragment can test another condition), so identical
+ * fragments share one registration per store and different fragments
+ * never do. A fingerprint could not
  * decide this: two colliding fragments would claim one SQL function
  * name, the second would silently reuse the first's predicate, and the
  * WHERE clause would filter on the wrong condition. The SQL identifier
@@ -121,7 +123,10 @@ export function deterministicFragment(fragment, operators = null, binding = 'it'
   /** @type {string} */
   let key;
   try {
-    key = semanticKey(fragment);
+    // ordered: the registrations outlive any one cached plan, so a plan
+    // keyed with member order still reaches a function registered for
+    // another order unless this identity keeps it too
+    key = semanticKey(fragment, { ordered: true });
   }
   catch {
     // a fragment that cannot be keyed injectively must not be shared

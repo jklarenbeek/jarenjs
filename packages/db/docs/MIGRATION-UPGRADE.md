@@ -389,6 +389,18 @@ the query engine, now refuse by code or answer what the engine answers:
   JSON `null` apart from a missing member — where an include and a query
   order a string by code point and read the two as one empty key; the root
   load now orders as they do.
+- Two query documents differing only in member order — of a `$for` or
+  `$let` binding object, or of a `$return` object — no longer share a cached
+  plan. On one store the second answered in the first one's row order and
+  output member order, and a reversed correlated binding that reads a name
+  bound after it answered the first document's rows where it refuses
+  `JQ2006` — through `execute`, `explain`, transaction views, entity and
+  collection cursors, `mode: 'rerun'` live registrations and the XQuery
+  front-end's two clause orders. Each member order is now its own
+  statement-cache entry (`store.stats().statementCache` counts a reordered
+  document, even one whose only change is clause order, as a miss), and a
+  predicate pushed as a registered SQL function registers one function per
+  member order.
 
 ## 8. Stricter models, keys and staged writes
 

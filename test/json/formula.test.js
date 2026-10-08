@@ -106,3 +106,31 @@ it('parity refuses an expected outcome that is not JSON before it evaluates a ro
   const parity = checkFormulaParity(real, [{ n: 1, m: 'x' }], [{ kind: 'error', message: undefined }]);
   assert.deepEqual([parity.agree, parity.differ], [1, 0]);
 });
+
+it('one compiler answers each member order of a profile as a fresh compiler does', () => {
+  // `$let` binds in key order (a later binding reads an earlier one, and a
+  // nested phrase may shadow), and an object constructor's members are the
+  // value's members in that order: two orders are two formulas
+  const pairs = [
+    [{ $let: { n: '$.price', m: '$n' }, $return: '$m' }, { $let: { m: '$n', n: '$.price' }, $return: '$m' }],
+    [{ a: '$.price', b: '$.qty' }, { b: '$.qty', a: '$.price' }],
+    [{ $let: { p: '$.price', q: '$p' }, $return: { $let: { p: '$.qty', r: '$p' }, $return: ['$q', '$r'] } },
+      { $let: { p: '$.price', q: '$p' }, $return: { $let: { r: '$p', p: '$.qty' }, $return: ['$q', '$r'] } }],
+  ];
+  /** @param {any} compiler @param {any} expression */
+  const outcome = (compiler, expression) => {
+    try { return JSON.stringify(compiler.compile(doc(expression)).evaluate({ price: 3, qty: 5 })); }
+    catch (error) { return `refused ${/** @type {any} */ (error).code}`; }
+  };
+  for (const [a, b] of pairs) {
+    const fresh = [outcome(createFormulaCompiler(), a), outcome(createFormulaCompiler(), b)];
+    assert.notEqual(fresh[0], fresh[1], 'the fixture is only meaningful while the two orders answer differently');
+    const one = createFormulaCompiler();
+    assert.equal(outcome(one, a), fresh[0]);
+    assert.equal(outcome(one, b), fresh[1], JSON.stringify(b));
+    assert.equal(outcome(one, a), fresh[0], 'the first order keeps its own entry');
+  }
+  assert.match(outcome(createFormulaCompiler(), pairs[0][1]), /^refused JQ/, 'the reversed $let reads a name bound after it');
+  const one = createFormulaCompiler();
+  assert.equal(one.compile(doc(pairs[1][0])), one.compile(doc(pairs[1][0])), 'the same order still hits');
+});

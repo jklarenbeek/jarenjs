@@ -5,6 +5,7 @@ void normalizedModel;
 import { getStringLength } from '@jarenjs/core/string';
 import { isJsonNumberString } from '@jarenjs/core/number';
 import { createBoundedCache, createSemanticCache } from '@jarenjs/core/cache';
+import { semanticKey } from '@jarenjs/core/object';
 import {
   compileJsonQuery, analyzeQuery, annotateTypes,
   NODE_KINDS, TYPE_TAGS, AST_VERSION,
@@ -81,6 +82,12 @@ const retained: boolean = semanticCache.set({ document: '$' }, 1);
 void retained;
 // @ts-expect-error — semantic eviction supplies a serialized identity string
 createSemanticCache<number>(2, (_identity: number) => {});
+// a cache whose entries depend on member order keys by it
+const orderedCache = createSemanticCache<number>(2, undefined, { ordered: true });
+const orderedKey: string = semanticKey({ b: 1, a: 2 }, { ordered: true });
+void [orderedCache, orderedKey];
+// @ts-expect-error — the order option is a boolean
+createSemanticCache<number>(2, undefined, { ordered: 'yes' });
 getStringLength(render({ name: 'Jaren' }));
 validate('Jaren');
 createTypeTestCompiler(validator);
