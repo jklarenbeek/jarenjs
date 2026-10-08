@@ -520,6 +520,15 @@ what each does is its own documentation's job
   surrogates answer differently from the engine, while the live strategies keep
   the true value, so a live result and `execute` differ. Wanted: those operands
   stay residual, or the dialect encodes them exactly.
+- [ ] **A store profile bounds query documents, not every read.** On a store
+  opened with a profile, a point read (`get`, collection or entity) answers the
+  row of any tenant, `store.observe`, capture and replication feeds deliver every
+  tenant's records, and a per-call `profile` option on `execute`, `query` and
+  `cursor` replaces the store's mandatory predicate instead of narrowing it
+  ([MODEL-FORMAT §8](../packages/db/docs/MODEL-FORMAT.md)). Wanted: the predicate
+  applied to point reads, the store's profile kept as a floor under a per-call
+  one (or a store option that pins it), and the feeds named as host surfaces
+  with their own bound.
 - [ ] **Federation merge strategy and spilling.** Connected N-way joins and
   nested fluent joins now have an explicit fetch order and combined admission
   credits (QUERY-PEN §12.1). A merge strategy still needs a provider ordering

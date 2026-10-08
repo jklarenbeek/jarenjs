@@ -421,7 +421,9 @@ read a member allow-list refused (`JD0011`) answers, while a document
 reading a member the list denies is refused as `execute` refuses it. An
 explicit `mode: 'rerun'` keeps its own reason, and over an asynchronous
 connection every registration is a resnapshot, which reads through the
-profile (§12.1). A registration reads the options `externals`, `mode` and
+profile with its limits narrowed to the resnapshot credits (§12.1): a
+result past them is `JD2060` where `execute` answers or refuses `JD2007`.
+A registration reads the options `externals`, `mode` and
 `eventTime` and refuses any other `JD0013`, so a per-call `profile` —
 which `execute` reads — is never dropped silently: a profile a live query
 must honour is the store's.

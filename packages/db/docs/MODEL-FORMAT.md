@@ -1963,8 +1963,12 @@ collection execution, entity execution (`entity.execute`, the chain's
 cursor), graph loading (`load`, `loadCursor`, `page`, every include
 subquery) and store-root execution (`store.execute`); a live
 registration on a store opened with a profile re-runs through `execute`
-whatever its shape (LIVE-FORMAT §7), so the profile binds every result
-it holds. `collections` is
+whatever its shape (LIVE-FORMAT §7; over an asynchronous connection a
+resnapshot, with the profile's limits narrowed to its credits), so the
+profile binds every result it holds. It bounds query documents, not
+every read: a point read (`get`) answers the row of any tenant, and
+`store.observe`, capture and replication feeds deliver every tenant's
+records, because they are host surfaces. `collections` is
 the one allow-list and names collections AND entity roots; a document
 that reads a name outside it is `JD0011` on every engine, with the
 same reason. `predicates` is keyed by collection or entity name, and
