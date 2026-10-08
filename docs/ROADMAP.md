@@ -325,18 +325,20 @@ what each does is its own documentation's job
   a partial predicate. MODEL-FORMAT §9.2 states the absence today, and a
   model that names an entity `indexes` member is refused (`JD0005`) rather
   than silently ignored until it ships.
-- [ ] **Database invariants over a store-owned layout.** `enforcement:
-  "database"` refuses (`JD0005`) unless the entity declares
-  `physical: { table, columns }` — hand-owning every column name and
-  codec — so the documented default layout can never have a rule the
-  database itself enforces, even `{ "$le": ["$.new.startsAt",
-  "$.new.endsAt"] }` over two mapped columns. The engine knows the
-  column for each member, which is all the trigger needs. Wanted: the
-  shape adapter from a store-owned mapping to the trigger lowering's
-  `{ physical, codec, null }` columns, the triggers carried into
-  `planEntity`'s expected shape and the migration planner, and a
-  decision on `audit` effects, whose trigger writes are invisible to
-  journal capture. MODEL-FORMAT §13 states the restriction today.
+- [ ] **Database invariants over a store-owned layout, beyond its scalar
+  columns.** A store-owned entity takes `enforcement: "database"` rules over
+  the scalar and foreign-key columns its table maps, installed with the table
+  and verified at every open (MODEL-FORMAT §13.4). Still refused (`JD0005`): a
+  rule that reads an epoch member, a member the document holds or a relation;
+  an `audit` or `effects`, whose trigger writes journal capture cannot see;
+  and `$exists-row`, whose probe needs the target table's key columns and
+  their declared types. Wanted: those, and a decision whether a store rule
+  should see the rows a foreign-key action writes, which a database rule
+  judges and a store rule never does. Introspection reports such a table's
+  triggers as unmapped objects, so a model derived from the database neither
+  reopens nor migrates to the authored one. Every PostgreSQL open reads each
+  store-owned table's triggers and rewrite rules with a query per table (about
+  1.2–1.5 ms each); one read per namespace would bound it.
 - [ ] **Pushdown beyond the proven scalar shapes.** Untyped group keys,
   group returns that read the grouped row binding, ordering by sum/avg
   or other unproven aggregate expressions, multi-root entity grouping and floating
