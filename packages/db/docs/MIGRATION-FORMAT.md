@@ -113,7 +113,8 @@ rewrites names without changing the model, so both endpoints are equal.
 - `kind: "sql"` executes one rendered DATA statement — a fold of a
   column into the document, a backfill, an `INSERT … SELECT` — §9.4; a
   dry run always prints it with its note.
-- `kind: "rebuild"` is the entity restructure of §10, self-contained:
+- `kind: "rebuild"` is the restructure of §10 — an entity's, or on SQLite
+  a collection's whose interval declaration changes — self-contained:
   the `CREATE` of the new shape, the copy and the index DDL.
 - `kind: "table"` carries `{ plan }`, the COMPLETE saved artifact from
   `planTableMigration`. It delegates to the guarded table executor,
@@ -347,6 +348,23 @@ explicit `id` (`jaren-db plan --id`).
   passes and a narrowing of one is caught.
 - Changing a collection's key declaration is not planned (a rebuild);
   the planner refuses with a `TypeError` naming the non-goal.
+- Adding, changing or removing a collection's interval declaration
+  (`intervals[]`, [MODEL-FORMAT §2](MODEL-FORMAT.md#2-the-model-document))
+  is planned. On PostgreSQL an added declaration is one `ALTER TABLE …
+  ADD CONSTRAINT "<name>_interval" CHECK (…)`, placed after every column
+  and index the link adds, since the CHECK reads the bound columns; the
+  engine checks every stored row as it adds the constraint, so there is no
+  `NOT VALID`. A removed one is one `DROP CONSTRAINT`, placed before every
+  index and column drop; a changed one is the two. On SQLite, which has no
+  `ADD CONSTRAINT`, any of the three is ONE `rebuild` step of the
+  collection (§10), which makes every other column and index step of that
+  collection the rebuild's own (an R*Tree the target no longer has is
+  still dropped in steps of its own before it); a rename in the same link
+  still runs first. Before any step of the link runs, the stored rows of every
+  collection whose declaration is new or changed are counted against the
+  target CHECK (§6): a non-zero count is `JD0021`, naming the collection,
+  the interval, the count and the first keys, and nothing changes.
+  Identical declarations plan nothing.
 
 ## 4. The shadow database
 
@@ -567,6 +585,29 @@ returning to their transaction, so finalization cannot flood the request queue
 ahead of commit. Document and derived-column transforms await every write before
 checking the target, recording the receipt or reporting completion; a rejected
 write rolls back its link.
+
+**The interval precondition.** A link whose target model declares an
+interval its from-model does not, or declares it differently, reaches its
+steps only once the stored rows pass the CHECK the link installs. In the
+link's transaction, before its first step, the runner counts the rows the
+target CHECK refuses — read from the link's exact identity
+(`identity.from` and `identity.to`; a `0.1` document carries none and is
+checked by nothing here), under the from-side table where the link renames
+the collection, through the bound columns' generating expressions where the
+link is the one adding those columns — and answers `JD0021` naming the
+collection, the interval, the count and the first ten keys in row order:
+`collection 'booking': 2 stored document(s) violate interval 'slot' (first
+keys: 'a', 'b')`. Nothing has run: the link rolls back whole, the links
+before it stand, and `migrationStatus` keeps the id pending. The rows are
+the operator's to repair in a link of their own, before the declaration —
+never dropped, rewritten or skipped on the operator's behalf. A writer that
+lands between the count and the DDL meets the CHECK instead (`JD0023`,
+class `constraint`), still a refusal. A dry run lists each precondition as
+`-- precondition: interval '<name>' on '<collection>'` and counts nothing;
+`migrationStatus` counts nothing. The count reads the whole table once per
+declaration, as the CHECK's own validation does when PostgreSQL adds it; on
+SQLite any change to a declaration copies the whole table (one rebuild,
+§10).
 
 For a nested rebuild, enter
 `withForeignKeysSuspended(connection, callback)` before the migration so
@@ -805,7 +846,7 @@ Two limits are the single pass's, and are stated rather than hidden:
 | code | raised when |
 |---|---|
 | `JD0020` | a baseline, adjacent exact endpoint or supplied final model disagrees |
-| `JD0021` | a required data transform is missing, target acceptance fails, or a PostgreSQL writer scope is not READ COMMITTED |
+| `JD0021` | a required data transform is missing, target acceptance fails, stored rows violate an interval the link declares (§6), or a PostgreSQL writer scope is not READ COMMITTED |
 | `JD0022` | an exact document/receipt or full history observation disagrees, or side authority is missing/partial/unsupported |
 | `JD0023` | a migration step failed (classified: `class` and `retryable`, the driver's error as `cause`) |
 | `JD0024` | a document source or target could not be read or written |
@@ -925,6 +966,26 @@ the transaction** — a reference the rebuild broke fails the migration
 rather than shipping (compared against the same check taken before it
 began, as a link's is, §6; a parent an earlier step of the link renamed
 counts under its new name, which the rebuilt `REFERENCES` clause spells).
+
+A collection rebuilds through the same step where its interval declaration
+is added, changed or removed on SQLite (§3): `create` is the target
+collection's table under the temporary name, the copy names the row
+identity, the key and the document — `"rowid", "key", "doc"`, so the
+collection's order survives, and with it the ids of an R*Tree, which are
+rowids — and every stored derived column both shapes hold unchanged (a
+generated column is computed, never inserted; one the target adds or
+changes is backfilled by a `derive` step after the rebuild), and `indexes`
+recreates the target's indexes and the sync triggers of an R*Tree the
+table keeps — `DROP TABLE` takes a table's triggers with it, not the
+virtual table — creating and filling one the target adds. A link holding
+such a rebuild changes the connection's foreign-key setting outside any
+transaction, as an entity's does, so an atomic run cannot hold it
+(`JD0026`, §6). As for an entity, the step recreates only what the target
+plans: a trigger or another object added to the table by hand goes with
+the dropped table and is not recreated (a view over it survives the
+rename) — a database the store refuses to open beforehand (`JD0002`, an
+undeclared object), since a migration verifies the target shape after its
+steps, not the source shape before them.
 
 On PostgreSQL the step keeps what the old table held, where a new table can:
 

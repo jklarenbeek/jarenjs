@@ -171,12 +171,15 @@ function enumOf(tokens, nativeCast) {
   return cursor.at === tokens.length ? result : null;
 }
 
-/** SQLite retains the CREATE text, including inline and table CHECKs.
+/** SQLite retains the CREATE text, including inline and table CHECKs: each
+ * under the name its `CONSTRAINT` clause gave it, else its ordinal, with the
+ * CHECK's own text as `sql`.
  * @param {any[]} rows @returns {any[]} neutral constraints */
 export function sqliteChecks(rows) {
   const checks = [];
   for (const row of rows) {
-    const tokens = sqlTokens(String(row.sql ?? ''));
+    const sql = String(row.sql ?? '');
+    const tokens = sqlTokens(sql);
     // A column's inherited collation changes IN equality even when the
     // CHECK itself names no collation. Refuse conservatively per table.
     const collated = tokens.some((token, i) => token.kind === 'word'
@@ -185,6 +188,8 @@ export function sqliteChecks(rows) {
     for (let i = 0; i < tokens.length; i++) {
       if (tokens[i].kind !== 'word' || tokens[i].value.toUpperCase() !== 'CHECK'
         || tokens[i + 1]?.value !== '(') continue;
+      const named = tokens[i - 2]?.kind === 'word' && tokens[i - 2].value.toUpperCase() === 'CONSTRAINT'
+        && (tokens[i - 1].kind === 'identifier' || tokens[i - 1].kind === 'word') ? tokens[i - 1].value : undefined;
       const start = i + 2;
       let depth = 1;
       for (i = start; i < tokens.length; i++) {
@@ -192,17 +197,22 @@ export function sqliteChecks(rows) {
         if (tokens[i].value === '(') depth++;
         if (tokens[i].value === ')' && --depth === 0) break;
       }
-      checks.push({ name: `check_${checks.length + 1}`,
+      checks.push({ name: named ?? `check_${checks.length + 1}`,
+        sql: sql.slice(tokens[start]?.at ?? sql.length, tokens[i]?.at ?? sql.length),
         ...(collated ? null : enumOf(tokens.slice(start, i))) });
     }
   }
   return checks;
 }
 
-/** PostgreSQL exposes each CHECK expression separately.
+/** PostgreSQL exposes each CHECK expression separately, with whether the
+ * rows it holds were checked against it (`validated`; a CHECK added `NOT
+ * VALID` holds nothing for them) and the session's string conformance.
  * @param {any[]} rows @returns {any[]} neutral constraints */
 export function postgresChecks(rows) {
-  return rows.map((row) => ({ name: String(row.name),
+  return rows.map((row) => ({ name: String(row.name), sql: String(row.expression ?? ''),
+    ...(row.validated === undefined || row.validated === null ? {} : { validated: Number(row.validated) === 1 }),
+    conforming: row.conforming === undefined || row.conforming === null || String(row.conforming) === 'on',
     ...(row.unsafe_collation ? null : enumOf(sqlTokens(String(row.expression ?? '')), postgresCast)) }));
 }
 

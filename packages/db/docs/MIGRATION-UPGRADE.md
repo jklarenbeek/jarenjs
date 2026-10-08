@@ -1166,12 +1166,32 @@ byte; a model that declares one is stricter on purpose:
   carries the CHECK opens only under a model that declares it, and one
   that lacks it only under a model that does not: the remedy is to put the
   CREATE text back as the model plans it.
-- Adding a declaration to an existing table, or removing one from it, is a
-  migration the planner does not carry yet: it plans no step either way.
-  Until it does, on SQLite a table opens only under the declaration it was
-  created with (`JD0002` otherwise) — declare the interval on a new
-  collection, or recreate the table; on PostgreSQL the same holds for
-  adding, while removing the declaration reopens the table as it is.
+- Adding a declaration to an existing table, changing it or removing it is
+  a planned migration ([MIGRATION-FORMAT §3](MIGRATION-FORMAT.md#3-planning-and-the-wideningnarrowing-rule)):
+  on PostgreSQL one `ADD CONSTRAINT`, which checks every stored row as it
+  is added, or one `DROP CONSTRAINT`; on SQLite one rebuild of the
+  collection, which an atomic run cannot hold (`JD0026`, as for an
+  entity's rebuild — run the chain without `atomic`). A link that adds or
+  tightens a declaration over stored rows its CHECK would refuse is refused
+  `JD0021` before any of its steps runs, naming the collection, the
+  interval, the count and the first keys: repair those documents in a link
+  of their own first. A table lacking the CHECK under a model that
+  declares it, or carrying one that differs from the declaration, is
+  `JD0002` at open on both engines, as before: migrate it, or restore the
+  CREATE text (SQLite) or the constraint (PostgreSQL) by hand. A table
+  carrying the CHECK under a model that no longer declares it is `JD0002`
+  on SQLite, whose CREATE text is compared whole, but opens on PostgreSQL,
+  where a collection declaring no interval reads none of its table's
+  CHECKs (as before): the constraint then still refuses every writer
+  `JD2005` where the store's own check (`JD2003`) is gone, `$overlaps`
+  plans the pre-filter again, and `introspectModel` reads it back as a
+  declaration — plan the removal (one `DROP CONSTRAINT` link) or drop it
+  by hand.
+- `introspectModel` derives the declaration back from the CHECK, the span's
+  bounds required and typed `integer`, and reports no loss for it; a CHECK
+  of another shape, under another name, or one added `NOT VALID` stays
+  `unmapped-constraint`. On SQLite a CHECK declared with a `CONSTRAINT`
+  name is reported under that name, where it was `check_N`.
 - The declaration is held at normalization, `JD0005` at the member: `path`
   is a singular JSONPath to a member the schema types as an object of two
   required `integer` bounds (a `number` bound is refused — the CHECK's

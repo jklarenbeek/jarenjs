@@ -161,6 +161,8 @@ function corpusOf(dialect) {
     end: dialect.quoteIdentifier('gx_span_end'),
     maxDuration: 28_800_000,
   });
+  out['ddl.addCheck'] = dialect.ddl.addCheck({ table: 'rows', name: 'slot_interval', sql: out['ddl.intervalCheck'] });
+  out['ddl.dropCheck'] = dialect.ddl.dropCheck({ table: 'rows', name: 'slot_interval' });
   out['ddl.dropIndex'] = dialect.ddl.dropIndex('rows_extra');
   out['ddl.createVirtualTable'] = dialect.ddl.createVirtualTable({ name: virtual.name });
   out['ddl.dropVirtualTable'] = dialect.ddl.dropVirtualTable(virtual.name);

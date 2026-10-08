@@ -235,7 +235,8 @@ function normalizeCapabilities(declared) {
  *   physicalNamespaceRequired?: boolean,
  *   qualifyPhysicalColumn?: (column: any, actual: any, kind: string) => void,
  *   invariantTriggers?: (mapping: any, all: any, dialect: any) => any[],
- *   readChecks?: (rows: any[]) => { name: string, column?: string, values?: any[] }[],
+ *   readChecks?: (rows: any[]) => { name: string, sql?: string, validated?: boolean, conforming?: boolean,
+ *     column?: string, values?: any[] }[],
  *   introspect: { version: () => string, compileOptions: () => string,
  *     pragma: (name: string) => string,
  *     tableExists: () => string, columns: (table: string) => string,
@@ -353,6 +354,26 @@ export function createDialect(spec) {
       const duration = maxDuration === null || maxDuration === undefined ? '' : ` AND ${end} - ${start} <= ${maxDuration}`;
       return `${typeOf} IS NULL OR (${typeOf} = 'object' AND ${integers} AND ${safe(start)} AND ${safe(end)} `
         + `AND ${start} < ${end}${duration})`;
+    },
+    /**
+     * Add a named CHECK to an existing table — a declared interval arriving
+     * through a migration, on an engine that alters a table in place. The
+     * engine checks every stored row as it adds the constraint, inside the
+     * statement's transaction.
+     * @param {{ table: string, name: string, sql: string }} shape - `sql` is
+     *   the CHECK's expression, as {@link intervalCheck} renders one
+     * @returns {string}
+     */
+    addCheck({ table, name, sql }) {
+      return `ALTER TABLE ${q(table)} ADD CONSTRAINT ${q(name)} CHECK (${sql})`;
+    },
+    /**
+     * Drop a named CHECK from an existing table.
+     * @param {{ table: string, name: string }} shape
+     * @returns {string}
+     */
+    dropCheck({ table, name }) {
+      return `ALTER TABLE ${q(table)} DROP CONSTRAINT ${q(name)}`;
     },
     /**
      * An index over columns, partial when it carries `where`: the condition
@@ -729,6 +750,18 @@ export function createDialect(spec) {
      * `array` — because the row decoder reads those names in JavaScript.
      */
     numericTypeNames: Object.freeze([...spec.numericTypeNames]),
+    /**
+     * Whether {@link jsonExtract} at a kind is TYPED: SQL NULL for an
+     * absent member, a stored JSON null and every other JSON type, so a
+     * literal, seek or list comparison reads the value alone and its
+     * presence is the type guard. An untyped extraction (SQLite's, which
+     * reads whatever the member holds) keeps the `json_type` guards of
+     * the truth table beside every comparison; those are load-bearing
+     * there. Externals and type tests keep the discriminator on every
+     * engine: an external's type is known only when it binds, and a type
+     * test asks for the type by name.
+     */
+    typedExtract: spec.typedExtract === true,
     /** An object built from alternating name/value SQL — the shape a
      * graph load's nested include answers. */
     jsonObject: spec.jsonObject,

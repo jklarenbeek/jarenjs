@@ -752,3 +752,125 @@ describe('introspectModel — the derivation', () => {
     });
   });
 });
+
+describe('introspectModel — a declared interval', () => {
+  const HOUR = 3_600_000;
+  const SPAN = { type: 'object', required: ['start', 'end'], properties: { start: { type: 'integer' }, end: { type: 'integer' } } };
+  const SLOT = { name: 'slot', path: '$.span' };
+  const BOUNDED = { ...SLOT, maxDuration: 8 * HOUR };
+  /** The booking model, declared with the given intervals. @param {any[]} [intervals] */
+  const booking = (intervals = undefined) => ({ $model: '0.1', collections: { booking: {
+    schema: { type: 'object', properties: { id: { type: 'string' }, span: SPAN } }, key: '/id',
+    indexes: [{ name: 'by_start', path: '$.span.start' }, { name: 'by_end', path: '$.span.end' }],
+    ...(intervals === undefined ? {} : { intervals }) } } });
+  /** The statements a model plans on SQLite. @param {any} model */
+  const statements = (model) => [...normalizeModel(model)]
+    .flatMap(([name, collection]) => planCollection(name, collection, sqliteDialect).createSql);
+
+  for (const [label, intervals] of /** @type {const} */ ([['with maxDuration', [BOUNDED]], ['without', [SLOT]]])) {
+    it(`reads the CHECK back into the declaration ${label}, the bounds required and typed integer, with no loss row for it`, async () => {
+      const declared = booking([...intervals]);
+      const connection = handMade(statements(declared));
+      try {
+        const { model, report } = await introspectModel(connection, { keys: { booking: '/id' } });
+        const derived = model.collections.booking;
+        assert.deepStrictEqual(derived.intervals, intervals);
+        assert.deepStrictEqual(derived.schema.properties.span, SPAN);
+        assert.deepStrictEqual(of(report, 'unmapped-constraint'), []);
+        assert.deepStrictEqual(of(report, 'lossy-type'), []);
+        assert.strictEqual(normalizeModel(model).get('booking').intervals[0].maxDuration, intervals[0].maxDuration ?? null);
+        // the derived model is the declared one's shape: nothing to plan between them
+        assert.deepStrictEqual(planMigration(model, declared, { dialect: sqliteDialect }).migration.steps, []);
+      }
+      finally { await connection.close(); }
+    });
+  }
+
+  it('keeps the loss row, under its declared name, for a CHECK of another shape, and check_N for an unnamed one', async () => {
+    const connection = handMade([
+      `CREATE TABLE "booking" ("key" TEXT PRIMARY KEY, "doc" BLOB NOT NULL,
+        "gx_span_start" INTEGER GENERATED ALWAYS AS (jsonb_extract("doc", '$."span"."start"')) VIRTUAL,
+        "gx_span_end" INTEGER GENERATED ALWAYS AS (jsonb_extract("doc", '$."span"."end"')) VIRTUAL,
+        CONSTRAINT "slot_interval" CHECK ("gx_span_start" < "gx_span_end"), CHECK ("gx_span_start" > 0)) STRICT`,
+      'CREATE INDEX "booking_by_start" ON "booking" ("gx_span_start")',
+      'CREATE INDEX "booking_by_end" ON "booking" ("gx_span_end")',
+    ]);
+    try {
+      const { model, report } = await introspectModel(connection, { keys: { booking: '/id' } });
+      assert.strictEqual(model.collections.booking.intervals, undefined);
+      assert.strictEqual(model.collections.booking.schema.properties.span.required, undefined);
+      assert.deepStrictEqual(of(report, 'unmapped-constraint'), ['booking.check_2', 'booking.slot_interval']);
+      assert.deepStrictEqual(of(report, 'lossy-type'), ['booking.gx_span_end', 'booking.gx_span_start']);
+    }
+    finally { await connection.close(); }
+  });
+
+  it('reads the one spelling back only under the name the store would give it', async () => {
+    const [create, ...indexes] = statements(booking([SLOT]));
+    const connection = handMade([create.replace('CONSTRAINT "slot_interval"', 'CONSTRAINT "slot_check"'), ...indexes]);
+    try {
+      const { model, report } = await introspectModel(connection, { keys: { booking: '/id' } });
+      assert.strictEqual(model.collections.booking.intervals, undefined);
+      assert.deepStrictEqual(of(report, 'unmapped-constraint'), ['booking.slot_check']);
+    }
+    finally { await connection.close(); }
+  });
+
+  describe('from the PostgreSQL catalog', () => {
+    const SAFE = '9007199254740991';
+    const path = (/** @type {string} */ p) => `(doc #> '{${p}}'::text[])`;
+    const CHECK = `((jsonb_typeof(${path('span')}) IS NULL) OR ((jsonb_typeof(${path('span')}) = 'object'::text) `
+      + 'AND (gx_span_start IS NOT NULL) AND (gx_span_end IS NOT NULL) AND (gx_span_start = trunc(gx_span_start)) AND (gx_span_end = trunc(gx_span_end)) '
+      + `AND ((gx_span_start >= ('-${SAFE}'::bigint)::numeric) AND (gx_span_start <= ('${SAFE}'::bigint)::numeric)) `
+      + `AND ((gx_span_end >= ('-${SAFE}'::bigint)::numeric) AND (gx_span_end <= ('${SAFE}'::bigint)::numeric)) AND (gx_span_start < gx_span_end) `
+      + 'AND ((gx_span_end - gx_span_start) <= (28800000)::numeric)))';
+    /**
+     * A connection over hand-authored catalog rows, keyed by a fragment only
+     * that query carries. @param {Record<string, any[]>} answers
+     */
+    const pgCatalog = (answers) => {
+      const dialect = postgresDialect();
+      const find = (/** @type {string} */ sql) => {
+        for (const [key, rows] of Object.entries(answers)) if (sql.includes(key)) return rows;
+        return [];
+      };
+      return Object.freeze({
+        dialect,
+        capabilities: { declaredSqlText: false },
+        prepare: (/** @type {string} */ sql) => Object.freeze({ all: () => find(sql), get: () => find(sql)[0], run: () => ({ changes: 0 }) }),
+      });
+    };
+    /** The declared booking table's catalog, its CHECK validated or not. @param {number} validated */
+    const catalog = (validated) => pgCatalog({
+      'relkind IN': [{ name: 'booking', type: 'table' }],
+      generated_kind: [
+        { name: 'key', type: 'text', hidden: 0 }, { name: 'doc', type: 'jsonb', hidden: 0 }, { name: 'rid', type: 'bigint', hidden: 0 },
+        { name: 'gx_span_start', type: 'numeric', hidden: 1 }, { name: 'gx_span_end', type: 'numeric', hidden: 1 },
+      ],
+      'CASE WHEN i.indisunique': [
+        { name: 'booking_by_start', uniq: 0, origin: 'c' }, { name: 'booking_by_end', uniq: 0, origin: 'c' }, { name: 'booking_pkey', uniq: 1, origin: 'pk' },
+      ],
+      "ci.relname = 'booking_by_start'": [{ name: 'gx_span_start' }],
+      "ci.relname = 'booking_by_end'": [{ name: 'gx_span_end' }],
+      "ci.relname = 'booking_pkey'": [{ name: 'key' }],
+      "c.contype = 'c'": [{ name: 'slot_interval', expression: CHECK, validated, conforming: 'on' }],
+      'FROM pg_attrdef d': ['start', 'end'].map((bound) => ({ name: `gx_span_${bound}`,
+        expression: `CASE WHEN jsonb_typeof(${path(`span,${bound}`)}) = 'number'::text THEN (${path(`span,${bound}`)})::numeric ELSE NULL::numeric END` })),
+    });
+
+    it('reads a validated CHECK back as the declaration, with the bounds typed integer and no lossy-type for them', async () => {
+      const { model, report } = await introspectModel(catalog(1), { keys: { booking: '/id' } });
+      assert.deepStrictEqual(model.collections.booking.intervals, [BOUNDED]);
+      assert.deepStrictEqual(model.collections.booking.schema.properties.span, SPAN);
+      assert.deepStrictEqual(of(report, 'unmapped-constraint'), []);
+      assert.deepStrictEqual(of(report, 'lossy-type'), []);
+    });
+
+    it('keeps the loss row for a CHECK added NOT VALID: the rows it holds were never checked', async () => {
+      const { model, report } = await introspectModel(catalog(0), { keys: { booking: '/id' } });
+      assert.strictEqual(model.collections.booking.intervals, undefined);
+      assert.deepStrictEqual(of(report, 'unmapped-constraint'), ['booking.slot_interval']);
+      assert.deepStrictEqual(of(report, 'lossy-type'), ['booking.gx_span_end', 'booking.gx_span_start']);
+    });
+  });
+});

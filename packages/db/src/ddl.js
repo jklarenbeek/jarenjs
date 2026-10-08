@@ -1116,7 +1116,7 @@ function verifyIntervalChecks(connection, plan, disagree) {
  * @param {any} dialect @param {any} plan @param {string} name - the column
  * @returns {string | undefined}
  */
-function plannedExpression(dialect, plan, name) {
+export function plannedExpression(dialect, plan, name) {
   const column = (plan.generated ?? []).find((/** @type {any} */ candidate) => candidate.name === name);
   if (column === undefined || column.stored === true || column.derive !== undefined) return undefined;
   return column.expression ?? dialect.jsonExtract(dialect.quoteIdentifier(DOC_COLUMN), column.pathText, column.kind);

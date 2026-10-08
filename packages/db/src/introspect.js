@@ -29,8 +29,8 @@
 
 import { chain, useStatementOnce } from './driver.js';
 import { DbCompileError } from './errors.js';
-import { KEY_COLUMN, DOC_COLUMN, SCALAR_CODECS, indexCondition } from './ddl.js';
-import { readPredicate, sqlTokens, SQLITE_PREDICATE } from './dialects/check-read.js';
+import { KEY_COLUMN, DOC_COLUMN, SCALAR_CODECS, indexCondition, canonicalOf } from './ddl.js';
+import { readPredicate, readIntervalCheck, sqlTokens, SQLITE_PREDICATE } from './dialects/check-read.js';
 import { comparableDeclaredSql } from './schema-sql.js';
 import { foldIdentifier } from './invariants.js';
 import { MODEL_VERSION, ENGINE_TABLES } from './engine-metadata.js';
@@ -249,6 +249,9 @@ function deriveCollection(dialect, table, report, keys, functionNames) {
   const paths = new Map();
   /** @type {Map<string, any>} column -> the declared index expression */
   const computed = new Map();
+  /** The columns whose type two schema types share — reported once the
+   * declared intervals are known, since a bound column's type is not a choice. */
+  const lossy = [];
   for (const column of table.columns) {
     if (!column.generated) continue;
     const expression = expressions.get(column.name);
@@ -274,10 +277,12 @@ function deriveCollection(dialect, table, report, keys, functionNames) {
         `the column type '${column.type}' maps back to no schema type, so the member `
         + 'is left untyped'));
     }
-    else reportLossyType(dialect, table, column, report);
+    else lossy.push(column);
     paths.set(column.name, { path: modelPath(segments), type, segments });
   }
 
+  /** The columns a plain path index covers — what a declaration requires of an interval's bounds. @type {Set<string>} */
+  const indexedColumns = new Set();
   const indexes = [];
   for (const index of table.indexes) {
     if (index.partial || index.columns.some((column) => column === null)) {
@@ -302,13 +307,34 @@ function deriveCollection(dialect, table, report, keys, functionNames) {
       ? covered[0].path : covered.map((entry) => entry.path) };
     if (index.unique) declared.unique = true;
     indexes.push(declared);
+    for (const column of index.columns) indexedColumns.add(column);
   }
+
+  // a declared interval: the one CHECK, under the name the store gives it,
+  // over the generated columns of its span's two bounds, each covered by a
+  // plain index — read back into the declaration, which types the bounds;
+  // every other CHECK is a loss
+  const intervals = [];
+  /** @type {{ span: import('./dialect.js').JsonPathSegment[], start: string, end: string }[]} */
+  const spans = [];
+  for (const check of table.checks) {
+    const interval = intervalOf(dialect, check, paths, indexedColumns);
+    if (typeof interval === 'string') {
+      report(loss('unmapped-constraint', `${table.name}.${check.name}`, interval));
+      continue;
+    }
+    intervals.push(interval.declaration);
+    spans.push(interval);
+  }
+  const bounds = new Set(spans.flatMap((span) => [span.start, span.end]));
+  for (const column of lossy) if (!bounds.has(column.name)) reportLossyType(dialect, table, column, report);
 
   // the key: a database-allocated integer says so in its type; a text
   // one cannot say which member filled it, and the caller may
   const keyColumn = byName.get(KEY_COLUMN);
   const keyType = dialect.schemaTypeOf(keyColumn.type);
-  const collection = { schema: { type: 'object', properties: {} }, indexes };
+  const collection = { schema: { type: 'object', properties: {} }, indexes,
+    ...(intervals.length === 0 ? {} : { intervals }) };
   const hinted = keys?.[table.name];
   if (keyType === 'integer') {
     collection.key = null;
@@ -331,8 +357,10 @@ function deriveCollection(dialect, table, report, keys, functionNames) {
     placeType(collection.schema, collection.key.slice(1).split('/')
       .filter((member) => member.length > 0).map((name) => ({ name })), keyType);
   }
-  for (const entry of paths.values())
-    placeType(collection.schema, entry.segments, entry.type);
+  // a bound a CHECK holds to an integer is one, whatever its column's type
+  for (const [column, entry] of paths)
+    placeType(collection.schema, entry.segments, bounds.has(column) ? 'integer' : entry.type);
+  for (const span of spans) requireBounds(collection.schema, span.span);
   // a member an EXPRESSION reads is in the document too, and the
   // expression's own column says nothing about its type — the schema
   // names it untyped rather than not at all
@@ -437,6 +465,61 @@ function memberSegments(path) {
     return null;
   }
   return segments.length === 0 ? null : segments;
+}
+
+/**
+ * Read one collection CHECK as a declared interval — the one template, under
+ * the name the store gives a declaration (`<name>_interval`), over the
+ * generated columns of its span member's `start` and `end` — or say why it
+ * is not one. A CHECK a model would not write again is a loss, never a
+ * guess: another shape, another name, bound columns that are not the span's
+ * or that no plain index covers (a declaration requires each bound indexed
+ * by its path), or (PostgreSQL) one added `NOT VALID`, whose rows were
+ * never checked.
+ * @param {any} dialect
+ * @param {{ name: string, sql?: string, validated?: boolean, conforming?: boolean }} check
+ * @param {Map<string, { segments: import('./dialect.js').JsonPathSegment[] }>} paths - the
+ *   member path each generated column reads
+ * @param {Set<string>} indexed - the columns a plain path index covers
+ * @returns {{ declaration: { name: string, path: string, maxDuration?: number },
+ *   span: import('./dialect.js').JsonPathSegment[], start: string, end: string } | string}
+ */
+function intervalOf(dialect, check, paths, indexed) {
+  const other = 'a CHECK over physical collection columns does not constrain the document schema';
+  if (check.sql === undefined || dialect.intervalSpelling === undefined) return other;
+  if (check.validated === false) return 'the CHECK was added NOT VALID, so the rows it holds were never checked against it';
+  const read = readIntervalCheck(check.sql, dialect.intervalSpelling(check.conforming !== false));
+  if (read === null) return other;
+  const stem = /^(.*)_interval$/.exec(check.name)?.[1];
+  if (stem === undefined || !IDENTIFIER.test(stem))
+    return 'an interval CHECK under a name the store would not give a declaration (<name>_interval)';
+  /** @param {string} column @param {string} bound */
+  const boundColumn = (column, bound) => {
+    const entry = paths.get(column);
+    return entry !== undefined && canonicalOf(entry.segments) === canonicalOf([...read.span, { name: bound }]);
+  };
+  if (read.column !== DOC_COLUMN || !boundColumn(read.start, 'start') || !boundColumn(read.end, 'end'))
+    return 'an interval CHECK whose bound columns are not the generated columns of its span member';
+  if (!indexed.has(read.start) || !indexed.has(read.end))
+    return 'an interval CHECK over a bound column no index covers: a declaration requires each bound indexed by its path';
+  /** @type {{ name: string, path: string, maxDuration?: number }} */
+  const declaration = { name: stem, path: modelPath(read.span) };
+  if (read.maxDuration !== null) declaration.maxDuration = read.maxDuration;
+  return { declaration, span: read.span, start: read.start, end: read.end };
+}
+
+/**
+ * Require a recovered span's two bounds at its schema node — what the CHECK
+ * holds for every stored row, and what the declaration's rule reads.
+ * @param {any} schema
+ * @param {import('./dialect.js').JsonPathSegment[]} segments - the span's path
+ */
+function requireBounds(schema, segments) {
+  let node = schema;
+  for (const segment of segments) {
+    node = 'index' in segment ? node?.prefixItems?.[segment.index] : node?.properties?.[segment.name];
+  }
+  if (node !== undefined) node.required = ['start', 'end'];
 }
 
 /** The model's own index name, out of the physical `<table>_<name>`. */
@@ -748,8 +831,6 @@ export function introspectModel(connection, options = undefined) {
       if (joinTables.has(table.name)) continue;
       if (looksLikeCollection(dialect, table)) {
         collections[table.name] = deriveCollection(dialect, table, add, options?.keys, byName);
-        for (const check of table.checks) add(loss('unmapped-constraint', `${table.name}.${check.name}`,
-          'a CHECK over physical collection columns does not constrain the document schema'));
         continue;
       }
       const hasDocument = table.columns.some((column) => column.name === DOC_COLUMN);

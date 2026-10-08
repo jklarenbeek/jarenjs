@@ -1353,9 +1353,15 @@ over an expression, an unmapped column or the row identity; with an
 `INCLUDE` column, an operator class, a collation or a key order of its own;
 whose name another planned object already takes with ASCII case folded —
 and every collection's partial index is reported as `unmapped-index`,
-never derived as an index it is not. CHECKs outside the complete scalar
-enum grammar, including NULL lists, collation-dependent equality and unproven
-type conversions, remain
+never derived as an index it is not. A collection's declared interval comes
+back as its `intervals` entry, read from the one CHECK the store writes for
+it, the span's bounds required and typed `integer`; a collection whose
+derived column the store writes (the mapping of PostgreSQL, and of a SQLite
+host without deterministic functions) is not read as a collection at all —
+its table comes back as an entity with loss rows — as before. CHECKs outside the
+complete scalar enum grammar, including NULL lists, collation-dependent
+equality and unproven type conversions, and an interval CHECK of another
+shape or name, or one added `NOT VALID`, remain
 `unmapped-constraint`.
 
 The derived model reproduces the physical shape — tables, keys, mapped

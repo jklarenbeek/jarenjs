@@ -45,7 +45,7 @@ import { modelIdentity, migrationIdentity } from './migration-identity.js';
 import { migrationChecksum, historyStatements, readMigrationHistory, checkHistoryObservation, checkAppliedRows,
   historyHeader, identityRows, checkHistoryIdentity, checkHistoryChain, writeIdentityRows } from './migration-history.js';
 export { HISTORY_TABLE, ENGINE_TABLES };
-import { planCollection, verifyShape, planEntity, planJoinTable } from './ddl.js';
+import { planCollection, verifyShape, planEntity, planJoinTable, plannedExpression } from './ddl.js';
 import { normalizeEntities, explainMapping } from './model.js';
 import { derivedValue, memberAt, registerDeriveFunctions } from './derive.js';
 import { mergeEntityRow } from './graph.js';
@@ -697,8 +697,173 @@ function deriveStep(collection, plan, columnNames, note) {
 }
 
 /**
+ * The declared intervals a collection gains, loses or changes between two
+ * physical plans. A CHECK is compared by its constraint name and the text
+ * it installs — which names its bound columns — and counts as changed where
+ * a column it reads is disturbed, since dropping a column drops a CHECK
+ * over it.
+ * @param {any} fromPlan @param {any} toPlan @param {Set<string>} disturbedColumns
+ * @returns {{ changed: boolean, dropped: any[], added: any[] }}
+ */
+function intervalDifference(fromPlan, toPlan, disturbedColumns) {
+  const from = new Map((fromPlan.intervals ?? []).map((interval) => [interval.constraint, interval]));
+  const to = new Map((toPlan.intervals ?? []).map((interval) => [interval.constraint, interval]));
+  const differs = (/** @type {any} */ a, /** @type {any} */ b) => a.sql !== b.sql
+    || [a.start, a.end, b.start, b.end].some((column) => disturbedColumns.has(column));
+  const dropped = [...from.values()].filter((interval) => !to.has(interval.constraint) || differs(interval, to.get(interval.constraint)));
+  const added = [...to.values()].filter((interval) => !from.has(interval.constraint) || differs(from.get(interval.constraint), interval));
+  return { changed: dropped.length > 0 || added.length > 0, dropped, added };
+}
+
+/**
+ * A collection's rebuild: the ONE step an engine without `ADD CONSTRAINT`
+ * (SQLite) takes where a declared interval's CHECK is added, changed or
+ * dropped — the documented procedure (§10) over the whole target shape, so
+ * every other column and index step of the collection is this step's. The
+ * copy names the row identity, the key and the document — the collection's
+ * order survives the dropped table, and so do the ids of an R*Tree, which
+ * are rowids — and every stored derived column both shapes hold unchanged;
+ * a generated column is computed, never inserted, and a stored one the
+ * target adds or changes is backfilled by the step after. An R*Tree the
+ * target keeps is not recreated (DROP TABLE takes the table's triggers, not
+ * the virtual table, whose rows stay with it); one the target adds is
+ * created whole and filled from the copied rows.
+ * @param {string} name @param {any} fromPlan @param {any} toPlan @param {any} toCollection
+ * @param {any} dialect @param {any} mapping - what `planCollection` takes
+ * @param {(a: any, b: any) => boolean} columnChanged
+ * @returns {{ steps: any[], backfilled: string[] }}
+ */
+function renderCollectionRebuild(name, fromPlan, toPlan, toCollection, dialect, mapping, columnChanged) {
+  const q = dialect.quoteIdentifier;
+  const temporary = `${name}__rebuild`;
+  const fromColumns = new Map(fromPlan.generated.map((/** @type {any} */ g) => [g.name, g]));
+  const stored = toPlan.generated.filter((/** @type {any} */ g) => g.stored === true);
+  const carried = stored.filter((/** @type {any} */ g) => fromColumns.has(g.name) && !columnChanged(fromColumns.get(g.name), g))
+    .map((/** @type {any} */ g) => g.name);
+  const backfilled = stored.map((/** @type {any} */ g) => g.name).filter((column) => !carried.includes(column));
+  const columns = [dialect.rowIdentity(), q(toPlan.keyColumn), q(toPlan.docColumn), ...carried.map(q)].join(', ');
+  const kept = new Set(fromPlan.virtualTables.map((/** @type {any} */ virtual) => virtual.name));
+  const virtualSql = new Set(toPlan.virtualTables.flatMap((/** @type {any} */ virtual) =>
+    [virtual.createSql, ...virtual.triggers.map((/** @type {any} */ trigger) => trigger.sql)]));
+  const indexes = [
+    ...toPlan.createSql.slice(1).filter((/** @type {string} */ sql) => !virtualSql.has(sql)),
+    ...toPlan.virtualTables.flatMap((/** @type {any} */ virtual) => (kept.has(virtual.name)
+      ? virtual.triggers.map((/** @type {any} */ trigger) => trigger.sql)
+      : [virtual.createSql, ...virtual.triggers.map((/** @type {any} */ trigger) => trigger.sql), virtual.fillSql])),
+  ];
+  const steps = [{
+    kind: 'rebuild',
+    table: name,
+    create: [planCollection(temporary, toCollection, dialect, mapping).createSql[0]],
+    copy: `INSERT INTO ${q(temporary)} (${columns}) SELECT ${columns} FROM ${q(name)}`,
+    indexes,
+    note: `rebuild '${name}' (its declared intervals changed, and this engine adds or drops a CHECK by rebuilding the table)`,
+  }];
+  if (backfilled.length > 0) {
+    steps.push(deriveStep(name, toPlan, backfilled,
+      `backfill derived column(s) ${backfilled.join(', ')} on '${name}' after the rebuild`));
+  }
+  return { steps, backfilled };
+}
+
+/**
+ * The interval preconditions of one link: for every declaration its target
+ * model carries that its from-model does not, or carries differently, the
+ * one statement that counts the stored rows the target CHECK refuses and
+ * answers the first ten of their keys in row order. Read from the link's
+ * exact identity, which a legacy document does not carry (then there are
+ * none); a collection the link renames is counted under its from-side
+ * table, since nothing has run. The CHECK renders over the bound columns'
+ * generating expressions, never the columns, because the same link may be
+ * adding them.
+ * @param {any} migration @param {any} dialect @param {any} mapping - what `planCollection` takes
+ * @returns {{ collection: string, interval: string, table: string, sql: string }[]}
+ */
+function intervalPreconditionsOf(migration, dialect, mapping) {
+  const identity = migration.identity;
+  if (identity === undefined || identity === null || typeof identity !== 'object') return [];
+  // only a target that declares an interval is normalized: a link whose
+  // models declare none has no precondition, whatever else they hold
+  const toModel = JSON.parse(identity.to);
+  const declares = Object.values(toModel.collections ?? {})
+    .some((/** @type {any} */ collection) => Array.isArray(collection?.intervals) && collection.intervals.length > 0);
+  if (!declares) return [];
+  const fromModel = JSON.parse(identity.from);
+  const fromCollections = Object.keys(fromModel.collections ?? {}).length === 0
+    ? new Map() : normalizeModel(fromModel, mapping.expressions);
+  const toCollections = normalizeModel(toModel, mapping.expressions);
+  const renamed = renamesOf(migration.steps);
+  /** @type {Map<string, string>} the from-side table under which each target collection's rows are */
+  const tableOf = new Map();
+  for (const name of fromCollections.keys()) tableOf.set(renamed(name), name);
+  const q = dialect.quoteIdentifier;
+  const checks = [];
+  for (const [name, toCollection] of toCollections) {
+    const table = tableOf.get(name);
+    const fromCollection = table === undefined ? undefined : fromCollections.get(table);
+    if (fromCollection === undefined || toCollection.intervals.length === 0) continue;
+    const plan = planCollection(name, toCollection, dialect, mapping);
+    for (const interval of plan.intervals) {
+      const before = fromCollection.intervals.find((/** @type {any} */ declared) => declared.name === interval.name);
+      if (before !== undefined && before.canonical === interval.span.canonical && before.maxDuration === interval.maxDuration) continue;
+      const refused = dialect.ddl.intervalCheck({ docColumn: plan.docColumn, span: interval.span.pathText, bounds: interval.span.bounds,
+        start: plannedExpression(dialect, plan, interval.start), end: plannedExpression(dialect, plan, interval.end),
+        maxDuration: interval.maxDuration });
+      checks.push({ collection: name, interval: interval.name, table,
+        sql: `SELECT ${q(plan.keyColumn)} AS ${q('k')}, count(*) OVER () AS ${q('n')} FROM ${q(table)} `
+          + `WHERE NOT COALESCE(${refused}, ${dialect.booleanLiteral(true)}) ORDER BY ${dialect.rowIdentity()} ${dialect.limitClause(10)}` });
+    }
+  }
+  return checks;
+}
+
+/**
+ * Count, before any step of a link runs, the stored rows each interval
+ * declaration the link adds or changes would refuse: a non-zero count
+ * refuses the link `JD0021`, naming the collection, the interval, the count
+ * and the first keys, with nothing changed. Nothing is dropped, rewritten or
+ * skipped on the operator's behalf; a writer that lands between this count
+ * and the DDL makes the DDL fail instead, still a refusal.
+ * @param {any} connection @param {any} migration @param {{ expressions?: any }} options
+ * @returns {any} value-or-promise
+ */
+function intervalPreconditions(connection, migration, options) {
+  const checks = intervalPreconditionsOf(migration, connection.dialect, mappingFor(connection, options.expressions));
+  return sequentially(checks, (check) => chain(useStatementOnce(connection, check.sql, (statement) => statement.all([])), (rows) => {
+    if (rows.length === 0) return;
+    const keys = rows.map((/** @type {any} */ row) => `'${String(row.k)}'`).join(', ');
+    throw refuse('JD0021', `collection '${check.collection}': ${Number(rows[0].n)} stored document(s) violate interval `
+      + `'${check.interval}' (first keys: ${keys}) — repair them before declaring it`);
+  }));
+}
+
+/**
+ * The physical mapping a plan takes where the caller names none: the one
+ * the open takes on this engine, as far as a dialect can say. A dialect
+ * that spells no generated expression for a derived column — PostgreSQL,
+ * whose drivers register no deterministic function, so the store writes
+ * the value — stores derived columns, and one that spells it generates
+ * them; an R*Tree is realized only where the dialect has virtual tables.
+ * The dialect is asked for the spelling exactly as `planCollection` asks
+ * it. What differs per DRIVER on one engine — a SQLite host without
+ * deterministic functions (Bun), a build without the R*Tree module — is
+ * the caller's to name through `derived` and `rtree`.
+ * @param {any} dialect
+ * @returns {{ derived: 'virtual' | 'stored', rtree: boolean }}
+ */
+function dialectMapping(dialect) {
+  let spelled = false;
+  try {
+    spelled = typeof dialect.derivedColumn(dialect.quoteIdentifier('doc'), dialect.jsonPathText([{ name: 'at' }]),
+      { derive: 'geohash', precision: 1 }) === 'string';
+  }
+  catch { spelled = false; }
+  return { derived: spelled ? 'virtual' : 'stored', rtree: dialect.capabilities?.virtualTables === true };
+}
+
+/**
  * Plan a migration between two model documents. The planner diffs the
- * PHYSICAL plans (columns, indexes) and renders DDL through the
+ * PHYSICAL plans (columns, indexes, declared intervals) and renders DDL through the
  * dialect; a changed schema gets a DRAFT identity transform that
  * refuses to run until the author fills it in — the planner cannot
  * infer a data transform and does not pretend to. Renames are declared
@@ -706,7 +871,9 @@ function deriveStep(collection, plan, columnNames, note) {
  * The physical mapping of a DERIVED index column depends on the driver
  * that will run the migration (`derived`), because the two mappings
  * really are different columns; a migration document planned for one is
- * not the document the other needs.
+ * not the document the other needs. Where the caller names none, the
+ * mapping is the engine's own (`dialectMapping`): stored derived columns
+ * and no R*Tree on PostgreSQL, generated columns and the R*Tree on SQLite.
  * @param {any} fromModel
  * @param {any} toModel
  * @param {{ id?: string, dialect?: any,
@@ -743,11 +910,13 @@ export function planMigration(fromModel, toModel, options = undefined) {
       from, to, identity, steps: [] },
     report: { renamed: [], added: [], removed: [], schemaChanged: [], drafts: [], widened: [], transformed: [], destructive: false } };
   }
-  const mapping = { derived: options?.derived ?? 'virtual', rtree: options?.rtree !== false,
+  const engine = dialectMapping(dialect);
+  const derived = options?.derived ?? engine.derived;
+  const mapping = { derived, rtree: options?.rtree ?? engine.rtree,
     // a model that declares an index EXPRESSION resolves its functions
     // here too: a plan is DDL, and DDL over a function this planner was
     // not told about is DDL nobody can apply
-    expressions: options?.expressions, registered: options?.derived !== 'stored' };
+    expressions: options?.expressions, registered: derived !== 'stored' };
   const fromCollections = normalizeModel(fromModel, options?.expressions);
   const toCollections = normalizeModel(toModel, options?.expressions);
 
@@ -867,68 +1036,91 @@ export function planMigration(fromModel, toModel, options = undefined) {
       if (target === undefined || columnChanged(fromColumn, target))
         disturbedColumns.add(columnName);
     }
-    const indexNeedsRebuild = (indexName, fromIndex) => {
-      const target = toIndexes.get(indexName);
-      return target === undefined || indexChanged(fromIndex, target)
-        || [...fromIndex.columns, ...(fromIndex.reads ?? [])].some((column) => disturbedColumns.has(column));
-    };
-    for (const [indexName, fromIndex] of fromIndexes) {
-      if (indexNeedsRebuild(indexName, fromIndex)) {
-        steps.push({ kind: 'ddl', sql: dialect.ddl.dropIndex(indexName),
-          note: `drop index '${indexName}' on '${name}'` });
+    // a declared interval's CHECK: an engine that alters a table in place
+    // drops it before any index or column work and adds it after all of it
+    // (the CHECK reads the bound columns); one that cannot (SQLite) takes
+    // ONE rebuild step of the whole target shape, which makes every other
+    // column and index step of this collection the rebuild's own
+    const intervals = intervalDifference(fromPlan, toPlan, disturbedColumns);
+    const rebuilding = intervals.changed && dialect.capabilities.alterTableFull !== true;
+    /** @type {string[]} */
+    let backfilled = [];
+    if (rebuilding) {
+      const rebuilt = renderCollectionRebuild(name, fromPlan, toPlan, toCollection, dialect, mapping, columnChanged);
+      steps.push(...rebuilt.steps);
+      backfilled = rebuilt.backfilled;
+    }
+    else {
+      for (const interval of intervals.dropped) {
+        steps.push({ kind: 'ddl', sql: dialect.ddl.dropCheck({ table: name, name: interval.constraint }),
+          note: `drop the CHECK '${interval.constraint}' of interval '${interval.name}' on '${name}'` });
       }
-    }
-    for (const columnName of disturbedColumns) {
-      steps.push({ kind: 'ddl', sql: dialect.ddl.dropColumn(name, columnName),
-        note: `drop generated column '${columnName}' on '${name}'` });
-    }
-    const backfilled = [];
-    for (const [columnName, toColumn] of toColumns) {
-      const source = fromColumns.get(columnName);
-      if (source === undefined || columnChanged(source, toColumn)) {
-        steps.push({
-          kind: 'ddl',
-          sql: dialect.ddl.addGeneratedColumn(
-            { table: name, docColumn: toPlan.docColumn, column: toColumn }),
-          note: toColumn.stored === true
-            ? `add stored derived column '${columnName}' on '${name}'`
-            : `add generated column '${columnName}' on '${name}'`,
-        });
-        if (toColumn.stored === true) backfilled.push(columnName);
+      const indexNeedsRebuild = (indexName, fromIndex) => {
+        const target = toIndexes.get(indexName);
+        return target === undefined || indexChanged(fromIndex, target)
+          || [...fromIndex.columns, ...(fromIndex.reads ?? [])].some((column) => disturbedColumns.has(column));
+      };
+      for (const [indexName, fromIndex] of fromIndexes) {
+        if (indexNeedsRebuild(indexName, fromIndex)) {
+          steps.push({ kind: 'ddl', sql: dialect.ddl.dropIndex(indexName),
+            note: `drop index '${indexName}' on '${name}'` });
+        }
       }
-    }
-    // a GENERATED column arrives populated; a STORED one arrives NULL,
-    // and a pushdown over a NULL column silently returns fewer rows.
-    // The backfill is an explicit step rather than an assumption that
-    // the table is empty
-    if (backfilled.length > 0) {
-      steps.push(deriveStep(name, toPlan, backfilled,
-        `backfill derived column(s) ${backfilled.join(', ')} on '${name}'`));
-    }
-    for (const [indexName, toIndex] of toIndexes) {
-      const source = fromIndexes.get(indexName);
-      const rebuilt = source !== undefined && indexNeedsRebuild(indexName, source);
-      if (source === undefined || rebuilt) {
-        steps.push({
-          kind: 'ddl',
-          sql: dialect.ddl.createIndex({ name: indexName, table: name, columns: toIndex.columns,
-            unique: toIndex.unique, where: toIndex.where }),
-          note: `create index '${indexName}' on '${name}'`,
-        });
+      for (const columnName of disturbedColumns) {
+        steps.push({ kind: 'ddl', sql: dialect.ddl.dropColumn(name, columnName),
+          note: `drop generated column '${columnName}' on '${name}'` });
       }
-    }
-    for (const [virtualName, target] of toVirtual) {
-      if (fromVirtual.has(virtualName)) continue;
-      steps.push({ kind: 'ddl', sql: target.createSql,
-        note: `create the R*Tree '${virtualName}' on '${name}'` });
-      for (const trigger of target.triggers) {
-        steps.push({ kind: 'ddl', sql: trigger.sql,
-          note: `create sync trigger '${trigger.name}' on '${name}'` });
+      for (const [columnName, toColumn] of toColumns) {
+        const source = fromColumns.get(columnName);
+        if (source === undefined || columnChanged(source, toColumn)) {
+          steps.push({
+            kind: 'ddl',
+            sql: dialect.ddl.addGeneratedColumn(
+              { table: name, docColumn: toPlan.docColumn, column: toColumn }),
+            note: toColumn.stored === true
+              ? `add stored derived column '${columnName}' on '${name}'`
+              : `add generated column '${columnName}' on '${name}'`,
+          });
+          if (toColumn.stored === true) backfilled.push(columnName);
+        }
       }
-      // the triggers fire on WRITES; the rows already stored need the
-      // backfill, and without it a probe silently returns nothing
-      steps.push({ kind: 'sql', sql: target.fillSql,
-        note: `backfill the R*Tree '${virtualName}' from the stored documents` });
+      // a GENERATED column arrives populated; a STORED one arrives NULL,
+      // and a pushdown over a NULL column silently returns fewer rows.
+      // The backfill is an explicit step rather than an assumption that
+      // the table is empty
+      if (backfilled.length > 0) {
+        steps.push(deriveStep(name, toPlan, backfilled,
+          `backfill derived column(s) ${backfilled.join(', ')} on '${name}'`));
+      }
+      for (const [indexName, toIndex] of toIndexes) {
+        const source = fromIndexes.get(indexName);
+        const rebuilt = source !== undefined && indexNeedsRebuild(indexName, source);
+        if (source === undefined || rebuilt) {
+          steps.push({
+            kind: 'ddl',
+            sql: dialect.ddl.createIndex({ name: indexName, table: name, columns: toIndex.columns,
+              unique: toIndex.unique, where: toIndex.where }),
+            note: `create index '${indexName}' on '${name}'`,
+          });
+        }
+      }
+      for (const [virtualName, target] of toVirtual) {
+        if (fromVirtual.has(virtualName)) continue;
+        steps.push({ kind: 'ddl', sql: target.createSql,
+          note: `create the R*Tree '${virtualName}' on '${name}'` });
+        for (const trigger of target.triggers) {
+          steps.push({ kind: 'ddl', sql: trigger.sql,
+            note: `create sync trigger '${trigger.name}' on '${name}'` });
+        }
+        // the triggers fire on WRITES; the rows already stored need the
+        // backfill, and without it a probe silently returns nothing
+        steps.push({ kind: 'sql', sql: target.fillSql,
+          note: `backfill the R*Tree '${virtualName}' from the stored documents` });
+      }
+      for (const interval of intervals.added) {
+        steps.push({ kind: 'ddl', sql: dialect.ddl.addCheck({ table: name, name: interval.constraint, sql: interval.sql }),
+          note: `add the CHECK '${interval.constraint}' of interval '${interval.name}' on '${name}'` });
+      }
     }
 
     if (canonicalizeJson(fromCollection.schema) !== canonicalizeJson(toCollection.schema)) {
@@ -2692,6 +2884,10 @@ function runMigration(target, migrations, options, replay = undefined, shadowRep
             const collect = (i) => {
               if (i >= pending.length) return null;
               const migration = pending[i];
+              // the preconditions are listed, never counted: a dry run reads
+              // no table's rows against a CHECK
+              for (const check of intervalPreconditionsOf(migration, dialect, mappingFor(connection, runOptions.expressions)))
+                rendered.push(`-- precondition: interval '${check.interval}' on '${check.collection}'`);
               for (const migrationStep of migration.steps) {
                 if (migrationStep.kind === 'ddl') rendered.push(migrationStep.sql);
                 else if (migrationStep.kind === 'sql') rendered.push(`-- data step (sql): ${migrationStep.note ?? ''}`, migrationStep.sql);
@@ -2784,9 +2980,10 @@ function runMigration(target, migrations, options, replay = undefined, shadowRep
               { class: 'constraint', retryable: false });
             }));
           // one link's work in the transaction or savepoint it is given: the
-          // foreign-key baseline, its steps, its physical checks, the
-          // foreign-key check, its history row — and, for the chain's last
-          // link, the final checks
+          // foreign-key baseline, the interval preconditions over the rows
+          // its steps will put under a CHECK, its steps, its physical
+          // checks, the foreign-key check, its history row — and, for the
+          // chain's last link, the final checks
           const linkWork = (scope, migration, final) => {
             let allocations;
             /** @type {any[] | null} */
@@ -2795,6 +2992,7 @@ function runMigration(target, migrations, options, replay = undefined, shadowRep
             work = chain(work, () => (migration.physical
               ? chain(verifyPreservation(scope, migration.physical, false), (state) => { allocations = state; }) : null));
             work = chain(work, () => historyExists ? null : chain(scope.exec(statements.create), () => { historyExists = true; }));
+            work = chain(work, () => intervalPreconditions(scope, migration, runOptions));
             work = chain(work, () => runSteps(scope, migration, runOptions));
             work = chain(work, () => migration.physical ? verifyPreservation(scope, migration.physical, true, allocations) : null);
             work = chain(work, () => acceptTarget(scope, final ? finalTarget : migration.physical?.target));

@@ -26,6 +26,10 @@ declares no `invariants`, so it neither opens over that table (`JD0002`, an
 undeclared trigger) nor migrates to the authored model (the plan's `CREATE`s
 meet the installed programs and fail `JD0023`); the model that declares the
 rules is the one that opens it.
+A collection's declared interval comes back from its CHECK as the `intervals`
+entry that declared it, the span typed an object of two required `integer`
+bounds, which is no loss; a CHECK of another shape or name, or one added
+`NOT VALID`, is `unmapped-constraint`.
 Repeated inspection is read-only; `strict: true` refuses losses with `JD0002`.
 
 A **model document** declares the collections of a store: each
@@ -127,12 +131,18 @@ The store runs over SQLite — on Node (`@jarenjs/db/node`), on Bun
   spelling). A dropped, altered, renamed or — on PostgreSQL —
   unvalidated CHECK is `JD0002` at open. `$overlaps` over the declared
   span plans exactly: two comparisons the bound's index seeks, no
-  residual (§3.2). `name` is an identifier, unique among the collection's
+  residual — and, with `maxDuration`, a third that bounds the start from
+  below, so the start index is sought between two bounds at every window
+  (§3.2). `name` is an identifier, unique among the collection's
   intervals, naming a constraint of at most 63 bytes; an unindexed bound,
   a bound typed `number` (the CHECK's integer test would refuse the
   fractions it admits), a path to no such member, a duplicate name and a
   `maxDuration` that is not a positive safe integer are `JD0005` at the
-  member.
+  member. Adding, changing or removing the declaration on an existing
+  collection is a planned migration — on PostgreSQL the CHECK added or
+  dropped in place, on SQLite one rebuild of the collection — refused
+  `JD0021` before any step where stored rows violate it
+  ([MIGRATION-FORMAT §3](MIGRATION-FORMAT.md#3-planning-and-the-wideningnarrowing-rule)).
 
 What the declaration buys is measured by `benchmark/series.js` over a
 year of fifty thousand stored spans asked one one-hour question at three
