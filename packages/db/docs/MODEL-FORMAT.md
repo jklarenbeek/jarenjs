@@ -1796,7 +1796,13 @@ retryable), `full` (`JD2082`), `readonly` (`JD2083`), `io` (`JD2084`),
 numeric result past the range of its type, such as an integer a PostgreSQL
 `bigint` column cannot hold), `data` (`JD2003`, not retryable, when Node's SQLite binding
 refuses to represent a stored integer as a JavaScript number), and the fallback
-`error` (`JD2005`). No pushed `$sum` or `$avg` over an `integer` member —
+`error` (`JD2005`). An engine reports only the first unique constraint a row
+fails, so a write colliding on its one-member key and on another unique
+constraint at once — `create()` of a stored row with its own unique values is
+one — is `JD2001` on PostgreSQL, which checks the primary key first, and on
+SQLite under an `integer` key (the rowid) or beside a one-to-one key, but on
+SQLite under a `string` or `number` key SQLite reports a unique member or a
+unique entity index instead: `JD2005`, naming it. No pushed `$sum` or `$avg` over an `integer` member —
 in a collection, an entity or a native temporal bucket — raises `overflow`
 or `data` over the values the store writes, which are JavaScript numbers and
 so within the double range: it folds as a double beside its exactness guard
@@ -3172,7 +3178,9 @@ const report = await store.saveChanges();     // one transaction
   inserted, a foreign-key `JD2005`. Documents
   handed to `add`/`put` are adopted and frozen. Staging is
   last-write-wins: `add()` twice under one key keeps the second document
-  (like `put`), where the explicit `create()` twice is `JD2001`.
+  (like `put`), where the explicit `create()` twice is `JD2001` (on SQLite
+  `JD2005` when a unique member or unique entity index collides too and the
+  key is not an `integer`, §7).
   An `add()` after a pending `remove()` of the same key refuses `JD2003`
   without changing that removal: use `put()`/`update()` for a replacement,
   or save the removal before staging an insert. A `put()` of a tracked row
@@ -3746,7 +3754,10 @@ between it and the statement — and the row now stored: an update that changes 
 database rule counts runs no `changed` rule, and a `columns` rule runs when the
 statement assigns one of them (§13.1). A delete rule is checked after the
 delete, against the row it removed; a key with no row removes nothing and runs
-no rule. A document's insert and update rules are checked before its own
+no rule. A row the database's own foreign-key actions remove or null — a
+`cascade` child, a `setNull` member — is no store write and runs none of its
+entity's store rules: a delete rule that refuses the child's own `delete()`
+does not stop its parent's. A document's insert and update rules are checked before its own
 statement, against the document the unit of work holds, membership arrays
 included; a save that changes only a document's memberships writes the join
 table, not its row, and runs its update rules after the save's other

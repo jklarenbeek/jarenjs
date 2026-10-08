@@ -182,6 +182,24 @@ describe('PostgreSQL journal capture of foreign-key actions', { skip: !url && 'J
     });
   });
 
+  it('a create whose membership the database refuses records nothing', async () => {
+    await fixture(async ({ store }) => {
+      const after = (await store.changes.bounds()).highWatermark;
+      let refused;
+      await store.transaction(async (/** @type {any} */ tx) => {
+        // the join row naming no tag is refused in the create's own savepoint,
+        // which takes the row and its first join row with it
+        try { await tx.entity('Parent').create({ id: 's', tags: ['t1', 'missing'] }); }
+        catch (error) { refused = /** @type {any} */ (error).code; }
+        await tx.entity('Tag').create({ id: 'u' });
+      });
+      assert.equal(refused, 'JD2005');
+      const page = await store.changes.page({ after });
+      assert.deepEqual(page.items.map((/** @type {any} */ record) => canonicalPatch(record.patch)), [['add /Tag/u {"id":"u"}']]);
+      assert.equal(await store.entity('Parent').get('s'), undefined);
+    });
+  });
+
   for (let seed = 1; seed <= 6; seed += 1) {
     it(`seed ${seed}: every record of a random workload yields the next state`, async () => {
       await fixture(async ({ store }) => {

@@ -3420,10 +3420,12 @@ export function openStore(model, options) {
                   return chain(core.create(doc), registerCreated);
                 // one capture scope and one transaction around the row and
                 // its join rows: a membership the database refuses rolls the
-                // row back too, and journal capture records the join rows
-                return chain(guard(() => connection.transaction(() =>
-                  chain(core.create(doc), (made) => chain(attach(made, memberships), () => made)))),
-                registerCreated);
+                // row back too, and journal capture records the join rows —
+                // in a capture nest, so when an enclosing transaction catches
+                // the refusal, the records of the rolled-back savepoint go too
+                const write = () => connection.transaction(() =>
+                  chain(core.create(doc), (made) => chain(attach(made, memberships), () => made)));
+                return chain(guard(() => (capture === null ? write() : capture.nest(write))), registerCreated);
               },
               get: (key) => chain(core.get(key), (doc) =>
                 (doc === undefined ? undefined : tracker.register(name, doc))),

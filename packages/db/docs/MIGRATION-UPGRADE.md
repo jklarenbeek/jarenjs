@@ -927,6 +927,9 @@ the database's own foreign-key actions ([LIVE-FORMAT](LIVE-FORMAT.md) §4):
 - A delete the database refuses no longer leaves membership removals behind in
   a transaction that catches the refusal: capture-only feeds no longer show
   them, and replicated stores no longer refuse that transaction `JD2104`.
+  Neither does a `create()` carrying a membership the database refuses
+  (`JD2005`, a join row naming no row): the created row and the join rows
+  stored before the refused one are no longer recorded.
 - On PostgreSQL such a delete first reads the rows it will change, locked as
   its own actions lock them: `FOR UPDATE` for a row it removes or a unique
   (one-to-one) member it nulls, `FOR NO KEY UPDATE` for any other row it

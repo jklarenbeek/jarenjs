@@ -147,8 +147,11 @@ its whole acknowledged history — an empty store, or one holding only what the
 two replicas shared. Under journal capture a
 cascading delete counts itself and its removed, nulled and membership rows
 against `maxOperations`, and their documents against `maxBytes`, and refuses
-`JD2106` before it runs; its complete envelope can still exceed `maxBytes` at
-commit (`JD2074`). Under session capture both bounds apply at commit.
+`JD2106` before it runs. Each delete counts only its own rows, so the
+transaction's complete envelope can still exceed either bound at commit:
+`maxOperations` (`JD2106`, `replication operation bound exceeded`) when its
+other writes or deletes add rows, `maxBytes` (`JD2074`) since the envelope
+carries more than those documents. Under session capture both bounds apply at commit.
 
 Data, receipt, per-row causal metadata, capture record and frontier settle in
 the same transaction. Replication is available only on the root Store; transaction

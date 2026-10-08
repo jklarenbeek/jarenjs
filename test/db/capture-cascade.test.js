@@ -4,9 +4,10 @@
  * delete records every row the declared foreign keys removed or nulled —
  * descendants at every depth, the foreign-key member of `setNull` rows, the
  * memberships of every removed row — exactly as session capture records them,
- * on every store delete path; a delete the database refuses records nothing;
- * under replication a delete whose rows exceed the replication bound refuses
- * before it runs.
+ * on every store delete path; a delete the database refuses records nothing,
+ * nor does a create whose membership it refuses; under replication a delete
+ * whose own rows exceed the replication bound refuses before it runs, and the
+ * envelope of its whole transaction is bounded at commit.
  */
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert/strict';
@@ -122,6 +123,42 @@ describe('journal capture of foreign-key actions', () => {
     }
   });
 
+  it('a create whose membership the database refuses records nothing, on either surface', async () => {
+    for (const replicated of [false, true]) for (const surface of ['async', 'sync']) {
+      const label = `${replicated ? 'replicated' : 'capture-only'} ${surface}`;
+      const store = await openStore(restrictModel, { driver: nodeDriver(), capture: { mode: 'journal' },
+        ...(replicated ? { replication: { replica: 'o' } } : {}) });
+      try {
+        await store.entity('Tag').create({ id: 't' });
+        /** @type {any[]} */
+        const seen = [];
+        store.observe((record) => seen.push(record));
+        let refused;
+        // the row and its first join row are stored before the second join
+        // row, which names no tag, is refused: all three go with the failure
+        const doc = { id: 'o', tags: ['t', 'missing'] };
+        if (surface === 'async') {
+          await store.transaction(async (/** @type {any} */ tx) => {
+            try { await tx.entity('Owner').create(doc); }
+            catch (error) { refused = /** @type {any} */ (error).code; }
+            await tx.entity('Tag').create({ id: 'u' });
+          });
+        }
+        else {
+          store.sync.transaction(() => {
+            try { store.sync.entity('Owner').create(doc); }
+            catch (error) { refused = /** @type {any} */ (error).code; }
+            store.sync.entity('Tag').create({ id: 'u' });
+          });
+        }
+        assert.equal(refused, 'JD2005', label);
+        assert.deepEqual(canonicalRecords(seen), [['add /Tag/u {"id":"u"}']], label);
+        assert.equal(await store.entity('Owner').get('o'), undefined, label);
+      }
+      finally { await store.close(); }
+    }
+  });
+
   it('a delete whose membership rows exceed replication capacity refuses before it runs', async () => {
     for (const memberships of [11, 12, 13]) {
       const store = await openStore(replicationModel, { driver: nodeDriver(), capture: { mode: 'journal' },
@@ -145,6 +182,59 @@ describe('journal capture of foreign-key actions', () => {
       }
       finally { await store.close(); }
     }
+  });
+
+  it('a bounded closure counts a membership met from both endpoints once and reads every row up to the credit', async () => {
+    // deleting `a` removes `b`, whose memberships are read once `a`'s were:
+    // [a,b] again first, then the two the credit has to count
+    const model = { $model: '0.1', entities: {
+      A: { schema: { type: 'object', required: ['id'], properties: { id: key,
+        kids: { 'x-entity': { relation: { to: 'B', many: true, via: 'aRef', onDelete: 'cascade' } } },
+        bs: { 'x-entity': { relation: { to: 'B', many: true } } } } } },
+      B: { schema: { type: 'object', required: ['id'], properties: { id: key, aRef: { type: ['string', 'null'] } } } },
+    } };
+    for (const maxOperations of [4, 5]) {
+      const store = await openStore(model, { driver: nodeDriver(), capture: { mode: 'journal' },
+        replication: { replica: 'a', maxOperations } });
+      try {
+        await store.entity('B').create({ id: 'b' });
+        for (const id of ['a', 'x', 'y']) await store.entity('A').create({ id, bs: ['b'] });
+        await store.entity('B').update('b', { aRef: 'a' });
+        const frontier = await store.replication.frontier();
+        // the root, `b` and three memberships
+        if (maxOperations === 4) {
+          await assert.rejects(store.entity('A').delete('a'),
+            { code: 'JD2106', reason: 'a cascading delete exceeds replication capacity' });
+          assert.deepEqual(await store.replication.frontier(), frontier);
+          continue;
+        }
+        assert.equal(await store.entity('A').delete('a'), true);
+        const [envelope] = (await store.replication.page({ after: frontier.a })).items;
+        assert.deepEqual(envelope.operations.map((/** @type {any} */ op) => `${op.table}/${op.key}`),
+          ['A/a', 'A_B/["a","b"]', 'A_B/["x","b"]', 'A_B/["y","b"]', 'B/b']);
+      }
+      finally { await store.close(); }
+    }
+  });
+
+  it('each delete counts its own rows; the envelope of their transaction is bounded at commit', async () => {
+    const store = await openStore(replicationModel, { driver: nodeDriver(), capture: { mode: 'journal' },
+      replication: { replica: 'a', maxOperations: 12 } });
+    try {
+      await store.entity('Tag').create({ id: 't' });
+      await store.entity('Tag').create({ id: 'u' });
+      for (let i = 0; i < 6; i++) await store.entity('Parent').create({ id: `p${i}`, tags: ['t', 'u'] });
+      const state = await replicaState(store);
+      const frontier = await store.replication.frontier();
+      // seven rows each, within the credit alone; fourteen together
+      await assert.rejects(store.transaction(async (/** @type {any} */ tx) => {
+        assert.equal(await tx.entity('Tag').delete('t'), true);
+        assert.equal(await tx.entity('Tag').delete('u'), true);
+      }), { code: 'JD2106', reason: 'replication operation bound exceeded' });
+      assert.deepEqual(await replicaState(store), state);
+      assert.deepEqual(await store.replication.frontier(), frontier);
+    }
+    finally { await store.close(); }
   });
 
   it('a tracked save records the stored row when a foreign-key action of its transaction changed it', async () => {
