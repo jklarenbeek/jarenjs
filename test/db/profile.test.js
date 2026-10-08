@@ -241,13 +241,38 @@ describe('a budget the engine counts is enforced; one it cannot count is refused
     await store.close();
   });
 
-  it('no estimated-row arithmetic exists anywhere in the engines', () => {
-    for (const file of fs.readdirSync('packages/db/src').filter((name) => name.endsWith('.js'))) {
-      const source = fs.readFileSync(`packages/db/src/${file}`, 'utf8');
-      const sites = source.split('\n').filter((line) => /estimat/i.test(line) && !/^\s*(\/\/|\*)/.test(line));
-      for (const line of sites) {
-        assert.match(line, /estimatedRows: capabilities\?\.rowEstimates|rowEstimates: false|'unavailable'|\* /,
-          `${file}: ${line.trim()} — a row estimate is a capability slot, never a computed number`);
+  it('no estimated-row arithmetic exists anywhere in the engines: the planner\'s answer is asked for at one site and handed over', () => {
+    const names = /** @type {string[]} */ (fs.readdirSync('packages/db/src', { recursive: true }))
+      .map((name) => String(name).replaceAll('\\', '/')).filter((name) => name.endsWith('.js'));
+    const sources = new Map(names.map((name) => [name, fs.readFileSync(`packages/db/src/${name}`, 'utf8')]));
+    const code = (/** @type {string} */ line) => !/^\s*(\/\/|\*|\/\*)/.test(line);
+    const occurrences = (/** @type {string} */ needle) => [...sources].flatMap(([name, source]) =>
+      source.split('\n').filter((line) => code(line) && line.includes(needle)).map(() => name));
+    // one helper asks the database, one dialect member reads the answer,
+    // and the one dialect that has an answer says whose number it is
+    assert.deepStrictEqual(occurrences('.explainEstimate('), ['query.js']);
+    assert.deepStrictEqual(occurrences('.readEstimate('), ['query.js']);
+    assert.deepStrictEqual(occurrences("'postgresql-planner'"), ['dialects/postgres.js']);
+    // every code line of the engines that names an estimate is a capability slot, a dialect
+    // member passed through, the helper or the budget slot — or merely hands the answer on
+    const DEFINITIONS = new Set([
+      'rowEstimates: false,',
+      'explainEstimate: spec.explainEstimate ?? null,',
+      'readEstimate: spec.readEstimate ?? null,',
+      'function budgetOf(profile, source, capabilities, estimate = null) {',
+      "estimatedRows: estimate ?? 'unavailable',",
+      'function estimateOf(connection, dialect, sql, params) {',
+      "if (connection.capabilities?.rowEstimates !== true || typeof dialect.explainEstimate !== 'function') return null;",
+      'return useStatementOnce(connection, dialect.explainEstimate(sql), (statement) =>',
+      'chain(statement.all(params), (rows) => dialect.readEstimate(rows)), { readOnly: true });',
+    ]);
+    for (const [name, source] of sources) {
+      if (name.includes('/')) continue;
+      for (const line of source.split('\n').filter((text) => code(text) && /estimat/i.test(text))) {
+        if (DEFINITIONS.has(line.trim())) continue;
+        assert.match(line, /\bestimate\b|\bestimateOf\(/, `${name}: ${line.trim()} — an estimate is the database's answer, not a computed number`);
+        assert.doesNotMatch(line.replace(/'[^']*'/g, ''), /[-+*/%]/,
+          `${name}: ${line.trim()} — nothing computes with a row estimate`);
       }
     }
   });

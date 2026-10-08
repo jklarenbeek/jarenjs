@@ -121,7 +121,7 @@ export interface TypedEntitySet<E extends MetaMap<E>, M extends EntityMeta> {
   /** One bounded page over the composite keyset, typed by the includes. */
   page<const S extends TypedLoadSpec<E, M>>(spec?: S, options?: PageOptions):
     Promise<Page<Readonly<Loaded<E, M, S>>>>;
-  explainLoad(spec?: TypedLoadSpec<E, M>, options?: Pick<ExecuteOptions, 'profile'>): LoadExplanation;
+  explainLoad(spec?: TypedLoadSpec<E, M>, options?: Pick<ExecuteOptions, 'profile'>): ValueOrPromise<LoadExplanation>;
   add(doc: M['input']): Readonly<M['doc']>;
   put(next: M['doc']): Readonly<M['doc']>;
   remove(key: EntityKeyArg | M['doc']): void;

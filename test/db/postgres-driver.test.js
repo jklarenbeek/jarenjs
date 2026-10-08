@@ -422,9 +422,12 @@ describe('the injected PostgreSQL driver', () => {
     assert.strictEqual(capabilities.jobs, true);
     assert.strictEqual(capabilities.savepoints, true);
     assert.strictEqual(capabilities.alterTableFull, true);
+    // the one slot SQLite leaves empty that this engine fills: its planner
+    // answers a row estimate for a statement (`EXPLAIN (FORMAT JSON)`)
+    assert.strictEqual(capabilities.rowEstimates, true);
     for (const absent of ['rtree', 'fts', 'sessions', 'userFunctions',
       'deterministicIndexableFunctions', 'aggregateFunctions', 'backup',
-      'statementTimeout', 'rowEstimates', 'lazyIteration']) {
+      'statementTimeout', 'lazyIteration']) {
       assert.strictEqual(capabilities[absent], false, absent);
     }
     assert.deepStrictEqual([...capabilities.configurablePragmas], []);
@@ -883,6 +886,97 @@ describe('the injected PostgreSQL driver', () => {
       assert.notStrictEqual(driver.dialect, postgresDialect({ searchPath: 'jaren_run_1' }));
       assert.strictEqual(driver.dialect.introspect.columns('rows'),
         postgresDialect({ searchPath: 'jaren_run_1' }).introspect.columns('rows'));
+    });
+
+    describe('the planner estimate explain() carries', () => {
+      const DOCUMENT = { $for: { it: '$[*]' }, $where: { $eq: ['$it.n', 3] }, $return: '$it.id' };
+      /** The server's answer to `EXPLAIN (FORMAT JSON)`: the json column, parsed as `pg` hands it over. */
+      const JSON_PLAN = /** @type {[RegExp, any]} */ ([/^EXPLAIN \(FORMAT JSON\) /, {
+        rows: [{ 'QUERY PLAN': [{ Plan: { 'Node Type': 'Sort', 'Plan Rows': 42 } }] }], rowCount: 1,
+        fields: [{ name: 'QUERY PLAN', dataTypeID: 114 }] }]);
+      /** The plain EXPLAIN: the prose the scan narrative is made of. */
+      const PROSE_PLAN = /** @type {[RegExp, any]} */ ([/^EXPLAIN /, {
+        rows: [{ 'QUERY PLAN': 'Index Scan using rows_by_n on rows  (cost=0.15..8.17 rows=1 width=64)' }], rowCount: 1,
+        fields: [{ name: 'QUERY PLAN', dataTypeID: 25 }] }]);
+
+      it('a native plan is priced by a statement of its own, over the values the narrative binds', async () => {
+        const injected = source([...EXISTING, JSON_PLAN, PROSE_PLAN]);
+        const store = await openStore(MODEL, { driver: postgresDriver(injected, { schema: 'jaren_run_1' }) });
+        try {
+          assert.strictEqual(store.capabilities.rowEstimates, true);
+          const before = injected.client.calls.length;
+          const explained = await store.collection('rows').explain(DOCUMENT);
+          assert.deepStrictEqual(explained.budget.estimatedRows, { rows: 42, source: 'postgresql-planner' });
+          const explains = injected.client.calls.slice(before).filter((call) => /^EXPLAIN/.test(call.text));
+          assert.deepStrictEqual(explains.map((call) => call.text),
+            [`EXPLAIN (FORMAT JSON) ${explained.sql}`, `EXPLAIN ${explained.sql}`]);
+          assert.deepStrictEqual(explains[0].values, explains[1].values);
+          assert.match(explained.scanNarrative, /^Index Scan using rows_by_n/, 'the narrative stays the plain EXPLAIN');
+        }
+        finally { await store.close(); }
+      });
+
+      it('a plan the engine answers is priced by nothing, and the narrative is still asked for', async () => {
+        const injected = source([...EXISTING, JSON_PLAN, PROSE_PLAN]);
+        const store = await openStore(MODEL, { driver: postgresDriver(injected, { schema: 'jaren_run_1' }) });
+        try {
+          const native = await store.collection('rows').explain(DOCUMENT);
+          assert.deepStrictEqual(native.budget.estimatedRows, { rows: 42, source: 'postgresql-planner' },
+            'the same document, answered natively, is priced');
+          const before = injected.client.calls.length;
+          const explained = await store.collection('rows').explain(DOCUMENT, { pushdown: false });
+          assert.strictEqual(explained.mode, 'set');
+          assert.strictEqual(explained.budget.estimatedRows, 'unavailable');
+          assert.deepStrictEqual(injected.client.calls.slice(before)
+            .filter((call) => /^EXPLAIN \(FORMAT JSON\)/.test(call.text)), []);
+        }
+        finally { await store.close(); }
+      });
+
+      it('an answer that is not a plan leaves the slot unavailable and the explanation whole', async () => {
+        let readable = true;
+        const answer = /** @type {[RegExp, any]} */ ([JSON_PLAN[0], () => (readable ? JSON_PLAN[1] : {
+          rows: [{ 'QUERY PLAN': 'not json at all' }], rowCount: 1, fields: [{ name: 'QUERY PLAN', dataTypeID: 25 }] })]);
+        const injected = source([...EXISTING, answer, PROSE_PLAN]);
+        const store = await openStore(MODEL, { driver: postgresDriver(injected, { schema: 'jaren_run_1' }) });
+        try {
+          const priced = await store.collection('rows').explain(DOCUMENT);
+          assert.deepStrictEqual(priced.budget.estimatedRows, { rows: 42, source: 'postgresql-planner' });
+          readable = false;
+          const explained = await store.collection('rows').explain(DOCUMENT);
+          assert.strictEqual(explained.mode, 'native');
+          assert.strictEqual(explained.budget.estimatedRows, 'unavailable');
+          assert.match(explained.scanNarrative, /^Index Scan using rows_by_n/);
+        }
+        finally { await store.close(); }
+      });
+
+      it('a connection that reports no row estimates is never asked for one', async () => {
+        const control = await openStore(MODEL, {
+          driver: postgresDriver(source([...EXISTING, JSON_PLAN, PROSE_PLAN]), { schema: 'jaren_run_1' }) });
+        try {
+          assert.deepStrictEqual((await control.collection('rows').explain(DOCUMENT)).budget.estimatedRows,
+            { rows: 42, source: 'postgresql-planner' }, 'the same connection, left as the probe reports it, is priced');
+        }
+        finally { await control.close(); }
+        const injected = source([...EXISTING, JSON_PLAN, PROSE_PLAN]);
+        const inner = postgresDriver(injected, { schema: 'jaren_run_1' });
+        const silent = { ...inner, open: async (/** @type {any[]} */ ...args) => {
+          const connection = await inner.open(...args);
+          return { ...connection, capabilities: Object.freeze({ ...connection.capabilities, rowEstimates: false }) };
+        } };
+        const store = await openStore(MODEL, { driver: silent });
+        try {
+          assert.strictEqual(store.capabilities.rowEstimates, false);
+          const before = injected.client.calls.length;
+          const explained = await store.collection('rows').explain(DOCUMENT);
+          assert.strictEqual(explained.mode, 'native');
+          assert.strictEqual(explained.budget.estimatedRows, 'unavailable');
+          assert.deepStrictEqual(injected.client.calls.slice(before)
+            .filter((call) => /^EXPLAIN \(FORMAT JSON\)/.test(call.text)), []);
+        }
+        finally { await store.close(); }
+      });
     });
   });
 });

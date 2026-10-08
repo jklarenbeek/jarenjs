@@ -1617,13 +1617,20 @@ async function profiledGraphLoads(): Promise<void> {
   const untrackedPosts: Post[] = untracked[0].posts;
   const syncRows: ReadonlyArray<Readonly<{ id: number }>> = syncHostItems.load({}, options);
   const syncUntracked: { id: number }[] = syncHostItems.asNoTracking().load({}, options);
-  for (const explanation of [raw.explainLoad({}, options), users.explainLoad({}, options),
+  // a promise where the database is asked for a row estimate (PostgreSQL), a value elsewhere
+  for (const explanation of [await raw.explainLoad({}, options), await users.explainLoad({}, options),
     syncHostItems.explainLoad({}, options)]) {
     const rowBound: number | null = explanation.budget.rows;
     const source: 'call' | 'store' | undefined = explanation.budget.profile?.source;
     const streaming: 'row' | 'buffered' = explanation.streaming;
     const barrier: string | undefined = explanation.barrier?.reason;
-    void [rowBound, source, streaming, barrier];
+    // the planner's own estimate arrives with the label that says whose it is, or not at all
+    const estimate = explanation.budget.estimatedRows;
+    const estimatedRows: number | undefined = estimate === 'unavailable' ? undefined : estimate.rows;
+    const estimator: 'postgresql-planner' | undefined = estimate === 'unavailable' ? undefined : estimate.source;
+    // @ts-expect-error — an unlabelled 'available' is no state: a number carries its source
+    const unlabelled: typeof estimate = 'available';
+    void [rowBound, source, streaming, barrier, estimatedRows, estimator, unlabelled];
   }
   // @ts-expect-error — a materialized load has no strict-streaming option
   await raw.load({}, { strictStreaming: true });

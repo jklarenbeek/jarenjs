@@ -342,13 +342,16 @@ const INCLUDE_LOAD_MEMBERS = Object.freeze(['where', 'orderBy', 'take', 'skip', 
  * The budget provenance `explain()` carries: which profile applied
  * and from where, every bound it imposed — each one the engine COUNTS
  * and enforces — and, by name, the two the driver cannot measure:
- * elapsed statement time and visited rows are empty capability slots on
- * SQLite, so they are reported `unavailable`, never approximated.
+ * elapsed statement time is an empty capability slot on SQLite and the
+ * row estimate is one wherever the database gives none, so they are
+ * reported `unavailable`, never approximated. The estimate is the
+ * database's own, handed over with the label that says whose it is.
  * @param {any} profile - the normalized profile, or null
  * @param {'call' | 'store' | null} source
  * @param {any} capabilities - the connection's capability table
+ * @param {{ rows: number, source: string } | null} [estimate] - the planner's answer for the statement
  */
-function budgetOf(profile, source, capabilities) {
+function budgetOf(profile, source, capabilities, estimate = null) {
   return {
     profile: profile === null ? null : { source, name: profile === SAFE_PROFILE ? 'safe' : 'custom' },
     rows: profile === null ? null : profile.maxRows,
@@ -358,8 +361,29 @@ function budgetOf(profile, source, capabilities) {
     limits: profile === null ? null : { ...profile.limits },
     scan: profile !== null && profile.refuseFullScan === true ? 'refused-by-shape' : 'unbounded',
     time: capabilities?.statementTimeout === true ? 'enforced' : 'unavailable',
-    estimatedRows: capabilities?.rowEstimates === true ? 'available' : 'unavailable',
+    estimatedRows: estimate ?? 'unavailable',
   };
+}
+
+/**
+ * The database planner's row estimate for one native statement, asked
+ * for as a statement of its own with the values a run would bind: the
+ * single place an estimate is requested. `null` where the connection
+ * reports none (SQLite's plan is prose, not numbers), and where the
+ * dialect cannot read the answer, so the slot reads `unavailable`.
+ * Callers ask only for a statement whose every slot holds its real
+ * value: the planner prices exactly what it is given, and a NULL in
+ * place of an unbound external is a different statement.
+ * @param {any} connection
+ * @param {any} dialect
+ * @param {string} sql - the native statement
+ * @param {any[]} params - the values it binds
+ * @returns {any} value-or-promise of `{ rows, source }` or `null`
+ */
+function estimateOf(connection, dialect, sql, params) {
+  if (connection.capabilities?.rowEstimates !== true || typeof dialect.explainEstimate !== 'function') return null;
+  return useStatementOnce(connection, dialect.explainEstimate(sql), (statement) =>
+    chain(statement.all(params), (rows) => dialect.readEstimate(rows)), { readOnly: true });
 }
 
 /**
@@ -1439,10 +1463,12 @@ export function createQueryEngine(context) {
 
   /**
    * The explanation record: the engine explain shape plus the pushdown
-   * facts. `estimatedRows` is deliberately ABSENT — the capability
-   * slot is empty on SQLite and no number is fabricated; the
-   * database's own plan prose rides in `scanNarrative` instead. So is
-   * every count in `series`: they are the LAST ACTUAL execution's, and
+   * facts. `budget.estimatedRows` is the database planner's own
+   * estimate for a native plan whose every slot is bound, labelled with
+   * its source, and `unavailable` everywhere else — SQLite, a plan the
+   * engine answers, a slot the call leaves unbound — so no number is
+   * fabricated; the database's own plan prose rides in `scanNarrative`.
+   * Every count in `series` is the LAST ACTUAL execution's, and
    * `null` until this document has run once.
    * @param {any} document
    * @param {{ externals?: any, strict?: boolean }} [options]
@@ -1518,11 +1544,15 @@ export function createQueryEngine(context) {
     });
     // EXPLAIN reads the statement's SHAPE: a seek's anchor is a value
     // the database would answer for a run, and explaining a plan runs
-    // nothing, so the slot it fills is described and left unbound
+    // nothing, so the slot it fills is described and left unbound. Such a
+    // slot, like an external the call left unbound, binds NULL, and the
+    // statement then differs from the one a run would send
+    let substituted = false;
     const eqpParams = chosen.slots.map((slot) => {
-      if ('typed' in slot) return null;
-      const value = slotValue(slot, externals);
-      return bindable(value) ? value : null;
+      const value = 'typed' in slot ? undefined : slotValue(slot, externals);
+      if (bindable(value)) return value;
+      substituted = true;
+      return null;
     });
     // a diversion is one more reason the engine answers, appended after
     // the plan's own: a residual stays a residual for its own reason,
@@ -1533,7 +1563,7 @@ export function createQueryEngine(context) {
       : entry.planned.reasons;
 
     const rank = entry.plan.rank;
-    return useStatementOnce(connection, dialect.explainQuery(chosen.sql), (statement) =>
+    const explained = (estimate) => useStatementOnce(connection, dialect.explainQuery(chosen.sql), (statement) =>
       chain(statement.all(eqpParams), (rows) => ({
         mode,
         // what a cursor over this call does — one row per pull, or a
@@ -1542,7 +1572,7 @@ export function createQueryEngine(context) {
         streaming: classified.streaming,
         barrier: classified.barrier,
         // the profile that applied and every bound it imposed
-        budget: budgetOf(profile, profileSource, connection.capabilities),
+        budget: budgetOf(profile, profileSource, connection.capabilities, estimate),
         // the order the STATEMENT executes under — the plan's declared
         // terms and the tie-breaker the emitter appends, in the same
         // normalized form the emitter renders (read from the plan, never
@@ -1628,6 +1658,9 @@ export function createQueryEngine(context) {
         },
         scanNarrative: dialect.explainLines(rows).join('; '),
       })), { readOnly: true });
+    // a native plan with every slot bound is priced first, by a statement of its own
+    return chain(mode === 'native' && !substituted ? estimateOf(connection, dialect, chosen.sql, eqpParams) : null,
+      explained);
   };
 
   return { execute: bounded(execute, driverWrap), query, explain: bounded(explain, driverWrap), shape,
@@ -2368,16 +2401,21 @@ export function createEntityQueryEngine(context) {
         : { mode: 'set', reasons },
     };
     if (mode !== 'native') return base;
-    return useStatementOnce(connection, dialect.explainQuery(entry.sql), (statement) =>
-      chain(statement.all(entry.slots.map((slot) =>
-        ('literal' in slot ? slot.literal : null))), (rows) => ({
-        ...base,
-        // the join graph, in the order the FROM clause builds it: the
-        // first binding, then each one and the equalities that attached
-        // it. Empty for a single-binding plan
-        joins: entry.planned.plan.joins,
-        scanNarrative: dialect.explainLines(rows).join('; '),
-      })), { readOnly: true });
+    const params = entry.slots.map((slot) => ('literal' in slot ? slot.literal : null));
+    // an external binds NULL here whatever the call gave, so only a plan
+    // of literals is priced: the planner would price a different statement
+    const priced = entry.slots.every((slot) => 'literal' in slot);
+    return chain(priced ? estimateOf(connection, dialect, entry.sql, params) : null, (estimate) =>
+      useStatementOnce(connection, dialect.explainQuery(entry.sql), (statement) =>
+        chain(statement.all(params), (rows) => ({
+          ...base,
+          budget: budgetOf(profile, profileSource, connection.capabilities, estimate),
+          // the join graph, in the order the FROM clause builds it: the
+          // first binding, then each one and the equalities that attached
+          // it. Empty for a single-binding plan
+          joins: entry.planned.plan.joins,
+          scanNarrative: dialect.explainLines(rows).join('; '),
+        })), { readOnly: true }));
   };
 
   return { execute: bounded(execute, driverWrap), query,
@@ -3369,7 +3407,10 @@ export function createLoadEngine(context, entityName) {
           maxRows: include.maxRows, maxBytes: include.maxBytes }]),
         ...(include.child === null ? [] : bounds(include.child, [...path, include.name])),
       ]);
-      return {
+      // priced first where the connection gives estimates: that is a
+      // statement of its own over the values a load binds, so the answer
+      // is a promise there and stays a plain value everywhere else
+      return chain(estimateOf(connection, dialect, entry.sql, entry.slots.map((slot) => slot.literal)), (estimate) => ({
         sql: entry.sql,
         pagination: entry.pagination,
         includes: describe(entry.tree, []),
@@ -3388,8 +3429,8 @@ export function createLoadEngine(context, entityName) {
         // binding can hand rows over one at a time
         ...rowClassOf(connection),
         // the profile that applied and every bound it imposed
-        budget: budgetOf(entry.profile, profileSourceOf(options), connection.capabilities),
-      };
+        budget: budgetOf(entry.profile, profileSourceOf(options), connection.capabilities, estimate),
+      }));
     },
   };
   // the loader's members answer through the boundary: a driver failure

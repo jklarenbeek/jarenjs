@@ -363,13 +363,15 @@ what each does is its own documentation's job
   **Proof still needed:** preserve output cardinality, structural equality,
   ordering and errors, and never drop a member a residual predicate reads.
 
-- [ ] **A third SQL dialect and native row estimates.**
+- [ ] **A third SQL dialect and SQLite row estimates.**
   PostgreSQL and SQLite share the model, query documents and differential
-  oracle. `rowEstimates` remains absent on both; SQLite also lacks a statement
-  timeout. PostgreSQL now provides bounded native cursors, a server timeout and
-  an optional cursor cancellation hook. **Driver boundary:** estimates need a
-  qualified estimate-returning operation; a server timeout is not the Store's
-  `AbortSignal` promise. A third dialect also needs an explicit
+  oracle. `rowEstimates` is filled on PostgreSQL by the planner's own labelled
+  estimate (`explain().budget.estimatedRows`) and remains absent on SQLite,
+  which also lacks a statement timeout. PostgreSQL now provides bounded native
+  cursors, a server timeout and an optional cursor cancellation hook.
+  **Driver boundary:** SQLite estimates need a per-statement estimate API that
+  neither `node:sqlite` nor `bun:sqlite` exposes; a server timeout is not the
+  Store's `AbortSignal` promise. A third dialect also needs an explicit
   disposition for the job queue and journal concurrency/coverage. PostgreSQL
   now qualifies managed journal capture and the shared leased job queue with
   concurrent claims and fenced checkpoints. Remaining subsystem work needs backend strategies, not

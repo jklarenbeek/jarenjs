@@ -272,6 +272,8 @@ export interface OrderIdentity {
   readonly column: string;
   readonly desc: boolean;
   readonly nullsFirst: boolean;
+  /** Set only on a term that resumes from the text its table stores (a SQLite uuid). */
+  readonly stored?: true;
 }
 
 /** One term of the order a statement actually executes under. `source`
@@ -370,7 +372,11 @@ export interface LoadExplanation {
     limits: Required<NonNullable<ProfileSpec['limits']>> | null;
     scan: 'refused-by-shape' | 'unbounded';
     time: 'enforced' | 'unavailable';
-    estimatedRows: 'available' | 'unavailable';
+    /** The database planner's own row estimate for the statement, with the
+     * label that says whose number it is — an estimate, never a count; or
+     * `'unavailable'` (SQLite, a plan the engine answers, a statement some
+     * slot of which could not be bound to its real value). */
+    estimatedRows: { rows: number; source: 'postgresql-planner' } | 'unavailable';
   };
 }
 
@@ -731,7 +737,9 @@ export interface EntitySet<T = unknown, I = unknown> {
   /** One bounded page over the composite keyset (§10.5). A `take` or
    * `skip` in the spec is refused: the page windows by its limit. */
   page(spec?: LoadSpec, options?: PageOptions): Promise<Page<Readonly<T>>>;
-  explainLoad(spec?: LoadSpec, options?: Pick<ExecuteOptions, 'profile'>): LoadExplanation;
+  /** A plain value where the connection gives no row estimate (SQLite); a
+   * promise where the database is asked for one (PostgreSQL). */
+  explainLoad(spec?: LoadSpec, options?: Pick<ExecuteOptions, 'profile'>): ValueOrPromise<LoadExplanation>;
   /** Track a pending insert (local, synchronous — no round trip). */
   add(doc: I): Readonly<T>;
   /** Register the next version of a tracked entity. */

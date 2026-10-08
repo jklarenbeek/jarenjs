@@ -171,6 +171,7 @@ function normalizeCapabilities(declared) {
  *   jsonRemove: (exprSql: string, pathText: string) => string,
  *   jsonAppend: (exprSql: string, arrayPathText: string, valueSql: string) => string,
  *   jsonEncode: (paramSql: string) => string,
+ *   jsonValue?: (columnSql: string) => string,
  *   jsonText: (columnSql: string) => string,
  *   jsonAgg: (exprSql: string) => string,
  *   jsonTypeOf: (columnSql: string, pathText: string) => string,
@@ -197,6 +198,8 @@ function normalizeCapabilities(declared) {
  *   rtreeDdl?: Record<string, Function>,
  *   explainQuery: (sql: string) => string,
  *   explainLines: (rows: any[]) => string[],
+ *   explainEstimate?: (sql: string) => string,
+ *   readEstimate?: (rows: any[]) => { rows: number, source: string } | null,
  *   isFullScan: (line: string, tables: readonly string[]) => boolean,
  *   usesIndex: (line: string, index: string) => boolean,
  *   excludedRef: (columnSql: string) => string,
@@ -741,6 +744,20 @@ export function createDialect(spec) {
     jsonRemove: spec.jsonRemove,
     jsonAppend: spec.jsonAppend,
     jsonEncode: spec.jsonEncode,
+    /**
+     * A typed COLUMN as the JSON value it holds, for `jsonSet` to write into
+     * the document when a migration folds the column into it: a boolean
+     * column (1 and 0) as `true` or `false`, every other scalar as the
+     * engine's own JSON of the column (`jsonValue`; the bare column where
+     * the engine's JSON function reads a SQL value as the JSON value it
+     * is). One implementation, so every fold spells a value alike.
+     * @param {string} columnSql
+     * @param {string} storage - the column's schema type
+     * @returns {string}
+     */
+    columnJson: (columnSql, storage) => (storage === 'boolean'
+      ? spec.jsonEncode(`CASE WHEN ${columnSql} = 1 THEN 'true' ELSE 'false' END`)
+      : spec.jsonValue === undefined ? columnSql : spec.jsonValue(columnSql)),
     jsonText: spec.jsonText,
     jsonAgg: spec.jsonAgg,
     jsonTypeOf: spec.jsonTypeOf,
@@ -885,6 +902,19 @@ export function createDialect(spec) {
     explainQuery: spec.explainQuery,
     /** The plan narrative, one line per row the engine answered. */
     explainLines: spec.explainLines,
+    /**
+     * The statement that asks the database's planner for its own row
+     * estimate of `sql`, or `null` on an engine with none to give. It runs
+     * beside {@link explainQuery}, never in place of it, and
+     * {@link readEstimate} reads what it returns.
+     */
+    explainEstimate: spec.explainEstimate ?? null,
+    /**
+     * The estimate in the rows `explainEstimate` returned, as `{ rows,
+     * source }` where `source` names whose number it is, or `null` for an
+     * answer this dialect cannot read: a number is never made up.
+     */
+    readEstimate: spec.readEstimate ?? null,
     /**
      * Whether one narrative line reports a FULL TABLE SCAN of one of
      * the named tables (or of an alias a join statement gave one). The

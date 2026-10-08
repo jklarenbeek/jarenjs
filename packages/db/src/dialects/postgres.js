@@ -590,6 +590,9 @@ export function postgresDialect(options = undefined) {
     jsonAppend: (exprSql, arrayPathText, valueSql) =>
       `jsonb_insert(${exprSql}, ${stringLiteral(pathWith(arrayPathText, '-1'))}, ${valueSql}, true)`,
     jsonEncode: (paramSql) => `(${paramSql})::jsonb`,
+    // `jsonb_set` takes a jsonb value: a number or a text column is not one
+    // (`to_jsonb` of a numeric keeps its scale, of a text is the JSON string)
+    jsonValue: (columnSql) => `to_jsonb(${columnSql})`,
     jsonText: (columnSql) => `(${columnSql})::text`,
     jsonEmbed: (columnSql) => `(${columnSql})`,
     jsonAgg: (exprSql) => `jsonb_agg(${exprSql})`,
@@ -690,6 +693,21 @@ export function postgresDialect(options = undefined) {
       line.includes(`Index Scan using ${index}`)
       || line.includes(`Index Only Scan using ${index}`)
       || line.includes(`Bitmap Index Scan on ${index}`),
+    // the planner's own row estimate: one row whose `QUERY PLAN` is the
+    // plan as JSON (text once the driver has normalized the json column),
+    // the top node's `Plan Rows` being the number. A plan that does not
+    // read that way is no estimate rather than a guessed one
+    explainEstimate: (sql) => `EXPLAIN (FORMAT JSON) ${sql}`,
+    readEstimate: (rows) => {
+      try {
+        const plan = rows[0]?.['QUERY PLAN'];
+        const count = (typeof plan === 'string' ? JSON.parse(plan) : plan)?.[0]?.Plan?.['Plan Rows'];
+        return Number.isFinite(count) && count >= 0 ? { rows: count, source: 'postgresql-planner' } : null;
+      }
+      catch {
+        return null;
+      }
+    },
     excludedRef: (columnSql) => `excluded.${columnSql}`,
     tx: {
       begin: 'BEGIN',

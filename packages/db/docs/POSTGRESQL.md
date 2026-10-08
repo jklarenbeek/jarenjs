@@ -84,6 +84,24 @@ snapshot is the engine's answer. The price: a top-level `$and` of more than 128
 or native `mutate()` above the bound that ran before is refused. SQLite has no
 JIT and sets no bound.
 
+`explain().budget.estimatedRows` is the planner's own row estimate for a native
+plan: `{ rows, source: 'postgresql-planner' }`, where `rows` is the `Plan Rows`
+of the top plan node from `EXPLAIN (FORMAT JSON)`. The store runs that as a
+statement of its own beside the plain `EXPLAIN` whose prose is `scanNarrative`,
+over the same bound values, so `explain()` of a native plan makes one more
+round trip. Collection `explain`, entity `explain` and `explainLoad` carry it;
+`explainLoad` runs no other statement, so it answers a promise here and stays a
+plain value on SQLite. It is an estimate and never a count: the planner prices
+the statement from the table's statistics (`ANALYZE`) and errs in either
+direction. A range over a member that is not indexed has no statistics to read
+and is priced as a default fraction of the table, and an external operand or a
+type test (above) keeps the discriminator `CASE`, which it can only price as a
+constant. No profile bound reads it. The slot stays `'unavailable'` for a plan
+the engine answers (`pushdown: false`, a document past the term bound, a
+diverted external), for a statement a slot of which the call left unbound — the
+statement `explain()` sends binds NULL there, which the planner prices as no
+row — and on SQLite, whose bindings expose no per-statement estimate.
+
 A physical keyset page compares its continuation as the stored values on
 PostgreSQL as on SQLite — integer, bigint (bound as its exact decimal string,
 which the server types from the column), text, and a native `uuid` column,

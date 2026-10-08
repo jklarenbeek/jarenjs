@@ -208,8 +208,9 @@ export interface Graph<E extends MetaMap<E>, M extends EntityMeta, S> {
    * attached and bounded, from the same one statement; `return()`
    * releases it. Untracked unless `tracking: true` is spelled per call. */
   cursor(options?: EntityCursorOptions): QueryCursor<Loaded<E, M, S>>;
-  /** `explainLoad(spec)`: the SQL, the includes, the pagination strategy. */
-  explain(): LoadExplanation;
+  /** `explainLoad(spec)`: the SQL, the includes, the pagination strategy;
+   * a promise where the database is asked for a row estimate (PostgreSQL). */
+  explain(): LoadExplanation | Promise<LoadExplanation>;
 }
 
 /** An entity handle: the typed entity set, the chain start, and the

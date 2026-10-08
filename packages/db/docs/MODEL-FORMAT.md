@@ -762,7 +762,8 @@ that are **empty (`false`) on every SQLite driver**:
 progress handler and no row-estimate API; a driver that cannot do a
 thing MUST say so here rather than degrade silently. The slots exist
 so a driver that has the facts can fill them without a contract
-change.
+change: the PostgreSQL driver fills `rowEstimates`, because its planner
+answers a row estimate for a statement (§8).
 
 On the Bun binding, `userFunctions`,
 `deterministicIndexableFunctions` and `sessions` are `false` by
@@ -2169,7 +2170,15 @@ rather than estimated. Visited-row and elapsed-time budgets exist
 only where a driver supplies a progress or interrupt hook; the
 shipped SQLite drivers supply neither, and `explain().budget` reports
 `time: 'unavailable'` and `estimatedRows: 'unavailable'` rather than
-a number nothing measured.
+a number nothing measured. On PostgreSQL `estimatedRows` of a native
+plan is `{ rows, source: 'postgresql-planner' }`: the planner's own
+estimate of the rows the statement's top plan node produces
+(`EXPLAIN (FORMAT JSON)`, run beside the plain `EXPLAIN` of
+`scanNarrative`), an estimate and never a count, which no budget
+reads. It stays `'unavailable'` for a plan the engine answers, for a
+statement a slot of which the call left unbound, and on SQLite
+([PostgreSQL](POSTGRESQL.md)); `explainLoad` asks the server for it
+there, so it answers a promise on PostgreSQL and a value elsewhere.
 
 **`signal` and `deadline`.** `ExecuteOptions.signal` cancels: a call
 already aborted issues no statement (`JD2072`), and a cursor or page
@@ -2245,8 +2254,9 @@ table is missing), and leaves the file's journal mode untouched.
   table) is bounded by nothing here. PostgreSQL's effective server timeout is
   reported separately; it does not turn a row-boundary AbortSignal into an
   interrupt. See [PostgreSQL host ownership](HOSTS.md#postgresql-sessions).
-- a row-estimate bound — SQLite's plan output is prose, so the
-  structural SCAN refusal is the honest substitute.
+- a row-estimate bound — SQLite's plan output is prose and
+  PostgreSQL's estimate is a planner estimate that can be far from the
+  count, so the structural SCAN refusal is the honest substitute on both.
 - safety for arbitrary untrusted SQL — none can be expressed.
 - tenant isolation without the mandatory predicate — a shared database
   is NOT safe for mutually hostile tenants unless the profile carries

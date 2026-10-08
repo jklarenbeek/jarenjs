@@ -353,6 +353,12 @@ the query engine, now refuse by code or answer what the engine answers:
   native `mutate()` past it, which ran natively before, is refused `JD0032` or
   `JD0038` naming the bound. Shorten the chain, spell equalities on one member
   as a list, or run the read through `execute()`, where the engine answers it.
+- On PostgreSQL `explain().budget.estimatedRows` is now the planner's own
+  estimate, `{ rows, source: 'postgresql-planner' }`, for a native plan, where
+  it was `'unavailable'` (the `'available'` the declaration also named was never
+  produced), and `explainLoad` asks the server for it, so it answers a promise
+  where it answered a value: `await` it (SQLite's stays a value). `explain()` of
+  a native plan makes one more round trip on PostgreSQL.
 - A collection `$sum` or `$avg` over a `number` member answered SQLite's
   compensated or PostgreSQL's exact sum; it now runs in the engine, whose
   left-to-right addition is the documented answer (`plan.floatingAccumulation`

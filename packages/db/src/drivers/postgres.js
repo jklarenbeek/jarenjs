@@ -212,6 +212,10 @@ export function postgresProbe(raw) {
         cursorLifetimeMs: raw.limits?.cursorLifetimeMs,
         maxCursors: raw.limits?.maxCursors,
         statementTimeout: raw.serverTimeouts === true,
+        // the planner answers a row estimate for a statement
+        // (`EXPLAIN (FORMAT JSON)`), which `explain()` reports as the
+        // planner's own number
+        rowEstimates: true,
         postgres: Object.freeze({ ...raw.limits,
           statementTimeoutMs: raw.serverTimeouts === true ? raw.limits.statementTimeoutMs : null,
           lockTimeoutMs: raw.serverTimeouts === true ? raw.limits.lockTimeoutMs : null,

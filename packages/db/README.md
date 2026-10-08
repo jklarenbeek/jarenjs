@@ -222,7 +222,8 @@ no continuation to emit.
   asked for. Every `explain()` also carries `budget`: the profile
   that applied, every bound it imposed, and the two driver slots
   (`time`, `estimatedRows`) reported `unavailable` on SQLite rather
-  than estimated (MODEL-FORMAT §8). A differential
+  than estimated, `estimatedRows` carrying the planner's own labelled
+  estimate for a native plan on PostgreSQL (MODEL-FORMAT §8). A differential
   oracle — a committed corpus and a seeded generator, every case run
   resident, native, native again over a store with every declared index
   removed, and forced-residual — keeps every path agreeing, with the one
@@ -916,9 +917,10 @@ oracle run on both. What differs is declared rather than discovered:
 | `ALTER TABLE` | additive only | additive changes alter the table in place; a change the planner expresses as a rebuild (a key, an enum, a type, a relation) rebuilds the table, writers waiting until it commits, which PostgreSQL supports only for an entity nothing else depends on: no foreign key references it, its own included, and no view reads it ([§10](docs/MIGRATION-FORMAT.md#10-the-rebuild-procedure)) |
 | a string holding U+0000, or an unpaired surrogate | stored and read back as written | refused by `jsonb` (`JD2005`) — in a document, and in a key a point read looks up — so a replicated SQLite document carrying one cannot be applied ([replication](docs/REPLICATION-FORMAT.md)) |
 
-PostgreSQL has bounded native cursors, finite admission and a read-back server
-**statement timeout**; SQLite's `statementTimeout` remains `false`. Neither
-backend advertises **row estimates**. See [host limits and cleanup](docs/HOSTS.md#postgresql-sessions)
+PostgreSQL has bounded native cursors, finite admission, a read-back server
+**statement timeout** and a labelled **row estimate** (the planner's, in
+`explain().budget.estimatedRows`); SQLite's `statementTimeout` and `rowEstimates`
+remain `false`. See [host limits and cleanup](docs/HOSTS.md#postgresql-sessions)
 for native versus buffered modes and cancellation settlement. PostgreSQL journal
 capture records participating managed writes; [its ordering and coverage](docs/LIVE-FORMAT.md#postgresql-managed-journals)
 remain explicit. Portable replication uses SQLite session/journal capture and
@@ -1734,7 +1736,8 @@ its side-effect-free status read are in
 - **Replication transport is supplied by the host.** Portable logical replication
   ships; arbitrary external writes are not captured as local row events.
 - **No statement timeout** on SQLite (the drivers expose no interrupt;
-  the capability slot is honestly `false`), no row estimates.
+  the capability slot is honestly `false`), and no row estimates there
+  either; PostgreSQL's planner gives a labelled one.
 - **Not safe for mutually hostile tenants** without the profile's
   mandatory predicate — SECURITY states the claims and non-claims.
 - **The job queue coordinates one database.** A shared SQLite file

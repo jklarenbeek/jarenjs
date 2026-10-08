@@ -39,7 +39,10 @@ binding declaration) and frozen. Two slots — `statementTimeout` and
 `rowEstimates` — are `false` on every SQLite driver because the
 underlying facts do not exist there (no interrupt, no progress
 handler, no estimate API). They are part of the contract so a driver
-that has the facts can fill them without a contract change.
+that has the facts can fill them without a contract change: the
+PostgreSQL driver fills `rowEstimates`, because its planner answers a row
+estimate for a statement, and `explain()` then reports that number with
+the label that says whose it is.
 
 ## The dialect seam (`src/dialect.js`, `src/dialects/sqlite.js`)
 
@@ -945,8 +948,11 @@ names the virtual table. `rank` is `null` or the k-nearest stage —
 what the fetch reads, the window the cut serves, the margin it keeps,
 and who decides the order (always the engine). `series` is `null` or
 the temporal record ("The temporal plan" above), whose `counts` are the
-last ACTUAL run's rather than an estimate. `estimatedRows` is ABSENT on SQLite drivers — the capability slot
-is empty and no number is fabricated. `residual` is `null` or
+last ACTUAL run's rather than an estimate. `budget.estimatedRows` is `'unavailable'` on SQLite drivers — the
+capability slot is empty and no number is fabricated — and, on PostgreSQL, the
+planner's own estimate for a native plan, `{ rows, source: 'postgresql-planner' }`,
+asked for by one statement of its own (`EXPLAIN (FORMAT JSON)`) beside the
+narrative's: an estimate and never a count. `residual` is `null` or
 `{ mode: 'row' | 'set' | 'knn', reasons: [{ construct, reason }] }` with
 reasons drawn from the deliberate-residual table. With
 `strict: true`, any residual is instead the compile error `JD0010`
