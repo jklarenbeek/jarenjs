@@ -337,9 +337,9 @@ plan; "extractable" below means what the pushdown planner already proves.
 | `orderBy` over extractable paths, an optional literal offset and limit (non-negative integers, written as numbers or quoted with `$const`; nested windows compose as the planner composes them, the innermost first), and a return that yields at most one item per row, reads no collection root and compiles without the store's registered operators | **maintained window**: a sorted structure over every matching row, the visible rows the `limit` after the first `offset`; ties broken by the collection key's text in code-point order — for a numeric key `10` sorts before `9`, which can differ from `execute`, whose ties follow row identity (declare the key as the last `orderBy` term for one tie order everywhere); an insert sorting beyond a full window is a no-op, one sorting above the offset shifts the visible rows. The window orders schema-conformant sort values: a stored `null`, or numbers beside strings, is outside that contract — the engine refuses to order it (`JQ2005`), SQL ranks a `null` where `$empty` puts an absent value, and the window ranks numbers before other values in the term's ascending order and the rest by their text | every matching row and its sort values, each an entry — the rows before the offset included (§12) |
 | whole-query `count` / `min` / `max`, and `sum` / `avg` over an `integer` member (the plan's aggregate), optional `where` | **running accumulator** plus a per-row contribution map — a delete can only be answered from retained contributions (§3: a `remove` carries no old value). `min`/`max` removal of the last extremum holder FALLS BACK to a recompute over the retained contributions; the accumulator alone cannot answer, and this fallback is the documented cost. Every aggregate but `count` skips a stored `null` term, as SQL does; a `sum` or `avg` answers from its terms only while the largest magnitude times the number of terms stays within ±(2^53 − 1) — the guard the query path checks; a term that is not an integer, which an `integer` member stores as given, counts as past it — because past it a fresh run adds left to right in the order it reads the rows (or SQL compensates a non-integer term's rounding), so from the write that crosses it the registration re-runs and `live.mode` says so (`{ strategy: 'rerun', mode: 'rerun', reason: "'accumulation' — integer accumulation exceeded its runtime exactness bound" }`; under a demanded `mode: 'incremental'` that write errors it `JD0051`, and a registration already past the bound refuses `JD0051`; beside a stored `null` term the re-run raises `JQ2001`, as `execute` does) | one contribution per matching row |
 | whole-query `sum` / `avg` over a `number` member | **re-run on invalidation**, the reason `plan.floatingAccumulation`: the answer is the engine's left-to-right addition over the matching rows in collection order, which a running accumulator would not reproduce, so every invalidation re-runs the whole document | the previous result, for diffing |
-| single-level `groupBy` with one or more keys and any return that reads only the group — its keys, its rows, externals — with no ordering, window or global read (the group form below) | **group maintenance**: reevaluate affected groups through the engine in source-row order; first surviving source occurrence determines group order | source documents and group outputs, with entry and byte credits — a return that copies rows charges their bytes again inside its output |
+| single-level `groupBy` with one or more keys and any return that reads only the group — its keys, its rows, externals — with no ordering, window or global read (the group form below), alone or as a group emission — `@jarenjs/linq`'s one `groupBy` followed by `select`/`where` steps (below) | **group maintenance**: reevaluate affected groups through the engine in source-row order; first surviving source occurrence determines group order | source documents and group outputs, with entry and byte credits — a return that copies rows charges their bytes again inside its output |
 | unordered SQL-native typed scalar distinct projections | **distinct maintenance**: keep the source holders of each value; deleting its earliest holder may move the value in first-occurrence order | source documents and unique outputs, with entry and byte credits |
-| count/sum/avg/min/max over unwindowed single-level groups | **group maintenance** followed by an engine fold over the retained group outputs in first-occurrence order | source documents and group outputs, with entry and byte credits |
+| count/sum/avg/min/max over unwindowed single-level groups or group emissions | **group maintenance** followed by an engine fold over the retained group outputs in first-occurrence order | source documents and group outputs, with entry and byte credits |
 | ordered or windowed distinct, ordered or windowed groups, aggregates over windowed groups and any other aggregate over groups | **re-run on invalidation** | the previous result, for diffing |
 | `where` whose spatial predicate is **refined** (the plan pushed a bounding-box or cell-range pre-filter and left the exact `$within`, bounded `$distance` or over-long cell prefix to the residual — `explain().prefilters` with `exact: false`), no order, no aggregate; optional per-row `select` | **incremental rows** — the geofence: the initial fetch narrows through the derived index, and every touched row is re-evaluated by the engine's EXACT predicate, so a point emits `add` when it enters the region, `remove` when it leaves, and nothing while it moves within (a whole-document return sees a `replace` carrying the new position) | the result rows |
 | a refined spatial predicate over a collection with **no document key** (`key: null`, rowid identity) | **re-run on invalidation** — the per-row strategy tracks a row by its declared key, and a rowid is not one; the reason says `rows without a document key cannot be tracked` | the previous result, for diffing |
@@ -352,7 +352,7 @@ plan; "extractable" below means what the pushdown planner already proves.
 | nested entity graph projections with indexed equality edges and unique binding names | **graph dependency maintenance**; a child change refreshes its bounded owners | source rows, reverse key indexes and graph outputs |
 | explicit two-level collection groups with a singular parent key and bounded nested input | **nested-group maintenance**; recompute affected parents through the query engine | source leaves and parent outputs |
 | unindexed/non-equi joins, self joins, explicit entity ordering/windows and object-root documents | **re-run on invalidation**, with the dependency or planner reason | previous result for diffing |
-| anything else: non-translatable predicates, `limit` without `orderBy`, a window bound that is not a literal non-negative integer, an offset or limit over a group, distinct projection, aggregate or nested group, an entity window, an ordered query inside a one-item array constructor (its one row is the whole array), an ordered query whose return yields several items per row or reads the collection root, a group whose return reads the collection root, a document the live evaluator cannot compile without the store's registered operators or zone provider (a rows, window or group document using a registered operator, or a named zone in a group key or a projection — the planner's reason names what stopped it; a zoned `$where` fails registration `JQ0003`, as `execute` fails), `@jarenjs/linq`'s nested two-level `groupBy` emission | **re-run on invalidation**, the reason named | the previous result, for diffing |
+| anything else: non-translatable predicates, `limit` without `orderBy`, a window bound that is not a literal non-negative integer, an offset or limit over a group, distinct projection, aggregate or nested group, an entity window, an ordered query inside a one-item array constructor (its one row is the whole array), an ordered query whose return yields several items per row or reads the collection root, a group whose return reads the collection root, a document the live evaluator cannot compile without the store's registered operators or zone provider (a rows, window or group document using a registered operator, or a named zone in a group key or a projection — the planner's reason names what stopped it; a zoned `$where` fails registration `JQ0003`, as `execute` fails), `@jarenjs/linq`'s nested two-level `groupBy` emission (a group of groups), and a `@jarenjs/linq` chain that orders, windows or deduplicates after `groupBy` | **re-run on invalidation**, the reason named | the previous result, for diffing |
 
 The **physical mapping** of a `derive: 'bbox'` index (MODEL-FORMAT §2.1,
 `physical`) does not move a query between these rows. It can change one
@@ -408,10 +408,41 @@ themselves (`"items": ["$it"]`), a nested query over `$it`, a bare member
 path. All are maintained the same way — every output depends on one
 group's rows alone, which is what per-group recomputation needs — and
 what the key, filter and return read decides the dependencies (§8). A
-return that reads the collection root (`$`, `$.…`, `$[…]`), an `$orderby`
+return that reads the collection root (`$`, `$.…`, `$[…]`, or the root
+named inside a path filter, as in `$it[?@.n > $[0].n]`), an `$orderby`
 or any other phrase key, a window over the group, and a document the live
 evaluator cannot compile without the store's registered operators or
 zone provider re-run, named. Multiple declared keys follow the same rule.
+
+A **group emission** — how `@jarenjs/linq` spells one `groupBy` followed
+by `select`/`where` steps — is maintained the same way. Every level
+around the group form is
+`{ "$for": { "it": [<the level inside>] }, "$where"?, "$return" }` — one
+binding over a one-item packed source, with a filter and a return that
+read no collection root. The steps `groupBy((r) => r.dept)`,
+`where((g) => g.items.count().gt(1))` and
+`select((g) => ({ key: g.key, total: g.items.all().pay.sum() }))` emit:
+
+```json
+{ "$for": { "it": [{ "$for": { "it": "$[*]" },
+                     "$groupby": { "g": "$it.dept" },
+                     "$return": { "key": { "$default": ["$g", null] },
+                                  "items": ["$it"] } }] },
+  "$where": { "$gt": [{ "$count": "$it.items[*]" }, 1] },
+  "$return": { "key": "$it.key", "total": { "$sum": "$it.items[*].pay" } } }
+```
+
+Each outer level maps or filters one group object at a time, so only the
+affected groups are evaluated again, and an aggregate over an emission
+(`{ "$sum": <emission> }`, the chain's `sum()`) folds the group outputs.
+A `where` before `groupBy` is the row filter, which decides whether a row
+is filed at all (its key decides the group); one after it filters group
+objects. The outer levels
+read the rows only through `items`, a bare row read, so an emission
+depends on every member (§8). A group of groups (`groupBy().groupBy()`)
+and a chain that orders (`orderBy`), windows (`take`, `skip`) or
+deduplicates (`distinct`) after `groupBy` re-run with the reason named —
+a window after the last step as `a windowed group re-runs`.
 
 ## 8. Invalidation
 
@@ -426,12 +457,20 @@ registration:
   key): an update record touching only other members is skipped — but
   a group that reads a row bare (`"items": ["$it"]`, `$get` over a row,
   a nested query over `$it`, a row-valued key) depends on every member,
-  while counting its rows (`{ "$count": "$it" }`) reads none. A group
+  and so does every group emission (§7), while counting a group's rows
+  (`{ "$count": "$it" }`) reads none. A group
   still reads the position of each row it holds that a skipped record
-  touches (one statement per row): a key deleted and inserted again in
-  one transaction reaches capture as a diff of its members, yet it is a
-  new row at the end of the source order, and the group moves it there
-  as a delete and an insert would;
+  touches (one statement per row): a key deleted and inserted again with
+  another value in one transaction reaches capture as a diff of its
+  members, yet it is a new row at the end of the source order, and the
+  group moves it there as a delete and an insert would. Inserted again
+  with an EQUAL value, the key reaches capture as no change at all (a
+  commit that changed nothing else carries no record): a group, distinct
+  projection or nested group keeps the row in its old place until a later
+  change to that row reaches capture, while `execute` reads it at its new
+  place at once (and a re-run does at its next record). Telling that move
+  apart would mean reading every held row's position on every record,
+  which maintenance does not do;
 - row and window strategies depend on their WHOLE collection — the
   result carries the row documents, so any member change changes an
   emitted row.
@@ -463,7 +502,12 @@ The result document is `{ "rows": [...] }` — always. Row and window
 strategies fill `rows` with result items; group strategies with one
 row per group; a whole-query aggregate is a ZERO-OR-ONE row result
 (`rows: [42]`; an empty `min()` is `rows: []`, the engine's
-undefined-as-absent mapping made visible). Consumers hold the result
+undefined-as-absent mapping made visible). In every mode — maintained,
+re-run and resnapshot, on PostgreSQL too — `rows` is the document's result
+sequence, the array `execute` answers for the document packed in a
+one-element array: a document registered unpacked whose result is ONE
+array value has that array as its one row, where `execute` of the
+unpacked document answers the array itself. Consumers hold the result
 document and apply patches to it; ops are `add`, `remove` and
 `replace` only.
 
@@ -846,9 +890,11 @@ does not substitute JavaScript arithmetic for query operators.
 
 Keys preserve structural equality and distinguish missing from null. Source
 holders retain physical row positions: changing a holder preserves its
-position, a key deleted and inserted again — in one transaction too — takes
-a new one at the end, and deleting a group's earliest holder may move that
-group's output. Unaffected group outputs retain reference identity. Only affected
+position, a key deleted and inserted again takes a new one at the end — in
+one transaction too, unless it comes back with an equal value, which
+capture records as no change: the holder then keeps its old position until
+a later change to that row reaches capture (§8) — and deleting a group's
+earliest holder may move that group's output. Unaffected group outputs retain reference identity. Only affected
 groups are reevaluated, followed by an optional final aggregate over all group
 outputs. This costs work proportional to the affected groups plus group-output
 ordering/folding, rather than constant-time arithmetic deltas.

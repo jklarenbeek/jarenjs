@@ -648,6 +648,35 @@ value the store did not honor now refuse by code, before any statement:
   `JQ2001`, as `execute` does, where the running sum kept answering. A stored
   `null` term counted toward a live `$avg` and could be its `$min`; `$avg`,
   `$min` and `$max` now skip it, as `execute` does.
+- An `@jarenjs/linq` emission of one `groupBy` followed by `select`/`where`
+  steps is maintained (`group`) instead of re-run, and so is an aggregate
+  over one (`{ "$sum": <emission> }`, the chain's `sum()`);
+  `mode: 'incremental'` now accepts them. Such an emission depends on every
+  member of a row and is charged as every maintained group is — each source
+  row and each output item an entry — so past `live.maxMaintained` it is
+  `JD2060` where it re-ran (`mode: 'rerun'` still re-runs it). A row deleted
+  and inserted again with an equal value in one transaction keeps its old
+  place in the result until a later change to that row reaches capture,
+  which records no change for it, where the re-run took the new place at
+  its next record. An emission that still re-runs names the group's own
+  reason where it named the `'$for'` one: `a windowed group re-runs` for a
+  `take` or `skip` after its last step,
+  `the group filter did not translate: …` for a row filter the planner does
+  not translate, `a spatial group re-runs: …` for a refined spatial one and
+  `rows without a document key cannot be tracked` on an unkeyed collection;
+  a group of groups and a chain that orders or deduplicates after `groupBy`
+  re-run as before.
+- A re-run or resnapshot live query — SQLite or PostgreSQL, collection or
+  entity — whose document was registered unpacked (a FLWOR rather than a
+  one-element array around it, as `toDocument()` hands a chain over) and
+  whose result is ONE array value had that array's items as its rows; it
+  now has the array as its one row, as every maintained strategy and
+  `execute` of the packed document answer. A refusal still names its place
+  in the document as registered.
+- A live group, nested group or window whose document names the collection
+  root inside a path filter (`$it[?@.n > $[0].n]`) was maintained over one
+  group or one row at a time and answered otherwise than `execute`; it now
+  re-runs, the reason named.
 
 ### Allocated entity keys on PostgreSQL
 

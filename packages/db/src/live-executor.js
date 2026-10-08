@@ -53,9 +53,23 @@ export function createLiveExecutor(context, bounds, signal) {
     { ...context, connection, profile, state });
   return {
     async execute() {
-      rows = 0; bytes = 0;
-      const result = await engine.execute(context.document, { externals: context.externals, signal });
-      const items = result === undefined ? [] : Array.isArray(result) ? result : [result];
+      // the rows are the result sequence (LIVE-FORMAT §9): a document
+      // registered unpacked runs packed, so a result that is one array is
+      // one row, as every maintained strategy answers it — and a refusal is
+      // the one the document as registered raises, naming its place there
+      const run = (document) => {
+        rows = 0; bytes = 0;
+        return engine.execute(document, { externals: context.externals, signal });
+      };
+      const packed = Array.isArray(context.document) ? context.document : [context.document];
+      let items;
+      try {
+        items = await run(packed);
+      }
+      catch (error) {
+        if (packed !== context.document) await run(context.document);
+        throw error;
+      }
       if (items.length > bounds.maxMaintained || utf8Length(JSON.stringify(items)) > bounds.maxBytes)
         throw new DbRuntimeError('JD2060', 'resnapshot result exceeded its maintained row or byte credits');
       return items;

@@ -29,7 +29,7 @@ import { planQuery, BIND_REASONS } from './plan.js';
 import { createSortedWindow } from './window.js';
 import { classifyEventTime, bucketStrategy, rollingStrategy } from './live-time.js';
 import { joinStrategy } from './live-join.js';
-import { classifyNestedGroup, nestedGroupStrategy } from './live-nested.js';
+import { classifyNestedGroup, nestedGroupStrategy, readsRoot } from './live-nested.js';
 import { LIVE_DEFAULTS } from './live-options.js';
 
 /** The store-level live bounds and their defaults (§12: printed,
@@ -142,13 +142,14 @@ function documentsSource(binding, where) {
 }
 
 /** Whether a document fragment never reads the collection root (`$`,
- * `$.…`, `$[…]`): a part the maintenance evaluates over a subset of
- * the rows — one group, one row — would see that subset as the
- * collection. A `$const` is quoted, never read.
+ * `$.…`, `$[…]`, or the root inside a path filter — {@link readsRoot}): a
+ * part the maintenance evaluates over a subset of the rows — one group,
+ * one row — would see that subset as the collection. A `$const` is
+ * quoted, never read.
  * @param {any} node
  * @returns {boolean} */
 function readsNoRoot(node) {
-  if (typeof node === 'string') return node !== '$' && !/^\$(?:\.|\[)/.test(node);
+  if (typeof node === 'string') return !readsRoot(node);
   if (Array.isArray(node)) return node.every(readsNoRoot);
   if (!isJsonObject(node) || Object.hasOwn(node, '$const')) return true;
   return Object.values(node).every(readsNoRoot);
@@ -189,6 +190,30 @@ function recogniseGroupForm(inner) {
   if (groupNames.length === 0) return null;
   if (![inner.$where, inner.$groupby, inner.$return].every(readsNoRoot)) return null;
   return { binding, key: groupNames.map((name) => [inner.$groupby[name]]), where: inner.$where };
+}
+
+/**
+ * Recognise a group emission (§7) — how `@jarenjs/linq` spells one
+ * `groupBy` followed by `select`/`where` steps: at every outer level
+ * `{ $for: { <name>: [<inner>] }, $where?, $return }`, one binding over a
+ * one-item packed source and a filter and return that never read the
+ * collection root, around a group form ({@link recogniseGroupForm}). Each
+ * outer level maps or filters one group object at a time, so the whole
+ * emission evaluated over one group's rows yields exactly that group's
+ * outputs. A `$groupby`, `$orderby`, window or `$distinct` at an outer
+ * level is not an emission.
+ * @param {any} document
+ * @returns {null | { binding: string, key: any, where: any }} the group form inside
+ */
+function recogniseGroupEmission(document) {
+  if (!isJsonObject(document) || !isJsonObject(document.$for)) return null;
+  const allowed = new Set(['$for', '$where', '$return']);
+  if (!Object.keys(document).every((key) => allowed.has(key))) return null;
+  const sources = Object.values(document.$for);
+  if (sources.length !== 1 || !Array.isArray(sources[0]) || sources[0].length !== 1) return null;
+  if (![document.$where, document.$return].every(readsNoRoot)) return null;
+  const [source] = sources[0];
+  return recogniseGroupForm(source) ?? recogniseGroupEmission(source);
 }
 
 /**
@@ -341,7 +366,7 @@ export function classifyLiveQuery(document, queryShape, keyed, eventTime = null)
 
   if (aggregate !== null) {
     if (windowed) return rerun('a windowed aggregate maintains no accumulator');
-    if (recogniseGroupForm(inner) !== null) {
+    if ((recogniseGroupForm(inner) ?? recogniseGroupEmission(inner)) !== null) {
       const grouped = classifyLiveQuery(inner, queryShape, keyed, eventTime);
       if (grouped.strategy === 'group') return { ...grouped, aggregate: aggregate.name };
     }
@@ -360,9 +385,16 @@ export function classifyLiveQuery(document, queryShape, keyed, eventTime = null)
     };
   }
 
-  const group = recogniseGroupForm(inner);
+  const emission = recogniseGroupEmission(inner);
+  const group = emission ?? recogniseGroupForm(inner);
   if (group !== null) {
     if (windowed) return rerun('a windowed group re-runs');
+    // the strategy evaluates the whole document once per group; an
+    // emission is compiled before its row filter is planned apart from
+    // it, so a refusal names the filter's place in the document
+    const compiles = compilesBare(inner);
+    const uncompiled = () => rerun(plannerReason(planQuery(inner, queryShape, {})));
+    if (emission !== null && !compiles) return uncompiled();
     const carrier = documentsSource(group.binding, group.where);
     const planned = planQuery(carrier, queryShape, {});
     if (planned.mode !== 'native') {
@@ -371,11 +403,15 @@ export function classifyLiveQuery(document, queryShape, keyed, eventTime = null)
         : `the group filter did not translate: ${plannerReason(planned)}`);
     }
     if (!keyed) return rerun('rows without a document key cannot be tracked');
-    // the strategy evaluates the whole document once per group
-    if (!compilesBare(inner)) return rerun(plannerReason(planQuery(inner, queryShape, {})));
+    if (!compiles) return uncompiled();
     return {
       strategy: 'group', inner, binding: group.binding, key: group.key, carrier,
-      deps: groupDeps(analyzeQuery(inner).root),
+      // an emission's own `$where` filters group objects, so the row filter
+      // rides on the description; its outer levels read the rows only
+      // through group objects, whose members (`key`, `items`) are not
+      // document members, so it depends on every member of a row
+      ...(emission === null ? { deps: groupDeps(analyzeQuery(inner).root) }
+        : { where: group.where ?? null, deps: { whole: true, members: new Set() } }),
     };
   }
 
@@ -856,24 +892,34 @@ function accumulatorStrategy(description, context) {
  * Everything outside the table: re-run the WHOLE query on
  * invalidation and diff against the previous result with value-equal
  * reference reuse — declared, honest, reported through `live.mode`.
+ * The rows are the document's result sequence (§9), as every maintained
+ * strategy evaluates it: a document registered unpacked runs packed, so
+ * a result that is one array is one row, never the array's items — and
+ * a refusal is the one the document as registered raises, naming its
+ * place there.
  * @param {any} description
  * @param {any} context
  */
 function rerunStrategy(description, context) {
   const stats = { reruns: 0 };
-  const normalise = (result) => (result === undefined ? []
-    : Array.isArray(result) ? result : [result]);
+  const { document, externals } = context;
+  const packed = Array.isArray(document) ? document : [document];
+  const run = () => {
+    try {
+      return context.execute(packed, { externals });
+    }
+    catch (error) {
+      if (packed !== document) context.execute(document, { externals });
+      throw error;
+    }
+  };
   return {
-    init: () => chain(
-      context.execute(context.document, { externals: context.externals }),
-      normalise),
+    init: run,
     entries: (rows) => rows.length,
     stats: () => ({ ...stats }),
     apply(record, previousRows) {
       stats.reruns += 1;
-      const result = context.execute(context.document, { externals: context.externals });
-      const next = shareByValue(previousRows, normalise(result));
-      return diffAgainst(previousRows, next);
+      return diffAgainst(previousRows, shareByValue(previousRows, run()));
     },
   };
 }

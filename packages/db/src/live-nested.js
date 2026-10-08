@@ -8,6 +8,17 @@ import { utf8Length } from './cursor.js';
 /** The dependency set of a strategy that reads every member of a row. */
 const WHOLE = { whole: true, members: new Set() };
 
+/**
+ * Whether a query string reads the collection root: the root itself (`$`,
+ * `$.…`, `$[…]`) or the root named inside a path filter
+ * (`$it.items[?@.n > $[0].n]`). A filter cannot name a variable, so any
+ * later `$` in a path is the root — or sits in a quoted name, where
+ * answering yes only costs a re-run.
+ * @param {string} text
+ * @returns {boolean}
+ */
+export const readsRoot = (text) => /^\$(?:$|[.[])/.test(text) || (text.startsWith('$') && text.includes('$', 1));
+
 /** Recognise nested groups whose parent key is a singular source member. @param {any} document */
 export function classifyNestedGroup(document) {
   const inner = Array.isArray(document) && document.length === 1 ? document[0] : document;
@@ -24,7 +35,7 @@ export function classifyNestedGroup(document) {
   let supported = true;
   const allowed = new Set(['$for', '$where', '$groupby', '$return', '$count', '$sum', '$avg', '$min', '$max', '$default', '$eq', '$ne', '$lt', '$le', '$gt', '$ge', '$and', '$or']);
   const visit = (node) => {
-    if (typeof node === 'string' && (node === '$' || node.startsWith('$.') || node.startsWith('$['))) supported = false;
+    if (typeof node === 'string' && readsRoot(node)) supported = false;
     if (Array.isArray(node)) { node.forEach(visit); return; }
     if (node === null || typeof node !== 'object') return;
     if (node.$groupby) count++;
@@ -44,11 +55,19 @@ export function classifyNestedGroup(document) {
   return { strategy: 'nested-group', inner, binding, key };
 }
 
-/** @param {any} description @param {any} context */
+/**
+ * Per-group recomputation: every source row is filed under its group key,
+ * and a change re-evaluates the whole document over the rows of the groups
+ * it reaches. Rows are filed through the row filter: `description.where`
+ * when the description carries one (`null` for none) — a group emission's
+ * own `$where` filters group objects, not rows — else the document's.
+ * @param {any} description @param {any} context
+ */
 export function nestedGroupStrategy(description, context) {
   const { inner, binding, key } = description;
+  const where = description.where === undefined ? inner.$where : description.where ?? undefined;
   const keyOf = compileJsonQuery([{ $for: { [binding]: '$[*]' },
-    ...(inner.$where === undefined ? {} : { $where: inner.$where }), $return: [key] }]);
+    ...(where === undefined ? {} : { $where: where }), $return: [key] }]);
   const evaluate = compileJsonQuery([inner]);
   const aggregate = description.aggregate === undefined ? null
     : compileJsonQuery([{ [description.aggregate]: '$[*]' }]);
@@ -109,7 +128,7 @@ export function nestedGroupStrategy(description, context) {
     close() { docs.clear(); groups.clear(); results.clear(); positions.clear(); },
     init() {
       const carrier = description.carrier ?? { $for: { [binding]: '$[*]' },
-        ...(inner.$where === undefined ? {} : { $where: inner.$where }), $return: `$${binding}` };
+        ...(where === undefined ? {} : { $where: where }), $return: `$${binding}` };
       const source = [{ $subsequence: [carrier, 0, context.maxMaintained + 1] }];
       for (const doc of context.execute(source, { externals: context.externals })) add(context.keyOf(doc), doc);
       check();
