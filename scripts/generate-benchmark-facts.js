@@ -297,6 +297,28 @@ function geoTable(keep) {
   });
   return ['', '| scenario | Jaren | rival | ratio |', '|---|---|---|---|', ...rows, ''].join('\n');
 }
+/**
+ * The replicated cascading delete of the change-flow result: one row per
+ * capture mode, then what the rows say — the rows the delete's foreign keys
+ * removed and nulled, whether both modes replicated the same envelope, and
+ * journal capture's delete p50 as a multiple of session capture's, whichever
+ * way it falls.
+ * @param {any[]} rows - the result's `cascade` rows
+ * @param {(value: number) => string} fixed
+ * @returns {string[]}
+ */
+function cascadeRows(rows, fixed) {
+  const journal = rows.find((row) => row.capture === 'journal');
+  const session = rows.find((row) => row.capture === 'session');
+  const same = journal.operations === session.operations && journal.bytes === session.bytes;
+  return ['', '| Capture | Rows removed | Rows nulled | Operations | Bytes | Delete p50 ms | Delete p95 ms | Apply p50 ms |',
+    '|---|---:|---:|---:|---:|---:|---:|---:|',
+    ...rows.map((row) => `| ${row.capture} | ${row.removed} | ${row.nulled} | ${row.operations} | ${row.bytes} | ${fixed(row.deleteMs.p50)} | ${fixed(row.deleteMs.p95)} | ${fixed(row.applyMs.p50)} |`),
+    '', `A parent's delete whose foreign keys remove ${journal.removed} rows and null ${journal.nulled} replicates `
+      + (same ? `as the same ${journal.operations}-operation envelope from either capture mode. ` : 'as the envelopes above. ')
+      + `Journal capture reads those rows before the delete runs: its delete p50 is `
+      + `${ratio(journal.deleteMs.p50 / session.deleteMs.p50)}× session capture's.`];
+}
 const FACTS = {
   'db.changeflow': () => {
     const report = JSON.parse(readFileSync(join(ROOT, 'benchmark/changeflow-results.json'), 'utf8'));
@@ -309,6 +331,7 @@ const FACTS = {
       '', '| Capture | Envelopes | Operations | Bytes | Apply p50 ms | Replay p50 ms | Conflict p50 ms |',
       '|---|---:|---:|---:|---:|---:|---:|---:|',
       ...report.replication.map((row) => `| ${row.capture} | ${row.envelopes} | ${row.operations} | ${row.bytes} | ${fixed(row.applyMs.p50)} | ${fixed(row.replayMs.p50)} | ${fixed(row.conflictMs.p50)} |`),
+      ...(report.cascade === undefined ? [] : cascadeRows(report.cascade, fixed)),
       '', 'Selective maintenance avoids repeated full SQL evaluation. Initialization and high-fan-out maintenance can cost more than rerunning; the table includes both. Offset groups remain rerun in both requested modes.',
     ].join('\n') + '\n\n';
   },

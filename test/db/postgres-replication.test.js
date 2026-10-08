@@ -320,7 +320,17 @@ describe('PostgreSQL managed replication', { skip: !url && 'JAREN_PG_URL is not 
         relation: { to: 'Tag', many: true, via: 'parentId', onDelete: 'cascade' },
       } };
       cascade.entities.Tag.schema.properties.parentId = { type: 'string' };
-      await assert.rejects(open('postgres', 'cascade', {}, { model: cascade }), { code: 'JD0051' });
+      // a cascading model enrolls, and its journal carries the child rows a delete cascades to
+      const origin = await open('postgres', 'cascade', {}, { model: cascade });
+      const replica = await open('sqlite', 'copy', {}, { model: cascade });
+      await origin.entity('Parent').create({ id: 'p' });
+      await origin.entity('Tag').create({ id: 't', parentId: 'p' });
+      await origin.entity('Parent').delete('p');
+      const envelopes = (await origin.replication.page()).items;
+      assert.deepEqual(envelopes[2].operations.map((op) => op.table).sort(), ['Parent', 'Tag']);
+      for (const envelope of envelopes) assert.equal((await replica.replication.apply(envelope)).status, 'applied');
+      assert.equal(await replica.entity('Tag').get('t'), undefined);
+      assert.deepEqual(await replicaState(replica), await replicaState(origin));
       await assert.rejects(open('postgres', 'physical', {}, { model: { $model: '0.1', entities: { Item: {
         schema: { type: 'object', properties: { id: { type: 'integer', 'x-entity': { key: true } } } },
         physical: { table: 'items', columns: { id: { name: 'id', codec: 'integer', null: 'reject' } } },

@@ -284,27 +284,28 @@ for (const mode of ['session', 'journal']) it(`${mode}: undeclared membership ca
   finally { await a.close(); await b.close(); }
 });
 
-it('journal replication refuses hidden child cascades, while session capture includes their operations', async () => {
+it('journal and session replication both carry the child rows a parent delete cascades to', async () => {
   const model = structuredClone(replicationModel);
   model.entities.Parent.schema.properties.children = { 'x-entity': {
     relation: { to: 'Tag', many: true, via: 'parentId', onDelete: 'cascade' },
   } };
   model.entities.Tag.schema.properties.parentId = { type: 'string' };
-  await assert.rejects(openStore(model, { driver: nodeDriver(), capture: { mode: 'journal' }, replication: { replica: 'j' } }),
-    { code: 'JD0051' });
-  const a = await openStore(model, { driver: nodeDriver(), capture: { mode: 'session' }, replication: { replica: 'a' } });
-  const b = await openStore(model, { driver: nodeDriver(), capture: { mode: 'session' }, replication: { replica: 'b' } });
-  try {
-    await a.entity('Parent').create({ id: 'p' });
-    await a.entity('Tag').create({ id: 't', parentId: 'p' });
-    for (const envelope of (await a.replication.page()).items) await b.replication.apply(envelope);
-    await a.entity('Parent').delete('p');
-    const envelope = (await a.replication.page({ after: 2 })).items[0];
-    assert.deepEqual(envelope.operations.map((op) => op.table).sort(), ['Parent', 'Tag']);
-    await b.replication.apply(envelope);
-    assert.equal(await b.entity('Tag').get('t'), undefined);
+  for (const mode of ['journal', 'session']) {
+    const a = await openStore(model, { driver: nodeDriver(), capture: { mode }, replication: { replica: 'a' } });
+    const b = await openStore(model, { driver: nodeDriver(), capture: { mode }, replication: { replica: 'b' } });
+    try {
+      await a.entity('Parent').create({ id: 'p' });
+      await a.entity('Tag').create({ id: 't', parentId: 'p' });
+      for (const envelope of (await a.replication.page()).items) await b.replication.apply(envelope);
+      await a.entity('Parent').delete('p');
+      const envelope = (await a.replication.page({ after: 2 })).items[0];
+      assert.deepEqual(envelope.operations.map((op) => op.table).sort(), ['Parent', 'Tag'], mode);
+      assert.equal((await b.replication.apply(envelope)).status, 'applied', mode);
+      assert.equal(await b.entity('Tag').get('t'), undefined, mode);
+      assert.deepEqual(await replicaState(b), await replicaState(a), mode);
+    }
+    finally { await a.close(); await b.close(); }
   }
-  finally { await a.close(); await b.close(); }
 });
 
 it('snapshot accumulation and resolver output obey byte capacity without partial effects', async () => {

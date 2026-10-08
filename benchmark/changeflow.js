@@ -7,6 +7,7 @@ import * as assert from 'node:assert/strict';
 import { openStore } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';
 import { liveOracle, replicationModel, replicaState } from '../test/db/oracle/replication.js';
+import { cascadeModel, cascadeScenario } from '../test/db/oracle/cascade.js';
 
 const samples = 15;
 const stats = (values) => {
@@ -118,9 +119,22 @@ for (const mode of ['session', 'journal']) {
   }
   finally { await source.close(); await target.close(); }
 }
+// a parent's delete whose foreign keys remove 100 children and null 20 notes,
+// replicated from each capture mode
+const cascade = [];
+for (const mode of ['session', 'journal']) {
+  const store = await openStore(cascadeModel(), { driver: nodeDriver(), capture: { mode }, replication: { replica: 'source' } });
+  const replica = await openStore(cascadeModel(), { driver: nodeDriver(), capture: { mode }, replication: { replica: 'target' } });
+  try {
+    const run = await cascadeScenario({ store, replica, rounds: samples, children: 100, notes: 20 });
+    cascade.push({ capture: mode, operations: run.operations, bytes: run.bytes, removed: run.removed, nulled: run.nulled,
+      deleteMs: stats(run.deleteMs), applyMs: stats(run.applyMs) });
+  }
+  finally { await store.close(); await replica.close(); }
+}
 const report = { $changeflowBenchmark: '0.1', recipe: 'node --expose-gc benchmark/changeflow.js',
   measuredAt: new Date().toISOString(), runtime: process.version, host: { platform: platform(), cpu: cpus()[0]?.model }, samples,
   correctness: 'Every mutation checked against fresh SQL and a patch-only consumer; every replication delivery checked against complete state.',
-  memory: { rssBytes: process.memoryUsage().rss }, live: measurements, replication };
+  memory: { rssBytes: process.memoryUsage().rss }, live: measurements, replication, cascade };
 await writeFile(new URL('./changeflow-results.json', import.meta.url), JSON.stringify(report, null, 2) + '\n');
 console.log(JSON.stringify(report, null, 2));

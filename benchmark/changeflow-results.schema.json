@@ -76,6 +76,22 @@
           "conflictMs"
         ]
       }
+    },
+    "cascade": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "required": [
+          "capture",
+          "operations",
+          "bytes",
+          "removed",
+          "nulled",
+          "deleteMs",
+          "applyMs"
+        ]
+      }
     }
   }
 }

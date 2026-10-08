@@ -29,7 +29,7 @@ describe('the page-bound gate', () => {
         at = source.indexOf('drainPage(cursor, {', at + 1);
       }
     }
-    assert.deepStrictEqual(drains.map((drain) => drain.file).sort(), ['capture.js', 'live-executor.js', 'query.js', 'replication.js', 'store.js'],
+    assert.deepStrictEqual(drains.map((drain) => drain.file).sort(), ['capture.js', 'live-executor.js', 'query.js', 'replication.js'],
       'entity, live snapshot, change and replication pages share the same bounded drain');
     for (const { file, call } of drains) {
       assert.match(call, /\blimit\b/, `${file}: the page passes its row bound`);

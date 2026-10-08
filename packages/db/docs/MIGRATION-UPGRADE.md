@@ -892,6 +892,25 @@ the database's own foreign-key actions ([LIVE-FORMAT](LIVE-FORMAT.md) §4):
   an envelope within it can still refuse at commit (`JD2074`). The message,
   `a cascading delete exceeds replication capacity`, replaces
   `membership cascade exceeds replication capacity`.
+- Journal replication now opens for models with cascading or set-null
+  relations, where it refused `JD0051` with
+  `journal replication cannot capture cascading or set-null child relations; use session capture`;
+  the rows such a delete removes or nulls count against the same `JD2106`
+  credits as its membership rows.
+- Replay, by `apply` and by `reset` in either capture mode, now writes a row
+  moved off a parent before the removals whose cascades would reach it, so the
+  envelope of a transaction that moves a child to a new parent and deletes the
+  old one applies and resets where it refused `JD2104` with
+  `the stored logical row differs from the requested replicated value` and
+  `reset did not store the requested logical state`.
+- Replay now also runs the write that releases a value of an entity's unique
+  slot (a one-to-one key, a unique member, a unique index) before the write
+  that takes it, so an envelope passing unique values between entity rows
+  applies and resets whatever their canonical order, where a row taking a value
+  before the row releasing it refused `JD2005`. Values rotated between rows
+  still refuse `JD2005`, and so does a collection document that takes a value
+  before the document releasing it. A reset now writes in canonical order
+  instead of the order the replica stored its rows in.
 
 ## Measured costs
 

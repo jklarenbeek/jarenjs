@@ -1321,6 +1321,10 @@ supplies bigint sequence storage, binary text collation, enrollment checks and
 the shared capture write lock. `dialects/postgres-metadata.js` verifies table
 shapes for both jobs and replication. Native replay defers managed foreign keys
 inside its transaction; no checkpoint, receipt or outbox engine is duplicated.
+Replay writes entity rows in a dependency order over the canonical one, built
+from the mapping (its foreign-key edges from `cascade.js`): a row moved off a
+parent the transaction removes before that removal, and the write releasing a
+unique value before the write taking it.
 
 `live-join.js` compiles indexed dependency descriptors from the entity planner
 and mapping. The same cache strategy maintains inner/left joins and eligible

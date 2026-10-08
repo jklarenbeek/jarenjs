@@ -2783,9 +2783,6 @@ export function openStore(model, options) {
               ? (hasSessions ? 'session' : 'journal')
               : wanted;
           }
-          if (options.replication !== undefined && captureMode === 'journal'
-            && Object.values(mapping?.entities ?? {}).some((entity) => entity.foreignKeys.some((fk) => fk.onDelete !== 'restrict')))
-            throw new DbCompileError('JD0051', 'journal replication cannot capture cascading or set-null child relations; use session capture');
           const captureShapes = new Map();
           if (captureMode !== 'none') {
             for (const [collectionName, plan] of plans) {
@@ -4856,7 +4853,7 @@ export function openStore(model, options) {
           }
           return chain(jobsEngine === null ? null : jobsEngine.ready, () => {
           if (options.replication !== undefined) {
-            replicationEngine = createReplicationEngine({ connection, capture,
+            replicationEngine = createReplicationEngine({ connection, capture, mapping,
               managedTables: [...captureShapes.keys()],
               config: options.replication, model: shapeHash(model), now: runtime.now, bracket: firstOpen,
               rows: createLogicalRows({ connection, shapes: captureShapes, capture,

@@ -8,12 +8,14 @@
  * capture writes for it. Beside it, a trial model widened to every shape a
  * delete's closure meets, the complete logical state a store's records
  * address, and a seeded random workload that checks every record it commits
- * against that state.
+ * against that state. Last, the timed scenario of a replicated cascading
+ * delete.
  */
 import * as assert from 'node:assert/strict';
+import { performance } from 'node:perf_hooks';
 import { mulberry32 } from '@jarenjs/core/random';
 import { applyJSONPatch } from '@jarenjs/json/patch';
-import { compileEntityModel } from '@jarenjs/db';
+import { compileEntityModel, encodeReplication } from '@jarenjs/db';
 
 /** @param {string} [type] */
 const key = (type = 'string') => ({ type, 'x-entity': { key: true } });
@@ -438,4 +440,62 @@ export async function randomWorkload(store, seed, operations,
   }
   finally { stop(); }
   return { records: records.map((record) => canonicalPatch(record.patch)), operations: counts, refused };
+}
+
+/**
+ * A replicated cascading delete, timed: each round creates a parent with
+ * `children` cascading children and `notes` set-null notes in one
+ * transaction and delivers it to `replica`, then times the parent's delete on
+ * `store` and the apply of its envelope on `replica`, and requires equal
+ * complete states. Every delete envelope must carry the parent and each row
+ * its foreign keys changed. Both stores are empty, replicated and opened with
+ * {@link cascadeModel}.
+ * @param {{ store: any, replica: any, rounds: number, children: number, notes: number }} options
+ * @returns {Promise<{ deleteMs: number[], applyMs: number[], operations: number, bytes: number,
+ *   removed: number, nulled: number }>} the delete and apply times of each
+ *   round; of the first round's delete envelope, the operation count, the
+ *   canonical encoding's byte length, and the rows the parent's foreign keys
+ *   removed and nulled
+ */
+export async function cascadeScenario({ store, replica, rounds, children, notes }) {
+  const model = cascadeModel();
+  /** @type {number[]} */
+  const deleteMs = [];
+  /** @type {number[]} */
+  const applyMs = [];
+  let operations = 0;
+  let bytes = 0;
+  let removed = 0;
+  let nulled = 0;
+  let next = (await store.replication.page({ after: 0, limit: 1 })).highWatermark;
+  for (let round = 0; round < rounds; round += 1) {
+    const parent = `p${round}`;
+    await store.transaction(async (/** @type {any} */ tx) => {
+      await tx.entity('Parent').create({ id: parent });
+      for (let i = 0; i < children; i += 1) await tx.entity('Child').create({ id: `${parent}c${i}`, parentId: parent, n: i });
+      for (let i = 0; i < notes; i += 1) await tx.entity('Note').create({ id: `${parent}n${i}`, parentId: parent });
+    });
+    const created = await store.replication.page({ after: next });
+    for (const envelope of created.items) assert.equal((await replica.replication.apply(envelope)).status, 'applied');
+    let at = performance.now();
+    await store.entity('Parent').delete(parent);
+    deleteMs.push(performance.now() - at);
+    const deleted = await store.replication.page({ after: created.next });
+    assert.equal(deleted.items.length, 1);
+    const [envelope] = deleted.items;
+    assert.equal(envelope.operations.length, 1 + children + notes);
+    if (round === 0) {
+      operations = envelope.operations.length;
+      bytes = new TextEncoder().encode(encodeReplication(envelope)).length;
+      // the parent's own removal aside
+      removed = envelope.operations.filter((/** @type {any} */ op) => op.after === null).length - 1;
+      nulled = envelope.operations.filter((/** @type {any} */ op) => op.after !== null).length;
+    }
+    at = performance.now();
+    assert.equal((await replica.replication.apply(envelope)).status, 'applied');
+    applyMs.push(performance.now() - at);
+    next = deleted.next;
+    assert.deepEqual(await storeState(replica, model), await storeState(store, model));
+  }
+  return { deleteMs, applyMs, operations, bytes, removed, nulled };
 }

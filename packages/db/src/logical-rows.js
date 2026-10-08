@@ -79,6 +79,8 @@ export function createLogicalRows({ connection, shapes, collectionCore, entityCo
       }));
   };
   return { read, write, tables: [...shapes.keys()],
+    // a member of an entity row as its column stores it: what a unique index compares
+    columnValue: (table, column, value) => entityCore(table).plan.encodeColumn(column, value),
     position: (table, key) => {
       const shape = shapeOf(table);
       return chain(statement(`SELECT ${dialect.rowIdentity()} AS position FROM ${q(table)} WHERE ${where(keyColumns(shape))}`, 'get', partsOf(shape, key)),

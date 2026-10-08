@@ -19,10 +19,12 @@ document does not apply to a PostgreSQL replica: its apply is `JD2005`,
 every later envelope of that origin `JD2100` (the gap it left), and a
 `reset` from a snapshot holding the document `JD2005` again. Keep such
 values out of documents that replicate to PostgreSQL. Drivers without `changeCapture`, and PostgreSQL's
-buffered cursor mode, refuse at open. Journal replication refuses models with cascading or set-null
-child foreign keys (`JD0051`), because the journal cannot observe those effects.
-Session capture includes them. Both modes support membership cascades and
-roll back an envelope whose side effects are absent from its logical operations.
+buffered cursor mode, refuse at open. Both capture modes record the rows a delete's foreign keys
+remove or null and the membership rows of every row it removes, so models with cascading and set-null
+relations replicate in either mode, and an envelope whose side effects on the replica are absent
+from its operations rolls back (`JD2104`). A journal origin records a deleted row under the key it
+was given: a delete of an integer-keyed row by another spelling of its key (`'16.0'`, `'016'`)
+refuses its replicated transaction `JD0060`, where session capture commits it.
 
 PostgreSQL enrollment verifies engine metadata, deterministic binary text
 collation, permanent managed tables and deferrable foreign keys. New managed
@@ -115,6 +117,33 @@ missing envelopes first, then retry, or perform an explicit reset. Model mismatc
 is `JD2102`. Imported envelopes keep their original identity and produce no local
 outbox entry, preventing echoes. A host forwarding between peers must preserve
 the original envelopes; `page()` exports this replica's own commits only.
+
+Replay writes an envelope's rows in its order — the canonical (table, key)
+order every exported envelope has; a reset sorts the rows it writes into it —
+with foreign-key checks deferred to the commit, except where an entity row has
+to wait for another. A row the envelope keeps whose stored cascading key names
+a row it removes, directly or through removed rows whose own cascading keys
+lead there, is written before each of those removals, which the replica's own
+cascade would otherwise apply to it first. The write that releases a value of
+an entity's unique slot — a one-to-one key, a unique member, a unique index,
+composite or partial — runs before the write that takes it, because
+uniqueness is checked as each write runs. So a transaction that moves a child
+to a new parent and deletes the old one applies and resets, and so does one
+that passes unique values between entity rows, unless they are rotated
+between rows, which no order replays (`JD2005`). Collection documents keep
+canonical order: a unique value passed to a document that sorts before the one
+releasing it refuses `JD2005`. A child added on one replica under a parent
+another replica deletes refuses on both sides: `JD2104` where the deletion
+arrives (its cascade would remove a row the envelope does not name), `JD2005`
+where the child arrives (its parent is gone). Neither replica can then apply
+the other's later envelopes (`JD2100`) or reset from the other's snapshot
+(`JD2105`); a store resets from either snapshot only while that snapshot covers
+its whole acknowledged history — an empty store, or one holding only what the
+two replicas shared. Under journal capture a
+cascading delete counts itself and its removed, nulled and membership rows
+against `maxOperations`, and their documents against `maxBytes`, and refuses
+`JD2106` before it runs; its complete envelope can still exceed `maxBytes` at
+commit (`JD2074`). Under session capture both bounds apply at commit.
 
 Data, receipt, per-row causal metadata, capture record and frontier settle in
 the same transaction. Replication is available only on the root Store; transaction

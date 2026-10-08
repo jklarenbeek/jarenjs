@@ -11,6 +11,8 @@ import { normalizeReplication, normalizeReplicationSnapshot, normalizeFrontier, 
 import { REPLICATION_TABLES } from './replication-tables.js';
 import { replicationSchema } from './dialects/replication.js';
 import { readOptions } from './options.js';
+import { compileJsonQuery } from '@jarenjs/json/query';
+import { foreignKeyEdges } from './cascade.js';
 
 const equal = (a, b) => stableStringify(a) === stableStringify(b);
 const position = (frontier, id) => Object.hasOwn(frontier, id) ? frontier[id] : 0;
@@ -30,6 +32,214 @@ const each = (items, fn) => {
   return next();
 };
 
+/** Canonical row order: how every envelope a store exports lists its
+ * operations, and the order a reset starts from.
+ * @param {{ table: string, key: string }} a @param {{ table: string, key: string }} b */
+const canonical = (a, b) => {
+  const x = JSON.stringify([a.table, a.key]);
+  const y = JSON.stringify([b.table, b.key]);
+  return x < y ? -1 : x > y ? 1 : 0;
+};
+
+/** The members a partial index's condition reads: its `$.<member>` operands.
+ * @param {any} value @param {Set<string>} [into] @returns {Set<string>} */
+const conditionMembers = (value, into = new Set()) => {
+  if (typeof value === 'string' && /^\$\.[A-Za-z_][A-Za-z0-9_]*$/.test(value)) into.add(value.slice(2));
+  else if (value !== null && typeof value === 'object') for (const item of Object.values(value)) conditionMembers(item, into);
+  return into;
+};
+
+/** A min-heap of operation positions: the earliest ready operation runs next. */
+const positions = () => {
+  /** @type {number[]} */
+  const heap = [];
+  return {
+    get size() { return heap.length; },
+    /** @param {number} at */
+    push(at) {
+      let child = heap.push(at) - 1;
+      while (child > 0) {
+        const parent = (child - 1) >> 1;
+        if (heap[parent] <= at) break;
+        heap[child] = heap[parent];
+        child = parent;
+      }
+      heap[child] = at;
+    },
+    pop() {
+      const top = heap[0];
+      const last = /** @type {number} */ (heap.pop());
+      if (heap.length > 0) {
+        let parent = 0;
+        for (;;) {
+          let child = 2 * parent + 1;
+          if (child >= heap.length) break;
+          if (child + 1 < heap.length && heap[child + 1] < heap[child]) child += 1;
+          if (heap[child] >= last) break;
+          heap[parent] = heap[child];
+          parent = child;
+        }
+        heap[parent] = last;
+      }
+      return top;
+    },
+  };
+};
+
+/**
+ * The order replay writes a transaction's rows in, from the store's entity
+ * mapping. A removal runs the replica's own `cascade` actions at once, and a
+ * write is checked for uniqueness as it runs, while foreign-key checks wait
+ * for the commit. So:
+ * - a kept row (`before` and `after` both present) whose stored `cascade` key
+ *   names a row the operations remove — directly, or through removed rows
+ *   whose own cascading keys lead there — is written before each of those
+ *   removals, which would otherwise delete it first;
+ * - the operation that releases a value of an entity's unique slot (a
+ *   one-to-one key, a unique member, a unique index) runs before the
+ *   operation that takes it. A partial index counts the rows its condition
+ *   covers, and every row lacking a member the condition reads: an edge too
+ *   many moves a release earlier, which is harmless, where one missed could
+ *   fail the write;
+ * - otherwise the given order holds: the earliest operation whose
+ *   predecessors have all run goes next. Values rotated between rows, which no
+ *   order can replay, fall back to the given order.
+ * Collection documents and memberships meet neither rule and keep their order.
+ * @param {any} mapping - the store's entity mapping, or `null`
+ * @param {(table: string, column: string, value: any) => any} columnValue - a member as its column stores it
+ * @returns {(operations: any[]) => any[]} over `{ table, key, before, after }`, `before` being the replica's row
+ */
+const replayOrder = (mapping, columnValue) => {
+  const { outbound } = foreignKeyEdges(mapping);
+  /** @type {Map<string, { cascades: any[], slots: { columns: string[], covers: ((doc: any) => boolean) | null }[] }>} */
+  const tables = new Map();
+  for (const [table, entity] of Object.entries(mapping?.entities ?? {})) {
+    const cascades = (outbound.get(table) ?? []).filter((edge) => edge.kind === 'fk' && edge.onDelete === 'cascade');
+    /** @type {{ columns: string[], covers: ((doc: any) => boolean) | null }[]} */
+    const slots = [];
+    const declared = new Set();
+    /** @param {string[]} columns @param {any} [where] */
+    const slot = (columns, where) => {
+      const id = JSON.stringify([columns, where ?? null]);
+      if (declared.has(id)) return;
+      declared.add(id);
+      if (where === undefined || where === null) {
+        slots.push({ columns, covers: null });
+        return;
+      }
+      // the condition answers as the query engine does over a row holding
+      // every member it reads; any other row is counted as covered
+      const reads = [...conditionMembers(where)];
+      let holds = null;
+      try { holds = compileJsonQuery(where); }
+      catch { holds = null; }
+      const condition = holds;
+      slots.push({ columns, covers: (doc) => condition === null
+        || reads.some((member) => doc[member] === undefined || doc[member] === null) || condition(doc) === true });
+    };
+    for (const fk of entity.foreignKeys ?? []) if (fk.unique) slot([fk.column]);
+    for (const index of entity.indexes ?? []) if (index.unique) slot([index.property]);
+    for (const index of entity.entityIndexes ?? []) if (index.unique) slot(index.columns, index.where);
+    if (cascades.length > 0 || slots.length > 0) tables.set(table, { cascades, slots });
+  }
+  /** The rows a row's stored cascading keys name. @param {any} plan @param {any} doc @returns {string[]} */
+  const parentsOf = (plan, doc) => (doc === null ? [] : plan.cascades.filter((edge) => doc[edge.column] != null)
+    .map((edge) => JSON.stringify([edge.parent, String(doc[edge.column])])));
+  /** The unique values a row holds, one string per covered slot whose columns hold no null.
+   * @param {string} table @param {any} plan @param {any} doc @returns {Set<string>} */
+  const valuesOf = (table, plan, doc) => {
+    const values = new Set();
+    if (doc === null) return values;
+    for (const [at, slot] of plan.slots.entries()) {
+      if (slot.covers !== null && !slot.covers(doc)) continue;
+      const tuple = slot.columns.map((column) => (doc[column] === undefined || doc[column] === null ? null
+        : columnValue(table, column, doc[column])));
+      // NULL never collides
+      if (tuple.every((value) => value !== null && value !== undefined)) values.add(JSON.stringify([table, at, tuple]));
+    }
+    return values;
+  };
+
+  return (operations) => {
+    if (tables.size === 0) return operations;
+    /** @type {Map<string, number>} */
+    const removed = new Map();
+    operations.forEach((op, at) => { if (op.after === null) removed.set(JSON.stringify([op.table, op.key]), at); });
+    /** @type {number[][]} */
+    const next = [];
+    const waits = new Array(operations.length).fill(0);
+    let edges = 0;
+    /** @param {number} from @param {number} to */
+    const precede = (from, to) => {
+      if (from === to) return;
+      (next[from] ??= []).push(to);
+      waits[to] += 1;
+      edges += 1;
+    };
+    /** @type {Map<string, number[]>} */
+    const released = new Map();
+    /** @type {Map<string, number[]>} */
+    const taken = new Map();
+    /** @param {Map<string, number[]>} map @param {string} value @param {number} at */
+    const note = (map, value, at) => {
+      const list = map.get(value);
+      if (list === undefined) map.set(value, [at]);
+      else list.push(at);
+    };
+    operations.forEach((op, at) => {
+      const plan = tables.get(op.table);
+      if (plan === undefined) return;
+      if (op.before !== null && op.after !== null && removed.size > 0) {
+        // every removal whose cascades would reach this row while it still names its old parent
+        const queue = parentsOf(plan, op.before);
+        const met = new Set();
+        while (queue.length > 0) {
+          const token = /** @type {string} */ (queue.pop());
+          const removal = removed.get(token);
+          if (removal === undefined || met.has(token)) continue;
+          met.add(token);
+          precede(at, removal);
+          const parent = operations[removal];
+          const parentPlan = tables.get(parent.table);
+          if (parentPlan !== undefined) queue.push(...parentsOf(parentPlan, parent.before));
+        }
+      }
+      if (plan.slots.length > 0) {
+        const before = valuesOf(op.table, plan, op.before);
+        const after = valuesOf(op.table, plan, op.after);
+        for (const value of before) if (!after.has(value)) note(released, value, at);
+        for (const value of after) if (!before.has(value)) note(taken, value, at);
+      }
+    });
+    for (const [value, takers] of taken) {
+      for (const from of released.get(value) ?? []) for (const to of takers) precede(from, to);
+    }
+    if (edges === 0) return operations;
+    const ready = positions();
+    operations.forEach((_, at) => { if (waits[at] === 0) ready.push(at); });
+    const done = new Array(operations.length).fill(false);
+    const order = [];
+    let earliest = 0;
+    while (order.length < operations.length) {
+      let at;
+      if (ready.size > 0) at = ready.pop();
+      else {
+        // a cycle: values rotated between rows, which no order replays
+        while (done[earliest]) earliest += 1;
+        at = earliest;
+      }
+      if (done[at]) continue;
+      done[at] = true;
+      order.push(operations[at]);
+      for (const to of next[at] ?? []) {
+        waits[to] -= 1;
+        if (waits[to] === 0 && !done[to]) ready.push(to);
+      }
+    }
+    return order;
+  };
+};
+
 /** Pure preflight shared by store construction and the engine.
  * @param {any} options @returns {any} */
 export function readReplicationOptions(options) {
@@ -47,8 +257,9 @@ export function readReplicationOptions(options) {
 
 /** @param {any} options */
 export function createReplicationEngine(options) {
-  const { connection, rows, capture, model, now, bracket } = options;
+  const { connection, rows, capture, model, now, bracket, mapping } = options;
   const config = readReplicationOptions(options.config);
+  const replay = replayOrder(mapping, rows.columnValue);
   const dialect = connection.dialect;
   const p = (i) => dialect.parameterRef(i, 'replica');
   const schema = replicationSchema(dialect);
@@ -129,10 +340,7 @@ export function createReplicationEngine(options) {
     }
     return chain(state(), (saved) => {
       const operations = [];
-      return chain(each([...grouped.values()].sort((a, b) => {
-        const x = JSON.stringify([a.table, a.key]); const y = JSON.stringify([b.table, b.key]);
-        return x < y ? -1 : x > y ? 1 : 0;
-      }), (entry) => chain(rowState(entry.table, entry.key), (old) => {
+      return chain(each([...grouped.values()].sort(canonical), (entry) => chain(rowState(entry.table, entry.key), (old) => {
         const after = entry.patch.length === 1 && entry.patch[0].op === 'remove' && entry.patch[0].path === ''
           ? null : applyJSONPatch(old.value, entry.patch);
         return chain(rows.read(entry.table, entry.key), (actual) => {
@@ -222,9 +430,10 @@ export function createReplicationEngine(options) {
         return { status: 'conflict', frontier: saved.frontier, conflicts };
       }
       // Canonical capture order is independent of FK topology; defer constraints
-      // until all rows of the logical transaction have reached their final state.
+      // until all rows of the logical transaction have reached their final state,
+      // in the order the replica's own cascades and unique indexes need
       await connection.exec(connection.dialect.tx.deferForeignKeys);
-      for (const operation of chosen) {
+      for (const operation of replay(chosen)) {
         cancelled(request);
         if (!equal(operation.before, operation.after)) await rows.write(operation);
       }
@@ -321,7 +530,7 @@ export function createReplicationEngine(options) {
         if (!equal(await rows.read(operation.table, operation.key) ?? null, operation.before))
           fail('JD2104', 'reset found a row outside its replication history');
       }
-      for (const operation of operations.values()) {
+      for (const operation of replay([...operations.values()].sort(canonical))) {
         cancelled(request);
         if (!equal(operation.before, operation.after)) await rows.write(operation);
       }

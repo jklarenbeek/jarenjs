@@ -51,7 +51,8 @@ it('current runtime scope agrees with the public exports and normative control c
   const replication = doc('packages/db/docs/REPLICATION-FORMAT.md');
   assert.match(replication, /PostgreSQL through journal capture and native bounded cursors/);
   assert.match(replication, /PostgreSQL → SQLite, SQLite → PostgreSQL and\s+PostgreSQL → PostgreSQL/);
-  assert.match(replication, /Journal replication refuses models with cascading or set-null/);
+  assert.match(replication, /models with cascading and set-null\s+relations replicate in either mode/);
+  assert.doesNotMatch(replication, /Journal replication refuses models with cascading/);
   assert.match(replication, /Opening never performs that migration implicitly/);
   assert.doesNotMatch(replication, /replication ledger\/apply strategy still refuses/);
   const view = doc('packages/view/docs/VIEW-FORMAT.md');
