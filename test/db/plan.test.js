@@ -999,15 +999,7 @@ describe('a disjunction regrouped by member', () => {
     assert.strictEqual(planned.prefilters[0].construct, '$overlaps');
   });
 
-  it('a non-finite number or a string a JSON list cannot carry never regroups: the item keeps its place', () => {
-    assert.deepStrictEqual(filterOf({ $or: [age('$gt', NaN), age('$gt', 5)] }), { p: 'or', items: [
-      { p: 'cmp', op: 'gt', ref: AGE, operand: { lit: NaN } },
-      { p: 'cmp', op: 'gt', ref: AGE, operand: { lit: 5 } },
-    ] });
-    assert.deepStrictEqual(filterOf({ $or: [age('$gt', 5), age('$ge', NaN)] }), { p: 'or', items: [
-      { p: 'cmp', op: 'gt', ref: AGE, operand: { lit: 5 } },
-      { p: 'cmp', op: 'ge', ref: AGE, operand: { lit: NaN } },
-    ] });
+  it('an infinity or a string a JSON list cannot carry never regroups: the item keeps its place', () => {
     assert.deepStrictEqual(filterOf({ $or: [age('$lt', Infinity), age('$lt', 5), age('$eq', -Infinity), age('$eq', 3)] }), { p: 'or', items: [
       { p: 'cmp', op: 'lt', ref: AGE, operand: { lit: Infinity } },
       { p: 'cmp', op: 'lt', ref: AGE, operand: { lit: 5 } },
@@ -1020,6 +1012,29 @@ describe('a disjunction regrouped by member', () => {
       { p: 'cmp', op: 'eq', ref: NAME, operand: { lit: 'b' } },
       { p: 'cmp', op: 'gt', ref: AGE, operand: { lit: 8 } },
     ] });
+  });
+
+  it('a NaN literal is no bound: it equals nothing and orders against nothing, and differs from every present member', () => {
+    // no database binds NaN as the engine compares it (SQLite stores NULL, PostgreSQL
+    // sorts it above every number), so the planner answers it where it plans it
+    const NOTHING = { p: 'const', value: false };
+    const PRESENT = { p: 'typeIs', ref: AGE, types: [], positive: true };
+    for (const op of ['$eq', '$lt', '$le', '$gt', '$ge'])
+      assert.deepStrictEqual(filterOf(age(op, NaN)), NOTHING, op);
+    assert.deepStrictEqual(filterOf(age('$ne', NaN)), PRESENT);
+    assert.deepStrictEqual(filterOf({ $gt: [NaN, '$it.age'] }), NOTHING, 'on the left');
+    assert.deepStrictEqual(filterOf({ $ne: [NaN, '$it.age'] }), PRESENT, 'on the left');
+    // beside other items it keeps its place and never becomes a group's bound
+    assert.deepStrictEqual(filterOf({ $or: [age('$gt', NaN), age('$gt', 5)] }), { p: 'or', items: [
+      NOTHING, { p: 'cmp', op: 'gt', ref: AGE, operand: { lit: 5 } },
+    ] });
+    assert.deepStrictEqual(filterOf({ $or: [age('$gt', 5), age('$ge', NaN), age('$gt', 3)] }), { p: 'or', items: [
+      { p: 'cmp', op: 'gt', ref: AGE, operand: { lit: 3 } }, NOTHING,
+    ] });
+    assert.deepStrictEqual(filterOf({ $or: [age('$eq', NaN), age('$eq', 7), age('$eq', 8)] }), { p: 'or', items: [
+      NOTHING, { p: 'in', ref: AGE, operand: { list: [7, 8] } },
+    ] });
+    assert.deepStrictEqual(filterOf({ $not: age('$lt', NaN) }), { p: 'not', item: NOTHING });
   });
 
   it('equalities on an instant column keep their epoch narrowing: no list, one range per instant; its rays still fold', () => {
@@ -1073,13 +1088,13 @@ describe('the predicate term bound', () => {
     assert.strictEqual(predicateTerms({ ...planned.plan, filter: null }), 0);
   });
 
-  it('counts an entity statement over every binding filter; a join edge is not a term', () => {
+  it('counts an entity statement over every binding filter and every comparison that refines a join; a join equality is not a term', () => {
     const MODEL = { $model: '0.1', entities: {
       Person: { schema: { type: 'object', required: ['id'], properties: {
         id: { type: 'string', 'x-entity': { key: true } }, age: { type: 'integer', 'x-entity': { index: true } } } } },
       Pet: { schema: { type: 'object', required: ['pid'], properties: {
         pid: { type: 'string', 'x-entity': { key: true } }, ownerId: { type: 'string', 'x-entity': { index: true } },
-        kind: { type: 'string', 'x-entity': { index: true } } } } } } };
+        kind: { type: 'string', 'x-entity': { index: true } }, weight: { type: 'integer', 'x-entity': { index: true } } } } } } };
     const entities = normalizeEntities(MODEL);
     const mapping = explainMapping(MODEL);
     const planned = planEntityQuery({ $for: { a: '$.Person[*]', b: '$.Pet[*]' },
@@ -1094,6 +1109,16 @@ describe('the predicate term bound', () => {
     assert.deepStrictEqual(demoted.reasons, [BOUND_REASON]);
     assert.deepStrictEqual(demoted.referenced, planned.referenced);
     assert.strictEqual(boundPredicateTerms(planned, 3), planned);
+    // a comparison between the bindings that is not an equality refines the join: the
+    // server evaluates it once per candidate pair, so each one is a leaf
+    const refined = planEntityQuery({ $for: { a: '$.Person[*]', b: '$.Pet[*]' },
+      $where: { $and: [{ $eq: ['$a.id', '$b.ownerId'] }, { $gt: ['$a.age', 1] }, { $lt: ['$a.age', '$b.weight'] },
+        { $ne: ['$a.age', '$b.weight'] }, { $ge: ['$a.age', '$b.weight'] }] },
+      $return: '$a' }, entities, mapping);
+    assert.strictEqual(refined.mode, 'native');
+    assert.strictEqual(predicateTerms(refined.plan), 4, 'one filter and three refinements');
+    assert.strictEqual(boundPredicateTerms(refined, 3).mode, 'set');
+    assert.strictEqual(boundPredicateTerms(refined, 4), refined);
   });
 
   it('demotes a collection plan past the bound with the reason first; at the bound, unbounded, or already in the engine it is untouched', () => {

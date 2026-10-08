@@ -7,7 +7,7 @@
  * index seeks it, and a chain mixing equalities and ranges regroups by
  * member to two bound values. A chain nothing regroups (`$and` pairs)
  * costs the server per leaf and row, so one statement carries at most the
- * dialect's bound of leaves (64): above it the engine answers, named, and
+ * dialect's bound of leaves (128): above it the engine answers, named, and
  * a load refuses by name. Every answer equals the residual's.
  */
 import { after, before, describe, it } from 'node:test';
@@ -139,7 +139,7 @@ describe('PostgreSQL: membership over thousands of values', { skip: !url && 'JAR
     assert.equal((await store.entity('Item').load({ where: mixedChain() })).length, EXPECTED.length);
   });
 
-  it('a chain of $and pairs, which nothing regroups, is bounded: 64 leaves prepare natively, more run in the engine, and a load refuses them', async () => {
+  it('a chain of $and pairs, which nothing regroups, is bounded: a short one prepares natively, a long one runs in the engine, and a load refuses it', async () => {
     // every leaf of an unregrouped chain reads its member's typed extraction
     // per row, so its cost is per leaf and row, and a long enough one is
     // priced into a JIT compile the server cannot cancel: one statement

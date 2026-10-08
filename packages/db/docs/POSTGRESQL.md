@@ -66,7 +66,9 @@ typed form is the column itself, which the planner estimates from its statistics
 One statement carries at most 128 leaf predicates (the dialect's
 `maxPredicateTerms`), counted over everything the statement holds once the
 planner has regrouped: the document's filters, every include filter of a graph
-load and the profile's mandatory predicate. A membership list is one leaf
+load, the profile's mandatory predicate and every comparison between two
+bindings that refines a join (the equality that joins them is merged by the
+server and is not counted). A membership list is one leaf
 however long it is, so a `$seq`, a same-member `$or` of equalities and a chain
 mixing equalities and ranges on two members all stay native; an `$or` of `$and`
 pairs and a top-level `$and` of `$ne` count per leaf. The bound exists because

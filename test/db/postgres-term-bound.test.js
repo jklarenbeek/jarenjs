@@ -3,8 +3,8 @@
  * @file The predicate term bound on a real PostgreSQL server: one statement
  * carries at most the dialect's `maxPredicateTerms` leaf predicates (128),
  * counted over the whole statement once the planner has regrouped it — the
- * document's filters, every include filter and the profile's mandatory
- * predicate. Above the bound a query document runs in the engine with the
+ * document's filters, every include filter, every comparison that refines a
+ * join and the profile's mandatory predicate. Above the bound a query document runs in the engine with the
  * named reason `predicate.termBound` (strict mode refuses it by name), and a
  * graph load or a native mutation, which have no engine path, refuse by
  * name. A chain the planner folds is one leaf however long it is. Every
@@ -27,10 +27,17 @@ const MODEL = {
       schema: { type: 'object', properties: { id: { type: 'string' }, sku: { type: 'string' }, n: { type: 'integer' } } },
       key: '/id', indexes: [{ name: 'sku', path: '$.sku' }],
     },
+    sample: {
+      schema: { type: 'object', properties: {
+        series: { type: 'string' }, at: { type: 'integer' }, value: { type: ['number', 'null'] } } },
+      key: null, identity: 'integer', indexes: [{ name: 'by_series_at', path: ['$.series', '$.at'] }],
+    },
   },
   entities: {
     Item: { schema: { type: 'object', properties: {
       id: { type: 'string', ...key }, sku: { type: 'string', 'x-entity': { index: true } }, n: { type: 'integer', 'x-entity': { index: true } } } } },
+    Node: { schema: { type: 'object', properties: {
+      id: { type: 'string', ...key }, grp: { type: 'string', 'x-entity': { index: true } }, w: { type: 'integer', 'x-entity': { index: true } } } } },
   },
 };
 /** One more row than the safe profile's `maxRows`: a residual's root fetch crosses it. */
@@ -87,6 +94,8 @@ describe('PostgreSQL: the predicate term bound', { skip: !url && 'JAREN_PG_URL i
         await tx.collection('items').put({ id: `i${i}`, sku: `s${i}`, n: i });
         await tx.entity('Item').create({ id: `i${i}`, sku: `s${i}`, n: i });
       }
+      for (let i = 0; i < 12; i++) await tx.entity('Node').create({ id: `n${i}`, grp: `g${i % 3}`, w: i });
+      for (let k = 0; k < 300; k++) for (let i = 0; i < 3; i++) await tx.collection('sample').put({ series: `d${k}`, at: i * 1000 + k, value: i });
     });
     await admin.query(`ANALYZE "${schema}"."items"`);
     await admin.query(`ANALYZE "${schema}"."Item"`);
@@ -97,6 +106,43 @@ describe('PostgreSQL: the predicate term bound', { skip: !url && 'JAREN_PG_URL i
     if (admin) {
       try { await admin.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`); }
       finally { await admin.end(); }
+    }
+  });
+
+  it('a comparison that refines a join is a leaf: 128 stay native, 129 run in the engine with the same answer', async () => {
+    // the server evaluates a non-equality between two bindings once per candidate pair, so it is
+    // priced and compiled like any other leaf; the equality that joins them is merged and priced once
+    const refined = (/** @type {number} */ count) => ({ $for: { a: '$.Node[*]', b: '$.Node[*]' },
+      $where: { $and: [{ $eq: ['$a.grp', '$b.grp'] }, ...Array.from({ length: count }, (_, i) =>
+        ({ [i % 2 === 0 ? '$lt' : '$ne']: ['$a.w', '$b.w'] }))] },
+      $return: { a: '$a.id', b: '$b.id' } });
+    const rows = async (/** @type {any} */ query, /** @type {any} */ options = {}) =>
+      (await store.execute(query, options)).map((/** @type {any} */ row) => `${row.a}:${row.b}`).sort();
+    assert.equal((await store.explain(refined(BOUND))).mode, 'native');
+    const above = await store.explain(refined(BOUND + 1));
+    assert.equal(above.mode, 'set');
+    assert.equal(reasonOf(above), 'predicate.termBound');
+    const expected = await rows(refined(BOUND + 1), { pushdown: false });
+    assert.equal(expected.length, 18, 'pairs of one group with the first lighter');
+    assert.deepEqual(await rows(refined(BOUND + 1)), expected);
+    assert.deepEqual(await rows(refined(BOUND)), await rows(refined(BOUND), { pushdown: false }));
+    await assert.rejects(async () => store.execute(refined(BOUND + 1), { strict: true }),
+      (/** @type {any} */ error) => error.code === 'JD0010' && TERM_BOUND.test(error.message));
+  });
+
+  it('an as-of join over many distinct keys keeps its narrowing: the keys are one leaf, not one per key', async () => {
+    // the probes' keys narrow the fetch and decide nothing; a leaf per key would put a batch of
+    // 128 sensors past the bound and send the whole collection to the engine
+    const sample = store.collection('sample');
+    const asof = (/** @type {number} */ count) => ({ $asof: [{ $const: Array.from({ length: count }, (_, k) =>
+      ({ at: 1500 + k, value: k, series: `d${k}` })) }, '$[*]', { by: '$.series' }] });
+    for (const count of [100, 200, 300]) {
+      const plan = await sample.explain(asof(count));
+      assert.equal(plan.series.mode, 'hybrid', `${count} keys`);
+      assert.notEqual(plan.sql, null, `${count} keys: the narrowing statement exists`);
+      assert.doesNotMatch(String(plan.residual?.reasons?.[0]?.reason), /more predicate terms/, `${count} keys`);
+      assert.match(plan.sql, /IN \(SELECT/, `${count} keys: one membership list`);
+      assert.deepEqual(await sample.execute(asof(count)), await sample.execute(asof(count), { pushdown: false }), `${count} keys`);
     }
   });
 

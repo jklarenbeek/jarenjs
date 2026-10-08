@@ -314,9 +314,11 @@ describe('the interval form, and the seek that binds a typed scalar', () => {
     assert.match(first.sql,
       /^SELECT MIN\("a"\) AS "anchor" FROM \(SELECT MAX\("gx_at"\) AS "a" FROM "users" WHERE /);
     assert.match(first.sql, /GROUP BY "gx_series"\)$/);
+    // the keys are one membership list, however many the probes name
+    assert.match(first.sql, /"gx_series" IN \(SELECT value FROM json_each\(\?\) /);
     // its own slots are its own: a positional dialect numbers by the
     // TEXT order of the statement being emitted, and the seek is one
-    assert.deepStrictEqual(first.slots.map((slot) => slot.literal), [1000, 'a', 'b']);
+    assert.deepStrictEqual(first.slots.map((slot) => slot.literal), [1000, '["a","b"]']);
     assert.strictEqual(emitted.slots.length, 1);
   });
 
@@ -559,5 +561,48 @@ describe('PostgreSQL: a literal comparison reads the typed extraction alone', ()
       `(${TXT} IS NOT NULL AND strpos(${TXT}, $5::text) > 0)`);
     assert.ok(discriminators(emit({ p: 'typeIs', positive: true, types: ['text'], ref: score })) >= 2);
     assert.deepStrictEqual(slots.map((slot) => slot.literal), [5, 'x', '["a"]', '[1]', 'ab']);
+  });
+});
+
+describe('PostgreSQL: an external against an entity column', () => {
+  const pg = postgresDialect();
+  const column = (/** @type {string} */ storage) => ({ segments: [{ name: 'c' }], flavor: 'entity-column', column: 'c', storage });
+  const emit = (/** @type {any} */ ref, /** @type {string} */ op) => {
+    /** @type {any[]} */
+    const slots = [];
+    const emitters = createEntityPredicateEmitters(pg,
+      (slot) => { slots.push(slot); return pg.parameterRef(slots.length, 'v'); });
+    return { sql: emitters.emitPred('"t"', '"t"."doc"', { p: 'cmp', op, ref, operand: { ext: 'x' } }), slots };
+  };
+  const json = { external: 'x', json: true };
+  const type = (/** @type {number} */ slot) => pg.valueTypeOf(`$${slot}`);
+  const numeric = `IN (${pg.numericTypeNames.map(pg.stringLiteral).join(', ')})`;
+
+  it('ne is true for a present value of the external\'s other type, and compares only the external\'s own', () => {
+    const text = emit(column('string'), 'ne');
+    assert.strictEqual(text.sql, `("t"."c" IS NOT NULL AND (NOT (${type(1)} = 'text') OR "t"."c" <> ${pg.externalRef('$2', 'text')}))`);
+    assert.deepStrictEqual(text.slots, [json, json]);
+    const number = emit(column('number'), 'ne');
+    assert.strictEqual(number.sql, `("t"."c" IS NOT NULL AND (NOT (${type(1)} ${numeric}) OR to_jsonb("t"."c") <> ${pg.externalRef('$2', 'number')}))`);
+  });
+
+  it('equality and orderings keep the guarded form: the external must be of the column\'s type', () => {
+    for (const [op, symbol] of [['eq', '='], ['lt', '<'], ['ge', '>=']]) {
+      assert.strictEqual(emit(column('string'), op).sql,
+        `("t"."c" IS NOT NULL AND ${type(1)} = 'text' AND "t"."c" ${symbol} ${pg.externalRef('$2', 'text')})`, op);
+      assert.strictEqual(emit(column('number'), op).sql,
+        `("t"."c" IS NOT NULL AND ${type(1)} ${numeric} AND to_jsonb("t"."c") ${symbol} ${pg.externalRef('$2', 'number')})`, op);
+    }
+  });
+
+  it('a boolean column holds neither a string nor a number: nothing equals or orders, every present value differs', () => {
+    for (const op of ['eq', 'lt', 'le', 'gt', 'ge']) {
+      const { sql, slots } = emit(column('boolean'), op);
+      assert.match(sql, /^\("t"\."c" IS NOT NULL AND FALSE AND /, op);
+      assert.deepStrictEqual(slots, [json], `${op}: the external keeps its slot, so a boolean one still reaches the engine`);
+    }
+    const differs = emit(column('boolean'), 'ne');
+    assert.match(differs.sql, /^\("t"\."c" IS NOT NULL AND \(NOT \(FALSE\) OR /);
+    assert.deepStrictEqual(differs.slots, [json]);
   });
 });

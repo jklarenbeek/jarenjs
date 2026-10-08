@@ -218,14 +218,14 @@ function cases(engine) {
     return expected;
   };
 
-  it('a non-finite number never becomes a bound: NaN and Infinity rays and equalities keep their place', async () => {
+  it('an infinity never becomes a bound, and NaN binds nothing: the other items keep their place', async () => {
     const n = (/** @type {string} */ op, /** @type {number} */ value) => ({ [op]: ['$it.n', value] });
     for (const [label, predicate, placeholders] of /** @type {[string, any, number][]} */ ([
-      ['NaN first', { $or: [n('$gt', NaN), n('$gt', 5)] }, 2],
-      ['NaN second', { $or: [n('$gt', 5), n('$gt', NaN)] }, 2],
-      ['NaN inclusive first', { $or: [n('$ge', NaN), n('$gt', 5)] }, 2],
-      ['NaN inclusive second', { $or: [n('$gt', 5), n('$ge', NaN)] }, 2],
-      ['NaN equality', { $or: [n('$eq', NaN), n('$eq', 7)] }, 2],
+      ['NaN first', { $or: [n('$gt', NaN), n('$gt', 5)] }, 1],
+      ['NaN second', { $or: [n('$gt', 5), n('$gt', NaN)] }, 1],
+      ['NaN inclusive first', { $or: [n('$ge', NaN), n('$gt', 5)] }, 1],
+      ['NaN inclusive second', { $or: [n('$gt', 5), n('$ge', NaN)] }, 1],
+      ['NaN equality', { $or: [n('$eq', NaN), n('$eq', 7)] }, 1],
       ['Infinity upper', { $or: [n('$lt', Infinity), n('$lt', 5)] }, 2],
       ['-Infinity lower', { $or: [n('$gt', -Infinity), n('$gt', 5)] }, 2],
       ['Infinity equality', { $or: [n('$eq', Infinity), n('$eq', 7)] }, 2],
@@ -236,6 +236,30 @@ function cases(engine) {
       assert.ok(expected.length > 0, label);
       assert.equal((await items().explain(overItems(predicate))).params.length, placeholders, label);
     }
+  });
+
+  it('a NaN literal binds nothing: every comparison, negation and disjunction with it equals the engine on every path', async () => {
+    // NaN equals nothing and orders against nothing, and differs from every
+    // present member; neither engine binds it so (SQLite stores NULL, which a
+    // negation turns into an unanswered row; PostgreSQL sorts it above every number)
+    for (const member of ['s', 'n', 't', 'm', 'b']) {
+      for (const op of ['$eq', '$ne', '$lt', '$le', '$gt', '$ge']) {
+        const base = { [op]: [`$it.${member}`, NaN] };
+        const flipped = { [op]: [NaN, `$it.${member}`] };
+        const beside = { $or: [base, { $gt: [`$it.${member}`, 5] }] };
+        for (const [label, predicate] of /** @type {[string, any][]} */ ([
+          ['plain', base], ['flipped', flipped], ['negated', { $not: base }], ['beside a ray', beside],
+          ['negated beside a ray', { $not: beside }], ['conjoined', { $and: [base, { $lt: [`$it.${member}`, 100] }] }],
+        ])) {
+          const expected = await agrees(predicate, `${op} ${member} ${label}`);
+          if (label === 'negated' && op !== '$ne') assert.ok(expected.length >= ROWS, `${op} ${member}: every row`);
+        }
+      }
+    }
+    // a differing NaN is the existence test, and the statement carries no value for it
+    assert.deepEqual(await agrees({ $ne: ['$it.n', NaN] }, 'ne'), await agrees({ $exists: '$it.n' }, 'exists'));
+    assert.deepEqual((await items().explain(overItems({ $gt: ['$it.n', NaN] }))).params, []);
+    assert.deepEqual((await items().explain(overItems({ $ne: ['$it.n', NaN] }))).params, []);
   });
 
   it('a string a JSON list cannot carry stays its own comparison: a lone surrogate beside other terms', async () => {
@@ -276,21 +300,6 @@ describe('a disjunction regrouped by member (SQLite)', () => {
   after(async () => { await store?.close(); });
   cases({ store: () => store, placeholders: (sql) => (sql.match(/\?/g) ?? []).length,
     instantSeek: /SEARCH t0 USING INDEX Item_at/ });
-
-  it('a NaN upper bound keeps its place too (SQLite binds it as NULL; PostgreSQL orders NaN above every number)', async () => {
-    const n = (/** @type {string} */ op, /** @type {number} */ value) => ({ [op]: ['$it.n', value] });
-    for (const [label, predicate] of /** @type {[string, any][]} */ ([
-      ['NaN upper first', { $or: [n('$lt', NaN), n('$lt', 5)] }],
-      ['NaN inclusive upper second', { $or: [n('$lt', 5), n('$le', NaN)] }],
-    ])) {
-      const rows = store.collection('items');
-      const expected = sorted(await rows.execute(overItems(predicate), { pushdown: false }));
-      assert.ok(expected.length > 0, label);
-      assert.deepEqual(sorted(await rows.execute(overItems(predicate))), expected, label);
-      assert.deepEqual(sorted(await store.execute(overItem(predicate))), sorted(await store.execute(overItem(predicate), { pushdown: false })), label);
-      assert.equal((await rows.explain(overItems(predicate))).params.length, 2, label);
-    }
-  });
 
   it('a live registration over a regrouped filter is maintained across writes', async () => {
     const liveStore = await openStore(MODEL, { driver: nodeDriver(), path: ':memory:', capture: true });

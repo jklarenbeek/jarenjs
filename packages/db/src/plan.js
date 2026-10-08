@@ -546,8 +546,8 @@ function planMembership(args, itSlot, shape) {
  * the left). A boolean or null became a type test, an external or a
  * list carries no literal, and a promotion carries a pre-filter: none
  * of them regroups. Nor does a literal no bound can carry exactly —
- * NaN and the infinities compare as nothing to the engine and have no
- * JSON spelling, and a lone surrogate is no JSON text — or an equality
+ * an infinity has no JSON spelling (NaN never gets here: it is answered
+ * where it is planned) and a lone surrogate is no JSON text — or an equality
  * on an instant column, whose own comparison narrows the column's
  * index by an epoch range that one list of document strings cannot
  * (its rays still fold: the folded bound keeps that range).
@@ -1269,7 +1269,9 @@ export function reasonId(reason) {
  * node except the connectives — `and`, `or`, `not` and a `binding`
  * scope — one bound membership list being one leaf, summed over a
  * collection plan's filter or an entity plan's binding filters and
- * include count filters; a join edge is not a predicate. What a
+ * include count filters, and over the comparisons between bindings
+ * that refine a join; a join's column equality is not a predicate (the
+ * server merges equalities and prices them once). What a
  * statement costs the database per row, and what prices it into a JIT
  * compile, grows with this count and never with the depth of the tree,
  * which nests in halves.
@@ -1290,6 +1292,10 @@ export function predicateTerms(value) {
   let terms = predicateTerms(value.filter ?? null);
   for (const entry of value.filters ?? []) terms += predicateTerms(entry.filter);
   for (const leaf of value.project?.leaves ?? []) terms += predicateTerms(leaf.count?.filter ?? null);
+  // a comparison between two bindings that is not an equality refines the
+  // join, and the server evaluates it once per candidate pair
+  for (const join of value.joins ?? [])
+    for (const edge of join.on) if (edge.op !== 'eq') terms += 1;
   return terms;
 }
 
@@ -1645,6 +1651,14 @@ function planPredicate(node, itSlot, shape) {
         if (ORDERING_OPS.has(op)) return exactly({ p: 'const', value: false });
         const typeName = lit === null ? 'null' : lit ? 'true' : 'false';
         return exactly({ p: 'typeIs', ref, types: [typeName], positive: op === 'eq' });
+      }
+      // NaN equals nothing, orders against nothing and differs from every
+      // present member; no database binds it so (SQLite stores NULL,
+      // PostgreSQL sorts it above every number), so it is answered here
+      if (typeof lit === 'number' && Number.isNaN(lit)) {
+        return exactly(op === 'ne'
+          ? { p: 'typeIs', ref, types: [], positive: true }
+          : { p: 'const', value: false });
       }
     }
     return exactly({ p: 'cmp', op: /** @type {any} */ (op), ref, operand });
@@ -2117,6 +2131,19 @@ function keyBound(ref, key) {
 }
 
 /**
+ * The rows whose key is one of the probes' keys: one equality, or one
+ * bound membership list however many keys the probes name (a leaf per
+ * key would put a long batch past the dialect's term bound, and lose
+ * the narrowing it exists for).
+ * @param {any} ref - the key's ref, known to carry a column
+ * @param {(string | number)[]} keys
+ * @returns {any}
+ */
+function keysBound(ref, keys) {
+  return keys.length === 1 ? keyBound(ref, keys[0]) : { p: 'in', ref, operand: { list: keys } };
+}
+
+/**
  * The bounds a frozen spec implies for the collection side, as pushable
  * conjuncts. Every one of them is an IMPLIED conjunct: it narrows the
  * fetch and decides nothing, because the residual re-runs the caller's
@@ -2342,9 +2369,7 @@ function planSeriesOperator(root, shape) {
     // membership test over the probes' own keys narrows and never drops
     if (probes !== null && probes.keys !== null && probes.keys.length > 0) {
       if (byRef !== null && byRef.column !== null) {
-        plan.filter = conjoin(plan.filter, probes.keys.length === 1
-          ? keyBound(byRef, probes.keys[0])
-          : { p: 'or', items: probes.keys.map((key) => keyBound(byRef, key)) });
+        plan.filter = conjoin(plan.filter, keysBound(byRef, probes.keys));
         prefilters.push({ construct: name, via: 'columns',
           columns: [byRef.column], exact: false });
       }
@@ -3565,6 +3590,30 @@ function crossBindingComparison(node, byName) {
   };
 }
 
+/** An integer column holds nothing at or beyond the 64-bit edge. */
+const INT64_EDGE = 2 ** 63;
+
+/**
+ * An integer column compared with a number that is not an integer of its
+ * own range — a fraction, an infinity, a magnitude past 64 bits — as the
+ * integers the comparison admits: `null` when the literal is such an
+ * integer (it compares as it stands), `'none'` or `'present'` when no
+ * integer or every integer answers, else the `le`/`ge` bound that means
+ * the same (`x < 2.5` is `x <= 2`).
+ * @param {string} op
+ * @param {number} lit
+ * @returns {null | 'none' | 'present' | { op: 'le' | 'ge', lit: number }}
+ */
+function integerBound(op, lit) {
+  if (Number.isInteger(lit) && Math.abs(lit) < INT64_EDGE) return null;
+  if (op === 'eq') return 'none';
+  if (op === 'ne') return 'present';
+  const above = lit >= INT64_EDGE;
+  const below = lit <= -INT64_EDGE;
+  if (op === 'lt' || op === 'le') return above ? 'present' : below ? 'none' : { op: 'le', lit: Math.floor(lit) };
+  return below ? 'present' : above ? 'none' : { op: 'ge', lit: Math.ceil(lit) };
+}
+
 /**
  * Plan one predicate over an entity binding: the same operator
  * grammar as phase A, with entity-flavored refs. Reuses
@@ -3606,6 +3655,15 @@ export function planEntityPredicate(node, slot, shape) {
     const ref = { ...pred.ref, column: flavored.column,
       flavor: flavored.flavor, storage: flavored.storage, format: flavored.format,
       codec: flavored.codec, codecColumn: flavored.codecColumn, nullPolicy: flavored.nullPolicy };
+    if (flavored.codec === 'integer' && pred.p === 'cmp' && typeof pred.operand.lit === 'number') {
+      // an integer column takes no fraction, infinity or 64-bit overflow as a
+      // value of its own type (PostgreSQL refuses the statement), and holds
+      // none: the comparison means the integers it admits
+      const bound = integerBound(pred.op, pred.operand.lit);
+      if (bound === 'none') return { p: 'const', value: false };
+      if (bound === 'present') return { p: 'typeIs', ref, types: [], positive: true };
+      if (bound !== null) return { ...pred, ref, op: bound.op, operand: { lit: bound.lit } };
+    }
     if (flavored.flavor === 'entity-epoch' && pred.p === 'in' && 'ext' in pred.operand) {
       // an epoch member compares as its document string; an external list
       // against the document layout is not translated

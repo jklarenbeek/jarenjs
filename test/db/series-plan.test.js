@@ -24,6 +24,7 @@ import {
   planQuery, normalizeModel, planCollection, sqliteDialect, assertNoSqlText, PLAN_VERSION,
 } from '@jarenjs/db';
 import { emitPlan } from '../../packages/db/src/emit.js';
+import { predicateTerms } from '../../packages/db/src/plan.js';
 import { SERIES_REASONS, filterFacts, singularSelector } from '../../packages/db/src/series.js';
 
 const ORIGIN = 1767225600000;
@@ -366,9 +367,22 @@ describe('a narrowing is implied, never decided', () => {
     assert.strictEqual(planned.series.mode, 'hybrid');
     assert.deepStrictEqual(planned.series.range,
       { column: 'gx_at', from: null, fromOp: null, to: 5000, toOp: 'le' });
-    assert.match(sqlOf(planned).sql, /"gx_series" = \?.*OR.*"gx_series" = \?/s);
+    // one membership list however many keys the probes name, so the filter is one leaf
+    assert.match(sqlOf(planned).sql, /"gx_series" IN \(SELECT value FROM json_each\(\?\)/);
+    assert.deepStrictEqual(planned.plan.filter.items.find((item) => item.p === 'in'),
+      { p: 'in', ref: { segments: [{ name: 'series' }], type: 'string', column: 'gx_series' },
+        operand: { list: ['a', 'b'] } });
     assert.strictEqual(planned.series.index, 'sample_by_series_at',
       'a membership test over the leading column still seeks');
+  });
+
+  it('a single key stays one equality, and many keys stay one leaf', () => {
+    const asof = (/** @type {number} */ count) => plan({ $asof: [{ $const: Array.from({ length: count }, (_, k) =>
+      ({ at: 1000 + k, value: k, series: `s${k}` })) }, '$[*]', { by: '$.series' }] });
+    // the probes' last instant, the data's own anchor, and the keys
+    for (const count of [1, 2, 3, 500]) assert.strictEqual(predicateTerms(asof(count).plan), 3, `${count} keys`);
+    assert.strictEqual(asof(1).plan.filter.items.at(-1).p, 'colCmp');
+    assert.strictEqual(asof(3).plan.filter.items.at(-1).p, 'in');
   });
 
   it('a tolerance bounds BOTH sides, which is the smallest fetch there is', () => {

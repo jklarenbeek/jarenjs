@@ -403,7 +403,14 @@ what each does is its own documentation's job
   index order (it spells `NULLS FIRST`, so the rows past the row value are sorted:
   about 14 ms for the second page of 200,000 rows against 0.016 ms read in index
   order), pushdown beyond the qualified native census and additional PostgreSQL
-  types remain open. Capture and replication of adopted physical tables — whose application triggers and
+  types remain open. An integral literal outside a PostgreSQL `smallint` or
+  `integer` physical column's own range (`qty < 3000000000` on an `integer`
+  column) is refused `JD2005` through `execute`, `load` and `mutate`, because
+  the server types the parameter from the column; wanted: record the native
+  width at qualification (`verifyPhysical`) and fold the comparison as the
+  integers the column admits, as a fraction already is, or spell the parameter
+  `($n)::bigint`, which the btree integer family compares with `int4` and so
+  still seeks. Capture and replication of adopted physical tables — whose application triggers and
   cascades the store does not write — remain refused until their complete writer population has
   an executable oracle.
 - [ ] **Broader database invariant lowering.** Rules lower to verified triggers
@@ -622,7 +629,24 @@ what each does is its own documentation's job
   about 0.6 s, of 128 inequalities about 1.6 s and of 128 comparisons against
   external operands about 6 s (259,000 characters of SQL). Wanted: a bound on the
   emitted statement's size, or a weight per operand kind, instead of a leaf
-  count, so that external-operand chains stop earlier and plain ones later.
+  count, so that external-operand chains stop earlier and plain ones later. A
+  top-level `$and` of `$ne` literals over one member is presence plus one
+  negated list and could regroup as an `$or` of equalities does, which would
+  make it one leaf.
+- [ ] **A mandatory predicate past the term bound still reaches PostgreSQL
+  whole.** A profile's mandatory predicate with more leaves than the dialect's
+  term bound demotes the document, but the residual's root fetch carries the
+  predicate (a 200-leaf statement is sent), and the bound's mechanism, an
+  uninterruptible JIT compile, holds for that statement too. Wanted: decide
+  whether resolving the profile refuses it (`JD0011`, the mandatory predicate
+  running in the database or not at all) or the fetch regroups its own
+  memberships.
+- [ ] **A pushed string operator answers false where the engine raises.** A
+  pushed `$starts-with`, `$ends-with` or `$contains` over a schema-typed string
+  member answers false for a stored number or null, a document the schema
+  forbids, where the engine raises `JQ2001`; the planner admits string
+  operators only over schema-typed string paths. Wanted: decide whether the
+  native answer or the engine's error is the contract, and make both agree.
 - [ ] **A join over a `$range` inner source runs as a nested loop.** The
   engine builds its hash, spatial and interval probes over an uncorrelated
   inner binding on the first outer tuple, but it declines a `$range` source and

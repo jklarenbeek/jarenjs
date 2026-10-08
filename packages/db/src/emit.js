@@ -781,10 +781,10 @@ export function emitPlan(plan, dialect, physical) {
       /** @type {import('./algebra.js').PlanPredicate} */
       let filter = colCmp(seek.ref.column, seek.bound.op, seek.bound.lit);
       if (seek.group !== null && seek.keys !== null && seek.keys.length > 0) {
+        // the keys are one membership list, however many the probes name
         filter = { p: 'and', items: [filter, seek.keys.length === 1
           ? colCmp(seek.group.column, 'eq', seek.keys[0])
-          : { p: 'or', items: seek.keys.map((key) =>
-            colCmp(seek.group.column, 'eq', key)) }] };
+          : { p: 'in', ref: seek.group, operand: { list: seek.keys } }] };
       }
       const inner = `${seek.inner.toUpperCase()}(${valueOf(seek.ref, seek.kind)})`;
       const where = ` FROM ${q(physical.table)} WHERE ${emitPred(filter)}`;
@@ -941,12 +941,20 @@ export function createEntityPredicateEmitters(dialect, param) {
         return `(${column} IS NOT NULL AND ${guard()} AND ${column} ${symbol} ${value()})`;
       }
       const kind = pred.ref.storage === 'string' ? 'text' : 'number';
-      const guard = kind === 'text'
-        ? `${dialect.valueTypeOf(externalSlot(pred.operand.ext))} = ${sl('text')}`
-        : `${dialect.valueTypeOf(externalSlot(pred.operand.ext))} IN ${NUMERIC()}`;
-      return `(${column} IS NOT NULL AND ${guard} AND `
-        + `${dialect.externalCompare(column, kind)} ${pred.op === 'ne' ? '<>' : symbol} `
-        + `${dialect.externalRef(externalSlot(pred.operand.ext), kind)})`;
+      // a boolean column holds neither a string nor a number, so nothing it
+      // holds equals or orders against an external that binds; the
+      // comparison keeps the external's slot, which is how a boolean, null
+      // or object external still sends the call to the engine
+      const guard = () => (pred.ref.storage === 'boolean' ? dialect.booleanLiteral(false)
+        : kind === 'text'
+          ? `${dialect.valueTypeOf(externalSlot(pred.operand.ext))} = ${sl('text')}`
+          : `${dialect.valueTypeOf(externalSlot(pred.operand.ext))} IN ${NUMERIC()}`);
+      const compare = () => `${dialect.externalCompare(column, kind)} ${symbol} `
+        + `${dialect.externalRef(externalSlot(pred.operand.ext), kind)}`;
+      // `ne` is true for a present value of the external's other type: the
+      // cross-type answer
+      if (pred.op === 'ne') return `(${column} IS NOT NULL AND (NOT (${guard()}) OR ${compare()}))`;
+      return `(${column} IS NOT NULL AND ${guard()} AND ${compare()})`;
     }
     const lit = pred.operand.lit;
     const litKind = typeof lit === 'number' ? 'number' : typeof lit === 'string' ? 'string' : 'other';

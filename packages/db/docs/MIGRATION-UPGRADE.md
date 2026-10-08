@@ -344,8 +344,9 @@ the query engine, now refuse by code or answer what the engine answers:
   the profile.
 - On PostgreSQL one statement now carries at most 128 leaf predicates, counted
   once the planner has regrouped (a membership list is one leaf; an `$or` of
-  `$and` pairs or a top-level `$and` of `$ne` counts per leaf, the profile's
-  mandatory predicate included), because a longer chain is priced into an LLVM
+  `$and` pairs or a top-level `$and` of `$ne` counts per leaf, as does each
+  comparison between two bindings that refines a join, and the profile's
+  mandatory predicate is included), because a longer chain is priced into an LLVM
   compile the server cannot interrupt. A query document past the bound runs in
   the engine where it was native (`predicate.termBound` in `explain()`,
   `JD0010` under strict mode, and under a profile `JD2007` past `maxRows` or
@@ -359,6 +360,37 @@ the query engine, now refuse by code or answer what the engine answers:
   produced), and `explainLoad` asks the server for it, so it answers a promise
   where it answered a value: `await` it (SQLite's stays a value). `explain()` of
   a native plan makes one more round trip on PostgreSQL.
+- On PostgreSQL an external operand compared with an entity column now answers as
+  the engine does: a `$ne` against an external of the column's other type matches
+  every present value (it matched none), a boolean column equals and orders
+  against neither a string nor a number, and a boolean or object external sends
+  the call to the engine, as it does on SQLite: strict mode refuses it `JD0010`
+  and `refuseFullScan` `JD0011`, where it ran natively. A profile's mandatory
+  predicate comparing a column with such an external is refused `JD0011`, as it is
+  on SQLite; it filtered by a wrong answer before.
+- A number that an integer column of an adopted table cannot take as its own type
+  (a fraction, an infinity, a magnitude past 64 bits) compares as the integers the
+  comparison admits (`qty < 2.5` is `qty <= 2`). On PostgreSQL `execute`, `load` and
+  `mutate` refused it `JD2005` (`invalid input syntax for type integer`); an integral
+  literal outside a `smallint` or `integer` column's own range still is.
+- A graph load answered wrongly in three shapes. A `count: true` include counted
+  every related row whatever the profile admitted (the related entity's allow-list
+  and mandatory predicate now hold the count, as they hold the rows an include
+  loads), so a profile's count shrinks to the rows it lets the caller read and is
+  refused as the rows would be: `JD0011` when the profile does not list the
+  related entity, `JD0032` when that entity's predicate names an external or
+  pushes the load past the term bound. A
+  many-to-many include with a `where`, or over an entity that a profile gives a
+  predicate, was refused `JD2005` on both engines; it now filters inside its
+  subquery. And on SQLite a relation holding both a `where` and a nested relation
+  with its own `where` bound the two filters' values in the wrong order, so the
+  load answered other rows than it asked for; each filter now takes its own.
+- A `NaN` literal in a comparison is answered where the query is planned: it
+  equals nothing, orders against nothing and differs from every present member,
+  so `$ne` is the existence test and the other comparisons are constant `false`.
+  On SQLite it bound as `NULL`, which a negation turned into an unanswered row,
+  and on PostgreSQL it sorted above every number, so `$not` of it, `$ne` and a
+  `load({ where })` answered other rows than the engine.
 - A collection `$sum` or `$avg` over a `number` member answered SQLite's
   compensated or PostgreSQL's exact sum; it now runs in the engine, whose
   left-to-right addition is the documented answer (`plan.floatingAccumulation`

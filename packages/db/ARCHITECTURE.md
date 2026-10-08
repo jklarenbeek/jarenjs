@@ -170,6 +170,15 @@ dialect papering over:
   form. SQLite's `jsonb_extract` reads whatever the member holds, so its
   `json_type` guards stay load-bearing there; externals and type tests
   keep the discriminator on both engines.
+A fourth difference is a limit, not a spelling, and the planner and the
+query layer enforce it rather than the emitter. PostgreSQL's planner
+prices every leaf per row, and a chain long enough to cross its JIT
+thresholds is compiled by LLVM, which checks for no interrupt, so a cancel
+and a statement timeout wait for the compile to end. The dialect declares
+`maxPredicateTerms: 128`; the planner counts the leaves once it has
+regrouped and answers a document past the bound in the engine, named
+`predicate.termBound`, while a graph load and a native mutation, which
+have no engine path, refuse it by name. SQLite declares none.
 
 An identifier longer than 63 bytes is REFUSED rather than emitted:
 PostgreSQL truncates one silently, and two generated column names that

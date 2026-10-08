@@ -2215,8 +2215,12 @@ export function createEntityQueryEngine(context) {
         if (listBindable(externals[slot.external])) continue;
         return { construct: 'external', reason: BIND_REASONS.external(slot.external, 'root') };
       }
-      const value = slotValue(slot, externals);
-      if (bindable(value) || (slot.nullable === true && value === null)) continue;
+      // a JSON-encoded external crosses as text whatever it holds, so what
+      // decides is the value the caller gave; a null compares as the
+      // column's own null on either engine
+      const json = 'external' in slot && slot.json === true;
+      const value = json ? externals[slot.external] : slotValue(slot, externals);
+      if (bindable(value) || ((slot.nullable === true || json) && value === null)) continue;
       const name = 'external' in slot ? slot.external
         : 'derived' in slot ? (slot.derived.kind === 'bboxAxis' ? slot.derived.external
           : [slot.derived.centre, slot.derived.radius].find((input) => 'external' in input)?.external) : null;
@@ -2683,6 +2687,12 @@ export function createLoadEngine(context, entityName) {
           ? null
           : buildTree(childName, childSpec, depth + 1, maxDepth,
             [...path, relationName], seen, profile),
+        // a count counts the related rows the caller may see: the child
+        // entity's allow-list and mandatory predicate bind it as they bind
+        // the rows
+        countWhere: childSpec.count === true
+          ? applyProfileToNode({ where: null }, childName, profile, [...path, relationName]).where
+          : null,
       };
       // the subquery's own LIMIT detects the bound (windowClause)
       if (include.child !== null) include.child.rowLimit = many ? include.maxRows : null;
@@ -2724,24 +2734,41 @@ export function createLoadEngine(context, entityName) {
     const parentKey = parentNode.entityMapping.keys[0];
     if (include.count === true) {
       const childTable = mapping.entities[relation.to].table;
+      const childKey = mapping.entities[relation.to].keys[0];
+      // the profile's predicate over the child entity, when it has one
+      const profiled = include.countWhere === null ? ''
+        : ` AND ${emitters.emitPred(q(childAlias), `${q(childAlias)}.${q('doc')}`, include.countWhere)}`;
       if (relation.kind === 'manyToMany') {
         const join = mapping.joinTables[relation.joinTable];
         const own = join.left.entity === parentNode.entity.name ? join.left : join.right;
-        return `(SELECT COUNT(*) FROM ${q(relation.joinTable)} AS ${q(childAlias)} `
-          + `WHERE ${q(childAlias)}.${q(own.column)} = ${q(parentAlias)}.${q(parentKey)})`;
+        // the links alone say how many there are; the child's rows are
+        // read only to hold them to the predicate
+        if (include.countWhere === null) {
+          return `(SELECT COUNT(*) FROM ${q(relation.joinTable)} AS ${q(childAlias)} `
+            + `WHERE ${q(childAlias)}.${q(own.column)} = ${q(parentAlias)}.${q(parentKey)})`;
+        }
+        return `(SELECT COUNT(*) FROM ${q(childTable)} AS ${q(childAlias)} `
+          + `JOIN ${q(relation.joinTable)} AS ${q(`${childAlias}_j`)} `
+          + `ON ${q(`${childAlias}_j`)}.${q(`${relation.to}_key`)} = ${q(childAlias)}.${q(childKey)} `
+          + `WHERE ${q(`${childAlias}_j`)}.${q(`${parentNode.entity.name}_key`)} = ${q(parentAlias)}.${q(parentKey)}${profiled})`;
       }
       if (relation.kind === 'oneToOne') {
-        const childKey = mapping.entities[relation.to].keys[0];
         return `(SELECT COUNT(*) FROM ${q(childTable)} AS ${q(childAlias)} `
-          + `WHERE ${q(childAlias)}.${q(childKey)} = ${q(parentAlias)}.${q(relation.via)})`;
+          + `WHERE ${q(childAlias)}.${q(childKey)} = ${q(parentAlias)}.${q(relation.via)}${profiled})`;
       }
       return `(SELECT COUNT(*) FROM ${q(childTable)} AS ${q(childAlias)} `
-        + `WHERE ${q(childAlias)}.${q(relation.via)} = ${q(parentAlias)}.${q(parentKey)})`;
+        + `WHERE ${q(childAlias)}.${q(relation.via)} = ${q(parentAlias)}.${q(parentKey)}${profiled})`;
     }
     const child = include.child;
     const childTable = child.entityMapping.table;
     const childKey = child.entityMapping.keys[0];
     const rendered = render(child, childAlias, param, emitters);
+    // the nested relations sit in the subquery's select list, before its
+    // own filter in the text, so they take their values first
+    const projection = rendered.projection();
+    // the filter is emitted once: each emission takes its own values
+    const filter = child.where === null ? null
+      : emitters.emitPred(rendered.aliasSql, rendered.docSql, child.where);
     const conditions = [];
     if (relation.kind === 'oneToMany') {
       conditions.push(`${q(childAlias)}.${q(relation.via)} = ${q(parentAlias)}.${q(parentKey)}`);
@@ -2749,8 +2776,7 @@ export function createLoadEngine(context, entityName) {
     else if (relation.kind === 'oneToOne') {
       conditions.push(`${q(childAlias)}.${q(childKey)} = ${q(parentAlias)}.${q(relation.via)}`);
     }
-    if (child.where !== null)
-      conditions.push(emitters.emitPred(rendered.aliasSql, rendered.docSql, child.where));
+    if (filter !== null) conditions.push(filter);
     const orderSql = (child.order ?? []).map((term) => {
       // epoch paths order by the document string (codepoint = the
       // engine's order); only plain mapped columns order natively, and
@@ -2767,18 +2793,17 @@ export function createLoadEngine(context, entityName) {
         + `JOIN ${q(relation.joinTable)} AS ${q(`${childAlias}_j`)} `
         + `ON ${q(`${childAlias}_j`)}.${q(`${relation.to}_key`)} = ${q(childAlias)}.${q(childKey)} `
         + `WHERE ${q(`${childAlias}_j`)}.${q(`${parentNode.entity.name}_key`)} = ${q(parentAlias)}.${q(parentKey)}`
-        + (child.where !== null
-          ? ` AND ${emitters.emitPred(rendered.aliasSql, rendered.docSql, child.where)}` : '')
+        + (filter !== null ? ` AND ${filter}` : '')
         + ` ORDER BY ${orderSql.join(', ')}`
         + windowClause(child)
       : `SELECT ${rendered.aliasSql}.* FROM ${q(childTable)} AS ${q(childAlias)} `
         + `WHERE ${conditions.join(' AND ')} ORDER BY ${orderSql.join(', ')}`
         + windowClause(child);
     if (relation.kind === 'oneToOne') {
-      return `(SELECT ${dialect.jsonObject(rendered.projection())} FROM `
+      return `(SELECT ${dialect.jsonObject(projection)} FROM `
         + `(${inner} ${dialect.limitClause(1, undefined)}) AS ${q(childAlias)})`;
     }
-    return `(SELECT ${dialect.jsonAgg(dialect.jsonObject(rendered.projection()))} `
+    return `(SELECT ${dialect.jsonAgg(dialect.jsonObject(projection))} `
       + `FROM (${inner}) AS ${q(childAlias)})`;
   };
 
@@ -2918,7 +2943,7 @@ export function createLoadEngine(context, entityName) {
     if (dialect.maxPredicateTerms !== null) {
       const treeTerms = (/** @type {any} */ node) => predicateTerms(node.where)
         + node.includes.reduce((/** @type {number} */ sum, /** @type {any} */ include) =>
-          sum + (include.child === null ? 0 : treeTerms(include.child)), 0);
+          sum + predicateTerms(include.countWhere) + (include.child === null ? 0 : treeTerms(include.child)), 0);
       if (treeTerms(tree) > dialect.maxPredicateTerms) {
         throw refuse(`the where expression is not translatable: ${PLANNER_REASONS['predicate.termBound'].text}; `
           + 'execute() answers it in the engine', []);

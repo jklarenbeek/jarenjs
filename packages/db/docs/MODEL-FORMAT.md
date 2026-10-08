@@ -2904,14 +2904,18 @@ Per binding, predicates resolve through three reference flavors:
 - **entity-column** — a mapped scalar column. Total forms, no
   `json_type` guard: a column-mapped property has no present-`null`
   (§9.3), so presence IS `IS NOT NULL`. Cross-type literals decide at
-  plan time (`false`, or presence for `$ne`).
+  plan time (`false`, or presence for `$ne`), and so does a number an
+  integer column cannot take as its own type — a fraction, an infinity, a
+  magnitude past 64 bits: it compares as the integers the comparison
+  admits (`x < 2.5` is `x <= 2`; `x = 2.5` is `false`).
 - **entity-epoch** — a derived instant column (§10.3).
 - **entity-doc** — any other path rides the JSONB document with the
   phase-A guarded truth table, aliased per binding.
 
 Externals bind against entity columns (with the phase-A `valueTypeOf`
-guard); a boolean, `null` or missing external diverts to the residual
-at bind time, exactly as phase A does. Externals against document
+guard); a boolean, an object or a missing external diverts to the
+residual at bind time, exactly as phase A does, while a `null` one binds
+and differs from every value the column holds. Externals against document
 paths stay residual.
 
 **Membership** is `$eq` between a member and a list — a `$seq` of scalar
@@ -2945,19 +2949,24 @@ holding an item the planner refuses (a compound literal, an operator
 over a member) stays whole in the engine with that item's reason:
 nothing is split between the statement and the engine. Three literal
 comparisons keep their place although their member regroups: one
-against a number that is not finite or a string that is no JSON text (a
+against an infinity or a string that is no JSON text (a
 lone surrogate), which no bound could carry exactly, and an equality on
 an entity's instant column, whose own comparison narrows the column's
 index by an epoch range that a list of document strings cannot (its
-rays still fold, and the folded bound keeps that range). A long `$and`,
+rays still fold, and the folded bound keeps that range). A NaN literal
+reaches no group: it equals nothing, orders against nothing and differs
+from every present member, so the planner answers it where it plans it —
+a constant `false`, or the existence test for `$ne` — and binds no value
+for it. A long `$and`,
 or an `$or` nothing regroups (`$and` pairs), nests in halves (depth
 log₂ n), so 5,000 leaves prepare and explain where a flat chain met
 SQLite's expression-depth limit near 1,000 terms. A dialect may bound
 the leaf predicates one statement carries (`maxPredicateTerms`:
-PostgreSQL 64, SQLite none), counted once the planner has regrouped —
+PostgreSQL 128, SQLite none), counted once the planner has regrouped —
 the chain that folds to one list is one leaf however long it is, and
 the count takes in every filter the statement holds, the profile's
-mandatory predicate included — and a document past the bound is the
+mandatory predicate and every comparison that refines a join included —
+and a document past the bound is the
 engine's, named `predicate.termBound` (§10.6).
 
 ### 10.2 Joins
@@ -3079,8 +3088,11 @@ inherited — `maxRows: Infinity` (`null` in the JSON spec) — so loading
 a relation whole is a decision rather than an oversight. The to-many
 subquery carries `LIMIT maxRows + 1`, so the bound is detected at the
 bound instead of after aggregating the whole relation; a `count`
-include is a number and carries neither. `explainLoad().bounds` lists
-the bounds every include ran under.
+include is a number and carries neither. Under a profile a `count`
+include counts what the profile lets the caller read: the related
+entity's allow-list refuses it (`JD0011`) and its mandatory predicate
+holds the count to the rows it admits, as it holds the rows an include
+loads. `explainLoad().bounds` lists the bounds every include ran under.
 
 **The graph cursor.** `store.entity(name).loadCursor(spec, options)` —
 `graph.cursor(options)` on the client — yields one root graph per
@@ -3277,8 +3289,8 @@ a number appears only where `capabilities.rowEstimates` is filled):
   `null`, a boolean, an object or an array at bind time;
 - on a dialect with a term bound (PostgreSQL: 128 leaf predicates per
   statement, counted once the planner has regrouped, over every filter
-  the statement carries and the profile's mandatory predicate), a
-  document past it — an `$or` of more than 64 `$and` pairs, a top-level
+  the statement carries, every comparison that refines a join and the
+  profile's mandatory predicate), a document past it — an `$or` of more than 64 `$and` pairs, a top-level
   `$and` of more than 128 `$ne` — named `predicate.termBound`; a graph
   load (`JD0032`) and a native mutation (`JD0038`), which have no engine
   path, refuse it by name, and under a profile the residual is refused

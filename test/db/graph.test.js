@@ -147,6 +147,38 @@ describe('one-statement graph loading', () => {
       'filtered to stars>=3, ordered desc, capped at two, per parent');
   });
 
+  it('filters at two depths each bind their own value, whatever order the statement reads them in', async () => {
+    // a relation's subquery holds its nested relations before its own filter in the text, and an
+    // anonymous placeholder takes the next value in the text
+    const graph = await store.entity('User').load({
+      orderBy: '$it.id',
+      include: { posts: {
+        where: { $ge: ['$it.stars', 4] }, orderBy: '$it.pid',
+        include: { comments: { where: { $eq: ['$it.text', 'wow'] }, orderBy: '$it.cid' } },
+      } },
+    });
+    assert.deepStrictEqual(
+      graph.map((u) => [u.id, u.posts.map((p) => [p.pid, p.comments.map((c) => c.text)])]),
+      [['u1', [[1, ['wow']]]], ['u2', [[3, []]]], ['u3', []]]);
+    const rooted = await store.entity('User').load({
+      where: { $eq: ['$it.name', 'ada'] },
+      include: { posts: {
+        where: { $le: ['$it.stars', 3] }, orderBy: '$it.pid',
+        include: { comments: { where: { $eq: ['$it.text', 'nice'] } } },
+      } },
+    });
+    assert.deepStrictEqual(rooted.map((u) => u.posts.map((p) => [p.pid, p.comments.length])), [[[2, 0], [4, 0]]]);
+  });
+
+  it('a many-to-many relation filters by its where inside the subquery', async () => {
+    const graph = await store.entity('User').load({
+      orderBy: '$it.id',
+      include: { labels: { where: { $eq: ['$it.name', 'dev'] }, orderBy: '$it.name' } },
+    });
+    assert.deepStrictEqual(graph.map((u) => [u.id, u.labels.map((l) => l.name)]),
+      [['u1', ['dev']], ['u2', []], ['u3', []]]);
+  });
+
   it('a required foreign key derives the inner join kind', async () => {
     const graph = await store.entity('Post').load({
       orderBy: '$it.pid',
@@ -188,6 +220,24 @@ describe('one-statement graph loading', () => {
     });
     assert.deepStrictEqual(graph.map((u) => [u.id, u.posts]),
       [['u1', 3], ['u2', 1], ['u3', 0]]);
+  });
+
+  it('a count include wears the profile as the rows it counts do: the predicate binds the count and the allow-list refuses it', async () => {
+    const users = store.entity('User');
+    const profile = { collections: ['User', 'Post', 'Label'],
+      predicates: { Post: { $ge: ['$it.stars', 4] }, Label: { $eq: ['$it.name', 'admin'] } } };
+    const rows = await users.load({ orderBy: '$it.id', include: { posts: true, labels: true } }, { profile });
+    const counts = await users.load({ orderBy: '$it.id',
+      include: { posts: { count: true }, labels: { count: true } } }, { profile });
+    assert.deepStrictEqual(counts.map((u) => [u.id, u.posts, u.labels]),
+      rows.map((u) => [u.id, u.posts.length, u.labels.length]), 'the number of rows the caller sees');
+    assert.deepStrictEqual(counts.map((u) => [u.id, u.posts, u.labels]), [['u1', 1, 1], ['u2', 1, 1], ['u3', 0, 0]]);
+    // a to-one count is the same question
+    const authors = await store.entity('Post').load({ orderBy: '$it.pid', include: { author: { count: true } } },
+      { profile: { predicates: { User: { $gt: ['$it.age', 40] } } } });
+    assert.deepStrictEqual(authors.map((p) => [p.pid, p.author]), [[1, 0], [2, 0], [3, 1], [4, 0]]);
+    assert.throws(() => users.explainLoad({ include: { posts: { count: true } } }, { profile: { collections: ['User'] } }),
+      (/** @type {any} */ error) => error.code === 'JD0011' && /does not allow loading entity 'Post' \(include path: posts\)/.test(error.message));
   });
 
   it('the promise-free twin loads, explains and queries the same surfaces', () => {
