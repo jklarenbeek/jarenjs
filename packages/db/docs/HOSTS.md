@@ -403,7 +403,8 @@ try {
 
 The host authorizes and scopes feed delivery, persists the acknowledged cursor,
 and handles retention resets. Journal capture covers enrolled Store writes;
-arbitrary SQL, other connections and all trigger/cascade effects are not covered.
+arbitrary SQL, other connections and application triggers are not covered; the
+foreign-key actions of a covered delete are.
 Explicit `session` mode refuses with `TypeError`, without a JD code. Synchronous
 Store methods remain unavailable. Import `asyncLive` from `@jarenjs/db/async-live`
 and pass `live: asyncLive(limits)` to select async maintenance. Its

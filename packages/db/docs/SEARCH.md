@@ -38,7 +38,8 @@ transaction view. Tokens bracket the source read through the shared revision
 snapshot validator. A changed token produces `invalidated` and preserves the
 previous published revision; the next request tries again. A provider must
 advance for every source change it promises to cover. Enrolled log revisions
-do not promise arbitrary external SQL or trigger/cascade coverage. An
+do not promise arbitrary external SQL or application trigger coverage; the
+foreign-key actions of an enrolled delete are part of its record. An
 authoritative refresh discovers current content but cannot prove a stable
 external multi-statement snapshot without a provider or host isolation contract.
 

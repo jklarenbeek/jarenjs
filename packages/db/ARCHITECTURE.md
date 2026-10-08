@@ -1081,7 +1081,22 @@ Two sources behind one contract: SQLite's **session changeset** where
 the binding exposes `createSession` (node:sqlite), parsed from its
 binary format by a hand-written decoder; a **write-path journal**
 where it does not (bun:sqlite, the wasm build), buffering before/after
-documents as the store writes them. Both net ONE op per row — insert+
+documents as the store writes them. The rows the database's own
+foreign-key actions change inside a DELETE are the one thing a journal
+cannot see written; `src/cascade.js` predicts them from the model's
+edges (which the open-time check holds equal to the database's):
+before the statement, inside its transaction, breadth first over the
+inbound `cascade`/`setNull` and join-table edges of every removed row,
+one statement per edge, level and chunk of keys, each read locked
+where the engine locks rows as strongly as the delete's own action
+will (PostgreSQL: `FOR UPDATE` for a removed row or a nulled unique
+member, `FOR NO KEY UPDATE` for any other nulled row). They are
+recorded right after the statement's own entry once it removed its
+row, so a refused delete records nothing. A tracked UPDATE assigns
+only the members its save changed, so the unit of work reads the row
+first and, when it no longer holds the tracked snapshot (such an
+action changed it), again afterwards: the stored rows are then its
+images. Both net ONE op per row — insert+
 update coalesces, insert+delete vanishes, an update back to the
 original emits nothing — so the two modes agree as SETS (a differential
 test pins it). The journal's netting was added when the wasm parity
@@ -1290,9 +1305,10 @@ invalidates capture subscribers after commit. Snapshot reset carries complete
 receipt evidence and refuses histories beyond its explicit credits.
 
 Replication and logical-row one-shot SQL use the driver's shared temporary
-statement owner. Bounded pages, snapshots and journal membership reads hold that
-borrow through complete cursor draining, including cancellation and capacity
-refusal. They never return an iterator after releasing its statement.
+statement owner. Bounded pages and snapshots hold that borrow through complete
+cursor draining, including cancellation and capacity refusal; the journal's
+foreign-key closure reads each statement whole before releasing it. They never
+return an iterator after releasing its statement.
 
 `dialects/replication.js` declares the metadata schema once; SQL values use
 the connection's parameter vocabulary. `dialects/postgres-replication.js`
@@ -1347,16 +1363,6 @@ both hosts, including transaction failures.
 
 `src/search.js` composes core lexical mechanics and the JSON predicate compiler over complete bounded entity snapshots. Committed capture and data-version checks invalidate derived state; SHA-256 source content validates persisted caches across reopen. Snapshot storage uses existing collection transactions. See [search execution](docs/SEARCH.md); native full-text dialects remain unqualified.
 
-`dialects/sqlite-relational.js` owns the explicit SQLite expression and statement
-compiler; `dialects/sqlite-schema.js` reuses it for ordered tables, indexes and
-triggers, sharing its column/reference renderer with native ADD COLUMN.
-`table-migration.js` owns reviewed source/settings guards for additive/object
-changes and source/target guards for native copying
-and preservation checks, with catalog/pragma spellings in the SQLite dialect.
-The supplied driver owns transactions and cursors. These programs are explicitly
-SQLite-semantic and never enter the JSON residual evaluator. See
-[the native SQLite contract](docs/SQLITE-RELATIONAL.md).
-
 `dialects/row-predicate.js` is the one lowering of a row predicate — a bounded
 query expression over the mapped columns of one row — to SQL that answers as the
 query engine does over the row as stored, per column `null` policy (SQL NULL as a
@@ -1371,6 +1377,31 @@ beside `compileInvariants` in `invariant-sql.js`, `POSTGRES` in
 `postgres-invariants.js`, so no PostgreSQL code reaches a bundle that carries
 only SQLite) and the resolver of the paths it reads, and wraps each refusal
 reason in its own error.
+
+An index condition (MODEL-FORMAT §2, §9.2) is that lowering's index rendering,
+every operand read as an absent member and every condition written in one
+spelling per meaning, so a condition read back renders as written; the dialect
+hands its flavor over as `rowPredicateFlavor`. `dialects/check-read.js` holds
+the one reader of a condition, `readPredicate(sql, spelling, member)`: one walk
+over `sqlTokens`, beside the CHECK enum recovery and sharing its literal reader,
+the engine injecting its spelling (`POSTGRES_PREDICATE` reads the server's
+deparse and the PostgreSQL rendering, `SQLITE_PREDICATE` the text SQLite keeps).
+`ddl.js` reaches it only through the dialect's `readIndexPredicate`, which only
+the PostgreSQL dialect sets — SQLite verifies by its CREATE text — so the reader
+never enters a bundle that carries only SQLite. Every planner lists the schema
+objects it names, the engine's own relations included, and
+`refuseNameCollisions` holds them to one namespace (ASCII case folded): each
+planner for its table, the store for the whole model.
+
+`dialects/sqlite-relational.js` owns the explicit SQLite expression and statement
+compiler; `dialects/sqlite-schema.js` reuses it for ordered tables, indexes and
+triggers, sharing its column/reference renderer with native ADD COLUMN.
+`table-migration.js` owns reviewed source/settings guards for additive/object
+changes and source/target guards for native copying
+and preservation checks, with catalog/pragma spellings in the SQLite dialect.
+The supplied driver owns transactions and cursors. These programs are explicitly
+SQLite-semantic and never enter the JSON residual evaluator. See
+[the native SQLite contract](docs/SQLITE-RELATIONAL.md).
 
 `relational.js` is one engine over an admission policy: planning, emission,
 execution, the result rule (`lastInsertRowid` only for an insert that inserted

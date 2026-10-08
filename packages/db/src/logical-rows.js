@@ -4,8 +4,10 @@ import { chain, useStatementOnce } from './driver.js';
 import { keyToken } from './capture.js';
 import { DbRuntimeError } from './errors.js';
 
-/** @param {any} options */
-export function createLogicalRows({ connection, shapes, collectionCore, entityCore, capture, captureJoinDelete }) {
+/** `captureCascade` and `recordCascade` are journal capture's foreign-key
+ * closure, handed only to the writer replication applies through.
+ * @param {any} options */
+export function createLogicalRows({ connection, shapes, collectionCore, entityCore, capture, captureCascade, recordCascade }) {
   const dialect = connection.dialect;
   const q = dialect.quoteIdentifier;
   const p = (i) => dialect.parameterRef(i, 'row');
@@ -67,10 +69,13 @@ export function createLogicalRows({ connection, shapes, collectionCore, entityCo
     const sql = after === null ? `DELETE FROM ${q(table)} WHERE ${where(keys)}`
       : before === null ? `INSERT INTO ${q(table)} (${names.map(q).join(', ')}) VALUES (${expressions.join(', ')})`
         : `UPDATE ${q(table)} SET ${names.map((name, i) => `${q(name)} = ${expressions[i]}`).join(', ')} WHERE ${where(keys, params.length)}`;
-    return chain(after === null && shape.kind === 'entity' ? captureJoinDelete?.(table, partsOf(shape, key)) : null,
-      () => chain(statement(sql, 'run', after === null ? partsOf(shape, key)
-      : before === null ? params : [...params, ...partsOf(shape, key)]), () => {
-      if (capture.mode === 'journal') capture.record(table, partsOf(shape, key), before, after);
+    return chain(after === null && shape.kind === 'entity' ? captureCascade?.(table, partsOf(shape, key)) : null,
+      (closure) => chain(statement(sql, 'run', after === null ? partsOf(shape, key)
+      : before === null ? params : [...params, ...partsOf(shape, key)]), (result) => {
+      if (capture.mode !== 'journal') return;
+      capture.record(table, partsOf(shape, key), before, after);
+      // the rows the database's foreign-key actions changed, once the delete removed its row
+      if (closure && Number(result?.changes ?? 0) > 0) recordCascade(closure.entries);
       }));
   };
   return { read, write, tables: [...shapes.keys()],

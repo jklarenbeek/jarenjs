@@ -125,7 +125,9 @@ export function deepFreeze(value) {
 export function createTracker(context) {
   const { connection, entities, mapping, coreFor } = context;
   const captureRecord = context.captureRecord ?? null;
-  const captureJoinDelete = context.captureJoinDelete ?? null;
+  // journal capture's foreign-key closure: read before each delete statement
+  // runs, recorded by `commit` only after the statement removed its row
+  const captureCascade = context.captureCascade ?? null;
   const dialect = connection.dialect;
   const q = dialect.quoteIdentifier;
   const parameterAt = (i) => dialect.parameterRef(i, 'v');
@@ -1073,6 +1075,25 @@ export function createTracker(context) {
   const keyArgument = (plan, parts) => (plan.keys.length === 1 ? parts[0]
     : Object.fromEntries(plan.keys.map((/** @type {string} */ key, /** @type {number} */ i) => [key, parts[i]])));
 
+  /** The row a tracked record names, as `get` reads it. @param {any} record */
+  const storedRowOf = (record) => {
+    const core = coreFor(record.entity);
+    return core.get(keyArgument(core.plan, core.plan.keys.map((/** @type {string} */ key) => record.snapshot[key])));
+  };
+
+  /** Whether a stored row still holds what a tracked snapshot says, relation
+   * members (projections, never stored) aside.
+   * @param {string} entityName @param {any} stored @param {any} snapshot */
+  const holdsSnapshot = (entityName, stored, snapshot) => {
+    const properties = entities.get(entityName).properties;
+    /** @type {any} */
+    const kept = {};
+    for (const [name, value] of Object.entries(snapshot)) {
+      if (properties.get(name)?.relation === undefined) kept[name] = value;
+    }
+    return createJSONPatch(kept, stored).length === 0;
+  };
+
   /** Run checks one after another. @param {(() => any)[]} runs @returns {any} */
   const settleChecks = (runs) => inOrder(runs.length, (at) => runs[at]());
 
@@ -1142,10 +1163,22 @@ export function createTracker(context) {
       const execute = () => useStatementOnce(connection, statement.sql, (prepared) =>
         attempt(() => (returning ? prepared.all(statement.params) : prepared.run(statement.params)),
           (error) => wrapDb(error, statement)));
+      // A tracked UPDATE assigns only the members the save changed, so its
+      // journal images are the snapshot and the snapshot with those changes
+      // only while the stored row still holds the snapshot. An earlier write
+      // of the transaction (a foreign-key action nulling a member, a direct
+      // write) leaves the snapshot stale; the row is then read again after the
+      // statement, and the two stored rows are the images.
+      const journalImage = statement.kind === 'update' && captureRecord !== null
+        && coreFor(statement.entity).plan.document !== false;
       return chain(ahead(statement), () => chain(
-        statement.kind === 'delete' && captureJoinDelete !== null
-          ? captureJoinDelete(statement.entity, statement.removal.parts)
-          : null,
+        statement.kind === 'delete' && captureCascade !== null
+          ? chain(captureCascade(statement.entity, statement.removal.parts), (closure) => {
+            statement.cascade = closure?.entries ?? [];
+          })
+          : journalImage
+            ? chain(storedRowOf(statement.record), (row) => { statement.journalBefore = row; })
+            : null,
         () => chain(execute(), (outcome) => {
           if (returning) {
             // auto keys allocate monotonically in insertion order —
@@ -1166,6 +1199,11 @@ export function createTracker(context) {
           else if (statement.kind === 'update') {
             if (changed === 0) throw conflict(statement);
             report.updated += 1;
+            if (journalImage && !holdsSnapshot(statement.entity, statement.journalBefore, statement.record.snapshot)) {
+              return chain(advance(), () => chain(storedRowOf(statement.record), (row) => {
+                statement.journalAfter = row;
+              }));
+            }
           }
           else if (statement.kind === 'delete') {
             if (changed === 0 && statement.guarded) throw conflict(statement);
@@ -1459,8 +1497,11 @@ export function createTracker(context) {
         record.snapshot = deepFreeze(saved);
         record.current = pending ?? record.snapshot;
         record.stamped = undefined;
-        captureRecord?.(statement.entity,
-          plan.keys.map((k) => record.snapshot[k]), before, record.snapshot);
+        // a stale snapshot is no image of the row: the stored rows read
+        // around the statement are (see `runStatements`)
+        const stale = statement.journalAfter !== undefined;
+        captureRecord?.(statement.entity, plan.keys.map((k) => record.snapshot[k]),
+          stale ? statement.journalBefore : before, stale ? statement.journalAfter : record.snapshot);
       }
       else if (statement.kind === 'delete') {
         const removal = statement.removal;
@@ -1470,6 +1511,10 @@ export function createTracker(context) {
         if ((statement.deletedRows ?? 0) > 0) {
           captureRecord?.(removal.entity, removal.parts,
             removal.snapshot ?? undefined, null);
+          // the rows the database's foreign-key actions changed with it
+          for (const entry of statement.cascade ?? []) {
+            captureRecord?.(entry.table, entry.keyParts, entry.before, entry.after);
+          }
         }
       }
       else if (statement.kind === 'join-insert' || statement.kind === 'join-delete') {

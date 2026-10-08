@@ -49,8 +49,8 @@ import { relationalEngine } from './relational.js';
 import { createTracker, membershipKeys } from './tracker.js';
 import { createCaptureEngine, DEFAULT_RETENTION } from './capture.js';
 import { createReplicationEngine, readReplicationOptions } from './replication.js';
-import { REPLICATION_DEFAULTS } from './replication-format.js';
 import { createLogicalRows } from './logical-rows.js';
+import { createCascadeCapture } from './cascade.js';
 import { shapeHash } from './migrate.js';
 import { createLiveRegistry, classifyLiveQuery, LIVE_DEFAULTS } from './live.js';
 import { ASYNC_LIVE_DEFAULTS } from './live-options.js';
@@ -3034,47 +3034,31 @@ export function openStore(model, options) {
             for (const name of names) delete out[name];
             return out;
           };
-          /** Journal mode cannot see ON DELETE CASCADE side effects;
-           * the ONE store-shaped case — join-table membership dying
-           * with its entity — is read and recorded before the delete.
-           * Deeper cascades (child rows) stay documented-invisible. */
-          const captureJoinDelete = capture === null || capture.mode !== 'journal'
-            ? null
-            : (entityName, keyParts) => {
-              const joins = Object.entries(mapping?.joinTables ?? {})
-                .filter(([, join]) => join.left.entity === entityName
-                  || join.right.entity === entityName);
-              const nextJoin = (i) => {
-                if (i >= joins.length) return null;
-                const [joinName, join] = joins[i];
-                const columns = [join.left.column, join.right.column];
-                const own = join.left.entity === entityName ? join.left : join.right;
-                const sql = `SELECT ${columns.map(dialect.quoteIdentifier).join(', ')} `
-                  + `FROM ${dialect.quoteIdentifier(joinName)} `
-                  + `WHERE ${dialect.quoteIdentifier(own.column)} = ${dialect.parameterRef(1, 'v')}`;
-                const boundedRows = () => {
-                  const { maxOperations = REPLICATION_DEFAULTS.maxOperations, maxBytes = REPLICATION_DEFAULTS.maxBytes } = options.replication;
-                  return useStatementOnce(connection, `${sql} LIMIT ${dialect.parameterRef(2, 'v')}`, (statement) => {
-                    const cursor = createCursor({ streaming: 'row', barrier: null,
-                      open: () => statement.iterate([keyParts[0], maxOperations + 1]),
-                      items: (row) => [row] });
-                    return chain(drainPage(cursor, { limit: maxOperations, maxBytes,
-                      sizeOf: (row) => utf8Length(JSON.stringify(row)), continuationOf: () => null }), (page) => {
-                      if (page.hasMore) throw new DbRuntimeError('JD2106', 'membership cascade exceeds replication capacity');
-                      return page.items;
-                    });
-                  });
-                };
-                return chain(options.replication === undefined
-                  ? useStatementOnce(connection, sql, (statement) => statement.all([keyParts[0]])) : boundedRows(), (rows) => {
-                    for (const row of rows) {
-                      capture.record(joinName, columns.map((column) => row[column]), undefined, null);
-                    }
-                    return nextJoin(i + 1);
-                  });
-              };
-              return nextJoin(0);
-            };
+          /** A journal sees the rows its write paths write, not the rows the
+           * database's own foreign-key actions remove or null inside a DELETE:
+           * descendants through `cascade`, the member of `setNull` rows, the
+           * membership rows of every removed row. Those are read from the
+           * model's edges — the database's, the open-time check makes sure —
+           * before the statement runs, inside its transaction and locked where
+           * the engine locks rows, and recorded only once the statement removed
+           * its row, right after the statement's own entry: a delete the
+           * database refuses records nothing. Under replication the rows count
+           * against the envelope's credits, refused before the delete. */
+          const cascadeCapture = capture === null || capture.mode !== 'journal' || mapping === null ? null
+            : createCascadeCapture({ connection, mapping,
+              // deferred: the entity cores are built further down
+              entityCoreFor: (name) => entityCoreFor(name),
+              // the credits replication reads: its own defaults under the given ones
+              bound: options.replication === undefined ? null : readReplicationOptions(options.replication) });
+          const captureCascade = cascadeCapture === null ? undefined
+            : (table, keyParts) => cascadeCapture.predict(table, keyParts);
+          /** Record a closure's entries, relation members stripped as every entry is. */
+          const recordCascade = (entries) => {
+            for (const entry of entries) {
+              capture.record(entry.table, entry.keyParts,
+                stripRelations(entry.table, entry.before), stripRelations(entry.table, entry.after));
+            }
+          };
           /** The document a keyed `put` replaces, for the journal's
            * before-image: resolved through the collection's own key when
            * the caller passed none — a plain upsert recorded as an
@@ -3160,13 +3144,16 @@ export function openStore(model, options) {
                     return next;
                   }))
                 : core.update(key, changes))),
+              // the closure's locked root is the before-image when the entity
+              // has inbound edges; a refused delete throws before any record
               delete: (key) => guard(() => (journal
-                ? chain(captureJoinDelete(entityName, core.normalizeKey(key)), () =>
-                  chain(core.get(key), (before) =>
+                ? chain(captureCascade(entityName, core.normalizeKey(key)), (closure) =>
+                  chain(closure === null ? core.get(key) : closure.root, (before) =>
                     chain(core.delete(key), (deleted) => {
                       if (deleted && before !== undefined) {
                         capture.record(entityName, core.normalizeKey(key),
                           stripRelations(entityName, before), null);
+                        if (closure !== null) recordCascade(closure.entries);
                       }
                       return deleted;
                     })))
@@ -3325,7 +3312,7 @@ export function openStore(model, options) {
                   : (table, keyParts, before, after) => capture.record(table, keyParts,
                     before === undefined ? undefined : stripRelations(table, before),
                     stripRelations(table, after)),
-                captureJoinDelete: captureJoinDelete ?? undefined,
+                captureCascade,
               })
               : null;
             /** @type {Map<string, any>} */
@@ -4863,7 +4850,7 @@ export function openStore(model, options) {
               managedTables: [...captureShapes.keys()],
               config: options.replication, model: shapeHash(model), now: runtime.now, bracket: firstOpen,
               rows: createLogicalRows({ connection, shapes: captureShapes, capture,
-                collectionCore: coreFor, entityCore: entityCoreFor, captureJoinDelete }),
+                collectionCore: coreFor, entityCore: entityCoreFor, captureCascade, recordCascade }),
             });
             store.replication = Object.freeze({
               frontier: lift(() => gated(() => replicationEngine.frontier())),

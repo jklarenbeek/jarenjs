@@ -689,18 +689,29 @@ the database's own foreign-key actions ([LIVE-FORMAT](LIVE-FORMAT.md) §4):
   did. A consumer that compensated for the missing rows can stop; one that
   rebuilds state from records committed before the upgrade should resnapshot
   once. Op order within a record stays unspecified: these rows now follow the
-  delete's own `remove`, where membership removals used to precede it.
+  delete's own `remove`, where membership removals used to precede it. A
+  tracked save now reads each row it updates (and again after the update when
+  the row no longer holds its tracked snapshot), so a row such a delete nulled
+  earlier in the transaction is recorded as stored, not with the snapshot's
+  stale member.
 - A delete the database refuses no longer leaves membership removals behind in
   a transaction that catches the refusal: capture-only feeds no longer show
   them, and replicated stores no longer refuse that transaction `JD2104`.
-- On PostgreSQL such a delete first reads the rows it will change `FOR UPDATE`,
-  so a writer outside capture that touches them waits for the commit.
-- Under replication, a delete whose root and membership rows exceed
-  `replication.maxOperations` or `maxBytes` refuses `JD2106` (`a cascading
-  delete exceeds replication capacity`) before it runs — at the bound the
-  envelope itself would have exceeded (`replication operation bound exceeded`,
-  refused at commit) — and that message replaces `membership cascade
-  exceeds replication capacity`.
+- On PostgreSQL such a delete first reads the rows it will change, locked as
+  its own actions lock them: `FOR UPDATE` for a row it removes or a unique
+  (one-to-one) member it nulls, `FOR NO KEY UPDATE` for any other row it
+  nulls. A writer outside capture that would change or remove one of them now
+  waits for the commit, and the delete waits for a writer already holding one
+  of them, before its statement rather than during it; a writer that only
+  references a nulled row is not waited for.
+- Under replication, a delete refuses `JD2106` before it runs when its root and
+  the rows it reaches exceed `replication.maxOperations`, the bound its
+  envelope would exceed at commit (`replication operation bound exceeded`);
+  rows this transaction created count too, though the envelope would not carry
+  them. Their documents count against `maxBytes` the same way, a lower bound:
+  an envelope within it can still refuse at commit (`JD2074`). The message,
+  `a cascading delete exceeds replication capacity`, replaces
+  `membership cascade exceeds replication capacity`.
 
 ## Measured costs
 

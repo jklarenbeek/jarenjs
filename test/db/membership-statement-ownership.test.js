@@ -8,6 +8,10 @@ import { nodeProcessDriver } from '@jarenjs/db/node-process';
 import { wasmDriver } from '@jarenjs/db/wasm';
 
 const key = { type: 'string', 'x-entity': { key: true } };
+// op order within a record is unspecified (LIVE-FORMAT §2): records compare
+// with their ops sorted by path, one op per path
+/** @param {any[][]} records */
+const byPath = (records) => records.map((patch) => [...patch].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)));
 const model = { $model: '0.1', entities: {
   Item: { schema: { type: 'object', required: ['id'], properties: {
     id: key, tags: { 'x-entity': { relation: { to: 'Tag', many: true } } },
@@ -51,11 +55,11 @@ for (const [host, driver] of hosts) {
           await store.entity('Item').create({ id, ...(attached ? { tags: ['t'] } : {}) });
           await store.entity('Item').delete(id);
           const membershipPath = `/Item_Tag/${JSON.stringify([id, 't'])}`;
-          assert.deepEqual(patches.splice(0), [
+          assert.deepEqual(byPath(patches.splice(0)), byPath([
             [{ op: 'add', path: `/Item/${id}`, value: { id } },
               ...(attached ? [{ op: 'add', path: membershipPath, value: { Item_key: id, Tag_key: 't' } }] : [])],
-            [...(attached ? [{ op: 'remove', path: membershipPath }] : []), { op: 'remove', path: `/Item/${id}` }],
-          ]);
+            [{ op: 'remove', path: `/Item/${id}` }, ...(attached ? [{ op: 'remove', path: membershipPath }] : [])],
+          ]));
         }
         assert.deepEqual(await store.entity('Item').load({ include: { tags: true } }), []);
         assert.deepEqual(await store.entity('Tag').load({}), [{ id: 't' }]);
@@ -86,15 +90,15 @@ it('native synchronous membership operations keep value returns and exact journa
     const doc = { id: 'a', tags: ['t'] };
     assert.deepEqual(store.sync.entity('Item').create(doc), doc);
     assert.equal(store.sync.entity('Item').delete('a'), true);
-    assert.deepEqual(patches, [
+    assert.deepEqual(byPath(patches), byPath([
       [{ op: 'add', path: '/Item/a', value: { id: 'a' } },
         { op: 'add', path: '/Item_Tag/["a","t"]', value: { Item_key: 'a', Tag_key: 't' } }],
-      [{ op: 'remove', path: '/Item_Tag/["a","t"]' }, { op: 'remove', path: '/Item/a' }],
-    ]);
+      [{ op: 'remove', path: '/Item/a' }, { op: 'remove', path: '/Item_Tag/["a","t"]' }],
+    ]));
   });
 });
 
-/** Observe only the bounded membership cursor, excluding replication's other SQL. */
+/** Observe only the bounded membership read, excluding replication's other SQL. */
 async function boundedStore(asynchronous) {
   const Native = process.versions.bun ? (await import('bun:sqlite')).Database
     : (await import('node:sqlite')).DatabaseSync;
@@ -111,7 +115,11 @@ async function boundedStore(asynchronous) {
       return answer({
         run: (params = []) => answer(statement.run(...params)),
         get: (params = []) => answer(statement.get(...params) ?? undefined),
-        all: (params = []) => answer(statement.all(...params)),
+        all(params = []) {
+          const rows = statement.all(...params);
+          if (record !== null) record.drained = true;
+          return answer(rows);
+        },
         iterate(params = []) {
           const source = statement.iterate(...params);
           return answer({
@@ -162,10 +170,10 @@ for (const asynchronous of [false, true]) for (const count of [0, 1, 3])
       }
       else {
         assert.equal(await store.entity('Item').delete('a'), true);
-        assert.deepEqual(patches, [[
-          ...Array.from({ length: count }, (_, n) => ({ op: 'remove', path: `/Item_Tag/${JSON.stringify(['a', String(n)])}` })),
+        assert.deepEqual(byPath(patches), byPath([[
           { op: 'remove', path: '/Item/a' },
-        ]]);
+          ...Array.from({ length: count }, (_, n) => ({ op: 'remove', path: `/Item_Tag/${JSON.stringify(['a', String(n)])}` })),
+        ]]));
         assert.equal(await store.entity('Item').get('a'), undefined);
       }
       assert.deepEqual(records, [{ drained: true, finalized: 1 }]);

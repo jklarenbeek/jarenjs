@@ -597,6 +597,28 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
         chain(statement.get(parts), (row) => (row === undefined ? undefined : merge(row)))),
       (error) => wrapDriverError(error, { docPath, collection: entity.name, key }));
     },
+    /**
+     * The rows whose `column` holds one of `values` — the rows a foreign key
+     * on that column names — each read as {@link get} reads one, inside the
+     * caller's transaction and locked for the rest of it where the engine
+     * locks rows, at most `limit` of them when one is given.
+     * @param {string} column - a column of this entity's table
+     * @param {any[]} values - the values as the column stores them
+     * @param {number} [limit]
+     * @param {string} [lock] - the row-lock suffix: `dialect.rowLockSuffix`
+     *   (`FOR UPDATE`) by default, `dialect.rowNoKeyLockSuffix` for rows the
+     *   write changes only outside their key columns
+     * @returns {any[] | Promise<any[]>}
+     */
+    referencing(column, values, limit = undefined, lock = dialect.rowLockSuffix) {
+      if (values.length === 0) return [];
+      const sql = `SELECT ${selectColumns} FROM ${tableSql} WHERE ${q(physicalName(column))} `
+        + `IN (${values.map((_, i) => parameterAt(i + 1)).join(', ')})`
+        + `${limit === undefined ? '' : ` LIMIT ${parameterAt(values.length + 1)}`}${lock}`;
+      return attempt(() => useStatementOnce(connection, sql, (statement) =>
+        chain(statement.all(limit === undefined ? values : [...values, limit]), (rows) => rows.map((row) => merge(row)))),
+      (error) => wrapDriverError(error, { docPath, collection: entity.name }));
+    },
     update(key, changes) {
       writable();
       const parts = keyParts(key);

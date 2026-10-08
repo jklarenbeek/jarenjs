@@ -146,6 +146,7 @@ function normalizeCapabilities(declared) {
  *   jobs?: any,
  *   replication?: any,
  *   rowLockSuffix?: string,
+ *   rowNoKeyLockSuffix?: string,
  *   owner?: { kind: 'lease', table: string, create: string, ensure: string, read: string,
  *     take: string, renew: string, release: string }
  *     | { kind: 'session', acquire: string, release: string },
@@ -623,6 +624,11 @@ export function createDialect(spec) {
     /** What a read inside a write appends to lock the rows it reads
      * (PostgreSQL's ` FOR UPDATE`); empty where writers serialize anyway. */
     rowLockSuffix: spec.rowLockSuffix ?? '',
+    /** What such a read appends for a row the write changes without
+     * touching a key column (PostgreSQL's ` FOR NO KEY UPDATE`, the lock that
+     * UPDATE itself takes): a writer that only references the row keeps its
+     * key-share lock and is not waited for. Empty where writers serialize. */
+    rowNoKeyLockSuffix: spec.rowNoKeyLockSuffix ?? '',
     // how a store becomes the single owner of its database, or absent
     owner: spec.owner,
     comparableForeignKeyAction: spec.comparableForeignKeyAction ?? ((action) => action),
