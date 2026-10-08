@@ -393,13 +393,11 @@ what each does is its own documentation's job
 - [ ] **Broader relational mapping and query qualification.** Explicit SQLite and PostgreSQL
   column layouts, codecs, read-only views and composite-key join-table entities
   are supported ([MODEL-FORMAT §12](../packages/db/docs/MODEL-FORMAT.md#12-existing-column-layouts)).
-  Physical tables page by integer, bigint and text identities on both engines,
-  and by uuid on PostgreSQL, an identity of NOT NULL terms in one direction as
-  one row value that the key's index serves
+  Physical tables page by integer, bigint, text and uuid identities on both
+  engines (a SQLite uuid by the text its table stores), an identity of NOT NULL
+  terms in one direction as one row value that the key's index serves
   ([MODEL-FORMAT §10.5](../packages/db/docs/MODEL-FORMAT.md#105-pagination)).
-  Relation navigation across physical layouts, keyset continuation over a `uuid`
-  key on SQLite (it reads back lowercase whatever the table stores, so its decoded
-  value does not compare as the stored one), a PostgreSQL page's `ORDER BY` read in
+  Relation navigation across physical layouts, a PostgreSQL page's `ORDER BY` read in
   index order (it spells `NULLS FIRST`, so the rows past the row value are sorted:
   about 14 ms for the second page of 200,000 rows against 0.016 ms read in index
   order), pushdown beyond the qualified native census and additional PostgreSQL

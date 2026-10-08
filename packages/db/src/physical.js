@@ -293,23 +293,27 @@ export function physicalRead(column, dialect, prefix = '') {
  * the code-point order of its lowercase text, under the same nullability
  * rule; bigint, decimal and epoch-ms order by value in SQL and by their
  * decoded string in the engine, and stay refused with every other codec.
- * `keyset` — a continuation's decoded value compares as the stored one:
- * integer, bigint (an exact decimal string), text, and a native uuid;
- * SQLite stores a uuid as text, whose decoded lowercase value need not
- * compare as the stored spelling. The planner's typed-path rule
+ * `keyset` — a continuation resumes exactly: integer, bigint (an exact
+ * decimal string), text and uuid. `stored` — the continuation carries the
+ * text the table stores, never the decoded value, because the two do not
+ * compare alike: SQLite keeps a uuid as text in whatever case the table
+ * holds and the entity decodes it to lowercase (a native uuid compares as
+ * its decoded lowercase text). Such a term is never `explicit`: `load`
+ * and `execute` order the decoded value. The planner's typed-path rule
  * (`entityShape`) admits the same codecs to native predicates and is not
  * widened here: a native uuid compared against a literal of another case
  * would match where the engine does not.
  * @param {any} column - a mapped column, as the open qualified it
  * @param {any} dialect
- * @returns {{ explicit: boolean, keyset: boolean }}
+ * @returns {{ explicit: boolean, keyset: boolean, stored: boolean }}
  */
 export function physicalOrderable(column, dialect) {
   const nativeUuid = column.codec === 'uuid' && dialect.name !== 'sqlite';
   const typed = ['text', 'integer', 'number', 'boolean', 'date', 'datetime'].includes(column.codec) && column.nativeQuery !== false;
   return {
     explicit: typed || (nativeUuid && column.null !== 'null'),
-    keyset: ['integer', 'bigint', 'text'].includes(column.codec) || nativeUuid,
+    keyset: ['integer', 'bigint', 'text', 'uuid'].includes(column.codec),
+    stored: column.codec === 'uuid' && !nativeUuid,
   };
 }
 

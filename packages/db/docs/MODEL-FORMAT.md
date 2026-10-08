@@ -3119,12 +3119,29 @@ decoded values, while the SQL names the physical columns and compares
 each as its codec compares. A renamed key column (`item_id` for `id`),
 a composite key and a bigint above 2^53 (bound as its exact decimal
 string) therefore page without skipping or repeating a row, and a
-primary-key order reports `snapshot: true`. Integer, bigint and text
-identities qualify on both engines, and a native `uuid` column on
-PostgreSQL, whose order is the code-point order of its lowercase text;
-every other codec refuses `JD0032` naming it (on SQLite a `uuid` is
-text that reads back lowercase whatever the table stores, so its
-decoded value does not compare as the stored one). A text term orders
+primary-key order reports `snapshot: true`. Integer, bigint, text and
+`uuid` identities qualify on both engines; every other codec refuses
+`JD0032` naming it. A native `uuid` column on PostgreSQL orders as the
+code-point order of its lowercase text, which is what an entity decodes.
+On SQLite a `uuid` is text in whatever case the table stores and the
+entity decodes it to lowercase, so the decoded value does not compare as
+the stored one, and a continuation built on it would skip rows. Such a
+term carries the **stored text** instead: the continuation's `key` (or
+`keys` entry) is the spelling the row holds, the identity marks the term
+`"stored": true`, and the statement compares and orders it by code point
+(`COLLATE BINARY`, whatever collation the column declares, so an index
+under another collation cannot serve it). A page over
+the key therefore returns every row once, in the order of the stored
+text — for a table holding uuids in several cases, not the order of
+their decoded values — and a continuation without the mark, or a bare
+key (the decoded value a caller reads off the entity), is `JD0035`. An
+explicit `load({ orderBy })` over a `uuid` column stays refused on
+SQLite (`JD0032`): a load and `execute()` order alike, and the engine
+orders the decoded value. A table that holds two spellings of one uuid
+(`A0…` and `a0…`) holds two rows: they load as two rows of one decoded
+key (the measured fixture: four rows, three decoded keys), and page once
+each by stored spelling. Opening does not refuse such a table; it is a
+hazard of the data, not of the page. A text term orders
 and compares by code point whatever collation the column declares — in
 `load({ orderBy })` exactly as in `execute()`: on SQLite `COLLATE
 BINARY`, so a NOCASE index cannot serve that order; on PostgreSQL the
@@ -3157,8 +3174,10 @@ property and appends the key a physical table's order ends with.
 `order` is the ordering's identity: a continuation replayed against a
 different ordering is the refusal `JD0035`, never a wrong page; a
 continuation whose `keys` do not match the declared key count, or
-whose `key` is not the entity's key shape, is `JD0035` too. Signing,
-tenant scoping, expiry and wire encoding are the **host's**: the store
+whose `key` is not the entity's key shape, is `JD0035` too. Only a
+term that resumes from the text its table stores (a SQLite `uuid`,
+above) carries `"stored": true` in `order`, and its value is that text.
+Signing, tenant scoping, expiry and wire encoding are the **host's**: the store
 has no principal and no key, so any signature it invented would be
 security theatre — a host that ships a continuation to an untrusted
 client signs it first. The optional
@@ -3741,9 +3760,9 @@ Present-null scalar equality/ranges preserve Jaren semantics. Unsupported codecs
 and shapes retain explicit residuals; strict mode also rejects unsupported bound
 externals before fetching rows. Scalar graph loads use mapped names.
 Physical `page` and structural `after` continuations qualify for integer,
-bigint and text identities on both engines and for a native `uuid` on
-PostgreSQL (§10.5); other codecs refuse `JD0032` by name, and an explicit
-`take`/`skip` load remains available.
+bigint, text and `uuid` identities on both engines, a SQLite `uuid` by the
+text its table stores (§10.5); other codecs refuse `JD0032` by name, and an
+explicit `take`/`skip` load remains available.
 Capture/live/replication for adopted application triggers is not qualified and
 is refused, rather than advertised as a complete change stream. PostgreSQL
 supports explicit native scalar adoption as described below.

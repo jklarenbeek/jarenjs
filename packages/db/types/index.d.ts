@@ -269,6 +269,8 @@ export interface OrderIdentity {
   readonly column: string;
   readonly desc: boolean;
   readonly nullsFirst: boolean;
+  /** Set only on a term that resumes from the text its table stores (a SQLite uuid). */
+  readonly stored?: true;
 }
 
 /** One term of the order a statement actually executes under. `source`

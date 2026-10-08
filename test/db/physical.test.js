@@ -131,7 +131,7 @@ it('tracked database defaults read back and codec failures roll back inserted ro
   });
 });
 
-it('physical keyset continuations page decoded text and bigint identities, and refuse a codec that cannot round-trip', async () => {
+it('physical keyset continuations page decoded text and bigint identities, and a uuid identity by the spelling the table stores', async () => {
   await fixture(async (store) => {
     // a composite key of a bigint and a text column, renamed (`b`, `a`),
     // with two sequences one apart above 2^53: every row once, in key order
@@ -151,7 +151,8 @@ it('physical keyset continuations page decoded text and bigint identities, and r
     }
     assert.deepEqual(seen, ['1/c', '9007199254740993/a', '9007199254740994/a', '9007199254740994/b']);
   });
-  // a uuid key reads back lowercase, whatever the table stores: refused, by codec
+  // a uuid key pages by the spelling the table stores (the page test reads every row back): an empty
+  // table has no page, and a continuation of another ordering belongs to no page of this one
   const dir = mkdtempSync(join(tmpdir(), 'jaren-physical-uuid-'));
   const path = join(dir, 'uuid.sqlite');
   const db = await nodeDriver().open(path);
@@ -162,10 +163,10 @@ it('physical keyset continuations page decoded text and bigint identities, and r
   physical: { table: 'tokens', columns: { id: { name: 'id', codec: 'uuid', null: 'reject' } } } } } };
   const store = await openStore(model, { driver: nodeDriver(), path, adopt: true });
   try {
-    await assert.rejects(store.entity('Token').page({}, { limit: 2 }),
-      (/** @type {any} */ error) => error.code === 'JD0032' && /'id' is a uuid column/.test(error.message));
+    const empty = await store.entity('Token').page({}, { limit: 2 });
+    assert.deepEqual([empty.items, empty.continuation, empty.hasMore], [[], null, false]);
     await assert.rejects(store.entity('Token').load({ after: { order: [], keys: [], key: 'x' } }),
-      (/** @type {any} */ error) => error.code === 'JD0032' && /uuid/.test(error.message));
+      (/** @type {any} */ error) => error.code === 'JD0035');
   }
   finally {
     await store.close();

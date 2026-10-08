@@ -2756,26 +2756,32 @@ export function createLoadEngine(context, entityName) {
    * document, a continuation and the column encoding name — and the SQL
    * reaches its physical column through {@link columnOfProperty}. On a
    * managed entity the two are one name, so its continuations are
-   * unchanged.
+   * unchanged. A term that resumes from the text its table stores (a
+   * SQLite uuid, which an entity decodes to lowercase whatever case the
+   * table holds) carries `stored: true`, so a continuation emitted for
+   * the decoded reading of the column belongs to no such ordering.
    * @param {any[]} order - the compiled order terms
    * @param {readonly string[]} keyColumns - the key properties
    * @param {(physical: string) => any} columnOfPhysical
-   * @returns {{ column: string, desc: boolean, nullsFirst: boolean }[]}
+   * @param {(property: string) => boolean} stored - whether a property resumes from its stored text
+   * @returns {{ column: string, desc: boolean, nullsFirst: boolean, stored?: true }[]}
    */
-  const orderIdentity = (order, keyColumns, columnOfPhysical) => {
+  const orderIdentity = (order, keyColumns, columnOfPhysical, stored) => {
+    const termOf = (/** @type {string} */ column, /** @type {boolean} */ desc, /** @type {boolean} */ nullsFirst) =>
+      (stored(column) ? { column, desc, nullsFirst, stored: true } : { column, desc, nullsFirst });
     const terms = order.map((term) => {
       if (term.ref.flavor !== 'entity-column') {
         throw refuse('a keyset orders by mapped columns — '
           + `'${modelPath(term.ref.segments)}' is a document path`, []);
       }
-      return { column: columnOfPhysical(term.ref.column)?.name ?? term.ref.column, desc: term.desc,
-        nullsFirst: term.emptyGreatest === term.desc };
+      return termOf(columnOfPhysical(term.ref.column)?.name ?? term.ref.column, term.desc,
+        term.emptyGreatest === term.desc);
     });
     for (const column of keyColumns) {
       // a key column is NOT NULL: `nullsFirst` is SQLite's own ASC
       // default, spelled so the identity is explicit, never a branch
       if (!terms.some((term) => term.column === column))
-        terms.push({ column, desc: false, nullsFirst: true });
+        terms.push(termOf(column, false, true));
     }
     return terms;
   };
@@ -2785,7 +2791,9 @@ export function createLoadEngine(context, entityName) {
    * `{ order, keys, key }` a page emitted, whose `order` must be this
    * graph's identity exactly — a continuation replayed against another
    * ordering is `JD0035`, never a wrong page — and whose values are
-   * returned aligned with the identity, encoded as the columns store them.
+   * returned aligned with the identity, encoded as the columns store them
+   * (a `stored` term's text, as it stands: encoding it would lowercase a
+   * uuid the table holds in another case).
    * @param {any} after
    * @param {ReturnType<typeof orderIdentity>} identity
    * @param {number} declared - how many terms the caller declared
@@ -2797,7 +2805,7 @@ export function createLoadEngine(context, entityName) {
       `the continuation does not belong to this ordering: ${reason}`,
       entities.get(entityName)?.docPath);
     const spell = (terms) => terms.map((term) => `${term.column} ${term.desc ? 'desc' : 'asc'}`
-      + `${term.nullsFirst ? ' nulls first' : ''}`).join(', ');
+      + `${term.nullsFirst ? ' nulls first' : ''}${term.stored === true ? ' stored' : ''}`).join(', ');
     if (after === null || typeof after !== 'object' || !Array.isArray(after.order)
       || !Array.isArray(after.keys) || !('key' in after)) {
       throw mismatch('a continuation is the { order, keys, key } value a page emitted');
@@ -2820,8 +2828,12 @@ export function createLoadEngine(context, entityName) {
         throw mismatch(`'key' must carry every key column { ${keyColumns.join(', ')} }`);
       return value;
     };
-    return identity.map((term, i) => encodeColumn(term.column,
-      i < declared ? (after.keys[i] ?? null) : keyOf(term.column)));
+    return identity.map((term, i) => {
+      const value = i < declared ? (after.keys[i] ?? null) : keyOf(term.column);
+      if (term.stored !== true) return encodeColumn(term.column, value);
+      if (typeof value !== 'string') throw mismatch(`'${term.column}' resumes from its stored text`);
+      return value;
+    });
   };
 
   /**
@@ -2911,6 +2923,16 @@ export function createLoadEngine(context, entityName) {
     const columnOfPhysical = (/** @type {string} */ physical) => mappedColumns.find((c) => (c.physical ?? c.name) === physical);
     const propertyOfPhysical = (/** @type {string} */ physical) => columnOfPhysical(physical)?.name ?? physical;
     /**
+     * Whether a property resumes a keyset from the text its table stores,
+     * not from its decoded value (physicalOrderable answers per codec and
+     * engine): a SQLite uuid.
+     * @param {string} property
+     */
+    const storedSpelling = (property) => {
+      const column = physicalEntity ? columnOfProperty(property) : undefined;
+      return column !== undefined && physicalOrderable(column, dialect).stored;
+    };
+    /**
      * What a term compares and orders by: its physical column, compared as
      * its codec compares — a mapped text column in codepoint order whatever
      * collation the table declared, the order `execute()` gives it. The
@@ -2930,12 +2952,13 @@ export function createLoadEngine(context, entityName) {
     // engine returns UTF8 text exactly, and its encoding is checked at open
     const provesTextBytes = physicalEntity && dialect.name === 'sqlite';
     /**
-     * A keyset over a physical table is qualified where a continuation's
-     * DECODED values compare as the stored ones do: over integer, bigint
-     * and text columns, and a native uuid column (physicalOrderable). A
-     * text key proves it round-trips per row on SQLite; where no such
-     * proof runs, the database's encoding must be UTF8, from which every
-     * stored text decodes exactly. Anything else is refused by name.
+     * A keyset over a physical table is qualified where a continuation
+     * resumes exactly (physicalOrderable): over integer, bigint, text and
+     * uuid columns, a uuid the SQLite table stores in another case than
+     * the entity decodes carrying its stored text. A text key proves it
+     * round-trips per row on SQLite; where no such proof runs, the
+     * database's encoding must be UTF8, from which every stored text
+     * decodes exactly. Anything else is refused by name.
      * @param {string[]} properties
      */
     const requirePhysicalKeyset = (properties) => {
@@ -2950,9 +2973,9 @@ export function createLoadEngine(context, entityName) {
       for (const property of properties) {
         const column = columnOfProperty(property);
         if (column === undefined || !physicalOrderable(column, dialect).keyset) {
-          throw refuse(`a keyset continuation over a physical table orders by integer, bigint and text `
+          throw refuse(`a keyset continuation over a physical table orders by integer, bigint, text and uuid `
             + `columns; '${property}' is a ${column?.codec} column, whose decoded value need not compare `
-            + 'as its stored one does (a uuid reads back lowercase)', []);
+            + 'as its stored one does', []);
         }
         if (column.codec === 'text' && !provesTextBytes && column.databaseEncoding !== 'UTF8') {
           throw refuse(`a keyset continuation over the text column '${property}' requires the UTF8 database `
@@ -2966,7 +2989,7 @@ export function createLoadEngine(context, entityName) {
     /** @type {ReturnType<typeof textKeyPlan>} */
     let textKeys = null;
     if (keysetMode) {
-      identity = orderIdentity(order, keyColumns, columnOfPhysical);
+      identity = orderIdentity(order, keyColumns, columnOfPhysical, storedSpelling);
       requirePhysicalKeyset(identity.map((term) => term.column));
       if (provesTextBytes) {
         textKeys = textKeyPlan(tree.entityMapping, identity.map((term) => columnOfProperty(term.column)),
@@ -3082,6 +3105,13 @@ export function createLoadEngine(context, entityName) {
         pagination === 'offset' ? spec.skip : undefined)}`;
     }
 
+    // the column holding each stored term's text, which a page reads off
+    // every row before the entity decodes it
+    const storedTerms = (identity ?? []).filter((term) => term.stored === true).map((term) => {
+      const column = columnOfProperty(term.column);
+      return { property: term.column, physical: column.physical ?? column.name };
+    });
+
     const entry = {
       sql, slots, tree, pagination, statement: null,
       rowBound,
@@ -3101,6 +3131,7 @@ export function createLoadEngine(context, entityName) {
       declared: order.map((term) => propertyOfPhysical(term.ref.column)),
       keyColumns,
       textKeys,
+      stored: storedTerms.length === 0 ? null : storedTerms,
       // a page over this ordering is a snapshot only when every order key
       // is immutable, and the primary key is the one column the engine
       // itself guarantees never moves (`update()` refuses to rewrite it)
@@ -3186,6 +3217,10 @@ export function createLoadEngine(context, entityName) {
    * columns dropped. @param {any} entry @param {any} row */
   const provenRow = (entry, row) => (entry.textKeys === null ? row
     : checkTextKeys(row, entry.textKeys, textDecoding, refuseTextKey));
+  /** The text each stored term held in the row an item was read from, by
+   * item: the entity decodes it away, and a continuation resumes from it.
+   * @type {WeakMap<object, Map<string, any>>} */
+  const storedText = new WeakMap();
 
   /** The graph cursor over one built load: one root row per pull. */
   const openCursor = (entry, signal, register, deadline = undefined, cursorFactory = createCursor) => {
@@ -3198,24 +3233,35 @@ export function createLoadEngine(context, entityName) {
     return cursorFactory({ ...rowClassOf(connection), signal, deadline, now: state.now, wrap: driverWrap,
       open: () => chain(entry.textKeys === null ? null : decodingOfText(), () =>
         chain(connection.prepare(entry.sql, { readOnly: true, ephemeral: true }), (statement) => statement.iterate(params))),
-      items: (row) => [each(checkRoot(entry, parseGraphRow(entry.tree, provenRow(entry, row), '__doc'), ++pulled))] });
+      items: (row) => {
+        const item = each(checkRoot(entry, parseGraphRow(entry.tree, provenRow(entry, row), '__doc'), ++pulled));
+        if (entry.stored !== null) {
+          storedText.set(item, new Map(entry.stored.map(({ property, physical }) => [property, row[physical]])));
+        }
+        return [item];
+      } });
   };
 
   /**
    * The continuation one root emits: unsigned, structural, opaque —
    * the ordering's identity (so it cannot be replayed against another
    * ordering), the declared order-key values as the DOCUMENT carries
-   * them, and the row's primary key, the tie-breaker. Signing, tenant
-   * scoping, expiry and wire encoding are the host's: the store has no
-   * principal and no key, and a signature it invented would be theatre.
+   * them (a `stored` term's, as its row held it), and the row's primary
+   * key, the tie-breaker. Signing, tenant scoping, expiry and wire
+   * encoding are the host's: the store has no principal and no key, and
+   * a signature it invented would be theatre.
    */
-  const continuationOf = (entry, doc) => deepFreeze({
-    order: entry.identity,
-    keys: entry.declared.map((column) => doc[column] ?? null),
-    key: entry.keyColumns.length === 1
-      ? doc[entry.keyColumns[0]]
-      : Object.fromEntries(entry.keyColumns.map((column) => [column, doc[column]])),
-  });
+  const continuationOf = (entry, doc) => {
+    const held = storedText.get(doc);
+    const valueOf = (/** @type {string} */ column) => (held?.has(column) ? held.get(column) : doc[column]);
+    return deepFreeze({
+      order: entry.identity,
+      keys: entry.declared.map((column) => valueOf(column) ?? null),
+      key: entry.keyColumns.length === 1
+        ? valueOf(entry.keyColumns[0])
+        : Object.fromEntries(entry.keyColumns.map((column) => [column, valueOf(column)])),
+    });
+  };
 
   const surface = {
     treeFor(spec) {

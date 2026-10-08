@@ -148,7 +148,7 @@ The headless adapter is exported by `@jarenjs/linq/db`; its structural contract 
 [COLLECTION-PROVIDER.md](../../app/docs/COLLECTION-PROVIDER.md). It uses existing
 entity cursors, keyset pages and committed capture, with no app import.
 Initial qualification is captured hybrid entity roots. Physical keyset pages
-qualify for SQLite integer, bigint and text identities (MODEL-FORMAT §10.5);
+qualify for integer, bigint, text and uuid identities on both engines (MODEL-FORMAT §10.5);
 physical capture retains its explicit refusal. Live notifications are
 source resets: an entity offset window still resets rather than being
 maintained, while a collection offset window over an `orderBy` is a

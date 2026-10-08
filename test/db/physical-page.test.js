@@ -7,8 +7,10 @@
  * composite key, a bigint above 2^53 and a text key (whatever collation
  * the table declared) page without skipping or repeating a row. A text
  * key proves per row that it round-trips through the file's text
- * encoding, and a codec whose decoded value does not compare as its
- * stored one (uuid) is refused by name. An ordered `load()` and
+ * encoding, a uuid key pages by the spelling the table stores (its
+ * continuation carries that text, not the lowercase value the entity
+ * decodes to), and a codec whose decoded value does not compare as its
+ * stored one is refused by name. An ordered `load()` and
  * `execute()` order a text column the same way: by code point. An
  * identity of NOT NULL terms in one direction compares as a row value,
  * which the key's index seeks; a term that can hold NULL, or directions
@@ -17,10 +19,28 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
+import { compareCodePoints } from '@jarenjs/core/string';
 
 import { adopted, everyPage, keyComparator } from './helpers.js';
 
 const key = { 'x-entity': { key: true } };
+
+/** Four spellings of three uuids: an entity decodes every one to lowercase. */
+const UUID = {
+  A: 'A0000000-0000-4000-8000-000000000000', a: 'a0000000-0000-4000-8000-000000000000',
+  b: 'b0000000-0000-4000-8000-000000000000', C: 'C0000000-0000-4000-8000-000000000000',
+};
+/** A physical uuid key over `token`, and a text label that tells equal decoded keys apart. */
+const tokens = { Token: { schema: { type: 'object', properties: { id: { type: 'string', ...key }, label: { type: 'string' } } },
+  physical: { table: 'token', columns: { id: { name: 'id', codec: 'uuid', null: 'reject' },
+    label: { name: 'label', codec: 'text', null: 'reject' } } } } };
+/** The ids the database file stores, by code point: the order a stored-spelling keyset pages in.
+ * @param {string} dbPath @param {string} [sql] @returns {string[]} */
+const storedIds = (dbPath, sql = 'SELECT id FROM token') => {
+  const raw = new DatabaseSync(dbPath);
+  try { return raw.prepare(sql).all().map((row) => String(row.id)).sort(compareCodePoints); }
+  finally { raw.close(); }
+};
 
 describe('a keyset page over a physical table', () => {
   it('a renamed integer key: every row once, snapshot', async () => {
@@ -186,17 +206,225 @@ describe('a keyset page over a physical table', () => {
     finally { await close(); }
   });
 
-  it('a uuid key is refused by codec — it reads back lowercase, whatever the table stores', async () => {
-    const { store, close } = await adopted(
-      "CREATE TABLE token(id TEXT PRIMARY KEY); INSERT INTO token VALUES ('A0000000-0000-4000-8000-000000000000'), "
-      + "('b0000000-0000-4000-8000-000000000000'), ('C0000000-0000-4000-8000-000000000000');",
-      { Token: { schema: { type: 'object', properties: { id: { type: 'string', ...key } } },
-        physical: { table: 'token', columns: { id: { name: 'id', codec: 'uuid', null: 'reject' } } } } });
+  it('a uuid key pages every stored row by its stored spelling, and its continuation carries that text', async () => {
+    const { store, dbPath, close } = await adopted(
+      'CREATE TABLE token(id TEXT PRIMARY KEY, label TEXT NOT NULL); '
+      + `INSERT INTO token VALUES ('${UUID.A}', 'one'), ('${UUID.b}', 'two'), ('${UUID.C}', 'three');`, tokens);
     try {
-      await assert.rejects(store.entity('Token').page({}, { limit: 1 }),
-        (/** @type {any} */ error) => error.code === 'JD0032' && /'id' is a uuid column/.test(error.message));
-      // reading every row without a continuation is unaffected
-      assert.equal((await store.entity('Token').load({})).length, 3);
+      const set = store.entity('Token');
+      // the table orders A, C, b by code point, and the entity reads them back as a, c, b
+      const stored = storedIds(dbPath);
+      assert.deepEqual(stored, [UUID.A, UUID.C, UUID.b]);
+      const expected = stored.map((id) => id.toLowerCase());
+      for (const limit of [1, 2, 3]) {
+        const { items, snapshots } = await everyPage(set, {}, limit);
+        assert.deepEqual(items.map((item) => item.id), expected, `limit ${limit}`);
+        assert.ok(snapshots.every(Boolean), 'a key order is a snapshot');
+      }
+      // the continuation names the stored text and marks the term that resumes from it
+      const first = await set.page({}, { limit: 1 });
+      assert.deepEqual(first.items.map((item) => item.id), [UUID.A.toLowerCase()]);
+      assert.deepEqual(first.continuation,
+        { order: [{ column: 'id', desc: false, nullsFirst: true, stored: true }], keys: [], key: UUID.A });
+      // resuming after the stored 'A0...' reads C0 and b0; a seek past the decoded 'a0...' would have skipped C0
+      const rest = await set.page({}, { limit: 5, after: first.continuation });
+      assert.deepEqual(rest.items.map((item) => item.id), [UUID.C.toLowerCase(), UUID.b]);
+      assert.equal(rest.hasMore, false);
+      assert.deepEqual((await set.load({ after: first.continuation })).map((item) => item.id), [UUID.C.toLowerCase(), UUID.b]);
+      // the statement compares and orders the stored text by code point, and the identity says so
+      const plan = await set.explainLoad({ after: first.continuation });
+      assert.equal(plan.pagination, 'keyset');
+      assert.deepEqual(plan.identity, [{ column: 'id', desc: false, nullsFirst: true, stored: true }]);
+      assert.match(plan.sql, /WHERE \(\("r"\."id" COLLATE BINARY\) > \?\) ORDER BY \("r"\."id" COLLATE BINARY\) ASC NULLS FIRST$/);
+      // reading without a continuation is unchanged: the key's order, and the engine's decoded order
+      assert.deepEqual((await set.load({})).map((item) => item.id), expected);
+      assert.deepEqual(await store.execute({ $for: { t: '$.Token[*]' }, $orderby: ['$t.id'], $return: '$t.id' }),
+        [UUID.A, UUID.b, UUID.C].map((id) => id.toLowerCase()));
+    }
+    finally { await close(); }
+  });
+
+  it('a continuation without the stored spelling and a bare decoded key are refused JD0035; an explicit orderBy over the uuid stays refused', async () => {
+    const { store, close } = await adopted(
+      'CREATE TABLE token(id TEXT PRIMARY KEY, label TEXT NOT NULL); '
+      + `INSERT INTO token VALUES ('${UUID.A}', 'one'), ('${UUID.b}', 'two'), ('${UUID.C}', 'three');`, tokens);
+    try {
+      const set = store.entity('Token');
+      const first = await set.page({}, { limit: 1 });
+      const refused = (/** @type {RegExp} */ message) => (/** @type {any} */ error) =>
+        error.code === 'JD0035' && message.test(error.message);
+      // the same ordering without the mark: a decoded value cannot be told from a stored one, so it resumes nowhere
+      const unmarked = { ...first.continuation, order: [{ column: 'id', desc: false, nullsFirst: true }] };
+      await assert.rejects(set.page({}, { limit: 5, after: unmarked }), refused(/this graph orders by \(id asc nulls first stored\)/));
+      await assert.rejects(set.load({ after: unmarked }), refused(/this graph orders by \(id asc nulls first stored\)/));
+      // a bare key: the decoded 'a0...' a caller reads off the entity
+      await assert.rejects(set.page({}, { after: UUID.A.toLowerCase() }), refused(/not a bare key/));
+      // the stored text is text
+      await assert.rejects(set.page({}, { after: { ...first.continuation, key: 7 } }), refused(/'id' resumes from its stored text/));
+      // an explicit order stays refused: load() and execute() order alike, and the engine orders the decoded value
+      for (const attempt of [() => set.load({ orderBy: '$it.id' }), () => set.load({ orderBy: '$it.id', after: UUID.a }),
+        () => set.page({ orderBy: '$it.id' }, { limit: 1 })]) {
+        await assert.rejects(attempt(),
+          (/** @type {any} */ error) => error.code === 'JD0032' && /orderBy must address typed entity paths/.test(error.message));
+      }
+    }
+    finally { await close(); }
+  });
+
+  it('mixed-case duplicates page once each, and a NOCASE-declared column does not reorder them: pages, load() and execute() agree', async () => {
+    // the NOCASE column keeps a BINARY primary-key index, so 'A0...' and 'a0...' are two rows of one table
+    for (const [declared, collation] of [['id TEXT PRIMARY KEY, label TEXT NOT NULL', 'default collation'],
+      ['id TEXT COLLATE NOCASE NOT NULL, label TEXT NOT NULL, PRIMARY KEY (id COLLATE BINARY)', 'NOCASE']]) {
+      const { store, dbPath, close } = await adopted(
+        `CREATE TABLE token(${declared}); `
+        + `INSERT INTO token VALUES ('${UUID.A}', 'one'), ('${UUID.a}', 'two'), ('${UUID.b}', 'three'), ('${UUID.C}', 'four');`, tokens);
+      try {
+        const set = store.entity('Token');
+        // the table stores four rows of three decoded ids: A and a are two rows and one decoded key
+        const rows = await set.load({});
+        assert.equal(rows.length, 4, collation);
+        assert.equal(new Set(rows.map((row) => row.id)).size, 3, collation);
+        // by code point of the stored text: A, C, a, b
+        const stored = storedIds(dbPath);
+        assert.deepEqual(stored, [UUID.A, UUID.C, UUID.a, UUID.b]);
+        const labels = ['one', 'four', 'two', 'three'];
+        for (const limit of [1, 2, 3, 4]) {
+          const { items } = await everyPage(set, {}, limit);
+          assert.deepEqual(items.map((item) => item.label), labels, `${collation}: limit ${limit}`);
+          assert.deepEqual(items.map((item) => item.id), stored.map((id) => id.toLowerCase()), `${collation}: limit ${limit}`);
+        }
+        // each continuation names the spelling its row stores: A, then C, then a (not A again), then b
+        /** @type {any[]} */
+        const keys = [];
+        /** @type {any} */
+        let after;
+        for (;;) {
+          const page = await set.page({}, { limit: 1, ...(after === undefined ? {} : { after }) });
+          keys.push(page.continuation.key);
+          if (!page.hasMore) break;
+          after = page.continuation;
+        }
+        assert.deepEqual(keys, stored, collation);
+        // load(), the native plan and the residual read the rows in that order too
+        assert.deepEqual(rows.map((row) => row.label), labels, collation);
+        const query = { $for: { t: '$.Token[*]' }, $return: '$t.label' };
+        assert.deepEqual(await store.execute(query), labels, collation);
+        assert.deepEqual(await store.execute(query, { pushdown: false }), labels, collation);
+        const explained = await store.explain(query);
+        assert.equal(explained.mode, 'native', collation);
+        assert.match(explained.sql, /ORDER BY \("t0"\."id" COLLATE BINARY\)$/);
+        // and a page compares the stored text by code point whatever the column declares
+        const plan = await set.explainLoad({ after: (await set.page({}, { limit: 1 })).continuation });
+        assert.match(plan.sql, /\("r"\."id" COLLATE BINARY\) > \?/, collation);
+      }
+      finally { await close(); }
+    }
+  });
+
+  it('a declared order term resumes beside the stored key: ascending as one row value, descending as the expansion', async () => {
+    const { store, dbPath, close } = await adopted(
+      'CREATE TABLE token(id TEXT PRIMARY KEY, label TEXT NOT NULL); '
+      + `INSERT INTO token VALUES ('${UUID.A}', 'x'), ('${UUID.a}', 'x'), ('${UUID.b}', 'y'), ('${UUID.C}', 'x');`, tokens);
+    try {
+      const set = store.entity('Token');
+      const raw = new DatabaseSync(dbPath);
+      /** @type {{ label: string, stored: string }[]} */
+      let rows;
+      try { rows = raw.prepare('SELECT label, id AS stored FROM token').all().map((row) => ({ label: String(row.label), stored: String(row.stored) })); }
+      finally { raw.close(); }
+      for (const [spec, direction] of /** @type {[any, number][]} */ ([
+        [{ orderBy: '$it.label' }, 1], [{ orderBy: { $key: '$it.label', $dir: 'desc' } }, -1],
+      ])) {
+        // the label by direction, then the stored text ascending: the key is appended ascending
+        const ordered = [...rows].sort((a, b) => direction * compareCodePoints(a.label, b.label) || compareCodePoints(a.stored, b.stored));
+        const oracle = ordered.map((row) => `${row.label}/${row.stored.toLowerCase()}`);
+        for (const limit of [1, 2, 3, 4]) {
+          const { items } = await everyPage(set, spec, limit);
+          assert.deepEqual(items.map((item) => `${item.label}/${item.id}`), oracle, `${JSON.stringify(spec)} limit ${limit}`);
+        }
+        // the declared term is the document's value, the key the text its row holds, and only the key's term is marked
+        const first = await set.page(spec, { limit: 1 });
+        assert.deepEqual(first.continuation.keys, [ordered[0].label]);
+        assert.equal(first.continuation.key, ordered[0].stored);
+        assert.deepEqual(first.continuation.order.map((/** @type {any} */ term) => term.stored), [undefined, true]);
+      }
+      // ascending, both terms cannot hold NULL: one row value over the label and the stored text
+      const ascending = await set.explainLoad({ orderBy: '$it.label', after: (await set.page({ orderBy: '$it.label' }, { limit: 1 })).continuation });
+      assert.match(ascending.sql, /WHERE \(\("r"\."label" COLLATE BINARY\), \("r"\."id" COLLATE BINARY\)\) > \(\?, \?\)/);
+    }
+    finally { await close(); }
+  });
+
+  it('a composite (text, uuid) key pages like the oracle for limits 1, 2, 3 and 7, the uuid ordering the rows of one text value', async () => {
+    const { store, dbPath, close } = await adopted(
+      'CREATE TABLE tagged(grp TEXT NOT NULL, tok TEXT NOT NULL, PRIMARY KEY (grp, tok)) WITHOUT ROWID; '
+      + `INSERT INTO tagged VALUES ('x', '${UUID.b}'), ('x', '${UUID.A}'), ('x', '${UUID.C}'), ('x', '${UUID.a}'), `
+      + `('y', '${UUID.A}'), ('y', '${UUID.a}'), ('w', '${UUID.C}'), ('é', '${UUID.b}');`,
+      { Tagged: { schema: { type: 'object', properties: { bucket: { type: 'string', ...key }, id: { type: 'string', ...key } } },
+        physical: { table: 'tagged', keys: ['bucket', 'id'], columns: {
+          bucket: { name: 'grp', codec: 'text', null: 'reject' }, id: { name: 'tok', codec: 'uuid', null: 'reject' } } } } });
+    try {
+      const set = store.entity('Tagged');
+      // the oracle: the stored rows by (text, stored uuid), both by code point
+      const raw = new DatabaseSync(dbPath);
+      /** @type {{ bucket: string, id: string }[]} */
+      let oracle;
+      try {
+        oracle = raw.prepare('SELECT grp, tok FROM tagged').all()
+          .map((row) => ({ bucket: String(row.grp), stored: String(row.tok) }))
+          .sort((a, b) => compareCodePoints(a.bucket, b.bucket) || compareCodePoints(a.stored, b.stored))
+          .map((row) => ({ bucket: row.bucket, id: row.stored.toLowerCase() }));
+      }
+      finally { raw.close(); }
+      assert.equal(oracle.length, 8);
+      for (const limit of [1, 2, 3, 7]) {
+        const { items, snapshots } = await everyPage(set, {}, limit);
+        assert.deepEqual(items.map((item) => ({ bucket: item.bucket, id: item.id })), oracle, `limit ${limit}`);
+        assert.ok(snapshots.every(Boolean), `limit ${limit}: a key order is a snapshot`);
+      }
+      // the continuation names each key column's stored text, and only the uuid term is marked
+      const third = await set.page({}, { limit: 3 });
+      assert.deepEqual(third.continuation, {
+        order: [{ column: 'bucket', desc: false, nullsFirst: true }, { column: 'id', desc: false, nullsFirst: true, stored: true }],
+        keys: [], key: { bucket: 'x', id: UUID.C } });
+      // both terms are keys that cannot hold NULL: one row value, each compared by code point
+      const plan = await set.explainLoad({ after: third.continuation });
+      assert.match(plan.sql, /WHERE \(\("r"\."grp" COLLATE BINARY\), \("r"\."tok" COLLATE BINARY\)\) > \(\?, \?\) ORDER BY \("r"\."grp" COLLATE BINARY\) ASC NULLS FIRST, \("r"\."tok" COLLATE BINARY\) ASC NULLS FIRST$/);
+    }
+    finally { await close(); }
+  });
+
+  it('a predicate or an ordering over a uuid column stays in the engine, so the stored-text comparison reaches keys and nothing else', async () => {
+    const { store, close } = await adopted(
+      'CREATE TABLE token(id TEXT PRIMARY KEY, label TEXT NOT NULL); '
+      + `INSERT INTO token VALUES ('${UUID.A}', 'one'), ('${UUID.b}', 'two');`, tokens);
+    try {
+      for (const [query, expected] of /** @type {[any, string | string[]][]} */ ([
+        // the engine compares decoded values: the stored 'A0...' answers a predicate on 'a0...' (one item is not a sequence)
+        [{ $for: { t: '$.Token[*]' }, $where: { $eq: ['$t.id', UUID.a] }, $return: '$t.label' }, 'one'],
+        [{ $for: { t: '$.Token[*]' }, $orderby: [{ $key: '$t.id', $dir: 'desc' }], $return: '$t.label' }, ['two', 'one']],
+      ])) {
+        assert.equal((await store.explain(query)).mode, 'set', JSON.stringify(query));
+        assert.deepEqual(await store.execute(query), expected, JSON.stringify(query));
+      }
+    }
+    finally { await close(); }
+  });
+
+  it('a codec whose decoded value need not compare as its stored one is refused by name as an order term', async () => {
+    const { store, close } = await adopted(
+      "CREATE TABLE item(item_id INTEGER PRIMARY KEY, day TEXT, ratio REAL); INSERT INTO item VALUES (1, '2026-01-02', 1.5);",
+      { Item: { schema: { type: 'object', properties: { id: { type: 'integer', ...key }, day: { type: 'string' }, ratio: { type: 'number' } } },
+        physical: { table: 'item', columns: { id: { name: 'item_id', codec: 'integer', null: 'reject' },
+          day: { name: 'day', codec: 'date', null: 'null' }, ratio: { name: 'ratio', codec: 'number', null: 'null' } } } } });
+    try {
+      for (const [property, codec] of [['day', 'date'], ['ratio', 'number']]) {
+        await assert.rejects(store.entity('Item').page({ orderBy: `$it.${property}` }, { limit: 1 }),
+          (/** @type {any} */ error) => error.code === 'JD0032'
+            && error.message.includes('orders by integer, bigint, text and uuid columns')
+            && error.message.includes(`'${property}' is a ${codec} column`));
+      }
+      assert.equal((await store.entity('Item').load({})).length, 1);
     }
     finally { await close(); }
   });
