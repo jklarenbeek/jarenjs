@@ -266,6 +266,20 @@ describe('the model pen — refusals, each with the fix in the message', () => {
     refused({ intervals: [{ name: 'slot', path: (/** @type {any} */ b) => b.span }] }, /intervals\[0\] path takes a JSONPath string/);
     refused({ intervals: [{ name: 'slot', path: '$.span', maxDuration: '8h' }] }, /intervals\[0\] maxDuration takes a number/);
     refused({ intervls: [] }, /does not take 'intervls' — the options are key, identity, indexes, intervals, renamedFrom/);
+    // the pen document quotes each interval refusal as the pen spells it (the
+    // document names a docPath beside the message rather than inside it)
+    for (const options of [
+      { intervals: { name: 'slot', path: '$.span' } },
+      { intervals: [{ name: 'slot', path: '$.span', maxDuratoin: 1 }] },
+      { intervals: [{ name: 'slot', path: '$.span', maxDuration: '8h' }] },
+    ]) {
+      const live = (() => {
+        try { m.collection(Booking, { key: '/id', indexes, ...options }); return ''; }
+        catch (/** @type {any} */ e) { return String(e.message).replace(/^JL0101: /, '').replace(/ at \/\S*$/, ''); }
+      })();
+      assert.ok(live !== '' && fs.readFileSync('packages/linq/docs/MODEL-PEN.md', 'utf8').includes(`| \`${live}\``),
+        `MODEL-PEN quotes the live message: ${live}`);
+    }
   });
 
   it('JL0102 — key()/unique()/index() on a kind that can never hold a column', () => {

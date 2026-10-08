@@ -235,9 +235,11 @@ member's shape, the indexes its bounds need, the duration's range) is
 the store's model walk to judge (`JD0005`). It is the one option that
 makes a collection stricter than its schema: every stored span becomes
 a half-open interval of two safe integers, for the store and for every
-other writer alike, so declare it where every document the collection
-already holds has one — a document that does not is refused at its next
-write (`JD2003`), and a table that holds one cannot carry the CHECK.
+other writer alike (a document without the member is stored as before),
+so declare it where every span the collection already holds is one — a
+document whose span is not is refused at its next write (`JD2003`), and
+the migration that adds the declaration over such rows is refused before
+any step (`JD0021`).
 
 `expressionIndex()` takes only `name` and `unique`, because an
 expression names the members it reads itself — nothing that describes a
@@ -848,7 +850,7 @@ This section is the vocabulary this pen adds.
 | `m.collection(b, { indexes: [{ name: 'by_a', path: '$.a', unique: 1 }] })` | `collection() indexes[0] unique takes a boolean, got 1` | `unique: true` |
 | `m.collection(b, { intervals: { name: 'slot', path: '$.span' } })` | `collection() intervals is an array of { name, path, maxDuration? } entries` | an array |
 | `m.collection(b, { intervals: [{ name: 'slot', path: '$.span', maxDuratoin: 1 }] })` | `collection() intervals[0] does not take 'maxDuratoin' — it takes name, path, maxDuration` — `docPath` `/maxDuratoin` | `maxDuration` |
-| `m.collection(b, { intervals: [{ name: 'slot', path: '$.span', maxDuration: '8h' }] })` | `collection() intervals[0] maxDuration takes a number, got '8h'` | milliseconds, `28_800_000` |
+| `m.collection(b, { intervals: [{ name: 'slot', path: '$.span', maxDuration: '8h' }] })` | `collection() intervals[0] maxDuration takes a number, got a string` | milliseconds, `28_800_000` |
 | `m.defineModel({})` | `defineModel() needs entities, collections, or both` | declare one of the two |
 | `m.defineModel({ tables: {} })` | `defineModel() does not take 'tables'` | `entities` or `collections` |
 | `m.defineModel({ entities: [] })` | `defineModel() entities is a plain object of declarations` | a plain object |

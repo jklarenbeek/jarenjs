@@ -860,8 +860,8 @@ object whose `start` and `end` are both REQUIRED and both numeric, and a
 write is validated against that schema, so a bound that is absent,
 textual or null is a row the collection cannot hold. An unmapped pair,
 an untyped one, or a probe that is not itself a half-open span pushes
-nothing and names why. ROADMAP carries the declared-interval `CHECK`
-that would make the conjunction exact and the fetch a seek.
+nothing and names why. What stays unpromoted is `$overlaps` over an
+entity's nested span (ROADMAP).
 
 **Reading a declared column without its guard.** A temporal refinement's
 own bounds (`p: 'colCmp'`) carry no `json_type` beside them: the model
