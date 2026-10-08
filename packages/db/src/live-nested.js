@@ -5,6 +5,9 @@ import { stableStringify } from '@jarenjs/core/object';
 import { DbRuntimeError } from './errors.js';
 import { utf8Length } from './cursor.js';
 
+/** The dependency set of a strategy that reads every member of a row. */
+const WHOLE = { whole: true, members: new Set() };
+
 /** Recognise nested groups whose parent key is a singular source member. @param {any} document */
 export function classifyNestedGroup(document) {
   const inner = Array.isArray(document) && document.length === 1 ? document[0] : document;
@@ -64,8 +67,8 @@ export function nestedGroupStrategy(description, context) {
   const sorted = (keys) => [...keys].sort((a, b) => positions.get(a) - positions.get(b));
   const check = () => {
     const entries = docs.size + resultCount + (aggregate === null ? 0 : 1);
-    if (entries > context.maxMaintained) throw new DbRuntimeError('JD2060', 'nested group dependencies exceed live.maxMaintained');
-    if (maintainedBytes > context.maxBytes) throw new DbRuntimeError('JD2060', 'nested group dependencies exceed live.maxBytes');
+    if (entries > context.maxMaintained) throw new DbRuntimeError('JD2060', 'group dependencies exceed live.maxMaintained');
+    if (maintainedBytes > context.maxBytes) throw new DbRuntimeError('JD2060', 'group dependencies exceed live.maxBytes');
     return entries;
   };
   const add = (token, doc) => {
@@ -114,8 +117,19 @@ export function nestedGroupStrategy(description, context) {
       return flatten();
     }, entries: check, stats: () => ({ ...stats }),
     apply(record, previousRows) {
-      const changes = context.touchedKeys(record, description.deps ?? { whole: true, members: new Set() });
-      if (changes === null) return null;
+      const deps = description.deps ?? WHOLE;
+      const changes = context.touchedKeys(record, deps) ?? new Map();
+      // a key deleted and inserted again in one transaction reaches capture
+      // as a diff of its members, yet it is a new row at the end of the
+      // source order: a held row the dependencies skipped is re-read, as a
+      // delete and an insert would be, when its position moved
+      if (!deps.whole) {
+        for (const token of context.touchedKeys(record, WHOLE)?.keys() ?? []) {
+          if (!changes.has(token) && docs.has(token)
+            && context.rowPosition(token) !== positions.get(token)) changes.set(token, { kind: 'update' });
+        }
+      }
+      if (changes.size === 0) return null;
       const affected = new Set();
       for (const token of changes.keys()) {
         const previous = docs.get(token);

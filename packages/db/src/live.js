@@ -25,7 +25,7 @@ import { isJsonObject, stableStringify } from '@jarenjs/core/object';
 
 import { DbCompileError, DbRuntimeError } from './errors.js';
 import { chain, attempt } from './driver.js';
-import { planQuery } from './plan.js';
+import { planQuery, BIND_REASONS } from './plan.js';
 import { createSortedWindow } from './window.js';
 import { classifyEventTime, bucketStrategy, rollingStrategy } from './live-time.js';
 import { joinStrategy } from './live-join.js';
@@ -40,6 +40,10 @@ const AGGREGATE_MEMBERS = new Map([
   ['$count', 'count'], ['$sum', 'sum'], ['$avg', 'avg'],
   ['$min', 'min'], ['$max', 'max'],
 ]);
+
+/** Why an integer sum or average re-runs once its terms leave the bound
+ * in which every partial sum is exact: the query path's own reason. */
+const ACCUMULATION_RERUN = `'accumulation' — ${BIND_REASONS.accumulation}`;
 
 /** Split an emitted pointer into unescaped segments. */
 const segmentsOf = (path) => path.split('/').slice(1).map(decodeJSONPointerSegment);
@@ -167,14 +171,14 @@ function compilesBare(document) {
 }
 
 /**
- * Recognise the canonical single-level group form (§7): one binding
- * over `$[*]`, optional `$where`, one or more group keys, and a
- * `$return` object whose members are the group key (`$g` plain or
- * defaulted) or a single-member aggregate over the group sequence.
+ * Recognise the single-level group form (§7): one binding over `$[*]`,
+ * optional `$where`, one or more group keys, and a `$return` that reads
+ * only the group — its keys, its rows, externals — never the collection
+ * root. Every output then depends on one group's rows alone, which is
+ * what per-group recomputation needs; what the return reads decides its
+ * member dependencies ({@link groupDeps}), not its shape.
  * @param {any} inner
- * @returns {null | { binding: string, groups: string[], key: any,
- *   where: any, members: { name: string, kind: 'key' | 'aggregate',
- *   fn?: string, operand?: any, defaulted?: boolean }[] }}
+ * @returns {null | { binding: string, key: any, where: any }}
  */
 function recogniseGroupForm(inner) {
   const binding = bindingNameOf(inner);
@@ -184,42 +188,17 @@ function recogniseGroupForm(inner) {
   const groupNames = Object.keys(inner.$groupby);
   if (groupNames.length === 0) return null;
   if (![inner.$where, inner.$groupby, inner.$return].every(readsNoRoot)) return null;
-  const scalar = groupNames.some((name) => inner.$return === `$${name}`)
-    || (isJsonObject(inner.$return) && Object.keys(inner.$return).length === 1
-      && AGGREGATE_MEMBERS.has(Object.keys(inner.$return)[0]));
-  if (scalar) return { binding, groups: groupNames,
-    key: groupNames.map((name) => [inner.$groupby[name]]), where: inner.$where, members: [] };
-  if (!isJsonObject(inner.$return)) return null;
-  const members = [];
-  for (const name of Object.keys(inner.$return)) {
-    const expr = inner.$return[name];
-    if (groupNames.some((group) => expr === `$${group}`)) {
-      members.push({ name, kind: 'key', defaulted: false });
-      continue;
-    }
-    if (isJsonObject(expr) && Array.isArray(expr.$default)
-      && expr.$default.length === 2 && groupNames.some((group) => expr.$default[0] === `$${group}`)
-      && expr.$default[1] === null && Object.keys(expr).length === 1) {
-      members.push({ name, kind: 'key', defaulted: true });
-      continue;
-    }
-    if (isJsonObject(expr) && Object.keys(expr).length === 1
-      && AGGREGATE_MEMBERS.has(Object.keys(expr)[0])) {
-      const op = Object.keys(expr)[0];
-      members.push({ name, kind: 'aggregate', fn: AGGREGATE_MEMBERS.get(op), operand: expr[op] });
-      continue;
-    }
-    return null;
-  }
-  return { binding, groups: groupNames, key: groupNames.map((name) => [inner.$groupby[name]]),
-    where: inner.$where, members };
+  return { binding, key: groupNames.map((name) => [inner.$groupby[name]]), where: inner.$where };
 }
 
 /**
  * Collect the top-level document members a compiled expression reads
  * through an item binding — the §8 member-level dependency set. Any
  * non-simple first step (wildcard, descendant, index) widens to the
- * whole collection.
+ * whole collection. Only PATH nodes are visited: a binding read bare
+ * (`$r`, `['$r']`, a nested `$for` over `$r`) is an analysis `var` node
+ * this walk never sees, so a strategy that admits a bare row read
+ * declares the whole document itself ({@link groupDeps}).
  * @param {any} node - an analysis AST node
  * @param {{ whole: boolean, members: Set<string> }} into
  */
@@ -232,7 +211,7 @@ function collectTopMembers(node, into) {
   if (node.kind === 'path' && node.rootSlot > 0 && node.external !== true) {
     const first = node.segments[0];
     if (first === undefined) {
-      into.whole = true; // the bare binding: the whole document is read
+      into.whole = true; // a path with no step reads its whole root
     }
     else if (first.descendant !== true && first.selectors.length === 1
       && first.selectors[0].kind === 'name') {
@@ -253,6 +232,30 @@ function memberDeps(root) {
   const deps = { whole: false, members: new Set() };
   collectTopMembers(root, deps);
   return deps;
+}
+
+/**
+ * The member dependency set of an admitted group (§8): the members its
+ * paths read ({@link memberDeps}), unless its key, filter or return reads
+ * a row BARE — a row copied whole, a nested `$for` over the group's rows,
+ * `$get` over a row, a row-valued key — which reads every member of it,
+ * so the group depends on the whole document. A group key variable or an
+ * external read bare is not a row read, and neither is counting a group's
+ * rows.
+ * @param {any} root - the group document's analysis root
+ * @returns {{ whole: boolean, members: Set<string> }}
+ */
+function groupDeps(root) {
+  const keys = new Set(root.groupby.keys.map((key) => key.slot));
+  const readsRowBare = (node) => {
+    if (node === null || typeof node !== 'object') return false;
+    if (Array.isArray(node)) return node.some(readsRowBare);
+    if (node.kind === 'op' && node.name === '$count' && node.args.length === 1
+      && node.args[0].kind === 'var') return false;
+    if (node.kind === 'var' && node.external !== true && !keys.has(node.slot)) return true;
+    return Object.keys(node).some((key) => key !== 'docPath' && readsRowBare(node[key]));
+  };
+  return readsRowBare(root) ? { whole: true, members: new Set() } : memberDeps(root);
 }
 
 /**
@@ -368,9 +371,11 @@ export function classifyLiveQuery(document, queryShape, keyed, eventTime = null)
         : `the group filter did not translate: ${plannerReason(planned)}`);
     }
     if (!keyed) return rerun('rows without a document key cannot be tracked');
+    // the strategy evaluates the whole document once per group
+    if (!compilesBare(inner)) return rerun(plannerReason(planQuery(inner, queryShape, {})));
     return {
       strategy: 'group', inner, binding: group.binding, key: group.key, carrier,
-      deps: memberDeps(analyzeQuery(inner).root),
+      deps: groupDeps(analyzeQuery(inner).root),
     };
   }
 
@@ -405,6 +410,7 @@ export function classifyLiveQuery(document, queryShape, keyed, eventTime = null)
     // dropped its terms — the window is not maintainable here
     if (isJsonObject(inner) && inner.$orderby !== undefined) return rerun(SPATIAL_RERUN.order);
     if (windowed) return rerun('a limit without an order is not deterministic to maintain');
+    if (!compilesBare(inner)) return rerun(plannerReason(planned));
     return {
       strategy: 'rows',
       inner,
@@ -415,9 +421,9 @@ export function classifyLiveQuery(document, queryShape, keyed, eventTime = null)
   if (!keyed) return rerun('rows without a document key cannot be tracked');
 
   // SQL can group a complete selection without proving that evaluating
-  // the document once per changed row maintains its result. Canonical
-  // maintained groups were handled above; the remaining groups and
-  // distinct projections need set-level invalidation.
+  // the document once per changed row maintains its result. Groups whose
+  // return reads only the group were maintained above; the remaining
+  // groups and distinct projections need set-level invalidation.
   if (planned.plan.group !== null || planned.plan.bucket !== null)
     return rerun('this grouping or distinct projection needs set-level maintenance');
 
@@ -459,6 +465,7 @@ export function classifyLiveQuery(document, queryShape, keyed, eventTime = null)
   if (planned.plan.window !== null || windowed) {
     return rerun('a limit without an order is not deterministic to maintain');
   }
+  if (!compilesBare(inner)) return rerun(plannerReason(planned));
   return {
     strategy: 'rows',
     inner,
@@ -723,6 +730,14 @@ function windowStrategy(description, context) {
  * contributions. `min`/`max` FALL BACK to a recompute over the
  * retained contributions when the current extremum's last holder
  * leaves — the documented fallback, counted in `stats().fallbacks`.
+ * A stored `null` term is skipped, as the native aggregate skips it.
+ * A sum or an average answers from its terms only while every partial
+ * sum is exact — the guard the native statement carries beside it: the
+ * largest magnitude times the number of terms within ±(2^53 - 1), a term
+ * that is not an integer counting as past it. Past it the answer is the
+ * engine's left-to-right addition in the order a fresh run reads the rows
+ * (or SQL's compensated sum of non-integer terms), which only a fresh run
+ * reproduces, so the registration re-runs from then on, the reason named.
  * @param {any} description
  * @param {any} context
  */
@@ -735,9 +750,12 @@ function accumulatorStrategy(description, context) {
     ? { $for: { it: '$[*]' }, $return: '$it' }
     : documentsSource(binding, operand.$where);
 
-  /** @type {Map<string, number | number[]>} */
+  /** @type {Map<string, number | (number | null)[]>} */
   const contributions = new Map();
   const stats = { fallbacks: 0 };
+  const INEXACT = Symbol('past the exactness bound');
+  /** @type {any} the re-run this registration answers by past the bound */
+  let rerun = null;
 
   const contributionOf = (doc) => {
     const items = /** @type {any[]} */ (evaluate([doc], context.externals));
@@ -747,23 +765,39 @@ function accumulatorStrategy(description, context) {
   const fold = () => {
     let sum = 0;
     let count = 0;
+    let largest = 0;
     let extreme;
     for (const contribution of contributions.values()) {
       if (isCount) {
         count += /** @type {number} */ (contribution);
         continue;
       }
-      for (const value of /** @type {number[]} */ (contribution)) {
+      for (const value of /** @type {(number | null)[]} */ (contribution)) {
+        if (value === null) continue;
         sum += value;
         count += 1;
+        // a term that is not an integer (an `integer` member stores what it
+        // is given) has no exact running sum: SQL compensates its rounding
+        largest = Math.max(largest, Number.isInteger(value) ? Math.abs(value) : Infinity);
         if (extreme === undefined
           || (fn === 'min' ? value < extreme : value > extreme)) extreme = value;
       }
     }
     if (fn === 'count') return count;
+    if (fn === 'min' || fn === 'max') return extreme;
+    // the native guard: largest <= floor((2^53 - 1) / count), exactly
+    if (count > 0 && largest > (Number.MAX_SAFE_INTEGER - Number.MAX_SAFE_INTEGER % count) / count) {
+      return INEXACT;
+    }
     if (fn === 'sum') return sum;
-    if (count === 0) return undefined;
-    return fn === 'avg' ? sum / count : extreme;
+    return count === 0 ? undefined : sum / count;
+  };
+  /** Answer by re-running for the rest of the registration's life. */
+  const switchToRerun = () => {
+    context.handOver(ACCUMULATION_RERUN);
+    contributions.clear();
+    rerun = rerunStrategy(description, context);
+    return rerun;
   };
 
   /** @type {any} */
@@ -780,12 +814,13 @@ function accumulatorStrategy(description, context) {
           }
         }
         current = fold();
-        return rowsOf();
+        return current === INEXACT ? switchToRerun().init() : rowsOf();
       }),
-    entries: () => contributions.size,
+    entries: (rows) => (rerun === null ? contributions.size : rerun.entries(rows)),
     close: () => contributions.clear(),
-    stats: () => ({ ...stats }),
+    stats: () => ({ ...stats, ...rerun?.stats() }),
     apply(record, previousRows) {
+      if (rerun !== null) return rerun.apply(record, previousRows);
       const touched = touchedKeys(record, context.name, description.deps);
       if (touched === null) return null;
       let changed = false;
@@ -811,6 +846,7 @@ function accumulatorStrategy(description, context) {
       // count/sum/avg fold in O(state); the same recompute IS the
       // min/max fallback when the extremum's holder left
       current = fold();
+      if (current === INEXACT) return switchToRerun().apply(record, previousRows);
       return diffAgainst(previousRows, shareByValue(previousRows, rowsOf()));
     },
   };
@@ -866,10 +902,18 @@ export function createLiveRegistry(bounds) {
         `the store's live.maxQueries bound of ${bounds.maxQueries} was reached`);
     }
     const classification = definition.classification;
+    /** `live.mode` for a strategy label and its reason. */
+    const modeOf = (strategy, reason) => Object.freeze({
+      strategy,
+      mode: ['rerun', 'resnapshot'].includes(strategy) ? strategy : 'incremental',
+      ...(reason ? { reason } : {}),
+    });
+    const unavailable = (reason) => new DbCompileError('JD0051',
+      `the demanded incremental mode is unavailable: ${reason}`);
     if (definition.demanded === 'incremental' && ['rerun', 'resnapshot'].includes(classification.strategy)) {
-      throw new DbCompileError('JD0051',
-        `the demanded incremental mode is unavailable: ${classification.reason}`);
+      throw unavailable(classification.reason);
     }
+    let mode = modeOf(classification.strategy, classification.reason);
 
     const context = {
       name: definition.name,
@@ -891,6 +935,14 @@ export function createLiveRegistry(bounds) {
       // imported by them: `live-time.js` maintains its own state and
       // must not become a second implementation of the pointer walk
       touchedKeys: (record, deps) => touchedKeys(record, definition.name, deps),
+      // a maintained strategy that can no longer answer what a fresh run
+      // answers hands its registration over to re-running for the rest of
+      // its life, the reason named in `live.mode`; a registration that
+      // demanded incremental maintenance refuses instead
+      handOver: (reason) => {
+        if (definition.demanded === 'incremental') throw unavailable(reason);
+        mode = modeOf('rerun', reason);
+      },
     };
     const STRATEGIES = {
       rows: rowsStrategy, window: windowStrategy, accumulator: accumulatorStrategy,
@@ -1000,16 +1052,11 @@ export function createLiveRegistry(bounds) {
           publish(outcome ?? { rows: event.rows, ops: [] }, {
             seq: event.seq, resetRequired: event.resetRequired, lag: event.lag });
       }, failed);
-      const mode = Object.freeze({
-        strategy: classification.strategy,
-        mode: ['rerun', 'resnapshot'].includes(classification.strategy) ? classification.strategy : 'incremental',
-        ...(classification.reason ? { reason: classification.reason } : {}),
-      });
       return Object.freeze({
         get result() { return state.result; },
         get state() { return state.status; },
         get error() { return state.error; },
-        mode,
+        get mode() { return mode; },
         stats: () => ({ ...state.stats, ...(strategy.stats?.() ?? {}) }),
         ...(strategy.refresh ? { refresh: strategy.refresh } : {}),
         ...(strategy.advance === undefined ? {} : {

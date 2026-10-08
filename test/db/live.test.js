@@ -421,8 +421,8 @@ describe('classification honesty (live.mode)', () => {
       /windowed group/],
       [{ $count: { $subsequence: [{ $for: { it: '$[*]' }, $return: '$it' }, 0, 5] } },
         /windowed aggregate/],
-      [[{ $for: { it: '$[*]' }, $groupby: { g: '$it.dept' },
-        $return: { key: { $default: ['$g', null] }, deep: { $count: '$it' }, odd: '$it' } }],
+      [[{ $for: { it: '$[*]' }, $groupby: { g: '$it.dept' }, $orderby: { $key: '$g' },
+        $return: { key: '$g', n: { $count: '$it' } } }],
       /group|residual|\$groupby/],
     ];
     for (const [document, expected] of cases) {

@@ -1684,9 +1684,9 @@ its side-effect-free status read are in
   their epoch clocks must be comparable. Separate databases need an idempotent
   relay. No priority classes, no cron, no workflow compensation.
 - **Live-query maintenance is limited to the declared table** (§7);
-  indexed joins and graph projections require bounded dependencies. Offset
-  windows, unindexed joins and non-canonical shapes re-run, reported; a load
-  specification is no live document (`JD0033`).
+  indexed joins and graph projections require bounded dependencies. Entity
+  offset windows, unindexed joins and every shape the table does not list
+  re-run, reported; a load specification is no live document (`JD0033`).
 - **`eventTime.retention` bounds repair work, not memory.** It is the
   horizon a view claims and is checked against the window it maintains;
   the maintained state is still bounded by `live.maxMaintained`, and no
@@ -1763,11 +1763,18 @@ floating-point accumulation order. Parameterized distance bounds bind both
 centre and radius through the spatial index, with full-query fallback for
 invalid, polar and antimeridian probes.
 
-Live collection groups now maintain multiple keys, unordered typed scalar
-distinct projections, and count/sum/avg/min/max over canonical group results.
-Only affected groups are reevaluated in source order; a final aggregate folds
-the retained group outputs in first-appearance order. Input documents and
-group outputs consume both state-entry and byte credits. See
+Live collection groups now maintain multiple keys, any return that reads only
+the group — its keys, aggregates and arithmetic over them, the rows themselves
+— unordered typed scalar distinct projections, and count/sum/avg/min/max over
+such group results. Only affected groups are reevaluated in source order; a
+final aggregate folds the retained group outputs in first-appearance order. A
+group that reads a row bare — copied whole, under `$get`, in a nested query,
+as its key — depends on every member of it. Input documents and group
+outputs consume both state-entry and byte credits, so a return that copies
+rows charges their bytes twice, and a group over more rows than
+`live.maxMaintained` is `JD2060` (`mode: 'rerun'` serves it). Ordered and
+windowed groups, and a document using a registered operator or a zoned group
+key or projection, re-run with the reason named. See
 [LIVE-FORMAT](docs/LIVE-FORMAT.md) for the supported shapes and measured costs.
 
 

@@ -568,6 +568,51 @@ value the store did not honor now refuse by code, before any statement:
   return reads the collection root; they now re-run, the reason named. An
   ordered query whose return uses a registered operator no longer refuses
   registration with `JQ0002`: it re-runs, the operator named.
+- A single-level live group whose return is not a key, an aggregate, or an
+  object of key and aggregate members — arithmetic over aggregates, the rows
+  themselves, a bare member path — is maintained (`live.mode.strategy`
+  `group`) instead of re-run, and an aggregate over such groups with it;
+  `mode: 'incremental'` now accepts them. They are charged as every
+  maintained group is: each source row is an entry and so is each output
+  item, and their bytes count against `live.maxBytes`, a copied row's bytes
+  again inside the output. At the default `live.maxMaintained` of 10,000 a
+  group of 10,000 rows with one output item, or one that grows to it, is
+  therefore `JD2060` where it re-ran: register it with `mode: 'rerun'`,
+  which keeps only the result, or raise `live.maxMaintained` (and
+  `live.maxBytes`). A window over such a group still re-runs, now with the
+  reason `a windowed group re-runs`.
+- A live group — an object of key and aggregate members included — that
+  reads a row bare (`$get` over a row, a nested query over the group's rows
+  inside an aggregate, a row-valued key) skipped a write to a member it
+  read and kept a stale result; it now depends on every member, as a group
+  copying its rows does. Counting the rows (`{ "$count": "$it" }`) still
+  reads none.
+- A key deleted and inserted again in one transaction kept its old place in
+  a live group or distinct projection whose dependencies skip the members
+  that changed; it now moves to the end of the source order, as `execute`
+  reads it, which costs one row-position read for every held row a skipped
+  write touches.
+- A live query whose document uses a registered operator, or a named zone
+  in a group key or a projection — a rows projection, a group aggregating a
+  registered operator, a group keyed by a zoned `$time-bucket`, a refined
+  spatial rows return — now re-runs with the planner's reason instead of
+  failing registration with `JQ0002`/`JQ0003`; on PostgreSQL a group
+  aggregating a registered operator no longer fails registration either. A
+  zoned `$where` still fails `JQ0003`, as `execute` does.
+- A live whole-collection `$sum` or `$avg` over an `integer` member kept a
+  running double sum past the bound in which every partial sum is exact, and
+  could answer another total than `execute`, which adds in the order it
+  reads the rows. From the write whose terms pass that bound — the largest
+  magnitude times the number of terms past 2^53 − 1, a term that is not an
+  integer (which an `integer` member stores as given, and whose rounding
+  SQL compensates) counting as past it — the registration now re-runs, and
+  `live.mode` reports `rerun` with the reason
+  `'accumulation' — integer accumulation exceeded its runtime exactness bound`;
+  one that demanded `mode: 'incremental'` refuses `JD0051`, or errors with it
+  at that write. Past the bound beside a stored `null` term the re-run raises
+  `JQ2001`, as `execute` does, where the running sum kept answering. A stored
+  `null` term counted toward a live `$avg` and could be its `$min`; `$avg`,
+  `$min` and `$max` now skip it, as `execute` does.
 
 ### Allocated entity keys on PostgreSQL
 
