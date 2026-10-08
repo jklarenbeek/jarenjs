@@ -44,7 +44,7 @@ import { normalizeProfile, assertProfileRoots } from './profile.js';
 import { compileEntityModel, joinTableRoots } from './model.js';
 import { entityCore } from './entity.js';
 import { verifyPhysical, verifyRulePrograms } from './physical.js';
-import { trustedSql, synchronousBody } from './sql.js';
+import { trustedSql, synchronousBody, RELEASE } from './sql.js';
 import { relationalEngine } from './relational.js';
 import { createTracker, membershipKeys } from './tracker.js';
 import { createCaptureEngine, DEFAULT_RETENTION } from './capture.js';
@@ -4714,11 +4714,19 @@ export function openStore(model, options) {
             const sqlWorks = () => (rootWork === myWork || severalSessions ? [myWork] : [myWork, rootWork]);
             /** @type {any} */
             let scopeSql;
-            const sqlOfScope = () => (scopeSql ??= trustedSql({ connection, readOnly, requireScope: () => requireScope(identity),
-              track: (/** @type {() => any} */ fn) => runScoped(identity, fn),
-              beforeWrite: () => beforeSqlWrite(undefined, sqlWorks()),
-              afterWrite: () => afterSqlWrite(sqlWorks()),
-            }));
+            const sqlOfScope = () => {
+              if (scopeSql !== undefined) return scopeSql;
+              scopeSql = trustedSql({ connection, readOnly, requireScope: () => requireScope(identity),
+                track: (/** @type {() => any} */ fn) => runScoped(identity, fn),
+                beforeWrite: () => beforeSqlWrite(undefined, sqlWorks()),
+                afterWrite: () => afterSqlWrite(sqlWorks()),
+              });
+              // a statement the body never closed leaves with the scope, as
+              // its cursors do: on a worker it held one of `maxStatements`
+              // slots for as long as the store lived
+              (identity.cursors ??= new Set()).add(() => Promise.resolve(scopeSql[RELEASE]()));
+              return scopeSql;
+            };
             // the relational engine as THIS scope's owner: every call checks
             // the exact scope and counts in flight for a hold limit, a write
             // is a savepoint of the transaction, and a cursor is the scope's;

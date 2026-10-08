@@ -1157,8 +1157,8 @@ a bounded number of them on these paths however long the store lives:
   held one statement per call; each is prepared for that one call and
   released after it.
 - A trusted statement (`tx.sql.prepare`) kept its slot after `close()`;
-  `close()` now gives it back, once. A statement a body never closes is still
-  held until the store closes, so close what you prepare.
+  `close()` now gives it back, once, and a statement a body never closes is
+  released when its transaction settles.
 - On the process host, once a store's life had prepared more statements than
   `maxStatements` (a few hundred journal-captured commits), a root read
   outside any transaction reported the owner's transaction settlement as

@@ -95,6 +95,17 @@ for (const [host, driver] of HOSTS) {
     }
     finally { await store.close(); }
   });
+
+  it(`${host}: 100 transactions each preparing a trusted statement and never closing it fit 64 statement slots`, async () => {
+    const store = await openStore(model, { driver: driver({ maxStatements: 64 }) });
+    try {
+      for (let i = 0; i < 100; i++) {
+        const value = await store.transaction(async (tx) => (await tx.sql.prepare('SELECT ? AS v', { access: 'read' }).get([i])).v);
+        assert.equal(value, i, `transaction ${i + 1}`);
+      }
+    }
+    finally { await store.close(); }
+  });
 }
 
 if (!process.versions.bun) {
