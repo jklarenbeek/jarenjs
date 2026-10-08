@@ -21,7 +21,8 @@ const model = { $model: '0.1', entities: {
 const document = [{ $for: { p: '$.Post[*]', a: '$.Author[*]' }, $where: { $eq: ['$p.author', '$a.id'] }, $return: { id: '$p.id', name: '$a.name' } }];
 const measurements = [];
 const graphDocument = [{ $for: { a: '$.Author[*]' }, $return: { id: '$a.id', posts: [{ $for: { p: '$.Post[*]' }, $where: { $eq: ['$p.author', '$a.id'] }, $return: '$p' }] } }];
-for (const [shape, fanout, liveDocument] of [['selective join', 1, document], ['high fan-out join', 200, document], ['graph', 1, graphDocument]]) {
+const selfJoinDocument = [{ $for: { p: '$.Post[*]', q: '$.Post[*]' }, $where: { $eq: ['$p.author', '$q.author'] }, $return: { p: '$p.id', q: '$q.id', title: '$q.title' } }];
+for (const [shape, fanout, liveDocument] of [['selective join', 1, document], ['high fan-out join', 200, document], ['graph', 1, graphDocument], ['self join', 1, selfJoinDocument]]) {
   for (const mode of ['incremental', 'rerun']) {
     const store = await openStore(model, { driver: nodeDriver(), capture: true });
     try {
@@ -41,7 +42,7 @@ for (const [shape, fanout, liveDocument] of [['selective join', 1, document], ['
       const times = []; const rebuild = [];
       for (let i = 0; i < samples; i++) {
         const at = performance.now();
-        if (shape === 'graph') await store.entity('Post').update('p0', { title: `changed${i}` });
+        if (shape === 'graph' || shape === 'self join') await store.entity('Post').update('p0', { title: `changed${i}` });
         else await store.entity('Author').update('a0', { name: `changed${i}` });
         times.push(performance.now() - at);
         const freshAt = performance.now(); await oracle.check(); rebuild.push(performance.now() - freshAt);
@@ -62,8 +63,13 @@ const nested = { $for: { row: '$[*]' }, $groupby: { region: '$row.region' }, $re
 } };
 const multiple = { $for: { row: '$[*]' }, $groupby: { region: '$row.region', team: '$row.team' },
   $return: { region: '$region', team: '$team', total: { $sum: '$row.score' } } };
+const offsetWindow = [{ $subsequence: [{ $for: { row: '$[*]' }, $orderby: { $key: '$row.score' }, $return: '$row' }, 1, 20] }];
+const groupReturnRows = [{ $for: { row: '$[*]' }, $groupby: { region: '$row.region' }, $return: { region: '$region', teams: ['$row.team'] } }];
+const groupEmission = [{ $for: { it: [{ $for: { it: '$[*]' }, $groupby: { g: '$it.region' }, $return: { key: { $default: ['$g', null] }, items: ['$it'] } }] },
+  $return: { region: '$it.key', teams: ['$it.items[*].team'] } }];
 for (const [shape, query] of [['multiple-key groups', [multiple]], ['group aggregate', [{ $sum: { ...multiple, $return: { $sum: '$row.score' } } }]],
-  ['distinct', [{ $distinct: { $for: { row: '$[*]' }, $return: '$row.team' } }]], ['nested groups', [nested]], ['offset groups', [{ $subsequence: [nested, 1, 3] }]]]) {
+  ['distinct', [{ $distinct: { $for: { row: '$[*]' }, $return: '$row.team' } }]], ['nested groups', [nested]], ['offset groups', [{ $subsequence: [nested, 1, 3] }]],
+  ['offset window', offsetWindow], ['group return rows', groupReturnRows], ['group emission', groupEmission]]) {
   for (const mode of ['auto', 'rerun']) {
     const store = await openStore(groupedModel, { driver: nodeDriver(), capture: true });
     try {
