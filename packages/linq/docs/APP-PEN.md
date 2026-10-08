@@ -1157,10 +1157,15 @@ cannot see the value:
   `x.n < 2` ask the proxy for a primitive. The capture refuses with
   `JL0108`, naming the spellings that work
   ([QUERY-PEN.md §14.9](QUERY-PEN.md#149-jl0108--a-capture-converted-to-a-primitive)).
-- `x.payload === null` and `if (x.payload)` cannot be refused, because
-  JavaScript asks the proxy nothing: the first is `false` and the second
-  true, for every value. No TypeScript declaration can make `=== null` an
-  error either, since `null` is comparable to every type.
+- `x.payload === null` and `if (x.payload)` ask the proxy nothing: the
+  first is `false` and the second true, for every value. A callback that
+  answers such a boolean itself — `action((st) => st.count === 0)`, a
+  subscription's `when: (st) => st.online === true` — is refused with
+  `JL0109`, naming the constant
+  ([QUERY-PEN.md §14.10](QUERY-PEN.md#1410-jl0109--a-callback-answered-a-javascript-boolean));
+  one it passes on — a `transition()` member, a `when()` condition — is
+  a literal there and is not refused. No TypeScript declaration can make
+  `=== null` an error either, since `null` is comparable to every type.
 
 ```js
 action((st, x) => transition({ state: x.payload.eq(null) }))   // { "$eq": ["$payload", null] }

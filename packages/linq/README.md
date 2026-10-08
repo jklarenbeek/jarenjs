@@ -127,7 +127,9 @@ you out of the traps:
    `a.and(b)`, `x.not()`, `s.eq('')`. A proxy cannot overload
    JavaScript's own operators: `u.age > 21` is refused with `JL0108`,
    and `a && b`, `cond ? x : y` or `a === b` evaluate against the proxy
-   object and produce a wrong document silently.
+   object — a callback that answers such a boolean itself
+   (`(u) => u.deleted === null`) is refused with `JL0109`, and one that
+   only uses it produces a wrong document silently.
 2. **Reach for the builder where you would write a schema.** Every pen
    that carries a schema takes a schema-pen builder in that position —
    a contract's `input`, a machine's `payload`, an app's `state`.
@@ -718,8 +720,10 @@ a coded error (`JL0001`–`JL0007`; the pens' and the client's refusals are `JL0
 rather than guessing. Some of JavaScript's own
 operators are the one thing a proxy cannot trap: `&&`, `||`, `!`, `?:`,
 truthiness and `===` evaluate against the proxy object and yield a wrong
-document silently (use `.and()`/`.or()`/`.not()`), while `u.age > 21` or
-`u.age + 1` are refused with `JL0108` — the pen doc's §3 lists them. Not
+document silently (use `.and()`/`.or()`/`.not()`) unless the callback
+answers the boolean itself, which is refused with `JL0109`, while
+`u.age > 21` or `u.age + 1` are refused with `JL0108` — the pen doc's §3
+lists them. Not
 a general lazy-iterable library — if you don't want a query document,
 you don't want this package.
 

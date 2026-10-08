@@ -32,6 +32,7 @@ export const LINQ_CODES = /* @__PURE__ */ Object.freeze({
   JL0106: 'a migration step names a table the target model does not declare, or a draft it cannot match',
   JL0107: 'a client operation named a member that is not the relation kind it needs',
   JL0108: 'a captured expression was converted to a JavaScript primitive',
+  JL0109: 'a captured callback read its argument and answered a JavaScript boolean',
   JL2001: 'first/single found no element',
   JL2002: 'single found more than one element',
   JL2003: 'elementAt is out of range',
@@ -124,8 +125,15 @@ export const LINQ_CODES = /* @__PURE__ */ Object.freeze({
  *    or `<`: JavaScript asked the capture proxy for a primitive, which
  *    it does not have (it stands for a value the query engine computes
  *    later). `.eq()`, `.lt()`, `.concat()` and `.exists()` write those
- *    comparisons; `===` and truthiness cannot be trapped and are
- *    documented instead
+ *    comparisons; `===` and truthiness test the proxy, never the value
+ *    (`JL0109`)
+ *  - `JL0109` — a captured callback read its argument and answered a
+ *    plain JavaScript boolean: `===`, `!==`, `!`, `typeof` and `== null`
+ *    test the capture proxy, never the value, so the document would hold
+ *    that constant. A callback that read nothing (`() => true`) answers a
+ *    deliberate constant; a boolean nested in a returned object or array,
+ *    one a pen helper consumes, and a comparison of the bare argument
+ *    (`x != null`) read as literals and are not refused
  */
 export class LinqBuildError extends CodedError {
   /**

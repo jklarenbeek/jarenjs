@@ -101,6 +101,15 @@ describe('every JL code fires', () => {
     assert.deepStrictEqual(from(tab).where((v) => v.tab.eq('labels')).select((v) => v.tab.concat('!')).toArray(), ['labels!']);
   });
 
+  it('JL0109 — a callback that read its argument answered a JavaScript boolean, the constant and the fix named', () => {
+    const rows = [{ a: null }, { a: 1 }];
+    assert.throws(() => from(rows).where((/** @type {any} */ x) => x.a === null).toDocument(),
+      (e) => e instanceof LinqBuildError && e.code === 'JL0109'
+        && /boolean false/.test(e.message) && /\.eq\(null\)/.test(e.message));
+    // a callback that reads nothing answers a deliberate constant
+    assert.strictEqual(from(rows).where(() => true).toDocument().$where, true);
+  });
+
   it('JL0006 — the recorded unsupported operator', () => {
     assert.throws(() => from([]).zip(), (e) => e.code === 'JL0006' && /zip/.test(e.message));
   });
@@ -251,7 +260,7 @@ describe('every JL code fires', () => {
     assert.strictEqual(Object.isFrozen(LINQ_CODES), true);
     assert.deepStrictEqual(Object.keys(LINQ_CODES).sort(), [
       'JL0001', 'JL0002', 'JL0003', 'JL0004', 'JL0005', 'JL0006', 'JL0007',
-      'JL0101', 'JL0102', 'JL0103', 'JL0104', 'JL0105', 'JL0106', 'JL0107', 'JL0108',
+      'JL0101', 'JL0102', 'JL0103', 'JL0104', 'JL0105', 'JL0106', 'JL0107', 'JL0108', 'JL0109',
       'JL2001', 'JL2002', 'JL2003', 'JL2004', 'JL2005', 'JL2006', 'JL2007', 'JL2008', 'JL2009', 'JL2010',
     ]);
   });

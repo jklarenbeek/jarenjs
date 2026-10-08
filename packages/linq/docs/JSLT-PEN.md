@@ -105,8 +105,12 @@ consequences, in the order a writer meets them:
    against the PROXY and silently write the wrong document —
    `() => ({ live: !v.deleted })` writes `{ "live": false }`,
    `() => ({ both: v.a && v.b })` keeps only the right operand
-   (`{ "both": "$.b" }`), and `v.flag ? 'a' : 'b'` is always `'a'`. A
-   condition belongs in the document: the expression surface's `.and()`,
+   (`{ "both": "$.b" }`), and `v.flag ? 'a' : 'b'` is always `'a'`.
+   Only a callback that answers such a boolean itself —
+   `(v) => v.deleted === null` — is refused, with `JL0109`
+   ([QUERY-PEN.md](QUERY-PEN.md) §14.10); nested in what the callback
+   answers, as above, it is a literal. A condition belongs in the
+   document: the expression surface's `.and()`,
    `.or()`, `.not()`, an operator (`op('$if', …)`), or a second rule with
    a narrower `match`. [QUERY-PEN.md](QUERY-PEN.md) §3 states this once
    for every capture in the suite.
@@ -526,13 +530,17 @@ to the codes `packages/linq/src/jslt/` throws. The full condition each
 code states across every pen is the binder's,
 [LINQ-FORMAT.md](LINQ-FORMAT.md) §1.3.
 
-The capture every JSLT callback runs in adds one more refusal, which is
+The capture every JSLT callback runs in adds two more refusals, which are
 the chain's and listed in QUERY-PEN. In a rule callback, `==`, `+`, a
 template literal or `<` over a captured value is `JL0108`
 ([QUERY-PEN.md §14.9](QUERY-PEN.md#149-jl0108--a-capture-converted-to-a-primitive)).
 `=== null`, `== null` (and `!= null`), `==` between two captures and
-truthiness cannot be refused, since they test the proxy and never the
-value. Write `.eq(null)`, `.exists()`, `.isEmpty()` or `a.eq(b)`.
+truthiness test the proxy and never the value, so they are refused with
+`JL0109` when the callback answers them — `body((v) => v.a === null)`
+names the constant it would have written
+([QUERY-PEN.md §14.10](QUERY-PEN.md#1410-jl0109--a-callback-answered-a-javascript-boolean)),
+while one nested in what the callback answers is a literal and is not
+refused. Write `.eq(null)`, `.exists()`, `.isEmpty()` or `a.eq(b)`.
 
 | Code | What this pen raises it for |
 |---|---|

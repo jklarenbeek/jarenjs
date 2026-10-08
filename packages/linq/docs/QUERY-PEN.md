@@ -175,15 +175,21 @@ value becomes the expression:
   name — the inner document rebinds `$it`, so a correlated subquery
   cannot be spelled this way. (`===` between proxies is untrappable and
   therefore undetectable; do not compare proxies.)
-- **Some of JavaScript's own operators cannot be trapped, and they do
-  not fail.** A proxy is an object, so `&&`, `||`, `!`, `?:`, `in`,
-  `typeof`, `Object.keys`, truthiness (`if (u.deleted)`), `===` and
-  `!==` — and `==`/`!=` against `null` or `undefined` — evaluate against
-  the PROXY and yield a silently wrong document:
+- **Some of JavaScript's own operators cannot be trapped.** A proxy is
+  an object, so `&&`, `||`, `!`, `?:`, `in`, `typeof`, `Object.keys`,
+  truthiness (`if (u.deleted)`), `===` and `!==` — and `==`/`!=` against
+  `null` or `undefined` — evaluate against the PROXY, never the value:
   `u.age.gt(21) && u.name.eq('x')` captures only the right operand,
   `!u.deleted` is the constant `false`, `u.deleted ? 'a' : 'b'` is
-  always `'a'`. Use the expression surface — `.and()`, `.or()`,
-  `.not()` — for logic. The
+  always `'a'`. A callback that read its argument and answers such a
+  boolean itself — `(u) => u.deleted === null`, `(u) => !u.deleted` —
+  is now refused with `JL0109` (§14.10) instead of capturing that
+  constant; a boolean the callback only uses — inside a returned object
+  or array, as a pen helper's argument, or as the condition of a `?:`,
+  `&&` or `||` that answers a capture — is not refused and still writes
+  a silently wrong document, and neither is a comparison of the bare
+  argument (`(u) => u != null`), which reads nothing. Use the expression
+  surface — `.and()`, `.or()`, `.not()` — for logic. The
   arithmetic and comparison operators (`u.age > 21`, `u.age + 1`,
   `${u.name}`, and `==` against a string, a number or a boolean) do ask
   the proxy for a primitive, and the capture refuses them with `JL0108`:
@@ -637,6 +643,8 @@ the normative home, this table mirrors it):
 | `JL0105` | a relation hop on the chain cannot lower: a many-to-many member (its join table is not a queryable root), a composite or undeclared key, or a malformed relation entry (§3, §4 "relation navigation") |
 | `JL0106` | a migration step names a table the target model does not declare, or a draft it cannot match |
 | `JL0107` | the client (`@jarenjs/linq/db`, [DB-CLIENT.md](DB-CLIENT.md)) named a member that is not the relation kind the operation needs: `include()` over a member that is not a declared relation, `link()`/`unlink()` over a relation that is not many-to-many |
+| `JL0108` | a captured expression — in any pen's callback, or the chain's — was converted to a JavaScript primitive: `==`, `+`, a template literal or `<` met the capture proxy (§14.9) |
+| `JL0109` | a captured callback — in any pen, or the chain — read its argument and answered a plain JavaScript boolean: `===`, `!==`, `!`, `typeof` or `== null` tested the capture proxy, never the value (§14.10) |
 
 Runtime errors (`LinqRuntimeError`):
 
@@ -1264,12 +1272,13 @@ held equal to the runtime's `LINQ_CODES` by
 reader needs — the SPELLING that trips each one and the spelling that
 works.
 
-The chain raises sixteen of the twenty-five codes:
+The chain raises seventeen of the twenty-six codes:
 - `JL0001`–`JL0007` at build time;
 - `JL2001`–`JL2006` and `JL2008` while a terminal runs;
-- `JL0105` and `JL0108`. These sit in the `JL01xx` block because a
-  relation hop and a primitive conversion are pen-shaped refusals, but
-  the chain's own expression capture raises them.
+- `JL0105`, `JL0108` and `JL0109`. These sit in the `JL01xx` block
+  because a relation hop, a primitive conversion and a boolean answer
+  are pen-shaped refusals, but the chain's own expression capture raises
+  them.
 
 The other nine are the PENS' and the CLIENT's: `JL0101`–`JL0104`,
 `JL0106` and `JL0107`, and the client door's `JL2007`, `JL2009` and `JL2010`. Their per-code conditions are the binder's,
@@ -1302,6 +1311,7 @@ proves that too, so the exclusion cannot hide a chain refusal).
 | `JL0007` | a provider serves several entity roots and has none of its own |
 | `JL0105` | a relation hop cannot lower to a phrase |
 | `JL0108` | a captured expression was converted to a JavaScript primitive: `==`, `+`, a template literal or `<` met the capture proxy |
+| `JL0109` | a callback read its argument and answered a plain JavaScript boolean: `===`, `!==`, `!`, `typeof` or `== null` tested the capture proxy |
 | `JL2001` | `first`/`single`/`last`, or `average`/`min`/`max`, over an empty sequence |
 | `JL2002` | `single`/`singleOrDefault` over two or more elements |
 | `JL2003` | `elementAt` out of range |
@@ -1535,7 +1545,7 @@ or a boolean, `+`, a template literal and a relational comparison.
 
 | The spelling that trips it | The message | The spelling that works |
 |---|---|---|
-| `(v) => v.tab == 'labels'` | `a captured expression is not a JavaScript value yet — ==, +, a template literal and < compare or join the capture itself; write the comparison with .eq(x), .ne(x), .lt(x), .exists() or .isEmpty(), and a string join with .concat(…) (and note that === and if (v) cannot be trapped: they compare or test the proxy, never the value)` | `(v) => v.tab.eq('labels')` |
+| `(v) => v.tab == 'labels'` | `a captured expression is not a JavaScript value yet — ==, +, a template literal and < compare or join the capture itself; write the comparison with .eq(x), .ne(x), .lt(x), .exists() or .isEmpty(), and a string join with .concat(…) (=== and if (v) test the proxy, never the value, and a callback that answers such a boolean is refused JL0109)` | `(v) => v.tab.eq('labels')` |
 | `` (v) => `${v.first} ${v.last}` `` | the same message | `(v) => v.first.concat(' ').concat(v.last)` |
 | `(v) => v.n + 1`, `(v) => v.n < 2` | the same message | `(v) => v.n.add(1)`, `(v) => v.n.lt(2)` |
 
@@ -1547,12 +1557,54 @@ proxy for anything:
   `r.a != r.b` is `true`.
 - `if (v.tab)` is always true.
 
-Each of these tests the proxy itself: `.where(r => r.a == null)` keeps
-no row, and `.check(x => x != null)` accepts everything. Write
+Each of these tests the proxy itself, so a callback that answers the
+result is refused with `JL0109` (§14.10): `.where(r => r.a == null)`
+used to keep no row. A comparison of the bare argument reads nothing and
+is not refused: `.check(x => x != null)` accepts everything. Write
 `v.payload.eq(null)`, `v.payload.exists()`, `v.payload.isEmpty()` or
 `r.a.eq(r.b)`.
 
-### 14.10 The runtime codes
+### 14.10 `JL0109` — a callback answered a JavaScript boolean
+
+The spellings §14.9 cannot trap still leave a trace when the callback
+ANSWERS them: a plain JavaScript boolean, which no captured value could
+have produced. A callback that read its argument — a member, a method, a
+declared parameter, a pen's external or a form rule's context — and
+answered `true` or `false` is refused, naming the constant the document
+would have held. A callback that read nothing answers a deliberate
+constant (`() => true`, `(x) => true`) and is written as one.
+
+| The spelling that trips it | The message | The spelling that works |
+|---|---|---|
+| `(v) => v.payload === null` | `a captured callback read its argument and answered the JavaScript boolean false — ===, !==, !, typeof and == null test the capture proxy, never the value, so the document would hold that constant; write .eq(null), .ne(x), .exists(), .isEmpty() or .not() — a deliberate constant reads nothing: () => true` | `(v) => v.payload.eq(null)` |
+| `(v) => v.n !== 1` | the same message, naming `true` | `(v) => v.n.ne(1)` |
+| `(v) => !v.deleted`, `(v) => Boolean(v.deleted)` | the same message, naming `false` and `true` | `(v) => v.deleted.not()`, `(v) => v.deleted.eq(true)` |
+| `(v) => (v.n.eq(1) ? true : false)` | the same message, naming `true` | `(v) => v.n.eq(1)` |
+| `(v, p) => p.tenant === 'a'` | the same message, naming `false` | `(v, p) => p.tenant.eq('a')` |
+| `orderBy((v) => v.due === null)` | the same message, naming `false` | `orderBy((v) => v.due, { empty: 'least' })`, the items with no `due` first (a key is a number or a string, never a boolean) |
+
+Every pen's callback runs in this capture, so the refusal is the same in
+a schema `check()`, a forms rule, a flow guard, an app action or
+subscription, a JSLT `body()`, a model `compute()` or index condition and
+a migration assertion. What it cannot see still writes a silently wrong
+document, because the callback never answers the boolean itself or never
+read anything:
+- a comparison of the BARE argument reads nothing: `(x) => x != null` is
+  `true` and `(x) => x === undefined` is `false`, exactly as
+  `() => true` is — so §14.9's `.check(x => x != null)` still accepts
+  everything;
+- `&&`, `||` and `?:` answering a capture: `(v) => v.a && v.b` is
+  `"$it.b"`;
+- a boolean a pen helper consumes: `v.a.eq(1).and(v.b === null)` folds
+  `false` into the `$and`, and an app action's `when(x.payload === null, …)`
+  takes a constant condition;
+- a boolean nested in a returned object or array:
+  `select((v) => ({ f: v.a === null }))` writes
+  `{ "$const": { "f": false } }`, and `select((v) => [v.a === null])`
+  answers `[false]` for every item — a nested boolean is
+  indistinguishable from a literal member.
+
+### 14.11 The runtime codes
 
 `JL2001`–`JL2006` are raised while a terminal RUNS. The first three are
 the C# semantics, exactly (§6); the last three are the seam between a
@@ -1767,8 +1819,10 @@ Each of these is a design commitment, checkable in the source:
   per row. This is why a JavaScript operator inside a callback is a trap
   rather than a slow path (§3): `&&`, `||`, `!`, `?:`, `in`, `typeof`,
   `Object.keys`, truthiness and `===` evaluate against the proxy and
-  yield a silently wrong document, while `>`, `<`, `+` and a template
-  literal are refused with `JL0108` (§14.9). Use `.and()`, `.or()`,
+  yield a silently wrong document — unless the callback answers the
+  boolean itself, which is refused with `JL0109` (§14.10) — while `>`,
+  `<`, `+` and a template literal are refused with `JL0108` (§14.9).
+  Use `.and()`, `.or()`,
   `.not()` and the comparison methods.
 - **No second grammar.** The chain emits the published query language
   and nothing else; `toDocument()` is compilable by a bare

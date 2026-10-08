@@ -73,6 +73,29 @@ const kindStack = [];
  * chain checks those bindings when it runs ({@link requireListBindings}).
  * @type {(string[] | null)[]} */
 const listStack = [];
+/** Whether each capture's callback has read its arguments, beside its
+ * epoch ({@link noteRead}): a callback that read them and then answered
+ * a plain JavaScript boolean compared or tested a proxy, which no proxy
+ * can trap, so the capture refuses the constant rather than write it.
+ * @type {boolean[]} */
+const readStack = [];
+
+/**
+ * Record that a capture's callback read one of its arguments: a
+ * string-keyed read of a value proxy (a member, or a method about to be
+ * called), of the parameters proxy, of a pen's externals proxy or of a
+ * forms rule's context — `e.root === null` reads no member of a value, so
+ * those proxies record their own reads. Symbol-keyed reads are the
+ * machinery's (`NODE`, `PARAMETERS`, `Symbol.toPrimitive`) and are never
+ * recorded, and a read of a proxy whose capture has ended records nothing.
+ * @param {number} [epoch] - the capture the read proxy belongs to; by
+ *   default the innermost one, which is the capture a pen's own argument
+ *   proxies are made in
+ */
+export function noteRead(epoch = captureStack[captureStack.length - 1]) {
+  const at = captureStack.indexOf(epoch);
+  if (at !== -1) readStack[at] = true;
+}
 
 /**
  * Whether the innermost capture folds a pure data tree into one `$const`
@@ -894,8 +917,8 @@ function toPrimitive() {
   throw new LinqBuildError('JL0108',
     'a captured expression is not a JavaScript value yet — ==, +, a template literal and < '
     + 'compare or join the capture itself; write the comparison with .eq(x), .ne(x), .lt(x), '
-    + '.exists() or .isEmpty(), and a string join with .concat(…) (and note that === and '
-    + 'if (v) cannot be trapped: they compare or test the proxy, never the value)');
+    + '.exists() or .isEmpty(), and a string join with .concat(…) (=== and if (v) test the '
+    + 'proxy, never the value, and a callback that answers such a boolean is refused JL0109)');
 }
 
 /**
@@ -931,6 +954,7 @@ function makeExpr(doc, epoch, pathable, extra = undefined) {
       // is a coded refusal naming the spelling, not a raw TypeError
       if (prop === Symbol.toPrimitive) return toPrimitive;
       if (typeof prop === 'symbol') return undefined;
+      noteRead(target.epoch);
       const method = METHODS[prop];
       if (method !== undefined) {
         return (...args) => {
@@ -1003,6 +1027,7 @@ function makeParams(declared, epoch) {
     get(_target, prop) {
       if (prop === PARAMETERS) return refuseParameters;
       if (typeof prop === 'symbol') return undefined;
+      noteRead(epoch);
       if (!declared.has(prop)) {
         throw new LinqBuildError('JL0004',
           `parameter '${prop}' is not declared — declare it first: .params({ ${prop}: value })`);
@@ -1022,6 +1047,11 @@ function makeParams(declared, epoch) {
  * aggregates fan over `$g[*]`). Captures nest — a chain built and run
  * inside a callback is ordinary — but a proxy used outside its capture,
  * or an enclosing capture's proxy used inside a nested one, is `JL0002`.
+ * A callback that read its arguments ({@link noteRead}) and answered a
+ * plain JavaScript boolean is `JL0109`, decided before anything converts
+ * the result: `x.a === null`, `!x.a` and `typeof x.a` test the proxy, so
+ * that boolean is the proxy's and never the value's. A callback that read
+ * nothing (`() => true`) answers a deliberate constant.
  * @param {(...roots: any[]) => any} fn - the user callback
  * @param {readonly (string | { doc: any, pathable: boolean, seq?: string,
  *   nav?: any, navOnFan?: boolean })[]} roots
@@ -1045,14 +1075,24 @@ export function captureExpression(fn, roots, declaredParams, fold = true, kind =
   foldStack.push(fold);
   kindStack.push(kind);
   listStack.push(lists);
+  readStack.push(false);
   try {
-    return toExpression(fn(...proxies), fold);
+    const result = fn(...proxies);
+    if (typeof result === 'boolean' && readStack[readStack.length - 1]) {
+      throw new LinqBuildError('JL0109',
+        `a captured callback read its argument and answered the JavaScript boolean ${result} — `
+        + '===, !==, !, typeof and == null test the capture proxy, never the value, so the document '
+        + 'would hold that constant; write .eq(null), .ne(x), .exists(), .isEmpty() or .not() — a '
+        + 'deliberate constant reads nothing: () => true');
+    }
+    return toExpression(result, fold);
   }
   finally {
     captureStack.pop(); // every proxy of this capture is now dead
     foldStack.pop();
     kindStack.pop();
     listStack.pop();
+    readStack.pop();
   }
 }
 

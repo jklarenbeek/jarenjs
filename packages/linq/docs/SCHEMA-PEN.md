@@ -782,13 +782,18 @@ to the codes `packages/linq/src/schema/` throws. The full condition each
 code states across every pen is the binder's,
 [LINQ-FORMAT.md](LINQ-FORMAT.md) §1.3.
 
-The capture every schema callback runs in adds one more refusal, which is
+The capture every schema callback runs in adds two more refusals, which are
 the chain's and listed in QUERY-PEN. In a `check()` callback, `==`, `+`, a
 template literal or `<` over a captured value is `JL0108`
 ([QUERY-PEN.md §14.9](QUERY-PEN.md#149-jl0108--a-capture-converted-to-a-primitive)).
 `=== null`, `== null` (and `!= null`), `==` between two captures and
-truthiness cannot be refused, since they test the proxy and never the
-value. Write `.eq(null)`, `.exists()`, `.isEmpty()` or `a.eq(b)`.
+truthiness test the proxy and never the value, so they are refused with
+`JL0109` when the callback answers them — `check((v, x) => x.root === null)`
+names the constant it would have written
+([QUERY-PEN.md §14.10](QUERY-PEN.md#1410-jl0109--a-callback-answered-a-javascript-boolean));
+a comparison of the bare value reads nothing, so `check((v) => v != null)`
+is still the constant `true`. Write `.eq(null)`, `.exists()`, `.isEmpty()`
+or `a.eq(b)`.
 
 | Code | What this pen raises it for |
 |---|---|

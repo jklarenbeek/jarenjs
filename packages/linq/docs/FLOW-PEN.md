@@ -562,13 +562,16 @@ to the codes `packages/linq/src/flow/` throws. The full condition each
 code states across every pen is the binder's,
 [LINQ-FORMAT.md](LINQ-FORMAT.md) §1.3.
 
-The capture every flow callback runs in adds one more refusal, which is
+The capture every flow callback runs in adds two more refusals, which are
 the chain's and listed in QUERY-PEN. In a guard, effect, node or edge callback, `==`, `+`, a
 template literal or `<` over a captured value is `JL0108`
 ([QUERY-PEN.md §14.9](QUERY-PEN.md#149-jl0108--a-capture-converted-to-a-primitive)).
 `=== null`, `== null` (and `!= null`), `==` between two captures and
-truthiness cannot be refused, since they test the proxy and never the
-value. Write `.eq(null)`, `.exists()`, `.isEmpty()` or `a.eq(b)`.
+truthiness test the proxy and never the value, so they are refused with
+`JL0109` when the callback answers them — `when((s) => s.payload.n === 3)`
+names the constant it would have written
+([QUERY-PEN.md §14.10](QUERY-PEN.md#1410-jl0109--a-callback-answered-a-javascript-boolean)).
+Write `.eq(null)`, `.exists()`, `.isEmpty()` or `a.eq(b)`.
 
 | Code | What this pen raises it for |
 |---|---|
