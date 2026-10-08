@@ -3099,28 +3099,51 @@ nor false for `NULL`, and a comparison alone would visit a null-keyed
 row twice or never. Only mapped columns carry a keyset; a document path
 in the ordering is refused (`JD0032`).
 
+**The row value.** When every term of the identity cannot hold NULL —
+a key column, or a mapped column the catalog declares `NOT NULL`, read
+at open; for a managed entity the key columns only — and every term
+shares one direction, the expansion is spelled as one row value,
+`(k1, k2, pk) > (v1, v2, vpk)` (`<` descending), which is exactly the
+expansion and which an index over the identity can serve as a single
+condition. A term that can hold NULL keeps the expansion, where its
+null branch is spelled — a NULL element would make the row value
+neither true nor false, and such a row would be skipped silently — and
+so do terms whose directions differ (a descending term with the
+ascending key appended). A one-term identity is the plain comparison it
+always was. The identity, the continuation and the `ORDER BY` are the
+same under either form; `explainLoad().sql` shows which was spelled.
+
 **Over a physical table** (§12) the keyset is the same model with one
 identity per term: the continuation names PROPERTIES and carries their
 decoded values, while the SQL names the physical columns and compares
 each as its codec compares. A renamed key column (`item_id` for `id`),
-a composite key and a bigint above 2^53 therefore page without skipping
-or repeating a row, and a primary-key order reports `snapshot: true`.
-On SQLite, integer, bigint and text identities qualify. A text term
-orders and compares by code point (`COLLATE BINARY`) whatever collation
-the column declares — in `load({ orderBy })` exactly as in `execute()`,
-so a NOCASE index cannot serve that order — and every text key a page
-reads must round-trip through the file's text encoding: one that does
-not (malformed UTF-8) refuses `JD0032` before a continuation is built on
-it, where it used to page forever. A nullable text order column's `NULL`
-has no text to prove, and pages by its null placement. Any other codec
-refuses `JD0032` naming it (a `uuid` reads back lowercase whatever the
-table stores, so its decoded value does not compare as the stored one),
-and a PostgreSQL physical keyset refuses naming the dialect until its
-physical comparison is qualified. A view refuses `JD0032` too: it
-enforces no primary key, so two of its rows can share the declared key,
-and a continuation past one would skip the other. `explainLoad()`'s
-`order` names the declared terms by property and appends the key a
-physical table's order ends with.
+a composite key and a bigint above 2^53 (bound as its exact decimal
+string) therefore page without skipping or repeating a row, and a
+primary-key order reports `snapshot: true`. Integer, bigint and text
+identities qualify on both engines, and a native `uuid` column on
+PostgreSQL, whose order is the code-point order of its lowercase text;
+every other codec refuses `JD0032` naming it (on SQLite a `uuid` is
+text that reads back lowercase whatever the table stores, so its
+decoded value does not compare as the stored one). A text term orders
+and compares by code point whatever collation the column declares — in
+`load({ orderBy })` exactly as in `execute()`: on SQLite `COLLATE
+BINARY`, so a NOCASE index cannot serve that order; on PostgreSQL the
+bare column where its collation is a code-point one (`C`, `POSIX`,
+`ucs_basic`, `pg_c_utf8`, or the database default of a libc-provider
+database collated `C` or `POSIX`) and `COLLATE "C"` otherwise, which is
+correct and which no index serves — the price is visible in
+`explainLoad().sql`. On SQLite every text key a page reads must
+round-trip through the file's text encoding: one that does not
+(malformed UTF-8) refuses `JD0032` before a continuation is built on
+it, where it used to page forever, and a nullable text order column's
+`NULL` has no text to prove and pages by its null placement. On
+PostgreSQL no per-row proof runs: a text keyset requires the `UTF8`
+database encoding, read at open, from which the driver returns every
+stored text exactly, and any other encoding refuses `JD0032` naming it.
+A view refuses `JD0032` too: it enforces no primary key, so two of its
+rows can share the declared key, and a continuation past one would skip
+the other. `explainLoad()`'s `order` names the declared terms by
+property and appends the key a physical table's order ends with.
 
 **The continuation** a page emits is unsigned, structural and opaque:
 
@@ -3717,9 +3740,10 @@ Mapped query documents use the qualified native subset in [NATIVE-PLANS](NATIVE-
 Present-null scalar equality/ranges preserve Jaren semantics. Unsupported codecs
 and shapes retain explicit residuals; strict mode also rejects unsupported bound
 externals before fetching rows. Scalar graph loads use mapped names.
-Physical `page` and structural `after` continuations qualify on SQLite for
-integer, bigint and text identities (§10.5); other codecs and PostgreSQL refuse
-`JD0032` by name, and an explicit `take`/`skip` load remains available.
+Physical `page` and structural `after` continuations qualify for integer,
+bigint and text identities on both engines and for a native `uuid` on
+PostgreSQL (§10.5); other codecs refuse `JD0032` by name, and an explicit
+`take`/`skip` load remains available.
 Capture/live/replication for adopted application triggers is not qualified and
 is refused, rather than advertised as a complete change stream. PostgreSQL
 supports explicit native scalar adoption as described below.
@@ -3773,7 +3797,12 @@ supported scalar min/max use the shared native runtime guards; floating sums
 and averages retain decoded evaluation to preserve accumulation order.
 Other scalar shapes retain a
 reported decoded residual or strict refusal. A physical keyset continuation
-remains unqualified on PostgreSQL and refuses `JD0032` naming the dialect. The shared native mutation engine supports bounded update, delete,
+pages integer, bigint, text and uuid identities (§10.5): a text term compares
+as the bare column where its collation is a code-point one and under
+`COLLATE "C"` otherwise, and requires the `UTF8` database encoding, read at
+open. An explicit `orderBy` over a `uuid` column that cannot hold NULL orders
+natively, as `execute()` orders its decoded text; a nullable text or uuid
+column stays refused for the typed path. The shared native mutation engine supports bounded update, delete,
 upsert and same-entity insert-select; returned row/byte overflow rolls back the
 statement and its transactional trigger effects. Exact decimals, bytes and JSON
 use codec-aware changed reporting. Structural SQL through

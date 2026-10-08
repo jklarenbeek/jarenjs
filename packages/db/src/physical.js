@@ -282,6 +282,37 @@ export function physicalRead(column, dialect, prefix = '') {
   return dialect.physicalRead(column.codec, sql);
 }
 
+/**
+ * Whether a mapped column may carry an order, per codec and engine: the
+ * one table an explicit `orderBy` of a load and a keyset term consult.
+ * `explicit` — a load may order by the column, because SQL orders it as
+ * `execute()` orders the decoded value: text (by code point, whatever
+ * collation the column declares), integer, number, boolean, date and
+ * datetime where the dialect compares the column natively
+ * (`nativeQuery`), and a native uuid column (PostgreSQL), whose order is
+ * the code-point order of its lowercase text, under the same nullability
+ * rule; bigint, decimal and epoch-ms order by value in SQL and by their
+ * decoded string in the engine, and stay refused with every other codec.
+ * `keyset` — a continuation's decoded value compares as the stored one:
+ * integer, bigint (an exact decimal string), text, and a native uuid;
+ * SQLite stores a uuid as text, whose decoded lowercase value need not
+ * compare as the stored spelling. The planner's typed-path rule
+ * (`entityShape`) admits the same codecs to native predicates and is not
+ * widened here: a native uuid compared against a literal of another case
+ * would match where the engine does not.
+ * @param {any} column - a mapped column, as the open qualified it
+ * @param {any} dialect
+ * @returns {{ explicit: boolean, keyset: boolean }}
+ */
+export function physicalOrderable(column, dialect) {
+  const nativeUuid = column.codec === 'uuid' && dialect.name !== 'sqlite';
+  const typed = ['text', 'integer', 'number', 'boolean', 'date', 'datetime'].includes(column.codec) && column.nativeQuery !== false;
+  return {
+    explicit: typed || (nativeUuid && column.null !== 'null'),
+    keyset: ['integer', 'bigint', 'text'].includes(column.codec) || nativeUuid,
+  };
+}
+
 /** The fields at which an installed program departs from the planned one.
  * @param {any} want @param {any} have @param {string} [at] @returns {string[]} */
 function programDifferences(want, have, at = '') {
@@ -345,6 +376,10 @@ export function verifyRulePrograms(connection, table, triggers, fail, { installe
 /** Verify an existing mapped object without executing DDL: its columns, its
  * declared indexes and its rule programs. Unmapped columns and all
  * application-owned programs remain physical facts, never inferred drops.
+ * What the catalog declares of a column is recorded on the column itself,
+ * which every reader of the mapping shares: whether it can hold NULL
+ * (`notNull`), and the database's text encoding (`databaseEncoding`)
+ * where the dialect reads the database's own catalog row.
  * @param {any} connection @param {any} mapping @param {any} schema @returns {any} */
 export function verifyPhysical(connection, mapping, schema) {
   const fail = (why) => { throw new DbCompileError('JD0002', `physical '${mapping.table}': ${why}`); };
@@ -366,6 +401,9 @@ export function verifyPhysical(connection, mapping, schema) {
     ? useStatementOnce(connection, connection.dialect.introspect.columns(mapping.table), (s) =>
       chain(s.all([]), (columns) => ({ columns: columns.map((c) => ({ ...c, generated: !!c.hidden })), primaryKey: [] })))
     : schema.tables.find((t) => t.name === mapping.table);
+  // the database's own row of its catalog, where the dialect reads one
+  // (PostgreSQL): its text encoding, default collation and locale provider
+  const database = schema.catalog?.find((o) => o.type === 'schema')?.metadata ?? null;
   return chain(programs, () => chain(read, (table) => {
     if (mapping.kind !== 'view' && JSON.stringify(table.primaryKey) !== JSON.stringify(mapping.keys.map((k) => mapping.columns.find((c) => c.name === k).physical))) fail('ordered primary key disagrees');
     for (const column of mapping.columns) {
@@ -374,7 +412,12 @@ export function verifyPhysical(connection, mapping, schema) {
       const type = actual.type.toUpperCase();
       if (!connection.dialect.physicalTypeMatches(column.codec, type)) fail(`'${column.physical}' type ${type} cannot guarantee codec ${column.codec}`);
       if (mapping.kind !== 'view' && actual.generated !== column.generated) fail(`'${column.physical}' generated ownership disagrees`);
-      connection.dialect.qualifyPhysicalColumn?.(column, actual, mapping.kind);
+      // a column the catalog declares NOT NULL compares inside a row value (a
+      // keyset seek) whatever null policy the model declares; a text column's
+      // stored bytes decode exactly only from a UTF8 database
+      column.notNull = actual.nullable === false;
+      if (database !== null) column.databaseEncoding = typeof database.encoding === 'string' ? database.encoding : null;
+      connection.dialect.qualifyPhysicalColumn?.(column, actual, mapping.kind, database);
     }
     return mapping.kind === 'view' ? null : verifyDeclaredIndexes(connection, mapping.declaredIndexes ?? [], table.indexes ?? [], fail);
   }));

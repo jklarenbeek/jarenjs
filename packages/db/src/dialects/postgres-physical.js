@@ -43,9 +43,17 @@ export function postgresPhysicalRead(codec, sql) {
 }
 
 /** JSON-facing comparable scalars retain shared boolean and codepoint meaning.
- * @param {string} codec @param {string} sql @returns {string} */
-export function postgresPhysicalCompare(codec, sql) {
+ * A term a load orders or seeks by passes its mapping column, and compares as
+ * the bare column where that orders alike and seeks the column's index: a
+ * uuid, whose native order is the code-point order of its lowercase text,
+ * and a text column collated by code point (`codePointText`); `COLLATE "C"`
+ * over a text column of another collation is correct and cannot seek. A
+ * predicate, join edge or grouping passes no column: two code-point columns
+ * of different collations compared bare resolve no collation.
+ * @param {string} codec @param {string} sql @param {any} [column] @returns {string} */
+export function postgresPhysicalCompare(codec, sql, column = undefined) {
   if (codec === 'boolean') return postgresPhysicalRead(codec, sql);
+  if (column !== undefined && (codec === 'uuid' || (codec === 'text' && column.codePointText === true))) return sql;
   if (['text', 'datetime', 'uuid'].includes(codec)) return `((${sql})::text COLLATE "C")`;
   return sql;
 }
@@ -69,8 +77,10 @@ export function postgresPhysicalDifferent(codec, left, right) {
 }
 
 /** Attach only verified native storage restrictions to the compiled mapping.
- * @param {any} column @param {any} actual @param {string} kind */
-export function qualifyPostgresPhysicalColumn(column, actual, kind) {
+ * @param {any} column @param {any} actual @param {string} kind
+ * @param {any} [database] - the catalog's row of the database: its default
+ *   collation and locale provider */
+export function qualifyPostgresPhysicalColumn(column, actual, kind, database = undefined) {
   const fail = (reason) => { throw new DbCompileError('JD0002', `physical column '${column.physical}': ${reason}`); };
   const type = actual.type.toUpperCase();
   if (column.declaredType !== undefined && column.declaredType.toUpperCase() !== type)
@@ -88,6 +98,17 @@ export function qualifyPostgresPhysicalColumn(column, actual, kind) {
   }
   if (column.codec === 'local-timestamp' || column.codec === 'instant')
     column.fractionDigits = Number(/^TIMESTAMP\(([0-6])\)/.exec(type)?.[1] ?? 6);
+  // a text column orders by code point where its collation is one — C,
+  // POSIX, the builtin ucs_basic and pg_c_utf8, or the database default of
+  // a libc provider collated C or POSIX; a builtin- or ICU-provider default
+  // is not known to be (the catalog row carries no locale) and compares
+  // under COLLATE "C" — so a term a load orders or seeks by may address
+  // the bare column, which the column's index serves
+  if (column.codec === 'text') {
+    const collation = actual.native?.collation ?? null;
+    column.codePointText = ['C', 'POSIX', 'ucs_basic', 'pg_c_utf8'].includes(collation)
+      || (collation === 'default' && database?.localeProvider === 'c' && ['C', 'POSIX'].includes(database.collation));
+  }
   // Native typed projections and predicates are independently qualified. The
   // decoded evaluator remains exact for every codec and reports its residual.
   column.nativeQuery = ['text', 'integer', 'number', 'boolean'].includes(column.codec) && column.null !== 'null';

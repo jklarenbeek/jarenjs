@@ -10,8 +10,9 @@
  */
 
 import { DatabaseSync } from 'node:sqlite';
-import { chain, rtreeDdl } from '@jarenjs/db';
-import { adaptNodeDatabase } from '@jarenjs/db/node';
+import { chain, rtreeDdl, openStore } from '@jarenjs/db';
+import { adaptNodeDatabase, nodeDriver } from '@jarenjs/db/node';
+import { compareCodePoints } from '@jarenjs/core/string';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -188,6 +189,124 @@ export function removeTempDirectory(dir, remove = fs.rmSync,
 export function tempDbPath() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jaren-db-'));
   return { dbPath: path.join(dir, 'store.db'), cleanup: () => removeTempDirectory(dir) };
+}
+
+/**
+ * Open an adopted store over a fresh SQLite file prepared by `ddl`.
+ * @param {string} ddl @param {Record<string, any>} entities
+ * @returns {Promise<{ store: any, dbPath: string, close: () => Promise<void> }>}
+ */
+export async function adopted(ddl, entities) {
+  const { dbPath, cleanup } = tempDbPath();
+  const db = new DatabaseSync(dbPath);
+  db.exec(ddl);
+  db.close();
+  const store = await openStore({ $model: '0.1', entities }, { driver: nodeDriver(), path: dbPath, adopt: true });
+  return { store, dbPath, close: async () => { await store.close(); cleanup(); } };
+}
+
+/** How many schemas this process has created on the PostgreSQL server. */
+let postgresSchemas = 0;
+
+/**
+ * The PostgreSQL twin of {@link adopted}: a schema of this test's own on
+ * the server `JAREN_PG_URL` names, prepared by `ddl` with that schema as
+ * the search path, every entity's layout qualified by it, and a pool of
+ * at most two connections the store opens on (a test's own statements
+ * share it); `close` drops the schema. `adopt: false` lets the store
+ * create managed tables; `open` wraps the driver's open, for a test that
+ * scripts what the catalog answers; `statements` collects the text of
+ * every statement any session sends, the test's own included.
+ * @param {string} ddl @param {Record<string, any>} entities
+ * @param {{ label?: string, adopt?: boolean, statements?: string[],
+ *   open?: (open: (...args: any[]) => any) => (...args: any[]) => any }} [options]
+ * @returns {Promise<{ store: any, schema: string, pool: any, close: () => Promise<void> }>}
+ */
+export async function adoptedPostgres(ddl, entities, { label = 'keyset', adopt = true, statements = undefined, open = undefined } = {}) {
+  const { default: pg } = await import('pg');
+  const { postgresDriver } = await import('@jarenjs/db/postgres');
+  const schema = `jaren_${label}_${process.pid}_${++postgresSchemas}`;
+  const pool = new pg.Pool({ connectionString: process.env.JAREN_PG_URL, max: 2 });
+  if (statements !== undefined) {
+    pool.on('connect', (/** @type {any} */ client) => {
+      const query = client.query.bind(client);
+      client.query = (/** @type {any[]} */ ...args) => {
+        statements.push(typeof args[0] === 'string' ? args[0] : String(args[0]?.text ?? ''));
+        return query(...args);
+      };
+    });
+  }
+  const drop = async () => {
+    await pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`).catch(() => {});
+    await pool.end();
+  };
+  let store;
+  try {
+    const client = await pool.connect();
+    try {
+      await client.query(`CREATE SCHEMA "${schema}"`);
+      if (ddl.trim() !== '') {
+        await client.query(`SET search_path TO "${schema}"`);
+        await client.query(ddl);
+      }
+    }
+    finally {
+      await client.query('RESET search_path').catch(() => {});
+      client.release();
+    }
+    const qualified = Object.fromEntries(Object.entries(entities).map(([name, entity]) => [name,
+      entity.physical === undefined ? entity : { ...entity, physical: { schema, ...entity.physical } }]));
+    const base = postgresDriver(pool, { schema });
+    const driver = open === undefined ? base : { ...base, open: open((...args) => base.open(...args)) };
+    store = await openStore({ $model: '0.1', entities: qualified }, { driver, adopt });
+  }
+  catch (error) {
+    await drop();
+    throw error;
+  }
+  return { store, schema, pool, close: async () => { await store.close(); await drop(); } };
+}
+
+/**
+ * Every page of `spec` at `limit`, following continuations.
+ * @param {any} set @param {any} spec @param {number} limit
+ * @returns {Promise<{ items: any[], snapshots: boolean[] }>}
+ */
+export async function everyPage(set, spec, limit) {
+  const items = [];
+  const snapshots = [];
+  /** @type {any} */
+  let after;
+  for (let pages = 0; pages < 100; pages++) {
+    const page = await set.page(spec, { limit, ...(after === undefined ? {} : { after }) });
+    items.push(...page.items);
+    snapshots.push(page.snapshot);
+    if (!page.hasMore) return { items, snapshots };
+    after = page.continuation;
+  }
+  throw new Error('a hundred pages: the continuation does not advance');
+}
+
+/**
+ * The order the engine gives decoded key values — code point for a
+ * string (a text key, a uuid's lowercase text), BigInt for a bigint's
+ * decimal string, numeric otherwise — over the keys in their declared
+ * order: the oracle a page sequence over the key must equal.
+ * @param {{ property: string, codec: string }[]} keys
+ * @returns {(a: any, b: any) => number}
+ */
+export function keyComparator(keys) {
+  const one = (/** @type {string} */ codec, /** @type {any} */ a, /** @type {any} */ b) => {
+    if (codec === 'bigint') return BigInt(a) < BigInt(b) ? -1 : BigInt(a) > BigInt(b) ? 1 : 0;
+    return typeof a === 'string' ? compareCodePoints(a, b) : a - b;
+  };
+  return (a, b) => {
+    for (const { property, codec } of keys) {
+      const order = one(codec, a[property], b[property]);
+      if (order !== 0) return order;
+    }
+    return 0;
+  };
 }
 
 /**

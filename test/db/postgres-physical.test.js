@@ -106,10 +106,14 @@ describe('PostgreSQL physical adoption', { skip: !url && 'JAREN_PG_URL is not se
         throw new Error('withdraw');
       }), /withdraw/);
       assert.ok(await target.get(1));
-      // a keyset continuation over a physical table is SQLite's physical
-      // comparison until PostgreSQL's applies: refused, naming the dialect
-      await assert.rejects(target.page({}, { limit: 2 }),
-        (/** @type {any} */ error) => error.code === 'JD0032' && /not qualified on postgres/.test(error.message));
+      // a keyset continuation over a physical table compares its decoded
+      // values as the stored ones on PostgreSQL as on SQLite: an integer
+      // key pages, and the continuation resumes exactly
+      const first = await target.page({}, { limit: 2 });
+      assert.deepEqual(first.items.map((/** @type {any} */ item) => item.id), [1, 2]);
+      assert.equal(first.hasMore, true);
+      assert.deepEqual((await target.page({}, { limit: 2, after: first.continuation })).items.map((/** @type {any} */ item) => item.id), [3]);
+      assert.equal((await target.explainLoad({ after: first.continuation })).pagination, 'keyset');
       assert.equal((await target.load({ orderBy: '$it.id' })).length, 3, 'an ordered load without a continuation still answers');
     }
     finally { await store?.close(); await pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`); await pool.end(); }
@@ -176,7 +180,10 @@ describe('PostgreSQL physical adoption', { skip: !url && 'JAREN_PG_URL is not se
       assert.equal((await store.entity('Record').get(input)).active, false);
       await assert.rejects(store.entity('Record').update(input, { amount: '1.1234567' }), { code: 'JD2003' });
       assert.equal((await store.entity('Record').get(input)).amount, input.amount);
-      await assert.rejects(store.entity('Record').page({}, { limit: 1 }), /keyset continuation is not qualified/);
+      // a (bigint, uuid) key pages: the bigint bound as its decimal string, the uuid as the native column
+      const page = await store.entity('Record').page({}, { limit: 1 });
+      assert.deepEqual(page.items.map((/** @type {any} */ row) => `${row.sequence}/${row.owner}`), [`${input.sequence}/${input.owner}`]);
+      assert.equal(page.hasMore, false);
     }
     finally {
       await store?.close();

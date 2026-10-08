@@ -84,6 +84,28 @@ snapshot is the engine's answer. The price: a top-level `$and` of more than 128
 or native `mutate()` above the bound that ran before is refused. SQLite has no
 JIT and sets no bound.
 
+A physical keyset page compares its continuation as the stored values on
+PostgreSQL as on SQLite — integer, bigint (bound as its exact decimal string,
+which the server types from the column), text, and a native `uuid` column,
+whose order is the code-point order of its lowercase text — and an identity
+of NOT NULL terms in one direction compares as one row value
+([MODEL-FORMAT §10.5](MODEL-FORMAT.md#105-pagination)), which the key's index
+serves as its condition. A text term is the bare column where its collation
+is a code-point one (`C`, `POSIX`, `ucs_basic`, `pg_c_utf8`, or the database
+default of a libc-provider database collated `C` or `POSIX`) and
+`((column)::text COLLATE "C")` otherwise: correct, and served by no index, as
+`explainLoad().sql` shows; a builtin- or ICU-provider database default takes
+that branch, because the catalog row the open reads carries no locale.
+Predicates, join edges and grouping keep `COLLATE "C"` over every text column,
+since two code-point columns of different collations compared bare resolve no
+collation. What does not seek: the page's `ORDER BY` spells the identity's
+null placement (`ASC NULLS FIRST`), which is not the order an ascending index
+provides, so the rows past the row value are sorted rather than read in index
+order. A text keyset requires the `UTF8` database encoding, read at open — no
+per-row byte proof runs here — and refuses `JD0032` naming any other. An
+explicit `orderBy` over a nullable text or uuid column stays refused, as every
+nullable column is for the typed path.
+
 ## The writer lock and the lock family
 
 `store.transaction(fn, { mode: 'immediate' })` runs `BEGIN`, then takes the

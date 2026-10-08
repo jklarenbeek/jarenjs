@@ -9,50 +9,18 @@
  * key proves per row that it round-trips through the file's text
  * encoding, and a codec whose decoded value does not compare as its
  * stored one (uuid) is refused by name. An ordered `load()` and
- * `execute()` order a text column the same way: by code point.
+ * `execute()` order a text column the same way: by code point. An
+ * identity of NOT NULL terms in one direction compares as a row value,
+ * which the key's index seeks; a term that can hold NULL, or directions
+ * that differ, keep the null-aware expansion.
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 
-import { openStore } from '@jarenjs/db';
-import { nodeDriver } from '@jarenjs/db/node';
-import { tempDbPath } from './helpers.js';
+import { adopted, everyPage, keyComparator } from './helpers.js';
 
 const key = { 'x-entity': { key: true } };
-
-/**
- * Open an adopted store over a fresh file prepared by `ddl`.
- * @param {string} ddl @param {Record<string, any>} entities
- */
-async function adopted(ddl, entities) {
-  const { dbPath, cleanup } = tempDbPath();
-  const db = new DatabaseSync(dbPath);
-  db.exec(ddl);
-  db.close();
-  const store = await openStore({ $model: '0.1', entities }, { driver: nodeDriver(), path: dbPath, adopt: true });
-  return { store, dbPath, close: async () => { await store.close(); cleanup(); } };
-}
-
-/**
- * Every page of `spec` at `limit`, following continuations.
- * @param {any} set @param {any} spec @param {number} limit
- * @returns {Promise<{ items: any[], snapshots: boolean[] }>}
- */
-async function everyPage(set, spec, limit) {
-  const items = [];
-  const snapshots = [];
-  /** @type {any} */
-  let after;
-  for (let pages = 0; pages < 100; pages++) {
-    const page = await set.page(spec, { limit, ...(after === undefined ? {} : { after }) });
-    items.push(...page.items);
-    snapshots.push(page.snapshot);
-    if (!page.hasMore) return { items, snapshots };
-    after = page.continuation;
-  }
-  throw new Error('a hundred pages: the continuation does not advance');
-}
 
 describe('a keyset page over a physical table', () => {
   it('a renamed integer key: every row once, snapshot', async () => {
@@ -229,6 +197,150 @@ describe('a keyset page over a physical table', () => {
         (/** @type {any} */ error) => error.code === 'JD0032' && /'id' is a uuid column/.test(error.message));
       // reading every row without a continuation is unaffected
       assert.equal((await store.entity('Token').load({})).length, 3);
+    }
+    finally { await close(); }
+  });
+});
+
+describe('a keyset page over a physical table seeks as a row value', () => {
+  it('every page sequence equals the oracle for limits 1, 2, 3 and 7 over integer, bigint, text and (bigint, text) keys', async () => {
+    const { store, close } = await adopted(
+      'CREATE TABLE item(item_id INTEGER PRIMARY KEY, label TEXT); '
+      + "INSERT INTO item VALUES (5, 'e'), (1, 'a'), (3, 'c'), (2, 'b'), (4, 'd'), (-7, 'z'); "
+      + 'CREATE TABLE big(id INTEGER PRIMARY KEY); '
+      + 'INSERT INTO big VALUES (9007199254740993), (1), (9007199254740994), (-9223372036854775808), (0); '
+      + 'CREATE TABLE word(w TEXT COLLATE NOCASE PRIMARY KEY); '
+      + "INSERT INTO word VALUES ('b'), ('A'), ('é'), ('a2'), ('B2'), ('😀'), ('z'), ('￿'), (''); "
+      + 'CREATE TABLE pair(a TEXT NOT NULL, b INTEGER NOT NULL, PRIMARY KEY (b, a)) WITHOUT ROWID; '
+      + "INSERT INTO pair VALUES ('x', 9007199254740993), ('y', 9007199254740993), ('x', 9007199254740994), "
+      + "('x', 1), ('z', -9223372036854775808), ('', 1);",
+      {
+        Item: { schema: { type: 'object', properties: { id: { type: 'integer', ...key }, name: { type: 'string' } } },
+          physical: { table: 'item', columns: { id: { name: 'item_id', codec: 'integer', null: 'reject' },
+            name: { name: 'label', codec: 'text', null: 'null' } } } },
+        Big: { schema: { type: 'object', properties: { id: { type: 'string', ...key } } },
+          physical: { table: 'big', columns: { id: { name: 'id', codec: 'bigint', null: 'reject' } } } },
+        Word: { schema: { type: 'object', properties: { id: { type: 'string', ...key } } },
+          physical: { table: 'word', columns: { id: { name: 'w', codec: 'text', null: 'reject' } } } },
+        Pair: { schema: { type: 'object', properties: { name: { type: 'string', ...key }, sequence: { type: 'string', ...key } } },
+          physical: { table: 'pair', keys: ['sequence', 'name'], columns: {
+            name: { name: 'a', codec: 'text', null: 'reject' }, sequence: { name: 'b', codec: 'bigint', null: 'reject' } } } },
+      });
+    try {
+      for (const [name, keys] of /** @type {[string, { property: string, codec: string }[]][]} */ ([
+        ['Item', [{ property: 'id', codec: 'integer' }]],
+        ['Big', [{ property: 'id', codec: 'bigint' }]],
+        ['Word', [{ property: 'id', codec: 'text' }]],
+        ['Pair', [{ property: 'sequence', codec: 'bigint' }, { property: 'name', codec: 'text' }]],
+      ])) {
+        const set = store.entity(name);
+        // the oracle: the rows the engine answers, in the order it gives their decoded keys
+        const oracle = (await store.execute({ $for: { it: `$.${name}[*]` }, $return: '$it' }, { pushdown: false }))
+          .sort(keyComparator(keys));
+        assert.ok(oracle.length >= 5, name);
+        for (const limit of [1, 2, 3, 7]) {
+          const { items, snapshots } = await everyPage(set, {}, limit);
+          assert.deepEqual(items, oracle, `${name} limit ${limit}`);
+          assert.ok(snapshots.every(Boolean), `${name}: a key order is a snapshot`);
+        }
+        const first = await set.page({}, { limit: 1 });
+        assert.equal((await set.explainLoad({ after: first.continuation })).pagination, 'keyset');
+      }
+      // exact: code point orders U+FFFF before an astral character, where UTF-16 units would not
+      assert.deepEqual((await everyPage(store.entity('Word'), {}, 2)).items.map((row) => row.id),
+        ['', 'A', 'B2', 'a2', 'b', 'z', 'é', '￿', '😀']);
+      // the composite key compares as ONE row value: both terms are key columns, ascending
+      const pair = store.entity('Pair');
+      const plan = await pair.explainLoad({ after: (await pair.page({}, { limit: 2 })).continuation });
+      assert.match(plan.sql, /WHERE \("r"\."b", \("r"\."a" COLLATE BINARY\)\) > \(\?, \?\) ORDER BY "r"\."b" ASC NULLS FIRST, \("r"\."a" COLLATE BINARY\) ASC NULLS FIRST$/);
+      // a one-term identity is the plain comparison it always was
+      const item = store.entity('Item');
+      assert.match((await item.explainLoad({ after: (await item.page({}, { limit: 2 })).continuation })).sql,
+        /WHERE \("r"\."item_id" > \?\) ORDER BY "r"\."item_id" ASC NULLS FIRST$/);
+    }
+    finally { await close(); }
+  });
+
+  it('at 95% depth over 200,000 rows the page statement seeks the primary key (SEARCH, never SCAN)', async () => {
+    const { store, dbPath, close } = await adopted(
+      'CREATE TABLE pair(a TEXT NOT NULL, b INTEGER NOT NULL, label TEXT, PRIMARY KEY (b, a)) WITHOUT ROWID; '
+      + 'WITH RECURSIVE g(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM g WHERE n < 200000) '
+      + "INSERT INTO pair SELECT hex(randomblob(4)), n / 10, 'x' FROM g; ANALYZE;",
+      { Pair: { schema: { type: 'object', properties: { name: { type: 'string', ...key }, seq: { type: 'integer', ...key }, label: { type: 'string' } } },
+        physical: { table: 'pair', keys: ['seq', 'name'], columns: {
+          name: { name: 'a', codec: 'text', null: 'reject' }, seq: { name: 'b', codec: 'integer', null: 'reject' },
+          label: { name: 'label', codec: 'text', null: 'null' } } } } });
+    try {
+      const set = store.entity('Pair');
+      const first = await set.page({}, { limit: 10 });
+      assert.deepEqual(first.continuation.order, [{ column: 'seq', desc: false, nullsFirst: true }, { column: 'name', desc: false, nullsFirst: true }]);
+      // 95% of the way down the key, and the statement's plan with the continuation's values written out in identity order
+      const deep = { ...first.continuation, key: { seq: 19000, name: '8' } };
+      const plan = await set.explainLoad({ after: deep });
+      assert.equal(plan.pagination, 'keyset');
+      assert.match(plan.sql, /WHERE \("r"\."b", \("r"\."a" COLLATE BINARY\)\) > \(\?, \?\) ORDER BY/);
+      const raw = new DatabaseSync(dbPath);
+      try {
+        const steps = raw.prepare(`EXPLAIN QUERY PLAN ${plan.sql}`).all(19000, '8').map((row) => String(row.detail));
+        assert.ok(steps.some((step) => step.startsWith('SEARCH r USING PRIMARY KEY')), steps.join(' | '));
+        assert.ok(!steps.some((step) => step.startsWith('SCAN')), steps.join(' | '));
+      }
+      finally { raw.close(); }
+      const page = await set.page({}, { limit: 10, after: deep });
+      assert.equal(page.items.length, 10);
+      assert.ok(page.items.every((row) => row.seq > 19000 || (row.seq === 19000 && row.name > '8')));
+    }
+    finally { await close(); }
+  });
+
+  it('a non-key term keeps the expansion where its column can hold NULL or the directions differ, and joins the row value where the catalog declares it NOT NULL', async () => {
+    const { store, close } = await adopted(
+      'CREATE TABLE item(item_id INTEGER PRIMARY KEY, label TEXT, rank INTEGER NOT NULL); '
+      + "INSERT INTO item VALUES (1, 'b', 2), (2, 'a', 2), (3, 'c', 1);",
+      { Item: { schema: { type: 'object', properties: { id: { type: 'integer', ...key }, name: { type: 'string' }, rank: { type: 'integer' } } },
+        physical: { table: 'item', columns: { id: { name: 'item_id', codec: 'integer', null: 'reject' },
+          name: { name: 'label', codec: 'text', null: 'reject' }, rank: { name: 'rank', codec: 'integer', null: 'null' } } } } });
+    try {
+      const set = store.entity('Item');
+      const resumed = async (/** @type {any} */ spec) => set.explainLoad({ ...spec, after: (await set.page(spec, { limit: 1 })).continuation });
+      // declared `reject`, but the catalog lets the column hold NULL: a row value would skip a stray NULL silently, so the expansion stays
+      assert.match((await resumed({ orderBy: '$it.name' })).sql,
+        /WHERE \(\("r"\."label" COLLATE BINARY\) > \? OR \(\("r"\."label" COLLATE BINARY\) = \? AND "r"\."item_id" > \?\)\)/);
+      // the catalog's NOT NULL is the fact, whatever policy the model declares: a row value
+      assert.match((await resumed({ orderBy: '$it.rank' })).sql,
+        /WHERE \("r"\."rank", "r"\."item_id"\) > \(\?, \?\) ORDER BY "r"\."rank" ASC NULLS FIRST, "r"\."item_id" ASC NULLS FIRST$/);
+      // the appended key ascends: a descending term makes the directions differ, and the expansion stays
+      const descending = (await resumed({ orderBy: { $key: '$it.rank', $dir: 'desc' } })).sql;
+      assert.match(descending, /"r"\."rank" < \?/);
+      assert.match(descending, /"r"\."rank" = \? AND "r"\."item_id" > \?/);
+      assert.doesNotMatch(descending, /\("r"\."rank", /);
+      for (const [spec, expected] of /** @type {[any, number[]][]} */ ([
+        [{ orderBy: '$it.name' }, [2, 1, 3]],
+        [{ orderBy: '$it.rank' }, [3, 1, 2]],
+        [{ orderBy: { $key: '$it.rank', $dir: 'desc' } }, [1, 2, 3]],
+      ])) {
+        for (const limit of [1, 2, 3]) {
+          const { items } = await everyPage(set, spec, limit);
+          assert.deepEqual(items.map((row) => row.id), expected, `${JSON.stringify(spec)} limit ${limit}`);
+        }
+      }
+    }
+    finally { await close(); }
+  });
+
+  it('an explicit orderBy over a bigint column stays refused: SQL orders it by value, the engine its decoded string by code point', async () => {
+    const { store, close } = await adopted(
+      'CREATE TABLE big(id INTEGER PRIMARY KEY, n INTEGER NOT NULL); INSERT INTO big VALUES (9007199254740993, 1), (10, 2), (9, 3);',
+      { Big: { schema: { type: 'object', properties: { id: { type: 'string', ...key }, n: { type: 'integer' } } },
+        physical: { table: 'big', columns: { id: { name: 'id', codec: 'bigint', null: 'reject' }, n: { name: 'n', codec: 'integer', null: 'reject' } } } } });
+    try {
+      const set = store.entity('Big');
+      await assert.rejects(set.load({ orderBy: '$it.id' }),
+        (/** @type {any} */ error) => error.code === 'JD0032' && /orderBy must address typed entity paths/.test(error.message));
+      // the key still pages in key order, by value
+      assert.deepEqual((await everyPage(set, {}, 2)).items.map((row) => row.id), ['9', '10', '9007199254740993']);
+      // and the engine orders the decoded string by code point, which is why the two cannot be one order
+      assert.deepEqual(await store.execute({ $for: { it: '$.Big[*]' }, $orderby: ['$it.id'], $return: '$it.id' }), ['10', '9', '9007199254740993']);
     }
     finally { await close(); }
   });

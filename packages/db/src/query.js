@@ -37,7 +37,7 @@
  * the whole document runs over them.
  */
 
-import { physicalSelection, columnCodec, textKeyPlan, textKeyDecoding, checkTextKeys } from './physical.js';
+import { physicalSelection, columnCodec, textKeyPlan, textKeyDecoding, checkTextKeys, physicalOrderable } from './physical.js';
 
 import { createSemanticCache } from '@jarenjs/core/cache';
 import { analyzeQuery, JsonQueryRuntimeError, renderQueryMessage } from '@jarenjs/json/query';
@@ -2495,6 +2495,25 @@ export function createLoadEngine(context, entityName) {
     return { ...node, where: conjoin(node.where, predicate) };
   };
 
+  /**
+   * The planner's shape of an entity, with the mapped columns a load may
+   * order by admitted: a column the planner keeps out of native predicates
+   * (`unsafe` — a native uuid compared against a literal of another case
+   * would match where the engine does not) still orders a load where SQL
+   * orders the column as the engine orders its decoded value, which
+   * {@link physicalOrderable} answers per codec and engine. Predicates
+   * keep the planner's own shape.
+   * @param {any} shape
+   */
+  const orderableShape = (shape) => {
+    const entityFlavors = new Map();
+    for (const [canonical, flavor] of shape.entityFlavors) {
+      entityFlavors.set(canonical, flavor.unsafe === true && flavor.codecColumn !== undefined
+        && physicalOrderable(flavor.codecColumn, dialect).explicit ? { ...flavor, unsafe: false } : flavor);
+    }
+    return { ...shape, entityFlavors };
+  };
+
   const compileOrder = (orderBy, entity, path) => {
     const specs = Array.isArray(orderBy) ? orderBy : [orderBy];
     const wrapper = { $for: { it: '$[*]' }, $orderby: specs, $return: '$it' };
@@ -2509,7 +2528,7 @@ export function createLoadEngine(context, entityName) {
     }
     const flwor = analysis.root;
     const slot = flwor.forBindings[0].slot;
-    const shape = entityShape(entity, mapping.entities[entity.name]);
+    const shape = orderableShape(entityShape(entity, mapping.entities[entity.name]));
     const terms = [];
     for (const spec of flwor.orderby.specs) {
       const ref = entityPathRef(spec.key, slot, shape);
@@ -2869,9 +2888,11 @@ export function createLoadEngine(context, entityName) {
 
     // pagination: keyset beats a growing OFFSET; the choice is reported,
     // never silent. A scalar `after` is the single unique-column keyset;
-    // a structural one — or a page — is the composite keyset: the
-    // lexicographic expansion over the declared terms with the primary
-    // key appended, null placement agreeing with the ORDER BY (§10.5)
+    // a structural one — or a page — is the composite keyset over the
+    // declared terms with the primary key appended: one row value where
+    // every term cannot hold NULL and shares one direction, which the
+    // key's index seeks, else the lexicographic expansion with null
+    // placement agreeing with the ORDER BY (§10.5)
     let pagination = 'none';
     const order = tree.order ?? [];
     const after = spec?.after === null ? undefined : spec?.after;
@@ -2892,19 +2913,29 @@ export function createLoadEngine(context, entityName) {
     /**
      * What a term compares and orders by: its physical column, compared as
      * its codec compares — a mapped text column in codepoint order whatever
-     * collation the table declared, the order `execute()` gives it.
+     * collation the table declared, the order `execute()` gives it. The
+     * column itself goes with the comparison: a dialect may spell the bare
+     * column for a term a load orders or seeks by (a native uuid, a text
+     * column collated by code point), which no predicate, join edge or
+     * grouping asks for.
      * @param {string} property
      */
     const termSql = (property) => {
       const column = columnOfProperty(property);
       const sql = `${rendered.aliasSql}.${q(column?.physical ?? column?.name ?? property)}`;
-      return physicalEntity && column !== undefined ? physicalComparable(column, sql, dialect) : sql;
+      return physicalEntity && column !== undefined ? physicalComparable(column, sql, dialect, column) : sql;
     };
+    // the per-row proof that a text key survives its text encoding is
+    // SQLite's (textKeyPlan reads the raw bytes beside the key): a typed
+    // engine returns UTF8 text exactly, and its encoding is checked at open
+    const provesTextBytes = physicalEntity && dialect.name === 'sqlite';
     /**
      * A keyset over a physical table is qualified where a continuation's
-     * DECODED values compare as the stored ones do: on SQLite, over
-     * integer, bigint and text columns (a text key additionally proves it
-     * round-trips, per row). Anything else is refused by name.
+     * DECODED values compare as the stored ones do: over integer, bigint
+     * and text columns, and a native uuid column (physicalOrderable). A
+     * text key proves it round-trips per row on SQLite; where no such
+     * proof runs, the database's encoding must be UTF8, from which every
+     * stored text decodes exactly. Anything else is refused by name.
      * @param {string[]} properties
      */
     const requirePhysicalKeyset = (properties) => {
@@ -2916,17 +2947,17 @@ export function createLoadEngine(context, entityName) {
           + 'primary key, so two rows can share the declared key and a page past one would skip '
           + 'the other — load the view whole, or page the table it reads', []);
       }
-      if (dialect.name !== 'sqlite') {
-        throw refuse(`a physical keyset continuation is not qualified on ${dialect.name}: its `
-          + 'continuation values are compared in code-point and int64 order, which only the SQLite '
-          + 'physical comparison applies', []);
-      }
       for (const property of properties) {
         const column = columnOfProperty(property);
-        if (!['integer', 'bigint', 'text'].includes(column?.codec)) {
+        if (column === undefined || !physicalOrderable(column, dialect).keyset) {
           throw refuse(`a keyset continuation over a physical table orders by integer, bigint and text `
             + `columns; '${property}' is a ${column?.codec} column, whose decoded value need not compare `
             + 'as its stored one does (a uuid reads back lowercase)', []);
+        }
+        if (column.codec === 'text' && !provesTextBytes && column.databaseEncoding !== 'UTF8') {
+          throw refuse(`a keyset continuation over the text column '${property}' requires the UTF8 database `
+            + 'encoding, from which every stored text decodes exactly; this database\'s encoding is '
+            + `${column.databaseEncoding ?? 'not recorded'}`, []);
         }
       }
     };
@@ -2937,7 +2968,7 @@ export function createLoadEngine(context, entityName) {
     if (keysetMode) {
       identity = orderIdentity(order, keyColumns, columnOfPhysical);
       requirePhysicalKeyset(identity.map((term) => term.column));
-      if (physicalEntity) {
+      if (provesTextBytes) {
         textKeys = textKeyPlan(tree.entityMapping, identity.map((term) => columnOfProperty(term.column)),
           dialect, `${rendered.aliasSql}.`);
       }
@@ -2951,36 +2982,54 @@ export function createLoadEngine(context, entityName) {
         pagination = 'keyset';
         const values = continuationValues(after, identity, order.length, keyColumns);
         const column = (/** @type {any} */ term) => termSql(term.column);
-        const equal = (i) => (values[i] === null
-          ? `${column(identity[i])} IS NULL`
-          : `${column(identity[i])} = ${param({ literal: values[i] })}`);
-        // "comes after the value in this term's order": a null value is
-        // followed by the non-nulls when nulls sort first and by nothing
-        // when they sort last; a non-null value is followed by the greater
-        // (or lesser, descending) values, and by the nulls when they sort
-        // last — the comparison alone would drop them, since SQL's
-        // `col > ?` is neither true nor false for NULL
-        const beyond = (i) => {
-          const term = identity[i];
-          if (values[i] === null) return `${column(term)} IS NOT NULL`;
-          const base = `${column(term)} ${term.desc ? '<' : '>'} ${param({ literal: values[i] })}`;
-          // a key column is NOT NULL and needs no null branch
-          return term.nullsFirst || keyColumns.includes(term.column)
-            ? base : `(${base} OR ${column(term)} IS NULL)`;
-        };
-        const branches = [];
-        for (let i = 0; i < identity.length; i++) {
-          // after a null that sorts last comes nothing in this term: the
-          // branch is empty, and only the tie-break branches remain
-          if (values[i] === null && !identity[i].nullsFirst) continue;
-          // parameters bind by position, so the parts are built in SQL
-          // text order: the equalities first, then the strict comparison
-          const parts = [];
-          for (let j = 0; j < i; j++) parts.push(equal(j));
-          parts.push(beyond(i));
-          branches.push(parts.length === 1 ? parts[0] : `(${parts.join(' AND ')})`);
+        // a term that cannot hold NULL: a key column, or a mapped column the
+        // catalog declares NOT NULL (recorded at open, whatever policy the
+        // model declares); a managed entity's declared columns can
+        const notNull = (/** @type {any} */ term) => keyColumns.includes(term.column)
+          || (physicalEntity && columnOfProperty(term.column)?.notNull === true);
+        if (identity.length > 1 && identity.every((term, i) => notNull(term) && values[i] !== null
+          && term.desc === identity[0].desc)) {
+          // one direction over terms that cannot hold NULL: the row value
+          // `(t1, ..., tn) > (?, ..., ?)` is exactly the expansion below,
+          // and the key's index seeks it. A NULL element would make the
+          // comparison neither true nor false, so a term that can hold one
+          // keeps the expansion, where its null branch is spelled out
+          const columns = identity.map((term) => column(term));
+          const bound = identity.map((_, i) => param({ literal: values[i] }));
+          conditions.push(`(${columns.join(', ')}) ${identity[0].desc ? '<' : '>'} (${bound.join(', ')})`);
         }
-        conditions.push(branches.length === 0 ? '0' : `(${branches.join(' OR ')})`);
+        else {
+          const equal = (i) => (values[i] === null
+            ? `${column(identity[i])} IS NULL`
+            : `${column(identity[i])} = ${param({ literal: values[i] })}`);
+          // "comes after the value in this term's order": a null value is
+          // followed by the non-nulls when nulls sort first and by nothing
+          // when they sort last; a non-null value is followed by the greater
+          // (or lesser, descending) values, and by the nulls when they sort
+          // last — the comparison alone would drop them, since SQL's
+          // `col > ?` is neither true nor false for NULL
+          const beyond = (i) => {
+            const term = identity[i];
+            if (values[i] === null) return `${column(term)} IS NOT NULL`;
+            const base = `${column(term)} ${term.desc ? '<' : '>'} ${param({ literal: values[i] })}`;
+            // a key column is NOT NULL and needs no null branch
+            return term.nullsFirst || keyColumns.includes(term.column)
+              ? base : `(${base} OR ${column(term)} IS NULL)`;
+          };
+          const branches = [];
+          for (let i = 0; i < identity.length; i++) {
+            // after a null that sorts last comes nothing in this term: the
+            // branch is empty, and only the tie-break branches remain
+            if (values[i] === null && !identity[i].nullsFirst) continue;
+            // parameters bind by position, so the parts are built in SQL
+            // text order: the equalities first, then the strict comparison
+            const parts = [];
+            for (let j = 0; j < i; j++) parts.push(equal(j));
+            parts.push(beyond(i));
+            branches.push(parts.length === 1 ? parts[0] : `(${parts.join(' AND ')})`);
+          }
+          conditions.push(branches.length === 0 ? '0' : `(${branches.join(' OR ')})`);
+        }
       }
     }
     else if (after !== undefined) {
@@ -2992,7 +3041,7 @@ export function createLoadEngine(context, entityName) {
       requirePhysicalKeyset([property]);
       // the caller seeks past the last row's value: a text key proves it
       // round-trips exactly as a continuation's does
-      if (physicalEntity) textKeys = textKeyPlan(tree.entityMapping, [columnOfProperty(property)], dialect, `${rendered.aliasSql}.`);
+      if (provesTextBytes) textKeys = textKeyPlan(tree.entityMapping, [columnOfProperty(property)], dialect, `${rendered.aliasSql}.`);
       pagination = 'keyset';
       conditions.push(`${termSql(property)} `
         + `${term.desc ? '<' : '>'} ${param({ literal: physicalEntity ? encodeColumn(property, after) : after })}`);

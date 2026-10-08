@@ -158,6 +158,23 @@ describe('duplicate first-order values across composite pages produce no omissio
     });
   });
 
+  it('a composite primary key paged on its own compares as one row value, and pages every row once', async () => {
+    const lines = store.entity('Line');
+    for (const limit of [1, 2, 3, 7]) {
+      const { ids } = await drain(lines, {}, { limit });
+      assert.deepStrictEqual(ids, ['1/1', '1/2', '2/1', '2/2', '3/1', '3/2'], `limit ${limit}`);
+    }
+    const first = await lines.page({}, { limit: 2 });
+    const explained = lines.explainLoad({ after: first.continuation });
+    assert.strictEqual(explained.pagination, 'keyset');
+    assert.strictEqual(explained.snapshot, true);
+    // both key columns are NOT NULL and ascend: the row value, which the key's index seeks
+    assert.match(explained.sql, /WHERE \("r"\."order", "r"\."seq"\) > \(\?, \?\) ORDER BY "r"\."order" ASC NULLS FIRST, "r"\."seq" ASC NULLS FIRST$/);
+    // a declared term of a managed entity can hold NULL: its expansion stays, the key appended whole
+    const byQty = lines.explainLoad({ orderBy: '$it.qty', after: (await lines.page({ orderBy: '$it.qty' }, { limit: 1 })).continuation });
+    assert.match(byQty.sql, /WHERE \("r"\."qty" > \? OR \("r"\."qty" = \? AND "r"\."order" > \?\) OR \("r"\."qty" = \? AND "r"\."order" = \? AND "r"\."seq" > \?\)\)/);
+  });
+
   it('an epoch column pages by the document instant: the continuation carries the string, the plan binds the epoch', async () => {
     const { ids, pages } = await drain(users, { orderBy: '$it.createdAt' }, { limit: 3 });
     assert.deepStrictEqual(ids, USERS.map((u) => u.id));

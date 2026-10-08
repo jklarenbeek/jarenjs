@@ -202,7 +202,11 @@ export const DB_CODES = Object.freeze({
  *    the root is the map of entity arrays, so there are no rows to answer
  *  - `JD0032` — a graph-load include specification is invalid: an
  *    unknown relation, a cycle, an untranslatable filter, or the
- *    depth bound exceeded (the bound is printed, never silent)
+ *    depth bound exceeded (the bound is printed, never silent); or a
+ *    keyset continuation is not qualified: over a view, a codec whose
+ *    decoded value does not compare as the stored one, a text key that
+ *    does not survive its SQLite text encoding, or a text term of a
+ *    database whose encoding is not UTF8 (named)
  *  - `JD0040` — `saveChanges()` cannot order its statements: the
  *    entities being inserted or deleted form a foreign-key cycle
  *    (self-references included); break the save in two

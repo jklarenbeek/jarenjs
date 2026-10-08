@@ -50,9 +50,11 @@ export function inListSql(dialect, valueSql, listSql, kind) {
 
 /** Physical text expressions must not inherit an application's collation:
  * the one rule every comparison and ordering over a mapped column follows.
- * @param {{ codec?: string }} ref @param {string} sql @param {any} dialect @returns {string} */
-export const physicalComparable = (ref, sql, dialect) => ref.codec !== undefined
-  ? dialect.physicalCompare?.(ref.codec, sql)
+ * A load's order and keyset terms pass their mapping column, which lets a
+ * dialect spell the bare column where that seeks; no other caller does.
+ * @param {{ codec?: string }} ref @param {string} sql @param {any} dialect @param {any} [column] @returns {string} */
+export const physicalComparable = (ref, sql, dialect, column = undefined) => ref.codec !== undefined
+  ? dialect.physicalCompare?.(ref.codec, sql, column)
     ?? (['text', 'date', 'datetime'].includes(ref.codec) ? dialect.codepoint(sql) : sql) : sql;
 const physicalValueType = (ref, sql, dialect) => ref.codec !== undefined
   ? dialect.physicalValueType?.(ref.codec, sql) ?? dialect.valueTypeOf(sql) : dialect.valueTypeOf(sql);
