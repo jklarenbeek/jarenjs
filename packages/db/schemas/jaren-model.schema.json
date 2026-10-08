@@ -100,7 +100,7 @@
           "type": "string"
         },
         "maxDuration": {
-          "description": "The longest span the collection holds, in milliseconds: end - start <= maxDuration, held by the store before the statement and by the table's CHECK for every other writer.",
+          "description": "The longest span the collection holds, in milliseconds: end - start <= maxDuration, held by the store before the statement and by the table's CHECK for every other writer, and bounding the start of an $overlaps seek from below.",
           "type": "integer",
           "minimum": 1,
           "maximum": 9007199254740991

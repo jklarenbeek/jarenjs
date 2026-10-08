@@ -828,7 +828,11 @@ that conjunction is exact is the model's to say: over a member the
 model declares an interval (`intervals`, MODEL-FORMAT §2) no stored
 span is empty, reversed or malformed — the store refuses one before the
 statement and the table's CHECK refuses every other writer — so the
-conjunction decides and the bound's index seeks. Undeclared, what
+conjunction decides and the bound's index seeks — and where the
+declaration also bounds the duration the plan carries a third
+comparison, the start past `from - maxDuration`, so the start index is
+sought between two bounds rather than from the probe's end down.
+Undeclared, what
 makes it a pre-filter rather than an exact translation is the kernel's
 other half: a span that is empty or reversed is not `false`, it RAISES
 (`JQ2001`). A conjunction alone would drop `[500, 100)` for a probe of

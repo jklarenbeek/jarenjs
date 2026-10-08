@@ -285,6 +285,15 @@ describe('the interval form, and the seek that binds a typed scalar', () => {
     assert.deepStrictEqual(slots.map((slot) => slot.literal), [300, 200]);
   });
 
+  it('a declared interval with a lower bound on the start seeks it from both sides, the lower bound first', () => {
+    const { sql, slots } = emit(plan({ p: 'interval', declared: true, lower: 100,
+      columns: { start: 'gx_s', end: 'gx_e' }, probe: { from: 200, to: 300 } }));
+    assert.match(sql, /WHERE \("gx_s" IS NOT NULL AND "gx_e" IS NOT NULL AND "gx_s" > \? AND "gx_s" < \? AND "gx_e" > \?\)/);
+    assert.strictEqual(sql.includes('>='), false);
+    // text order: the two bounds of the start, then the end's
+    assert.deepStrictEqual(slots.map((slot) => slot.literal), [100, 300, 200]);
+  });
+
   it('a numeric seek folds the groups and binds ONE guarded comparison', () => {
     const seek = { name: 'asof.lower', kind: 'number', ref: at,
       bound: { op: 'le', lit: 1000 }, inner: 'max', outer: 'min',

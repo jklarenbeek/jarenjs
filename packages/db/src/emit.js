@@ -495,13 +495,18 @@ export function emitPlan(plan, dialect, physical) {
         const start = q(pred.columns.start);
         const end = q(pred.columns.end);
         const guard = `${start} IS NOT NULL AND ${end} IS NOT NULL AND `;
+        // a bounded duration bounds the start from below as well, and
+        // first, so the start's two bounds sit side by side for its index
+        // to seek between
+        const floor = pred.declared === true && typeof pred.lower === 'number'
+          ? `${start} > ${param({ literal: pred.lower })} AND ` : '';
         const meets = `${start} < ${param({ literal: pred.probe.to })} `
           + `AND ${end} > ${param({ literal: pred.probe.from })}`;
         // a declared interval holds no empty or reversed span, so the
         // conjunction is the operator; undeclared, the rows §8.16 raises
         // on are kept for the engine to raise on
         return pred.declared === true
-          ? `(${guard}${meets})`
+          ? `(${guard}${floor}${meets})`
           : `(${guard}((${meets}) OR ${start} >= ${end}))`;
       }
       case 'typeIs': {

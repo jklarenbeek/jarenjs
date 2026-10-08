@@ -9,9 +9,11 @@
  * SQLite and PostgreSQL alike. The CHECK is verified at every open (`JD0002`
  * when dropped, altered, renamed or — on PostgreSQL — left unvalidated),
  * `$overlaps` over the declared span plans exactly (no disjunct, no
- * residual, no UDF) and answers what the engine answers, and the declaration
- * is held to its rules (`JD0005`). The two spellings of the CHECK are pinned
- * verbatim: a changed spelling is a changed guarantee.
+ * residual, no UDF) and answers what the engine answers — under a
+ * `maxDuration`, with the start bounded from below as well, so its index is
+ * sought from both sides — and the declaration is held to its rules
+ * (`JD0005`). The two spellings of the CHECK are pinned verbatim: a changed
+ * spelling is a changed guarantee.
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
@@ -32,6 +34,7 @@ const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
 const EIGHT_HOURS = 8 * HOUR;
 const MAX_SAFE = Number.MAX_SAFE_INTEGER;
+const MIN_SAFE = Number.MIN_SAFE_INTEGER;
 /** A span the schema requires, so a missing or textual bound is unwritable under a hook. */
 const SPAN = {
   type: 'object',
@@ -137,6 +140,32 @@ const WINDOWS = [10, 180, 355].map((day) => ({ day, probe: { start: day * DAY + 
 const MET = WINDOWS.map(({ day, probe }) => ({ id: `met-${day}`, span: { start: probe.start - HOUR, end: probe.end + HOUR } }));
 /** A query's answer as a list: a sequence of one item is handed back bare, and an empty one as `undefined`. @param {any} answer */
 const items = (answer) => (answer === undefined ? [] : Array.isArray(answer) ? answer : [answer]);
+
+/** The declaration without its duration: the conjunction alone. */
+const UNBOUNDED = model({ intervals: [{ name: 'slot', path: '$.span' }] });
+/**
+ * The three parameters of the two-sided seek in text order: the lower bound
+ * on the start (the window's start, floored, less the maximum duration),
+ * the window's end, the window's start.
+ * @param {{ start: number, end: number }} probe
+ */
+const twoSided = ({ start, end }) => [{ literal: Math.floor(start) - EIGHT_HOURS }, { literal: end }, { literal: start }];
+/**
+ * Two spans of exactly the maximum duration at a window's lower edge: one
+ * ends where the window starts (touching, not an overlap — its start sits ON
+ * the lower bound, which is strict) and one an instant later (an overlap —
+ * its start is the first past the bound).
+ * @param {string | number} day
+ * @param {{ start: number }} probe
+ */
+const edges = (day, { start }) => [
+  { id: `edge-out-${day}`, span: { start: Math.floor(start) - EIGHT_HOURS, end: Math.floor(start) } },
+  { id: `edge-in-${day}`, span: { start: Math.floor(start) - EIGHT_HOURS + 1, end: Math.floor(start) + 1 } },
+];
+/** The three windows, a window of exactly the maximum duration, and a probe whose instants are fractional. */
+const PROBES = [...WINDOWS,
+  { day: 'a window of exactly maxDuration', probe: { start: 180 * DAY, end: 180 * DAY + EIGHT_HOURS } },
+  { day: 'a fractional probe', probe: { start: 180 * DAY + 12 * HOUR + 0.5, end: 180 * DAY + 13 * HOUR + 0.5 } }];
 
 describe('the declaration', () => {
   it('normalizes to the constraint name, the bound columns and the duration', () => {
@@ -390,6 +419,69 @@ describe('$overlaps over the declared span plans exactly on SQLite', () => {
   });
 });
 
+describe('a maximum duration bounds the start from below', () => {
+  it('binds from - maxDuration under the start as a third parameter, and answers the engine at every window', async () => {
+    const rows = [...corpus(2_000), ...MET, ...PROBES.flatMap(({ day, probe }) => edges(day, probe)), { id: 'no-span' }];
+    const store = await openStore(DECLARED, { driver: nodeDriver() });
+    try {
+      const booking = store.collection('booking');
+      await store.transaction(async (tx) => {
+        for (const row of rows) await tx.collection('booking').put(row);
+      });
+      for (const { day, probe } of PROBES) {
+        const document = flwor(probe);
+        const explained = await booking.explain(document);
+        assert.match(explained.sql, /"gx_span_start" > \? AND "gx_span_start" < \? AND "gx_span_end" > \?/, `${day}`);
+        assert.deepEqual(explained.params, twoSided(probe), `${day}`);
+        assert.deepEqual(explained.prefilters, [], `${day}`);
+        assert.equal(explained.mode, 'native', `${day}`);
+        const engine = items(queryJson(document, rows));
+        assert.ok(engine.includes(`edge-in-${day}`) && !engine.includes(`edge-out-${day}`), `${day}: the edge spans sit on the bound`);
+        assert.deepEqual(items(await booking.execute(document)), engine, `${day}`);
+        assert.deepEqual(items(await booking.execute(document, { pushdown: false })), engine, `${day}`);
+      }
+    }
+    finally { await store.close(); }
+  });
+
+  it('without maxDuration the plan is the declared conjunction alone, byte for byte', async () => {
+    const store = await openStore(UNBOUNDED, { driver: nodeDriver() });
+    try {
+      const { probe } = WINDOWS[1];
+      const explained = await store.collection('booking').explain(flwor(probe));
+      assert.match(explained.sql, /WHERE \("gx_span_start" IS NOT NULL AND "gx_span_end" IS NOT NULL AND "gx_span_start" < \? AND "gx_span_end" > \?\) ORDER BY/);
+      assert.deepEqual(explained.params, [{ literal: probe.end }, { literal: probe.start }]);
+    }
+    finally { await store.close(); }
+  });
+
+  it('drops the lower bound where it would fall below the least safe integer, and keeps it at exactly that', async () => {
+    const store = await openStore(DECLARED, { driver: nodeDriver() });
+    try {
+      const booking = store.collection('booking');
+      const rows = [
+        { id: 'least', span: { start: MIN_SAFE, end: MIN_SAFE + EIGHT_HOURS } },
+        { id: 'next', span: { start: MIN_SAFE + 1, end: MIN_SAFE + 1 + EIGHT_HOURS } },
+      ];
+      for (const row of rows) await booking.put(row);
+      // one below the least safe integer: every stored start is at least that, so the two parameters alone
+      const below = flwor({ start: MIN_SAFE + EIGHT_HOURS - 1, end: MIN_SAFE + EIGHT_HOURS + HOUR });
+      const unbounded = await booking.explain(below);
+      assert.doesNotMatch(unbounded.sql, /"gx_span_start" > /);
+      assert.deepEqual(unbounded.params, [{ literal: MIN_SAFE + EIGHT_HOURS + HOUR }, { literal: MIN_SAFE + EIGHT_HOURS - 1 }]);
+      assert.deepEqual(items(queryJson(below, rows)), ['least', 'next']);
+      assert.deepEqual(items(await booking.execute(below)), ['least', 'next']);
+      // exactly the least safe integer: bound, and the span starting there is rightly not an overlap
+      const least = flwor({ start: MIN_SAFE + EIGHT_HOURS, end: MIN_SAFE + EIGHT_HOURS + HOUR });
+      const bounded = await booking.explain(least);
+      assert.deepEqual(bounded.params, [{ literal: MIN_SAFE }, { literal: MIN_SAFE + EIGHT_HOURS + HOUR }, { literal: MIN_SAFE + EIGHT_HOURS }]);
+      assert.deepEqual(items(queryJson(least, rows)), ['next']);
+      assert.deepEqual(items(await booking.execute(least)), ['next']);
+    }
+    finally { await store.close(); }
+  });
+});
+
 describe('a declared interval on PostgreSQL', { skip: !PG_URL && 'JAREN_PG_URL is not set' }, () => {
   /** The stored CHECK of the booking table: its deparse and whether it is validated. @param {any} pool @param {string} schema */
   const storedCheck = async (pool, schema) => {
@@ -482,6 +574,37 @@ describe('a declared interval on PostgreSQL', { skip: !PG_URL && 'JAREN_PG_URL i
       const undeclared = await openStore(UNDECLARED, { driver: driver() });
       try { assert.deepEqual(await undeclared.collection('booking').get('a'), { id: 'a', span: { start: 1, end: 2 } }); }
       finally { await undeclared.close(); }
+    });
+  });
+
+  it('with maxDuration the start index is sought from both sides, at the window the one-sided plan scanned too', async () => {
+    await withPostgres(async ({ pool, schema, driver }) => {
+      const store = await openStore(DECLARED, { driver: driver() });
+      try {
+        const booking = store.collection('booking');
+        const rows = [...corpus(3_000), ...MET, ...WINDOWS.flatMap(({ day, probe }) => edges(day, probe))];
+        await pool.query(`INSERT INTO "${schema}"."booking" ("key", "doc") SELECT d->>'id', d FROM jsonb_array_elements($1::jsonb) AS d`, [JSON.stringify(rows)]);
+        await pool.query(`ANALYZE "${schema}"."booking"`);
+        for (const { day, probe } of WINDOWS) {
+          const document = flwor(probe);
+          const explained = await booking.explain(document);
+          assert.match(explained.sql, /"gx_span_start" > \$1 AND "gx_span_start" < \$2 AND "gx_span_end" > \$3/, `day ${day}`);
+          assert.deepEqual(explained.params, twoSided(probe), `day ${day}`);
+          assert.deepEqual(explained.prefilters, [], `day ${day}`);
+          const engine = items(queryJson(document, rows));
+          assert.ok(engine.includes(`edge-in-${day}`) && !engine.includes(`edge-out-${day}`), `day ${day}`);
+          assert.deepEqual(items(await booking.execute(document)), engine, `day ${day}`);
+          assert.deepEqual(items(await booking.execute(document, { pushdown: false })), engine, `day ${day}`);
+          // the server's plan: one index condition carrying both bounds of the start, and no sequential scan
+          const { rows: lines } = await pool.query({ text: `EXPLAIN ${explained.sql.replace('FROM "booking"', `FROM "${schema}"."booking"`)}`,
+            values: explained.params.map((/** @type {any} */ p) => p.literal) });
+          const text = lines.map((line) => line['QUERY PLAN']).join('\n');
+          // a bound deparses as a quoted cast ('…'::numeric), signed where it is negative, or as a bare literal where it is fractional
+          assert.match(text, /Index Cond: \(.*\(gx_span_start > '?-?\d+(?:\.\d+)?'?(?:::numeric)?\) AND \(gx_span_start < '?-?\d+(?:\.\d+)?'?(?:::numeric)?\)\)/, `day ${day}:\n${text}`);
+          assert.doesNotMatch(text, /Seq Scan/, `day ${day}:\n${text}`);
+        }
+      }
+      finally { await store.close(); }
     });
   });
 });

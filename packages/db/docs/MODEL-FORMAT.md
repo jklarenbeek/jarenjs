@@ -132,8 +132,9 @@ The store runs over SQLite — on Node (`@jarenjs/db/node`), on Bun
   unvalidated CHECK is `JD0002` at open. `$overlaps` over the declared
   span plans exactly: two comparisons the bound's index seeks, no
   residual — and, with `maxDuration`, a third that bounds the start from
-  below, so the start index is sought between two bounds at every window
-  (§3.2). `name` is an identifier, unique among the collection's
+  below, so the plan binds both bounds of the start at every window;
+  reading the index between them is the engine's choice (§3.2). `name`
+  is an identifier, unique among the collection's
   intervals, naming a constraint of at most 63 bytes; an unindexed bound,
   a bound typed `number` (the CHECK's integer test would refuse the
   fractions it admits), a path to no such member, a duplicate name and a
@@ -151,9 +152,15 @@ comparison between two columns that keeps an inverted span for the engine
 binds no index — and the exact plan seeks the start index from the
 window's end and reads every span that started before it, so on SQLite it
 wins early in the year and loses late in it — the declared plan is <!--fact:series.spanVerdict--><!--/fact-->.
+A `maxDuration` is the late window's cure: no span meeting a window began
+more than that long before it, so the plan bounds the start from below as
+well and the seek reads the window's neighbourhood alone, whatever the
+day — with the duration bounded the plan is <!--fact:series.spanBoundedVerdict--><!--/fact-->.
 PostgreSQL chooses per window — a bitmap read of one bound's index where
 the window is selective, a sequential scan where it is not — and at no
-measured window was the exact plan slower than the scan it replaces.
+measured window was the exact plan slower than the scan it replaces; with
+the duration bounded it read the start index between both bounds at every
+measured window, the middle one included.
 
 <!--fact:series.spanTable-->
 <!--/fact-->
@@ -647,7 +654,17 @@ comparison may assume of a stored span is the model's to say:
   equal to their own `trunc`; SQLSTATE 23514), both within the safe
   integers. So the pushed conjunction is the operator itself — exact, no
   residual, no document read per row, and a fetch the bound's index
-  seeks.
+  seeks. With `maxDuration` the fetch is a two-sided seek: a span no
+  longer than it that reaches past the probe's start began after `from -
+  maxDuration`, so the plan binds that as a lower bound on the start
+  column beside the probe's end — `start > from - maxDuration AND start <
+  to AND end > from` — and the plan carries both bounds whatever the
+  window; reading the index between them is the engine's choice, SQLite's
+  at every window and PostgreSQL's where its statistics favour the index
+  over a scan (a fractional probe start is floored first, so the
+  subtraction stays exact and bounds no less); a probe whose lower bound
+  would fall below the least safe integer, which every stored start
+  already satisfies, plans without it.
 - Undeclared, the schema alone cannot forbid an inverted span (no
   keyword compares two members), so the statement keeps every row whose
   own span is empty or reversed and the operator raises over them,

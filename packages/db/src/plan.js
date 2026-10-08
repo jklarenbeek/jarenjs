@@ -1376,7 +1376,12 @@ function planSpatial(node, itSlot, shape) {
  * statement, hook or no hook, and the table's CHECK refuses every
  * other writer. There the conjunction is the operator itself — exact,
  * nothing to refine, no document read per row, and a fetch the bound's
- * index can seek.
+ * index can seek. A declaration that also bounds the span's duration
+ * bounds the START from below (a span no longer than D that reaches
+ * past the probe's start began after `from - D`), so the start's index
+ * is sought between two bounds rather than from the probe's end down to
+ * the first row — one-sided, a seek that reads every span begun before
+ * the window, and costs more the later the window sits.
  *
  * Undeclared, the schema alone cannot forbid an inverted span (JSON
  * Schema compares no two members), so the pushed form is a PRE-FILTER
@@ -1430,11 +1435,19 @@ function planIntervalOverlap(node, itSlot, shape) {
     probe: { from, to } };
   // a declaration over these two columns means no stored span is empty,
   // reversed or malformed: the conjunction decides, nothing refines
-  const declared = (shape.intervals ?? []).some((interval) =>
+  const declared = (shape.intervals ?? []).find((interval) =>
     interval.start === bounds.start.column && interval.end === bounds.end.column);
-  if (declared) {
-    return { pred: { ...pred, declared: true }, exact: true, prefilters: [], refinements: [],
-      composable: true };
+  if (declared !== undefined) {
+    // a maximum duration D bounds the start from below as well: a span no
+    // longer than D whose end is past `from` started after `from - D`. The
+    // probe's start is floored first — a fractional instant is a legal
+    // probe, and an integer floor keeps the subtraction exact while
+    // bounding no less — and a bound below the least safe integer, which
+    // every stored start already satisfies, is left out
+    const lower = typeof declared.maxDuration === 'number'
+      ? Math.floor(from) - declared.maxDuration : Number.NEGATIVE_INFINITY;
+    return { pred: { ...pred, declared: true, ...(lower >= Number.MIN_SAFE_INTEGER ? { lower } : {}) },
+      exact: true, prefilters: [], refinements: [], composable: true };
   }
   return { ...promotion(pred,
     { construct: '$overlaps', via: 'columns',

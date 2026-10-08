@@ -859,20 +859,28 @@ const FACTS = {
   },
   // -- series: the stored span, the mapped pre-filter against the declared
   // interval at three days of the year - the late-window loss published
-  // beside the wins, as measured
+  // beside the wins, as measured, and the bounded duration's cure beside it
   'series.spanTable': () => {
     const rows = seriesSpanDays().map((day) => {
       const prefilter = seriesSpanRow('spanPrefilter', day);
       const declared = seriesSpanRow('spanDeclared', day);
+      const bounded = seriesSpanRow('spanBounded', day);
       return `| day ${day} | ${thousands(declared.results)} | ${ms(prefilter.ns / 1e6)} ms `
-        + `| ${ms(declared.ns / 1e6)} ms | ${spanVerdict(prefilter.ns / declared.ns)} |`;
+        + `| ${ms(declared.ns / 1e6)} ms | ${spanVerdict(prefilter.ns / declared.ns)} `
+        + `| ${ms(bounded.ns / 1e6)} ms | ${spanVerdict(prefilter.ns / bounded.ns)} |`;
     });
-    return ['', '| window | spans met | mapped pre-filter (scan) | declared interval (seek) | the declaration is |',
-      '|---|---:|---:|---:|---|', ...rows, ''].join('\n');
+    return ['', '| window | spans met | mapped pre-filter (scan) | declared interval (seek) | the declaration is '
+      + '| with `maxDuration` (two-sided seek) | the bound is |',
+    '|---|---:|---:|---:|---|---:|---|', ...rows, ''].join('\n');
   },
   'series.spanVerdict': () => {
     const windows = seriesSpanDays().map((day) =>
       `${spanVerdict(seriesSpanRow('spanPrefilter', day).ns / seriesSpanRow('spanDeclared', day).ns)} at day ${day}`);
+    return `${windows.slice(0, -1).join(', ')} and ${windows[windows.length - 1]}`;
+  },
+  'series.spanBoundedVerdict': () => {
+    const windows = seriesSpanDays().map((day) =>
+      `${spanVerdict(seriesSpanRow('spanPrefilter', day).ns / seriesSpanRow('spanBounded', day).ns)} at day ${day}`);
     return `${windows.slice(0, -1).join(', ')} and ${windows[windows.length - 1]}`;
   },
 

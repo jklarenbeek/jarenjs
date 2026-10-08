@@ -833,15 +833,27 @@ member an interval as well — `intervals: [{ name: 'slot', path: '$.span'
 of two safe integers for every writer: the store refuses the rest before
 the statement, hook or no hook (`JD2003`), and a named CHECK on the table
 refuses them from raw SQL (`JD2005`), so the conjunction is the operator
-itself — exact, no residual, and a seek on the bound's index. Undeclared
-it stays a pre-filter: §8.16 RAISES on a span whose end is at or before
-its start and no schema keyword forbids storing one, so the statement
+itself — exact, no residual, and a seek on the bound's index. Bound the
+duration too (`maxDuration`, milliseconds) and the plan binds a lower
+bound on the start as well — no span meeting the window began more than
+that long before it — so both bounds of the start column are bound
+whatever the window: on SQLite the start index is then sought between
+them, where the one-sided seek read every span begun before the window;
+PostgreSQL chooses its read per window, and read the index between the
+two at every measured one.
+Undeclared it stays a pre-filter: §8.16 RAISES on a span whose end is at
+or before its start and no schema keyword forbids storing one, so the statement
 keeps every inverted row and the operator raises over it exactly as it
 would have — a comparison between two columns, which no index bounds, so
 the fetch scans; what it buys is that the pruned rows never reach the
 engine at all. An unmapped pair, a schema that admits a textual bound, or
 a probe that is not itself a half-open span pushes nothing and names why
-— `strict: true` answers `JD0010`.
+— `strict: true` answers `JD0010`. Declaring the interval on a collection
+that already holds documents, changing it or removing it is a planned
+migration (the CHECK added or dropped in place on PostgreSQL, one rebuild
+of the collection on SQLite), refused `JD0021` before any step where stored
+rows violate it, with their count and first keys
+([MIGRATION-FORMAT §3](docs/MIGRATION-FORMAT.md#3-planning-and-the-wideningnarrowing-rule)).
 
 **One corpus, five executors, proven to agree.** The committed temporal
 corpus (`test/json/fixtures/series-corpus.json`) runs through the plain

@@ -1051,19 +1051,27 @@ const SPAN_BOUNDS = {
 };
 
 /**
+ * The longest span the corpus holds is just under eight hours, so a
+ * declaration bounding the duration at eight accepts every row of it.
+ */
+const SPAN_MAX_DURATION = 8 * 3_600_000;
+
+/**
  * The booking collection, its two bounds mapped — and, declared, held to
  * be a half-open interval for every writer, which is what lets the plan
- * drop the disjunct that keeps an inverted span for the engine to raise on.
- * @param {boolean} declared
+ * drop the disjunct that keeps an inverted span for the engine to raise on;
+ * a declaration that also bounds the duration lets the plan bound the start
+ * from below as well.
+ * @param {{ name: string, path: string, maxDuration?: number } | null} interval
  */
-const spanModel = (declared) => ({
+const spanModel = (interval) => ({
   $model: '0.1',
   collections: {
     booking: {
       schema: { type: 'object', properties: { id: { type: 'string' }, span: SPAN_BOUNDS } },
       key: '/id',
       indexes: [{ name: 'by_start', path: '$.span.start' }, { name: 'by_end', path: '$.span.end' }],
-      ...(declared ? { intervals: [{ name: 'slot', path: '$.span' }] } : {}),
+      ...(interval === null ? {} : { intervals: [interval] }),
     },
   },
 });
@@ -1106,19 +1114,24 @@ function firstIdDisagreement(x, y) {
 }
 
 /**
- * The stored-span legs, one per window: the corpus loaded twice — into a
- * collection that maps the two bounds, and into one that also DECLARES
- * the span an interval — and the engine's own answer over the array, all
- * three checked equal in order before either store is timed. `n` is the
- * day of the year the window sits at.
+ * The stored-span legs, one per window: the corpus loaded three times —
+ * into a collection that maps the two bounds, into one that also DECLARES
+ * the span an interval, and into one whose declaration bounds the duration
+ * too — and the engine's own answer over the array, all four checked equal
+ * in order before any store is timed. `n` is the day of the year the window
+ * sits at.
  */
 async function runSpanLegs() {
   const bookings = storedSpans(SPAN_COUNT);
-  const routes = /** @type {const} */ ([['spanPrefilter', false], ['spanDeclared', true]]);
+  const routes = /** @type {const} */ ([
+    ['spanPrefilter', null],
+    ['spanDeclared', { name: 'slot', path: '$.span' }],
+    ['spanBounded', { name: 'slot', path: '$.span', maxDuration: SPAN_MAX_DURATION }],
+  ]);
   /** @type {Record<string, any>} */
   const stores = {};
-  for (const [key, declared] of routes) {
-    const store = await openStore(spanModel(declared), { driver: nodeDriver() });
+  for (const [key, interval] of routes) {
+    const store = await openStore(spanModel(interval), { driver: nodeDriver() });
     await store.transaction(async (tx) => {
       const loading = tx.collection('booking');
       for (const booking of bookings) await loading.insert(booking);
@@ -1138,14 +1151,23 @@ async function runSpanLegs() {
     const plans = {};
     /** @type {Record<string, number>} */
     const results = {};
-    for (const [key, declared] of routes) {
+    for (const [key, interval] of routes) {
+      const declared = interval !== null;
+      const bounded = interval !== null && 'maxDuration' in interval;
+      const name = bounded ? 'bounded' : declared ? 'declared' : 'mapped';
       const booking = stores[key].collection('booking');
       const explained = await booking.explain(document);
       plans[key] = `${explained.mode}, ${explained.prefilters.length === 0 ? 'exact' : 'pre-filter'}: ${explained.scanNarrative}`;
-      check(`${label}: the ${declared ? 'declared' : 'mapped'} store ${declared ? 'plans the conjunction exactly' : 'keeps its pre-filter'}`,
+      check(`${label}: the ${name} store ${declared ? 'plans the conjunction exactly' : 'keeps its pre-filter'}`,
         (explained.prefilters.length === 0) === declared, plans[key]);
+      if (declared) {
+        // the two bounds of the start sit side by side only where the duration is bounded
+        check(`${label}: the ${name} store ${bounded ? 'seeks the start from both sides' : 'bounds the start from above alone'}`,
+          /"gx_span_start" > \? AND "gx_span_start" < \?/.test(explained.sql) === bounded,
+          explained.sql.slice(explained.sql.indexOf('WHERE')));
+      }
       const answer = listOf(await booking.execute(document));
-      check(`${label}: the ${declared ? 'declared' : 'mapped'} store answers the engine's rows, in its order`,
+      check(`${label}: the ${name} store answers the engine's rows, in its order`,
         firstIdDisagreement(answer, reference) === null,
         firstIdDisagreement(answer, reference) ?? `${answer.length} rows`);
       results[key] = answer.length;
@@ -1311,6 +1333,7 @@ const joinTable = {
 const SPAN_ORDER = [
   ['spanPrefilter', 'one-hour window — the store, mapped bounds (a pre-filter: every inverted span is kept for the engine)'],
   ['spanDeclared', 'one-hour window — the store, a declared interval (exact: the start index seeks)'],
+  ['spanBounded', 'one-hour window — the store, a declared interval with a maximum duration (exact: the start index seeks between two bounds)'],
 ];
 
 const lastSpan = spanLegs[spanLegs.length - 1];
@@ -1321,17 +1344,20 @@ const spanTable = {
   head: ['route', ...spanLegs.map((leg) => leg.label), 'rows'],
   rows: SPAN_ORDER.map(([key, name]) => ({
     cells: [name, ...spanLegs.map((leg) => ns(leg.rows[key])), count(lastSpan.results[key])],
-    strong: key === 'spanDeclared',
+    strong: key === 'spanBounded',
   })),
-  note: 'Lower is better. Both stores answered the identical rows in the identical order, and both'
-    + ' agreed with the engine over the array, before either was timed. The mapped pre-filter keeps'
+  note: 'Lower is better. All three stores answered the identical rows in the identical order, and all'
+    + ' agreed with the engine over the array, before any was timed. The mapped pre-filter keeps'
     + ' every span whose own bounds are inverted for the engine to raise on — a comparison between two'
     + ' columns no index bounds, so every window scans the table. The declared interval holds no such'
     + ' span, so the conjunction is exact and SQLite seeks the start index from the window\'s end — and'
     + ' reads every span that started before it, so the seek costs more the later the window sits: the'
-    + ' late window is the loss, published beside the wins. The "rows" column is the answer size at the'
-    + ` last window, where the plans were: mapped — ${lastSpan.plans.spanPrefilter}; declared —`
-    + ` ${lastSpan.plans.spanDeclared}.`,
+    + ' late window is the loss, published beside the wins. A declaration that also bounds the duration'
+    + ' bounds the start from below as well — no span meeting the window began more than that long'
+    + ' before it — so the seek reads the window\'s neighbourhood alone, whatever the day. The "rows"'
+    + ' column is the answer size at the last window, where the plans were: mapped —'
+    + ` ${lastSpan.plans.spanPrefilter}; declared — ${lastSpan.plans.spanDeclared}; bounded —`
+    + ` ${lastSpan.plans.spanBounded}.`,
 };
 
 const tables = [timingTable, planTable, joinTable, spanTable];
@@ -1395,6 +1421,13 @@ const figures = {
   spanDeclaredVsPrefilterEarly: ratio(spanLegs[0].rows.spanPrefilter, spanLegs[0].rows.spanDeclared),
   spanDeclaredVsPrefilterMiddle: ratio(spanLegs[1].rows.spanPrefilter, spanLegs[1].rows.spanDeclared),
   spanDeclaredVsPrefilterLate: ratio(spanLegs[2].rows.spanPrefilter, spanLegs[2].rows.spanDeclared),
+  // the same pre-filter against the declaration that also bounds the
+  // duration, per window, and that bound against the unbounded declaration
+  // at the window the latter loses
+  spanBoundedVsPrefilterEarly: ratio(spanLegs[0].rows.spanPrefilter, spanLegs[0].rows.spanBounded),
+  spanBoundedVsPrefilterMiddle: ratio(spanLegs[1].rows.spanPrefilter, spanLegs[1].rows.spanBounded),
+  spanBoundedVsPrefilterLate: ratio(spanLegs[2].rows.spanPrefilter, spanLegs[2].rows.spanBounded),
+  spanBoundedVsDeclaredLate: ratio(spanLegs[2].rows.spanDeclared, spanLegs[2].rows.spanBounded),
 };
 
 const notes = [
@@ -1482,6 +1515,13 @@ const notes = [
     + ` ${SPAN_DAYS[2]}, over ${SPAN_COUNT.toLocaleString('en-US')} stored spans. The pre-filter scans`
     + ' every window alike, and the exact plan seeks the start index from the window\'s end and reads'
     + ' every span that started before it — cheap early in the year, dear late in it. The loss stays in.',
+  `Bounding the duration as well answers that window ${joinVerdict(figures.spanBoundedVsPrefilterEarly)}`
+    + ` the mapped pre-filter at day ${SPAN_DAYS[0]}, ${joinVerdict(figures.spanBoundedVsPrefilterMiddle)}`
+    + ` it at day ${SPAN_DAYS[1]} and ${joinVerdict(figures.spanBoundedVsPrefilterLate)} it at day`
+    + ` ${SPAN_DAYS[2]} — and ${joinVerdict(figures.spanBoundedVsDeclaredLate)} the unbounded declaration`
+    + ' at the window it lost. No span meeting a window began more than the bound before it, so the'
+    + ' start is bounded from below as well and the seek reads the window\'s neighbourhood alone,'
+    + ' whatever the day.',
 ];
 
 console.log('\nDerived figures');

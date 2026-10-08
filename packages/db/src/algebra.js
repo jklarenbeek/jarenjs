@@ -65,7 +65,7 @@ export const PLAN_VERSION = 2;
  *   { p: 'cellIn', column: string, cells: string[], keepEmpty?: boolean } |
  *   { p: 'cellPrefix', column: string, prefix: string } |
  *   { p: 'interval', columns: { start: string, end: string },
- *     probe: { from: number, to: number }, declared?: true } |
+ *     probe: { from: number, to: number }, declared?: true, lower?: number } |
  *   { p: 'colCmp', op: 'eq' | 'lt' | 'le' | 'gt' | 'ge',
  *     column: string, operand: { lit: unknown } | { seek: string } }
  * )} PlanPredicate
@@ -105,7 +105,11 @@ export const PLAN_VERSION = 2;
  *   pre-filter narrows, and a narrowing that swallowed an error would
  *   answer where the engine does not. `declared` marks the member a
  *   model interval, whose store and CHECK hold no such span: the
- *   conjunction alone, exact.
+ *   conjunction alone, exact. `lower`, present only beside `declared`
+ *   and only where the model also bounds the span's duration, is the
+ *   least start a span meeting the probe can have (the probe's start
+ *   less that duration): the start column is then bounded from both
+ *   sides and its index sought between them.
  *
  * @typedef {(
  *   { p: 'leaf', index: number } |
