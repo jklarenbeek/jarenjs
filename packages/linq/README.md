@@ -129,7 +129,11 @@ you out of the traps:
    and `a && b`, `cond ? x : y` or `a === b` evaluate against the proxy
    object — a callback that answers such a boolean itself
    (`(u) => u.deleted === null`) is refused with `JL0109`, and one that
-   only uses it produces a wrong document silently.
+   only uses it produces a wrong document silently. Destructuring a
+   parameter reads it, so an optional filter chooses its callback outside
+   the callback, `q.name ? ({ name }) => name.eq(q.name) : () => true`,
+   instead of answering `true` after the read: the capture cannot tell
+   that `true` from the one a comparison answers.
 2. **Reach for the builder where you would write a schema.** Every pen
    that carries a schema takes a schema-pen builder in that position —
    a contract's `input`, a machine's `payload`, an app's `state`.

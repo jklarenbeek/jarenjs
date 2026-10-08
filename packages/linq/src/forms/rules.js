@@ -24,7 +24,7 @@
 
 import { LinqBuildError } from '../errors.js';
 import { captureQuery } from '../capture-root.js';
-import { noteRead } from '../expression.js';
+import { captureEpoch, noteRead } from '../expression.js';
 import { describeValue, requireJson } from '../json-boundary.js';
 
 /** The keyword every rule method writes. */
@@ -50,17 +50,19 @@ const ADVICE = () => ' — the document being edited is the context\'s root (c.r
  * through to the externals proxy, which refuses it by name. The context
  * is no more a value than that proxy is: embedded or spread, it answers
  * the externals proxy's own refusal rather than reading as `{}`. Reading a
- * name records that the rule read its argument: `c.root === null` reads no
- * member of the `$` proxy, so the context records the read itself.
+ * name records that the rule read its argument, into the capture the
+ * context is made in: `c.root === null` reads no member of the `$` proxy,
+ * so the context records the read itself.
  * @param {any} doc - the `$` proxy
  * @param {any} externals - the externals proxy (`value`, `pointer`)
  * @returns {any}
  */
 function contextProxy(doc, externals) {
+  const epoch = captureEpoch();
   return new Proxy(Object.freeze({}), {
     ownKeys: () => Reflect.ownKeys(externals),
     get: (_target, prop) => {
-      if (typeof prop === 'string') noteRead();
+      if (typeof prop === 'string') noteRead(epoch);
       return prop === 'root' ? doc : externals[prop];
     },
   });

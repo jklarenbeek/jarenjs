@@ -10,8 +10,9 @@
  * call, and using one outside it (stored and replayed into a later
  * chain) is `JL0002` — a proxy that escaped would otherwise emit a
  * document that silently refers to the wrong binding. (`===` between
- * proxies is untrappable and therefore undetectable; the format doc
- * says so.)
+ * proxies is untrappable: a callback that answers it after reading a
+ * member is `JL0109`, but an identity test of bare proxies reads nothing
+ * and stays undetectable; the format doc says so.)
  *
  * Method names shadow member access: `u.eq` is the operator, never the
  * data member — reach a colliding member with `u.get('eq')`.
@@ -85,16 +86,27 @@ const readStack = [];
  * string-keyed read of a value proxy (a member, or a method about to be
  * called), of the parameters proxy, of a pen's externals proxy or of a
  * forms rule's context — `e.root === null` reads no member of a value, so
- * those proxies record their own reads. Symbol-keyed reads are the
- * machinery's (`NODE`, `PARAMETERS`, `Symbol.toPrimitive`) and are never
- * recorded, and a read of a proxy whose capture has ended records nothing.
- * @param {number} [epoch] - the capture the read proxy belongs to; by
- *   default the innermost one, which is the capture a pen's own argument
- *   proxies are made in
+ * those proxies record their own reads. Destructuring a parameter reads
+ * it. Every proxy records into the capture it was made in — a pen's own
+ * argument proxies take theirs from {@link captureEpoch} — so a read of a
+ * proxy whose capture has ended records nothing, and neither does a
+ * Symbol-keyed read: those are the machinery's (`NODE`, `PARAMETERS`,
+ * `Symbol.toPrimitive`).
+ * @param {number} epoch - the capture the read proxy belongs to
  */
-export function noteRead(epoch = captureStack[captureStack.length - 1]) {
+export function noteRead(epoch) {
   const at = captureStack.indexOf(epoch);
   if (at !== -1) readStack[at] = true;
+}
+
+/**
+ * The innermost capture's epoch, `0` outside every capture: the capture a
+ * proxy a pen builds inside its callback (an externals proxy, a forms
+ * rule's context) belongs to, for {@link noteRead}.
+ * @returns {number}
+ */
+export function captureEpoch() {
+  return captureStack.length === 0 ? 0 : captureStack[captureStack.length - 1];
 }
 
 /**
@@ -954,15 +966,18 @@ function makeExpr(doc, epoch, pathable, extra = undefined) {
       // is a coded refusal naming the spelling, not a raw TypeError
       if (prop === Symbol.toPrimitive) return toPrimitive;
       if (typeof prop === 'symbol') return undefined;
-      noteRead(target.epoch);
       const method = METHODS[prop];
       if (method !== undefined) {
+        // a method name read is a read; a dead or enclosing proxy is refused when it is called
+        noteRead(target.epoch);
         return (...args) => {
           assertLive(target);
           return method(target, ...args);
         };
       }
+      // a member read the liveness rule refuses is no read
       assertLive(target);
+      noteRead(target.epoch);
       return member(target, prop);
     },
   });
@@ -1082,8 +1097,11 @@ export function captureExpression(fn, roots, declaredParams, fold = true, kind =
       throw new LinqBuildError('JL0109',
         `a captured callback read its argument and answered the JavaScript boolean ${result} — `
         + '===, !==, !, typeof and == null test the capture proxy, never the value, so the document '
-        + 'would hold that constant; write .eq(null), .ne(x), .exists(), .isEmpty() or .not() — a '
-        + 'deliberate constant reads nothing: () => true');
+        + 'would hold that constant; write .eq(null), .ne(x), .exists(), .isEmpty() or .not(). A '
+        + 'deliberate constant must read nothing, and destructuring a parameter or reading a member '
+        + 'before choosing the answer is a read: choose the callback outside it '
+        + '(q.name ? ({ name }) => name.eq(q.name) : () => true) or read only inside the branch '
+        + 'that uses the value');
     }
     return toExpression(result, fold);
   }

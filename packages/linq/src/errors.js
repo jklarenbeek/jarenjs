@@ -131,9 +131,12 @@ export const LINQ_CODES = /* @__PURE__ */ Object.freeze({
  *    plain JavaScript boolean: `===`, `!==`, `!`, `typeof` and `== null`
  *    test the capture proxy, never the value, so the document would hold
  *    that constant. A callback that read nothing (`() => true`) answers a
- *    deliberate constant; a boolean nested in a returned object or array,
- *    one a pen helper consumes, and a comparison of the bare argument
- *    (`x != null`) read as literals and are not refused
+ *    deliberate constant; destructuring a parameter is a read, so an
+ *    optional filter chooses its callback outside the callback or reads
+ *    only inside the branch that uses the value (QUERY-PEN.md §14.10). A
+ *    boolean nested in a returned object or array, one a pen helper
+ *    consumes, and a test of the bare argument (`x != null`, `'a' in x`,
+ *    `typeof x`) are not refused
  */
 export class LinqBuildError extends CodedError {
   /**

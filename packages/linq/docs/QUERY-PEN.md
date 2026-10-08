@@ -173,8 +173,10 @@ value becomes the expression:
   (`select((u) => ({ id: u.id, n: from(rows).count() }))`); an
   enclosing capture's proxy used inside the nested one is `JL0002` by
   name — the inner document rebinds `$it`, so a correlated subquery
-  cannot be spelled this way. (`===` between proxies is untrappable and
-  therefore undetectable; do not compare proxies.)
+  cannot be spelled this way. (`===` between proxies is untrappable: a
+  callback that answers `u.a === u.b` read members and is refused with
+  `JL0109` (§14.10), but an identity test of bare proxies, `v === u`,
+  reads nothing and stays undetectable; do not compare proxies.)
 - **Some of JavaScript's own operators cannot be trapped.** A proxy is
   an object, so `&&`, `||`, `!`, `?:`, `in`, `typeof`, `Object.keys`,
   truthiness (`if (u.deleted)`), `===` and `!==` — and `==`/`!=` against
@@ -187,8 +189,10 @@ value becomes the expression:
   constant; a boolean the callback only uses — inside a returned object
   or array, as a pen helper's argument, or as the condition of a `?:`,
   `&&` or `||` that answers a capture — is not refused and still writes
-  a silently wrong document, and neither is a comparison of the bare
-  argument (`(u) => u != null`), which reads nothing. Use the expression
+  a silently wrong document, and neither is a test of the bare argument
+  (`(u) => u != null`), which reads nothing. Destructuring a parameter is
+  a read, so an optional filter chooses its callback outside the callback
+  (§14.10) rather than answering `true` after the read. Use the expression
   surface — `.and()`, `.or()`, `.not()` — for logic. The
   arithmetic and comparison operators (`u.age > 21`, `u.age + 1`,
   `${u.name}`, and `==` against a string, a number or a boolean) do ask
@@ -1355,7 +1359,9 @@ alike and mean different things, so they carry different messages.
 Captures NEST legally: a chain built and run inside a callback
 (`select((u) => ({ n: from(other).count() }))`) is ordinary, because it
 touches none of the enclosing proxies. `===` between proxies is
-untrappable and therefore undetectable; do not compare proxies.
+untrappable: a callback that answers `u.a === u.b` read members and is
+`JL0109` (§14.10), but an identity test of bare proxies (`v === u`) reads
+nothing and stays undetectable; do not compare proxies.
 
 ### 14.3 `JL0003` — the schema operators need a compiler
 
@@ -1576,23 +1582,61 @@ constant (`() => true`, `(x) => true`) and is written as one.
 
 | The spelling that trips it | The message | The spelling that works |
 |---|---|---|
-| `(v) => v.payload === null` | `a captured callback read its argument and answered the JavaScript boolean false — ===, !==, !, typeof and == null test the capture proxy, never the value, so the document would hold that constant; write .eq(null), .ne(x), .exists(), .isEmpty() or .not() — a deliberate constant reads nothing: () => true` | `(v) => v.payload.eq(null)` |
+| `(v) => v.payload === null` | `a captured callback read its argument and answered the JavaScript boolean false — ===, !==, !, typeof and == null test the capture proxy, never the value, so the document would hold that constant; write .eq(null), .ne(x), .exists(), .isEmpty() or .not(). A deliberate constant must read nothing, and destructuring a parameter or reading a member before choosing the answer is a read: choose the callback outside it (q.name ? ({ name }) => name.eq(q.name) : () => true) or read only inside the branch that uses the value` | `(v) => v.payload.eq(null)` |
 | `(v) => v.n !== 1` | the same message, naming `true` | `(v) => v.n.ne(1)` |
 | `(v) => !v.deleted`, `(v) => Boolean(v.deleted)` | the same message, naming `false` and `true` | `(v) => v.deleted.not()`, `(v) => v.deleted.eq(true)` |
 | `(v) => (v.n.eq(1) ? true : false)` | the same message, naming `true` | `(v) => v.n.eq(1)` |
 | `(v, p) => p.tenant === 'a'` | the same message, naming `false` | `(v, p) => p.tenant.eq('a')` |
-| `orderBy((v) => v.due === null)` | the same message, naming `false` | `orderBy((v) => v.due, { empty: 'least' })`, the items with no `due` first (a key is a number or a string, never a boolean) |
+| `({ name }) => (q.name ? name.eq(q.name) : true)`, `q.name` unset | the same message, naming `true` | `q.name ? ({ name }) => name.eq(q.name) : () => true`, or `(v) => (q.name ? v.name.eq(q.name) : true)` |
+| `orderBy((v) => v.due === null)` | the same message, naming `false` | none today (below) |
+
+**Destructuring a parameter is a read.** The optional-filter idiom
+`where(({ name }) => (q.name ? name.eq(q.name) : true))` is refused even
+when `q.name` is unset and `true` is exactly the answer meant: the
+destructuring reads `name` before the callback chooses, and to the
+capture a callback that read its argument and answered `true` is the
+`x.a !== null` mistake — the two cannot be told apart. A member hoisted
+into a local (`const n = x.name;`) is the same read. Choose the callback
+outside the callback, `where(q.name ? ({ name }) => name.eq(q.name) : () => true)`,
+or read only inside the branch that uses the value,
+`where((v) => (q.name ? v.name.eq(q.name) : true))`: with the filter off
+both write `true`, and with `q.name` set to `'x'` both write
+`{ "$eq": ["$it.name", "x"] }`. The same holds in every pen — a `check()`
+that destructures its externals, a flow guard or a subscription's `when`
+that destructures its scope.
+
+**An ordering key cannot test for `null`.** A key is a number, a string
+or the empty sequence, never a boolean: `orderBy((v) => v.due.eq(null))`
+is `JQ2005` at run time, and so was the `$key: false` the refused spelling
+used to write. `orderBy((v) => v.due)` already sorts an ABSENT `due`
+first (`{ empty: 'greatest' }` sorts it last), but a `null` `due` is
+`JQ2005` as a key too, and no spelling without a boolean key orders
+`null` items first today.
 
 Every pen's callback runs in this capture, so the refusal is the same in
-a schema `check()`, a forms rule, a flow guard, an app action or
-subscription, a JSLT `body()`, a model `compute()` or index condition and
-a migration assertion. What it cannot see still writes a silently wrong
-document, because the callback never answers the boolean itself or never
-read anything:
-- a comparison of the BARE argument reads nothing: `(x) => x != null` is
-  `true` and `(x) => x === undefined` is `false`, exactly as
-  `() => true` is — so §14.9's `.check(x => x != null)` still accepts
-  everything;
+a schema `check()`, a forms rule, a flow guard, an app action, patch path
+or subscription, a JSLT `body()`, a JTLT `query()` or `json()`, a model
+`compute()`, index, `expressionIndex()` or collection key, a migration
+assertion and the client's `include()` and `where()`. A callback that
+read its argument and answered a boolean used to be taken at every one
+of these sites — written as the constant (a `where`, a check, a forms
+rule, a guard, an action, a subscription's `when` or `key`, a JSLT body,
+a JTLT `json()`, a model `compute()`, a migration assertion, the client's
+`where()`), failing at run time with `JQ2005` (an `orderBy` key), or
+refused with the pen's own `JL0102` (a model index key, condition,
+`expressionIndex()` argument or composite part, a collection `key`, an
+app patch path), `JL0101` (a JTLT `query()`) or `JL0107` (the client's
+`include()`) — and is now `JL0109` at all of them. What it cannot see
+still writes a silently wrong document, because the callback never
+answers the boolean itself or never read anything:
+- a test of the BARE argument reads no member, so it answers what it
+  answers for any object, exactly as a constant would: `== null`,
+  `===`, `in`, `typeof`, `Object.keys`, `instanceof` and `Array.isArray`
+  over the argument itself — `(x) => x != null` and
+  `(x) => x instanceof Object` are `true`, `(x) => x === undefined`,
+  `(x) => 'a' in x` and `(x) => Array.isArray(x)` are `false` — and an
+  identity test of bare proxies (`v === u`); so §14.9's
+  `.check(x => x != null)` still accepts everything;
 - `&&`, `||` and `?:` answering a capture: `(v) => v.a && v.b` is
   `"$it.b"`;
 - a boolean a pen helper consumes: `v.a.eq(1).and(v.b === null)` folds

@@ -12,7 +12,7 @@
  * point.
  */
 
-import { captureExpression, noteRead, PARAMETERS } from './expression.js';
+import { captureEpoch, captureExpression, noteRead, PARAMETERS } from './expression.js';
 import { LinqBuildError } from './errors.js';
 
 /** No parameters are declared for a rule: `p.x` cannot appear. */
@@ -38,8 +38,9 @@ const article = (/** @type {string} */ what) =>
  * as `{}` — so it answers the capture's {@link PARAMETERS} key with a
  * refusal of its own, and asking for its keys (a spread, `Object.keys`)
  * is the same refusal. Reading a name records that the rule read its
- * argument ({@link noteRead}): `e.root === null` reads no member of the
- * value it answers, so the read is recorded here.
+ * argument ({@link noteRead}) — into the capture the proxy is made in,
+ * never a later one: `e.root === null` reads no member of the value it
+ * answers, so the read is recorded here.
  * @param {string} what - the method, for the message
  * @param {readonly string[]} names - the externals bound
  * @param {readonly any[]} proxies - one expression proxy per name
@@ -52,12 +53,13 @@ function externalsProxy(what, names, proxies, advice, noun) {
       `${article(what)} ${what} ${noun}'s externals argument is not a value — `
       + (names.length === 0 ? 'it binds no externals' : `read one by name: ${names.join(', ')}`));
   };
+  const epoch = captureEpoch();
   return new Proxy(Object.freeze({}), {
     ownKeys: notValue,
     get(_target, prop) {
       if (prop === PARAMETERS) return notValue;
       if (typeof prop === 'symbol') return undefined;
-      noteRead();
+      noteRead(epoch);
       const index = names.indexOf(/** @type {string} */ (prop));
       if (index !== -1) return proxies[index];
       const bound = names.length === 0
