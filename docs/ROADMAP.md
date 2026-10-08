@@ -374,10 +374,11 @@ what each does is its own documentation's job
   now qualifies managed journal capture and the shared leased job queue with
   concurrent claims and fenced checkpoints. Remaining subsystem work needs backend strategies, not
   setting capability flags optimistically.
-- [ ] **Introspection outside the model vocabulary.** Partial indexes,
-  direct SQL expression indexes and
+- [ ] **Introspection outside the model vocabulary.** A collection's
+  partial index, an entity's partial index whose condition does not read back
+  into the query grammar, direct SQL expression indexes and
   CHECK expressions outside the complete scalar enum grammar remain sorted
-  loss rows. **Format boundary:** a partial predicate or physical expression
+  loss rows. **Format boundary:** such a partial predicate or physical expression
   index has no equivalent model declaration; emitting an unconditional index
   would strengthen its meaning. Boolean-versus-integer origins and numeric
   precision erased by storage also cannot be inferred without metadata.
@@ -402,19 +403,21 @@ what each does is its own documentation's job
   cascades the store does not write — remain refused until their complete writer population has
   an executable oracle.
 - [ ] **Broader database invariant lowering.** Rules lower to verified triggers
-  on SQLite and PostgreSQL alike ([MODEL-FORMAT §13](../packages/db/docs/MODEL-FORMAT.md#13-persistence-invariants)).
-  Arbitrary trigger programs (a `TableTrigger` stays SQLite SQL), expression
-  families outside the bounded grammar (arithmetic, membership, aggregates over
-  other rows), existence probes keyed by anything but the target's primary key
-  (a physical layout verifies no unique index), probes of the rule's own table
-  and the stored-row walk of a PostgreSQL migration over physical entities
-  remain open. Store-only rules retain their explicit writer qualification.
-  SQLite's change test compares each column under its declared collation and
-  stored spelling (§13.4), where PostgreSQL and the store compare by codec;
-  comparing by code point would change the text of every installed update
-  program, so it waits for a reviewed migration of installed programs.
-  General interval seek/indexing remains separate from the supported
-  cross-member predicate.
+  on SQLite and PostgreSQL alike ([MODEL-FORMAT §13](../packages/db/docs/MODEL-FORMAT.md#13-persistence-invariants)),
+  over comparisons, membership, existence probes keyed by a verified unique
+  index and integer `$add`/`$sub`/`$neg` inside the safe-integer domain.
+  Still outside: `$mul`, `$div`, `$idiv`, `$mod` and arithmetic over a
+  `number` operand (the engine's double rounding and division are not SQL's);
+  `$starts-with` (a code-point prefix spelling and an oracle of its own on each
+  engine); an arbitrary trigger program (a `TableTrigger` stays SQLite SQL); a
+  probe of the rule's own table (PostgreSQL runs row triggers at statement end
+  and SQLite per row); an aggregate over other rows; and the stored-row walk of
+  a migration that adds a rule (it judges no stored row today). Store-only rules
+  retain their explicit writer qualification. SQLite's change test compares
+  each column under its declared collation and stored spelling (§13.4), where
+  PostgreSQL and the store compare by codec; comparing by code point would
+  change the text of every installed update program, so it waits for a
+  reviewed migration of installed programs.
 - [ ] **Broader native authoring for legacy SQL.** The executable census now
   proves five adopted-column read families and three SQLite mutation families
   ([native contracts](../packages/db/docs/NATIVE-PLANS.md)). Receipt history
@@ -628,13 +631,22 @@ what each does is its own documentation's job
   running after its client went away, past both `pg_cancel_backend` and
   `pg_terminate_backend`. Wanted: the typed fold a column gets, or a bound on the
   terms such a chain may compile to.
-- [ ] **An interval declaration is needed before `$overlaps` can seek.**
-  The current prefilter retains malformed stored spans so the engine can raise
-  the required error; that extra disjunct prevents an index seek.
-  **Model-format boundary:** declaring a start/end pair as well-formed requires
-  a cross-member constraint carried into DDL CHECKs, migration parity and
-  introspection, plus the corresponding `createIntervalIndex` resident shape.
-  Silently dropping inverted spans would violate QUERY-FORMAT §8.16.
+- [ ] **A join over a `$range` inner source runs as a nested loop.** The
+  engine builds its hash, spatial and interval probes over an uncorrelated
+  inner binding on the first outer tuple, but it declines a `$range` source and
+  answers that join by the nested loop (the json package's ARCHITECTURE, "Interval
+  joins"): the same pairs, order and first error, quadratically — about 178 ms for two 2,000-item ranges where a
+  probe over a materialized source takes 1 ms. Wanted: build the probe by
+  counting when the range fits the guard that bounds a materialized source
+  (`JQ2007`), keeping the nested loop's pairs, order and errors.
+- [ ] **A capture argument answers `JSON.stringify` and array methods with raw
+  host errors.** Every unknown name on a captured value is a member proxy, so
+  `JSON.stringify(x)` of a capture argument recurses until a `RangeError` and
+  `x.tags.includes('a')` is a raw `TypeError` instead of a coded refusal.
+  Wanted: a `toJSON` special case in the value proxy's `get` (that would shadow
+  a member of that name, which `get('toJSON')` still reaches) and an `apply`
+  trap for array methods, each answering a coded refusal that names the
+  query-language spelling.
 
 ## Lexical search (cross-package)
 
