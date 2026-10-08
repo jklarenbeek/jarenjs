@@ -25,6 +25,7 @@ import { DbCompileError, DbRuntimeError } from '../errors.js';
 import { chain, useStatementOnce } from '../driver.js';
 import { checkSqliteTargetPath } from '../backup.js';
 import { sqliteDatabasePath } from '../migration-target.js';
+import { sqliteDialect } from '../dialects/sqlite.js';
 
 /** The files SQLite keeps beside a database: its rollback journal, its
  * write-ahead log and that log's shared-memory index. */
@@ -278,7 +279,7 @@ export async function copyBunDatabase(db, target, options) {
   // store closed meanwhile is then refused as closed (`JD2063`) at
   // publication, not met here as a raw closed-handle error
   const library = file === '' ? null : firstRow(db, SOURCE_ID)?.id;
-  const timeout = file === '' ? 0 : (firstRow(db, 'PRAGMA busy_timeout')?.timeout ?? 0);
+  const timeout = file === '' ? 0 : (firstRow(db, sqliteDialect.introspect.pragma('busy_timeout'))?.timeout ?? 0);
   const sqlite = file === '' ? null : await import('node:sqlite').catch(() => null);
   if (typeof sqlite?.backup === 'function' && typeof sqlite?.DatabaseSync === 'function'
     && nodeSqliteLibrary(sqlite) === library) {
@@ -319,7 +320,7 @@ async function asRollbackJournal(path) {
   // `exec` only: under Bun, `close()` leaves a connection with an
   // unfinalized statement open (see copyBunDatabase)
   const db = new sqlite.DatabaseSync(path);
-  try { db.exec('PRAGMA journal_mode=DELETE'); }
+  try { db.exec(sqliteDialect.pragma.set('journal_mode', 'DELETE')); }
   finally { db.close(); }
 }
 
@@ -370,16 +371,16 @@ async function insideOneRead(connection, copy) {
   try {
     // the read transaction starts at its first read
     connection.exec('SELECT count(*) FROM sqlite_schema');
-    const set = await useStatementOnce(connection, 'PRAGMA query_only', (/** @type {any} */ statement) => statement.get([]));
+    const set = await useStatementOnce(connection, sqliteDialect.introspect.pragma('query_only'), (/** @type {any} */ statement) => statement.get([]));
     if (Number(set?.query_only ?? 0) === 0) {
-      connection.exec('PRAGMA query_only=1');
+      connection.exec(sqliteDialect.pragma.set('query_only', 1));
       restore = 0;
     }
     return await copy();
   }
   finally {
     if (restore !== null) {
-      try { connection.exec(`PRAGMA query_only=${restore}`); }
+      try { connection.exec(sqliteDialect.pragma.set('query_only', restore)); }
       catch { /* a closed connection keeps no setting */ }
     }
     try { connection.exec('COMMIT'); }
