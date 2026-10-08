@@ -52,7 +52,7 @@ import { postgresJobs } from './postgres-jobs.js';
 import { postgresReplication } from './postgres-replication.js';
 import { POSTGRES_LOCK_CLASSES, OWNER_LOCK, transactionLock } from './postgres-locks.js';
 import { readExpression } from './expression-read.js';
-import { postgresChecks } from './check-read.js';
+import { postgresChecks, POSTGRES_PREDICATE, POSTGRES_PREDICATE_ESCAPED } from './check-read.js';
 import { postgresReadBack } from './postgres-read-back.js';
 import { modelPath } from '../model-path.js';
 
@@ -357,6 +357,59 @@ function memberPathOf(expression) {
 }
 
 /**
+ * The segments a `#>` array literal (`{span,"a b",0}`) addresses — as
+ * {@link memberPathOf} reads one out of a whole expression — or `null`.
+ * @param {string} literal
+ * @returns {import('../dialect.js').JsonPathSegment[] | null}
+ */
+function pathSegmentsOf(literal) {
+  if (!literal.startsWith('{') || !literal.endsWith('}')) return null;
+  const elements = parseArrayLiteral(literal.slice(1, -1));
+  if (elements === null || elements.length === 0) return null;
+  return elements.map((element) => (/^(?:0|[1-9][0-9]*)$/.test(element)
+    ? { index: Number(element) }
+    : { name: element }));
+}
+
+/**
+ * How this dialect's interval CHECK reads back through the one interval
+ * reader, for a session whose `standard_conforming_strings` is as given.
+ * The server deparses `jsonb_typeof((doc #> '{span}'::text[]))` where the
+ * dialect wrote `jsonb_typeof(("doc" #> '{"span"}'))` — bare lower-case
+ * names, a cast on the array literal, the literal's quoting its own, a
+ * type on every constant — and both read as one; a bound is an integer
+ * by its column: present, and equal to its own truncation.
+ * @param {boolean} conforming
+ * @returns {import('./check-read.js').IntervalSpelling}
+ */
+function intervalSpelling(conforming) {
+  return {
+    ...(conforming ? POSTGRES_PREDICATE : POSTGRES_PREDICATE_ESCAPED),
+    integers: 'column',
+    typeOf: (tokens, at) => {
+      const symbol = (/** @type {number} */ i, /** @type {string} */ value) => tokens[i]?.kind === 'symbol' && tokens[i].value === value;
+      if (tokens[at]?.kind !== 'word' || tokens[at].value.toLowerCase() !== 'jsonb_typeof' || !symbol(at + 1, '(')) return undefined;
+      let i = at + 2;
+      let depth = 0;
+      for (; symbol(i, '('); i++) depth++;
+      const column = tokens[i];
+      if (column === undefined || (column.kind !== 'identifier' && column.kind !== 'word')) return undefined;
+      if (!symbol(i + 1, '#') || !symbol(i + 2, '>') || tokens[i + 3]?.kind !== 'string') return undefined;
+      const segments = pathSegmentsOf(tokens[i + 3].value);
+      if (segments === null) return undefined;
+      i += 4;
+      if (symbol(i, '::')) {
+        if (tokens[i + 1]?.kind !== 'word' || tokens[i + 1].value.toLowerCase() !== 'text' || !symbol(i + 2, '[') || !symbol(i + 3, ']')) return undefined;
+        i += 4;
+      }
+      for (; depth > 0; depth--, i++) if (!symbol(i, ')')) return undefined;
+      if (!symbol(i, ')')) return undefined;
+      return { column: column.value, segments, end: i + 1 };
+    },
+  };
+}
+
+/**
  * The declared index EXPRESSION a generated column computes, out of the
  * SQL this dialect wrote for it. Here the engine calls its OWN
  * immutable function, so `byName` maps the host's `sql` name back to the
@@ -492,6 +545,18 @@ export function postgresDialect(options = undefined) {
       : `LIMIT ${limit === null ? 'ALL' : limit}`),
     jsonPathText,
     jsonExtract,
+    // the two engine-specific pieces of a declared interval's CHECK: the
+    // span member's JSON type by name (`jsonb_typeof` itself, where the
+    // query layer's `jsonTypeOf` folds the server's names into the
+    // engine's), and each bound held to an integer by its COLUMN — the
+    // generated numeric column is NULL for every non-number (so a boolean,
+    // a text, a half span fail `IS NOT NULL`) and holds a fraction, which
+    // `trunc` tells apart
+    jsonTypeName: (columnSql, pathText) => `jsonb_typeof(${jsonExtract(columnSql, pathText)})`,
+    integerBounds: ({ start, end }) =>
+      `${start.sql} IS NOT NULL AND ${end.sql} IS NOT NULL AND `
+      + `${start.sql} = trunc(${start.sql}) AND ${end.sql} = trunc(${end.sql})`,
+    intervalSpelling,
     // Concurrent first opens can both observe an absent relation before
     // either CREATE commits. Ordinary unique violations remain failures. A
     // rule program's function and trigger race as measured: the function on
@@ -753,6 +818,9 @@ export function postgresDialect(options = undefined) {
         + "AND a.attgenerated <> '' ORDER BY a.attnum",
       checks: (table) =>
         'SELECT c.conname AS name, pg_get_expr(c.conbin, c.conrelid) AS expression, '
+        // a CHECK added NOT VALID holds nothing for the rows already there
+        + 'CASE WHEN c.convalidated THEN 1 ELSE 0 END AS validated, '
+        + `${CONFORMING} AS conforming, `
         + 'EXISTS (SELECT 1 FROM pg_attribute ca JOIN pg_collation co ON co.oid = ca.attcollation '
         + 'WHERE ca.attrelid = c.conrelid AND ca.attnum = ANY(c.conkey) '
         + 'AND NOT co.collisdeterministic) AS unsafe_collation '

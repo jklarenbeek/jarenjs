@@ -150,6 +150,17 @@ function corpusOf(dialect) {
   out['ddl.dropColumn'] = dialect.ddl.dropColumn('rows', 'extra');
   out['ddl.createIndex'] = dialect.ddl
     .createIndex({ name: 'rows_extra', table: 'rows', columns: ['extra'], unique: true });
+  out['ddl.intervalCheck'] = dialect.ddl.intervalCheck({
+    docColumn: 'doc',
+    span: /** @type {string} */ (dialect.jsonPathText([{ name: 'span' }])),
+    bounds: {
+      start: /** @type {string} */ (dialect.jsonPathText([{ name: 'span' }, { name: 'start' }])),
+      end: /** @type {string} */ (dialect.jsonPathText([{ name: 'span' }, { name: 'end' }])),
+    },
+    start: dialect.quoteIdentifier('gx_span_start'),
+    end: dialect.quoteIdentifier('gx_span_end'),
+    maxDuration: 28_800_000,
+  });
   out['ddl.dropIndex'] = dialect.ddl.dropIndex('rows_extra');
   out['ddl.createVirtualTable'] = dialect.ddl.createVirtualTable({ name: virtual.name });
   out['ddl.dropVirtualTable'] = dialect.ddl.dropVirtualTable(virtual.name);

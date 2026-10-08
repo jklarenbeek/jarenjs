@@ -198,7 +198,7 @@ no relations (MODEL-FORMAT §9.1); one physical engine sits under both.
 
 | Method | Emits | Type reading | Status |
 |---|---|---|---|
-| `collection(schema, { key?, identity?, indexes?, renamedFrom? })` | `{ schema, key?, identity?, indexes?, 'x-rename'? }` — `key` is an RFC 6901 pointer, a captured member path (`(d) => d.id` → `/id`) or `null` (the store allocates, `identity` says how); the other options ride verbatim, and an `indexes` entry written by hand rather than by `index()` is held to what `index()` writes | `CollectionSpec<Infer<B>>`, carrying the document shape its paths are checked against | native; an option outside the four, a key that is neither pointer nor lambda nor `null`, an `indexes` that is not an array of `index()` entries, an entry member outside the index grammar or of the wrong type, all `JL0101` |
+| `collection(schema, { key?, identity?, indexes?, intervals?, renamedFrom? })` | `{ schema, key?, identity?, indexes?, intervals?, 'x-rename'? }` — `key` is an RFC 6901 pointer, a captured member path (`(d) => d.id` → `/id`) or `null` (the store allocates, `identity` says how); the other options ride verbatim, an `indexes` entry written by hand rather than by `index()` is held to what `index()` writes, and an `intervals` entry is closed to `name`, `path` and `maxDuration` (two strings and a number) | `CollectionSpec<Infer<B>>`, carrying the document shape its paths are checked against | native; an option outside the five, a key that is neither pointer nor lambda nor `null`, an `indexes` that is not an array of `index()` entries, an entry member outside the index grammar or of the wrong type, an `intervals` that is not an array of objects, an interval member outside the three or of the wrong type, all `JL0101` |
 | `index(path, options?)` | `{ name, path, unique?, derive?, precision?, dims?, physical?, where? }` — `path` is a captured lambda (`(p) => p.cell` → `$.cell`), a non-empty array of them (a composite), or a JSONPath string; `name` defaults to `by_<segments>`; each of the rest is the JSON type the grammar declares — `unique` a boolean, `derive` and `physical` strings, `precision` and `dims` numbers, `where` a query document — and rides verbatim for the store's model walk to judge its value (§2.1); a `where` lambda is captured into the query grammar (`(d) => d.status.in(['active', 'pending'])` → `{ $eq: ['$.status', { $seq: ['active', 'pending'] }] }`) | `IndexPath<D>` and `IndexCondition<D>` over the collection's or the entity's shape: a member the shape lacks does not compile, nor does a `where` that is neither a predicate nor a query document | native; an option outside the seven, or of the wrong type, is `JL0101`; a lambda that answers an operator result or a surface method is `JL0102`, and so is a `where` lambda that answers no predicate |
 
 | `expressionIndex(expression, options?)` | `{ name, expression, unique? }` — an index over a COMPUTED value: a `{ call, args }` node whose arguments are member lambdas, JSONPath strings, JSON scalars or further calls; `name` defaults to `by_<call>_<members>` | the expression's member lambdas are checked against the collection's shape | native; a node outside the vocabulary, an option outside the two, a `unique` that is not a boolean, and anything that looks like SQL text are all `JL0101` |
@@ -227,6 +227,17 @@ path a condition reads. `in()` writes membership as `$eq` against a
 lambda that answers no predicate — a member read alone — is `JL0102`; the
 types refuse one that answers no boolean expression, so only a boolean
 member read alone compiles and meets that refusal at build.
+
+`intervals` declares a span member an interval (MODEL-FORMAT §2): each
+entry `{ name, path, maxDuration? }` rides verbatim — `name` and `path`
+strings, `maxDuration` a number — and everything about its VALUE (the
+member's shape, the indexes its bounds need, the duration's range) is
+the store's model walk to judge (`JD0005`). It is the one option that
+makes a collection stricter than its schema: every stored span becomes
+a half-open interval of two safe integers, for the store and for every
+other writer alike, so declare it where every document the collection
+already holds has one — a document that does not is refused at its next
+write (`JD2003`), and a table that holds one cannot carry the CHECK.
 
 `expressionIndex()` takes only `name` and `unique`, because an
 expression names the members it reads itself — nothing that describes a
@@ -825,11 +836,14 @@ This section is the vocabulary this pen adds.
 | `m.index((p) => p.a, { name: '9 x' })` | `index() name takes a definition name (letters, digits, '_', '.', '-', not starting with a digit), got a string` | an identifier-shaped name |
 | `m.collection(m.object({}), { key: 'id' })` | `collection() key is an RFC 6901 pointer, a member path lambda, or null` | `'/id'`, or `(d) => d.id` |
 | `m.collection({}, {})` | `collection() takes a schema builder as its document schema` | a builder |
-| `m.collection(b, { keys: [] })` | `collection() does not take 'keys' — the options are key, identity, indexes, renamedFrom` | `key` |
+| `m.collection(b, { keys: [] })` | `collection() does not take 'keys' — the options are key, identity, indexes, intervals, renamedFrom` | `key` |
 | `m.collection(b, { indexes: {} })` | `collection() indexes is an array of index() entries` | an array |
 | `m.collection(b, { indexes: [{ path: '$.a' }] })` | `collection() indexes[0] is not an index() entry` | `m.index('$.a')` |
 | `m.collection(b, { indexes: [{ name: 'by_a', path: '$.a', uniqe: true }] })` | `collection() indexes[0] does not take 'uniqe' — it takes name, path, expression, unique, derive, precision, dims, physical, where` — `docPath` `/uniqe` | `unique`, or `m.index('$.a', { unique: true })` |
 | `m.collection(b, { indexes: [{ name: 'by_a', path: '$.a', unique: 1 }] })` | `collection() indexes[0] unique takes a boolean, got 1` | `unique: true` |
+| `m.collection(b, { intervals: { name: 'slot', path: '$.span' } })` | `collection() intervals is an array of { name, path, maxDuration? } entries` | an array |
+| `m.collection(b, { intervals: [{ name: 'slot', path: '$.span', maxDuratoin: 1 }] })` | `collection() intervals[0] does not take 'maxDuratoin' — it takes name, path, maxDuration` — `docPath` `/maxDuratoin` | `maxDuration` |
+| `m.collection(b, { intervals: [{ name: 'slot', path: '$.span', maxDuration: '8h' }] })` | `collection() intervals[0] maxDuration takes a number, got '8h'` | milliseconds, `28_800_000` |
 | `m.defineModel({})` | `defineModel() needs entities, collections, or both` | declare one of the two |
 | `m.defineModel({ tables: {} })` | `defineModel() does not take 'tables'` | `entities` or `collections` |
 | `m.defineModel({ entities: [] })` | `defineModel() entities is a plain object of declarations` | a plain object |

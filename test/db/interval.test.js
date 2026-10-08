@@ -206,3 +206,48 @@ describe('$overlaps over a declared interval', () => {
     await store.close();
   });
 });
+
+describe('a declared interval makes the conjunction exact', () => {
+  /** The same model, declaring the span: no stored span is empty or reversed. */
+  const DECLARED = { ...MODEL(MAPPED) };
+  DECLARED.collections = { booking: { ...MODEL(MAPPED).collections.booking, intervals: [{ name: 'slot', path: '$.span' }] } };
+  const seededDeclared = async (rows = ROWS) => {
+    const store = await openStore(DECLARED, { driver: nodeDriver() });
+    const booking = store.collection('booking');
+    for (const row of rows) await booking.insert(row);
+    return { store, booking };
+  };
+
+  it('plans the operator itself: two comparisons, no disjunct, nothing to refine, no UDF', async () => {
+    const { store, booking } = await seededDeclared();
+    const explained = await booking.explain(flwor(PROBE));
+    assert.deepStrictEqual(explained.prefilters, []);
+    assert.strictEqual(explained.mode, 'native');
+    assert.deepStrictEqual(explained.udfs, []);
+    assert.match(explained.sql, /"gx_span_start" < \? AND "gx_span_end" > \?/);
+    assert.doesNotMatch(explained.sql, />= "gx_span_end"/);
+    assert.doesNotMatch(explained.sql, /json_type\("doc", '\$\."span"/);
+    // and under a foreign profile there is no residual to name
+    const foreign = await booking.explain(flwor(PROBE), { profile: PROFILE });
+    assert.strictEqual(foreign.mode, 'native');
+    assert.deepStrictEqual(foreign.prefilters, []);
+    await store.close();
+  });
+
+  it('answers what the engine answers over the boundary corpus, the row with no span included', async () => {
+    const { store, booking } = await seededDeclared();
+    const document = flwor(PROBE);
+    assert.deepStrictEqual(await booking.execute(document), ['one-instant', 'inside']);
+    assert.deepStrictEqual(await booking.execute(document, { pushdown: false }), ['one-instant', 'inside']);
+    assert.deepStrictEqual(await booking.execute(document, { profile: { maxRows: 2 } }), ['one-instant', 'inside']);
+    await store.close();
+  });
+
+  it('holds no span the operator raises on: an empty or reversed one is refused at the write', async () => {
+    const { store, booking } = await seededDeclared();
+    for (const span of [{ start: 300, end: 300 }, { start: 500, end: 100 }])
+      await assert.rejects(async () => booking.insert({ id: 'bad', room: 'e', span }), { code: 'JD2003' });
+    assert.deepStrictEqual(await booking.execute(flwor(PROBE)), resident(flwor(PROBE), ROWS));
+    await store.close();
+  });
+});

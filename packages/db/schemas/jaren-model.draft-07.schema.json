@@ -68,6 +68,13 @@
             "$ref": "#/definitions/index"
           }
         },
+        "intervals": {
+          "description": "Declared intervals: each names a member the schema types as an object whose start and end are both required integers, each bound indexed by its path. Every stored span is then half-open (start < end) for every writer, enforced by the store before the statement and by a CHECK on the table, and $overlaps over it plans exactly.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/interval"
+          }
+        },
         "x-rename": {
           "description": "Migration hint: this collection was previously named the given identifier. Read by the migration planner (a rename cannot be inferred from a diff); ignored by the store.",
           "type": "string",
@@ -76,6 +83,32 @@
       },
       "required": [
         "schema"
+      ],
+      "additionalProperties": false
+    },
+    "interval": {
+      "description": "One declared interval over a span member: a name, unique within its collection, that names the table's CHECK constraint <name>_interval; the singular path of the span member; and, optionally, the longest span the collection holds.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "The interval name, unique within its collection; <name>_interval, the constraint it names, fits 63 bytes.",
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+        },
+        "path": {
+          "description": "A singular JSONPath expression selecting the span member — an object the schema types with required integer start and end bounds, each indexed by its own path.",
+          "type": "string"
+        },
+        "maxDuration": {
+          "description": "The longest span the collection holds, in milliseconds: end - start <= maxDuration, held by the store before the statement and by the table's CHECK for every other writer.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "name",
+        "path"
       ],
       "additionalProperties": false
     },

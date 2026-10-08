@@ -33,7 +33,7 @@ import { chain, toPromise, isThenable, attempt, abortReason, createStatementOwne
 import { createSessionRouter } from './sessions.js';
 import { isPlainOptions, refuseUnknownMembers, refuseUnknownModelMembers, readOptions, readControls } from './options.js';
 import { canonicalKeyText, namesNoNumber, noNumberKeyReason } from './key-text.js';
-import { planCollection, planEntity, planJoinTable, refuseNameCollisions, verifyShape } from './ddl.js';
+import { planCollection, planEntity, planJoinTable, refuseNameCollisions, verifyShape, compileIndexPath, canonicalOf } from './ddl.js';
 import { translatePatch } from './patch-sql.js';
 import { createQueryEngine, createQueryState, createEntityQueryEngine, createLoadEngine } from './query.js';
 import { CLOSED_UNDER, admitCursor, admitSyncCursor, createCursor, createSyncCursor, shareCursor } from './cursor.js';
@@ -59,7 +59,7 @@ import { normalizeEventTime } from './live-time.js';
 import { createJobEngine, JOB_DEFAULTS } from './jobs.js';
 import { createOwnerLease, OWNER_LEASE_DEFAULT_MS, OWNER_LEASE_MIN_MS } from './owner.js';
 import { introspectModel, readSchema } from './introspect.js';
-import { collectEntityRoots, entityRoot } from './plan.js';
+import { collectEntityRoots, entityRoot, intervalBounds } from './plan.js';
 import {
   DERIVE_KINDS, PHYSICAL_KINDS, PRECISION_MIN, PRECISION_MAX, DIMS_MIN, DIMS_MAX,
   derivedValue, memberAt, storedMemberForm, registerDeriveFunctions,
@@ -78,8 +78,12 @@ const IDENTITIES = new Set(['uuid', 'integer']);
  * §2): the canonical schema says `additionalProperties: false` at each, and
  * the runtime agrees. `x-rename` is the migration planner's hint. */
 const MODEL_MEMBERS = ['$model', 'collections', 'entities'];
-const COLLECTION_MEMBERS = ['schema', 'key', 'identity', 'indexes', 'x-rename'];
+const COLLECTION_MEMBERS = ['schema', 'key', 'identity', 'indexes', 'intervals', 'x-rename'];
 const INDEX_MEMBERS = ['name', 'path', 'expression', 'unique', 'where', 'derive', 'precision', 'dims', 'physical'];
+const INTERVAL_MEMBERS = ['name', 'path', 'maxDuration'];
+/** The bytes a constraint name may take on either engine (PostgreSQL's identifier limit), so a model opens on both. */
+const CONSTRAINT_NAME_BYTES = 63;
+const UTF8 = new TextEncoder();
 
 /**
  * @param {string} code
@@ -401,9 +405,143 @@ export function normalizeModel(model, expressions = undefined) {
       keySegments,
       identity,
       indexes,
+      intervals: normalizeIntervals(spec, docPath, indexes),
     });
   }
   return normalized;
+}
+
+/**
+ * The declared intervals of one collection, each closed to `name`, `path`
+ * and `maxDuration` and held to its rules — every failure `JD0005` at the
+ * member. The path names a member the schema types as a half-open span
+ * (the planner's one rule, `intervalBounds`) whose two bounds are typed
+ * `integer` — the CHECK's integer test would refuse the fractions a
+ * `number` bound admits — and each indexed by its path, since a bound
+ * seeks, and the CHECK reads, through the generated column a plain index
+ * gives it. The name is an identifier, unique among the collection's
+ * intervals, naming a `<name>_interval` constraint of at most 63 bytes.
+ * @param {any} spec - the collection declaration
+ * @param {string} docPath
+ * @param {any[]} indexes - the collection's normalized indexes
+ * @returns {any[]} each with its span segments and canonical, the two
+ *   bounds' canonicals and `maxDuration` (`null` when none)
+ */
+function normalizeIntervals(spec, docPath, indexes) {
+  const declared = spec.intervals ?? [];
+  if (!Array.isArray(declared))
+    throw modelError('JD0005', 'intervals must be an array', `${docPath}/intervals`);
+  if (declared.length === 0) return [];
+  // the paths a plain index gives a generated column: a derived or an
+  // expression index makes none for the member itself
+  /** @type {Map<string, string>} */
+  const indexed = new Map();
+  for (const index of indexes) {
+    if (index.expression !== undefined || index.derive) continue;
+    for (const path of index.paths) {
+      const { canonical } = compileIndexPath(path, `${index.docPath}/path`);
+      indexed.set(canonical, canonical);
+    }
+  }
+  const names = new Set();
+  const intervals = [];
+  for (let i = 0; i < declared.length; i++) {
+    const interval = declared[i];
+    const at = `${docPath}/intervals/${i}`;
+    if (interval === null || typeof interval !== 'object' || Array.isArray(interval))
+      throw modelError('JD0005', 'an interval must be an object', at);
+    refuseUnknownModelMembers(interval, INTERVAL_MEMBERS, at, 'interval');
+    if (typeof interval.name !== 'string' || !COLLECTION_NAME.test(interval.name))
+      throw modelError('JD0005', 'an interval needs an identifier name', `${at}/name`);
+    if (names.has(interval.name))
+      throw modelError('JD0005', `duplicate interval name '${interval.name}'`, `${at}/name`);
+    names.add(interval.name);
+    const constraint = `${interval.name}_interval`;
+    if (UTF8.encode(constraint).length > CONSTRAINT_NAME_BYTES) {
+      throw modelError('JD0005',
+        `the constraint name '${constraint}' exceeds ${CONSTRAINT_NAME_BYTES} bytes`, `${at}/name`);
+    }
+    if (typeof interval.path !== 'string' || interval.path === '') {
+      throw modelError('JD0005',
+        'an interval path is a singular JSONPath string selecting the span member', `${at}/path`);
+    }
+    let compiled;
+    try {
+      compiled = compileIndexPath(interval.path, `${at}/path`);
+    }
+    catch (cause) {
+      throw new DbCompileError('JD0005',
+        `the interval path '${interval.path}' must be a singular JSONPath selecting the span member`,
+        `${at}/path`, /** @type {Error} */ (cause));
+    }
+    const bounds = intervalBounds({ segments: compiled.segments }, { schema: spec.schema, columnByCanonical: indexed });
+    if (bounds === null) {
+      throw modelError('JD0005',
+        `the interval path '${interval.path}' must select a member the schema types as an object whose `
+        + 'start and end are both required and both numeric (a $ref or an array type is not read here)', `${at}/path`);
+    }
+    for (const bound of [bounds.start, bounds.end]) {
+      const boundPath = `$${canonicalOf(bound.segments)}`;
+      if (bound.type !== 'integer') {
+        throw modelError('JD0005',
+          `the interval bound '${boundPath}' is typed ${bound.type}: an interval bound is typed integer, `
+          + 'since the CHECK refuses the fractional bound a number admits', `${at}/path`);
+      }
+      if (bound.column === null) {
+        throw modelError('JD0005',
+          `the interval bound '${boundPath}' has no index: declare an index over its path `
+          + `({ "path": "${boundPath}" }), which gives it the column the CHECK and the plan read`, `${at}/path`);
+      }
+    }
+    let maxDuration = null;
+    if (interval.maxDuration !== undefined) {
+      if (!Number.isSafeInteger(interval.maxDuration) || interval.maxDuration < 1) {
+        throw modelError('JD0005',
+          `maxDuration is a positive safe integer of milliseconds, got ${JSON.stringify(interval.maxDuration)}`,
+          `${at}/maxDuration`);
+      }
+      maxDuration = interval.maxDuration;
+    }
+    intervals.push({
+      name: interval.name,
+      constraint,
+      path: interval.path,
+      segments: compiled.segments,
+      canonical: compiled.canonical,
+      start: { canonical: canonicalOf(bounds.start.segments) },
+      end: { canonical: canonicalOf(bounds.end.segments) },
+      maxDuration,
+      docPath: at,
+    });
+  }
+  return intervals;
+}
+
+/**
+ * Why a span member would not be stored under a declared interval, or
+ * `null`: absent is fine; present, it is an object whose `start` and `end`
+ * are safe integers, in order, and — with a maximum — no further apart
+ * than it. The rule the table's CHECK holds for every other writer,
+ * judged on the document before any statement.
+ * @param {unknown} span
+ * @param {number | null} maxDuration
+ * @returns {string | null}
+ */
+function spanFault(span, maxDuration) {
+  if (span === undefined) return null;
+  if (span === null || typeof span !== 'object' || Array.isArray(span)) {
+    const what = span === null ? 'null' : Array.isArray(span) ? 'an array' : `a ${typeof span}`;
+    return `is ${what}, not an object with start and end`;
+  }
+  const { start, end } = /** @type {{ start?: unknown, end?: unknown }} */ (span);
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end))
+    return 'needs start and end both present as safe integers';
+  const from = /** @type {number} */ (start);
+  const to = /** @type {number} */ (end);
+  if (!(from < to)) return `has its end ${to} at or before its start ${from}: a span is half-open and never empty`;
+  if (maxDuration !== null && to - from > maxDuration)
+    return `lasts ${to - from} ms, longer than its maxDuration of ${maxDuration} ms`;
+  return null;
 }
 
 /**
@@ -827,6 +965,17 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
   });
 
   const checkValid = (doc) => {
+    // a declared interval holds a half-open span of two safe integers, or
+    // no span at all: refused here, before the statement, hook or no hook
+    // — the CHECK on the table holds the same rule for every other writer
+    for (const interval of collection.intervals) {
+      const fault = spanFault(memberAt(doc, interval.segments), interval.maxDuration);
+      if (fault !== null) {
+        throw new DbRuntimeError('JD2003',
+          `collection '${collection.name}' rejected the document: the interval '${interval.name}' at ${interval.path} ${fault}`,
+          { docPath: collection.docPath, collection: collection.name });
+      }
+    }
     if (validate === null) return;
     const result = validate(doc);
     const valid = result === true || result?.valid === true;

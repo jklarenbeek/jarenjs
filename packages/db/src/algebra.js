@@ -65,7 +65,7 @@ export const PLAN_VERSION = 2;
  *   { p: 'cellIn', column: string, cells: string[], keepEmpty?: boolean } |
  *   { p: 'cellPrefix', column: string, prefix: string } |
  *   { p: 'interval', columns: { start: string, end: string },
- *     probe: { from: number, to: number } } |
+ *     probe: { from: number, to: number }, declared?: true } |
  *   { p: 'colCmp', op: 'eq' | 'lt' | 'le' | 'gt' | 'ge',
  *     column: string, operand: { lit: unknown } | { seek: string } }
  * )} PlanPredicate
@@ -100,10 +100,12 @@ export const PLAN_VERSION = 2;
  *   types as an object of two REQUIRED numeric bounds, so a stored
  *   bound that is absent or textual is a row the collection cannot
  *   hold. It is true where the row's half-open span meets the probe's
- *   — and ALSO where the row's own span is empty or reversed, which is
- *   not an overlap but a row §8.16 RAISES on: a pre-filter narrows, and
- *   a narrowing that swallowed an error would answer where the engine
- *   does not.
+ *   — and, undeclared, ALSO where the row's own span is empty or
+ *   reversed, which is not an overlap but a row §8.16 RAISES on: a
+ *   pre-filter narrows, and a narrowing that swallowed an error would
+ *   answer where the engine does not. `declared` marks the member a
+ *   model interval, whose store and CHECK hold no such span: the
+ *   conjunction alone, exact.
  *
  * @typedef {(
  *   { p: 'leaf', index: number } |

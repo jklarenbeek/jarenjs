@@ -15,7 +15,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { sqliteDialect } from '@jarenjs/db';
 import { postgresDialect } from '@jarenjs/db/postgres';
-import { POSTGRES_PREDICATE, POSTGRES_PREDICATE_ESCAPED, SQLITE_PREDICATE, decimalText, readPredicate } from '../../packages/db/src/dialects/check-read.js';
+import { POSTGRES_PREDICATE, POSTGRES_PREDICATE_ESCAPED, SQLITE_PREDICATE, decimalText, readIntervalCheck, readPredicate } from '../../packages/db/src/dialects/check-read.js';
 import { expressionForm, postgresReadBack } from '../../packages/db/src/dialects/postgres-read-back.js';
 import { rowPaths, rowPredicate } from '../../packages/db/src/dialects/row-predicate.js';
 import { SQLITE } from '../../packages/db/src/dialects/invariant-sql.js';
@@ -192,5 +192,62 @@ describe("reading a generated column's expression back", () => {
       "lower((doc #>> '{a}'::text[]))", '', 'CASE',
     ]) assert.notEqual(postgresReadBack.expression(stored, text, true), null, stored);
     assert.notEqual(postgresReadBack.expression("\"left\"((doc #>> '{a}'::text[]), 4)", 'left(("doc" #>> \'{"a"}\'), 3)', true), null);
+  });
+});
+
+describe('reading an interval CHECK back', () => {
+  const SAFE = '9007199254740991';
+  /** The two branches of PostgreSQL's deparse of the interval CHECK (16, 17 and 18 agree). */
+  const ABSENT = "(jsonb_typeof((doc #> '{span}'::text[])) IS NULL)";
+  const OBJECT = (/** @type {string} */ duration) => "((jsonb_typeof((doc #> '{span}'::text[])) = 'object'::text) "
+    + 'AND (gx_span_start IS NOT NULL) AND (gx_span_end IS NOT NULL) AND (gx_span_start = trunc(gx_span_start)) AND (gx_span_end = trunc(gx_span_end)) '
+    + `AND ((gx_span_start >= ('-${SAFE}'::bigint)::numeric) AND (gx_span_start <= ('${SAFE}'::bigint)::numeric)) `
+    + `AND ((gx_span_end >= ('-${SAFE}'::bigint)::numeric) AND (gx_span_end <= ('${SAFE}'::bigint)::numeric)) AND (gx_span_start < gx_span_end)${duration})`;
+  /** The deparse, with the duration clause as given. @param {string} [duration] */
+  const deparsed = (duration = '') => `(${ABSENT} OR ${OBJECT(duration)})`;
+  /** The text the PostgreSQL dialect writes, which the server deparses as the above. @param {string} [duration] */
+  const written = (duration = '') => 'jsonb_typeof(("doc" #> \'{"span"}\')) IS NULL OR (jsonb_typeof(("doc" #> \'{"span"}\')) = \'object\' '
+    + 'AND "gx_span_start" IS NOT NULL AND "gx_span_end" IS NOT NULL AND "gx_span_start" = trunc("gx_span_start") AND "gx_span_end" = trunc("gx_span_end") '
+    + `AND "gx_span_start" BETWEEN -${SAFE} AND ${SAFE} AND "gx_span_end" BETWEEN -${SAFE} AND ${SAFE} AND "gx_span_start" < "gx_span_end"${duration})`;
+  /** The text the SQLite dialect writes, kept verbatim in the CREATE text. @param {string} [duration] */
+  const sqlite = (duration = '') => 'json_type("doc", \'$."span"\') IS NULL OR (json_type("doc", \'$."span"\') = \'object\' '
+    + 'AND json_type("doc", \'$."span"."start"\') IS \'integer\' AND json_type("doc", \'$."span"."end"\') IS \'integer\' '
+    + `AND "gx_span_start" BETWEEN -${SAFE} AND ${SAFE} AND "gx_span_end" BETWEEN -${SAFE} AND ${SAFE} AND "gx_span_start" < "gx_span_end"${duration})`;
+  const reading = (maxDuration = null) => ({ column: 'doc', span: [{ name: 'span' }], start: 'gx_span_start', end: 'gx_span_end', maxDuration });
+  const postgres = postgresDialect().intervalSpelling(true);
+  const sqliteSpelling = sqliteDialect.intervalSpelling();
+
+  it('reads the deparse and the written text as one declaration, with and without a duration', () => {
+    assert.deepEqual(readIntervalCheck(deparsed(), postgres), reading());
+    assert.deepEqual(readIntervalCheck(written(), postgres), reading());
+    assert.deepEqual(readIntervalCheck(deparsed(' AND ((gx_span_end - gx_span_start) <= (28800000)::numeric)'), postgres), reading(28800000));
+    assert.deepEqual(readIntervalCheck(written(' AND "gx_span_end" - "gx_span_start" <= 28800000'), postgres), reading(28800000));
+    assert.deepEqual(readIntervalCheck(sqlite(), sqliteSpelling), reading());
+    assert.deepEqual(readIntervalCheck(sqlite(' AND "gx_span_end" - "gx_span_start" <= 28800000'), sqliteSpelling), reading(28800000));
+    // a nested span member, and the conjuncts in another order
+    assert.deepEqual(readIntervalCheck(deparsed().replaceAll("'{span}'", "'{booking,span}'"), postgres),
+      { ...reading(), span: [{ name: 'booking' }, { name: 'span' }] });
+    assert.deepEqual(readIntervalCheck(`(${OBJECT('')} OR ${ABSENT})`, postgres), reading());
+  });
+
+  it('reads anything else as nothing: a missing, altered, doubled or foreign conjunct', () => {
+    for (const [label, text] of [
+      ['a bound left unchecked', deparsed().replace(' AND (gx_span_end IS NOT NULL)', '')],
+      ['no whole-number test', deparsed().replace(' AND (gx_span_start = trunc(gx_span_start))', '')],
+      ['a closed comparison', deparsed().replace('(gx_span_start < gx_span_end)', '(gx_span_start <= gx_span_end)')],
+      ['a narrower range', deparsed().replace(`(gx_span_start <= ('${SAFE}'::bigint)::numeric)`, "(gx_span_start <= ('1'::bigint)::numeric)")],
+      ['a bound tested twice', deparsed().replace('(gx_span_end IS NOT NULL)', '(gx_span_start IS NOT NULL)')],
+      ['another JSON type', deparsed().replace("'object'::text", "'array'::text")],
+      ['two different spans', deparsed().replace("IS NULL) OR ((jsonb_typeof((doc #> '{span}'", "IS NULL) OR ((jsonb_typeof((doc #> '{other}'")],
+      ['a foreign conjunct', deparsed().replace('(gx_span_start < gx_span_end)', '(gx_span_start < gx_span_end) AND (gx_span_start > (0)::numeric)')],
+      ['a non-integer duration', deparsed(' AND ((gx_span_end - gx_span_start) <= (1.5)::numeric)')],
+      ['a duration over the wrong pair', deparsed(' AND ((gx_span_start - gx_span_end) <= (28800000)::numeric)')],
+      ['a duration twice', deparsed(' AND ((gx_span_end - gx_span_start) <= (1)::numeric) AND ((gx_span_end - gx_span_start) <= (2)::numeric)')],
+      ['no absent branch', OBJECT('')],
+      ['a third branch', `(${ABSENT} OR ${OBJECT('')} OR (gx_span_start IS NULL))`],
+      ['text', 'CHECK'], ['nothing', ''],
+    ]) assert.equal(readIntervalCheck(text, postgres), null, label);
+    assert.equal(readIntervalCheck(sqlite().replace("IS 'integer'", "= 'integer'"), sqliteSpelling), null, 'an equality a NULL satisfies');
+    assert.equal(readIntervalCheck(deparsed(), sqliteSpelling), null, 'one engine\'s spelling under the other\'s');
   });
 });

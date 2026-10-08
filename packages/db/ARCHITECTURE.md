@@ -789,7 +789,7 @@ is the ENGINE running the caller's own document, decides:
 
 | operator | what bounds the fetch |
 |---|---|
-| `$overlaps` over a declared interval | the half-open conjunction over the two bound columns, plus every row the operator RAISES on (below) |
+| `$overlaps` over an interval member | the half-open conjunction over the two bound columns — exact over a member the model declares an interval, and otherwise plus every row the operator RAISES on (below) |
 | `$resample` (fill, calendar, `first`/`last`) | the spec's own `start`/`end`, plus the operand's `$where` |
 | `$rolling` | the operand's `$where` alone — a window measured in time answers once per input instant |
 | `$asof` with the collection on the RIGHT | the probes' own span (`at <= max` backward, `at >= min` forward, both sides under a `tolerance`) and a membership test over the probes' `by` keys, plus the ANCHOR below |
@@ -823,9 +823,14 @@ whole span, which is the anchor at its worst.
 
 **`$overlaps` and the row that raises.** Two half-open spans share an
 instant when each starts before the other ends, which over declared
-bound columns is two comparisons the emitter already spells. What makes
-it a pre-filter rather than an exact translation is the kernel's other
-half: a span that is empty or reversed is not `false`, it RAISES
+bound columns is two comparisons the emitter already spells. Whether
+that conjunction is exact is the model's to say: over a member the
+model declares an interval (`intervals`, MODEL-FORMAT §2) no stored
+span is empty, reversed or malformed — the store refuses one before the
+statement and the table's CHECK refuses every other writer — so the
+conjunction decides and the bound's index seeks. Undeclared, what
+makes it a pre-filter rather than an exact translation is the kernel's
+other half: a span that is empty or reversed is not `false`, it RAISES
 (`JQ2001`). A conjunction alone would drop `[500, 100)` for a probe of
 `[100, 200)` — answering where the engine errors, which no pushdown may
 do — so the statement keeps every row whose own span is inverted

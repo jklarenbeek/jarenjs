@@ -1032,6 +1032,138 @@ function runJoinLeg({ n, bookings, probes }) {
 
 //#endregion
 
+//#region the stored span
+
+/**
+ * One year of stored bookings, thirty minutes to eight hours long, drawn
+ * from one linear congruential sequence — the corpus every stored-span
+ * row reads — and the three days of the year a one-hour question is asked
+ * at: early, middle and late, since where the window sits is what a
+ * one-sided seek pays for.
+ */
+const SPAN_COUNT = flags.quick ? 10_000 : 50_000;
+const SPAN_YEAR = 1_767_225_600_000;
+const SPAN_DAYS = [10, 180, 355];
+const SPAN_BOUNDS = {
+  type: 'object',
+  required: ['start', 'end'],
+  properties: { start: { type: 'integer' }, end: { type: 'integer' } },
+};
+
+/**
+ * The booking collection, its two bounds mapped — and, declared, held to
+ * be a half-open interval for every writer, which is what lets the plan
+ * drop the disjunct that keeps an inverted span for the engine to raise on.
+ * @param {boolean} declared
+ */
+const spanModel = (declared) => ({
+  $model: '0.1',
+  collections: {
+    booking: {
+      schema: { type: 'object', properties: { id: { type: 'string' }, span: SPAN_BOUNDS } },
+      key: '/id',
+      indexes: [{ name: 'by_start', path: '$.span.start' }, { name: 'by_end', path: '$.span.end' }],
+      ...(declared ? { intervals: [{ name: 'slot', path: '$.span' }] } : {}),
+    },
+  },
+});
+
+/** @param {number} n */
+function storedSpans(n) {
+  const HOUR = 3_600_000;
+  const DAY = 86_400_000;
+  let state = 7;
+  const next = () => (state = (state * 1103515245 + 12345) % 2147483648) / 2147483648;
+  return Array.from({ length: n }, (_, i) => {
+    const start = SPAN_YEAR + Math.floor(next() * 365 * DAY);
+    return { id: `b${i}`, span: { start, end: start + 1_800_000 + Math.floor(next() * 7.5 * HOUR) } };
+  });
+}
+
+/** The one-hour question at noon of one day of the year. @param {number} day */
+const spanQuestion = (day) => {
+  const noon = SPAN_YEAR + day * 86_400_000 + 12 * 3_600_000;
+  return {
+    $for: { it: '$[*]' },
+    $where: { $overlaps: ['$it.span', { $const: { start: noon, end: noon + 3_600_000 } }] },
+    $return: '$it.id',
+  };
+};
+
+/** A query's answer as a list: one item comes back bare, none as `undefined`. @param {any} answer */
+const listOf = (answer) => (answer === undefined ? [] : Array.isArray(answer) ? answer : [answer]);
+
+/**
+ * Where two id lists first disagree, or null when they do not.
+ * @param {string[]} x
+ * @param {string[]} y
+ * @returns {string | null}
+ */
+function firstIdDisagreement(x, y) {
+  if (x.length !== y.length) return `${x.length} rows against ${y.length}`;
+  const at = x.findIndex((id, i) => id !== y[i]);
+  return at < 0 ? null : `row ${at}: ${x[at]} against ${y[at]}`;
+}
+
+/**
+ * The stored-span legs, one per window: the corpus loaded twice — into a
+ * collection that maps the two bounds, and into one that also DECLARES
+ * the span an interval — and the engine's own answer over the array, all
+ * three checked equal in order before either store is timed. `n` is the
+ * day of the year the window sits at.
+ */
+async function runSpanLegs() {
+  const bookings = storedSpans(SPAN_COUNT);
+  const routes = /** @type {const} */ ([['spanPrefilter', false], ['spanDeclared', true]]);
+  /** @type {Record<string, any>} */
+  const stores = {};
+  for (const [key, declared] of routes) {
+    const store = await openStore(spanModel(declared), { driver: nodeDriver() });
+    await store.transaction(async (tx) => {
+      const loading = tx.collection('booking');
+      for (const booking of bookings) await loading.insert(booking);
+    });
+    stores[key] = store;
+  }
+  const legs = [];
+  for (const day of SPAN_DAYS) {
+    const label = `day ${day}`;
+    const document = spanQuestion(day);
+    const reference = listOf(queryJson(document, bookings));
+    const oracle = listOf(await stores.spanPrefilter.collection('booking').execute(document, { pushdown: false }));
+    check(`${label}: the engine over the stored rows answers what it answers over the array`,
+      firstIdDisagreement(oracle, reference) === null,
+      firstIdDisagreement(oracle, reference) ?? `${reference.length} rows`);
+    /** @type {Record<string, string>} */
+    const plans = {};
+    /** @type {Record<string, number>} */
+    const results = {};
+    for (const [key, declared] of routes) {
+      const booking = stores[key].collection('booking');
+      const explained = await booking.explain(document);
+      plans[key] = `${explained.mode}, ${explained.prefilters.length === 0 ? 'exact' : 'pre-filter'}: ${explained.scanNarrative}`;
+      check(`${label}: the ${declared ? 'declared' : 'mapped'} store ${declared ? 'plans the conjunction exactly' : 'keeps its pre-filter'}`,
+        (explained.prefilters.length === 0) === declared, plans[key]);
+      const answer = listOf(await booking.execute(document));
+      check(`${label}: the ${declared ? 'declared' : 'mapped'} store answers the engine's rows, in its order`,
+        firstIdDisagreement(answer, reference) === null,
+        firstIdDisagreement(answer, reference) ?? `${answer.length} rows`);
+      results[key] = answer.length;
+    }
+    if (flags.verify || failures !== 0) {
+      legs.push({ n: day, label, rows: {}, results, plans });
+      continue;
+    }
+    const rows = Object.fromEntries(routes.map(([key]) =>
+      [key, medianNs(() => stores[key].collection('booking').execute(document), ROUNDS.query)]));
+    legs.push({ n: day, label, rows, results, plans });
+  }
+  for (const store of Object.values(stores)) await store.close();
+  return legs;
+}
+
+//#endregion
+
 //#region run
 
 const corpusMeta = verifyCommittedCorpus();
@@ -1041,6 +1173,7 @@ for (const n of SIZES)
   legs.push(await runLeg(n));
 
 const joinLegs = intervalJoinSides(JOIN_SIDES).map(runJoinLeg);
+const spanLegs = await runSpanLegs();
 
 const width = Math.max(...checks.map((c) => c.name.length)) + 2;
 console.log(`\nEquivalence — ${checks.length} checks, every one before a timing`);
@@ -1175,7 +1308,33 @@ const joinTable = {
     + ' the largest side.',
 };
 
-const tables = [timingTable, planTable, joinTable];
+const SPAN_ORDER = [
+  ['spanPrefilter', 'one-hour window — the store, mapped bounds (a pre-filter: every inverted span is kept for the engine)'],
+  ['spanDeclared', 'one-hour window — the store, a declared interval (exact: the start index seeks)'],
+];
+
+const lastSpan = spanLegs[spanLegs.length - 1];
+
+const spanTable = {
+  title: `One stored-span question at three days of a year of ${SPAN_COUNT.toLocaleString('en-US')} spans`
+    + ` — median of ${ROUNDS.query} rounds`,
+  head: ['route', ...spanLegs.map((leg) => leg.label), 'rows'],
+  rows: SPAN_ORDER.map(([key, name]) => ({
+    cells: [name, ...spanLegs.map((leg) => ns(leg.rows[key])), count(lastSpan.results[key])],
+    strong: key === 'spanDeclared',
+  })),
+  note: 'Lower is better. Both stores answered the identical rows in the identical order, and both'
+    + ' agreed with the engine over the array, before either was timed. The mapped pre-filter keeps'
+    + ' every span whose own bounds are inverted for the engine to raise on — a comparison between two'
+    + ' columns no index bounds, so every window scans the table. The declared interval holds no such'
+    + ' span, so the conjunction is exact and SQLite seeks the start index from the window\'s end — and'
+    + ' reads every span that started before it, so the seek costs more the later the window sits: the'
+    + ' late window is the loss, published beside the wins. The "rows" column is the answer size at the'
+    + ` last window, where the plans were: mapped — ${lastSpan.plans.spanPrefilter}; declared —`
+    + ` ${lastSpan.plans.spanDeclared}.`,
+};
+
+const tables = [timingTable, planTable, joinTable, spanTable];
 for (const table of tables) {
   console.log(`\n${table.title}`);
   const w = Math.max(...table.rows.map((r) => String(r.cells[0]).length),
@@ -1231,6 +1390,11 @@ const figures = {
     : Math.round((largest.n / largest.results.kernelRender) * 100) / 100,
   noisiestRoute: noisiest.route,
   noisiestSpread: noisiest.spread,
+  // the mapped pre-filter against the declared interval, per window: over
+  // one is the declaration's win, under one its loss, published either way
+  spanDeclaredVsPrefilterEarly: ratio(spanLegs[0].rows.spanPrefilter, spanLegs[0].rows.spanDeclared),
+  spanDeclaredVsPrefilterMiddle: ratio(spanLegs[1].rows.spanPrefilter, spanLegs[1].rows.spanDeclared),
+  spanDeclaredVsPrefilterLate: ratio(spanLegs[2].rows.spanPrefilter, spanLegs[2].rows.spanDeclared),
 };
 
 const notes = [
@@ -1312,6 +1476,12 @@ const notes = [
     + ` ${joinVerdict(ratio(largestJoin.rows.joinNestedLoop, largestJoin.rows.joinIntervalProbe))}`
     + ' the nested loop it replaced, in the same order. The index is built per evaluation, so'
     + ' the row prices the build as well as the probes.',
+  `A declared interval answers the one-hour window ${joinVerdict(figures.spanDeclaredVsPrefilterEarly)}`
+    + ` the mapped pre-filter at day ${SPAN_DAYS[0]}, ${joinVerdict(figures.spanDeclaredVsPrefilterMiddle)}`
+    + ` it at day ${SPAN_DAYS[1]} and ${joinVerdict(figures.spanDeclaredVsPrefilterLate)} it at day`
+    + ` ${SPAN_DAYS[2]}, over ${SPAN_COUNT.toLocaleString('en-US')} stored spans. The pre-filter scans`
+    + ' every window alike, and the exact plan seeks the start index from the window\'s end and reads'
+    + ' every span that started before it — cheap early in the year, dear late in it. The loss stays in.',
 ];
 
 console.log('\nDerived figures');
@@ -1367,8 +1537,9 @@ if (flags.output === 'json') {
     headline,
     checks,
     tables,
-    // a join row's `n` is the spans on each side
-    rows: [...legs.map((leg) => [leg, ORDER]), ...joinLegs.map((leg) => [leg, JOIN_ORDER])]
+    // a join row's `n` is the spans on each side; a stored-span row's the day of the year
+    rows: [...legs.map((leg) => [leg, ORDER]), ...joinLegs.map((leg) => [leg, JOIN_ORDER]),
+      ...spanLegs.map((leg) => [leg, SPAN_ORDER])]
       .flatMap(([leg, order]) => order
         .filter(([key]) => leg.rows[key] !== undefined)
         .map(([key, name]) => ({

@@ -68,5 +68,26 @@ describe('the extended jaren-model artifact', () => {
         entities: { User: { schema: {}, surprises: true } },
       }), false, 'entity declarations are closed');
     });
+
+    it(`a declared interval, and its closed entry, under ${draft}`, () => {
+      const validate = compileArtifact(artifact);
+      const booking = (/** @type {any} */ intervals) => ({
+        $model: '0.1',
+        collections: { booking: { schema: { type: 'object' }, key: '/id',
+          indexes: [{ name: 'by_start', path: '$.span.start' }, { name: 'by_end', path: '$.span.end' }], intervals } },
+      });
+      assert.strictEqual(validate(booking([{ name: 'slot', path: '$.span', maxDuration: 28800000 }])), true);
+      assert.strictEqual(validate(booking([{ name: 'slot', path: '$.span' }])), true, 'maxDuration is optional');
+      assert.strictEqual(validate(booking([])), true);
+      assert.strictEqual(validate({ $model: '0.1', collections: { booking: { schema: { type: 'object' }, key: '/id', intervls: [] } } }), false, 'a misspelt member');
+      assert.strictEqual(validate(booking({ name: 'slot', path: '$.span' })), false, 'an array');
+      assert.strictEqual(validate(booking([{ name: 'slot', path: '$.span', bogus: 1 }])), false, 'entries are closed');
+      assert.strictEqual(validate(booking([{ name: 'slot' }])), false, 'a path is required');
+      assert.strictEqual(validate(booking([{ path: '$.span' }])), false, 'a name is required');
+      assert.strictEqual(validate(booking([{ name: 'a slot', path: '$.span' }])), false, 'a name is an identifier');
+      assert.strictEqual(validate(booking([{ name: 'slot', path: '$.span', maxDuration: 0 }])), false, 'a duration is positive');
+      assert.strictEqual(validate(booking([{ name: 'slot', path: '$.span', maxDuration: 1.5 }])), false, 'a duration is an integer');
+      assert.strictEqual(validate(booking([{ name: 'slot', path: '$.span', maxDuration: '8h' }])), false, 'a duration is a number');
+    });
   }
 });

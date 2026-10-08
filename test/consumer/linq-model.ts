@@ -70,6 +70,20 @@ void [noteInput, noteDoc, noRelations, noEntities];
 void m.collection(Place, { key: (d) => d.id, indexes: [m.index((p) => p.embedding, { derive: 'vector', dims: 4 })] });
 void m.collection(Place, { indexes: [m.index([(p) => p.series, (p) => p.t])] });
 
+// a declared interval: a name, the span member's path and an optional longest duration
+const Booking = m.object({ id: m.string(), span: m.object({ start: m.integer(), end: m.integer() }) });
+const bookings = m.collection(Booking, {
+  key: (b) => b.id,
+  indexes: [m.index((b) => b.span.start), m.index((b) => b.span.end)],
+  intervals: [{ name: 'slot', path: '$.span', maxDuration: 28_800_000 }, { name: 'open', path: '$.span' }],
+});
+const declaredIntervals: readonly m.IntervalSpec[] | undefined = bookings.intervals;
+void declaredIntervals;
+// @ts-expect-error — maxDuration is a number of milliseconds
+void m.collection(Booking, { intervals: [{ name: 'slot', path: '$.span', maxDuration: '8h' }] });
+// @ts-expect-error — an interval entry is closed to name, path and maxDuration
+void m.collection(Booking, { intervals: [{ name: 'slot', path: '$.span', unique: true }] });
+
 // an entity's own indexes: composite, unique and partial, the paths and the
 // condition checked against the entity's shape
 const Shift = m.object({ id: m.string().key(), employeeId: m.string(), day: m.string(), status: m.string().optional() })

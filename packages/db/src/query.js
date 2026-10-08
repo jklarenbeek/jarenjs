@@ -514,6 +514,10 @@ export function createQueryEngine(context) {
     // plan is recognized by the index a model already has, so the
     // planner needs to see the list rather than guess a column's role
     indexes: physicalPlan.expected?.indexes ?? [],
+    // the DECLARED intervals, each by its two bound columns: over one of
+    // them `$overlaps` is exact, since no stored span is empty, reversed
+    // or malformed
+    intervals: physicalPlan.intervals ?? [],
     // the R*Tree virtual tables this collection's `bbox` column sets are
     // realized as, by stem — empty under `physical: 'columns'`, and
     // empty on a driver whose build carries no R*Tree module, because

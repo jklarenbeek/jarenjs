@@ -26,6 +26,13 @@
  */
 
 /**
+ * The bound a declared interval keeps each span bound within: the safe
+ * integers, which both engines compare exactly and the query engine holds
+ * as a number without rounding.
+ */
+const SAFE_BOUND = Number.MAX_SAFE_INTEGER;
+
+/**
  * The closed set of dialect capabilities, each with the answer a
  * spelling spec that says nothing gets. They are SYNTACTIC — what SQL
  * this engine will accept — as opposed to the connection capabilities
@@ -204,6 +211,10 @@ function normalizeCapabilities(declared) {
  *     integrityCheck: (limit?: number) => string,
  *     optimize: () => string },
  *   schemaTypeOf?: (declaredType: string) => string | undefined,
+ *   jsonTypeName: (columnSql: string, pathText: string) => string,
+ *   integerBounds: (shape: { docColumnSql: string, start: { sql: string, pathText: string },
+ *     end: { sql: string, pathText: string } }) => string,
+ *   intervalSpelling: (conforming: boolean) => import('./dialects/check-read.js').IntervalSpelling,
  *   memberPathOf?: (expression: string) => (JsonPathSegment[] | null),
  *   expressionOf?: (expression: string, byName: Record<string, string>) => (any | null),
  *   readGenerated?: (rows: any[]) => { name: string, expression: string }[],
@@ -299,20 +310,49 @@ export function createDialect(spec) {
     },
     /**
      * One collection's physical table: a key column, the JSON document
-     * column, and a virtual generated column per indexed path.
+     * column, a virtual generated column per indexed path, and a named
+     * CHECK per declared interval.
      * @param {{ table: string, keyColumn: string, keyType: string,
      *   docColumn: string, generated: { name: string, type: string,
-     *   pathText: string }[] }} shape
+     *   pathText: string }[], checks?: { name: string, sql: string }[] }} shape
      * @returns {string}
      */
-    createTable({ table, keyColumn, keyType, docColumn, generated }) {
+    createTable({ table, keyColumn, keyType, docColumn, generated, checks = [] }) {
       const columns = [
         `${q(keyColumn)} ${keyType} PRIMARY KEY`,
         `${q(docColumn)} ${spec.docColumnType} NOT NULL`,
         ...identityColumnSql(),
         ...generated.map((g) => generatedColumnSql(docColumn, g)),
+        ...checks.map((check) => `CONSTRAINT ${q(check.name)} CHECK (${check.sql})`),
       ];
       return `CREATE TABLE ${q(table)} (${columns.join(', ')})${spec.tableSuffix}`;
+    },
+    /**
+     * The one CHECK a declared interval installs, over two operand
+     * expressions for its bounds — the bound columns in a CREATE TABLE,
+     * the columns' own generating expressions where an existing table's
+     * rows are counted against it. The span member is absent, or it is
+     * an object whose two bounds are integers by the engine's own test
+     * (a spec entry: the document's JSON type, or the column's presence
+     * and wholeness), safe integers, in order, and — with `maxDuration`
+     * — no further apart than it. No conjunct is one a NULL satisfies:
+     * a half span fails the integer test instead of passing a comparison
+     * with NULL, which a CHECK would let through.
+     * @param {{ docColumn: string, span: string,
+     *   bounds: { start: string, end: string }, start: string, end: string,
+     *   maxDuration: number | null }} shape - `span` and `bounds` are path
+     *   texts as `jsonPathText` writes them; `start` and `end` the operand SQL
+     * @returns {string} the CHECK's expression, without the keyword
+     */
+    intervalCheck({ docColumn, span, bounds, start, end, maxDuration }) {
+      const docColumnSql = q(docColumn);
+      const typeOf = spec.jsonTypeName(docColumnSql, span);
+      const safe = (/** @type {string} */ operand) => `${operand} BETWEEN ${-SAFE_BOUND} AND ${SAFE_BOUND}`;
+      const integers = spec.integerBounds({ docColumnSql,
+        start: { sql: start, pathText: bounds.start }, end: { sql: end, pathText: bounds.end } });
+      const duration = maxDuration === null || maxDuration === undefined ? '' : ` AND ${end} - ${start} <= ${maxDuration}`;
+      return `${typeOf} IS NULL OR (${typeOf} = 'object' AND ${integers} AND ${safe(start)} AND ${safe(end)} `
+        + `AND ${start} < ${end}${duration})`;
     },
     /**
      * An index over columns, partial when it carries `where`: the condition
@@ -752,6 +792,11 @@ export function createDialect(spec) {
      * reports rather than a path it invents.
      */
     memberPathOf: spec.memberPathOf,
+    /**
+     * How this dialect's interval CHECK reads back through the one
+     * interval reader, for a session whose string spelling is as given.
+     */
+    intervalSpelling: spec.intervalSpelling,
     /**
      * The declared index EXPRESSION a generated column's SQL computes,
      * recovered from the dialect's own spelling of it. `byName` maps the

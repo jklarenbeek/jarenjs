@@ -1277,36 +1277,41 @@ function planSpatial(node, itSlot, shape) {
 }
 
 /**
- * P4 — `$overlaps` over a declared interval.
+ * P4 — `$overlaps` over an interval member.
  *
  * The engine's rule (`overlapsInterval`) is one conjunction: two
  * half-open spans share an instant when each starts before the other
  * ends. Over a row whose bounds are declared columns that is two
  * ordinary comparisons, which is why the promotion exists at all.
  *
- * What makes it a PRE-FILTER rather than an exact translation is the
- * kernel's other half: a span that is empty or reversed is not `false`,
- * it RAISES (`JQ2001`, through `requireInterval`). A conjunction alone
+ * Whether the conjunction is EXACT is the model's to say. The kernel's
+ * other half is that a span that is empty or reversed is not `false`,
+ * it RAISES (`JQ2001`, through `requireInterval`): a conjunction alone
  * would drop `[500, 100)` for a probe of `[100, 200)` — answering where
- * the engine errors, the one thing a pushdown may never do. JSON Schema
- * has no keyword that compares two members, so the store cannot make an
- * inverted span unstorable the way it makes a missing or mistyped bound
- * unstorable; the fetch therefore keeps every inverted row, and the
- * engine raises over the candidates exactly as it would have.
+ * the engine errors, the one thing a pushdown may never do. A
+ * collection that DECLARES the member an interval (`intervals` in the
+ * model) holds no such span: the store refuses one before the
+ * statement, hook or no hook, and the table's CHECK refuses every
+ * other writer. There the conjunction is the operator itself — exact,
+ * nothing to refine, no document read per row, and a fetch the bound's
+ * index can seek.
  *
- * That disjunct is a comparison between two COLUMNS, which no index
- * bounds, so the statement scans. What it still buys is the decode: the
- * rows that come back are the ones the operator can be true for, plus
- * the ones it must raise on, rather than the whole collection. A store
- * that could declare the pair as an interval — a `CHECK` on the two
- * columns — would make the conjunction exact and the fetch a seek;
- * ROADMAP carries that as open work.
+ * Undeclared, the schema alone cannot forbid an inverted span (JSON
+ * Schema compares no two members), so the pushed form is a PRE-FILTER
+ * that keeps every row whose own span is inverted — a comparison
+ * between two COLUMNS, which no index bounds, so the statement scans —
+ * and the engine raises over the candidates exactly as it would have.
+ * What it still buys is the decode: the rows that come back are the
+ * ones the operator can be true for, plus the ones it must raise on,
+ * rather than the whole collection.
  *
- * The rest of the malformed cases ARE schema ones, exactly as the
+ * The rest of the malformed cases are schema ones, exactly as the
  * spatial promotions' precondition is: a bound the engine errors on
  * (absent, textual, null) cannot be written to a collection whose
- * schema requires two numeric bounds, because a write is validated
- * against that schema (`JD2003`).
+ * schema requires two numeric bounds — under a validation hook
+ * (`JD2003`), and under a declaration always. A collection with neither
+ * stores what it is given, and the guard below drops such a row where
+ * the engine would have raised; the declaration is what closes that.
  * @param {any} node
  * @param {number} itSlot
  * @param {any} shape
@@ -1341,6 +1346,14 @@ function planIntervalOverlap(node, itSlot, shape) {
   const pred = { p: 'interval',
     columns: { start: bounds.start.column, end: bounds.end.column },
     probe: { from, to } };
+  // a declaration over these two columns means no stored span is empty,
+  // reversed or malformed: the conjunction decides, nothing refines
+  const declared = (shape.intervals ?? []).some((interval) =>
+    interval.start === bounds.start.column && interval.end === bounds.end.column);
+  if (declared) {
+    return { pred: { ...pred, declared: true }, exact: true, prefilters: [], refinements: [],
+      composable: true };
+  }
   return { ...promotion(pred,
     { construct: '$overlaps', via: 'columns',
       columns: [bounds.start.column, bounds.end.column], exact: false },
@@ -1355,12 +1368,16 @@ function planIntervalOverlap(node, itSlot, shape) {
  * object, carrying `start` and `end`, both REQUIRED and both typed
  * numeric and only numeric. A union with `null` or `string` is not an
  * interval here — an RFC 3339 bound is a perfectly good instant to the
- * engine and no epoch column can compare against it.
- * @param {any} spanRef
- * @param {any} shape
- * @returns {{ start: any, end: any } | null}
+ * engine and no epoch column can compare against it. The one rule for
+ * what an interval member is: the model's `intervals` declaration is
+ * held to it too, with `columnByCanonical` standing for the paths the
+ * collection indexes.
+ * @param {{ segments: any[] }} spanRef
+ * @param {{ schema: any, columnByCanonical: Map<string, string> }} shape
+ * @returns {{ start: { segments: any[], type: string, column: string | null },
+ *   end: { segments: any[], type: string, column: string | null } } | null}
  */
-function intervalBounds(spanRef, shape) {
+export function intervalBounds(spanRef, shape) {
   const node = schemaNodeAt(shape.schema, spanRef.segments);
   if (node === undefined || node.type !== 'object') return null;
   const required = Array.isArray(node.required) ? node.required : [];

@@ -112,6 +112,41 @@ The store runs over SQLite — on Node (`@jarenjs/db/node`), on Bun
 - `indexes[].derive` declares a **derived** index: the columns are
   computed FROM the selected member rather than being the member.
   See §2.1.
+- `intervals[]` declares a member an **interval**: `{ "name", "path",
+  "maxDuration"? }`. `path` is a singular JSONPath selecting a member the
+  schema types as an object whose `start` and `end` are both required
+  and both `integer`, each bound indexed by its own path (`$.span.start`,
+  `$.span.end`) — the generated columns the CHECK reads and the plan
+  seeks. Every stored span of the collection is then a half-open interval
+  of two safe integers, `start < end` (and, with `maxDuration`, a
+  positive integer of milliseconds, `end - start <= maxDuration`), or the
+  member is absent: the store refuses anything else before the statement
+  (`JD2003`, with or without the validation hook of §5), and a CHECK on
+  the table named `<name>_interval` refuses it from every other writer
+  (`JD2005`, class `constraint`; §3.2 lists the shapes and each engine's
+  spelling). A dropped, altered, renamed or — on PostgreSQL —
+  unvalidated CHECK is `JD0002` at open. `$overlaps` over the declared
+  span plans exactly: two comparisons the bound's index seeks, no
+  residual (§3.2). `name` is an identifier, unique among the collection's
+  intervals, naming a constraint of at most 63 bytes; an unindexed bound,
+  a bound typed `number` (the CHECK's integer test would refuse the
+  fractions it admits), a path to no such member, a duplicate name and a
+  `maxDuration` that is not a positive safe integer are `JD0005` at the
+  member.
+
+What the declaration buys is measured by `benchmark/series.js` over a
+year of fifty thousand stored spans asked one one-hour question at three
+days of the year. The mapped pre-filter scans every window alike — the
+comparison between two columns that keeps an inverted span for the engine
+binds no index — and the exact plan seeks the start index from the
+window's end and reads every span that started before it, so on SQLite it
+wins early in the year and loses late in it — the declared plan is <!--fact:series.spanVerdict--><!--/fact-->.
+PostgreSQL chooses per window — a bitmap read of one bound's index where
+the window is selective, a sequential scan where it is not — and at no
+measured window was the exact plan slower than the scan it replaces.
+
+<!--fact:series.spanTable-->
+<!--/fact-->
 
 An invalid model document is `JD0005` with a `docPath` pointing at the
 offending member. Model checking happens before any database work.
@@ -119,9 +154,10 @@ offending member. Model checking happens before any database work.
 **Every declaration is a closed set**, and the runtime and the canonical
 schema (`schemas/jaren-model.schema.json`, `additionalProperties: false`
 at each) agree on it: the root takes `$model`, `collections` and
-`entities`; a collection `schema`, `key`, `identity`, `indexes` and
-`x-rename`; an index `name`, `path`, `expression`, `unique`, `where`,
-`derive`, `precision`, `dims` and `physical`; an entity `schema`,
+`entities`; a collection `schema`, `key`, `identity`, `indexes`,
+`intervals` and `x-rename`; an index `name`, `path`, `expression`,
+`unique`, `where`, `derive`, `precision`, `dims` and `physical`; an
+interval `name`, `path` and `maxDuration`; an entity `schema`,
 `indexes`, `physical`, `invariants` and `x-rename` (§9); an entity index
 `name`, `path`, `expression`, `unique` and `where` (§9.2); an invariant
 the members of §13. Any other member — `uniqe` for `unique`, a
@@ -579,14 +615,37 @@ engine's refusal instead keeps `compileSchema` injected.
 member the schema types as an object whose `start` and `end` are both
 REQUIRED and both numeric — and only numeric, since an RFC 3339 bound
 is a good instant to the engine and no epoch column compares against
-it. Under that declaration a bound that is absent, textual or `null` is
-a row the collection cannot hold, so the pushed comparison cannot swallow
-a refusal the engine would have raised. One malformed case remains
-declarable by no schema keyword — a span whose `end` is at or before its
-`start` — so the statement keeps every one of those rows and the operator
-raises over them, exactly as it would have. Both bounds must map to
-declared columns; an unmapped pair pushes nothing and `strict: true`
-names it (`JD0010`).
+it. Both bounds must map to declared columns; an unmapped pair pushes
+nothing and `strict: true` names it (`JD0010`). What the pushed
+comparison may assume of a stored span is the model's to say:
+
+- Under a **declared interval** (`intervals`, §2) every stored span is
+  a half-open one of two safe integers, or the member is absent. The
+  store refuses a `null`, scalar or array span, a half span, a `null`,
+  boolean, textual, fractional or out-of-range bound, an empty or
+  reversed span and one longer than `maxDuration` before the statement
+  (`JD2003`), with or without the validation hook, and the table's CHECK
+  `<name>_interval` refuses the same shapes from every other writer —
+  on SQLite by `json_type` over the document (`IS 'integer'`, since a
+  half span's absent bound compares as NULL and a CHECK passes a NULL
+  comparison, and since the INTEGER column reads a JSON boolean as 1;
+  a textual bound that spells no integer, or a fractional one, meets
+  STRICT's type refusal first, errcode 3091, while a text that spells an
+  integer is coerced into the column and the CHECK refuses it, as it
+  refuses every other shape, errcode 275), on PostgreSQL by
+  `jsonb_typeof` and the generated numeric columns (`IS NOT NULL`,
+  equal to their own `trunc`; SQLSTATE 23514), both within the safe
+  integers. So the pushed conjunction is the operator itself — exact, no
+  residual, no document read per row, and a fetch the bound's index
+  seeks.
+- Undeclared, the schema alone cannot forbid an inverted span (no
+  keyword compares two members), so the statement keeps every row whose
+  own span is empty or reversed and the operator raises over them,
+  exactly as it would have — a comparison between two columns, which no
+  index bounds, so the fetch scans. A store without the hook also holds
+  a `null`, scalar or half span, whose bound column is NULL: the pushed
+  form's guard drops such a row where the engine would have raised, and
+  the declaration is what closes that.
 
 Under `physical: 'rtree'` the same rule is enforced in SQL, by the
 `WHEN <stem>_w IS NOT NULL` guard on the sync triggers: **a document

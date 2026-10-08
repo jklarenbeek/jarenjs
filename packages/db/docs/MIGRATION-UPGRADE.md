@@ -1095,6 +1095,55 @@ the database's own foreign-key actions ([LIVE-FORMAT](LIVE-FORMAT.md) §4):
   statement slots; they are released after each use now, as are the owner
   lease's renewals, and such a store keeps writing.
 
+## 11. Declared intervals
+
+A collection may declare a span member an **interval** — `intervals: [{
+name, path, maxDuration? }]` ([MODEL-FORMAT §2](MODEL-FORMAT.md#2-the-model-document)).
+A model that declares none keeps its documents, plans and tables byte for
+byte; a model that declares one is stricter on purpose:
+
+- The store refuses `JD2003` a document whose declared span is present but
+  not an object of two safe-integer bounds with `start < end` (and `end -
+  start <= maxDuration` where one is declared) — through `insert`, `put`
+  and `patch`, whether or not `compileSchema` was injected. A document
+  that would be refused cannot sit in a table that carries the CHECK, so
+  such documents are repaired or removed before the collection is created
+  declared.
+- The table carries `CONSTRAINT "<name>_interval" CHECK (…)`, so a raw SQL
+  writer on another connection is refused `JD2005`, class `constraint`
+  (SQLite errcode 275, or 3091 where STRICT refuses the bound's type first;
+  PostgreSQL SQLSTATE 23514).
+- Every open verifies the CHECK — on SQLite through the table's CREATE
+  text, on PostgreSQL by reading the constraint back from the catalog:
+  present, validated and read as the declaration (the server's deparse is
+  one text on 16, 17 and 18), with no CHECK beside it the model does not
+  declare. A dropped, altered or renamed constraint, one added `NOT VALID`
+  and an undeclared one are `JD0002` at open. On PostgreSQL the remedy is
+  to restore it exactly (`ALTER TABLE … ADD CONSTRAINT … CHECK (…)`, and
+  `VALIDATE CONSTRAINT` after a `NOT VALID`), or to drop the declaration:
+  a collection declaring no interval reads none of its table's CHECKs, as
+  before. On SQLite the CREATE text is compared whole, so a table that
+  carries the CHECK opens only under a model that declares it, and one
+  that lacks it only under a model that does not: the remedy is to put the
+  CREATE text back as the model plans it.
+- Adding a declaration to an existing table, or removing one from it, is a
+  migration the planner does not carry yet: it plans no step either way.
+  Until it does, on SQLite a table opens only under the declaration it was
+  created with (`JD0002` otherwise) — declare the interval on a new
+  collection, or recreate the table; on PostgreSQL the same holds for
+  adding, while removing the declaration reopens the table as it is.
+- The declaration is held at normalization, `JD0005` at the member: `path`
+  is a singular JSONPath to a member the schema types as an object of two
+  required `integer` bounds (a `number` bound is refused — the CHECK's
+  integer test would refuse the fractions it admits), each bound indexed by
+  its own path, `name` an identifier unique among the collection's
+  intervals whose `<name>_interval` fits 63 bytes, and `maxDuration` a
+  positive safe integer of milliseconds.
+- `$overlaps` over the declared span plans exactly — no disjunct, no
+  residual, no registered predicate — and seeks the bound's index;
+  `explain()` reports `prefilters: []` where it reported the half-open
+  pre-filter, and `mode: 'native'` under a profile that registers nothing.
+
 ## 12. Statement slots on the worker, pool and process hosts
 
 A host that keeps every prepared statement until told otherwise (the worker,

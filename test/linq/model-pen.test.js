@@ -235,6 +235,39 @@ describe('the model pen — refusals, each with the fix in the message', () => {
       [{ name: 'by_x_a', expression: { member: '$.a' }, unique: true }]);
   });
 
+  it('intervals — the declaration rides verbatim, closed and typed (JL0101), and the store accepts what the pen wrote', async () => {
+    const Booking = s.object({ id: s.string(), span: s.object({ start: s.integer(), end: s.integer() }) });
+    const indexes = [m.index((b) => b.span.start), m.index((b) => b.span.end)];
+    const declared = m.collection(Booking, { key: '/id', indexes, intervals: [{ name: 'slot', path: '$.span', maxDuration: 28800000 }] });
+    const written = {
+      schema: Booking.schema,
+      key: '/id',
+      indexes: [{ name: 'by_span_start', path: '$.span.start' }, { name: 'by_span_end', path: '$.span.end' }],
+      intervals: [{ name: 'slot', path: '$.span', maxDuration: 28800000 }],
+    };
+    assert.strictEqual(JSON.stringify(declared), JSON.stringify(written), 'the pen writes what the hand wrote, member for member');
+    assert.deepStrictEqual(m.collection(Booking, { intervals: [{ name: 'slot', path: '$.span' }] }).intervals, [{ name: 'slot', path: '$.span' }]);
+    const document = m.defineModel({ collections: { booking: declared } });
+    assert.strictEqual(grammar(document), true);
+    assert.strictEqual(normalizeModel(document).get('booking').intervals[0].constraint, 'slot_interval');
+    const store = await openStore(document, { driver: nodeDriver() });
+    try {
+      await store.collection('booking').put({ id: 'a', span: { start: 0, end: 1 } });
+      await assert.rejects(async () => store.collection('booking').put({ id: 'b', span: { start: 1, end: 1 } }), { code: 'JD2003' });
+    }
+    finally { await store.close(); }
+    const refused = (/** @type {any} */ options, /** @type {RegExp} */ message) =>
+      assert.throws(() => m.collection(Booking, { key: '/id', indexes, ...options }),
+        (/** @type {any} */ e) => e.code === 'JL0101' && message.test(e.message), String(message));
+    refused({ intervals: { name: 'slot', path: '$.span' } }, /intervals is an array/);
+    refused({ intervals: ['slot'] }, /intervals\[0\] is an object/);
+    refused({ intervals: [{ name: 'slot', path: '$.span', maxDuratoin: 1 }] }, /intervals\[0\] does not take 'maxDuratoin' — it takes name, path, maxDuration/);
+    refused({ intervals: [{ name: 1, path: '$.span' }] }, /intervals\[0\] name takes a string/);
+    refused({ intervals: [{ name: 'slot', path: (/** @type {any} */ b) => b.span }] }, /intervals\[0\] path takes a JSONPath string/);
+    refused({ intervals: [{ name: 'slot', path: '$.span', maxDuration: '8h' }] }, /intervals\[0\] maxDuration takes a number/);
+    refused({ intervls: [] }, /does not take 'intervls' — the options are key, identity, indexes, intervals, renamedFrom/);
+  });
+
   it('JL0102 — key()/unique()/index() on a kind that can never hold a column', () => {
     // the store's own rule (JD0005, "only a top-level scalar takes a
     // column"), seen at build: the pen refuses the kinds it is CERTAIN

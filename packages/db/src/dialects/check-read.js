@@ -433,3 +433,202 @@ export const POSTGRES_PREDICATE_ESCAPED = /* @__PURE__ */ Object.freeze(/* @__PU
 export const SQLITE_PREDICATE = /* @__PURE__ */ Object.freeze({
   truth: (token) => (token.kind === 'number' && (token.value === '1' || token.value === '0') ? token.value === '1' : undefined),
 });
+
+/**
+ * How one engine spells the interval CHECK it hands back, beyond what a
+ * {@link PredicateSpelling} reads: `typeOf` reads the JSON-type call over
+ * the document column at `at` — the column, the path it reads as segments
+ * and the token after the call — or answers `undefined`; `integers` says
+ * how a bound is held to an integer, by the document's JSON type
+ * (`'document'`: one JSON-type call per bound, `IS 'integer'`) or by the
+ * column (`'column'`: present, and equal to its own `trunc`).
+ * @typedef {PredicateSpelling & {
+ *   typeOf: (tokens: { kind: string, value: string }[], at: number) =>
+ *     ({ column: string, segments: import('../dialect.js').JsonPathSegment[], end: number } | undefined),
+ *   integers: 'document' | 'column' }} IntervalSpelling
+ */
+
+/** The bound every declared interval keeps a span within: the safe integers. */
+const SAFE_BOUND = Number.MAX_SAFE_INTEGER;
+
+/**
+ * Read an interval CHECK back into its declaration — the document column
+ * and span path it reads, the two bound columns and the maximum duration —
+ * or `null` for text that is not exactly one engine's spelling of the one
+ * template: a conjunct missing, doubled, altered or added, a branch more or
+ * fewer, a constant other than the template's, a comparison a NULL could
+ * satisfy. Conjuncts are read as a set through the engine's own
+ * parentheses and casts, so the server's deparse and the text the dialect
+ * wrote read as one declaration whatever order the conjuncts come in.
+ * @param {string} sql
+ * @param {IntervalSpelling} spelling - the engine's
+ * @returns {{ column: string, span: import('../dialect.js').JsonPathSegment[],
+ *   start: string, end: string, maxDuration: number | null } | null}
+ */
+export function readIntervalCheck(sql, spelling) {
+  const tokens = sqlTokens(String(sql), spelling.nativeToken);
+  if (tokens.length === 0) return null;
+  const cursor = tokenCursor(tokens);
+  const take = cursor.take;
+  const COMPARISONS = ['=', '<', '<=', '>='];
+  /** A column name at the cursor. */
+  const column = () => {
+    const token = tokens[cursor.at];
+    if (token === undefined || !(token.kind === 'identifier' || (token.kind === 'word' && spelling.bare === true))) return undefined;
+    cursor.at++;
+    return token.value;
+  };
+  /** A number literal as the engine spells one: signed, parenthesised, cast. */
+  const number = () => {
+    const value = scalarAt(cursor, spelling.cast, false, spellsExactly);
+    return typeof value === 'number' ? value : undefined;
+  };
+  /** A string literal, possibly cast. */
+  const string = () => {
+    const value = scalarAt(cursor, spelling.cast, false);
+    return typeof value === 'string' ? value : undefined;
+  };
+  /** The comparison at the cursor, its two symbols adjacent. */
+  const comparison = () => {
+    const token = tokens[cursor.at], next = tokens[cursor.at + 1];
+    if (token?.kind !== 'symbol') return undefined;
+    const pair = next?.kind === 'symbol' && next.at === /** @type {number} */ (token.at) + 1 ? `${token.value}${next.value}` : undefined;
+    if (pair !== undefined && COMPARISONS.includes(pair)) { cursor.at += 2; return pair; }
+    if (!COMPARISONS.includes(token.value)) return undefined;
+    cursor.at++;
+    return token.value;
+  };
+  /** An operand: a JSON-type call, a column, or a difference of two columns, each possibly parenthesised. @returns {any} */
+  const operand = () => {
+    const start = cursor.at;
+    if (take('(')) {
+      const inner = operand();
+      if (inner !== undefined && take(')')) return inner;
+      cursor.at = start;
+    }
+    const typeOf = spelling.typeOf(tokens, cursor.at);
+    if (typeOf !== undefined) {
+      cursor.at = typeOf.end;
+      return { typeOf: { column: typeOf.column, segments: typeOf.segments } };
+    }
+    const left = column();
+    if (left === undefined) return undefined;
+    if (!take('-')) return { column: left };
+    const right = column();
+    return right === undefined ? undefined : { difference: [left, right] };
+  };
+  /** One conjunct the template writes, tagged by its kind. @returns {any} */
+  const atom = () => {
+    const left = operand();
+    if (left === undefined) return undefined;
+    if (left.typeOf !== undefined) {
+      if (take('IS')) {
+        if (take('NULL')) return { kind: 'absent', ...left.typeOf };
+        return string() === 'integer' ? { kind: 'integer', ...left.typeOf } : undefined;
+      }
+      return take('=') && string() === 'object' ? { kind: 'object', ...left.typeOf } : undefined;
+    }
+    if (left.difference !== undefined) {
+      if (comparison() !== '<=') return undefined;
+      const max = number();
+      return max === undefined ? undefined : { kind: 'duration', end: left.difference[0], start: left.difference[1], max };
+    }
+    const name = left.column;
+    if (take('IS')) return take('NOT') && take('NULL') ? { kind: 'present', column: name } : undefined;
+    if (take('BETWEEN')) {
+      const low = number();
+      if (low === undefined || !take('AND')) return undefined;
+      const high = number();
+      return high === undefined ? undefined : { kind: 'within', column: name, low, high };
+    }
+    const op = comparison();
+    if (op === undefined) return undefined;
+    if (op === '=') {
+      // the whole-number test: the column equal to its own truncation
+      if (!take('TRUNC') || !take('(')) return undefined;
+      const same = column();
+      return same === name && take(')') ? { kind: 'whole', column: name } : undefined;
+    }
+    if (op === '<') {
+      const end = column();
+      return end === undefined ? undefined : { kind: 'before', start: name, end };
+    }
+    const bound = number();
+    if (bound === undefined) return undefined;
+    return op === '>=' ? { kind: 'atLeast', column: name, low: bound } : { kind: 'atMost', column: name, high: bound };
+  };
+  /** A parenthesised conjunction, or one atom. @param {number} depth @returns {any[] | undefined} */
+  const term = (depth) => {
+    if (depth > READ_DEPTH) return undefined;
+    const start = cursor.at;
+    if (take('(')) {
+      const inner = conjunction(depth + 1);
+      if (inner !== undefined && take(')')) return inner;
+      cursor.at = start;
+    }
+    const one = atom();
+    return one === undefined ? undefined : [one];
+  };
+  /** The atoms of a conjunction, nested conjunctions flattened. @param {number} depth @returns {any[] | undefined} */
+  const conjunction = (depth) => {
+    const atoms = [];
+    do {
+      const part = term(depth);
+      if (part === undefined) return undefined;
+      atoms.push(...part);
+    } while (take('AND'));
+    return atoms;
+  };
+  /** The two branches of the disjunction, possibly parenthesised as a whole. @param {number} depth @returns {any[][] | undefined} */
+  const branches = (depth) => {
+    if (depth > READ_DEPTH) return undefined;
+    const start = cursor.at;
+    if (take('(')) {
+      const inner = branches(depth + 1);
+      if (inner !== undefined && take(')')) return inner;
+      cursor.at = start;
+    }
+    const first = conjunction(depth);
+    if (first === undefined || !take('OR')) return undefined;
+    const second = conjunction(depth);
+    return second === undefined ? undefined : [first, second];
+  };
+  const read = branches(0);
+  if (read === undefined || cursor.at !== tokens.length) return null;
+  // one branch is the absent span alone; the other names the span an
+  // object and holds every bound conjunct, once each
+  const alone = read.findIndex((branch) => branch.length === 1 && branch[0].kind === 'absent');
+  if (alone < 0) return null;
+  const absent = read[alone][0];
+  const rest = read[1 - alone].flatMap((item) => (item.kind === 'within'
+    ? [{ kind: 'atLeast', column: item.column, low: item.low }, { kind: 'atMost', column: item.column, high: item.high }]
+    : [item]));
+  const before = rest.find((item) => item.kind === 'before');
+  if (before === undefined || before.start === before.end) return null;
+  const { start, end } = before;
+  const integers = spelling.integers === 'document'
+    ? ['start', 'end'].map((bound) => ({ kind: 'integer', column: absent.column, segments: [...absent.segments, { name: bound }] }))
+    : [start, end].flatMap((name) => [{ kind: 'present', column: name }, { kind: 'whole', column: name }]);
+  const expected = [
+    { kind: 'object', column: absent.column, segments: absent.segments },
+    ...integers,
+    ...[start, end].flatMap((name) => [{ kind: 'atLeast', column: name, low: -SAFE_BOUND }, { kind: 'atMost', column: name, high: SAFE_BOUND }]),
+    { kind: 'before', start, end },
+  ];
+  const counts = new Map();
+  for (const item of rest) {
+    const key = JSON.stringify(item);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  for (const item of expected) {
+    const key = JSON.stringify(item);
+    if (counts.get(key) !== 1) return null;
+    counts.delete(key);
+  }
+  const extra = [...counts.keys()].map((key) => JSON.parse(key));
+  if (extra.length === 0) return { column: absent.column, span: absent.segments, start, end, maxDuration: null };
+  const [duration] = extra;
+  if (extra.length !== 1 || counts.get(JSON.stringify(duration)) !== 1 || duration.kind !== 'duration'
+    || duration.start !== start || duration.end !== end || !Number.isSafeInteger(duration.max) || duration.max < 1) return null;
+  return { column: absent.column, span: absent.segments, start, end, maxDuration: duration.max };
+}

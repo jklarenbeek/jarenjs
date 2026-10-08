@@ -277,6 +277,14 @@ describe('the interval form, and the seek that binds a typed scalar', () => {
     assert.deepStrictEqual(slots.map((slot) => slot.literal), [300, 200]);
   });
 
+  it('a declared interval is the two comparisons alone, still total over a row with no span', () => {
+    const { sql, slots } = emit(plan({ p: 'interval', declared: true,
+      columns: { start: 'gx_s', end: 'gx_e' }, probe: { from: 200, to: 300 } }));
+    assert.match(sql, /WHERE \("gx_s" IS NOT NULL AND "gx_e" IS NOT NULL AND "gx_s" < \? AND "gx_e" > \?\)/);
+    assert.strictEqual(sql.includes('>='), false, 'no stored span is empty or reversed, so no row is kept for the operator to raise on');
+    assert.deepStrictEqual(slots.map((slot) => slot.literal), [300, 200]);
+  });
+
   it('a numeric seek folds the groups and binds ONE guarded comparison', () => {
     const seek = { name: 'asof.lower', kind: 'number', ref: at,
       bound: { op: 'le', lit: 1000 }, inner: 'max', outer: 'min',

@@ -857,6 +857,24 @@ const FACTS = {
     return ['', '| spans a side | pairs | nested loop | interval index | nested loop ÷ index |',
       '|---|---:|---:|---:|---:|', ...rows, ''].join('\n');
   },
+  // -- series: the stored span, the mapped pre-filter against the declared
+  // interval at three days of the year - the late-window loss published
+  // beside the wins, as measured
+  'series.spanTable': () => {
+    const rows = seriesSpanDays().map((day) => {
+      const prefilter = seriesSpanRow('spanPrefilter', day);
+      const declared = seriesSpanRow('spanDeclared', day);
+      return `| day ${day} | ${thousands(declared.results)} | ${ms(prefilter.ns / 1e6)} ms `
+        + `| ${ms(declared.ns / 1e6)} ms | ${spanVerdict(prefilter.ns / declared.ns)} |`;
+    });
+    return ['', '| window | spans met | mapped pre-filter (scan) | declared interval (seek) | the declaration is |',
+      '|---|---:|---:|---:|---|', ...rows, ''].join('\n');
+  },
+  'series.spanVerdict': () => {
+    const windows = seriesSpanDays().map((day) =>
+      `${spanVerdict(seriesSpanRow('spanPrefilter', day).ns / seriesSpanRow('spanDeclared', day).ns)} at day ${day}`);
+    return `${windows.slice(0, -1).join(', ')} and ${windows[windows.length - 1]}`;
+  },
 
   'geo.pip2000': () => `${ratio(geoRatio('point in polygon (2000-vertex)'))}×`,
   'geo.bbox2000': () => `${ratio(geoRatio('bounding box (2000-vertex)'))}×`,
@@ -1212,6 +1230,22 @@ function seriesJoinRow(route, n) {
     throw new Error(`series.json has no '${route}' row at ${n} — regenerate it before quoting one`);
   return row;
 }
+/** The days of the year the stored-span question was asked at, ascending. */
+function seriesSpanDays() {
+  const days = data('series').rows.filter((r) => r.route === 'spanDeclared').map((r) => r.n);
+  if (days.length === 0)
+    throw new Error("series.json has no 'spanDeclared' row — regenerate it before quoting one");
+  return days.sort((a, b) => a - b);
+}
+/** One stored-span route's row at one day of the year. */
+function seriesSpanRow(route, day) {
+  const row = data('series').rows.find((r) => r.route === route && r.n === day);
+  if (row === undefined)
+    throw new Error(`series.json has no '${route}' row at day ${day} — regenerate it before quoting one`);
+  return row;
+}
+/** A speed-up stated as one and a loss as one, never a floor at parity. @param {number} r */
+const spanVerdict = (r) => (r >= 1 ? `${ratio(r)}× faster` : `${ratio(1 / r)}× slower`);
 
 //#region the registry
 

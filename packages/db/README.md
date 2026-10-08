@@ -824,19 +824,24 @@ below it to skip. At fifty-one such probes over a hundred thousand rows
 the batch still LOSES to fifty-one separate index reads. Few questions
 of a large series belong to a batch; a join of two series does.
 
-**`$overlaps` narrows through a declared interval.** Type a member as an
-object whose `start` and `end` are both required and both numeric, map
-each bound to a column, and the half-open test pushes: two comparisons
-over the declared columns, with the engine's own operator deciding over
-what comes back. It stays a pre-filter rather than an exact translation
-because §8.16 RAISES on a span whose end is at or before its start, and
-no schema keyword forbids storing one — so the statement keeps every
-inverted row and the operator raises over it exactly as it would have.
-That disjunct compares two columns, which no index bounds, so the fetch
-scans; what it buys is that the pruned rows never reach the engine at
-all. An unmapped pair, a schema that admits a textual bound, or a probe
-that is not itself a half-open span pushes nothing and names why —
-`strict: true` answers `JD0010`.
+**`$overlaps` narrows through mapped bounds, and is exact over a declared
+interval.** Type a member as an object whose `start` and `end` are both
+required and both numeric, map each bound to a column, and the half-open
+test pushes: two comparisons over the declared columns. Declare the
+member an interval as well — `intervals: [{ name: 'slot', path: '$.span'
+}]`, the bounds typed `integer` — and every stored span is a half-open one
+of two safe integers for every writer: the store refuses the rest before
+the statement, hook or no hook (`JD2003`), and a named CHECK on the table
+refuses them from raw SQL (`JD2005`), so the conjunction is the operator
+itself — exact, no residual, and a seek on the bound's index. Undeclared
+it stays a pre-filter: §8.16 RAISES on a span whose end is at or before
+its start and no schema keyword forbids storing one, so the statement
+keeps every inverted row and the operator raises over it exactly as it
+would have — a comparison between two columns, which no index bounds, so
+the fetch scans; what it buys is that the pruned rows never reach the
+engine at all. An unmapped pair, a schema that admits a textual bound, or
+a probe that is not itself a half-open span pushes nothing and names why
+— `strict: true` answers `JD0010`.
 
 **One corpus, five executors, proven to agree.** The committed temporal
 corpus (`test/json/fixtures/series-corpus.json`) runs through the plain

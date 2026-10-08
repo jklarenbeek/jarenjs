@@ -286,6 +286,9 @@ export function fullDoubleDialect(createDialect) {
     jsonText: (column) => `JTEXT(${column})`,
     jsonAgg: (expr) => `JAGG(${expr})`,
     jsonTypeOf: (column, pathText) => `JTYPE(${column}, '${pathText}')`,
+    jsonTypeName: (column, pathText) => `JTYPE(${column}, '${pathText}')`,
+    integerBounds: ({ docColumnSql, start, end }) =>
+      `WHOLE(JX(${docColumnSql}, '${start.pathText}')) AND WHOLE(JX(${docColumnSql}, '${end.pathText}'))`,
     numericTypeNames: ['integer', 'real'],
     jsonObject: (pairs) => `JOBJ(${pairs})`,
     schemaTypeOf: (declaredType) => (declaredType === 'KEYTYPE' ? 'string' : undefined),

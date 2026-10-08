@@ -494,10 +494,15 @@ export function emitPlan(plan, dialect, physical) {
         // row; `IS NOT NULL` keeps the form total for a row with no span
         const start = q(pred.columns.start);
         const end = q(pred.columns.end);
-        return `(${start} IS NOT NULL AND ${end} IS NOT NULL AND `
-          + `((${start} < ${param({ literal: pred.probe.to })} `
-          + `AND ${end} > ${param({ literal: pred.probe.from })}) `
-          + `OR ${start} >= ${end}))`;
+        const guard = `${start} IS NOT NULL AND ${end} IS NOT NULL AND `;
+        const meets = `${start} < ${param({ literal: pred.probe.to })} `
+          + `AND ${end} > ${param({ literal: pred.probe.from })}`;
+        // a declared interval holds no empty or reversed span, so the
+        // conjunction is the operator; undeclared, the rows §8.16 raises
+        // on are kept for the engine to raise on
+        return pred.declared === true
+          ? `(${guard}${meets})`
+          : `(${guard}((${meets}) OR ${start} >= ${end}))`;
       }
       case 'typeIs': {
         const jt = typeOf(pred.ref);

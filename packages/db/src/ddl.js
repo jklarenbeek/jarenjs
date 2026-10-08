@@ -24,6 +24,7 @@ import { foldIdentifier } from './invariants.js';
 import { verifyRulePrograms } from './physical.js';
 import { rowPaths, rowPredicate, storedBoolean } from './dialects/row-predicate.js';
 import { planTable } from './dialects/sqlite-schema.js';
+import { readIntervalCheck } from './dialects/check-read.js';
 import { comparableDeclaredSql } from './schema-sql.js';
 export { normalizeDeclaredSql, comparableDeclaredSql } from './schema-sql.js';
 
@@ -565,6 +566,9 @@ function deriveColumns(index, context) {
  *     triggers: { name: string, sql: string }[] }[],
  *   objects: { name: string, what: string, docPath: string }[],
  *   conditionColumns: { name: string, physical: string, codec: string }[],
+ *   intervals: { name: string, constraint: string, span: { segments: any[], canonical: string,
+ *     pathText: string, bounds: { start: string, end: string } }, start: string, end: string,
+ *     maxDuration: number | null, sql: string, docPath: string }[],
  *   expected: { columns: { name: string, type: string,
  *     generated: boolean }[], indexes: { name: string, unique: boolean,
  *     columns: string[], where?: string, reads?: string[] }[] },
@@ -711,6 +715,26 @@ export function planCollection(name, collection, dialect, options = undefined) {
     index.where = indexCondition(index.declared.where, conditionColumns, dialect, `${index.declared.docPath}/where`, unreadable, reads);
     index.reads = [...reads];
   }
+  // a declared interval: the two bound columns the collection's plain
+  // indexes give its span member (held at normalization), and the one
+  // CHECK that makes every stored span a half-open one for every writer
+  const intervals = (collection.intervals ?? []).map((interval) => {
+    const pathText = dialect.jsonPathText(interval.segments);
+    const boundText = (/** @type {string} */ bound) => dialect.jsonPathText([...interval.segments, { name: bound }]);
+    const bounds = { start: boundText('start'), end: boundText('end') };
+    const start = columnByCanonical.get(interval.start.canonical);
+    const end = columnByCanonical.get(interval.end.canonical);
+    if (pathText === null || bounds.start === null || bounds.end === null || start === undefined || end === undefined) {
+      throw new DbCompileError('JD0004',
+        `the interval path '${interval.path}' names a member the dialect's JSON path grammar cannot carry`,
+        `${interval.docPath}/path`);
+    }
+    const sql = dialect.ddl.intervalCheck({ docColumn: DOC_COLUMN, span: pathText, bounds,
+      start: dialect.quoteIdentifier(start), end: dialect.quoteIdentifier(end), maxDuration: interval.maxDuration });
+    return { name: interval.name, constraint: interval.constraint,
+      span: { segments: interval.segments, canonical: interval.canonical, pathText, bounds },
+      start, end, maxDuration: interval.maxDuration, sql, docPath: interval.docPath };
+  });
   // every name the table, its columns and its indexes take, at the member
   // each one comes from (see `refuseLongName`)
   refuseLongName(dialect, name, `the table for collection '${name}'`, collection.docPath ?? `/collections/${name}`);
@@ -735,6 +759,7 @@ export function planCollection(name, collection, dialect, options = undefined) {
     keyType,
     docColumn: DOC_COLUMN,
     generated,
+    checks: intervals.map((interval) => ({ name: interval.constraint, sql: interval.sql })),
   };
   const createSql = [
     dialect.ddl.createTable(tableShape),
@@ -776,6 +801,8 @@ export function planCollection(name, collection, dialect, options = undefined) {
     objects,
     /** The members an index condition may read, by their generated columns. */
     conditionColumns,
+    /** The declared intervals: each one's bound columns and the CHECK it installs. */
+    intervals,
     expected: {
       columns: [
         { name: KEY_COLUMN, type: keyType, generated: false },
@@ -1029,10 +1056,55 @@ export function verifyShape(connection, plan, collection, docPath, kind = 'colle
           // no CREATE text, every other trigger or rewrite rule on the table
           // undeclared drift; a CREATE text comparison covers them below
           return chain(collectColumns(0), () =>
-            chain(verifyRulePrograms(connection, plan.table, plan.programs ?? [], disagree,
-              { installed: dialect.capabilities.declaredSqlText !== true, undeclared: true }), () =>
-              verifyDeclaredSql(connection, plan, disagree)));
+            chain(verifyIntervalChecks(connection, plan, disagree), () =>
+              chain(verifyRulePrograms(connection, plan.table, plan.programs ?? [], disagree,
+                { installed: dialect.capabilities.declaredSqlText !== true, undeclared: true }), () =>
+                verifyDeclaredSql(connection, plan, disagree))));
         }));
+    }));
+}
+
+/**
+ * The interval CHECKs an existing table must carry, on an engine that keeps
+ * no CREATE text: each declared one present, validated, and read back as
+ * the declaration through the one interval reader — text the reader does
+ * not read is drift — and no CHECK the model does not declare beside them,
+ * as the CREATE text comparison holds on SQLite. A collection declaring no
+ * interval reads none of its table's CHECKs, as before.
+ * @param {any} connection
+ * @param {any} plan
+ * @param {(difference: string) => never} disagree
+ * @returns {any} value-or-promise
+ */
+function verifyIntervalChecks(connection, plan, disagree) {
+  const dialect = connection.dialect;
+  const intervals = plan.intervals ?? [];
+  if (intervals.length === 0 || dialect.capabilities.declaredSqlText === true) return null;
+  return chain(connection.prepare(dialect.introspect.checks(plan.table)), (statement) =>
+    chain(statement.all([]), (rows) => {
+      /** @type {Map<string, any>} */
+      const stored = new Map(rows.map((row) => [String(row.name), row]));
+      for (const interval of intervals) {
+        const row = stored.get(interval.constraint);
+        if (row === undefined) {
+          disagree(`the model declares the interval '${interval.name}' as CHECK '${interval.constraint}', `
+            + 'which the database does not have');
+        }
+        if (Number(row.validated) !== 1)
+          disagree(`CHECK '${interval.constraint}' is not validated: the rows it holds were never checked against it`);
+        const conforming = row.conforming === undefined || row.conforming === null || String(row.conforming) === 'on';
+        const read = readIntervalCheck(String(row.expression ?? ''), dialect.intervalSpelling(conforming));
+        const same = read !== null && read.column === plan.docColumn && canonicalOf(read.span) === interval.span.canonical
+          && read.start === interval.start && read.end === interval.end && read.maxDuration === interval.maxDuration;
+        if (!same) {
+          disagree(`CHECK '${interval.constraint}' is declared as\n  ${row.expression}\nand the model declares\n  ${interval.sql}`);
+        }
+      }
+      for (const name of stored.keys()) {
+        if (!intervals.some((interval) => interval.constraint === name))
+          disagree(`the database has the CHECK '${name}', which the model does not declare`);
+      }
+      return null;
     }));
 }
 

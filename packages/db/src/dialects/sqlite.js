@@ -12,7 +12,7 @@ import { createDialect } from '../dialect.js';
 import { rtreeDdl } from './rtree-ddl.js';
 import { readExpression } from './expression-read.js';
 import { SQLITE, sqliteInvariantTriggers } from './invariant-sql.js';
-import { sqliteChecks } from './check-read.js';
+import { sqliteChecks, SQLITE_PREDICATE } from './check-read.js';
 import { OWNER_TABLE } from '../engine-metadata.js';
 import { modelPath } from '../model-path.js';
 
@@ -191,6 +191,38 @@ function parsePathText(text) {
 }
 
 /**
+ * The JSON type name of the member at a path — `json_type`, which answers
+ * `integer` and `real` apart, as the query layer and a declared interval's
+ * CHECK both read it.
+ * @param {string} columnSql
+ * @param {string} pathText
+ * @returns {string}
+ */
+function jsonTypeName(columnSql, pathText) {
+  return `json_type(${columnSql}, ${stringLiteral(pathText)})`;
+}
+
+/**
+ * How this dialect's interval CHECK reads back through the one interval
+ * reader: `json_type(<doc>, '<path>')` names the document column and the
+ * path as {@link jsonPathText} writes one, and a bound is an integer by
+ * the document's own JSON type. The engine keeps the text verbatim, so
+ * there is one spelling whatever the session.
+ * @type {import('./check-read.js').IntervalSpelling}
+ */
+const INTERVAL_SPELLING = Object.freeze({
+  ...SQLITE_PREDICATE,
+  integers: 'document',
+  typeOf: (tokens, at) => {
+    const [call, open, column, comma, path, close] = tokens.slice(at, at + 6);
+    if (call?.kind !== 'word' || call.value.toLowerCase() !== 'json_type' || open?.value !== '(' || column?.kind !== 'identifier'
+      || comma?.value !== ',' || path?.kind !== 'string' || close?.value !== ')') return undefined;
+    const segments = parsePathText(path.value);
+    return segments === null ? undefined : { column: column.value, segments, end: at + 6 };
+  },
+});
+
+/**
  * The declared index EXPRESSION a generated column computes, out of the
  * SQL this dialect wrote for it. `byName` maps the engine's function
  * name back to the model's — here that is the `jaren_x_` registration,
@@ -313,6 +345,15 @@ export const sqliteDialect = createDialect({
   jsonExtract: (columnSql, pathText, kind) => kind === 'json'
     ? `(${columnSql} -> ${stringLiteral(pathText)})`
     : `jsonb_extract(${columnSql}, ${stringLiteral(pathText)})`,
+  // the engine-specific piece of a declared interval's CHECK beside
+  // `jsonTypeOf`: each bound held to an integer by ITS JSON type — `IS`,
+  // not `=`, because a half span's absent bound reads NULL and a CHECK
+  // passes a NULL comparison; the column itself cannot tell, since an
+  // INTEGER column reads a JSON boolean as 1 or 0
+  integerBounds: ({ docColumnSql, start, end }) =>
+    `json_type(${docColumnSql}, ${stringLiteral(start.pathText)}) IS 'integer' AND `
+    + `json_type(${docColumnSql}, ${stringLiteral(end.pathText)}) IS 'integer'`,
+  intervalSpelling: () => INTERVAL_SPELLING,
   // a DERIVED column's expression: the member as JSON text handed to
   // the deterministic function the store registers at open. The
   // precision is a LITERAL, not a parameter — a generated column's
@@ -344,8 +385,9 @@ export const sqliteDialect = createDialect({
   jsonEncode: (paramSql) => `jsonb(${paramSql})`,
   jsonText: (columnSql) => `json(${columnSql})`,
   jsonAgg: (exprSql) => `json_group_array(${exprSql})`,
-  jsonTypeOf: (columnSql, pathText) =>
-    `json_type(${columnSql}, ${stringLiteral(pathText)})`,
+  jsonTypeOf: jsonTypeName,
+  // the same call names a member's JSON type in a declared interval's CHECK
+  jsonTypeName,
   // SQLite keeps the two number types it stores apart, so a JSON number
   // is one of two names here
   numericTypeNames: ['integer', 'real'],

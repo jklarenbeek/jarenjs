@@ -54,6 +54,12 @@ async function refusesToOpen(open, expected) {
 }
 
 const COLLECTION = { schema: { type: 'object' }, key: '/id' };
+/** A collection whose span member can declare an interval: two required integer bounds, each indexed. */
+const SPANNED = {
+  schema: { type: 'object', properties: { span: { type: 'object', required: ['start', 'end'], properties: { start: { type: 'integer' }, end: { type: 'integer' } } } } },
+  key: '/id',
+  indexes: [{ name: 'by_start', path: '$.span.start' }, { name: 'by_end', path: '$.span.end' }],
+};
 const KEYED = { type: 'object', properties: { id: { type: 'string', 'x-entity': { key: true } }, n: { type: 'integer' } } };
 const collectionModel = (/** @type {any} */ collection) => ({ $model: '0.1', collections: { c: collection } });
 const entityModel = (/** @type {any} */ entity) => ({ $model: '0.1', entities: { E: entity } });
@@ -78,6 +84,8 @@ const REFUSED = [
   ['an unknown entity index member', entityModel({ schema: KEYED, indexes: [{ name: 'x', path: '$.n', bogus: 1 }] }), '/entities/E/indexes/0/bogus'],
   ['a misspelt unique on an entity index', entityModel({ schema: KEYED, indexes: [{ name: 'x', path: '$.n', uniqe: true }] }), '/entities/E/indexes/0/uniqe'],
   ['an unknown invariant member', entityModel({ schema: KEYED, invariants: [{ ...storeRule, bogus: 1 }] }), '/entities/E/invariants/0/bogus'],
+  ['a misspelt intervals', collectionModel({ ...SPANNED, intervls: [{ name: 'slot', path: '$.span' }] }), '/collections/c/intervls'],
+  ['an unknown interval member', collectionModel({ ...SPANNED, intervals: [{ name: 'slot', path: '$.span', bogus: 1 }] }), '/collections/c/intervals/0/bogus'],
 ];
 
 /** Accepted alike: every declaration member, the migration hints, and an invariant's when/columns/effects. */
@@ -94,6 +102,7 @@ const ACCEPTED = [
   ['an invariant when', physicalRule({ name: 'g', on: ['update'], enforcement: 'database', when: 'assigned', assert: false })],
   ['an invariant columns', physicalRule({ name: 'g', on: ['update'], enforcement: 'database', columns: ['n'], assert: false })],
   ['an invariant effects', physicalRule({ name: 'g', on: ['update'], enforcement: 'database', effects: [{ increment: 'rev' }], assert: true })],
+  ['a declared interval', collectionModel({ ...SPANNED, intervals: [{ name: 'slot', path: '$.span', maxDuration: 28800000 }, { name: 'open', path: '$.span' }] })],
 ];
 
 /** Every committed `$model` JSON document under the database tests. */

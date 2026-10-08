@@ -408,11 +408,24 @@ export function expressionIndex<D = unknown>(
   options?: { name?: string; unique?: boolean },
 ): ExpressionIndexSpec<D>;
 
+/**
+ * One declared interval of a collection: `path` selects a member the schema
+ * types as an object of two required `integer` bounds, each indexed by its
+ * path; every stored span is then half-open (`start < end`) for every
+ * writer, and no longer than `maxDuration` milliseconds where one is given.
+ */
+export interface IntervalSpec {
+  readonly name: string;
+  readonly path: string;
+  readonly maxDuration?: number;
+}
+
 export interface CollectionOptions<D> {
   /** An RFC 6901 pointer, a captured member path (`(d) => d.id` → `/id`), or `null` (the store allocates). */
   key?: string | ((doc: Expr<D>) => unknown) | null;
   identity?: 'caller' | 'uuid' | 'integer';
   indexes?: readonly (IndexSpec<D> | ExpressionIndexSpec<D>)[];
+  intervals?: readonly IntervalSpec[];
   renamedFrom?: string;
 }
 
@@ -423,6 +436,7 @@ export interface CollectionSpec<D = unknown> {
   readonly key?: string | null;
   readonly identity?: 'caller' | 'uuid' | 'integer';
   readonly indexes?: readonly IndexSpec<D>[];
+  readonly intervals?: readonly IntervalSpec[];
   readonly 'x-rename'?: string;
 }
 
