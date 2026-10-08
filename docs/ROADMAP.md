@@ -349,6 +349,13 @@ what each does is its own documentation's job
   first-occurrence order and engine errors under the indexed, unindexed and
   forced-residual oracle. A disconnected binding graph remains a deliberate
   cartesian-product refusal; removing that guard changes the join contract.
+  Two native entity equality joins already pair differently from the engine: over
+  a nullable member the database pairs no nulls where the engine pairs `null`
+  with `null` (a live registration follows `execute`), and between differently
+  typed columns (text `'7'` against integer `7`, `1` against `true`) SQLite's
+  affinity pairs rows the engine and the live strategies leave apart. Wanted: the
+  planner guards the pairs it cannot prove, or the join documents the database's
+  pairing as its contract.
 - [ ] **Projection and distinct beyond reconstructible trees.** A return
   containing an unproven operator (restricted correlated counts are now native),
   a whole entity binding inside a constructor or a non-singular
@@ -468,6 +475,51 @@ what each does is its own documentation's job
   or `JD2003` ([MODEL-FORMAT §10.6](../packages/db/docs/MODEL-FORMAT.md)).
   Wanted: the series planner keeps these sums residual with a named reason, as
   the collection planner does.
+- [ ] **Join tables are not queryable roots.** A many-to-many join table has no
+  root to bind: `u.labels` as a chain hop is `JL0105`, and a membership is read
+  through `include` (`client.entities.User.include((u) => u.labels)` loads the
+  rows, `{ count: true }` counts them). A question about the membership itself
+  ("which pairs were attached since Friday") is reachable only by loading and
+  asking in JavaScript. Wanted: a root for a join table, so a membership can be
+  filtered, counted and joined in one document
+  ([DB-CLIENT §6](../packages/linq/docs/DB-CLIENT.md)).
+- [ ] **An aggregate method on a captured value ignores its argument.**
+  `g.items.sum((r) => r.score)` emits `$sum` over the rows and fails `JQ2001` at
+  run time, in memory and on a store alike; the documented spelling fans first
+  (`g.items.all().score.sum()`, QUERY-PEN). Refusing an argument the capture does
+  not read changes the capture's surface, so it needs a decision.
+- [ ] **Live evaluation compares group keys and documents by a sorting
+  serialization.** A group key computed to a non-finite number (`$div` by zero)
+  shares or misorders live groups, because a live group is keyed by
+  `stableStringify` where the engine keys by `stableKeyString`, which
+  `@jarenjs/json/query` does not export; and live results and replication compare
+  documents by `stableStringify` equality (`live.js`, `live-nested.js`,
+  `replication.js`), which ignores member order, so a write that only reorders a
+  stored document's members counts as no change and a registration keeps serving
+  the previous order. Wanted: export the engine's group-key identity and key live
+  groups by it; and either compare with member order
+  (`semanticKey(value, { ordered: true })`), accepting a re-emission on a
+  reorder-only write, or state that a stored document's member order is not part
+  of its value.
+- [ ] **Live registrations take unchecked options and share capture records.**
+  Unknown live option keys (`mod`, `eventtime`) are ignored, and a valid
+  `eventTime` on a document that is not temporal is ignored too; the window and
+  rows strategies hold the capture record's inserted object, so a
+  `store.observe` observer that mutates its record rewrites `live.result`.
+  Wanted: `store.live` validates its option keys (`externals`, `mode`,
+  `eventTime`), a decision on `eventTime` over a non-temporal document, and
+  records frozen at capture or copied per registration.
+- [ ] **A chain handed to another source's `live()` runs against the wrong
+  collection.** `client.collections.orders.live(<a chain over users>)` registers
+  the users chain's document against `orders`: a chain's run bindings carry no
+  source. Wanted: the chain carries its source and `live()` refuses a chain over
+  another source.
+- [ ] **Lone surrogates and NUL in native projections.** A lone surrogate written
+  as a JavaScript escape comes back from a native projection, group key or
+  distinct as three U+FFFD, and `$ends-with` and `$contains` over NUL or lone
+  surrogates answer differently from the engine, while the live strategies keep
+  the true value, so a live result and `execute` differ. Wanted: those operands
+  stay residual, or the dialect encodes them exactly.
 - [ ] **Federation merge strategy and spilling.** Connected N-way joins and
   nested fluent joins now have an explicit fetch order and combined admission
   credits (QUERY-PEN §12.1). A merge strategy still needs a provider ordering

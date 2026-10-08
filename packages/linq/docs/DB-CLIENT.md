@@ -845,7 +845,7 @@ scope; a join between two STORES, or between a store and an array, would
 need one query document with two inputs and there is no such document.
 Three or more bindings the entity translator names a residual. Both are
 on [docs/ROADMAP.md](../../../docs/ROADMAP.md) under `@jarenjs/linq &
-@jarenjs/db`, "Cross-source linq joins beyond one store".
+@jarenjs/db`, "Federation merge strategy and spilling".
 
 **A many-to-many join table is not a queryable root in this version.**
 `u.labels` as a chain HOP is `JL0105` — the join table has no root to
