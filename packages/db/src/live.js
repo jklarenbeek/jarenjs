@@ -44,26 +44,32 @@ const AGGREGATE_MEMBERS = new Map([
 /** Split an emitted pointer into unescaped segments. */
 const segmentsOf = (path) => path.split('/').slice(1).map(decodeJSONPointerSegment);
 
+/** Whether a `$subsequence` bound is a number literal as the query
+ * analysis reads it — written as a number or quoted with `$const` —
+ * which is what the planner peels a window by (it validates the value).
+ * @param {any} bound
+ * @returns {boolean} */
+const isLiteralBound = (bound) => typeof bound === 'number'
+  || (isJsonObject(bound) && Object.keys(bound).length === 1 && typeof bound.$const === 'number');
+
 /**
  * Peel the canonical wrappers off a document the way the planner
- * does: one-element array pack, then literal `$subsequence` windows,
- * then a top-level aggregate member.
+ * does: one-element array pack, then `$subsequence` windows with
+ * number-literal bounds, then a top-level aggregate member. It says
+ * only WHETHER windows were peeled: their bounds are validated and
+ * composed by the planner alone (`plan.window`, read through
+ * `windowProbe`).
  * @param {any} document
  */
 function unwrapDocument(document) {
   const whole = Array.isArray(document) && document.length === 1 ? document[0] : document;
   let doc = whole;
-  let offset = 0;
-  let limit = null;
   let windowed = false;
   while (isJsonObject(doc) && Array.isArray(doc.$subsequence)
     && Object.keys(doc).length === 1
-    && typeof doc.$subsequence[1] === 'number'
-    && (doc.$subsequence[2] === undefined || typeof doc.$subsequence[2] === 'number')) {
+    && isLiteralBound(doc.$subsequence[1])
+    && (doc.$subsequence[2] === undefined || isLiteralBound(doc.$subsequence[2]))) {
     windowed = true;
-    offset += doc.$subsequence[1];
-    const length = doc.$subsequence[2];
-    if (length !== undefined) limit = limit === null ? length : Math.min(limit, length);
     doc = doc.$subsequence[0];
   }
   let aggregate = null;
@@ -80,7 +86,26 @@ function unwrapDocument(document) {
       }
     }
   }
-  return { inner: doc, whole, windowed, offset, limit, aggregate };
+  return { inner: doc, whole, windowed, aggregate };
+}
+
+/**
+ * The document that asks the planner for a peeled window's bounds: the
+ * same `$subsequence` nesting around the ordered phrase, whose return
+ * is the bare binding. A window pushes only under a projection that
+ * pushes too, and the maintained window evaluates the projection per
+ * row itself — so the bounds are read from a plan whose projection
+ * always pushes, and `composeWindows` (plan.js) stays the one place
+ * nested windows compose.
+ * @param {any} window - the outermost peeled `$subsequence`, or `inner`
+ * @param {any} inner - the ordered phrase `unwrapDocument` reached
+ * @param {string} binding - the phrase's single `$for` name
+ * @returns {any}
+ */
+function windowProbe(window, inner, binding) {
+  if (window === inner) return { ...inner, $return: `$${binding}` };
+  const [phrase, ...bounds] = window.$subsequence;
+  return { $subsequence: [windowProbe(phrase, inner, binding), ...bounds] };
 }
 
 /** Whether a `$for` source is the whole collection: the bare `$[*]`, or
@@ -112,6 +137,35 @@ function documentsSource(binding, where) {
   };
 }
 
+/** Whether a document fragment never reads the collection root (`$`,
+ * `$.…`, `$[…]`): a part the maintenance evaluates over a subset of
+ * the rows — one group, one row — would see that subset as the
+ * collection. A `$const` is quoted, never read.
+ * @param {any} node
+ * @returns {boolean} */
+function readsNoRoot(node) {
+  if (typeof node === 'string') return node !== '$' && !/^\$(?:\.|\[)/.test(node);
+  if (Array.isArray(node)) return node.every(readsNoRoot);
+  if (!isJsonObject(node) || Object.hasOwn(node, '$const')) return true;
+  return Object.values(node).every(readsNoRoot);
+}
+
+/** Whether the live evaluators can compile `document` the way they
+ * do — with no options: the registered operators, the zone provider
+ * and the profile limits ride only on `execute`'s residual. A document
+ * they cannot compile stays on the re-run path, which executes it.
+ * @param {any} document
+ * @returns {boolean} */
+function compilesBare(document) {
+  try {
+    compileJsonQuery([document]);
+    return true;
+  }
+  catch {
+    return false;
+  }
+}
+
 /**
  * Recognise the canonical single-level group form (§7): one binding
  * over `$[*]`, optional `$where`, one or more group keys, and a
@@ -129,14 +183,7 @@ function recogniseGroupForm(inner) {
   if (!Object.keys(inner).every((key) => allowed.has(key))) return null;
   const groupNames = Object.keys(inner.$groupby);
   if (groupNames.length === 0) return null;
-  // Subset evaluation must never read the global collection root.
-  const local = (node) => {
-    if (typeof node === 'string') return node !== '$' && !/^\$(?:\.|\[)/.test(node);
-    if (Array.isArray(node)) return node.every(local);
-    if (!isJsonObject(node) || Object.hasOwn(node, '$const')) return true;
-    return Object.values(node).every(local);
-  };
-  if (![inner.$where, inner.$groupby, inner.$return].every(local)) return null;
+  if (![inner.$where, inner.$groupby, inner.$return].every(readsNoRoot)) return null;
   const scalar = groupNames.some((name) => inner.$return === `$${name}`)
     || (isJsonObject(inner.$return) && Object.keys(inner.$return).length === 1
       && AGGREGATE_MEMBERS.has(Object.keys(inner.$return)[0]));
@@ -279,7 +326,7 @@ export function classifyLiveQuery(document, queryShape, keyed, eventTime = null)
       ?? { construct: 'residual', reason: 'the document did not translate' };
     return `'${forcing.construct}' — ${forcing.reason}`;
   };
-  const { inner, whole, windowed, offset, limit, aggregate } = unwrapDocument(document);
+  const { inner, whole, windowed, aggregate } = unwrapDocument(document);
   const nested = classifyNestedGroup(inner);
   if (nested !== null && !windowed && keyed && aggregate === null) return nested;
 
@@ -375,16 +422,37 @@ export function classifyLiveQuery(document, queryShape, keyed, eventTime = null)
     return rerun('this grouping or distinct projection needs set-level maintenance');
 
   if (planned.plan.order !== null) {
-    if (offset > 0 || (planned.plan.window?.offset ?? 0) > 0) {
-      return rerun('an offset window re-runs');
+    // the planner read through a one-item array constructor the
+    // unwrapping above keeps: the result is ONE row, the whole array
+    if (planned.wrapped) {
+      return rerun('an ordered query inside a one-item array constructor re-runs (its one row is the whole array)');
     }
-    const returnCard = planned.analysis.root.return?.card ?? 1;
-    if (returnCard > 2) return rerun('a one-to-many projection under an order re-runs');
+    // the bounds are the planner's: literal non-negative integers, and
+    // nested windows composed innermost first — anything else re-runs
+    // with the planner's own reason (a native windowed plan carries its
+    // composed window). An ordered plan's phrase is one plain binding
+    // over the collection, so `bindingNameOf` names it.
+    /** @type {{ offset: number, limit: number | null }} */
+    let window = { offset: 0, limit: null };
+    if (windowed) {
+      const bounded = planQuery(
+        windowProbe(whole, inner, /** @type {string} */ (bindingNameOf(inner))), queryShape, {});
+      if (bounded.mode !== 'native') return rerun(plannerReason(bounded));
+      window = /** @type {any} */ (bounded.plan).window;
+    }
+    // the window keeps one item per row and evaluates every row alone
+    // through an evaluator compiled with no options
+    if ((planned.analysis.root.ret?.card ?? 1) > 2) return rerun('a one-to-many projection under an order re-runs');
+    if (![inner.$where, inner.$return].every(readsNoRoot)) {
+      return rerun('a projection that reads the collection root re-runs (a row is evaluated alone)');
+    }
+    if (!compilesBare(inner)) return rerun(plannerReason(planned));
     return {
       strategy: 'window',
       inner,
       order: planned.plan.order,
-      limit: planned.plan.window?.limit ?? limit,
+      offset: window.offset,
+      limit: window.limit,
       deps: { whole: true, members: new Set() },
     };
   }
@@ -589,15 +657,16 @@ function rowsStrategy(description, context) {
 }
 
 /**
- * `orderBy` (+ `limit`): §7's maintained window over ALL matching
- * rows — which is what answers a delete inside the visible window
- * without a re-query — with the first `limit` entries visible and
- * ties broken by the key token.
+ * `orderBy` (+ `offset`, `limit`): §7's maintained window over ALL
+ * matching rows — which is what answers a delete inside the visible
+ * window, and a row entering or leaving above the offset, without a
+ * re-query — with the `limit` entries after the first `offset` visible
+ * and ties broken by the key token.
  * @param {any} description
  * @param {any} context
  */
 function windowStrategy(description, context) {
-  const { inner, order, limit } = description;
+  const { inner, order, offset, limit } = description;
   const binding = /** @type {string} */ (bindingNameOf(inner));
   const rowDocument = { ...inner };
   delete rowDocument.$orderby;
@@ -615,14 +684,17 @@ function windowStrategy(description, context) {
       return value;
     };
   });
-  const sortedWindow = createSortedWindow(order, limit);
+  // every matching row is kept; `visible()` is the first `offset +
+  // limit` of them and the rows shown are those past the offset (a
+  // `null` limit shows every row past it — never `offset + null`)
+  const sortedWindow = createSortedWindow(order, limit === null ? null : offset + limit);
 
   const place = (token, doc) => {
     const items = /** @type {any[]} */ (evaluate([doc], context.externals));
     if (items.length === 0) return;
     sortedWindow.insert(token, getters.map((get) => get(doc)), items[0]);
   };
-  const visibleRows = () => sortedWindow.visible().map((entry) => entry.item);
+  const visibleRows = () => sortedWindow.visible().slice(offset).map((entry) => entry.item);
 
   return {
     init: () => chain(context.execute([source], { externals: context.externals }),

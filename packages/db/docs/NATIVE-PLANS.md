@@ -150,4 +150,6 @@ entity cursors, keyset pages and committed capture, with no app import.
 Initial qualification is captured hybrid entity roots. Physical keyset pages
 qualify for SQLite integer, bigint and text identities (MODEL-FORMAT §10.5);
 physical capture retains its explicit refusal. Live notifications are
-source resets; offset windows retain their existing rerun classification.
+source resets: an entity offset window still resets rather than being
+maintained, while a collection offset window over an `orderBy` is a
+maintained live window (LIVE-FORMAT §7).

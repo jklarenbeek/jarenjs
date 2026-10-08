@@ -94,12 +94,15 @@ them).
   connection; a journal-mode delete of a row the store never read
   emits its `remove` without having seen the old document; a keyed
   `put` reads the stored document first, so it emits the `replace`
-  session mode emits and a `put` that changes nothing emits nothing;
-  and of the
-  database's own `ON DELETE` side effects it reconstructs exactly ONE
-  — join-table membership dying with its entity (read before the
-  delete) — while cascades into CHILD rows (`onDelete: 'cascade'` /
-  `'setNull'` on one-to-many relations) stay invisible. For writes
+  session mode emits and a `put` that changes nothing emits nothing.
+  It reconstructs the database's own `ON DELETE` actions: before a
+  store delete runs it reads the rows the declared foreign keys will
+  remove or null — descendants through `onDelete: 'cascade'` at every
+  depth, the foreign-key member of `'setNull'` rows, the membership
+  rows of every removed row — locking them where the engine locks rows,
+  and records them once the delete removed its row (a row both nulled
+  and removed is recorded as removed; a delete the database refuses
+  records nothing). For writes
   made through the store API within those bounds the two modes MUST
   produce the same op sets — proven by a differential test.
 - Requesting `mode: 'session'` on a driver without sessions is a
@@ -134,9 +137,10 @@ refuses before commit rather than persisting an imprecise continuation.
 
 The journal observes Jaren-managed API writes made with capture enabled.
 Other connections must also participate through that API for their writes to
-appear in the same log. Arbitrary SQL, custom triggers and child cascade or
-set-null effects are not enrolled. Physical-table adoption refuses capture;
-trusted SQL writes refuse while capture is active. Use an explicit schema on
+appear in the same log. Arbitrary SQL and custom triggers are not enrolled;
+the foreign-key actions of a captured delete are (§4). Physical-table
+adoption refuses capture; trusted SQL writes refuse while capture is active.
+Use an explicit schema on
 the driver; the driver puts it before `pg_temp` and restores the original
 search path before releasing the session. Host-provided unscoped search paths
 and external schema changes remain the host's responsibility.
@@ -330,7 +334,7 @@ plan; "extractable" below means what the pushdown planner already proves.
 |---|---|---|
 | `where` whose predicates translate (the plan's filter), no order, no aggregate | **incremental rows**: per-row re-evaluation; insert / remove / replace in the result | the result rows |
 | the same with a per-row `select` projection (row-mode plan) | **incremental rows**: the affected row alone is recomputed; a source row may project to several items | result rows, grouped by source key |
-| `orderBy` over extractable paths, optional `limit`, offset 0 | **maintained window**: a sorted structure; ties broken by the collection key, appended as the final sort term; an insert sorting beyond a full window is a no-op | the window rows and their sort keys |
+| `orderBy` over extractable paths, an optional literal offset and limit (non-negative integers, written as numbers or quoted with `$const`; nested windows compose as the planner composes them, the innermost first), and a return that yields at most one item per row, reads no collection root and compiles without the store's registered operators | **maintained window**: a sorted structure over every matching row, the visible rows the `limit` after the first `offset`; ties broken by the collection key's text in code-point order — for a numeric key `10` sorts before `9`, which can differ from `execute`, whose ties follow row identity (declare the key as the last `orderBy` term for one tie order everywhere); an insert sorting beyond a full window is a no-op, one sorting above the offset shifts the visible rows. The window orders schema-conformant sort values: a stored `null`, or numbers beside strings, is outside that contract — the engine refuses to order it (`JQ2005`), SQL ranks a `null` where `$empty` puts an absent value, and the window ranks numbers before other values in the term's ascending order and the rest by their text | every matching row and its sort values, each an entry — the rows before the offset included (§12) |
 | whole-query `count` / `min` / `max`, and `sum` / `avg` over an `integer` member (the plan's aggregate), optional `where` | **running accumulator** plus a per-row contribution map — a delete can only be answered from retained contributions (§3: a `remove` carries no old value). `min`/`max` removal of the last extremum holder FALLS BACK to a recompute over the retained contributions; the accumulator alone cannot answer, and this fallback is the documented cost | one contribution per matching row |
 | whole-query `sum` / `avg` over a `number` member | **re-run on invalidation**, the reason `plan.floatingAccumulation`: the answer is the engine's left-to-right addition over the matching rows in collection order, which a running accumulator would not reproduce, so every invalidation re-runs the whole document | the previous result, for diffing |
 | single-level `groupBy` with one or more keys and canonical returns below | **group maintenance**: reevaluate affected groups through the engine in source-row order; first surviving source occurrence determines group order | source documents and group outputs, with entry and byte credits |
@@ -348,7 +352,7 @@ plan; "extractable" below means what the pushdown planner already proves.
 | nested entity graph projections with indexed equality edges and unique binding names | **graph dependency maintenance**; a child change refreshes its bounded owners | source rows, reverse key indexes and graph outputs |
 | explicit two-level collection groups with a singular parent key and bounded nested input | **nested-group maintenance**; recompute affected parents through the query engine | source leaves and parent outputs |
 | unindexed/non-equi joins, self joins, explicit entity ordering/windows and object-root documents | **re-run on invalidation**, with the dependency or planner reason | previous result for diffing |
-| anything else: non-translatable predicates, `limit` without `orderBy`, `offset` > 0, windowed aggregates, `@jarenjs/linq`'s nested two-level `groupBy` emission, non-canonical group returns | **re-run on invalidation**, the reason named | the previous result, for diffing |
+| anything else: non-translatable predicates, `limit` without `orderBy`, a window bound that is not a literal non-negative integer, an offset or limit over a group, distinct projection, aggregate or nested group, an entity window, an ordered query inside a one-item array constructor (its one row is the whole array), an ordered query whose return yields several items per row, reads the collection root or uses a registered operator, `@jarenjs/linq`'s nested two-level `groupBy` emission, non-canonical group returns | **re-run on invalidation**, the reason named | the previous result, for diffing |
 
 The **physical mapping** of a `derive: 'bbox'` index (MODEL-FORMAT §2.1,
 `physical`) does not move a query between these rows. It can change one
@@ -458,10 +462,14 @@ document and apply patches to it; ops are `add`, `remove` and
   copy-on-write preserves the same sharing on the consumer's side —
   which is what keeps the O(k) renderer's fast paths alive end to
   end.
-- **Order.** An ordered (window) query's row order is the engine's,
-  with ties broken by the collection key — the key is appended to the
-  declared terms at registration, so the order is total and stable by
-  construction. An UNORDERED query's initial order is the engine's;
+- **Order.** An ordered (window) query's row order — offset windows
+  included — is the engine's over the declared terms, with ties broken
+  by the collection key's text in code-point order, so the order is
+  total and stable by construction. For a string key that is the order
+  the key gives as a final term; for a numeric key it is not (`10`
+  sorts before `9`), and `execute` breaks ties by row identity — a
+  consumer that needs one tie order everywhere declares the key as the
+  last `orderBy` term. An UNORDERED query's initial order is the engine's;
   maintenance then appends newly matching rows and splices removed
   ones, which is deterministic given the write history but is NOT
   re-derived rowid order — a consumer that needs a specific order
@@ -478,8 +486,9 @@ import in either direction (the `fsmToApp` precedent):
 import { liveAppBinding, createLiveSubscription } from '@jarenjs/db/app';
 
 const { subscription, actions } = liveAppBinding({
-  run: 'db/live', action: 'db/liveChanged', statePath: '/live/users' });
-// subscription → { run: 'db/live', with: { …, statePath, action } }
+  run: 'db/live', action: 'db/liveChanged', statePath: '/live/users',
+  collection: 'users', query: [{ $for: { u: '$[*]' }, $return: '$u' }] });
+// subscription → { run: 'db/live', with: { …, collection, query, statePath, action } }
 // actions      → { 'db/liveChanged': { patch: '$payload' } }
 
 createApp({ ...doc, subs: [subscription], actions: { ...doc.actions, ...actions } },
@@ -653,7 +662,7 @@ event when closed, so `live.error` remains authoritative. Await async `close()`;
 the last verified `result` remains readable. Stats expose checkpoint, lag,
 pending work, input credits, subscriptions, coalescing and resets.
 
-Coverage is enrolled managed writes. Unenrolled SQL, arbitrary trigger/cascade
+Coverage is enrolled managed writes. Unenrolled SQL, arbitrary trigger
 effects and external databases require a separate host freshness mechanism.
 
 ## 13. Event time
@@ -834,4 +843,4 @@ correctness and costs for that fixture rather than a universal crossover.
 
 ## Structural range adapter
 
-`@jarenjs/linq/db` exposes bounded ranges over captured hybrid entity roots, using the existing keyset pager and committed observer. Its live event is an explicit source reset with monotone revision; this does not promote offset windows or the remaining incremental shapes. See [COLLECTION-PROVIDER](../../app/docs/COLLECTION-PROVIDER.md) for credits, snapshot identity and disposal. Maintained top windows check offscreen rows against their bound and release retained state on close.
+`@jarenjs/linq/db` exposes bounded ranges over captured hybrid entity roots, using the existing keyset pager and committed observer. Its live event is an explicit source reset with monotone revision; this does not promote entity offset windows or the remaining incremental shapes. See [COLLECTION-PROVIDER](../../app/docs/COLLECTION-PROVIDER.md) for credits, snapshot identity and disposal. Maintained top windows check offscreen rows against their bound and release retained state on close.

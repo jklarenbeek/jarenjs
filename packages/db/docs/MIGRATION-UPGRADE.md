@@ -542,6 +542,21 @@ value the store did not honor now refuse by code, before any statement:
 - `store.live` of a document that names no entity root — a load
   specification, or a `@jarenjs/linq` `include()` chain — was a `TypeError`;
   it is now `JD0033`, as `store.execute` refuses the same document.
+- A collection live query with a literal offset over an `orderBy` (nested
+  windows included, and a `@jarenjs/linq` `skip()` with no `select` after
+  it) is maintained (`live.mode.strategy` `window`) instead of re-run;
+  `mode: 'incremental'` now accepts it, ties follow the window's key-text
+  order rather than a re-run's row order, and it is charged as a top window
+  is — every matching row an entry — so over more rows than
+  `live.maxMaintained` it is `JD2060` where it re-ran (`mode: 'rerun'` still
+  re-runs it).
+- A collection live window with a negative `$subsequence` bound or a
+  fractional limit was maintained with rows that differed from `execute`,
+  and so were an ordered query inside a one-item array constructor, an
+  ordered query whose return yields several items per row and a window whose
+  return reads the collection root; they now re-run, the reason named. An
+  ordered query whose return uses a registered operator no longer refuses
+  registration with `JQ0002`: it re-runs, the operator named.
 
 ### Allocated entity keys on PostgreSQL
 
