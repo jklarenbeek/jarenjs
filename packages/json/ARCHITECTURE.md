@@ -161,9 +161,9 @@ That leaves two hazards. A tuple the index rejects never reaches the predicate, 
 <!--fact:series.intervalJoinTable-->
 | spans a side | pairs | nested loop | interval index | nested loop ÷ index |
 |---|---:|---:|---:|---:|
-| 500 × 500 | 239 | 21 ms | 0.36 ms | 57.6× |
-| 1,000 × 1,000 | 975 | 83 ms | 0.78 ms | 105.4× |
-| 2,000 × 2,000 | 3,907 | 335 ms | 2.1 ms | 157.9× |
+| 500 × 500 | 239 | 22 ms | 0.36 ms | 60.9× |
+| 1,000 × 1,000 | 975 | 89 ms | 0.75 ms | 117.8× |
+| 2,000 × 2,000 | 3,907 | 359 ms | 2.1 ms | 174.4× |
 <!--/fact-->
 
 `limits.steps` is the third compile-time switch. Instrumentation is opt-in at the `compileNode` dispatch point: with no step limit the compiler emits exactly the closures it always did, and with one it wraps every node in a counter check whose counter lives in its own frame slot. `limits.depth` needs no runtime support at all — with no recursion in the language, evaluation depth *is* the AST's static depth, so it is measured once at normalize time (`JQ0011`).

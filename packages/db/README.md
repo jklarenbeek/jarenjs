@@ -777,12 +777,12 @@ as-of join over one seeded corpus by plain references, by the temporal
 kernel, by a generic query document, by hand-written SQL and by the
 store — every route checked against the others before a timing is
 taken. At <!--fact:series.corpus-->100,000 samples at 1-second spacing, Node v24.20.0<!--/fact-->,
-the store is measured three ways at once — <!--fact:series.storeShapes-->the planned range costs 4.5× the hand-written statement and 2607.3× the resident cut, and the pushed bucket ladder 2.5× the hand-written GROUP BY, 1.7× FASTER than the generic query route, and 151.4× the one-pass loop<!--/fact-->.
+the store is measured three ways at once — <!--fact:series.storeShapes-->the planned range costs 4.8× the hand-written statement and 2548.0× the resident cut, and the pushed bucket ladder 2.6× the hand-written GROUP BY, 1.8× FASTER than the generic query route, and 158.3× the one-pass loop<!--/fact-->.
 The range row is not the planner's price: the statement selects two
 COLUMNS where the store renders and parses a whole JSON document per
 row, which is what storing documents costs.
 
-And what a refinement costs, with the loss in it: <!--fact:series.storeRefinement-->A window measured in time is not pushed: the store answers it at 19.1× the kernel over an array already in memory, over 100,000 candidates the index bounded. The batched as-of join reads 91,682 rows in 2 statements and costs 1553.6× fifty-one separate index reads — a bound is what it buys, not a speed-up. Without a tolerance the open side has no bound the probes imply, so the plan reads the data's own: the last instant each series carries at or before the earliest probe, folded to the least of them. That anchor is the extra statement, and what it saves depends on where the probes sit — evenly spread ones, as here, leave the least below them to skip.<!--/fact-->
+And what a refinement costs, with the loss in it: <!--fact:series.storeRefinement-->A window measured in time is not pushed: the store answers it at 20.6× the kernel over an array already in memory, over 100,000 candidates the index bounded. The batched as-of join reads 91,682 rows in 2 statements and costs 1555.6× fifty-one separate index reads — a bound is what it buys, not a speed-up. Without a tolerance the open side has no bound the probes imply, so the plan reads the data's own: the last instant each series carries at or before the earliest probe, folded to the least of them. That anchor is the extra statement, and what it saves depends on where the probes sit — evenly spread ones, as here, leave the least below them to skip.<!--/fact-->
 
 **A refinement is named, never quiet.** `explain().series` reports
 `mode` — `native`, `hybrid` or `engine` — the declared index the fetch
@@ -941,31 +941,31 @@ alone; writing accepted evidence requires both engines. The committed
 
 <!--fact:postgres.portability-->
 
-Measured 2026-10-08T11:26:48.797Z: 500 documents, Node 24.20.0, SQLite 3.53.4, PostgreSQL 17.11 (Debian 17.11-1.pgdg12+2), pg 8.23.0. Durability settings: fsync=on, synchronous_commit=on, full_page_writes=on.
+Measured 2026-10-09T00:34:29.344Z: 500 documents, Node 24.20.0, SQLite 3.53.4, PostgreSQL 17.11 (Debian 17.11-1.pgdg12+2), pg 8.23.0. Durability settings: fsync=on, synchronous_commit=on, full_page_writes=on.
 
 | Operation | SQLite ms | PostgreSQL ms | PG / SQLite | Client query calls per PG operation | Iterations |
 |---|---:|---:|---:|---:|---:|
-| open | 19.241 | 19.673 | 1.0× | 17 | 1 |
-| insert | 0.013 | 0.583 | 46.6× | 1 | 500 |
-| get | 0.016 | 0.582 | 35.3× | 5 | 50 |
-| indexed | 0.599 | 2.532 | 4.2× | 13 | 20 |
-| scanned | 0.617 | 2.333 | 3.8× | 13 | 20 |
-| range | 0.513 | 2.323 | 4.5× | 13 | 20 |
-| transaction | 0.131 | 0.929 | 7.1× | 3 | 20 |
-| migration (one index) | 17.160 | 149.693 | 8.7× | not separately counted | 1 |
+| open | 19.940 | 19.464 | 1.0× | 20 | 1 |
+| insert | 0.014 | 0.686 | 50.4× | 1 | 500 |
+| get | 0.016 | 0.685 | 42.7× | 5 | 50 |
+| indexed | 0.590 | 2.728 | 4.6× | 13 | 20 |
+| scanned | 0.624 | 2.556 | 4.1× | 13 | 20 |
+| range | 0.508 | 2.288 | 4.5× | 13 | 20 |
+| transaction | 0.130 | 1.029 | 7.9× | 3 | 20 |
+| migration (one index) | 19.741 | 149.621 | 7.6× | not separately counted | 1 |
 
-Sequential insert throughput: SQLite 79917, PostgreSQL 1714 documents/second.
+Sequential insert throughput: SQLite 73527, PostgreSQL 1458 documents/second.
 
 | First-row probe | SQLite | PostgreSQL |
 |---|---:|---:|
-| First row ms | 0.857 | 0.872 |
-| First row plus cleanup ms | 0.934 | 1.131 |
+| First row ms | 0.860 | 0.811 |
+| First row plus cleanup ms | 0.933 | 1.111 |
 | Returned rows | 1 | 1 |
 | Fetched native rows / normalized bytes | not instrumented | 64 / 5661 |
 | Session peak native frame rows / bytes | not instrumented | 64 / 5813 |
 | Client query calls including cleanup | no network | 5 |
-| Sampled RSS before / after MiB | 91.47 / 108.34 | 115.43 / 117.80 |
-| Sampled heap before / after MiB | 24.11 / 30.99 | 17.29 / 25.55 |
+| Sampled RSS before / after MiB | 91.71 / 107.08 | 113.33 / 118.21 |
+| Sampled heap before / after MiB | 24.73 / 31.88 | 19.77 / 28.94 |
 
 After close: driver active=0, queued=0; native cursors=0, prepared statements=0; host pool total=1, idle=1, waiting=0.
 

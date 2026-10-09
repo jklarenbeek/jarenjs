@@ -39,7 +39,7 @@ is the index of those guides, and it is how a reader reaches any of them.
 | [LINQ-FORMAT.md](LINQ-FORMAT.md) | 954 | this file, the binder and the family's **normative reference**: what a pen is, the rules all of them keep, the shared `JL01xx` table, and the cross-pen views derived from the guides it indexes. **Read it when** you want a rule that is true of every pen, an index of the documents, or one place to look up a method without knowing which pen owns it |
 | [QUERY-PEN.md](QUERY-PEN.md) | 2,013 | the chain, `.` — query documents (`jaren-query`) and the provider seam. **Read it when** you are querying data, or implementing a provider that answers a query document |
 | [SCHEMA-PEN.md](SCHEMA-PEN.md) | 1,256 | `./schema` — JSON Schema 2020-12: the structural keywords, the constraints and the annotations, each with a method of its own, plus `$query`, `$defs`/`$ref` recursion and the normalizer's per-field predicates. **Read it when** you are describing the shape of data — for validation, for a form, or as the base of an entity |
-| [MODEL-PEN.md](MODEL-PEN.md) | 1,221 | `./model` — the `x-entity` vocabulary on JSON Schema, and the `$model` 0.1 document `openStore` accepts unchanged. **Read it when** you are declaring a store's entities, their keys and their relations |
+| [MODEL-PEN.md](MODEL-PEN.md) | 1,242 | `./model` — the `x-entity` vocabulary on JSON Schema, and the `$model` 0.1 document `openStore` accepts unchanged. **Read it when** you are declaring a store's entities, their keys and their relations |
 | [JSLT-PEN.md](JSLT-PEN.md) | 980 | `./jslt` — `$jslt` 0.1 stylesheets: the envelope and its rules, whose bodies are captured over the matched value. **Read it when** you are transforming one document into another |
 | [MIGRATION-PEN.md](MIGRATION-PEN.md) | 957 | `./migration` — `$migration` 0.2 documents: exact model endpoints and the ordered steps the runner takes. **Read it when** you are moving a store from one model to the next |
 | [CONTRACT-PEN.md](CONTRACT-PEN.md) | 1,222 | `./contract` — `$contract` 0.1 documents: the operations, their schemas, their declared behavior and their REST binding. **Read it when** you are declaring an API and want its client, its server and its tools typed from one document |
@@ -208,7 +208,7 @@ and the bundle is the byte count the tree-shaking probe builds.
 | [LINQ-FORMAT.md](LINQ-FORMAT.md) | — | 954 | — | — | — | — |
 | [QUERY-PEN.md](QUERY-PEN.md) | `.` | 2,013 | 34 | 8 | 17 | 216,582 B |
 | [SCHEMA-PEN.md](SCHEMA-PEN.md) | `./schema` | 1,256 | 82 | 10 | 4 | 38,528 B |
-| [MODEL-PEN.md](MODEL-PEN.md) | `./model` | 1,221 | 31 | 7 | 3 | 50,249 B |
+| [MODEL-PEN.md](MODEL-PEN.md) | `./model` | 1,242 | 31 | 7 | 3 | 50,322 B |
 | [JSLT-PEN.md](JSLT-PEN.md) | `./jslt` | 980 | 17 | 8 | 3 | 21,448 B |
 | [MIGRATION-PEN.md](MIGRATION-PEN.md) | `./migration` | 957 | 13 | 5 | 4 | 27,586 B |
 | [CONTRACT-PEN.md](CONTRACT-PEN.md) | `./contract` | 1,222 | 38 | 6 | 3 | 51,785 B |
@@ -219,9 +219,9 @@ and the bundle is the byte count the tree-shaking probe builds.
 | [JTLT-PEN.md](JTLT-PEN.md) | `./jtlt` | 83 | 13 | 1 | 2 | 18,316 B |
 | [PROJECT-PEN.md](PROJECT-PEN.md) | `./project` | 81 | 9 | 1 | 1 | 4,371 B |
 | [CHARTS-PEN.md](CHARTS-PEN.md) | `./charts` | 94 | 21 | 1 | 1 | 6,170 B |
-| [DB-CLIENT.md](DB-CLIENT.md) | `./db` | 1,171 | 45 | 4 | 2 | 894,190 B |
+| [DB-CLIENT.md](DB-CLIENT.md) | `./db` | 1,171 | 45 | 4 | 2 | 925,082 B |
 | [FORMULA-PEN.md](FORMULA-PEN.md) | `./formula` | 41 | 2 | — | — | 10,798 B |
-| **16 documents** | | **13,487** | **372** | **73** | | |
+| **16 documents** | | **13,508** | **372** | **73** | | |
 <!--/fact-->
 
 A pen whose mapping rows are far below its worked examples is a pen
@@ -267,7 +267,7 @@ it and each document publishes it. The rounded column is what
 |---|---|---:|---:|
 | `@jarenjs/linq` | [QUERY-PEN.md](QUERY-PEN.md) | 216,582 B | 217 kB |
 | `@jarenjs/linq/schema` | [SCHEMA-PEN.md](SCHEMA-PEN.md) | 38,528 B | 39 kB |
-| `@jarenjs/linq/model` | [MODEL-PEN.md](MODEL-PEN.md) | 50,249 B | 50 kB |
+| `@jarenjs/linq/model` | [MODEL-PEN.md](MODEL-PEN.md) | 50,322 B | 50 kB |
 | `@jarenjs/linq/jslt` | [JSLT-PEN.md](JSLT-PEN.md) | 21,448 B | 21 kB |
 | `@jarenjs/linq/migration` | [MIGRATION-PEN.md](MIGRATION-PEN.md) | 27,586 B | 28 kB |
 | `@jarenjs/linq/contract` | [CONTRACT-PEN.md](CONTRACT-PEN.md) | 51,785 B | 52 kB |
@@ -278,7 +278,7 @@ it and each document publishes it. The rounded column is what
 | `@jarenjs/linq/jtlt` | [JTLT-PEN.md](JTLT-PEN.md) | 18,316 B | 18 kB |
 | `@jarenjs/linq/project` | [PROJECT-PEN.md](PROJECT-PEN.md) | 4,371 B | 4 kB |
 | `@jarenjs/linq/charts` | [CHARTS-PEN.md](CHARTS-PEN.md) | 6,170 B | 6 kB |
-| `@jarenjs/linq/db` | [DB-CLIENT.md](DB-CLIENT.md) | 894,190 B | 894 kB |
+| `@jarenjs/linq/db` | [DB-CLIENT.md](DB-CLIENT.md) | 925,082 B | 925 kB |
 | `@jarenjs/linq/formula` | [FORMULA-PEN.md](FORMULA-PEN.md) | 10,798 B | 11 kB |
 <!--/fact-->
 
@@ -546,7 +546,7 @@ it says.
 
 | Method | Emits | Type reading | Status |
 |---|---|---|---|
-| `collection(schema, { key?, identity?, indexes?, renamedFrom? })` | `{ schema, key?, identity?, indexes?, 'x-rename'? }` — `key` is an RFC 6901 pointer, a captured member path (`(d) => d.id` → `/id`) or `null` (the store allocates, `identity` says how); the other options ride verbatim, and an `indexes` entry written by hand rather than by `index()` is held to what `index()` writes | `CollectionSpec<Infer<B>>`, carrying the document shape its paths are checked against | native; an option outside the four, a key that is neither pointer nor lambda nor `null`, an `indexes` that is not an array of `index()` entries, an entry member outside the index grammar or of the wrong type, all `JL0101` |
+| `collection(schema, { key?, identity?, indexes?, intervals?, renamedFrom? })` | `{ schema, key?, identity?, indexes?, intervals?, 'x-rename'? }` — `key` is an RFC 6901 pointer, a captured member path (`(d) => d.id` → `/id`) or `null` (the store allocates, `identity` says how); the other options ride verbatim, an `indexes` entry written by hand rather than by `index()` is held to what `index()` writes, and an `intervals` entry is closed to `name`, `path` and `maxDuration` (two strings and a number) | `CollectionSpec<Infer<B>>`, carrying the document shape its paths are checked against | native; an option outside the five, a key that is neither pointer nor lambda nor `null`, an `indexes` that is not an array of `index()` entries, an entry member outside the index grammar or of the wrong type, an `intervals` that is not an array of objects, an interval member outside the three or of the wrong type, all `JL0101` |
 | `index(path, options?)` | `{ name, path, unique?, derive?, precision?, dims?, physical?, where? }` — `path` is a captured lambda (`(p) => p.cell` → `$.cell`), a non-empty array of them (a composite), or a JSONPath string; `name` defaults to `by_<segments>`; each of the rest is the JSON type the grammar declares — `unique` a boolean, `derive` and `physical` strings, `precision` and `dims` numbers, `where` a query document — and rides verbatim for the store's model walk to judge its value (§2.1); a `where` lambda is captured into the query grammar (`(d) => d.status.in(['active', 'pending'])` → `{ $eq: ['$.status', { $seq: ['active', 'pending'] }] }`) | `IndexPath<D>` and `IndexCondition<D>` over the collection's or the entity's shape: a member the shape lacks does not compile, nor does a `where` that is neither a predicate nor a query document | native; an option outside the seven, or of the wrong type, is `JL0101`; a lambda that answers an operator result or a surface method is `JL0102`, and so is a `where` lambda that answers no predicate |
 
 | `expressionIndex(expression, options?)` | `{ name, expression, unique? }` — an index over a COMPUTED value: a `{ call, args }` node whose arguments are member lambdas, JSONPath strings, JSON scalars or further calls; `name` defaults to `by_<call>_<members>` | the expression's member lambdas are checked against the collection's shape | native; a node outside the vocabulary, an option outside the two, a `unique` that is not a boolean, and anything that looks like SQL text are all `JL0101` |

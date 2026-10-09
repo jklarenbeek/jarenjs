@@ -2098,7 +2098,14 @@
                 "storeAsOfVsIndexReads",
                 "storeAsOfCandidates",
                 "storeAsOfStatements",
-                "storeRollingCandidates"
+                "storeRollingCandidates",
+                "spanDeclaredVsPrefilterEarly",
+                "spanDeclaredVsPrefilterMiddle",
+                "spanDeclaredVsPrefilterLate",
+                "spanBoundedVsPrefilterEarly",
+                "spanBoundedVsPrefilterMiddle",
+                "spanBoundedVsPrefilterLate",
+                "spanBoundedVsDeclaredLate"
               ],
               "properties": {
                 "largest": {
@@ -2291,6 +2298,55 @@
                 },
                 "storeRollingCandidates": {
                   "description": "How many rows the rolling refinement handed to the kernel.",
+                  "type": [
+                    "null",
+                    "number"
+                  ]
+                },
+                "spanDeclaredVsPrefilterEarly": {
+                  "description": "How much faster a declared interval answers the one-hour window than the mapped pre-filter, at the early day of the stored-span leg.",
+                  "type": [
+                    "null",
+                    "number"
+                  ]
+                },
+                "spanDeclaredVsPrefilterMiddle": {
+                  "description": "The same ratio at the middle day.",
+                  "type": [
+                    "null",
+                    "number"
+                  ]
+                },
+                "spanDeclaredVsPrefilterLate": {
+                  "description": "The same ratio at the late day, where the one-sided seek reads the most spans and loses ground.",
+                  "type": [
+                    "null",
+                    "number"
+                  ]
+                },
+                "spanBoundedVsPrefilterEarly": {
+                  "description": "How much faster a declared interval with a maximum duration answers the window than the mapped pre-filter, at the early day.",
+                  "type": [
+                    "null",
+                    "number"
+                  ]
+                },
+                "spanBoundedVsPrefilterMiddle": {
+                  "description": "The same ratio at the middle day.",
+                  "type": [
+                    "null",
+                    "number"
+                  ]
+                },
+                "spanBoundedVsPrefilterLate": {
+                  "description": "The same ratio at the late day.",
+                  "type": [
+                    "null",
+                    "number"
+                  ]
+                },
+                "spanBoundedVsDeclaredLate": {
+                  "description": "How much faster bounding the duration answers the late window than the declared interval alone.",
                   "type": [
                     "null",
                     "number"

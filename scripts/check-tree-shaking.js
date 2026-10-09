@@ -285,7 +285,9 @@ if (modelEngineLeak.length > 0)
 // faithfully (740) and the entity vocabulary refuses more spellings (225).
 // Raised to 50,300 (measured 50249): entity indexes — composite, unique and
 // partial, with their conditions — ride in the pen (2149), and the shared capture refuses a callback that reads its argument and answers a plain boolean (514) and explains the destructuring read it names (269).
-if (modelBytes > 50300)
+// Raised to 50,400 (measured 50322): the collection spec's `intervals` option
+// and its closed entries (73).
+if (modelBytes > 50400)
   throw new Error(`The model pen bundle grew to ${modelBytes} bytes.`);
 const schemaModelLeak = Object.entries(schemaInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/model/') && info.bytesInOutput > 0);
@@ -514,7 +516,24 @@ if (asyncLiveLeak.length)
 // callback that reads its argument with its explanation (514 and 209) and
 // compiled query caches keyed by member order (341) add 3107; the log and
 // lease statements released after each use take 41 away.
-if (clientBytes > 894200)
+// Measured 925082 since: declared intervals — the vocabulary, the store's
+// check, the CHECK on both engines with its PostgreSQL read-back and the exact
+// plan (9698), their migration and introspection (1832) and the seek bounded
+// on both sides by a maximum duration (245) — add 11775; verified physical
+// indexes at every open, existence probes keyed by a unique index and bounded
+// integer arithmetic (7263), the application's own index spelling compared by
+// tokens and a member that shadows a column refused (1610) add 8873; the
+// regrouped disjunction (789), the PostgreSQL typed extraction (305), the
+// predicate term bound (1438) and the wrong answers a planner hunt fixed with
+// the join refinements it counts (1269) add 3801; the row-value keyset with
+// PostgreSQL's physical keyset (1049), a SQLite uuid paged by the text its
+// table stores (693) and the defects a keyset hunt fixed (1208) add 2950;
+// duplicate keys classified by the key's own constraint (1507); the labelled
+// PostgreSQL row estimate (611); PostgreSQL entity migrations — key allocation,
+// column and document moves, rebuild casts (694); and statement slots given
+// back by job pages, maintenance, trusted statements at the end of their
+// transaction and the process host (681).
+if (clientBytes > 925100)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 
