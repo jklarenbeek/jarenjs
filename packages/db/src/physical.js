@@ -421,7 +421,10 @@ export function verifyPhysical(connection, mapping, schema) {
       // stored bytes decode exactly only from a UTF8 database
       column.notNull = actual.nullable === false;
       if (database !== null) column.databaseEncoding = typeof database.encoding === 'string' ? database.encoding : null;
-      connection.dialect.qualifyPhysicalColumn?.(column, actual, mapping.kind, database);
+      // the catalog's own row of the column, where the dialect reads one: the
+      // schema its collation lives in, which a name alone does not say
+      const catalogColumn = schema.catalog?.find((o) => o.type === 'column' && o.owner === mapping.table && o.name === column.physical)?.metadata ?? null;
+      connection.dialect.qualifyPhysicalColumn?.(column, actual, mapping.kind, database, catalogColumn);
     }
     return mapping.kind === 'view' ? null : verifyDeclaredIndexes(connection, mapping.declaredIndexes ?? [], table.indexes ?? [], fail);
   }));

@@ -111,8 +111,9 @@ whose order is the code-point order of its lowercase text — and an identity
 of NOT NULL terms in one direction compares as one row value
 ([MODEL-FORMAT §10.5](MODEL-FORMAT.md#105-pagination)), which the key's index
 serves as its condition. A text term is the bare column where its collation
-is a code-point one (`C`, `POSIX`, `ucs_basic`, `pg_c_utf8`, or the database
-default of a libc-provider database collated `C` or `POSIX`) and
+is a code-point one of the server's own, in `pg_catalog` (`C`, `POSIX`, `ucs_basic`,
+`pg_c_utf8`, or the database default of a libc-provider database collated `C` or
+`POSIX`; a collation a user made and named `C` elsewhere is not one) and
 `((column)::text COLLATE "C")` otherwise: correct, and served by no index, as
 `explainLoad().sql` shows; a builtin- or ICU-provider database default takes
 that branch, because the catalog row the open reads carries no locale.
@@ -123,14 +124,19 @@ null placement (`ASC NULLS FIRST`), which is not the order an ascending index
 provides, so the rows past the row value are sorted rather than read in index
 order. A text keyset requires the `UTF8` database encoding, read at open — no
 per-row byte proof runs here — and refuses `JD0032` naming any other. An
-explicit `orderBy` over a nullable text or uuid column stays refused, as every
-nullable column is for the typed path.
+explicit `orderBy` over a text or uuid column with the `null` NULL policy stays
+refused, as every such column is for the typed path.
 
 A duplicate key is the violation of the table's primary-key constraint under
 the name the catalog gives it, read when the store opens: by the table probe for
 a table the store owns (again after it creates the table, since the server
 numbers a key name another relation holds), and from the catalog rows the open
-already reads for a physical entity. A table renamed by a migration, an adopted
+already reads for a physical entity. A partitioned table keeps its rows in
+partitions that each carry a key constraint of their own, and the server names
+the partition's when it finds a key twice: the open reads the constraint of the
+table and of every partition below it in the store's schema, so a partition
+attached while the store is open reports `JD2005` naming its own until the next
+open. A table renamed by a migration, an adopted
 table whose key has any name and a table with a unique member called `pkey1`
 therefore answer `JD2001` for a duplicate key and `JD2005` naming the member
 for a duplicate member. A write that collides on its key and on another unique

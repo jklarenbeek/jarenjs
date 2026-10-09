@@ -603,31 +603,49 @@ const SQLITE_CONSTRAINT_UNIQUE = 2067;
  * @returns {boolean}
  */
 function listsEvery(message, qualified) {
-  const at = message.indexOf('UNIQUE constraint failed:');
-  const named = message.slice(at + 'UNIQUE constraint failed:'.length).split(',').map((part) => part.trim());
+  const named = namedColumns(message) ?? [];
   return qualified.every((column) => named.includes(column));
 }
 
 /**
+ * The `table.column` entries a SQLite UNIQUE message lists, or `null` for a
+ * message that carries no listing.
+ * @param {string} message
+ * @returns {string[] | null}
+ */
+function namedColumns(message) {
+  const at = message.indexOf('UNIQUE constraint failed:');
+  if (at < 0) return null;
+  return message.slice(at + 'UNIQUE constraint failed:'.length).split(',').map((part) => part.trim());
+}
+
+/**
  * The unique key a write was inserting under.
- * @typedef {{ table: string, column: string | string[], constraint?: string }} UniqueKey
+ * @typedef {{ table: string, column: string | string[], constraint?: string | string[] }} UniqueKey
  * `column` is the key's column, or its columns in key order; `constraint`
  * is the name the catalog gives the key's primary-key constraint, which
- * PostgreSQL's report is matched against.
+ * PostgreSQL's report is matched against — the names of every one, for a
+ * table whose rows live in partitions that each carry their own.
  */
 
 /**
  * Whether a SQLite UNIQUE failure is the key's own collision: a PRIMARY KEY
- * conflict, or a UNIQUE conflict whose message names every key column — a
- * unique INDEX over another column is a constraint failure, not a duplicate
- * key.
+ * conflict on the table the write inserts into, or a UNIQUE conflict whose
+ * message names every key column — a unique INDEX over another column is a
+ * constraint failure, not a duplicate key, and neither is the primary key of
+ * another table that a trigger of this one inserted into, which the message
+ * names by its table. A message that lists no columns leaves the code as the
+ * answer.
  * @param {number | null} extended @param {string} message @param {UniqueKey} unique
  * @returns {boolean}
  */
 function ownsKey(extended, message, unique) {
-  return extended === SQLITE_CONSTRAINT_PRIMARYKEY
-    || (message.includes('UNIQUE constraint failed')
-      && listsEvery(message, [unique.column].flat().map((column) => `${unique.table}.${column}`)));
+  if (extended === SQLITE_CONSTRAINT_PRIMARYKEY) {
+    const named = namedColumns(message);
+    return named === null || named[0].startsWith(`${unique.table}.`);
+  }
+  return message.includes('UNIQUE constraint failed')
+    && listsEvery(message, [unique.column].flat().map((column) => `${unique.table}.${column}`));
 }
 
 /**
@@ -698,7 +716,8 @@ export function classifyDriverError(error, unique = undefined) {
  * @returns {{ class: string, code: string | null, retryable: boolean, reason: string }}
  */
 function classifySqlState(state, error, unique) {
-  if (state === '23505' && typeof unique?.constraint === 'string' && error?.constraint === unique.constraint) {
+  if (state === '23505' && typeof error?.constraint === 'string'
+    && (Array.isArray(unique?.constraint) ? unique.constraint.includes(error.constraint) : error.constraint === unique?.constraint)) {
     return { ...DUPLICATE };
   }
   // an integer that will not fit the column: SQLite reports it as a

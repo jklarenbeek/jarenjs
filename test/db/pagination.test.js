@@ -133,3 +133,100 @@ describe('keyset pagination', () => {
     await assert.rejects(() => users.load({ take: 2, after: 'u3' }), code);
   });
 });
+
+describe('a scalar cursor over a unique column that may hold NULL', () => {
+  const MEMBERS = {
+    $model: '0.1',
+    entities: {
+      Member: {
+        schema: {
+          type: 'object',
+          required: ['id', 'email'],
+          properties: {
+            id: { type: 'string', 'x-entity': { key: true } },
+            email: { type: 'string', 'x-entity': { unique: true } },
+            nick: { type: ['string', 'null'], 'x-entity': { unique: true } },
+            // optional, and typed as a plain string: a member a document may simply lack is NULL in its column
+            handle: { type: 'string', 'x-entity': { unique: true } },
+          },
+        },
+      },
+      // a key the schema does not list as required: the column is its primary key, and no row lacks it
+      Tag: {
+        schema: {
+          type: 'object',
+          properties: { code: { type: 'string', 'x-entity': { key: true } } },
+        },
+      },
+    },
+  };
+  /** The rows: three nicknames, three members without one (a unique column holds many NULLs). */
+  const ROWS = [['a', 'n1'], ['b', null], ['c', 'n3'], ['d', null], ['e', 'n5'], ['f', null]];
+
+  /** @type {any} */
+  let store = null;
+  /** @type {any} */
+  let members = null;
+  before(async () => {
+    store = await openStore(MEMBERS, { driver: nodeDriver() });
+    members = store.entity('Member');
+    for (const [id, nick] of ROWS) {
+      await members.create({ id, email: `${id}@x.test`, ...(nick === null ? {} : { nick, handle: `h${nick.slice(1)}` }) });
+    }
+  });
+  after(async () => {
+    if (store !== null) await store.close();
+  });
+
+  const refusedForNulls = (/** @type {any} */ error) => {
+    assert.strictEqual(error.code, 'JD0032');
+    assert.match(error.message, /past 'nick': the column may hold NULL/);
+    assert.match(error.message, /page\(\)/);
+    return true;
+  };
+  const ids = async (/** @type {any} */ spec) => (await members.load(spec)).map((/** @type {any} */ m) => m.id);
+
+  it('an ordering that sorts the NULLs after the values is refused, where a value cannot reach them', async () => {
+    // descending, nulls last by default: `nick < 'n5'` would never see b, d and f
+    await assert.rejects(() => members.load({ orderBy: { $key: '$it.nick', $dir: 'desc' }, take: 2, after: 'n5' }), refusedForNulls);
+    // ascending with the empties greatest: the same rows, last again
+    await assert.rejects(() => members.load({ orderBy: { $key: '$it.nick', $empty: 'greatest' }, take: 2, after: 'n3' }), refusedForNulls);
+    assert.throws(() => members.explainLoad({ orderBy: { $key: '$it.nick', $dir: 'desc' }, take: 2, after: 'n5' }), refusedForNulls);
+  });
+
+  it('a member the model does not require is as nullable as one typed so: its documents may lack it', async () => {
+    const refusedForHandle = (/** @type {any} */ error) => {
+      assert.strictEqual(error.code, 'JD0032');
+      assert.match(error.message, /past 'handle': the column may hold NULL/);
+      return true;
+    };
+    await assert.rejects(() => members.load({ orderBy: { $key: '$it.handle', $dir: 'desc' }, take: 2, after: 'h5' }), refusedForHandle);
+    await assert.rejects(() => members.load({ orderBy: { $key: '$it.handle', $empty: 'greatest' }, take: 2, after: 'h3' }), refusedForHandle);
+    assert.deepStrictEqual(await ids({ orderBy: '$it.handle', take: 2, after: 'h3' }), ['e']);
+    // the key is NOT NULL whatever the schema requires, and a required member never lacks a value
+    assert.deepStrictEqual(await ids({ orderBy: { $key: '$it.id', $dir: 'desc' }, take: 2, after: 'd' }), ['c', 'b']);
+    const tags = store.entity('Tag');
+    for (const code of ['a', 'b', 'c', 'd']) await tags.create({ code });
+    assert.deepStrictEqual((await tags.load({ orderBy: { $key: '$it.code', $dir: 'desc' }, take: 2, after: 'd' })).map((/** @type {any} */ t) => t.code), ['c', 'b']);
+  });
+
+  it('an ordering that sorts the NULLs before the values keeps its cursor, and page() visits every row either way', async () => {
+    assert.deepStrictEqual(await ids({ orderBy: '$it.nick', take: 2, after: 'n3' }), ['e']);
+    assert.deepStrictEqual(await ids({ orderBy: { $key: '$it.nick', $dir: 'desc', $empty: 'greatest' }, take: 2, after: 'n3' }), ['a']);
+    for (const orderBy of [{ $key: '$it.nick', $dir: 'desc' }, { $key: '$it.nick', $empty: 'greatest' }, '$it.nick']) {
+      const seen = [];
+      let after_ = undefined;
+      for (;;) {
+        const page = await members.page({ orderBy }, { limit: 2, ...(after_ === undefined ? {} : { after: after_ }) });
+        seen.push(...page.items.map((/** @type {any} */ m) => m.id));
+        if (!page.hasMore) break;
+        after_ = page.continuation;
+      }
+      assert.deepStrictEqual([...seen].sort(), ['a', 'b', 'c', 'd', 'e', 'f'], JSON.stringify(orderBy));
+    }
+  });
+
+  it('a required member typed without null keeps its descending cursor', async () => {
+    assert.deepStrictEqual(await ids({ orderBy: { $key: '$it.email', $dir: 'desc' }, take: 2, after: 'd@x.test' }), ['c', 'b']);
+  });
+});

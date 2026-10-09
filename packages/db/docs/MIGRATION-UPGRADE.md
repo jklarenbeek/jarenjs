@@ -468,6 +468,24 @@ the query engine, now refuse by code or answer what the engine answers:
   would evaluate it a row at a time (rows, a window, an event-time view's
   operand filter) re-runs, the reason named, where `mode: 'incremental'`
   refuses it `JD0051`.
+- A scalar `after` over a unique column that may hold NULL — a member the
+  model declares nullable (`['string', 'null']`) or does not require; a key
+  never does — ordered with its NULLs last (descending, or ascending with
+  `$empty: 'greatest'`) answered the rows that hold a value and left every
+  NULL row out of the walk without a word, since the cursor's comparison is
+  neither true nor false for them. It is now `JD0032` naming `page()`, whose continuation
+  carries the null placement. With the NULLs first the cursor stands, and a
+  walk whose first page holds only NULL rows still cannot advance, because a
+  row without a value carries none to resume from.
+- A continuation compared its ordering as the text a serializer wrote, so one a
+  host kept in a PostgreSQL `jsonb` column (which orders the members of an
+  object by length) came back refused `JD0035`, the message naming the same
+  ordering twice; its terms are compared member by member now and it resumes.
+- `explainLoad` read no option it was given beyond `profile`, so a misspelt
+  `profle` explained the load under no profile and said so by answering; it
+  takes `profile`, the one option its declaration lists, and refuses another
+  member `JD0013` naming the nearest one — a `signal` or a `deadline`, which it
+  never read, included.
 
 ## 8. Stricter models, keys and staged writes
 
@@ -591,6 +609,23 @@ value the store did not honor now refuse by code, before any statement:
   for `<table>_pkey` (and its numbered and clipped forms); it is told
   `constraint` (`JD2005`) unless it also passes `constraint`, the name of the
   table's primary-key constraint.
+- On SQLite a trigger of an adopted table whose own insert met the PRIMARY KEY
+  of another table was reported as a duplicate key of the entity (`JD2001`,
+  `a 'Item' already exists under key 1`, for a key no `Item` holds); only a
+  PRIMARY KEY conflict on the table the write inserts into is the key's now, and
+  the other table's is a constraint failure (`JD2005`) naming it.
+- A duplicate key on an adopted PostgreSQL partitioned table read `JD2005`
+  naming the partition's own constraint (`parts_1_pkey`), because every
+  partition carries one; it reads `JD2001`. The open reads the key constraint
+  of the table and of every partition below it in the store's schema, so a
+  partition attached while the store is open reports `JD2005` until the next
+  open.
+- A text column of an adopted PostgreSQL table collated by a collation a user
+  made and named like a code-point one (`"C"`, `POSIX`, `ucs_basic`,
+  `pg_c_utf8`) in a schema other than `pg_catalog` was read as the server's
+  own and ordered a load, a page and a continuation by that collation, where
+  `execute()` orders by code point; it is compared under `COLLATE "C"` now,
+  as every other collation that is not known to be code point is.
 - `put()` after a pending `remove()` of the same key was returned, and the save
   deleted the row anyway; the put now cancels the removal and the save updates
   the row. A removal saved in a transaction that rolled back, under a key an

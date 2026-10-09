@@ -146,6 +146,11 @@ describe('the options of the other read calls', () => {
       await assert.rejects(later(() => items.explain(q, { externls: {} })), refusal('JD0013', /'externls'.*did you mean 'externals'/));
       await assert.rejects(later(() => drain(items.loadCursor({}, { signl: 1 }))), refusal('JD0013', /'signl'.*did you mean 'signal'/));
       await assert.rejects(later(() => docs.explain(dq, { profle: {} })), refusal('JD0013', /'profle'.*did you mean 'profile'/));
+      // the explanation of a load reads the profile it explains under and nothing else: a misspelt profile is no profile at all,
+      // and it said so by answering; a signal or a deadline was never read, so naming one is refused too
+      await assert.rejects(later(() => items.explainLoad({}, { profle: 'safe' })), refusal('JD0013', /'profle'.*did you mean 'profile'/));
+      await assert.rejects(later(() => items.explainLoad({}, { signal: new AbortController().signal })), refusal('JD0013', /'signal' is not one it reads/));
+      await assert.rejects(later(() => items.explainLoad({}, 'x')), refusal('JD0013', /plain object/));
 
       // every member each call reads still answers
       const controls = { signal: new AbortController().signal, deadline: Date.now() + 60_000 };
@@ -155,6 +160,7 @@ describe('the options of the other read calls', () => {
         'native');
       assert.deepEqual((await drain(items.loadCursor({ where: { $eq: ['$it.v', 1] } }, { tracking: false, ...controls })))
         .map((/** @type {any} */ doc) => doc.id), ['i1']);
+      assert.deepEqual(items.explainLoad({}, { profile: 'safe' }).budget.profile, { source: 'call', name: 'safe' });
       assert.equal((await docs.explain(dq, { externals: {}, strict: true, pushdown: true, strictStreaming: true, ...controls })).mode,
         'native');
     });

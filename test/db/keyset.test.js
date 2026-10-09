@@ -220,6 +220,23 @@ describe('null ordering matches the explain plan', () => {
 });
 
 describe('a continuation belongs to exactly one ordering', () => {
+  it('is the same continuation whatever order a serializer kept the members of its terms in', async () => {
+    const first = await users.page({ orderBy: '$it.age' }, { limit: 3 });
+    const resumed = await users.page({ orderBy: '$it.age' }, { limit: 3, after: first.continuation });
+    // PostgreSQL's jsonb keeps the members of an object by length, so a continuation a host kept in one comes back so
+    const reordered = { key: first.continuation.key, keys: first.continuation.keys,
+      order: first.continuation.order.map((/** @type {any} */ term) => ({ desc: term.desc, column: term.column, nullsFirst: term.nullsFirst })) };
+    assert.notStrictEqual(JSON.stringify(reordered.order), JSON.stringify(first.continuation.order));
+    const again = await users.page({ orderBy: '$it.age' }, { limit: 3, after: reordered });
+    assert.deepStrictEqual(again.items.map((u) => u.id), resumed.items.map((u) => u.id));
+    assert.deepStrictEqual(again.continuation, resumed.continuation);
+    // an extra member and a term that is no object are still not this ordering, and say so rather than fail on a TypeError
+    await assert.rejects(() => users.page({ orderBy: '$it.age' }, { limit: 3, after: { ...reordered, order: reordered.order.map((/** @type {any} */ term) => ({ ...term, stored: false })) } }),
+      codeIs('JD0035', /emitted for the ordering/));
+    await assert.rejects(() => users.page({ orderBy: '$it.age' }, { limit: 3, after: { ...reordered, order: [null, 7] } }),
+      codeIs('JD0035', /emitted for the ordering/));
+  });
+
   it('replayed against a different ordering, or malformed, it is JD0035 — never a wrong page', async () => {
     const first = await users.page({ orderBy: '$it.age' }, { limit: 3 });
     await assert.rejects(() => users.page({ orderBy: '$it.score' }, { limit: 3, after: first.continuation }),

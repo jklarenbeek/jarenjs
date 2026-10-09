@@ -307,8 +307,12 @@ const DOCUMENT_CALL_OPTIONS = Object.freeze(['externals', 'strictStreaming', 'st
 /** An entity cursor's options: a collection cursor's, and the `tracking`
  * its set reads off the same bag. An entity `explain` takes either call's. */
 const ENTITY_CURSOR_OPTIONS = Object.freeze([...DOCUMENT_CALL_OPTIONS, 'tracking']);
+/** A graph load's options. */
+const LOAD_CALL_OPTIONS = Object.freeze(['signal', 'deadline', 'profile']);
+/** What the explanation of a graph load reads: the profile it explains under. */
+const EXPLAIN_LOAD_OPTIONS = Object.freeze(['profile']);
 /** A graph cursor's options: a load's, and its set's `tracking`. */
-const LOAD_CURSOR_OPTIONS = Object.freeze(['signal', 'deadline', 'profile', 'tracking']);
+const LOAD_CURSOR_OPTIONS = Object.freeze([...LOAD_CALL_OPTIONS, 'tracking']);
 
 /**
  * One read call's options, before anything runs: a closed member set,
@@ -2867,13 +2871,22 @@ export function createLoadEngine(context, entityName) {
     const mismatch = (reason) => new DbCompileError('JD0035',
       `the continuation does not belong to this ordering: ${reason}`,
       entities.get(entityName)?.docPath);
-    const spell = (terms) => terms.map((term) => `${term.column} ${term.desc ? 'desc' : 'asc'}`
-      + `${term.nullsFirst ? ' nulls first' : ''}${term.stored === true ? ' stored' : ''}`).join(', ');
+    const spell = (terms) => terms.map((term) => `${term?.column} ${term?.desc ? 'desc' : 'asc'}`
+      + `${term?.nullsFirst ? ' nulls first' : ''}${term?.stored === true ? ' stored' : ''}`).join(', ');
     if (after === null || typeof after !== 'object' || !Array.isArray(after.order)
       || !Array.isArray(after.keys) || !('key' in after)) {
       throw mismatch('a continuation is the { order, keys, key } value a page emitted');
     }
-    if (JSON.stringify(after.order) !== JSON.stringify(identity)) {
+    // the same terms, whatever order a serializer kept their members in
+    // (PostgreSQL's jsonb sorts them by length): a continuation a host stored
+    // and read back is the one it was handed
+    const sameTerms = after.order.length === identity.length && identity.every((term, i) => {
+      const other = after.order[i];
+      const members = other !== null && typeof other === 'object' ? Object.keys(other) : [];
+      return members.length === Object.keys(term).length
+        && members.every((member) => Object.hasOwn(term, member) && other[member] === term[member]);
+    });
+    if (!sameTerms) {
       throw mismatch(`it was emitted for the ordering (${spell(after.order)}); this graph orders `
         + `by (${spell(identity)})`);
     }
@@ -3125,6 +3138,18 @@ export function createLoadEngine(context, entityName) {
         throw refuse("'after' (keyset pagination) needs a single orderBy over a unique column", []);
       }
       requirePhysicalKeyset([property]);
+      // a unique column that may hold NULL (a member the model declares
+      // nullable or does not require; a key never does) holds many of them,
+      // and a value positions no row among them: ordered with its NULLs
+      // after its values, the cursor's comparison would never visit them, so
+      // it is refused where page() carries the placement
+      const member = entities.get(entityName);
+      if (!keyColumns.includes(property) && term.emptyGreatest !== term.desc
+        && (member?.properties?.get(property)?.nullable === true || !(member?.schema?.required ?? []).includes(property))) {
+        throw refuse(`'after' (keyset pagination) cannot resume past '${property}': the column may hold NULL and `
+          + 'this ordering sorts its NULLs after its values, which a single value cannot reach — page() '
+          + 'carries the null placement in its continuation', []);
+      }
       // the caller seeks past the last row's value: a text key proves it
       // round-trips exactly as a continuation's does
       if (provesTextBytes) textKeys = textKeyPlan(tree.entityMapping, [columnOfProperty(property)], dialect, `${rendered.aliasSql}.`);
@@ -3331,7 +3356,7 @@ export function createLoadEngine(context, entityName) {
       return buildLoad(spec).tree;
     },
     load(spec, options = undefined) {
-      readCallOptions(options, ['signal', 'deadline', 'profile'], `entity('${entityName}').load`);
+      readCallOptions(options, LOAD_CALL_OPTIONS, `entity('${entityName}').load`);
       requireCallable(options, state.now);
       const entry = buildLoad(spec, false, profileOf(options));
       const params = entry.slots.map((slot) => slot.literal);
@@ -3419,6 +3444,7 @@ export function createLoadEngine(context, entityName) {
       }));
     },
     explainLoad(spec, options = undefined) {
+      readCallOptions(options, EXPLAIN_LOAD_OPTIONS, `entity('${entityName}').explainLoad`);
       const entry = buildLoad(spec, spec?.after !== undefined && typeof spec.after === 'object', profileOf(options));
       const describe = (node, path) => node.includes.flatMap((include) => [
         { path: [...path, include.name].join('.'), kind: include.kind,

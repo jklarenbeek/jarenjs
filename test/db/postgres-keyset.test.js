@@ -225,6 +225,27 @@ describe('a keyset page over a physical PostgreSQL table', { skip: !url && 'JARE
     finally { await close(); }
   });
 
+  it('a collation a user made and called "C" is read as the collation it is, not by its name: the load and the query order the column alike', async () => {
+    // the schema's own "C" is an ICU collation; the server's, in pg_catalog, is not the one the column names
+    const { store, close } = await adoptedPostgres(
+      `CREATE COLLATION "C" (provider = icu, locale = 'und');
+       DO $$ BEGIN EXECUTE format('CREATE TABLE spoof(w text COLLATE %I.%I PRIMARY KEY, n integer NOT NULL)', current_schema(), 'C'); END $$;
+       INSERT INTO spoof VALUES ('b', 1), ('A', 2), ('é', 3), ('a2', 4), ('B2', 5), ('z', 6);`,
+      { Spoof: wordEntity('spoof') }, { label: 'spoof' });
+    try {
+      const set = store.entity('Spoof');
+      for (const limit of [1, 2, 4]) {
+        assert.deepEqual((await everyPage(set, {}, limit)).items.map((row) => row.id), WORDS, `limit ${limit}`);
+      }
+      assert.deepEqual((await set.load({ orderBy: '$it.id' })).map((row) => row.id), WORDS);
+      assert.deepEqual(await store.execute({ $for: { it: '$.Spoof[*]' }, $orderby: ['$it.id'], $return: '$it.id' }), WORDS);
+      // the price of a collation that is not known to be code point, visible where it is paid
+      const plan = await set.explainLoad({ after: (await set.page({}, { limit: 1 })).continuation });
+      assert.match(plan.sql, /COLLATE "C"/, plan.sql);
+    }
+    finally { await close(); }
+  });
+
   it('a text keyset requires the UTF8 database encoding, read at open: a catalog answering SQL_ASCII refuses it by name before any statement, and an integer key still pages', async () => {
     /** @type {string[]} */
     const statements = [];

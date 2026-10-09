@@ -79,8 +79,10 @@ export function postgresPhysicalDifferent(codec, left, right) {
 /** Attach only verified native storage restrictions to the compiled mapping.
  * @param {any} column @param {any} actual @param {string} kind
  * @param {any} [database] - the catalog's row of the database: its default
- *   collation and locale provider */
-export function qualifyPostgresPhysicalColumn(column, actual, kind, database = undefined) {
+ *   collation and locale provider
+ * @param {any} [catalogColumn] - the catalog's row of the column: the schema
+ *   its collation belongs to */
+export function qualifyPostgresPhysicalColumn(column, actual, kind, database = undefined, catalogColumn = undefined) {
   const fail = (reason) => { throw new DbCompileError('JD0002', `physical column '${column.physical}': ${reason}`); };
   const type = actual.type.toUpperCase();
   if (column.declaredType !== undefined && column.declaredType.toUpperCase() !== type)
@@ -103,11 +105,14 @@ export function qualifyPostgresPhysicalColumn(column, actual, kind, database = u
   // a libc provider collated C or POSIX; a builtin- or ICU-provider default
   // is not known to be (the catalog row carries no locale) and compares
   // under COLLATE "C" — so a term a load orders or seeks by may address
-  // the bare column, which the column's index serves
+  // the bare column, which the column's index serves. The names are the
+  // server's own only in pg_catalog: a collation a user made and called "C"
+  // elsewhere is whatever its definition says, and is not read as one
   if (column.codec === 'text') {
     const collation = actual.native?.collation ?? null;
-    column.codePointText = ['C', 'POSIX', 'ucs_basic', 'pg_c_utf8'].includes(collation)
-      || (collation === 'default' && database?.localeProvider === 'c' && ['C', 'POSIX'].includes(database.collation));
+    column.codePointText = catalogColumn?.collationSchema === 'pg_catalog'
+      && (['C', 'POSIX', 'ucs_basic', 'pg_c_utf8'].includes(collation)
+        || (collation === 'default' && database?.localeProvider === 'c' && ['C', 'POSIX'].includes(database.collation)));
   }
   // Native typed projections and predicates are independently qualified. The
   // decoded evaluator remains exact for every codec and reports its residual.

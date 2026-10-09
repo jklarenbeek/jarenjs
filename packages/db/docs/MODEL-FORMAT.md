@@ -1897,7 +1897,10 @@ refuses to represent a stored integer as a JavaScript number), and the fallback
 
 The key's own constraint is the table's PRIMARY KEY, whatever number of
 members it keys by; a composite key's `JD2001` names every member
-(`a 'Pair' already exists under key {"a":1,"b":"x"}`). On PostgreSQL it is
+(`a 'Pair' already exists under key {"a":1,"b":"x"}`). On SQLite a PRIMARY KEY
+conflict is the key's only on the table the write inserts into: a trigger of an
+adopted table whose own insert meets another table's key is a constraint
+failure, `JD2005`, naming that table. On PostgreSQL it is
 the constraint the catalog names for that primary key, which the store reads
 when it opens — the table probe answers it, once more after the store creates
 the table, and a physical entity takes it from the catalog rows its open
@@ -1908,7 +1911,12 @@ its own, and a unique member may carry a name shaped like a key's (a member
 named `pkey1` is indexed `<table>_pkey1`): a collision on that member is a
 constraint failure, `JD2005`, naming it. A caller outside the store, which
 read no key constraint, gets no `JD2001` from a PostgreSQL violation. A key
-constraint renamed under an open store is read again at the next open.
+constraint renamed under an open store is read again at the next open, and so
+is a partition attached to a partitioned table: the rows of such a table live
+in partitions that each carry a key constraint of their own, which the server
+names when a key is found twice, so the open reads the constraint of the table
+and of every partition below it in the store's schema, and a partition attached
+later reports `JD2005` naming its own until the next open.
 
 An engine reports only the first unique constraint a row fails, so a write
 colliding on its key and on another unique constraint at once — `create()` of
@@ -3120,7 +3128,14 @@ descending ordering over a UNIQUE column — the key, or any `unique:
 true` column — compiles to `WHERE col > ?` / `< ?`. A scalar cursor
 over a non-unique column, a document path, or a multi-key ordering is
 refused (`JD0032`), because such a cursor either skips rows or repeats
-them wherever the value ties.
+them wherever the value ties. A unique column that may hold NULL — a member
+the model declares nullable or does not require; a key never does — holds many
+of them, and a value positions no row among them: ordered with its NULLs
+after its values (descending, or ascending with `$empty: 'greatest'`) the
+cursor's comparison would never visit them, so it is refused `JD0032` and
+`page()`, whose continuation carries the null placement, is the form to use.
+With the NULLs first the cursor stands, but a row without a value carries none
+to resume from, so a walk whose first page holds only NULL rows cannot advance.
 
 **The composite keyset.** The orderings a list actually wants —
 `(updatedAt, id)`, `(createdAt, id)`, `(priority desc, id)` — have a
@@ -3191,10 +3206,15 @@ each by stored spelling. Opening does not refuse such a table; it is a
 hazard of the data, not of the page. A text term orders
 and compares by code point whatever collation the column declares — in
 `load({ orderBy })` exactly as in `execute()`: on SQLite `COLLATE
-BINARY`, so a NOCASE index cannot serve that order; on PostgreSQL the
-bare column where its collation is a code-point one (`C`, `POSIX`,
+BINARY` over a UTF-8 database, so a NOCASE index cannot serve that order
+(a UTF-16 database compares BINARY over its UTF-16 bytes, which is not code
+point order: every row is still visited once, but a native text order, a page
+included, differs from the engine's there); on PostgreSQL the
+bare column where its collation is a code-point one of the server's own in
+`pg_catalog` (`C`, `POSIX`,
 `ucs_basic`, `pg_c_utf8`, or the database default of a libc-provider
-database collated `C` or `POSIX`) and `COLLATE "C"` otherwise, which is
+database collated `C` or `POSIX`) and `COLLATE "C"` otherwise — a collation a
+user made and named `C` in another schema included — which is
 correct and which no index serves — the price is visible in
 `explainLoad().sql`. On SQLite every text key a page reads must
 round-trip through the file's text encoding: one that does not
@@ -3219,7 +3239,10 @@ property and appends the key a physical table's order ends with.
 ```
 
 `order` is the ordering's identity: a continuation replayed against a
-different ordering is the refusal `JD0035`, never a wrong page; a
+different ordering is the refusal `JD0035`, never a wrong page (the terms are
+compared member by member, not as the text a serializer wrote, so a
+continuation kept in a PostgreSQL `jsonb` column, which orders the members of
+an object by length, is the one that was handed out); a
 continuation whose `keys` do not match the declared key count, or
 whose `key` is not the entity's key shape, is `JD0035` too. Only a
 term that resumes from the text its table stores (a SQLite `uuid`,
@@ -3864,9 +3887,9 @@ reported decoded residual or strict refusal. A physical keyset continuation
 pages integer, bigint, text and uuid identities (§10.5): a text term compares
 as the bare column where its collation is a code-point one and under
 `COLLATE "C"` otherwise, and requires the `UTF8` database encoding, read at
-open. An explicit `orderBy` over a `uuid` column that cannot hold NULL orders
-natively, as `execute()` orders its decoded text; a nullable text or uuid
-column stays refused for the typed path. The shared native mutation engine supports bounded update, delete,
+open. An explicit `orderBy` over a `uuid` column with the `reject` or `absent`
+NULL policy orders natively, as `execute()` orders its decoded text; a text or
+uuid column with the `null` policy stays refused for the typed path. The shared native mutation engine supports bounded update, delete,
 upsert and same-entity insert-select; returned row/byte overflow rolls back the
 statement and its transactional trigger effects. Exact decimals, bytes and JSON
 use codec-aware changed reporting. Structural SQL through

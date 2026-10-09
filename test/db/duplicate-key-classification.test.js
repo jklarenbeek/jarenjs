@@ -279,6 +279,43 @@ describe('postgres: an adopted table keeps the name its own key was given', { sk
   });
 });
 
+describe('postgres: a partitioned table keeps its key in every partition', { skip: skipFor('postgres') }, () => {
+  it('a duplicate key is JD2001 whichever partition, or sub-partition, holds it; a partition attached after the open reports its own constraint until the next open', async () => {
+    await withDatabase('postgres', async (db) => {
+      const s = `"${db.schema}"`;
+      await db.raw(`CREATE TABLE ${s}.parts (id integer NOT NULL, label text NOT NULL, PRIMARY KEY (id)) PARTITION BY RANGE (id);
+        CREATE TABLE ${s}.parts_1 PARTITION OF ${s}.parts FOR VALUES FROM (0) TO (100);
+        CREATE TABLE ${s}.parts_2 PARTITION OF ${s}.parts FOR VALUES FROM (100) TO (200) PARTITION BY RANGE (id);
+        CREATE TABLE ${s}.parts_2a PARTITION OF ${s}.parts_2 FOR VALUES FROM (100) TO (150);
+        CREATE TABLE ${s}.parts_2b PARTITION OF ${s}.parts_2 FOR VALUES FROM (150) TO (200);
+        CREATE TABLE ${s}.plain (id integer NOT NULL PRIMARY KEY, label text NOT NULL)`);
+      const model = { $model: '0.1', entities: Object.fromEntries(['parts', 'plain'].map((table) => [table === 'parts' ? 'Part' : 'Plain',
+        { schema: { type: 'object', properties: { id: { type: 'integer', 'x-entity': { key: true } }, label: { type: 'string' } } },
+          physical: { schema: db.schema, table, columns: { id: { name: 'id', codec: 'integer', null: 'reject' }, label: { name: 'label', codec: 'text', null: 'reject' } } } }])) };
+      await withOpen(db, model, async (store) => {
+        const parts = store.entity('Part');
+        for (const id of [5, 120, 170]) {
+          await parts.create({ id, label: 'a' });
+          assert.deepEqual(await refusal(() => parts.create({ id, label: 'b' })),
+            { code: 'JD2001', message: `JD2001: a 'Part' already exists under key ${id} at /entities/Part` }, `key ${id}`);
+        }
+        parts.add({ id: 120, label: 'c' });
+        assert.equal((await refusal(() => store.saveChanges()))?.code, 'JD2001', 'a saved add()');
+        // a partition attached while the store is open is known at the next open
+        await db.raw(`CREATE TABLE ${s}.parts_3 PARTITION OF ${s}.parts FOR VALUES FROM (200) TO (300)`);
+        await parts.create({ id: 250, label: 'a' });
+        assert.equal((await refusal(() => parts.create({ id: 250, label: 'b' })))?.code, 'JD2005');
+      }, { adopt: true });
+      await withOpen(db, model, async (store) => {
+        assert.equal((await refusal(() => store.entity('Part').create({ id: 250, label: 'b' })))?.code, 'JD2001');
+        // a table that is not partitioned reads its one constraint, as it always did
+        await store.entity('Plain').create({ id: 1, label: 'a' });
+        assert.equal((await refusal(() => store.entity('Plain').create({ id: 1, label: 'b' })))?.code, 'JD2001');
+      }, { adopt: true });
+    });
+  });
+});
+
 describe('sqlite: an adopted table is read by its physical key column', () => {
   it('a write colliding on its key and on a unique column reads JD2001, the unique column alone JD2005', async () => {
     const { store, close } = await adopted(
@@ -291,6 +328,31 @@ describe('sqlite: an adopted table is read by its physical key column', () => {
         { code: 'JD2001', message: "JD2001: a 'Item' already exists under key \"a\" at /entities/Item" });
       assert.deepEqual(await refusal(() => store.entity('Item').create({ id: 'b', name: 'l1' })),
         { code: 'JD2005', message: 'JD2005: the database rejected the operation: UNIQUE constraint failed: item.label at /entities/Item' });
+    }
+    finally { await close(); }
+  });
+});
+
+describe('sqlite: a primary key another table reports is not this table\'s duplicate key', () => {
+  it('a trigger whose insert meets the key of its own table is a constraint failure; the entity\'s own key is still a duplicate', async () => {
+    const { store, close } = await adopted(
+      'CREATE TABLE audit(id INTEGER PRIMARY KEY, note TEXT); INSERT INTO audit VALUES (1, \'taken\'); '
+      + 'CREATE TABLE item(id INTEGER PRIMARY KEY, label TEXT NOT NULL); '
+      + 'CREATE TRIGGER item_audit AFTER INSERT ON item BEGIN INSERT INTO audit (id, note) VALUES (NEW.id, NEW.label); END; '
+      + 'INSERT INTO item VALUES (2, \'a\')',
+      { Item: { schema: { type: 'object', properties: { id: { type: 'integer', 'x-entity': { key: true } }, label: { type: 'string' } } },
+        physical: { table: 'item', columns: { id: { name: 'id', codec: 'integer', null: 'reject' },
+          label: { name: 'label', codec: 'text', null: 'reject' } } } } });
+    try {
+      const set = store.entity('Item');
+      // no 'Item' holds key 1: the audit row does
+      assert.deepEqual(await refusal(() => set.create({ id: 1, label: 'x' })),
+        { code: 'JD2005', message: 'JD2005: the database rejected the operation: UNIQUE constraint failed: audit.id at /entities/Item' });
+      set.add({ id: 1, label: 'y' });
+      assert.equal((await refusal(() => store.saveChanges()))?.code, 'JD2005', 'a saved add()');
+      // the entity's own key, held by a row
+      assert.deepEqual(await refusal(() => set.create({ id: 2, label: 'b' })),
+        { code: 'JD2001', message: "JD2001: a 'Item' already exists under key 2 at /entities/Item" });
     }
     finally { await close(); }
   });

@@ -669,13 +669,31 @@ function recordKeyConstraint(plan, row) {
 /**
  * The name the catalog gives a physical table's primary-key constraint,
  * from the catalog rows the open already read (PostgreSQL's; none on SQLite).
+ * The rows of a partitioned table live in partitions, each carrying a key
+ * constraint of its own, and the server names that one when a key is found
+ * twice: the names of every partition below the table follow its own, as
+ * they stood at the open.
  * @param {any} schema - `readSchema`'s answer
  * @param {string} table
- * @returns {string | undefined}
+ * @returns {string | string[] | undefined}
  */
 function physicalKeyConstraint(schema, table) {
-  return schema.catalog?.find((/** @type {any} */ object) =>
-    object.type === 'constraint' && object.owner === table && object.metadata?.kind === 'p')?.name;
+  const keyOf = (/** @type {string} */ owner) => schema.catalog?.find((/** @type {any} */ object) =>
+    object.type === 'constraint' && object.owner === owner && object.metadata?.kind === 'p')?.name;
+  const own = keyOf(table);
+  if (own === undefined) return undefined;
+  const names = [own];
+  const tree = [table];
+  for (let at = 0; at < tree.length; at++) {
+    for (const row of schema.catalog) {
+      if (row.type !== 'table' || row.metadata?.partition == null || tree.includes(row.name)
+        || !row.metadata.inherits?.some((/** @type {any} */ parent) => parent.name === tree[at])) continue;
+      tree.push(row.name);
+      const partitionKey = keyOf(row.name);
+      if (partitionKey !== undefined) names.push(partitionKey);
+    }
+  }
+  return names.length === 1 ? own : names;
 }
 
 /**

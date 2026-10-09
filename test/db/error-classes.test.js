@@ -144,6 +144,24 @@ describe('the table', () => {
     assert.strictEqual(classifyDriverError(member, unique).class, 'constraint');
   });
 
+  it('a PRIMARY KEY conflict is the key\'s own only on the table the write inserts into', () => {
+    const unique = { table: 'item', column: 'id' };
+    // a trigger inserting into another table meets that table's key: the failure names it
+    const foreign = { errcode: 1555, message: 'UNIQUE constraint failed: audit.id' };
+    assert.strictEqual(classifyDriverError(foreign, unique).class, 'constraint', 'another table\'s key is a constraint failure');
+    assert.strictEqual(classifyDriverError(foreign, unique).code, 'JD2005');
+    assert.strictEqual(keyUndecided(foreign, unique), true, 'whether this table\'s key is stored too is for the read to say');
+    // a table whose name merely begins with this one's, and a composite key of another table
+    assert.strictEqual(classifyDriverError({ errcode: 1555, message: 'UNIQUE constraint failed: item2.id' }, unique).class, 'constraint');
+    assert.strictEqual(classifyDriverError({ errcode: 1555, message: 'UNIQUE constraint failed: audit.a, audit.b' }, unique).class, 'constraint');
+    // the table's own key, a composite one, and a failure whose message carries no listing at all
+    assert.strictEqual(classifyDriverError({ errcode: 1555, message: 'UNIQUE constraint failed: item.id' }, unique).class, 'duplicate');
+    assert.strictEqual(classifyDriverError({ errcode: 1555, message: 'UNIQUE constraint failed: item.a, item.b' }, { table: 'item', column: ['a', 'b'] }).class, 'duplicate');
+    assert.strictEqual(classifyDriverError({ errcode: 1555, message: 'sqlite3 result code 1555' }, unique).class, 'duplicate',
+      'a binding that names no table leaves the primary-key code as the answer');
+    assert.strictEqual(keyUndecided({ errcode: 1555, message: 'UNIQUE constraint failed: item.id' }, unique), false);
+  });
+
   it('a key is undecided only after a SQLite UNIQUE failure that is not its own', () => {
     const unique = { table: 'p', column: 'pid' };
     const member = { errcode: 2067, message: 'UNIQUE constraint failed: p.slug' };
@@ -526,6 +544,14 @@ describe('one classifier, two engines: a SQLSTATE lands in the same classes', ()
     // a composite key names its columns the same way, and the constraint decides
     assert.strictEqual(classifyDriverError(pgError('23505', { constraint: 'pair_pkey' }),
       { table: 'pair', column: ['a', 'b'], constraint: 'pair_pkey' }).class, 'duplicate');
+    // a partitioned table's key lives in every partition, each under a name of its own: any of them, and no other
+    const partitioned = { table: 'parts', column: 'id', constraint: ['parts_pkey', 'parts_1_pkey', 'parts_2_pkey'] };
+    for (const named of partitioned.constraint)
+      assert.strictEqual(classifyDriverError(pgError('23505', { constraint: named }), partitioned).class, 'duplicate', named);
+    for (const named of ['parts_3_pkey', 'parts_1_pkey1', 'parts_slug_key'])
+      assert.strictEqual(classifyDriverError(pgError('23505', { constraint: named }), partitioned).class, 'constraint', named);
+    assert.strictEqual(classifyDriverError(pgError('23505'), partitioned).class, 'constraint', 'a violation naming no constraint');
+    assert.strictEqual(classifyDriverError(pgError('23505', { constraint: 'parts_pkey' }), { ...partitioned, constraint: [] }).class, 'constraint');
   });
 
   it('contention is busy and retryable, whichever engine reported it', () => {

@@ -410,7 +410,10 @@ what each does is its own documentation's job
   width at qualification (`verifyPhysical`) and fold the comparison as the
   integers the column admits, as a fraction already is, or spell the parameter
   `($n)::bigint`, which the btree integer family compares with `int4` and so
-  still seeks. Capture and replication of adopted physical tables — whose application triggers and
+  still seeks. A partition attached to an adopted partitioned table while a
+  store is open reports a duplicate key as `JD2005` naming its own constraint
+  until the next open; the catalog read cannot follow it without a read on the
+  failure path, which an aborted PostgreSQL transaction forbids. Capture and replication of adopted physical tables — whose application triggers and
   cascades the store does not write — remain refused until their complete writer population has
   an executable oracle.
 - [ ] **Broader database invariant lowering.** Rules lower to verified triggers
@@ -641,6 +644,23 @@ what each does is its own documentation's job
   whether resolving the profile refuses it (`JD0011`, the mandatory predicate
   running in the database or not at all) or the fetch regroups its own
   memberships.
+- [ ] **SQLite text in a UTF-16 file.** A store opened over a SQLite file whose
+  text encoding is UTF-16 compares and orders every native text term through
+  BINARY over the UTF-16 bytes, not by code point: `$lt` against U+FFFD answered
+  an astral character the engine excludes, and `load({ orderBy })`, a keyset
+  page and a native `$orderby` order `Ā, U+E000, 😀, a, z` (UTF-16le) where the
+  engine answers `a, z, Ā, U+E000`. A page still visits every row once. The
+  assumption that BINARY is code point order is stated for UTF-8 and nothing
+  checks the encoding at open. Wanted: decide between refusing a UTF-16 file
+  when a store opens (`JD0002`, as database rules already do) and a code-point
+  collation the dialect's `codepoint` spells in place of BINARY.
+- [ ] **Keyset pages share one plan.** Every page of a keyset walk misses the
+  store-wide statement cache, because the continuation's values are part of the
+  cache key: 100 pages are 100 compiles (about 24 µs each, 21% of a 4-row page
+  on SQLite) and a long walk evicts the other plans of a 128-entry cache.
+  Wanted: key the load by the continuation's shape (the null mask and the
+  row-value choice decide the SQL text) and bind its values through the slots,
+  so a walk reuses one entry.
 - [ ] **A pushed string operator answers false where the engine raises.** A
   pushed `$starts-with`, `$ends-with` or `$contains` over a schema-typed string
   member answers false for a stored number or null, a document the schema
