@@ -113,12 +113,17 @@ export function insertAttempt(connection, call, details, held) {
  * @param {Partial<import('@jarenjs/core/runtime').Runtime>} [runtime] - the
  *   host's runtime record: the clock a `default: 'now'` stamps and the
  *   identifier a `default: 'uuid'` allocates; the platform's own when absent
- * @param {string} [keyConstraint] - the name the catalog gives the table's
- *   primary-key constraint (PostgreSQL): the one unique violation that is a
- *   duplicate key; without it none is
+ * @param {string | string[]} [keyConstraint] - the name the catalog gives the
+ *   table's primary-key constraint (PostgreSQL), or the names of a partitioned
+ *   table's tree: the unique violation that is a duplicate key; without it none
+ *   is
+ * @param {boolean} [keyAllocates] - whether the table's key column allocates
+ *   a key the model leaves to the database (`default: "auto"`), as the open
+ *   read it: `false` where it allocates nothing, so a write that leaves the
+ *   key to the database is refused by name; allocating where not read
  * @returns {any}
  */
-export function entityCore(connection, entity, entityMapping, validate, runtime = undefined, keyConstraint = undefined) {
+export function entityCore(connection, entity, entityMapping, validate, runtime = undefined, keyConstraint = undefined, keyAllocates = true) {
   const host = resolveRuntime(runtime);
   const dialect = connection.dialect;
   const q = dialect.quoteIdentifier;
@@ -430,6 +435,12 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
     for (let i = 0; i < keys.length; i++) {
       const name = keys[i];
       const part = doc[name];
+      if ((part === undefined || part === null) && name === autoKey && keyAllocates === false) {
+        throw new DbRuntimeError('JD2002', `the key member '${name}' is declared "default": "auto" but its column allocates `
+          + 'nothing on this database (it has no default and is not an identity, as read when the store opened): give the column '
+          + 'the allocation the model declares (MODEL-FORMAT §9.5) and reopen the store, or write the key',
+        { docPath, collection: entity.name });
+      }
       if ((part === undefined || part === null) && name !== autoKey && !(physical && columnByName.get(name)?.generated)) {
         throw new DbRuntimeError('JD2002', `the key member '${name}' is missing — only a key declared `
           + '"default": "auto" is the database\'s to allocate', { docPath, collection: entity.name });

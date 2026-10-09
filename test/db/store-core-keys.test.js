@@ -417,14 +417,14 @@ describe('a PostgreSQL auto key table an earlier release created', { skip: skipF
     }
   };
 
-  it('still opens with its numeric key: explicit keys work, an allocated one is refused by the database until the upgrade gives the column its sequence', () =>
+  it('still opens with its numeric key: explicit keys work, an allocated one is refused by name until the upgrade gives the column its sequence', () =>
     withPostgres(async ({ pool, schema, driver }) => {
       await inSchema(pool, schema, LEGACY);
       let store = await openStore(AUTO, { driver: driver() });
       try {
         assert.deepStrictEqual(await store.entity('Post').create({ pid: 7, title: 'kept' }), { pid: 7, title: 'kept' });
         await store.entity('Comment').create({ cid: 'c7', postId: 7 });
-        await assert.rejects(store.entity('Post').create({ title: 'auto' }), { code: 'JD2005' });
+        await assert.rejects(store.entity('Post').create({ title: 'auto' }), { code: 'JD2002', message: /column allocates nothing on this database/ });
       }
       finally { await store.close(); }
       // the upgrade recipe MIGRATION-UPGRADE documents: referencing columns first

@@ -468,13 +468,22 @@ what each does is its own documentation's job
   an entity no foreign key references, its own included: a referenced or
   self-referencing entity is refused at the drop (`JD0023`, naming what depends
   on it) and the link rolls back whole
-  ([MIGRATION-FORMAT §10](../packages/db/docs/MIGRATION-FORMAT.md)). Also open
-  on PostgreSQL: a key that gains `default: 'auto'` after creation opens but
-  cannot allocate (no sequence), a key that drops it and is then referenced by a
-  new entity cannot create the foreign key, and folding a numeric or text column
-  into the document fails. Wanted: foreign keys re-pointed through the rebuild,
-  or in-place `ALTER`s where PostgreSQL has them, key allocation converted by a
-  planned step, and the same chain qualified on both engines.
+  ([MIGRATION-FORMAT §10](../packages/db/docs/MIGRATION-FORMAT.md)). Wanted:
+  foreign keys re-pointed through the rebuild, or in-place `ALTER`s where
+  PostgreSQL has them.
+- [ ] **A rebuild that folds several columns into the document plans a copy
+  statement that doubles per column.** The fold repeats the document expression
+  in both branches of its `CASE`, so a rebuild that folds 8, 12 and 16 columns
+  plans a copy of 18 KB, 287 KB and 4.6 MB on SQLite (22 KB, 352 KB and 5.6 MB
+  on PostgreSQL), where a lift of the same members stays linear (about 1 KB and
+  2 KB at 16). Wanted: a fold that writes the document expression once, so the
+  statement grows linearly per column.
+- [ ] **A relation dropped in the edit that renames one of its endpoints
+  fails.** The plan renames the entity and then drops the join table under the
+  new name (`DROP TABLE "Article_Tag"`), but the join table is still `Post_Tag`:
+  the link fails `JD0023` on both engines and rolls back whole, and the same two
+  edits as two migrations apply. Wanted: the drop names the table the join
+  still has.
 - [ ] **Native temporal buckets sum floating readings in SQL.** Collection and
   entity sums over `number` members run in the engine, left to right in doubles;
   a `$time-bucket` or `$resample` sum over a `number` member is still summed by

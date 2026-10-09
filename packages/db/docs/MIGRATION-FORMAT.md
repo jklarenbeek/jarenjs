@@ -872,7 +872,12 @@ is not an array, and a document that is not a valid migration is `JD0023`.
 
 `planModelMigration(fromModel, toModel, { dialect })` extends the §3
 planner to models with `entities`. The strategy table is the design;
-every row has a shadow-verified test that migrates seeded data:
+every row has a test that migrates seeded data (shadow-verified on SQLite), and
+the rows that move a value between its column and the document, or change a
+key's allocation, have a PostgreSQL twin that reads back the values the SQLite
+run keeps, run without the shadow, which a PostgreSQL target replays on a
+database of its own
+([entity migration tests](../../../test/db/postgres-entity-migration.test.js)):
 
 | Change | Strategy |
 |---|---|
@@ -884,7 +889,8 @@ every row has a shadow-verified test that migrates seeded data:
 | add or drop a relation (foreign-key column, join table) | foreign keys **rebuild** the holder — an inferred foreign-key column the target model no longer declares is folded into the document when the target declares the property, else named in `report.lost` and the plan is destructive; join tables create/drop directly |
 | entity added / dropped | create / `DROP TABLE` (destructive, named), children before parents so no foreign key dangles mid-migration |
 | entity renamed | declared with `x-rename` on the target entity — never inferred; join tables renamed mechanically with their endpoints |
-| scalar ⇄ JSONB move (`column: "json"` toggled) | the first two rows: `ADD COLUMN` plus a `sql` lift out of the document, or a `sql` fold plus `DROP COLUMN` — a rebuild only where SQLite cannot drop the column in place |
+| scalar ⇄ JSONB move (`column: "json"` toggled) | the first two rows: `ADD COLUMN` plus a `sql` lift out of the document, or a `sql` fold plus `DROP COLUMN` — a rebuild only where SQLite cannot drop the column in place. A value keeps its JSON type on both engines: a fold writes the column's JSON value (on PostgreSQL `to_jsonb` of a number or a text, `true` or `false` of a boolean), a lift reads the member as the JSON type its column holds, an absent member stays absent, and on PostgreSQL a member the document holds as another JSON type than its column's refuses the lift (`JD0023`, naming the member and the type found) before any row changes, as SQLite's STRICT column refuses a text in an integer column (SQLite takes a boolean as 1 where PostgreSQL refuses it). An instant moves between a plain column, an epoch column and the document as the string it began as; an epoch column retyped to a number keeps the epoch |
+| key allocation (`default: "auto"`) added or removed | PostgreSQL, where allocation is a column property: steps of their own, right after the entity renames and ahead of every other step. Gaining: the key's table locked against every other session (a block that runs `LOCK TABLE … IN ACCESS EXCLUSIVE MODE`), a check under that lock that no stored key is a number a `bigint` would round (`JD0023`, naming the key and the value; a key stored as text, or retyped into the integer by the same edit, is read as the number it spells), every referencing column and then the key `ALTER … TYPE bigint`, a sequence the key owns as its default (an identity allocates by itself and takes none), `setval` past the highest stored key, and the rule functions of the converted tables replaced. Dropping: the key's identity, if it is one, and its default removed, the key and then every referencing column `TYPE numeric`, the sequence the key owned dropped, the rule functions replaced. A table the same edit rebuilds takes the lock and the check for a gain, and nothing for a drop: the rebuild carries the sequence, or leaves it with the old table. SQLite: no step, the rowid allocates either way |
 
 **A new unique index meets the stored rows.** Adding a unique or a partial
 unique index — or changing a condition so that it covers more rows — over
@@ -910,6 +916,42 @@ the programs arrive, so a row it rewrites into conformance is kept and a
 row it leaves violating stays, as any stored row does. Find such rows with
 the rule's condition before the rule arrives, as the colliding groups of a
 unique index are found above.
+
+**Key allocation is converted ahead of everything else.** The steps of the
+last row go right after the entity renames and before every other step the
+migration plans (a join table's rename or rebuild included), so a table the
+same migration creates or rebuilds meets the converted key whichever order the
+model declares them in. PostgreSQL implements a reference from a
+`bigint` column to a `numeric` key and never the reverse, so the type changes
+run in the order that never meets the reverse: referencing columns first when
+the key gains allocation, the key first when it drops it. Every column that
+references the key in the database as the source model has it is converted,
+a table the migration drops later included. Each step is plain text in the
+document, and the steps hold over the starting states of the key's column the
+store opens (a sequence the column already owns is kept, one it does not own is
+not dropped, an identity is its own allocation), so a database an earlier
+release left with or without a sequence is converted too. Three of them are
+`DO` blocks, because a sequence's name is the catalog's to say and a lock is
+taken inside one: the statement check admits a `DO` only as the exact text the
+planner renders for the key its first line names, never as a statement of any
+other shape, and a bare `LOCK` stays refused (`JD0021`; an allocation block
+this release would render differently, from a document planned by another
+release, is refused with the advice to plan the migration again). The lock is
+asked for ahead of everything else: the check and the conversions then see the same
+keys (a session cannot commit a fractional key between them), and a session
+that wrote the key's table before the migration began finishes its work on the
+tables that reference it before any of them is touched. A conversion locks
+several tables in turn, so a session that takes them in another order can still
+deadlock with it: PostgreSQL ends one of the two (`JD0023`, `deadlock
+detected`, retryable, nothing changed) and a rerun lands. A conversion rewrites
+its tables under exclusive locks, and a session that connected before it keeps
+what it prepared or compiled against the old column type: a rule function of a
+converted table it ran is refused until the function is replaced, which the plan
+does for every converted table, and a write it prepared that returns the
+converted key (a `create()` without a key, after the key dropped `auto`) fails
+`JD2005` (`cached plan must not change result type`) until the session
+reconnects; reads and writes that carry their key go on. Close or restart the
+application's other sessions around the migration.
 
 Two rules keep the diff honest:
 
@@ -955,7 +997,12 @@ literally, as one implementation used by every rebuilding strategy:
 The step is SELF-CONTAINED rendered SQL — reviewable in the migration
 document, mechanical to run: create the new shape under the temporary
 name, copy (the planner renders the column mapping: surviving columns
-verbatim, new ones from the document, dropped ones already folded),
+verbatim, a column whose type changes through `CAST(<column> AS <type>)` —
+the type's name alone, the target column carries its own collation — new
+ones from the document read as the JSON type their column holds, dropped
+ones already folded, and an epoch column that becomes a plain string column as
+the string the document holds, which then leaves the document; one retyped to
+a number, an integer or a boolean keeps copying the epoch),
 `DROP` the old table, `RENAME` the new one into place, recreate every
 index from the target model (a store-owned table's rule programs are not
 the step's: they are dropped in steps of their own before the rebuild —
@@ -1013,7 +1060,10 @@ On PostgreSQL the step keeps what the old table held, where a new table can:
   value, the highest copied value plus one, and 1. A key the table handed out
   is not handed out again, through any number of rebuilds, and the next value
   is never below 1, so a table holding only explicit keys at or below zero
-  rebuilds too.
+  rebuilds too. A key that gains `default: "auto"` in the same edit is locked
+  and checked first as an in-place gain is (§9): a stored key a `bigint` would
+  round refuses the migration; one that drops it takes its sequence with the
+  old table.
 - **Rows keep their `rid`.** The copy carries it, so an entity read with no
   ordering answers its rows in the order they were written, as before.
 - **The primary key takes `<table>_pkey`** where no other relation of the

@@ -224,7 +224,7 @@ function normalizeCapabilities(declared) {
  *   expressionOf?: (expression: string, byName: Record<string, string>) => (any | null),
  *   readGenerated?: (rows: any[]) => { name: string, expression: string }[],
  *   physicalRead?: (codec: string, sql: string) => string,
- *   physicalCompare?: (codec: string, sql: string) => string,
+ *   physicalCompare?: (codec: string, sql: string, column?: any) => string,
  *   physicalValueType?: (codec: string, sql: string) => string,
  *   physicalDifferent?: (codec: string, left: string, right: string) => string,
  *   numberCast?: (sql: string) => string,
@@ -238,7 +238,7 @@ function normalizeCapabilities(declared) {
  *   relational?: any,
  *   migration?: any,
  *   physicalNamespaceRequired?: boolean,
- *   qualifyPhysicalColumn?: (column: any, actual: any, kind: string) => void,
+ *   qualifyPhysicalColumn?: (column: any, actual: any, kind: string, database?: any, catalogColumn?: any) => void,
  *   invariantTriggers?: (mapping: any, all: any, dialect: any) => any[],
  *   readChecks?: (rows: any[]) => { name: string, sql?: string, validated?: boolean, conforming?: boolean,
  *     column?: string, values?: any[] }[],
@@ -761,6 +761,8 @@ export function createDialect(spec) {
     jsonText: spec.jsonText,
     jsonAgg: spec.jsonAgg,
     jsonTypeOf: spec.jsonTypeOf,
+    /** A member's JSON type by the engine's own name (SQL NULL for an absent member). */
+    jsonTypeName: spec.jsonTypeName,
     /**
      * The spellings {@link jsonTypeOf} answers for a JSON NUMBER. SQLite
      * discriminates the two it stores (`integer`, `real`); an engine with

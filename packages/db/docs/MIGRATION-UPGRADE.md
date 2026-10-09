@@ -998,16 +998,49 @@ value the store did not honor now refuse by code, before any statement:
 
 An entity key with `default: "auto"` is now a `bigserial` column on
 PostgreSQL, and every foreign-key or join-table column referencing it is
-`bigint` ([MODEL-FORMAT §9.5](MODEL-FORMAT.md#95-identity)). A table an earlier
-release created declared these `numeric` with no allocation, so every insert
-that left the key to the database failed (`JD2005`, a null key). Such a table
-still opens and keeps its explicit keys. To give it the allocation, run once
-per such key, with the store's schema on the search path — here `Post` keys by
-`pid`, `Comment.postId` references it and `Post_Tag` is a many-to-many join
-table. The referencing columns change first, because PostgreSQL refuses a
-`bigint` key that a `numeric` column references:
+`bigint` ([MODEL-FORMAT §9.5](MODEL-FORMAT.md#95-identity)). A model edit
+that gains or drops `default: "auto"` on a key is planned on PostgreSQL now,
+as steps in the migration document
+([MIGRATION-FORMAT §9](MIGRATION-FORMAT.md#9-relational-changes-entities)):
+gaining locks the key's table against every other session, checks that no
+stored key is a number a `bigint` would round, converts every referencing
+column and then the key to `bigint`, gives the key a sequence it owns as its
+default (an identity column allocates by itself and takes none) and continues
+it past the highest stored key; dropping removes the key's identity and
+default, converts the key and then every referencing column to `numeric` and
+drops the sequence the key owned, so an entity or a join table added by the
+same edit can reference the key. A migration unapplied since an earlier
+release planned the edit with no step must be planned again. Gaining refuses a
+stored key that is not a whole number a `bigint` holds (a fraction, a number
+beyond it) with `JD0023` naming the key and the value, and changes nothing:
+correct or remove that key and run again. Three of the steps are `DO` blocks
+(the lock a gain starts with is one), which the PostgreSQL statement check
+admits only as the exact text the planner renders (any other `DO` is
+`JD0021`). A conversion rewrites its tables under exclusive locks: run it with
+the application's other sessions closed, and restart them after
+([MIGRATION-FORMAT §9](MIGRATION-FORMAT.md#9-relational-changes-entities)).
+The statements below are the same steps by hand, for a table the planner never
+converted.
+
+A table an earlier release created declared these `numeric` with no allocation,
+so every insert that left the key to the database failed (`JD2005`, a null
+key). Such a table still opens and keeps its explicit keys, and a write that
+leaves the key to the database over a column that allocates nothing — a
+`create()` or a staged `add()` — is refused `JD2002` by name before any
+statement, where the database refused it (`JD2005`) after one. A column
+allocates nothing when it has no default of any kind and is no identity: a
+default the application wrapped, or a function of its own, is taken to
+allocate. The store decides when it opens, so a store opened before the column
+was converted keeps refusing, and says so, until it is reopened. To give the
+column the allocation, run once per such key, in one transaction with the
+store's schema on the search path — here `Post` keys by `pid`, `Comment.postId`
+references it and `Post_Tag` is a many-to-many join table. The referencing
+columns change first, because PostgreSQL refuses a `bigint` key that a
+`numeric` column references:
 
 ```sql
+BEGIN;
+LOCK TABLE "Post" IN ACCESS EXCLUSIVE MODE;
 ALTER TABLE "Comment" ALTER COLUMN "postId" TYPE bigint;
 ALTER TABLE "Post_Tag" ALTER COLUMN "Post_key" TYPE bigint;
 ALTER TABLE "Post" ALTER COLUMN "pid" TYPE bigint;
@@ -1015,17 +1048,20 @@ CREATE SEQUENCE "Post_pid_seq" OWNED BY "Post"."pid";
 ALTER TABLE "Post" ALTER COLUMN "pid" SET DEFAULT nextval('"Post_pid_seq"');
 SELECT setval(pg_get_serial_sequence('"Post"', 'pid'),
   GREATEST(nextval(pg_get_serial_sequence('"Post"', 'pid')), COALESCE((SELECT max("pid") FROM "Post"), 0) + 1), false);
+COMMIT;
 ```
 
 The `setval` finds the key's sequence by its column, whatever its name (a
 rebuilt table's is `Post__rebuild_pid_seq`), and never moves it backwards.
 
-A key holding a fraction would be rounded by the type change; check that
-`SELECT count(*) FROM "Post" WHERE "pid" <> trunc("pid")` answers 0 first.
+A key holding a fraction would be rounded by the type change; right after the
+lock, check that `SELECT count(*) FROM "Post" WHERE "pid" <> trunc("pid")`
+answers 0, and `ROLLBACK` if it does not (the lock keeps a writer from adding
+one in between).
 
 The other way round, a database created while the key declared `auto` keeps
-its `bigserial` key column and `bigint` references when the model drops
-`auto`, and the migration planner plans no step for that edit; opening it
+its `bigserial` key column and `bigint` references when an earlier release
+migrated the edit that drops `auto`, which planned no step; opening it
 under the new model failed `JD0002` (`BIGINT` against `NUMERIC`). Reopen it
 with the model as it now stands — no statement is needed: the store accepts
 the allocated columns for a key the caller supplies, every insert carries its
@@ -1044,16 +1080,52 @@ DEFAULT`, the key column, then each referencing column, `TYPE numeric`, and
 
 A key that was created without `auto` and is later declared
 `default: "auto"` is the first case again: the table keeps the `numeric`
-key column and references it was created with, with no sequence, and the
-migration planner plans no step for that edit either. The store opens
+key column and references it was created with, with no sequence, and an
+earlier release planned no step for that edit either. The store opens
 it under the new model. SQLite allocates such a key from its rowid, past the
 highest one. On PostgreSQL every `create()` or saved `add()` that leaves the
-key to the database fails `JD2005` (`null value in column "id" … violates
-not-null constraint`) until the column is repaired by hand with the recipe
-above, with its own table, key and referencing columns: each referencing
-column to `bigint` first, then the key column to `bigint`, a sequence owned
-by the key column, the key's default `nextval` of that sequence, and `setval`
-past the highest key.
+key to the database is refused `JD2002` (it failed `JD2005`, `null value in
+column "id" … violates not-null constraint`) until the column is repaired by
+hand with the recipe above, with its own table, key and referencing columns:
+each referencing column to `bigint` first, then the key column to `bigint`, a
+sequence owned by the key column, the key's default `nextval` of that
+sequence, and `setval` past the highest key. A migration planned now for the
+same edit does all of it.
+
+### Moves between a column and the document on PostgreSQL
+
+On PostgreSQL a migration that folded a number, an integer or a string member
+into the document failed `JD0023` (`function jsonb_set(jsonb, unknown, numeric,
+boolean) does not exist`), one that lifted a number, an integer or a boolean
+out of it failed (`column "n" is of type numeric but expression is of type
+jsonb`), a date-time's move to an epoch column failed (`cannot cast type jsonb
+to timestamp with time zone`), and one that lifted a string stored its JSON
+text, quotes included (`"x"`), as the column's value, without a word. Every one
+of them runs now with the value and its JSON type intact
+([MIGRATION-FORMAT §9](MIGRATION-FORMAT.md#9-relational-changes-entities)); a
+member the document holds as another JSON type than its column's refuses the
+lift `JD0023`, before any row changes and naming the member and the type found
+(SQLite already refused a text in an integer column, and takes a boolean as 1
+where PostgreSQL refuses it): correct the documents and run again. A column an
+earlier string lift filled is repaired once, per column (only over values that
+lift wrote: a string that really begins with a quote decodes too):
+
+```sql
+UPDATE "Post" SET "m" = "m"::jsonb #>> '{}' WHERE "m" IS NOT NULL;
+```
+
+A rebuild that retypes a member to text failed on PostgreSQL (`syntax error at
+or near "COLLATE"`); it casts to the type's name now. On both engines a rebuild
+that turns an epoch column into a plain one copies the instant's string from
+the document and removes it there (an epoch column retyped to a number keeps
+the epoch, as it did); SQLite copied the epoch's digits as text
+(`"1791421323004"`) and left the document's string beside them. A SQLite column
+an earlier rebuild filled so is repaired once, per column:
+
+```sql
+UPDATE "Post" SET "m" = jsonb_extract("doc", '$."m"'), "doc" = jsonb_remove("doc", '$."m"')
+WHERE jsonb_extract("doc", '$."m"') IS NOT NULL;
+```
 
 ## 9. Backups and snapshots
 

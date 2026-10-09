@@ -1306,6 +1306,36 @@ const dropPrograms = (programs, kept, table) => [...programs].reverse().filter((
   .map((item) => ({ kind: 'ddl', sql: item.drop, note: `drop the ${item.type} '${item.name}' of a rule on '${table}'` }));
 
 /**
+ * The kind a member is extracted from the document as when a column takes
+ * it: the JSON string, boolean or number the column's type holds.
+ * @param {string} storage - the column's schema type
+ * @returns {'text' | 'number' | 'boolean'}
+ */
+const extractKind = (storage) => (storage === 'string' ? 'text' : storage === 'boolean' ? 'boolean' : 'number');
+
+/**
+ * The step that refuses a lift over a document member of another JSON type
+ * than the column that takes it, before any row changes, on an engine that
+ * types its extraction: such an engine reads the member as NULL, and a lift
+ * that went on would leave the member in the document beside a column that
+ * cannot hold it, where the store then fails every write of the row. The
+ * refusal is the failing cast of a message that names the member and the type
+ * found, as a STRICT column's own refusal is on SQLite (`JD0023`).
+ * @param {any} dialect @param {string} table @param {string} member
+ * @param {'text' | 'number' | 'boolean'} kind - what the column holds
+ * @returns {any}
+ */
+function mistypedMemberStep(dialect, table, member, kind) {
+  const q = dialect.quoteIdentifier, literal = dialect.stringLiteral;
+  const found = dialect.jsonTypeName(q('doc'), dialect.jsonPathText([{ name: member }]));
+  const held = kind === 'text' ? 'string' : kind;
+  return { kind: 'sql', note: `check that no document of '${table}' holds '${member}' as another JSON type than its column`,
+    sql: `WITH ${q('_jaren_member')} AS (SELECT ${found} AS ${q('found')} FROM ${q(table)} WHERE ${found} NOT IN ('null', ${literal(held)}) LIMIT 1) `
+      + `SELECT (${literal(`the member '${member}' of '${table}' holds a JSON `)} || ${q('found')} || `
+      + `${literal(`, where its column holds a JSON ${held}: correct the documents first`)})::bigint FROM ${q('_jaren_member')}` };
+}
+
+/**
  * The relational half of the diff (§9): entity add/drop/rename, the
  * additive and droppable column strategies with their data steps, the
  * rebuild for everything structural, the rules' programs, join tables, and
@@ -1331,7 +1361,8 @@ function planEntityChanges(fromModel, toModel, dialect, steps, report, transform
     ? explainMapping(toModel) : { entities: {}, joinTables: {} };
   const q = dialect.quoteIdentifier;
   const pathText = (name) => dialect.jsonPathText([{ name }]);
-  const docExtract = (docSql, name) => dialect.jsonExtract(docSql, pathText(name));
+  /** @param {string} docSql @param {string} name @param {string} [kind] */
+  const docExtract = (docSql, name, kind = undefined) => dialect.jsonExtract(docSql, pathText(name), kind);
   const storageType = (storage) => dialect.typeFor(storage, 'generated');
 
   // ————— declared entity renames (join tables move with them) —————
@@ -1356,6 +1387,13 @@ function planEntityChanges(fromModel, toModel, dialect, steps, report, transform
       note: `rename entity '${hint}' to '${name}'` });
   }
   const consumedOldEntities = new Set(renamedFrom.values());
+  // the steps that give a key the allocation the target declares, or take it
+  // away, go in after the entity renames and ahead of every other step: a
+  // table this migration creates or rebuilds (a join table that follows a
+  // renamed endpoint included) meets the converted key, whichever order the
+  // model declares the entities in
+  const allocation = [];
+  const loopStart = steps.length;
   // a join table's endpoints come from the MAPPING, never from splitting
   // its name: an entity named with an underscore, or a `through` name,
   // does not split into its endpoints — and a split that guessed wrong
@@ -1411,6 +1449,39 @@ function planEntityChanges(fromModel, toModel, dialect, steps, report, transform
       note: `drop '${joinName}' — its memberships now live in '${newJoin}'` });
   }
 
+  // the columns of the database that reference an entity's key as it stands
+  // when the allocation steps run (the from-model's foreign keys under the
+  // names the entity renames gave their tables, its join tables under the
+  // names they still have): whatever a key's allocation changes the type of
+  // must change with it, a table the migration drops later included
+  const referencesTo = (fromName) => {
+    const found = [];
+    for (const [other, holder] of Object.entries(fromMapping.entities)) {
+      for (const fk of holder.foreignKeys) {
+        if (fk.references === fromName) found.push({ table: renamedEntity(other), column: fk.column });
+      }
+    }
+    for (const [joinName, join] of Object.entries(fromMapping.joinTables)) {
+      for (const side of [join.left, join.right]) {
+        if (side.entity === fromName) found.push({ table: joinName, column: side.column });
+      }
+    }
+    return found;
+  };
+  // the rule functions of tables whose columns change type, replaced as they
+  // are: a session that ran one keeps it compiled against the old type, and
+  // PostgreSQL refuses its next run ("type of parameter … does not match")
+  // until the function is replaced. A renamed table has no program to
+  // replace: its programs were dropped before the rename, and are created
+  // again at the end under the new name
+  const recompiled = (tables) => [...new Set(tables)].flatMap((table) => {
+    if (fromMapping.entities[table] === undefined) return [];
+    return (planEntity(table, fromMapping.entities[table], fromMapping, dialect).programs ?? [])
+      .filter((item) => item.type === 'function')
+      .map((item) => ({ kind: 'ddl', sql: item.sql.replace(/^CREATE FUNCTION /, 'CREATE OR REPLACE FUNCTION '),
+        note: `compile the rule function '${item.name}' of '${table}' again against the converted columns` }));
+  });
+
   // ————— per-entity strategies —————
   for (const [name, toEntity] of toEntities) {
     const fromName = renamedFrom.get(name) ?? name;
@@ -1445,6 +1516,19 @@ function planEntityChanges(fromModel, toModel, dialect, steps, report, transform
 
     const needsRebuild = !keysEqual || !fksEqual || changedColumns.length > 0
       || addedColumns.some((columnName) => toColumns.get(columnName).check !== undefined);
+
+    // a single key that gains or drops the database's allocation (an integer
+    // declared `default: "auto"`, or retyped into one): where the engine's
+    // allocation is a column property, the column changes with it
+    const keyBefore = fm.columns.find((column) => column.key);
+    const keyAfter = tm.columns.find((column) => column.key);
+    const allocated = (column) => column.storage === 'integer' && column.auto === true;
+    if (dialect.autoKeyType !== undefined && keysEqual && fm.keys.length === 1
+      && keyBefore !== undefined && keyAfter !== undefined && allocated(keyBefore) !== allocated(keyAfter)) {
+      const referencing = needsRebuild ? [] : referencesTo(fromName);
+      allocation.push(...allocationSteps(dialect, name, keyAfter.name, allocated(keyAfter), referencing, needsRebuild,
+        needsRebuild ? [] : recompiled([name, ...referencing.map((reference) => reference.table)])));
+    }
 
     const fromPlan = planEntity(fromName, fm, fromMapping, dialect);
     const toPlan = planEntity(name, tm, toMapping, dialect);
@@ -1488,9 +1572,7 @@ function planEntityChanges(fromModel, toModel, dialect, steps, report, transform
         const property = toEntity.properties.get(columnName);
         const survives = property !== undefined && column.source !== 'epoch(document)';
         if (survives) {
-          const fold = column.storage === 'boolean'
-            ? dialect.jsonEncode(`CASE WHEN ${q(columnName)} = 1 THEN 'true' ELSE 'false' END`)
-            : q(columnName);
+          const fold = dialect.columnJson(q(columnName), column.storage);
           steps.push({ kind: 'sql',
             sql: `UPDATE ${q(name)} SET ${q('doc')} = `
               + `${dialect.jsonSet(q('doc'), pathText(columnName), fold)} `
@@ -1524,18 +1606,23 @@ function planEntityChanges(fromModel, toModel, dialect, steps, report, transform
             note: `start the version token '${columnName}' on '${name}' for the rows that predate it` });
         }
         const wasDocStored = fromEntity.properties.has(columnName);
+        // the member is read as the JSON type its column holds, so an engine
+        // that types its extraction hands the column a value of its own type
+        // (and refuses first a member that is another: `mistypedMemberStep`)
         if (wasDocStored && column.source === 'epoch(document)') {
           steps.push({ kind: 'sql',
             sql: `UPDATE ${q(name)} SET ${q(columnName)} = `
-              + `${dialect.epochFromRfc3339(docExtract(q('doc'), columnName))} `
-              + `WHERE ${docExtract(q('doc'), columnName)} IS NOT NULL`,
+              + `${dialect.epochFromRfc3339(docExtract(q('doc'), columnName, 'text'))} `
+              + `WHERE ${docExtract(q('doc'), columnName, 'text')} IS NOT NULL`,
             note: `derive the epoch column from the document's '${columnName}' strings` });
         }
         else if (wasDocStored) {
+          const kind = extractKind(column.storage);
+          if (dialect.typedExtract === true) steps.push(mistypedMemberStep(dialect, name, columnName, kind));
           steps.push({ kind: 'sql',
-            sql: `UPDATE ${q(name)} SET ${q(columnName)} = ${docExtract(q('doc'), columnName)}, `
+            sql: `UPDATE ${q(name)} SET ${q(columnName)} = ${docExtract(q('doc'), columnName, kind)}, `
               + `${q('doc')} = ${dialect.jsonRemove(q('doc'), pathText(columnName))} `
-              + `WHERE ${docExtract(q('doc'), columnName)} IS NOT NULL`,
+              + `WHERE ${docExtract(q('doc'), columnName, kind)} IS NOT NULL`,
             note: `move '${columnName}' out of the document into its column` });
         }
       }
@@ -1575,6 +1662,8 @@ function planEntityChanges(fromModel, toModel, dialect, steps, report, transform
       }
     }
   }
+
+  steps.splice(loopStart, 0, ...allocation);
 
   // ————— dropped entities, children before parents —————
   // foreign keys are enforced while a migration runs (node:sqlite has
@@ -1673,6 +1762,18 @@ function isRebuildLock(dialect, step, sql) {
 }
 
 /**
+ * The expression that finds the sequence a column owns, at run time and
+ * whatever the sequence is called (a renamed table keeps its sequence's old
+ * name, a rebuilt table's is named after its temporary table): NULL where the
+ * column owns none. The one spelling of the lookup every statement that
+ * reads or moves a serial column's sequence uses.
+ * @param {any} dialect @param {string} table @param {string} column @returns {string}
+ */
+function serialSequenceSql(dialect, table, column) {
+  return `pg_catalog.pg_get_serial_sequence(${dialect.stringLiteral(dialect.quoteIdentifier(table))}, ${dialect.stringLiteral(column)})`;
+}
+
+/**
  * The statement, in a PostgreSQL rebuild's `create`, that carries a serial
  * column's allocation from the old table's sequence to the temporary
  * table's, while both exist. PostgreSQL reads a sequence's position only
@@ -1689,10 +1790,8 @@ function isRebuildLock(dialect, step, sql) {
  */
 function carriedSequenceSql(dialect, from, to, column) {
   const q = dialect.quoteIdentifier;
-  const sequenceOf = (/** @type {string} */ table) => 'pg_catalog.pg_get_serial_sequence('
-    + `${dialect.stringLiteral(q(table))}, ${dialect.stringLiteral(column)})`;
-  return `WITH ${q('_jaren_sequence')} AS (SELECT ${sequenceOf(from)} AS ${q('old')}) `
-    + `SELECT pg_catalog.setval(${sequenceOf(to)}, pg_catalog.setval(${q('old')}, `
+  return `WITH ${q('_jaren_sequence')} AS (SELECT ${serialSequenceSql(dialect, from, column)} AS ${q('old')}) `
+    + `SELECT pg_catalog.setval(${serialSequenceSql(dialect, to, column)}, pg_catalog.setval(${q('old')}, `
     + `pg_catalog.nextval(${q('old')}), false), false) FROM ${q('_jaren_sequence')}`;
 }
 
@@ -1707,10 +1806,145 @@ function carriedSequenceSql(dialect, from, to, column) {
  */
 function advancedSequenceSql(dialect, table, column) {
   const q = dialect.quoteIdentifier;
-  const sequence = `pg_catalog.pg_get_serial_sequence(${dialect.stringLiteral(q(table))}, ${dialect.stringLiteral(column)})`;
+  const sequence = serialSequenceSql(dialect, table, column);
   return `WITH ${q('_jaren_sequence')} AS (SELECT GREATEST(pg_catalog.nextval(${sequence}), `
     + `COALESCE(MAX(${q(column)}) + 1, 1), 1) AS ${q('next')} FROM ${q(table)}) `
     + `SELECT pg_catalog.setval(${sequence}, ${q('next')}, false) FROM ${q('_jaren_sequence')}`;
+}
+
+/**
+ * A statement that fails, naming the key and the value, when a stored key of
+ * `table` is not a whole number a bigint holds: the cast of its message to
+ * `bigint` is the failure, so nothing a conversion would round is converted,
+ * and the migration rolls back whole. No row, no failure.
+ * @param {any} dialect @param {string} table @param {string} column @returns {string}
+ */
+function wholeKeySql(dialect, table, column) {
+  const q = dialect.quoteIdentifier, literal = dialect.stringLiteral, key = q(column);
+  // the key as the number it spells, whatever it is stored as (a key retyped into an integer may be text)
+  const number = `${key}::numeric`;
+  return `WITH ${q('_jaren_key')} AS (SELECT ${key} FROM ${q(table)} WHERE ${number} <> pg_catalog.trunc(${number}) `
+    + `OR ${number} NOT BETWEEN -9223372036854775808 AND 9223372036854775807 ORDER BY ${number} LIMIT 1) `
+    + `SELECT (${literal(`the key '${column}' of '${table}' holds `)} || ${key}::text || `
+    + `${literal(', which is not a whole number a bigint holds')})::bigint FROM ${q('_jaren_key')}`;
+}
+
+/**
+ * The PL/pgSQL block of one allocation step, as one statement. Its first
+ * line after `DO` names what it does and to which key (`["ensure", table,
+ * column]`), so the statement check can admit exactly this text and no other
+ * (`isAllocationBlock`): `lock` locks the key's table against every other
+ * session, readers included; `ensure` gives the key a sequence it owns, unless
+ * it owns one, and makes it the key's default, unless it is an identity;
+ * `release` drops the sequence the key owns, unless it owns none. The last two
+ * find the sequence at run time, whatever it is called.
+ * @param {any} dialect @param {'lock' | 'ensure' | 'release'} action @param {string} table @param {string} column
+ * @returns {string}
+ */
+function allocationBlock(dialect, action, table, column) {
+  const q = dialect.quoteIdentifier, literal = dialect.stringLiteral;
+  const owned = serialSequenceSql(dialect, table, column);
+  const qualified = `${q(table)}.${q(column)}`;
+  const body = {
+    lock: ['BEGIN', `  LOCK TABLE ${q(table)} IN ACCESS EXCLUSIVE MODE;`, 'END;'],
+    release: ['DECLARE', `  seq text := ${owned};`, 'BEGIN', '  IF seq IS NOT NULL THEN',
+      `    EXECUTE ${literal('DROP SEQUENCE ')} || seq;`, '  END IF;', 'END;'],
+    ensure: ['DECLARE', `  seq text := ${owned};`, `  base text := ${literal(`${table}_${column}_seq`)};`,
+      '  name text := base;', '  n integer := 0;',
+      // an identity column allocates by itself, and takes no default over it
+      `  ident text := coalesce((SELECT attidentity::text FROM pg_catalog.pg_attribute WHERE attrelid = pg_catalog.to_regclass(${literal(q(table))}) AND attname = ${literal(column)}), '');`,
+      'BEGIN', '  IF seq IS NULL THEN',
+      // the name a serial column would have taken, the next free one where it is held
+      // (bounded: a name the server clips is held at every number, and the create then says so)
+      '    WHILE n < 1000 AND pg_catalog.to_regclass(pg_catalog.quote_ident(name)) IS NOT NULL LOOP',
+      '      n := n + 1;', '      name := base || n;', '    END LOOP;',
+      `    EXECUTE ${literal('CREATE SEQUENCE ')} || pg_catalog.quote_ident(name) || ${literal(` AS bigint OWNED BY ${qualified}`)};`,
+      `    seq := ${owned};`, '  END IF;', "  IF ident = '' THEN",
+      `    EXECUTE ${literal(`ALTER TABLE ${q(table)} ALTER COLUMN ${q(column)} SET DEFAULT nextval(`)} || pg_catalog.quote_literal(seq) || ${literal('::regclass)')};`,
+      '  END IF;', 'END;'],
+  }[action];
+  let tag = '$jaren_allocation$';
+  for (let i = 1; body.some((line) => line.includes(tag)); i++) tag = `$jaren_allocation_${i}$`;
+  return `DO ${tag}\n-- ${JSON.stringify([action, table, column])}\n${body.join('\n')}\n${tag}`;
+}
+
+/**
+ * What an allocation block's first line names: its action, table and key, or
+ * `null` for any other statement.
+ * @param {unknown} sql @returns {['lock' | 'ensure' | 'release', string, string] | null}
+ */
+function allocationBlockOf(sql) {
+  const header = typeof sql === 'string' ? /^DO \$[A-Za-z_0-9]*\$\n-- (\[[^\n]*\])\n/.exec(sql) : null;
+  if (header === null) return null;
+  try {
+    const [action, table, column] = JSON.parse(header[1]);
+    return (action === 'lock' || action === 'ensure' || action === 'release') && typeof table === 'string' && typeof column === 'string'
+      ? [action, table, column] : null;
+  }
+  catch { return null; }
+}
+
+/**
+ * Whether `sql` is exactly an allocation block the planner renders
+ * (`allocationBlock`): the one `DO` a PostgreSQL migration statement may be,
+ * admitted only by being byte for byte what the planner writes for the key
+ * it names, as a rebuild's lock is (`isRebuildLock`).
+ * @param {any} dialect @param {unknown} sql @returns {boolean}
+ */
+function isAllocationBlock(dialect, sql) {
+  const named = allocationBlockOf(sql);
+  return named !== null && sql === allocationBlock(dialect, ...named);
+}
+
+/**
+ * The steps that give an entity's single integer key the allocation its model
+ * now declares, or take it away, where the engine's allocation is a column
+ * property (`autoKeyType`: PostgreSQL's `bigserial`, a `bigint` that its own
+ * sequence feeds, against the `numeric` of a key the caller supplies).
+ * PostgreSQL implements a reference to a key from a column of the same type or
+ * a `bigint` column against a `numeric` key, never a `numeric` column against
+ * a `bigint` key, so the type changes run in the one order that never meets
+ * the second: gaining, the key's table is locked first, a check that no stored
+ * key is a number the conversion would round runs under that lock, then every
+ * referencing column and then the key become `bigint`; dropping, the key
+ * (its identity and default removed) and then every referencing column become
+ * `numeric`. A column that already has what the step gives it, an identity
+ * that allocates already, or an edit that finds no sequence to drop, is left
+ * as it is. A table the same edit rebuilds takes its sequence from the
+ * rebuild, and is only locked and checked.
+ * @param {any} dialect @param {string} table @param {string} column - the key
+ * @param {boolean} gain - whether the key gains allocation (else it drops it)
+ * @param {{ table: string, column: string }[]} referencing - the columns that reference the key
+ * @param {boolean} rebuilt - whether the same edit rebuilds the key's table
+ * @param {any[]} recompile - the steps that replace the rule functions of the tables whose columns change type
+ * @returns {any[]}
+ */
+function allocationSteps(dialect, table, column, gain, referencing, rebuilt, recompile) {
+  const q = dialect.quoteIdentifier;
+  const allocated = dialect.comparableColumnType(dialect.autoKeyType).toLowerCase();
+  const stored = dialect.typeFor('integer', 'generated');
+  const alter = (/** @type {string} */ holder, /** @type {string} */ name, /** @type {string} */ type, /** @type {string} */ note) =>
+    ({ kind: 'ddl', sql: `ALTER TABLE ${q(holder)} ALTER COLUMN ${q(name)} TYPE ${type}`, note });
+  const key = `the key '${column}' of '${table}'`;
+  const references = (/** @type {string} */ type) => referencing.map((reference) => alter(reference.table, reference.column, type,
+    `convert '${reference.table}'.'${reference.column}', which references ${key}, to ${type}`));
+  if (gain) {
+    // the key's table is locked first, readers included: the check and the conversions then see the same keys
+    // (a session cannot commit a fractional one between them), and a session that wrote the key's table before
+    // the migration began finishes its work on the tables that reference it before any of them is touched
+    return [{ kind: 'ddl', sql: allocationBlock(dialect, 'lock', table, column), note: `lock '${table}' against every other session while its keys are checked and converted` },
+      { kind: 'sql', sql: wholeKeySql(dialect, table, column), note: `check that every stored value of ${key} is a whole number a bigint holds` },
+      ...(rebuilt ? [] : [...references(allocated), alter(table, column, allocated, `convert ${key} to ${allocated}`),
+        { kind: 'ddl', sql: allocationBlock(dialect, 'ensure', table, column), note: `give ${key} a sequence it owns and make it the default` },
+        { kind: 'sql', sql: advancedSequenceSql(dialect, table, column), note: `continue the sequence of ${key} past the highest stored key` },
+        ...recompile])];
+  }
+  return rebuilt ? [] : [
+    { kind: 'ddl', sql: `ALTER TABLE ${q(table)} ALTER COLUMN ${q(column)} DROP IDENTITY IF EXISTS`, note: `remove the identity of ${key}, if it is one` },
+    { kind: 'ddl', sql: `ALTER TABLE ${q(table)} ALTER COLUMN ${q(column)} DROP DEFAULT`, note: `remove the default of ${key}` },
+    alter(table, column, stored, `convert ${key} to ${stored}`), ...references(stored),
+    { kind: 'ddl', sql: allocationBlock(dialect, 'release', table, column), note: `drop the sequence ${key} owned` },
+    ...recompile];
 }
 
 /** A rebuilt table's primary key, with its schema, when it is not yet under
@@ -1769,6 +2003,9 @@ function renderRebuild(name, fromName, fm, tm, fromMapping, toMapping, dialect, 
   const fromHas = (columnName) =>
     fromColumns.has(columnName) || fromFkOnly.includes(columnName);
   const storageType = (storage) => dialect.typeFor(storage, 'generated');
+  /** The storage an inferred foreign-key column holds: the key it references. */
+  const referencedStorage = (/** @type {any} */ mapping, /** @type {string} */ columnName) =>
+    mapping.foreignKeys.find((/** @type {any} */ fk) => fk.column === columnName)?.referencesType;
 
   // the to-table's column order: scalars (non-fk-claimed), then
   // foreign keys, then the document — exactly planEntity's assembly
@@ -1791,6 +2028,9 @@ function renderRebuild(name, fromName, fm, tm, fromMapping, toMapping, dialect, 
   const foldColumn = (expression, columnName, fold) =>
     `CASE WHEN ${q(columnName)} IS NULL THEN ${expression} `
     + `ELSE ${dialect.jsonSet(expression, pathText(columnName), fold)} END`;
+  // the checks of the members the copy reads from the document into a typed
+  // column, which run ahead of the rebuild
+  const guards = [];
   for (const { name: columnName, column } of ordered) {
     targets.push(q(columnName));
     if (fromHas(columnName)) {
@@ -1803,13 +2043,25 @@ function renderRebuild(name, fromName, fm, tm, fromMapping, toMapping, dialect, 
         // old column and keep the string in the document — an absent
         // string stays absent (§9.3), never a JSON null
         sources.push(dialect.epochFromRfc3339(q(columnName)));
-        docExpr = foldColumn(docExpr, columnName, q(columnName));
+        docExpr = foldColumn(docExpr, columnName, dialect.columnJson(q(columnName), 'string'));
+      }
+      else if (column !== null && column.source !== 'epoch(document)' && column.storage === 'string'
+        && fromColumn !== undefined && fromColumn.source === 'epoch(document)') {
+        // a derived instant becomes a plain string column: it holds the string
+        // the document holds (the epoch is the derivation of it), which then
+        // leaves the document, as a member that moved into a column does. A
+        // column of another type takes the epoch itself, cast
+        sources.push(dialect.jsonExtract(q('doc'), pathText(columnName), 'text'));
+        if (dialect.typedExtract === true) guards.push(mistypedMemberStep(dialect, name, columnName, 'text'));
+        docExpr = dialect.jsonRemove(docExpr, pathText(columnName));
       }
       else if (sameStorage) {
         sources.push(q(columnName));
       }
       else {
-        sources.push(`CAST(${q(columnName)} AS ${storageType(column.storage)})`);
+        // the type's name alone: a collation belongs to the column, and
+        // `CAST(x AS text COLLATE "C")` is not a cast
+        sources.push(`CAST(${q(columnName)} AS ${dialect.comparableColumnType(storageType(column.storage))})`);
       }
       continue;
     }
@@ -1821,10 +2073,13 @@ function renderRebuild(name, fromName, fm, tm, fromMapping, toMapping, dialect, 
       sources.push('0');
       continue;
     }
-    // a new column: from the document when the property existed there
-    sources.push(column !== null && column.source === 'epoch(document)'
-      ? dialect.epochFromRfc3339(dialect.jsonExtract(q('doc'), pathText(columnName)))
-      : dialect.jsonExtract(q('doc'), pathText(columnName)));
+    // a new column: from the document when the property existed there, read
+    // as the JSON type the column holds (an instant, as the string it is)
+    const epoch = column !== null && column.source === 'epoch(document)';
+    const kind = epoch ? 'text' : extractKind(column === null ? referencedStorage(tm, columnName) : column.storage);
+    const member = dialect.jsonExtract(q('doc'), pathText(columnName), kind);
+    if (!epoch && dialect.typedExtract === true) guards.push(mistypedMemberStep(dialect, name, columnName, kind));
+    sources.push(epoch ? dialect.epochFromRfc3339(member) : member);
   }
   // columns that vanish: fold survivors into the document, name losses
   for (const [columnName, fromColumn] of fromColumns) {
@@ -1833,10 +2088,7 @@ function renderRebuild(name, fromName, fm, tm, fromMapping, toMapping, dialect, 
       && toMapping.entities[name] !== undefined
       && tm.document.includes(columnName);
     if (survives) {
-      const fold = fromColumn.storage === 'boolean'
-        ? dialect.jsonEncode(`CASE WHEN ${q(columnName)} = 1 THEN 'true' ELSE 'false' END`)
-        : q(columnName);
-      docExpr = foldColumn(docExpr, columnName, fold);
+      docExpr = foldColumn(docExpr, columnName, dialect.columnJson(q(columnName), fromColumn.storage));
     }
     else if (fromColumn.source !== 'epoch(document)') {
       lost.push(columnName);
@@ -1849,7 +2101,7 @@ function renderRebuild(name, fromName, fm, tm, fromMapping, toMapping, dialect, 
   for (const columnName of fromFkOnly) {
     if (ordered.some((entry) => entry.name === columnName)) continue;
     if (toMapping.entities[name] !== undefined && tm.document.includes(columnName)) {
-      docExpr = foldColumn(docExpr, columnName, q(columnName));
+      docExpr = foldColumn(docExpr, columnName, dialect.columnJson(q(columnName), referencedStorage(fm, columnName)));
     }
     else {
       lost.push(columnName);
@@ -1890,7 +2142,7 @@ function renderRebuild(name, fromName, fm, tm, fromMapping, toMapping, dialect, 
   if (lost.length > 0) report.destructive = true;
   const copy = `INSERT INTO ${q(temporary)} (${targets.join(', ')}) `
     + `SELECT ${sources.join(', ')} FROM ${q(name)}`;
-  return [{
+  return [...guards, {
     kind: 'rebuild', table: name, create, copy, indexes,
     note: `rebuild '${name}' (${fromName === name ? '' : `renamed from '${fromName}'; `}`
       + `structural change)${lost.length > 0
@@ -3124,7 +3376,17 @@ function checkMigrationStatements(migration, dialect) {
       step.copy, ...(step.indexes ?? [])] : step.kind === 'table'
       ? [...step.plan.statements, ...step.plan.finish] : ['ddl', 'sql'].includes(step.kind) ? [step.sql] : []);
   for (const sql of fragments) {
-    if (dialect?.migration) { dialect.migration.checkSql(sql); continue; }
+    if (dialect?.migration) {
+      if (isAllocationBlock(dialect, sql)) continue;
+      // a block that names a key but is not what this release renders for it: say so, where
+      // the statement check would only say that a `DO` is not one transactional statement
+      if (allocationBlockOf(sql) !== null) {
+        throw refuse('JD0021', `an allocation block of migration '${migration.id}' is not the one this release renders for its key: `
+          + 'plan the migration again');
+      }
+      dialect.migration.checkSql(sql);
+      continue;
+    }
     const tokens = typeof sql === 'string' ? sqlTokens(sql) : [];
     const words = tokens.filter((t) => t.kind === 'word').map((t) => t.value.toUpperCase());
     const fail = () => { throw refuse('JD0021', 'migration steps cannot change transaction or connection ownership; use one statement per step'); };

@@ -330,3 +330,88 @@ describe('coverage-complete strategy variants', () => {
     await done();
   });
 });
+
+describe('the statements a move between a column and the document plans on SQLite stay as they were', () => {
+  /** Member `m` of `type` placed in a column, in the document, or (an instant) in an epoch column. */
+  const placed = (type, place, extra = {}) => ({
+    m: { ...(type === 'datetime' ? { type: 'string', format: 'date-time' } : { type }),
+      ...(place === 'json' ? { 'x-entity': { column: 'json' } } : place === 'epoch' ? { 'x-entity': { column: 'integer' } } : {}) },
+    ...extra });
+  const kind = { kind: { type: 'string', enum: ['a', 'b'] } };
+  /** The statements of the plan from `a` to `b`: a rebuild's create and copy, every other step's SQL. */
+  const statements = (a, b) => planModelMigration(entityModel(a), entityModel(b), { dialect: sqliteDialect, id: 'm' })
+    .migration.steps.filter((s) => s.draft !== true).flatMap((s) => (s.kind === 'rebuild' ? [s.create[0], s.copy, ...s.indexes] : [s.sql]));
+  const plans = {
+    'fold number': statements(placed('number', 'column'), placed('number', 'json')),
+    'fold boolean': statements(placed('boolean', 'column'), placed('boolean', 'json')),
+    'lift string': statements(placed('string', 'json'), placed('string', 'column')),
+    'json->epoch': statements(placed('datetime', 'json'), placed('datetime', 'epoch')),
+    'plain->epoch': statements(placed('datetime', 'column'), placed('datetime', 'epoch')),
+    'integer->string': statements(placed('integer', 'column'), placed('string', 'column')),
+    'epoch->integer': statements(placed('datetime', 'epoch'), placed('integer', 'column')),
+    'epoch->number': statements(placed('datetime', 'epoch'), placed('number', 'column')),
+    'fold string rebuild': statements(placed('string', 'column'), placed('string', 'json', kind)),
+    'lift integer rebuild': statements(placed('integer', 'json'), placed('integer', 'column', kind)),
+  };
+
+  it('a fold, a lift, an epoch derivation and a cast are spelled as they have always been', () => {
+    assert.deepStrictEqual(plans, Object.fromEntries([
+    ['fold number', [
+      'UPDATE "User" SET "doc" = jsonb_set("doc", \'$."m"\', "m") WHERE "m" IS NOT NULL',
+      'ALTER TABLE "User" DROP COLUMN "m"',
+    ]],
+    ['fold boolean', [
+      'UPDATE "User" SET "doc" = jsonb_set("doc", \'$."m"\', jsonb(CASE WHEN "m" = 1 THEN \'true\' ELSE \'false\' END)) WHERE "m" IS NOT NULL',
+      'ALTER TABLE "User" DROP COLUMN "m"',
+    ]],
+    ['lift string', [
+      'ALTER TABLE "User" ADD COLUMN "m" TEXT',
+      'UPDATE "User" SET "m" = jsonb_extract("doc", \'$."m"\'), "doc" = jsonb_remove("doc", \'$."m"\') WHERE jsonb_extract("doc", \'$."m"\') IS NOT NULL',
+    ]],
+    ['json->epoch', [
+      'ALTER TABLE "User" ADD COLUMN "m" INTEGER',
+      'UPDATE "User" SET "m" = CAST(round((julianday(jsonb_extract("doc", \'$."m"\')) - 2440587.5) * 86400000.0) AS INTEGER) WHERE jsonb_extract("doc", \'$."m"\') IS NOT NULL',
+    ]],
+    ['plain->epoch', [
+      'CREATE TABLE "User__rebuild" ("id" TEXT PRIMARY KEY, "m" INTEGER, "doc" BLOB NOT NULL) STRICT',
+      'INSERT INTO "User__rebuild" ("id", "m", "doc") SELECT "id", CAST(round((julianday("m") - 2440587.5) * 86400000.0) AS INTEGER), CASE WHEN "m" IS NULL THEN "doc" ELSE jsonb_set("doc", \'$."m"\', "m") END FROM "User"',
+    ]],
+    ['integer->string', [
+      'CREATE TABLE "User__rebuild" ("id" TEXT PRIMARY KEY, "m" TEXT, "doc" BLOB NOT NULL) STRICT',
+      'INSERT INTO "User__rebuild" ("id", "m", "doc") SELECT "id", CAST("m" AS TEXT), "doc" FROM "User"',
+    ]],
+    ['epoch->integer', [
+      'CREATE TABLE "User__rebuild" ("id" TEXT PRIMARY KEY, "m" INTEGER, "doc" BLOB NOT NULL) STRICT',
+      'INSERT INTO "User__rebuild" ("id", "m", "doc") SELECT "id", "m", "doc" FROM "User"',
+    ]],
+    ['epoch->number', [
+      'CREATE TABLE "User__rebuild" ("id" TEXT PRIMARY KEY, "m" REAL, "doc" BLOB NOT NULL) STRICT',
+      'INSERT INTO "User__rebuild" ("id", "m", "doc") SELECT "id", CAST("m" AS REAL), "doc" FROM "User"',
+    ]],
+    ['fold string rebuild', [
+      'CREATE TABLE "User__rebuild" ("id" TEXT PRIMARY KEY, "kind" TEXT CHECK ("kind" IN (\'a\', \'b\')), "doc" BLOB NOT NULL) STRICT',
+      'INSERT INTO "User__rebuild" ("id", "kind", "doc") SELECT "id", jsonb_extract("doc", \'$."kind"\'), jsonb_remove(CASE WHEN "m" IS NULL THEN "doc" ELSE jsonb_set("doc", \'$."m"\', "m") END, \'$."kind"\') FROM "User"',
+    ]],
+    ['lift integer rebuild', [
+      'CREATE TABLE "User__rebuild" ("id" TEXT PRIMARY KEY, "m" INTEGER, "kind" TEXT CHECK ("kind" IN (\'a\', \'b\')), "doc" BLOB NOT NULL) STRICT',
+      'INSERT INTO "User__rebuild" ("id", "m", "kind", "doc") SELECT "id", jsonb_extract("doc", \'$."m"\'), jsonb_extract("doc", \'$."kind"\'), jsonb_remove(jsonb_remove("doc", \'$."m"\'), \'$."kind"\') FROM "User"',
+    ]],
+    ]));
+  });
+
+  it('an epoch column turned plain keeps the instant\'s string, and the document keeps no second copy of it', async () => {
+    const from = entityModel(placed('datetime', 'epoch'));
+    const to = entityModel(placed('datetime', 'column'));
+    const { reopened, raw, migration, done } = await roundTrip(from, to, async (s) => {
+      await s.entity('User').create({ id: 'u1', m: '2026-10-08T01:02:03.004Z' });
+      await s.entity('User').create({ id: 'u2' });
+    });
+    assert.deepStrictEqual(migration.steps.map((s) => s.kind), ['rebuild']);
+    assert.deepStrictEqual(
+      raw.prepare('SELECT id, m, json(doc) AS doc FROM "User" ORDER BY id').all().map((row) => ({ ...row })),
+      [{ id: 'u1', m: '2026-10-08T01:02:03.004Z', doc: '{}' }, { id: 'u2', m: null, doc: '{}' }]);
+    assert.deepStrictEqual(await reopened.entity('User').asNoTracking().get('u1'),
+      { id: 'u1', m: '2026-10-08T01:02:03.004Z' });
+    await done();
+  });
+});

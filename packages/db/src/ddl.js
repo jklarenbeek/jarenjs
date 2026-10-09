@@ -963,6 +963,7 @@ export function verifyShape(connection, plan, collection, docPath, kind = 'colle
           type: comparableType(String(row.type)),
           generated: Number(row.hidden) !== 0,
           computes: row.default_value === null || row.default_value === undefined ? null : String(row.default_value),
+          identity: row.identity === undefined || row.identity === null ? '' : String(row.identity),
           conforming: row.conforming === undefined || row.conforming === null || String(row.conforming) === 'on',
         }))
         .sort((a, b) => (a.name < b.name ? -1 : 1));
@@ -997,6 +998,17 @@ export function verifyShape(connection, plan, collection, docPath, kind = 'colle
         const difference = planned === undefined ? null
           : readBack.expression(/** @type {string} */ (have.computes), planned, have.conforming);
         if (difference !== null) disagree(`column '${have.name}' ${difference}`);
+      }
+      // a key the model leaves to the database over a column that allocates
+      // nothing (a table an earlier release created, or one migrated before
+      // allocation was planned) opens, and refuses the write that needs the
+      // allocation. Only what is proven is refused: a column allocates nothing
+      // when it has no default of any kind and is no identity (a default the
+      // application wrapped, or a function of its own, allocates as it says);
+      // the answer is recorded for the entity as the open read it
+      if (plan.autoKey !== undefined) {
+        const key = actual.find((column) => column.name === plan.autoKey);
+        plan.keyAllocates = key !== undefined && (key.computes !== null || key.identity !== '');
       }
       return chain(connection.prepare(dialect.introspect.indexes(plan.table)), (indexesStatement) =>
         chain(indexesStatement.all([]), (indexRows) => {
@@ -1190,7 +1202,8 @@ const expectedColumnsOf = (columns, legacyTypes, dialect) => [...columns
  * @param {any} dialect
  * @returns {{ table: string, createSql: string[], expected: any,
  *   columnNames: Set<string>, objects?: { name: string, what: string, docPath: string }[],
- *   programs?: any[], conditionColumns?: { name: string, physical: string, codec: string }[] }}
+ *   programs?: any[], conditionColumns?: { name: string, physical: string, codec: string }[],
+ *   autoKey?: string, keyAllocates?: boolean }}
  */
 export function planEntity(name, entityMapping, entities, dialect) {
   if (entityMapping.document === false) {
@@ -1329,10 +1342,17 @@ export function planEntity(name, entityMapping, entities, dialect) {
     objects.push({ name: program, what: `the rule program '${program}'`, docPath: `${entityPath}/invariants`, rename: 'the entity' });
   refuseNameCollisions(objects);
 
+  // the key the database allocates, where its allocation is a property of the
+  // column (`keyAllocates`, recorded when an existing table is verified, says
+  // whether the table has it)
+  const autoColumn = dialect.autoKeyType !== undefined && singleKey
+    ? entityMapping.columns.find((/** @type {any} */ column) => column.key && column.auto === true) : undefined;
+
   return {
     table: name,
     createSql,
     columnNames: new Set(columns.map((column) => column.name)),
+    ...(autoColumn === undefined ? {} : { autoKey: autoColumn.name }),
     expectedForeignKeys: expectedForeignKeysOf(columns),
     objects,
     /** The programs of the entity's database rules, in install order (their SQL ends `createSql`). */

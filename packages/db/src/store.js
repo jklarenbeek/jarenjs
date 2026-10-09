@@ -3541,7 +3541,7 @@ export function openStore(model, options) {
                 ? options.compileSchema(writeSchemaOf(entity, mapping.entities[name]))
                 : null);
               core = captureEntity(name, entityCore(connection, entity,
-                mapping.entities[name], validate, runtime, entityPlans.get(name)?.keyConstraint));
+                mapping.entities[name], validate, runtime, entityPlans.get(name)?.keyConstraint, entityPlans.get(name)?.keyAllocates));
               entityCores.set(name, core);
             }
             return core;

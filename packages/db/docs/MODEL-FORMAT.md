@@ -2771,21 +2771,24 @@ rolled-back insert leaves a gap, and it does not see a key written
 explicitly — the allocation that reaches one is `JD2001` ("under the key
 the database allocated") and the next moves past it, so explicit keys
 beside allocated ones belong outside the range the sequence will reach. A
-PostgreSQL table an earlier release created declared the key `numeric`
-with no allocation; it still opens, explicit keys work, and an insert
-that leaves the key to the database is refused by it (`JD2005`) until the
-column gets its sequence
+PostgreSQL edit that gains or drops `auto` is planned
+([MIGRATION-FORMAT §9](MIGRATION-FORMAT.md#9-relational-changes-entities); SQLite
+plans nothing, its rowid allocates either way): gaining locks the key's table,
+converts every column that references the key, then the key, to `bigint`,
+gives the key a sequence it owns as its default (an identity needs none), and
+continues the sequence past the highest stored key; dropping removes the key's
+identity and default, converts the key and then every referencing column to
+`numeric`, and drops the sequence the key owned, so an entity or a join table
+the edit adds can reference the key. A stored key a conversion would
+round (a fraction, a number beyond a `bigint`) refuses the gain, naming the
+key and the value (`JD0023`), and nothing changes. A PostgreSQL table an
+earlier release created declared the key `numeric` with no allocation, and one
+an earlier release migrated keeps whatever allocation it had: either opens,
+explicit keys work, and a write that leaves the key to the database over a
+column with no default and no identity (a default of any kind is taken to
+allocate) is refused by name (`JD2002`) before any statement; the open decides,
+so a store opened before the column was converted says to reopen
 ([upgrade](MIGRATION-UPGRADE.md#allocated-entity-keys-on-postgresql)).
-The other way round, a key that no longer declares `auto` keeps the
-allocated columns a PostgreSQL database created for it: the store opens
-it under the model as it now stands, every insert carries its key, and
-the sequence stays on the column unused — declared `auto` again, the key
-resumes it, which never saw the explicit keys written meanwhile. An
-entity or a join table the same edit adds, referencing that key, would be
-created `numeric` against the `bigint` key, which PostgreSQL refuses
-(`JD0002` at open, `JD0023` from `migrate()`): add it while the key still
-declares `auto`, or convert the
-key first ([upgrade](MIGRATION-UPGRADE.md#allocated-entity-keys-on-postgresql)).
 
 ### 9.6 Defaults
 
