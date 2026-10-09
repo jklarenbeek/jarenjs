@@ -16,7 +16,8 @@ import { openStore } from '@jarenjs/db';
 import { nodeWorkerDriver } from '@jarenjs/db/node-worker';
 import { nodeWorkerPoolDriver } from '@jarenjs/db/node-pool';
 import { nodeProcessDriver } from '@jarenjs/db/node-process';
-import { useStatementOnce } from '../../packages/db/src/driver.js';
+import { nodeDriver } from '@jarenjs/db/node';
+import { useStatementOnce, iterateStatementOnce } from '../../packages/db/src/driver.js';
 
 const model = { $model: '0.1', collections: { notes: { key: '/id', schema: { type: 'object', properties: {
   id: { type: 'string' }, n: { type: 'integer' } } } } } };
@@ -155,6 +156,26 @@ it('worker: a one-shot release the request queue would refuse is reserved like a
     assert.equal(connection.metrics().pending, 0);
   }
   finally { await connection.close(); }
+});
+
+it('the iterator a one-cursor preparation hands back is its own iterable, sync and async, and gives its statement back', async () => {
+  const sync = await nodeDriver().open(':memory:');
+  try {
+    const rows = [];
+    for (const row of iterateStatementOnce(sync, 'SELECT 1 AS n UNION ALL SELECT 2', [])) rows.push(row.n);
+    assert.deepEqual(rows, [1, 2]);
+  }
+  finally { await sync.close(); }
+  const worker = await nodeWorkerDriver().open(':memory:');
+  try {
+    const base = worker.metrics().statements;
+    const rows = [];
+    for await (const row of await iterateStatementOnce(worker, 'SELECT 1 AS n UNION ALL SELECT 2', [])) rows.push(row.n);
+    assert.deepEqual(rows, [1, 2]);
+    await delay(50);
+    assert.equal(worker.metrics().statements, base, 'the statement was given back');
+  }
+  finally { await worker.close(); }
 });
 
 it('pool: metrics report the statements each worker holds, stable over 100 journal-captured commits', async () => {
