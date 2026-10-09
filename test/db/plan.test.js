@@ -715,6 +715,8 @@ describe('the planner\'s reason vocabulary', () => {
       + 'entity engine (group-order-aggregates.test.js, over a store-owned PostgreSQL table)',
     'bind.entityGroupWhole': "an entity grouping's cursor barrier, classified by the entity engine",
     'bind.path': 'a member name the dialect cannot spell (the hostile suite)',
+    'bind.identity': 'a table that takes every spelling of the row identity, decided by the entity emitter '
+      + '(row-identity.test.js)',
     'interval.overlap': 'the promotion itself needs a declared interval (the interval suite)',
     'interval.noColumns': 'an interval the schema declares and the model does not map '
       + '(the interval suite)',

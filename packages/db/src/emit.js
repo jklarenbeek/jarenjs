@@ -72,6 +72,28 @@ const physicalValueType = (ref, sql, dialect) => ref.codec !== undefined
 export class UnrepresentablePath extends Error {}
 
 /**
+ * A table that takes every spelling of the dialect's row identity as a
+ * column name (SQLite's `rowid`, `oid` and `_rowid_`) has no row identity
+ * to order its rows by, so a statement that must reproduce the engine's
+ * order of the rows runs in the residual instead.
+ */
+export class UnrepresentableIdentity extends Error {}
+
+/**
+ * The names of the columns an entity's table has: its mapped members, its
+ * foreign keys and, unless it has none, its document. A name a row
+ * identity must not share, since the database resolves a name to a column
+ * before it resolves it to the row.
+ * @param {{ columns: { name: string, physical?: string }[], foreignKeys?: { column: string }[], document?: boolean }} entityMapping
+ * @returns {string[]}
+ */
+export function entityTableColumns(entityMapping) {
+  return [...entityMapping.columns.map((column) => column.physical ?? column.name),
+    ...(entityMapping.foreignKeys ?? []).map((key) => key.column),
+    ...(entityMapping.document === false ? [] : ['doc'])];
+}
+
+/**
  * The one spelling of a promoted ref's member path, for every emitter:
  * the dialect's path text, or {@link UnrepresentablePath}.
  * @param {any} dialect
@@ -1262,15 +1284,29 @@ export function emitEntityPlan(plan, dialect, physicalOf) {
   // caller merges them back into the entity shape — or, for a projected
   // shape, one value/type pair per DISTINCT leaf and no document at all
   const group = plan.group;
-  const groupValue = (ref) => physicalComparable(ref,
-    `${aliasOf(plan.bindings[0].name)}.${q(ref.column)}`, dialect);
+  // A grouping over a join reads a derived table of the join, whose rows carry
+  // their number in the engine's nested-loop order: the columns its keys and
+  // aggregates read are named once each there, and every read above goes by
+  // that name
+  const joined = group !== null && plan.bindings.length > 1;
+  const bindingOf = (entry) => entry.binding ?? plan.bindings[0].name;
+  /** @type {Map<string, { name: string, source: string }>} */
+  const inputs = new Map();
+  const groupColumn = (binding, ref) => {
+    const source = `${aliasOf(binding)}.${q(ref.column)}`;
+    if (!joined) return source;
+    if (!inputs.has(source)) inputs.set(source, { name: q(`x${inputs.size}`), source });
+    return /** @type {any} */ (inputs.get(source)).name;
+  };
+  const groupValue = (entry) => physicalComparable(entry.ref, groupColumn(bindingOf(entry), entry.ref), dialect);
   // A sum or an average folds its terms as doubles past which nothing
   // overflows, so even a group its guard rejects raises nothing first.
   const numericGroup = (entry) => ['sum', 'avg'].includes(entry.fn);
-  const groupTerm = (entry) => exactTerm(dialect, groupValue(entry.ref));
-  const groupSafe = (entry) => exactSum(dialect, groupValue(entry.ref));
-  const groupValid = (ref) => {
-    const value = groupValue(ref);
+  const groupTerm = (entry) => exactTerm(dialect, groupValue(entry));
+  const groupSafe = (entry) => exactSum(dialect, groupValue(entry));
+  const groupValid = (entry) => {
+    const { ref } = entry;
+    const value = groupValue(entry);
     const type = physicalValueType(ref, value, dialect);
     const valid = ref.codec === 'text' ? `${type} = ${sl('text')}`
       : ref.codec === 'boolean' ? `${type} = ${sl('integer')} AND ${value} IN (0, 1)`
@@ -1278,20 +1314,21 @@ export function emitEntityPlan(plan, dialect, physicalOf) {
           + ` AND ABS(${dialect.numberCast(value)}) <= 9007199254740991`;
     return `(MIN(CASE WHEN ${ref.nullPolicy === 'reject' ? '' : `${value} IS NULL OR `}(${valid}) THEN 1 ELSE 0 END) = 1)`;
   };
-  const groupRefs = group ? [...group.keys, ...group.aggregates].map((entry) => entry.ref).filter((ref) => ref?.codecColumn) : [];
+  const groupEntries = group ? [...group.keys, ...group.aggregates].filter((entry) => entry.ref?.codecColumn) : [];
+  const keyPairs = group ? group.keys.map((key, i) => projectedPair({ binding: bindingOf(key), ref: key.ref }, `k${i}`)) : [];
   const selection = group
-    ? [...group.keys.map((key, i) => projectedPair({ binding: plan.bindings[0].name, ref: key.ref }, `k${i}`)),
+    ? [...(joined ? group.keys.flatMap((_, i) => [q(`vk${i}`), q(`tk${i}`)]) : keyPairs),
       ...group.aggregates.map((entry, i) => `${groupedAggregate(entry, entry.fn === 'rows' ? 'COUNT(*)'
         : dialect.groupAggregate(entry.fn, numericGroup(entry) ? groupTerm(entry) : entry.ref.codec === 'integer'
-          ? dialect.numberCast(groupValue(entry.ref)) : groupValue(entry.ref)))} AS ${q(`a${i}`)}`),
+          ? dialect.numberCast(groupValue(entry)) : groupValue(entry)))} AS ${q(`a${i}`)}`),
       ...group.aggregates.flatMap((entry, i) => numericGroup(entry) ? [`${groupSafe(entry)} AS ${q(`_safe${i}`)}`] : []),
-      ...(groupRefs.length ? [`${groupRefs.map(groupValid).join(' AND ')} AS ${q('_valid')}`] : [])].join(', ')
+      ...(groupEntries.length ? [`${groupEntries.map(groupValid).join(' AND ')} AS ${q('_valid')}`] : [])].join(', ')
     : plan.scalarAggregate
     ? `${dialect.groupAggregate(plan.scalarAggregate.fn, plan.scalarAggregate.ref.type === 'string'
-      ? groupValue(plan.scalarAggregate.ref) : numericGroup(plan.scalarAggregate) ? groupTerm(plan.scalarAggregate)
-        : dialect.numberCast(groupValue(plan.scalarAggregate.ref)))} AS ${q('value')}, `
-      + `${groupValid(plan.scalarAggregate.ref)} AS ${q('_valid')}, `
-      + `${plan.scalarAggregate.ref.nullPolicy === 'null' ? `COUNT(*) - COUNT(${groupValue(plan.scalarAggregate.ref)})` : '0'} AS ${q('_nulls')}, `
+      ? groupValue(plan.scalarAggregate) : numericGroup(plan.scalarAggregate) ? groupTerm(plan.scalarAggregate)
+        : dialect.numberCast(groupValue(plan.scalarAggregate)))} AS ${q('value')}, `
+      + `${groupValid(plan.scalarAggregate)} AS ${q('_valid')}, `
+      + `${plan.scalarAggregate.ref.nullPolicy === 'null' ? `COUNT(*) - COUNT(${groupValue(plan.scalarAggregate)})` : '0'} AS ${q('_nulls')}, `
       + `${numericGroup(plan.scalarAggregate) ? groupSafe(plan.scalarAggregate) : '1'} AS ${q('_safe')}`
     : plan.aggregate === 'count'
     ? (plan.quantifier === undefined ? `COUNT(*) AS ${q('value')}` : '1')
@@ -1316,11 +1353,25 @@ export function emitEntityPlan(plan, dialect, physicalOf) {
     + ` ${JOIN_OPS[edge.op ?? 'eq']} `
     + physicalComparable(edge.right, `${aliasOf(edge.right.binding)}.${q(edge.right.column)}`, dialect);
 
-  let sql = `SELECT ${selection} FROM `;
+  /** What orders one binding's rows as the engine meets them: its physical key columns, else its row identity. */
+  const identityTerms = (binding) => {
+    const { keys, mapping, columns } = physicalOf(binding.entity);
+    if (keys) {
+      return keys.map((key) => physicalComparable(mapping.columns.find((c) => c.physical === key),
+        `${aliasOf(binding.name)}.${q(key)}`, dialect));
+    }
+    const identity = columns === undefined ? dialect.rowIdentity() : dialect.rowIdentity(columns);
+    if (identity === null) {
+      throw new UnrepresentableIdentity('a table with columns named rowid, oid and _rowid_ has no row '
+        + 'identity to order its rows by: the document runs in the residual');
+    }
+    return [`${aliasOf(binding.name)}.${identity}`];
+  };
+
   // the JOIN order the planner settled: the first binding, then each
   // one an edge attaches to what is already joined. A binding nothing
   // attached never reaches here — that graph is the residual
-  sql += plan.joins.length === 0
+  const fromSql = plan.joins.length === 0
     ? tableOf(plan.bindings[0].name)
     : plan.joins.map((join, i) => (i === 0
       ? tableOf(join.binding)
@@ -1328,18 +1379,25 @@ export function emitEntityPlan(plan, dialect, physicalOf) {
   const filterSql = plan.filters
     .filter((entry) => entry.filter !== null)
     .map((entry) => emitPred(entry.binding, entry.filter));
-  if (filterSql.length > 0) sql += ` WHERE ${filterSql.join(' AND ')}`;
+  const whereSql = filterSql.length > 0 ? ` WHERE ${filterSql.join(' AND ')}` : '';
+  let sql;
+  if (joined) {
+    // the rows of the join, numbered in the engine's nested-loop order (every
+    // binding's identity, in binding order): a group's first row is the least
+    // number among its rows. The name starts with a digit, so that no table
+    // name prefixes it in a scan narrative
+    const rows = [...keyPairs, ...[...inputs.values()].map(({ name, source }) => `${source} AS ${name}`),
+      `ROW_NUMBER() OVER (ORDER BY ${plan.bindings.flatMap(identityTerms).join(', ')}) AS ${q('_rn')}`];
+    sql = `SELECT ${selection} FROM (SELECT ${rows.join(', ')} FROM ${fromSql}${whereSql}) AS ${q('0rows')}`;
+  }
+  else sql = `SELECT ${selection} FROM ${fromSql}${whereSql}`;
 
   if (group) {
     sql += ` GROUP BY ${group.keys.map((key, i) => `${q(`vk${i}`)}, ${q(`tk${i}`)}`).join(', ')}`;
     const terms = group.order === 'first-seen' ? [] : group.order.map((term) =>
       `${q(term.aggregate === undefined ? `vk${term.index}` : `a${term.aggregate}`)} ${term.desc ? 'DESC' : 'ASC'}${dialect.orderNulls(term.nullsFirst)}`);
-    const physical = physicalOf(plan.bindings[0].entity);
-    for (const key of physical.keys ?? [null]) {
-      const value = `${aliasOf(plan.bindings[0].name)}.${key === null ? dialect.rowIdentity() : q(key)}`;
-      const column = physical.mapping?.columns.find((c) => c.physical === key);
-      terms.push(`MIN(${column ? physicalComparable(column, value, dialect) : value})`);
-    }
+    // groups an order leaves tied come out by their first row
+    terms.push(...(joined ? [`MIN(${q('_rn')})`] : identityTerms(plan.bindings[0]).map((term) => `MIN(${term})`)));
     sql += ` ORDER BY ${terms.join(', ')}`;
     if (plan.window !== null) sql += ` ${dialect.limitClause(plan.window.limit, plan.window.offset)}`;
   }
@@ -1365,13 +1423,7 @@ export function emitEntityPlan(plan, dialect, physicalOf) {
       return `${value} ${term.desc ? 'DESC' : 'ASC'}${dialect.orderNulls(nullsFirst)}`;
     });
     // the engine's nested-loop order: binding-order row identities
-    for (const binding of plan.bindings) {
-      const keys = physicalOf(binding.entity).keys;
-      if (keys) terms.push(...keys.map((key) => physicalComparable(
-        physicalOf(binding.entity).mapping.columns.find((c) => c.physical === key),
-        `${aliasOf(binding.name)}.${q(key)}`, dialect)));
-      else terms.push(`${aliasOf(binding.name)}.${dialect.rowIdentity()}`);
-    }
+    for (const binding of plan.bindings) terms.push(...identityTerms(binding));
     sql += ` ORDER BY ${terms.join(', ')}`;
     if (plan.window !== null)
       sql += ` ${dialect.limitClause(plan.window.limit, plan.window.offset)}`;

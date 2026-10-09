@@ -1,0 +1,853 @@
+{
+ "group": "34 entity group joins",
+ "model": {
+  "$model": "0.1",
+  "entities": {
+   "User": {
+    "schema": {
+     "type": "object",
+     "required": [
+      "id"
+     ],
+     "properties": {
+      "id": {
+       "type": "string",
+       "x-entity": {
+        "key": true
+       }
+      },
+      "name": {
+       "type": "string"
+      },
+      "age": {
+       "type": "integer"
+      },
+      "city": {
+       "type": "string",
+       "x-entity": {
+        "index": true
+       }
+      }
+     }
+    }
+   },
+   "Post": {
+    "schema": {
+     "type": "object",
+     "required": [
+      "pid"
+     ],
+     "properties": {
+      "pid": {
+       "type": "integer",
+       "x-entity": {
+        "key": true
+       }
+      },
+      "stars": {
+       "type": "integer",
+       "x-entity": {
+        "index": true
+       }
+      },
+      "authorId": {
+       "type": "string",
+       "x-entity": {
+        "index": true
+       }
+      },
+      "title": {
+       "type": "string"
+      },
+      "weight": {
+       "type": "number"
+      }
+     }
+    }
+   }
+  }
+ },
+ "documents": {
+  "User": [
+   {
+    "id": "u2",
+    "name": "b",
+    "age": 3,
+    "city": "delft"
+   },
+   {
+    "id": "u1",
+    "name": "a",
+    "age": 5,
+    "city": "delft"
+   },
+   {
+    "id": "u3",
+    "name": "c"
+   },
+   {
+    "id": "u4",
+    "name": "d",
+    "age": 9,
+    "city": "utrecht"
+   }
+  ],
+  "Post": [
+   {
+    "pid": 1,
+    "stars": 4,
+    "authorId": "u1",
+    "title": "gamma",
+    "weight": 0.5
+   },
+   {
+    "pid": 2,
+    "authorId": "u2",
+    "weight": 0.25
+   },
+   {
+    "pid": 3,
+    "stars": 4,
+    "authorId": "u2",
+    "title": "alpha",
+    "weight": 0.125
+   },
+   {
+    "pid": 4,
+    "stars": 7,
+    "authorId": "u1",
+    "title": "delta"
+   },
+   {
+    "pid": 5
+   },
+   {
+    "pid": 6,
+    "stars": 1,
+    "authorId": "u2",
+    "title": "beta",
+    "weight": 0.0625
+   },
+   {
+    "pid": 7,
+    "stars": 2,
+    "authorId": "ghost",
+    "title": "omega"
+   }
+  ]
+ },
+ "cases": [
+  {
+   "name": "count per parent, the parent bound first",
+   "query": {
+    "$for": {
+     "u": "$.User[*]",
+     "p": "$.Post[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$p.authorId",
+      "$u.id"
+     ]
+    },
+    "$groupby": {
+     "who": "$u.id"
+    },
+    "$return": {
+     "who": "$who",
+     "n": {
+      "$count": "$p"
+     }
+    }
+   }
+  },
+  {
+   "name": "count per parent, the child bound first",
+   "query": {
+    "$for": {
+     "p": "$.Post[*]",
+     "u": "$.User[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$p.authorId",
+      "$u.id"
+     ]
+    },
+    "$groupby": {
+     "who": "$u.id"
+    },
+    "$return": {
+     "who": "$who",
+     "n": {
+      "$count": "$p"
+     }
+    }
+   }
+  },
+  {
+   "name": "the parent's age summed by the child's stars",
+   "query": {
+    "$for": {
+     "u": "$.User[*]",
+     "p": "$.Post[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$p.authorId",
+      "$u.id"
+     ]
+    },
+    "$groupby": {
+     "s": "$p.stars"
+    },
+    "$return": {
+     "s": "$s",
+     "n": {
+      "$count": "$u"
+     },
+     "a": {
+      "$sum": "$u.age"
+     }
+    }
+   }
+  },
+  {
+   "name": "extremes and mean of the child's stars by the parent's name",
+   "query": {
+    "$for": {
+     "p": "$.Post[*]",
+     "u": "$.User[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$p.authorId",
+      "$u.id"
+     ]
+    },
+    "$groupby": {
+     "who": "$u.name"
+    },
+    "$return": {
+     "who": "$who",
+     "top": {
+      "$max": "$p.stars"
+     },
+     "avg": {
+      "$avg": "$p.stars"
+     }
+    }
+   }
+  },
+  {
+   "name": "least and greatest strings of either binding",
+   "query": {
+    "$for": {
+     "u": "$.User[*]",
+     "p": "$.Post[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$p.authorId",
+      "$u.id"
+     ]
+    },
+    "$groupby": {
+     "who": "$u.id"
+    },
+    "$return": {
+     "who": "$who",
+     "first": {
+      "$min": "$p.title"
+     },
+     "last": {
+      "$max": "$p.title"
+     },
+     "name": {
+      "$max": "$u.name"
+     }
+    }
+   }
+  },
+  {
+   "name": "grouped by a member of each binding",
+   "query": {
+    "$for": {
+     "u": "$.User[*]",
+     "p": "$.Post[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$p.authorId",
+      "$u.id"
+     ]
+    },
+    "$groupby": {
+     "who": "$u.name",
+     "s": "$p.stars"
+    },
+    "$return": {
+     "who": "$who",
+     "s": "$s",
+     "n": {
+      "$count": "$p"
+     }
+    }
+   }
+  },
+  {
+   "name": "a filter on each binding beside the grouping",
+   "query": {
+    "$for": {
+     "u": "$.User[*]",
+     "p": "$.Post[*]"
+    },
+    "$where": {
+     "$and": [
+      {
+       "$eq": [
+        "$p.authorId",
+        "$u.id"
+       ]
+      },
+      {
+       "$ge": [
+        "$p.stars",
+        2
+       ]
+      },
+      {
+       "$gt": [
+        "$u.age",
+        3
+       ]
+      }
+     ]
+    },
+    "$groupby": {
+     "who": "$u.id"
+    },
+    "$return": {
+     "who": "$who",
+     "n": {
+      "$count": "$p"
+     },
+     "t": {
+      "$sum": "$p.stars"
+     }
+    }
+   }
+  },
+  {
+   "name": "every aggregate side by side",
+   "query": {
+    "$for": {
+     "p": "$.Post[*]",
+     "u": "$.User[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$p.authorId",
+      "$u.id"
+     ]
+    },
+    "$groupby": {
+     "who": "$u.id"
+    },
+    "$return": {
+     "who": "$who",
+     "n": {
+      "$count": "$u"
+     },
+     "s": {
+      "$sum": "$p.stars"
+     },
+     "a": {
+      "$avg": "$p.stars"
+     },
+     "lo": {
+      "$min": "$p.stars"
+     },
+     "hi": {
+      "$max": "$p.stars"
+     },
+     "age": {
+      "$sum": "$u.age"
+     }
+    }
+   }
+  },
+  {
+   "name": "a self join grouped by the name of the first",
+   "query": {
+    "$for": {
+     "a": "$.User[*]",
+     "b": "$.User[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$a.city",
+      "$b.city"
+     ]
+    },
+    "$groupby": {
+     "who": "$a.name"
+    },
+    "$return": {
+     "who": "$who",
+     "n": {
+      "$count": "$b"
+     }
+    }
+   }
+  },
+  {
+   "name": "a join that matches nothing",
+   "query": {
+    "$for": {
+     "u": "$.User[*]",
+     "p": "$.Post[*]"
+    },
+    "$where": {
+     "$and": [
+      {
+       "$eq": [
+        "$p.authorId",
+        "$u.id"
+       ]
+      },
+      {
+       "$gt": [
+        "$p.stars",
+        100
+       ]
+      }
+     ]
+    },
+    "$groupby": {
+     "who": "$u.id"
+    },
+    "$return": {
+     "who": "$who",
+     "n": {
+      "$count": "$p"
+     }
+    }
+   }
+  },
+  {
+   "name": "a return without the key",
+   "query": {
+    "$for": {
+     "u": "$.User[*]",
+     "p": "$.Post[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$p.authorId",
+      "$u.id"
+     ]
+    },
+    "$groupby": {
+     "who": "$u.id"
+    },
+    "$return": {
+     "n": {
+      "$count": "$p"
+     }
+    }
+   }
+  },
+  {
+   "name": "a return of arrays and literals",
+   "query": {
+    "$for": {
+     "u": "$.User[*]",
+     "p": "$.Post[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$p.authorId",
+      "$u.id"
+     ]
+    },
+    "$groupby": {
+     "who": "$u.id"
+    },
+    "$return": {
+     "pair": [
+      "$who",
+      {
+       "$count": "$p"
+      }
+     ],
+     "tag": "x",
+     "none": null
+    }
+   }
+  },
+  {
+   "name": "one aggregate asked twice",
+   "query": {
+    "$for": {
+     "u": "$.User[*]",
+     "p": "$.Post[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$p.authorId",
+      "$u.id"
+     ]
+    },
+    "$groupby": {
+     "who": "$u.id"
+    },
+    "$return": {
+     "a": {
+      "$sum": "$p.stars"
+     },
+     "b": {
+      "$sum": "$p.stars"
+     }
+    }
+   }
+  },
+  {
+   "name": "a navigation hop beside the grouped join",
+   "query": {
+    "$for": {
+     "u": "$.User[*]",
+     "p": "$.Post[*]"
+    },
+    "$where": {
+     "$and": [
+      {
+       "$eq": [
+        "$p.authorId",
+        "$u.id"
+       ]
+      },
+      {
+       "$ge": [
+        {
+         "$count": {
+          "$for": {
+           "r1": "$.Post[*]"
+          },
+          "$where": {
+           "$eq": [
+            "$r1.authorId",
+            "$u.id"
+           ]
+          },
+          "$return": "$r1"
+         }
+        },
+        3
+       ]
+      }
+     ]
+    },
+    "$groupby": {
+     "who": "$u.id"
+    },
+    "$return": {
+     "who": "$who",
+     "n": {
+      "$count": "$p"
+     }
+    }
+   }
+  },
+  {
+   "name": "an external bound beside the grouping",
+   "query": {
+    "$for": {
+     "u": "$.User[*]",
+     "p": "$.Post[*]"
+    },
+    "$where": {
+     "$and": [
+      {
+       "$eq": [
+        "$p.authorId",
+        "$u.id"
+       ]
+      },
+      {
+       "$ge": [
+        "$p.stars",
+        "$least"
+       ]
+      }
+     ]
+    },
+    "$groupby": {
+     "who": "$u.id"
+    },
+    "$return": {
+     "who": "$who",
+     "n": {
+      "$count": "$p"
+     }
+    }
+   },
+   "externals": {
+    "least": 4
+   }
+  },
+  {
+   "name": "an ordered grouping over a join is the engine's",
+   "query": {
+    "$for": {
+     "u": "$.User[*]",
+     "p": "$.Post[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$p.authorId",
+      "$u.id"
+     ]
+    },
+    "$groupby": {
+     "who": "$u.id"
+    },
+    "$orderby": [
+     "$who"
+    ],
+    "$return": {
+     "who": "$who",
+     "n": {
+      "$count": "$p"
+     }
+    }
+   }
+  },
+  {
+   "name": "a window over the groups of a join is the engine's",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "u": "$.User[*]",
+       "p": "$.Post[*]"
+      },
+      "$where": {
+       "$eq": [
+        "$p.authorId",
+        "$u.id"
+       ]
+      },
+      "$groupby": {
+       "who": "$u.id"
+      },
+      "$return": {
+       "who": "$who",
+       "n": {
+        "$count": "$p"
+       }
+      }
+     },
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "a floating sum over a join is the engine's",
+   "query": {
+    "$for": {
+     "u": "$.User[*]",
+     "p": "$.Post[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$p.authorId",
+      "$u.id"
+     ]
+    },
+    "$groupby": {
+     "who": "$u.id"
+    },
+    "$return": {
+     "who": "$who",
+     "w": {
+      "$sum": "$p.weight"
+     }
+    }
+   }
+  },
+  {
+   "name": "a floating mean over a join is the engine's",
+   "query": {
+    "$for": {
+     "u": "$.User[*]",
+     "p": "$.Post[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$p.authorId",
+      "$u.id"
+     ]
+    },
+    "$groupby": {
+     "who": "$u.id"
+    },
+    "$return": {
+     "who": "$who",
+     "w": {
+      "$avg": "$p.weight"
+     }
+    }
+   }
+  },
+  {
+   "name": "a binding with no equality to the others is a product, and the engine groups it",
+   "query": {
+    "$for": {
+     "u": "$.User[*]",
+     "p": "$.Post[*]"
+    },
+    "$groupby": {
+     "who": "$u.id"
+    },
+    "$return": {
+     "who": "$who",
+     "n": {
+      "$count": "$p"
+     }
+    }
+   }
+  },
+  {
+   "name": "a return reading the whole binding is the engine's",
+   "query": {
+    "$for": {
+     "u": "$.User[*]",
+     "p": "$.Post[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$p.authorId",
+      "$u.id"
+     ]
+    },
+    "$groupby": {
+     "who": "$u.id"
+    },
+    "$return": {
+     "who": "$who",
+     "rows": "$p"
+    }
+   }
+  },
+  {
+   "name": "the nullable form of a sum over the first binding of a join is the engine's",
+   "query": {
+    "$for": {
+     "u": "$.User[*]",
+     "p": "$.Post[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$p.authorId",
+      "$u.id"
+     ]
+    },
+    "$groupby": {
+     "who": "$u.id"
+    },
+    "$return": {
+     "who": "$who",
+     "s": {
+      "$if": [
+       {
+        "$exists": {
+         "$for": {
+          "x": "$u"
+         },
+         "$where": {
+          "$ne": [
+           "$x.age",
+           null
+          ]
+         },
+         "$return": "$x.age"
+        }
+       },
+       {
+        "$sum": {
+         "$for": {
+          "x": "$u"
+         },
+         "$where": {
+          "$ne": [
+           "$x.age",
+           null
+          ]
+         },
+         "$return": "$x.age"
+        }
+       },
+       null
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "the nullable form of a sum over a join is the engine's",
+   "query": {
+    "$for": {
+     "u": "$.User[*]",
+     "p": "$.Post[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$p.authorId",
+      "$u.id"
+     ]
+    },
+    "$groupby": {
+     "who": "$u.id"
+    },
+    "$return": {
+     "who": "$who",
+     "s": {
+      "$if": [
+       {
+        "$exists": {
+         "$for": {
+          "x": "$p"
+         },
+         "$where": {
+          "$ne": [
+           "$x.stars",
+           null
+          ]
+         },
+         "$return": "$x.stars"
+        }
+       },
+       {
+        "$sum": {
+         "$for": {
+          "x": "$p"
+         },
+         "$where": {
+          "$ne": [
+           "$x.stars",
+           null
+          ]
+         },
+         "$return": "$x.stars"
+        }
+       },
+       null
+      ]
+     }
+    }
+   }
+  }
+ ]
+}

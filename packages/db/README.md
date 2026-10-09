@@ -287,8 +287,16 @@ no continuation to emit.
   already joined, which is what makes the plan a nested loop the engine
   can be compared against — a binding nothing attaches would be a
   cartesian product, so it is the residual, named, and `strict: true`
-  refuses it. `explain()` lists the join order with the equalities that
-  attached each binding, and the group's keys, aggregates and order.
+  refuses it. An equality attaches a binding only between mapped columns of
+  one comparison family — the family the column stores — neither a boolean
+  and not both able to read a NULL as a present `null`, so the database pairs
+  the rows as the engine does; any other equality is the engine's. On SQLite
+  an unordered `$groupby` over a connected join lowers to one statement too,
+  its groups in the engine's order of first appearance; PostgreSQL leaves a
+  join to the engine (`bind.entityGrouping`). `explain()` lists the join
+  order with the equalities that attached each binding and the order the
+  rows or groups come out in; a collection's also lists the group's keys and
+  aggregates.
   Nullable scalar keys also group; ordering null or boolean keys remains
   residual to preserve the engine's error. Windows over singleton group
   constructors lower, and counts over constructors containing only keys,

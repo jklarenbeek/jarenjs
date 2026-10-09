@@ -1,0 +1,860 @@
+{
+ "group": "35 entity group joins over three bindings",
+ "model": {
+  "$model": "0.1",
+  "entities": {
+   "Team": {
+    "schema": {
+     "type": "object",
+     "required": [
+      "tid"
+     ],
+     "properties": {
+      "tid": {
+       "type": "string",
+       "x-entity": {
+        "key": true
+       }
+      },
+      "name": {
+       "type": "string"
+      },
+      "rank": {
+       "type": "integer"
+      },
+      "cap": {
+       "type": "integer"
+      },
+      "up": {
+       "type": "boolean"
+      }
+     }
+    }
+   },
+   "Player": {
+    "schema": {
+     "type": "object",
+     "required": [
+      "plid"
+     ],
+     "properties": {
+      "plid": {
+       "type": "integer",
+       "x-entity": {
+        "key": true
+       }
+      },
+      "teamId": {
+       "type": "string",
+       "x-entity": {
+        "index": true
+       }
+      },
+      "nick": {
+       "type": "string"
+      },
+      "rank": {
+       "type": "integer"
+      },
+      "goals": {
+       "type": "integer"
+      },
+      "ok": {
+       "type": "boolean"
+      },
+      "ratio": {
+       "type": "number"
+      }
+     }
+    }
+   },
+   "Cap": {
+    "schema": {
+     "type": "object",
+     "required": [
+      "cid"
+     ],
+     "properties": {
+      "cid": {
+       "type": "integer",
+       "x-entity": {
+        "key": true
+       }
+      },
+      "plid": {
+       "type": "integer",
+       "x-entity": {
+        "index": true
+       }
+      },
+      "mins": {
+       "type": "integer"
+      },
+      "tag": {
+       "type": "string"
+      }
+     }
+    }
+   }
+  }
+ },
+ "documents": {
+  "Team": [
+   {
+    "tid": "t1",
+    "name": "red",
+    "rank": 2,
+    "cap": 4503599627370496,
+    "up": true
+   },
+   {
+    "tid": "t2",
+    "name": "blue",
+    "up": false
+   },
+   {
+    "tid": "t3",
+    "name": "green",
+    "rank": 1,
+    "cap": 4503599627370496,
+    "up": true
+   },
+   {
+    "tid": "t4",
+    "name": "void",
+    "rank": 9
+   }
+  ],
+  "Player": [
+   {
+    "plid": 1,
+    "teamId": "t1",
+    "nick": "b",
+    "rank": 5,
+    "goals": 2,
+    "ok": true,
+    "ratio": 0.1
+   },
+   {
+    "plid": 2,
+    "teamId": "t2",
+    "nick": "B",
+    "rank": 5,
+    "goals": 3,
+    "ok": false,
+    "ratio": 0.2
+   },
+   {
+    "plid": 3,
+    "teamId": "t1",
+    "nick": "é",
+    "goals": 1,
+    "ok": true,
+    "ratio": 0.3
+   },
+   {
+    "plid": 4,
+    "teamId": "t3",
+    "nick": "a",
+    "rank": 7,
+    "goals": 4,
+    "ok": false,
+    "ratio": 0.4
+   },
+   {
+    "plid": 5,
+    "teamId": "t1",
+    "nick": "a",
+    "rank": 7
+   },
+   {
+    "plid": 6,
+    "nick": "z",
+    "rank": 1,
+    "goals": 9
+   },
+   {
+    "plid": 7,
+    "teamId": "t9",
+    "nick": "q",
+    "goals": 5
+   },
+   {
+    "plid": 8,
+    "teamId": "t3",
+    "nick": "b",
+    "rank": 5,
+    "goals": 6,
+    "ok": true,
+    "ratio": 0.6
+   },
+   {
+    "plid": 9,
+    "teamId": "t1",
+    "nick": "c",
+    "rank": 5,
+    "goals": 1,
+    "ok": false
+   }
+  ],
+  "Cap": [
+   {
+    "cid": 1,
+    "plid": 1,
+    "mins": 90,
+    "tag": "x"
+   },
+   {
+    "cid": 2,
+    "plid": 1,
+    "mins": 45,
+    "tag": "y"
+   },
+   {
+    "cid": 3,
+    "plid": 2,
+    "mins": 10
+   },
+   {
+    "cid": 4,
+    "plid": 3,
+    "mins": 30,
+    "tag": "x"
+   },
+   {
+    "cid": 5,
+    "plid": 4,
+    "tag": "y"
+   },
+   {
+    "cid": 6,
+    "plid": 99,
+    "mins": 5,
+    "tag": "z"
+   },
+   {
+    "cid": 7,
+    "mins": 7
+   },
+   {
+    "cid": 8,
+    "plid": 8,
+    "mins": 60,
+    "tag": "x"
+   },
+   {
+    "cid": 9,
+    "plid": 1,
+    "mins": 15,
+    "tag": "x"
+   }
+  ]
+ },
+ "cases": [
+  {
+   "name": "caps per team across three bindings",
+   "query": {
+    "$for": {
+     "t": "$.Team[*]",
+     "p": "$.Player[*]",
+     "c": "$.Cap[*]"
+    },
+    "$where": {
+     "$and": [
+      {
+       "$eq": [
+        "$p.teamId",
+        "$t.tid"
+       ]
+      },
+      {
+       "$eq": [
+        "$c.plid",
+        "$p.plid"
+       ]
+      }
+     ]
+    },
+    "$groupby": {
+     "team": "$t.name"
+    },
+    "$return": {
+     "team": "$team",
+     "n": {
+      "$count": "$c"
+     },
+     "mins": {
+      "$sum": "$c.mins"
+     }
+    }
+   }
+  },
+  {
+   "name": "three bindings, the middle one bound first",
+   "query": {
+    "$for": {
+     "p": "$.Player[*]",
+     "t": "$.Team[*]",
+     "c": "$.Cap[*]"
+    },
+    "$where": {
+     "$and": [
+      {
+       "$eq": [
+        "$p.teamId",
+        "$t.tid"
+       ]
+      },
+      {
+       "$eq": [
+        "$c.plid",
+        "$p.plid"
+       ]
+      }
+     ]
+    },
+    "$groupby": {
+     "team": "$t.name"
+    },
+    "$return": {
+     "team": "$team",
+     "n": {
+      "$count": "$c"
+     },
+     "players": {
+      "$count": "$p"
+     }
+    }
+   }
+  },
+  {
+   "name": "three bindings joined through the middle one only",
+   "query": {
+    "$for": {
+     "t": "$.Team[*]",
+     "c": "$.Cap[*]",
+     "p": "$.Player[*]"
+    },
+    "$where": {
+     "$and": [
+      {
+       "$eq": [
+        "$p.teamId",
+        "$t.tid"
+       ]
+      },
+      {
+       "$eq": [
+        "$c.plid",
+        "$p.plid"
+       ]
+      }
+     ]
+    },
+    "$groupby": {
+     "team": "$t.name"
+    },
+    "$return": {
+     "team": "$team",
+     "n": {
+      "$count": "$p"
+     },
+     "hi": {
+      "$max": "$c.mins"
+     }
+    }
+   }
+  },
+  {
+   "name": "a member of the same name on two bindings",
+   "query": {
+    "$for": {
+     "t": "$.Team[*]",
+     "p": "$.Player[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$p.teamId",
+      "$t.tid"
+     ]
+    },
+    "$groupby": {
+     "r": "$t.rank"
+    },
+    "$return": {
+     "r": "$r",
+     "pmax": {
+      "$max": "$p.rank"
+     },
+     "tmax": {
+      "$max": "$t.rank"
+     },
+     "n": {
+      "$count": "$p"
+     }
+    }
+   }
+  },
+  {
+   "name": "the same member of both bindings summed beside each other",
+   "query": {
+    "$for": {
+     "t": "$.Team[*]",
+     "p": "$.Player[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$p.teamId",
+      "$t.tid"
+     ]
+    },
+    "$groupby": {
+     "team": "$t.name"
+    },
+    "$return": {
+     "team": "$team",
+     "ps": {
+      "$sum": "$p.rank"
+     },
+     "ts": {
+      "$sum": "$t.rank"
+     },
+     "pa": {
+      "$avg": "$p.rank"
+     },
+     "ta": {
+      "$avg": "$t.rank"
+     }
+    }
+   }
+  },
+  {
+   "name": "aggregates of a member some rows lack",
+   "query": {
+    "$for": {
+     "t": "$.Team[*]",
+     "p": "$.Player[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$p.teamId",
+      "$t.tid"
+     ]
+    },
+    "$groupby": {
+     "team": "$t.name"
+    },
+    "$return": {
+     "team": "$team",
+     "s": {
+      "$sum": "$p.goals"
+     },
+     "a": {
+      "$avg": "$p.goals"
+     },
+     "lo": {
+      "$min": "$p.goals"
+     },
+     "hi": {
+      "$max": "$p.goals"
+     }
+    }
+   }
+  },
+  {
+   "name": "a boolean key of the parent",
+   "query": {
+    "$for": {
+     "t": "$.Team[*]",
+     "p": "$.Player[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$p.teamId",
+      "$t.tid"
+     ]
+    },
+    "$groupby": {
+     "up": "$t.up"
+    },
+    "$return": {
+     "up": "$up",
+     "n": {
+      "$count": "$p"
+     }
+    }
+   }
+  },
+  {
+   "name": "a boolean key of the child, absent for some",
+   "query": {
+    "$for": {
+     "t": "$.Team[*]",
+     "p": "$.Player[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$p.teamId",
+      "$t.tid"
+     ]
+    },
+    "$groupby": {
+     "ok": "$p.ok"
+    },
+    "$return": {
+     "ok": "$ok",
+     "n": {
+      "$count": "$t"
+     }
+    }
+   }
+  },
+  {
+   "name": "strings compare by code point across bindings",
+   "query": {
+    "$for": {
+     "t": "$.Team[*]",
+     "p": "$.Player[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$p.teamId",
+      "$t.tid"
+     ]
+    },
+    "$groupby": {
+     "team": "$t.name"
+    },
+    "$return": {
+     "team": "$team",
+     "lo": {
+      "$min": "$p.nick"
+     },
+     "hi": {
+      "$max": "$p.nick"
+     }
+    }
+   }
+  },
+  {
+   "name": "a key that spans the rows of several parents",
+   "query": {
+    "$for": {
+     "t": "$.Team[*]",
+     "p": "$.Player[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$p.teamId",
+      "$t.tid"
+     ]
+    },
+    "$groupby": {
+     "nick": "$p.nick"
+    },
+    "$return": {
+     "nick": "$nick",
+     "n": {
+      "$count": "$t"
+     },
+     "g": {
+      "$sum": "$p.goals"
+     }
+    }
+   }
+  },
+  {
+   "name": "a parent's value repeated by its children passes the exactness bound",
+   "query": {
+    "$for": {
+     "t": "$.Team[*]",
+     "p": "$.Player[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$p.teamId",
+      "$t.tid"
+     ]
+    },
+    "$groupby": {
+     "team": "$t.name"
+    },
+    "$return": {
+     "team": "$team",
+     "s": {
+      "$sum": "$t.cap"
+     }
+    }
+   }
+  },
+  {
+   "name": "a parent's value repeated by its children, averaged",
+   "query": {
+    "$for": {
+     "t": "$.Team[*]",
+     "p": "$.Player[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$p.teamId",
+      "$t.tid"
+     ]
+    },
+    "$groupby": {
+     "team": "$t.name"
+    },
+    "$return": {
+     "team": "$team",
+     "a": {
+      "$avg": "$t.cap"
+     }
+    }
+   }
+  },
+  {
+   "name": "a self join grouped by the first player",
+   "query": {
+    "$for": {
+     "a": "$.Player[*]",
+     "b": "$.Player[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$a.teamId",
+      "$b.teamId"
+     ]
+    },
+    "$groupby": {
+     "nick": "$a.nick"
+    },
+    "$return": {
+     "nick": "$nick",
+     "n": {
+      "$count": "$b"
+     },
+     "g": {
+      "$sum": "$b.goals"
+     }
+    }
+   }
+  },
+  {
+   "name": "a disjunction across joined bindings beside the grouping",
+   "query": {
+    "$for": {
+     "t": "$.Team[*]",
+     "p": "$.Player[*]"
+    },
+    "$where": {
+     "$and": [
+      {
+       "$eq": [
+        "$p.teamId",
+        "$t.tid"
+       ]
+      },
+      {
+       "$or": [
+        {
+         "$gt": [
+          "$t.rank",
+          1
+         ]
+        },
+        {
+         "$gt": [
+          "$p.goals",
+          3
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    "$groupby": {
+     "team": "$t.name"
+    },
+    "$return": {
+     "team": "$team",
+     "n": {
+      "$count": "$p"
+     }
+    }
+   }
+  },
+  {
+   "name": "an external bound inside a grouped join",
+   "query": {
+    "$for": {
+     "t": "$.Team[*]",
+     "p": "$.Player[*]"
+    },
+    "$where": {
+     "$and": [
+      {
+       "$eq": [
+        "$p.teamId",
+        "$t.tid"
+       ]
+      },
+      {
+       "$ge": [
+        "$p.goals",
+        "$least"
+       ]
+      }
+     ]
+    },
+    "$groupby": {
+     "team": "$t.name"
+    },
+    "$return": {
+     "team": "$team",
+     "n": {
+      "$count": "$p"
+     }
+    }
+   },
+   "externals": {
+    "least": 2
+   }
+  },
+  {
+   "name": "a floating mean over three bindings is the engine's",
+   "query": {
+    "$for": {
+     "t": "$.Team[*]",
+     "p": "$.Player[*]",
+     "c": "$.Cap[*]"
+    },
+    "$where": {
+     "$and": [
+      {
+       "$eq": [
+        "$p.teamId",
+        "$t.tid"
+       ]
+      },
+      {
+       "$eq": [
+        "$c.plid",
+        "$p.plid"
+       ]
+      }
+     ]
+    },
+    "$groupby": {
+     "team": "$t.name"
+    },
+    "$return": {
+     "team": "$team",
+     "a": {
+      "$avg": "$p.ratio"
+     }
+    }
+   }
+  },
+  {
+   "name": "an ordered grouping over three bindings is the engine's",
+   "query": {
+    "$for": {
+     "t": "$.Team[*]",
+     "p": "$.Player[*]",
+     "c": "$.Cap[*]"
+    },
+    "$where": {
+     "$and": [
+      {
+       "$eq": [
+        "$p.teamId",
+        "$t.tid"
+       ]
+      },
+      {
+       "$eq": [
+        "$c.plid",
+        "$p.plid"
+       ]
+      }
+     ]
+    },
+    "$groupby": {
+     "team": "$t.name"
+    },
+    "$orderby": [
+     {
+      "$key": {
+       "$count": "$c"
+      },
+      "$dir": "desc"
+     }
+    ],
+    "$return": {
+     "team": "$team",
+     "n": {
+      "$count": "$c"
+     }
+    }
+   }
+  },
+  {
+   "name": "a third binding nothing connects is a product, and the engine groups it",
+   "query": {
+    "$for": {
+     "t": "$.Team[*]",
+     "p": "$.Player[*]",
+     "c": "$.Cap[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$p.teamId",
+      "$t.tid"
+     ]
+    },
+    "$groupby": {
+     "team": "$t.name"
+    },
+    "$return": {
+     "team": "$team",
+     "n": {
+      "$count": "$c"
+     }
+    }
+   }
+  },
+  {
+   "name": "a difference between the bindings refines the join beside the grouping",
+   "query": {
+    "$for": {
+     "t": "$.Team[*]",
+     "p": "$.Player[*]"
+    },
+    "$where": {
+     "$and": [
+      {
+       "$eq": [
+        "$p.teamId",
+        "$t.tid"
+       ]
+      },
+      {
+       "$ne": [
+        "$p.rank",
+        "$t.rank"
+       ]
+      }
+     ]
+    },
+    "$groupby": {
+     "r": "$t.rank"
+    },
+    "$return": {
+     "r": "$r",
+     "n": {
+      "$count": "$p"
+     }
+    }
+   }
+  }
+ ]
+}

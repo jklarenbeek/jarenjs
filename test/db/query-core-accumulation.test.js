@@ -634,6 +634,32 @@ describe('an aggregate over a member of more than one type', () => {
   });
 });
 
+describe('a whole aggregate over a member that admits null', () => {
+  // the engine's sequence holds an item for a stored null, which it refuses
+  // (`JQ2001`), and none for an absent member; SQL skips both, so such an
+  // aggregate is the engine's on every engine
+  const model = { $model: '0.1', collections: { rows: {
+    key: '/id',
+    schema: { type: 'object', properties: { id: { type: 'string' }, n: { type: ['integer', 'null'] }, s: { type: ['string', 'null'] } } },
+  } } };
+  const documents = [{ id: 'a', n: 1, s: 'p' }, { id: 'b', n: null, s: null }, { id: 'c', n: 3 }];
+
+  it('stays in the engine, and raises what the engine raises', async () => {
+    await onBothEngines(model, async (store, host) => {
+      const rows = store.collection('rows');
+      for (const document of documents) await rows.insert(document);
+      for (const [fn, member] of [['$sum', 'n'], ['$avg', 'n'], ['$min', 'n'], ['$max', 'n'], ['$min', 's'], ['$max', 's']]) {
+        const document = whole(fn, member);
+        const label = `${host} ${JSON.stringify(document)}`;
+        const engine = await outcome(() => compileJsonQuery(document)(structuredClone(documents)));
+        assert.deepEqual(engine, { code: 'JQ2001' }, `engine: ${label}`);
+        assert.deepEqual(await outcome(() => rows.execute(document)), engine, label);
+        assert.equal((await rows.explain(document)).mode, 'set', label);
+      }
+    });
+  });
+});
+
 describe("a physical entity's whole integer sum or average", () => {
   it('declines a cursor under strictStreaming before any statement runs, as the collection does', async () => {
     /** @param {string | null} schema */

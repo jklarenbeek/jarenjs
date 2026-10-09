@@ -50,7 +50,8 @@ import {
   isRootScanSource, isEntityRootSource, BIND_REASONS, PLANNER_REASONS, admitsMixedTypes,
   predicateTerms, boundPredicateTerms, mapHops, hopsOf,
 } from './plan.js';
-import { emitPlan, emitEntityPlan, createEntityPredicateEmitters, UnrepresentablePath, physicalComparable,
+import { emitPlan, emitEntityPlan, createEntityPredicateEmitters, UnrepresentablePath, UnrepresentableIdentity,
+  entityTableColumns, physicalComparable,
   pathTextOf, kindOf, bucketGuards } from './emit.js';
 import { modelPath } from './model-path.js';
 import { selectPlan, conjoin, effectiveOrder, planOrder, ordersByColumn } from './algebra.js';
@@ -422,6 +423,19 @@ function projectedItems(row) {
  */
 function segmentsOf(ref) {
   return ref.segments.map((segment) => ('name' in segment ? segment.name : segment.index));
+}
+
+/**
+ * The row identity an entity's rows are fetched in order of: the dialect's
+ * spelling that no column of the table shadows. A table that takes every
+ * spelling has none that reproduces the insertion order, and its rows come
+ * in the order of the spelling it shadows.
+ * @param {any} dialect
+ * @param {any} entityMapping
+ * @returns {string}
+ */
+function rowIdentityOf(dialect, entityMapping) {
+  return dialect.rowIdentity(entityTableColumns(entityMapping)) ?? dialect.rowIdentity();
 }
 
 /**
@@ -1838,6 +1852,8 @@ export function createEntityQueryEngine(context) {
   const physicalOf = (name) => ({ table: mapping.entities[name].table, schema: mapping.entities[name].schema,
     // a join-table root has no document column of its own (§10.7)
     document: mapping.entities[name].document !== false,
+    // the names a row identity must not share
+    columns: entityTableColumns(mapping.entities[name]),
     ...(entities.get(name)?.physical == null ? {} : {
       mapping: mapping.entities[name],
       keys: mapping.entities[name].keys.map((key) => mapping.entities[name].columns.find((c) => c.name === key).physical),
@@ -1884,8 +1900,11 @@ export function createEntityQueryEngine(context) {
       planned = { ...planned, mode: 'set', plan: null,
         reasons: [{ construct: 'pushdown', reason: BIND_REASONS.pushdown }] };
     }
+    // the runtime guards of a grouping are qualified on PostgreSQL for one
+    // adopted table with no document column, and for no join
     if ((planned.plan?.group || planned.plan?.scalarAggregate) && dialect.name !== 'sqlite'
-      && !(dialect.physicalValueType && mapping.entities[planned.plan.bindings[0].entity]?.document === false)) {
+      && !(planned.plan.bindings.length === 1 && dialect.physicalValueType
+        && mapping.entities[planned.plan.bindings[0].entity]?.document === false)) {
       planned = { ...planned, mode: 'set', plan: null,
         reasons: [{ construct: '$groupby', reason: BIND_REASONS.entityGrouping }] };
     }
@@ -1982,15 +2001,17 @@ export function createEntityQueryEngine(context) {
         entry.slots = emitted.slots;
       }
       catch (error) {
-        if (!(error instanceof UnrepresentablePath)) throw error;
-        // a member name the dialect cannot spell: the whole document runs
-        // in the set residual, named, as on a collection — and strict
-        // mode and a profile refusing full scans refuse it by name
+        if (!(error instanceof UnrepresentablePath || error instanceof UnrepresentableIdentity)) throw error;
+        // a member name the dialect cannot spell, or a table with no row
+        // identity to order by: the whole document runs in the set
+        // residual, named, as on a collection — and strict mode and a
+        // profile refusing full scans refuse it by name
+        const construct = error instanceof UnrepresentablePath ? 'path' : 'identity';
         entry.planned = { ...planned, mode: 'set', plan: null,
-          reasons: [{ construct: 'path', reason: error.message }, ...planned.reasons] };
+          reasons: [{ construct, reason: error.message }, ...planned.reasons] };
         if (profile !== null && profile.refuseFullScan === true) {
           throw profileEntityRefusal('the profile refuses a full-table scan, and the residual this '
-            + `document needs fetches every row of ${planned.referenced.join(', ')} ('path' — ${error.message})`, docPath);
+            + `document needs fetches every row of ${planned.referenced.join(', ')} ('${construct}' — ${error.message})`, docPath);
         }
       }
     }
@@ -2090,7 +2111,7 @@ export function createEntityQueryEngine(context) {
               // the key's codec comparison, as the native plan orders it: a
               // text key in code-point order on every dialect
               return physicalComparable(column, `${q('t')}.${q(column.physical)}`, dialect);
-            }).join(', ') : `${q('t')}.${dialect.rowIdentity()}`}${limit}`,
+            }).join(', ') : `${q('t')}.${rowIdentityOf(dialect, mapping.entities[name])}`}${limit}`,
           slots,
           statement: null,
         };
@@ -2811,7 +2832,7 @@ export function createLoadEngine(context, entityName) {
       const nullsFirst = term.emptyGreatest === term.desc;
       return `${value} ${term.desc ? 'DESC' : 'ASC'}${dialect.orderNulls(nullsFirst)}`;
     });
-    orderSql.push(`${rendered.aliasSql}.${dialect.rowIdentity()}`);
+    orderSql.push(`${rendered.aliasSql}.${rowIdentityOf(dialect, child.entityMapping)}`);
     const inner = relation.kind === 'manyToMany'
       ? `SELECT ${rendered.aliasSql}.* FROM ${q(childTable)} AS ${q(childAlias)} `
         + `JOIN ${q(relation.joinTable)} AS ${q(`${childAlias}_j`)} `
@@ -3201,7 +3222,7 @@ export function createLoadEngine(context, entityName) {
         const nullsFirst = term.emptyGreatest === term.desc;
         return `${value} ${term.desc ? 'DESC' : 'ASC'}${dialect.orderNulls(nullsFirst)}`;
       });
-    if (identity === null) orderSql.push(...(physicalEntity ? keyColumns.map((key) => termSql(key)) : [`${rendered.aliasSql}.${dialect.rowIdentity()}`]));
+    if (identity === null) orderSql.push(...(physicalEntity ? keyColumns.map((key) => termSql(key)) : [`${rendered.aliasSql}.${rowIdentityOf(dialect, tree.entityMapping)}`]));
     sql += ` ORDER BY ${orderSql.join(', ')}`;
     // the profile's row bound rides the root as LIMIT maxRows + 1, so
     // a load past it is detected at the bound and refused (JD2007)

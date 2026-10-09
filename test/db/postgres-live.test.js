@@ -23,7 +23,7 @@
 import { describe, it, before, after } from 'node:test';
 import * as assert from 'node:assert';
 
-import { openStore, planMigration, planModelMigration, migrate } from '@jarenjs/db';
+import { openStore, planMigration, planModelMigration, migrate, reasonId } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';
 import { postgresDriver, postgresDialect, POSTGRES_FLOOR } from '@jarenjs/db/postgres';
 
@@ -366,6 +366,36 @@ describe('PostgreSQL, live', { skip: SKIP }, () => {
               });
             }
           });
+        }
+      });
+    }
+  });
+
+  describe('grouping the rows of a join', () => {
+    // the runtime guards of an entity grouping are qualified for one adopted table alone, so a join of any
+    // layout is grouped by the engine, under a name, and the answer is the one SQLite's statement gives
+    for (const side of /** @type {const} */ (['indexed', 'unindexed'])) {
+      it(`plans the engine's grouping of a join under the unqualified guards — ${side}`, async () => {
+        for (const [name, cases] of /** @type {[string, string[]][]} */ ([
+          ['12 joins', ['grouping a join counts related rows per parent', 'aggregates over the grouped join']],
+          ['34 entity group joins', ['count per parent, the parent bound first', 'every aggregate side by side']],
+          ['35 entity group joins over three bindings', ['caps per team across three bindings']],
+        ])) {
+          const group = loadRelationGroups().find((entry) => entry.group === name);
+          assert.ok(group, name);
+          const { store } = await storeForEntityGroup(group, await freshDriver(), side);
+          try {
+            for (const kase of group.cases.filter((entry) => cases.includes(entry.name))) {
+              const label = `${name}/${kase.name} [${side}]`;
+              const explained = await store.explain(kase.query);
+              assert.strictEqual(explained.mode, 'set', label);
+              assert.strictEqual(reasonId(explained.residual.reasons[0].reason), 'bind.entityGrouping', label);
+              assert.strictEqual(await runEntityCase(store, group.documents, kase, 'native'), null, label);
+            }
+          }
+          finally {
+            await store.close();
+          }
         }
       });
     }

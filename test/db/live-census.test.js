@@ -22,7 +22,7 @@ import * as assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import { isDeepStrictEqual } from 'node:util';
 
-import { openStore } from '@jarenjs/db';
+import { openStore, PLANNER_REASONS } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';
 import { fromAsync } from '@jarenjs/linq';
 import { open } from '@jarenjs/linq/db';
@@ -144,8 +144,10 @@ const SHAPES = [
   { name: 'a non-equality join alone (a cartesian product)', on: 'entity',
     document: [{ ...JOIN, $where: { $lt: ['$p.score', '$a.rank'] } }],
     row: 'unindexed/non-equi joins',
-    mode: rerun('entity dependency plan: every binding past the first needs a column equality to one already joined '
-      + '— a binding nothing connects is a cartesian product, which is engine work') },
+    mode: rerun(`entity dependency plan: ${PLANNER_REASONS['entity.joinKey'].text}`) },
+  { name: 'an equality across comparison families', on: 'entity',
+    document: [{ $for: { p: '$.Post[*]', a: '$.Author[*]' }, $where: { $eq: ['$p.score', '$a.name'] }, $return: { id: '$p.id', who: '$a.name' } }],
+    row: 'an equality that is no join edge', mode: rerun(`entity dependency plan: ${PLANNER_REASONS['entity.joinKey'].text}`) },
   { name: 'an equi-join over a column with no declared index', on: 'entity',
     document: [{ ...JOIN, $where: { $eq: ['$p.editor', '$a.id'] } }],
     row: 'unindexed/non-equi joins', mode: rerun("join dependency 'p.editor' has no declared index") },
@@ -198,6 +200,12 @@ const SHAPES = [
     row: 'reads an entity root outside its child queries', mode: rerun(HOP_SHAPE) },
   { name: 'an aggregate over an entity join', on: 'entity', document: [{ $count: JOIN }],
     row: 'an entity aggregate', mode: rerun('an entity aggregate has no bounded tuple accumulator') },
+  { name: 'a grouping of an entity join', on: 'entity',
+    document: [{ ...JOIN, $groupby: { who: '$a.name' }, $return: { who: '$who', n: { $count: '$p' } } }],
+    row: 'an entity grouping', mode: rerun('an entity grouping has no bounded tuple accumulator') },
+  { name: 'a grouping of one entity root', on: 'entity',
+    document: [{ $for: { p: '$.Post[*]' }, $groupby: { s: '$p.score' }, $return: { s: '$s', n: { $count: '$p' } } }],
+    row: 'an entity grouping', mode: rerun('an entity grouping has no bounded tuple accumulator') },
   { name: 'an object-root entity document', on: 'entity',
     document: [{ authors: { $count: '$.Author[*]' }, posts: { $count: '$.Post[*]' } }],
     row: 'object-root documents', mode: rerun('entity dependency plan: only a FLWOR over entity arrays is translated') },

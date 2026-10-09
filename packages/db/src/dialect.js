@@ -193,7 +193,7 @@ function normalizeCapabilities(declared) {
  *   timeBucket: (instantSql: string, originSql: string, everyA: string,
  *     everyB: string, everyC: string) => string,
  *   groupAggregate: (fn: string, valueSql: string | null) => string,
- *   rowIdentity: () => string,
+ *   rowIdentity: { (): string, (columns: readonly string[]): string | null },
  *   identityIn: (identitySql: string, paramSqls: string[]) => string,
  *   rtree?: { module: string, columns: readonly string[] },
  *   rtreeDdl?: Record<string, Function>,

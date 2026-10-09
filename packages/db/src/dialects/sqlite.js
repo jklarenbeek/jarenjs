@@ -103,8 +103,20 @@ function pragmaValue(value) {
 }
 
 /** SQLite's own per-row identity: the implicit `rowid` of every
- * table this store creates, which is INSERTION order. */
-const rowIdentity = () => '"rowid"';
+ * table this store creates, which is INSERTION order. SQLite resolves a
+ * name to a column of the table before it resolves it to the row, and
+ * `rowid`, `oid` and `_rowid_` name the same row, so given the names of a
+ * table's columns the identity is the first of the three that none of them
+ * takes (names compare with ASCII case folded), and `null` when they take
+ * all three. Without the names it is `rowid`, for the tables whose columns
+ * the store names itself.
+ * @type {{ (): string, (columns: readonly string[]): string | null }} */
+const rowIdentity = /** @type {any} */ ((/** @type {readonly string[] | undefined} */ columns) => {
+  if (columns === undefined) return '"rowid"';
+  const taken = new Set(columns.map((name) => name.replace(/[A-Z]/g, (letter) => letter.toLowerCase())));
+  const alias = ['rowid', 'oid', '_rowid_'].find((name) => !taken.has(name));
+  return alias === undefined ? null : `"${alias}"`;
+});
 
 /** The R*Tree module and the shape this store gives it: the row id and
  * the four box edges in (minx, maxx, miny, maxy) order, which is the

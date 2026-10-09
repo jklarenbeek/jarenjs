@@ -2943,7 +2943,9 @@ binding or hop of its own. A correlation qualifies only when both sides are
 mapped columns of one comparison family, neither boolean, neither admitting
 `null` — in its schema type or in its column's policy, `null: 'null'` reading
 a NULL as a present `null` — because the engine equates the string `"1"`
-with no integer and `null` with `null`, where SQL does neither. Such a hop
+with no integer and `null` with `null`, where SQL does neither. A foreign key
+no property declares has no type to compare in a correlation, and a join
+(§10.2) reads it as the key it references where a hop does not. Such a hop
 is a correlated subselect of the row's own statement:
 
 - a comparison of the member a hop returns with a literal or an external,
@@ -3070,6 +3072,46 @@ reports the join (`{ left, right }`) and the `EXPLAIN QUERY PLAN`
 narrative; the paired foreign key carries an index (every foreign key
 does — unique for a strict one-to-one, plain otherwise), so the probe
 side of the join is a `SEARCH`, never a second scan.
+
+An equality is a join edge only where the database pairs the rows as the engine
+does, and that takes three things. Both sides are mapped columns of ONE
+comparison family: the family the column stores and the engine decodes (an
+integer against a number, a string against a string), never the first type of a
+union (`['integer', 'string']` over a text column), never a schema type that
+claims another kind than the codec holds, never a boolean, and never a column of
+no declared type — except a foreign key no property declares, which compares as
+the key it references. SQLite compares a string column with an integer one by
+affinity, pairing `'1'` with `1`, and PostgreSQL has no such operator
+(`JD2005`), where the engine pairs nothing. And the two sides are not both able
+to read a NULL as a present `null`: a column whose policy is `null: 'null'`
+gives the engine a `null` it equates with another, and SQL pairs none. A NULL
+that reads back as no member (every store-owned column, and an adopted one
+declared `null: 'absent'`) is an empty sequence in the engine and an unknown in
+SQL, which pair alike, so a nullable member still joins natively against a key
+or against another nullable member. An equality that fails the rule is no edge:
+a binding it alone would connect is in the same case as a binding nothing joins
+to (`entity.joinKey`), and beside a real edge it is a conjunct that belongs to
+no binding (`entity.conjunctBinding`). The comparisons that refine an edge —
+`$ne`, `$lt` and the rest between two columns — and a hop's correlation follow
+the same family rule and refuse any column that can read a NULL, in either way,
+since a difference of a `null` is true in the engine and unknown in SQL.
+
+An unordered grouping of the rows of a join (`$groupby` over two or more
+bindings) lowers on SQLite to one statement. The join is a derived table that
+numbers its rows in the engine's nested-loop order — every binding's physical
+key columns, or its row identity, in binding order — so a group comes out where
+its first row does, whatever the keys of its bindings are; the statement groups
+the keys' value/type pairs and orders them by the least number of each group. A
+key or an aggregate reads either binding, and `$count` of any binding is the
+number of the group's rows. The derived table is named so that no table name
+prefixes it in a scan narrative, and the profile's predicates and a
+`refuseFullScan` check read the one statement as they read a join. Only the
+groups in that order lower: an ordered grouping, a window over groups, the
+nullable form of a sum and a return that reads a whole binding stay in the
+engine, as do a floating sum or average, a date-codec key or aggregate, and a
+sum, mean, extreme or ordering over a column that reads a NULL as a `null` or
+stores a boolean (§10.6); such a column as a group KEY lowers. On PostgreSQL the
+engine groups a join of any layout (`bind.entityGrouping`).
 
 A navigation hop (§10.1) is a join's correlated cousin: it never multiplies
 the outer rows, only filters, counts or decorates the row it hangs from, so
@@ -3381,20 +3423,24 @@ a number appears only where `capabilities.rowEstimates` is filled):
 
 - a binding nothing joins to — the cartesian product a nested-loop plan
   must never emit by accident; every binding past the first attaches by
-  a column equality to one already joined, and a graph that does not
-  close is the engine's;
-- a non-equality predicate used as the only join anchor, or a boolean
-  predicate whose individual leaf cannot be assigned to one binding;
+  a column equality to one already joined (an edge, §10.2: one stored
+  comparison family, no boolean, not two columns that read a NULL as a
+  `null`), and a graph that does not close is the engine's;
+- a non-equality predicate used as the only join anchor, an equality that is
+  no edge beside a real one, or a boolean predicate whose individual leaf
+  cannot be assigned to one binding;
 - collection grouping with untyped keys, row-binding returns, or ordering by
   anything except an orderable key or a count, minimum, maximum, integer sum
-  or integer average expression; entity grouping over more than one binding,
-  over a floating or date-codec aggregate, or over a compound physical key
-  whose order leaves two groups tied (`entity.groupOrder`), and, on
-  PostgreSQL, over a store-owned table (`bind.entityGrouping`); aggregates
-  over groups beyond a count of singleton constructors containing keys,
-  literals and row counts; windows over group returns that may omit an item,
-  and over groups ordered by an integer sum or average
-  (`plan.windowedAccumulation`);
+  or integer average expression; entity grouping over a floating sum or
+  average or a date-codec key or aggregate, over an aggregate or an ordered
+  key that reads a NULL as a present `null` or that stores a boolean, over a
+  join that is ordered, windowed, returns the nullable form of a sum or reads
+  a whole binding, or over one binding's compound physical key whose order
+  leaves two groups tied (`entity.groupOrder`), and, on PostgreSQL, over a
+  store-owned table or any join (`bind.entityGrouping`); aggregates over
+  groups beyond a count of singleton constructors containing keys, literals
+  and row counts; windows over group returns that may omit an item, and over
+  groups ordered by an integer sum or average (`plan.windowedAccumulation`);
 - projection trees containing operators, whole entity binding references or
   non-singular paths; windows over those opaque projections;
 - a navigation hop out of shape (`entity.hopShape`): a hop out of a hop,
@@ -3406,6 +3452,11 @@ a number appears only where `capabilities.rowEstimates` is filled):
   equalities do not cover the related entity's declared key, or that
   returns the binding itself: where one related row is not guaranteed the
   engine raises (`JQ2005`, `JQ2001`), so it keeps the error (§10.1);
+- a statement that must order a table's rows, over a table that takes every
+  spelling of SQLite's row identity (`rowid`, `oid` and `_rowid_`) as a column
+  (`bind.identity`): the database resolves a name to a column before it
+  resolves it to the row, so no spelling is left that reads the insertion
+  order; a table that takes fewer reads the first it leaves free;
 - `$distinct` over untyped/compound projections or ordering by other paths;
   typed scalar projections lower when unordered or ordered solely by the
   projected path, preserving first occurrence or that declared order;
@@ -3496,7 +3547,9 @@ orders its tied groups by the smallest key tuple, which the minima of the
 key columns taken one by one do not give: one whose order leaves two groups
 tied — no order, an aggregate, a key left out — is the engine's
 (`entity.groupOrder`), and an order that names every group key ranks every
-pair of groups apart and lowers. The runtime guards of an entity grouping
+pair of groups apart and lowers. A grouping over a join takes the first
+appearance from the number of its rows (§10.2), which orders by every key
+column of every binding, so a compound key needs no such refusal there. The runtime guards of an entity grouping
 (`_safe`, `_valid`) are qualified on SQLite and over a PostgreSQL table with
 no document column, an adopted one; a store-owned PostgreSQL table plans the
 set residual under `bind.entityGrouping`. An entity grouping under a window

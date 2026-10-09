@@ -154,9 +154,9 @@ export const PLAN_VERSION = 2;
  * @typedef {{ ref: PlanRef, desc: boolean, emptyGreatest: boolean,
  *   hop?: PlanHop }} PlanOrderTerm
  *
- * @typedef {{ keys: { as: string, ref: PlanRef }[],
+ * @typedef {{ keys: { as: string, ref: PlanRef, binding?: string }[],
  *   aggregates: { as: string, fn: 'rows' | 'sum' | 'avg' | 'min' | 'max',
- *     ref: PlanRef | null, empty: 'zero' | 'omit' | 'null' }[],
+ *     ref: PlanRef | null, empty: 'zero' | 'omit' | 'null', binding?: string }[],
  *   tree: PlanProjectionNode,
  *   order: 'first-seen' | { index?: number, aggregate?: number,
  *     desc: boolean, nullsFirst: boolean }[]
@@ -168,7 +168,9 @@ export const PLAN_VERSION = 2;
  *   whose member is omitted, which SQL's `NULL` alone could not say) and
  *   an `agg` node reads one aggregate under its `empty` rule. `order` is
  *   `'first-seen'`, the engine's own order of first appearance, or the
- *   group-key ordering an `$orderby` declared. A plan carrying a group
+ *   group-key ordering an `$orderby` declared. Over a join a key or an
+ *   aggregate names the `binding` it reads (the one binding otherwise), and
+ *   only `'first-seen'` is planned. A plan carrying a group
  *   carries no `bucket` or `rank`. A `count` aggregate may wrap a
  * singleton group constructor, counting groups through a subquery.
  *

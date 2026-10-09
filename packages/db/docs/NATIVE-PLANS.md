@@ -39,7 +39,31 @@ inner returns remain residual. Mandatory profile filters
 apply to correlated roots too. Scalar column projections preserve declared NULL
 policies. Codecs needing transformed representations remain decoded-row work.
 
-Grouping is restricted to one root and reconstructible keys/aggregates. A nullable
+A join pairs rows by equalities between mapped columns, and only where the
+database pairs them as the engine does: both columns of ONE comparison family —
+the family the column stores and the engine decodes, never a union's first type
+nor a schema type that claims another kind than the codec holds (a number
+against an integer, a string against a string) — neither a boolean, and not both
+able to read a NULL as a present `null`, which the engine equates with another
+and SQL does not. A NULL that reads back as no member pairs alike in both, so a
+nullable member still joins natively against a key or against another nullable
+member. A foreign key no property declares compares as the key it references. An
+equality that fails the rule is no edge: a root it alone would connect is a
+product the engine builds, and beside a real edge it is a conjunct the engine
+decides. The comparisons that refine an edge, and a hop's correlation, follow
+the family rule and refuse any column that can read a NULL.
+
+Grouping lowers over one root, or on SQLite, unordered, over a connected join of
+roots, with reconstructible keys/aggregates. A join is grouped through a derived
+table that numbers its rows in the engine's nested-loop order, every root's
+identity in binding order, so a group comes out where its first row does; keys
+and aggregates read either root, and a count of any root is the count of the
+group's rows. Only the groups in that order lower there: an ordered grouping, a
+window over groups, the nullable form of a sum and a return that reads a whole
+root stay in the engine. A sum, mean or extreme over a column whose NULL reads
+back as a present `null` or that stores a boolean, and a grouping ordered by
+such a key, stay in the engine, which refuses the `null` or the boolean where
+SQL skips, folds or orders it. A nullable
 SQL sum needs an explicit query expression: test existence of non-null values,
 then sum those values, otherwise return literal null. An ordinary JSON sum over
 an empty sequence remains zero, beside the nullable form of the same sum in one
@@ -74,8 +98,8 @@ their first appearance, and a group past the bound sends the call to the
 engine. A floating one stays in the engine, and so does a window over groups
 ordered by either (`plan.windowedAccumulation`), because the bound of a group
 the window leaves out is never read. On PostgreSQL an entity grouping lowers
-over an adopted table with no document column; over a store-owned table the
-engine groups (`bind.entityGrouping`). An entity ordering over a
+over one adopted table with no document column; over a store-owned table, and
+over any join, the engine groups (`bind.entityGrouping`). An entity ordering over a
 document member reads it as its declared type, so a number orders numerically on
 PostgreSQL as on SQLite, in a query's `$orderby`, a load's include and a root
 load alike; a member declared with more than one type orders in the engine (a

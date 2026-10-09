@@ -567,6 +567,75 @@ the query engine, now refuse by code or answer what the engine answers:
   its projected path, ordered a number by its digits (`10, 100, 2, 9`) and a
   string by the database's collation; the key is read at its own kind for the
   order now, so a number orders by value and a string by code point.
+- A join's equality between two entity columns was an edge whatever the
+  columns held. A string column against an integer one paired by SQLite's
+  affinity (`'1'` with `1`) where the query engine pairs nothing, PostgreSQL
+  refused it (`JD2005`, `operator does not exist: text = numeric`), a column
+  whose property is a union of kinds (`['integer', 'string']` over a text
+  column), or whose schema type is not what its codec stores (an `integer` over
+  a text column), joined an integer column the same way, and two adopted
+  columns that read a NULL as a present `null` (`null: 'null'`) paired nothing
+  in SQL where the engine equates the nulls. An equality is an edge now only
+  between mapped columns of ONE comparison family — the family the column
+  stores and the engine decodes — neither a boolean, and not two columns that
+  can each read a NULL as a present `null`. A nullable member whose NULL reads
+  back as no member (every store-owned column, and an adopted one declared
+  `null: 'absent'`) still joins natively, against a key or against another such
+  member; a foreign key no property declares compares as the key it references.
+  Any other equality runs in the engine and answers what the engine answers
+  (`entity.joinKey` when it alone would connect a binding,
+  `entity.conjunctBinding` beside a real edge; `JD0010` under strict mode),
+  among them a column whose property declares no type, which joined natively
+  while it was paired by text and now does not. The comparisons that refine an
+  edge (`$ne`, `$lt` and the rest between two columns) and a navigation hop's
+  correlation follow the same family rule, and refuse a column that can read
+  any NULL; a refinement over a column that reads a NULL as a `null` runs in
+  the engine too, where SQLite dropped the rows the engine's difference of a
+  `null` keeps.
+- A join the planner no longer takes does not maintain a live view incrementally
+  any more: the view of a join over an equality that is no edge re-runs on
+  invalidation (`live.mode` is `rerun`, naming the reason), fetching both tables
+  whole for each read, and `mode: 'incremental'` over it is `JD0051`; the
+  equality of a nullable foreign key against its key stays maintained
+  (LIVE-FORMAT §7).
+- An unordered entity grouping over a connected join of two or more bindings ran
+  in the engine (`entity.projection`) and lowers now on SQLite to one statement
+  over a derived table of the join: the groups come out in the engine's order of
+  first appearance, keys and aggregates read either binding, and a group past an
+  integer sum's bound answers the call from the engine, as for one binding. On
+  PostgreSQL a join of any layout is grouped by the engine
+  (`bind.entityGrouping`, `JD0010` under strict mode); an ordered grouping, a
+  window over groups, the nullable form of a sum and a return that reads a whole
+  binding stay in the engine everywhere.
+- A grouped `$sum`, `$avg`, `$min` or `$max` over an entity column whose NULL
+  reads back as a present `null` skipped the NULL on SQLite where the engine
+  refuses the sequence (`JQ2001`), and a grouping ordered by such a key ordered
+  the `null` group where the engine refuses to order a `null` (`JQ2005`). Both
+  run in the engine now (`entity.projection`, `JD0010` under strict mode) and
+  raise what it raises.
+- A column that stores a boolean while its property claims another type (a
+  string over a `boolean` codec) was ordered and folded as 0/1 by an entity
+  `$orderby`, by the ordering of groups and by a grouped `$min` or `$max`, where
+  the engine refuses a boolean (`JQ2005`, `JQ2001`). They run in the engine now,
+  as they always did for a property that claims a boolean.
+- A live query over an entity grouping was registered as an incremental join,
+  and once a group held several rows it drifted from a fresh run (after one
+  insert it held `[{ a: 'u1', n: 1 }, { a: 'u1', n: 1 }]` where `execute`
+  answered `{ a: 'u1', n: 2 }`). It re-runs on invalidation now: `live.mode` is
+  `rerun` (LIVE-FORMAT §7). `mode: 'incremental'` over any entity grouping,
+  which was accepted and drifted, is `JD0051` naming the reason.
+- A member of an entity named `rowid`, `oid` or `_rowid_` (in any case) shadowed
+  that spelling of SQLite's row identity: the statements that order a table's
+  rows by it read the member's values, not the insertion order. A join, a fetch
+  and a load came in the member's order, and rows that tied on it came out in
+  another order from a native join than from the engine, so an ungrouped join
+  answered differently from `pushdown: false`. Those statements read the first
+  of the three spellings the table does not name now, which is the insertion
+  order, so the join, the fetch and the load agree again and a table that held
+  such a member answers its ungrouped joins in insertion order from this
+  release. A table that names all three has no spelling left: a query that must
+  order its rows runs in the engine (`bind.identity`, `JD0010` under strict
+  mode).
 
 ## 8. Stricter models, keys and staged writes
 

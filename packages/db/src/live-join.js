@@ -87,6 +87,7 @@ export function classifyEntityLive(document, entities, mapping, operators) {
   const plan = planned.plan;
   if (plan.window !== null) return rerun('an entity offset or limit window re-runs');
   if (plan.aggregate !== null) return rerun('an entity aggregate has no bounded tuple accumulator');
+  if (plan.group !== null) return rerun('an entity grouping has no bounded tuple accumulator');
   if (plan.order !== null) return rerun('an explicitly ordered entity join has no maintained ordering');
   // The evaluated document reads each binding from an input member: an
   // entity's first binding from the entity's own, every later alias of it

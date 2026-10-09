@@ -210,9 +210,14 @@ const ENTITY_REASONS = {
   scalarAggregate: 'native scalar aggregation requires a scalar physical projection; sums and averages require exact integer accumulation',
   notFlwor: 'only a FLWOR over entity arrays is translated',
   bindingRoot: 'bindings must each range over one declared entity array ($.Entity[*])',
-  joinKey: 'every binding past the first needs a column equality to one already joined — '
-    + 'a binding nothing connects is a cartesian product, which is engine work',
-  conjunctBinding: 'a conjunct must belong to one binding (or be the single join equality)',
+  joinKey: 'every binding past the first needs a column equality to one already joined, between '
+    + 'mapped columns of one comparison family that the engine and the database pair alike (not a '
+    + 'boolean, not columns that store another kind than their type claims, not two columns that '
+    + 'can each read a NULL as a null) — a binding nothing connects is a cartesian product, which '
+    + 'is engine work',
+  conjunctBinding: 'a conjunct must belong to one binding (or be the single join equality, or a '
+    + 'comparison between mapped columns of one comparison family that the engine and the database '
+    + 'decide alike)',
   external: 'externals compare only against entity columns in this version',
   booleanList: 'a bound membership list compares its strings and numbers; against a boolean column '
     + 'its items compare in the engine',
@@ -284,6 +289,24 @@ function admitsNull(schema, segments) {
   return Array.isArray(node?.type) && node.type.includes('null');
 }
 
+/**
+ * How a reference reads a null the database holds, the one question every
+ * rule about nulls asks: `'present'` when it reads back as a `null` member
+ * (a column whose policy says so, whatever its schema type; a document
+ * member whose type admits one), `'absent'` when it reads back as no member
+ * at all (a column of any other policy whose type admits `null`: the engine
+ * sees an empty sequence, as SQL sees an unknown), `'none'` when it holds
+ * none.
+ * @param {any} ref
+ * @param {any} schema
+ * @returns {'present' | 'absent' | 'none'}
+ */
+function nullReading(ref, schema) {
+  if (ref.nullPolicy === 'null') return 'present';
+  if (!admitsNull(schema, ref.segments)) return 'none';
+  return ref.flavor === 'entity-column' || ref.flavor === 'entity-epoch' ? 'absent' : 'present';
+}
+
 /** Whether a schema node admits values of more than one comparable kind
  * (`['integer', 'string']`; `integer` and `number` are one kind). The
  * planner types such a member by its first type, so SQL would order the
@@ -347,11 +370,18 @@ function unpinnedStep(schema, segments) {
   });
 }
 
+/** Whether a reference holds a boolean: by its schema type, or by what its
+ * column stores, whatever the schema claims of it. A boolean orders as 0/1
+ * and folds as a number in SQL, and is `JQ2005`/`JQ2001` in the engine. */
+function holdsBoolean(ref) {
+  return ref.type === 'boolean' || ref.storage === 'boolean';
+}
+
 /** Whether a typed reference orders natively: numbers and strings of one
- * type that cannot hold a null. A boolean orders as 0/1 in SQL and is
- * `JQ2005` in the engine. */
+ * type that cannot hold a null — in its schema type, or by its column's
+ * policy, which reads a NULL back as a present `null` — and no boolean. */
 function orderable(ref, schema) {
-  return ref.type !== 'unknown' && ref.type !== 'boolean' && !admitsNull(schema, ref.segments)
+  return ref.type !== 'unknown' && !holdsBoolean(ref) && nullReading(ref, schema) === 'none'
     && !admitsMixedTypes(schema, ref.segments);
 }
 
@@ -1371,6 +1401,9 @@ export const PLANNER_REASONS = Object.freeze({
   // the sentence itself is the dialect's, raised where the path is
   // spelled; the vocabulary claims its stable opening
   'bind.path': { prefix: 'a member name the dialect' },
+  // likewise raised where the order is spelled: a table naming every
+  // spelling of the row identity as a column
+  'bind.identity': { prefix: 'a table with columns named rowid' },
 });
 
 /**
@@ -2634,21 +2667,31 @@ function planSeriesOperator(root, shape) {
  *   `$sum` are `0`, the other three are the empty sequence and their
  *   member is omitted. SQL answers `NULL` for all of them, so the
  *   mapping rides the plan.
+ *
+ * Over a join (`owners`, the bindings by slot) a key or an aggregate reads
+ * the binding its path starts at, and records it; `$count` of any binding
+ * is the tuple count. Only the groups in the order the engine meets them
+ * are planned there: the rows of a join come out of a derived table that
+ * numbers them in the nested-loop order, and an ordering, or the one form
+ * of a sum that tests the group's own rows, keeps the engine.
  * @param {any} node - the FLWOR node
  * @param {number} itSlot
  * @param {any} shape
+ * @param {(node: any, slot: number, shape: any) => any} [resolve]
+ * @param {Map<number, any> | null} [owners]
  * @returns {any | null}
  */
-function planGeneralGrouping(node, itSlot, shape, resolve = pathRef) {
+function planGeneralGrouping(node, itSlot, shape, resolve = pathRef, owners = null) {
+  if (owners !== null && node.orderby !== null) return null;
   const keys = [];
   /** @type {Map<number, number>} */
   const keySlot = new Map();
   for (const key of node.groupby.keys) {
-    const ref = resolve(key.expr, itSlot, shape);
-    if (ref === null || ref.type === 'unknown')
+    const read = groupedPath(key.expr, itSlot, shape, resolve, owners);
+    if (read === null || read.ref.type === 'unknown')
       return null;
     keySlot.set(key.slot, keys.length);
-    keys.push({ as: key.name, ref });
+    keys.push({ as: key.name, ref: read.ref, ...(read.binding === undefined ? {} : { binding: read.binding }) });
   }
   const aggregates = [];
   /** @type {Map<string, number>} */
@@ -2659,12 +2702,13 @@ function planGeneralGrouping(node, itSlot, shape, resolve = pathRef) {
     if (child.kind === 'var' && child.external !== true && keySlot.has(child.slot))
       return { p: 'key', index: keySlot.get(child.slot) };
     if (child.kind === 'op') {
-      const entry = groupAggregate(child, itSlot, shape, resolve);
+      const entry = groupAggregate(child, itSlot, shape, resolve, owners);
       if (entry === null) return null;
-      // one aggregate per distinct (function, empty answer, path): two
-      // members that ask the same question are one SQL aggregate, and a sum
-      // that is `null` over no values is not the sum that is `0`
-      const identity = `${entry.fn}:${entry.empty}:${entry.ref === null ? '' : canonicalOf(entry.ref.segments)}`;
+      // one aggregate per distinct (function, empty answer, binding, path):
+      // two members that ask the same question are one SQL aggregate, a sum
+      // that is `null` over no values is not the sum that is `0`, and the
+      // same member of two bindings is two questions
+      const identity = `${entry.fn}:${entry.empty}:${entry.binding ?? ''}:${entry.ref === null ? '' : canonicalOf(entry.ref.segments)}`;
       let index = byAggregate.get(identity);
       if (index === undefined) {
         index = aggregates.length;
@@ -2712,12 +2756,14 @@ function planGeneralGrouping(node, itSlot, shape, resolve = pathRef) {
  * @param {any} node - an `op` node
  * @param {number} itSlot
  * @param {any} shape
- * @returns {{ as: string, fn: string, ref: any, empty: string } | null}
+ * @param {(node: any, slot: number, shape: any) => any} [resolve]
+ * @param {Map<number, any> | null} [owners] - the bindings of a join, by slot
+ * @returns {{ as: string, fn: string, ref: any, empty: string, binding?: string } | null}
  */
-function groupAggregate(node, itSlot, shape, resolve = pathRef) {
+function groupAggregate(node, itSlot, shape, resolve = pathRef, owners = null) {
   // SQL's nullable sum is authored explicitly: test for any non-null
   // values, sum exactly that sequence, otherwise return a literal null.
-  if (node.name === '$if' && node.args[0]?.name === '$exists'
+  if (owners === null && node.name === '$if' && node.args[0]?.name === '$exists'
     && node.args[1]?.name === '$sum' && node.args[2]?.kind === 'literal' && node.args[2].value === null) {
     const filtered = (phrase) => {
       if (phrase?.kind !== 'flwor' || phrase.forBindings.length !== 1 || phrase.letBindings.length
@@ -2739,22 +2785,51 @@ function groupAggregate(node, itSlot, shape, resolve = pathRef) {
       ? { fn: 'sum', ref: sum, empty: 'null' } : null;
   }
   if (node.name === '$count') {
-    return isItVar(node.args[0], itSlot)
+    // every tuple of a group holds one row of each binding, so the count of
+    // any binding is the count of the group's rows
+    return (owners === null ? isItVar(node.args[0], itSlot)
+      : node.args[0].kind === 'var' && node.args[0].external !== true && owners.has(node.args[0].slot))
       ? { fn: 'rows', ref: null, empty: 'zero' } : null;
   }
   const fn = AGGREGATES.get(node.name);
   if (fn === undefined || fn === 'count') return null;
-  const ref = resolve(node.args[0], itSlot, shape);
+  const read = groupedPath(node.args[0], itSlot, shape, resolve, owners);
   const numeric = fn === 'sum' || fn === 'avg';
   // a member of two types folds as its first in SQL, where the engine
-  // refuses the mixed sequence (`JQ2001`)
-  const acceptable = ref !== null
-    && (numeric ? isNumericType(ref.type) : ref.type !== 'unknown')
-    && ref.type !== 'boolean' && !admitsNull(shape.schema, ref.segments)
-    && !admitsMixedTypes(shape.schema, ref.segments);
+  // refuses the mixed sequence (`JQ2001`); a column that reads a NULL as a
+  // present `null` is a sequence holding one, which SQL skips and the
+  // engine refuses the same way
+  const acceptable = read !== null
+    && (numeric ? isNumericType(read.ref.type) : read.ref.type !== 'unknown')
+    && !holdsBoolean(read.ref) && nullReading(read.ref, read.shape.schema) === 'none'
+    && !admitsMixedTypes(read.shape.schema, read.ref.segments);
   if (!acceptable) return null;
   // what an aggregate over NO values says, in the ENGINE's words
-  return { fn, ref, empty: fn === 'sum' ? 'zero' : 'omit' };
+  return { fn, ref: read.ref, empty: fn === 'sum' ? 'zero' : 'omit',
+    ...(read.binding === undefined ? {} : { binding: read.binding }) };
+}
+
+/**
+ * The member path a grouping reads, resolved on the binding it starts at:
+ * the one grouped binding, or — over a join, where `owners` maps each
+ * binding's slot — whichever binding its root names, recorded by name.
+ * `null` when the node is not a path the plan can resolve there.
+ * @param {any} expr
+ * @param {number} itSlot
+ * @param {any} shape
+ * @param {(node: any, slot: number, shape: any) => any} resolve
+ * @param {Map<number, any> | null} owners
+ * @returns {{ ref: any, shape: any, binding?: string } | null}
+ */
+function groupedPath(expr, itSlot, shape, resolve, owners) {
+  if (owners === null) {
+    const ref = resolve(expr, itSlot, shape);
+    return ref === null ? null : { ref, shape };
+  }
+  const owner = expr.kind === 'path' ? owners.get(expr.rootSlot) : undefined;
+  if (owner === undefined) return null;
+  const ref = resolve(expr, owner.slot, owner.shape);
+  return ref === null ? null : { ref, shape: owner.shape, binding: owner.name };
 }
 
 /**
@@ -3461,7 +3536,7 @@ function planCollectionPhrase(document, analysis, shape, options) {
       || aggregate.fn === 'registered';
     const acceptable = ref !== null
       && (numeric ? isNumericType(ref.type) : ref.type !== 'unknown')
-      && ref.type !== 'boolean' && !admitsNull(shape.schema, ref.segments)
+      && !holdsBoolean(ref) && nullReading(ref, shape.schema) === 'none'
       && !admitsMixedTypes(shape.schema, ref.segments);
     if (!acceptable) {
       return collectionResult(analysis, null, 'set', [refusal(aggregate.name, PLAN_REASONS.aggregatePath)]);
@@ -3666,7 +3741,7 @@ export function entityShape(entity, entityMapping) {
   for (const fk of entityMapping.foreignKeys) {
     const fkCanonical = canonicalOf([{ name: fk.column }]);
     if (!flavors.has(fkCanonical))
-      flavors.set(fkCanonical, { column: fk.column, flavor: 'entity-column', storage: fk.referencesType });
+      flavors.set(fkCanonical, { column: fk.column, flavor: 'entity-column', storage: fk.referencesType, foreignKey: true });
   }
   return {
     collection: entity.name,
@@ -3747,10 +3822,6 @@ function planHop(inner, outer, entities, mapping) {
     const cross = conjunct.kind === 'op' && conjunct.name === '$eq'
       ? crossBindingComparison(conjunct, scope) : null;
     if (cross !== null && (cross.left.binding === binding || cross.right.binding === binding)) {
-      // a column whose NULL reads back as a present `null` pairs, in the
-      // engine, with a `null` and, in SQL, with nothing — whatever the
-      // schema says of its type
-      if (cross.left.ref.nullPolicy === 'null' || cross.right.ref.nullPolicy === 'null') return null;
       edges.push({ left: { binding: cross.left.binding.name, ref: cross.left.ref },
         right: { binding: cross.right.binding.name, ref: cross.right.ref } });
       continue;
@@ -3950,22 +4021,63 @@ function entityProjectionTree(node, byName, entities, mapping) {
   return tree === null ? { blocked: blocked ?? ENTITY_REASONS.projection } : { tree, leaves };
 }
 
+/** The family of value each storage class of a mapped column compares as in the database. */
+const STORED_FAMILIES = new Map([['integer', 'number'], ['number', 'number'], ['string', 'string']]);
+
+/**
+ * The one comparison family a mapped column has — what the database
+ * compares and what the engine compares — or `null` when it has none that
+ * both agree on: a boolean; a column whose property is a union of kinds
+ * (the schema's first type is a claim about one of them, the column stores
+ * another); a column whose schema type is not the family its storage holds
+ * (an `integer` over a text column); a column of no declared type, except a
+ * foreign key no property declares when `undeclaredKeys` is set, which has
+ * the family of the key it references, the type its column stores and the
+ * type of the member the engine's documents carry for it.
+ * @param {any} binding
+ * @param {any} ref
+ * @param {boolean} undeclaredKeys
+ * @returns {'number' | 'string' | null}
+ */
+function columnFamily(binding, ref, undeclaredKeys) {
+  if (ref === null || ref.flavor !== 'entity-column' || ref.mixed === true) return null;
+  const stored = STORED_FAMILIES.get(ref.storage);
+  if (stored === undefined) return null;
+  if (ref.type === 'unknown') {
+    return undeclaredKeys && binding.shape.entityFlavors.get(canonicalOf(ref.segments))?.foreignKey === true
+      ? /** @type {'number' | 'string'} */ (stored) : null;
+  }
+  return (isNumericType(ref.type) ? 'number' : ref.type) === stored ? /** @type {'number' | 'string'} */ (stored) : null;
+}
+
 /**
  * A comparison whose two sides are member paths on DIFFERENT bindings,
- * as a join refinement — or `null` when it is not one this plan can
- * prove. Both sides must be mapped columns of the same comparison
- * family: SQL compares by column affinity where the engine compares by
- * JSON type, so a string column against a number column would answer
- * differently on the two sides, and a column that admits `null` would
- * make the comparison neither true nor false where the engine has an
- * answer. An epoch column is refused too — it stores an integer beside
- * a document string the engine reads, and the two need not order alike
- * across mixed stored precisions.
+ * as a join edge (`edge`: an equality that attaches a binding), a
+ * refinement or a hop's correlation — or `null` when it is not one this
+ * plan can prove. Both sides must be mapped columns of the same comparison
+ * family ({@link columnFamily}): SQL compares by what a column stores, the
+ * engine by JSON type, so a string column against a number column would
+ * answer differently on the two sides (SQLite pairs `'1'` with `1`,
+ * PostgreSQL has no such operator), and a schema that claims another kind
+ * than the column holds would hide it.
+ *
+ * Nulls decide the rest. A column whose policy reads a NULL back as a
+ * present `null` ({@link nullReading}) gives the engine a `null` it equates
+ * with another and differs from every other value, where SQL does neither.
+ * A column whose NULL reads back as no member gives the engine an empty
+ * sequence, which compares like SQL's unknown. So an equality that
+ * attaches a binding is refused only when BOTH sides can read a present
+ * `null` (the engine pairs them, SQL pairs none); a refinement or a hop
+ * correlation refuses any side that can read one, in either way.
+ * An epoch column is refused too — it stores an integer beside a document
+ * string the engine reads, and the two need not order alike across mixed
+ * stored precisions.
  * @param {any} node - an `op` node whose name is a comparison
  * @param {Map<number, any>} byName - binding slot → binding
+ * @param {boolean} [edge] - the equality attaches a binding: it also reads an undeclared foreign key as the key it references and admits a column that can read an absent null
  * @returns {{ op: string, left: any, right: any } | null}
  */
-function crossBindingComparison(node, byName) {
+function crossBindingComparison(node, byName, edge = false) {
   const [left, right] = node.args;
   const leftBinding = left?.kind === 'path' ? byName.get(left.rootSlot) : undefined;
   const rightBinding = right?.kind === 'path' ? byName.get(right.rootSlot) : undefined;
@@ -3973,12 +4085,10 @@ function crossBindingComparison(node, byName) {
     || leftBinding === rightBinding) return null;
   const leftRef = entityPathRef(left, left.rootSlot, leftBinding.shape);
   const rightRef = entityPathRef(right, right.rootSlot, rightBinding.shape);
-  const usable = (binding, ref) => ref !== null && ref.flavor === 'entity-column'
-    && ref.type !== 'unknown' && ref.type !== 'boolean'
-    && !admitsNull(binding.shape.schema, ref.segments);
-  if (!usable(leftBinding, leftRef) || !usable(rightBinding, rightRef)) return null;
-  const family = (ref) => (isNumericType(ref.type) ? 'number' : ref.type);
-  if (family(leftRef) !== family(rightRef)) return null;
+  const family = columnFamily(leftBinding, leftRef, edge);
+  if (family === null || family !== columnFamily(rightBinding, rightRef, edge)) return null;
+  const reads = [nullReading(leftRef, leftBinding.shape.schema), nullReading(rightRef, rightBinding.shape.schema)];
+  if (edge ? reads.every((read) => read === 'present') : reads.some((read) => read !== 'none')) return null;
   return {
     op: COMPARISONS.get(node.name),
     left: { binding: leftBinding, ref: leftRef },
@@ -4288,8 +4398,9 @@ function planEntityQueryCore(document, entities, mapping, operators) {
   // a binding's predicates may read a related entity through a hop
   for (const binding of bindings)
     binding.shape.hop = (node) => planHopPredicate(node, binding, entities, mapping);
-  const group = root.groupby === null ? null : bindings.length === 1 && aggregate === null && !windows.length
-    ? planGeneralGrouping(root, bindings[0].slot, bindings[0].shape, entityPathRef) : null;
+  const group = root.groupby === null ? null : aggregate === null && !windows.length
+    ? planGeneralGrouping(root, bindings[0].slot, bindings[0].shape, entityPathRef,
+      bindings.length > 1 ? byName : null) : null;
   if (root.groupby !== null && group === null) return residual('$groupby', ENTITY_REASONS.projection);
   if (group && [...group.keys, ...group.aggregates].some((entry) => entry.ref && entry.ref.flavor !== 'entity-column'))
     return residual('$groupby', ENTITY_REASONS.projection);
@@ -4300,8 +4411,10 @@ function planEntityQueryCore(document, entities, mapping, operators) {
     return residual('$groupby', ENTITY_REASONS.projection);
   // Groups an order leaves tied come out by first appearance: over a compound
   // physical key that is the smallest key TUPLE, which the minima of the key
-  // columns taken one by one do not give.
-  if (group && !ranksGroupsApart(group) && entities.get(bindings[0].entity).physical?.keys.length > 1)
+  // columns taken one by one do not give. A join numbers its rows instead,
+  // by every binding's identity, so its first appearance is exact.
+  if (group && bindings.length === 1 && !ranksGroupsApart(group)
+    && entities.get(bindings[0].entity).physical?.keys.length > 1)
     return residual('$groupby', ENTITY_REASONS.groupOrder);
   const conjuncts = root.where === null
     ? []
@@ -4345,22 +4458,14 @@ function planEntityQueryCore(document, entities, mapping, operators) {
   let whereFullyPushed = true;
   for (const conjunct of conjuncts) {
     // a column equality between two bindings is a join edge, whatever
-    // the binding count — several between one pair simply conjoin
+    // the binding count — several between one pair simply conjoin — when
+    // the database pairs the rows as the engine does; any other equality
+    // is no edge, and falls to the conjunct rules below
     if (bindings.length > 1 && conjunct.kind === 'op' && conjunct.name === '$eq') {
-      const [left, right] = conjunct.args;
-      const leftBinding = left.kind === 'path' ? byName.get(left.rootSlot) : undefined;
-      const rightBinding = right.kind === 'path' ? byName.get(right.rootSlot) : undefined;
-      if (leftBinding !== undefined && rightBinding !== undefined
-        && leftBinding !== rightBinding) {
-        const leftRef = entityPathRef(left, left.rootSlot, leftBinding.shape);
-        const rightRef = entityPathRef(right, right.rootSlot, rightBinding.shape);
-        if (leftRef?.flavor === 'entity-column' && rightRef?.flavor === 'entity-column') {
-          edges.push({
-            left: { binding: leftBinding, ref: leftRef },
-            right: { binding: rightBinding, ref: rightRef },
-          });
-          continue;
-        }
+      const edge = crossBindingComparison(conjunct, byName, true);
+      if (edge !== null) {
+        edges.push({ left: edge.left, right: edge.right });
+        continue;
       }
     }
     // a cross-binding comparison that is not an equality: a refinement
@@ -4497,9 +4602,8 @@ function planEntityQueryCore(document, entities, mapping, operators) {
       // admits null stores a present null (a COLUMN stores it absent,
       // §9.3, so a nullable column pushes)
       if (ref === null || (ref.flavor === 'entity-doc' && ref.type === 'unknown')
-        || ref.type === 'boolean'
-        || ref.nullPolicy === 'null'
-        || (ref.flavor === 'entity-doc' && admitsNull(binding.shape.schema, ref.segments))
+        || holdsBoolean(ref)
+        || nullReading(ref, binding.shape.schema) === 'present'
         || admitsMixedTypes(binding.shape.schema, ref.segments)
         || spec.collation !== null || spec.collationName !== null) {
         orderPushed = false;

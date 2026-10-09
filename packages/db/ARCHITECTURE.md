@@ -539,8 +539,10 @@ mode, `knn`, beside native, row and set.
 | `$let` bindings, `$fold`, positional/window bindings | no equivalence proof exists yet; residual by default |
 | a `$groupby` whose key is untyped, whose `$return` reads the binding, or whose `$orderby` names anything but an orderable key, a count/min/max or an integer sum/avg | SQL's grouping and the engine's need not agree on an untyped key; after a grouping the binding holds the group's ROWS, which an object member cannot take; a floating sum or average accumulates in the engine's order (`plan.floatingAccumulation`) |
 | a window over a group return that may omit an item, or over groups ordered by an integer sum/avg (`plan.windowedAccumulation`), or a group aggregate beyond the proven constructor count | SQL group cardinality must equal the projected item cardinality; the exactness guard beside a sum is read on the groups a statement returns, not on those a window leaves out; numeric and error semantics need their own proof |
-| an entity grouping over a compound physical key whose order leaves two groups tied (`entity.groupOrder`), or over a store-owned PostgreSQL table (`bind.entityGrouping`) | tied groups come out by first appearance, the smallest key TUPLE, which the minima of the key columns taken one by one do not give; the runtime guards (`_safe`, `_valid`) are qualified on SQLite and over an adopted PostgreSQL table with no document column |
-| a `$for` binding nothing joins to — a cartesian product | the engine builds the product; a plan that emitted one by accident is the thing an equi-join graph exists to prevent |
+| an entity grouping over a compound physical key whose order leaves two groups tied (`entity.groupOrder`), over a store-owned PostgreSQL table or any join on PostgreSQL (`bind.entityGrouping`), or over a join that is ordered, windowed, returns the nullable form of a sum or reads a whole binding | tied groups come out by first appearance, the smallest key TUPLE, which the minima of the key columns taken one by one do not give; the runtime guards (`_safe`, `_valid`) are qualified on SQLite and over one adopted PostgreSQL table with no document column; a join's groups come out by the number of their first row, which an ordering has not been proven to leave alone |
+| an entity grouping that sums, averages or takes an extreme of a column whose NULL reads back as a present `null` or that stores a boolean, or orders its groups by such a key | the engine refuses a sequence holding a `null` or a boolean (`JQ2001`, `JQ2005`) where SQL skips, folds or orders it |
+| a `$for` binding nothing joins to — a cartesian product — or one a column equality connects only across comparison families (or a union, or a schema type the codec does not hold), over a boolean, over a column of no declared type, or between two columns that can each read a NULL as a `null` | the engine builds the product; a plan that emitted one by accident is the thing an equi-join graph exists to prevent; SQL pairs `'1'` with `1` by affinity (PostgreSQL has no such operator) and pairs no `null` with another, where the engine pairs none and equates the nulls |
+| a statement that must order a table's rows, over a table that takes every spelling of SQLite's row identity (`rowid`, `oid` and `_rowid_`) as a column (`bind.identity`) | the database resolves a name to a column before it resolves it to the row, so no spelling is left that reads the insertion order |
 | non-singular path expansion | one relation per binding in this version |
 | an entity navigation hop that is chained, ordered or grouped inside, correlated by an inequality, or by equalities across comparison families or over members that admit `null` in their type or their column's policy (`entity.hopShape`; an uncorrelated one in a `$where` is `entity.conjunctBinding`); a hop read as a value (order key, projection leaf) whose equalities do not cover the related entity's key (`entity.hopValue`) | SQL equates the string `"1"` with no integer where the engine does not, pairs no `null` with `null` where the engine pairs them, and a scalar subselect over two rows raises where the engine raises `JQ2005`/`JQ2001` itself — the shapes without the proof keep the engine's answer and its errors |
 | `$match` and other unlisted operators, `$call` | no native spelling proven equivalent |
@@ -1111,7 +1113,13 @@ recheck (mixed stored precisions can never diverge from the engine's
 codepoint order), and everything else rides the phase-A guarded truth
 table aliased per binding. Two-binding equijoins emit INNER JOIN with
 binding-order row-identity tiebreakers — exactly the engine's
-nested-loop order. A navigation hop — a plain FLWOR over another entity,
+nested-loop order. An equality is a join edge only between mapped columns of
+one comparison family — the family the column stores and the engine decodes —
+that are not both able to read a NULL as a present `null` (a join reads a
+foreign key no property declares as the key it references; a hop does not): SQL
+then pairs the rows the engine does. The refinements of an edge and a hop's
+correlation follow the family rule and refuse any column that can read a NULL.
+A navigation hop — a plain FLWOR over another entity,
 correlated with the row by column equalities of one comparison family that
 admit no null — is a correlated subselect of the same statement: `EXISTS`, `COUNT(*)`
 or a scalar read, in a predicate, a count or value leaf, an order key, or as
@@ -1124,7 +1132,11 @@ groups come out by the keys, the aggregates (an integer sum or average, a count,
 an extreme) and then the first row of each group; where the first row is a
 compound physical key it is a tuple no per-column minimum gives, so an order
 that leaves two groups tied keeps that grouping in the engine (MODEL-FORMAT
-§10.6). The graph loader compiles include trees to
+§10.6). A grouping over a join groups a derived table of the join that numbers
+its rows by every binding's identity in binding order, so the groups come out by
+the number of their first row — a tuple order the minima of key columns could
+not give — and only the unordered grouping lowers there; PostgreSQL leaves a
+join to the engine (`bind.entityGrouping`). The graph loader compiles include trees to
 correlated `json_group_array`/`json_object` subqueries: one statement
 per load, proven by a counting driver, never promised.
 

@@ -336,40 +336,46 @@ what each does is its own documentation's job
   1.2–1.5 ms each); one read per namespace would bound it.
 - [ ] **Pushdown beyond the proven scalar shapes.** Untyped group keys,
   group returns that read the grouped row binding, ordering by a floating
-  sum/avg or other unproven aggregate expressions, multi-root entity grouping
-  and floating numeric aggregates without a rounding proof still run in the
-  engine. One-root scalar grouping, guarded integer sums/counts and groups
-  ordered by an integer sum/avg now have native plans. A window over a group
-  return that can omit an item needs an output-cardinality proof, and a window
-  over groups ordered by an integer sum/avg needs the exactness guard read on
-  every group, not only on the returned ones (`plan.windowedAccumulation`); the
-  proven singleton constructors already lower. A grouping over a compound
-  physical key whose order leaves two groups tied runs in the engine
-  (`entity.groupOrder`): a group's first appearance is its smallest key tuple,
-  which per-column minima do not give. On PostgreSQL an entity grouping lowers
-  only over an adopted table with no document column; a store-owned table plans
-  the set residual (`bind.entityGrouping`) until its runtime guards are
-  qualified there. A comparison of two paths when either is not typed as a
-  scalar (an object, an array, a member with no type), an entity query's
-  comparison of two paths outside one non-null number/string family,
-  predicates whose individual leaves span bindings, and unlisted operators
-  remain residual. **Semantic boundary:** promotions must preserve missing/null,
-  first-occurrence order and engine errors under the indexed, unindexed and
-  forced-residual oracle. A disconnected binding graph remains a deliberate
-  cartesian-product refusal; removing that guard changes the join contract.
-  Two native entity equality joins already pair differently from the engine: over
-  a nullable member the database pairs no nulls where the engine pairs `null`
-  with `null` (a live registration follows `execute`), and between differently
-  typed columns (text `'7'` against integer `7`, `1` against `true`) SQLite's
-  affinity pairs rows the engine and the live strategies leave apart. Wanted: the
-  planner guards the pairs it cannot prove, or the join documents the database's
-  pairing as its contract.
+  sum/avg or other unproven aggregate expressions and floating numeric
+  aggregates without a rounding proof still run in the engine. One-root scalar
+  grouping, guarded integer sums/counts, groups ordered by an integer sum/avg
+  and, on SQLite, the unordered grouping of a connected join of roots now have
+  native plans; over a join of roots an ordered grouping, a window over its
+  groups, the nullable form of a sum and a return that reads a whole binding
+  still run in the engine (tied groups would order by the first row's number,
+  with a proof per ordering shape). A window over a group return that can omit
+  an item needs an output-cardinality proof, and a window over groups ordered
+  by an integer sum/avg needs the exactness guard read on every group, not only
+  on the returned ones (`plan.windowedAccumulation`); the proven singleton
+  constructors already lower. A grouping over a compound physical key whose
+  order leaves two groups tied runs in the engine (`entity.groupOrder`): a
+  group's first appearance is its smallest key tuple, which per-column minima
+  do not give. On PostgreSQL an entity grouping lowers only over one adopted
+  table with no document column; a store-owned table and any join plan the set
+  residual (`bind.entityGrouping`) until the runtime guards are qualified
+  there. A comparison of two paths when either is not typed as a scalar (an
+  object, an array, a member with no type), an entity query's comparison of two
+  paths outside one non-null number/string family, predicates whose individual
+  leaves span bindings, and unlisted operators remain residual. **Semantic
+  boundary:** promotions must preserve missing/null, first-occurrence order and
+  engine errors under the indexed, unindexed and forced-residual oracle. A
+  disconnected binding graph remains a deliberate cartesian-product refusal;
+  removing that guard changes the join contract. A join equality is an edge
+  only between mapped columns of one comparison family (the family the column
+  stores and the engine decodes, never a union's first type) that are neither a
+  boolean nor both able to read a NULL as a present `null`, so the database
+  pairs the rows the engine does; an undeclared foreign key compares as the key
+  it references, a nullable member whose NULL reads back as no member (every
+  store-owned nullable column) still joins natively, and any other equality
+  runs in the engine.
 - [ ] **Projection and distinct beyond reconstructible trees.** A return
   containing an unproven operator, a whole entity binding inside a constructor
   or a non-singular path still needs the engine. So does a navigation hop that
   is chained, ordered inside, correlated across comparison families or over a
   column that can hold a `null`, or read as a value without the related
-  entity's key. Windows over such returns are set-residual:
+  entity's key. A hop over a foreign key no property declares stays in the
+  engine although a join reads that key (`entity.hopShape`). Windows over such
+  returns are set-residual:
   source-row limits cannot stand in for projected-item limits. `$distinct`
   over an untyped or compound projection, or ordering by paths other than the
   projected scalar, also remains residual.
@@ -779,6 +785,27 @@ what each does is its own documentation's job
   (`UnrepresentablePath`) on `node:sqlite` and `bun:sqlite`, the fate of any
   unspellable path name. Wanted: decide whether the hatch keeps the carve-out
   for such a name or the refusal is the contract.
+- [ ] **A grouped sum, average or extreme over a column that reads a NULL as a
+  present `null` runs in the engine.** A column whose policy reads a NULL as a
+  present `null` (`null: 'null'`) makes a grouped `$sum`, `$avg`, `$min` or
+  `$max` skip the NULL in SQL where the engine raises `JQ2001`, and an ordering
+  by it order the NULL where the engine raises `JQ2005`, so the planner keeps
+  both in the engine. Wanted: a native `_nulls` guard, as the whole-set
+  aggregate has, that keeps them in SQL.
+- [ ] **Migrations and the relational write paths read the row identity without
+  the table's columns.** The query, load and live paths spell SQLite's row
+  identity with the first of `rowid`, `oid` and `_rowid_` that the table does
+  not name as a column; `migrate.js`, `maintenance.js`, `migration-history.js`
+  and `dialects/rtree-ddl.js` still spell `rowid`, so a member of that name may
+  shadow it there. Not exercised. Wanted: one spelling through the dialect's
+  `rowIdentity(columns)`, with a test per path.
+- [ ] **A schema that disagrees with its column's codec answers a predicate
+  natively where the engine raises.** A property typed `string` over a column
+  whose codec is `boolean` (the model validator accepts it) makes `$contains`
+  answer no row natively where the engine raises `JQ2001`; the ordering and
+  aggregate gates read what the column stores, the predicate planner reads the
+  schema. Wanted: refuse the disagreement at the model, which closes the class
+  for every shape.
 - [ ] **Member paths outside ASCII identifiers in entity indexes, index
   conditions and database rules.** Entity index paths, index conditions and
   rule operands name members as `$.<member>` over ASCII identifiers. A member

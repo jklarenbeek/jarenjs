@@ -83,7 +83,9 @@ export function createLogicalRows({ connection, shapes, collectionCore, entityCo
     columnValue: (table, column, value) => entityCore(table).plan.encodeColumn(column, value),
     position: (table, key) => {
       const shape = shapeOf(table);
-      return chain(statement(`SELECT ${dialect.rowIdentity()} AS position FROM ${q(table)} WHERE ${where(keyColumns(shape))}`, 'get', partsOf(shape, key)),
+      // the identity no column of the table shadows, as the statements that order the table's rows read it
+      const identity = dialect.rowIdentity(shape.columns.map((column) => column.name)) ?? dialect.rowIdentity();
+      return chain(statement(`SELECT ${identity} AS position FROM ${q(table)} WHERE ${where(keyColumns(shape))}`, 'get', partsOf(shape, key)),
         (row) => row?.position);
     },
     empty: () => {
