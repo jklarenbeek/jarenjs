@@ -48,7 +48,8 @@ const MODEL = {
   },
   collections: {
     rows: { key: '/id', schema: { type: 'object', properties: {
-      id: { type: 'string' }, region: { type: 'string' }, team: { type: 'string' }, score: { type: 'number' } } } },
+      id: { type: 'string' }, region: { type: 'string' }, team: { type: 'string' }, score: { type: 'number' },
+      weight: { type: 'integer' } } } },
   },
 };
 
@@ -67,7 +68,7 @@ async function seed(store) {
     await tx.entity('Parent').create({ id: 'P2', name: 'two', tags: ['t2'] });
     for (let i = 1; i <= 12; i++) {
       await tx.collection('rows').put({ id: `r${i}`, region: ['west', 'east', 'north'][i % 3],
-        team: ['x', 'y', 'z', 'w'][i % 4], score: i });
+        team: ['x', 'y', 'z', 'w'][i % 4], score: i, weight: i % 5 });
     }
   });
 }
@@ -105,6 +106,9 @@ const ORDERED = (orderby) => ({ $for: { r: '$[*]' }, $orderby: orderby, $return:
 const maintained = (strategy) => ({ strategy, mode: 'incremental' });
 const rerun = (reason) => ({ strategy: 'rerun', mode: 'rerun', reason });
 const DECODED = 'entity dependency plan: this entity return or grouping needs decoded-row evaluation';
+// the child query correlates on a foreign key the schema declares no property for, so no comparison family is known
+const HOP_SHAPE = 'entity dependency plan: a navigation hop translates only as one plain correlated FLWOR whose '
+  + 'correlation equates mapped columns of one comparison family that admit no null';
 const SET_LEVEL = 'this grouping or distinct projection needs set-level maintenance';
 const PROFILED = "the store profile's predicates, member lists and limits apply to every read, which maintenance does not repeat";
 const ROW_ALONE = 'a projection that reads the collection root re-runs (a row is evaluated alone)';
@@ -191,7 +195,7 @@ const SHAPES = [
     row: 'reads an entity root outside its child queries', mode: rerun(DECODED) },
   { name: 'a graph projection beside a count of an entity root', on: 'entity',
     document: [{ $for: { a: '$.Author[*]' }, $return: { id: '$a.id', posts: CHILD_IDS, total: { $count: '$.Post[*]' } } }],
-    row: 'reads an entity root outside its child queries', mode: rerun(DECODED) },
+    row: 'reads an entity root outside its child queries', mode: rerun(HOP_SHAPE) },
   { name: 'an aggregate over an entity join', on: 'entity', document: [{ $count: JOIN }],
     row: 'an entity aggregate', mode: rerun('an entity aggregate has no bounded tuple accumulator') },
   { name: 'an object-root entity document', on: 'entity',
@@ -239,6 +243,11 @@ const SHAPES = [
     row: 'ordered or windowed groups',
     mode: rerun("'$groupby' — a floating sum or average runs in the engine, whose left-to-right addition decides "
       + 'the rounding a native sum would not reproduce') },
+  // an integer sum orders natively, and a group that orders is still set-level work for maintenance
+  { name: 'groups ordered by an integer sum', on: 'rows',
+    document: [{ ...GROUP, $orderby: [{ $key: { $sum: '$r.weight' }, $dir: 'desc' }],
+      $return: { key: '$g', total: { $sum: '$r.weight' } } }],
+    row: 'ordered or windowed groups', mode: rerun(SET_LEVEL) },
   { name: 'one groupBy followed by select, as @jarenjs/linq emits it', on: 'rows',
     document: (s) => fromAsync(s.collection('rows')).groupBy((r) => r.region)
       .select((g) => ({ key: g.key, n: g.items.count() })).toDocument(),

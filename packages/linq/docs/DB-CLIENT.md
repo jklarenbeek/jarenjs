@@ -883,7 +883,7 @@ A child list is an entity-root projection document, handed to the same
 
 That is the graph row of [LIVE-FORMAT](../../db/docs/LIVE-FORMAT.md) §7.
 An ordering inside the child query, which an include spec's `orderBy`
-asks for, re-runs with the reason named (`needs decoded-row evaluation`);
+asks for, re-runs with the reason named (`a navigation hop translates only as one plain correlated FLWOR`);
 a window over an unordered child query is maintained.
 
 **The client is not the place a model is authored.** `open()` takes a

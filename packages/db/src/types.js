@@ -9,21 +9,28 @@
  * never weakens one.
  */
 
-import { schemaTypeAt } from './ddl.js';
+import { schemaNodeAt, schemaTypeAt } from './ddl.js';
 
 const KNOWN = new Set(['string', 'integer', 'number', 'boolean']);
 
 /**
- * The planner-facing type of a member path.
+ * The planner-facing type of a member path. A member declared with more
+ * than one type is typed by the first (the type its column takes its
+ * storage from), except that one declared `integer` and also `number` is a
+ * number: it may hold a fraction, and the planner reads `integer` as
+ * "every value is whole" — the claim an exact sum rests on.
  * @param {any} schema - The collection's document schema
  * @param {({ name: string } | { index: number })[]} segments
  * @returns {'string' | 'integer' | 'number' | 'boolean' | 'unknown'}
  */
 export function typeOfPath(schema, segments) {
   const declared = schemaTypeAt(schema, segments);
-  return declared !== undefined && KNOWN.has(declared)
-    ? /** @type {any} */ (declared)
-    : 'unknown';
+  if (declared === undefined || !KNOWN.has(declared)) return 'unknown';
+  if (declared === 'integer') {
+    const union = schemaNodeAt(schema, segments)?.type;
+    if (Array.isArray(union) && union.includes('number')) return 'number';
+  }
+  return /** @type {any} */ (declared);
 }
 
 /**

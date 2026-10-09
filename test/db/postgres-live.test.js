@@ -341,32 +341,34 @@ describe('PostgreSQL, live', { skip: SKIP }, () => {
       });
     }
 
-    describe('entities and relations', () => {
-      for (const group of loadRelationGroups()) {
-        describe(group.group, () => {
-          /** @type {any} */
-          let opened = null;
-          after(async () => { if (opened !== null) await opened.store.close(); });
-          for (const kase of group.cases) {
-            it(kase.name, async () => {
-              if (opened === null)
-                opened = await storeForEntityGroup(group, await freshDriver());
-              // the engine's root is the entities PLUS the join rows a
-              // group declares as memberships: a join-table root is
-              // queryable, and the engine has no other way to see one
-              const divergence = await runEntityCase(
-                opened.store, { ...group.documents, ...(group.memberships ?? {}) },
-                kase, 'native');
-              assert.strictEqual(divergence, null,
-                divergence === null ? '' : `${group.group}/${kase.name} diverged\n`
-                  + `  sql:      ${divergence.sql ?? '<none>'}\n`
-                  + `  engine:   ${JSON.stringify(divergence.expected)}\n`
-                  + `  pushdown: ${JSON.stringify(divergence.actual)}`);
-            });
-          }
-        });
-      }
-    });
+    for (const side of /** @type {const} */ (['indexed', 'unindexed'])) {
+      describe(`entities and relations — ${side}`, () => {
+        for (const group of loadRelationGroups()) {
+          describe(group.group, () => {
+            /** @type {any} */
+            let opened = null;
+            after(async () => { if (opened !== null) await opened.store.close(); });
+            for (const kase of group.cases) {
+              it(kase.name, async () => {
+                if (opened === null)
+                  opened = await storeForEntityGroup(group, await freshDriver(), side);
+                // the engine's root is the entities PLUS the join rows a
+                // group declares as memberships: a join-table root is
+                // queryable, and the engine has no other way to see one
+                const divergence = await runEntityCase(
+                  opened.store, { ...group.documents, ...(group.memberships ?? {}) },
+                  kase, 'native');
+                assert.strictEqual(divergence, null,
+                  divergence === null ? '' : `${group.group}/${kase.name} [${side}] diverged\n`
+                    + `  sql:      ${divergence.sql ?? '<none>'}\n`
+                    + `  engine:   ${JSON.stringify(divergence.expected)}\n`
+                    + `  pushdown: ${JSON.stringify(divergence.actual)}`);
+              });
+            }
+          });
+        }
+      });
+    }
   });
 
   describe('migration', () => {

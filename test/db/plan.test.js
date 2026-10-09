@@ -595,7 +595,7 @@ describe('the planner\'s reason vocabulary', () => {
     'kind.let': [collection, F({ $let: { z: 1 } })],
     'predicate.notPredicate': [collection, F({ $where: 5 })],
     'predicate.existence': [collection, F({ $where: { $exists: { $eq: [1, 1] } } })],
-    'predicate.joinTerritory': [collection, F({ $where: { $eq: ['$it.n', '$it.s'] } })],
+    'predicate.joinTerritory': [collection, F({ $where: { $eq: ['$it.o', '$it.n'] } })],
     'predicate.operands': [collection, F({ $where: { $eq: [1, 2] } })],
     'predicate.compoundLiteral': [collection,
       F({ $where: { $eq: ['$it.o', { $const: { k: 1 } }] } })],
@@ -630,6 +630,11 @@ describe('the planner\'s reason vocabulary', () => {
     // needs the engine's output cardinality.
     'plan.windowedGroup': [collection, { $subsequence: [
       { $for: { it: '$[*]' }, $groupby: { g: '$it.s' }, $return: '$g' }, 0, 2] }],
+    // the guard beside an integer sum is read on the groups a statement
+    // returns, so a window over groups ordered by one cannot trust it
+    'plan.windowedAccumulation': [collection, { $subsequence: [
+      { $for: { it: '$[*]' }, $groupby: { g: '$it.s' }, $orderby: [{ $key: { $sum: '$it.n' }, $dir: 'desc' }],
+        $return: { g: '$g' } }, 0, 2] }],
     'plan.groupedAggregate': [collection, { $sum: {
       $for: { it: '$[*]' }, $groupby: { g: '$it.s' }, $return: { g: '$g' } } }],
     'plan.distinctProjection': [collection, { $distinct: F({}) }],
@@ -655,6 +660,13 @@ describe('the planner\'s reason vocabulary', () => {
       { $for: { p: '$.Person[*]' }, $return: { n: { $count: '$p.name' } } }],
     'entity.scalarAggregate': [entity, { $sum: E({}) }],
     'entity.order': [entity, E({ $orderby: ['$p.ok'] })],
+    // a hop is ONE plain correlated FLWOR; an inner ordering is not
+    'entity.hopShape': [entity, E({ $where: { $exists: { $for: { q: '$.Pet[*]' },
+      $where: { $eq: ['$q.ownerId', '$p.id'] }, $orderby: ['$q.pid'], $return: '$q' } } })],
+    // a hop read as a value reaches one row only through the related key;
+    // `ownerId` is not the pet's
+    'entity.hopValue': [entity, { $for: { p: '$.Person[*]' }, $return: { kind: {
+      $for: { q: '$.Pet[*]' }, $where: { $eq: ['$q.ownerId', '$p.id'] }, $return: '$q.kind' } } }],
     'interval.operands': [collection, F({ $where: { $overlaps: ['$it.o', '$it.o'] } })],
     'interval.probe': [collection,
       F({ $where: { $overlaps: ['$it.o', { $const: { start: 2, end: 1 } }] } })],
@@ -683,7 +695,8 @@ describe('the planner\'s reason vocabulary', () => {
    * by the suite whose model they need.
    */
   const NOT_REACHED = {
-    'entity.groupOrder': 'native-read-boundaries.test.js exercises compound physical group ordering refusal',
+    'entity.groupOrder': 'group-order-aggregates.test.js and native-read-boundaries.test.js exercise the '
+      + 'compound physical group ordering refusal',
     'predicate.physicalCodec': 'the explicit codec model and load refusal live in physical.test.js',
     'kind.raw': 'a raw node is only a registry operator\'s inert argument — never a root or a predicate',
     'flwor.collation': 'a $collation cannot be ANALYZED without a collation registry, '
@@ -699,7 +712,7 @@ describe('the planner\'s reason vocabulary', () => {
     'bind.accumulation': 'an integer sum past its exactness bound, found by a run (the accumulation suite)',
     'bind.accumulationWhole': "a whole integer sum's cursor barrier, classified by a cursor (the accumulation suite)",
     'bind.entityGrouping': 'an entity grouping on a dialect whose guards are not qualified, decided by the '
-      + 'entity engine (the accumulation suite, over PostgreSQL)',
+      + 'entity engine (group-order-aggregates.test.js, over a store-owned PostgreSQL table)',
     'bind.entityGroupWhole': "an entity grouping's cursor barrier, classified by the entity engine",
     'bind.path': 'a member name the dialect cannot spell (the hostile suite)',
     'interval.overlap': 'the promotion itself needs a declared interval (the interval suite)',
@@ -855,6 +868,46 @@ describe('a grouping the plan can rebuild lowers to a GROUP BY', () => {
       $return: { g: '$g' },
     }, GROUP_SHAPE);
     assert.strictEqual(byMember.mode, 'set');
+  });
+
+  it('an integer sum or average orders the groups beside the aggregate it is; a window over them is engine work', () => {
+    const grouped = (/** @type {any} */ order, /** @type {boolean} */ windowed = false) => {
+      const document = { $for: { it: '$[*]' }, $groupby: { g: '$it.name' }, $orderby: order, $return: { g: '$g' } };
+      return planQuery(windowed ? { $subsequence: [document, 0, 2] } : document, GROUP_SHAPE);
+    };
+    const bySum = grouped([{ $key: { $sum: '$it.age' }, $dir: 'desc' }]);
+    assert.strictEqual(bySum.mode, 'native');
+    assertNoSqlText(bySum.plan);
+    assert.deepStrictEqual(bySum.plan.group.aggregates.map((a) => [a.fn, a.empty]), [['sum', 'zero']]);
+    assert.deepStrictEqual(bySum.plan.group.order, [{ aggregate: 0, desc: true, nullsFirst: false }]);
+    // a bare key is ascending, and an average over no values is the empty key, which orders first
+    const byAvg = grouped([{ $avg: '$it.age' }]);
+    assert.strictEqual(byAvg.mode, 'native');
+    assert.deepStrictEqual(byAvg.plan.group.aggregates.map((a) => [a.fn, a.empty]), [['avg', 'omit']]);
+    assert.deepStrictEqual(byAvg.plan.group.order, [{ aggregate: 0, desc: false, nullsFirst: true }]);
+    // the guard beside a sum is read on the groups a statement returns, so a window leaves the groups to the engine
+    for (const order of [[{ $key: { $sum: '$it.age' }, $dir: 'desc' }], [{ $avg: '$it.age' }]]) {
+      const windowed = grouped(order, true);
+      assert.strictEqual(windowed.mode, 'set');
+      assert.deepStrictEqual(windowed.reasons.map((entry) => reasonId(entry.reason)), ['plan.windowedAccumulation']);
+    }
+    // a count and an extreme have no such guard to read
+    for (const key of [{ $count: '$it' }, { $min: '$it.age' }, { $max: '$it.age' }])
+      assert.strictEqual(grouped([{ $key: key, $dir: 'desc' }], true).mode, 'native');
+  });
+
+  it('the nullable form of a sum and the plain sum are two aggregates, whichever the return or the order names first', () => {
+    const rows = { $for: { x: '$it' }, $where: { $ne: ['$x.age', null] }, $return: '$x.age' };
+    const nullable = { $if: [{ $exists: rows }, { $sum: rows }, null] };
+    for (const ret of [{ g: '$g', s: nullable }, { s: nullable, g: '$g', t: { $sum: '$it.age' } }]) {
+      const planned = planQuery({ $for: { it: '$[*]' }, $groupby: { g: '$it.name' },
+        $orderby: [{ $key: { $sum: '$it.age' }, $dir: 'asc' }], $return: ret }, GROUP_SHAPE);
+      assert.strictEqual(planned.mode, 'native');
+      const aggregates = planned.plan.group.aggregates;
+      assert.deepStrictEqual(aggregates.map((a) => [a.fn, a.empty]).sort(), [['sum', 'null'], ['sum', 'zero']]);
+      // a group with no value is `null` in the form that says so and `0` for the order
+      assert.strictEqual(aggregates[planned.plan.group.order[0].aggregate].empty, 'zero');
+    }
   });
 
   it('a key or an aggregate the plan cannot prove refuses the whole grouping', () => {

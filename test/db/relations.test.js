@@ -15,7 +15,7 @@ import { describe, it, after } from 'node:test';
 import * as fs from 'node:fs';
 import * as assert from 'node:assert';
 
-import { openStore } from '@jarenjs/db';
+import { openStore, reasonId } from '@jarenjs/db';
 import { from } from '@jarenjs/linq';
 import { compileJsonQuery } from '@jarenjs/json/query';
 import { nodeDriver } from '@jarenjs/db/node';
@@ -205,27 +205,44 @@ describe('the linq-roots groups are what the chains emit', () => {
     }
   });
 
-  it('promotes the correlated count projection and names the remaining hop residuals', async () => {
-    const group = JSON.parse(fs.readFileSync('test/db/oracle/relations/15-linq-hops.json', 'utf8'));
+  it('the group join and the any are native; an operator over a member stays in the engine', async () => {
+    const group = JSON.parse(fs.readFileSync('test/db/oracle/relations/14-linq-roots.json', 'utf8'));
     const { store } = await storeForEntityGroup(group);
-    const REASONS = new Set([
-      'this entity return or grouping needs decoded-row evaluation',
-      'existence tests translate only over a singular member path on the binding',
-      'comparisons translate only between a singular member path and a literal or external',
-      'ordering translates only over typed entity paths (never a boolean, never a document path that admits null)',
-      'no equivalence proof exists yet; residual by default',
-    ]);
     for (const kase of group.cases) {
       const explained = await store.explain(kase.query);
-      if (kase.name === 'a hop from the joined it2') {
-        assert.strictEqual(explained.mode, 'native');
+      if (kase.name === 'a projection') {
+        assert.strictEqual(explained.mode, 'set', kase.name);
+        assert.deepStrictEqual(explained.reasons.map((r) => reasonId(r.reason)), ['entity.projection']);
+        continue;
+      }
+      assert.strictEqual(explained.mode, 'native', `${kase.name}: ${JSON.stringify(explained.reasons)}`);
+      assert.deepStrictEqual(await store.execute(kase.query, { strict: true }),
+        await store.execute(kase.query, { pushdown: false }), kase.name);
+    }
+    await store.close();
+  });
+
+  it('promotes the correlated hops and names the remaining hop residuals', async () => {
+    const group = JSON.parse(fs.readFileSync('test/db/oracle/relations/15-linq-hops.json', 'utf8'));
+    const { store } = await storeForEntityGroup(group);
+    // the cases whose hop is not one plain correlated FLWOR with a proven
+    // correlation stay in the engine, each under its own reason
+    const RESIDUAL = /** @type {Record<string, string>} */ ({
+      'a to-many hop as an array member': 'entity.hopValue',
+      'two hops chained': 'entity.hopShape',
+      "a hop from a group-join's fanned group": 'kind.let',
+    });
+    for (const kase of group.cases) {
+      const explained = await store.explain(kase.query);
+      const reason = RESIDUAL[kase.name];
+      if (reason === undefined) {
+        assert.strictEqual(explained.mode, 'native', `${kase.name}: ${JSON.stringify(explained.reasons)}`);
         assert.deepStrictEqual(await store.execute(kase.query, { strict: true }),
-          await store.execute(kase.query, { pushdown: false }));
+          await store.execute(kase.query, { pushdown: false }), kase.name);
         continue;
       }
       assert.strictEqual(explained.mode, 'set', kase.name);
-      assert.ok(explained.reasons.length > 0 && explained.reasons.every((r) => REASONS.has(r.reason)),
-        `${kase.name}: ${JSON.stringify(explained.reasons)}`);
+      assert.deepStrictEqual(explained.reasons.map((r) => reasonId(r.reason)), [reason], kase.name);
       assert.deepStrictEqual([...explained.referenced].sort(), ['Post', 'User'], kase.name);
       // the entity engine refuses before it returns a promise (value-or-
       // promise), so the refusal is awaited through an async wrapper

@@ -18,6 +18,7 @@
  */
 
 import { codePointPrefixSuccessor } from '@jarenjs/core/string';
+import { plainFamily } from './algebra.js';
 import { physicalSelection } from './physical.js';
 
 /**
@@ -120,6 +121,20 @@ export function kindOf(ref) {
 function exactSum(dialect, valueSql) {
   return `(COUNT(${valueSql}) = 0 OR `
     + `MAX(ABS(${dialect.numberCast(valueSql)})) <= 9007199254740991 / COUNT(${valueSql}))`;
+}
+
+/**
+ * One aggregate of a grouping as the select list carries it. A sum over no
+ * values is the engine's `0`, so the statement answers `0` there too: the
+ * groups ordered by it place a group with no value where the engine does,
+ * and what the decoder reads is what the order saw. Naming that value also
+ * works in a PostgreSQL ORDER BY.
+ * @param {{ empty: string }} entry
+ * @param {string} aggregateSql
+ * @returns {string}
+ */
+function groupedAggregate(entry, aggregateSql) {
+  return entry.empty === 'zero' ? `COALESCE(${aggregateSql}, 0)` : aggregateSql;
 }
 
 /**
@@ -317,25 +332,37 @@ export function emitPlan(plan, dialect, physical) {
    * real SQL type, asked to compare a text column with a number — the
    * member is read out of the document instead. Same answer, unindexed,
    * and never a type error the row's own type guard already excludes.
+   * A member the schema lets hold more than one kind has a column of its
+   * FIRST type, which a value of another kind does not survive intact (a
+   * TEXT column holds the number 2 as '2'), so that column answers its
+   * own kind alone. A column spelled by a path text that reads a step off
+   * the wrong kind of container (`unpinned`: the schema leaves the
+   * container open) gives way to the guarded document where the dialect
+   * guards one.
    * @param {any} ref
    * @param {'any' | 'text' | 'number' | 'boolean'} [kind]
    */
   const valueOf = (ref, kind = 'any') =>
     (ref.column !== null && dialect.columnUsableFor(ref.type, kind)
+      && !(ref.mixed === true && kind !== 'any' && kind !== kindOf(ref))
+      && !(ref.unpinned === true && docOf(ref) !== docColumn)
       ? q(ref.column)
-      : dialect.jsonExtract(docColumn, pathText(ref), kind));
+      : dialect.jsonExtract(docOf(ref), pathText(ref), kind));
   const pathText = (ref) => pathTextOf(dialect, ref);
+  /** The document a query reads a ref's member from: guarded where the
+   * engine's path text would read the member off the wrong container. */
+  const docOf = (ref) => dialect.queryDocument(docColumn, ref.segments);
   /** The presence/type discriminator, always over the document column. */
-  const typeOf = (ref) => dialect.jsonTypeOf(docColumn, pathText(ref));
+  const typeOf = (ref) => dialect.jsonTypeOf(docOf(ref), pathText(ref));
   /** One projected member: its value beside its JSON type, under a
    * suffixed pair of names the decoder reads back. */
   const projectedPair = (ref, suffix) =>
     `CASE WHEN ${typeOf(ref)} IN (${sl('object')}, ${sl('array')}) `
-    + `THEN ${dialect.jsonText(dialect.jsonExtract(docColumn, pathText(ref)))} `
+    + `THEN ${dialect.jsonText(dialect.jsonExtract(docOf(ref), pathText(ref)))} `
     // a SCALAR leaf comes back as the value the decoder reads: the
     // engine's own scalar where it has one, its text where every
     // member is one JSON type and a CASE could not answer two
-    + `ELSE ${dialect.jsonExtract(docColumn, pathText(ref), 'scalar')} `
+    + `ELSE ${dialect.jsonExtract(docOf(ref), pathText(ref), 'scalar')} `
     + `END AS ${q(`v${suffix}`)}, ${typeOf(ref)} AS ${q(`t${suffix}`)}`;
 
   const sl = dialect.stringLiteral;
@@ -420,7 +447,7 @@ export function emitPlan(plan, dialect, physical) {
       const value = valueOf(pred.ref, kind);
       if (dialect.typedExtract === true) {
         return pred.op === 'ne'
-          ? typedDiffers(dialect.jsonExtract(docColumn, pathText(pred.ref)), value, param({ literal: lit }))
+          ? typedDiffers(dialect.jsonExtract(docOf(pred.ref), pathText(pred.ref)), value, param({ literal: lit }))
           : typedTotal(value, `${value} ${symbol} ${param({ literal: lit })}`);
       }
       const typeGuard = kind === 'number'
@@ -496,14 +523,67 @@ export function emitPlan(plan, dialect, physical) {
   };
 
   /**
+   * A comparison of two member paths the schema types as scalars. Of two
+   * present values an equality holds when both are of one family and
+   * equal there — numbers as numbers, strings by code point, booleans by
+   * value, two nulls — a difference is its negation, and an ordering
+   * holds only between two numbers or two strings; every other pairing
+   * is false, the engine's answer. A family a side can hold beside others
+   * is tested on the side (a value read at another kind is no value at
+   * all), and one it holds alone needs no test — except on an engine whose
+   * typed read is NULL for every other family, where each side is tested,
+   * so that a term is never NULL. Every family's term is true or false,
+   * so the negation composes.
+   * @param {any} pred
+   * @returns {string}
+   */
+  const emitRefCmp = (pred) => {
+    const { left, right } = pred;
+    // two members of one family, neither able to hold another: the plain
+    // comparison of their values
+    if (plainFamily(pred) !== null) {
+      return compareRefs(pred, (ref) => ({ value: valueOf(ref, kindOf(ref)),
+        present: `${typeOf(ref)} IS NOT NULL` }));
+    }
+    const typed = dialect.typedExtract === true;
+    const present = (ref) => `${typed ? dialect.jsonExtract(docOf(ref), pathText(ref)) : typeOf(ref)} IS NOT NULL`;
+    const is = (ref, family) => {
+      if (family === 'null') return `${dialect.jsonTypeName(docOf(ref), pathText(ref))} = ${sl('null')}`;
+      // a typed read is NULL for every other JSON type
+      if (typed) return `${valueOf(ref, family)} IS NOT NULL`;
+      return family === 'number' ? `${typeOf(ref)} IN ${NUMERIC()}`
+        : family === 'text' ? `${typeOf(ref)} = ${sl('text')}`
+          : `${typeOf(ref)} IN (${sl('true')}, ${sl('false')})`;
+    };
+    const symbol = { eq: '=', ne: '=', lt: '<', le: '<=', gt: '>', ge: '>=' }[pred.op];
+    const ordering = pred.op !== 'eq' && pred.op !== 'ne';
+    const sharing = left.families.filter((/** @type {string} */ family) => right.families.includes(family)
+      && (!ordering || family === 'number' || family === 'text'));
+    const within = (/** @type {string} */ family) => {
+      const terms = [left, right].filter((side) => typed || side.families.length > 1)
+        .map((side) => is(side, family));
+      if (family !== 'null') terms.push(`${valueOf(left, family)} ${symbol} ${valueOf(right, family)}`);
+      return terms.length === 0 ? dialect.booleanLiteral(true)
+        : terms.length === 1 ? terms[0] : `(${terms.join(' AND ')})`;
+    };
+    const terms = sharing.map(within);
+    // a difference holds wherever both are present and no family's term does,
+    // an equality or an ordering where one does
+    const decided = pred.op === 'ne'
+      ? (terms.length === 0 ? [] : [`NOT (${terms.join(' OR ')})`])
+      : [terms.length === 0 ? dialect.booleanLiteral(false)
+        : terms.length === 1 ? terms[0] : `(${terms.join(' OR ')})`];
+    return `(${[present(left), present(right), ...decided].join(' AND ')})`;
+  };
+
+  /**
    * @param {import('./algebra.js').PlanPredicate} pred
    * @returns {string}
    */
   const emitPred = (pred) => {
     switch (pred.p) {
       case 'refCmp':
-        return compareRefs(pred, (ref) => ({ value: valueOf(ref, kindOf(ref)),
-          present: `${typeOf(ref)} IS NOT NULL` }));
+        return emitRefCmp(pred);
       case 'and':
         return balancedJoin(pred.items.map(emitPred), 'AND');
       case 'or':
@@ -536,11 +616,17 @@ export function emitPlan(plan, dialect, physical) {
           ? `${start} > ${param({ literal: pred.lower })} AND ` : '';
         const meets = `${start} < ${param({ literal: pred.probe.to })} `
           + `AND ${end} > ${param({ literal: pred.probe.from })}`;
+        // a span whose container the schema leaves open is read by the
+        // bound columns off either kind of it where the dialect's path text
+        // cannot tell them apart: the document is held to the container
+        // the span's path means
+        const container = pred.unpinned === undefined ? null : dialect.queryGuard(docColumn, pred.unpinned);
+        const held = container === null ? '' : ` AND ${container}`;
         // a declared interval holds no empty or reversed span, so the
         // conjunction is the operator; undeclared, the rows §8.16 raises
         // on are kept for the engine to raise on
         return pred.declared === true
-          ? `(${guard}${floor}${meets})`
+          ? `(${guard}${floor}${meets}${held})`
           : `(${guard}((${meets}) OR ${start} >= ${end}))`;
       }
       case 'typeIs': {
@@ -662,12 +748,8 @@ export function emitPlan(plan, dialect, physical) {
       + `${q(plan.rank.alternatives[0].column)} AS ${q('vec')}`
     : plan.group !== null
       ? [...plan.group.keys.map((key, i) => projectedPair(key.ref, `k${i}`)),
-        ...plan.group.aggregates.map((entry, i) => {
-          const value = dialect.groupAggregate(entry.fn, accumulated(entry.fn, entry.ref));
-          // Empty sums order as zero, the same value reconstruction
-          // returns. Naming that value also works in PostgreSQL ORDER BY.
-          return `${entry.empty === 'zero' ? `COALESCE(${value}, 0)` : value} AS ${q(`a${i}`)}`;
-        }),
+        ...plan.group.aggregates.map((entry, i) =>
+          `${groupedAggregate(entry, dialect.groupAggregate(entry.fn, accumulated(entry.fn, entry.ref)))} AS ${q(`a${i}`)}`),
         // an integer sum or average answers only beside its exactness guard
         ...plan.group.aggregates.flatMap((entry, i) => (entry.fn === 'sum' || entry.fn === 'avg'
           ? [`${exactSum(dialect, foldValue(entry.fn, entry.ref))} AS ${q(`_safe${i}`)}`] : []))].join(', ')
@@ -722,9 +804,19 @@ export function emitPlan(plan, dialect, physical) {
       .map((key, i) => `${q(`vk${i}`)}, ${q(`tk${i}`)}`).join(', ')}`;
     // the groups' order: the engine's own order of first appearance —
     // over a collection, each group's earliest row identity — or the
-    // key ordering an `$orderby` declared
+    // key ordering an `$orderby` declared. An engine whose scalar read is
+    // TEXT (`typedExtract`) projects a key as text that orders a number by
+    // its digits and a string by the database collation, so an ordered key
+    // is read at its own kind, as every other ordering reads one: a group
+    // has one key, so the minimum of it is the key
+    const keyOrder = (/** @type {number} */ index) => {
+      const ref = plan.group.keys[index].ref;
+      return dialect.typedExtract === true
+        ? dialect.groupAggregate('min', valueOf(ref, kindOf(ref)))
+        : q(`vk${index}`);
+    };
     const order = plan.group.order === 'first-seen' ? []
-      : plan.group.order.map((term) => `${q(term.aggregate === undefined ? `vk${term.index}` : `a${term.aggregate}`)} `
+      : plan.group.order.map((term) => `${term.aggregate === undefined ? keyOrder(term.index) : q(`a${term.aggregate}`)} `
         + `${term.desc ? 'DESC' : 'ASC'}${dialect.orderNulls(term.nullsFirst)}`);
     order.push(dialect.groupAggregate('min', dialect.rowIdentity()));
     sql += ` ORDER BY ${order.join(', ')}`;
@@ -809,12 +901,16 @@ export function emitPlan(plan, dialect, physical) {
 /**
  * The entity predicate emitters, shared by the entity plan emitter
  * and the graph-load builder: given an alias and its document column,
- * emit one predicate with the flavor-correct forms.
+ * emit one predicate with the flavor-correct forms. A plan that reads a
+ * related entity through a hop also names where the hop finds it:
+ * `related` spells an entity's table and a binding's alias.
  * @param {any} dialect
  * @param {(slot: ParamSlot) => string} param
- * @returns {{ emitPred: (aliasSql: string, docSql: string, pred: any) => string }}
+ * @param {{ tableOf: (entity: string) => string, aliasOf: (binding: string) => string }} [related]
+ * @returns {{ emitPred: (aliasSql: string, docSql: string, pred: any) => string,
+ *   hopFrom: (hop: any) => { alias: string, sql: string } }}
  */
-export function createEntityPredicateEmitters(dialect, param) {
+export function createEntityPredicateEmitters(dialect, param, related = undefined) {
   const q = dialect.quoteIdentifier;
   const sl = dialect.stringLiteral;
   const NUMERIC = () => `(${dialect.numericTypeNames.map(sl).join(', ')})`;
@@ -986,7 +1082,31 @@ export function createEntityPredicateEmitters(dialect, param) {
     return `(${column} IS NOT NULL AND ${range} AND ${value} ${symbol} ${param({ literal: pred.operand.lit })})`;
   };
 
+  let hops = 0;
+  /**
+   * The FROM and WHERE of a hop's subselect: the related entity under an
+   * alias of its own, the correlation compared as a join compares it (a
+   * text column in code-point order), then the hop's own filter. Called
+   * once for every place the SQL reads the hop, so each reading carries
+   * its own parameters, in the order of the text.
+   * @param {{ entity: string, binding: string, edges: any[], filter: any }} hop
+   */
+  const hopFrom = (hop) => {
+    const alias = q(`h${hops++}`);
+    const side = (/** @type {{ binding: string, ref: any }} */ end) => physicalComparable(end.ref,
+      `${end.binding === hop.binding ? alias : related.aliasOf(end.binding)}.${q(end.ref.column)}`, dialect);
+    const conditions = hop.edges.map((/** @type {any} */ edge) => `${side(edge.left)} = ${side(edge.right)}`);
+    if (hop.filter !== null) conditions.push(emitPred(alias, `${alias}.${q('doc')}`, hop.filter));
+    return { alias, sql: `FROM ${related.tableOf(hop.entity)} AS ${alias} WHERE ${conditions.join(' AND ')}` };
+  };
+
   const emitPred = (aliasSql, docSql, pred) => {
+    if (pred.p === 'hop') return `EXISTS (SELECT 1 ${hopFrom(pred.hop).sql})`;
+    if (pred.p === 'hopCount') {
+      const { sql } = hopFrom(pred.hop);
+      const symbol = { eq: '=', ne: '<>', lt: '<', le: '<=', gt: '>', ge: '>=' }[pred.op];
+      return `((SELECT COUNT(*) ${sql}) ${symbol} ${param({ literal: pred.lit })})`;
+    }
     if (pred.p === 'refCmp') return compareRefs(pred, (ref) => {
       if (ref.flavor === 'entity-column') {
         const value = physicalComparable(ref, `${aliasSql}.${q(ref.column)}`, dialect);
@@ -1015,7 +1135,7 @@ export function createEntityPredicateEmitters(dialect, param) {
     }
     return emitDocPred(docSql, pred);
   };
-  return { emitPred };
+  return { emitPred, hopFrom };
 }
 
 /**
@@ -1030,10 +1150,12 @@ export function createEntityPredicateEmitters(dialect, param) {
  * typed. Join emission
  * appends BOTH bindings' row identities in binding order, which is
  * exactly the engine's nested-loop order — determinism the oracle
- * depends on.
+ * depends on. A navigation hop is a correlated subselect over the related
+ * entity's table (`EXISTS`, `COUNT(*)`, or one scalar read), and a root
+ * quantifier wraps the statement in `EXISTS`.
  * @param {any} plan - from `planEntityQuery`
  * @param {any} dialect
- * @param {(entity: string) => { table: string }} physicalOf
+ * @param {(entity: string) => { table: string, schema?: string }} physicalOf
  * @returns {{ sql: string, slots: ParamSlot[] }}
  */
 export function emitEntityPlan(plan, dialect, physicalOf) {
@@ -1054,7 +1176,10 @@ export function emitEntityPlan(plan, dialect, physicalOf) {
   const pathText = (ref) => pathTextOf(dialect, ref);
 
   const entityOf = new Map(plan.bindings.map((binding) => [binding.name, binding.entity]));
-  const emitters = createEntityPredicateEmitters(dialect, param);
+  const emitters = createEntityPredicateEmitters(dialect, param, {
+    aliasOf,
+    tableOf: (entity) => dialect.tableName(physicalOf(entity).table, physicalOf(entity).schema),
+  });
   const emitPred = (bindingName, pred) => {
     if (pred.p === 'binding') return emitPred(pred.binding, pred.filter);
     if (pred.p === 'and' || pred.p === 'or')
@@ -1080,39 +1205,56 @@ export function emitEntityPlan(plan, dialect, physicalOf) {
     const names = `${q(`v${suffix}`)}`;
     const typeName = `${q(`t${suffix}`)}`;
     if (leaf.count) {
-      const count = leaf.count;
-      const alias = q(`c${suffix}`);
-      const value = (side) => physicalComparable(side.ref,
-        `${side.binding === count.binding ? alias : aliasOf(side.binding)}.${q(side.ref.column)}`, dialect);
-      const predicates = count.edges.map((edge) => `${value(edge.left)} = ${value(edge.right)}`);
-      if (count.filter) predicates.push(emitters.emitPred(alias, `${alias}.${q('doc')}`, count.filter));
-      return `(SELECT COUNT(*) FROM ${q(physicalOf(count.entity).table)} AS ${alias} `
-        + `WHERE ${predicates.join(' AND ')}) AS ${names}, ${sl('integer')} AS ${typeName}`;
+      return `(SELECT COUNT(*) ${emitters.hopFrom(leaf.count).sql}) AS ${names}, ${sl('integer')} AS ${typeName}`;
     }
-    if (leaf.ref.flavor === 'entity-column') {
-      const raw = `${aliasOf(leaf.binding)}.${q(leaf.ref.column)}`;
-      const column = physicalComparable(leaf.ref,
-        leaf.ref.codec === 'integer'
-          ? `CASE WHEN ${physicalValueType(leaf.ref, raw, dialect)} = ${sl('integer')} THEN ${dialect.numberCast(raw)} ELSE ${raw} END`
+    if (leaf.hop) {
+      // the member of the one related row, and its type beside it: a
+      // subselect for each, which finds the row again and no row at all
+      // where the hop reaches none
+      const read = (pick) => {
+        const { alias, sql } = emitters.hopFrom(leaf.hop);
+        return `(SELECT ${pick(readLeaf(leaf.ref, alias, `${alias}.${q('doc')}`, true))} ${sql})`;
+      };
+      return `${read((member) => member.value)} AS ${names}, ${read((member) => member.type)} AS ${typeName}`;
+    }
+    const { value, type } = readLeaf(leaf.ref, aliasOf(leaf.binding), docOf(leaf.binding));
+    return `${value} AS ${names}, ${type} AS ${typeName}`;
+  };
+  /**
+   * A leaf's value and its JSON type, as expressions over the alias of the
+   * row that holds it. `related` marks a row a hop reaches: the hop that
+   * reaches none sends NULL for the value AND the type, so a NULL the row
+   * does hold must say `null` in its type unless its column's policy makes
+   * the member absent — the decoder takes the missing type for the missing
+   * row, and answers a column that rejects a NULL as it always does.
+   */
+  const readLeaf = (ref, aliasSql, docSql, related = false) => {
+    if (ref.flavor === 'entity-column') {
+      const raw = `${aliasSql}.${q(ref.column)}`;
+      const column = physicalComparable(ref,
+        ref.codec === 'integer'
+          ? `CASE WHEN ${physicalValueType(ref, raw, dialect)} = ${sl('integer')} THEN ${dialect.numberCast(raw)} ELSE ${raw} END`
           : raw, dialect);
-      const emptyType = leaf.ref.nullPolicy === 'null' ? sl('null') : 'NULL';
-      const type = leaf.ref.storage === 'boolean'
+      const emptyType = ref.nullPolicy === 'null' || (related && ref.nullPolicy === 'reject')
+        ? sl('null') : 'NULL';
+      const type = ref.storage === 'boolean'
         ? `CASE WHEN ${column} IS NULL THEN ${emptyType} WHEN ${column} = 0 `
           + `THEN ${sl('false')} ELSE ${sl('true')} END`
         : `CASE WHEN ${column} IS NULL THEN ${emptyType} ELSE ${sl(
-          leaf.ref.storage === 'string' ? 'text'
-            : leaf.ref.storage === 'integer'
+          ref.storage === 'string' ? 'text'
+            : ref.storage === 'integer'
               ? dialect.numericTypeNames[0]
               : dialect.numericTypeNames[dialect.numericTypeNames.length - 1])} END`;
-      return `${column} AS ${names}, ${type} AS ${typeName}`;
+      return { value: column, type };
     }
-    const docSql = docOf(leaf.binding);
-    const text = pathText(leaf.ref);
+    const text = pathText(ref);
     const type = dialect.jsonTypeOf(docSql, text);
-    return `CASE WHEN ${type} IN (${sl('object')}, ${sl('array')}) `
-      + `THEN ${dialect.jsonText(dialect.jsonExtract(docSql, text))} `
-      + `ELSE ${dialect.jsonExtract(docSql, text, 'scalar')} END AS ${names}, `
-      + `${type} AS ${typeName}`;
+    return {
+      value: `CASE WHEN ${type} IN (${sl('object')}, ${sl('array')}) `
+        + `THEN ${dialect.jsonText(dialect.jsonExtract(docSql, text))} `
+        + `ELSE ${dialect.jsonExtract(docSql, text, 'scalar')} END`,
+      type,
+    };
   };
 
   const ret = plan.ret;
@@ -1139,9 +1281,9 @@ export function emitEntityPlan(plan, dialect, physicalOf) {
   const groupRefs = group ? [...group.keys, ...group.aggregates].map((entry) => entry.ref).filter((ref) => ref?.codecColumn) : [];
   const selection = group
     ? [...group.keys.map((key, i) => projectedPair({ binding: plan.bindings[0].name, ref: key.ref }, `k${i}`)),
-      ...group.aggregates.map((entry, i) => `${entry.fn === 'rows' ? 'COUNT(*)'
+      ...group.aggregates.map((entry, i) => `${groupedAggregate(entry, entry.fn === 'rows' ? 'COUNT(*)'
         : dialect.groupAggregate(entry.fn, numericGroup(entry) ? groupTerm(entry) : entry.ref.codec === 'integer'
-          ? dialect.numberCast(groupValue(entry.ref)) : groupValue(entry.ref))} AS ${q(`a${i}`)}`),
+          ? dialect.numberCast(groupValue(entry.ref)) : groupValue(entry.ref)))} AS ${q(`a${i}`)}`),
       ...group.aggregates.flatMap((entry, i) => numericGroup(entry) ? [`${groupSafe(entry)} AS ${q(`_safe${i}`)}`] : []),
       ...(groupRefs.length ? [`${groupRefs.map(groupValid).join(' AND ')} AS ${q('_valid')}`] : [])].join(', ')
     : plan.scalarAggregate
@@ -1152,7 +1294,7 @@ export function emitEntityPlan(plan, dialect, physicalOf) {
       + `${plan.scalarAggregate.ref.nullPolicy === 'null' ? `COUNT(*) - COUNT(${groupValue(plan.scalarAggregate.ref)})` : '0'} AS ${q('_nulls')}, `
       + `${numericGroup(plan.scalarAggregate) ? groupSafe(plan.scalarAggregate) : '1'} AS ${q('_safe')}`
     : plan.aggregate === 'count'
-    ? `COUNT(*) AS ${q('value')}`
+    ? (plan.quantifier === undefined ? `COUNT(*) AS ${q('value')}` : '1')
     : plan.project != null
       // `p`-prefixed, because a bare `t0` would collide with this
       // plan's own binding aliases
@@ -1208,9 +1350,17 @@ export function emitEntityPlan(plan, dialect, physicalOf) {
       // the engine's — because mixed stored precisions would let the
       // integer column sort differently; any other document member
       // orders as its declared type, a number numerically
-      const value = term.ref.flavor === 'entity-column'
-        ? physicalComparable(term.ref, `${aliasOf(term.binding)}.${q(term.ref.column)}`, dialect)
-        : dialect.jsonExtract(docOf(term.binding), pathText(term.ref), kindOf(term.ref));
+      const read = (alias) => term.ref.flavor === 'entity-column'
+        ? physicalComparable(term.ref, `${alias}.${q(term.ref.column)}`, dialect)
+        : dialect.jsonExtract(`${alias}.${q('doc')}`, pathText(term.ref), kindOf(term.ref));
+      // a hop key is the member of the one related row: no value, which
+      // the empty placement orders, where the hop finds none
+      let value;
+      if (term.hop === undefined) value = read(aliasOf(term.binding));
+      else {
+        const { alias, sql: from } = emitters.hopFrom(term.hop);
+        value = `(SELECT ${read(alias)} ${from})`;
+      }
       const nullsFirst = term.emptyGreatest === term.desc;
       return `${value} ${term.desc ? 'DESC' : 'ASC'}${dialect.orderNulls(nullsFirst)}`;
     });
@@ -1226,5 +1376,9 @@ export function emitEntityPlan(plan, dialect, physicalOf) {
     if (plan.window !== null)
       sql += ` ${dialect.limitClause(plan.window.limit, plan.window.offset)}`;
   }
+  // `$some` finds a row the condition selects; `$every` finds none that its
+  // negation selects. The statement answers which, as one boolean
+  if (plan.quantifier !== undefined)
+    sql = `SELECT ${plan.quantifier === 'every' ? 'NOT ' : ''}EXISTS (${sql}) AS ${q('value')}`;
   return { sql, slots };
 }

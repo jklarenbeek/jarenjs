@@ -147,6 +147,7 @@ function normalizeCapabilities(declared) {
  *   limitClause: (limit: number, offset?: number) => string,
  *   jsonPathText: (segments: JsonPathSegment[]) => string | null,
  *   jsonExtract: (columnSql: string, pathText: string, kind?: string) => string,
+ *   queryGuard?: (documentSql: string, segments: JsonPathSegment[]) => string | null,
  *   rowPredicateFlavor?: any,
  *   readBack?: { conditionReads: (planned: string, columns: any[]) => boolean,
  *     condition: (stored: string | null, planned: string | undefined, columns: any[], conforming: boolean) => string | null,
@@ -255,6 +256,7 @@ function normalizeCapabilities(declared) {
 export function createDialect(spec) {
   const q = spec.quoteIdentifier;
   const p = spec.parameterRef;
+  const queryGuard = spec.queryGuard ?? (() => null);
   const foreignKeyActions = spec.foreignKeyActions ?? { cascade: 'CASCADE', restrict: 'RESTRICT', setNull: 'SET NULL' };
   const referenceSql = (reference) => ` REFERENCES ${q(reference.table)} (${q(reference.column)})`
     + ` ON DELETE ${foreignKeyActions[reference.onDelete]}${spec.foreignKeySuffix ?? ''}`;
@@ -692,6 +694,28 @@ export function createDialect(spec) {
     limitClause: spec.limitClause,
     jsonPathText: spec.jsonPathText,
     jsonExtract: spec.jsonExtract,
+    /**
+     * The condition under which a QUERY reads the member at `segments`
+     * from a document, or `null` when every read is right. An engine
+     * whose path text cannot tell a member NAME from an array INDEX
+     * answers it (PostgreSQL's `#>` takes the element `0` of an array and
+     * the key `0` of an object for both); an engine whose text can,
+     * answers `null`. Only query emitters call it and
+     * {@link queryDocument}: the generated columns, the migrations and
+     * the drift read-back keep spelling paths through {@link jsonExtract}
+     * alone.
+     */
+    queryGuard,
+    /**
+     * The document expression a QUERY reads the member at `segments`
+     * from: the document itself, or, where {@link queryGuard} holds a
+     * condition, the document under it — one that fails the guard is no
+     * document at all, so every typed form over it reads NULL, absent.
+     */
+    queryDocument: (documentSql, segments) => {
+      const guard = queryGuard(documentSql, segments);
+      return guard === null ? documentSql : `(CASE WHEN ${guard} THEN ${documentSql} END)`;
+    },
     /**
      * How the row-predicate lowering spells this engine's comparisons, truth
      * values and text literals: what an index condition is rendered with.

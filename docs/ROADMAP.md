@@ -335,14 +335,25 @@ what each does is its own documentation's job
   store-owned table's triggers and rewrite rules with a query per table (about
   1.2–1.5 ms each); one read per namespace would bound it.
 - [ ] **Pushdown beyond the proven scalar shapes.** Untyped group keys,
-  group returns that read the grouped row binding, ordering by sum/avg
-  or other unproven aggregate expressions, multi-root entity grouping and floating
-  numeric aggregates without a rounding proof still run in the engine. One-root
-  scalar grouping and guarded integer sums/counts now have native plans. A window over a group return that can omit an item needs an
-  output-cardinality proof; the proven singleton constructors already lower.
-  Path comparisons outside one non-null number/string family, predicates
-  whose individual leaves span bindings, and unlisted operators remain
-  residual. **Semantic boundary:** promotions must preserve missing/null,
+  group returns that read the grouped row binding, ordering by a floating
+  sum/avg or other unproven aggregate expressions, multi-root entity grouping
+  and floating numeric aggregates without a rounding proof still run in the
+  engine. One-root scalar grouping, guarded integer sums/counts and groups
+  ordered by an integer sum/avg now have native plans. A window over a group
+  return that can omit an item needs an output-cardinality proof, and a window
+  over groups ordered by an integer sum/avg needs the exactness guard read on
+  every group, not only on the returned ones (`plan.windowedAccumulation`); the
+  proven singleton constructors already lower. A grouping over a compound
+  physical key whose order leaves two groups tied runs in the engine
+  (`entity.groupOrder`): a group's first appearance is its smallest key tuple,
+  which per-column minima do not give. On PostgreSQL an entity grouping lowers
+  only over an adopted table with no document column; a store-owned table plans
+  the set residual (`bind.entityGrouping`) until its runtime guards are
+  qualified there. A comparison of two paths when either is not typed as a
+  scalar (an object, an array, a member with no type), an entity query's
+  comparison of two paths outside one non-null number/string family,
+  predicates whose individual leaves span bindings, and unlisted operators
+  remain residual. **Semantic boundary:** promotions must preserve missing/null,
   first-occurrence order and engine errors under the indexed, unindexed and
   forced-residual oracle. A disconnected binding graph remains a deliberate
   cartesian-product refusal; removing that guard changes the join contract.
@@ -354,9 +365,11 @@ what each does is its own documentation's job
   planner guards the pairs it cannot prove, or the join documents the database's
   pairing as its contract.
 - [ ] **Projection and distinct beyond reconstructible trees.** A return
-  containing an unproven operator (restricted correlated counts are now native),
-  a whole entity binding inside a constructor or a non-singular
-  path still needs the engine. Windows over such returns are set-residual:
+  containing an unproven operator, a whole entity binding inside a constructor
+  or a non-singular path still needs the engine. So does a navigation hop that
+  is chained, ordered inside, correlated across comparison families or over a
+  column that can hold a `null`, or read as a value without the related
+  entity's key. Windows over such returns are set-residual:
   source-row limits cannot stand in for projected-item limits. `$distinct`
   over an untyped or compound projection, or ordering by paths other than the
   projected scalar, also remains residual.
@@ -495,8 +508,10 @@ what each does is its own documentation's job
   integer-valued doubles raises.** Over integer-valued doubles past 2^53
   (`1e16`, `2^62`) the driver's integer read raises `JD2003` where the engine
   answers: `$max` over `1e16, 1` on a plain collection, whole and grouped, and
-  in temporal buckets; PostgreSQL answers. `$min`/`$max` stay native, so this is
-  a defect of the read, not of the plan. Wanted: a read that returns the double.
+  in temporal buckets; PostgreSQL answers. A native group key or projection
+  over such a member, and a grouped `$min`/`$max` over an `integer` member past
+  2^53, raise the same way. `$min`/`$max` stay native, so this is a defect of
+  the read, not of the plan. Wanted: a read that returns the double.
 - [ ] **Join tables are not queryable roots.** A many-to-many join table has no
   root to bind: `u.labels` as a chain hop is `JL0105`, and a membership is read
   through `include` (`client.entities.User.include((u) => u.labels)` loads the
@@ -679,8 +694,13 @@ what each does is its own documentation's job
   pushed `$starts-with`, `$ends-with` or `$contains` over a schema-typed string
   member answers false for a stored number or null, a document the schema
   forbids, where the engine raises `JQ2001`; the planner admits string
-  operators only over schema-typed string paths. Wanted: decide whether the
-  native answer or the engine's error is the contract, and make both agree.
+  operators only over schema-typed string paths. The same holds for a member
+  typed as a union whose first type is `string` (`['string', 'null']`,
+  `['string', 'number']`), where the stored null or number conforms to the
+  schema: the planner reads the first type as the subject's. A literal `$get`
+  that feeds a string operator lowers only over a member typed `string` alone,
+  so it adds no second spelling of this. Wanted: decide whether the native
+  answer or the engine's error is the contract, and make both agree.
 - [ ] **A join over a `$range` inner source runs as a nested loop.** The
   engine builds its hash, spatial and interval probes over an uncorrelated
   inner binding on the first outer tuple, but it declines a `$range` source and
@@ -698,18 +718,67 @@ what each does is its own documentation's job
   trap for array methods, each answering a coded refusal that names the
   query-language spelling.
 
-- [ ] **A PostgreSQL index path's `[n]` step reads an object's key `n`.** The
-  dialect spells a JSONPath array step as the jsonb path element `n`, which
-  `#>` resolves as the key `"n"` of an object and as the index `n` of an array,
-  where SQLite's `json_extract` and the engine's JSONPath resolve it on arrays
-  only. A collection indexed on `$.spans[0].start` therefore answers natively
-  a document whose `spans` is an object keyed `"0"` that the engine never
-  answers (`pushdown: false` and SQLite answer without it), and a declared
-  interval on `$.spans[0]` seeks such a row exactly. The store's member walk
-  reads the same object, so the store and PostgreSQL's CHECK agree with each
-  other and disagree with SQLite. Wanted: the dialect's array-only extraction
-  for an index step (`jsonb_typeof` guarded, or `jsonb_path_query_first`),
-  with the store's member walk given the same guard.
+- [ ] **A PostgreSQL index path's `[n]` step reads an object's key `n`.** A
+  query that reads a member path through the document guards a step the
+  database resolves on either container: an index step only on an array, and a
+  member name that `#>` also takes for an array index (`0`, `00`, `+1`, `-1`,
+  ` 1`, and those behind a tab, newline, vertical tab, form feed or carriage
+  return) only on an object, so it answers what the engine and SQLite answer.
+  Where the schema leaves the step's container open (no declared `type`, so an
+  array and an object both conform), a comparison, an ordering or a grouping
+  over the indexed path reads the guarded document instead of the column and
+  does not seek that index, and a declared interval's exact `$overlaps` holds
+  the document to the span's container beside its two bound columns; where the
+  schema declares the container (`type: 'array'` for an index step,
+  `type: 'object'` for a digit name) the column and its index are read as
+  before. Still open: the generated columns, the declared interval's bound
+  columns and their CHECK, and the store's own interval check (`memberAt`)
+  spell the step through `#>`, which resolves the key `"n"` of an object, so a
+  conforming document whose open container is an object keyed `"0"` is read as
+  a span by the CHECK and the store where SQLite's CHECK and the engine read
+  none; the entity predicate, projection and order reads and a load's two
+  order terms in `query.js` still read the shared spelling. Wanted: the
+  generated expression and the CHECK array-only for an index step (a rebuild
+  the catalog comparison must accept), `memberAt` changed in the same change,
+  and the entity and load reads routed through the dialect's `queryDocument`;
+  then an expression index would restore the seek the guarded reads give up.
+- [ ] **SQLite refuses a schema-conforming document under an indexed union
+  whose first type cannot hold it.** A generated column takes the union's first
+  type and a STRICT table refuses a value that type cannot hold: `{ q: 'b' }`
+  under `['boolean', 'number', 'string', 'null']`, `['number', 'string']` and
+  `['integer', 'string']` (`JD2005 cannot store TEXT value in INTEGER column`
+  / `... in REAL column`) and `2.5` under `['integer', 'number']` (`cannot
+  store REAL value in INTEGER column`); only a string-first union indexes.
+  Wanted: type the column of a union `ANY`, or refuse the index at the model.
+- [ ] **A number comparison on an indexed union member no longer seeks its
+  SQLite index, and `explain().indexes` still names it.** The generated column
+  of a member typed as a union takes the union's first type, so a comparison
+  reads the column only for a value of that type and the document for every
+  other kind (a number 2 is the text `'2'` in a TEXT column and never equals
+  the literal 2): a number comparison on a string-first union member does not
+  read the index, a string comparison still does, and `explain().indexes`
+  lists the index all the same. Wanted: a second typed column or an expression
+  index that restores the seek, and `explain()` naming only the indexes a plan
+  reads.
+- [ ] **An entity comparison of two columns of one family reads a NULL the
+  schema omits as a value.** `$eq: ['$t.a', '$t.c']` over two text columns of
+  an adopted table that read a NULL as a present `null` (`null: 'null'`) while
+  the schema omits `null` answers `[2, 4]` natively where the engine answers
+  `[1, 2, 3, 4]`: the entity planner trusts the schema over the column's NULL
+  policy for a pair of one family. Wanted: read the policy where the entity
+  gate decides, or refuse a pair whose column policy the schema does not state.
+- [ ] **The wasm SQLite host reports an engine error raised inside a
+  registered function as `JD2005`.** `node:sqlite` surfaces the engine's own
+  code (`JQ2001` for a string operator over a stored number) from a function
+  the hatch registers; the wasm build wraps it as a driver error, so one query
+  raises two codes on two hosts. Wanted: decide the contract and make both
+  hosts raise it.
+- [ ] **Strict mode refuses a `$get` with an unspellable member name where the
+  hatch ran it.** A literal `$get` whose name holds a `"` or a control
+  character is promoted by the schema and refused by the dialect's grammar
+  (`UnrepresentablePath`) on `node:sqlite` and `bun:sqlite`, the fate of any
+  unspellable path name. Wanted: decide whether the hatch keeps the carve-out
+  for such a name or the refusal is the contract.
 - [ ] **Member paths outside ASCII identifiers in entity indexes, index
   conditions and database rules.** Entity index paths, index conditions and
   rule operands name members as `$.<member>` over ASCII identifiers. A member

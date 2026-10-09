@@ -1,0 +1,537 @@
+{
+ "group": "digit member names",
+ "schema": {
+  "type": "object",
+  "properties": {
+   "id": {
+    "type": "string"
+   },
+   "o": {
+    "type": "object",
+    "properties": {
+     "0": {
+      "type": "string"
+     }
+    }
+   }
+  }
+ },
+ "indexes": [],
+ "documents": [
+  {
+   "id": "a",
+   "u": [
+    7
+   ]
+  },
+  {
+   "id": "b",
+   "u": {
+    "0": 7
+   }
+  },
+  {
+   "id": "c",
+   "u": "x"
+  },
+  {
+   "id": "d",
+   "0": 1
+  },
+  {
+   "id": "e",
+   "u": [
+    7,
+    8
+   ]
+  },
+  {
+   "id": "f",
+   "u": {
+    "-1": 7,
+    "+0": 7,
+    " 1": 7,
+    "00": 7,
+    "1": 8
+   }
+  },
+  {
+   "id": "g",
+   "u": [
+    [
+     7
+    ]
+   ]
+  },
+  {
+   "id": "h",
+   "u": {
+    "0": [
+     7
+    ]
+   }
+  },
+  {
+   "id": "i",
+   "w": [
+    {
+     "v": 1
+    }
+   ]
+  },
+  {
+   "id": "j",
+   "w": {
+    "0": {
+     "v": 1
+    }
+   }
+  },
+  {
+   "id": "k",
+   "u": null
+  },
+  {
+   "id": "l",
+   "o": {
+    "0": "z"
+   }
+  },
+  {
+   "id": "m",
+   "u": [
+    "0"
+   ]
+  },
+  {
+   "id": "n",
+   "u": {
+    "\u000b1": 7,
+    "\f1": 7,
+    "\r1": 7,
+    "\t1": 7,
+    "\n1": 7
+   }
+  },
+  {
+   "id": "o",
+   "u": [
+    "p",
+    "q"
+   ]
+  }
+ ],
+ "cases": [
+  {
+   "name": "a name 0 exists only on an object",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$exists": "$it.u['0']"
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "an index 0 exists only on an array",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$exists": "$it.u[0]"
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "a name 0 against a number",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.u['0']",
+      7
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "an index 0 against a number",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.u[0]",
+      7
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "a name 0 is empty",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$empty": "$it.u['0']"
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "an index 0 is empty",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$empty": "$it.u[0]"
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "an index 0 differs",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$ne": [
+      "$it.u[0]",
+      8
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "a name 0 differs",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$ne": [
+      "$it.u['0']",
+      8
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "an index 1 against a number",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.u[1]",
+      8
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "a name 1 against a number",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.u['1']",
+      8
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "a name that reads as a negative index",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$exists": "$it.u['-1']"
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "a name that reads as a signed index",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$exists": "$it.u['+0']"
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "a name that reads as a padded index",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$exists": "$it.u[' 1']"
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "a name that reads as a zero-padded index",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$exists": "$it.u['00']"
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "a name led by a vertical tab reads as no index",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$exists": "$it.u[\"\\u000b1\"]"
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "a name led by a form feed reads as no index",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$exists": "$it.u[\"\\f1\"]"
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "a name led by a carriage return reads as no index",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$exists": "$it.u[\"\\r1\"]"
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "a name led by a tab reads as no index",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$exists": "$it.u[\"\\t1\"]"
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "a name led by a newline reads as no index",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$exists": "$it.u[\"\\n1\"]"
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "a nested index then a name",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$exists": "$it.u[0][0]"
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "a nested name then an index",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$exists": "$it.u['0'][0]"
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "an index then a name inside an array of objects",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.w[0].v",
+      1
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "a name then a name inside an object",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.w['0'].v",
+      1
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "a name 0 on the binding",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$exists": "$it['0']"
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "a name 0 under a typed object",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$exists": "$it.o['0']"
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "an index 0 beside a name 0",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$or": [
+      {
+       "$exists": "$it.u[0]"
+      },
+      {
+       "$exists": "$it.u['0']"
+      }
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "a negated index",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$not": {
+      "$exists": "$it.u[0]"
+     }
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "a name 0 projected",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$exists": "$it.u['0']"
+    },
+    "$return": "$it.u['0']"
+   }
+  },
+  {
+   "name": "an index 0 projected",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$exists": "$it.id"
+    },
+    "$return": "$it.u[0]"
+   }
+  },
+  {
+   "name": "a name 0 against a name 0",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.u['0']",
+      "$it.u['0']"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "a name 0 against an index 0",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.u['0']",
+      "$it.u[0]"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  }
+ ]
+}

@@ -1,0 +1,554 @@
+{
+ "group": "group order past the exactness bound",
+ "schema": {
+  "type": "object",
+  "properties": {
+   "id": {
+    "type": "string"
+   },
+   "g": {
+    "type": "string"
+   },
+   "i": {
+    "type": "integer"
+   }
+  }
+ },
+ "indexes": [
+  {
+   "name": "by_g",
+   "path": "$.g"
+  },
+  {
+   "name": "by_i",
+   "path": "$.i"
+  }
+ ],
+ "documents": [
+  {
+   "id": "b1",
+   "g": "B",
+   "i": 1000000000000001
+  },
+  {
+   "id": "b2",
+   "g": "B",
+   "i": 1000000000000001
+  },
+  {
+   "id": "b3",
+   "g": "B",
+   "i": 1000000000000001
+  },
+  {
+   "id": "b4",
+   "g": "B",
+   "i": 1000000000000001
+  },
+  {
+   "id": "b5",
+   "g": "B",
+   "i": 1000000000000001
+  },
+  {
+   "id": "b6",
+   "g": "B",
+   "i": 1000000000000000
+  },
+  {
+   "id": "b7",
+   "g": "B",
+   "i": 1000000000000000
+  },
+  {
+   "id": "b8",
+   "g": "B",
+   "i": 1000000000000000
+  },
+  {
+   "id": "a1",
+   "g": "A",
+   "i": 1000000000000000
+  },
+  {
+   "id": "a2",
+   "g": "A",
+   "i": 1000000000000001
+  },
+  {
+   "id": "a3",
+   "g": "A",
+   "i": 1000000000000001
+  },
+  {
+   "id": "u1",
+   "g": "U",
+   "i": 9007199254740991
+  },
+  {
+   "id": "u2",
+   "g": "U",
+   "i": 2
+  },
+  {
+   "id": "u3",
+   "g": "U",
+   "i": -9007199254740991
+  },
+  {
+   "id": "v1",
+   "g": "V",
+   "i": 1
+  },
+  {
+   "id": "x1",
+   "g": "X",
+   "i": 4611686018427387904
+  },
+  {
+   "id": "y1",
+   "g": "Y",
+   "i": 5
+  }
+ ],
+ "cases": [
+  {
+   "name": "averages that round to one double tie, descending",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$or": [
+      {
+       "$eq": [
+        "$it.g",
+        "A"
+       ]
+      },
+      {
+       "$eq": [
+        "$it.g",
+        "B"
+       ]
+      }
+     ]
+    },
+    "$groupby": {
+     "g": "$it.g"
+    },
+    "$orderby": [
+     {
+      "$key": {
+       "$avg": "$it.i"
+      },
+      "$dir": "desc"
+     }
+    ],
+    "$return": {
+     "g": "$g",
+     "a": {
+      "$avg": "$it.i"
+     }
+    }
+   }
+  },
+  {
+   "name": "averages that round to one double tie, ascending",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$or": [
+      {
+       "$eq": [
+        "$it.g",
+        "A"
+       ]
+      },
+      {
+       "$eq": [
+        "$it.g",
+        "B"
+       ]
+      }
+     ]
+    },
+    "$groupby": {
+     "g": "$it.g"
+    },
+    "$orderby": [
+     {
+      "$key": {
+       "$avg": "$it.i"
+      },
+      "$dir": "asc"
+     }
+    ],
+    "$return": {
+     "g": "$g",
+     "a": {
+      "$avg": "$it.i"
+     }
+    }
+   }
+  },
+  {
+   "name": "sums of the same groups differ",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$or": [
+      {
+       "$eq": [
+        "$it.g",
+        "A"
+       ]
+      },
+      {
+       "$eq": [
+        "$it.g",
+        "B"
+       ]
+      }
+     ]
+    },
+    "$groupby": {
+     "g": "$it.g"
+    },
+    "$orderby": [
+     {
+      "$key": {
+       "$sum": "$it.i"
+      },
+      "$dir": "desc"
+     }
+    ],
+    "$return": {
+     "g": "$g",
+     "t": {
+      "$sum": "$it.i"
+     }
+    }
+   }
+  },
+  {
+   "name": "an average used only to order",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$or": [
+      {
+       "$eq": [
+        "$it.g",
+        "A"
+       ]
+      },
+      {
+       "$eq": [
+        "$it.g",
+        "B"
+       ]
+      }
+     ]
+    },
+    "$groupby": {
+     "g": "$it.g"
+    },
+    "$orderby": [
+     {
+      "$key": {
+       "$avg": "$it.i"
+      },
+      "$dir": "desc"
+     }
+    ],
+    "$return": {
+     "g": "$g"
+    }
+   }
+  },
+  {
+   "name": "a sum past the exactness bound answers the engine",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$or": [
+      {
+       "$eq": [
+        "$it.g",
+        "U"
+       ]
+      },
+      {
+       "$eq": [
+        "$it.g",
+        "V"
+       ]
+      }
+     ]
+    },
+    "$groupby": {
+     "g": "$it.g"
+    },
+    "$orderby": [
+     {
+      "$key": {
+       "$sum": "$it.i"
+      },
+      "$dir": "asc"
+     }
+    ],
+    "$return": {
+     "g": "$g",
+     "t": {
+      "$sum": "$it.i"
+     }
+    }
+   }
+  },
+  {
+   "name": "an average past the exactness bound answers the engine",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$or": [
+      {
+       "$eq": [
+        "$it.g",
+        "U"
+       ]
+      },
+      {
+       "$eq": [
+        "$it.g",
+        "V"
+       ]
+      }
+     ]
+    },
+    "$groupby": {
+     "g": "$it.g"
+    },
+    "$orderby": [
+     {
+      "$key": {
+       "$avg": "$it.i"
+      },
+      "$dir": "asc"
+     }
+    ],
+    "$return": {
+     "g": "$g",
+     "a": {
+      "$avg": "$it.i"
+     }
+    }
+   }
+  },
+  {
+   "name": "a sum used only to order, past the bound",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$or": [
+      {
+       "$eq": [
+        "$it.g",
+        "U"
+       ]
+      },
+      {
+       "$eq": [
+        "$it.g",
+        "V"
+       ]
+      }
+     ]
+    },
+    "$groupby": {
+     "g": "$it.g"
+    },
+    "$orderby": [
+     {
+      "$key": {
+       "$sum": "$it.i"
+      },
+      "$dir": "asc"
+     }
+    ],
+    "$return": {
+     "g": "$g"
+    }
+   }
+  },
+  {
+   "name": "a group past int64 orders by the engine sum",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$or": [
+      {
+       "$eq": [
+        "$it.g",
+        "X"
+       ]
+      },
+      {
+       "$eq": [
+        "$it.g",
+        "Y"
+       ]
+      }
+     ]
+    },
+    "$groupby": {
+     "g": "$it.g"
+    },
+    "$orderby": [
+     {
+      "$key": {
+       "$sum": "$it.i"
+      },
+      "$dir": "desc"
+     }
+    ],
+    "$return": {
+     "g": "$g",
+     "t": {
+      "$sum": "$it.i"
+     }
+    }
+   }
+  },
+  {
+   "name": "a window cannot hide a group past the bound",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$where": {
+       "$or": [
+        {
+         "$eq": [
+          "$it.g",
+          "X"
+         ]
+        },
+        {
+         "$eq": [
+          "$it.g",
+          "Y"
+         ]
+        }
+       ]
+      },
+      "$groupby": {
+       "g": "$it.g"
+      },
+      "$orderby": [
+       {
+        "$key": {
+         "$sum": "$it.i"
+        },
+        "$dir": "desc"
+       }
+      ],
+      "$return": {
+       "g": "$g",
+       "t": {
+        "$sum": "$it.i"
+       }
+      }
+     },
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "a window cannot hide a group past the bound, ascending",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$where": {
+       "$or": [
+        {
+         "$eq": [
+          "$it.g",
+          "U"
+         ]
+        },
+        {
+         "$eq": [
+          "$it.g",
+          "V"
+         ]
+        }
+       ]
+      },
+      "$groupby": {
+       "g": "$it.g"
+      },
+      "$orderby": [
+       {
+        "$key": {
+         "$sum": "$it.i"
+        },
+        "$dir": "asc"
+       }
+      ],
+      "$return": {
+       "g": "$g"
+      }
+     },
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "every group orders by the engine sum",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$groupby": {
+     "g": "$it.g"
+    },
+    "$orderby": [
+     {
+      "$key": {
+       "$sum": "$it.i"
+      },
+      "$dir": "desc"
+     }
+    ],
+    "$return": {
+     "g": "$g",
+     "t": {
+      "$sum": "$it.i"
+     }
+    }
+   }
+  }
+ ]
+}

@@ -48,7 +48,7 @@ import { readOptions, readControls, isPlainOptions, refuseUnknownMembers } from 
 import {
   planQuery, planEntityQuery, entityShape, planEntityPredicate, entityPathRef,
   isRootScanSource, isEntityRootSource, BIND_REASONS, PLANNER_REASONS, admitsMixedTypes,
-  predicateTerms, boundPredicateTerms,
+  predicateTerms, boundPredicateTerms, mapHops, hopsOf,
 } from './plan.js';
 import { emitPlan, emitEntityPlan, createEntityPredicateEmitters, UnrepresentablePath, physicalComparable,
   pathTextOf, kindOf, bucketGuards } from './emit.js';
@@ -164,6 +164,18 @@ function answerOf(entry, items) {
 function wrapValue(entry, value) {
   if (entry.planned.wrapped !== true) return value;
   return value === undefined ? [] : [value];
+}
+
+/**
+ * What the one row of a count statement answers: the count, or — for a
+ * root quantifier, whose statement is an existence test — its boolean
+ * (SQLite answers `1` and `0`, PostgreSQL `true` and `false`).
+ * @param {any} plan
+ * @param {any} row
+ * @returns {number | boolean}
+ */
+function countedValue(plan, row) {
+  return plan.quantifier === undefined ? row?.value ?? 0 : Boolean(row?.value);
 }
 
 /**
@@ -453,8 +465,14 @@ function leafItems(row, suffix, column = undefined) {
 function projectedTreeItems(project, row, prefix = '') {
   const build = (node) => {
     if (node.p === 'lit') return [node.value];
-    if (node.p === 'leaf') return leafItems(row, `${prefix}${node.index}`,
-      project.leaves[node.index].ref?.codecColumn);
+    if (node.p === 'leaf') {
+      const leaf = project.leaves[node.index];
+      const at = `${prefix}${node.index}`;
+      // a hop that reaches no row sends no type at all, and its member is
+      // absent whatever the column's policy says of a NULL it does read
+      if (leaf.hop !== undefined && (row[`t${at}`] ?? null) === null) return [];
+      return leafItems(row, at, leaf.ref?.codecColumn);
+    }
     if (node.p === 'object') {
       /** @type {any} */
       const out = {};
@@ -1873,8 +1891,9 @@ export function createEntityQueryEngine(context) {
     }
     const docPath = entities.get(planned.referenced[0])?.docPath;
     // the profile's mandatory predicates ride the statement — once per
-    // binding over their entity, and in every count of its rows — so
-    // their leaves count with the plan's against the dialect's term
+    // binding over their entity, and in every subselect that reads its
+    // rows (a hop's test, count, value or order key) — so their leaves
+    // count with the plan's against the dialect's term
     // bound; past it the whole document is the set residual's, named,
     // before the profile reads the mode
     const mandatory = new Map();
@@ -1886,8 +1905,7 @@ export function createEntityQueryEngine(context) {
     }
     const mandatoryTerms = planned.plan === null || mandatory.size === 0 ? 0
       : planned.plan.bindings.reduce((sum, binding) => sum + predicateTerms(mandatory.get(binding.entity) ?? null), 0)
-        + (planned.plan.project?.leaves ?? []).reduce((sum, leaf) =>
-          sum + (leaf.count ? predicateTerms(mandatory.get(leaf.count.entity) ?? null) : 0), 0);
+        + hopsOf(planned.plan).reduce((sum, hop) => sum + predicateTerms(mandatory.get(hop.entity) ?? null), 0);
     planned = boundPredicateTerms(planned, dialect.maxPredicateTerms, mandatoryTerms);
     // the profile, applied exactly as on a collection (MODEL-FORMAT §8):
     // the roots a document may read, the references it may make, the
@@ -1950,9 +1968,8 @@ export function createEntityQueryEngine(context) {
           const predicate = mandatory.get(binding.entity);
           return predicate === undefined ? entry : { ...entry, filter: conjoin(entry.filter, predicate) };
         }) };
-        if (plan.project) plan = { ...plan, project: { ...plan.project, leaves: plan.project.leaves.map((leaf) =>
-          leaf.count && mandatory.has(leaf.count.entity) ? { ...leaf, count: { ...leaf.count,
-            filter: conjoin(leaf.count.filter, mandatory.get(leaf.count.entity)) } } : leaf) } };
+        plan = mapHops(plan, (hop) => (mandatory.has(hop.entity)
+          ? { ...hop, filter: conjoin(hop.filter, mandatory.get(hop.entity)) } : hop));
       }
       if (entry.rowBound !== null && plan.aggregate === null) {
         const cap = entry.rowBound + 1;
@@ -2165,7 +2182,10 @@ export function createEntityQueryEngine(context) {
         return wrapValue(entry, row?.value ?? (entry.planned.plan.aggregate === 'sum' ? 0 : undefined));
       });
       if (entry.planned.plan.aggregate === 'count')
-        return chain(statement.get(params), (row) => { admittedRows(entry, row ? [row] : []); return wrapValue(entry, row?.value ?? 0); });
+        return chain(statement.get(params), (row) => {
+          admittedRows(entry, row ? [row] : []);
+          return wrapValue(entry, countedValue(entry.planned.plan, row));
+        });
       return chain(statement.all(params), (rows) => {
         admittedRows(entry, rows);
         checkRows(entry, rows, entry.planned.referenced[0]);
@@ -2340,7 +2360,7 @@ export function createEntityQueryEngine(context) {
           chain(statement.get(params), (row) => {
             entry.admitted = { statements: 0, rows: 0, bytes: 0 };
             admittedRows(entry, row ? [row] : []);
-            return [row?.value ?? 0];
+            return [countedValue(entry.planned.plan, row)];
           }))) });
     }
     const rowEntity = entry.planned.plan.ret === null ? null

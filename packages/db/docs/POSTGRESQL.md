@@ -64,6 +64,27 @@ that every row evaluated beside the typed extraction's own `CASE` and that the
 planner's selectivity estimate could not price; where the member is indexed the
 typed form is the column itself, which the planner estimates from its statistics.
 
+A path step `#>` could read off the wrong kind of container is guarded. `#>`
+takes the element `0` of an array and the key `0` of an object for the one path
+step, and the array branch reads any text `strtol` accepts as an index (`00`,
+`+1`, `-1`, ` 1`), so `$it.u['0']` also matched an array and `$it.u[0]` also
+matched an object, where the query engine and SQLite match one each. A query now
+reads such a path from a document wrapped in a `CASE` that requires each
+parent to be the container its step means; a path with no such step is written
+as before. The generated columns, the migrations and the drift read-back
+share the dialect's path text and keep it byte for byte, so an existing
+database never reads as drifted. Where the schema leaves the step's container
+open (no declared `type`: `items` binds arrays alone and `properties` objects
+alone, so the other kind conforms) a comparison, an ordering or a grouping
+reads the guarded document instead of the indexed column, and does not seek
+that index; the declared interval's exact seek holds the document to the span's
+container beside its bound columns. Where the container is declared
+(`type: 'array'` for an index step, `type: 'object'` for a digit name) the
+column is read as before, and a document of the other kind, which the schema
+forbids, is still read through it. The columns, the CHECK and the store's own
+interval check read the key `0` of an object for an index step and an array's
+element for a name, whatever the schema says of the container.
+
 One statement carries at most 128 leaf predicates (the dialect's
 `maxPredicateTerms`), counted over everything the statement holds once the
 planner has regrouped: the document's filters, every include filter of a graph
@@ -72,7 +93,9 @@ bindings that refines a join (the equality that joins them is merged by the
 server and is not counted). A membership list is one leaf
 however long it is, so a `$seq`, a same-member `$or` of equalities and a chain
 mixing equalities and ranges on two members all stay native; an `$or` of `$and`
-pairs and a top-level `$and` of `$ne` count per leaf. The bound exists because
+pairs and a top-level `$and` of `$ne` count per leaf, and a comparison of two
+member paths decided one family at a time counts a leaf for each family the two
+share. The bound exists because
 the planner prices every leaf per row, and a chain whose cost crosses the
 server's JIT thresholds is compiled by LLVM, whose passes check for no
 interrupt: a cancel, a termination and a `statement_timeout` all wait for that
@@ -120,7 +143,10 @@ is a code-point one of the server's own, in `pg_catalog` (`C`, `POSIX`, `ucs_bas
 that branch, because the catalog row the open reads carries no locale.
 Predicates, join edges and grouping keep `COLLATE "C"` over every text column,
 since two code-point columns of different collations compared bare resolve no
-collation. What does not seek: the page's `ORDER BY` spells the identity's
+collation, and a collection group key an `$orderby` orders is read at its own
+kind (`COLLATE "C"` for a string, `numeric` for a number) instead of from the
+projected text, so neither the database's collation nor the digits of a number
+decide the order. What does not seek: the page's `ORDER BY` spells the identity's
 null placement (`ASC NULLS FIRST`), which is not the order an ascending index
 provides, so the rows past the row value are sorted rather than read in index
 order. A text keyset requires the `UTF8` database encoding, read at open — no

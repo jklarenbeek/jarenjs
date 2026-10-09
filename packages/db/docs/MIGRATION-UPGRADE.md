@@ -499,6 +499,74 @@ the query engine, now refuse by code or answer what the engine answers:
   takes `profile`, the one option its declaration lists, and refuses another
   member `JD0013` naming the nearest one — a `signal` or a `deadline`, which it
   never read, included.
+- In a collection query a literal `$get` over the binding or over a member the
+  schema types `object` now plans as the member path it names, and a
+  comparison of two paths the schema types as scalars plans native across JSON
+  type families (SQLite, PostgreSQL and Bun alike; `node:sqlite` no longer
+  registers a function for either). A `$get` whose name SQLite's path grammar
+  cannot spell (an embedded `"`) therefore runs in the engine there,
+  `explain()` naming `bind.path`, where `node:sqlite` answered it through a
+  registered function; strict mode refuses it `JD0010`. A `$get` that feeds a
+  string operator keeps its plan unless the member is typed `string` alone,
+  because the engine raises on a subject of another kind. An entity query is
+  unchanged, apart from the sentence `explain()` gives `predicate.joinTerritory`,
+  which now also says an entity query compares two members of one non-null
+  number or string family alone.
+- On SQLite a comparison of a member the schema lets hold several kinds
+  (`['string', 'number']`) read its index column for every kind of operand,
+  and that column holds the first type's: a number stored under a `TEXT`
+  column is the text of the number, so over `x: 2` indexed as text
+  `$eq: ['$it.x', 2]`, an ordering against a number and an external number all
+  answered by text or by the spelling of the bound number, and missed the row.
+  Only the first type's kind reads the column now, and a number reads the
+  document, so a number comparison on such a member no longer seeks its index
+  (a string comparison still does).
+- On PostgreSQL a query's path with a step `#>` reads off either container
+  answered rows the query engine and SQLite do not: `$it.u['0']` also matched
+  an array's first element, `$it.u[0]` an object's key `"0"`, and the member
+  names `-1`, `+1` and ` 1` matched an array's elements. A query reads such a
+  path guarded now. The generated columns keep their definitions, so no
+  database reads as drifted. Where the schema leaves the step's container
+  open (no declared `type`, so an array and an object both conform) a
+  comparison, an ordering or a grouping reads the guarded document instead of
+  the indexed column and no longer seeks that index, and a declared interval's
+  exact `$overlaps` holds the document to the span's container beside its
+  bound columns; where the schema declares the container (`type: 'array'` for
+  an index step, `type: 'object'` for a digit name) the column and its index
+  are read as before. The columns, the CHECK and the store's own interval
+  check still read an object's key `0` for an index step.
+- A grouping whose `$orderby` names an integer `$sum` or `$avg` ran in the
+  engine and now lowers beside the sum's exactness guard: a group with no value
+  orders as `0` (a sum) or as the empty key (an average), equal values by first
+  appearance, and a group past the bound answers the call from the engine
+  (`explain().fallback`, `JD0010` under strict mode). A window over such groups
+  keeps running in the engine, now named `plan.windowedAccumulation`
+  (`JD0010` under strict mode), because the guard of a group the window leaves
+  out is never read.
+- An entity grouping over a compound physical key (an adopted table whose
+  primary key spans several columns) whose order leaves two groups tied — an
+  aggregate, or a key that leaves another group key unordered — now runs in the
+  engine (`entity.groupOrder`, `JD0010` under strict mode); it answered the tied
+  groups by independent per-column minima of the key rather than in the
+  engine's order of first appearance. An order that names every group key
+  lowers as before.
+- A `$sum` or `$avg` over a member declared `integer` and also `number` (in
+  either order), or over an adopted column whose codec is not `integer`,
+  grouped, whole or in a temporal bucket, now runs in the engine
+  (`plan.floatingAccumulation` for a collection, `entity.projection` or
+  `entity.scalarAggregate` for an entity, `series.floating-accumulation` for a
+  bucket; `JD0010` under strict mode): the planner read the first declared type
+  and added with SQLite's compensated sum, which rounds where the engine adds
+  left to right. Such a member is no longer a temporal instant
+  (`instant-not-integer`).
+- In one collection grouping the nullable form of a sum (`$if` over `$exists` of
+  the non-null values) and the plain sum of the same member shared one
+  aggregate, so one of them answered the other's empty value; they are two
+  aggregates now, `null` and `0` for a group with no value.
+- On PostgreSQL a collection group ordered by a key, or a `$distinct` ordered by
+  its projected path, ordered a number by its digits (`10, 100, 2, 9`) and a
+  string by the database's collation; the key is read at its own kind for the
+  order now, so a number orders by value and a string by code point.
 
 ## 8. Stricter models, keys and staged writes
 

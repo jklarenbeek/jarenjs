@@ -18,7 +18,7 @@ import * as path from 'node:path';
 
 import { from, fromAsync } from '@jarenjs/linq';
 import { compileJsonQuery } from '@jarenjs/json/query';
-import { openStore, entityRoot } from '@jarenjs/db';
+import { openStore, entityRoot, reasonId } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';
 
 const REGION = {
@@ -454,8 +454,8 @@ describe('the relation table on the entity handles (MODEL-FORMAT §10.1)', () =>
   });
 });
 
-describe('a relation hop is a residual the store runs over the fetched roots (MODEL-FORMAT §10.1, §10.6)', () => {
-  it('the to-one hop in a projection: the rows agree native, residual and in the engine; strict refuses', async () => {
+describe('a relation hop is a correlated subselect where its correlation is proven (MODEL-FORMAT §10.1, §10.6)', () => {
+  it('the to-one hop in a projection: the rows agree native, residual and in the engine', async () => {
     const store = await seededRelated();
     const chain = from(store.sync.entity('Post')).select((p) => ({ title: p.title, by: p.author.email }));
     const doc = chain.toDocument();
@@ -472,14 +472,15 @@ describe('a relation hop is a residual the store runs over the fetched roots (MO
     assert.deepStrictEqual(await store.entity('Post').execute([doc], { pushdown: false }), expected);
     assert.deepStrictEqual(await fromAsync(store.entity('Post')).select((p) => ({ title: p.title, by: p.author.email })).toArray(),
       expected);
-    // the residual, named: the §2.6 projection reason, over both roots
+    // one statement: the hop is a scalar subselect over the related entity,
+    // and the correlation covers the author's key, so it yields one row
     const explained = store.sync.explain(doc);
-    assert.strictEqual(explained.mode, 'set');
+    assert.strictEqual(explained.mode, 'native');
     assert.deepStrictEqual(explained.referenced, ['Post', 'User']);
-    assert.deepStrictEqual(explained.reasons, [{ construct: '$return',
-      reason: 'this entity return or grouping needs decoded-row evaluation' }]);
+    assert.deepStrictEqual(explained.reasons, []);
+    assert.match(explained.sql, /\(SELECT [^()]*FROM "User"/);
     assert.deepStrictEqual(chain.explain().hops, [{ member: 'author', kind: 'oneToOne', binding: 'r1' }]);
-    assert.throws(() => store.sync.execute(doc, { strict: true }), (e) => e.code === 'JD0010');
+    assert.deepStrictEqual(store.sync.execute(doc, { strict: true }), expected);
     await store.close();
   });
 
@@ -518,34 +519,34 @@ describe('a relation hop is a residual the store runs over the fetched roots (MO
     await store.close();
   });
 
-  it('which lowered shapes push natively today: none — every hop is a named residual, pinned per shape', async () => {
+  it('which lowered shapes push natively: every plain hop with a proven correlation; the chained hop is a named residual', async () => {
     const store = await seededRelated();
     const users = store.sync.entity('User');
     const posts = store.sync.entity('Post');
-    const pins = [
-      ['a to-one hop in $where', from(posts).where((p) => p.author.email.eq('ada@x')),
-        'comparisons translate only between a singular member path and a literal or external'],
-      ['a to-one existence in $where', from(posts).where((p) => p.author.exists()),
-        'existence tests translate only over a singular member path on the binding'],
-      ['a to-one hop under $orderby', from(posts).orderBy((p) => p.author.email),
-        'ordering translates only over typed entity paths (never a boolean, never a document path that admits null)'],
-      ['a to-many count in $where', from(users).where((u) => u.posts.all().count().ge(2)),
-        'comparisons translate only between a singular member path and a literal or external'],
-      ['a to-many existence in $where', from(users).where((u) => u.posts.all().exists()),
-        'existence tests translate only over a singular member path on the binding'],
-      ['a hop in $return', from(posts).select((p) => p.author.email),
-        'this entity return or grouping needs decoded-row evaluation'],
+    const pushed = [
+      ['a to-one hop in $where', from(posts).where((p) => p.author.email.eq('ada@x'))],
+      ['a to-one existence in $where', from(posts).where((p) => p.author.exists())],
+      ['a to-one hop under $orderby', from(posts).orderBy((p) => p.author.email)],
+      ['a to-many count in $where', from(users).where((u) => u.posts.all().count().ge(2))],
+      ['a to-many existence in $where', from(users).where((u) => u.posts.all().exists())],
+      ['a hop in $return', from(posts).select((p) => p.author.email)],
     ];
-    for (const [name, chain, reason] of pins) {
+    for (const [name, chain] of pushed) {
       const explained = store.sync.explain(chain.toDocument());
-      assert.strictEqual(explained.mode, 'set', name);
-      assert.strictEqual(explained.sql, null, name);
-      assert.strictEqual(explained.reasons[0].reason, reason, name);
+      assert.strictEqual(explained.mode, 'native', name);
+      assert.deepStrictEqual(explained.reasons, [], name);
+      assert.match(explained.sql, /SELECT [^]*SELECT /, `${name}: the hop is a subselect of the one statement`);
       // the terminal's window is read through as it is for every chain
       assert.strictEqual(store.sync.explain([chain.toDocument()]).wrapped, true, name);
     }
+    // a hop out of a hop is two navigations, and the engine's
+    const chained = from(posts).select((p) => ({ id: p.id, siblings: p.author.posts.all().count() }));
+    const explained = store.sync.explain(chained.toDocument());
+    assert.strictEqual(explained.mode, 'set');
+    assert.strictEqual(explained.sql, null);
+    assert.strictEqual(reasonId(explained.reasons[0].reason), 'entity.hopShape');
     // the contrast a hand-written document keeps: the two-binding equijoin
-    // returning a bare binding is the one native shape (§10.2)
+    // returning a bare binding is native too (§10.2)
     assert.strictEqual(store.sync.explain(from(posts).join(from(users),
       (p) => p.authorId, (u) => u.id, (p) => p).toDocument()).mode, 'native');
     await store.close();

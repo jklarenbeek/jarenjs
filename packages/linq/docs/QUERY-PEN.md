@@ -282,7 +282,7 @@ is part of THIS design.
 | series family (§8.16) | `overlaps(other)` → `$overlaps`; `timeBucket(every, origin?, context?)` → `$time-bucket`; `resample(spec)`, `rolling(spec)` and `asof(right, spec?)` → the three sequence operators. A **spec is a literal** and is embedded verbatim — it is read once when the query compiles, so a spec built from the row is `JL0005`, and every rule about what it may *say* stays in the compiler (`JQ0003`). Note that a member literally named `at` is read with `get('at')`: `at(index)` is path navigation on this surface | native | on `ArrayExpr`/fanned paths for the three sequence operators, on `Expr<…>` for the two scalar ones |
 | spatial family (§8.14) | `bbox geoArea geoLength centroid` → `$bbox $area $length $centroid`; `distance within bboxIntersects` → `$distance $within $bbox-intersects`; `geohash(precision?)` → `$geohash` (optional arity, like `substring`); `geoParse geoText geohashBounds geohashNeighbours` → the conversion family; `geoSimplify(tolerance)` → `$geo-simplify`. A plain JSON polygon embeds as a literal (`p.at.within(poly)`); `.params({ region })` makes it an external instead | native | on `Expr<…>`, per the typed-surface order |
 | vector family (§8.15) | `similarity(other)` → `$similarity`. The other operand is an array of numbers: a captured one embeds as a literal, `.params({ query })` binds it at call time. There is no `knn` method — k-nearest is `orderByDescending(...).take(k)`, which is the composition the emitted document already is | native | on `Expr<…>`, per the typed-surface order |
-| relation navigation — to-one hop (`p.author`, `p.author.email`) | over a provider with a relation table (§3, §8): `{ "$for": { "r1": "$.User[*]" }, "$where": { "$eq": ["$r1.<targetKey>", "$it.<via>"] }, "$return": "$r1.email" }` — the target's key against the row's foreign key (`kind: "oneToOne"`, the key on the declaring entity). Zero or one item: an object member's one value (absent when there is none), an operand elsewhere (empty compares false; `exists()`/`isEmpty()` say which), and under `$orderby` a key that may be empty (`$empty` applies). The binding is `r1`, `r2`, … per capture | native by desugaring — the document is the phrase; a store runs it as a named residual (`explain()`, MODEL-FORMAT §10.6) | `Expr<Post>['author']` is `ObjectExpr<User>` — emit's optional relation member, nothing new |
+| relation navigation — to-one hop (`p.author`, `p.author.email`) | over a provider with a relation table (§3, §8): `{ "$for": { "r1": "$.User[*]" }, "$where": { "$eq": ["$r1.<targetKey>", "$it.<via>"] }, "$return": "$r1.email" }` — the target's key against the row's foreign key (`kind: "oneToOne"`, the key on the declaring entity). Zero or one item: an object member's one value (absent when there is none), an operand elsewhere (empty compares false; `exists()`/`isEmpty()` say which), and under `$orderby` a key that may be empty (`$empty` applies). The binding is `r1`, `r2`, … per capture | native by desugaring — the document is the phrase; a store plans it as a correlated subselect where its correlation is proven (MODEL-FORMAT §10.1) and runs it as a named residual otherwise (`explain()`, §10.6) | `Expr<Post>['author']` is `ObjectExpr<User>` — emit's optional relation member, nothing new |
 | relation navigation — to-many hop (`u.posts`, `u.posts.all()`) | `{ "$for": { "r1": "$.Post[*]" }, "$where": { "$eq": ["$r1.<via>", "$it.<targetKey>"] }, "$return": "$r1" }` — the target's foreign key against the row's key (`kind: "oneToMany"`, the key on the target). As a VALUE the phrase is packed, `[ <phrase> ]`, the array of related rows a member holds (`{ posts: u.posts }`; `u.posts.at(0)` indexes it); fanned, `u.posts.all()` is the bare phrase, a sequence: `.all().count()` → `{ "$count": <phrase> }`, `.all().exists()` → `{ "$exists": <phrase> }`, `.all().title` returns `"$r1.title"` per row (`[u.posts.all().title]` packs the titles). `count()`/`exists()` on the value range over the rows too, as a group-join's group's do | native by desugaring, as above | `ArrayExpr<Post>`; `all()` is `FannedExpr<Post>` |
 | relation navigation — chained, and from every row binding | hops nest: `p.author.posts.all().count()` is `{ "$count": { "$for": { "r1": "$.User[*]" }, "$where": …, "$return": { "$for": { "r2": "$.Post[*]" }, "$where": { "$eq": ["$r2.authorId", "$r1.id"] }, "$return": "$r2" } } }` — the inner phrase correlates with the outer binding; a hop off a fanned to-many (`u.posts.all().author`) is a sequence, one target per row; a join's `it2` hops from the inner row; a group-join's fanned group (`g.all().author`) binds each row first (`{ "$for": { "r1": "$g[*]" }, "$return": <hop over $r1> }`); the group itself is an array, not a row | native by desugaring, as above | as the target's `Expr<…>` |
 | relation navigation — many-to-many (`u.labels`) | — the join table is not a queryable root in this version, so no phrase exists to lower to; `load({ include: { labels: true } })` reads the memberships | unsupported (`JL0105`, naming the join table) | — |
@@ -584,9 +584,9 @@ importing the other: its collections and its entity sets are providers
 (the sets carry `root`, `scope` and `relations`; the store carries
 `roots` and `relations`), and a test double proves the document arrives
 whole. A lowered hop is what a store receives as any other document: it
-runs the correlated phrase in its residual over the fetched roots and
-`explain()` names the §10.6 reason — no lowered shape pushes natively in
-this version, and the store's `strict` refuses them all (`JD0010`).
+plans a plain hop with a proven correlation as a subselect of one statement
+(MODEL-FORMAT §10.1) and runs any other in its residual over the fetched
+roots, where `explain()` names the §10.6 reason and `strict` refuses it (`JD0010`).
 
 ### 8.1 Compilation registries
 
@@ -1132,9 +1132,9 @@ Three things this document shows that the source does not:
   lowers and `posts` would be an ordinary member of the target.
 
 `p.author` and `p.author.posts` are declarations of intent, not
-instructions: `explain().hops` lists what the callbacks navigated, and
-no lowered shape pushes natively in this version — a store runs the
-phrase as a named residual and says so (§8).
+instructions: `explain().hops` lists what the callbacks navigated, and a
+store pushes a hop natively where its correlation is proven (MODEL-FORMAT
+§10.1) and runs the phrase as a named residual otherwise, and says so (§8).
 
 ### 13.5 A parameter is a seam, not a value
 

@@ -1,0 +1,3108 @@
+{
+ "group": "typed scalar path comparisons",
+ "schema": {
+  "type": "object",
+  "properties": {
+   "id": {
+    "type": "string"
+   },
+   "x": {
+    "type": [
+     "string",
+     "number",
+     "boolean",
+     "null"
+    ]
+   },
+   "y": {
+    "type": [
+     "string",
+     "number",
+     "boolean",
+     "null"
+    ]
+   },
+   "p": {
+    "type": [
+     "number",
+     "string",
+     "boolean",
+     "null"
+    ]
+   },
+   "q": {
+    "type": [
+     "boolean",
+     "number",
+     "string",
+     "null"
+    ]
+   },
+   "n": {
+    "type": "integer"
+   },
+   "f": {
+    "type": "number"
+   },
+   "s": {
+    "type": "string"
+   },
+   "s2": {
+    "type": "string"
+   },
+   "b": {
+    "type": "boolean"
+   },
+   "b2": {
+    "type": "boolean"
+   },
+   "ns": {
+    "type": [
+     "string",
+     "null"
+    ]
+   },
+   "nn": {
+    "type": [
+     "number",
+     "null"
+    ]
+   },
+   "bb": {
+    "type": [
+     "boolean",
+     "null"
+    ]
+   },
+   "first name": {
+    "type": "string"
+   },
+   "0": {
+    "type": "string"
+   },
+   "o": {
+    "type": "object",
+    "properties": {
+     "k": {
+      "type": "integer"
+     }
+    }
+   },
+   "o2": {
+    "type": "object",
+    "properties": {
+     "k": {
+      "type": "integer"
+     }
+    }
+   },
+   "a": {
+    "type": "array",
+    "items": {
+     "type": "integer"
+    }
+   },
+   "a2": {
+    "type": "array",
+    "items": {
+     "type": "integer"
+    }
+   }
+  }
+ },
+ "indexes": [
+  {
+   "name": "by_x",
+   "path": "$.x"
+  },
+  {
+   "name": "by_y",
+   "path": "$.y"
+  },
+  {
+   "name": "by_ns",
+   "path": "$.ns"
+  },
+  {
+   "name": "by_nn",
+   "path": "$.nn"
+  },
+  {
+   "name": "by_bb",
+   "path": "$.bb"
+  }
+ ],
+ "documents": [
+  {
+   "id": "absent/absent"
+  },
+  {
+   "id": "absent/null",
+   "y": null,
+   "q": null
+  },
+  {
+   "id": "absent/true",
+   "y": true,
+   "q": true
+  },
+  {
+   "id": "absent/false",
+   "y": false,
+   "q": false
+  },
+  {
+   "id": "absent/b",
+   "y": "b",
+   "q": "b"
+  },
+  {
+   "id": "absent/c",
+   "y": "c",
+   "q": "c"
+  },
+  {
+   "id": "absent/2",
+   "y": 2,
+   "q": 2
+  },
+  {
+   "id": "absent/2.0",
+   "y": 2.0,
+   "q": 2.0
+  },
+  {
+   "id": "absent/3.5",
+   "y": 3.5,
+   "q": 3.5
+  },
+  {
+   "id": "null/absent",
+   "x": null,
+   "p": null
+  },
+  {
+   "id": "null/null",
+   "x": null,
+   "y": null,
+   "p": null,
+   "q": null
+  },
+  {
+   "id": "null/true",
+   "x": null,
+   "y": true,
+   "p": null,
+   "q": true
+  },
+  {
+   "id": "null/false",
+   "x": null,
+   "y": false,
+   "p": null,
+   "q": false
+  },
+  {
+   "id": "null/b",
+   "x": null,
+   "y": "b",
+   "p": null,
+   "q": "b"
+  },
+  {
+   "id": "null/c",
+   "x": null,
+   "y": "c",
+   "p": null,
+   "q": "c"
+  },
+  {
+   "id": "null/2",
+   "x": null,
+   "y": 2,
+   "p": null,
+   "q": 2
+  },
+  {
+   "id": "null/2.0",
+   "x": null,
+   "y": 2.0,
+   "p": null,
+   "q": 2.0
+  },
+  {
+   "id": "null/3.5",
+   "x": null,
+   "y": 3.5,
+   "p": null,
+   "q": 3.5
+  },
+  {
+   "id": "true/absent",
+   "x": true,
+   "p": true
+  },
+  {
+   "id": "true/null",
+   "x": true,
+   "y": null,
+   "p": true,
+   "q": null
+  },
+  {
+   "id": "true/true",
+   "x": true,
+   "y": true,
+   "p": true,
+   "q": true
+  },
+  {
+   "id": "true/false",
+   "x": true,
+   "y": false,
+   "p": true,
+   "q": false
+  },
+  {
+   "id": "true/b",
+   "x": true,
+   "y": "b",
+   "p": true,
+   "q": "b"
+  },
+  {
+   "id": "true/c",
+   "x": true,
+   "y": "c",
+   "p": true,
+   "q": "c"
+  },
+  {
+   "id": "true/2",
+   "x": true,
+   "y": 2,
+   "p": true,
+   "q": 2
+  },
+  {
+   "id": "true/2.0",
+   "x": true,
+   "y": 2.0,
+   "p": true,
+   "q": 2.0
+  },
+  {
+   "id": "true/3.5",
+   "x": true,
+   "y": 3.5,
+   "p": true,
+   "q": 3.5
+  },
+  {
+   "id": "false/absent",
+   "x": false,
+   "p": false
+  },
+  {
+   "id": "false/null",
+   "x": false,
+   "y": null,
+   "p": false,
+   "q": null
+  },
+  {
+   "id": "false/true",
+   "x": false,
+   "y": true,
+   "p": false,
+   "q": true
+  },
+  {
+   "id": "false/false",
+   "x": false,
+   "y": false,
+   "p": false,
+   "q": false
+  },
+  {
+   "id": "false/b",
+   "x": false,
+   "y": "b",
+   "p": false,
+   "q": "b"
+  },
+  {
+   "id": "false/c",
+   "x": false,
+   "y": "c",
+   "p": false,
+   "q": "c"
+  },
+  {
+   "id": "false/2",
+   "x": false,
+   "y": 2,
+   "p": false,
+   "q": 2
+  },
+  {
+   "id": "false/2.0",
+   "x": false,
+   "y": 2.0,
+   "p": false,
+   "q": 2.0
+  },
+  {
+   "id": "false/3.5",
+   "x": false,
+   "y": 3.5,
+   "p": false,
+   "q": 3.5
+  },
+  {
+   "id": "b/absent",
+   "x": "b",
+   "p": "b"
+  },
+  {
+   "id": "b/null",
+   "x": "b",
+   "y": null,
+   "p": "b",
+   "q": null
+  },
+  {
+   "id": "b/true",
+   "x": "b",
+   "y": true,
+   "p": "b",
+   "q": true
+  },
+  {
+   "id": "b/false",
+   "x": "b",
+   "y": false,
+   "p": "b",
+   "q": false
+  },
+  {
+   "id": "b/b",
+   "x": "b",
+   "y": "b",
+   "p": "b",
+   "q": "b"
+  },
+  {
+   "id": "b/c",
+   "x": "b",
+   "y": "c",
+   "p": "b",
+   "q": "c"
+  },
+  {
+   "id": "b/2",
+   "x": "b",
+   "y": 2,
+   "p": "b",
+   "q": 2
+  },
+  {
+   "id": "b/2.0",
+   "x": "b",
+   "y": 2.0,
+   "p": "b",
+   "q": 2.0
+  },
+  {
+   "id": "b/3.5",
+   "x": "b",
+   "y": 3.5,
+   "p": "b",
+   "q": 3.5
+  },
+  {
+   "id": "c/absent",
+   "x": "c",
+   "p": "c"
+  },
+  {
+   "id": "c/null",
+   "x": "c",
+   "y": null,
+   "p": "c",
+   "q": null
+  },
+  {
+   "id": "c/true",
+   "x": "c",
+   "y": true,
+   "p": "c",
+   "q": true
+  },
+  {
+   "id": "c/false",
+   "x": "c",
+   "y": false,
+   "p": "c",
+   "q": false
+  },
+  {
+   "id": "c/b",
+   "x": "c",
+   "y": "b",
+   "p": "c",
+   "q": "b"
+  },
+  {
+   "id": "c/c",
+   "x": "c",
+   "y": "c",
+   "p": "c",
+   "q": "c"
+  },
+  {
+   "id": "c/2",
+   "x": "c",
+   "y": 2,
+   "p": "c",
+   "q": 2
+  },
+  {
+   "id": "c/2.0",
+   "x": "c",
+   "y": 2.0,
+   "p": "c",
+   "q": 2.0
+  },
+  {
+   "id": "c/3.5",
+   "x": "c",
+   "y": 3.5,
+   "p": "c",
+   "q": 3.5
+  },
+  {
+   "id": "2/absent",
+   "x": 2,
+   "p": 2
+  },
+  {
+   "id": "2/null",
+   "x": 2,
+   "y": null,
+   "p": 2,
+   "q": null
+  },
+  {
+   "id": "2/true",
+   "x": 2,
+   "y": true,
+   "p": 2,
+   "q": true
+  },
+  {
+   "id": "2/false",
+   "x": 2,
+   "y": false,
+   "p": 2,
+   "q": false
+  },
+  {
+   "id": "2/b",
+   "x": 2,
+   "y": "b",
+   "p": 2,
+   "q": "b"
+  },
+  {
+   "id": "2/c",
+   "x": 2,
+   "y": "c",
+   "p": 2,
+   "q": "c"
+  },
+  {
+   "id": "2/2",
+   "x": 2,
+   "y": 2,
+   "p": 2,
+   "q": 2
+  },
+  {
+   "id": "2/2.0",
+   "x": 2,
+   "y": 2.0,
+   "p": 2,
+   "q": 2.0
+  },
+  {
+   "id": "2/3.5",
+   "x": 2,
+   "y": 3.5,
+   "p": 2,
+   "q": 3.5
+  },
+  {
+   "id": "2.0/absent",
+   "x": 2.0,
+   "p": 2.0
+  },
+  {
+   "id": "2.0/null",
+   "x": 2.0,
+   "y": null,
+   "p": 2.0,
+   "q": null
+  },
+  {
+   "id": "2.0/true",
+   "x": 2.0,
+   "y": true,
+   "p": 2.0,
+   "q": true
+  },
+  {
+   "id": "2.0/false",
+   "x": 2.0,
+   "y": false,
+   "p": 2.0,
+   "q": false
+  },
+  {
+   "id": "2.0/b",
+   "x": 2.0,
+   "y": "b",
+   "p": 2.0,
+   "q": "b"
+  },
+  {
+   "id": "2.0/c",
+   "x": 2.0,
+   "y": "c",
+   "p": 2.0,
+   "q": "c"
+  },
+  {
+   "id": "2.0/2",
+   "x": 2.0,
+   "y": 2,
+   "p": 2.0,
+   "q": 2
+  },
+  {
+   "id": "2.0/2.0",
+   "x": 2.0,
+   "y": 2.0,
+   "p": 2.0,
+   "q": 2.0
+  },
+  {
+   "id": "2.0/3.5",
+   "x": 2.0,
+   "y": 3.5,
+   "p": 2.0,
+   "q": 3.5
+  },
+  {
+   "id": "3.5/absent",
+   "x": 3.5,
+   "p": 3.5
+  },
+  {
+   "id": "3.5/null",
+   "x": 3.5,
+   "y": null,
+   "p": 3.5,
+   "q": null
+  },
+  {
+   "id": "3.5/true",
+   "x": 3.5,
+   "y": true,
+   "p": 3.5,
+   "q": true
+  },
+  {
+   "id": "3.5/false",
+   "x": 3.5,
+   "y": false,
+   "p": 3.5,
+   "q": false
+  },
+  {
+   "id": "3.5/b",
+   "x": 3.5,
+   "y": "b",
+   "p": 3.5,
+   "q": "b"
+  },
+  {
+   "id": "3.5/c",
+   "x": 3.5,
+   "y": "c",
+   "p": 3.5,
+   "q": "c"
+  },
+  {
+   "id": "3.5/2",
+   "x": 3.5,
+   "y": 2,
+   "p": 3.5,
+   "q": 2
+  },
+  {
+   "id": "3.5/2.0",
+   "x": 3.5,
+   "y": 2.0,
+   "p": 3.5,
+   "q": 2.0
+  },
+  {
+   "id": "3.5/3.5",
+   "x": 3.5,
+   "y": 3.5,
+   "p": 3.5,
+   "q": 3.5
+  },
+  {
+   "id": "extra00",
+   "x": 1,
+   "y": true,
+   "p": 1,
+   "q": true
+  },
+  {
+   "id": "extra01",
+   "x": 0,
+   "y": false,
+   "p": 0,
+   "q": false
+  },
+  {
+   "id": "extra02",
+   "x": true,
+   "y": 1,
+   "p": true,
+   "q": 1
+  },
+  {
+   "id": "extra03",
+   "x": false,
+   "y": 0,
+   "p": false,
+   "q": 0
+  },
+  {
+   "id": "extra04",
+   "x": 1,
+   "y": 1,
+   "p": 1,
+   "q": 1
+  },
+  {
+   "id": "extra05",
+   "x": 0,
+   "y": 0,
+   "p": 0,
+   "q": 0
+  },
+  {
+   "id": "extra06",
+   "x": -0.0,
+   "y": 0,
+   "p": -0.0,
+   "q": 0
+  },
+  {
+   "id": "extra07",
+   "x": "2",
+   "y": 2,
+   "p": "2",
+   "q": 2
+  },
+  {
+   "id": "extra08",
+   "x": 2,
+   "y": "2",
+   "p": 2,
+   "q": "2"
+  },
+  {
+   "id": "extra09",
+   "x": "2",
+   "y": "2",
+   "p": "2",
+   "q": "2"
+  },
+  {
+   "id": "extra10",
+   "x": "3.5",
+   "y": 3.5,
+   "p": "3.5",
+   "q": 3.5
+  },
+  {
+   "id": "extra11",
+   "x": "10",
+   "y": "9",
+   "p": "10",
+   "q": "9"
+  },
+  {
+   "id": "extra12",
+   "x": 10,
+   "y": 9,
+   "p": 10,
+   "q": 9
+  },
+  {
+   "id": "extra13",
+   "x": "1e1",
+   "y": 10,
+   "p": "1e1",
+   "q": 10
+  },
+  {
+   "id": "extra14",
+   "x": "",
+   "y": null,
+   "p": "",
+   "q": null
+  },
+  {
+   "id": "extra15",
+   "x": "",
+   "y": false,
+   "p": "",
+   "q": false
+  },
+  {
+   "id": "extra16",
+   "x": "",
+   "y": 0,
+   "p": "",
+   "q": 0
+  },
+  {
+   "id": "extra17",
+   "x": "true",
+   "y": true,
+   "p": "true",
+   "q": true
+  },
+  {
+   "id": "extra18",
+   "x": "false",
+   "y": false,
+   "p": "false",
+   "q": false
+  },
+  {
+   "id": "extra19",
+   "x": "null",
+   "y": null,
+   "p": "null",
+   "q": null
+  },
+  {
+   "id": "extra20",
+   "x": "0",
+   "y": 0,
+   "p": "0",
+   "q": 0
+  },
+  {
+   "id": "extra21",
+   "x": "0",
+   "y": false,
+   "p": "0",
+   "q": false
+  },
+  {
+   "id": "extra22",
+   "x": null,
+   "p": null
+  },
+  {
+   "id": "extra23",
+   "y": null,
+   "q": null
+  },
+  {
+   "id": "extra24",
+   "x": "\uffff",
+   "y": "\ud800\udc00",
+   "p": "\uffff",
+   "q": "\ud800\udc00"
+  },
+  {
+   "id": "extra25",
+   "x": "\ud800\udc00",
+   "y": "\uffff",
+   "p": "\ud800\udc00",
+   "q": "\uffff"
+  },
+  {
+   "id": "extra26",
+   "x": "\u00e9",
+   "y": "e",
+   "p": "\u00e9",
+   "q": "e"
+  },
+  {
+   "id": "extra27",
+   "x": 1e+21,
+   "y": 1e+21,
+   "p": 1e+21,
+   "q": 1e+21
+  },
+  {
+   "id": "extra28",
+   "x": -1.5,
+   "y": -1.5,
+   "p": -1.5,
+   "q": -1.5
+  },
+  {
+   "id": "mini00",
+   "n": 1,
+   "f": 1.0,
+   "s": "1",
+   "s2": "1",
+   "b": true,
+   "b2": true,
+   "ns": "1",
+   "nn": 1,
+   "bb": true
+  },
+  {
+   "id": "mini01",
+   "n": 2,
+   "f": 1.5,
+   "s": "a",
+   "s2": "b",
+   "b": false,
+   "b2": true,
+   "ns": null,
+   "nn": null,
+   "bb": null
+  },
+  {
+   "id": "mini02",
+   "n": 3,
+   "f": 3,
+   "s": "b",
+   "s2": "a",
+   "b": true,
+   "b2": false,
+   "ns": "b",
+   "nn": 3,
+   "bb": false
+  },
+  {
+   "id": "mini03"
+  },
+  {
+   "id": "mini04",
+   "n": 0,
+   "f": 0,
+   "s": "",
+   "s2": "",
+   "b": false,
+   "b2": false,
+   "ns": "",
+   "nn": 0,
+   "bb": false
+  },
+  {
+   "id": "mini05",
+   "n": -1,
+   "f": -1.5,
+   "s": "\u00e9",
+   "s2": "e",
+   "b": true,
+   "b2": true,
+   "ns": null,
+   "nn": null,
+   "bb": null
+  },
+  {
+   "id": "mini06",
+   "n": 5,
+   "ns": null,
+   "nn": null,
+   "bb": null
+  },
+  {
+   "id": "mini07",
+   "n": 2,
+   "s": "2",
+   "ns": "2",
+   "nn": 2,
+   "f": 2
+  },
+  {
+   "id": "mini08",
+   "s": "\uffff",
+   "s2": "\ud800\udc00",
+   "ns": "\uffff"
+  },
+  {
+   "id": "mini09",
+   "s": "\ud800\udc00",
+   "s2": "\uffff",
+   "ns": "\ud800\udc00"
+  },
+  {
+   "id": "mini10",
+   "f": 2.5,
+   "n": 2,
+   "nn": 2.5
+  },
+  {
+   "id": "mini11",
+   "n": 7,
+   "f": 7,
+   "nn": 7,
+   "s": "7",
+   "s2": "7",
+   "ns": "7"
+  },
+  {
+   "id": "mini12",
+   "ns": "x"
+  },
+  {
+   "id": "mini13",
+   "nn": 4
+  },
+  {
+   "id": "mini14",
+   "bb": true
+  },
+  {
+   "id": "mini15",
+   "b": true,
+   "bb": null
+  },
+  {
+   "id": "get1",
+   "first name": "Ada",
+   "0": "zero",
+   "o": {
+    "k": 3
+   },
+   "o2": {
+    "k": 3
+   },
+   "u": {
+    "k": 3
+   },
+   "s": "Ada"
+  },
+  {
+   "id": "get2",
+   "first name": "Bo",
+   "o": {
+    "k": 4
+   },
+   "o2": {
+    "k": 3
+   },
+   "u": [
+    3
+   ],
+   "s": "Cy"
+  },
+  {
+   "id": "get3",
+   "u": {
+    "k": 3
+   },
+   "o": {},
+   "o2": {}
+  },
+  {
+   "id": "get4",
+   "first name": "Ada",
+   "o": {
+    "k": 5
+   },
+   "o2": {
+    "k": 5
+   },
+   "u": "k",
+   "a": [
+    1,
+    2
+   ],
+   "a2": [
+    1,
+    2
+   ]
+  },
+  {
+   "id": "proto",
+   "__proto__": "own",
+   "constructor": "c",
+   "toString": "t"
+  },
+  {
+   "id": "deep1",
+   "o": {
+    "k": 1
+   },
+   "o2": {
+    "k": 1
+   },
+   "a": [
+    1,
+    2
+   ],
+   "a2": [
+    1,
+    2
+   ],
+   "u": 1,
+   "n": 1
+  },
+  {
+   "id": "deep2",
+   "o": {
+    "k": 1
+   },
+   "o2": {
+    "k": 2
+   },
+   "a": [
+    1,
+    2
+   ],
+   "a2": [
+    2,
+    1
+   ],
+   "u": "x",
+   "n": 2
+  },
+  {
+   "id": "deep3",
+   "u": null,
+   "n": 3
+  }
+ ],
+ "cases": [
+  {
+   "name": "x against y: $eq",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.x",
+      "$it.y"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "x against y: $ne",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$ne": [
+      "$it.x",
+      "$it.y"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "x against y: $lt",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$lt": [
+      "$it.x",
+      "$it.y"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "x against y: $le",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$le": [
+      "$it.x",
+      "$it.y"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "x against y: $gt",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$gt": [
+      "$it.x",
+      "$it.y"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "x against y: $ge",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$ge": [
+      "$it.x",
+      "$it.y"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "p against q: $eq",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.p",
+      "$it.q"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "p against q: $ne",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$ne": [
+      "$it.p",
+      "$it.q"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "p against q: $lt",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$lt": [
+      "$it.p",
+      "$it.q"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "p against q: $le",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$le": [
+      "$it.p",
+      "$it.q"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "p against q: $gt",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$gt": [
+      "$it.p",
+      "$it.q"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "p against q: $ge",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$ge": [
+      "$it.p",
+      "$it.q"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "y against p: $eq",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.y",
+      "$it.p"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "y against p: $ne",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$ne": [
+      "$it.y",
+      "$it.p"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "y against p: $lt",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$lt": [
+      "$it.y",
+      "$it.p"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "y against p: $le",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$le": [
+      "$it.y",
+      "$it.p"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "y against p: $gt",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$gt": [
+      "$it.y",
+      "$it.p"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "y against p: $ge",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$ge": [
+      "$it.y",
+      "$it.p"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "not x against y: $eq",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$not": {
+      "$eq": [
+       "$it.x",
+       "$it.y"
+      ]
+     }
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "not x against y: $ne",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$not": {
+      "$ne": [
+       "$it.x",
+       "$it.y"
+      ]
+     }
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "not x against y: $lt",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$not": {
+      "$lt": [
+       "$it.x",
+       "$it.y"
+      ]
+     }
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "not x against y: $le",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$not": {
+      "$le": [
+       "$it.x",
+       "$it.y"
+      ]
+     }
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "not x against y: $gt",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$not": {
+      "$gt": [
+       "$it.x",
+       "$it.y"
+      ]
+     }
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "not x against y: $ge",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$not": {
+      "$ge": [
+       "$it.x",
+       "$it.y"
+      ]
+     }
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "x against y: an equality or an ordering",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$or": [
+      {
+       "$eq": [
+        "$it.x",
+        "$it.y"
+       ]
+      },
+      {
+       "$lt": [
+        "$it.x",
+        "$it.y"
+       ]
+      }
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "x against y: a difference outside an equality",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$and": [
+      {
+       "$ne": [
+        "$it.x",
+        "$it.y"
+       ]
+      },
+      {
+       "$not": {
+        "$eq": [
+         "$it.x",
+         "$it.y"
+        ]
+       }
+      }
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "x against y beside a literal",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$and": [
+      {
+       "$ne": [
+        "$it.x",
+        "$it.y"
+       ]
+      },
+      {
+       "$eq": [
+        "$it.x",
+        2
+       ]
+      }
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "x against the literal 2",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.x",
+      2
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "x against the literal 3.5",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.x",
+      3.5
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "x against the literal \"b\"",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.x",
+      "b"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "x against the literal \"2\"",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.x",
+      "2"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "x against the literal true",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.x",
+      true
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "x against the literal null",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.x",
+      null
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "x ordered against the literal 2",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$gt": [
+      "$it.x",
+      2
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "x ordered against the literal \"b\"",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$lt": [
+      "$it.x",
+      "b"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "x differs from the literal 2",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$ne": [
+      "$it.x",
+      2
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "p against the literal 2",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.p",
+      2
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "p against the literal 3.5",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.p",
+      3.5
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "p against the literal \"b\"",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.p",
+      "b"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "p against the literal \"2\"",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.p",
+      "2"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "p against the literal true",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.p",
+      true
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "p against the literal null",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.p",
+      null
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "p ordered against the literal 2",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$gt": [
+      "$it.p",
+      2
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "p ordered against the literal \"b\"",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$lt": [
+      "$it.p",
+      "b"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "p differs from the literal 2",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$ne": [
+      "$it.p",
+      2
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "x against the external 2",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.x",
+      "$v"
+     ]
+    },
+    "$return": "$it.id"
+   },
+   "externals": {
+    "v": 2
+   }
+  },
+  {
+   "name": "x against the external \"b\"",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.x",
+      "$v"
+     ]
+    },
+    "$return": "$it.id"
+   },
+   "externals": {
+    "v": "b"
+   }
+  },
+  {
+   "name": "x against the external \"2\"",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.x",
+      "$v"
+     ]
+    },
+    "$return": "$it.id"
+   },
+   "externals": {
+    "v": "2"
+   }
+  },
+  {
+   "name": "p against the external 2",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.p",
+      "$v"
+     ]
+    },
+    "$return": "$it.id"
+   },
+   "externals": {
+    "v": 2
+   }
+  },
+  {
+   "name": "p against the external \"b\"",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.p",
+      "$v"
+     ]
+    },
+    "$return": "$it.id"
+   },
+   "externals": {
+    "v": "b"
+   }
+  },
+  {
+   "name": "p against the external \"2\"",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.p",
+      "$v"
+     ]
+    },
+    "$return": "$it.id"
+   },
+   "externals": {
+    "v": "2"
+   }
+  },
+  {
+   "name": "x against itself: $eq",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.x",
+      "$it.x"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "x against itself: $ne",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$ne": [
+      "$it.x",
+      "$it.x"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "x against itself: $lt",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$lt": [
+      "$it.x",
+      "$it.x"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "x against itself: $le",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$le": [
+      "$it.x",
+      "$it.x"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "n against f: $eq",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.n",
+      "$it.f"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "n against f: $ne",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$ne": [
+      "$it.n",
+      "$it.f"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "n against f: $lt",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$lt": [
+      "$it.n",
+      "$it.f"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "n against f: $le",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$le": [
+      "$it.n",
+      "$it.f"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "n against f: $gt",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$gt": [
+      "$it.n",
+      "$it.f"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "n against f: $ge",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$ge": [
+      "$it.n",
+      "$it.f"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "n against s: $eq",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.n",
+      "$it.s"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "n against s: $ne",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$ne": [
+      "$it.n",
+      "$it.s"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "n against s: $lt",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$lt": [
+      "$it.n",
+      "$it.s"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "n against s: $le",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$le": [
+      "$it.n",
+      "$it.s"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "n against s: $gt",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$gt": [
+      "$it.n",
+      "$it.s"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "n against s: $ge",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$ge": [
+      "$it.n",
+      "$it.s"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "s against s2: $eq",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.s",
+      "$it.s2"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "s against s2: $ne",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$ne": [
+      "$it.s",
+      "$it.s2"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "s against s2: $lt",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$lt": [
+      "$it.s",
+      "$it.s2"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "s against s2: $le",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$le": [
+      "$it.s",
+      "$it.s2"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "s against s2: $gt",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$gt": [
+      "$it.s",
+      "$it.s2"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "s against s2: $ge",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$ge": [
+      "$it.s",
+      "$it.s2"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "b against b2: $eq",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.b",
+      "$it.b2"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "b against b2: $ne",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$ne": [
+      "$it.b",
+      "$it.b2"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "b against b2: $lt",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$lt": [
+      "$it.b",
+      "$it.b2"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "b against b2: $le",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$le": [
+      "$it.b",
+      "$it.b2"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "b against b2: $gt",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$gt": [
+      "$it.b",
+      "$it.b2"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "b against b2: $ge",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$ge": [
+      "$it.b",
+      "$it.b2"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "ns against s: $eq",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.ns",
+      "$it.s"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "ns against s: $ne",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$ne": [
+      "$it.ns",
+      "$it.s"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "ns against s: $lt",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$lt": [
+      "$it.ns",
+      "$it.s"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "ns against s: $le",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$le": [
+      "$it.ns",
+      "$it.s"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "ns against s: $gt",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$gt": [
+      "$it.ns",
+      "$it.s"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "ns against s: $ge",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$ge": [
+      "$it.ns",
+      "$it.s"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "nn against f: $eq",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.nn",
+      "$it.f"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "nn against f: $ne",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$ne": [
+      "$it.nn",
+      "$it.f"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "nn against f: $lt",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$lt": [
+      "$it.nn",
+      "$it.f"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "nn against f: $le",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$le": [
+      "$it.nn",
+      "$it.f"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "nn against f: $gt",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$gt": [
+      "$it.nn",
+      "$it.f"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "nn against f: $ge",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$ge": [
+      "$it.nn",
+      "$it.f"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "bb against b: $eq",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.bb",
+      "$it.b"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "bb against b: $ne",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$ne": [
+      "$it.bb",
+      "$it.b"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "bb against b: $lt",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$lt": [
+      "$it.bb",
+      "$it.b"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "bb against b: $le",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$le": [
+      "$it.bb",
+      "$it.b"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "bb against b: $gt",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$gt": [
+      "$it.bb",
+      "$it.b"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "bb against b: $ge",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$ge": [
+      "$it.bb",
+      "$it.b"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "ns against nn: $eq",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.ns",
+      "$it.nn"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "ns against nn: $ne",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$ne": [
+      "$it.ns",
+      "$it.nn"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "ns against nn: $lt",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$lt": [
+      "$it.ns",
+      "$it.nn"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "ns against nn: $le",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$le": [
+      "$it.ns",
+      "$it.nn"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "ns against nn: $gt",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$gt": [
+      "$it.ns",
+      "$it.nn"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "ns against nn: $ge",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$ge": [
+      "$it.ns",
+      "$it.nn"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "get on the binding: a name with a space",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      {
+       "$get": [
+        "$it",
+        "first name"
+       ]
+      },
+      "Ada"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "get on the binding: a difference",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$ne": [
+      {
+       "$get": [
+        "$it",
+        "first name"
+       ]
+      },
+      "Ada"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "get on the binding: a member named 0 exists",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$exists": {
+      "$get": [
+       "$it",
+       "0"
+      ]
+     }
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "get on the binding: a member named 0 is empty",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$empty": {
+      "$get": [
+       "$it",
+       "0"
+      ]
+     }
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "get on the binding against a path",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      {
+       "$get": [
+        "$it",
+        "first name"
+       ]
+      },
+      "$it.s"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "get on the binding: a string operator",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$starts-with": [
+      {
+       "$get": [
+        "$it",
+        "first name"
+       ]
+      },
+      "A"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "get on the binding: a name no member holds",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$exists": {
+      "$get": [
+       "$it",
+       "nope"
+      ]
+     }
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "get on the binding: a member named like a prototype member",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$exists": {
+      "$get": [
+       "$it",
+       "__proto__"
+      ]
+     }
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "get on the binding: a constructor member",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      {
+       "$get": [
+        "$it",
+        "constructor"
+       ]
+      },
+      "c"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "get on the binding: a name only the prototype chain holds",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$exists": {
+      "$get": [
+       "$it",
+       "hasOwnProperty"
+      ]
+     }
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "get on the binding: a quote in the name",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$exists": {
+      "$get": [
+       "$it",
+       "a\"b"
+      ]
+     }
+    },
+    "$return": "$it.id"
+   },
+   "unspellable": true
+  },
+  {
+   "name": "get under an object member",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      {
+       "$get": [
+        "$it.o",
+        "k"
+       ]
+      },
+      3
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "get under an object member exists",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$exists": {
+      "$get": [
+       "$it.o",
+       "k"
+      ]
+     }
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "get under two object members",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$gt": [
+      {
+       "$get": [
+        "$it.o",
+        "k"
+       ]
+      },
+      {
+       "$get": [
+        "$it.o2",
+        "k"
+       ]
+      }
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "get under an untyped member",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      {
+       "$get": [
+        "$it.u",
+        "k"
+       ]
+      },
+      3
+     ]
+    },
+    "$return": "$it.id"
+   },
+   "stays": "predicate.operands"
+  },
+  {
+   "name": "get under an untyped member exists",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$exists": {
+      "$get": [
+       "$it.u",
+       "k"
+      ]
+     }
+    },
+    "$return": "$it.id"
+   },
+   "stays": "predicate.existence"
+  },
+  {
+   "name": "get with an index on an array member",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      {
+       "$get": [
+        "$it.a",
+        0
+       ]
+      },
+      1
+     ]
+    },
+    "$return": "$it.id"
+   },
+   "stays": "predicate.operands"
+  },
+  {
+   "name": "an untyped member against a typed one",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.u",
+      "$it.n"
+     ]
+    },
+    "$return": "$it.id"
+   },
+   "stays": "predicate.joinTerritory"
+  },
+  {
+   "name": "an object member against a typed one",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.o",
+      "$it.n"
+     ]
+    },
+    "$return": "$it.id"
+   },
+   "stays": "predicate.joinTerritory"
+  },
+  {
+   "name": "two object members",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.o",
+      "$it.o2"
+     ]
+    },
+    "$return": "$it.id"
+   },
+   "stays": "predicate.joinTerritory"
+  },
+  {
+   "name": "two array members",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$ne": [
+      "$it.a",
+      "$it.a2"
+     ]
+    },
+    "$return": "$it.id"
+   },
+   "stays": "predicate.joinTerritory"
+  },
+  {
+   "name": "an untyped member against an object member",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.u",
+      "$it.o"
+     ]
+    },
+    "$return": "$it.id"
+   },
+   "stays": "predicate.joinTerritory"
+  }
+ ]
+}

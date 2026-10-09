@@ -1,0 +1,233 @@
+{
+ "group": "32 entity group order over members of other types",
+ "model": {
+  "$model": "0.1",
+  "entities": {
+   "Item": {
+    "schema": {
+     "type": "object",
+     "required": [
+      "id"
+     ],
+     "properties": {
+      "id": {
+       "type": "integer",
+       "x-entity": {
+        "key": true
+       }
+      },
+      "g": {
+       "type": "string",
+       "x-entity": {
+        "index": true
+       }
+      },
+      "n": {
+       "type": [
+        "integer",
+        "null"
+       ]
+      },
+      "u": {
+       "type": [
+        "integer",
+        "number"
+       ]
+      },
+      "f": {
+       "type": "number"
+      },
+      "b": {
+       "type": "boolean"
+      }
+     }
+    }
+   }
+  }
+ },
+ "documents": {
+  "Item": [
+   {
+    "id": 1,
+    "g": "A",
+    "n": 1,
+    "u": 0.1,
+    "f": 0.1,
+    "b": true
+   },
+   {
+    "id": 2,
+    "g": "A",
+    "u": 0.2,
+    "f": 0.2,
+    "b": false
+   },
+   {
+    "id": 3,
+    "g": "A",
+    "u": 0.3,
+    "f": 0.3,
+    "b": true
+   },
+   {
+    "id": 4,
+    "g": "B",
+    "n": 2,
+    "u": 0.6,
+    "f": 0.6,
+    "b": false
+   }
+  ]
+ },
+ "cases": [
+  {
+   "name": "a sum of a member that may be null",
+   "query": {
+    "$for": {
+     "it": "$.Item[*]"
+    },
+    "$groupby": {
+     "g": "$it.g"
+    },
+    "$orderby": [
+     {
+      "$key": {
+       "$sum": "$it.n"
+      },
+      "$dir": "asc"
+     }
+    ],
+    "$return": {
+     "g": "$g"
+    }
+   }
+  },
+  {
+   "name": "an average of a member that may be null",
+   "query": {
+    "$for": {
+     "it": "$.Item[*]"
+    },
+    "$groupby": {
+     "g": "$it.g"
+    },
+    "$orderby": [
+     {
+      "$key": {
+       "$avg": "$it.n"
+      },
+      "$dir": "asc"
+     }
+    ],
+    "$return": {
+     "g": "$g"
+    }
+   }
+  },
+  {
+   "name": "a sum of a member that may hold a fraction",
+   "query": {
+    "$for": {
+     "it": "$.Item[*]"
+    },
+    "$groupby": {
+     "g": "$it.g"
+    },
+    "$orderby": [
+     {
+      "$key": {
+       "$sum": "$it.u"
+      },
+      "$dir": "asc"
+     }
+    ],
+    "$return": {
+     "g": "$g"
+    }
+   }
+  },
+  {
+   "name": "an average of a member that may hold a fraction",
+   "query": {
+    "$for": {
+     "it": "$.Item[*]"
+    },
+    "$groupby": {
+     "g": "$it.g"
+    },
+    "$orderby": [
+     {
+      "$key": {
+       "$avg": "$it.u"
+      },
+      "$dir": "desc"
+     }
+    ],
+    "$return": {
+     "g": "$g"
+    }
+   }
+  },
+  {
+   "name": "a sum of a member that may hold a fraction, returned",
+   "query": {
+    "$for": {
+     "it": "$.Item[*]"
+    },
+    "$groupby": {
+     "g": "$it.g"
+    },
+    "$return": {
+     "g": "$g",
+     "t": {
+      "$sum": "$it.u"
+     }
+    }
+   }
+  },
+  {
+   "name": "a sum of a boolean member",
+   "query": {
+    "$for": {
+     "it": "$.Item[*]"
+    },
+    "$groupby": {
+     "g": "$it.g"
+    },
+    "$orderby": [
+     {
+      "$key": {
+       "$sum": "$it.b"
+      },
+      "$dir": "asc"
+     }
+    ],
+    "$return": {
+     "g": "$g"
+    }
+   }
+  },
+  {
+   "name": "a sum of a floating member",
+   "query": {
+    "$for": {
+     "it": "$.Item[*]"
+    },
+    "$groupby": {
+     "g": "$it.g"
+    },
+    "$orderby": [
+     {
+      "$key": {
+       "$sum": "$it.f"
+      },
+      "$dir": "asc"
+     }
+    ],
+    "$return": {
+     "g": "$g"
+    }
+   }
+  }
+ ]
+}

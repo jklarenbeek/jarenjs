@@ -170,13 +170,38 @@ dialect papering over:
   form. SQLite's `jsonb_extract` reads whatever the member holds, so its
   `json_type` guards stay load-bearing there; externals and type tests
   keep the discriminator on both engines.
+- **One spelling for an index and a name.** `#>` takes the element `0`
+  of an array and the key `0` of an object for the same path step (and
+  `-1`, `+1` and ` 1` for array indexes), where the engine's path and
+  SQLite's select an element by index and a member by name alone. A query
+  reads a path with such a step from a document guarded on each parent —
+  `queryGuard`, a dialect member only the query emitters call, and the
+  `queryDocument` it yields — so a document whose container is the other
+  kind is no document and the member is absent; a path with no such step is
+  written as it always was. The generated columns, the migrations and the
+  drift read-back keep spelling paths through `jsonPathText` and
+  `jsonExtract` unchanged, which is why an existing database never reads as
+  drifted. A comparison, an ordering or a grouping that would read such a
+  column reads the guarded document instead wherever the schema leaves the
+  step's container open (no declared `type`: `items` binds arrays alone and
+  `properties` objects alone, so the other kind conforms), and the declared
+  interval's exact seek holds the document to the container beside its
+  bound columns; a path whose container the schema declares (`type: 'array'`
+  for an index step, `type: 'object'` for a digit name) keeps its column and
+  its index. What the columns, the CHECK and the store's own interval check
+  still read is the key `0` of an object for an index step and an element
+  of an array for a name: for a declared container that document is
+  non-conforming, for an open one it conforms and they read it as they
+  always did.
 A fourth difference is a limit, not a spelling, and the planner and the
 query layer enforce it rather than the emitter. PostgreSQL's planner
 prices every leaf per row, and a chain long enough to cross its JIT
 thresholds is compiled by LLVM, which checks for no interrupt, so a cancel
 and a statement timeout wait for the compile to end. The dialect declares
 `maxPredicateTerms: 128`; the planner counts the leaves once it has
-regrouped and answers a document past the bound in the engine, named
+regrouped (a comparison of two paths decided one family at a time counts a
+leaf for each family the two share) and answers a document past the bound
+in the engine, named
 `predicate.termBound`, while a graph load and a native mutation, which
 have no engine path, refuse it by name. SQLite declares none.
 
@@ -419,8 +444,12 @@ A single-binding FLWOR over the collection (`$for: { <name>: '$[*]' }`
 — the examples here write `it`, but the binding is the **document's** to
 name and nothing translates differently under another one)
 with: comparison predicates (`$eq $ne $lt $le $gt $ge`) between a
-singular member path and a literal or external, or two paths in the same
-non-null number/string family; membership — `$eq` between a singular
+singular member path and a literal or external, or two paths the schema
+types as scalars, compared by the family of their values (the type truth
+table below); a literal `$get` over the binding or over a member the schema
+types `object` reads as the member path it names, in a collection query's
+`$exists`, `$empty`, six comparisons and, over a member typed `string`
+alone, three string operators; membership — `$eq` between a singular
 member path and a `$seq` of scalar literals or every item of an external
 (`'$ids[*]'`), in either order, and an `$or` of two or more equalities
 comparing one member with scalar literals, each ONE list predicate;
@@ -449,12 +478,19 @@ may emit zero or several items per source row.
 General scalar grouping preserves absent and null keys separately through
 value/type pairs. Null and boolean keys may group, but ordering them stays
 residual to preserve `JQ2005`. Explicit group ordering accepts orderable keys and proven count/min/max
-expressions, including aggregates absent from the return; first appearance
-breaks ties. SUM/AVG ordering remains residual: compensated or differently
+expressions and integer sums and averages, including aggregates absent from the return; first appearance
+breaks ties. A floating SUM/AVG ordering remains residual: compensated or differently
 ordered SQL accumulation can change which group sorts first. A grouped
-SUM/AVG over a `number` member stays in the engine for the same reason; over
+SUM/AVG over a `number` member (or one declared `integer` and also `number`)
+stays in the engine for the same reason; over
 an `integer` member each group carries the exactness guard, and a group past
-it sends the run to the engine. Literal windows lower over singleton group constructors;
+it sends the run to the engine. A group with no value orders as the engine
+orders it: a sum as `0`, an average as the empty key. That guard is read on
+the groups a statement returns, so a window over groups ordered by an
+integer sum or average stays in the engine (`plan.windowedAccumulation`).
+An ordered group key is read at its own kind (a number by value, a string by
+code point, on PostgreSQL `numeric` and `COLLATE "C"`), never from the text the
+decoder reads. Other literal windows lower over singleton group constructors;
 `$count` over such constructors with only row-count aggregates counts a grouped
 subquery. `$distinct` over a typed scalar projection uses the same key relation, with
 absent members removed first. Unordered inputs retain first appearance; an
@@ -501,16 +537,18 @@ mode, `knn`, beside native, row and set.
 | construct | reason |
 |---|---|
 | `$let` bindings, `$fold`, positional/window bindings | no equivalence proof exists yet; residual by default |
-| a `$groupby` whose key is untyped, whose `$return` reads the binding, or whose `$orderby` names anything but an orderable key or count/min/max | SQL's grouping and the engine's need not agree on an untyped key; after a grouping the binding holds the group's ROWS, which an object member cannot take |
-| a window over a group return that may omit an item, or a group aggregate beyond the proven constructor count | SQL group cardinality must equal the projected item cardinality; numeric and error semantics need their own proof |
+| a `$groupby` whose key is untyped, whose `$return` reads the binding, or whose `$orderby` names anything but an orderable key, a count/min/max or an integer sum/avg | SQL's grouping and the engine's need not agree on an untyped key; after a grouping the binding holds the group's ROWS, which an object member cannot take; a floating sum or average accumulates in the engine's order (`plan.floatingAccumulation`) |
+| a window over a group return that may omit an item, or over groups ordered by an integer sum/avg (`plan.windowedAccumulation`), or a group aggregate beyond the proven constructor count | SQL group cardinality must equal the projected item cardinality; the exactness guard beside a sum is read on the groups a statement returns, not on those a window leaves out; numeric and error semantics need their own proof |
+| an entity grouping over a compound physical key whose order leaves two groups tied (`entity.groupOrder`), or over a store-owned PostgreSQL table (`bind.entityGrouping`) | tied groups come out by first appearance, the smallest key TUPLE, which the minima of the key columns taken one by one do not give; the runtime guards (`_safe`, `_valid`) are qualified on SQLite and over an adopted PostgreSQL table with no document column |
 | a `$for` binding nothing joins to — a cartesian product | the engine builds the product; a plan that emitted one by accident is the thing an equi-join graph exists to prevent |
 | non-singular path expansion | one relation per binding in this version |
+| an entity navigation hop that is chained, ordered or grouped inside, correlated by an inequality, or by equalities across comparison families or over members that admit `null` in their type or their column's policy (`entity.hopShape`; an uncorrelated one in a `$where` is `entity.conjunctBinding`); a hop read as a value (order key, projection leaf) whose equalities do not cover the related entity's key (`entity.hopValue`) | SQL equates the string `"1"` with no integer where the engine does not, pairs no `null` with `null` where the engine pairs them, and a scalar subselect over two rows raises where the engine raises `JQ2005`/`JQ2001` itself — the shapes without the proof keep the engine's answer and its errors |
 | `$match` and other unlisted operators, `$call` | no native spelling proven equivalent |
 | `$orderby` with a `$collation` | a collation the dialect cannot reproduce is refused, not approximated |
 | a projection the tree cannot rebuild: an operator over a member, a reference to the binding itself, a non-singular path | the WHOLE projection runs per row (the row residual) — pushed and ordered rows, projected by the engine; a window over these items runs in the set residual; promoting the part that composes would answer a shape nobody asked for |
 | a document that reads the collection root outside its binding — `$`, `$.…`, `$[…]`, a nested query over `$[*]`, a variable bound to the root, the root inside a path filter (`$it.xs[?@ == $[0].n]`) | the engine answers over the WHOLE collection (under a profile, the rows its mandatory predicate keeps): the row residual would hand it one row, and a pushed conjunct, the deterministic-function hatch, a window or a k-nearest cut the rows they keep — so such a document is planned with no hook (nothing registered for a narrowing it cannot keep), a plan that narrows becomes the bare fetch with the reason `plan.rootRead`, and one that already fetches every row keeps its own reasons. The planner counts root reads over the analysis, filter selectors included; a phrase it narrows reads the root once, through its binding or a temporal operator's operand |
 | string operators with an external pattern | the pattern's type is unknowable at plan time and the engine ERRORS on non-string patterns |
-| path comparisons with untyped, nullable, boolean or differing comparison families | the total typed comparison proof does not cover these shapes |
+| a comparison of two paths when either is not typed as a scalar — an object, an array, an untyped member (`predicate.joinTerritory`; an entity query also refuses a pair outside one non-null number or string family); a `$get` whose target is untyped, whose key is no literal string, or that feeds a string operator over a member that can hold another kind (`predicate.operands`, `predicate.existence`, `predicate.stringSubject`) | `$eq` and `$ne` compare objects and arrays deeply, member order and `1` against `1.0` insignificant inside, which SQL text cannot reproduce; the engine raises on a string operator's subject of another kind; the deterministic-function hatch may still take it |
 | `$distinct` over untyped/compound projections or ordering by other paths | first-occurrence order and structural equality need additional lowering |
 | array/object literals in comparisons | deep-equality has no guarded native form |
 | `$within` over a `derive: 'bbox'` column | a bounding-box pre-filter is pushed; exact containment refines in the engine |
@@ -564,9 +602,39 @@ generated column where one exists), `?` = the bound operand:
 | `$eq` path, `$seq` of literals | `(jt = 'text' AND v IN (SELECT value FROM json_each(?) WHERE key IS NOT NULL AND type = 'text')) OR (jt IN ('integer','real') AND v IN (… type IN ('integer','real')))` — the strings bind as one JSON list and the numbers as another; a `null`, `true` or `false` in the list is its own `jt` test, OR'd in; an empty list is constant `FALSE` |
 | `$eq` path, `$x[*]` | the same two branches, each binding the external's JSON; `json_each` reaches an array's elements or an object's member values, and a scalar reaches nothing — the engine's `[*]` |
 | ordering vs external | the same two-branch form with `op` |
+| `$eq` path, path | `jtL IS NOT NULL AND jtR IS NOT NULL AND (…)` with one term for each family both members can hold: numbers `jtL IN ('integer','real') AND jtR IN ('integer','real') AND vL = vR`, strings `jtL = 'text' AND jtR = 'text' AND vL = vR`, booleans `jtL IN ('true','false') AND jtR IN ('true','false') AND vL = vR`, nulls `jtL = 'null' AND jtR = 'null'`; a side that can hold only that family omits its test; two members that share no family: constant `FALSE` |
+| `$ne` path, path | `jtL IS NOT NULL AND jtR IS NOT NULL AND NOT (…the $eq terms…)`; with no family in common, the two presence tests alone |
+| `$lt/$le/$gt/$ge` path, path | the number and string terms with `op`; constant `FALSE` when the two share neither |
 | `$starts-with` path, string | `jt = 'text' AND (v >= ? AND v < ?)` — the prefix and its code-point successor |
 | `$ends-with` path, string | `jt = 'text' AND (length(?) = 0 OR substr(v, -length(?)) = ?)` |
 | `$contains` path, string | `jt = 'text' AND instr(v, ?) > 0` |
+
+**A path against a path is decided by the family of the two values.**
+Only members the schema types as scalars qualify — `string`, `number`,
+`integer` and `boolean`, each optionally with `null` — because those never
+hold an object or an array, whose comparison is deep; the planner reads the
+WHOLE type of each member (`['string', 'null']` is a text member that may
+hold `null`). Two present values are equal when they are of one family and
+equal there (numbers as numbers, `1` and `1.0` alike; strings by code point;
+booleans by value; two `null`s), differ otherwise, and order only as two
+numbers or two strings, so `$le` of two `null`s or two booleans is false and
+a number never orders against a string; an absent member answers `false` for
+every operator, `$ne` included. Each family's term is true or false, never
+`NULL` (on PostgreSQL the test of a side is the typed value's own `IS NOT
+NULL`), so a negation composes. Two members of one family that hold nothing
+else (`integer` against `number`) keep the plain `vL op vR`. An entity query
+keeps that plain form alone: its path comparisons over mapped columns
+compare one family, and every other pair stays with the engine.
+
+**A member's column answers its own kind.** A member the schema lets hold
+more than one kind (`['string', 'number']`) has a generated column of its
+FIRST type, and a SQLite column's affinity rewrites a value of any other
+kind — a `TEXT` column holds the number `2` as the text `'2'`, so a numeric
+comparison against it answers by text order or by the spelling of the bound
+number, never by value — so a comparison reads that column for the
+first type's kind and the document for every other, whether the operand is a
+literal, an external or another path. The string comparison of such a
+member still seeks its index; the number comparison does not.
 
 **The prefix predicate is index-usable, and the other two are not.**
 `$starts-with` emits a half-open range over the value, so a declared
@@ -1043,7 +1111,20 @@ recheck (mixed stored precisions can never diverge from the engine's
 codepoint order), and everything else rides the phase-A guarded truth
 table aliased per binding. Two-binding equijoins emit INNER JOIN with
 binding-order row-identity tiebreakers — exactly the engine's
-nested-loop order. The graph loader compiles include trees to
+nested-loop order. A navigation hop — a plain FLWOR over another entity,
+correlated with the row by column equalities of one comparison family that
+admit no null — is a correlated subselect of the same statement: `EXISTS`, `COUNT(*)`
+or a scalar read, in a predicate, a count or value leaf, an order key, or as
+the root `$some`/`$every`. It is one implementation of one proof: the hop
+planner reads the FLWOR once, every site wraps the same descriptor, and a
+profile's mandatory predicate and the dialect's term bound reach every
+site through it (MODEL-FORMAT §10.1). A grouping over one binding is a `GROUP BY`
+over its keys' value/type pairs with each aggregate beside its guards, and the
+groups come out by the keys, the aggregates (an integer sum or average, a count,
+an extreme) and then the first row of each group; where the first row is a
+compound physical key it is a tuple no per-column minimum gives, so an order
+that leaves two groups tied keeps that grouping in the engine (MODEL-FORMAT
+§10.6). The graph loader compiles include trees to
 correlated `json_group_array`/`json_object` subqueries: one statement
 per load, proven by a counting driver, never promised.
 

@@ -174,6 +174,14 @@ On PostgreSQL an array step in the span's path (`$.spans[0]`) is read through
 `#>`, which resolves the key `"0"` of an object in that position too: a
 document whose `spans` is an object keyed so is read as a span by the store,
 the CHECK and the native plan, where SQLite and the query engine read none.
+The generated bound columns, the CHECK and the store's own check carry that
+reading (their text is the one the catalog is compared with). A query is held
+to the container: a comparison or an ordering over a path whose container the
+schema leaves open reads the guarded document rather than the column, and the
+exact `$overlaps` plan holds the document to the span's container beside the
+bound columns, so neither answers a document the engine reads none of. Where
+the schema declares the container's type (`type: 'array'`) such a document is
+non-conforming and the column is read as it stands.
 
 An invalid model document is `JD0005` with a `docPath` pointing at the
 offending member. Model checking happens before any database work.
@@ -2358,7 +2366,24 @@ The per-driver capability matrix — read once at open, on
 
 On **bun:sqlite** there is no UDF API, so `pushableOperators` is `[]` and
 every registered operator is the residual (§8.1) — no failure, the same
-result, reported by capability. A **profiled (untrusted) document never
+result, reported by capability. What has a native spelling never needed the
+function: a comparison of two member paths the schema types as scalars
+(`string`, `number`, `integer`, `boolean`, each optionally with `null`),
+across JSON type families, and a literal `$get` over the binding or over a
+member the schema types `object`, plan native on every driver in a collection
+query — two present values are equal when they are of one family and equal
+there, differ otherwise, and order only as two numbers or two strings, and an
+absent member answers `false` for every operator — so `bun:sqlite` and
+PostgreSQL answer them in the database and `node:sqlite` no longer registers a
+function for them. A comparison of two paths when either is typed as an object
+or an array, or not typed, a `$get` over an untyped target, and a `$get` that
+feeds a string operator over a member that can hold another kind keep the
+function on `node:sqlite` and the residual elsewhere, named
+(`predicate.joinTerritory`, `predicate.operands`, `predicate.existence`,
+`predicate.stringSubject`); an untyped path against a literal or an external
+plans native as it always did. An entity query keeps its plain comparison of
+two members of one non-null number or string family and refuses every other
+pair as before. A **profiled (untrusted) document never
 triggers host-side registration** — the UDF hatch is gated on `profile
 === null`, exactly as the engine-internal hatch is; a profiled `$sqrt`
 predicate runs in the residual.
@@ -2907,11 +2932,62 @@ the one function that derives them. The document format is unchanged:
 `{ $for: { r1: '$.User[*]' }, $where: { $eq: ['$r1.id', '$it.authorId'] },
 $return: '$r1.email' }` (QUERY-PEN §4, relation navigation) — a
 document a hand could have written, which this translator and the
-engine both run and the oracle proves (`15-linq-hops.json`). Every such
-lowered shape is a residual here (§10.6 — a projection, a comparison or
-an existence test over a phrase rather than a member path, an ordering
-by a phrase), named by `explain()` and refused under `strict`; none
-pushes natively in this version.
+engine both run and the oracle proves (`15-linq-hops.json`).
+
+To the translator that phrase is a **navigation hop** when it is one plain
+FLWOR over a declared entity array, correlated with the row by column
+equalities: its `$where` holds those equalities and predicates over the
+related entity alone, its `$return` is the binding or one singular member
+path of it, and it has no `$orderby`, `$let`, `$groupby`, window, second
+binding or hop of its own. A correlation qualifies only when both sides are
+mapped columns of one comparison family, neither boolean, neither admitting
+`null` — in its schema type or in its column's policy, `null: 'null'` reading
+a NULL as a present `null` — because the engine equates the string `"1"`
+with no integer and `null` with `null`, where SQL does neither. Such a hop
+is a correlated subselect of the row's own statement:
+
+- a comparison of the member a hop returns with a literal or an external,
+  in either operand order, is existential — true when any related row's
+  member compares true, and no operand pair raises — so it is
+  `EXISTS (SELECT 1 FROM <related> WHERE <correlation> AND <the comparison
+  the member plans to anywhere else>)`;
+- `$exists` and `$empty` of a hop are `EXISTS` and `NOT EXISTS`; a hop that
+  returns a member counts only the rows that carry it, so the emptiness of a
+  member-less author is true, not only that of a missing one;
+- `$count` of a hop compared with a number is `(SELECT COUNT(*) …) <op> n`,
+  a fraction or a magnitude past 64 bits folding as it does for an integer
+  column; a count is always present, so against any other scalar only
+  `$ne` holds and the comparison is a constant, and an external keeps the
+  count in the engine;
+- `$some` and `$every` over one entity array are one `EXISTS` of the rows
+  the condition selects, and one `NOT EXISTS` of the rows it does not; the
+  answer is the boolean;
+- a `$let` bound to a bracketed hop and read only as `$count` of `$g[*]` —
+  the group join that counts its children — is that count;
+- a hop that is an order key or a projection leaf is a scalar subselect, and
+  only when its equalities cover the related entity's declared key, so that
+  it reaches one row at most. A hop that finds none, or whose member is
+  absent, orders by the `$empty` placement and leaves its member out of the
+  projected object, as the engine does — a hop that reaches no row (a
+  dangling key, a NULL key, a related row a profile hides) leaves it out
+  whatever the column's policy says of a NULL it does read, which is a
+  present `null` under `null: 'null'` and a refusal (`JD2003`) under
+  `reject`, as anywhere else; `explain().order` reports such a key against
+  the hop's own binding.
+
+Every subselect reads its related entity under that entity's mandatory
+profile predicate, once for each place the statement reads it — a value
+leaf reads it twice, for the member and for its type — and the leaves of
+the filter inside it count toward the dialect's term bound as many times as
+the statement carries them. A profile that refuses full-table scans sees the
+scan inside a subselect as it sees a join's. A hop that is none of the above
+stays in the engine, named by `explain()` and refused under `strict`
+(§10.6): a hop out of a hop, an inner ordering, a correlation by an
+inequality, equalities across comparison families or over members that admit
+`null` (`entity.hopShape`), and a hop read as a value without the key proof
+(`entity.hopValue`). A hop with no correlation to the row is no hop of it: in
+a `$where` its conjunct belongs to no binding (`entity.conjunctBinding`),
+anywhere else it is `entity.hopShape`.
 
 Per binding, predicates resolve through three reference flavors:
 
@@ -2995,9 +3071,14 @@ narrative; the paired foreign key carries an index (every foreign key
 does — unique for a strict one-to-one, plain otherwise), so the probe
 side of the join is a `SEARCH`, never a second scan.
 
+A navigation hop (§10.1) is a join's correlated cousin: it never multiplies
+the outer rows, only filters, counts or decorates the row it hangs from, so
+the join graph and the result order are the ones the bindings give.
+
 Projection trees of singular member paths and constants lower over one or
 several bindings. Counts over those trees count their items; a single-path
-count or window first excludes rows where that path is absent. Boolean
+count or window first excludes rows where that path is absent, and a hop
+leaf excludes the rows whose related row does not carry the member. Boolean
 predicates may span bindings when each leaf uses one binding's proven total
 forms. The mandatory column equalities still establish the join graph;
 a disjunction is never treated as a mandatory join edge. Compatible path
@@ -3305,14 +3386,35 @@ a number appears only where `capabilities.rowEstimates` is filled):
 - a non-equality predicate used as the only join anchor, or a boolean
   predicate whose individual leaf cannot be assigned to one binding;
 - collection grouping with untyped keys, row-binding returns, or ordering by
-  anything except an orderable key or count/min/max expression; entity grouping; aggregates over groups
-  beyond a count of singleton constructors containing keys, literals and row
-  counts; windows over group returns that may omit an item;
+  anything except an orderable key or a count, minimum, maximum, integer sum
+  or integer average expression; entity grouping over more than one binding,
+  over a floating or date-codec aggregate, or over a compound physical key
+  whose order leaves two groups tied (`entity.groupOrder`), and, on
+  PostgreSQL, over a store-owned table (`bind.entityGrouping`); aggregates
+  over groups beyond a count of singleton constructors containing keys,
+  literals and row counts; windows over group returns that may omit an item,
+  and over groups ordered by an integer sum or average
+  (`plan.windowedAccumulation`);
 - projection trees containing operators, whole entity binding references or
   non-singular paths; windows over those opaque projections;
+- a navigation hop out of shape (`entity.hopShape`): a hop out of a hop,
+  one with an inner `$orderby`, `$let`, grouping or window, one correlated
+  by an inequality, or with equalities across comparison families or over
+  members that admit `null` (an uncorrelated hop in a `$where` belongs to
+  no binding: `entity.conjunctBinding`); and a hop read as
+  a value (`entity.hopValue`) — an order key, a projection leaf — whose
+  equalities do not cover the related entity's declared key, or that
+  returns the binding itself: where one related row is not guaranteed the
+  engine raises (`JQ2005`, `JQ2001`), so it keeps the error (§10.1);
 - `$distinct` over untyped/compound projections or ordering by other paths;
   typed scalar projections lower when unordered or ordered solely by the
   projected path, preserving first occurrence or that declared order;
+- a comparison of two paths when either is not typed as a scalar (an object, an
+  array, a member with no type), which compares deeply; a `$get` over an
+  untyped target, with a key that is no literal string, or feeding a string
+  operator over a member that can hold another kind; and, in an entity query,
+  a comparison of two paths that do not hold one and the same non-null number
+  or string family (`predicate.joinTerritory`);
 - externals against document paths; booleans and `null` at bind time;
   a bound membership list against a boolean column, and one holding a
   `null`, a boolean, an object or an array at bind time;
@@ -3367,6 +3469,38 @@ pinned series still seeks the series index (`explain().series.mode` is
 `hybrid`, its refinement `resampleSeries`, with the index and its
 pinned prefix) — so the engine adds only the rows the document
 selects; `$min`, `$max`, counts and `integer` readings stay native.
+
+Groups ordered by an integer `$sum` or `$avg` — a collection's, and an
+entity's over one binding — come out in the order of the aggregate the
+statement selects, beside the guard above: a group with no value sums to `0`
+and averages to the empty key, which `$empty` places; groups the order
+leaves tied come out by first appearance, the group's earliest row; a group
+past the guard sends the call to the engine, whose order that is. A
+collection's floating sum or average orders in the engine, named
+`plan.floatingAccumulation` (an entity grouping's is `entity.projection`);
+so does a member declared `integer` that may also hold a `number` (whichever
+type is listed first) and an adopted column whose codec is not `integer`,
+since neither is a sum of whole numbers. A window over a collection's groups
+ordered by either is the engine's too, named `plan.windowedAccumulation`: the
+guard is read on the groups a statement returns, and a group the window
+leaves out could rank elsewhere in the engine's order (an entity grouping
+under a window is `entity.projection`). The nullable form of a sum
+(`$if` over `$exists` of the non-null values) and the plain sum of the same
+member are two aggregates of one grouping: a group with no value is `null`
+in the first and `0` in the second, which is the one an order reads. A group
+key orders as its own kind on every dialect, a number by value and a string
+by code point; PostgreSQL reads an ordered key at that kind (`numeric`,
+`COLLATE "C"`) rather than from the text the decoder reads, so neither the
+digits of a number nor the database's collation decide. An entity grouping over a compound physical key
+orders its tied groups by the smallest key tuple, which the minima of the
+key columns taken one by one do not give: one whose order leaves two groups
+tied — no order, an aggregate, a key left out — is the engine's
+(`entity.groupOrder`), and an order that names every group key ranks every
+pair of groups apart and lowers. The runtime guards of an entity grouping
+(`_safe`, `_valid`) are qualified on SQLite and over a PostgreSQL table with
+no document column, an adopted one; a store-owned PostgreSQL table plans the
+set residual under `bind.entityGrouping`. An entity grouping under a window
+is the engine's on every dialect.
 
 One deviation between a pushed answer and the engine's is DECLARED
 rather than refused, because the database is right by its own

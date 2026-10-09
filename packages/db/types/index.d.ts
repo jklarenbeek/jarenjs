@@ -2142,7 +2142,7 @@ export declare function entityPathRef(node: unknown, slot: number, shape: unknow
 export declare function planEntityPredicate(node: unknown, slot: number, shape: unknown): unknown;
 export declare function planEntityQuery(document: unknown, entities: unknown, mapping: unknown): unknown;
 export declare function emitPlan(plan: unknown, dialect: Dialect, physical: unknown): unknown;
-export declare function createEntityPredicateEmitters(dialect: Dialect, param: unknown): unknown;
+export declare function createEntityPredicateEmitters(dialect: Dialect, param: unknown, related?: unknown): unknown;
 export declare function emitEntityPlan(plan: unknown, dialect: Dialect, physicalOf: unknown): unknown;
 export declare function mergeEntityRow(entityMapping: unknown, row: unknown, docField?: string): unknown;
 export declare function parseGraphRow(node: unknown, row: unknown, docField?: string): unknown;

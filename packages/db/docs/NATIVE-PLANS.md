@@ -29,25 +29,35 @@ const explanation = await store.explain(document);
 ```
 
 Native correlations require one inner entity root, equality edges to outer
-bindings, a bare inner return, and supported scalar predicates. Windows, grouping
-and ordering inside a correlation, and arbitrary computed inner returns remain residual. Mandatory profile filters
+bindings, a bare inner return or one singular member path of it, and supported
+scalar predicates. Such a hop counts, tests existence or emptiness, takes part
+in a comparison, and — where its equalities cover the inner entity's declared
+key — orders rows or fills a projected member; `$some` and `$every` over one
+entity array are one `EXISTS` (MODEL-FORMAT §10.1). Windows, grouping
+and ordering inside a correlation, a hop out of a hop, and arbitrary computed
+inner returns remain residual. Mandatory profile filters
 apply to correlated roots too. Scalar column projections preserve declared NULL
 policies. Codecs needing transformed representations remain decoded-row work.
 
 Grouping is restricted to one root and reconstructible keys/aggregates. A nullable
 SQL sum needs an explicit query expression: test existence of non-null values,
 then sum those values, otherwise return literal null. An ordinary JSON sum over
-an empty sequence remains zero. Compound physical identities without explicit
-group ordering remain residual; the first-seen order cannot be replaced with
-independent SQL minima. Unsupported shapes give a reason in `explain`; strict
-mode refuses them with `JD0010`.
+an empty sequence remains zero, beside the nullable form of the same sum in one
+grouping: each is an aggregate of its own. Groups an order leaves tied come out by first
+appearance, and over a compound physical identity that is the smallest key
+tuple, which independent SQL minima do not give: such a grouping (no order, an
+aggregate, a key left out) remains residual, while an order naming every group
+key ranks the groups apart and lowers. Unsupported shapes give a reason in
+`explain`; strict mode refuses them with `JD0010`.
 Physical integer sums/averages also prove the group's magnitude/count bound
 inside SQL. When intermediate exactness cannot be guaranteed, ordinary execution
 uses the existing decoded evaluator and reports that diversion; strict execution
 refuses `JD0010`. This can cost an additional statement and full decoded scans.
 Floating sums/averages and date/datetime grouping remain residual. Collection
 sums and averages follow the same rules: a `number` member stays in the engine
-(`plan.floatingAccumulation`), which adds the rows the pushed `$where` still
+(`plan.floatingAccumulation`; so does one declared `integer` and also `number`,
+in either order, and an adopted column whose codec is not `integer`), which
+adds the rows the pushed `$where` still
 selects through its index, and an `integer` one folds as a double beside the same
 magnitude/count bound, its run answered by the engine past it over those same
 selected rows (`explain().fallback.construct` `'accumulation'`); a term past the
@@ -57,7 +67,15 @@ one (a JSON number past the double range, written by trusted SQL, is refused on
 PostgreSQL: MODEL-FORMAT §7). A temporal bucket's sum or
 average over a `number` reading stays in the engine too
 (`series.floating-accumulation`, a pinned series still seeking its index), and
-a native one over `integer` readings carries the same bound. An entity ordering over a
+a native one over `integer` readings carries the same bound. Groups ordered by
+an integer sum or average lower beside that bound: a group with no value
+orders as `0` (a sum) or as the empty key (an average), equal values keep
+their first appearance, and a group past the bound sends the call to the
+engine. A floating one stays in the engine, and so does a window over groups
+ordered by either (`plan.windowedAccumulation`), because the bound of a group
+the window leaves out is never read. On PostgreSQL an entity grouping lowers
+over an adopted table with no document column; over a store-owned table the
+engine groups (`bind.entityGrouping`). An entity ordering over a
 document member reads it as its declared type, so a number orders numerically on
 PostgreSQL as on SQLite, in a query's `$orderby`, a load's include and a root
 load alike; a member declared with more than one type orders in the engine (a

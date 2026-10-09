@@ -262,8 +262,15 @@ no continuation to emit.
   the schema forbids `null` on, because SQL cannot tell a stored `null`
   from an absent one and the engine can.
 - **Typed path comparisons and distinct scalar projections.** Comparisons
-  between two paths in the same non-null number/string family lower without
-  a UDF. `$distinct` over a typed scalar projection groups by its value and JSON
+  between two paths the schema types as scalars lower without a UDF on every
+  driver, across JSON type families and for nullable and boolean members
+  alike — two present values are equal when they are of one family and equal
+  there, and order only as two numbers or two strings, as the engine answers
+  — and so does a literal `$get` over the binding or an `object`-typed
+  member, in a collection query. A comparison of two paths when either is
+  typed as an object or an array, or not typed, stays with the engine, and an
+  entity query keeps its plain comparison of two members of one non-null
+  number or string family. `$distinct` over a typed scalar projection groups by its value and JSON
   type, excluding missing members. Unordered inputs retain first occurrence;
   ordering solely by the projected path also lowers. Literal windows apply
   to the distinct items.
@@ -275,7 +282,7 @@ no continuation to emit.
   in SQL under the ENGINE's empty rules (`0` for a count or a sum, no
   member at all for the other three), and the groups come out in the
   engine's own order of first appearance unless an `$orderby` over the
-  keys or count/min/max says otherwise. Entity queries join any number of bindings: every
+  keys, count/min/max or an integer sum or average says otherwise. Entity queries join any number of bindings: every
   binding past the first must be attached by a column equality to one
   already joined, which is what makes the plan a nested loop the engine
   can be compared against — a binding nothing attaches would be a
@@ -1829,9 +1836,10 @@ bounded materialization strategies through `onAssertionPlan`.
 See [MIGRATION-FORMAT §6 and §11](docs/MIGRATION-FORMAT.md).
 
 Collection constructor projections can include a whole row beside member
-paths. Group ordering lowers count/min/max expressions, including aggregates
-used only for sorting; SUM/AVG ordering remains in the engine to preserve
-floating-point accumulation order. Parameterized distance bounds bind both
+paths. Group ordering lowers count/min/max expressions and integer sums and
+averages, including aggregates used only for sorting; a floating SUM/AVG
+ordering remains in the engine to preserve floating-point accumulation order.
+Parameterized distance bounds bind both
 centre and radius through the spatial index, with full-query fallback for
 invalid, polar and antimeridian probes.
 

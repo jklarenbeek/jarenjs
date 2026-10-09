@@ -44,9 +44,10 @@ import {
 import { compareJsonScalarLt } from '@jarenjs/core/object';
 import { compileBuckets, resampleSeries, toEpoch } from '@jarenjs/core/series';
 
-import { selectPlan, conjoin, PLAN_VERSION } from './algebra.js';
+import { selectPlan, conjoin, plainFamily, PLAN_VERSION } from './algebra.js';
 import { typeOfPath, isNumericType } from './types.js';
-import { schemaNodeAt, canonicalOf } from './ddl.js';
+import { schemaNodeAt, canonicalOf, columnKindFor } from './ddl.js';
+import { readsAsIndex } from './model-path.js';
 import {
   BBOX_COMPONENTS, BBOX_INDEX_ORDER, PRECISION_MIN, PRECISION_MAX,
   probeBox, probePosition, probeCircleBox, cellNeighbourhood, probeVector,
@@ -101,7 +102,10 @@ const PREDICATE_REASONS = {
   negatedPrefilter: 'a negated predicate cannot ride an implied pre-filter '
     + '(negating a superset drops rows)',
   existence: 'existence tests translate only over a singular member path on the binding',
-  joinTerritory: 'path comparisons require the same non-null numeric or string family',
+  joinTerritory: 'path comparisons translate only between members the schema types as scalars '
+    + '(strings, numbers and booleans, each optionally null), and an entity query only between two '
+    + 'members of one number or string family that admit no null; any other member may hold an '
+    + 'object or an array, which compare deeply',
   operands: 'comparisons translate only between a singular member path and a literal or external',
   compoundLiteral: 'array and object literals have no guarded native comparison form',
   stringSubject: 'string operators translate only over schema-typed string paths '
@@ -135,6 +139,8 @@ const PLAN_REASONS = {
   groupedAggregate: 'an aggregate over a grouped phrase folds its groups, which the engine does',
   distinctProjection: 'distinct translates over one typed scalar member path, unordered or ordered by that same path',
   windowedGroup: 'a window over groups whose return can omit an item needs the engine cardinality',
+  windowedAccumulation: 'a window over groups ordered by an integer sum or average cannot read '
+    + 'the exactness guard of the groups it leaves out',
   aggregatePath: 'aggregates translate only over a singular schema-typed path '
     + '(the engine ERRORS on non-conforming operands)',
   floatingAccumulation: 'a floating sum or average runs in the engine, whose left-to-right '
@@ -211,9 +217,14 @@ const ENTITY_REASONS = {
   booleanList: 'a bound membership list compares its strings and numbers; against a boolean column '
     + 'its items compare in the engine',
   projection: 'this entity return or grouping needs decoded-row evaluation',
-  groupOrder: 'first-seen grouping over a compound physical key requires tuple ordering',
+  groupOrder: 'groups an order leaves tied come out by first appearance, which over a compound '
+    + 'physical key requires tuple ordering',
   order: 'ordering translates only over typed entity paths (never a boolean, never a document '
     + 'path that admits null)',
+  hopShape: 'a navigation hop translates only as one plain correlated FLWOR whose correlation '
+    + 'equates mapped columns of one comparison family that admit no null',
+  hopValue: 'a hop used as a value translates only when its correlation covers the related '
+    + "entity's declared key",
 };
 
 /**
@@ -252,12 +263,16 @@ function isWindowBound(value) {
 }
 
 /** Whether an aggregate accumulates floating values: a sum or an average
- * over a member the schema does not type `integer`. The engine adds left
- * to right in doubles; SQLite's compensated sum and PostgreSQL's exact
- * numeric sum round differently, so such an aggregate stays the engine's.
+ * over a member the schema does not type `integer`, or over an adopted
+ * column whose codec is not `integer` however the schema types it. The
+ * engine adds left to right in doubles; SQLite's compensated sum and
+ * PostgreSQL's exact numeric sum round differently, so such an aggregate
+ * stays the engine's.
  * @param {{ fn: string, ref: any }} entry @returns {boolean} */
 function floatingAccumulation(entry) {
-  return (entry.fn === 'sum' || entry.fn === 'avg') && entry.ref?.type !== 'integer';
+  const ref = entry.ref;
+  return (entry.fn === 'sum' || entry.fn === 'avg')
+    && (ref?.type !== 'integer' || (ref.codec !== undefined && ref.codec !== 'integer'));
 }
 
 /** Whether a schema node admits `null` beside its scalar type. A present
@@ -281,6 +296,55 @@ export function admitsMixedTypes(schema, segments) {
   if (!Array.isArray(node?.type)) return false;
   return new Set(node.type.filter((type) => type !== 'null')
     .map((type) => (type === 'integer' ? 'number' : type))).size > 1;
+}
+
+const FAMILY_ORDER = ['number', 'text', 'boolean', 'null'];
+
+/**
+ * The JSON families a member can hold when the schema types it as
+ * scalars alone — `string`, `number`, `integer` and `boolean`, each
+ * optionally with `null` — or `null` when it types it as anything else
+ * (an object, an array, or no type at all). A schema-conforming document
+ * never holds an object or an array there, so two such members compare
+ * by the family of their values and never by structure.
+ * @param {any} schema
+ * @param {import('./dialect.js').JsonPathSegment[]} segments
+ * @returns {('number' | 'text' | 'boolean' | 'null')[] | null}
+ */
+function scalarFamilies(schema, segments) {
+  const declared = schemaNodeAt(schema, segments)?.type;
+  const names = typeof declared === 'string' ? [declared] : declared;
+  if (!Array.isArray(names) || names.length === 0) return null;
+  const found = new Set();
+  for (const name of names) {
+    const family = name === 'null' ? 'null' : columnKindFor(name);
+    if (family === undefined) return null;
+    found.add(family);
+  }
+  return /** @type {any} */ (FAMILY_ORDER.filter((family) => found.has(family)));
+}
+
+/**
+ * Whether a step of a path meets a container the schema does not declare
+ * as the kind the step means, where a path engine may read the step off
+ * the other kind: an index off the key of that number in an object, a
+ * member name that reads as an index ({@link readsAsIndex}) off an array's
+ * element. A declared `type` that excludes the other kind pins the
+ * container. A container with no `type` is not pinned — `properties`
+ * binds objects alone and `items` arrays alone, so a value of the other
+ * kind conforms — and neither is a path that leaves the schema.
+ * @param {any} schema
+ * @param {import('./dialect.js').JsonPathSegment[]} segments
+ * @returns {boolean}
+ */
+function unpinnedStep(schema, segments) {
+  return segments.some((segment, at) => {
+    const index = 'index' in segment;
+    if (!index && !readsAsIndex(segment.name)) return false;
+    const declared = schemaNodeAt(schema, segments.slice(0, at))?.type;
+    const kinds = typeof declared === 'string' ? [declared] : declared;
+    return !Array.isArray(kinds) || kinds.includes(index ? 'object' : 'array');
+  });
 }
 
 /** Whether a typed reference orders natively: numbers and strings of one
@@ -453,7 +517,69 @@ function pathRef(node, itSlot, shape) {
     segments: path.segments,
     type: typeOfPath(shape.schema, path.segments),
     column: shape.columnByCanonical.get(path.canonical) ?? null,
+    // a member of several kinds: its column holds the first type's, and
+    // answers a value of that kind alone
+    ...(admitsMixedTypes(shape.schema, path.segments) ? { mixed: true } : {}),
+    // a step a path engine may read off the other kind of container, in a
+    // container the schema leaves open: a column spelled that way reads
+    // the wrong member of a conforming document
+    ...(unpinnedStep(shape.schema, path.segments) ? { unpinned: true } : {}),
   };
+}
+
+/**
+ * A literal `$get` — `{ $get: [target, 'name'] }`, the runtime form of a
+ * path leaf — as the member path it names. An object target yields its
+ * member or nothing and every other target yields nothing, which is what
+ * the name selector `target['name']` answers, so where the target is the
+ * binding or a member the schema types `object` the call is that path and
+ * every form that translates a path translates it. Any other `$get` (an
+ * untyped target, a name that is no literal string) is returned as it is,
+ * and so is one that feeds a string operator (`stringOperand`) unless the
+ * member is typed `string` alone: the engine raises on a subject of
+ * another kind, and a `$get` is not to join the spellings that answer.
+ * @param {any} node
+ * @param {number} itSlot
+ * @param {any} shape
+ * @param {boolean} stringOperand
+ * @returns {any}
+ */
+function getAsPath(node, itSlot, shape, stringOperand) {
+  if (node.kind !== 'op' || node.name !== '$get' || node.args.length !== 2) return node;
+  const [target, key] = node.args;
+  if (key.kind !== 'literal' || typeof key.value !== 'string') return node;
+  const parent = isItVar(target, itSlot) ? { segments: [] } : memberPath(target, itSlot);
+  if (parent === null || (parent.segments.length > 0
+    && schemaNodeAt(shape.schema, parent.segments)?.type !== 'object')) return node;
+  if (stringOperand) {
+    const families = scalarFamilies(shape.schema, [...parent.segments, { name: key.value }]);
+    if (families?.length !== 1 || families[0] !== 'text') return node;
+  }
+  const select = { descendant: false, selectors: [{ kind: 'name', name: key.value }] };
+  return { kind: 'path', card: 2, name: target.name, rootSlot: itSlot, external: false, rootCard: 1,
+    segments: [...(target.kind === 'path' ? target.segments : []), select], singular: true,
+    docPath: node.docPath };
+}
+
+/** The predicate operators whose operands may be a literal `$get`. */
+const GET_OPERANDS = new Set(['$exists', '$empty', ...COMPARISONS.keys(), ...STRING_OPS.keys()]);
+
+/**
+ * The predicate with every operand that is a literal `$get` over the
+ * binding or an object-typed member replaced by its member path. A
+ * collection's alone: an entity query assigns each conjunct to a binding
+ * by the paths it reads and plans its own forms.
+ * @param {any} node
+ * @param {number} itSlot
+ * @param {any} shape
+ * @returns {any}
+ */
+function withGetPaths(node, itSlot, shape) {
+  if (shape.entityFlavors !== undefined || !GET_OPERANDS.has(node.name)) return node;
+  const stringOperand = STRING_OPS.has(node.name);
+  const args = node.args.map((/** @type {any} */ arg) => getAsPath(arg, itSlot, shape, stringOperand));
+  return args.some((/** @type {any} */ arg, /** @type {number} */ i) => arg !== node.args[i])
+    ? { ...node, args } : node;
 }
 
 /**
@@ -1267,11 +1393,16 @@ export function reasonId(reason) {
 /**
  * The leaf predicates a plan or a predicate carries: every predicate
  * node except the connectives — `and`, `or`, `not` and a `binding`
- * scope — one bound membership list being one leaf, summed over a
+ * scope — one bound membership list being one leaf and a comparison of
+ * two paths decided one family at a time one leaf for each family they
+ * share, summed over a
  * collection plan's filter or an entity plan's binding filters and
- * include count filters, and over the comparisons between bindings
- * that refine a join; a join's column equality is not a predicate (the
- * server merges equalities and prices them once). What a
+ * include count filters, over the filters inside the subselects that
+ * read a related entity (a hop's test, count, value or order key — a
+ * value's twice, for the member and for its type), and
+ * over the comparisons between bindings that refine a join; a join's
+ * column equality is not a predicate (the server merges equalities and
+ * prices them once). What a
  * statement costs the database per row, and what prices it into a JIT
  * compile, grows with this count and never with the depth of the tree,
  * which nests in halves.
@@ -1286,17 +1417,76 @@ export function predicateTerms(value) {
         return value.items.reduce((/** @type {number} */ sum, /** @type {any} */ item) => sum + predicateTerms(item), 0);
       case 'not': return predicateTerms(value.item);
       case 'binding': return predicateTerms(value.filter);
+      // two paths decided one family at a time cost a term for each family
+      // they can hold in common
+      case 'refCmp': return plainFamily(value) !== null ? 1
+        : Math.max(1, value.left.families.filter((/** @type {string} */ family) =>
+          value.right.families.includes(family)).length);
+      // the rows of a related entity tested or counted: the filter inside
+      // the subselect is read for every outer row, and the test itself is
+      // a leaf where the filter holds none
+      case 'hop': return Math.max(1, predicateTerms(value.hop.filter));
+      case 'hopCount': return 1 + predicateTerms(value.hop.filter);
       default: return 1;
     }
   }
   let terms = predicateTerms(value.filter ?? null);
   for (const entry of value.filters ?? []) terms += predicateTerms(entry.filter);
-  for (const leaf of value.project?.leaves ?? []) terms += predicateTerms(leaf.count?.filter ?? null);
+  // a value leaf reads its hop twice, once for the member and once for its
+  // type, so the statement carries the filter twice
+  for (const leaf of value.project?.leaves ?? [])
+    terms += predicateTerms(leaf.count?.filter ?? null) + 2 * predicateTerms(leaf.hop?.filter ?? null);
+  for (const term of value.order ?? []) terms += predicateTerms(term.hop?.filter ?? null);
   // a comparison between two bindings that is not an equality refines the
   // join, and the server evaluates it once per candidate pair
   for (const join of value.joins ?? [])
     for (const edge of join.on) if (edge.op !== 'eq') terms += 1;
   return terms;
+}
+
+/**
+ * An entity plan with every hop rewritten by `fn` — the correlated
+ * subselects of its predicates, its count and value leaves and its order
+ * keys. A caller that narrows every read of a related entity (a profile's
+ * mandatory predicate) does it here, once, for every site that reads one.
+ * @param {any} plan - an `entity-select` or `entity-join` plan
+ * @param {(hop: any) => any} fn
+ * @returns {any}
+ */
+export function mapHops(plan, fn) {
+  const predicate = (/** @type {any} */ pred) => {
+    switch (pred?.p) {
+      case 'and': case 'or': return { ...pred, items: pred.items.map(predicate) };
+      case 'not': return { ...pred, item: predicate(pred.item) };
+      case 'binding': return { ...pred, filter: predicate(pred.filter) };
+      case 'hop': case 'hopCount': return { ...pred, hop: fn(pred.hop) };
+      default: return pred;
+    }
+  };
+  return {
+    ...plan,
+    filters: plan.filters.map((/** @type {any} */ entry) => ({ ...entry, filter: predicate(entry.filter) })),
+    order: plan.order === null ? null : plan.order.map((/** @type {any} */ term) =>
+      (term.hop === undefined ? term : { ...term, hop: fn(term.hop) })),
+    project: plan.project === null ? null : { ...plan.project, leaves: plan.project.leaves.map((/** @type {any} */ leaf) =>
+      (leaf.count !== undefined ? { ...leaf, count: fn(leaf.count) }
+        : leaf.hop !== undefined ? { ...leaf, hop: fn(leaf.hop) } : leaf)) },
+  };
+}
+
+/**
+ * Every read of a related entity an entity plan's statement makes, in the
+ * order its sites appear: a value leaf reads its hop twice, once for the
+ * member and once for its type.
+ * @param {any} plan
+ * @returns {any[]}
+ */
+export function hopsOf(plan) {
+  /** @type {any[]} */
+  const found = [];
+  mapHops(plan, (hop) => { found.push(hop); return hop; });
+  for (const leaf of plan.project?.leaves ?? []) if (leaf.hop !== undefined) found.push(leaf.hop);
+  return found;
 }
 
 /**
@@ -1508,7 +1698,10 @@ function planIntervalOverlap(node, itSlot, shape) {
     // every stored start already satisfies, is left out
     const lower = typeof declared.maxDuration === 'number'
       ? Math.floor(from) - declared.maxDuration : Number.NEGATIVE_INFINITY;
-    return { pred: { ...pred, declared: true, ...(lower >= Number.MIN_SAFE_INTEGER ? { lower } : {}) },
+    // the bound columns carry no container: where the span's container is left
+    // open, a dialect that reads it off the wrong kind guards the document beside them
+    const open = spanRef.unpinned === true ? { unpinned: spanRef.segments } : {};
+    return { pred: { ...pred, declared: true, ...(lower >= Number.MIN_SAFE_INTEGER ? { lower } : {}), ...open },
       exact: true, prefilters: [], refinements: [], composable: true };
   }
   return { ...promotion(pred,
@@ -1602,6 +1795,15 @@ function planPredicate(node, itSlot, shape) {
       exact: true, prefilters: inner.prefilters, refinements: [] };
   }
 
+  node = withGetPaths(node, itSlot, shape);
+
+  // a shape that can resolve a navigation hop (an entity binding of one
+  // planned query) answers the forms that read a related entity
+  if (shape.hop !== undefined) {
+    const hopped = shape.hop(node);
+    if (hopped !== null) return hopped;
+  }
+
   const spatial = planSpatial(node, itSlot, shape);
   if (spatial !== null) return spatial;
 
@@ -1634,11 +1836,14 @@ function planPredicate(node, itSlot, shape) {
     if (ref === null || operand === null) {
       const other = pathRef(right, itSlot, shape);
       if (ref !== null && other !== null) {
-        const family = (item) => isNumericType(item.type) ? 'number' : item.type;
-        if (orderable(ref, shape.schema) && orderable(other, shape.schema)
-          && family(ref) === family(other))
-          return exactly({ p: 'refCmp', op, left: ref, right: other });
-        return { refusal: refusal(node.name, PREDICATE_REASONS.joinTerritory) };
+        const leftFamilies = scalarFamilies(shape.schema, ref.segments);
+        const rightFamilies = scalarFamilies(shape.schema, other.segments);
+        // two members the schema types as scalars compare by the family of
+        // their values; any other operand is deep-equality territory
+        if (leftFamilies === null || rightFamilies === null)
+          return { refusal: refusal(node.name, PREDICATE_REASONS.joinTerritory) };
+        return exactly({ p: 'refCmp', op, left: { ...ref, families: leftFamilies },
+          right: { ...other, families: rightFamilies } });
       }
       return { refusal: refusal(node.name, PREDICATE_REASONS.operands) };
     }
@@ -2456,9 +2661,10 @@ function planGeneralGrouping(node, itSlot, shape, resolve = pathRef) {
     if (child.kind === 'op') {
       const entry = groupAggregate(child, itSlot, shape, resolve);
       if (entry === null) return null;
-      // one aggregate per distinct (function, path): two members that
-      // ask the same question are one SQL aggregate
-      const identity = `${entry.fn}:${entry.ref === null ? '' : canonicalOf(entry.ref.segments)}`;
+      // one aggregate per distinct (function, empty answer, path): two
+      // members that ask the same question are one SQL aggregate, and a sum
+      // that is `null` over no values is not the sum that is `0`
+      const identity = `${entry.fn}:${entry.empty}:${entry.ref === null ? '' : canonicalOf(entry.ref.segments)}`;
       let index = byAggregate.get(identity);
       if (index === undefined) {
         index = aggregates.length;
@@ -2571,10 +2777,12 @@ function groupOrder(orderby, keySlot, build) {
     if (key.kind === 'var' && key.external !== true && keySlot.has(key.slot))
       target = { index: keySlot.get(key.slot) };
     else {
-      // SQL SUM/AVG may accumulate in a different order (SQLite also
-      // compensates rounding). Such a value cannot safely decide group
-      // order. Counts and extrema have no accumulation-order ambiguity.
-      if (!['$count', '$min', '$max'].includes(key.name)) return null;
+      // A floating sum or average accumulates in the engine's order, which
+      // SQL does not reproduce (SQLite also compensates rounding), so the
+      // callers keep such an aggregate in the engine by name. An integer one
+      // is exact beside its guard, and counts and extrema have no
+      // accumulation order: each of them decides a group's place.
+      if (!['$count', '$min', '$max', '$sum', '$avg'].includes(key.name)) return null;
       const aggregate = key.kind === 'op' ? build(key) : null;
       if (aggregate?.p !== 'agg') return null;
       target = { aggregate: aggregate.index };
@@ -2583,6 +2791,32 @@ function groupOrder(orderby, keySlot, build) {
       nullsFirst: (spec.emptyGreatest === true) === (spec.desc === true) });
   }
   return terms;
+}
+
+/**
+ * Whether a grouping's order ranks any two groups apart: it names every
+ * group key, and two groups differ in one of them. An order that does not
+ * (an aggregate, a key left out, none at all) leaves ties, and tied groups
+ * come out by first appearance.
+ * @param {{ keys: any[], order: 'first-seen' | { index?: number, aggregate?: number }[] }} group
+ * @returns {boolean}
+ */
+function ranksGroupsApart(group) {
+  const order = group.order;
+  return order !== 'first-seen' && group.keys.every((_, index) =>
+    order.some((term) => term.aggregate === undefined && term.index === index));
+}
+
+/**
+ * Whether a grouping is ordered by an integer sum or average: a value that
+ * is exact only while the guard of its own group holds, and a statement
+ * reads the guard of the groups it returns, not of those a window leaves out.
+ * @param {{ aggregates: { fn: string }[], order: 'first-seen' | { aggregate?: number }[] }} group
+ * @returns {boolean}
+ */
+function ordersByAccumulation(group) {
+  return group.order !== 'first-seen' && group.order.some((term) =>
+    term.aggregate !== undefined && ['sum', 'avg'].includes(group.aggregates[term.aggregate].fn));
 }
 
 /**
@@ -3254,8 +3488,13 @@ function planCollectionPhrase(document, analysis, shape, options) {
 
   // the temporal bucket: only over a WHOLE pushed selection, because a
   // conjunct the residual would still apply would arrive after the rows
-  // were already summed
-  if (flwor.group !== null && fullyPushed && aggregate === null
+  // were already summed. A window over groups ordered by an integer sum or
+  // average stays in the engine: the guard beside each sum is read on the
+  // rows the statement returns, and a group the window leaves out could
+  // rank elsewhere in the engine's order
+  const windowedAccumulation = windows.length > 0 && flwor.group !== null
+    && ordersByAccumulation(flwor.group);
+  if (flwor.group !== null && fullyPushed && aggregate === null && !windowedAccumulation
     && (windows.length === 0 || ['object', 'array', 'lit'].includes(flwor.group.tree.p)
       || (flwor.group.tree.p === 'agg'
         && flwor.group.aggregates[flwor.group.tree.index].empty === 'zero'))) {
@@ -3287,8 +3526,10 @@ function planCollectionPhrase(document, analysis, shape, options) {
   // a grouping IS the projection, and answering it as one would answer
   // per row instead of per group
   const groupedResidual = flwor.group !== null || flwor.bucket !== null;
-  if (groupedResidual && windows.length > 0)
-    flwor.reasons.push(refusal('$groupby', PLAN_REASONS.windowedGroup));
+  if (groupedResidual && windows.length > 0) {
+    flwor.reasons.push(refusal('$groupby', windowedAccumulation
+      ? PLAN_REASONS.windowedAccumulation : PLAN_REASONS.windowedGroup));
+  }
 
   if (!groupedResidual && fullyPushed && flwor.projectionNative
     && (windows.length === 0 || plan.window !== null)) {
@@ -3468,56 +3709,207 @@ export function entityPathRef(node, slot, shape) {
 }
 
 /**
+ * A navigation hop: one plain FLWOR over a declared entity, correlated with
+ * the bindings in `outer` by column equalities. Its `$where` is conjuncts,
+ * each a correlation equality {@link crossBindingComparison} proves over
+ * columns that read no NULL as a `null`, or a predicate over the hop's own
+ * binding, and its `$return` is that binding
+ * bare or one singular member path of it. An ordering, a `$let`, a grouping,
+ * a window, a second binding or a hop out of a hop is not a hop: an inner
+ * ordering can raise where a statement could not.
+ * @param {any} inner - a `flwor` node
+ * @param {Map<number, any>} outer - slot → the bindings the hop correlates with
+ * @param {Map<string, any>} entities
+ * @param {any} mapping
+ * @returns {{ hop: { entity: string, binding: string, edges: any[], filter: any },
+ *   binding: any, member: any } | null} `member` is the returned path
+ *   node, or `null` for the binding itself
+ */
+function planHop(inner, outer, entities, mapping) {
+  if (inner?.kind !== 'flwor' || inner.forBindings.length !== 1 || inner.groupby !== null
+    || inner.fold !== null || inner.orderby !== null || inner.letBindings.length
+    || inner.asChecks !== null || inner.count !== null) return null;
+  const source = inner.forBindings[0];
+  const entity = bindingEntity(source, entities);
+  if (entity === null || source.window !== null || source.atSlot !== -1 || source.allowingEmpty) return null;
+  const ret = inner.ret;
+  const bare = ret.kind === 'var' && ret.external !== true && ret.slot === source.slot;
+  if (!bare && !(ret.kind === 'path' && ret.external !== true && ret.rootSlot === source.slot
+    && ret.singular === true)) return null;
+  const shape = entityShape(entities.get(entity), mapping.entities[entity]);
+  const binding = { name: source.name, slot: source.slot, entity, shape };
+  const scope = new Map([...outer, [binding.slot, binding]]);
+  const conjuncts = inner.where?.kind === 'op' && inner.where.name === '$and' ? inner.where.args : [inner.where];
+  const edges = [];
+  let filter = null;
+  for (const conjunct of conjuncts) {
+    if (conjunct === null) continue;
+    const cross = conjunct.kind === 'op' && conjunct.name === '$eq'
+      ? crossBindingComparison(conjunct, scope) : null;
+    if (cross !== null && (cross.left.binding === binding || cross.right.binding === binding)) {
+      // a column whose NULL reads back as a present `null` pairs, in the
+      // engine, with a `null` and, in SQL, with nothing — whatever the
+      // schema says of its type
+      if (cross.left.ref.nullPolicy === 'null' || cross.right.ref.nullPolicy === 'null') return null;
+      edges.push({ left: { binding: cross.left.binding.name, ref: cross.left.ref },
+        right: { binding: cross.right.binding.name, ref: cross.right.ref } });
+      continue;
+    }
+    const slots = new Set(); collectBindingSlots(conjunct, scope, slots);
+    if (slots.size !== 1 || !slots.has(binding.slot)) return null;
+    const planned = planEntityPredicate(conjunct, binding.slot, shape);
+    if ('refusal' in planned) return null;
+    filter = conjoin(filter, planned.pred);
+  }
+  if (!edges.length) return null;
+  return { hop: { entity, binding: binding.name, edges, filter }, binding, member: bare ? null : ret };
+}
+
+/**
+ * Whether a hop reaches at most one row of its entity for each outer row:
+ * its equalities cover every column of the entity's declared key.
+ * @param {{ entity: string, binding: string, edges: any[] }} hop
+ * @param {any} mapping
+ * @returns {boolean}
+ */
+function hopKeyed(hop, mapping) {
+  const keys = mapping.entities[hop.entity].keys;
+  const covered = new Set(hop.edges.flatMap((edge) => [edge.left, edge.right])
+    .filter((side) => side.binding === hop.binding).map((side) => canonicalOf(side.ref.segments)));
+  return keys.length > 0 && keys.every((key) => covered.has(canonicalOf([{ name: key }])));
+}
+
+/**
+ * A planned hop whose rows are the ones that carry the member it returns:
+ * the engine's sequence has one item per row where the member is present, so
+ * a test or a count of it conjoins that presence. A hop returning its binding
+ * is returned as it was.
+ * @param {{ hop: any, binding: any, member: any }} planned
+ * @returns {{ hop: any, binding: any, member: any } | { refusal: { construct: string, reason: string } }}
+ */
+function hopWithPresence(planned) {
+  if (planned.member === null) return planned;
+  const present = planEntityPredicate({ kind: 'op', card: 1, name: '$exists', args: [planned.member] },
+    planned.binding.slot, planned.binding.shape);
+  return 'refusal' in present ? present
+    : { ...planned, hop: { ...planned.hop, filter: conjoin(planned.hop.filter, present.pred) } };
+}
+
+/**
+ * The predicate forms that read a related entity: the existence or emptiness
+ * of a hop, a comparison of the member a hop returns, and a comparison of the
+ * count of a hop. `null` when the node is none of them, so it plans as any
+ * other predicate; a hop out of shape is refused by its reason.
+ * @param {any} node - an `op` node
+ * @param {any} outerBinding - the binding the predicate belongs to
+ * @param {Map<string, any>} entities
+ * @param {any} mapping
+ * @returns {any}
+ */
+function planHopPredicate(node, outerBinding, entities, mapping) {
+  const isHop = (arg) => arg?.kind === 'flwor';
+  const isCount = (arg) => arg?.kind === 'op' && arg.name === '$count' && isHop(arg.args[0]);
+  const existence = node.name === '$exists' || node.name === '$empty';
+  if (!existence && !COMPARISONS.has(node.name)) return null;
+  const hopAt = node.args.findIndex((arg) => isHop(arg) || isCount(arg));
+  if (hopAt === -1 || node.args.some((arg, i) => i !== hopAt && (isHop(arg) || isCount(arg)))
+    || (existence && !isHop(node.args[hopAt]))) return null;
+  const counted = isCount(node.args[hopAt]);
+  const planned = planHop(counted ? node.args[hopAt].args[0] : node.args[hopAt],
+    new Map([[outerBinding.slot, outerBinding]]), entities, mapping);
+  if (planned === null) return { refusal: refusal(node.name, ENTITY_REASONS.hopShape) };
+  if (existence || counted) {
+    const guarded = hopWithPresence(planned);
+    if ('refusal' in guarded) return guarded;
+    if (existence) {
+      const test = { p: 'hop', hop: guarded.hop };
+      return exactly(node.name === '$exists' ? test : { p: 'not', item: test });
+    }
+    return planHopCount(node, hopAt, guarded.hop);
+  }
+  // a comparison of the member the hop returns is the comparison of the
+  // related rows, existentially: general comparisons raise on no operand pair
+  if (planned.member === null) return null;
+  const compared = planEntityPredicate(
+    { ...node, args: node.args.map((arg, i) => (i === hopAt ? planned.member : arg)) },
+    planned.binding.slot, planned.binding.shape);
+  if ('refusal' in compared) return compared;
+  return exactly({ p: 'hop', hop: { ...planned.hop, filter: conjoin(planned.hop.filter, compared.pred) } });
+}
+
+/**
+ * A count compared with a number is a comparison of two numbers; a count is
+ * always present, so against anything that is not a number — NaN included —
+ * only `$ne` holds. The literal is the integers the comparison admits, as for
+ * an integer column.
+ * @param {any} node - the comparison
+ * @param {number} hopAt - which operand is the count
+ * @param {any} hop
+ * @returns {any}
+ */
+function planHopCount(node, hopAt, hop) {
+  const operand = operandOf(node.args[1 - hopAt]);
+  if (operand === null) return null;
+  if ('ext' in operand) return { refusal: refusal(node.name, ENTITY_REASONS.external) };
+  const named = COMPARISONS.get(node.name);
+  const op = hopAt === 1 ? ({ lt: 'gt', le: 'ge', gt: 'lt', ge: 'le' })[named] ?? named : named;
+  const lit = operand.lit;
+  if (typeof lit !== 'number' || Number.isNaN(lit)) return exactly({ p: 'const', value: op === 'ne' });
+  const bound = integerBound(op, lit);
+  if (bound === 'none' || bound === 'present') return exactly({ p: 'const', value: bound === 'present' });
+  return exactly({ p: 'hopCount', hop, ...(bound ?? { op, lit }) });
+}
+
+/**
  * The projection TREE of an ENTITY query: the same closed shape a
  * collection projection composes — objects, arrays, literals and
  * singular member paths — with each leaf carrying the BINDING it reads
- * from, so the statement extracts it from that binding's alias. `null`
- * when the shape is not one the plan can rebuild. A constant tree
- * fetches a row marker, preserving the selection's cardinality.
+ * from, so the statement extracts it from that binding's alias. A leaf
+ * may also read a RELATED entity — the rows a hop counts, or the one
+ * member a keyed hop reaches — as a correlated subselect. The reason
+ * comes back when the shape is not one the plan can rebuild. A constant
+ * tree fetches a row marker, preserving the selection's cardinality.
  * @param {any} node - the `$return` AST node
  * @param {Map<number, any>} byName - binding slot → binding
- * @returns {{ tree: any, leaves: { binding: string, ref: any }[] } | null}
+ * @returns {{ tree: any, leaves: any[] } | { blocked: string }}
  */
 function entityProjectionTree(node, byName, entities, mapping) {
   const leaves = [];
+  /** @type {string | null} the reason of the first hop that could not be a leaf */
+  let blocked = null;
   /** @type {Map<string, number>} */
   const byCanonical = new Map();
   const build = (child) => {
     assertDecidedKind(child);
     if (child.kind === 'literal') return { p: 'lit', value: child.value };
     if (child.kind === 'op' && child.name === '$count') {
-      const inner = child.args[0];
-      if (inner?.kind !== 'flwor' || inner.forBindings.length !== 1 || inner.groupby !== null
-        || inner.fold !== null || inner.orderby !== null || inner.letBindings.length
-        || inner.asChecks !== null || inner.count !== null) return null;
-      const binding = inner.forBindings[0];
-      const entity = bindingEntity(binding, entities);
-      if (entity === null || binding.window !== null || binding.atSlot !== -1 || binding.allowingEmpty
-        || inner.ret.kind !== 'var' || inner.ret.slot !== binding.slot) return null;
-      const shape = entityShape(entities.get(entity), mapping.entities[entity]);
-      const innerBinding = { name: binding.name, slot: binding.slot, entity, shape };
-      const scope = new Map([...byName, [binding.slot, innerBinding]]);
-      const conjuncts = inner.where?.kind === 'op' && inner.where.name === '$and' ? inner.where.args : [inner.where];
-      const edges = [];
-      let filter = null;
-      for (const conjunct of conjuncts) {
-        if (conjunct === null) continue;
-        const cross = conjunct.kind === 'op' && conjunct.name === '$eq'
-          ? crossBindingComparison(conjunct, scope) : null;
-        if (cross !== null && (cross.left.binding === innerBinding || cross.right.binding === innerBinding)) {
-          edges.push({ left: { binding: cross.left.binding.name, ref: cross.left.ref },
-            right: { binding: cross.right.binding.name, ref: cross.right.ref } });
-          continue;
-        }
-        const slots = new Set(); collectBindingSlots(conjunct, scope, slots);
-        if (slots.size !== 1 || !slots.has(binding.slot)) return null;
-        const planned = planEntityPredicate(conjunct, binding.slot, shape);
-        if ('refusal' in planned) return null;
-        filter = conjoin(filter, planned.pred);
+      // the rows of a related entity counted in the row's own statement
+      if (child.args[0]?.kind !== 'flwor') return null;
+      const planned = planHop(child.args[0], byName, entities, mapping);
+      const counted = planned === null ? null : hopWithPresence(planned);
+      if (counted === null || 'refusal' in counted) {
+        blocked ??= counted === null ? ENTITY_REASONS.hopShape : counted.refusal.reason;
+        return null;
       }
-      if (!edges.length) return null;
       const index = leaves.length;
-      leaves.push({ count: { entity, binding: binding.name, edges, filter } });
+      leaves.push({ count: counted.hop });
+      return { p: 'leaf', index };
+    }
+    if (child.kind === 'flwor') {
+      // a hop read as a value: one row, or none, of the related entity
+      const planned = planHop(child, byName, entities, mapping);
+      if (planned === null) {
+        blocked ??= ENTITY_REASONS.hopShape;
+        return null;
+      }
+      const ref = planned.member === null ? null
+        : entityPathRef(planned.member, planned.binding.slot, planned.binding.shape);
+      if (ref === null || !hopKeyed(planned.hop, mapping)) {
+        blocked ??= ENTITY_REASONS.hopValue;
+        return null;
+      }
+      const index = leaves.length;
+      leaves.push({ hop: planned.hop, ref });
       return { p: 'leaf', index };
     }
     if (child.kind === 'path') {
@@ -3555,7 +3947,7 @@ function entityProjectionTree(node, byName, entities, mapping) {
     return null;
   };
   const tree = build(node);
-  return tree === null ? null : { tree, leaves };
+  return tree === null ? { blocked: blocked ?? ENTITY_REASONS.projection } : { tree, leaves };
 }
 
 /**
@@ -3638,6 +4030,13 @@ export function planEntityPredicate(node, slot, shape) {
       return { ...pred, items: pred.items.map(reflavor) };
     if (pred.p === 'not') return { ...pred, item: reflavor(pred.item) };
     if (pred.p === 'refCmp') {
+      // the entity emitters compare two members of one plain family; a
+      // pair that needs the family dispatch of a collection stays with the
+      // engine
+      if (plainFamily(pred) === null) {
+        blocked = refusal(`$${pred.op}`, PREDICATE_REASONS.joinTerritory);
+        return pred;
+      }
       const flavor = (ref) => reflavor({ p: 'typeIs', ref, types: [], positive: true }).ref;
       return { ...pred, left: flavor(pred.left), right: flavor(pred.right) };
     }
@@ -3704,6 +4103,55 @@ export function planEntityPredicate(node, slot, shape) {
   const pred = reflavor(outcome.pred);
   if (blocked !== null) return { refusal: blocked };
   return { pred };
+}
+
+/**
+ * A FLWOR whose `$let` variables are each a bracketed hop that nothing reads
+ * but `{ $count: '$g[*]' }` — the group join that counts its children —
+ * counts the hop itself: the count is written in place of the variable's and
+ * the `$let` dropped. Any other read of a variable, or any other `$let`,
+ * leaves the FLWOR as it is.
+ * @param {any} root - a `flwor` node
+ * @returns {any}
+ */
+function inlineCountedLets(root) {
+  if (root.letBindings.length === 0) return root;
+  /** @type {Map<number, any>} */
+  const hops = new Map();
+  for (const binding of root.letBindings) {
+    const expr = binding.expr;
+    if (expr.kind !== 'array' || expr.elements.length !== 1 || expr.elements[0].kind !== 'flwor') return root;
+    hops.set(binding.slot, expr.elements[0]);
+  }
+  const countedSlot = (node) => {
+    const path = node.kind === 'op' && node.name === '$count' ? node.args[0] : null;
+    return path?.kind === 'path' && path.external !== true && hops.has(path.rootSlot)
+      && path.segments.length === 1 && path.segments[0].descendant !== true
+      && path.segments[0].selectors.length === 1 && path.segments[0].selectors[0].kind === 'wildcard'
+      ? path.rootSlot : -1;
+  };
+  let onlyCounted = true;
+  /** @type {Set<number>} */
+  const counted = new Set();
+  const scan = (node, inLet) => {
+    if (node === null || typeof node !== 'object') return;
+    if (Array.isArray(node)) { for (const item of node) scan(item, inLet); return; }
+    const slot = countedSlot(node);
+    if (slot !== -1 && !inLet) { counted.add(slot); return; }
+    if ((node.kind === 'path' && hops.has(node.rootSlot)) || (node.kind === 'var' && hops.has(node.slot))) onlyCounted = false;
+    for (const [key, value] of Object.entries(node)) if (key !== 'docPath') scan(value, inLet);
+  };
+  scan({ ...root, letBindings: [] }, false);
+  for (const hop of hops.values()) scan(hop, true);
+  if (!onlyCounted || counted.size !== hops.size) return root;
+  const rewrite = (node) => {
+    if (node === null || typeof node !== 'object') return node;
+    if (Array.isArray(node)) return node.map(rewrite);
+    const slot = countedSlot(node);
+    if (slot !== -1) return { ...node, args: [hops.get(slot)] };
+    return Object.fromEntries(Object.entries(node).map(([key, value]) => [key, key === 'docPath' ? value : rewrite(value)]));
+  };
+  return rewrite({ ...root, letBindings: [] });
 }
 
 /**
@@ -3800,9 +4248,24 @@ function planEntityQueryCore(document, entities, mapping, operators) {
     root = root.args[0];
     assertDecidedKind(root);
   }
+  // `$some`/`$every` over one entity array tests its rows: some row
+  // satisfies, or no row fails to (a planned predicate is total, so its
+  // negation holds exactly where it fails). It is a count of the rows the
+  // test selects, answered as a boolean
+  let quantifier = null;
+  if (root.kind === 'quant' && aggregate === null && windows.length === 0 && root.bindings.length === 1) {
+    const [source] = root.bindings;
+    quantifier = root.some ? 'some' : 'every';
+    aggregate = 'count';
+    root = { kind: 'flwor', card: 3, fold: null, letBindings: [], asChecks: null, groupby: null,
+      orderby: null, count: null, limits: null,
+      forBindings: [{ ...source, atSlot: -1, allowingEmpty: false, window: null }],
+      where: root.some ? root.satisfies : { kind: 'op', card: 1, name: '$not', args: [root.satisfies] },
+      ret: { kind: 'var', card: 1, name: source.name, slot: source.slot, external: false } };
+  }
   if (root.kind !== 'flwor')
     return residual(root.kind, ENTITY_REASONS.notFlwor);
-  root = flattenEntityProjection(root);
+  root = flattenEntityProjection(inlineCountedLets(root));
   if (root.fold !== null || root.letBindings.length > 0 || root.asChecks !== null
     || root.count !== null)
     return residual('$let', KIND_REASONS.let);
@@ -3822,6 +4285,9 @@ function planEntityQueryCore(document, entities, mapping, operators) {
     });
   }
   const byName = new Map(bindings.map((binding) => [binding.slot, binding]));
+  // a binding's predicates may read a related entity through a hop
+  for (const binding of bindings)
+    binding.shape.hop = (node) => planHopPredicate(node, binding, entities, mapping);
   const group = root.groupby === null ? null : bindings.length === 1 && aggregate === null && !windows.length
     ? planGeneralGrouping(root, bindings[0].slot, bindings[0].shape, entityPathRef) : null;
   if (root.groupby !== null && group === null) return residual('$groupby', ENTITY_REASONS.projection);
@@ -3830,10 +4296,12 @@ function planEntityQueryCore(document, entities, mapping, operators) {
   // Integer accumulations carry a runtime exactness proof. Floating
   // accumulations and date-codec validation need the decoded evaluator.
   if (group && [...group.keys, ...group.aggregates].some((entry) => entry.ref
-    && (['date', 'datetime'].includes(entry.ref.codec)
-      || (['sum', 'avg'].includes(entry.fn) && entry.ref.type !== 'integer'))))
+    && (['date', 'datetime'].includes(entry.ref.codec) || floatingAccumulation(entry))))
     return residual('$groupby', ENTITY_REASONS.projection);
-  if (group?.order === 'first-seen' && entities.get(bindings[0].entity).physical?.keys.length > 1)
+  // Groups an order leaves tied come out by first appearance: over a compound
+  // physical key that is the smallest key TUPLE, which the minima of the key
+  // columns taken one by one do not give.
+  if (group && !ranksGroupsApart(group) && entities.get(bindings[0].entity).physical?.keys.length > 1)
     return residual('$groupby', ENTITY_REASONS.groupOrder);
   const conjuncts = root.where === null
     ? []
@@ -3975,26 +4443,30 @@ function planEntityQueryCore(document, entities, mapping, operators) {
   // SHAPE the projection tree rebuilds from the bindings' members
   const retBinding = root.ret.kind === 'var' && root.ret.external !== true
     ? byName.get(root.ret.slot) : undefined;
-  const projection = retBinding === undefined && group === null
+  const built = retBinding === undefined && group === null
     ? entityProjectionTree(root.ret, byName, entities, mapping) : null;
-  if (retBinding === undefined && projection === null && group === null) {
-    reasons.push(refusal('$return', ENTITY_REASONS.projection));
+  const projection = built !== null && 'tree' in built ? built : null;
+  if (built !== null && projection === null) {
+    reasons.push(refusal('$return', built.blocked));
   }
   let scalarAggregate = null;
   if (aggregate !== null && aggregate !== 'count') {
     const leaf = projection?.tree.p === 'leaf' ? projection.leaves[projection.tree.index] : null;
-    if (bindings.length !== 1 || !leaf?.ref || leaf.ref.flavor !== 'entity-column'
+    if (bindings.length !== 1 || !leaf?.ref || leaf.hop !== undefined || leaf.ref.flavor !== 'entity-column'
       || !['text', 'integer', 'number'].includes(leaf.ref.codec)
-      || (['sum', 'avg'].includes(aggregate) && leaf.ref.type !== 'integer')
+      || floatingAccumulation({ fn: aggregate, ref: leaf.ref })
       || admitsMixedTypes(bindings[0].shape.schema, leaf.ref.segments))
       return residual(`$${aggregate}`, ENTITY_REASONS.scalarAggregate);
     scalarAggregate = { fn: aggregate, ref: leaf.ref };
   }
   if (projection?.tree.p === 'leaf' && !projection.leaves[projection.tree.index].count && (aggregate === 'count' || windows.length > 0)) {
     const leaf = projection.leaves[projection.tree.index];
-    const binding = bindings.find((entry) => entry.name === leaf.binding);
-    filters.set(binding.slot, conjoin(filters.get(binding.slot),
-      { p: 'typeIs', ref: leaf.ref, types: [], positive: true }));
+    const present = { p: 'typeIs', ref: leaf.ref, types: [], positive: true };
+    // an item exists only where the member does: for a hop leaf, where a
+    // related row carries it
+    const owner = leaf.hop === undefined ? bindings.find((entry) => entry.name === leaf.binding) : bindings[0];
+    filters.set(owner.slot, conjoin(filters.get(owner.slot), leaf.hop === undefined ? present
+      : { p: 'hop', hop: { ...leaf.hop, filter: conjoin(leaf.hop.filter, present) } }));
   }
 
   // ordering over flavored refs of either binding
@@ -4003,10 +4475,23 @@ function planEntityQueryCore(document, entities, mapping, operators) {
   if (root.orderby !== null && group === null) {
     const terms = [];
     for (const spec of root.orderby.specs) {
-      const slot = spec.key.kind === 'path' ? spec.key.rootSlot : -1;
-      const binding = byName.get(slot);
-      const ref = binding === undefined
-        ? null : entityPathRef(spec.key, slot, binding.shape);
+      // the key is a member of a binding, or the member one keyed hop
+      // reaches in the related row (which has none, or one)
+      let key = spec.key;
+      let binding;
+      let hop = null;
+      let blocked = ENTITY_REASONS.order;
+      if (key.kind === 'flwor') {
+        const planned = planHop(key, byName, entities, mapping);
+        if (planned === null) blocked = ENTITY_REASONS.hopShape;
+        else if (planned.member === null || !hopKeyed(planned.hop, mapping)) blocked = ENTITY_REASONS.hopValue;
+        else {
+          ({ hop, binding } = planned);
+          key = planned.member;
+        }
+      }
+      else if (key.kind === 'path') binding = byName.get(key.rootSlot);
+      const ref = binding === undefined ? null : entityPathRef(key, key.rootSlot, binding.shape);
       // a boolean orders in SQL and is `JQ2005` in the engine on either
       // flavor, and so does a member of two types; a document path that
       // admits null stores a present null (a COLUMN stores it absent,
@@ -4018,10 +4503,10 @@ function planEntityQueryCore(document, entities, mapping, operators) {
         || admitsMixedTypes(binding.shape.schema, ref.segments)
         || spec.collation !== null || spec.collationName !== null) {
         orderPushed = false;
-        reasons.push(refusal('$orderby', ENTITY_REASONS.order));
+        reasons.push(refusal('$orderby', blocked));
         break;
       }
-      terms.push({ binding, ref, desc: spec.desc === true, emptyGreatest: spec.emptyGreatest === true });
+      terms.push({ binding, ref, hop, desc: spec.desc === true, emptyGreatest: spec.emptyGreatest === true });
     }
     if (orderPushed) order = terms;
   }
@@ -4082,9 +4567,11 @@ function planEntityQueryCore(document, entities, mapping, operators) {
       order: order === null ? null : order.map((term) => ({
         binding: term.binding.name, ref: term.ref,
         desc: term.desc, emptyGreatest: term.emptyGreatest,
+        ...(term.hop === null ? {} : { hop: term.hop }),
       })),
       window,
       aggregate,
+      ...(quantifier === null ? {} : { quantifier }),
       ...(scalarAggregate === null ? {} : { scalarAggregate }),
       group,
       ret: retBinding === undefined ? null : retBinding.name,

@@ -1,0 +1,933 @@
+{
+ "group": "29 entity group order by integer sums",
+ "model": {
+  "$model": "0.1",
+  "entities": {
+   "Item": {
+    "schema": {
+     "type": "object",
+     "required": [
+      "id"
+     ],
+     "properties": {
+      "id": {
+       "type": "integer",
+       "x-entity": {
+        "key": true
+       }
+      },
+      "g": {
+       "type": "string",
+       "x-entity": {
+        "index": true
+       }
+      },
+      "i": {
+       "type": "integer",
+       "x-entity": {
+        "index": true
+       }
+      },
+      "m": {
+       "type": "number"
+      },
+      "k": {
+       "type": "integer",
+       "x-entity": {
+        "index": true
+       }
+      }
+     }
+    }
+   }
+  }
+ },
+ "documents": {
+  "Item": [
+   {
+    "id": 1,
+    "g": "pos",
+    "i": 3,
+    "m": 0.1,
+    "k": 10
+   },
+   {
+    "id": 2,
+    "g": "neg",
+    "i": -5,
+    "m": 0.2,
+    "k": 2
+   },
+   {
+    "id": 3,
+    "g": "none",
+    "m": 0.3,
+    "k": 9
+   },
+   {
+    "id": 4,
+    "g": "pos",
+    "i": 4,
+    "m": 0.4,
+    "k": 100
+   },
+   {
+    "id": 5,
+    "g": "tie1",
+    "i": 7,
+    "m": 0.5,
+    "k": -5
+   },
+   {
+    "id": 6,
+    "g": "tie2",
+    "i": 7,
+    "m": 0.6,
+    "k": 10
+   },
+   {
+    "id": 7,
+    "g": "zero",
+    "i": 2,
+    "m": 0.7,
+    "k": 2
+   },
+   {
+    "id": 8,
+    "g": "zero",
+    "i": -2,
+    "m": 0.8,
+    "k": 9
+   },
+   {
+    "id": 9,
+    "i": 1,
+    "m": 0.9
+   },
+   {
+    "id": 10,
+    "g": "neg",
+    "i": -1,
+    "m": 1.0,
+    "k": -10
+   }
+  ]
+ },
+ "cases": [
+  {
+   "name": "a sum ascending",
+   "query": {
+    "$for": {
+     "it": "$.Item[*]"
+    },
+    "$groupby": {
+     "g": "$it.g"
+    },
+    "$orderby": [
+     {
+      "$key": {
+       "$sum": "$it.i"
+      },
+      "$dir": "asc"
+     }
+    ],
+    "$return": {
+     "g": "$g",
+     "t": {
+      "$sum": "$it.i"
+     }
+    }
+   }
+  },
+  {
+   "name": "a sum descending",
+   "query": {
+    "$for": {
+     "it": "$.Item[*]"
+    },
+    "$groupby": {
+     "g": "$it.g"
+    },
+    "$orderby": [
+     {
+      "$key": {
+       "$sum": "$it.i"
+      },
+      "$dir": "desc"
+     }
+    ],
+    "$return": {
+     "g": "$g",
+     "t": {
+      "$sum": "$it.i"
+     }
+    }
+   }
+  },
+  {
+   "name": "equal sums keep their first appearance",
+   "query": {
+    "$for": {
+     "it": "$.Item[*]"
+    },
+    "$groupby": {
+     "g": "$it.g"
+    },
+    "$orderby": [
+     {
+      "$key": {
+       "$sum": "$it.i"
+      },
+      "$dir": "desc"
+     }
+    ],
+    "$return": "$g"
+   }
+  },
+  {
+   "name": "a group with no value sums to zero",
+   "query": {
+    "$for": {
+     "it": "$.Item[*]"
+    },
+    "$groupby": {
+     "g": "$it.g"
+    },
+    "$orderby": [
+     {
+      "$sum": "$it.i"
+     }
+    ],
+    "$return": {
+     "g": "$g",
+     "t": {
+      "$sum": "$it.i"
+     }
+    }
+   }
+  },
+  {
+   "name": "an average ascending puts a group with no value first",
+   "query": {
+    "$for": {
+     "it": "$.Item[*]"
+    },
+    "$groupby": {
+     "g": "$it.g"
+    },
+    "$orderby": [
+     {
+      "$key": {
+       "$avg": "$it.i"
+      },
+      "$dir": "asc"
+     }
+    ],
+    "$return": {
+     "g": "$g",
+     "a": {
+      "$avg": "$it.i"
+     }
+    }
+   }
+  },
+  {
+   "name": "an average descending puts a group with no value last",
+   "query": {
+    "$for": {
+     "it": "$.Item[*]"
+    },
+    "$groupby": {
+     "g": "$it.g"
+    },
+    "$orderby": [
+     {
+      "$key": {
+       "$avg": "$it.i"
+      },
+      "$dir": "desc"
+     }
+    ],
+    "$return": {
+     "g": "$g",
+     "a": {
+      "$avg": "$it.i"
+     }
+    }
+   }
+  },
+  {
+   "name": "an average with the empty greatest",
+   "query": {
+    "$for": {
+     "it": "$.Item[*]"
+    },
+    "$groupby": {
+     "g": "$it.g"
+    },
+    "$orderby": [
+     {
+      "$key": {
+       "$avg": "$it.i"
+      },
+      "$dir": "asc",
+      "$empty": "greatest"
+     }
+    ],
+    "$return": {
+     "g": "$g",
+     "a": {
+      "$avg": "$it.i"
+     }
+    }
+   }
+  },
+  {
+   "name": "an average descending with the empty greatest",
+   "query": {
+    "$for": {
+     "it": "$.Item[*]"
+    },
+    "$groupby": {
+     "g": "$it.g"
+    },
+    "$orderby": [
+     {
+      "$key": {
+       "$avg": "$it.i"
+      },
+      "$dir": "desc",
+      "$empty": "greatest"
+     }
+    ],
+    "$return": {
+     "g": "$g",
+     "a": {
+      "$avg": "$it.i"
+     }
+    }
+   }
+  },
+  {
+   "name": "a sum used only to order",
+   "query": {
+    "$for": {
+     "it": "$.Item[*]"
+    },
+    "$groupby": {
+     "g": "$it.g"
+    },
+    "$orderby": [
+     {
+      "$key": {
+       "$sum": "$it.i"
+      },
+      "$dir": "desc"
+     }
+    ],
+    "$return": {
+     "g": "$g"
+    }
+   }
+  },
+  {
+   "name": "a sum, then the key",
+   "query": {
+    "$for": {
+     "it": "$.Item[*]"
+    },
+    "$groupby": {
+     "g": "$it.g"
+    },
+    "$orderby": [
+     {
+      "$key": {
+       "$sum": "$it.i"
+      },
+      "$dir": "desc"
+     },
+     {
+      "$key": "$g",
+      "$dir": "asc"
+     }
+    ],
+    "$return": {
+     "g": "$g",
+     "t": {
+      "$sum": "$it.i"
+     }
+    }
+   }
+  },
+  {
+   "name": "the key, then a sum",
+   "query": {
+    "$for": {
+     "it": "$.Item[*]"
+    },
+    "$groupby": {
+     "g": "$it.g"
+    },
+    "$orderby": [
+     {
+      "$key": "$g",
+      "$dir": "desc"
+     },
+     {
+      "$key": {
+       "$sum": "$it.i"
+      },
+      "$dir": "asc"
+     }
+    ],
+    "$return": {
+     "g": "$g",
+     "t": {
+      "$sum": "$it.i"
+     }
+    }
+   }
+  },
+  {
+   "name": "a count, then a sum",
+   "query": {
+    "$for": {
+     "it": "$.Item[*]"
+    },
+    "$groupby": {
+     "g": "$it.g"
+    },
+    "$orderby": [
+     {
+      "$key": {
+       "$count": "$it"
+      },
+      "$dir": "desc"
+     },
+     {
+      "$key": {
+       "$sum": "$it.i"
+      },
+      "$dir": "asc"
+     }
+    ],
+    "$return": {
+     "g": "$g",
+     "n": {
+      "$count": "$it"
+     },
+     "t": {
+      "$sum": "$it.i"
+     }
+    }
+   }
+  },
+  {
+   "name": "a sum over the rows a where keeps",
+   "query": {
+    "$for": {
+     "it": "$.Item[*]"
+    },
+    "$where": {
+     "$gt": [
+      "$it.i",
+      0
+     ]
+    },
+    "$groupby": {
+     "g": "$it.g"
+    },
+    "$orderby": [
+     {
+      "$key": {
+       "$sum": "$it.i"
+      },
+      "$dir": "desc"
+     }
+    ],
+    "$return": {
+     "g": "$g",
+     "t": {
+      "$sum": "$it.i"
+     }
+    }
+   }
+  },
+  {
+   "name": "a sum and an average of the same member",
+   "query": {
+    "$for": {
+     "it": "$.Item[*]"
+    },
+    "$groupby": {
+     "g": "$it.g"
+    },
+    "$orderby": [
+     {
+      "$key": {
+       "$avg": "$it.i"
+      },
+      "$dir": "desc"
+     },
+     {
+      "$key": {
+       "$sum": "$it.i"
+      },
+      "$dir": "asc"
+     }
+    ],
+    "$return": {
+     "g": "$g",
+     "t": {
+      "$sum": "$it.i"
+     },
+     "a": {
+      "$avg": "$it.i"
+     }
+    }
+   }
+  },
+  {
+   "name": "a window over groups ordered by a sum",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$.Item[*]"
+      },
+      "$groupby": {
+       "g": "$it.g"
+      },
+      "$orderby": [
+       {
+        "$key": {
+         "$sum": "$it.i"
+        },
+        "$dir": "desc"
+       }
+      ],
+      "$return": {
+       "g": "$g",
+       "t": {
+        "$sum": "$it.i"
+       }
+      }
+     },
+     1,
+     3
+    ]
+   }
+  },
+  {
+   "name": "a window over groups ordered by an average",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$.Item[*]"
+      },
+      "$groupby": {
+       "g": "$it.g"
+      },
+      "$orderby": [
+       {
+        "$key": {
+         "$avg": "$it.i"
+        },
+        "$dir": "asc"
+       }
+      ],
+      "$return": {
+       "g": "$g",
+       "a": {
+        "$avg": "$it.i"
+       }
+      }
+     },
+     0,
+     2
+    ]
+   }
+  },
+  {
+   "name": "a floating sum ordering stays in the engine",
+   "query": {
+    "$for": {
+     "it": "$.Item[*]"
+    },
+    "$groupby": {
+     "g": "$it.g"
+    },
+    "$orderby": [
+     {
+      "$key": {
+       "$sum": "$it.m"
+      },
+      "$dir": "desc"
+     }
+    ],
+    "$return": {
+     "g": "$g",
+     "n": {
+      "$count": "$it"
+     }
+    }
+   }
+  },
+  {
+   "name": "a floating average ordering stays in the engine",
+   "query": {
+    "$for": {
+     "it": "$.Item[*]"
+    },
+    "$groupby": {
+     "g": "$it.g"
+    },
+    "$orderby": [
+     {
+      "$key": {
+       "$avg": "$it.m"
+      },
+      "$dir": "asc"
+     }
+    ],
+    "$return": {
+     "g": "$g",
+     "n": {
+      "$count": "$it"
+     }
+    }
+   }
+  },
+  {
+   "name": "an integer sum ordering beside a floating sum return",
+   "query": {
+    "$for": {
+     "it": "$.Item[*]"
+    },
+    "$groupby": {
+     "g": "$it.g"
+    },
+    "$orderby": [
+     {
+      "$key": {
+       "$sum": "$it.i"
+      },
+      "$dir": "desc"
+     }
+    ],
+    "$return": {
+     "g": "$g",
+     "f": {
+      "$sum": "$it.m"
+     }
+    }
+   }
+  },
+  {
+   "name": "a sum order beside the nullable form of the same sum",
+   "query": {
+    "$for": {
+     "it": "$.Item[*]"
+    },
+    "$groupby": {
+     "g": "$it.g"
+    },
+    "$orderby": [
+     {
+      "$key": {
+       "$sum": "$it.i"
+      },
+      "$dir": "asc"
+     }
+    ],
+    "$return": {
+     "g": "$g",
+     "s": {
+      "$if": [
+       {
+        "$exists": {
+         "$for": {
+          "x": "$it"
+         },
+         "$where": {
+          "$ne": [
+           "$x.i",
+           null
+          ]
+         },
+         "$return": "$x.i"
+        }
+       },
+       {
+        "$sum": {
+         "$for": {
+          "x": "$it"
+         },
+         "$where": {
+          "$ne": [
+           "$x.i",
+           null
+          ]
+         },
+         "$return": "$x.i"
+        }
+       },
+       null
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "a sum order beside the nullable form of the same sum, descending",
+   "query": {
+    "$for": {
+     "it": "$.Item[*]"
+    },
+    "$groupby": {
+     "g": "$it.g"
+    },
+    "$orderby": [
+     {
+      "$key": {
+       "$sum": "$it.i"
+      },
+      "$dir": "desc"
+     }
+    ],
+    "$return": {
+     "g": "$g",
+     "s": {
+      "$if": [
+       {
+        "$exists": {
+         "$for": {
+          "x": "$it"
+         },
+         "$where": {
+          "$ne": [
+           "$x.i",
+           null
+          ]
+         },
+         "$return": "$x.i"
+        }
+       },
+       {
+        "$sum": {
+         "$for": {
+          "x": "$it"
+         },
+         "$where": {
+          "$ne": [
+           "$x.i",
+           null
+          ]
+         },
+         "$return": "$x.i"
+        }
+       },
+       null
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "a plain sum beside the nullable form of the same sum",
+   "query": {
+    "$for": {
+     "it": "$.Item[*]"
+    },
+    "$groupby": {
+     "g": "$it.g"
+    },
+    "$return": {
+     "g": "$g",
+     "t": {
+      "$sum": "$it.i"
+     },
+     "s": {
+      "$if": [
+       {
+        "$exists": {
+         "$for": {
+          "x": "$it"
+         },
+         "$where": {
+          "$ne": [
+           "$x.i",
+           null
+          ]
+         },
+         "$return": "$x.i"
+        }
+       },
+       {
+        "$sum": {
+         "$for": {
+          "x": "$it"
+         },
+         "$where": {
+          "$ne": [
+           "$x.i",
+           null
+          ]
+         },
+         "$return": "$x.i"
+        }
+       },
+       null
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "the nullable form of a sum beside the plain sum",
+   "query": {
+    "$for": {
+     "it": "$.Item[*]"
+    },
+    "$groupby": {
+     "g": "$it.g"
+    },
+    "$return": {
+     "s": {
+      "$if": [
+       {
+        "$exists": {
+         "$for": {
+          "x": "$it"
+         },
+         "$where": {
+          "$ne": [
+           "$x.i",
+           null
+          ]
+         },
+         "$return": "$x.i"
+        }
+       },
+       {
+        "$sum": {
+         "$for": {
+          "x": "$it"
+         },
+         "$where": {
+          "$ne": [
+           "$x.i",
+           null
+          ]
+         },
+         "$return": "$x.i"
+        }
+       },
+       null
+      ]
+     },
+     "g": "$g",
+     "t": {
+      "$sum": "$it.i"
+     }
+    }
+   }
+  },
+  {
+   "name": "groups ordered by a numeric key, ascending",
+   "query": {
+    "$for": {
+     "it": "$.Item[*]"
+    },
+    "$groupby": {
+     "k": "$it.k"
+    },
+    "$orderby": [
+     "$k"
+    ],
+    "$return": {
+     "k": "$k",
+     "n": {
+      "$count": "$it"
+     }
+    }
+   }
+  },
+  {
+   "name": "groups ordered by a numeric key, descending",
+   "query": {
+    "$for": {
+     "it": "$.Item[*]"
+    },
+    "$groupby": {
+     "k": "$it.k"
+    },
+    "$orderby": [
+     {
+      "$key": "$k",
+      "$dir": "desc"
+     }
+    ],
+    "$return": {
+     "k": "$k",
+     "n": {
+      "$count": "$it"
+     }
+    }
+   }
+  },
+  {
+   "name": "a numeric key, then a sum",
+   "query": {
+    "$for": {
+     "it": "$.Item[*]"
+    },
+    "$groupby": {
+     "k": "$it.k"
+    },
+    "$orderby": [
+     "$k",
+     {
+      "$key": {
+       "$sum": "$it.i"
+      },
+      "$dir": "desc"
+     }
+    ],
+    "$return": {
+     "k": "$k",
+     "t": {
+      "$sum": "$it.i"
+     }
+    }
+   }
+  },
+  {
+   "name": "a sum, then a numeric key",
+   "query": {
+    "$for": {
+     "it": "$.Item[*]"
+    },
+    "$groupby": {
+     "k": "$it.k"
+    },
+    "$orderby": [
+     {
+      "$key": {
+       "$sum": "$it.i"
+      },
+      "$dir": "desc"
+     },
+     "$k"
+    ],
+    "$return": {
+     "k": "$k",
+     "t": {
+      "$sum": "$it.i"
+     }
+    }
+   }
+  }
+ ]
+}

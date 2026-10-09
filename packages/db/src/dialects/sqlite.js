@@ -451,10 +451,11 @@ export const sqliteDialect = createDialect({
   // SQLite's plan is PROSE, one `detail` column per row
   explainLines: (rows) => rows.map((row) => String(row.detail)),
   // `SCAN <table>` with no index behind it is the full read; a join
-  // statement's narrative names the ALIAS the emitter gave the table,
+  // statement's narrative names the ALIAS the emitter gave the table
+  // (`t0`, … for a binding, `h0`, … for a related entity a hop reads),
   // which is why an alias shape counts as one too
   isFullScan: (line, tables) =>
-    (/^SCAN t\d+\b/.test(line) || tables.some((table) => line.startsWith(`SCAN ${table}`)))
+    (/^SCAN [th]\d+\b/.test(line) || tables.some((table) => line.startsWith(`SCAN ${table}`)))
     && !line.includes('USING INDEX'),
   usesIndex: (line, index) =>
     line.includes(`USING INDEX ${index}`) || line.includes(`USING COVERING INDEX ${index}`),

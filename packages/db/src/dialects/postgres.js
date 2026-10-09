@@ -54,7 +54,7 @@ import { POSTGRES_LOCK_CLASSES, OWNER_LOCK, transactionLock } from './postgres-l
 import { readExpression } from './expression-read.js';
 import { postgresChecks, POSTGRES_PREDICATE, POSTGRES_PREDICATE_ESCAPED } from './check-read.js';
 import { postgresReadBack } from './postgres-read-back.js';
-import { modelPath } from '../model-path.js';
+import { modelPath, readsAsIndex } from '../model-path.js';
 
 /** PostgreSQL truncates an identifier past this many BYTES, silently
  * and with only a notice — so two long generated names would collide
@@ -260,6 +260,33 @@ function jsonExtract(columnSql, pathText, kind) {
     default:
       return at;
   }
+}
+
+/**
+ * The condition under which a query reads the member at `segments` from a
+ * document, or `null` when every read is right. `#>` has one spelling for
+ * the array element `0` and the object key `0`, so a path step that is an
+ * index, or a name that reads as one, would select a member the engine's
+ * path never selects: the key `0` of an object for an index step, the
+ * element `0` of an array for a name step. The parent of each such step
+ * must be the container the step means. The generated columns,
+ * migrations and drift read-back keep spelling their paths through
+ * {@link jsonExtract}.
+ * @param {string} documentSql - SQL for the document, as `jsonb`
+ * @param {import('../dialect.js').JsonPathSegment[]} segments
+ * @returns {string | null}
+ */
+function queryGuard(documentSql, segments) {
+  if (jsonPathText(segments) === null) return null;
+  const guards = [];
+  segments.forEach((segment, at) => {
+    const index = 'index' in segment;
+    if (!index && !readsAsIndex(segment.name)) return;
+    const parent = at === 0 ? documentSql
+      : `(${documentSql} #> ${stringLiteral(/** @type {string} */ (jsonPathText(segments.slice(0, at))))})`;
+    guards.push(`jsonb_typeof(${parent}) = '${index ? 'array' : 'object'}'`);
+  });
+  return guards.length === 0 ? null : guards.join(' AND ');
 }
 
 /**
@@ -545,6 +572,7 @@ export function postgresDialect(options = undefined) {
       : `LIMIT ${limit === null ? 'ALL' : limit}`),
     jsonPathText,
     jsonExtract,
+    queryGuard,
     // the two engine-specific pieces of a declared interval's CHECK: the
     // span member's JSON type by name (`jsonb_typeof` itself, where the
     // query layer's `jsonTypeOf` folds the server's names into the
@@ -685,9 +713,10 @@ export function postgresDialect(options = undefined) {
     isFullScan: (line, tables) => {
       const match = /\bSeq Scan on (?:\w+\.)?"?([^\s"]+)"?/.exec(line);
       if (match === null) return false;
-      // a join statement aliases its tables `t0`, `t1`, …, and the plan
-      // names the relation with the alias after it
-      return tables.includes(match[1]) || /\bSeq Scan on \S+ t\d+\b/.test(line);
+      // a join statement aliases its tables `t0`, `t1`, … and a hop the
+      // related entity it reads `h0`, `h1`, …, and the plan names the
+      // relation with the alias after it
+      return tables.includes(match[1]) || /\bSeq Scan on \S+ [th]\d+\b/.test(line);
     },
     usesIndex: (line, index) =>
       line.includes(`Index Scan using ${index}`)

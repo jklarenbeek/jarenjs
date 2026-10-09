@@ -1,0 +1,535 @@
+{
+ "group": "typed members under untyped containers",
+ "schema": {
+  "type": "object",
+  "properties": {
+   "id": {
+    "type": "string"
+   },
+   "s": {
+    "type": "string"
+   },
+   "m": {
+    "type": [
+     "string",
+     "number"
+    ]
+   },
+   "n": {
+    "properties": {
+     "0": {
+      "type": "integer"
+     }
+    }
+   },
+   "v": {
+    "items": {
+     "type": "integer"
+    }
+   },
+   "u": {
+    "properties": {
+     "0": {
+      "type": [
+       "string",
+       "null"
+      ]
+     },
+     "1": {
+      "type": [
+       "string",
+       "number"
+      ]
+     }
+    }
+   },
+   "w": {
+    "type": "object",
+    "properties": {
+     "0": {
+      "type": "integer"
+     }
+    }
+   },
+   "a": {
+    "type": "array",
+    "items": {
+     "type": "integer"
+    }
+   }
+  }
+ },
+ "indexes": [
+  {
+   "name": "by_n0",
+   "path": "$.n['0']"
+  },
+  {
+   "name": "by_v0",
+   "path": "$.v[0]"
+  },
+  {
+   "name": "by_u0",
+   "path": "$.u['0']"
+  },
+  {
+   "name": "by_u1",
+   "path": "$.u['1']"
+  },
+  {
+   "name": "by_w0",
+   "path": "$.w['0']"
+  },
+  {
+   "name": "by_a0",
+   "path": "$.a[0]"
+  }
+ ],
+ "documents": [
+  {
+   "id": "arr1",
+   "u": [
+    "p",
+    "q"
+   ],
+   "n": [
+    7,
+    8
+   ],
+   "v": [
+    7,
+    8
+   ],
+   "a": [
+    3,
+    4
+   ]
+  },
+  {
+   "id": "obj1",
+   "u": {
+    "0": "p",
+    "1": "q"
+   },
+   "n": {
+    "0": 7
+   },
+   "v": {
+    "0": 7,
+    "1": 8
+   },
+   "w": {
+    "0": 3
+   }
+  },
+  {
+   "id": "arr2",
+   "u": [
+    null,
+    3
+   ],
+   "n": [
+    9
+   ],
+   "v": [
+    9
+   ]
+  },
+  {
+   "id": "obj2",
+   "u": {
+    "0": null,
+    "1": 3
+   },
+   "n": {
+    "0": 9
+   },
+   "v": {
+    "0": 9
+   }
+  },
+  {
+   "id": "str1",
+   "u": "x",
+   "n": "x",
+   "v": "x",
+   "w": {},
+   "a": []
+  },
+  {
+   "id": "none"
+  },
+  {
+   "id": "pin1",
+   "w": {
+    "0": 4
+   },
+   "a": [
+    4
+   ]
+  },
+  {
+   "id": "mix1",
+   "m": "abc",
+   "s": "abc"
+  },
+  {
+   "id": "mix2",
+   "m": 5,
+   "s": "x"
+  },
+  {
+   "id": "mix3",
+   "m": "zzz",
+   "s": "zzz"
+  }
+ ],
+ "cases": [
+  {
+   "name": "a name 0 against a number",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.n['0']",
+      7
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "a name 0 differs from a number",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$ne": [
+      "$it.n['0']",
+      7
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "a name 0 ordered against a number",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$gt": [
+      "$it.n['0']",
+      5
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "a name 0 exists",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$exists": "$it.n['0']"
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "a name 0 is empty",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$empty": "$it.n['0']"
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "a name 0 is the order",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$orderby": [
+     "$it.n['0']"
+    ],
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "a name 0 is the order, descending",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$orderby": [
+     {
+      "$key": "$it.n['0']",
+      "$dir": "desc"
+     }
+    ],
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "an index 0 against a number",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.v[0]",
+      7
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "an index 0 ordered against a number",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$lt": [
+      "$it.v[0]",
+      9
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "an index 0 exists",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$exists": "$it.v[0]"
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "an index 0 is the order",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$orderby": [
+     "$it.v[0]"
+    ],
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "a name 0 projected",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$exists": "$it.n['0']"
+    },
+    "$return": "$it.n['0']"
+   }
+  },
+  {
+   "name": "an index 0 projected",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$exists": "$it.id"
+    },
+    "$return": "$it.v[0]"
+   }
+  },
+  {
+   "name": "two widened members by name, a difference",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$ne": [
+      "$it.u['0']",
+      "$it.u['1']"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "two widened members by name, an order",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$le": [
+      "$it.u['0']",
+      "$it.u['1']"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "two widened members by name, an equality",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.u['0']",
+      "$it.u['1']"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "two widened members by index, a difference",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$ne": [
+      "$it.u[0]",
+      "$it.u[1]"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "two widened members by index, an order",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$ge": [
+      "$it.u[0]",
+      "$it.u[1]"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "a widened member against a literal",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$ne": [
+      "$it.u['0']",
+      "p"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "a name 0 under a declared object",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.w['0']",
+      3
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "an index 0 under a declared array",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$it.a[0]",
+      3
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "a name 0 under a declared object is the order",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$orderby": [
+     "$it.w['0']"
+    ],
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "a get feeding a string operator over a string member",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$starts-with": [
+      {
+       "$get": [
+        "$it",
+        "s"
+       ]
+      },
+      "a"
+     ]
+    },
+    "$return": "$it.id"
+   }
+  },
+  {
+   "name": "a get against a number over a union member",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$where": {
+     "$eq": [
+      {
+       "$get": [
+        "$it",
+        "m"
+       ]
+      },
+      5
+     ]
+    },
+    "$return": "$it.id"
+   }
+  }
+ ]
+}

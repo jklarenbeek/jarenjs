@@ -194,7 +194,7 @@ describe('exactly one statement per graph load', () => {
       'one statement, and no document blob in it');
   });
 
-  it('a projected correlated count uses one statement and remaining hop filters name their residuals', async () => {
+  it('a projected correlated count and a hop in a filter each use one statement', async () => {
     const posts = store.sync.entity('Post');
     const users = store.sync.entity('User');
     // the to-many count projection is one correlated SQL statement
@@ -207,15 +207,15 @@ describe('exactly one statement per graph load', () => {
     assert.strictEqual(rows.length, 30);
     assert.ok(rows.every((row) => row.n === 2));
     assert.strictEqual(counters.executed, 1, 'both roots participate in one native statement');
-    // the to-many count in a filter: the same two fetches for ten parents
+    // the to-many count in a filter is a subselect of the one statement
     counters.executed = 0;
     const prolific = from(users).where((u) => u.posts.all().count().ge(3)).select((u) => u.id).toArray();
     assert.strictEqual(prolific.length, 10);
-    assert.strictEqual(counters.executed, 2);
+    assert.strictEqual(counters.executed, 1);
     // and the async twin receives the same document once
     counters.executed = 0;
     assert.strictEqual((await fromAsync(store.entity('User')).where((u) => u.posts.all().exists()).count()), 10);
-    assert.strictEqual(counters.executed, 2);
+    assert.strictEqual(counters.executed, 1);
   });
 
   it('the contrast: per-parent querying is the N+1 the include avoids', async () => {

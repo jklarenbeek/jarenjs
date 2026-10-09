@@ -21,11 +21,21 @@
 export const PLAN_VERSION = 2;
 
 /**
+ * @typedef {'number' | 'text' | 'boolean' | 'null'} PlanFamily
+ *
  * @typedef {{ segments: ({ name: string } | { index: number })[],
- *   type: string, column: string | null }} PlanRef
+ *   type: string, column: string | null, mixed?: true, unpinned?: true,
+ *   families?: PlanFamily[] }} PlanRef
  *   A typed reference into the stored document: `type` is the
  *   schema-declared type or `'unknown'`; `column` is the generated
- *   column name when the collection indexes this path.
+ *   column name when the collection indexes this path. `mixed` marks a
+ *   member the schema lets hold more than one kind, whose column answers
+ *   the first type's kind alone; `unpinned` marks a path with a step a
+ *   path engine may read off the other kind of container (an index, or a
+ *   name that reads as one) whose container the schema leaves open, so a
+ *   column spelled by the engine's path text may read the wrong member of
+ *   a conforming document; `families` is carried by the two sides of a
+ *   path comparison: every JSON family the schema lets the member hold.
  *
  * @typedef {{ lit: unknown } | { ext: string } | { seek: string }} PlanOperand
  *   A SEEK operand names one of the plan's own seeks: a scalar the
@@ -57,6 +67,8 @@ export const PLAN_VERSION = 2;
  *   { p: 'strop', kind: 'starts' | 'ends' | 'contains',
  *     ref: PlanRef, operand: PlanOperand } |
  *   { p: 'const', value: boolean } |
+ *   { p: 'hop', hop: PlanHop } |
+ *   { p: 'hopCount', hop: PlanHop, op: 'eq' | 'ne' | 'lt' | 'le' | 'gt' | 'ge', lit: number } |
  *   { p: 'udf', name: string, key: string } |
  *   { p: 'bboxOverlap', columns: { w: string, s: string, e: string,
  *     n: string }, probe: { box: number[] } | { ext: string } |
@@ -65,7 +77,8 @@ export const PLAN_VERSION = 2;
  *   { p: 'cellIn', column: string, cells: string[], keepEmpty?: boolean } |
  *   { p: 'cellPrefix', column: string, prefix: string } |
  *   { p: 'interval', columns: { start: string, end: string },
- *     probe: { from: number, to: number }, declared?: true, lower?: number } |
+ *     probe: { from: number, to: number }, declared?: true, lower?: number,
+ *     unpinned?: ({ name: string } | { index: number })[] } |
  *   { p: 'colCmp', op: 'eq' | 'lt' | 'le' | 'gt' | 'ge',
  *     column: string, operand: { lit: unknown } | { seek: string } }
  * )} PlanPredicate
@@ -128,7 +141,18 @@ export const PLAN_VERSION = 2;
  *   is `null`, where a leaf that finds nothing is omitted from its
  *   object and skipped in its array — the engine's own rule.
  *
- * @typedef {{ ref: PlanRef, desc: boolean, emptyGreatest: boolean }} PlanOrderTerm
+ * @typedef {{ entity: string, binding: string,
+ *   edges: { left: { binding: string, ref: PlanRef }, right: { binding: string, ref: PlanRef } }[],
+ *   filter: PlanPredicate | null }} PlanHop
+ *   A navigation hop of an entity plan: the rows of another entity, found
+ *   by column equalities with the rows of the plan's bindings and kept by
+ *   `filter` over the hop's own binding. The statement reads it as a
+ *   correlated subselect — `EXISTS` for a `hop` predicate, `COUNT(*)`
+ *   for a `hopCount` one, a scalar read for an order key or a projection
+ *   leaf — never as a join, so it adds no row to the result.
+ *
+ * @typedef {{ ref: PlanRef, desc: boolean, emptyGreatest: boolean,
+ *   hop?: PlanHop }} PlanOrderTerm
  *
  * @typedef {{ keys: { as: string, ref: PlanRef }[],
  *   aggregates: { as: string, fn: 'rows' | 'sum' | 'avg' | 'min' | 'max',
@@ -381,6 +405,21 @@ export function planOrder(plan) {
         desc: plan.bucket.order === 'desc', nullsFirst: false, tieBreaker: false }];
   }
   return effectiveOrder(plan.order);
+}
+
+/**
+ * The one value family two compared paths hold when each can hold that
+ * family and no other — `'number'` or `'text'`. Such a comparison is the
+ * plain `left op right` over two present values; every other pair of
+ * families is decided one family at a time.
+ * @param {{ left: PlanRef, right: PlanRef }} comparison - a `refCmp` node
+ * @returns {'number' | 'text' | null}
+ */
+export function plainFamily(comparison) {
+  const left = comparison.left.families;
+  const right = comparison.right.families;
+  return left?.length === 1 && right?.length === 1 && left[0] === right[0]
+    && (left[0] === 'number' || left[0] === 'text') ? left[0] : null;
 }
 
 /**

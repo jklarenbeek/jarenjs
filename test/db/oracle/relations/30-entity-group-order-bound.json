@@ -1,0 +1,432 @@
+{
+ "group": "30 entity group order past the exactness bound",
+ "model": {
+  "$model": "0.1",
+  "entities": {
+   "Item": {
+    "schema": {
+     "type": "object",
+     "required": [
+      "id"
+     ],
+     "properties": {
+      "id": {
+       "type": "integer",
+       "x-entity": {
+        "key": true
+       }
+      },
+      "g": {
+       "type": "string",
+       "x-entity": {
+        "index": true
+       }
+      },
+      "i": {
+       "type": "integer",
+       "x-entity": {
+        "index": true
+       }
+      },
+      "m": {
+       "type": "number"
+      },
+      "k": {
+       "type": "integer",
+       "x-entity": {
+        "index": true
+       }
+      }
+     }
+    }
+   }
+  }
+ },
+ "documents": {
+  "Item": [
+   {
+    "id": 1,
+    "g": "B",
+    "i": 1000000000000001
+   },
+   {
+    "id": 2,
+    "g": "B",
+    "i": 1000000000000001
+   },
+   {
+    "id": 3,
+    "g": "B",
+    "i": 1000000000000001
+   },
+   {
+    "id": 4,
+    "g": "B",
+    "i": 1000000000000001
+   },
+   {
+    "id": 5,
+    "g": "B",
+    "i": 1000000000000001
+   },
+   {
+    "id": 6,
+    "g": "B",
+    "i": 1000000000000000
+   },
+   {
+    "id": 7,
+    "g": "B",
+    "i": 1000000000000000
+   },
+   {
+    "id": 8,
+    "g": "B",
+    "i": 1000000000000000
+   },
+   {
+    "id": 9,
+    "g": "A",
+    "i": 1000000000000000
+   },
+   {
+    "id": 10,
+    "g": "A",
+    "i": 1000000000000001
+   },
+   {
+    "id": 11,
+    "g": "A",
+    "i": 1000000000000001
+   },
+   {
+    "id": 12,
+    "g": "U",
+    "i": 9007199254740991
+   },
+   {
+    "id": 13,
+    "g": "U",
+    "i": 2
+   },
+   {
+    "id": 14,
+    "g": "U",
+    "i": -9007199254740991
+   },
+   {
+    "id": 15,
+    "g": "V",
+    "i": 1
+   }
+  ]
+ },
+ "cases": [
+  {
+   "name": "averages that round to one double tie, descending",
+   "query": {
+    "$for": {
+     "it": "$.Item[*]"
+    },
+    "$where": {
+     "$or": [
+      {
+       "$eq": [
+        "$it.g",
+        "A"
+       ]
+      },
+      {
+       "$eq": [
+        "$it.g",
+        "B"
+       ]
+      }
+     ]
+    },
+    "$groupby": {
+     "g": "$it.g"
+    },
+    "$orderby": [
+     {
+      "$key": {
+       "$avg": "$it.i"
+      },
+      "$dir": "desc"
+     }
+    ],
+    "$return": {
+     "g": "$g",
+     "a": {
+      "$avg": "$it.i"
+     }
+    }
+   }
+  },
+  {
+   "name": "averages that round to one double tie, ascending",
+   "query": {
+    "$for": {
+     "it": "$.Item[*]"
+    },
+    "$where": {
+     "$or": [
+      {
+       "$eq": [
+        "$it.g",
+        "A"
+       ]
+      },
+      {
+       "$eq": [
+        "$it.g",
+        "B"
+       ]
+      }
+     ]
+    },
+    "$groupby": {
+     "g": "$it.g"
+    },
+    "$orderby": [
+     {
+      "$key": {
+       "$avg": "$it.i"
+      },
+      "$dir": "asc"
+     }
+    ],
+    "$return": {
+     "g": "$g",
+     "a": {
+      "$avg": "$it.i"
+     }
+    }
+   }
+  },
+  {
+   "name": "sums of the same groups differ",
+   "query": {
+    "$for": {
+     "it": "$.Item[*]"
+    },
+    "$where": {
+     "$or": [
+      {
+       "$eq": [
+        "$it.g",
+        "A"
+       ]
+      },
+      {
+       "$eq": [
+        "$it.g",
+        "B"
+       ]
+      }
+     ]
+    },
+    "$groupby": {
+     "g": "$it.g"
+    },
+    "$orderby": [
+     {
+      "$key": {
+       "$sum": "$it.i"
+      },
+      "$dir": "desc"
+     }
+    ],
+    "$return": {
+     "g": "$g",
+     "t": {
+      "$sum": "$it.i"
+     }
+    }
+   }
+  },
+  {
+   "name": "an average used only to order",
+   "query": {
+    "$for": {
+     "it": "$.Item[*]"
+    },
+    "$where": {
+     "$or": [
+      {
+       "$eq": [
+        "$it.g",
+        "A"
+       ]
+      },
+      {
+       "$eq": [
+        "$it.g",
+        "B"
+       ]
+      }
+     ]
+    },
+    "$groupby": {
+     "g": "$it.g"
+    },
+    "$orderby": [
+     {
+      "$key": {
+       "$avg": "$it.i"
+      },
+      "$dir": "desc"
+     }
+    ],
+    "$return": {
+     "g": "$g"
+    }
+   }
+  },
+  {
+   "name": "a sum past the exactness bound answers the engine",
+   "query": {
+    "$for": {
+     "it": "$.Item[*]"
+    },
+    "$where": {
+     "$or": [
+      {
+       "$eq": [
+        "$it.g",
+        "U"
+       ]
+      },
+      {
+       "$eq": [
+        "$it.g",
+        "V"
+       ]
+      }
+     ]
+    },
+    "$groupby": {
+     "g": "$it.g"
+    },
+    "$orderby": [
+     {
+      "$key": {
+       "$sum": "$it.i"
+      },
+      "$dir": "asc"
+     }
+    ],
+    "$return": {
+     "g": "$g",
+     "t": {
+      "$sum": "$it.i"
+     }
+    }
+   }
+  },
+  {
+   "name": "an average past the exactness bound answers the engine",
+   "query": {
+    "$for": {
+     "it": "$.Item[*]"
+    },
+    "$where": {
+     "$or": [
+      {
+       "$eq": [
+        "$it.g",
+        "U"
+       ]
+      },
+      {
+       "$eq": [
+        "$it.g",
+        "V"
+       ]
+      }
+     ]
+    },
+    "$groupby": {
+     "g": "$it.g"
+    },
+    "$orderby": [
+     {
+      "$key": {
+       "$avg": "$it.i"
+      },
+      "$dir": "asc"
+     }
+    ],
+    "$return": {
+     "g": "$g",
+     "a": {
+      "$avg": "$it.i"
+     }
+    }
+   }
+  },
+  {
+   "name": "a sum used only to order, past the bound",
+   "query": {
+    "$for": {
+     "it": "$.Item[*]"
+    },
+    "$where": {
+     "$or": [
+      {
+       "$eq": [
+        "$it.g",
+        "U"
+       ]
+      },
+      {
+       "$eq": [
+        "$it.g",
+        "V"
+       ]
+      }
+     ]
+    },
+    "$groupby": {
+     "g": "$it.g"
+    },
+    "$orderby": [
+     {
+      "$key": {
+       "$sum": "$it.i"
+      },
+      "$dir": "asc"
+     }
+    ],
+    "$return": {
+     "g": "$g"
+    }
+   }
+  },
+  {
+   "name": "every group orders by the engine sum",
+   "query": {
+    "$for": {
+     "it": "$.Item[*]"
+    },
+    "$groupby": {
+     "g": "$it.g"
+    },
+    "$orderby": [
+     {
+      "$key": {
+       "$sum": "$it.i"
+      },
+      "$dir": "desc"
+     }
+    ],
+    "$return": {
+     "g": "$g",
+     "t": {
+      "$sum": "$it.i"
+     }
+    }
+   }
+  }
+ ]
+}

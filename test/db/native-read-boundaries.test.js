@@ -155,7 +155,7 @@ it('first-seen grouping over compound physical keys explicitly refuses native pl
       $return: { e: '$e', rows: { $count: '$i' } } }];
     const explanation = await store.explain(query);
     assert.equal(explanation.mode, 'set');
-    assert.match(explanation.reasons[0].reason, /first-seen grouping over a compound physical key/);
+    assert.match(explanation.reasons[0].reason, /first appearance, which over a compound physical key requires tuple ordering/);
     await assert.rejects(async () => store.execute(query, { strict: true }), { code: 'JD0010' });
     assert.deepEqual(await store.execute(query), await store.execute(query, { pushdown: false }));
   }
