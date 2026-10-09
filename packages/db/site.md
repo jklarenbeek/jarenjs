@@ -55,9 +55,10 @@ planner reads three shapes through it: a half-open range under a series
 equality, an as-of lookup that is the index read backwards for one row, and a
 fixed-width bucket ladder — a `$groupby` over `$time-bucket`, or a `$resample`
 whose spec asks for nothing a GROUP BY cannot do — pushed as integer arithmetic
-in SQL. A fill policy, a calendar width, a rolling window and an as-of join are
-named refinements instead: the index bounds the fetch and the temporal kernel
-decides over what comes back, with `explain()`.series carrying the reason code,
+in SQL. A fill policy, a calendar width, a floating sum or mean, a rolling
+window and an as-of join are named refinements instead: the index bounds the
+fetch and the temporal kernel decides over what comes back, with
+`explain()`.series carrying the reason code,
 the index the fetch seeks through and the LAST ACTUAL run's candidate and result
 counts rather than an estimate. strict: true refuses every refinement before a
 statement runs. The batched as-of join costs one statement whatever the probes

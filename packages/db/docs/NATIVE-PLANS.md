@@ -54,8 +54,10 @@ selected rows (`explain().fallback.construct` `'accumulation'`); a term past the
 bound is left out of the fold, so over the values the store writes no accumulator
 overflows and the statement never fails, inside a PostgreSQL transaction or out of
 one (a JSON number past the double range, written by trusted SQL, is refused on
-PostgreSQL: MODEL-FORMAT §7). A native temporal
-bucket over `integer` readings carries the same bound. An entity ordering over a
+PostgreSQL: MODEL-FORMAT §7). A temporal bucket's sum or
+average over a `number` reading stays in the engine too
+(`series.floating-accumulation`, a pinned series still seeking its index), and
+a native one over `integer` readings carries the same bound. An entity ordering over a
 document member reads it as its declared type, so a number orders numerically on
 PostgreSQL as on SQLite, in a query's `$orderby`, a load's include and a root
 load alike; a member declared with more than one type orders in the engine (a

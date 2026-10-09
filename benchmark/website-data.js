@@ -1237,6 +1237,16 @@ function buildHeadlines(generated, meta) {
     const failures = meta.equivalenceFailures ?? 0;
     if (figures.largest !== undefined) {
       const times = (/** @type {number} */ r) => `${r.toFixed(2)}×`;
+      // the bucket is called pushed only when the planner reported it native,
+      // and its comparison with the generic route is stated as it fell
+      const pushed = (meta.plans ?? []).find((/** @type {any} */ p) => p.key === 'storeBucket')
+        ?.plan.startsWith('native:');
+      const bucket = pushed
+        ? `A bucket ladder pushed into a stored GROUP BY is ${times(figures.storeBucketVsQuery)} the generic query route;`
+        : 'A bucket whose floating mean the engine adds over the index-bounded fetch is'
+          + ` ${figures.storeBucketVsQuery >= 1
+            ? `${times(figures.storeBucketVsQuery)} faster than`
+            : `${times(1 / figures.storeBucketVsQuery)} slower than`} the generic query route;`;
       add('series', 'Series', {
         ratio: null,
         rival: 'no library rival — the routes a consumer already has',
@@ -1246,8 +1256,7 @@ function buildHeadlines(generated, meta) {
           + ' re-measured against every route since. A sorted cut answers a one-hour range'
           + ` ${times(figures.cutVsFilter)} a full filter, and a declared epoch column under an`
           + ` index answers it ${times(figures.columnVsDocument)} the same range read back out of`
-          + ' the stored JSON with date functions. A bucket ladder pushed into a stored GROUP BY is'
-          + ` ${times(figures.storeBucketVsQuery)} the generic query route; a rolling window is a`
+          + ` the stored JSON with date functions. ${bucket} a rolling window is a`
           + ` named refinement instead, costing ${times(figures.storeRollingVsResident)} the kernel`
           + ' over an array already in memory. The durable range costs'
           + ` ${times(figures.storedRangeVsResident)} the resident cut, which is the price of never`

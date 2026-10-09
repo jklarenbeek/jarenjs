@@ -1848,6 +1848,8 @@ function resampleBucket(spec, shape) {
     const valueBad = valueRefusal(value)
       ?? (admitsMixedTypes(shape.schema, value.segments) ? 'value-not-numeric' : null);
     if (valueBad !== null) return { code: valueBad };
+    // the engine adds left to right, which no SQL sum reproduces over doubles
+    if (floatingAccumulation({ fn, ref: value })) return { code: 'floating-accumulation' };
   }
   // The bucket shape, exactly: the bucket's start, its reading, and the count
   // of SOURCE rows — which is `COUNT(*)` whether or not it is also the
@@ -1900,7 +1902,8 @@ function groupLadder(key, itSlot, shape) {
 /**
  * The closed projection of a bucket grouping: one member per answered
  * value, each of them the group key, a `$count` of the whole binding,
- * or one of the four value aggregates over a schema-typed numeric path.
+ * `$min` or `$max` over a schema-typed numeric path, or `$sum` or `$avg`
+ * over a path the schema types `integer` (a floating one is the engine's).
  * @param {any} ret - the `$return` node
  * @param {number} itSlot
  * @param {number} keySlot
@@ -1933,6 +1936,7 @@ function bucketProjection(ret, itSlot, keySlot, shape) {
     const valueBad = valueRefusal(ref)
       ?? (admitsMixedTypes(shape.schema, ref.segments) ? 'value-not-numeric' : null);
     if (valueBad !== null) return { code: valueBad };
+    if (floatingAccumulation({ fn, ref })) return { code: 'floating-accumulation' };
     // what an aggregate over NO numbers says, in the ENGINE's words:
     // `$sum` of an empty sequence is 0 and the other three are the
     // empty sequence, which an object constructor leaves the member out

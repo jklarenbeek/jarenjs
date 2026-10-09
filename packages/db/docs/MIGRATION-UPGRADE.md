@@ -425,6 +425,19 @@ the query engine, now refuse by code or answer what the engine answers:
   average (`JD2005`, class `overflow`, aborting an open transaction with
   `JD2088`) where it answered the engine's `Infinity`; SQLite still answers
   `Infinity`.
+- A temporal bucket's `$sum` or `$avg` over a `number` reading (a
+  `$time-bucket` `$groupby`, `$resample`'s `sum` and its default `mean`)
+  answered the database's own sum, which is not the engine's left-to-right
+  addition — over `1e16, 1, -1e16` the store answered `1` where the engine
+  answers `0` — and on SQLite raised `JD2003` or `JD2005` over integer-valued
+  readings the engine sums. It now runs in the engine
+  (`series.floating-accumulation` in `explain()`, `JD0010` under strict mode)
+  over the rows the series index still selects: slower where it was native,
+  and a profile's `maxRows` now bounds those fetched rows (`JD2007` past it)
+  rather than the buckets. A `$time-bucket` `$sum` or `$avg` over
+  `['number', 'null']` that meets a `null` reading, which the store answered,
+  is now the engine's `JQ2001`, as a collection's is; `$resample` still skips
+  the `null`, and `$min`, `$max`, counts and `integer` readings stay native.
 - An ordering over a member of more than one type (`type: ['integer',
   'string']`) was pushed, answering an order the engine refuses (`JQ2005`);
   a query now leaves it to the engine, and a graph load refuses it `JD0032`.

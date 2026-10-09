@@ -100,14 +100,14 @@ const DOCUMENTS = {
       { $lt: ['$r.on', 60000] }] },
     $groupby: { b: { '$time-bucket': ['$r.on', 1000, 0] } },
     $orderby: ['$b'],
-    $return: { at: '$b', mean: { $avg: '$r.reading' }, n: { $count: '$r' } } },
+    $return: { at: '$b', peak: { $max: '$r.reading' }, n: { $count: '$r' } } },
   'native, the temporal bucket in first-appearance order': { $for: { r: '$[*]' },
     $where: { $and: [{ $eq: ['$r.series', 's'] }, { $ge: ['$r.on', 0] }] },
     $groupby: { b: { '$time-bucket': ['$r.on', 1000] } },
-    $return: { at: '$b', total: { $sum: '$r.reading' } } },
+    $return: { at: '$b', low: { $min: '$r.reading' } } },
   'native, the resample ladder': { $resample: [{ $for: { r: '$[*]' },
     $where: { $eq: ['$r.series', 's'] }, $return: '$r' },
-  { every: 1000, at: '$.on', value: '$.reading' }] },
+  { every: 1000, at: '$.on', value: '$.reading', aggregate: 'max' }] },
 };
 
 /**

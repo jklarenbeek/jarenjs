@@ -16,15 +16,17 @@
  *  2. **as-of** — the same prefix with ONE instant bound, ordered by
  *     the instant and cut to a finite window. One index seek per probe.
  *  3. **bucket** — a fixed-width ladder over the instant column with
- *     the exact `sum|mean|min|max|count` aggregates, which is a
- *     `GROUP BY` over integer arithmetic.
+ *     the aggregates a `GROUP BY` reproduces exactly (`min|max|count`,
+ *     and `sum|mean` over an `integer` reading), which is a `GROUP BY`
+ *     over integer arithmetic.
  *
  * Everything else — a calendar ladder, a fill policy, a rolling window,
- * an as-of JOIN, `first`/`last` — is a named core refinement: the
- * database narrows through the index and `@jarenjs/core/series` (via
- * the residual, which is the ENGINE running the caller's own document)
- * decides. The narrowing is the contribution; the answer is always the
- * engine's, which is what makes a refinement idempotent.
+ * an as-of JOIN, `first`/`last`, a floating sum or mean — is a named
+ * core refinement: the database narrows through the index and
+ * `@jarenjs/core/series` (via the residual, which is the ENGINE
+ * running the caller's own document) decides. The narrowing is the
+ * contribution; the answer is always the engine's, which is what makes
+ * a refinement idempotent.
  *
  * Every refusal here has a CODE, and the code is the first word of the
  * sentence the plan carries, so `explain().series.reasons[].code` and
@@ -45,7 +47,10 @@ export const SERIES_OPS = Object.freeze([
  * name for each. `count` is `rows` because it counts SOURCE ROWS —
  * duplicates and measured gaps included — which is `COUNT(*)` and not
  * `COUNT(value)`; the six value aggregates skip a `null` reading,
- * which is what SQL's aggregates already do with SQL `NULL`.
+ * which is what SQL's aggregates already do with SQL `NULL`. A `sum`
+ * or `mean` is exact only over an `integer` reading: over any other
+ * the planner keeps the engine's left-to-right addition
+ * (`floating-accumulation`).
  *
  * `first` and `last` are deliberately absent: they name a row by its
  * position in the series, and a group's order is not the series' order.
@@ -93,6 +98,9 @@ export const SERIES_REASONS = Object.freeze({
   'value-not-numeric':
     'the reading is not a schema-typed number, and a SQL aggregate over an untyped member '
     + 'answers where the engine refuses',
+  'floating-accumulation':
+    'a floating sum or average runs in the engine, whose left-to-right addition decides the '
+    + 'rounding a SQL sum would not reproduce',
   'nonnative-grouping':
     'the grouping key or the projection is not the closed bucket shape',
   'invalid-spec':

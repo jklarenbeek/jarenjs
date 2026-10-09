@@ -773,10 +773,12 @@ async function runLeg(n) {
   // recognizes — an indexed range, a fixed bucket ladder and an as-of
   // join bounded by the probes it was given — and the fourth is what it
   // deliberately does NOT: a window measured in time is a refinement,
-  // so the index bounds the fetch and the kernel decides. Each one is
+  // so the index bounds the fetch and the kernel decides. The bucket
+  // averages a floating reading, which is a refinement too (the engine
+  // adds left to right, and no SQL average reproduces it). Each one is
   // checked against the answer its resident twin gives before it is
   // timed, and the plan the database took is read from the store's own
-  // `explain()` rather than asserted.
+  // `explain()` rather than asserted: the labels follow that mode.
 
   const STORE_RANGE = {
     $for: { s: '$[*]' },
@@ -809,7 +811,7 @@ async function runLeg(n) {
       ?? `${storeRange.length} rows`);
 
   const storeBucket = stored(STORE_BUCKET);
-  check(`${label}: the store's native bucket answers the one-pass loop, value for value`,
+  check(`${label}: the store's bucket answers the one-pass loop, value for value`,
     firstBucketDisagreement(storeBucket, buckets) === null,
     firstBucketDisagreement(storeBucket, buckets) ?? `${storeBucket.length} buckets`);
 
@@ -1223,6 +1225,9 @@ const ratio = (a, b) => (a === undefined || b === undefined ? null
   : Math.round((a.ns / b.ns) * 100) / 100);
 const times = (r) => (r === null ? '—' : `${r.toFixed(2)}×`);
 
+/** The mode the store reported for one of its documents at the largest leg. */
+const storeMode = (key) => legs[legs.length - 1].plans[key].split(':', 1)[0];
+
 const ORDER = [
   ['filter', `${RANGE_MS / 3600_000} h range — full in-memory filter`],
   ['cut', `${RANGE_MS / 3600_000} h range — sorted binary cut`],
@@ -1248,7 +1253,8 @@ const ORDER = [
   ['sqlAsOfDense', 'the same dense join — SQLite, one index read per left row'],
   ['sqlBucket', `fixed ${BUCKET_MS / 1000} s aggregate — SQLite, integer bucket + GROUP BY`],
   ['storeRange', `${RANGE_MS / 3600_000} h range — the store, a document over the (series, at) index`],
-  ['storeBucket', `fixed ${BUCKET_MS / 1000} s buckets — the store, $resample pushed to GROUP BY`],
+  ['storeBucket', `fixed ${BUCKET_MS / 1000} s buckets — the store, ${storeMode('storeBucket') === 'native'
+    ? '$resample pushed to GROUP BY' : 'index-bounded + core kernel'}`],
   ['storeRolling', `rolling mean, ${ROLLING_WIDTH} s window — the store, index-bounded + core kernel`],
   ['storeAsOfJoin', `as-of join, ${ROUNDS.asof} left rows — the store, one batched fetch + core kernel`],
 ];
@@ -1476,11 +1482,17 @@ const notes = [
   `The store answers the same range at ${times(figures.storeRangeVsSql)} the hand-written`
     + ' statement — which selects two COLUMNS where the store renders and parses a whole JSON'
     + ' document per row. That is the price of storing documents rather than columns, and it is'
-    + ` not the planner's: the same ladder as a GROUP BY costs ${times(figures.storeBucketVsSql)}`
-    + ' the hand-written one, where the extra is a guarded predicate and one member read out of'
-    + ` the document. Against the generic query route the vocabulary had before, the pushed bucket`
-    + ` is ${times(figures.storeBucketVsQuery)} FASTER. Against a decoded array in memory the`
-    + ` range is ${times(figures.storeRangeVsResident)} and the bucket`
+    + (storeMode('storeBucket') === 'native'
+      ? ` not the planner's: the same ladder as a GROUP BY costs ${times(figures.storeBucketVsSql)}`
+        + ' the hand-written one, where the extra is a guarded predicate and one member read out of'
+        + ` the document. Against the generic query route the vocabulary had before, the pushed bucket`
+        + ` is ${times(figures.storeBucketVsQuery)} FASTER.`
+      : ` not the planner's. The buckets average a floating reading, which is NOT pushed — the engine`
+        + ' adds left to right, and no SQL average reproduces that — so the index bounds the fetch and'
+        + ` the temporal kernel adds the mean: ${times(figures.storeBucketVsSql)} the hand-written`
+        + ` GROUP BY, and ${joinVerdict(figures.storeBucketVsQuery)} the generic query route the`
+        + ' vocabulary had before.')
+    + ` Against a decoded array in memory the range is ${times(figures.storeRangeVsResident)} and the bucket`
     + ` ${times(figures.storeBucketVsResident)}: durability and a selective read are what that`
     + ' buys, and both numbers are published rather than netted out.',
   `A window measured in time is NOT pushed — it is a named refinement — and the store answers it`

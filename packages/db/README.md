@@ -227,9 +227,9 @@ no continuation to emit.
   oracle — a committed corpus and a seeded generator, every case run
   resident, native, native again over a store with every declared index
   removed, and forced-residual — keeps every path agreeing, with the one
-  arithmetic deviation declared rather than hidden (MODEL-FORMAT §10.6: SQLite's
-  compensated `SUM` and the engine's naive one differ in the last
-  bit). `strict: true` turns any residual into a compile error.
+  deviation declared rather than hidden (MODEL-FORMAT §10.6: a native
+  temporal bucket skips a `null` reading where the engine refuses it).
+  `strict: true` turns any residual into a compile error.
   Constant trees fetch only a row marker. Counts over entity projection trees
   lower too; a single-path count or window excludes absent members before
   counting items. A window over a projection that can emit several items runs
@@ -332,8 +332,9 @@ no continuation to emit.
   series equality, an as-of lookup (the index read backwards, one row),
   and a fixed-width bucket ladder — a `$groupby` over `$time-bucket`, or
   a `$resample` whose spec asks for nothing a `GROUP BY` cannot do — as
-  integer arithmetic in SQL. A fill policy, a calendar width, a rolling
-  window and an as-of JOIN are **named refinements**: the index bounds
+  integer arithmetic in SQL. A fill policy, a calendar width, a floating
+  sum or mean, a rolling window and an as-of JOIN are **named
+  refinements**: the index bounds
   the fetch and `@jarenjs/core/series` decides, with `explain().series`
   carrying the reason code and the last run's actual candidate and
   result counts. See [Time series](#time-series--the-index-the-ladder-the-refinement).
@@ -761,7 +762,7 @@ await sample.execute({
 // native: the same index, GROUP BY over integer bucket arithmetic
 await sample.execute({ $resample: [
   { $for: { s: '$[*]' }, $where: { $eq: ['$s.series', 'sensor-a'] }, $return: '$s' },
-  { every: 'PT1M', aggregate: 'mean' },
+  { every: 'PT1M', aggregate: 'max' },
 ] });
 
 // hybrid: the index bounds the fetch, rollingSeries decides
@@ -770,6 +771,12 @@ await sample.execute({ $rolling: [
   { width: 'PT1M', aggregate: 'mean', minPeriods: 30 },
 ] });
 ```
+
+A bucket's `sum` or `mean` is pushed only over a reading the schema types
+`integer`. Over a `number` the engine adds left to right, which no SQL sum
+reproduces, so it is a named refinement (`floating-accumulation`) over the
+fetch the series equality still bounds through the index, and `strict: true`
+refuses it.
 
 **The numbers, the loss included.** `benchmark/series.js` answers the
 same range, the same buckets, the same rolling window and the same
@@ -791,7 +798,8 @@ answer, and a reason code for every thing the database could not do:
 `fill-policy`, `calendar-width`, `named-zone`, `rolling-refinement`,
 `asof-refinement`, `unsupported-aggregate`, `nonliteral-spec`,
 `instant-not-integer`, `missing-series-prefix`, `row-selector`,
-`value-not-numeric`, `nonnative-grouping`, `invalid-spec`. `strict: true` refuses
+`value-not-numeric`, `floating-accumulation`, `nonnative-grouping`,
+`invalid-spec`. `strict: true` refuses
 every one of them before a statement runs, and the counts `explain()`
 prints are the LAST ACTUAL execution's — `null` until the document has
 run, because an estimate wearing a count's name is worse than no

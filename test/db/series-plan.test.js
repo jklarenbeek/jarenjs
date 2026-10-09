@@ -21,7 +21,7 @@ import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
 
 import {
-  planQuery, normalizeModel, planCollection, sqliteDialect, assertNoSqlText, PLAN_VERSION,
+  planQuery, normalizeModel, planCollection, sqliteDialect, assertNoSqlText, PLAN_VERSION, reasonId,
 } from '@jarenjs/db';
 import { emitPlan } from '../../packages/db/src/emit.js';
 import { predicateTerms } from '../../packages/db/src/plan.js';
@@ -41,6 +41,8 @@ const MODEL = {
           at: { type: 'integer' },
           on: { type: 'number' },
           value: { type: ['number', 'null'] },
+          hits: { type: 'integer' },
+          mixed: { type: ['number', 'string'] },
           note: { type: 'string' },
         },
       },
@@ -116,7 +118,7 @@ const BUCKET = {
   ] },
   $groupby: { b: { '$time-bucket': ['$s.at', 60000, ORIGIN] } },
   $orderby: ['$b'],
-  $return: { at: '$b', value: { $avg: '$s.value' }, count: { $count: '$s' } },
+  $return: { at: '$b', value: { $max: '$s.value' }, count: { $count: '$s' } },
 };
 
 describe('the three closed shapes seek the composite index', () => {
@@ -163,7 +165,7 @@ describe('the three closed shapes seek the composite index', () => {
       as: 'at',
       order: 'asc',
       aggregates: [
-        { fn: 'avg', as: 'value', empty: 'omit',
+        { fn: 'max', as: 'value', empty: 'omit',
           ref: { segments: [{ name: 'value' }], type: 'number', column: null } },
         { fn: 'rows', ref: null, as: 'count', empty: 'null' },
       ],
@@ -175,12 +177,12 @@ describe('the three closed shapes seek the composite index', () => {
   });
 
   it('a $resample whose spec asks for nothing a GROUP BY cannot do is native too', () => {
-    const planned = plan({ $resample: [NARROWED, { every: 60000, origin: ORIGIN }] });
+    const planned = plan({ $resample: [NARROWED, { every: 60000, origin: ORIGIN, aggregate: 'max' }] });
     assert.strictEqual(planned.mode, 'native');
     assert.strictEqual(planned.series.operation, 'resample');
     assert.strictEqual(planned.series.index, 'sample_by_series_at');
     assert.deepStrictEqual(planned.plan.bucket.aggregates.map((a) => [a.fn, a.as, a.empty]),
-      [['avg', 'value', 'null'], ['rows', 'count', 'null']]);
+      [['max', 'value', 'null'], ['rows', 'count', 'null']]);
   });
 
   it("aggregate: 'count' answers the row count as the value AND as the count", () => {
@@ -202,7 +204,7 @@ describe('the emitted statements: one ladder, written once', () => {
     const emitted = sqlOf(plan(BUCKET));
     assert.match(emitted.sql,
       /SELECT \("gx_at" - \(\(\("gx_at" - \?\) % \? \+ \?\) % \?\)\) AS "at"/);
-    assert.match(emitted.sql, /AVG\(jsonb_extract\("doc", '\$\."value"'\)\) AS "value"/);
+    assert.match(emitted.sql, /MAX\(jsonb_extract\("doc", '\$\."value"'\)\) AS "value"/);
     assert.match(emitted.sql, /COUNT\(\*\) AS "count"/);
     assert.match(emitted.sql, /GROUP BY "at" ORDER BY "at" ASC$/);
     // the ladder's parameters come FIRST and in text order: the origin
@@ -286,9 +288,10 @@ describe('every refinement names one reason, and the table is complete', () => {
     'row-selector': { $resample: [NARROWED, { every: 60000, at: '$.a.b' }] },
     'instant-not-integer': { $resample: [NARROWED, { every: 60000, at: '$.on' }] },
     'value-not-numeric': { $resample: [NARROWED, { every: 60000, value: '$.note' }] },
+    'floating-accumulation': { $resample: [NARROWED, { every: 60000 }] },
     'nonliteral-spec': { ...BUCKET, $groupby: { b: { '$time-bucket': ['$s.at', '$s.at'] } } },
     'nonnative-grouping': { ...BUCKET, $return: { at: '$b', n: { $count: '$s.value' } } },
-    'missing-series-prefix': { $resample: ['$[*]', { every: 60000 }] },
+    'missing-series-prefix': { $resample: ['$[*]', { every: 60000, aggregate: 'max' }] },
     'invalid-spec': { $resample: [NARROWED, { every: 60000, start: 'not-an-instant' }] },
   };
 
@@ -342,7 +345,7 @@ describe('every refinement names one reason, and the table is complete', () => {
   it('a bucket over the WHOLE collection is still native, and still names the scan', () => {
     // the database answers it — a scan is a plan, not a residual — and
     // the reason is what tells a reader the index earned nothing here
-    const planned = plan({ $resample: ['$[*]', { every: 60000 }] });
+    const planned = plan({ $resample: ['$[*]', { every: 60000, aggregate: 'max' }] });
     assert.strictEqual(planned.mode, 'native');
     assert.strictEqual(planned.series.mode, 'native');
     assert.deepStrictEqual(codes(planned), ['missing-series-prefix']);
@@ -438,10 +441,83 @@ describe('a narrowing is implied, never decided', () => {
   });
 });
 
+describe("a floating sum or average in a bucket is the engine's, and the fetch still seeks", () => {
+  /** The grouping spelling, aggregating `member` with `fn`. */
+  const grouped = (fn, member = 'value') => ({ ...BUCKET,
+    $return: { at: '$b', value: { [fn]: `$s.${member}` }, count: { $count: '$s' } } });
+  /** The ladder spelling, reading `member` through `aggregate`. */
+  const resampled = (aggregate, member = 'value') => ({ $resample: [NARROWED,
+    { every: 60000, origin: ORIGIN, aggregate, value: `$.${member}` }] });
+
+  it('a $sum or $avg over a number reading names the code in the grouping spelling', () => {
+    for (const fn of ['$sum', '$avg']) {
+      const planned = plan(grouped(fn));
+      assert.strictEqual(planned.mode, 'set', fn);
+      assert.strictEqual(planned.plan.bucket, null, fn);
+      assert.deepStrictEqual(codes(planned), ['floating-accumulation'], fn);
+      assert.strictEqual(planned.reasons[0].construct, '$groupby', fn);
+      assert.strictEqual(reasonId(planned.reasons[0].reason), 'series.floating-accumulation', fn);
+      // the residual keeps the narrowing: the series index and its prefix
+      assert.strictEqual(planned.series.mode, 'hybrid', fn);
+      assert.strictEqual(planned.series.operation, 'bucket', fn);
+      assert.strictEqual(planned.series.refinement, 'resampleSeries', fn);
+      assert.strictEqual(planned.series.index, 'sample_by_series_at', fn);
+      assert.deepStrictEqual(planned.series.prefix, ['gx_series'], fn);
+      assert.match(sqlOf(planned).sql, /"gx_series" = \?/, fn);
+      assert.doesNotMatch(sqlOf(planned).sql, /GROUP BY/, fn);
+    }
+  });
+
+  it('a $resample sum or mean — the default included — names it too', () => {
+    for (const aggregate of ['sum', 'mean']) {
+      const planned = plan(resampled(aggregate));
+      assert.strictEqual(planned.mode, 'set', aggregate);
+      assert.strictEqual(planned.plan.bucket, null, aggregate);
+      assert.deepStrictEqual(codes(planned), ['floating-accumulation'], aggregate);
+      assert.strictEqual(planned.reasons[0].construct, '$resample', aggregate);
+      assert.strictEqual(reasonId(planned.reasons[0].reason), 'series.floating-accumulation', aggregate);
+      assert.strictEqual(planned.series.mode, 'hybrid', aggregate);
+      assert.strictEqual(planned.series.operation, 'resample', aggregate);
+      assert.strictEqual(planned.series.refinement, 'resampleSeries', aggregate);
+      assert.strictEqual(planned.series.index, 'sample_by_series_at', aggregate);
+      assert.deepStrictEqual(planned.series.prefix, ['gx_series'], aggregate);
+    }
+    // the spec's default aggregate is the mean
+    assert.deepStrictEqual(codes(plan({ $resample: [NARROWED, { every: 60000 }] })),
+      ['floating-accumulation']);
+  });
+
+  it('extremes, counts and integer readings stay native, the integer sums beside their guard', () => {
+    for (const document of [grouped('$min'), grouped('$max'), resampled('min'),
+      resampled('max'), resampled('count')]) {
+      const planned = plan(document);
+      assert.strictEqual(planned.mode, 'native');
+      assert.deepStrictEqual(planned.reasons, []);
+      assert.doesNotMatch(sqlOf(planned).sql, /_safe/);
+    }
+    for (const document of [grouped('$sum', 'hits'), grouped('$avg', 'hits'),
+      resampled('sum', 'hits'), resampled('mean', 'hits')]) {
+      const planned = plan(document);
+      assert.strictEqual(planned.mode, 'native');
+      assert.deepStrictEqual(planned.reasons, []);
+      assert.match(sqlOf(planned).sql, /AS "_safe0"/);
+    }
+  });
+
+  it('a reading of two types still names value-not-numeric first', () => {
+    for (const document of [grouped('$sum', 'mixed'), grouped('$avg', 'mixed'),
+      resampled('sum', 'mixed'), resampled('mean', 'mixed')])
+      assert.deepStrictEqual(codes(plan(document)), ['value-not-numeric']);
+  });
+});
+
 describe('strict mode refuses every hybrid and engine plan before execution', () => {
   const strictShape = { ...SHAPE };
   for (const [label, document] of Object.entries({
     'a fill policy': { $resample: [NARROWED, { every: 60000, fill: 'locf' }] },
+    'a floating mean': { $resample: [NARROWED, { every: 60000 }] },
+    'a floating sum in a grouping': { ...BUCKET,
+      $return: { at: '$b', value: { $sum: '$s.value' }, count: { $count: '$s' } } },
     'a calendar width': { $resample: [NARROWED, { every: 'P1M' }] },
     'a rolling window': { $rolling: [NARROWED, { width: 60000 }] },
     'an as-of join': { $asof: [{ $const: [{ at: 0, value: 1 }] }, '$[*]', {}] },
@@ -457,7 +533,7 @@ describe('strict mode refuses every hybrid and engine plan before execution', ()
 
   it('the three native shapes carry no reason at all', () => {
     for (const document of [RANGE, ASOF, BUCKET,
-      { $resample: [NARROWED, { every: 60000 }] }]) {
+      { $resample: [NARROWED, { every: 60000, aggregate: 'max' }] }]) {
       const planned = plan(document);
       assert.strictEqual(planned.mode, 'native');
       assert.deepStrictEqual(planned.reasons, []);
@@ -478,7 +554,7 @@ describe('the row selector reads the two spellings a member has', () => {
 
   it('a selector that names a member names its column', () => {
     const planned = plan({ $resample: [NARROWED,
-      { every: 60000, at: '$.at', value: '$.value' }] });
+      { every: 60000, at: '$.at', value: '$.value', aggregate: 'max' }] });
     assert.strictEqual(planned.mode, 'native');
     assert.strictEqual(planned.plan.bucket.ref.column, 'gx_at');
   });
@@ -487,7 +563,7 @@ describe('the row selector reads the two spellings a member has', () => {
 describe('a peeled window composes over a temporal plan', () => {
   it('a native bucket takes the window as a LIMIT over its ascending groups', () => {
     const planned = plan({ $subsequence: [
-      { $resample: [NARROWED, { every: 60000, origin: ORIGIN }] }, 1, 2] });
+      { $resample: [NARROWED, { every: 60000, origin: ORIGIN, aggregate: 'max' }] }, 1, 2] });
     assert.strictEqual(planned.mode, 'native');
     assert.deepStrictEqual(planned.plan.window, { offset: 1, limit: 2 });
     assert.match(sqlOf(planned).sql, /GROUP BY "at" ORDER BY "at" ASC LIMIT 2 OFFSET 1$/);

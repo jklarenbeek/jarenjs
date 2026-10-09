@@ -403,6 +403,156 @@ describe('an integer sum or average in a native temporal bucket', () => {
   });
 });
 
+describe('a floating sum or average in a temporal bucket', () => {
+  const model = { $model: '0.1', collections: { rows: {
+    key: '/id',
+    schema: { type: 'object', properties: {
+      id: { type: 'string' }, series: { type: 'string' }, at: { type: 'integer' }, value: { type: 'number' } } },
+    indexes: [{ name: 'by_series_at', path: ['$.series', '$.at'] }],
+  } } };
+  // one 1000 ms bucket per series: terms that cancel, terms with no exact
+  // binary sum, a total past 2^53 (a JD2003 on Node's SQLite binding) and one
+  // past int64 (a JD2005 there)
+  const cases = [
+    { series: 'cancelling', values: [1e16, 1, -1e16], sum: 0, mean: 0 },
+    { series: 'dyadic', values: [0.1, 0.2, 0.3], sum: 0.6000000000000001, mean: 0.20000000000000004 },
+    { series: 'past53', values: [BIG, 2], sum: 9007199254740992, mean: 4503599627370496 },
+    { series: 'pastInt64', values: [2 ** 62, 2 ** 62], sum: 9223372036854776000, mean: 4611686018427388000 },
+  ];
+  const documents = cases.flatMap(({ series, values }) =>
+    values.map((value, at) => ({ id: `${series}${at}`, series, at, value })));
+  /** @param {string} series */
+  const source = (series) => ({ $for: { s: '$[*]' },
+    $where: { $and: [{ $eq: ['$s.series', series] }, { $ge: ['$s.at', 0] }] } });
+  /** @param {string} series @param {string} fn */
+  const grouped = (series, fn) => ({ ...source(series),
+    $groupby: { b: { '$time-bucket': ['$s.at', 1000, 0] } }, $orderby: ['$b'],
+    $return: { at: '$b', v: { [fn]: '$s.value' } } });
+  /** @param {string} series @param {string} aggregate */
+  const resampled = (series, aggregate) => ({ $resample: [{ ...source(series), $return: '$s' },
+    { every: 1000, origin: 0, aggregate }] });
+
+  for (const { series, values, sum, mean } of cases) {
+    it(`answers the engine's left-to-right accumulation over ${series} readings, and the fetch still seeks the series index`, async () => {
+      const own = documents.filter((document) => document.series === series);
+      await onBothEngines(model, async (store, host) => {
+        const rows = store.collection('rows');
+        for (const document of own) await rows.insert(document);
+        for (const [document, answer] of [
+          [grouped(series, '$sum'), { at: 0, v: sum }],
+          [grouped(series, '$avg'), { at: 0, v: mean }],
+          [resampled(series, 'sum'), { at: 0, value: sum, count: values.length }],
+          [resampled(series, 'mean'), { at: 0, value: mean, count: values.length }],
+        ]) {
+          const label = `${host} ${JSON.stringify(document)}`;
+          assert.deepEqual(compileJsonQuery(document)(structuredClone(own)), answer, `engine: ${label}`);
+          assert.deepEqual(await rows.execute(document), answer, label);
+          assert.deepEqual(await drained(rows.query(document)), [answer], label);
+          const explained = await rows.explain(document);
+          assert.equal(explained.mode, 'set', label);
+          assert.equal(ids(explained)[0], 'series.floating-accumulation', label);
+          assert.equal(explained.series.reasons[0].code, 'floating-accumulation', label);
+          await assert.rejects(Promise.resolve().then(() => rows.execute(document, { strict: true })),
+            { code: 'JD0010', message: /floating-accumulation/ }, label);
+          // the series equality still bounds the fetch: the index is sought, not scanned
+          assert.equal(explained.series.mode, 'hybrid', label);
+          assert.equal(explained.series.refinement, 'resampleSeries', label);
+          assert.equal(explained.series.index, 'rows_by_series_at', label);
+          assert.deepEqual(explained.series.prefix, ['gx_series'], label);
+          if (host === 'sqlite') {
+            assert.match(explained.scanNarrative, /SEARCH rows USING INDEX rows_by_series_at/, label);
+          }
+        }
+      });
+    });
+  }
+
+  it('keeps the extremes and the counts native over the same readings', async () => {
+    await onBothEngines(model, async (store, host) => {
+      const rows = store.collection('rows');
+      for (const document of documents) await rows.insert(document);
+      // the dyadic and the 2^53 series: the extremes of the others are
+      // integer-valued doubles past 2^53, which Node's SQLite binding
+      // cannot hand over whatever plan reads them
+      for (const [series, min, max, count] of [['dyadic', 0.1, 0.3, 3], ['past53', 2, BIG, 2]]) {
+        for (const [document, answer] of [
+          [grouped(series, '$min'), { at: 0, v: min }],
+          [grouped(series, '$max'), { at: 0, v: max }],
+          [resampled(series, 'min'), { at: 0, value: min, count }],
+          [resampled(series, 'max'), { at: 0, value: max, count }],
+        ]) {
+          const label = `${host} ${series} ${JSON.stringify(document)}`;
+          assert.deepEqual(compileJsonQuery(document)(structuredClone(documents)), answer, `engine: ${label}`);
+          assert.deepEqual(await rows.execute(document), answer, label);
+          assert.equal((await rows.explain(document)).mode, 'native', label);
+        }
+      }
+      const counted = resampled('dyadic', 'count');
+      assert.deepEqual(await rows.execute(counted), { at: 0, value: 3, count: 3 }, host);
+      assert.equal((await rows.explain(counted)).mode, 'native', host);
+    });
+  });
+});
+
+describe('a null reading in a temporal bucket', () => {
+  // readings 2, null, 4 in one bucket. The engine refuses the null in a
+  // grouped aggregate and the temporal kernel skips it
+  /** @param {string[]} type */
+  const model = (type) => ({ $model: '0.1', collections: { rows: {
+    key: '/id',
+    schema: { type: 'object', properties: {
+      id: { type: 'string' }, series: { type: 'string' }, at: { type: 'integer' }, value: { type } } },
+    indexes: [{ name: 'by_series_at', path: ['$.series', '$.at'] }],
+  } } });
+  const documents = [2, null, 4].map((value, at) => ({ id: `r${at}`, series: 's', at, value }));
+  const source = { $for: { s: '$[*]' },
+    $where: { $and: [{ $eq: ['$s.series', 's'] }, { $ge: ['$s.at', 0] }] } };
+  /** @param {string} fn */
+  const grouped = (fn) => ({ ...source, $groupby: { b: { '$time-bucket': ['$s.at', 1000, 0] } },
+    $orderby: ['$b'], $return: { at: '$b', v: { [fn]: '$s.value' } } });
+  /** @param {string} aggregate */
+  const resampled = (aggregate) => ({ $resample: [{ ...source, $return: '$s' },
+    { every: 1000, origin: 0, aggregate }] });
+
+  it("is the engine's refusal for a floating $sum or $avg, and the kernel's skip for a $resample", async () => {
+    await onBothEngines(model(['number', 'null']), async (store, host) => {
+      const rows = store.collection('rows');
+      for (const document of documents) await rows.insert(document);
+      for (const fn of ['$sum', '$avg']) {
+        const document = grouped(fn);
+        const label = `${host} ${fn}`;
+        assert.throws(() => compileJsonQuery(document)(structuredClone(documents)), { code: 'JQ2001' }, `engine: ${label}`);
+        await assert.rejects(Promise.resolve().then(() => rows.execute(document)), { code: 'JQ2001' }, label);
+        assert.equal((await rows.explain(document)).mode, 'set', label);
+      }
+      for (const [aggregate, value] of [['sum', 6], ['mean', 3]]) {
+        const document = resampled(aggregate);
+        const label = `${host} ${aggregate}`;
+        assert.deepEqual(compileJsonQuery(document)(structuredClone(documents)), { at: 0, value, count: 3 }, `engine: ${label}`);
+        assert.deepEqual(await rows.execute(document), { at: 0, value, count: 3 }, label);
+        assert.equal((await rows.explain(document)).mode, 'set', label);
+      }
+    });
+  });
+
+  it('is still skipped by a pushed extreme, and by an integer sum or average', async () => {
+    for (const [type, fns] of [[['number', 'null'], { $min: 2, $max: 4 }],
+      [['integer', 'null'], { $min: 2, $max: 4, $sum: 6, $avg: 3 }]]) {
+      await onBothEngines(model(type), async (store, host) => {
+        const rows = store.collection('rows');
+        for (const document of documents) await rows.insert(document);
+        for (const [fn, value] of Object.entries(fns)) {
+          const document = grouped(fn);
+          const label = `${host} ${type} ${fn}`;
+          assert.throws(() => compileJsonQuery(document)(structuredClone(documents)), { code: 'JQ2001' }, `engine: ${label}`);
+          assert.equal((await rows.explain(document)).mode, 'native', label);
+          assert.deepEqual(await rows.execute(document), { at: 0, v: value }, label);
+        }
+      });
+    }
+  });
+});
+
 /** What a call answers, or the code it refuses with. @param {() => any} run */
 const outcome = async (run) => {
   try {

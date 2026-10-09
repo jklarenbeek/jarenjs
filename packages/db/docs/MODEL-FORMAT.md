@@ -1949,9 +1949,7 @@ that reached a document another way (trusted SQL, another writer) reads
 back as `Infinity`: SQLite then answers the engine's `Infinity`, while
 PostgreSQL's guard cannot read it as a double and refuses the call
 (`JD2005`, class `overflow`), which inside a transaction aborts it
-(`JD2088`). A native bucket over a `number` member keeps the database's own sum
-(§10.6), which on SQLite can still raise either over integer-valued
-readings. A returned classification owns its mutable metadata;
+(`JD2088`). A returned classification owns its mutable metadata;
 editing it cannot change how later failures are classified. A classified error
 carries `class`, `retryable` and the driver's error as `cause`; a
 lifecycle that owns its failure code (`JD2078` for maintenance and
@@ -3359,31 +3357,33 @@ collection's, or a physical entity's column — is `buffered`
 (`bind.accumulationWhole`), and `strictStreaming` declines it (`JD0037`)
 as it declines the floating twin. A native temporal bucket's `$sum` or
 `$avg` over `integer` readings carries the same guard and the same
-fallback.
+fallback. Over a reading the schema does not type `integer` a temporal
+bucket's `$sum` or `$avg` — a `$time-bucket` `$groupby`, and
+`$resample`'s `sum` and `mean` — runs in the engine as the
+collection's does, named `series.floating-accumulation`
+(`explain().series.reasons[].code` is `floating-accumulation`), and
+strict mode refuses it (`JD0010`). The fetch keeps its narrowing — a
+pinned series still seeks the series index (`explain().series.mode` is
+`hybrid`, its refinement `resampleSeries`, with the index and its
+pinned prefix) — so the engine adds only the rows the document
+selects; `$min`, `$max`, counts and `integer` readings stay native.
 
-Two deviations between a pushed answer and the engine's are DECLARED
-rather than refused, because in both the database is right by its own
+One deviation between a pushed answer and the engine's is DECLARED
+rather than refused, because the database is right by its own
 arithmetic:
 
-- `$sum`/`$avg` over `number` readings in a native temporal bucket (a
-  `$time-bucket` `$groupby`, and `$resample`'s `sum` and `mean`) — SQL
-  sums with compensation (SQLite) or exactly (PostgreSQL) and the
-  series kernel naively, so over `0.1, 0.2, 0.3` the store answers `0.6`
-  where the kernel answers `0.6000000000000001`: equal to within an
-  ulp, never equal by `===` (the temporal corpus draws dyadic readings,
-  which are exact on both sides). The sum is the database's own, so on
-  SQLite a `number` member holding integer-valued readings sums them as
-  integers: past int64 that bucket is `JD2005` (class `overflow`), and a
-  total past `2^53` is `JD2003` on Node's binding. A member the schema
-  types `integer` carries the exactness guard instead (above).
-- a `$time-bucket` `$groupby` whose aggregated path admits `null`
-  (`['number', 'null']`): the pushed `AVG` skips a `null` reading
-  exactly as the series kernel — and therefore the `$resample`
-  spelling — does, while the engine's `$avg` over a sequence holding
-  `null` raises `JQ2001`; under this one spelling the store answers
-  where the in-memory engine refuses. Everywhere else an ordering or
-  an aggregate over a path that admits `null`, or over a boolean path,
-  is a named residual, so the two paths keep answering alike.
+- a `$time-bucket` `$groupby` whose aggregated path admits `null`: the
+  pushed `$min` and `$max` over `['number', 'null']` — and `$sum`,
+  `$avg`, `$min` and `$max` over `['integer', 'null']` — skip a `null`
+  reading exactly as the series kernel does, while the engine's
+  aggregate over a sequence holding `null` raises `JQ2001`; over
+  `2, null, 4` the store answers `$sum` `6`, `$avg` `3`, `$min` `2`
+  and `$max` `4`. The `$resample` spelling skips the `null` natively
+  and in the engine alike. A `$sum` or `$avg` over `['number', 'null']`
+  is no part of the deviation: it is the engine's, and raises `JQ2001`
+  for a bucket holding a `null` reading. Everywhere else an ordering
+  or an aggregate over a path that admits `null`, or over a boolean
+  path, is a named residual, so the two paths keep answering alike.
 
 An ordering over a member declared with more than one type
 (`['integer', 'string']`) is a named residual as well, since the engine

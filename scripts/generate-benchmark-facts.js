@@ -814,12 +814,18 @@ const FACTS = {
   // against the array already in memory. Three ratios per shape,
   // because quoting only the flattering one is the thing honesty forbids.
   'series.storeShapes': () => {
-    const { figures } = data('series').meta;
+    const { figures, plans } = data('series').meta;
+    // the bucket is called pushed only when the planner reported it native,
+    // and its comparison with the generic route is stated in the direction
+    // it was measured
+    const pushed = plans.find((entry) => entry.key === 'storeBucket').plan.startsWith('native:');
+    const query = figures.storeBucketVsQuery;
     return `the planned range costs ${ratio(figures.storeRangeVsSql)}× the hand-written `
-      + `statement and ${ratio(figures.storeRangeVsResident)}× the resident cut, and the pushed `
-      + `bucket ladder ${ratio(figures.storeBucketVsSql)}× the hand-written GROUP BY, `
-      + `${ratio(figures.storeBucketVsQuery)}× FASTER than the generic query route, and `
-      + `${ratio(figures.storeBucketVsResident)}× the one-pass loop`;
+      + `statement and ${ratio(figures.storeRangeVsResident)}× the resident cut, and the `
+      + `${pushed ? 'pushed bucket ladder' : 'index-bounded bucket (its mean added in the engine)'} `
+      + `${ratio(figures.storeBucketVsSql)}× the hand-written GROUP BY, `
+      + `${query >= 1 ? `${ratio(query)}× FASTER` : `${ratio(1 / query)}× SLOWER`} `
+      + `than the generic query route, and ${ratio(figures.storeBucketVsResident)}× the one-pass loop`;
   },
   'series.storeRefinement': () => {
     const { figures } = data('series').meta;

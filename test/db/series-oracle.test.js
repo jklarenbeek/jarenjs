@@ -64,14 +64,16 @@ const PLANS = {
   'range/half-open-edges': ['native', 'native', [], true],
   'range/starts-before-corpus': ['native', 'native', [], true],
   'range/entirely-after-corpus': ['native', 'native', [], true],
-  'bucket/fixed-minute': ['native', 'native', [], true],
+  // the corpus readings are numbers, so a sum or a mean over them is the
+  // engine's: the series index still bounds the fetch
+  'bucket/fixed-minute': ['set', 'hybrid', ['floating-accumulation'], true],
   'asof/on-a-sample': ['native', 'native', [], true],
   'asof/between-samples': ['native', 'native', [], true],
   'asof/before-the-first': ['native', 'native', [], true],
   'asof/after-the-last': ['native', 'native', [], true],
-  'resample/fixed-minute-mean': ['native', 'native', [], true],
+  'resample/fixed-minute-mean': ['set', 'hybrid', ['floating-accumulation'], true],
   'resample/fixed-minute-count': ['native', 'native', [], true],
-  'resample/gapped-omit': ['native', 'native', [], true],
+  'resample/gapped-omit': ['set', 'hybrid', ['floating-accumulation'], true],
   'resample/gapped-null-buckets': ['set', 'hybrid', ['fill-policy'], true],
   'resample/sparse-fill-null': ['set', 'hybrid', ['fill-policy'], true],
   'resample/sparse-fill-zero': ['set', 'hybrid', ['fill-policy'], true],
@@ -221,7 +223,7 @@ describe('the temporal corpus through SQLite', () => {
 
 describe('the counts explain() reports are the last ACTUAL run, never an estimate', () => {
   it('null before the document has run, and the real numbers after it', async () => {
-    const { entry, projected } = PROJECTED.find((row) => row.entry.name === 'resample/gapped-omit');
+    const { entry, projected } = PROJECTED.find((row) => row.entry.name === 'resample/fixed-minute-count');
     const { store, collection } = await storeFor(nodeDriver(), projected.documents, 'indexed');
     try {
       const before = await collection.explain(projected.query);
@@ -261,7 +263,7 @@ describe('the counts explain() reports are the last ACTUAL run, never an estimat
 
 describe('strict mode refuses a refinement before it runs', () => {
   for (const name of ['resample/sparse-fill-locf', 'resample/calendar-month',
-    'rolling/gapped-sum', 'asof/keyed']) {
+    'rolling/gapped-sum', 'asof/keyed', 'bucket/fixed-minute', 'resample/fixed-minute-mean']) {
     it(`${name} is JD0010, and the message names the temporal reason`, async () => {
       const { projected } = PROJECTED.find((row) => row.entry.name === name);
       const { store, collection } = await storeFor(nodeDriver(), projected.documents, 'indexed');
@@ -281,8 +283,7 @@ describe('strict mode refuses a refinement before it runs', () => {
     });
   }
 
-  for (const name of ['range/interior-minute', 'asof/on-a-sample', 'bucket/fixed-minute',
-    'resample/fixed-minute-mean']) {
+  for (const name of ['range/interior-minute', 'asof/on-a-sample', 'resample/fixed-minute-count']) {
     it(`${name} is native, so strict mode runs it`, async () => {
       const { projected } = PROJECTED.find((row) => row.entry.name === name);
       const { store, collection } = await storeFor(nodeDriver(), projected.documents, 'indexed');
@@ -306,7 +307,7 @@ describe('a native bucket that meets a row with no instant hands the question ba
     const { store, collection } = await storeFor(nodeDriver(),
       [{ series: 'sensor-a', at: 1000, value: 1 }, { series: 'sensor-a', value: 2 }], 'indexed');
     try {
-      const query = { $resample: [{ $for: { s: '$[*]' }, $return: '$s' }, { every: 1000 }] };
+      const query = { $resample: [{ $for: { s: '$[*]' }, $return: '$s' }, { every: 1000, aggregate: 'max' }] };
       const explained = await collection.explain(query);
       assert.strictEqual(explained.mode, 'native', 'the plan is a bucket');
       await assert.rejects(
@@ -334,7 +335,7 @@ describe('the grouping spelling: every order and window the plan pushes', () => 
       { $lt: ['$r.at', ORIGIN + 300000] },
     ] },
     $groupby: { b: { '$time-bucket': ['$r.at', 60000, ORIGIN] } },
-    $return: { at: '$b', v: { $avg: '$r.value' }, n: { $count: '$r' } },
+    $return: { at: '$b', v: { $max: '$r.value' }, n: { $count: '$r' } },
     ...extra,
   });
   const SHAPES = {
@@ -382,13 +383,18 @@ describe("a profile's row bound counts what the fetch answered, and refuses", ()
         const inside = tx.collection(SERIES_COLLECTION);
         for (const row of rows) await inside.insert(row);
       });
-      const document = (every) => ({ $resample: [
+      const document = (every, aggregate = 'count') => ({ $resample: [
         { $for: { s: '$[*]' }, $where: { $eq: ['$s.series', 'sensor-a'] }, $return: '$s' },
-        { every }] });
+        { every, aggregate }] });
       const answered = await collection.execute(document(60000));
       assert.strictEqual(answered.length, 2, 'two minutes of readings, two buckets');
       await assert.rejects(
         Promise.resolve().then(() => collection.execute(document(30000))),
+        (error) => /** @type {any} */ (error).code === 'JD2007');
+      // a mean over these numbers is the engine's: the bound counts the
+      // rows it fetched, not the two buckets it answers
+      await assert.rejects(
+        Promise.resolve().then(() => collection.execute(document(60000, 'mean'))),
         (error) => /** @type {any} */ (error).code === 'JD2007');
     }
     finally {

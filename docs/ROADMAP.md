@@ -484,14 +484,19 @@ what each does is its own documentation's job
   the link fails `JD0023` on both engines and rolls back whole, and the same two
   edits as two migrations apply. Wanted: the drop names the table the join
   still has.
-- [ ] **Native temporal buckets sum floating readings in SQL.** Collection and
-  entity sums over `number` members run in the engine, left to right in doubles;
-  a `$time-bucket` or `$resample` sum over a `number` member is still summed by
-  the database (`1e16, 1, -1e16` answers `1` where the engine answers `0`), and
-  over integer-valued `number` readings Node's SQLite binding can raise `JD2005`
-  or `JD2003` ([MODEL-FORMAT §10.6](../packages/db/docs/MODEL-FORMAT.md)).
-  Wanted: the series planner keeps these sums residual with a named reason, as
-  the collection planner does.
+- [ ] **A native temporal bucket answers where the engine raises on a null
+  reading.** A `$time-bucket` `$groupby` over a reading that admits `null`
+  answers natively where the engine raises: `$min` and `$max` over
+  `['number','null']`, and `$sum`, `$avg`, `$min`, `$max` over
+  `['integer','null']` skip the `null` (`2, null, 4` answers `2`/`4`/`6`/`3`)
+  while the engine raises `JQ2001` ([MODEL-FORMAT §10.6](../packages/db/docs/MODEL-FORMAT.md)).
+  Wanted: either one answer or a named residual.
+- [ ] **SQLite's native `$min`/`$max` over a `number` holding large
+  integer-valued doubles raises.** Over integer-valued doubles past 2^53
+  (`1e16`, `2^62`) the driver's integer read raises `JD2003` where the engine
+  answers: `$max` over `1e16, 1` on a plain collection, whole and grouped, and
+  in temporal buckets; PostgreSQL answers. `$min`/`$max` stay native, so this is
+  a defect of the read, not of the plan. Wanted: a read that returns the double.
 - [ ] **Join tables are not queryable roots.** A many-to-many join table has no
   root to bind: `u.labels` as a chain hop is `JL0105`, and a membership is read
   through `include` (`client.entities.User.include((u) => u.labels)` loads the
