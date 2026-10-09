@@ -306,6 +306,11 @@ const WRAPPED_RERUN = 'a query inside a one-item array constructor re-runs (its 
  * and that row alone is not the collection `execute` evaluates over. */
 const ROW_ALONE = 'a projection that reads the collection root re-runs (a row is evaluated alone)';
 
+/** Why a count of a constructor of operators re-runs: its statement is one `COUNT(*)` that evaluates no constructor,
+ * and an accumulator would retain a contribution for every row to repeat it. */
+const COUNT_STATEMENT = 'a count of a constructor of operators re-runs '
+  + '(its statement is one COUNT(*); an accumulator would retain a contribution for every row)';
+
 const SPATIAL_RERUN = {
   aggregate: 'a spatial aggregate re-runs: the accumulator needs a fully translated '
     + 'selection, and a refined spatial predicate leaves the exact test to the engine',
@@ -359,6 +364,8 @@ export function classifyLiveQuery(document, queryShape, keyed, eventTime = null)
     }
     if (planned.plan.group !== null || planned.plan.bucket !== null)
       return rerun('an aggregate over groups needs group-level maintenance');
+    // a count the planner answers without projecting the rows (the operand plans as a row projection)
+    if (planned.plan.aggregate.fn === 'count' && planQuery(inner, queryShape, {}).mode === 'row') return rerun(COUNT_STATEMENT);
     if (!keyed) return rerun('rows without a document key cannot be tracked');
     return {
       strategy: 'accumulator',

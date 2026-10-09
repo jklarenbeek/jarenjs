@@ -1,0 +1,1371 @@
+{
+ "group": "windows and counts over constructors",
+ "schema": {
+  "type": "object",
+  "properties": {
+   "id": {
+    "type": "string"
+   },
+   "n": {
+    "type": "integer"
+   },
+   "s": {
+    "type": "string"
+   },
+   "u": {
+    "type": [
+     "string",
+     "null"
+    ]
+   },
+   "f": {
+    "type": "number"
+   },
+   "tags": {
+    "type": "array",
+    "items": {
+     "type": "string"
+    }
+   },
+   "o": {
+    "type": "object",
+    "properties": {
+     "k": {
+      "type": "integer"
+     },
+     "t": {
+      "type": "string"
+     }
+    }
+   },
+   "z": {}
+  }
+ },
+ "indexes": [
+  {
+   "name": "by_id",
+   "path": "$.id"
+  },
+  {
+   "name": "by_n",
+   "path": "$.n"
+  },
+  {
+   "name": "by_s",
+   "path": "$.s"
+  }
+ ],
+ "documents": [
+  {
+   "id": "a",
+   "n": 10,
+   "s": "ada",
+   "u": "x",
+   "f": 1.5,
+   "tags": [
+    "p",
+    "q"
+   ],
+   "o": {
+    "k": 1,
+    "t": "oo"
+   },
+   "z": 1
+  },
+  {
+   "id": "b",
+   "n": 20,
+   "s": "kid",
+   "u": null,
+   "f": -2.25,
+   "tags": [],
+   "z": "zz"
+  },
+  {
+   "id": "c",
+   "n": 30,
+   "s": "lin",
+   "o": {
+    "k": 3
+   },
+   "z": null
+  },
+  {
+   "id": "d",
+   "s": "zed",
+   "u": "y"
+  },
+  {
+   "id": "e",
+   "n": 20,
+   "u": null
+  },
+  {
+   "id": "f",
+   "s": "",
+   "u": ""
+  },
+  {
+   "id": "g",
+   "n": -5,
+   "s": "ada",
+   "tags": [
+    "r"
+   ]
+  },
+  {
+   "s": "no id",
+   "f": 0.5
+  },
+  {
+   "id": "h",
+   "n": 0,
+   "s": "αβγ",
+   "f": 0
+  },
+  {
+   "id": "i",
+   "n": 7,
+   "s": "Ünï",
+   "tags": [
+    "t",
+    "u",
+    "v"
+   ],
+   "o": {
+    "t": "deep"
+   }
+  }
+ ],
+ "cases": [
+  {
+   "name": "a window over a default constructor",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "v": {
+        "$default": [
+         "$it.n",
+         -1
+        ]
+       }
+      }
+     },
+     1,
+     3
+    ]
+   }
+  },
+  {
+   "name": "a window over upper-cased members",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "s": {
+        "$upper": "$it.s"
+       }
+      }
+     },
+     2,
+     3
+    ]
+   }
+  },
+  {
+   "name": "a window over lower-cased members and lengths",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "l": {
+        "$lower": "$it.s"
+       },
+       "len": {
+        "$string-length": "$it.s"
+       }
+      }
+     },
+     0,
+     4
+    ]
+   }
+  },
+  {
+   "name": "a window over counts and presence tests",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "c": {
+        "$count": "$it.n"
+       },
+       "e": {
+        "$exists": "$it.n"
+       },
+       "t": {
+        "$count": "$it.tags"
+       }
+      }
+     },
+     3,
+     4
+    ]
+   }
+  },
+  {
+   "name": "a window over a descending order with absent keys greatest",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       {
+        "$key": "$it.id",
+        "$dir": "desc",
+        "$empty": "greatest"
+       }
+      ],
+      "$return": {
+       "id": "$it.id",
+       "s": {
+        "$upper": "$it.s"
+       }
+      }
+     },
+     1,
+     3
+    ]
+   }
+  },
+  {
+   "name": "a window over a number order, absent keys least",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.n"
+      ],
+      "$return": {
+       "n": "$it.n",
+       "s": {
+        "$upper": "$it.s"
+       }
+      }
+     },
+     1,
+     5
+    ]
+   }
+  },
+  {
+   "name": "an offset window with no limit",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "s": {
+        "$upper": "$it.s"
+       }
+      }
+     },
+     4
+    ]
+   }
+  },
+  {
+   "name": "nested windows compose over a constructor",
+   "query": {
+    "$subsequence": [
+     {
+      "$subsequence": [
+       {
+        "$for": {
+         "it": "$[*]"
+        },
+        "$orderby": [
+         "$it.id"
+        ],
+        "$return": {
+         "id": "$it.id",
+         "s": {
+          "$upper": "$it.s"
+         }
+        }
+       },
+       2,
+       6
+      ]
+     },
+     1,
+     2
+    ]
+   }
+  },
+  {
+   "name": "an empty window over a constructor",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "s": {
+        "$upper": "$it.s"
+       }
+      }
+     },
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "a window past the last row",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "s": {
+        "$upper": "$it.s"
+       }
+      }
+     },
+     50,
+     5
+    ]
+   }
+  },
+  {
+   "name": "a window over a filter and a constructor",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$where": {
+       "$gt": [
+        "$it.n",
+        5
+       ]
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "s": {
+        "$upper": "$it.s"
+       }
+      }
+     },
+     1,
+     3
+    ]
+   }
+  },
+  {
+   "name": "a window over an external bound and a constructor",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$where": {
+       "$ge": [
+        "$it.n",
+        "$min"
+       ]
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "s": {
+        "$upper": "$it.s"
+       }
+      }
+     },
+     0,
+     2
+    ]
+   },
+   "externals": {
+    "min": 10
+   }
+  },
+  {
+   "name": "an unordered window follows insertion order",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$return": {
+       "id": "$it.id",
+       "s": {
+        "$upper": "$it.s"
+       }
+      }
+     },
+     2,
+     3
+    ]
+   }
+  },
+  {
+   "name": "a window over an array constructor",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": [
+       "$it.id",
+       {
+        "$upper": "$it.s"
+       },
+       {
+        "$default": [
+         "$it.n",
+         0
+        ]
+       }
+      ]
+     },
+     1,
+     4
+    ]
+   }
+  },
+  {
+   "name": "a window of one over an array constructor",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": [
+       "$it.id",
+       {
+        "$upper": "$it.s"
+       }
+      ]
+     },
+     2,
+     1
+    ]
+   }
+  },
+  {
+   "name": "a window of one over an array constructor of absent members",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": [
+       {
+        "$default": [
+         "$it.o.t",
+         "$it.zz"
+        ]
+       }
+      ]
+     },
+     5,
+     1
+    ]
+   }
+  },
+  {
+   "name": "a window of one over an object constructor of absent members",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "a": {
+        "$default": [
+         "$it.o.t",
+         "$it.zz"
+        ]
+       }
+      }
+     },
+     5,
+     1
+    ]
+   }
+  },
+  {
+   "name": "a window over a nested constructor",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "a": {
+        "b": {
+         "$upper": "$it.s"
+        }
+       },
+       "c": [
+        "$it.id",
+        {
+         "$default": [
+          "$it.n",
+          0
+         ]
+        }
+       ]
+      }
+     },
+     2,
+     3
+    ]
+   }
+  },
+  {
+   "name": "a window over a default of two members",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "v": {
+        "$default": [
+         "$it.o.t",
+         "$it.s"
+        ]
+       }
+      }
+     },
+     0,
+     6
+    ]
+   }
+  },
+  {
+   "name": "a window over literals beside an operator",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "k": "const",
+       "l": 7,
+       "m": null,
+       "v": {
+        "$upper": "$it.s"
+       }
+      }
+     },
+     1,
+     3
+    ]
+   }
+  },
+  {
+   "name": "a window over an operator on a nested string member",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "v": {
+        "$upper": "$it.o.t"
+       }
+      }
+     },
+     0,
+     10
+    ]
+   }
+  },
+  {
+   "name": "a window over an operator on an array element",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "v": {
+        "$upper": "$it.tags[0]"
+       }
+      }
+     },
+     0,
+     10
+    ]
+   }
+  },
+  {
+   "name": "a window over the document beside an operator",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "doc": "$it",
+       "s": {
+        "$upper": "$it.s"
+       }
+      }
+     },
+     1,
+     2
+    ]
+   }
+  },
+  {
+   "name": "a window over a constructor ordered by a string member",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.s"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "s": {
+        "$upper": "$it.s"
+       }
+      }
+     },
+     2,
+     4
+    ]
+   }
+  },
+  {
+   "name": "a window over a constructor with an empty member name",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "": {
+        "$upper": "$it.s"
+       },
+       "id": "$it.id"
+      }
+     },
+     1,
+     2
+    ]
+   }
+  },
+  {
+   "name": "a count of a default constructor",
+   "query": {
+    "$count": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": {
+      "id": "$it.id",
+      "v": {
+       "$default": [
+        "$it.n",
+        -1
+       ]
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "a count of an upper constructor under a filter",
+   "query": {
+    "$count": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$where": {
+      "$gt": [
+       "$it.n",
+       5
+      ]
+     },
+     "$return": {
+      "id": "$it.id",
+      "s": {
+       "$upper": "$it.s"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "a count of an array constructor of operators",
+   "query": {
+    "$count": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": [
+      {
+       "$upper": "$it.s"
+      },
+      {
+       "$string-length": "$it.s"
+      },
+      {
+       "$exists": "$it.n"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "a count of an ordered constructor",
+   "query": {
+    "$count": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$orderby": [
+      "$it.id"
+     ],
+     "$return": {
+      "id": "$it.id",
+      "l": {
+       "$lower": "$it.s"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "a count of a constructor over an empty selection",
+   "query": {
+    "$count": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$where": {
+      "$gt": [
+       "$it.n",
+       1000
+      ]
+     },
+     "$return": {
+      "s": {
+       "$upper": "$it.s"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "a count of a constructor of counts and presence tests",
+   "query": {
+    "$count": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$where": {
+      "$exists": "$it.s"
+     },
+     "$return": {
+      "c": {
+       "$count": "$it.tags"
+      },
+      "e": {
+       "$exists": "$it.o.k"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "a count of a constructor under an external bound",
+   "query": {
+    "$count": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$where": {
+      "$ge": [
+       "$it.n",
+       "$min"
+      ]
+     },
+     "$return": {
+      "s": {
+       "$upper": "$it.s"
+      }
+     }
+    }
+   },
+   "externals": {
+    "min": 10
+   }
+  },
+  {
+   "name": "a count of a constructor over the document beside an operator",
+   "query": {
+    "$count": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": {
+      "doc": "$it",
+      "s": {
+       "$upper": "$it.s"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "a window over an arithmetic leaf",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "v": {
+        "$add": [
+         "$it.n",
+         1
+        ]
+       }
+      }
+     },
+     1,
+     3
+    ]
+   }
+  },
+  {
+   "name": "a window over a concatenation",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "v": {
+        "$concat": [
+         "$it.s",
+         "-"
+        ]
+       }
+      }
+     },
+     1,
+     3
+    ]
+   }
+  },
+  {
+   "name": "a window over a count of a path that expands",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "c": {
+        "$count": "$it.tags[*]"
+       }
+      }
+     },
+     1,
+     3
+    ]
+   }
+  },
+  {
+   "name": "an upper-case of a member that may be null raises past the window",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "v": {
+        "$upper": "$it.u"
+       }
+      }
+     },
+     0,
+     2
+    ]
+   }
+  },
+  {
+   "name": "a count of an upper-case of a member that may be null",
+   "query": {
+    "$count": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": {
+      "id": "$it.id",
+      "v": {
+       "$upper": "$it.u"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "an upper-case of an integer member raises past the window",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "v": {
+        "$upper": "$it.n"
+       }
+      }
+     },
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "an upper-case of an untyped member raises past the window",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "v": {
+        "$upper": "$it.z"
+       }
+      }
+     },
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "a length of an untyped member raises past the window",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "v": {
+        "$string-length": "$it.z"
+       }
+      }
+     },
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "a count of an upper-case of a number literal",
+   "query": {
+    "$count": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": {
+      "id": "$it.id",
+      "v": {
+       "$upper": 5
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "a count of an upper-case of a string literal",
+   "query": {
+    "$count": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": {
+      "id": "$it.id",
+      "v": {
+       "$upper": "abc"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "a count of a length of an untyped member",
+   "query": {
+    "$count": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": {
+      "v": {
+       "$string-length": "$it.z"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "an object member of several items raises past the window",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "t": "$it.tags[*]"
+      }
+     },
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "a count of a constructor with a member of several items",
+   "query": {
+    "$count": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": {
+      "id": "$it.id",
+      "t": "$it.tags[*]"
+     }
+    }
+   }
+  },
+  {
+   "name": "a default over a path of several items raises past the window",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "v": {
+        "$default": [
+         "$it.tags[*]",
+         "none"
+        ]
+       }
+      }
+     },
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "a default over an operator is no leaf",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "v": {
+        "$default": [
+         {
+          "$upper": "$it.s"
+         },
+         "none"
+        ]
+       }
+      }
+     },
+     1,
+     3
+    ]
+   }
+  },
+  {
+   "name": "an operator on an operator is no leaf",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "v": {
+        "$upper": {
+         "$lower": "$it.s"
+        }
+       }
+      }
+     },
+     1,
+     3
+    ]
+   }
+  },
+  {
+   "name": "an operator at the root of the return is no constructor",
+   "query": {
+    "$count": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": {
+      "$default": [
+       "$it.n",
+       "$it.f"
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "an operator at the root of the return under a window",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "$default": [
+        "$it.n",
+        "$it.f"
+       ]
+      }
+     },
+     1,
+     3
+    ]
+   }
+  },
+  {
+   "name": "an external in a constructor stays in the engine",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "x": "$min",
+       "s": {
+        "$upper": "$it.s"
+       }
+      }
+     },
+     1,
+     3
+    ]
+   },
+   "externals": {
+    "min": 10
+   }
+  },
+  {
+   "name": "a key that may be null cannot order the window",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.u"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "s": {
+        "$upper": "$it.s"
+       }
+      }
+     },
+     1,
+     3
+    ]
+   }
+  }
+ ]
+}

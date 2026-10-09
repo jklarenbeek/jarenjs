@@ -2219,7 +2219,12 @@ prove was applied is not a budget.
 
 1. **Engine limits.** The four engine limits ride into every residual
    compilation, so the JavaScript portion of a query is bounded by the
-   engine's own enforcement and fails with the engine's own codes.
+   engine's own enforcement and fails with the engine's own codes. A window or
+   a count the statement answers (a collection's window over a constructor of
+   operators that cannot raise, §10.6, or a count of one) leaves the engine only
+   the window's rows, each evaluated alone, and the count none: `maxRows` and
+   `maxBytes` bound it, and a `resultItems`, `sequenceItems` or `steps` limit
+   smaller than the window no longer refuses it.
 2. **The mandatory row bound.** Every non-aggregate fetch carries a
    database-side `LIMIT` of `maxRows + 1`. A fetch that crosses
    `maxRows` — a result set, a residual's candidate set, a diverted
@@ -3120,7 +3125,14 @@ the join graph and the result order are the ones the bindings give.
 Projection trees of singular member paths and constants lower over one or
 several bindings. Counts over those trees count their items; a single-path
 count or window first excludes rows where that path is absent, and a hop
-leaf excludes the rows whose related row does not carry the member. Boolean
+leaf excludes the rows whose related row does not carry the member. A count
+over an object or array constructor whose operators cannot raise is a
+`COUNT(*)` too, with no projection read: it yields one item per row, and the
+operators are `$default` over member paths and literals, `$upper`, `$lower` and
+`$string-length` over a member the schema types exactly `string` (reached by no
+negative index) and whose column, if it has one, stores text and reads no NULL
+as a present `null`, and `$count` and `$exists` over a member path (§10.6). On an entity a window over
+such a projection stays in the engine. Boolean
 predicates may span bindings when each leaf uses one binding's proven total
 forms. The mandatory column equalities still establish the join graph;
 a disjunction is never treated as a mandatory join edge. Compatible path
@@ -3441,8 +3453,22 @@ a number appears only where `capabilities.rowEstimates` is filled):
   groups beyond a count of singleton constructors containing keys, literals
   and row counts; windows over group returns that may omit an item, and over
   groups ordered by an integer sum or average (`plan.windowedAccumulation`);
-- projection trees containing operators, whole entity binding references or
-  non-singular paths; windows over those opaque projections;
+- projection trees containing an operator other than `$default` over member
+  paths and literals, `$upper`, `$lower` and `$string-length` over a member the
+  schema types exactly `string`, and `$count` and `$exists` over a member path,
+  whole entity binding references or non-singular paths; windows over those
+  projections, counts of them, and on an entity every window over an operator
+  projection (the entity planner has no row residual; `plan.countProjection`,
+  `flwor.projection`, `entity.projection`). The engine evaluates the return of
+  every row, so an operator that can raise keeps the document in the engine: a
+  window or a count that never evaluated the rows it skips would answer where
+  the engine raises. Over an object or array constructor of member paths,
+  literals and those operators (a collection's also of the document itself) a
+  collection's window is pushed (`LIMIT`/`OFFSET`, the constructor run per
+  fetched row), and a count of it, on a collection or an entity, is a
+  `COUNT(*)`; a collection's window or count stays in the engine where a pushed
+  conjunct runs as a registered function (`plan.registeredFunction`), which the
+  database may leave unevaluated on a row the engine evaluates and raises on;
 - a navigation hop out of shape (`entity.hopShape`): a hop out of a hop,
   one with an inner `$orderby`, `$let`, grouping or window, one correlated
   by an inequality, or with equalities across comparison families or over

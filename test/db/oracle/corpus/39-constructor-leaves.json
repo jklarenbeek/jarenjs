@@ -1,0 +1,795 @@
+{
+ "group": "constructor leaves over unions and open containers",
+ "schema": {
+  "type": "object",
+  "properties": {
+   "id": {
+    "type": "string"
+   },
+   "a": {
+    "type": "string"
+   },
+   "mix": {
+    "type": [
+     "string",
+     "integer"
+    ]
+   },
+   "oc": {
+    "properties": {
+     "0": {
+      "type": "string"
+     }
+    }
+   },
+   "ic": {
+    "items": {
+     "type": "string"
+    }
+   },
+   "nest": {
+    "type": [
+     "object",
+     "null"
+    ],
+    "properties": {
+     "s": {
+      "type": "string"
+     }
+    }
+   },
+   "arr": {
+    "type": "array",
+    "items": {
+     "type": "object",
+     "properties": {
+      "s": {
+       "type": "string"
+      }
+     }
+    }
+   },
+   "z": {},
+   "tup": {
+    "type": "array",
+    "prefixItems": [
+     {
+      "type": "number"
+     }
+    ],
+    "items": {
+     "type": "string"
+    }
+   },
+   "lst": {
+    "type": "array",
+    "items": {
+     "type": "string"
+    }
+   },
+   "cnt": {
+    "type": "array",
+    "contains": {
+     "type": "string"
+    }
+   }
+  }
+ },
+ "indexes": [
+  {
+   "name": "by_id",
+   "path": "$.id"
+  },
+  {
+   "name": "by_a",
+   "path": "$.a"
+  }
+ ],
+ "documents": [
+  {
+   "id": "r1",
+   "a": "x",
+   "mix": "m",
+   "oc": {
+    "0": "zero"
+   },
+   "ic": [
+    "i",
+    "j"
+   ],
+   "nest": {
+    "s": "n"
+   },
+   "arr": [
+    {
+     "s": "p"
+    }
+   ],
+   "tup": [
+    1,
+    "y"
+   ],
+   "lst": [
+    "l",
+    "m"
+   ],
+   "cnt": [
+    "x",
+    "y"
+   ]
+  },
+  {
+   "id": "r2",
+   "a": "y",
+   "mix": 5,
+   "oc": [
+    7
+   ],
+   "ic": {
+    "0": 7
+   },
+   "nest": null,
+   "arr": [
+    {
+     "s": "p"
+    },
+    {
+     "s": "q"
+    }
+   ],
+   "z": 3,
+   "tup": [
+    5
+   ],
+   "lst": [],
+   "cnt": [
+    "x",
+    3
+   ]
+  },
+  {
+   "id": "r3",
+   "oc": "txt",
+   "ic": "str",
+   "nest": {},
+   "arr": [],
+   "z": "zz",
+   "tup": [
+    2,
+    "p",
+    "q"
+   ],
+   "lst": [
+    "k"
+   ],
+   "cnt": [
+    "x"
+   ]
+  },
+  {
+   "id": "r4",
+   "a": "",
+   "mix": "",
+   "oc": null,
+   "ic": null
+  },
+  {
+   "id": "r5"
+  }
+ ],
+ "cases": [
+  {
+   "name": "an upper-case of a string member",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "v": {
+        "$upper": "$it.a"
+       }
+      }
+     },
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "an upper-case of a member of two types",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "v": {
+        "$upper": "$it.mix"
+       }
+      }
+     },
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "an upper-case of a member under a name that reads as an index",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "v": {
+        "$upper": "$it.oc['0']"
+       }
+      }
+     },
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "an upper-case of an index into a container with no items",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "v": {
+        "$upper": "$it.oc[0]"
+       }
+      }
+     },
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "an upper-case of an index into an array of strings",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "v": {
+        "$upper": "$it.ic[0]"
+       }
+      }
+     },
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "an upper-case of a name that reads as an index in a container with no properties",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "v": {
+        "$upper": "$it.ic['0']"
+       }
+      }
+     },
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "an upper-case of a member of an object that may be null",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "v": {
+        "$upper": "$it.nest.s"
+       }
+      }
+     },
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "an upper-case of a name over an array of objects",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "v": {
+        "$upper": "$it.arr.s"
+       }
+      }
+     },
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "an upper-case of a member of the first element of an array of objects",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "v": {
+        "$upper": "$it.arr[0].s"
+       }
+      }
+     },
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "a length of a string member",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "v": {
+        "$string-length": "$it.a"
+       }
+      }
+     },
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "a length of a member of two types",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "v": {
+        "$string-length": "$it.mix"
+       }
+      }
+     },
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "a presence test of a name that reads as an index",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "v": {
+        "$exists": "$it.ic['0']"
+       }
+      }
+     },
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "a count of an index into a container with no items",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "v": {
+        "$count": "$it.oc[0]"
+       }
+      }
+     },
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "a default of an index into a container with no items",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "v": {
+        "$default": [
+         "$it.oc[0]",
+         "d"
+        ]
+       }
+      }
+     },
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "a count of upper-cases of a name that reads as an index",
+   "query": {
+    "$count": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": {
+      "v": {
+       "$upper": "$it.oc['0']"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "a count of upper-cases of an index into a container with no items",
+   "query": {
+    "$count": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": {
+      "v": {
+       "$upper": "$it.oc[0]"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "a count of upper-cases of an index into an array of strings",
+   "query": {
+    "$count": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": {
+      "v": {
+       "$upper": "$it.ic[0]"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "a count of upper-cases of a name that reads as an index in a container with no properties",
+   "query": {
+    "$count": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": {
+      "v": {
+       "$upper": "$it.ic['0']"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "a count of upper-cases of a member of two types",
+   "query": {
+    "$count": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": {
+      "v": {
+       "$upper": "$it.mix"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "a count of lengths of a member of an object that may be null",
+   "query": {
+    "$count": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": {
+      "v": {
+       "$string-length": "$it.nest.s"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "an upper-case of the last element of a tuple",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "v": {
+        "$upper": "$it.tup[-1]"
+       }
+      }
+     },
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "an upper-case of an element past the prefix of a tuple",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "v": {
+        "$upper": "$it.tup[1]"
+       }
+      }
+     },
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "an upper-case of the first element of a tuple",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "v": {
+        "$upper": "$it.tup[0]"
+       }
+      }
+     },
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "an upper-case of the last element of an array of strings",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "v": {
+        "$upper": "$it.lst[-1]"
+       }
+      }
+     },
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "an upper-case of an element of an array that only contains a string",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "v": {
+        "$upper": "$it.cnt[1]"
+       }
+      }
+     },
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "a presence test of the last element of a tuple",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "it": "$[*]"
+      },
+      "$orderby": [
+       "$it.id"
+      ],
+      "$return": {
+       "id": "$it.id",
+       "v": {
+        "$exists": "$it.tup[-1]"
+       }
+      }
+     },
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "a count of upper-cases of the last element of a tuple",
+   "query": {
+    "$count": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": {
+      "v": {
+       "$upper": "$it.tup[-1]"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "a count of upper-cases of an element past the prefix of a tuple",
+   "query": {
+    "$count": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": {
+      "v": {
+       "$upper": "$it.tup[1]"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "a count of upper-cases of the last element of an array of strings",
+   "query": {
+    "$count": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": {
+      "v": {
+       "$upper": "$it.lst[-1]"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "a count of upper-cases of an element of an array that only contains a string",
+   "query": {
+    "$count": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": {
+      "v": {
+       "$upper": "$it.cnt[1]"
+      }
+     }
+    }
+   }
+  }
+ ]
+}

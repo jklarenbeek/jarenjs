@@ -614,11 +614,17 @@ describe('the planner\'s reason vocabulary', () => {
     'plan.windowedAggregate': [collection,
       { $subsequence: [{ $sum: { $for: { it: '$[*]' }, $return: '$it.n' } }, 0, 1] }],
     'plan.notFlwor': [collection, 3],
-    // a constructor yields ONE item per row, so a count over a
-    // projection tree is a COUNT(*); the refusal is for a projection
-    // whose item count the rows cannot decide
+    // a constructor yields ONE item per row, so a count over one whose
+    // operators cannot raise is a COUNT(*); an operator that can raise is
+    // evaluated for every row by the engine, so its count stays there
     'plan.countProjection': [collection,
-      { $count: { $for: { it: '$[*]' }, $return: { x: { $count: '$it.n' } } } }],
+      { $count: { $for: { it: '$[*]' }, $return: { x: { $add: ['$it.n', 1] } } } }],
+    // a conjunct the hatch takes runs as a registered function; the census plans without the store's hook,
+    // so the hook here accepts every fragment
+    'plan.registeredFunction': [(document) => planQuery(document, CENSUS_SHAPE,
+      { udf: () => ({ name: 'registered_stub', key: 'stub' }) }),
+    { $count: { $for: { it: '$[*]' }, $where: { $eq: [{ $upper: '$it.s' }, 'A'] },
+      $return: { x: { $upper: '$it.s' } } } }],
     'operators.registered': [collection,
       { $for: { it: '$[*]' }, $return: { a: { $sqrt: '$it.f' } } }],
     'plan.aggregatePath': [collection,

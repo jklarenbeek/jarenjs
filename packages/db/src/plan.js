@@ -134,8 +134,9 @@ const PLAN_REASONS = {
   windowBounds: 'window bounds must be literal numbers to push (non-negative integers)',
   windowedAggregate: 'a windowed aggregate is not translated',
   notFlwor: 'only a FLWOR over the collection is translated',
-  countProjection: 'count translates only over the bare binding or one member path '
-    + '(a projected return can change the item count)',
+  countProjection: 'count translates only over the bare binding, one member path or a constructor '
+    + 'of member paths, literals and operators that cannot raise (any other return is evaluated '
+    + 'for every row by the engine, which may raise or yield no item or several)',
   groupedAggregate: 'an aggregate over a grouped phrase folds its groups, which the engine does',
   distinctProjection: 'distinct translates over one typed scalar member path, unordered or ordered by that same path',
   windowedGroup: 'a window over groups whose return can omit an item needs the engine cardinality',
@@ -147,6 +148,9 @@ const PLAN_REASONS = {
     + 'addition decides the rounding a native sum would not reproduce',
   rootRead: 'the document reads the collection root outside its binding, so the engine answers it '
     + 'over the whole collection',
+  registeredFunction: 'a window or a count beside a conjunct that runs as a registered function stays in '
+    + 'the engine, which evaluates the function on every row (the database stops evaluating one once the '
+    + 'window is full or a cheaper conjunct has refused the row)',
 };
 
 /**
@@ -2895,6 +2899,75 @@ function ordersByAccumulation(group) {
 }
 
 /**
+ * The operators a constructor may apply and still leave a row's evaluation
+ * unneeded: the engine evaluates the return of every row, so a window or a
+ * count that evaluates only some rows, or none, answers as the engine does
+ * only where the rows it skips cannot raise. Each entry names the operand it
+ * accepts, and with that operand the operator does not raise:
+ * - `plain`: a literal or a singular member path (a sequence of several
+ *   items raises);
+ * - `string`: a singular member path that holds a string or nothing, which
+ *   gives `""` (a length, `0`) where the member is absent, while a `null`, a
+ *   number, an array or an object raises;
+ * - `path`: a singular member path of any type.
+ * @type {ReadonlyMap<string, { arity: number, operand: 'plain' | 'string' | 'path' }>}
+ */
+export const TOTAL_OPERATORS = new Map([
+  ['$default', { arity: 2, operand: 'plain' }],
+  ['$upper', { arity: 1, operand: 'string' }],
+  ['$lower', { arity: 1, operand: 'string' }],
+  ['$string-length', { arity: 1, operand: 'string' }],
+  ['$count', { arity: 1, operand: 'path' }],
+  ['$exists', { arity: 1, operand: 'path' }],
+]);
+
+/**
+ * Whether a reference holds a string or nothing. The schema must type it
+ * exactly `string`: the type {@link typeOfPath} reports is the first of a
+ * union, and a union with `null` or a number holds what a string operator
+ * raises on. The path must be one the schema places as the engine reads it:
+ * a name reads the member of an object, a non-negative index the element of
+ * an array (a prefix item, else `items`), and every step on another kind of
+ * value reads nothing; a negative index is refused. A column must store text,
+ * with no codec past `text`, and read no NULL as a present `null`
+ * ({@link nullReading}); an epoch column keeps a number beside the string and
+ * proves nothing here.
+ * @param {any} ref
+ * @param {any} schema - the schema that types the reference
+ * @returns {boolean}
+ */
+function holdsOnlyStrings(ref, schema) {
+  // a negative index counts from the end of the array, which no schema places: `schemaNodeAt` reads it as an element
+  // past the prefix items, where the last element of a short tuple is one of them
+  if (ref.segments.some((segment) => 'index' in segment && segment.index < 0)) return false;
+  if (schemaNodeAt(schema, ref.segments)?.type !== 'string' || nullReading(ref, schema) !== 'none') return false;
+  switch (ref.flavor) {
+    case undefined: case 'entity-doc': return true;
+    case 'entity-column': return ref.storage === 'string' && (ref.codec === undefined || ref.codec === 'text');
+    default: return false;
+  }
+}
+
+/**
+ * Whether an operator node applies one of the {@link TOTAL_OPERATORS} to
+ * operands it accepts.
+ * @param {any} op - an `op` node
+ * @param {(node: any) => { ref: any, schema: any } | null} resolve - the
+ *   singular member path a node is, with the schema that types it, or `null`
+ *   when the node is no such path
+ * @returns {boolean}
+ */
+function cannotRaise(op, resolve) {
+  const rule = TOTAL_OPERATORS.get(op.name);
+  if (rule === undefined || op.args.length !== rule.arity) return false;
+  return op.args.every((/** @type {any} */ arg) => {
+    if (arg.kind === 'literal') return rule.operand === 'plain';
+    const found = resolve(arg);
+    return found !== null && (rule.operand !== 'string' || holdsOnlyStrings(found.ref, found.schema));
+  });
+}
+
+/**
  * The projection TREE one `$return` compiles to, or `null` when the
  * shape is not one the plan can rebuild. Object and array constructors,
  * literals, whole collection bindings and singular member paths compose;
@@ -2905,12 +2978,18 @@ function ordersByAccumulation(group) {
  * Distinct paths are collected once: a path named twice is one fetched
  * column and two leaves pointing at it. A constant tree needs only a
  * row marker from SQL: the selection contributes its cardinality.
+ *
+ * With `total`, an operator it accepts stands in the tree as an opaque node.
+ * Such a tree proves that a constructor yields one item per row and cannot
+ * raise; it is no projection a statement can fetch, so only a caller that
+ * asks the proof gets one.
  * @param {any} node - the `$return` AST node
  * @param {number} itSlot
  * @param {any} shape
+ * @param {((op: any) => boolean) | undefined} [total]
  * @returns {{ tree: any, leaves: import('./algebra.js').PlanRef[] } | null}
  */
-function projectionTree(node, itSlot, shape) {
+function projectionTree(node, itSlot, shape, total = undefined) {
   /** @type {import('./algebra.js').PlanRef[]} */
   const leaves = [];
   /** @type {Map<string, number>} */
@@ -2949,6 +3028,7 @@ function projectionTree(node, itSlot, shape) {
       }
       return { p: 'array', items };
     }
+    if (total !== undefined && child.kind === 'op' && total(child)) return { p: 'opaque' };
     return null;
   };
   const tree = build(node);
@@ -2969,11 +3049,18 @@ function projectionTree(node, itSlot, shape) {
  * @returns {{ plan: import('./algebra.js').Plan,
  *   reasons: { construct: string, reason: string }[],
  *   whereFullyPushed: boolean, orderPushed: boolean,
- *   projectionNative: boolean, itSlot: number, itName: string | null,
+ *   projectionNative: boolean, totalReturn: boolean, itSlot: number, itName: string | null,
  *   udfs: string[], prefilters: any[],
  *   knn: { column: string, dims: number, probe: any } | null }}
  *   `knn` is the recognized k-nearest ordering, pending the window
- *   the caller peels; its ordering is then never pushed
+ *   the caller peels; its ordering is then never pushed. `totalReturn`
+ *   is set when the return is not a projection the statement can fetch but
+ *   is a constructor that yields one item per row and cannot raise: the
+ *   rows are then its items, and a count or a window may leave rows
+ *   unevaluated unless a conjunct runs as a registered function (`udfs`),
+ *   which the database stops evaluating once the window is full, or once a
+ *   cheaper conjunct has refused the row, where the engine evaluates it on
+ *   every row and raises where it does
  */
 function planFlwor(node, shape, rawFlwor, udfHook) {
   const reasons = [];
@@ -2989,7 +3076,7 @@ function planFlwor(node, shape, rawFlwor, udfHook) {
   if (!sourceIsCollection) {
     reasons.push(refusal('$for', FLWOR_REASONS.binding));
     return { plan, reasons, whereFullyPushed: false, orderPushed: false,
-      projectionNative: false, projectedTree: null,
+      projectionNative: false, totalReturn: false, projectedTree: null,
       itSlot: -1, itName: null, udfs: [], prefilters: [],
       knn: null, bucket: null, group: null, bucketRefusal: null };
   }
@@ -3164,6 +3251,7 @@ function planFlwor(node, shape, rawFlwor, udfHook) {
   // pushed, which the caller decides — a projection that dropped a
   // member a residual conjunct still needs would be a wrong answer
   let projectionNative = false;
+  let totalReturn = false;
   /** @type {import('./algebra.js').PlanRef | null} */
   let projectedPath = null;
   /** @type {{ tree: any, leaves: any[] } | null} */
@@ -3186,6 +3274,13 @@ function planFlwor(node, shape, rawFlwor, udfHook) {
     }
     else {
       reasons.push(refusal('$return', FLWOR_REASONS.projection));
+      // an object or array constructor is one item per row; where every
+      // operator in it cannot raise, no row needs evaluating to count or to window the rows
+      totalReturn = (node.ret.kind === 'object' || node.ret.kind === 'array')
+        && projectionTree(node.ret, itSlot, shape, (op) => cannotRaise(op, (arg) => {
+          const found = pathRef(arg, itSlot, shape);
+          return found === null ? null : { ref: found, schema: shape.schema };
+        })) !== null;
     }
   }
 
@@ -3195,6 +3290,7 @@ function planFlwor(node, shape, rawFlwor, udfHook) {
     whereFullyPushed: whereFullyPushed && structureClean,
     orderPushed: orderPushed && structureClean,
     projectionNative,
+    totalReturn,
     projectedPath,
     projectedTree,
     itSlot,
@@ -3455,6 +3551,9 @@ function planCollectionPhrase(document, analysis, shape, options) {
   const flwor = planFlwor(root, shape, rawInner, options?.udf);
   const { plan } = flwor;
   const fullyPushed = flwor.whereFullyPushed && flwor.orderPushed;
+  // the rows are the items of a constructor that cannot raise, and a count or
+  // a window may leave some unevaluated, unless a conjunct runs as a registered function
+  const rowsAreItems = flwor.totalReturn && flwor.udfs.length === 0;
 
   if (distinct) {
     const ref = flwor.projectedPath;
@@ -3510,8 +3609,10 @@ function planCollectionPhrase(document, analysis, shape, options) {
       return collectionResult(analysis, null, 'set', [refusal(aggregate.name, PLAN_REASONS.groupedAggregate)]);
     }
     if (aggregate.fn === 'count') {
-      if (!flwor.projectionNative) {
-        return collectionResult(analysis, null, 'set', [refusal('$count', PLAN_REASONS.countProjection)]);
+      // a constructor that cannot raise is one item per row, so the rows are the count
+      if (!flwor.projectionNative && !rowsAreItems) {
+        return collectionResult(analysis, null, 'set', [refusal('$count',
+          flwor.totalReturn ? PLAN_REASONS.registeredFunction : PLAN_REASONS.countProjection)]);
       }
       // a count over one member path counts the rows where the member
       // is PRESENT — an absent member yields no item — so the presence
@@ -3621,9 +3722,15 @@ function planCollectionPhrase(document, analysis, shape, options) {
       classifySelection(plan, shape, flwor.orderPushed));
   }
 
-  // the row residual: everything but the projection pushed
+  // the row residual: everything but the projection pushed. A window rides
+  // along only where the rows are the items; one that only a registered
+  // function holds back names that cause first
+  if (!groupedResidual && fullyPushed && !flwor.projectionNative && windows.length > 0
+    && flwor.totalReturn && !rowsAreItems) {
+    flwor.reasons.unshift(refusal('$subsequence', PLAN_REASONS.registeredFunction));
+  }
   if (!groupedResidual && fullyPushed && !flwor.projectionNative
-    && windows.length === 0) {
+    && (windows.length === 0 || rowsAreItems)) {
     const rawFlwor = rawInner;
     const name = flwor.itName ?? 'it';
     // A COMPLETE one-row document: its binding and projection travel together,
@@ -3940,11 +4047,16 @@ function planHopCount(node, hopAt, hop) {
  * member a keyed hop reaches — as a correlated subselect. The reason
  * comes back when the shape is not one the plan can rebuild. A constant
  * tree fetches a row marker, preserving the selection's cardinality.
+ * With `total`, an operator it accepts stands in the tree as an opaque
+ * node, as in the collection's tree: a proof for a count, never a projection.
  * @param {any} node - the `$return` AST node
  * @param {Map<number, any>} byName - binding slot → binding
+ * @param {Map<string, any>} entities
+ * @param {any} mapping
+ * @param {((op: any) => boolean) | undefined} [total]
  * @returns {{ tree: any, leaves: any[] } | { blocked: string }}
  */
-function entityProjectionTree(node, byName, entities, mapping) {
+function entityProjectionTree(node, byName, entities, mapping, total = undefined) {
   const leaves = [];
   /** @type {string | null} the reason of the first hop that could not be a leaf */
   let blocked = null;
@@ -3953,9 +4065,8 @@ function entityProjectionTree(node, byName, entities, mapping) {
   const build = (child) => {
     assertDecidedKind(child);
     if (child.kind === 'literal') return { p: 'lit', value: child.value };
-    if (child.kind === 'op' && child.name === '$count') {
+    if (child.kind === 'op' && child.name === '$count' && child.args[0]?.kind === 'flwor') {
       // the rows of a related entity counted in the row's own statement
-      if (child.args[0]?.kind !== 'flwor') return null;
       const planned = planHop(child.args[0], byName, entities, mapping);
       const counted = planned === null ? null : hopWithPresence(planned);
       if (counted === null || 'refusal' in counted) {
@@ -4015,6 +4126,7 @@ function entityProjectionTree(node, byName, entities, mapping) {
       }
       return { p: 'array', items };
     }
+    if (total !== undefined && child.kind === 'op' && total(child)) return { p: 'opaque' };
     return null;
   };
   const tree = build(node);
@@ -4551,7 +4663,16 @@ function planEntityQueryCore(document, entities, mapping, operators) {
   const built = retBinding === undefined && group === null
     ? entityProjectionTree(root.ret, byName, entities, mapping) : null;
   const projection = built !== null && 'tree' in built ? built : null;
-  if (built !== null && projection === null) {
+  // a count fetches no projection: over a constructor of one item per row
+  // whose operators cannot raise, the rows are the count
+  const counted = built !== null && projection === null && aggregate === 'count'
+    && (root.ret.kind === 'object' || root.ret.kind === 'array')
+    && 'tree' in entityProjectionTree(root.ret, byName, entities, mapping, (op) => cannotRaise(op, (arg) => {
+      const binding = arg.kind === 'path' && arg.external !== true ? byName.get(arg.rootSlot) : undefined;
+      const found = binding === undefined ? null : entityPathRef(arg, arg.rootSlot, binding.shape);
+      return found === null ? null : { ref: found, schema: binding.shape.schema };
+    }));
+  if (built !== null && projection === null && !counted) {
     reasons.push(refusal('$return', built.blocked));
   }
   let scalarAggregate = null;
@@ -4616,7 +4737,7 @@ function planEntityQueryCore(document, entities, mapping, operators) {
   }
 
   const fullyPushed = whereFullyPushed && orderPushed
-    && (retBinding !== undefined || projection !== null || group !== null);
+    && (retBinding !== undefined || projection !== null || group !== null || counted);
   if (!fullyPushed) {
     return { analysis, mode: 'set', plan: null, referenced, reasons };
   }

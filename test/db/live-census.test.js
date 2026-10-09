@@ -112,6 +112,9 @@ const HOP_SHAPE = 'entity dependency plan: a navigation hop translates only as o
 const SET_LEVEL = 'this grouping or distinct projection needs set-level maintenance';
 const PROFILED = "the store profile's predicates, member lists and limits apply to every read, which maintenance does not repeat";
 const ROW_ALONE = 'a projection that reads the collection root re-runs (a row is evaluated alone)';
+// the count is one COUNT(*) statement: an accumulator would retain a contribution for every row to repeat it
+const COUNT_STATEMENT = 'a count of a constructor of operators re-runs '
+  + '(its statement is one COUNT(*); an accumulator would retain a contribution for every row)';
 
 /**
  * @typedef {object} Shape
@@ -218,6 +221,13 @@ const SHAPES = [
     row: 'per-row `select` projection (row-mode plan)', mode: maintained('rows') },
   { name: 'a count of the rows a translated where selects', on: 'rows',
     document: [{ $count: { $for: { r: '$[*]' }, $where: { $gt: ['$r.score', 3] }, $return: '$r' } }],
+    row: 'whole-query `count` / `min` / `max`', mode: maintained('accumulator') },
+  { name: 'a count of the rows a constructor of operators projects', on: 'rows',
+    document: [{ $count: { $for: { r: '$[*]' }, $where: { $gt: ['$r.score', 3] },
+      $return: { id: '$r.id', team: { $upper: '$r.team' }, w: { $default: ['$r.weight', 0] } } } }],
+    row: 'whole-query `count` over a constructor with an operator', mode: rerun(COUNT_STATEMENT) },
+  { name: 'a count of the rows a constructor of member paths projects', on: 'rows',
+    document: [{ $count: { $for: { r: '$[*]' }, $where: { $gt: ['$r.score', 3] }, $return: { id: '$r.id', team: '$r.team' } } }],
     row: 'whole-query `count` / `min` / `max`', mode: maintained('accumulator') },
   { name: 'the least value of a member', on: 'rows', document: [{ $min: { $for: { r: '$[*]' }, $return: '$r.score' } }],
     row: 'whole-query `count` / `min` / `max`', mode: maintained('accumulator') },

@@ -636,6 +636,38 @@ the query engine, now refuse by code or answer what the engine answers:
   release. A table that names all three has no spelling left: a query that must
   order its rows runs in the engine (`bind.identity`, `JD0010` under strict
   mode).
+- A window over an object or array constructor of member paths, literals and
+  operators that cannot raise (`$default` over member paths and literals;
+  `$upper`, `$lower` and `$string-length` over a member the schema types exactly
+  `string`; `$count` and `$exists` over a member path), such as
+  `select(p => ({ id: p.id, s: p.s.upper() })).skip(10).take(5)`, fetched every
+  candidate row and ran in the engine. On a collection it plans `row` now: the
+  window is in the statement (`LIMIT`/`OFFSET`), only the rows of the window are
+  fetched and projected, and `explain().residual.reasons` still names
+  `flwor.projection`. A count of such a constructor is a `COUNT(*)` on a
+  collection and on an entity, and `strict: true` accepts it where it refused.
+  A pushed conjunct that runs as a registered function keeps a collection's
+  window or count in the engine, under the reason `plan.registeredFunction`.
+  The engine evaluated the constructor for every row, so a document that
+  violates its schema (inserts are unvalidated without a `compileSchema` hook)
+  raised `JQ2001` from a row outside the window, or from any row of a count; a
+  row the statement does not read raises nothing now. Likewise a row of an
+  adopted table that its codec cannot decode (invalid text in a `date` or
+  `datetime` column, which only trusted SQL writes): the engine raised `JD2003`
+  decoding it, and a count reads no row, as a count of the bare binding or of a
+  constructor of member paths already did. A profile's `maxRows` and `maxBytes`
+  bound the rows of the window, or the one row of the count, where they bounded
+  every candidate; its engine limits (`resultItems`, `sequenceItems`, `steps`)
+  bound only what the engine still evaluates, a window's rows each alone, so a
+  limit smaller than the window no longer refuses it. For the string operators, a
+  member of two types or that may be `null`, an untyped member, an epoch column,
+  an adopted column that stores another kind than its type claims or reads a
+  NULL as a present `null`, and a path with a negative index keep the plan they
+  had; `$exists`, `$count` and `$default` take a member of any type, so over such
+  a member they change from `set` to `native` or `row` as well. Any other
+  operator, a path that expands and every entity window over an operator
+  projection keep the plan they had. A live count of such a constructor re-runs,
+  as it did.
 
 ## 8. Stricter models, keys and staged writes
 

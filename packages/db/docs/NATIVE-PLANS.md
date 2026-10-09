@@ -108,6 +108,18 @@ comparisons explicitly use codepoint collation, independent of a column's declar
 collation — and the decoded evaluator fetches a root in that key order too, on
 PostgreSQL as on SQLite; an incompatible index may therefore stop helping that query.
 
+A count over an object or array constructor of member paths, literals and
+operators that cannot raise is one `COUNT(*)` that reads no row: `$default` over
+member paths and literals, `$upper`, `$lower` and `$string-length` over a member
+the schema types exactly `string` (reached by no negative index; an adopted
+column must also store text, under no date codec, and read no NULL as a present
+`null`), and `$count` and `$exists` over a member path. The engine evaluates the return of every row, so any other
+operator, a union, an epoch column or a column that stores another kind than its
+type claims keeps the count in the engine, which raises where a row does; so
+does a window over an operator projection of an entity, which has no row
+residual (a collection's window over such a constructor is pushed: MODEL-FORMAT
+§10.6).
+
 Safe identity/object projection chains, including a projected join followed by
 filtering and ordering, flatten without crossing windows, grouping or inner
 ordering. Standalone min/max over supported scalar columns and sum/avg over safe

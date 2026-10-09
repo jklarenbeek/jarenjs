@@ -369,14 +369,25 @@ what each does is its own documentation's job
   store-owned nullable column) still joins natively, and any other equality
   runs in the engine.
 - [ ] **Projection and distinct beyond reconstructible trees.** A return
-  containing an unproven operator, a whole entity binding inside a constructor
-  or a non-singular path still needs the engine. So does a navigation hop that
-  is chained, ordered inside, correlated across comparison families or over a
-  column that can hold a `null`, or read as a value without the related
-  entity's key. A hop over a foreign key no property declares stays in the
-  engine although a join reads that key (`entity.hopShape`). Windows over such
-  returns are set-residual:
-  source-row limits cannot stand in for projected-item limits. `$distinct`
+  containing an operator beyond `$default`, `$upper`, `$lower`,
+  `$string-length`, `$count` and `$exists` (each over the members
+  [MODEL-FORMAT §10.6](../packages/db/docs/MODEL-FORMAT.md) names), a whole
+  entity binding inside a constructor or a non-singular path still needs the
+  engine. So does a navigation hop that is chained, ordered inside, correlated
+  across comparison families or over a column that can hold a `null`, or read
+  as a value without the related entity's key. A hop over a foreign key no
+  property declares stays in the engine although a join reads that key
+  (`entity.hopShape`). Windows over such returns are set-residual: source-row
+  limits cannot stand in for projected-item limits, and the engine evaluates
+  the return of every row, so a window or a count may leave a row unevaluated
+  only where the evaluation cannot raise. Over an object or array constructor
+  of those operators a collection's window rides in the statement (`row`) and
+  a count is a `COUNT(*)`, on a collection and on an entity; an entity window
+  over an operator projection (the entity planner has no row residual; a
+  per-row evaluation of the constructor over the fetched window would lower
+  it), a collection's window or count beside a conjunct that runs as a
+  registered function, and a bare operator as the whole return (always one
+  item per row, but no constructor) are still the engine's. `$distinct`
   over an untyped or compound projection, or ordering by paths other than the
   projected scalar, also remains residual.
   **Proof still needed:** preserve output cardinality, structural equality,
@@ -806,6 +817,29 @@ what each does is its own documentation's job
   aggregate gates read what the column stores, the predicate planner reads the
   schema. Wanted: refuse the disagreement at the model, which closes the class
   for every shape.
+- [ ] **A conjunct that runs as a registered function can go unevaluated where
+  the engine evaluates it and raises.** An ordered index stops at the window,
+  and an index on a cheaper conjunct never visits the row, so a native window,
+  count or fetch beside such a conjunct answers on SQLite where the engine
+  raises (`plan.registeredFunction` keeps a window or a count over a
+  constructor in the engine, but the plain-member and bare-binding plans stay
+  exposed). Wanted: prove the conjunct cannot raise, or keep the engine's order
+  of evaluation.
+- [ ] **A native count never reads a row its codec cannot decode.** A row an
+  adopted table holds that its codec cannot decode (invalid text in a `date` or
+  `datetime` column, which only trusted SQL writes) raises `JD2003` in the
+  engine; the count of the bare binding, of a constructor of member paths and
+  of a constructor of operators answer where the engine raises. Wanted: count
+  natively only where the table cannot hold an invalid row (a declared check),
+  or read the column.
+- [ ] **A negative index through a tuple schema is typed as the array's
+  `items`.** For `prefixItems` with `items`, the shared typing
+  (`schemaNodeAt`, `typeOfPath`) types `$it.a[-1]` as `items`, so `$orderby`,
+  `$starts-with` and `$min` over it answer natively where the engine raises
+  (`JQ2005`, `JQ2001`) for a one-element array whose last element is a prefix
+  item. The constructor's string proof refuses a negative index; the shared
+  typing does not. Wanted: type a negative index through `prefixItems` as
+  unknown.
 - [ ] **Member paths outside ASCII identifiers in entity indexes, index
   conditions and database rules.** Entity index paths, index conditions and
   rule operands name members as `$.<member>` over ASCII identifiers. A member

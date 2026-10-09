@@ -219,9 +219,13 @@ no continuation to emit.
   whole entity binding, a non-singular path — refuses WHOLE and
   runs per row, with `explain().residualProjection` naming what stayed
   behind: promoting the half that composes would answer a shape nobody
-  asked for. Every `explain()` also carries `budget`: the profile
-  that applied, every bound it imposed, and the two driver slots
-  (`time`, `estimatedRows`) reported `unavailable` on SQLite rather
+  asked for. Where the shape is an object or array constructor whose leaves
+  are member paths, literals and operators that cannot raise (`$default`,
+  `$upper`, `$lower`, `$string-length`, `$count` and `$exists` over the members
+  MODEL-FORMAT §10.6 names) a count is one `COUNT(*)`, and on a collection a
+  window rides in the statement while each fetched row runs the shape. Every
+  `explain()` also carries `budget`: the profile that applied, every bound
+  it imposed, and the two driver slots (`time`, `estimatedRows`) reported `unavailable` on SQLite rather
   than estimated, `estimatedRows` carrying the planner's own labelled
   estimate for a native plan on PostgreSQL (MODEL-FORMAT §8). A differential
   oracle — a committed corpus and a seeded generator, every case run

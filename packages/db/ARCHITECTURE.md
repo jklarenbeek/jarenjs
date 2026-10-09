@@ -472,8 +472,36 @@ which could not tell an absent member from a present `null`.
 
 Constant projection trees fetch a row marker instead of a document. A
 window over a single path removes absent members before its SQL limit;
-a window over an opaque projection stays set-residual because that projection
-may emit zero or several items per source row.
+a window over an opaque projection (one the tree cannot rebuild) stays
+set-residual because that projection may emit zero or several items per source
+row, and so does a count of it.
+
+The exception is an object or array constructor, which yields exactly one item
+per row, whose every leaf is a singular member path, a literal, the document
+itself or one of a closed list of operators that cannot raise on a document
+that conforms to its schema (`TOTAL_OPERATORS`): `$default` over member paths
+and literals; `$upper`, `$lower` and `$string-length` over a member the schema
+types exactly `string` (a union, an untyped member, a column that stores another
+kind, reads a NULL as a present `null` or decodes its text through a date codec,
+an epoch column and a path with a negative index are none: a schema places an
+element by its position from the start, not from the end of a tuple); and
+`$count` and `$exists` over a member path.
+The engine evaluates the return of every row, so only an evaluation that cannot
+raise may go unmade for the rows a window leaves out, or for every row of a
+count. Over such a constructor on a collection the window rides in the statement
+(`LIMIT`/`OFFSET`) while each fetched row runs the constructor in the engine
+(the row residual), and a `$count` is a `COUNT(*)` that reads no row; on an
+entity only the count lowers, because the entity planner has no row residual, so
+a window over an operator projection runs in the engine (`entity.projection`). A
+collection's window or count also stays in the engine when a pushed conjunct
+runs as a registered function (`plan.registeredFunction`): the database stops
+evaluating one once the window is full, or once a cheaper conjunct has refused
+the row, and the engine evaluates every row. A document whose rows violate their schema is outside this
+proof: the engine would raise `JQ2001` on a row the statement never reads. So is
+a row of an adopted table that its codec cannot decode (invalid text in a `date`
+or `datetime` column, which only trusted SQL writes): the engine raises `JD2003`
+decoding it, and a count reads no row, as a count of the bare binding or of a
+constructor of member paths already did.
 
 General scalar grouping preserves absent and null keys separately through
 value/type pairs. Null and boolean keys may group, but ordering them stays
@@ -547,7 +575,7 @@ mode, `knn`, beside native, row and set.
 | an entity navigation hop that is chained, ordered or grouped inside, correlated by an inequality, or by equalities across comparison families or over members that admit `null` in their type or their column's policy (`entity.hopShape`; an uncorrelated one in a `$where` is `entity.conjunctBinding`); a hop read as a value (order key, projection leaf) whose equalities do not cover the related entity's key (`entity.hopValue`) | SQL equates the string `"1"` with no integer where the engine does not, pairs no `null` with `null` where the engine pairs them, and a scalar subselect over two rows raises where the engine raises `JQ2005`/`JQ2001` itself — the shapes without the proof keep the engine's answer and its errors |
 | `$match` and other unlisted operators, `$call` | no native spelling proven equivalent |
 | `$orderby` with a `$collation` | a collation the dialect cannot reproduce is refused, not approximated |
-| a projection the tree cannot rebuild: an operator over a member, a reference to the binding itself, a non-singular path | the WHOLE projection runs per row (the row residual) — pushed and ordered rows, projected by the engine; a window over these items runs in the set residual; promoting the part that composes would answer a shape nobody asked for |
+| a projection the tree cannot rebuild: an operator over a member, a reference to the binding itself, a non-singular path | the WHOLE projection runs per row (the row residual) — pushed and ordered rows, projected by the engine; a window over these items, and a count of them, run in the set residual (`flwor.projection`, `plan.countProjection`), except over a constructor whose operators cannot raise (the pushdown contract above), whose window is in the statement and whose count is a `COUNT(*)` while no conjunct runs as a registered function (`plan.registeredFunction`); promoting the part that composes would answer a shape nobody asked for |
 | a document that reads the collection root outside its binding — `$`, `$.…`, `$[…]`, a nested query over `$[*]`, a variable bound to the root, the root inside a path filter (`$it.xs[?@ == $[0].n]`) | the engine answers over the WHOLE collection (under a profile, the rows its mandatory predicate keeps): the row residual would hand it one row, and a pushed conjunct, the deterministic-function hatch, a window or a k-nearest cut the rows they keep — so such a document is planned with no hook (nothing registered for a narrowing it cannot keep), a plan that narrows becomes the bare fetch with the reason `plan.rootRead`, and one that already fetches every row keeps its own reasons. The planner counts root reads over the analysis, filter selectors included; a phrase it narrows reads the root once, through its binding or a temporal operator's operand |
 | string operators with an external pattern | the pattern's type is unknowable at plan time and the engine ERRORS on non-string patterns |
 | a comparison of two paths when either is not typed as a scalar — an object, an array, an untyped member (`predicate.joinTerritory`; an entity query also refuses a pair outside one non-null number or string family); a `$get` whose target is untyped, whose key is no literal string, or that feeds a string operator over a member that can hold another kind (`predicate.operands`, `predicate.existence`, `predicate.stringSubject`) | `$eq` and `$ne` compare objects and arrays deeply, member order and `1` against `1.0` insignificant inside, which SQL text cannot reproduce; the engine raises on a string operator's subject of another kind; the deterministic-function hatch may still take it |
@@ -984,7 +1012,9 @@ exactly what an honest explain may not print.
 ### The two residual modes
 
 - **Row residual** — only the projection is untranslated: predicates,
-  and ordering are fully pushed, with no output window; each fetched row runs
+  and ordering are fully pushed, with no output window unless the projection is
+  a constructor of one item per row that cannot raise (then the window is pushed
+  too, and the rows fetched are the window's); each fetched row runs
   `{ $for: { <the document's own binding>: '$[*]' },
   $return: [ <the document's $return> ] }` (the array wrapper keeps
   array-valued items unambiguous) and the items concatenate in row

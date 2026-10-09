@@ -1,0 +1,569 @@
+{
+ "group": "entity counts over constructors",
+ "model": {
+  "$model": "0.1",
+  "entities": {
+   "Person": {
+    "schema": {
+     "type": "object",
+     "required": [
+      "id"
+     ],
+     "properties": {
+      "id": {
+       "type": "string",
+       "x-entity": {
+        "key": true
+       }
+      },
+      "name": {
+       "type": "string"
+      },
+      "age": {
+       "type": "integer"
+      },
+      "nick": {
+       "type": [
+        "string",
+        "null"
+       ]
+      },
+      "bio": {
+       "type": "object",
+       "properties": {
+        "line": {
+         "type": "string"
+        }
+       }
+      },
+      "tup": {
+       "type": "array",
+       "prefixItems": [
+        {
+         "type": "number"
+        }
+       ],
+       "items": {
+        "type": "string"
+       }
+      },
+      "pets": {
+       "x-entity": {
+        "relation": {
+         "to": "Pet",
+         "many": true,
+         "via": "ownerId",
+         "onDelete": "cascade"
+        }
+       }
+      }
+     }
+    }
+   },
+   "Pet": {
+    "schema": {
+     "type": "object",
+     "required": [
+      "pid",
+      "ownerId"
+     ],
+     "properties": {
+      "pid": {
+       "type": "integer",
+       "x-entity": {
+        "key": true
+       }
+      },
+      "kind": {
+       "type": "string"
+      },
+      "weight": {
+       "type": "number"
+      },
+      "ownerId": {
+       "type": "string"
+      }
+     }
+    }
+   }
+  }
+ },
+ "documents": {
+  "Person": [
+   {
+    "id": "p1",
+    "name": "ada",
+    "age": 36,
+    "nick": "a",
+    "bio": {
+     "line": "engineer"
+    },
+    "tup": [
+     1,
+     "y"
+    ]
+   },
+   {
+    "id": "p2",
+    "name": "lin",
+    "age": 64,
+    "tup": [
+     5
+    ]
+   },
+   {
+    "id": "p3",
+    "name": "kid",
+    "bio": {}
+   },
+   {
+    "id": "p4",
+    "tup": [
+     2,
+     "p",
+     "q"
+    ]
+   }
+  ],
+  "Pet": [
+   {
+    "pid": 1,
+    "kind": "cat",
+    "weight": 4.5,
+    "ownerId": "p1"
+   },
+   {
+    "pid": 2,
+    "kind": "dog",
+    "weight": 12,
+    "ownerId": "p1"
+   },
+   {
+    "pid": 3,
+    "kind": "fish",
+    "ownerId": "p2"
+   },
+   {
+    "pid": 4,
+    "ownerId": "p3"
+   }
+  ]
+ },
+ "cases": [
+  {
+   "name": "a count of an upper constructor",
+   "query": {
+    "$count": {
+     "$for": {
+      "p": "$.Person[*]"
+     },
+     "$return": {
+      "id": "$p.id",
+      "n": {
+       "$upper": "$p.name"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "a count of an ordered constructor under a filter",
+   "query": {
+    "$count": {
+     "$for": {
+      "p": "$.Person[*]"
+     },
+     "$where": {
+      "$gt": [
+       "$p.age",
+       10
+      ]
+     },
+     "$orderby": [
+      "$p.id"
+     ],
+     "$return": {
+      "id": "$p.id",
+      "n": {
+       "$lower": "$p.name"
+      },
+      "len": {
+       "$string-length": "$p.name"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "a count of an array constructor of presence tests",
+   "query": {
+    "$count": {
+     "$for": {
+      "p": "$.Person[*]"
+     },
+     "$return": [
+      {
+       "$exists": "$p.age"
+      },
+      {
+       "$count": "$p.nick"
+      },
+      {
+       "$default": [
+        "$p.age",
+        0
+       ]
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "a count of a constructor over a document member",
+   "query": {
+    "$count": {
+     "$for": {
+      "p": "$.Person[*]"
+     },
+     "$return": {
+      "a": {
+       "$upper": "$p.bio.line"
+      },
+      "b": {
+       "$exists": "$p.bio.line"
+      },
+      "c": {
+       "$default": [
+        "$p.bio.line",
+        "none"
+       ]
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "a count of a constructor over a join",
+   "query": {
+    "$count": {
+     "$for": {
+      "p": "$.Person[*]",
+      "q": "$.Pet[*]"
+     },
+     "$where": {
+      "$eq": [
+       "$p.id",
+       "$q.ownerId"
+      ]
+     },
+     "$return": {
+      "a": {
+       "$upper": "$p.name"
+      },
+      "k": {
+       "$lower": "$q.kind"
+      },
+      "w": {
+       "$default": [
+        "$q.weight",
+        0
+       ]
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "a count of a constructor beside a hop count",
+   "query": {
+    "$count": {
+     "$for": {
+      "p": "$.Person[*]"
+     },
+     "$return": {
+      "n": {
+       "$count": {
+        "$for": {
+         "q": "$.Pet[*]"
+        },
+        "$where": {
+         "$eq": [
+          "$q.ownerId",
+          "$p.id"
+         ]
+        },
+        "$return": "$q"
+       }
+      },
+      "u": {
+       "$upper": "$p.name"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "a count of a constructor over no rows",
+   "query": {
+    "$count": {
+     "$for": {
+      "p": "$.Person[*]"
+     },
+     "$where": {
+      "$gt": [
+       "$p.age",
+       1000
+      ]
+     },
+     "$return": {
+      "n": {
+       "$upper": "$p.name"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "a count of a constructor of literals and an operator",
+   "query": {
+    "$count": {
+     "$for": {
+      "p": "$.Person[*]"
+     },
+     "$return": {
+      "k": "const",
+      "z": null,
+      "n": {
+       "$string-length": "$p.name"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "a count of an arithmetic leaf",
+   "query": {
+    "$count": {
+     "$for": {
+      "p": "$.Person[*]"
+     },
+     "$return": {
+      "id": "$p.id",
+      "v": {
+       "$add": [
+        "$p.age",
+        1
+       ]
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "a count of an upper-case of a nullable member",
+   "query": {
+    "$count": {
+     "$for": {
+      "p": "$.Person[*]"
+     },
+     "$return": {
+      "id": "$p.id",
+      "v": {
+       "$upper": "$p.nick"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "a count of an upper-case of an integer member",
+   "query": {
+    "$count": {
+     "$for": {
+      "p": "$.Person[*]"
+     },
+     "$return": {
+      "id": "$p.id",
+      "v": {
+       "$upper": "$p.age"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "a count of a constructor with a hop that can reach several rows",
+   "query": {
+    "$count": {
+     "$for": {
+      "p": "$.Person[*]"
+     },
+     "$return": {
+      "k": {
+       "$for": {
+        "q": "$.Pet[*]"
+       },
+       "$where": {
+        "$eq": [
+         "$q.ownerId",
+         "$p.id"
+        ]
+       },
+       "$return": "$q.kind"
+      },
+      "u": {
+       "$upper": "$p.name"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "a count of an upper-case of the last element of a tuple",
+   "query": {
+    "$count": {
+     "$for": {
+      "p": "$.Person[*]"
+     },
+     "$return": [
+      {
+       "$upper": "$p.tup[-1]"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "a count of an upper-case of an element past the prefix of a tuple",
+   "query": {
+    "$count": {
+     "$for": {
+      "p": "$.Person[*]"
+     },
+     "$return": [
+      {
+       "$upper": "$p.tup[1]"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "a count of an upper-case of the first element of a tuple",
+   "query": {
+    "$count": {
+     "$for": {
+      "p": "$.Person[*]"
+     },
+     "$return": [
+      {
+       "$upper": "$p.tup[0]"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "a count of an operator at the root of the return",
+   "query": {
+    "$count": {
+     "$for": {
+      "p": "$.Person[*]"
+     },
+     "$return": {
+      "$default": [
+       "$p.age",
+       "$p.name"
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "a count of an operator over a nested operator",
+   "query": {
+    "$count": {
+     "$for": {
+      "p": "$.Person[*]"
+     },
+     "$return": {
+      "v": {
+       "$upper": {
+        "$lower": "$p.name"
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "a window over an operator projection stays in the engine",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "p": "$.Person[*]"
+      },
+      "$orderby": [
+       "$p.id"
+      ],
+      "$return": {
+       "id": "$p.id",
+       "n": {
+        "$upper": "$p.name"
+       }
+      }
+     },
+     0,
+     3
+    ]
+   }
+  },
+  {
+   "name": "an offset window over an operator projection stays in the engine",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "p": "$.Person[*]"
+      },
+      "$orderby": [
+       "$p.id"
+      ],
+      "$return": {
+       "id": "$p.id",
+       "n": {
+        "$default": [
+         "$p.age",
+         -1
+        ]
+       }
+      }
+     },
+     1
+    ]
+   }
+  },
+  {
+   "name": "a window over a member projection is native",
+   "query": {
+    "$subsequence": [
+     {
+      "$for": {
+       "p": "$.Person[*]"
+      },
+      "$orderby": [
+       "$p.id"
+      ],
+      "$return": {
+       "id": "$p.id",
+       "n": "$p.name"
+      }
+     },
+     1,
+     2
+    ]
+   }
+  }
+ ]
+}
