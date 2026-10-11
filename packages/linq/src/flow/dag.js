@@ -20,10 +20,10 @@
  * task-registry resolution (`JF0018`).
  */
 
-import { cloneJson, deepFreeze, setObjectMember, isJsonObject, isPlainOptions } from '@jarenjs/core/object';
+import { deepFreeze, setObjectMember, isJsonObject, isPlainOptions } from '@jarenjs/core/object';
 
 import { LinqBuildError } from '../errors.js';
-import { closedTo, describeValue, requireJson, requireNameMap } from '../json-boundary.js';
+import { closedTo, describeValue, requireNameMap, requireOwnJson } from '../json-boundary.js';
 import { queryMember } from './capture.js';
 
 const DAG_VERSION = '0.1';
@@ -96,7 +96,7 @@ export function constant(value) {
       'constant() takes the value the node yields — every JSON value, null included; '
       + 'undefined is not one', '/value');
   }
-  return node({ kind: 'const', value: cloneJson(requireJson(value, 'constant()')) });
+  return node({ kind: 'const', value: requireOwnJson(value, 'constant()') });
 }
 
 /**
@@ -129,7 +129,7 @@ export function jslt(document) {
       'jslt() takes a stylesheet document — the JSLT pen\'s stylesheet(…) or rule array, '
       + 'or one written by hand', '/stylesheet');
   }
-  return node({ kind: 'jslt', stylesheet: cloneJson(requireJson(document, 'jslt()')) });
+  return node({ kind: 'jslt', stylesheet: requireOwnJson(document, 'jslt()') });
 }
 
 /**

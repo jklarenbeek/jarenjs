@@ -17,7 +17,7 @@
  */
 
 import { LinqBuildError } from '../errors.js';
-import { describeValue, requireJson, requireNameMap } from '../json-boundary.js';
+import { describeValue, requireJson, requireNameMap, requireOwnJson } from '../json-boundary.js';
 import { SCHEMA_BUILDER, isSchemaBuilder } from './brand.js';
 import { assemble } from './emit.js';
 import { captureCheck } from './check.js';
@@ -57,7 +57,7 @@ const OWNED = new Set([
 ]);
 
 /** The JSON boundary (`JL0101`), shared with every pen. */
-export { describeValue, requireJson } from '../json-boundary.js';
+export { describeValue, requireJson, requireOwnJson } from '../json-boundary.js';
 
 /** @param {any} value @param {string} what */
 export function requireBuilder(value, what) {
@@ -283,7 +283,7 @@ export class SchemaBuilder {
   }
 
   /** `default`: materialized by the normalizer's `useDefaults`. @param {any} value */
-  default(value) { return this.annotate('default', requireJson(value, 'default()')); }
+  default(value) { return this.annotate('default', requireOwnJson(value, 'default()')); }
 
   /** `description`. @param {string} text */
   describe(text) { return this.annotate('description', requireString(text, 'describe()')); }
@@ -294,7 +294,7 @@ export class SchemaBuilder {
   /** One more entry of `examples`. @param {any} value */
   example(value) {
     const current = this.annotation('examples') ?? [];
-    return this.annotate('examples', [...current, requireJson(value, 'example()')]);
+    return this.annotate('examples', [...current, requireOwnJson(value, 'example()')]);
   }
 
   /**
@@ -314,13 +314,13 @@ export class SchemaBuilder {
           + `builder method that emits it, keyword('${key}', value) where no method does, `
           + 'or wrap a hand-written schema with from()');
       }
-      next = next.annotate(key, requireJson(annotations[key], `meta().${key}`));
+      next = next.annotate(key, requireOwnJson(annotations[key], `meta().${key}`));
     }
     return next;
   }
 
   /** `errorMessage`: the validator's author-supplied message spec. @param {any} spec */
-  message(spec) { return this.annotate('errorMessage', requireJson(spec, 'message()')); }
+  message(spec) { return this.annotate('errorMessage', requireOwnJson(spec, 'message()')); }
 
   /**
    * A cross-field rule as `$query`: a callback captured through the
@@ -331,7 +331,7 @@ export class SchemaBuilder {
   check(rule) {
     const query = typeof rule === 'function'
       ? captureCheck(rule)
-      : requireJson(rule, 'check()');
+      : requireOwnJson(rule, 'check()');
     return this.with({ checks: Object.freeze([...this.#state.checks, query]) });
   }
 
@@ -366,7 +366,7 @@ export class SchemaBuilder {
    * @returns {this}
    */
   annotate(key, value) {
-    return this.with({ annotations: annotate(this.#state.annotations, key, value) });
+    return this.with({ annotations: annotate(this.#state.annotations, requireString(key, 'annotate() name'), value) });
   }
 
   /**
@@ -392,6 +392,7 @@ export class SchemaBuilder {
    * @returns {this}
    */
   keyword(key, value) {
+    requireString(key, 'keyword() name');
     if ((this.state.kind === 'never' || (this.state.kind === 'raw' && typeof this.state.json === 'boolean'))
       && !this.state.nullable) {
       throw new LinqBuildError('JL0102', `a boolean schema carries no '${key}' — nullable() it first`);
@@ -513,14 +514,14 @@ export class ObjectBuilder extends SchemaBuilder {
   propertyNames(builder) { return this.with({ names: requireBuilder(builder, 'propertyNames()') }); }
   /** `dependentRequired`. @param {Record<string, string[]>} map */
   dependentRequired(map) {
-    requireJson(map, 'dependentRequired()');
-    if (map === null || typeof map !== 'object' || Array.isArray(map)
-      || Object.keys(map).some((key) => !Array.isArray(map[key])
-        || map[key].some((name) => typeof name !== 'string'))) {
+    const own = requireOwnJson(map, 'dependentRequired()');
+    if (own === null || typeof own !== 'object' || Array.isArray(own)
+      || Object.keys(own).some((key) => !Array.isArray(own[key])
+        || own[key].some((name) => typeof name !== 'string'))) {
       throw new LinqBuildError('JL0101',
         'dependentRequired() takes a plain object mapping a member name to an array of member names');
     }
-    return this.with({ dependent: map });
+    return this.with({ dependent: own });
   }
   /** More members (a later spelling of a name replaces the earlier one). @param {Record<string, any>} props */
   extend(props) {
@@ -603,6 +604,7 @@ export class NeverBuilder extends SchemaBuilder {
   /** @param {string} key @param {any} value */
   annotate(key, value) {
     if (this.state.nullable) return super.annotate(key, value);
+    requireString(key, 'annotate() name');
     throw new LinqBuildError('JL0102',
       `never() is the boolean schema false, which carries no '${key}' — annotate the member `
       + 'that holds it, or nullable() it first');

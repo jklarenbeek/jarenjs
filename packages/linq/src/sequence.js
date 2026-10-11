@@ -21,7 +21,7 @@ import {
 } from './expression.js';
 import {
   emitDocument, wrapTerminal, snapshot, fanProjection, isReservedBinding, RESERVED_BINDINGS_TEXT,
-  PROJECTING_STAGES, requireNonNegativeInteger, readOptions, orderSpec, RUN_BINDINGS,
+  PROJECTING_STAGES, requireNonNegativeInteger, readOptions, orderSpec, RUN_BINDINGS, mergeBindings,
 } from './document.js';
 import {
   classifySource, compileDocument, executeInMemory, providerRoot, providerRelations, sharesScope,
@@ -121,7 +121,9 @@ export class Sequence {
    * @param {readonly string[]} [lists] - a terminal predicate's own */
   #externals(lists = []) {
     requireListBindings([...this.#lists(), ...lists], this.#params);
-    return Object.fromEntries(this.#params);
+    // a copy per run: a provider handed the sequence's own values could write
+    // into them, and the next run (or explain) would read what it wrote
+    return snapshot(Object.fromEntries(this.#params));
   }
 
   /** Whether this sequence is a provider's own root, untouched — the
@@ -243,16 +245,7 @@ export class Sequence {
         + ' — a query document reads one input; load both collections under one root'
         + (scoped ? ', or join two entity sets of one store' : ''));
     }
-    const merged = new Map(this.#params);
-    for (const [name, value] of inner.#params) {
-      if (merged.has(name) && merged.get(name) !== value) {
-        throw new LinqBuildError('JL0004',
-          `parameter '${name}' is bound to different values by the two sides of ${what} — `
-          + 'one document carries one binding per name; bind it once, or rename one side');
-      }
-      merged.set(name, value);
-    }
-    return merged;
+    return mergeBindings(this.#params, inner.#params, what);
   }
 
   /** Equi-join → nested `$for` + `$where` equality (the engine rewrites
@@ -427,8 +420,7 @@ export class Sequence {
         throw new LinqBuildError('JL0004',
           `'${name}' is reserved (the emitted document's own binding names: ${RESERVED_BINDINGS_TEXT})`);
       }
-      requireJsonBinding(name, bindings[name]);
-      merged.set(name, bindings[name]);
+      merged.set(name, requireJsonBinding(name, bindings[name]));
     }
     return this.#rebound(merged);
   }
@@ -472,7 +464,7 @@ export class Sequence {
       document,
       externals: [...compiled.externals],
       dependencies: compiled.dependencies,
-      hops: this.#hops(),
+      hops: snapshot(this.#hops()),
       bindings: this.#externals(),
     };
   }
@@ -480,7 +472,7 @@ export class Sequence {
   /** What a run binds, unchecked ({@link RUN_BINDINGS}): for `live()`,
    * which checks the list rule against the externals it registers. */
   [RUN_BINDINGS]() {
-    return { bindings: Object.fromEntries(this.#params), lists: this.#lists() };
+    return { bindings: snapshot(Object.fromEntries(this.#params)), lists: this.#lists() };
   }
 
   /** @param {string} terminal @param {readonly any[]} [args]
@@ -704,5 +696,7 @@ export function fromDocument(source, document, options) {
     }
     root = root.$expr;
   }
-  return new Sequence(source, classifySource(source), root, [], new Map(), read);
+  // a copy: the sequence is immutable, and a document its author still holds
+  // must not be a way to rewrite it
+  return new Sequence(source, classifySource(source), snapshot(root), [], new Map(), read);
 }

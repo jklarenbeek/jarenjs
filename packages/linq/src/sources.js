@@ -59,20 +59,36 @@ export function createPushQueue(options) {
   if (!Number.isInteger(highWaterMark) || highWaterMark < 1) {
     throw new LinqBuildError('JL0005', 'highWaterMark must be a positive integer');
   }
-  /** @type {any[]} */
+  /** Values fed and not yet handed out: `buffer[head]` is the next one.
+   * Handing out by index keeps a drain linear — `shift()` moves the whole
+   * remainder each time, so a queue fed ahead of its reader went quadratic.
+   * @type {any[]} */
   const buffer = [];
-  /** @type {(() => void) | null} */
-  let wake = null;
+  let head = 0;
+  /** Every reader parked on an empty queue; one signal releases them all.
+   * @type {(() => void)[]} */
+  const waiting = [];
   let ended = false;
   /** @type {unknown} */
   let failure = null;
 
   function signal() {
-    if (wake !== null) {
-      const w = wake;
-      wake = null;
-      w();
+    for (const wake of waiting.splice(0)) wake();
+  }
+
+  /** The next value, and the consumed prefix dropped once it is half the array. */
+  function take() {
+    const value = buffer[head];
+    buffer[head++] = undefined;
+    if (head === buffer.length) {
+      buffer.length = 0;
+      head = 0;
     }
+    else if (head >= 1024 && head * 2 >= buffer.length) {
+      buffer.splice(0, head);
+      head = 0;
+    }
+    return value;
   }
 
   return {
@@ -83,24 +99,26 @@ export function createPushQueue(options) {
       }
       buffer.push(value);
       signal();
-      return buffer.length <= highWaterMark;
+      return buffer.length - head <= highWaterMark;
     },
+    // the first end() is the end: a second one cannot erase its failure
     end(error) {
+      if (ended) return;
       ended = true;
       failure = error;
       signal();
     },
     async* [Symbol.asyncIterator]() {
       for (;;) {
-        if (buffer.length > 0) {
-          yield buffer.shift();
+        if (head < buffer.length) {
+          yield take();
           continue;
         }
         if (ended) {
           if (failure !== undefined && failure !== null) throw failure;
           return;
         }
-        await new Promise((resolve) => { wake = () => resolve(undefined); });
+        await new Promise((resolve) => { waiting.push(() => resolve(undefined)); });
       }
     },
   };

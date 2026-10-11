@@ -67,7 +67,10 @@ omit data members and supply data through the chart engine's separate argument.
 | `JL0101` | a non-JSON value, non-plain option map, unknown kind or option, or a fluent member on a kind that does not declare it |
 
 Numeric ranges and relationships among data members remain the chart grammar's
-and renderer's responsibility. For extension fields use `from(document)`.
+and renderer's responsibility. For extension fields use `from(document)`. A document whose `type` is not a chart kind
+the vocabulary declares, a name on `Object.prototype` included (`toString`), is
+`JL0101` "unknown chart kind" at the first fluent member, where it escaped as a raw
+`TypeError`.
 
 ## 5. The types
 

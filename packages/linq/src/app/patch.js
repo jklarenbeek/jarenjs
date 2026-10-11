@@ -24,14 +24,13 @@
  * wherever an operation holds one.
  */
 
+import { escapePointerToken } from '@jarenjs/core/string';
+
 import { LinqBuildError } from '../errors.js';
 import { liftExpression } from '../expression.js';
 import { describeValue } from '../json-boundary.js';
 import { captureAction } from './capture.js';
 import { refuseConditional } from './conditional.js';
-
-/** RFC 6901: `~` and `/` escape inside a pointer segment. @param {string} segment */
-const escapeSegment = (segment) => segment.replaceAll('~', '~0').replaceAll('/', '~1');
 
 /**
  * `JL0102` for a path expression the pen cannot lower to a pointer.
@@ -61,7 +60,7 @@ function pointerOf(path) {
       let j = i + 1;
       while (j < path.length && path[j] !== '.' && path[j] !== '[') j++;
       if (j === i + 1) unlowerable(path);
-      out += `/${escapeSegment(path.slice(i + 1, j))}`;
+      out += `/${escapePointerToken(path.slice(i + 1, j))}`;
       i = j;
       continue;
     }
@@ -82,7 +81,7 @@ function pointerOf(path) {
         else { name += esc; j += 2; }
       }
       if (path[j + 1] !== ']') unlowerable(path);
-      out += `/${escapeSegment(name)}`;
+      out += `/${escapePointerToken(name)}`;
       i = j + 2;
       continue;
     }
@@ -115,7 +114,7 @@ function pointerPieces(doc) {
   const key = doc.$get[1];
   // a bare string operand is a literal member name; one starting with
   // `$` is a path, which is a computed segment like any other operator
-  if (typeof key === 'string' && key[0] !== '$') return [...base, { text: `/${escapeSegment(key)}` }];
+  if (typeof key === 'string' && key[0] !== '$') return [...base, { text: `/${escapePointerToken(key)}` }];
   if (Number.isInteger(key) && key >= 0) return [...base, { text: `/${key}` }];
   return [...base, { text: '/' }, { expr: key }];
 }

@@ -14,8 +14,10 @@
  * member outside the closed vocabulary — with `JL0102` naming the rule.
  */
 
+import { cloneJson } from '@jarenjs/core/object';
+
 import { LinqBuildError } from '../errors.js';
-import { requireJson, requireName } from '../schema/builders.js';
+import { requireOwnJson, requireName } from '../schema/builders.js';
 import { captureQuery } from '../schema/check.js';
 
 /** What a captured model default or member path evaluates over, for the
@@ -219,7 +221,7 @@ export function withEntity(Base) {
     updated() { return this.entity({ default: 'updated' }); }
 
     /** `default: { value }` — a literal, filled when absent. @param {any} value */
-    fill(value) { return this.entity({ default: { value: requireJson(value, 'fill()') } }); }
+    fill(value) { return this.entity({ default: { value: requireOwnJson(value, 'fill()') } }); }
 
     /**
      * `default: { query }` — evaluated over the document being written
@@ -230,7 +232,7 @@ export function withEntity(Base) {
     compute(rule) {
       const query = typeof rule === 'function'
         ? captureQuery('compute()', [], rule, { advice: () => DOCUMENT_SCOPE })
-        : requireJson(rule, 'compute()');
+        : requireOwnJson(rule, 'compute()');
       return this.entity({ default: { query } });
     }
 
@@ -245,7 +247,7 @@ export function withEntity(Base) {
      * @param {any} layout */
     physical(layout) {
       if (this.state.kind !== 'object') throw new LinqBuildError('JL0102', 'physical() belongs on an entity object');
-      return this.with({ physical: requireJson(layout, 'physical()') });
+      return this.with({ physical: requireOwnJson(layout, 'physical()') });
     }
 
     /** The entity's own indexes — composite, unique or partial `index()`
@@ -255,7 +257,7 @@ export function withEntity(Base) {
     indexes(entries) {
       if (this.state.kind !== 'object') throw new LinqBuildError('JL0102', 'indexes() belongs on an entity object');
       if (!Array.isArray(entries)) throw new LinqBuildError('JL0101', 'indexes() takes an array of index() entries');
-      return this.with({ indexes: [...entries] });
+      return this.with({ indexes: entries.map((entry) => cloneJson(entry)) });
     }
 
 
@@ -263,7 +265,7 @@ export function withEntity(Base) {
      * @param {any[]} rules */
     invariants(rules) {
       if (this.state.kind !== 'object') throw new LinqBuildError('JL0102', 'invariants() belongs on an entity object');
-      return this.with({ invariants: requireJson(rules, 'invariants()') });
+      return this.with({ invariants: requireOwnJson(rules, 'invariants()') });
     }
 
     /** As in the schema pen, but `x-entity` is owned here. @param {Record<string, any>} annotations */

@@ -207,7 +207,7 @@ hands it to `explain()` and asserts `mode: 'native'` with no residual.
 | `after(cursor)` | `after` | the keyset continuation (§10.5) a `page()` over the same ordering emitted — typed by the declared ordering, so a bare key does not compile; the ROOT only |
 | `maxDepth(n)` | `maxDepth` | the include depth bound (§10.4) |
 | `asNoTracking()` | — | changes the load, never the document |
-| `toSpec()`, `toJSON()` | the spec | plain deep-frozen JSON, a snapshot: mutating it changes nothing, and two builds are one document |
+| `toSpec()`, `toJSON()` | the spec | plain deep-frozen JSON, a snapshot: mutating it changes nothing, and two builds are one document; a cursor handed to `after()` is copied there, so writing into it afterwards moves no page |
 | `toArray()` | — | `load(spec)`: the store's one statement |
 | `cursor(options?)` | — | `loadCursor(spec, options)`: one root graph per pull from that same statement, its includes attached and bounded per root; `return()` releases it; `{ signal?, tracking? }` — untracked unless `tracking: true` |
 | `page(options?)` | — | `page(spec, options)`: one bounded page over the composite keyset — `{ items, continuation, hasMore, snapshot }`, never more than `limit` roots or `maxBytes` bytes; `{ limit?, after?, maxBytes?, consistency?, signal?, tracking? }`; a `take`/`skip` on the graph beside it is the store's `JD0032` |

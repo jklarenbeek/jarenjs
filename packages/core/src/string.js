@@ -415,6 +415,20 @@ export function kebabCase(s) {
   return s.replace(/[A-Z]/g, (c) => '-' + c.toLowerCase());
 }
 
+/**
+ * Escape one reference token for a JSON Pointer (RFC 6901 §3): `~` becomes
+ * `~0` and `/` becomes `~1`, in that order, so an escaped `/` is never
+ * escaped again.
+ *
+ * @param {string} token - A member name or an array index, as text
+ * @returns {string} The token as it is written between two slashes
+ * @example
+ * escapePointerToken('a/b~c'); // 'a~1b~0c'
+ */
+export function escapePointerToken(token) {
+  return token.replaceAll('~', '~0').replaceAll('/', '~1');
+}
+
 /** One code point that a slug keeps: a letter, a digit, or a combining
  * mark (which belongs to the letter in front of it). Everything else
  * outside ASCII is punctuation, a symbol or an emoji, and is dropped. */

@@ -16,13 +16,10 @@
 import { deepFreeze, setObjectMember, isJsonObject } from '@jarenjs/core/object';
 import { LinqBuildError } from '../errors.js';
 import { isSchemaBuilder, schemaOf } from '../schema/brand.js';
-import { describeValue, requireJson, requireNameMap } from '../json-boundary.js';
+import { describeValue, requireNameMap, requireOwnJson } from '../json-boundary.js';
 import { body } from './body.js';
 
 const DISPOSITIONS = ['share', 'fresh', 'error'];
-
-/** A JSON value, copied: the document is a value of its own. @param {any} v */
-const copy = (v) => JSON.parse(JSON.stringify(v));
 
 /**
  * The `match` member (§3.1), or `undefined` for the unconditional rule.
@@ -62,7 +59,7 @@ function readMatch(match) {
   if (match.schema !== undefined) {
     out.schema = isSchemaBuilder(match.schema)
       ? schemaOf(match.schema)
-      : copy(requireJson(match.schema, 'rule() match.schema'));
+      : requireOwnJson(match.schema, 'rule() match.schema');
   }
   return out;
 }
@@ -79,7 +76,7 @@ function readBody(value) {
       'rule() takes a body: a callback (value, x) => …, body(…), or a query document',
       '/body');
   }
-  return copy(requireJson(value, 'rule() body'));
+  return requireOwnJson(value, 'rule() body');
 }
 
 /**
@@ -196,7 +193,7 @@ export function stylesheet(rules, options = undefined) {
         `stylesheet() rule ${i} has no body (JSLT-FORMAT §2.2, the compiler's JT0002)`,
         `/rules/${i}/body`);
     }
-    return copy(requireJson(r, `stylesheet() rule ${i}`));
+    return requireOwnJson(r, `stylesheet() rule ${i}`);
   });
   return deepFreeze(out);
 }

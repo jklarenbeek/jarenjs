@@ -441,7 +441,10 @@ or epoch number, a hole to `null`. The boundary is the same for a
 `concat` array and for a `params()` binding (`JL0004`): a parameter
 becomes an external and, on a provider, a bound SQL parameter, so a
 `Date` there would compare against nothing and answer `[]` with no error
-anywhere.
+anywhere. A constant is copied where it is captured, so writing into the
+object afterwards changes nothing in a query already built (a query that
+kept the reference answered the mutated value); a `fromDocument` document
+and the schema `ofType`/`cast` are given are copied the same way.
 
 ## 6. Terminal semantics
 
@@ -491,7 +494,9 @@ emitted document's own binding names — and so are `r1`, `r2`, … (`r`
 followed by a positive integer): the bindings a relation hop allocates,
 numbered per capture (§3, §4 "relation navigation"). Declaring any of
 them is `JL0004`. A binding must be query data (§5): a `Date`, `Map`,
-`NaN`, `-0` or a sparse array is `JL0004` with the conversion named. A
+`NaN`, `-0` or a sparse array is `JL0004` with the conversion named, and a
+binding is copied when it is bound, so writing into the caller's object
+afterwards changes neither the sequence nor what a provider receives, and each run hands a provider its own copy, so a provider that writes into its externals rewrites nothing the next run reads. A
 parameter an `in()` reads whole as its list must be bound to an array
 when the chain runs (§4), and the parameters argument itself is not a
 value (§3): both are `JL0004` too.
@@ -503,7 +508,8 @@ the values bound so far — what a provider receives as `externals`, and
 what a host handed the chain, such as a live registration, forwards
 without a second spelling); a name both sides
 bind to different values is `JL0004` — one document carries one binding
-per name. Rebinding a name later (`.params({ k: 3 })`) re-runs the
+per name, and two bindings that spell the same JSON (member order
+included) are one value, whatever their references. Rebinding a name later (`.params({ k: 3 })`) re-runs the
 whole document under the new value, on the async surface too: a
 `params()` after a `mapAsync` rebinds the pushed prefix as well as the
 residual.
@@ -802,7 +808,11 @@ operators; a per-element async *predicate* is `mapAsync` then `where`.
   push parsers deliberately have no backpressure protocol; the queue
   is where one appears): `feed(value)` returns `false` once the queue
   exceeds the mark — a pause HINT, never a hard stop — and
-  `end(error?)` closes (or fails) the stream. The options are a closed
+  `end(error?)` closes (or fails) the stream — the first `end()` decides, so a
+  later one cannot erase the failure an earlier `end(error)` carried. The
+  queue keeps its unread values by index: a drain is linear in the values
+  fed, the mark counts the values not yet read, and several readers of one
+  queue are each woken, every value reaching exactly one. The options are a closed
   set: a misspelt mark (`highWatermark`) is `JL0005` naming the nearest,
   and `null` or a non-object is `JL0005` — the first used to be ignored
   and the second to escape as a raw `TypeError`. Anything else is
@@ -867,8 +877,10 @@ streaming mode. Nested sides additionally expose `children`. `build` and
 **Budgets are admission credits.** `maxRows` and `maxBytes` apply separately
 at each source or intermediate. `maxTotalRows` and `maxTotalBytes` cover all
 retained source and intermediate admissions in the entire call, and default
-to twice their corresponding per-side budget. All four are positive safe
-integers. Credits are cumulative: freeing an intermediate's inputs does not
+to twice their corresponding per-side budget, held at the largest safe
+integer (a side budget of `Number.MAX_SAFE_INTEGER` is accepted, and its
+default total is the same figure, where it used to be refused naming a
+`maxTotalRows` nobody wrote). All four are positive safe integers. Credits are cumulative: freeing an intermediate's inputs does not
 refund them. This conservative rule makes a nested plan's total explicit.
 The spec is a closed set — `sources`, `maxRows`, `maxBytes`,
 `maxTotalRows`, `maxTotalBytes` and `strategy` — and so is a described
@@ -1262,7 +1274,9 @@ export const names = fromDocument(users, saved).select((u) => u.name);
 }
 ```
 
-`names.toArray()` answers `["Ada"]`. The saved document became the source
+`names.toArray()` answers `["Ada"]`. The saved document is copied when
+`fromDocument` is called, so its author writing into it afterwards cannot
+rewrite the sequence, and it became the source
 of a new phrase rather than being merged into one — which is what keeps a
 document a reader did not write from being reinterpreted. A
 `fromDocument` chain never hops (§3): there the document decides what the
@@ -1449,6 +1463,7 @@ that preserves it, so there is no spelling that is allowed to.
 | `select((u) => u.posts.title)` (a to-many hop) | `.title is read off a to-many relation, which holds an array of related rows — fan them first (.all().title), index one (.at(0)), or aggregate the array` | `u.posts.all().title`, `u.posts.at(0).title` |
 | `from(rows).skip(-1)` | `skip takes a non-negative integer, got -1` | a non-negative integer |
 | `from(rows).take(1.5)` | `take takes a non-negative integer, got 1.5` | an integer |
+| `from(rows).take('2')` | `take takes a non-negative integer, got "2"` — `skip`, `take`, `elementAt` and `elementAtOrDefault`, on both surfaces, word the refused value one way: a string is quoted (it used to read as the number it spells), a bigint keeps its suffix (`got 2n`), an object or array is named (`got an object`, `got an array`, where an object read `[object Object]`), a function is `a function`, and a Symbol or null-prototype object is named (`got a symbol`) rather than escaping as the engine's own `TypeError`; a message matched on `got <number>` is unchanged | a number |
 | `from(rows).where(42)` | `this operator takes a callback function` | a callback |
 | `from(rows).join([], …)` | `join takes another sequence as its inner side` | `from(sameSource)` |
 | `from(a).join(from(b), …)` | `join's other side must derive from the same source, or from two providers sharing one scope (one store's entity sets) — a query document reads one input; load both collections under one root, or join two entity sets of one store` | one source, or one store's two entity sets (§13.2) |

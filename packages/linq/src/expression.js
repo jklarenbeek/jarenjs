@@ -272,12 +272,17 @@ function requireDense(array) {
  * into a document as an external, and later into a provider as a bound
  * SQL parameter, so a `Date`, `Map`, `NaN` or `-0` here would compare
  * against nothing and answer `[]` with no error anywhere. One check for
- * both surfaces, one message.
+ * both surfaces, one message. The value it answers is the binding's own: a
+ * container is copied, so writing into the caller's object afterwards can
+ * neither change a bound sequence nor smuggle a non-JSON value past this check.
  * @param {string} name
  * @param {any} value
+ * @returns {any}
  */
 export function requireJsonBinding(name, value) {
-  if (isPlainJson(value)) return;
+  if (isPlainJson(value)) {
+    return value !== null && typeof value === 'object' ? JSON.parse(JSON.stringify(value)) : value;
+  }
   const hole = Array.isArray(value) ? holeIn(value) : -1;
   const what = hole >= 0 ? `a sparse array (index ${hole} is a hole)`
     : value !== null && typeof value === 'object'
@@ -354,8 +359,13 @@ export function toExpression(value, fold = true) {
     // a parameters argument names values and is not one: its own refusal
     value[PARAMETERS]?.();
     if (fold && isPlainJson(value)) {
-      // verbatim data: cheaper and clearer than a constructor tree
-      return { $const: value };
+      // verbatim data: cheaper and clearer than a constructor tree. A copy,
+      // because the document owns its constants: a caller who writes into
+      // the object afterwards must not rewrite a query already built. The
+      // value just passed `isPlainJson`, so the text round trip is exact
+      // (an own `__proto__` member survives it as a member) and adds no
+      // module to a bundle that only captures
+      return { $const: JSON.parse(JSON.stringify(value)) };
     }
     const proto = Object.getPrototypeOf(value);
     if (Array.isArray(value)) {

@@ -1,12 +1,12 @@
 //@ts-check
 /** Immutable JSON document storage shared by the authored-format pens. */
-import { cloneJson, deepFreeze } from '@jarenjs/core/object';
-import { requireJson, requireNameMap } from './json-boundary.js';
+import { deepFreeze } from '@jarenjs/core/object';
+import { requireNameMap, requireOwnJson } from './json-boundary.js';
 import { LinqBuildError } from './errors.js';
 
 /** A snapshot, never a view of a caller-owned document. @param {any} value */
 export function snapshot(value) {
-  return deepFreeze(cloneJson(requireJson(value, 'document')));
+  return deepFreeze(requireOwnJson(value, 'document'));
 }
 
 /** The closed option boundary; extensions enter through the raw document factory. */

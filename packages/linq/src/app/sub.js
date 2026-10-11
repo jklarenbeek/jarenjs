@@ -19,7 +19,7 @@
  */
 
 import { LinqBuildError } from '../errors.js';
-import { describeValue, requireJson } from '../json-boundary.js';
+import { describeValue, requireOwnJson } from '../json-boundary.js';
 import { captureSub } from './capture.js';
 
 /** The subscription brand: how `defineApp` tells one apart. */
@@ -87,7 +87,7 @@ export function sub(run, options = undefined) {
           "sub() 'with' is VERBATIM data handed to the handler, never evaluated — for props "
           + "derived from the state write 'withQuery' instead (APP-FORMAT §5.3)", '/with');
       }
-      entry.with = JSON.parse(JSON.stringify(requireJson(options.with, "sub() 'with'")));
+      entry.with = requireOwnJson(options.with, "sub() 'with'");
     }
     if (options.when !== undefined) entry.when = captureSub('when', [], options.when);
     const instance = options.for !== undefined ? Object.freeze(['item']) : Object.freeze([]);

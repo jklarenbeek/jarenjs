@@ -23,6 +23,7 @@
  */
 
 import { deepFreeze } from '@jarenjs/core/object';
+import { escapePointerToken } from '@jarenjs/core/string';
 
 import { LinqBuildError } from '../errors.js';
 import { isSchemaBuilder, schemaOf } from '../schema/brand.js';
@@ -34,9 +35,6 @@ import { KEYWORD } from './rules.js';
  * forms transform uses, so the two documents are byte-equal.
  */
 const ITEM_VAR = '_item';
-
-/** RFC 6901: `~` and `/` escape inside a pointer segment. @param {string} key */
-const escapePointer = (key) => key.replaceAll('~', '~0').replaceAll('/', '~1');
 
 /**
  * The RFC 9535 name selector `['…']` for one member name.
@@ -123,7 +121,7 @@ function collect(schema, pointer, chunks, out) {
   }
   if (schema.properties !== null && typeof schema.properties === 'object') {
     for (const [key, sub] of Object.entries(schema.properties)) {
-      collect(sub, `${pointer}/${escapePointer(key)}`, extendChunks(chunks, nameSelector(key)), out);
+      collect(sub, `${pointer}/${escapePointerToken(key)}`, extendChunks(chunks, nameSelector(key)), out);
     }
   }
   if (Array.isArray(schema.prefixItems)) {

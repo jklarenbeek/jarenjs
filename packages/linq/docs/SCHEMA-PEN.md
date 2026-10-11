@@ -274,6 +274,16 @@ constraints, in the order they were FIRST set; setting one twice replaces
 the value and keeps the position. Constraint keywords follow the same
 rule through `.keyword()`.
 
+A JSON value a builder is handed — a `default()`, `example()`, a `meta()`
+annotation, `message()`, `literal()`, an `enumOf()` member, a `from()`
+schema, a `check()` query document, a `dependentRequired()` map — is
+copied where it enters: the document never aliases the argument, so
+writing into it afterwards changes nothing already built, and reading
+`.schema` never freezes the caller's own object (a builder that kept the
+reference let a later write rewrite the document, then froze the caller's
+value in place). The key of `.keyword()` and `.annotate()` is a string,
+`JL0101` otherwise.
+
 ### 2.9 Validation extensions
 
 Two of the three keyword families §1 names as riding beside standard JSON
@@ -298,7 +308,7 @@ exports a pen built over this one comes in by.
 
 | Method | Emits | `Infer` / `Input` | Status |
 |---|---|---|---|
-| `document(root, { draft })` | the document, with `$schema` first for `'2020-12'`; without a draft, the root's document unchanged | — | native; another draft, or a draft on a boolean schema, is `JL0102` |
+| `document(root, { draft })` | the document, with `$schema` first for `'2020-12'`; without a draft, the root's document unchanged | — | native; another draft (a name on `Object.prototype` included), or a draft on a boolean schema, is `JL0102`; an option other than `draft` is `JL0101` |
 | `.schema` | the assembled document — a deep-frozen value, computed once and memoized | `JsonSchema \| boolean` | native |
 | `.toJSON()` | the same document, so `JSON.stringify(builder)` is the document | `JsonSchema \| boolean` | native |
 | `.state` | the frozen builder state (kind, children, keywords, annotations) — what a subclass reads, never a document | the state object | native |

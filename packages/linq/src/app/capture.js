@@ -22,9 +22,7 @@
  */
 
 import { captureQuery } from '../capture-root.js';
-
-/** §3.1's ambient vocabulary, for a `JL0104` message. */
-export const ACTION_SCOPE = 'an action document (APP-FORMAT §3.1)';
+import { requireOwnJson } from '../json-boundary.js';
 
 /** The externals the dispatch loop binds on every action. */
 const ACTION_EXTERNALS = Object.freeze(['event', 'payload']);
@@ -53,7 +51,7 @@ export function captureAction(what, fn) {
  * @returns {any} the query document (plain JSON)
  */
 export function captureSub(what, externals, value) {
-  if (typeof value !== 'function') return JSON.parse(JSON.stringify(value));
+  if (typeof value !== 'function') return requireOwnJson(value, `sub() ${what}`);
   const advice = () => (externals.length === 0
     ? ` — a subscription's ${what} is compiled closed-world against the state alone; $item `
       + 'exists only under a "for" declaration (APP-FORMAT §5.3)'

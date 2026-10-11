@@ -13,10 +13,12 @@
  * held by `entityIndex` to what an entity table can carry.
  */
 
+import { escapePointerToken } from '@jarenjs/core/string';
+
 import { LinqBuildError } from '../errors.js';
 import { closedTo } from '../json-boundary.js';
 import { isSchemaBuilder } from '../schema/brand.js';
-import { describeValue, requireJson, requireName } from '../schema/builders.js';
+import { describeValue, requireJson, requireName, requireOwnJson } from '../schema/builders.js';
 import { captureQuery } from '../schema/check.js';
 import { DOCUMENT_SCOPE, refuseStrandedIndexes, refuseStrandedRename } from './entity.js';
 
@@ -54,8 +56,8 @@ const OPTION_TYPES = Object.freeze({
  */
 function indexOption(value, key, what) {
   const type = OPTION_TYPES[key];
-  const json = requireJson(value, `${what} ${key}`);
-  if (typeof json === type && (type !== 'object' || (json !== null && !Array.isArray(json)))) return value;
+  const json = requireOwnJson(value, `${what} ${key}`);
+  if (typeof json === type && (type !== 'object' || (json !== null && !Array.isArray(json)))) return json;
   throw new LinqBuildError('JL0101', `${what} ${key} takes ${type === 'object' ? 'a query document' : `a ${type}`}, got ${describeValue(value)}`);
 }
 
@@ -243,7 +245,7 @@ function expressionNode(node, what, depth) {
     throw new LinqBuildError('JL0101', `${what} nests deeper than 8`);
   if (typeof node === 'function') return { member: capturePath(node, what) };
   if (typeof node === 'string' && node.charCodeAt(0) === 0x24) return { member: node };
-  if (typeof node === 'number' || typeof node === 'boolean') return { value: node };
+  if (typeof node === 'number' || typeof node === 'boolean') return { value: requireJson(node, what) };
   if (node === null || typeof node !== 'object' || Array.isArray(node)) {
     throw new LinqBuildError('JL0101',
       `${what} takes a path lambda, a JSONPath string, a JSON scalar, or `
@@ -262,7 +264,7 @@ function expressionNode(node, what, depth) {
       throw new LinqBuildError('JL0101',
         `${what}.value takes a JSON string, number or boolean`);
     }
-    return { value: node.value };
+    return { value: requireJson(node.value, `${what}.value`) };
   }
   if (typeof node.call !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(node.call))
     throw new LinqBuildError('JL0101', `${what}.call names a function by identifier`);
@@ -338,7 +340,7 @@ function keyPointer(key) {
       throw new LinqBuildError('JL0102',
         `collection() key must select members by name ((d) => d.id), got the path ${path}`);
     }
-    return '/' + path.slice(2).split('.').map((s) => s.replaceAll('~', '~0').replaceAll('/', '~1')).join('/');
+    return '/' + path.slice(2).split('.').map(escapePointerToken).join('/');
   }
   if (typeof key === 'string' && key.startsWith('/')) return key;
   throw new LinqBuildError('JL0101',
@@ -373,7 +375,7 @@ export function collection(builder, options = {}) {
   }
   const out = { schema: builder.schema };
   if (options.key !== undefined) out.key = keyPointer(options.key);
-  if (options.identity !== undefined) out.identity = requireJson(options.identity, 'collection() identity');
+  if (options.identity !== undefined) out.identity = requireOwnJson(options.identity, 'collection() identity');
   if (options.indexes !== undefined) {
     if (!Array.isArray(options.indexes)) {
       throw new LinqBuildError('JL0101', 'collection() indexes is an array of index() entries');
@@ -389,7 +391,7 @@ export function collection(builder, options = {}) {
       for (const key of Object.keys(one)) {
         if (OPTION_TYPES[key] !== undefined && one[key] !== undefined) indexOption(one[key], key, what);
       }
-      return requireJson(one, what);
+      return requireOwnJson(one, what);
     });
   }
   if (options.intervals !== undefined) {
@@ -410,7 +412,7 @@ export function collection(builder, options = {}) {
         throw new LinqBuildError('JL0101',
           `${what} ${key} takes a ${key === 'path' ? 'JSONPath string' : type}, got ${describeValue(one[key])}`);
       }
-      return requireJson(one, what);
+      return requireOwnJson(one, what);
     });
   }
   const renamed = options.renamedFrom ?? builder.state.renamedFrom;

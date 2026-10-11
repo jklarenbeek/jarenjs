@@ -20,7 +20,7 @@ import { deepFreeze, setObjectMember } from '@jarenjs/core/object';
 
 import { captureExpression } from '../expression.js';
 import { LinqBuildError } from '../errors.js';
-import { requireJson, describeValue } from '../json-boundary.js';
+import { requireJson, requireOwnJson, describeValue } from '../json-boundary.js';
 
 const NO_PARAMS = new Set();
 const ROOT_KEYS = ['where', 'orderBy', 'take', 'skip', 'after', 'maxDepth', 'include'];
@@ -286,7 +286,7 @@ export class Graph {
   /** The keyset continuation (§10.5): the `{ order, keys, key }` value a
    * page emitted — a bare unique-column value is the single-column form.
    * @param {any} cursor */
-  after(cursor) { return this.#with({ after: requireJson(cursor, 'after()') }); }
+  after(cursor) { return this.#with({ after: requireOwnJson(cursor, 'after()') }); }
 
   /** The include depth bound (§10.4). @param {number} depth */
   maxDepth(depth) { return this.#with({ maxDepth: requireJson(depth, 'maxDepth()') }); }

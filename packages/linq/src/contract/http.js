@@ -10,6 +10,7 @@
  * projections are what show the `{name}` form.
  */
 
+import { setObjectMember } from '@jarenjs/core/object';
 import { parsePathTemplate } from '@jarenjs/core/route';
 import { LinqBuildError } from '../errors.js';
 import { describeValue, requireJson } from '../json-boundary.js';
@@ -100,7 +101,7 @@ export function http(spec) {
           `http() maps '${member}' to path, but the template declares no {${member}} — a `
           + 'path member is named by the template itself', `/in/${member}`);
       }
-      placed[member] = where;
+      setObjectMember(placed, member, where);
     }
     out.in = placed;
   }

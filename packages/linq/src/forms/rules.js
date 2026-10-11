@@ -25,7 +25,7 @@
 import { LinqBuildError } from '../errors.js';
 import { captureQuery } from '../capture-root.js';
 import { captureEpoch, noteRead } from '../expression.js';
-import { describeValue, requireJson } from '../json-boundary.js';
+import { describeValue, requireOwnJson } from '../json-boundary.js';
 
 /** The keyword every rule method writes. */
 export const KEYWORD = 'x-form';
@@ -77,7 +77,7 @@ function contextProxy(doc, externals) {
  */
 function ruleMember(member, value) {
   if (typeof value !== 'function') {
-    return JSON.parse(JSON.stringify(requireJson(value, `form() ${member}`)));
+    return requireOwnJson(value, `form() ${member}`);
   }
   return captureQuery(`form() ${member}`, EXTERNALS,
     (doc, externals) => value(contextProxy(doc, externals)),
@@ -101,7 +101,7 @@ function readMessage(value) {
     throw new LinqBuildError('JL0101',
       "form() message as a MessageSpec needs '$msgid' and/or 'message'", '/message');
   }
-  return JSON.parse(JSON.stringify(requireJson(value, 'form() message')));
+  return requireOwnJson(value, 'form() message');
 }
 
 /**

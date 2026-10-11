@@ -2,15 +2,19 @@
 /** JSON catalogs and existing MessageSpec values, checked against English vocabulary. */
 import { compileMessageTemplate } from '@jarenjs/core/message';
 import { snapshot, optionsOf } from '../authored.js';
-import { requireNameMap } from '../json-boundary.js';
+import { describeValue, requireNameMap } from '../json-boundary.js';
 import { LinqBuildError } from '../errors.js';
 import { CATALOGS } from './vocabulary.js';
 export { CATALOGS } from './vocabulary.js';
 
 const ALL = Object.freeze(Object.assign({}, ...Object.values(CATALOGS)));
+/** A refused name as a message quotes it: a string in single quotes, anything else by what it is. */
+const quoted = (value) => (typeof value === 'string' ? `'${value}'` : describeValue(value));
 function sourceOf(source) {
   if (source === 'all') return ALL;
-  if (!Object.hasOwn(CATALOGS, source)) throw new LinqBuildError('JL0101', `Unknown message catalog '${source}'`);
+  if (typeof source !== 'string' || !Object.hasOwn(CATALOGS, source)) {
+    throw new LinqBuildError('JL0101', `Unknown message catalog ${quoted(source)}`);
+  }
   return CATALOGS[source];
 }
 function mapOf(value) {
@@ -19,7 +23,9 @@ function mapOf(value) {
   return requireNameMap(value, 'catalog entries');
 }
 function checkTemplate(id, text, reference, locale, exact = true) {
-  if (!Object.hasOwn(reference, id)) throw new LinqBuildError('JL0101', `${locale}/${id}: unknown message id`);
+  if (typeof id !== 'string' || !Object.hasOwn(reference, id)) {
+    throw new LinqBuildError('JL0101', `${locale}/${typeof id === 'string' ? id : describeValue(id)}: unknown message id`);
+  }
   if (typeof text !== 'string') throw new LinqBuildError('JL0101', `${locale}/${id}: JSON catalog entries are template strings`);
   const names = compileMessageTemplate(text).parameters;
   const missing = exact ? reference[id].filter((name) => !names.includes(name)) : [];
@@ -84,7 +90,9 @@ export function inline(value) {
 }
 /** The existing structured MessageSpec; it is a message reference, not a catalog entry. */
 export function message(id, options = {}) {
-  if (!Object.hasOwn(ALL, id)) throw new LinqBuildError('JL0101', `Unknown message id '${id}'`);
+  if (typeof id !== 'string' || !Object.hasOwn(ALL, id)) {
+    throw new LinqBuildError('JL0101', `Unknown message id ${quoted(id)}`);
+  }
   const opts = optionsOf(options, ['params', 'message'], 'message()');
   if (Object.hasOwn(opts, 'params')) {
     for (const name of Object.keys(mapOf(opts.params))) {

@@ -23,6 +23,7 @@ import {
   FNV1A_OFFSET_BASIS,
   kebabCase,
   slugify,
+  escapePointerToken,
 } from '@jarenjs/core/string';
 
 describe('isStringEmpty', () => {
@@ -408,6 +409,22 @@ describe('hashContent', () => {
       assert.isTrue(h.length <= 7);
       assert.isTrue(/^[0-9a-z]+$/.test(h));
     }
+  });
+});
+
+describe('escapePointerToken', () => {
+  it('escapes the tilde before the slash, so an escaped slash is never escaped again', () => {
+    assert.strictEqual(escapePointerToken('a/b'), 'a~1b');
+    assert.strictEqual(escapePointerToken('a~b'), 'a~0b');
+    assert.strictEqual(escapePointerToken('~/'), '~0~1');
+    assert.strictEqual(escapePointerToken('~1'), '~01');
+    assert.strictEqual(escapePointerToken('//~~'), '~1~1~0~0');
+  });
+
+  it('leaves a token with neither character as it came', () => {
+    assert.strictEqual(escapePointerToken(''), '');
+    assert.strictEqual(escapePointerToken('plain'), 'plain');
+    assert.strictEqual(escapePointerToken('é 😀'), 'é 😀');
   });
 });
 

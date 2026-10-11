@@ -20,6 +20,7 @@
  */
 
 import { isJsonObject } from '@jarenjs/core/object';
+import { escapePointerToken } from '@jarenjs/core/string';
 import { LinqBuildError } from '../errors.js';
 import { captureFold, captureKind, inCapture, isExpression, liftExpression, toExpression } from '../expression.js';
 import { describeValue } from '../json-boundary.js';
@@ -56,7 +57,7 @@ function conditionalAt(value, at) {
   }
   if (!isJsonObject(value)) return null;
   for (const key of Object.keys(value)) {
-    const found = conditionalAt(value[key], `${at}/${key.replaceAll('~', '~0').replaceAll('/', '~1')}`);
+    const found = conditionalAt(value[key], `${at}/${escapePointerToken(key)}`);
     if (found !== null) return found;
   }
   return null;

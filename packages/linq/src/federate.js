@@ -17,7 +17,7 @@
  * cartesian products. Ordinary unrelated-source join() still refuses JL0005.
  */
 
-import { LinqBuildError, LinqRuntimeError } from './errors.js';
+import { LinqBuildError, LinqRuntimeError, spellValue } from './errors.js';
 import { compileDocument, isProviderSource, providerRoot } from './provider.js';
 import { memberSegment } from './expression.js';
 import { readOptions } from './document.js';
@@ -381,16 +381,21 @@ export function federate(spec) {
   const strategy = spec.strategy ?? 'hash';
   if (!STRATEGIES.has(strategy)) {
     throw new LinqBuildError('JL0005',
-      `federate() knows the strategies ${[...STRATEGIES].join(', ')}, not '${strategy}'`);
+      `federate() knows the strategies ${[...STRATEGIES].join(', ')}, not `
+      + (typeof strategy === 'string' ? `'${strategy}'` : spellValue(strategy)));
   }
   const budget = {
     maxRows: budgetOf(spec.maxRows, 'maxRows'),
     maxBytes: budgetOf(spec.maxBytes, 'maxBytes'),
   };
 
+  // the default total is twice a side's budget, held to a safe integer: a
+  // side that is bounded at the largest budget is not a refusal of a total
+  // the caller never wrote
+  const doubled = (/** @type {number} */ side) => Math.min(side * 2, Number.MAX_SAFE_INTEGER);
   const totals = {
-    maxRows: budgetOf(spec.maxTotalRows ?? budget.maxRows * 2, 'maxTotalRows'),
-    maxBytes: budgetOf(spec.maxTotalBytes ?? budget.maxBytes * 2, 'maxTotalBytes'),
+    maxRows: budgetOf(spec.maxTotalRows ?? doubled(budget.maxRows), 'maxTotalRows'),
+    maxBytes: budgetOf(spec.maxTotalBytes ?? doubled(budget.maxBytes), 'maxTotalBytes'),
   };
 
   /** The scope every member shares: what admits the join, and nothing else. */
@@ -412,7 +417,7 @@ export function federate(spec) {
     const estimatedRows = declared?.estimatedRows;
     if (estimatedRows !== undefined && (!Number.isInteger(estimatedRows) || estimatedRows < 0)) {
       throw new LinqBuildError('JL0005',
-        `federate()'s source '${name}' declares a non-integer estimatedRows`);
+        `federate()'s source '${name}' declares a negative or non-integer estimatedRows`);
     }
     // the federated root, which is what the chain binds and what the
     // resident document ranges over; the source's OWN root is what its

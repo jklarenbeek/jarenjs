@@ -179,6 +179,17 @@ describe('hops chain, and hop from every binding that holds rows', () => {
       [{ member: 'author', kind: 'oneToOne', binding: 'r1' }, { member: 'author', kind: 'oneToOne', binding: 'r2' }]);
   });
 
+  it('explain().hops is a copy: writing into it changes nothing the next explain() reports', async () => {
+    const chain = posts().select((p) => ({ by: p.author.email }));
+    const reported = chain.explain().hops;
+    reported[0].member = 'tampered';
+    reported.push({ member: 'extra' });
+    assert.deepStrictEqual(chain.explain().hops, [{ member: 'author', kind: 'oneToOne', binding: 'r1' }]);
+    const asynchronous = fromAsync(entitySet('Post', scope)).select((p) => ({ by: p.author.email }));
+    asynchronous.explain().hops[0].member = 'tampered';
+    assert.deepStrictEqual(asynchronous.explain().hops, [{ member: 'author', kind: 'oneToOne', binding: 'r1' }]);
+  });
+
   it("a hop from a join's it2 and from a group-join's fanned group", () => {
     const joined = posts().join(users(), (p) => p.authorId, (u) => u.id,
       (p, u) => ({ title: p.title, n: u.posts.all().count() }));

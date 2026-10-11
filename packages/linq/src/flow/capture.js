@@ -16,7 +16,7 @@
 
 import { cloneJson } from '@jarenjs/core/object';
 import { captureQuery } from '../capture-root.js';
-import { requireJson } from '../json-boundary.js';
+import { requireOwnJson } from '../json-boundary.js';
 
 /**
  * One query-valued member: a callback captured over `$`, or a query
@@ -27,7 +27,7 @@ import { requireJson } from '../json-boundary.js';
  * @returns {any} the query document (plain JSON)
  */
 export function queryMember(what, scope, value) {
-  if (typeof value !== 'function') return cloneJson(requireJson(value, what));
+  if (typeof value !== 'function') return requireOwnJson(value, what);
   const advice = () => ` — ${what} evaluates over ${scope}, which its argument IS`;
   return cloneJson(captureQuery(what, [], value, { advice, fold: false, noun: 'callback' }));
 }

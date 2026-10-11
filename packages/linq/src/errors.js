@@ -197,3 +197,19 @@ export class LinqRuntimeError extends CodedError {
       cause !== undefined ? { cause } : undefined);
   }
 }
+
+/**
+ * A refused argument, as a message quotes it. Total: a Symbol or a
+ * null-prototype object interpolated into a template literal throws a
+ * `TypeError` of its own, which would replace the coded refusal the
+ * caller was owed. A string is quoted, a number, boolean, bigint, `null`
+ * and `undefined` read as written, and anything else is named by what it is.
+ * @param {unknown} value
+ * @returns {string}
+ */
+export function spellValue(value) {
+  if (typeof value === 'string') return JSON.stringify(value);
+  if (typeof value === 'symbol' || typeof value === 'function') return `a ${typeof value}`;
+  if (typeof value === 'object' && value !== null) return Array.isArray(value) ? 'an array' : 'an object';
+  return typeof value === 'bigint' ? `${value}n` : String(value);
+}

@@ -255,7 +255,7 @@ and a subscription the host runs.
 | Method | Emits | Type reading | Status |
 |---|---|---|---|
 | `bind(name, { payload?, event?, preventDefault?, stopPropagation? })` | APP-FORMAT §4's object binding — `{ action, with?, event?, preventDefault?, stopPropagation? }`, in the format's member order | `Binding<Names>` — annotate the call (`bind<Action>('todo/add')`) and an undeclared name stops compiling | native; an empty name, an unknown member or a non-boolean control `JL0101`; a field §3.1 excludes `JL0102` |
-| `sub(run, { with?, when?, withQuery?, key?, for? })` | one APP-FORMAT §5.3 entry, in the format's member order | `SubDeclaration<Run>` | native; an empty `run`, an unknown member or a callback under `with` `JL0101`; a combination §5.3 calls `JA0008` `JL0102`; `$item` outside a `for` `JL0104` |
+| `sub(run, { with?, when?, withQuery?, key?, for? })` | one APP-FORMAT §5.3 entry, in the format's member order | `SubDeclaration<Run>` | native; an empty `run`, an unknown member or a callback under `with` `JL0101`, as is a hand-written query document under `when`, `withQuery`, `key` or `for` that is not JSON (`NaN`, `-0`, a `Date`, a bigint, an `undefined` member) — it used to be flattened silently, to `null`, `0` or `{}`; a combination §5.3 calls `JA0008` `JL0102`; `$item` outside a `for` `JL0104` |
 
 **`with` is data; `withQuery`, `key` and `for` are queries.** That is the
 distinction the format builds its whole restart rule out of, and the pen

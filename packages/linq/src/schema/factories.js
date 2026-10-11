@@ -12,7 +12,7 @@
 import { LinqBuildError } from '../errors.js';
 import { isSchemaBuilder } from './brand.js';
 import {
-  initial, requireJson, requireBuilder, requireString, requireName,
+  initial, requireOwnJson, requireBuilder, requireString, requireName,
   requireBuilderMap, describeValue,
 } from './builders.js';
 
@@ -67,7 +67,7 @@ export function createFactories(classes) {
 
   /** `{ const: value }`. @param {any} value */
   function literal(value) {
-    return new BaseBuilder(initial('literal', { value: requireJson(value, 'literal()') }));
+    return new BaseBuilder(initial('literal', { value: requireOwnJson(value, 'literal()') }));
   }
 
   /** `{ enum: values }`. @param {readonly any[]} values */
@@ -76,7 +76,7 @@ export function createFactories(classes) {
       throw new LinqBuildError('JL0101', 'enumOf() takes a non-empty array of JSON values');
     }
     return new BaseBuilder(initial('enum', {
-      values: Object.freeze(values.map((value) => requireJson(value, 'enumOf()'))),
+      values: Object.freeze(values.map((value) => requireOwnJson(value, 'enumOf()'))),
     }));
   }
 
@@ -193,7 +193,7 @@ export function createFactories(classes) {
       throw new LinqBuildError('JL0101',
         `from() takes a JSON Schema object or boolean, got ${describeValue(json)}`);
     }
-    return new BaseBuilder(initial('raw', { json: requireJson(json, 'from()') }));
+    return new BaseBuilder(initial('raw', { json: requireOwnJson(json, 'from()') }));
   }
 
   /** `{ type: 'string', format: 'date-time' }`. */
@@ -217,11 +217,15 @@ export function createFactories(classes) {
    */
   function document(root, options = {}) {
     const schema = requireBuilder(root, 'document()').schema;
-    if (options.draft === undefined) return schema;
-    const uri = DRAFTS[options.draft];
+    for (const key of Object.keys(options ?? {})) {
+      if (key !== 'draft') throw new LinqBuildError('JL0101', `document() does not take '${key}' — it takes draft`);
+    }
+    const draft = options?.draft;
+    if (draft === undefined) return schema;
+    const uri = typeof draft === 'string' && Object.hasOwn(DRAFTS, draft) ? DRAFTS[draft] : undefined;
     if (uri === undefined) {
       throw new LinqBuildError('JL0102',
-        `document() writes the 2020-12 vocabulary only; '${options.draft}' is not a draft it `
+        `document() writes the 2020-12 vocabulary only; ${typeof draft === 'string' ? `'${draft}'` : describeValue(draft)} is not a draft it `
         + 'can declare');
     }
     if (typeof schema === 'boolean') {

@@ -65,6 +65,23 @@ export function requireJson(value, what) {
 }
 
 /**
+ * {@link requireJson}, then a copy of what passed: the value a pen or a
+ * chain KEEPS. A document owns its JSON — a caller who writes into the
+ * argument afterwards rewrites nothing already built, and reading the
+ * document never freezes the caller's object in place.
+ * @template T
+ * @param {T} value
+ * @param {string} what - the keyword or method, for the message
+ * @returns {T} an independent copy
+ */
+export function requireOwnJson(value, what) {
+  // the text round trip is exact for what just passed `requireJson` (an own
+  // `__proto__` member comes back as a member), and it keeps this boundary
+  // from importing a clone routine into a bundle that only validates
+  return JSON.parse(JSON.stringify(requireJson(value, what)));
+}
+
+/**
  * A name → value map a pen reads by its OWN keys — an object of
  * builders, operations, nodes, actions or modes.
  *

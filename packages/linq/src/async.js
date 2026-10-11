@@ -46,7 +46,7 @@ import {
 } from './provider.js';
 import {
   emitDocument, wrapTerminal, snapshot, fanProjection, isReservedBinding, RESERVED_BINDINGS_TEXT,
-  PROJECTING_STAGES, requireNonNegativeInteger, readOptions, orderSpec, RUN_BINDINGS,
+  PROJECTING_STAGES, requireNonNegativeInteger, readOptions, orderSpec, RUN_BINDINGS, mergeBindings,
 } from './document.js';
 import { adaptAsyncSource } from './sources.js';
 import { applyMapAsync, normalizeMapAsyncOptions } from './concurrency.js';
@@ -194,7 +194,9 @@ export class AsyncSequence {
     requireListBindings([...this.#lists(), ...lists], this.#params);
     return {
       names: [...this.#params.keys()],
-      values: Object.fromEntries(this.#params),
+      // a copy per run: a provider that writes into what it is handed must
+      // not rewrite the sequence's own bindings
+      values: snapshot(Object.fromEntries(this.#params)),
     };
   }
 
@@ -334,16 +336,7 @@ export class AsyncSequence {
         `${what}'s other side must derive from the same source, or from two providers sharing `
         + "one scope (one store's entity sets) — a query document reads one input");
     }
-    const merged = new Map(this.#params);
-    for (const [name, value] of inner.#params) {
-      if (merged.has(name) && merged.get(name) !== value) {
-        throw new LinqBuildError('JL0004',
-          `parameter '${name}' is bound to different values by the two sides of ${what} — `
-          + 'one document carries one binding per name; bind it once, or rename one side');
-      }
-      merged.set(name, value);
-    }
-    return merged;
+    return mergeBindings(this.#params, inner.#params, what);
   }
 
   /** Equi-join, pushed whole: the nested-`$for` shape the synchronous
@@ -436,8 +429,7 @@ export class AsyncSequence {
     validateParams(bindings);
     const merged = new Map(this.#params);
     for (const name of Object.keys(bindings)) {
-      requireJsonBinding(name, bindings[name]);
-      merged.set(name, bindings[name]);
+      merged.set(name, requireJsonBinding(name, bindings[name]));
     }
     return new AsyncSequence(this.#origin, this.#stages, merged, this.#options, this.#relations);
   }
@@ -489,7 +481,7 @@ export class AsyncSequence {
       barriers,
       streaming: first === undefined ? 'row' : 'buffered',
       barrier: first === undefined ? null : { construct: first.operator, reason: first.reason },
-      hops: this.#hops(),
+      hops: snapshot(this.#hops()),
       bindings: this.#externals().values,
     };
     if (firstMap < 0) {
@@ -507,7 +499,7 @@ export class AsyncSequence {
   /** What a run binds, unchecked ({@link RUN_BINDINGS}): for `live()`,
    * which checks the list rule against the externals it registers. */
   [RUN_BINDINGS]() {
-    return { bindings: Object.fromEntries(this.#params), lists: this.#lists() };
+    return { bindings: snapshot(Object.fromEntries(this.#params)), lists: this.#lists() };
   }
 
   //#endregion

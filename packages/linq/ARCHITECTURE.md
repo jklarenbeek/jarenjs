@@ -53,8 +53,10 @@ document (`{ $count: … }`), and `groupBy` packs its default return as
 one item.
 
 The emitter also owns `requireNonNegativeInteger`, the shared count/index guard
-for synchronous and asynchronous sequence windows and positional terminals.
-Both surfaces report the same `JL0005` refusal at their existing call boundary.
+for synchronous and asynchronous sequence windows and positional terminals,
+and `mergeBindings`, the one rule for the parameters a joined or concatenated
+side carries into its outer sequence. Both surfaces report the same `JL0005`
+and `JL0004` refusals at their existing call boundaries.
 
 ## The typed surface (`types/index.d.ts`)
 
@@ -118,7 +120,8 @@ shared by every pen: `capture-root.js` (`captureQuery`: one capture over
 a value at `$` with named externals — `check()`'s `root`/`path`, the
 model pen's `compute()` with none, the JSLT pen's `body()` with the
 declared parameters) and `json-boundary.js` (`requireJson`, the `JL0101`
-door), and `effect.js` (the `{ run, with? }` descriptor two formats spell
+door, and `requireOwnJson`, the same door for a value a document keeps: it
+returns a copy, so a document owns its JSON), and `effect.js` (the `{ run, with? }` descriptor two formats spell
 identically — a machine's effects and an app transition's — with each pen
 passing in how its props are captured). The model pen (`src/model/`) and
 the forms pen (`src/forms/`) each subclass the schema pen's classes

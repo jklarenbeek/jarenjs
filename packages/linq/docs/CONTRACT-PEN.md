@@ -230,6 +230,10 @@ The binding may also be written as a plain object in the operation's
 checks, the same messages — so the two spellings differ only in when the
 refusal arrives.
 
+An input member named `__proto__` in `in` stays a member of the binding,
+in its place: it used to be dropped silently, which routed the member
+nowhere.
+
 ### 2.7 The three consumers
 
 Three identity wrappers that type a client, a handler map or a tool set

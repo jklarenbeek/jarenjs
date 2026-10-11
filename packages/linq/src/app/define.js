@@ -27,7 +27,7 @@
 import { deepFreeze, setObjectMember, isJsonObject } from '@jarenjs/core/object';
 
 import { LinqBuildError } from '../errors.js';
-import { describeValue, requireJson, requireNameMap } from '../json-boundary.js';
+import { describeValue, requireNameMap, requireOwnJson } from '../json-boundary.js';
 import { isSchemaBuilder, schemaOf } from '../schema/brand.js';
 import { ACTION } from './action.js';
 import { SUB } from './sub.js';
@@ -36,9 +36,6 @@ const APP_VERSION = '0.1';
 
 /** The members `defineApp()` takes. */
 const APP_MEMBERS = Object.freeze(['state', 'initial', 'schema', 'view', 'actions', 'subs']);
-
-/** A JSON value, copied: the document is a value of its own. @param {any} v */
-const copy = (v) => JSON.parse(JSON.stringify(v));
 
 /**
  * The initial value a schema's `default()`s describe.
@@ -58,8 +55,8 @@ function initialOf(schema, at, needed) {
   if (schema === null || typeof schema !== 'object' || Array.isArray(schema)) {
     return { has: false };
   }
-  if (schema.default !== undefined) return { has: true, value: copy(schema.default) };
-  if (schema.const !== undefined) return { has: true, value: copy(schema.const) };
+  if (schema.default !== undefined) return { has: true, value: requireOwnJson(schema.default, 'defineApp() state default') };
+  if (schema.const !== undefined) return { has: true, value: requireOwnJson(schema.const, 'defineApp() state const') };
   if (!isJsonObject(schema.properties)) return { has: false };
 
   const required = Array.isArray(schema.required) ? schema.required : [];
@@ -137,7 +134,7 @@ function readView(view) {
       `defineApp() view is a JSLT stylesheet document or a bare rule array, got ${describeValue(view)}`,
       '/view');
   }
-  return copy(requireJson(view, 'defineApp() view'));
+  return requireOwnJson(view, 'defineApp() view');
 }
 
 /**
@@ -185,9 +182,9 @@ export function defineApp(spec) {
     : spec.schema !== undefined ? schemaOf(spec.schema) : null;
 
   let state;
-  if (spec.initial !== undefined) state = copy(requireJson(spec.initial, 'defineApp() initial'));
+  if (spec.initial !== undefined) state = requireOwnJson(spec.initial, 'defineApp() initial');
   else if (stateIsBuilder) state = initialOf(stateSchema, '', true).value;
-  else if (spec.state !== undefined) state = copy(requireJson(spec.state, 'defineApp() state'));
+  else if (spec.state !== undefined) state = requireOwnJson(spec.state, 'defineApp() state');
 
   const view = readView(spec.view);
 
@@ -250,6 +247,6 @@ export function defineApp(spec) {
 
   return Object.freeze({
     document: deepFreeze(document),
-    stateSchema: stateSchema === null ? null : deepFreeze(copy(stateSchema)),
+    stateSchema: stateSchema === null ? null : deepFreeze(requireOwnJson(stateSchema, 'defineApp() schema')),
   });
 }

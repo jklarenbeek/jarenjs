@@ -14,6 +14,7 @@
  */
 
 import { cloneJson, deepFreeze, setObjectMember } from '@jarenjs/core/object';
+import { escapePointerToken } from '@jarenjs/core/string';
 
 import { LinqBuildError } from '../errors.js';
 import { isSchemaBuilder } from './brand.js';
@@ -30,9 +31,6 @@ const NORMALIZER_KEYS = ['default', 'x-coerce', 'x-trim'];
 
 /** A definition whose body is still being emitted (a cycle in progress). */
 const PENDING = Symbol('pending');
-
-/** @param {string} key a JSON pointer token, escaped per RFC 6901 */
-const token = (key) => key.replaceAll('~', '~0').replaceAll('/', '~1');
 
 /**
  * A hoisting context one or more roots share: every `named()` builder
@@ -226,7 +224,7 @@ function emitNode(builder, ctx, at) {
   }
   for (const key of Object.keys(st.keywords)) {
     const value = st.keywords[key];
-    setObjectMember(node, key, emitKeyword(value, ctx, `${at}/${token(key)}`, key));
+    setObjectMember(node, key, emitKeyword(value, ctx, `${at}/${escapePointerToken(key)}`, key));
   }
   if (st.nullable && TYPED[st.kind] !== undefined && Array.isArray(node.enum)
     && !node.enum.includes(null)) node.enum = [...node.enum, null];
@@ -250,7 +248,7 @@ function emitKeyword(value, ctx, at, keyword) {
   }
   if (Array.isArray(value)) return value.map((v, i) => emitKeyword(v, ctx, `${at}/${i}`, keyword));
   if (value !== null && typeof value === 'object')
-    return Object.fromEntries(Object.keys(value).map((k) => [k, emitKeyword(value[k], ctx, `${at}/${token(k)}`, keyword)]));
+    return Object.fromEntries(Object.keys(value).map((k) => [k, emitKeyword(value[k], ctx, `${at}/${escapePointerToken(k)}`, keyword)]));
   return value;
 }
 
@@ -302,7 +300,7 @@ function emitCore(builder, st, ctx, at) {
         const properties = {};
         const required = [];
         for (const [key, member] of st.props) {
-          setObjectMember(properties, key, emitNode(member, ctx, `${at}/properties/${token(key)}`));
+          setObjectMember(properties, key, emitNode(member, ctx, `${at}/properties/${escapePointerToken(key)}`));
           if (!member.state.optional) required.push(key);
         }
         node.properties = properties;
@@ -313,7 +311,7 @@ function emitCore(builder, st, ctx, at) {
         const patternProperties = {};
         for (const [pattern, member] of st.patterns) {
           setObjectMember(patternProperties, pattern,
-            emitNode(member, ctx, `${at}/patternProperties/${token(pattern)}`));
+            emitNode(member, ctx, `${at}/patternProperties/${escapePointerToken(pattern)}`));
         }
         node.patternProperties = patternProperties;
       }
@@ -412,7 +410,7 @@ function define(name, target, ctx, at) {
   if (owner === undefined) {
     ctx.owners.set(name, target);
     ctx.defs.set(name, PENDING);
-    ctx.defs.set(name, emitNode(target, ctx, `/$defs/${token(name)}`));
+    ctx.defs.set(name, emitNode(target, ctx, `/$defs/${escapePointerToken(name)}`));
   }
   else if (owner !== target) {
     throw new LinqBuildError('JL0103',

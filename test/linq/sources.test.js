@@ -109,3 +109,74 @@ describe('the josl CSV end-to-end', () => {
       `live set grew ${growthMb.toFixed(2)} MB over 100k rows — must stay flat`);
   });
 });
+
+describe('the push queue', () => {
+  /** @param {AsyncIterable<any>} source */
+  async function drain(source) {
+    const out = [];
+    for await (const value of source) out.push(value);
+    return out;
+  }
+
+  it('ends once: a second end() does not erase the failure the first one carried', async () => {
+    const failed = createPushQueue();
+    failed.feed(1);
+    failed.end(new Error('reader failed'));
+    failed.end();
+    await assert.rejects(() => drain(failed), /reader failed/);
+
+    const twice = createPushQueue();
+    twice.end(new Error('first'));
+    twice.end(new Error('second'));
+    await assert.rejects(() => drain(twice), /first/);
+
+    const clean = createPushQueue();
+    clean.feed('a');
+    clean.end();
+    clean.end(new Error('too late'));
+    assert.deepStrictEqual(await drain(clean), ['a']);
+  });
+
+  it('two readers waiting on an empty queue are both released', async () => {
+    const queue = createPushQueue();
+    const first = drain(queue);
+    const second = drain(queue);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    queue.feed(1);
+    queue.feed(2);
+    queue.end();
+    const [a, b] = await Promise.race([
+      Promise.all([first, second]),
+      new Promise((resolve) => setTimeout(() => resolve('hung'), 2000)),
+    ]);
+    assert.notStrictEqual(a, undefined, 'a reader that waited was woken');
+    assert.deepStrictEqual([...a, ...b].sort(), [1, 2], 'between them, every value exactly once');
+  });
+
+  it('a queue fed far ahead of its reader drains in linear time, in order, and reports the mark by what is unread', async () => {
+    const queue = createPushQueue({ highWaterMark: 4 });
+    assert.deepStrictEqual([1, 2, 3, 4, 5].map((n) => queue.feed(n)), [true, true, true, true, false]);
+    const reader = queue[Symbol.asyncIterator]();
+    for (let n = 1; n <= 3; n++) assert.strictEqual((await reader.next()).value, n);
+    assert.strictEqual(queue.feed(6), true, 'three read: three unread, then four, within the mark');
+    assert.strictEqual(queue.feed(7), true);
+    assert.strictEqual(queue.feed(8), false, 'five unread exceeds a mark of four');
+    await reader.return();
+
+    const big = createPushQueue({ highWaterMark: Number.MAX_SAFE_INTEGER });
+    const count = 400000;
+    for (let n = 0; n < count; n++) big.feed(n);
+    big.end();
+    const started = performance.now();
+    let expected = 0;
+    for await (const value of big) {
+      if (value !== expected) assert.fail(`out of order at ${expected}: ${value}`);
+      expected++;
+    }
+    const elapsed = performance.now() - started;
+    assert.strictEqual(expected, count);
+    // a shift() per value took seconds here and grew quadratically; the bound is
+    // generous for a loaded host and far under what the quadratic drain needed
+    assert.strictEqual(elapsed < 4000, true, `draining ${count} values took ${elapsed.toFixed(0)} ms`);
+  });
+});

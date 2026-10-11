@@ -14,7 +14,7 @@
  * the source, the `compileDag` discipline.
  */
 
-import { LinqBuildError } from './errors.js';
+import { LinqBuildError, spellValue } from './errors.js';
 import { readOptions } from './document.js';
 
 const MODES = new Set(['parallel', 'concat', 'switch', 'exhaust']);
@@ -40,7 +40,8 @@ export function normalizeMapAsyncOptions(options) {
   const mode = options.mode ?? 'parallel';
   if (!MODES.has(mode)) {
     throw new LinqBuildError('JL0005',
-      `mapAsync mode must be one of parallel|concat|switch|exhaust, got '${mode}'`);
+      'mapAsync mode must be one of parallel|concat|switch|exhaust, got '
+      + (typeof mode === 'string' ? `'${mode}'` : spellValue(mode)));
   }
   const ordered = options.ordered === undefined ? true : options.ordered;
   if (typeof ordered !== 'boolean') {

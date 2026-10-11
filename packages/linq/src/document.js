@@ -38,7 +38,7 @@
  */
 
 import { isPlainOptions, refuseUnknownMembers } from '@jarenjs/core/object';
-import { LinqBuildError } from './errors.js';
+import { LinqBuildError, spellValue } from './errors.js';
 
 /**
  * Validate a sequence window's count or a positional terminal's index.
@@ -48,9 +48,37 @@ import { LinqBuildError } from './errors.js';
  */
 export function requireNonNegativeInteger(value, what) {
   if (!Number.isInteger(value) || value < 0) {
-    throw new LinqBuildError('JL0005', `${what} takes a non-negative integer, got ${value}`);
+    throw new LinqBuildError('JL0005', `${what} takes a non-negative integer, got ${spellValue(value)}`);
   }
   return value;
+}
+
+/**
+ * The parameter bindings of a sequence and of the sequence it embeds whole
+ * (a `join`, `groupJoin` or `concat` side), as ONE document carries them.
+ * A name both sides bind must bind to the same value: the same reference,
+ * or the same JSON — two literals spelled alike are one binding, not two.
+ * Bindings are query data (`requireJsonBinding`), so their JSON text is
+ * their identity, member order included.
+ * @param {ReadonlyMap<string, any>} own
+ * @param {ReadonlyMap<string, any>} inner
+ * @param {string} what - the operator, for the message
+ * @returns {Map<string, any>}
+ */
+export function mergeBindings(own, inner, what) {
+  const merged = new Map(own);
+  for (const [name, value] of inner) {
+    if (merged.has(name)) {
+      const held = merged.get(name);
+      if (held !== value && JSON.stringify(held) !== JSON.stringify(value)) {
+        throw new LinqBuildError('JL0004',
+          `parameter '${name}' is bound to different values by the two sides of ${what} — `
+          + 'one document carries one binding per name; bind it once, or rename one side');
+      }
+    }
+    else merged.set(name, value);
+  }
+  return merged;
 }
 
 /**
