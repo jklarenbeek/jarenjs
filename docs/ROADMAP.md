@@ -143,6 +143,14 @@ delete it or fix it.
   the complete pipeline. Parameterized `$apply` remains one possible path;
   function values are neither needed nor planned for this purpose.
 
+- [ ] **A tuple slot the data does not hold yet.** `formRulesToQueryAssertions`
+  binds an absent slot to `null` and enforces its assert on submit, while
+  `buildFormViewModel` renders slots from the data and has no node for a
+  missing one, so the refusal names nothing the operator can see. Wanted:
+  decide whether an assert on a missing slot holds vacuously (as for a hidden
+  field) or the view model renders the missing slots, and make both paths
+  agree.
+
 ## @jarenjs/view & @jarenjs/app
 
 Reusable host helpers now cover [bounded file tokens and route subscriptions](../packages/app/docs/APP-FORMAT.md),
@@ -233,6 +241,14 @@ establish registry publication or downstream acceptance.
   first candidate — and not before, so that the shape is fitted to a real
   consumer rather than to a description of one.
 
+- [ ] **Canonical printing outside the corpora.** `parseMarkdown(toMarkdown(doc))`
+  deep-equals `doc` over the CommonMark and GFM corpora, but three constructs
+  still drift: adjacent emphasis and strong siblings print their delimiters
+  into one run (`*a*_b_` reads back as `*a**b*`), a chain of empty list items
+  with alternating markers prints as a thematic break, and raw inline HTML that
+  begins a continuation line prints at a line start and opens an HTML block.
+  Wanted: a printer that checks its own output reads back as the input.
+
 ## @jarenjs/mermaid
 
 - [ ] **`htmlLabels:true`** — labels still render as SVG `<text>`. The view renderer now supports HTML descendants of `foreignObject` and namespaced attributes; Mermaid still needs HTML-label rendering, sizing and parity tests. Safe mode intentionally excludes `foreignObject`.
@@ -250,6 +266,10 @@ establish registry publication or downstream acceptance.
   currently mark.
 - [ ] **Adopt the shared 3D kernel** — `@jarenjs/calc`'s x·y·z plotter introduced a reusable `@jarenjs/core/math` `mat4`/`project.js` kernel (matrices, projection, `surfaceNormal`, painter's-algorithm depth sort). Mermaid 3D could adopt it rather than growing its own projection math.
 
+- [ ] **ER attribute comments.** `string name PK "comment"` parses, but the
+  comment is dropped: the AST has no field for it, so `toMermaid` loses it.
+  Wanted: an AST member (and a schema revision).
+
 ## @jarenjs/charts
 
 - [ ] **Sessions for the remaining ten types** — `line`, `bar` and `candlestick` patch in place; the other ten re-render wholesale, which is correct and, at their sizes, cheap. A `heatmap` session (one cell rect per changed count) is the next one with an obvious incremental path now that the accumulator feeds it.
@@ -260,6 +280,11 @@ establish registry publication or downstream acceptance.
 - [ ] **Interactive plots** — drag-to-rotate for x·y·z and pan/zoom for x·y are a `hydrate` enhancement (out of scope for v1; the static SVG render is complete).
 - [ ] **Programmer 64-bit precision** — the expression evaluator surfaces programmer-mode results as `Number`, so a result beyond 2^53 is rounded before the four-base display wraps it to the word (`0xFFFFFFFFFFFFFFFF` displays `0x0`; [CALC-FORMAT](../components/calc/docs/CALC-FORMAT.md) says so). A BigInt-valued evaluation path would close the gap.
 - [ ] **More converter dimensions & rate providers** — fuel economy (non-affine) and additional API-key-free tickers; websocket/streaming rates are deliberately out of v1 (REST polling only).
+
+- [ ] **Compile errors carry no position.** Unknown functions and arity errors
+  are raised from the compiled AST, which holds no offsets, and report line 1
+  column 1. Wanted: the parser stamps call positions (a side table keeps the
+  AST geometry-free).
 
 ## @jarenjs/play
 

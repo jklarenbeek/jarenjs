@@ -413,8 +413,20 @@ describe('getInclusiveExclusiveBounds', () => {
     assert.deepEqual(emin, 10);
   });
 
-  it('should return [undefined, exclusive] when exclusive is a value', () => {
+  it('should return [inclusive, exclusive] when exclusive is a value', () => {
     const [min, emin] = getInclusiveExclusiveBounds(x => x, 10, 20);
+    assert.deepEqual(min, 10);
+    assert.deepEqual(emin, 20);
+  });
+
+  it('should return [inclusive, undefined] when exclusive is false', () => {
+    const [min, emin] = getInclusiveExclusiveBounds(x => x, 10, false);
+    assert.deepEqual(min, 10);
+    assert.deepEqual(emin, undefined);
+  });
+
+  it('should return [undefined, exclusive] when only exclusive is a value', () => {
+    const [min, emin] = getInclusiveExclusiveBounds(x => x, undefined, 20);
     assert.deepEqual(min, undefined);
     assert.deepEqual(emin, 20);
   });

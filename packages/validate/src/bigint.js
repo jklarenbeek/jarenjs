@@ -17,24 +17,34 @@ function compileBigIntMaximum(schemaObj, jsonSchema) {
     jsonSchema.exclusiveMaximum,
   );
 
+  let validateExclusive;
   if (emax != null) {
     const addError = schemaObj.createErrorHandler(emax, 'exclusiveMaximum');
 
-    return function validateExclusiveMaximumBigInt(data, dataPath) {
+    validateExclusive = function validateExclusiveMaximumBigInt(data, dataPath) {
       return data < emax
         || addError(data, dataPath);
     };
   }
-  else if (max != null) {
+
+  let validateInclusive;
+  if (max != null) {
     const addError = schemaObj.createErrorHandler(max, 'maximum');
 
-    return function validateMaximumBigInt(data, dataPath) {
+    validateInclusive = function validateMaximumBigInt(data, dataPath) {
       return data <= max
         || addError(data, dataPath);
     };
   }
 
-  return undefined;
+  if (validateInclusive && validateExclusive) {
+    return function validateMaximumRangeBigInt(data, dataPath) {
+      return validateInclusive(data, dataPath)
+        && validateExclusive(data, dataPath);
+    };
+  }
+
+  return validateInclusive || validateExclusive;
 }
 
 function compileBigIntMinimum(schemaObj, jsonSchema) {
@@ -44,24 +54,34 @@ function compileBigIntMinimum(schemaObj, jsonSchema) {
     jsonSchema.exclusiveMinimum,
   );
 
+  let validateExclusive;
   if (emin != null) {
     const addError = schemaObj.createErrorHandler(emin, 'exclusiveMinimum');
 
-    return function validateExclusiveMinimumBigInt(data, dataPath) {
+    validateExclusive = function validateExclusiveMinimumBigInt(data, dataPath) {
       return data > emin
         || addError(data, dataPath);
     };
   }
-  else if (min != null) {
+
+  let validateInclusive;
+  if (min != null) {
     const addError = schemaObj.createErrorHandler(min, 'minimum');
 
-    return function validateMinimumBigInt(data, dataPath) {
+    validateInclusive = function validateMinimumBigInt(data, dataPath) {
       return data >= min
         || addError(data, dataPath);
     };
   }
 
-  return undefined;
+  if (validateInclusive && validateExclusive) {
+    return function validateMinimumRangeBigInt(data, dataPath) {
+      return validateInclusive(data, dataPath)
+        && validateExclusive(data, dataPath);
+    };
+  }
+
+  return validateInclusive || validateExclusive;
 }
 
 function compileBigIntMultipleOf(schemaObj, jsonSchema) {

@@ -57,26 +57,36 @@ function compileFormatMinimumByType(parseType, schemaObj, jsonSchema) {
     jsonSchema.formatExclusiveMinimum,
   );
 
+  let isExclusive;
   if (emin != null) {
     const addError = schemaObj.createErrorHandler(emin, 'formatExclusiveMinimum');
     const bound = emin.valueOf();
 
-    return function isFormatExclusiveMinimum(date, dataPath) {
+    isExclusive = function isFormatExclusiveMinimum(date, dataPath) {
       return date > bound
         || addError(asDateValue(date), dataPath);
     };
   }
-  else if (min) {
+
+  let isInclusive;
+  if (min) {
     const addError = schemaObj.createErrorHandler(min, 'formatMinimum');
     const bound = min.valueOf();
 
-    return function isFormatMinimum(date, dataPath) {
+    isInclusive = function isFormatMinimum(date, dataPath) {
       return date >= bound
         || addError(asDateValue(date), dataPath);
     };
   }
 
-  return undefined;
+  if (isInclusive && isExclusive) {
+    return function isFormatMinimumRange(date, dataPath) {
+      return isInclusive(date, dataPath)
+        && isExclusive(date, dataPath);
+    };
+  }
+
+  return isInclusive || isExclusive;
 }
 
 /**
@@ -95,26 +105,36 @@ function compileFormatMaximumByType(parseType, schemaObj, jsonSchema) {
     jsonSchema.formatExclusiveMaximum,
   );
 
+  let isExclusive;
   if (emax != null) {
     const addError = schemaObj.createErrorHandler(emax, 'formatExclusiveMaximum');
     const bound = emax.valueOf();
 
-    return function isFormatExclusiveMaximum(date, dataPath) {
+    isExclusive = function isFormatExclusiveMaximum(date, dataPath) {
       return date < bound
         || addError(asDateValue(date), dataPath);
     };
   }
-  else if (max) {
+
+  let isInclusive;
+  if (max) {
     const addError = schemaObj.createErrorHandler(max, 'formatMaximum');
     const bound = max.valueOf();
 
-    return function isFormatMaximum(date, dataPath) {
+    isInclusive = function isFormatMaximum(date, dataPath) {
       return date <= bound
         || addError(asDateValue(date), dataPath);
     };
   }
 
-  return undefined;
+  if (isInclusive && isExclusive) {
+    return function isFormatMaximumRange(date, dataPath) {
+      return isInclusive(date, dataPath)
+        && isExclusive(date, dataPath);
+    };
+  }
+
+  return isInclusive || isExclusive;
 }
 
 /**

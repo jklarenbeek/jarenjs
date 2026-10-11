@@ -25,7 +25,12 @@ or threw with a sibling keyword); `haversineDistance` over a NaN coordinate is `
 (it was half the planet, 20,015,114 m); `Float64.fib(Infinity)` and `Float64.factorial(Infinity)`
 answer `Infinity` (they never returned).
 `equalsDeep` compares two `Date`s by instant (every pair used to read equal) and
-reads a null-prototype object like any other.
+reads a null-prototype object like any other. `axisTicksLinear` keeps the tick at
+either end of the domain when the quotient rounds just short of a whole number
+(`[0, 0.3]` lost its `0.3`, `[0.1, 0.7]` its `0.7`).
+`getInclusiveExclusiveBounds` answers both bounds when the exclusive one is a value
+(`(t, 10, 20)` is `[10, 20]`; it answered `[undefined, 20]`) and keeps the inclusive one when
+the draft-04 modifier is `false` (it read `false` as a bound).
 
 `semanticKey(value, options?)` (`@jarenjs/core/object`) is the collision-free
 identity the semantic cache keys by, in two forms of one serializer with the same

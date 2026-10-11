@@ -218,21 +218,23 @@ export function getArrayClass(obj, def = undefined) {
 //#endregion
 
 /**
- * Calculates the inclusive and exclusive bounds based on the provided parameters.
+ * Reads the inclusive and exclusive bounds of one side of a range. Both
+ * apply: a numeric `exclusive` is its own bound beside `inclusive` (draft
+ * 2019-09 and later), while the boolean spelling of draft-04 modifies the
+ * inclusive value: `true` makes it exclusive, `false` leaves it inclusive.
  *
  * @param {function} getType - A function to determine the type of the inclusive and exclusive bounds.
  * @param {number|string|undefined} inclusive - The inclusive bound value.
- * @param {number|string|boolean|undefined} exclusive - The exclusive bound value.
- * @returns {Array} An array containing the inclusive and exclusive bounds.
+ * @param {number|string|boolean|undefined} exclusive - The exclusive bound value, or the draft-04 boolean modifier.
+ * @returns {Array} `[inclusive, exclusive]`, either of which may be undefined.
  */
 export function getInclusiveExclusiveBounds(getType, inclusive, exclusive) {
   const includes = getType(inclusive);
-  const excludes = exclusive === true
-    ? includes
-    : getType(exclusive);
-  return (excludes === undefined)
-    ? [includes, undefined]
-    : [undefined, excludes];
+  if (exclusive === true)
+    return [undefined, includes];
+  if (exclusive === false)
+    return [includes, undefined];
+  return [includes, getType(exclusive)];
 }
 
 export { checkOutcome, composeChecks } from './check.js';

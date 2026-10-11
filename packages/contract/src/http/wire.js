@@ -154,8 +154,8 @@ const NO_MESSAGE = 'request failed';
  * @returns {string}
  */
 export function renderMessage(catalog, msgid, params) {
-  let render = catalog !== null ? catalog[msgid] : undefined;
-  if (render === undefined) render = contractCatalogEn[msgid];
+  let render = catalog !== null && Object.hasOwn(catalog, msgid) ? catalog[msgid] : undefined;
+  if (render === undefined && Object.hasOwn(contractCatalogEn, msgid)) render = contractCatalogEn[msgid];
   if (render === undefined) return NO_MESSAGE;
   try {
     const text = render(params);

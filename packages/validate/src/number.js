@@ -20,24 +20,34 @@ function compileNumberMaximum(schemaObj, jsonSchema) {
     jsonSchema.exclusiveMaximum,
   );
 
+  let validateExclusive;
   if (emax != null) {
     const addError = schemaObj.createErrorHandler(emax, 'exclusiveMaximum');
 
-    return function validateExclusiveMaximum(data, dataPath) {
+    validateExclusive = function validateExclusiveMaximum(data, dataPath) {
       return data < emax
         || addError(data, dataPath);
     };
   }
-  else if (max != null) {
+
+  let validateInclusive;
+  if (max != null) {
     const addError = schemaObj.createErrorHandler(max, 'maximum');
 
-    return function validateMaximum(data, dataPath) {
+    validateInclusive = function validateMaximum(data, dataPath) {
       return data <= max
         || addError(data, dataPath);
     };
   }
 
-  return undefined;
+  if (validateInclusive && validateExclusive) {
+    return function validateMaximumRange(data, dataPath) {
+      return validateInclusive(data, dataPath)
+        && validateExclusive(data, dataPath);
+    };
+  }
+
+  return validateInclusive || validateExclusive;
 }
 
 function compileNumberMinimum(schemaObj, jsonSchema) {
@@ -47,24 +57,34 @@ function compileNumberMinimum(schemaObj, jsonSchema) {
     jsonSchema.exclusiveMinimum,
   );
 
+  let validateExclusive;
   if (emin != null) {
     const addError = schemaObj.createErrorHandler(emin, 'exclusiveMinimum');
 
-    return function validateExclusiveMinimum(data, dataPath) {
+    validateExclusive = function validateExclusiveMinimum(data, dataPath) {
       return data > emin
         || addError(data, dataPath);
     };
   }
-  else if (min != null) {
+
+  let validateInclusive;
+  if (min != null) {
     const addError = schemaObj.createErrorHandler(min, 'minimum');
 
-    return function validateMinimum(data, dataPath) {
+    validateInclusive = function validateMinimum(data, dataPath) {
       return data >= min
         || addError(data, dataPath);
     };
   }
 
-  return undefined;
+  if (validateInclusive && validateExclusive) {
+    return function validateMinimumRange(data, dataPath) {
+      return validateInclusive(data, dataPath)
+        && validateExclusive(data, dataPath);
+    };
+  }
+
+  return validateInclusive || validateExclusive;
 }
 
 function compileNumberMultipleOf(schemaObj, jsonSchema) {

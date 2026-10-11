@@ -90,6 +90,19 @@ export const messagesEn = {
 /** The compiled built-in English catalog (module-level singleton). */
 const EN = compileMessageCatalog(messagesEn);
 
+/**
+ * The render closure a message key names in a catalog. Only OWN members
+ * answer, so a key every object inherits (`toString`, `constructor`,
+ * `__proto__`) is a miss like any unknown key instead of a function that
+ * renders garbage or throws.
+ * @param {Readonly<Record<string, (params: object, error?: object) => string>>|undefined} catalog - A compiled catalog
+ * @param {string} key - The message key
+ * @returns {((params: object, error?: object) => string)|undefined}
+ */
+function lookupRender(catalog, key) {
+  return catalog !== undefined && Object.hasOwn(catalog, key) ? catalog[key] : undefined;
+}
+
 //#endregion
 
 //#region Public error record & rendering
@@ -160,10 +173,10 @@ function markInlineMessage(error) {
 export function renderErrorMessage(error, catalog = undefined) {
   const msgid = error.msgid || error.keyword;
   const params = error.params || {};
-  let render = catalog !== undefined ? catalog[msgid] : undefined;
-  if (render === undefined) render = EN[msgid];
-  if (render === undefined && catalog !== undefined) render = catalog[error.keyword];
-  if (render === undefined) render = EN[error.keyword];
+  const render = lookupRender(catalog, msgid)
+    ?? lookupRender(EN, msgid)
+    ?? lookupRender(catalog, error.keyword)
+    ?? lookupRender(EN, error.keyword);
   if (render === undefined) return `validation failed for keyword '${error.keyword}'`;
   return render(params, error);
 }
@@ -189,10 +202,10 @@ export function localizeErrors(errors, catalog) {
     if (error.inlineMessage === true) continue;
     const msgid = error.msgid || error.keyword;
     const params = error.params || {};
-    let render = catalog !== undefined ? catalog[msgid] : undefined;
-    if (render === undefined) render = EN[msgid];
-    if (render === undefined && catalog !== undefined) render = catalog[error.keyword];
-    if (render === undefined) render = EN[error.keyword];
+    const render = lookupRender(catalog, msgid)
+      ?? lookupRender(EN, msgid)
+      ?? lookupRender(catalog, error.keyword)
+      ?? lookupRender(EN, error.keyword);
     if (render !== undefined) {
       error.message = render(params, error);
     }
@@ -464,7 +477,7 @@ export function convertInternalErrors(internalErrors) {
     if (renderMessages) {
       if (spec !== null) {
         if (spec.msgid !== null) {
-          const render = EN[spec.msgid];
+          const render = lookupRender(EN, spec.msgid);
           if (render !== undefined) {
             message = render(params);
           } else if (spec.render !== null) {

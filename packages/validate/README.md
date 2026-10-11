@@ -71,8 +71,10 @@ Jaren supports the full set of JSON Schema validation keywords. Here's a quick o
 
 ### 🔑 Keywords for numbers
 
-- maximum / minimum<br />or exclusiveMaximum / exclusiveMinimum
+- maximum / minimum<br />and exclusiveMaximum / exclusiveMinimum
 - multipleOf
+
+A numeric `exclusiveMinimum`/`exclusiveMaximum` is its own bound and applies beside `minimum`/`maximum`: `{ "minimum": 5, "exclusiveMinimum": 3 }` rejects `4`, `{ "maximum": 5, "exclusiveMaximum": 10 }` rejects `6`, and the same holds for `bigint` values and for `formatMinimum`/`formatExclusiveMinimum` and `formatMaximum`/`formatExclusiveMaximum`. The draft-04 boolean spelling still modifies the inclusive bound: `true` makes it exclusive and `false` leaves it inclusive. *Upgrade: the exclusive bound used to replace the inclusive one, so `4` and `6` above passed, and `{ "minimum": 5, "exclusiveMinimum": false }` accepted `1` while `{ "maximum": 5, "exclusiveMaximum": false }` rejected `5`.*
 
 BigInt instance values are supported too: `maximum`/`minimum`/`exclusiveMaximum`/`exclusiveMinimum` and `multipleOf` compile dedicated BigInt comparators when the data is a `bigint`.
 
@@ -845,6 +847,12 @@ schema-authored messages translatable:
     "message": "Total must be a number"       // fallback when no catalog covers it
   } } }
 ```
+
+A `$msgid` or a catalog key resolves by own member only, so a name every object
+inherits (`constructor`, `toString`, `__proto__`) is an unknown key: the inline
+`message` renders, or the keyword's own message when there is none. *Upgrade:
+such a `$msgid` used to render the inherited function's result (`[object Undefined]`,
+or the parameters object as the message) or throw.*
 
 ### Locale packs
 
