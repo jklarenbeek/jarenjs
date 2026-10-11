@@ -10,6 +10,44 @@ function measured(file) {
   return report;
 }
 
+/**
+ * The membership measurement as the tables a reader needs: each chain's plan
+ * and time, the server's own account of the native statements, then the
+ * planner's estimates against the rows returned.
+ * @param {any} report
+ */
+function membershipText(report) {
+  const { postgres: server, runtime } = report;
+  const ms = (/** @type {number} */ value) => value.toFixed(2);
+  const load = (/** @type {number[] | null} */ sample) => (Array.isArray(sample) ? ms(sample[0]) : 'not reported');
+  const ratio = (/** @type {number} */ value) => `${value >= 0.1 ? value.toFixed(2) : value.toPrecision(1)}×`;
+  const settings = ['jit', 'jit_above_cost', 'jit_inline_above_cost', 'jit_optimize_above_cost']
+    .map(name => `${name}=${server[name]}`).join(', ');
+  const chains = [...report.chains.map((/** @type {any} */ row) => ['pairs', row]), ['regrouped', report.folded]];
+  const native = chains.filter(([, row]) => row.server !== null).map(([, row]) => row.server);
+  const range = (/** @type {number[]} */ values, /** @type {(value: number) => string} */ format) => {
+    const [low, high] = [Math.min(...values), Math.max(...values)];
+    return low === high ? format(low) : `${format(low)} to ${format(high)}`;
+  };
+  const view = native.length === 0 ? '' : `The native statements under \`EXPLAIN (ANALYZE)\`: the planner priced them at ${
+    range(native.map((/** @type {any} */ one) => one.cost), String)} against jit_above_cost=${server.jit_above_cost}, `
+    + `the server planned them in ${range(native.map((/** @type {any} */ one) => one.planningMs), ms)} ms and ran them in ${
+      range(native.map((/** @type {any} */ one) => one.executionMs), ms)} ms, and its JIT compiled ${
+      native.filter((/** @type {any} */ one) => one.jit).length} of the ${native.length}.\n\n`;
+  return `\n\nMeasured ${report.measuredAt}: PostgreSQL ${server.version} (${settings}), Node ${runtime.node}, pg ${runtime.pg}; ${report.documents} documents in each table, analyzed first; the median of ${report.iterations} calls after ${report.warmup} warm-up calls; host load (one-minute average) ${load(runtime.loadavg?.before)} before and ${load(runtime.loadavg?.after)} after, on ${runtime.cpus} cores.\n\n`
+    + `One statement carries at most ${report.bound} leaf predicates. A chain of \`$and\` pairs (pairs) is not regrouped, so every term is a leaf; the same number of terms written as equalities on one member and ranges on another (regrouped) becomes one membership list and one bound.\n\n`
+    + '| Chain | Terms | Leaf predicates | Plan | `execute()` ms | The engine alone, ms | Rows |\n|---|---:|---:|---|---:|---:|---:|\n'
+    + chains.map(([kind, row]) => `| ${kind} | ${row.terms} | ${row.leaves} | ${row.mode === 'native' ? 'native' : `engine, \`${row.reason}\``} | ${ms(row.ms)} | ${row.engineMs === null ? 'same route' : ms(row.engineMs)} | ${row.rows} |`).join('\n')
+    + `\n\n${view}`
+    + 'The planner\'s own estimate, `explain().budget.estimatedRows`, against the rows each statement returns:\n\n'
+    + '| Statement | Estimated rows | Actual rows | Estimate / actual |\n|---|---:|---:|---:|\n'
+    + report.estimates.map((/** @type {any} */ row) => {
+      const estimated = row.estimatedRows === 'unavailable' ? null : row.estimatedRows.rows;
+      return `| ${row.label} | ${estimated ?? 'unavailable'} | ${row.actualRows} | ${estimated === null || row.actualRows === 0 ? 'n/a' : ratio(estimated / row.actualRows)} |`;
+    }).join('\n')
+    + `\n\n${report.scope}\n\n`;
+}
+
 /** Backend costs derive from the measured source rather than a handwritten table. */
 export const postgresFacts = {
   name: 'PostgreSQL portability measurements',
@@ -72,6 +110,12 @@ export const postgresFacts = {
             return `| ${host.label} | ${row.consumer} | ${row.peakRssBytes} | ${budget} | ${row.peakRssBytes > budget ? `loss (+${row.peakRssBytes - budget})` : 'within reference'} |`;
           })).join('\n')
         + '\n\nThese larger physical SQLite workloads are separate from the small build-selected managed application. Functional recovery success does not imply memory-budget success. Earlier samples remain in the resource history.\n\n';
+    },
+    'postgres.membership': () => {
+      const report = measured('postgres-membership-result.json');
+      if (report.format !== 'jaren-postgres-membership/1')
+        throw new Error(`PostgreSQL evidence in postgres-membership-result.json is a ${report.format} report, expected jaren-postgres-membership/1`);
+      return membershipText(report);
     },
   }),
 };

@@ -832,6 +832,54 @@ result whole or not at all, and keeps the two previous measurements in it.
 The figures come from a Linux x64 host and exercise logical dump/restore and
 archived-WAL recovery only; power loss and fleet failover are not tested.
 
+## PostgreSQL membership chains and row estimates
+
+`postgres-membership-result.json` records what a long chain of membership
+terms costs against a PostgreSQL collection and how close the planner's row
+estimate comes to the rows a statement returns; the
+[PostgreSQL guide](../packages/db/docs/POSTGRESQL.md) derives its tables from
+it. Measure on an owned disposable server, quiet, then derive the documents:
+
+```sh
+JAREN_PG_URL=postgres://jaren:jaren@127.0.0.1:55433/jaren node benchmark/postgres-membership.js --write
+npm run docs:derive
+```
+
+It measures four things, on small tables it analyzes first:
+
+- chains of `$and` pairs that nothing regroups, of growing length: the plan
+  `explain()` gives each (native within the dialect's bound on the leaf
+  predicates of one statement, otherwise the engine, naming
+  `predicate.termBound`), the milliseconds `execute()` takes and, where the
+  plan is native, the same chain run through the engine alone
+  (`pushdown: false`), so the price of a refused chain is published beside the
+  win;
+- the same number of terms written as equalities on one member and ranges on
+  another, which the planner regroups to one membership list and one bound;
+- `explain().budget.estimatedRows` against the rows returned, for collection
+  statements, entity statements and loads, including the statement whose
+  estimate is far off and the one for which none is offered;
+- the server's own account (`EXPLAIN (ANALYZE)`) of every native statement:
+  what the planner priced it at, what planning and execution took, and whether
+  its JIT compiled it.
+
+The server's JIT settings are read and recorded and never changed. A compile
+forced by lowered thresholds is a configuration no application runs, so those
+numbers are not a figure this program publishes. No statement it sends carries
+more than 400 terms that nothing regroups, every statement runs under a
+`statement_timeout`, it holds one pooled connection beside one administrative
+connection, and the schema it creates is dropped when the run ends.
+
+The result pins the SHA-256 of `packages/db/src/plan.js`, `emit.js`,
+`query.js`, `dialects/postgres.js` and of the program itself, so a change to
+any of them makes `npm run docs:check` refuse the figures until they are
+measured again, and it records the host's load before and after. The
+milliseconds are wall-clock times at the client on one host and include no
+commit, so the durability settings are recorded but not required; they are
+shape evidence, not a latency claim. `--smoke` runs two sizes three times,
+writes nothing and finishes in seconds: it checks that the program still runs
+against a PostgreSQL 16, 17 or 18 server.
+
 ## Forms composition addressing
 
 Run `node benchmark/forms-composition.js` to reproduce

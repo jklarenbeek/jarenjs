@@ -533,7 +533,17 @@ if (asyncLiveLeak.length)
 // column and document moves, rebuild casts (694); and statement slots given
 // back by job pages, maintenance, trusted statements at the end of their
 // transaction and the process host (681).
-if (clientBytes > 925100)
+// Measured 944041 since: floating temporal-bucket sums kept in the engine
+// (266); correlated navigation hops in predicates, counts and projections
+// (about 6200), typed path comparisons across JSON families with a literal
+// $get and the PostgreSQL digit-name guard (about 3400) and groups ordered by
+// an integer sum or average (about 700) add 10272 together; join edges limited
+// to pairs both engines agree on, grouped joins of entity roots and a row
+// identity no member name shadows (2280); windows and counts over constructors
+// of total operators (2111); distinct over compound, other-ordered and entity
+// projections with group keys read as doubles (3187); and the defects a
+// planner hunt fixed (843).
+if (clientBytes > 944100)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 

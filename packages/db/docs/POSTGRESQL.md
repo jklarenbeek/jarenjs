@@ -130,6 +130,54 @@ diverted external), for a statement a slot of which the call left unbound — th
 statement `explain()` sends binds NULL there, which the planner prices as no
 row — and on SQLite, whose bindings expose no per-statement estimate.
 
+The committed [measurement](../../../benchmark/postgres-membership-result.json)
+puts the bound, the regrouping and the estimate to a server at its own JIT
+settings, which it reads and never changes. It runs chains of membership terms
+of growing length (the plan each gets, the milliseconds it takes and the
+engine's own time for the same chain), the same number of terms regrouped into
+one list, the server's account of the native statements, and a small corpus of
+statements whose estimates it sets against the rows they return. It pins the
+SHA-256 of the planner, the emitter, the query compiler, the PostgreSQL dialect
+and its own source, so `npm run docs:check` refuses it once any of them
+changes, until it is measured again:
+
+<!--fact:postgres.membership-->
+
+Measured 2026-10-11T13:12:36.805Z: PostgreSQL 17.11 (Debian 17.11-1.pgdg12+2) (jit=on, jit_above_cost=100000, jit_inline_above_cost=500000, jit_optimize_above_cost=500000), Node 24.20.0, pg 8.23.0; 2000 documents in each table, analyzed first; the median of 31 calls after 6 warm-up calls; host load (one-minute average) 3.44 before and 3.24 after, on 16 cores.
+
+One statement carries at most 128 leaf predicates. A chain of `$and` pairs (pairs) is not regrouped, so every term is a leaf; the same number of terms written as equalities on one member and ranges on another (regrouped) becomes one membership list and one bound.
+
+| Chain | Terms | Leaf predicates | Plan | `execute()` ms | The engine alone, ms | Rows |
+|---|---:|---:|---|---:|---:|---:|
+| pairs | 50 | 50 | native | 2.31 | 10.11 | 25 |
+| pairs | 100 | 100 | native | 2.70 | 12.97 | 50 |
+| pairs | 200 | 200 | engine, `predicate.termBound` | 18.58 | same route | 100 |
+| pairs | 400 | 400 | engine, `predicate.termBound` | 29.96 | same route | 200 |
+| regrouped | 400 | 2 | native | 4.01 | 40.00 | 200 |
+
+The native statements under `EXPLAIN (ANALYZE)`: the planner priced them at 147.29 to 288.37 against jit_above_cost=100000, the server planned them in 0.08 to 0.35 ms and ran them in 0.14 to 1.80 ms, and its JIT compiled 0 of the 3.
+
+The planner's own estimate, `explain().budget.estimatedRows`, against the rows each statement returns:
+
+| Statement | Estimated rows | Actual rows | Estimate / actual |
+|---|---:|---:|---:|
+| collection `people`: `$eq` on an indexed member | 200 | 200 | 1.00× |
+| collection `items`: 8 unregrouped terms | 1 | 4 | 0.25× |
+| collection `items`: 64 unregrouped terms | 11 | 32 | 0.34× |
+| collection `items`: 400 regrouped terms | 1332 | 200 | 6.66× |
+| entity `Item`: 8 unregrouped terms | 4 | 4 | 1.00× |
+| entity `Item`: 64 unregrouped terms | 32 | 32 | 1.00× |
+| entity `Item`: 400 regrouped terms | 1000 | 200 | 5.00× |
+| `explainLoad` of `Item`: 8 unregrouped terms | 4 | 4 | 1.00× |
+| `explainLoad` of `Item`: 64 unregrouped terms | 32 | 32 | 1.00× |
+| `explainLoad` of `Item`: 400 regrouped terms | 1000 | 200 | 5.00× |
+| collection `people`: an external the call leaves unbound | unavailable | 200 | n/a |
+| collection `people`: an external bound to the value | 1 | 200 | 0.005× |
+
+One host, client and server on one machine, one pooled connection beside one administrative one. Each table holds the documents above and was analyzed before the first call. Milliseconds are the median wall-clock time of the calls above, after the warm-up calls: the statement's construction, the round trip, the server's work and the decoding of the rows, with no commit. The engine column runs the same chain with pushdown: false, which fetches the collection and filters it in the engine. The server's JIT settings are its own and are never changed; the server view is EXPLAIN (ANALYZE) of each native statement. An estimate is the planner's own and never a count. No production latency claim.
+
+<!--/fact-->
+
 A physical keyset page compares its continuation as the stored values on
 PostgreSQL as on SQLite — integer, bigint (bound as its exact decimal string,
 which the server types from the column), text, and a native `uuid` column,

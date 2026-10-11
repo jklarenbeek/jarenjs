@@ -255,46 +255,46 @@ allocations observed after initialization, not precise retained-heap sizes.
 
 <!--fact:db.changeflow-->
 
-Measured 2026-10-09, v24.20.0, AMD Ryzen 9 5900HX with Radeon Graphics; 15 mutations per case.
+Measured 2026-10-11, v24.20.0, AMD Ryzen 9 5900HX with Radeon Graphics; 15 mutations per case.
 
 | Shape | Strategy | Initialize ms | Mutation p50 ms | Mutation p95 ms | Initialization heap bytes |
 |---|---|---:|---:|---:|---:|
-| selective join | join | 18.463 | 0.401 | 2.292 | 6183592 |
-| selective join | rerun | 1.109 | 0.925 | 2.739 | 403936 |
-| high fan-out join | join | 9.997 | 2.264 | 3.439 | 5621840 |
-| high fan-out join | rerun | 0.859 | 1.116 | 1.727 | 389688 |
-| graph | graph | 9.268 | 0.375 | 0.750 | 5667488 |
-| graph | rerun | 4.985 | 4.921 | 5.994 | 1486552 |
-| self join | join | 6.555 | 0.329 | 0.699 | 4128600 |
-| self join | rerun | 1.029 | 1.096 | 1.944 | 450312 |
-| multiple-key groups | group | 9.486 | 0.336 | 2.147 | 2603464 |
-| multiple-key groups | rerun | 0.927 | 0.605 | 1.814 | 288000 |
-| group aggregate | group | 3.728 | 0.254 | 0.440 | 2071264 |
-| group aggregate | rerun | 0.822 | 0.516 | 0.571 | 267848 |
-| distinct | distinct | 4.259 | 0.191 | 0.378 | 1780024 |
-| distinct | rerun | 0.607 | 0.266 | 0.375 | 85272 |
-| nested groups | nested-group | 4.614 | 0.233 | 0.685 | 1965560 |
-| nested groups | rerun | 0.871 | 0.622 | 0.876 | 301608 |
-| offset groups | rerun | 1.156 | 0.463 | 0.578 | 322304 |
-| offset groups | rerun | 0.923 | 0.507 | 0.616 | 289680 |
-| offset window | window | 2.368 | 0.143 | 0.406 | 741768 |
-| offset window | rerun | 0.353 | 0.245 | 0.305 | 52104 |
-| group return rows | group | 4.646 | 0.214 | 0.355 | 2069392 |
-| group return rows | rerun | 0.938 | 0.525 | 0.679 | 207064 |
-| group emission | group | 4.646 | 0.237 | 0.544 | 2038648 |
-| group emission | rerun | 0.756 | 0.518 | 0.642 | 254296 |
+| selective join | join | 18.816 | 0.398 | 2.255 | 6270584 |
+| selective join | rerun | 1.040 | 0.908 | 1.331 | 421648 |
+| high fan-out join | join | 8.597 | 2.006 | 2.998 | 6231824 |
+| high fan-out join | rerun | 0.798 | 0.920 | 1.172 | 401368 |
+| graph | graph | 8.970 | 0.293 | 0.622 | 6102720 |
+| graph | rerun | 4.462 | 4.476 | 5.491 | 1505888 |
+| self join | join | 5.618 | 0.251 | 0.464 | 4362056 |
+| self join | rerun | 0.890 | 0.910 | 1.068 | 468456 |
+| multiple-key groups | group | 8.988 | 0.269 | 0.891 | 2782072 |
+| multiple-key groups | rerun | 0.898 | 0.539 | 0.664 | 293072 |
+| group aggregate | group | 4.129 | 0.251 | 0.434 | 2246192 |
+| group aggregate | rerun | 0.806 | 0.446 | 0.549 | 282968 |
+| distinct | distinct | 4.250 | 0.184 | 0.307 | 1958952 |
+| distinct | rerun | 0.478 | 0.236 | 0.339 | 93096 |
+| nested groups | nested-group | 4.268 | 0.210 | 0.309 | 2140256 |
+| nested groups | rerun | 0.859 | 0.542 | 0.667 | 294824 |
+| offset groups | rerun | 1.111 | 0.457 | 0.556 | 326192 |
+| offset groups | rerun | 0.795 | 0.502 | 0.580 | 292040 |
+| offset window | window | 1.901 | 0.133 | 0.369 | 557904 |
+| offset window | rerun | 0.422 | 0.238 | 0.393 | 52936 |
+| group return rows | group | 4.270 | 0.197 | 0.297 | 2247088 |
+| group return rows | rerun | 0.861 | 0.508 | 0.649 | 211560 |
+| group emission | group | 4.124 | 0.199 | 0.307 | 2215504 |
+| group emission | rerun | 0.744 | 0.494 | 0.638 | 254752 |
 
 | Capture | Envelopes | Operations | Bytes | Apply p50 ms | Replay p50 ms | Conflict p50 ms |
 |---|---:|---:|---:|---:|---:|---:|
-| session | 15 | 15 | 3169 | 0.556 | 0.135 | 0.271 |
-| journal | 15 | 15 | 3169 | 0.341 | 0.109 | 0.192 |
+| session | 15 | 15 | 3169 | 0.467 | 0.120 | 0.205 |
+| journal | 15 | 15 | 3169 | 0.304 | 0.098 | 0.173 |
 
 | Capture | Rows removed | Rows nulled | Operations | Bytes | Delete p50 ms | Delete p95 ms | Apply p50 ms |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| session | 100 | 20 | 121 | 11189 | 4.851 | 7.450 | 10.808 |
-| journal | 100 | 20 | 121 | 11189 | 5.580 | 10.862 | 18.412 |
+| session | 100 | 20 | 121 | 11189 | 4.536 | 6.401 | 10.179 |
+| journal | 100 | 20 | 121 | 11189 | 4.981 | 9.871 | 17.267 |
 
-A parent's delete whose foreign keys remove 100 rows and null 20 replicates as the same 121-operation envelope from either capture mode. Journal capture reads those rows before the delete runs: its delete p50 is 1.2× session capture's.
+A parent's delete whose foreign keys remove 100 rows and null 20 replicates as the same 121-operation envelope from either capture mode. Journal capture reads those rows before the delete runs: its delete p50 is 1.1× session capture's.
 
 Selective maintenance avoids repeated full SQL evaluation. Initialization and high-fan-out maintenance can cost more than rerunning; the table includes both. Offset groups remain rerun in both requested modes.
 

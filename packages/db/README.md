@@ -815,12 +815,12 @@ as-of join over one seeded corpus by plain references, by the temporal
 kernel, by a generic query document, by hand-written SQL and by the
 store — every route checked against the others before a timing is
 taken. At <!--fact:series.corpus-->100,000 samples at 1-second spacing, Node v24.20.0<!--/fact-->,
-the store is measured three ways at once — <!--fact:series.storeShapes-->the planned range costs 4.8× the hand-written statement and 2548.0× the resident cut, and the pushed bucket ladder 2.6× the hand-written GROUP BY, 1.8× FASTER than the generic query route, and 158.3× the one-pass loop<!--/fact-->.
+the store is measured three ways at once — <!--fact:series.storeShapes-->the planned range costs 4.2× the hand-written statement and 2585.6× the resident cut, and the index-bounded bucket (its mean added in the engine) 4.9× the hand-written GROUP BY, 1.1× SLOWER than the generic query route, and 286.9× the one-pass loop<!--/fact-->.
 The range row is not the planner's price: the statement selects two
 COLUMNS where the store renders and parses a whole JSON document per
 row, which is what storing documents costs.
 
-And what a refinement costs, with the loss in it: <!--fact:series.storeRefinement-->A window measured in time is not pushed: the store answers it at 20.6× the kernel over an array already in memory, over 100,000 candidates the index bounded. The batched as-of join reads 91,682 rows in 2 statements and costs 1555.6× fifty-one separate index reads — a bound is what it buys, not a speed-up. Without a tolerance the open side has no bound the probes imply, so the plan reads the data's own: the last instant each series carries at or before the earliest probe, folded to the least of them. That anchor is the extra statement, and what it saves depends on where the probes sit — evenly spread ones, as here, leave the least below them to skip.<!--/fact-->
+And what a refinement costs, with the loss in it: <!--fact:series.storeRefinement-->A window measured in time is not pushed: the store answers it at 17.2× the kernel over an array already in memory, over 100,000 candidates the index bounded. The batched as-of join reads 91,682 rows in 2 statements and costs 1437.5× fifty-one separate index reads — a bound is what it buys, not a speed-up. Without a tolerance the open side has no bound the probes imply, so the plan reads the data's own: the last instant each series carries at or before the earliest probe, folded to the least of them. That anchor is the extra statement, and what it saves depends on where the probes sit — evenly spread ones, as here, leave the least below them to skip.<!--/fact-->
 
 **A refinement is named, never quiet.** `explain().series` reports
 `mode` — `native`, `hybrid` or `engine` — the declared index the fetch
@@ -980,31 +980,31 @@ alone; writing accepted evidence requires both engines. The committed
 
 <!--fact:postgres.portability-->
 
-Measured 2026-10-09T00:34:29.344Z: 500 documents, Node 24.20.0, SQLite 3.53.4, PostgreSQL 17.11 (Debian 17.11-1.pgdg12+2), pg 8.23.0. Durability settings: fsync=on, synchronous_commit=on, full_page_writes=on.
+Measured 2026-10-11T13:12:30.908Z: 500 documents, Node 24.20.0, SQLite 3.53.4, PostgreSQL 17.11 (Debian 17.11-1.pgdg12+2), pg 8.23.0. Durability settings: fsync=on, synchronous_commit=on, full_page_writes=on.
 
 | Operation | SQLite ms | PostgreSQL ms | PG / SQLite | Client query calls per PG operation | Iterations |
 |---|---:|---:|---:|---:|---:|
-| open | 19.940 | 19.464 | 1.0× | 20 | 1 |
-| insert | 0.014 | 0.686 | 50.4× | 1 | 500 |
-| get | 0.016 | 0.685 | 42.7× | 5 | 50 |
-| indexed | 0.590 | 2.728 | 4.6× | 13 | 20 |
-| scanned | 0.624 | 2.556 | 4.1× | 13 | 20 |
-| range | 0.508 | 2.288 | 4.5× | 13 | 20 |
-| transaction | 0.130 | 1.029 | 7.9× | 3 | 20 |
-| migration (one index) | 19.741 | 149.621 | 7.6× | not separately counted | 1 |
+| open | 20.087 | 19.509 | 1.0× | 20 | 1 |
+| insert | 0.014 | 0.636 | 46.5× | 1 | 500 |
+| get | 0.016 | 0.671 | 42.0× | 5 | 50 |
+| indexed | 0.614 | 2.488 | 4.1× | 13 | 20 |
+| scanned | 0.599 | 2.403 | 4.0× | 13 | 20 |
+| range | 0.511 | 2.300 | 4.5× | 13 | 20 |
+| transaction | 0.132 | 0.954 | 7.2× | 3 | 20 |
+| migration (one index) | 17.985 | 154.704 | 8.6× | not separately counted | 1 |
 
-Sequential insert throughput: SQLite 73527, PostgreSQL 1458 documents/second.
+Sequential insert throughput: SQLite 73123, PostgreSQL 1572 documents/second.
 
 | First-row probe | SQLite | PostgreSQL |
 |---|---:|---:|
-| First row ms | 0.860 | 0.811 |
-| First row plus cleanup ms | 0.933 | 1.111 |
+| First row ms | 0.859 | 1.047 |
+| First row plus cleanup ms | 0.931 | 1.375 |
 | Returned rows | 1 | 1 |
 | Fetched native rows / normalized bytes | not instrumented | 64 / 5661 |
 | Session peak native frame rows / bytes | not instrumented | 64 / 5813 |
 | Client query calls including cleanup | no network | 5 |
-| Sampled RSS before / after MiB | 91.71 / 107.08 | 113.33 / 118.21 |
-| Sampled heap before / after MiB | 24.73 / 31.88 | 19.77 / 28.94 |
+| Sampled RSS before / after MiB | 102.83 / 119.56 | 128.91 / 130.54 |
+| Sampled heap before / after MiB | 25.10 / 32.21 | 17.79 / 26.07 |
 
 After close: driver active=0, queued=0; native cursors=0, prepared statements=0; host pool total=1, idle=1, waiting=0.
 
@@ -1298,13 +1298,13 @@ disagree.
 <!--fact:live.eventTimeTable-->
 | view | maintained | re-run | ratio |
 |---|---:|---:|---:|
-| bucket (60 s ladder, mean), 1000 rows | 123 µs | 911 µs | 7.4× |
-| rolling (5 min window, mean), 1000 rows | 411 µs | 3.67 ms | 8.9× |
-| bucket (60 s ladder, mean), 10000 rows | 136 µs | 8.12 ms | 59.6× |
-| rolling (5 min window, mean), 10000 rows | 13.4 ms | 60.9 ms | 4.5× |
+| bucket (60 s ladder, mean), 1000 rows | 121 µs | 1.1 ms | 9.1× |
+| rolling (5 min window, mean), 1000 rows | 421 µs | 3.89 ms | 9.2× |
+| bucket (60 s ladder, mean), 10000 rows | 137 µs | 10.7 ms | 78.0× |
+| rolling (5 min window, mean), 10000 rows | 13.2 ms | 66.3 ms | 5.0× |
 <!--/fact-->
 
-The gain is <!--fact:live.eventTimeBand-->59.6× for the bucket and 4.5× for the rolling at 10,000 readings<!--/fact-->. A bucket
+The gain is <!--fact:live.eventTimeBand-->78.0× for the bucket and 5.0× for the rolling at 10,000 readings<!--/fact-->. A bucket
 view is nearly flat in the series length, because a write folds one
 bucket again and the rest of the ladder is untouched. A rolling view is
 not, and the table says so: its answer is one row per reading, so the
