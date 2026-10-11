@@ -1,0 +1,1593 @@
+{
+ "group": "distinct projections over scalar leaves",
+ "schema": {
+  "type": "object",
+  "properties": {
+   "id": {
+    "type": "string"
+   },
+   "s": {
+    "type": "string"
+   },
+   "t": {
+    "type": "string"
+   },
+   "n": {
+    "type": "number"
+   },
+   "b": {
+    "type": "boolean"
+   },
+   "ns": {
+    "type": [
+     "string",
+     "null"
+    ]
+   },
+   "nn": {
+    "type": [
+     "number",
+     "null"
+    ]
+   },
+   "o": {
+    "type": "object",
+    "properties": {
+     "p": {
+      "type": "number"
+     },
+     "q": {
+      "type": "number"
+     }
+    }
+   },
+   "u": {},
+   "k": {
+    "type": "number"
+   },
+   "mix": {
+    "type": [
+     "string",
+     "integer"
+    ]
+   },
+   "big": {
+    "type": "number"
+   },
+   "bigi": {
+    "type": "integer"
+   },
+   "bigm": {
+    "type": [
+     "string",
+     "integer"
+    ]
+   },
+   "nmix": {
+    "type": [
+     "integer",
+     "string"
+    ]
+   },
+   "bi": {
+    "type": [
+     "boolean",
+     "integer"
+    ]
+   },
+   "ob": {
+    "type": [
+     "string",
+     "object"
+    ]
+   },
+   "tags": {
+    "type": "array",
+    "items": {
+     "type": "integer"
+    }
+   },
+   "tup": {
+    "type": "array",
+    "prefixItems": [
+     {
+      "type": "object"
+     }
+    ],
+    "items": {
+     "type": "string"
+    }
+   }
+  }
+ },
+ "indexes": [
+  {
+   "name": "by_s",
+   "path": "$.s"
+  },
+  {
+   "name": "by_n",
+   "path": "$.n"
+  },
+  {
+   "name": "by_big",
+   "path": "$.big"
+  }
+ ],
+ "documents": [
+  {
+   "id": "a",
+   "s": "x",
+   "t": "x",
+   "n": 1,
+   "b": true,
+   "ns": null,
+   "nn": null,
+   "o": {
+    "p": 1,
+    "q": 2
+   },
+   "u": 1,
+   "k": 2,
+   "mix": "1",
+   "bi": true,
+   "ob": {
+    "p": 1,
+    "q": 2
+   },
+   "tags": [
+    1,
+    2
+   ],
+   "tup": [
+    {
+     "a": 1,
+     "b": 2
+    },
+    "x"
+   ],
+   "big": 1700000000000000000,
+   "bigi": 1700000000000000000,
+   "bigm": 1700000000000000000,
+   "nmix": 1700000000000000000
+  },
+  {
+   "id": "b",
+   "s": "x",
+   "n": 1,
+   "b": true,
+   "o": {
+    "q": 2,
+    "p": 1
+   },
+   "u": "1",
+   "k": 1,
+   "mix": 1,
+   "bi": 1,
+   "ob": {
+    "q": 2,
+    "p": 1
+   },
+   "tags": [
+    1
+   ],
+   "tup": [
+    {
+     "b": 2,
+     "a": 1
+    },
+    "y"
+   ],
+   "big": 1700000001000000000,
+   "bigi": 1700000000000000000,
+   "bigm": "x",
+   "nmix": "x"
+  },
+  {
+   "id": "c",
+   "s": "x",
+   "n": 1.5,
+   "b": false,
+   "ns": "x",
+   "nn": 2,
+   "o": {
+    "p": 1
+   },
+   "u": true,
+   "k": 2,
+   "mix": "",
+   "bi": false,
+   "ob": "a",
+   "tags": [],
+   "tup": [
+    {
+     "a": 1
+    }
+   ],
+   "big": 1700000000000000000,
+   "bigi": 1700000001000000000,
+   "bigm": 1700000000000000000,
+   "nmix": 1700000000000000000
+  },
+  {
+   "id": "d",
+   "n": 1,
+   "b": true,
+   "ns": null,
+   "t": "x",
+   "u": null,
+   "k": 3,
+   "mix": 1,
+   "bi": 0,
+   "ob": "a",
+   "big": 9007199254740992,
+   "bigi": 9007199254740992,
+   "bigm": 9007199254740992,
+   "nmix": 2
+  },
+  {
+   "id": "e",
+   "s": "x",
+   "n": 1.5,
+   "o": {
+    "p": 1.0
+   },
+   "k": 1,
+   "mix": "é",
+   "bi": true,
+   "ob": {
+    "p": 1
+   },
+   "tags": [
+    1,
+    2,
+    3
+   ],
+   "big": 4611686018427388000,
+   "bigi": 4611686018427388000
+  },
+  {
+   "id": "f",
+   "s": "",
+   "n": 0,
+   "ns": "",
+   "nn": 0,
+   "k": 0,
+   "mix": "α",
+   "bi": 1,
+   "tup": [
+    {
+     "a": 1
+    },
+    "z"
+   ],
+   "big": -9007199254740992,
+   "bigi": -9007199254740992,
+   "bigm": "",
+   "nmix": ""
+  },
+  {
+   "id": "g",
+   "s": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzza",
+   "n": -2.5,
+   "b": false,
+   "ns": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzb",
+   "nn": -1,
+   "k": 4,
+   "t": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzza",
+   "big": 0.5,
+   "bigm": "x",
+   "nmix": "x"
+  },
+  {
+   "id": "h",
+   "s": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzb",
+   "n": 1e+21,
+   "k": 4,
+   "ns": "😀",
+   "mix": "😀"
+  },
+  {
+   "id": "i",
+   "s": "😀",
+   "n": 1e+21,
+   "b": true,
+   "nn": 2,
+   "k": 1,
+   "ns": "é",
+   "mix": "é",
+   "tags": [
+    3
+   ],
+   "big": 1e+21
+  },
+  {
+   "id": "j",
+   "s": "é",
+   "n": 2,
+   "b": false,
+   "ns": "é",
+   "k": 0,
+   "mix": "é",
+   "big": 1700000000000000000
+  },
+  {
+   "id": "k",
+   "s": "é",
+   "ns": "x",
+   "nn": 2,
+   "t": "",
+   "u": {
+    "a": 1
+   },
+   "bi": true
+  },
+  {
+   "id": "l",
+   "n": 1,
+   "b": true,
+   "k": 2,
+   "tags": [
+    1
+   ],
+   "big": 2,
+   "bigi": 2
+  }
+ ],
+ "cases": [
+  {
+   "name": "a compound of a string and a number",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": {
+      "s": "$it.s",
+      "n": "$it.n"
+     }
+    }
+   }
+  },
+  {
+   "name": "a compound with its members in another order",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": {
+      "n": "$it.n",
+      "s": "$it.s"
+     }
+    }
+   }
+  },
+  {
+   "name": "a compound of a nullable string alone",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": {
+      "ns": "$it.ns"
+     }
+    }
+   }
+  },
+  {
+   "name": "a compound of a nullable number and a nullable string",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": {
+      "nn": "$it.nn",
+      "ns": "$it.ns"
+     }
+    }
+   }
+  },
+  {
+   "name": "a compound of a boolean and a number",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": {
+      "b": "$it.b",
+      "n": "$it.n"
+     }
+    }
+   }
+  },
+  {
+   "name": "a compound of three leaves",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": {
+      "s": "$it.s",
+      "n": "$it.n",
+      "b": "$it.b"
+     }
+    }
+   }
+  },
+  {
+   "name": "a compound with a nested object and a literal",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": {
+      "a": {
+       "s": "$it.s",
+       "n": "$it.n"
+      },
+      "c": 1
+     }
+    }
+   }
+  },
+  {
+   "name": "a compound of a string-or-integer member",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": {
+      "mix": "$it.mix"
+     }
+    }
+   }
+  },
+  {
+   "name": "a compound of a boolean-or-integer member",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": {
+      "bi": "$it.bi"
+     }
+    }
+   }
+  },
+  {
+   "name": "a compound naming one path twice",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": {
+      "x": "$it.s",
+      "y": "$it.s",
+      "n": "$it.n"
+     }
+    }
+   }
+  },
+  {
+   "name": "a compound of the unique key",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": {
+      "id": "$it.id"
+     }
+    }
+   }
+  },
+  {
+   "name": "a compound of an array element",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": {
+      "first": "$it.tags[0]",
+      "s": "$it.s"
+     }
+    }
+   }
+  },
+  {
+   "name": "a compound beside a filter",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$where": {
+      "$ge": [
+       "$it.n",
+       1
+      ]
+     },
+     "$return": {
+      "s": "$it.s",
+      "n": "$it.n"
+     }
+    }
+   }
+  },
+  {
+   "name": "a compound beside a filter that keeps few rows",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$where": {
+      "$eq": [
+       "$it.s",
+       "x"
+      ]
+     },
+     "$return": {
+      "s": "$it.s",
+      "n": "$it.n"
+     }
+    }
+   }
+  },
+  {
+   "name": "a window over a compound",
+   "query": {
+    "$subsequence": [
+     {
+      "$distinct": {
+       "$for": {
+        "it": "$[*]"
+       },
+       "$return": {
+        "s": "$it.s",
+        "n": "$it.n"
+       }
+      }
+     },
+     1,
+     3
+    ]
+   }
+  },
+  {
+   "name": "a window over a compound without a limit",
+   "query": {
+    "$subsequence": [
+     {
+      "$distinct": {
+       "$for": {
+        "it": "$[*]"
+       },
+       "$return": {
+        "s": "$it.s",
+        "n": "$it.n"
+       }
+      }
+     },
+     2
+    ]
+   }
+  },
+  {
+   "name": "nested windows over a compound",
+   "query": {
+    "$subsequence": [
+     {
+      "$subsequence": [
+       {
+        "$distinct": {
+         "$for": {
+          "it": "$[*]"
+         },
+         "$return": {
+          "s": "$it.s",
+          "n": "$it.n"
+         }
+        }
+       },
+       1,
+       5
+      ]
+     },
+     1,
+     2
+    ]
+   }
+  },
+  {
+   "name": "a compound ordered by another path ascending",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$orderby": [
+      {
+       "$key": "$it.k",
+       "$dir": "asc"
+      }
+     ],
+     "$return": {
+      "s": "$it.s",
+      "n": "$it.n"
+     }
+    }
+   }
+  },
+  {
+   "name": "a compound ordered by another path descending",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$orderby": [
+      {
+       "$key": "$it.k",
+       "$dir": "desc"
+      }
+     ],
+     "$return": {
+      "s": "$it.s",
+      "n": "$it.n"
+     }
+    }
+   }
+  },
+  {
+   "name": "a compound ordered by another path, absent keys last",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$orderby": [
+      {
+       "$key": "$it.k",
+       "$dir": "asc",
+       "$empty": "greatest"
+      }
+     ],
+     "$return": {
+      "s": "$it.s",
+      "n": "$it.n"
+     }
+    }
+   }
+  },
+  {
+   "name": "a compound ordered by one of its own members",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$orderby": [
+      {
+       "$key": "$it.s",
+       "$dir": "desc"
+      }
+     ],
+     "$return": {
+      "s": "$it.s",
+      "n": "$it.n"
+     }
+    }
+   }
+  },
+  {
+   "name": "a window over an ordered compound",
+   "query": {
+    "$subsequence": [
+     {
+      "$distinct": {
+       "$for": {
+        "it": "$[*]"
+       },
+       "$orderby": [
+        {
+         "$key": "$it.k",
+         "$dir": "desc",
+         "$empty": "greatest"
+        }
+       ],
+       "$return": {
+        "s": "$it.s",
+        "n": "$it.n"
+       }
+      }
+     },
+     1,
+     3
+    ]
+   }
+  },
+  {
+   "name": "a compound with a literal and one leaf",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": {
+      "k": 5,
+      "s": "$it.s"
+     }
+    }
+   }
+  },
+  {
+   "name": "a compound of a leaf under a nested literal object",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": {
+      "z": {
+       "one": 1,
+       "v": "$it.n"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "a compound with a member named __proto__",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": {
+      "__proto__": "$it.s",
+      "n": "$it.n"
+     }
+    }
+   }
+  },
+  {
+   "name": "a compound whose only member is named __proto__",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": {
+      "__proto__": "$it.s"
+     }
+    }
+   }
+  },
+  {
+   "name": "a compound with a nested member named __proto__",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": {
+      "a": {
+       "__proto__": "$it.s"
+      },
+      "n": "$it.n"
+     }
+    }
+   }
+  },
+  {
+   "name": "a compound with a member named __proto__, ordered by another path",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$orderby": [
+      {
+       "$key": "$it.k",
+       "$dir": "desc"
+      }
+     ],
+     "$return": {
+      "__proto__": "$it.s",
+      "n": "$it.n"
+     }
+    }
+   }
+  },
+  {
+   "name": "distinct string",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": "$it.s"
+    }
+   }
+  },
+  {
+   "name": "distinct string-or-integer",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": "$it.mix"
+    }
+   }
+  },
+  {
+   "name": "distinct boolean-or-integer",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": "$it.bi"
+    }
+   }
+  },
+  {
+   "name": "distinct nullable string",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": "$it.ns"
+    }
+   }
+  },
+  {
+   "name": "distinct an array element",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": "$it.tags[0]"
+    }
+   }
+  },
+  {
+   "name": "distinct an element past the prefix items",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": "$it.tup[1]"
+    }
+   }
+  },
+  {
+   "name": "distinct ordered by its own path",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$orderby": [
+      {
+       "$key": "$it.s",
+       "$dir": "desc"
+      }
+     ],
+     "$return": "$it.s"
+    }
+   }
+  },
+  {
+   "name": "distinct string ordered by k asc, least",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$orderby": [
+      {
+       "$key": "$it.k",
+       "$dir": "asc",
+       "$empty": "least"
+      }
+     ],
+     "$return": "$it.s"
+    }
+   }
+  },
+  {
+   "name": "distinct string ordered by k asc, greatest",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$orderby": [
+      {
+       "$key": "$it.k",
+       "$dir": "asc",
+       "$empty": "greatest"
+      }
+     ],
+     "$return": "$it.s"
+    }
+   }
+  },
+  {
+   "name": "distinct string ordered by k desc, least",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$orderby": [
+      {
+       "$key": "$it.k",
+       "$dir": "desc",
+       "$empty": "least"
+      }
+     ],
+     "$return": "$it.s"
+    }
+   }
+  },
+  {
+   "name": "distinct string ordered by k desc, greatest",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$orderby": [
+      {
+       "$key": "$it.k",
+       "$dir": "desc",
+       "$empty": "greatest"
+      }
+     ],
+     "$return": "$it.s"
+    }
+   }
+  },
+  {
+   "name": "distinct string ordered by two other paths",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$orderby": [
+      {
+       "$key": "$it.k",
+       "$dir": "desc"
+      },
+      {
+       "$key": "$it.n",
+       "$dir": "asc",
+       "$empty": "greatest"
+      }
+     ],
+     "$return": "$it.s"
+    }
+   }
+  },
+  {
+   "name": "distinct string ordered by itself, then another path",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$orderby": [
+      {
+       "$key": "$it.s",
+       "$dir": "asc"
+      },
+      {
+       "$key": "$it.k",
+       "$dir": "desc"
+      }
+     ],
+     "$return": "$it.s"
+    }
+   }
+  },
+  {
+   "name": "distinct string ordered by another path, then itself",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$orderby": [
+      {
+       "$key": "$it.k",
+       "$dir": "desc"
+      },
+      {
+       "$key": "$it.s",
+       "$dir": "asc"
+      }
+     ],
+     "$return": "$it.s"
+    }
+   }
+  },
+  {
+   "name": "distinct number ordered by another path beside a filter",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$where": {
+      "$ne": [
+       "$it.s",
+       "x"
+      ]
+     },
+     "$orderby": [
+      {
+       "$key": "$it.k",
+       "$dir": "asc",
+       "$empty": "greatest"
+      }
+     ],
+     "$return": "$it.n"
+    }
+   }
+  },
+  {
+   "name": "a window over a string ordered by another path",
+   "query": {
+    "$subsequence": [
+     {
+      "$distinct": {
+       "$for": {
+        "it": "$[*]"
+       },
+       "$orderby": [
+        {
+         "$key": "$it.k",
+         "$dir": "desc"
+        }
+       ],
+       "$return": "$it.s"
+      }
+     },
+     0,
+     2
+    ]
+   }
+  },
+  {
+   "name": "distinct string-or-integer ordered by another path",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$orderby": [
+      {
+       "$key": "$it.k",
+       "$dir": "asc"
+      }
+     ],
+     "$return": "$it.mix"
+    }
+   }
+  },
+  {
+   "name": "distinct boolean ordered by another path",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$orderby": [
+      {
+       "$key": "$it.n",
+       "$dir": "desc"
+      }
+     ],
+     "$return": "$it.b"
+    }
+   }
+  },
+  {
+   "name": "a compound of a large whole number and a string",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": {
+      "big": "$it.big",
+      "s": "$it.s"
+     }
+    }
+   }
+  },
+  {
+   "name": "a compound of a large whole number alone",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": {
+      "big": "$it.big"
+     }
+    }
+   }
+  },
+  {
+   "name": "a compound of a large integer member and a string",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": {
+      "bigi": "$it.bigi",
+      "s": "$it.s"
+     }
+    }
+   }
+  },
+  {
+   "name": "a compound of a large string-or-integer member and a number",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": {
+      "bigm": "$it.bigm",
+      "big": "$it.big"
+     }
+    }
+   }
+  },
+  {
+   "name": "distinct large whole number",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": "$it.big"
+    }
+   }
+  },
+  {
+   "name": "distinct large integer",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": "$it.bigi"
+    }
+   }
+  },
+  {
+   "name": "distinct large string-or-integer",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": "$it.bigm"
+    }
+   }
+  },
+  {
+   "name": "a string ordered by a large whole number",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$orderby": [
+      {
+       "$key": "$it.big",
+       "$dir": "desc"
+      }
+     ],
+     "$return": "$it.s"
+    }
+   }
+  },
+  {
+   "name": "a compound ordered by a large integer",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$orderby": [
+      {
+       "$key": "$it.bigi",
+       "$dir": "asc",
+       "$empty": "greatest"
+      }
+     ],
+     "$return": {
+      "s": "$it.s",
+      "n": "$it.n"
+     }
+    }
+   }
+  },
+  {
+   "name": "a large whole number ordered by another path",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$orderby": [
+      {
+       "$key": "$it.k",
+       "$dir": "desc"
+      }
+     ],
+     "$return": "$it.big"
+    }
+   }
+  },
+  {
+   "name": "a window over a compound of a large whole number",
+   "query": {
+    "$subsequence": [
+     {
+      "$distinct": {
+       "$for": {
+        "it": "$[*]"
+       },
+       "$return": {
+        "big": "$it.big",
+        "s": "$it.s"
+       }
+      }
+     },
+     1,
+     3
+    ]
+   }
+  },
+  {
+   "name": "distinct large integer-or-string",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": "$it.nmix"
+    }
+   }
+  },
+  {
+   "name": "a compound of a large integer-or-string member and a string",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": {
+      "nmix": "$it.nmix",
+      "s": "$it.s"
+     }
+    }
+   }
+  },
+  {
+   "name": "a grouping keyed by a large whole number",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$groupby": {
+     "g": "$it.big"
+    },
+    "$return": {
+     "g": "$g",
+     "c": {
+      "$count": "$it"
+     }
+    }
+   }
+  },
+  {
+   "name": "a grouping keyed by a large integer",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$groupby": {
+     "g": "$it.bigi"
+    },
+    "$return": {
+     "g": "$g",
+     "c": {
+      "$count": "$it"
+     }
+    }
+   }
+  },
+  {
+   "name": "a grouping keyed by a large string-or-integer",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$groupby": {
+     "g": "$it.bigm"
+    },
+    "$return": {
+     "g": "$g",
+     "c": {
+      "$count": "$it"
+     }
+    }
+   }
+  },
+  {
+   "name": "a grouping keyed by a large integer-or-string",
+   "query": {
+    "$for": {
+     "it": "$[*]"
+    },
+    "$groupby": {
+     "g": "$it.nmix"
+    },
+    "$return": {
+     "g": "$g",
+     "c": {
+      "$count": "$it"
+     }
+    }
+   }
+  },
+  {
+   "name": "an object leaf stays in the engine",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": {
+      "o": "$it.o"
+     }
+    }
+   }
+  },
+  {
+   "name": "an untyped leaf stays in the engine",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": {
+      "u": "$it.u"
+     }
+    }
+   }
+  },
+  {
+   "name": "a leaf under a union with an object stays in the engine",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": "$it.ob"
+    }
+   }
+  },
+  {
+   "name": "a compound with a leaf under a union with an object stays in the engine",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": {
+      "ob": "$it.ob",
+      "s": "$it.s"
+     }
+    }
+   }
+  },
+  {
+   "name": "an array constructor of two leaves stays in the engine",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": [
+      "$it.s",
+      "$it.t"
+     ]
+    }
+   }
+  },
+  {
+   "name": "an array constructor of one leaf stays in the engine",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": [
+      "$it.s"
+     ]
+    }
+   }
+  },
+  {
+   "name": "a compound holding the document stays in the engine",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": {
+      "doc": "$it",
+      "s": "$it.s"
+     }
+    }
+   }
+  },
+  {
+   "name": "a constructor without a leaf stays in the engine",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": {
+      "k": 1
+     }
+    }
+   }
+  },
+  {
+   "name": "a negative index through a tuple stays in the engine",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": {
+      "last": "$it.tup[-1]"
+     }
+    }
+   }
+  },
+  {
+   "name": "an element of a tuple that is no scalar stays in the engine",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": "$it.tup[0]"
+    }
+   }
+  },
+  {
+   "name": "an operator inside a constructor stays in the engine",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": {
+      "u": {
+       "$upper": "$it.s"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "a path with several items stays in the engine",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": {
+      "t": "$it.tags[*]"
+     }
+    }
+   }
+  },
+  {
+   "name": "distinct of the bare binding stays in the engine",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$return": "$it"
+    }
+   }
+  },
+  {
+   "name": "distinct ordered by a nullable key stays in the engine",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$orderby": [
+      {
+       "$key": "$it.ns",
+       "$dir": "asc"
+      }
+     ],
+     "$return": "$it.s"
+    }
+   }
+  },
+  {
+   "name": "a compound ordered by a boolean stays in the engine",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$orderby": [
+      {
+       "$key": "$it.b",
+       "$dir": "asc"
+      }
+     ],
+     "$return": {
+      "s": "$it.s"
+     }
+    }
+   }
+  },
+  {
+   "name": "a compound ordered by a mixed-kind member stays in the engine",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "it": "$[*]"
+     },
+     "$orderby": [
+      {
+       "$key": "$it.mix",
+       "$dir": "asc"
+      }
+     ],
+     "$return": {
+      "s": "$it.s"
+     }
+    }
+   }
+  }
+ ]
+}

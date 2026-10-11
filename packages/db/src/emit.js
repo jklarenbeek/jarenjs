@@ -80,6 +80,29 @@ export class UnrepresentablePath extends Error {}
 export class UnrepresentableIdentity extends Error {}
 
 /**
+ * The rows of a grouping, numbered in the order the engine meets them: a
+ * derived table that carries what the statement reads of each row and the
+ * number of the row under `order`. A group's first row is the least number
+ * among its rows, so the groups come out in the order of their first
+ * appearance when the statement orders them by {@link firstRowNumber}. The
+ * database refuses a window function inside an aggregate, which is why the
+ * number is made one level down. The table's name starts with a digit, so that
+ * no table's name prefixes it in a scan narrative.
+ * @param {(name: string) => string} q - the dialect's identifier quoting
+ * @param {{ columns: string[], from: string, where: string, order: string[] }} rows -
+ *   what each row carries, the source and its `WHERE` clause (with its leading
+ *   space, or empty), and the terms that number the rows
+ * @returns {string} the derived table with its alias, for a `FROM` clause
+ */
+function numberedRows(q, { columns, from, where, order }) {
+  return `(SELECT ${[...columns, `ROW_NUMBER() OVER (ORDER BY ${order.join(', ')}) AS ${q('_rn')}`].join(', ')} `
+    + `FROM ${from}${where}) AS ${q('0rows')}`;
+}
+
+/** The term that puts the groups of {@link numberedRows} in the order of their first rows. */
+const firstRowNumber = (/** @type {(name: string) => string} */ q) => `MIN(${q('_rn')})`;
+
+/**
  * The names of the columns an entity's table has: its mapped members, its
  * foreign keys and, unless it has none, its document. A name a row
  * identity must not share, since the database resolves a name to a column
@@ -377,21 +400,36 @@ export function emitPlan(plan, dialect, physical) {
   /** The presence/type discriminator, always over the document column. */
   const typeOf = (ref) => dialect.jsonTypeOf(docOf(ref), pathText(ref));
   /** One projected member: its value beside its JSON type, under a
-   * suffixed pair of names the decoder reads back. */
-  const projectedPair = (ref, suffix) =>
-    `CASE WHEN ${typeOf(ref)} IN (${sl('object')}, ${sl('array')}) `
-    + `THEN ${dialect.jsonText(dialect.jsonExtract(docOf(ref), pathText(ref)))} `
-    // a SCALAR leaf comes back as the value the decoder reads: the
-    // engine's own scalar where it has one, its text where every
-    // member is one JSON type and a CASE could not answer two
-    + `ELSE ${dialect.jsonExtract(docOf(ref), pathText(ref), 'scalar')} `
-    + `END AS ${q(`v${suffix}`)}, ${typeOf(ref)} AS ${q(`t${suffix}`)}`;
+   * suffixed pair of names the decoder reads back. A group KEY that may hold
+   * a number is read as the number the engine holds, so that values it holds
+   * equal group together however they were written (`2` and `2.0`, an integer
+   * text past 2^53): its type names the JSON number once (`integer` and `real`
+   * are one number), a member that holds numbers and nothing else is read as
+   * the double itself, and one that may hold other scalars reads a number so
+   * and every other scalar as it is stored. */
+  const projectedPair = (ref, suffix, groupKey = false) => {
+    const numeric = groupKey && (ref.type === 'integer' || ref.type === 'number');
+    const holdsNumber = numeric || (groupKey && ref.mixed === true);
+    const type = holdsNumber ? numberOnce(typeOf(ref)) : typeOf(ref);
+    if (numeric && ref.mixed !== true)
+      return `${dialect.jsonExtract(docOf(ref), pathText(ref), 'double')} AS ${q(`v${suffix}`)}, ${type} AS ${q(`t${suffix}`)}`;
+    return `CASE WHEN ${typeOf(ref)} IN (${sl('object')}, ${sl('array')}) `
+      + `THEN ${dialect.jsonText(dialect.jsonExtract(docOf(ref), pathText(ref)))} `
+      // a SCALAR leaf comes back as the value the decoder reads: the
+      // engine's own scalar where it has one, its text where every
+      // member is one JSON type and a CASE could not answer two
+      + `ELSE ${dialect.jsonExtract(docOf(ref), pathText(ref), holdsNumber ? 'key' : 'scalar')} `
+      + `END AS ${q(`v${suffix}`)}, ${type} AS ${q(`t${suffix}`)}`;
+  };
 
   const sl = dialect.stringLiteral;
   /** The discriminator's spellings for a JSON NUMBER, as this engine
    * answers them: SQLite keeps `integer` and `real` apart, an engine
    * with one JSON number type answers one name. */
   const NUMERIC = () => `(${dialect.numericTypeNames.map(sl).join(', ')})`;
+  /** A JSON type read so that every JSON number has one name. */
+  const numberOnce = (/** @type {string} */ typeSql) => (dialect.numericTypeNames.length === 1 ? typeSql
+    : `CASE WHEN ${typeSql} IN ${NUMERIC()} THEN ${sl(dialect.numericTypeNames[0])} ELSE ${typeSql} END`);
 
   /**
    * One aggregate's argument, read at the kind the FOLD needs rather
@@ -769,7 +807,7 @@ export function emitPlan(plan, dialect, physical) {
     ? `${dialect.rowIdentity()} AS ${q('rid')}, `
       + `${q(plan.rank.alternatives[0].column)} AS ${q('vec')}`
     : plan.group !== null
-      ? [...plan.group.keys.map((key, i) => projectedPair(key.ref, `k${i}`)),
+      ? [...plan.group.keys.map((key, i) => projectedPair(key.ref, `k${i}`, true)),
         ...plan.group.aggregates.map((entry, i) =>
           `${groupedAggregate(entry, dialect.groupAggregate(entry.fn, accumulated(entry.fn, entry.ref)))} AS ${q(`a${i}`)}`),
         // an integer sum or average answers only beside its exactness guard
@@ -813,8 +851,29 @@ export function emitPlan(plan, dialect, physical) {
               + (plan.aggregate.fn === 'sum' || plan.aggregate.fn === 'avg'
                 ? `, ${exactSum(dialect, foldValue(plan.aggregate.fn, plan.aggregate.ref))} AS ${q('_safe')}` : '');
 
-  let sql = `SELECT ${selection} FROM ${q(physical.table)}`;
-  if (plan.filter !== null) sql += ` WHERE ${emitPred(plan.filter)}`;
+  /** The terms that put the rows in the order the engine meets them: the
+   * declared ordering, then the row identity. The collection is a SEQUENCE:
+   * its order is insertion (row identity) order, and the engine's sort is
+   * stable — the identity tiebreaker reproduces both, and without it the
+   * database is free to answer in index order */
+  const rowOrder = () => [...(plan.order ?? []).map((term) => {
+    // Jaren's default sorts an empty key least: NULLS FIRST when
+    // ascending, NULLS LAST when descending — and mirrored for
+    // $empty: 'greatest' (probed against the engine)
+    const nullsFirst = term.emptyGreatest === term.desc;
+    return `${valueOf(term.ref, kindOf(term.ref))} `
+      + `${term.desc ? 'DESC' : 'ASC'}${dialect.orderNulls(nullsFirst)}`;
+  }), dialect.rowIdentity()];
+  const where = plan.filter === null ? '' : ` WHERE ${emitPred(plan.filter)}`;
+  // a grouping that keeps an ordering is a distinct of rows ordered by other paths than the one it
+  // projects: its rows are numbered in that order, and a group stands where its first row does
+  const numbered = plan.group !== null && plan.order !== null;
+  if (numbered && plan.group.aggregates.length > 0)
+    throw new Error('emit: a grouping that numbers its rows by an ordering folds no aggregate');
+  let sql = numbered
+    ? `SELECT ${plan.group.keys.flatMap((_, i) => [q(`vk${i}`), q(`tk${i}`)]).join(', ')} FROM ${numberedRows(q, {
+      columns: [selection], from: q(physical.table), where, order: rowOrder() })}`
+    : `SELECT ${selection} FROM ${q(physical.table)}${where}`;
   if (plan.group !== null) {
     // BY THE ALIASES the selection named, not by a second spelling of
     // the same member. Two reasons, and the second is the load-bearing
@@ -840,7 +899,7 @@ export function emitPlan(plan, dialect, physical) {
     const order = plan.group.order === 'first-seen' ? []
       : plan.group.order.map((term) => `${term.aggregate === undefined ? keyOrder(term.index) : q(`a${term.aggregate}`)} `
         + `${term.desc ? 'DESC' : 'ASC'}${dialect.orderNulls(term.nullsFirst)}`);
-    order.push(dialect.groupAggregate('min', dialect.rowIdentity()));
+    order.push(numbered ? firstRowNumber(q) : dialect.groupAggregate('min', dialect.rowIdentity()));
     sql += ` ORDER BY ${order.join(', ')}`;
   }
   if (plan.bucket !== null) {
@@ -855,20 +914,7 @@ export function emitPlan(plan, dialect, physical) {
   }
   if (plan.aggregate === null && plan.rank === null && plan.bucket === null
     && plan.group === null) {
-    const terms = (plan.order ?? []).map((term) => {
-      // Jaren's default sorts an empty key least: NULLS FIRST when
-      // ascending, NULLS LAST when descending — and mirrored for
-      // $empty: 'greatest' (probed against the engine)
-      const nullsFirst = term.emptyGreatest === term.desc;
-      return `${valueOf(term.ref, kindOf(term.ref))} `
-        + `${term.desc ? 'DESC' : 'ASC'}${dialect.orderNulls(nullsFirst)}`;
-    });
-    // the collection is a SEQUENCE: its order is insertion (row
-    // identity) order, and the engine's sort is stable — the identity
-    // tiebreaker reproduces both, and without it the database is free
-    // to answer in index order
-    terms.push(dialect.rowIdentity());
-    sql += ` ORDER BY ${terms.join(', ')}`;
+    sql += ` ORDER BY ${rowOrder().join(', ')}`;
   }
   if (plan.window !== null && plan.aggregate === null) {
     sql += ` ${dialect.limitClause(plan.window.limit, plan.window.offset)}`;
@@ -1383,12 +1429,10 @@ export function emitEntityPlan(plan, dialect, physicalOf) {
   let sql;
   if (joined) {
     // the rows of the join, numbered in the engine's nested-loop order (every
-    // binding's identity, in binding order): a group's first row is the least
-    // number among its rows. The name starts with a digit, so that no table
-    // name prefixes it in a scan narrative
-    const rows = [...keyPairs, ...[...inputs.values()].map(({ name, source }) => `${source} AS ${name}`),
-      `ROW_NUMBER() OVER (ORDER BY ${plan.bindings.flatMap(identityTerms).join(', ')}) AS ${q('_rn')}`];
-    sql = `SELECT ${selection} FROM (SELECT ${rows.join(', ')} FROM ${fromSql}${whereSql}) AS ${q('0rows')}`;
+    // binding's identity, in binding order)
+    sql = `SELECT ${selection} FROM ${numberedRows(q, {
+      columns: [...keyPairs, ...[...inputs.values()].map(({ name, source }) => `${source} AS ${name}`)],
+      from: fromSql, where: whereSql, order: plan.bindings.flatMap(identityTerms) })}`;
   }
   else sql = `SELECT ${selection} FROM ${fromSql}${whereSql}`;
 
@@ -1397,7 +1441,7 @@ export function emitEntityPlan(plan, dialect, physicalOf) {
     const terms = group.order === 'first-seen' ? [] : group.order.map((term) =>
       `${q(term.aggregate === undefined ? `vk${term.index}` : `a${term.aggregate}`)} ${term.desc ? 'DESC' : 'ASC'}${dialect.orderNulls(term.nullsFirst)}`);
     // groups an order leaves tied come out by their first row
-    terms.push(...(joined ? [`MIN(${q('_rn')})`] : identityTerms(plan.bindings[0]).map((term) => `MIN(${term})`)));
+    terms.push(...(joined ? [firstRowNumber(q)] : identityTerms(plan.bindings[0]).map((term) => `MIN(${term})`)));
     sql += ` ORDER BY ${terms.join(', ')}`;
     if (plan.window !== null) sql += ` ${dialect.limitClause(plan.window.limit, plan.window.offset)}`;
   }

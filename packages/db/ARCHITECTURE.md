@@ -504,7 +504,11 @@ decoding it, and a count reads no row, as a count of the bare binding or of a
 constructor of member paths already did.
 
 General scalar grouping preserves absent and null keys separately through
-value/type pairs. Null and boolean keys may group, but ordering them stays
+value/type pairs, and groups a key by the number it is, not by the way it was
+written (`2.0` and `2` are one key). A key is a singular path the schema
+declares as scalars alone, however many kinds a union lists; one that may hold
+an object or an array, or is reached by a negative index, is the engine's. Null
+and boolean keys may group, but ordering them stays
 residual to preserve `JQ2005`. Explicit group ordering accepts orderable keys and proven count/min/max
 expressions and integer sums and averages, including aggregates absent from the return; first appearance
 breaks ties. A floating SUM/AVG ordering remains residual: compensated or differently
@@ -520,9 +524,25 @@ An ordered group key is read at its own kind (a number by value, a string by
 code point, on PostgreSQL `numeric` and `COLLATE "C"`), never from the text the
 decoder reads. Other literal windows lower over singleton group constructors;
 `$count` over such constructors with only row-count aggregates counts a grouped
-subquery. `$distinct` over a typed scalar projection uses the same key relation, with
-absent members removed first. Unordered inputs retain first appearance; an
-ordering composed solely of the projected path lowers to group-key order.
+subquery. `$distinct` uses the same key relation over leaves the schema declares as
+scalars alone (a string, a number, an integer or a boolean, each optionally `null`, however
+many of them a union lists), alone or as the members of an object constructor with literals;
+a path alone has its absent members removed first, a constructor yields an item for every
+row. Unordered inputs retain first appearance; an ordering composed solely of the projected
+path lowers to group-key order; an ordering by any other paths numbers the rows in that
+order in a derived table, as a grouped join does, and a group stands where its first row
+does, so a row without the key stays in the ordering where `$empty` places it. A key
+reads a number as the number the engine parses: SQLite's `integer` and `real` are one
+name, and a member that holds numbers alone is read as a double, so `2` beside `2.0` is one
+group and a whole number beyond 2^53, which a client that writes doubles leaves as an integer
+text the driver cannot hand over exactly, is a key like any other; PostgreSQL groups the
+numeric itself, whose equality ignores the scale it was written with. A member that may also
+hold a string reads a number as that double (SQLite) or as the number's text without its scale
+(PostgreSQL) and every other scalar as it is stored. The statement groups every row it reads,
+and the planner cannot know how many groups there are: with nearly as many groups as rows it
+does the engine's own work and a sort besides and can be slower than the engine. An entity
+`$distinct` of mapped columns is the same grouping through the entity emitter, with the guards
+of an entity grouping.
 
 Entity projection trees, constants, counts and single-path windows follow the
 same cardinality rules. An equijoin graph can additionally filter through
@@ -565,7 +585,7 @@ mode, `knn`, beside native, row and set.
 | construct | reason |
 |---|---|
 | `$let` bindings, `$fold`, positional/window bindings | no equivalence proof exists yet; residual by default |
-| a `$groupby` whose key is untyped, whose `$return` reads the binding, or whose `$orderby` names anything but an orderable key, a count/min/max or an integer sum/avg | SQL's grouping and the engine's need not agree on an untyped key; after a grouping the binding holds the group's ROWS, which an object member cannot take; a floating sum or average accumulates in the engine's order (`plan.floatingAccumulation`) |
+| a `$groupby` whose key is untyped or may hold an object or an array, whose `$return` reads the binding, or whose `$orderby` names anything but an orderable key, a count/min/max or an integer sum/avg | SQL's grouping and the engine's need not agree on an untyped key; after a grouping the binding holds the group's ROWS, which an object member cannot take; a floating sum or average accumulates in the engine's order (`plan.floatingAccumulation`) |
 | a window over a group return that may omit an item, or over groups ordered by an integer sum/avg (`plan.windowedAccumulation`), or a group aggregate beyond the proven constructor count | SQL group cardinality must equal the projected item cardinality; the exactness guard beside a sum is read on the groups a statement returns, not on those a window leaves out; numeric and error semantics need their own proof |
 | an entity grouping over a compound physical key whose order leaves two groups tied (`entity.groupOrder`), over a store-owned PostgreSQL table or any join on PostgreSQL (`bind.entityGrouping`), or over a join that is ordered, windowed, returns the nullable form of a sum or reads a whole binding | tied groups come out by first appearance, the smallest key TUPLE, which the minima of the key columns taken one by one do not give; the runtime guards (`_safe`, `_valid`) are qualified on SQLite and over one adopted PostgreSQL table with no document column; a join's groups come out by the number of their first row, which an ordering has not been proven to leave alone |
 | an entity grouping that sums, averages or takes an extreme of a column whose NULL reads back as a present `null` or that stores a boolean, or orders its groups by such a key | the engine refuses a sequence holding a `null` or a boolean (`JQ2001`, `JQ2005`) where SQL skips, folds or orders it |
@@ -579,7 +599,7 @@ mode, `knn`, beside native, row and set.
 | a document that reads the collection root outside its binding — `$`, `$.…`, `$[…]`, a nested query over `$[*]`, a variable bound to the root, the root inside a path filter (`$it.xs[?@ == $[0].n]`) | the engine answers over the WHOLE collection (under a profile, the rows its mandatory predicate keeps): the row residual would hand it one row, and a pushed conjunct, the deterministic-function hatch, a window or a k-nearest cut the rows they keep — so such a document is planned with no hook (nothing registered for a narrowing it cannot keep), a plan that narrows becomes the bare fetch with the reason `plan.rootRead`, and one that already fetches every row keeps its own reasons. The planner counts root reads over the analysis, filter selectors included; a phrase it narrows reads the root once, through its binding or a temporal operator's operand |
 | string operators with an external pattern | the pattern's type is unknowable at plan time and the engine ERRORS on non-string patterns |
 | a comparison of two paths when either is not typed as a scalar — an object, an array, an untyped member (`predicate.joinTerritory`; an entity query also refuses a pair outside one non-null number or string family); a `$get` whose target is untyped, whose key is no literal string, or that feeds a string operator over a member that can hold another kind (`predicate.operands`, `predicate.existence`, `predicate.stringSubject`) | `$eq` and `$ne` compare objects and arrays deeply, member order and `1` against `1.0` insignificant inside, which SQL text cannot reproduce; the engine raises on a string operator's subject of another kind; the deterministic-function hatch may still take it |
-| `$distinct` over untyped/compound projections or ordering by other paths | first-occurrence order and structural equality need additional lowering |
+| `$distinct` of an object, an array, an untyped member or a union that may hold either, of a path reached by a negative index, of an array constructor, an operator, the document or a path with several items; on an entity, of anything but mapped columns of scalar codecs, or with an ordering of its own | SQLite groups an object or an array by its text, which keeps the order of its members, and PostgreSQL's jsonb text keeps the spelling of a number (`1.0`), where the engine compares them member by member and numbers by value; an array's elements are not named, so rows with different leaves can answer one array (`plan.distinctProjection`, `entity.distinct`) |
 | array/object literals in comparisons | deep-equality has no guarded native form |
 | `$within` over a `derive: 'bbox'` column | a bounding-box pre-filter is pushed; exact containment refines in the engine |
 | a bounded `$distance` over a `derive: 'bbox'` column | a geodesic-circle box pre-filter is pushed; the exact distance refines in the engine |

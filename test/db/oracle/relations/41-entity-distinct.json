@@ -1,0 +1,982 @@
+{
+ "group": "entity distinct over mapped columns",
+ "model": {
+  "$model": "0.1",
+  "entities": {
+   "Person": {
+    "schema": {
+     "type": "object",
+     "required": [
+      "id"
+     ],
+     "properties": {
+      "id": {
+       "type": "string",
+       "x-entity": {
+        "key": true
+       }
+      },
+      "name": {
+       "type": "string"
+      },
+      "age": {
+       "type": "integer",
+       "x-entity": {
+        "index": true
+       }
+      },
+      "city": {
+       "type": "string",
+       "x-entity": {
+        "index": true
+       }
+      },
+      "score": {
+       "type": "number"
+      },
+      "active": {
+       "type": "boolean"
+      },
+      "nick": {
+       "type": [
+        "string",
+        "null"
+       ]
+      },
+      "bio": {
+       "type": "object",
+       "properties": {
+        "line": {
+         "type": "string"
+        }
+       }
+      },
+      "pets": {
+       "x-entity": {
+        "relation": {
+         "to": "Pet",
+         "many": true,
+         "via": "ownerId",
+         "onDelete": "cascade"
+        }
+       }
+      }
+     }
+    }
+   },
+   "Pet": {
+    "schema": {
+     "type": "object",
+     "required": [
+      "pid",
+      "ownerId"
+     ],
+     "properties": {
+      "pid": {
+       "type": "integer",
+       "x-entity": {
+        "key": true
+       }
+      },
+      "kind": {
+       "type": "string"
+      },
+      "weight": {
+       "type": "number"
+      },
+      "ownerId": {
+       "type": "string",
+       "x-entity": {
+        "index": true
+       }
+      }
+     }
+    }
+   },
+   "Toy": {
+    "schema": {
+     "type": "object",
+     "required": [
+      "tid"
+     ],
+     "properties": {
+      "tid": {
+       "type": "integer",
+       "x-entity": {
+        "key": true
+       }
+      },
+      "name": {
+       "type": "string"
+      },
+      "petId": {
+       "type": "integer",
+       "x-entity": {
+        "index": true
+       }
+      }
+     }
+    }
+   }
+  }
+ },
+ "documents": {
+  "Person": [
+   {
+    "id": "p01",
+    "name": "ada",
+    "age": 36,
+    "city": "delft",
+    "score": 1.5,
+    "active": true,
+    "nick": "a",
+    "bio": {
+     "line": "engineer"
+    }
+   },
+   {
+    "id": "p02",
+    "name": "ada",
+    "age": 36,
+    "city": "delft",
+    "score": 1.5,
+    "active": true,
+    "bio": {
+     "line": "engineer"
+    }
+   },
+   {
+    "id": "p03",
+    "name": "lin",
+    "age": 64,
+    "city": "utrecht",
+    "score": 2,
+    "active": false,
+    "nick": "a"
+   },
+   {
+    "id": "p04",
+    "name": "kid",
+    "city": "delft",
+    "score": 0,
+    "active": false,
+    "nick": ""
+   },
+   {
+    "id": "p05",
+    "age": 64,
+    "city": "utrecht",
+    "score": -2.5,
+    "active": true
+   },
+   {
+    "id": "p06",
+    "name": "",
+    "age": 0,
+    "score": 1.5,
+    "nick": "b"
+   },
+   {
+    "id": "p07",
+    "name": "qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq",
+    "age": 7,
+    "city": "delft",
+    "active": true
+   },
+   {
+    "id": "p08",
+    "name": "qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqx",
+    "age": 7,
+    "city": "😀",
+    "score": 1e+21
+   },
+   {
+    "id": "p09",
+    "name": "é",
+    "age": 36,
+    "city": "é",
+    "active": false
+   },
+   {
+    "id": "p10",
+    "name": "é",
+    "age": -1,
+    "city": "delft",
+    "nick": "a"
+   },
+   {
+    "id": "p11",
+    "name": "ada",
+    "age": 64,
+    "city": "delft",
+    "score": 2
+   }
+  ],
+  "Pet": [
+   {
+    "pid": 1,
+    "kind": "cat",
+    "weight": 4.5,
+    "ownerId": "p01"
+   },
+   {
+    "pid": 2,
+    "kind": "dog",
+    "weight": 12,
+    "ownerId": "p01"
+   },
+   {
+    "pid": 3,
+    "kind": "cat",
+    "ownerId": "p03"
+   },
+   {
+    "pid": 4,
+    "weight": 4.5,
+    "ownerId": "p03"
+   },
+   {
+    "pid": 5,
+    "kind": "fish",
+    "weight": 0.5,
+    "ownerId": "p05"
+   },
+   {
+    "pid": 6,
+    "kind": "cat",
+    "weight": 4.5,
+    "ownerId": "p05"
+   },
+   {
+    "pid": 7,
+    "kind": "cat",
+    "weight": 4.5,
+    "ownerId": "p11"
+   }
+  ],
+  "Toy": [
+   {
+    "tid": 1,
+    "name": "ball",
+    "petId": 1
+   },
+   {
+    "tid": 2,
+    "name": "bone",
+    "petId": 2
+   },
+   {
+    "tid": 3,
+    "name": "ball",
+    "petId": 2
+   },
+   {
+    "tid": 4,
+    "name": "yarn",
+    "petId": 3
+   },
+   {
+    "tid": 5,
+    "petId": 6
+   },
+   {
+    "tid": 6,
+    "name": "ball",
+    "petId": 7
+   },
+   {
+    "tid": 7,
+    "name": "drum",
+    "petId": 99
+   }
+  ]
+ },
+ "cases": [
+  {
+   "name": "distinct name",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "p": "$.Person[*]"
+     },
+     "$return": "$p.name"
+    }
+   }
+  },
+  {
+   "name": "distinct age",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "p": "$.Person[*]"
+     },
+     "$return": "$p.age"
+    }
+   }
+  },
+  {
+   "name": "distinct city",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "p": "$.Person[*]"
+     },
+     "$return": "$p.city"
+    }
+   }
+  },
+  {
+   "name": "distinct score",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "p": "$.Person[*]"
+     },
+     "$return": "$p.score"
+    }
+   }
+  },
+  {
+   "name": "distinct active",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "p": "$.Person[*]"
+     },
+     "$return": "$p.active"
+    }
+   }
+  },
+  {
+   "name": "distinct nick",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "p": "$.Person[*]"
+     },
+     "$return": "$p.nick"
+    }
+   }
+  },
+  {
+   "name": "distinct id",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "p": "$.Person[*]"
+     },
+     "$return": "$p.id"
+    }
+   }
+  },
+  {
+   "name": "distinct name beside a filter",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "p": "$.Person[*]"
+     },
+     "$where": {
+      "$ge": [
+       "$p.age",
+       7
+      ]
+     },
+     "$return": "$p.name"
+    }
+   }
+  },
+  {
+   "name": "a window over a distinct column",
+   "query": {
+    "$subsequence": [
+     {
+      "$distinct": {
+       "$for": {
+        "p": "$.Person[*]"
+       },
+       "$return": "$p.city"
+      }
+     },
+     1,
+     2
+    ]
+   }
+  },
+  {
+   "name": "a window over a distinct column without a limit",
+   "query": {
+    "$subsequence": [
+     {
+      "$distinct": {
+       "$for": {
+        "p": "$.Person[*]"
+       },
+       "$return": "$p.age"
+      }
+     },
+     2
+    ]
+   }
+  },
+  {
+   "name": "a window over a distinct nullable column",
+   "query": {
+    "$subsequence": [
+     {
+      "$distinct": {
+       "$for": {
+        "p": "$.Person[*]"
+       },
+       "$return": "$p.nick"
+      }
+     },
+     0,
+     2
+    ]
+   }
+  },
+  {
+   "name": "a compound of a string and an integer",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "p": "$.Person[*]"
+     },
+     "$return": {
+      "city": "$p.city",
+      "age": "$p.age"
+     }
+    }
+   }
+  },
+  {
+   "name": "a compound of two nullable columns",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "p": "$.Person[*]"
+     },
+     "$return": {
+      "nick": "$p.nick",
+      "name": "$p.name"
+     }
+    }
+   }
+  },
+  {
+   "name": "a compound of a boolean and a string",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "p": "$.Person[*]"
+     },
+     "$return": {
+      "active": "$p.active",
+      "city": "$p.city"
+     }
+    }
+   }
+  },
+  {
+   "name": "a compound of a number and an integer",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "p": "$.Person[*]"
+     },
+     "$return": {
+      "score": "$p.score",
+      "age": "$p.age"
+     }
+    }
+   }
+  },
+  {
+   "name": "a compound with a nested object and a literal",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "p": "$.Person[*]"
+     },
+     "$return": {
+      "a": {
+       "city": "$p.city"
+      },
+      "k": 1,
+      "age": "$p.age"
+     }
+    }
+   }
+  },
+  {
+   "name": "a compound naming one column twice",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "p": "$.Person[*]"
+     },
+     "$return": {
+      "x": "$p.city",
+      "y": "$p.city",
+      "age": "$p.age"
+     }
+    }
+   }
+  },
+  {
+   "name": "a compound of the key",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "p": "$.Person[*]"
+     },
+     "$return": {
+      "id": "$p.id"
+     }
+    }
+   }
+  },
+  {
+   "name": "a compound with a member named __proto__",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "p": "$.Person[*]"
+     },
+     "$return": {
+      "__proto__": "$p.city",
+      "age": "$p.age"
+     }
+    }
+   }
+  },
+  {
+   "name": "a compound with a nested member named __proto__",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "p": "$.Person[*]"
+     },
+     "$return": {
+      "a": {
+       "__proto__": "$p.city"
+      },
+      "k": 1
+     }
+    }
+   }
+  },
+  {
+   "name": "a compound beside a filter",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "p": "$.Person[*]"
+     },
+     "$where": {
+      "$ne": [
+       "$p.city",
+       "utrecht"
+      ]
+     },
+     "$return": {
+      "city": "$p.city",
+      "active": "$p.active"
+     }
+    }
+   }
+  },
+  {
+   "name": "a window over a compound",
+   "query": {
+    "$subsequence": [
+     {
+      "$distinct": {
+       "$for": {
+        "p": "$.Person[*]"
+       },
+       "$return": {
+        "city": "$p.city",
+        "age": "$p.age"
+       }
+      }
+     },
+     1,
+     3
+    ]
+   }
+  },
+  {
+   "name": "a compound of columns of the joined bindings",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "p": "$.Person[*]",
+      "q": "$.Pet[*]"
+     },
+     "$where": {
+      "$eq": [
+       "$p.id",
+       "$q.ownerId"
+      ]
+     },
+     "$return": {
+      "city": "$p.city",
+      "kind": "$q.kind"
+     }
+    }
+   }
+  },
+  {
+   "name": "a column of the joined binding",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "p": "$.Person[*]",
+      "q": "$.Pet[*]"
+     },
+     "$where": {
+      "$eq": [
+       "$p.id",
+       "$q.ownerId"
+      ]
+     },
+     "$return": "$q.kind"
+    }
+   }
+  },
+  {
+   "name": "a column of the first binding of a join",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "p": "$.Person[*]",
+      "q": "$.Pet[*]"
+     },
+     "$where": {
+      "$eq": [
+       "$p.id",
+       "$q.ownerId"
+      ]
+     },
+     "$return": "$p.city"
+    }
+   }
+  },
+  {
+   "name": "a compound of both bindings with absent members",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "p": "$.Person[*]",
+      "q": "$.Pet[*]"
+     },
+     "$where": {
+      "$eq": [
+       "$p.id",
+       "$q.ownerId"
+      ]
+     },
+     "$return": {
+      "age": "$p.age",
+      "weight": "$q.weight",
+      "kind": "$q.kind"
+     }
+    }
+   }
+  },
+  {
+   "name": "a window over a distinct of a join",
+   "query": {
+    "$subsequence": [
+     {
+      "$distinct": {
+       "$for": {
+        "p": "$.Person[*]",
+        "q": "$.Pet[*]"
+       },
+       "$where": {
+        "$eq": [
+         "$p.id",
+         "$q.ownerId"
+        ]
+       },
+       "$return": {
+        "city": "$p.city",
+        "kind": "$q.kind"
+       }
+      }
+     },
+     1,
+     2
+    ]
+   }
+  },
+  {
+   "name": "a distinct of a join beside a filter on each binding",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "p": "$.Person[*]",
+      "q": "$.Pet[*]"
+     },
+     "$where": {
+      "$and": [
+       {
+        "$eq": [
+         "$p.id",
+         "$q.ownerId"
+        ]
+       },
+       {
+        "$ne": [
+         "$p.city",
+         "utrecht"
+        ]
+       },
+       {
+        "$ne": [
+         "$q.kind",
+         "fish"
+        ]
+       }
+      ]
+     },
+     "$return": {
+      "name": "$p.name",
+      "kind": "$q.kind"
+     }
+    }
+   }
+  },
+  {
+   "name": "a compound of columns of three joined bindings",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "p": "$.Person[*]",
+      "q": "$.Pet[*]",
+      "r": "$.Toy[*]"
+     },
+     "$where": {
+      "$and": [
+       {
+        "$eq": [
+         "$p.id",
+         "$q.ownerId"
+        ]
+       },
+       {
+        "$eq": [
+         "$q.pid",
+         "$r.petId"
+        ]
+       }
+      ]
+     },
+     "$return": {
+      "city": "$p.city",
+      "kind": "$q.kind",
+      "toy": "$r.name"
+     }
+    }
+   }
+  },
+  {
+   "name": "a column of the third joined binding",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "p": "$.Person[*]",
+      "q": "$.Pet[*]",
+      "r": "$.Toy[*]"
+     },
+     "$where": {
+      "$and": [
+       {
+        "$eq": [
+         "$p.id",
+         "$q.ownerId"
+        ]
+       },
+       {
+        "$eq": [
+         "$q.pid",
+         "$r.petId"
+        ]
+       }
+      ]
+     },
+     "$return": "$r.name"
+    }
+   }
+  },
+  {
+   "name": "a distinct with an ordering stays in the engine",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "p": "$.Person[*]"
+     },
+     "$orderby": [
+      "$p.age"
+     ],
+     "$return": "$p.city"
+    }
+   }
+  },
+  {
+   "name": "a distinct of a document member stays in the engine",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "p": "$.Person[*]"
+     },
+     "$return": "$p.bio.line"
+    }
+   }
+  },
+  {
+   "name": "a compound with a document member stays in the engine",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "p": "$.Person[*]"
+     },
+     "$return": {
+      "city": "$p.city",
+      "line": "$p.bio.line"
+     }
+    }
+   }
+  },
+  {
+   "name": "an array constructor stays in the engine",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "p": "$.Person[*]"
+     },
+     "$return": [
+      "$p.city",
+      "$p.age"
+     ]
+    }
+   }
+  },
+  {
+   "name": "the bare binding stays in the engine",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "p": "$.Person[*]"
+     },
+     "$return": "$p"
+    }
+   }
+  },
+  {
+   "name": "a constructor holding the binding stays in the engine",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "p": "$.Person[*]"
+     },
+     "$return": {
+      "who": "$p",
+      "city": "$p.city"
+     }
+    }
+   }
+  },
+  {
+   "name": "a constructor without a column stays in the engine",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "p": "$.Person[*]"
+     },
+     "$return": {
+      "k": 1
+     }
+    }
+   }
+  },
+  {
+   "name": "an operator inside a constructor stays in the engine",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "p": "$.Person[*]"
+     },
+     "$return": {
+      "u": {
+       "$upper": "$p.name"
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "a count of a related entity stays in the engine",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "p": "$.Person[*]"
+     },
+     "$return": {
+      "pets": {
+       "$count": {
+        "$for": {
+         "q": "$.Pet[*]"
+        },
+        "$where": {
+         "$eq": [
+          "$q.ownerId",
+          "$p.id"
+         ]
+        },
+        "$return": "$q"
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "a count of a distinct stays in the engine",
+   "query": {
+    "$count": {
+     "$distinct": {
+      "$for": {
+       "p": "$.Person[*]"
+      },
+      "$return": "$p.city"
+     }
+    }
+   }
+  },
+  {
+   "name": "a distinct of a joined binding with an ordering stays in the engine",
+   "query": {
+    "$distinct": {
+     "$for": {
+      "p": "$.Person[*]",
+      "q": "$.Pet[*]"
+     },
+     "$where": {
+      "$eq": [
+       "$p.id",
+       "$q.ownerId"
+      ]
+     },
+     "$orderby": [
+      "$q.pid"
+     ],
+     "$return": "$q.kind"
+    }
+   }
+  }
+ ]
+}

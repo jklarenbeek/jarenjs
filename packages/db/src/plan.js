@@ -138,7 +138,10 @@ const PLAN_REASONS = {
     + 'of member paths, literals and operators that cannot raise (any other return is evaluated '
     + 'for every row by the engine, which may raise or yield no item or several)',
   groupedAggregate: 'an aggregate over a grouped phrase folds its groups, which the engine does',
-  distinctProjection: 'distinct translates over one typed scalar member path, unordered or ordered by that same path',
+  distinctProjection: 'distinct translates over singular member paths the schema declares as scalars (strings, '
+    + 'numbers, integers and booleans, each optionally null), alone or as the members of an object constructor, in '
+    + 'first-appearance order or ordered by paths that ordering translates over; an object, an array or an untyped '
+    + 'member, or one that may hold either, groups by its text where the engine compares deeply',
   windowedGroup: 'a window over groups whose return can omit an item needs the engine cardinality',
   windowedAccumulation: 'a window over groups ordered by an integer sum or average cannot read '
     + 'the exactness guard of the groups it leaves out',
@@ -148,9 +151,10 @@ const PLAN_REASONS = {
     + 'addition decides the rounding a native sum would not reproduce',
   rootRead: 'the document reads the collection root outside its binding, so the engine answers it '
     + 'over the whole collection',
-  registeredFunction: 'a window or a count beside a conjunct that runs as a registered function stays in '
-    + 'the engine, which evaluates the function on every row (the database stops evaluating one once the '
-    + 'window is full or a cheaper conjunct has refused the row)',
+  registeredFunction: 'a window, a count, or a distinct of a constructor or ordered by other paths, beside a '
+    + 'conjunct that runs as a registered function, stays in the engine, which evaluates the function on '
+    + 'every row (the database stops evaluating one once the window is full or a cheaper conjunct has '
+    + 'refused the row)',
 };
 
 /**
@@ -226,6 +230,8 @@ const ENTITY_REASONS = {
   booleanList: 'a bound membership list compares its strings and numbers; against a boolean column '
     + 'its items compare in the engine',
   projection: 'this entity return or grouping needs decoded-row evaluation',
+  distinct: 'an entity distinct translates over the mapped columns of scalar types (a column, or an object '
+    + 'constructor of columns and literals), in first-appearance order, with no ordering of its own',
   groupOrder: 'groups an order leaves tied come out by first appearance, which over a compound '
     + 'physical key requires tuple ordering',
   order: 'ordering translates only over typed entity paths (never a boolean, never a document '
@@ -349,6 +355,37 @@ function scalarFamilies(schema, segments) {
     found.add(family);
   }
   return /** @type {any} */ (FAMILY_ORDER.filter((family) => found.has(family)));
+}
+
+/**
+ * Whether a reference holds a scalar or nothing, as every key of a grouping
+ * and every leaf of a distinct must: a string, a number, a boolean or `null`,
+ * in any mix the schema declares. The database groups such a value by what it
+ * is and by its JSON type, as the engine's equality does; an object or an
+ * array it groups by its text, which keeps the order of its members and the
+ * spelling of its numbers where the engine compares deeply. So the schema must
+ * declare the type on the node the path reaches ({@link scalarFamilies}: a
+ * union with an object or an array, a type that is not declared and a path the
+ * schema does not reach all fail), and a negative index fails because
+ * {@link schemaNodeAt} reads it as an element past the prefix items, where the
+ * last element of a short tuple is one of them.
+ * @param {{ segments: import('./dialect.js').JsonPathSegment[] }} ref
+ * @param {any} schema - the schema that types the reference
+ * @returns {boolean}
+ */
+function holdsOnlyScalars(ref, schema) {
+  return ref.segments.length > 0 && !countsFromTheEnd(ref) && scalarFamilies(schema, ref.segments) !== null;
+}
+
+/**
+ * Whether a reference has a negative index, which counts from the end of an
+ * array: the last element of a short tuple is a prefix item, which
+ * {@link schemaNodeAt} does not place.
+ * @param {{ segments: import('./dialect.js').JsonPathSegment[] }} ref
+ * @returns {boolean}
+ */
+function countsFromTheEnd(ref) {
+  return ref.segments.some((segment) => 'index' in segment && segment.index < 0);
 }
 
 /**
@@ -2692,7 +2729,7 @@ function planGeneralGrouping(node, itSlot, shape, resolve = pathRef, owners = nu
   const keySlot = new Map();
   for (const key of node.groupby.keys) {
     const read = groupedPath(key.expr, itSlot, shape, resolve, owners);
-    if (read === null || read.ref.type === 'unknown')
+    if (read === null || read.ref.type === 'unknown' || !holdsOnlyScalars(read.ref, read.shape.schema))
       return null;
     keySlot.set(key.slot, keys.length);
     keys.push({ as: key.name, ref: read.ref, ...(read.binding === undefined ? {} : { binding: read.binding }) });
@@ -2873,6 +2910,31 @@ function groupOrder(orderby, keySlot, build) {
 }
 
 /**
+ * The tree a `$distinct` rebuilds each group's item from, out of the tree of
+ * its `$return`: the same tree with every leaf read as the group key of its
+ * index. Only objects, literals and leaves qualify. The members of an object
+ * are named, so two rows that differ in a leaf answer different objects and
+ * two that agree answer one; the elements of an array are not named and a leaf
+ * that finds nothing is skipped, so rows that hold different leaves can answer
+ * the same array (`[$it.a, $it.b]` of `{a: 'x'}` and of `{b: 'x'}`), which the
+ * engine keeps as one item and a grouping by the leaves as two.
+ * @param {any} node - a node of a projection tree
+ * @returns {any | null}
+ */
+function distinctTree(node) {
+  if (node.p === 'lit') return node;
+  if (node.p === 'leaf') return { p: 'key', index: node.index };
+  if (node.p !== 'object') return null;
+  const members = [];
+  for (const member of node.members) {
+    const built = distinctTree(member.node);
+    if (built === null) return null;
+    members.push({ name: member.name, node: built });
+  }
+  return { p: 'object', members };
+}
+
+/**
  * Whether a grouping's order ranks any two groups apart: it names every
  * group key, and two groups differ in one of them. An order that does not
  * (an aggregate, a key left out, none at all) leaves ties, and tied groups
@@ -2937,9 +2999,7 @@ export const TOTAL_OPERATORS = new Map([
  * @returns {boolean}
  */
 function holdsOnlyStrings(ref, schema) {
-  // a negative index counts from the end of the array, which no schema places: `schemaNodeAt` reads it as an element
-  // past the prefix items, where the last element of a short tuple is one of them
-  if (ref.segments.some((segment) => 'index' in segment && segment.index < 0)) return false;
+  if (countsFromTheEnd(ref)) return false;
   if (schemaNodeAt(schema, ref.segments)?.type !== 'string' || nullReading(ref, schema) !== 'none') return false;
   switch (ref.flavor) {
     case undefined: case 'entity-doc': return true;
@@ -3556,23 +3616,40 @@ function planCollectionPhrase(document, analysis, shape, options) {
   const rowsAreItems = flwor.totalReturn && flwor.udfs.length === 0;
 
   if (distinct) {
-    const ref = flwor.projectedPath;
-    const sameOrder = root.orderby === null || (ref !== null && plan.order !== null
-      && plan.order.every((term) => canonicalOf(term.ref.segments) === canonicalOf(ref.segments)));
-    if (fullyPushed && sameOrder && ref !== null && ref.type !== 'unknown'
-      && flwor.group === null && flwor.bucket === null) {
-      // DISTINCT and GROUP BY share the query language's key relation.
-      // An absent path contributes no item, including under a window.
-      plan.filter = conjoin(plan.filter, { p: 'typeIs', ref, types: [], positive: true });
-      plan.group = { keys: [{ as: 'distinct', ref }], aggregates: [],
-        tree: { p: 'key', index: 0 }, order: root.orderby === null ? 'first-seen'
-          : plan.order.map((term) => ({ index: 0, desc: term.desc,
-            nullsFirst: (term.emptyGreatest === true) === (term.desc === true) })) };
-      plan.order = null;
-      plan.window = windows.length === 0 ? null : composeWindows(windows);
-      return collectionResult(analysis, plan, 'native', [], null, flwor.udfs, flwor.prefilters);
+    // the items are one scalar path, or the object a constructor of such paths and literals builds
+    const single = flwor.projectedPath;
+    const built = single !== null || flwor.projectedTree === null ? null : distinctTree(flwor.projectedTree.tree);
+    const leaves = single !== null ? [single] : built === null ? [] : flwor.projectedTree.leaves;
+    // rows ordered by the projected path alone leave the groups in that path's order; any other ordering
+    // numbers the rows by it, and a group stands where its first row does
+    const ordering = root.orderby === null ? 'none'
+      : single !== null && plan.order !== null
+        && plan.order.every((term) => canonicalOf(term.ref.segments) === canonicalOf(single.segments)) ? 'path' : 'rows';
+    // the keys the rows are numbered by are typed as any ordering types them, which reads a negative index off
+    // the items of a tuple, where the last element of a short one is a prefix item
+    const numberedByEnd = ordering === 'rows' && plan.order !== null && plan.order.some((term) => countsFromTheEnd(term.ref));
+    if (!fullyPushed || flwor.group !== null || flwor.bucket !== null || leaves.length === 0
+      || !leaves.every((ref) => holdsOnlyScalars(ref, shape.schema)) || numberedByEnd) {
+      return collectionResult(analysis, null, 'set', [refusal('$distinct', PLAN_REASONS.distinctProjection)]);
     }
-    return collectionResult(analysis, null, 'set', [refusal('$distinct', PLAN_REASONS.distinctProjection)]);
+    // a conjunct that runs as a registered function can go unevaluated on a row the engine evaluates and raises
+    // on, so only a path alone (unordered, or ordered by itself) lowers beside one
+    if ((single === null || ordering === 'rows') && flwor.udfs.length > 0) {
+      return collectionResult(analysis, null, 'set', [refusal('$distinct', PLAN_REASONS.registeredFunction)]);
+    }
+    // DISTINCT and GROUP BY share the query language's key relation. An absent path contributes no
+    // item, including under a window; an object constructor yields an item for every row.
+    if (single !== null) plan.filter = conjoin(plan.filter, { p: 'typeIs', ref: single, types: [], positive: true });
+    plan.group = {
+      keys: leaves.map((ref) => ({ as: single !== null ? 'distinct' : canonicalOf(ref.segments), ref })),
+      aggregates: [],
+      tree: single !== null ? { p: 'key', index: 0 } : built,
+      order: ordering === 'path' ? plan.order.map((term) => ({ index: 0, desc: term.desc,
+        nullsFirst: (term.emptyGreatest === true) === (term.desc === true) })) : 'first-seen',
+    };
+    if (ordering !== 'rows') plan.order = null;
+    plan.window = windows.length === 0 ? null : composeWindows(windows);
+    return collectionResult(analysis, plan, 'native', [], null, flwor.udfs, flwor.prefilters);
   }
 
   if (flwor.knn !== null) {
@@ -4133,6 +4210,35 @@ function entityProjectionTree(node, byName, entities, mapping, total = undefined
   return tree === null ? { blocked: blocked ?? ENTITY_REASONS.projection } : { tree, leaves };
 }
 
+/**
+ * The grouping an entity `$distinct` is: one key for each leaf of its return, which is one mapped column or an
+ * object constructor of them and literals, and the groups in the order the engine meets them. `null` for any
+ * other phrase: one with an ordering or a grouping of its own, or a return with a leaf that is no mapped column
+ * of a scalar type (a document member, an epoch, a hop, a count or the binding itself) or an array.
+ * @param {any} flwor - the FLWOR the `$distinct` ranges over
+ * @param {any[]} bindings
+ * @param {Map<number, any>} byName - the bindings, by slot
+ * @param {Map<string, any>} entities
+ * @param {any} mapping
+ * @returns {{ group: any, leaf: { binding: string, ref: any } | null } | null} `leaf` is the one leaf a bare
+ *   column return reads
+ */
+function planEntityDistinct(flwor, bindings, byName, entities, mapping) {
+  if (flwor.groupby !== null || flwor.orderby !== null) return null;
+  const built = entityProjectionTree(flwor.ret, byName, entities, mapping);
+  if (!('tree' in built) || built.leaves.length === 0) return null;
+  const tree = distinctTree(built.tree);
+  const schemaOf = (/** @type {any} */ leaf) => bindings.find((entry) => entry.name === leaf.binding)?.shape.schema;
+  if (tree === null || !built.leaves.every((/** @type {any} */ leaf) => leaf.count === undefined && leaf.hop === undefined
+    && leaf.ref.flavor === 'entity-column' && !['date', 'datetime'].includes(leaf.ref.codec)
+    && holdsOnlyScalars(leaf.ref, schemaOf(leaf)))) return null;
+  return {
+    group: { keys: built.leaves.map((/** @type {any} */ leaf) => ({ as: canonicalOf(leaf.ref.segments), ref: leaf.ref,
+      ...(bindings.length > 1 ? { binding: leaf.binding } : {}) })), aggregates: [], tree, order: 'first-seen' },
+    leaf: tree.p === 'key' ? built.leaves[0] : null,
+  };
+}
+
 /** The family of value each storage class of a mapped column compares as in the database. */
 const STORED_FAMILIES = new Map([['integer', 'number'], ['number', 'number'], ['string', 'string']]);
 
@@ -4485,6 +4591,12 @@ function planEntityQueryCore(document, entities, mapping, operators) {
       where: root.some ? root.satisfies : { kind: 'op', card: 1, name: '$not', args: [root.satisfies] },
       ret: { kind: 'var', card: 1, name: source.name, slot: source.slot, external: false } };
   }
+  // a `$distinct` over a FLWOR groups the leaves of its return
+  const distinct = root.kind === 'op' && root.name === '$distinct' && aggregate === null && quantifier === null;
+  if (distinct) {
+    root = root.args[0];
+    assertDecidedKind(root);
+  }
   if (root.kind !== 'flwor')
     return residual(root.kind, ENTITY_REASONS.notFlwor);
   root = flattenEntityProjection(inlineCountedLets(root));
@@ -4510,10 +4622,13 @@ function planEntityQueryCore(document, entities, mapping, operators) {
   // a binding's predicates may read a related entity through a hop
   for (const binding of bindings)
     binding.shape.hop = (node) => planHopPredicate(node, binding, entities, mapping);
-  const group = root.groupby === null ? null : aggregate === null && !windows.length
-    ? planGeneralGrouping(root, bindings[0].slot, bindings[0].shape, entityPathRef,
-      bindings.length > 1 ? byName : null) : null;
-  if (root.groupby !== null && group === null) return residual('$groupby', ENTITY_REASONS.projection);
+  const distinction = distinct ? planEntityDistinct(root, bindings, byName, entities, mapping) : null;
+  if (distinct && distinction === null) return residual('$distinct', ENTITY_REASONS.distinct);
+  const group = distinction !== null ? distinction.group
+    : root.groupby === null ? null : aggregate === null && !windows.length
+      ? planGeneralGrouping(root, bindings[0].slot, bindings[0].shape, entityPathRef,
+        bindings.length > 1 ? byName : null) : null;
+  if (!distinct && root.groupby !== null && group === null) return residual('$groupby', ENTITY_REASONS.projection);
   if (group && [...group.keys, ...group.aggregates].some((entry) => entry.ref && entry.ref.flavor !== 'entity-column'))
     return residual('$groupby', ENTITY_REASONS.projection);
   // Integer accumulations carry a runtime exactness proof. Floating
@@ -4693,6 +4808,13 @@ function planEntityQueryCore(document, entities, mapping, operators) {
     const owner = leaf.hop === undefined ? bindings.find((entry) => entry.name === leaf.binding) : bindings[0];
     filters.set(owner.slot, conjoin(filters.get(owner.slot), leaf.hop === undefined ? present
       : { p: 'hop', hop: { ...leaf.hop, filter: conjoin(leaf.hop.filter, present) } }));
+  }
+
+  // a bare leaf yields an item only where its member is present, so a group of absent members is no item
+  // (and no window may count it)
+  if (distinction?.leaf != null) {
+    const owner = bindings.find((entry) => entry.name === distinction.leaf.binding);
+    filters.set(owner.slot, conjoin(filters.get(owner.slot), { p: 'typeIs', ref: distinction.leaf.ref, types: [], positive: true }));
   }
 
   // ordering over flavored refs of either binding

@@ -247,7 +247,11 @@ function jsonExtract(columnSql, pathText, kind) {
     case 'text':
       return `((CASE WHEN jsonb_typeof(${at}) = 'string' `
         + `THEN ${columnSql} #>> ${stringLiteral(pathText)} END) COLLATE "C")`;
+    // `double` is a number a GROUP KEY reads: the numeric itself, whose equality ignores
+    // the scale its JSON text was written with (`1` and `1.0` are one key) and which needs
+    // no text of either to group by
     case 'number':
+    case 'double':
       return `(CASE WHEN jsonb_typeof(${at}) = 'number' THEN (${at})::numeric END)`;
     case 'boolean':
       return `(CASE WHEN jsonb_typeof(${at}) = 'boolean' `
@@ -257,6 +261,12 @@ function jsonExtract(columnSql, pathText, kind) {
     // one column that can carry every scalar is what it needs
     case 'scalar':
       return `(${columnSql} #>> ${stringLiteral(pathText)})`;
+    // a group KEY that may hold any scalar: a number as the number it is, with no
+    // trailing zeros of the scale its JSON text was written with (`1` and `1.0` are
+    // one key), every other scalar as its text
+    case 'key':
+      return `(CASE WHEN jsonb_typeof(${at}) = 'number' THEN trim_scale((${at})::numeric)::text `
+        + `ELSE ${columnSql} #>> ${stringLiteral(pathText)} END)`;
     default:
       return at;
   }

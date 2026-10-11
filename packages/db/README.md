@@ -274,12 +274,24 @@ no continuation to emit.
   member, in a collection query. A comparison of two paths when either is
   typed as an object or an array, or not typed, stays with the engine, and an
   entity query keeps its plain comparison of two members of one non-null
-  number or string family. `$distinct` over a typed scalar projection groups by its value and JSON
-  type, excluding missing members. Unordered inputs retain first occurrence;
-  ordering solely by the projected path also lowers. Literal windows apply
-  to the distinct items.
+  number or string family. `$distinct` over a singular member path the schema
+  declares as scalars alone — strings, numbers, integers and booleans, each
+  optionally `null` — or over an object constructor of such paths and literals
+  groups by each leaf's value and JSON type, as the engine's equality tells `'1'`
+  from `1`, `true` from `1`, `null` from an absent member and the string `'2.0'`
+  from `2`, while it holds `2` and `2.0` equal.
+  Unordered inputs retain first occurrence; ordering by the projected path
+  also lowers, and so does ordering by other paths that ordering lowers over:
+  the rows are numbered in that order and a group stands where its first row
+  does. Literal windows apply to the distinct items. The statement groups
+  every row it reads and the planner cannot know how many groups there are,
+  so with nearly as many groups as rows it does the engine's own work and a
+  sort besides and can be slower than the engine. An entity `$distinct` of
+  mapped columns lowers the same way (on PostgreSQL over one adopted table
+  with no document column). A leaf that may hold an object or an array stays
+  with the engine, which compares those member by member.
 - **Grouping and joins lower whole, or not at all.** A `$groupby` over
-  schema-typed member keys becomes a real `GROUP BY`: the keys come back
+  member keys the schema declares as scalars alone becomes a real `GROUP BY`: the keys come back
   with their JSON types beside them, so a group whose key is ABSENT
   leaves that member out exactly as the object constructor does, the
   closed aggregate set (`$count`, `$sum`, `$avg`, `$min`, `$max`) folds
@@ -1857,7 +1869,7 @@ invalid, polar and antimeridian probes.
 
 Live collection groups now maintain multiple keys, any return that reads only
 the group — its keys, aggregates and arithmetic over them, the rows themselves
-— unordered typed scalar distinct projections, and count/sum/avg/min/max over
+— unordered distinct projections of one scalar member path, and count/sum/avg/min/max over
 such group results. Only affected groups are reevaluated in source order; a
 final aggregate folds the retained group outputs in first-appearance order. A
 group that reads a row bare — copied whole, under `$get`, in a nested query,

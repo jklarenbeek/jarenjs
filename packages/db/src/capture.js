@@ -33,6 +33,7 @@ export { CHANGES_TABLE, CHANGES_STATE_TABLE };
 
 import { createJSONPatch } from '@jarenjs/json/patch';
 import { encodeJSONPointerSegment, decodeJSONPointerSegment } from '@jarenjs/json/pointer';
+import { setObjectMember } from '@jarenjs/core/object';
 
 import { DbCompileError, DbRuntimeError, wrapDriverError } from './errors.js';
 import { chain, attempt, useStatementOnce } from './driver.js';
@@ -256,7 +257,7 @@ export function translateOperations(connection, shapes, operations) {
           if (shape.kind === 'collection' && column.role === 'key') continue;
           const value = values[c];
           if (value === null || value === undefined) continue;
-          out[column.name] = documentValue(column, value);
+          setObjectMember(out, column.name, documentValue(column, value));
         }
         return out;
       });

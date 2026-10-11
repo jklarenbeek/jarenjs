@@ -401,6 +401,31 @@ describe('PostgreSQL, live', { skip: SKIP }, () => {
     }
   });
 
+  describe('distinct over the rows of an entity', () => {
+    // the runtime guards of an entity grouping are qualified for one adopted table alone, so a distinct of a store-owned
+    // table is grouped by the engine, under the same name, and the answer is the one SQLite's statement gives
+    for (const side of /** @type {const} */ (['indexed', 'unindexed'])) {
+      it(`plans the engine's distinct of a store-owned table under the unqualified guards — ${side}`, async () => {
+        const group = loadRelationGroups().find((entry) => entry.group === 'entity distinct over mapped columns');
+        assert.ok(group);
+        const { store } = await storeForEntityGroup(group, await freshDriver(), side);
+        try {
+          for (const kase of group.cases.filter((entry) => !entry.name.endsWith('stays in the engine'))) {
+            const label = `${kase.name} [${side}]`;
+            const explained = await store.explain(kase.query);
+            assert.strictEqual(explained.mode, 'set', label);
+            assert.strictEqual(reasonId(explained.residual.reasons[0].reason), 'bind.entityGrouping', label);
+            await assert.rejects(Promise.resolve().then(() => store.execute(kase.query, { strict: true })), { code: 'JD0010' }, label);
+            assert.strictEqual(await runEntityCase(store, group.documents, kase, 'native'), null, label);
+          }
+        }
+        finally {
+          await store.close();
+        }
+      });
+    }
+  });
+
   describe('migration', () => {
     it('a planned migration applies, converges, and the reopened store verifies it',
       async () => {

@@ -334,7 +334,9 @@ what each does is its own documentation's job
   reopens nor migrates to the authored one. Every PostgreSQL open reads each
   store-owned table's triggers and rewrite rules with a query per table (about
   1.2–1.5 ms each); one read per namespace would bound it.
-- [ ] **Pushdown beyond the proven scalar shapes.** Untyped group keys,
+- [ ] **Pushdown beyond the proven scalar shapes.** Group keys the schema does
+  not declare as scalars alone (untyped, a union that lists an object or an
+  array, reached by a negative index),
   group returns that read the grouped row binding, ordering by a floating
   sum/avg or other unproven aggregate expressions and floating numeric
   aggregates without a rounding proof still run in the engine. One-root scalar
@@ -387,9 +389,15 @@ what each does is its own documentation's job
   per-row evaluation of the constructor over the fetched window would lower
   it), a collection's window or count beside a conjunct that runs as a
   registered function, and a bare operator as the whole return (always one
-  item per row, but no constructor) are still the engine's. `$distinct`
-  over an untyped or compound projection, or ordering by paths other than the
-  projected scalar, also remains residual.
+  item per row, but no constructor) are still the engine's. `$distinct` still
+  runs in the engine over a leaf that may hold an object or an array (an
+  untyped member, a union that lists either, a path reached by a negative
+  index: the database groups an object by its text, which keeps member order,
+  where the engine compares members), an array constructor, an operator, the
+  document, a constructor or an ordering by other paths beside a registered
+  function, and, on an entity, a distinct with an ordering of its own (numbering
+  the entity rows by the order terms would lower it) or over a document member,
+  an epoch or a date column (`plan.distinctProjection`, `entity.distinct`).
   **Proof still needed:** preserve output cardinality, structural equality,
   ordering and errors, and never drop a member a residual predicate reads.
 
@@ -525,10 +533,11 @@ what each does is its own documentation's job
   integer-valued doubles raises.** Over integer-valued doubles past 2^53
   (`1e16`, `2^62`) the driver's integer read raises `JD2003` where the engine
   answers: `$max` over `1e16, 1` on a plain collection, whole and grouped, and
-  in temporal buckets; PostgreSQL answers. A native group key or projection
-  over such a member, and a grouped `$min`/`$max` over an `integer` member past
-  2^53, raise the same way. `$min`/`$max` stay native, so this is a defect of
-  the read, not of the plan. Wanted: a read that returns the double.
+  in temporal buckets; a native projection of such a member; and a grouped
+  `$min`/`$max` over an `integer` member past 2^53 (group keys and `$distinct`
+  leaves already read as doubles). PostgreSQL answers. `$min`/`$max` stay
+  native, so this is a defect of the read, not of the plan. Wanted: a read that
+  returns the double, for an aggregate's argument and for a projected value.
 - [ ] **Join tables are not queryable roots.** A many-to-many join table has no
   root to bind: `u.labels` as a chain hop is `JL0105`, and a membership is read
   through `include` (`client.entities.User.include((u) => u.labels)` loads the
@@ -825,13 +834,33 @@ what each does is its own documentation's job
   constructor in the engine, but the plain-member and bare-binding plans stay
   exposed). Wanted: prove the conjunct cannot raise, or keep the engine's order
   of evaluation.
-- [ ] **A native count never reads a row its codec cannot decode.** A row an
-  adopted table holds that its codec cannot decode (invalid text in a `date` or
-  `datetime` column, which only trusted SQL writes) raises `JD2003` in the
-  engine; the count of the bare binding, of a constructor of member paths and
-  of a constructor of operators answer where the engine raises. Wanted: count
+- [ ] **A native statement never reads a column its codec cannot decode.** A
+  row an adopted table holds that its codec cannot decode (invalid text in a
+  `date` or `datetime` column, a PostgreSQL `double precision` NaN or Infinity,
+  an integer above 2^53) raises `JD2003` in the engine, which decodes the whole
+  row; a native count, selection, grouping or distinct reads only the columns
+  it names and answers. Wanted: count
   natively only where the table cannot hold an invalid row (a declared check),
   or read the column.
+- [ ] **A native grouping cannot know its group count.** A native `$distinct`
+  or `$groupby` groups every row it reads: with nearly as many groups as rows
+  the statement does the engine's work and a sort besides and is slower than
+  the engine, on PostgreSQL more than on SQLite. Wanted: a cost signal (a
+  distinct-count estimate or a bounded-group run-time fallback).
+- [ ] **PostgreSQL groups a number apart that the engine holds equal.** A number
+  a foreign writer stores with more digits than a double holds
+  (`1.0000000000000001`), or two spellings of one denormal, groups apart on
+  PostgreSQL, whose `numeric` is exact; on Bun an integer text beyond 2^53 that
+  a JavaScript store cannot write reads back as its neighbour's double and
+  answers a duplicate item. A store writes canonical text, so only trusted SQL
+  or a foreign writer reaches it. Wanted: read a number key as `double
+  precision` on PostgreSQL, measured.
+- [ ] **An entity write drops a property named `__proto__`.** The write
+  normalisers assign members by name (`rest[key] = doc[key]`), so a property
+  named `__proto__` holding an object or an array is lost, and a model with a
+  relation named `__proto__` refuses every `create()` (`'__proto__' in doc` is
+  true for any object). The read decoders define such a member as an own
+  property. Wanted: the same in the write path, membership by `Object.hasOwn`.
 - [ ] **A negative index through a tuple schema is typed as the array's
   `items`.** For `prefixItems` with `items`, the shared typing
   (`schemaNodeAt`, `typeOfPath`) types `$it.a[-1]` as `items`, so `$orderby`,

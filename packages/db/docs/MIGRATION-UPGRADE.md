@@ -668,6 +668,73 @@ the query engine, now refuse by code or answer what the engine answers:
   operator, a path that expands and every entity window over an operator
   projection keep the plan they had. A live count of such a constructor re-runs,
   as it did.
+- A `$distinct` of an object constructor of member paths and literals, a
+  collection's `$distinct` ordered by paths other than the one it projects, and
+  an entity's `$distinct` of mapped columns ran in the engine (on a collection
+  under `plan.distinctProjection`, on an entity under `entity.notFlwor`). They
+  plan `native` now, in the order the engine meets the rows (an ordering by
+  other paths numbers the rows in that order and takes each group at its first
+  row, a row without the key staying in the ordering where `$empty` places it),
+  and `strict: true` accepts them where it refused. A profile's `maxRows`
+  bounds the groups the statement returns, where it bounded every row the
+  engine path fetched, and on an entity `maxBytes` bounds each group's item; a
+  collection's statement reads no document, so `maxBytes`, which bounds the
+  documents a fetch returns, bounds none of its groups (a distinct of one path
+  already answered so). Its engine limits (`resultItems`, `sequenceItems`,
+  `steps`, `depth`) bound only what the engine still evaluates, so a limit
+  smaller than the distinct, or than the depth of its constructor, no longer
+  refuses it. A constructor, or an
+  ordering by other paths, beside a conjunct that runs as a registered function
+  stays in the engine (`plan.registeredFunction`), and an order key reached by a
+  negative index does too. A live registration of any of them re-runs, as it
+  did; only its reason reads "this grouping or distinct projection needs
+  set-level maintenance" where it named the planner's, and an entity's reads
+  "an entity grouping has no bounded tuple accumulator". An entity `$distinct`
+  lowers on PostgreSQL over one adopted table with no document column alone: a
+  store-owned table and a join are the engine's (`bind.entityGrouping`), and a
+  `$distinct` of a table with a compound physical key is the engine's
+  (`entity.groupOrder`).
+- A `$distinct` leaf or a `$groupby` key whose member the schema lets hold an
+  object or an array behind a scalar first type (`['string', 'object']`), and a
+  path reached by a negative index, ran natively, grouped by the member's text.
+  SQLite stores the members of an object in the order they were written, so two
+  objects the engine holds equal (`{"p": 1, "q": 2}` and `{"q": 2, "p": 1}`)
+  were two items, or two groups; and a negative index through a tuple was typed
+  by the schema's `items` where the last element of a short tuple is a prefix
+  item. Those keys stay in the engine now (`plan.distinctProjection` for a
+  distinct, the grouping's reason for a `$groupby`). A keyed live `$distinct` of
+  such a path was maintained (its answers came from the engine, so they were
+  right) and re-runs now, with the planner's reason, so `mode: 'incremental'` is
+  refused (`JD0051`); a live `$groupby` keyed by one is maintained as it was. A
+  member of two scalar kinds (`['string', 'integer']`, `['boolean', 'integer']`)
+  or one that may be `null` is unchanged.
+- A group key or a distinct leaf that reads a number grouped `2.0` apart from
+  `2`: SQLite by their JSON types (`real` and `integer`), PostgreSQL by the
+  scale a number was written with, where the engine holds them equal. A store
+  writes `2` for both, so the second spelling reaches a document only through a
+  write the store did not make (trusted SQL, a migration fold). They are one
+  key now: a key that holds a number is read as the number the engine parses (a
+  double on SQLite, the numeric itself on PostgreSQL; a member that may also hold
+  a string reads a number so and every other scalar as it is stored).
+- A group key or a distinct leaf over a `number` or `integer` member that holds a
+  whole number beyond ±(2^53 - 1), however written (a nanosecond timestamp, as a
+  client that writes doubles leaves it), raised `JD2003` on SQLite when the
+  statement read it as an integer, for a single-path `$distinct` and for a
+  `$groupby` key. It answers now, and so does every compound and every ordered
+  distinct that reads such a leaf, because a key is read as the double the
+  engine parses and the driver is never asked for the integer; the answers are
+  the engine's. A member that holds such numbers is still refused `JD2003` on
+  SQLite where it is read as a value and not as a key: a plain projection of
+  it, a native `$min` or `$max` of it, and a grouped `$min` or `$max` of it, as
+  they were.
+- A member named `__proto__` in a projection, in the return of a `$groupby`, in
+  the aggregates of a temporal bucket, in the properties of an entity read back
+  from its row and in the document a change capture builds from a row was
+  dropped from the item or document built, by an assignment that does not make
+  an own member of that name; the engine kept it. The decoders define the member
+  now, so a native statement and the engine answer the same item for such a
+  name. This corrects an answer that differed: no query that answered right
+  changes.
 
 ## 8. Stricter models, keys and staged writes
 

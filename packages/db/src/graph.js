@@ -14,6 +14,8 @@
  * whole one.
  */
 
+import { setObjectMember } from '@jarenjs/core/object';
+
 import { columnCodec } from './physical.js';
 
 import { DbRuntimeError } from './errors.js';
@@ -80,16 +82,16 @@ export function mergeEntityRow(entityMapping, row, docField = 'doc') {
     if (column.source === 'epoch(document)') continue;
     if (entityMapping.document === false && column.codec) {
       const value = columnCodec(column).decode(row[column.physical ?? column.name]);
-      if (value !== undefined) Object.defineProperty(doc, column.name, { value, enumerable: true, writable: true, configurable: true });
+      if (value !== undefined) setObjectMember(doc, column.name, value);
       continue;
     }
     const value = row[column.name];
     if (value === null || value === undefined) continue;
-    doc[column.name] = column.storage === 'boolean' ? value === 1 : value;
+    setObjectMember(doc, column.name, column.storage === 'boolean' ? value === 1 : value);
   }
   for (const fk of entityMapping.foreignKeys) {
     const value = row[fk.column];
-    if (value !== null && value !== undefined) doc[fk.column] = value;
+    if (value !== null && value !== undefined) setObjectMember(doc, fk.column, value);
   }
   return doc;
 }
@@ -109,17 +111,17 @@ export function parseGraphRow(node, row, docField = '__doc') {
   for (const include of node.includes) {
     const raw = row[include.field];
     if (include.count === true) {
-      doc[include.name] = Number(raw ?? 0);
+      setObjectMember(doc, include.name, Number(raw ?? 0));
       continue;
     }
     if (raw === null || raw === undefined) {
-      doc[include.name] = include.many ? [] : null;
+      setObjectMember(doc, include.name, include.many ? [] : null);
       continue;
     }
     const parsed = checkBounds(node, include, row, raw, sizes);
-    doc[include.name] = include.many
+    setObjectMember(doc, include.name, include.many
       ? parsed.map((child) => parseGraphChild(include.child, child, sizes))
-      : parseGraphChild(include.child, parsed, sizes);
+      : parseGraphChild(include.child, parsed, sizes));
   }
   return doc;
 }
@@ -139,26 +141,26 @@ function parseGraphChild(node, child, sizes) {
     if (column.source === 'epoch(document)') continue;
     const value = child[column.name];
     if (value === null || value === undefined) continue;
-    doc[column.name] = column.storage === 'boolean' ? value === 1 : value;
+    setObjectMember(doc, column.name, column.storage === 'boolean' ? value === 1 : value);
   }
   for (const fk of node.entityMapping.foreignKeys) {
     const value = child[fk.column];
-    if (value !== null && value !== undefined) doc[fk.column] = value;
+    if (value !== null && value !== undefined) setObjectMember(doc, fk.column, value);
   }
   for (const include of node.includes) {
     const raw = child[include.field];
     if (include.count === true) {
-      doc[include.name] = Number(raw ?? 0);
+      setObjectMember(doc, include.name, Number(raw ?? 0));
       continue;
     }
     if (raw === null || raw === undefined) {
-      doc[include.name] = include.many ? [] : null;
+      setObjectMember(doc, include.name, include.many ? [] : null);
       continue;
     }
     const parsed = checkBounds(node, include, child, raw, sizes);
-    doc[include.name] = include.many
+    setObjectMember(doc, include.name, include.many
       ? parsed.map((grandchild) => parseGraphChild(include.child, grandchild, sizes))
-      : parseGraphChild(include.child, parsed, sizes);
+      : parseGraphChild(include.child, parsed, sizes));
   }
   return doc;
 }

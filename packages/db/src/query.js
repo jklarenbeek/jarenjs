@@ -59,7 +59,7 @@ import {
   compileSetResidual, compileRowResidual, compilePackedResidual, sequenceResult,
 } from './residual.js';
 import { createCursor, createSyncCursor, drainPage, utf8Length, PAGE_LIMIT_DEFAULT, rowClassOf } from './cursor.js';
-import { deepFreeze } from '@jarenjs/core/object';
+import { deepFreeze, setObjectMember } from '@jarenjs/core/object';
 import { derivedSlotValue, probeVector, columnScore } from './derive.js';
 import { cutCandidates, identityBatches } from './knn.js';
 import {
@@ -492,7 +492,7 @@ function projectedTreeItems(project, row, prefix = '') {
       const out = {};
       for (const member of node.members) {
         const items = build(member.node);
-        if (items.length > 0) out[member.name] = items[0];
+        if (items.length > 0) setObjectMember(out, member.name, items[0]);
       }
       return [out];
     }
@@ -533,7 +533,7 @@ function projectedTreeItems(project, row, prefix = '') {
         const out = {};
         for (const member of node.members) {
           const items = build(member.node, row);
-          if (items.length > 0) out[member.name] = items[0];
+          if (items.length > 0) setObjectMember(out, member.name, items[0]);
         }
         return [out];
       }
@@ -1091,7 +1091,7 @@ export function createQueryEngine(context) {
       for (const aggregate of bucket.aggregates) {
         const value = row[aggregate.as] ?? null;
         if (value === null && aggregate.empty === 'omit') continue;
-        item[aggregate.as] = value === null && aggregate.empty === 'zero' ? 0 : value;
+        setObjectMember(item, aggregate.as, value === null && aggregate.empty === 'zero' ? 0 : value);
       }
       items.push(item);
     }

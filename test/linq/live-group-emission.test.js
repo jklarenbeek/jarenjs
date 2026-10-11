@@ -22,7 +22,7 @@ import { describe, it } from 'node:test';
 import * as assert from 'node:assert/strict';
 
 import { createJsltRegistry, statsPack } from '@jarenjs/json/jslt';
-import { openStore } from '@jarenjs/db';
+import { openStore, PLANNER_REASONS } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';
 import { asyncLive } from '@jarenjs/db/async-live';
 import { fromAsync } from '@jarenjs/linq';
@@ -202,7 +202,7 @@ describe('the group-emission boundary', () => {
         [byRegion(rows).orderBy((/** @type {any} */ g) => g.key).select((/** @type {any} */ g) => g.key), FOR],
         [byRegion(rows).select((/** @type {any} */ g) => g.key).take(2), 'a windowed group re-runs'],
         [byRegion(rows).select((/** @type {any} */ g) => g.items.count()).distinct(),
-          "'$distinct' — distinct translates over one typed scalar member path, unordered or ordered by that same path"],
+          `'$distinct' — ${PLANNER_REASONS['plan.distinctProjection'].text}`],
       ];
       for (const [chain, reason] of cases) {
         const document = chain.toDocument();

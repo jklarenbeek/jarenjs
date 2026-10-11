@@ -354,9 +354,22 @@ export const sqliteDialect = createDialect({
   // JSON-valued consumers need the encoded member, including quotes around
   // strings and the original boolean spelling; jsonb_extract returns SQL
   // scalars for these and json() cannot recover their JSON representation.
-  jsonExtract: (columnSql, pathText, kind) => kind === 'json'
-    ? `(${columnSql} -> ${stringLiteral(pathText)})`
-    : `jsonb_extract(${columnSql}, ${stringLiteral(pathText)})`,
+  // A number a GROUP KEY reads is the double the engine holds, the double
+  // nearest to the stored text: an integer text past 2^53 is no JavaScript
+  // number a driver can hand back, and a double is what the engine compares.
+  // `double` reads a member that holds numbers and nothing else; `key` one
+  // that may hold any scalar, and casts only what is a number.
+  jsonExtract: (columnSql, pathText, kind) => {
+    const member = stringLiteral(pathText);
+    switch (kind) {
+      case 'json': return `(${columnSql} -> ${member})`;
+      case 'double': return `CAST(jsonb_extract(${columnSql}, ${member}) AS REAL)`;
+      case 'key':
+        return `(CASE WHEN json_type(${columnSql}, ${member}) IN ('integer', 'real') `
+          + `THEN CAST(jsonb_extract(${columnSql}, ${member}) AS REAL) ELSE jsonb_extract(${columnSql}, ${member}) END)`;
+      default: return `jsonb_extract(${columnSql}, ${member})`;
+    }
+  },
   // the engine-specific piece of a declared interval's CHECK beside
   // `jsonTypeOf`: each bound held to an integer by ITS JSON type — `IS`,
   // not `=`, because a half span's absent bound reads NULL and a CHECK

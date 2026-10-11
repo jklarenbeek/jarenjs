@@ -108,6 +108,38 @@ comparisons explicitly use codepoint collation, independent of a column's declar
 collation — and the decoded evaluator fetches a root in that key order too, on
 PostgreSQL as on SQLite; an incompatible index may therefore stop helping that query.
 
+`$distinct` is the grouping of its items. The database groups a scalar by its value
+and its JSON type, which is how the engine's equality tells `'1'` from `1`, `true`
+from `1` and `null` from an absent member, and holds `2` and `2.0` equal as one number
+(the string `'2.0'` is apart from `2`); the groups come out in the order the engine meets
+the rows. A collection's distinct lowers over a singular
+member path the schema declares as scalars alone — strings, numbers, integers and
+booleans, each optionally `null`, however many of them a union lists — or over an object
+constructor of such paths and literals, nested objects included (each absent path is an
+absent member of its item). It lowers unordered, ordered by the projected path alone, or
+ordered by other paths that ordering lowers over: the statement then numbers the rows in
+that order, as the join above does, and takes each group at its first row, so a row
+without the key stays in the ordering where `$empty` places it. A literal window over it
+lowers. A group key that holds a number is read as the number the engine parses (a double
+on SQLite, the numeric itself on PostgreSQL), so `2` and `2.0` are one key and a whole number
+beyond 2^53, which a client that writes doubles leaves as an integer text, is a key like any
+other: the driver is never asked for it as an integer. The statement groups every row it
+reads, and the planner cannot know how many groups there are: with nearly as many groups
+as rows the statement does the engine's own work and a sort besides, and can be slower than
+the engine. SQLite groups an object or an array by its text, which keeps the order its
+members were written in, and PostgreSQL's jsonb text keeps the spelling of a number (`1.0`),
+where the engine compares them member by member and numbers by value. So a leaf that may
+hold either (an object, an array, a member with no type, a union that lists either, a path
+reached by a negative index), an array constructor (its elements are not named, so rows with
+different leaves can answer one array), an operator, the document and a path with several
+items stay in the engine (`plan.distinctProjection`), as does a constructor, or a distinct
+ordered by other paths, beside a conjunct that runs as a registered function
+(`plan.registeredFunction`). An entity's distinct lowers the same way over mapped columns of
+text, integer, number and boolean types, alone or in an object constructor, over one binding
+or a connected join, with no ordering of its own; any other shape stays in the engine
+(`entity.distinct`), and on PostgreSQL it lowers over one adopted table with no document
+column (`bind.entityGrouping` otherwise).
+
 A count over an object or array constructor of member paths, literals and
 operators that cannot raise is one `COUNT(*)` that reads no row: `$default` over
 member paths and literals, `$upper`, `$lower` and `$string-length` over a member

@@ -419,7 +419,9 @@ export function classifyLiveQuery(document, queryShape, keyed, eventTime = null)
 
   const planned = planQuery(inner, queryShape, {});
   const distinct = isJsonObject(inner) ? inner.$distinct : null;
+  // the holders of each value are kept for a distinct of one path; a distinct of a constructor re-runs
   if (!windowed && keyed && planned.mode === 'native' && isJsonObject(distinct)
+    && planned.plan?.group?.tree.p === 'key'
     && distinct.$orderby === undefined && bindingNameOf(distinct) !== null) {
     const binding = bindingNameOf(distinct);
     const name = binding === '_distinct' ? '_distinctKey' : '_distinct';

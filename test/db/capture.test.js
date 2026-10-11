@@ -215,6 +215,20 @@ describe('session capture', () => {
     await store.close();
   });
 
+  it('keeps a column named __proto__ in the document it captures', async () => {
+    // the schema is JSON text: an object literal naming `__proto__` would set a prototype instead of a property
+    const schema = JSON.parse('{"type":"object","required":["id"],"properties":{"id":{"type":"integer",'
+      + '"x-entity":{"key":true}},"__proto__":{"type":"string"},"name":{"type":"string"}}}');
+    const store = await openStore({ $model: '0.1', entities: { P: { schema } } }, { driver: nodeDriver(), capture: true });
+    const seen = [];
+    store.observe((record) => seen.push(record));
+    await store.entity('P').create(JSON.parse('{"id":1,"__proto__":"v","name":"n"}'));
+    const document = seen[0].patch[0].value;
+    assert.strictEqual(Object.getOwnPropertyDescriptor(document, '__proto__')?.value, 'v');
+    assert.strictEqual(document.name, 'n');
+    await store.close();
+  });
+
   it('observers: order, isolation, unsubscribe', async () => {
     const store = await open();
     const calls = [];

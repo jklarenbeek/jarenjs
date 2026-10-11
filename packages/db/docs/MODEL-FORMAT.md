@@ -3118,6 +3118,22 @@ sum, mean, extreme or ordering over a column that reads a NULL as a `null` or
 stores a boolean (§10.6); such a column as a group KEY lowers. On PostgreSQL the
 engine groups a join of any layout (`bind.entityGrouping`).
 
+An entity `$distinct` is a grouping whose keys are the leaves of its return: one
+mapped column, or an object constructor of columns and literals (nested objects
+included; an array constructor, an operator, a document member, an epoch or date
+column, a hop, a count, the binding itself and a constructor with no column stay
+in the engine under `entity.distinct`). Each key is read as the value the column stores
+beside its JSON type, so two rows are one group where the engine decodes them to
+equal values, and the groups come out in first-appearance order: by the binding's
+key, or over a connected join by the number of the row in the nested loop (the
+derived table above), so a compound physical key whose first appearance is a key
+tuple stays in the engine as a grouping's does (`entity.groupOrder`). A bare
+column excludes the rows where it is absent; a constructor yields an item for
+every row. A literal window applies to the distinct items. An ordering of its
+own (`$orderby`) stays in the engine. The guards of an entity grouping are
+qualified on PostgreSQL for one adopted table with no document column, so a
+store-owned table and a join are the engine's there (`bind.entityGrouping`).
+
 A navigation hop (§10.1) is a join's correlated cousin: it never multiplies
 the outer rows, only filters, counts or decorates the row it hangs from, so
 the join graph and the result order are the ones the bindings give.
@@ -3441,7 +3457,8 @@ a number appears only where `capabilities.rowEstimates` is filled):
 - a non-equality predicate used as the only join anchor, an equality that is
   no edge beside a real one, or a boolean predicate whose individual leaf
   cannot be assigned to one binding;
-- collection grouping with untyped keys, row-binding returns, or ordering by
+- collection grouping with untyped keys, keys that may hold an object or an
+  array or are reached by a negative index, row-binding returns, or ordering by
   anything except an orderable key or a count, minimum, maximum, integer sum
   or integer average expression; entity grouping over a floating sum or
   average or a date-codec key or aggregate, over an aggregate or an ordered
@@ -3483,9 +3500,26 @@ a number appears only where `capabilities.rowEstimates` is filled):
   (`bind.identity`): the database resolves a name to a column before it
   resolves it to the row, so no spelling is left that reads the insertion
   order; a table that takes fewer reads the first it leaves free;
-- `$distinct` over untyped/compound projections or ordering by other paths;
-  typed scalar projections lower when unordered or ordered solely by the
-  projected path, preserving first occurrence or that declared order;
+- `$distinct` (`plan.distinctProjection`, on an entity `entity.distinct`) over
+  anything but singular member paths the schema declares as scalars alone —
+  strings, numbers, integers and booleans, each optionally `null` — alone or as
+  the members and nested members of an object constructor with literals: an
+  object, an array, a member with no type, a union that lists either, a path
+  reached by a negative index (which counts from the end of an array, where the
+  last element of a short tuple is a prefix item), an array constructor (its
+  elements are not named, so rows with different leaves can answer one array),
+  an operator, the document itself, a path with several items and a constructor
+  with no leaf. SQLite groups an object or an array by its text, which keeps the
+  order its members were written in, and PostgreSQL's jsonb text keeps the
+  spelling of a number (`1.0`), where the engine compares them member by member
+  and numbers by value. Scalars lower unordered, ordered by the projected path alone
+  (the groups come out in that order), or ordered by other paths ordering lowers
+  over, which number the rows in that order and take each group at its first row;
+  a collection's order key reached by a negative index, and a constructor or an
+  ordering by other paths beside a conjunct that runs as a registered function
+  (`plan.registeredFunction`), stay in the engine. On an entity only mapped
+  columns of text, integer, number and boolean types lower, with no ordering of
+  its own (§10.2);
 - a comparison of two paths when either is not typed as a scalar (an object, an
   array, a member with no type), which compares deeply; a `$get` over an
   untyped target, with a key that is no literal string, or feeding a string

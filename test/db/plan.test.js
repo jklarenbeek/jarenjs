@@ -647,6 +647,7 @@ describe('the planner\'s reason vocabulary', () => {
     // a second read of the root sees what the engine is handed: never one row
     'plan.rootRead': [collection, F({ $return: { x: { $count: '$[*]' } } })],
     'entity.notFlwor': [entity, { $count: '$.Person[*]' }],
+    'entity.distinct': [entity, { $distinct: { $for: { p: '$.Person[*]' }, $orderby: ['$p.id'], $return: '$p.name' } }],
     'entity.bindingRoot': [entity, { $for: { p: { $in: '$.Person[*]', $at: 'i' } }, $return: '$p' }],
     'entity.joinKey': [entity, { $for: { a: '$.Person[*]', b: '$.Pet[*]' }, $return: '$a' }],
     // a conjunct spanning two bindings that is neither a column equality

@@ -173,6 +173,10 @@ export const PLAN_VERSION = 2;
  *   only `'first-seen'` is planned. A plan carrying a group
  *   carries no `bucket` or `rank`. A `count` aggregate may wrap a
  * singleton group constructor, counting groups through a subquery.
+ *   A `$distinct` is a group whose keys are its leaves, and a collection's
+ *   keeps the plan's `order` when its rows are ordered by paths other than the
+ *   one it projects: the statement numbers its rows in that order and a group
+ *   stands where its first row does.
  *
  * @typedef {{ ref: PlanRef, every: number, origin: number, as: string,
  *   order: 'asc' | 'desc' | 'first-seen',
