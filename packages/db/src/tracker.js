@@ -34,6 +34,7 @@
  * than reporting a success it never had.
  */
 
+import { setObjectMember } from '@jarenjs/core/object';
 import { createJSONPatch } from '@jarenjs/json/patch';
 import { parseJSONPointer } from '@jarenjs/json/pointer';
 
@@ -1086,7 +1087,7 @@ export function createTracker(context) {
     /** @type {any} */
     const kept = {};
     for (const [name, value] of Object.entries(snapshot)) {
-      if (properties.get(name)?.relation === undefined) kept[name] = value;
+      if (properties.get(name)?.relation === undefined) setObjectMember(kept, name, value);
     }
     return createJSONPatch(kept, stored).length === 0;
   };

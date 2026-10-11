@@ -236,6 +236,19 @@ export function canonicalOf(segments) {
 const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 /**
+ * The subschema of one array element. A negative index counts from the end,
+ * so against a tuple (`prefixItems`) it lands on a prefix item in a short
+ * array and on an item past the prefix in a long one: no schema places it.
+ * @param {any} node
+ * @param {number} index
+ * @returns {any}
+ */
+function elementAt(node, index) {
+  if (index < 0) return Array.isArray(node.prefixItems) ? undefined : node.items;
+  return node.prefixItems?.[index] ?? node.items;
+}
+
+/**
  * The schema subschema at a segment path, walked structurally through
  * `properties` / `items` / `prefixItems`. The collection's schema is
  * the type source — that is why the physical mapping needs no
@@ -248,9 +261,7 @@ export function schemaNodeAt(schema, segments) {
   let node = schema;
   for (const segment of segments) {
     if (node === null || typeof node !== 'object') return undefined;
-    node = 'name' in segment
-      ? node.properties?.[segment.name]
-      : node.prefixItems?.[segment.index] ?? node.items;
+    node = 'name' in segment ? node.properties?.[segment.name] : elementAt(node, segment.index);
   }
   return node === null || typeof node !== 'object' ? undefined : node;
 }

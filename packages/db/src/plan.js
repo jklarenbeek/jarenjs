@@ -366,9 +366,8 @@ function scalarFamilies(schema, segments) {
  * spelling of its numbers where the engine compares deeply. So the schema must
  * declare the type on the node the path reaches ({@link scalarFamilies}: a
  * union with an object or an array, a type that is not declared and a path the
- * schema does not reach all fail), and a negative index fails because
- * {@link schemaNodeAt} reads it as an element past the prefix items, where the
- * last element of a short tuple is one of them.
+ * schema does not reach all fail), and a negative index fails because it counts
+ * from the end of the array, which no schema places.
  * @param {{ segments: import('./dialect.js').JsonPathSegment[] }} ref
  * @param {any} schema - the schema that types the reference
  * @returns {boolean}
@@ -379,8 +378,8 @@ function holdsOnlyScalars(ref, schema) {
 
 /**
  * Whether a reference has a negative index, which counts from the end of an
- * array: the last element of a short tuple is a prefix item, which
- * {@link schemaNodeAt} does not place.
+ * array: the last element of a short tuple is a prefix item, so the schema
+ * places no negative index through a tuple ({@link schemaNodeAt}).
  * @param {{ segments: import('./dialect.js').JsonPathSegment[] }} ref
  * @returns {boolean}
  */
@@ -3096,6 +3095,37 @@ function projectionTree(node, itSlot, shape, total = undefined) {
 }
 
 /**
+ * The conjuncts of a raw `$where` as the query normalizer reads them: an
+ * `$and` argument that is itself an `$and` is part of the call, so the
+ * conjuncts are the leaves of the nest in order, each with the place the
+ * caller wrote it.
+ * @param {any} rawWhere
+ * @param {string} mount - where the `$where` sits in the caller's document
+ * @returns {{ fragment: any, mount: string }[]}
+ */
+function rawConjunctsOf(rawWhere, mount) {
+  const nested = (/** @type {any} */ value) => value !== null && typeof value === 'object' && !Array.isArray(value)
+    && Object.keys(value).length === 1 && Object.hasOwn(value, '$and') && Array.isArray(value.$and);
+  if (!nested(rawWhere)) return [];
+  /** @type {{ fragment: any, mount: string }[]} */
+  const found = [];
+  const pending = [{ items: rawWhere.$and, path: `${mount}/$and`, next: 0 }];
+  while (pending.length > 0) {
+    const top = pending[pending.length - 1];
+    if (top.next >= top.items.length) {
+      pending.pop();
+      continue;
+    }
+    const index = top.next++;
+    const value = top.items[index];
+    const path = `${top.path}/${index}`;
+    if (nested(value)) pending.push({ items: value.$and, path: `${path}/$and`, next: 0 });
+    else found.push({ fragment: value, mount: path });
+  }
+  return found;
+}
+
+/**
  * Plan a FLWOR node into a select plan, recording refusals. When a
  * conjunct refuses native translation, the injected `udf` hook may
  * promote it to a deterministic-function predicate instead (the
@@ -3195,20 +3225,21 @@ function planFlwor(node, shape, rawFlwor, udfHook) {
     const split = node.where.kind === 'op' && node.where.name === '$and';
     const conjuncts = split ? node.where.args : [node.where];
     const rawWhere = rawFlwor?.$where;
-    const rawConjuncts = split ? rawWhere?.$and ?? [] : [rawWhere];
+    const found = split ? rawConjunctsOf(rawWhere, '/$where') : [{ fragment: rawWhere, mount: '/$where' }];
+    // the fragments line up with the normalized conjuncts or ride no hatch
+    const rawConjuncts = found.length === conjuncts.length ? found : [];
     for (let i = 0; i < conjuncts.length; i++) {
       const outcome = planPredicate(conjuncts[i], itSlot, shape);
       if ('refusal' in outcome) {
-        const promoted = udfHook !== undefined && rawConjuncts[i] !== undefined
-          ? udfHook(rawConjuncts[i], itName)
+        const promoted = udfHook !== undefined && rawConjuncts[i]?.fragment !== undefined
+          ? udfHook(rawConjuncts[i].fragment, itName)
           : null;
         if (promoted !== null) {
           // the conjunct's own place in the caller's document rides the
           // call as a literal, so the shared function can report an
           // engine error where the caller wrote the fragment
           plan.filter = conjoin(plan.filter,
-            { p: 'udf', name: promoted.name, key: promoted.key,
-              mount: split ? `/$where/$and/${i}` : '/$where' });
+            { p: 'udf', name: promoted.name, key: promoted.key, mount: rawConjuncts[i].mount });
           udfs.push(promoted.name);
         }
         else {
@@ -3228,13 +3259,12 @@ function planFlwor(node, shape, rawFlwor, udfHook) {
         // interval promotion asks for it today; the spatial ones have
         // not been proven under the hatch and keep their residual
         const composed = outcome.refinements.length > 0 && outcome.composable === true
-          && udfHook !== undefined && rawConjuncts[i] !== undefined
-          ? udfHook(rawConjuncts[i], itName)
+          && udfHook !== undefined && rawConjuncts[i]?.fragment !== undefined
+          ? udfHook(rawConjuncts[i].fragment, itName)
           : null;
         if (composed !== null) {
           plan.filter = conjoin(plan.filter,
-            { p: 'udf', name: composed.name, key: composed.key,
-              mount: split ? `/$where/$and/${i}` : '/$where' });
+            { p: 'udf', name: composed.name, key: composed.key, mount: rawConjuncts[i].mount });
           udfs.push(composed.name);
           continue;
         }

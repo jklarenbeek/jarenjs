@@ -1,0 +1,860 @@
+{
+ "group": "entity document member names",
+ "model": {
+  "$model": "0.1",
+  "entities": {
+   "Open": {
+    "schema": {
+     "type": "object",
+     "required": [
+      "oid"
+     ],
+     "properties": {
+      "oid": {
+       "type": "integer",
+       "x-entity": {
+        "key": true
+       }
+      },
+      "tag": {
+       "type": "string"
+      },
+      "u": {}
+     }
+    }
+   },
+   "Typed": {
+    "schema": {
+     "type": "object",
+     "required": [
+      "tid"
+     ],
+     "properties": {
+      "tid": {
+       "type": "integer",
+       "x-entity": {
+        "key": true
+       }
+      },
+      "tag": {
+       "type": "string"
+      },
+      "u": {
+       "type": [
+        "array",
+        "object",
+        "string",
+        "null"
+       ],
+       "items": {
+        "type": "integer"
+       },
+       "properties": {
+        "0": {
+         "type": "integer"
+        },
+        "00": {
+         "type": "integer"
+        },
+        " 1": {
+         "type": "integer"
+        }
+       }
+      }
+     }
+    }
+   }
+  }
+ },
+ "documents": {
+  "Open": [
+   {
+    "oid": 1,
+    "tag": "t1",
+    "u": [
+     7
+    ]
+   },
+   {
+    "oid": 2,
+    "tag": "t2",
+    "u": {
+     "0": 7
+    }
+   },
+   {
+    "oid": 3,
+    "tag": "t0",
+    "u": "x"
+   },
+   {
+    "oid": 4,
+    "tag": "t1",
+    "u": {
+     "00": 7
+    }
+   },
+   {
+    "oid": 5,
+    "tag": "t2",
+    "u": {
+     " 1": 7
+    }
+   },
+   {
+    "oid": 6,
+    "tag": "t0",
+    "u": [
+     1,
+     7
+    ]
+   },
+   {
+    "oid": 7,
+    "tag": "t1"
+   },
+   {
+    "oid": 8,
+    "tag": "t2",
+    "u": {
+     "0": 3,
+     "00": 9
+    }
+   },
+   {
+    "oid": 9,
+    "tag": "t0",
+    "u": [
+     7,
+     2
+    ]
+   },
+   {
+    "oid": 10,
+    "tag": "t1",
+    "u": {}
+   },
+   {
+    "oid": 11,
+    "tag": "t2",
+    "u": []
+   }
+  ],
+  "Typed": [
+   {
+    "tid": 1,
+    "tag": "t1",
+    "u": [
+     7
+    ]
+   },
+   {
+    "tid": 2,
+    "tag": "t2",
+    "u": {
+     "0": 7
+    }
+   },
+   {
+    "tid": 3,
+    "tag": "t0",
+    "u": "x"
+   },
+   {
+    "tid": 4,
+    "tag": "t1",
+    "u": {
+     "00": 7
+    }
+   },
+   {
+    "tid": 5,
+    "tag": "t2",
+    "u": {
+     " 1": 7
+    }
+   },
+   {
+    "tid": 6,
+    "tag": "t0",
+    "u": [
+     1,
+     7
+    ]
+   },
+   {
+    "tid": 7,
+    "tag": "t1"
+   },
+   {
+    "tid": 8,
+    "tag": "t2",
+    "u": {
+     "0": 3,
+     "00": 9
+    }
+   },
+   {
+    "tid": 9,
+    "tag": "t0",
+    "u": [
+     7,
+     2
+    ]
+   },
+   {
+    "tid": 10,
+    "tag": "t1",
+    "u": {}
+   },
+   {
+    "tid": 11,
+    "tag": "t2",
+    "u": []
+   }
+  ]
+ },
+ "cases": [
+  {
+   "name": "Open exists, a name 0",
+   "query": {
+    "$for": {
+     "o": "$.Open[*]"
+    },
+    "$where": {
+     "$exists": "$o.u['0']"
+    },
+    "$return": "$o.oid"
+   }
+  },
+  {
+   "name": "Open compared, a name 0",
+   "query": {
+    "$for": {
+     "o": "$.Open[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$o.u['0']",
+      7
+     ]
+    },
+    "$return": "$o.oid"
+   }
+  },
+  {
+   "name": "Open projected, a name 0",
+   "query": {
+    "$for": {
+     "o": "$.Open[*]"
+    },
+    "$return": {
+     "id": "$o.oid",
+     "v": "$o.u['0']"
+    }
+   }
+  },
+  {
+   "name": "Open exists, an index 0",
+   "query": {
+    "$for": {
+     "o": "$.Open[*]"
+    },
+    "$where": {
+     "$exists": "$o.u[0]"
+    },
+    "$return": "$o.oid"
+   }
+  },
+  {
+   "name": "Open compared, an index 0",
+   "query": {
+    "$for": {
+     "o": "$.Open[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$o.u[0]",
+      7
+     ]
+    },
+    "$return": "$o.oid"
+   }
+  },
+  {
+   "name": "Open projected, an index 0",
+   "query": {
+    "$for": {
+     "o": "$.Open[*]"
+    },
+    "$return": {
+     "id": "$o.oid",
+     "v": "$o.u[0]"
+    }
+   }
+  },
+  {
+   "name": "Open exists, a name 00",
+   "query": {
+    "$for": {
+     "o": "$.Open[*]"
+    },
+    "$where": {
+     "$exists": "$o.u['00']"
+    },
+    "$return": "$o.oid"
+   }
+  },
+  {
+   "name": "Open compared, a name 00",
+   "query": {
+    "$for": {
+     "o": "$.Open[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$o.u['00']",
+      7
+     ]
+    },
+    "$return": "$o.oid"
+   }
+  },
+  {
+   "name": "Open projected, a name 00",
+   "query": {
+    "$for": {
+     "o": "$.Open[*]"
+    },
+    "$return": {
+     "id": "$o.oid",
+     "v": "$o.u['00']"
+    }
+   }
+  },
+  {
+   "name": "Open exists, a name with a leading space",
+   "query": {
+    "$for": {
+     "o": "$.Open[*]"
+    },
+    "$where": {
+     "$exists": "$o.u[' 1']"
+    },
+    "$return": "$o.oid"
+   }
+  },
+  {
+   "name": "Open compared, a name with a leading space",
+   "query": {
+    "$for": {
+     "o": "$.Open[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$o.u[' 1']",
+      7
+     ]
+    },
+    "$return": "$o.oid"
+   }
+  },
+  {
+   "name": "Open projected, a name with a leading space",
+   "query": {
+    "$for": {
+     "o": "$.Open[*]"
+    },
+    "$return": {
+     "id": "$o.oid",
+     "v": "$o.u[' 1']"
+    }
+   }
+  },
+  {
+   "name": "Open exists, an index 1",
+   "query": {
+    "$for": {
+     "o": "$.Open[*]"
+    },
+    "$where": {
+     "$exists": "$o.u[1]"
+    },
+    "$return": "$o.oid"
+   }
+  },
+  {
+   "name": "Open compared, an index 1",
+   "query": {
+    "$for": {
+     "o": "$.Open[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$o.u[1]",
+      7
+     ]
+    },
+    "$return": "$o.oid"
+   }
+  },
+  {
+   "name": "Open projected, an index 1",
+   "query": {
+    "$for": {
+     "o": "$.Open[*]"
+    },
+    "$return": {
+     "id": "$o.oid",
+     "v": "$o.u[1]"
+    }
+   }
+  },
+  {
+   "name": "Typed exists, a name 0",
+   "query": {
+    "$for": {
+     "t": "$.Typed[*]"
+    },
+    "$where": {
+     "$exists": "$t.u['0']"
+    },
+    "$return": "$t.tid"
+   }
+  },
+  {
+   "name": "Typed compared, a name 0",
+   "query": {
+    "$for": {
+     "t": "$.Typed[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$t.u['0']",
+      7
+     ]
+    },
+    "$return": "$t.tid"
+   }
+  },
+  {
+   "name": "Typed projected, a name 0",
+   "query": {
+    "$for": {
+     "t": "$.Typed[*]"
+    },
+    "$return": {
+     "id": "$t.tid",
+     "v": "$t.u['0']"
+    }
+   }
+  },
+  {
+   "name": "Typed exists, an index 0",
+   "query": {
+    "$for": {
+     "t": "$.Typed[*]"
+    },
+    "$where": {
+     "$exists": "$t.u[0]"
+    },
+    "$return": "$t.tid"
+   }
+  },
+  {
+   "name": "Typed compared, an index 0",
+   "query": {
+    "$for": {
+     "t": "$.Typed[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$t.u[0]",
+      7
+     ]
+    },
+    "$return": "$t.tid"
+   }
+  },
+  {
+   "name": "Typed projected, an index 0",
+   "query": {
+    "$for": {
+     "t": "$.Typed[*]"
+    },
+    "$return": {
+     "id": "$t.tid",
+     "v": "$t.u[0]"
+    }
+   }
+  },
+  {
+   "name": "Typed exists, a name 00",
+   "query": {
+    "$for": {
+     "t": "$.Typed[*]"
+    },
+    "$where": {
+     "$exists": "$t.u['00']"
+    },
+    "$return": "$t.tid"
+   }
+  },
+  {
+   "name": "Typed compared, a name 00",
+   "query": {
+    "$for": {
+     "t": "$.Typed[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$t.u['00']",
+      7
+     ]
+    },
+    "$return": "$t.tid"
+   }
+  },
+  {
+   "name": "Typed projected, a name 00",
+   "query": {
+    "$for": {
+     "t": "$.Typed[*]"
+    },
+    "$return": {
+     "id": "$t.tid",
+     "v": "$t.u['00']"
+    }
+   }
+  },
+  {
+   "name": "Typed exists, a name with a leading space",
+   "query": {
+    "$for": {
+     "t": "$.Typed[*]"
+    },
+    "$where": {
+     "$exists": "$t.u[' 1']"
+    },
+    "$return": "$t.tid"
+   }
+  },
+  {
+   "name": "Typed compared, a name with a leading space",
+   "query": {
+    "$for": {
+     "t": "$.Typed[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$t.u[' 1']",
+      7
+     ]
+    },
+    "$return": "$t.tid"
+   }
+  },
+  {
+   "name": "Typed projected, a name with a leading space",
+   "query": {
+    "$for": {
+     "t": "$.Typed[*]"
+    },
+    "$return": {
+     "id": "$t.tid",
+     "v": "$t.u[' 1']"
+    }
+   }
+  },
+  {
+   "name": "Typed exists, an index 1",
+   "query": {
+    "$for": {
+     "t": "$.Typed[*]"
+    },
+    "$where": {
+     "$exists": "$t.u[1]"
+    },
+    "$return": "$t.tid"
+   }
+  },
+  {
+   "name": "Typed compared, an index 1",
+   "query": {
+    "$for": {
+     "t": "$.Typed[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$t.u[1]",
+      7
+     ]
+    },
+    "$return": "$t.tid"
+   }
+  },
+  {
+   "name": "Typed projected, an index 1",
+   "query": {
+    "$for": {
+     "t": "$.Typed[*]"
+    },
+    "$return": {
+     "id": "$t.tid",
+     "v": "$t.u[1]"
+    }
+   }
+  },
+  {
+   "name": "Typed ordered by a name 0",
+   "query": {
+    "$for": {
+     "t": "$.Typed[*]"
+    },
+    "$orderby": [
+     "$t.u['0']",
+     "$t.tid"
+    ],
+    "$return": "$t.tid"
+   }
+  },
+  {
+   "name": "Typed ordered descending by a name 0",
+   "query": {
+    "$for": {
+     "t": "$.Typed[*]"
+    },
+    "$orderby": [
+     {
+      "$key": "$t.u['0']",
+      "$dir": "desc"
+     },
+     "$t.tid"
+    ],
+    "$return": "$t.tid"
+   }
+  },
+  {
+   "name": "Typed ordered by an index 0",
+   "query": {
+    "$for": {
+     "t": "$.Typed[*]"
+    },
+    "$orderby": [
+     "$t.u[0]",
+     "$t.tid"
+    ],
+    "$return": "$t.tid"
+   }
+  },
+  {
+   "name": "Typed ordered descending by an index 0",
+   "query": {
+    "$for": {
+     "t": "$.Typed[*]"
+    },
+    "$orderby": [
+     {
+      "$key": "$t.u[0]",
+      "$dir": "desc"
+     },
+     "$t.tid"
+    ],
+    "$return": "$t.tid"
+   }
+  },
+  {
+   "name": "Typed ordered by a name 00",
+   "query": {
+    "$for": {
+     "t": "$.Typed[*]"
+    },
+    "$orderby": [
+     "$t.u['00']",
+     "$t.tid"
+    ],
+    "$return": "$t.tid"
+   }
+  },
+  {
+   "name": "Typed ordered descending by a name 00",
+   "query": {
+    "$for": {
+     "t": "$.Typed[*]"
+    },
+    "$orderby": [
+     {
+      "$key": "$t.u['00']",
+      "$dir": "desc"
+     },
+     "$t.tid"
+    ],
+    "$return": "$t.tid"
+   }
+  },
+  {
+   "name": "Typed ordered by an index 1",
+   "query": {
+    "$for": {
+     "t": "$.Typed[*]"
+    },
+    "$orderby": [
+     "$t.u[1]",
+     "$t.tid"
+    ],
+    "$return": "$t.tid"
+   }
+  },
+  {
+   "name": "Typed ordered descending by an index 1",
+   "query": {
+    "$for": {
+     "t": "$.Typed[*]"
+    },
+    "$orderby": [
+     {
+      "$key": "$t.u[1]",
+      "$dir": "desc"
+     },
+     "$t.tid"
+    ],
+    "$return": "$t.tid"
+   }
+  },
+  {
+   "name": "Typed compared, an index 0 against a name 0: $eq",
+   "query": {
+    "$for": {
+     "t": "$.Typed[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$t.u[0]",
+      "$t.u['0']"
+     ]
+    },
+    "$return": "$t.tid"
+   }
+  },
+  {
+   "name": "Typed compared, a name 00 against a name with a leading space: $eq",
+   "query": {
+    "$for": {
+     "t": "$.Typed[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$t.u['00']",
+      "$t.u[' 1']"
+     ]
+    },
+    "$return": "$t.tid"
+   }
+  },
+  {
+   "name": "Typed compared, an index 1 against a name 0: $eq",
+   "query": {
+    "$for": {
+     "t": "$.Typed[*]"
+    },
+    "$where": {
+     "$eq": [
+      "$t.u[1]",
+      "$t.u['0']"
+     ]
+    },
+    "$return": "$t.tid"
+   }
+  },
+  {
+   "name": "Typed compared, an index 0 against a name 0: $ne",
+   "query": {
+    "$for": {
+     "t": "$.Typed[*]"
+    },
+    "$where": {
+     "$ne": [
+      "$t.u[0]",
+      "$t.u['0']"
+     ]
+    },
+    "$return": "$t.tid"
+   }
+  },
+  {
+   "name": "Typed compared, a name 00 against a name with a leading space: $ne",
+   "query": {
+    "$for": {
+     "t": "$.Typed[*]"
+    },
+    "$where": {
+     "$ne": [
+      "$t.u['00']",
+      "$t.u[' 1']"
+     ]
+    },
+    "$return": "$t.tid"
+   }
+  },
+  {
+   "name": "Typed compared, an index 1 against a name 0: $ne",
+   "query": {
+    "$for": {
+     "t": "$.Typed[*]"
+    },
+    "$where": {
+     "$ne": [
+      "$t.u[1]",
+      "$t.u['0']"
+     ]
+    },
+    "$return": "$t.tid"
+   }
+  },
+  {
+   "name": "Typed compared, an index 0 against a name 0: $lt",
+   "query": {
+    "$for": {
+     "t": "$.Typed[*]"
+    },
+    "$where": {
+     "$lt": [
+      "$t.u[0]",
+      "$t.u['0']"
+     ]
+    },
+    "$return": "$t.tid"
+   }
+  },
+  {
+   "name": "Typed compared, a name 00 against a name with a leading space: $lt",
+   "query": {
+    "$for": {
+     "t": "$.Typed[*]"
+    },
+    "$where": {
+     "$lt": [
+      "$t.u['00']",
+      "$t.u[' 1']"
+     ]
+    },
+    "$return": "$t.tid"
+   }
+  },
+  {
+   "name": "Typed compared, an index 1 against a name 0: $lt",
+   "query": {
+    "$for": {
+     "t": "$.Typed[*]"
+    },
+    "$where": {
+     "$lt": [
+      "$t.u[1]",
+      "$t.u['0']"
+     ]
+    },
+    "$return": "$t.tid"
+   }
+  }
+ ]
+}

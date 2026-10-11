@@ -70,8 +70,10 @@ step, and the array branch reads any text `strtol` accepts as an index (`00`,
 `+1`, `-1`, ` 1`), so `$it.u['0']` also matched an array and `$it.u[0]` also
 matched an object, where the query engine and SQLite match one each. A query now
 reads such a path from a document wrapped in a `CASE` that requires each
-parent to be the container its step means; a path with no such step is written
-as before. The generated columns, the migrations and the drift read-back
+parent to be the container its step means, in a collection and in an entity's
+document alike (a predicate, a projected leaf, an ordering, and the ordering
+of a graph load or of an included relation); a path with no such step is
+written as before. The generated columns, the migrations and the drift read-back
 share the dialect's path text and keep it byte for byte, so an existing
 database never reads as drifted. Where the schema leaves the step's container
 open (no declared `type`: `items` binds arrays alone and `properties` objects

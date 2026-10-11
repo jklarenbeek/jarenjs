@@ -2828,7 +2828,7 @@ export function createLoadEngine(context, entityName) {
       // any other document member orders as its declared type
       const value = term.ref.flavor === 'entity-column'
         ? `${rendered.aliasSql}.${q(term.ref.column)}`
-        : dialect.jsonExtract(rendered.docSql, pathTextOf(dialect, term.ref), kindOf(term.ref));
+        : dialect.jsonExtract(dialect.queryDocument(rendered.docSql, term.ref.segments), pathTextOf(dialect, term.ref), kindOf(term.ref));
       const nullsFirst = term.emptyGreatest === term.desc;
       return `${value} ${term.desc ? 'DESC' : 'ASC'}${dialect.orderNulls(nullsFirst)}`;
     });
@@ -3218,7 +3218,7 @@ export function createLoadEngine(context, entityName) {
         // missing member as one empty key
         const value = term.ref.flavor === 'entity-column'
           ? termSql(propertyOfPhysical(term.ref.column))
-          : dialect.jsonExtract(rendered.docSql, pathTextOf(dialect, term.ref), kindOf(term.ref));
+          : dialect.jsonExtract(dialect.queryDocument(rendered.docSql, term.ref.segments), pathTextOf(dialect, term.ref), kindOf(term.ref));
         const nullsFirst = term.emptyGreatest === term.desc;
         return `${value} ${term.desc ? 'DESC' : 'ASC'}${dialect.orderNulls(nullsFirst)}`;
       });

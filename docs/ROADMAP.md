@@ -762,12 +762,12 @@ what each does is its own documentation's job
   spell the step through `#>`, which resolves the key `"n"` of an object, so a
   conforming document whose open container is an object keyed `"0"` is read as
   a span by the CHECK and the store where SQLite's CHECK and the engine read
-  none; the entity predicate, projection and order reads and a load's two
-  order terms in `query.js` still read the shared spelling. Wanted: the
-  generated expression and the CHECK array-only for an index step (a rebuild
-  the catalog comparison must accept), `memberAt` changed in the same change,
-  and the entity and load reads routed through the dialect's `queryDocument`;
-  then an expression index would restore the seek the guarded reads give up.
+  none (the entity predicate, projection and order reads and a load's order
+  terms read through the dialect's guard like the collection reads). Wanted:
+  the generated expression and the CHECK array-only for an index step (a
+  rebuild the catalog comparison must accept), `memberAt` changed in the same
+  change; then an expression index would restore the seek the guarded reads
+  give up.
 - [ ] **SQLite refuses a schema-conforming document under an indexed union
   whose first type cannot hold it.** A generated column takes the union's first
   type and a STRICT table refuses a value that type cannot hold: `{ q: 'b' }`
@@ -842,6 +842,11 @@ what each does is its own documentation's job
   it names and answers. Wanted: count
   natively only where the table cannot hold an invalid row (a declared check),
   or read the column.
+- [ ] **A live ordered window and a fresh run order equal keys differently.** A
+  maintained window breaks ties by the collection key token (LIVE-FORMAT §9
+  promises the total order), a fresh run keeps insertion order, so a keyed
+  collection ordered by a non-unique member holds one order live and another
+  when run. Wanted: decide which is the contract and make both agree.
 - [ ] **A native grouping cannot know its group count.** A native `$distinct`
   or `$groupby` groups every row it reads: with nearly as many groups as rows
   the statement does the engine's work and a sort besides and is slower than
@@ -855,20 +860,6 @@ what each does is its own documentation's job
   answers a duplicate item. A store writes canonical text, so only trusted SQL
   or a foreign writer reaches it. Wanted: read a number key as `double
   precision` on PostgreSQL, measured.
-- [ ] **An entity write drops a property named `__proto__`.** The write
-  normalisers assign members by name (`rest[key] = doc[key]`), so a property
-  named `__proto__` holding an object or an array is lost, and a model with a
-  relation named `__proto__` refuses every `create()` (`'__proto__' in doc` is
-  true for any object). The read decoders define such a member as an own
-  property. Wanted: the same in the write path, membership by `Object.hasOwn`.
-- [ ] **A negative index through a tuple schema is typed as the array's
-  `items`.** For `prefixItems` with `items`, the shared typing
-  (`schemaNodeAt`, `typeOfPath`) types `$it.a[-1]` as `items`, so `$orderby`,
-  `$starts-with` and `$min` over it answer natively where the engine raises
-  (`JQ2005`, `JQ2001`) for a one-element array whose last element is a prefix
-  item. The constructor's string proof refuses a negative index; the shared
-  typing does not. Wanted: type a negative index through `prefixItems` as
-  unknown.
 - [ ] **Member paths outside ASCII identifiers in entity indexes, index
   conditions and database rules.** Entity index paths, index conditions and
   rule operands name members as `$.<member>` over ASCII identifiers. A member

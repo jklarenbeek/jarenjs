@@ -988,14 +988,19 @@ export function createEntityPredicateEmitters(dialect, param, related = undefine
 
   const pathText = (ref) => pathTextOf(dialect, ref);
 
+  /** The document a ref's member is read from: the document under the
+   * condition an engine whose path text cannot tell a name from an index
+   * holds (`dialect.queryDocument`, the read the collection emitters use). */
+  const documentOf = (docSql, ref) => dialect.queryDocument(docSql, ref.segments);
+
   /** The member at a ref, read as the SQL a comparison of that KIND
    * needs. On a dynamically typed engine every kind is the same read;
    * on one whose columns carry a real type they are four. */
   const memberAt = (docSql, ref, kind) =>
-    dialect.jsonExtract(docSql, pathText(ref), kind);
+    dialect.jsonExtract(documentOf(docSql, ref), pathText(ref), kind);
 
   const emitDocPred = (docSql, pred) => {
-    const jt = dialect.jsonTypeOf(docSql, pathText(pred.ref));
+    const jt = dialect.jsonTypeOf(documentOf(docSql, pred.ref), pathText(pred.ref));
     const typed = dialect.typedExtract === true;
     if (pred.p === 'in') {
       // the collection's membership form, over the entity's document
@@ -1182,7 +1187,7 @@ export function createEntityPredicateEmitters(dialect, param, related = undefine
       }
       // Epoch columns retain the document's lexical comparison rule.
       return { value: memberAt(docSql, ref, ref.type === 'string' ? 'text' : 'number'),
-        present: `${dialect.jsonTypeOf(docSql, pathText(ref))} IS NOT NULL` };
+        present: `${dialect.jsonTypeOf(documentOf(docSql, ref), pathText(ref))} IS NOT NULL` };
     });
     if (pred.p === 'and')
       return balancedJoin(pred.items.map((item) => emitPred(aliasSql, docSql, item)), 'AND');
@@ -1316,11 +1321,12 @@ export function emitEntityPlan(plan, dialect, physicalOf) {
       return { value: column, type };
     }
     const text = pathText(ref);
-    const type = dialect.jsonTypeOf(docSql, text);
+    const document = dialect.queryDocument(docSql, ref.segments);
+    const type = dialect.jsonTypeOf(document, text);
     return {
       value: `CASE WHEN ${type} IN (${sl('object')}, ${sl('array')}) `
-        + `THEN ${dialect.jsonText(dialect.jsonExtract(docSql, text))} `
-        + `ELSE ${dialect.jsonExtract(docSql, text, 'scalar')} END`,
+        + `THEN ${dialect.jsonText(dialect.jsonExtract(document, text))} `
+        + `ELSE ${dialect.jsonExtract(document, text, 'scalar')} END`,
       type,
     };
   };
@@ -1454,7 +1460,7 @@ export function emitEntityPlan(plan, dialect, physicalOf) {
       // orders as its declared type, a number numerically
       const read = (alias) => term.ref.flavor === 'entity-column'
         ? physicalComparable(term.ref, `${alias}.${q(term.ref.column)}`, dialect)
-        : dialect.jsonExtract(`${alias}.${q('doc')}`, pathText(term.ref), kindOf(term.ref));
+        : dialect.jsonExtract(dialect.queryDocument(`${alias}.${q('doc')}`, term.ref.segments), pathText(term.ref), kindOf(term.ref));
       // a hop key is the member of the one related row: no value, which
       // the empty placement orders, where the hop finds none
       let value;

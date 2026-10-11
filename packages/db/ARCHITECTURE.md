@@ -177,8 +177,8 @@ dialect papering over:
   reads a path with such a step from a document guarded on each parent —
   `queryGuard`, a dialect member only the query emitters call, and the
   `queryDocument` it yields — so a document whose container is the other
-  kind is no document and the member is absent; a path with no such step is
-  written as it always was. The generated columns, the migrations and the
+  kind is no document and the member is absent, in an entity's document as in
+  a collection's; a path with no such step is written as it always was. The generated columns, the migrations and the
   drift read-back keep spelling paths through `jsonPathText` and
   `jsonExtract` unchanged, which is why an existing database never reads as
   drifted. A comparison, an ordering or a grouping that would read such a

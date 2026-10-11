@@ -19,6 +19,7 @@ import {
   getEpochOfDateTimeRFC3339, getEpochOfDateOnlyRFC3339,
 } from '@jarenjs/core/dates/rfc3339';
 import { resolveRuntime } from '@jarenjs/core/runtime';
+import { setObjectMember } from '@jarenjs/core/object';
 
 import { DbRuntimeError, wrapDriverError, wrapHeldKey, keyUndecided } from './errors.js';
 import { chain, isThenable, attempt, useStatementOnce, releaseStatements as releasePrepared } from './driver.js';
@@ -184,6 +185,10 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
       .filter((property) => property.relation !== undefined)
       .map((property) => property.name));
 
+  /** A member a document holds itself: a name the prototype also answers
+   * (`__proto__`) is a member only where the document defines it. */
+  const memberOf = (doc, name) => (Object.hasOwn(doc, name) ? doc[name] : undefined);
+
   /** Split a completed document into bound column values + the rest.
    * Relation members are PROJECTIONS (§10.1) — never stored. */
   const split = (doc, { updating = false } = {}) => {
@@ -191,12 +196,12 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
     /** @type {any} */
     const rest = {};
     for (const key of Object.keys(doc)) {
-      if (!columnSet.has(key) && !relationNames.has(key)) rest[key] = doc[key];
+      if (!columnSet.has(key) && !relationNames.has(key)) setObjectMember(rest, key, doc[key]);
     }
     for (const column of scalarColumns) {
-      if (column.name === autoKey && doc[column.name] === undefined) continue;
-      if (physical && (column.generated || (!updating && column.databaseDefault && doc[column.name] === undefined))) continue;
-      const value = doc[column.name];
+      const value = memberOf(doc, column.name);
+      if (column.name === autoKey && value === undefined) continue;
+      if (physical && (column.generated || (!updating && column.databaseDefault && value === undefined))) continue;
       if (physical) {
         values.push({ name: column.name, value: column.codecPlan.encode(value) });
         continue;
@@ -204,7 +209,7 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
       if (column.epoch) {
         // derived: the string stays in the document, the epoch rides
         // the column
-        rest[column.name] = value;
+        setObjectMember(rest, column.name, value);
         values.push({ name: column.name, value: epochOf(column.property, value) });
         continue;
       }
@@ -216,7 +221,7 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
       });
     }
     for (const fk of fkColumns) {
-      const value = doc[fk];
+      const value = memberOf(doc, fk);
       values.push({ name: fk, value: value === undefined || value === null ? null : value });
     }
     if (physical && Object.keys(rest).length > 0) throw new DbRuntimeError('JD2003',
@@ -238,7 +243,7 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
     if (physical) return doc;
     let out = doc;
     const drop = (name) => {
-      if (!(name in out) || (out[name] !== null && out[name] !== undefined)) return;
+      if (!Object.hasOwn(out, name) || (out[name] !== null && out[name] !== undefined)) return;
       if (out === doc) out = { ...doc };
       delete out[name];
     };
@@ -256,7 +261,7 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
       if (column.generated || !Object.hasOwn(doc, column.name)) continue;
       const value = column.codecPlan.normalize(doc[column.name]);
       if (value === undefined) delete normalized[column.name];
-      else normalized[column.name] = value;
+      else setObjectMember(normalized, column.name, value);
     }
     return normalized;
   };
@@ -293,17 +298,17 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
   const applyDefaults = (doc, { updating }) => {
     const out = { ...doc };
     for (const { name, fill } of defaulters) {
-      if (out[name] === undefined) out[name] = fill(out);
+      if (memberOf(out, name) === undefined) setObjectMember(out, name, fill(out));
     }
     // the version token starts at 0 on insert: a row written with SQL
     // NULL never matched the tracker's `WHERE ver = 0` and could not be
     // saved through the unit of work at all
     if (!updating && entity.version !== null && entity.version !== undefined
-      && out[entity.version] === undefined) {
-      out[entity.version] = 0;
+      && memberOf(out, entity.version) === undefined) {
+      setObjectMember(out, entity.version, 0);
     }
     if (updating) {
-      for (const { name, fill } of updateStamps) out[name] = fill(out);
+      for (const { name, fill } of updateStamps) setObjectMember(out, name, fill(out));
     }
     return out;
   };
@@ -318,7 +323,7 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
    */
   const refuseProjections = (doc, verb, memberships) => {
     for (const name of relationNames) {
-      const value = doc?.[name];
+      const value = doc === null || doc === undefined ? undefined : memberOf(doc, name);
       if (value === undefined || (Array.isArray(value) && value.length === 0)) continue;
       const relation = entity.properties.get(name).relation;
       if (memberships && relation.kind === 'manyToMany' && Array.isArray(value)) continue;
@@ -659,7 +664,7 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
     stampUpdated: (doc) => {
       if (updateStamps.length === 0) return doc;
       const out = { ...doc };
-      for (const { name, fill } of updateStamps) out[name] = fill(out);
+      for (const { name, fill } of updateStamps) setObjectMember(out, name, fill(out));
       return out;
     },
     normalizeKey: (key) => normalizeKeyArg(key),
@@ -771,7 +776,8 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
         for (const keyName of keys) {
           // the key identifies the row the UPDATE addresses; rewriting it
           // through `changes` moved rows out from under the tracker
-          if (changes?.[keyName] !== undefined && changes[keyName] !== current[keyName]) {
+          if (changes !== null && changes !== undefined && memberOf(changes, keyName) !== undefined
+            && changes[keyName] !== current[keyName]) {
             throw new DbRuntimeError('JD2003',
               `'${keyName}' is the primary key — update() cannot rewrite it; delete and create`,
               { docPath, collection: entity.name, key: parts[0] });
@@ -787,7 +793,7 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
         // but it still moves a declared version token so optimistic
         // savers see the row changed
         if (entity.version !== null && entity.version !== undefined)
-          next[entity.version] = (Number(current[entity.version]) || 0) + 1;
+          setObjectMember(next, entity.version, (Number(current[entity.version]) || 0) + 1);
         checkValid(next);
         const { values: all, rest } = split(next, { updating: true });
         // a physical row is assigned what changes and nothing else, as a

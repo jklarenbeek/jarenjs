@@ -735,6 +735,34 @@ the query engine, now refuse by code or answer what the engine answers:
   now, so a native statement and the engine answer the same item for such a
   name. This corrects an answer that differed: no query that answered right
   changes.
+- A member named `__proto__` in a document written through an entity's
+  `create()`, `update()`, `add()` or `put()` was dropped from the stored
+  document (the write assigned it by name), a default declared on it was not
+  applied, and a relation member named so made every `create()` refuse (the
+  write asked whether the document had the member with `in`, which is true of
+  every object). The write defines such a member as an own property and asks
+  the document itself, so it is stored, defaulted and read back like any other
+  member; a document that carries a value under a relation's name is still
+  refused as a projection.
+- A path with a negative index through a tuple (`prefixItems` beside `items`)
+  was typed by the schema's `items`, so an `$orderby`, a string operator or a
+  `$min` over it answered natively where the engine raises (`JQ2005`,
+  `JQ2001`) for a short array whose last element is a prefix item. The schema
+  places no negative index through a tuple now and such a query runs in the
+  engine, which raises; a negative index through an array with `items` alone is
+  typed as before.
+- On PostgreSQL an entity's document was read through `#>` for every path, so an
+  entity predicate, a projected leaf or an ordering over a member under an open
+  container read the key `"0"` of an object as the element `0` of an array
+  (and `"00"` or `" 1"` as indexes): `$exists: "$b.u['0']"` matched an array,
+  and a load or an included relation ordered by `$it.u[0]` ranked an object's
+  member. Entity documents are read through the same guarded document a
+  collection's are, so PostgreSQL answers what SQLite and the engine answer.
+- A `$where` whose `$and` held another `$and` ran a conjunct no statement can
+  spell as the registered function of a sibling conjunct (the planner indexed
+  the caller's document by the flattened conjunct number), so such a query could
+  answer rows the engine rejects. Each registered function now carries the
+  fragment the caller wrote, at the place the caller wrote it.
 
 ## 8. Stricter models, keys and staged writes
 
