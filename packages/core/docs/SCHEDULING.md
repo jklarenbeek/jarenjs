@@ -57,9 +57,19 @@ is drawn. Zero delays are supported. A supplied server minimum does not draw
 randomness and retains the policy's documented clamping behavior.
 
 `parseRetryAfter(raw, {dialect,now})` accepts HTTP seconds/date by default,
-numeric milliseconds under `milliseconds`, or nothing under `none`.
-`sleep(ms, signal)` removes its timer and listener on settlement. `abortError`
-returns the signal's reason, or a platform-shaped AbortError.
+numeric milliseconds under `milliseconds`, or nothing under `none`; a negative
+number, or one too large to be a finite wait, is no hint (a negative number used
+to be read as a date). `sleep(ms, signal)` removes its timer and listener on
+settlement and really waits for a wait longer than one timer holds (2^31 - 1 ms),
+in turns (it used to fire after a millisecond, so a very long `Retry-After`
+became an immediate retry; `sleep(Infinity)` now never settles unless aborted).
+`backoffDelay` with a `retryAfterMs` returns it unbounded under every policy but
+`ai-compat`, which caps it at `maxMs`: a caller that feeds `parseRetryAfter` into
+`backoffDelay` and sleeps on the result must bound the wait itself, as
+the provider executor does with its overall deadline. `abortError` returns the
+signal's reason, or a platform-shaped AbortError. A zero `baseMs` gives a zero
+backoff at every attempt (it used to give NaN past attempt 1024); the
+`contract-compat` policy still adds its jitter of up to 249 ms to it.
 
 `createAttemptBudget(totalAttempts, safety)` returns a private frozen capability
 with `take()`, `used` and `remaining`. Categories are `safe-read`,

@@ -97,11 +97,20 @@ export class Int32 {
     return ((value - min) / (max - min)) | 0;
   }
 
+  /**
+   * Linear interpolation: `min` at a factor of 0, `max` at 1. The factor is
+   * truncated to an integer first, like every argument of this class, so a
+   * fractional one reads as 0 (use `Float64` or `Vec2f64.lerp` for those).
+   * @param {number} norm the interpolation factor, truncated to an integer
+   * @param {number} min the value at 0
+   * @param {number} max the value at 1
+   * @returns {number} `min + (max - min) * norm`, truncated to int32
+   */
   static lerp(norm = 0, min = 0, max = 0) {
     norm = norm | 0;
     min = min | 0;
     max = max | 0;
-    return ((max - min) * (norm + min)) | 0;
+    return (min + (max - min) * norm) | 0;
   }
 
   static map(value = 0, smin = 0, smax = 0, dmin = 0, dmax = 0) {

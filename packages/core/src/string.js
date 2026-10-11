@@ -60,7 +60,15 @@ export function isStringRegExp(data) {
   }
 }
 
+/** The letters a `/source/flags` literal may end in. */
+const REGEXP_FLAGS = /^[dgimsuvy]*$/;
+
 /**
+ * Compile a pattern string into a Unicode-mode RegExp. A string that opens
+ * with a slash and ends in a closing slash plus flag letters
+ * (`/source/flags`) is read as a literal; any other string, a leading
+ * slash included, is the pattern itself. A RegExp passes through; `null`
+ * and `undefined` answer `undefined`.
  * @param {string | RegExp | null | undefined } pattern
  * @returns {RegExp | undefined}
  */
@@ -74,15 +82,16 @@ export function createRegExp(pattern) {
   if (isStringType(pattern)) {
     if (pattern[0] === '/') {
       const e = pattern.lastIndexOf('/');
-      if (e >= 0) {
+      // `/source/flags` only when a closing slash is followed by flag
+      // letters alone: `/users/[0-9]+` is a pattern that starts with a slash
+      const g = pattern.substring(e + 1);
+      if (e > 0 && REGEXP_FLAGS.test(g)) {
         const r = pattern.substring(1, e);
-        const g = pattern.substring(e + 1);
-        // Add unicode flag if not already present
-        return g.includes('u') ? new RegExp(r, g) : new RegExp(r, g + 'u');
+        // Unicode mode unless the literal already chose one (`u` or `v`)
+        return g.includes('u') || g.includes('v') ? new RegExp(r, g) : new RegExp(r, g + 'u');
       }
     }
-    else
-      return new RegExp(pattern, 'u');
+    return new RegExp(pattern, 'u');
   }
   // TODO: should we return false instead?
   throw new Error(`Unknown Regular Expression Pattern Type: ${pattern}`);
@@ -149,10 +158,18 @@ export function getStringLength(str, useGrapheme = false) {
   if (!useGrapheme) {
     return str.length;
   }
-  // Fast-path: check ASCII inline to avoid function call overhead
+  // Fast-path: check ASCII inline to avoid function call overhead. A CR LF
+  // pair is ASCII but one cluster, so the pairs are counted here and taken off
+  // the length; no segmenter is needed for it.
   const len = str.length;
+  let pairs = 0;
   for (let i = 0; i < len; i++) {
-    if (str.charCodeAt(i) > 127) {
+    const code = str.charCodeAt(i);
+    if (code === 13 && i + 1 < len && str.charCodeAt(i + 1) === 10) {
+      pairs++;
+      i++;
+    }
+    else if (code > 127) {
       // Non-ASCII found - use grapheme counting.
       // Segment the whole string: a cluster may span the ASCII boundary
       // (e.g. 'e' followed by a combining accent).
@@ -165,7 +182,7 @@ export function getStringLength(str, useGrapheme = false) {
       return countCodePoints(str);
     }
   }
-  return len;
+  return len - pairs;
 }
 
 /**

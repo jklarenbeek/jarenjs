@@ -157,6 +157,10 @@ export class Float64 {
       const t = +(+c + +x);
       c = +x;
       x = +t;
+      // past the largest double every later term is Infinity too, and an
+      // unbounded n (or one past 2**53, where `i` stops advancing) would
+      // otherwise never reach it
+      if (x === Infinity) return Infinity;
     }
     return +x;
   }
@@ -444,6 +448,8 @@ export class Float64 {
     n = +n;
     if (n < 0.0 && mathf64_floor(n) === n) return NaN;
     if (mathf64_floor(n) === n) {
+      // 171! is the first to overflow a double; an unbounded n never finishes the product
+      if (n > 170.0) return Infinity;
       let acc = 1.0;
       for (let i = 2.0; i <= n; i += 1.0) acc *= i;
       return +acc;

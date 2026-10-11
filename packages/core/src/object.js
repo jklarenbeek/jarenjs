@@ -13,7 +13,7 @@ const hasOwn = Object.hasOwn;
 /**
  * Deep equality comparison for arbitrary values.
  *
- * Generic JavaScript equality: understands Maps, Sets, RegExps,
+ * Generic JavaScript equality: understands Maps, Sets, RegExps, Dates,
  * functions, typed arrays and class instances (prototype constructors
  * must match; an own `constructor` member is data). Not the same as
  * `equalsJson`, which compares JSON values
@@ -30,7 +30,7 @@ export function equalsDeep(target, source) {
   if (isBooleanType(source)) return false;
 
   if (isFn(target))
-    return target.toString() === source.toString();
+    return isFn(source) && target.toString() === source.toString();
 
   if (isScalarType(target))
     return false;
@@ -87,6 +87,10 @@ export function equalsDeep(target, source) {
   if (constructor === RegExp) {
     return target.toString() === source.toString();
   }
+
+  // a Date holds its instant in an internal slot, not in a member
+  if (constructor === Date)
+    return Object.is(target.getTime(), source.getTime());
 
   if (isTypedArray(target)) {
     if (target.length !== source.length)

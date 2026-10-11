@@ -87,7 +87,7 @@ export function isValidFloat64(value) {
 }
 
 export function getValidFloat64(value, defVal = NaN) {
-  return isNumberType(value)
+  return isNumberType(value) && !Number.isNaN(value)
     ? value
     : defVal;
 }

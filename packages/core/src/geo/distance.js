@@ -55,7 +55,8 @@ export function haversineDistance(lon1, lat1, lon2, lat2, radius = EARTH_RADIUS)
   const sdl = Math.sin(dl * 0.5);
   const a = sdp * sdp + Math.cos(p1) * Math.cos(p2) * sdl * sdl;
   // asin form rather than atan2: same result, one fewer transcendental
-  return 2 * radius * Math.asin(Math.sqrt(a < 1 ? a : 1));
+  // a rounding excess over 1 is clamped; NaN is not an excess and stays NaN
+  return 2 * radius * Math.asin(Math.sqrt(a >= 1 ? 1 : a));
 }
 
 /**

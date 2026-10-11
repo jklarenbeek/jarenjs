@@ -532,10 +532,14 @@ new JarenValidator({ useGrapheme: false })
 **If you are migrating from a validator that counts code units, set
 `useGrapheme: false`,** or strings containing emoji, combining marks, flags
 or astral-plane characters will silently change validity at the boundaries.
-Grapheme mode is not expensive — ASCII takes a `str.length` fast path and
-most Unicode takes a code-point count; only cluster-forming strings reach
-`Intl.Segmenter` — so the default is about correctness, not speed, and
-switching to it later is a product decision rather than a performance one.
+Grapheme mode is not expensive — ASCII takes a `str.length` fast path (a CR LF
+pair counted as the one cluster it is) and most Unicode takes a code-point
+count; only cluster-forming strings reach `Intl.Segmenter` — so the default is
+about correctness, not speed, and switching to it later is a product decision
+rather than a performance one. Upgrade note: CR LF counts as one grapheme in
+the default mode, so a browser textarea value with line breaks is one
+character shorter per break than it was read before (`'a\r\nb'` has length 3,
+not 4, against `maxLength: 3`); `useGrapheme: false` still counts both code units.
 
 ### `format` and content assertion follow the draft
 

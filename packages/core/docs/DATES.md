@@ -113,7 +113,10 @@ other format testers). The load-bearing distinction is
 (`durationToMs`), while years and months are **calendar** units whose
 length depends on where they land — those go through
 `addDuration(dateParts, duration, sign)`, which applies the clamping
-month math. `monthsBetween(from, to)` is the calendar diff.
+month math. `monthsBetween(from, to)` is the calendar diff: a month is whole
+once the day is reached and, when both values carry a time of day, the instant
+(offsets included) is too (`T12:00` to the next month's `T10:00` is zero months; it used to read
+one). A value with no clock is compared by its day.
 
 ## Formatting — `format.js`
 
@@ -130,6 +133,11 @@ byte-stable across Node/ICU versions.
 wide and short, 7 weekdays wide and short from Sunday, the two day-period
 markers), read once out of a locale pack's own msgids and frozen, so a
 pattern compiled against them costs no lookup per date.
+A formatter refuses a value that has not got the half a token reads — a date
+token over a full-time, a clock token over a full-date — with a `TypeError`
+whose `half` is `'date'` or `'time'`; it used to write the `-1` sentinels into
+the text (`0001-0-1-0-1`). The offset tokens write nothing for a value that
+carries none.
 
 ## Parsing — `parse.js`
 

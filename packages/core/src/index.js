@@ -197,8 +197,13 @@ export const TypedArray = Object.getPrototypeOf(Uint8Array);
 export function isTypedArray(data) {
   if (data == null)
     return false;
-  const proto = data.__proto__.__proto__;
-  return proto != null && proto.constructor === TypedArray;
+  // the prototype chain, not the `__proto__` member: a null-prototype object
+  // has no such accessor and parsed JSON can carry one as plain data
+  const own = Object.getPrototypeOf(Object(data));
+  if (own === null)
+    return false;
+  const proto = Object.getPrototypeOf(own);
+  return proto !== null && proto.constructor === TypedArray;
 }
 //#endregion
 

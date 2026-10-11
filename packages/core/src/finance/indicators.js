@@ -15,11 +15,51 @@
 export function sma(values, period) {
   const n = values.length;
   const out = new Array(n).fill(null);
-  let sum = 0;
+  // a series of finite numbers needs nothing but the running sum
+  let clean = true;
   for (let i = 0; i < n; i++) {
-    sum += values[i];
-    if (i >= period) sum -= values[i - period];
-    if (i >= period - 1) out[i] = sum / period;
+    if (!(values[i] - values[i] === 0)) { clean = false; break; }
+  }
+  if (clean) {
+    let total = 0;
+    for (let i = 0; i < n; i++) {
+      total += values[i];
+      if (i >= period) total -= values[i - period];
+      if (i >= period - 1) out[i] = total / period;
+    }
+    return out;
+  }
+  // The running sum carries finite values only (a `null` reads as 0, as it
+  // always did), and the NaNs and the two infinities in the window are counted
+  // beside it, so one bad value does not poison the windows after it has left
+  // and no window is ever re-read.
+  let sum = 0;
+  let nan = 0;
+  let up = 0;
+  let down = 0;
+  let bad = 0;
+  const take = (raw, sign) => {
+    const x = raw === null ? 0 : +raw;
+    if (x === Infinity) { up += sign; bad += sign; }
+    else if (x === -Infinity) { down += sign; bad += sign; }
+    else if (x !== x) { nan += sign; bad += sign; }
+    else sum += sign * x;
+  };
+  for (let i = 0; i < n; i++) {
+    const added = values[i];
+    if (added - added === 0) sum += added; // finite (or null, which reads as 0)
+    else take(added, 1);
+    if (i >= period) {
+      const left = values[i - period];
+      if (left - left === 0) sum -= left;
+      else take(left, -1);
+    }
+    if (i >= period - 1) {
+      if (bad === 0) out[i] = sum / period;
+      else if (nan > 0 || (up > 0 && down > 0)) out[i] = NaN;
+      else if (up > 0) out[i] = Infinity;
+      else out[i] = -Infinity;
+    }
   }
   return out;
 }

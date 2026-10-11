@@ -394,8 +394,8 @@ export class Vec2f64 {
     const bx = +b.x;
     const by = +b.y;
     return new Vec2f64(
-      +((ax + norm) * (bx - ax)),
-      +((ay + norm) * (by - ay)),
+      +(ax + norm * (bx - ax)),
+      +(ay + norm * (by - ay)),
     );
   }
 

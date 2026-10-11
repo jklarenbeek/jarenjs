@@ -24,7 +24,10 @@ The decisions that live here, and nowhere else:
 
 - **Naming.** `$defs` keys and `$ref` pointer tokens are the names a reader
   already uses, so they win. Anything else is derived from the path that
-  reached it (`UserAddressStreet`), PascalCased and de-collided by suffix.
+  reached it (`UserAddressStreet`), PascalCased and de-collided by suffix. The
+  names the printers write as globals, `Array` and `Record`, are taken from the
+  start, so a `$defs` key spelled either way is declared `Array2` or `Record2`
+  rather than shadowing `Array<T>` for the whole file.
 - **Cycles.** A node reached while it is still being built is hoisted to a
   declaration and referenced by name. That is what turns a cyclic graph into
   an acyclic list; the frame already building it finishes the declaration.

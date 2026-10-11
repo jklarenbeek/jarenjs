@@ -41,7 +41,9 @@ rather than a mapped coordinate.
 
 BigInt fixed-width integers for programmer-calculator mode. `toWord(value,
 bits, signed)` masks and sign-extends into an 8/16/32/64-bit word;
-`wAnd/wOr/wXor/wNot/wShl/wShr/wRol/wRor/wMod` operate at a width;
+`wAnd/wOr/wXor/wNot/wShl/wShr/wRol/wRor/wMod` operate at a width (a shift
+count wraps with it, a negative one counting from the top; `wShl(1n, -1n)` used
+to shift the other way and answer `0n`);
 `toBase(int, radix, {group, sep, pad, upper})` and `fromBase(str, radix)`
 (prefix-aware: `0x`/`0o`/`0b`) are the radix string I/O.
 
@@ -69,6 +71,14 @@ first consumer; Mermaid 3D is a candidate — see ROADMAP).
 group, radix, decimal })` and radix-aware `parseNumber(str, { radix })`
 (recognizes `0x`/`0o`/`0b` prefixes, grouping separators and scientific
 notation; returns `NaN` on failure). Radix I/O delegates to `word.js`.
+`Int32.lerp(norm, min, max)` is `min + (max - min) * norm` and `Vec2f64.lerp(norm, a, b)`
+is `a + norm * (b - a)`; both multiplied the span by `norm + base` before, which agreed
+with these only from a base of 0 (`Int32.lerp(5, 3, 13)` was 80, it is 53). `Float64.fib`
+and `Float64.factorial` answer `Infinity` for an argument past the largest double,
+`Infinity` and `1e300` included (they looped for ever).
+Engineering notation keeps the mantissa in [1, 1000): `999.9996` at three
+places is `1.000e+3` (it used to print `1000.000e+0`), and the smallest
+subnormals format as `5.000e-324`.
 
 > **`notation: 'auto'` is not a drop-in for a fixed-unit readout.** The auto
 > branch escapes to exponential once `abs(value) >= 1e21` or

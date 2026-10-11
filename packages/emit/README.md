@@ -228,10 +228,22 @@ Outside bundle mode, schema names must produce distinct output filenames.
 Names such as `user-account.json` and `user_account.json` both become
 `UserAccount.d.ts`; the CLI refuses that collision with exit 2 before writing.
 
+`Array` and `Record` are reserved: the printers write `Array<T>` and `Record<string, T>`, so
+a declaration of either name would shadow them for the whole file. A root name (taken from
+the file name, `--name` or the `name` option, so `record.json` and `array.json` too) or a
+`$defs` key that reads `Record` or `Array` is declared `Record2` or `Array2`; the output file
+keeps its name (`Record.d.ts`). Upgrade note: such a root used to be declared `Record` or
+`Array`, which broke the file whenever it also used `Array<T>`; it is renamed now even when
+it does not.
+
 `--bundle` compiles every schema into **one name space**: a `$defs.Id` that
 two schemas both declare comes out as `Id` and `Id2`, deterministically in
 sorted-file order, instead of two colliding declarations. The programmatic
 equivalent is the `reserved` option of `compileEmitModel`.
+
+Every schema is read and compiled before the first file is written: a file that
+is not valid JSON, or that no model can be compiled from, fails the command with
+exit 2 and a message that names it, and leaves the output directory as it was.
 
 ## Import maps: serving the suite unbundled
 

@@ -66,6 +66,12 @@ delete it or fix it.
   the closure compiler staying the default. The no-`eval` rule is absolute in this
   package today, which is the guarantee this must not quietly cost.
 
+- [ ] **I-Regexp validity versus compilability.** `isValidIRegexp` accepts
+  grammar-valid patterns that `compileIRegexp` cannot build (`[z-a]`,
+  `a{3,2}`, a quantified `^` or `$`), so a validator can pass a pattern that
+  JSONPath `match()` then treats as false. Wanted: decide whether validity
+  requires compilability.
+
 ## @jarenjs/json — JSLT
 
 - [ ] **JSLT matcher optimizer (single-walk)** — replace per-rule path pre-passes with a single multi-pattern walk, specialize location tracking by reachable modes, and use input-schema knowledge to prune impossible shape rules. The benchmark quantifies the gap: dense pure-path transforms pay ~9–12× over the raw path scan, and hand-written native JS stays 3–139× faster on real transformations — this is the main JSLT performance workstream.
@@ -203,6 +209,13 @@ establish registry publication or downstream acceptance.
   retried as a call is. The `retry-on-undeclared` lint flags an entry that names
   a stream code, but an entry naming a declared code passes. Refusing a retry
   policy where it cannot apply is a lint rule of its own.
+
+- [ ] **An oversize stream frame ends the stream as a slow consumer.** A
+  snapshot or patch larger than `streamLimits.queue.bytes` (1 MiB by default)
+  is refused with the retryable `JC2096` on an idle consumer, the connection is
+  torn down, and a client with `reconnect` retries the same frame until
+  `JC2097`. Wanted: an empty queue admits one oversize frame, or the refusal
+  gets its own non-retryable code.
 
 ## @jarenjs/md
 
@@ -1240,3 +1253,6 @@ still open is listed here, each with its reason.
   wants `--sizes 10000`. Backing the largest leg with a file would buy the
   headroom at the price of measuring a page cache instead of a database, which
   is only worth trading once a runner actually fails.
+- [ ] **Fixed-width integer vectors.** `Int32` and `Vec2i32` multiply through a
+  double (`| 0`), losing low bits past 2^53, and `cross3` is unwrapped. Wanted:
+  decide wrap (`Math.imul`) or saturate, then pin it.

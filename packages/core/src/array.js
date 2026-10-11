@@ -28,8 +28,11 @@ export function getUniqueArray(arr, def = undefined) {
   if (arr == null)
     return def;
 
+  // first occurrence wins; a Set sees NaN as equal to itself, so a NaN is kept
+  // once instead of dropped, and the pass is linear
+  const seen = new Set();
   return arr.constructor === Array
-    ? arr.filter((el, index, a) => index === a.indexOf(el))
+    ? arr.filter((el) => !seen.has(el) && seen.add(el))
     : arr.constructor === Set
       ? Array.from(arr)
       : def;

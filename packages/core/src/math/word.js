@@ -45,6 +45,19 @@ export function toWord(value, bits = 32, signed = false) {
   return v;
 }
 
+/**
+ * A shift count reduced into `[0, bits)`, as the width itself wraps: a count
+ * of `bits` shifts by none and a negative one counts from the top, the way a
+ * JavaScript `<<` and the rotations here read it.
+ * @param {bigint | number} n
+ * @param {number} bits
+ * @returns {bigint}
+ */
+function shiftCount(n, bits) {
+  const width = BigInt(bits | 0);
+  return ((BigInt(n) % width) + width) % width;
+}
+
 /** @param {bigint} a @param {bigint} b @param {number} [bits] @param {boolean} [signed] */
 export function wAnd(a, b, bits = 32, signed = false) {
   return toWord(toWord(a, bits, false) & toWord(b, bits, false), bits, signed);
@@ -63,7 +76,7 @@ export function wNot(a, bits = 32, signed = false) {
 }
 /** @param {bigint} a @param {bigint} n @param {number} [bits] @param {boolean} [signed] */
 export function wShl(a, n, bits = 32, signed = false) {
-  return toWord(toWord(a, bits, false) << (BigInt(n) % BigInt(bits)), bits, signed);
+  return toWord(toWord(a, bits, false) << shiftCount(n, bits), bits, signed);
 }
 /**
  * Logical right shift (zero fill) over the unsigned representation, then
@@ -71,7 +84,7 @@ export function wShl(a, n, bits = 32, signed = false) {
  * @param {bigint} a @param {bigint} n @param {number} [bits] @param {boolean} [signed]
  */
 export function wShr(a, n, bits = 32, signed = false) {
-  return toWord(toWord(a, bits, false) >> (BigInt(n) % BigInt(bits)), bits, signed);
+  return toWord(toWord(a, bits, false) >> shiftCount(n, bits), bits, signed);
 }
 /** Rotate left. @param {bigint} a @param {bigint} n @param {number} [bits] @param {boolean} [signed] */
 export function wRol(a, n, bits = 32, signed = false) {

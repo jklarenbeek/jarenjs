@@ -44,10 +44,22 @@ function groupInteger(intPart, sep) {
  */
 function toEngineering(value, precision) {
   if (value === 0) return '0e+0';
-  const exp = Math.floor(Math.log10(Math.abs(value)));
-  const engExp = Math.floor(exp / 3) * 3;
-  const mantissa = value / Math.pow(10, engExp);
-  const m = precision >= 0 ? mantissa.toFixed(precision) : String(mantissa);
+  // the exponent comes from the number's own digits, so it is exact at every
+  // magnitude, and the mantissa is shifted as text, so no power of ten has to
+  // be representable (the smallest subnormals have none)
+  const [digits, exponent] = value.toExponential().split('e');
+  const decimalExp = Number(exponent);
+  const render = (engExp) => {
+    const mantissa = Number(`${digits}e${decimalExp - engExp}`);
+    return precision >= 0 ? mantissa.toFixed(precision) : String(mantissa);
+  };
+  let engExp = Math.floor(decimalExp / 3) * 3;
+  let m = render(engExp);
+  // rounding can carry the mantissa up to 1000: 999.9996 is 1.000e+3
+  if (precision >= 0 && Math.abs(Number(m)) >= 1000) {
+    engExp += 3;
+    m = render(engExp);
+  }
   return `${m}e${engExp >= 0 ? '+' : ''}${engExp}`;
 }
 

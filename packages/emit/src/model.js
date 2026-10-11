@@ -494,6 +494,13 @@ function createPlainContext(ctx) {
   };
 }
 
+/**
+ * The global generic types the printers write out by name (`Array<T>`,
+ * `Record<string, T>`): a declaration of the same name would shadow them in
+ * the emitted file and break every use.
+ */
+const EMITTED_GLOBALS = Object.freeze(['Array', 'Record']);
+
 /** Reserve a unique declaration name. */
 function reserveName(ctx, preferred) {
   const base = toIdentifier(preferred);
@@ -987,7 +994,7 @@ export function compileEmitModel(schema, options = {}) {
     ctx.variant = variant;
     ctx.shared = sharedNames;
     ctx.taken = taken
-      ?? (Array.isArray(options.reserved) ? options.reserved.slice() : []);
+      ?? [...EMITTED_GLOBALS, ...(Array.isArray(options.reserved) ? options.reserved : [])];
 
     // `$defs`/`definitions` are declared first and in document order: they are
     // the names a reader of the schema already uses, and declaring them up

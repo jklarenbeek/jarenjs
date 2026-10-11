@@ -42,16 +42,19 @@ describe('getBigIntishType', () => {
 });
 
 describe('BigInt_min/max', () => {
-  // Note: The implementation has swapped names - min returns max and vice versa
-  
-  it('BigInt_min returns maximum (implementation quirk)', () => {
-    assert.deepEqual(BigInt_min(BigInt(1), BigInt(2), BigInt(3)), BigInt(3));
-    assert.deepEqual(BigInt_min(BigInt(-5), BigInt(-10), BigInt(0)), BigInt(0));
+  it('BigInt_min returns the smallest', () => {
+    assert.deepEqual(BigInt_min(BigInt(1), BigInt(2), BigInt(3)), BigInt(1));
+    assert.deepEqual(BigInt_min(BigInt(-5), BigInt(-10), BigInt(0)), BigInt(-10));
   });
 
-  it('BigInt_max returns minimum (implementation quirk)', () => {
-    assert.deepEqual(BigInt_max(BigInt(1), BigInt(2), BigInt(3)), BigInt(1));
-    assert.deepEqual(BigInt_max(BigInt(-5), BigInt(-10), BigInt(0)), BigInt(-10));
+  it('BigInt_max returns the largest', () => {
+    assert.deepEqual(BigInt_max(BigInt(1), BigInt(2), BigInt(3)), BigInt(3));
+    assert.deepEqual(BigInt_max(BigInt(-5), BigInt(-10), BigInt(0)), BigInt(0));
+  });
+
+  it('agree with BigInt_MinMax on the same values', () => {
+    const values = [5n, -2n, 9n, 0n, -7n];
+    assert.deepEqual([BigInt_min(...values), BigInt_max(...values)], BigInt_MinMax(...values));
   });
 });
 

@@ -68,12 +68,14 @@ export function mirr(cashflows, financeRate, reinvestRate) {
 
 /**
  * Convert an array of dates (Date, ms timestamp, or day number) to year
- * fractions from the first date.
+ * fractions from the first date. A number under 1e6 in magnitude is a day
+ * number (negative before 1970: 1960-01-01 is -3653); anything larger,
+ * negative timestamps before 1970 included (-3.2e11), is milliseconds.
  * @param {Array<Date|number>} dates
  * @returns {number[]}
  */
 function yearFractions(dates) {
-  const toMs = (d) => (d instanceof Date ? d.getTime() : d * (typeof d === 'number' && d < 1e6 ? MS_PER_DAY : 1));
+  const toMs = (d) => (d instanceof Date ? d.getTime() : d * (typeof d === 'number' && Math.abs(d) < 1e6 ? MS_PER_DAY : 1));
   const t0 = toMs(dates[0]);
   return dates.map((d) => (toMs(d) - t0) / MS_PER_DAY / DAYS_PER_YEAR);
 }

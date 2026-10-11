@@ -2216,7 +2216,7 @@ export const OPERATORS = Object.freeze({
         }
         return (f) => {
           const v = dateGet(f);
-          return v === EMPTY ? EMPTY : format(dateParts(v, datePath));
+          return v === EMPTY ? EMPTY : renderDate(format, dateParts(v, datePath), v, datePath);
         };
       }
       // a dynamic pattern gets the monomorphic per-callsite cache the
@@ -2246,7 +2246,7 @@ export const OPERATORS = Object.freeze({
               { detail: e instanceof Error ? e.message : 'invalid' }, patternPath);
           }
         }
-        return lastFormat(dateParts(v, datePath));
+        return renderDate(lastFormat, dateParts(v, datePath), v, datePath);
       };
     },
   },
@@ -2550,6 +2550,21 @@ function formatCalendarResult(input, result) {
   if (input.year >= 0 && (result.year < 0 || result.year > 9999))
     throw new TypeError('the result is outside the years 0000-9999 RFC 3339 can spell');
   return formatRFC3339Parts(result);
+}
+
+// A pattern token that reads a half the value has not got (a year of a
+// full-time, an hour of a full-date) is refused the way the component
+// operators refuse it, not written out as a sentinel.
+function renderDate(format, parts, value, docPath) {
+  try {
+    return format(parts);
+  }
+  catch (e) {
+    if (e instanceof TypeError && (e.half === 'date' || e.half === 'time'))
+      throw runtimeError('JQ2001', e.half === 'date' ? 'query/no-date-component' : 'query/no-time-component',
+        { value: String(value) }, docPath);
+    throw e;
+  }
 }
 
 //#endregion

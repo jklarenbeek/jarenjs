@@ -20,7 +20,9 @@ import { pmt as tvmPmt } from './tvm.js';
  * Build a full amortization schedule. The payment is derived from the
  * standard annuity formula unless an explicit `payment` is supplied
  * (e.g. a rounded real-world instalment); the final period absorbs any
- * rounding residue so the balance lands exactly on zero.
+ * rounding residue so the balance lands exactly on zero. `type: 1` is an
+ * annuity-due (payments at the start of each period): its first row has no
+ * interest and every payment, the last included, is the same instalment.
  *
  * @param {number} principal loan amount (positive)
  * @param {number} rate periodic interest rate
@@ -34,7 +36,10 @@ export function amortizationSchedule(principal, rate, nper, opts = {}) {
   const rows = [];
   let balance = principal;
   for (let period = 1; period <= nper; period++) {
-    const interest = balance * rate;
+    // an annuity-due pays at the start of the period: the first payment meets
+    // a principal that has accrued nothing yet, and each later row carries the
+    // interest the balance left by the row before it earned
+    const interest = type === 1 && period === 1 ? 0 : balance * rate;
     let principalPart = payment - interest;
     let pay = payment;
     if (period === nper) {

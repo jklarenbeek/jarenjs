@@ -27,7 +27,17 @@ uses Newton with a bisection fallback.
 
 `amortizationSchedule(principal, rate, nper, { payment?, type? })` →
 rows of `{ period, payment, interest, principal, balance }`; the last row
-clears rounding residue to a zero balance.
+clears rounding residue to a zero balance. With `type: 1` (annuity-due) the
+first row carries no interest and every instalment, the last included, is the
+due-annuity payment (the rows used to accrue ordinary interest, so the last
+instalment came out larger: by 13% for a 12-month 1% loan, by a multiple of the
+first for a long one).
+`xnpv` / `xirr` read a date number under 1e6 in magnitude as a day number (negative
+before 1970: 1960-01-01 is -3653) and a larger one as milliseconds; a negative
+millisecond timestamp used to be read as days, so the flows of 1960 came out
+simultaneous and the result meaningless. `sma` treats a `null` as 0 as before, but a `NaN` or an
+infinity now affects only the windows that hold it (the running sum stayed `NaN`
+for the rest of the series), in time linear in the series.
 
 ## Interest — `interest.js`
 

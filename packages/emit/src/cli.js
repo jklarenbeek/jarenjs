@@ -156,7 +156,7 @@ function collectSchemaFiles(target) {
   const stat = fs.statSync(target);
   if (!stat.isDirectory()) return [target];
   return fs.readdirSync(target)
-    .filter((f) => f.endsWith('.json'))
+    .filter((f) => f.endsWith('.json') && fs.statSync(path.join(target, f)).isFile())
     .sort()
     .map((f) => path.join(target, f));
 }
@@ -265,20 +265,32 @@ function main() {
   // `$defs.Id` would otherwise collide as duplicate identifiers. The files
   // are processed in sorted order, so the renames are deterministic.
   const reserved = [];
+  // Every schema is read and compiled before anything is written, so one bad
+  // file (named in the message) leaves the output directory as it was.
+  const models = [];
   for (let i = 0; i < files.length; i++) {
     const file = files[i];
-    const schema = JSON.parse(fs.readFileSync(file, 'utf8'));
-    const name = options.name ?? nameFromFile(file);
-    const model = compileEmitModel(schema, {
-      name, source: path.basename(file),
-      normalize: normalizeOptions, variantSuffix: options.suffix,
-      reserved: options.bundle !== null ? reserved : undefined,
-    });
+    let model;
+    try {
+      const schema = JSON.parse(fs.readFileSync(file, 'utf8'));
+      const name = options.name ?? nameFromFile(file);
+      model = compileEmitModel(schema, {
+        name, source: path.basename(file),
+        normalize: normalizeOptions, variantSuffix: options.suffix,
+        reserved: options.bundle !== null ? reserved : undefined,
+      });
+    }
+    catch (error) {
+      throw new Error(`${file}: ${error instanceof Error ? error.message : String(error)}`);
+    }
     if (options.bundle !== null) {
       bundled.push(...model.declarations);
       for (const declaration of model.declarations) reserved.push(declaration.name);
       continue;
     }
+    models.push({ file, model });
+  }
+  for (const { file, model } of models) {
     const out = path.join(options.out, nameFromFile(file) + target.extension);
     ok = writeOrCheck(out, target.render(model), options.check) && ok;
   }

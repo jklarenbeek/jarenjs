@@ -12,6 +12,20 @@ is inserted. The semantic hook receives the complete serialized identity and the
 stored entry. Hits, replacement of an existing key and clear do not notify;
 neither do the bounded cache's explicit deletion or the semantic cache's
 unkeyable values. The caller owns resource cleanup and any explicit clearing.
+A limit under 1 retains nothing: each `set` hands its entry straight to the hook
+(it used to throw on the first `set`).
+
+Answers that changed (upgrade notes): `getUniqueArray` keeps one `NaN` where it
+dropped every one (so `isUniqueArray([NaN])` is `true`) and runs in linear time;
+`getValidFloat64(NaN, d)` answers `d`, like the 16- and 32-bit twins, where it answered
+`NaN`; `lerpColor` holds every channel to 0-255 when `t` extrapolates (it spilled into the
+next channel, and a negative `t` returned a malformed `#80`); `canonicalNullable` answers
+`null` for a prototype-named `type` such as `constructor` (it answered a canonical form,
+or threw with a sibling keyword); `haversineDistance` over a NaN coordinate is `NaN`
+(it was half the planet, 20,015,114 m); `Float64.fib(Infinity)` and `Float64.factorial(Infinity)`
+answer `Infinity` (they never returned).
+`equalsDeep` compares two `Date`s by instant (every pair used to read equal) and
+reads a null-prototype object like any other.
 
 `semanticKey(value, options?)` (`@jarenjs/core/object`) is the collision-free
 identity the semantic cache keys by, in two forms of one serializer with the same
@@ -43,7 +57,7 @@ document's entry to another that differs from it only in member order.
 | `@jarenjs/core/stats` | descriptive statistics over a sample: `mean`, sample `variance`/`stddev`, the midpoint `median`, and `quantile(values, p, { method })` — `p` on 0..1 under a NAMED rule, `'nearest-rank'` or `'linear'`, because a default would decide silently; an empty sample answers `undefined`, never `0` |
 | `@jarenjs/core/async` | `mapConcurrent(items, limit, worker, { signal })` — the bounded ordered asynchronous map: never more than `limit` workers in flight, results in input order, a rejection or an abort stops dispatch and drains the lanes before the map rejects, so nothing is still running when it settles; and `createAwaitedSink(sink)` — the suite's one write serializer: every `write` waits for the previous one to settle (a sink may answer a promise — a socket waiting for `drain`, a stream waiting for the consumer's pull), `end` waits for every write, `abort` rejects what is still queued at once, one failure stops everything behind it, and a synchronous sink stays on a no-promise fast path. `createLatestDelivery(observer, coalesce?)` bounds callback delivery at one active and one latest event, isolates failures and drops pending work on close |
 | `@jarenjs/core/checksum` | `crc32(bytes)` computes the unsigned CRC-32 used by PNG and ZIP over a byte view, without changing it; empty input answers 0 |
-| `@jarenjs/core/chunk` | cutting a value down to size: `sizeOf` (the suite's one size rule — a string is its length, anything else its JSON), `excerpt`, `truncate`, and `chunkText` by size, line or separator with offsets that locate a piece in its source |
+| `@jarenjs/core/chunk` | cutting a value down to size: `sizeOf` (the suite's one size rule — a string is its length, anything else its JSON), `excerpt`, `truncate`, and `chunkText` by size, line or separator with offsets that locate a piece in its source (an empty separator, which used to loop forever, and a NaN size or overlap are a `TypeError`) |
 | `@jarenjs/core/scan` | char-code constants and predicates for recursive-descent parsers |
 | `@jarenjs/core/message` | the message template/catalog compiler shared by the validator and the form layer |
 | `@jarenjs/core/schema` | the JSON Schema constraint-keyword groups (`NUMERIC_CONSTRAINTS`, `STRING_CONSTRAINTS`, `ARRAY_CONSTRAINTS`, `OBJECT_CONSTRAINTS`) that forms, emit and the validator compose, the per-type `TYPE_SCOPED_KEYWORDS` and `ANNOTATION_KEYWORDS`, ordered `SCHEMA_VALUE_KEYWORDS` / `SCHEMA_MAP_KEYWORDS` / `SCHEMA_LIST_KEYWORDS` that readers extend with their own compatibility rules, and the suite's one nullable normalizer: `splitNullable` gives the non-null branch of `type: [T, 'null']` or of a two-branch `anyOf`/`oneOf` (structural — forms, the contract transport compiler), `canonicalNullable` the one spelling only where both accept the same values (value-exact — the contract diff) |
@@ -51,7 +65,7 @@ document's entry to another that differs from it only in member order.
 | `@jarenjs/core/number` | boolean/number/integer coercion helpers (`isIntishType`, ...) and `isJsonNumberString`, the strict lexical JSON-number predicate shared by query casts and schema normalization; conversion and overflow policy stay with each caller |
 | `@jarenjs/core/integer` | `int8` ... `uint64` ranges and validators |
 | `@jarenjs/core/float` | `float16` ... `float64` constants, validators, increment/decrement |
-| `@jarenjs/core/bigint` | bigint helpers (`BigInt_min`, `BigInt_MinMax`, ...) |
+| `@jarenjs/core/bigint` | bigint helpers (`BigInt_min`, `BigInt_MinMax`, ...); **breaking change of `@jarenjs/core/bigint`:** `BigInt_min` now answers the smallest and `BigInt_max` the largest, where they used to answer each other's value (swap any caller that relied on the old answers), and the functions are typed `bigint` instead of `any` |
 | `@jarenjs/core/dates` | RFC 3339 / ISO 8601 validation, plus the calendar kernel: integer date arithmetic, compiled formatting, durations |
 | `@jarenjs/core/geo` | the spatial kernel over GeoJSON: robust orientation, great-circle measurement, rings, bounding boxes, geohash, GeoJSON/WKT validity, a packed-Hilbert box index, Web Mercator and Douglas-Peucker simplification |
 | `@jarenjs/core/vector` | the vector kernel over plain arrays: dot, cosine and Euclidean similarity (higher-is-better; a malformed pair scores 0), l2 normalization, the packed little-endian Float32 form and the one shape guard (`isVector`) |
@@ -79,6 +93,8 @@ createRegExp('^\\p{L}+$');            // unicode-flagged RegExp
 const matches = createRegExpTester('/^x/gi');
 matches('X'); matches('X');          // true both times; global/sticky state is isolated
 ```
+
+`createRegExp` reads `/source/flags` as a literal only when a closing slash is followed by flag letters, so `'/users/[0-9]+'` is a pattern that starts with a slash (it used to throw), and a `v`-mode literal keeps `v` instead of gaining `u`. `getStringLength(str, true)` counts a CR LF pair as one grapheme in ASCII text too.
 
 ## Text validation
 

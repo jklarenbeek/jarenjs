@@ -15,6 +15,7 @@
 // `addToParts`, where the anchor exists.
 
 import { addToParts, daysFromCivil } from './civil.js';
+import { epochOfRFC3339Parts } from './rfc3339.js';
 
 /**
  * A decomposed ISO 8601 duration. Every field is a non-negative number;
@@ -194,20 +195,28 @@ export function addDuration(dateParts, duration, sign = 1) {
 }
 
 /**
- * Whole calendar months between two dates, ignoring the time of day —
- * the building block `diff` needs for the units that are not fixed-width.
+ * Whole calendar months between two dates — the building block `diff`
+ * needs for the units that are not fixed-width.
  *
  * "Whole" is defined by `addToParts`, so that adding the result back to
  * `from` never overshoots `to`. That makes 2026-01-31 → 2026-02-28 **one**
  * month, not zero, because the clamping rule already says Jan 31 plus a
  * month IS Feb 28. Keeping the two operations inverse is worth more than
- * matching moment here, which reports zero for the same pair.
+ * matching moment here, which reports zero for the same pair. When both
+ * values carry a time of day the clock and the offset count too: the month is
+ * whole once the instant is reached (`T12:00` → next month `T10:00` is not yet
+ * one); a value with no clock is compared by its day.
  *
  * @param {object} from - a parts record
  * @param {object} to - a parts record
  * @returns {number} signed month count
  */
 export function monthsBetween(from, to) {
+  if (from.hours >= 0 && to.hours >= 0) {
+    const timed = instantMonths(from, to);
+    if (timed !== null)
+      return timed;
+  }
   let months = (to.year - from.year) * 12 + (to.month - from.month);
   if (months === 0)
     return 0;
@@ -219,6 +228,37 @@ export function monthsBetween(from, to) {
     months -= 1;
   else if (months < 0 && advancedDay < toDay)
     months += 1;
+  return months;
+}
+
+/**
+ * The whole months between two values that both carry a clock, by instant:
+ * the most months that, added to `from`, stay on this side of `to`. The local
+ * month difference is only the starting guess (offsets can put it one off).
+ * Null when an instant is out of range.
+ * @param {object} from
+ * @param {object} to
+ * @returns {number | null}
+ */
+function instantMonths(from, to) {
+  const start = epochOfRFC3339Parts(from);
+  const target = epochOfRFC3339Parts(to);
+  if (!Number.isFinite(start) || !Number.isFinite(target))
+    return null;
+  if (start === target)
+    return 0;
+  const at = (months) => epochOfRFC3339Parts(addToParts(from, months, 'month'));
+  let months = (to.year - from.year) * 12 + (to.month - from.month);
+  if (target > start) {
+    if (months < 0) months = 0;
+    while (months > 0 && at(months) > target) months--;
+    while (at(months + 1) <= target) months++;
+  }
+  else {
+    if (months > 0) months = 0;
+    while (months < 0 && at(months) < target) months++;
+    while (at(months - 1) >= target) months--;
+  }
   return months;
 }
 

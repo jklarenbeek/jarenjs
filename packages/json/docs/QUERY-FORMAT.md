@@ -1460,7 +1460,9 @@ Three rules make these predictable:
 - **Month arithmetic clamps.** `2026-01-31` plus one month is `2026-02-28`,
   because the alternative — overflowing into March — makes adding a month
   non-monotonic. `$date-diff` counts months to match, so adding its result
-  back never overshoots: `2026-01-31` to `2026-02-28` is **one** month.
+  back never overshoots: `2026-01-31` to `2026-02-28` is **one** month, and
+  with a time of day on both sides the clock counts (`2026-01-15T12:00:00Z`
+  to `2026-02-15T10:00:00Z` is zero months; it used to read one).
 - **An operation that needs a half the value has not got is refused.** A unit
   names a half: `year` through `day` read the calendar, `hour` through
   `millisecond` read the clock. Adding hours to a `full-date`, adding a day
@@ -1504,7 +1506,7 @@ one computed at runtime, the message naming the option.
 | `$date-add` `$date-sub` | `[date, duration]` or `[date, amount, unit]` → a value of the same lexical form; a fraction that has no exact conversion, or a unit the value has no half for, is `JQ2001` |
 | `$start-of` `$end-of` | `[date, unit]` → the unit's first / last instant, in the same lexical form; a sub-day unit on a `full-date`, or `week` and coarser on a `full-time`, is `JQ2001` |
 | `$date-diff` | `[from, to, unit]` → whole units, negative when `to` precedes `from`; a value with no date half is `JQ2001` for every unit |
-| `$date-format` | `[date, pattern]` → the value rendered through an LDML pattern |
+| `$date-format` | `[date, pattern]` → the value rendered through an LDML pattern; a token that reads a half the value has not got (`yyyy` of a `full-time`, `HH` of a `full-date`) is `JQ2001`, where it used to be written as a sentinel |
 
 Every operator that *produces* a date produces it in the same canonical
 spelling, so one query can never emit two forms of one instant: a fractional

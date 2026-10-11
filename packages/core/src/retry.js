@@ -26,7 +26,8 @@ export function backoffDelay(options, attempt, retryAfterMs = undefined) {
   if (!Number.isFinite(baseMs) || baseMs < 0 || !Number.isFinite(maxMs) || maxMs < 0)
     throw new TypeError('backoffDelay baseMs and maxMs must be finite nonnegative numbers');
   if (typeof random !== 'function') throw new TypeError('backoffDelay random must be a function');
-  const cap = Math.min(maxMs, baseMs * 2 ** (attempt - 1));
+  // a zero base stays zero however large the doubling grows
+  const cap = baseMs === 0 ? 0 : Math.min(maxMs, baseMs * 2 ** (attempt - 1));
   if (retryAfterMs !== undefined)
     return policy === 'ai-compat' ? Math.min(maxMs, retryAfterMs) : Math.max(0, retryAfterMs);
   if (policy === 'contract-compat') return cap + Math.floor(random() * 250);
@@ -36,6 +37,7 @@ export function backoffDelay(options, attempt, retryAfterMs = undefined) {
 /**
  * Parse only the selected header dialect. HTTP accepts seconds or HTTP-date;
  * milliseconds accepts nonnegative numbers only; none ignores the header.
+ * A negative number, or one too large to be a finite wait, is no hint.
  * @param {string | null | undefined} raw
  * @param {{ dialect?: 'http' | 'milliseconds' | 'none', now?: number }} [options]
  * @returns {number | undefined}
@@ -43,7 +45,10 @@ export function backoffDelay(options, attempt, retryAfterMs = undefined) {
 export function parseRetryAfter(raw, { dialect = 'http', now = Date.now() } = {}) {
   if (raw == null || raw === '' || dialect === 'none') return undefined;
   const number = Number(raw);
-  if (Number.isFinite(number) && number >= 0) return number * (dialect === 'milliseconds' ? 1 : 1000);
+  if (Number.isFinite(number)) {
+    const wait = number * (dialect === 'milliseconds' ? 1 : 1000);
+    return number >= 0 && Number.isFinite(wait) ? wait : undefined;
+  }
   if (dialect !== 'http') return undefined;
   const date = Date.parse(raw);
   return Number.isNaN(date) ? undefined : Math.max(0, date - now);
@@ -57,19 +62,31 @@ export function abortError(signal) {
   return error;
 }
 
-/** Abortable timer with listener cleanup on either settlement.
+/** The longest wait one timer holds: a larger delay would fire at once. */
+const MAX_TIMER_MS = 2 ** 31 - 1;
+
+/** Abortable timer with listener cleanup on either settlement. A wait past
+ * the longest single timer is slept in turns, never cut short.
  * @param {number} ms @param {AbortSignal} [signal] @returns {Promise<void>} */
 export function sleep(ms, signal = undefined) {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) { reject(abortError(signal)); return; }
+    let timer;
     const onAbort = () => {
       clearTimeout(timer);
       reject(abortError(signal));
     };
-    const timer = setTimeout(() => {
-      signal?.removeEventListener('abort', onAbort);
-      resolve();
-    }, ms);
+    const wait = (left) => {
+      timer = setTimeout(() => {
+        if (left > MAX_TIMER_MS) {
+          wait(left - MAX_TIMER_MS);
+          return;
+        }
+        signal?.removeEventListener('abort', onAbort);
+        resolve();
+      }, Math.min(left, MAX_TIMER_MS));
+    };
+    wait(ms);
     signal?.addEventListener('abort', onAbort, { once: true });
   });
 }

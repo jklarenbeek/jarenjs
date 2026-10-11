@@ -121,6 +121,22 @@ const NEEDS_NAMES = Object.freeze({
 
 const MAX_TOKEN = 4;
 
+// the half of a parts record each token reads: a token that reads a half
+// the record has not got (`-1` sentinels) has nothing true to write
+const DATE_TOKENS = new Set(['yyyy', 'yy', 'y', 'MMMM', 'MMM', 'MM', 'M', 'dd', 'd', 'EEEE', 'EEE', 'E',
+  'DDD', 'D', 'ww', 'w', 'Q']);
+const TIME_TOKENS = new Set(['HH', 'H', 'hh', 'h', 'mm', 'm', 'ss', 's', 'SSS', 'S', 'a']);
+
+/**
+ * The refusal for a token that reads a half the value has not got.
+ * @param {'date' | 'time'} half
+ * @param {string} token
+ * @returns {TypeError}
+ */
+function missingHalf(half, token) {
+  return Object.assign(new TypeError(`the '${token}' token reads the ${half} half, and this value has none`), { half });
+}
+
 /**
  * Compile an LDML date pattern into a formatter.
  *
@@ -130,7 +146,9 @@ const MAX_TOKEN = 4;
  * @param {string} pattern - an LDML pattern, e.g. `"yyyy-MM-dd'T'HH:mm:ssXXX"`
  * @param {DateNames} [names] - locale names, required only if the
  *   pattern uses `MMM`/`MMMM`/`EEE`/`EEEE`/`a`
- * @returns {(parts: object) => string} the compiled formatter
+ * @returns {(parts: object) => string} the compiled formatter; it throws a
+ *   `TypeError` carrying `half: 'date' | 'time'` for a value that has not got
+ *   the half a token of the pattern reads
  * @throws {TypeError} on an unterminated quote, or a name token with no
  *   provider for it
  * @example
@@ -142,6 +160,8 @@ export function compileDateFormat(pattern, names = undefined) {
   if (typeof pattern !== 'string')
     throw new TypeError('a date pattern must be a string');
   const steps = [];
+  let dateToken = null;
+  let timeToken = null;
   let literal = '';
   const flushLiteral = () => {
     if (literal !== '') {
@@ -187,6 +207,8 @@ export function compileDateFormat(pattern, names = undefined) {
         + ' (@jarenjs/core/dates is locale-free by design)'), { token: matched, names: need });
     }
     flushLiteral();
+    if (dateToken === null && DATE_TOKENS.has(matched)) dateToken = matched;
+    if (timeToken === null && TIME_TOKENS.has(matched)) timeToken = matched;
     const fn = TOKENS[matched];
     steps.push(need === undefined ? fn : (p) => fn(p, names));
     i += matched.length;
@@ -196,13 +218,22 @@ export function compileDateFormat(pattern, names = undefined) {
   const count = steps.length;
   if (count === 0)
     return () => '';
-  if (count === 1)
-    return steps[0];
+  const run = count === 1
+    ? steps[0]
+    : (parts) => {
+      let out = '';
+      for (let i = 0; i < count; i++)
+        out += steps[i](parts);
+      return out;
+    };
+  if (dateToken === null && timeToken === null)
+    return run;
   return (parts) => {
-    let out = '';
-    for (let i = 0; i < count; i++)
-      out += steps[i](parts);
-    return out;
+    if (dateToken !== null && parts.month === -1)
+      throw missingHalf('date', dateToken);
+    if (timeToken !== null && parts.hours === -1)
+      throw missingHalf('time', timeToken);
+    return run(parts);
   };
 }
 

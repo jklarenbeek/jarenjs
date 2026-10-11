@@ -60,7 +60,7 @@ export function trueThat(whatever, _path = undefined, _root = undefined, _key = 
  * @param {string | undefined} _path the current json path to the data
  * @param {any | undefined} _root  the root of the json data
  * @param {string | string[] | undefined} _key a key or an array of keys
- * @returns {boolean} returns always true
+ * @returns {boolean} returns always false
  */
 export function falseThat(whatever, _path = undefined, _root = undefined, _key = undefined) {
   // eslint-disable-next-line no-constant-binary-expression

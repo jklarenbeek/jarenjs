@@ -32,7 +32,8 @@ measurement: <!--fact:geo.losses-->three rows lose to a rival: point in polygon 
 Spherical, on the IUGG mean radius (`EARTH_RADIUS` = 6 371 008.8 m). A
 Euclidean norm on raw degrees is 64% wrong over 1 km at 52°N, so the
 planar shortcut does not exist here. `haversineDistance` (<0.5%
-anywhere) is the answer; `equirectDistance` (0.02% at 430 km, 12.4%
+anywhere; `NaN` for a non-finite coordinate, where it used to answer half the
+planet) is the answer; `equirectDistance` (0.02% at 430 km, 12.4%
 intercontinentally, a few multiply-adds) is the *screening* form for
 rejecting candidates before the real test. Also `initialBearing`,
 `destinationPoint`, `lineLength(positions)`. The ellipsoid is

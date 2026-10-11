@@ -89,8 +89,10 @@ function tables() {
   if (lookups === null) {
     lookups = {
       annotations: new Set(ANNOTATION_KEYWORDS),
-      scoped: Object.fromEntries(Object.entries(TYPE_SCOPED_KEYWORDS)
-        .map(([type, keywords]) => [type, new Set(keywords)])),
+      // no prototype: a schema's `type` is data, and `constructor` or
+      // `__proto__` must not read as a known type
+      scoped: Object.assign(Object.create(null), Object.fromEntries(Object.entries(TYPE_SCOPED_KEYWORDS)
+        .map(([type, keywords]) => [type, new Set(keywords)]))),
     };
   }
   return lookups;

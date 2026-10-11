@@ -100,15 +100,21 @@ export function truncate(text, max, marker = '… [truncated]') {
  * @returns {Array<{ index: number, start: number, end: number, text: string }>}
  *   `start`/`end` are offsets into the original text, so a piece can be
  *   located in the source it came from.
+ * @throws {TypeError} When `size` or `overlap` is NaN (empty text included), or the
+ *   `separator` of a separator split is not a non-empty string
  */
 export function chunkText(text, options = {}) {
   const source = String(text ?? '');
   const size = Math.max(1, Math.floor(options.size ?? 4000));
   const strategy = options.strategy ?? 'size';
+  if (Number.isNaN(size))
+    throw new TypeError('chunkText size is a number of characters');
   if (source.length === 0) return [];
 
   if (strategy === 'size') {
     const overlap = Math.max(0, Math.min(Math.floor(options.overlap ?? 0), size - 1));
+    if (Number.isNaN(overlap))
+      throw new TypeError('chunkText overlap is a number of characters');
     /** @type {Array<{ index: number, start: number, end: number, text: string }>} */
     const pieces = [];
     const step = size - overlap;
@@ -123,6 +129,8 @@ export function chunkText(text, options = {}) {
   // line and separator differ only in what a unit is and what joins two
   // of them back together — one grouping loop, two vocabularies
   const separator = strategy === 'line' ? '\n' : (options.separator ?? '\n\n');
+  if (typeof separator !== 'string' || separator === '')
+    throw new TypeError('chunkText separator is a non-empty string');
   return groupUnits(source, separator, size);
 }
 

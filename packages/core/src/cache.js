@@ -46,7 +46,9 @@ import { semanticKey } from './object.js';
 /**
  * A bounded, string-or-value-keyed LRU cache.
  * @template K, V
- * @param {number} limit - Maximum number of retained entries (> 0)
+ * @param {number} limit - Maximum number of retained entries; `Infinity`
+ *   is unbounded, and a limit under 1 retains nothing (every `set` hands
+ *   its entry straight to `onEvict`)
  * @param {(key: K, value: V) => void} [onEvict] - Called with the entry
  *   the bound pushed out, after it left the cache — how an owner releases
  *   what the value holds (a prepared statement a worker keeps). Not called
@@ -71,6 +73,10 @@ export function createBoundedCache(limit, onEvict = undefined) {
 
   /** @type {BoundedCache<K, V>['set']} */
   function set(key, value) {
+    if (limit < 1) {
+      onEvict?.(key, value);
+      return;
+    }
     if (map.has(key)) map.delete(key);
     else if (map.size >= limit) {
       const [oldest, evicted] = map.entries().next().value;
@@ -141,7 +147,8 @@ export function createBoundedCache(limit, onEvict = undefined) {
  * keys the whole tuple, which a `${a}|${b}` string concatenation cannot
  * do injectively once `a` may itself contain the separator.
  * @template V
- * @param {number} limit - Maximum number of retained entries (> 0)
+ * @param {number} limit - Maximum number of retained entries; a limit
+ *   under 1 retains nothing, as for {@link createBoundedCache}
  * @param {(identity: string, entry: V) => void} [onEvict] - Called after
  *   a capacity eviction, with the complete semantic identity and entry.
  *   Replacement, clear and unkeyable values do not invoke it.
