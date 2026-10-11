@@ -62,9 +62,11 @@ const SHAPES = [
 
 describe('md — parse time grows linearly on hostile input', function () {
   for (const [what, make, n, run] of SHAPES) {
-    it(`${what}: quadrupling the input at most multiplies the time by eight`, function () {
-      const ratio = growthRatio(run, make(n), make(4 * n), { limit: 8 });
-      assert.ok(ratio < 8, `quadrupling ${what} multiplied the time by ${ratio.toFixed(2)}`);
+    // eight times the input: linear is about 8x, quadratic about 64x; the
+    // wide step keeps the ratio readable on a host the gate loads in parallel
+    it(`${what}: eight times the input at most multiplies the time by twenty-four`, function () {
+      const ratio = growthRatio(run, make(n), make(8 * n), { limit: 24 });
+      assert.ok(ratio < 24, `eight times ${what} multiplied the time by ${ratio.toFixed(2)}`);
     });
   }
 });
