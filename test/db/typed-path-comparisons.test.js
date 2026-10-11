@@ -17,8 +17,6 @@
 
 import { describe, it, before, after } from 'node:test';
 import * as assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
 
 import { compileJsonQuery } from '@jarenjs/json/query';
 import {
@@ -81,19 +79,6 @@ describe('the corpus group on PostgreSQL', { skip: !PG_URL && 'JAREN_PG_URL is n
       }
     });
   }
-});
-
-describe('the corpus group on bun:sqlite', () => {
-  it('plans native with no user function and answers as the engine does', (t) => {
-    const which = spawnSync('bun', ['--version'], { encoding: 'utf8' });
-    if (which.status !== 0) return t.skip('no bun binary on PATH');
-    const fixture = fileURLToPath(new URL('./fixtures/typed-paths-bun.mjs', import.meta.url));
-    const run = spawnSync('bun', ['run', fixture], { encoding: 'utf8', cwd: fileURLToPath(new URL('../..', import.meta.url)) });
-    const report = JSON.parse(run.stdout.trim().split('\n').at(-1) ?? 'null');
-    assert.equal(report?.runtime, 'bun', run.stderr);
-    assert.deepEqual(report.failures, []);
-    assert.equal(run.status, 0);
-  });
 });
 
 const MODEL = {

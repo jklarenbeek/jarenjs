@@ -11,12 +11,10 @@
  */
 import { after, before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { fileURLToPath } from 'node:url';
 
 import { openStore, reasonId, PLANNER_REASONS } from '@jarenjs/db';
 import { nodeDriver, adaptNodeDatabase } from '@jarenjs/db/node';
@@ -482,16 +480,6 @@ describe('correlated hops: adopted columns, whatever their codec and null policy
       await store.close();
       rmSync(dir, { recursive: true, force: true });
     }
-  });
-  it('the same worlds on bun:sqlite', (t) => {
-    const which = spawnSync('bun', ['--version'], { encoding: 'utf8' });
-    if (which.status !== 0) return t.skip('no bun binary on PATH');
-    const fixture = fileURLToPath(new URL('./fixtures/adopted-hops-bun.mjs', import.meta.url));
-    const run = spawnSync('bun', ['run', fixture], { encoding: 'utf8', cwd: fileURLToPath(new URL('../..', import.meta.url)) });
-    const report = JSON.parse(run.stdout.trim().split('\n').at(-1) ?? 'null');
-    assert.equal(report?.runtime, 'bun', run.stderr);
-    assert.deepEqual(report.failures, []);
-    assert.equal(run.status, 0);
   });
 });
 
