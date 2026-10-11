@@ -25,8 +25,6 @@
  * that must buffer hands the buffered items in as `materialize`, named.
  */
 
-import { utf8ByteLength } from '@jarenjs/core/string';
-
 import { DbRuntimeError } from './errors.js';
 import { chain, isThenable } from './driver.js';
 
@@ -44,18 +42,6 @@ function settling(call, release, wrap = (error) => error) {
   let result;
   try { result = call(); } catch (error) { return failed(error); }
   return isThenable(result) ? result.then(undefined, failed) : result;
-}
-
-/**
- * The serialised size of a JSON text in UTF-8 bytes — the one measure
- * every byte bound in this package counts (an include per root, a page,
- * a change record): the suite's counter, re-exported under the name the
- * engines read.
- * @param {string} text
- * @returns {number}
- */
-export function utf8Length(text) {
-  return utf8ByteLength(text);
 }
 
 /**

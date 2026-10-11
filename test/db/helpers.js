@@ -313,7 +313,7 @@ export function keyComparator(keys) {
  * The FULL test-double dialect for the query layer: every spelling
  * primitive foreign (brackets, `@pN` refs, alien JSON functions), so a
  * plan rendered through it and through SQLite differ correspondingly —
- * the D21 proof repeated at the query layer.
+ * the dialect proof repeated at the query layer.
  * @param {any} createDialect - `createDialect` from @jarenjs/db
  * @returns {any}
  */

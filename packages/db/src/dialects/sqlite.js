@@ -8,7 +8,7 @@
  * binding this package ships binds arrays.
  */
 
-import { createDialect } from '../dialect.js';
+import { createDialect, stringLiteral } from '../dialect.js';
 import { rtreeDdl } from './rtree-ddl.js';
 import { readExpression } from './expression-read.js';
 import { SQLITE, sqliteInvariantTriggers } from './invariant-sql.js';
@@ -19,11 +19,6 @@ import { modelPath } from '../model-path.js';
 /** @param {string} s */
 function quoteIdentifier(s) {
   return `"${String(s).replace(/"/g, '""')}"`;
-}
-
-/** @param {string} s */
-function stringLiteral(s) {
-  return `'${String(s).replace(/'/g, "''")}'`;
 }
 
 /**

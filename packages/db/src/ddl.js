@@ -21,6 +21,7 @@ import { chain } from './driver.js';
 import { BBOX_COMPONENTS, BBOX_INDEX_ORDER, derivedMappingFor } from './derive.js';
 import { expressionSql, expressionStem, expressionFunctions } from './expression.js';
 import { foldIdentifier } from './invariants.js';
+import { SCALAR_TYPES, columnKindFor } from './scalar-types.js';
 import { verifyRulePrograms } from './physical.js';
 import { rowPaths, rowPredicate, storedBoolean } from './dialects/row-predicate.js';
 import { planTable } from './dialects/sqlite-schema.js';
@@ -283,27 +284,6 @@ export function schemaTypeAt(schema, segments) {
     return node.type.find((t) => typeof t === 'string' && t !== 'null');
   }
   return undefined;
-}
-
-/** The scalar schema types a derived index cannot be declared over. */
-const SCALAR_TYPES = new Set(['string', 'integer', 'number', 'boolean']);
-
-/**
- * The comparison KIND a declared schema type implies — what a column
- * over that member holds, and therefore how its expression has to read
- * the member out of the document. On a dynamically typed engine the
- * kind changes nothing; on one whose columns carry a real SQL type it
- * is the difference between a `text` column and a type error.
- * @param {string | undefined} schemaType
- * @returns {'text' | 'number' | 'boolean' | undefined}
- */
-export function columnKindFor(schemaType) {
-  switch (schemaType) {
-    case 'string': return 'text';
-    case 'integer': case 'number': return 'number';
-    case 'boolean': return 'boolean';
-    default: return undefined;
-  }
 }
 
 /**

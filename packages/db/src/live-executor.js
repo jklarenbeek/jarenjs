@@ -1,8 +1,9 @@
 //@ts-check
 /** Bounded snapshot execution through the existing collection/entity engines. */
+import { utf8ByteLength } from '@jarenjs/core/string';
 import { createQueryEngine, createEntityQueryEngine, createQueryState } from './query.js';
 import { SAFE_PROFILE } from './profile.js';
-import { createCursor, drainPage, isCursorBudgetError, utf8Length } from './cursor.js';
+import { createCursor, drainPage, isCursorBudgetError } from './cursor.js';
 import { DbCompileError, DbRuntimeError } from './errors.js';
 
 /** One serialized evaluator owns its counters and compiled plan. No per-call
@@ -10,7 +11,7 @@ import { DbCompileError, DbRuntimeError } from './errors.js';
  * @param {any} context @param {any} bounds @param {AbortSignal} signal */
 export function createLiveExecutor(context, bounds, signal) {
   const binding = { document: context.document, externals: context.externals };
-  if (utf8Length(JSON.stringify(binding)) > bounds.maxInputBytes)
+  if (utf8ByteLength(JSON.stringify(binding)) > bounds.maxInputBytes)
     throw new DbCompileError('JD0052', 'resnapshot query bindings exceed input byte credits');
   context = { ...context, ...structuredClone(binding) };
   const source = context.connection;
@@ -25,7 +26,7 @@ export function createLiveExecutor(context, bounds, signal) {
       [key, narrower(base.limits[key], key === 'resultItems' ? bounds.maxMaintained : value)])) };
   let rows = 0, bytes = 0;
   const refused = () => new DbRuntimeError('JD2060', 'resnapshot input exceeded its row or byte credits');
-  const sizeOf = (row) => utf8Length(JSON.stringify(row));
+  const sizeOf = (row) => utf8ByteLength(JSON.stringify(row));
   const connection = { ...source, prepare(sql, metadata) {
     const read = async (params, one) => {
       // The credits are inclusive, so none is checked before a statement: one
@@ -84,7 +85,7 @@ export function createLiveExecutor(context, bounds, signal) {
         if (packed !== context.document) await run(context.document);
         throw error;
       }
-      if (items.length > bounds.maxMaintained || utf8Length(JSON.stringify(items)) > bounds.maxBytes)
+      if (items.length > bounds.maxMaintained || utf8ByteLength(JSON.stringify(items)) > bounds.maxBytes)
         throw new DbRuntimeError('JD2060', 'resnapshot result exceeded its maintained row or byte credits');
       return items;
     },

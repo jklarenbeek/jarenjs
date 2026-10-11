@@ -202,7 +202,7 @@ describe('SQLite dialect goldens', () => {
   });
 });
 
-describe('the test-double dialect proves the seam (D21)', () => {
+describe('the test-double dialect proves the seam', () => {
   const users = normalizeModel(MODEL).get('users');
   const sqlitePlan = planCollection('users', users, sqliteDialect);
   const doublePlan = planCollection('users', users, doubleDialect);

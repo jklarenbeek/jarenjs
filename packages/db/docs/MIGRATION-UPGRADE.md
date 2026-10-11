@@ -763,6 +763,21 @@ the query engine, now refuse by code or answer what the engine answers:
   the caller's document by the flattened conjunct number), so such a query could
   answer rows the engine rejects. Each registered function now carries the
   fragment the caller wrote, at the place the caller wrote it.
+- A string operator (`$starts-with`, `$ends-with`, `$contains`) over a member
+  typed with another kind besides `null` (`['string', 'integer']`) was
+  translated and answered the rows of the strings, where the engine raises
+  `JQ2001` on the number a conforming document may hold. Such a member,
+  spelled as a path as it already was spelled with `$get`, is the engine's
+  (`predicate.stringSubject` in `explain()`), raises, and on PostgreSQL is
+  refused by `strict`. So is one over an adopted column whose policy is
+  `null: 'null'`, which reads a NULL back as a present `null`. A member typed
+  `['string', 'null']` is unchanged: it stays native, and a stored `null`
+  answers false there where the engine raises (MODEL-FORMAT section 10.6).
+- An `$orderby` over an entity member that maps to an epoch column
+  (`column: "integer"`) and admits `null` was translated, reading the member's
+  `null` as an unknown, though the document keeps the `null` there
+  (MODEL-FORMAT section 9.3); the engine raises `JQ2005` on it. Such an
+  ordering is the engine's, and raises.
 
 ## 8. Stricter models, keys and staged writes
 
@@ -1520,6 +1535,13 @@ WHERE jsonb_extract("doc", '$."m"') IS NOT NULL;
 - A backup whose temporary file's side-file name was too long for the file
   system reported a spurious `cleanupError` (`ENAMETOOLONG`); it no longer
   does.
+- Earlier documents promised that on Bun an abort raised by a timer or an I/O
+  callback that came due during the copy lands before publication. That is
+  withdrawn: the backup cannot order a timer against the copy's closing file
+  I/O, so such an abort lands before publication only if the event loop runs
+  it first, and a copy may be published whole. An abort raised inside
+  `onProgress`, or by a microtask queued during the copy, is honoured as
+  documented.
 
 ## 10. Journal capture of foreign-key actions
 

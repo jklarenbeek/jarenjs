@@ -37,6 +37,7 @@
  * the whole document runs over them.
  */
 
+import { utf8ByteLength } from '@jarenjs/core/string';
 import { physicalSelection, columnCodec, textKeyPlan, textKeyDecoding, checkTextKeys, physicalOrderable } from './physical.js';
 
 import { createSemanticCache } from '@jarenjs/core/cache';
@@ -52,13 +53,13 @@ import {
 } from './plan.js';
 import { emitPlan, emitEntityPlan, createEntityPredicateEmitters, UnrepresentablePath, UnrepresentableIdentity,
   entityTableColumns, physicalComparable,
-  pathTextOf, kindOf, bucketGuards } from './emit.js';
+  documentMemberOf, bucketGuards } from './emit.js';
 import { modelPath } from './model-path.js';
 import { selectPlan, conjoin, effectiveOrder, planOrder, ordersByColumn } from './algebra.js';
 import {
   compileSetResidual, compileRowResidual, compilePackedResidual, sequenceResult,
 } from './residual.js';
-import { createCursor, createSyncCursor, drainPage, utf8Length, PAGE_LIMIT_DEFAULT, rowClassOf } from './cursor.js';
+import { createCursor, createSyncCursor, drainPage, PAGE_LIMIT_DEFAULT, rowClassOf } from './cursor.js';
 import { deepFreeze, setObjectMember } from '@jarenjs/core/object';
 import { derivedSlotValue, probeVector, columnScore } from './derive.js';
 import { cutCandidates, identityBatches } from './knn.js';
@@ -935,7 +936,7 @@ export function createQueryEngine(context) {
   /** One row's document against the profile's byte bound. */
   const checkByteBound = (entry, row) => {
     if (entry.byteBound === null || typeof row.doc !== 'string') return;
-    const bytes = utf8Length(row.doc);
+    const bytes = utf8ByteLength(row.doc);
     if (bytes > entry.byteBound) {
       throw new DbRuntimeError('JD2076',
         `an item of ${bytes} serialised bytes exceeds the profile's maxBytes bound of ${entry.byteBound}`,
@@ -2031,7 +2032,7 @@ export function createEntityQueryEngine(context) {
     entry.admitted ??= { statements: 0, rows: 0, bytes: 0 };
     entry.admitted.statements++;
     entry.admitted.rows += rows.length;
-    entry.admitted.bytes += utf8Length(JSON.stringify(rows));
+    entry.admitted.bytes += utf8ByteLength(JSON.stringify(rows));
     return rows;
   };
   /** One merged entity document against the profile's byte bound
@@ -2039,7 +2040,7 @@ export function createEntityQueryEngine(context) {
    * in columns and the row's own JSON text holds only the rest. */
   const checkBytes = (entry, doc, name) => {
     if (entry.byteBound === null) return doc;
-    const bytes = utf8Length(JSON.stringify(doc));
+    const bytes = utf8ByteLength(JSON.stringify(doc));
     if (bytes > entry.byteBound) {
       throw new DbRuntimeError('JD2076',
         `an item of ${bytes} serialised bytes exceeds the profile's maxBytes bound of ${entry.byteBound}`,
@@ -2398,7 +2399,7 @@ export function createEntityQueryEngine(context) {
       },
       items: (row) => {
         pulledRows++;
-        entry.admitted.bytes += utf8Length(JSON.stringify(row)) + (entry.admitted.rows ? 1 : 0);
+        entry.admitted.bytes += utf8ByteLength(JSON.stringify(row)) + (entry.admitted.rows ? 1 : 0);
         entry.admitted.rows++;
         if (entry.rowBound !== null && pulledRows > entry.rowBound) {
           throw new DbRuntimeError('JD2007',
@@ -2828,7 +2829,7 @@ export function createLoadEngine(context, entityName) {
       // any other document member orders as its declared type
       const value = term.ref.flavor === 'entity-column'
         ? `${rendered.aliasSql}.${q(term.ref.column)}`
-        : dialect.jsonExtract(dialect.queryDocument(rendered.docSql, term.ref.segments), pathTextOf(dialect, term.ref), kindOf(term.ref));
+        : documentMemberOf(dialect, rendered.docSql, term.ref);
       const nullsFirst = term.emptyGreatest === term.desc;
       return `${value} ${term.desc ? 'DESC' : 'ASC'}${dialect.orderNulls(nullsFirst)}`;
     });
@@ -3218,7 +3219,7 @@ export function createLoadEngine(context, entityName) {
         // missing member as one empty key
         const value = term.ref.flavor === 'entity-column'
           ? termSql(propertyOfPhysical(term.ref.column))
-          : dialect.jsonExtract(dialect.queryDocument(rendered.docSql, term.ref.segments), pathTextOf(dialect, term.ref), kindOf(term.ref));
+          : documentMemberOf(dialect, rendered.docSql, term.ref);
         const nullsFirst = term.emptyGreatest === term.desc;
         return `${value} ${term.desc ? 'DESC' : 'ASC'}${dialect.orderNulls(nullsFirst)}`;
       });
@@ -3314,7 +3315,7 @@ export function createLoadEngine(context, entityName) {
         { docPath: entities.get(entityName)?.docPath, collection: entityName });
     }
     if (entry.byteBound !== null) {
-      const bytes = utf8Length(JSON.stringify(doc));
+      const bytes = utf8ByteLength(JSON.stringify(doc));
       if (bytes > entry.byteBound) {
         throw new DbRuntimeError('JD2076',
           `an item of ${bytes} serialised bytes exceeds the profile's maxBytes bound of ${entry.byteBound}`,
@@ -3476,7 +3477,7 @@ export function createLoadEngine(context, entityName) {
       const cursor = openCursor(entry, options?.signal, undefined, options?.deadline, cursorFactory);
       return chain(drainPage(cursor, {
         limit, maxBytes, after: after ?? null, lookahead: options?.lookahead,
-        sizeOf: (doc) => utf8Length(JSON.stringify(doc)),
+        sizeOf: (doc) => utf8ByteLength(JSON.stringify(doc)),
         continuationOf: (doc) => continuationOf(entry, doc),
       }), (page) => ({
         ...page,

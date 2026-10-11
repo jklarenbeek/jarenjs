@@ -754,9 +754,15 @@ describe('the Bun binding', () => {
         assert.strictEqual(report.full.events, Math.ceil(report.full.pages / 100) - 1, JSON.stringify(report.full));
         assert.strictEqual(report.full.zero, 0);
         assert.deepStrictEqual(report.abort, { code: 'JD2079', events: 3, siblings: [] });
-        // a timer abort can fire only after the last page, and still lands
-        // before publication
-        assert.deepStrictEqual(report.timer, { code: 'JD2079', events: report.full.events, published: false, siblings: [] });
+        // an abort raised by a microtask queued during the copy runs after
+        // the last page and still lands before publication
+        assert.deepStrictEqual(report.microtask, { code: 'JD2079', events: report.full.events, published: false, siblings: [] });
+        // a timer's turn against the copy's file I/O is not the backup's to
+        // order: the abort lands and nothing is published, or the copy is
+        // published whole; no temporary file remains either way
+        assert.ok(report.timer.code === 'JD2079' ? report.timer.published === false
+          : report.timer.code === null && report.timer.published === true, JSON.stringify(report.timer));
+        assert.deepStrictEqual([report.timer.events, report.timer.siblings], [report.full.events, []]);
         assert.deepStrictEqual(report.deadline, { code: 'JD2075', calls: 6 });
         assert.deepStrictEqual(report.thrown, { code: 'JD2078', cause: 'refused', siblings: [] });
         assert.deepStrictEqual(report.closed, { code: 'JD2063', cleanupError: null, siblings: [] });

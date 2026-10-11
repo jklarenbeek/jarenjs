@@ -41,7 +41,7 @@
  * (`tx.writerLock`).
  */
 
-import { createDialect } from '../dialect.js';
+import { createDialect, stringLiteral } from '../dialect.js';
 import { postgresPhysicalRead, postgresPhysicalCompare, postgresPhysicalValueType, postgresPhysicalDifferent, postgresPhysicalTypeMatches, qualifyPostgresPhysicalColumn } from './postgres-physical.js';
 import { postgresCatalog } from './postgres-catalog.js';
 import { POSTGRES, postgresInvariantTriggers } from './postgres-invariants.js';
@@ -55,6 +55,7 @@ import { readExpression } from './expression-read.js';
 import { postgresChecks, POSTGRES_PREDICATE, POSTGRES_PREDICATE_ESCAPED } from './check-read.js';
 import { postgresReadBack } from './postgres-read-back.js';
 import { modelPath, readsAsIndex } from '../model-path.js';
+import { columnKindFor } from '../scalar-types.js';
 
 /** PostgreSQL truncates an identifier past this many BYTES, silently
  * and with only a notice — so two long generated names would collide
@@ -75,14 +76,6 @@ function quoteIdentifier(name) {
       + 'which PostgreSQL truncates silently — two names that share a prefix would become one');
   }
   return `"${text.replace(/"/g, '""')}"`;
-}
-
-/**
- * @param {string} value
- * @returns {string}
- */
-function stringLiteral(value) {
-  return `'${String(value).replace(/'/g, "''")}'`;
 }
 
 /**
@@ -203,13 +196,7 @@ function comparableColumnType(declaredType) {
  * @returns {boolean}
  */
 function columnUsableFor(declaredType, kind) {
-  if (kind === 'any') return true;
-  switch (declaredType) {
-    case 'string': return kind === 'text';
-    case 'integer': case 'number': return kind === 'number';
-    case 'boolean': return kind === 'boolean';
-    default: return false;
-  }
+  return kind === 'any' || columnKindFor(declaredType) === kind;
 }
 
 /**

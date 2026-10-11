@@ -1052,9 +1052,10 @@ step — `JD2080`; the migration in flight rolls back whole), `maintenance:
 `JD2079`, also while the backup still waits for the store gate; on
 Bun, whose platform runs every step before it returns, only an abort
 raised inside `onProgress` or a passed deadline stops a copy mid-way,
-an abort raised by a timer or an I/O callback that came due during the
-copy lands after the copy and before publication — one raised later,
-by work those callbacks start, may come after publication — and a
+an abort raised by a microtask queued during the copy lands after the
+copy and before publication — one raised by a timer or an I/O callback
+lands only if the event loop runs it before the copy settles, and may come
+after publication — and a
 one-step copy is checked before and after), and `midStatement:
 false` — a filled slot, not an absent
 one; a driver that grows an interrupt flips exactly that member. A
@@ -2381,8 +2382,8 @@ there, differ otherwise, and order only as two numbers or two strings, and an
 absent member answers `false` for every operator — so `bun:sqlite` and
 PostgreSQL answer them in the database and `node:sqlite` no longer registers a
 function for them. A comparison of two paths when either is typed as an object
-or an array, or not typed, a `$get` over an untyped target, and a `$get` that
-feeds a string operator over a member that can hold another kind keep the
+or an array, or not typed, a `$get` over an untyped target, and a string
+operator (over a path or a `$get`) over a member that can hold another kind keep the
 function on `node:sqlite` and the residual elsewhere, named
 (`predicate.joinTerritory`, `predicate.operands`, `predicate.existence`,
 `predicate.stringSubject`); an untyped path against a literal or an external
@@ -3639,6 +3640,18 @@ residual, refuses it (`JD0032`). So is a `$sum`, `$avg`, `$min` or `$max`
 over such a member — whole, grouped or in a temporal bucket, over a
 collection or an entity — since SQL would read it as its first type where
 the engine refuses the mixed sequence (`JQ2001`).
+
+A string operator (`$starts-with`, `$ends-with`, `$contains`) over a member
+declared with several kinds besides `null` (`['string', 'integer']`) is the
+engine's too (`predicate.stringSubject`), and so is one over an adopted
+column whose policy reads a NULL back as a present `null`: the engine raises
+`JQ2001` on the number or the `null`. **A named deviation:** a member typed
+`string` and `null` alone (`['string', 'null']`: a plain column, an epoch
+column, a document member) keeps the native form, so a stored `null` answers
+false there where the engine raises `JQ2001`. Running the common nullable text
+shape in the engine costs its prefix search the index seek (about 30 times on
+SQLite, 15 on PostgreSQL), makes `strict` refuse it and counts every fetched
+row against a profile's `maxRows`; the deviation is open work on the ROADMAP.
 
 ### 10.7 The join table as a query root
 

@@ -16,8 +16,8 @@
  * the delete, while one that only references a row the delete nulls is not
  * waited for.
  */
+import { utf8ByteLength } from '@jarenjs/core/string';
 import { chain, isThenable, useStatementOnce } from './driver.js';
-import { utf8Length } from './cursor.js';
 import { DbRuntimeError } from './errors.js';
 
 /** The most keys one closure statement binds. */
@@ -167,7 +167,7 @@ export function createCascadeCapture({ connection, mapping, entityCoreFor, bound
       met.set(table, (met.get(table) ?? 0) + 1);
       if (bound === null) return;
       operations -= 1;
-      bytes -= utf8Length(JSON.stringify(doc));
+      bytes -= utf8ByteLength(JSON.stringify(doc));
       if (operations < 0 || bytes < 0)
         throw new DbRuntimeError('JD2106', 'a cascading delete exceeds replication capacity');
     };

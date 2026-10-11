@@ -1,5 +1,5 @@
 // Under Bun, a file backup through the Bun driver: progress events,
-// cancellation from inside onProgress and from a timer, a deadline on an
+// cancellation from inside onProgress, from a microtask and from a timer, a deadline on an
 // injected clock, cleanup after a throw and after a close mid-copy, a
 // point-in-time copy, page identity with the source, two identical runs,
 // a memory store and a stale log at the target — one JSON line the
@@ -62,9 +62,25 @@ const report = {};
   report.abort = { code: codeOf(error), events, siblings: siblings(target) };
 }
 {
-  // an abort raised by a timer during the copy: Bun runs every step before
-  // backup() returns, so the timer fires after the last page, and the
-  // abort still lands before publication
+  // an abort raised by a microtask queued during the copy: Bun runs every
+  // step before backup() returns, so the microtask runs after the last page
+  // and before the copy settles through file I/O, and the abort lands before
+  // publication
+  const target = file('microtask.db');
+  const controller = new AbortController();
+  let events = 0;
+  const error = await failure(store.backupTo(target, {
+    rate: 100, signal: controller.signal,
+    onProgress: () => { if (++events === 1) queueMicrotask(() => controller.abort(new Error('microtask'))); },
+  }));
+  report.microtask = { code: codeOf(error), events, published: existsSync(target), siblings: siblings(target) };
+}
+{
+  // an abort raised by a timer queued during the copy: whether the timer
+  // runs before the copy's file I/O settles is the event loop's to order
+  // (under load it does not always), so the backup either stops at the abort
+  // and publishes nothing or publishes the whole copy; no temporary file
+  // remains either way
   const target = file('timer.db');
   const controller = new AbortController();
   let events = 0;

@@ -3,7 +3,8 @@
 import { stableStringify, deepFreeze } from '@jarenjs/core/object';
 import { applyJSONPatch } from '@jarenjs/json/patch';
 import { decodeJSONPointerSegment } from '@jarenjs/json/pointer';
-import { utf8Length, assertItemBytes, createCursor, drainPage } from './cursor.js';
+import { utf8ByteLength } from '@jarenjs/core/string';
+import { assertItemBytes, createCursor, drainPage } from './cursor.js';
 import { chain, useStatementOnce } from './driver.js';
 import { DbRuntimeError } from './errors.js';
 import { refuseCancelled } from './cancellation.js';
@@ -276,7 +277,7 @@ export function createReplicationEngine(options) {
   });
   const bounded = (document) => {
     if (document.operations.length > config.maxOperations) fail('JD2106', 'replication operation bound exceeded');
-    assertItemBytes(utf8Length(stableStringify(document)), config.maxBytes);
+    assertItemBytes(utf8ByteLength(stableStringify(document)), config.maxBytes);
   };
   const receipt = (envelope) => sql(`INSERT INTO ${REPLICATION_TABLES.receipts} (id, payload) VALUES (${p(1)}, ${p(2)})`, 'run',
     [replicationIdentity(envelope.replica, envelope.seq), stableStringify(envelope)]);
@@ -289,7 +290,7 @@ export function createReplicationEngine(options) {
       const result = [];
       for await (const item of cursor) {
         if (++credits.count > config.maxOperations) fail('JD2106', 'replication read exceeds its row capacity');
-        credits.bytes += utf8Length(stableStringify(item)) + 1;
+        credits.bytes += utf8ByteLength(stableStringify(item)) + 1;
         assertItemBytes(credits.bytes, Math.min(request?.maxBytes ?? config.maxBytes, config.maxBytes));
         result.push(item);
       }
@@ -420,7 +421,7 @@ export function createReplicationEngine(options) {
         chosen.push({ ...operation, before: actual, after });
       }
       bounded({ ...envelope, operations: chosen });
-      assertItemBytes(utf8Length(stableStringify(conflicts)), config.maxBytes);
+      assertItemBytes(utf8ByteLength(stableStringify(conflicts)), config.maxBytes);
       for (const conflict of conflicts) {
         await sql(`INSERT INTO ${REPLICATION_TABLES.conflicts} (id, evidence) VALUES (${p(1)}, ${p(2)}) ON CONFLICT(id) DO UPDATE SET evidence = excluded.evidence`,
           'run', [JSON.stringify([identity, conflict.table, conflict.key]), stableStringify(conflict)]);
@@ -467,7 +468,7 @@ export function createReplicationEngine(options) {
       `SELECT payload FROM ${REPLICATION_TABLES.outbox} WHERE seq > ${p(1)} ORDER BY seq LIMIT ${p(2)}`, (statement) => {
         const cursor = createCursor({ streaming: 'row', barrier: null, signal: request.signal, deadline: request.deadline, now,
           open: () => statement.iterate([after, limit + 1]),
-          items: (row) => [{ envelope: JSON.parse(row.payload), bytes: utf8Length(row.payload) }] });
+          items: (row) => [{ envelope: JSON.parse(row.payload), bytes: utf8ByteLength(row.payload) }] });
         return drainPage(cursor, { limit, maxBytes: Math.min(maxBytes, config.maxBytes), after,
           sizeOf: (item) => item.bytes, continuationOf: (item) => item.envelope.seq });
       });
@@ -486,7 +487,7 @@ export function createReplicationEngine(options) {
       (row) => JSON.parse(row.payload), request, credits);
     const document = normalizeReplicationSnapshot({ $replicationSnapshot: '0.1', model, frontier: saved.frontier,
       rows: values, receipts });
-    assertItemBytes(utf8Length(stableStringify(document)), Math.min(maxBytes, config.maxBytes));
+    assertItemBytes(utf8ByteLength(stableStringify(document)), Math.min(maxBytes, config.maxBytes));
     cancelled(request);
     return document;
   };
@@ -494,7 +495,7 @@ export function createReplicationEngine(options) {
     const document = normalizeReplicationSnapshot(input);
     if (document.model !== model) fail('JD2102', 'snapshot model revision mismatch');
     if (document.rows.length + document.receipts.length > config.maxOperations) fail('JD2106', 'snapshot exceeds the bounded reset capacity');
-    assertItemBytes(utf8Length(stableStringify(document)), config.maxBytes);
+    assertItemBytes(utf8ByteLength(stableStringify(document)), config.maxBytes);
     for (const row of document.rows) if (!dominates(document.frontier, row.frontier)) fail('JD2104', 'snapshot row is ahead of its frontier');
     const receipts = new Map();
     for (const envelope of document.receipts) {

@@ -496,7 +496,8 @@ what each does is its own documentation's job
   On Bun a backup's copy runs on the calling thread, because Bun's `node:sqlite`
   backup performs every step before it returns: a deadline or an abort raised
   from `onProgress` stops it between pages, but an abort from a timer or I/O
-  takes effect only after the copy, and nothing else on that thread runs
+  takes effect only after the copy, and only if the event loop runs it before
+  the copy's closing file I/O settles; nothing else on that thread runs
   meanwhile. A Bun copy that leaves the thread free needs a worker-hosted backup
   qualified inside compiled executables
   ([HOSTS](../packages/db/docs/HOSTS.md#existing-file-adoption-and-backup)).
@@ -717,16 +718,20 @@ what each does is its own documentation's job
   row-value choice decide the SQL text) and bind its values through the slots,
   so a walk reuses one entry.
 - [ ] **A pushed string operator answers false where the engine raises.** A
-  pushed `$starts-with`, `$ends-with` or `$contains` over a schema-typed string
-  member answers false for a stored number or null, a document the schema
-  forbids, where the engine raises `JQ2001`; the planner admits string
-  operators only over schema-typed string paths. The same holds for a member
-  typed as a union whose first type is `string` (`['string', 'null']`,
-  `['string', 'number']`), where the stored null or number conforms to the
-  schema: the planner reads the first type as the subject's. A literal `$get`
-  that feeds a string operator lowers only over a member typed `string` alone,
-  so it adds no second spelling of this. Wanted: decide whether the native
-  answer or the engine's error is the contract, and make both agree.
+  pushed `$starts-with`, `$ends-with` or `$contains` over a member typed
+  `string` alone, or `string` and `null` alone (`['string', 'null']`: a plain
+  column, an epoch column, a document member), answers false for a stored null
+  (for the `string`-alone member also a number), where the engine raises
+  `JQ2001`. The first is a document the schema forbids, reachable only on a
+  store that validates nothing; the second is conforming data, kept native on
+  purpose because running it in the engine costs the prefix search its index
+  seek, makes `strict` refuse it on PostgreSQL and counts every fetched row
+  against a profile's `maxRows`. A member of several kinds besides `null`
+  (`['string', 'integer']`) and an adopted column with `null: 'null'` are the
+  engine's and raise. A literal `$get` that feeds a string operator lowers only
+  over a member typed `string` alone. Wanted: a guarded native form that raises
+  on the null row (a native count of the rows holding a null beside the seek),
+  or a decision that the native answer is the contract for a nullable string.
 - [ ] **A join over a `$range` inner source runs as a nested loop.** The
   engine builds its hash, spatial and interval probes over an uncorrelated
   inner binding on the first outer tuple, but it declines a `$range` source and
@@ -832,8 +837,11 @@ what each does is its own documentation's job
   count or fetch beside such a conjunct answers on SQLite where the engine
   raises (`plan.registeredFunction` keeps a window or a count over a
   constructor in the engine, but the plain-member and bare-binding plans stay
-  exposed). Wanted: prove the conjunct cannot raise, or keep the engine's order
-  of evaluation.
+  exposed). A string operator over a member of several kinds besides `null`,
+  or over a `null: 'null'` column, runs the same way, so it raises only where
+  the row reaches it.
+  Wanted: prove the conjunct cannot raise, or keep the engine's order of
+  evaluation.
 - [ ] **A native statement never reads a column its codec cannot decode.** A
   row an adopted table holds that its codec cannot decode (invalid text in a
   `date` or `datetime` column, a PostgreSQL `double precision` NaN or Infinity,
@@ -875,6 +883,14 @@ what each does is its own documentation's job
   SQLite does.
 - [ ] **Two catalog tokenizers.** `schema-sql.js` and `dialects/check-read.js`
   each tokenize catalog SQL (`tokensOf`, `sqlTokens`); one could serve both.
+
+- [ ] **A row holding an `undefined` member crashes `$distinct` and whole-row
+  `groupBy` in memory.** `from([{ a: 1, b: undefined }]).distinct()` and
+  `.groupBy((r) => r)` raise the engine's raw `TypeError` from
+  `stableKeyString`, while the async `distinct` keeps `{ a: 1, b: undefined }`
+  and `{ a: 1 }` apart. Wanted: decide whether an `undefined` member is
+  absent, as `JSON.stringify` reads it, and make the engine's group-key
+  identity and the async key agree on it.
 
 ## Lexical search (cross-package)
 

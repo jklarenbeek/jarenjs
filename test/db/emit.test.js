@@ -2,7 +2,7 @@
 /**
  * @file The emitter: golden SQL for the truth-table forms through the
  * SQLite dialect, the SAME plans through the full test-double dialect
- * (correspondingly different text — the D21 proof at the query layer),
+ * (correspondingly different text — the dialect proof at the query layer),
  * and the injection-impossibility proof: a hostile literal value never
  * appears in the SQL text, only in the ordered parameter slots.
  */
@@ -145,7 +145,7 @@ describe('golden SQL (the truth-table forms)', () => {
   });
 });
 
-describe('the dialect proof, repeated at the query layer (D21)', () => {
+describe('the dialect proof, repeated at the query layer', () => {
   const DOCS = [
     { $for: { it: '$[*]' }, $where: { $gt: ['$it.age', 21] }, $return: '$it' },
     { $for: { it: '$[*]' }, $where: { '$starts-with': ['$it.name', 'a'] }, $return: '$it' },
@@ -245,7 +245,7 @@ describe('the spatial forms (over derived columns)', () => {
     assert.deepStrictEqual(prefix.slots.map((slot) => slot.literal), ['u17', 'u18']);
   });
 
-  it('the same spatial plans render through the double dialect (D21)', () => {
+  it('the same spatial plans render through the double dialect', () => {
     for (const document of [
       where({ '$bbox-intersects': ['$it.at', REGION] }),
       where({ '$starts-with': [{ $geohash: ['$it.at', 6] }, 'u17'] }),
@@ -428,7 +428,7 @@ describe('the entity predicate emitters (direct)', () => {
       /json_type/, 'epoch strops are document forms');
   });
 
-  it('the double dialect spells every entity form differently (D21)', () => {
+  it('the double dialect spells every entity form differently', () => {
     const doubled = fullDoubleDialect(createDialect);
     const forms = [
       { p: 'cmp', op: 'ge', ref: docRef, operand: { lit: 5 } },

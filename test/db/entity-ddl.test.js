@@ -3,7 +3,7 @@
  * @file Entity DDL: golden SQL through the SQLite dialect (typed
  * columns, checks, foreign keys with declared on-delete, composite
  * keys, join tables), the same plans rendered differently through the
- * full test double (the D21 proof at the entity layer), and the
+ * full test double (the dialect proof at the entity layer), and the
  * foreign-keys pragma verified ON per connection.
  */
 
@@ -140,7 +140,7 @@ describe('golden entity-level indexes', () => {
   });
 });
 
-describe('the dialect proof at the entity layer (D21)', () => {
+describe('the dialect proof at the entity layer', () => {
   it('the same mapping renders correspondingly different DDL through the double', () => {
     const doubled = fullDoubleDialect(createDialect);
     for (const name of ['User', 'Post', 'Grade']) {

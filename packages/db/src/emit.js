@@ -20,6 +20,8 @@
 import { codePointPrefixSuccessor } from '@jarenjs/core/string';
 import { plainFamily } from './algebra.js';
 import { physicalSelection } from './physical.js';
+import { columnKindFor } from './scalar-types.js';
+import { isNumericType } from './types.js';
 
 /**
  * Join boolean terms with `op`, nesting long chains in halves — depth
@@ -29,7 +31,7 @@ import { physicalSelection } from './physical.js';
  * parameters they bound stay in statement-text order.
  * @param {string[]} parts @param {'AND' | 'OR'} op @returns {string}
  */
-export function balancedJoin(parts, op) {
+function balancedJoin(parts, op) {
   if (parts.length <= 8) return `(${parts.join(` ${op} `)})`;
   const middle = Math.ceil(parts.length / 2);
   return `(${balancedJoin(parts.slice(0, middle), op)} ${op} ${balancedJoin(parts.slice(middle), op)})`;
@@ -123,7 +125,7 @@ export function entityTableColumns(entityMapping) {
  * @param {{ segments: import('./dialect.js').JsonPathSegment[] }} ref
  * @returns {string}
  */
-export function pathTextOf(dialect, ref) {
+function pathTextOf(dialect, ref) {
   const text = dialect.jsonPathText(ref.segments);
   if (text === null) {
     throw new UnrepresentablePath('a member name the dialect\'s JSON path grammar cannot '
@@ -142,12 +144,19 @@ export function pathTextOf(dialect, ref) {
  * @returns {'number' | 'text' | 'boolean' | 'any'}
  */
 export function kindOf(ref) {
-  switch (ref?.type) {
-    case 'integer': case 'number': return 'number';
-    case 'string': return 'text';
-    case 'boolean': return 'boolean';
-    default: return 'any';
-  }
+  return columnKindFor(ref?.type) ?? 'any';
+}
+
+/**
+ * A document member read as its declared type, the way an ordering over it
+ * reads it: a number numerically, a string by code point.
+ * @param {any} dialect
+ * @param {string} docSql - the document column, qualified
+ * @param {{ segments: import('./dialect.js').JsonPathSegment[], type?: string }} ref
+ * @returns {string}
+ */
+export function documentMemberOf(dialect, docSql, ref) {
+  return dialect.jsonExtract(dialect.queryDocument(docSql, ref.segments), pathTextOf(dialect, ref), kindOf(ref));
 }
 
 /**
@@ -408,7 +417,7 @@ export function emitPlan(plan, dialect, physical) {
    * the double itself, and one that may hold other scalars reads a number so
    * and every other scalar as it is stored. */
   const projectedPair = (ref, suffix, groupKey = false) => {
-    const numeric = groupKey && (ref.type === 'integer' || ref.type === 'number');
+    const numeric = groupKey && isNumericType(ref.type);
     const holdsNumber = numeric || (groupKey && ref.mixed === true);
     const type = holdsNumber ? numberOnce(typeOf(ref)) : typeOf(ref);
     if (numeric && ref.mixed !== true)
@@ -1460,7 +1469,7 @@ export function emitEntityPlan(plan, dialect, physicalOf) {
       // orders as its declared type, a number numerically
       const read = (alias) => term.ref.flavor === 'entity-column'
         ? physicalComparable(term.ref, `${alias}.${q(term.ref.column)}`, dialect)
-        : dialect.jsonExtract(dialect.queryDocument(`${alias}.${q('doc')}`, term.ref.segments), pathText(term.ref), kindOf(term.ref));
+        : documentMemberOf(dialect, `${alias}.${q('doc')}`, term.ref);
       // a hop key is the member of the one related row: no value, which
       // the empty placement orders, where the hop finds none
       let value;

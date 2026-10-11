@@ -1,4 +1,5 @@
 //@ts-check
+import { utf8ByteLength } from '@jarenjs/core/string';
 import { CHANGES_TABLE, CHANGES_STATE_TABLE } from './engine-metadata.js';
 export { CHANGES_TABLE, CHANGES_STATE_TABLE };
 /**
@@ -37,7 +38,7 @@ import { setObjectMember } from '@jarenjs/core/object';
 
 import { DbCompileError, DbRuntimeError, wrapDriverError } from './errors.js';
 import { chain, attempt, useStatementOnce } from './driver.js';
-import { createCursor, drainPage, utf8Length, PAGE_LIMIT_DEFAULT } from './cursor.js';
+import { createCursor, drainPage, PAGE_LIMIT_DEFAULT } from './cursor.js';
 
 /** The persisted change log (LIVE-FORMAT §5). */
 
@@ -844,7 +845,7 @@ export function createCaptureEngine(options) {
       const cursor = createCursor({ streaming: 'row', barrier: null, signal: options?.signal, deadline, now: clock,
         open: () => statement.iterate([after, limit + 1]),
         wrap: captureFailure,
-        items: (row) => [{ record: recordOf(row), bytes: utf8Length(String(row.patch)) }] });
+        items: (row) => [{ record: recordOf(row), bytes: utf8ByteLength(String(row.patch)) }] });
       return drainPage(cursor, {
         limit, maxBytes, after,
         sizeOf: (item) => item.bytes,

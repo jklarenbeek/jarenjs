@@ -264,9 +264,10 @@ function vacuumInto(db, target) {
  *
  * Either copy holds the thread from its first page to its last. The copy
  * is then flushed and its page count read from its header — real I/O, so
- * the timers and I/O callbacks that came due during the copy run before it
- * settles, and an abort they raise is seen before publication. No timer is
- * involved: a clock that never advances cannot stall it.
+ * the microtasks queued during the copy run before it settles, and an abort
+ * they raise is seen before publication; a timer or an I/O callback that
+ * came due may run before or after it, as the event loop orders them. No
+ * timer is involved: a clock that never advances cannot stall it.
  * @param {any} db - a `bun:sqlite`-shaped `Database`
  * @param {string} target
  * @param {{ rate?: number, progress?: (report: { totalPages: number,

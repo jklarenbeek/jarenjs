@@ -120,6 +120,17 @@ function normalizeCapabilities(declared) {
 }
 
 /**
+ * A string as an SQL literal in standard form: single-quoted, a quote
+ * doubled. The spelling both built-in dialects share; a dialect whose
+ * engine quotes otherwise passes its own.
+ * @param {string} text
+ * @returns {string}
+ */
+export function stringLiteral(text) {
+  return `'${String(text).replace(/'/g, "''")}'`;
+}
+
+/**
  * Compose a dialect from its spelling spec. Every statement the store
  * ever runs is built here from the spec's primitives, so a spec with
  * different quoting or parameter style produces correspondingly

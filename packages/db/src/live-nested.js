@@ -2,8 +2,8 @@
 /** Collection groups use bounded per-group recomputation over maintained leaves. */
 import { compileJsonQuery } from '@jarenjs/json/query';
 import { isJsonObject, stableStringify, semanticKey } from '@jarenjs/core/object';
+import { utf8ByteLength } from '@jarenjs/core/string';
 import { DbRuntimeError } from './errors.js';
-import { utf8Length } from './cursor.js';
 
 /** The dependency set of a strategy that reads every member of a row. */
 const WHOLE = { whole: true, members: new Set() };
@@ -125,7 +125,7 @@ export function nestedGroupStrategy(description, context) {
   const positions = new Map();
   let maintainedBytes = 0;
   let resultCount = 0;
-  const bytesOf = (value) => utf8Length(stableStringify(value));
+  const bytesOf = (value) => utf8ByteLength(stableStringify(value));
   const stats = { refreshedGroups: 0, dependencyReads: 0, reruns: 0 };
   const groupOf = (doc) => {
     const keys = keyOf([doc], context.externals);

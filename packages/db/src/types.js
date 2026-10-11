@@ -10,8 +10,7 @@
  */
 
 import { schemaNodeAt, schemaTypeAt } from './ddl.js';
-
-const KNOWN = new Set(['string', 'integer', 'number', 'boolean']);
+import { SCALAR_TYPES } from './scalar-types.js';
 
 /**
  * The planner-facing type of a member path. A member declared with more
@@ -25,7 +24,7 @@ const KNOWN = new Set(['string', 'integer', 'number', 'boolean']);
  */
 export function typeOfPath(schema, segments) {
   const declared = schemaTypeAt(schema, segments);
-  if (declared === undefined || !KNOWN.has(declared)) return 'unknown';
+  if (declared === undefined || !SCALAR_TYPES.has(declared)) return 'unknown';
   if (declared === 'integer') {
     const union = schemaNodeAt(schema, segments)?.type;
     if (Array.isArray(union) && union.includes('number')) return 'number';

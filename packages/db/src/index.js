@@ -25,9 +25,10 @@ export {
   wrapStatement, lazyOpen,
 } from './driver.js';
 export {
-  planCollection, compileIndexPath, schemaTypeAt, columnKindFor, KEY_COLUMN, DOC_COLUMN,
+  planCollection, compileIndexPath, schemaTypeAt, KEY_COLUMN, DOC_COLUMN,
   normalizeDeclaredSql, comparableDeclaredSql,
 } from './ddl.js';
+export { columnKindFor } from './scalar-types.js';
 export {
   planQuery, assertDecidedKind, entityShape, entityPathRef,
   planEntityPredicate, planEntityQuery, collectEntityRoots, entityRoot,

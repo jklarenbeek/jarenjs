@@ -46,7 +46,8 @@ import { compileBuckets, resampleSeries, toEpoch } from '@jarenjs/core/series';
 
 import { selectPlan, conjoin, plainFamily, PLAN_VERSION } from './algebra.js';
 import { typeOfPath, isNumericType } from './types.js';
-import { schemaNodeAt, canonicalOf, columnKindFor } from './ddl.js';
+import { schemaNodeAt, canonicalOf } from './ddl.js';
+import { columnKindFor } from './scalar-types.js';
 import { readsAsIndex } from './model-path.js';
 import {
   BBOX_COMPONENTS, BBOX_INDEX_ORDER, PRECISION_MIN, PRECISION_MAX,
@@ -108,8 +109,8 @@ const PREDICATE_REASONS = {
     + 'object or an array, which compare deeply',
   operands: 'comparisons translate only between a singular member path and a literal or external',
   compoundLiteral: 'array and object literals have no guarded native comparison form',
-  stringSubject: 'string operators translate only over schema-typed string paths '
-    + '(the engine ERRORS on non-string subjects)',
+  stringSubject: 'string operators translate only over paths the schema types string alone, '
+    + 'or string and null (the engine ERRORS on non-string subjects)',
   stringPattern: 'string operators translate only with literal string patterns '
     + "(an external pattern's type is unknowable at plan time)",
   emptyPattern: "the empty pattern's vacuous-truth corner (true even on a missing member) "
@@ -303,10 +304,10 @@ function admitsNull(schema, segments) {
  * How a reference reads a null the database holds, the one question every
  * rule about nulls asks: `'present'` when it reads back as a `null` member
  * (a column whose policy says so, whatever its schema type; a document
- * member whose type admits one), `'absent'` when it reads back as no member
- * at all (a column of any other policy whose type admits `null`: the engine
- * sees an empty sequence, as SQL sees an unknown), `'none'` when it holds
- * none.
+ * member whose type admits one, an epoch member included, which keeps its
+ * string in the document), `'absent'` when it reads back as no member at all
+ * (a column of any other policy whose type admits `null`: the engine sees an
+ * empty sequence, as SQL sees an unknown), `'none'` when it holds none.
  * @param {any} ref
  * @param {any} schema
  * @returns {'present' | 'absent' | 'none'}
@@ -314,7 +315,7 @@ function admitsNull(schema, segments) {
 function nullReading(ref, schema) {
   if (ref.nullPolicy === 'null') return 'present';
   if (!admitsNull(schema, ref.segments)) return 'none';
-  return ref.flavor === 'entity-column' || ref.flavor === 'entity-epoch' ? 'absent' : 'present';
+  return ref.flavor === 'entity-column' ? 'absent' : 'present';
 }
 
 /** Whether a schema node admits values of more than one comparable kind
@@ -328,7 +329,7 @@ export function admitsMixedTypes(schema, segments) {
   const node = schemaNodeAt(schema, segments);
   if (!Array.isArray(node?.type)) return false;
   return new Set(node.type.filter((type) => type !== 'null')
-    .map((type) => (type === 'integer' ? 'number' : type))).size > 1;
+    .map((type) => columnKindFor(type) ?? type)).size > 1;
 }
 
 const FAMILY_ORDER = ['number', 'text', 'boolean', 'null'];
@@ -410,6 +411,23 @@ function unpinnedStep(schema, segments) {
   });
 }
 
+/**
+ * Whether a string operator over a reference is left to the engine because it
+ * can meet a subject that is not a string: a member of several kinds besides
+ * `null` (`['string', 'integer']`), or a column whose policy reads a NULL back
+ * as a present `null` ({@link nullReading}). A member typed `string` and
+ * `null` alone stays native: a stored `null` there answers false where the
+ * engine raises `JQ2001` (a named deviation, so a prefix search over the most
+ * common nullable text shape keeps its index seek and its bounded cost).
+ * @param {any} ref
+ * @param {any} shape
+ * @returns {boolean}
+ */
+function stringSubjectRaises(ref, shape) {
+  if (ref.mixed === true) return true;
+  return shape.entityFlavors?.get(canonicalOf(ref.segments))?.nullPolicy === 'null';
+}
+
 /** Whether a reference holds a boolean: by its schema type, or by what its
  * column stores, whatever the schema claims of it. A boolean orders as 0/1
  * and folds as a number in SQL, and is `JQ2005`/`JQ2001` in the engine. */
@@ -417,8 +435,8 @@ function holdsBoolean(ref) {
   return ref.type === 'boolean' || ref.storage === 'boolean';
 }
 
-/** Whether a typed reference orders natively: numbers and strings of one
- * type that cannot hold a null — in its schema type, or by its column's
+/** Whether a typed reference orders and folds natively: numbers and strings
+ * of one type that cannot hold a null — in its schema type, or by its column's
  * policy, which reads a NULL back as a present `null` — and no boolean. */
 function orderable(ref, schema) {
   return ref.type !== 'unknown' && !holdsBoolean(ref) && nullReading(ref, schema) === 'none'
@@ -1946,7 +1964,7 @@ function planPredicate(node, itSlot, shape) {
   if (stringOp !== undefined) {
     const ref = pathRef(node.args[0], itSlot, shape);
     const operand = operandOf(node.args[1]);
-    if (ref === null || ref.type !== 'string') {
+    if (ref === null || ref.type !== 'string' || stringSubjectRaises(ref, shape)) {
       return { refusal: refusal(node.name, PREDICATE_REASONS.stringSubject) };
     }
     if (operand === null || !('lit' in operand) || typeof operand.lit !== 'string') {
@@ -1994,7 +2012,7 @@ function planPredicate(node, itSlot, shape) {
 /**
  * The source a packed spelling stands for. `["$[*]"]` — an array
  * constructor of exactly one element — is what a `$for` unpacks back
- * into the rows (QUERY-FORMAT §6.2, D4): `@jarenjs/linq` binds every
+ * into the rows (QUERY-FORMAT §6.2): `@jarenjs/linq` binds every
  * iterated source that way so an array-valued ROW stays one item. Over
  * a collection or an entity array the rows are objects, so the packed
  * and the bare spelling are the same rows, and the planner reads
@@ -2839,10 +2857,8 @@ function groupAggregate(node, itSlot, shape, resolve = pathRef, owners = null) {
   // refuses the mixed sequence (`JQ2001`); a column that reads a NULL as a
   // present `null` is a sequence holding one, which SQL skips and the
   // engine refuses the same way
-  const acceptable = read !== null
-    && (numeric ? isNumericType(read.ref.type) : read.ref.type !== 'unknown')
-    && !holdsBoolean(read.ref) && nullReading(read.ref, read.shape.schema) === 'none'
-    && !admitsMixedTypes(read.shape.schema, read.ref.segments);
+  const acceptable = read !== null && (!numeric || isNumericType(read.ref.type))
+    && orderable(read.ref, read.shape.schema);
   if (!acceptable) return null;
   // what an aggregate over NO values says, in the ENGINE's words
   return { fn, ref: read.ref, empty: fn === 'sum' ? 'zero' : 'omit',
@@ -3742,10 +3758,7 @@ function planCollectionPhrase(document, analysis, shape, options) {
     // first where the engine refuses the mixed sequence
     const numeric = aggregate.fn === 'sum' || aggregate.fn === 'avg'
       || aggregate.fn === 'registered';
-    const acceptable = ref !== null
-      && (numeric ? isNumericType(ref.type) : ref.type !== 'unknown')
-      && !holdsBoolean(ref) && nullReading(ref, shape.schema) === 'none'
-      && !admitsMixedTypes(shape.schema, ref.segments);
+    const acceptable = ref !== null && (!numeric || isNumericType(ref.type)) && orderable(ref, shape.schema);
     if (!acceptable) {
       return collectionResult(analysis, null, 'set', [refusal(aggregate.name, PLAN_REASONS.aggregatePath)]);
     }

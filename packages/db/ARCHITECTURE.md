@@ -400,18 +400,18 @@ options)`), never by import.
 
 ## The decisions that cost something
 
-- **D3 — the normalized AST is a compatibility surface.** The planner
+- **The normalized AST is a compatibility surface.** The planner
   walks the engine's PUBLISHED AST, which promoted an internal shape
   to a versioned contract the engine must now keep. Paid for: a
   load-time exhaustiveness pact means a new language construct breaks
   the build instead of silently becoming a residual.
-- **D6 — the store API is asynchronous** even though every shipped
+- **The store API is asynchronous** even though every shipped
   driver is synchronous. Measured cost: ~0.17 µs per point read
   (~6 %) over the `store.sync` twin. Paid for: the browser's OPFS
   story and any future non-embedded driver need no API change, and
   the sync-capable `chain` keeps the internal composition
   allocation-free so the surface pays exactly one promise per call.
-- **D21 — the dialect indirection is paid for a second backend that
+- **The dialect indirection is paid for a second backend that
   does not exist.** Every byte of SQL routes through a spelling spec;
   the test double proves the seam by rendering the same plans and the
   same DDL differently. The cost is one indirection and a larger
@@ -598,7 +598,7 @@ mode, `knn`, beside native, row and set.
 | a projection the tree cannot rebuild: an operator over a member, a reference to the binding itself, a non-singular path | the WHOLE projection runs per row (the row residual) — pushed and ordered rows, projected by the engine; a window over these items, and a count of them, run in the set residual (`flwor.projection`, `plan.countProjection`), except over a constructor whose operators cannot raise (the pushdown contract above), whose window is in the statement and whose count is a `COUNT(*)` while no conjunct runs as a registered function (`plan.registeredFunction`); promoting the part that composes would answer a shape nobody asked for |
 | a document that reads the collection root outside its binding — `$`, `$.…`, `$[…]`, a nested query over `$[*]`, a variable bound to the root, the root inside a path filter (`$it.xs[?@ == $[0].n]`) | the engine answers over the WHOLE collection (under a profile, the rows its mandatory predicate keeps): the row residual would hand it one row, and a pushed conjunct, the deterministic-function hatch, a window or a k-nearest cut the rows they keep — so such a document is planned with no hook (nothing registered for a narrowing it cannot keep), a plan that narrows becomes the bare fetch with the reason `plan.rootRead`, and one that already fetches every row keeps its own reasons. The planner counts root reads over the analysis, filter selectors included; a phrase it narrows reads the root once, through its binding or a temporal operator's operand |
 | string operators with an external pattern | the pattern's type is unknowable at plan time and the engine ERRORS on non-string patterns |
-| a comparison of two paths when either is not typed as a scalar — an object, an array, an untyped member (`predicate.joinTerritory`; an entity query also refuses a pair outside one non-null number or string family); a `$get` whose target is untyped, whose key is no literal string, or that feeds a string operator over a member that can hold another kind (`predicate.operands`, `predicate.existence`, `predicate.stringSubject`) | `$eq` and `$ne` compare objects and arrays deeply, member order and `1` against `1.0` insignificant inside, which SQL text cannot reproduce; the engine raises on a string operator's subject of another kind; the deterministic-function hatch may still take it |
+| a comparison of two paths when either is not typed as a scalar — an object, an array, an untyped member (`predicate.joinTerritory`; an entity query also refuses a pair outside one non-null number or string family); a `$get` whose target is untyped, whose key is no literal string, or that feeds a string operator over a member that can hold another kind (`predicate.operands`, `predicate.existence`, `predicate.stringSubject`), and a string operator, spelled as a path or a `$get`, over a member of several kinds besides `null` or an adopted column with `null: 'null'` (`predicate.stringSubject`) | `$eq` and `$ne` compare objects and arrays deeply, member order and `1` against `1.0` insignificant inside, which SQL text cannot reproduce; the engine raises on a string operator's subject of another kind; the deterministic-function hatch may still take it |
 | `$distinct` of an object, an array, an untyped member or a union that may hold either, of a path reached by a negative index, of an array constructor, an operator, the document or a path with several items; on an entity, of anything but mapped columns of scalar codecs, or with an ordering of its own | SQLite groups an object or an array by its text, which keeps the order of its members, and PostgreSQL's jsonb text keeps the spelling of a number (`1.0`), where the engine compares them member by member and numbers by value; an array's elements are not named, so rows with different leaves can answer one array (`plan.distinctProjection`, `entity.distinct`) |
 | array/object literals in comparisons | deep-equality has no guarded native form |
 | `$within` over a `derive: 'bbox'` column | a bounding-box pre-filter is pushed; exact containment refines in the engine |
@@ -703,8 +703,17 @@ operators, aggregates and ordering are only promoted on schema-typed
 paths that cannot hold `null` and are not boolean, because the engine
 ERRORS on non-conforming operands where SQL would coerce or sort — a
 `null` under an ordered key, a non-string under a string operator —
-so a path whose schema admits `null` is a named residual for those
-forms and the two engines keep answering alike over conforming data.
+so a path whose schema admits `null`, or several kinds, is a named residual
+for ordering and aggregates, and the two engines keep answering alike over
+conforming data. A string operator is the one named deviation: a member typed
+`['string', 'null']` stays native, so a stored `null` answers false where the
+engine raises `JQ2001` (the common nullable text shape keeps its index seek,
+`strict` and its profile row bound; the ROADMAP lists it), while a member of
+several kinds besides `null` (`['string', 'integer']`) and a column whose
+policy reads a NULL back as a present `null` (`null: 'null'`) are the
+engine's and raise. An entity column of any other policy holds no member
+where it holds NULL, and an epoch column keeps its `null` in the document, so
+an ordering over a nullable one is the engine's.
 And the guards protect the JSON TYPE, not the VALUE: a typed
 generated column carries SQLite affinity, so on an unvalidated store a
 row that violates the schema — the string `'020'` under an `integer`

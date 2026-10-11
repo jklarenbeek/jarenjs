@@ -458,8 +458,9 @@ export interface BackupOptions {
   /** Cancels between pages, and while the backup waits for the store
    * gate: `JD2079`, the temporary file removed, the target untouched. On
    * Bun only an abort raised inside `onProgress` stops a copy mid-way;
-   * one raised by a timer or an I/O callback that came due during the
-   * copy lands after the copy and before publication. */
+   * one raised by a microtask queued during the copy lands after the copy
+   * and before publication, and one raised by a timer or an I/O callback
+   * lands only if the event loop runs it before the copy settles. */
   signal?: AbortSignal;
   /** An epoch-millisecond deadline on the store's clock, honoured before
    * the copy, between its pages and before publication (`JD2075`, same

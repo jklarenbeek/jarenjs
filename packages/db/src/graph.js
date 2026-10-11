@@ -16,10 +16,10 @@
 
 import { setObjectMember } from '@jarenjs/core/object';
 
+import { utf8ByteLength } from '@jarenjs/core/string';
 import { columnCodec } from './physical.js';
 
 import { DbRuntimeError } from './errors.js';
-import { utf8Length } from './cursor.js';
 import { jsonBytes, decodeCountedJson } from './json-bytes.js';
 
 /**
@@ -57,7 +57,7 @@ function boundRefusal(node, include, keyed, bound, measured) {
  */
 function checkBounds(node, include, keyed, raw, sizes) {
   if (include.maxBytes !== null && include.maxBytes !== undefined) {
-    const bytes = typeof raw === 'string' ? utf8Length(raw) : jsonBytes(raw, sizes);
+    const bytes = typeof raw === 'string' ? utf8ByteLength(raw) : jsonBytes(raw, sizes);
     if (bytes > include.maxBytes) throw boundRefusal(node, include, keyed, 'maxBytes', bytes);
   }
   const parsed = typeof raw === 'string' ? decodeCountedJson(raw, sizes) : raw;

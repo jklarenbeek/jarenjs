@@ -2,12 +2,12 @@
 /** Bounded column mutation documents, lowered through the entity's writer plan. */
 import { analyzeQuery } from '@jarenjs/json/query';
 import { createBoundedCache } from '@jarenjs/core/cache';
+import { utf8ByteLength } from '@jarenjs/core/string';
 import { chain, attempt, createStatementOwner } from './driver.js';
 import { DbCompileError, DbRuntimeError, wrapDriverError } from './errors.js';
 import { entityShape, planEntityPredicate, predicateTerms, PLANNER_REASONS } from './plan.js';
 import { createEntityPredicateEmitters } from './emit.js';
 import { physicalSelection } from './physical.js';
-import { utf8Length } from './cursor.js';
 import { relationalEmitter } from './relational.js';
 
 /** Bind each document, reuse its SQL statement within the guarded transaction.
@@ -235,13 +235,13 @@ export function createEntityMutation(connection, entity, mapping, core) {
           ? new DbRuntimeError('JD2007', 'insert-select exceeded its source row bound', { cause: error })
           : wrapDriverError(error, details)), (rows) => {
         const stored = rows.map(core.plan.merge);
-        if (rows.length > plan.maxRows || utf8Length(JSON.stringify(stored)) > plan.maxBytes)
+        if (rows.length > plan.maxRows || utf8ByteLength(JSON.stringify(stored)) > plan.maxBytes)
           throw new DbRuntimeError('JD2007', 'native mutation exceeded its returned row or byte bound');
         stored.forEach(core.validateOnly);
         const returned = stored.map((row) => Object.fromEntries(plan.returning
           .filter((name) => Object.hasOwn(row, name)).map((name) => [name, row[name]])));
         return { mode: 'native', affected: rows.length, rows: returned,
-          admitted: { statements: 1, rows: rows.length, bytes: utf8Length(JSON.stringify(stored)) } };
+          admitted: { statements: 1, rows: rows.length, bytes: utf8ByteLength(JSON.stringify(stored)) } };
       });
     }), (error) => wrapDriverError(error, details));
   };

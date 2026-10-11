@@ -18,8 +18,8 @@
 
 import { analyzeQuery, createQueryAccumulator } from '@jarenjs/json/query';
 import { setObjectMember } from '@jarenjs/core/object';
+import { utf8ByteLength } from '@jarenjs/core/string';
 import { DbCompileError, DbRuntimeError } from './errors.js';
-import { utf8Length } from './cursor.js';
 import { checkMigrationIdentity } from './migration-identity.js';
 
 /** The format emitted by current migration authoring. Legacy 0.1 remains readable. */
@@ -445,7 +445,7 @@ export function createAssertionBoundGuard(bounds, collection, where) {
       }
       rows++;
       if (bounds.maxBytes === null) return;
-      const size = utf8Length(serialized ?? JSON.stringify(document));
+      const size = utf8ByteLength(serialized ?? JSON.stringify(document));
       if (bytes + size > bounds.maxBytes) {
         throw new DbRuntimeError('JD2076',
           `${where} must hold every document of '${collection}' at once; the document that `

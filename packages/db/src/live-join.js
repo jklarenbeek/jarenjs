@@ -3,11 +3,11 @@
 import { compileJsonQuery } from '@jarenjs/json/query';
 import { stableStringify } from '@jarenjs/core/object';
 import { decodeJSONPointerSegment } from '@jarenjs/json/pointer';
+import { utf8ByteLength } from '@jarenjs/core/string';
 import { planEntityQuery, entityRoot } from './plan.js';
 import { joinTableRoots } from './model.js';
 import { keyToken } from './capture.js';
 import { DbRuntimeError } from './errors.js';
-import { utf8Length } from './cursor.js';
 import { readsRoot, compilesBare, valueKey } from './live-nested.js';
 
 /**
@@ -165,7 +165,7 @@ export function joinStrategy(description, context) {
   let inputCount = 0;
   let outputCount = 0;
   let maintainedBytes = 0;
-  const bytesOf = (value) => utf8Length(stableStringify(value));
+  const bytesOf = (value) => utf8ByteLength(stableStringify(value));
   const counts = { dependencyReads: 0, refreshedRoots: 0, reruns: 0 };
   const root = bindings[0];
   const keyOf = (binding, row) => keyToken(binding.mapping.keys.map((name) => row[name]));

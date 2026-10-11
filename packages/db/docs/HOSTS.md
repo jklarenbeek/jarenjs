@@ -876,10 +876,11 @@ database, so a path renamed or replaced under an open Bun store copies what the
 path holds now, or fails. Bun's `node:sqlite` runs every step before it
 returns, so its progress events arrive synchronously, nothing else on the
 thread runs until the copy ends, and only an abort raised inside `onProgress`
-or a passed deadline stops a copy mid-way; an abort raised by a timer or an I/O
-callback that came due during the copy lands after the copy and before
-publication (the copy settles through file I/O, never a timer, so fake timers
-cannot stall it). A Bun database without a file, a Bun runtime without
+or a passed deadline stops a copy mid-way; an abort raised by a microtask queued
+during the copy lands after the copy and before publication, while one raised by
+a timer or an I/O callback lands only if the event loop runs it before the copy
+settles, which it does not order (the copy settles through file I/O, never a
+timer, so fake timers cannot stall it). A Bun database without a file, a Bun runtime without
 `node:sqlite`, and a `bun:sqlite` on another SQLite library than `node:sqlite`'s
 (compared before the file is opened) copy with one `VACUUM INTO` statement
 instead (one step, no event). Neither host allocates a whole-database
