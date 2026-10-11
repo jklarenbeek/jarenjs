@@ -349,4 +349,27 @@ describe('inverse agreement (JD0031)', () => {
         return true;
       });
   });
+
+  it('a setNull relation over a required via member is JD0005 at its onDelete, and over an optional one is accepted', () => {
+    const setNull = (required) => {
+      const model = pair(
+        { to: 'Post', many: true, via: 'authorId', onDelete: 'setNull' },
+        { to: 'User', via: 'authorId', onDelete: 'setNull' });
+      model.entities.Post.schema.properties.authorId = { type: 'string' };
+      model.entities.Post.schema.required = required;
+      return model;
+    };
+    assert.throws(() => normalizeEntities(setNull(['pid', 'authorId'])), (error) => {
+      assert.strictEqual(error.code, 'JD0005');
+      assert.match(error.message, /onDelete: 'setNull' leaves 'authorId' of 'Post' unset, and the schema requires it/);
+      assert.ok(String(error.docPath).endsWith('/onDelete'), error.docPath);
+      return true;
+    });
+    assert.doesNotThrow(() => normalizeEntities(setNull(['pid'])));
+    // cascade and restrict never unset it
+    const cascade = setNull(['pid', 'authorId']);
+    cascade.entities.User.schema.properties.posts['x-entity'].relation.onDelete = 'cascade';
+    cascade.entities.Post.schema.properties.author['x-entity'].relation.onDelete = 'cascade';
+    assert.doesNotThrow(() => normalizeEntities(cascade));
+  });
 });

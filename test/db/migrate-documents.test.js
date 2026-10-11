@@ -412,4 +412,15 @@ describe('a source walked once', () => {
     (error) => /** @type {any} */ (error).code === 'JD0023');
     assert.ok(produced <= 200, `drained ${produced} documents past the violation`);
   });
+
+  it('a misspelt option of a document run is JD0013 naming the nearest, before any document is read', async () => {
+    let read = 0;
+    const source = { async *[Symbol.asyncIterator]() { read++; yield { id: 'a' }; } };
+    await assert.rejects(() => migrateDocuments({ users: [] }, [], { batchSze: 10 }),
+      { code: 'JD0013', message: /documents option 'batchSze' is not one it reads.*batchSize/s });
+    await assert.rejects(() => streamDocuments({ users: source }, [], { write: () => {}, signl: 1 }),
+      { code: 'JD0013', message: /documents option 'signl' is not one it reads.*signal/s });
+    assert.strictEqual(read, 0);
+    assert.deepStrictEqual((await migrateDocuments({ users: [] }, [], { batchSize: 10 })).documents, { users: [] });
+  });
 });

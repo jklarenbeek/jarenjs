@@ -75,9 +75,8 @@ export {
   parseChangeset, translateOperations, keyToken, createCaptureEngine,
   CHANGES_TABLE, CHANGES_STATE_TABLE, DEFAULT_RETENTION,
 } from './capture.js';
-export {
-  createTracker, deepFreeze, BATCH_PARAM_BUDGET, BATCH_ROW_BOUND,
-} from './tracker.js';
+export { createTracker, BATCH_PARAM_BUDGET, BATCH_ROW_BOUND } from './tracker.js';
+export { deepFreeze } from '@jarenjs/core/object';
 export {
   planMigration, planModelMigration, migrate, migrationStatus, migrationHistory, adoptMigrationHistory,
   shapeHash, isPerDocumentAssertion,

@@ -630,21 +630,70 @@ export function cloneJson(value) {
 }
 
 /**
+ * The roots `deepFreeze` froze whole and that held at least `DEEP_FROZEN_SIZE`
+ * values: freezing one again, or a document that shares it, does not walk it
+ * again. (A smaller subtree is cheaper to walk than to remember.)
+ */
+const deepFrozen = new WeakSet();
+const DEEP_FROZEN_SIZE = 64;
+
+/** The objects being frozen below `CYCLE_DEPTH`, so a cycle meets one of them and stops. */
+const open = new Set();
+const CYCLE_DEPTH = 8;
+
+/**
+ * Freeze everything under `value`, answering how many objects it walked.
+ * Objects are remembered as "open" only from `CYCLE_DEPTH` down: a cycle
+ * revisits some object at ever greater depth, so it is met there, and the
+ * ordinary shallow document pays nothing for it.
+ * @param {object} value @param {number} depth @returns {number}
+ */
+function freezeWalk(value, depth) {
+  if (deepFrozen.has(value)) return 0;
+  const tracked = depth >= CYCLE_DEPTH;
+  if (tracked) open.add(value);
+  let walked = 1;
+  if (Array.isArray(value)) {
+    for (let i = 0; i < value.length; i++) {
+      const item = value[i];
+      if (typeof item === 'object' && item !== null && !(tracked && open.has(item))) walked += freezeWalk(item, depth + 1);
+    }
+  }
+  else {
+    const keys = Object.keys(value);
+    for (let i = 0; i < keys.length; i++) {
+      const member = /** @type {any} */ (value)[keys[i]];
+      if (typeof member === 'object' && member !== null && !(tracked && open.has(member))) walked += freezeWalk(member, depth + 1);
+    }
+  }
+  if (tracked) open.delete(value);
+  Object.freeze(value);
+  if (walked >= DEEP_FROZEN_SIZE) deepFrozen.add(value);
+  return walked;
+}
+
+/**
  * Recursively `Object.freeze` a value and everything reachable from it,
- * returning the value. Scalars pass through untouched. Assumes an acyclic
- * structure (a JSON value); a cycle would recurse forever.
+ * returning the value. Scalars pass through untouched. A value frozen only at
+ * its top (`Object.freeze({ a: [] })`) still has its members frozen. A large
+ * subtree this function already froze is not walked again, so freezing a
+ * document that shares one with an earlier document costs the new part only;
+ * a cycle terminates. An array is frozen element by element (its non-index
+ * properties are frozen, not descended into).
  *
  * @template T
  * @param {T} value
  * @returns {T} the same value, deeply frozen
  */
 export function deepFreeze(value) {
-  if (typeof value !== 'object' || value === null)
-    return value;
-  const keys = Object.keys(value);
-  for (let i = 0; i < keys.length; i++)
-    deepFreeze(value[keys[i]]);
-  return Object.freeze(value);
+  if (typeof value !== 'object' || value === null) return value;
+  try {
+    freezeWalk(value, 0);
+  }
+  finally {
+    if (open.size !== 0) open.clear();
+  }
+  return value;
 }
 
 /**

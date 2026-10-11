@@ -27,6 +27,7 @@ import { applyJSONPatch } from '@jarenjs/json/patch';
 import { analyzeQuery } from '@jarenjs/json/query';
 import { parseJSONPointer, compileJSONPointer, JSONPOINTER_NOTHING } from '@jarenjs/json/pointer';
 import { equalsJson } from '@jarenjs/core/object';
+import { utf8ByteLength } from '@jarenjs/core/string';
 
 import { DbCompileError, DbRuntimeError, wrapDriverError, isDriverError, classifyDriverError } from './errors.js';
 import { chain, toPromise, isThenable, attempt, abortReason, createStatementOwner, useStatementOnce } from './driver.js';
@@ -56,7 +57,7 @@ import { createLiveRegistry, classifyLiveQuery, LIVE_DEFAULTS } from './live.js'
 import { ASYNC_LIVE_DEFAULTS } from './live-options.js';
 import { classifyEntityLive } from './live-join.js';
 import { normalizeEventTime } from './live-time.js';
-import { createJobEngine, JOB_DEFAULTS } from './jobs.js';
+import { createJobEngine, JOB_DEFAULTS, checkStopOptions } from './jobs.js';
 import { createOwnerLease, OWNER_LEASE_DEFAULT_MS, OWNER_LEASE_MIN_MS } from './owner.js';
 import { introspectModel, readSchema } from './introspect.js';
 import { collectEntityRoots, entityRoot, intervalBounds } from './plan.js';
@@ -69,10 +70,9 @@ import {
 } from './expression.js';
 
 /** The model format version this store implements. */
-import { MODEL_VERSION } from './engine-metadata.js';
+import { MODEL_VERSION, IDENTIFIER } from './engine-metadata.js';
 export { MODEL_VERSION };
 
-const COLLECTION_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const IDENTITIES = new Set(['uuid', 'integer']);
 /** The closed members of the model document's declarations (MODEL-FORMAT
  * §2): the canonical schema says `additionalProperties: false` at each, and
@@ -83,7 +83,6 @@ const INDEX_MEMBERS = ['name', 'path', 'expression', 'unique', 'where', 'derive'
 const INTERVAL_MEMBERS = ['name', 'path', 'maxDuration'];
 /** The bytes a constraint name may take on either engine (PostgreSQL's identifier limit), so a model opens on both. */
 const CONSTRAINT_NAME_BYTES = 63;
-const UTF8 = new TextEncoder();
 
 /**
  * @param {string} code
@@ -260,7 +259,7 @@ export function normalizeModel(model, expressions = undefined) {
   const normalized = new Map();
   for (const name of Object.keys(collections)) {
     const docPath = `/collections/${name}`;
-    if (!COLLECTION_NAME.test(name)) {
+    if (!IDENTIFIER.test(name)) {
       throw modelError('JD0005',
         `collection names are identifiers ([A-Za-z_][A-Za-z0-9_]*), got '${name}'`,
         '/collections');
@@ -322,7 +321,7 @@ export function normalizeModel(model, expressions = undefined) {
       if (index === null || typeof index !== 'object' || Array.isArray(index))
         throw modelError('JD0005', 'an index must be an object', indexDocPath);
       refuseUnknownModelMembers(index, INDEX_MEMBERS, indexDocPath, 'index');
-      if (typeof index.name !== 'string' || !COLLECTION_NAME.test(index.name)) {
+      if (typeof index.name !== 'string' || !IDENTIFIER.test(index.name)) {
         throw modelError('JD0005',
           'an index needs an identifier name', `${indexDocPath}/name`);
       }
@@ -451,13 +450,13 @@ function normalizeIntervals(spec, docPath, indexes) {
     if (interval === null || typeof interval !== 'object' || Array.isArray(interval))
       throw modelError('JD0005', 'an interval must be an object', at);
     refuseUnknownModelMembers(interval, INTERVAL_MEMBERS, at, 'interval');
-    if (typeof interval.name !== 'string' || !COLLECTION_NAME.test(interval.name))
+    if (typeof interval.name !== 'string' || !IDENTIFIER.test(interval.name))
       throw modelError('JD0005', 'an interval needs an identifier name', `${at}/name`);
     if (names.has(interval.name))
       throw modelError('JD0005', `duplicate interval name '${interval.name}'`, `${at}/name`);
     names.add(interval.name);
     const constraint = `${interval.name}_interval`;
-    if (UTF8.encode(constraint).length > CONSTRAINT_NAME_BYTES) {
+    if (utf8ByteLength(constraint) > CONSTRAINT_NAME_BYTES) {
       throw modelError('JD0005',
         `the constraint name '${constraint}' exceeds ${CONSTRAINT_NAME_BYTES} bytes`, `${at}/name`);
     }
@@ -1062,9 +1061,9 @@ function collectionCore(connection, collection, plan, validate, queryState, stor
       const own = extractKey(doc, collection.keySegments, collection.key,
         collection.name, collection.docPath);
       // a keyed collection writes under the document's OWN key: an
-      // explicit one that disagrees used to be ignored in silence (the
-      // write landed under the document's key, while journal capture read
-      // its before-image under the explicit one)
+      // explicit one that disagrees is refused (ignored, the write would land
+      // under the document's key while journal capture read its before-image
+      // under the explicit one)
       if (explicitKey !== undefined && canonicalKeyText(
         requireKey(explicitKey, collection.name, collection.docPath)) !== canonicalKeyText(own)) {
         throw new DbRuntimeError('JD2002',
@@ -1480,11 +1479,11 @@ function refuseUnknownOpenOptions(options) {
  * Refuse an open option whose VALUE is malformed (`JD0009`), before the
  * driver opens — the closed set above settles the names, this settles
  * what each switch may hold. Each rule exists because a malformed value
- * used to mean something else in silence: `queueTimeout: Infinity`
- * became a 1 ms wait (the timer's own overflow rule), `capture: 'false'`
- * and `jobs: 0` switched the feature ON (any value but `undefined` and
- * `false` did), `jobs: null` threw a raw `TypeError`, and a misspelt
- * `transactions` was refused only after the file was created and its
+ * would mean something else in silence: `queueTimeout: Infinity` becomes a
+ * 1 ms wait (the timer's own overflow rule), `capture: 'false'` and
+ * `jobs: 0` switch the feature ON (any value but `undefined` and `false`
+ * does), `jobs: null` throws a raw `TypeError`, and a misspelt
+ * `transactions` is refused only after the file was created and its
  * handle opened.
  * @param {Record<string, any>} options
  */
@@ -4329,6 +4328,10 @@ export function openStore(model, options) {
              * @param {{ graceMs?: number }} [closeOptions]
              */
             close: lift((closeOptions) => {
+              // everything close reads is checked before anything is touched: a
+              // bad value refuses with the store open, its workers polling and
+              // its live registrations registered
+              checkStopOptions(closeOptions);
               const liveCleanup = liveRegistry?.closeAll();
               const cursorCleanup = cursorOwnership === undefined && sharedCursors.size === 0 ? null
                 : Promise.allSettled([...cursorOwnership?.owners ?? [], ...sharedCursors]

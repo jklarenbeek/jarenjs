@@ -579,3 +579,36 @@ describe("the shape hash reads a model's OWN entity names", () => {
       'a hint is a planning instruction, not shape — even on this name');
   });
 });
+
+describe('a member named like SQLite\'s row identity', () => {
+  for (const member of ['rowid', 'ROWID', 'oid', '_rowid_']) {
+    it(`a jslt step rewrites each row of an entity that maps '${member}' to a column, and no other`, async () => {
+      const columns = (extra) => ({ name: { type: 'string' }, [member]: { type: 'integer' }, ...extra });
+      const from = model({ User: ent(columns({}), ['id', 'name']) });
+      const to = model({ User: ent(columns({ shout: { type: 'string' } }), ['id', 'name']) });
+      const file = fresh(`identity-${member}`);
+      const store = await openStore(from, { driver: nodeDriver(), path: file });
+      for (const [id, name, value] of [['u1', 'ada', 100], ['u2', 'bob', 5], ['u3', 'cy', 100]])
+        await store.entity('User').create({ id, name, [member]: value });
+      await store.close();
+      const step = { kind: 'jslt', collection: 'User',
+        stylesheet: [{ match: '$', body: { id: '$.id', name: '$.name', [member]: `$.${member}`, shout: { $upper: '$.name' } } }] };
+      const migration = {
+        $migration: '0.2', identity: migrationIdentity(from, to), id: 'identity', from: shapeHash(from), to: shapeHash(to),
+        steps: [{ kind: 'ddl', sql: 'ALTER TABLE "User" ADD COLUMN "shout" TEXT' }, step,
+          { kind: 'query', collection: 'User', assert: { $for: { it: '$[*]' }, $where: { $empty: '$it.shout' }, $return: '$it' } }],
+      };
+      // one row per batch: the walk pages past a row whose member value equals the next one's
+      const run = () => migrate({ driver: nodeDriver(), path: file }, [migration],
+        { baseline: from, model: to, compileSchema, batchSize: 1 });
+      assert.deepStrictEqual((await run()).applied, ['identity']);
+      const migrated = await openStore(to, { driver: nodeDriver(), path: file });
+      assert.deepStrictEqual(
+        await Promise.all(['u1', 'u2', 'u3'].map((id) => migrated.entity('User').get(id))),
+        [{ id: 'u1', name: 'ada', [member]: 100, shout: 'ADA' }, { id: 'u2', name: 'bob', [member]: 5, shout: 'BOB' },
+          { id: 'u3', name: 'cy', [member]: 100, shout: 'CY' }]);
+      await migrated.close();
+      assert.deepStrictEqual((await run()).applied, [], 'the second run changes nothing');
+    });
+  }
+});

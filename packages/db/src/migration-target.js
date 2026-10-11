@@ -24,7 +24,7 @@ export function physicalObjectKey(object) {
  * An owned SQLite connection enforces foreign keys whatever its binding's
  * default: node:sqlite switches them on, bun:sqlite and a wasm build leave
  * them off, and a migration's cascade must mean what the schema declares on
- * every driver — a delete under Bun used to leave the orphan Node removed.
+ * every driver — a delete under Bun would leave the orphan Node removes.
  * The setting belongs outside any transaction, so it is made once, at open,
  * and read back. A borrowed connection keeps its caller's setting; the
  * foreign-key check each link ends with refuses what it would leave behind.

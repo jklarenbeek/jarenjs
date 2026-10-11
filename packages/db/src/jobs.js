@@ -46,11 +46,54 @@ import { chain, attempt, iterateStatementOnce } from './driver.js';
 import { DbCompileError, DbRuntimeError, wrapDriverError } from './errors.js';
 import { createCursor, rowClassOf, PAGE_LIMIT_DEFAULT } from './cursor.js';
 import { refuseCancelled } from './cancellation.js';
-import { readOptions } from './options.js';
+import { readOptions, readOptionsOrNull } from './options.js';
 import { jobStatements } from './dialects/jobs.js';
 /** What `enqueue` reads from its options (§2). */
 const ENQUEUE_OPTIONS = ['id', 'runAt', 'maxAttempts'];
-/** §4 defaults, all overridable per worker. */
+/** What `claim`, `renew` and `createWorker` read from theirs (§3, §6). */
+const CLAIM_OPTIONS = ['kinds', 'owner', 'leaseMs'];
+const RENEW_OPTIONS = ['leaseMs'];
+/** What the administration calls read (§10): filters and bounds, then the call's own controls. */
+const PAGE_OPTIONS = ['state', 'kind', 'after', 'limit', 'signal', 'deadline'];
+const CANCEL_OPTIONS = ['lease', 'signal', 'deadline'];
+const REQUEUE_OPTIONS = ['signal', 'deadline'];
+const RESET_OPTIONS = ['expectedGeneration', 'signal', 'deadline'];
+const SWEEP_OPTIONS = ['settledBefore', 'limit', 'signal', 'deadline'];
+const WORKER_OPTIONS = ['handlers', 'concurrency', 'pollInterval', 'leaseMs', 'owner', 'renew', 'onOutcome',
+  'effectSafety', 'backoffBase', 'backoffCap', 'stopGraceMs'];
+/** The longest delay a timer keeps: a longer one fires at once. */
+const TIMER_MAX = 2 ** 31 - 1;
+
+/**
+ * Refuse (`TypeError`) a duration option that is not a finite number of
+ * milliseconds, before it is stored or armed: a `NaN` lease stored a NULL
+ * expiry that no claim could recover, and a `NaN` or overlarge timer delay
+ * fires every millisecond.
+ * @param {string} owner - the call, for the message
+ * @param {string} name - the option
+ * @param {unknown} value
+ * @param {{ positive?: boolean, timer?: boolean }} [rule] - `positive`: above zero;
+ *   `timer`: no longer than a timer keeps. `null` is as good as absent: the default holds.
+ */
+function requireMilliseconds(owner, name, value, rule = {}) {
+  if (value === undefined || value === null) return;
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || (rule.positive === true && value === 0)
+    || (rule.timer === true && value > TIMER_MAX)) {
+    throw new TypeError(`${owner}: "${name}" is ${rule.positive === true ? 'a positive' : 'a non-negative'} finite number `
+      + `of milliseconds${rule.timer === true ? ` up to ${TIMER_MAX}` : ''}`);
+  }
+}
+/**
+ * Refuse what `stop` (and `close`, which passes its options to every worker's
+ * `stop`) would read, before anything is stopped or closed.
+ * @param {unknown} stopOptions
+ */
+export function checkStopOptions(stopOptions) {
+  readOptionsOrNull(stopOptions, ['graceMs'], 'jobs worker stop');
+  requireMilliseconds('stop', 'graceMs', /** @type {any} */ (stopOptions)?.graceMs, { timer: true });
+}
+
+/** §4 defaults: each is overridable per worker except `maxAttempts`, which belongs to the job. */
 export const JOB_DEFAULTS = Object.freeze({
   maxAttempts: 5,
   leaseMs: 30_000,
@@ -103,6 +146,20 @@ export function serializeResult(value) {
   catch (error) {
     return { reason: `the result could not be serialized: ${describeValue(error)}` };
   }
+}
+
+/**
+ * JSON text for a value a job stores (a payload, a checkpoint): the text
+ * `JSON.stringify` makes, or a `TypeError` for the value it makes none of (a
+ * function, a symbol or `undefined`, which would otherwise reach the driver as an
+ * unbindable `undefined`), as a BigInt or a cycle already is.
+ * @param {any} value @param {string} what - the stored value's name, for the message
+ * @returns {string}
+ */
+function storedJson(value, what) {
+  const text = JSON.stringify(value);
+  if (text === undefined) throw new TypeError(`${what} is not representable as JSON (undefined, a function or a symbol)`);
+  return text;
 }
 
 /** Map a raw row to the frozen public record (§2). The lease token is
@@ -294,7 +351,7 @@ export function createJobEngine(options) {
     const at = now();
     return chain(prepared('enqueue').run([
       id, kind,
-      payload === undefined || payload === null ? null : JSON.stringify(payload),
+      payload === undefined || payload === null ? null : storedJson(payload, 'enqueue: "payload"'),
       enqueueOptions?.runAt ?? at,
       enqueueOptions?.maxAttempts ?? defaults.maxAttempts,
       at, at,
@@ -329,11 +386,13 @@ export function createJobEngine(options) {
    * @param {{ kinds: string[], owner: string, leaseMs?: number }} claimOptions
    */
   const claim = (claimOptions) => {
-    const { kinds, owner } = claimOptions;
+    readOptionsOrNull(claimOptions, CLAIM_OPTIONS, 'jobs.claim');
+    const { kinds, owner } = claimOptions ?? {};
     if (!Array.isArray(kinds) || kinds.length === 0
       || typeof owner !== 'string' || owner === '') {
       throw new TypeError('claim: needs a non-empty "kinds" array and an "owner"');
     }
+    requireMilliseconds('claim', 'leaseMs', claimOptions.leaseMs, { positive: true });
     const at = now();
     // the claim MINTS the fence: a fresh token for this attempt, and a
     // generation one higher than whatever ran before it. Both come back
@@ -448,6 +507,8 @@ export function createJobEngine(options) {
   const renew = (lease, renewOptions) => {
     const misuse = requireLease(lease, 'renew()');
     if (misuse !== null) throw misuse;
+    readOptionsOrNull(renewOptions, RENEW_OPTIONS, 'jobs.renew');
+    requireMilliseconds('renew', 'leaseMs', renewOptions?.leaseMs, { positive: true });
     const at = now();
     return chain(prepared('renew').get([
       at + (renewOptions?.leaseMs ?? defaults.leaseMs), uuid(),
@@ -567,7 +628,7 @@ export function createJobEngine(options) {
                 });
             }
             return prepared('cpSave')
-              .run([runId, nodeId, JSON.stringify(value), generation]);
+              .run([runId, nodeId, storedJson(value, 'checkpoint save(): the value'), generation]);
           });
       }),
       complete: (runId, result) => connection.transaction(() => chain(
@@ -604,6 +665,7 @@ export function createJobEngine(options) {
    *   signal?: AbortSignal, deadline?: number }} [pageOptions]
    */
   const page = (pageOptions = undefined) => {
+    readOptionsOrNull(pageOptions, PAGE_OPTIONS, 'jobs.page');
     const state = pageOptions?.state;
     if (state !== undefined && !JOB_STATES.includes(state)) {
       throw new TypeError(`page: state is one of ${JOB_STATES.map((s) => `'${s}'`).join(', ')}, got ${
@@ -648,6 +710,7 @@ export function createJobEngine(options) {
    */
   const cancel = (id, cancelOptions = undefined) => {
     if (typeof id !== 'string' || id === '') throw new TypeError('cancel: id is a non-empty string');
+    readOptionsOrNull(cancelOptions, CANCEL_OPTIONS, 'jobs.cancel');
     refuseCancelled(cancelOptions, now, { abortCode: 'JD2081', aborted: 'cancel() ran', passed: 'cancel() ran' });
     const lease = cancelOptions?.lease;
     const at = now();
@@ -714,6 +777,7 @@ export function createJobEngine(options) {
    */
   const requeue = (id, requeueOptions = undefined) => {
     if (typeof id !== 'string' || id === '') throw new TypeError('requeue: id is a non-empty string');
+    readOptionsOrNull(requeueOptions, REQUEUE_OPTIONS, 'jobs.requeue');
     refuseCancelled(requeueOptions, now, { abortCode: 'JD2081', aborted: 'requeue() ran', passed: 'requeue() ran' });
     const at = now();
     return chain(prepared('requeue').run([at, at, id, at]), (out) => {
@@ -749,6 +813,7 @@ export function createJobEngine(options) {
    */
   const reset = (id, resetOptions) => {
     if (typeof id !== 'string' || id === '') throw new TypeError('reset: id is a non-empty string');
+    readOptionsOrNull(resetOptions, RESET_OPTIONS, 'jobs.reset');
     const expected = resetOptions?.expectedGeneration;
     if (!Number.isSafeInteger(expected) || expected < 0)
       throw new TypeError('reset: expectedGeneration is the observed non-negative lease generation');
@@ -778,6 +843,7 @@ export function createJobEngine(options) {
    * @param {{ settledBefore: number, limit?: number, signal?: AbortSignal, deadline?: number }} sweepOptions
    */
   const sweep = (sweepOptions) => {
+    readOptionsOrNull(sweepOptions, SWEEP_OPTIONS, 'jobs.sweep');
     const horizon = sweepOptions?.settledBefore;
     if (typeof horizon !== 'number' || !Number.isFinite(horizon))
       throw new TypeError('sweep: settledBefore is required — an epoch in milliseconds before which a settled job is swept');
@@ -814,7 +880,19 @@ export function createJobEngine(options) {
       throw new TypeError(
         'createWorker: "handlers" must be a non-empty object of functions');
     }
+    readOptions(workerOptions, WORKER_OPTIONS, 'jobs.createWorker');
     const kinds = Object.keys(handlers);
+    if (workerOptions.owner != null && (typeof workerOptions.owner !== 'string' || workerOptions.owner === ''))
+      throw new TypeError('createWorker: "owner" is a non-empty string');
+    if (workerOptions.renew != null && typeof workerOptions.renew !== 'boolean')
+      throw new TypeError('createWorker: "renew" is true or false');
+    if (workerOptions.onOutcome != null && typeof workerOptions.onOutcome !== 'function')
+      throw new TypeError('createWorker: "onOutcome" is a function');
+    requireMilliseconds('createWorker', 'pollInterval', workerOptions.pollInterval, { timer: true });
+    requireMilliseconds('createWorker', 'leaseMs', workerOptions.leaseMs, { positive: true });
+    requireMilliseconds('createWorker', 'backoffBase', workerOptions.backoffBase);
+    requireMilliseconds('createWorker', 'backoffCap', workerOptions.backoffCap);
+    requireMilliseconds('createWorker', 'stopGraceMs', workerOptions.stopGraceMs, { timer: true });
     const owner = workerOptions.owner ?? uuid();
     const concurrency = workerOptions.concurrency ?? 1;
     if (!(Number.isInteger(concurrency) && concurrency >= 1)) {
@@ -828,7 +906,9 @@ export function createJobEngine(options) {
     // actually at risk. A handler that must not outlive its lease says
     // `renew: false` and gets the old behaviour, deliberately.
     const renewing = workerOptions.renew !== false;
-    const renewEvery = Math.max(1, Math.floor(leaseMs / 3));
+    // a third of the lease, and no longer than a timer keeps: a longer delay fires
+    // every millisecond
+    const renewEvery = Math.min(TIMER_MAX, Math.max(1, Math.floor(leaseMs / 3)));
     const stats = {
       claims: 0, completions: 0, failures: 0, polls: 0, wakes: 0, claimErrors: 0,
       /** Attempts cancelled through `cancel()` while their handler ran. */
@@ -1235,6 +1315,7 @@ export function createJobEngine(options) {
        * @returns {Promise<{ drained: boolean, inFlight: number }>}
        */
       async stop(stopOptions) {
+        checkStopOptions(stopOptions);
         running = false;
         shutdown.abort();
         onWake();

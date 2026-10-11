@@ -11,10 +11,12 @@ import { refuseCancelled } from './cancellation.js';
 import { normalizeReplication, normalizeReplicationSnapshot, normalizeFrontier, replicationIdentity, REPLICATION_DEFAULTS } from './replication-format.js';
 import { REPLICATION_TABLES } from './replication-tables.js';
 import { replicationSchema } from './dialects/replication.js';
-import { readOptions } from './options.js';
+import { readOptions, readOptionsOrNull } from './options.js';
 import { compileJsonQuery } from '@jarenjs/json/query';
 import { foreignKeyEdges } from './cascade.js';
 
+/** The controls every replication call takes beside its own bounds. */
+const CONTROL_OPTIONS = ['signal', 'deadline'];
 const equal = (a, b) => stableStringify(a) === stableStringify(b);
 const position = (frontier, id) => Object.hasOwn(frontier, id) ? frontier[id] : 0;
 const dominates = (a, b) => Object.entries(b).every(([id, seq]) => position(a, id) >= seq);
@@ -364,6 +366,7 @@ export function createReplicationEngine(options) {
 
   /** All checks precede writes; conflict evidence commits without advancing a frontier. */
   const apply = (input, request, transaction) => {
+    readOptionsOrNull(request, CONTROL_OPTIONS, 'replication.apply');
     const envelope = normalizeReplication(input);
     bounded(envelope);
     cancelled(request);
@@ -451,7 +454,9 @@ export function createReplicationEngine(options) {
     }, request);
   };
 
-  const page = async (request = {}) => {
+  const page = async (request) => {
+    request ??= {};
+    readOptionsOrNull(request, ['after', 'limit', 'maxBytes', 'signal', 'deadline'], 'replication.page');
     const { after = 0, limit = 100, maxBytes = config.maxBytes } = request;
     if (!Number.isSafeInteger(after) || after < 0 || !Number.isSafeInteger(limit) || limit < 1
       || !Number.isSafeInteger(maxBytes) || maxBytes < 1) throw new TypeError('replication.page needs safe after, limit and maxBytes bounds');
@@ -475,7 +480,9 @@ export function createReplicationEngine(options) {
     return { items: page.items.map((item) => item.envelope), ...bounds, next: page.continuation ?? after,
       bytes: page.items.reduce((sum, item) => sum + item.bytes, 0), resetRequired: false, hasMore: page.hasMore };
   };
-  const snapshot = async (request = {}) => {
+  const snapshot = async (request) => {
+    request ??= {};
+    readOptionsOrNull(request, ['maxBytes', 'signal', 'deadline'], 'replication.snapshot');
     const maxBytes = request.maxBytes ?? config.maxBytes;
     if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) throw new TypeError('snapshot.maxBytes must be a positive safe integer');
     cancelled(request);
@@ -492,6 +499,7 @@ export function createReplicationEngine(options) {
     return document;
   };
   const reset = (input, request, transaction) => {
+    readOptionsOrNull(request, CONTROL_OPTIONS, 'replication.reset');
     const document = normalizeReplicationSnapshot(input);
     if (document.model !== model) fail('JD2102', 'snapshot model revision mismatch');
     if (document.rows.length + document.receipts.length > config.maxOperations) fail('JD2106', 'snapshot exceeds the bounded reset capacity');
@@ -548,7 +556,9 @@ export function createReplicationEngine(options) {
   };
   return { ready, commit, apply, page, snapshot, reset,
     frontier: () => chain(state(), (saved) => saved.frontier),
-    conflicts: (request = {}) => {
+    conflicts: (request) => {
+      request ??= {};
+      readOptionsOrNull(request, ['limit', 'maxBytes', 'signal', 'deadline'], 'replication.conflicts');
       const limit = request.limit ?? 100;
       if (!Number.isSafeInteger(limit) || limit < 1) throw new TypeError('conflicts.limit must be a positive safe integer');
       if (request.maxBytes !== undefined && (!Number.isSafeInteger(request.maxBytes) || request.maxBytes < 1))

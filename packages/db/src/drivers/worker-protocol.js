@@ -4,7 +4,7 @@ import { DbCompileError, DbRuntimeError } from '../errors.js';
 import { jsonStringBytes } from '../json-bytes.js';
 import { refuseUnknownMembers } from '../options.js';
 
-export const WORKER_PROTOCOL_VERSION = 1;
+const WORKER_PROTOCOL_VERSION = 1;
 /** The mark a driver puts in its worker's `workerData`: an endpoint serves
  * only a worker started with it, never a thread that merely imported it. */
 export const WORKER_ENDPOINT_MARK = `jarenjs-sqlite-endpoint/${WORKER_PROTOCOL_VERSION}`;

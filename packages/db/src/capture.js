@@ -39,6 +39,7 @@ import { setObjectMember } from '@jarenjs/core/object';
 import { DbCompileError, DbRuntimeError, wrapDriverError } from './errors.js';
 import { chain, attempt, useStatementOnce } from './driver.js';
 import { createCursor, drainPage, PAGE_LIMIT_DEFAULT } from './cursor.js';
+import { readOptionsOrNull } from './options.js';
 
 /** The persisted change log (LIVE-FORMAT §5). */
 
@@ -825,6 +826,7 @@ export function createCaptureEngine(options) {
    */
   function readPage(options) {
     requireLog('changes.page');
+    readOptionsOrNull(options, ['after', 'limit', 'maxBytes', 'deadline', 'signal'], 'changes.page');
     const after = options?.after;
     requireCursor(after, 'changes.page');
     const limit = options?.limit ?? PAGE_LIMIT_DEFAULT;

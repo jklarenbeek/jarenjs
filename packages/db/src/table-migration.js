@@ -7,6 +7,7 @@ import { defineTable, planTable, schemaChangeSql } from './dialects/sqlite-schem
 import { relationalEmitter, relationalIdentifier as q, sql } from './relational.js';
 import { sqliteDialect as dialect, sqliteTableMigration } from './dialects/sqlite.js';
 import { sqlTokens } from './dialects/check-read.js';
+import { isKeyword } from './sql.js';
 import { ENGINE_TABLES } from './engine-metadata.js';
 import { withForeignKeySettings } from './foreign-key-scope.js';
 import { chain } from './driver.js';
@@ -136,7 +137,7 @@ export function planTableMigration(connection, definition, options) {
   if (source.some((o) => o.name === temporary)) refuse('the rebuild temporary name already exists');
   const oldColumns = existing ? connection.prepare(dialect.introspect.columns(target.name)).all([]) : [];
   const oldKey = oldColumns.filter((c) => c.pk > 0).sort((a, b) => a.pk - b.pk).map((c) => c.name);
-  if (rebuild && sqlTokens(existing.sql).some((t) => t.kind === 'word' && t.value.toUpperCase() === 'AUTOINCREMENT')
+  if (rebuild && sqlTokens(existing.sql).some((t) => isKeyword(t, 'AUTOINCREMENT'))
     && !target.columns.some((c) => c.identity === 'autoincrement')) refuse('rebuild must preserve AUTOINCREMENT allocation');
   if (rebuild && (oldKey.length !== (target.primaryKey?.length ?? 0)
     || oldKey.some((name) => !target.primaryKey.includes(name)))) refuse('rebuild must preserve every primary-key column');

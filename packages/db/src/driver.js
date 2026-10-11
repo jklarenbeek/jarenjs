@@ -876,8 +876,8 @@ export function finishConnection(raw, dialect, synchronous, capabilities, queueT
    * A transaction's rollback, unless the connection was closed under it:
    * closing already discarded the uncommitted work (SQLite rolls back on
    * close; a remote host's close does the same), so a ROLLBACK then
-   * could only fail — and that raw "not open" error used to ride beside
-   * the holder's own coded `JD2063` in a `TransactionFailure`.
+   * could only fail, and its raw "not open" error would ride beside the
+   * holder's own coded `JD2063` in a `TransactionFailure`.
    * @param {() => any} rollback
    * @returns {() => any}
    */

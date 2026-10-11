@@ -120,6 +120,13 @@ function misuse(message) {
   process.exit(2);
 }
 
+/** The flags that take the argument after them as their value. */
+const VALUE_FLAGS = new Set([
+  '--from', '--to', '--model', '--store', '--baseline', '--migrations', '--id', '--out', '--snapshot',
+  '--types', '--observed', '--physical-target', '--in', '--max-rows', '--max-bytes', '--max-distinct',
+  '--out-format', '--format', '--collection', '--batch-size',
+]);
+
 function parseArgs(argv) {
   const options = {
     command: argv[2], from: null, to: null, model: null, store: null,
@@ -145,6 +152,11 @@ function parseArgs(argv) {
     }
     if ((flag === '--observed' || flag === '--physical-target') && options.command !== 'adopt-history')
       misuse(`${flag} is only used by adopt-history`);
+    // a value flag with nothing after it, or another flag in its place, has
+    // no value: taking the next flag for it named a file `--id`, and none at
+    // all stored `undefined`, which a command read as an absent option
+    if (VALUE_FLAGS.has(flag) && (argv[i + 1] === undefined || argv[i + 1].startsWith('--')))
+      (options.command === 'documents' ? misuse : fail)(`${flag} needs a value`);
     switch (flag) {
       case '--from': options.from = argv[++i]; break;
       case '--to': options.to = argv[++i]; break;
@@ -573,8 +585,6 @@ async function commandShape(options) {
 async function commandDocuments(options) {
   if (options.migrations === null) misuse('documents needs --migrations <dir>');
   if (options.inputs.length === 0) misuse('documents needs --in <file> (or - for standard input)');
-  if (options.inputs.some((input) => typeof input !== 'string' || input.startsWith('--')))
-    misuse('--in requires a file or collection=file');
   const multiple = options.inputs.length > 1 || /^[A-Za-z_][A-Za-z0-9_]*=/.test(options.in);
   if (multiple && options.inPlace)
     misuse('multiple sources require one --out collection bundle; several in-place renames are not atomic');

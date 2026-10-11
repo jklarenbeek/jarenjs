@@ -13,6 +13,17 @@ import { DbRuntimeError, wrapDriverError } from './errors.js';
 export const RELEASE = Symbol('release the trusted statements of a scope');
 
 /**
+ * Whether a token is the keyword `word` (given in capitals): a bare word, read
+ * without regard to ASCII case. A quoted identifier or a string is never one.
+ * @param {{ kind: string, value: string } | undefined} token
+ * @param {string} word
+ * @returns {boolean}
+ */
+export function isKeyword(token, word) {
+  return token?.kind === 'word' && token.value.toUpperCase() === word;
+}
+
+/**
  * Whether a statement's tokens write: `INSERT`, `UPDATE`, `DELETE`, or
  * `REPLACE` as a statement (`REPLACE INTO`, `INSERT OR REPLACE`). A
  * `REPLACE` immediately followed by `(` is the string function, which a
@@ -20,7 +31,7 @@ export const RELEASE = Symbol('release the trusted statements of a scope');
  * @param {{ kind: string, value: string }[]} tokens
  * @returns {boolean}
  */
-export function writesRows(tokens) {
+function writesRows(tokens) {
   return tokens.some((token, i) => {
     if (token.kind !== 'word') return false;
     const word = token.value.toUpperCase();

@@ -34,7 +34,7 @@
  * than reporting a success it never had.
  */
 
-import { setObjectMember } from '@jarenjs/core/object';
+import { deepFreeze, setObjectMember } from '@jarenjs/core/object';
 import { createJSONPatch } from '@jarenjs/json/patch';
 import { parseJSONPointer } from '@jarenjs/json/pointer';
 
@@ -96,25 +96,6 @@ function inOrder(count, step, from = 0) {
     if (isThenable(out)) return out.then(() => inOrder(count, step, at + 1));
   }
   return undefined;
-}
-
-/**
- * Deep-freeze a JSON value in place and return it. Idempotent; shared
- * substructure (a graph load's children) freezes once.
- * @template T
- * @param {T} value
- * @returns {T}
- */
-export function deepFreeze(value) {
-  if (value === null || typeof value !== 'object' || Object.isFrozen(value))
-    return value;
-  Object.freeze(value);
-  if (Array.isArray(value)) {
-    for (const item of value) deepFreeze(item);
-    return value;
-  }
-  for (const key of Object.keys(value)) deepFreeze(/** @type {any} */ (value)[key]);
-  return value;
 }
 
 /**

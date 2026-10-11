@@ -7,6 +7,7 @@ import { compileJsonQuery } from '@jarenjs/json/query';
 import { chain } from './driver.js';
 import { DbCompileError, DbRuntimeError } from './errors.js';
 import { refuseUnknownModelMembers } from './options.js';
+import { IDENTIFIER } from './engine-metadata.js';
 
 const MEMBERS = ['name', 'on', 'assert', 'enforcement', 'audit', 'when', 'columns', 'effects'];
 /** The codecs a rule compares, as SQL and as JSON alike. */
@@ -170,7 +171,7 @@ export function normalizeInvariants(rules, path) {
     };
     if (!rule || typeof rule !== 'object' || Array.isArray(rule)) fail('an invariant must be an object');
     refuseUnknownModelMembers(rule, MEMBERS, at, 'invariant');
-    if (typeof rule.name !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(rule.name) || names.has(rule.name)) fail('invariant names must be distinct identifiers', 'name');
+    if (typeof rule.name !== 'string' || !IDENTIFIER.test(rule.name) || names.has(rule.name)) fail('invariant names must be distinct identifiers', 'name');
     names.add(rule.name);
     if (!['database', 'store'].includes(rule.enforcement)) fail('invariant enforcement must be database or store', 'enforcement');
     if (!Array.isArray(rule.on) || !rule.on.length || new Set(rule.on).size !== rule.on.length
@@ -431,7 +432,7 @@ export function resolveInvariants(entities, codecOf, storageOf) {
 }
 
 /** @param {string} name @returns {DbRuntimeError} */
-export function invariantFailure(name) {
+function invariantFailure(name) {
   const error = new DbRuntimeError('JD2096', `persistence invariant '${name}' rejected the mutation`);
   error.class = 'constraint';
   error.retryable = false;

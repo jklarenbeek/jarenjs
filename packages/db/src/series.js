@@ -38,10 +38,6 @@ import { isNumericType } from './types.js';
 /** The three §8.16 operators a whole document can BE. */
 export const SERIES_ROOT_OPS = Object.freeze(['$resample', '$rolling', '$asof']);
 
-/** Every §8.16 operator: naming one makes a document temporal. */
-export const SERIES_OPS = Object.freeze([
-  '$overlaps', '$time-bucket', '$resample', '$rolling', '$asof']);
-
 /**
  * The aggregates a `GROUP BY` reproduces exactly, and the plan's
  * name for each. `count` is `rows` because it counts SOURCE ROWS —

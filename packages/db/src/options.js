@@ -20,8 +20,8 @@ export { isPlainOptions, nearestName, refuseUnknownMembers } from '@jarenjs/core
  * Refuse the first member of a model declaration outside its closed set:
  * `JD0005` whose `docPath` points at the member, naming the nearest member
  * and the set. Called before any other rule of the declaration, so a typo
- * is reported as the typo it is — a misspelt `unique` used to be dropped,
- * and the index it declared was created without it.
+ * is reported as the typo it is — a misspelt `unique` dropped silently would
+ * create the index it declares without it.
  * @param {Record<string, any>} declaration
  * @param {readonly string[]} members - the closed set, in its documented order
  * @param {string} docPath - the declaration's own pointer into the model
@@ -47,6 +47,15 @@ export function readOptions(options, members, owner, code = 'JD0013') {
   if (!isPlainOptions(options)) throw new DbCompileError(code, `${owner} options must be a plain object`);
   refuseUnknownMembers(options, members, (key, hint) =>
     new DbCompileError(code, `${owner} option '${key}' is not one it reads${hint}`));
+}
+
+/** `readOptions` for a call whose options may also be `null`, which is as
+ * good as none (a configuration that leaves an option out says `null`).
+ * @param {any} options @param {readonly string[]} members @param {string} owner
+ * @param {string} [code] @returns {void} */
+export function readOptionsOrNull(options, members, owner, code = 'JD0013') {
+  if (options === null) return;
+  readOptions(options, members, owner, code);
 }
 
 /** Whether a value can stand for an `AbortSignal`: what admission reads

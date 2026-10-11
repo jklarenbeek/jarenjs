@@ -198,7 +198,14 @@ it('pool: metrics report the statements each worker holds, stable over 100 journ
 
 it('worker: every refused or abandoned change page gives its statement back', async () => {
   const { driver, connections } = observed(nodeWorkerDriver({ windowRows: 1, maxCursors: 1 }));
-  const store = await openStore(model, { driver, capture: journal });
+  // the store's clock is read at every record boundary of a page that
+  // carries a deadline, so it places the abort exactly: a microtask queued by
+  // the fifth reading runs while the drain awaits its next one-row window.
+  // A timer would race the drain (50 one-row windows, about 2.5 ms): a page
+  // that finishes first is complete and rightly not refused
+  /** @type {(() => void) | null} */
+  let onClock = null;
+  const store = await openStore(model, { driver, capture: journal, runtime: { now: () => { onClock?.(); return Date.now(); } } });
   try {
     const connection = connections[0];
     for (let i = 0; i < 60; i++) await store.collection('notes').put({ id: `n${i % 6}`, n: i });
@@ -211,12 +218,15 @@ it('worker: every refused or abandoned change page gives its statement back', as
     };
     await refused('deadline passed', () => store.changes.page({ after: 0, limit: 10, deadline: Date.now() - 1000 }), { code: 'JD2075' });
     await refused('signal already aborted', () => store.changes.page({ after: 0, limit: 10, signal: AbortSignal.abort() }), { code: 'JD2072' });
-    await refused('aborted mid-drain', () => {
-      const controller = new AbortController();
-      const page = store.changes.page({ after: 0, limit: 50, signal: controller.signal });
-      setTimeout(() => controller.abort(), 3);
-      return page;
-    }, { code: 'JD2072' });
+    const controller = new AbortController();
+    let readings = 0;
+    onClock = () => { if (++readings === 5) queueMicrotask(() => controller.abort()); };
+    try {
+      await refused('aborted mid-drain', () => store.changes.page({
+        after: 0, limit: 50, deadline: Date.now() + 60_000, signal: controller.signal }), { code: 'JD2072' });
+    }
+    finally { onClock = null; }
+    assert.ok(readings >= 5 && readings < 50, `the page read the clock ${readings} times: it stopped inside its drain`);
     await refused('oversize record', () => store.changes.page({ after: 0, limit: 10, maxBytes: 1 }), { code: 'JD2074' });
     // the one cursor slot held by a raw statement of this test's own: the
     // page's iterate is refused, and its preparation leaves with the refusal

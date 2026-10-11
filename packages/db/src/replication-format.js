@@ -2,6 +2,7 @@
 /** Portable logical transactions. Canonical payloads are also collision-free receipts. */
 import { stableStringify } from '@jarenjs/core/object';
 import { DbCompileError } from './errors.js';
+import { IDENTIFIER } from './engine-metadata.js';
 
 export const REPLICATION_VERSION = '0.1';
 export const REPLICATION_DEFAULTS = Object.freeze({ retention: 1000, maxOperations: 10000, maxBytes: 4194304 });
@@ -70,7 +71,7 @@ export function normalizeReplication(document) {
   const rows = new Set();
   for (const operation of document.operations) {
     if (!members(operation, ['table', 'key', 'before', 'after'])
-      || typeof operation.table !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(operation.table)
+      || typeof operation.table !== 'string' || !IDENTIFIER.test(operation.table)
       || typeof operation.key !== 'string'
       || !(operation.before === null || record(operation.before))
       || !(operation.after === null || record(operation.after))) invalid('invalid logical row operation');
@@ -97,7 +98,7 @@ export function normalizeReplicationSnapshot(document) {
   const seen = new Set();
   for (const row of document.rows) {
     if (!members(row, ['table', 'key', 'value', 'frontier']) || typeof row.table !== 'string'
-      || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(row.table) || typeof row.key !== 'string'
+      || !IDENTIFIER.test(row.table) || typeof row.key !== 'string'
       || !(row.value === null || record(row.value))) invalid('invalid snapshot row');
     normalizeFrontier(row.frontier);
     const key = JSON.stringify([row.table, row.key]);

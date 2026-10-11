@@ -29,11 +29,13 @@
 
 import { chain, useStatementOnce } from './driver.js';
 import { DbCompileError } from './errors.js';
+import { readOptionsOrNull } from './options.js';
 import { KEY_COLUMN, DOC_COLUMN, SCALAR_CODECS, indexCondition, canonicalOf } from './ddl.js';
 import { readPredicate, readIntervalCheck, sqlTokens, SQLITE_PREDICATE } from './dialects/check-read.js';
 import { comparableDeclaredSql } from './schema-sql.js';
+import { isKeyword } from './sql.js';
 import { foldIdentifier } from './invariants.js';
-import { MODEL_VERSION, ENGINE_TABLES } from './engine-metadata.js';
+import { MODEL_VERSION, ENGINE_TABLES, IDENTIFIER } from './engine-metadata.js';
 import { registeredName, expressionMembers } from './expression.js';
 import { modelPath } from './model-path.js';
 
@@ -157,6 +159,24 @@ const ON_DELETE = Object.freeze({
 });
 
 /**
+ * Refuse an introspection option that is none of its own, or of the wrong type
+ * (`JD0013`): a misspelt `strict` read a partial model as the whole one, and a
+ * string for `tables` was read as a set of its characters.
+ * @param {any} options
+ */
+function readIntrospectOptions(options) {
+  readOptionsOrNull(options, ['strict', 'tables', 'keys', 'expressions'], 'introspect');
+  if (options === undefined || options === null) return;
+  const refuse = (/** @type {string} */ name, /** @type {string} */ rule) =>
+    new DbCompileError('JD0013', `introspect option '${name}' ${rule}`);
+  if (options.strict !== undefined && typeof options.strict !== 'boolean') throw refuse('strict', 'is true or false');
+  if (options.tables !== undefined && !(Array.isArray(options.tables) && options.tables.every((name) => typeof name === 'string')))
+    throw refuse('tables', 'is an array of table names');
+  if (options.keys !== undefined && (options.keys === null || typeof options.keys !== 'object' || Array.isArray(options.keys)))
+    throw refuse('keys', 'is an object of document pointers by table');
+}
+
+/**
  * Read the whole database into the neutral IR: one entry per table and
  * per view, in catalog order.
  * @param {any} connection
@@ -164,6 +184,7 @@ const ON_DELETE = Object.freeze({
  * @returns {any} value-or-promise of `{ tables, views }`
  */
 export function readSchema(connection, options = undefined) {
+  readIntrospectOptions(options);
   const dialect = connection.dialect;
   const engine = ENGINE_TABLES;
   const wanted = options?.tables === undefined ? null : new Set(options.tables);
@@ -649,7 +670,6 @@ function deriveEntity(dialect, table, report) {
 }
 
 /** An identifier a `$.<member>` path and an index name can spell. */
-const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 /**
  * The columns of an entity table an index or its condition may read: a
@@ -677,7 +697,7 @@ function conditionText(sql) {
   let depth = 0;
   for (const token of sqlTokens(sql)) {
     if (token.kind === 'symbol') depth += token.value === '(' ? 1 : token.value === ')' ? -1 : 0;
-    else if (depth === 0 && token.kind === 'word' && token.value.toUpperCase() === 'WHERE') return sql.slice(token.at + 5);
+    else if (depth === 0 && isKeyword(token, 'WHERE')) return sql.slice(token.at + 5);
   }
   return null;
 }
@@ -795,6 +815,7 @@ function looksLikeJoinTable(dialect, table) {
  * @returns {any} value-or-promise of `{ model, report }`
  */
 export function introspectModel(connection, options = undefined) {
+  readIntrospectOptions(options);
   const dialect = connection.dialect;
   // the engine's function name back to the model's: the registration
   // this store made where it computes an expression itself, the host's

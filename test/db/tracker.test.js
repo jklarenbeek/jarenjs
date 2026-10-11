@@ -117,6 +117,21 @@ describe('materialised entities are plain frozen JSON', () => {
     assert.strictEqual(report.updated, 0);
   });
 
+  it('a put of a document frozen only at its top freezes what it holds, so a later edit cannot reach the save', async () => {
+    await users().create({ ...BASE, id: 'u-shallow' });
+    const tags = ['a', 'b'];
+    const next = Object.freeze({ ...BASE, id: 'u-shallow', name: 'bob', profile: { bio: 'x', tags } });
+    users().put(next);
+    assert.strictEqual(Object.isFrozen(next.profile), true);
+    assert.strictEqual(Object.isFrozen(tags), true);
+    assert.throws(() => tags.push('c'), TypeError);
+    assert.throws(() => { next.profile.bio = 'changed'; }, TypeError);
+    await store.saveChanges();
+    const saved = await users().get('u-shallow');
+    assert.deepStrictEqual(saved.profile, { bio: 'x', tags: ['a', 'b'] });
+    assert.strictEqual(saved.name, 'bob');
+  });
+
   it('keeps composite keys distinct when their values contain the tracking separator', async () => {
     const database = await openStore({
       $model: '0.1',

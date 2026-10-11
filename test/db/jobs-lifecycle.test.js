@@ -75,7 +75,7 @@ describe('total normalization of handler outcomes', () => {
     const store = await open();
     const worker = store.jobs.createWorker({
       handlers: { bad: () => ({ big: 10n }), good: () => ({ ok: true }) },
-      pollInterval: 5, maxAttempts: 1,
+      pollInterval: 5,
     });
     worker.start();
     await store.jobs.enqueue('bad', null, { id: 'b', maxAttempts: 1 });

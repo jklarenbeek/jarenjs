@@ -18,9 +18,9 @@ export function postgresChannel(value) {
 }
 
 /** Every member `postgresDriver` reads: the limits and its session
- * policy. A CLOSED set — a misspelt `statmentTimeoutMs` used to leave
+ * policy. A CLOSED set — a misspelt `statmentTimeoutMs` would leave
  * the server default in force without a word. */
-export const POSTGRES_DRIVER_OPTIONS = Object.freeze([...Object.keys(POSTGRES_DEFAULTS),
+const POSTGRES_DRIVER_OPTIONS = Object.freeze([...Object.keys(POSTGRES_DEFAULTS),
   'schema', 'notifyChannel', 'queueTimeout', 'poolMode', 'prepared', 'cursorMode', 'destroy', 'cancel']);
 
 /** What `adaptPostgresClient` reads: the driver's set, plus the members
@@ -60,7 +60,7 @@ export function postgresSettings(options = {}, known = POSTGRES_DRIVER_OPTIONS, 
       throw new DbCompileError('JD0003', `${owner} option '${key}' exceeds the timer range`);
   }
   // the store's own rule for the same member: `Infinity`, a negative or a
-  // fraction used to become a 1 ms wait (or none) behind a transaction
+  // fraction would become a 1 ms wait (or none) behind a transaction
   const { queueTimeout } = options;
   if (queueTimeout !== undefined
     && (!Number.isInteger(queueTimeout) || queueTimeout < 0 || queueTimeout > 0x7fffffff))

@@ -2779,7 +2779,10 @@ edge is `JD0031` (children share their parent).
 
 `onDelete` is REQUIRED wherever a foreign-key column is created —
 `"cascade"`, `"restrict"` or `"setNull"` — never defaulted silently.
-Referential integrity is real SQLite foreign keys:
+`"setNull"` over a foreign-key property the entity's schema lists in
+`required` is `JD0005` at the relation's `onDelete`: the database's set-null
+would store a row that schema rejects, and `get` would answer it without the
+member. Referential integrity is real SQLite foreign keys:
 `PRAGMA foreign_keys = ON` is set AND VERIFIED per connection (it
 defaults off), a violating write fails with the wrapped database
 error, and the declared on-delete behaviour is observed by test.
@@ -3709,7 +3712,9 @@ const report = await store.saveChanges();     // one transaction
   `link()`s and `unlink()`s staged under its key before the add or after
   it (§11.7) — the save used to write their join rows for a row it never
   inserted, a foreign-key `JD2005`. Documents
-  handed to `add`/`put` are adopted and frozen. Staging is
+  handed to `add`/`put` are adopted and deep-frozen — everything they hold
+  freezes, whether or not the document itself already was, so a member the
+  caller kept a reference to cannot change what the save writes. Staging is
   last-write-wins: `add()` twice under one key keeps the second document
   (like `put`), where the explicit `create()` twice is `JD2001` (§7).
   An `add()` after a pending `remove()` of the same key refuses `JD2003`

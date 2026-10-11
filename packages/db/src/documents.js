@@ -26,6 +26,7 @@ import { compileJsltStylesheet } from '@jarenjs/json/jslt';
 
 import { DbCompileError } from './errors.js';
 import { refuseCancelled } from './cancellation.js';
+import { readOptionsOrNull } from './options.js';
 import {
   compileDocumentStep, checkMigrationDocument, PHYSICAL_STEP_KINDS, DOCUMENT_STEP_KINDS, HOST_STEP_KIND,
   normalizeAssertionBounds, createAssertionBoundGuard,
@@ -89,8 +90,14 @@ function planStorelessRun(migrations, present, context) {
   return plans;
 }
 
+/** What a document run reads: its bounds and hooks, then the call's own controls (`write` is a streamed run's sink). */
+const RUN_OPTIONS = ['batchSize', 'onProgress', 'onAssertionPlan', 'keys', 'compileJslt', 'compileQuery', 'runtime',
+  'assertionBounds', 'signal', 'deadline', 'write'];
+
 /** The shared option surface both surfaces read. */
 function runContext(options) {
+  readOptionsOrNull(options, RUN_OPTIONS, 'documents');
+  options ??= {};
   const runtime = resolveRuntime(options.runtime);
   if (!Number.isSafeInteger(options.batchSize ?? 500) || (options.batchSize ?? 500) < 1)
     throw new TypeError('batchSize must be a positive safe integer');

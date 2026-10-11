@@ -1,6 +1,8 @@
 //@ts-check
 /** Inert metadata: inspecting a schema must not load its runtime owners. */
 import { REPLICATION_TABLES } from './replication-tables.js';
+/** The grammar of a name the model gives a table, a column, an index, a rule or a function: an ASCII identifier. */
+export const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
 /** Current model document version. */
 export const MODEL_VERSION = '0.1';
 /** Migration receipt table. */

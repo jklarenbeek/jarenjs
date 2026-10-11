@@ -1142,10 +1142,17 @@ jaren-db history  --store <db> [--out <observation.json>]
 jaren-db adopt-history --store <db> --migrations <applied-prefix-dir> --observed <observation.json>
                        --model <model> [--physical-target <json>] [--yes]
 jaren-db documents --migrations <dir> --in <file|-> (--out <file|-> | --in-place --yes | --check)
-                   [--format json|jsonl] [--out-format json|jsonl] [--collection <name>]
-                   [--batch-size <n>]
+                   [--format json|jsonl|collections] [--out-format json|jsonl|collections]
+                   [--in collection=file ...] [--collection <name>] [--batch-size <n>]
+                   [--max-rows <n|none>] [--max-bytes <n|none>] [--max-distinct <n>]
 ```
 
+- **A flag that takes a value is given one.** `--store` as the last word,
+  or followed by another `--flag`, is refused by name (`jaren-db: --store
+  needs a value`, exit 1; exit 2 for `documents`, `history` and
+  `adopt-history`) before any file is read or written — the next flag is
+  never taken for its value, and a missing value is never read as an absent
+  option.
 - **A model or a migration is a `.json` file or a MODULE.** `--model`,
   `--from`, `--to` and `--baseline` accept a `.json` file or a module
   (`.js`, `.mjs`, `.cjs` — and `.ts` where the host strips types: Node

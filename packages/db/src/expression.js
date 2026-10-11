@@ -38,6 +38,7 @@
  */
 
 import { DbCompileError } from './errors.js';
+import { IDENTIFIER } from './engine-metadata.js';
 
 /** The three node kinds, closed. */
 export const EXPRESSION_KINDS = Object.freeze(['member', 'value', 'call']);
@@ -107,7 +108,7 @@ export function normalizeExpression(node, docPath, declarations, depth = 0) {
     return Object.freeze({ value });
   }
 
-  if (typeof node.call !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(node.call))
+  if (typeof node.call !== 'string' || !IDENTIFIER.test(node.call))
     throw refuse('a call node names a function by identifier', `${docPath}/call`);
   for (const extra of Object.keys(node)) {
     if (extra !== 'call' && extra !== 'args')

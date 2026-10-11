@@ -23,6 +23,7 @@
 import { DbRuntimeError, wrapDriverError } from './errors.js';
 import { chain, attempt, useStatementOnce } from './driver.js';
 import { refuseCancelled } from './cancellation.js';
+import { readOptionsOrNull } from './options.js';
 
 /** The checkpoint modes `PRAGMA wal_checkpoint` accepts, closed. */
 export const CHECKPOINT_MODES = Object.freeze(['passive', 'full', 'restart', 'truncate']);
@@ -54,7 +55,7 @@ const failed = (operation) => (error) => wrapDriverError(error,
  * @param {boolean} readOnly
  * @returns {Readonly<Record<string, boolean>>}
  */
-export function maintenanceCapabilities(declared, readOnly) {
+function maintenanceCapabilities(declared, readOnly) {
   /** @type {Record<string, boolean>} */
   const out = {};
   for (const operation of MAINTENANCE_OPERATIONS) {
@@ -116,6 +117,7 @@ export function createMaintenance({ connection, readOnly, now }) {
      * @param {{ mode?: string, signal?: AbortSignal, deadline?: number }} [options]
      */
     checkpoint(options = undefined) {
+      readOptionsOrNull(options, ['mode', 'signal', 'deadline'], 'checkpoint');
       const mode = options?.mode ?? 'passive';
       if (typeof mode !== 'string' || !CHECKPOINT_MODES.includes(mode)) {
         throw new TypeError(`checkpoint: mode is one of ${
@@ -139,6 +141,7 @@ export function createMaintenance({ connection, readOnly, now }) {
      * @param {{ limit?: number, signal?: AbortSignal, deadline?: number }} [options]
      */
     integrityCheck(options = undefined) {
+      readOptionsOrNull(options, ['limit', 'signal', 'deadline'], 'integrityCheck');
       const limit = options?.limit;
       if (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1)) {
         throw new TypeError(`integrityCheck: limit is a positive integer, got ${JSON.stringify(limit)}`);
@@ -154,6 +157,7 @@ export function createMaintenance({ connection, readOnly, now }) {
     /** `PRAGMA foreign_key_check`: every violating row, typed.
      * @param {{ signal?: AbortSignal, deadline?: number }} [options] */
     foreignKeyCheck(options = undefined) {
+      readOptionsOrNull(options, ['signal', 'deadline'], 'foreignKeyCheck');
       callable(options, 'foreignKeyCheck');
       require('foreignKeyCheck');
       return chain(rows('foreignKeyCheck', dialect.pragma.foreignKeyCheck()), (answer) => ({
@@ -170,6 +174,7 @@ export function createMaintenance({ connection, readOnly, now }) {
      * result is that it ran — no invented statistics.
      * @param {{ signal?: AbortSignal, deadline?: number }} [options] */
     optimize(options = undefined) {
+      readOptionsOrNull(options, ['signal', 'deadline'], 'optimize');
       callable(options, 'optimize');
       require('optimize');
       return chain(rows('optimize', dialect.pragma.optimize()), () => ({ ran: true }));

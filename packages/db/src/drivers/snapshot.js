@@ -65,7 +65,7 @@ export async function removeSqliteFile(path) {
  * @param {string} what - the refused operation, for the message
  * @returns {Promise<void>}
  */
-export async function refuseOwnDatabase(databaseFile, target, what) {
+async function refuseOwnDatabase(databaseFile, target, what) {
   if (!databaseFile) return;
   const fs = await import('node:fs/promises');
   const { basename, dirname, join, resolve } = await import('node:path');
@@ -331,7 +331,7 @@ async function asRollbackJournal(path) {
  * destination with every side file it left.
  * @param {string} target - a file path the caller has checked
  * @param {() => any} write @returns {Promise<number>} */
-export async function writeSqliteSnapshot(target, write) {
+async function writeSqliteSnapshot(target, write) {
   const fs = await import('node:fs/promises');
   const reservation = await fs.open(target, 'wx');
   try {

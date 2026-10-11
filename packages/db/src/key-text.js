@@ -2,14 +2,14 @@
 /**
  * @file One key, one spelling (MODEL-FORMAT §5): the text a collection
  * key is bound as on a TEXT key column, and the reading that recognizes
- * a key stored before that spelling was the only one.
+ * a key stored under another spelling.
  *
- * A JavaScript number reaching a TEXT key column used to be bound as the
- * driver chose: node:sqlite binds it as a REAL, so SQLite stored `7` as
- * `'7.0'`, while Bun binds an integer-valued number as an INTEGER and
- * stored `'7'` — one key, two rows on a file both runtimes wrote. Every
- * driver now binds its canonical JSON text; the store still finds (and
- * converges) a row an earlier node write stored.
+ * A JavaScript number reaching a TEXT key column is bound as its canonical
+ * JSON text on every driver. Left to the driver it would not agree:
+ * node:sqlite binds a number as a REAL (`7` stored as `'7.0'`) while Bun binds
+ * an integer-valued one as an INTEGER (`'7'`), one key as two rows on a file
+ * both runtimes wrote. A row stored under the REAL spelling is still found,
+ * and converged to the canonical one.
  */
 
 /**

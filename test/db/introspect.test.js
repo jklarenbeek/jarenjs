@@ -874,3 +874,32 @@ describe('introspectModel — a declared interval', () => {
     });
   });
 });
+
+describe('introspectModel — options', () => {
+  const TABLES = ['CREATE TABLE "Choice" ("id" TEXT PRIMARY KEY, "state" TEXT)'];
+
+  it('an option that is none of its own is JD0013 naming the nearest, and one of the wrong type is refused', async () => {
+    const connection = handMade(TABLES);
+    try {
+      await assert.rejects(async () => introspectModel(connection, { strcit: true }),
+        { code: 'JD0013', message: /introspect option 'strcit' is not one it reads.*strict/s });
+      await assert.rejects(async () => readSchema(connection, { table: ['Choice'] }),
+        { code: 'JD0013', message: /introspect option 'table' is not one it reads.*tables/s });
+      for (const strict of ['yes', 1, null]) {
+        await assert.rejects(async () => introspectModel(connection, { strict }),
+          { code: 'JD0013', message: /^JD0013: introspect option 'strict' is true or false/ }, String(strict));
+      }
+      for (const tables of ['Choice', [5], { Choice: true }, null]) {
+        await assert.rejects(async () => introspectModel(connection, { tables }),
+          { code: 'JD0013', message: /^JD0013: introspect option 'tables' is an array of table names/ }, JSON.stringify(tables));
+      }
+      for (const keys of ['/id', ['/id'], null]) {
+        await assert.rejects(async () => introspectModel(connection, { keys }),
+          { code: 'JD0013', message: /^JD0013: introspect option 'keys' is an object of document pointers by table/ }, JSON.stringify(keys));
+      }
+      const { model } = await introspectModel(connection, { strict: false, tables: ['Choice'], keys: {} });
+      assert.deepStrictEqual(Object.keys(model.entities), ['Choice']);
+    }
+    finally { await connection.close(); }
+  });
+});

@@ -1704,6 +1704,56 @@ a bounded number of them on these paths however long the store lives:
   has a cursor return's reserved capacity.
 - The pool host's `metrics().workers[]` report each worker's `statements`.
 
+## 13. Stricter options and values on the write side
+
+Calls that read an option or a value they could not honor ran on without it;
+each now refuses by code before it runs or stores anything:
+
+- Every option object these calls read must be a plain object (`null` is as good as
+  none, and `undefined`): a class instance, an object with a prototype of its own or one
+  from another realm is `JD0013`, as `enqueue`'s always was. `store.close(options)`
+  checks its options (`graceMs`, the only member it reads, and no other) before it
+  stops or closes anything, so a bad one refuses with the store open, its workers
+  polling and its live queries registered.
+- A job worker, `jobs.claim`, `jobs.renew`, `jobs.page`, `jobs.cancel`,
+  `jobs.requeue`, `jobs.reset` and `jobs.sweep` read a closed set of options:
+  a member outside it is `JD0013` naming the nearest (`createWorker({ concurency })`
+  ran one loop, and a `maxAttempts` passed to a worker was ignored — it belongs
+  to the job). A lease that is not a positive finite number of milliseconds
+  (`NaN` stored no expiry and stranded the job `leased` for good), a worker
+  interval that is not a finite number inside the timer range (`NaN` or an
+  overlarge `pollInterval` polled every millisecond), an `owner` that is not a
+  non-empty string, a `renew` that is not a boolean and an `onOutcome` that is
+  not a function are a `TypeError` (`backoffCap: Infinity`, uncapped before, is one:
+  a finite number is what the retry's `run_at` stores). A job payload or checkpoint value JSON cannot
+  express — a function, a symbol, `undefined` for a checkpoint — is a `TypeError`
+  instead of an unbindable value reaching the driver.
+- `checkpoint`, `integrityCheck`, `foreignKeyCheck`, `optimize`,
+  `changes.page`, `replication.page`, `apply`, `reset`, `snapshot` and
+  `conflicts` read a closed set of options as well (a misspelt `mode` ran a
+  PASSIVE checkpoint), and `introspect` reads `strict` as a boolean, `tables`
+  as an array of names and `keys` as an object (a string for `tables` was read
+  as a set of its characters). A document run (`migrateDocuments`,
+  `streamDocuments`) reads a closed set too (a misspelt
+  `batchSize` ran with the default).
+- `create()`, `add()` and `update()` of an entity refuse `JD2003` a value that is
+  not an object: a string spread into numbered members, and `null`, `undefined`
+  or a number stored an empty row (`put()` already refused them).
+- A document handed to `put()` that was frozen at its top only is now frozen all
+  the way down, so a member the caller kept a reference to can no longer change
+  what the save writes after the document was validated.
+- The `deepFreeze` that `@jarenjs/db` exports is the one of `@jarenjs/core/object`: it
+  freezes beneath a root that was already frozen (it stopped at the root), and it still
+  terminates on a cyclic value.
+- `planMigration` and `planModelMigration` answer `JD0005` for a model that is
+  `null`, or whose entity or collection is `null`, where they threw a `TypeError`.
+- A relation declared `onDelete: 'setNull'` over a foreign-key property the
+  entity's schema lists in `required` is `JD0005`: the database's set-null
+  stored a row its own schema rejects.
+- A command-line flag that takes a value and is followed by none, or by another
+  `--flag`, is refused by name (`jaren-db: --store needs a value`) instead of
+  reading as an absent option or taking the next flag for its value.
+
 ## Measured costs
 
 Exact identity stores complete canonical documents and model endpoints, so

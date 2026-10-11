@@ -16,6 +16,8 @@
 
 import { explainMapping } from './model.js';
 import { analyzeQuery } from '@jarenjs/json/query';
+import { utf8ByteLength } from '@jarenjs/core/string';
+import { IDENTIFIER } from './engine-metadata.js';
 import { DbCompileError } from './errors.js';
 import { chain } from './driver.js';
 import { BBOX_COMPONENTS, BBOX_INDEX_ORDER, derivedMappingFor } from './derive.js';
@@ -35,8 +37,6 @@ const MANAGED_SQL_OPTIONS = Object.freeze({ columnOrder: /** @type {const} */ ('
 export const KEY_COLUMN = 'key';
 export const DOC_COLUMN = 'doc';
 
-const UTF8 = new TextEncoder();
-
 /**
  * Refuse (`JD0004`) a name the plan gives a table, a column or an index that
  * the engine cannot hold, at the model member it comes from — before any SQL
@@ -52,7 +52,7 @@ const UTF8 = new TextEncoder();
 function refuseLongName(dialect, name, what, docPath) {
   const limit = dialect.maxIdentifierBytes;
   if (!Number.isFinite(limit)) return;
-  const bytes = UTF8.encode(name).length;
+  const bytes = utf8ByteLength(name);
   if (bytes > limit) {
     throw new DbCompileError('JD0004',
       `${what} would be named '${name}', ${bytes} bytes; the ${dialect.name} engine keeps ${limit} bytes `
@@ -234,7 +234,6 @@ export function canonicalOf(segments) {
 
 /** A member name that spells itself: anything else is JSON-quoted in
  * the canonical, so `.a.b` (nested) and `."a.b"` (one member) differ. */
-const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 /**
  * The subschema of one array element. A negative index counts from the end,

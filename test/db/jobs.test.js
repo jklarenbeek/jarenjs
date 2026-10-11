@@ -65,6 +65,33 @@ describe('the job record and enqueue (§2)', () => {
     await store.close();
   });
 
+  it('a payload JSON cannot express is a TypeError, as a BigInt or a cycle is, and enqueues nothing', async () => {
+    const store = await open({ now: makeClock() });
+    const cycle = {};
+    cycle.self = cycle;
+    for (const [what, payload] of [['a function', () => 1], ['a symbol', Symbol('x')], ['a BigInt', 1n], ['a cycle', cycle]]) {
+      await assert.rejects(async () => store.jobs.enqueue('mail', payload, { id: 'bad' }), (error) => {
+        assert.strictEqual(error.name, 'TypeError', what);
+        assert.strictEqual(error.code, undefined, `${what}: not a driver error`);
+        return true;
+      }, what);
+    }
+    assert.strictEqual(await store.jobs.get('bad'), undefined);
+    assert.strictEqual((await store.jobs.counts()).pending, 0);
+    await assert.rejects(async () => store.jobs.enqueue('mail', () => 1), {
+      name: 'TypeError', message: 'enqueue: "payload" is not representable as JSON (undefined, a function or a symbol)' });
+    await store.jobs.enqueue('step', null, { id: 'run' });
+    const claimed = await store.jobs.claim({ kinds: ['step'], owner: 'w' });
+    const checkpoints = store.jobs.checkpointsFor(claimed);
+    for (const value of [undefined, () => 1, Symbol('x')]) {
+      await assert.rejects(async () => checkpoints.save('run', 'node', value), {
+        name: 'TypeError', message: 'checkpoint save(): the value is not representable as JSON (undefined, a function or a symbol)' });
+    }
+    await checkpoints.save('run', 'node', { ok: true });
+    assert.deepStrictEqual((await checkpoints.load('run')).values, { node: { ok: true } });
+    await store.close();
+  });
+
   it('a future runAt schedules; the claim respects eligibility', async () => {
     const clock = makeClock();
     const store = await open({ now: clock });

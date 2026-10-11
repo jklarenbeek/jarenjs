@@ -21,7 +21,7 @@
  */
 
 import { canonicalizeJson } from '@jarenjs/json/canonical';
-import { hashContent } from '@jarenjs/core/string';
+import { hashContent, utf8ByteLength } from '@jarenjs/core/string';
 import { resolveRuntime } from '@jarenjs/core/runtime';
 import { refuseCancelled } from './cancellation.js';
 import { cloneJson, setObjectMember, isPlainOptions } from '@jarenjs/core/object';
@@ -51,6 +51,7 @@ import { derivedValue, memberAt, registerDeriveFunctions } from './derive.js';
 import { mergeEntityRow } from './graph.js';
 import { entityCore } from './entity.js';
 import { sqlTokens } from './dialects/check-read.js';
+import { isKeyword } from './sql.js';
 import { comparableDeclaredSql } from './schema-sql.js';
 import { applyTableMigration } from './table-migration.js';
 import { withForeignKeySettings } from './foreign-key-scope.js';
@@ -402,7 +403,7 @@ function storedDerivedColumns(connection, table, step, options) {
  * carries them, as a store's does, so a host or jslt step leaves none
  * stale — or a mapped entity row WHOLE: its columns split out through the
  * entity's own split and the rest into its document (a column-mapped member
- * a transform wrote used to land in the document and be shadowed on read).
+ * a transform wrote into the document would be shadowed on read).
  * @param {any} connection @param {string} table @param {any} step
  * @param {{ entity: any, mapping: any } | null} stepEntity @param {any} options
  * @param {(write: (doc: any, rid: any) => any) => any} use
@@ -419,7 +420,7 @@ function documentWriter(connection, table, step, stepEntity, options, use) {
       `${q('doc')} = ${dialect.jsonEncode(dialect.parameterRef(columns.length + 1, 'doc'))}`,
     ];
     return useStatementOnce(connection, `UPDATE ${q(table)} SET ${assignments.join(', ')} `
-      + `WHERE ${dialect.rowIdentity()} = ${dialect.parameterRef(columns.length + 2, 'rid')}`, (update) =>
+      + `WHERE ${entityRowIdentity(dialect, stepEntity.mapping)} = ${dialect.parameterRef(columns.length + 2, 'rid')}`, (update) =>
       use((/** @type {any} */ next, /** @type {any} */ rid) => {
         const { values, rest } = core.plan.split(next);
         const byName = new Map(values.map((value) => [value.name, value.value]));
@@ -897,7 +898,7 @@ export function planMigration(fromModel, toModel, options = undefined) {
     throw new TypeError('planMigration needs { dialect } (the store dialect renders the DDL)');
   const identity = migrationIdentity(fromModel, toModel);
   const from = hashContent(identity.from), to = hashContent(identity.to);
-  if ([fromModel, toModel].some((m) => Object.values(m.entities ?? {}).some((e) => e.physical !== undefined))) {
+  if ([fromModel, toModel].some((m) => Object.values(m?.entities ?? {}).some((e) => e?.physical !== undefined))) {
     normalizeEntities(fromModel);
     normalizeEntities(toModel);
     if (canonicalizeJson(fromModel) !== canonicalizeJson(toModel))
@@ -1546,8 +1547,7 @@ function planEntityChanges(fromModel, toModel, dialect, steps, report, transform
     }
 
     if (needsRebuild) {
-      steps.push(...renderRebuild(name, fromName, fm, tm,
-        fromMapping, toMapping, dialect, report));
+      steps.push(...renderRebuild(name, fromName, fm, tm, toMapping, dialect, report));
     }
     else {
       // index diff first (a column cannot drop under a live index);
@@ -1713,8 +1713,6 @@ function planEntityChanges(fromModel, toModel, dialect, steps, report, transform
   return programs;
 }
 
-const UTF8 = new TextEncoder();
-
 /**
  * The name PostgreSQL gives a primary key a CREATE leaves unnamed:
  * `<table>_pkey`, the table's name clipped at a character boundary so the
@@ -1726,7 +1724,7 @@ const UTF8 = new TextEncoder();
 function postgresKeyName(table, limit) {
   let kept = '', bytes = 0;
   for (const character of table) {
-    bytes += UTF8.encode(character).length;
+    bytes += utf8ByteLength(character);
     if (bytes > limit - '_pkey'.length) break;
     kept += character;
   }
@@ -1988,7 +1986,7 @@ function nameRebuiltKey(connection, table) {
  * the old table's sequence: `create` carries its position across before the
  * old table is dropped, and `indexes` advances it past the copied values.
  */
-function renderRebuild(name, fromName, fm, tm, fromMapping, toMapping, dialect, report) {
+function renderRebuild(name, fromName, fm, tm, toMapping, dialect, report) {
   const q = dialect.quoteIdentifier;
   const pathText = (memberName) => dialect.jsonPathText([{ name: memberName }]);
   const temporary = `${name}__rebuild`;
@@ -2298,7 +2296,7 @@ function walkRows(connection, table, batchSize, handle, keyed = true, entityMapp
   const q = dialect.quoteIdentifier;
   if (entityMapping?.document === false)
     return walkPhysicalRows(connection, entityMapping, batchSize, handle, check);
-  const rid = dialect.rowIdentity();
+  const rid = entityMapping === null ? dialect.rowIdentity() : entityRowIdentity(dialect, entityMapping);
   const keySelect = keyed ? `, ${q('key')} AS ${q('k')}` : '';
   const columnSelect = entityMapping === null ? '' : entityColumnsOf(entityMapping)
     .map((column) => `, ${q(column)}`).join('');
@@ -2319,6 +2317,16 @@ function walkRows(connection, table, batchSize, handle, keyed = true, entityMapp
     };
     return nextBatch(undefined);
   }));
+}
+
+/**
+ * How a row of an entity's table is named: the dialect's row identity, spelled
+ * around the columns the entity maps (a member named `rowid` takes that name
+ * in SQLite, so the walk and the write must agree on another of its aliases).
+ * @param {any} dialect @param {any} entityMapping
+ */
+function entityRowIdentity(dialect, entityMapping) {
+  return dialect.rowIdentity([...entityColumnsOf(entityMapping), 'doc']) ?? dialect.rowIdentity();
 }
 
 /** The physical columns an entity row carries beside its document. */
@@ -2384,8 +2392,7 @@ function renamesOf(steps) {
     if ((step?.kind !== 'ddl' && step?.kind !== 'sql') || typeof step.sql !== 'string') continue;
     const tokens = sqlTokens(step.sql);
     if (tokens.at(-1)?.kind === 'symbol' && tokens.at(-1)?.value === ';') tokens.pop();
-    const keyword = (/** @type {number} */ at, /** @type {string} */ value) =>
-      tokens[at]?.kind === 'word' && tokens[at].value.toUpperCase() === value;
+    const keyword = (/** @type {number} */ at, /** @type {string} */ value) => isKeyword(tokens[at], value);
     const name = (/** @type {number} */ at) =>
       (tokens[at]?.kind === 'word' || tokens[at]?.kind === 'identifier' ? tokens[at].value : undefined);
     const at = tokens[3]?.kind === 'symbol' && tokens[3].value === '.' ? 4 : 2;
@@ -3400,7 +3407,7 @@ function checkMigrationStatements(migration, dialect) {
         && token.value === ';' && i !== tokens.length - 1)) fail();
       continue;
     }
-    const begin = tokens.findIndex((token) => token.kind === 'word' && token.value.toUpperCase() === 'BEGIN');
+    const begin = tokens.findIndex((token) => isKeyword(token, 'BEGIN'));
     if (begin < 0) fail();
     let depth = 1, end = -1;
     for (let i = begin + 1; i < tokens.length; i++) {

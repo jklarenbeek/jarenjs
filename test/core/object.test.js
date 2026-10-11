@@ -476,6 +476,40 @@ describe('deepFreeze', () => {
     assert.isTrue(Object.isFrozen(value.a.b[1]));
   });
 
+  it('freezes the members of a value that was frozen only at its top', () => {
+    const tags = ['a'];
+    const value = Object.freeze({ profile: { tags } });
+    deepFreeze(value);
+    assert.isTrue(Object.isFrozen(value.profile));
+    assert.isTrue(Object.isFrozen(tags));
+  });
+
+  it('terminates on a cycle, through objects and arrays, near the root and deep', () => {
+    const root = { list: [] };
+    root.self = root;
+    root.list.push(root, { back: root });
+    deepFreeze(root);
+    assert.isTrue(Object.isFrozen(root) && Object.isFrozen(root.list) && Object.isFrozen(root.list[1]));
+    const head = {};
+    let tail = head;
+    for (let i = 0; i < 40; i++) { tail.next = {}; tail = tail.next; }
+    tail.back = head;
+    deepFreeze(head);
+    assert.isTrue(Object.isFrozen(tail));
+  });
+
+  it('does not walk a large subtree it already froze again, and still freezes what is new beside it', () => {
+    let reads = 0;
+    const big = { get members() { reads++; return Array.from({ length: 100 }, (_, i) => ({ i })); } };
+    deepFreeze(big);
+    assert.strictEqual(reads, 1);
+    const next = { shared: big, fresh: { x: [1] } };
+    deepFreeze(next);
+    deepFreeze(big);
+    assert.strictEqual(reads, 1, 'the frozen subtree was not read again');
+    assert.isTrue(Object.isFrozen(next) && Object.isFrozen(next.fresh) && Object.isFrozen(next.fresh.x));
+  });
+
   it('passes scalars through untouched', () => {
     assert.isTrue(deepFreeze(1) === 1);
     assert.isTrue(deepFreeze(null) === null);

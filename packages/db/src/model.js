@@ -20,6 +20,8 @@ import { compileJsonQuery } from '@jarenjs/json/query';
 import { isJsonObject, isJsonContainer } from '@jarenjs/core/object';
 
 import { DbCompileError } from './errors.js';
+import { IDENTIFIER } from './engine-metadata.js';
+import { SCALAR_TYPES } from './scalar-types.js';
 import { refuseUnknownModelMembers } from './options.js';
 import { columnCodec, normalizePhysical } from './physical.js';
 import { normalizeInvariants, resolveInvariants } from './invariants.js';
@@ -44,8 +46,6 @@ const COLUMN_MAPPED = 'an entity index reads column-mapped top-level members as 
   + 'and an entity table has no generated column — map it as a column (a top-level scalar property)';
 const RELATION_MEMBERS = new Set(['to', 'many', 'via', 'through', 'onDelete']);
 const ON_DELETE = new Set(['cascade', 'restrict', 'setNull']);
-const ENTITY_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
-const SCALARS = new Set(['string', 'integer', 'number', 'boolean']);
 
 /**
  * The one JSON scalar type a closed set names, or `undefined` when it
@@ -67,7 +67,7 @@ function enumScalarType(values) {
     const type = typeof value === 'number'
       ? (Number.isInteger(value) ? 'integer' : 'number')
       : typeof value;
-    if (!SCALARS.has(type)) return undefined;
+    if (!SCALAR_TYPES.has(type)) return undefined;
     types.add(type);
   }
   if (types.size === 1) return [...types][0];
@@ -219,7 +219,7 @@ function normalizeEntityIndexes(spec, docPath) {
         throw modelError(`an entity index takes no '${member}': ${COLUMN_MAPPED}`, `${indexPath}/${member}`, 'JD0004');
     }
     refuseUnknownModelMembers(index, ENTITY_INDEX_MEMBERS, indexPath, 'index');
-    if (typeof index.name !== 'string' || !ENTITY_NAME.test(index.name))
+    if (typeof index.name !== 'string' || !IDENTIFIER.test(index.name))
       throw modelError('an index needs an identifier name', `${indexPath}/name`);
     if (names.has(index.name)) throw modelError(`duplicate index name '${index.name}'`, `${indexPath}/name`);
     names.add(index.name);
@@ -302,7 +302,7 @@ export function normalizeEntities(model) {
   const entities = new Map();
   for (const name of Object.keys(declared)) {
     const docPath = `/entities/${name}`;
-    if (!ENTITY_NAME.test(name))
+    if (!IDENTIFIER.test(name))
       throw modelError(`entity names are identifiers, got '${name}'`, '/entities');
     const spec = declared[name];
     if (!isJsonObject(spec))
@@ -361,7 +361,7 @@ export function normalizeEntities(model) {
       // property the document keeps — `column: 'json'`, a non-scalar, a
       // union — they were accepted and never applied (a key with no key
       // column let duplicates in and broke every read)
-      const columnMapped = SCALARS.has(type ?? '') && entityBlock.column !== 'json';
+      const columnMapped = SCALAR_TYPES.has(type ?? '') && entityBlock.column !== 'json';
       const needsColumn = ['key', 'unique', 'index'].filter((member) => entityBlock[member] === true);
       if (!columnMapped && needsColumn.length > 0) {
         const why = entityBlock.column === 'json'
@@ -397,7 +397,7 @@ export function normalizeEntities(model) {
         type,
         format: typeof effective.format === 'string' ? effective.format : undefined,
         enum: Array.isArray(effective.enum)
-          && effective.enum.every((v) => v === null || SCALARS.has(typeof v === 'number' ? (Number.isInteger(v) ? 'integer' : 'number') : typeof v))
+          && effective.enum.every((v) => v === null || SCALAR_TYPES.has(typeof v === 'number' ? (Number.isInteger(v) ? 'integer' : 'number') : typeof v))
           ? effective.enum : undefined,
         // a nullable scalar reads back ABSENT from its column (§9.3), so
         // a write cannot be made to require it — see `writeSchemaOf`
@@ -418,7 +418,7 @@ export function normalizeEntities(model) {
           : { ...entityBlock.relation },
       };
       if (property.key) {
-        if (!SCALARS.has(property.type ?? ''))
+        if (!SCALAR_TYPES.has(property.type ?? ''))
           throw modelError('a key property must be a scalar', propertyPath);
         keys.push(propertyName);
       }
@@ -529,7 +529,7 @@ function resolveRelations(entities) {
     }
     if (!hasVia)
       throw modelError('a foreign-key relation needs via (the FK property name)', docPath);
-    if (typeof relation.via !== 'string' || !ENTITY_NAME.test(relation.via))
+    if (typeof relation.via !== 'string' || !IDENTIFIER.test(relation.via))
       throw modelError('via must be an identifier property name', `${docPath}/via`);
     if (!ON_DELETE.has(relation.onDelete)) {
       throw modelError(
@@ -560,6 +560,15 @@ function resolveRelations(entities) {
           `via property '${relation.via}' on '${relation.fkEntity}' must be a `
           + `column-mapped ${targetKeyType} (the referenced key's type)`,
           `${docPath}/via`);
+      }
+      // the database's set-null stores a row its own schema would reject
+      // (the member reads back absent), so a required via member cannot
+      // be the target of one
+      if (relation.onDelete === 'setNull' && Array.isArray(holder.schema.required)
+        && holder.schema.required.includes(relation.via)) {
+        throw modelError(`onDelete: 'setNull' leaves '${relation.via}' of '${relation.fkEntity}' unset, `
+          + 'and the schema requires it: make the member optional, or declare cascade or restrict',
+        `${docPath}/onDelete`);
       }
     }
   }
@@ -734,7 +743,7 @@ function keyStorageOf(entity) {
  */
 function storageOf(property) {
   if (property.relation !== undefined) return 'relation';
-  if (!SCALARS.has(property.type ?? '') || property.column === 'json') return 'document';
+  if (!SCALAR_TYPES.has(property.type ?? '') || property.column === 'json') return 'document';
   return property.column === 'integer' ? 'epoch' : 'column';
 }
 

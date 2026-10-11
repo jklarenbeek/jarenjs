@@ -49,7 +49,7 @@ export function createEntityMutation(connection, entity, mapping, core) {
       delete: ['key', 'where', 'expectedRevision'],
       upsert: ['values', 'conflict', 'conflictWhere', 'update', 'onConflict', 'reporting'],
       'insert-select': ['source', 'where', 'select', 'conflict', 'onConflict'] }[document.op];
-    if (!allowed) fail('op must be update, upsert or insert-select');
+    if (!allowed) fail('op must be update, delete, upsert or insert-select');
     for (const key of Object.keys(document))
       if (!['op', 'returning', 'maxRows', 'maxBytes', ...allowed].includes(key)) fail(`unknown mutation member '${key}'`);
     const maxRows = document.maxRows ?? 100;
@@ -91,16 +91,19 @@ export function createEntityMutation(connection, entity, mapping, core) {
         fail(PLANNER_REASONS['predicate.termBound'].text);
       return planned;
     };
+    const plannedPredicate = (expression) => {
+      const analyzed = analyzeQuery({ $for: { it: '$[*]' }, $where: expression, $return: '$it' });
+      return bounded(planEntityPredicate(analyzed.root.where, analyzed.root.forBindings[0].slot, entityShape(entity, mapping)));
+    };
+    /** The planned predicate as SQL over the row of `alias`, its literals bound. */
+    const emittedPredicate = (planned, alias, document) => createEntityPredicateEmitters(dialect, (slot) => {
+      if (!Object.hasOwn(slot, 'literal')) return fail('mutation predicates use literal values');
+      return param(slot.literal);
+    }).emitPred(alias, document, planned.pred);
     const predicate = (expression) => {
       if (typeof expression === 'boolean') return dialect.booleanLiteral(expression);
       if (expression?.$sql !== undefined || typeof expression === 'number') return sqlExpression(expression);
-      const analyzed = analyzeQuery({ $for: { it: '$[*]' }, $where: expression, $return: '$it' });
-      const planned = bounded(planEntityPredicate(analyzed.root.where, analyzed.root.forBindings[0].slot, entityShape(entity, mapping)));
-      const emitter = createEntityPredicateEmitters(dialect, (slot) => {
-        if (!Object.hasOwn(slot, 'literal')) return fail('mutation predicates use literal values');
-        return param(slot.literal);
-      });
-      return emitter.emitPred(table, `${table}.${q('doc')}`, planned.pred);
+      return emittedPredicate(plannedPredicate(expression), table, `${table}.${q('doc')}`);
     };
     let sql;
     let prefix = '';
@@ -173,19 +176,12 @@ export function createEntityMutation(connection, entity, mapping, core) {
           return fail('insert-select values are singular member paths or $literal values');
         });
         const filter = document.where ?? true;
-        const analyzed = analyzeQuery({ $for: { it: '$[*]' }, $where: filter, $return: '$it' });
-        const predicate = typeof filter === 'boolean' ? null
-          : bounded(planEntityPredicate(analyzed.root.where, analyzed.root.forBindings[0].slot, entityShape(entity, mapping)));
-        const emitter = createEntityPredicateEmitters(dialect, (slot) => {
-          if (!Object.hasOwn(slot, 'literal')) return fail('mutation predicates use literal values');
-          return param(slot.literal);
-        });
-        const where = predicate === null ? dialect.booleanLiteral(filter)
-          : emitter.emitPred(q('s'), `${q('s')}.${q('doc')}`, predicate.pred);
+        const where = typeof filter === 'boolean' ? dialect.booleanLiteral(filter)
+          : emittedPredicate(plannedPredicate(filter), q('s'), `${q('s')}.${q('doc')}`);
         source = `SELECT ${values.join(', ')} FROM ${table} AS ${q('s')} WHERE ${where}`
           + ` ORDER BY ${core.plan.keys.map((key) => `${q('s')}.${q(column(key).physical)}`).join(', ')}`
           + ` LIMIT ${maxRows + 1}`;
-        const aliases = names.map((name, i) => q(`v${i}`));
+        const aliases = names.map((_name, i) => q(`v${i}`));
         prefix = `WITH ${q('_jaren_source')} (${aliases.join(', ')}) AS MATERIALIZED (${source}) `;
         source = `SELECT ${aliases.join(', ')} FROM ${q('_jaren_source')} WHERE `
           + dialect.mutationRowGuard(`(SELECT COUNT(*) FROM ${q('_jaren_source')})`, maxRows);

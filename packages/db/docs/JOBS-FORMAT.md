@@ -64,7 +64,10 @@ because jobs rows are live work and a rebuild would drop a queue.
 `enqueue`'s options are validated as
 they are stored: `runAt` must be a finite epoch in milliseconds and
 `maxAttempts` a positive integer (`TypeError`) — a `NaN` eligibility
-was once stored, and that job was pending forever. They are a closed
+was once stored, and that job was pending forever. A payload (and a
+checkpoint value) is JSON: one that `JSON.stringify` cannot express — a
+function, a symbol, a BigInt, a cycle — is a `TypeError`, and nothing is
+enqueued. They are a closed
 set — `id`, `runAt`, `maxAttempts` — in a plain object: any other
 member is `JD0013` naming the nearest one (a misspelt `runat` used to be
 dropped, and the job ran at once), as are options that are not a plain
@@ -257,8 +260,19 @@ be reclaimed: the worker renews while it runs (§6).
 ## 6. Workers and concurrency
 
 `createWorker({ handlers, concurrency, pollInterval, leaseMs, owner,
-renew, onOutcome, backoffBase, backoffCap, stopGraceMs })` returns
-`{ start(), stop(), stats(), leases() }`:
+renew, onOutcome, effectSafety, backoffBase, backoffCap, stopGraceMs })`
+returns `{ start(), stop(), stats(), leases() }`. The options are a closed
+set (any other member is `JD0013` naming the nearest, as for `enqueue`), and
+each is checked before the worker exists: `leaseMs` is a positive finite
+number of milliseconds, `pollInterval`, `backoffBase`, `backoffCap` and
+`stopGraceMs` non-negative finite ones (the two that arm a timer no longer than
+a timer keeps, 2^31 − 1), `owner` a non-empty string, `renew` a boolean and
+`onOutcome` a function — a `TypeError` otherwise. `claim` (`kinds`, `owner`,
+`leaseMs`), `renew` (`leaseMs`), `stop` (`graceMs`) and the administration calls
+of §10 each read a closed set of their own, and hold `leaseMs` and `graceMs` to
+the rules above (a lease that is not a finite number stored no expiry, and the
+job it leased was never claimed, renewed or settled again). A worker renews at
+a third of its lease, and at most every 2^31 − 1 milliseconds:
 
 - `concurrency` (default 1, a positive integer — `TypeError`
   otherwise, because a worker with zero loops would `start()` and never

@@ -11,6 +11,7 @@ import { sqlitePhysicalColumnType, sqliteTableMigration } from './dialects/sqlit
 import { comparableDeclaredSql } from './schema-sql.js';
 import { foldIdentifier } from './invariants.js';
 import { sqlTokens } from './dialects/check-read.js';
+import { isKeyword } from './sql.js';
 
 const compiledCodecs = new WeakMap();
 const STORAGE = { text: 'string', integer: 'integer', number: 'number', boolean: 'boolean',
@@ -132,7 +133,7 @@ function declaredIndex(index, columns, sql) {
  * @param {(why: string) => never} fail
  * @returns {any} value-or-promise
  */
-export function verifyDeclaredIndexes(connection, declared, existing, fail) {
+function verifyDeclaredIndexes(connection, declared, existing, fail) {
   const dialect = connection.dialect;
   const text = dialect.capabilities.declaredSqlText === true;
   const fold = dialect.name === 'sqlite' ? foldIdentifier : (/** @type {string} */ name) => name;
@@ -180,7 +181,7 @@ function sameIndexText(wanted, actual) {
 function indexTokens(sql) {
   const tokens = sqlTokens(sql);
   if (tokens.length === 0) return null;
-  const word = (/** @type {number} */ i, /** @type {string} */ value) => tokens[i]?.kind === 'word' && tokens[i].value.toUpperCase() === value;
+  const word = (/** @type {number} */ i, /** @type {string} */ value) => isKeyword(tokens[i], value);
   /** @type {string[]} */
   const out = [];
   for (let i = 0; i < tokens.length; i++) {

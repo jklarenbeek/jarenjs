@@ -336,6 +336,14 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
     }
   };
 
+  /** A write takes an object: a string would spread into numbered members, and
+   * `null` or `undefined` into an empty row (`put()` refuses them the same way).
+   * @param {any} doc @param {string} what - what the call takes, for the message */
+  const requireObject = (doc, what) => {
+    if (doc === null || typeof doc !== 'object' || Array.isArray(doc))
+      throw new DbRuntimeError('JD2003', what, { docPath, collection: entity.name });
+  };
+
   const checkValid = (doc) => {
     if (validate === null) return;
     const outcome = validate(doc);
@@ -653,6 +661,7 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
     },
     complete: (doc, { updating }) => {
       writable();
+      requireObject(doc, `${updating ? 'update' : 'add'}() takes an entity document`);
       if (!updating && physical && scalarColumns.some((c) => c.generated && Object.hasOwn(doc, c.name)))
         throw new DbRuntimeError('JD2003', 'generated columns are database-owned');
       const completed = applyDefaults(normalizePhysicalDoc(doc), { updating });
@@ -670,6 +679,7 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
     normalizeKey: (key) => normalizeKeyArg(key),
     create(doc) {
       writable();
+      requireObject(doc, 'create() takes an entity document');
       refuseProjections(doc, 'create', true);
       const completed = applyDefaults(doc, { updating: false });
       checkValid(completed);
@@ -698,12 +708,7 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
       return probing('insert') || triggered('insert') ? bracketed(completed[keys[0]], write) : write();
     },
     get(key) {
-      const parts = keyParts(key);
-      const sql = `SELECT ${selectColumns} FROM ${tableSql} WHERE ${keyWhere(0)}`;
-      // classified like every read of the query engines, never raw
-      return attempt(() => chain(prepared('get', sql), (statement) =>
-        chain(statement.get(parts), (row) => (row === undefined ? undefined : merge(row)))),
-      (error) => wrapDriverError(error, { docPath, collection: entity.name, key }));
+      return readRow(key, 'get', '');
     },
     /**
      * The row a store rule judges as `$.old`, read inside the write's
@@ -713,11 +718,7 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
      * @param {any} key
      */
     getLocked(key) {
-      const parts = keyParts(key);
-      const sql = `SELECT ${selectColumns} FROM ${tableSql} WHERE ${keyWhere(0)}${dialect.rowLockSuffix}`;
-      return attempt(() => chain(prepared('getLocked', sql), (statement) =>
-        chain(statement.get(parts), (row) => (row === undefined ? undefined : merge(row)))),
-      (error) => wrapDriverError(error, { docPath, collection: entity.name, key }));
+      return readRow(key, 'getLocked', dialect.rowLockSuffix);
     },
     /**
      * The rows whose `column` holds one of `values` — the rows a foreign key
@@ -765,6 +766,7 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
     },
     update(key, changes) {
       writable();
+      requireObject(changes, 'update() takes an object of the members to change');
       const parts = keyParts(key);
       refuseProjections(changes, 'update', false);
       const update = () => chain(ruled('update') ? this.getLocked(key) : this.get(key), (current) => {
@@ -776,7 +778,7 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
         for (const keyName of keys) {
           // the key identifies the row the UPDATE addresses; rewriting it
           // through `changes` moved rows out from under the tracker
-          if (changes !== null && changes !== undefined && memberOf(changes, keyName) !== undefined
+          if (memberOf(changes, keyName) !== undefined
             && changes[keyName] !== current[keyName]) {
             throw new DbRuntimeError('JD2003',
               `'${keyName}' is the primary key — update() cannot rewrite it; delete and create`,
@@ -832,6 +834,20 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
   };
   core.mutate = createEntityMutation(connection, entity, entityMapping, core);
   return core;
+  /**
+   * One row by key, merged back into its document: `get`, or `getLocked` with
+   * the dialect's row-lock suffix — classified like every read of the query
+   * engines, never raw.
+   * @param {any} key @param {string} name - the prepared statement's name
+   * @param {string} lock - the row-lock suffix, empty for a plain read
+   */
+  function readRow(key, name, lock) {
+    const parts = keyParts(key);
+    const sql = `SELECT ${selectColumns} FROM ${tableSql} WHERE ${keyWhere(0)}${lock}`;
+    return attempt(() => chain(prepared(name, sql), (statement) =>
+      chain(statement.get(parts), (row) => (row === undefined ? undefined : merge(row)))),
+    (error) => wrapDriverError(error, { docPath, collection: entity.name, key }));
+  }
   function remove(key) {
       const parts = keyParts(key);
       const sql = `DELETE FROM ${tableSql} WHERE ${keyWhere(0)}`;

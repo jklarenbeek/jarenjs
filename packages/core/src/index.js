@@ -132,7 +132,15 @@ export function isNullValue(data) {
  * @returns {boolean} Returns true if the data is an object of the specified class; otherwise, false.
  */
 export function isObjectOfClass(data, type) {
-  return data != null && data.constructor === type;
+  if (data == null)
+    return false;
+  const constructor = data.constructor;
+  if (constructor === type)
+    return true;
+  // parsed JSON can carry an own member named `constructor`, which shadows
+  // the class's: a value that is not a function is read from the prototype
+  return typeof constructor !== 'function'
+    && Object.getPrototypeOf(data)?.constructor === type;
 }
 
 /**

@@ -151,4 +151,13 @@ describe('the draft rule and the non-goals', () => {
   it('the planner requires its dialect explicitly', () => {
     assert.throws(() => planMigration(M0, M0), TypeError);
   });
+
+  it('a model that is not a model document is JD0005, not a TypeError out of the planner', () => {
+    for (const [what, bad] of [['null', null], ['a null entity', { $model: '0.1', entities: { E: null } }],
+      ['a null collection', { $model: '0.1', collections: { c: null } }]]) {
+      for (const [from, to] of [[bad, M0], [M0, bad]]) {
+        assert.throws(() => plan(from, to), (error) => error.code === 'JD0005', `${what} as ${from === bad ? 'from' : 'to'}`);
+      }
+    }
+  });
 });

@@ -24,6 +24,14 @@ describe('native column mutation plans', () => {
     }
     finally { await store.close(); }
   });
+  it('a mutation naming no operation of its own is refused listing every operation there is', async () => {
+    const { store } = await storeForSqlCensus();
+    try {
+      await assert.rejects(async () => store.entity('Setting').mutate({ op: 'merge', key: 'locale' }),
+        { code: 'JD0038', message: /^JD0038: op must be update, delete, upsert or insert-select/ });
+    }
+    finally { await store.close(); }
+  });
   it('output and commit failures withdraw native data, allocated receipts and co-committed jobs', async () => {
     const raw = new DatabaseSync(':memory:');
     const fixture = JSON.parse(readFileSync(new URL('../adoption/fixtures/relational.json', import.meta.url), 'utf8'));

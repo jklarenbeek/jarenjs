@@ -1371,7 +1371,7 @@ cannot carry:
 
 ```js
 const { model, report } = await store.introspect({ keys: { users: '/id' } });
-// model  — a valid jaren-model: collections, keys, indexes with their paths,
+// model  — a jaren-model document: collections, keys, indexes with their paths,
 //          entities with their keys, unique/indexed columns and foreign keys
 // report — [{ code, object, detail }], sorted, one row per gap
 ```
@@ -1383,7 +1383,12 @@ document's unindexed members are not in the physical shape
 (`document-members`), a text key column cannot say which member filled
 it (`key-source` — `options.keys` supplies the pointer), a view cannot
 be declared (`unmapped-view`), a foreign key cannot say which side
-declared the edge (`ambiguous-relation`). `strict: true` refuses rather
+declared the edge (`ambiguous-relation`). The relation a foreign key comes
+back as rides the foreign-key column itself, which no model accepts as it
+stands (`normalizeEntities` refuses it `JD0005`): a database with an entity
+foreign key derives a model to read and to declare the edge from, not one to
+open a store with or to plan from until that edge is declared on its parent
+(`many: true`, `via` naming a typed property). `strict: true` refuses rather
 than answering a partial model. The rule programs of a store-owned entity
 ([MODEL-FORMAT §13.4](docs/MODEL-FORMAT.md#134-database-enforcement)) are
 reported as `unmapped-object` rows and left as they are: the derived model
@@ -1420,7 +1425,7 @@ shape or name, or one added `NOT VALID`, remain
 The derived model reproduces the physical shape — tables, keys, mapped
 columns, foreign keys and the indexes above — not the schema that made it:
 it requires only the keys, types each member as its column reads back, and
-leaves out what the shape does not carry. It is usable as a migration's
+leaves out what the shape does not carry. Where it has no foreign key, it is usable as a migration's
 `from`: read a database, plan against your declared model, and an
 unchanged shape plans no index change — but the plan still carries what
 the shape could not tell: a drafted transform where the declared schema
