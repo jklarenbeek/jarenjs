@@ -216,7 +216,8 @@ if (chainEdgeLeak.length > 0)
 // compiled query caches were keyed by member order (255).
 // Raised to 216,800 (measured 216793): the sequence's per-run bindings, caller JSON copied at its boundary and the bounded push queue add 211.
 // Raised to 217,400 (measured 217345): core's deepFreeze, which every pen shares, freezing beneath an already frozen root with a memo of whole frozen subtrees and a cycle guard, and the sequence code it carries add 552.
-if (chainBytes > 217400)
+// Raised to 218,500 (measured 218468): core's corrected date, month, grapheme and moving-average helpers the engine carries add 1123.
+if (chainBytes > 218500)
   throw new Error(`The chain bundle grew to ${chainBytes} bytes.`);
 
 console.log(`Tree-shaking smoke test passed (${chainBytes} byte chain bundle; no schema-pen module, no client module, no store/validator/formats bytes).`);
@@ -554,7 +555,8 @@ if (asyncLiveLeak.length)
 // planner hunt fixed (843).
 // Raised to 944,200 (measured 944196): the chain's per-run bindings and copied caller JSON, less the planner's single scalar-type table add 155.
 // Raised to 948,800 (measured 948704): the store's checked close and worker options, null accepted as no options, refused non-object entity writes and the closed option sets of maintenance, changes, replication, jobs and introspection (2664), the JSON engine's date range and prototype-named members (964) and core's deepFreeze (about 390) add 4508.
-if (clientBytes > 948800)
+// Raised to 950,200 (measured 950165): the same core helpers the store and the engine carry add 1461.
+if (clientBytes > 950200)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 
