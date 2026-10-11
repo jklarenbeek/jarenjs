@@ -297,8 +297,9 @@ export function formatCsvValue(value) {
  * Serialize records to a CSV document.
  *
  * A field is quoted only when it has to be — when it contains the
- * delimiter, a quote, a newline, or edge whitespace a lenient reader
- * might trim. Everything else is written bare, which keeps the output
+ * delimiter, a quote, a newline, edge whitespace a lenient reader
+ * might trim, or a leading byte order mark (a reader drops one at the start
+ * of a document). Everything else is written bare, which keeps the output
  * both smaller and diff-friendly.
  *
  * @param {Array<Array|object>} rows - Records: arrays, or objects keyed by column
@@ -337,11 +338,15 @@ export function createCsvRowFormatter(options = {}) {
   const unsafe = needsQuoteTester(delimiter, quote);
   const escaped = quote + quote;
 
+  // A reader drops a byte order mark at the start of a document, and which
+  // cell opens the document is not the formatter's to know (it may format one
+  // row at a time, or several documents), so every cell whose own text begins
+  // with one is quoted: the mark stays cell text wherever the cell lands.
   const cell = (value) => {
     let s = formatCsvValue(value);
     if (neutralize && s.length > 0 && '=+-@\t\r\n'.includes(s[0]))
       s = "'" + s;
-    if (quote.length === 0 || !unsafe(s))
+    if (quote.length === 0 || !(unsafe(s) || s.charCodeAt(0) === 0xFEFF))
       return s;
     return quote + (s.includes(quote) ? s.replaceAll(quote, escaped) : s) + quote;
   };

@@ -267,7 +267,7 @@ function compileTypeSimple(schemaObj, jsonSchema) {
   if (type == null) return undefined;
 
   const isDataType = createIsSchemaTypeHandler(type);
-  if (!isDataType) throw new Error(`The explicit schema type '${type}' is unknown. (TODO: add trace)`);
+  if (!isDataType) throw new Error(`The explicit schema type '${type}' is unknown.`);
 
   const addError = schemaObj.createErrorHandler(type, 'type');
 
@@ -291,7 +291,7 @@ function compileTypeArray(schemaObj, jsonSchema) {
     const type = schemaTypes[i];
     const callback = createIsSchemaTypeHandler(type);
     if (!callback)
-      throw new Error(`The explicit schema type '${type}' of '${types} is unknown. (TODO: add trace)`);
+      throw new Error(`The explicit schema type '${type}' of [${schemaTypes.join(', ')}] is unknown.`);
 
     types.push(callback);
     names.push(type);

@@ -25,6 +25,7 @@ import {
   getArrayClassMinItems,
   isOfSchemaType,
   ValidationResult,
+  memberPath,
 } from './tools.js';
 
 import {
@@ -210,7 +211,6 @@ function compileAdditionalProperties(schemaObj, jsonSchema) {
 
 //#region Dependencies
 function compileDependentRequired(schemaObj, jsonSchema) {
-  // TODO: before we go to release remove this check, since it doesn't help anyone.
   // dependentRequired only exists since draft 2019-09; a document that
   // declares an older draft via $schema treats it as an unknown keyword.
   if (schemaObj.declaredDraft != null && schemaObj.declaredDraft < 2019)
@@ -238,7 +238,6 @@ function compileDependentRequired(schemaObj, jsonSchema) {
 }
 
 function compileDependentSchemas(schemaObj, jsonSchema) {
-  // TODO: before we go to release remove this check, since it doesn't help anyone.
   // dependentSchemas only exists since draft 2019-09; a document that
   // declares an older draft via $schema treats it as an unknown keyword.
   if (schemaObj.declaredDraft != null && schemaObj.declaredDraft < 2019)
@@ -249,7 +248,7 @@ function compileDependentSchemas(schemaObj, jsonSchema) {
 
   const validators = new Map();
   for (const key in dependentSchemas) {
-    if (Object.prototype.hasOwnProperty.call(dependentSchemas, key)) {
+    if (Object.hasOwn(dependentSchemas, key)) {
       const schema = dependentSchemas[key];
       if (!isBoolOrObjectClass(schema) && !schemaObj.options.skipErrors)
         throw new Error(`Expected Schema at '${schemaObj.path}/${key}'`);
@@ -265,10 +264,14 @@ function compileDependentSchemas(schemaObj, jsonSchema) {
   if (validators.size === 0)
     return undefined;
 
-  return function validateDependentSchemasItem(data, dataPath, dataRoot, dataKey) {
+  // The dependent schema applies to the object that holds the trigger
+  // member, so it is handed the object's own location (`ownerPath`), not
+  // the member's: what it reports and what a relative `$data` reference
+  // inside it resolves against is the object.
+  return function validateDependentSchemasItem(data, dataPath, dataRoot, dataKey, ownerPath = dataPath) {
     if (validators.has(dataKey)) {
       const validator = validators.get(dataKey);
-      return validator(data, dataPath, dataRoot, dataKey);
+      return validator(data, ownerPath, dataRoot, dataKey);
     }
     return true;
   };
@@ -299,7 +302,7 @@ function compileDependencies(schemaObj, jsonSchema) {
         throw new Error(`Expected Validator at '${schemaObj.path}/${key}'`);
     }
     else if (isArrayClass(right)) {
-      const addError = schemaObj.createErrorHandler(right, ['dependencies', key]);
+      const addError = schemaObj.createErrorHandler(right, ['dependencies']);
       requiredDeps.push({ key, required: right, addError });
     }
     else if (!schemaObj.options.skipErrors)
@@ -312,9 +315,9 @@ function compileDependencies(schemaObj, jsonSchema) {
   // Single schema dependency - most common case
   if (schemaDeps.length === 1 && requiredDeps.length === 0) {
     const { key, validator } = schemaDeps[0];
-    return function validateSingleSchemaDep(data, dataPath, dataRoot, dataKey) {
+    return function validateSingleSchemaDep(data, dataPath, dataRoot, dataKey, ownerPath = dataPath) {
       if (dataKey === key) {
-        return validator(data, dataPath, dataRoot, dataKey);
+        return validator(data, ownerPath, dataRoot, dataKey);
       }
       return true;
     };
@@ -348,11 +351,11 @@ function compileDependencies(schemaObj, jsonSchema) {
     requiredDepMap.set(requiredDeps[i].key, requiredDeps[i]);
   }
 
-  return function validateDependenciesItem(data, dataPath, dataRoot, dataKey) {
+  return function validateDependenciesItem(data, dataPath, dataRoot, dataKey, ownerPath = dataPath) {
     // Check schema dependencies first
     const schemaValidator = schemaDepMap.get(dataKey);
     if (schemaValidator != null) {
-      return schemaValidator(data, dataPath, dataRoot, dataKey);
+      return schemaValidator(data, ownerPath, dataRoot, dataKey);
     }
     // Check required dependencies
     const reqDep = requiredDepMap.get(dataKey);
@@ -368,7 +371,6 @@ function compileDependencies(schemaObj, jsonSchema) {
 
 //#region Main
 export function compileObjectPrimitives(schemaObj, jsonSchema) {
-  // TODO: figure out if we need such a check for real!
   // minProperties/maxProperties/required belong to the validation
   // vocabulary; assert nothing when the metaschema disables it.
   if (schemaObj.options.vocabValidation === false)
@@ -566,14 +568,14 @@ function compileObjectProperty(schemaObj, jsonSchema) {
   return function validateObjectProperty(data, dataPath, dataRoot, dataKey) {
     const result = new ValidationResult();
     // Build the child dataPath by appending the property key
-    const newPath = dataPath ? `${dataPath}/${dataKey}` : `/${dataKey}`;
+    const newPath = memberPath(dataPath ?? '', dataKey);
 
     result.addValid(validateName(dataKey, dataPath))
       .addResult(validateProperty(data, newPath, dataRoot, dataKey))
       .addResult(validatePattern(data, newPath, dataRoot, dataKey))
       .addValid(validateDepRequired(data, newPath, dataRoot, dataKey))
-      .addValid(validateDepSchemas(data, newPath, dataRoot, dataKey))
-      .addValid(validateDependency(data, newPath, dataRoot, dataKey));
+      .addValid(validateDepSchemas(data, newPath, dataRoot, dataKey, dataPath))
+      .addValid(validateDependency(data, newPath, dataRoot, dataKey, dataPath));
 
     if (additionalValidator)
       return !result.match
@@ -641,7 +643,7 @@ function compileObjectChildrenFast(schemaObj, jsonSchema) {
         const propValidator = propsMap.get(dataKey);
         if (propValidator != null) {
           matched = true;
-          childPath = extendPaths ? dataPath + '/' + dataKey : dataPath;
+          childPath = extendPaths ? memberPath(dataPath, dataKey) : dataPath;
           if (propValidator(data[dataKey], childPath, dataRoot, dataKey) === false)
             return false;
           if (track) root.evalLog.add(data, dataKey);
@@ -653,7 +655,7 @@ function compileObjectChildrenFast(schemaObj, jsonSchema) {
           const entry = patternList[j];
           if (entry.matches(dataKey)) {
             matched = true;
-            if (childPath === null) childPath = extendPaths ? dataPath + '/' + dataKey : dataPath;
+            if (childPath === null) childPath = extendPaths ? memberPath(dataPath, dataKey) : dataPath;
             if (entry.validator(data[dataKey], childPath, dataRoot, dataKey) === false)
               return false;
             if (track) root.evalLog.add(data, dataKey);
@@ -665,7 +667,7 @@ function compileObjectChildrenFast(schemaObj, jsonSchema) {
         if (additionalFalse)
           return false;
         if (additionalValidator != null) {
-          if (childPath === null) childPath = extendPaths ? dataPath + '/' + dataKey : dataPath;
+          if (childPath === null) childPath = extendPaths ? memberPath(dataPath, dataKey) : dataPath;
           if (additionalValidator(data[dataKey], childPath, dataRoot, dataKey) === false)
             return false;
         }
@@ -673,12 +675,12 @@ function compileObjectChildrenFast(schemaObj, jsonSchema) {
       }
 
       if (depRequiredValidator != null || depSchemasValidator != null || dependencyValidator != null) {
-        if (childPath === null) childPath = extendPaths ? dataPath + '/' + dataKey : dataPath;
+        if (childPath === null) childPath = extendPaths ? memberPath(dataPath, dataKey) : dataPath;
         if (depRequiredValidator != null && depRequiredValidator(data, childPath, dataRoot, dataKey) === false)
           return false;
-        if (depSchemasValidator != null && depSchemasValidator(data, childPath, dataRoot, dataKey) === false)
+        if (depSchemasValidator != null && depSchemasValidator(data, childPath, dataRoot, dataKey, dataPath) === false)
           return false;
-        if (dependencyValidator != null && dependencyValidator(data, childPath, dataRoot, dataKey) === false)
+        if (dependencyValidator != null && dependencyValidator(data, childPath, dataRoot, dataKey, dataPath) === false)
           return false;
       }
     }
@@ -771,7 +773,7 @@ export function compileObjectSchema(schemaObj, jsonSchema) {
           const key = propKeys[i];
           // Object.hasOwn: avoid picking up inherited members like toString
           if (Object.hasOwn(data, key)) {
-            const childPath = extendPaths ? dataPath + '/' + key : dataPath;
+            const childPath = extendPaths ? memberPath(dataPath, key) : dataPath;
             if (propValidators[i](data[key], childPath, dataRoot, key) === false)
               return false;
             if (track) root.evalLog.add(data, key);

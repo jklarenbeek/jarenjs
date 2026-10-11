@@ -1,11 +1,63 @@
-const CONST_REGPEXP_ISBN10 = /^(?:ISBN(?:-10)?:? *((?=\d{1,5}([ -]?)\d{1,7}\2?\d{1,6}\2?\d)(?:\d\2*){9}[\dX]))$/i;
-export function isValidISBN10(str) {
-  return CONST_REGPEXP_ISBN10.test(str);
+// An ISBN is written bare (`0306406152`) or in four hyphenated or spaced
+// groups with one separator character throughout (`0-306-40615-2`); a
+// leading `ISBN`, `ISBN-10:` or `ISBN-13:` label is tolerated. Both forms
+// must carry a correct check digit.
+const CONST_REGEXP_ISBN_LABEL = /^ISBN(?:-1[03])?:? *(?=\S)/i;
+const CONST_REGEXP_ISBN10 = /^(?:(\d{9})([\dX])|\d{1,5}([ -])\d{1,7}\3\d{1,6}\3[\dX])$/i;
+const CONST_REGEXP_ISBN13 = /^(?:(97[89]\d{9})(\d)|97[89]([ -])\d{1,5}\3\d{1,7}\3\d{1,6}\3\d)$/;
+
+function isbnDigits(str) {
+  return str.replace(/[ -]/g, '');
 }
 
-const CONST_REGEXP_ISBN13 = /^(?:ISBN(?:-13)?:? *(97(?:8|9)([ -]?)(?=\d{1,5}\2?\d{1,7}\2?\d{1,6}\2?\d)(?:\d\2*){9}\d))$/i;
+/**
+ * Tests a 10-digit ISBN: bare or in four groups joined by one separator,
+ * with an optional `ISBN` label and a correct check digit (`X` is ten).
+ * @param {string} str - The candidate ISBN
+ * @returns {boolean} True for a well-formed ISBN-10 whose check digit holds
+ * @example
+ * isValidISBN10('0-306-40615-2'); // true
+ * isValidISBN10('0306406153'); // false (check digit)
+ */
+export function isValidISBN10(str) {
+  if (typeof str !== 'string')
+    return false;
+  const body = str.replace(CONST_REGEXP_ISBN_LABEL, '');
+  if (!CONST_REGEXP_ISBN10.test(body))
+    return false;
+  const digits = isbnDigits(body);
+  if (digits.length !== 10)
+    return false;
+  let sum = 0;
+  for (let i = 0; i < 10; i++) {
+    const c = digits.charCodeAt(i);
+    sum += (10 - i) * (c === 88 || c === 120 ? 10 : c - 48);
+  }
+  return sum % 11 === 0;
+}
+
+/**
+ * Tests a 13-digit ISBN (prefix 978 or 979): bare or in five groups joined
+ * by one separator, with an optional `ISBN` label and a correct check digit.
+ * @param {string} str - The candidate ISBN
+ * @returns {boolean} True for a well-formed ISBN-13 whose check digit holds
+ * @example
+ * isValidISBN13('978-0-306-40615-7'); // true
+ * isValidISBN13('9780306406158'); // false (check digit)
+ */
 export function isValidISBN13(str) {
-  return CONST_REGEXP_ISBN13.test(str);
+  if (typeof str !== 'string')
+    return false;
+  const body = str.replace(CONST_REGEXP_ISBN_LABEL, '');
+  if (!CONST_REGEXP_ISBN13.test(body))
+    return false;
+  const digits = isbnDigits(body);
+  if (digits.length !== 13)
+    return false;
+  let sum = 0;
+  for (let i = 0; i < 13; i++)
+    sum += (digits.charCodeAt(i) - 48) * (i % 2 === 0 ? 1 : 3);
+  return sum % 10 === 0;
 }
 
 // The 249 officially assigned ISO 3166-1 alpha-2 codes plus XK, the

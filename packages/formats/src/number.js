@@ -26,6 +26,18 @@ import { numberFormatTesters } from './testers.js';
  * validator(128); // false (out of int8 range)
  */
 function createNumberFormatCompiler(formatName, isNumberTest) {
+  // `Number()` runs the value's own `toString`/`valueOf`, so an instance
+  // carrying a member of that name that is not a function throws; such a
+  // value is simply not a number.
+  const numberOf = (data) => {
+    try {
+      return Number(data);
+    }
+    catch {
+      return NaN;
+    }
+  };
+
   return function compileNumberFormat(schemaObj, jsonSchema) {
     if (jsonSchema.format !== formatName)
       throw new Error('Format is not equal to jsonSchema (should not happen!)');
@@ -34,7 +46,7 @@ function createNumberFormatCompiler(formatName, isNumberTest) {
 
     return function validateNumberFormat(data, dataPath) {
       return (data == null
-        || isNumberTest(Number(data))
+        || isNumberTest(numberOf(data))
         || addError(data, dataPath));
     };
   };

@@ -9,6 +9,7 @@ import {
   getBoolOrObjectClass,
   hasUnevaluatedPropertiesCoverage,
   hasUnevaluatedItemsCoverage,
+  memberPath,
 } from './tools.js';
 
 /**
@@ -32,6 +33,9 @@ function compileUnevaluatedProperties(schemaObj, jsonSchema) {
     return undefined;
 
   const root = schemaObj.root;
+  // A member's location is read by its errors (collecting mode) and by a
+  // relative `$data` reference; otherwise nobody looks, so it is not built.
+  const extendPaths = root.usesDollarData || !schemaObj.options.skipErrors;
   const addError = schemaObj.createErrorHandler(uneval, 'unevaluatedProperties');
 
   // true: everything left over is valid, but counts as evaluated for
@@ -71,7 +75,7 @@ function compileUnevaluatedProperties(schemaObj, jsonSchema) {
     for (let i = 0; i < keys.length; ++i) {
       const key = keys[i];
       if (log.hasKey(data, key, mark)) continue;
-      if (validator(data[key], dataPath, dataRoot, key) === true)
+      if (validator(data[key], extendPaths ? memberPath(dataPath, key) : dataPath, dataRoot, key) === true)
         log.add(data, key);
       else
         valid = addError(key, dataPath) && valid;
@@ -99,6 +103,9 @@ function compileUnevaluatedItems(schemaObj, jsonSchema) {
     return undefined;
 
   const root = schemaObj.root;
+  // A member's location is read by its errors (collecting mode) and by a
+  // relative `$data` reference; otherwise nobody looks, so it is not built.
+  const extendPaths = root.usesDollarData || !schemaObj.options.skipErrors;
   const addError = schemaObj.createErrorHandler(uneval, 'unevaluatedItems');
 
   if (uneval === true) {
@@ -128,7 +135,7 @@ function compileUnevaluatedItems(schemaObj, jsonSchema) {
     let valid = true;
     for (let i = 0; i < data.length; ++i) {
       if (log.hasItem(data, i, mark)) continue;
-      if (validator(data[i], dataPath, dataRoot, i) === true)
+      if (validator(data[i], extendPaths ? dataPath + '/' + i : dataPath, dataRoot, i) === true)
         log.add(data, i);
       else
         valid = addError(i, dataPath) && valid;

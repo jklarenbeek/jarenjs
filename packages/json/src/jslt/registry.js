@@ -29,7 +29,7 @@ import { queryRuntimeError } from '../query/messages.js';
 import { compileJsonQuery } from '../query/index.js';
 import { compileJsltStylesheet } from './index.js';
 
-const hasOwn = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+const hasOwn = Object.hasOwn;
 const RESULT_OPT = () => CARD_OPT;
 const RESULT_MANY = () => CARD_MANY;
 const RT_NUMBER = () => 'number';

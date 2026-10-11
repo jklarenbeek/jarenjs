@@ -252,16 +252,28 @@ function compileItemValidator(schemaObj, itemSchema, key, index) {
 
     // Fast path: type-only schema (most common case) - check property directly first
     if (stopAtFirst && itemSchema.type !== undefined && Object.keys(itemSchema).length === 1) {
-      return compileTypeOnlyValidator(itemSchema.type);
+      const typeOnly = compileTypeOnlyValidator(itemSchema.type);
+      if (typeOnly !== undefined) return typeOnly;
     }
 
     // Fast path: required-only schema - check property directly first
-    if (stopAtFirst && itemSchema.required !== undefined && Object.keys(itemSchema).length === 1) {
+    if (stopAtFirst && Array.isArray(itemSchema.required) && Object.keys(itemSchema).length === 1) {
       const required = itemSchema.required;
+      // `in` also answers for the names every object inherits (`toString`);
+      // a list naming one of those takes the own-member probe, any other list
+      // keeps the cheap test.
+      const inherited = required.some((name) => name in Object.prototype);
+      const count = required.length;
       return function validateRequiredOnly(data, _dataPath, _dataRoot) {
         // Required properties only apply to objects, not arrays or other types
         if (typeof data !== 'object' || data === null || Array.isArray(data)) return true;
-        for (let i = 0; i < required.length; i++) {
+        if (inherited) {
+          for (let i = 0; i < count; i++) {
+            if (!Object.hasOwn(data, required[i])) return false;
+          }
+          return true;
+        }
+        for (let i = 0; i < count; i++) {
           if (!(required[i] in data)) return false;
         }
         return true;
@@ -275,8 +287,8 @@ function compileItemValidator(schemaObj, itemSchema, key, index) {
 
 /**
  * Compile a validator for simple type-only schemas
- * @param {string} type - The type to validate
- * @returns {Function} Type validator function
+ * @param {unknown} type - The `type` keyword value
+ * @returns {Function | undefined} Type validator function, or `undefined` when `type` is not a single known type name
  */
 function compileTypeOnlyValidator(type) {
   switch (type) {
@@ -309,7 +321,9 @@ function compileTypeOnlyValidator(type) {
         return data === null;
       };
     default:
-      return trueThat;
+      // not a single type name (a union array, an unknown word): the
+      // caller compiles the full schema instead
+      return undefined;
   }
 }
 //#endregion

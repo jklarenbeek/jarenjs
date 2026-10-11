@@ -31,7 +31,7 @@
 // QUERY-FORMAT.md section 10.3) are raised here.
 
 import { aggregateSequence } from './accumulator.js';
-import { equalsJson, compareJsonScalarLt } from '@jarenjs/core/object';
+import { equalsJson, compareJsonScalarLt, setObjectMember } from '@jarenjs/core/object';
 import { isJsonNumberString } from '@jarenjs/core/number';
 import {
   mathf64_abs, mathf64_ceil, mathf64_floor, mathf64_round, roundExact, shortestDecimal, shiftDecimal, decimalToNumber,
@@ -916,7 +916,7 @@ function dateShiftEntry(sign) {
               { got: typeof second === 'string' ? JSON.stringify(second) : itemRef(second) }, secondPath);
           }
           try {
-            return formatRFC3339Parts(addDuration(parts, duration, sign));
+            return formatCalendarResult(parts, addDuration(parts, duration, sign));
           }
           catch (e) {
             throw dateRefusal(e, datePath);
@@ -926,7 +926,7 @@ function dateShiftEntry(sign) {
           throw runtimeError('JQ2001', 'query/expected-units', { got: itemRef(second) }, secondPath);
         const unit = unitArg(unitGet(f), unitPath);
         try {
-          return formatRFC3339Parts(addToParts(parts, sign * second, unit));
+          return formatCalendarResult(parts, addToParts(parts, sign * second, unit));
         }
         catch (e) {
           throw dateRefusal(e, datePath);
@@ -955,7 +955,7 @@ function dateTruncEntry(truncate) {
         const parts = dateParts(value, datePath);
         const unit = unitArg(unitGet(f), unitPath);
         try {
-          return formatRFC3339Parts(truncate(parts, unit));
+          return formatCalendarResult(parts, truncate(parts, unit));
         }
         catch (e) {
           throw dateRefusal(e, datePath);
@@ -1792,7 +1792,7 @@ export const OPERATORS = Object.freeze({
             continue;
           if (typeof item.key !== 'string')
             continue;
-          out[item.key] = hasOwn(item, 'value') ? item.value : null;
+          setObjectMember(out, item.key, hasOwn(item, 'value') ? item.value : null);
         }
         return out;
       };
@@ -2539,6 +2539,17 @@ function compileCoalesce(gets) {
     }
     return EMPTY;
   };
+}
+
+// RFC 3339 spells the years 0000-9999, and a parts record marks a value
+// with no date by a negative year. A calendar result past either end of
+// that range would be rendered as another date (year -1 as 0001) or as a
+// bare time, so it is refused instead; a value with no date keeps its
+// own wrap-around.
+function formatCalendarResult(input, result) {
+  if (input.year >= 0 && (result.year < 0 || result.year > 9999))
+    throw new TypeError('the result is outside the years 0000-9999 RFC 3339 can spell');
+  return formatRFC3339Parts(result);
 }
 
 //#endregion

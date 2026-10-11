@@ -49,6 +49,8 @@ These format validators are based on the [json-schema.org](https://json-schema.o
 
 *Note: All date time formats can use formatMinimum / formatMaximum and formatExclusiveMinimum and formatExclusiveMaximum. The bounds are folded to epoch milliseconds at compile time and string values compare as numbers, so a validation allocates no `Date`; a raw `Date` instance as the value is still accepted and compares numerically.*
 
+*Note: `iso-time` takes any offset whose hour is 00–23 and minute 00–59 (`12:00:00+05:30` validates, `12:00:00+24:00` does not) in its compiler and its bare tester alike, and a zone-less `iso-date-time` or `iso-time` is read as UTC when it meets a `formatMinimum` or `formatMaximum`, whatever zone the host is in. Upgrade: offsets with a non-zero minute used to be refused, `+24:00` and above used to pass the bare tester, and a zone-less value was compared in the host's own zone.*
+
 *Note: `date-time` and `time` take a fraction of any number of digits and a leap second (`:60`) only at 23:59:60 UTC — `12:59:60Z` and `47:59:60Z` are refused. `iso-date-time` and `iso-time` cap the fraction at six digits and refuse `:60`.*
 
 #### 🗨 Formats for url's, hostnames and emails
@@ -63,7 +65,7 @@ These format validators are based on the [json-schema.org](https://json-schema.o
 - `email` | email address according to [RFC5321](https://datatracker.ietf.org/doc/html/rfc5321), including quoted-string local parts and `[192.0.2.1]` / `[IPv6:::1]` address literals
 - `hostname` | host name according to [RFC1034](https://datatracker.ietf.org/doc/html/rfc1034#section-3.5)
 - `idn-hostname` | host name with international characters
-- `idn-email` | email address with international characters
+- `idn-email` | email address with international characters according to [RFC6531](https://datatracker.ietf.org/doc/html/rfc6531): the `email` grammar with non-ASCII text in the local part and an IDN hostname as the domain. *Upgrade: it used to accept any `x@y.z` shape, including spaces, line breaks and empty labels; those are now refused as in `email`.*
 
 #### 🗨 Formats for identifiers
 
@@ -102,8 +104,8 @@ These are grouped in `jsonFormats`.
 - `base64` | base64 encoded data
 - `byte` | same as `base64` format
 
-- `isbn10` | International Standard Book Number 10 digit number
-- `isbn13` | International Standard Book Number 13 digit number
+- `isbn10` | International Standard Book Number, 10 digits — bare (`0306406152`) or in four groups joined by one hyphen or space (`0-306-40615-2`), with an optional `ISBN` label, and the check digit must hold (`X` is ten)
+- `isbn13` | International Standard Book Number, 13 digits starting 978 or 979 — bare or in five groups joined by one hyphen or space (`978-0-306-40615-7`), with an optional `ISBN` label, and the check digit must hold. *Upgrade: both formats used to require the literal `ISBN` label and ignored the check digit, so a bare valid number was refused and a mistyped one accepted.*
 
 - `country2` | country code by alpha-2 according to [ISO3166-1](https://www.iso.org/iso-3166-country-codes.html) — the 249 assigned codes plus `XK`, the user-assigned code for Kosovo; matched case-insensitively
 - `iban` | International Bank Account Number according to [ISO13616](https://www.iso.org/standard/81090.html) — checks the country's registered length, the alphanumeric body and the ISO 7064 MOD 97-10 check digits, so a transposed digit is caught; accepts both the compact electronic format (`NL91ABNA0417164300`) and the print format grouped in fours (`NL91 ABNA 0417 1643 00`)
@@ -120,7 +122,7 @@ These are grouped in `geoFormats`, backed by the spatial kernel in [`@jarenjs/co
 
 ### ✍ Formats for numbers
 
-These are grouped in `numberFormats`. Formats for numbers validate both numbers and strings as number types; combine them with the `type` keyword (e.g. `{ "type": "integer", "format": "int32" }`) when only real number types should be allowed.
+These are grouped in `numberFormats`. Formats for numbers validate both numbers and strings as number types; combine them with the `type` keyword (e.g. `{ "type": "integer", "format": "int32" }`) when only real number types should be allowed. An instance that cannot be read as a number at all, such as parsed JSON `{"toString": true}`, fails the format like any other object; upgrade: it used to throw out of the validator.
 
 #### 🗨 Formats integer numbers
 

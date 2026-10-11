@@ -484,6 +484,11 @@ const CONST_ISO_REGEX_DATETIME = /^(\d{4})-([0-1]\d)-([0-3]\d)[T\s](\d{2}):(\d{2
 // Regex for iso-time: allows with or without timezone  
 const CONST_ISO_REGEX_TIME = /^(\d{2}):(\d{2}):(\d{2})(\.\d{1,6})?(?:(Z)|([+-])(\d{2}):(\d{2}))?$/i;
 
+// A validated ISO string ends in a zone designator or in nothing: without
+// one `Date.parse` reads the text in the host's local zone, so a zone-less
+// string is read as UTC instead, whatever machine validates it.
+const CONST_ISO_REGEX_ZONED = /(?:Z|[+-]\d{2}:\d{2})$/i;
+
 /**
  * Validates an ISO 8601 date-time string with optional timezone.
  * Unlike RFC 3339, the timezone is optional.
@@ -560,9 +565,9 @@ export function isValidISOTime(str) {
     return false;
 
   // Validate timezone if present
-  if (r[7] != null) {
-    const tzh = parseInt(r[8], 10) | 0;
-    const tzm = parseInt(r[9], 10) | 0;
+  if (r[6] != null) {
+    const tzh = parseInt(r[7], 10) | 0;
+    const tzm = parseInt(r[8], 10) | 0;
     if (tzh < 0 || tzh > 23 || tzm < 0 || tzm > 59)
       return false;
   }
@@ -582,11 +587,10 @@ export function getDateTypeOfISODateTime(str, def = undefined) {
   if (!isValidISODateTime(str))
     return def;
 
-  // If no timezone specified, treat as local time by appending Z
-  // (ISO 8601 without timezone is local time, but for consistency we treat as UTC)
-  if (!/[Z+-]\d{2}:\d{2}$/i.test(str) && !str.endsWith('Z')) {
-    // Try parsing as-is (Date.parse handles both formats)
-    const date = new Date(Date.parse(str.replace(' ', 'T')));
+  // ISO 8601 without a timezone is local time; every host must agree, so
+  // the value is read as UTC.
+  if (!CONST_ISO_REGEX_ZONED.test(str)) {
+    const date = new Date(Date.parse(str.replace(' ', 'T') + 'Z'));
     return isNaN(date.getTime()) ? def : date;
   }
 
@@ -605,8 +609,8 @@ export function getDateTypeOfISOTime(str, def = undefined) {
   if (!isValidISOTime(str))
     return def;
 
-  // Prepend a dummy date for parsing
-  const dateTimeStr = CONST_TIME_INSERTDATE + str;
+  // Prepend a dummy date for parsing; a zone-less time is read as UTC.
+  const dateTimeStr = CONST_TIME_INSERTDATE + str + (CONST_ISO_REGEX_ZONED.test(str) ? '' : 'Z');
   const date = new Date(Date.parse(dateTimeStr));
   return isNaN(date.getTime()) ? def : date;
 }
@@ -619,8 +623,8 @@ export function getDateTypeOfISOTime(str, def = undefined) {
 export function getEpochOfISODateTime(str, def = undefined) {
   if (!isValidISODateTime(str))
     return def;
-  if (!/[Z+-]\d{2}:\d{2}$/i.test(str) && !str.endsWith('Z')) {
-    const ms = Date.parse(str.replace(' ', 'T'));
+  if (!CONST_ISO_REGEX_ZONED.test(str)) {
+    const ms = Date.parse(str.replace(' ', 'T') + 'Z');
     return ms !== ms ? def : ms;
   }
   return Date.parse(str);
@@ -629,7 +633,7 @@ export function getEpochOfISODateTime(str, def = undefined) {
 export function getEpochOfISOTime(str, def = undefined) {
   if (!isValidISOTime(str))
     return def;
-  const ms = Date.parse(CONST_TIME_INSERTDATE + str);
+  const ms = Date.parse(CONST_TIME_INSERTDATE + str + (CONST_ISO_REGEX_ZONED.test(str) ? '' : 'Z'));
   return ms !== ms ? def : ms;
 }
 //#endregion

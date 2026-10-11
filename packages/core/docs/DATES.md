@@ -14,7 +14,7 @@ or a single module.
 Validation: `isDateOnlyRFC3339`, `isTimeOnlyRFC3339`,
 `isDateTimeRFC3339` (strict RFC 3339 — an offset is required), and the
 ISO twins `isValidISODateTime` / `isValidISOTime` (offset optional —
-what HTML's `datetime-local` control emits). Leap years and month
+what HTML's `datetime-local` control emits; the offset hour is 00–23 and the minute 00–59 in both, and a value without an offset is read as UTC by the epoch and `Date` readers whatever zone the host is in). *Upgrade: `getDateTypeOfISODateTime`, `getDateTypeOfISOTime`, `getEpochOfISODateTime` and `getEpochOfISOTime` answered a zone-less string in the host's own zone; they now answer the UTC reading on every host, and `isValidISOTime` accepts an offset such as `+05:30`.* Leap years and month
 lengths are checked, not just shape. `isTimeOnlyRFC3339` and
 `isDateTimeRFC3339` take a fractional second of any number of digits
 (`time-secfrac = "." 1*DIGIT`),

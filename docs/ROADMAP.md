@@ -112,6 +112,18 @@ delete it or fix it.
 - [ ] **ajv-style `errorMessage` `properties`/`items` map forms** — only if demand appears; the subtree prefix rule already covers what they express.
 - [ ] **Relative-pointer `${...}` interpolation in message templates** — ajv-errors-style data interpolation; params already carry the offending values, so this is convenience, not capability.
 
+- [ ] **Name the offending member of `unevaluated*` failures.**
+  `unevaluatedProperties: false` and `unevaluatedItems: false` errors carry
+  empty `params` and the parent's path, so two failing members read
+  identically; `additionalProperties` already points at the member.
+- [ ] **`data` and `$data` disagree about an uncompilable reference.** `$data`
+  refuses at compile time, `data` compiles to a constraint that never asserts.
+  Wanted: decide which reading wins for `data`.
+- [ ] **Recursion depth is the JavaScript stack.** `canonicalizeJson`, JSONPath
+  `$..*`, validation of a deeply nested instance and a self-referencing `$ref`
+  throw `RangeError` instead of a coded refusal; a depth option would turn them
+  into one.
+
 ## @jarenjs/forms
 
 - [ ] **Complete stylesheet composition needs a demonstrated benefit** —
@@ -430,6 +442,15 @@ what each does is its own documentation's job
   keys, exact types, constraints, opclasses, functions, RLS and identity sequences;
   adoption does not infer
   application intent from their DDL.
+- [ ] **A model derived from a database with an entity foreign key does not
+  normalize.** `introspectModel` writes a foreign key as a relation on its own
+  typeless column (reported `ambiguous-relation`), which `normalizeEntities`
+  refuses `JD0005` (the via property must be a typed, column-mapped scalar);
+  read as the one-to-one it declares, the edge would plan a unique index the
+  database does not hold. Such a model can neither open the database it came
+  from nor be a migration's `from`. Wanted: derive the typed foreign-key
+  property and the parent's `many: true` relation, so a derived model reopens
+  its database and plans no change.
 - [ ] **Broader relational mapping and query qualification.** Explicit SQLite and PostgreSQL
   column layouts, codecs, read-only views and composite-key join-table entities
   are supported ([MODEL-FORMAT §12](../packages/db/docs/MODEL-FORMAT.md#12-existing-column-layouts)).
@@ -517,6 +538,19 @@ what each does is its own documentation's job
   on PostgreSQL), where a lift of the same members stays linear (about 1 KB and
   2 KB at 16). Wanted: a fold that writes the document expression once, so the
   statement grows linearly per column.
+- [ ] **A column retype copies through a lossy `CAST`.** A rebuild that changes a
+  mapped column's type copies `CAST("col" AS <type>)`: number to integer keeps
+  `81` for `81.125`, text to integer or boolean keeps `0`/`false` for text that
+  names no number, and PostgreSQL's cast rounds. The last link's real-data
+  validation cannot see it (the cast result always validates) and
+  `report.destructive` stays false. Wanted: a refusal before the copy when a
+  value does not survive the cast, on both engines.
+- [ ] **An abort delivered inside the injected clock ends a cursor as
+  exhausted.** An abort raised synchronously from `spec.now()` after the
+  signal check of a page boundary settles the cursor, so a page resolves short
+  with `hasMore: false` instead of `JD2072`. Reachable only from a user clock
+  that aborts. Wanted: the boundary checks the signal once more after the clock
+  read.
 - [ ] **A relation dropped in the edit that renames one of its endpoints
   fails.** The plan renames the entity and then drops the join table under the
   new name (`DROP TABLE "Article_Tag"`), but the join table is still `Post_Tag`:
@@ -634,11 +668,6 @@ what each does is its own documentation's job
   delete removes it). Journal capture now reads exactly those rows before the
   delete; judging them needs the same read under session capture and a decided
   `$.old`/`$.new` for a nulled row.
-- [ ] **A `setNull` relation over a required member.** The model accepts a
-  `setNull` relation whose via member is required or non-nullable; the
-  database's set-null then stores a row that member's schema rejects (`get`
-  answers the document without the member). Wanted: the model refuses the
-  relation (`JD0005`), or reads its via member as nullable.
 - [ ] **Remaining incremental live shapes.**
   [The matrix](../packages/db/docs/LIVE-FORMAT.md) still re-runs ordered groups,
   ordered or windowed distinct projections, windowed groups and windowed
@@ -817,13 +846,6 @@ what each does is its own documentation's job
   by it order the NULL where the engine raises `JQ2005`, so the planner keeps
   both in the engine. Wanted: a native `_nulls` guard, as the whole-set
   aggregate has, that keeps them in SQL.
-- [ ] **Migrations and the relational write paths read the row identity without
-  the table's columns.** The query, load and live paths spell SQLite's row
-  identity with the first of `rowid`, `oid` and `_rowid_` that the table does
-  not name as a column; `migrate.js`, `maintenance.js`, `migration-history.js`
-  and `dialects/rtree-ddl.js` still spell `rowid`, so a member of that name may
-  shadow it there. Not exercised. Wanted: one spelling through the dialect's
-  `rowIdentity(columns)`, with a test per path.
 - [ ] **A schema that disagrees with its column's codec answers a predicate
   natively where the engine raises.** A property typed `string` over a column
   whose codec is `boolean` (the model validator accepts it) makes `$contains`

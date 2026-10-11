@@ -434,6 +434,43 @@ And for `additionalProperties: false`, Jaren points `instancePath` at the
 offending member (`/nested/extra`) where Ajv points at the parent object —
 deliberate, and spec-truer.
 
+A member name is one pointer token, so `/` and `~` inside it are escaped as
+`~1` and `~0`: the member `a/b` is `/a~1b`, and a relative `$data` reference
+walks back up from that same escaped location. *Upgrade: these names used to
+appear unescaped (`/a/b`), which read as two nested members and made a
+`$data` reference from such a member resolve against the wrong location.*
+
+A subschema's errors, and any relative `$data` reference inside it, are located
+at the instance the subschema applies to. `dependentSchemas` and the schema
+form of draft 7 `dependencies` apply to the object that holds the trigger
+member, so their errors sit at that object (`required` at `""`, not at `/x`);
+the schema form of `unevaluatedProperties` and `unevaluatedItems` applies to
+each leftover member or item, so its errors sit there. A failed draft 7 array
+`dependencies` entry reports the keyword `dependencies`. `dependentRequired` and
+the array form of `dependencies` name a member that must exist beside the trigger
+member and no subschema runs, so they keep reporting the trigger member's
+location (`/x`), like `required` and `additionalProperties` do for the member
+they name. *Upgrade: these used
+the trigger member's location (or the parent's, for unevaluated members), so a
+`$data` reference inside such a subschema resolved against the wrong place, and
+the array form reported the dependent member's name as its keyword.*
+
+The default (first-failure) validator and the collecting one answer alike for a
+one-keyword item schema. *Upgrade: in the default mode `items`/`prefixItems`
+with an array-form `type` (`{ "type": ["string"] }`) accepted any item, a
+`required` item schema counted inherited names such as `toString` as present,
+and a `$data` `required` there asserted nothing; an item schema whose only
+keyword is a `type` word the validator does not know, such as
+`{ "items": { "type": "strin" } }`, used to accept every item and is now
+refused when the schema is compiled, like the same schema in the collecting
+mode.* The one-keyword `required` shortcut treats a member inherited from a
+custom prototype as present, except for the names every object inherits
+(`toString`, `constructor`, ...), which must be own members. A member named `constructor`
+is data wherever it appears, so a `$defs` entry of that name is usable and a
+missing `$ref` target beside a `constructor` property is refused at compile
+time like any other. An unknown type name in a `type` list is refused naming
+the type and the list.
+
 **Collected errors are exhaustive across independent keywords.** Every
 keyword that can fail independently reports its own fault, rather than the
 first failure hiding the rest: keyword groups on one node (`enum` beside

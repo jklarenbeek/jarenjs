@@ -1169,7 +1169,7 @@ clause/operator collision note.
 | `$range` | `[start, end]` | The integers from *start* to *end* **inclusive** (the XQuery `to` operator). Either operand empty → empty; *start* > *end* → empty. Each bound must be a safe integer (±(2⁵³−1)), otherwise `JQ2001`. Materializing more than **1,000,000 items** is runtime error `JQ2007`, checked before allocation. `limits.sequenceItems` can lower this ceiling. Direct `$for`/quantifier iteration uses counting loops and is not subject to the allocation ceiling. |
 | `$get` | `[target, key]` | Dynamic lookup, the runtime counterpart of a path leaf: an object *target* with a string *key* yields the member value or empty; an array *target* with an integer *key* yields the element at that 0-based (D6) index — a negative index counts from the end, like the RFC 9535 index selector — or empty. **Every other combination** (wrong type pairing, non-integral index, empty or multi-item operands) is simply the empty sequence, never an error. |
 | `$entries` | `{"$entries": e}` | The member-pair counterpart of a `[*]` path segment (which yields values only): each OBJECT item of the operand contributes one `{"key": name, "value": v}` pair per member, in member order; non-object items contribute nothing, and an empty operand yields the empty sequence. `$from-entries` is the inverse; the `$map` constructor (§3.5.2) is the fixed-arity form for computed keys. |
-| `$from-entries` | `{"$from-entries": e}` | The inverse of `$entries`: assembles ONE object from the operand's `{"key": name, "value": v}` items, in sequence order — later pairs win on duplicate keys, exactly like the `$map` constructor. Items without a string `key` contribute nothing; a pair missing its `value` member reads as `null`; an empty operand constructs the empty object. |
+| `$from-entries` | `{"$from-entries": e}` | The inverse of `$entries`: assembles ONE object from the operand's `{"key": name, "value": v}` items, in sequence order — later pairs win on duplicate keys, exactly like the `$map` constructor. Items without a string `key` contribute nothing; a pair missing its `value` member reads as `null`; an empty operand constructs the empty object. A pair named `__proto__` is an ordinary own member, as in the `$map` constructor (upgrade: it used to be dropped and to replace the result's prototype). |
 
 Combined example (also exercises the aggregates of §8.8):
 
@@ -1468,6 +1468,12 @@ Three rules make these predictable:
   `JQ2001` — there is no answer to give, and the alternative to refusing is
   to invent one. `$start-of`/`$end-of` `day` is the boundary both forms have:
   a `full-time` truncates to midnight and to `23:59:59.999`.
+
+RFC 3339 spells the years `0000` through `9999`, so a shift or a truncation
+whose result falls outside them (`9999-12-31` plus a day, `0000-01-01` minus
+one, the Sunday that ends the week of `9999-12-31`) is `JQ2001` rather than a
+spelling of some other date. *Upgrade: these used to answer `10000-01-01` and
+`0001-12-31`, or a bare time for a `date-time`.*
 
 A **fraction** is a quantity only where the unit converts exactly.
 `[date, 1.5, "day"]` and `[date, "P1.5D"]` are thirty-six hours, applied as

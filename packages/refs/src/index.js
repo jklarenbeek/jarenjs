@@ -33,7 +33,7 @@ const schemaDrafts = {
  * @throws {Error} When the version is unknown
  */
 export function getSchemaDraftByVersion(version) {
-  if (version in schemaDrafts)
+  if (Object.hasOwn(schemaDrafts, version))
     return schemaDrafts[version];
   else
     throw new Error('Unknown reference schema version');

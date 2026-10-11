@@ -1,5 +1,7 @@
 //@ts-check
 
+import { encodeJSONPointerSegment } from '@jarenjs/json/pointer';
+
 import {
   isBigIntType,
   isNullValue,
@@ -459,4 +461,31 @@ export class ValidationResult {
     this.errors += result.errors;
     return this;
   }
+}
+
+// Escaped member names, by name. Property names repeat from one instance to
+// the next, so the escape test runs once per distinct name; the table is
+// bounded and only short names enter it, so hostile names cannot grow it.
+const MEMBER_TOKENS = new Map();
+const MEMBER_TOKENS_MAX = 1024;
+const MEMBER_TOKEN_LENGTH_MAX = 64;
+
+/**
+ * The location of a member of the instance at `dataPath`: the member name is
+ * one pointer token, so `/` and `~` inside it are escaped.
+ * @param {string} dataPath - The parent's location
+ * @param {string} key - The member name
+ * @returns {string} The member's location
+ */
+export function memberPath(dataPath, key) {
+  let token = MEMBER_TOKENS.get(key);
+  if (token === undefined) {
+    token = encodeJSONPointerSegment(key);
+    if (key.length <= MEMBER_TOKEN_LENGTH_MAX) {
+      if (MEMBER_TOKENS.size >= MEMBER_TOKENS_MAX)
+        MEMBER_TOKENS.clear();
+      MEMBER_TOKENS.set(key, token);
+    }
+  }
+  return dataPath + '/' + token;
 }
