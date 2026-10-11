@@ -1,6 +1,3 @@
-import { registerSiteWebMcp } from '../boundaries/webmcp.js';
-import { createDataController } from '@jarenjs/studio/data';
-import { createFlowController } from '@jarenjs/studio/flow';
 //@ts-check
 /**
  * Assemble and start the site: one app document (state + stylesheet +
@@ -16,10 +13,12 @@ import { createFlowController } from '@jarenjs/studio/flow';
  *    retired URLs, and apply an inbound share token.
  */
 
+import { registerSiteWebMcp } from '../boundaries/webmcp.js';
+import { createDataController } from '@jarenjs/studio/data';
+import { createFlowController } from '@jarenjs/studio/flow';
 import { createCollectionDemoWidget } from '../boundaries/collection.js';
 import { createApp, formEventFields, createDocStore, encodeShare, decodeShare } from '@jarenjs/app';
 import { createProjectController } from '@jarenjs/studio/component';
-
 
 import { ACTIONS, SUBS } from './actions.js';
 

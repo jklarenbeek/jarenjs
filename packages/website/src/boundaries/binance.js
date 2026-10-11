@@ -94,28 +94,36 @@ export function createBinanceFeed() {
     klines.onEvent(event);
   };
 
+  /** One message through the strict reader into both adapters; whether it parsed. */
+  function ingest(text) {
+    try {
+      const reader = createJsonxStreamReader({ mode: 'json', onEvent: sink });
+      reader.feed(String(text));
+      reader.end();
+      price.endDocument();
+      klines.endDocument();
+      return true;
+    }
+    catch {
+      price.abortDocument();
+      klines.abortDocument();
+      return false;
+    }
+  }
+
   return {
-    /** One complete WebSocket message (or synthetic seed message). */
+    /** One complete WebSocket message. */
     handleMessage(text) {
       messages++;
-      try {
-        const reader = createJsonxStreamReader({ mode: 'json', onEvent: sink });
-        reader.feed(String(text));
-        reader.end();
-        price.endDocument();
-        klines.endDocument();
-      }
-      catch {
-        drops++;
-        price.abortDocument();
-        klines.abortDocument();
-      }
+      if (!ingest(text)) drops++;
     },
 
     /**
      * Seed the candlestick from a REST klines response BODY (text!).
      * Each row becomes a synthetic kline message through the exact
-     * message path — no special cases.
+     * message path — no special cases — but is not a feed message: the
+     * `messages` and `drops` counts are the WebSocket's, so a seed row
+     * that fails to parse is skipped like a malformed row.
      * @param {string} bodyText
      */
     seedKlines(bodyText) {
@@ -125,7 +133,7 @@ export function createBinanceFeed() {
       if (!Array.isArray(rows)) return;
       for (const row of rows) {
         if (!Array.isArray(row) || row.length < 5) continue;
-        this.handleMessage(`{"stream":"seed","data":{"k":{"t":${Number(row[0])},"o":"${row[1]}","h":"${row[2]}","l":"${row[3]}","c":"${row[4]}"}}}`);
+        ingest(`{"stream":"seed","data":{"k":{"t":${Number(row[0])},"o":"${row[1]}","h":"${row[2]}","l":"${row[3]}","c":"${row[4]}"}}}`);
       }
     },
 

@@ -2,7 +2,7 @@
 /** One bounded route subscription and navigation owner over an injected Window,
  * and the route table that names an address by its template. */
 import { compileRoutes, parsePathTemplate } from '@jarenjs/core/route';
-import { isPlainOptions, refuseUnknownMembers } from '@jarenjs/core/object';
+import { isJsonObject, isPlainOptions, refuseUnknownMembers } from '@jarenjs/core/object';
 import { AppRuntimeError, APP_CODES } from './errors.js';
 
 /**
@@ -45,7 +45,7 @@ export function compileRouteTable(templates) {
   const malformed = (/** @type {string} */ detail) => {
     throw new AppRuntimeError('JA2027', `${APP_CODES.JA2027}: ${detail}`);
   };
-  if (templates === null || typeof templates !== 'object' || Array.isArray(templates))
+  if (!isJsonObject(templates))
     malformed('the table is an object of route name → path template');
   const entries = [];
   for (const [name, template] of Object.entries(templates)) {

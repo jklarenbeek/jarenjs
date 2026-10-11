@@ -24,6 +24,7 @@ import {
 
 import {
   equalsDeep,
+  isJsonObject,
   isUniqueDeepArray,
 } from '@jarenjs/core/object';
 import { createBoundedCache } from '@jarenjs/core/cache';
@@ -48,9 +49,9 @@ import {
  * @property {string} message - Human readable message (rendered through a catalog)
  */
 
-// Bounded LRU (`@jarenjs/core/cache`) replacing the old flush-all-at-500
-// variant; `null` is the cached "invalid pattern" verdict (the cache's
-// miss sentinel is `undefined`, so a negative result is a real entry).
+// Bounded LRU (`@jarenjs/core/cache`); `null` is the cached "invalid
+// pattern" verdict (the cache's miss sentinel is `undefined`, so a negative
+// result is a real entry).
 const regexCache = createBoundedCache(500);
 function getPattern(source) {
   return regexCache.getOrCreate(source, (src) => {
@@ -158,8 +159,10 @@ export function validateField(field, value, catalog = undefined) {
 
     case 'number':
     case 'integer': {
-      const num = typeof value === 'number' ? value : Number(value);
-      if (value === null || typeof value === 'boolean' || Number.isNaN(num)) {
+      // only a number (or a bigint) is a number, as to the validator: a
+      // string, an array or a date that merely converts to one is not
+      const num = typeof value === 'number' ? value : typeof value === 'bigint' ? Number(value) : NaN;
+      if (Number.isNaN(num)) {
         pushError(errors, catalog, 'type', { type: 'number' });
         return errors;
       }
@@ -212,7 +215,7 @@ export function validateField(field, value, catalog = undefined) {
     }
 
     case 'object': {
-      if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+      if (!isJsonObject(value)) {
         pushError(errors, catalog, 'type', { type: 'object' });
         return errors;
       }

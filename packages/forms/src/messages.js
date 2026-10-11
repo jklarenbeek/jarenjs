@@ -33,8 +33,8 @@ export {
 
 /**
  * The built-in English forms catalog. Key set = exactly the `form/*` keys
- * `validateField` emits, plus `x-form/assert` (the rules default). The
- * strings are byte-identical to the historical inline template literals.
+ * `validateField` emits, plus `x-form/assert` (the rules default) and the
+ * form-chrome strings.
  * @type {Record<string, string | ((params: object, error?: object) => string)>}
  */
 export const formsMessagesEn = {
@@ -101,6 +101,22 @@ export function formatDisplayName(catalog, format) {
 }
 
 /**
+ * The render closure a message key resolves to: the caller's catalog
+ * first, then the built-in English catalog, or `undefined`. Only OWN
+ * members answer, so a key every object inherits (`toString`,
+ * `constructor`, `__proto__`) is a miss like any unknown key rather than
+ * a function that renders garbage.
+ *
+ * @param {Readonly<Record<string, (params: object, error?: object) => string>>|undefined} catalog - A compiled catalog, or undefined for English
+ * @param {string} msgid - The message key
+ * @returns {((params: object, error?: object) => string)|undefined}
+ */
+export function lookupFormsMessage(catalog, msgid) {
+  if (catalog !== undefined && Object.hasOwn(catalog, msgid)) return catalog[msgid];
+  return Object.hasOwn(formsMessages, msgid) ? formsMessages[msgid] : undefined;
+}
+
+/**
  * Resolve a message key through a caller catalog with built-in English
  * fallback and render it.
  *
@@ -116,8 +132,7 @@ export function formatDisplayName(catalog, format) {
  * @returns {string} The rendered message
  */
 export function renderFormsMessage(catalog, msgid, params) {
-  let render = catalog !== undefined ? catalog[msgid] : undefined;
-  if (render === undefined) render = formsMessages[msgid];
+  const render = lookupFormsMessage(catalog, msgid);
   if (render === undefined) return msgid;
   if (msgid === 'form/format') {
     const format = formatDisplayName(catalog, /** @type {any} */ (params).format);

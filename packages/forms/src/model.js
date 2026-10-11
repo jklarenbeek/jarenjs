@@ -99,9 +99,9 @@ const ANCHOR_MAPS = createWeakCache();
  * Resolve a same-document `$ref` — `#` (the root), `#/pointer`, or
  * `#anchor` — with the validator's own exported resolver, so a form
  * derives its model from exactly the schema the validator would
- * enforce. (The previous private re-implementation resolved only
- * `#/pointer`, silently rendering `$ref: "#"` and `#anchor` fields as
- * `unknown`.) External refs stay unresolvable by design.
+ * enforce; a private resolver of `#/pointer` alone would render the
+ * root and anchor forms as `unknown`. External refs stay unresolvable
+ * by design.
  * @param {string} ref
  * @param {object} rootSchema
  * @returns {object|boolean|null} The referenced schema or null when unresolvable
@@ -133,7 +133,7 @@ function resolveLocalRef(ref, rootSchema) {
  */
 export function resolveSchema(schema, rootSchema, depth = 0) {
   if (depth > DEFAULT_MAX_DEPTH) return schema;
-  if (schema == null || typeof schema !== 'object' || Array.isArray(schema)) return schema;
+  if (!isJsonObject(schema)) return schema;
 
   let resolved = schema;
 
@@ -183,8 +183,7 @@ export function resolveSchema(schema, rootSchema, depth = 0) {
 function getOneOfConstBranches(schema) {
   if (!Array.isArray(schema.oneOf) || schema.oneOf.length === 0) return null;
   for (const branch of schema.oneOf) {
-    if (branch == null || typeof branch !== 'object' || Array.isArray(branch)
-      || branch.const === undefined) return null;
+    if (!isJsonObject(branch) || branch.const === undefined) return null;
   }
   return schema.oneOf;
 }
@@ -286,11 +285,6 @@ function getControl(kind, schema) {
   }
 }
 
-/**
- * Extract the constraint set the UI and the preemptive field validation use.
- * @param {object} schema
- * @returns {object}
- */
 /** The form-relevant constraint keywords: the shared groups plus the
  * date bounds — constraints like any other; without them a date control
  * has no min/max to offer and the user only learns the range by
@@ -303,6 +297,11 @@ const FORM_CONSTRAINTS = [
   ...OBJECT_CONSTRAINTS,
 ];
 
+/**
+ * Extract the constraint set the UI and the preemptive field validation use.
+ * @param {object} schema
+ * @returns {object}
+ */
 function getConstraints(schema) {
   const c = {};
   for (const key of FORM_CONSTRAINTS) {
@@ -398,7 +397,7 @@ function buildField(rawSchema, rootSchema, pointer, key, required, depth, t) {
     field.children = Object.entries(effective.properties).map(([name, propSchema]) =>
       buildField(
         propSchema, rootSchema,
-        `${pointer}/${escapePointerKey(name)}`, name,
+        `${pointer}/${encodeJSONPointerSegment(name)}`, name,
         requiredSet.has(name), depth + 1, t));
   }
 

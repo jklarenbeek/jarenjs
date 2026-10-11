@@ -91,6 +91,8 @@ export function escapeAttribute(value) {
  * @param {Record<string, any>} props
  * @param {Set<string>} skip
  * @param {import('./safe.js').SafePolicy | null} policy
+ * @param {((info: { kind: string, name: string }) => void) | null} onUnsafe - the
+ *   safe-mode report sink, or null
  * @returns {string}
  */
 function serializeProps(props, skip, policy, onUnsafe) {

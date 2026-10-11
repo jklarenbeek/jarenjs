@@ -1,4 +1,3 @@
-import { FLOW_FORM_RULES } from '@jarenjs/studio/flow';
 //@ts-check
 /**
  * The complete view stylesheet: one JSLT envelope assembling the shell
@@ -7,6 +6,7 @@ import { FLOW_FORM_RULES } from '@jarenjs/studio/flow';
  * flow and play modes for their generated forms.
  */
 
+import { FLOW_FORM_RULES } from '@jarenjs/studio/flow';
 import { createFormView } from '@jarenjs/app';
 
 import { SHELL_RULES } from './shell.js';

@@ -102,7 +102,8 @@ export function createFocusEffect(options) {
 
   /**
    * Resolve every queued intent against the committed frame. Missing
-   * targets report `JA2014`; every sibling intent still runs.
+   * targets report `JA2014` and a throwing `measure` completion dispatch
+   * surfaces its error; every sibling intent still runs.
    */
   focusEffect.flush = function flush() {
     if (disposed || queue.length === 0) return;
@@ -142,16 +143,23 @@ export function createFocusEffect(options) {
         const rect = typeof target.getBoundingClientRect === 'function'
           ? target.getBoundingClientRect()
           : null;
-        dispatch(props.done, {
-          id: props.id ?? null,
-          ref: props.ref,
-          rect: rect === null ? null : {
-            x: rect.x, y: rect.y,
-            width: rect.width, height: rect.height,
-            top: rect.top, left: rect.left,
-            right: rect.right, bottom: rect.bottom,
-          },
-        });
+        // the completion dispatch is host code too: one that throws must
+        // not starve the sibling intents of the batch
+        try {
+          dispatch(props.done, {
+            id: props.id ?? null,
+            ref: props.ref,
+            rect: rect === null ? null : {
+              x: rect.x, y: rect.y,
+              width: rect.width, height: rect.height,
+              top: rect.top, left: rect.left,
+              right: rect.right, bottom: rect.bottom,
+            },
+          });
+        }
+        catch (thrown) {
+          if (firstError === null) firstError = { value: thrown };
+        }
       }
     }
     if (firstError !== null) throw firstError.value;

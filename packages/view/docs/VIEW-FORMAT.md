@@ -139,6 +139,11 @@ Every other prop **writes through**:
 - `true` renders as a bare attribute, `false` and `null` remove the
   attribute / clear the property.
 - Prop names are used as-is: producers write `class`, not `className`.
+- A prop named like a member every object inherits (`constructor`,
+  `toString`, `valueOf`, `hasOwnProperty`) is an ordinary prop: both
+  renderers write it as an attribute — never through the property, which
+  would replace the node's own method — and remove it as one when a frame
+  drops it. Upgrade note: the DOM renderer used to drop such a prop.
 
 Three kinds of property are not left to the node's own property, and the
 serializer and the patching renderer MUST write them identically — the

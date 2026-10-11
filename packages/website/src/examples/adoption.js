@@ -3,7 +3,7 @@
 import { open, createDbReceipts, createDbIngestionStore, createDbEffectStore, createDbRunStore } from '@jarenjs/linq/db';
 import { compileLexical } from '@jarenjs/core/search';
 import { createArrayRangeProvider } from '@jarenjs/core/range';
-import { canonicalizeJson, canonicalSha256 } from '@jarenjs/json/canonical';
+import { canonicalizeJson, canonicalSha256, cloneJson } from '@jarenjs/json/canonical';
 import { compileRulePlan, selectRuleChanges } from '@jarenjs/json/rules';
 import { migrateFormulas } from '@jarenjs/json/formula/migrate';
 import { compileContract } from '@jarenjs/contract';
@@ -132,7 +132,7 @@ function createAdoption(client, model, definition, authorize, executor, release)
     }),
     preview: async (text) => planFor(JSON.parse(text), await rowsFor(client)),
     async saveRule(rule) {
-      rule = JSON.parse(canonicalizeJson(rule));
+      rule = cloneJson(rule);
       compileRulePlan(rule, options);
       if (!await canWrite()) return { state: 'refused', reason: 'unauthorized', changes: 0, writes: 0, revisions: 0 };
       return client.transaction(async (tx) => {
@@ -144,7 +144,7 @@ function createAdoption(client, model, definition, authorize, executor, release)
       });
     },
     command: { execute: async (request) => {
-      const input = JSON.parse(canonicalizeJson(request));
+      const input = cloneJson(request);
       return command.execute(input, { hash: await canonicalSha256(input) });
     } },
     ingest: () => ingest.run(plan, { executor }),

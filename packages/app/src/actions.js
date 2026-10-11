@@ -20,6 +20,7 @@
  *    registered effect handlers
  */
 
+import { isJsonObject } from '@jarenjs/core/object';
 import { compileJsonQuery } from '@jarenjs/json/query';
 import { AppCompileError, toError, safeErrorMessage } from './errors.js';
 
@@ -40,7 +41,7 @@ import { AppCompileError, toError, safeErrorMessage } from './errors.js';
  */
 export function compileActions(actions, options) {
   if (actions === undefined) return new Map();
-  if (actions === null || typeof actions !== 'object' || Array.isArray(actions)) {
+  if (!isJsonObject(actions)) {
     throw new AppCompileError('JA0003',
       'the "actions" member must be an object of named action documents',
       '/actions');
@@ -125,7 +126,7 @@ export function compileSubs(subs, options) {
       '/subs');
   }
   return subs.map((entry, i) => {
-    if (entry === null || typeof entry !== 'object' || Array.isArray(entry)
+    if (!isJsonObject(entry)
       || typeof entry.run !== 'string' || entry.run === '') {
       throw new AppCompileError('JA0006',
         `subscription ${i} must be an object with a non-empty "run" name`,

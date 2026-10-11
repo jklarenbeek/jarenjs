@@ -148,3 +148,38 @@ describe('@jarenjs/app — createSplitterWidget', () => {
     assert.strictEqual(host.count('keydown'), 0);
   });
 });
+
+describe('@jarenjs/app — a splitter whose state holds a ratio that is not a number', () => {
+  it('opens at the midpoint instead of writing NaN into the layout', () => {
+    for (const ratio of ['abc', {}, [1, 2], Infinity, NaN]) {
+      const w = createSplitterWidget(opts);
+      const { host, attrs, styleSet } = fakeEnv();
+      w.mount(host, { ratio }, () => {});
+      assert.strictEqual(attrs['aria-valuenow'], '50', String(ratio));
+      assert.strictEqual(styleSet['--jplay-ratio'], '0.5', String(ratio));
+      assert.strictEqual(styleSet['--jplay-ratio-first'], '0.5fr', String(ratio));
+    }
+  });
+
+  it('returns to the midpoint when an update brings a ratio that is not a number', () => {
+    const w = createSplitterWidget(opts);
+    const { host, attrs } = fakeEnv();
+    const handle = w.mount(host, { ratio: 0.3 }, () => {});
+    assert.strictEqual(attrs['aria-valuenow'], '30');
+    w.update(handle, { ratio: 'abc' });
+    assert.strictEqual(attrs['aria-valuenow'], '50');
+    w.update(handle, { ratio: 0.7 });
+    assert.strictEqual(attrs['aria-valuenow'], '70');
+  });
+
+  it('a number or numeric text still sets the split, clamped', () => {
+    const w = createSplitterWidget(opts);
+    const { host, attrs } = fakeEnv();
+    const handle = w.mount(host, { ratio: '0.25' }, () => {});
+    assert.strictEqual(attrs['aria-valuenow'], '25');
+    w.update(handle, { ratio: 7 });
+    assert.strictEqual(attrs['aria-valuenow'], '90');
+    w.update(handle, { ratio: -1 });
+    assert.strictEqual(attrs['aria-valuenow'], '10');
+  });
+});

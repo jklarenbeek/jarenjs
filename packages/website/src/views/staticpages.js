@@ -1,8 +1,8 @@
 //@ts-check
 /**
  * Docs — a sectioned reference rendered from the DOCS_SECTIONS content
- * document (one section at a time, deep-linkable via ?s=). (The former
- * Examples gallery now lives in the #/play playground.)
+ * document (one section at a time, deep-linkable via ?s=). The example
+ * gallery is the #/play playground.
  */
 
 export const STATIC_RULES = [
@@ -13,8 +13,8 @@ export const STATIC_RULES = [
       // The rail holds BOTH lists and scrolls as one on desktop. On mobile
       // it is `display: contents`, so its two halves become grid items in
       // their own right and the README list can be ordered BELOW the
-      // article — reading the docs on a phone used to mean scrolling past
-      // the package list first.
+      // article, so a phone reader meets the article first rather than
+      // scrolling past the package list.
       ['div', { class: 'docs-side' },
         ['nav', { class: 'docs-nav' },
           ['h1', {}, 'Docs'],

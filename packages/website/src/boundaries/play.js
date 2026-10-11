@@ -6,6 +6,7 @@
  * work in the query/jslt engines. Ephemeral (no document, unlike the studio).
  */
 import { createSplitterWidget } from '@jarenjs/app';
+import { isJsonObject } from '@jarenjs/core/object';
 import { createPlayComponent } from '@jarenjs/play/component';
 import { toMarkdown } from '@jarenjs/md';
 import { createMdx } from '@jarenjs/md/mdx';
@@ -163,9 +164,9 @@ export function sessionToLoaded(session) {
   return {
     engine: typeof s.engine === 'string' ? s.engine : PLAY_START.engine,
     exampleId: typeof s.exampleId === 'string' ? s.exampleId : null,
-    source: s.source && typeof s.source === 'object' ? s.source : {},
-    data: s.data && typeof s.data === 'object' ? s.data : {},
-    config: s.config && typeof s.config === 'object' ? s.config : {},
+    source: isJsonObject(s.source) ? s.source : {},
+    data: isJsonObject(s.data) ? s.data : {},
+    config: isJsonObject(s.config) ? s.config : {},
   };
 }
 
@@ -197,7 +198,7 @@ export function sessionFromDocument(text) {
   let parsed;
   try { parsed = JSON.parse(String(text ?? '')); }
   catch { return null; }
-  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  if (!isJsonObject(parsed)) return null;
   const wrapped = parsed.session && typeof parsed.session === 'object';
   const session = wrapped ? parsed.session : parsed;
   // a document that names no engine is not a session — refuse it rather
@@ -241,8 +242,9 @@ export function legacyExperimentToSession(engine, inputs) {
       config: {},
     };
   }
+  // an own engine only: a name every object inherits (`constructor`) is not one
+  if (!Object.hasOwn(playComponent.engines, engine)) return null;
   const descriptor = playComponent.engines[engine];
-  if (descriptor === undefined) return null;
   /** @type {Record<string, string>} */
   const source = {};
   /** @type {Record<string, string>} */

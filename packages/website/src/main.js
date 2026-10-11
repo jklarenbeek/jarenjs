@@ -17,6 +17,7 @@ import { md } from './boundaries/markdown.js';
 import { parseHash } from './lib/route.js';
 import { createHashRouteSubscription } from '@jarenjs/app/routes';
 import { createMotion, prefersReducedMotion } from './lib/motion.js';
+import { readTheme, writeTheme } from './lib/theme.js';
 
 const BASE = import.meta.env.BASE_URL;
 /** The build-generated site data, by the name the app asks for it under. */
@@ -24,7 +25,6 @@ const SITE_FILES = {
   packages: 'site/packages.json', content: 'site/content.json',
   cards: 'site/cards.json', build: 'build.json', corpus: 'site/spatial-corpus.json',
 };
-const THEME_KEY = 'jaren-theme';
 const IDE_KEY = 'jaren-ide';
 // Keep the existing 8000-character share tokens plus deployment URL overhead.
 const routes = createHashRouteSubscription({ window, maxLength: 65536, maxQueryEntries: 1024 });
@@ -51,10 +51,7 @@ const jsonStore = (key) => ({
   },
 });
 
-const stored = localStorage.getItem(THEME_KEY);
-const theme = stored === 'dark' || stored === 'light'
-  ? stored
-  : (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+const theme = readTheme(() => localStorage, () => matchMedia('(prefers-color-scheme: dark)').matches);
 document.documentElement.classList.toggle('dark', theme === 'dark');
 
 // Diagrams render complete; hydration only ADDS pan/zoom to them, so it runs
@@ -112,7 +109,7 @@ const app = createSiteApp({
   },
   applyTheme: (next) => {
     document.documentElement.classList.toggle('dark', next === 'dark');
-    localStorage.setItem(THEME_KEY, next);
+    writeTheme(() => localStorage, next);
   },
   listenHash: (cb) => routes({ action: 'route' }, (_action, route) => cb(parseHash(route.raw))),
   navigate: routes.navigate,

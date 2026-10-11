@@ -35,6 +35,11 @@ export function createSplitterWidget(opts) {
   const step = opts.step ?? 0.05;
   const fineStep = opts.fineStep ?? 0.01;
   const clamp = (r) => Math.min(max, Math.max(min, r));
+  // the ratio a host's state holds: anything that is not a finite number is the midpoint
+  const ratioOf = (value) => {
+    const r = Number(value ?? 0.5);
+    return clamp(Number.isFinite(r) ? r : 0.5);
+  };
 
   return {
     mount(host, props, emit) {
@@ -112,7 +117,7 @@ export function createSplitterWidget(opts) {
         emit({ action, with: next });
       };
 
-      const handle = { host, doc, ratio: clamp(Number(props?.ratio ?? 0.5)),
+      const handle = { host, doc, ratio: ratioOf(props?.ratio),
         axis: props?.axis === 'y' ? 'y' : 'x', startRatio: 0.5,
         dragging: false, applyRatio, onMove, onUp, onCancel };
       applyRatio(handle.ratio);
@@ -128,7 +133,7 @@ export function createSplitterWidget(opts) {
         handle.axis = axis;
         handle.applyRatio(handle.ratio);
       }
-      const r = clamp(Number(props?.ratio ?? 0.5));
+      const r = ratioOf(props?.ratio);
       if (r !== handle.ratio && !handle.dragging) {
         handle.ratio = r;
         handle.applyRatio(r);

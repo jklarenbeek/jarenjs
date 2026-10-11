@@ -1,6 +1,3 @@
-import { createDataState } from '@jarenjs/studio/data';
-import { createFlowState } from '@jarenjs/studio/flow';
-import { createProjectState } from '@jarenjs/studio/component';
 //@ts-check
 /**
  * The initial application state — one JSON document. Everything the
@@ -8,6 +5,9 @@ import { createProjectState } from '@jarenjs/studio/component';
  * viewModel boundary); compiled artifacts never do.
  */
 
+import { createDataState } from '@jarenjs/studio/data';
+import { createFlowState } from '@jarenjs/studio/flow';
+import { createProjectState } from '@jarenjs/studio/component';
 import { calcInitialState } from '@jarenjs/calc/component';
 
 import { STARTER_PROJECT } from '../content/projectTemplates.js';

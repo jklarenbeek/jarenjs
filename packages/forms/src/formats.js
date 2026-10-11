@@ -162,5 +162,5 @@ FORM_FORMATS['multiline'] = { test: acceptAnything, control: 'textarea' };
  */
 export function getFormatInfo(format) {
   if (typeof format !== 'string') return null;
-  return FORM_FORMATS[format] || null;
+  return Object.hasOwn(FORM_FORMATS, format) ? FORM_FORMATS[format] : null;
 }

@@ -119,12 +119,12 @@ depends on it — the schema is the contract.
 `validateField(field, value)` returns `[{ keyword, message }]` using `@jarenjs/core` directly:
 
 - **strings**: grapheme-aware `minLength`/`maxLength` (`getStringLength`), unicode `pattern` (`createRegExp`, cached), and 50+ `format` testers from the [`@jarenjs/formats`](../formats) `formatTesters` registry — the same name → predicate table the authoritative validator's format compilers wrap, so both layers accept exactly the same strings
-- **numbers**: type/integer checks, bounds, `multipleOf`
+- **numbers**: type/integer checks, bounds, `multipleOf`. A number (or a bigint) is a number, as to the validator; a numeric string, an array or a date is a `type` error. Upgrade note: layer 1 used to accept anything that converts to a number
 - **enum/const**: deep equality (`equalsDeep`)
 - **arrays**: `minItems`/`maxItems`/`uniqueItems` (`isUniqueDeepArray`)
 - **`null` is a value**, as it is to the validator: a `nullable` field accepts it, and any other field reports what refuses it — its `type`, or its `enum` or `const`. Only an absent member (`undefined`) meets `required`, except on a field layer 1 cannot judge (a `json` control): there a `null` it does not admit is what the control writes for half-typed input, and a required field reports `required` for it.
 
-`validateAllFields(model, data)` walks the whole tree and returns a `{ '/pointer': errors }` map — ideal for rendering inline errors next to every field. It reads own JSON members, like the pointer helpers: a field named `constructor`, `toString` or `__proto__` is absent until the data supplies that member.
+`validateAllFields(model, data)` walks the whole tree and returns a `{ '/pointer': errors }` map — ideal for rendering inline errors next to every field. It reads own JSON members, like the pointer helpers: a field named `constructor`, `toString` or `__proto__` is absent until the data supplies that member. The same holds for names looked up in a table: a `format`, a message id (`$msgid`) or a catalog key named like an `Object.prototype` member is an unknown one, and a rule inside an array item reads an object's own members and an array's elements by index only. Upgrade note: such names used to answer as a format, a message or a member (`renderFormsMessage(undefined, 'toString', {})` is now `'toString'`, the id).
 
 ## Layer 2 — `x-form` rules: cross-field behavior per keystroke
 
@@ -193,7 +193,7 @@ These two externals are the whole vocabulary: any other free name in a rule is a
 
 ### Array item templates
 
-A rule on an array item template (`/lines/-/amount`) compiles **once** and evaluates **per element** of the actual array, binding `$value`/`$pointer` per index — results are keyed by the expanded pointer (`/lines/2/amount`). Rendering uses [`@jarenjs/json/jslt`](../json/docs/JSLT-FORMAT.md) rules over the composed view model. Composition retains the model, data and session cursors together; see the addressing measurement below.
+A rule on an array item template (`/lines/-/amount`) compiles **once** and evaluates **per element** of the actual array, binding `$value`/`$pointer` per index — results are keyed by the expanded pointer (`/lines/2/amount`). Rendering uses [`@jarenjs/json/jslt`](../json/docs/JSLT-FORMAT.md) rules over the composed view model. Composition retains the model, data and session cursors together; see the addressing measurement below. On a tuple the item template applies from the first element after the fixed slots (`prefixItems`, or an `items` array); a slot's rules are its own. Upgrade note: the template's rules used to replace those of the slots in front of it.
 
 ### Schema literals in rules
 
@@ -257,8 +257,18 @@ wrong:
   `buildFormViewModel` drops hidden subtrees and their errors never render
   or count. Ordinary schema constraints still apply to retained values.
 
-One divergence remains, and is inherent: `$pointer` for template elements
-stays the template pointer, because element indexes are a render-time notion.
+The copy reads a tuple the way `buildFormModel` does: fixed slots from
+`prefixItems` or an `items` array, and the elements after them (`items`
+beside `prefixItems`, `additionalItems` beside an `items` array) as the item
+template. An element that is itself an array is walked by index, because a
+query sequence splices the arrays it holds. Upgrade note: the copy used to
+skip an `items` array and `additionalItems`, apply the template to the slots
+in front of it, and accept an invalid cell of an array inside an array.
+
+Two divergences remain. `$pointer` for template elements stays the template
+pointer, because element indexes are a render-time notion; and a tuple slot
+the data does not hold yet has no node while typing, though its assert binds
+`null` on submit — add the slot (`addValue`) to see and fix it.
 
 A hidden field's *value* is a separate question, and the answer is explicit:
 values are kept while editing — a field that reappears must not have
@@ -385,8 +395,8 @@ equality, so values loaded from JSON keep their selection.
 Form data keeps plain JSON semantics — an untouched field is *absent*, not an empty string. Pointers parse, read AND write through the [`@jarenjs/json`](../json) engines (RFC 6901, one implementation repo-wide): reads hit a compiled-getter cache and allocate nothing, and writes run on the same copy-on-write kernel as the patch module (`compileJSONPointerSetter` with `parents: 'create'`), so untouched siblings are shared by reference on every keystroke — which feeds the JSLT memo and the view patcher's reference-equality fast path downstream:
 
 - `createInitialData(model)` — defaults and `const` values filled in as own JSON members (including `__proto__`); a required boolean without a default starts `false`, because a checkbox cannot show "absent" and layer 1 and the validator must judge the same value; everything else absent
-- `parseFieldInput(field, raw)` — input coercion (`''` → undefined, numeric strings → numbers, enum options → typed values)
-- `getValueAtPointer` / `setValueAtPointer` / `appendItem` / `removeItemAt` — immutable updates addressed by JSON pointer
+- `parseFieldInput(field, raw)` — input coercion (`''` → undefined, numeric strings → numbers, enum options → typed values). Blank or non-finite text in a number field stays text, so layer 1 reports it; upgrade note: `'  '` used to become `0` and `'Infinity'` became `Infinity`, which JSON cannot carry
+- `getValueAtPointer` / `setValueAtPointer` / `appendItem` / `removeItemAt` — immutable updates addressed by JSON pointer; `removeItemAt` takes an integer or its canonical decimal text (`'1'`); an index that names no item (`-1`, past the end, other text) returns the document itself (upgrade note: `-1` used to remove the last item)
 - `createItemValue(field.item)` — starter value for a new array item
 
 ## The view model — one render tree per instant

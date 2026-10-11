@@ -16,7 +16,10 @@ const PAGES = new Set(['home', 'playground', 'benchmarks', 'charts', 'collection
  */
 export function parseHash(hash) {
   const raw = (hash ?? '').replace(/^#\/?/, '');
-  const [pathPart, queryPart] = raw.split('?');
+  // the query is everything after the FIRST '?': a later one is part of a value
+  const split = raw.indexOf('?');
+  const pathPart = split < 0 ? raw : raw.slice(0, split);
+  const queryPart = split < 0 ? undefined : raw.slice(split + 1);
   const page = pathPart.replace(/\/+$/, '') || 'home';
   /** @type {Record<string, string>} */
   const params = {};

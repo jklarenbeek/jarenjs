@@ -117,9 +117,9 @@ function compareVersion(a, b) {
  * The span one provenance field covers across the headline rows, with
  * the rows that do not record it counted rather than folded in.
  *
- * The tiles used to print the LAST RUN's date and version as though
- * they described every row, over rows measured weeks and versions
- * earlier. A set of rows is honestly summarized by its range.
+ * Rows are measured at different times and versions, so one row's date
+ * and version cannot stand for all of them: a set of rows is honestly
+ * summarized by its range.
  */
 function provenanceSpan(headlines, pick, compare) {
   const values = headlines.map(pick).filter((v) => typeof v === 'string' && v !== '');
@@ -295,8 +295,8 @@ function validate(data, benchUi) {
     out.push(cards([
       { title: 'Success-only totals', value: `${Math.round(overall.jarenSuccessTime)} ms vs ${Math.round(overall.ajvSuccessTime)} ms`, note: 'Jaren vs Ajv, tests both can run' },
       { title: 'Jaren wins', value: `${overall.successOnly?.jarenWins ?? '—'} tests`, note: `Ajv wins ${overall.successOnly?.ajvWins ?? '—'}` },
-      // both columns are derived: the note used to spell Jaren's side as
-      // a literal, which stops being true the moment a test regresses
+      // both columns are derived: a literal for Jaren's side stops being
+      // true the moment a test regresses
       { title: 'Ajv failures', value: `${overall.ajvFailures} tests, ${overall.ajvErrors} errors`, note: `Jaren: ${overall.jarenFailures ?? '—'} and ${overall.jarenErrors ?? '—'}` },
     ]));
   }
@@ -348,8 +348,8 @@ function jsonpath(data, benchUi) {
   const out = [];
   const groups = data.compliance?.groups ?? [];
   // Summed from the same per-group rows the table below prints, per
-  // engine: the card used to divide the corpus total by itself, so no
-  // failure could ever move it. A regression now reads n-1 / n here.
+  // engine: dividing the corpus total by itself would leave the card
+  // unable to move on a failure. A regression reads n-1 / n here.
   const total = groups.reduce((n, [, g]) => n + (g.total ?? 0), 0);
   const passed = (engine) => groups.reduce((n, [, g]) => n + (g.pass?.[engine] ?? 0), 0);
   const score = (engine) => (groups.length === 0 ? '—' : `${passed(engine)} / ${total}`);

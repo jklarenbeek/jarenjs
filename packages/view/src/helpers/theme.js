@@ -29,16 +29,16 @@ import { kebabCase } from '@jarenjs/core/string';
  * host's tokens (light/dark and all) live, with the concrete color as the
  * fallback outside any host. `vars` never leaks into `tokens`.
  *
- * @param {Record<string, Record<string, string>>} themes the component's
- *   named token tables (must include a `default`)
- * @param {string} prefix the CSS-variable prefix (e.g. `mm`, `calc`),
- *   without the leading `--`
  * The name `'host'` is reserved: it selects the component's own host-var
  * map wholesale, which is how a consumer asks for "theme me from the page"
  * without knowing which tokens are linkable. It resolves to
  * `{ vars: hostVars }`, so a component that passes no `hostVars` simply has
  * no `'host'` theme and falls back to `default` like any other unknown name.
  *
+ * @param {Record<string, Record<string, string>>} themes the component's
+ *   named token tables (must include a `default`)
+ * @param {string} prefix the CSS-variable prefix (e.g. `mm`, `calc`),
+ *   without the leading `--`
  * @param {string | Record<string, any>} [nameOrOverrides]
  * @param {Record<string, string>} [hostVars] the component's token key →
  *   host custom-property map, used when `nameOrOverrides` is `'host'`

@@ -32,7 +32,7 @@
  * the queue always drains, cleanups are never skipped.
  */
 
-import { isPlainOptions, nearestName, refuseUnknownMembers, stableStringify } from '@jarenjs/core/object';
+import { isJsonObject, isPlainOptions, nearestName, refuseUnknownMembers, stableStringify } from '@jarenjs/core/object';
 import { compileJsltStylesheet } from '@jarenjs/json/jslt';
 import { applyJSONPatch } from '@jarenjs/json/patch';
 import { createDomRenderer } from '@jarenjs/view';
@@ -377,7 +377,7 @@ function grantHint(name, registry) {
  */
 export function createApp(appDoc, options = {}) {
   checkAppOptions(options);
-  if (appDoc === null || typeof appDoc !== 'object' || Array.isArray(appDoc)) {
+  if (!isJsonObject(appDoc)) {
     throw new AppCompileError('JA0001', 'the app document must be an object', '');
   }
   if (appDoc.view === undefined) {
@@ -1035,8 +1035,7 @@ export function createApp(appDoc, options = {}) {
 
   /**
    * Look up a subscription handler; `undefined` after a report means
-   * "cannot start" (`JA2008`/`JA2013`-lookup, matching the historical
-   * single-instance behaviour).
+   * "cannot start" (`JA2008`/`JA2013`-lookup, as for a single instance).
    * @param {any} sub
    * @returns {any}
    */
@@ -1204,8 +1203,7 @@ export function createApp(appDoc, options = {}) {
    * its resolved key changes: stop, then start with the new props,
    * within one reconciliation. The key derives from the resolved props
    * by value, or from the explicit `key` query; a static `with` entry
-   * has no key and never restarts (the historical behaviour, preserved
-   * exactly). `for` declarations reconcile per instance
+   * has no key and never restarts. `for` declarations reconcile per instance
    * ({@link refreshFanout}). This is the same "key plus supersede
    * policy" shape `createTaskEffect` models for effects.
    *
@@ -1688,7 +1686,7 @@ export function createApp(appDoc, options = {}) {
     settled(settleOptions = undefined) {
       let frame = false;
       if (settleOptions !== undefined) {
-        if (settleOptions === null || typeof settleOptions !== 'object' || Array.isArray(settleOptions)) {
+        if (!isJsonObject(settleOptions)) {
           throw new TypeError('app.settled: options are { frame?: boolean }');
         }
         for (const key of Object.keys(settleOptions)) {
@@ -1849,17 +1847,16 @@ function setEventMember(obj, name, value) {
 }
 
 /**
- * Resolve one requested `$event` field, in precedence order: a registered
- * host extractor, the built-in allow-list, else `null` + a JA2009 report
- * (a typo in one field must not swallow the dispatch). `undefined`
- * coerces to `null` so the result stays JSON.
+ * Resolve one requested `$event` field the host registered no extractor
+ * for: the built-in allow-list, else `null` + a JA2009 report (a typo in
+ * one field must not swallow the dispatch). `undefined` coerces to `null`
+ * so the result stays JSON.
  * @param {any} event
  * @param {string} name
- * @param {Record<string, (nativeEvent: any) => any>} extractors
  * @param {(outcome: { kind: 'unknown', field: string }) => void} report
  * @returns {any}
  */
-function resolveEventField(event, name, extractors, report) {
+function resolveEventField(event, name, report) {
   const source = EVENT_FIELD_SOURCES[name];
   if (source !== undefined) {
     const value = source === 'target' ? event?.target?.[name] : event?.[name];
@@ -1909,7 +1906,7 @@ function eventData(event, fields, extractors, report) {
       }
       // a requested default member is already bound; never null it out
       if (DEFAULT_EVENT_MEMBERS[name] === true) continue;
-      setEventMember(data, name, resolveEventField(event, name, extractors, report));
+      setEventMember(data, name, resolveEventField(event, name, report));
     }
   }
   return data;

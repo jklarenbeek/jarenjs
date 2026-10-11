@@ -1,5 +1,3 @@
-import { DATA_ACTIONS } from '@jarenjs/studio/data';
-import { PROJECT_ACTIONS } from '@jarenjs/studio/component';
 //@ts-check
 /**
  * The site's actions — every one a Jaren JSON Query document producing
@@ -8,6 +6,9 @@ import { PROJECT_ACTIONS } from '@jarenjs/studio/component';
  * `route/set`. Note how `route/set` computes its fetch effects with
  * `$if` — orchestration as data.
  */
+
+import { DATA_ACTIONS } from '@jarenjs/studio/data';
+import { PROJECT_ACTIONS } from '@jarenjs/studio/component';
 
 import { FLOW_ACTIONS } from './flow-actions.js';
 
@@ -324,11 +325,12 @@ export const ACTIONS = {
   'play/import': { effects: [{ run: 'play-import' }] },
   'play/name': { patch: [{ op: 'replace', path: '/play/name', value: '$event.value' }] },
   'play/names': { patch: [{ op: 'replace', path: '/play/names', value: '$payload' }] },
-  // a save landed: adopt the record it wrote, so Save now overwrites it
+  // a save landed: adopt the record it wrote, so Save now overwrites it.
+  // A null name is the unbind after a delete: the session keeps its title
   'play/saved': {
     patch: [
       { op: 'replace', path: '/play/savedName', value: '$payload.name' },
-      { op: 'replace', path: '/play/name', value: '$payload.name' },
+      { op: 'replace', path: '/play/name', value: { $if: ['$payload.name', '$payload.name', '$.play.name'] } },
       { op: 'replace', path: '/play/names', value: '$payload.names' },
     ],
   },
@@ -367,8 +369,12 @@ export const ACTIONS = {
     { op: 'replace', path: '/play/dataValue', value: '$payload.value' },
   ] },
   'play/data-mirror': { patch: [{ op: 'add', path: '/play/data/data', value: '$payload' }] },
-  // the six standard form actions, writing into `/play/dataValue` —
-  // mirrored from @jarenjs/app's createFormActions, with play-scoped names
+  // the six standard form actions, writing into `/play/dataValue` under
+  // play-scoped names. Unlike @jarenjs/app's createFormActions they treat
+  // the root pointer ('') as a `replace` (the buffer always exists) and
+  // never remove a cleared member: a cleared text control keeps `''`, so
+  // clearing a root-level control cannot leave the buffer undefined for
+  // the mirror that serializes it
   'play/f-input': { patch: [{ op: { $if: [{ $or: ['$payload.element', { $eq: ['$payload.pointer', ''] }] }, 'replace', 'add'] }, path: { $concat: ['/play/dataValue', '$payload.pointer'] }, value: '$event.value' }] },
   'play/f-check': { patch: [{ op: { $if: [{ $or: ['$payload.element', { $eq: ['$payload.pointer', ''] }] }, 'replace', 'add'] }, path: { $concat: ['/play/dataValue', '$payload.pointer'] }, value: '$event.checked' }] },
   'play/f-number': { patch: [{ op: { $if: [{ $or: ['$payload.element', { $eq: ['$payload.pointer', ''] }] }, 'replace', 'add'] }, path: { $concat: ['/play/dataValue', '$payload.pointer'] }, value: { $if: [{ $ne: ['$event.value', ''] }, { $number: '$event.value' }, null] } }] },

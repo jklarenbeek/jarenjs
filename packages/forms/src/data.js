@@ -13,7 +13,7 @@
  * cached by pointer string and reads are allocation-free.
  */
 
-import { equalsJson, setObjectMember } from '@jarenjs/core/object';
+import { equalsJson, isJsonObject, setObjectMember } from '@jarenjs/core/object';
 import { createBoundedCache } from '@jarenjs/core/cache';
 import {
   parseJSONPointer,
@@ -110,15 +110,20 @@ export function setValueAtPointer(data, pointer, value) {
 
 /**
  * Return a copy of `data` with the item at `index` removed from the array
- * at `pointer`.
+ * at `pointer`. The index is an integer or its canonical decimal text
+ * (`'1'`, as a dataset or a payload carries it); an index that names no
+ * item (negative, fractional, past the end, any other text) removes nothing
+ * and returns `data` itself.
  * @param {any} data
  * @param {string} pointer - Pointer to the ARRAY
- * @param {number} index
+ * @param {number | string} index
  * @returns {any}
  */
 export function removeItemAt(data, pointer, index) {
   const arr = getValueAtPointer(data, pointer);
   if (!Array.isArray(arr)) return data;
+  if (typeof index === 'string' && /^(?:0|[1-9][0-9]*)$/.test(index)) index = Number(index);
+  if (!Number.isInteger(index) || index < 0 || index >= arr.length) return data;
   const next = arr.slice();
   next.splice(index, 1);
   return setValueAtPointer(data, pointer, next);
@@ -180,8 +185,7 @@ function collectChanged(previous, current, pointer, out) {
       out.push(`${pointer}/${i}`); // added or removed tail slot
     return;
   }
-  if (previous !== null && typeof previous === 'object' && !Array.isArray(previous)
-    && current !== null && typeof current === 'object' && !Array.isArray(current)) {
+  if (isJsonObject(previous) && isJsonObject(current)) {
     const before = Object.keys(previous);
     const after = Object.keys(current);
     // Same members in the same order — which is what a copy-on-write
@@ -285,7 +289,10 @@ export function createItemValue(itemField) {
 /**
  * Coerce a raw input string (what an HTML input yields) into the typed
  * value for a field. An empty string means "absent" (undefined) so that
- * required/optional semantics stay correct.
+ * required/optional semantics stay correct. A number field keeps the raw
+ * string unless it reads as a finite number, so blank or non-finite text
+ * (`'  '`, `'Infinity'`) is reported as a type error instead of becoming
+ * `0` or a value JSON cannot carry.
  * @param {import('./model.js').FormField} field
  * @param {any} raw - Raw input value (string, or boolean for checkboxes)
  * @returns {any}
@@ -297,10 +304,10 @@ export function parseFieldInput(field, raw) {
   switch (field.kind) {
     case 'number':
     case 'integer': {
-      const num = Number(raw);
-      // Keep the raw string when it is not numeric, so validation can
-      // report a type error instead of silently swallowing the input.
-      return Number.isNaN(num) ? raw : num;
+      const num = typeof raw === 'string' && raw.trim() === '' ? NaN : Number(raw);
+      // Keep the raw string when it is not a finite number, so validation
+      // can report a type error instead of silently swallowing the input.
+      return Number.isFinite(num) ? num : raw;
     }
     case 'enum': {
       // Map the selected option string back to the typed enum value

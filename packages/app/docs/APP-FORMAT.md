@@ -700,7 +700,9 @@ swallowing sink recovers it; an escaping failure rolls back as
 `JA0007`). A missing target is a diagnosable
 `JA2014`, never a silent no-op; sibling intents still resolve.
 `measure` dispatches `done` with `{ id, ref, rect }`, the JSON-reduced
-bounding rect. `app.destroy()` cancels pending intents through the
+bounding rect; a `done` dispatch that throws surfaces its error after the
+batch, and sibling intents still resolve (upgrade note: it used to drop
+the rest of the batch). `app.destroy()` cancels pending intents through the
 handler's `dispose()`. A headless app never flushes — the queue is a
 documented no-op there.
 

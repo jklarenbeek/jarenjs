@@ -116,6 +116,26 @@ describe('the post-render focus queue (APP-FORMAT §8.4)', function () {
       'the valid sibling intent still ran');
   });
 
+  it('a measure completion that throws surfaces its error after the batch, and sibling intents still resolve', function () {
+    const calls = [];
+    const node = (ref) => ({
+      getAttribute: (name) => (name === 'data-ref' ? ref : null),
+      childNodes: [],
+      focus: () => calls.push(`focus:${ref}`),
+      getBoundingClientRect: () => ({ x: 1, y: 2, width: 3, height: 4, top: 2, left: 1, right: 4, bottom: 6 }),
+    });
+    const container = { getAttribute: () => null, childNodes: [node('a'), node('b'), node('c')] };
+    const focus = createFocusEffect({ container });
+    const thrown = new Error('completion refused');
+    focus({ ref: 'a', op: 'measure', done: 'measured', id: 7 }, () => { throw thrown; });
+    focus({ ref: 'b' }, () => {});
+    focus({ ref: 'c', op: 'measure', done: 'measured', id: 8 }, (name, payload) => calls.push(`${name}:${payload.id}`));
+    assert.throws(() => focus.flush(), (error) => error === thrown);
+    assert.deepStrictEqual(calls, ['focus:b', 'measured:8']);
+    focus.flush();
+    assert.deepStrictEqual(calls, ['focus:b', 'measured:8'], 'the batch is spent, not replayed');
+  });
+
   it('app.destroy() disposes the queue: pending intents are canceled', function () {
     const { app, container, document, focus } = mountWithFocus(dialogDoc());
     void focus;

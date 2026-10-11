@@ -182,9 +182,9 @@ const gridNote = (status) => (status === 'error'
 
 /**
  * The hero's first bullet is the conformance claim, and it becomes the
- * measured score once the run lands: the page used to claim a round
- * 100% the honest count does not support. A headline carrying no
- * pass/total pair leaves the authored, figure-free line standing.
+ * measured score once the run lands: a round 100% would claim more than
+ * the honest count supports. A headline carrying no pass/total pair
+ * leaves the authored, figure-free line standing.
  */
 function heroWith(hero, headline) {
   const score = headline?.conformance;
@@ -243,7 +243,6 @@ export function viewModel(state) {
   // re-render with the same README returns the same vnode reference.
   if (state.readme.open) ui.readme = readmeOverlay(state.readme);
 
-
   // The footer's provenance line, likewise global — but only once the
   // generated file has landed: a page that cannot say which revision it
   // is says nothing rather than guessing.
@@ -273,11 +272,7 @@ const buildLine = memo1((build) => {
   };
 });
 
-
-
-/** Progress entries the panel shows before it says "and N more". */
-
-
+/** The README dialog's overlay model, memoized on the readme slice. */
 const readmeOverlay = memo1((readme) => ({
   title: readme.title,
   status: readme.status,

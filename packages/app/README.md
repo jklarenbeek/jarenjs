@@ -169,7 +169,7 @@ Jaren owns state and orchestration; the widget owns its DOM. Its `props` come fr
 
 Two IDE-shaped primitives ship ready to bind, so a two-pane surface (the studio, the play playground) doesn't re-implement them:
 
-- **`createSplitterWidget({ action, grid, rail, cssVar, min, max, step })`** — a drag handle over a pane boundary. It drives a CSS ratio variable *live* during a drag (no per-move dispatch — that would flood the transaction log and undo) and commits the ratio through `action` on pointer-up only, plus keyboard resize as an ARIA separator. Register it like any widget; parameterize the grid/rail selectors, the CSS variable and the commit action so each surface binds its own.
+- **`createSplitterWidget({ action, grid, rail, cssVar, min, max, step })`** — a drag handle over a pane boundary. It drives a CSS ratio variable *live* during a drag (no per-move dispatch — that would flood the transaction log and undo) and commits the ratio through `action` on pointer-up only, plus keyboard resize as an ARIA separator. Register it like any widget; parameterize the grid/rail selectors, the CSS variable and the commit action so each surface binds its own. The widget's `ratio` prop is clamped to `min`…`max`; one that is not a finite number is the midpoint (upgrade note: it used to write `NaN` into the layout).
 
   Widget props accept `axis: 'x' | 'y'` (default `'x'`) for side-by-side or
   stacked panes. The widget also writes `${cssVar}-first` and

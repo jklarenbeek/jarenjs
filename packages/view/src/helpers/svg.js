@@ -71,15 +71,16 @@ export function anchorForAngle(angle) {
  * become CSS custom properties on the element (via `theme.cssVars`) so the
  * stylesheet can re-theme without a re-render, and `theme.tokens.fontFamily`
  * is written as the base font.
- * @param {string} className the root element's `class`
- * @param {number} width
- * @param {number} height
- * @param {{ cssVars: Record<string,string>, tokens: Record<string,string> }} theme
+ *
  * `max-width: 100%` is written inline so a standalone SVG never overflows its
  * container. It is inline because the theme variables are, and that means it
  * outranks any stylesheet — so a caller whose content must NOT be scaled down
  * (a diagram, where shrinking scales the text below legibility) has to opt out
  * here rather than in CSS.
+ * @param {string} className the root element's `class`
+ * @param {number} width
+ * @param {number} height
+ * @param {{ cssVars: Record<string,string>, tokens: Record<string,string> }} theme
  * @param {any[]} children
  * @param {string} [key]
  * @param {{ fit?: boolean, fontFamily?: string }} [options] `fit: false` omits

@@ -273,8 +273,3 @@ function safeStyle(value) {
   }
   return value;
 }
-
-export {
-  SAFE_HTML_TAGS, SAFE_SVG_TAGS, DANGEROUS_PROPS,
-  URL_ATTRS, URL_LIST_ATTRS, RE_SAFE_NAME,
-};

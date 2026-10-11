@@ -84,6 +84,19 @@ describe('binance feed (offline, vendored payloads)', function () {
     });
   });
 
+  it('the REST seed is not feed traffic: it adds candles, not messages or drops', function () {
+    const feed = createBinanceFeed();
+    feed.seedKlines(REST_KLINES);
+    assert.strictEqual(feed.klineData().candles.length, 2);
+    assert.deepStrictEqual(feed.stats(), { messages: 0, drops: 0 });
+    // a malformed seed row is skipped like a short one, and counts nowhere
+    feed.seedKlines(JSON.stringify([[1721556000000, '1', '2', '3', '4'], ['not a time', '1', '2', '3', '4']]));
+    assert.strictEqual(feed.klineData().candles.length, 3);
+    assert.deepStrictEqual(feed.stats(), { messages: 0, drops: 0 });
+    feed.handleMessage(MINITICKER('BTCUSDT', 1000, 64000));
+    assert.deepStrictEqual(feed.stats(), { messages: 1, drops: 0 });
+  });
+
   it('a malformed message increments drops and never throws', function () {
     const feed = createBinanceFeed();
     feed.handleMessage(MINITICKER('BTCUSDT', 1000, 100));

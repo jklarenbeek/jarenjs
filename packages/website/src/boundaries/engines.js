@@ -7,6 +7,7 @@
  * (`#/play`) — this module only keeps what other live surfaces share.
  */
 
+import { isJsonObject } from '@jarenjs/core/object';
 import { compileJsonQuery } from '@jarenjs/json';
 import {
   compileJsltStylesheet,
@@ -61,11 +62,16 @@ export function runQuery(inputs) {
     if (inputs.externals !== '') {
       const parsed = parseJson(inputs.externals, 'externals');
       if (parsed.node) return [parsed.node];
+      // externals are named values: anything but an object has no names to bind
+      if (!isJsonObject(parsed.value)) {
+        return [callout('Externals must be an object',
+          'The externals input is a JSON object of name → value, one member per external the query uses.')];
+      }
       externals = parsed.value;
     }
     const compiled = timed(() => compileJsonQuery(query.value, { compileTypeTest, ...registryOptions }));
     const fn = compiled.value;
-    const unbound = fn.externals.filter((name) => !(name in externals));
+    const unbound = fn.externals.filter((name) => !Object.hasOwn(externals, name));
     if (unbound.length > 0) {
       return [callout('Unbound externals',
         `This query needs externals not provided: ${unbound.join(', ')}. Add them to the externals input as JSON.`)];

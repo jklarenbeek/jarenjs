@@ -17,7 +17,7 @@ import { STUDIO_TEMPLATES } from './appTemplates.js';
 /** The live starter app: the `h1` reflects `state.title` (so editing the
  * state block hot-updates it), an UNCONTROLLED scratch input (it survives
  * a hot-update — a reboot clears it), and a string-only action. */
-export const STARTER_APP = JSON.stringify({
+const STARTER_APP = JSON.stringify({
   state: { title: 'Hello from the studio', note: 'edit me' },
   view: [{
     match: '$',
@@ -42,7 +42,7 @@ const UPPER_JSLT = JSON.stringify({
 const UPPER_DATA = JSON.stringify({ name: 'Ada', tags: ['compiler', 'json'] }, null, 2);
 
 /** The default layout every seed opens with. */
-export const PROJECT_LAYOUT = Object.freeze({ mode: 'classic', ratio: 0.5, autorun: true });
+const PROJECT_LAYOUT = Object.freeze({ mode: 'classic', ratio: 0.5, autorun: true });
 
 /**
  * One `@jarenjs/app` document as a single-`app`-file project — how a
@@ -162,6 +162,18 @@ export function projectTemplate(id) {
 export const STARTER_PROJECT = projectTemplate('starter');
 
 /**
+ * The layout a shared project carries over the defaults. The split ratio
+ * is a number the layout is computed from, so anything but a finite one
+ * (text, `null`, a number too large to be one) is the default split.
+ * @param {any} layout
+ */
+function sharedLayout(layout) {
+  const given = layout !== null && typeof layout === 'object' ? layout : {};
+  const ratio = Number.isFinite(given.ratio) ? given.ratio : PROJECT_LAYOUT.ratio;
+  return { ...PROJECT_LAYOUT, ...given, ratio };
+}
+
+/**
  * An inbound share snapshot → an openable project, or null for a foreign
  * shape. Two codecs open here: `{ e: 'project', i: { project } }` (a whole
  * project) and the Studio's `{ e: 'studio', i: { doc } }` (a single app
@@ -188,6 +200,6 @@ export function sharedProject(snapshot) {
     name: typeof p.name === 'string' ? p.name : 'Shared project',
     files,
     active: files.some((f) => f.name === p.active) ? p.active : files[0].name,
-    layout: { ...PROJECT_LAYOUT, ...(p.layout !== null && typeof p.layout === 'object' ? p.layout : {}) },
+    layout: sharedLayout(p.layout),
   };
 }

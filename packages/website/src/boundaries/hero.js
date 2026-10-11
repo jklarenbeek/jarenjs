@@ -27,7 +27,7 @@
 
 import { compileContract } from '@jarenjs/contract';
 import { openLocalClient } from '@jarenjs/contract/local';
-import { isJsonValue } from '@jarenjs/core/object';
+import { isJsonObject, isJsonValue } from '@jarenjs/core/object';
 
 import heroDoc from '../content/hero.contract.json' with { type: 'json' };
 import { formatJson } from '../lib/format.js';
@@ -100,9 +100,7 @@ const stage = (key, title, state, summary, artifact) => ({
 });
 
 /** How many members an object value carries; `0` for anything else. */
-const members = (value) => (value !== null && typeof value === 'object' && !Array.isArray(value)
-  ? Object.keys(value).length
-  : 0);
+const members = (value) => (isJsonObject(value) ? Object.keys(value).length : 0);
 
 /** `1 violation` / `3 violations` — the count is the run's. */
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;

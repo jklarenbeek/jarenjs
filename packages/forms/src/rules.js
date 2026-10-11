@@ -41,6 +41,8 @@
  * template layer (packages/json/docs/JSLT-PRELUDE.md section 7).
  */
 
+import { isJsonObject } from '@jarenjs/core/object';
+
 import {
   compileJsonQuery,
   JsonQueryRuntimeError,
@@ -48,12 +50,12 @@ import {
 
 import {
   compileJSONPointer,
+  encodeJSONPointerSegment,
   JSONPOINTER_NOTHING,
 } from '@jarenjs/json/pointer';
 
-import { escapePointerKey } from './model.js';
-
 import { setValueAtPointer, changedPointers } from './data.js';
+import { resolveSchema } from './model.js';
 
 import {
   queryDependencies, mergeDependencies, dependencyTouched, ALL_POINTERS,
@@ -62,7 +64,7 @@ import {
 import {
   compileMessageTemplate,
   renderFormsMessage,
-  formsMessages,
+  lookupFormsMessage,
 } from './messages.js';
 
 /** The externals every rule query may reference, and no others. */
@@ -84,10 +86,18 @@ const DEFAULT_ASSERT_MSGID = 'x-form/assert';
  */
 
 /**
- * Marker for the array-item position in a template pointer's part list
- * (the `-` segment of `/lines/-`): evaluation expands it per element.
+ * The array-item position in a template pointer's part list (the `-`
+ * segment of `/lines/-`): evaluation expands it per element from `from`
+ * on. The elements before it are tuple slots, each with rules of its own,
+ * and an item template never applies to them.
+ * @typedef {{ readonly from: number }} ItemSlot
  */
-const ITEM = Symbol('forms.ItemTemplate');
+
+/** @param {number} from @returns {ItemSlot} */
+const itemSlot = (from) => ({ from });
+
+/** @param {string|ItemSlot} part @returns {part is ItemSlot} */
+const isItemSlot = (part) => typeof part !== 'string';
 
 /**
  * Compile one rule member, prefixing compile errors with the field's
@@ -127,8 +137,8 @@ function compileRuleQuery(doc, fieldPointer, member, options) {
 /**
  * @typedef {object} CompiledFieldRules
  * @property {string} pointer - The field's data pointer (template pointers keep `-`)
- * @property {Array<string|symbol>} parts - Decoded segments; ITEM marks an array-item slot
- * @property {boolean} templated - Whether `parts` contains an ITEM slot
+ * @property {Array<string|ItemSlot>} parts - Decoded segments; an {@link ItemSlot} marks an array-item position
+ * @property {boolean} templated - Whether `parts` contains an item slot
  * @property {((root: any) => any)|null} getValue - Compiled getter (non-template fields)
  * @property {function|null} visible
  * @property {function|null} enabled
@@ -160,7 +170,7 @@ function compileRuleMessageSpec(raw, fieldPointer) {
     throw new Error(`${fieldPointer} x-form/message: 'message' must be a string`);
   if (spec.$msgid === undefined && spec.message === undefined)
     throw new Error(`${fieldPointer} x-form/message: needs '$msgid' and/or 'message'`);
-  if (spec.params !== undefined && (spec.params === null || typeof spec.params !== 'object' || Array.isArray(spec.params)))
+  if (spec.params !== undefined && !isJsonObject(spec.params))
     throw new Error(`${fieldPointer} x-form/message: 'params' must be an object`);
   return {
     msgid: spec.$msgid !== undefined ? spec.$msgid : null,
@@ -223,7 +233,7 @@ function walkField(field, parts, rules, queryOptions) {
   const raw = field.rules;
   if (raw != null) {
     const pointer = field.pointer;
-    const templated = parts.includes(ITEM);
+    const templated = parts.some(isItemSlot);
     rules.push({
       pointer,
       parts,
@@ -251,7 +261,7 @@ function walkField(field, parts, rules, queryOptions) {
       walkField(field.tuple[i], [...parts, String(i)], rules, queryOptions);
   }
   if (field.item)
-    walkField(field.item, [...parts, ITEM], rules, queryOptions);
+    walkField(field.item, [...parts, itemSlot(field.tuple ? field.tuple.length : 0)], rules, queryOptions);
 }
 
 /**
@@ -261,14 +271,14 @@ function walkField(field, parts, rules, queryOptions) {
  * slot, since adding or removing an element changes which pointers the
  * rule even produces.
  * @param {any} raw - The authored `x-form` object
- * @param {Array<string|symbol>} parts - Decoded path segments; ITEM marks a slot
+ * @param {Array<string|ItemSlot>} parts - Decoded path segments; an item slot ends the field's own location
  * @returns {string[]}
  */
 function fieldDependencies(raw, parts) {
   let own = '';
   for (const part of parts) {
-    if (part === ITEM) break;
-    own += `/${escapePointerKey(/** @type {string} */ (part))}`;
+    if (isItemSlot(part)) break;
+    own += `/${encodeJSONPointerSegment(part)}`;
   }
   return mergeDependencies([
     [own],
@@ -322,10 +332,10 @@ function evaluateOne(rule, data, value, pointer, ext, results, catalog, written)
       let message;
       if (spec !== null) {
         if (spec.msgid !== null) {
-          // D-M5 chain: active catalog, then built-in English, then the
-          // spec's inline template, then the assert default text
-          let render = catalog !== undefined ? catalog[spec.msgid] : undefined;
-          if (render === undefined) render = formsMessages[spec.msgid];
+          // the message resolves through the active catalog, then built-in
+          // English, then the spec's inline template, then the assert
+          // default text
+          const render = lookupFormsMessage(catalog, spec.msgid);
           if (render !== undefined) message = render(params);
           else if (spec.render !== null) message = spec.render(params);
           else message = renderFormsMessage(catalog, DEFAULT_ASSERT_MSGID, params);
@@ -355,9 +365,27 @@ function ebvFailOpen(query, data, ext) {
 }
 
 /**
+ * The member a pointer segment names, read the way the pointer engine
+ * reads it: an object's OWN member, an array's element at a canonical
+ * index. Anything else — an inherited name (`constructor`), an array's
+ * `length`, a non-index — is absent.
+ * @param {any} node
+ * @param {string} segment
+ * @returns {any}
+ */
+function memberAt(node, segment) {
+  if (node === null || typeof node !== 'object') return undefined;
+  if (Array.isArray(node)) {
+    return /^(?:0|[1-9][0-9]*)$/.test(segment) ? node[Number(segment)] : undefined;
+  }
+  return Object.hasOwn(node, segment) ? node[segment] : undefined;
+}
+
+/**
  * Expand a template rule against the actual data: walk the decoded parts,
- * and at each ITEM slot fan out over the array's real length, binding
- * `value`/`pointer` per element (`/lines/-/amount` -> `/lines/2/amount`).
+ * and at each item slot fan out over the array's elements from the slot's
+ * first index, binding `value`/`pointer` per element
+ * (`/lines/-/amount` -> `/lines/2/amount`).
  *
  * This is the compiled-once/dispatch-many shape the JSLT template layer
  * needs (JSLT-PRELUDE.md section 3, `$apply`): ONE compiled closure, one
@@ -368,18 +396,16 @@ function expandItemRule(rule, data, node, partIndex, pointer, ext, results, cata
   const parts = rule.parts;
   for (let i = partIndex; i < parts.length; i++) {
     const part = parts[i];
-    if (part === ITEM) {
+    if (isItemSlot(part)) {
       if (!Array.isArray(node)) return; // nothing to expand into
-      for (let index = 0; index < node.length; index++) {
+      for (let index = part.from; index < node.length; index++) {
         expandItemRule(rule, data, node[index], i + 1, `${pointer}/${index}`,
           ext, results, catalog, written);
       }
       return;
     }
-    pointer = `${pointer}/${escapePointerKey(part)}`;
-    node = (node != null && typeof node === 'object')
-      ? node[/** @type {string} */ (part)]
-      : undefined;
+    pointer = `${pointer}/${encodeJSONPointerSegment(part)}`;
+    node = memberAt(node, part);
   }
   evaluateOne(rule, data, node, pointer, ext, results, catalog, written);
 }
@@ -676,12 +702,12 @@ function pathNameSelector(key) {
  * const validate = new JarenValidator().compile(submitSchema); // caller-side
  */
 export function formRulesToQueryAssertions(schema) {
-  if (schema == null || typeof schema !== 'object' || Array.isArray(schema))
+  if (!isJsonObject(schema))
     return schema;
 
   /** @type {Array<{query: any, pointer: string, message: unknown}>} */
   const assertions = [];
-  collectAsserts(schema, '', ['$'], assertions);
+  collectAsserts(schema, '', ['$'], [], assertions, [], schema, 0);
   if (assertions.length === 0)
     return schema;
 
@@ -704,7 +730,7 @@ export function formRulesToQueryAssertions(schema) {
 function assertMessageSpec(message, pointer) {
   if (typeof message === 'string')
     return { message, params: { pointer } };
-  if (message != null && typeof message === 'object' && !Array.isArray(message)) {
+  if (isJsonObject(message)) {
     const spec = /** @type {any} */ (message);
     return { ...spec, params: { pointer, ...(spec.params || {}) } };
   }
@@ -717,6 +743,25 @@ function assertMessageSpec(message, pointer) {
  * staying inside the engine's variable grammar.
  */
 const ITEM_VAR = '_item';
+
+/** The index variable of an element that is itself an array (see {@link assertQuery}). */
+const INDEX_VAR = '_index';
+
+/**
+ * Whether the elements an item template describes may be arrays. A schema
+ * names an array by `type`, or by having none and describing no object.
+ * @param {any} schema
+ * @returns {boolean}
+ */
+function mayBeArray(schema) {
+  if (!isJsonObject(schema)) return false;
+  const type = schema.type;
+  if (type === undefined) {
+    return schema.properties === undefined && schema.patternProperties === undefined
+      && schema.additionalProperties === undefined;
+  }
+  return type === 'array' || (Array.isArray(type) && type.includes('array'));
+}
 
 /**
  * Append one path selector to the last chunk of a chunk list, returning
@@ -740,6 +785,11 @@ function extendChunks(chunks, selector) {
  * absent location arrives as `null`, exactly as the keystroke path
  * binds it.
  *
+ * A sequence splices the arrays it holds, so an `$every` over elements
+ * that are themselves arrays would iterate their members instead. Such a
+ * level (`spread[k]`) walks the element positions instead: `$range` over
+ * the indexes, and the element bound whole with `$let` and `$get`.
+ *
  * A field's own and ancestor `visible` rules guard its assert, each
  * with the value/pointer bindings of the field that owns the rule:
  * the assert holds vacuously while the field is hidden. That is what
@@ -748,6 +798,7 @@ function extendChunks(chunks, selector) {
  * unguarded copy would let a field the operator cannot see or fix block
  * submit forever.
  * @param {string[]} chunks
+ * @param {boolean[]} spread - Per expansion, whether its elements may be arrays
  * @param {any} assert - The authored rule document
  * @param {string} pointer - The field's data pointer
  * @param {any} [visible] - The field's `visible` rule, when it has one
@@ -755,7 +806,7 @@ function extendChunks(chunks, selector) {
  *   Visibility rules of ancestor fields, in root-to-parent order
  * @returns {any} The wrapped query document
  */
-function assertQuery(chunks, assert, pointer, visible, ancestors = []) {
+function assertQuery(chunks, spread, assert, pointer, visible, ancestors = []) {
   const depth = chunks.length - 1;
   const at = (k) => k === 0 ? chunks[0] : `$${ITEM_VAR}${k - 1}${chunks[k]}`;
   const body = visible === undefined
@@ -781,48 +832,86 @@ function assertQuery(chunks, assert, pointer, visible, ancestors = []) {
       $return: ancestor.visible,
     } }, query] };
   }
-  for (let k = depth - 1; k >= 0; k--)
-    query = { $every: { [`${ITEM_VAR}${k}`]: at(k) }, $satisfies: query };
+  for (let k = depth - 1; k >= 0; k--) {
+    if (!spread[k]) {
+      query = { $every: { [`${ITEM_VAR}${k}`]: at(k) }, $satisfies: query };
+      continue;
+    }
+    // the expansion's last selector is `[*]` or `[from:]`: the array is the
+    // path before it, and the elements are those from `from` on
+    const [, list, selector] = /** @type {RegExpExecArray} */ (/^(.*)\[(\*|\d+:)\]$/s.exec(at(k)));
+    const from = selector === '*' ? 0 : Number.parseInt(selector, 10);
+    query = {
+      $every: { [`${INDEX_VAR}${k}`]: { $range: [from, { $sub: [{ $count: `${list}[*]` }, 1] }] } },
+      $satisfies: { $let: { [`${ITEM_VAR}${k}`]: { $get: [list, `$${INDEX_VAR}${k}`] } }, $return: query },
+    };
+  }
   return query;
 }
 
+/** The depth at which `buildFormModel` stops building fields. */
+const MAX_REF_DEPTH = 24;
+
 /**
- * Depth-first collection of `x-form.assert` documents with the pointer
- * and the path chunks of their data location.
+ * The schema a `$ref` names, with its siblings over it — resolved as
+ * `buildFormModel` resolves it, so the copy reads the schema the form
+ * was built from. A schema without a `$ref` is itself.
+ * @param {any} schema
+ * @param {any} root
+ * @returns {any}
  */
-function collectAsserts(schema, pointer, chunks, out, ancestors = []) {
-  if (schema == null || typeof schema !== 'object' || Array.isArray(schema))
+function dereference(schema, root) {
+  return typeof schema.$ref === 'string' ? resolveSchema(schema, root) : schema;
+}
+
+/**
+ * Depth-first collection of `x-form.assert` documents with the pointer,
+ * the path chunks of their data location and, per expansion, whether its
+ * elements may be arrays.
+ */
+function collectAsserts(schema, pointer, chunks, spread, out, ancestors, root, depth) {
+  // the model's depth limit: a recursive `$ref` ends where the form ends
+  if (!isJsonObject(schema) || depth > MAX_REF_DEPTH)
     return;
+  schema = dereference(schema, root);
 
   const rules = schema['x-form'];
-  if (rules != null && typeof rules === 'object' && !Array.isArray(rules)
-      && rules.assert !== undefined) {
+  if (isJsonObject(rules) && rules.assert !== undefined) {
     out.push({
-      query: assertQuery(chunks, rules.assert, pointer, rules.visible, ancestors),
+      query: assertQuery(chunks, spread, rules.assert, pointer, rules.visible, ancestors),
       pointer,
       message: rules.message,
     });
   }
-  const parents = rules != null && typeof rules === 'object' && !Array.isArray(rules)
-      && rules.visible !== undefined
+  const parents = isJsonObject(rules) && rules.visible !== undefined
     ? [...ancestors, { chunks, pointer, visible: rules.visible }]
     : ancestors;
 
   if (schema.properties != null && typeof schema.properties === 'object') {
     for (const [key, sub] of Object.entries(schema.properties)) {
-      collectAsserts(sub, `${pointer}/${escapePointerKey(key)}`,
-        extendChunks(chunks, pathNameSelector(key)), out, parents);
+      collectAsserts(sub, `${pointer}/${encodeJSONPointerSegment(key)}`,
+        extendChunks(chunks, pathNameSelector(key)), spread, out, parents, root, depth + 1);
     }
   }
-  if (Array.isArray(schema.prefixItems)) {
-    for (let i = 0; i < schema.prefixItems.length; i++)
-      collectAsserts(schema.prefixItems[i], `${pointer}/${i}`, extendChunks(chunks, `[${i}]`), out, parents);
+  // the same split as buildFormModel: fixed slots from `prefixItems` (or an
+  // `items` array), and a template for the elements after them — `items`
+  // beside `prefixItems`, `additionalItems` beside an `items` array
+  const tuple = Array.isArray(schema.prefixItems) ? schema.prefixItems
+    : Array.isArray(schema.items) ? schema.items : null;
+  if (tuple !== null) {
+    for (let i = 0; i < tuple.length; i++)
+      collectAsserts(tuple[i], `${pointer}/${i}`, extendChunks(chunks, `[${i}]`), spread, out, parents, root, depth + 1);
   }
-  if (schema.items != null && typeof schema.items === 'object' && !Array.isArray(schema.items))
-    collectAsserts(schema.items, `${pointer}/-`, [...extendChunks(chunks, '[*]'), ''], out, parents);
+  const rest = Array.isArray(schema.items) ? schema.additionalItems : schema.items;
+  if (isJsonObject(rest)) {
+    const from = tuple === null ? 0 : tuple.length;
+    collectAsserts(rest, `${pointer}/-`,
+      [...extendChunks(chunks, from === 0 ? '[*]' : `[${from}:]`), ''],
+      [...spread, mayBeArray(isJsonObject(rest) ? dereference(rest, root) : rest)], out, parents, root, depth + 1);
+  }
   if (Array.isArray(schema.allOf)) {
     for (const branch of schema.allOf)
-      collectAsserts(branch, pointer, chunks, out, parents);
+      collectAsserts(branch, pointer, chunks, spread, out, parents, root, depth + 1);
   }
 }
 

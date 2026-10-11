@@ -3,7 +3,7 @@
 import { compileContract } from '@jarenjs/contract';
 import { createCommand } from '@jarenjs/contract/command';
 import { open, createDbReceipts } from '@jarenjs/linq/db';
-import { canonicalizeJson, canonicalSha256 } from '@jarenjs/json/canonical';
+import { cloneJson, canonicalSha256 } from '@jarenjs/json/canonical';
 import { compileRulePlan, selectRuleChanges } from '@jarenjs/json/rules';
 import { compileJSONPointerSetter } from '@jarenjs/json/write';
 import { createTypeTestCompiler } from '@jarenjs/validate/query';
@@ -62,7 +62,7 @@ export async function openRuleExample({ driver, count = 64, authorize = () => tr
     });
     return { client, command: {
       async execute(value, context = {}) {
-        const input = JSON.parse(canonicalizeJson(value));
+        const input = cloneJson(value);
         return command.execute(input, { ...context, ruleKeyHash: await canonicalSha256(input.key), ruleRequestHash: await canonicalSha256(input) });
       },
     },

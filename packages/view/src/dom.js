@@ -57,15 +57,17 @@ import { createSafePolicy } from './safe.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
-/** Props that are renderer instructions, never written to the DOM. */
-const SKIP_PROPS = { key: true, on: true, memo: true };
+/** Props that are renderer instructions, never written to the DOM. A Set,
+ * so a prop named like an `Object.prototype` member (`constructor`,
+ * `toString`) is an ordinary prop. */
+const SKIP_PROPS = new Set(['key', 'on', 'memo']);
 
 /**
  * Widget-vnode props that configure the widget instead of the host
  * element. Every other prop (`key`/`on` included) flows through
  * `setProp` exactly as on any element vnode.
  */
-const WIDGET_SKIP_PROPS = { name: true, props: true, tag: true };
+const WIDGET_SKIP_PROPS = new Set(['name', 'props', 'tag']);
 
 /**
  * @callback EventBindingHandler
@@ -668,7 +670,7 @@ function patchProps(ctx, node, oldProps, newProps, ns) {
   if (oldProps !== newProps) {
     let aliased = false;
     for (const name in oldProps) {
-      if (!(name in newProps)) {
+      if (!Object.hasOwn(newProps, name)) {
         if (isAliased(name)) aliased = true;
         else setProp(ctx, node, name, oldProps[name], undefined, ns);
       }
@@ -904,10 +906,10 @@ function setProp(ctx, node, name, oldValue, newValue, ns) {
       if (ctx.onUnsafe !== null) ctx.onUnsafe({ kind: 'event', name: 'on' });
       return;
     }
-    setEvents(ctx, node, oldValue, newValue);
+    setEvents(ctx, node, newValue);
     return;
   }
-  if (name in SKIP_PROPS) return;
+  if (SKIP_PROPS.has(name)) return;
   if (ctx.policy !== null) {
     const decided = ctx.policy.prop(name, newValue);
     // A rejected NAME (scripting sink, inline `on*`, injection-shaped) is
@@ -957,7 +959,10 @@ function setProp(ctx, node, name, oldValue, newValue, ns) {
       return;
     }
   }
-  if (ns === null && name in node && name !== 'list' && name !== 'form') {
+  // A name every object inherits (`constructor`, `toString`) is never a DOM
+  // property to write: the write would shadow the method, where the markup
+  // writes an attribute.
+  if (ns === null && name in node && name !== 'list' && name !== 'form' && !(name in Object.prototype)) {
     if (newValue == null || newValue === false) removeProperty(node, name, oldValue);
     else writeProperty(node, name, newValue);
   }
@@ -1000,13 +1005,14 @@ function eventProxy(event) {
 }
 
 /**
- * Reconcile the `on` prop: `{ [eventType]: binding }`.
+ * Reconcile the `on` prop: `{ [eventType]: binding }`, against the
+ * bindings the node holds (the node, not the old vnode, is what carries
+ * the listeners).
  * @param {any} ctx
  * @param {any} node
- * @param {Record<string, any> | undefined} oldOn
  * @param {Record<string, any> | undefined} newOn
  */
-function setEvents(ctx, node, oldOn, newOn) {
+function setEvents(ctx, node, newOn) {
   const prev = node.__jarenOn ?? EMPTY_PROPS;
   const next = newOn ?? EMPTY_PROPS;
   node.__jarenOn = next;
@@ -1062,7 +1068,7 @@ function createWidgetNode(ctx, vnode, ns) {
     ? ctx.doc.createElementNS(ns, tag)
     : ctx.doc.createElement(tag);
   for (const name in props) {
-    if (name in WIDGET_SKIP_PROPS) continue;
+    if (WIDGET_SKIP_PROPS.has(name)) continue;
     setProp(ctx, node, name, undefined, props[name], ns);
   }
   node.__jarenWidget = {
@@ -1201,13 +1207,13 @@ function patchWidgetNode(ctx, parent, node, oldV, newV, ns) {
 function patchWidgetProps(ctx, node, oldProps, newProps, ns) {
   if (oldProps === newProps) return;
   for (const name in oldProps) {
-    if (name in WIDGET_SKIP_PROPS) continue;
-    if (!(name in newProps)) {
+    if (WIDGET_SKIP_PROPS.has(name)) continue;
+    if (!Object.hasOwn(newProps, name)) {
       setProp(ctx, node, name, oldProps[name], undefined, ns);
     }
   }
   for (const name in newProps) {
-    if (name in WIDGET_SKIP_PROPS) continue;
+    if (WIDGET_SKIP_PROPS.has(name)) continue;
     if (oldProps[name] !== newProps[name]) {
       setProp(ctx, node, name, oldProps[name], newProps[name], ns);
     }
