@@ -316,16 +316,16 @@ column is what being one Store costs (below 1×) or gains (above):
 
 <!--fact:postgres.sessions-->
 
-Measured 2026-10-09T00:34:44.194Z: PostgreSQL 17.11 (Debian 17.11-1.pgdg12+2) (fsync=on, synchronous_commit=on, full_page_writes=on), Node 24.20.0, pg 8.23.0; 8 clients at once, each 40 one-document write transactions on keys of its own; the median of 5 rounds, each measuring every shape once.
+Measured 2026-10-11T19:18:26.349Z: PostgreSQL 17.11 (Debian 17.11-1.pgdg12+2) (fsync=on, synchronous_commit=on, full_page_writes=on), Node 24.20.0, pg 8.23.0; 8 clients at once, each 40 one-document write transactions on keys of its own; the median of 5 rounds, each measuring every shape once.
 
 | N | One store on N sessions, tx/s | N stores of one session, tx/s | One store over N stores |
 |---:|---:|---:|---:|
-| 1 | 1209 | 1244 | 0.97× |
-| 2 | 2635 | 2643 | 1.00× |
-| 4 | 4497 | 4609 | 0.98× |
-| 8 | 6300 | 6969 | 0.90× |
+| 1 | 1231 | 1304 | 0.94× |
+| 2 | 2654 | 2623 | 1.01× |
+| 4 | 4747 | 5051 | 0.94× |
+| 8 | 6706 | 7442 | 0.90× |
 
-One transaction with nothing beside it: 0.822 ms on a store of one session, 0.826 ms through the router of a store on two (0.6%). A store on one session has no router.
+One transaction with nothing beside it: 0.811 ms on a store of one session, 0.755 ms through the router of a store on two (-6.8%). A store on one session has no router.
 
 One host, client and server on one machine; each client a run of one-document transactions on keys of its own (no conflicts), every commit durable, so it waits on a disk the host shares with whatever else runs there. A store on one session runs them in turn; several sessions and separate stores let the server work on them together. No production throughput claim.
 
@@ -457,11 +457,11 @@ records matching tool versions and each recovery assertion:
 
 | Logical backup / restore server | Tables / rows | Archive bytes | Omitted metadata cases detected | Elapsed ms |
 |---|---:|---:|---:|---:|
-| 16.15 (Debian 16.15-1.pgdg12+2) | 14 / 16 | 27501 | 10 | 1080.39 |
-| 17.11 (Debian 17.11-1.pgdg12+2) | 14 / 16 | 27925 | 10 | 1022.40 |
-| 18.6 (Debian 18.6-1.pgdg12+2) | 14 / 16 | 27861 | 10 | 1052.53 |
+| 16.15 (Debian 16.15-1.pgdg12+2) | 14 / 16 | 27558 | 10 | 1459.41 |
+| 17.11 (Debian 17.11-1.pgdg12+2) | 14 / 16 | 27984 | 10 | 1011.02 |
+| 18.6 (Debian 18.6-1.pgdg12+2) | 14 / 16 | 27921 | 10 | 1542.62 |
 
-Archived WAL: 17.11 (Debian 17.11-1.pgdg12+2), 14 tables / 16 rows, 7118.10 ms; source stopped before promotion: true. Physical sequence advances are retained in the result. Power loss and fleet failover were not tested.
+Archived WAL: 17.11 (Debian 17.11-1.pgdg12+2), 14 tables / 16 rows, 5746.00 ms; source stopped before promotion: true. Physical sequence advances are retained in the result. Power loss and fleet failover were not tested.
 
 <!--/fact-->
 
@@ -476,10 +476,10 @@ retains earlier Bun memory-budget losses even when a later sample passes.
 
 | Existing SQLite adoption executable | Workload | RSS bytes | Frozen reference bytes | RSS disposition |
 |---|---|---:|---:|---|
-| bun-executable | catalog | 262373376 | 536870912 | within reference |
-| bun-executable | archive-stock | 977813504 | 1073741824 | within reference |
-| node-executable | catalog | 297455616 | 536870912 | within reference |
-| node-executable | archive-stock | 830263296 | 1073741824 | within reference |
+| bun-executable | catalog | 287760384 | 536870912 | within reference |
+| bun-executable | archive-stock | 1015595008 | 1073741824 | within reference |
+| node-executable | catalog | 290533376 | 536870912 | within reference |
+| node-executable | archive-stock | 829067264 | 1073741824 | within reference |
 
 These larger physical SQLite workloads are separate from the small build-selected managed application. Functional recovery success does not imply memory-budget success. Earlier samples remain in the resource history.
 

@@ -79,5 +79,5 @@ validate XML well-formedness, render text, or add a second dispatch language.
 
 ## 7. Cost
 
-The isolated JTLT pen costs **<!--fact:bundle.jtlt-->18,031<!--/fact--> bytes**.
+The isolated JTLT pen costs **<!--fact:bundle.jtlt-->18,420<!--/fact--> bytes**.
 Its tree probe excludes target engines and the query chain.
