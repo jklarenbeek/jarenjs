@@ -359,7 +359,9 @@ Determinism is *same input → same output values*, never same timing:
 results are keyed and port objects are assembled in edge document
 order, so completion order cannot change a value. Each node evaluates
 at most once per run; every declared node evaluates, reachable from
-the output or not.
+the output or not. The walk is iterative: a chain of any depth runs
+whatever order its nodes were declared in (a long chain declared
+output-first used to overflow the call stack).
 
 A `task` node's handler is called as
 `handler({ with, input }, signal)` — `with` is its query resolved

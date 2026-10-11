@@ -27,7 +27,7 @@ import { compileMessageCatalog } from '@jarenjs/core/message';
 import { resolveHostRuntime } from '../runtime.js';
 
 import { ContractHostError } from '../errors.js';
-import { admitOptions, admitSignal } from '../options.js';
+import { admitOptions, admitSignal, admitSubscribeOptions } from '../options.js';
 import { validateOperationInput, PORT_LOCAL_ERRORS } from '../pipeline.js';
 import { renderMessage, projectValidationDetails, verdict } from '../http/wire.js';
 import { createStreamConsumer } from '../stream/client.js';
@@ -431,26 +431,7 @@ export function openPortClient(contract, options) {
     if (route.op.kind !== 'subscribe') {
       throw new ContractHostError('JC1010', `client: '${route.op.id}' is a ${route.op.kind} operation — subscribe carries streams; use invoke`);
     }
-    admitOptions(options, ['onSnapshot', 'onPatch', 'onError', 'onEnd', 'signal', 'lastSeq', 'reconnect'],
-      (reason) => host('JC1008', reason), 'subscribe options');
-    for (const name of ['onSnapshot', 'onPatch', 'onError', 'onEnd']) {
-      const cb = /** @type {any} */ (options)[name];
-      if (cb !== undefined && typeof cb !== 'function') throw host('JC1008', `options.${name} must be a function`);
-    }
-    /** @type {number | null} */
-    let lastSeq = null;
-    if (options.lastSeq !== undefined && options.lastSeq !== null) {
-      if (!Number.isInteger(options.lastSeq) || options.lastSeq < 0) throw host('JC1008', 'options.lastSeq must be a non-negative integer');
-      lastSeq = options.lastSeq;
-    }
-    if (options.reconnect !== undefined && options.reconnect !== null) {
-      const r = /** @type {any} */ (options.reconnect);
-      admitOptions(r, ['max'], (reason) => host('JC1008', reason), 'options.reconnect');
-      if (!Number.isInteger(r.max) || r.max < 0) {
-        throw host('JC1008', 'options.reconnect must be { max } with a non-negative integer number of further attempts');
-      }
-    }
-    const signal = admitSignal(options.signal, (reason) => host('JC1008', reason));
+    const { lastSeq, signal } = admitSubscribeOptions(options, (reason) => host('JC1008', reason));
     const meta = makeMeta(route.op.id, null, null);
     const id = prefix + (++seq);
 

@@ -22,7 +22,7 @@
  */
 
 import { deepFreeze } from '@jarenjs/core/object';
-import { canonicalizeJson } from '@jarenjs/json/canonical';
+import { cloneJson } from '@jarenjs/json/canonical';
 import { compileJSONPatch } from '@jarenjs/json/patch';
 
 import { ContractHostError } from '../errors.js';
@@ -149,7 +149,7 @@ export function createRunPageHandler(options) {
   if (typeof options?.page !== 'function' || typeof options.authorize !== 'function' || !Number.isSafeInteger(maxPage) || maxPage < 1)
     throw new ContractHostError('JC1008', 'run pages need page/authorize capabilities and a finite limit');
   return async (input, context) => {
-    input = deepFreeze(JSON.parse(canonicalizeJson(input)));
+    input = deepFreeze(cloneJson(input));
     if (await options.authorize(input, context) !== true) throw new ContractHostError('JC1008', 'run observation refused');
     if (typeof input?.id !== 'string' || !input.id || !Number.isSafeInteger(input.after) || input.after < 0
       || !Number.isSafeInteger(input.limit) || input.limit < 1 || input.limit > maxPage)

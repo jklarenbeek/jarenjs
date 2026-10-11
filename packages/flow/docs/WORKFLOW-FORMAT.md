@@ -133,7 +133,12 @@ output. Inline DAGs retain their wiring and checkpoint declarations, with
 the output checkpoint enabled because a completed region is serializable.
 Consequently **every task in a composed workflow must declare a version**, and
 its registry entry must supply the same version. Intermediate undeclared
-checkpoints recompute, per FLOW-FORMAT §7.6.
+checkpoints recompute, per FLOW-FORMAT §7.6. A DAG or task that does not
+compile (JF0011, JF0013, JF0014, JF0018, JF0019 and the other DAG codes) is
+reported at its place in the workflow document: an inline DAG's path continues
+under `<state>/work/dag`, and the shorthand's unknown handler, version
+mismatch or bad `with` point at `<state>/work/task`, `/version` and `/with`.
+Before this, the path named the lowered DAG, which the author never wrote.
 
 Choices and work completions become explicit internal event names. Wait
 names receive a separate `event:` prefix, so an external caller cannot forge

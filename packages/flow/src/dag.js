@@ -23,6 +23,14 @@ import { asError, FlowCompileError, FlowRuntimeError } from './errors.js';
 
 const KINDS = ['input', 'output', 'const', 'query', 'jslt', 'task'];
 
+/**
+ * A string with something in it besides whitespace: a version, a revision,
+ * a name.
+ * @param {unknown} s
+ * @returns {s is string}
+ */
+export const nonblank = (s) => typeof s === 'string' && s.trim() !== '';
+
 /** Kinds that must not receive an inbound edge / must have one. */
 const NO_INBOUND = new Set(['input', 'const']);
 const NEEDS_INBOUND = new Set(['query', 'jslt', 'task', 'output']);
@@ -94,8 +102,7 @@ function normalizeTaskEntry(entry, name) {
     throw new TypeError(
       `compileDag: the registered handler '${name}' is not a function, nor { run, version }`);
   }
-  if (entry.version !== undefined
-    && (typeof entry.version !== 'string' || entry.version.trim() === '')) {
+  if (entry.version !== undefined && !nonblank(entry.version)) {
     throw new TypeError(
       `compileDag: the registered handler '${name}' has a version that is not a non-empty string`);
   }
@@ -104,7 +111,7 @@ function normalizeTaskEntry(entry, name) {
       `compileDag: the registered handler '${name}' has a taskVersions that is not an object`);
   }
   if (entry.taskVersions !== undefined && Object.entries(entry.taskVersions).some(([path, version]) =>
-    /~(?:[^01]|$)/.test(path) || typeof version !== 'string' || version.trim() === '')) {
+    /~(?:[^01]|$)/.test(path) || !nonblank(version))) {
     throw new TypeError(`compileDag: the registered handler '${name}' has invalid taskVersions paths or versions`);
   }
   return {
@@ -138,7 +145,7 @@ export function compileDag(doc, options) {
   }
   const checkpoint = options?.checkpoint;
   const revision = options?.revision;
-  if (revision !== undefined && (typeof revision !== 'string' || !revision.trim() || !checkpoint))
+  if (revision !== undefined && (!nonblank(revision) || !checkpoint))
     throw new TypeError('compileDag: revision must be nonblank and requires a checkpoint store');
   if (checkpoint !== undefined && (typeof checkpoint?.load !== 'function'
     || typeof checkpoint.save !== 'function'
@@ -209,8 +216,7 @@ export function compileDag(doc, options) {
           throw new FlowCompileError('JF0011',
             `task node '${id}' must carry a non-empty string "run"`, `${base}/run`);
         }
-        if (decl.version !== undefined
-          && (typeof decl.version !== 'string' || decl.version.trim() === '')) {
+        if (decl.version !== undefined && !nonblank(decl.version)) {
           throw new FlowCompileError('JF0011',
             `task node '${id}' has a "version" member that is not a non-empty string`,
             `${base}/version`);
@@ -505,14 +511,38 @@ export function compileDag(doc, options) {
       }
     }
 
-    /** @param {string} id @returns {Promise<any>} */
+    /**
+     * The node's value promise, starting it and every upstream node not yet
+     * started — dependencies first, walked without recursion so a chain
+     * thousands of nodes deep is not that many nested calls, whatever order
+     * its nodes were declared in.
+     * @param {string} id @returns {Promise<any>}
+     */
     const valueOf = (id) => {
-      let p = promises.get(id);
-      if (p === undefined) {
-        p = evaluate(/** @type {any} */ (nodes.get(id)));
-        promises.set(id, p);
+      const known = promises.get(id);
+      if (known !== undefined) return known;
+      /** @type {string[]} */
+      const started = [];
+      const seen = new Set([id]);
+      /** @type {[string, number][]} */
+      const stack = [[id, 0]];
+      while (stack.length > 0) {
+        const frame = stack[stack.length - 1];
+        const inbound = nodes.get(frame[0]).inbound;
+        if (frame[1] < inbound.length) {
+          const from = inbound[frame[1]++].from;
+          if (!seen.has(from) && !promises.has(from)) {
+            seen.add(from);
+            stack.push([from, 0]);
+          }
+        }
+        else {
+          started.push(frame[0]);
+          stack.pop();
+        }
       }
-      return p;
+      for (const next of started) promises.set(next, evaluate(nodes.get(next)));
+      return /** @type {Promise<any>} */ (promises.get(id));
     };
 
     /** @param {any} node @returns {Promise<any>} */

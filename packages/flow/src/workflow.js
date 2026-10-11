@@ -4,20 +4,18 @@
  * See docs/WORKFLOW-FORMAT.md for the document and compare-and-swap store. */
 import { deepFreeze, isJsonObject, setObjectMember } from '@jarenjs/core/object';
 import { hashContent } from '@jarenjs/core/string';
-import { canonicalizeJson } from '@jarenjs/json/canonical';
+import { canonicalizeJson, cloneJson } from '@jarenjs/json/canonical';
 import { encodeJSONPointerSegment } from '@jarenjs/json/pointer';
 import { compileJsonQuery } from '@jarenjs/json/query';
-import { compileDag } from './dag.js';
+import { compileDag, nonblank } from './dag.js';
 import { compileStatechart } from './statechart.js';
 import { asError, FlowCompileError, FlowRuntimeError } from './errors.js';
 
 const NEXT = '@workflow/next';
 const DONE = '@workflow/done';
 const ERROR = '@workflow/error';
-const clone = (value) => JSON.parse(canonicalizeJson(value));
 const fail = (reason, path) => { throw new FlowCompileError('JF0021', reason, path); };
 const malformed = (reason) => { throw new FlowRuntimeError('JF2016', reason); };
-const nonblank = (s) => typeof s === 'string' && s.trim() !== '';
 
 /** @typedef {{version: string, revision: string, document: any, fsm: any,
  * dags: Record<string, any>, sources: Record<string, string>, specs: Record<string, any>}} LoweredWorkflow */
@@ -37,7 +35,7 @@ const nonblank = (s) => typeof s === 'string' && s.trim() !== '';
  * @returns {LoweredWorkflow} */
 export function lowerWorkflow(document) {
   let doc;
-  try { doc = clone(document); }
+  try { doc = cloneJson(document); }
   catch (err) { throw new FlowCompileError('JF0021', 'workflow must be JSON', '', asError(err)); }
   if (!isJsonObject(doc) || doc.$workflow !== '0.2' || !nonblank(doc.revision))
     fail('a workflow requires "$workflow": "0.2" and a nonblank revision', '');
@@ -107,7 +105,7 @@ export function lowerWorkflow(document) {
         }
         else {
           if (Object.keys(spec.work).length !== 1 || !isJsonObject(spec.work.dag)) fail('work.dag must be a DAG document', `${id}/work/dag`);
-          dag = clone(spec.work.dag);
+          dag = cloneJson(spec.work.dag);
           // Completion is a serialization boundary even if the author elects
           // to recompute intermediate nodes. This requires all task versions.
           for (const node of Object.values(dag.nodes ?? {})) if (node?.kind === 'output') node.checkpoint = true;
@@ -170,6 +168,25 @@ export function lowerWorkflow(document) {
   return deepFreeze({ version: '0.1', revision: doc.revision, document: doc, fsm, dags, sources, specs });
 }
 
+/**
+ * A compile error raised by a state's lowered DAG, re-based onto the workflow
+ * document: a `work.dag` keeps the path inside the DAG it declared, and the
+ * `work: { task }` shorthand (whose DAG the lowering writes) maps its task
+ * node's `run`, `version` and `with` members back to the members the author
+ * wrote.
+ * @param {unknown} err
+ * @param {string} id - the work state's pointer
+ * @param {any} work - the state's `work` declaration
+ */
+function relocate(err, id, work) {
+  if (!(err instanceof FlowCompileError)) return err;
+  const inner = err.docPath ?? '';
+  const member = /^\/nodes\/task\/(run|version|with)$/.exec(inner)?.[1];
+  const docPath = Object.hasOwn(work, 'dag') ? `${id}/work/dag${inner}`
+    : `${id}/work${member === undefined ? '' : `/${member === 'run' ? 'task' : member}`}`;
+  return new FlowCompileError(err.code, err.reason, docPath, err.cause instanceof Error ? err.cause : undefined);
+}
+
 /** @typedef {{ load: (runId: string) => WorkflowSnapshot | null | Promise<WorkflowSnapshot | null>,
  * save: (runId: string, snapshot: WorkflowSnapshot, expectedGeneration: number) => boolean | Promise<boolean> }} WorkflowStore */
 /** @typedef {{ runId: string, snapshot?: any, expectedGeneration?: number,
@@ -201,11 +218,15 @@ export function compileWorkflow(document, options = {}) {
   for (const [id, doc] of Object.entries(lowered.dags)) {
     const revision = hashContent(canonicalizeJson(doc));
     setObjectMember(revisions.dags, id, revision);
-    const dag = compileDag(doc, { tasks: options.tasks, revision, checkpoint: {
-      load: (key, identity) => route(key).load(identity),
-      save: (key, node, value) => route(key).save(node, value),
-      complete: (key, result) => route(key).complete(result),
-    } });
+    let dag;
+    try {
+      dag = compileDag(doc, { tasks: options.tasks, revision, checkpoint: {
+        load: (key, identity) => route(key).load(identity),
+        save: (key, node, value) => route(key).save(node, value),
+        complete: (key, result) => route(key).complete(result),
+      } });
+    }
+    catch (err) { throw relocate(err, id, lowered.specs[id].work); }
     dags.set(id, dag);
     for (const [node, version] of Object.entries(dag.taskVersions))
       setObjectMember(taskVersions, `${id}/${node}`, version);
@@ -256,7 +277,7 @@ export function compileWorkflow(document, options = {}) {
     const persist = (mutate = undefined) => {
       writes = writes.then(async () => {
         ensureLive();
-        const next = clone(snapshot);
+        const next = cloneJson(snapshot);
         mutate?.(next);
         if (!Number.isSafeInteger(next.generation + 1)) malformed('snapshot generation exhausted');
         next.generation++;
@@ -343,7 +364,7 @@ export function compileWorkflow(document, options = {}) {
     }
     try {
       ensureLive();
-      const originalInput = clone(input ?? null);
+      const originalInput = cloneJson(input ?? null);
       let saved;
       try { saved = store ? await wait(store.load(runId)) : opts.snapshot; }
       catch (err) {
@@ -351,7 +372,7 @@ export function compileWorkflow(document, options = {}) {
         throw new FlowRuntimeError('JF2009', 'workflow store load failed', '', asError(err));
       }
       if (saved != null) {
-        saved = clone(saved);
+        saved = cloneJson(saved);
         validate(saved, originalInput);
         snapshot = saved;
       }
@@ -383,7 +404,7 @@ export function compileWorkflow(document, options = {}) {
         if (spec.kind === 'work') {
           if (snapshot.pending === null) {
             let workInput;
-            try { workInput = clone(inputs.get(id)(scope()) ?? null); }
+            try { workInput = cloneJson(inputs.get(id)(scope()) ?? null); }
             catch (err) { throw new FlowRuntimeError('JF2016', 'work input evaluation failed', `${id}/input`, asError(err)); }
             await persist((next) => { next.pending = { state: id, visit: next.context.visits[id], input: workInput, values: {} }; });
           }
@@ -399,7 +420,7 @@ export function compileWorkflow(document, options = {}) {
               bound();
               if (snapshot.pending.identity === undefined)
                 await persist((next) => { next.pending.identity = dagIdentity; });
-              return { identity: snapshot.pending.identity, values: clone(snapshot.pending.values) };
+              return { identity: snapshot.pending.identity, values: cloneJson(snapshot.pending.values) };
             },
             save(node, value) { bound(); return persist((next) => { setObjectMember(next.pending.values, node, value); }); },
             complete(result) { bound(); return persist((next) => { next.pending.result = result; }); },
@@ -409,7 +430,7 @@ export function compileWorkflow(document, options = {}) {
           try {
             if (Object.hasOwn(pending, 'result')) result = pending.result;
             else {
-              const task = dags.get(id).run(clone(pending.input), { runId: key, signal: controller.signal,
+              const task = dags.get(id).run(cloneJson(pending.input), { runId: key, signal: controller.signal,
                 resources: opts.resources,
                 onNode: (record) => observe({ type: 'node', state: id, activation: pending.visit, ...record }) });
               // A private resource lease outlives every worker that received it.
@@ -421,7 +442,7 @@ export function compileWorkflow(document, options = {}) {
             error = { code: err.code, message: err.message, nodeId: err.nodeId ?? null };
           }
           finally { routes.delete(key); }
-          const data = clone(error ? { error } : result);
+          const data = cloneJson(error ? { error } : result);
           const context = { ...snapshot.context, data };
           await apply(step(error ? ERROR : DONE, null, context), (next) => {
             next.context.data = data;
@@ -443,7 +464,7 @@ export function compileWorkflow(document, options = {}) {
           if (event) {
             const incoming = event; event = undefined;
             const r = step(`event:${incoming.type}`, incoming.payload ?? null);
-            await apply(r, (next) => { if (r.changed) next.context.event = clone(incoming); });
+            await apply(r, (next) => { if (r.changed) next.context.event = cloneJson(incoming); });
             if (r.changed) continue;
           }
           await persist((next) => { next.status = 'waiting'; });
@@ -453,7 +474,7 @@ export function compileWorkflow(document, options = {}) {
       }
       observe({ type: snapshot.status, active: snapshot.control.active, generation: snapshot.generation });
       return deepFreeze({ status: snapshot.status, result: snapshot.status === 'done' ? snapshot.context.data : null,
-        snapshot: clone(snapshot) });
+        snapshot: cloneJson(snapshot) });
     }
     finally {
       live = false;

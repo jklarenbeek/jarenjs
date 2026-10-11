@@ -926,6 +926,9 @@ function checkHttp(http, id, kind, members, base) {
   const inMap = http.in === undefined ? {} : http.in;
   if (!isJsonObject(inMap)) throw refuse('JC0009', 'http.in must be an object of member → path | query | header | body', at(base, 'in'));
   const inKeys = Object.keys(inMap);
+  // a member the document did not map is not mapped by whatever
+  // Object.prototype holds under its name (`constructor`, `toString`)
+  const mapped = (/** @type {string} */ m) => Object.hasOwn(inMap, m);
   for (let i = 0; i < inKeys.length; i++) {
     const m = inKeys[i];
     const loc = inMap[m];
@@ -951,12 +954,12 @@ function checkHttp(http, id, kind, members, base) {
     let loc;
     if (variables.includes(m)) loc = 'path';
     else if (m === bodyMember) loc = 'body';
-    else if (inMap[m] !== undefined) loc = inMap[m];
+    else if (mapped(m)) loc = inMap[m];
     else loc = defaultLocation;
     if (bodyMember !== null && m !== bodyMember && loc === 'body') {
       throw refuse('JC0009',
         `'${m}' would travel in the body, but http.body names '${bodyMember}' as the whole body — map '${m}' to query or header`,
-        inMap[m] !== undefined ? at(at(base, 'in'), m) : at(base, 'body'));
+        mapped(m) ? at(at(base, 'in'), m) : at(base, 'body'));
     }
     setObjectMember(locations, m, loc);
   }
@@ -967,7 +970,7 @@ function checkHttp(http, id, kind, members, base) {
         throw refuse('JC0016',
           `a ${kind} operation bound to ${method} cannot carry '${m}' in the body `
           + (method === 'OPTIONS' ? '(an OPTIONS body is never carried: both adapters drop it)' : '(a GET body)'),
-          m === bodyMember ? at(base, 'body') : (inMap[m] !== undefined ? at(at(base, 'in'), m) : at(base, 'method')));
+          m === bodyMember ? at(base, 'body') : (mapped(m) ? at(at(base, 'in'), m) : at(base, 'method')));
       }
     }
   }
@@ -979,12 +982,12 @@ function checkHttp(http, id, kind, members, base) {
     if (locations[m] === 'header' && !FIELD_NAME.test(m)) {
       throw refuse('JC0009',
         `'${m}' is mapped to header, but a header's name is its member's name and '${m}' is not an HTTP token (RFC 9110 §5.6.2) — rename the member or map it to query`,
-        inMap[m] !== undefined ? at(at(base, 'in'), m) : base);
+        mapped(m) ? at(at(base, 'in'), m) : base);
     }
     if (locations[m] === 'header' && RESERVED_HEADERS.has(m.toLowerCase())) {
       throw refuse('JC0009',
         `'${m}' is mapped to header, but '${m.toLowerCase()}' is a field the transport or the binding writes itself — rename the member or map it to query`,
-        inMap[m] !== undefined ? at(at(base, 'in'), m) : base);
+        mapped(m) ? at(at(base, 'in'), m) : base);
     }
   }
   // a subscribe operation's media is the stream envelope, not an opaque
@@ -997,10 +1000,10 @@ function checkHttp(http, id, kind, members, base) {
     for (let i = 0; i < members.length; i++) {
       const m = members[i];
       if (locations[m] === 'body') {
-        const declaredBy = m === bodyMember ? 'http.body' : (inMap[m] !== undefined ? `http.in.${m}` : `the default location of a ${kind} member`);
+        const declaredBy = m === bodyMember ? 'http.body' : (mapped(m) ? `http.in.${m}` : `the default location of a ${kind} member`);
         throw refuse('JC0017',
           `an opaque operation (media ${media}) cannot carry '${m}' in the body (placed there by ${declaredBy}) — its body is bytes the contract never decodes; map '${m}' to query or header, or make the operation JSON`,
-          m === bodyMember ? at(base, 'body') : (inMap[m] !== undefined ? at(at(base, 'in'), m) : at(base, 'media')));
+          m === bodyMember ? at(base, 'body') : (mapped(m) ? at(at(base, 'in'), m) : at(base, 'media')));
       }
     }
   }

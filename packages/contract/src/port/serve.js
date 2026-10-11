@@ -28,6 +28,7 @@ import { ContractHostError, ContractFailure } from '../errors.js';
 import { validateOperationInput, settleOperation, safeTrace, PORT_LOCAL_ERRORS, classifyDeclared } from '../pipeline.js';
 import { resolveLifecycle, identify as identifyHost, acquire as acquireHost, once, releaseLeases, RollbackCarrier } from '../host.js';
 import { resolveHostRuntime } from '../runtime.js';
+import { admitHandlers, admitServeOptions } from '../options.js';
 import { isSubscriptionLike, runSubscription, resolveStreamLimits, STREAM_ERRORS } from '../stream/server.js';
 import { HTTP_ERRORS, renderMessage, declaredMessage } from '../http/wire.js';
 import { isContractFrame, valueFrame, errorFrame, pushFrame, attach, isChannel } from './frame.js';
@@ -163,39 +164,14 @@ const PORT_OPTIONS = Object.freeze(['channel', 'validateOutput', 'trace', 'onErr
  * servePort(contract, handlers, { channel: new BroadcastChannel('app') });
  */
 export function servePort(contract, handlers, options) {
-  if (contract === null || typeof contract !== 'object' || typeof contract.match !== 'function'
-    || contract.operations === null || typeof contract.operations !== 'object' || !Array.isArray(contract.ids)) {
-    throw host('JC1001', 'the first argument must be a compiled contract (compileContract)');
-  }
-  if (handlers === null || typeof handlers !== 'object' || Array.isArray(handlers)) {
-    throw host('JC1001', 'handlers must be an object of operation id → function');
-  }
-  const names = Object.keys(handlers);
-  for (let i = 0; i < names.length; i++) {
-    const id = names[i];
-    if (!Object.hasOwn(contract.operations, id)) {
-      throw host('JC1001', `handlers names '${id}', which is not an operation of the contract`);
-    }
-    if (typeof handlers[id] !== 'function') {
-      throw host('JC1001', `the handler of '${id}' must be a function, got ${typeof handlers[id]}`);
-    }
-  }
+  admitHandlers(contract, handlers, (reason) => host('JC1001', reason));
   if (options === null || typeof options !== 'object') throw host('JC1001', 'options must be an object with the channel');
   refuseUnknownMembers(options, PORT_OPTIONS, (key, hint) => host('JC1001', `option '${key}' is not one servePort reads${hint}`));
   const channel = options.channel;
   if (!isChannel(channel)) {
     throw host('JC1001', 'options.channel must expose postMessage and a message listener surface (a MessagePort, Worker, BroadcastChannel, a worker\'s self, or the shape)');
   }
-  const validateOutput = options.validateOutput === undefined ? 'always' : options.validateOutput;
-  if (validateOutput !== 'always' && validateOutput !== 'never') {
-    throw host('JC1001', "options.validateOutput must be 'always' or 'never'");
-  }
-  for (const [name, value] of [['trace', options.trace], ['onError', options.onError]]) {
-    if (value !== undefined && typeof value !== 'function') throw host('JC1001', `options.${name} must be a function`);
-  }
-  if (options.catalog !== undefined && (options.catalog === null || typeof options.catalog !== 'object')) {
-    throw host('JC1001', 'options.catalog must be a message catalog object');
-  }
+  const validateOutput = admitServeOptions(options, ['trace', 'onError'], (reason) => host('JC1001', reason));
   const runtime = resolveHostRuntime(options.runtime, host, 'JC1001');
   const streamLimits = resolveStreamLimits(options.streamLimits, (reason) => host('JC1001', reason));
   const lifecycle = resolveLifecycle(options, (reason) => host('JC1001', reason));

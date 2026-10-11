@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { compileStatechart, createStatechartSession } from '@jarenjs/flow';
+import { compileFsm, compileStatechart, createStatechartSession } from '@jarenjs/flow';
 
 const effect = (run) => [{ run }];
 const compile = (states, transitions, initial = 'running', options) => compileStatechart({
@@ -217,6 +217,20 @@ describe('explicit-time statecharts', () => {
     assert.deepEqual(resumed.send('resume').state.active, ['b']);
     assert.throws(() => chart.restore({ ...stored, active: ['a', 'b'] }), { code: 'JF2010' });
     assert.throws(() => chart.restore({ ...stored, history: { memory: ['paused'] } }), { code: 'JF2010' });
+  });
+
+  it('a guard that throws reads false and is recorded with the same JF2003 record the flat engine writes', () => {
+    const doc = { initial: 'a', states: ['a', 'b'], transitions: [{ from: 'a', event: 'go', guard: { $idiv: [1, 0] }, to: 'b' }] };
+    const flat = compileFsm(doc).step('a', 'go');
+    const chart = compile(['a', 'b'], doc.transitions, 'a');
+    const result = chart.step(chart.start().state, 'go');
+    assert.equal(result.changed, false);
+    assert.deepEqual(result.errors, [{
+      code: 'JF2003',
+      docPath: '/transitions/0/guard',
+      message: "the guard threw while evaluating and reads false: JQ2002: '$idiv' by zero at /$idiv",
+    }]);
+    assert.deepEqual(result.errors, flat.errors);
   });
 
   it('refuses malformed hierarchy, initial, history, trigger, internal and final-state declarations', () => {

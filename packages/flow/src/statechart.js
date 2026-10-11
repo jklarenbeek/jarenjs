@@ -2,8 +2,8 @@
 /** Pure, explicit-time statecharts. See docs/STATECHART-FORMAT.md. */
 import { deepFreeze, isJsonObject } from '@jarenjs/core/object';
 import { compileJsonQuery } from '@jarenjs/json/query';
-import { canonicalizeJson } from '@jarenjs/json/canonical';
-import { compileEffectList, resolveEffect } from './fsm.js';
+import { cloneJson } from '@jarenjs/json/canonical';
+import { compileEffectList, passesGuard, resolveEffect } from './fsm.js';
 import { asError, FlowCompileError, FlowRuntimeError } from './errors.js';
 
 /** @typedef {Readonly<{ active: readonly string[], history: Readonly<Record<string, readonly string[]>>,
@@ -221,7 +221,7 @@ export function compileStatechart(doc, options = {}) {
         || seen.has(timer.transition) || tokens.has(timer.token)) invalid('invalid timer record');
       seen.add(timer.transition); tokens.add(timer.token);
     }
-    const normalized = JSON.parse(canonicalizeJson(state));
+    const normalized = cloneJson(state);
     normalized.active = ordered(normalized.active);
     for (const id of Object.keys(normalized.history)) normalized.history[id] = ordered(normalized.history[id]);
     normalized.timers.sort((a, b) => a.at - b.at || a.transition - b.transition);
@@ -274,15 +274,7 @@ export function compileStatechart(doc, options = {}) {
       outer: for (const id of [leaf, ...ancestors(leaf)]) {
         for (const t of byFrom.get(id)) {
           if (!matches(t)) continue;
-          if (!evaluated.has(t)) {
-            let pass = true;
-            try { if (t.guard !== null) pass = t.guard.ebv(scope); }
-            catch (err) {
-              pass = false;
-              out.errors.push({ code: 'JF2003', docPath: `${t.path}/guard`, message: asError(err).message });
-            }
-            evaluated.set(t, pass);
-          }
+          if (!evaluated.has(t)) evaluated.set(t, passesGuard(t.guard, scope, `${t.path}/guard`, out.errors));
           if (evaluated.get(t)) { enabled.add(t); break outer; }
         }
       }
@@ -356,7 +348,7 @@ export function compileStatechart(doc, options = {}) {
     },
     step(snapshot, event, opts) {
       if (typeof event !== 'string') throw new FlowRuntimeError('JF2002', 'event must be a string');
-      const state = JSON.parse(canonicalizeJson(restore(snapshot)));
+      const state = cloneJson(restore(snapshot));
       state.time = timeAt(snapshot, opts?.now);
       const out = result(state);
       const scope = scopeFor(state, event, opts);
@@ -366,7 +358,7 @@ export function compileStatechart(doc, options = {}) {
     },
     advance(snapshot, now, opts) {
       const until = timeAt(snapshot, now);
-      const state = JSON.parse(canonicalizeJson(restore(snapshot)));
+      const state = cloneJson(restore(snapshot));
       const out = result(state);
       const budget = { count: 0 };
       while (state.timers.length && state.timers[0].at <= until) {

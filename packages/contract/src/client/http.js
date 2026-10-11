@@ -36,7 +36,7 @@ import { JarenValidator } from '@jarenjs/validate';
 import { createSseEventDecoder } from '@jarenjs/core/text/sse';
 
 import { ContractHostError } from '../errors.js';
-import { admitOptions, admitSignal } from '../options.js';
+import { admitOptions, admitSignal, admitSubscribeOptions } from '../options.js';
 import { resolveHostRuntime } from '../runtime.js';
 import { isReadableStream, isAsyncByteSource } from '../http/body.js';
 import { compatReason } from '../compat.js';
@@ -239,6 +239,17 @@ function safeName(err) {
  */
 function transportString(v) {
   return typeof v === 'string' ? v : (typeof v === 'object' ? JSON.stringify(v) : String(v));
+}
+
+/**
+ * The member the caller gave: an own property of the input, never one
+ * `Object.prototype` holds under the name (`constructor`, `toString`).
+ * @param {any} value
+ * @param {string} name
+ * @returns {unknown}
+ */
+function memberOf(value, name) {
+  return Object.hasOwn(value, name) ? value[name] : undefined;
 }
 
 /** RFC 9110 §5.6.2's `token`: what a field name may be. */
@@ -558,8 +569,8 @@ export function openHttpClient(contract, options = {}) {
       }
       // a URL has no spelling for null: a segment "null" would be the
       // string "null" to the server, a value the client never sent
-      if (value[s.text] === null) throw new Unencodable(s.text, `path variable '${s.text}' is null, which a URL cannot carry as a segment`);
-      const text = transportString(value[s.text]);
+      if (memberOf(value, s.text) === null) throw new Unencodable(s.text, `path variable '${s.text}' is null, which a URL cannot carry as a segment`);
+      const text = transportString(memberOf(value, s.text));
       // an empty value leaves `//`; `.` and `..` are dot segments every URL
       // resolver folds into ANOTHER path — `/users/../sessions` is
       // `/sessions`, so another operation would run under this one's name
@@ -575,7 +586,7 @@ export function openHttpClient(contract, options = {}) {
     const params = new URLSearchParams();
     for (let i = 0; i < route.queryMembers.length; i++) {
       const m = route.queryMembers[i];
-      const v = value[m];
+      const v = memberOf(value, m);
       if (route.queryJson.has(m)) {
         if (v !== undefined) params.append(m, JSON.stringify(v));
         continue;
@@ -628,7 +639,7 @@ export function openHttpClient(contract, options = {}) {
       }
     }
     for (let i = 0; i < route.headerMembers.length; i++) {
-      const v = value[route.headerMembers[i]];
+      const v = memberOf(value, route.headerMembers[i]);
       if (v === undefined) continue;
       if (v === null) {
         if (route.required.has(route.headerMembers[i])) {
@@ -666,14 +677,15 @@ export function openHttpClient(contract, options = {}) {
   function bodyOf(route, value) {
     if (!route.hasBody) return null;
     if (route.wholeBody !== null) {
-      const v = value[route.wholeBody];
+      const v = memberOf(value, route.wholeBody);
       return v === undefined ? null : JSON.stringify(v);
     }
     /** @type {Record<string, unknown>} */
     const body = {};
     for (let i = 0; i < route.bodyMembers.length; i++) {
       const m = route.bodyMembers[i];
-      if (value[m] !== undefined) setObjectMember(body, m, value[m]);
+      const v = memberOf(value, m);
+      if (v !== undefined) setObjectMember(body, m, v);
     }
     return JSON.stringify(body);
   }
@@ -1176,28 +1188,7 @@ export function openHttpClient(contract, options = {}) {
     if (route.op.kind !== 'subscribe') {
       throw new ContractHostError('JC1010', `client: '${route.id}' is a ${route.op.kind} operation — subscribe carries streams; use invoke`);
     }
-    admitOptions(options, ['onSnapshot', 'onPatch', 'onError', 'onEnd', 'signal', 'lastSeq', 'reconnect'],
-      (reason) => host('JC1008', reason), 'subscribe options');
-    for (const name of ['onSnapshot', 'onPatch', 'onError', 'onEnd']) {
-      const cb = /** @type {any} */ (options)[name];
-      if (cb !== undefined && typeof cb !== 'function') throw host('JC1008', `options.${name} must be a function`);
-    }
-    /** @type {number | null} */
-    let lastSeq = null;
-    if (options.lastSeq !== undefined && options.lastSeq !== null) {
-      if (!Number.isInteger(options.lastSeq) || options.lastSeq < 0) throw host('JC1008', 'options.lastSeq must be a non-negative integer');
-      lastSeq = options.lastSeq;
-    }
-    let reconnectMax = 0;
-    if (options.reconnect !== undefined && options.reconnect !== null) {
-      const r = /** @type {any} */ (options.reconnect);
-      admitOptions(r, ['max'], (reason) => host('JC1008', reason), 'options.reconnect');
-      if (!Number.isInteger(r.max) || r.max < 0) {
-        throw host('JC1008', 'options.reconnect must be { max } with a non-negative integer number of further attempts');
-      }
-      reconnectMax = r.max;
-    }
-    const signal = admitSignal(options.signal, (reason) => host('JC1008', reason));
+    const { lastSeq, reconnectMax, signal } = admitSubscribeOptions(options, (reason) => host('JC1008', reason));
     const meta = newMeta(route.id, null);
     const streamPolicy = route.op.policy.stream;
     const heartbeatMs = streamPolicy === null ? 15000 : streamPolicy.heartbeatMs;

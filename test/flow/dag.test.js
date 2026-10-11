@@ -371,6 +371,25 @@ describe('compileDag — the run', function () {
       [['i', 'ok'], ['o', 'ok'], ['q', 'ok']]);
     for (const rec of records) assert.strictEqual(typeof rec.ms, 'number');
   });
+
+  it('runs a chain thousands of nodes deep whatever order its nodes are declared in', async function () {
+    const depth = 6000;
+    const edges = [{ from: 'in', to: 'q0' }];
+    for (let i = 1; i < depth; i++) edges.push({ from: `q${i - 1}`, to: `q${i}` });
+    edges.push({ from: `q${depth - 1}`, to: 'out' });
+    for (const declared of ['forward', 'output first']) {
+      /** @type {Record<string, any>} */
+      const nodes = declared === 'forward' ? { in: { kind: 'input' } } : { out: { kind: 'output' } };
+      const ids = Array.from({ length: depth }, (_, i) => `q${i}`);
+      for (const id of declared === 'forward' ? ids : ids.reverse()) nodes[id] = { kind: 'query', query: '$' };
+      if (declared === 'forward') nodes.out = { kind: 'output' };
+      else nodes.in = { kind: 'input' };
+      let settled = 0;
+      const result = await compileDag({ $dag: '0.1', nodes, edges }).run({ n: 7 }, { onNode: () => { settled++; } });
+      assert.deepStrictEqual(result, { n: 7 }, declared);
+      assert.strictEqual(settled, depth + 2, declared);
+    }
+  });
 });
 
 describe('compileDag — failure and abort (§7.3)', function () {

@@ -91,7 +91,7 @@ export function describeContract(contract) {
       const m = members[j];
       const isVariable = op.http.variables.includes(m);
       const isBody = op.http.body === m;
-      if (http === undefined || (!isVariable && !isBody && declaredIn[m] === undefined)) inferredIn.push(m);
+      if (http === undefined || (!isVariable && !isBody && !Object.hasOwn(declaredIn, m))) inferredIn.push(m);
     }
     operations.push({
       id,

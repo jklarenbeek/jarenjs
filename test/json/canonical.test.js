@@ -5,6 +5,7 @@ import { match as assertMatch, rejects as assertRejects } from 'node:assert';
 import {
   canonicalizeJson,
   canonicalSha256,
+  cloneJson,
   JsonCanonicalizeError,
 } from '@jarenjs/json';
 
@@ -170,5 +171,32 @@ describe('canonicalSha256', () => {
   it('distinguishes values that differ and refuses non-JSON as a rejection', async () => {
     assert.notStrictEqual(await canonicalSha256({ a: 1 }), await canonicalSha256({ a: 2 }));
     await assertRejects(() => canonicalSha256({ a: () => 1 }), JsonCanonicalizeError);
+  });
+});
+
+describe('cloneJson', () => {
+  it('copies through the canonical text: unshared, member order canonical, an own __proto__ kept', () => {
+    const inner = { z: [1, { y: 2 }] };
+    const original = JSON.parse('{"b":1,"a":{"z":[1,{"y":2}]},"__proto__":{"k":3}}');
+    original.shared = inner;
+    original.again = inner;
+    const copy = cloneJson(original);
+    assert.deepStrictEqual(Object.keys(copy), ['__proto__', 'a', 'again', 'b', 'shared']);
+    assert.deepStrictEqual(copy.a, { z: [1, { y: 2 }] });
+    assert.notStrictEqual(copy.shared, copy.again);
+    assert.notStrictEqual(copy.shared, inner);
+    assert.strictEqual(Object.getPrototypeOf(copy), Object.prototype);
+    assert.deepStrictEqual(Object.getOwnPropertyDescriptor(copy, '__proto__')?.value, { k: 3 });
+    copy.shared.z.push(9);
+    assert.deepStrictEqual(inner.z, [1, { y: 2 }]);
+  });
+
+  it('refuses what is not JSON data before copying, as canonicalizeJson does', () => {
+    for (const bad of [undefined, () => 1, NaN, 1n, { a: undefined }, new Date(0)]) {
+      assert.throws(() => cloneJson(bad), JsonCanonicalizeError);
+    }
+    const cycle = {};
+    cycle.self = cycle;
+    assert.throws(() => cloneJson(cycle), JsonCanonicalizeError);
   });
 });

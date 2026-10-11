@@ -23,6 +23,7 @@ import { ContractHostError } from '../errors.js';
 import { resolveHostRuntime } from '../runtime.js';
 import { resolveStreamLimits } from '../stream/server.js';
 import { resolveLifecycle } from '../host.js';
+import { admitHandlers, admitServeOptions } from '../options.js';
 import { dispatch } from './dispatch.js';
 import { HTTP_ERRORS, WELL_KNOWN_PATH } from './wire.js';
 import { BodyLimitError, BodyEncodingError, readBody } from './body.js';
@@ -241,13 +242,7 @@ function prepare(op, handler, tag) {
  * const response = await server.dispatch({ method: 'GET', url: '/api/catalog', headers: {}, body: null });
  */
 export function serveHttp(contract, handlers, options = {}) {
-  if (contract === null || typeof contract !== 'object' || typeof contract.match !== 'function'
-    || contract.operations === null || typeof contract.operations !== 'object') {
-    throw host('JC1001', 'the first argument must be a compiled contract (compileContract)');
-  }
-  if (handlers === null || typeof handlers !== 'object' || Array.isArray(handlers)) {
-    throw host('JC1001', 'handlers must be an object of operation id → function');
-  }
+  admitHandlers(contract, handlers, (reason) => host('JC1001', reason));
   if (!isPlainOptions(options)) throw host('JC1001', 'options must be a plain object');
   // a CLOSED set: a typo'd option used to vanish — `precondition` served
   // a stale If-Match with 200
@@ -262,16 +257,6 @@ export function serveHttp(contract, handlers, options = {}) {
   if (ledger !== null && (typeof ledger !== 'object' || typeof ledger.claim !== 'function'
     || typeof ledger.commit !== 'function' || typeof ledger.fail !== 'function' || typeof ledger.lookup !== 'function')) {
     throw host('JC1001', 'options.ledger must implement { claim, commit, fail, lookup }');
-  }
-  const names = Object.keys(handlers);
-  for (let i = 0; i < names.length; i++) {
-    const id = names[i];
-    if (!Object.hasOwn(contract.operations, id)) {
-      throw host('JC1001', `handlers names '${id}', which is not an operation of the contract`);
-    }
-    if (typeof handlers[id] !== 'function') {
-      throw host('JC1001', `the handler of '${id}' must be a function, got ${typeof handlers[id]}`);
-    }
   }
   const preconditions = options.preconditions === undefined ? null : options.preconditions;
   if (preconditions !== null && (typeof preconditions !== 'object' || Array.isArray(preconditions))) {
@@ -308,21 +293,11 @@ export function serveHttp(contract, handlers, options = {}) {
     routes.set(id, prepare(op, handler, preconditions !== null && Object.hasOwn(preconditions, id) ? preconditions[id] : null));
   }
 
-  const validateOutput = options.validateOutput === undefined ? 'always' : options.validateOutput;
-  if (validateOutput !== 'always' && validateOutput !== 'never') {
-    throw host('JC1001', "options.validateOutput must be 'always' or 'never'");
-  }
+  const validateOutput = admitServeOptions(options, ['trace', 'scope', 'errorBody', 'onError', 'now'], (reason) => host('JC1001', reason));
   const head = options.head === undefined ? true : options.head === true;
   const wellKnown = options.wellKnown === undefined ? WELL_KNOWN_PATH : options.wellKnown;
   if (wellKnown !== false && (typeof wellKnown !== 'string' || wellKnown.charCodeAt(0) !== 0x2F)) {
     throw host('JC1001', 'options.wellKnown must be an absolute path or false');
-  }
-  for (const [name, value] of [['trace', options.trace], ['scope', options.scope], ['errorBody', options.errorBody],
-    ['onError', options.onError], ['now', options.now]]) {
-    if (value !== undefined && typeof value !== 'function') throw host('JC1001', `options.${name} must be a function`);
-  }
-  if (options.catalog !== undefined && (options.catalog === null || typeof options.catalog !== 'object')) {
-    throw host('JC1001', 'options.catalog must be a message catalog object');
   }
   const runtime = resolveHostRuntime(options.runtime, host, 'JC1001');
   const streamLimits = resolveStreamLimits(options.streamLimits, (reason) => host('JC1001', reason));

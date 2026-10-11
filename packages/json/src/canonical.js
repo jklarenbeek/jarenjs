@@ -167,6 +167,22 @@ export function canonicalizeJson(value) {
   return serializeValue(value, '', new Set());
 }
 
+/**
+ * An independent deep copy of a JSON value, made through its canonical text:
+ * nothing is shared with the original, members come out in RFC 8785 order, and
+ * a value that is not JSON data is refused before any copy exists. A
+ * `__proto__` member survives as an own data member.
+ *
+ * @param {any} value - The JSON value to copy
+ * @returns {any} A structurally equal, unshared value
+ * @throws {JsonCanonicalizeError} When the value is not JSON data
+ * @example
+ * const copy = cloneJson({ b: [1], a: 2 }); // { a: 2, b: [1] }
+ */
+export function cloneJson(value) {
+  return JSON.parse(canonicalizeJson(value));
+}
+
 const HEX = '0123456789abcdef';
 
 /**

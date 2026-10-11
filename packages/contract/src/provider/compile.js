@@ -1,13 +1,12 @@
 //@ts-check
 /** Compile JSON protocol declarations to bounded pull-based page execution. */
 import { deepFreeze, isJsonObject } from '@jarenjs/core/object';
-import { canonicalizeJson } from '@jarenjs/json/canonical';
+import { canonicalizeJson, cloneJson } from '@jarenjs/json/canonical';
 import { compileJsonQuery } from '@jarenjs/json/query';
 import { compileJsltStylesheet } from '@jarenjs/json/jslt';
 import { ContractCompileError } from '../errors.js';
 import { providerHostError } from './execute.js';
 
-const clone = (value) => JSON.parse(canonicalizeJson(value));
 const fail = (reason, path = '') => { throw new ContractCompileError('JC0021', reason, path); };
 
 /**
@@ -19,7 +18,7 @@ const fail = (reason, path = '') => { throw new ContractCompileError('JC0021', r
  */
 export function compileProvider(document, options = {}) {
   let doc;
-  try { doc = clone(document); }
+  try { doc = cloneJson(document); }
   catch { fail('provider descriptor must be JSON'); }
   if (!isJsonObject(doc) || doc.$provider !== '0.1') fail('provider descriptor requires $provider:0.1');
   const known = ['id', '$provider', 'apiVersion', 'endpoint', 'protocol', 'method', 'safety', 'headers', 'query', 'body', 'graphql', 'response', 'pagination', 'limits', 'capability', 'inputSchema'];
@@ -70,7 +69,7 @@ export function compileProvider(document, options = {}) {
         if (Object.keys(spec).length !== 1 || typeof spec.callback !== 'string'
           || !Object.hasOwn(options.callbacks ?? {}, spec.callback) || typeof options.callbacks[spec.callback] !== 'function') fail('undeclared callback', path);
         const callback = options.callbacks[spec.callback];
-        return (data) => clone(callback(clone(data)));
+        return (data) => cloneJson(callback(cloneJson(data)));
       }
       return compileJsonQuery(spec);
     }
@@ -119,7 +118,7 @@ export function compileProvider(document, options = {}) {
     for (;;) {
       if (context.signal?.aborted) { yield end('incomplete', 'cancelled'); return; }
       if (pageCount >= limits.pages) { yield end('incomplete', 'page-limit'); return; }
-      const data = { input: clone(input), cursor, apiVersion: doc.apiVersion, partition: context.partition ?? null, sourceVersion: context.sourceVersion ?? null };
+      const data = { input: cloneJson(input), cursor, apiVersion: doc.apiVersion, partition: context.partition ?? null, sourceVersion: context.sourceVersion ?? null };
       let request;
       try {
         const url = new URL(doc.endpoint);
@@ -132,7 +131,7 @@ export function compileProvider(document, options = {}) {
         if (cursor !== null && pagination.cursorParam) url.searchParams.set(pagination.cursorParam, String(cursor));
         let body = bodyOf(data);
         if (doc.protocol === 'graphql') {
-          const variables = clone(variablesOf(data));
+          const variables = cloneJson(variablesOf(data));
           if (!isJsonObject(variables)) throw new Error('variables must be an object');
           if (pagination.cursorVariable) Object.defineProperty(variables, pagination.cursorVariable, { value: cursor, enumerable: true, configurable: true, writable: true });
           body = { query: doc.graphql.query, variables };
@@ -155,7 +154,7 @@ export function compileProvider(document, options = {}) {
         if (!Array.isArray(rows)) throw new Error('rows must be an array');
         rowIds = rows.map((row) => idOf(row));
         if (rowIds.some((id) => (typeof id !== 'string' || !id) && (typeof id !== 'number' || !Number.isSafeInteger(id)))) throw new Error('ids must be nonempty strings or safe integers');
-        rows = rows.map((row) => clone(transform(clone(row))));
+        rows = rows.map((row) => cloneJson(transform(cloneJson(row))));
         next = cursorOf(raw) ?? null;
         if (next !== null && !['string', 'number'].includes(typeof next)) throw new Error('cursor must be a scalar');
         hasMore = moreOf(raw);

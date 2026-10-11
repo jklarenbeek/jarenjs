@@ -36,7 +36,7 @@ None of it depends on JSON Schema: every module can be used standalone in any Ja
 | Write operations | `compileJSONPointerSetter`/`Inserter`/`Remover`, `compileJSONPathSetter`/`Inserter`/`Remover`, one-shot `setAtJSONPointer`, `removeAtJSONPath`, ..., `JsonWriteError` |
 | Addressing bridge | `jsonPointerFromJSONPath`, `jsonPathFromJSONPointer` |
 | JSONPath ([RFC 9535](https://www.rfc-editor.org/rfc/rfc9535.html)) | `compileJSONPath`, `queryJSONPath`, `parseJSONPath`, `isValidJSONPathStrict`, `isValidJSONPathSegments` |
-| Canonical JSON ([RFC 8785](https://www.rfc-editor.org/rfc/rfc8785.html)) | `canonicalizeJson`, `JsonCanonicalizeError` |
+| Canonical JSON ([RFC 8785](https://www.rfc-editor.org/rfc/rfc8785.html)) | `canonicalizeJson`, `cloneJson`, `canonicalSha256`, `JsonCanonicalizeError` |
 | Jaren JSON Query | `compileJsonQuery`, `queryJson`, `JsonQueryCompileError`, `JsonQueryRuntimeError` |
 | Jaren JSLT | `compileJsltStylesheet`, `transformJson`, `JsltCompileError`, `JsltRuntimeError` |
 | Jaren JTLT | `compileJtltStylesheet`, `renderText`, `validateJtltTemplate`, `JtltCompileError`, `JtltRuntimeError` |

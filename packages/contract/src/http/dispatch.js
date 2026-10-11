@@ -744,7 +744,8 @@ function afterIdentity(server, request, route, trace, hit, isHead, method, path,
     ctxHeaders = {};
     for (let i = 0; i < route.headerMembers.length; i++) {
       const name = route.headerNames[i];
-      const raw = headers[name];
+      // an own field only: `constructor` is not a header the request sent
+      const raw = Object.hasOwn(headers, name) ? headers[name] : undefined;
       if (raw === undefined) continue;
       const m = route.headerMembers[i];
       if (route.headerArray[i]) {

@@ -289,7 +289,12 @@ top-level `input.properties` member gets exactly one location:
 3. a member named in `http.in` → that location (`JC0009` when it names no
    input member, an unknown location, or `path` for a member the template
    does not declare);
-4. otherwise the default: `query` for a `read`, `body` for a `command`.
+4. otherwise the default: `query` for a `read`, `body` for a `command`. A
+   member is mapped only by an entry the document wrote under its own name:
+   a member called `constructor` or `toString` takes the default like any
+   other (it used to read the object's inherited member and travel as a
+   header), and an absent one is absent on the wire, in a header and in a
+   diff, never filled in from `Object.prototype`.
 
 Scalar path, query and header members arrive as strings and are decoded
 by a normalizer compiled over those members with `coerceTypes`
@@ -1885,7 +1890,13 @@ outcome whose `error.code` is in `retry.on` (declared codes and
 `JC2xxx` taxonomy codes alike — `JC2009` in-progress is a natural
 member). At most `max` further attempts; the backoff before attempt
 `n+1` is `min(1000 · 2^n, 8000)` ms plus up to 250 ms of jitter through
-`sleep(ms, signal)`; an abort during the backoff resolves `cancelled`.
+`sleep(ms, signal)`; an abort during the backoff resolves `cancelled`. The
+invoke/subscribe client never reads the server's `retry-after`: whatever it
+says, a wait is at most 8,249 ms, so a hostile or mistaken hint cannot park a
+caller. The provider executor does read it (`retryAfter` dialect option) and
+waits that long, but never past its deadline: a hint that does not fit before
+the deadline ends the call as refused (`deadline`), carrying the hint as
+`retryAfterMs`.
 The idempotency key stays the same across the attempts (that is what
 makes them safe); `meta.attempt` stays the caller's — retries are
 inside one attempt, not new ones.

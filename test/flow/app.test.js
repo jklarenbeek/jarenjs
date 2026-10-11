@@ -357,6 +357,25 @@ describe('fsmToApp — output hygiene', function () {
     }
   });
 
+  it('keeps an event and an effect member named __proto__ as own members, as the headless engine does', function () {
+    const doc = JSON.parse(`{"initial":"a","states":["a","b"],"transitions":[
+      {"from":"a","event":"__proto__","to":"b"},
+      {"from":"b","event":"go","to":"a","effects":[{"run":"log","with":{"__proto__":"$.payload","k":"$.payload.k"}}]}]}`);
+    const bare = fsmToApp(doc, { namespace: '' });
+    assert.deepStrictEqual(bare.events, ['__proto__', 'go']);
+    assert.deepStrictEqual(Object.keys(bare.actions), ['__proto__', 'go']);
+    assert.strictEqual(Object.getPrototypeOf(bare.actions), Object.prototype);
+    assert.strictEqual(Object.hasOwn(bare.actions, '__proto__'), true);
+
+    const out = fsmToApp(doc);
+    const [effect] = out.actions['fsm/go'].$return.$if[1].effects;
+    assert.deepStrictEqual(Object.keys(effect.with), ['__proto__', 'k']);
+    assert.strictEqual(effect.with['k'], '$__fsm.payload.k');
+    assert.strictEqual(Object.getOwnPropertyDescriptor(effect.with, '__proto__')?.value, '$__fsm.payload');
+    const headless = compileFsm(doc).step('b', 'go', { payload: { k: 1 } }).effects[0];
+    assert.deepStrictEqual(Object.keys(headless.with), ['__proto__', 'k']);
+  });
+
   it('rejects bad machine documents with the same JF codes as compileFsm', function () {
     assert.throws(
       () => fsmToApp({ initial: null, states: ['a'], transitions: [{ from: 'a', to: 'zz' }] }),

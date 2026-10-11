@@ -141,7 +141,10 @@ app's own `JA2005` and the state stays untouched.
 `/wizard` with `wizard/` actions and an upload machine at `/upload`
 with `upload/` actions share one app without touching each other —
 each machine's actions read and write only its own slice, and the
-action-name spaces are disjoint by construction.
+action-name spaces are disjoint by construction. Names are carried as own
+members whatever they spell: an event, or an effect `with` member, named
+`__proto__` appears in the generated actions as it does in the headless
+step's effects (it used to be dropped).
 
 ## The worked example
 

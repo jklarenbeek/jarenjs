@@ -34,7 +34,7 @@ import { isPlainOptions, refuseUnknownMembers } from '@jarenjs/core/object';
 import { compileMessageCatalog } from '@jarenjs/core/message';
 
 import { ContractHostError, ContractFailure } from '../errors.js';
-import { admitOptions, admitSignal } from '../options.js';
+import { admitHandlers, admitOptions, admitServeOptions, admitSignal } from '../options.js';
 import { validateOperationInput, settleOperation, safeTrace, PORT_LOCAL_ERRORS, classifyDeclared } from '../pipeline.js';
 import { resolveLifecycle, identify as identifyHost, acquire as acquireHost, once, releaseLeases, RollbackCarrier } from '../host.js';
 import { resolveHostRuntime } from '../runtime.js';
@@ -207,35 +207,10 @@ const LOCAL_OPTIONS = Object.freeze(['validateOutput', 'trace', 'onError', 'cata
  * if (!outcome.ok && outcome.kind === 'failure') show(outcome.error.code);   // status is null here
  */
 export function openLocalClient(contract, handlers, options = {}) {
-  if (contract === null || typeof contract !== 'object' || typeof contract.match !== 'function'
-    || contract.operations === null || typeof contract.operations !== 'object' || !Array.isArray(contract.ids)) {
-    throw host('JC1001', 'the first argument must be a compiled contract (compileContract)');
-  }
-  if (handlers === null || typeof handlers !== 'object' || Array.isArray(handlers)) {
-    throw host('JC1001', 'handlers must be an object of operation id → function');
-  }
-  const names = Object.keys(handlers);
-  for (let i = 0; i < names.length; i++) {
-    const id = names[i];
-    if (!Object.hasOwn(contract.operations, id)) {
-      throw host('JC1001', `handlers names '${id}', which is not an operation of the contract`);
-    }
-    if (typeof handlers[id] !== 'function') {
-      throw host('JC1001', `the handler of '${id}' must be a function, got ${typeof handlers[id]}`);
-    }
-  }
+  admitHandlers(contract, handlers, (reason) => host('JC1001', reason));
   if (!isPlainOptions(options)) throw host('JC1001', 'options must be a plain object');
   refuseUnknownMembers(options, LOCAL_OPTIONS, (key, hint) => host('JC1001', `option '${key}' is not one serveLocal reads${hint}`));
-  const validateOutput = options.validateOutput === undefined ? 'always' : options.validateOutput;
-  if (validateOutput !== 'always' && validateOutput !== 'never') {
-    throw host('JC1001', "options.validateOutput must be 'always' or 'never'");
-  }
-  for (const [name, value] of [['trace', options.trace], ['onError', options.onError]]) {
-    if (value !== undefined && typeof value !== 'function') throw host('JC1001', `options.${name} must be a function`);
-  }
-  if (options.catalog !== undefined && (options.catalog === null || typeof options.catalog !== 'object')) {
-    throw host('JC1001', 'options.catalog must be a message catalog object');
-  }
+  const validateOutput = admitServeOptions(options, ['trace', 'onError'], (reason) => host('JC1001', reason));
   const runtime = resolveHostRuntime(options.runtime, host, 'JC1001');
   const lifecycle = resolveLifecycle(options, (reason) => host('JC1001', reason));
   const trace = options.trace === undefined ? runtime.uuid : options.trace;

@@ -107,6 +107,15 @@ export const FLOW_CODES = Object.freeze({
  *    node
  *  - `JF0018` — a `task` node names a handler the compile-time
  *    registry does not provide
+ *  - `JF0019` — a `task` node and its registered handler disagree
+ *    about the handler version
+ *
+ * Statecharts and workflows:
+ *
+ *  - `JF0020` — a statechart violates the hierarchy, initial, state or
+ *    transition rules
+ *  - `JF0021` — a workflow declaration or reference is malformed
+ *  - `JF0022` — an automatic workflow cycle has no declared visit bound
  */
 export class FlowCompileError extends CodedError {
   /**
@@ -149,6 +158,25 @@ export class FlowCompileError extends CodedError {
  *    `docPath` and `cause`
  *  - `JF2007` — the caller's `signal` aborted the run (`cause` is the
  *    abort reason when one was given)
+ *  - `JF2008` — a node declared `checkpoint: true` but produced a value
+ *    that is not JSON-serializable
+ *  - `JF2009` — the checkpoint or workflow store failed to load, save
+ *    or complete
+ *
+ * Statecharts and workflows:
+ *
+ *  - `JF2010` — a statechart snapshot is malformed or has an illegal
+ *    configuration
+ *  - `JF2011` — explicit time moved backwards or a timer exceeded its
+ *    numeric range
+ *  - `JF2012` — a statechart exceeded its microstep limit
+ *  - `JF2013` — a checkpoint belongs to a different workflow, input or
+ *    task implementation
+ *  - `JF2014` — a workflow run is busy or its snapshot generation is
+ *    stale
+ *  - `JF2015` — a workflow state exceeded its declared visit bound
+ *  - `JF2016` — a workflow snapshot is malformed or execution could not
+ *    progress
  */
 export class FlowRuntimeError extends CodedError {
   /**

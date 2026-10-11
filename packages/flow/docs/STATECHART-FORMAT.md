@@ -88,7 +88,9 @@ entry effects in tree order. `$.state` is the ordered **array of active leaf
 ids**; `$.event` is the external name, or null for initial entry/timers;
 `$.payload` and `$.context` are caller values, defaulting to null. Guards
 use query effective boolean value. Evaluation failures retain FLOW-FORMAT's
-JF2003/JF2004 records and fail-closed behavior.
+JF2003/JF2004 records and fail-closed behavior. A statechart's JF2003
+record carries the same message as the flat engine's ("the guard threw while
+evaluating and reads false: …"); before, it carried the query error's text alone.
 
 `always` transitions participate in automatic stabilization after initial
 entry, an external event or a timer. `done` is enabled when its compound

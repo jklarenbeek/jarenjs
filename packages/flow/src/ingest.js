@@ -1,6 +1,6 @@
 //@ts-check
 /** Resumable complete ingestion over injected provider and transaction stores. */
-import { canonicalizeJson } from '@jarenjs/json/canonical';
+import { canonicalizeJson, cloneJson } from '@jarenjs/json/canonical';
 import { compileWorkflow } from './workflow.js';
 
 /**
@@ -95,7 +95,7 @@ export function createIngestion(options) {
         || new Set(plan.partitions).size !== plan.partitions.length || !Object.hasOwn(plan, 'input')
         || Object.keys(plan).some((name) => !['source', 'version', 'generation', 'partitions', 'input', 'policyRevision', 'consistency'].includes(name)))
         throw new TypeError('ingestion plan needs source/version/generation, unique bounded partitions, input, policyRevision and consistency');
-      const input = JSON.parse(canonicalizeJson(plan));
+      const input = cloneJson(plan);
       const result = await workflow.run(input, { runId: canonicalizeJson([plan.source, plan.generation]), resources,
         signal: resources.signal });
       return result.result;

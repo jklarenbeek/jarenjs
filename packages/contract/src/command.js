@@ -1,7 +1,7 @@
 //@ts-check
 /** Opt-in business settlement shared by handlers on every invocation carrier. */
 import { deepFreeze } from '@jarenjs/core/object';
-import { canonicalizeJson } from '@jarenjs/json/canonical';
+import { cloneJson } from '@jarenjs/json/canonical';
 import { ContractFailure, ContractHostError, ContractRuntimeError } from './errors.js';
 import { runOperation, validateOperationInput } from './pipeline.js';
 
@@ -30,7 +30,7 @@ export function createCommand(operation, options) {
   async function execute(input, context = {}) {
     // Freeze before asynchronous authority checks so callers cannot change the
     // authorized request or the request whose hash the application computes.
-    const value = deepFreeze(JSON.parse(canonicalizeJson(input ?? null)));
+    const value = deepFreeze(cloneJson(input ?? null));
     if (await options.authorize(value, context) !== true) return refused('unauthorized');
     if (validateOperationInput(route, value) !== null) throw new ContractRuntimeError('JC2110', 'command input failed validation', { msgid: 'contract/command-failed' });
     const identity = options.identity(value, context);
@@ -44,7 +44,7 @@ export function createCommand(operation, options) {
         if (result.kind === 'failure' && !failures.has(result.code)) throw { state: 'uncommitted', historic: false, outcome: result };
         if (context.signal?.aborted) throw refused('cancelled');
         // Canonicalization rejects non-JSON values before any transaction commits.
-        const outcome = JSON.parse(canonicalizeJson(result.kind === 'failure' ? { ...result, details: result.details ?? null } : result));
+        const outcome = cloneJson(result.kind === 'failure' ? { ...result, details: result.details ?? null } : result);
         return { outcome, references: options.references?.(outcome, hostContext) ?? [] };
       }, context.lease === undefined ? {} : { lease: context.lease });
     }

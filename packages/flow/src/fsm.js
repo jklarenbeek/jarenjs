@@ -62,6 +62,30 @@ export function compileEffectList(list, docPath) {
 }
 
 /**
+ * Evaluate a compiled guard against the scope: a throwing guard fails
+ * closed — it reads false and the failure is recorded (JF2003).
+ * @param {any} guard - a compiled query, or null for no guard
+ * @param {any} scope
+ * @param {string} docPath - JSON Pointer of the guard member
+ * @param {any[]} errors - step-result error records, appended to
+ * @returns {boolean}
+ */
+export function passesGuard(guard, scope, docPath, errors) {
+  if (guard === null) return true;
+  try {
+    return guard.ebv(scope);
+  }
+  catch (err) {
+    errors.push({
+      code: 'JF2003',
+      docPath,
+      message: `the guard threw while evaluating and reads false: ${asError(err).message}`,
+    });
+    return false;
+  }
+}
+
+/**
  * Resolve one compiled effect against the evaluation scope. An empty
  * query result omits the `with` member; a throwing `with` fails closed —
  * the effect is omitted and the failure recorded (JF2004).
@@ -298,20 +322,7 @@ export function compileFsm(doc) {
     const errors = [];
     for (const t of byFrom.get(state) ?? []) {
       if (t.event !== null && t.event !== event) continue;
-      if (t.guard !== null) {
-        let pass = false;
-        try {
-          pass = t.guard.ebv(scope);
-        }
-        catch (err) {
-          errors.push({
-            code: 'JF2003',
-            docPath: t.guardPath,
-            message: `the guard threw while evaluating and reads false: ${asError(err).message}`,
-          });
-        }
-        if (!pass) continue;
-      }
+      if (!passesGuard(t.guard, scope, t.guardPath, errors)) continue;
       const effects = [];
       const moved = state !== t.to;
       if (moved) {

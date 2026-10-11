@@ -615,8 +615,8 @@ function compareBinding(diff, aOp, bOp) {
   if (aOp.http.opaque !== bOp.http.opaque) emit('media', aOp.http.opaque, bOp.http.opaque);
   if (aOp.http.body !== bOp.http.body) emit('body', aOp.http.body, bOp.http.body);
   for (const m of new Set([...Object.keys(aOp.http.in), ...Object.keys(bOp.http.in)])) {
-    const from = aOp.http.in[m];
-    const to = bOp.http.in[m];
+    const from = Object.hasOwn(aOp.http.in, m) ? aOp.http.in[m] : undefined;
+    const to = Object.hasOwn(bOp.http.in, m) ? bOp.http.in[m] : undefined;
     if (from !== undefined && to !== undefined && from !== to) {
       push(diff.breaking, {
         kind: 'binding-changed', op, docPath: opPath(op) + '/http/in/' + encodeJSONPointerSegment(m),
@@ -637,8 +637,8 @@ function compareErrors(diff, aOp, bOp) {
   const op = aOp.id;
   for (const code of new Set([...Object.keys(aOp.errors), ...Object.keys(bOp.errors)])) {
     const at = opPath(op) + '/errors/' + encodeJSONPointerSegment(code);
-    const from = aOp.errors[code];
-    const to = bOp.errors[code];
+    const from = Object.hasOwn(aOp.errors, code) ? aOp.errors[code] : undefined;
+    const to = Object.hasOwn(bOp.errors, code) ? bOp.errors[code] : undefined;
     if (from !== undefined && to === undefined) {
       push(diff.breaking, { kind: 'error-removed', op, docPath: at, from: code, rule: 'R10' });
       continue;

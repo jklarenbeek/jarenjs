@@ -17,7 +17,7 @@
  * the headless step scope.
  */
 
-import { isJsonObject } from '@jarenjs/core/object';
+import { isJsonObject, setObjectMember } from '@jarenjs/core/object';
 import { compileFsm } from './fsm.js';
 
 /**
@@ -62,7 +62,7 @@ function rewriteScope(node) {
           'fsmToApp reserves the variable name "__fsm" inside generated actions; '
           + 'the machine document must not bind it');
       }
-      out[key] = rewriteScope(node[key]);
+      setObjectMember(out, key, rewriteScope(node[key]));
     }
     return out;
   }
@@ -166,7 +166,7 @@ export function fsmToApp(fsmDoc, options) {
         ? { $if: [cond, result] }
         : { $if: [cond, result, chain] };
     }
-    actions[namespace + event] = {
+    setObjectMember(actions, namespace + event, {
       $let: {
         __fsm: {
           state: currentPath,
@@ -176,7 +176,7 @@ export function fsmToApp(fsmDoc, options) {
         },
       },
       $return: chain,
-    };
+    });
   }
 
   return { slice: { current: fsmDoc.initial }, actions, events };

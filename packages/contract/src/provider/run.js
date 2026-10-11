@@ -1,6 +1,6 @@
 //@ts-check
 /** Run lifetimes over the existing identify/acquire/release coordinator. */
-import { canonicalizeJson } from '@jarenjs/json/canonical';
+import { cloneJson } from '@jarenjs/json/canonical';
 import { deepFreeze } from '@jarenjs/core/object';
 import { resolveLifecycle, identify, acquire, once } from '../host.js';
 import { createProviderExecutor, providerHostError } from './execute.js';
@@ -34,7 +34,7 @@ export async function withProviderRun(authority, host, work, options = {}) {
     throw providerHostError('authority contains only runId, actor, environment, destination, revision and lease opaque strings');
   if (!host || ['identify', 'acquire', 'current', 'transport'].some((name) => typeof host[name] !== 'function') || typeof work !== 'function')
     throw providerHostError('run needs identify, acquire, current, transport and work capabilities');
-  const evidence = deepFreeze(JSON.parse(canonicalizeJson(authority)));
+  const evidence = deepFreeze(cloneJson(authority));
   const lifecycle = resolveLifecycle(host, providerHostError);
   const controller = new AbortController();
   const signal = AbortSignal.any([controller.signal, ...(options.signal ? [options.signal] : [])]);
@@ -93,14 +93,14 @@ export async function withProviderRun(authority, host, work, options = {}) {
           check: { value: () => track(check({ phase: 'publish' })) },
           publish: { value: (value, commit) => track((async () => {
             if (!await check({ phase: 'publish' })) return refused('authority-changed');
-            return commit(JSON.parse(canonicalizeJson(value)), evidence);
+            return commit(cloneJson(value), evidence);
           })()) },
         }));
         if (!await check({ phase: 'start' })) return refused('authority-changed');
         try {
           const value = await work(run);
           if (signal.aborted || !live) return refused('cancelled');
-          return { state: 'complete', evidence, value: JSON.parse(canonicalizeJson(value)) };
+          return { state: 'complete', evidence, value: cloneJson(value) };
         }
         catch { return refused('run-failed'); }
         finally {

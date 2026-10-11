@@ -5,7 +5,12 @@
  * `stringifyJoslStream` → an opaque handler's byte source → the real
  * Node HTTP adapter under the host lifecycle → `typedHttpClient(…).
  * bytes()` → an incremental hash/count sink — 100 MiB of rows in a child
- * whose V8 old space is 48 MiB. Backpressure reaches the cursor: at a
+ * whose V8 old space is 64 MiB, a third of it live with the loaded modules
+ * before the first byte moves. Retention is asserted on the live heap after a forced
+ * collection at a quarter and three quarters consumed, not by the child
+ * surviving: whether the collector keeps up with garbage under a fixed cap
+ * is the machine's scheduling (a 48 MiB cap left 27 MiB over them and killed the child in a few runs in twenty-five). Backpressure reaches
+ * the cursor: at a
  * quarter consumed the cursor has pulled a bounded prefix of the rows,
  * and queued application bytes stay bounded independently of TCP buffers. A halfway
  * cancellation reaches the byte source's `return()`, the cursor's
@@ -22,10 +27,12 @@ import { fileURLToPath } from 'node:url';
 
 const CHILD = fileURLToPath(new URL('./fixtures/host-seam-child.mjs', import.meta.url));
 const TOTAL = 100 * 1024 * 1024;
+/** The heap the pipeline may hold beyond the loaded modules, after a collection, while 100 MiB flows through. */
+const LIVE_GROWTH = 8 * 1024 * 1024;
 
 describe('the host seam end to end — a fixed-heap child', () => {
-  it('moves 100 MiB of rows as CSV and JOSL from a store cursor to bytes() under a 48 MiB old space; backpressure reaches the cursor; a halfway cancel releases everything once', () => {
-    const child = spawnSync(process.execPath, ['--no-warnings=ExperimentalWarning', '--max-old-space-size=48', CHILD, String(TOTAL)],
+  it('moves 100 MiB of rows as CSV and JOSL from a store cursor to bytes() under a 64 MiB old space; the live heap stays flat; backpressure reaches the cursor; a halfway cancel releases everything once', () => {
+    const child = spawnSync(process.execPath, ['--no-warnings=ExperimentalWarning', '--max-old-space-size=64', '--expose-gc', CHILD, String(TOTAL)],
       { encoding: 'utf8', maxBuffer: 1024 * 1024 });
     assert.strictEqual(child.status, 0, child.stderr);
     const out = JSON.parse(child.stdout.trim().split('\n').pop() ?? '{}');
@@ -38,6 +45,10 @@ describe('the host seam end to end — a fixed-heap child', () => {
       assert.strictEqual(run.pulls, out.rows, `${carrier}: every row pulled exactly once`);
       assert.ok(run.pullsAtQuarter !== null && run.pullsAtQuarter < out.rows,
         `${carrier}: at a quarter consumed the cursor had pulled ${run.pullsAtQuarter} of ${out.rows} rows — it did not run ahead to the end`);
+      for (const [point, live] of [['a quarter', run.liveQuarter], ['three quarters', run.liveThreeQuarters]]) {
+        assert.ok(typeof live === 'number', `${carrier}: the live heap was sampled at ${point}`);
+        assert.ok(live - out.baselineHeap < LIVE_GROWTH, `${carrier}: ${live - out.baselineHeap} bytes retained at ${point} consumed (baseline ${out.baselineHeap})`);
+      }
       if (carrier === 'node') {
         assert.ok(run.highWaterMark > 0, 'the real writable queue was observed');
         assert.ok(run.maxProducerAhead <= run.maxChunk, 'the adapter pulls at most one unwritten chunk');

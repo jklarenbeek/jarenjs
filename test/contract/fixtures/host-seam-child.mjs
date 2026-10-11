@@ -3,8 +3,13 @@
 // encoded as an opaque handler's `AsyncIterable<Uint8Array>`, served
 // through the real Node HTTP adapter under the host lifecycle, read with
 // `typedHttpClient(...).bytes()` into an incremental hash/count sink —
-// under a V8 old space far below the payload (`--max-old-space-size=48`
-// for 100 MiB). Backpressure is measured where it matters: the rows the
+// under a V8 old space far below the payload (`--max-old-space-size=64`
+// for 100 MiB, a third of it live with the loaded modules before the
+// first byte moves). Retention is measured by the live heap after a forced
+// collection at a quarter and three quarters consumed, never by the
+// process surviving: whether a collector keeps up with garbage under a
+// fixed cap is the host's scheduling, not the pipeline's memory.
+// Backpressure is measured where it matters: the rows the
 // cursor pulled while the client had consumed a quarter, and the application writable queue (independent of TCP buffers). A halfway cancellation must
 // reach every finalizer exactly once: the byte source's `return()`, the
 // DB cursor's `return()`, the acquired release and the identity release,
@@ -32,6 +37,21 @@ const TOTAL = Number(process.argv[2] ?? process.env.SEAM_BYTES ?? 100 * 1024 * 1
 const PAYLOAD = 4096;
 const ROWS = Math.ceil(TOTAL / PAYLOAD);
 const CANCEL_AT = Math.floor(TOTAL / 4);
+
+if (typeof globalThis.gc !== 'function') throw new Error('the seam child needs --expose-gc to measure the live heap');
+/**
+ * The memory the process retains: a full collection, a pause for the
+ * backing stores the collector releases off-thread, and a second
+ * collection, so garbage not yet swept is not counted. Buffers live
+ * outside the heap, so their backing stores are added.
+ */
+const liveHeap = async () => {
+  globalThis.gc?.();
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  globalThis.gc?.();
+  const usage = process.memoryUsage();
+  return usage.heapUsed + usage.arrayBuffers;
+};
 
 let peakRss = 0;
 const sample = () => {
@@ -180,6 +200,10 @@ async function sink(stream, of, cancelAt) {
   let consumed = 0;
   let maxAhead = 0;
   let pullsAtQuarter = null;
+  /** @type {number | null} */
+  let liveQuarter = null;
+  /** @type {number | null} */
+  let liveThreeQuarters = null;
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -189,13 +213,15 @@ async function sink(stream, of, cancelAt) {
     const ahead = c.encoded - consumed;
     if (ahead > maxAhead) maxAhead = ahead;
     if (pullsAtQuarter === null && consumed >= TOTAL / 4) pullsAtQuarter = c.pulls;
+    if (cancelAt === null && liveQuarter === null && consumed >= TOTAL / 4) liveQuarter = await liveHeap();
+    if (cancelAt === null && liveThreeQuarters === null && consumed >= (3 * TOTAL) / 4) liveThreeQuarters = await liveHeap();
     sample();
     if (cancelAt !== null && consumed >= cancelAt) {
       await reader.cancel();
       break;
     }
   }
-  return { hash: h.digest('hex'), consumed, maxAhead, pullsAtQuarter };
+  return { hash: h.digest('hex'), consumed, maxAhead, pullsAtQuarter, liveQuarter, liveThreeQuarters };
 }
 
 /** Wait until a counter settles (the cancel reaches the finalizers asynchronously). @param {() => boolean} until */
@@ -224,6 +250,7 @@ nodeServer.listen(0, '127.0.0.1');
 await once(nodeServer, 'listening');
 const client = typedHttpClient(openHttpClient(contract, { baseUrl: `http://127.0.0.1:${nodeServer.address().port}` }), pen);
 
+const baselineHeap = await liveHeap();
 const started = Date.now();
 const csv = await client.bytes('rows.csv', null);
 if (!csv.ok) throw new Error(`csv failed: ${JSON.stringify(csv)}`);
@@ -270,7 +297,7 @@ nodeServer.close();
 await store.close();
 rmSync(dir, { recursive: true, force: true });
 process.stdout.write(`${JSON.stringify({
-  total: TOTAL, rows: ROWS, payload: PAYLOAD, page: PAGE, cancelAt: CANCEL_AT,
+  total: TOTAL, baselineHeap, rows: ROWS, payload: PAYLOAD, page: PAGE, cancelAt: CANCEL_AT,
   node: { csv: csvSummary, josl: joslSummary, cancel: cancelSummary, ms: nodeMs },
   fetch: { csv: fetchSummary, cancel: fetchCancelSummary, ms: fetchMs },
   peakRss,

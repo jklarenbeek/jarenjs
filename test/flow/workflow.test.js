@@ -41,6 +41,23 @@ describe('one workflow lowered onto statechart and DAG', () => {
       assert.throws(() => lowerWorkflow(invalid), { code: 'JF0021', docPath });
   });
 
+  it('reports an embedded DAG or task that does not compile at its place in the workflow document', () => {
+    const tasks = { one: handler(() => 1) };
+    const dagState = (dag) => workflow({ work: { work: { dag }, then: 'done' }, done: { final: true } });
+    const cases = [
+      [workflow({ work: task('missing', 'done'), done: { final: true } }), 'JF0018', '/states/work/work/task'],
+      [workflow({ work: { work: { task: 'one', version: '2' }, then: 'done' }, done: { final: true } }), 'JF0019', '/states/work/work/version'],
+      [workflow({ work: { work: { task: 'one', version: '1', with: { $nope: 1 } }, then: 'done' }, done: { final: true } }), 'JF0014', '/states/work/work/with'],
+      [dagState({ $dag: '0.1', nodes: { in: { kind: 'input' }, x: { kind: 'bogus' }, out: { kind: 'output' } }, edges: [] }), 'JF0011', '/states/work/work/dag/nodes/x/kind'],
+      [dagState({ $dag: '0.1', nodes: { in: { kind: 'input' }, t: { kind: 'task', run: 'one' }, out: { kind: 'output' } },
+        edges: [{ from: 'in', to: 't' }, { from: 't', to: 'out' }] }), 'JF0011', '/states/work/work/dag/nodes/t/version'],
+      [dagState({ $dag: '0.1', nodes: { in: { kind: 'input' }, out: { kind: 'output' } }, edges: [{ from: 'in', to: 'gone' }] }), 'JF0013', '/states/work/work/dag/edges/0/to'],
+    ];
+    for (const [doc, code, docPath] of cases)
+      assert.throws(() => compileWorkflow(doc, { tasks }), (error) => error.code === code && error.docPath === docPath
+        && error.message.endsWith(` at ${docPath}`), `${code} at ${docPath}`);
+  });
+
   it('refuses corrupt saved control before claiming the run or invoking a task', async () => {
     const doc = workflow({ wait: { on: [{ event: 'go', to: 'work' }] }, work: task('one', 'done'), done: { final: true } });
     let calls = 0; let saves = 0;
