@@ -15,6 +15,8 @@
  * richer `parseFrontmatter` through `options.parseFrontmatter`.
  */
 
+import { setObjectMember } from '@jarenjs/core/object';
+
 /** A leading front-matter fence: `---` on its own line at the very top. */
 const FM_OPEN = /^---[ \t]*$/;
 /** An `%%{init: {...}}%%` (or `%%{ init: ... }%%`) directive line. */
@@ -126,11 +128,11 @@ export function parseYamlSubset(text) {
     const parent = stack[stack.length - 1].obj;
     if (valueText === '') {
       const child = {};
-      parent[key] = child;
+      setObjectMember(parent, key, child);
       stack.push({ indent, obj: child });
     }
     else {
-      parent[key] = parseScalar(valueText);
+      setObjectMember(parent, key, parseScalar(valueText));
     }
   }
   return root;
@@ -189,13 +191,10 @@ function mergeConfig(base, extra) {
   const out = { ...base };
   for (const key of Object.keys(extra)) {
     const value = extra[key];
-    if (value && typeof value === 'object' && !Array.isArray(value)
-      && out[key] && typeof out[key] === 'object' && !Array.isArray(out[key])) {
-      out[key] = { ...out[key], ...value };
-    }
-    else {
-      out[key] = value;
-    }
+    const prior = Object.hasOwn(out, key) ? out[key] : undefined;
+    const nested = value && typeof value === 'object' && !Array.isArray(value)
+      && prior && typeof prior === 'object' && !Array.isArray(prior);
+    setObjectMember(out, key, nested ? { ...prior, ...value } : value);
   }
   return out;
 }

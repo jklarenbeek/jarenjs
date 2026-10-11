@@ -8,8 +8,22 @@
 
 import { collectBraceBody } from '../utils.js';
 
+/** An entity name: a run of non-space characters, or a quoted name that may hold spaces. */
+const NAME = '("[^"]*"|\\S+)';
 /** `LEFT <cardl>--<cardr> RIGHT : label` (relationship). */
-const RE_REL = /^(\S+)\s+([|}{o]{1,2})(--|\.\.)([|}{o]{1,2})\s+(\S+)\s*:\s*(.*)$/;
+const RE_REL = new RegExp(`^${NAME}\\s+([|}{o]{1,2})(--|\\.\\.)([|}{o]{1,2})\\s+${NAME}\\s*:\\s*(.*)$`);
+
+/** A line that is just one entity name. */
+const RE_BARE = new RegExp(`^${NAME}$`);
+
+/**
+ * An entity name as written, without the quotes that spell it.
+ * @param {string} name
+ * @returns {string}
+ */
+function unquote(name) {
+  return name.length >= 2 && name.startsWith('"') && name.endsWith('"') ? name.slice(1, -1) : name;
+}
 
 /**
  * @param {string[]} lines
@@ -42,11 +56,14 @@ export function parseEr(lines) {
     // it can never match RE_REL.
     const rel = RE_REL.exec(line);
     if (rel !== null) {
-      ensure(rel[1]);
-      ensure(rel[5]);
+      const left = unquote(rel[1]);
+      const right = unquote(rel[5]);
+      if (left === '' || right === '') continue; // an empty name names nothing
+      ensure(left);
+      ensure(right);
       relationships.push({
-        left: rel[1],
-        right: rel[5],
+        left,
+        right,
         leftCard: rel[2],
         rightCard: rel[4],
         identifying: rel[3] === '--',
@@ -57,7 +74,7 @@ export function parseEr(lines) {
 
     const brace = line.indexOf('{');
     if (brace !== -1) {
-      const name = line.slice(0, brace).trim();
+      const name = unquote(line.slice(0, brace).trim());
       const ent = ensure(name);
       let body;
       ({ body, li } = collectBraceBody(lines, li, line.slice(brace + 1)));
@@ -69,6 +86,10 @@ export function parseEr(lines) {
       }
       continue;
     }
+
+    // a bare entity line: one name (quoted or not) and nothing else
+    const bare = RE_BARE.exec(line);
+    if (bare !== null && unquote(bare[1]) !== '') ensure(unquote(bare[1]));
   }
 
   return { entities: order.map((n) => entityMap.get(n)), relationships };

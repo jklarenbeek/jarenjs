@@ -213,7 +213,7 @@ export async function loadMarkdown(url, options = {}) {
   if (cache !== null) {
     const entry = cache.get(key);
     if (entry !== undefined) {
-      if (entry.promise !== undefined) return entry.promise; // share in-flight
+      if (entry.promise !== undefined) return joinPending(entry, resolved, options); // share in-flight
       if (entry.compiled !== undefined) {
         // Serve immediately; revalidate in the background when the
         // origin gave us a validator.
@@ -231,7 +231,10 @@ export async function loadMarkdown(url, options = {}) {
   // Only this record owns the pending result. An invalidation, eviction
   // or newer load revokes its right to mutate the cache, not its caller's
   // right to receive the response it requested.
-  const pending = { promise: /** @type {Promise<CompiledMd> | undefined} */ (undefined) };
+  const pending = {
+    promise: /** @type {Promise<CompiledMd> | undefined} */ (undefined),
+    signal: options.signal,
+  };
   const promise = fetchAndCompile(resolved, options, undefined)
     .then((result) => {
       if (cache !== null && cache.get(key) === pending) {
@@ -251,6 +254,34 @@ export async function loadMarkdown(url, options = {}) {
   pending.promise = promise;
   if (cache !== null) cache.set(key, pending);
   return promise;
+}
+
+/**
+ * Wait on another caller's in-flight load without inheriting its
+ * cancellation. The fetch belongs to the caller that started it: when that
+ * caller aborts, a caller that is still wanted starts its own load instead
+ * of failing with an abort it never asked for, and a caller that aborts
+ * after joining is rejected with its own reason while the shared fetch
+ * carries on for the others.
+ * @param {{ promise: Promise<CompiledMd>, signal?: AbortSignal }} pending
+ * @param {string} url
+ * @param {MdLoadOptions} options
+ * @returns {Promise<CompiledMd>}
+ */
+function joinPending(pending, url, options) {
+  const own = options.signal;
+  const shared = pending.promise.catch((err) => {
+    if (pending.signal !== undefined && pending.signal.aborted && !(own !== undefined && own.aborted)) {
+      return loadMarkdown(url, options);
+    }
+    throw err;
+  });
+  if (own === undefined) return shared;
+  return new Promise((resolve, reject) => {
+    const abandon = () => reject(own.reason ?? new Error('md load: aborted'));
+    own.addEventListener('abort', abandon, { once: true });
+    shared.then(resolve, reject).finally(() => own.removeEventListener('abort', abandon));
+  });
 }
 
 /**

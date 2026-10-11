@@ -54,6 +54,11 @@ and [ARCHITECTURE.md](ARCHITECTURE.md) for the state, action and run-loop
 contract an embedding host supplies. Query, JSLT, JTLT and XQuery expose
 an editable JSON externals pane.
 
+Answers that changed (upgrade notes): `runExample` answers `unknown engine` for
+an id every object inherits (`constructor`, `__proto__`, `toString`), where it
+failed with `engine.run is not a function`; a timing that is `NaN` or infinite
+prints a dash, where it printed `NaN ms`.
+
 ## Exports
 
 Every subpath a consumer can import, derived from the manifest by

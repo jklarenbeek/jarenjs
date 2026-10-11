@@ -178,7 +178,8 @@ function withConfig(engine, options) {
  * @returns {PlayResult | Promise<PlayResult>}
  */
 export function runExample(engineId, source, data, options = {}) {
-  const engine = ENGINES[engineId];
+  // own members only: an id such as `constructor` names no engine
+  const engine = Object.hasOwn(ENGINES, engineId) ? ENGINES[engineId] : undefined;
   if (engine === undefined) {
     return { ok: false, timing: null, error: { message: `unknown engine: ${engineId}` }, panels: [] };
   }

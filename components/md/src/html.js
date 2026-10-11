@@ -283,9 +283,63 @@ function attrsFor(tag, urlPolicy) {
       if (safe !== null) props[lower] = safe;
       continue;
     }
+    if (lower === 'srcset') {
+      const safe = filterSrcset(decodeReferences(value), urlPolicy);
+      if (safe !== '') props.srcset = safe;
+      continue;
+    }
     props[lower] = decodeReferences(value);
   }
   return props;
+}
+
+/** HTML's ASCII whitespace: space, tab, line feed, form feed, carriage return. */
+function isAsciiSpace(code) {
+  return code === 0x20 || code === 0x09 || code === 0x0A || code === 0x0C || code === 0x0D;
+}
+
+/**
+ * Pass every candidate URL of a `srcset` through the URL policy and write
+ * back the candidates that survive. The list is read the way the HTML
+ * specification reads it: a candidate is a URL (a run of non-whitespace; a
+ * trailing comma ends a candidate that has no descriptor) followed by
+ * descriptors up to the next comma outside parentheses.
+ * @param {string} value
+ * @param {(url: string) => (string|null)} urlPolicy
+ * @returns {string}
+ */
+function filterSrcset(value, urlPolicy) {
+  const kept = [];
+  const n = value.length;
+  let i = 0;
+  while (i < n) {
+    while (i < n && (value.charCodeAt(i) === 0x2C || isAsciiSpace(value.charCodeAt(i)))) i++;
+    if (i >= n) break;
+    let start = i;
+    while (i < n && !isAsciiSpace(value.charCodeAt(i))) i++;
+    let url = value.slice(start, i);
+    let descriptors = '';
+    if (url.endsWith(',')) {
+      url = url.replace(/,+$/, '');
+    }
+    else {
+      start = i;
+      let depth = 0;
+      while (i < n) {
+        const c = value.charCodeAt(i);
+        if (c === 0x28) depth++;
+        else if (c === 0x29 && depth > 0) depth--;
+        else if (c === 0x2C && depth === 0) break;
+        i++;
+      }
+      descriptors = value.slice(start, i).trim().replace(/\s+/g, ' ');
+    }
+    if (url === '') continue;
+    const safe = urlPolicy(url);
+    if (safe === null || /\s/.test(safe)) continue;
+    kept.push(descriptors === '' ? safe : safe + ' ' + descriptors);
+  }
+  return kept.join(', ');
 }
 
 /** Tag-name characters: a letter, then letters, digits or `-`. */

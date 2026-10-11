@@ -357,6 +357,25 @@ Node is a capability it lacks.
 See [ARCHITECTURE.md](ARCHITECTURE.md) and
 [docs/MERMAID-FORMAT.md](docs/MERMAID-FORMAT.md).
 
+Answers that changed (upgrade notes): a state diagram never makes a state its
+own ancestor (`state C { state C {` and an ancestor declared inside its own
+descendant used to parse into states that were each other's parent, which
+`toMermaid` refused with a bare `TypeError`); a `__proto__` key in front matter
+or an init directive is a config member, where it re-parented the config
+object; a quoted flowchart label may hold its own closing bracket
+(`A("f(x)") --> B` used to read the label `"f(x` and silently drop the edge and
+`B`), and `toMermaid` quotes a label that starts or ends with `/`, `\` or a space
+so it reads back as it was; an `erDiagram` entity name in quotes may hold spaces
+in a relationship as in a block (`"PRODUCT CATEGORY" ||--o{ PRODUCT : has` used
+to vanish into a bogus entity), the quotes are not part of the name, and a name
+with a space prints in quotes, and a bare entity line (`"E F"`, `G`) declares an
+entity; a `style` or `classDef` value is plain paint (a color, a number with a
+unit, a dash list, `var(--name)`, `url(#id)` of the same document, or a color
+function such as `rgb(10 20 30)`), and one carrying a `;`, a remote `url()` or
+another function is dropped without a diagnostic, where it was written into the
+shape's inline style and added declarations of its own; the component's
+never-read `onHydrateError` option is gone from its type.
+
 ## Exports
 
 Every subpath a consumer can import, derived from the manifest by

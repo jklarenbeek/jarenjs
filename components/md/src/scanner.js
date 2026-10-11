@@ -487,6 +487,16 @@ export function scanLinkTitle(text, pos) {
 // Character classes (the flanking rules and the autolink grammar)
 // ------------------------------------------------------------------
 
+/**
+ * The two spellings an angle-bracket autolink can take (CommonMark
+ * §Autolinks): `<scheme:destination>` and `<address@host>`. The parser
+ * reads them and the printer asks the same patterns whether a link can
+ * be written that way, so the two cannot disagree about what one is.
+ */
+// eslint-disable-next-line no-control-regex -- the spec excludes all control characters
+export const RE_AUTOLINK_URI = /^<([a-zA-Z][a-zA-Z0-9+.-]{1,31}:[^<>\x00-\x20]*)>/;
+export const RE_AUTOLINK_EMAIL = /^<([a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+)>/;
+
 /** ASCII punctuation membership (emphasis flanking, backslash escapes). */
 export const ASCII_PUNCT = new Uint8Array(128);
 for (const ch of '!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~') ASCII_PUNCT[ch.charCodeAt(0)] = 1;

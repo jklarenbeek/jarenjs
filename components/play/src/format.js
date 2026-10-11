@@ -5,16 +5,17 @@
  */
 
 /**
- * A measured duration as a stage label. Anything that is not a number —
- * including the `null` an engine reports for a phase it does not have, or
- * one the host never measured — is an em dash rather than a fabricated
- * `0`, which would read as "ran in no time" instead of "not measured".
+ * A measured duration as a stage label. Anything that is not a finite
+ * number — including the `null` an engine reports for a phase it does not
+ * have, or one the host never measured, and a `NaN` or infinite reading —
+ * is an em dash rather than a fabricated `0`, which would read as "ran in
+ * no time" instead of "not measured".
  * Sub-hundredth-millisecond work prints as a floor: two decimals is the
  * resolution the cards claim, and `0.00 ms` would over-claim it.
  * @param {unknown} ms
  * @returns {string}
  */
 export function formatMs(ms) {
-  if (typeof ms !== 'number') return '—';
+  if (typeof ms !== 'number' || !Number.isFinite(ms)) return '—';
   return ms < 0.01 ? '<0.01 ms' : `${ms.toFixed(2)} ms`;
 }

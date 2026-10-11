@@ -108,8 +108,9 @@ attributes. That inherits, for free: O(change) diffing, keyed
 reconciliation, SSR via `renderToString`, and CSP-safety. `render` is
 synchronous and complete, so a Markdown document with a `mermaid` fence
 renders to a full SVG string through SSR with **no browser** — a
-capability real Mermaid lacks. `hydrate` is therefore a no-op in v1,
-reserved for optional pan/zoom later.
+capability real Mermaid lacks. The component's `hydrate` is therefore a
+no-op; pan, zoom and touch are the opt-in `mermaidPlugin({ interactive: true })`
+hydrate, which attaches to the finished SVG.
 
 ## Known limits (v0.1)
 

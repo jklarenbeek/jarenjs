@@ -52,6 +52,10 @@ export function axisTicksOrdinal(categories) {
   return categories.map((label, i) => ({ label, pos: (i + 0.5) / n }));
 }
 
+/** The size and suffix of each compact-label unit: none, `k`, `M`, `G`. */
+const UNIT_SIZE = [1, 1e3, 1e6, 1e9];
+const UNIT_SUFFIX = ['', 'k', 'M', 'G'];
+
 /**
  * A compact tick label: `1.5k`, `2M`, `1G` for large magnitudes,
  * 3-significant-digit decimals otherwise.
@@ -61,10 +65,15 @@ export function axisTicksOrdinal(categories) {
 export function formatTickValue(v) {
   if (v === 0) return '0';
   const abs = Math.abs(v);
-  if (abs >= 1e9) return trim(v / 1e9) + 'G';
-  if (abs >= 1e6) return trim(v / 1e6) + 'M';
-  if (abs >= 1e3) return trim(v / 1e3) + 'k';
-  return trim(v);
+  let unit = abs >= 1e9 ? 3 : abs >= 1e6 ? 2 : abs >= 1e3 ? 1 : 0;
+  let label = trim(v / UNIT_SIZE[unit]);
+  // three digits can round up to 1000 of this unit (999,999 -> 1000k): that
+  // is one of the next
+  if (unit < 3 && Math.abs(Number(label)) >= 1000) {
+    unit += 1;
+    label = trim(v / UNIT_SIZE[unit]);
+  }
+  return label + UNIT_SUFFIX[unit];
 }
 
 /**

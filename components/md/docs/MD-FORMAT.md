@@ -566,7 +566,14 @@ with backticks, `*emphasis*`/`**strong**`, reference-free inline links,
 `|`-piped tables with an alignment row, and blank lines between blocks.
 A footnote definition prints where it stands, its later blocks indented
 four columns; a literal autolink prints bare, escaped so that a `_` or
-`&` in a destination survives the trip back.
+`&` in a destination survives the trip back. A link prints as an
+angle-bracket autolink only where that spelling parses as one — an
+absolute URI or an email address; `[CHANGELOG.md](CHANGELOG.md)` keeps its
+inline form. Strong around a lone emphasis prints its emphasis with
+underscores (`**_x_**`), because `***x***` reads back as the nesting the
+other way round. A fence's info string is escaped as it is read: a
+backslash before punctuation and an `&` that opens a character reference
+print with a backslash.
 
 The normative round-trip guarantees:
 
@@ -585,6 +592,13 @@ The normative round-trip guarantees:
    identity JSLT stylesheet (`[]`) maps back — by reference — to the
    same AST, which prints to the canonical equivalent of the JTLT
    output.
+
+The guarantee is checked over those corpora and over randomly assembled
+documents; it has known gaps outside them. Two emphasis or strong nodes that
+are adjacent siblings print their delimiters into one run (`*a*_b_` prints
+`*a**b*`); a chain of empty list items with alternating markers (`* + *`)
+prints as a thematic break (`- - -`); and a raw-HTML node that begins a
+continuation line prints at a line start, where it opens an HTML block.
 
 ## 6. Structural sharing (normative)
 

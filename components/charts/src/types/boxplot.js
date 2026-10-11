@@ -128,7 +128,7 @@ export function buildBoxplotAST(data, config = {}) {
   const labels = input.map((box) => box.label);
   const band = scaleBand(labels, 0.35);
   const boxes = input.map((box, i) => {
-    const start = i * band.step + (band.step - band.bandwidth) / 2;
+    const start = band.start(i);
     const s = box.stats;
     return {
       label: box.label,

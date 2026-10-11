@@ -139,7 +139,7 @@ export function buildBarAST(data, config = {}) {
     for (let ci = 0; ci < categories.length; ci++) {
       const v = s.values[ci];
       if (typeof v !== 'number' || !Number.isFinite(v) || v <= 0) continue;
-      const start = band(categories[ci]);
+      const start = band.start(ci);
       let u0;
       let u1;
       let v0;
@@ -174,7 +174,7 @@ export function buildBarAST(data, config = {}) {
     title: config.title ?? null,
     orient: config.orient === 'h' ? 'h' : 'v',
     cat: {
-      ticks: categories.map((label) => ({ pos: band(label) + band.bandwidth / 2, label: String(label) })),
+      ticks: categories.map((label, ci) => ({ pos: band.start(ci) + band.bandwidth / 2, label: String(label) })),
       label: config.catLabel ?? null,
     },
     val: {

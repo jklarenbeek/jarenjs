@@ -474,8 +474,9 @@ as markup or as a live URL.
   everything else. What makes that offerable is structural rather than a
   promise about filtering: the output is a vnode tree, so an
   unrecognised element contributes only its children's text, `on*`
-  handlers and `style` never exist to begin with, `href`/`src` go
-  through the same URL policy as Markdown's own links, and a
+  handlers and `style` never exist to begin with, `href`, `src` and
+  every `srcset` candidate go through the same URL policy as Markdown's
+  own links (the host's `options.sanitizeUrl` included), and a
   `<script>`'s content is discarded rather than shown. It is not an
   HTML5 parser — unbalanced input closes at the end of its run — and a
   host with its own rules injects them through `options.parseHtml`.
@@ -606,6 +607,21 @@ Measured, not claimed — `npm run benchmark:markdown`, <!--fact:md.measured-->2
   markup out — and the order in which a serializer happened to print a
   tag's attributes — is normalized away on every engine's output, not
   just this one's.
+
+Answers that changed (upgrade notes): `toMarkdown` keeps a link whose text is
+its own relative destination as `[CHANGELOG.md](CHANGELOG.md)` (it printed
+`<CHANGELOG.md>`, which reads back as text or raw HTML, so the link was lost);
+it prints strong around a lone emphasis as `**_x_**` (`***x***` reads back as
+emphasis around strong) and escapes a backslash before punctuation, or an `&`
+that opens a character reference, in a fence info string (both read back
+decoded). The incremental parser holds a frontmatter closing fence until its
+line is complete, so a chunk boundary after `---` no longer changes the
+document. Under `html: 'vnode'` a host `sanitizeUrl` judges the URLs of raw
+HTML (it judged Markdown links and images only) and every `srcset` candidate
+(`srcset` went through unread). A `loadMarkdown` call that joins an in-flight
+load keeps its own cancellation: the first caller's abort used to reject it,
+and its own abort was ignored. `frontmatterExternals` keeps a `__proto__` key
+as a member.
 
 ## Exports
 

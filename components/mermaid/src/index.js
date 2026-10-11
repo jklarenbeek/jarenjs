@@ -52,10 +52,14 @@ export function renderMermaid(source, options = {}) {
 
 /**
  * @typedef {object} CompiledMermaid
- * @property {import('./ast.js').DiagramDocument} doc the parsed document
+ * @property {import('./ast.js').DiagramDocument | null} doc the parsed
+ *   document, or null when the source did not parse
+ * @property {unknown} parseError the error the parse raised, or null
  * @property {() => any} toVnode cached pure-vnode SVG
  * @property {() => string} toSvgString cached standalone SVG string (SSR)
  * @property {() => string} toText canonical Mermaid text (`toMermaid`)
+ * @property {() => any} toLayout cached positioned scene (null for types
+ *   without a geometric layout and for sources that did not parse)
  * @property {(visitor: (stmt: any) => void) => void} walk walk the AST
  */
 

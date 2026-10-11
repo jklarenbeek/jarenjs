@@ -77,7 +77,7 @@ export function calcInitialState() {
   };
 }
 
-/** The scope for evaluating the entry buffer in a given state. */
+/** The scope for evaluating an entry against a state slice or an effect's props. */
 function scopeOf(calc) {
   return {
     angleMode: calc.angleMode,
@@ -126,7 +126,6 @@ const CONVERTER_UNIT_IDS = Object.fromEntries(converterDimensions()
 /**
  * The action query documents. `dataPointer` for the financial form is
  * `/calc/fin`.
- * @returns {Record<string, any>}
  */
 export const calcActions = {
   'calc/key': { patch: [{ op: 'replace', path: '/calc/entry', value: { $concat: ['$.calc.entry', '$payload.k'] } }] },
@@ -192,7 +191,14 @@ export const calcActions = {
     ],
   },
   'calc/rates-refresh': { effects: [{ run: 'rates-fetch', with: { force: true } }] },
-  'calc/rates-ok': { patch: [{ op: 'replace', path: '/calc/rates', value: '$payload' }] },
+  // a fetched table is live: it replaces the fallback and says so
+  'calc/rates-ok': {
+    patch: [
+      { op: 'replace', path: '/calc/rates', value: '$payload' },
+      { op: 'add', path: '/calc/rates/status', value: 'ok' },
+      { op: 'add', path: '/calc/rates/stale', value: false },
+    ],
+  },
   'calc/rates-err': { patch: [{ op: 'replace', path: '/calc/rates/status', value: 'error' }] },
   // the financial panel writes through the (namespaced) @jarenjs/forms actions
   ...createFormActions({ dataPointer: '/calc/fin', actions: FORM_ACTIONS }),
@@ -214,11 +220,7 @@ export const calcEditEffects = {
     if (entry === '') return;
     const mode = props.mode ?? 'standard';
     const env = envForMode(mode);
-    const scope = {
-      angleMode: props.angleMode, wordBits: props.wordBits, signed: props.signed,
-      ans: props.ans, mem: props.memory, memory: props.memory,
-    };
-    const res = evaluate(entry, scope, { env });
+    const res = evaluate(entry, scopeOf(props), { env });
     if (!res.ok) return; // leave the entry; the live display shows the error
     const desc = MODE_BY_ID[mode] ?? standardMode;
     const display = desc.format
@@ -229,9 +231,13 @@ export const calcEditEffects = {
     const value = mode === 'programmer'
       ? wordValue(res.value, props.wordBits ?? 32, props.signed ?? false)
       : res.value;
-    // Grouping belongs on the tape/display; expression literals contain no spaces.
-    dispatch('calc/commit', { value, display, expr: entry,
-      entry: mode === 'programmer' ? display.replaceAll(' ', '') : display });
+    // The displayed result becomes the next entry, except when it is not a
+    // number (`∞`, `NaN`, `—` are not expressions): the typed expression
+    // stays, so the entry still evaluates. Grouping belongs on the
+    // tape/display; expression literals contain no spaces.
+    const next = !Number.isFinite(res.value) ? entry
+      : mode === 'programmer' ? display.replaceAll(' ', '') : display;
+    dispatch('calc/commit', { value, display, expr: entry, entry: next });
   },
 };
 

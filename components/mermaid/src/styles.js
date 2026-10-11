@@ -30,6 +30,20 @@ const SHAPE_PROPS = {
 };
 
 /**
+ * What a style value may be once it reaches an attribute: a run of plain
+ * tokens (colors, numbers with units, a dash list), a reference to a
+ * custom property (`var(--accent)`), a reference to an element of the same
+ * document (`url(#gradient)`) or a color function with a numeric body
+ * (`rgb(10 20 30)`, `hsl(210 50% 40% / 0.5)`). A declaration separator, a
+ * remote `url()`, a quote or any other function is not a paint value, and
+ * the value is written into an inline `style`, where it would add
+ * declarations of its own — a remote resource among them. A value that
+ * fails is dropped without a diagnostic: the AST keeps what the author
+ * wrote, and the render simply does not paint it.
+ */
+const SAFE_STYLE_VALUE = /^(?:[#\w.%+ -]+|var\(--[\w-]+\)|url\(#[\w-]+\)|(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch)\([\d\s.%/+-]*\))$/;
+
+/**
  * Parse a Mermaid style string (`fill:#eee,stroke-width:2px`) into an object.
  * Unknown properties are kept: a consumer may understand more than this one,
  * and silently dropping a declaration the author wrote is the same class of
@@ -134,7 +148,8 @@ export function shapeStyle(styles, tokens) {
 
 /**
  * The SVG attributes a resolved style object contributes to a shape, with the
- * built-in `note` marker expanded against the live theme.
+ * built-in `note` marker expanded against the live theme. A value that is
+ * not plain paint (see {@link SAFE_STYLE_VALUE}) contributes nothing.
  * @param {Record<string,string>|undefined} styles
  * @param {Record<string,string>} tokens theme tokens
  * @returns {Record<string,string>}
@@ -150,7 +165,7 @@ export function shapeAttributes(styles, tokens) {
   }
   for (const [key, attribute] of Object.entries(SHAPE_PROPS)) {
     const value = styles[key];
-    if (value === undefined) continue;
+    if (value === undefined || !SAFE_STYLE_VALUE.test(value)) continue;
     out[attribute] = key === 'stroke-width' ? value.replace(/px$/i, '') : value;
   }
   return out;
@@ -174,7 +189,7 @@ export function shapeAttributes(styles, tokens) {
  */
 export function textColor(styles, tokens) {
   if (styles === undefined) return null;
-  if (typeof styles.color === 'string') return styles.color;
+  if (typeof styles.color === 'string' && SAFE_STYLE_VALUE.test(styles.color)) return styles.color;
   if (styles['mm-builtin'] === 'note' && !isHexColor(styles.fill)) return tokens.noteText;
   if (isHexColor(styles.fill)) return inkFor(styles.fill);
   return null;

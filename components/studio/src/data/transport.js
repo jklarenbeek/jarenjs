@@ -67,7 +67,10 @@ export function createTransport(deps) {
   };
 
   /** @param {any} input @param {any} callbacks */
-  const subscribe = (input, callbacks) => client.subscribe('data.live', input, callbacks);
+  const subscribe = (input, callbacks) => {
+    if (client === null) throw new Error('the data transport is closed');
+    return client.subscribe('data.live', input, callbacks);
+  };
 
   /** @type {((notice: any) => void) | null} */
   let onNotice = null;

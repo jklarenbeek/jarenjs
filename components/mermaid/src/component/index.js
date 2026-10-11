@@ -10,8 +10,9 @@
  *    `@jarenjs/app` viewModels (reference-stable, so an unchanged source
  *    patches in O(1) — the O(change) contract), `effects` entries for
  *    the app effect registry (`mermaid-render`, `mermaid-load`), and a
- *    `hydrate()` pass kept for API symmetry (a no-op in v1: the render is
- *    already complete);
+ *    `hydrate()` kept for API symmetry (a no-op: the render is already
+ *    complete; pan, zoom and touch are the opt-in
+ *    `mermaidPlugin({ interactive: true })` hydrate);
  *  - `styles/mermaid.css` — the component stylesheet.
  *
  * The boundary is one-way: the component imports the engine, never the
@@ -33,14 +34,13 @@ import { compileMermaid, diagramToVnode } from '../index.js';
  * @property {number} [memoLimit] LRU size for the source-string memo (default 32)
  * @property {string | URL} [base] base URL for `mermaid-load`
  * @property {typeof globalThis.fetch} [fetch] fetch implementation for `mermaid-load`
- * @property {(err: any) => void} [onHydrateError]
  */
 /**
  * @typedef {object} MermaidComponent
  * @property {(source: string) => any} compile memoized compile
  * @property {(sourceOrDoc: any) => any} view memoized vnode projection
  * @property {Record<string, (props: any, dispatch: any) => any>} effects
- * @property {(container: any) => void} hydrate no-op in v1
+ * @property {(container: any) => void} hydrate no-op
  */
 
 /**
@@ -107,8 +107,8 @@ export function createMermaidComponent(options = {}) {
       },
     },
 
-    // Render is complete; hydrate is reserved for optional
-    // client-only enhancements (pan/zoom) that are out of scope for v1.
+    // The render is complete, so there is nothing to attach; the
+    // client-only enhancement (pan/zoom) is `mermaidPlugin`'s hydrate.
     hydrate() {
       /* no-op */
     },

@@ -109,8 +109,11 @@ loop/opt/alt/par/critical/break.
 
 Class: `{ classes:[{ name, label, members[] }], relations[] }`. ER:
 `{ entities:[{ name, attributes[] }], relationships[] }`. State:
-`{ states:[{ id, label }], transitions:[{ from, to, label, event,
-guard, effect, parent }] }` — a transition's `label` is the verbatim
+`{ states:[{ id, label, parent? }], transitions:[{ from, to, label, event,
+guard, effect, parent }] }` — a composite state's members carry its id as
+`parent`, and a state is never its own ancestor (opening `state C {`
+inside `C`, or declaring an ancestor inside its own descendant, leaves it
+under the parent it already has); a transition's `label` is the verbatim
 text after `:` (what renderers draw and `toMermaid` prints), and
 `event`/`guard`/`effect` are its UML reading, parsed as
 `event [guard] / effect` with every part optional: the first `[` opens

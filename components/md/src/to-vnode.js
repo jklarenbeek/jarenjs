@@ -153,7 +153,7 @@ function htmlNodeVnode(node, rctx, blockClass) {
 /**
  * The render context threaded through one emission.
  * @typedef {{ tables: any, html: 'skip'|'text'|'vnode', options: MdVnodeOptions,
- *   parseHtml: (html: string) => any,
+ *   parseHtml: (html: string) => any, stockHtml: boolean,
  *   sanitizeUrl: (url: string) => (string|null),
  *   headingIds: boolean, slugPrefix: string, headingAnchors: boolean,
  *   slugs: Map<string, number>,
@@ -245,7 +245,7 @@ function pairInlineHtml(nodes, rctx) {
       top().push(inlineVnode(node, rctx));
       continue;
     }
-    const tag = rctx.parseHtml === parseHtmlFragment ? parseHtmlTag(node.value) : null;
+    const tag = rctx.stockHtml ? parseHtmlTag(node.value, { sanitizeUrl: rctx.sanitizeUrl }) : null;
     if (tag === null) {
       // not one plain tag (a comment, a whole element, an injected
       // parser): whatever the parser makes of it stands on its own
@@ -706,14 +706,19 @@ export function mdToVnode(docOrCompiled, options = {}) {
     ? docOrCompiled
     : Array.isArray(docOrCompiled.ast) ? docOrCompiled.ast : [docOrCompiled];
   const tables = docOrCompiled.tables ?? buildPluginTables(options.plugins);
+  const sanitizeUrl = typeof options.sanitizeUrl === 'function'
+    ? options.sanitizeUrl
+    : defaultSanitizeUrl;
+  // The stock HTML parser judges its URLs by the same policy as Markdown's
+  // links; an injected one owns the raw HTML it is given.
+  const injectedParser = typeof options.parseHtml === 'function' ? options.parseHtml : null;
   /** @type {RenderCtx} */
   const rctx = {
     tables,
     html: options.html === 'text' || options.html === 'vnode' ? options.html : 'skip',
-    parseHtml: typeof options.parseHtml === 'function' ? options.parseHtml : parseHtmlFragment,
-    sanitizeUrl: typeof options.sanitizeUrl === 'function'
-      ? options.sanitizeUrl
-      : defaultSanitizeUrl,
+    parseHtml: injectedParser ?? ((html) => parseHtmlFragment(html, { sanitizeUrl })),
+    stockHtml: injectedParser === null,
+    sanitizeUrl,
     headingIds: options.headingIds === true,
     slugPrefix: typeof options.slugPrefix === 'string' ? options.slugPrefix : '',
     headingAnchors: options.headingIds === true && options.headingAnchors === true,

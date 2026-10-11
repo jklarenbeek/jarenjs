@@ -39,8 +39,10 @@ function niceTicks(min, max, count) {
   const step = raw > 0 ? niceStep(raw) : 1;
   const start = Math.ceil(min / step) * step;
   const ticks = [];
+  // A step finer than the spacing of doubles at `v` cannot advance it.
   for (let v = start; v <= max + step * 1e-9; v += step) {
     ticks.push(Math.abs(v) < step * 1e-9 ? 0 : v);
+    if (!(v + step > v)) break;
   }
   return ticks;
 }

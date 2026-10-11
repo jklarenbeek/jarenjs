@@ -61,8 +61,13 @@ export function toMermaid(docOrAst) {
 //#endregion
 //#region flowchart -------------------------------------------------
 
-/** Protect delimiters and literal quotes without removing label text. */
-const RE_NEEDS_QUOTE = /[[\](){}<>|"';]/;
+/**
+ * Protect delimiters and literal quotes without removing label text. A
+ * slash or backslash at either end would join the shape's own brackets
+ * (`[/x` opens a parallelogram), and outer whitespace is trimmed on the way
+ * back in.
+ */
+const RE_NEEDS_QUOTE = /[[\](){}<>|"';]|^[\s/\\]|[\s/\\]$/;
 
 /**
  * @param {any} ast
@@ -306,14 +311,16 @@ function printState(ast) {
  */
 function printEr(ast) {
   const out = ['erDiagram'];
+  // a name with a space must be quoted to read back as one name
+  const name = (/** @type {string} */ n) => (/\s/.test(n) ? `"${n}"` : n);
   for (const e of ast.entities) {
-    if (e.attributes.length === 0) { out.push(e.name); continue; }
-    out.push(`${e.name} {`);
+    if (e.attributes.length === 0) { out.push(name(e.name)); continue; }
+    out.push(`${name(e.name)} {`);
     for (const a of e.attributes) out.push(`  ${a.type} ${a.name}${a.keys.length ? ' ' + a.keys.join(' ') : ''}`);
     out.push('}');
   }
   for (const r of ast.relationships) {
-    out.push(`${r.left} ${r.leftCard}${r.identifying ? '--' : '..'}${r.rightCard} ${r.right} : ${r.label}`);
+    out.push(`${name(r.left)} ${r.leftCard}${r.identifying ? '--' : '..'}${r.rightCard} ${name(r.right)} : ${r.label}`);
   }
   return out.join('\n') + '\n';
 }

@@ -74,10 +74,12 @@ export function scaleOrdinal(categories) {
 /**
  * Band scale: each category owns an equal band with inner padding. The
  * returned function gives the band's start; `bandwidth` and `step` are
- * exposed as properties. Unknown categories map to NaN.
+ * exposed as properties, and `start(i)` gives the start of the i-th band
+ * — the way to place a category by its position, since two categories that
+ * share a label share the function's answer. Unknown categories map to NaN.
  * @param {readonly string[]} categories - Domain, in display order
  * @param {number} [padding] - Fraction of each step left empty (0..1)
- * @returns {((category: string) => number) & {bandwidth: number, step: number}}
+ * @returns {((category: string) => number) & {bandwidth: number, step: number, start: (index: number) => number}}
  */
 export function scaleBand(categories, padding = 0.2) {
   const n = categories.length;
@@ -93,6 +95,7 @@ export function scaleBand(categories, padding = 0.2) {
   };
   scale.bandwidth = bandwidth;
   scale.step = step;
+  scale.start = (/** @type {number} */ i) => i * step + inset;
   return scale;
 }
 

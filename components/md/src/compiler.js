@@ -10,6 +10,7 @@
  * reference, which is what the view patcher's `===` fast path wants.
  */
 
+import { setObjectMember } from '@jarenjs/core/object';
 import { parseMarkdown, buildPluginTables } from './parser.js';
 import { walkAst, visitAst } from './ast.js';
 import { toMarkdown } from './to-md.js';
@@ -134,7 +135,7 @@ export function frontmatterExternals(frontmatter) {
   }
   for (const key of Object.keys(frontmatter)) {
     if (key === 'root' || key === 'path') continue;
-    out[key] = frontmatter[key];
+    setObjectMember(out, key, frontmatter[key]);
   }
   return out;
 }

@@ -313,14 +313,34 @@ function matchOpener(s, pos) {
   return null;
 }
 
+/** A link operator (`-->`, `---`, `==>`, `-.->`, `--o`, `--x`, `<-->`) inside text. */
+const RE_LINK_INSIDE = /<?(?:-{2,}[>ox-]|={2,}[>ox=]|-\.+-[>ox-]?)/;
+
 /**
- * Scan for the earliest closer sequence from `from`.
+ * Scan for the earliest closer sequence from `from`. A label that opens
+ * with a quote and whose matching quote is followed by the closer is one
+ * unit: the brackets inside it are text. Any other label (an apostrophe in
+ * prose, a quote never closed, a quote whose partner lies past a link) is
+ * scanned as written.
  * @param {string} s
  * @param {number} from
  * @param {[string, string][]} closers
  * @returns {{ at: number, end: number, shape: string } | null}
  */
 function scanToCloser(s, from, closers) {
+  let start = from;
+  while (start < s.length && (s.charCodeAt(start) === 0x20 || s.charCodeAt(start) === 0x09)) start++;
+  const quote = s[start];
+  if (quote === '"' || quote === '\'') {
+    let end = s.indexOf(quote, start + 1);
+    // a link operator between the quotes means the second quote belongs to
+    // another node: this quote is a stray one, and the statement keeps its edge
+    if (end !== -1 && !RE_LINK_INSIDE.test(s.slice(start + 1, end))) {
+      end++;
+      while (end < s.length && (s.charCodeAt(end) === 0x20 || s.charCodeAt(end) === 0x09)) end++;
+      if (closers.some(([seq]) => s.startsWith(seq, end))) from = end;
+    }
+  }
   for (let i = from; i < s.length; i++) {
     for (let c = 0; c < closers.length; c++) {
       const [seq, shape] = closers[c];

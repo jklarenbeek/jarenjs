@@ -533,8 +533,10 @@ export function axisTicksLinear(min, max, count = 5) {
     return [min, max];
   const decimals = Math.max(0, -Math.floor(Math.log10(step)));
   const ticks = [];
-  const first = Math.ceil(min / step);
-  const last = Math.floor(max / step);
+  // a quotient a rounding error short of a whole number is that number:
+  // 0.3 / 0.1 is 2.9999999999999996, and the tick at 0.3 is in the domain
+  const first = Math.ceil(min / step - 1e-9);
+  const last = Math.floor(max / step + 1e-9);
   // `toFixed` stops at 100 digits: a step below 1e-100 rounds by significance
   for (let i = first; i <= last; ++i)
     ticks.push(Number(decimals > 100 ? (i * step).toPrecision(15) : (i * step).toFixed(decimals)));

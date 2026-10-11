@@ -95,6 +95,10 @@ error with a JSON Pointer. There is deliberately no single composed
 mega-schema; that is what lets a project mix an app, a store and a data
 query at once. See [PROJECT-FORMAT.md](docs/PROJECT-FORMAT.md).
 
+Answers that changed (upgrade notes): `subscribe` on a closed data transport
+refuses with `the data transport is closed`, as `request` does, where it threw
+a `TypeError` about `null`.
+
 ## Exports
 
 Every subpath a consumer can import, derived from the manifest by

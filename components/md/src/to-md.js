@@ -10,6 +10,8 @@
  * per-node type chains.
  */
 
+import { RE_AUTOLINK_URI, RE_AUTOLINK_EMAIL } from './scanner.js';
+
 /**
  * @typedef {import('./ast.js').MdNode} MdNode
  */
@@ -99,7 +101,14 @@ const INLINE_PRINTERS = {
       || (last !== undefined && last.type === 'emphasis');
     return alternate ? '_' + inner + '_' : '*' + inner + '*';
   },
-  strong: (node) => '**' + printInlines(node.children) + '**',
+  strong: (node) => {
+    // `***x***` reads back as emphasis around strong, so strong around
+    // an emphasis that is all of its content spells the emphasis `_`.
+    const only = node.children.length === 1 && node.children[0].type === 'emphasis';
+    return only
+      ? '**_' + printInlines(node.children[0].children) + '_**'
+      : '**' + printInlines(node.children) + '**';
+  },
   strikethrough: (node) => '~~' + printInlines(node.children) + '~~',
   inlineCode: (node) => printCodeSpan(node.value),
   // A GFM literal autolink prints as the bare text it was written as
@@ -142,8 +151,14 @@ function isAutolink(node) {
   const only = node.children[0];
   if (only.type !== 'text') return false;
   const url = /** @type {string} */ (node.url);
-  const shown = url.startsWith('mailto:') ? url.slice(7) : url;
-  return only.value === shown && !/[\s<>]/.test(shown);
+  // `<…>` is an autolink only for an absolute URI (`scheme:…`) or an email
+  // address; any other text between angle brackets (`<docs/a.md>`) parses
+  // as text or raw HTML, so a relative link keeps its `[text](url)` form.
+  if (url.startsWith('mailto:')) {
+    const address = url.slice(7);
+    return only.value === address && RE_AUTOLINK_EMAIL.exec('<' + address + '>')?.[1] === address;
+  }
+  return only.value === url && RE_AUTOLINK_URI.exec('<' + url + '>')?.[1] === url;
 }
 
 /**
@@ -299,6 +314,20 @@ const BLOCK_PRINTERS = {
   custom: (node) => (Array.isArray(node.children) ? printBlocks(node.children, false) : ''),
 };
 
+/** A backslash that would escape the character after it, or an ampersand that opens a reference. */
+const RE_INFO_ESCAPE = /\\(?=[!-/:-@[-`{-~])|&(?=[#A-Za-z][#A-Za-z0-9]*;)/g;
+
+/**
+ * Escape an info string the way the parser reads one: backslash escapes
+ * and character references are decoded there, so a value holding either
+ * must not print them as they stand.
+ * @param {string} info
+ * @returns {string}
+ */
+function escapeInfo(info) {
+  return info.replace(RE_INFO_ESCAPE, '\\$&');
+}
+
 /**
  * Print a code fence, growing the fence beyond any backtick run in the
  * value.
@@ -308,7 +337,7 @@ const BLOCK_PRINTERS = {
  * @returns {string}
  */
 function printFence(lang, meta, value) {
-  const info = lang === null ? '' : meta === null ? lang : lang + ' ' + meta;
+  const info = escapeInfo(lang === null ? '' : meta === null ? lang : lang + ' ' + meta);
   // A backtick info string cannot sit on a backtick fence (the spec
   // forbids it, precisely so the fence stays findable), so such a block
   // prints on a tilde fence instead.

@@ -36,6 +36,8 @@ import {
   scanFootnoteDefinition,
   scanFootnoteReference,
   scanAutolinkLiterals,
+  RE_AUTOLINK_URI,
+  RE_AUTOLINK_EMAIL,
   normalizeLabel,
   isSpaceCode,
   ASCII_PUNCT,
@@ -830,9 +832,6 @@ function isBlankFrom(line, from) {
 // Inline parser
 // ------------------------------------------------------------------
 
-// eslint-disable-next-line no-control-regex -- the spec excludes all control characters
-const RE_AUTOLINK_URI = /^<([a-zA-Z][a-zA-Z0-9+.-]{1,31}:[^<>\x00-\x20]*)>/;
-const RE_AUTOLINK_EMAIL = /^<([a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+)>/;
 /** An inline open or closing tag (the inline raw-HTML forms that begin with a letter or `/`). */
 const RE_INLINE_TAG = /^<(?:[a-zA-Z][a-zA-Z0-9-]*(?:\s+[a-zA-Z_:][a-zA-Z0-9_.:-]*(?:\s*=\s*(?:[^\s"'=<>`]+|'[^']*'|"[^"]*"))?)*\s*\/?>|\/[a-zA-Z][a-zA-Z0-9-]*\s*>)/;
 
@@ -1854,13 +1853,18 @@ export function createIncrementalParser(options = {}) {
       fmState = false;
       return true;
     }
-    const fm = parseFrontmatter(buffer, options.toml !== undefined ? { toml: options.toml } : undefined);
+    // A fence only closes frontmatter once its line is complete: `---` at
+    // the end of a chunk may still become `----` or `--- text`, which the
+    // whole document reads as body. So until the stream ends the head is
+    // cut at the last line break, and the partial line waits.
+    const head = final ? buffer : buffer.slice(0, buffer.lastIndexOf('\n') + 1);
+    const fm = parseFrontmatter(head, options.toml !== undefined ? { toml: options.toml } : undefined);
     if (fm.lang !== null) {
       frontmatter = fm.data;
       frontmatterLang = fm.lang;
       parser.ctx.frontmatter = fm.data;
       api.frontmatter = fm.data;
-      buffer = fm.body;
+      buffer = fm.body + buffer.slice(head.length);
       fmState = true;
       return true;
     }

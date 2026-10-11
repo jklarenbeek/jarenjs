@@ -52,11 +52,6 @@ const TYPE_PARSERS = {
   pie: parsePie,
 };
 
-/** Types that parse-accept into a placeholder in the coverage scorecard. */
-export const SECONDARY_TYPES = new Set([
-  'mindmap', 'gitGraph', 'journey', 'timeline', 'quadrantChart', 'requirement',
-]);
-
 /**
  * Parse Mermaid source into a `DiagramDocument`.
  * @param {string} source
@@ -121,5 +116,5 @@ function detectDirection(header, keyword) {
   // `graph LR` or `flowchart TD`; a trailing `:` occasionally appears.
   const dir = rest.replace(/:$/, '').trim().toUpperCase();
   const known = new Set(['TB', 'TD', 'BT', 'LR', 'RL']);
-  return known.has(dir) ? (dir === 'TD' ? 'TD' : dir) : 'TB';
+  return known.has(dir) ? dir : 'TB';
 }

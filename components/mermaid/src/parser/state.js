@@ -66,6 +66,9 @@ const RE_STATE_AS = /^state\s+"([^"]*)"\s+as\s+(\S+)\s*$/;
 /** `id : description`. */
 const RE_STATE_DESC = /^(\S+)\s*:\s*(.*)$/;
 
+/** The longest parent chain walked to decide whether a re-declared state is an ancestor. */
+const MAX_ANCESTOR_WALK = 1000;
+
 /**
  * @param {string[]} lines
  * @returns {object}
@@ -78,19 +81,33 @@ export function parseState(lines) {
   /** @type {string[]} */
   const parentStack = [];
 
+  // A state cannot sit inside itself or inside one of its own descendants:
+  // re-declaring an ancestor from within keeps it where it was. Only a state
+  // that already exists can be an ancestor, and the walk up from the new
+  // parent is bounded, so hostile nesting costs linear time; a chain longer
+  // than any real diagram is refused as if it contained the state.
+  const insideItself = (id, under) => {
+    let at = under;
+    for (let steps = 0; at !== undefined; at = stateMap.get(at)?.parent) {
+      if (at === id || ++steps > MAX_ANCESTOR_WALK) return true;
+    }
+    return false;
+  };
   const ensure = (id, label, declaration = false) => {
     if (id === '[*]') return;
     let st = stateMap.get(id);
     if (st === undefined) {
+      // a new state cannot be an ancestor of anything yet
       st = { id, label: label ?? id,
         ...(parentStack.length ? { parent: parentStack.at(-1) } : {}) };
       stateMap.set(id, st);
       order.push(id);
+      return;
     }
-    else if (label != null) {
-      st.label = label;
+    if (label != null) st.label = label;
+    if (declaration && parentStack.length && !insideItself(id, parentStack.at(-1))) {
+      st.parent = parentStack.at(-1);
     }
-    if (declaration && parentStack.length) st.parent = parentStack.at(-1);
   };
 
   for (let li = 0; li < lines.length; li++) {

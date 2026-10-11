@@ -442,6 +442,17 @@ The same module's `mermaidPieToChartAST` maps a mermaid pie AST onto
 document; validate untrusted definitions with `@jarenjs/validate`
 before compiling.
 
+Answers that changed (upgrade notes): a bar chart places each bar and tick by its
+position in `categories`, where two categories sharing a label (`['a', 'a', 'b']`)
+were drawn in one band, one over the other, with the first band empty;
+`scaleBand` gained `start(index)` for that. `formatTickValue` carries into the next
+unit when rounding reaches 1000 of this one (999,999 reads `1M`, not `1000k`).
+Axes built on `axisTicksLinear` keep the tick at either end of a raw domain when
+the quotient rounds just short of a whole number (`[0, 0.3]` gains its `0.3`,
+`[0.1, 0.7]` its `0.7`); the bar, line, scatter and gauge builders nice the
+domain first and are unchanged, while candlestick, boxplot, streamgraph and
+radar axes can gain an end tick.
+
 ## Exports
 
 Every subpath a consumer can import, derived from the manifest by

@@ -63,6 +63,12 @@ parse steps; aborting rejects the promise with the signal's reason and
 leaves the cache untouched (an aborted in-flight entry is evicted so
 the next call retries).
 
+Cancellation belongs to the caller that gave the signal. A call that joins
+another caller's in-flight load (§2) is rejected with its own signal's reason
+if it aborts while waiting, and the shared fetch carries on for the others; if
+the caller that started the fetch aborts, a joined caller that has not aborted
+starts its own load instead of failing with an abort it never asked for.
+
 ## 4. Streaming
 
 When the response body is a `ReadableStream`, the loader parses

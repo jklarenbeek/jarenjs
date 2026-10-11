@@ -70,6 +70,14 @@ action. When refreshes overlap, only the newest request may publish success
 or failure; an older completion cannot replace its rates or clear its
 in-flight status.
 
+Answers that changed (upgrade notes): `=` on a result that is not a finite
+number (`1/0`, `0/0`, a programmer value with no word) leaves the typed
+expression as the entry, where it committed `∞`, `NaN` or `—`, which do not
+evaluate; a fetched rate table is marked `status: 'ok'` and not stale, where
+the converter went on printing `rates: idle`; a plot domain narrower than the
+spacing of doubles at its position (near 1e16) lays one tick, where it grew
+its tick array until the engine refused to allocate it.
+
 See `docs/CALC-FORMAT.md` and `ARCHITECTURE.md` for the full contract.
 
 ## Exports
