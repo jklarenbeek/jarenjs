@@ -157,7 +157,7 @@ the table and stale in the paragraph that cites it:
 |---|---:|---|
 | `.` | <!--fact:bundle.chain.kb-->217<!--/fact--> kB | the query engine — a chain's document has to run somewhere |
 | `./schema` | <!--fact:bundle.schema.kb-->39<!--/fact--> kB | the builders and the recording proxy `check()` captures through |
-| `./model` | <!--fact:bundle.model.kb-->50<!--/fact--> kB | the schema pen it subclasses |
+| `./model` | <!--fact:bundle.model.kb-->51<!--/fact--> kB | the schema pen it subclasses |
 | `./jslt` | <!--fact:bundle.jslt.kb-->21<!--/fact--> kB | the body capture; of the schema pen, only the builder brand |
 | `./migration` | <!--fact:bundle.migration.kb-->28<!--/fact--> kB | the canonicalizer and hash a shape identity needs |
 | `./contract` | <!--fact:bundle.contract.kb-->52<!--/fact--> kB | the schema pen (a contract's inputs and outputs are schemas) |

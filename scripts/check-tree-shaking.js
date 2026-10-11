@@ -144,7 +144,8 @@ if (engineLeak.length > 0)
 // diagnostics belong in this bundle: keep useful refusals within the
 // budget rather than shortening messages to hide unrelated growth.
 // Raised to 38,600 (measured 38528): the shared capture refuses a callback that reads its argument and answers a plain boolean (511) and explains the destructuring read it names (269).
-if (schemaBytes > 38600)
+// Raised to 39,000 (measured 38910): the pen boundary that copies caller JSON and words the refusal of a symbol or a prototype-less value add 382.
+if (schemaBytes > 39000)
   throw new Error(`The schema pen bundle grew to ${schemaBytes} bytes.`);
 
 console.log(`Tree-shaking smoke test passed (${schemaBytes} byte schema-pen bundle; no chain module, no engine).`);
@@ -212,7 +213,8 @@ if (chainEdgeLeak.length > 0)
 // refused a callback that reads its argument and answers a plain boolean
 // (513) and explained the destructuring read it names (209), and the
 // compiled query caches were keyed by member order (255).
-if (chainBytes > 216600)
+// Raised to 216,800 (measured 216793): the sequence's per-run bindings, caller JSON copied at its boundary and the bounded push queue add 211.
+if (chainBytes > 216800)
   throw new Error(`The chain bundle grew to ${chainBytes} bytes.`);
 
 console.log(`Tree-shaking smoke test passed (${chainBytes} byte chain bundle; no schema-pen module, no client module, no store/validator/formats bytes).`);
@@ -287,7 +289,8 @@ if (modelEngineLeak.length > 0)
 // partial, with their conditions — ride in the pen (2149), and the shared capture refuses a callback that reads its argument and answers a plain boolean (514) and explains the destructuring read it names (269).
 // Raised to 50,400 (measured 50322): the collection spec's `intervals` option
 // and its closed entries (73).
-if (modelBytes > 50400)
+// Raised to 50,800 (measured 50710): caller JSON copied at the pen boundary and worded refusals of symbol and prototype-less values add 388.
+if (modelBytes > 50800)
   throw new Error(`The model pen bundle grew to ${modelBytes} bytes.`);
 const schemaModelLeak = Object.entries(schemaInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/model/') && info.bytesInOutput > 0);
@@ -403,7 +406,8 @@ if (migrationEngineLeak.length > 0)
 // Raised to 27,200 (measured 26807): the shared capture's faithful
 // recording (740) and the migration pen's own refusals (136).
 // Raised to 27,600 (measured 27586): the shared capture refuses a callback that reads its argument and answers a plain boolean (511) and explains the destructuring read it names (268).
-if (migrationBytes > 27600)
+// Raised to 27,700 (measured 27614): caller JSON copied at the pen boundary add 28.
+if (migrationBytes > 27700)
   throw new Error(`The migration pen bundle grew to ${migrationBytes} bytes.`);
 const chainMigrationLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/migration/') && info.bytesInOutput > 0);
@@ -543,7 +547,8 @@ if (asyncLiveLeak.length)
 // of total operators (2111); distinct over compound, other-ordered and entity
 // projections with group keys read as doubles (3187); and the defects a
 // planner hunt fixed (843).
-if (clientBytes > 944100)
+// Raised to 944,200 (measured 944196): the chain's per-run bindings and copied caller JSON, less the planner's single scalar-type table add 155.
+if (clientBytes > 944200)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 
@@ -592,7 +597,8 @@ if (contractPenLeak.length > 0)
 // Raised to 51,300 (measured 51005): the shared capture's faithful
 // recording (740).
 // Raised to 51,800 (measured 51785): the shared capture refuses a callback that reads its argument and answers a plain boolean (514) and explains the destructuring read it names (266).
-if (contractPenBytes > 51800)
+// Raised to 52,200 (measured 52169): caller JSON copied at the pen boundary and an own-member read of the http `in` map add 384.
+if (contractPenBytes > 52200)
   throw new Error(`The contract pen bundle grew to ${contractPenBytes} bytes.`);
 const chainContractLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/contract/') && info.bytesInOutput > 0);
@@ -706,7 +712,8 @@ const appPenLeak = Object.entries(appPenInputs)
 if (appPenLeak.length > 0)
   throw new Error(`The app pen pulled another pen into the bundle: ${appPenLeak.map(([file]) => file).join(', ')}`);
 // Raised to 53,800 (measured 53705): the shared capture refuses a callback that reads its argument and answers a plain boolean (514) and explains the destructuring read it names (270).
-if (appPenBytes > 53800)
+// Raised to 54,000 (measured 53968): caller JSON copied at the pen boundary and its worded refusals add 263.
+if (appPenBytes > 54000)
   throw new Error(`The app pen bundle grew to ${appPenBytes} bytes.`);
 const chainAppLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/app/') && info.bytesInOutput > 0);
@@ -758,7 +765,8 @@ const formsPenLeak = Object.entries(formsPenInputs)
 if (formsPenLeak.length > 0)
   throw new Error(`The forms pen pulled another pen into the bundle: ${formsPenLeak.map(([file]) => file).join(', ')}`);
 // Raised to 42,800 (measured 42725): the shared capture refuses a callback that reads its argument and answers a plain boolean (541) and explains the destructuring read it names (281).
-if (formsPenBytes > 42800)
+// Raised to 43,000 (measured 42997): caller JSON copied at the pen boundary and its worded refusals add 272.
+if (formsPenBytes > 43000)
   throw new Error(`The forms pen bundle grew to ${formsPenBytes} bytes.`);
 const chainFormsLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/forms/') && info.bytesInOutput > 0);

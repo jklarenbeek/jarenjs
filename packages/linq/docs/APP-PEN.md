@@ -1292,7 +1292,7 @@ not look for them:
 
 ## 7. Cost
 
-`@jarenjs/linq/app` builds to **<!--fact:bundle.app-->53,705<!--/fact--> bytes** as a minified,
+`@jarenjs/linq/app` builds to **<!--fact:bundle.app-->53,968<!--/fact--> bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
 measures and `npm run test:tree-shaking` reports, published rounded
 beside the other subpath prices in
@@ -1302,8 +1302,8 @@ pen and the JSLT pen (state, and views), and no chain module, no
 
 It is the second-largest pen bundle after the client, and the two pens
 it carries are most of it. The three figures the same probe measures,
-side by side: `@jarenjs/linq/schema` <!--fact:bundle.schema-->38,528<!--/fact--> bytes,
-`@jarenjs/linq/jslt` <!--fact:bundle.jslt-->21,448<!--/fact-->, `@jarenjs/linq/app` <!--fact:bundle.app-->53,705<!--/fact-->. The subpath sums do not add — all
+side by side: `@jarenjs/linq/schema` <!--fact:bundle.schema-->38,910<!--/fact--> bytes,
+`@jarenjs/linq/jslt` <!--fact:bundle.jslt-->21,489<!--/fact-->, `@jarenjs/linq/app` <!--fact:bundle.app-->53,968<!--/fact-->. The subpath sums do not add — all
 three carry the capture, the expression lowering and the JSON boundary,
 which each bundle counts once — so what the app pen costs a consumer who
 already imports the schema pen is the difference the numbers do state:

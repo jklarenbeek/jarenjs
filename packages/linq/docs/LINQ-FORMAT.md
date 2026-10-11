@@ -37,19 +37,19 @@ is the index of those guides, and it is how a reader reaches any of them.
 | Document | Lines | What it writes, and when to open it |
 |---|---:|---|
 | [LINQ-FORMAT.md](LINQ-FORMAT.md) | 954 | this file, the binder and the family's **normative reference**: what a pen is, the rules all of them keep, the shared `JL01xx` table, and the cross-pen views derived from the guides it indexes. **Read it when** you want a rule that is true of every pen, an index of the documents, or one place to look up a method without knowing which pen owns it |
-| [QUERY-PEN.md](QUERY-PEN.md) | 2,013 | the chain, `.` — query documents (`jaren-query`) and the provider seam. **Read it when** you are querying data, or implementing a provider that answers a query document |
-| [SCHEMA-PEN.md](SCHEMA-PEN.md) | 1,256 | `./schema` — JSON Schema 2020-12: the structural keywords, the constraints and the annotations, each with a method of its own, plus `$query`, `$defs`/`$ref` recursion and the normalizer's per-field predicates. **Read it when** you are describing the shape of data — for validation, for a form, or as the base of an entity |
+| [QUERY-PEN.md](QUERY-PEN.md) | 2,028 | the chain, `.` — query documents (`jaren-query`) and the provider seam. **Read it when** you are querying data, or implementing a provider that answers a query document |
+| [SCHEMA-PEN.md](SCHEMA-PEN.md) | 1,266 | `./schema` — JSON Schema 2020-12: the structural keywords, the constraints and the annotations, each with a method of its own, plus `$query`, `$defs`/`$ref` recursion and the normalizer's per-field predicates. **Read it when** you are describing the shape of data — for validation, for a form, or as the base of an entity |
 | [MODEL-PEN.md](MODEL-PEN.md) | 1,242 | `./model` — the `x-entity` vocabulary on JSON Schema, and the `$model` 0.1 document `openStore` accepts unchanged. **Read it when** you are declaring a store's entities, their keys and their relations |
 | [JSLT-PEN.md](JSLT-PEN.md) | 980 | `./jslt` — `$jslt` 0.1 stylesheets: the envelope and its rules, whose bodies are captured over the matched value. **Read it when** you are transforming one document into another |
 | [MIGRATION-PEN.md](MIGRATION-PEN.md) | 957 | `./migration` — `$migration` 0.2 documents: exact model endpoints and the ordered steps the runner takes. **Read it when** you are moving a store from one model to the next |
-| [CONTRACT-PEN.md](CONTRACT-PEN.md) | 1,222 | `./contract` — `$contract` 0.1 documents: the operations, their schemas, their declared behavior and their REST binding. **Read it when** you are declaring an API and want its client, its server and its tools typed from one document |
+| [CONTRACT-PEN.md](CONTRACT-PEN.md) | 1,226 | `./contract` — `$contract` 0.1 documents: the operations, their schemas, their declared behavior and their REST binding. **Read it when** you are declaring an API and want its client, its server and its tools typed from one document |
 | [FLOW-PEN.md](FLOW-PEN.md) | 1,050 | `./flow` — `jaren-fsm` 0.1 machines and `jaren-dag` 0.1 dataflows, every query-valued member captured. **Read it when** you are declaring a state machine or a dependency graph of tasks |
 | [APP-PEN.md](APP-PEN.md) | 1,312 | `./app` — the `jaren-app` 0.1 document `createApp` runs, and the JSON Schema of its state beside it. **Read it when** you are declaring a whole application: state, view, actions, effects |
 | [FORMS-PEN.md](FORMS-PEN.md) | 947 | `./forms` — the `x-form` vocabulary on JSON Schema, and `assertOnSubmit()`, the same rules' layer-3 `$query` twin. **Read it when** you are turning a schema into a form |
 | [MESSAGES-PEN.md](MESSAGES-PEN.md) | 105 | `./messages` — JSON message catalogs and message references. **Read it when** you want checked translation keys, placeholders and explicit completeness. |
 | [JTLT-PEN.md](JTLT-PEN.md) | 83 | `./jtlt` — text templates with JSLT dispatch and query expressions. **Read it when** you want to author Markdown, XML or source text as portable JSON. |
 | [PROJECT-PEN.md](PROJECT-PEN.md) | 81 | `./project` — Studio projects with named, typed files. **Read it when** you want a portable editor workspace containing documents written by several pens. |
-| [CHARTS-PEN.md](CHARTS-PEN.md) | 94 | `./charts` — chart-definition documents for every chart kind. **Read it when** you want typed chart data and presentation options that `compileChart` consumes. |
+| [CHARTS-PEN.md](CHARTS-PEN.md) | 97 | `./charts` — chart-definition documents for every chart kind. **Read it when** you want typed chart data and presentation options that `compileChart` consumes. |
 | [DB-CLIENT.md](DB-CLIENT.md) | 1,171 | `./db` — the client: the store's typed front door, not a pen, and the package's one runtime edge. **Read it when** you are reading or writing rows: `load`, `include`, `link`/`unlink`, `live` |
 | [FORMULA-PEN.md](FORMULA-PEN.md) | 41 | `./formula` — author versioned saved JSON Query profiles without executing them. |
 <!--/fact-->
@@ -206,22 +206,22 @@ and the bundle is the byte count the tree-shaking probe builds.
 | Document | Subpath | Lines | Mapping rows | Worked examples | Refusals | Bundle |
 |---|---|---:|---:|---:|---:|---:|
 | [LINQ-FORMAT.md](LINQ-FORMAT.md) | — | 954 | — | — | — | — |
-| [QUERY-PEN.md](QUERY-PEN.md) | `.` | 2,013 | 34 | 8 | 17 | 216,582 B |
-| [SCHEMA-PEN.md](SCHEMA-PEN.md) | `./schema` | 1,256 | 82 | 10 | 4 | 38,528 B |
-| [MODEL-PEN.md](MODEL-PEN.md) | `./model` | 1,242 | 31 | 7 | 3 | 50,322 B |
-| [JSLT-PEN.md](JSLT-PEN.md) | `./jslt` | 980 | 17 | 8 | 3 | 21,448 B |
-| [MIGRATION-PEN.md](MIGRATION-PEN.md) | `./migration` | 957 | 13 | 5 | 4 | 27,586 B |
-| [CONTRACT-PEN.md](CONTRACT-PEN.md) | `./contract` | 1,222 | 38 | 6 | 3 | 51,785 B |
-| [FLOW-PEN.md](FLOW-PEN.md) | `./flow` | 1,050 | 16 | 7 | 3 | 21,505 B |
-| [APP-PEN.md](APP-PEN.md) | `./app` | 1,312 | 24 | 7 | 4 | 53,705 B |
-| [FORMS-PEN.md](FORMS-PEN.md) | `./forms` | 947 | 18 | 6 | 3 | 42,725 B |
-| [MESSAGES-PEN.md](MESSAGES-PEN.md) | `./messages` | 105 | 9 | 2 | 1 | 13,828 B |
-| [JTLT-PEN.md](JTLT-PEN.md) | `./jtlt` | 83 | 13 | 1 | 2 | 18,316 B |
-| [PROJECT-PEN.md](PROJECT-PEN.md) | `./project` | 81 | 9 | 1 | 1 | 4,371 B |
-| [CHARTS-PEN.md](CHARTS-PEN.md) | `./charts` | 94 | 21 | 1 | 1 | 6,170 B |
-| [DB-CLIENT.md](DB-CLIENT.md) | `./db` | 1,171 | 45 | 4 | 2 | 944,041 B |
+| [QUERY-PEN.md](QUERY-PEN.md) | `.` | 2,028 | 34 | 8 | 17 | 216,793 B |
+| [SCHEMA-PEN.md](SCHEMA-PEN.md) | `./schema` | 1,266 | 82 | 10 | 4 | 38,910 B |
+| [MODEL-PEN.md](MODEL-PEN.md) | `./model` | 1,242 | 31 | 7 | 3 | 50,710 B |
+| [JSLT-PEN.md](JSLT-PEN.md) | `./jslt` | 980 | 17 | 8 | 3 | 21,489 B |
+| [MIGRATION-PEN.md](MIGRATION-PEN.md) | `./migration` | 957 | 13 | 5 | 4 | 27,614 B |
+| [CONTRACT-PEN.md](CONTRACT-PEN.md) | `./contract` | 1,226 | 38 | 6 | 3 | 52,169 B |
+| [FLOW-PEN.md](FLOW-PEN.md) | `./flow` | 1,050 | 16 | 7 | 3 | 21,590 B |
+| [APP-PEN.md](APP-PEN.md) | `./app` | 1,312 | 24 | 7 | 4 | 53,968 B |
+| [FORMS-PEN.md](FORMS-PEN.md) | `./forms` | 947 | 18 | 6 | 3 | 42,997 B |
+| [MESSAGES-PEN.md](MESSAGES-PEN.md) | `./messages` | 105 | 9 | 2 | 1 | 13,623 B |
+| [JTLT-PEN.md](JTLT-PEN.md) | `./jtlt` | 83 | 13 | 1 | 2 | 18,031 B |
+| [PROJECT-PEN.md](PROJECT-PEN.md) | `./project` | 81 | 9 | 1 | 1 | 4,063 B |
+| [CHARTS-PEN.md](CHARTS-PEN.md) | `./charts` | 97 | 21 | 1 | 1 | 5,903 B |
+| [DB-CLIENT.md](DB-CLIENT.md) | `./db` | 1,171 | 45 | 4 | 2 | 944,196 B |
 | [FORMULA-PEN.md](FORMULA-PEN.md) | `./formula` | 41 | 2 | — | — | 10,798 B |
-| **16 documents** | | **13,508** | **372** | **73** | | |
+| **16 documents** | | **13,540** | **372** | **73** | | |
 <!--/fact-->
 
 A pen whose mapping rows are far below its worked examples is a pen
@@ -265,20 +265,20 @@ it and each document publishes it. The rounded column is what
 <!--fact:pens.cost-->
 | Subpath | Document | Bundle | Rounded |
 |---|---|---:|---:|
-| `@jarenjs/linq` | [QUERY-PEN.md](QUERY-PEN.md) | 216,582 B | 217 kB |
-| `@jarenjs/linq/schema` | [SCHEMA-PEN.md](SCHEMA-PEN.md) | 38,528 B | 39 kB |
-| `@jarenjs/linq/model` | [MODEL-PEN.md](MODEL-PEN.md) | 50,322 B | 50 kB |
-| `@jarenjs/linq/jslt` | [JSLT-PEN.md](JSLT-PEN.md) | 21,448 B | 21 kB |
-| `@jarenjs/linq/migration` | [MIGRATION-PEN.md](MIGRATION-PEN.md) | 27,586 B | 28 kB |
-| `@jarenjs/linq/contract` | [CONTRACT-PEN.md](CONTRACT-PEN.md) | 51,785 B | 52 kB |
-| `@jarenjs/linq/flow` | [FLOW-PEN.md](FLOW-PEN.md) | 21,505 B | 22 kB |
-| `@jarenjs/linq/app` | [APP-PEN.md](APP-PEN.md) | 53,705 B | 54 kB |
-| `@jarenjs/linq/forms` | [FORMS-PEN.md](FORMS-PEN.md) | 42,725 B | 43 kB |
-| `@jarenjs/linq/messages` | [MESSAGES-PEN.md](MESSAGES-PEN.md) | 13,828 B | 14 kB |
-| `@jarenjs/linq/jtlt` | [JTLT-PEN.md](JTLT-PEN.md) | 18,316 B | 18 kB |
-| `@jarenjs/linq/project` | [PROJECT-PEN.md](PROJECT-PEN.md) | 4,371 B | 4 kB |
-| `@jarenjs/linq/charts` | [CHARTS-PEN.md](CHARTS-PEN.md) | 6,170 B | 6 kB |
-| `@jarenjs/linq/db` | [DB-CLIENT.md](DB-CLIENT.md) | 944,041 B | 944 kB |
+| `@jarenjs/linq` | [QUERY-PEN.md](QUERY-PEN.md) | 216,793 B | 217 kB |
+| `@jarenjs/linq/schema` | [SCHEMA-PEN.md](SCHEMA-PEN.md) | 38,910 B | 39 kB |
+| `@jarenjs/linq/model` | [MODEL-PEN.md](MODEL-PEN.md) | 50,710 B | 51 kB |
+| `@jarenjs/linq/jslt` | [JSLT-PEN.md](JSLT-PEN.md) | 21,489 B | 21 kB |
+| `@jarenjs/linq/migration` | [MIGRATION-PEN.md](MIGRATION-PEN.md) | 27,614 B | 28 kB |
+| `@jarenjs/linq/contract` | [CONTRACT-PEN.md](CONTRACT-PEN.md) | 52,169 B | 52 kB |
+| `@jarenjs/linq/flow` | [FLOW-PEN.md](FLOW-PEN.md) | 21,590 B | 22 kB |
+| `@jarenjs/linq/app` | [APP-PEN.md](APP-PEN.md) | 53,968 B | 54 kB |
+| `@jarenjs/linq/forms` | [FORMS-PEN.md](FORMS-PEN.md) | 42,997 B | 43 kB |
+| `@jarenjs/linq/messages` | [MESSAGES-PEN.md](MESSAGES-PEN.md) | 13,623 B | 14 kB |
+| `@jarenjs/linq/jtlt` | [JTLT-PEN.md](JTLT-PEN.md) | 18,031 B | 18 kB |
+| `@jarenjs/linq/project` | [PROJECT-PEN.md](PROJECT-PEN.md) | 4,063 B | 4 kB |
+| `@jarenjs/linq/charts` | [CHARTS-PEN.md](CHARTS-PEN.md) | 5,903 B | 6 kB |
+| `@jarenjs/linq/db` | [DB-CLIENT.md](DB-CLIENT.md) | 944,196 B | 944 kB |
 | `@jarenjs/linq/formula` | [FORMULA-PEN.md](FORMULA-PEN.md) | 10,798 B | 11 kB |
 <!--/fact-->
 
@@ -474,7 +474,7 @@ it says.
 
 | Method | Emits | `Infer` / `Input` | Status |
 |---|---|---|---|
-| `document(root, { draft })` | the document, with `$schema` first for `'2020-12'`; without a draft, the root's document unchanged | — | native; another draft, or a draft on a boolean schema, is `JL0102` |
+| `document(root, { draft })` | the document, with `$schema` first for `'2020-12'`; without a draft, the root's document unchanged | — | native; another draft (a name on `Object.prototype` included), or a draft on a boolean schema, is `JL0102`; an option other than `draft` is `JL0101` |
 | `.schema` | the assembled document — a deep-frozen value, computed once and memoized | `JsonSchema \| boolean` | native |
 | `.toJSON()` | the same document, so `JSON.stringify(builder)` is the document | `JsonSchema \| boolean` | native |
 | `.state` | the frozen builder state (kind, children, keywords, annotations) — what a subclass reads, never a document | the state object | native |
@@ -525,7 +525,7 @@ it says.
 | `.column('json')` | `column: 'json'` — the scalar stays in the JSONB document, which is the opt-out that preserves present-`null` (§9.3) | — | native |
 | `.now()` | `default: 'now'` — an RFC 3339 stamp on insert, when the member is absent | marks it `generated`: optional on `input` | native |
 | `.updated()` | `default: 'updated'` — a stamp on insert AND on every update | marks it `generated` | native |
-| `.fill(value)` | `default: { value }` — a literal, filled when absent; the value crosses the JSON boundary (`requireJson`) | marks it `generated` | native; a value that is not JSON is `JL0101` |
+| `.fill(value)` | `default: { value }` — a literal, filled when absent; the value crosses the JSON boundary (`requireJson`) and is copied | marks it `generated` | native; a value that is not JSON is `JL0101` |
 | `.compute(fn)`, `.compute(query)` | `default: { query }` — captured over the document being written (`$`), or a query document verbatim | marks it `generated` | native; a captured rule that binds ANY external is `JL0104` |
 | `.physical(layout)` | `physical` on the entity declaration | preserves entity types; explicit column codecs | native on an object builder |
 | `.indexes(entries)` | `indexes` on the entity declaration — composite, unique or partial `index()` entries over the entity's column-mapped members (MODEL-FORMAT §9.2), each held by `defineModel` to what an entity table carries, a member read through `get()` written `$.<member>` | each entry's paths and `where` are checked against the entity's shape | native on an entity's own object builder; not an array, or an entry outside the index grammar, `JL0101`; on another kind, on a member or in a collection's schema, an entry that needs a generated column (`derive`, `precision`, `dims`, `physical`, an expression), or a path that is not one top-level member, `JL0102` |
@@ -549,7 +549,7 @@ it says.
 | `collection(schema, { key?, identity?, indexes?, intervals?, renamedFrom? })` | `{ schema, key?, identity?, indexes?, intervals?, 'x-rename'? }` — `key` is an RFC 6901 pointer, a captured member path (`(d) => d.id` → `/id`) or `null` (the store allocates, `identity` says how); the other options ride verbatim, an `indexes` entry written by hand rather than by `index()` is held to what `index()` writes, and an `intervals` entry is closed to `name`, `path` and `maxDuration` (two strings and a number) | `CollectionSpec<Infer<B>>`, carrying the document shape its paths are checked against | native; an option outside the five, a key that is neither pointer nor lambda nor `null`, an `indexes` that is not an array of `index()` entries, an entry member outside the index grammar or of the wrong type, an `intervals` that is not an array of objects, an interval member outside the three or of the wrong type, all `JL0101` |
 | `index(path, options?)` | `{ name, path, unique?, derive?, precision?, dims?, physical?, where? }` — `path` is a captured lambda (`(p) => p.cell` → `$.cell`), a non-empty array of them (a composite), or a JSONPath string; `name` defaults to `by_<segments>`; each of the rest is the JSON type the grammar declares — `unique` a boolean, `derive` and `physical` strings, `precision` and `dims` numbers, `where` a query document — and rides verbatim for the store's model walk to judge its value (§2.1); a `where` lambda is captured into the query grammar (`(d) => d.status.in(['active', 'pending'])` → `{ $eq: ['$.status', { $seq: ['active', 'pending'] }] }`) | `IndexPath<D>` and `IndexCondition<D>` over the collection's or the entity's shape: a member the shape lacks does not compile, nor does a `where` that is neither a predicate nor a query document | native; an option outside the seven, or of the wrong type, is `JL0101`; a lambda that answers an operator result or a surface method is `JL0102`, and so is a `where` lambda that answers no predicate |
 
-| `expressionIndex(expression, options?)` | `{ name, expression, unique? }` — an index over a COMPUTED value: a `{ call, args }` node whose arguments are member lambdas, JSONPath strings, JSON scalars or further calls; `name` defaults to `by_<call>_<members>` | the expression's member lambdas are checked against the collection's shape | native; a node outside the vocabulary, an option outside the two, a `unique` that is not a boolean, and anything that looks like SQL text are all `JL0101` |
+| `expressionIndex(expression, options?)` | `{ name, expression, unique? }` — an index over a COMPUTED value: a `{ call, args }` node whose arguments are member lambdas, JSONPath strings, JSON scalars or further calls; `name` defaults to `by_<call>_<members>` | the expression's member lambdas are checked against the collection's shape | native; a node outside the vocabulary, an option outside the two, a `unique` that is not a boolean, and anything that looks like SQL text are all `JL0101`; a scalar that is not JSON (`NaN`, `±Infinity`, `-0`) is `JL0101` too |
 
 **The model document**
 
@@ -758,7 +758,7 @@ it says.
 | Method | Emits | Type reading | Status |
 |---|---|---|---|
 | `bind(name, { payload?, event?, preventDefault?, stopPropagation? })` | APP-FORMAT §4's object binding — `{ action, with?, event?, preventDefault?, stopPropagation? }`, in the format's member order | `Binding<Names>` — annotate the call (`bind<Action>('todo/add')`) and an undeclared name stops compiling | native; an empty name, an unknown member or a non-boolean control `JL0101`; a field §3.1 excludes `JL0102` |
-| `sub(run, { with?, when?, withQuery?, key?, for? })` | one APP-FORMAT §5.3 entry, in the format's member order | `SubDeclaration<Run>` | native; an empty `run`, an unknown member or a callback under `with` `JL0101`; a combination §5.3 calls `JA0008` `JL0102`; `$item` outside a `for` `JL0104` |
+| `sub(run, { with?, when?, withQuery?, key?, for? })` | one APP-FORMAT §5.3 entry, in the format's member order | `SubDeclaration<Run>` | native; an empty `run`, an unknown member or a callback under `with` `JL0101`, as is a hand-written query document under `when`, `withQuery`, `key` or `for` that is not JSON (`NaN`, `-0`, a `Date`, a bigint, an `undefined` member) — it used to be flattened silently, to `null`, `0` or `{}`; a combination §5.3 calls `JA0008` `JL0102`; `$item` outside a `for` `JL0104` |
 
 ### The Jaren forms pen — [FORMS-PEN.md §2](FORMS-PEN.md)
 
@@ -926,7 +926,7 @@ it says.
 | `after(cursor)` | `after` | the keyset continuation (§10.5) a `page()` over the same ordering emitted — typed by the declared ordering, so a bare key does not compile; the ROOT only |
 | `maxDepth(n)` | `maxDepth` | the include depth bound (§10.4) |
 | `asNoTracking()` | — | changes the load, never the document |
-| `toSpec()`, `toJSON()` | the spec | plain deep-frozen JSON, a snapshot: mutating it changes nothing, and two builds are one document |
+| `toSpec()`, `toJSON()` | the spec | plain deep-frozen JSON, a snapshot: mutating it changes nothing, and two builds are one document; a cursor handed to `after()` is copied there, so writing into it afterwards moves no page |
 | `toArray()` | — | `load(spec)`: the store's one statement |
 | `cursor(options?)` | — | `loadCursor(spec, options)`: one root graph per pull from that same statement, its includes attached and bounded per root; `return()` releases it; `{ signal?, tracking? }` — untracked unless `tracking: true` |
 | `page(options?)` | — | `page(spec, options)`: one bounded page over the composite keyset — `{ items, continuation, hasMore, snapshot }`, never more than `limit` roots or `maxBytes` bytes; `{ limit?, after?, maxBytes?, consistency?, signal?, tracking? }`; a `take`/`skip` on the graph beside it is the store's `JD0032` |
