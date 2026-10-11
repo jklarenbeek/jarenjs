@@ -288,7 +288,7 @@ diagram or chart code, bundled or not. Since 0.96.0 `@jarenjs/md/plugins`
 exports no `mermaidPlugin`: import it from `@jarenjs/mermaid/plugin`, and
 hand it charts' `mermaidPieRenderer` as `renderers.pie`, or a pie renders
 a placeholder. Parsing and rendering to vnodes
-costs a consumer **<!--fact:bundle.md-->87,255<!--/fact--> bytes**
+costs a consumer **<!--fact:bundle.md-->87,958<!--/fact--> bytes**
 minified and tree-shaken. `npm run test:tree-shaking` measures it and
 holds both import graphs (`@jarenjs/md` and `@jarenjs/md/component`) free
 of mermaid and charts modules.

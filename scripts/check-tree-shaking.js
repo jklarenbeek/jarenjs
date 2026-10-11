@@ -556,7 +556,9 @@ if (asyncLiveLeak.length)
 // Raised to 944,200 (measured 944196): the chain's per-run bindings and copied caller JSON, less the planner's single scalar-type table add 155.
 // Raised to 948,800 (measured 948704): the store's checked close and worker options, null accepted as no options, refused non-object entity writes and the closed option sets of maintenance, changes, replication, jobs and introspection (2664), the JSON engine's date range and prototype-named members (964) and core's deepFreeze (about 390) add 4508.
 // Raised to 950,200 (measured 950165): the same core helpers the store and the engine carry add 1461.
-if (clientBytes > 950200)
+// Raised to 950,500 (measured 950448): the minimum and maximum applied beside a
+// numeric exclusive bound, shared by the engine's validator, add 283.
+if (clientBytes > 950500)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 
