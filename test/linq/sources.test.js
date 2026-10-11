@@ -163,20 +163,29 @@ describe('the push queue', () => {
     assert.strictEqual(queue.feed(8), false, 'five unread exceeds a mark of four');
     await reader.return();
 
-    const big = createPushQueue({ highWaterMark: Number.MAX_SAFE_INTEGER });
-    const count = 400000;
-    for (let n = 0; n < count; n++) big.feed(n);
-    big.end();
-    const started = performance.now();
-    let expected = 0;
-    for await (const value of big) {
-      if (value !== expected) assert.fail(`out of order at ${expected}: ${value}`);
-      expected++;
-    }
-    const elapsed = performance.now() - started;
-    assert.strictEqual(expected, count);
-    // a shift() per value took seconds here and grew quadratically; the bound is
-    // generous for a loaded host and far under what the quadratic drain needed
-    assert.strictEqual(elapsed < 4000, true, `draining ${count} values took ${elapsed.toFixed(0)} ms`);
+    /** The fastest of three drains of `count` values fed ahead of the reader. */
+    const drain = async (/** @type {number} */ count) => {
+      let best = Infinity;
+      for (let run = 0; run < 3; run++) {
+        const big = createPushQueue({ highWaterMark: Number.MAX_SAFE_INTEGER });
+        for (let n = 0; n < count; n++) big.feed(n);
+        big.end();
+        const started = performance.now();
+        let expected = 0;
+        for await (const value of big) {
+          if (value !== expected) assert.fail(`out of order at ${expected}: ${value}`);
+          expected++;
+        }
+        assert.strictEqual(expected, count);
+        best = Math.min(best, performance.now() - started);
+      }
+      return best;
+    };
+    // eight times the values: a linear drain takes about eight times as long, the
+    // quadratic one it replaced (a shift() per value) about sixty-four times; a
+    // ratio is steady on a loaded host where a wall-clock bound is not
+    const small = await drain(50000);
+    const large = await drain(400000);
+    assert.strictEqual(large / Math.max(small, 1) < 24, true, `50000 values took ${small.toFixed(1)} ms, 400000 took ${large.toFixed(1)} ms`);
   });
 });

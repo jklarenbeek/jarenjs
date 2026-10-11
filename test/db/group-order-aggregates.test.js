@@ -514,55 +514,76 @@ describe('the key of a group is ordered as the kind it is', () => {
   });
 });
 
-describe('a PostgreSQL database that is not C-collated', { skip: !URL && 'JAREN_PG_URL is not set' }, () => {
-  it('orders string group keys by code point, as the engine does', async (t) => {
-    const { default: pg } = await import('pg');
-    const admin = new pg.Client({ connectionString: URL });
-    await admin.connect();
-    const database = `group_order_icu_${process.pid}`;
+/**
+ * The server answers some statements with a transient refusal while other suites share it:
+ * template0 in use by a concurrent CREATE DATABASE, or a backend terminated under the case.
+ */
+const TRANSIENT = new Set(['55006', '57P01', '57P02', '57P03']);
+
+/** @param {import('node:test').TestContext} t */
+async function icuCase(t) {
+  const { default: pg } = await import('pg');
+  const admin = new pg.Client({ connectionString: URL });
+  await admin.connect();
+  const database = `group_order_icu_${process.pid}`;
+  try {
     try {
-      try {
-        await admin.query(`CREATE DATABASE "${database}" TEMPLATE template0 ENCODING 'UTF8' LOCALE_PROVIDER icu ICU_LOCALE 'en-US'`);
-      }
-      catch (error) {
-        t.skip(`no database with an ICU collation can be created here: ${/** @type {any} */ (error).message}`);
-        return;
-      }
-      const url = new globalThis.URL(/** @type {string} */ (URL));
-      url.pathname = `/${database}`;
-      const pool = new pg.Pool({ connectionString: url.href, max: 2 });
-      let store;
-      try {
-        // without a collation of its own, 'a' sorts before 'B' here and after it by code point
-        assert.equal((await pool.query(`SELECT 'a'::text < 'B'::text AS before`)).rows[0].before, true, 'the database default is not code point order');
-        const schema = `group_order_icu_${process.pid}`;
-        await pool.query(`CREATE SCHEMA "${schema}"`);
-        const model = { $model: '0.1', collections: { rows: { key: null, identity: 'integer',
-          schema: { type: 'object', properties: { g: { type: 'string' }, v: { type: 'integer' } } }, indexes: [] } } };
-        const { openStore } = await import('@jarenjs/db');
-        store = await openStore(model, { driver: postgresDriver(pool, { schema }) });
-        const rows = store.collection('rows');
-        for (const document of [{ g: 'a', v: 1 }, { g: 'B', v: 1 }, { g: 'b', v: 2 }]) await rows.insert(document);
-        const grouped = (/** @type {any} */ order, ret = '$g') => ({ $for: { it: '$[*]' }, $groupby: { g: '$it.g' }, $orderby: order, $return: ret });
-        for (const [name, order, answer] of /** @type {[string, any, string[]]} */ ([
-          ['the key', ['$g'], ['B', 'a', 'b']],
-          ['a sum, then the key', [{ $key: { $sum: '$it.v' } }, '$g'], ['B', 'a', 'b']],
-          ['a count, then the key descending', [{ $key: { $count: '$it' } }, { $key: '$g', $dir: 'desc' }], ['b', 'a', 'B']],
-        ])) {
-          const query = grouped(order);
-          assert.equal((await rows.explain(query)).mode, 'native', name);
-          assert.deepEqual(await rows.execute(query), answer, name);
-          assert.deepEqual(await rows.execute(query, { pushdown: false }), answer, `${name} (engine)`);
-        }
-      }
-      finally {
-        await store?.close();
-        await pool.end();
+      await admin.query(`CREATE DATABASE "${database}" TEMPLATE template0 ENCODING 'UTF8' LOCALE_PROVIDER icu ICU_LOCALE 'en-US'`);
+    }
+    catch (error) {
+      if (TRANSIENT.has(/** @type {any} */ (error).code)) throw error;
+      t.skip(`no database with an ICU collation can be created here: ${/** @type {any} */ (error).message}`);
+      return;
+    }
+    const url = new globalThis.URL(/** @type {string} */ (URL));
+    url.pathname = `/${database}`;
+    const pool = new pg.Pool({ connectionString: url.href, max: 2 });
+    let store;
+    try {
+      // without a collation of its own, 'a' sorts before 'B' here and after it by code point
+      assert.equal((await pool.query(`SELECT 'a'::text < 'B'::text AS before`)).rows[0].before, true, 'the database default is not code point order');
+      const schema = `group_order_icu_${process.pid}`;
+      await pool.query(`CREATE SCHEMA "${schema}"`);
+      const model = { $model: '0.1', collections: { rows: { key: null, identity: 'integer',
+        schema: { type: 'object', properties: { g: { type: 'string' }, v: { type: 'integer' } } }, indexes: [] } } };
+      const { openStore } = await import('@jarenjs/db');
+      store = await openStore(model, { driver: postgresDriver(pool, { schema }) });
+      const rows = store.collection('rows');
+      for (const document of [{ g: 'a', v: 1 }, { g: 'B', v: 1 }, { g: 'b', v: 2 }]) await rows.insert(document);
+      const grouped = (/** @type {any} */ order, ret = '$g') => ({ $for: { it: '$[*]' }, $groupby: { g: '$it.g' }, $orderby: order, $return: ret });
+      for (const [name, order, answer] of /** @type {[string, any, string[]]} */ ([
+        ['the key', ['$g'], ['B', 'a', 'b']],
+        ['a sum, then the key', [{ $key: { $sum: '$it.v' } }, '$g'], ['B', 'a', 'b']],
+        ['a count, then the key descending', [{ $key: { $count: '$it' } }, { $key: '$g', $dir: 'desc' }], ['b', 'a', 'B']],
+      ])) {
+        const query = grouped(order);
+        assert.equal((await rows.explain(query)).mode, 'native', name);
+        assert.deepEqual(await rows.execute(query), answer, name);
+        assert.deepEqual(await rows.execute(query, { pushdown: false }), answer, `${name} (engine)`);
       }
     }
     finally {
-      await admin.query(`DROP DATABASE IF EXISTS "${database}" WITH (FORCE)`);
-      await admin.end();
+      await store?.close();
+      await pool.end();
+    }
+  }
+  finally {
+    await admin.query(`DROP DATABASE IF EXISTS "${database}" WITH (FORCE)`);
+    await admin.end();
+  }
+}
+
+describe('a PostgreSQL database that is not C-collated', { skip: !URL && 'JAREN_PG_URL is not set' }, () => {
+  it('orders string group keys by code point, as the engine does', async (t) => {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        await icuCase(t);
+        return;
+      }
+      catch (error) {
+        if (attempt >= 4 || !TRANSIENT.has(/** @type {any} */ (error).code)) throw error;
+        await new Promise((resolve) => setTimeout(resolve, 250 * attempt));
+      }
     }
   });
 });
