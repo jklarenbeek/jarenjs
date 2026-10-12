@@ -286,10 +286,6 @@ establish registry publication or downstream acceptance.
 
 - [ ] **Sessions for the remaining ten types** — `line`, `bar` and `candlestick` patch in place; the other ten re-render wholesale, which is correct and, at their sizes, cheap. A `heatmap` session (one cell rect per changed count) is the next one with an obvious incremental path now that the accumulator feeds it.
 - [ ] **Deeper treemap nesting** — one hierarchy level ships (groups squarify, children squarify under a naming band). Arbitrary depth needs a recursive layout and a header budget that does not eat the leaves.
-- [ ] **Bars below zero.** A bar chart rises from a baseline at the bottom of
-  the plot, so a zero or negative value draws no bar. Wanted: a baseline inside
-  the plot for domains that cross zero (stacked bars then stack each sign
-  apart).
 
 ## @jarenjs/calc
 

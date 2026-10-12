@@ -39,7 +39,10 @@ import { normalizeTooltip, valueMark } from '../core/marks.js';
 /**
  * @typedef {object} BarMarkAST
  * @property {number} u0 @property {number} u1 category-axis band
- * @property {number} v0 @property {number} v1 value-axis extent
+ * @property {number} v0 the value-axis end the bar rises from (the zero
+ *   baseline, or the bar beneath it in a stack of the same sign)
+ * @property {number} v1 the value-axis end the value reaches; below `v0`
+ *   for a negative value
  * @property {number} series series index
  * @property {'win'|'loss'|null} tone
  * @property {string} label the category this bar stands in
@@ -48,44 +51,65 @@ import { normalizeTooltip, valueMark } from '../core/marks.js';
  */
 
 /**
+ * Whether a value draws a bar: a finite number other than zero, and on a
+ * log axis a positive one (a log axis has no zero and no side below it).
+ * @param {any} v @param {boolean} log
+ * @returns {boolean}
+ */
+export function barDrawable(v, log) {
+  return typeof v === 'number' && Number.isFinite(v) && (log ? v > 0 : v !== 0);
+}
+
+/**
  * Scan the drawn values for the extremes the value axis is resolved
- * from: the largest bar (a stacked chart's per-category total) and the
- * smallest positive value a log axis needs for its bottom decade.
+ * from: the largest bar above zero and the deepest below it (a stacked
+ * chart's per-category positive and negative totals, each sign stacked
+ * apart), and the smallest positive value a log axis needs for its
+ * bottom decade.
  *
  * Exported because the incremental session must reach the same bounds
  * decision from the same numbers — one implementation, no drift.
  * @param {any} data
  * @param {boolean} stacked @param {boolean} log
- * @returns {{maxVal: number, minPos: number}}
+ * @returns {{maxVal: number, minVal: number, minPos: number}}
  */
 export function scanBarExtremes(data, stacked, log) {
   const categories = data?.categories ?? [];
   const series = (data?.series ?? []).filter((s) => Array.isArray(s.values));
   let maxVal = 0;
+  let minVal = 0;
   let minPos = Infinity;
   for (let ci = 0; ci < categories.length; ci++) {
-    let sum = 0;
+    let up = 0;
+    let down = 0;
     for (const s of series) {
       const v = s.values[ci];
-      if (typeof v !== 'number' || !Number.isFinite(v) || v <= 0) continue;
-      sum += v;
-      if (!stacked && v > maxVal) maxVal = v;
-      if (v < minPos) minPos = v;
+      if (!barDrawable(v, log)) continue;
+      if (v > 0) {
+        up += v;
+        if (!stacked && v > maxVal) maxVal = v;
+        if (v < minPos) minPos = v;
+      }
+      else {
+        down += v;
+        if (!stacked && v < minVal) minVal = v;
+      }
     }
-    if (stacked && sum > maxVal) maxVal = sum;
+    if (stacked && up > maxVal) maxVal = up;
+    if (stacked && down < minVal) minVal = down;
   }
-  if (maxVal === 0) maxVal = 1;
+  if (maxVal === 0 && minVal === 0) maxVal = 1;
   if (!Number.isFinite(minPos)) minPos = log ? 0.1 : 0;
-  return { maxVal, minPos };
+  return { maxVal, minVal, minPos };
 }
 
 /**
  * Resolve the value-axis bounds and tick values from the scanned
- * extremes: a nice-number top over a zero base, or whole decades under
- * `log`. The AST records the bounds so a later build — or the session —
+ * extremes: nice-number bounds that always contain zero (a zero base
+ * when nothing is negative), or whole decades under `log`. The AST records the bounds so a later build — or the session —
  * can detect "unchanged". A top rounded up past what a double holds is
  * clamped (`measurableSpan`, `measurableDecades`).
- * @param {{maxVal: number, minPos: number}} ext
+ * @param {{maxVal: number, minVal: number, minPos: number}} ext
  * @param {boolean} log
  * @returns {{domain: [number, number], tickValues: number[]}}
  */
@@ -98,8 +122,10 @@ export function resolveBarDomains(ext, log) {
   }
   // a stacked total can overflow to Infinity: it tops out at the largest double
   const max = Math.min(ext.maxVal, Number.MAX_VALUE);
-  const step = niceStep(max, 5);
-  const domain = measurableSpan(0, step * Math.ceil(max / step));
+  const min = Math.max(ext.minVal, -Number.MAX_VALUE);
+  const step = niceStep(Number.isFinite(max - min) ? max - min : Number.MAX_VALUE, 5);
+  const lo = min === 0 ? 0 : step * Math.floor(min / step);
+  const domain = measurableSpan(lo, step * Math.ceil(max / step));
   return { domain, tickValues: axisTicksLinear(domain[0], domain[1], 5) };
 }
 
@@ -111,6 +137,17 @@ export function resolveBarDomains(ext, log) {
  */
 export function barScale(domain, log) {
   return log ? scaleLog(domain[0], domain[1]) : scaleLinear(domain[0], domain[1]);
+}
+
+/**
+ * Where the zero baseline sits on the value axis, as a unit position:
+ * the bottom of the plot for a domain that starts at zero or a log axis,
+ * inside it for a domain that crosses zero.
+ * @param {(v: number) => number} scale @param {boolean} log
+ * @returns {number}
+ */
+export function barBaseline(scale, log) {
+  return log ? 0 : clamp01(scale(0));
 }
 
 /**
@@ -133,12 +170,15 @@ export function buildBarAST(data, config = {}) {
   const groups = stacked ? 1 : Math.max(1, series.length);
   const sub = band.bandwidth / groups;
   const bars = [];
-  const running = stacked ? new Array(categories.length).fill(0) : null;
+  const base0 = barBaseline(scale, log);
+  // each sign stacks apart: positives upward from zero, negatives downward
+  const up = stacked ? new Array(categories.length).fill(0) : null;
+  const down = stacked ? new Array(categories.length).fill(0) : null;
   for (let si = 0; si < series.length; si++) {
     const s = series[si];
     for (let ci = 0; ci < categories.length; ci++) {
       const v = s.values[ci];
-      if (typeof v !== 'number' || !Number.isFinite(v) || v <= 0) continue;
+      if (!barDrawable(v, log)) continue;
       const start = band.start(ci);
       let u0;
       let u1;
@@ -147,15 +187,16 @@ export function buildBarAST(data, config = {}) {
       if (stacked) {
         u0 = start;
         u1 = start + band.bandwidth;
-        const base = running[ci];
-        running[ci] = base + v;
-        v0 = base === 0 ? 0 : clamp01(scale(base));
-        v1 = clamp01(scale(running[ci]));
+        const run = v > 0 ? up : down;
+        const base = run[ci];
+        run[ci] = base + v;
+        v0 = base === 0 ? base0 : clamp01(scale(base));
+        v1 = clamp01(scale(run[ci]));
       }
       else {
         u0 = start + si * sub + sub * 0.06;
         u1 = start + (si + 1) * sub - sub * 0.06;
-        v0 = 0;
+        v0 = base0;
         v1 = clamp01(scale(v));
       }
       bars.push({
@@ -202,16 +243,16 @@ export function buildBarAST(data, config = {}) {
 export function barMarkRender(bar, ast, plot, theme, palette, tooltip = null) {
   let x; let y; let w; let h;
   if (ast.orient === 'h') {
-    x = plot.x + bar.v0 * plot.w;
-    w = (bar.v1 - bar.v0) * plot.w;
+    x = plot.x + Math.min(bar.v0, bar.v1) * plot.w;
+    w = Math.abs(bar.v1 - bar.v0) * plot.w;
     y = plot.y + bar.u0 * plot.h;
     h = (bar.u1 - bar.u0) * plot.h;
   }
   else {
     x = plot.x + bar.u0 * plot.w;
     w = (bar.u1 - bar.u0) * plot.w;
-    y = plot.y + (1 - bar.v1) * plot.h;
-    h = (bar.v1 - bar.v0) * plot.h;
+    y = plot.y + (1 - Math.max(bar.v0, bar.v1)) * plot.h;
+    h = Math.abs(bar.v1 - bar.v0) * plot.h;
   }
   const text = ast.legend !== null
     ? `${bar.name} — ${bar.label}: ${bar.value}`

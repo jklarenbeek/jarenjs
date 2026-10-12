@@ -92,8 +92,10 @@ axisTicksTime(Date.UTC(1970, 0, 1), Date.UTC(5000, 0, 1));  // → 2000, 3000, 4
 The full contract is `schemas/chart-definition.schema.json`.
 
 **Values a chart cannot draw are dropped, not printed.** Bar and line skip
-a non-finite value, and a bar chart skips a value of zero or less as well (its
-bars rise from a zero baseline, so a negative value draws no bar); a pie drops every slice whose value is not a finite
+a non-finite value, and a bar chart skips a zero (a bar of no length) and, on a
+`log` axis, a value of zero or less (a log axis has no zero and no side below it);
+a negative value on a linear axis hangs below a zero baseline that sits inside the
+plot, and a stacked chart stacks positives up and negatives down, apart; a pie drops every slice whose value is not a finite
 number of at least zero, so the shares are of what is left — such a slice
 used to be summed into the total and printed as `a: NaN (NaN%)` or as a
 share above 100%. A domain wider than a double can measure — data at
@@ -345,9 +347,9 @@ extremes a second time. That is the last row, and it is the price of the
 default: a long live line declares `sampling: false`, which is exactly
 what the three rows before it are.
 
-A bar chart's stillness test is the nice-number top rather than a
-declared policy: a count below it repaints one rect, a count that
-pushes the axis higher rebuilds. A new category rebuilds too — every
+A bar chart's stillness test is the nice-number bounds rather than a
+declared policy: a count inside them repaints one rect, a count that
+pushes the axis past either end rebuilds. A new category rebuilds too — every
 band width and position moves with it — and so does a stacked chart,
 where one value shifts every bar above it in its category.
 
@@ -443,7 +445,10 @@ The same module's `mermaidPieToChartAST` maps a mermaid pie AST onto
 document; validate untrusted definitions with `@jarenjs/validate`
 before compiling.
 
-Answers that changed (upgrade notes): a bar chart places each bar and tick by its
+Answers that changed (upgrade notes): a bar chart with a negative value on a linear
+axis used to drop it and draw nothing; it now draws the bar from a zero baseline inside
+the plot, and the value axis extends below zero to hold it (a chart with no negative
+value is unchanged). A bar chart places each bar and tick by its
 position in `categories`, where two categories sharing a label (`['a', 'a', 'b']`)
 were drawn in one band, one over the other, with the first band empty;
 `scaleBand` gained `start(index)` for that. `formatTickValue` carries into the next

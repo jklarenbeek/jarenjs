@@ -35,7 +35,7 @@ import { normalizeTooltip } from './marks.js';
 import { numOf } from './stream-adapter.js';
 import {
   buildBarAST, buildBarRender, barMarkRender,
-  scanBarExtremes, resolveBarDomains, barScale,
+  scanBarExtremes, resolveBarDomains, barScale, barDrawable,
 } from '../types/bar.js';
 import {
   buildLineASTResolved, buildLineRender, scanLineExtremes, resolveLineDomains,
@@ -155,7 +155,7 @@ function createBarSession(config, source, options) {
       const at = barAt.get(markKey(step.si, label));
       const value = truth?.series?.[step.si]?.values?.[step.ci];
       // no rect yet (or none any more) means the child list changes shape
-      if (at === undefined || typeof value !== 'number' || !Number.isFinite(value) || value <= 0)
+      if (at === undefined || !barDrawable(value, log))
         return rebuild(truth);
       const bar = { ...ast.bars[at], v1: clamp01(scale(value)), value };
       ast.bars[at] = bar;
