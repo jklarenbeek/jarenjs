@@ -17,13 +17,16 @@
 // Two passes for streaming, one for wholesale, is the deliberate trade:
 // the wholesale path is what a 100 MB file goes through.
 //
-// **The parser is authoritative, the cutter only permissive.** The cutter
-// resolves an ambiguous quote by staying inside the field, which is the
-// latest any reading could close it; the parser may close earlier. So a
-// cut span can contain more than one record but never less than one, and
-// the cut path reads a span in a loop rather than assuming it holds
-// exactly one record. If that invariant were reversed — a cut earlier
-// than the parser's — the text after the cut would be silently dropped.
+// **The parser is authoritative; the cutter follows its rule.** A quote
+// followed by ordinary text is resolved the way the parser resolves it
+// (another quote before the next delimiter or terminator keeps the field
+// open), so a cut span ends where the parser's record ends. It can still
+// contain more than one record, so the cut path reads a span in a loop
+// rather than assuming it holds exactly one. A cut earlier than the
+// parser's would drop the text after it, or heal a record that continues
+// in the next chunk.
+// The one known exception is a `comment` line that contains the quote
+// character, which the cutter reads as the start of a quoted field.
 //
 // Self-healing (`repair: true`) is the second reason this exists. Real
 // CSV is damaged constantly: an unclosed quote, a bare quote inside a
@@ -49,7 +52,7 @@ import {
 
 import { CsvSyntaxError } from './errors.js';
 import { JoslLimitError, limitOption, chunkByteLength, feedBounded } from './limits.js';
-import { columnOf, feedMachine, beginParseAll, offsetDateTime } from './util.js';
+import { feedMachine, beginParseAll, offsetDateTime } from './util.js';
 import { setObjectMember } from '@jarenjs/core/object';
 import { utf8ByteLength } from '@jarenjs/core/string';
 import {
@@ -277,6 +280,7 @@ export class CsvMachine {
     this.buf = '';
     this.scanPos = 0;
     this.scanState = S_START;
+    this.scanLook = 0; // how far the lookahead after a quote has already read
     this.started = false;
     this.ended = false;
 
@@ -295,6 +299,7 @@ export class CsvMachine {
     this.dropRecord = false; // set for a line that carries no record (a comment)
     this.line = 1; // physical line currently being read (1-based)
     this.recordOrigin = 1; // physical line the current record starts on
+    this.recordPos = 0; // offset of the current record in the text being read
   }
 
   //#region public surface
@@ -405,9 +410,8 @@ export class CsvMachine {
   //#region chunk cutter
 
   // Advance the cutter over the buffer, handing each complete span to the
-  // record reader. Permissive by construction: an ambiguous quote keeps
-  // it inside the field, so a span never ends before the parser would end
-  // a record — see the invariant at the top of this file.
+  // record reader. A span never ends before the parser would end a
+  // record — see the invariant at the top of this file.
   scan() {
     const buf = this.buf;
     const len = buf.length;
@@ -425,11 +429,10 @@ export class CsvMachine {
     let cr = -2;
 
     outer: while (pos < len) {
-      // Fast path. The cutter is permissive: it is in a quoted state
-      // whenever ANY reading could be inside a quote, so a plain state
-      // with no quote character ahead means every newline ahead is a
-      // real record end — indexOf can cut records without the
-      // per-character machine. A record that does contain a quote is
+      // Fast path. A plain state with no quote character ahead means
+      // every newline ahead is a real record end, so indexOf can cut
+      // records without the per-character machine. A record that does
+      // contain a quote is
       // handed to the machine below, one record at a time; one that
       // visibly STARTS with a quote skips the lookups outright.
       if (this.maxFieldBytes === Infinity && (state === S_PLAIN || (state === S_START && buf.charCodeAt(pos) !== quote))) {
@@ -559,10 +562,31 @@ export class CsvMachine {
               pos++;
               continue;
             }
-            // Anything but a delimiter or terminator keeps the field open:
-            // the latest close any reading could pick, which is what makes
-            // the cutter permissive.
-            state = c === delim || c === CC_LF || c === CC_CR ? S_PLAIN : S_QUOTED;
+            if (c === delim || c === CC_LF || c === CC_CR) {
+              state = S_PLAIN;
+              continue;
+            }
+            // Ordinary text after a quote: the parser's own rule decides
+            // (`quoteBeforeBreak`). Another quote before the next delimiter
+            // or terminator makes this one a literal and the field stays
+            // open; none closes the field here and the text up to the break
+            // is absorbed. Reading it any other way cuts a span where the
+            // parser would not, so repaired rows would differ between a
+            // whole document and a chunked one, and a strict stream would
+            // hold its stray-quote error back until the next quote.
+            let look = Math.max(pos + 1, this.scanLook);
+            while (look < len) {
+              const d = buf.charCodeAt(look);
+              if (d === quote || d === delim || d === CC_LF || d === CC_CR)
+                break;
+              look++;
+            }
+            if (look >= len && !this.ended) {
+              this.scanLook = len; // resume reading here, not at the quote
+              break; // undecided until the next chunk arrives
+            }
+            this.scanLook = 0;
+            state = look < len && buf.charCodeAt(look) === quote ? S_QUOTED : S_PLAIN;
             continue;
           }
         }
@@ -572,8 +596,14 @@ export class CsvMachine {
       // Out of input. A trailing S_QUOTE is undecided until the next
       // character arrives, so stop one short and re-read it next time.
       if (state === S_QUOTE && !this.ended) {
-        this.scanPos = pos - 1;
-        this.scanState = S_QUOTED;
+        if (pos < len) { // undecided in the text after the quote: resume there
+          this.scanPos = pos;
+          this.scanState = S_QUOTE;
+        }
+        else {
+          this.scanPos = pos - 1;
+          this.scanState = S_QUOTED;
+        }
       }
       else {
         this.scanPos = pos;
@@ -595,6 +625,7 @@ export class CsvMachine {
     this.buf = this.buf.slice(start);
     this.scanPos -= start;
     this.scanFieldStart = Math.max(0, this.scanFieldStart - start);
+    this.scanLook = Math.max(0, this.scanLook - start);
     // The scanner cursors are absolute in the buffer, so they shift with
     // it; one already consumed has no meaning in the new buffer.
     if (this.nextDelim >= 0)
@@ -634,6 +665,7 @@ export class CsvMachine {
         cells = [];
       }
       this.recordOrigin = this.line;
+      this.recordPos = pos;
       this.dropRecord = false;
       const start = pos;
       pos = this.parseRecord(text, pos, end, cells);
@@ -656,6 +688,16 @@ export class CsvMachine {
       throw new JoslLimitError('CSV2003', 'a field exceeds maxFieldBytes', this.maxFieldBytes, this.line);
     if (cells.length >= this.maxColumns)
       throw new JoslLimitError('CSV2004', 'a record has more than maxColumns fields', this.maxColumns, this.recordOrigin);
+  }
+
+  // The 1-based column of `pos` on its physical line. A line starts after a
+  // LF or where the record does, because a bare CR ends a record without a
+  // LF before the next one: counting from the last LF alone would add every
+  // earlier CR-terminated line to the column, and more so in a whole
+  // document than in a chunked read, whose span starts at the record.
+  columnAt(text, pos) {
+    const lf = text.lastIndexOf('\n', pos - 1);
+    return pos - (lf >= this.recordPos ? lf : this.recordPos - 1);
   }
 
   // The single grammar path: fill `cells` with one record's fields and
@@ -706,7 +748,7 @@ export class CsvMachine {
       // A bare CR is an old-Mac terminator. Reading it as data instead
       // would silently glue two records together, so repair mode ends the
       // record here and strict mode says why.
-      this.heal('CSV1006', this.line, columnOf(text, pos));
+      this.heal('CSV1006', this.line, this.columnAt(text, pos));
       this.line++;
       return pos + 1;
     }
@@ -752,7 +794,7 @@ export class CsvMachine {
       if (pos >= end) {
         // Out of input with the field still open. Closing it here is the
         // only reading that keeps the text.
-        this.heal('CSV1001', this.recordOrigin, columnOf(text, pos));
+        this.heal('CSV1001', this.recordOrigin, this.columnAt(text, pos));
         if (this.limited)
           this.admitCell(cells, text, opened, pos);
         cells.push(this.finishQuoted(joinCell(out, text, start, pos)));
@@ -793,11 +835,11 @@ export class CsvMachine {
       //
       // Column count wins ties, because a consumer indexes by column.
       if (quoteBeforeBreak(text, pos + 1, end, quote, delim)) {
-        this.heal('CSV1003', this.line, columnOf(text, pos));
+        this.heal('CSV1003', this.line, this.columnAt(text, pos));
         pos++;
         continue;
       }
-      this.heal('CSV1002', this.line, columnOf(text, pos));
+      this.heal('CSV1002', this.line, this.columnAt(text, pos));
       const closed = joinCell(out, text, start, pos);
       pos++; // past the closing quote
       const stray = pos;

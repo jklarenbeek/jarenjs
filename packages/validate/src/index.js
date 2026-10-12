@@ -20,7 +20,7 @@ import {
 
 import {
   isBoolOrObjectClass,
-  hasSchemaRef,
+  hasSchemaReference,
   hasUnevaluatedPropertiesCoverage,
   hasUnevaluatedItemsCoverage,
   EvalLog,
@@ -307,7 +307,18 @@ export class ValidationRoot {
         throw new Error(`Object at '${path}' is already created`);
     }
 
-    const obj = new ValidationObject(self, path, schema, baseUri, parentDeclaredDraft);
+    // The paths under construction right now: a reference back to one of
+    // them is resolved when it is first used, not by building the object a
+    // second time (see `resolveObject`).
+    const building = self.#building;
+    building.add(path);
+    let obj;
+    try {
+      obj = new ValidationObject(self, path, schema, baseUri, parentDeclaredDraft);
+    }
+    finally {
+      building.delete(path);
+    }
     objects.set(path, obj);
     return obj;
   }
@@ -324,6 +335,8 @@ export class ValidationRoot {
   #traverse = null;
   /** @type {Map|null} Map of paths to ValidationObjects */
   #objects = null;
+  /** @type {Set<string>} Paths whose ValidationObject is being constructed */
+  #building = new Set();
   /** @type {Array} Array of validation errors */
   #errors = null;
   /** @type {ValidationObject|null} The root schema's ValidationObject */
@@ -572,9 +585,13 @@ export class ValidationRoot {
    * @param {string} ref - The reference URI to resolve
    * @param {string} path - The current path (for error messages)
    * @param {object} schema - The schema containing the $ref
-   * @returns {ValidationObject} The resolved ValidationObject
+   * @param {boolean} [unlessBuilding] - Answer `null` instead of building the
+   *   target when it is one of the objects under construction (a reference
+   *   that leads back to an enclosing schema), so the caller keeps the
+   *   reference to resolve on first use
+   * @returns {ValidationObject|null} The resolved ValidationObject
    */
-  resolveObject(ref, path, schema) {
+  resolveObject(ref, path, schema, unlessBuilding = false) {
     // Fast path - check if already compiled first
     const objects = this.#objects;
     const cached = objects.get(ref);
@@ -588,6 +605,7 @@ export class ValidationRoot {
     // Check if final ID is already compiled
     const finalCached = objects.get(id);
     if (finalCached != null) return finalCached;
+    if (unlessBuilding && this.#building.has(id)) return null;
 
     // Create and cache the validation object
     return ValidationRoot.#createObject(this, id, root);
@@ -805,7 +823,7 @@ export class ValidationObject {
    * @returns {function(any, any):boolean} A function that validates data against the compiled schema and returns a boolean.
    */
   static compileValidator(self, path, schema, baseUri) {
-    if (!hasSchemaRef(schema))
+    if (!hasSchemaReference(schema, '$ref'))
       return compileSchemaObject(self, schema);
 
     const root = self.#root;
@@ -1226,7 +1244,13 @@ export class ValidationObject {
     // This ensures that $ref in the child will be resolved against basePath,
     // not against any sibling $id that the child might have.
     // The child inherits this document's declared draft version.
-    const child = root.createObject(path, schema, basePath, this.#declaredDraft);
+    // The items fast path of a `$ref` can build this very object first, when the
+    // reference points at a sibling still to be compiled: the path names the
+    // same schema location, so take that one.
+    const built = root.unresolvedObject(path);
+    const child = built !== null
+      ? built
+      : root.createObject(path, schema, basePath, this.#declaredDraft);
     this.#members.push(child);
 
     return child.validate;
@@ -1236,8 +1260,8 @@ export class ValidationObject {
 /**
  * Run a `$ref` and its sibling keywords, which are INDEPENDENT of each other:
  * a document can fail the referenced schema and its siblings for unrelated
- * reasons, and reporting only the first is the same short-circuit that used to
- * hide half of every issue list. Boolean mode keeps the early exit.
+ * reasons, and reporting only the first would hide half of every issue list.
+ * Boolean mode keeps the early exit.
  * @param {Function} refValidator
  * @param {Function} siblingValidator
  * @param {boolean} stopAtFirst
@@ -1811,7 +1835,7 @@ export class JarenValidator {
 
           // Check if candidate is an ancestor by checking if our id starts with candidate's path
           if (isJsonPointerPath && id.startsWith(candidateId.replace('#', '#/') + '/')) {
-            // This is a descendant of a JSON pointer path - skip for now
+            // A descendant of a JSON pointer path is no base for our $id: skip it
             continue;
           }
 

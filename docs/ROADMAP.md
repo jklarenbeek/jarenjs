@@ -118,17 +118,25 @@ delete it or fix it.
 - [ ] **ajv-style `errorMessage` `properties`/`items` map forms** — only if demand appears; the subtree prefix rule already covers what they express.
 - [ ] **Relative-pointer `${...}` interpolation in message templates** — ajv-errors-style data interpolation; params already carry the offending values, so this is convenience, not capability.
 
-- [ ] **Name the offending member of `unevaluated*` failures.**
-  `unevaluatedProperties: false` and `unevaluatedItems: false` errors carry
-  empty `params` and the parent's path, so two failing members read
-  identically; `additionalProperties` already points at the member.
+- [ ] **`unevaluated*` failures sit at the object or array, not at the
+  member.** The member is named in `params` (`unevaluatedProperty`,
+  `unevaluatedItem`), but `instancePath` is the holder's, where
+  `additionalProperties` reports at the member. Wanted: decide whether the two
+  should agree.
 - [ ] **`data` and `$data` disagree about an uncompilable reference.** `$data`
   refuses at compile time, `data` compiles to a constraint that never asserts.
   Wanted: decide which reading wins for `data`.
 - [ ] **Recursion depth is the JavaScript stack.** `canonicalizeJson`, JSONPath
   `$..*`, validation of a deeply nested instance and a self-referencing `$ref`
   throw `RangeError` instead of a coded refusal; a depth option would turn them
-  into one.
+  into one. A self-referencing
+  `{ "$ref": "#" }` overflows the stack at validation while a ring of two
+  references answers `true`; both want a compile-time refusal.
+- [ ] **A contradictory count pair is refused where a contradictory range is
+  not.** `minItems` above `maxItems` (and the properties pair) throws at
+  compile time, even inside a `not` or `anyOf` branch where it is satisfiable;
+  `minLength`/`maxLength`, `minimum`/`maximum` and `minContains`/`maxContains`
+  compile. Wanted: refuse all of them or none.
 
 ## @jarenjs/forms
 
@@ -352,6 +360,16 @@ costs a descriptor plus examples and no UI code at all.
   document implies having all of it, so this waits for a consumer that
   genuinely edits a stream.
 
+- [ ] **The CSV stream reader is quadratic in one very long quoted field.** It
+  re-flattens its buffer per chunk. Wanted: search only the new chunk for the
+  closing quote.
+- [ ] **A comment line that contains the quote character, and the `line` of a
+  `maxFieldBytes` refusal, differ between a chunked and a whole CSV read.** The
+  cutter reads the quote in the comment as opening a field; `CSV2003` reports
+  another line. Wanted: make the cutter comment-aware.
+- [ ] **An empty root array and an empty table are the same JOSL text.**
+  `stringifyJosl([])` is `''`, which reads back as `{}`.
+
 ## @jarenjs/linq & @jarenjs/db — the data pair
 
 The fluent front door and the SQLite document store shipped as a pair;
@@ -480,15 +498,6 @@ what each does is its own documentation's job
   keys, exact types, constraints, opclasses, functions, RLS and identity sequences;
   adoption does not infer
   application intent from their DDL.
-- [ ] **A model derived from a database with an entity foreign key does not
-  normalize.** `introspectModel` writes a foreign key as a relation on its own
-  typeless column (reported `ambiguous-relation`), which `normalizeEntities`
-  refuses `JD0005` (the via property must be a typed, column-mapped scalar);
-  read as the one-to-one it declares, the edge would plan a unique index the
-  database does not hold. Such a model can neither open the database it came
-  from nor be a migration's `from`. Wanted: derive the typed foreign-key
-  property and the parent's `many: true` relation, so a derived model reopens
-  its database and plans no change.
 - [ ] **Broader relational mapping and query qualification.** Explicit SQLite and PostgreSQL
   column layouts, codecs, read-only views and composite-key join-table entities
   are supported ([MODEL-FORMAT §12](../packages/db/docs/MODEL-FORMAT.md#12-existing-column-layouts)).
@@ -566,9 +575,24 @@ what each does is its own documentation's job
   an entity no foreign key references, its own included: a referenced or
   self-referencing entity is refused at the drop (`JD0023`, naming what depends
   on it) and the link rolls back whole
-  ([MIGRATION-FORMAT §10](../packages/db/docs/MIGRATION-FORMAT.md)). Wanted:
+  ([MIGRATION-FORMAT §10](../packages/db/docs/MIGRATION-FORMAT.md)). A rename
+  of a referenced entity plans such a rebuild for every table that references
+  it, so a rename alone is refused when one of those is itself referenced. Wanted:
   foreign keys re-pointed through the rebuild, or in-place `ALTER`s where
   PostgreSQL has them.
+- [ ] **An expired lease past `maxAttempts` is claimed again.** `attempts`
+  counts every claim, a crashed attempt included, but the claim only reads the
+  lease: a job with `maxAttempts: 1` whose lease expired is claimed with
+  `attempts: 2`, then 3, and the handler runs each time, so a job that crashes
+  its worker never dead-letters. Wanted: the claim dead-letters a job whose
+  lease expired at `attempts >= maxAttempts` (with the last error), leaving a
+  requeued dead job its one extra attempt
+  ([JOBS-FORMAT §10](../packages/db/docs/JOBS-FORMAT.md)).
+- [ ] **Entities that reference each other in a cycle do not open on
+  PostgreSQL.** Tables are created after the tables they reference, which a
+  cycle (`Person.pet` and `Pet.owner`, both one-to-one) has no order for, where
+  SQLite opens the model. Wanted: create the cycle's tables first and add its
+  foreign keys after.
 - [ ] **A rebuild that folds several columns into the document plans a copy
   statement that doubles per column.** The fold repeats the document expression
   in both branches of its `CASE`, so a rebuild that folds 8, 12 and 16 columns
@@ -583,12 +607,6 @@ what each does is its own documentation's job
   validation cannot see it (the cast result always validates) and
   `report.destructive` stays false. Wanted: a refusal before the copy when a
   value does not survive the cast, on both engines.
-- [ ] **A relation dropped in the edit that renames one of its endpoints
-  fails.** The plan renames the entity and then drops the join table under the
-  new name (`DROP TABLE "Article_Tag"`), but the join table is still `Post_Tag`:
-  the link fails `JD0023` on both engines and rolls back whole, and the same two
-  edits as two migrations apply. Wanted: the drop names the table the join
-  still has.
 - [ ] **A native temporal bucket answers where the engine raises on a null
   reading.** A `$time-bucket` `$groupby` over a reading that admits `null`
   answers natively where the engine raises: `$min` and `$max` over
@@ -951,13 +969,6 @@ what each does is its own documentation's job
 - [ ] **Two catalog tokenizers.** `schema-sql.js` and `dialects/check-read.js`
   each tokenize catalog SQL (`tokensOf`, `sqlTokens`); one could serve both.
 
-- [ ] **A row holding an `undefined` member crashes `$distinct` and whole-row
-  `groupBy` in memory.** `from([{ a: 1, b: undefined }]).distinct()` and
-  `.groupBy((r) => r)` raise the engine's raw `TypeError` from
-  `stableKeyString`, while the async `distinct` keeps `{ a: 1, b: undefined }`
-  and `{ a: 1 }` apart. Wanted: decide whether an `undefined` member is
-  absent, as `JSON.stringify` reads it, and make the engine's group-key
-  identity and the async key agree on it.
 - [ ] **`createDbLedger().sweep()` removes every expired record in one
   transaction.** It reads every expired id and deletes them one by one inside a
   single immediate transaction, so a ledger that was not swept for a long time

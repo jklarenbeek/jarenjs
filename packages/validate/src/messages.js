@@ -433,6 +433,10 @@ export function convertInternalErrors(internalErrors) {
       params.pattern = err.expected?.source || err.expected;
     } else if (keyword === 'additionalProperties') {
       params.additionalProperty = err.dataKey;
+    } else if (keyword === 'unevaluatedProperties') {
+      params.unevaluatedProperty = err.value;
+    } else if (keyword === 'unevaluatedItems') {
+      params.unevaluatedItem = err.value;
     } else if (keyword === 'format') {
       params.format = err.expected || err.value;
     } else if (keyword === '$query') {

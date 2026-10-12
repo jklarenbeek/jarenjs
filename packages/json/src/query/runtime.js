@@ -141,7 +141,12 @@ export function itemRef(v) {
  *     (reachable through `$div`) serialize as `NaN`/`Infinity`, which
  *     cannot collide with quoted strings. Note this makes `NaN` group
  *     with `NaN`, the XQuery grouping rule, even though `NaN` never
- *     equals itself under `$eq`.
+ *     equals itself under `$eq`;
+ *   - a `bigint` serializes as its digits and `n`, so it never reaches the
+ *     object branch (where every bigint would read as `{}`);
+ *   - `undefined` serializes as `undefined`, so a member held as `undefined`
+ *     is a member, as it is to `$eq` (`equalsJson`) and to the async
+ *     operators' `semanticKey`, and is not the same row as one without it.
  *
  * @param {any} value - a JSON item (not EMPTY, not a Seq)
  * @returns {string} a deterministic serialization for grouping
@@ -154,6 +159,10 @@ export function stableKeyString(value) {
       return value === 0 ? '0' : String(value); // normalizes -0
     case 'boolean':
       return value ? 'true' : 'false';
+    case 'bigint':
+      return String(value) + 'n'; // an integer past 2^53 read from JOSL
+    case 'undefined':
+      return 'undefined'; // a row member held as `undefined`: present, not absent
     default:
       break;
   }

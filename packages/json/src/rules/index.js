@@ -19,7 +19,7 @@ export function compileRulePlan(definition, options) {
     throw new FormulaError('JQ2015', formulaMessage('query/formula/rule-identity'), doc?.id ?? '', '');
   const allowed = new Set(options.writableFields);
   const pointers = new Map();
-  for (const [i, target] of doc.targets.entries()) if (target.enabled !== false) {
+  for (const [i, target] of doc.targets.entries()) if (target !== null && target !== undefined && target.enabled !== false) {
     if (typeof target.field !== 'string' || !target.field.startsWith('/') || !allowed.has(target.field))
       throw new FormulaError('JQ2015', formulaMessage('query/formula/rule-field-not-writable'), doc.id, `/targets/${i}/field`);
     pointers.set(target.id, compileJSONPointer(target.field));

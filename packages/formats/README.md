@@ -40,7 +40,7 @@ These format validators are based on the [json-schema.org](https://json-schema.o
 #### 🗨 Formats for datetime
 
 - `date-time` | according to [RFC3339](https://datatracker.ietf.org/doc/html/rfc3339#section-5.6), time-zone is mandatory
-- `date` | according to [RFC3339](https://datatracker.ietf.org/doc/html/rfc3339#section-5.6), time-zone is mandatory
+- `date` | a `full-date` (`YYYY-MM-DD`) according to [RFC3339](https://datatracker.ietf.org/doc/html/rfc3339#section-5.6); it carries no time zone. *Upgrade: `2024-02-29Z` used to pass, as did a date-time whose date half ended in a zone (`2024-02-29ZT12:00:00Z`); both are refused now.*
 - `time` | according to [RFC3339](https://datatracker.ietf.org/doc/html/rfc3339#section-5.6), time-zone is mandatory
 
 - `duration` | duration from RFC3339

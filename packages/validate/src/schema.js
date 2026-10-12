@@ -22,9 +22,7 @@ import {
 import {
   combineIndependent,
   createIsSchemaTypeHandler,
-  hasSchemaRef,
-  hasSchemaRecursiveRef,
-  hasSchemaDynamicRef,
+  hasSchemaReference,
   hasRefSiblings,
 } from './tools.js';
 
@@ -62,12 +60,12 @@ import { createJsonPointer } from './traverse.js';
  */
 function compileDynamicRef(schemaObj, jsonSchema) {
   // Check for $recursiveRef (draft 2019-09)
-  if (hasSchemaRecursiveRef(jsonSchema)) {
+  if (hasSchemaReference(jsonSchema, '$recursiveRef')) {
     return compileRecursiveRef(schemaObj, jsonSchema);
   }
 
   // Check for $dynamicRef (draft 2020-12)
-  if (hasSchemaDynamicRef(jsonSchema)) {
+  if (hasSchemaReference(jsonSchema, '$dynamicRef')) {
     return compileDynamicAnchorRef(schemaObj, jsonSchema);
   }
 
@@ -411,7 +409,7 @@ export function compileSchemaObject(schemaObj, jsonSchema) {
   // combined (ref + siblings) validator instead of here, so that the
   // $ref target's annotations are visible to the unevaluated* check.
   let refWithSiblings = false;
-  if (hasSchemaRef(jsonSchema) && !hasSchemaRecursiveRef(jsonSchema)) {
+  if (hasSchemaReference(jsonSchema, '$ref') && !hasSchemaReference(jsonSchema, '$recursiveRef')) {
     // Check if there are any validation-related sibling keywords
     // (REF_SIBLING_KEYWORDS — the one list the reference resolver reads
     // too). In draft 2019-09+, if there are validation siblings, we

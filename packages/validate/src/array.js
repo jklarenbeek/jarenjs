@@ -40,7 +40,7 @@ function compileMaxItems(schemaObj, jsonSchema) {
   const max = getIntishType(jsonSchema.maxItems) ?? -1;
   if (max < 0) return undefined;
   const min = getIntishType(jsonSchema.minItems) || 0;
-  if (max < min) throw new Error('maxItems must be greater then minItems');
+  if (max < min) throw new Error('maxItems must not be smaller than minItems');
 
   const addError = schemaObj.createErrorHandler(max, 'maxItems');
   return function validateMaxItems(len = 0, dataPath = '') {
@@ -232,7 +232,7 @@ function compileItemValidator(schemaObj, itemSchema, key, index) {
         const root = schemaObj.root;
         if (root && root.resolveObject) {
           try {
-            const targetObj = root.resolveObject(itemSchema.$ref, schemaObj.path, itemSchema);
+            const targetObj = root.resolveObject(itemSchema.$ref, schemaObj.path, itemSchema, true);
             if (targetObj && targetObj.validate) {
               return targetObj.validate;
             }

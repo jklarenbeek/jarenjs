@@ -265,12 +265,17 @@ reading arrived first. `minPeriods` is how many source rows the window
 must hold before a value is reported at all.
 
 The complexity is per aggregate and is structural rather than hopeful:
-`sum`/`mean`/`count` carry a running total, `min`/`max` use a monotone
-deque, and `first`/`last` are two pointers that only move forward. A
-carried total is not a fresh sum in the last bits when the values are
-not exactly representable — that is what carrying one costs, and the
+`count` is the window's row count, `sum`/`mean` keep a total in two parts that is only ever added to
+(a departing row moves the window's edge, it is never subtracted; the front part takes one array of
+`n + 1` numbers beside the output), `min`/`max`
+use a monotone deque, and `first`/`last` are two pointers that only move
+forward. A sum adds the readings in another order than a fresh scan, so it can
+differ in the last bits when the values are not exactly representable — the
 suite's corpora use exact binary fractions so the difference is zero and
-equality is the check.
+equality is the check. *Upgrade: the total used to be reduced by each reading
+that left, so a large reading took smaller ones with it for every later window
+(`1e16` then `1, 1, 1` summed to `1` where `2` was due) and an overflow to
+infinity turned every later value of the series into `null`.*
 
 ## As-of joins — `asof.js`
 

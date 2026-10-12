@@ -23,9 +23,11 @@
 // The complexity claim is per aggregate, and it is a claim about
 // structure rather than about a stopwatch:
 //
-//   sum, mean, count   a running total. The arriving row is added and
-//                      the departing row subtracted, so the window is
-//                      never re-read.
+//   sum, mean, count   a total in two parts, a front rebuilt from the
+//                      rows once and a back that rows are added to as
+//                      they arrive. A departing row only moves the
+//                      window's edge, so each row is added a constant
+//                      number of times and none is ever subtracted.
 //   min, max           a monotone deque. A row that arrives smaller
 //                      than the rows behind it makes them unreachable,
 //                      so they leave; each row is pushed and popped at
@@ -33,10 +35,13 @@
 //   first, last        the window's own ends, tracked by two pointers
 //                      that only ever move forward.
 //
-// A carried total is not a fresh sum in the last bits when the values
-// are not exactly representable — that is what carrying one costs, and
-// the suite's corpora use exact binary fractions so the difference is
-// zero and equality is the check rather than a tolerance.
+// A sum adds the same readings in another order than a fresh left-to-right
+// scan, so the two can differ in the last bits when the values are not
+// exactly representable; the suite's corpora use exact binary fractions
+// so the difference is zero and equality is the check rather than a
+// tolerance. What subtracting a departed reading would add is not a last
+// bit: a reading of 1e16 takes the 1 beside it out of every later window,
+// and an overflow to infinity never leaves.
 
 import { addToParts } from '../dates/civil.js';
 import { canonicalSeries } from './normalize.js';
@@ -135,8 +140,20 @@ export function rollingSeries(rows, spec) {
   let head = 0;
   let tail = 0;
 
+  // sum and mean keep the window's total as two parts: `suffix[k]` is the
+  // total of the readings in [k, mid), the front, and `backSum` the total of
+  // those admitted since, in [mid, current). A departing row only moves `lo`,
+  // so no total is ever reduced by a reading it once swallowed: subtracting
+  // one would keep the rounding of a large reading after it left (a 1e16 that
+  // took a 1 with it) and an overflow to infinity for the rest of the series.
+  // When the front is spent the back becomes the front, one pass over the
+  // rows it holds, so each row is added a constant number of times.
+  const wantsSum = aggregate === 'sum' || aggregate === 'mean';
+  const suffix = wantsSum ? new Float64Array(n + 1) : null;
+  let mid = 0;
+  let backSum = 0;
+
   let lo = 0;
-  let sum = 0;
   let measured = 0;
   let firstAt = 0;
   let lastAt = -1;
@@ -157,17 +174,21 @@ export function rollingSeries(rows, spec) {
 
     const opens = opensAt(at);
     while (lo < i && samples[lo].at <= opens) {
-      const leaving = samples[lo].value;
-      if (leaving !== null) {
-        sum -= leaving;
-        measured--;
+      if (suffix !== null && lo >= mid) {
+        suffix[i] = 0;
+        for (let k = i - 1; k >= lo; k--)
+          suffix[k] = (samples[k].value ?? 0) + suffix[k + 1];
+        mid = i;
+        backSum = 0;
       }
+      if (samples[lo].value !== null)
+        measured--;
       lo++;
     }
     for (let k = i; k <= group; k++) {
       const value = samples[k].value;
       if (value !== null) {
-        sum += value;
+        backSum += value;
         measured++;
         lastAt = k;
         if (deque !== null) {
@@ -189,7 +210,7 @@ export function rollingSeries(rows, spec) {
 
     const count = group - lo + 1;
     const value = count < minPeriods ? null
-      : reduce(aggregate, count, measured, sum, samples, deque, head,
+      : reduce(aggregate, count, measured, (suffix !== null && lo < mid ? suffix[lo] : 0) + backSum, samples, deque, head,
         firstAt <= group ? firstAt : -1, lastAt >= lo ? lastAt : -1);
     for (let k = i; k <= group; k++)
       out[k] = { at, count, value };

@@ -457,6 +457,21 @@ the trigger member's location (or the parent's, for unevaluated members), so a
 `$data` reference inside such a subschema resolved against the wrong place, and
 the array form reported the dependent member's name as its keyword.*
 
+An `unevaluatedProperties` or `unevaluatedItems` failure names the member in its
+`params` (`unevaluatedProperty`, the member name; `unevaluatedItem`, the index), while
+its `instancePath` stays at the object or array that holds it (`additionalProperties`
+reports at the member). *Upgrade: `params` used to be empty, so two failing members read alike.*
+
+A reference from `items`, `prefixItems` or a tuple form back to a schema that is
+still being compiled (`{ "type": "array", "items": { "$ref": "#" } }`, or a cycle through
+two definitions) resolves when it is first used, like every other recursive `$ref`.
+*Upgrade: compiling it built the enclosing schema again until the call stack ran out,
+which took milliseconds and, in collecting mode, threw `Object at '…#/items' is already created`.*
+
+An inconsistent count pair (`minItems` above `maxItems`, `minProperties` above
+`maxProperties`) is a compile error whose message reads `maxItems must not be smaller
+than minItems`.
+
 The default (first-failure) validator and the collecting one answer alike for a
 one-keyword item schema. *Upgrade: in the default mode `items`/`prefixItems`
 with an array-form `type` (`{ "type": ["string"] }`) accepted any item, a

@@ -464,7 +464,17 @@ doc.repairs; // [{ code: 'CSV1003', line: 2, column: 10, message: … }, …]
 decides between them by looking for another quote before the next
 delimiter. `"he said "hi" ok"` keeps its text; `"abc"junk,d` keeps its
 **column count**, because a consumer indexes by column and a lost
-boundary corrupts every field after it.
+boundary corrupts every field after it. A chunked read applies the same
+rule where it cuts records, so it yields the rows and the repair log a
+whole-document read does at every chunk size (except where a `comment` line contains the quote character, which the cutter reads as a quote), and a strict stream refuses
+stray text after a closing quote when that line ends. *Upgrade: the cutter
+used to keep the field open to the next quote, so a strict stream held that
+error back until a later quote or the end of the source, buffering all of
+it, and a repaired read could lose a newline from a quoted field that
+opened on the next line. A repair's column is now counted from the start of
+its line also when a bare CR ended the line before; it used to run on from
+the last LF, so a CR-only document reported the same damage at a larger
+column in a whole read than in a chunked one.*
 
 A short record leaves its missing columns absent rather than empty:
 reading `undefined` says *this record did not carry the column*, where

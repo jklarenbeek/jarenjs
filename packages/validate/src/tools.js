@@ -76,22 +76,17 @@ export function isOfSchemaType(schema, type) {
   return false;
 }
 
-export function hasSchemaRef(schema) {
+/**
+ * True when the schema is an object whose reference keyword is a string
+ * with something in it.
+ * @param {any} schema
+ * @param {'$ref'|'$recursiveRef'|'$dynamicRef'} keyword
+ * @returns {boolean}
+ */
+export function hasSchemaReference(schema, keyword) {
   return isObjectClass(schema)
-    && isStringType(schema.$ref)
-    && !isStringWhiteSpace(schema.$ref);
-}
-
-export function hasSchemaRecursiveRef(schema) {
-  return isObjectClass(schema)
-    && isStringType(schema.$recursiveRef)
-    && !isStringWhiteSpace(schema.$recursiveRef);
-}
-
-export function hasSchemaDynamicRef(schema) {
-  return isObjectClass(schema)
-    && isStringType(schema.$dynamicRef)
-    && !isStringWhiteSpace(schema.$dynamicRef);
+    && isStringType(schema[keyword])
+    && !isStringWhiteSpace(schema[keyword]);
 }
 
 /**

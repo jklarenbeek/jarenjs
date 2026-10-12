@@ -1042,7 +1042,7 @@ For broader context on how this package fits into the JarenJS ecosystem:
 | `messages.js` | Error conversion & i18n | `ValidationError`, `convertInternalErrors`, `messagesEn`, `compileMessageTemplate`, `compileMessageCatalog`, `renderErrorMessage`, `localizeErrors`, `compileErrorMessageSpec` |
 | `schema.js` | Schema compilation | `compileSchemaObject` |
 | `traverse.js` | Schema traversal | `TraverseOptions`, `storeSchemaIdsInMap`, `resolveRefSchemaDeep` |
-| `tools.js` | Shared utilities | `isBoolOrObjectClass`, `hasSchemaRef`, `createIsSchemaTypeHandler` |
+| `tools.js` | Shared utilities | `isBoolOrObjectClass`, `hasSchemaReference`, `createIsSchemaTypeHandler` |
 | `string.js` | String keywords | `compileStringBasic` |
 | `number.js` | Number keywords | `compileNumberBasic` |
 | `bigint.js` | BigInt keywords | `compileBigIntBasic` |

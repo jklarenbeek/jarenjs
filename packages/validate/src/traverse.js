@@ -1,6 +1,6 @@
 import {
   isBoolOrObjectClass,
-  hasSchemaRef,
+  hasSchemaReference,
   hasRefSiblings,
 } from './tools.js';
 
@@ -394,7 +394,7 @@ export function resolveRefSchemaDeep(schemas, baseUri, refschema, opts = new Tra
   if (!isObjectClass(refschema))
     return { id: baseUri, schema: refschema };
 
-  if (!hasSchemaRef(refschema))
+  if (!hasSchemaReference(refschema, '$ref'))
     return { id: baseUri, schema: refschema };
 
   const queue = [{ item: refschema, base: baseUri }];
@@ -416,7 +416,7 @@ export function resolveRefSchemaDeep(schemas, baseUri, refschema, opts = new Tra
     // document schema is nothing but such hops). The item is kept as
     // written and compiled as a schema object, where the resource's
     // draft decides whether its siblings assert (draft-07 ignores them).
-    if (hasSchemaRef(item)) {
+    if (hasSchemaReference(item, '$ref')) {
       if (item !== refschema && hasRefSiblings(item))
         return { id: base, schema: item };
       const ref = item.$ref;

@@ -58,17 +58,14 @@ function getTwoDigits(str, i) {
 
 /**
  * Validates the region [from, to) of str as an RFC 3339 full-date
- * (YYYY-MM-DD, with an optional trailing z/Z) without allocating.
+ * (YYYY-MM-DD, no zone) without allocating.
  * @param {string} str - The string containing the date
  * @param {number} from - Start of the region (inclusive)
  * @param {number} to - End of the region (exclusive)
  * @returns {boolean} True when the region is a valid full-date
  */
 function isDateOnlyRegion(str, from, to) {
-  let end = to;
-  const zc = str.charCodeAt(end - 1);
-  if (zc === 122 || zc === 90) end--; // optional trailing z/Z
-  if (end - from !== 10) return false;
+  if (to - from !== 10) return false;
 
   const y1 = getTwoDigits(str, from);
   const y2 = getTwoDigits(str, from + 2);

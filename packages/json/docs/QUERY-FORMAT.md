@@ -1159,7 +1159,7 @@ clause/operator collision note.
 
 | Operator | Signature | Definition |
 |---|---|---|
-| `$distinct` | `{"$distinct": e}` | The distinct items of the operand, in first-occurrence order (`fn:distinct-values` adapted to D2 deep equality). Equality is the **grouping key relation** of §6.5: deep structural equality with `NaN` equal to itself and `-0` equal to `0` — `$distinct` and `$groupby` always agree. |
+| `$distinct` | `{"$distinct": e}` | The distinct items of the operand, in first-occurrence order (`fn:distinct-values` adapted to D2 deep equality). Equality is the **grouping key relation** of §6.5: deep structural equality with `NaN` equal to itself and `-0` equal to `0` — `$distinct` and `$groupby` always agree. A `bigint` item (an integer past 2^53 read by `@jarenjs/josl`) equals only the same `bigint`, and a member held as `undefined` by a host-built row is a member, not an absent one. *Upgrade: every `bigint` shared one group with `{}`, and an `undefined` member raised a raw `TypeError`.* |
 | `$reverse` | `{"$reverse": e}` | The operand's items in reverse order (`fn:reverse`). |
 | `$sort` | `{"$sort": e}` | The operand's items sorted ascending by value (`fn:sort`, natural order only — key-based sorting is `$orderby`'s job). Items MUST be all numbers or all strings; anything else, or a mix, is runtime error `JQ2005` (the `$orderby` key-type rules). `NaN` orders per §6.6: equal to itself, less than every other number. The sort is stable. |
 | `$head` | `{"$head": e}` | The first item, or empty (`fn:head`). |
