@@ -13,6 +13,8 @@
  *    turned blank text into `0`.
  * 4. `removeItemAt` removed the last item for index -1 and rewrote the
  *    document for an index past the end.
+ * 5. A tuple slot the data does not hold yet has no node in the view model,
+ *    yet its assert failed on `null` in the rule results and on submit.
  */
 
 import { describe, it } from 'node:test';
@@ -317,5 +319,81 @@ describe('forms — a server error is its message', () => {
       { count: 2, nodes: [[], ['5', 'ok']] });
     assert.deepStrictEqual(fold({ '/a': 'plain', '/b': ['one', 'two'] }),
       { count: 3, nodes: [['plain'], ['one', 'two']] });
+  });
+});
+
+describe('forms - a tuple slot the data does not hold yet', () => {
+  const second = { type: 'string', 'x-form': { assert: { $eq: ['$value', 'ok'] }, message: 'second must be ok' } };
+  const schema = { type: 'object', properties: { pair: { type: 'array', prefixItems: [{ type: 'string' }, second] } } };
+  const model = buildFormModel(schema);
+  const rules = compileFormRules(model);
+  const accepts = (data, s = schema) => new JarenValidator().compile(formRulesToQueryAssertions(s))(data);
+
+  it('holds vacuously in the rule results, whether the array is short or absent', () => {
+    assert.deepStrictEqual(evaluateFormRules(rules, { pair: ['a'] }), { '/pair/1': {} });
+    assert.deepStrictEqual(evaluateFormRules(rules, {}), { '/pair/1': {} });
+    assert.deepStrictEqual(evaluateFormRules(rules, { pair: 'text' }), { '/pair/1': {} });
+  });
+
+  it('is still enforced once the slot is held', () => {
+    const results = evaluateFormRules(rules, { pair: ['a', 'no'] });
+    assert.deepStrictEqual(results['/pair/1'].errors.map((e) => e.message), ['second must be ok']);
+    assert.deepStrictEqual(evaluateFormRules(rules, { pair: ['a', 'ok'] }), { '/pair/1': {} });
+  });
+
+  it('holds vacuously on submit, and the view model shows no node for it', () => {
+    assert.strictEqual(accepts({ pair: ['a'] }), true);
+    assert.strictEqual(accepts({}), true);
+    assert.strictEqual(accepts({ pair: ['a', 'no'] }), false);
+    assert.strictEqual(accepts({ pair: ['a', 'ok'] }), true);
+    const tree = buildFormViewModel(model, { pair: ['a'] }, { rules });
+    assert.deepStrictEqual(tree.children[0].items.map((item) => item.pointer), ['/pair/0']);
+  });
+
+  it('covers everything under the slot, and a draft-07 items array alike', () => {
+    const nested = {
+      type: 'object',
+      properties: { t: { type: 'array', prefixItems: [{ type: 'string' }, {
+        type: 'object', properties: { x: { type: 'string', 'x-form': { assert: { $eq: ['$value', 'ok'] } } } },
+      }] } },
+    };
+    assert.deepStrictEqual(evaluateFormRules(compileFormRules(buildFormModel(nested)), { t: ['a'] }), { '/t/1/x': {} });
+    assert.strictEqual(accepts({ t: ['a'] }, nested), true);
+    assert.strictEqual(accepts({ t: ['a', {}] }, nested), false);
+    assert.strictEqual(accepts({ t: ['a', { x: 'ok' }] }, nested), true);
+    const draft7 = { type: 'object', properties: { t: { type: 'array', items: [{ type: 'string' }, second] } } };
+    assert.strictEqual(accepts({ t: ['a'] }, draft7), true);
+    assert.strictEqual(accepts({ t: ['a', 'no'] }, draft7), false);
+  });
+
+  it('is judged per element when the tuple sits in an array item', () => {
+    const grid = { type: 'object', properties: { rows: { type: 'array', items: { type: 'array', prefixItems: [{ type: 'string' }, second] } } } };
+    const gridRules = compileFormRules(buildFormModel(grid));
+    const results = evaluateFormRules(gridRules, { rows: [['a'], ['a', 'no']] });
+    assert.deepStrictEqual(results['/rows/0/1'], {});
+    assert.strictEqual(results['/rows/1/1'].errors.length, 1);
+    assert.strictEqual(accepts({ rows: [['a'], ['a', 'ok']] }, grid), true);
+    assert.strictEqual(accepts({ rows: [['a'], ['a', 'no']] }, grid), false);
+  });
+
+  it('an array below a slot the data does not hold expands to nothing', () => {
+    const below = {
+      type: 'object',
+      properties: { t: { type: 'array', prefixItems: [{ type: 'array', items: { type: 'string', 'x-form': { assert: { $eq: ['$value', 'ok'] } } } }] } },
+    };
+    const belowRules = compileFormRules(buildFormModel(below));
+    assert.deepStrictEqual(evaluateFormRules(belowRules, { t: [] }), {});
+    assert.deepStrictEqual(Object.keys(evaluateFormRules(belowRules, { t: [['ok', 'no']] })), ['/t/0/0', '/t/0/1']);
+    assert.strictEqual(accepts({ t: [] }, below), true);
+    assert.strictEqual(accepts({ t: [['no']] }, below), false);
+  });
+
+  it('a memoized evaluation follows the slot as it is added and removed', () => {
+    const memo = createRuleMemo();
+    const short = { pair: ['a'] };
+    assert.deepStrictEqual(evaluateFormRules(rules, short, undefined, memo), { '/pair/1': {} });
+    const grown = { pair: ['a', 'no'] };
+    assert.strictEqual(evaluateFormRules(rules, grown, undefined, memo)['/pair/1'].errors.length, 1);
+    assert.deepStrictEqual(evaluateFormRules(rules, short, undefined, memo), { '/pair/1': {} });
   });
 });

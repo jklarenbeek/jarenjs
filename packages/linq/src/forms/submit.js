@@ -17,9 +17,12 @@
  * context expects; the message travels with them so submit renders the
  * same text the keystroke path does.
  *
+ * An assert on a tuple slot the data does not hold yet holds vacuously, as
+ * for a hidden field, because the view model has no node for the slot.
+ *
  * Nothing here imports `@jarenjs/forms`: the transform reads the emitted
  * document, and the pen test pins it equal to
- * `formRulesToQueryAssertions` over the corpus.
+ * `formRulesToQueryAssertions` over the corpus and the tuple-slot cases.
  */
 
 import { deepFreeze } from '@jarenjs/core/object';
@@ -66,16 +69,24 @@ function extendChunks(chunks, selector) {
  * @param {any} assert - the authored rule document
  * @param {string} pointer - the field's data pointer
  * @param {any} [visible] - the field's `visible` rule, when it has one
+ * @param {ReadonlyArray<{chunks: readonly string[], index: number}>} slots - the
+ *   tuple slots the field sits at or under: the assert holds vacuously while
+ *   the data does not hold the slot, as for a hidden field
  * @returns {any}
  */
-function assertQuery(chunks, assert, pointer, visible) {
+function assertQuery(chunks, assert, pointer, visible, slots) {
   const depth = chunks.length - 1;
-  const at = (k) => (k === 0 ? chunks[0] : `$${ITEM_VAR}${k - 1}${chunks[k]}`);
+  const at = (k, from = chunks) => (k === 0 ? from[0] : `$${ITEM_VAR}${k - 1}${from[k]}`);
   const body = visible === undefined ? assert : { $or: [{ $not: visible }, assert] };
   let query = {
     $let: { value: { $default: [at(depth), { $const: null }] }, pointer: { $const: pointer } },
     $return: body,
   };
+  for (let i = slots.length - 1; i >= 0; i--) {
+    const level = slots[i].chunks.length - 1;
+    const list = at(level, slots[i].chunks);
+    query = { $or: [{ $not: { $gt: [{ $count: `${list}[*]` }, slots[i].index] } }, query] };
+  }
   for (let k = depth - 1; k >= 0; k--) {
     query = { $every: { [`${ITEM_VAR}${k}`]: at(k) }, $satisfies: query };
   }
@@ -107,33 +118,33 @@ function messageSpec(message, pointer) {
  * @param {readonly string[]} chunks
  * @param {any[]} out
  */
-function collect(schema, pointer, chunks, out) {
+function collect(schema, pointer, chunks, out, slots = []) {
   if (schema === null || typeof schema !== 'object' || Array.isArray(schema)) return;
 
   const rules = schema[KEYWORD];
   if (rules !== null && typeof rules === 'object' && !Array.isArray(rules)
     && rules.assert !== undefined) {
     out.push({
-      query: assertQuery(chunks, rules.assert, pointer, rules.visible),
+      query: assertQuery(chunks, rules.assert, pointer, rules.visible, slots),
       pointer,
       message: rules.message,
     });
   }
   if (schema.properties !== null && typeof schema.properties === 'object') {
     for (const [key, sub] of Object.entries(schema.properties)) {
-      collect(sub, `${pointer}/${escapePointerToken(key)}`, extendChunks(chunks, nameSelector(key)), out);
+      collect(sub, `${pointer}/${escapePointerToken(key)}`, extendChunks(chunks, nameSelector(key)), out, slots);
     }
   }
   if (Array.isArray(schema.prefixItems)) {
     for (let i = 0; i < schema.prefixItems.length; i++) {
-      collect(schema.prefixItems[i], `${pointer}/${i}`, extendChunks(chunks, `[${i}]`), out);
+      collect(schema.prefixItems[i], `${pointer}/${i}`, extendChunks(chunks, `[${i}]`), out, [...slots, { chunks, index: i }]);
     }
   }
   if (schema.items !== null && typeof schema.items === 'object' && !Array.isArray(schema.items)) {
-    collect(schema.items, `${pointer}/-`, [...extendChunks(chunks, '[*]'), ''], out);
+    collect(schema.items, `${pointer}/-`, [...extendChunks(chunks, '[*]'), ''], out, slots);
   }
   if (Array.isArray(schema.allOf)) {
-    for (const branch of schema.allOf) collect(branch, pointer, chunks, out);
+    for (const branch of schema.allOf) collect(branch, pointer, chunks, out, slots);
   }
 }
 

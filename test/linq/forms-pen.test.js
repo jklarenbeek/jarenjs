@@ -122,6 +122,29 @@ describe('the forms README\'s layer-2 document, rebuilt through the pen', () => 
       'hidden holds vacuously, as it does per keystroke');
   });
 
+  it('holds the assert of a tuple slot the data does not hold yet vacuously, as forms does', () => {
+    const second = { type: 'string', 'x-form': { assert: { $eq: ['$value', 'ok'] } } };
+    const nested = { type: 'object', properties: { x: second } };
+    const documents = [
+      { type: 'object', properties: { pair: { type: 'array', prefixItems: [{ type: 'string' }, second] } } },
+      { type: 'object', properties: { pair: { type: 'array', prefixItems: [{ type: 'string' }, nested] } } },
+    ];
+    const data = [
+      { pair: ['a'] }, {}, { pair: ['a', 'no'] }, { pair: ['a', 'ok'] }, { pair: ['a', {}] },
+      { pair: ['a', { x: 'ok' }] },
+    ];
+    for (const doc of documents) {
+      const twin = assertOnSubmit(doc);
+      assert.deepStrictEqual(twin, formRulesToQueryAssertions(doc));
+      const ours = new JarenValidator().compile(twin);
+      const theirs = new JarenValidator().compile(formRulesToQueryAssertions(doc));
+      for (const d of data) assert.strictEqual(ours(d), theirs(d), JSON.stringify(d));
+    }
+    const first = new JarenValidator().compile(assertOnSubmit(documents[0]));
+    assert.strictEqual(first({ pair: ['a'] }), true);
+    assert.strictEqual(first({ pair: ['a', 'no'] }), false);
+  });
+
   it('leaves a document with no assert exactly as it was', () => {
     const doc = s.document(s.object({ a: s.string().form({ computed: (c) => c.root.b }) }));
     assert.strictEqual(bytes(assertOnSubmit(doc)), bytes(doc));

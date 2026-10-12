@@ -265,10 +265,16 @@ query sequence splices the arrays it holds. Upgrade note: the copy used to
 skip an `items` array and `additionalItems`, apply the template to the slots
 in front of it, and accept an invalid cell of an array inside an array.
 
-Two divergences remain. `$pointer` for template elements stays the template
-pointer, because element indexes are a render-time notion; and a tuple slot
-the data does not hold yet has no node while typing, though its assert binds
-`null` on submit — add the slot (`addValue`) to see and fix it.
+A **tuple slot the data does not hold yet** has no node in the view model, so
+its rules hold vacuously, as for a hidden field: `evaluateFormRules` returns an
+empty result for it (and for everything under it) and the submit copy guards
+its assert on the array holding that index. Add the slot (`addValue`) and the
+assert applies. Upgrade note: an assert on a missing slot used to fail on
+`null`, on submit and in the rule results, naming a field the operator could
+not see.
+
+One divergence remains: `$pointer` for template elements stays the template
+pointer, because element indexes are a render-time notion.
 
 A hidden field's *value* is a separate question, and the answer is explicit:
 values are kept while editing — a field that reappears must not have

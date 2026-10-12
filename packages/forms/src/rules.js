@@ -223,11 +223,20 @@ export function compileFormRules(model, options = {}) {
     : {};
   /** @type {Array<CompiledFieldRules>} */
   const rules = [];
-  walkField(model, [], rules, queryOptions);
+  walkField(model, [], rules, queryOptions, []);
   return { rules };
 }
 
-function walkField(field, parts, rules, queryOptions) {
+/**
+ * @param {any} field
+ * @param {Array<string|ItemSlot>} parts - Decoded path segments to the field
+ * @param {any[]} rules - The compiled rules, appended to
+ * @param {any} queryOptions
+ * @param {number[]} slots - Indexes into `parts` of the tuple slots the
+ *   field sits at or under: a slot the data does not hold has no node, so
+ *   nothing beneath it is evaluated
+ */
+function walkField(field, parts, rules, queryOptions, slots) {
   if (field == null) return;
 
   const raw = field.rules;
@@ -237,6 +246,7 @@ function walkField(field, parts, rules, queryOptions) {
     rules.push({
       pointer,
       parts,
+      slots,
       templated,
       getValue: templated ? null : compileJSONPointer(pointer),
       visible: raw.visible !== undefined
@@ -254,14 +264,14 @@ function walkField(field, parts, rules, queryOptions) {
 
   if (field.children) {
     for (const child of field.children)
-      walkField(child, [...parts, child.key], rules, queryOptions);
+      walkField(child, [...parts, child.key], rules, queryOptions, slots);
   }
   if (field.tuple) {
     for (let i = 0; i < field.tuple.length; i++)
-      walkField(field.tuple[i], [...parts, String(i)], rules, queryOptions);
+      walkField(field.tuple[i], [...parts, String(i)], rules, queryOptions, [...slots, parts.length]);
   }
   if (field.item)
-    walkField(field.item, [...parts, itemSlot(field.tuple ? field.tuple.length : 0)], rules, queryOptions);
+    walkField(field.item, [...parts, itemSlot(field.tuple ? field.tuple.length : 0)], rules, queryOptions, slots);
 }
 
 /**
@@ -404,6 +414,18 @@ function expandItemRule(rule, data, node, partIndex, pointer, ext, results, cata
       }
       return;
     }
+    if (rule.slots.includes(i) && !(Array.isArray(node) && Number(part) < node.length)) {
+      // a tuple slot the data does not hold has no node in the view
+      // model, so its rules - and those of everything under it - hold
+      // vacuously, as for a hidden field, instead of reading `null`
+      let rest = i;
+      while (rest < parts.length && !isItemSlot(parts[rest])) rest++;
+      if (rest < parts.length) return; // an array below it expands to nothing
+      for (let k = i; k < parts.length; k++) pointer = `${pointer}/${encodeJSONPointerSegment(parts[k])}`;
+      results[pointer] = {};
+      if (written !== null) written.push(pointer);
+      return;
+    }
     pointer = `${pointer}/${encodeJSONPointerSegment(part)}`;
     node = memberAt(node, part);
   }
@@ -415,7 +437,8 @@ function expandItemRule(rule, data, node, partIndex, pointer, ext, results, cata
  *
  * Returns a map of data pointer -> RuleResult holding only the rules each
  * field declares. Rules on array item templates are evaluated once per
- * element of the actual array, keyed by the expanded pointer.
+ * element of the actual array, keyed by the expanded pointer. A rule on a
+ * tuple slot the data does not hold yet (or under one) yields an empty result.
  *
  * Pass a `memo` from {@link createRuleMemo} to re-evaluate only the
  * rules a change can have affected. The memo diffs the previous
@@ -462,7 +485,7 @@ export function evaluateFormRules(compiled, data, catalog = undefined, memo = un
     for (let i = 0; i < rules.length; i++) {
       const rule = rules[i];
       if (!dependenciesAffected(rule.deps, changed)) continue;
-      if (!rule.templated) {
+      if (!rule.templated && rule.slots.length === 0) {
         // it writes its own pointer and nothing else, every time — no
         // key set to track and nothing that can go stale
         const value = rule.getValue(data);
@@ -508,7 +531,7 @@ export function evaluateFormRules(compiled, data, catalog = undefined, memo = un
 
 /** Evaluate one compiled rule into the results map. */
 function evaluateRule(rule, data, ext, results, catalog, written) {
-  if (rule.templated) {
+  if (rule.templated || rule.slots.length > 0) {
     expandItemRule(rule, data, data, 0, '', ext, results, catalog, written);
     return;
   }
@@ -683,6 +706,11 @@ function pathNameSelector(key) {
  * (`properties`, `items`, `prefixItems`, `allOf`) but does not resolve
  * `$ref`s - a `$def`'s data location depends on its use site.
  *
+ * A tuple slot the data does not hold yet has no node in the view model, so
+ * the assert of the slot and of everything under it holds vacuously, as for
+ * a hidden field: the branch is guarded on the array holding that index,
+ * and `evaluateFormRules` gives the same empty result.
+ *
  * Absent fields bind exactly as they do per keystroke: `null`. A path
  * that selects nothing is the empty sequence, which compares unequal to
  * everything and would make `$ne`/`$eq` mean the opposite thing on the
@@ -804,9 +832,14 @@ function extendChunks(chunks, selector) {
  * @param {any} [visible] - The field's `visible` rule, when it has one
  * @param {Array<{chunks: string[], pointer: string, visible: any}>} [ancestors]
  *   Visibility rules of ancestor fields, in root-to-parent order
+ * @param {Array<{chunks: string[], index: number}>} [slots] - The tuple
+ *   slots the field sits at or under, each as the chunks of its array
+ *   and its index: the assert holds vacuously while the data does not
+ *   hold the slot, as for a hidden field, because the view model has no
+ *   node for it either
  * @returns {any} The wrapped query document
  */
-function assertQuery(chunks, spread, assert, pointer, visible, ancestors = []) {
+function assertQuery(chunks, spread, assert, pointer, visible, ancestors = [], slots = []) {
   const depth = chunks.length - 1;
   const at = (k) => k === 0 ? chunks[0] : `$${ITEM_VAR}${k - 1}${chunks[k]}`;
   const body = visible === undefined
@@ -816,6 +849,11 @@ function assertQuery(chunks, spread, assert, pointer, visible, ancestors = []) {
     $let: { value: { $default: [at(depth), { $const: null }] }, pointer: { $const: pointer } },
     $return: body,
   };
+  for (let i = slots.length - 1; i >= 0; i--) {
+    const level = slots[i].chunks.length - 1;
+    const list = level === 0 ? slots[i].chunks[0] : `$${ITEM_VAR}${level - 1}${slots[i].chunks[level]}`;
+    query = { $or: [{ $not: { $gt: [{ $count: `${list}[*]` }, slots[i].index] } }, query] };
+  }
   // Every enclosing item variable is in scope here. Bind an ancestor
   // from its own path chunks, never from the descendant's value; a
   // nested array's visibility must read its own row at each depth.
@@ -869,7 +907,7 @@ function dereference(schema, root) {
  * the path chunks of their data location and, per expansion, whether its
  * elements may be arrays.
  */
-function collectAsserts(schema, pointer, chunks, spread, out, ancestors, root, depth) {
+function collectAsserts(schema, pointer, chunks, spread, out, ancestors, root, depth, slots = []) {
   // the model's depth limit: a recursive `$ref` ends where the form ends
   if (!isJsonObject(schema) || depth > MAX_REF_DEPTH)
     return;
@@ -878,7 +916,7 @@ function collectAsserts(schema, pointer, chunks, spread, out, ancestors, root, d
   const rules = schema['x-form'];
   if (isJsonObject(rules) && rules.assert !== undefined) {
     out.push({
-      query: assertQuery(chunks, spread, rules.assert, pointer, rules.visible, ancestors),
+      query: assertQuery(chunks, spread, rules.assert, pointer, rules.visible, ancestors, slots),
       pointer,
       message: rules.message,
     });
@@ -890,7 +928,7 @@ function collectAsserts(schema, pointer, chunks, spread, out, ancestors, root, d
   if (schema.properties != null && typeof schema.properties === 'object') {
     for (const [key, sub] of Object.entries(schema.properties)) {
       collectAsserts(sub, `${pointer}/${encodeJSONPointerSegment(key)}`,
-        extendChunks(chunks, pathNameSelector(key)), spread, out, parents, root, depth + 1);
+        extendChunks(chunks, pathNameSelector(key)), spread, out, parents, root, depth + 1, slots);
     }
   }
   // the same split as buildFormModel: fixed slots from `prefixItems` (or an
@@ -900,18 +938,19 @@ function collectAsserts(schema, pointer, chunks, spread, out, ancestors, root, d
     : Array.isArray(schema.items) ? schema.items : null;
   if (tuple !== null) {
     for (let i = 0; i < tuple.length; i++)
-      collectAsserts(tuple[i], `${pointer}/${i}`, extendChunks(chunks, `[${i}]`), spread, out, parents, root, depth + 1);
+      collectAsserts(tuple[i], `${pointer}/${i}`, extendChunks(chunks, `[${i}]`), spread, out, parents, root, depth + 1,
+        [...slots, { chunks, index: i }]);
   }
   const rest = Array.isArray(schema.items) ? schema.additionalItems : schema.items;
   if (isJsonObject(rest)) {
     const from = tuple === null ? 0 : tuple.length;
     collectAsserts(rest, `${pointer}/-`,
       [...extendChunks(chunks, from === 0 ? '[*]' : `[${from}:]`), ''],
-      [...spread, mayBeArray(isJsonObject(rest) ? dereference(rest, root) : rest)], out, parents, root, depth + 1);
+      [...spread, mayBeArray(isJsonObject(rest) ? dereference(rest, root) : rest)], out, parents, root, depth + 1, slots);
   }
   if (Array.isArray(schema.allOf)) {
     for (const branch of schema.allOf)
-      collectAsserts(branch, pointer, chunks, spread, out, parents, root, depth + 1);
+      collectAsserts(branch, pointer, chunks, spread, out, parents, root, depth + 1, slots);
   }
 }
 

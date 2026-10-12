@@ -150,14 +150,6 @@ delete it or fix it.
   the complete pipeline. Parameterized `$apply` remains one possible path;
   function values are neither needed nor planned for this purpose.
 
-- [ ] **A tuple slot the data does not hold yet.** `formRulesToQueryAssertions`
-  binds an absent slot to `null` and enforces its assert on submit, while
-  `buildFormViewModel` renders slots from the data and has no node for a
-  missing one, so the refusal names nothing the operator can see. Wanted:
-  decide whether an assert on a missing slot holds vacuously (as for a hidden
-  field) or the view model renders the missing slots, and make both paths
-  agree.
-
 ## @jarenjs/view & @jarenjs/app
 
 Reusable host helpers now cover [bounded file tokens and route subscriptions](../packages/app/docs/APP-FORMAT.md),
