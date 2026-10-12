@@ -39,8 +39,6 @@ function compileMinItems(schemaObj, jsonSchema) {
 function compileMaxItems(schemaObj, jsonSchema) {
   const max = getIntishType(jsonSchema.maxItems) ?? -1;
   if (max < 0) return undefined;
-  const min = getIntishType(jsonSchema.minItems) || 0;
-  if (max < min) throw new Error('maxItems must not be smaller than minItems');
 
   const addError = schemaObj.createErrorHandler(max, 'maxItems');
   return function validateMaxItems(len = 0, dataPath = '') {

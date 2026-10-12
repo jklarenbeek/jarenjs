@@ -469,8 +469,18 @@ two definitions) resolves when it is first used, like every other recursive `$re
 which took milliseconds and, in collecting mode, threw `Object at '…#/items' is already created`.*
 
 An inconsistent count pair (`minItems` above `maxItems`, `minProperties` above
-`maxProperties`) is a compile error whose message reads `maxItems must not be smaller
-than minItems`.
+`maxProperties`) compiles, like a `minimum` above a `maximum`, and no instance of that
+type passes it; inside a `not` or an `anyOf` branch it is satisfiable. *Upgrade: it was a
+compile error.*
+
+A schema whose `$ref` points at itself (`{ "$ref": "#" }`, with or without siblings, or
+`{ "properties": { "a": { "$ref": "#/properties/a" } } }`) is refused when the schema is
+compiled: `$ref cycle: <id> refers to itself and never reads the instance`. *Upgrade: such
+a schema compiled and overflowed the call stack when it validated.* A loop that reaches
+its target through another reference (a `$defs` entry that refers to itself, a ring of two
+definitions) still compiles and answers `true`, and a reference that passes through
+`properties`, `items` or another applicator before it comes back is recursion and is
+unchanged.
 
 The default (first-failure) validator and the collecting one answer alike for a
 one-keyword item schema. *Upgrade: in the default mode `items`/`prefixItems`

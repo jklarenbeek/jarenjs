@@ -20,12 +20,14 @@ describe('Schema Object Type', function () {
       }));
     });
 
-    it('should throw an error when maxProperties is smaller then minProperties', function () {
-      assert.throws(() => compiler.compile({
+    it('should compile a maxProperties smaller than minProperties and never validate', function () {
+      const validate = compiler.compile({
         type: 'object',
         minProperties: 3,
         maxProperties: 2,
-      }));
+      });
+      assert.isFalse(validate({ a: 1, b: 2 }));
+      assert.isFalse(validate({ a: 1, b: 2, c: 3 }));
     });
 
     it('should validate the object member size', function () {

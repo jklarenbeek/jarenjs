@@ -847,6 +847,10 @@ export class ValidationObject {
       ? (self.baseUri || baseUri || path)
       : (baseUri || path);
     const { id: ref } = createJsonPointer(schema.$ref, refBase, root.traverse);
+    // A schema that references itself decides nothing: validating it re-enters
+    // the same validator on the same instance until the stack runs out.
+    if (ref === path)
+      throw new Error(`$ref cycle: ${path} refers to itself and never reads the instance`);
     // Only check for sibling validators in draft 2019-09+
     const siblingValidator = draftVersion >= 2019 ? compileSchemaObject(self, schema) : null;
 

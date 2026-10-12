@@ -21,15 +21,19 @@ describe('Schema Array Type', function () {
       const validate = compiler.compile({ type: 'array', maxItems: 0 });
       assert.isTrue(validate([]));
       assert.isFalse(validate([1]));
-      assert.throws(() => compiler.compile({ type: 'array', minItems: 1, maxItems: 0 }));
+      const never = compiler.compile({ type: 'array', minItems: 1, maxItems: 0 });
+      assert.isFalse(never([]));
+      assert.isFalse(never([1]));
     });
 
-    it('should throw an error when maxItems is smaller then minItems', function () {
-      assert.throws(() => compiler.compile({
+    it('should compile a maxItems smaller than minItems and never validate', function () {
+      const validate = compiler.compile({
         type: 'array',
         minItems: 3,
         maxItems: 2,
-      }));
+      });
+      assert.isFalse(validate([1, 2]));
+      assert.isFalse(validate([1, 2, 3]));
     });
 
     it('should not exceed maxItems.', function () {

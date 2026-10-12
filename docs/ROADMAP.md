@@ -127,16 +127,15 @@ delete it or fix it.
   refuses at compile time, `data` compiles to a constraint that never asserts.
   Wanted: decide which reading wins for `data`.
 - [ ] **Recursion depth is the JavaScript stack.** `canonicalizeJson`, JSONPath
-  `$..*`, validation of a deeply nested instance and a self-referencing `$ref`
-  throw `RangeError` instead of a coded refusal; a depth option would turn them
-  into one. A self-referencing
-  `{ "$ref": "#" }` overflows the stack at validation while a ring of two
-  references answers `true`; both want a compile-time refusal.
-- [ ] **A contradictory count pair is refused where a contradictory range is
-  not.** `minItems` above `maxItems` (and the properties pair) throws at
-  compile time, even inside a `not` or `anyOf` branch where it is satisfiable;
-  `minLength`/`maxLength`, `minimum`/`maximum` and `minContains`/`maxContains`
-  compile. Wanted: refuse all of them or none.
+  `$..*`, validation of a deeply nested instance and a reference loop through
+  an applicator (`allOf: [{ "$ref": "#" }]`, `anyOf: [{ "type": "string" },
+  { "$ref": "#" }]` on a non-string) throw `RangeError` instead of a coded
+  refusal; a depth option would turn them into one.
+- [ ] **A `$ref` loop that never reads the instance compiles and answers
+  `true`.** `{ "$defs": { "a": { "$ref": "#/$defs/a" } }, "$ref":
+  "#/$defs/a" }` and a ring of two definitions are flattened to the empty
+  schema. Wanted: refuse them at compile time (a minor, since they compile
+  today).
 
 ## @jarenjs/forms
 
@@ -265,6 +264,7 @@ establish registry publication or downstream acceptance.
   a list, which prints inside the last item. Wanted: a search that scales, and a
   way to end a list before such a block (a node that records it, or a printed
   separator the parser drops).
+
 ## @jarenjs/mermaid
 
 - [ ] **`htmlLabels:true`** — labels still render as SVG `<text>`. The view renderer now supports HTML descendants of `foreignObject` and namespaced attributes; Mermaid still needs HTML-label rendering, sizing and parity tests. Safe mode intentionally excludes `foreignObject`.
