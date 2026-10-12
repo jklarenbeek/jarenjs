@@ -225,6 +225,21 @@ export function bucketGuards(bucket) {
     && entry.ref?.type === 'integer' ? `${prefix}${i}` : null));
 }
 
+/**
+ * The name of the column that counts the rows of a native bucket whose
+ * reading is absent, or `null` when the plan asks for none. It is clear of
+ * every name the document gave the bucket's members.
+ * @param {{ as: string, aggregates: { as: string }[], reading?: any }} bucket
+ * @returns {string | null}
+ */
+export function bucketAbsentGuard(bucket) {
+  if (bucket.reading === undefined) return null;
+  const taken = new Set([bucket.as, ...bucket.aggregates.map((entry) => entry.as)]);
+  let name = '_absent';
+  while (taken.has(name)) name = `_${name}`;
+  return name;
+}
+
 /** A comparison of schema-compatible paths is false if either is absent.
  * @param {any} pred @param {(ref: any) => { value: string, present: string }} read */
 function compareRefs(pred, read) {
@@ -804,6 +819,7 @@ export function emitPlan(plan, dialect, physical) {
       param({ literal: plan.bucket.every }),
       param({ literal: plan.bucket.every }));
   const bucketGuardNames = plan.bucket === null ? [] : bucketGuards(plan.bucket);
+  const bucketAbsentName = plan.bucket === null ? null : bucketAbsentGuard(plan.bucket);
 
   const selection = plan.rank !== null
     // the k-nearest fetch: the row identity and the packed column
@@ -831,7 +847,11 @@ export function emitPlan(plan, dialect, physical) {
         // an integer sum or average answers only beside its exactness
         // guard, as it does in any other grouping
         ...plan.bucket.aggregates.flatMap((entry, i) => (bucketGuardNames[i] === null ? []
-          : [`${exactSum(dialect, foldValue(entry.fn, entry.ref))} AS ${q(bucketGuardNames[i])}`]))].join(', ')
+          : [`${exactSum(dialect, foldValue(entry.fn, entry.ref))} AS ${q(bucketGuardNames[i])}`])),
+        // and a reading the kernel requires of every row is counted where it
+        // is absent: SQL skips the NULL it reads there, the kernel refuses it
+        ...(bucketAbsentName === null ? []
+          : [`COUNT(CASE WHEN ${typeOf(plan.bucket.reading)} IS NULL THEN 1 END) AS ${q(bucketAbsentName)}`])].join(', ')
       : plan.aggregate === null
         ? (plan.project === 'document'
           ? `${dialect.jsonText(docColumn)} AS ${q('doc')}`

@@ -2,13 +2,11 @@
 /** Indexed dependency maintenance over bounded, mapped entity roots. */
 import { compileJsonQuery } from '@jarenjs/json/query';
 import { stableStringify } from '@jarenjs/core/object';
-import { decodeJSONPointerSegment } from '@jarenjs/json/pointer';
-import { utf8ByteLength } from '@jarenjs/core/string';
 import { planEntityQuery, entityRoot } from './plan.js';
 import { joinTableRoots } from './model.js';
 import { keyToken } from './capture.js';
 import { DbRuntimeError } from './errors.js';
-import { readsRoot, compilesBare, valueKey } from './live-nested.js';
+import { readsRoot, compilesBare, sharedRow, bytesOf, segmentsOf } from './live-nested.js';
 
 /**
  * Compile eligibility from the existing planner and declared mapping: a
@@ -165,7 +163,6 @@ export function joinStrategy(description, context) {
   let inputCount = 0;
   let outputCount = 0;
   let maintainedBytes = 0;
-  const bytesOf = (value) => utf8ByteLength(stableStringify(value));
   const counts = { dependencyReads: 0, refreshedRoots: 0, reruns: 0 };
   const root = bindings[0];
   const keyOf = (binding, row) => keyToken(binding.mapping.keys.map((name) => row[name]));
@@ -259,7 +256,7 @@ export function joinStrategy(description, context) {
     const previous = items.get(key) ?? [];
     outputCount += fresh.length - previous.length;
     maintainedBytes += bytesOf(fresh) - (items.has(key) ? bytesOf(previous) : 0);
-    items.set(key, fresh.map((item, i) => valueKey(previous[i]) === valueKey(item) ? previous[i] : item));
+    items.set(key, fresh.map((item, i) => sharedRow(previous[i], item)));
     counts.refreshedRoots++;
     bound();
   };
@@ -287,7 +284,7 @@ export function joinStrategy(description, context) {
       const changed = new Map();
       const affected = new Set();
       for (const operation of record.patch) {
-        const [table, token] = operation.path.split('/').slice(1).map(decodeJSONPointerSegment);
+        const [table, token] = segmentsOf(operation.path);
         if (aliasesOf.has(table)) changed.set(JSON.stringify([table, token]), { table, token });
       }
       // the outer owners a changed row reaches through any alias holding it

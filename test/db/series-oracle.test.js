@@ -322,6 +322,51 @@ describe('a native bucket that meets a row with no instant hands the question ba
   });
 });
 
+describe('a native bucket that meets a row with no reading hands the question back', () => {
+  // the kernel reads the reading of EVERY row, whatever the aggregate, and a
+  // row that carries none is neither a number nor `null` (JQ2001); SQL reads
+  // the absent member as a NULL and skips it. `value` is optional in the
+  // corpus schema, so the plan is a bucket and the rows decide
+  const WITH = { series: 'sensor-a', at: 1000, value: 1 };
+  const WITHOUT = { series: 'sensor-a', at: 1500 };
+  const spec = (aggregate, extra = {}) => ({ $resample: [
+    { $for: { s: '$[*]' }, $return: '$s' }, { every: 1000, aggregate, ...extra }] });
+
+  for (const [aggregate, extra] of [['min', {}], ['max', {}], ['count', {}], ['mean', { value: '$.on' }]]) {
+    it(`${aggregate}: the engine refuses, so the store refuses and counts the diversion`, async () => {
+      const { store, collection } = await storeFor(nodeDriver(),
+        [{ ...WITH, on: 5 }, WITHOUT], 'indexed');
+      try {
+        const query = spec(aggregate, extra);
+        assert.strictEqual((await collection.explain(query)).mode, 'native');
+        await assert.rejects(async () => collection.execute(query, { pushdown: false }),
+          (error) => /** @type {any} */ (error).code === 'JQ2001');
+        await assert.rejects(async () => collection.execute(query),
+          (error) => /** @type {any} */ (error).code === 'JQ2001');
+        assert.strictEqual(collection.stats().series.diverted, 1);
+      }
+      finally {
+        await store.close();
+      }
+    });
+  }
+
+  it('with every reading present the same query stays native and diverts nothing', async () => {
+    const { store, collection } = await storeFor(nodeDriver(),
+      [WITH, { ...WITHOUT, value: null }, { ...WITH, at: 2500, value: 4 }], 'indexed');
+    try {
+      const answer = await collection.execute(spec('count'), { strict: true });
+      assert.deepStrictEqual(answer, [{ at: 1000, value: 2, count: 2 }, { at: 2000, value: 1, count: 1 }]);
+      assert.deepStrictEqual(await collection.execute(spec('max')),
+        await collection.execute(spec('max'), { pushdown: false }));
+      assert.strictEqual(collection.stats().series.diverted, 0);
+    }
+    finally {
+      await store.close();
+    }
+  });
+});
+
 describe('the grouping spelling: every order and window the plan pushes', () => {
   const ORIGIN = 1767225600000;
   const rows = [];

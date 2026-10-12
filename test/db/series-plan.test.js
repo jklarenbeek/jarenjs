@@ -274,6 +274,15 @@ describe('the ladder folds what it can and refuses what it cannot', () => {
   it('a REAL instant column is not a whole epoch, and says so', () => {
     assert.deepStrictEqual(codes(bucketWith(['$s.on', 60000, ORIGIN])), ['instant-not-integer']);
   });
+
+  it('a $resample count still needs a numeric reading: the kernel reads it off every row', () => {
+    const counted = (/** @type {any} */ value) => plan({ $resample: [NARROWED,
+      { every: 60000, aggregate: 'count', ...(value === undefined ? {} : { value }) }] });
+    assert.strictEqual(counted().plan.bucket.aggregates[0].fn, 'rows');
+    assert.deepStrictEqual(codes(counted('$.note')), ['value-not-numeric']);
+    assert.deepStrictEqual(codes(counted('$.mixed')), ['value-not-numeric']);
+    assert.notStrictEqual(counted('$.note').mode, 'native');
+  });
 });
 
 describe('every refinement names one reason, and the table is complete', () => {
@@ -614,5 +623,55 @@ describe('what a pushed filter pins for a seek', () => {
     // two columns, or a ray, decide no seek
     assert.deepStrictEqual(pinnedBy({ $or: [series('a'), { $eq: ['$it.at', 5] }] }), []);
     assert.deepStrictEqual(pinnedBy({ $or: [series('a'), series('b'), { $gt: ['$it.at', 5] }] }), []);
+  });
+});
+
+describe('the range an explain reports is the tightest bound the filter holds', () => {
+  const rangeOf = (/** @type {any[]} */ items, extra = {}) => plan({
+    $for: { s: '$[*]' },
+    $where: { $and: [{ $eq: ['$s.series', 'a'] }, ...items] },
+    $orderby: [{ $key: '$s.at' }],
+    $return: '$s',
+    ...extra,
+  }).series.range;
+  const at = (/** @type {string} */ op, /** @type {any} */ value) => ({ [op]: ['$s.at', value] });
+
+  it('two lower bounds, in either order, report the larger; two upper bounds the smaller', () => {
+    assert.deepStrictEqual(rangeOf([at('$ge', 100), at('$ge', 50), at('$lt', 200)]),
+      { column: 'gx_at', from: 100, fromOp: 'ge', to: 200, toOp: 'lt' });
+    assert.deepStrictEqual(rangeOf([at('$ge', 50), at('$ge', 100), at('$lt', 200)]),
+      { column: 'gx_at', from: 100, fromOp: 'ge', to: 200, toOp: 'lt' });
+    assert.deepStrictEqual(rangeOf([at('$ge', 100), at('$lt', 300), at('$lt', 200)]),
+      { column: 'gx_at', from: 100, fromOp: 'ge', to: 200, toOp: 'lt' });
+    assert.deepStrictEqual(rangeOf([at('$ge', 100), at('$lt', 200), at('$le', 900)]),
+      { column: 'gx_at', from: 100, fromOp: 'ge', to: 200, toOp: 'lt' });
+  });
+
+  it('a bound that is not a literal never displaces one that is', () => {
+    const expected = { column: 'gx_at', from: 100, fromOp: 'ge', to: 200, toOp: 'lt' };
+    assert.deepStrictEqual(rangeOf([at('$ge', 100), at('$ge', '$x'), at('$lt', 200), at('$lt', '$y')]), expected);
+    assert.deepStrictEqual(rangeOf([at('$ge', '$x'), at('$ge', 100), at('$lt', '$y'), at('$lt', 200)]), expected);
+  });
+
+  it('at an equal value the strict comparison is the tighter one, whichever came first', () => {
+    assert.deepStrictEqual(rangeOf([at('$ge', 100), at('$gt', 100), at('$le', 200), at('$lt', 200)]),
+      { column: 'gx_at', from: 100, fromOp: 'gt', to: 200, toOp: 'lt' });
+    assert.deepStrictEqual(rangeOf([at('$gt', 100), at('$ge', 100), at('$lt', 200), at('$le', 200)]),
+      { column: 'gx_at', from: 100, fromOp: 'gt', to: 200, toOp: 'lt' });
+  });
+
+  it("a $resample window beside the operand's own bound reports the tighter of the two", () => {
+    const resample = (/** @type {any} */ spec, /** @type {any} */ where) => plan({ $resample: [{
+      $for: { s: '$[*]' },
+      $where: { $and: [{ $eq: ['$s.series', 'a'] }, ...where] },
+      $return: '$s',
+    }, { every: 60000, aggregate: 'max', ...spec }] });
+    const loose = resample({ start: 50, end: 900 }, [at('$ge', 100), at('$lt', 400)]);
+    assert.strictEqual(loose.mode, 'native');
+    assert.deepStrictEqual(loose.series.range,
+      { column: 'gx_at', from: 100, fromOp: 'ge', to: 400, toOp: 'lt' });
+    const tight = resample({ start: 150, end: 300 }, [at('$ge', 100), at('$lt', 400)]);
+    assert.deepStrictEqual(tight.series.range,
+      { column: 'gx_at', from: 150, fromOp: 'ge', to: 300, toOp: 'lt' });
   });
 });

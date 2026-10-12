@@ -20,8 +20,7 @@
  */
 
 import { compileJsonQuery, analyzeQuery } from '@jarenjs/json/query';
-import { decodeJSONPointerSegment } from '@jarenjs/json/pointer';
-import { isJsonObject, stableStringify } from '@jarenjs/core/object';
+import { isJsonObject, stableStringify, cloneJson } from '@jarenjs/core/object';
 
 import { DbCompileError, DbRuntimeError } from './errors.js';
 import { chain, attempt } from './driver.js';
@@ -29,7 +28,7 @@ import { planQuery, BIND_REASONS } from './plan.js';
 import { createSortedWindow, compareCodepoint } from './window.js';
 import { classifyEventTime, bucketStrategy, rollingStrategy } from './live-time.js';
 import { joinStrategy } from './live-join.js';
-import { classifyNestedGroup, nestedGroupStrategy, readsNoRoot, compilesBare, valueKey } from './live-nested.js';
+import { classifyNestedGroup, nestedGroupStrategy, readsNoRoot, compilesBare, valueKey, sharedRow, segmentsOf } from './live-nested.js';
 import { LIVE_DEFAULTS } from './live-options.js';
 
 /** The store-level live bounds and their defaults (§12: printed,
@@ -47,9 +46,6 @@ const LIVE_MODES = ['auto', 'incremental', 'rerun', 'resnapshot'];
 /** Why an integer sum or average re-runs once its terms leave the bound
  * in which every partial sum is exact: the query path's own reason. */
 const ACCUMULATION_RERUN = `'accumulation' — ${BIND_REASONS.accumulation}`;
-
-/** Split an emitted pointer into unescaped segments. */
-const segmentsOf = (path) => path.split('/').slice(1).map(decodeJSONPointerSegment);
 
 /** Whether a `$subsequence` bound is a number literal as the query
  * analysis reads it — written as a number or quoted with `$const` —
@@ -569,12 +565,6 @@ function diffAgainst(previousRows, nextRows) {
   return ops.length === 0 ? null : { ops, rows: nextRows };
 }
 
-/** Reuse the previous row object when a fresh one is value-equal —
- * the structural-sharing half of §9 for re-evaluated rows. */
-function sharedRow(previous, fresh) {
-  return valueKey(previous) === valueKey(fresh) ? previous : fresh;
-}
-
 /**
  * Map fresh rows onto previous references where value-equal — the
  * sharing pass for strategies that rebuild their row list (window
@@ -616,6 +606,9 @@ function touchedKeys(record, name, deps) {
     if (segments[0] !== name) continue;
     const token = segments[1];
     if (segments.length === 2) {
+      // the inserted document is the capture record's own object, shared with
+      // every observer and every registration: a strategy reads it and copies
+      // what it KEEPS (`cloneJson`), never what it rejects
       if (op.op === 'add') touched.set(token, { kind: 'insert', doc: op.value });
       else if (op.op === 'remove') touched.set(token, { kind: 'delete' });
       else touched.set(token, { kind: 'update' });
@@ -670,9 +663,11 @@ function rowsStrategy(description, context) {
         const doc = change.kind === 'delete'
           ? undefined
           : change.kind === 'insert' ? change.doc : context.readRow(token);
-        const fresh = doc === undefined
+        const evaluated = doc === undefined
           ? []
           : /** @type {any[]} */ (evaluate([doc], context.externals));
+        // a row read off the record is shared: what is kept is a copy of it
+        const fresh = change.kind === 'insert' && evaluated.length > 0 ? evaluated.map(cloneJson) : evaluated;
         if (fresh.length === 0) {
           if (previous !== undefined) {
             itemsByKey.delete(token);
@@ -737,10 +732,10 @@ function windowStrategy(description, context) {
   // `null` limit shows every row past it — never `offset + null`)
   const sortedWindow = createSortedWindow(order, limit === null ? null : offset + limit);
 
-  const place = (token, doc) => {
+  const place = (token, doc, shared = false) => {
     const items = /** @type {any[]} */ (evaluate([doc], context.externals));
     if (items.length === 0) return;
-    sortedWindow.insert(token, getters.map((get) => get(doc)), items[0]);
+    sortedWindow.insert(token, getters.map((get) => get(doc)), shared ? cloneJson(items[0]) : items[0]);
   };
   const visibleRows = () => sortedWindow.visible().slice(offset).map((entry) => entry.item);
 
@@ -759,7 +754,7 @@ function windowStrategy(description, context) {
         sortedWindow.remove(token);
         if (change.kind === 'delete') continue;
         const doc = change.kind === 'insert' ? change.doc : context.readRow(token);
-        if (doc !== undefined) place(token, doc);
+        if (doc !== undefined) place(token, doc, change.kind === 'insert');
       }
       return diffAgainst(previousRows, shareByValue(previousRows, visibleRows()));
     },

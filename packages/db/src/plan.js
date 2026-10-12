@@ -2138,15 +2138,14 @@ function resampleBucket(spec, shape) {
   const instantBad = instantRefusal(at);
   if (instantBad !== null) return { code: instantBad };
   const value = memberRef(shape, valueName);
-  if (fn !== 'rows') {
-    // a reading of two types folds as its first in SQL, where the engine
-    // refuses the mixed sequence
-    const valueBad = valueRefusal(value)
-      ?? (admitsMixedTypes(shape.schema, value.segments) ? 'value-not-numeric' : null);
-    if (valueBad !== null) return { code: valueBad };
-    // the engine adds left to right, which no SQL sum reproduces over doubles
-    if (floatingAccumulation({ fn, ref: value })) return { code: 'floating-accumulation' };
-  }
+  // the kernel reads the reading of EVERY row, whatever the aggregate, so a
+  // count needs a numeric reading as a sum does; a reading of two types
+  // folds as its first in SQL, where the engine refuses the mixed sequence
+  const valueBad = valueRefusal(value)
+    ?? (admitsMixedTypes(shape.schema, value.segments) ? 'value-not-numeric' : null);
+  if (valueBad !== null) return { code: valueBad };
+  // the engine adds left to right, which no SQL sum reproduces over doubles
+  if (fn !== 'rows' && floatingAccumulation({ fn, ref: value })) return { code: 'floating-accumulation' };
   // The bucket shape, exactly: the bucket's start, its reading, and the count
   // of SOURCE rows — which is `COUNT(*)` whether or not it is also the
   // answer, because `aggregate: 'count'` returns that same number
@@ -2160,6 +2159,10 @@ function resampleBucket(spec, shape) {
       { fn: /** @type {any} */ (fn), ref: fn === 'rows' ? null : value, as: 'value' },
       { fn: /** @type {any} */ ('rows'), ref: null, as: 'count' },
     ],
+    // a member the schema leaves optional may be absent, which SQL reads as
+    // the `NULL` of a measured gap and the kernel refuses
+    ...(Array.isArray(shape.schema?.required) && shape.schema.required.includes(valueName)
+      ? {} : { reading: value }),
   } };
 }
 

@@ -834,8 +834,10 @@ reason named, never a maintained view that dies on its first fold.
 - **A bucket view keeps its rows by bucket.** A write touches one bucket
   — two, when it moves a reading across a boundary — and exactly those
   are folded again by calling `resampleSeries` over that bucket's own
-  rows. The aggregate is therefore the kernel's, and cannot drift from
-  what a fresh query would answer.
+  rows. The aggregate is therefore the kernel's: a bucket's `min`, `max`
+  and `count`, and its `sum` or `mean` over readings whose additions are
+  exact, are what a fresh query answers (the last bits of a floating
+  `sum` or `mean` are the exception, below).
 - **A rolling view keeps its rows in instant order.** A write at `t` can
   only change the windows ending in `[t, t + width)`, so exactly that
   stretch is recomputed — again by the kernel, over the slice those
@@ -847,6 +849,11 @@ the span a single repair can read. A shorter one is a re-run with the
 numbers printed. It is **not** a compaction policy — the maintained
 state is bounded by `live.maxMaintained` exactly as every other
 strategy's is (§12), and nothing an answer still depends on is dropped.
+A `fill` policy's empty positions are part of the result and are counted
+with the rows when the ladder follows the data, a window open at `start`
+or `end`: readings far enough apart for their ladder to outgrow the bound
+are `JD2060`, refused before the ladder is built. A window declared at both
+ends is the author's own bound and is not charged.
 That is the honest statement of what this version buys: bounded repair
 work and a visible lateness contract, not a smaller heap.
 
@@ -889,11 +896,22 @@ not late data: it belongs to no bucket this view maintains, so there is
 nothing to be late for.
 
 The maintained answer is **equal to a full recomputation after every
-mutation** — not approximately, and not eventually. `test/db/live-time.test.js`
-holds a shuffled stream of inserts, in-place updates, instant moves and
-deletes against `resampleSeries` / `rollingSeries` over the whole
-collection after each one, which is the only oracle that cannot drift
-with the implementation.
+mutation** — not approximately, and not eventually — for `min`, `max` and
+`count`, and for a `sum` or `mean` over readings whose additions are exact
+(integers, binary fractions). `test/db/live-time.test.js` holds a shuffled
+stream of inserts, in-place updates, instant moves and deletes against
+`resampleSeries` / `rollingSeries` over the whole collection after each
+one, which is the only oracle that cannot drift with the implementation.
+
+A floating `sum` or `mean` is the one exception, and it can differ from a
+fresh run in the last bits. A rolling window's kernel carries a running
+total that still holds the rows which left it (readings `0.1`, `0.2` and
+`0.3` at minutes 0, 1 and 4 under a three-minute width: the last window holds
+`0.3` alone, a fresh run answers `0.30000000000000004` and the view, which
+adds the slice it recomputes afresh, answers `0.3`), and rows sharing an instant are added in the order they reached the
+view, which an update moves behind the rows it was before. A registration
+whose floating readings must add in the fresh run's order asks for
+`mode: 'rerun'`.
 
 
 ## Bounded joins, graph projections and nested groups

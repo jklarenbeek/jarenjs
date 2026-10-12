@@ -237,15 +237,25 @@ export function filterFacts(filter) {
       return;
     }
     const operand = 'lit' in pred.operand ? pred.operand.lit : undefined;
+    // a conjunction holds every bound it names, and the seek is cut by the
+    // tightest: the larger lower bound, the smaller upper one, and at an
+    // equal value the strict comparison. A bound that is not a literal
+    // decides nothing beside one that is
     if (pred.op === 'ge' || pred.op === 'gt') {
       const entry = boundOf(column);
-      entry.from = operand ?? null;
-      entry.fromOp = pred.op;
+      if (entry.from === null || (operand != null
+        && (operand > entry.from || (operand === entry.from && pred.op === 'gt')))) {
+        entry.from = operand ?? null;
+        entry.fromOp = pred.op;
+      }
     }
     else if (pred.op === 'le' || pred.op === 'lt') {
       const entry = boundOf(column);
-      entry.to = operand ?? null;
-      entry.toOp = pred.op;
+      if (entry.to === null || (operand != null
+        && (operand < entry.to || (operand === entry.to && pred.op === 'lt')))) {
+        entry.to = operand ?? null;
+        entry.toOp = pred.op;
+      }
     }
   };
   walk(filter);

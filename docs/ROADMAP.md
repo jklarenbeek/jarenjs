@@ -583,12 +583,6 @@ what each does is its own documentation's job
   validation cannot see it (the cast result always validates) and
   `report.destructive` stays false. Wanted: a refusal before the copy when a
   value does not survive the cast, on both engines.
-- [ ] **An abort delivered inside the injected clock ends a cursor as
-  exhausted.** An abort raised synchronously from `spec.now()` after the
-  signal check of a page boundary settles the cursor, so a page resolves short
-  with `hasMore: false` instead of `JD2072`. Reachable only from a user clock
-  that aborts. Wanted: the boundary checks the signal once more after the clock
-  read.
 - [ ] **A relation dropped in the edit that renames one of its endpoints
   fails.** The plan renames the entity and then drops the join table under the
   new name (`DROP TABLE "Article_Tag"`), but the join table is still `Post_Tag`:
@@ -602,6 +596,22 @@ what each does is its own documentation's job
   `['integer','null']` skip the `null` (`2, null, 4` answers `2`/`4`/`6`/`3`)
   while the engine raises `JQ2001` ([MODEL-FORMAT §10.6](../packages/db/docs/MODEL-FORMAT.md)).
   Wanted: either one answer or a named residual.
+- [ ] **A native `$resample` window never reads the rows outside it.** `start`
+  and `end` are applied by the statement, so a row outside them that the
+  temporal kernel refuses (no instant, no reading) is never met, where the
+  engine validates every row first and raises `JQ2001` (the operand's own
+  `$where` is no case: the engine filters before the kernel too). Inside the
+  window the statement counts the rows that carry no reading and hands such a
+  question to the engine. Wanted: either state that the window prunes before
+  validation, or a probe over the rows outside it that costs less than the
+  window saves.
+- [ ] **An event-time `sum` or `mean` over floating readings can differ from a
+  fresh run in the last bits.** A rolling window's kernel carries a running
+  total that still holds rows that left it, and a view adds the slice it
+  recomputes afresh; rows at one instant add in arrival order in a view and in
+  store order in a fresh run
+  ([LIVE-FORMAT §13.3](../packages/db/docs/LIVE-FORMAT.md)). Wanted: a re-run
+  for a reading not typed `integer`, or a view that adds in the kernel's order.
 - [ ] **SQLite's native `$min`/`$max` over a `number` holding large
   integer-valued doubles raises.** Over integer-valued doubles past 2^53
   (`1e16`, `2^62`) the driver's integer read raises `JD2003` where the engine
@@ -637,14 +647,11 @@ what each does is its own documentation's job
   (`semanticKey(value, { ordered: true })`), accepting a re-emission on a
   reorder-only write, or state that a stored document's member order is not part
   of its value.
-- [ ] **Live registrations take unchecked options and share capture records.**
-  Unknown live option keys (`mod`, `eventtime`) are ignored, and a valid
-  `eventTime` on a document that is not temporal is ignored too; the window and
-  rows strategies hold the capture record's inserted object, so a
-  `store.observe` observer that mutates its record rewrites `live.result`.
-  Wanted: `store.live` validates its option keys (`externals`, `mode`,
-  `eventTime`), a decision on `eventTime` over a non-temporal document, and
-  records frozen at capture or copied per registration.
+- [ ] **A valid `eventTime` on a document that is not temporal is ignored.**
+  `collection.live(document, { eventTime })` over a document that is neither a
+  `$resample` nor a `$rolling` registers an ordinary view and drops the
+  declaration, where an entity registration refuses it (`JD0053`). Wanted: a
+  decision whether a collection registration refuses it too.
 - [ ] **A chain handed to another source's `live()` runs against the wrong
   collection.** `client.collections.orders.live(<a chain over users>)` registers
   the users chain's document against `orders`: a chain's run bindings carry no
@@ -951,6 +958,13 @@ what each does is its own documentation's job
   and `{ a: 1 }` apart. Wanted: decide whether an `undefined` member is
   absent, as `JSON.stringify` reads it, and make the engine's group-key
   identity and the async key agree on it.
+- [ ] **`createDbLedger().sweep()` removes every expired record in one
+  transaction.** It reads every expired id and deletes them one by one inside a
+  single immediate transaction, so a ledger that was not swept for a long time
+  holds the write lock and a result as large as its backlog; the ledger shape
+  (`sweep(now)` answering a count) carries no limit. Wanted: a bounded batch
+  the shape can express (a `limit` and a count that says whether more remain),
+  or a stated host cadence.
 
 ## Lexical search (cross-package)
 
@@ -1228,6 +1242,12 @@ thing to avoid.
   than a table entry. Note `todayMarker` is **not** on this list and never
   will be — it needs a clock, and there is none (see the constraint above);
   a host that wants "now" on a diagram supplies the instant as data.
+- [ ] **`resampleSeries` walks every empty position, and its ladder is inexact
+  near 2^52.** Two rows far apart at a small `every` cost time in proportion to
+  the span over the width, whatever the fill, not to the rows; and past about
+  2^52 ms the ladder's float arithmetic misaligns bucket starts that a
+  database's integer arithmetic places exactly. Wanted: walk the occupied
+  buckets for an omit fill; compute the ladder in exact integers.
 
 ## Geospatial (cross-package)
 

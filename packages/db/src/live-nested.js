@@ -3,6 +3,7 @@
 import { compileJsonQuery } from '@jarenjs/json/query';
 import { isJsonObject, stableStringify, semanticKey } from '@jarenjs/core/object';
 import { utf8ByteLength } from '@jarenjs/core/string';
+import { decodeJSONPointerSegment } from '@jarenjs/json/pointer';
 import { DbRuntimeError } from './errors.js';
 
 /** The dependency set of a strategy that reads every member of a row. */
@@ -50,6 +51,25 @@ export function valueKey(value) {
     return stableStringify(value) ?? '';
   }
 }
+
+/** Reuse the previous row object when a fresh one is value-equal — the
+ * structural-sharing half of §9 for re-evaluated rows.
+ * @param {any} previous
+ * @param {any} fresh
+ * @returns {any} */
+export function sharedRow(previous, fresh) {
+  return valueKey(previous) === valueKey(fresh) ? previous : fresh;
+}
+
+/** The serialized size a maintained value is charged to `live.maxBytes`.
+ * @param {any} value
+ * @returns {number} */
+export const bytesOf = (value) => utf8ByteLength(stableStringify(value));
+
+/** Split an emitted pointer into unescaped segments.
+ * @param {string} path
+ * @returns {string[]} */
+export const segmentsOf = (path) => path.split('/').slice(1).map(decodeJSONPointerSegment);
 
 /** Whether the live evaluators can compile `document` the way they do —
  * with no options: the registered operators, the zone provider and the
@@ -125,7 +145,6 @@ export function nestedGroupStrategy(description, context) {
   const positions = new Map();
   let maintainedBytes = 0;
   let resultCount = 0;
-  const bytesOf = (value) => utf8ByteLength(stableStringify(value));
   const stats = { refreshedGroups: 0, dependencyReads: 0, reruns: 0 };
   const groupOf = (doc) => {
     const keys = keyOf([doc], context.externals);
@@ -162,7 +181,7 @@ export function nestedGroupStrategy(description, context) {
     const previous = results.get(group);
     maintainedBytes += bytesOf(next) - (previous === undefined ? 0 : bytesOf(previous));
     resultCount += next.length - (previous?.length ?? 0);
-    results.set(group, valueKey(previous) === valueKey(next) ? previous : next);
+    results.set(group, sharedRow(previous, next));
     stats.refreshedGroups++;
     check();
   };

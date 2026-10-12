@@ -778,6 +778,38 @@ the query engine, now refuse by code or answer what the engine answers:
   `null` as an unknown, though the document keeps the `null` there
   (MODEL-FORMAT section 9.3); the engine raises `JQ2005` on it. Such an
   ordering is the engine's, and raises.
+- A native `$resample` bucket skipped a row that carried no reading as it skips
+  a `null` one, where the temporal kernel refuses it (`JQ2001`: a reading is a
+  finite number or `null`, and an absent one is neither). A reading the schema
+  leaves optional is now counted where it is absent, and a bucket that meets
+  one hands the question back to the engine, which raises (counted in
+  `stats().series.diverted`, as a missing instant is). A `count` bucket ignored
+  its reading altogether, so it answered over a reading that is not a schema-typed
+  number; it needs one now, as every other aggregate does, and a document
+  without one runs in the engine (`value-not-numeric`; `strict` refuses it). The
+  extra count of rows without a reading costs a native bucket over an optional
+  reading measurable time on large collections; a schema that requires the
+  member pays nothing.
+- An event-time live view (`eventTime`) that meets a reading or an instant the
+  temporal kernel refuses raised the kernel's own uncoded `TypeError`, from
+  registration and as the error of a view the write reached; it is `JQ2001`
+  now, the code a fresh run raises.
+- An event-time `$resample` view with a `fill` of `null` or `zero` built the whole
+  ladder between two readings far apart however large `live.maxMaintained` was;
+  its empty positions are counted with the result now when the ladder follows the
+  data (a window open at `start` or `end`), and a ladder past the bound is `JD2060`
+  (the view closes, as any live view past its bound does); a window declared at
+  both ends is the author's bound and registers as before.
+- A cursor whose `deadline` clock aborts the cursor's own signal ended as an
+  exhausted cursor, a short page with no more to read; it is `JD2072` now.
+- `explain().series.range` named the last bound a conjunction held; it names
+  the tightest (the larger lower bound, the smaller upper one), and a literal
+  bound beside a parameter's (`at >= 100 and at >= $x`) is now reported where
+  it was lost, so that selection is classified as a range.
+- A live result row was the capture record's own object, so an observer that
+  rewrote its record rewrote what the registrations served; each registration
+  reads its own copy of the part of an inserted document it keeps, made
+  only for a row its filter admits.
 
 ## 8. Stricter models, keys and staged writes
 

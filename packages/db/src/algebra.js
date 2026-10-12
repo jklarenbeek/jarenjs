@@ -182,7 +182,8 @@ export const PLAN_VERSION = 2;
  *   order: 'asc' | 'desc' | 'first-seen',
  *   aggregates: { fn: 'rows' | 'sum' | 'avg' | 'min' | 'max',
  *     ref: PlanRef | null, as: string,
- *     empty: 'null' | 'zero' | 'omit' }[] }} PlanBucket
+ *     empty: 'null' | 'zero' | 'omit' }[],
+ *   reading?: PlanRef }} PlanBucket
  *   The fixed-width temporal GROUP BY: the instant column, the ladder's
  *   width and anchor in epoch milliseconds, the name the bucket's start
  *   is answered under, how the groups are ordered, and one aggregate
@@ -192,6 +193,11 @@ export const PLAN_VERSION = 2;
  *   `null` one. `first-seen` order is the group's earliest row identity,
  *   which is the engine's own "order of first appearance" (§6.5).
  *   A plan carrying a bucket carries no `aggregate` and no `rank`.
+ *   `reading` is set when the kernel reads a member of EVERY row whatever the
+ *   aggregate (a `$resample`'s reading, which a row must carry as a number
+ *   or `null`) and the schema does not require it: the statement then
+ *   counts the rows that carry none, and a count above zero hands the
+ *   question back to the engine, which refuses.
  *
  * @typedef {{ alternatives: { column: string, dims: number }[],
  *   probe: { lit: number[] } | { ext: string },

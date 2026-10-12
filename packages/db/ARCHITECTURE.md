@@ -1020,7 +1020,19 @@ is not a number groups under SQL `NULL`; the kernel REFUSES such a row
 the whole question back — the full-collection residual, where the engine
 answers what it answers everywhere — and the fallback is COUNTED as
 `collection.stats().series.diverted`, the same honesty the k-nearest
-divert has.
+divert has. A `$resample` reading is the same kind of requirement: the
+kernel reads it off EVERY row, whatever the aggregate, and a row that
+carries none is refused (`null` is a measured gap, an absent member is
+neither), while SQL skips the NULL it reads there. When the schema leaves
+the member optional the statement counts the rows that carry none, and a
+count above zero diverts exactly as a missing instant does; a member the
+schema requires needs no count (on a store that validates what it writes),
+and a reading that is not a schema-typed
+number is not a bucket at all (`value-not-numeric`, also for `count`).
+Both counts are over the rows the statement reads: a `start`/`end`
+window is applied by the statement, so a row outside it is never read and
+a refusable row there is never met (the operand's own `$where` hides
+nothing the engine meets: it filters before the kernel there too).
 
 **`explain().series`** is `null` unless the document asked a temporal
 question, which it does by naming a §8.16 operator or by being the
@@ -1372,8 +1384,9 @@ of rows: a `$resample` bucket state and a `$rolling` window state, both
 over a FIXED width. There is no clock under either — the watermark is a
 finite epoch the host supplies and `advance()` is the only way it moves
 — and both fold through `@jarenjs/core/series` itself rather than
-carrying a second aggregate, so a maintained answer cannot drift from
-what a fresh query gives. A write touches one bucket (two when it
+carrying a second aggregate, so a maintained answer is what a fresh
+query gives (a floating `sum` or `mean` apart, in its last bits:
+LIVE-FORMAT §13.3). A write touches one bucket (two when it
 crosses a boundary) or the windows ending in `[t, t + width)`, and
 exactly those are recomputed. Everything a per-key state cannot place
 exactly re-runs with its member named: a calendar ladder, a named zone,

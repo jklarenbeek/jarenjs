@@ -70,6 +70,27 @@ describe('cursor lifecycle across asynchronous source boundaries', () => {
     assert.equal(cursor.next().done, true);
     assert.equal(row, 100001);
   });
+  it('an abort raised inside the deadline clock is JD2072 on the pull, never a quiet end', async () => {
+    const build = (make) => {
+      const controller = new AbortController();
+      const spec = { streaming: 'row', signal: controller.signal, deadline: 1_000, items: (row) => [row],
+        now: () => { controller.abort(); return 0; } };
+      return make(spec);
+    };
+    const asynchronous = build((spec) => createCursor({ ...spec,
+      open: () => (async function* () { yield 1; yield 2; })() }));
+    await assert.rejects(asynchronous.next(), { code: 'JD2072' });
+    const synchronous = build((spec) => createSyncCursor({ ...spec, open: () => [1, 2][Symbol.iterator]() }));
+    assert.throws(() => synchronous.next(), { code: 'JD2072' });
+    // a clock that does not abort keeps the rows flowing, and one past the
+    // deadline is still the deadline's refusal
+    const flowing = createSyncCursor({ streaming: 'row', deadline: 1_000, now: () => 0,
+      open: () => [1, 2][Symbol.iterator](), items: (row) => [row] });
+    assert.deepEqual([flowing.next().value, flowing.next().value, flowing.next().done], [1, 2, true]);
+    const late = createSyncCursor({ streaming: 'row', deadline: 1_000, now: () => 2_000,
+      open: () => [1][Symbol.iterator](), items: (row) => [row] });
+    assert.throws(() => late.next(), { code: 'JD2075' });
+  });
 });
 
 describe('cursor protocol disposal', () => {

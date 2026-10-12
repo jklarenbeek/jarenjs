@@ -53,7 +53,7 @@ import {
 } from './plan.js';
 import { emitPlan, emitEntityPlan, createEntityPredicateEmitters, UnrepresentablePath, UnrepresentableIdentity,
   entityTableColumns, physicalComparable,
-  documentMemberOf, bucketGuards } from './emit.js';
+  documentMemberOf, bucketGuards, bucketAbsentGuard } from './emit.js';
 import { modelPath } from './model-path.js';
 import { selectPlan, conjoin, effectiveOrder, planOrder, ordersByColumn } from './algebra.js';
 import {
@@ -1075,18 +1075,22 @@ export function createQueryEngine(context) {
    *
    * `null` when a group has no instant at all — a row whose instant
    * member is missing or is not a number groups under SQL `NULL`, and
-   * the kernel REFUSES such a row (`JQ2001`). SQL cannot refuse, so the
-   * call diverts and the engine answers, exactly as it does everywhere.
+   * the kernel REFUSES such a row (`JQ2001`). So it does a row that
+   * carries no reading when the plan counts those (`reading`): SQL skips
+   * the `NULL` it reads there. SQL cannot refuse, so the call diverts and
+   * the engine answers, exactly as it does everywhere.
    * @param {any} entry
    * @param {any[]} rows
    * @returns {any[] | null}
    */
   const bucketItems = (entry, rows) => {
     const bucket = entry.plan.bucket;
+    const absent = bucketAbsentGuard(bucket);
     const items = [];
     for (const row of rows) {
       const start = row[bucket.as] ?? null;
       if (start === null) return null;
+      if (absent !== null && Number(row[absent]) > 0) return null;
       /** @type {any} */
       const item = { [bucket.as]: start };
       for (const aggregate of bucket.aggregates) {

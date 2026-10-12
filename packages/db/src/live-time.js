@@ -18,8 +18,9 @@
  *  - **A bucket view keeps its rows by bucket.** A write touches one
  *   bucket (two, when it moves a reading across a boundary), and only
  *   those are folded again — through `resampleSeries` itself, over that
- *   bucket's own rows, so the aggregate is the kernel's and cannot
- *   drift from what a fresh query would answer.
+ *   bucket's own rows, so the aggregate is the kernel's (a floating
+ *   `sum` or `mean` can still differ from a fresh run in its last bits:
+ *   the rows are added in the order the view holds them).
  *  - **A rolling view keeps its rows in instant order.** A write at `t`
  *   can only change the windows ending in `[t, t + width)`, so exactly
  *   that stretch is recomputed — again by the kernel, over the slice
@@ -43,14 +44,29 @@
  * file drops nothing that an answer still depends on.
  */
 
-import { compileJsonQuery } from '@jarenjs/json/query';
-import { isJsonObject } from '@jarenjs/core/object';
+import { compileJsonQuery, JsonQueryRuntimeError, renderQueryMessage } from '@jarenjs/json/query';
+import { isJsonObject, cloneJson } from '@jarenjs/core/object';
 import { compileBuckets, resampleSeries, rollingSeries, toEpoch } from '@jarenjs/core/series';
 
-import { DbCompileError } from './errors.js';
+import { DbCompileError, DbRuntimeError } from './errors.js';
 import { chain } from './driver.js';
 import { singularSelector } from './series.js';
 import { readsNoRoot } from './live-nested.js';
+
+/**
+ * The error a refused reading is. The temporal kernel throws a `TypeError`
+ * for a row it cannot read (no instant, a reading that is neither a finite
+ * number nor `null`); the query engine answers the same row with `JQ2001`,
+ * and a view must not be the one place that surfaces the host error.
+ * @param {unknown} error
+ * @returns {unknown}
+ */
+function kernelRefusal(error) {
+  if (!(error instanceof TypeError)) return error;
+  const message = { messageId: 'query/detail', params: { detail: error.message } };
+  return new JsonQueryRuntimeError('JQ2001', renderQueryMessage(message), undefined,
+    { ...message, cause: error });
+}
 
 /** The closed `eventTime` member set (§13.1). */
 const EVENT_TIME_MEMBERS = Object.freeze(['path', 'watermark', 'allowedLateness', 'retention']);
@@ -300,15 +316,24 @@ function eventTimeBase(description, context) {
   const boundary = () => watermark - description.eventTime.allowedLateness;
 
   /** The row this document contributes, or `undefined` for none. */
-  const rowOf = (doc) => {
+  const rowOf = (doc, shared = false) => {
     if (doc === undefined) return undefined;
     const items = /** @type {any[]} */ (evaluate([doc], context.externals));
-    return items.length === 0 ? undefined : items[0];
+    if (items.length === 0) return undefined;
+    // a document read off the capture record is shared; the row kept is a copy
+    return shared ? cloneJson(items[0]) : items[0];
   };
 
   /** The instant a contributed row carries, through the kernel's own
    * reader so a live view refuses exactly where a query would. */
-  const instantOf = (row) => toEpoch(row[member]);
+  const instantOf = (row) => {
+    try {
+      return toEpoch(row[member]);
+    }
+    catch (error) {
+      throw kernelRefusal(error);
+    }
+  };
 
   const advance = (next) => {
     if (typeof next !== 'number' || !Number.isFinite(next))
@@ -369,9 +394,13 @@ export function bucketStrategy(description, context) {
       folded.delete(bucket);
       return;
     }
-    const out = resampleSeries([...held.values()],
-      { ...spec, start: bucket, end: bucket + ladder.width, fill: 'null' });
-    folded.set(bucket, out[0]);
+    try {
+      folded.set(bucket, resampleSeries([...held.values()],
+        { ...spec, start: bucket, end: bucket + ladder.width, fill: 'null' })[0]);
+    }
+    catch (error) {
+      throw kernelRefusal(error);
+    }
   };
 
   /** Put a document's row where it belongs, reporting the buckets that
@@ -410,6 +439,14 @@ export function bucketStrategy(description, context) {
     let index = ladder.indexOf(from);
     let at = ladder.startOf(index);
     while (end === null ? at <= /** @type {number} */ (last) : at < end) {
+      // a ladder that follows the data (a window open at either end) is the
+      // result and is charged like any other, refused before it is built; a
+      // window the author declared in full is the author's own bound
+      if ((start === null || end === null) && placed.size + out.length >= context.maxMaintained) {
+        throw new DbRuntimeError('JD2060',
+          `the maintained live state exceeded the live.maxMaintained bound of ${context.maxMaintained}`,
+          { collection: context.name });
+      }
       out.push(folded.get(at) ?? { at, value: empty, count: 0 });
       index += 1;
       at = ladder.startOf(index);
@@ -438,7 +475,7 @@ export function bucketStrategy(description, context) {
       for (const [key, change] of touched) {
         const doc = change.kind === 'delete' ? undefined
           : change.kind === 'insert' ? change.doc : context.readRow(key);
-        const row = base.rowOf(doc);
+        const row = base.rowOf(doc, change.kind === 'insert');
         const before = placed.get(key);
         const after = row === undefined ? null : base.instantOf(row);
         const boundary = base.boundary();
@@ -480,13 +517,23 @@ export function rollingStrategy(description, context) {
 
   /** @type {Map<string, { at: number, row: any }>} */
   const placed = new Map();
-  /** Rows in instant order; ties keep insertion order, which the seven
-   * maintained aggregates cannot tell apart. @type {any[]} */
+  /** Rows in instant order; ties keep arrival order, which `min`, `max`
+   * and `count` cannot tell apart and a floating `sum` or `mean` can.
+   * @type {any[]} */
   let ordered = [];
   /** One output per row of `ordered`. @type {any[]} */
   let out = [];
 
   const compareAt = (a, b) => base.instantOf(a) - base.instantOf(b);
+
+  const rolled = (rows) => {
+    try {
+      return rollingSeries(rows, spec);
+    }
+    catch (error) {
+      throw kernelRefusal(error);
+    }
+  };
 
   /** The first position whose instant is at or after `at`. */
   const lowerBound = (at) => {
@@ -523,7 +570,7 @@ export function rollingStrategy(description, context) {
     base.stats.recomputes += 1;
     const lo = upperBound(from - width);
     const hi = lowerBound(to + width);
-    const answers = rollingSeries(ordered.slice(lo, hi), spec);
+    const answers = rolled(ordered.slice(lo, hi));
     for (let i = lowerBound(from); i < hi; i++) out[i] = answers[i - lo];
   };
 
@@ -565,7 +612,7 @@ export function rollingStrategy(description, context) {
           ordered.push(row);
         }
         ordered.sort(compareAt);
-        out = rollingSeries(ordered, spec);
+        out = rolled(ordered);
         return out.slice();
       }),
     apply(record) {
@@ -579,7 +626,7 @@ export function rollingStrategy(description, context) {
       for (const [key, change] of touched) {
         const doc = change.kind === 'delete' ? undefined
           : change.kind === 'insert' ? change.doc : context.readRow(key);
-        const row = base.rowOf(doc);
+        const row = base.rowOf(doc, change.kind === 'insert');
         const before = placed.get(key)?.at;
         const after = row === undefined ? undefined : base.instantOf(row);
         const boundary = base.boundary();

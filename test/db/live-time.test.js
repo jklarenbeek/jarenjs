@@ -526,3 +526,115 @@ describe('the emitted patch keeps its §9 promises', function () {
     await store.close();
   });
 });
+
+describe("a reading the kernel refuses is the engine's own JQ2001", function () {
+  for (const [label, document] of [['bucket', bucketDoc()], ['rolling', rollingDoc()]]) {
+    it(`${label}: at registration, and as the error of a view a reading with no value reaches`,
+      async function () {
+        const store = await open();
+        const readings = store.collection('readings');
+        await readings.insert({ id: 'ok', series: 's', at: T0, value: 1 });
+        const live = await readings.live(document, { eventTime: EVENT_TIME });
+        const events = [];
+        live.subscribe((event) => events.push(event));
+        // `value` is optional in the schema, and the kernel reads an absent
+        // reading as neither a number nor null
+        await readings.insert({ id: 'bad', series: 's', at: T0 + 1000 });
+        assert.strictEqual(live.state, 'errored');
+        assert.strictEqual(live.error.code, 'JQ2001');
+        assert.match(live.error.reason, /value: neither a finite number nor null/);
+        assert.strictEqual(events.length, 1);
+        assert.strictEqual(events[0].error, live.error);
+        // the same data refuses the same way when a view is registered over it
+        await assert.rejects(readings.live(document, { eventTime: EVENT_TIME }),
+          { code: 'JQ2001', reason: /value: neither a finite number nor null/ });
+        await assert.rejects(async () => readings.execute(document, { pushdown: false }), { code: 'JQ2001' });
+        await store.close();
+      });
+  }
+});
+
+describe('a fill policy is charged to live.maxMaintained like every other result', function () {
+  const FILLED = [{ $resample: ['$[*]', { every: 1000, aggregate: 'sum', fill: 'null' }] }];
+
+  it('refuses JD2060 once the ladder between two readings far apart outgrows the bound', async function () {
+    const store = await open({ live: { maxMaintained: 100 } });
+    const readings = store.collection('readings');
+    await readings.insert({ id: 'a', series: 's', at: T0, value: 1 });
+    const live = await readings.live(FILLED, { eventTime: EVENT_TIME });
+    assert.strictEqual(live.result.rows.length, 1);
+    // 50 empty positions and two readings: inside the bound
+    await readings.insert({ id: 'b', series: 's', at: T0 + 50_000, value: 2 });
+    assert.strictEqual(live.result.rows.length, 51);
+    assert.strictEqual(live.state, 'live');
+    // 5,000 positions: the result alone is past the bound
+    await readings.insert({ id: 'c', series: 's', at: T0 + 5_000_000, value: 3 });
+    assert.strictEqual(live.state, 'errored');
+    assert.strictEqual(live.error.code, 'JD2060');
+    assert.match(live.error.reason, /live\.maxMaintained bound of 100/);
+    // and a registration over that data refuses the same way
+    await assert.rejects(readings.live(FILLED, { eventTime: EVENT_TIME }), { code: 'JD2060' });
+    await store.close();
+  });
+
+  it('a window the author declared is the author\'s bound: one reading registers, as it always did', async function () {
+    const store = await open({ live: { maxMaintained: 100 } });
+    const readings = store.collection('readings');
+    await readings.insert({ id: 'a', series: 's', at: T0 + 5000, value: 1 });
+    const windowed = [{ $resample: ['$[*]', { every: 1000, aggregate: 'sum', fill: 'zero',
+      start: T0, end: T0 + 1_000_000 }] }];
+    const live = await readings.live(windowed, { eventTime: EVENT_TIME });
+    assert.strictEqual(live.state, 'live');
+    assert.strictEqual(live.result.rows.length, 1000);
+    assert.deepStrictEqual(live.result.rows, await readings.execute(windowed, { pushdown: false }));
+    // a window with one open end follows the data, and the data's ladder is still charged
+    const halfOpen = [{ $resample: ['$[*]', { every: 1000, aggregate: 'sum', fill: 'zero', start: T0 }] }];
+    await readings.insert({ id: 'b', series: 's', at: T0 + 5_000_000, value: 2 });
+    await assert.rejects(readings.live(halfOpen, { eventTime: EVENT_TIME }), { code: 'JD2060' });
+    await store.close();
+  });
+
+  it('the bound is inclusive: the readings plus the ladder may fill it, and not one more', async function () {
+    for (const [gap, state, rows] of [[97_000, 'live', 98], [98_000, 'errored', 1]]) {
+      const store = await open({ live: { maxMaintained: 100 } });
+      const readings = store.collection('readings');
+      await readings.insert({ id: 'a', series: 's', at: T0, value: 1 });
+      const live = await readings.live(FILLED, { eventTime: EVENT_TIME });
+      await readings.insert({ id: 'b', series: 's', at: T0 + gap, value: 2 });
+      assert.strictEqual(live.state, state, `a gap of ${gap} ms`);
+      assert.strictEqual(live.result.rows.length, rows, `a gap of ${gap} ms`);
+      await store.close();
+    }
+  });
+
+  it('an omit fill counts the folded buckets and the rows it keeps, as before', async function () {
+    const store = await open({ live: { maxMaintained: 100 } });
+    const readings = store.collection('readings');
+    await readings.insert({ id: 'a', series: 's', at: T0, value: 1 });
+    await readings.insert({ id: 'b', series: 's', at: T0 + 5_000_000, value: 2 });
+    const live = await readings.live(bucketDoc({ every: 1000 }), { eventTime: EVENT_TIME });
+    assert.strictEqual(live.result.rows.length, 2);
+    assert.strictEqual(live.state, 'live');
+    await store.close();
+  });
+});
+
+describe('an event-time view keeps its own copy of a reading', function () {
+  for (const [label, document] of [['bucket', bucketDoc({ aggregate: 'sum' })], ['rolling', rollingDoc({ aggregate: 'sum' })]]) {
+    it(`${label}: an observer that rewrites its record does not change what a later fold adds`,
+      async function () {
+        const store = await open();
+        const readings = store.collection('readings');
+        const live = await readings.live(document, { eventTime: EVENT_TIME });
+        store.observe((record) => {
+          for (const operation of record.patch) {
+            if (operation.value !== null && typeof operation.value === 'object') operation.value.value = 1000;
+          }
+        });
+        await readings.insert({ id: 'a', series: 's', at: T0 + 1000, value: 1 });
+        await readings.insert({ id: 'b', series: 's', at: T0 + 2000, value: 2 });
+        assert.deepStrictEqual(live.result.rows.map((row) => row.value), label === 'bucket' ? [3] : [1, 3]);
+        await store.close();
+      });
+  }
+});

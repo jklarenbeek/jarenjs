@@ -161,7 +161,13 @@ function itemCursor(spec, synchronous) {
   const boundary = () => {
     if (signal?.aborted) throw aborted();
     if (done) return;
-    if (spec.deadline !== undefined && spec.now() > spec.deadline)
+    if (spec.deadline === undefined) return;
+    const now = spec.now();
+    // the clock is host code and may abort the signal itself; the abort
+    // already released the statement, so the pull must say so rather than
+    // end quietly as an exhausted cursor
+    if (signal?.aborted) throw aborted();
+    if (now > spec.deadline)
       throw new DbRuntimeError('JD2075',
         `the deadline passed before the next row (${new Date(spec.deadline).toISOString()}); `
         + 'the statement was released at a row boundary');
