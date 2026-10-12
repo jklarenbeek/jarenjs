@@ -218,7 +218,8 @@ if (chainEdgeLeak.length > 0)
 // Raised to 217,400 (measured 217345): core's deepFreeze, which every pen shares, freezing beneath an already frozen root with a memo of whole frozen subtrees and a cycle guard, and the sequence code it carries add 552.
 // Raised to 218,500 (measured 218468): core's corrected date, month, grapheme and moving-average helpers the engine carries add 1123.
 // Raised to 218,700 (measured 218633): the engine's group-key identity for bigints and undefined members add 165.
-if (chainBytes > 218700)
+// Raised to 219,200 (measured 219196): core's occupied-bucket resample walk and nearest-rank quantiles the engine carries add 563.
+if (chainBytes > 219200)
   throw new Error(`The chain bundle grew to ${chainBytes} bytes.`);
 
 console.log(`Tree-shaking smoke test passed (${chainBytes} byte chain bundle; no schema-pen module, no client module, no store/validator/formats bytes).`);
@@ -561,7 +562,8 @@ if (asyncLiveLeak.length)
 // numeric exclusive bound, shared by the engine's validator, add 283.
 // Raised to 952,800 (measured 952715): relation names read as own members in the db client, misspelt durable and graph options refused (about 1600), and native buckets that count rows without a reading, event-time refusals and a read-only capture record shared by live views (about 700) add 2267.
 // Raised to 954,500 (measured 954485): the store's closed options, relation drops beside renames and derived foreign keys (about 1340), and the engine's group-key identity for bigints and undefined members (about 300) add 1770.
-if (clientBytes > 954500)
+// Raised to 955,100 (measured 955085): core's occupied-bucket resample walk, nearest-rank quantiles and the WKT writer's validation add 600.
+if (clientBytes > 955100)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 
