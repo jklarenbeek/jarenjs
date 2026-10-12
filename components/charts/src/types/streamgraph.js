@@ -79,7 +79,13 @@ export function buildStreamgraphAST(data, config = {}) {
   const yScale = scaleLinear(yMin, yMax === yMin ? yMin + 1 : yMax);
 
   // the x extent, kept to a span a double can measure
-  const xExtent = xs !== null ? measurableSpan(Math.min(...xs), Math.max(...xs)) : null;
+  let xMin = Infinity;
+  let xMax = -Infinity;
+  for (const x of xs ?? []) {
+    if (x < xMin) xMin = x;
+    if (x > xMax) xMax = x;
+  }
+  const xExtent = xs !== null ? measurableSpan(xMin, xMax) : null;
   const uOf = xExtent !== null
     ? scaleLinear(xExtent[0], xExtent[1] === xExtent[0] ? xExtent[0] + 1 : xExtent[1])
     : null;

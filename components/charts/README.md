@@ -92,7 +92,8 @@ axisTicksTime(Date.UTC(1970, 0, 1), Date.UTC(5000, 0, 1));  // → 2000, 3000, 4
 The full contract is `schemas/chart-definition.schema.json`.
 
 **Values a chart cannot draw are dropped, not printed.** Bar and line skip
-a non-finite value; a pie drops every slice whose value is not a finite
+a non-finite value, and a bar chart skips a value of zero or less as well (its
+bars rise from a zero baseline, so a negative value draws no bar); a pie drops every slice whose value is not a finite
 number of at least zero, so the shares are of what is left — such a slice
 used to be summed into the total and printed as `a: NaN (NaN%)` or as a
 share above 100%. A domain wider than a double can measure — data at

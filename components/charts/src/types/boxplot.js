@@ -113,8 +113,13 @@ export function buildBoxplotAST(data, config = {}) {
   let lo = Infinity;
   let hi = -Infinity;
   for (const { stats } of input) {
-    const min = Math.min(stats.lo, ...stats.outliers);
-    const max = Math.max(stats.hi, ...stats.outliers);
+    // folded one by one: an argument list has a limit, a box's outliers do not
+    let min = stats.lo;
+    let max = stats.hi;
+    for (const v of stats.outliers) {
+      if (v < min) min = v;
+      if (v > max) max = v;
+    }
     if (min < lo) lo = min;
     if (max > hi) hi = max;
   }

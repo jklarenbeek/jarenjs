@@ -162,11 +162,14 @@ export function renderPieAST(ast, theme, hash, options = {}) {
     ]);
   });
 
+  /** @type {any[]} */
   const children = [];
   if (ast.title) {
     children.push(textAt(cx, 24, ast.title, fs + 2, { 'font-weight': 'bold', 'text-anchor': 'middle', fill: textColor }));
   }
-  children.push(...slices, ...legend);
+  // not `push(...slices)`: an argument list has a limit, a pie of any size does not
+  for (const part of slices) children.push(part);
+  for (const part of legend) children.push(part);
   const width = legendX + legendW + 20;
   const height = 2 * R + 70;
   return svgRoot(rootClass, width, height, theme, children, keyPrefix + hash);
