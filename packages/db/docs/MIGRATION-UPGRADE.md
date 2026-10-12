@@ -723,10 +723,10 @@ the query engine, now refuse by code or answer what the engine answers:
   `$groupby` key. It answers now, and so does every compound and every ordered
   distinct that reads such a leaf, because a key is read as the double the
   engine parses and the driver is never asked for the integer; the answers are
-  the engine's. A member that holds such numbers is still refused `JD2003` on
-  SQLite where it is read as a value and not as a key: a plain projection of
-  it, a native `$min` or `$max` of it, and a grouped `$min` or `$max` of it, as
-  they were.
+  the engine's. A member that holds such numbers was still refused `JD2003` on
+  SQLite where it was read as a value and not as a key (a plain projection of
+  it, a native `$min` or `$max` of it, whole, grouped or in a bucket); every one
+  of those reads is the double the engine holds now.
 - A member named `__proto__` in a projection, in the return of a `$groupby`, in
   the aggregates of a temporal bucket, in the properties of an entity read back
   from its row and in the document a change capture builds from a row was
@@ -810,6 +810,13 @@ the query engine, now refuse by code or answer what the engine answers:
   rewrote its record rewrote what the registrations served; each registration
   reads its own copy of the part of an inserted document it keeps, made
   only for a row its filter admits.
+
+- A native `$min` or `$max` of a `number` or `integer` member, and a native
+  projection of one, raised `JD2003` on SQLite when a stored whole number was
+  past ±(2^53 - 1) (`1e16`, `2^62`), where the engine answers and PostgreSQL
+  did. They answer the double the engine holds now, whole, grouped, in a
+  temporal bucket and in a projection or a cursor over one; a number inside
+  the range reads back as it did.
 
 ## 8. Stricter models, keys and staged writes
 

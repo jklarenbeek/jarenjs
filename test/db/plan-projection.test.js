@@ -57,7 +57,7 @@ describe('a single member path projects into the statement', () => {
       const explained = await rows.explain(document);
       assert.strictEqual(explained.mode, 'native', path);
       assert.deepStrictEqual(explained.projection, { path: path.slice(4).split('.') }, path);
-      assert.match(explained.sql, /END AS "v", json_type\("doc", '\$\..*'\) AS "t"/);
+      assert.match(explained.sql, / AS "v", .*json_type\("doc", '\$\..*'\).* AS "t"/);
       assert.doesNotMatch(explained.sql, /AS "doc"/, `${path}: the whole document is not read`);
       const answer = await Promise.resolve(rows.execute(document));
       assert.deepStrictEqual(answer, engine(document), path);

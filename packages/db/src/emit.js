@@ -437,13 +437,18 @@ export function emitPlan(plan, dialect, physical) {
     const type = holdsNumber ? numberOnce(typeOf(ref)) : typeOf(ref);
     if (numeric && ref.mixed !== true)
       return `${dialect.jsonExtract(docOf(ref), pathText(ref), 'double')} AS ${q(`v${suffix}`)}, ${type} AS ${q(`t${suffix}`)}`;
-    return `CASE WHEN ${typeOf(ref)} IN (${sl('object')}, ${sl('array')}) `
+    const read = `CASE WHEN ${typeOf(ref)} IN (${sl('object')}, ${sl('array')}) `
       + `THEN ${dialect.jsonText(dialect.jsonExtract(docOf(ref), pathText(ref)))} `
       // a SCALAR leaf comes back as the value the decoder reads: the
       // engine's own scalar where it has one, its text where every
       // member is one JSON type and a CASE could not answer two
       + `ELSE ${dialect.jsonExtract(docOf(ref), pathText(ref), holdsNumber ? 'key' : 'scalar')} `
-      + `END AS ${q(`v${suffix}`)}, ${type} AS ${q(`t${suffix}`)}`;
+      + 'END';
+    // a member that holds numbers and nothing else comes back as the
+    // double the engine holds, where the driver cannot return the integer
+    // text past 2^53 it is stored as
+    const wide = !groupKey && ref.mixed !== true && isNumericType(ref.type);
+    return `${wide ? dialect.numberRead(read) : read} AS ${q(`v${suffix}`)}, ${type} AS ${q(`t${suffix}`)}`;
   };
 
   const sl = dialect.stringLiteral;
@@ -477,6 +482,19 @@ export function emitPlan(plan, dialect, physical) {
     }
     return valueOf(ref, kind);
   };
+
+  /**
+   * An extreme of a member that holds numbers and nothing else, read back
+   * as the double the engine compares: a stored integer text past 2^53 is
+   * no number every driver can hand back. Cast beside the aggregate, so
+   * the index that answers it is still the one the statement uses.
+   * @param {string} fn
+   * @param {any} ref
+   * @param {string} aggregateSql
+   * @returns {string}
+   */
+  const extremeRead = (fn, ref, aggregateSql) => ((fn === 'min' || fn === 'max')
+    && ref.mixed !== true && isNumericType(ref.type) ? dialect.numberRead(aggregateSql) : aggregateSql);
 
   /**
    * A whole or grouped aggregate's argument: a sum or an average folds
@@ -834,15 +852,16 @@ export function emitPlan(plan, dialect, physical) {
     : plan.group !== null
       ? [...plan.group.keys.map((key, i) => projectedPair(key.ref, `k${i}`, true)),
         ...plan.group.aggregates.map((entry, i) =>
-          `${groupedAggregate(entry, dialect.groupAggregate(entry.fn, accumulated(entry.fn, entry.ref)))} AS ${q(`a${i}`)}`),
+          `${groupedAggregate(entry, extremeRead(entry.fn, entry.ref,
+            dialect.groupAggregate(entry.fn, accumulated(entry.fn, entry.ref))))} AS ${q(`a${i}`)}`),
         // an integer sum or average answers only beside its exactness guard
         ...plan.group.aggregates.flatMap((entry, i) => (entry.fn === 'sum' || entry.fn === 'avg'
           ? [`${exactSum(dialect, foldValue(entry.fn, entry.ref))} AS ${q(`_safe${i}`)}`] : []))].join(', ')
       : plan.bucket !== null
         ? [`${bucketSql} AS ${q(plan.bucket.as)}`,
         ...plan.bucket.aggregates.map((entry, i) =>
-          `${dialect.groupAggregate(entry.fn, bucketGuardNames[i] === null
-            ? foldValue(entry.fn, entry.ref) : accumulated(entry.fn, entry.ref))} `
+          `${extremeRead(entry.fn, entry.ref, dialect.groupAggregate(entry.fn, bucketGuardNames[i] === null
+            ? foldValue(entry.fn, entry.ref) : accumulated(entry.fn, entry.ref)))} `
           + `AS ${q(entry.as)}`),
         // an integer sum or average answers only beside its exactness
         // guard, as it does in any other grouping
@@ -875,8 +894,8 @@ export function emitPlan(plan, dialect, physical) {
           : plan.aggregate.fn === 'registered'
             ? `${plan.aggregate.sql}(${valueOf(plan.aggregate.ref,
               kindOf(plan.aggregate.ref))}) AS ${q('value')}`
-            : `${plan.aggregate.fn.toUpperCase()}(`
-              + `${accumulated(plan.aggregate.fn, plan.aggregate.ref)}) AS ${q('value')}`
+            : `${extremeRead(plan.aggregate.fn, plan.aggregate.ref, `${plan.aggregate.fn.toUpperCase()}(`
+              + `${accumulated(plan.aggregate.fn, plan.aggregate.ref)})`)} AS ${q('value')}`
               + (plan.aggregate.fn === 'sum' || plan.aggregate.fn === 'avg'
                 ? `, ${exactSum(dialect, foldValue(plan.aggregate.fn, plan.aggregate.ref))} AS ${q('_safe')}` : '');
 

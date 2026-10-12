@@ -240,6 +240,7 @@ export function stringLiteral(text) {
  *   physicalValueType?: (codec: string, sql: string) => string,
  *   physicalDifferent?: (codec: string, left: string, right: string) => string,
  *   numberCast?: (sql: string) => string,
+ *   numberRead?: (sql: string) => string,
  *   distinct?: (left: string, right: string) => string,
  *   mutationRowGuard?: (count: string, limit: number) => string,
  *   boundMutation?: (sql: string, limit: number) => string,
@@ -920,6 +921,13 @@ export function createDialect(spec) {
     physicalValueType: spec.physicalValueType,
     physicalDifferent: spec.physicalDifferent,
     numberCast: spec.numberCast ?? ((sql) => `CAST(${sql} AS REAL)`),
+    /**
+     * A JSON number a statement hands BACK to the host, as the double the
+     * engine holds. An engine whose driver cannot return an integer past
+     * 2^53 as a JavaScript number casts it here; an engine that answers a
+     * number as it stores it leaves the expression alone.
+     */
+    numberRead: spec.numberRead ?? ((sql) => sql),
     distinct: spec.distinct ?? ((left, right) => `${left} IS NOT ${right}`),
     mutationRowGuard: spec.mutationRowGuard,
     boundMutation: spec.boundMutation,

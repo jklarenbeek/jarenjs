@@ -601,15 +601,6 @@ what each does is its own documentation's job
   store order in a fresh run
   ([LIVE-FORMAT §13.3](../packages/db/docs/LIVE-FORMAT.md)). Wanted: a re-run
   for a reading not typed `integer`, or a view that adds in the kernel's order.
-- [ ] **SQLite's native `$min`/`$max` over a `number` holding large
-  integer-valued doubles raises.** Over integer-valued doubles past 2^53
-  (`1e16`, `2^62`) the driver's integer read raises `JD2003` where the engine
-  answers: `$max` over `1e16, 1` on a plain collection, whole and grouped, and
-  in temporal buckets; a native projection of such a member; and a grouped
-  `$min`/`$max` over an `integer` member past 2^53 (group keys and `$distinct`
-  leaves already read as doubles). PostgreSQL answers. `$min`/`$max` stay
-  native, so this is a defect of the read, not of the plan. Wanted: a read that
-  returns the double, for an aggregate's argument and for a projected value.
 - [ ] **Join tables are not queryable roots.** A many-to-many join table has no
   root to bind: `u.labels` as a chain hop is `JL0105`, and a membership is read
   through `include` (`client.entities.User.include((u) => u.labels)` loads the
@@ -652,6 +643,11 @@ what each does is its own documentation's job
   surrogates answer differently from the engine, while the live strategies keep
   the true value, so a live result and `execute` differ. Wanted: those operands
   stay residual, or the dialect encodes them exactly.
+  An exact read of a stored lone surrogate would guard every SQLite text leaf
+  of a projection, group key or distinct with a byte-pattern test, which makes
+  those reads measurably slower for text that never holds one, and an
+  `$ends-with` that compares bytes to survive a U+0000 answers false under
+  `$not` for the empty string; both mechanisms were tried and withdrawn.
 - [ ] **A store profile bounds query documents, not every read.** On a store
   opened with a profile, a point read (`get`, collection or entity) answers the
   row of any tenant, `store.observe`, capture and replication feeds deliver every

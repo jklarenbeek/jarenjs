@@ -141,7 +141,7 @@ describe('golden SQL (the truth-table forms)', () => {
       + 'MAX(ABS(CAST("gx_age" AS REAL))) <= 9007199254740991 / COUNT("gx_age")) AS "_safe" FROM "users"');
     const max = emitFor(
       { $max: { $for: { it: '$[*]' }, $return: '$it.age' } }, sqliteDialect);
-    assert.strictEqual(max.sql, 'SELECT MAX("gx_age") AS "value" FROM "users"');
+    assert.strictEqual(max.sql, 'SELECT CAST(MAX("gx_age") AS REAL) AS "value" FROM "users"');
   });
 });
 

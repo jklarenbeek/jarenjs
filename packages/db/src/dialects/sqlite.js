@@ -455,6 +455,9 @@ export const sqliteDialect = createDialect({
   groupAggregate: (fn, valueSql) => (valueSql === null
     ? 'COUNT(*)'
     : `${{ sum: 'SUM', avg: 'AVG', min: 'MIN', max: 'MAX' }[fn]}(${valueSql})`),
+  // an integer text past 2^53 is stored as an INTEGER the driver refuses to
+  // hand back (JD2003), where the engine holds the double nearest to it
+  numberRead: (sql) => `CAST(${sql} AS REAL)`,
   rowIdentity,
   // membership of the row identity in a bound list — the fetch of a
   // k-nearest plan's candidates. `IN` over the rowid is a primary-key

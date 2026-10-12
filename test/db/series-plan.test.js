@@ -204,7 +204,7 @@ describe('the emitted statements: one ladder, written once', () => {
     const emitted = sqlOf(plan(BUCKET));
     assert.match(emitted.sql,
       /SELECT \("gx_at" - \(\(\("gx_at" - \?\) % \? \+ \?\) % \?\)\) AS "at"/);
-    assert.match(emitted.sql, /MAX\(jsonb_extract\("doc", '\$\."value"'\)\) AS "value"/);
+    assert.match(emitted.sql, /CAST\(MAX\(jsonb_extract\("doc", '\$\."value"'\)\) AS REAL\) AS "value"/);
     assert.match(emitted.sql, /COUNT\(\*\) AS "count"/);
     assert.match(emitted.sql, /GROUP BY "at" ORDER BY "at" ASC$/);
     // the ladder's parameters come FIRST and in text order: the origin
