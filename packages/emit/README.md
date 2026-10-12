@@ -267,10 +267,11 @@ subpath:
 - a `null` target withholds its subpaths, under a matched condition too
   (`{ "browser": null, "default": "./node.js" }` serves a browser nothing),
   and a fallback array takes its first target Node takes;
-- a target Node refuses (outside `./`, or through `..` or `node_modules`) is
-  reported, not mapped;
-- a package without `exports` serves its `main`, read from the package root,
-  or else its `index.js`.
+- a target Node refuses (outside `./`, or through `..` or `node_modules`) is reported, not mapped;
+- a package without `exports` serves its `main`, read from the package root:
+  the first of `main`, `main.js` and `main/index.js` that is a file, else its
+  `index.js` (Node's `.json` and `.node` candidates are not copied, a browser
+  map serving only JavaScript).
 
 `--prefix` is the URL `node_modules` is served under, so a dependency
 installed nested is served from where it sits. A package installed twice — a

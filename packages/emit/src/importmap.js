@@ -340,7 +340,8 @@ export function scanImports(source) {
  * (`default` matches whatever the conditions are, as it does in Node); an
  * array, its first entry that resolves to a target Node takes, past a
  * `null`, an unmatched entry and a target Node refuses — and, when none
- * does, its last refusal or `null`.
+ * does, its last refusal or `null`. A number or a boolean names nothing
+ * and is passed over like an unmatched key.
  * @param {any} value
  * @param {readonly string[]} conditions
  * @returns {string | null}
@@ -354,7 +355,8 @@ export function exportTarget(value, conditions) {
  * apart what `exportTarget` folds into null: a string target, `null` when
  * the value withholds the subpath, `undefined` when no condition matches
  * (the enclosing object then reads its next key). A target that is no
- * string, array, object or null is passed over like an unmatched one.
+ * string, array, object or null is passed over like an unmatched one (Node
+ * raises `ERR_INVALID_PACKAGE_TARGET` for it; a map does not refuse it).
  * @param {any} value
  * @param {readonly string[]} conditions
  * @returns {string | null | undefined}
@@ -523,6 +525,28 @@ function legacyMain(main) {
 }
 
 /**
+ * The `main` a package without `exports` serves from `dir`, found as Node's
+ * legacy main resolution finds it: the first of `main`, `main.js` and
+ * `main/index.js` that is a file, else `./index.js`, as Node falls back
+ * to it (a package with no such file reports it unresolved). Node also
+ * tries `.json` and `.node` candidates; a browser map serves only
+ * JavaScript, so they are not copied. A map cannot probe the file system
+ * at load time as Node does, so the probe happens here, once, from the
+ * installed tree.
+ * @param {string} dir
+ * @param {unknown} main
+ * @returns {string}
+ */
+function legacyEntry(dir, main) {
+  const written = legacyMain(main);
+  const isFile = (/** @type {string} */ path) => existsSync(join(dir, path)) && statSync(join(dir, path)).isFile();
+  for (const candidate of [written, `${written}.js`, `${written}/index.js`]) {
+    if (isFile(candidate)) return candidate;
+  }
+  return './index.js';
+}
+
+/**
  * The stems `./folder/prefix*suffix` matches among the files `listFiles`
  * names below the folder — a stem may hold a `/`, as Node's `*` does —
  * sorted; null when the folder is absent or lies outside the package.
@@ -601,8 +625,9 @@ const RE_SCRIPT = /\.(?:m?js)$/;
  * `imports[specifier] = prefix + <the copy's path below
  * root/node_modules> + '/' + path` — a dependency installed nested is
  * served from its nested place, never from a root copy no dependent
- * reaches. A target Node refuses is reported in `unresolved`, a `null`
- * target maps nothing. A package installed more than once is reported in
+ * reaches. A target Node refuses is reported in `unresolved`, a `null` target maps nothing, and a package
+ * without `exports` serves the first of `main`, `main.js` and
+ * `main/index.js` that is a file, else `./index.js`. A package installed more than once is reported in
  * `duplicates`. An import of an optional peer that is not installed is
  * reported in `optional`, not in `unresolved`: a page that never loads the
  * importing file never fetches it. Node built-ins (`node:fs`, `fs`) are
@@ -692,7 +717,9 @@ export function buildImportMap(options) {
   const entryFiles = [];
   for (const name of names) {
     const dir = /** @type {string} */ (chosen.get(name));
-    const entries = expandExports(manifests.get(name), { conditions, listFiles: (folder) => listDirectory(join(dir, folder)) });
+    const manifest = manifests.get(name);
+    const entries = expandExports(manifest.exports == null ? { ...manifest, main: legacyEntry(dir, manifest.main) } : manifest,
+      { conditions, listFiles: (folder) => listDirectory(join(dir, folder)) });
     for (const entry of entries) {
       const specifier = entry.key === '.' ? name : name + entry.key.slice(1);
       // a wildcard the files could not make finite, or a target Node refuses: nothing a browser could load

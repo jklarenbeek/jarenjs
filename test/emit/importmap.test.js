@@ -211,6 +211,55 @@ describe('buildImportMap — an installed tree, served unbundled', () => {
     finally { fs.rmSync(root, { recursive: true, force: true }); }
   });
 
+  it('resolves a main that names no file as Node does: main.js, then main/index.js, then index.js', () => {
+    const root = installTree({
+      'node_modules/@x/bare/package.json': { name: '@x/bare', version: '1.0.0', main: 'lib/entry' },
+      'node_modules/@x/bare/lib/entry.js': 'export const where = 1;\n',
+      'node_modules/@x/dir/package.json': { name: '@x/dir', version: '1.0.0', main: './lib' },
+      'node_modules/@x/dir/lib/index.js': 'export const where = 2;\n',
+      'node_modules/@x/both/package.json': { name: '@x/both', version: '1.0.0', main: 'lib' },
+      'node_modules/@x/both/lib.js': 'export const where = 3;\n',
+      'node_modules/@x/both/lib/index.js': 'export const where = 4;\n',
+      'node_modules/@x/exact/package.json': { name: '@x/exact', version: '1.0.0', main: 'entry' },
+      'node_modules/@x/exact/entry': 'export const where = 5;\n',
+      'node_modules/@x/exact/entry.js': 'export const where = 6;\n',
+      'node_modules/@x/missing/package.json': { name: '@x/missing', version: '1.0.0', main: 'gone.js' },
+      'node_modules/@x/missing/index.js': 'export const where = 7;\n',
+      'node_modules/@x/none/package.json': { name: '@x/none', version: '1.0.0', main: 'gone' },
+    });
+    try {
+      const names = ['bare', 'dir', 'both', 'exact', 'missing', 'none'].map((n) => `@x/${n}`);
+      const { imports, unresolved } = buildImportMap({ packages: names, root, prefix: '/v/' });
+      assert.deepStrictEqual(imports, {
+        '@x/bare': '/v/@x/bare/lib/entry.js',
+        '@x/both': '/v/@x/both/lib.js',
+        '@x/dir': '/v/@x/dir/lib/index.js',
+        '@x/exact': '/v/@x/exact/entry',
+        '@x/missing': '/v/@x/missing/index.js',
+        '@x/none': '/v/@x/none/index.js',
+      });
+      // the one main that reaches no file at all stays the index.js Node would also try last
+      assert.deepStrictEqual(unresolved.map((u) => u.specifier), ['./index.js']);
+    }
+    finally { fs.rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it('passes over an export target that is a number or a boolean, mapping and exiting as before', () => {
+    const root = installTree({
+      'node_modules/@x/num/package.json': { name: '@x/num', version: '1.0.0', exports: { '.': './a.js', './n': 5, './b': { browser: true, default: './a.js' } } },
+      'node_modules/@x/num/a.js': 'export const where = 1;\n',
+    });
+    try {
+      const { imports, unresolved } = buildImportMap({ packages: ['@x/num'], root, prefix: '/v/' });
+      assert.deepStrictEqual(imports, { '@x/num': '/v/@x/num/a.js', '@x/num/b': '/v/@x/num/a.js' });
+      assert.deepStrictEqual(unresolved, []);
+      const run = runCli(root, ['--packages', '@x/num', '--prefix', '/v/']);
+      assert.strictEqual(run.status, 0, run.stderr);
+      assert.deepStrictEqual(JSON.parse(run.stdout).imports, imports);
+    }
+    finally { fs.rmSync(root, { recursive: true, force: true }); }
+  });
+
   it('maps nothing a null under a matched condition withholds, and a fallback array\'s first target Node takes', () => {
     const root = installTree({
       'node_modules/@x/withheld/package.json': { name: '@x/withheld', version: '1.0.0', exports: {

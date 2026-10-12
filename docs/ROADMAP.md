@@ -1298,16 +1298,13 @@ still open is listed here, each with its reason.
 
 ## Benchmarks & tooling
 
-- [ ] **The import map reads `exports` and `main` as Node does, short of three
-  edges.** A `main` that names a missing file is taken literally, where Node also
-  tries `main.js` and `main/index.js` before `./index.js`; an export target that is
-  a number or a boolean is passed over, where Node raises
-  `ERR_INVALID_PACKAGE_TARGET`; and following `optionalDependencies` can reach a
-  platform-binary package with no JavaScript entry, whose `./index.js` is then
-  reported unresolved. None occurs in the suite's own closure; each needs a
-  deliberate rule for which of Node's fallbacks a browser map should copy, since a
-  map cannot probe the file system at load time as Node does.
-
+- [ ] **The import map passes over two things Node refuses or lacks.** An export
+  target that is a number or a boolean is passed over, where Node raises
+  `ERR_INVALID_PACKAGE_TARGET`; refusing it would make `jaren-emit importmap`
+  exit 1 on a manifest that builds a working map today, so it needs a deliberate
+  decision. And following `optionalDependencies` can reach a platform-binary
+  package with no JavaScript entry, whose `./index.js` is then reported
+  unresolved. Neither occurs in the suite's own closure.
 - [ ] **`vector.js`'s largest leg needs about 1.5 GB.** 50,000 × 768 holds one
   in-memory SQLite database of roughly a gigabyte beside a 153 MB resident
   matrix, and finishes in about ninety seconds; a memory-constrained runner
