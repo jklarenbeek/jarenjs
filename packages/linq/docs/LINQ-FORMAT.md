@@ -44,13 +44,13 @@ is the index of those guides, and it is how a reader reaches any of them.
 | [MIGRATION-PEN.md](MIGRATION-PEN.md) | 957 | `./migration` — `$migration` 0.2 documents: exact model endpoints and the ordered steps the runner takes. **Read it when** you are moving a store from one model to the next |
 | [CONTRACT-PEN.md](CONTRACT-PEN.md) | 1,226 | `./contract` — `$contract` 0.1 documents: the operations, their schemas, their declared behavior and their REST binding. **Read it when** you are declaring an API and want its client, its server and its tools typed from one document |
 | [FLOW-PEN.md](FLOW-PEN.md) | 1,050 | `./flow` — `jaren-fsm` 0.1 machines and `jaren-dag` 0.1 dataflows, every query-valued member captured. **Read it when** you are declaring a state machine or a dependency graph of tasks |
-| [APP-PEN.md](APP-PEN.md) | 1,312 | `./app` — the `jaren-app` 0.1 document `createApp` runs, and the JSON Schema of its state beside it. **Read it when** you are declaring a whole application: state, view, actions, effects |
+| [APP-PEN.md](APP-PEN.md) | 1,314 | `./app` — the `jaren-app` 0.1 document `createApp` runs, and the JSON Schema of its state beside it. **Read it when** you are declaring a whole application: state, view, actions, effects |
 | [FORMS-PEN.md](FORMS-PEN.md) | 947 | `./forms` — the `x-form` vocabulary on JSON Schema, and `assertOnSubmit()`, the same rules' layer-3 `$query` twin. **Read it when** you are turning a schema into a form |
 | [MESSAGES-PEN.md](MESSAGES-PEN.md) | 105 | `./messages` — JSON message catalogs and message references. **Read it when** you want checked translation keys, placeholders and explicit completeness. |
 | [JTLT-PEN.md](JTLT-PEN.md) | 83 | `./jtlt` — text templates with JSLT dispatch and query expressions. **Read it when** you want to author Markdown, XML or source text as portable JSON. |
-| [PROJECT-PEN.md](PROJECT-PEN.md) | 81 | `./project` — Studio projects with named, typed files. **Read it when** you want a portable editor workspace containing documents written by several pens. |
-| [CHARTS-PEN.md](CHARTS-PEN.md) | 97 | `./charts` — chart-definition documents for every chart kind. **Read it when** you want typed chart data and presentation options that `compileChart` consumes. |
-| [DB-CLIENT.md](DB-CLIENT.md) | 1,171 | `./db` — the client: the store's typed front door, not a pen, and the package's one runtime edge. **Read it when** you are reading or writing rows: `load`, `include`, `link`/`unlink`, `live` |
+| [PROJECT-PEN.md](PROJECT-PEN.md) | 84 | `./project` — Studio projects with named, typed files. **Read it when** you want a portable editor workspace containing documents written by several pens. |
+| [CHARTS-PEN.md](CHARTS-PEN.md) | 98 | `./charts` — chart-definition documents for every chart kind. **Read it when** you want typed chart data and presentation options that `compileChart` consumes. |
+| [DB-CLIENT.md](DB-CLIENT.md) | 1,195 | `./db` — the client: the store's typed front door, not a pen, and the package's one runtime edge. **Read it when** you are reading or writing rows: `load`, `include`, `link`/`unlink`, `live` |
 | [FORMULA-PEN.md](FORMULA-PEN.md) | 41 | `./formula` — author versioned saved JSON Query profiles without executing them. |
 <!--/fact-->
 
@@ -211,17 +211,17 @@ and the bundle is the byte count the tree-shaking probe builds.
 | [MODEL-PEN.md](MODEL-PEN.md) | `./model` | 1,242 | 31 | 7 | 3 | 51,102 B |
 | [JSLT-PEN.md](JSLT-PEN.md) | `./jslt` | 980 | 17 | 8 | 3 | 21,878 B |
 | [MIGRATION-PEN.md](MIGRATION-PEN.md) | `./migration` | 957 | 13 | 5 | 4 | 28,005 B |
-| [CONTRACT-PEN.md](CONTRACT-PEN.md) | `./contract` | 1,226 | 38 | 6 | 3 | 52,562 B |
+| [CONTRACT-PEN.md](CONTRACT-PEN.md) | `./contract` | 1,226 | 38 | 6 | 3 | 52,871 B |
 | [FLOW-PEN.md](FLOW-PEN.md) | `./flow` | 1,050 | 16 | 7 | 3 | 21,978 B |
-| [APP-PEN.md](APP-PEN.md) | `./app` | 1,312 | 24 | 7 | 4 | 54,359 B |
+| [APP-PEN.md](APP-PEN.md) | `./app` | 1,314 | 24 | 7 | 4 | 54,314 B |
 | [FORMS-PEN.md](FORMS-PEN.md) | `./forms` | 947 | 18 | 6 | 3 | 43,389 B |
 | [MESSAGES-PEN.md](MESSAGES-PEN.md) | `./messages` | 105 | 9 | 2 | 1 | 13,999 B |
-| [JTLT-PEN.md](JTLT-PEN.md) | `./jtlt` | 83 | 13 | 1 | 2 | 18,420 B |
-| [PROJECT-PEN.md](PROJECT-PEN.md) | `./project` | 81 | 9 | 1 | 1 | 4,441 B |
-| [CHARTS-PEN.md](CHARTS-PEN.md) | `./charts` | 97 | 21 | 1 | 1 | 6,279 B |
-| [DB-CLIENT.md](DB-CLIENT.md) | `./db` | 1,171 | 45 | 4 | 2 | 950,448 B |
+| [JTLT-PEN.md](JTLT-PEN.md) | `./jtlt` | 83 | 13 | 1 | 2 | 18,592 B |
+| [PROJECT-PEN.md](PROJECT-PEN.md) | `./project` | 84 | 9 | 1 | 1 | 4,612 B |
+| [CHARTS-PEN.md](CHARTS-PEN.md) | `./charts` | 98 | 21 | 1 | 1 | 6,447 B |
+| [DB-CLIENT.md](DB-CLIENT.md) | `./db` | 1,195 | 45 | 4 | 2 | 952,715 B |
 | [FORMULA-PEN.md](FORMULA-PEN.md) | `./formula` | 41 | 2 | — | — | 11,183 B |
-| **16 documents** | | **13,540** | **372** | **73** | | |
+| **16 documents** | | **13,570** | **372** | **73** | | |
 <!--/fact-->
 
 A pen whose mapping rows are far below its worked examples is a pen
@@ -270,15 +270,15 @@ it and each document publishes it. The rounded column is what
 | `@jarenjs/linq/model` | [MODEL-PEN.md](MODEL-PEN.md) | 51,102 B | 51 kB |
 | `@jarenjs/linq/jslt` | [JSLT-PEN.md](JSLT-PEN.md) | 21,878 B | 22 kB |
 | `@jarenjs/linq/migration` | [MIGRATION-PEN.md](MIGRATION-PEN.md) | 28,005 B | 28 kB |
-| `@jarenjs/linq/contract` | [CONTRACT-PEN.md](CONTRACT-PEN.md) | 52,562 B | 53 kB |
+| `@jarenjs/linq/contract` | [CONTRACT-PEN.md](CONTRACT-PEN.md) | 52,871 B | 53 kB |
 | `@jarenjs/linq/flow` | [FLOW-PEN.md](FLOW-PEN.md) | 21,978 B | 22 kB |
-| `@jarenjs/linq/app` | [APP-PEN.md](APP-PEN.md) | 54,359 B | 54 kB |
+| `@jarenjs/linq/app` | [APP-PEN.md](APP-PEN.md) | 54,314 B | 54 kB |
 | `@jarenjs/linq/forms` | [FORMS-PEN.md](FORMS-PEN.md) | 43,389 B | 43 kB |
 | `@jarenjs/linq/messages` | [MESSAGES-PEN.md](MESSAGES-PEN.md) | 13,999 B | 14 kB |
-| `@jarenjs/linq/jtlt` | [JTLT-PEN.md](JTLT-PEN.md) | 18,420 B | 18 kB |
-| `@jarenjs/linq/project` | [PROJECT-PEN.md](PROJECT-PEN.md) | 4,441 B | 4 kB |
-| `@jarenjs/linq/charts` | [CHARTS-PEN.md](CHARTS-PEN.md) | 6,279 B | 6 kB |
-| `@jarenjs/linq/db` | [DB-CLIENT.md](DB-CLIENT.md) | 950,448 B | 950 kB |
+| `@jarenjs/linq/jtlt` | [JTLT-PEN.md](JTLT-PEN.md) | 18,592 B | 19 kB |
+| `@jarenjs/linq/project` | [PROJECT-PEN.md](PROJECT-PEN.md) | 4,612 B | 5 kB |
+| `@jarenjs/linq/charts` | [CHARTS-PEN.md](CHARTS-PEN.md) | 6,447 B | 6 kB |
+| `@jarenjs/linq/db` | [DB-CLIENT.md](DB-CLIENT.md) | 952,715 B | 953 kB |
 | `@jarenjs/linq/formula` | [FORMULA-PEN.md](FORMULA-PEN.md) | 11,183 B | 11 kB |
 <!--/fact-->
 
@@ -624,7 +624,7 @@ it says.
 
 | Method | Emits | Type reading | Status |
 |---|---|---|---|
-| `read({ input?, output, errors?, policy?, http?, doc? })` | `{ kind: 'read', … }` in §12.1's operation order, declared members only | `OperationDeclaration<'read', S>`; `kind` is the literal | native; a member the spec does not take, a missing `output`, or a non-string `doc`, `JL0101` |
+| `read({ input?, output, errors?, policy?, http?, doc? })` | `{ kind: 'read', … }` in §12.1's operation order, declared members only | `OperationDeclaration<'read', S>`; `kind` is the literal | native; a member the spec does not take, a missing `output`, or a non-string `doc`, `JL0101`; the plain objects and arrays of the spec are copied when the declaration is made (so are an `error()`'s `schema`): a write into the spec before `defineContract()` is no longer seen |
 | `command({ … })` | `{ kind: 'command', … }` | `OperationDeclaration<'command', S>` | native; the same three |
 | `subscribe({ … })` | `{ kind: 'subscribe', … }` — `output` is the SNAPSHOT schema (§17) | `OperationDeclaration<'subscribe', S>`; never opaque | native; the same three |
 
@@ -830,7 +830,7 @@ it says.
 | `bare(rules?)` | public rule array | shorthand | native |
 | `.rules(rules)`, `.rule(rule)` | replace or append rules | preserves envelope/shorthand | native |
 | `.output(method)` | output method; wraps a bare list in an envelope | text or XML | native |
-| `from(document)` | raw template with member order preserved | template | native |
+| `from(document)` | raw template with member order preserved; a fluent member on a root that is neither an object nor a rule list is `JL0101` (it used to spread a string into indexed members, or fail with a raw `TypeError`), and `.rule()` on an envelope without `rules` starts the list | template | native |
 | `.schema`, `.toJSON()` | frozen public JSON | document | native |
 
 ### The project pen — [PROJECT-PEN.md §2](PROJECT-PEN.md)
@@ -884,7 +884,7 @@ it says.
 | `where`, `select`, `orderBy`, …, `toArray`, `first`, `count`, … | the chain: `fromAsync(handle)` ([QUERY-PEN.md](QUERY-PEN.md) §8, §10) | every `AsyncSequence` operator and terminal, delegated — nothing is duplicated, every read is the chain's document and pushes down; the handle is iterable (`for await`); two handles of one client share a `scope`, so a join's inner may be `fromAsync(otherHandle)` |
 | `include(pick, spec?)` | the store's `load(spec)` (MODEL-FORMAT §10.4, §10.5) | opens a graph that EMITS the spec (§2.4, §3), typed `Loaded<>` by what it included |
 | `link(own, member, target)`, `unlink(…)` | the store's membership API (MODEL-FORMAT §11.7) | reads the relation table first — the member must be a many-to-many relation (`JL0107`, naming the kind it is, or the members that are) — then records through the store; `saveChanges()` writes the join rows |
-| `live(chain \| document, options?)` | the store's registration — `store.live` for an entity root, `collection.live` for a collection (LIVE-FORMAT §7) | hands over the chain's document and its `params()` bindings as the externals (`options.externals` merge over them, and a parameter an `in()` reads whole must be an array in the merged set — `JL0004`, so a placeholder the options override registers and a non-array override, which used to register unchecked, does not); the strategy, the reason and the maintenance are the store's |
+| `live(chain \| document, options?)` | the store's registration — `store.live` for an entity root, `collection.live` for a collection (LIVE-FORMAT §7) | hands over the chain's document and its `params()` bindings as the externals (`options.externals` merge over them, and a parameter an `in()` reads whole must be an array in the merged set — `JL0004`, so a placeholder the options override registers and a non-array override, which used to register unchecked, does not; options the store would refuse — `null`, a string, `externals` that is not a plain object — reach it as given and it refuses them with `JD0013`, where the merge used to accept an array or a string as bindings named `0`, `1`, …); the strategy, the reason and the maintenance are the store's |
 | `client.collections.<name>` | the store's collection | the same chain start and `live`, typed from the pen's collection schema (§2.5) |
 | `saveChanges()`, `transaction(fn, options?)`, `close()`, `capabilities`, `store` | the store's | pass-throughs; `saveChanges` and `live` exist exactly when the model declares entities, as on the store; `store` is the escape hatch, typed `TypedStore` |
 
@@ -911,7 +911,7 @@ it says.
 | the provider seam | `root` `scope` `relations` |
 | membership | `link` `unlink` — the store's, behind §4.2's check |
 | the chain | every `AsyncSequence` operator and terminal: `where` `select` `selectMany` `orderBy` `orderByDescending` `thenBy` `thenByDescending` `groupBy` `aggregate` `join` `groupJoin` `skip` `take` `distinct` `reverse` `concat` `defaultIfEmpty` `ofType` `cast` `zip` `mapAsync` `params` `toDocument` `toArray` `first` `firstOrDefault` `single` `singleOrDefault` `last` `lastOrDefault` `elementAt` `elementAtOrDefault` `count` `sum` `average` `min` `max` `any` `all`, and `Symbol.asyncIterator` |
-| the client's own | `include` (§2.4), `live`, and `range(spec, options)` |
+| the client's own | `include` (§2.4), `graph()` (a graph with nothing included, §2.4), `live`, and `range(spec, options)` |
 | in both | `explain` |
 
 **The graph**
@@ -920,7 +920,7 @@ it says.
 |---|---|---|
 | `include(pick, spec?)` | one entry of `include` | `pick` is `(u) => u.posts`, or `u.get('posts')` for a name that collides with a proxy method |
 | `where(predicate)` | `where` | consecutive calls conjoin under one `$and` |
-| `orderBy(key, options?)`, `orderByDescending(key, options?)` | `orderBy` | replaces; `options` is `{ empty?, collation? }` |
+| `orderBy(key, options?)`, `orderByDescending(key, options?)` | `orderBy` | replaces; `options` is `{ empty?, collation? }`, the chain's closed set: any other member, or options that are not a plain object (`null` included), is `JL0005` naming the nearest member — a misspelt `empty` used to sort the other way in silence |
 | `thenBy(key, options?)`, `thenByDescending(key, options?)` | appends to `orderBy` | `JL0005` when no `orderBy` precedes it |
 | `take(n)`, `skip(n)` | `take`, `skip` | the offset window |
 | `after(cursor)` | `after` | the keyset continuation (§10.5) a `page()` over the same ordering emitted — typed by the declared ordering, so a bare key does not compile; the ROOT only |
@@ -939,7 +939,7 @@ it says.
 | `{ count: true }` | `{ count: true }` | the number; any other member beside it is the store's `JD0032` |
 | `where: (p) => p.stars.ge(3)` | `where: { $ge: ["$it.stars", 3] }` | the target row is `it`; translatability is the store's verdict (`JD0032`), and a relation hop is a plain path here and refused there |
 | `orderBy: (p) => p.pid` | `orderBy: "$it.pid"` | a bare key, ascending |
-| `orderBy: { key, desc?, empty?, collation? }` | `orderBy: { $key, $dir, $empty, $collation }` | as the chain spells `$orderby`; an array of either is an array |
+| `orderBy: { key, desc?, empty?, collation? }` | `orderBy: { $key, $dir, $empty, $collation }` | as the chain spells `$orderby`; an array of either is an array; `desc` is a boolean and any other member of the term is `JL0101` (a misspelt `descending` used to sort ascending in silence) |
 | `take`, `skip` | `take`, `skip` | the window inside the subquery (a non-integer is the store's `JD0032`) |
 | `maxRows`, `maxBytes` | `maxRows`, `maxBytes` | the per-root bounds (MODEL-FORMAT §10.4): rows of the relation per parent and serialised bytes per parent; crossing one is the store's `JD2073`, never a truncated graph. Defaults 1000 rows / 1 MiB (a `take` is the row bound of the include it windows); `Infinity` spells the unbounded case and emits as `null` |
 | `include: { comments: spec }` | `include: { comments: <lowered> }` | over the TARGET's relation table (the scope carries every root's) |

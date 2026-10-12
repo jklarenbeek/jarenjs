@@ -93,6 +93,6 @@ render tooltips; those responsibilities remain in the chart engine.
 
 ## 7. Cost
 
-The isolated chart pen costs **<!--fact:bundle.charts-->6,279<!--/fact--> bytes**.
+The isolated chart pen costs **<!--fact:bundle.charts-->6,447<!--/fact--> bytes**.
 The tree-shaking gate refuses chart engine, other target engine and chain
 modules in this bundle, and checks that the chain and schema pen do not import it.

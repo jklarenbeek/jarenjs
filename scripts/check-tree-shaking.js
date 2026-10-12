@@ -558,7 +558,8 @@ if (asyncLiveLeak.length)
 // Raised to 950,200 (measured 950165): the same core helpers the store and the engine carry add 1461.
 // Raised to 950,500 (measured 950448): the minimum and maximum applied beside a
 // numeric exclusive bound, shared by the engine's validator, add 283.
-if (clientBytes > 950500)
+// Raised to 952,800 (measured 952715): relation names read as own members in the db client, misspelt durable and graph options refused (about 1600), and native buckets that count rows without a reading, event-time refusals and a read-only capture record shared by live views (about 700) add 2267.
+if (clientBytes > 952800)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 
@@ -609,7 +610,8 @@ if (contractPenLeak.length > 0)
 // Raised to 51,800 (measured 51785): the shared capture refuses a callback that reads its argument and answers a plain boolean (514) and explains the destructuring read it names (266).
 // Raised to 52,200 (measured 52169): caller JSON copied at the pen boundary and an own-member read of the http `in` map add 384.
 // Raised to 52,600 (measured 52562): core's deepFreeze, which every pen shares, freezing beneath an already frozen root with a memo of whole frozen subtrees and a cycle guard add 393.
-if (contractPenBytes > 52600)
+// Raised to 52,900 (measured 52871): a contract declaration copied from the caller's spec add 309.
+if (contractPenBytes > 52900)
   throw new Error(`The contract pen bundle grew to ${contractPenBytes} bytes.`);
 const chainContractLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/contract/') && info.bytesInOutput > 0);

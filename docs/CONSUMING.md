@@ -166,10 +166,10 @@ the table and stale in the paragraph that cites it:
 | `./forms` | <!--fact:bundle.forms.kb-->43<!--/fact--> kB | the schema pen it subclasses |
 | `./formula` | <!--fact:bundle.formula.kb-->11<!--/fact--> kB | saved Query profiles; no evaluator |
 | `./messages` | <!--fact:bundle.messages.kb-->14<!--/fact--> kB | message templates; no locale packs |
-| `./jtlt` | <!--fact:bundle.jtlt.kb-->18<!--/fact--> kB | text template capture; no renderer |
-| `./project` | <!--fact:bundle.project.kb-->4<!--/fact--> kB | project files; no Studio engine |
+| `./jtlt` | <!--fact:bundle.jtlt.kb-->19<!--/fact--> kB | text template capture; no renderer |
+| `./project` | <!--fact:bundle.project.kb-->5<!--/fact--> kB | project files; no Studio engine |
 | `./charts` | <!--fact:bundle.charts.kb-->6<!--/fact--> kB | chart definitions; no chart engine |
-| `./db` | <!--fact:bundle.db.kb-->950<!--/fact--> kB | the store, the validator and the formats, by construction |
+| `./db` | <!--fact:bundle.db.kb-->953<!--/fact--> kB | the store, the validator and the formats, by construction |
 
 Read the last row as the honest one: the front door costs what the store
 costs, because it *is* the store. The tree-shaking gate holds both
