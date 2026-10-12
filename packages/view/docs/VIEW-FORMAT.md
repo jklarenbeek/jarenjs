@@ -701,7 +701,15 @@ Under the safe profile a renderer MUST:
    deny-list that rejects `javascript:`, `vbscript:`, `file:` and
    document-carrying `data:`, and **drop inline styles** carrying
    `expression(` or a script-scheme `url()`.
-4. **Strip `on` bindings and `jaren-widget` nodes**: an untrusted document
+4. **Drop a prop value that is not a scalar**: a string, a number, a
+   boolean or `null`, as the safe schema says. A list or an object would be
+   written as its text, which neither the URL nor the style check reads (a
+   list holding a `javascript:` URL), or cannot be made at all (an object whose
+   `toString` is not a function). The one list is a `multiple` select's
+   `value`, and the one object is `style`, whose own values are held to the
+   same rule. Upgrade note: such a value was written as its text; it is now
+   dropped and reported as an unsafe prop.
+5. **Strip `on` bindings and `jaren-widget` nodes**: an untrusted document
    MUST NOT bind host actions or mount imperative code. Safe-mode views are
    display-oriented.
 

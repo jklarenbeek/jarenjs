@@ -174,6 +174,16 @@ export function createSafePolicy() {
         || lower === 'is' || DANGEROUS_PROPS.has(lower)) {
         return null;
       }
+      // a value is a string, a number, a boolean or null, as the safe schema
+      // says: anything else is turned into text by the renderers, and the
+      // text of a list or an object is not what the checks below read (a
+      // list holding a script URL) or cannot be made at all (a `toString`
+      // member that is no function). A `multiple` select's `value` is the
+      // one list.
+      if (lower === 'style') return { name, value: safeStyle(value) };
+      if (!isScalar(value) && !(lower === 'value' && Array.isArray(value) && value.every(isScalar))) {
+        return { name, value: null };
+      }
       if (URL_ATTRS.has(lower)) {
         const safe = sanitizeUrl(value);
         // Keep the (safe) name but clear the value when the URL is unsafe: a
@@ -183,12 +193,19 @@ export function createSafePolicy() {
       if (URL_LIST_ATTRS.has(lower)) {
         return { name, value: sanitizeUrlList(value, lower === 'srcset') };
       }
-      if (lower === 'style') {
-        return { name, value: safeStyle(value) };
-      }
       return { name, value };
     },
   };
+}
+
+/**
+ * Whether `value` is a kind an attribute can carry: a string, a number, a
+ * boolean, or nothing (`null`/`undefined`).
+ * @param {any} value
+ * @returns {boolean}
+ */
+function isScalar(value) {
+  return value == null || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean';
 }
 
 /**
@@ -267,7 +284,7 @@ function safeStyle(value) {
     for (const key in value) {
       if (!RE_SAFE_STYLE_KEY.test(key) || RE_DANGEROUS_STYLE.test(key)) return null;
       const v = value[key];
-      if (typeof v === 'string' && RE_DANGEROUS_STYLE.test(v)) return null;
+      if (!isScalar(v) || (typeof v === 'string' && RE_DANGEROUS_STYLE.test(v))) return null;
     }
     return value;
   }

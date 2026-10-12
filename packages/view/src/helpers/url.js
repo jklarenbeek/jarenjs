@@ -106,6 +106,10 @@ const URL_LITERAL = new Uint8Array(128);
 for (const ch of "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789;/?:@&=+$,-_.!~*'()#")
   URL_LITERAL[ch.charCodeAt(0)] = 1;
 
+/** The start of an absolute URL or a `//` reference whose host is an IPv6
+ * literal, `[` … `]` included in the match's first group. */
+const RE_IPV6_HOST = /^(?:[A-Za-z][A-Za-z0-9+.-]*:)?\/\/(?:[^/?#@[\]]*@)?(\[[0-9A-Fa-f:.]+\])/;
+
 /** An already-encoded octet: `%` followed by two hex digits. */
 const RE_PCT_OCTET = /^%[0-9A-Fa-f]{2}/;
 
@@ -130,6 +134,21 @@ const RE_PCT_OCTET = /^%[0-9A-Fa-f]{2}/;
  * @returns {string} the attribute-ready URL
  */
 export function encodeUrlAttribute(url) {
+  // An IPv6 literal host keeps its brackets: they delimit the address, so
+  // `%5B::1%5D` is no host and the whole URL stops parsing. Everywhere else
+  // `[` and `]` are encoded like any other character outside the set.
+  const literal = RE_IPV6_HOST.exec(url);
+  if (literal === null) return encodeOctets(url);
+  const start = literal[0].length - literal[1].length;
+  return encodeOctets(url.slice(0, start)) + literal[1] + encodeOctets(url.slice(literal[0].length));
+}
+
+/**
+ * The character-by-character encoding behind {@link encodeUrlAttribute}.
+ * @param {string} url
+ * @returns {string}
+ */
+function encodeOctets(url) {
   let out = '';
   for (let i = 0; i < url.length; i++) {
     const code = url.charCodeAt(i);

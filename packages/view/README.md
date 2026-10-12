@@ -136,6 +136,10 @@ renderToString(untrustedVnode, { safe: true });
 createDomRenderer(container, { safe: true, onUnsafe: (i) => log(i) });
 ```
 
+`onUnsafe` receives one `{ kind, name }` per tag, prop, event binding or
+widget the policy removed; a prop with no value (`null`, or one a frame drops)
+removed nothing and is not reported (upgrade note: it used to be).
+
 Both build the **same** policy ([`createSafePolicy`](src/safe.js)), so the
 client and the server neutralize an attack identically. In safe mode:
 
@@ -150,6 +154,12 @@ client and the server neutralize an attack identically. In safe mode:
 - **URL attributes** (`href`, `src`, …) are filtered through the `sanitizeUrl`
   deny-list; **inline styles** carrying `expression(` or a script-scheme
   `url()` are dropped;
+- **a prop value** must be a string, a number, a boolean or `null` (a
+  `multiple` select's `value` may be a list, `style` an object of such
+  values): a list or an object is dropped instead of being written as its
+  text, which the URL and style checks do not read and which throws for an
+  object whose `toString` is not a function. Upgrade note: such a value used
+  to be written as its text;
 - **`on` event bindings and `jaren-widget` nodes are stripped** — an untrusted
   document must not bind the host's actions or mount imperative JavaScript, so
   safe-mode views are display-oriented.
@@ -182,6 +192,7 @@ The `./helpers` subpath is the single home for the small view-layer helper kerne
 - **SVG builders over `h()`** — `svgRoot(className, width, height, theme, children, key?)`, `group`, `rect`, `circle`, `line`, `path`, `polyline`, `polygon`, `textAt`, `textLines`, plus the geometry guard `num` and the path-string builder `polylinePath`. `svgRoot` takes the root `class` and (via `theme.cssVars`) the CSS variables from the caller.
 - **`sanitizeHref(url)`** — the strict URL **allow-list** (http/https/mailto/`#`/`/`/`.`) for link hrefs from a constrained producer, such as a Mermaid `click` directive. It rejects a scheme-less relative reference like `image.png`.
 - **`sanitizeUrl(url)`** — the URL **deny-list** for hrefs and image sources authored in ordinary content: it rejects only `javascript:`, `vbscript:`, `file:` and `data:` other than a raster image, and passes everything else, relative references included. This is what `@jarenjs/md` filters link destinations through. Both return the trimmed URL or `null`, and `null` means *drop the attribute*.
+- **`encodeUrlAttribute(url)`** — percent-encodes a URL that has already passed a sanitizer, byte by byte from its UTF-8, for an attribute: the reserved characters that carry URL structure stay, an existing `%XX` octet is kept, a lone `%` is encoded. The brackets of an IPv6 literal host (`http://[::1]:8080/`) stay too, since `%5B::1%5D` is no host; a bracket anywhere else is encoded. Upgrade note: the brackets of an IPv6 host used to be encoded, which made the link unparseable.
 - **`resolveTheme(themes, prefix, nameOrOverrides?)`** — the prefix-driven mechanics behind each component's `createTheme`: a name-or-overrides object resolved to `{ name, tokens, cssVars }`, stamping every token as `--<prefix>-<kebab-case-key>`. Components keep their own token tables; the resolution logic lives here once. The pure `kebabCase` transform it uses comes from [`@jarenjs/core/string`](../core). One documented quirk (behavior preserved, test-asserted): when passed an *overrides object* that carries a `theme` key, that key is spread into the returned `tokens` and therefore surfaces as a `--<prefix>-theme` CSS variable — the base-selecting key leaks into the output rather than being stripped.
 
 - **`createProjectionMemo({ compile, toVnode, docToVnode, memoLimit? })`** — the memo pair a component's `view()` projection is built on: an LRU-memoized `compile(source)` (string-keyed, default limit 32) and a reference-stable `view(sourceOrDoc)` that projects a source string through the compile memo or an already-parsed document through a WeakMap keyed on its identity. `@jarenjs/md` and `@jarenjs/mermaid` build their component-layer `view()` on it — reference stability is what lets an unchanged input patch in O(1).

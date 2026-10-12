@@ -110,7 +110,8 @@ function serializeProps(props, skip, policy, onUnsafe) {
       // attribute — is what the DOM renderer's `removeAttribute` also does in
       // safe mode, so the two outputs match.
       if (decided === null || decided.value === null) {
-        if (onUnsafe !== null) onUnsafe({ kind: 'prop', name });
+        // a prop the author left empty (`null`) was not stripped by anything
+        if (onUnsafe !== null && value != null) onUnsafe({ kind: 'prop', name });
         continue;
       }
       attr = decided.name;

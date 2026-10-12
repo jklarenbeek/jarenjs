@@ -915,13 +915,16 @@ function setProp(ctx, node, name, oldValue, newValue, ns) {
     // A rejected NAME (scripting sink, inline `on*`, injection-shaped) is
     // dropped; a sanitized-away URL or dangerous style keeps its (safe) name
     // and clears the value.
+    // A prop with no value (the author's `null`, or one this frame drops)
+    // was not stripped by anything, so it is not reported.
     if (decided === null) {
-      if (ctx.onUnsafe !== null) ctx.onUnsafe({ kind: 'prop', name });
+      if (ctx.onUnsafe !== null && newValue != null) ctx.onUnsafe({ kind: 'prop', name });
       return;
     }
     name = decided.name;
+    const given = newValue;
     newValue = decided.value;
-    if (newValue === null && ctx.onUnsafe !== null) ctx.onUnsafe({ kind: 'prop', name });
+    if (newValue === null && given != null && ctx.onUnsafe !== null) ctx.onUnsafe({ kind: 'prop', name });
     // SAFE MODE IS ATTRIBUTE-ONLY. Never `node[name] = …`: a live DOM property
     // write can THROW (`input.files` is read-only) and it diverges from SSR
     // for a cleared value (an empty reflected attribute vs an omitted one).
