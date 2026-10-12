@@ -2,7 +2,9 @@
 /** Atomic page/checkpoint staging and complete-generation publication. */
 import { canonicalizeJson } from '@jarenjs/json/canonical';
 import { isThenable } from '@jarenjs/core/function';
+import { closedOptions } from './options.js';
 
+const OPTIONS = Object.freeze(['staging', 'checkpoints', 'publications', 'facts', 'reconcile']);
 const copy = (value) => JSON.parse(canonicalizeJson(value));
 const key = (...parts) => canonicalizeJson(parts);
 
@@ -15,6 +17,7 @@ const key = (...parts) => canonicalizeJson(parts);
  * reconcile?: (existing: any, incoming: any, evidence: any) => any }} options
  */
 export function createDbIngestionStore(client, options) {
+  closedOptions(options, OPTIONS, 'createDbIngestionStore()');
   if (!client || typeof client.transaction !== 'function' || !client.collections || !options)
     throw new TypeError('ingestion store needs a client and declared collection names');
   const names = ['staging', 'checkpoints', 'publications', ...(options.facts ? ['facts'] : [])];

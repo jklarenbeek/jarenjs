@@ -17,7 +17,11 @@
  * `createDbLedger` is the contract ledger over a declared collection of
  * the client's store, through that same surface: the durable idempotency
  * ledger a host was left to write, with no edge from `@jarenjs/contract`
- * to a store (DB-CLIENT.md §2.6).
+ * to a store (DB-CLIENT.md §2.6). Beside it sits the durable layer a host
+ * maps onto its own tables — `createDbReceipts`, `createDbEffectStore`,
+ * `createDbRunStore`, `createDbIngestionStore` — the bounded range providers
+ * (`createDbRangeProvider`, `createLexicalRangeProvider`) and
+ * `defineReplication`; an option bag any of them takes is a closed set.
  */
 
 export { open, defaultValidator } from './open.js';

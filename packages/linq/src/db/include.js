@@ -18,13 +18,17 @@
 
 import { deepFreeze, setObjectMember } from '@jarenjs/core/object';
 
-import { captureExpression } from '../expression.js';
+import { captureExpression, unbracketName } from '../expression.js';
+import { readOptions } from '../document.js';
+import { providerRelations } from '../provider.js';
 import { LinqBuildError } from '../errors.js';
 import { requireJson, requireOwnJson, describeValue } from '../json-boundary.js';
 
 const NO_PARAMS = new Set();
 const ROOT_KEYS = ['where', 'orderBy', 'take', 'skip', 'after', 'maxDepth', 'include'];
 const INCLUDE_KEYS = ['where', 'orderBy', 'take', 'skip', 'count', 'maxRows', 'maxBytes', 'include'];
+const ORDER_OPTIONS = ['empty', 'collation'];
+const ORDER_TERM_KEYS = ['key', 'desc', 'empty', 'collation'];
 /** A member path over the row: the shorthand or the bracketed spelling. */
 const MEMBER_PATH = /^\$it(?:\.([A-Za-z_$][\w$]*)|\['((?:[^'\\]|\\.)*)'\])$/;
 
@@ -50,7 +54,8 @@ function captureOver(fn, what) {
  * @returns {{ member: string, entry: any }}
  */
 function requireRelation(relations, entityName, member, what) {
-  const entry = relations[member];
+  // an own member only: `constructor` and `toString` are on every table's prototype
+  const entry = Object.hasOwn(relations, member) ? relations[member] : undefined;
   if (entry === undefined) {
     const declared = Object.keys(relations);
     throw new LinqBuildError('JL0107',
@@ -78,7 +83,7 @@ function pickMember(pick, relations, entityName) {
       `include() picks one relation member of '${entityName}' by name ((u) => u.posts); got `
       + (typeof captured === 'string' ? captured : 'an operator result'));
   }
-  const member = match[1] ?? match[2].replace(/\\(.)/g, '$1');
+  const member = match[1] ?? unbracketName(match[2]);
   return requireRelation(relations, entityName, member, 'include()');
 }
 
@@ -95,10 +100,10 @@ function orderTerm(key, desc, options, what) {
   const expression = captureOver(key, what);
   const spec = { $key: expression };
   if (desc) spec.$dir = 'desc';
-  if (options !== undefined && options !== null) {
-    if (options.empty !== undefined) spec.$empty = requireJson(options.empty, `${what} empty`);
-    if (options.collation !== undefined) spec.$collation = requireJson(options.collation, `${what} collation`);
-  }
+  // the chain's closed option set: a misspelt `empty` would sort the other way in silence
+  const { empty, collation } = readOptions(options, ORDER_OPTIONS, what);
+  if (empty !== undefined) spec.$empty = requireJson(empty, `${what} empty`);
+  if (collation !== undefined) spec.$collation = requireJson(collation, `${what} collation`);
   return Object.keys(spec).length === 1 ? expression : spec;
 }
 
@@ -113,7 +118,15 @@ function lowerOrder(orderBy, what) {
   const one = (term, at) => {
     if (typeof term === 'function') return orderTerm(term, false, undefined, at);
     if (term !== null && typeof term === 'object' && !Array.isArray(term) && typeof term.key === 'function') {
-      return orderTerm(term.key, term.desc === true, term, at);
+      for (const key of Object.keys(term)) {
+        if (!ORDER_TERM_KEYS.includes(key)) {
+          throw new LinqBuildError('JL0101', `${at} does not take '${key}' — the members are ${ORDER_TERM_KEYS.join(', ')}`);
+        }
+      }
+      if (term.desc !== undefined && typeof term.desc !== 'boolean') {
+        throw new LinqBuildError('JL0101', `${at} desc is a boolean, got ${describeValue(term.desc)}`);
+      }
+      return orderTerm(term.key, term.desc === true, { empty: term.empty, collation: term.collation }, at);
     }
     throw new LinqBuildError('JL0101',
       `${at} takes a key callback ((p) => p.stars) or { key, desc?, empty?, collation? }, got ${describeValue(term)}`);
@@ -219,8 +232,7 @@ export class Graph {
 
   /** The other roots' tables, where a nested include finds its target's. */
   #relationsOf() {
-    const scoped = this.#set.scope?.relations;
-    return (name) => (scoped !== null && typeof scoped === 'object' ? scoped[name] : undefined);
+    return providerRelations(this.#set)?.resolve ?? (() => undefined);
   }
 
   /**

@@ -4,12 +4,19 @@ import { canonicalizeJson } from '@jarenjs/json/canonical';
 import { resolveRuntime } from '@jarenjs/core/runtime';
 import { deepFreeze } from '@jarenjs/core/object';
 
+import { closedOptions } from './options.js';
+
+const OPTIONS = Object.freeze(['keys', 'maxRows', 'maxBytes', 'maxPages', 'maxInFlight', 'maxSubscriptions', 'resident',
+  'profile', 'runtime', 'source', 'query', 'schemaVersion', 'seekIndex', 'exactTotal']);
+
 /** Open a bounded source. Resident mode obtains a complete, bounded source
  * snapshot before offering index seeks or an exact total. Sequential mode
  * admits only first pages and continuations through the store's keyset pager.
  * @param {any} store @param {string} entity @param {any} [spec]
  * @param {any} [options] @returns {Promise<any>} */
 export async function createDbRangeProvider(store, entity, spec = {}, options = {}) {
+  closedOptions(options, OPTIONS, 'createDbRangeProvider()');
+  if (spec === null || typeof spec !== 'object' || Array.isArray(spec)) throw new TypeError('range provider needs a spec object');
   spec = structuredClone(spec);
   const keys = options.keys?.slice();
   if (!Array.isArray(keys) || !keys.length || keys.some((key) => typeof key !== 'string') || new Set(keys).size !== keys.length)
@@ -244,6 +251,12 @@ export async function createDbRangeProvider(store, entity, spec = {}, options = 
         finally { exports.delete(iterator); }
       })();
       exports.add(iterator);
+      // a generator closed before its first `next()` never runs its body, so its
+      // `finally` would never release the credit: release it where it is closed
+      for (const close of ['return', 'throw']) {
+        const closeGenerator = iterator[close].bind(iterator);
+        iterator[close] = (value) => { exports.delete(iterator); return closeGenerator(value); };
+      }
       return iterator;
     },
     async dispose() {

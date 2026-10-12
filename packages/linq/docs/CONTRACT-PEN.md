@@ -121,7 +121,7 @@ safely, whether it may change state, whether it streams.
 
 | Method | Emits | Type reading | Status |
 |---|---|---|---|
-| `read({ input?, output, errors?, policy?, http?, doc? })` | `{ kind: 'read', … }` in §12.1's operation order, declared members only | `OperationDeclaration<'read', S>`; `kind` is the literal | native; a member the spec does not take, a missing `output`, or a non-string `doc`, `JL0101` |
+| `read({ input?, output, errors?, policy?, http?, doc? })` | `{ kind: 'read', … }` in §12.1's operation order, declared members only | `OperationDeclaration<'read', S>`; `kind` is the literal | native; a member the spec does not take, a missing `output`, or a non-string `doc`, `JL0101`; the plain objects and arrays of the spec are copied when the declaration is made (so are an `error()`'s `schema`): a write into the spec before `defineContract()` is no longer seen |
 | `command({ … })` | `{ kind: 'command', … }` | `OperationDeclaration<'command', S>` | native; the same three |
 | `subscribe({ … })` | `{ kind: 'subscribe', … }` — `output` is the SNAPSHOT schema (§17) | `OperationDeclaration<'subscribe', S>`; never opaque | native; the same three |
 

@@ -8,8 +8,8 @@ import { CHART_FIELDS } from './vocabulary.js';
 export class ChartBuilder extends DocumentBuilder {
   /** @param {Record<string, any>} value */
   options(value) {
-    const keys = Object.hasOwn(CHART_FIELDS, this.schema.type) ? CHART_FIELDS[this.schema.type] : undefined;
-    if (keys === undefined) throw new LinqBuildError('JL0101', `unknown chart kind '${this.schema.type}'`);
+    const keys = Object.hasOwn(CHART_FIELDS, this.schema?.type) ? CHART_FIELDS[this.schema.type] : undefined;
+    if (keys === undefined) throw new LinqBuildError('JL0101', `unknown chart kind '${this.schema?.type}'`);
     return this.with(optionsOf(value, keys, `${this.schema.type}()`));
   }
   /** `title`. @param {any} value */

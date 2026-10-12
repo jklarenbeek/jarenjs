@@ -777,7 +777,9 @@ planning, buffering limits and cleanup guarantees.
 
 `@jarenjs/linq/authoring` exposes `DocumentBuilder`, `snapshot`, `optionsOf` and
 `captureQuery` for pens that produce ordinary JSON documents. Builder snapshots
-are deeply frozen; `with()` creates a new instance of the same subclass.
+are deeply frozen; `with()` creates a new instance of the same subclass, and refuses
+(`JL0101`) a builder whose document is not an object, where it used to spread a string
+into indexed members.
 `optionsOf` enforces a closed set of option keys. `captureQuery` uses the same
 expression capture as the built-in pens; external names are explicit and an
 undeclared name retains the `JL0104` refusal. Compilation remains the consumer's

@@ -2,8 +2,10 @@
 /** Durable external intent/evidence in mapped tables, fenced by the existing job engine. */
 import { canonicalizeJson } from '@jarenjs/json/canonical';
 import { mappedRecords, recordTransaction, copyRecord, refuseRecord } from './records.js';
+import { closedOptions } from './options.js';
 
 const zero = Object.freeze({ changes: 0, writes: 0, revisions: 0 });
+const OPTIONS = Object.freeze(['operations', 'maxLegs', 'maxBytes']);
 const terminal = (state) => state === 'confirmed' || state === 'rejected';
 /**
  * Preparation/outbox and each settlement commit locally. Remote delivery never
@@ -11,6 +13,7 @@ const terminal = (state) => state === 'confirmed' || state === 'rejected';
  * @param {any} client @param {{ operations: any, maxLegs?: number, maxBytes?: number }} options
  */
 export function createDbEffectStore(client, options) {
+  closedOptions(options, OPTIONS, 'createDbEffectStore()');
   const records = mappedRecords(client, options?.operations);
   const { maxLegs = 64, maxBytes = 262144 } = options;
   for (const limit of [maxLegs, maxBytes]) if (!Number.isSafeInteger(limit) || limit < 1) throw new TypeError('effect limits must be finite positive integers');

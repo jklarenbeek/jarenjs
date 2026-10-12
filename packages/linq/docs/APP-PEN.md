@@ -459,7 +459,9 @@ What to read off it:
   `/2` at build time; no expression survives into the document.
 - **`get(name)` is how a member whose name is not an identifier is
   reached**, and RFC 6901 escaping is the pen's: `draft/note` →
-  `draft~1note`, `a~b` → `a~0b`. It is also the escape for a member
+  `draft~1note`, `a~b` → `a~0b`; a name holding a newline, a tab or any
+  other control character reaches the pointer as itself (it used to lose
+  the character and keep a letter, `a\nb` → `/anb`). It is also the escape for a member
   named like a chain method ([§5.3](#53-a-member-named-like-a-chain-method-captures-as-the-method)).
 - **`move()` and `copy()` lower BOTH pointers.** `from` is written
   before `path`, which is RFC 6902's member order.

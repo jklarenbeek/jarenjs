@@ -15,6 +15,8 @@
  * placeholder the options override is not checked, and an override is.
  */
 
+import { isPlainOptions } from '@jarenjs/core/object';
+
 import { RUN_BINDINGS } from '../document.js';
 import { requireListBindings } from '../expression.js';
 
@@ -50,7 +52,13 @@ function documentOf(source) {
 export function registerLive(register, source, options = {}) {
   try {
     const { document, bindings, lists } = documentOf(source);
-    const externals = { ...bindings, ...(options.externals ?? {}) };
+    // options the store would refuse reach it as they were given: merging
+    // would read `null` options as a TypeError, spread a string into
+    // members and an array into `0`, `1`, ... and so accept them
+    if (!isPlainOptions(options) || !(options.externals == null || isPlainOptions(options.externals))) {
+      return register(document, options);
+    }
+    const externals = { ...bindings, ...options.externals };
     requireListBindings(lists, new Map(Object.entries(externals)));
     return register(document, { ...options, externals });
   }

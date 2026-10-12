@@ -131,7 +131,7 @@ refusal) and `rules.js` (the rule object and the envelope, in Appendix
 A's member order) — it imports nothing of `src/schema/` but `brand.js`.
 The contract pen (`src/contract/`) is `operation.js` (the three kinds,
 the error declaration and the policy vocabulary), `http.js` (the binding
-and the §4.2 path-template scan, mirrored from the compiler's parser)
+whose §4.2 path template is checked by the compiler's own parser, `@jarenjs/core/route`)
 and `define.js` (the document, in CONTRACT-FORMAT §12.1's member order,
 and the three identity wrappers that type a client, a handler table and
 an AI toolbox). It reaches back into `schema/emit.js` for one thing —

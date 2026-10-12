@@ -79,7 +79,7 @@ export class TemplateBuilder extends DocumentBuilder {
     return Array.isArray(this.schema) ? new TemplateBuilder(rules) : this.with({ rules });
   }
   /** Append a rule without changing existing rules. @param {any} value */
-  rule(value) { return this.rules([...(Array.isArray(this.schema) ? this.schema : this.schema.rules), value]); }
+  rule(value) { return this.rules([...(Array.isArray(this.schema) ? this.schema : this.schema?.rules ?? []), value]); }
   /** Set output; a bare list becomes an envelope when an output is declared. @param {'text' | 'xml'} value */
   output(value) {
     if (!OUTPUTS.includes(value)) throw new LinqBuildError('JL0101', 'output() takes text or xml');

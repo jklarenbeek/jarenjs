@@ -3,7 +3,9 @@
 import { canonicalizeJson } from '@jarenjs/json/canonical';
 import { resolveRuntime } from '@jarenjs/core/runtime';
 import { mappedRecords, recordTransaction, copyRecord, refuseRecord } from './records.js';
+import { closedOptions } from './options.js';
 
+const OPTIONS = Object.freeze(['receipts', 'leases', 'runtime']);
 const fields = ['tenant', 'environment', 'aggregate', 'op', 'key', 'hashVersion', 'hash'];
 /** @param {any} identity */
 function identityOf(identity) {
@@ -23,6 +25,7 @@ const zero = Object.freeze({ changes: 0, writes: 0, revisions: 0 });
  * @param {{ receipts: any, leases?: any, runtime?: any }} options
  */
 export function createDbReceipts(client, options) {
+  closedOptions(options, OPTIONS, 'createDbReceipts()');
   const receipts = mappedRecords(client, options?.receipts);
   const leases = options.leases === undefined ? null : mappedRecords(client, options.leases);
   if (leases?.name === receipts.name) throw new TypeError('receipts and leases must use distinct collections');

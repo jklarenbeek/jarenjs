@@ -2,8 +2,10 @@
 /** Existing domain run identities and bounded event pages over mapped application tables. */
 import { canonicalizeJson } from '@jarenjs/json/canonical';
 import { mappedRecords, recordTransaction, copyRecord, refuseRecord } from './records.js';
+import { closedOptions } from './options.js';
 
 const zero = Object.freeze({ changes: 0, writes: 0, revisions: 0 });
+const OPTIONS = Object.freeze(['runs', 'events', 'statuses', 'summary', 'canReset', 'maxPage', 'maxBytes']);
 /**
  * Checkpoints remain the existing workflow's format. Status mapping and public
  * summaries are application policy; events never contain the checkpoint input,
@@ -14,6 +16,7 @@ const zero = Object.freeze({ changes: 0, writes: 0, revisions: 0 });
  * maxPage?: number, maxBytes?: number }} options
  */
 export function createDbRunStore(client, options) {
+  closedOptions(options, OPTIONS, 'createDbRunStore()');
   const runs = mappedRecords(client, options?.runs), events = mappedRecords(client, options?.events);
   if (runs.name === events.name) throw new TypeError('runs and events must be distinct collections');
   const { maxPage = 128, maxBytes = 262144 } = options;
@@ -140,7 +143,8 @@ export function createDbRunStore(client, options) {
       return inside(async (tx) => {
         const record = await requireRun(tx, id);
         await guard(tx, record, lease);
-        if (record.status === statuses[state]) return { record, ...zero };
+        // a completed run is final: its status is the one thing `requestCancel` also refuses to rewrite
+        if (record.status === statuses[state] || record.status === statuses.done) return { record, ...zero };
         record.status = statuses[state]; record.summary = { status: state };
         return write(tx, record);
       });

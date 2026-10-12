@@ -3,6 +3,12 @@
 import { createArrayRangeProvider, rangeBytes, rangeIdentity } from '@jarenjs/core/range';
 import { canonicalizeJson } from '@jarenjs/json/canonical';
 
+import { closedOptions } from './options.js';
+
+/** The members this adapter reads, beside the range provider's own that it passes through. */
+const OPTIONS = Object.freeze(['maxMatches', 'maxSourceBytes', 'query', 'source', 'disposeSource', 'runtime', 'keyOf',
+  'maxPages', 'maxRows', 'maxBytes', 'maxInFlight', 'seekIndex', 'exactTotal']);
+
 /**
  * Materialize only a credited, complete lexical membership. The source retains
  * authoritative rows; this adapter owns one bounded range copy and its cursors.
@@ -10,6 +16,7 @@ import { canonicalizeJson } from '@jarenjs/json/canonical';
  * @returns {Promise<any>}
  */
 export async function createLexicalRangeProvider(source, text, spec = {}, options = {}) {
+  closedOptions(options, OPTIONS, 'createLexicalRangeProvider()');
   const maxMatches = options.maxMatches ?? 1000, maxSourceBytes = options.maxSourceBytes ?? 1024 * 1024;
   if (!Number.isSafeInteger(maxMatches) || maxMatches < 1 || !Number.isSafeInteger(maxSourceBytes) || maxSourceBytes < 2)
     throw new TypeError('Invalid lexical range credits');

@@ -75,4 +75,9 @@ describe('chart pen', () => {
     assert.throws(() => c.pie().title(() => 'x'), { code: 'JL0101' });
     assert.throws(() => c.from({ type: 'unknown' }).options({}), { code: 'JL0101' });
   });
+  it('a raw root that is not an object has no kind to extend: JL0101, never a raw TypeError', () => {
+    for (const root of [null, 5, 'pie', ['pie']]) {
+      assert.throws(() => c.from(root).title('x'), { code: 'JL0101', message: "JL0101: unknown chart kind 'undefined'" });
+    }
+  });
 });

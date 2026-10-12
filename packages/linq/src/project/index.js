@@ -32,7 +32,7 @@ export class ProjectBuilder extends DocumentBuilder {
   /** Replace the whole file list. @param {readonly object[]} values */
   files(values) { return this.with({ files: filesOf(values) }); }
   /** Append one file, without inventing a duplicate-name policy. @param {object} value */
-  file(value) { return this.files([...this.schema.files, value]); }
+  file(value) { return this.files([...(this.schema?.files ?? []), value]); }
   /** The requested active file; Studio falls back if it cannot resolve it. @param {string} name */
   active(name) {
     if (typeof name !== 'string') throw new LinqBuildError('JL0101', 'active() takes a file name');

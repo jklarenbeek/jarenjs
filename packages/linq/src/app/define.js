@@ -27,7 +27,7 @@
 import { deepFreeze, setObjectMember, isJsonObject } from '@jarenjs/core/object';
 
 import { LinqBuildError } from '../errors.js';
-import { describeValue, requireNameMap, requireOwnJson } from '../json-boundary.js';
+import { closedTo, describeValue, requireNameMap, requireOwnJson } from '../json-boundary.js';
 import { isSchemaBuilder, schemaOf } from '../schema/brand.js';
 import { ACTION } from './action.js';
 import { SUB } from './sub.js';
@@ -161,12 +161,7 @@ export function defineApp(spec) {
     throw new LinqBuildError('JL0101',
       `defineApp() takes { state, initial?, schema?, view, actions?, subs? }, got ${describeValue(spec)}`);
   }
-  for (const key of Object.keys(spec)) {
-    if (!APP_MEMBERS.includes(key)) {
-      throw new LinqBuildError('JL0101',
-        `defineApp() does not take '${key}' — it takes ${APP_MEMBERS.join(', ')}`, `/${key}`);
-    }
-  }
+  closedTo(spec, APP_MEMBERS, 'defineApp()');
 
   const stateIsBuilder = isSchemaBuilder(spec.state);
   if (stateIsBuilder && spec.schema !== undefined) {

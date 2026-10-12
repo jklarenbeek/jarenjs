@@ -28,7 +28,7 @@
 import { isJsonObject } from '@jarenjs/core/object';
 import { LinqBuildError } from '../errors.js';
 import { isExpression } from '../expression.js';
-import { describeValue } from '../json-boundary.js';
+import { closedTo, describeValue } from '../json-boundary.js';
 import { action, effect, transition } from './action.js';
 import { when } from './conditional.js';
 import { readPatch, replace } from './patch.js';
@@ -74,11 +74,7 @@ export function taskSlot(name, options) {
   if (options === null || typeof options !== 'object' || Array.isArray(options)) {
     throw new LinqBuildError('JL0101', `taskSlot() options are { at, mode?, fail? }, got ${describeValue(options)}`);
   }
-  for (const key of Object.keys(options)) {
-    if (!SLOT_OPTIONS.includes(key)) {
-      throw new LinqBuildError('JL0101', `taskSlot() does not take '${key}' — it takes ${SLOT_OPTIONS.join(', ')}`, `/${key}`);
-    }
-  }
+  closedTo(options, SLOT_OPTIONS, 'taskSlot()');
   const { at, mode = 'switch', fail = false } = options;
   if (typeof at !== 'function') {
     throw new LinqBuildError('JL0101',

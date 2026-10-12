@@ -100,7 +100,7 @@ decides which document answers a question about behaviour.
 | `where`, `select`, `orderBy`, …, `toArray`, `first`, `count`, … | the chain: `fromAsync(handle)` ([QUERY-PEN.md](QUERY-PEN.md) §8, §10) | every `AsyncSequence` operator and terminal, delegated — nothing is duplicated, every read is the chain's document and pushes down; the handle is iterable (`for await`); two handles of one client share a `scope`, so a join's inner may be `fromAsync(otherHandle)` |
 | `include(pick, spec?)` | the store's `load(spec)` (MODEL-FORMAT §10.4, §10.5) | opens a graph that EMITS the spec (§2.4, §3), typed `Loaded<>` by what it included |
 | `link(own, member, target)`, `unlink(…)` | the store's membership API (MODEL-FORMAT §11.7) | reads the relation table first — the member must be a many-to-many relation (`JL0107`, naming the kind it is, or the members that are) — then records through the store; `saveChanges()` writes the join rows |
-| `live(chain \| document, options?)` | the store's registration — `store.live` for an entity root, `collection.live` for a collection (LIVE-FORMAT §7) | hands over the chain's document and its `params()` bindings as the externals (`options.externals` merge over them, and a parameter an `in()` reads whole must be an array in the merged set — `JL0004`, so a placeholder the options override registers and a non-array override, which used to register unchecked, does not); the strategy, the reason and the maintenance are the store's |
+| `live(chain \| document, options?)` | the store's registration — `store.live` for an entity root, `collection.live` for a collection (LIVE-FORMAT §7) | hands over the chain's document and its `params()` bindings as the externals (`options.externals` merge over them, and a parameter an `in()` reads whole must be an array in the merged set — `JL0004`, so a placeholder the options override registers and a non-array override, which used to register unchecked, does not; options the store would refuse — `null`, a string, `externals` that is not a plain object — reach it as given and it refuses them with `JD0013`, where the merge used to accept an array or a string as bindings named `0`, `1`, …); the strategy, the reason and the maintenance are the store's |
 | `client.collections.<name>` | the store's collection | the same chain start and `live`, typed from the pen's collection schema (§2.5) |
 | `saveChanges()`, `transaction(fn, options?)`, `close()`, `capabilities`, `store` | the store's | pass-throughs; `saveChanges` and `live` exist exactly when the model declares entities, as on the store; `store` is the escape hatch, typed `TypedStore` |
 
@@ -148,6 +148,14 @@ plain `TypeError` naming the driver imports (`open needs { driver } from
 @jarenjs/db/node, /bun or /wasm`). A `JL01xx` is a refusal to write
 something into a document, and neither of those is about a document.
 
+The option bag of `createDbReceipts`, `createDbRunStore`, `createDbEffectStore`,
+`createDbIngestionStore`, `createDbRangeProvider` (and `handle.range`) and
+`createLexicalRangeProvider` is a closed set: a member the constructor does not
+read, or options that are not a plain object, is a `TypeError` naming the nearest
+member (`createDbRunStore() does not take 'maxPag' — did you mean 'maxPage'?`).
+A misspelt `leases`, `facts` or `maxRows` used to be replaced by its default in
+silence — no lease table, no fact publication, a 256-row bound where 3 was meant.
+
 `defaultValidator()` is exported so a host can build the same validator
 and add to it — `defaultValidator().addFormats(myFormats)` — rather than
 reconstruct the configuration by reading this paragraph.
@@ -165,7 +173,7 @@ and resolved below.
 | the provider seam | `root` `scope` `relations` |
 | membership | `link` `unlink` — the store's, behind §4.2's check |
 | the chain | every `AsyncSequence` operator and terminal: `where` `select` `selectMany` `orderBy` `orderByDescending` `thenBy` `thenByDescending` `groupBy` `aggregate` `join` `groupJoin` `skip` `take` `distinct` `reverse` `concat` `defaultIfEmpty` `ofType` `cast` `zip` `mapAsync` `params` `toDocument` `toArray` `first` `firstOrDefault` `single` `singleOrDefault` `last` `lastOrDefault` `elementAt` `elementAtOrDefault` `count` `sum` `average` `min` `max` `any` `all`, and `Symbol.asyncIterator` |
-| the client's own | `include` (§2.4), `live`, and `range(spec, options)` |
+| the client's own | `include` (§2.4), `graph()` (a graph with nothing included, §2.4), `live`, and `range(spec, options)` |
 | in both | `explain` |
 
 **`explain` is the one name the store's set and the chain both carry, and
@@ -174,7 +182,7 @@ with no argument explains the EMPTY chain — `{ barriers: [], hops: [],
 bindings: {}, document: '$.Post[*]' }` — and `handle.explain(document,
 options?)` is the store's own explanation of that document, the one that
 names the translator, the SQL and the referenced roots. It is the only
-collision: a sweep of the chain's 40 names against the entity set's 18
+collision: a sweep of the chain's 40 names against every name of the entity set
 finds `explain` and nothing else, which is what makes the delegation
 safe to state as a rule rather than as a list of exceptions.
 
@@ -201,7 +209,7 @@ hands it to `explain()` and asserts `mode: 'native'` with no residual.
 |---|---|---|
 | `include(pick, spec?)` | one entry of `include` | `pick` is `(u) => u.posts`, or `u.get('posts')` for a name that collides with a proxy method |
 | `where(predicate)` | `where` | consecutive calls conjoin under one `$and` |
-| `orderBy(key, options?)`, `orderByDescending(key, options?)` | `orderBy` | replaces; `options` is `{ empty?, collation? }` |
+| `orderBy(key, options?)`, `orderByDescending(key, options?)` | `orderBy` | replaces; `options` is `{ empty?, collation? }`, the chain's closed set: any other member, or options that are not a plain object (`null` included), is `JL0005` naming the nearest member — a misspelt `empty` used to sort the other way in silence |
 | `thenBy(key, options?)`, `thenByDescending(key, options?)` | appends to `orderBy` | `JL0005` when no `orderBy` precedes it |
 | `take(n)`, `skip(n)` | `take`, `skip` | the offset window |
 | `after(cursor)` | `after` | the keyset continuation (§10.5) a `page()` over the same ordering emitted — typed by the declared ordering, so a bare key does not compile; the ROOT only |
@@ -231,7 +239,7 @@ true }` for the number, or an object of clauses:
 | `{ count: true }` | `{ count: true }` | the number; any other member beside it is the store's `JD0032` |
 | `where: (p) => p.stars.ge(3)` | `where: { $ge: ["$it.stars", 3] }` | the target row is `it`; translatability is the store's verdict (`JD0032`), and a relation hop is a plain path here and refused there |
 | `orderBy: (p) => p.pid` | `orderBy: "$it.pid"` | a bare key, ascending |
-| `orderBy: { key, desc?, empty?, collation? }` | `orderBy: { $key, $dir, $empty, $collation }` | as the chain spells `$orderby`; an array of either is an array |
+| `orderBy: { key, desc?, empty?, collation? }` | `orderBy: { $key, $dir, $empty, $collation }` | as the chain spells `$orderby`; an array of either is an array; `desc` is a boolean and any other member of the term is `JL0101` (a misspelt `descending` used to sort ascending in silence) |
 | `take`, `skip` | `take`, `skip` | the window inside the subquery (a non-integer is the store's `JD0032`) |
 | `maxRows`, `maxBytes` | `maxRows`, `maxBytes` | the per-root bounds (MODEL-FORMAT §10.4): rows of the relation per parent and serialised bytes per parent; crossing one is the store's `JD2073`, never a truncated graph. Defaults 1000 rows / 1 MiB (a `take` is the row bound of the include it windows); `Infinity` spells the unbounded case and emits as `null` |
 | `include: { comments: spec }` | `include: { comments: <lowered> }` | over the TARGET's relation table (the scope carries every root's) |
@@ -261,10 +269,13 @@ graph with two includes.
 
 ### 2.5 The collection handle
 
-A collection handle is 49 members: 10 from the store's collection
-(`stats` `get` `insert` `put` `patch` `delete` `execute` `query`
-`explain` `live`), the same 40 chain members, and the same one overlap on
-`explain`. It has no `include`, no `link`/`unlink` and no unit of work,
+A collection handle is 49 members: 11 from the store's collection
+(`stats` `get` `insert` `put` `patch` `delete` `all` `execute` `query`
+`explain` `live`), the same 40 chain members, and two overlaps, `explain`
+(resolved by arity, as on an entity handle) and `all` (resolved by the
+argument: a predicate is the chain's quantifier and answers a boolean;
+nothing, or the collection's `all()` options, is every document, always an
+array). It has no `include`, no `link`/`unlink` and no unit of work,
 because a collection has no relations and no tracking — and neither does
 its client: a collections-only model opens a client with no
 `saveChanges` and no `live` of its own, exactly as the store does.
@@ -637,7 +648,8 @@ assembled node by node the way a pen's document is.
 Two codes the client does NOT raise, and a reader will meet both. `JL0004`
 and `JL0005` are the chain's, and they reach a graph unchanged — a load
 clause that binds an external is `JL0004` (`parameter 'x' is not
-declared`), and a `thenBy()` with no `orderBy` before it is `JL0005`.
+declared`), and a `thenBy()` with no `orderBy` before it is `JL0005`, as is an ordering's
+`options` argument that is not a plain object or names a member outside `empty` and `collation`.
 Everything the store's own vocabulary cannot carry is the store's
 refusal, raised where the store raises it: `JD0032` for a spec the load
 engine cannot translate, `JD2003` for a write or a membership target the
@@ -656,6 +668,8 @@ capture.
 | `include((u) => u.posts, { orderBy: 5 })` | `posts orderBy takes a key callback ((p) => p.stars) or { key, desc?, empty?, collation? }, got 5` | `{ orderBy: (p) => p.pid }` |
 | `include((u) => u.posts, { include: 3 })` | `include at posts is a record of relation members, got 3` | `{ include: { comments: true } }` |
 | `include((u) => u.posts, { take: new Date(0) })` | `posts take received a Date instance, which is not JSON — a document carries null, booleans, finite numbers (never -0), strings, arrays and plain objects, and nothing else` | `{ take: 2 }` |
+| `include((u) => u.posts, { orderBy: { key: (p) => p.pid, descending: true } })` | `posts orderBy does not take 'descending' — the members are key, desc, empty, collation` | `{ key, desc: true }` |
+| `include((u) => u.posts, { orderBy: { key: (p) => p.pid, desc: 'yes' } })` | `posts orderBy desc is a boolean, got a string` | `desc: true` |
 | `.orderBy(5)`, `.thenBy(5)`, `.thenByDescending(5)`, `.where(5)` | `orderBy() takes a callback over the row, got 5` | a callback |
 
 Rows two, three and four are one rule seen three ways, and they are held
@@ -682,6 +696,14 @@ what the entity does declare.
 | `client.entities.User.include((u) => u.nope)` | `'nope' is not a relation member of 'User' — include() loads a declared relation ('posts', 'labels')` | a declared relation |
 | `client.entities.User.include((u) => u.age.ge(1))` | `include() picks one relation member of 'User' by name ((u) => u.posts); got an operator result` | a bare member read |
 | `include((u) => u.posts, { include: { nope: true } })` | `'nope' is not a relation member of 'Post' — a nested include loads a declared relation ('author', 'comments')` | a relation of the TARGET |
+
+A relation whose name holds a control character, a quote or a backslash is found
+under that name (`u.get('a\tb')` used to look up `atb`).
+
+A name every object carries (`constructor`, `toString`, `__proto__`) is looked up
+among the table's own members only, so `include((u) => u.get('constructor'))` is
+refused like any undeclared name; it used to pass the lookup and name the
+inherited function in the specification.
 
 The last row names `Post`'s relations rather than `User`'s, which is the
 whole point of resolving a nested include against the target's table: a
@@ -1163,7 +1185,9 @@ and generation, not inputs or results. `get` is trusted/private;
 Missing event history returns `reset-required` with the current durable cursor.
 
 `requestCancel` compares the observed revision and records actor/reason;
-`finish` persists a final cancelled/failed observation after draining.
+`finish` persists a final cancelled/failed observation after draining, and leaves a
+completed run as it is (it used to rewrite `done` to `failed`, which `requestCancel`
+refuses for the same run).
 `reset` changes only this run's checkpoint and requires current revision,
 inactive status, actor/reason and a transactional `canReset(tx, record)` policy.
 The default refuses; the policy must consult receipts and unresolved effects.

@@ -1,7 +1,7 @@
 //@ts-check
 /** Immutable JSON document storage shared by the authored-format pens. */
 import { deepFreeze } from '@jarenjs/core/object';
-import { requireNameMap, requireOwnJson } from './json-boundary.js';
+import { describeValue, requireNameMap, requireOwnJson } from './json-boundary.js';
 import { LinqBuildError } from './errors.js';
 
 /** A snapshot, never a view of a caller-owned document. @param {any} value */
@@ -32,6 +32,12 @@ export class DocumentBuilder {
   toJSON() { return this.#schema; }
   /** Replace members without changing the original builder. @param {object} patch */
   with(patch) {
+    // a verbatim `from()` root that is not an object has no members to replace;
+    // spreading it would turn a string into indexed members and `null` into `{}`
+    if (this.#schema === null || typeof this.#schema !== 'object' || Array.isArray(this.#schema)) {
+      throw new LinqBuildError('JL0101',
+        `a fluent member extends an object document, and this one is ${describeValue(this.#schema)}`);
+    }
     const Kind = /** @type {any} */ (this.constructor);
     return new Kind({ ...this.#schema, ...patch });
   }

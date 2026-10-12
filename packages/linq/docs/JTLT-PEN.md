@@ -30,7 +30,7 @@ escaping, dispatch, matching, output and the structural/compiler boundary.
 | `bare(rules?)` | public rule array | shorthand | native |
 | `.rules(rules)`, `.rule(rule)` | replace or append rules | preserves envelope/shorthand | native |
 | `.output(method)` | output method; wraps a bare list in an envelope | text or XML | native |
-| `from(document)` | raw template with member order preserved | template | native |
+| `from(document)` | raw template with member order preserved; a fluent member on a root that is neither an object nor a rule list is `JL0101` (it used to spread a string into indexed members, or fail with a raw `TypeError`), and `.rule()` on an envelope without `rules` starts the list | template | native |
 | `.schema`, `.toJSON()` | frozen public JSON | document | native |
 
 Expression callbacks receive the matched value and declared externals. Supply

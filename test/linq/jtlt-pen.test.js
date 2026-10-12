@@ -90,4 +90,13 @@ describe('JTLT pen', () => {
     const reserved = p.stylesheet([p.rule([]).priority(-1e308)]);
     assert.equal(validateJtltTemplate(reserved.schema).errors[0].code, 'TL0003');
   });
+  it('a raw root that is not an object or a rule list takes no fluent member; an envelope without rules takes its first', () => {
+    assert.deepEqual(p.from({ $jtlt: '0.1' }).rule(p.rule([])).schema, { $jtlt: '0.1', rules: [{ body: [] }] });
+    for (const root of [null, 5, 'template']) {
+      for (const extend of [(b) => b.rule(p.rule([])), (b) => b.rules([]), (b) => b.output('text')]) {
+        assert.throws(() => extend(p.from(root)), (error) => error.code === 'JL0101'
+          && /^JL0101: a fluent member extends an object document, and this one is /.test(error.message));
+      }
+    }
+  });
 });

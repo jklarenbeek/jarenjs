@@ -16,6 +16,7 @@ import * as s from '@jarenjs/linq/schema';
 import * as m from '@jarenjs/linq/model';
 import { sub } from '@jarenjs/linq/app';
 import { open } from '@jarenjs/linq/db';
+import { defineContract, read, command, subscribe, error, http } from '@jarenjs/linq/contract';
 import { nodeDriver } from '@jarenjs/db/node';
 
 /** A fresh caller-owned value: nested, so a shallow copy would not do. */
@@ -321,5 +322,51 @@ describe('a graph copies the keyset cursor it resumes from', () => {
     finally {
       await client.close();
     }
+  });
+});
+
+describe('a contract declaration owns what it was handed', () => {
+  /** The hand-written members of an operation, fresh each call. */
+  const members = () => ({
+    input: { type: 'object', properties: { id: { type: 'integer' } } },
+    output: { type: 'string' },
+    errors: { gone: { status: 404, schema: { type: 'object', properties: { why: { type: 'string' } } } } },
+    policy: { retry: { max: 1, on: ['gone'] }, stream: { resume: 'replay' } },
+    doc: 'one',
+  });
+  const build = (spec, declared) => defineContract({}, {
+    a: read(spec), b: command({ output: true, errors: { teapot: declared } }),
+  }).document;
+
+  it('writes between the declaration and defineContract() change nothing', () => {
+    const untouched = JSON.stringify(build(members(), error({ status: 418, schema: { type: 'string' } })));
+    const spec = members();
+    const hand = { type: 'string' };
+    const declared = error({ status: 418, schema: hand });
+    const op = read(spec);
+    spec.doc = 'two';
+    spec.output.type = 'number';
+    spec.input.properties.id.type = 'string';
+    spec.errors.gone.schema.properties.why.type = 'number';
+    spec.errors.gone.status = 500;
+    spec.policy.retry.on.push('teapot');
+    spec.policy.stream.resume = 'snapshot';
+    hand.type = 'number';
+    const document = defineContract({}, { a: op, b: command({ output: true, errors: { teapot: declared } }) }).document;
+    assert.strictEqual(JSON.stringify(document), untouched);
+  });
+
+  it('subscribe() and command() copy alike, and a cyclic hand-written schema is still the pen\'s JL0101', () => {
+    for (const declare of [command, subscribe]) {
+      const spec = members();
+      const op = declare(spec);
+      spec.output.type = 'number';
+      assert.deepStrictEqual(defineContract({}, { a: op }).document.operations.a.output, { type: 'string' });
+    }
+    const cyclic = { type: 'object', properties: {} };
+    cyclic.properties.self = cyclic;
+    assert.throws(() => defineContract({}, { a: read({ output: cyclic }) }), { code: 'JL0101' });
+    const binding = http({ method: 'GET', path: '/a/{id}' });
+    assert.strictEqual(defineContract({}, { a: read({ output: true, http: binding }) }).document.operations.a.http.path, '/a/{id}');
   });
 });

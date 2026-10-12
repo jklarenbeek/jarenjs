@@ -70,7 +70,8 @@ Numeric ranges and relationships among data members remain the chart grammar's
 and renderer's responsibility. For extension fields use `from(document)`. A document whose `type` is not a chart kind
 the vocabulary declares, a name on `Object.prototype` included (`toString`), is
 `JL0101` "unknown chart kind" at the first fluent member, where it escaped as a raw
-`TypeError`.
+`TypeError`; so is a `from()` root that is not an object at all (`null`, a number, a
+string, an array), at its first fluent member.
 
 ## 5. The types
 

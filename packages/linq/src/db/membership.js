@@ -20,7 +20,8 @@ import { LinqBuildError } from '../errors.js';
  * @returns {any} the relation entry
  */
 export function requireMembership(relations, entityName, member, verb) {
-  const entry = relations[member];
+  // an own member only: `constructor` and `toString` are on every table's prototype
+  const entry = Object.hasOwn(relations, member) ? relations[member] : undefined;
   if (entry === undefined) {
     const declared = Object.keys(relations).filter((name) => relations[name].kind === 'manyToMany');
     throw new LinqBuildError('JL0107',

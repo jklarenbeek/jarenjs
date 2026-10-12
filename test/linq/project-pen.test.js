@@ -114,4 +114,14 @@ describe('project pen', () => {
     assert.deepEqual(parseProject(built.schema).files, built.schema.files);
     assert.throws(() => p.file('x', 'data', '{}', { unknown: true }), { code: 'JL0101' });
   });
+  it('a raw envelope without files takes its first file, and a root that is not an object takes no member', () => {
+    const file = { name: 'a', kind: 'app', text: '{}' };
+    assert.deepEqual(p.from({ project: '0.1' }).file(file).schema, { project: '0.1', files: [file] });
+    for (const root of [null, 5, 'envelope', ['envelope']]) {
+      for (const extend of [(b) => b.file(file), (b) => b.files([]), (b) => b.active('a'), (b) => b.layout({ mode: 'a' })]) {
+        assert.throws(() => extend(p.from(root)), (error) => error.code === 'JL0101'
+          && /^JL0101: a fluent member extends an object document, and this one is /.test(error.message));
+      }
+    }
+  });
 });

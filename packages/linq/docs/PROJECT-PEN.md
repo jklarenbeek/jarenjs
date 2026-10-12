@@ -67,7 +67,10 @@ contains the schema's file-kind vocabulary, checked against Studio's own set.
 types. `JsonInput` accepts readonly structural documents and leaves unknown
 schema extension values to the runtime JSON check. `.files()` replaces the name union and `.file()` widens it. `.active()`
 refuses an undeclared literal name in TypeScript. `from()` deliberately keeps
-names broad. Neither duplicate detection nor numeric range proofs are claimed.
+names broad, and keeps its root verbatim: a fluent member on a root that is not
+an object (`null`, a number, a string, an array) is `JL0101`, where a string root
+used to spread into indexed members and `.file()` on an envelope without `files` was
+a raw `TypeError` (it now starts the list). Neither duplicate detection nor numeric range proofs are claimed.
 
 ## 6. What it cannot spell
 

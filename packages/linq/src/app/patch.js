@@ -27,7 +27,7 @@
 import { escapePointerToken } from '@jarenjs/core/string';
 
 import { LinqBuildError } from '../errors.js';
-import { liftExpression } from '../expression.js';
+import { liftExpression, unbracketName } from '../expression.js';
 import { describeValue } from '../json-boundary.js';
 import { captureAction } from './capture.js';
 import { refuseConditional } from './conditional.js';
@@ -66,22 +66,14 @@ function pointerOf(path) {
     }
     if (path[i] !== '[') unlowerable(path);
     if (path[i + 1] === "'") {
-      let name = '';
       let j = i + 2;
       for (;;) {
         if (j >= path.length) unlowerable(path);
-        const ch = path[j];
-        if (ch === "'") break;
-        if (ch !== '\\') { name += ch; j++; continue; }
-        const esc = path[j + 1];
-        if (esc === 'u') {
-          name += String.fromCodePoint(Number.parseInt(path.slice(j + 2, j + 6), 16));
-          j += 6;
-        }
-        else { name += esc; j += 2; }
+        if (path[j] === "'") break;
+        j += path[j] === '\\' ? 2 : 1;
       }
       if (path[j + 1] !== ']') unlowerable(path);
-      out += `/${escapePointerToken(name)}`;
+      out += `/${escapePointerToken(unbracketName(path.slice(i + 2, j)))}`;
       i = j + 2;
       continue;
     }

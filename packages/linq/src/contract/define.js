@@ -21,10 +21,10 @@
  * document means.
  */
 
-import { cloneJson, deepFreeze, setObjectMember, isJsonObject } from '@jarenjs/core/object';
+import { deepFreeze, setObjectMember, isJsonObject } from '@jarenjs/core/object';
 
 import { LinqBuildError } from '../errors.js';
-import { describeValue, requireJson, requireNameMap } from '../json-boundary.js';
+import { describeValue, requireNameMap, requireOwnJson } from '../json-boundary.js';
 import { isSchemaBuilder } from '../schema/brand.js';
 import { createHoist, emitInto, hoistedDefs } from '../schema/emit.js';
 import { http as httpBinding, isHttpBinding } from './http.js';
@@ -47,12 +47,12 @@ const ID = /^[A-Za-z_][A-Za-z0-9_-]*$/;
  */
 function schemaAt(value, ctx, at) {
   if (isSchemaBuilder(value)) return emitInto(value, ctx, at);
-  const json = requireJson(value, `the schema at ${at}`);
+  const json = requireOwnJson(value, `the schema at ${at}`);
   if (typeof json !== 'boolean' && !isJsonObject(json)) {
     throw new LinqBuildError('JL0101',
       `a schema is an object, true or false — got ${describeValue(value)}`, at);
   }
-  return cloneJson(json);
+  return json;
 }
 
 /**

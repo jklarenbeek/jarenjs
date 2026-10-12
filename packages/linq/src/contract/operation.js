@@ -20,7 +20,7 @@
  * nothing.
  */
 
-import { isJsonObject } from '@jarenjs/core/object';
+import { isJsonObject, setObjectMember } from '@jarenjs/core/object';
 import { LinqBuildError } from '../errors.js';
 import { closedTo, describeValue } from '../json-boundary.js';
 
@@ -60,6 +60,34 @@ export const POLICY_VALUES = Object.freeze({
  * core and json only; test/linq/contract-pen.test.js holds it equal to
  * `CONTRACT_GRAMMARS` from @jarenjs/contract. */
 const CODE = /^[a-z][a-z0-9_-]*(\.[a-z][a-z0-9_-]*)*$/;
+
+/**
+ * A copy of the plain objects and arrays a declaration was handed, so a later
+ * write into the caller's spec changes nothing `defineContract` reads. A schema
+ * builder (a class instance) is not plain data and stays the caller's; the pen's own
+ * declarations (`error()`, `http()`) copy like any object and are checked again
+ * where they are read. A cycle is kept as it is — the JSON boundary refuses it by
+ * name when the document is built.
+ * @param {any} value
+ * @param {Set<object>} [active] - the containers being copied
+ * @returns {any}
+ */
+function ownDeclared(value, active = new Set()) {
+  if (value === null || typeof value !== 'object' || active.has(value)) return value;
+  if (!Array.isArray(value)) {
+    const proto = Object.getPrototypeOf(value);
+    if (proto !== Object.prototype && proto !== null) return value;
+  }
+  active.add(value);
+  let out;
+  if (Array.isArray(value)) out = value.map((item) => ownDeclared(item, active));
+  else {
+    out = {};
+    for (const key of Object.keys(value)) setObjectMember(out, key, ownDeclared(value[key], active));
+  }
+  active.delete(value);
+  return out;
+}
 
 /**
  * One entry of `policy.retry`/`policy.stream`/`policy.limits`/
@@ -207,7 +235,7 @@ export function error(spec = {}) {
   }
   const out = {};
   if (spec.status !== undefined) out.status = spec.status;
-  if (spec.schema !== undefined) out.schema = spec.schema;
+  if (spec.schema !== undefined) out.schema = ownDeclared(spec.schema);
   Object.defineProperty(out, ERROR_DECLARATION, { value: true, enumerable: false });
   return Object.freeze(out);
 }
@@ -280,7 +308,7 @@ export function checkOperation(kind, spec, at) {
  */
 function operation(kind, spec) {
   checkOperation(kind, spec);
-  const out = { kind, spec };
+  const out = { kind, spec: ownDeclared(spec) };
   Object.defineProperty(out, OPERATION, { value: true, enumerable: false });
   return Object.freeze(out);
 }

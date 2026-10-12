@@ -174,6 +174,22 @@ function bracketName(name) {
   return `['${escaped}']`;
 }
 
+/** The control characters {@link bracketName} spells as short escapes. */
+const SHORT_ESCAPES = { __proto__: null, b: '\b', f: '\f', n: '\n', r: '\r', t: '\t' };
+
+/**
+ * The member name the inside of a bracketed name selector stands for:
+ * the inverse of {@link bracketName}, so a name round-trips through the
+ * path the capture writes (`\n` is a newline, `\u0001` is U+0001, any
+ * other escaped character stands for itself).
+ * @param {string} escaped - the text between the selector's quotes
+ * @returns {string}
+ */
+export function unbracketName(escaped) {
+  return escaped.replace(/\\(?:u([0-9a-fA-F]{4})|([\s\S]))/g,
+    (_, hex, ch) => (hex === undefined ? SHORT_ESCAPES[ch] ?? ch : String.fromCharCode(Number.parseInt(hex, 16))));
+}
+
 /**
  * One member step on a path: the shorthand for an identifier, the
  * bracketed selector for anything else.
