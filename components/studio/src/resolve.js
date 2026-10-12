@@ -33,6 +33,10 @@ export function documentKey(kind, value) {
   return semanticKey(value, { ordered: true });
 }
 
+/** The fewest file reads one resolution may use, and the reads each file of the project adds. */
+const MIN_READS = 256;
+const READS_PER_FILE = 64;
+
 /** Resolve one file and its transitive sources. Imported members must be
  * absent locally; a typo, cycle or collision is a refusal, never a fallback.
  * @param {any} project @param {string} name
@@ -40,10 +44,15 @@ export function documentKey(kind, value) {
 export function resolveProjectFile(project, name) {
   const visiting = new Set();
   const sources = new Set();
+  // A file imported from two members is read twice, so a chain of files that
+  // each import the next one twice reads 2^n times: the reads are bounded by
+  // what a project of this many files can reasonably hold.
+  let budget = Math.max(MIN_READS, project.files.length * READS_PER_FILE);
   const read = (name) => {
     const file = project.files.find((f) => f.name === name);
     if (!file) throw new StudioError('JS0003', `missing project file '${name}'`);
     if (visiting.has(name)) throw new StudioError('JS0003', `cyclic file import at '${name}'`);
+    if (--budget < 0) throw new StudioError('JS0003', `the imports from '${name}' expand to too many file reads`);
     visiting.add(name);
     sources.add(name);
     let doc;

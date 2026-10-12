@@ -97,7 +97,10 @@ query at once. See [PROJECT-FORMAT.md](docs/PROJECT-FORMAT.md).
 
 Answers that changed (upgrade notes): `subscribe` on a closed data transport
 refuses with `the data transport is closed`, as `request` does, where it threw
-a `TypeError` about `null`.
+a `TypeError` about `null`. A file whose imports expand to more reads than its
+project can reasonably hold (a chain of files that each import the next under two
+members reads the last one 2^n times) is a `JS0003` refusal, like a cycle, where
+resolving it kept the page busy for minutes.
 
 ## Exports
 
