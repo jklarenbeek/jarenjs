@@ -111,10 +111,10 @@ npm run docs:derive
 
 | Host | Consumer | Rows | Journey ms | Search startup ms | Heap MiB | Peak RSS MiB | Second writes |
 |---|---|---:|---:|---:|---:|---:|---:|
-| node | catalog | 10000 | 729.16 | 313.93 | 70.03 | 276.20 | 0 |
-| node | archive-stock | 75000 | 3906.01 | 2539.98 | 289.20 | 893.90 | 0 |
-| bun | catalog | 10000 | 608.42 | 263.14 | 67.25 | 268.85 | 0 |
-| bun | archive-stock | 75000 | 2934.83 | 1803.76 | 328.80 | 996.14 | 0 |
+| node | catalog | 10000 | 754.98 | 332.38 | 69.81 | 272.50 | 0 |
+| node | archive-stock | 75000 | 3956.44 | 2532.22 | 335.88 | 887.00 | 0 |
+| bun | catalog | 10000 | 602.75 | 250.70 | 66.78 | 263.12 | 0 |
+| bun | archive-stock | 75000 | 3031.85 | 1846.24 | 330.24 | 988.45 | 0 |
 
 Retained reference adapters: 105 lines; adopted application policy: 196 lines. Third-party search/virtualization mechanisms in the application: 2 → 0.
 
@@ -271,7 +271,7 @@ and host-wide remaining handles lack matching combined measurements.
 | catalog | relational.statements | 9 | 9 (pass) | relational: 9 (pass) | pending | pending |
 | catalog | relational.queryMs | 100 | 0.09 (pass) | relational: 0.49 (pass) | pending | pending |
 | catalog | relational.recoveryMs | 5000 | 34.73 (pass) | relational: 43.50 (pass) | pending | pending |
-| catalog | search.startupMs | 15000 | 372.60 (pass) | lexical: 385.02 (pass) | 313.93 (pass) | 263.14 (pass) |
+| catalog | search.startupMs | 15000 | 372.60 (pass) | lexical: 385.02 (pass) | 332.38 (pass) | 250.70 (pass) |
 | catalog | search.coldIndexMs | 15000 | 169.51 (pass) | lexical: 173.34 (pass) | pending | pending |
 | catalog | search.warmIndexMs | 15000 | 65.05 (pass) | lexical: 176.75 (pass) | pending | pending |
 | catalog | search.queryMs | 100 | 14.11 (pass) | lexical: 9.00 (pass) | pending | pending |
@@ -291,15 +291,15 @@ and host-wide remaining handles lack matching combined measurements.
 | catalog | providers.bytes | 262144 | 269 (pass) | providers: 66426 (pass) | pending | pending |
 | catalog | providers.attempts | 3 | pending | providers: pending | pending | pending |
 | catalog | providers.unresolvedResends | 0 | pending | providers: pending | 0 (pass) | 0 (pass) |
-| catalog | resources.sampledHeapBytes | 268435456 | 154179328 (pass) | —: pending | 73433320 (pass) | 70511767 (pass) |
-| catalog | resources.peakRssBytes | 536870912 | 315109376 (pass) | —: pending | 289615872 (pass) | 281911296 (pass) |
+| catalog | resources.sampledHeapBytes | 268435456 | 154179328 (pass) | —: pending | 73202064 (pass) | 70019517 (pass) |
+| catalog | resources.peakRssBytes | 536870912 | 315109376 (pass) | —: pending | 285741056 (pass) | 275902464 (pass) |
 | catalog | resources.peakHeapBytes | 268435456 | pending | —: pending | pending | pending |
-| catalog | resources.teardownMs | 1000 | 0.07 (pass) | —: pending | 0.23 (pass) | 0.45 (pass) |
+| catalog | resources.teardownMs | 1000 | 0.07 (pass) | —: pending | 0.22 (pass) | 0.36 (pass) |
 | catalog | resources.remainingHandles | 0 | pending | —: pending | pending | pending |
 | archive-stock | relational.statements | 9 | 9 (pass) | relational: 9 (pass) | pending | pending |
 | archive-stock | relational.queryMs | 250 | 0.16 (pass) | relational: 0.60 (pass) | pending | pending |
 | archive-stock | relational.recoveryMs | 5000 | 49.20 (pass) | relational: 76.04 (pass) | pending | pending |
-| archive-stock | search.startupMs | 45000 | 2096.09 (pass) | lexical: 2853.08 (pass) | 2539.98 (pass) | 1803.76 (pass) |
+| archive-stock | search.startupMs | 45000 | 2096.09 (pass) | lexical: 2853.08 (pass) | 2532.22 (pass) | 1846.24 (pass) |
 | archive-stock | search.coldIndexMs | 45000 | 970.36 (pass) | lexical: 1204.92 (pass) | pending | pending |
 | archive-stock | search.warmIndexMs | 45000 | 479.46 (pass) | lexical: 1416.27 (pass) | pending | pending |
 | archive-stock | search.queryMs | 250 | 88.96 (pass) | lexical: 78.50 (pass) | pending | pending |
@@ -319,10 +319,10 @@ and host-wide remaining handles lack matching combined measurements.
 | archive-stock | providers.bytes | 524288 | 269 (pass) | providers: 135886 (pass) | pending | pending |
 | archive-stock | providers.attempts | 3 | pending | providers: pending | pending | pending |
 | archive-stock | providers.unresolvedResends | 0 | pending | providers: pending | 0 (pass) | 0 (pass) |
-| archive-stock | resources.sampledHeapBytes | 805306368 | 1020055816 (fail) | —: pending | 303249568 (pass) | 344769203 (pass) |
-| archive-stock | resources.peakRssBytes | 1073741824 | 1209151488 (fail) | —: pending | 937324544 (pass) | 1044525056 (pass) |
+| archive-stock | resources.sampledHeapBytes | 805306368 | 1020055816 (fail) | —: pending | 352197664 (pass) | 346277444 (pass) |
+| archive-stock | resources.peakRssBytes | 1073741824 | 1209151488 (fail) | —: pending | 930091008 (pass) | 1036460032 (pass) |
 | archive-stock | resources.peakHeapBytes | 805306368 | pending | —: pending | pending | pending |
-| archive-stock | resources.teardownMs | 2000 | 0.10 (pass) | —: pending | 0.22 (pass) | 0.33 (pass) |
+| archive-stock | resources.teardownMs | 2000 | 0.10 (pass) | —: pending | 0.33 (pass) | 0.32 (pass) |
 | archive-stock | resources.remainingHandles | 0 | pending | —: pending | pending | pending |
 
 <!--/fact-->

@@ -163,7 +163,7 @@ the table and stale in the paragraph that cites it:
 | `./contract` | <!--fact:bundle.contract.kb-->53<!--/fact--> kB | the schema pen (a contract's inputs and outputs are schemas) |
 | `./flow` | <!--fact:bundle.flow.kb-->22<!--/fact--> kB | the capture; of the schema pen, only the brand |
 | `./app` | <!--fact:bundle.app.kb-->54<!--/fact--> kB | the schema pen and the JSLT pen (state, and views) |
-| `./forms` | <!--fact:bundle.forms.kb-->43<!--/fact--> kB | the schema pen it subclasses |
+| `./forms` | <!--fact:bundle.forms.kb-->44<!--/fact--> kB | the schema pen it subclasses |
 | `./formula` | <!--fact:bundle.formula.kb-->11<!--/fact--> kB | saved Query profiles; no evaluator |
 | `./messages` | <!--fact:bundle.messages.kb-->14<!--/fact--> kB | message templates; no locale packs |
 | `./jtlt` | <!--fact:bundle.jtlt.kb-->19<!--/fact--> kB | text template capture; no renderer |

@@ -214,12 +214,12 @@ and the bundle is the byte count the tree-shaking probe builds.
 | [CONTRACT-PEN.md](CONTRACT-PEN.md) | `./contract` | 1,226 | 38 | 6 | 3 | 52,871 B |
 | [FLOW-PEN.md](FLOW-PEN.md) | `./flow` | 1,050 | 16 | 7 | 3 | 21,978 B |
 | [APP-PEN.md](APP-PEN.md) | `./app` | 1,314 | 24 | 7 | 4 | 54,314 B |
-| [FORMS-PEN.md](FORMS-PEN.md) | `./forms` | 947 | 18 | 6 | 3 | 43,389 B |
+| [FORMS-PEN.md](FORMS-PEN.md) | `./forms` | 947 | 18 | 6 | 3 | 43,566 B |
 | [MESSAGES-PEN.md](MESSAGES-PEN.md) | `./messages` | 105 | 9 | 2 | 1 | 13,999 B |
 | [JTLT-PEN.md](JTLT-PEN.md) | `./jtlt` | 83 | 13 | 1 | 2 | 18,592 B |
 | [PROJECT-PEN.md](PROJECT-PEN.md) | `./project` | 84 | 9 | 1 | 1 | 4,612 B |
 | [CHARTS-PEN.md](CHARTS-PEN.md) | `./charts` | 98 | 21 | 1 | 1 | 6,447 B |
-| [DB-CLIENT.md](DB-CLIENT.md) | `./db` | 1,195 | 45 | 4 | 2 | 954,979 B |
+| [DB-CLIENT.md](DB-CLIENT.md) | `./db` | 1,195 | 45 | 4 | 2 | 955,324 B |
 | [FORMULA-PEN.md](FORMULA-PEN.md) | `./formula` | 41 | 2 | — | — | 11,183 B |
 | **16 documents** | | **13,570** | **372** | **73** | | |
 <!--/fact-->
@@ -273,12 +273,12 @@ it and each document publishes it. The rounded column is what
 | `@jarenjs/linq/contract` | [CONTRACT-PEN.md](CONTRACT-PEN.md) | 52,871 B | 53 kB |
 | `@jarenjs/linq/flow` | [FLOW-PEN.md](FLOW-PEN.md) | 21,978 B | 22 kB |
 | `@jarenjs/linq/app` | [APP-PEN.md](APP-PEN.md) | 54,314 B | 54 kB |
-| `@jarenjs/linq/forms` | [FORMS-PEN.md](FORMS-PEN.md) | 43,389 B | 43 kB |
+| `@jarenjs/linq/forms` | [FORMS-PEN.md](FORMS-PEN.md) | 43,566 B | 44 kB |
 | `@jarenjs/linq/messages` | [MESSAGES-PEN.md](MESSAGES-PEN.md) | 13,999 B | 14 kB |
 | `@jarenjs/linq/jtlt` | [JTLT-PEN.md](JTLT-PEN.md) | 18,592 B | 19 kB |
 | `@jarenjs/linq/project` | [PROJECT-PEN.md](PROJECT-PEN.md) | 4,612 B | 5 kB |
 | `@jarenjs/linq/charts` | [CHARTS-PEN.md](CHARTS-PEN.md) | 6,447 B | 6 kB |
-| `@jarenjs/linq/db` | [DB-CLIENT.md](DB-CLIENT.md) | 954,979 B | 955 kB |
+| `@jarenjs/linq/db` | [DB-CLIENT.md](DB-CLIENT.md) | 955,324 B | 955 kB |
 | `@jarenjs/linq/formula` | [FORMULA-PEN.md](FORMULA-PEN.md) | 11,183 B | 11 kB |
 <!--/fact-->
 

@@ -932,7 +932,7 @@ for this pen at all.
 
 ## 7. Cost
 
-`@jarenjs/linq/forms` builds to **<!--fact:bundle.forms-->43,389<!--/fact--> bytes** as a minified,
+`@jarenjs/linq/forms` builds to **<!--fact:bundle.forms-->43,566<!--/fact--> bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
 measures and `npm run test:tree-shaking` reports, published rounded
 beside the other subpath prices in
