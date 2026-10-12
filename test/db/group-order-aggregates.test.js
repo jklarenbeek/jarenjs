@@ -524,6 +524,9 @@ const TRANSIENT = new Set(['55006', '57P01', '57P02', '57P03']);
 async function icuCase(t) {
   const { default: pg } = await import('pg');
   const admin = new pg.Client({ connectionString: URL });
+  // a backend the server ends under a sibling suite surfaces as an 'error' event;
+  // the query that was waiting rejects with its code and the case retries
+  admin.on('error', () => {});
   await admin.connect();
   const database = `group_order_icu_${process.pid}`;
   try {
@@ -538,6 +541,7 @@ async function icuCase(t) {
     const url = new globalThis.URL(/** @type {string} */ (URL));
     url.pathname = `/${database}`;
     const pool = new pg.Pool({ connectionString: url.href, max: 2 });
+    pool.on('error', () => {});
     let store;
     try {
       // without a collation of its own, 'a' sorts before 'B' here and after it by code point
