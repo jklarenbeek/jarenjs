@@ -566,14 +566,6 @@ what each does is its own documentation's job
   it, so a rename alone is refused when one of those is itself referenced. Wanted:
   foreign keys re-pointed through the rebuild, or in-place `ALTER`s where
   PostgreSQL has them.
-- [ ] **An expired lease past `maxAttempts` is claimed again.** `attempts`
-  counts every claim, a crashed attempt included, but the claim only reads the
-  lease: a job with `maxAttempts: 1` whose lease expired is claimed with
-  `attempts: 2`, then 3, and the handler runs each time, so a job that crashes
-  its worker never dead-letters. Wanted: the claim dead-letters a job whose
-  lease expired at `attempts >= maxAttempts` (with the last error), leaving a
-  requeued dead job its one extra attempt
-  ([JOBS-FORMAT §10](../packages/db/docs/JOBS-FORMAT.md)).
 - [ ] **Entities that reference each other in a cycle do not open on
   PostgreSQL.** Tables are created after the tables they reference, which a
   cycle (`Person.pet` and `Pet.owner`, both one-to-one) has no order for, where

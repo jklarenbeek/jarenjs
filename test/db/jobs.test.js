@@ -438,7 +438,8 @@ describe('the drift gate the fence owes itself', () => {
     const normalize = (sql) => sql.replace(/\$\d+/g, '?');
     const claim = normalize(statements.claim(2));
     assert.match(claim, /lease_generation\s*=\s*lease_generation\s*\+\s*1/);
-    assert.match(claim, /lease_token=\?/);
+    // the minted token is assigned plainly, or in the live branch of the CASE that dead-letters a spent row
+    assert.match(claim, /lease_token=(?:CASE WHEN [^?]*? ELSE )?\?/);
     for (const name of ['renew', 'complete', 'dead', 'retry', 'cancelLeased', 'assertLease', 'cpFence']) {
       const statement = normalize(statements[name]);
       const where = statement.slice(statement.indexOf('WHERE'));

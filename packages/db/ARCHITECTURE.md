@@ -1410,7 +1410,7 @@ The optional scheduler/executor stay outside ordinary synchronous client imports
 ## Durable runs and the job queue (`src/jobs.js`, `src/dag-job.js`)
 
 The queue's correctness story has two halves. The claim UPDATE selects
-the earliest eligible row (pending, failed, or an expired lease — so
+the earliest eligible row (pending, failed, or an expired lease with attempts left — so
 recovery IS the next claim, not a sweeper) whose kind the worker
 registered, MINTS the fence — a fresh opaque `lease_token` and the next
 `lease_generation` — sets the row leased with a deadline, and RETURNs

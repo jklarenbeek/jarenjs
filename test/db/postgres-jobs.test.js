@@ -375,7 +375,7 @@ describe('PostgreSQL jobs and transactional outbox', { skip: !url && 'JAREN_PG_U
     await fixture(async ({ open, pool, advance }) => {
       let lose = '', replies = 0;
       const source = observedSource(pool, (text) => {
-        if (lose && (lose === 'commit' ? text === 'COMMIT' : text.startsWith('UPDATE "_jaren_jobs" SET state=\'leased\''))) {
+        if (lose && (lose === 'commit' ? text === 'COMMIT' : (text.startsWith('UPDATE "_jaren_jobs" SET state=') && text.includes('lease_generation=lease_generation+1')))) {
           lose = ''; replies++;
           throw Object.assign(new Error('queue reply lost'), { code: '08006' });
         }

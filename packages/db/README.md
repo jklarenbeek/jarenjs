@@ -1230,7 +1230,7 @@ measure what that costs sequential point reads beside what it gains concurrent o
   a `@jarenjs/flow` DAG run checkpoints declared nodes and RESUMES
   after a crash; `store.jobs` leases work in one guarded statement (no
   distributed lock), retries with backoff, dead-letters, and reclaims
-  expired leases as recovery. Every settling call carries a FENCE — the
+  expired leases as recovery (a crashed final attempt dead-letters). Every settling call carries a FENCE — the
   opaque token one claim mints, plus a lease that is still valid — so an
   expired or superseded attempt cannot mark a job done over the live
   one's result, and is told which of three things happened rather than

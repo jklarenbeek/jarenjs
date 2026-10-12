@@ -88,9 +88,9 @@ so two workers cannot claim the same job, without any distributed
 lock — and it MINTS the fence the attempt will settle with:
 
 ```sql
-UPDATE "_jaren_jobs" SET state='leased', lease_owner=?, lease_until=?,
-  lease_generation=lease_generation+1, lease_token=?,
-  attempts=attempts+1, updated_at=?
+UPDATE "_jaren_jobs" SET state=CASE WHEN spent THEN 'dead' ELSE 'leased' END,
+  lease_owner=…, lease_until=…, lease_token=…,   -- NULL / unchanged when spent
+  lease_generation=lease_generation+1, last_error=…, attempts=…, updated_at=?
 WHERE id = (SELECT id FROM "_jaren_jobs"
   WHERE (state='pending' OR state='failed'
          OR (state='leased' AND lease_until < ?))
@@ -98,6 +98,13 @@ WHERE id = (SELECT id FROM "_jaren_jobs"
   ORDER BY run_at, created_at, id LIMIT 1)
 RETURNING *
 ```
+
+Here `spent` is `state='leased' AND attempts >= max_attempts`: the selected
+row is an expired lease whose attempt budget is used up (§5). The statement
+dead-letters it instead of leasing it, and `claim()` runs the statement
+again until it leases a row or finds none. The expanded `SET` list is the
+shape of the statement, not a second statement, so the claim stays one
+transaction per row.
 
 The example shows SQLite parameters. PostgreSQL emits numbered parameters and
 adds `FOR UPDATE SKIP LOCKED` to the bounded candidate SELECT. Independent
@@ -230,6 +237,11 @@ A failed attempt (the handler threw or rejected) records
   and their checkpoint rows (a post-mortem can read exactly how far
   the run got).
 
+An attempt that never settles counts too: `attempts` rises at every claim,
+so a final attempt whose worker crashed leaves a leased row with
+`attempts >= max_attempts` and an expired lease. The next claim for its
+kind dead-letters that row (§5) instead of claiming it again.
+
 Backoff is exponential with jitter:
 `min(cap, base × 2^(attempts−1)) × (0.5 + random()/2)`, defaults
 `base` 1 000 ms, `cap` 60 000 ms. `Math.random` is the platform
@@ -242,10 +254,19 @@ test in this repository does.
 A worker that dies mid-job leaves a `leased` row whose `lease_until`
 passes; the claim statement (§3) treats an expired lease exactly like
 `pending`, so **recovery is not a separate sweeper — it is the next
-claim**. The reclaimed attempt re-runs the handler; a §7 DAG job
+claim**, while the budget lasts. The reclaimed attempt re-runs the handler; a §7 DAG job
 resumes from its checkpoint rows rather than restarting, and the
 reclaimed attempt reads the checkpoints written up to and including its
 own generation, so it resumes from its predecessor's work.
+
+A row whose lease expired at `attempts >= max_attempts` was a crashed final
+attempt, and it is not reclaimed: the claim moves it to `state='dead'`
+instead (in the same statement, §3), keeping its `last_error` (`lease expired`
+when no attempt recorded one), clearing the lease and moving
+`lease_generation`, so the crashed attempt's token settles nothing (`JD2065`:
+the job is dead). The handler does not run again; `requeue` (§10) is the
+deliberate way to give it one more attempt. Only jobs of the claim's kinds
+are touched, and a live lease never is.
 
 The reclaim also FENCES the attempt it displaced: the older token settles
 nothing from that moment, and its settlement is refused `JD2066` rather
@@ -360,7 +381,7 @@ does the same and **closes the connection either way**, then reports
 `JD2062` when handlers were left running — a report, not a refusal: the
 handle really is released. A handler that ignores its signal therefore
 cannot hold the database file open for the life of the process, and the
-lease expiry (§5) lets another worker re-claim its job.
+lease expiry (§5) lets another worker re-claim its job while attempts remain.
 
 A loop the grace period could not drain is **cancelled**, not merely
 uncounted: when its wedged handler finally settles, the loop exits

@@ -382,7 +382,8 @@ export function createJobEngine(options) {
 
   /**
    * §3: the single guarded claim; expired leases are claimable — the
-   * next claim IS crash recovery.
+   * next claim IS crash recovery — unless the attempt budget is spent,
+   * where the claim dead-letters the job (§4) and takes the next one.
    * @param {{ kinds: string[], owner: string, leaseMs?: number }} claimOptions
    */
   const claim = (claimOptions) => {
@@ -399,12 +400,17 @@ export function createJobEngine(options) {
     // through the RETURNING the claim already had, so the attempt that
     // holds them is the only one that can settle the job
     const statement = prepared(`claim:${kinds.length}`, sql.claim(kinds.length));
-    return chain(statement.get([
+    // a crashed final attempt (lease expired, budget spent) comes back from
+    // the same statement already dead-lettered; claim again past it
+    const next = () => chain(statement.get([
       owner, at + (claimOptions.leaseMs ?? defaults.leaseMs), uuid(),
       at, at, at, ...kinds,
-    ]), (row) => (row === undefined
-      ? undefined
-      : Object.freeze({ ...publicJob(row), lease: leaseOf(row) })));
+    ]), (row) => {
+      if (row === undefined) return undefined;
+      if (row.state === 'dead') return next();
+      return Object.freeze({ ...publicJob(row), lease: leaseOf(row) });
+    });
+    return next();
   };
 
   /**
@@ -1008,7 +1014,8 @@ export function createJobEngine(options) {
      * drained must abandon its job — no completion or failure write,
      * no further claim, no re-armed poll timer — because the store it
      * would touch is the one the caller is about to close. The
-     * abandoned lease expires and the next claim re-runs the job (§5).
+     * abandoned lease expires and the next claim re-runs the job, or
+     * dead-letters it when this was its final attempt (§5).
      * A later `start()` opens a NEW session, so a cancelled loop can
      * never be revived.
      */
@@ -1158,7 +1165,8 @@ export function createJobEngine(options) {
           recordLost(attempt, 'failure', refusal);
           return;
         }
-        // the lease will expire and the job will be re-claimed (§5);
+        // the lease will expire and the job will be re-claimed, or dead-lettered
+        // when this was its final attempt (§5);
         // a worker must not die because the failure write failed
       }
       stats.failures += 1;
@@ -1294,7 +1302,8 @@ export function createJobEngine(options) {
        * Stop claiming, signal in-flight handlers to abort, and wait for
        * the loops — but only up to `graceMs`. A handler that ignores its
        * signal cannot hold the process open; the resolved record says so
-       * instead, and the lease expiry (§5) lets another worker re-claim.
+       * instead, and the lease expiry (§5) lets another worker re-claim
+       * (or dead-letter a final attempt).
        * A loop the grace period could not drain is cancelled outright:
        * when its handler finally settles it exits without another
        * claim, store write or poll timer.
@@ -1334,8 +1343,8 @@ export function createJobEngine(options) {
           // …and bar it from settling. §6.1's whole point is that a
           // cancelled loop touches the store the caller is about to
           // close no further. The abandoned lease then expires and the
-          // job recovers by re-claim (§5), which is exactly what the
-          // cancellation means.
+          // job recovers by re-claim (a final attempt dead-letters, §5),
+          // which is exactly what the cancellation means.
           for (const abandoned of attempts.values()) abandoned.settled = true;
         }
         // quiescence, on BOTH paths: no renewal timer stays armed (and

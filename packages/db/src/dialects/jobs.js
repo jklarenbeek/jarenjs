@@ -57,7 +57,16 @@ export function jobStatements(dialect) {
     get: `SELECT * FROM ${jobs} WHERE id=${p(1)}`,
     counts: `SELECT state, COUNT(*) AS n FROM ${jobs} GROUP BY state`,
     pendingKinds: `SELECT kind, COUNT(*) AS n FROM ${jobs} WHERE state IN ('pending', 'failed') GROUP BY kind`,
-    claim: (count) => update(`state='leased', lease_owner=${p(1)}, lease_until=${p(2)}, lease_generation=lease_generation+1, lease_token=${p(3)}, attempts=attempts+1, updated_at=${p(4)}`, `id = (SELECT id FROM ${jobs} WHERE (state='pending' OR state='failed' OR (state='leased' AND lease_until<${p(5)})) AND run_at<=${p(6)} AND kind IN (${Array.from({ length: count }, (_, i) => p(i + 7)).join(', ')}) ORDER BY run_at, created_at, id LIMIT 1${strategy.claimLock ?? ''})`, ' RETURNING *'),
+    // One statement claims the earliest eligible row. An expired lease at an
+    // exhausted budget is a crashed final attempt: the same statement
+    // dead-letters it (fence generation moved, lease cleared, attempts kept)
+    // and the caller claims again, so an idle poll costs what it always did.
+    claim: (count) => {
+      const spent = "(state='leased' AND attempts>=max_attempts)";
+      // an untyped parameter beside NULL in a CASE has no type to infer from
+      const choose = (live, dead) => `CASE WHEN ${spent} THEN ${dead} ELSE ${live} END`;
+      return update(`state=${choose("'leased'", "'dead'")}, lease_owner=${choose(p(1), 'lease_owner')}, lease_until=${choose(strategy.numericType ? `CAST(${p(2)} AS ${strategy.numericType})` : p(2), 'NULL')}, lease_generation=lease_generation+1, lease_token=${choose(p(3), 'NULL')}, last_error=${choose('last_error', "COALESCE(last_error, 'lease expired')")}, attempts=${choose('attempts+1', 'attempts')}, updated_at=${p(4)}`, `id = (SELECT id FROM ${jobs} WHERE (state='pending' OR state='failed' OR (state='leased' AND lease_until<${p(5)})) AND run_at<=${p(6)} AND kind IN (${Array.from({ length: count }, (_, i) => p(i + 7)).join(', ')}) ORDER BY run_at, created_at, id LIMIT 1${strategy.claimLock ?? ''})`, ' RETURNING *');
+    },
     fenceRow: `SELECT state, lease_token, lease_until, lease_generation FROM ${jobs} WHERE id=${p(1)}`,
     assertLease: checkLease,
     renew: update(`lease_until=${p(1)}, lease_token=${p(2)}, updated_at=${p(3)}`, `id=${p(4)} AND ${fence(5)}`, ' RETURNING *'),

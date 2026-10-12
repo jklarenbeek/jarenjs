@@ -1853,6 +1853,16 @@ exactly; one sentence per changed answer:
   permissions (a `0600` input came out `0644`), and over a link replace the file the
   link names, leaving the link.
 
+## 15. A crashed final attempt dead-letters
+
+A job whose lease expired with `attempts >= max_attempts` used to be claimed
+again by every later claim, so a job that crashed its worker ran forever. The
+next claim after the upgrade moves each such leased row of its kinds to
+`state='dead'` with its last error (`lease expired` when none) and runs the
+handler no more; no schema change is involved. Read `counts()` after rollout:
+rows that were looping now show as `dead`. `requeue(id)` gives a dead job one
+more attempt ([JOBS-FORMAT §10](JOBS-FORMAT.md)).
+
 ## Measured costs
 
 Exact identity stores complete canonical documents and model endpoints, so
