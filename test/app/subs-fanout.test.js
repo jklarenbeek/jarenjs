@@ -130,6 +130,41 @@ describe('subscription fan-out (`for`)', () => {
     app.destroy();
   });
 
+  it('items whose keys repeat count once against the bound', () => {
+    const doc = feedDoc();
+    const errors = [];
+    const log = [];
+    doc.subs = [{ run: 'feed', for: '$.feeds' }];
+    const app = createApp(doc, {
+      schedule: sync,
+      maxSubInstances: 2,
+      onError: (err) => errors.push(err),
+      subs: { feed: logger(log) },
+    });
+    log.length = 0;
+    app.dispatch('set', ['a', 'b', 'a', 'b', 'a']); // two distinct keys, five items
+    assert.deepStrictEqual(errors, []);
+    assert.deepStrictEqual(log, []);
+    app.dispatch('set', ['b', 'c', 'b', 'c']);
+    assert.deepStrictEqual(errors, []);
+    assert.deepStrictEqual(log, [['stop', 'a'], ['start', 'c']]);
+    app.dispatch('set', ['b', 'c', 'b', 'd']); // a third distinct key
+    assert.deepStrictEqual(errors.map((e) => e.code), ['JA2017']);
+    assert.deepStrictEqual(log, [['stop', 'a'], ['start', 'c']], 'the previous set was kept');
+    app.destroy();
+  });
+
+  it('the key expression does not run for an item past the bound', () => {
+    const doc = feedDoc();
+    doc.state.feeds = [1, 2, 3, 4, 5, 6];
+    doc.subs = [{ run: 'feed', for: '$.feeds', key: { $if: [{ $gt: ['$item', 2] }, { $get: ['$item', 'x'] }, '$item'] } }];
+    const errors = [];
+    const app = createApp(doc, { schedule: sync, maxSubInstances: 2, onError: (e) => errors.push(e), subs: { feed: logger([]) } });
+    // items 3.. would make the key expression fail; none of them is evaluated
+    assert.deepStrictEqual(errors.map((e) => e.code), ['JA2017']);
+    app.destroy();
+  });
+
   it('a single non-array item fans out over one instance; an empty result over none', () => {
     const doc = feedDoc();
     doc.state.feeds = 'solo';

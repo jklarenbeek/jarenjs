@@ -314,9 +314,11 @@ previous order, then added — and changed, by resolved props value —
 instances start in the document order of the item sequence; duplicate
 keys collapse to the first occurrence. A resolution failure fails the
 whole declaration closed (`JA2016`, naming the member). Exceeding
-`maxSubInstances` (a `createApp` option, default 256) is `JA2017`, and
+`maxSubInstances` (a `createApp` option, default 256) — more distinct keys
+than that; an item whose key repeats is not an instance — is `JA2017`, and
 the previous instance set is KEPT — the bound is printed, never
-silent.
+silent. Upgrade note: items with repeated keys used to count against the bound,
+so a set of N distinct keys could be refused at a bound of N.
 
 **Scope.** Dynamic members are compiled closed-world: the only
 external a document may reference is `$item`, and only under `for` —
@@ -746,7 +748,7 @@ the last, past `destroy()`. The claim-first rule means one live slot is
 one start and one release, whatever the handler does.
 
 The `for` fan-out bound (`maxSubInstances`) stops the WORK, not just the
-retention: enumeration halts the moment the bound is crossed and reports
+retention: enumeration halts at the first key past the bound and reports
 `JA2017` with how many items were left. Bounding only what is kept still
 ran every key and props expression of a runaway query first, so the
 limit cost memory and CPU proportional to the mistake it existed to

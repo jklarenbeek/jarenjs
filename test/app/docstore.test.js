@@ -119,6 +119,38 @@ describe('@jarenjs/app — createDocStore', () => {
   });
 });
 
+describe('@jarenjs/app — a persisted slot that is not a document store', () => {
+  /** An adapter whose slot holds `raw` (JSON text) until the first write. */
+  function slot(raw) {
+    let written;
+    return {
+      read: () => JSON.parse(raw),
+      write: (root) => { written = JSON.stringify(root); },
+      get written() { return written; },
+    };
+  }
+
+  it('starts empty and saves, for a root that is a number, a string, a boolean or a list', () => {
+    for (const raw of ['5', '"x"', 'true', '[]', '[1,2]']) {
+      const storage = slot(raw);
+      const store = createDocStore({ storage });
+      assert.deepStrictEqual(store.names(), [], raw);
+      store.save('a', { v: 1 });
+      assert.strictEqual(storage.written, '{"experiments":{"a":{"v":1}}}', raw);
+    }
+  });
+
+  it('starts empty and saves, for a collection that is not an object', () => {
+    for (const raw of ['5', '"abc"', 'true', '[]', '[1,2]']) {
+      const storage = slot(`{"experiments":${raw},"play":{"keep":1}}`);
+      const store = createDocStore({ storage });
+      assert.deepStrictEqual(store.names(), [], raw);
+      store.save('a', { v: 1 });
+      assert.strictEqual(storage.written, '{"experiments":{"a":{"v":1}},"play":{"keep":1}}', raw);
+    }
+  });
+});
+
 describe('@jarenjs/app — the share codec', () => {
   it('round-trips a Unicode snapshot through a base64url token', () => {
     const snap = { e: 'path', i: { selector: '$..naïve', data: '{"π":3}' } };

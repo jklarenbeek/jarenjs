@@ -175,7 +175,7 @@ Two IDE-shaped primitives ship ready to bind, so a two-pane surface (the studio,
   stacked panes. The widget also writes `${cssVar}-first` and
   `${cssVar}-rest` as fractional grid tracks. Pointer cancellation restores
   the starting ratio without committing; vertical resizing uses Up/Down.
-- **`createDocStore({ storage, key })`** — a keyed `save`/`load`/`remove`/`names`/`all` CRUD over an injected `storage` (`localStorage` in the browser, an in-memory object in tests), so the package never touches `localStorage` itself. Paired with **`encodeShare(snapshot)`** / **`decodeShare(token)`**, a Unicode-safe base64url share-link codec (a corrupt token decodes to `null`, never a throw), it is the new/save/load/delete/share pattern behind the studio and play surfaces.
+- **`createDocStore({ storage, key })`** — a keyed `save`/`load`/`remove`/`names`/`all` CRUD over an injected `storage` (`localStorage` in the browser, an in-memory object in tests), so the package never touches `localStorage` itself. A slot that does not hold an object (a number, a string, a list, or a collection of any of those) holds no documents and starts empty; it used to throw at construction or at the first save, or lose every save. Paired with **`encodeShare(snapshot)`** / **`decodeShare(token)`**, a Unicode-safe base64url share-link codec (a corrupt token decodes to `null`, never a throw), it is the new/save/load/delete/share pattern behind the studio and play surfaces.
 
 Collection keys and document names such as `__proto__` are ordinary own
 members of the document store and survive persistence. Loading a name

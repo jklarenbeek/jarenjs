@@ -13,7 +13,7 @@
  * forgivingly: a corrupt token decodes to `null`, never a throw.
  */
 
-import { setObjectMember } from '@jarenjs/core/object';
+import { isJsonObject, setObjectMember } from '@jarenjs/core/object';
 import { createWeakCache } from '@jarenjs/core/cache';
 
 /** Collection handles share their adapter's root, including unsaved fallback data. */
@@ -35,8 +35,14 @@ const storesByStorage = createWeakCache();
  */
 export function createDocStore({ storage, key = 'experiments' }) {
   // Read once per adapter; every collection writes the same current root.
-  const store = storesByStorage.getOrCreate(storage, () => storage.read() ?? {});
-  if (!Object.hasOwn(store, key) || store[key] == null) setObjectMember(store, key, {});
+  // A root or a collection that is not an object (a slot another program or
+  // an older format wrote: `5`, `"x"`, a list) holds no documents, so it is
+  // replaced instead of throwing at the first save or losing every save.
+  const store = storesByStorage.getOrCreate(storage, () => {
+    const root = storage.read();
+    return isJsonObject(root) ? root : {};
+  });
+  if (!Object.hasOwn(store, key) || !isJsonObject(store[key])) setObjectMember(store, key, {});
   return {
     save(name, value) { setObjectMember(store[key], name, value); storage.write(store); },
     load(name) { return Object.hasOwn(store[key], name) ? store[key][name] : undefined; },

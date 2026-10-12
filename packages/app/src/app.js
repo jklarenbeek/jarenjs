@@ -425,9 +425,9 @@ export function createApp(appDoc, options = {}) {
   if (!Number.isInteger(maxTurns) || maxTurns <= 0) {
     throw new TypeError('createApp: options.maxTurns must be a positive integer');
   }
-  // Fan-out containment (D-discipline: a bound is printed, never
-  // silent): a `for` subscription resolving more instances than this
-  // reports JA2017 and keeps its previous instance set.
+  // Fan-out containment (a bound is printed, never silent): a `for`
+  // subscription resolving more instances than this reports JA2017 and
+  // keeps its previous instance set.
   const maxSubInstances = options.maxSubInstances ?? 256;
   if (!Number.isInteger(maxSubInstances) || maxSubInstances <= 0) {
     throw new TypeError('createApp: options.maxSubInstances must be a positive integer');
@@ -1103,16 +1103,17 @@ export function createApp(appDoc, options = {}) {
         const items = resolved === undefined ? []
           : Array.isArray(resolved) ? resolved : [resolved];
         for (let k = 0; k < items.length; k++) {
-          // The bound stops the WORK, not just the retained instances.
-          // Checking it after the loop bounded what was kept while a
-          // runaway `for` query still ran every key and props expression
-          // and serialized every result first — so the limit cost memory
-          // and CPU proportional to the mistake it was there to contain.
-          if (next.size >= maxSubInstances) {
+          const item = items[k];
+          // The bound stops the WORK, not just the retained instances: with
+          // the bound reached, an author's `key` expression is not run for
+          // another item. Without one the key is the item itself, which is
+          // cheap, so a duplicate of a kept key (not an instance) still
+          // collapses instead of counting against the bound.
+          if (next.size >= maxSubInstances
+            && (sub.keyQuery !== null || !next.has(subKeyOf(item)))) {
             overflow = next.size + (items.length - k);
             break;
           }
-          const item = items[k];
           failingMember = sub.keyQuery !== null ? 'key' : 'for';
           const key = sub.keyQuery !== null
             ? subKeyOf(sub.keyQuery(state, { item }))
