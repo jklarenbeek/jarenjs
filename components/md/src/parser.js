@@ -15,7 +15,7 @@
  * blocks while later chunks are still arriving (docs/LOADER.md §4).
  */
 
-import { countIndent, expandTabs, hashContent, fnv1a, FNV1A_OFFSET_BASIS, MAX_NESTING } from './utils.js';
+import { countIndent, expandTabs, tabsFrom, hashContent, fnv1a, FNV1A_OFFSET_BASIS, MAX_NESTING } from './utils.js';
 import { parseFrontmatter } from './frontmatter.js';
 import {
   scanThematicBreak,
@@ -218,15 +218,37 @@ class BlockParser {
      * @type {WeakSet<any>}
      */
     this.blankEnd = new WeakSet();
+    /** The current line with its tabs expanded, and as it was written. */
+    this.cooked = '';
+    this.written = '';
     /** Plugin rule context. */
     this.ctx = { frontmatter: /** @type {any} */ (null), options };
   }
 
   /**
-   * Process one detabbed line.
-   * @param {string} line
+   * `rest` — a suffix of the current detabbed line — without its first
+   * `skip` columns, as the line was written: a tab past them stays a tab,
+   * which is what a code block or an HTML block holds.
+   * @param {string} rest
+   * @param {number} skip
+   * @returns {string}
    */
-  line(line) {
+  literal(rest, skip) {
+    return this.written === this.cooked
+      ? rest.slice(skip)
+      : tabsFrom(this.written, this.cooked.length - rest.length + skip);
+  }
+
+  /**
+   * Process one line: `line` has its tabs expanded to the 4-column stops
+   * the block rules measure indentation in, `written` is the line as it
+   * was written.
+   * @param {string} line
+   * @param {string} [written]
+   */
+  line(line, written = line) {
+    this.cooked = line;
+    this.written = written;
     // 1. Match the open containers' prefixes.
     let offset = 0;
     let matched = 0;
@@ -255,6 +277,9 @@ class BlockParser {
           // line does not continue an item that is still empty — it ends
           // it (and the list with it).
           if (this.isItemEmpty(entry, matched)) break;
+          // The whitespace of a blank line belongs to no content: a
+          // line in a code block inside the item keeps none of it.
+          offset = line.length;
         }
         else {
           let i = offset;
@@ -298,7 +323,7 @@ class BlockParser {
           return;
         }
         const strip = Math.min(leaf.indent, countIndent(rest));
-        leaf.lines.push(strip === 0 ? rest : rest.slice(strip));
+        leaf.lines.push(this.literal(rest, strip));
         return;
       }
       if (leaf.kind === 'html') {
@@ -308,10 +333,10 @@ class BlockParser {
             this.sawBlank();
             return;
           }
-          leaf.lines.push(rest);
+          leaf.lines.push(this.literal(rest, 0));
           return;
         }
-        leaf.lines.push(rest);
+        leaf.lines.push(this.literal(rest, 0));
         if (scanHtmlBlockEnd(leaf.htmlKind, rest)) this.closeLeaf();
         return;
       }
@@ -365,8 +390,9 @@ class BlockParser {
     const marker = scanListMarker(rest, indent);
     if (marker !== null) {
       // Only non-empty items — and ordered lists starting at 1 —
-      // interrupt a paragraph.
-      if (marker.contentOffset >= rest.length) return false;
+      // interrupt a paragraph. A marker followed by nothing but spaces
+      // or tabs is empty however many there are.
+      if (RE_EMPTY_ITEM.test(rest)) return false;
       return !marker.ordered || marker.start === 1;
     }
     return false;
@@ -444,7 +470,7 @@ class BlockParser {
         // Blank: paragraphs, tables and type-6/7 html close; indented
         // code buffers the blank; fences got it earlier.
         const leaf = this.leaf;
-        if (leaf !== null && leaf.kind === 'indented') leaf.lines.push('');
+        if (leaf !== null && leaf.kind === 'indented') leaf.lines.push(rest.length > 4 ? this.literal(rest, 4) : '');
         else this.closeLeaf();
         this.sawBlank();
         return;
@@ -458,11 +484,11 @@ class BlockParser {
           return;
         }
         if (leaf !== null && leaf.kind === 'indented') {
-          leaf.lines.push(rest.slice(4));
+          leaf.lines.push(this.literal(rest, 4));
           return;
         }
         this.closeList();
-        this.leaf = { kind: 'indented', lines: [rest.slice(4)] };
+        this.leaf = { kind: 'indented', lines: [this.literal(rest, 4)] };
         return;
       }
 
@@ -580,7 +606,7 @@ class BlockParser {
         if (kind !== 0) {
           this.closeLeaf();
           this.closeList();
-          this.leaf = { kind: 'html', htmlKind: kind, lines: [rest] };
+          this.leaf = { kind: 'html', htmlKind: kind, lines: [this.literal(rest, 0)] };
           if (scanHtmlBlockEnd(kind, rest)) this.closeLeaf();
           return;
         }
@@ -728,7 +754,7 @@ class BlockParser {
       }
       case 'indented': {
         const lines = leaf.lines;
-        while (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
+        while (lines.length > 0 && isBlankFrom(lines[lines.length - 1], 0)) lines.pop();
         this.add(code(null, null, lines.join('\n') + '\n'));
         break;
       }
@@ -898,6 +924,9 @@ function inlineHtmlEnd(src, pos, rest, inline) {
   const close = find('>', pos + 2);
   return close !== -1 && close - 1 >= pos + 2 && src.charCodeAt(close - 1) === 0x3F ? close + 1 : -1;
 }
+
+/** A list marker with nothing after it but spaces and tabs. */
+const RE_EMPTY_ITEM = /^[ \t]*(?:[-+*]|\d{1,9}[.)])[ \t]*$/;
 
 /** Characters the inline scanner dispatches on; the rest fast-skip. */
 const INLINE_SPECIAL = new Uint8Array(128);
@@ -1418,8 +1447,9 @@ function closerKind(closer) {
  * three, `~~` for strikethrough) in time linear in the run.
  *
  * Closers are taken in order, each pairing with the nearest opener below
- * it that the rules allow; a closer with characters left is retried, and
- * an opener left over once its closer is spent is retried as a closer.
+ * it that the rules allow; a closer with characters left is retried. An
+ * opener with characters left once its closer is spent stays an opener: it
+ * was already weighed as a closer when the run reached it.
  * Two structures keep that linear. The run is a doubly linked list while
  * delimiters pair, so wrapping a span relinks two cells instead of
  * splicing — and searching — an array. And the opener search has a floor
@@ -1566,11 +1596,6 @@ function resolveEmphasis(nodes, delims, limit) {
     }
     else {
       unlink(closeCell);
-      if (!openerSpent) {
-        // what is left of the opener is tried as a closer in turn
-        openers.length = k;
-        retry = oi;
-      }
     }
   }
   // nothing paired, nothing moved
@@ -1759,12 +1784,15 @@ function feedLines(parser, textChunk, final) {
     if (nl === -1) break;
     let line = textChunk.slice(pos, nl);
     if (line.endsWith('\r')) line = line.slice(0, -1);
-    parser.line(expandTabs(line));
+    parser.line(expandTabs(line), line);
     pos = nl + 1;
   }
   const tail = pos === 0 ? textChunk : textChunk.slice(pos);
   if (final) {
-    if (tail !== '') parser.line(expandTabs(tail.endsWith('\r') ? tail.slice(0, -1) : tail));
+    if (tail !== '') {
+      const last = tail.endsWith('\r') ? tail.slice(0, -1) : tail;
+      parser.line(expandTabs(last), last);
+    }
     return '';
   }
   return tail;

@@ -41,6 +41,7 @@ export class MdFrontmatterError extends Error {
   }
 }
 
+const RE_HEX = /^[0-9a-fA-F]+$/;
 const RE_NUMBER = /^[+-]?(?:\d+|\d*\.\d+|\d+\.\d*)(?:[eE][+-]?\d+)?$/;
 const RE_TOML_NUMBER = /^[+-]?(?:0x[0-9a-fA-F_]+|0o[0-7_]+|0b[01_]+|(?:\d[\d_]*)(?:\.[\d_]+)?(?:[eE][+-]?[\d_]+)?)$/;
 
@@ -724,13 +725,17 @@ function scanFlowLine(scan, segment) {
  * @returns {string}
  */
 function stripComment(text) {
+  // a quote protects a `#` only in a scalar that begins with one: the
+  // apostrophe of `it's` or the quotes of `say "hi"` are plain text
+  const starts = text.charCodeAt(0);
+  const quoted = starts === 0x22 || starts === 0x27;
   let quote = 0;
   for (let i = 0; i < text.length; i++) {
     const c = text.charCodeAt(i);
     if (quote !== 0) {
       if (c === quote && !(quote === 0x22 && text.charCodeAt(i - 1) === 0x5C)) quote = 0;
     }
-    else if (c === 0x22 || c === 0x27) quote = c;
+    else if (quoted && (c === 0x22 || c === 0x27)) quote = c;
     else if (c === 0x23 && i > 0) {
       const prev = text.charCodeAt(i - 1);
       if (prev === 0x20 || prev === 0x09) return text.slice(0, i).trimEnd();
@@ -798,10 +803,19 @@ function parseQuoted(text, pos, quote, lineNo) {
         case 'b': out += '\b'; break;
         case 'f': out += '\f'; break;
         case '0': out += '\0'; break;
-        case 'u':
-          out += String.fromCharCode(parseInt(text.slice(i + 2, i + 6), 16) || 0);
-          i += 4;
+        case 'x': case 'u': case 'U': {
+          // the digits are the character: `\x41`, `\u00e9`, `\U0001F600`
+          const width = esc === 'x' ? 2 : esc === 'u' ? 4 : 8;
+          const digits = text.slice(i + 2, i + 2 + width);
+          if (digits.length !== width || !RE_HEX.test(digits)) {
+            throw new MdFrontmatterError(`'\\${esc}' needs ${width} hexadecimal digits`, lineNo);
+          }
+          const point = parseInt(digits, 16);
+          if (point > 0x10FFFF) throw new MdFrontmatterError(`'\\${esc}${digits}' is not a character`, lineNo);
+          out += String.fromCodePoint(point);
+          i += width;
           break;
+        }
         default: out += esc ?? '';
       }
       i += 2;
@@ -1163,7 +1177,14 @@ function parseTomlValue(text, no) {
   if (text === '') throw new MdFrontmatterError('missing value', no);
   const c0 = text.charCodeAt(0);
   if (c0 === 0x22 || c0 === 0x27) {
-    return parseQuoted(text, 0, /** @type {'"'|"'"} */ (text[0]), no).value;
+    if (text.startsWith(text[0].repeat(3))) {
+      throw new MdFrontmatterError('multi-line strings are not supported', no);
+    }
+    const quoted = parseQuoted(text, 0, /** @type {'"'|"'"} */ (text[0]), no);
+    if (text.slice(quoted.end).trim() !== '') {
+      throw new MdFrontmatterError('trailing content after a quoted string', no);
+    }
+    return quoted.value;
   }
   if (c0 === 0x5B /* [ */) return parseTomlArray(text, no, 1).value;
   if (c0 === 0x7B /* { */) return parseTomlInline(text, no, 1).value;

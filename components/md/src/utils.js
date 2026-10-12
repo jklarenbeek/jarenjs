@@ -126,6 +126,32 @@ export function expandTabs(line, startColumn = 0) {
 }
 
 /**
+ * The part of a line that starts at column `column` of its tab-expanded
+ * form, with the tabs it was written with kept. A tab that straddles the
+ * column is spent in part: the columns past it come back as spaces. A
+ * line without tabs is just sliced.
+ * @param {string} line the line as written
+ * @param {number} column a column of `expandTabs(line)`
+ * @returns {string}
+ */
+export function tabsFrom(line, column) {
+  if (line.indexOf('\t') === -1) return line.slice(column);
+  let at = 0;
+  for (let i = 0; i < line.length; i++) {
+    if (at >= column) return line.slice(i);
+    if (line.charCodeAt(i) === 9) {
+      const next = at + 4 - (at % 4);
+      if (next > column) return ' '.repeat(next - column) + line.slice(i + 1);
+      at = next;
+    }
+    else {
+      at++;
+    }
+  }
+  return '';
+}
+
+/**
  * The rule one member of a closed option set must satisfy: what it
  * `expects`, as a refusal names it, the `test` a present value passes,
  * and — for a closed list of values — the `values` a refusal names the

@@ -621,7 +621,30 @@ HTML (it judged Markdown links and images only) and every `srcset` candidate
 (`srcset` went through unread). A `loadMarkdown` call that joins an in-flight
 load keeps its own cancellation: the first caller's abort used to reject it,
 and its own abort was ignored. `frontmatterExternals` keeps a `__proto__` key
-as a member.
+as a member. A tab inside a code block, indented or fenced, or inside a raw HTML
+block, stays a tab (it read as spaces; the scorecard collapses whitespace, so
+it could not see the four CommonMark tab examples differ, and `.md pre` sets
+`tab-size: 4` so a tab keeps the width its spaces had); a whitespace-only
+line in indented code keeps the columns past its indent, and one inside a list
+item's code keeps none. An empty list marker followed by two or more spaces
+or a tab no longer interrupts a paragraph. When a delimiter run closes and
+leaves characters behind, what is left of its opener stays an opener, as the
+reference algorithm has it (`*a*****b**` reads `*a***` then strong, not
+emphasis around `a`). `toMarkdown` checks emphasis and strong that sit beside
+or inside each other against the parser and spells them with the other
+delimiter where `*` would merge runs, prints a marker-only list item and a rule
+under an alternate marker so they stay items, indents a raw-HTML node that begins
+a continuation line, escapes a link destination, title and info string as they
+are read (backslash before punctuation, character references, tabs, newlines)
+and prints a tab in text as `&#9;`. In frontmatter, a quote protects a `#`
+only in a scalar that begins with one (`title: It's fine # note` ends at the
+comment); `\xXX` and `\UXXXXXXXX` escapes mean their character, and an escape
+without its digits is a located error, as in YAML (`"C:\users\me"` in double
+quotes read as a string with a NUL where `\users` stood; that is a stricter
+refusal of input the old reader mis-read, and it names the line and the escape:
+`'\U' needs 8 hexadecimal digits (line 2)`); and the TOML subset refuses text after
+a quoted string and a triple-quoted string instead of keeping the first quote
+pair's content.
 
 ## Exports
 

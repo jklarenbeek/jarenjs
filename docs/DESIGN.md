@@ -362,3 +362,5 @@ A visual pass is verified the way the original audit was made:
 
 All of the above (plus the browser matrix) run together as `npm run site:gate`, which is
 the one command a visual change must end green on.
+
+**Code blocks keep their tabs.** `.md pre` sets `tab-size: 4`, so a tab in code (which the Markdown parser keeps) is as wide as the four spaces it once became; no token is involved.

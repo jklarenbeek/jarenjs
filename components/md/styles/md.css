@@ -104,6 +104,8 @@
   margin: 0.8em 0;
   padding: 0.8em 1em;
   overflow-x: auto;
+  /* a tab in code is a tab (the parser keeps it); browsers default to 8 columns */
+  tab-size: 4;
   background: var(--md-code-bg, #f2f4f8);
   border-radius: 8px;
 }

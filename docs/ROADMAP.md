@@ -256,13 +256,16 @@ establish registry publication or downstream acceptance.
   first candidate — and not before, so that the shape is fitted to a real
   consumer rather than to a description of one.
 
-- [ ] **Canonical printing outside the corpora.** `parseMarkdown(toMarkdown(doc))`
-  deep-equals `doc` over the CommonMark and GFM corpora, but three constructs
-  still drift: adjacent emphasis and strong siblings print their delimiters
-  into one run (`*a*_b_` reads back as `*a**b*`), a chain of empty list items
-  with alternating markers prints as a thematic break, and raw inline HTML that
-  begins a continuation line prints at a line start and opens an HTML block.
-  Wanted: a printer that checks its own output reads back as the input.
+- [ ] **Canonical printing's last shapes.** `parseMarkdown(toMarkdown(doc))`
+  deep-equals `doc` over the CommonMark and GFM corpora and over random
+  documents, except for shapes no real document holds: a paragraph that is only
+  raw inline HTML after a link reference definition took the lines above it,
+  an HTML block's leading spaces as the first line of a list item, and four or
+  more nested delimiter runs holding literal `*` characters. Wanted: a printer
+  that can spell each, or an AST that records what the definition took.
+- [ ] **Tabs inside paragraph text.** Code and HTML blocks keep their tabs;
+  paragraph, heading and table text still read from the tab-expanded line, so
+  `a<TAB>b` parses as `a   b`. Wanted: tab-aware inline parsing.
 
 ## @jarenjs/mermaid
 

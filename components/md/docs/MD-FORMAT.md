@@ -134,7 +134,9 @@ The built-in parser handles, from scratch and dependency-free:
   exponent), and plain strings. Anything else — including YAML 1.1
   `yes`/`no`, sexagesimals, hex ints and timestamps — is a **string**.
 - **Quoted strings** — double quotes with JSON-style escapes
-  (`\n \t \r \b \f \0 \\ \" \uXXXX`), single quotes with `''` → `'`.
+  (`\n \t \r \b \f \0 \\ \" \xXX \uXXXX \UXXXXXXXX`; an escape without
+  its hexadecimal digits, or one past U+10FFFF, is a located frontmatter
+  error), single quotes with `''` → `'`.
   An opening quote requires a closing quote; an unterminated string is
   a located frontmatter error, and so is anything but a comment after
   the closing quote (`trailing content after a quoted string`).
@@ -169,7 +171,9 @@ The built-in parser handles, from scratch and dependency-free:
   deeper than the block keeps the line breaks around it. A block
   scalar without content lines is the empty string. The `+` chomp and
   explicit indent indicators are not supported.
-- **Comments** — `#` to end of line, outside quotes.
+- **Comments** — `#` to end of line, after a space or tab. A quote protects
+  a `#` only in a scalar that begins with one: in `it's # note` the
+  apostrophe is plain text and `# note` is the comment.
 
 Deliberately outside the subset: anchors/aliases (`&`/`*`), tags (`!!`),
 multi-document streams (`---` separators inside the block), complex
@@ -197,7 +201,8 @@ with dotted paths, bare/quoted/dotted keys, basic and literal strings,
 integers (decimal/hex/octal/binary with `_`), floats, booleans, flow
 arrays (multi-line), inline tables and comments. Datetimes and any other
 unrecognized value are kept as verbatim **strings**; multi-line strings
-are not supported. Comments end at each physical line, including within
+are not supported, and neither is text after a quoted string: both are
+located frontmatter errors. Comments end at each physical line, including within
 multi-line arrays. Dotted keys in an inline table preserve sibling
 members, and table names such as `__proto__` are ordinary own properties.
 An unterminated quoted string is a located frontmatter error, and so are
@@ -240,8 +245,8 @@ unchanged where possible.
 | `blockquote` | `children` | block content |
 | `list` | `ordered` (boolean), `start` (number or `null`), `tight` (boolean), `children` | children are `listItem`s |
 | `listItem` | `checked` (`true`/`false`/`null`), `children` | `checked` non-null only for task-list items |
-| `code` | `lang` (string or `null`), `meta` (string or `null`), `value` | fenced and indented; `lang` is the info string's first word, `meta` the rest |
-| `html` | `value` | a raw HTML block, verbatim |
+| `code` | `lang` (string or `null`), `meta` (string or `null`), `value` | fenced and indented; `lang` is the info string's first word, `meta` the rest. A tab inside the content stays a tab; one the indentation or a container marker spends is spent, and a tab spent in part reads as the spaces left of it |
+| `html` | `value` | a raw HTML block, verbatim (its tabs included) |
 | `table` | `align` (array of `"left"`/`"right"`/`"center"`/`null`), `children` | children are `tableRow`s; the first row is the header |
 | `tableRow` | `children` | children are `tableCell`s |
 | `tableCell` | `children` | inline content |
@@ -571,9 +576,17 @@ angle-bracket autolink only where that spelling parses as one — an
 absolute URI or an email address; `[CHANGELOG.md](CHANGELOG.md)` keeps its
 inline form. Strong around a lone emphasis prints its emphasis with
 underscores (`**_x_**`), because `***x***` reads back as the nesting the
-other way round. A fence's info string is escaped as it is read: a
-backslash before punctuation and an `&` that opens a character reference
-print with a backslash.
+other way round. Emphasis or strong beside or inside another (`*a*` then
+`_b_`, `__**x**y__`) is checked against the parser: when the `*` spelling
+would merge delimiters into one run, the first alternating spelling that
+reads back as the same nodes is the one printed. A destination, a title
+and a fence's info string are escaped as they are read: a backslash before
+punctuation, an `&` that opens a character reference, a tab and a newline
+print as an escape or a reference, and a destination that starts with `<`
+or holds a control character prints in angle brackets. A list item made of
+markers alone prints its first block the other way (`- * -`), a raw-HTML
+node that begins a continuation line prints four spaces in, and a tab in
+text prints as `&#9;`.
 
 The normative round-trip guarantees:
 
@@ -594,11 +607,13 @@ The normative round-trip guarantees:
    output.
 
 The guarantee is checked over those corpora and over randomly assembled
-documents; it has known gaps outside them. Two emphasis or strong nodes that
-are adjacent siblings print their delimiters into one run (`*a*_b_` prints
-`*a**b*`); a chain of empty list items with alternating markers (`* + *`)
-prints as a thematic break (`- - -`); and a raw-HTML node that begins a
-continuation line prints at a line start, where it opens an HTML block.
+documents; it has known gaps outside them, all in shapes no real document
+holds. A paragraph that is only raw inline HTML (after a link reference
+definition took the lines above it) prints at a line start and reads back as
+an HTML block; an HTML block's leading spaces inside a list item's first
+line fold into the item's own padding; and a few shapes of four or more
+nested delimiter runs holding literal `*` characters have no spelling the
+printer tries.
 
 ## 6. Structural sharing (normative)
 
