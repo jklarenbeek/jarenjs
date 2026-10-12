@@ -85,6 +85,10 @@ member order (monomorphic; the structural hash is deterministic).
 | subgraph | `{ id, label, direction, nodes[] }` |
 | classDef / class / style | `{ name, styles }` / `{ node, name }` / `{ node, styles }` |
 
+A flowchart declares at most 10,000 edges, counting the pairs a `&` group
+expands to; a source that names more is a `MermaidParseError` on the line that
+crosses the bound.
+
 A node `id` is alphanumeric/underscore (plus Unicode letters); `-` and
 `.` are **excluded** so an id can never swallow a following link
 operator — `A-->B` parses as an edge, not as a node with id `A-`. This
@@ -108,7 +112,10 @@ loop/opt/alt/par/critical/break.
 ### 4.3 class / er / state / pie
 
 Class: `{ classes:[{ name, label, members[] }], relations[] }`. ER:
-`{ entities:[{ name, attributes[] }], relationships[] }`. State:
+`{ entities:[{ name, attributes[] }], relationships[] }`, an attribute being
+`{ type, name, keys[] }` plus the `comment` that ended its line in quotes when
+there was one (keys are `PK`, `FK`, `UK`, comma- or space-separated; `toMermaid`
+prints them comma-separated, as Mermaid writes them). State:
 `{ states:[{ id, label, parent? }], transitions:[{ from, to, label, event,
 guard, effect, parent }] }` — a composite state's members carry its id as
 `parent`, and a state is never its own ancestor (opening `state C {`
@@ -258,6 +265,13 @@ deep-equal fixed point**: they emit their members by bare id and a
 re-parse reconstructs membership, so the shape survives but the strict
 `nodes[]` ordering of a subgraph is not guaranteed to be `===`-identical
 to the original.
+
+The state printer keeps the order of `states` (layout reads it): when the
+plain spelling would introduce the states in another order, it declares every
+state first. The class printer writes a member that holds a `}` or starts with
+`%%` as a `Name : member` line, because a body ends at its first `}` and drops
+comment-looking lines; the pie printer writes a label's line break as `<br/>`
+and a value as a plain decimal.
 
 The printer is canonical, not verbatim: it does not preserve source
 whitespace or comments. Two round-trip modes coexist:

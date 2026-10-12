@@ -374,7 +374,21 @@ unit, a dash list, `var(--name)`, `url(#id)` of the same document, or a color
 function such as `rgb(10 20 30)`), and one carrying a `;`, a remote `url()` or
 another function is dropped without a diagnostic, where it was written into the
 shape's inline style and added declarations of its own; the component's
-never-read `onHydrateError` option is gone from its type.
+never-read `onHydrateError` option is gone from its type; a flowchart holds at
+most 10,000 edges (`A & B & … --> C & D & …` declares one per pair, so fourteen
+kilobytes of source named a million and rendered to hundreds of megabytes), and
+a longer source is a `MermaidParseError` at the line that crossed the bound; an
+unclosed `{` body of a class or an entity keeps its last character (the last
+member of `class A {` + `-bar` read `ba`, and an entity's last `PK` was lost)
+and is read in time linear in its lines; `toMermaid` keeps the order of a state
+diagram's states (a labelled state used before its label line, or a child listed
+before its parent, came back in another order), writes a class member holding a
+`}` or starting `%%` as a `Name : member` line, prints a pie label's line break
+as `<br/>`, and prints a very small or very large pie value as a plain decimal
+(`1e-7` is not a number a pie row reads, so the slice vanished); an `erDiagram`
+attribute keeps the quoted comment that ends its line (`string name PK "the name"`)
+as a `comment` member, which `toMermaid` prints, and reads keys written
+comma-separated (`PK, FK` kept only `FK`), which `toMermaid` now prints that way.
 
 ## Exports
 

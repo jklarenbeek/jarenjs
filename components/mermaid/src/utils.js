@@ -47,18 +47,27 @@ export function toLines(source) {
  * Accumulate a `{ ... }` body that may span multiple lines. `head` is
  * the text after the opening brace on the current line; lines are
  * consumed until one contains the closing brace. Returns the body text
- * before the `}` and the advanced line index so the caller's loop can
+ * before the `}` (the whole rest of the source when no brace ever
+ * closes it) and the advanced line index so the caller's loop can
  * continue after the block (class and ER entity bodies share this).
+ * Each line is searched once, so an unclosed body costs its length.
  * @param {string[]} lines
  * @param {number} li - index of the line the `{` sits on
  * @param {string} head - text after the opening brace
  * @returns {{ body: string, li: number }}
  */
 export function collectBraceBody(lines, li, head) {
-  let body = head;
-  while (body.indexOf('}') === -1 && li + 1 < lines.length) {
+  const close = head.indexOf('}');
+  if (close !== -1) return { body: head.slice(0, close), li };
+  const parts = [head];
+  while (li + 1 < lines.length) {
     li++;
-    body += '\n' + lines[li];
+    const at = lines[li].indexOf('}');
+    if (at !== -1) {
+      parts.push(lines[li].slice(0, at));
+      break;
+    }
+    parts.push(lines[li]);
   }
-  return { body: body.slice(0, body.indexOf('}')), li };
+  return { body: parts.join('\n'), li };
 }

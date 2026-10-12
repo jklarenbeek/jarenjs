@@ -12,6 +12,8 @@
  * to re-emit an edited AST as editable Mermaid text.
  */
 
+import { parseState } from './parser/state.js';
+
 //#region public ----------------------------------------------------
 
 /** @type {Record<string, (ast: any) => string>} */
@@ -232,6 +234,15 @@ function arrowToken(line, head) {
 //#region class / state / er / gantt / pie (best effort) ------------
 
 /**
+ * Can this class member not stand on a line of a `{ … }` body?
+ * @param {{ visibility: string|null, text: string }} member
+ * @returns {boolean}
+ */
+function isUnbracedMember(member) {
+  return member.text.includes('}') || (member.visibility === null && member.text.startsWith('%%'));
+}
+
+/**
  * @param {any} ast
  * @returns {string}
  */
@@ -240,6 +251,12 @@ function printClass(ast) {
   for (const cls of ast.classes) {
     if (cls.members.length === 0) {
       out.push(`class ${cls.name}`);
+    }
+    else if (cls.members.some(isUnbracedMember)) {
+      // a body ends at its first `}` and drops comment-looking lines, so
+      // such a member can only be written as a `Name : member` line
+      out.push(`class ${cls.name}`);
+      for (const m of cls.members) out.push(`${cls.name} : ${m.visibility ?? ''}${m.text}`);
     }
     else {
       out.push(`class ${cls.name} {`);
@@ -254,12 +271,44 @@ function printClass(ast) {
 }
 
 /**
+ * Print a state diagram. The states keep the order the AST lists them in
+ * (layout reads it); when the plain spelling would introduce them in
+ * another order — a labelled state used before its label line, a child
+ * listed before its parent — every state is declared up front instead.
  * @param {any} ast
  * @returns {string}
  */
 function printState(ast) {
+  const text = printStateLines(ast, false);
+  if (sameStates(text, ast)) return text;
+  const declared = printStateLines(ast, true);
+  return sameStates(declared, ast) ? declared : text;
+}
+
+/**
+ * Does this printed diagram introduce the AST's states in the AST's order?
+ * @param {string} text
+ * @param {any} ast
+ * @returns {boolean}
+ */
+function sameStates(text, ast) {
+  const read = /** @type {any} */ (parseState(text.split('\n').slice(1)));
+  return read.states.length === ast.states.length
+    && read.states.every((/** @type {any} */ s, /** @type {number} */ i) => s.id === ast.states[i].id);
+}
+
+/**
+ * @param {any} ast
+ * @param {boolean} declareAll declare every state at the top level first
+ * @returns {string}
+ */
+function printStateLines(ast, declareAll) {
   const out = ['stateDiagram-v2'];
-  if (ast.states.some((s) => s.parent != null) || ast.transitions.some((t) => t.parent != null)) {
+  const nested = ast.states.some((s) => s.parent != null) || ast.transitions.some((t) => t.parent != null);
+  if (declareAll) {
+    for (const s of ast.states) out.push(s.label !== s.id ? `${s.id} : ${s.label}` : `state ${s.id}`);
+  }
+  if (nested) {
     const states = new Map(ast.states.map((s) => [s.id, s]));
     let opened = [];
     const scope = (parent) => {
@@ -277,8 +326,11 @@ function printState(ast) {
     // Declare every id first, then retain transition document order even
     // when that requires reopening a compound scope. Priority survives print.
     for (const s of ast.states) {
+      // a state declared up front is moved under its parent by naming it there
+      if (declareAll && s.parent == null) continue;
       scope(s.parent);
-      out.push('  '.repeat(opened.length) + (s.label !== s.id ? `${s.id} : ${s.label}` : `state ${s.id}`));
+      out.push('  '.repeat(opened.length)
+        + (declareAll || s.label === s.id ? `state ${s.id}` : `${s.id} : ${s.label}`));
     }
     for (const t of ast.transitions) {
       scope(t.parent);
@@ -287,17 +339,19 @@ function printState(ast) {
     scope(null);
     return out.join('\n') + '\n';
   }
-  // an id-only state no transition mentions must still be DECLARED, or
-  // the canonical round trip silently drops it (`state x` is the
-  // parser's own spelling for exactly that)
-  const mentioned = new Set();
-  for (const t of ast.transitions) {
-    mentioned.add(t.from);
-    mentioned.add(t.to);
-  }
-  for (const s of ast.states) {
-    if (s.label !== s.id) out.push(`${s.id} : ${s.label}`);
-    else if (!mentioned.has(s.id)) out.push(`state ${s.id}`);
+  if (!declareAll) {
+    // an id-only state no transition mentions must still be DECLARED, or
+    // the canonical round trip silently drops it (`state x` is the
+    // parser's own spelling for exactly that)
+    const mentioned = new Set();
+    for (const t of ast.transitions) {
+      mentioned.add(t.from);
+      mentioned.add(t.to);
+    }
+    for (const s of ast.states) {
+      if (s.label !== s.id) out.push(`${s.id} : ${s.label}`);
+      else if (!mentioned.has(s.id)) out.push(`state ${s.id}`);
+    }
   }
   for (const t of ast.transitions) {
     out.push(`${t.from} --> ${t.to}${t.label ? ' : ' + t.label : ''}`);
@@ -316,7 +370,9 @@ function printEr(ast) {
   for (const e of ast.entities) {
     if (e.attributes.length === 0) { out.push(name(e.name)); continue; }
     out.push(`${name(e.name)} {`);
-    for (const a of e.attributes) out.push(`  ${a.type} ${a.name}${a.keys.length ? ' ' + a.keys.join(' ') : ''}`);
+    for (const a of e.attributes) {
+      out.push(`  ${a.type} ${a.name}${a.keys.length ? ' ' + a.keys.join(', ') : ''}${a.comment === undefined ? '' : ` "${a.comment}"`}`);
+    }
     out.push('}');
   }
   for (const r of ast.relationships) {
@@ -346,8 +402,27 @@ function printGantt(ast) {
 function printPie(ast) {
   const out = ['pie' + (ast.showData ? ' showData' : '')];
   if (ast.title) out.push('title ' + ast.title);
-  for (const s of ast.slices) out.push(`"${s.label}" : ${s.value}`);
+  for (const s of ast.slices) out.push(`"${s.label.replace(/\n/g, '<br/>')}" : ${plainDecimal(s.value)}`);
   return out.join('\n') + '\n';
+}
+
+/**
+ * A number as the plain decimal a pie row reads (`1e-7` is not one).
+ * @param {number} value
+ * @returns {string}
+ */
+function plainDecimal(value) {
+  if (value < 0) return '-' + plainDecimal(-value);
+  const text = String(value);
+  const at = text.indexOf('e');
+  if (at === -1) return text;
+  const [whole, fraction = ''] = text.slice(0, at).split('.');
+  const digits = whole + fraction;
+  const point = whole.length + Number(text.slice(at + 1));
+  if (point <= 0) return '0.' + '0'.repeat(-point) + digits;
+  return point >= digits.length
+    ? digits + '0'.repeat(point - digits.length)
+    : digits.slice(0, point) + '.' + digits.slice(point);
 }
 
 //#endregion

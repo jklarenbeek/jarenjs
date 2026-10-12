@@ -13,6 +13,9 @@ const NAME = '("[^"]*"|\\S+)';
 /** `LEFT <cardl>--<cardr> RIGHT : label` (relationship). */
 const RE_REL = new RegExp(`^${NAME}\\s+([|}{o]{1,2})(--|\\.\\.)([|}{o]{1,2})\\s+${NAME}\\s*:\\s*(.*)$`);
 
+/** The quoted comment that ends an attribute line. */
+const RE_COMMENT = /\s+"([^"]*)"\s*$/;
+
 /** A line that is just one entity name. */
 const RE_BARE = new RegExp(`^${NAME}$`);
 
@@ -81,8 +84,9 @@ export function parseEr(lines) {
       for (const raw of body.split('\n')) {
         const attr = raw.trim();
         if (attr === '') continue;
-        const parts = attr.split(/\s+/);
-        entityAttr(ent, parts);
+        const comment = RE_COMMENT.exec(attr);
+        const parts = (comment === null ? attr : attr.slice(0, comment.index)).split(/\s+/);
+        entityAttr(ent, parts, comment === null ? null : comment[1]);
       }
       continue;
     }
@@ -97,11 +101,12 @@ export function parseEr(lines) {
 
 /**
  * @param {{ attributes: object[] }} ent
- * @param {string[]} parts `[type, name, key?, "comment"?]`
+ * @param {string[]} parts `[type, name, key…]`; keys may be comma-separated
+ * @param {string | null} comment the quoted comment that ended the line, if any
  */
-function entityAttr(ent, parts) {
+function entityAttr(ent, parts, comment) {
   const type = parts[0] ?? '';
   const name = parts[1] ?? '';
-  const keys = parts.slice(2).filter((p) => p === 'PK' || p === 'FK' || p === 'UK');
-  ent.attributes.push({ type, name, keys });
+  const keys = parts.slice(2).flatMap((p) => p.split(',')).filter((p) => p === 'PK' || p === 'FK' || p === 'UK');
+  ent.attributes.push(comment === null ? { type, name, keys } : { type, name, keys, comment });
 }

@@ -284,10 +284,6 @@ establish registry publication or downstream acceptance.
   currently mark.
 - [ ] **Adopt the shared 3D kernel** — `@jarenjs/calc`'s x·y·z plotter introduced a reusable `@jarenjs/core/math` `mat4`/`project.js` kernel (matrices, projection, `surfaceNormal`, painter's-algorithm depth sort). Mermaid 3D could adopt it rather than growing its own projection math.
 
-- [ ] **ER attribute comments.** `string name PK "comment"` parses, but the
-  comment is dropped: the AST has no field for it, so `toMermaid` loses it.
-  Wanted: an AST member (and a schema revision).
-
 ## @jarenjs/charts
 
 - [ ] **Sessions for the remaining ten types** — `line`, `bar` and `candlestick` patch in place; the other ten re-render wholesale, which is correct and, at their sizes, cheap. A `heatmap` session (one cell rect per changed count) is the next one with an obvious incremental path now that the accumulator feeds it.

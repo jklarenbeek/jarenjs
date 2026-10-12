@@ -206,6 +206,9 @@ function parseSubgraphHeader(rest) {
   return { id: rest, label: rest };
 }
 
+/** The most edges one flowchart may declare. */
+const MAX_EDGES = 10000;
+
 /**
  * Parse one vertex/edge chain: `A[x] --> B & C -->|l| D`.
  * @param {string} stmt
@@ -235,6 +238,11 @@ function parseChain(stmt, lineNo, ensureNode, edges, classes) {
     const nextGroup = readVertexGroup(s, pos, lineNo, ensureNode, classes);
     if (nextGroup === null) fail('expected a node after a link', lineNo);
     pos = nextGroup.pos;
+    // `A & B & … --> C & D & …` is a link per pair, so a few kilobytes of
+    // source can name millions of edges
+    if (edges.length + prevGroup.ids.length * nextGroup.ids.length > MAX_EDGES) {
+      fail(`a flowchart holds at most ${MAX_EDGES} edges`, lineNo);
+    }
     for (const from of prevGroup.ids) {
       for (const to of nextGroup.ids) {
         edges.push(flowEdge(from, to, edge.stroke, edge.head, edge.tail, edge.length, edge.label));
