@@ -396,3 +396,31 @@ describe('jaren-contract diff --audience and lint', () => {
     }
   });
 });
+
+describe('jaren-contract — a report longer than a pipe holds', () => {
+  const write = (/** @type {Record<string, unknown>} */ files) => (/** @type {string} */ dir) => {
+    for (const [name, doc] of Object.entries(files)) fs.writeFileSync(path.join(dir, name), JSON.stringify(doc));
+  };
+  /** @param {number} n */
+  const operations = (n) => Object.fromEntries(Array.from({ length: n }, (_, i) => [`op${i}`, {
+    kind: 'read', input: { type: 'object', properties: { q: { type: 'string' } } }, output: true,
+    http: { method: 'POST', path: `/ops/${i}` },
+  }]));
+
+  it('diff --fail-on prints the whole report before it exits 1', () => {
+    const files = write({ 'v1.json': { $contract: '0.1', operations: operations(3000) }, 'v2.json': { $contract: '0.1', operations: operations(1) } });
+    const r = run(['diff', '--from', 'v1.json', '--to', 'v2.json', '--fail-on', 'breaking'], files);
+    assert.strictEqual(r.status, 1, r.stderr);
+    assert.ok(r.stdout.length > 300000, 'the report is longer than a pipe buffer');
+    assert.strictEqual(JSON.parse(r.stdout).breaking.length, 2999);
+    assert.match(r.stderr, /2999 breaking change/);
+  });
+
+  it('lint --fail-on prints every finding before it exits 1', () => {
+    const r = run(['lint', '--contract', 'api.json', '--fail-on', 'all'], write({ 'api.json': { $contract: '0.1', operations: operations(1500) } }));
+    assert.strictEqual(r.status, 1, r.stderr);
+    assert.ok(r.stdout.length > 300000, 'the report is longer than a pipe buffer');
+    assert.strictEqual(JSON.parse(r.stdout).length, 1500);
+    assert.match(r.stderr, /lint: 1500 finding\(s\)/);
+  });
+});

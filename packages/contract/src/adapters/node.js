@@ -32,6 +32,7 @@
 
 import { discard } from '../http/body.js';
 import { admitOptions } from '../options.js';
+import { timerMs } from '../timer.js';
 import { createAwaitedSink } from '@jarenjs/core/async';
 
 /**
@@ -510,7 +511,7 @@ function lingerThenDestroy(req, lingerMs) {
   if (typeof req.resume === 'function') req.resume();
   const timer = setTimeout(() => {
     if (req.destroyed !== true) /** @type {NonNullable<NodeRequestLike['destroy']>} */ (req.destroy)();
-  }, lingerMs);
+  }, timerMs(lingerMs));
   if (typeof timer.unref === 'function') timer.unref();
 }
 
@@ -529,7 +530,8 @@ function lingerOption(value, owner) {
  * @param {{ lingerMs?: number, request?: (req: NodeRequestLike) => unknown }} [options] -
  *   `lingerMs` bounds how long a closing response waits, draining the peer's
  *   unfinished upload, before the socket is destroyed (default 1000 ms — it
- *   is what keeps an overflow 413 readable through the close); `request` is a
+ *   is what keeps an overflow 413 readable through the close; a value past
+ *   2^31 - 1 ms, the longest a timer waits, waits that long); `request` is a
  *   per-request seed — its answer reaches `identify` as `meta.request`, so a
  *   principal a framework decorated onto the request (`req.user`) needs no
  *   side channel. A seed that throws answers a plain 500.

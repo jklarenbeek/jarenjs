@@ -666,3 +666,68 @@ describe('stream over the fetch adapter', () => {
     assert.strictEqual(failure.code, 'gone');
   });
 });
+
+describe('stream over SSE — a heartbeat longer than a timer can wait', () => {
+  it('waits as long as a timer can on both ends, where a longer delay would run at 1 ms', async () => {
+    const MAX_TIMER = 2 ** 31 - 1;
+    const slow = compileContract({ $contract: '0.1', operations: { feed: {
+      kind: 'subscribe',
+      output: { type: 'object', required: ['rows'], properties: { rows: { type: 'array' } } },
+      policy: { stream: { heartbeatMs: 3_000_000_000 } },
+    } } });
+    const quiet = makeSource({ rows: [] });
+    const dispatcher = serveHttp(slow, { feed: () => quiet.sub }, { trace: () => 'trace-hb' });
+    const handler = toFetchHandler(dispatcher);
+    /** @type {number[]} */
+    const intervals = [];
+    /** @type {number[]} */
+    const timeouts = [];
+    const { setInterval: realInterval, setTimeout: realTimeout } = globalThis;
+    globalThis.setInterval = /** @type {any} */ ((/** @type {any} */ fn, /** @type {number} */ ms, /** @type {any[]} */ ...rest) => {
+      intervals.push(ms);
+      return realInterval(fn, ms, ...rest);
+    });
+    globalThis.setTimeout = /** @type {any} */ ((/** @type {any} */ fn, /** @type {number} */ ms, /** @type {any[]} */ ...rest) => {
+      timeouts.push(ms);
+      return realTimeout(fn, ms, ...rest);
+    });
+    const errors = [];
+    const opened = [];
+    const reader = (await handler(new Request('http://x/feed', { headers: { accept: 'text/event-stream' } }))).body?.getReader();
+    const client = openHttpClient(slow, { fetch: async (url, init) => handler(new Request('http://x' + url, init)) });
+    const subscription = client.subscribe('feed', undefined, { onSnapshot: (v) => opened.push(v), onError: (o) => errors.push(o.error.code) });
+    try {
+      await wait(() => opened.length === 1);
+      // the server's own interval, and the client's silence bound of 2 x 3e9
+      assert.ok(intervals.includes(MAX_TIMER), `heartbeat interval ${JSON.stringify(intervals)}`);
+      assert.ok(timeouts.includes(MAX_TIMER), `silence bound ${JSON.stringify(timeouts)}`);
+      assert.ok(intervals.every((ms) => ms <= MAX_TIMER) && timeouts.every((ms) => ms <= MAX_TIMER));
+      await new Promise((resolve) => realTimeout(resolve, 60));
+      assert.deepStrictEqual(errors, [], 'no heartbeat was missed');
+    }
+    finally {
+      globalThis.setInterval = realInterval;
+      globalThis.setTimeout = realTimeout;
+      subscription.stop();
+      await reader?.cancel();
+      client.close();
+      dispatcher.close();
+    }
+  });
+});
+
+describe('stream over SSE — ids are the decimal text of a seq', () => {
+  it('a Last-Event-ID that is not a plain non-negative integer resumes from nowhere, where "12abc" once resumed from 12', async () => {
+    const seen = [];
+    const server = serveHttp(CONTRACT, { feed: () => makeSource({ rows: [] }, { replay: (/** @type {number} */ after) => { seen.push(after); return null; } }).sub, tiny: () => makeSource({ rows: [] }).sub }, { trace: () => 'trace-id' });
+    const handler = toFetchHandler(server);
+    for (const id of ['12abc', '1.5', '1e3', '-3']) {
+      const response = await handler(new Request('http://x/rooms/r1/feed', { headers: { accept: 'text/event-stream', 'last-event-id': id } }));
+      await /** @type {NonNullable<typeof response.body>} */ (response.body).cancel();
+    }
+    const ok = await handler(new Request('http://x/rooms/r1/feed', { headers: { accept: 'text/event-stream', 'last-event-id': '12' } }));
+    await /** @type {NonNullable<typeof ok.body>} */ (ok.body).cancel();
+    server.close();
+    assert.deepStrictEqual(seen, [0, 0, 0, 0, 12]);
+  });
+});

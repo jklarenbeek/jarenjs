@@ -254,6 +254,16 @@ describe('servePort + openPortClient over a MessageChannel', () => {
     await drain();   // the late response finds no pending entry — nothing throws, nothing settles twice
   });
 
+  it('a timeoutMs past 2^31 - 1 waits as long as a timer can instead of timing out at once', async () => {
+    const { server, client } = pair();
+    track(servePort(shop, {
+      ...shopHandlers(),
+      'catalog.load': async () => { await new Promise((resolve) => setTimeout(resolve, 30)); return { revision: 1, products: [] }; },
+    }, { channel: server }));
+    const c = track(openPortClient(shop, { channel: client, timeoutMs: 3e9 }));
+    assert.strictEqual(/** @type {any} */ (await c.invoke('catalog.load')).ok, true);
+  });
+
   it('a malformed response frame addressed to this client is JC2073; close() resolves pending invokes cancelled and detaches', async () => {
     const fake = fakeBroadcast();
     const c = track(openPortClient(shop, { channel: fake.join(), timeoutMs: 0 }));

@@ -739,3 +739,53 @@ it('holds later buffered emissions while an oversized patch awaits an atomic res
   assert.deepStrictEqual(carrier.log, ['snapshot:1', 'snapshot:2', 'patch:3']);
   runner.stop(null); await runner.done;
 });
+
+it('feeds a backlog of many pages to a carrier at the pace it takes them, past the queue bound', async () => {
+  const LOG = 700;
+  const log = Array.from({ length: LOG }, (_, i) => patchAt(i + 1));
+  const source = makeSource({ rows: [] }, {
+    replay: (after, { limit }) => {
+      const items = log.filter((e) => e.seq > after).slice(0, limit);
+      return pageOf(items, { hasMore: items.length > 0 && items[items.length - 1].seq < LOG, highWatermark: LOG });
+    },
+  });
+  const carrier = makeCarrier();
+  const runner = runSubscription(ROUTE, source.sub, carrier.hooks, { lastSeq: 0, validate: true });
+  // the live source writes while the backlog drains: it follows the log in order
+  source.emit(patchAt(LOG + 1));
+  // a consumer that takes one frame per macrotask, as a socket does
+  let settled = 0;
+  for (let i = 0; i < 4 * LOG && settled < LOG + 1; i++) {
+    while (settled < carrier.gates.length) carrier.gates[settled++].resolve(undefined);
+    await tick();
+  }
+  assert.strictEqual(carrier.frames.some((f) => f.event === 'error'), false, 'the backlog is not a slow consumer');
+  assert.deepStrictEqual(carrier.frames.map((f) => f.seq), Array.from({ length: LOG + 1 }, (_, i) => i + 1));
+  assert.ok(carrier.frames.every((f) => f.event === 'patch'));
+  runner.stop(null); await runner.done;
+});
+
+it('refuses an emission whose seq is not a non-negative safe integer, as a source fault that ends the stream', async () => {
+  // an SSE id is the seq's decimal text: 1.5 and 1e21 do not survive it, so a stream that
+  // delivered them would hand a consumer ids that regress or collide
+  for (const seq of [1.5, 1e21, -1, NaN, Infinity, 2 ** 53, '3', null, undefined]) {
+    const source = makeSource({ rows: [] });
+    const carrier = makeCarrier({ sync: true });
+    const runner = runSubscription(ROUTE, source.sub, carrier.hooks, { lastSeq: null, validate: true });
+    source.emit({ patch: [], seq });
+    await tick();
+    runner.stop(null); await runner.done;
+    assert.deepStrictEqual(carrier.log, ['snapshot:0', 'error:0', 'done'], `seq ${String(seq)}`);
+    assert.strictEqual(carrier.frames[1].data.intent, 'source');
+    assert.match(carrier.frames[1].data.cause.message, /non-negative safe integer seq/);
+    assert.deepStrictEqual(source.counts, { stops: 1, closes: 1 });
+  }
+  for (const seq of [0, 7, Number.MAX_SAFE_INTEGER]) {
+    const source = makeSource({ rows: [] });
+    const carrier = makeCarrier({ sync: true });
+    const runner = runSubscription(ROUTE, source.sub, carrier.hooks, { lastSeq: null, validate: true });
+    source.emit({ patch: [], seq });
+    assert.deepStrictEqual(carrier.log, ['snapshot:0', `patch:${seq}`], `seq ${seq}`);
+    runner.stop(null); await runner.done;
+  }
+});

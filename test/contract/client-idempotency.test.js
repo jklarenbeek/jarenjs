@@ -392,3 +392,28 @@ describe('retry under the declared policy', () => {
     assert.strictEqual(!r2.ok && r2.kind, 'cancelled');
   });
 });
+
+describe('a key the host generator answers', () => {
+  it('is admitted as a key the caller names is: an empty, edge-whitespace or uncarriable key rejects JC1008 before anything is stored or sent', async () => {
+    for (const bad of ['', ' k', 'k ', '\tk', 'a\nb', 'k\u0000']) {
+      const mem = memoryStorage();
+      const { client, sent, ledger } = pair({}, { keys: () => bad, storage: mem.storage });
+      await assert.rejects(client.invoke('product.save', SAVE), (/** @type {any} */ e) => e.code === 'JC1008' && /options\.keys answered a key/.test(e.message),
+        JSON.stringify(bad));
+      assert.strictEqual(sent.length, 0, 'nothing was sent');
+      assert.strictEqual(mem.calls.write, 0, 'nothing was stored');
+      assert.deepStrictEqual(await client.pending(), []);
+      assert.strictEqual(ledger.size, 0);
+    }
+    for (const bad of [undefined, null, {}, [], NaN, Infinity, true, 1n]) {
+      const { client, sent } = pair({}, { keys: () => /** @type {any} */ (bad) });
+      await assert.rejects(client.invoke('product.save', SAVE), (/** @type {any} */ e) => e.code === 'JC1008', String(bad));
+      assert.strictEqual(sent.length, 0, `${String(bad)} was never sent as its text`);
+    }
+    const mem = memoryStorage();
+    const { client, sent } = pair({}, { keys: () => /** @type {any} */ (7), storage: mem.storage });
+    const outcome = await client.invoke('product.save', SAVE);
+    assert.strictEqual(outcome.ok, true);
+    assert.strictEqual(sent[0].init.headers['idempotency-key'], '7');
+  });
+});

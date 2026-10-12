@@ -37,6 +37,7 @@ import {
 import {
   isSubscriptionLike, runSubscription, STREAM_ERRORS, STREAM_MEDIA, HEARTBEAT_LINE, encodeStreamEvent,
 } from '../stream/server.js';
+import { timerMs } from '../timer.js';
 import {
   HTTP_ERRORS, JSON_CONTENT_TYPE, JSON_MEDIA, isFieldValue,
   renderMessage, declaredMessage, headerValue, contentLength, mediaMatches, exceedsBytes,
@@ -1244,8 +1245,8 @@ function sseResponse(server, route, ctx, sub, trace, headers, life, armed) {
   const lastRaw = headerValue(headers, 'last-event-id');
   let lastSeq = null;
   if (lastRaw !== undefined) {
-    const n = Number.parseInt(lastRaw, 10);
-    if (Number.isFinite(n) && n >= 0) lastSeq = n;
+    const n = /^\d+$/.test(lastRaw) ? Number(lastRaw) : NaN;
+    if (Number.isSafeInteger(n)) lastSeq = n;
   }
   const streamPolicy = route.op.policy.stream;
   const heartbeatMs = streamPolicy === null ? 15000 : streamPolicy.heartbeatMs;
@@ -1264,7 +1265,7 @@ function sseResponse(server, route, ctx, sub, trace, headers, life, armed) {
         // next write meets the same rejection and releases the stream
         answer.then(heartbeatSettled, heartbeatSettled);
       }
-    }, heartbeatMs);
+    }, timerMs(heartbeatMs));
     if (timer !== null && typeof (/** @type {any} */ (timer)).unref === 'function') /** @type {any} */ (timer).unref();
 
     /**

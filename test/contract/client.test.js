@@ -430,3 +430,27 @@ describe('openHttpClient — nullable transport members, one reading for both sp
     assert.strictEqual(calls, 1);
   });
 });
+
+describe('timeoutMs a timer cannot take', () => {
+  it('a fraction or a delay past 2^31 - 1 neither throws nor aborts at once: the request completes', async () => {
+    for (const timeoutMs of [1500.5, 2 ** 31, 3e9, 1e10, 1e300]) {
+      const { client } = pair({}, {}, {
+        timeoutMs,
+        fetch: (/** @type {string} */ url, /** @type {any} */ init) => new Promise((resolve, reject) => {
+          init.signal.addEventListener('abort', () => reject(init.signal.reason));
+          setTimeout(() => resolve(new Response(JSON.stringify({ revision: 1, products: [] }), { status: 200, headers: { 'content-type': 'application/json' } })), 30);
+        }),
+      });
+      const outcome = await client.invoke('catalog.load');
+      assert.strictEqual(outcome.ok, true, `timeoutMs ${timeoutMs} ${JSON.stringify(outcome)}`);
+    }
+  });
+
+  it('a fraction below one millisecond is a one millisecond timeout, an outcome and not a thrown RangeError', async () => {
+    const { client } = pair({}, {}, { timeoutMs: 0.5, fetch: (/** @type {string} */ url, /** @type {any} */ init) => new Promise((resolve, reject) => {
+      init.signal.addEventListener('abort', () => reject(init.signal.reason));
+    }) });
+    const outcome = /** @type {any} */ (await client.invoke('catalog.load'));
+    assert.deepStrictEqual([outcome.ok, outcome.kind, outcome.error.code], [false, 'network', 'JC2051']);
+  });
+});

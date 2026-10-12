@@ -1600,7 +1600,8 @@ the platform:
   - `from` is the exact request object `nodeRequest` returned. It decides
     `connection: close` and the linger for an upload left unread.
   - Both Node option bags are closed plain or null-prototype records.
-    `lingerMs` is a non-negative finite number; malformed options or a
+    `lingerMs` is a non-negative finite number, waited as a timer can (at most
+    2^31 − 1 ms; a larger one once destroyed the socket at 1 ms); malformed options or a
     foreign `from` throw `TypeError` before response writes.
   - A framework guard runs in the framework's lifecycle, before the
     route dispatches, so it answers before any byte streams (the
@@ -1681,6 +1682,7 @@ is likewise a closed record with only a non-negative integer `max`.
   "keys": "runtime.uuid",                 // the idempotency key generator (crypto.randomUUID with no record)
   "storage": null,                        // { read(), write(value) } — the @jarenjs/app docstore adapter shape — for durable key records
   "timeoutMs": 0,                         // per request; 0 = none; composed with ctx.signal
+                                          // (rounded up to a whole millisecond, at most 2^31 - 1: a fraction once threw, a longer one timed out at once)
   "sleep": "(ms, signal) => Promise",      // the retry backoff sleeper (injectable)
   "catalog": null,                        // a message catalog consulted before the English one
   "wellKnown": "/.well-known/jaren-contract",   // where negotiate() asks
@@ -1790,7 +1792,11 @@ is true exactly for a 304.
    when the store throws — nothing is sent blind). A `ctx.idempotencyKey`
    a header cannot carry, or with edge whitespace (the transport trims
    it, so the key recorded would not be the key sent), is `JC2050`
-   (`keyword: "encoding"`, `path: ""`) before anything is recorded.
+   (`keyword: "encoding"`, `path: ""`) before anything is recorded. A key
+   `keys()` answers that is empty, or has either fault, is the host's own
+   mistake and rejects `JC1008` before anything is recorded or sent (it
+   once travelled: an empty one ran the command with no idempotency, and one
+   with a control character was reported as a network loss).
 5. **Send** through `fetch` with the composed signal (`ctx.signal`,
    `timeoutMs`, the client's `close()`). A rejection is `kind:
    "cancelled"` when the caller's signal aborted (or the rejection is an
@@ -2442,7 +2448,9 @@ stay public.
 [--out <dir|file>] [--check] [--info-title T] [--info-version V]
 [--lenient] [--fail-on <rule,…|all>]` (the package `bin`). `lint` prints
 `lintContract`'s findings (§13.1) and, under `--fail-on`, exits **1** when
-a named rule (or any, with `all`) has one. `describe` prints `describe()`;
+a named rule (or any, with `all`) has one; `lint` and `diff` print their
+whole report to a pipe before exiting 1 (a long one was once cut at the
+pipe's buffer by the exit). `describe` prints `describe()`;
 `public`/`openapi` print or write JSON (two-space indent, trailing
 newline); `types`/`docs` the text artifacts; `--out` names a file, or a
 directory that gets `<contract id><extension>`
@@ -3001,7 +3009,10 @@ no-store`, `x-jaren-trace`. Events, in order:
   the two watermarks are the replay source's when it reported them.
 - `patch` — `id: <seq>`, data `{ "patch": [...], "seq": n }`: the
   LIVE-FORMAT emission verbatim.
-- heartbeat comment lines (`:`) every `policy.stream.heartbeatMs`.
+- heartbeat comment lines (`:`) every `policy.stream.heartbeatMs`; the server's
+  interval and the client's `2 × heartbeatMs` silence bound each wait at most
+  2^31 − 1 ms, the longest a timer waits (a longer one once ran at 1 ms: a
+  heartbeat line a millisecond on the server, an instant `JC2094` on the client).
 - `error` — data the §7.3 wire error (no `status` member matters here);
   the stream ends with it. A declared failure the source raises
   mid-stream (a `ctx.fail` value as the emission's `error`) renders its
@@ -3009,7 +3020,11 @@ no-store`, `x-jaren-trace`. Events, in order:
 - `end` — data `{ "reason": "closed" | "server-shutdown" }`.
 
 `seq` is strictly increasing per stream; a violation is the client's
-`JC2092`. An emission whose serialized patch's UTF-8 byte length exceeds
+`JC2092`. It is a non-negative safe integer, because an SSE id is its
+decimal text and a fraction or a number past 2^53 does not survive that:
+an emission carrying any other `seq` is a source fault that ends the
+stream (the client's `JC2093`), where a fractional one was once
+delivered and then read back as a regression. An emission whose serialized patch's UTF-8 byte length exceeds
 `policy.stream.maxPatchBytes` is replaced by a fresh `snapshot` event
 at that emission's seq — the consumer swaps its document instead of
 patching it; nothing is dropped.
@@ -3071,7 +3086,18 @@ network`, retryable — the consumer reads slower than the source
 emits), then the subscription is released and the carrier tears its
 sink down (the node adapter destroys the socket, the fetch bridge
 errors the stream) rather than wait for a consumer that stopped
-reading; nothing is dropped silently, oldest or newest.
+reading; nothing is dropped silently, oldest or newest. A replay is fed to
+the carrier one page at a time: the next page is asked for, and the live
+emissions held meanwhile follow, once the frames already queued have been
+taken, so a backlog longer than `queue.events` reaches a consumer that
+reads steadily — a resume once ended in `JC2096` at the second page on a
+carrier that applies backpressure (the Web stream bridge, a busy socket).
+A consumer that stalls part-way through a long backlog is no longer ended with
+`JC2096` by the replay itself: the runner waits for the carrier, holding
+live emissions (at most `queue.events`, past which `JC2096` ends the stream
+as before) until the carrier takes the frames or fails; memory stays bounded,
+and a stalled peer is released when its connection drops or its heartbeat
+write fails.
 
 `toNodeHandler` — and `writeNodeResponse`, the same writer for a
 framework route that dispatched itself (§9) — writes SSE with

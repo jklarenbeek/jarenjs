@@ -305,8 +305,8 @@ function classifyEmission(emission) {
     if (e.error !== undefined) return { kind: 'error', cause: e.error };
     const patch = e.patch;
     const seq = e.seq;
-    if (!Array.isArray(patch) || typeof seq !== 'number' || !Number.isFinite(seq)) {
-      return { kind: 'error', cause: new TypeError('the subscription emitted a value that is not { patch, seq }') };
+    if (!Array.isArray(patch) || !Number.isSafeInteger(seq) || seq < 0) {
+      return { kind: 'error', cause: new TypeError('the subscription emitted a value that is not { patch, seq } with a non-negative safe integer seq') };
     }
     return { kind: 'patch', patch, seq };
   }
@@ -410,6 +410,13 @@ export function runSubscription(route, sub, hooks, options) {
   /** the frames charged to the queue: queued or in flight, not yet settled */
   let queuedEvents = 0;
   let queuedBytes = 0;
+  /**
+   * Settles once the newest frame still charged to the queue has: the queue
+   * writes in order, so it is also the settlement of every frame before it.
+   * `null` when nothing is charged.
+   * @type {Promise<void> | null}
+   */
+  let drained = null;
 
   /**
    * Whether one more frame of `bytes` fits the bound; the terminal
@@ -436,8 +443,26 @@ export function runSubscription(route, sub, hooks, options) {
       queuedBytes -= bytes;
     };
     const answer = queue.write(frame);
-    if (answer === undefined) settle();
-    else answer.then(settle, () => { settle(); release(false); });
+    if (answer === undefined) {
+      settle();
+      return;
+    }
+    const mine = answer.then(settle, () => { settle(); release(false); }).then(() => {
+      if (drained === mine) drained = null;
+    });
+    drained = mine;
+  }
+
+  /**
+   * Run `next` once the frames queued so far have settled — at once when
+   * none is in flight, so a synchronous carrier never waits. A backlog is
+   * fed to a carrier at the pace the carrier takes it: the bound is on the
+   * frames a slow consumer has not taken, not on how many a log holds.
+   * @param {() => void} next
+   */
+  function afterDrain(next) {
+    if (drained === null) next();
+    else drained.then(() => { if (!finished) next(); });
   }
 
   /**
@@ -653,10 +678,21 @@ export function runSubscription(route, sub, hooks, options) {
   }
   if (typeof stopSub !== 'function') stopSub = null;
 
-  /** Flush what was held while the initial events were decided. */
+  /**
+   * Flush what was held while the initial events were decided: at once, or
+   * behind the frames still queued — they and the held emissions together
+   * could pass the bound the consumer is within. Emissions that arrive in
+   * the meantime are held behind the others.
+   */
   function flush() {
-    ready = true;
-    while (ready && early.length > 0 && !finished) deliver(early.shift());
+    if (early.length === 0) {
+      ready = true;
+      return;
+    }
+    afterDrain(() => {
+      ready = true;
+      while (ready && early.length > 0 && !finished) deliver(early.shift());
+    });
   }
 
   /** The highest valid seq among the emissions held so far. */
@@ -781,7 +817,8 @@ export function runSubscription(route, sub, hooks, options) {
         flush();
         return;
       }
-      page(next, goal);
+      // the next page waits for this one to be taken
+      afterDrain(() => page(next, goal));
     };
     if (isThenable(answer)) {
       toPromise(answer).then(settle, (/** @type {unknown} */ err) => {

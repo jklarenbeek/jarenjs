@@ -268,6 +268,40 @@ describe('adapters — the body limit', () => {
     await once(short, 'close');
   });
 
+  it('a lingerMs past 2^31 - 1 lingers as long as a timer can, where a longer delay would destroy the socket at 1 ms', async () => {
+    const long = http.createServer(toNodeHandler(dispatcher, { lingerMs: 3e9 }));
+    long.listen(0, '127.0.0.1');
+    await once(long, 'listening');
+    const port = /** @type {import('node:net').AddressInfo} */ (long.address()).port;
+    /** @type {number[]} */
+    const delays = [];
+    const realTimeout = globalThis.setTimeout;
+    globalThis.setTimeout = /** @type {any} */ ((/** @type {any} */ fn, /** @type {number} */ ms, /** @type {any[]} */ ...rest) => {
+      delays.push(ms);
+      return realTimeout(fn, ms, ...rest);
+    });
+    const req = http.request(`http://127.0.0.1:${port}/product.remove`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'transfer-encoding': 'chunked' },
+    });
+    req.on('error', () => {});
+    try {
+      const answered = new Promise((resolve) => req.on('response', resolve));
+      req.write(Buffer.alloc(8 * 1024, 0x78));
+      const res = /** @type {any} */ (await answered);
+      assert.strictEqual(res.statusCode, 413);
+      res.resume();
+      assert.ok(delays.includes(2 ** 31 - 1), `linger delays ${JSON.stringify(delays)}`);
+      assert.ok(delays.every((ms) => ms <= 2 ** 31 - 1));
+    }
+    finally {
+      globalThis.setTimeout = realTimeout;
+      req.destroy();
+      long.closeAllConnections();
+      await new Promise((resolve) => long.close(resolve));
+    }
+  });
+
   it('a chunked body within the limit is collected and dispatched; bytes reach the strict decoder (invalid UTF-8 is JC2005)', async () => {
     const ok = await fetch(origin + '/product.remove', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"id":7}' });
     assert.strictEqual(ok.status, 204);

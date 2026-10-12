@@ -43,6 +43,7 @@ import { compatReason } from '../compat.js';
 import { WELL_KNOWN_PATH, verdict, projectValidationDetails, renderMessage, isFieldValue } from '../http/wire.js';
 import { createStreamConsumer, STREAM_ERRORS } from '../stream/client.js';
 import { STREAM_MEDIA } from '../stream/sse.js';
+import { timerMs } from '../timer.js';
 import {
   CLIENT_ERRORS, prepareOutcomeRoute, assembleOutcome, makeMeta, okOutcome, failedOutcome, clientError, outcomeError,
 } from './outcome.js';
@@ -547,7 +548,7 @@ export function openHttpClient(contract, options = {}) {
     /** @type {AbortSignal[]} */
     const list = [closer.signal];
     if (signal !== null) list.push(signal);
-    if (timeoutMs > 0) list.push(AbortSignal.timeout(timeoutMs));
+    if (timeoutMs > 0) list.push(AbortSignal.timeout(timerMs(timeoutMs)));
     return AbortSignal.any(list);
   }
 
@@ -934,7 +935,18 @@ export function openHttpClient(contract, options = {}) {
           return invalidInput(route, meta, encodingDetails(err));
         }
       }
-      else key = String(hostFact('keys', keys));
+      else {
+        const drawn = hostFact('keys', keys);
+        // the same admission as a key the caller names: the key recorded must be
+        // the key sent, and an empty one is no key to the server at all, which
+        // would run the command unprotected under a stored record claiming otherwise;
+        // only a string or a finite number is a key (undefined, null or an object
+        // would otherwise be sent as its text, one key for every call)
+        key = typeof drawn === 'string' || (typeof drawn === 'number' && Number.isFinite(drawn)) ? String(drawn) : '';
+        if (key.length === 0 || !isFieldValue(key) || /^[ \t]|[ \t]$/.test(key)) {
+          throw host('JC1008', 'options.keys answered a key that cannot ride the Idempotency-Key header (empty, edge whitespace, or a character a header cannot carry)');
+        }
+      }
       headers['idempotency-key'] = key;
       if (storage !== null) {
         let hash;
@@ -1301,13 +1313,13 @@ export function openHttpClient(contract, options = {}) {
           consumer.fail(failedOutcome('network',
             outcomeError('JC2094', renderMessage(catalog, STREAM_ERRORS.JC2094.msgid, { op: route.id, ms: 2 * heartbeatMs }), null, null, true), meta));
           own.abort();
-        }, 2 * heartbeatMs);
+        }, timerMs(2 * heartbeatMs));
         /** @type {any} */ (watchdog).unref?.();
       }
 
       /** @param {import('@jarenjs/core/text/sse').SseEvent} ev */
       function deliver(ev) {
-        const parsed = ev.id === null ? NaN : Number.parseInt(ev.id, 10);
+        const parsed = ev.id !== null && /^\d+$/.test(ev.id) ? Number(ev.id) : NaN;
         const seq = Number.isFinite(parsed) ? parsed : null;
         let data;
         try {

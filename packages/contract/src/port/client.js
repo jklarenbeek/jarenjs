@@ -31,6 +31,7 @@ import { admitOptions, admitSignal, admitSubscribeOptions } from '../options.js'
 import { validateOperationInput, PORT_LOCAL_ERRORS } from '../pipeline.js';
 import { renderMessage, projectValidationDetails, verdict } from '../http/wire.js';
 import { createStreamConsumer } from '../stream/client.js';
+import { timerMs } from '../timer.js';
 import {
   prepareOutcomeRoute, assembleOutcome, makeMeta, failedOutcome, outcomeError, clientError,
 } from '../client/outcome.js';
@@ -398,7 +399,7 @@ export function openPortClient(contract, options) {
           // a channel that cannot carry the cancel changes nothing
         }
         resolve(bindingOutcome('network', 'JC2072', { op: route.op.id, ms: timeoutMs }, meta));
-      }, timeoutMs);
+      }, timerMs(timeoutMs));
       pending.set(id, { resolve, route, meta, timer, cleanup });
       try {
         channel.postMessage(requestFrame(id, route.op.id, value));

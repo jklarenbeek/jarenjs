@@ -234,7 +234,8 @@ async function runDiff(options) {
   const failing = failOn.filter((name) => diff[/** @type {keyof typeof diff} */ (name)].length > 0);
   if (failing.length > 0) {
     console.error(`diff: ${failing.map((name) => `${diff[/** @type {keyof typeof diff} */ (name)].length} ${name}`).join(', ')} change(s)`);
-    process.exit(1);
+    // not process.exit: a report longer than the pipe holds is still being written
+    process.exitCode = 1;
   }
 }
 
@@ -270,7 +271,7 @@ async function runLint(options) {
   const failing = findings.filter((f) => failOn.includes(f.rule));
   if (failing.length > 0) {
     console.error(`lint: ${failing.length} finding(s): ${[...new Set(failing.map((f) => f.rule))].join(', ')}`);
-    process.exit(1);
+    process.exitCode = 1;
   }
 }
 

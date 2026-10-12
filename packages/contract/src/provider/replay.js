@@ -3,6 +3,7 @@
 import { canonicalSha256 } from '@jarenjs/json/canonical';
 import { createScheduler } from '@jarenjs/core/schedule';
 import { utf8ByteLength } from '@jarenjs/core/string';
+import { timerMs } from '../timer.js';
 
 const credential = /authorization|cookie|token|secret|api[-_]?key/i;
 const FORMAT = 'jaren-provider-replay/1';
@@ -56,7 +57,7 @@ export function createProviderReplay(options, hostError) {
     const stopped = new Promise((_resolve, reject) => {
       listener = () => reject(new Error(abort.signal.aborted ? 'deadline' : 'cancelled'));
       signal.addEventListener('abort', listener, { once: true });
-      timer = setTimeout(() => abort.abort(), Math.min(2147483647, Math.max(0, context.deadline - now())));
+      timer = setTimeout(() => abort.abort(), timerMs(Math.max(0, context.deadline - now())));
     });
     try {
       return await Promise.race([scheduler.run(() => task(signal), { signal, deadline: context.deadline, scope: context.scope }), stopped]);
