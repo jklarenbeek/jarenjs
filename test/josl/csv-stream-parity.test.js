@@ -11,6 +11,57 @@ function chunked(text, options, size) {
 }
 
 describe('a chunked CSV read says what the whole document says', () => {
+  it('hands a record over the moment its line break arrives, however long the field before it', () => {
+    // the rows read after each chunk, for chunks the reader may hold back
+    const steps = [
+      [['"a"', '\n'], [0, 1]],
+      [['"a"', '\r\n'], [0, 1]],
+      [['"ab', 'cd', '"\n'], [0, 0, 1]],
+      [['"ab\n', 'cd', '"\n'], [0, 0, 1]],
+      [['"a"b', 'c', '\n'], [0, 0, 1]],
+      [['"a"b', 'c', '\rx'], [0, 0, 1]],
+      [['"a"b', 'c', ',d\n'], [0, 0, 1]],
+    ];
+    for (const [chunks, expected] of /** @type {[string[], number[]][]} */ (steps)) {
+      const reader = createCsvStreamReader({ repair: true });
+      const seen = chunks.map((chunk) => (reader.feed(chunk), reader.rows().length));
+      assert.deepEqual(seen, expected, JSON.stringify(chunks));
+    }
+  });
+
+  it('refuses an oversized field while it is still being fed, not when the stream ends', () => {
+    for (const limit of ['maxFieldBytes', 'maxRecordBytes']) {
+      for (const head of ['"', '"a"']) {
+        const reader = createCsvStreamReader({ [limit]: 100 });
+        let fed = 0;
+        assert.throws(() => {
+          for (; fed < 50; fed++) reader.feed(fed === 0 ? head + 'b'.repeat(10) : 'b'.repeat(10));
+        }, (/** @type {any} */ e) => e.code === (limit === 'maxFieldBytes' ? 'CSV2003' : 'CSV2002'), `${limit} after ${head}`);
+        assert.ok(fed < 50, `${limit} after ${head}: refused at chunk ${fed}`);
+      }
+    }
+  });
+
+  it('reads a long field the same at every chunk size when the chunks around it hold no quote', () => {
+    const run = 'b'.repeat(40);
+    const texts = [
+      `"${run}`,
+      `"a"${run}`,
+      `"${run}"\n"${run}""${run}",x\n`,
+      `"a"${run},c\n"${run}"${run}"\n`,
+      `h1,h2\n"${run}\n${run}"${run}\r\nx,"y"${run}"z"\n`,
+    ];
+    for (const text of texts) {
+      for (const options of [{ repair: true }, { repair: true, headers: true }]) {
+        const whole = parseCsvDocument(text, options);
+        const expected = { rows: whole.rows, repairs: whole.repairs.map((r) => `${r.code}@${r.line}:${r.column}`) };
+        for (const size of [1, 7, 16, 41, 64]) {
+          assert.deepEqual(chunked(text, options, size), expected, `${JSON.stringify(text)} in chunks of ${size}`);
+        }
+      }
+    }
+  });
+
   it('reads repaired text the same at every chunk size', () => {
     // `""b` closes an empty quoted field and absorbs `b`; the next line opens a
     // quote that stays open to the end, newlines included

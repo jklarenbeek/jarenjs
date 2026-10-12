@@ -360,9 +360,11 @@ costs a descriptor plus examples and no UI code at all.
   document implies having all of it, so this waits for a consumer that
   genuinely edits a stream.
 
-- [ ] **The CSV stream reader is quadratic in one very long quoted field.** It
-  re-flattens its buffer per chunk. Wanted: search only the new chunk for the
-  closing quote.
+- [ ] **The CSV stream reader re-reads a long quoted field whose chunks each
+  hold a quote.** Feeding is linear for an open quoted field and for text after
+  a closing quote, but a chunk that holds a quote can move the cutter, so a
+  very long field with an escaped quote in every chunk is still re-scanned per
+  chunk. Wanted: resume the cutter's scan where the last chunk stopped.
 - [ ] **A comment line that contains the quote character, and the `line` of a
   `maxFieldBytes` refusal, differ between a chunked and a whole CSV read.** The
   cutter reads the quote in the comment as opening a field; `CSV2003` reports

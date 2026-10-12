@@ -281,6 +281,10 @@ export class CsvMachine {
     this.scanPos = 0;
     this.scanState = S_START;
     this.scanLook = 0; // how far the lookahead after a quote has already read
+    // Chunks that cannot move the cutter, held apart from `buf` until one
+    // can (see `inert`): appending them to `buf` would make the next scan
+    // copy the whole pending text again.
+    this.held = [];
     this.started = false;
     this.ended = false;
 
@@ -318,6 +322,9 @@ export class CsvMachine {
       if (this.nextDelim === -1) this.nextDelim = -2;
       if (this.nextLf === -1) this.nextLf = -2;
       if (this.nextCr === -1) this.nextCr = -2;
+      if (this.inert(part))
+        return;
+      this.release();
       feedMachine(this, part);
       if (this.maxRecordBytes !== Infinity && utf8ByteLength(this.buf) > this.maxRecordBytes)
         throw new JoslLimitError('CSV2002', 'a record exceeds maxRecordBytes', this.maxRecordBytes, this.recordOrigin);
@@ -345,6 +352,7 @@ export class CsvMachine {
     if (this.ended)
       return this.outRows;
     this.ended = true;
+    this.release();
     this.scan();
     if (this.buf.length !== 0) {
       const rest = this.buf;
@@ -408,6 +416,39 @@ export class CsvMachine {
   //#endregion
 
   //#region chunk cutter
+
+  // True when `chunk` has been held instead of buffered because the scan it
+  // would trigger could only read it, not cut anything. The cutter cuts a
+  // span at a line break that ends a record, so a chunk with no LF or CR
+  // cannot cut one while the cutter sits inside a quoted field or just past
+  // a closing quote; and inside a quoted field whose scanned text is all in
+  // `buf`, a chunk with no quote character cannot leave the field, line
+  // breaks or not. Holding it costs the chunk, where buffering it would make
+  // the next scan copy the whole pending text again. Not while a size limit
+  // needs the span in view at every feed.
+  inert(chunk) {
+    if (!this.started || this.ended || this.quote < 0 || chunk.length === 0
+      || this.maxRecordBytes !== Infinity || this.maxFieldBytes !== Infinity)
+      return false;
+    const state = this.scanState;
+    if (state === S_QUOTED && this.scanPos >= this.buf.length) {
+      if (chunk.indexOf(this.quoteChar) >= 0)
+        return false;
+    }
+    else if (state !== S_QUOTED && state !== S_QUOTE || chunk.indexOf('\n') >= 0 || chunk.indexOf('\r') >= 0) {
+      return false;
+    }
+    this.held.push(chunk);
+    return true;
+  }
+
+  // Join the held chunks onto the buffer, once, for a scan that needs them.
+  release() {
+    if (this.held.length === 0)
+      return;
+    this.buf += this.held.join('');
+    this.held.length = 0;
+  }
 
   // Advance the cutter over the buffer, handing each complete span to the
   // record reader. A span never ends before the parser would end a
