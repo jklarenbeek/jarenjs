@@ -1,8 +1,8 @@
 {
  "$comment": "QT3 baseline: every attributed tier-A failure (see benchmark/qt3-README.md). Deviation ids: D1-D7 QUERY-FORMAT.md section 11; E1/E2 engine rules (comparison/no-atomization, sections 8.4-8.10); F1-F6 front-end approximations (XQUERY-FRONTEND.md section 3). skip: fatal resource exhaustion, never run in-process.",
  "summary": {
-  "pass": 1858,
-  "unsupported-syntax": 21191
+  "pass": 1852,
+  "unsupported-syntax": 21198
  },
  "tests": {
   "ArrayTest-044": {
@@ -19,10 +19,6 @@
    "status": "deviation",
    "id": "D2",
    "note": "= compares an array item structurally; XQuery atomizes the array into its members"
-  },
-  "ArrowPostfix-016": {
-   "status": "bug",
-   "issue": "front-end: '=>' directly after a comparison right-hand side raises a generic syntax error instead of unsupported construct 'arrow expression'"
   },
   "FOAR0001_1": {
    "status": "deviation",
@@ -319,22 +315,6 @@
    "id": "F4",
    "note": "the version/encoding declaration is validated for shape only; XQST0031/XQST0087 are not raised"
   },
-  "K2-Axes-94": {
-   "status": "bug",
-   "issue": "front-end: a bare NameTest that collides with a keyword ('let', 'order', 'default', 'declare', ...) raises a generic keyword error instead of unsupported construct 'path expression'"
-  },
-  "K2-DefaultNamespaceProlog-18": {
-   "status": "bug",
-   "issue": "front-end: a bare NameTest that collides with a keyword ('let', 'order', 'default', 'declare', ...) raises a generic keyword error instead of unsupported construct 'path expression'"
-  },
-  "K2-DefaultOrderingProlog-2": {
-   "status": "bug",
-   "issue": "front-end: a bare NameTest that collides with a keyword ('let', 'order', 'default', 'declare', ...) raises a generic keyword error instead of unsupported construct 'path expression'"
-  },
-  "K2-ExternalVariablesWithout-17": {
-   "status": "bug",
-   "issue": "front-end: a bare NameTest that collides with a keyword ('let', 'order', 'default', 'declare', ...) raises a generic keyword error instead of unsupported construct 'path expression'"
-  },
   "K2-ForExprPositionalVar-4": {
    "status": "deviation",
    "id": "D6",
@@ -389,14 +369,6 @@
    "status": "deviation",
    "id": "D5",
    "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
-  },
-  "K2-NameTest-78": {
-   "status": "bug",
-   "issue": "front-end: a bare NameTest that collides with a keyword ('let', 'order', 'default', 'declare', ...) raises a generic keyword error instead of unsupported construct 'path expression'"
-  },
-  "K2-NameTest-79": {
-   "status": "bug",
-   "issue": "front-end: a bare NameTest that collides with a keyword ('let', 'order', 'default', 'declare', ...) raises a generic keyword error instead of unsupported construct 'path expression'"
   },
   "K2-NumericDivide-1": {
    "status": "deviation",

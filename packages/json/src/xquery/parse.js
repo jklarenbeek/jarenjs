@@ -90,8 +90,9 @@ const VALUE_COMPS = Object.freeze({
   eq: '$eq', ne: '$ne', lt: '$lt', le: '$le', gt: '$gt', ge: '$ge',
 });
 
-// keywords that can never start an expression in the subset; produces a
-// clearer error than the generic path-expression one
+// keywords that cannot start an expression in the subset. A bare one is
+// still a name test (a path expression, unsupported); it is reported as a
+// misplaced keyword only when the next token shows it was meant as one
 const EXPR_KEYWORDS = new Set([
   'for', 'let', 'some', 'every', 'if', 'then', 'else', 'return', 'where',
   'order', 'group', 'stable', 'count', 'satisfies', 'in', 'at', 'to',
@@ -99,6 +100,12 @@ const EXPR_KEYWORDS = new Set([
   'instance', 'treat', 'castable', 'cast', 'is', 'case', 'default',
   'ascending', 'descending', 'least', 'greatest', 'collation', 'empty',
   'allowing', 'by', 'declare', 'import', 'module', 'external', 'variable',
+]);
+
+// words that follow an operand as an operator
+const OPERATOR_WORDS = new Set([
+  'eq', 'ne', 'lt', 'le', 'gt', 'ge', 'and', 'or', 'div', 'idiv', 'mod', 'to',
+  'union', 'intersect', 'except', 'instance', 'treat', 'castable', 'cast', 'is',
 ]);
 
 // computed node constructor keywords (keyword followed by '{')
@@ -616,7 +623,15 @@ export function parseXQuery(source) {
       return left;
     }
     skipWS();
-    return { [op]: [left, parseStringConcat()] };
+    const right = parseStringConcat();
+    // the arrow binds tighter than a comparison, so '=>' after the right-hand
+    // side is an arrow expression on it
+    const afterRight = pos;
+    skipWS();
+    if (cc(pos) === CC_EQ && cc(pos + 1) === CC_GT)
+      fail("unsupported construct 'arrow expression'", pos);
+    pos = afterRight;
+    return { [op]: [left, right] };
   }
 
   // StringConcatExpr ::= RangeExpr ("||" RangeExpr)* - variadic $concat.
@@ -1058,10 +1073,26 @@ export function parseXQuery(source) {
     }
     if (prefix === null && name === 'function')
       fail("unsupported construct 'inline function expression'", at);
-    if (prefix === null && EXPR_KEYWORDS.has(name))
+    if (prefix === null && EXPR_KEYWORDS.has(name) && followedByKeywordRole())
       fail(`unexpected keyword '${name}'`, at);
     // a bare (or prefixed) name in expression position is an axis step
     return fail("unsupported construct 'path expression'", at);
+  }
+
+  // true when the next token shows that a keyword-named name was meant as a
+  // keyword: a variable reference, a number or a string literal, or a word
+  // that is not an operator. A name test is followed by the end, a closer or
+  // an operator, never by one of those.
+  function followedByKeywordRole() {
+    const c = cc(pos);
+    if (c === CC_DOLLAR || c === CC_DQUOTE || c === CC_SQUOTE || isDigitCode(c))
+      return true;
+    if (!isNameStartCode(c))
+      return false;
+    const save = pos;
+    const word = parseNCName();
+    pos = save;
+    return !OPERATOR_WORDS.has(word);
   }
 
   function parseArguments() {
@@ -1621,8 +1652,11 @@ export function parseXQuery(source) {
         skipWS();
         if (cc(pos) === CC_PERCENT)
           fail("unsupported construct 'annotation'");
-        if (!isNameStartCode(cc(pos)))
-          fail('expected a declaration keyword');
+        // nothing declarable follows: 'declare' is a name test, not a prolog
+        if (!isNameStartCode(cc(pos))) {
+          pos = save;
+          return;
+        }
         const kind = parseNCName();
         if (kind === 'variable') {
           parseVariableDecl(at);

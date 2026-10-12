@@ -613,6 +613,32 @@ describe('XQuery front-end parser', () => {
       failsWith('group by $x', "unexpected keyword 'group'", 0);
     });
 
+    it('should report a keyword-named name test as a path expression, not a keyword', () => {
+      failsWith('let', "unsupported construct 'path expression'", 0);
+      failsWith('declare', "unsupported construct 'path expression'", 0);
+      failsWith('default eq default', "unsupported construct 'path expression'", 0);
+      failsWith('order eq order', "unsupported construct 'path expression'", 0);
+      failsWith('variable lt variable', "unsupported construct 'path expression'", 0);
+      failsWith('1 + count', "unsupported construct 'path expression'", 4);
+    });
+
+    it('should keep the keyword diagnostic where the next token shows a keyword was meant', () => {
+      failsWith('1 + let $x := 1 return $x', "unexpected keyword 'let'", 4);
+      failsWith('order by $x', "unexpected keyword 'order'", 0);
+      failsWith('return 1', "unexpected keyword 'return'", 0);
+      failsWith('for return 4', "unexpected keyword 'for'", 0);
+      failsWith('for in 1 return 4', "unexpected keyword 'for'", 0);
+      failsWith('default declare default element namespace b = "u"; 1', "unexpected keyword 'default'", 0);
+      failsWith('for window $w in (1 to 10) return $w', "unexpected keyword 'for'", 0);
+    });
+
+    it('should report an arrow after a comparison right-hand side as an arrow expression', () => {
+      failsWith('1 = 2 => f()', "unsupported construct 'arrow expression'", 6);
+      failsWith('$a eq (2) => f()', "unsupported construct 'arrow expression'", 10);
+      failsWith('let $x := 4 return $x<=3.2=>ceiling()', "unsupported construct 'arrow expression'", 26);
+      failsWith('1 = 2 = 3', 'unexpected token', 6);
+    });
+
     it('should reject non-string input', () => {
       failsWith(42, 'query must be a string');
     });
