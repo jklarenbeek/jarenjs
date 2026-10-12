@@ -129,7 +129,9 @@ hand-written expectations.
 
 ### Block phase: a container stack and one open leaf
 
-Each (detabbed) line runs through three steps:
+Each line runs through three steps, measured in its tab-expanded form while
+the text that reaches a paragraph, a heading or a table keeps the tabs as
+written:
 
 1. **Match open containers.** The stack holds `blockquote`, `list` and
    `listItem` entries; each consumes its marker prefix (`>`, item

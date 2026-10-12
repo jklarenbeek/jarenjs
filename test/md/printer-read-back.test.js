@@ -163,3 +163,58 @@ describe('toMarkdown — a run no spelling reads back as costs a few parses, not
     assert.ok(stubborn / easy < 30, `stubborn ${stubborn.toFixed(1)} ms, easy ${easy.toFixed(1)} ms`);
   });
 });
+
+describe('toMarkdown — a paragraph that opens with raw HTML stays a paragraph', function () {
+  it('continues a filler definition, the way the source held it', () => {
+    assert.equal(canonical('[a]: /u\n<b>'), '[-]: <>\n<b>\n');
+    assert.equal(canonical('[a]: /u "t"\n<span>'), '[-]: <>\n<span>\n');
+    assert.equal(canonical('[a]: /u\n<b>\nx'), '[-]: <>\n<b>\nx\n');
+    assert.equal(canonical('> [a]: /u\n> <b>'), '> [-]: <>\n> <b>\n');
+  });
+
+  it('indents a first line that could interrupt a paragraph as well', () => {
+    assert.equal(roundTrip([p({ type: 'html', value: '<div>' })]), '[-]: <>\n    <div>\n');
+  });
+
+  it('leaves a paragraph whose first line is not a block start alone', () => {
+    assert.equal(canonical('[a]: /u\n<b>x'), '<b>x\n');
+    assert.equal(canonical('<b>x</b>'), '<b>x</b>\n');
+  });
+});
+
+describe('toMarkdown — a block that starts with spaces starts below its marker', function () {
+  it('puts the marker alone for an HTML block with leading spaces', () => {
+    assert.equal(canonical('-\n   <div>'), '-\n   <div>\n');
+    assert.equal(canonical('-\n    <div>'), '-\n    <div>\n');
+    assert.equal(canonical('1.\n    <div>'), '1.\n    <div>\n');
+    assert.equal(canonical('-\n   <div>\n   x'), '-\n   <div>\n   x\n');
+  });
+
+  it('does the same after a footnote label', () => {
+    assert.equal(canonical('[^a]:\n     <div>\n\nx [^a]'), '[^a]:\n     <div>\n\nx [^a]\n');
+  });
+
+  it('leaves an HTML block without leading spaces on the marker line', () => {
+    assert.equal(canonical('-  <div>'), '- <div>\n');
+    assert.equal(canonical('-\n  <div>'), '- <div>\n');
+  });
+});
+
+describe('toMarkdown — a literal delimiter can print bare when nothing else reads back', function () {
+  it('spells an unmatched delimiter beside the openers it shares a run with', () => {
+    assert.equal(canonical(' ***`*_[_*'), '***\\`*_\\[_*\n');
+    assert.equal(canonical('****`\\*a*b*b'), '****\\`\\*a*b*b\n');
+    assert.equal(canonical(' __*\\**_*_**_'), '___\\*_*\\**\\*\\*_\n');
+  });
+});
+
+describe('toMarkdown — a setext heading that opens with raw HTML, and text shaped like a rule', function () {
+  it('continues a filler definition for a setext heading too', () => {
+    assert.equal(canonical('[x]: /u\n<span>\n*- - \n- '), '[-]: <>\n<span>\n\\*- -\n---\n');
+  });
+
+  it('escapes a line of spaced dashes in text', () => {
+    assert.equal(roundTrip([p(t('-- -'))]), '\\-- -\n');
+    assert.equal(roundTrip([p(t('a'), { type: 'softBreak' }, t('-- -'))]), 'a\n\\-- -\n');
+  });
+});

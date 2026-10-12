@@ -256,17 +256,15 @@ establish registry publication or downstream acceptance.
   first candidate — and not before, so that the shape is fitted to a real
   consumer rather than to a description of one.
 
-- [ ] **Canonical printing's last shapes.** `parseMarkdown(toMarkdown(doc))`
-  deep-equals `doc` over the CommonMark and GFM corpora and over random
-  documents, except for shapes no real document holds: a paragraph that is only
-  raw inline HTML after a link reference definition took the lines above it,
-  an HTML block's leading spaces as the first line of a list item, and four or
-  more nested delimiter runs holding literal `*` characters. Wanted: a printer
-  that can spell each, or an AST that records what the definition took.
-- [ ] **Tabs inside paragraph text.** Code and HTML blocks keep their tabs;
-  paragraph, heading and table text still read from the tab-expanded line, so
-  `a<TAB>b` parses as `a   b`. Wanted: tab-aware inline parsing.
-
+- [ ] **Canonical printing's last shapes.** parseMarkdown(toMarkdown(doc)) deep-
+  equals doc over the CommonMark and GFM corpora and random documents, except
+  two shapes no real document holds: a run of more than four emphasis/strong
+  nodes (or over 600 printed characters) whose canonical spelling does not read
+  back (the spelling search covers at most four delimiter nodes, six bits), and
+  a top-level HTML block starting with two or more spaces placed straight after
+  a list, which prints inside the last item. Wanted: a search that scales, and a
+  way to end a list before such a block (a node that records it, or a printed
+  separator the parser drops).
 ## @jarenjs/mermaid
 
 - [ ] **`htmlLabels:true`** — labels still render as SVG `<text>`. The view renderer now supports HTML descendants of `foreignObject` and namespaced attributes; Mermaid still needs HTML-label rendering, sizing and parity tests. Safe mode intentionally excludes `foreignObject`.

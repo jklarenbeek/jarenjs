@@ -579,14 +579,18 @@ underscores (`**_x_**`), because `***x***` reads back as the nesting the
 other way round. Emphasis or strong beside or inside another (`*a*` then
 `_b_`, `__**x**y__`) is checked against the parser: when the `*` spelling
 would merge delimiters into one run, the first alternating spelling that
-reads back as the same nodes is the one printed. A destination, a title
+reads back as the same nodes is the one printed. When none of those does, up
+to four such nodes in a short run are also tried with each text node's `*` and
+`_` left bare, which is how a source spells a delimiter run that no escaped
+character can. A destination, a title
 and a fence's info string are escaped as they are read: a backslash before
 punctuation, an `&` that opens a character reference, a tab and a newline
 print as an escape or a reference, and a destination that starts with `<`
 or holds a control character prints in angle brackets. A list item made of
 markers alone prints its first block the other way (`- * -`), a raw-HTML
 node that begins a continuation line prints four spaces in, and a tab in
-text prints as `&#9;`.
+text prints as `&#9;`. A tab inside paragraph, heading and table text is a
+tab in the AST, as it is inside code and HTML blocks.
 
 The normative round-trip guarantees:
 
@@ -607,13 +611,19 @@ The normative round-trip guarantees:
    output.
 
 The guarantee is checked over those corpora and over randomly assembled
-documents; it has known gaps outside them, all in shapes no real document
-holds. A paragraph that is only raw inline HTML (after a link reference
-definition took the lines above it) prints at a line start and reads back as
-an HTML block; an HTML block's leading spaces inside a list item's first
-line fold into the item's own padding; and a few shapes of four or more
-nested delimiter runs holding literal `*` characters have no spelling the
-printer tries.
+documents; it has known gaps outside them, in shapes no real document
+holds. Two remain: a run of more than four emphasis or strong nodes, or one
+longer than 600 printed characters, whose canonical spelling does not read
+back is printed canonically, and the spellings that would read back (the
+other delimiter for each node, a literal `*` or `_` left bare) are not
+searched; and a top-level HTML block that begins with two or more spaces,
+placed straight after a list, prints inside the list's last item, because
+the spaces count as the item's indentation and nothing the AST holds can end
+the list first. A paragraph that is only raw inline HTML a block would start on (it can
+only follow a link reference definition, which the AST does not keep) prints
+after a definition that defines nothing, `[-]: <>`; an HTML block's leading
+spaces as the first line of a list item or a footnote definition print
+below the marker or the label; a setext heading that opens with such a tag continues the same definition, and a line of text shaped like a rule (`-- -`) prints with its first character escaped.
 
 ## 6. Structural sharing (normative)
 

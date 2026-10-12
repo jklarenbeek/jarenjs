@@ -20,6 +20,10 @@ import { parseInlines } from './parser.js';
 
 /** Characters that are backslash-escaped in canonical text output. */
 const RE_ESCAPE = /[\\`*_[\]<>~|#&]/g;
+/** The same set without the delimiter characters: text whose literal `*` and `_` print as they are. */
+const RE_ESCAPE_BARE = /[\\`[\]<>~|#&]/g;
+/** A character that can open or close emphasis. */
+const RE_DELIMITER = /[*_]/;
 /** Line starts that would re-parse as a block construct: a list marker,
  * a blockquote, or a setext underline under the line before it. */
 const RE_DANGEROUS_LINE = /^(?:(?:[-+=>]|\d{1,9}[.)])(?: |$)|[-=]{2,}[ \t]*$)/;
@@ -29,16 +33,21 @@ const RE_LEADING_DIGITS = /^\d{1,9}/;
 const FOOTNOTE_CONTINUATION = '    ';
 
 /**
- * Escape inline text so it re-parses as the same literal text.
+ * Escape inline text so it re-parses as the same literal text. With
+ * `bare` its `*` and `_` characters print unescaped: an unmatched
+ * delimiter left in a run is how a source spells some nestings no
+ * escaped one can.
  * @param {string} value
+ * @param {boolean} [bare]
  * @returns {string}
  */
-function escapeText(value) {
-  const escaped = value.replace(RE_ESCAPE, '\\$&');
+function escapeText(value, bare = false) {
+  const escaped = value.replace(bare ? RE_ESCAPE_BARE : RE_ESCAPE, '\\$&');
   // A newline inside a text VALUE is not a line break — the parser gives
   // those their own `softBreak` node — it came from `&#10;`, and printed
-  // literally it would split the paragraph in two. A tab came from
-  // `&#9;` too: a literal one reads back as spaces.
+  // literally it would split the paragraph in two. A tab prints as a
+  // reference too: bare, it is indentation at a line start and dropped at
+  // a line end.
   return escaped.indexOf('\n') === -1 && escaped.indexOf('\t') === -1
     ? escaped
     : escaped.replace(/\n/g, '&#10;').replace(/\t/g, '&#9;');
@@ -57,7 +66,7 @@ function guardLineStart(line) {
   // is how the text came in (`&#9;foo`) and how it goes back out.
   if (line.charCodeAt(0) === 0x09) return '&#9;' + line.slice(1);
   if (line.startsWith('    ')) return '&#32;' + line.slice(1);
-  if (!RE_DANGEROUS_LINE.test(line)) return line;
+  if (!RE_DANGEROUS_LINE.test(line) && !scanThematicBreak(line, 0)) return line;
   // A backslash escapes ASCII PUNCTUATION and nothing else, so an
   // ordered-list line is disarmed at its delimiter (`1\. text`): `\1.`
   // would print a literal backslash, re-parse as one, and print itself
@@ -77,20 +86,24 @@ function guardLineStart(line) {
  * canonical spelling (`*`, `**`); the others alternate with `_`/`__`
  * by nesting depth and by position in a run of adjacent siblings, for
  * the shapes the canonical spelling merges into one delimiter run; the
- * last resort (style 4) takes each node's spelling from a bit of `mask`,
- * in the order the nodes print.
- * @typedef {{ style: number, depth: number, mask: number, seen: { count: number } }} PrintContext
+ * last resort (style 4) takes each delimiter node's spelling from a bit
+ * of `mask`, in the order the nodes print, and — in the bits above the
+ * `delims` of those — whether each text node holding a `*` or `_`
+ * prints it bare.
+ * @typedef {{ style: number, depth: number, mask: number, delims: number, seen: { count: number, bare: number } }} PrintContext
  */
 
 /** The alternating spellings tried, in order, when the canonical one does not read back. */
 const EMPHASIS_STYLES = 4;
 /** The most delimiter nodes whose spellings are tried one by one (2^4 candidates). */
 const MASK_NODES = 4;
+/** The most bits of spelling, delimiter nodes and delimiter-holding text nodes together, tried (2^6 candidates). */
+const MASK_BITS = 6;
 /** The longest run (in printed characters) given that search: each candidate is a parse of it. */
 const MASK_LENGTH = 600;
 
 /** @type {PrintContext} */
-const CANONICAL = { style: 0, depth: 0, mask: 0, seen: { count: 0 } };
+const CANONICAL = { style: 0, depth: 0, mask: 0, delims: 0, seen: { count: 0, bare: 0 } };
 
 /**
  * Does this node spell with a delimiter run (`*`/`_`)?
@@ -113,6 +126,18 @@ function underscoreFor(pc, run) {
   return pc.style === 1 ? parity === 1
     : pc.style === 2 ? parity === 0
       : pc.style === 3;
+}
+
+/**
+ * Does this text node print its `*` and `_` characters bare? The
+ * last-resort search decides it, one bit per text node that holds one.
+ * @param {string} value
+ * @param {PrintContext} pc
+ * @returns {boolean}
+ */
+function printsBare(value, pc) {
+  if (pc.style !== 4 || !RE_DELIMITER.test(value)) return false;
+  return ((pc.mask >> (pc.delims + pc.seen.bare++)) & 1) === 1;
 }
 
 /**
@@ -143,12 +168,12 @@ function printInlines(nodes, pc) {
  * @returns {PrintContext}
  */
 function deeper(pc) {
-  return { style: pc.style, depth: pc.depth + 1, mask: pc.mask, seen: pc.seen };
+  return { style: pc.style, depth: pc.depth + 1, mask: pc.mask, delims: pc.delims, seen: pc.seen };
 }
 
 /** @type {Record<string, (node: MdNode, pc: PrintContext, run: number) => string>} */
 const INLINE_PRINTERS = {
-  text: (node) => escapeText(node.value),
+  text: (node, pc) => escapeText(node.value, printsBare(node.value, pc)),
   emphasis: (node, pc, run) => {
     if (pc.style !== 0) {
       const mark = underscoreFor(pc, run) ? '_' : '*';
@@ -244,15 +269,34 @@ function countDelimiters(nodes) {
 }
 
 /**
- * How many spellings the last-resort search tries: every combination for
- * a few delimiter nodes in a short run, none for more.
+ * How many text nodes hold a literal `*` or `_`, at any depth?
  * @param {MdNode[]} nodes
- * @param {string} printed
  * @returns {number}
  */
-function maskCount(nodes, printed) {
-  const count = countDelimiters(nodes);
-  return count <= MASK_NODES && printed.length <= MASK_LENGTH ? 1 << count : 0;
+function countDelimiterTexts(nodes) {
+  let count = 0;
+  for (let i = 0; i < nodes.length; i++) {
+    const node = nodes[i];
+    if (node.type === 'text' && RE_DELIMITER.test(node.value)) count++;
+    if (Array.isArray(node.children)) count += countDelimiterTexts(node.children);
+  }
+  return count;
+}
+
+/**
+ * How the last-resort search is laid out: the delimiter nodes it spells
+ * one by one and how many candidates that makes — every combination of
+ * a few delimiter nodes and the text nodes holding a delimiter in a short
+ * run, none for more.
+ * @param {MdNode[]} nodes
+ * @param {string} printed
+ * @returns {{ delims: number, masks: number }}
+ */
+function maskPlan(nodes, printed) {
+  const delims = countDelimiters(nodes);
+  if (delims > MASK_NODES || printed.length > MASK_LENGTH) return { delims, masks: 0 };
+  const bits = Math.min(delims + countDelimiterTexts(nodes), MASK_BITS);
+  return { delims, masks: 1 << bits };
 }
 
 /** Inline parse state for the read-back check: no definitions, no plugins. */
@@ -280,9 +324,9 @@ function printRun(nodes) {
   const canonical = printInlines(nodes, CANONICAL);
   if (!mayMergeDelimiters(nodes) || readsAs(canonical, nodes)) return canonical;
   for (let style = 1; style <= EMPHASIS_STYLES; style++) {
-    const masks = style < EMPHASIS_STYLES ? 1 : maskCount(nodes, canonical);
+    const { delims, masks } = style < EMPHASIS_STYLES ? { delims: 0, masks: 1 } : maskPlan(nodes, canonical);
     for (let mask = 0; mask < masks; mask++) {
-      const text = printInlines(nodes, { style, depth: 0, mask, seen: { count: 0 } });
+      const text = printInlines(nodes, { style, depth: 0, mask, delims, seen: { count: 0, bare: 0 } });
       if (readsAs(text, nodes)) return text;
     }
   }
@@ -388,9 +432,32 @@ function printFlow(children) {
   return lines.join('\n');
 }
 
+/**
+ * A link reference definition that defines nothing a document can use.
+ * A paragraph whose first line is raw HTML opening a block reads back as
+ * that block; the one way to keep it a paragraph is to have it continue
+ * a paragraph already open, which is how a definition's lines come to
+ * hold it in the source. The definition leaves the AST when it is read.
+ */
+const FILLER_DEFINITION = '[-]: <>';
+
+/**
+ * Print a paragraph; one that opens with raw HTML a block would start
+ * on continues a filler definition instead.
+ * @param {MdNode[]} children
+ * @returns {string}
+ */
+function printParagraph(children) {
+  const text = printFlow(children);
+  const lines = text.split('\n');
+  if (scanHtmlBlockStart(lines[0], 0, false) === 0) return text;
+  if (scanHtmlBlockStart(lines[0], 0, true) !== 0) lines[0] = '    ' + lines[0];
+  return FILLER_DEFINITION + '\n' + lines.join('\n');
+}
+
 /** @type {Record<string, (node: MdNode, alt?: boolean, spare?: boolean) => string>} */
 const BLOCK_PRINTERS = {
-  paragraph: (node) => printFlow(node.children),
+  paragraph: (node) => printParagraph(node.children),
 
   heading: (node) => {
     const text = printRun(node.children);
@@ -399,7 +466,7 @@ const BLOCK_PRINTERS = {
     // only depths 1 and 2 have. Deeper headings cannot hold one: they
     // can only come from ATX in the first place.
     if (node.depth <= 2 && text.indexOf('\n') !== -1) {
-      return printFlow(node.children) + '\n' + (node.depth === 1 ? '===' : '---');
+      return printParagraph(node.children) + '\n' + (node.depth === 1 ? '===' : '---');
     }
     return '#'.repeat(node.depth) + ' ' + text;
   },
@@ -442,7 +509,10 @@ const BLOCK_PRINTERS = {
         body = printBlocks(items[i].children, node.tight, true);
         lines = body.split('\n');
       }
-      let item = marker + check + lines[0];
+      // An HTML block's own leading spaces would be read as the space
+      // after the marker, so the block starts on the line below it.
+      const first = check === '' && /^[ \t]/.test(lines[0]);
+      let item = first ? marker.trimEnd() + '\n' + indent + lines[0] : marker + check + lines[0];
       for (let k = 1; k < lines.length; k++) {
         item += '\n' + (lines[k] === '' ? '' : indent + lines[k]);
       }
@@ -461,7 +531,10 @@ const BLOCK_PRINTERS = {
   footnoteDefinition: (node) => {
     const body = printBlocks(node.children, false);
     const lines = body.split('\n');
-    let out = '[^' + (node.label ?? node.identifier) + ']: ' + lines[0];
+    // leading spaces on the first line would be read as the space after
+    // the label, so that line starts the block below it
+    let out = '[^' + (node.label ?? node.identifier) + ']:'
+      + (/^[ \t]/.test(lines[0]) ? '\n' + FOOTNOTE_CONTINUATION : ' ') + lines[0];
     for (let k = 1; k < lines.length; k++) {
       out += '\n' + (lines[k] === '' ? '' : FOOTNOTE_CONTINUATION + lines[k]);
     }

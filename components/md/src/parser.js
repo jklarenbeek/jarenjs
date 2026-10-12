@@ -306,7 +306,7 @@ class BlockParser {
       // starts a second list for exactly that reason.
       if (this.leaf !== null && this.leaf.kind === 'paragraph'
         && !blank && !this.startsBlock(rest)) {
-        this.leaf.lines.push(stripIndent(rest));
+        this.leaf.lines.push(this.literal(rest, countIndent(rest)));
         return;
       }
       this.closeTo(matched);
@@ -357,7 +357,7 @@ class BlockParser {
           this.open(rest);
           return;
         }
-        leaf.rows.push(rest);
+        leaf.rows.push(this.literal(rest, 0));
         return;
       }
     }
@@ -480,7 +480,7 @@ class BlockParser {
       if (indent >= 4) {
         const leaf = this.leaf;
         if (leaf !== null && leaf.kind === 'paragraph') {
-          leaf.lines.push(rest.slice(indent));
+          leaf.lines.push(this.literal(rest, indent));
           return;
         }
         if (leaf !== null && leaf.kind === 'indented') {
@@ -550,6 +550,9 @@ class BlockParser {
       if (c === 0x23 /* # */) {
         const atx = scanAtxHeading(rest, indent);
         if (atx !== null) {
+          // the heading text as written: the scan again over the line's
+          // own characters, so a tab inside it stays a tab
+          if (this.written !== this.cooked) atx.text = scanAtxHeading(this.literal(rest, indent), 0).text;
           this.closeLeaf();
           this.closeList();
           this.add({ type: 'heading', depth: atx.depth, children: [], raw: atx.text });
@@ -649,12 +652,12 @@ class BlockParser {
 
       // Paragraph text.
       if (para !== null) {
-        para.lines.push(rest.slice(indent));
+        para.lines.push(this.literal(rest, indent));
       }
       else {
         this.closeLeaf();
         this.closeList();
-        this.leaf = { kind: 'paragraph', lines: [rest.slice(indent)] };
+        this.leaf = { kind: 'paragraph', lines: [this.literal(rest, indent)] };
       }
       return;
     }
@@ -828,16 +831,6 @@ class BlockParser {
   finish() {
     this.closeTo(0);
   }
-}
-
-/**
- * Strip leading spaces without a regex (hot path).
- * @param {string} text
- * @returns {string}
- */
-function stripIndent(text) {
-  const indent = countIndent(text);
-  return indent === 0 ? text : text.slice(indent);
 }
 
 /**
