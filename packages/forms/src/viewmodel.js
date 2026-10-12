@@ -200,6 +200,17 @@ export function buildFormViewModel(model, data, options = {}) {
 }
 
 /**
+ * The text of a server message: a string as it is, a number as `String`
+ * writes it; `null` for anything else (absent, `null`, boolean, object).
+ * @param {any} message
+ * @returns {string | null}
+ */
+function messageText(message) {
+  return typeof message === 'string' ? message
+    : typeof message === 'number' ? String(message) : null;
+}
+
+/**
  * Normalize the session options into the walk's working state.
  * @param {FormSessionOptions} session
  * @param {any} data
@@ -221,15 +232,19 @@ function compileSession(session, data) {
   if (Array.isArray(raw)) {
     for (const entry of raw) {
       if (entry === null || typeof entry !== 'object' || typeof entry.pointer !== 'string') continue;
+      // a string or a number is shown as its text; anything else says nothing to show
+      const text = messageText(entry.message);
+      if (text === null) continue;
       const list = serverErrors.get(entry.pointer) ?? [];
-      list.push(String(entry.message));
+      list.push(text);
       serverErrors.set(entry.pointer, list);
     }
   }
-  else if (raw !== null && typeof raw === 'object' && raw !== undefined) {
+  else if (raw !== null && typeof raw === 'object') {
     for (const pointer in raw) {
       const value = raw[pointer];
-      serverErrors.set(pointer, Array.isArray(value) ? value.map(String) : [String(value)]);
+      const messages = (Array.isArray(value) ? value : [value]).map(messageText).filter((text) => text !== null);
+      if (messages.length > 0) serverErrors.set(pointer, messages);
     }
   }
   const hasInitial = 'initial' in session;

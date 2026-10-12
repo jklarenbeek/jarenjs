@@ -290,3 +290,32 @@ describe('forms — removeItemAt removes the item it names', () => {
     assert.deepStrictEqual(data, { a: [1, 2, 3] });
   });
 });
+
+describe('forms — a server error is its message', () => {
+  const model = buildFormModel({ type: 'object', properties: { a: { type: 'string' }, b: { type: 'string' } } });
+  const fold = (serverErrors) => {
+    const tree = buildFormViewModel(model, { a: 'x' }, { session: { serverErrors } });
+    return { count: tree.session.serverErrorCount, nodes: tree.children.map((child) => child.serverErrors) };
+  };
+
+  it('a number is shown as its text, in both forms; an object, boolean or null is not text', () => {
+    assert.deepStrictEqual(fold([{ pointer: '/a', message: 404 }, { pointer: '/b', message: { message: 'x' } }, { pointer: '/b', message: true }]),
+      { count: 1, nodes: [['404'], []] });
+    assert.deepStrictEqual(fold({ '/a': 404, '/b': [{ message: 'x' }, 0, false] }),
+      { count: 2, nodes: [['404'], ['0']] });
+  });
+
+  it('an entry without a text message shows nothing and counts nothing, in the list form', () => {
+    assert.deepStrictEqual(fold([{ pointer: '/a' }, { pointer: '/a', message: null }, { pointer: '/b', message: { x: 1 } }]),
+      { count: 0, nodes: [[], []] });
+    assert.deepStrictEqual(fold([{ pointer: '/a', message: 'no' }, { pointer: '/a' }, { pointer: '/a', message: 'again' }]),
+      { count: 2, nodes: [['no', 'again'], []] });
+  });
+
+  it('a value that is not text shows nothing and counts nothing, in the record form', () => {
+    assert.deepStrictEqual(fold({ '/a': null, '/b': [null, 5, 'ok', { m: 1 }] }),
+      { count: 2, nodes: [[], ['5', 'ok']] });
+    assert.deepStrictEqual(fold({ '/a': 'plain', '/b': ['one', 'two'] }),
+      { count: 3, nodes: [['plain'], ['one', 'two']] });
+  });
+});
