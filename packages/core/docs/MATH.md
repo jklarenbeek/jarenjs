@@ -71,6 +71,13 @@ first consumer; Mermaid 3D is a candidate — see ROADMAP).
 group, radix, decimal })` and radix-aware `parseNumber(str, { radix })`
 (recognizes `0x`/`0o`/`0b` prefixes, grouping separators and scientific
 notation; returns `NaN` on failure). Radix I/O delegates to `word.js`.
+`Int32` and `Vec2i32` wrap every product to int32 exactly (`Math.imul`), so
+`Int32.dot(2147483647, 0, 2147483645, 0)` is `3`, the low 32 bits of the true
+product; a double product lost them past 2^53. The in-place `iadd`, `iadds`,
+`isub`, `isubs`, `imul` and `imuls` wrap to int32 as well. `Vec2i32.cross3`
+now returns an int32 too: it used to return the exact double, so coordinates
+around 1e5 (`(0,0)`, `(1e5,0)`, `(0,1e5)`: 1e10 before, 1410065408 now) change
+the answer, and the sign can flip for coordinates from about 46341 up.
 `Int32.lerp(norm, min, max)` is `min + (max - min) * norm` and `Vec2f64.lerp(norm, a, b)`
 is `a + norm * (b - a)`; both multiplied the span by `norm + base` before, which agreed
 with these only from a base of 0 (`Int32.lerp(5, 3, 13)` was 80, it is 53). `Float64.fib`

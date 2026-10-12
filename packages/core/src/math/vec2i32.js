@@ -52,13 +52,13 @@ export class Vec2i32 {
 
   static mul(a = def_Vec2i32, b = def_Vec2i32) {
     return new Vec2i32(
-      ((a.x | 0) * (b.x | 0)) | 0,
-      ((a.y | 0) * (b.y | 0)) | 0,
+      Math.imul(a.x, b.x),
+      Math.imul(a.y, b.y),
     );
   }
   static muls(v = def_Vec2i32, scalar = 0) {
     scalar = scalar | 0;
-    return new Vec2i32(((v.x | 0) * scalar) | 0, ((v.y | 0) * scalar) | 0);
+    return new Vec2i32(Math.imul(v.x, scalar), Math.imul(v.y, scalar));
   }
 
   static div(a = def_Vec2i32, b = def_Vec2i32) {
@@ -77,7 +77,7 @@ export class Vec2i32 {
   //#region static scalar products
 
   static mag2(v = def_Vec2i32) {
-    return ((v.x | 0) * (v.x | 0) + (v.y | 0) * (v.y | 0)) | 0;
+    return (Math.imul(v.x, v.x) + Math.imul(v.y, v.y)) | 0;
   }
 
   static mag(v = def_Vec2i32) {
@@ -85,18 +85,17 @@ export class Vec2i32 {
   }
 
   static dot(a = def_Vec2i32, b = def_Vec2i32) {
-    return ((a.x | 0) * (b.x | 0) + (a.y | 0) * (b.y | 0)) | 0;
+    return (Math.imul(a.x, b.x) + Math.imul(a.y, b.y)) | 0;
   }
 
   static cross(a = def_Vec2i32, b = def_Vec2i32) {
-    return ((a.x | 0) * (b.y | 0) - (a.y | 0) * (b.x | 0)) | 0;
+    return (Math.imul(a.x, b.y) - Math.imul(a.y, b.x)) | 0;
   }
 
   static cross3(a = def_Vec2i32, b = def_Vec2i32, c = def_Vec2i32) {
     return (
-      ((b.x | 0) - (a.x | 0)) * ((c.y | 0) - (a.y | 0)) -
-      ((b.y | 0) - (a.y | 0)) * ((c.x | 0) - (a.x | 0))
-    );
+      Math.imul(b.x - a.x, c.y - a.y) - Math.imul(b.y - a.y, c.x - a.x)
+    ) | 0;
   }
 
   static thetaEx(v = def_Vec2i32) {
@@ -134,41 +133,41 @@ export class Vec2i32 {
   }
 
   iadd(v = def_Vec2i32) {
-    this.x += v.x | 0 | 0;
-    this.y += v.y | 0 | 0;
+    this.x = (this.x + v.x) | 0;
+    this.y = (this.y + v.y) | 0;
     return this;
   }
 
   iadds(scalar = 0) {
     scalar = scalar | 0;
-    this.x += scalar | 0;
-    this.y += scalar | 0;
+    this.x = (this.x + scalar) | 0;
+    this.y = (this.y + scalar) | 0;
     return this;
   }
 
   isub(v = def_Vec2i32) {
-    this.x -= v.x | 0 | 0;
-    this.y -= v.y | 0 | 0;
+    this.x = (this.x - v.x) | 0;
+    this.y = (this.y - v.y) | 0;
     return this;
   }
 
   isubs(scalar = 0) {
     scalar = scalar | 0;
-    this.x -= scalar | 0;
-    this.y -= scalar | 0;
+    this.x = (this.x - scalar) | 0;
+    this.y = (this.y - scalar) | 0;
     return this;
   }
 
   imul(v = def_Vec2i32) {
-    this.x *= v.x | 0 | 0;
-    this.y *= v.y | 0 | 0;
+    this.x = Math.imul(this.x, v.x);
+    this.y = Math.imul(this.y, v.y);
     return this;
   }
 
   imuls(scalar = 0) {
     scalar = scalar | 0;
-    this.x *= scalar;
-    this.y *= scalar;
+    this.x = Math.imul(this.x, scalar);
+    this.y = Math.imul(this.y, scalar);
     return this;
   }
 

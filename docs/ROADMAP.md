@@ -1314,6 +1314,3 @@ still open is listed here, each with its reason.
   wants `--sizes 10000`. Backing the largest leg with a file would buy the
   headroom at the price of measuring a page cache instead of a database, which
   is only worth trading once a runner actually fails.
-- [ ] **Fixed-width integer vectors.** `Int32` and `Vec2i32` multiply through a
-  double (`| 0`), losing low bits past 2^53, and `cross3` is unwrapped. Wanted:
-  decide wrap (`Math.imul`) or saturate, then pin it.

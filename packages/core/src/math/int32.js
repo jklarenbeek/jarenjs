@@ -59,7 +59,7 @@ export class Int32 {
   static mag2(dx = 0, dy = 0) {
     dx = dx | 0;
     dy = dy | 0;
-    return (dx * dx + dy * dy) | 0;
+    return (Math.imul(dx, dx) + Math.imul(dy, dy)) | 0;
   }
 
   static hypot(dx = 0, dy = 0) {
@@ -79,7 +79,7 @@ export class Int32 {
     ay = ay | 0;
     bx = bx | 0;
     by = by | 0;
-    return (ax * bx + ay * by) | 0;
+    return (Math.imul(ax, bx) + Math.imul(ay, by)) | 0;
   }
 
   static cross(ax = 0, ay = 0, bx = 0, by = 0) {
@@ -87,7 +87,7 @@ export class Int32 {
     ay = ay | 0;
     bx = bx | 0;
     by = by | 0;
-    return (ax * by - bx * ay) | 0;
+    return (Math.imul(ax, by) - Math.imul(bx, ay)) | 0;
   }
 
   static norm(value = 0, min = 0, max = 0) {
@@ -110,7 +110,7 @@ export class Int32 {
     norm = norm | 0;
     min = min | 0;
     max = max | 0;
-    return (min + (max - min) * norm) | 0;
+    return (min + Math.imul(max - min, norm)) | 0;
   }
 
   static map(value = 0, smin = 0, smax = 0, dmin = 0, dmax = 0) {
