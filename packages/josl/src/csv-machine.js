@@ -25,8 +25,8 @@
 // rather than assuming it holds exactly one. A cut earlier than the
 // parser's would drop the text after it, or heal a record that continues
 // in the next chunk.
-// The one known exception is a `comment` line that contains the quote
-// character, which the cutter reads as the start of a quoted field.
+// A `comment` line is no record, so the cutter skips it to its line break
+// without reading a delimiter or a quote in it.
 //
 // Self-healing (`repair: true`) is the second reason this exists. Real
 // CSV is damaged constantly: an unclosed quote, a bare quote inside a
@@ -99,6 +99,8 @@ const S_START = 0; // at a field start: a quote here opens a quoted field
 const S_PLAIN = 1; // inside an unquoted field: a quote is ordinary text
 const S_QUOTED = 2; // inside a quoted field
 const S_QUOTE = 3; // saw a quote inside a quoted field; needs one lookahead
+const SPILL = 512; // fewest scanned characters of an open record worth moving out of the buffer
+const S_COMMENT = 4; // inside a comment line: delimiters and quotes are ordinary text
 
 //#endregion
 
@@ -285,13 +287,18 @@ export class CsvMachine {
     // can (see `inert`): appending them to `buf` would make the next scan
     // copy the whole pending text again.
     this.held = [];
+    // The scanned head of a record that is still open, spilled out of `buf` so
+    // that each chunk joins onto a short tail instead of copying the pending
+    // text again (see `compact`). Only while no size limit needs the span in view.
+    this.head = [];
+    this.headLength = 0;
     this.started = false;
     this.ended = false;
 
     // Next-occurrence cursors for the plain-field scanner, absolute in
     // the span text and found lazily: -1 means "none in the rest of the
-    // text" and stays valid, -2 means not looked yet. They belong to one
-    // span's text, so `readSpan` resets them.
+    // text" and stays valid, -2 means not looked yet. They index `buf`, so
+    // `shift` moves them and a span read from anywhere else resets them.
     this.nextDelim = -2;
     this.nextLf = -2;
     this.nextCr = -2;
@@ -304,6 +311,8 @@ export class CsvMachine {
     this.line = 1; // physical line currently being read (1-based)
     this.recordOrigin = 1; // physical line the current record starts on
     this.recordPos = 0; // offset of the current record in the text being read
+    this.columnPos = 0; // text before this offset is known to hold no LF after columnLf
+    this.columnLf = -1; // the last LF before columnPos in the record being read
   }
 
   //#region public surface
@@ -354,10 +363,13 @@ export class CsvMachine {
     this.ended = true;
     this.release();
     this.scan();
-    if (this.buf.length !== 0) {
-      const rest = this.buf;
+    if (this.head.length !== 0 || this.buf.length !== 0) {
+      const rest = this.head.join('') + this.buf;
+      this.head.length = 0;
+      this.headLength = 0;
       this.buf = '';
       this.scanPos = 0;
+      this.nextDelim = this.nextLf = this.nextCr = -2;
       this.readSpan(rest, 0, rest.length);
     }
     return this.outRows;
@@ -422,17 +434,17 @@ export class CsvMachine {
   // span at a line break that ends a record, so a chunk with no LF or CR
   // cannot cut one while the cutter sits inside a quoted field or just past
   // a closing quote; and inside a quoted field whose scanned text is all in
-  // `buf`, a chunk with no quote character cannot leave the field, line
-  // breaks or not. Holding it costs the chunk, where buffering it would make
-  // the next scan copy the whole pending text again. Not while a size limit
-  // needs the span in view at every feed.
+  // `buf`, a chunk whose every quote is a doubled one (`doubledOnly`) cannot
+  // leave the field, line breaks or not. Holding it costs the chunk, where
+  // buffering it would make the next scan copy the whole pending text again.
+  // Not while a size limit needs the span in view at every feed.
   inert(chunk) {
     if (!this.started || this.ended || this.quote < 0 || chunk.length === 0
       || this.maxRecordBytes !== Infinity || this.maxFieldBytes !== Infinity)
       return false;
     const state = this.scanState;
     if (state === S_QUOTED && this.scanPos >= this.buf.length) {
-      if (chunk.indexOf(this.quoteChar) >= 0)
+      if (!this.doubledOnly(chunk))
         return false;
     }
     else if (state !== S_QUOTED && state !== S_QUOTE || chunk.indexOf('\n') >= 0 || chunk.indexOf('\r') >= 0) {
@@ -440,6 +452,26 @@ export class CsvMachine {
     }
     this.held.push(chunk);
     return true;
+  }
+
+  // True when `chunk` can only continue an open quoted field whose scanned
+  // text is all in `buf`: every quote character in it is the first of a pair
+  // inside the chunk (a literal quote), so the field stays open and the cutter
+  // has nothing to decide. A chunk with any other quote may close the field,
+  // or end on a quote that needs the next chunk's first character. This reads
+  // the chunk once, where buffering a chunk that holds a quote would make the
+  // next scan flatten and copy the whole pending field again.
+  doubledOnly(chunk) {
+    const len = chunk.length;
+    let i = 0;
+    for (;;) {
+      const q = chunk.indexOf(this.quoteChar, i);
+      if (q < 0)
+        return true;
+      if (q + 1 >= len || chunk.charCodeAt(q + 1) !== this.quote)
+        return false;
+      i = q + 2;
+    }
   }
 
   // Join the held chunks onto the buffer, once, for a scan that needs them.
@@ -516,9 +548,11 @@ export class CsvMachine {
             if (qlimit < len)
               break;
             this.scanPos = len;
-            this.scanState = start === len || buf.charCodeAt(len - 1) === delim
-              ? S_START
-              : S_PLAIN;
+            this.scanState = this.commentStart(buf, start)
+              ? S_COMMENT
+              : start === len || buf.charCodeAt(len - 1) === delim
+                ? S_START
+                : S_PLAIN;
             this.compact(start);
             return;
           }
@@ -526,7 +560,7 @@ export class CsvMachine {
             break; // this record holds a quote: the machine reads it
           // The terminator belongs to the span, so the parser consumes
           // it and counts the line exactly as it does whole-document.
-          this.readSpan(buf, start, cut);
+          this.emit(buf, start, cut);
           start = cut;
           pos = cut;
           state = S_START;
@@ -537,6 +571,10 @@ export class CsvMachine {
         const c = buf.charCodeAt(pos);
         switch (state) {
           case S_START:
+            if (pos === start && this.head.length === 0 && this.commentAt(buf, pos)) {
+              state = S_COMMENT; // a comment line is no record: its quotes open nothing
+              continue;
+            }
             if (c === quote) {
               state = S_QUOTED;
               pos++;
@@ -544,8 +582,9 @@ export class CsvMachine {
             }
             state = S_PLAIN;
             continue;
+          case S_COMMENT:
           case S_PLAIN: {
-            if (c === delim) {
+            if (c === delim && state === S_PLAIN) {
               this.checkFieldBytes(buf, this.scanFieldStart, pos, start);
               this.scanFieldStart = pos + 1;
               state = S_START;
@@ -554,7 +593,7 @@ export class CsvMachine {
             }
             if (c === CC_LF) {
               pos++;
-              this.readSpan(buf, start, pos);
+              this.emit(buf, start, pos);
               start = pos;
               this.scanFieldStart = pos;
               state = S_START;
@@ -577,7 +616,7 @@ export class CsvMachine {
               pos++;
               if (buf.charCodeAt(pos) === CC_LF)
                 pos++;
-              this.readSpan(buf, start, pos);
+              this.emit(buf, start, pos);
               start = pos;
               this.scanFieldStart = pos;
               state = S_START;
@@ -659,10 +698,50 @@ export class CsvMachine {
     this.compact(start);
   }
 
-  // Drop the spans already handed off, keeping the partial tail.
-  compact(start) {
-    if (start === 0)
+  // True when the record that starts at `pos` is a comment line.
+  commentAt(buf, pos) {
+    return this.comment >= 0 && pos < buf.length && buf.charCodeAt(pos) === this.comment;
+  }
+
+  // True when the record that starts at `start` is a comment line. After its
+  // head is spilled `buf` no longer starts at the record, but a comment record
+  // is then already in S_COMMENT, which nothing leaves before its line break.
+  commentStart(buf, start) {
+    return this.head.length === 0 && this.commentAt(buf, start);
+  }
+
+  // Hand `buf[start, cut)` to the record reader; a span that begins in a
+  // spilled head is joined with it first.
+  emit(buf, start, cut) {
+    if (this.head.length === 0) {
+      this.readSpan(buf, start, cut);
       return;
+    }
+    const text = this.head.join('') + buf;
+    const lead = this.headLength;
+    this.head.length = 0;
+    this.headLength = 0;
+    // the next-occurrence cursors belong to one text; this one is not `buf`
+    this.nextDelim = this.nextLf = this.nextCr = -2;
+    this.readSpan(text, 0, lead + cut);
+    this.nextDelim = this.nextLf = this.nextCr = -2;
+  }
+
+  // Drop the spans already handed off, keeping the partial tail; then move
+  // what the cutter has read of an open record out of the buffer, so the next
+  // chunk joins onto a short tail rather than flattening the whole record.
+  compact(start) {
+    if (start !== 0)
+      this.shift(start);
+    if (this.scanPos >= SPILL && this.maxRecordBytes === Infinity && this.maxFieldBytes === Infinity) {
+      this.head.push(this.buf.slice(0, this.scanPos));
+      this.headLength += this.scanPos;
+      this.shift(this.scanPos);
+    }
+  }
+
+  // Cut the first `start` characters off the buffer and move its cursors.
+  shift(start) {
     this.buf = this.buf.slice(start);
     this.scanPos -= start;
     this.scanFieldStart = Math.max(0, this.scanFieldStart - start);
@@ -707,6 +786,8 @@ export class CsvMachine {
       }
       this.recordOrigin = this.line;
       this.recordPos = pos;
+      this.columnPos = pos;
+      this.columnLf = -1;
       this.dropRecord = false;
       const start = pos;
       pos = this.parseRecord(text, pos, end, cells);
@@ -736,8 +817,25 @@ export class CsvMachine {
   // LF before the next one: counting from the last LF alone would add every
   // earlier CR-terminated line to the column, and more so in a whole
   // document than in a chunked read, whose span starts at the record.
+  //
+  // The last LF before `pos` is searched back only as far as the previous
+  // repair of this record looked, so a long record with a repair in every
+  // chunk costs its length once, not once per repair.
   columnAt(text, pos) {
-    const lf = text.lastIndexOf('\n', pos - 1);
+    let lf = this.columnLf;
+    if (pos >= this.columnPos) {
+      for (let i = pos - 1; i >= this.columnPos; i--) {
+        if (text.charCodeAt(i) === CC_LF) {
+          lf = i;
+          break;
+        }
+      }
+      this.columnPos = pos;
+      this.columnLf = lf;
+    }
+    else {
+      lf = text.lastIndexOf('\n', pos - 1);
+    }
     return pos - (lf >= this.recordPos ? lf : this.recordPos - 1);
   }
 
