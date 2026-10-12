@@ -286,7 +286,17 @@ explicit `id` (`jaren-db plan --id`).
   table's name (an entity name may itself contain `_`); where the
   rename flips the sorted endpoint order the join table is rebuilt
   (create, `INSERT … SELECT`, drop) under its new name and no
-  membership is lost.
+  membership is lost; a join table named by `through` keeps its name, so
+  the rebuilt table is built as `<through>__rebuild` and renamed once the
+  old one is dropped (PostgreSQL: its primary key takes the name a create
+  gives it). A link that also rebuilds a table runs SQLite under
+  `legacy_alter_table`, where a rename leaves the other tables'
+  `REFERENCES` spelling the old name, so a join table renamed with its
+  endpoint is rebuilt there too. A relation that goes takes its join table
+  first, under the name the table still has (before any entity is dropped
+  or rebuilt, which a table that references it would block on PostgreSQL),
+  and a join table name given to another pair of entities is a table that
+  goes and one that is created, never one that stays.
 - Added, removed and changed indexes become index DDL — reusing the
   store's own DDL generator, never a second implementation. An index is
   changed when its uniqueness, its columns (in order) or its condition
@@ -1153,6 +1163,11 @@ jaren-db documents --migrations <dir> --in <file|-> (--out <file|-> | --in-place
   `adopt-history`) before any file is read or written — the next flag is
   never taken for its value, and a missing value is never read as an absent
   option.
+- **A flag is the command's own.** Each command reads the flags its synopsis
+  lists (`status` and `check` also accept `--baseline`, which they do not
+  use); a flag only another command reads is refused by name (`jaren-db:
+  snapshot does not take '--out'`, exit 1; exit 2 for `documents`, `history`
+  and `adopt-history`), never taken and ignored.
 - **A model or a migration is a `.json` file or a MODULE.** `--model`,
   `--from`, `--to` and `--baseline` accept a `.json` file or a module
   (`.js`, `.mjs`, `.cjs` — and `.ts` where the host strips types: Node

@@ -3,6 +3,7 @@
  * bind canonical documents to losslessly observed rows in their stored order. */
 import { canonicalizeJson } from '@jarenjs/json/canonical';
 import { hashContent } from '@jarenjs/core/string';
+import { isJsonObject } from '@jarenjs/core/object';
 import { chain, useStatementOnce } from './driver.js';
 import { DbCompileError } from './errors.js';
 import { HISTORY_TABLE, MIGRATION_IDENTITY_TABLE } from './engine-metadata.js';
@@ -21,7 +22,7 @@ function invalid(reason) { throw new DbCompileError('JD0022', reason); }
 
 /** Exact closed records, including records decoded from untrusted stored JSON. */
 function keys(value, names) {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
+  return isJsonObject(value)
     && Object.keys(value).length === names.length && names.every((name) => Object.hasOwn(value, name));
 }
 
@@ -234,7 +235,7 @@ export function checkHistoryIdentity(observed, migrations, replay = undefined) {
     invalid('unsupported migration identity header');
   if (header.legacyCount > 0) {
     const model = parseCanonical(header.legacyModel, 'adopted model');
-    if (model === null || typeof model !== 'object' || Array.isArray(model) || model.$model !== '0.1'
+    if (!isJsonObject(model) || model.$model !== '0.1'
       || modelIdentity(model) !== header.legacyModel) invalid('adopted model must be canonical $model 0.1 text without planning hints');
     try {
       const source = JSON.parse(header.legacyModelSource);

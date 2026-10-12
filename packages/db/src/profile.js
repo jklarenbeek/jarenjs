@@ -39,6 +39,7 @@ import { planQuery, collectMemberReads } from './plan.js';
 import { conjoin } from './algebra.js';
 import { compileIndexPath } from './ddl.js';
 import { DbCompileError } from './errors.js';
+import { isJsonObject } from '@jarenjs/core/object';
 
 /** The `'safe'` profile: the documented defaults. */
 export const SAFE_PROFILE = Object.freeze({
@@ -91,7 +92,7 @@ function boundMember(value, member) {
  */
 export function normalizeProfile(profile) {
   if (profile === 'safe') return SAFE_PROFILE;
-  if (profile === null || typeof profile !== 'object' || Array.isArray(profile))
+  if (!isJsonObject(profile))
     throw new TypeError("profile must be 'safe' or a profile object");
   const merged = {
     limits: Object.freeze({ ...SAFE_PROFILE.limits, ...profile.limits }),

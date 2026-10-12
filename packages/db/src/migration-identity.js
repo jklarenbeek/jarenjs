@@ -4,6 +4,7 @@ import { canonicalizeJson } from '@jarenjs/json/canonical';
 import { withoutModelRenameHints } from '@jarenjs/core/model';
 import { hashContent } from '@jarenjs/core/string';
 import { DbCompileError } from './errors.js';
+import { isJsonObject } from '@jarenjs/core/object';
 
 /** Canonical shape text; planning hints do not describe the resulting model.
  * @param {any} model @returns {string} */
@@ -31,7 +32,7 @@ export function checkMigrationIdentity(migration) {
   try {
     const member = Object.getOwnPropertyDescriptor(migration, 'identity');
     const identity = member && Object.hasOwn(member, 'value') ? member.value : undefined;
-    if (!member?.enumerable || identity === null || typeof identity !== 'object' || Array.isArray(identity))
+    if (!member?.enumerable || !isJsonObject(identity))
       throw invalid('requires identity { version: 1, from, to }');
     const fields = Object.getOwnPropertyDescriptors(identity);
     if (Reflect.ownKeys(fields).length !== 3
@@ -47,7 +48,7 @@ export function checkMigrationIdentity(migration) {
       let model;
       try { model = JSON.parse(text); }
       catch (cause) { throw invalid(`identity.${side} must be canonical $model 0.1 JSON text`, `/identity/${side}`, cause); }
-      if (model === null || typeof model !== 'object' || Array.isArray(model)
+      if (!isJsonObject(model)
         || !Object.hasOwn(model, '$model') || model.$model !== '0.1' || modelIdentity(model) !== text)
         throw invalid(`identity.${side} must be canonical $model 0.1 text without rename hints`, `/identity/${side}`);
       if (hashContent(text) !== migration[side])

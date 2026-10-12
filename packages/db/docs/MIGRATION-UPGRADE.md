@@ -1786,6 +1786,73 @@ each now refuses by code before it runs or stores anything:
   `--flag`, is refused by name (`jaren-db: --store needs a value`) instead of
   reading as an absent option or taking the next flag for its value.
 
+## 14. Stricter relations and names, and a plan that applies
+
+Models and plans that were accepted and then misbehaved are refused or planned
+exactly; one sentence per changed answer:
+
+- Two many-to-many declarations that name one join table without being each
+  other's inverse are `JD0031` naming both: the same pair declared twice under
+  the implicit name (`Post.tags` and `Post.labels` read and wrote one table), and
+  two pairs given one `through` (the second pair's writes met a raw
+  foreign-key failure). Give each edge a `through` of its own.
+- A collection, an entity or a join table named like one of the engine's tables
+  (`_jaren_migrations`, `_jaren_jobs`, `_jaren_changes`, `_jaren_owner`, …) is
+  `JD0004` ("the name of the engine's own table"), where it opened and then
+  shared that table with the engine.
+- A migration plan no longer fails `JD0023` for: a relation dropped in the edit
+  that renames one of its endpoints (it dropped the join table under the new
+  name); a `through` join table whose endpoint rename reorders its columns (it
+  was rebuilt under its own name beside itself); an entity dropped together with
+  its relation on PostgreSQL (the join table that references the entity went
+  second); a join table renamed with its endpoint in a link that also rebuilds a
+  table, on SQLite (the shape check found the old name in its `REFERENCES`); and a
+  join table name given to another pair of entities. A plan written by the old
+  planner for one of these carried the failing step: plan it again.
+- An entity, a join table or a collection named `__proto__` is a member of the
+  mapping like any other name: the mapping and the derived model were plain
+  objects assigned by name, which rewrote the object's prototype and left the
+  entity no table (its first write met the driver's "no such table").
+- Tables are created after the tables they reference: a model that declares a
+  child before its parent (or an entity before the one its one-to-one points at)
+  opens on PostgreSQL, where it failed `relation "Author" does not exist`, and a
+  migration that adds such entities creates the parent first. Models whose
+  entities are already declared parent-first plan and create exactly as before.
+  Entities that reference each other in a cycle are created in a different order
+  than declared (A and B referencing each other, declared A then B, are created
+  B then A, in a plan's steps too), and still have no workable creation order on
+  PostgreSQL.
+- Declaring the `via` property of a relation whose foreign key the planner
+  inferred (or dropping that declaration) adds and drops no column: the plan
+  was `ADD COLUMN` over a column the table held, or `DROP COLUMN` over the
+  foreign key it still needs, and failed `JD0023`.
+- `introspect` of an entity foreign key answers the typed property and the edge
+  declared beside it (a one-to-many on the parent, a one-to-one on the child
+  where the key is unique), where it wrote a relation onto the key's own
+  typeless column that `normalizeEntities` refused `JD0005`. The derived model now
+  opens the database it was read from; a foreign key it cannot declare is an
+  `unmapped-constraint` row. On PostgreSQL a `NO ACTION` or `RESTRICT` key
+  reads back as `restrict`, the action the store writes there.
+- `introspect` reports a table whose name is no identifier as `unmapped-table`
+  instead of deriving an entity a model refuses (`JD0005`); a many-to-many edge
+  no longer replaces a column or another edge of the same pair that has the
+  member's name (`tags` becomes `tags_Post_Tag`), and a `keys` hint is read only
+  for a table it names.
+- `planModelMigration` answers `JD0013` for an `id` that is not a non-empty string,
+  where it planned a document no runner accepts (`jaren-db plan --id ''` wrote it).
+- `createDagJobRunner` reads a closed set of options: a member outside it is
+  `JD0013` naming the nearest (`concurency`, `stopGracMs` and `task` were
+  ignored, and so was a `maxAttempts` that belongs to the job).
+- `jaren-db` refuses a flag that only another command reads
+  (`<command> does not take '<flag>'`): `snapshot --out file` wrote the default
+  snapshot beside the model, and `apply --check` applied. A script that passed
+  such a flag drops it. `documents` and the history commands answer exit 2, the
+  other commands exit 1.
+- A JSON array file that begins with a byte order mark reads, as the JSONL file
+  always did. `documents --out` and `--in-place` over an existing file keep its
+  permissions (a `0600` input came out `0644`), and over a link replace the file the
+  link names, leaving the link.
+
 ## Measured costs
 
 Exact identity stores complete canonical documents and model endpoints, so

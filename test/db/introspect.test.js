@@ -538,7 +538,9 @@ describe('introspectModel — the derivation', () => {
           assert.deepStrictEqual(author.properties.name, {
             type: 'string', 'x-entity': { index: true } });
           assert.deepStrictEqual(model.entities.Book.schema.properties.authorId, {
-            'x-entity': { relation: { to: 'Author', via: 'authorId', onDelete: 'cascade' } } });
+            type: 'string', 'x-entity': { index: true } });
+          assert.deepStrictEqual(author.properties.books, {
+            'x-entity': { relation: { to: 'Book', many: true, via: 'authorId', onDelete: 'cascade' } } });
           // which SIDE declared the edge, and whether the other holds
           // many, is not in the shape
           assert.deepStrictEqual(of(report, 'ambiguous-relation'), ['Book.authorId']);

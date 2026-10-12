@@ -34,7 +34,7 @@
  * than reporting a success it never had.
  */
 
-import { deepFreeze, setObjectMember } from '@jarenjs/core/object';
+import { deepFreeze, setObjectMember, isJsonObject } from '@jarenjs/core/object';
 import { createJSONPatch } from '@jarenjs/json/patch';
 import { parseJSONPointer } from '@jarenjs/json/pointer';
 
@@ -230,7 +230,7 @@ export function createTracker(context) {
 
   const put = (entityName, next) => {
     const core = coreFor(entityName);
-    if (next === null || typeof next !== 'object' || Array.isArray(next))
+    if (!isJsonObject(next))
       throw contractError(entityName, 'put() takes an entity document');
     const key = recordKeyFor(entityName, next);
     const record = key === null ? undefined : records.get(key);
@@ -330,7 +330,7 @@ export function createTracker(context) {
     }
     let ownKey;
     let ownRecord;
-    if (own !== null && typeof own === 'object' && !Array.isArray(own)) {
+    if (isJsonObject(own)) {
       ownKey = own[plan.keys[0]];
       if (typeof ownKey !== 'string' && typeof ownKey !== 'number') {
         ownRecord = pendingInsertHolding(entityName, own);

@@ -400,6 +400,11 @@ await store.jobs.enqueue('sync-report', { input: { day: '2026-08-05' } });
 - The engine arrives as a capability (the validation hook's shape, applied to flow);
   `@jarenjs/db`'s manifest and import graph name `@jarenjs/flow`
   nowhere, asserted by test.
+- The options are a closed set: `compileDag`, `documents`, `tasks`, and the
+  worker's own (`concurrency`, `pollInterval`, `leaseMs`, `owner`, `renew`,
+  `onOutcome`, `backoffBase`, `backoffCap`, `stopGraceMs`, `effectSafety`). A
+  member outside it is `JD0013` naming the nearest (`concurency` ran one loop);
+  `maxAttempts` belongs to the job (`enqueue`).
 - The job id is the run id. Node values save into
   `_jaren_job_checkpoints` as the run progresses, each stamped with the
   writing attempt's generation; `complete` records the DAG result AND

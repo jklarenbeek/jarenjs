@@ -24,7 +24,7 @@ import { canonicalizeJson } from '@jarenjs/json/canonical';
 import { hashContent, utf8ByteLength } from '@jarenjs/core/string';
 import { resolveRuntime } from '@jarenjs/core/runtime';
 import { refuseCancelled } from './cancellation.js';
-import { cloneJson, setObjectMember, isPlainOptions } from '@jarenjs/core/object';
+import { cloneJson, setObjectMember, isPlainOptions, isJsonObject } from '@jarenjs/core/object';
 import { withoutModelRenameHints } from '@jarenjs/core/model';
 import { schemaPosition } from './schema-positions.js';
 import { compileJsonQuery } from '@jarenjs/json/query';
@@ -45,7 +45,7 @@ import { modelIdentity, migrationIdentity } from './migration-identity.js';
 import { migrationChecksum, historyStatements, readMigrationHistory, checkHistoryObservation, checkAppliedRows,
   historyHeader, identityRows, checkHistoryIdentity, checkHistoryChain, writeIdentityRows } from './migration-history.js';
 export { HISTORY_TABLE, ENGINE_TABLES };
-import { planCollection, verifyShape, planEntity, planJoinTable, plannedExpression } from './ddl.js';
+import { planCollection, verifyShape, planEntity, planJoinTable, plannedExpression, creationOrder } from './ddl.js';
 import { normalizeEntities, explainMapping } from './model.js';
 import { derivedValue, memberAt, registerDeriveFunctions } from './derive.js';
 import { mergeEntityRow } from './graph.js';
@@ -85,8 +85,7 @@ export { MIGRATION_VERSION, isPerDocumentAssertion, ASSERTION_BOUNDS_DEFAULT };
  * @returns {boolean}
  */
 function isWidening(from, to) {
-  const plain = (node) => node !== null && typeof node === 'object' && !Array.isArray(node);
-  if (!plain(from) || !plain(to)) return false;
+  if (!isJsonObject(from) || !isJsonObject(to)) return false;
   const fromRequired = from.required ?? [];
   const toRequired = to.required ?? [];
   if (!Array.isArray(fromRequired) || !Array.isArray(toRequired)) return false;
@@ -98,7 +97,7 @@ function isWidening(from, to) {
     if (keyword === 'properties') {
       const fromProperties = from.properties ?? {};
       const toProperties = to.properties ?? {};
-      if (!plain(fromProperties) || !plain(toProperties)) return false;
+      if (!isJsonObject(fromProperties) || !isJsonObject(toProperties)) return false;
       for (const name of Object.keys(fromProperties)) {
         // a declaration that disappeared, or one whose shape changed
         if (!Object.hasOwn(toProperties, name)) return false;
@@ -445,7 +444,7 @@ function documentWriter(connection, table, step, stepEntity, options, use) {
  */
 function readHosts(hosts) {
   if (hosts === undefined) return Object.freeze(Object.create(null));
-  if (hosts === null || typeof hosts !== 'object' || Array.isArray(hosts))
+  if (!isJsonObject(hosts))
     throw new TypeError('hosts must be an object of { version, run } by host name');
   const out = Object.create(null);
   for (const [name, host] of Object.entries(hosts)) {
@@ -660,7 +659,7 @@ function physicalScopeOf(scope, dialect, owned) {
   if (dialect?.migration) {
     throw refuse('JD0021', 'a physical scope is qualified on SQLite; a PostgreSQL plan inventories its schema whole');
   }
-  if (!scope || typeof scope !== 'object' || Array.isArray(scope) || Object.keys(scope).some((key) => key !== 'tables')
+  if (!isJsonObject(scope) || Object.keys(scope).some((key) => key !== 'tables')
     || !Array.isArray(scope.tables) || scope.tables.length === 0 || new Set(scope.tables).size !== scope.tables.length
     || scope.tables.some((/** @type {any} */ table) => typeof table !== 'string' || table === '' || ENGINE_TABLES.has(table)))
     throw refuse('JD0027', 'a physical scope is { tables: [...] }, a non-empty list of distinct table names');
@@ -893,6 +892,9 @@ function dialectMapping(dialect) {
  */
 export function planMigration(fromModel, toModel, options = undefined) {
   readOptions(options, ['id', 'dialect', 'derived', 'rtree', 'expressions', 'transform'], 'planModelMigration()');
+  // the name the history records: a document with any other is one no runner accepts
+  if (options?.id !== undefined && options.id !== null && (typeof options.id !== 'string' || options.id === ''))
+    throw refuse('JD0013', `planModelMigration() option 'id' is a non-empty string, the migration's name in the history, got ${JSON.stringify(options.id)}`);
   const dialect = options?.dialect ?? null;
   if (dialect === null || typeof dialect !== 'object')
     throw new TypeError('planMigration needs { dialect } (the store dialect renders the DDL)');
@@ -1216,7 +1218,7 @@ export function planMigration(fromModel, toModel, options = undefined) {
 function transformOf(transform) {
   if (transform === undefined) return null;
   const checked = (step, where) => {
-    if (step === null || typeof step !== 'object' || Array.isArray(step)
+    if (!isJsonObject(step)
       || !(step.kind === 'jslt' && typeof step.collection === 'string' && Array.isArray(step.stylesheet) && step.draft !== true
         || step.kind === 'host' && typeof step.run === 'string' && step.run !== '' && typeof step.version === 'string' && step.version !== ''))
       throw new TypeError(`${where} is a jslt step (collection, stylesheet) or a host step (run, version)`);
@@ -1269,7 +1271,7 @@ function stripEntityVocabulary(node) {
     if (key === 'x-entity' || key === 'x-rename') continue;
     const value = node[key];
     const position = schemaPosition(key);
-    if (position === 2 && value !== null && typeof value === 'object' && !Array.isArray(value)) {
+    if (position === 2 && isJsonObject(value)) {
       const map = {};
       for (const name of Object.keys(value)) setObjectMember(map, name, stripEntityVocabulary(value[name]));
       setObjectMember(out, key, map);
@@ -1410,11 +1412,65 @@ function planEntityChanges(fromModel, toModel, dialect, steps, report, transform
     if (joinName !== implicitJoinName(join)) return joinName; // a `through` name stays
     return [renamedEntity(join.left.entity), renamedEntity(join.right.entity)].sort().join('_');
   };
+  // the join table a relation continues in the target: the name it ends up
+  // under, joining the same two entities (one name given to another edge is a
+  // table that goes and one that is created)
+  const endpoints = (join, entityName) => [entityName(join.left.entity), entityName(join.right.entity)].sort().join('\0');
+  const continued = (joinName) => {
+    const target = toMapping.joinTables[renamedJoinName(joinName)];
+    return target !== undefined
+      && endpoints(target, (name) => name) === endpoints(fromMapping.joinTables[joinName], renamedEntity) ? target : undefined;
+  };
+  // a relation that goes takes its join table first: the table references its
+  // endpoints, and PostgreSQL will not drop or rebuild an entity under a table
+  // that still references it. The table was never renamed with its endpoint:
+  // it has the name it was created under
+  for (const joinName of Object.keys(fromMapping.joinTables)) {
+    if (continued(joinName) !== undefined) continue;
+    report.destructive = true;
+    steps.push({ kind: 'ddl', sql: dialect.ddl.dropTable(joinName),
+      note: `DESTRUCTIVE: drop join table '${joinName}' and its memberships` });
+  }
+  /**
+   * Replace a join table by one built from the target mapping: the target is
+   * created (beside the old table when both keep one name), the memberships
+   * copied, the old table dropped and the new one given its final name.
+   * @param {string} oldName @param {string} finalName @param {any} target
+   * @param {(toColumn: string) => string} sourceOf - the old table's column a target column copies from
+   * @param {string} why
+   */
+  const rebuildJoin = (oldName, finalName, target, sourceOf, why) => {
+    const q = dialect.quoteIdentifier;
+    const targetOrder = [target.left.column, target.right.column];
+    // a `through` name stays through the rename, so the rebuilt table is
+    // built beside the old one and takes the name once the old one is gone
+    const staged = finalName === oldName ? `${oldName}__rebuild` : finalName;
+    for (const sql of planJoinTable(staged, target, toMapping, dialect).createSql) {
+      steps.push({ kind: 'ddl', sql, note: `rebuild join table '${oldName}' as '${finalName}' ${why}` });
+    }
+    steps.push({ kind: 'sql',
+      sql: `INSERT INTO ${q(staged)} (${targetOrder.map(q).join(', ')}) `
+        + `SELECT ${targetOrder.map((column) => q(sourceOf(column))).join(', ')} FROM ${q(oldName)}`,
+      note: `copy the memberships of '${oldName}' into '${staged}'` });
+    steps.push({ kind: 'ddl', sql: dialect.ddl.dropTable(oldName),
+      note: `drop '${oldName}' — its memberships now live in '${staged}'` });
+    if (staged === finalName) return;
+    steps.push({ kind: 'ddl', sql: dialect.ddl.renameTable(staged, finalName), note: `rename '${staged}' to '${finalName}'` });
+    // PostgreSQL named the key after the staged table; a create gives it `<table>_pkey`
+    if (dialect.name === 'postgres') {
+      steps.push({ kind: 'ddl',
+        sql: `ALTER TABLE ${q(finalName)} RENAME CONSTRAINT ${q(postgresKeyName(staged, dialect.maxIdentifierBytes))} `
+          + `TO ${q(postgresKeyName(finalName, dialect.maxIdentifierBytes))}`,
+        note: `the primary key of '${finalName}' takes the name a create gives it` });
+    }
+  };
+  /** The join tables renamed in place, which a rebuilding link must still rebuild. @type {{ name: string, target: any }[]} */
+  const renamedInPlace = [];
   for (const [joinName, join] of Object.entries(fromMapping.joinTables)) {
     if (![join.left, join.right].some((side) => renamedEntity(side.entity) !== side.entity)) continue;
     const newJoin = renamedJoinName(joinName);
-    const target = toMapping.joinTables[newJoin];
-    if (target === undefined) continue; // the relation is gone: the drop below names it
+    const target = continued(joinName);
+    if (target === undefined) continue; // the relation is gone: the drop above names it
     // the fresh build orders the endpoint columns by the SORTED entity
     // names, and a rename can flip that order — then the primary key's
     // column order would differ from a fresh build's and the shape
@@ -1435,19 +1491,11 @@ function planEntityChanges(fromModel, toModel, dialect, steps, report, transform
         steps.push({ kind: 'ddl', sql: dialect.ddl.renameColumn(newJoin, column.from, column.to),
           note: `rename the endpoint column '${column.from}' with its entity` });
       }
+      renamedInPlace.push({ name: newJoin, target });
       continue;
     }
-    const q = dialect.quoteIdentifier;
-    const sourceOf = (toColumn) => renamedColumns.find((column) => column.to === toColumn).from;
-    for (const sql of planJoinTable(newJoin, target, toMapping, dialect).createSql) {
-      steps.push({ kind: 'ddl', sql, note: `rebuild join table '${joinName}' as '${newJoin}' in its endpoint order` });
-    }
-    steps.push({ kind: 'sql',
-      sql: `INSERT INTO ${q(newJoin)} (${targetOrder.map(q).join(', ')}) `
-        + `SELECT ${targetOrder.map((column) => q(sourceOf(column))).join(', ')} FROM ${q(joinName)}`,
-      note: `copy the memberships of '${joinName}' into '${newJoin}'` });
-    steps.push({ kind: 'ddl', sql: dialect.ddl.dropTable(joinName),
-      note: `drop '${joinName}' — its memberships now live in '${newJoin}'` });
+    rebuildJoin(joinName, newJoin, target, (toColumn) => renamedColumns.find((column) => column.to === toColumn).from,
+      'in its endpoint order');
   }
 
   // the columns of the database that reference an entity's key as it stands
@@ -1484,7 +1532,10 @@ function planEntityChanges(fromModel, toModel, dialect, steps, report, transform
   });
 
   // ————— per-entity strategies —————
-  for (const [name, toEntity] of toEntities) {
+  // an entity added after the entities it references: PostgreSQL has no forward references
+  const targetOrder = creationOrder([...toEntities.keys()], (name) => toMapping.entities[name].foreignKeys.map((fk) => fk.references));
+  for (const name of targetOrder) {
+    const toEntity = toEntities.get(name);
     const fromName = renamedFrom.get(name) ?? name;
     const fromEntity = fromEntities.get(fromName);
     const tm = toMapping.entities[name];
@@ -1509,10 +1560,17 @@ function planEntityChanges(fromModel, toModel, dialect, steps, report, transform
     const changedColumns = [...toColumns.keys()].filter((columnName) =>
       fromColumns.has(columnName)
       && columnFacts(fromColumns.get(columnName)) !== columnFacts(toColumns.get(columnName)));
+    // a foreign key's column is the table's whether its property is declared
+    // or inferred from the relation: declaring (or no longer declaring) the
+    // `via` property adds and drops no column
+    const heldBy = (/** @type {any} */ mapping) => new Set([...mapping.columns.map((/** @type {any} */ column) => column.name),
+      ...mapping.foreignKeys.map((/** @type {any} */ fk) => fk.column)]);
+    const fromHeld = heldBy(fm);
+    const toHeld = heldBy(tm);
     const addedColumns = [...toColumns.keys()]
-      .filter((columnName) => !fromColumns.has(columnName));
+      .filter((columnName) => !fromHeld.has(columnName));
     const droppedColumns = [...fromColumns.keys()]
-      .filter((columnName) => !toColumns.has(columnName));
+      .filter((columnName) => !toHeld.has(columnName));
     const keysEqual = JSON.stringify(fm.keys) === JSON.stringify(tm.keys);
 
     const needsRebuild = !keysEqual || !fksEqual || changedColumns.length > 0
@@ -1693,22 +1751,23 @@ function planEntityChanges(fromModel, toModel, dialect, steps, report, transform
       note: `DESTRUCTIVE: drop entity '${name}' and every row in it` });
   }
 
+  // a link that rebuilds a table runs under SQLite's `legacy_alter_table`,
+  // where renaming a table leaves every other table's REFERENCES spelling the
+  // old name: a join table renamed in place is rebuilt too, to name the
+  // entity it references now
+  if (dialect.capabilities.pragmas === true && steps.some((step) => step.kind === 'rebuild')) {
+    for (const { name, target } of renamedInPlace)
+      rebuildJoin(name, name, target, (toColumn) => toColumn, 'to reference its renamed endpoint');
+  }
+
   // ————— join tables —————
-  const fromJoins = new Set(Object.keys(fromMapping.joinTables).map(renamedJoinName));
+  const fromJoins = new Set(Object.keys(fromMapping.joinTables).filter((joinName) => continued(joinName) !== undefined).map(renamedJoinName));
   for (const joinName of Object.keys(toMapping.joinTables)) {
     if (fromJoins.has(joinName)) continue;
     for (const sql of planJoinTable(joinName, toMapping.joinTables[joinName],
       toMapping, dialect).createSql) {
       steps.push({ kind: 'ddl', sql, note: `create join table '${joinName}'` });
     }
-  }
-  const toJoins = new Set(Object.keys(toMapping.joinTables));
-  for (const joinName of Object.keys(fromMapping.joinTables)) {
-    const finalName = renamedJoinName(joinName);
-    if (toJoins.has(finalName)) continue;
-    report.destructive = true;
-    steps.push({ kind: 'ddl', sql: dialect.ddl.dropTable(finalName),
-      note: `DESTRUCTIVE: drop join table '${finalName}' and its memberships` });
   }
   return programs;
 }

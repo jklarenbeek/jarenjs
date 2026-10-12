@@ -237,7 +237,7 @@ stable code, an object and a detail, sorted, once:
 | `unmapped-constraint` | a CHECK that is not a complete scalar enum of a mapped entity column |
 | `unmapped-type` | a column type no schema type maps back from — the member is derived untyped |
 | `lossy-type` | a column type two schema types are stored as (SQLite `INTEGER`; PostgreSQL `numeric`, `smallint`) — the derived type is a choice |
-| `ambiguous-relation` | a foreign key says which entity it points at; which side declared the edge, and whether the other holds many, is not in the shape |
+| `ambiguous-relation` | a foreign key says which entity it points at; which side declared the edge, whether the other holds many, and under what name, is not in the shape — the relation is declared on the parent (the child, where the key is unique) and reported here |
 
 Scalar entity enum CHECKs are recovered on both dialects. SQLite reads its
 stored CREATE text; PostgreSQL reads `pg_constraint` expressions, including

@@ -50,10 +50,9 @@ const printed = (at) => (at === null || !Number.isFinite(at) ? 'an unknown time'
  * @param {string} reason
  * @param {{ owner: string | null, expiresAt: number | null }} holder
  * @param {boolean} retryable
- * @param {unknown} [cause]
  */
-function notOwner(reason, holder, retryable, cause = undefined) {
-  const error = new DbRuntimeError('JD2061', reason, cause === undefined ? undefined : { cause });
+function notOwner(reason, holder, retryable) {
+  const error = new DbRuntimeError('JD2061', reason);
   Object.assign(error, { owner: holder.owner, expiresAt: holder.expiresAt, class: 'busy', retryable });
   return error;
 }

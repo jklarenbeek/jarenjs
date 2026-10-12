@@ -17,7 +17,7 @@
  */
 
 import { analyzeQuery, createQueryAccumulator } from '@jarenjs/json/query';
-import { setObjectMember } from '@jarenjs/core/object';
+import { setObjectMember, isJsonObject } from '@jarenjs/core/object';
 import { utf8ByteLength } from '@jarenjs/core/string';
 import { DbCompileError, DbRuntimeError } from './errors.js';
 import { checkMigrationIdentity } from './migration-identity.js';
@@ -142,7 +142,7 @@ export function classifyAssertion(query, options = {}) {
  * @returns {any} the replacement
  */
 export function checkReplacement(next, document, keys, identity, fail) {
-  if (next === null || typeof next !== 'object' || Array.isArray(next))
+  if (!isJsonObject(next))
     fail(`the transform produced a non-document for row ${identity}`);
   for (const key of keys) {
     const present = Object.hasOwn(document, key);
@@ -354,11 +354,11 @@ function checkDocumentShape(migration, allowDraft) {
       throw new DbCompileError('JD0023',
         `migration '${migration.id}' step ${i} is a sql step without sql text`);
     }
-    if (step.kind === 'table' && (!step.plan || typeof step.plan !== 'object' || Array.isArray(step.plan) || step.plan.version !== 1
+    if (step.kind === 'table' && (!isJsonObject(step.plan) || step.plan.version !== 1
       || ['id', 'table', 'checksum', 'temporary'].some((key) => typeof step.plan[key] !== 'string' || step.plan[key].length === 0)
       || typeof step.plan.rebuild !== 'boolean'
       || ['source', 'after'].some((key) => !Array.isArray(step.plan[key])
-        || step.plan[key].some((value) => !value || typeof value !== 'object' || Array.isArray(value)))
+        || step.plan[key].some((value) => !isJsonObject(value)))
       || ['unchanged', 'statements', 'finish'].some((key) => !Array.isArray(step.plan[key])
         || step.plan[key].some((value) => typeof value !== 'string' || value.length === 0)))) {
       throw new DbCompileError('JD0023', `migration '${migration.id}' step ${i} is a table step without its reviewed plan`);

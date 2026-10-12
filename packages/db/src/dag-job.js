@@ -25,9 +25,10 @@
 
 import { canonicalizeJson } from '@jarenjs/json/canonical';
 import { hashContent } from '@jarenjs/core/string';
-import { setObjectMember } from '@jarenjs/core/object';
+import { setObjectMember, isJsonObject } from '@jarenjs/core/object';
 
 import { DbRuntimeError } from './errors.js';
+import { readOptionsOrNull } from './options.js';
 
 /** The checkpoint row a run's identity lives in. The leading unit
  * separator keeps it out of any node-id namespace a document could
@@ -38,6 +39,10 @@ export const RUN_IDENTITY_NODE = '\u001Fidentity';
 /** What joins a job id to an attempt's token in the run key the DAG
  * sees. A unit separator, so no job id can carry one by accident. */
 const RUN_KEY_SEPARATOR = '\u001F';
+
+/** Every member `createDagJobRunner` reads: the worker's own, which it hands on, and the three that make it a runner. */
+const RUNNER_OPTIONS = Object.freeze(['compileDag', 'documents', 'tasks', 'concurrency', 'pollInterval', 'leaseMs',
+  'owner', 'renew', 'onOutcome', 'backoffBase', 'backoffCap', 'stopGraceMs', 'effectSafety']);
 
 /**
  * Build a worker whose handlers run checkpointed DAG documents.
@@ -56,6 +61,7 @@ export function createDagJobRunner(store, options) {
     throw new TypeError(
       'createDagJobRunner: the store was opened without { jobs } — nothing to compose');
   }
+  readOptionsOrNull(options, RUNNER_OPTIONS, 'createDagJobRunner');
   const { compileDag, documents } = options ?? {};
   if (typeof compileDag !== 'function') {
     throw new TypeError(
@@ -140,7 +146,7 @@ export function createDagJobRunner(store, options) {
       await context.checkpoints.save(jobId, RUN_IDENTITY_NODE, identity);
       return;
     }
-    if (stored === null || typeof stored !== 'object' || Array.isArray(stored))
+    if (!isJsonObject(stored))
       throw new DbRuntimeError('JD2069', `run '${jobId}' has invalid checkpoint identity metadata`,
         { docPath: '/jobs', collection: jobId });
     const differs = [];

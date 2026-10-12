@@ -4,6 +4,7 @@
  * A `$exists-row` probe reads one row of another table by its key: the store
  * answers it with the same SQL the database's trigger runs. */
 import { compileJsonQuery } from '@jarenjs/json/query';
+import { isJsonObject } from '@jarenjs/core/object';
 import { chain } from './driver.js';
 import { DbCompileError, DbRuntimeError } from './errors.js';
 import { refuseUnknownModelMembers } from './options.js';
@@ -24,7 +25,7 @@ export const ARITHMETIC = Object.freeze({ $add: 2, $sub: 2, $neg: 1 });
 const STORE_OWNED_CODECS = Object.freeze({ string: 'text', integer: 'integer', number: 'number', boolean: 'boolean' });
 
 /** Whether a node is one of the arithmetic a rule lowers. @param {any} node */
-export const isArithmetic = (node) => node !== null && typeof node === 'object' && !Array.isArray(node)
+export const isArithmetic = (node) => isJsonObject(node)
   && Object.keys(node).length === 1 && Object.hasOwn(ARITHMETIC, Object.keys(node)[0]);
 
 /**
@@ -91,9 +92,9 @@ function withProbes(node, probes, fail) {
   if (!node || typeof node !== 'object' || Object.hasOwn(node, '$const')) return node;
   if (Object.hasOwn(node, '$exists-row')) {
     const probe = node['$exists-row'];
-    if (Object.keys(node).length !== 1 || !probe || typeof probe !== 'object' || Array.isArray(probe)
+    if (Object.keys(node).length !== 1 || !isJsonObject(probe)
       || Object.keys(probe).some((key) => !['entity', 'match'].includes(key)) || typeof probe.entity !== 'string'
-      || !probe.match || typeof probe.match !== 'object' || Array.isArray(probe.match) || Object.keys(probe.match).length === 0)
+      || !isJsonObject(probe.match) || Object.keys(probe.match).length === 0)
       fail('$exists-row is { entity, match: { <member>: <value>, … } }');
     probes.push({ entity: probe.entity, match: probe.match });
     return { $eq: [`$.probes[${probes.length - 1}]`, true] };
@@ -107,7 +108,7 @@ function plainArithmetic(operands) {
   return operands.every((operand) => (typeof operand === 'string' ? RECORD_PATH.test(operand)
     : typeof operand === 'number' ? Number.isInteger(operand)
       : isArithmetic(operand) ? plainArithmetic([Object.values(operand)[0]].flat())
-        : operand !== null && typeof operand === 'object' && !Array.isArray(operand) && Object.keys(operand).length === 1
+        : isJsonObject(operand) && Object.keys(operand).length === 1
           && typeof operand.$const === 'number' && Number.isInteger(operand.$const)));
 }
 
@@ -169,7 +170,7 @@ export function normalizeInvariants(rules, path) {
     const fail = (reason, member = undefined) => {
       throw new DbCompileError('JD0005', reason, member === undefined ? at : `${at}/${member}`);
     };
-    if (!rule || typeof rule !== 'object' || Array.isArray(rule)) fail('an invariant must be an object');
+    if (!isJsonObject(rule)) fail('an invariant must be an object');
     refuseUnknownModelMembers(rule, MEMBERS, at, 'invariant');
     if (typeof rule.name !== 'string' || !IDENTIFIER.test(rule.name) || names.has(rule.name)) fail('invariant names must be distinct identifiers', 'name');
     names.add(rule.name);
@@ -187,7 +188,7 @@ export function normalizeInvariants(rules, path) {
       fail('invariant columns name distinct members, on a rule that includes update', 'columns');
     if (rule.columns !== undefined && rule.when === 'changed') fail("invariant columns fire on assignment, which when: 'changed' contradicts", 'columns');
     if (rule.effects !== undefined && (rule.enforcement !== 'database' || !rule.on.includes('update') || !Array.isArray(rule.effects)
-      || rule.effects.length === 0 || rule.effects.some((e) => !e || typeof e !== 'object' || Array.isArray(e)
+      || rule.effects.length === 0 || rule.effects.some((e) => !isJsonObject(e)
         || Object.keys(e).length !== 1 || typeof e.increment !== 'string' || e.increment === '')))
       fail('effects are database effects of a rule that includes update: [{ increment: <member> }]', 'effects');
     if (rule.effects !== undefined && rule.columns !== undefined) fail('an increment runs on every update of the row, never on columns alone', 'columns');

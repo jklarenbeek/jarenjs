@@ -26,7 +26,7 @@ import { backoffDelay, sleep } from '@jarenjs/core/retry';
 import { applyJSONPatch } from '@jarenjs/json/patch';
 import { analyzeQuery } from '@jarenjs/json/query';
 import { parseJSONPointer, compileJSONPointer, JSONPOINTER_NOTHING } from '@jarenjs/json/pointer';
-import { equalsJson } from '@jarenjs/core/object';
+import { equalsJson, isJsonObject } from '@jarenjs/core/object';
 import { utf8ByteLength } from '@jarenjs/core/string';
 
 import { DbCompileError, DbRuntimeError, wrapDriverError, isDriverError, classifyDriverError } from './errors.js';
@@ -34,7 +34,7 @@ import { chain, toPromise, isThenable, attempt, abortReason, createStatementOwne
 import { createSessionRouter } from './sessions.js';
 import { isPlainOptions, refuseUnknownMembers, refuseUnknownModelMembers, readOptions, readControls } from './options.js';
 import { canonicalKeyText, namesNoNumber, noNumberKeyReason } from './key-text.js';
-import { planCollection, planEntity, planJoinTable, refuseNameCollisions, verifyShape, compileIndexPath, canonicalOf } from './ddl.js';
+import { planCollection, planEntity, planJoinTable, refuseNameCollisions, verifyShape, compileIndexPath, canonicalOf, creationOrder } from './ddl.js';
 import { translatePatch } from './patch-sql.js';
 import { createQueryEngine, createQueryState, createEntityQueryEngine, createLoadEngine } from './query.js';
 import { CLOSED_UNDER, admitCursor, admitSyncCursor, createCursor, createSyncCursor, shareCursor } from './cursor.js';
@@ -237,7 +237,7 @@ function normalizeDerive(index, paths, docPath) {
  * @returns {Map<string, any>} collection name -> normalized collection
  */
 export function normalizeModel(model, expressions = undefined) {
-  if (model === null || typeof model !== 'object' || Array.isArray(model))
+  if (!isJsonObject(model))
     throw modelError('JD0005', 'the model document must be an object', '');
   refuseUnknownModelMembers(model, MODEL_MEMBERS, '', 'model');
   if (model.$model !== MODEL_VERSION) {
@@ -265,7 +265,7 @@ export function normalizeModel(model, expressions = undefined) {
         '/collections');
     }
     const spec = collections[name];
-    if (spec === null || typeof spec !== 'object' || Array.isArray(spec))
+    if (!isJsonObject(spec))
       throw modelError('JD0005', 'a collection must be an object', docPath);
     refuseUnknownModelMembers(spec, COLLECTION_MEMBERS, docPath, 'collection');
     if (spec.schema === null || typeof spec.schema !== 'object'
@@ -318,7 +318,7 @@ export function normalizeModel(model, expressions = undefined) {
     for (let i = 0; i < declaredIndexes.length; i++) {
       const index = declaredIndexes[i];
       const indexDocPath = `${docPath}/indexes/${i}`;
-      if (index === null || typeof index !== 'object' || Array.isArray(index))
+      if (!isJsonObject(index))
         throw modelError('JD0005', 'an index must be an object', indexDocPath);
       refuseUnknownModelMembers(index, INDEX_MEMBERS, indexDocPath, 'index');
       if (typeof index.name !== 'string' || !IDENTIFIER.test(index.name)) {
@@ -447,7 +447,7 @@ function normalizeIntervals(spec, docPath, indexes) {
   for (let i = 0; i < declared.length; i++) {
     const interval = declared[i];
     const at = `${docPath}/intervals/${i}`;
-    if (interval === null || typeof interval !== 'object' || Array.isArray(interval))
+    if (!isJsonObject(interval))
       throw modelError('JD0005', 'an interval must be an object', at);
     refuseUnknownModelMembers(interval, INTERVAL_MEMBERS, at, 'interval');
     if (typeof interval.name !== 'string' || !IDENTIFIER.test(interval.name))
@@ -528,7 +528,7 @@ function normalizeIntervals(spec, docPath, indexes) {
  */
 function spanFault(span, maxDuration) {
   if (span === undefined) return null;
-  if (span === null || typeof span !== 'object' || Array.isArray(span)) {
+  if (!isJsonObject(span)) {
     const what = span === null ? 'null' : Array.isArray(span) ? 'an array' : `a ${typeof span}`;
     return `is ${what}, not an object with start and end`;
   }
@@ -553,7 +553,7 @@ function spanFault(span, maxDuration) {
 function keyMemberOf(doc, keySegments) {
   let node = doc;
   for (const segment of keySegments) {
-    if (node === null || typeof node !== 'object' || Array.isArray(node)) return undefined;
+    if (!isJsonObject(node)) return undefined;
     node = node[segment.name];
   }
   return node;
@@ -572,7 +572,7 @@ function keyMemberOf(doc, keySegments) {
 function extractKey(doc, keySegments, pointer, collection, docPath) {
   let node = doc;
   for (const segment of keySegments) {
-    if (node === null || typeof node !== 'object' || Array.isArray(node)) {
+    if (!isJsonObject(node)) {
       node = undefined;
       break;
     }
@@ -816,7 +816,10 @@ function ensureShape(connection, collections, plans, createsNothing) {
 function ensureEntityShape(connection, entityPlans, entities, createsNothing) {
   if (entityPlans.size === 0) return null;
   const dialect = connection.dialect;
-  const names = [...entityPlans.keys()];
+  // a table is created after the tables it references: PostgreSQL has no
+  // forward references, so a child declared before its parent would not open
+  const names = creationOrder([...entityPlans.keys()],
+    (name) => (entityPlans.get(name).expectedForeignKeys ?? []).map((/** @type {any} */ fk) => fk.references));
   const bracket = createsNothing !== null ? (fn) => fn() : (fn) => immediately(connection, fn);
   return bracket(() => {
     const step = (i) => {

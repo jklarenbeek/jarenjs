@@ -20,7 +20,7 @@
  */
 
 import { resolveRuntime } from '@jarenjs/core/runtime';
-import { setObjectMember } from '@jarenjs/core/object';
+import { setObjectMember, isJsonObject } from '@jarenjs/core/object';
 import { compileJsonQuery } from '@jarenjs/json/query';
 import { compileJsltStylesheet } from '@jarenjs/json/jslt';
 
@@ -164,7 +164,7 @@ const countersFor = (report, collection) => {
  * @returns {Promise<{ documents: Record<string, any[]>, report: any }>}
  */
 export async function migrateDocuments(collections, migrations, options = {}) {
-  if (collections === null || typeof collections !== 'object' || Array.isArray(collections))
+  if (!isJsonObject(collections))
     throw new TypeError('migrateDocuments needs { [collection]: document[] }');
   for (const [name, documents] of Object.entries(collections)) {
     if (!Array.isArray(documents))
@@ -279,7 +279,7 @@ export async function migrateDocuments(collections, migrations, options = {}) {
  * @returns {Promise<any>} the report
  */
 export async function streamDocuments(sources, migrations, options) {
-  if (sources === null || typeof sources !== 'object' || Array.isArray(sources))
+  if (!isJsonObject(sources))
     throw new TypeError('streamDocuments needs { [collection]: iterable }');
   if (options === null || typeof options !== 'object' || typeof options.write !== 'function')
     throw new TypeError('streamDocuments needs { write(collection, document) }');

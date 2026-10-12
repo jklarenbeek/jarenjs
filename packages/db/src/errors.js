@@ -43,7 +43,7 @@ export const DB_CODES = Object.freeze({
   JD0014: 'a transaction guarantee was requested where it cannot act',
   JD0015: 'owner was asked of an adopted store whose database has no owner table',
   JD0030: 'an unknown x-entity member was declared',
-  JD0031: 'relation declarations contradict each other',
+  JD0031: 'relation declarations contradict each other, or two many-to-many declarations that are not inverses name one join table',
   JD0032: 'the include specification is invalid',
   JD0033: 'an entity query names no entity array',
   JD0034: 'a tracked cursor needs a bare entity return',
@@ -156,7 +156,9 @@ export const DB_CODES = Object.freeze({
  *    keeps 63 bytes of an identifier and truncates a longer one silently),
  *    refused when the model is planned — before any statement — at the
  *    model member the name comes from; SQLite holds a name of any length.
- *    So is an index the plan would name as the engine names one of the
+ *    So is a collection, entity or join table named like one of the
+ *    engine's own tables (`_jaren_migrations`, `_jaren_jobs`, …), and an
+ *    index the plan would name as the engine names one of the
  *    table's own objects (`dialect.ownRelationNames`: PostgreSQL's
  *    `<table>_pkey` and `<table>_<column>_seq`), which the open would skip
  *  - `JD0005` — the model document is invalid; `docPath` points at
@@ -196,7 +198,8 @@ export const DB_CODES = Object.freeze({
  *  - `JD0030` — an unknown member inside an `x-entity` block; a
  *    silently ignored mapping directive is a data-loss bug waiting
  *  - `JD0031` — two relation declarations whose inverses contradict
- *    (different `via`, impossible `many` pairings)
+ *    (different `via`, impossible `many` pairings), or two many-to-many
+ *    declarations that are not each other's inverse and name one join table
  *  - `JD0033` — a document handed to `store.execute()` or `store.live()`
  *    over entities ranges over no declared entity array (`$.<Entity>[*]`);
  *    the root is the map of entity arrays, so there are no rows to answer

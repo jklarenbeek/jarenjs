@@ -7,13 +7,13 @@ import { sqliteRelationalVocabulary } from './dialects/sqlite-relational.js';
 import { chain, attempt, abortReason } from './driver.js';
 import { createCursor, createSyncCursor, admitCursor, rowClassOf } from './cursor.js';
 import { readOptions, readControls } from './options.js';
+import { isJsonObject } from '@jarenjs/core/object';
 
 /** @typedef {{ sql: string, params: any[], access: 'read'|'write' }} RelationalPlan */
 const fail = (message) => { throw new DbCompileError('JD0038', message); };
 const own = (o, key) => Object.hasOwn(o, key);
-const object = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 const check = (value, members, label) => {
-  if (!object(value)) fail(`${label} must be an object`);
+  if (!isJsonObject(value)) fail(`${label} must be an object`);
   for (const key of Object.keys(value)) if (!members.includes(key)) fail(`unknown ${label} member '${key}'`);
 };
 /** Quote one identifier; a dot is part of the name, never SQL syntax.
@@ -82,7 +82,7 @@ export function relationalEmitter(options = {}) {
   };
   const expr = (value, depth = 0) => {
     if (depth > 64) return fail('SQL expression nesting exceeds 64');
-    if (!object(value) || value instanceof Uint8Array) return literal(value);
+    if (!isJsonObject(value) || value instanceof Uint8Array) return literal(value);
     const next = (child) => expr(child, depth + 1);
     switch (value.$sql) {
       case 'column':
@@ -152,7 +152,7 @@ export function relationalEmitter(options = {}) {
   };
   const projection = (columns, depth) => {
     if (columns === undefined || columns === '*') return '*';
-    if (!object(columns) || !Object.keys(columns).length) return fail('columns must be a nonempty projection or *');
+    if (!isJsonObject(columns) || !Object.keys(columns).length) return fail('columns must be a nonempty projection or *');
     return Object.entries(columns).map(([name, value]) => `${expr(value, depth)} AS ${q(name)}`).join(', ');
   };
   const window = (value, name) => {
@@ -210,7 +210,7 @@ export function relationalEmitter(options = {}) {
       if (spec.op === 'delete' && (own(spec, 'set') || own(spec, 'reporting'))) fail('delete has no assignments or reporting policy');
       if (spec.reporting !== undefined && !['matched', 'changed'].includes(spec.reporting)) fail('reporting is matched or changed');
       if (spec.op === 'update') {
-        if (!object(spec.set) || !Object.keys(spec.set).length) fail('update requires assignments');
+        if (!isJsonObject(spec.set) || !Object.keys(spec.set).length) fail('update requires assignments');
         out = `UPDATE ${table} SET ${Object.entries(spec.set).map(([name, v]) => `${q(name)} = ${expr(v)}`).join(', ')}`;
       }
       else out = `DELETE FROM ${table}`;
@@ -231,7 +231,7 @@ export function relationalEmitter(options = {}) {
       }
       else {
         if (own(spec, 'columns')) fail('literal inserts take column names from values');
-        if (!object(spec.values)) fail('insert values must be an object');
+        if (!isJsonObject(spec.values)) fail('insert values must be an object');
         names = Object.keys(spec.values);
         input = names.length ? `VALUES (${names.map((name) => expr(spec.values[name])).join(', ')})` : 'DEFAULT VALUES';
       }
@@ -259,7 +259,7 @@ export function relationalEmitter(options = {}) {
           out += ' DO NOTHING';
         }
         else {
-          if (!object(conflict.set) || !Object.keys(conflict.set).length) fail('conflict update requires assignments');
+          if (!isJsonObject(conflict.set) || !Object.keys(conflict.set).length) fail('conflict update requires assignments');
           out += ` DO UPDATE SET ${Object.entries(conflict.set).map(([name, v]) => `${q(name)} = ${expr(v)}`).join(', ')}`;
           if (own(conflict, 'updateWhere')) out += ` WHERE ${expr(conflict.updateWhere)}`;
         }
@@ -280,7 +280,7 @@ export function planRelational(document, options) {
   readOptions(options, ['externals', 'dialect', 'signal'], 'planRelational()');
   readControls(options, 'planRelational()');
   const emitter = relationalEmitter(options);
-  const writing = object(document) && own(document, 'op');
+  const writing = isJsonObject(document) && own(document, 'op');
   return { sql: writing ? emitter.mutation(document) : emitter.select(document),
     params: emitter.params, access: writing ? 'write' : 'read' };
 }

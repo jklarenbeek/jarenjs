@@ -904,12 +904,15 @@ stream of inserts, in-place updates, instant moves and deletes against
 one, which is the only oracle that cannot drift with the implementation.
 
 A floating `sum` or `mean` is the one exception, and it can differ from a
-fresh run in the last bits. A rolling window's kernel carries a running
-total that still holds the rows which left it (readings `0.1`, `0.2` and
-`0.3` at minutes 0, 1 and 4 under a three-minute width: the last window holds
-`0.3` alone, a fresh run answers `0.30000000000000004` and the view, which
-adds the slice it recomputes afresh, answers `0.3`), and rows sharing an instant are added in the order they reached the
-view, which an update moves behind the rows it was before. A registration
+fresh run in the last bits, because floating additions do not associate. The
+kernel adds a window's readings in two parts, the older ones from the newest
+end back and the newer ones as they arrived, and the view adds the slice it
+recomputes in its own order, and rows sharing an instant are added in the
+order they reached the view, which an update moves behind the rows it was
+before. Readings `0.7` at minute 5, `0.01` at minute 2, `0.3` at minute 4 and
+`0.6` at minute 5, inserted in that order under a three-minute width: the
+last two windows hold `0.3`, `0.7` and `0.6`; a fresh run answers
+`1.5999999999999999` and the view answers `1.6`. A registration
 whose floating readings must add in the fresh run's order asks for
 `mode: 'rerun'`.
 

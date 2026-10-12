@@ -30,6 +30,7 @@ import * as path from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 
 import { DbCompileError } from './errors.js';
+import { isJsonObject } from '@jarenjs/core/object';
 
 /** The document encodings a file may carry. */
 export const DOCUMENT_FORMATS = Object.freeze(['json', 'jsonl']);
@@ -58,11 +59,21 @@ async function* textChunks(source) {
     ? fs.createReadStream(source)
     : source;
   const decoder = new StringDecoder('utf8');
+  // a byte order mark leads the text of a file an editor saved "with BOM"; it
+  // is not part of the document, and `JSON.parse` refuses it
+  let leading = true;
+  const unmarked = (/** @type {string} */ text) => {
+    if (leading && text !== '') {
+      leading = false;
+      if (text.charCodeAt(0) === 0xFEFF) return text.slice(1);
+    }
+    return text;
+  };
   for await (const chunk of stream) {
-    const text = decoder.write(/** @type {Buffer} */ (chunk));
+    const text = unmarked(decoder.write(/** @type {Buffer} */ (chunk)));
     if (text !== '') yield text;
   }
-  const rest = decoder.end();
+  const rest = unmarked(decoder.end());
   if (rest !== '') yield rest;
 }
 
@@ -223,7 +234,7 @@ export async function readCollectionBundle(source, bounds) {
     text += chunk;
   }
   const value = parseDocument(text, 'collection bundle');
-  if (value === null || typeof value !== 'object' || Array.isArray(value)
+  if (!isJsonObject(value)
     || Object.values(value).some((documents) => !Array.isArray(documents)))
     throw refuse('a collection bundle is an object mapping collection names to document arrays');
   for (const [name, documents] of Object.entries(value))
@@ -273,7 +284,9 @@ function documentEncoder(format, collections = []) {
  * `write` appends to a sibling temporary; `commit` flushes it, renames
  * it over the target and answers the bytes written; `abort` removes it
  * and leaves the target untouched. A target that is never committed is
- * a target that never changed.
+ * a target that never changed. A target that is a link is followed, and
+ * a file it replaces keeps its permission bits (not its owner or ACL; a hard
+ * link to it is broken by the rename).
  *
  * @param {string} target - the file to replace
  * @param {'json' | 'jsonl' | 'collections'} format
@@ -284,10 +297,23 @@ function documentEncoder(format, collections = []) {
  */
 export async function openAtomicTarget(target, format, options = {}) {
   const encoder = documentEncoder(format, options.collections);
-  const directory = path.dirname(path.resolve(target));
+  // a link is followed, so the file it names is the one replaced, and the
+  // replacement keeps the permissions of the file it replaces: a rewrite
+  // must not make a private file readable by others
+  const published = await fsp.realpath(target).catch(() => path.resolve(target));
+  const mode = await fsp.stat(published).then((stat) => stat.mode & 0o7777, () => null);
+  const directory = path.dirname(published);
   const temporary = path.join(directory,
-    `.${path.basename(target)}.${process.pid}.${Date.now()}.tmp`);
+    `.${path.basename(published)}.${process.pid}.${Date.now()}.tmp`);
   const handle = await fsp.open(temporary, 'wx');
+  if (mode !== null) {
+    try { await handle.chmod(mode); }
+    catch (error) {
+      await handle.close().catch(() => undefined);
+      await fsp.rm(temporary, { force: true });
+      throw error;
+    }
+  }
   let bytes = 0;
   let settled = false;
 
@@ -315,7 +341,7 @@ export async function openAtomicTarget(target, format, options = {}) {
         // Publish only after the temporary has been durably flushed.
         await handle.sync();
         await handle.close();
-        await fsp.rename(temporary, target);
+        await fsp.rename(temporary, published);
         return { bytes, documents: encoder.count() };
       }
       catch (error) {

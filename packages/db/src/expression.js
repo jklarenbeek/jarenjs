@@ -39,6 +39,7 @@
 
 import { DbCompileError } from './errors.js';
 import { IDENTIFIER } from './engine-metadata.js';
+import { isJsonObject } from '@jarenjs/core/object';
 
 /** The three node kinds, closed. */
 export const EXPRESSION_KINDS = Object.freeze(['member', 'value', 'call']);
@@ -73,7 +74,7 @@ export function normalizeExpression(node, docPath, declarations, depth = 0) {
   if (depth > EXPRESSION_DEPTH) {
     throw refuse(`an index expression nests deeper than ${EXPRESSION_DEPTH}`, docPath);
   }
-  if (node === null || typeof node !== 'object' || Array.isArray(node))
+  if (!isJsonObject(node))
     throw refuse('an index expression node must be an object', docPath);
   const kinds = EXPRESSION_KINDS.filter((kind) => Object.hasOwn(node, kind));
   if (kinds.length !== 1) {

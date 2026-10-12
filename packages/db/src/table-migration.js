@@ -13,6 +13,7 @@ import { withForeignKeySettings } from './foreign-key-scope.js';
 import { chain } from './driver.js';
 import { withMigrationConnection, physicalTargetOf, preservationSchemaOf, checkPhysicalPreservation,
   verifyPreservation, lockMigration } from './migration-target.js';
+import { isJsonObject } from '@jarenjs/core/object';
 
 const refuse = (message) => { throw new DbCompileError('JD0021', message); };
 const fingerprint = (v) => canonicalizeJson(v);
@@ -144,7 +145,7 @@ export function planTableMigration(connection, definition, options) {
   const dropped = oldColumns.filter((c) => !target.columns.some((t) => t.name === c.name)).map((c) => c.name);
   if (fingerprint([...dropped].sort()) !== fingerprint([...(options.dropColumns ?? [])].sort())) refuse('every removed source column needs an explicit dropColumns disposition');
   const copy = options.copy ?? {};
-  if (!copy || typeof copy !== 'object' || Array.isArray(copy)) refuse('copy must be an assignment object');
+  if (!isJsonObject(copy)) refuse('copy must be an assignment object');
   for (const key of Object.keys(copy)) if (!target.columns.some((c) => c.name === key && c.generated === undefined) || oldKey.includes(key)) refuse('copy targets a writable non-key column');
   const writable = target.columns.filter((c) => c.generated === undefined
     && (Object.hasOwn(copy, c.name) || oldColumns.some((old) => old.name === c.name)));

@@ -264,11 +264,10 @@ export function useStatementOnce(connection, sql, use, options = undefined) {
  * @param {any} connection
  * @param {string} sql
  * @param {any[]} params
- * @param {{ readOnly?: boolean }} [options]
  * @returns {any} value-or-promise of the driver iterator
  */
-export function iterateStatementOnce(connection, sql, params, options = undefined) {
-  return chain(options === undefined ? connection.prepare(sql) : connection.prepare(sql, options), (statement) => {
+export function iterateStatementOnce(connection, sql, params) {
+  return chain(connection.prepare(sql), (statement) => {
     let released = false;
     const release = () => {
       if (released) return;

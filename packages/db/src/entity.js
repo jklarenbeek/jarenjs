@@ -19,7 +19,7 @@ import {
   getEpochOfDateTimeRFC3339, getEpochOfDateOnlyRFC3339,
 } from '@jarenjs/core/dates/rfc3339';
 import { resolveRuntime } from '@jarenjs/core/runtime';
-import { setObjectMember } from '@jarenjs/core/object';
+import { setObjectMember, isJsonObject } from '@jarenjs/core/object';
 
 import { DbRuntimeError, wrapDriverError, wrapHeldKey, keyUndecided } from './errors.js';
 import { chain, isThenable, attempt, useStatementOnce, releaseStatements as releasePrepared } from './driver.js';
@@ -340,7 +340,7 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
    * `null` or `undefined` into an empty row (`put()` refuses them the same way).
    * @param {any} doc @param {string} what - what the call takes, for the message */
   const requireObject = (doc, what) => {
-    if (doc === null || typeof doc !== 'object' || Array.isArray(doc))
+    if (!isJsonObject(doc))
       throw new DbRuntimeError('JD2003', what, { docPath, collection: entity.name });
   };
 
@@ -484,11 +484,11 @@ export function entityCore(connection, entity, entityMapping, validate, runtime 
   const normalizeKeyArg = (key) => {
     if (keys.length === 1) {
       if (typeof key === 'string' || typeof key === 'number') return [key];
-      if (key !== null && typeof key === 'object' && !Array.isArray(key)
+      if (isJsonObject(key)
         && typeof key[keys[0]] !== 'object' && key[keys[0]] !== undefined)
         return [key[keys[0]]];
     }
-    else if (key !== null && typeof key === 'object' && !Array.isArray(key)) {
+    else if (isJsonObject(key)) {
       const parts = keys.map((name) => key[name]);
       if (parts.every((part) => typeof part === 'string' || typeof part === 'number'))
         return parts;

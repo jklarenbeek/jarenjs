@@ -7,6 +7,7 @@ import { readSchema } from './introspect.js';
 import { ENGINE_TABLES } from './engine-metadata.js';
 import { comparableDeclaredSql } from './schema-sql.js';
 import { canonicalizeJson } from '@jarenjs/json/canonical';
+import { isJsonObject } from '@jarenjs/core/object';
 
 const migrationOwners = new WeakMap();
 /** Preserve borrowed-handle identity through an exclusively owned facade.
@@ -138,7 +139,7 @@ export function physicalTargetOf(target) {
         || Object.keys(object).some((key) => !['schema', 'type', 'name', 'owner', 'sql', 'metadata'].includes(key))
         || ['type', 'name', 'owner'].some((key) => typeof object[key] !== 'string' || !object[key])
         || object.sql !== null && typeof object.sql !== 'string'
-        || !object.metadata || typeof object.metadata !== 'object' || Array.isArray(object.metadata)
+        || !isJsonObject(object.metadata)
         || ENGINE_TABLES.has(object.owner) || ENGINE_TABLES.has(object.name)) fail();
       const key = physicalObjectKey(object);
       if (names.has(key)) fail();
@@ -296,7 +297,7 @@ export function checkPhysicalPreservation(physical, dialect) {
   if (physical.target !== undefined) physicalTargetOf(physical.target);
   if (physical.scope !== undefined) {
     const tables = physical.scope?.tables;
-    if (!physical.scope || typeof physical.scope !== 'object' || Array.isArray(physical.scope)
+    if (!isJsonObject(physical.scope)
       || Object.keys(physical.scope).some((key) => key !== 'tables') || !Array.isArray(tables) || tables.length === 0
       || new Set(tables).size !== tables.length || tables.some((table) => typeof table !== 'string' || table === '' || ENGINE_TABLES.has(table)))
       throw new DbCompileError('JD0027', 'a physical scope is { tables: [...] }, a non-empty list of distinct table names');

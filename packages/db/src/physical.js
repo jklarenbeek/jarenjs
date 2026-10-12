@@ -3,6 +3,7 @@
 import { getEpochOfDateTimeRFC3339, getEpochOfDateOnlyRFC3339 } from '@jarenjs/core/dates/rfc3339';
 import { DbCompileError, DbRuntimeError } from './errors.js';
 import { chain, useStatementOnce } from './driver.js';
+import { isJsonObject } from '@jarenjs/core/object';
 import { canonicalizeJson } from '@jarenjs/json/canonical';
 import { encodeJSONPointerSegment } from '@jarenjs/json/pointer';
 import { refuseUnknownModelMembers } from './options.js';
@@ -30,13 +31,13 @@ const COLUMN_MEMBERS = ['name', 'codec', 'null', 'default', 'generated', 'type',
 export function normalizePhysical(physical, properties, keys, path) {
   if (physical === undefined) return null;
   const fail = (reason) => { throw new DbCompileError('JD0005', reason, `${path}/physical`); };
-  if (!physical || typeof physical !== 'object' || Array.isArray(physical)) fail('physical must be an object');
+  if (!isJsonObject(physical)) fail('physical must be an object');
   refuseUnknownModelMembers(physical, LAYOUT_MEMBERS, `${path}/physical`, 'physical layout');
   if (!identifier(physical.table)) fail('physical.table must be a nonempty SQL identifier');
   if (physical.schema !== undefined && !identifier(physical.schema)) fail('physical.schema must be a nonempty SQL identifier');
   if (physical.kind !== undefined && !['table', 'view'].includes(physical.kind)) fail('physical.kind is table or view');
   if (physical.kind === 'view' && physical.indexes !== undefined) fail('a view has no indexes to verify: declare them on the table they index');
-  if (!physical.columns || typeof physical.columns !== 'object' || Array.isArray(physical.columns)) fail('physical.columns is required');
+  if (!isJsonObject(physical.columns)) fail('physical.columns is required');
   const ordered = physical.keys ?? keys;
   if (!Array.isArray(ordered) || ordered.length !== keys.length || new Set(ordered).size !== keys.length
     || ordered.some((key) => !keys.includes(key))) fail('physical.keys must order every declared key exactly once');
@@ -51,7 +52,7 @@ export function normalizePhysical(physical, properties, keys, path) {
   for (const name of names) {
     const property = properties.get(name);
     const c = physical.columns[name];
-    if (!c || typeof c !== 'object' || Array.isArray(c)) fail(`'${name}' needs an explicit supported column codec`);
+    if (!isJsonObject(c)) fail(`'${name}' needs an explicit supported column codec`);
     refuseUnknownModelMembers(c, COLUMN_MEMBERS, `${path}/physical/columns/${encodeJSONPointerSegment(name)}`, 'physical column');
     if (!Object.hasOwn(STORAGE, c.codec)) fail(`'${name}' needs an explicit supported column codec`);
     if (!identifier(c.name) || used.has(c.name.toLowerCase())) fail(`'${name}' needs a distinct physical column name`);
@@ -323,7 +324,7 @@ export function physicalOrderable(column, dialect) {
 function programDifferences(want, have, at = '') {
   return Object.keys(want).flatMap((key) => {
     const value = want[key];
-    if (value !== null && typeof value === 'object' && !Array.isArray(value)) return programDifferences(value, have?.[key], `${at}${key}.`);
+    if (isJsonObject(value)) return programDifferences(value, have?.[key], `${at}${key}.`);
     return canonicalizeJson(value) === canonicalizeJson(have?.[key] ?? null) ? [] : [`${at}${key}`];
   });
 }

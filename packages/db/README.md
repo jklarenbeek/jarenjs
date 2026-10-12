@@ -1384,12 +1384,19 @@ document's unindexed members are not in the physical shape
 (`document-members`), a text key column cannot say which member filled
 it (`key-source` — `options.keys` supplies the pointer), a view cannot
 be declared (`unmapped-view`), a foreign key cannot say which side
-declared the edge (`ambiguous-relation`). The relation a foreign key comes
-back as rides the foreign-key column itself, which no model accepts as it
-stands (`normalizeEntities` refuses it `JD0005`): a database with an entity
-foreign key derives a model to read and to declare the edge from, not one to
-open a store with or to plan from until that edge is declared on its parent
-(`many: true`, `via` naming a typed property). `strict: true` refuses rather
+declared the edge (`ambiguous-relation`), a table whose name is no identifier
+(`My Table`, `123x`) is no collection or entity a model can declare
+(`unmapped-table`). A many-to-many edge is declared on the first of its two
+entities as the other's name pluralised, qualified by the join table's name
+where a column or another edge already has that member. A foreign key comes
+back as the typed property it is, with the edge declared beside it: a
+one-to-many on the parent (`many: true`, `via` naming the property, the child's
+name pluralised as the member), or, where the key is unique, a one-to-one on
+the child. A key a model cannot declare — over several columns, to a column that
+is not the entity's single key, typed unlike that key, with an ON UPDATE action or
+an ON DELETE action the model has no word for (anything but `cascade`,
+`restrict` and `setNull`), to a table that is not an entity — is an
+`unmapped-constraint` row and stays out of the model. `strict: true` refuses rather
 than answering a partial model. The rule programs of a store-owned entity
 ([MODEL-FORMAT §13.4](docs/MODEL-FORMAT.md#134-database-enforcement)) are
 reported as `unmapped-object` rows and left as they are: the derived model
@@ -1426,8 +1433,8 @@ shape or name, or one added `NOT VALID`, remain
 The derived model reproduces the physical shape — tables, keys, mapped
 columns, foreign keys and the indexes above — not the schema that made it:
 it requires only the keys, types each member as its column reads back, and
-leaves out what the shape does not carry. Where it has no foreign key, it is usable as a migration's
-`from`: read a database, plan against your declared model, and an
+leaves out what the shape does not carry. It opens the database it was read from and is usable as a migration's
+`from` (a foreign key it could not declare aside): read a database, plan against your declared model, and an
 unchanged shape plans no index change — but the plan still carries what
 the shape could not tell: a drafted transform where the declared schema
 requires or types more, and a table rebuild where a `lossy-type` column's

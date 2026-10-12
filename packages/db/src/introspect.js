@@ -38,6 +38,7 @@ import { foldIdentifier } from './invariants.js';
 import { MODEL_VERSION, ENGINE_TABLES, IDENTIFIER } from './engine-metadata.js';
 import { registeredName, expressionMembers } from './expression.js';
 import { modelPath } from './model-path.js';
+import { isJsonObject, setObjectMember } from '@jarenjs/core/object';
 
 /**
  * Every code the loss report uses, with what it means. Closed, and
@@ -153,10 +154,17 @@ function readTable(connection, table, objects) {
         }))));
 }
 
-/** The on-delete word a model declares, from the catalog's. */
-const ON_DELETE = Object.freeze({
-  CASCADE: 'cascade', RESTRICT: 'restrict', 'SET NULL': 'setNull',
-});
+/** The on-delete words a model declares. */
+const MODEL_ACTIONS = Object.freeze(['cascade', 'restrict', 'setNull']);
+
+/**
+ * The on-delete word a model declares for the action a catalog reports: the
+ * word whose SQL the dialect writes reads back as that action (PostgreSQL
+ * writes `restrict` as a deferrable NO ACTION key, and reads it back so).
+ * @param {any} dialect @param {string} action @returns {string | undefined}
+ */
+const onDeleteOf = (dialect, action) => MODEL_ACTIONS.find((word) =>
+  dialect.comparableForeignKeyAction(dialect.foreignKeyActionSql(word)) === dialect.comparableForeignKeyAction(action));
 
 /**
  * Refuse an introspection option that is none of its own, or of the wrong type
@@ -172,7 +180,7 @@ function readIntrospectOptions(options) {
   if (options.strict !== undefined && typeof options.strict !== 'boolean') throw refuse('strict', 'is true or false');
   if (options.tables !== undefined && !(Array.isArray(options.tables) && options.tables.every((name) => typeof name === 'string')))
     throw refuse('tables', 'is an array of table names');
-  if (options.keys !== undefined && (options.keys === null || typeof options.keys !== 'object' || Array.isArray(options.keys)))
+  if (options.keys !== undefined && (!isJsonObject(options.keys)))
     throw refuse('keys', 'is an object of document pointers by table');
 }
 
@@ -356,7 +364,7 @@ function deriveCollection(dialect, table, report, keys, functionNames) {
   const keyType = dialect.schemaTypeOf(keyColumn.type);
   const collection = { schema: { type: 'object', properties: {} }, indexes,
     ...(intervals.length === 0 ? {} : { intervals }) };
-  const hinted = keys?.[table.name];
+  const hinted = keys !== undefined && Object.hasOwn(keys, table.name) ? keys[table.name] : undefined;
   if (keyType === 'integer') {
     collection.key = null;
     collection.identity = 'integer';
@@ -436,15 +444,17 @@ function placeType(node, segments, type) {
     }
     if (current.type === undefined) current.type = 'object';
     if (current.properties === undefined) current.properties = {};
+    // an own member, whatever the document names it: `__proto__` assigned
+    // would rewrite the map's prototype and leave no member
+    const existing = Object.hasOwn(current.properties, segment.name) ? current.properties[segment.name] : undefined;
     if (last) {
-      const existing = current.properties[segment.name];
       // a member already typed by the key keeps that type; two indexes
       // over one member agree by construction (one column serves both)
       if (existing === undefined || existing.type === undefined)
-        current.properties[segment.name] = type === undefined ? {} : { type };
+        setObjectMember(current.properties, segment.name, type === undefined ? {} : { type });
       return;
     }
-    if (current.properties[segment.name] === undefined) current.properties[segment.name] = {};
+    if (existing === undefined) setObjectMember(current.properties, segment.name, {});
     current = current.properties[segment.name];
   }
 }
@@ -555,10 +565,11 @@ function indexName(table, physical) {
  * @param {any} dialect
  * @param {any} table
  * @param {(row: any) => void} report
- * @param {Set<string>} joinTables
+ * @param {{ child: string, column: string, fk: any }[]} edges - receives each
+ *   foreign key: its edge is declared once every entity is derived
  * @returns {any}
  */
-function deriveEntity(dialect, table, report) {
+function deriveEntity(dialect, table, report, edges) {
   const identity = dialect.identityColumn?.name;
   const primaryKey = new Set(table.primaryKey ?? []);
   const fkByColumn = new Map(table.foreignKeys.map((fk) => [fk.column, fk]));
@@ -612,21 +623,10 @@ function deriveEntity(dialect, table, report) {
         'a generated column on an entity table is not an entity property'));
       continue;
     }
+    // the foreign key column is a typed property like any other: the edge it
+    // belongs to is declared beside it, on an entity not derived yet
     const fk = fkByColumn.get(column.name);
-    if (fk !== undefined) {
-      // the FOREIGN KEY side. Which side declared it — and whether the
-      // other holds many — is not in the shape: a `to`/`via` pair is
-      // derivable, the inverse is not
-      properties[column.name] = { 'x-entity': { relation: {
-        to: fk.target,
-        via: column.name,
-        ...(ON_DELETE[fk.onDelete] === undefined ? {} : { onDelete: ON_DELETE[fk.onDelete] }),
-      } } };
-      report(loss('ambiguous-relation', `${table.name}.${column.name}`,
-        `the foreign key points at '${fk.target}', which is one side of the edge; whether `
-        + 'the other side holds many is not in the physical shape'));
-      continue;
-    }
+    if (fk !== undefined) edges.push({ child: table.name, column: column.name, fk });
     const type = dialect.schemaTypeOf(column.type);
     if (type === undefined) {
       report(loss('unmapped-type', `${table.name}.${column.name}`,
@@ -639,10 +639,10 @@ function deriveEntity(dialect, table, report) {
     if (uniqueColumns.has(column.name)) entity.unique = true;
     else if (indexedColumns.has(column.name)) entity.index = true;
     if (Object.keys(entity).length > 0) property['x-entity'] = entity;
-    properties[column.name] = property;
+    setObjectMember(properties, column.name, property);
   }
   for (const check of table.checks) {
-    const property = properties[check.column];
+    const property = Object.hasOwn(properties, check.column) ? properties[check.column] : undefined;
     const family = property?.type === 'integer' ? 'number'
       : property?.type === 'string' ? 'string' : property?.type;
     if (check.values === undefined || property === undefined
@@ -667,6 +667,69 @@ function deriveEntity(dialect, table, report) {
   const schema = { type: 'object', properties };
   if (required.length > 0) schema.required = required.sort();
   return indexes.length > 0 ? { schema, indexes } : { schema };
+}
+
+/**
+ * The member an edge is declared as on an entity: `plain`, unless a column or
+ * another edge already has it, then qualified by the foreign key's column (or
+ * the join table's name), so that no member is replaced.
+ * @param {any} properties @param {string} plain @param {string} qualifier
+ * @returns {string}
+ */
+function edgeMember(properties, plain, qualifier) {
+  let member = plain;
+  for (let n = 1; Object.hasOwn(properties, member); n++) member = `${plain}_${qualifier}${n > 1 ? `_${n}` : ''}`;
+  return member;
+}
+
+/**
+ * Declare the relation each foreign key belongs to, now that every entity is
+ * derived: the typed foreign-key property stays what it is, and the edge is
+ * written beside it, as a model declares one. A key that is unique holds one
+ * row of the child per parent, so it is a one-to-one declared on the child; any
+ * other is a one-to-many declared on the parent. A foreign key a model cannot
+ * declare (it spans several columns, references no single key of a derived
+ * entity, carries an action the model has no word for, or is typed unlike the
+ * key it references) is reported `unmapped-constraint` and left out.
+ * @param {any} dialect @param {Record<string, any>} entities @param {any[]} tables
+ * @param {{ child: string, column: string, fk: any }[]} edges
+ * @param {(row: any) => void} report
+ */
+function declareEdges(dialect, entities, tables, edges, report) {
+  const byName = new Map(tables.map((table) => [table.name, table]));
+  for (const { child, column, fk } of edges) {
+    const where = `${child}.${column}`;
+    const refuse = (/** @type {string} */ why) => report(loss('unmapped-constraint', where,
+      `the foreign key to '${fk.target}' is not declared: ${why}`));
+    const composite = fk.ordinal !== 0 || byName.get(child).foreignKeys.some((/** @type {any} */ other) =>
+      other !== fk && other.group !== null && other.group === fk.group);
+    if (composite) { refuse('it spans several columns'); continue; }
+    if ((byName.get(child).primaryKey ?? []).includes(column)) { refuse('its column is the table\'s own key'); continue; }
+    if (!Object.hasOwn(entities, fk.target)) { refuse('it references a table that is not an entity of this model'); continue; }
+    const parent = entities[fk.target];
+    const keys = Object.entries(parent.schema.properties).filter(([, property]) => /** @type {any} */ (property)['x-entity']?.key === true);
+    if (keys.length !== 1 || (fk.targetColumn !== null && fk.targetColumn !== keys[0][0])) {
+      refuse('it does not reference the single key of the entity'); continue;
+    }
+    const property = entities[child].schema.properties[column];
+    if (property.type === undefined || property.type !== /** @type {any} */ (keys[0][1]).type) {
+      refuse(`its column is typed ${property.type ?? 'unlike the key'}, not as the key it references`); continue;
+    }
+    if (fk.onUpdate !== 'NO ACTION') { refuse(`it has the ON UPDATE action ${fk.onUpdate}`); continue; }
+    const onDelete = onDeleteOf(dialect, fk.onDelete);
+    if (onDelete === undefined) { refuse(`its ON DELETE action is ${fk.onDelete}, which a model does not declare`); continue; }
+    const oneToOne = property['x-entity']?.unique === true;
+    const owner = oneToOne ? entities[child] : parent;
+    const member = oneToOne
+      ? edgeMember(owner.schema.properties, fk.target.toLowerCase(), column)
+      : edgeMember(owner.schema.properties, `${child.toLowerCase()}s`, column);
+    setObjectMember(owner.schema.properties, member, { 'x-entity': { relation: oneToOne
+      ? { to: fk.target, via: column, onDelete } : { to: child, many: true, via: column, onDelete } } });
+    report(loss('ambiguous-relation', where,
+      `the foreign key was declared as a ${oneToOne ? 'one-to-one' : 'one-to-many'} relation on '${oneToOne ? child : fk.target}' `
+      + `as '${member}'; which side a model declared it on, whether the other holds many, and under what name, `
+      + 'is not in the physical shape'));
+  }
 }
 
 /** An identifier a `$.<member>` path and an index name can spell. */
@@ -848,10 +911,20 @@ export function introspectModel(connection, options = undefined) {
     const model = { $model: MODEL_VERSION };
     const collections = {};
     const entities = {};
+    /** @type {{ child: string, column: string, fk: any }[]} */
+    const edges = [];
     for (const table of schema.tables) {
       if (joinTables.has(table.name)) continue;
+      // a collection and an entity are named by an identifier: a model that
+      // declared any other name would be refused whole (JD0005)
+      if (!IDENTIFIER.test(table.name)) {
+        add(loss('unmapped-table', table.name,
+          'the table\'s name is not an identifier (an ASCII letter or underscore, then ASCII letters, digits '
+          + 'and underscores), the only kind a model gives a collection or an entity'));
+        continue;
+      }
       if (looksLikeCollection(dialect, table)) {
-        collections[table.name] = deriveCollection(dialect, table, add, options?.keys, byName);
+        setObjectMember(collections, table.name, deriveCollection(dialect, table, add, options?.keys, byName));
         continue;
       }
       const hasDocument = table.columns.some((column) => column.name === DOC_COLUMN);
@@ -862,8 +935,9 @@ export function introspectModel(connection, options = undefined) {
           + 'nor an entity'));
         continue;
       }
-      entities[table.name] = deriveEntity(dialect, table, add);
+      setObjectMember(entities, table.name, deriveEntity(dialect, table, add, edges));
     }
+    declareEdges(dialect, entities, schema.tables, edges, add);
 
     // a join table's edge belongs to the two entities it joins, and it
     // is declared on ONE of them — the shape cannot say which, so it is
@@ -872,15 +946,19 @@ export function introspectModel(connection, options = undefined) {
       if (!joinTables.has(table.name)) continue;
       const [left, right] = table.foreignKeys.map((fk) => fk.target).sort();
       if (left === undefined || right === undefined
-        || entities[left] === undefined || entities[right] === undefined) {
+        || !Object.hasOwn(entities, left) || !Object.hasOwn(entities, right)) {
         add(loss('unmapped-table', table.name,
           'the join table points at something this read did not derive as an entity'));
         continue;
       }
-      const member = `${right.toLowerCase()}s`;
-      entities[left].schema.properties[member] = {
+      // the edge's name on `left` is its target's, pluralised, unless a column
+      // or another edge between the two already has it: then the join table's
+      // name tells them apart, so no member is replaced
+      const properties = entities[left].schema.properties;
+      const member = edgeMember(properties, `${right.toLowerCase()}s`, table.name);
+      setObjectMember(properties, member, {
         'x-entity': { relation: { to: right, many: true, through: table.name } },
-      };
+      });
       add(loss('ambiguous-relation', table.name,
         `a many-to-many edge between '${left}' and '${right}' was declared on '${left}' as `
         + `'${member}'; which side a model declared it on, and under what name, is not in the `

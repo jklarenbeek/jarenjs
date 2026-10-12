@@ -127,6 +127,26 @@ const VALUE_FLAGS = new Set([
   '--out-format', '--format', '--collection', '--batch-size',
 ]);
 
+/**
+ * The flags each command reads. A flag some other command reads is refused
+ * by name: taken and ignored, `snapshot --out file` wrote the default
+ * snapshot beside the model instead, and `apply --check` applied.
+ */
+const COMMAND_FLAGS = Object.freeze({
+  plan: ['--from', '--to', '--model', '--store', '--id', '--out', '--snapshot'],
+  snapshot: ['--model', '--snapshot', '--types'],
+  status: ['--model', '--store', '--migrations', '--snapshot', '--baseline'],
+  check: ['--model', '--store', '--migrations', '--snapshot', '--baseline'],
+  apply: ['--store', '--baseline', '--migrations', '--model', '--dry-run', '--yes'],
+  shape: ['--model'],
+  history: ['--store', '--out'],
+  'adopt-history': ['--store', '--migrations', '--observed', '--model', '--physical-target', '--yes'],
+  documents: ['--migrations', '--in', '--out', '--in-place', '--check', '--yes', '--format', '--out-format',
+    '--collection', '--batch-size', '--max-rows', '--max-bytes', '--max-distinct'],
+});
+/** Every flag some command reads, and the two helps every command takes. */
+const KNOWN_FLAGS = new Set([...Object.values(COMMAND_FLAGS).flat(), '--help', '-h']);
+
 function parseArgs(argv) {
   const options = {
     command: argv[2], from: null, to: null, model: null, store: null,
@@ -137,21 +157,22 @@ function parseArgs(argv) {
     batchSize: null, inPlace: false, check: false,
     dryRun: false, yes: false, help: false,
   };
-  const historyFlags = options.command === 'history'
-    ? new Set(['--store', '--out', '--help', '-h'])
-    : options.command === 'adopt-history'
-      ? new Set(['--store', '--migrations', '--observed', '--model', '--physical-target', '--yes', '--help', '-h'])
-      : null;
+  const historyCommand = options.command === 'history' || options.command === 'adopt-history';
+  const taken = Object.hasOwn(COMMAND_FLAGS, options.command) ? new Set(COMMAND_FLAGS[options.command]) : null;
   for (let i = 3; i < argv.length; i++) {
     const flag = argv[i];
-    if (historyFlags) {
-      if (!historyFlags.has(flag)) misuse(`${options.command} does not take '${flag}'`);
+    if (historyCommand) {
+      if (!taken.has(flag) && flag !== '--help' && flag !== '-h') misuse(`${options.command} does not take '${flag}'`);
       if (!['--yes', '--help', '-h'].includes(flag)
         && (!argv[i + 1] || argv[i + 1].startsWith('--') || argv[i + 1] === '-h'))
         misuse(`${flag} needs a value`);
     }
     if ((flag === '--observed' || flag === '--physical-target') && options.command !== 'adopt-history')
       misuse(`${flag} is only used by adopt-history`);
+    // a flag another command reads is not this one's: ignoring it would run
+    // the command without the thing the flag was asked to do
+    if (taken !== null && KNOWN_FLAGS.has(flag) && flag !== '--help' && flag !== '-h' && !taken.has(flag))
+      (options.command === 'documents' ? misuse : fail)(`${options.command} does not take '${flag}'`);
     // a value flag with nothing after it, or another flag in its place, has
     // no value: taking the next flag for it named a file `--id`, and none at
     // all stored `undefined`, which a command read as an absent option

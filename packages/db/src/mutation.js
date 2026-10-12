@@ -9,6 +9,7 @@ import { entityShape, planEntityPredicate, predicateTerms, PLANNER_REASONS } fro
 import { createEntityPredicateEmitters } from './emit.js';
 import { physicalSelection } from './physical.js';
 import { relationalEmitter } from './relational.js';
+import { isJsonObject } from '@jarenjs/core/object';
 
 /** Bind each document, reuse its SQL statement within the guarded transaction.
  * @param {any} connection @param {any} entity @param {any} mapping @param {any} core */
@@ -44,7 +45,7 @@ export function createEntityMutation(connection, entity, mapping, core) {
     if (entity.physical == null || dialect.name !== 'sqlite' && !dialect.physicalDifferent)
       fail('native mutations require a qualified column layout');
     core.plan.writable();
-    if (!document || typeof document !== 'object' || Array.isArray(document)) fail('a mutation is an object');
+    if (!isJsonObject(document)) fail('a mutation is an object');
     const allowed = { update: ['key', 'expectedRevision', 'set', 'where', 'reporting', 'expressions'],
       delete: ['key', 'where', 'expectedRevision'],
       upsert: ['values', 'conflict', 'conflictWhere', 'update', 'onConflict', 'reporting'],
@@ -110,8 +111,8 @@ export function createEntityMutation(connection, entity, mapping, core) {
     if (document.reporting !== undefined && !['matched', 'changed'].includes(document.reporting)) fail('reporting is matched or changed');
     if (document.op === 'update' || document.op === 'delete') {
       const set = document.set ?? {}, expressions = document.expressions ?? {};
-      if (document.op === 'update' && (!set || typeof set !== 'object' || Array.isArray(set)
-        || !expressions || typeof expressions !== 'object' || Array.isArray(expressions)
+      if (document.op === 'update' && (!isJsonObject(set)
+        || !isJsonObject(expressions)
         || !Object.keys(set).length && !Object.keys(expressions).length)) fail('update needs set or expressions assignments');
       const assignments = Object.entries(set).map(([name, value]) => {
         const c = writableColumn(name);
@@ -150,7 +151,7 @@ export function createEntityMutation(connection, entity, mapping, core) {
       let names;
       let source;
       if (document.op === 'upsert') {
-        if (!document.values || typeof document.values !== 'object' || Array.isArray(document.values)) fail('upsert needs values');
+        if (!isJsonObject(document.values)) fail('upsert needs values');
         const complete = core.complete(document.values, { updating: false });
         const split = core.plan.split(complete);
         names = split.values.map((v) => v.name);
@@ -159,7 +160,7 @@ export function createEntityMutation(connection, entity, mapping, core) {
       }
       else {
         if (document.source !== entity.name || document.onConflict !== 'nothing') fail('insert-select supports same-entity sources with onConflict nothing');
-        if (!document.select || typeof document.select !== 'object' || Array.isArray(document.select)) fail('insert-select needs a projection');
+        if (!isJsonObject(document.select)) fail('insert-select needs a projection');
         names = Object.keys(document.select);
         if (!names.length || core.plan.keys.some((key) => !names.includes(key))) fail('insert-select projects every primary-key member');
         const values = names.map((name) => {
@@ -171,7 +172,7 @@ export function createEntityMutation(connection, entity, mapping, core) {
             if (from.codec !== target.codec || from.null !== target.null) fail('insert-select requires identical source and target codecs');
             return `${q('s')}.${q(from.physical)}`;
           }
-          if (value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length === 1 && Object.hasOwn(value, '$literal'))
+          if (isJsonObject(value) && Object.keys(value).length === 1 && Object.hasOwn(value, '$literal'))
             return param(core.plan.encodeColumn(name, value.$literal));
           return fail('insert-select values are singular member paths or $literal values');
         });

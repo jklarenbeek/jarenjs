@@ -17,7 +17,7 @@ import {
   collectSameDocumentAnchors, resolveSameDocumentRef,
 } from '@jarenjs/validate/normalize';
 import { compileJsonQuery } from '@jarenjs/json/query';
-import { isJsonObject, isJsonContainer } from '@jarenjs/core/object';
+import { isJsonObject, isJsonContainer, setObjectMember } from '@jarenjs/core/object';
 
 import { DbCompileError } from './errors.js';
 import { IDENTIFIER } from './engine-metadata.js';
@@ -625,6 +625,28 @@ function resolveRelations(entities) {
       }
     }
   }
+
+  // a join table holds one edge's memberships: its two inverse declarations
+  // at most. A third declaration naming it, or two that are not inverses (the
+  // same pair declared twice, or another pair given the same `through`),
+  // would read and write one table as two relations
+  /** @type {Map<string, any[]>} */
+  const claims = new Map();
+  for (const declaration of declarations) {
+    const relation = declaration.property.relation;
+    if (relation.kind !== 'manyToMany') continue;
+    const claimed = claims.get(relation.joinTable);
+    if (claimed === undefined) { claims.set(relation.joinTable, [declaration]); continue; }
+    const [first] = claimed;
+    if (claimed.length === 1 && first.property.relation.to === declaration.owner && relation.to === first.owner) {
+      claimed.push(declaration);
+      continue;
+    }
+    throw new DbCompileError('JD0031',
+      `relation '${first.owner}.${first.property.name}' and '${declaration.owner}.${declaration.property.name}' `
+      + `both use the join table '${relation.joinTable}' but do not declare one edge: give each edge its own through`,
+      `${declaration.property.docPath}/x-entity/relation`);
+  }
 }
 
 /**
@@ -754,8 +776,8 @@ function mappingOf(model, entities) {
 
   for (const entity of entities.values()) {
     if (entity.physical !== null) {
-      mapping.entities[entity.name] = { ...entity.physical, document: false,
-        foreignKeys: [], indexes: [], version: entity.version, invariants: model.entities[entity.name].invariants ?? [] };
+      setObjectMember(mapping.entities, entity.name, { ...entity.physical, document: false,
+        foreignKeys: [], indexes: [], version: entity.version, invariants: model.entities[entity.name].invariants ?? [] });
       continue;
     }
     const columns = [];
@@ -838,7 +860,9 @@ function mappingOf(model, entities) {
         + 'one-to-many relation, whose children share their parent',
         entity.properties.get(fk.column)?.docPath ?? `/entities/${entity.name}`);
     }
-    mapping.entities[entity.name] = {
+    // an own member, whatever the entity is named: `__proto__` assigned would
+    // rewrite the map's prototype and leave the entity no table
+    setObjectMember(mapping.entities, entity.name, {
       table: entity.name,
       keys: entity.keys,
       columns,
@@ -850,7 +874,7 @@ function mappingOf(model, entities) {
       // a composite or partial unique index is never a unique column
       ...(entity.indexes.length ? { entityIndexes: entityIndexesOf(entity, columns, foreignKeys) } : {}),
       ...(entity.invariants.length ? { invariants: model.entities[entity.name].invariants } : {}),
-    };
+    });
   }
 
   const seenJoins = new Set();
@@ -867,11 +891,11 @@ function mappingOf(model, entities) {
       }
       seenJoins.add(relation.joinTable);
       const [a, b] = [entity.name, relation.to].sort();
-      mapping.joinTables[relation.joinTable] = {
+      setObjectMember(mapping.joinTables, relation.joinTable, {
         left: { entity: a, column: `${a}_key`, referencesKey: entities.get(a).keys[0] },
         right: { entity: b, column: `${b}_key`, referencesKey: entities.get(b).keys[0] },
         onDelete: 'cascade',
-      };
+      });
     }
   }
   return mapping;
@@ -918,7 +942,7 @@ export function joinTableRoots(entities, mapping) {
       version: null,
       joinTable: true,
     });
-    mappings[name] = {
+    setObjectMember(mappings, name, {
       table: name,
       columns,
       foreignKeys: [],
@@ -927,7 +951,7 @@ export function joinTableRoots(entities, mapping) {
       // a join row IS its two keys: there is no document column to read,
       // and the merge is handed an empty one
       document: false,
-    };
+    });
   }
   return { entities: roots, mappings };
 }

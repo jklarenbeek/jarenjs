@@ -441,6 +441,128 @@ describe('a join table takes its endpoints from the mapping, never from its name
     assert.deepStrictEqual(member.items.map((item) => item.id), ['wi1']);
     await migrated.close();
   });
+
+  it('a relation dropped in the edit that renames its endpoint drops the table it still has', async () => {
+    // the join table only follows its endpoint when the relation stays; a
+    // relation that goes leaves it under its old name, and the drop names that
+    for (const [label, through, joinTable] of [['implicit', undefined, 'Post_Tag'], ['through', 'Tagging', 'Tagging']]) {
+      const from = model({ Post: ent({ tags: many('Tag', through) }), Tag: ent({}) });
+      const to = model({ Article: { 'x-rename': 'Post', ...ent({}) }, Tag: ent({}) });
+      const { migration, report } = planModelMigration(from, to, { dialect: sqliteDialect, id: `drop-${label}` });
+      assert.strictEqual(report.destructive, true);
+      assert.deepStrictEqual(migration.steps.filter((step) => step.kind === 'ddl').map((step) => step.sql), [
+        'ALTER TABLE "Post" RENAME TO "Article"',
+        `DROP TABLE "${joinTable}"`,
+      ], label);
+      const file = fresh(`join-drop-${label}`);
+      const store = await openStore(from, { driver: nodeDriver(), path: file });
+      await store.entity('Post').create({ id: 'p1' });
+      await store.entity('Tag').create({ id: 't1' });
+      await store.saveChanges();
+      store.entity('Post').link('p1', 'tags', 't1');
+      await store.saveChanges();
+      await store.close();
+      const outcome = await migrate({ driver: nodeDriver(), path: file }, [applied(migration)], { baseline: from, model: to });
+      assert.deepStrictEqual(outcome.applied, [`drop-${label}`], label);
+      const raw = new DatabaseSync(file);
+      assert.deepStrictEqual(raw.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE '\\_%' ESCAPE '\\' ORDER BY name")
+        .all().map((row) => row.name), ['Article', 'Tag'], label);
+      raw.close();
+      const reopened = await openStore(to, { driver: nodeDriver(), path: file });
+      assert.strictEqual((await reopened.entity('Article').get('p1'))?.id, 'p1');
+      await reopened.close();
+    }
+  });
+});
+
+describe('a join table name given to another edge', () => {
+  const many = (to) => ({ 'x-entity': { relation: { to, many: true, through: 'Link' } } });
+
+  it('is a table that goes and a table that is created, not one that stays', async () => {
+    const from = model({ A: ent({ bs: many('B') }), B: ent({}), C: ent({}) });
+    const to = model({ A: ent({}), B: ent({ cs: many('C') }), C: ent({}) });
+    const { migration, report } = planModelMigration(from, to, { dialect: sqliteDialect, id: 'reuse' });
+    assert.strictEqual(report.destructive, true, 'the memberships of the old edge are lost');
+    assert.deepStrictEqual(migration.steps.filter((step) => step.kind === 'ddl').map((step) => step.sql.replace(/^(CREATE TABLE "Link").*$/s, '$1 …')),
+      ['DROP TABLE "Link"', 'CREATE TABLE "Link" …']);
+    const file = fresh('join-name-reused');
+    const store = await openStore(from, { driver: nodeDriver(), path: file });
+    await store.entity('A').create({ id: 'a1' });
+    await store.entity('B').create({ id: 'b1' });
+    await store.entity('C').create({ id: 'c1' });
+    await store.saveChanges();
+    store.entity('A').link('a1', 'bs', 'b1');
+    await store.saveChanges();
+    await store.close();
+    assert.deepStrictEqual((await migrate({ driver: nodeDriver(), path: file }, [applied(migration)], { baseline: from, model: to })).applied, ['reuse']);
+    const migrated = await openStore(to, { driver: nodeDriver(), path: file });
+    migrated.entity('B').link('b1', 'cs', 'c1');
+    await migrated.saveChanges();
+    const [b] = await migrated.entity('B').asNoTracking().load({ where: { $eq: ['$it.id', 'b1'] }, include: { cs: true } });
+    assert.deepStrictEqual(b.cs.map((c) => c.id), ['c1']);
+    await migrated.close();
+  });
+});
+
+describe('a join table follows its renamed endpoint in a link that also rebuilds a table', () => {
+  // a link with a rebuild runs under SQLite's legacy_alter_table, where renaming
+  // a table leaves other tables' REFERENCES spelling the old name: the join
+  // table is rebuilt to name the entity it references now
+  const many = (to) => ({ 'x-entity': { relation: { to, many: true } } });
+  const FROM = model({ Post: ent({ tags: many('Tag') }), Tag: ent({}), Other: ent({}) });
+  const TO = model({
+    Article: { 'x-rename': 'Post', ...ent({ tags: many('Tag'), others: { 'x-entity': { relation: { to: 'Other', many: true, via: 'articleId', onDelete: 'restrict' } } } }) },
+    Tag: ent({}),
+    Other: ent({ articleId: { type: 'string' } }),
+  });
+
+  it('renames the entity, rebuilds the join table under its name, and keeps the memberships', async () => {
+    const { migration, report } = planModelMigration(FROM, TO, { dialect: sqliteDialect, id: 'rename-and-rebuild' });
+    assert.strictEqual(report.destructive, false);
+    assert.ok(migration.steps.some((step) => step.kind === 'rebuild'), 'the link rebuilds a table');
+    const ddl = migration.steps.filter((step) => step.kind === 'ddl' || step.kind === 'sql').map((step) => step.sql.replace(/^CREATE TABLE .*$/s, 'CREATE TABLE …'));
+    assert.deepStrictEqual(ddl, [
+      'ALTER TABLE "Post" RENAME TO "Article"',
+      'ALTER TABLE "Post_Tag" RENAME TO "Article_Tag"',
+      'ALTER TABLE "Article_Tag" RENAME COLUMN "Post_key" TO "Article_key"',
+      'CREATE TABLE …',
+      'INSERT INTO "Article_Tag__rebuild" ("Article_key", "Tag_key") SELECT "Article_key", "Tag_key" FROM "Article_Tag"',
+      'DROP TABLE "Article_Tag"',
+      'ALTER TABLE "Article_Tag__rebuild" RENAME TO "Article_Tag"',
+    ]);
+    const file = fresh('join-follows-rebuild');
+    const store = await openStore(FROM, { driver: nodeDriver(), path: file });
+    await store.entity('Post').create({ id: 'p1' });
+    await store.entity('Tag').create({ id: 't1' });
+    await store.entity('Other').create({ id: 'o1' });
+    await store.saveChanges();
+    store.entity('Post').link('p1', 'tags', 't1');
+    await store.saveChanges();
+    await store.close();
+    const outcome = await migrate({ driver: nodeDriver(), path: file }, [applied(migration)], { baseline: FROM, model: TO });
+    assert.deepStrictEqual(outcome.applied, ['rename-and-rebuild']);
+    const raw = new DatabaseSync(file);
+    const join = raw.prepare("SELECT sql FROM sqlite_master WHERE name = 'Article_Tag'").get();
+    assert.match(join.sql, /"Article_key" TEXT REFERENCES "Article" \("id"\)/, 'the join table references the entity by its new name');
+    raw.close();
+    const migrated = await openStore(TO, { driver: nodeDriver(), path: file });
+    const [article] = await migrated.entity('Article').asNoTracking()
+      .load({ where: { $eq: ['$it.id', 'p1'] }, include: { tags: true } });
+    assert.deepStrictEqual(article.tags.map((tag) => tag.id), ['t1']);
+    await migrated.close();
+    assert.deepStrictEqual(planModelMigration(TO, TO, { dialect: sqliteDialect, id: 'again' }).migration.steps, []);
+    assert.deepStrictEqual((await migrate({ driver: nodeDriver(), path: file }, [applied(migration)], { baseline: FROM, model: TO })).applied, []);
+  });
+
+  it('a link without a rebuild keeps renaming the table and the column alone', () => {
+    const to = model({ Article: { 'x-rename': 'Post', ...ent({ tags: many('Tag') }) }, Tag: ent({}), Other: ent({}) });
+    const { migration } = planModelMigration(FROM, to, { dialect: sqliteDialect, id: 'rename-only' });
+    assert.deepStrictEqual(migration.steps.filter((step) => step.kind === 'ddl').map((step) => step.sql), [
+      'ALTER TABLE "Post" RENAME TO "Article"',
+      'ALTER TABLE "Post_Tag" RENAME TO "Article_Tag"',
+      'ALTER TABLE "Article_Tag" RENAME COLUMN "Post_key" TO "Article_key"',
+    ]);
+  });
 });
 
 describe('the entity path plans twice to one document and applies twice to one database', () => {

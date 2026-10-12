@@ -17,7 +17,7 @@
 import { explainMapping } from './model.js';
 import { analyzeQuery } from '@jarenjs/json/query';
 import { utf8ByteLength } from '@jarenjs/core/string';
-import { IDENTIFIER } from './engine-metadata.js';
+import { IDENTIFIER, ENGINE_TABLES } from './engine-metadata.js';
 import { DbCompileError } from './errors.js';
 import { chain } from './driver.js';
 import { BBOX_COMPONENTS, BBOX_INDEX_ORDER, derivedMappingFor } from './derive.js';
@@ -82,6 +82,10 @@ function ownObjects(dialect, table, columns, docPath) {
       what: `the ${dialect.name} engine's own relation '${name}' of table '${table}' (its primary key's index, or a serial column's sequence)` }));
 }
 
+/** The engine's own tables (migration history, change ledger, job queue, owner lease): names no object of a model may take. */
+const RESERVED = [...ENGINE_TABLES].map((name) => /** @type {[string, { name: string, what: string, reserved: true }]} */ (
+  [foldIdentifier(name), { name, what: `the engine's own table '${name}'`, reserved: true }]));
+
 /**
  * Refuse (`JD0004`) the second of two schema objects a plan gives one name.
  * Every table, index, virtual table and trigger a model plans, and the
@@ -95,8 +99,8 @@ function ownObjects(dialect, table, columns, docPath) {
  * @returns {void}
  */
 export function refuseNameCollisions(objects) {
-  /** @type {Map<string, { name: string, what: string }>} */
-  const seen = new Map();
+  /** @type {Map<string, { name: string, what: string, reserved?: true }>} */
+  const seen = new Map(RESERVED);
   for (const object of objects) {
     const key = foldIdentifier(object.name);
     const first = seen.get(key);
@@ -104,7 +108,7 @@ export function refuseNameCollisions(objects) {
     throw new DbCompileError('JD0004',
       `${object.what} would be named '${object.name}', the name of ${first.what}`
       + (first.name === object.name ? '' : ` ('${first.name}': names are compared with ASCII case folded, as SQLite compares them)`)
-      + ` — two objects of one database cannot share a name: rename ${object.rename ?? 'one of them'}`, object.docPath);
+      + ` — two objects of one database cannot share a name: rename ${object.rename ?? (first.reserved ? 'it' : 'one of them')}`, object.docPath);
   }
 }
 
@@ -1150,6 +1154,31 @@ function keyColumnType(keyColumn, dialect, referencing, single = true) {
     return { type: stored };
   const allocated = referencing ? dialect.comparableColumnType(dialect.autoKeyType).toLowerCase() : dialect.autoKeyType;
   return keyColumn.auto === true ? { type: allocated, legacyType: stored } : { type: stored, legacyType: allocated };
+}
+
+/**
+ * The order tables can be created in: as declared, except that a table comes
+ * after the tables it references (a foreign key's, a join table's endpoints),
+ * which PostgreSQL requires to exist and SQLite does not. A table that
+ * references itself needs no other; a cycle has no such order, and each table
+ * of it is placed after the ones it reaches first (A and B referencing each
+ * other, declared A then B, are created B then A), the walk being depth first.
+ * @param {string[]} names - in declaration order
+ * @param {(name: string) => Iterable<string>} referencesOf
+ * @returns {string[]}
+ */
+export function creationOrder(names, referencesOf) {
+  const known = new Set(names);
+  const placed = new Set();
+  const order = [];
+  const visit = (/** @type {string} */ name) => {
+    if (placed.has(name)) return;
+    placed.add(name);
+    for (const other of referencesOf(name)) if (known.has(other)) visit(other);
+    order.push(name);
+  };
+  for (const name of names) visit(name);
+  return order;
 }
 
 /**

@@ -1223,3 +1223,125 @@ describe('a rebuild that lifts many members out of the document plans a copy tha
     assert.ok(copy(sqliteDialect).length < 20_000);
   });
 });
+
+for (const engine of ENGINES) {
+  describe(`${engine}: a relation's join table through an edit that renames its endpoint`, { skip: skipFor(engine) }, () => {
+    /** @param {any} extra */
+    const entity = (extra = {}) => ({ schema: { type: 'object', required: ['pid'], properties: {
+      pid: { type: 'string', 'x-entity': { key: true } }, ...extra } } });
+    const many = (/** @type {string} */ to) => ({ 'x-entity': { relation: { to, many: true, through: 'Tagging' } } });
+
+    it('a rename that reorders the endpoint columns rebuilds a table that keeps its `through` name', async () => {
+      await withDatabase(engine, async (db) => {
+        const before = { $model: '0.1', entities: { Post: entity({ tags: many('Tag') }), Tag: entity() } };
+        const after = { $model: '0.1', entities: { Post: entity({ tags: many('Label') }), Label: { 'x-rename': 'Tag', ...entity() } } };
+        await withOpen(db, before, async (store) => {
+          await store.entity('Post').create({ pid: 'p1' });
+          await store.entity('Tag').create({ pid: 't1' });
+          await store.entity('Tag').create({ pid: 't2' });
+          await store.saveChanges();
+          store.entity('Post').link('p1', 'tags', 't2');
+          store.entity('Post').link('p1', 'tags', 't1');
+          await store.saveChanges();
+        });
+        const migration = planned(db, before, after, 'flip');
+        assert.deepEqual((await migrate(db.target(), [migration], { baseline: before, model: after, shadow: false })).applied, ['flip']);
+        await settled(db, before, after, migration);
+        assert.deepEqual((await db.rows('SELECT "Label_key", "Post_key" FROM "Tagging" ORDER BY 1')).map((row) => [row.Label_key, row.Post_key]),
+          [['t1', 'p1'], ['t2', 'p1']]);
+        const tables = (await db.rows(db.engine === 'sqlite'
+          ? "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE '\\_%' ESCAPE '\\' ORDER BY name"
+          : "SELECT table_name AS name FROM information_schema.tables WHERE table_schema = current_schema() AND table_name NOT LIKE '\\_%' ORDER BY 1"))
+          .map((row) => row.name);
+        assert.deepEqual(tables.filter((name) => !/^(Post|Label|Tagging)$/.test(name)), []);
+        if (db.engine === 'postgres') {
+          assert.deepEqual((await db.rows("SELECT conname FROM pg_constraint WHERE conrelid = to_regclass('\"Tagging\"') AND contype = 'p'"))
+            .map((row) => row.conname), ['Tagging_pkey']);
+        }
+        const [post] = await withOpen(db, after, (store) => store.entity('Post').asNoTracking()
+          .load({ where: { $eq: ['$it.pid', 'p1'] }, include: { tags: true } }));
+        assert.deepEqual(post.tags.map((/** @type {any} */ tag) => tag.pid).sort(), ['t1', 't2']);
+      });
+    });
+
+    it('entities added child-first are created parent-first, which PostgreSQL requires', async () => {
+      await withDatabase(engine, async (db) => {
+        const other = entity();
+        const before = { $model: '0.1', entities: { Other: other } };
+        const after = { $model: '0.1', entities: { Other: other, Book: entity({ authorId: { type: 'string' } }),
+          Author: entity({ books: { 'x-entity': { relation: { to: 'Book', many: true, via: 'authorId', onDelete: 'cascade' } } } }) } };
+        await withOpen(db, before, async () => undefined);
+        const migration = planned(db, before, after, 'grow');
+        assert.deepEqual(migration.steps.map((/** @type {any} */ step) => /^CREATE TABLE "(\w+)"/.exec(step.sql ?? '')?.[1]).filter(Boolean), ['Author', 'Book']);
+        assert.deepEqual((await migrate(db.target(), [migration], { baseline: before, model: after, shadow: false })).applied, ['grow']);
+        await settled(db, before, after, migration);
+        await withOpen(db, after, async (store) => {
+          await store.entity('Author').create({ pid: 'a1' });
+          await store.entity('Book').create({ pid: 'b1', authorId: 'a1' });
+          await assert.rejects(store.entity('Book').create({ pid: 'b2', authorId: 'nobody' }), { code: 'JD2005' });
+        });
+      });
+    });
+
+    it('declaring (or no longer declaring) the via property of a relation adds and drops no column', async () => {
+      await withDatabase(engine, async (db) => {
+        const edges = {
+          one: { 'x-entity': { relation: { to: 'Profile', via: 'profileId', onDelete: 'setNull' } } },
+          many: { 'x-entity': { relation: { to: 'Book', many: true, via: 'authorId', onDelete: 'cascade' } } },
+        };
+        const inferred = { $model: '0.1', entities: { Author: entity({ profile: edges.one, books: edges.many }), Profile: entity(), Book: entity() } };
+        const declared = { $model: '0.1', entities: { Author: entity({ profile: edges.one, books: edges.many, profileId: { type: 'string' } }),
+          Profile: entity(), Book: entity({ authorId: { type: 'string', 'x-entity': { index: true } } }) } };
+        await withOpen(db, inferred, async (store) => {
+          await store.entity('Profile').create({ pid: 'pr1' });
+          await store.entity('Author').create({ pid: 'a1', profileId: 'pr1' });
+          await store.entity('Book').create({ pid: 'b1', authorId: 'a1' });
+        });
+        const chain = [];
+        for (const [from, to, id] of [[inferred, declared, 'declare'], [declared, inferred, 'infer']]) {
+          const migration = planned(db, from, to, id);
+          assert.deepEqual(migration.steps.filter((/** @type {any} */ step) => step.kind !== 'jslt'), [], `${id}: no DDL at all`);
+          chain.push(migration);
+          assert.deepEqual((await migrate(db.target(), chain, { baseline: inferred, model: to, shadow: false })).applied, [id]);
+          const [author] = await withOpen(db, to, (store) => store.entity('Author').asNoTracking()
+            .load({ where: { $eq: ['$it.pid', 'a1'] }, include: { profile: true, books: true } }));
+          assert.deepEqual([author.profile?.pid, author.books.map((/** @type {any} */ book) => book.pid)], ['pr1', ['b1']], id);
+        }
+        assert.deepEqual((await migrate(db.target(), chain, { baseline: inferred, model: inferred, shadow: false })).applied, []);
+      });
+    });
+
+    it('an entity dropped with its relation drops the join table first, which still references it', async () => {
+      await withDatabase(engine, async (db) => {
+        const before = { $model: '0.1', entities: { Post: entity({ tags: many('Tag') }), Tag: entity() } };
+        const after = { $model: '0.1', entities: { Tag: entity() } };
+        await withOpen(db, before, async (store) => {
+          await store.entity('Post').create({ pid: 'p1' });
+          await store.entity('Tag').create({ pid: 't1' });
+          await store.saveChanges();
+          store.entity('Post').link('p1', 'tags', 't1');
+          await store.saveChanges();
+        });
+        const migration = planned(db, before, after, 'gone');
+        assert.deepEqual(migration.steps.map((/** @type {any} */ step) => step.sql), ['DROP TABLE "Tagging"', 'DROP TABLE "Post"']);
+        assert.deepEqual((await migrate(db.target(), [migration], { baseline: before, model: after, shadow: false })).applied, ['gone']);
+        await settled(db, before, after, migration);
+        assert.deepEqual((await withOpen(db, after, (store) => store.entity('Tag').get('t1')))?.pid, 't1');
+      });
+    });
+
+    it('a relation dropped in that edit drops the table it still has', async () => {
+      await withDatabase(engine, async (db) => {
+        const before = { $model: '0.1', entities: { Post: entity({ tags: many('Tag') }), Tag: entity() } };
+        const after = { $model: '0.1', entities: { Article: { 'x-rename': 'Post', ...entity() }, Tag: entity() } };
+        await withOpen(db, before, async (store) => { await store.entity('Post').create({ pid: 'p1' }); });
+        const migration = planned(db, before, after, 'drop');
+        assert.deepEqual(migration.steps.filter((/** @type {any} */ step) => step.kind === 'ddl').map((/** @type {any} */ step) => step.sql).slice(-1),
+          ['DROP TABLE "Tagging"']);
+        assert.deepEqual((await migrate(db.target(), [migration], { baseline: before, model: after, shadow: false })).applied, ['drop']);
+        await settled(db, before, after, migration);
+        assert.deepEqual((await withOpen(db, after, (store) => store.entity('Article').get('p1')))?.pid, 'p1');
+      });
+    });
+  });
+}

@@ -1,6 +1,6 @@
 //@ts-check
 /** Portable logical transactions. Canonical payloads are also collision-free receipts. */
-import { stableStringify } from '@jarenjs/core/object';
+import { stableStringify, isJsonObject } from '@jarenjs/core/object';
 import { DbCompileError } from './errors.js';
 import { IDENTIFIER } from './engine-metadata.js';
 
@@ -8,16 +8,15 @@ export const REPLICATION_VERSION = '0.1';
 export const REPLICATION_DEFAULTS = Object.freeze({ retention: 1000, maxOperations: 10000, maxBytes: 4194304 });
 
 const invalid = (reason) => { throw new DbCompileError('JD0060', reason); };
-const record = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 const id = (value) => typeof value === 'string' && value.length > 0 && value.length <= 128;
 const sequence = (value) => Number.isSafeInteger(value) && value >= 0;
-const members = (value, names) => record(value) && Object.keys(value).length === names.length
+const members = (value, names) => isJsonObject(value) && Object.keys(value).length === names.length
   && names.every((name) => Object.hasOwn(value, name));
 
 /** Normalize a causal frontier without interpreting host-issued replica names. @param {any} value */
 export function normalizeFrontier(value) {
   jsonValue(value);
-  if (!record(value) || Object.entries(value).some(([key, seq]) => !id(key) || !sequence(seq)))
+  if (!isJsonObject(value) || Object.entries(value).some(([key, seq]) => !id(key) || !sequence(seq)))
     invalid('a frontier maps non-empty replica ids to non-negative safe sequences');
   return Object.fromEntries(Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0));
 }
@@ -73,8 +72,8 @@ export function normalizeReplication(document) {
     if (!members(operation, ['table', 'key', 'before', 'after'])
       || typeof operation.table !== 'string' || !IDENTIFIER.test(operation.table)
       || typeof operation.key !== 'string'
-      || !(operation.before === null || record(operation.before))
-      || !(operation.after === null || record(operation.after))) invalid('invalid logical row operation');
+      || !(operation.before === null || isJsonObject(operation.before))
+      || !(operation.after === null || isJsonObject(operation.after))) invalid('invalid logical row operation');
     const key = JSON.stringify([operation.table, operation.key]);
     if (rows.has(key)) invalid('a transaction contains at most one net operation per row');
     rows.add(key);
@@ -99,7 +98,7 @@ export function normalizeReplicationSnapshot(document) {
   for (const row of document.rows) {
     if (!members(row, ['table', 'key', 'value', 'frontier']) || typeof row.table !== 'string'
       || !IDENTIFIER.test(row.table) || typeof row.key !== 'string'
-      || !(row.value === null || record(row.value))) invalid('invalid snapshot row');
+      || !(row.value === null || isJsonObject(row.value))) invalid('invalid snapshot row');
     normalizeFrontier(row.frontier);
     const key = JSON.stringify([row.table, row.key]);
     if (seen.has(key)) invalid('duplicate snapshot row');

@@ -1794,7 +1794,7 @@ error.
 | `JD0001` | the SQLite library is below the supported floor |
 | `JD0002` | the existing database disagrees with the declared model, or the open failed in the driver |
 | `JD0003` | the driver binding is unavailable on this runtime |
-| `JD0004` | a declared index cannot be mapped to a column, or a planned table, column or index name is longer than the engine holds (PostgreSQL: 63 bytes, refused when the model is planned; §3), or an index would take a name PostgreSQL gives one of the table's own objects (`<table>_pkey`, `<table>_<column>_seq`; §3), or a store-owned entity's member would take the name of the table's own document column (`doc`), of its row identity column on PostgreSQL (`rid`), or of another member's column as the engine compares names (SQLite folds ASCII case; §9.2) |
+| `JD0004` | a declared index cannot be mapped to a column, or a planned table, column or index name is longer than the engine holds (PostgreSQL: 63 bytes, refused when the model is planned; §3), or an index would take a name PostgreSQL gives one of the table's own objects (`<table>_pkey`, `<table>_<column>_seq`; §3), or a store-owned entity's member would take the name of the table's own document column (`doc`), of its row identity column on PostgreSQL (`rid`), or of another member's column as the engine compares names (SQLite folds ASCII case; §9.2), or a collection, entity or join table named like one of the engine's own tables (`_jaren_migrations`, `_jaren_jobs`, `_jaren_changes`, `_jaren_owner`, …; §9.4) |
 | `JD0005` | the model document is invalid |
 | `JD0006` | an open option named a pragma this store does not configure |
 | `JD0007` | the pragma cannot be applied on this driver or store |
@@ -1807,7 +1807,7 @@ error.
 | `JD0014` | a transaction guarantee was requested where it cannot act |
 | `JD0015` | owner was asked of an adopted store whose database has no owner table |
 | `JD0030` | an unknown x-entity member was declared |
-| `JD0031` | relation declarations contradict each other |
+| `JD0031` | relation declarations contradict each other, or two many-to-many declarations that are not inverses name one join table (§9.4) |
 | `JD0032` | the include specification is invalid |
 | `JD0033` | an entity query names no entity array |
 | `JD0034` | a tracked cursor needs a bare entity return |
@@ -2753,7 +2753,10 @@ the SAME kind with different `via`s are two independent edges — which
 is how a legitimate cycle is written (`Post.author` by `authorId` and
 `User.featured` by `featuredPostId`, one-to-one each way).
 Many-to-many pairs must agree on the join table, and a many-to-many
-facing a foreign-key relation is `JD0031`.
+facing a foreign-key relation is `JD0031`. A join table holds one edge: its
+two inverse declarations at most, so the same pair declared twice under the
+implicit name, or two pairs given one `through`, is `JD0031` naming both
+relations (each edge takes a `through` of its own).
 
 - **one-to-many** — `{ to, many: true, via, onDelete }`: `via` names
   the foreign-key property on the TARGET entity (`authorId` on
@@ -2775,7 +2778,11 @@ edge is `JD0031` (children share their parent).
   `<A>_<B>` with the entity names sorted — implicit names are exactly
   the thing teams later regret, so the explicit name exists. Its two
   foreign keys cascade on delete (join rows die with either side; not
-  configurable in this version).
+  configurable in this version). The name of a collection, an entity or a
+  join table is never one of the engine's own tables (`_jaren_migrations`,
+  `_jaren_migration_identity`, `_jaren_changes`, `_jaren_changes_state`,
+  `_jaren_jobs`, `_jaren_job_checkpoints`, `_jaren_owner` and the replication
+  tables), compared with ASCII case folded: `JD0004`.
 
 `onDelete` is REQUIRED wherever a foreign-key column is created —
 `"cascade"`, `"restrict"` or `"setNull"` — never defaulted silently.
