@@ -15,6 +15,7 @@
 import { createStreamReader, createJsonxStreamReader } from '@jarenjs/josl';
 import { JarenValidator } from '@jarenjs/validate';
 import { OUR_SCHEMA_OPTIONS } from '../lib/schema-options.js';
+import { now } from '../lib/format.js';
 import { compileChart } from '@jarenjs/charts';
 import { createStreamAdapter } from '@jarenjs/charts/stream-adapter';
 import chartSchema from '@jarenjs/charts/schemas/chart-definition.schema.json' with { type: 'json' };
@@ -65,14 +66,14 @@ export function chartRenderer(source, config) {
   // geometry-free AST into SVG vnodes is the RUN. Play reports whichever
   // halves a renderer measures, so measure both rather than hand it one
   // wall-clock number it would have to attribute by guessing.
-  const t0 = performance.now();
+  const t0 = now();
   const events = [];
   const definition = parseWithEvents(format, String(source ?? ''), events);
   const outcome = validateDefinition(definition);
   const valid = typeof outcome === 'object' && outcome !== null ? outcome.valid : outcome === true;
   if (!valid) throw new Error('not a valid chart definition (schemas/chart-definition.schema.json)');
   const compiled = compileChart(definition, dataFor(definition, events), { theme: 'host' });
-  const t1 = performance.now();
+  const t1 = now();
   const vnode = compiled.toVnode();
-  return { vnode, compileMs: t1 - t0, runMs: performance.now() - t1 };
+  return { vnode, compileMs: t1 - t0, runMs: now() - t1 };
 }

@@ -16,7 +16,7 @@ import { md, mdArticle, UNTRUSTED } from './markdown.js';
 import { mermaid } from './mermaid.js';
 import { chartRenderer } from './charts.js';
 import { runValidation, localizeErrors } from './validator.js';
-import { formatJson } from '../lib/format.js';
+import { formatJson, timed } from '../lib/format.js';
 
 /** The component, with the site's math/finance/stats packs mounted. */
 export const playComponent = createPlayComponent({ operators: operatorRegistry });
@@ -43,11 +43,6 @@ const mdx = createMdx({ compileQuery: compileJsonQuery });
  * them and the stage prints two real numbers; omit them and it honestly
  * prints one.
  */
-const timed = (fn) => {
-  const t0 = performance.now();
-  const value = fn();
-  return { value, ms: performance.now() - t0 };
-};
 
 const renderers = {
   markdown: (source) => {

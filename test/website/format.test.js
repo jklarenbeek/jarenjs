@@ -3,7 +3,7 @@
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
 
-import { memo1 } from '../../packages/website/src/lib/format.js';
+import { memo1, formatRatio } from '../../packages/website/src/lib/format.js';
 
 describe('website projection memo', () => {
   it('does not cache failures under the previous successful result', () => {
@@ -41,5 +41,19 @@ describe('website projection memo', () => {
     assert.deepStrictEqual(recovered, { value: 'first' });
     assert.strictEqual(memo('first'), recovered);
     assert.strictEqual(calls, 2);
+  });
+});
+
+describe('website speed ratio', () => {
+  it('names the direction and keeps three significant figures', () => {
+    assert.strictEqual(formatRatio(12.3456), '12.3× faster');
+    assert.strictEqual(formatRatio(1), '1× faster');
+    assert.strictEqual(formatRatio(0.5), '2× slower');
+    assert.strictEqual(formatRatio(0.4), '2.5× slower');
+  });
+
+  it('prints a ratio that compares nothing as unknown', () => {
+    for (const ratio of [0, -0, -5, Infinity, -Infinity, NaN, null, undefined, '12'])
+      assert.strictEqual(formatRatio(/** @type {any} */ (ratio)), '—', String(ratio));
   });
 });

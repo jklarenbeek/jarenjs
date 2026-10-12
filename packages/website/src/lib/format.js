@@ -9,6 +9,18 @@ import { Float64 } from '@jarenjs/core/math';
  */
 export const now = () => (typeof performance !== 'undefined' ? performance : Date).now();
 
+/**
+ * Run `fn` once and report its value with the milliseconds it took.
+ * @template T
+ * @param {() => T} fn
+ * @returns {{ value: T, ms: number }}
+ */
+export function timed(fn) {
+  const start = now();
+  const value = fn();
+  return { value, ms: now() - start };
+}
+
 /** A value as pretty-printed JSON — the site's one code-block format. */
 export const formatJson = (value) => JSON.stringify(value, null, 2);
 
@@ -40,9 +52,13 @@ export function formatMsUnscaled(ms) {
   return `${round3(ms)} ms`;
 }
 
-/** A speed ratio: `>1` always means "Jaren is N× faster". */
+/**
+ * A speed ratio: `>1` always means "Jaren is N× faster". A ratio that is
+ * not a positive finite number (a timing of zero on either side) compares
+ * nothing, so it prints as unknown instead of `Infinity× slower`.
+ */
 export function formatRatio(ratio) {
-  if (ratio === null || ratio === undefined || Number.isNaN(ratio)) return '—';
+  if (typeof ratio !== 'number' || !Number.isFinite(ratio) || ratio <= 0) return '—';
   if (ratio >= 1) return `${round3(ratio)}× faster`;
   return `${round3(1 / ratio)}× slower`;
 }

@@ -16,7 +16,7 @@ import {
 import { createTypeTestCompiler } from '@jarenjs/validate/query';
 
 import { cards, code, error, callout } from '../lib/nodes.js';
-import { now, formatJson, formatMsUnscaled } from '../lib/format.js';
+import { timed, formatJson, formatMsUnscaled } from '../lib/format.js';
 
 const compileTypeTest = createTypeTestCompiler();
 
@@ -40,12 +40,6 @@ function parseJson(text, label) {
   catch (err) {
     return { node: error({ message: `${label}: ${/** @type {Error} */ (err).message}` }, 'Invalid JSON') };
   }
-}
-
-function timed(fn) {
-  const start = now();
-  const value = fn();
-  return { value, ms: now() - start };
 }
 
 /**

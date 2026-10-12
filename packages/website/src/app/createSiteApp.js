@@ -688,7 +688,7 @@ function wireBoundaries(app, debounceMs, navigate, projectController) {
   /** The retired #/studio URL → #/project, the share token riding along
    * (applyShareToken opens a studio-document token as a one-app project). */
   function studioRedirect(params) {
-    return params.s === undefined ? '#/project' : `#/project?s=${params.s}`;
+    return params.s === undefined ? '#/project' : `#/project?s=${encodeURIComponent(params.s)}`;
   }
 
   /** Inbound deep links on #/play: `?engine=<id>` opens that engine's first

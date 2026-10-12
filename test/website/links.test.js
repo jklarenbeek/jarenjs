@@ -77,6 +77,19 @@ describe('website — a retired playground link names an engine nobody has', () 
   });
 });
 
+describe('website — a retired studio link carries its token across as one value', () => {
+  it('a token holding & = or # is not split into parameters by the redirect', () => {
+    const { navigated } = mountSite('#/studio?s=a%26b%3D1%23c');
+    assert.deepStrictEqual(navigated, ['#/project?s=a%26b%3D1%23c']);
+  });
+
+  it('a token of the encoder\'s alphabet passes unchanged', () => {
+    const token = encodeShare({ e: 'validate', i: { schemaText: '{}', data: 1 } });
+    assert.deepStrictEqual(mountSite(`#/studio?s=${token}`).navigated, [`#/project?s=${token}`]);
+    assert.deepStrictEqual(mountSite('#/studio').navigated, ['#/project']);
+  });
+});
+
 describe('website — a session token with a shape of its own', () => {
   it('an array is not a pane record', () => {
     assert.deepStrictEqual(sessionToLoaded({ engine: 'validate', source: [1, 2], data: ['x'], config: [] }),
