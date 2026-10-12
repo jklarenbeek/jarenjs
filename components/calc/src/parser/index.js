@@ -23,8 +23,8 @@
  * the leaf; the AST keeps only the numeric value.
  */
 
-import { num, constant, variable, unary, postfix, binary, call, isConstant } from '../ast.js';
-import { CalcParseError } from '../errors.js';
+import { num, constant, variable, unary, postfix, binary, call, isConstant, setSite } from '../ast.js';
+import { CalcParseError, errorAt } from '../errors.js';
 
 /** Sticky number matcher: hex / octal / binary / decimal-with-exponent. */
 const RE_NUMBER = /0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[bB][01]+|(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?/y;
@@ -46,12 +46,7 @@ class Parser {
 
   /** @returns {never} */
   fail(message, pos = this.p) {
-    let line = 1;
-    let col = 1;
-    for (let i = 0; i < pos && i < this.n; i++) {
-      if (this.s.charCodeAt(i) === 10) { line++; col = 1; } else col++;
-    }
-    throw new CalcParseError(message, line, col, pos);
+    throw errorAt(message, this.s, pos);
   }
 
   skipWs() {
@@ -163,14 +158,15 @@ class Parser {
     const mi = RE_IDENT.exec(this.s);
     if (mi !== null && mi.index === this.p) {
       const name = mi[0];
+      const start = this.p;
       this.p += name.length;
       this.skipWs();
       if (this.s.charCodeAt(this.p) === 0x28) { // '(' → call
         this.p++;
         const args = this.parseArgs();
-        return call(name, args);
+        return setSite(call(name, args), this.s, start);
       }
-      return isConstant(name) ? constant(name) : variable(name);
+      return isConstant(name) ? setSite(constant(name), this.s, start) : variable(name);
     }
 
     this.fail(`unexpected '${this.s[this.p]}'`);

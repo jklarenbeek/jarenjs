@@ -12,6 +12,35 @@
 
 export const CALC_AST_VERSION = '0.13.0';
 
+/**
+ * Where a node was written. A side table, so the AST itself stays
+ * geometry-free: a node that was built rather than parsed has no entry.
+ * @type {WeakMap<object, { source: string, position: number }>}
+ */
+const SITES = new WeakMap();
+
+/**
+ * Record the source text and offset a node was parsed from.
+ * @template {object} T
+ * @param {T} node
+ * @param {string} source
+ * @param {number} position 0-based char offset
+ * @returns {T}
+ */
+export function setSite(node, source, position) {
+  SITES.set(node, { source, position });
+  return node;
+}
+
+/**
+ * The source text and offset a node was parsed from, when it was.
+ * @param {object} node
+ * @returns {{ source: string, position: number } | undefined}
+ */
+export function siteOf(node) {
+  return SITES.get(node);
+}
+
 /** Numeric literal (value only — the radix/format is not preserved). */
 export function num(value) {
   return { type: 'num', value: +value };

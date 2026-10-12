@@ -13,7 +13,8 @@
 
 import { parseExpression } from './parser/index.js';
 import { defaultEnv } from './env.js';
-import { CalcParseError } from './errors.js';
+import { CalcParseError, errorAt } from './errors.js';
+import { siteOf } from './ast.js';
 
 /**
  * Compile an AST against an environment.
@@ -40,7 +41,7 @@ function build(node, env) {
     case 'const': {
       const name = node.name;
       const v = env.constants[name];
-      if (v === undefined) throw new CalcParseError(`unknown constant '${name}'`);
+      if (v === undefined) throw refuse(node, `unknown constant '${name}'`);
       return () => v;
     }
     case 'var': {
@@ -72,8 +73,8 @@ function build(node, env) {
     case 'call': {
       // own members only: a name inherited from Object.prototype is no function of ours
       const fn = Object.hasOwn(env.funcs, node.name) ? env.funcs[node.name] : undefined;
-      if (fn === undefined) throw new CalcParseError(`unknown function '${node.name}'`);
-      checkArity(node.name, node.args.length, env.arity);
+      if (fn === undefined) throw refuse(node, `unknown function '${node.name}'`);
+      checkArity(node, env.arity);
       const args = node.args.map((a) => build(a, env));
       return (scope) => fn(args.map((a) => a(scope)), scope);
     }
@@ -83,14 +84,27 @@ function build(node, env) {
 }
 
 /**
+ * The error for a node the environment cannot compile: positioned where
+ * the node was written when the parser recorded it, unpositioned otherwise.
+ * @param {any} node
+ * @param {string} message
+ * @returns {CalcParseError}
+ */
+function refuse(node, message) {
+  const site = siteOf(node);
+  return site === undefined ? new CalcParseError(message) : errorAt(message, site.source, site.position);
+}
+
+/**
  * Refuse a call with an argument count outside the function's declared
  * `[min, max]`. An environment without an `arity` table, or a function
  * without an entry in it, is not checked.
- * @param {string} name
- * @param {number} count
+ * @param {any} node the call node
  * @param {Record<string, readonly [number, number]> | undefined} arity
  */
-function checkArity(name, count, arity) {
+function checkArity(node, arity) {
+  const name = node.name;
+  const count = node.args.length;
   if (arity === undefined || !Object.hasOwn(arity, name)) return;
   const [min, max] = arity[name];
   if (count >= min && count <= max) return;
@@ -98,7 +112,7 @@ function checkArity(name, count, arity) {
   const expected = max === Infinity ? `at least ${min} ${noun(min)}`
     : min === max ? `${min} ${noun(min)}`
       : `${min} or ${max} arguments`;
-  throw new CalcParseError(`${name}() expected ${expected}, got ${count}`);
+  throw refuse(node, `${name}() expected ${expected}, got ${count}`);
 }
 
 /**

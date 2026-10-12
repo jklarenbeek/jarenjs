@@ -295,11 +295,6 @@ establish registry publication or downstream acceptance.
 - [ ] **Programmer 64-bit precision** — the expression evaluator surfaces programmer-mode results as `Number`, so a result beyond 2^53 is rounded before the four-base display wraps it to the word (`0xFFFFFFFFFFFFFFFF` displays `0x0`; [CALC-FORMAT](../components/calc/docs/CALC-FORMAT.md) says so). A BigInt-valued evaluation path would close the gap.
 - [ ] **More converter dimensions & rate providers** — fuel economy (non-affine) and additional API-key-free tickers; websocket/streaming rates are deliberately out of v1 (REST polling only).
 
-- [ ] **Compile errors carry no position.** Unknown functions and arity errors
-  are raised from the compiled AST, which holds no offsets, and report line 1
-  column 1. Wanted: the parser stamps call positions (a side table keeps the
-  AST geometry-free).
-
 ## @jarenjs/play
 
 The engine playground behind `#/play`: pick an engine and an example, edit the

@@ -6,6 +6,23 @@
  * path catches it and never rethrows into the app loop.
  */
 
+/**
+ * An error at a character offset of `source`, with the 1-based line and
+ * column that offset falls on.
+ * @param {string} message
+ * @param {string} source
+ * @param {number} position 0-based char offset
+ * @returns {CalcParseError}
+ */
+export function errorAt(message, source, position) {
+  let line = 1;
+  let column = 1;
+  for (let i = 0; i < position && i < source.length; i++) {
+    if (source.charCodeAt(i) === 10) { line++; column = 1; } else column++;
+  }
+  return new CalcParseError(message, line, column, position);
+}
+
 export class CalcParseError extends Error {
   /**
    * @param {string} message

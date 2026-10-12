@@ -76,7 +76,10 @@ expression as the entry, where it committed `∞`, `NaN` or `—`, which do not
 evaluate; a fetched rate table is marked `status: 'ok'` and not stale, where
 the converter went on printing `rates: idle`; a plot domain narrower than the
 spacing of doubles at its position (near 1e16) lays one tick, where it grew
-its tick array until the engine refused to allocate it.
+its tick array until the engine refused to allocate it; an unknown function, a
+wrong argument count and a constant the environment lacks report the line and
+column of the call (they reported line 1 column 1 wherever it stood; the parser
+records the position in a side table, so the AST itself stays geometry-free).
 
 See `docs/CALC-FORMAT.md` and `ARCHITECTURE.md` for the full contract.
 
