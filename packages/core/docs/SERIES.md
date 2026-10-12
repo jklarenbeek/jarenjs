@@ -227,6 +227,10 @@ denominator of what was *seen*. All six value aggregates (`sum`, `mean`,
 `null` exactly when there was nothing to measure and `count` says
 whether that was because nobody reported or because everybody reported a
 gap. `aggregate: 'count'` returns that row count as the value.
+With the `omit` fill the ladder jumps from one occupied bucket to the next, so two rows far apart cost
+time in the rows, not in the span. A bucket start that is never emitted is never evaluated, so
+`disambiguation: 'reject'` judges only the starts the `omit` fill emits: an empty bucket on a skipped or
+doubled local time no longer raises (the other fills still raise, because they emit it).
 
 With no `start`/`end` the window is the data's own — the bucket holding
 the first sample through the bucket holding the last — because the only

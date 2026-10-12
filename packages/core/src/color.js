@@ -12,19 +12,19 @@ function clampChannel(value) {
 }
 
 /**
- * Linear-interpolate two `#rrggbb` hex colors channel-by-channel and
- * return the result as `#rrggbb`. `t` is the blend factor (0 → `a`,
+ * Linear-interpolate two hex colors (`#rrggbb`, or `#rgb` read as
+ * `#rrggbb`) channel-by-channel and return the result as `#rrggbb`. `t` is the blend factor (0 → `a`,
  * 1 → `b`); values outside `[0, 1]` extrapolate, each channel held to
  * 0–255.
  *
- * @param {string} a a `#rrggbb` hex color
- * @param {string} b a `#rrggbb` hex color
+ * @param {string} a a `#rrggbb` or `#rgb` hex color
+ * @param {string} b a `#rrggbb` or `#rgb` hex color
  * @param {number} t blend factor
  * @returns {string} the interpolated `#rrggbb` color
  */
 export function lerpColor(a, b, t) {
-  const pa = parseInt(a.slice(1), 16);
-  const pb = parseInt(b.slice(1), 16);
+  const pa = parseInt(expandHex(a).slice(1), 16);
+  const pb = parseInt(expandHex(b).slice(1), 16);
   const ar = (pa >> 16) & 255, ag = (pa >> 8) & 255, ab = pa & 255;
   const br = (pb >> 16) & 255, bg = (pb >> 8) & 255, bb = pb & 255;
   const r = clampChannel(ar + (br - ar) * t);
@@ -40,11 +40,11 @@ export function lerpColor(a, b, t) {
  * pick a legible ink over an arbitrary fill (light ink below ~0.4,
  * dark ink above).
  *
- * @param {string} hex a `#rrggbb` hex color
+ * @param {string} hex a `#rrggbb` or `#rgb` hex color
  * @returns {number} relative luminance in [0, 1]
  */
 export function relativeLuminance(hex) {
-  const p = parseInt(hex.slice(1), 16);
+  const p = parseInt(expandHex(hex).slice(1), 16);
   const r = channel(((p >> 16) & 255) / 255);
   const g = channel(((p >> 8) & 255) / 255);
   const b = channel((p & 255) / 255);

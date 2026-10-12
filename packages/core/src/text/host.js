@@ -20,7 +20,17 @@ import {
 
 
 //#region Host Tests
-const CONST_REGEXP_MAC_ADDR = /^(?:[0-9A-Fa-f]{2}([:-]?)[0-9A-Fa-f]{2})(?:(?:\1|\.)(?:[0-9A-Fa-f]{2}([:-]?)[0-9A-Fa-f]{2})){2}$/;
+// Six octets in one of the four spellings an EUI-48 has, and no mixing of
+// them: `aa:bb:cc:dd:ee:ff`, `aa-bb-cc-dd-ee-ff`, `aabb.ccdd.eeff` and
+// `aabbccddeeff`.
+const CONST_REGEXP_MAC_ADDR = /^(?:[0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5}|[0-9A-Fa-f]{2}(?:-[0-9A-Fa-f]{2}){5}|[0-9A-Fa-f]{4}(?:\.[0-9A-Fa-f]{4}){2}|[0-9A-Fa-f]{12})$/;
+/**
+ * Whether a string is an EUI-48 hardware address in one consistent
+ * spelling: colon-separated, hyphen-separated, dotted in three groups of
+ * four digits, or with no separator at all.
+ * @param {string} str
+ * @returns {boolean}
+ */
 export function isValidMACAddr(str) {
   return CONST_REGEXP_MAC_ADDR.test(str);
 }

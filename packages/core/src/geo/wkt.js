@@ -504,8 +504,33 @@ function isEvery3D(value) {
   return seen && all;
 }
 
-/** One tagged geometry, modifier and all, or null. */
-function writeGeometry(geometry, dim) {
+/** Whether a ring has four positions and its first and last agree, as far
+ * as the written dimension goes. */
+function isWritableRing(ring, hasZ) {
+  const n = ring.length;
+  if (n < 4)
+    return false;
+  const a = ring[0];
+  const b = ring[n - 1];
+  return a[0] === b[0] && a[1] === b[1] && (!hasZ || a[2] === b[2]);
+}
+
+/** Whether the coordinates meet the reader's minimum for the type: two
+ * positions in a line, closed rings of four in a polygon. */
+function isWritableShape(type, coordinates, hasZ) {
+  switch (type) {
+    case 'LineString': return coordinates.length >= 2;
+    case 'MultiLineString': return coordinates.every((line) => line.length >= 2);
+    case 'Polygon': return coordinates.every((ring) => isWritableRing(ring, hasZ));
+    case 'MultiPolygon':
+      return coordinates.every((rings) => rings.every((ring) => isWritableRing(ring, hasZ)));
+    default: return true;
+  }
+}
+
+/** One tagged geometry, modifier and all, or null. `level` is how many
+ * collections enclose it. */
+function writeGeometry(geometry, dim, level = 0) {
   if (geometry === null || typeof geometry !== 'object' || Array.isArray(geometry))
     return null;
   const type = geometry.type;
@@ -515,11 +540,14 @@ function writeGeometry(geometry, dim) {
       return null;
     if (geometries.length === 0)
       return 'GEOMETRYCOLLECTION EMPTY';
+    // a member nested past the reader's bound is text the reader refuses
+    if (level >= MAX_COLLECTION_DEPTH)
+      return null;
     const parts = [];
     for (let i = 0; i < geometries.length; i++) {
       // each member carries its own modifier, which is the only place
       // WKT lets the dimension change inside one value
-      const text = writeGeometry(geometries[i], dim);
+      const text = writeGeometry(geometries[i], dim, level + 1);
       if (text === null)
         return null;
       parts.push(text);
@@ -535,8 +563,13 @@ function writeGeometry(geometry, dim) {
   if (coordinates.length === 0)
     return `${body.tag} EMPTY`;
   const hasZ = dim === 3 && isEvery3D(geometry);
+  // text the reader refuses is a value that cannot be written; the shape
+  // is checked while the nest is walked (writeCoordinates answers null
+  // for anything that is not arrays of positions)
   const text = writeCoordinates(coordinates, body.depth, hasZ, body.wrap);
-  return text === null ? null : `${body.tag}${hasZ ? ' Z' : ''} ${text}`;
+  if (text === null || !isWritableShape(type, coordinates, hasZ))
+    return null;
+  return `${body.tag}${hasZ ? ' Z' : ''} ${text}`;
 }
 
 /**
@@ -579,7 +612,10 @@ function geometryToWrite(value) {
  * never emitted.
  *
  * A non-finite coordinate yields `null`: a value that cannot be written
- * is not written approximately.
+ * is not written approximately. So does a geometry {@link isValidWkt}
+ * would refuse once written: a polygon ring of fewer than four positions
+ * or whose first and last positions differ (altitude included), a line
+ * of one position, or collections nested more than eight deep.
  *
  * @param {any} value
  * @param {{ dim?: number }} [options]

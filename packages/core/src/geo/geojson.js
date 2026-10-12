@@ -23,7 +23,8 @@ import { sphericalRingArea, pointInPolygon, isRingClosed } from './ring.js';
 
 /**
  * Whether a value looks like a bare position: an array of at least two
- * finite numbers.
+ * numbers. Finiteness is not judged here: {@link bboxOf} answers null for
+ * a non-finite position, and the writer refuses one.
  * @param {any} value
  * @returns {boolean}
  */

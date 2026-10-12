@@ -84,7 +84,8 @@ export function median(values) {
  * The quantile methods this module knows.
  *
  * - `'nearest-rank'`: the value at rank `max(1, ceil(p · n))` of the
- *   ascending sample — always a value that was measured, never one
+ *   ascending sample, where a product within a few ulps of a whole rank
+ *   is that rank (`0.07` over 100 values is the 7th, not the 8th) — always a value that was measured, never one
  *   invented between two. The benchmark rule.
  * - `'linear'`: rank `(n − 1) · p`, interpolated linearly between the
  *   values at `floor` and `ceil` of it (Hyndman–Fan type 7, the default
@@ -117,7 +118,16 @@ export function quantile(values, p, options) {
   const n = values.length;
   if (n === 0) return undefined;
   const sorted = ascending(values);
-  if (method === 'nearest-rank') return sorted[Math.max(1, Math.ceil(p * n)) - 1];
+  if (method === 'nearest-rank') {
+    // `p * n` of a decimal `p` carries the rounding of `p` itself
+    // (0.07 * 100 is 7.000000000000001), and a ceiling would take the
+    // next measured value; a product within a few ulps of a whole rank
+    // is that rank
+    const exact = p * n;
+    const whole = Math.round(exact);
+    const rank = Math.abs(exact - whole) <= n * 4 * Number.EPSILON ? whole : Math.ceil(exact);
+    return sorted[Math.max(1, rank) - 1];
+  }
   const rank = (n - 1) * p;
   const lo = Math.floor(rank);
   const hi = Math.ceil(rank);

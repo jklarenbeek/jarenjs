@@ -1255,12 +1255,10 @@ thing to avoid.
   than a table entry. Note `todayMarker` is **not** on this list and never
   will be — it needs a clock, and there is none (see the constraint above);
   a host that wants "now" on a diagram supplies the instant as data.
-- [ ] **`resampleSeries` walks every empty position, and its ladder is inexact
-  near 2^52.** Two rows far apart at a small `every` cost time in proportion to
-  the span over the width, whatever the fill, not to the rows; and past about
-  2^52 ms the ladder's float arithmetic misaligns bucket starts that a
-  database's integer arithmetic places exactly. Wanted: walk the occupied
-  buckets for an omit fill; compute the ladder in exact integers.
+- [ ] **A resample fill over a window far wider than its width emits a row per
+  bucket.** A non-omit fill answers every bucket of the declared window, so a
+  wide window at a small `every` produces a row per position. Wanted: decide a
+  cap, or refuse a window whose bucket count passes one.
 
 ## Geospatial (cross-package)
 

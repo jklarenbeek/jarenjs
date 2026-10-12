@@ -395,7 +395,19 @@ export function resampleSeries(rows, spec) {
   let start = buckets.startOf(index);
   let i = from;
   while (start < limit) {
-    const end = buckets.calendar ? buckets.startOf(index + 1) : start + buckets.width;
+    let end = buckets.calendar ? buckets.startOf(index + 1) : start + buckets.width;
+    if (fill === 'omit') {
+      // an empty bucket is not emitted, so none is walked: with no row
+      // left the window is done, and with one further on the ladder
+      // jumps to the bucket that holds it
+      if (i >= to)
+        break;
+      if (samples[i].at >= end) {
+        index = buckets.indexOf(samples[i].at);
+        start = buckets.startOf(index);
+        end = buckets.calendar ? buckets.startOf(index + 1) : start + buckets.width;
+      }
+    }
     let count = 0;
     let n = 0;
     let sum = 0;

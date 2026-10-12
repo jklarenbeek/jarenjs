@@ -116,6 +116,45 @@ export function sphericalRingArea(ring, radius = EARTH_RADIUS) {
 }
 
 /**
+ * Where a position lies against a ring: 0 outside, 1 on an edge or
+ * vertex, 2 strictly inside (even-odd rule).
+ * @param {number} x
+ * @param {number} y
+ * @param {Array<number[]>} ring
+ * @returns {number}
+ */
+function locateInRing(x, y, ring) {
+  const n = ring.length;
+  if (n < 3)
+    return 0;
+  let inside = false;
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    const xi = ring[i][0];
+    const yi = ring[i][1];
+    const xj = ring[j][0];
+    const yj = ring[j][1];
+    // Two cheap tests decide whether the exact predicate is needed at
+    // all. An edge that neither straddles the ray nor holds the point
+    // inside its closed bounding box can affect neither answer, and on
+    // a large ring that is almost every edge - so the robust
+    // orientation runs a handful of times instead of twice per vertex.
+    const straddles = (yi > y) !== (yj > y);
+    const spans = (xi < xj ? xi <= x && x <= xj : xj <= x && x <= xi)
+      && (yi < yj ? yi <= y && y <= yj : yj <= y && y <= yi);
+    if (!straddles && !spans)
+      continue;
+    const side = orient2d(xi, yi, xj, yj, x, y);
+    // exactly on this edge, and within its extent rather than its line
+    if (side === 0 && spans)
+      return 1;
+    // the crossing test itself: is the edge to the right of the point
+    if (straddles && side !== 0 && (side > 0) === (yj > yi))
+      inside = !inside;
+  }
+  return inside ? 2 : 0;
+}
+
+/**
  * Whether a position lies inside a ring, by the even-odd (crossing)
  * rule. A position exactly on an edge or vertex counts as **inside**,
  * which is the convention that makes adjacent polygons tile without
@@ -132,49 +171,26 @@ export function sphericalRingArea(ring, radius = EARTH_RADIUS) {
  * @returns {boolean}
  */
 export function pointInRing(x, y, ring) {
-  const n = ring.length;
-  if (n < 3)
-    return false;
-  let inside = false;
-  for (let i = 0, j = n - 1; i < n; j = i++) {
-    const xi = ring[i][0];
-    const yi = ring[i][1];
-    const xj = ring[j][0];
-    const yj = ring[j][1];
-    // Two cheap tests decide whether the exact predicate is needed at
-    // all. An edge that neither straddles the ray nor spans the point
-    // can affect neither answer, and on a large ring that is almost
-    // every edge - so the robust orientation runs a handful of times
-    // instead of twice per vertex.
-    const straddles = (yi > y) !== (yj > y);
-    const spans = (xi < x) === (x <= xj) && (yi < y) === (y <= yj);
-    if (!straddles && !spans)
-      continue;
-    const side = orient2d(xi, yi, xj, yj, x, y);
-    // exactly on this edge, and within its extent rather than its line
-    if (side === 0 && spans)
-      return true;
-    // the crossing test itself: is the edge to the right of the point
-    if (straddles && side !== 0 && (side > 0) === (yj > yi))
-      inside = !inside;
-  }
-  return inside;
+  return locateInRing(x, y, ring) !== 0;
 }
 
 /**
  * Whether a position lies inside a polygon: inside its exterior ring and
- * outside every hole.
+ * not strictly inside any hole. The boundary counts as inside for the
+ * polygon as for a ring, so a position on a hole's edge or vertex is on
+ * the polygon's own boundary and is inside; a polygon that fills the
+ * hole claims it too, and the two tile without a gap.
  * @param {number} x - longitude
  * @param {number} y - latitude
  * @param {Array<Array<number[]>>} rings - a GeoJSON Polygon's coordinates
  * @returns {boolean}
  */
 export function pointInPolygon(x, y, rings) {
-  if (rings.length === 0 || !pointInRing(x, y, rings[0]))
+  if (rings.length === 0 || locateInRing(x, y, rings[0]) === 0)
     return false;
   for (let i = 1; i < rings.length; i++) {
-    if (pointInRing(x, y, rings[i]))
-      return false; // in a hole
+    if (locateInRing(x, y, rings[i]) === 2)
+      return false; // strictly inside a hole
   }
   return true;
 }

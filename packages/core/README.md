@@ -24,6 +24,18 @@ next channel, and a negative `t` returned a malformed `#80`); `canonicalNullable
 or threw with a sibling keyword); `haversineDistance` over a NaN coordinate is `NaN`
 (it was half the planet, 20,015,114 m); `Float64.fib(Infinity)` and `Float64.factorial(Infinity)`
 answer `Infinity` (they never returned).
+`quantile(..., { method: 'nearest-rank' })` reads a decimal probability as the rank it names
+(`p = 0.07` over 100 values is the seventh; it was the eighth, and the default 95% bootstrap
+interval over 1000 resamples took rank 26 for its lower bound instead of 25). `lerpColor` and
+`relativeLuminance` read `#rgb` as `#rrggbb` (they parsed it as the number 0x0rgb).
+`pointInRing` counts the right and top edges and every corner of a ring as inside, like the
+left and bottom ones (they answered `false`). `pointInPolygon` counts a position on a hole's edge or vertex as inside the polygon (the
+boundary rule), where the hole's right and top edges and corners used to be inside and its left and
+bottom edges outside; only a position strictly inside the hole is outside. `isValidMACAddr` refuses an address that
+changes its separator or grouping (`aa:bb:cc-dd:ee:ff`, `Bf27.c107d3b1`). `geoJsonToWkt`
+answers `null` for a ring the reader would refuse (fewer than four positions, ends that
+differ), a one-position line and collections nested past eight, where it wrote text
+`isValidWkt` rejects.
 `equalsDeep` compares two `Date`s by instant (every pair used to read equal) and
 reads a null-prototype object like any other. `axisTicksLinear` keeps the tick at
 either end of the domain when the quotient rounds just short of a whole number
