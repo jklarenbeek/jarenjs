@@ -564,7 +564,9 @@ if (asyncLiveLeak.length)
 // Raised to 954,500 (measured 954485): the store's closed options, relation drops beside renames and derived foreign keys (about 1340), and the engine's group-key identity for bigints and undefined members (about 300) add 1770.
 // Raised to 955,100 (measured 955085): core's occupied-bucket resample walk, nearest-rank quantiles and the WKT writer's validation add 600.
 // Raised to 955,400 (measured 955324): the claim that dead-letters a job whose lease expired past its attempt bound adds 345.
-if (clientBytes > 955400)
+// Raised to 955,600 (measured 955583): SQLite's extremes and projections read
+// large integer-valued doubles back as doubles (add 259).
+if (clientBytes > 955600)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 
