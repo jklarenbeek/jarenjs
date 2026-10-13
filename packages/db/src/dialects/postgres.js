@@ -443,10 +443,10 @@ function pathElementsOf(literal) {
  * non-negative integer is an ARRAY INDEX, as it was on the way in, except
  * where `isName` says the guard of the path made it a name.
  * @param {string[]} elements
- * @param {(at: number) => boolean} [isName]
+ * @param {(at: number) => boolean} isName
  * @returns {import('../dialect.js').JsonPathSegment[]}
  */
-function segmentsOfElements(elements, isName = () => false) {
+function segmentsOfElements(elements, isName) {
   return elements.map((element, at) => (!isName(at) && /^(?:0|[1-9][0-9]*)$/.test(element)
     ? { index: Number(element) }
     : { name: element }));

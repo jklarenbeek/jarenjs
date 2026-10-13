@@ -162,19 +162,19 @@ changes, until it is measured again:
 
 <!--fact:postgres.membership-->
 
-Measured 2026-10-13T09:30:00.401Z: PostgreSQL 17.11 (Debian 17.11-1.pgdg12+2) (jit=on, jit_above_cost=100000, jit_inline_above_cost=500000, jit_optimize_above_cost=500000), Node 24.20.0, pg 8.23.0; 2000 documents in each table, analyzed first; the median of 31 calls after 6 warm-up calls; host load (one-minute average) 0.81 before and 0.98 after, on 16 cores.
+Measured 2026-10-13T09:41:47.539Z: PostgreSQL 17.11 (Debian 17.11-1.pgdg12+2) (jit=on, jit_above_cost=100000, jit_inline_above_cost=500000, jit_optimize_above_cost=500000), Node 24.20.0, pg 8.23.0; 2000 documents in each table, analyzed first; the median of 31 calls after 6 warm-up calls; host load (one-minute average) 0.91 before and 0.92 after, on 16 cores.
 
 One statement carries at most 128 leaf predicates. A chain of `$and` pairs (pairs) is not regrouped, so every term is a leaf; the same number of terms written as equalities on one member and ranges on another (regrouped) becomes one membership list and one bound.
 
 | Chain | Terms | Leaf predicates | Plan | `execute()` ms | The engine alone, ms | Rows |
 |---|---:|---:|---|---:|---:|---:|
-| pairs | 50 | 50 | native | 2.15 | 10.13 | 25 |
-| pairs | 100 | 100 | native | 2.64 | 12.90 | 50 |
-| pairs | 200 | 200 | engine, `predicate.termBound` | 18.81 | same route | 100 |
-| pairs | 400 | 400 | engine, `predicate.termBound` | 30.83 | same route | 200 |
-| regrouped | 400 | 2 | native | 4.04 | 41.85 | 200 |
+| pairs | 50 | 50 | native | 2.21 | 10.06 | 25 |
+| pairs | 100 | 100 | native | 2.73 | 13.00 | 50 |
+| pairs | 200 | 200 | engine, `predicate.termBound` | 19.36 | same route | 100 |
+| pairs | 400 | 400 | engine, `predicate.termBound` | 32.23 | same route | 200 |
+| regrouped | 400 | 2 | native | 4.05 | 42.59 | 200 |
 
-The native statements under `EXPLAIN (ANALYZE)`: the planner priced them at 147.29 to 288.37 against jit_above_cost=100000, the server planned them in 0.08 to 0.35 ms and ran them in 0.11 to 1.72 ms, and its JIT compiled 0 of the 3.
+The native statements under `EXPLAIN (ANALYZE)`: the planner priced them at 147.29 to 288.37 against jit_above_cost=100000, the server planned them in 0.08 to 0.39 ms and ran them in 0.11 to 1.73 ms, and its JIT compiled 0 of the 3.
 
 The planner's own estimate, `explain().budget.estimatedRows`, against the rows each statement returns:
 
