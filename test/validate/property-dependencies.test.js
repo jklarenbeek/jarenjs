@@ -488,11 +488,11 @@ describe('propertyDependencies with malformed values', function () {
   });
 });
 
-// The draft-next suite files carry the keyword's conformance cases. The
-// benchmark loader does not run that folder, so they run here with the option
+// The draft-next suite files carry the keyword's conformance cases, vendored
+// under fixtures/ (PROVENANCE.md there). The benchmark loader does not run that folder, so they run here with the option
 // on, in both modes, exactly as written (the draft-next dialect is read as
 // 2020-12).
-const SUITE = new URL('../../benchmark/suite/tests/draft-next/', import.meta.url);
+const SUITE = new URL('./fixtures/property-dependencies/', import.meta.url);
 const NEXT_SCHEMA = 'https://json-schema.org/draft/next/schema';
 
 function suiteGroups(file) {
