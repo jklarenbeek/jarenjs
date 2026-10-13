@@ -221,7 +221,8 @@ if (chainEdgeLeak.length > 0)
 // Raised to 218,700 (measured 218633): the engine's group-key identity for bigints and undefined members add 165.
 // Raised to 219,200 (measured 219196): core's occupied-bucket resample walk and nearest-rank quantiles the engine carries add 563.
 // Raised to 219,600 (measured 219582): the shared capture's coded refusal of JSON.stringify on a captured value add 386.
-if (chainBytes > 219600)
+// Raised to 220,200 (measured 220136): the resample fill's bucket budget the chain's series operators carry adds 554.
+if (chainBytes > 220200)
   throw new Error(`The chain bundle grew to ${chainBytes} bytes.`);
 
 console.log(`Tree-shaking smoke test passed (${chainBytes} byte chain bundle; no schema-pen module, no client module, no store/validator/formats bytes).`);
@@ -578,7 +579,8 @@ if (asyncLiveLeak.length)
 // Raised to 961,600 (measured 961595): the profile's predicate on point reads, the keyset load's per-call continuation binding and the term weights of external comparisons add 1232.
 // Raised to 963,200 (measured 963128): the guarded reads of an open-container index path, the step kinds a migration compares and the null-counting grouped fold add 1533.
 // Raised to 964,100 (measured 964083): the codec agreement check of a model, the text-encoding check at open and the bounded ledger sweep add 955.
-if (clientBytes > 964100)
+// Raised to 964,800 (measured 964759): the retype's value-survival check and the resample fill's bucket budget add 676.
+if (clientBytes > 964800)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 
