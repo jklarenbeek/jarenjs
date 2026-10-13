@@ -387,6 +387,17 @@ export function createDialect(spec) {
       return `ALTER TABLE ${q(table)} ADD CONSTRAINT ${q(name)} CHECK (${sql})`;
     },
     /**
+     * Add one foreign key to an existing table, named as the engine names a
+     * key declared with the column — a cycle's key arriving once the tables
+     * it spans exist.
+     * @param {{ table: string, column: string, references: { table: string,
+     *   column: string, onDelete: 'cascade' | 'restrict' | 'setNull' } }} shape
+     * @returns {string}
+     */
+    addForeignKey({ table, column, references }) {
+      return `ALTER TABLE ${q(table)} ADD FOREIGN KEY (${q(column)})${referenceSql(references)}`;
+    },
+    /**
      * Drop a named CHECK from an existing table.
      * @param {{ table: string, name: string }} shape
      * @returns {string}

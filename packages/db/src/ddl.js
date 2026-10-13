@@ -1163,6 +1163,9 @@ function keyColumnType(keyColumn, dialect, referencing, single = true) {
  * references itself needs no other; a cycle has no such order, and each table
  * of it is placed after the ones it reaches first (A and B referencing each
  * other, declared A then B, are created B then A), the walk being depth first.
+ * A dialect that alters a table in place creates the cycle's tables without
+ * the keys that close it and adds them afterwards (`planEntity`'s
+ * `deferCycles`).
  * @param {string[]} names - in declaration order
  * @param {(name: string) => Iterable<string>} referencesOf
  * @returns {string[]}
@@ -1179,6 +1182,28 @@ export function creationOrder(names, referencesOf) {
   };
   for (const name of names) visit(name);
   return order;
+}
+
+/**
+ * Whether the foreign key from `table` to `target` closes a cycle: the target
+ * is another table that references `table` again, directly or through others.
+ * A table that references itself closes none.
+ * @param {string} table
+ * @param {string} target
+ * @param {any} entities - the full `explainMapping` result
+ * @returns {boolean}
+ */
+function closesCycle(table, target, entities) {
+  if (target === table) return false;
+  const seen = new Set([target]);
+  const queue = [target];
+  for (let i = 0; i < queue.length; i++) {
+    for (const fk of entities.entities[queue[i]]?.foreignKeys ?? []) {
+      if (fk.references === table) return true;
+      if (!seen.has(fk.references)) { seen.add(fk.references); queue.push(fk.references); }
+    }
+  }
+  return false;
 }
 
 /**
@@ -1219,12 +1244,16 @@ const expectedColumnsOf = (columns, legacyTypes, dialect) => [...columns
  * @param {any} entities - the full `explainMapping` result (key types
  *   come from the referenced entity's columns)
  * @param {any} dialect
+ * @param {{ deferCycles?: boolean }} [options] - `deferCycles`: on a dialect
+ *   that alters a table in place, leave the foreign keys that close a cycle
+ *   out of the table and plan them as `deferredForeignKeys`, statements to
+ *   run once every table of the cycle exists
  * @returns {{ table: string, createSql: string[], expected: any,
  *   columnNames: Set<string>, objects?: { name: string, what: string, docPath: string }[],
  *   programs?: any[], conditionColumns?: { name: string, physical: string, codec: string }[],
- *   autoKey?: string, keyAllocates?: boolean }}
+ *   deferredForeignKeys?: string[], autoKey?: string, keyAllocates?: boolean }}
  */
-export function planEntity(name, entityMapping, entities, dialect) {
+export function planEntity(name, entityMapping, entities, dialect, options = {}) {
   if (entityMapping.document === false) {
     if (!dialect.invariantTriggers && entityMapping.invariants.some((rule) => rule.enforcement === 'database'))
       throw new DbCompileError('JD0005', 'this dialect cannot verify declared database invariant triggers');
@@ -1300,9 +1329,16 @@ export function planEntity(name, entityMapping, entities, dialect) {
   }
   columns.push({ name: DOC_COLUMN, type: dialect.docColumnType, notNull: true });
 
+  // a foreign key that closes a cycle names a table that may not exist yet:
+  // the table is created without it and the key is added once the cycle's
+  // tables exist (the table still PLANS it, so the open verifies it)
+  const deferred = options.deferCycles === true && dialect.capabilities.alterTableFull === true
+    ? new Set(entityMapping.foreignKeys.filter((/** @type {any} */ fk) => closesCycle(name, fk.references, entities)).map((/** @type {any} */ fk) => fk.column))
+    : new Set();
   const createSql = [dialect.ddl.createRelationalTable({
     table: name,
-    columns,
+    columns: deferred.size === 0 ? columns
+      : columns.map((column) => (deferred.has(column.name) ? { ...column, references: undefined } : column)),
     compositeKey: singleKey ? undefined : entityMapping.keys,
   })];
   // one index per column, keyed by its name: a declared `index`/`unique`
@@ -1373,6 +1409,9 @@ export function planEntity(name, entityMapping, entities, dialect) {
     columnNames: new Set(columns.map((column) => column.name)),
     ...(autoColumn === undefined ? {} : { autoKey: autoColumn.name }),
     expectedForeignKeys: expectedForeignKeysOf(columns),
+    /** The statements that add the cycle's foreign keys, run after every table of the cycle exists. */
+    deferredForeignKeys: columns.filter((column) => deferred.has(column.name))
+      .map((column) => dialect.ddl.addForeignKey({ table: name, column: column.name, references: column.references })),
     objects,
     /** The programs of the entity's database rules, in install order (their SQL ends `createSql`). */
     programs,

@@ -25,7 +25,18 @@ const MODELS = /** @type {Record<string, any>} */ ({
     B: ent({ cs: rel('C', { many: true, via: 'bId', onDelete: 'cascade' }), aId: { type: 'string' } }),
     A: ent({ bs: rel('B', { many: true, via: 'aId', onDelete: 'cascade' }) }),
   },
+  'two one-to-ones that reference each other in a cycle': {
+    Person: ent({ petId: { type: 'string' }, pet: rel('Pet', { via: 'petId', onDelete: 'setNull' }) }),
+    Pet: ent({ ownerId: { type: 'string' }, owner: rel('Person', { via: 'ownerId', onDelete: 'setNull' }) }),
+  },
+  'a cycle of three beside a table that references itself': {
+    C: ent({ aId: { type: 'string' }, a: rel('A', { via: 'aId', onDelete: 'setNull' }) }),
+    Tree: ent({ parentId: { type: 'string' }, parent: rel('Tree', { via: 'parentId', onDelete: 'setNull' }) }),
+    A: ent({ bId: { type: 'string' }, b: rel('B', { via: 'bId', onDelete: 'setNull' }) }),
+    B: ent({ cId: { type: 'string' }, c: rel('C', { via: 'cId', onDelete: 'setNull' }) }),
+  },
 });
+const CYCLE = MODELS['two one-to-ones that reference each other in a cycle'];
 
 describe('the order tables are created in', () => {
   it('a migration adds a child and its parent in the order that works, on either dialect', () => {
@@ -38,6 +49,23 @@ describe('the order tables are created in', () => {
     }
   });
 
+  it('a migration creates a cycle\'s tables, then adds its foreign keys after, on PostgreSQL only', () => {
+    const steps = (/** @type {any} */ dialect) => planModelMigration({ $model: '0.1', entities: { Other: ent() } }, { $model: '0.1', entities: { Other: ent(), ...CYCLE } }, { dialect, id: 'cycle' })
+      .migration.steps.map((/** @type {any} */ step) => step.sql).filter((/** @type {any} */ sql) => /^(CREATE TABLE|ALTER TABLE)/.test(sql ?? ''));
+    const pg = steps(postgresDialect({ searchPath: 'tenant' }));
+    assert.deepStrictEqual(pg.map((sql) => /^(CREATE TABLE|ALTER TABLE) "(\w+)"/.exec(sql)?.slice(1, 3).join(' ')), ['CREATE TABLE Pet', 'CREATE TABLE Person', 'ALTER TABLE Pet', 'ALTER TABLE Person']);
+    assert.ok(pg.slice(0, 2).every((sql) => !sql.includes('REFERENCES')), pg.join('\n'));
+    assert.match(pg[3], /^ALTER TABLE "Person" ADD FOREIGN KEY \("petId"\) REFERENCES "Pet" \("id"\) ON DELETE SET NULL DEFERRABLE INITIALLY IMMEDIATE$/);
+    assert.match(pg[2], /^ALTER TABLE "Pet" ADD FOREIGN KEY \("ownerId"\) REFERENCES "Person" \("id"\) ON DELETE SET NULL DEFERRABLE INITIALLY IMMEDIATE$/);
+    const tree = planModelMigration({ $model: '0.1', entities: { Other: ent() } }, { $model: '0.1', entities: { Other: ent(), Tree: MODELS['a cycle of three beside a table that references itself'].Tree } },
+      { dialect: postgresDialect({ searchPath: 'tenant' }), id: 'tree' }).migration.steps.map((/** @type {any} */ step) => step.sql).filter((/** @type {any} */ sql) => /^(CREATE TABLE|ALTER TABLE)/.test(sql ?? ''));
+    assert.strictEqual(tree.length, 1, 'a table that references itself keeps its key in its own CREATE');
+    assert.match(tree[0], /REFERENCES "Tree"/);
+    const lite = steps(sqliteDialect);
+    assert.deepStrictEqual(lite.map((sql) => /^(CREATE TABLE|ALTER TABLE) "(\w+)"/.exec(sql)?.slice(1, 3).join(' ')), ['CREATE TABLE Pet', 'CREATE TABLE Person'], 'SQLite adds nothing');
+    assert.ok(lite.every((sql) => sql.includes('REFERENCES')), lite.join('\n'));
+  });
+
   it('is the declared order, with each table after those it references', () => {
     const references = /** @type {Record<string, string[]>} */ ({ Book: ['Author'], Author: [], Profile: ['Author', 'Elsewhere'], Self: ['Self'], A: ['B'], B: ['A'] });
     const of = (/** @type {string[]} */ names) => creationOrder(names, (name) => references[name]);
@@ -46,6 +74,29 @@ describe('the order tables are created in', () => {
     assert.deepStrictEqual(of(['Profile', 'Book', 'Author']), ['Author', 'Profile', 'Book'], 'a reference outside the set asks for nothing');
     assert.deepStrictEqual(of(['Self', 'Book', 'Author']), ['Self', 'Author', 'Book'], 'a table that references itself needs no other');
     assert.deepStrictEqual(of(['A', 'Author', 'B']), ['B', 'A', 'Author'], 'a cycle has no order: it keeps the one it was declared in, after what it needs');
+  });
+
+  describe('PostgreSQL: a cycle', { skip: skipFor('postgres') }, () => {
+    it('opens with both foreign keys in the catalog, enforces them, and verifies them on the next open', async () => {
+      const model = { $model: '0.1', entities: CYCLE };
+      await withPostgres(async ({ pool, schema, driver }) => {
+        const store = await openStore(model, { driver: driver() });
+        try {
+          await store.entity('Person').create({ id: 'a' });
+          await store.entity('Pet').create({ id: 'p', ownerId: 'a' });
+          await store.entity('Person').update('a', { petId: 'p' });
+          await assert.rejects(store.entity('Pet').create({ id: 'q', ownerId: 'nobody' }));
+          await store.entity('Pet').delete('p');
+          assert.strictEqual((await store.entity('Person').get('a'))?.petId, undefined, 'ON DELETE SET NULL reaches the other side of the cycle');
+        }
+        finally { await store.close(); }
+        const { rows } = await pool.query('SELECT conrelid::regclass::text AS "table", pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE contype = $1 AND connamespace = $2::regnamespace ORDER BY 1', ['f', schema]);
+        assert.deepStrictEqual(rows.map((row) => row.def.replace(`${schema}.`, '')), ['FOREIGN KEY ("petId") REFERENCES "Pet"(id) ON DELETE SET NULL DEFERRABLE', 'FOREIGN KEY ("ownerId") REFERENCES "Person"(id) ON DELETE SET NULL DEFERRABLE']);
+        await (await openStore(model, { driver: driver() })).close();
+        await pool.query(`ALTER TABLE "${schema}"."Person" DROP CONSTRAINT "Person_petId_fkey"`);
+        await assert.rejects(openStore(model, { driver: driver() }), { code: 'JD0002', message: /the foreign keys are \[\], the model declares \[petId -> Pet\(id\) ON DELETE SET NULL/ });
+      });
+    });
   });
 
   for (const engine of ENGINES) {

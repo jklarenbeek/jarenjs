@@ -1836,8 +1836,11 @@ exactly; one sentence per changed answer:
   entities are already declared parent-first plan and create exactly as before.
   Entities that reference each other in a cycle are created in a different order
   than declared (A and B referencing each other, declared A then B, are created
-  B then A, in a plan's steps too), and still have no workable creation order on
-  PostgreSQL.
+  B then A, in a plan's steps too). On PostgreSQL a cycle's tables are created
+  without the foreign keys that close it, and each key is then added with
+  `ALTER TABLE … ADD FOREIGN KEY` once every table exists, in a plan's steps
+  too: a model that failed to open there (`relation "Person" does not exist`)
+  opens, and SQLite creates the tables as before.
 - Declaring the `via` property of a relation whose foreign key the planner
   inferred (or dropping that declaration) adds and drops no column: the plan
   was `ADD COLUMN` over a column the table held, or `DROP COLUMN` over the

@@ -821,9 +821,16 @@ function ensureEntityShape(connection, entityPlans, entities, createsNothing) {
   const names = creationOrder([...entityPlans.keys()],
     (name) => (entityPlans.get(name).expectedForeignKeys ?? []).map((/** @type {any} */ fk) => fk.references));
   const bracket = createsNothing !== null ? (fn) => fn() : (fn) => immediately(connection, fn);
+  /** The tables this open created: a cycle's foreign keys are added once they all exist. */
+  const created = [];
+  const addDeferred = () => {
+    const statements = created.flatMap((table) => entityPlans.get(table).deferredForeignKeys ?? []);
+    const run = (/** @type {number} */ k) => (k >= statements.length ? null : chain(connection.exec(statements[k]), () => run(k + 1)));
+    return run(0);
+  };
   return bracket(() => {
     const step = (i) => {
-      if (i >= names.length) return null;
+      if (i >= names.length) return addDeferred();
       const name = names[i];
       const plan = entityPlans.get(name);
       const docPath = entities.get(name)?.docPath ?? `/entities/${name}`;
@@ -843,8 +850,9 @@ function ensureEntityShape(connection, entityPlans, entities, createsNothing) {
             // the database must hold what its rule programs compare, before they are created
             const refuse = (/** @type {string} */ why) => { throw new DbCompileError('JD0002', `entity '${name}': ${why}`, docPath); };
             return chain(verifyRulePrograms(connection, name, plan.programs ?? [], refuse, { installed: false }), () =>
-              chain(runCreate(connection, plan), () => chain(statement.get([name]), (created) => {
-                recordKeyConstraint(plan, created);
+              chain(runCreate(connection, plan), () => chain(statement.get([name]), (made) => {
+                created.push(name);
+                recordKeyConstraint(plan, made);
                 return step(i + 1);
               })));
           }
@@ -2898,7 +2906,7 @@ export function openStore(model, options) {
               expressions: options.expressions, registered: registersFunctions }));
         if (mapping !== null) {
           for (const name of Object.keys(mapping.entities))
-            entityPlans.set(name, planEntity(name, mapping.entities[name], mapping, dialect));
+            entityPlans.set(name, planEntity(name, mapping.entities[name], mapping, dialect, { deferCycles: true }));
           for (const joinName of Object.keys(mapping.joinTables)) {
             entityPlans.set(joinName,
               planJoinTable(joinName, mapping.joinTables[joinName], mapping, dialect));

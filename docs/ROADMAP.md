@@ -542,11 +542,6 @@ what each does is its own documentation's job
   it, so a rename alone is refused when one of those is itself referenced. Wanted:
   foreign keys re-pointed through the rebuild, or in-place `ALTER`s where
   PostgreSQL has them.
-- [ ] **Entities that reference each other in a cycle do not open on
-  PostgreSQL.** Tables are created after the tables they reference, which a
-  cycle (`Person.pet` and `Pet.owner`, both one-to-one) has no order for, where
-  SQLite opens the model. Wanted: create the cycle's tables first and add its
-  foreign keys after.
 - [ ] **A rebuild that folds several columns into the document plans a copy
   statement that doubles per column.** The fold repeats the document expression
   in both branches of its `CASE`, so a rebuild that folds 8, 12 and 16 columns
@@ -893,6 +888,11 @@ what each does is its own documentation's job
   SQLite compares the condition's text (MODEL-FORMAT §12). Wanted: read
   `pg_get_expr(indpred)` through the relational grammar and compare it as
   SQLite does.
+  A comparison through the grammar must treat as equal a commuted `AND` or
+  `OR` operand order, `IN (a, b)` beside `x = a OR x = b` (and `= ANY (ARRAY[...])`),
+  a flipped comparison (`5 < n` and `n > 5`), redundant parentheses and the
+  server's casts and literal spellings, and it is a stated stricter refusal at
+  open (a minor).
 - [ ] **Two catalog tokenizers.** `schema-sql.js` and `dialects/check-read.js`
   each tokenize catalog SQL (`tokensOf`, `sqlTokens`); one could serve both.
 

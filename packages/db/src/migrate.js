@@ -1534,6 +1534,8 @@ function planEntityChanges(fromModel, toModel, dialect, steps, report, transform
   // ————— per-entity strategies —————
   // an entity added after the entities it references: PostgreSQL has no forward references
   const targetOrder = creationOrder([...toEntities.keys()], (name) => toMapping.entities[name].foreignKeys.map((fk) => fk.references));
+  /** The foreign keys that close a cycle, added once every table of the migration exists. */
+  const keysAfter = [];
   for (const name of targetOrder) {
     const toEntity = toEntities.get(name);
     const fromName = renamedFrom.get(name) ?? name;
@@ -1542,8 +1544,11 @@ function planEntityChanges(fromModel, toModel, dialect, steps, report, transform
 
     if (fromEntity === undefined) {
       report.added.push(name);
-      for (const sql of planEntity(name, tm, toMapping, dialect).createSql)
+      const added = planEntity(name, tm, toMapping, dialect, { deferCycles: true });
+      for (const sql of added.createSql)
         steps.push({ kind: 'ddl', sql, note: `create entity '${name}'` });
+      for (const sql of added.deferredForeignKeys ?? [])
+        keysAfter.push({ kind: 'ddl', sql, note: `add the foreign key of entity '${name}' that closes a cycle` });
       continue;
     }
     const fm = fromMapping.entities[fromName];
@@ -1722,6 +1727,7 @@ function planEntityChanges(fromModel, toModel, dialect, steps, report, transform
   }
 
   steps.splice(loopStart, 0, ...allocation);
+  steps.push(...keysAfter);
 
   // ————— dropped entities, children before parents —————
   // foreign keys are enforced while a migration runs (node:sqlite has
@@ -2231,14 +2237,13 @@ export function createModelShape(connection, model, expressions = undefined) {
   const entities = normalizeEntities(model);
   if (entities.size > 0) {
     const mapping = explainMapping(model);
-    for (const name of Object.keys(mapping.entities)) {
-      statements.push(
-        ...planEntity(name, mapping.entities[name], mapping, dialect).createSql);
-    }
+    const plans = Object.keys(mapping.entities).map((name) => planEntity(name, mapping.entities[name], mapping, dialect, { deferCycles: true }));
+    for (const plan of plans) statements.push(...plan.createSql);
     for (const name of Object.keys(mapping.joinTables)) {
       statements.push(
         ...planJoinTable(name, mapping.joinTables[name], mapping, dialect).createSql);
     }
+    for (const plan of plans) statements.push(...plan.deferredForeignKeys ?? []);
   }
   const run = (i) => (i >= statements.length
     ? null
