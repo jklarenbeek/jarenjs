@@ -5,6 +5,7 @@ import {
   compileJsonQuery,
   queryJson,
   JsonQueryRuntimeError,
+  stableKeyString as exportedKeyString,
 } from '@jarenjs/json/query';
 
 import { stableKeyString } from '../../../packages/json/src/query/runtime.js';
@@ -705,7 +706,7 @@ describe('Jaren JSON Query FLWOR phrases', () => {
     });
   });
 
-  describe('stableKeyString (engine-internal)', () => {
+  describe('stableKeyString (the group-key identity)', () => {
     it('should serialize deep-equal values identically', () => {
       assert.strictEqual(
         stableKeyString({ b: 1, a: [2, { d: 3, c: 4 }] }),
@@ -720,6 +721,17 @@ describe('Jaren JSON Query FLWOR phrases', () => {
       // JSON string escaping: no raw control character ever appears
       assert.strictEqual(stableKeyString('a\u0000b').indexOf('\u0000'), -1);
       assert.notStrictEqual(stableKeyString('a\u0000b'), stableKeyString('a b'));
+    });
+
+    it('should be the identity the engine groups by, exported from the query subpath', () => {
+      assert.strictEqual(exportedKeyString, stableKeyString);
+      // each non-finite number, and the null JSON text writes for all three,
+      // is its own key, as it is its own group to `$groupby` and `$distinct`
+      const keys = [NaN, Infinity, -Infinity, null].map(exportedKeyString);
+      assert.deepStrictEqual(keys, ['NaN', 'Infinity', '-Infinity', 'null']);
+      const grouped = queryJson({ $for: { n: '$[*]' }, $groupby: { g: { $div: ['$n', 0] } }, $return: '$g' }, [1, -1, 0, 2]);
+      assert.deepStrictEqual(grouped, [Infinity, -Infinity, NaN]);
+      assert.deepStrictEqual(grouped.map(exportedKeyString), ['Infinity', '-Infinity', 'NaN']);
     });
 
     it('should keep values of different types apart', () => {

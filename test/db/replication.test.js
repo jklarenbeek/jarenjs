@@ -169,6 +169,14 @@ it('canonical encoding detaches input and keeps hostile replica identities unamb
     assert.throws(() => normalizeReplication(wrong), { code: 'JD0060' });
 });
 
+it("a row's member order is not part of its replicated value: the encoding sorts members and a reorder-only operation is no change", () => {
+  const document = { $replication: '0.1', replica: 'a', seq: 1, model: 'm', frontier: {},
+    operations: [{ table: 'notes', key: 'k', before: null, after: { n: 1, id: 'k' } }] };
+  assert.equal(JSON.stringify(normalizeReplication(document).operations[0].after), '{"id":"k","n":1}');
+  const reorder = { ...document, operations: [{ table: 'notes', key: 'k', before: { id: 'k', n: 1 }, after: { n: 1, id: 'k' } }] };
+  assert.throws(() => normalizeReplication(reorder), { code: 'JD0060', message: /must change its row/ });
+});
+
 it('snapshot reset reconnects after retention loss and cannot discard acknowledged writes', async () => {
   const a = await open('a', { retention: 1 }); const b = await open('b');
   try {

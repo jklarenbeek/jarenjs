@@ -522,3 +522,67 @@ describe('the group-return trial (seeded)', () => {
     assert.equal(checks, 3600);
   });
 });
+
+describe('group keys that are not finite numbers', () => {
+  const NONFINITE = {
+    $model: '0.1',
+    collections: { rows: {
+      schema: { type: 'object', properties: {
+        id: { type: 'string' }, kind: { type: 'string' }, n: { type: 'number' } } },
+      key: '/id',
+    } },
+  };
+  // `+inf`, `-inf` and `nan` are the quotient of `n` by zero; `fin` and
+  // `none` key the finite string and the null a stored JSON text can name
+  const KEY = { $if: [{ $eq: ['$it.kind', 'fin'] }, 'finite',
+    { $if: [{ $eq: ['$it.kind', 'none'] }, { $const: null }, { $div: ['$it.n', 0] }] }] };
+  const BY_KEY = [{ $for: { it: '$[*]' }, $groupby: { g: KEY }, $return: { ids: ['$it.id'] } }];
+  const ids = (...groups) => groups.map((group) => ({ ids: group }));
+  const ROWS = [['a', 'x', 1], ['b', 'fin', 5], ['c', 'x', -1], ['d', 'x', 0], ['e', 'none', 7], ['f', 'x', 2]];
+
+  it('a computed NaN, Infinity, -Infinity and null key each keep their own group, in first-appearance order', async () => {
+    const store = await openStore(NONFINITE, { driver: nodeDriver(), capture: true });
+    try {
+      const rows = store.collection('rows');
+      for (const [id, kind, n] of ROWS) await rows.insert({ id, kind, n });
+      const live = await rows.live(BY_KEY);
+      assert.deepEqual(live.mode, MAINTAINED);
+      const oracle = liveOracle(live, () => rows.execute(BY_KEY));
+      assert.deepEqual(live.result.rows, ids(['a', 'f'], ['b'], ['c'], ['d'], ['e']));
+      await oracle.check();
+      // a group's rows leave, a key returns at the end, another group joins
+      await rows.delete('a');
+      assert.deepEqual(live.result.rows, ids(['b'], ['c'], ['d'], ['e'], ['f']));
+      await oracle.check();
+      await rows.insert({ id: 'g', kind: 'x', n: -4 });
+      assert.deepEqual(live.result.rows, ids(['b'], ['c', 'g'], ['d'], ['e'], ['f']));
+      await oracle.check();
+      await rows.insert({ id: 'a', kind: 'x', n: 9 });
+      assert.deepEqual(live.result.rows, ids(['b'], ['c', 'g'], ['d'], ['e'], ['f', 'a']));
+      await oracle.check();
+      oracle.close();
+      live.close();
+    }
+    finally { await store.close(); }
+  });
+
+  it('a group moved between a non-finite key and a finite one is re-filed, not merged', async () => {
+    const store = await openStore(NONFINITE, { driver: nodeDriver(), capture: true });
+    try {
+      const rows = store.collection('rows');
+      for (const [id, kind, n] of ROWS) await rows.insert({ id, kind, n });
+      const live = await rows.live(BY_KEY);
+      const oracle = liveOracle(live, () => rows.execute(BY_KEY));
+      await oracle.check();
+      await rows.put({ id: 'c', kind: 'fin', n: -1 });
+      assert.deepEqual(live.result.rows, ids(['a', 'f'], ['b', 'c'], ['d'], ['e']));
+      await oracle.check();
+      await rows.put({ id: 'e', kind: 'x', n: -7 });
+      assert.deepEqual(live.result.rows, ids(['a', 'f'], ['b', 'c'], ['d'], ['e']));
+      await oracle.check();
+      oracle.close();
+      live.close();
+    }
+    finally { await store.close(); }
+  });
+});

@@ -564,19 +564,6 @@ what each does is its own documentation's job
   what they are handed, where the captured value's aggregates now refuse it.
   Wanted: the same JL0005 refusal naming `where(pred).count()` /
   `select(sel).sum()`.
-- [ ] **Live evaluation compares group keys and documents by a sorting
-  serialization.** A group key computed to a non-finite number (`$div` by zero)
-  shares or misorders live groups, because a live group is keyed by
-  `stableStringify` where the engine keys by `stableKeyString`, which
-  `@jarenjs/json/query` does not export; and live results and replication compare
-  documents by `stableStringify` equality (`live.js`, `live-nested.js`,
-  `replication.js`), which ignores member order, so a write that only reorders a
-  stored document's members counts as no change and a registration keeps serving
-  the previous order. Wanted: export the engine's group-key identity and key live
-  groups by it; and either compare with member order
-  (`semanticKey(value, { ordered: true })`), accepting a re-emission on a
-  reorder-only write, or state that a stored document's member order is not part
-  of its value.
 - [ ] **A chain handed to another source's `live()` runs against the wrong
   collection.** `client.collections.orders.live(<a chain over users>)` registers
   the users chain's document against `orders`: a chain's run bindings carry no

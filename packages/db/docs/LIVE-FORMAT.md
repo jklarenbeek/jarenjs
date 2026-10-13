@@ -595,6 +595,17 @@ document and apply patches to it; ops are `add`, `remove` and
   ones, which is deterministic given the write history but is NOT
   re-derived rowid order — a consumer that needs a specific order
   declares an `orderBy`. Group rows keep first-appearance order.
+- **A stored document's member order is not part of its value.** Capture is a
+  minimal patch (§3), which has no op for a reorder: a write that only reorders
+  a document's members leaves no record, so no registration re-evaluates and
+  none emits, and a row that is re-evaluated for another reason is reused,
+  reference-identical, when it equals the previous one with its members taken
+  unordered. A live row can therefore hold its members in the order they were
+  first read where `execute` answers the order of the last write, and a query
+  that exposes member order (`$entries`, `[*]` over an object) is as current as
+  the last change that reached capture. Replication does not carry the order
+  either: its documents are canonically sorted, and an operation that only
+  reorders a row's members is no operation.
 - `seq` is the capture record's `seq`; re-run emissions carry it too.
 - **An emission reaches the observers subscribed when it began.** An
   observer subscribed from inside another's callback starts from
@@ -1027,8 +1038,16 @@ stored `null` that the engine refuses, so `{ "$sum": "$it.pay" }` beside a
 stored `null` answers in `execute` and raises `JQ2001` here. Maintenance
 does not substitute JavaScript arithmetic for query operators.
 
-Keys preserve structural equality and distinguish missing from null. Source
-holders retain physical row positions: changing a holder preserves its
+Keys preserve structural equality and distinguish missing from null. A group
+is filed under the engine's own key identity (`stableKeyString`, exported from
+`@jarenjs/json/query`), so keys computed to `NaN`, `Infinity`, `-Infinity` and
+`null` (`$div` by zero) are four groups, in first-appearance order, as a fresh
+run has them. *Upgrade: the three non-finite numbers and `null` shared one
+filing, so their groups were placed together at that filing's first row, not
+each at its own first appearance, and a result could come back in another
+order than `execute`.*
+
+Source holders retain physical row positions: changing a holder preserves its
 position, a key deleted and inserted again takes a new one at the end — in
 one transaction too, unless it comes back with an equal value, which
 capture records as no change: the holder then keeps its old position until

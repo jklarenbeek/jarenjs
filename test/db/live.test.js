@@ -751,3 +751,52 @@ describe('the maintenance oracle (seeded)', () => {
     await store.close();
   });
 });
+
+describe("a stored document's member order is not part of its value", () => {
+  const ORDERED = { $for: { it: '$[*]' }, $return: '$it' };
+
+  it('a write that only reorders members is no change: no record, no emission, the registered row stays', async () => {
+    const store = await open();
+    try {
+      const users = store.collection('users');
+      await users.insert({ id: 'u', age: 20, dept: 'x' });
+      const records = [];
+      store.observe((record) => records.push(record));
+      const live = await users.live([ORDERED]);
+      const events = [];
+      live.subscribe((event) => events.push(event));
+      const held = live.result.rows[0];
+      await users.put({ dept: 'x', age: 20, id: 'u' });
+      assert.deepEqual(records, []);
+      assert.deepEqual(events, []);
+      assert.equal(live.result.rows[0], held);
+      assert.equal(JSON.stringify(live.result.rows), '[{"id":"u","age":20,"dept":"x"}]');
+      // the table itself answers the order it was last written in
+      assert.equal(JSON.stringify(await users.execute([ORDERED])), '[{"dept":"x","age":20,"id":"u"}]');
+      assert.deepEqual(live.result.rows, await users.execute([ORDERED]));
+      live.close();
+    }
+    finally { await store.close(); }
+  });
+
+  it('a row re-evaluated because a member changed is the document as stored then; a value that is equal is reused as it was', async () => {
+    const store = await open();
+    try {
+      const users = store.collection('users');
+      await users.insert({ id: 'u', age: 20, dept: 'x', profile: { a: 1, b: 2 } });
+      const whole = await users.live([ORDERED]);
+      const part = [{ $for: { it: '$[*]' }, $where: { $ne: ['$it.dept', 'z'] }, $return: '$it.profile' }];
+      const nested = await users.live(part);
+      const heldProfile = nested.result.rows[0];
+      await users.put({ dept: 'y', age: 20, profile: { b: 2, a: 1 }, id: 'u' });
+      assert.equal(JSON.stringify(whole.result.rows), '[{"dept":"y","age":20,"profile":{"b":2,"a":1},"id":"u"}]');
+      assert.equal(JSON.stringify(nested.result.rows), '[{"a":1,"b":2}]');
+      assert.equal(nested.result.rows[0], heldProfile);
+      assert.equal(JSON.stringify(await users.execute(part)), '[{"b":2,"a":1}]');
+      assert.deepEqual(nested.result.rows, await users.execute(part));
+      whole.close();
+      nested.close();
+    }
+    finally { await store.close(); }
+  });
+});

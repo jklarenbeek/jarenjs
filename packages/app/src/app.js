@@ -1004,7 +1004,7 @@ export function createApp(appDoc, options = {}) {
 
   /**
    * The restart key of a resolved value, BY VALUE: `stableStringify`
-   * (never `stableKeyString` — package-private to the query engine, and
+   * (never `stableKeyString`, the query engine's group-key identity:
    * its `NaN`-by-name rule is a grouping decision this key does not
    * want). `undefined` (an empty query result) normalizes to `null`
    * first, so absence keys deterministically. A cyclic value overflows

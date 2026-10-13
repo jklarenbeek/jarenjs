@@ -23,6 +23,7 @@ export { JsonQueryCompileError, JsonQueryRuntimeError, QUERY_CODES } from './err
 export { queryMessagesEn, queryCatalogEn, renderQueryMessage } from './messages.js';
 export { NODE_KINDS };
 export { createQueryAccumulator } from './accumulator.js';
+export { stableKeyString } from './runtime.js';
 export { createLexicalProvider } from './lexical-provider.js';
 export { annotateTypes, TYPE_TAGS } from './types.js';
 

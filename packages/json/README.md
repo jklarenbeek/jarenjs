@@ -551,7 +551,7 @@ cheaper.externals;                    // ['maxPrice']
 cheaper(data, { maxPrice: 9 });       // [ 'Sayings of the Century', 'Moby Dick' ]
 ```
 
-The compiled function also carries `query.first(data, externals)`, `query.exists(data, externals)` and `query.doc` (a frozen copy of the query document). `query.items(data, externals)` preserves sequence item boundaries (including singleton arrays); `createQueryAccumulator` from `@jarenjs/json/query` supplies the same ordered aggregate state to streaming hosts. Results come back as plain JSON: `undefined` for the empty sequence, the item for a singleton, an array for anything longer. `queryJson(doc, data, externals)` is the cached one-call form.
+The compiled function also carries `query.first(data, externals)`, `query.exists(data, externals)` and `query.doc` (a frozen copy of the query document). `query.items(data, externals)` preserves sequence item boundaries (including singleton arrays); `createQueryAccumulator` from `@jarenjs/json/query` supplies the same ordered aggregate state to streaming hosts, and `stableKeyString` from the same subpath is the identity `$groupby` and `$distinct` file an item under (`NaN`, `Infinity`, `-Infinity` and `null` are four keys, `-0` and `0` one), for a host that keeps groups of its own. Results come back as plain JSON: `undefined` for the empty sequence, the item for a singleton, an array for anything longer. `queryJson(doc, data, externals)` is the cached one-call form.
 
 ### XQuery semantics, stated deviations
 

@@ -124,7 +124,10 @@ export function itemRef(v) {
 
 /**
  * Deterministic serialization of one JSON item, for `$groupby` keys
- * (QUERY-FORMAT.md section 6.5) — **engine-internal**, not an interchange
+ * (QUERY-FORMAT.md section 6.5) — the identity the engine files a group,
+ * a `$distinct` item and an equi-join bucket under, exported from
+ * `@jarenjs/json/query` for a host that maintains groups of its own and
+ * must file a row under the group a fresh run would. Not an interchange
  * format. For interchange (hashing, signing) use `canonicalizeJson`
  * (canonical.js, RFC 8785), which is deliberately NOT this function: JCS
  * rejects `NaN`/`Infinity` outright, where grouping needs them to be

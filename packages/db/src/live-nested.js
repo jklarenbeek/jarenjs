@@ -1,6 +1,6 @@
 //@ts-check
 /** Collection groups use bounded per-group recomputation over maintained leaves. */
-import { compileJsonQuery } from '@jarenjs/json/query';
+import { compileJsonQuery, stableKeyString } from '@jarenjs/json/query';
 import { isJsonObject, stableStringify, semanticKey } from '@jarenjs/core/object';
 import { utf8ByteLength } from '@jarenjs/core/string';
 import { decodeJSONPointerSegment } from '@jarenjs/json/pointer';
@@ -39,7 +39,9 @@ export function readsNoRoot(node) {
 /** The identity a maintained result keeps an output's previous reference
  * by: its whole value, exact for the numbers JSON text cannot tell apart —
  * `NaN`, `±Infinity`, `-0` — which a computed output can hold, so a ratio
- * turning from `NaN` to `Infinity` is a change. A value only a host
+ * turning from `NaN` to `Infinity` is a change. Members are taken
+ * unordered: a stored document's member order is not part of its value
+ * (LIVE-FORMAT §9), as capture's patches cannot carry it. A value only a host
  * function returns (a class instance) is compared by its JSON text.
  * @param {any} value
  * @returns {string} */
@@ -148,7 +150,7 @@ export function nestedGroupStrategy(description, context) {
   const stats = { refreshedGroups: 0, dependencyReads: 0, reruns: 0 };
   const groupOf = (doc) => {
     const keys = keyOf([doc], context.externals);
-    return keys.length === 0 ? null : stableStringify(keys);
+    return keys.length === 0 ? null : stableKeyString(keys);
   };
   const sorted = (keys) => [...keys].sort((a, b) => positions.get(a) - positions.get(b));
   const check = () => {

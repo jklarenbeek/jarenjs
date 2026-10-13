@@ -522,6 +522,13 @@ XQuery 3.1 group-by semantics:
 *name* MUST be a valid variable name, distinct from every other variable
 bound in the phrase (`JQ0007`).
 
+The key relation is also exported as `stableKeyString(item)` from
+`@jarenjs/json/query`: two items are one group exactly when their strings are
+equal (`NaN`, `Infinity`, `-Infinity` and `null` are four keys; `-0` and `0`
+are one). A host that maintains groups outside the engine files each row
+under it, not under a JSON text such as `JSON.stringify`, which writes all
+three non-finite numbers as `null`.
+
 ```json
 { "$for": { "b": "$.store.book[*]" },
   "$groupby": { "genre": "$b.category" },

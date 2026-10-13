@@ -17,6 +17,7 @@ import { foreignKeyEdges } from './cascade.js';
 
 /** The controls every replication call takes beside its own bounds. */
 const CONTROL_OPTIONS = ['signal', 'deadline'];
+// member order is not part of a row's value: the serialization sorts members
 const equal = (a, b) => stableStringify(a) === stableStringify(b);
 const position = (frontier, id) => Object.hasOwn(frontier, id) ? frontier[id] : 0;
 const dominates = (a, b) => Object.entries(b).every(([id, seq]) => position(a, id) >= seq);
