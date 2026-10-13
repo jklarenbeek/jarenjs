@@ -631,7 +631,8 @@ the query engine, now refuse by code or answer what the engine answers:
   refuses the sequence (`JQ2001`), and a grouping ordered by such a key ordered
   the `null` group where the engine refuses to order a `null` (`JQ2005`). Both
   run in the engine now (`entity.projection`, `JD0010` under strict mode) and
-  raise what it raises.
+  raise what it raises; the aggregate has run natively again since, as
+  [§20](#20-a-grouped-fold-over-a-null-reading-column-counts-its-nulls) says.
 - A column that stores a boolean while its property claims another type (a
   string over a `boolean` codec) was ordered and folded as 0/1 by an entity
   `$orderby`, by the ordering of groups and by a grouped `$min` or `$max`, where
@@ -2049,6 +2050,19 @@ number `1` no longer do where a string-first member's `TEXT` column made them on
   as before, and its rows are read by a query that supplies the external. A root
   the profile keeps no predicate for, and a store opened with none, read as
   before, and the store's own writes still read the stored row.
+
+## 20. A grouped fold over a null-reading column counts its nulls
+
+- A grouped `$sum`, `$avg`, `$min` or `$max` over an entity column whose policy
+  reads a NULL as a present `null` (`null: 'null'`) ran in the engine
+  (`entity.projection`), so `explain()` named `set` mode and `strict: true`
+  refused it `JD0010`. On SQLite it now runs in SQL, and the statement counts
+  the NULLs of each such aggregate beside it. A group that holds none answers
+  as before; a group that holds one raises the engine's `JQ2001` for the whole
+  grouping, as before, including under `strict: true`, which now raises
+  `JQ2001` where it raised `JD0010`. A grouping ordered by a key of that policy
+  is unchanged (`JQ2005`, in the engine), and so is every grouping on
+  PostgreSQL, which reads no column of that policy natively.
 
 ## Measured costs
 

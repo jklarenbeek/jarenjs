@@ -2223,6 +2223,8 @@ export function createEntityQueryEngine(context) {
           const group = entry.planned.plan.group;
           if (rows.some((row) => row._valid === 0))
             throw new DbRuntimeError('JD2003', 'a grouped physical column refuses a lossy or invalid value');
+          if (rows.some((row) => group.aggregates.some((aggregate, i) => aggregate.countsNulls && row[`_nulls${i}`] > 0)))
+            throw aggregateNullError();
           if (rows.some((row) => group.aggregates.some((aggregate, i) =>
             ['sum', 'avg'].includes(aggregate.fn) && row[`_safe${i}`] !== 1))) {
             entry.runtimeReason = { construct: '$groupby', reason: BIND_REASONS.accumulation };

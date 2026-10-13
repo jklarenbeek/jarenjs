@@ -788,13 +788,15 @@ what each does is its own documentation's job
   (`UnrepresentablePath`) on `node:sqlite` and `bun:sqlite`, the fate of any
   unspellable path name. Wanted: decide whether the hatch keeps the carve-out
   for such a name or the refusal is the contract.
-- [ ] **A grouped sum, average or extreme over a column that reads a NULL as a
-  present `null` runs in the engine.** A column whose policy reads a NULL as a
-  present `null` (`null: 'null'`) makes a grouped `$sum`, `$avg`, `$min` or
-  `$max` skip the NULL in SQL where the engine raises `JQ2001`, and an ordering
-  by it order the NULL where the engine raises `JQ2005`, so the planner keeps
-  both in the engine. Wanted: a native `_nulls` guard, as the whole-set
-  aggregate has, that keeps them in SQL.
+- [ ] **A grouping ordered by a key that reads a NULL as a present `null` runs
+  in the engine.** A column whose policy reads a NULL as a present `null`
+  (`null: 'null'`) used as a group key under an `$orderby` makes the engine
+  raise `JQ2005` where SQL would order the NULL, so the planner keeps the
+  grouping in the engine. Wanted: a native guard that raises `JQ2005` when the
+  ordered key holds a NULL, so it stays in SQL. On PostgreSQL no column of that
+  policy is read natively (`nativeQuery` is false for it), so the grouped sum,
+  mean and extreme there also stay in the engine; qualifying such a column would
+  close both.
 - [ ] **A schema that disagrees with its column's codec answers a predicate
   natively where the engine raises.** A property typed `string` over a column
   whose codec is `boolean` (the model validator accepts it) makes `$contains`

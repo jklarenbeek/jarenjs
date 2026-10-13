@@ -67,10 +67,15 @@ identity in binding order, so a group comes out where its first row does; keys
 and aggregates read either root, and a count of any root is the count of the
 group's rows. Only the groups in that order lower there: an ordered grouping, a
 window over groups, the nullable form of a sum and a return that reads a whole
-root stay in the engine. A sum, mean or extreme over a column whose NULL reads
-back as a present `null` or that stores a boolean, and a grouping ordered by
-such a key, stay in the engine, which refuses the `null` or the boolean where
-SQL skips, folds or orders it. A nullable
+root stay in the engine. A sum, mean or extreme over a column that stores a
+boolean, and a grouping ordered by a key that stores one or whose NULL reads
+back as a present `null`, stay in the engine, which refuses the boolean or the
+`null` where SQL folds or orders it. A sum, mean or extreme over a column whose
+NULL reads back as a present `null` lowers: the statement counts that
+aggregate's NULLs beside it, and the runtime raises the engine's `JQ2001` when
+a group holds one, where SQL alone would skip it. On PostgreSQL such a column
+is not qualified for native reads at all, so there the aggregate stays in the
+engine under `entity.projection`. A nullable
 SQL sum needs an explicit query expression: test existence of non-null values,
 then sum those values, otherwise return literal null. An ordinary JSON sum over
 an empty sequence remains zero, beside the nullable form of the same sum in one

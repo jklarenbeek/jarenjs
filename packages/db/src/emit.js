@@ -1425,6 +1425,8 @@ export function emitEntityPlan(plan, dialect, physicalOf) {
           + ` AND ABS(${dialect.numberCast(value)}) <= 9007199254740991`;
     return `(MIN(CASE WHEN ${ref.nullPolicy === 'reject' ? '' : `${value} IS NULL OR `}(${valid}) THEN 1 ELSE 0 END) = 1)`;
   };
+  // the rows of a group whose NULL a SQL aggregate skips and the engine refuses
+  const nullCount = (entry) => `COUNT(*) - COUNT(${groupValue(entry)})`;
   const groupEntries = group ? [...group.keys, ...group.aggregates].filter((entry) => entry.ref?.codecColumn) : [];
   const keyPairs = group ? group.keys.map((key, i) => projectedPair({ binding: bindingOf(key), ref: key.ref }, `k${i}`)) : [];
   const selection = group
@@ -1433,13 +1435,14 @@ export function emitEntityPlan(plan, dialect, physicalOf) {
         : dialect.groupAggregate(entry.fn, numericGroup(entry) ? groupTerm(entry) : entry.ref.codec === 'integer'
           ? dialect.numberCast(groupValue(entry)) : groupValue(entry)))} AS ${q(`a${i}`)}`),
       ...group.aggregates.flatMap((entry, i) => numericGroup(entry) ? [`${groupSafe(entry)} AS ${q(`_safe${i}`)}`] : []),
+      ...group.aggregates.flatMap((entry, i) => entry.countsNulls ? [`${nullCount(entry)} AS ${q(`_nulls${i}`)}`] : []),
       ...(groupEntries.length ? [`${groupEntries.map(groupValid).join(' AND ')} AS ${q('_valid')}`] : [])].join(', ')
     : plan.scalarAggregate
     ? `${dialect.groupAggregate(plan.scalarAggregate.fn, plan.scalarAggregate.ref.type === 'string'
       ? groupValue(plan.scalarAggregate) : numericGroup(plan.scalarAggregate) ? groupTerm(plan.scalarAggregate)
         : dialect.numberCast(groupValue(plan.scalarAggregate)))} AS ${q('value')}, `
       + `${groupValid(plan.scalarAggregate)} AS ${q('_valid')}, `
-      + `${plan.scalarAggregate.ref.nullPolicy === 'null' ? `COUNT(*) - COUNT(${groupValue(plan.scalarAggregate)})` : '0'} AS ${q('_nulls')}, `
+      + `${plan.scalarAggregate.ref.nullPolicy === 'null' ? nullCount(plan.scalarAggregate) : '0'} AS ${q('_nulls')}, `
       + `${numericGroup(plan.scalarAggregate) ? groupSafe(plan.scalarAggregate) : '1'} AS ${q('_safe')}`
     : plan.aggregate === 'count'
     ? (plan.quantifier === undefined ? `COUNT(*) AS ${q('value')}` : '1')

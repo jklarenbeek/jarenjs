@@ -437,9 +437,14 @@ function holdsBoolean(ref) {
 
 /** Whether a typed reference orders and folds natively: numbers and strings
  * of one type that cannot hold a null — in its schema type, or by its column's
- * policy, which reads a NULL back as a present `null` — and no boolean. */
-function orderable(ref, schema) {
-  return ref.type !== 'unknown' && !holdsBoolean(ref) && nullReading(ref, schema) === 'none'
+ * policy, which reads a NULL back as a present `null` — and no boolean. A
+ * caller that counts the NULLs its statement skipped (`countsNulls`) and
+ * refuses the answer when it meets one also takes a column whose policy reads
+ * a NULL as a present `null`, which the engine refuses in a fold the same way.
+ * @param {any} ref @param {any} schema @param {boolean} [countsNulls] */
+function orderable(ref, schema, countsNulls = false) {
+  return ref.type !== 'unknown' && !holdsBoolean(ref)
+    && (nullReading(ref, schema) === 'none' || (countsNulls && ref.nullPolicy === 'null'))
     && !admitsMixedTypes(schema, ref.segments);
 }
 
@@ -2888,7 +2893,7 @@ function planGeneralGrouping(node, itSlot, shape, resolve = pathRef, owners = nu
  * @param {any} shape
  * @param {(node: any, slot: number, shape: any) => any} [resolve]
  * @param {Map<number, any> | null} [owners] - the bindings of a join, by slot
- * @returns {{ as: string, fn: string, ref: any, empty: string, binding?: string } | null}
+ * @returns {{ as: string, fn: string, ref: any, empty: string, countsNulls?: true, binding?: string } | null}
  */
 function groupAggregate(node, itSlot, shape, resolve = pathRef, owners = null) {
   // SQL's nullable sum is authored explicitly: test for any non-null
@@ -2928,12 +2933,14 @@ function groupAggregate(node, itSlot, shape, resolve = pathRef, owners = null) {
   // a member of two types folds as its first in SQL, where the engine
   // refuses the mixed sequence (`JQ2001`); a column that reads a NULL as a
   // present `null` is a sequence holding one, which SQL skips and the
-  // engine refuses the same way
+  // engine refuses the same way, so the statement counts those NULLs
+  // beside the aggregate (`countsNulls`) and the runtime refuses the answer
   const acceptable = read !== null && (!numeric || isNumericType(read.ref.type))
-    && orderable(read.ref, read.shape.schema);
+    && orderable(read.ref, read.shape.schema, true);
   if (!acceptable) return null;
   // what an aggregate over NO values says, in the ENGINE's words
   return { fn, ref: read.ref, empty: fn === 'sum' ? 'zero' : 'omit',
+    ...(read.ref.nullPolicy === 'null' ? { countsNulls: true } : {}),
     ...(read.binding === undefined ? {} : { binding: read.binding }) };
 }
 

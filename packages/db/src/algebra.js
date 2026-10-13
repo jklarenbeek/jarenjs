@@ -158,7 +158,8 @@ export const PLAN_VERSION = 2;
  *
  * @typedef {{ keys: { as: string, ref: PlanRef, binding?: string }[],
  *   aggregates: { as: string, fn: 'rows' | 'sum' | 'avg' | 'min' | 'max',
- *     ref: PlanRef | null, empty: 'zero' | 'omit' | 'null', binding?: string }[],
+ *     ref: PlanRef | null, empty: 'zero' | 'omit' | 'null', countsNulls?: true,
+ *     binding?: string }[],
  *   tree: PlanProjectionNode,
  *   order: 'first-seen' | { index?: number, aggregate?: number,
  *     desc: boolean, nullsFirst: boolean }[]

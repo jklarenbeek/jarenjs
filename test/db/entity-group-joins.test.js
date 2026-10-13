@@ -342,19 +342,29 @@ describe('a column that reads a NULL back as a present null', () => {
   const answerOf = (store, document, options) => Promise.resolve().then(() => store.execute(document, options))
     .then((value) => JSON.stringify(value), (error) => `throws ${error.code}`);
 
-  it('keeps a grouped sum, mean or extreme in the engine, which refuses the null', async () => {
+  it('counts the nulls of a grouped sum, mean or extreme, which the engine refuses', async () => {
     await onNullPolicy(async (store, host) => {
       for (const [name, aggregate] of [['sum', '$sum'], ['mean', '$avg'], ['least', '$min'], ['greatest', '$max']]) {
         for (const member of ['b', 'c']) {
           if (member === 'c' && (aggregate === '$sum' || aggregate === '$avg')) continue;
           const query = { $for: { t: '$.T[*]' }, $groupby: { k: '$t.id' }, $return: { k: '$k', v: { [aggregate]: `$t.${member}` } } };
           const label = `${host}: the ${name} of ${member}`;
+          // PostgreSQL qualifies no column of this policy for native reads, so the engine keeps it there
           const explained = await store.explain(query);
-          assert.equal(explained.mode, 'set', label);
-          assert.equal(reasonOf(explained), 'entity.projection', label);
+          assert.equal(explained.mode, host === 'sqlite' ? 'native' : 'set', label);
+          if (host !== 'sqlite') assert.equal(reasonOf(explained), 'entity.projection', label);
           const engine = await answerOf(store, query, { pushdown: false });
           assert.equal(engine, 'throws JQ2001', label);
           assert.equal(await answerOf(store, query), engine, label);
+          if (host === 'sqlite') assert.equal(await answerOf(store, query, { strict: true }), engine, label);
+          // the rows of b the engine reads no null from are answered, in SQL
+          if (member === 'b') {
+            const clean = { ...query, $where: { $and: [{ $ge: ['$t.id', 2] }, { $le: ['$t.id', 3] }] } };
+            const expected = JSON.stringify([{ k: 2, v: 3 }, { k: 3, v: 5 }]);
+            assert.equal(await answerOf(store, clean, { pushdown: false }), expected, `${label} (engine)`);
+            assert.equal(await answerOf(store, clean), expected, label);
+            if (host === 'sqlite') assert.equal(await answerOf(store, clean, { strict: true }), expected, label);
+          }
         }
       }
     });
