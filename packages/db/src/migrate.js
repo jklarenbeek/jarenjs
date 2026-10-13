@@ -45,7 +45,7 @@ import { modelIdentity, migrationIdentity } from './migration-identity.js';
 import { migrationChecksum, historyStatements, readMigrationHistory, checkHistoryObservation, checkAppliedRows,
   historyHeader, identityRows, checkHistoryIdentity, checkHistoryChain, writeIdentityRows } from './migration-history.js';
 export { HISTORY_TABLE, ENGINE_TABLES };
-import { planCollection, verifyShape, legacyColumnTypes, planEntity, planJoinTable, plannedExpression, creationOrder } from './ddl.js';
+import { planCollection, verifyShape, legacyColumnTypes, planEntity, planJoinTable, plannedExpression, acceptsColumn, creationOrder } from './ddl.js';
 import { normalizeEntities, explainMapping } from './model.js';
 import { derivedValue, memberAt, registerDeriveFunctions } from './derive.js';
 import { mergeEntityRow } from './graph.js';
@@ -709,7 +709,7 @@ function deriveStep(collection, plan, columnNames, note) {
 function intervalDifference(fromPlan, toPlan, disturbedColumns) {
   const from = new Map((fromPlan.intervals ?? []).map((interval) => [interval.constraint, interval]));
   const to = new Map((toPlan.intervals ?? []).map((interval) => [interval.constraint, interval]));
-  const differs = (/** @type {any} */ a, /** @type {any} */ b) => a.sql !== b.sql
+  const differs = (/** @type {any} */ a, /** @type {any} */ b) => (a.sql !== b.sql && a.sql !== b.alternate)
     || [a.start, a.end, b.start, b.end].some((column) => disturbedColumns.has(column));
   const dropped = [...from.values()].filter((interval) => !to.has(interval.constraint) || differs(interval, to.get(interval.constraint)));
   const added = [...to.values()].filter((interval) => !from.has(interval.constraint) || differs(from.get(interval.constraint), interval));
@@ -809,7 +809,7 @@ function intervalPreconditionsOf(migration, dialect, mapping) {
       if (before !== undefined && before.canonical === interval.span.canonical && before.maxDuration === interval.maxDuration) continue;
       const refused = dialect.ddl.intervalCheck({ docColumn: plan.docColumn, span: interval.span.pathText, bounds: interval.span.bounds,
         start: plannedExpression(dialect, plan, interval.start), end: plannedExpression(dialect, plan, interval.end),
-        maxDuration: interval.maxDuration });
+        maxDuration: interval.maxDuration, unpinned: interval.span.unpinned });
       checks.push({ collection: name, interval: interval.name, table,
         sql: `SELECT ${q(plan.keyColumn)} AS ${q('k')}, count(*) OVER () AS ${q('n')} FROM ${q(table)} `
           + `WHERE NOT COALESCE(${refused}, ${dialect.booleanLiteral(true)}) ORDER BY ${dialect.rowIdentity()} ${dialect.limitClause(10)}` });
@@ -999,10 +999,16 @@ export function planMigration(fromModel, toModel, options = undefined) {
     // mapping, is a different column even where name and type agree
     // and so is a member of several types by any change of its types or their
     // order: its column is untyped whatever they are, and what differs is how
-    // the first of them makes it read the member
+    // the first of them makes it read the member. The same index expression read
+    // with the guard of a path that leaves a container open and without it is one
+    // column (`alternate`): a table holds either, and neither is a change — but
+    // the guard names the kind of each digit step (`[0]` off an array, `['0']`
+    // off an object), so a column guarded for one kind is a change to the other
     const columnChanged = (a, b) => a.type !== b.type || a.pathText !== b.pathText
       || (a.members ?? null) !== (b.members ?? null)
-      || (a.expression ?? null) !== (b.expression ?? null)
+      || (a.alternate === undefined && b.alternate === undefined
+        ? (a.expression ?? null) !== (b.expression ?? null)
+        : !acceptsColumn(dialect, a, b))
       || (a.stored === true) !== (b.stored === true);
 
     // columns first decide their fate; an index rebuilds when it

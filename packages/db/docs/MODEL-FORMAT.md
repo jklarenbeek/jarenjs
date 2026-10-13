@@ -170,18 +170,22 @@ measured window, the middle one included.
 | day 355 | 20 | 37 ms | 26 ms | 1.4× faster | 0.056 ms | 650.3× faster |
 <!--/fact-->
 
-On PostgreSQL an array step in the span's path (`$.spans[0]`) is read through
-`#>`, which resolves the key `"0"` of an object in that position too: a
-document whose `spans` is an object keyed so is read as a span by the store,
-the CHECK and the native plan, where SQLite and the query engine read none.
-The generated bound columns, the CHECK and the store's own check carry that
-reading (their text is the one the catalog is compared with). A query is held
-to the container: a comparison or an ordering over a path whose container the
-schema leaves open reads the guarded document rather than the column, and the
-exact `$overlaps` plan holds the document to the span's container beside the
-bound columns, so neither answers a document the engine reads none of. Where
-the schema declares the container's type (`type: 'array'`) such a document is
-non-conforming and the column is read as it stands.
+On PostgreSQL `#>` resolves the key `"0"` of an object where the span's path
+has an array step (`$.spans[0]`), so a path whose container the schema leaves
+open is read off the document under a guard that requires each such step's
+parent to be the container it means: the bound columns, the CHECK and the
+native plan's exact `$overlaps` hold a document whose `spans` is an object
+keyed so to be no span, as SQLite and the query engine do, and the store's own
+check reads an index step off an array alone on every engine. A comparison or
+an ordering over such a path reads the guarded document rather than the
+column. Where the schema declares the container's type (`type: 'array'`) the
+bound columns and the CHECK are spelled without the guard, and a document of
+the other kind is non-conforming. A table holds either spelling and is
+accepted as it is (a change of how the model declares the container plans
+nothing, a move of the path between an index step and a name rebuilds the
+bound columns and the CHECK); one an earlier release created holds the unguarded text and reads an
+object's key `0` there until the interval and its bound indexes are dropped by
+a migration and declared again.
 
 An invalid model document is `JD0005` with a `docPath` pointing at the
 offending member. Model checking happens before any database work.

@@ -37,7 +37,7 @@ import { isKeyword } from './sql.js';
 import { foldIdentifier } from './invariants.js';
 import { MODEL_VERSION, ENGINE_TABLES, IDENTIFIER } from './engine-metadata.js';
 import { registeredName, expressionMembers } from './expression.js';
-import { modelPath } from './model-path.js';
+import { modelPath, readsAsIndex } from './model-path.js';
 import { isJsonObject, setObjectMember } from '@jarenjs/core/object';
 
 /**
@@ -274,10 +274,12 @@ function deriveCollection(dialect, table, report, keys, functionNames) {
   const expressions = new Map(table.generated.map((entry) => [entry.name, entry.expression]));
 
   /** @type {Map<string, { path: string, type: string | undefined,
-   *   segments: import('./dialect.js').JsonPathSegment[] }>} */
+   *   segments: import('./dialect.js').JsonPathSegment[], open: boolean }>} */
   const paths = new Map();
   /** @type {Map<string, any>} column -> the declared index expression */
   const computed = new Map();
+  /** The columns whose expression reads its member under the dialect's guard. @type {Set<string>} */
+  const guarded = new Set();
   /** The columns whose type two schema types share — reported once the
    * declared intervals are known, since a bound column's type is not a choice. */
   const lossy = [];
@@ -285,6 +287,7 @@ function deriveCollection(dialect, table, report, keys, functionNames) {
     if (!column.generated) continue;
     const expression = expressions.get(column.name);
     const segments = expression === undefined ? null : dialect.memberPathOf(expression);
+    const open = expression !== undefined && dialect.memberGuarded?.(expression) === true;
     if (segments === null) {
       // a DECLARED EXPRESSION, then — the other kind of generated column
       // this format writes, and the dialect that wrote its SQL is the
@@ -293,6 +296,7 @@ function deriveCollection(dialect, table, report, keys, functionNames) {
         ? null : dialect.expressionOf(expression, functionNames ?? {});
       if (declared !== null) {
         computed.set(column.name, declared);
+        if (open) guarded.add(column.name);
         continue;
       }
       report(loss('unmapped-column', `${table.name}.${column.name}`,
@@ -307,7 +311,7 @@ function deriveCollection(dialect, table, report, keys, functionNames) {
         + 'is left untyped'));
     }
     else lossy.push(column);
-    paths.set(column.name, { path: modelPath(segments), type, segments });
+    paths.set(column.name, { path: modelPath(segments), type, segments, open });
   }
 
   /** The columns a plain path index covers — what a declaration requires of an interval's bounds. @type {Set<string>} */
@@ -388,15 +392,15 @@ function deriveCollection(dialect, table, report, keys, functionNames) {
   }
   // a bound a CHECK holds to an integer is one, whatever its column's type
   for (const [column, entry] of paths)
-    placeType(collection.schema, entry.segments, bounds.has(column) ? 'integer' : entry.type);
+    placeType(collection.schema, entry.segments, bounds.has(column) ? 'integer' : entry.type, entry.open);
   for (const span of spans) requireBounds(collection.schema, span.span);
   // a member an EXPRESSION reads is in the document too, and the
   // expression's own column says nothing about its type — the schema
   // names it untyped rather than not at all
-  for (const expression of computed.values()) {
+  for (const [column, expression] of computed) {
     for (const member of expressionMembers(expression)) {
       const segments = memberSegments(member);
-      if (segments !== null) placeType(collection.schema, segments, undefined);
+      if (segments !== null) placeType(collection.schema, segments, undefined, guarded.has(column));
     }
   }
   if (collection.schema.properties === undefined) collection.schema.properties = {};
@@ -422,17 +426,23 @@ function deriveCollection(dialect, table, report, keys, functionNames) {
  * the round trip would not converge. Nothing else is invented: a node
  * on the way to a typed leaf is an object or an array because the path
  * says so, and a leaf with no type is an empty schema.
+ *
+ * A member the catalog reads under the dialect's guard (`open`) was declared
+ * with a container the schema leaves open, and a step the guard covers (an
+ * index, a name that reads as one) leaves the container it meets untyped, so
+ * the derived model plans the same guard.
  * @param {any} node - the schema node to place into
  * @param {import('./dialect.js').JsonPathSegment[]} segments
  * @param {string | undefined} type
+ * @param {boolean} [open]
  */
-function placeType(node, segments, type) {
+function placeType(node, segments, type, open = false) {
   let current = node;
   for (let i = 0; i < segments.length; i++) {
     const segment = segments[i];
     const last = i === segments.length - 1;
     if ('index' in segment) {
-      if (current.type === undefined) current.type = 'array';
+      if (current.type === undefined && !open) current.type = 'array';
       if (current.prefixItems === undefined) current.prefixItems = [];
       while (current.prefixItems.length <= segment.index) current.prefixItems.push({});
       if (last) {
@@ -442,7 +452,7 @@ function placeType(node, segments, type) {
       current = current.prefixItems[segment.index];
       continue;
     }
-    if (current.type === undefined) current.type = 'object';
+    if (current.type === undefined && !(open && readsAsIndex(segment.name))) current.type = 'object';
     if (current.properties === undefined) current.properties = {};
     // an own member, whatever the document names it: `__proto__` assigned
     // would rewrite the map's prototype and leave no member

@@ -239,8 +239,12 @@ export function derivedValue(column, member) {
 }
 
 /**
- * Read the member one derived column is computed from, walking the
- * same typed segments the physical mapping was planned over.
+ * Read the member one derived column, or a declared interval, is read from,
+ * walking the same typed segments the physical mapping was planned over as
+ * the query engine's path does: an index step reads an array's element and
+ * nothing else, a name step an object's own member and nothing else (the
+ * key `"0"` of an object is no element, the element `0` of an array no key
+ * `"0"`, and a name such as `length` or `constructor` is no member).
  * @param {any} doc
  * @param {import('./dialect.js').JsonPathSegment[]} segments
  * @returns {any} the member, or `undefined`
@@ -249,7 +253,14 @@ export function memberAt(doc, segments) {
   let node = doc;
   for (const segment of segments) {
     if (node === null || typeof node !== 'object') return undefined;
-    node = 'name' in segment ? node[segment.name] : node[segment.index];
+    if ('name' in segment) {
+      if (Array.isArray(node) || !Object.hasOwn(node, segment.name)) return undefined;
+      node = node[segment.name];
+    }
+    else {
+      if (!Array.isArray(node)) return undefined;
+      node = node[segment.index];
+    }
   }
   return node;
 }

@@ -175,24 +175,33 @@ dialect papering over:
   `-1`, `+1` and ` 1` for array indexes), where the engine's path and
   SQLite's select an element by index and a member by name alone. A query
   reads a path with such a step from a document guarded on each parent —
-  `queryGuard`, a dialect member only the query emitters call, and the
+  `queryGuard`, a dialect member, and the
   `queryDocument` it yields — so a document whose container is the other
   kind is no document and the member is absent, in an entity's document as in
-  a collection's; a path with no such step is written as it always was. The generated columns, the migrations and the
-  drift read-back keep spelling paths through `jsonPathText` and
-  `jsonExtract` unchanged, which is why an existing database never reads as
-  drifted. A comparison, an ordering or a grouping that would read such a
-  column reads the guarded document instead wherever the schema leaves the
-  step's container open (no declared `type`: `items` binds arrays alone and
-  `properties` objects alone, so the other kind conforms), and the declared
-  interval's exact seek holds the document to the container beside its
-  bound columns; a path whose container the schema declares (`type: 'array'`
-  for an index step, `type: 'object'` for a digit name) keeps its column and
-  its index. What the columns, the CHECK and the store's own interval check
-  still read is the key `0` of an object for an index step and an element
-  of an array for a name: for a declared container that document is
-  non-conforming, for an open one it conforms and they read it as they
-  always did.
+  a collection's; a path with no such step is written as it always was.
+  Wherever the schema leaves the step's container open (no declared `type`:
+  `items` binds arrays alone and `properties` objects alone, so the other
+  kind conforms) the generated column, an index expression and a declared
+  interval's CHECK read the member through the same `queryDocument`
+  (`columnRead`, planned on the column as `unpinned`), so a conforming
+  document of the other kind holds nothing at the step; a comparison, an
+  ordering or a grouping that would read such a column reads the guarded
+  document instead, and the declared interval's exact seek holds the document
+  to the container beside its bound columns. A path whose container the schema
+  declares (`type: 'array'` for an index step, `type: 'object'` for a digit
+  name) is spelled as it always was, which is why such a database never
+  reads as drifted. A table holds either spelling of a guardable path (a model
+  that changes how it declares the container, or a table an earlier release
+  created): the planned column and interval keep the other spelling as
+  `alternate`, which the drift read-back accepts beside the planned text and the
+  migration planner reads as no change (`acceptsColumn`: a column whose text is
+  neither the other's nor its `alternate` is a change, so a guard for the other
+  kind of digit step rebuilds it), and the interval reader accepts the
+  CHECK with or without the guard (and only the guard its own path calls for).
+  `memberPathOf` reads a step the guard makes into an object as a name, so a
+  derived model opens the table it came from. `memberAt`, the store's own read of a span or of a
+  derived column's member, selects an index step off an array and a name off
+  an object's own members alone.
 A fourth difference is a limit, not a spelling, and the planner and the
 query layer enforce it rather than the emitter. PostgreSQL's planner
 prices every leaf per row, and a chain long enough to cross its JIT

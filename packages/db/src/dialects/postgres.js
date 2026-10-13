@@ -260,30 +260,49 @@ function jsonExtract(columnSql, pathText, kind) {
 }
 
 /**
+ * The containers a path's steps must meet, outermost first, for a read of
+ * the member at `segments` to select what the engine's path selects: the
+ * parent of each step that is an index must be an array, and the parent of
+ * each name an array would take for an index ({@link readsAsIndex}) an
+ * object. `null` where the dialect cannot spell the path at all.
+ * @param {import('../dialect.js').JsonPathSegment[]} segments
+ * @returns {{ parent: import('../dialect.js').JsonPathSegment[], container: 'array' | 'object' }[] | null}
+ */
+function guardSteps(segments) {
+  if (jsonPathText(segments) === null) return null;
+  const steps = [];
+  segments.forEach((segment, at) => {
+    const index = 'index' in segment;
+    if (!index && !readsAsIndex(segment.name)) return;
+    steps.push({ parent: segments.slice(0, at), container: /** @type {'array' | 'object'} */ (index ? 'array' : 'object') });
+  });
+  return steps;
+}
+
+/**
  * The condition under which a query reads the member at `segments` from a
  * document, or `null` when every read is right. `#>` has one spelling for
  * the array element `0` and the object key `0`, so a path step that is an
  * index, or a name that reads as one, would select a member the engine's
  * path never selects: the key `0` of an object for an index step, the
  * element `0` of an array for a name step. The parent of each such step
- * must be the container the step means. The generated columns,
- * migrations and drift read-back keep spelling their paths through
- * {@link jsonExtract}.
+ * must be the container the step means (see {@link guardSteps}). A
+ * generated column, an index expression and an interval's CHECK whose
+ * path leaves such a container open read through the same guard
+ * ({@link queryDocument} of the dialect); the migrations and the drift
+ * read-back spell a top-level member through {@link jsonExtract} alone.
  * @param {string} documentSql - SQL for the document, as `jsonb`
  * @param {import('../dialect.js').JsonPathSegment[]} segments
  * @returns {string | null}
  */
 function queryGuard(documentSql, segments) {
-  if (jsonPathText(segments) === null) return null;
-  const guards = [];
-  segments.forEach((segment, at) => {
-    const index = 'index' in segment;
-    if (!index && !readsAsIndex(segment.name)) return;
-    const parent = at === 0 ? documentSql
-      : `(${documentSql} #> ${stringLiteral(/** @type {string} */ (jsonPathText(segments.slice(0, at))))})`;
-    guards.push(`jsonb_typeof(${parent}) = '${index ? 'array' : 'object'}'`);
-  });
-  return guards.length === 0 ? null : guards.join(' AND ');
+  const steps = guardSteps(segments);
+  if (steps === null || steps.length === 0) return null;
+  return steps.map(({ parent, container }) => {
+    const at = parent.length === 0 ? documentSql
+      : `(${documentSql} #> ${stringLiteral(/** @type {string} */ (jsonPathText(parent)))})`;
+    return `jsonb_typeof(${at}) = '${container}'`;
+  }).join(' AND ');
 }
 
 /**
@@ -349,11 +368,12 @@ function parseArrayLiteral(body) {
 
 /**
  * The member path a generated column's expression reads, recovered from
- * this dialect's own spelling. Every form it writes navigates with
- * `#>` or `#>>` over an array literal, and the FIRST one is the member
- * — the guard reads the same path, and a `CASE` cannot come before it.
- * Anything else answers `null`, and the caller reports the column
- * rather than inventing a path for it.
+ * this dialect's own spelling. Every form it writes navigates with `#>` or
+ * `#>>` over an array literal, and the member is the LONGEST path read:
+ * the guard of a path that leaves a container open reads its parents,
+ * each a proper prefix of the member, and may come before it. Anything
+ * else answers `null`, and the caller reports the column rather than
+ * inventing a path for it.
  * @param {string} expression
  * @returns {import('../dialect.js').JsonPathSegment[] | null}
  */
@@ -369,30 +389,129 @@ function memberPathOf(expression) {
   }
   // a function whose name is a keyword comes back quoted: `"left"(…)`
   if (/"(?:[^"]|"")+"\s*\(/.test(text)) return null;
-  const match = /#>>?\s*'\{((?:[^']|'')*)\}'/.exec(text);
-  if (match === null) return null;
-  const elements = parseArrayLiteral(match[1].replace(/''/g, "'"));
-  if (elements === null || elements.length === 0) return null;
-  // an element that spells a whole non-negative integer is an ARRAY
-  // INDEX here, exactly as it was on the way in
-  return elements.map((element) => (/^(?:0|[1-9][0-9]*)$/.test(element)
+  /** @type {string[] | null} */
+  let longest = null;
+  for (const match of text.matchAll(/#>>?\s*'\{((?:[^']|'')*)\}'/g)) {
+    const elements = pathElementsOf(`{${match[1].replace(/''/g, "'")}}`);
+    if (elements === null) return null;
+    if (longest === null || elements.length > longest.length) longest = elements;
+  }
+  if (longest === null) return null;
+  const member = longest;
+  // a step the guard says is a step into an OBJECT is a name, whatever it spells
+  /** @type {Set<number>} */
+  const names = new Set();
+  for (const guard of text.matchAll(GUARD_TEST)) {
+    const parent = guard[1] === undefined ? [] : pathElementsOf(`{${guard[1].replace(/''/g, "'")}}`);
+    if (parent !== null && guard[2] === 'object' && parent.every((element, at) => element === member[at])) names.add(parent.length);
+  }
+  return segmentsOfElements(member, (at) => names.has(at));
+}
+
+/** A guard's test of a container, in this dialect's spelling and the server's:
+ * `jsonb_typeof(("doc" #> '{"u"}')) = 'object'`, the parent path (none for the
+ * document itself) and the container the parent must be. */
+const GUARD_TEST = /jsonb_typeof\(\(*\s*(?:"(?:[^"]|"")+"|[A-Za-z_][A-Za-z0-9_]*)\s*(?:#>\s*'\{((?:[^']|'')*)\}'(?:::text\[\])?\s*)?\)+\s*=\s*'(array|object)'/g;
+
+/**
+ * Whether an expression reads its member under the guard of
+ * {@link queryGuard}: a `CASE` whose branch is the bare document column
+ * (`THEN "doc" END`, or the server's `THEN doc ELSE NULL::jsonb END`). Every
+ * other `CASE` this dialect writes returns a read or a cast of the member.
+ * @param {string} expression
+ * @returns {boolean}
+ */
+function memberGuarded(expression) {
+  return /\bTHEN\s+(?:"(?:[^"]|"")+"|(?!(?:true|false|null)\b)[A-Za-z_][A-Za-z0-9_]*)\s+(?:END|ELSE)\b/i.test(String(expression));
+}
+
+/**
+ * The elements of a `#>` array literal (`{span,"a b",0}`), or `null` for
+ * text that is none or names no element.
+ * @param {string} literal
+ * @returns {string[] | null}
+ */
+function pathElementsOf(literal) {
+  if (!literal.startsWith('{') || !literal.endsWith('}')) return null;
+  const elements = parseArrayLiteral(literal.slice(1, -1));
+  return elements === null || elements.length === 0 ? null : elements;
+}
+
+/**
+ * The segments the elements of a path address, as {@link memberPathOf}
+ * reads one out of a whole expression: an element that spells a whole
+ * non-negative integer is an ARRAY INDEX, as it was on the way in, except
+ * where `isName` says the guard of the path made it a name.
+ * @param {string[]} elements
+ * @param {(at: number) => boolean} [isName]
+ * @returns {import('../dialect.js').JsonPathSegment[]}
+ */
+function segmentsOfElements(elements, isName = () => false) {
+  return elements.map((element, at) => (!isName(at) && /^(?:0|[1-9][0-9]*)$/.test(element)
     ? { index: Number(element) }
     : { name: element }));
 }
 
 /**
- * The segments a `#>` array literal (`{span,"a b",0}`) addresses — as
- * {@link memberPathOf} reads one out of a whole expression — or `null`.
- * @param {string} literal
- * @returns {import('../dialect.js').JsonPathSegment[] | null}
+ * The containers a guard in a CHECK names, as the guard's tokens spell them,
+ * once parentheses and casts are set aside: `WHEN jsonb_typeof(doc #> '{a}')
+ * = 'array' AND … THEN doc [ELSE NULL]`. Each conjunct names a parent
+ * path (the elements of its array literal) and the container it must be.
+ * @param {{ kind: string, value: string }[]} inner - the tokens between `CASE` and `END`
+ * @param {string} column - the document column the CHECK reads
+ * @returns {{ parent: string[], container: string }[] | null}
  */
-function pathSegmentsOf(literal) {
-  if (!literal.startsWith('{') || !literal.endsWith('}')) return null;
-  const elements = parseArrayLiteral(literal.slice(1, -1));
-  if (elements === null || elements.length === 0) return null;
-  return elements.map((element) => (/^(?:0|[1-9][0-9]*)$/.test(element)
-    ? { index: Number(element) }
-    : { name: element }));
+function readGuard(inner, column) {
+  /** @type {{ kind: string, value: string }[]} */
+  const flat = [];
+  for (let i = 0; i < inner.length; i++) {
+    const token = inner[i];
+    if (token.kind === 'symbol' && (token.value === '(' || token.value === ')')) continue;
+    if (token.kind === 'symbol' && token.value === '::') {
+      // a cast: `::text`, `::jsonb`, `::text[]`
+      i++;
+      if (inner[i + 1]?.value === '[' && inner[i + 2]?.value === ']') i += 2;
+      continue;
+    }
+    flat.push(token);
+  }
+  let k = 0;
+  const word = (/** @type {string} */ value) => {
+    if (flat[k]?.kind !== 'word' || flat[k].value.toLowerCase() !== value) return false;
+    k++;
+    return true;
+  };
+  const symbol = (/** @type {string} */ value) => {
+    if (flat[k]?.kind !== 'symbol' || flat[k].value !== value) return false;
+    k++;
+    return true;
+  };
+  const columnName = () => {
+    const token = flat[k];
+    if (token === undefined || (token.kind !== 'identifier' && token.kind !== 'word') || token.value !== column) return false;
+    k++;
+    return true;
+  };
+  if (!word('when')) return null;
+  const guards = [];
+  do {
+    if (!word('jsonb_typeof') || !columnName()) return null;
+    /** @type {string[]} */
+    let parent = [];
+    if (symbol('#')) {
+      if (!symbol('>') || flat[k]?.kind !== 'string') return null;
+      const elements = pathElementsOf(flat[k].value);
+      if (elements === null) return null;
+      parent = elements;
+      k++;
+    }
+    if (!symbol('=') || flat[k]?.kind !== 'string') return null;
+    guards.push({ parent, container: flat[k].value });
+    k++;
+  } while (word('and'));
+  if (!word('then') || !columnName()) return null;
+  if (word('else') && !word('null')) return null;
+  return k === flat.length ? guards : null;
 }
 
 /**
@@ -402,7 +521,11 @@ function pathSegmentsOf(literal) {
  * dialect wrote `jsonb_typeof(("doc" #> '{"span"}'))` — bare lower-case
  * names, a cast on the array literal, the literal's quoting its own, a
  * type on every constant — and both read as one; a bound is an integer
- * by its column: present, and equal to its own truncation.
+ * by its column: present, and equal to its own truncation. A span path
+ * that leaves a container open reads its member off the document under
+ * the guard of {@link queryGuard}, `jsonb_typeof((CASE WHEN … THEN doc END)
+ * #> '{span,0}')`, which reads back only as exactly the guard its own path
+ * calls for; the unguarded form an earlier release wrote reads as well.
  * @param {boolean} conforming
  * @returns {import('./check-read.js').IntervalSpelling}
  */
@@ -412,16 +535,44 @@ function intervalSpelling(conforming) {
     integers: 'column',
     typeOf: (tokens, at) => {
       const symbol = (/** @type {number} */ i, /** @type {string} */ value) => tokens[i]?.kind === 'symbol' && tokens[i].value === value;
-      if (tokens[at]?.kind !== 'word' || tokens[at].value.toLowerCase() !== 'jsonb_typeof' || !symbol(at + 1, '(')) return undefined;
+      const wordAt = (/** @type {number} */ i, /** @type {string} */ value) => tokens[i]?.kind === 'word' && tokens[i].value.toLowerCase() === value;
+      if (!wordAt(at, 'jsonb_typeof') || !symbol(at + 1, '(')) return undefined;
       let i = at + 2;
       let depth = 0;
       for (; symbol(i, '('); i++) depth++;
-      const column = tokens[i];
-      if (column === undefined || (column.kind !== 'identifier' && column.kind !== 'word')) return undefined;
-      if (!symbol(i + 1, '#') || !symbol(i + 2, '>') || tokens[i + 3]?.kind !== 'string') return undefined;
-      const segments = pathSegmentsOf(tokens[i + 3].value);
-      if (segments === null) return undefined;
-      i += 4;
+      /** @type {{ parent: string[], container: string }[] | null} */
+      let guards = null;
+      let column;
+      if (wordAt(i, 'case')) {
+        const end = tokens.findIndex((token, k) => k > i && token.kind === 'word' && token.value.toLowerCase() === 'end');
+        if (end < 0) return undefined;
+        const then = tokens.findIndex((token, k) => k > i && k < end && token.kind === 'word' && token.value.toLowerCase() === 'then');
+        column = tokens[then + 1];
+        if (then < 0 || column === undefined || (column.kind !== 'identifier' && column.kind !== 'word')) return undefined;
+        guards = readGuard(tokens.slice(i + 1, end), column.value);
+        if (guards === null) return undefined;
+        i = end + 1;
+        // the parentheses the server puts round the CASE
+        if (depth > 0 && symbol(i, ')')) { depth--; i++; }
+      }
+      else {
+        column = tokens[i];
+        if (column === undefined || (column.kind !== 'identifier' && column.kind !== 'word')) return undefined;
+        i++;
+      }
+      if (!symbol(i, '#') || !symbol(i + 1, '>') || tokens[i + 2]?.kind !== 'string') return undefined;
+      const elements = pathElementsOf(tokens[i + 2].value);
+      if (elements === null) return undefined;
+      // a name an array would take for an index is the object step its guard says it is
+      const segments = segmentsOfElements(elements, (p) => guards?.some((guard) => guard.parent.length === p && guard.container === 'object') === true);
+      if (guards !== null) {
+        // exactly the guard this path calls for: no conjunct more, fewer or other
+        const wanted = guardSteps(segments);
+        if (wanted === null || wanted.length !== guards.length
+          || !wanted.every(({ parent, container }, k) => guards[k].container === container
+            && JSON.stringify(guards[k].parent) === JSON.stringify(elements.slice(0, parent.length)))) return undefined;
+      }
+      i += 3;
       if (symbol(i, '::')) {
         if (tokens[i + 1]?.kind !== 'word' || tokens[i + 1].value.toLowerCase() !== 'text' || !symbol(i + 2, '[') || !symbol(i + 3, ']')) return undefined;
         i += 4;
@@ -700,6 +851,7 @@ export function postgresDialect(options = undefined) {
     identityIn: (identitySql, paramSqls) => `${identitySql} IN (${paramSqls.join(', ')})`,
     schemaTypeOf,
     memberPathOf,
+    memberGuarded,
     expressionOf,
     // the catalog already answers one row per generated column
     readChecks: postgresChecks,

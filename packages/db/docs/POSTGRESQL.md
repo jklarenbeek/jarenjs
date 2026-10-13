@@ -73,19 +73,28 @@ reads such a path from a document wrapped in a `CASE` that requires each
 parent to be the container its step means, in a collection and in an entity's
 document alike (a predicate, a projected leaf, an ordering, and the ordering
 of a graph load or of an included relation); a path with no such step is
-written as before. The generated columns, the migrations and the drift read-back
-share the dialect's path text and keep it byte for byte, so an existing
-database never reads as drifted. Where the schema leaves the step's container
-open (no declared `type`: `items` binds arrays alone and `properties` objects
-alone, so the other kind conforms) a comparison, an ordering or a grouping
-reads the guarded document instead of the indexed column, and does not seek
-that index; the declared interval's exact seek holds the document to the span's
-container beside its bound columns. Where the container is declared
-(`type: 'array'` for an index step, `type: 'object'` for a digit name) the
-column is read as before, and a document of the other kind, which the schema
-forbids, is still read through it. The columns, the CHECK and the store's own
-interval check read the key `0` of an object for an index step and an array's
-element for a name, whatever the schema says of the container.
+written as before. Where the schema leaves the step's container open (no
+declared `type`: `items` binds arrays alone and `properties` objects alone, so
+the other kind conforms) the generated column, an index expression and a
+declared interval's CHECK over the path read the member from the same guarded
+document, so a conforming document whose open container is an object keyed `0`
+holds nothing at an index step (it neither collides in a unique index with the
+array that holds the same element nor reads as a span), as the engine and
+SQLite read it; a comparison, an ordering or a grouping reads the guarded
+document instead of the indexed column, and does not seek that index, and the
+declared interval's exact seek holds the document to the span's container
+beside its bound columns. Where the container is declared (`type: 'array'` for
+an index step, `type: 'object'` for a digit name) the column, its index and the
+CHECK are spelled and read as before, and a document of the other kind, which
+the schema forbids, is still read through them. The store's own interval check
+reads an index step off an array and a name off an object, on every engine. A
+table holds either spelling of such a column, index expression and CHECK and
+opens as it is: a model that changes how it declares the container plans no
+change to them (one that moves the path between an index step and a name
+rebuilds them, the guard naming the kind of step), and a table an earlier release created, which holds the
+unguarded definitions, keeps reading an object's key `0` at an index step (and
+answers `JD2005` from its CHECK for a bad span there) until its index and
+interval are dropped by a migration and declared again.
 
 One statement carries at most 128 predicate terms (the dialect's
 `maxPredicateTerms`), a leaf predicate being one term but for the one weighed

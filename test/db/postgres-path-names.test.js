@@ -6,9 +6,11 @@
  * array and an index selector `[0]` also matched an object, where the
  * engine and SQLite match one each. A query now reads such a path from a
  * document guarded so each step meets the container it means; a path with
- * no such step is read as before, and the generated columns, migrations
- * and drift read-back, which share the dialect's path text, keep every
- * byte of theirs.
+ * no such step is read as before, and so are the generated columns,
+ * migrations and drift read-back of every path whose containers the schema
+ * declares, which keep every byte of theirs (a path whose container the
+ * schema leaves open is guarded in them too: see
+ * postgres-open-container-columns.test.js).
  */
 
 import { describe, it, before, after } from 'node:test';

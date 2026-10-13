@@ -2210,7 +2210,11 @@ export declare function canonicalExpression(node: unknown): string;
 export declare function expressionMembers(node: unknown, out?: string[]): string[];
 /** Every function an expression calls, sorted. */
 export declare function expressionFunctions(node: unknown, out?: Set<string>): string[];
-/** The SQL an expression compiles to on one dialect. */
+/** The SQL an expression compiles to on one dialect. `context` carries
+ * `docColumnSql`, `declarations`, `registered`, `docPath`, `segmentsOf` and,
+ * optionally, `unpinnedOf(segments)`: the segments of a member the dialect
+ * reads under its guard because the schema leaves a container of its path
+ * open (a member is read unguarded when it is absent). */
 export declare function expressionSql(
   node: unknown, dialect: Dialect, context: unknown,
 ): string;

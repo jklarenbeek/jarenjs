@@ -749,30 +749,31 @@ what each does is its own documentation's job
   `apply` trap that answers a coded refusal naming the query-language
   spelling, without turning every capture into a callable proxy (which would
   change `typeof` on every captured value).
-- [ ] **A PostgreSQL index path's `[n]` step reads an object's key `n`.** A
-  query that reads a member path through the document guards a step the
-  database resolves on either container: an index step only on an array, and a
-  member name that `#>` also takes for an array index (`0`, `00`, `+1`, `-1`,
-  ` 1`, and those behind a tab, newline, vertical tab, form feed or carriage
-  return) only on an object, so it answers what the engine and SQLite answer.
-  Where the schema leaves the step's container open (no declared `type`, so an
-  array and an object both conform), a comparison, an ordering or a grouping
-  over the indexed path reads the guarded document instead of the column and
-  does not seek that index, and a declared interval's exact `$overlaps` holds
-  the document to the span's container beside its two bound columns; where the
-  schema declares the container (`type: 'array'` for an index step,
-  `type: 'object'` for a digit name) the column and its index are read as
-  before. Still open: the generated columns, the declared interval's bound
-  columns and their CHECK, and the store's own interval check (`memberAt`)
-  spell the step through `#>`, which resolves the key `"n"` of an object, so a
-  conforming document whose open container is an object keyed `"0"` is read as
-  a span by the CHECK and the store where SQLite's CHECK and the engine read
-  none (the entity predicate, projection and order reads and a load's order
-  terms read through the dialect's guard like the collection reads). Wanted:
-  the generated expression and the CHECK array-only for an index step (a
-  rebuild the catalog comparison must accept), `memberAt` changed in the same
-  change; then an expression index would restore the seek the guarded reads
-  give up.
+- [ ] **A PostgreSQL table keeps the unguarded definitions of an open-container
+  index path until its index is dropped and declared again; a comparison,
+  ordering or grouping over such a path reads the guarded document and does not
+  seek the index.** The generated column, index expression and interval CHECK of
+  a new table read an index step off an array alone (and a digit name off an
+  object alone) where the schema leaves the container open; a table an earlier
+  release created, or one whose model only changed how it declares the
+  container, keeps whatever it holds and opens as it is, so no plan upgrades it
+  (a model that moves the path between an index step and a name rebuilds the
+  column). Still open: (a) a plan, or an option, that rebuilds such a column
+  from the live catalog; (b) a migration document a previous release planned
+  keeps creating unguarded columns (re-plan the link); (c) an earlier table
+  answers `JD2005` from its CHECK where the store answered `JD2003` for an
+  object keyed `0` holding a bad span, and a table that keeps its plain column
+  after a declared container is loosened (`type: 'array'` or `'object'` to none)
+  refuses conforming documents of the other kind (`JD2005`); (d) a digit name
+  over a DECLARED object container (`type: 'object'`, `$.s['0']`) is unguarded
+  text that `introspect()` reads back as an index, an interval over it does not
+  reopen (`JD0002`, before and after), and the plan from a model that reads such
+  a name under a guard to the model derived from the unguarded table rebuilds
+  the column; (e) the seek: read the column for an open-container path when the
+  plan knows the column carries the guard (the planned column's `unpinned`; a
+  table holding the other spelling must keep the guarded document), or an
+  expression index; (f) `memberAt` reads a negative index as absent where the
+  engine counts from the end.
 - [ ] **A SQLite table the previous release created keeps one of its member's types under an indexed union until a link changes the union or the column is retyped by hand.**
   Such a table opens, answers as it did and is accepted by `plan --store` and `migrate()`, but a comparison of a kind its column cannot hold reads the document and names no
   index, and it still refuses the documents the column's type cannot hold. A plan that changes the union's types rebuilds the column; a plan between identical models

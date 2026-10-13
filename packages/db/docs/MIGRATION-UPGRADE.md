@@ -553,7 +553,8 @@ the query engine, now refuse by code or answer what the engine answers:
   bound columns; where the schema declares the container (`type: 'array'` for
   an index step, `type: 'object'` for a digit name) the column and its index
   are read as before. The columns, the CHECK and the store's own interval
-  check still read an object's key `0` for an index step.
+  check were left reading an object's key `0` for an index step; they read it
+  as the query does now (see [§21](#21-a-path-with-an-index-step-reads-an-array-and-nothing-else)).
 - A grouping whose `$orderby` names an integer `$sum` or `$avg` ran in the
   engine and now lowers beside the sum's exactness guard: a group with no value
   orders as `0` (a sum) or as the empty key (an average), equal values by first
@@ -2063,6 +2064,77 @@ number `1` no longer do where a string-first member's `TEXT` column made them on
   `JQ2001` where it raised `JD0010`. A grouping ordered by a key of that policy
   is unchanged (`JQ2005`, in the engine), and so is every grouping on
   PostgreSQL, which reads no column of that policy natively.
+
+## 21. A path with an index step reads an array and nothing else
+
+On PostgreSQL a generated column, an index expression and a declared interval's
+CHECK over a path with an index step (`$.u[0]`) read an object's key `"0"`
+there as well, and over a name that reads as an index (`$.u['0']`) an array's
+first element, where the query engine and SQLite read neither. A conforming
+document whose open container (no declared `type`) was the other kind
+therefore collided with the document that holds the same value in a unique
+index (`JD2005`), was read as a span by the CHECK (`JD2005`) and was counted as
+one by the precondition of a migration that adds the interval (`JD0021`). They
+read such a path from the document under the guard a query reads it under now,
+so that document holds nothing at the step: its column is `NULL`, it collides
+with nothing and it is no span. A path whose containers the schema declares is
+spelled and read as before, and so is every SQLite table.
+
+- The store's own interval check, and the stored derived columns' read of their
+  member (geohash, bounding box, vector), took an array's element for a name
+  and an object's key for an index step, and any inherited name (`length`,
+  `constructor`) for a member. They select an index step off an array and a
+  name off an object's own members alone now, on every engine: a document
+  whose open container is an object keyed `0` is no longer refused `JD2003` as
+  a bad span, and a derived column stores `NULL` where it read the other
+  container. A row already stored keeps the value it holds until its document
+  is written again.
+- `store.introspect()` of a PostgreSQL table whose columns read their member
+  under the guard derives a schema that leaves the containers the guard covers
+  untyped (it derived `type: 'array'` or `type: 'object'` for them), and a name
+  that reads as an index comes back as the name (`$.u["0"]`, where it came back
+  as the index `$.u[0]`), so the derived model opens the table and plans
+  nothing against the model it was read from. A table with the earlier,
+  unguarded definitions derives its containers declared, as before.
+- A table reads a guarded path either way: a model that declares a container it
+  left open, or leaves open one it declared, plans no change to the column, the
+  index expression or the CHECK, and the store opens on the table as it is; the
+  model-from-catalog plan (`jaren-db plan --store`, `introspect()` then
+  `planModelMigration`) of a table the previous release created is the plan the
+  previous release made. A guard names the kind of each digit step, so a model
+  edit that moves a path between an index step and a name (`$.u[0]` to
+  `$.u['0']`, or dropping one of two indexes that share the column) is a change
+  the plan rebuilds, as is declaring the container the other kind; the plan in
+  the other direction of the flow above, from the model to the model read off
+  an earlier table, rebuilds the column of a name the derived model reads as an
+  index. The definition a table holds otherwise changes only with a migration
+  that drops the index (and its interval) and a later one that declares it
+  again.
+
+**Downgrade.** A table this release creates holds the guarded definitions for a
+path whose container the schema leaves open, and the previous release refuses it
+at open (`JD0002`, `column ... computes (CASE WHEN jsonb_typeof(...`, or the
+CHECK declared with the guard). To go back, drop and recreate each such
+generated column, its index and the interval's CHECK with the previous
+release's unguarded text: `"doc" #> '{"u","0"}'` under the same typed `CASE`
+(`jsonb_typeof(...) = 'number' THEN (...)::numeric`) for an index step, and
+`jsonb_typeof("doc" #> '{"s","0"}')` in the CHECK. The values the columns hold
+are recomputed by the statement. `introspect()` of the table answers the
+previous release's schema (containers typed) after that.
+
+**A table an earlier release created** opens and answers as it did, with the
+unguarded definitions; it keeps reading an object's key `0` at an index step
+until its index is dropped and declared again. Two answers differ on it from
+the previous release's: a document whose open container is an object keyed `0`
+and whose span is bad was refused `JD2003` by the store (which read it as a
+span) and is now written, and the table's own CHECK answers `JD2005` for it
+(`violates check constraint`), because the CHECK still reads it as a span.
+
+**A saved migration** a previous release planned carries the DDL text it
+planned: applying it creates the columns, indexes and CHECK of a path with an
+open container unguarded, as that release did, and the store accepts them. Plan
+the link again with this release to create them guarded; an applied link is
+never re-planned (see section 1).
 
 ## Measured costs
 

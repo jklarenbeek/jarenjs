@@ -29,6 +29,7 @@ import { rowPaths, rowPredicate, storedBoolean } from './dialects/row-predicate.
 import { planTable } from './dialects/sqlite-schema.js';
 import { readIntervalCheck } from './dialects/check-read.js';
 import { comparableDeclaredSql } from './schema-sql.js';
+import { readsAsIndex } from './model-path.js';
 export { normalizeDeclaredSql, comparableDeclaredSql } from './schema-sql.js';
 
 const MANAGED_SQL_OPTIONS = Object.freeze({ columnOrder: /** @type {const} */ ('ignore') });
@@ -268,6 +269,45 @@ export function schemaNodeAt(schema, segments) {
     node = 'name' in segment ? node.properties?.[segment.name] : elementAt(node, segment.index);
   }
   return node === null || typeof node !== 'object' ? undefined : node;
+}
+
+/**
+ * Whether a step of a path meets a container the schema does not declare
+ * as the kind the step means, where a path engine may read the step off
+ * the other kind: an index off the key of that number in an object, a
+ * member name that reads as an index ({@link readsAsIndex}) off an array's
+ * element. A declared `type` that excludes the other kind pins the
+ * container. A container with no `type` is not pinned — `properties`
+ * binds objects alone and `items` arrays alone, so a value of the other
+ * kind conforms — and neither is a path that leaves the schema.
+ * @param {any} schema
+ * @param {import('./dialect.js').JsonPathSegment[]} segments
+ * @returns {boolean}
+ */
+export function unpinnedStep(schema, segments) {
+  return segments.some((segment, at) => {
+    const index = 'index' in segment;
+    if (!index && !readsAsIndex(segment.name)) return false;
+    const declared = schemaNodeAt(schema, segments.slice(0, at))?.type;
+    const kinds = typeof declared === 'string' ? [declared] : declared;
+    return !Array.isArray(kinds) || kinds.includes(index ? 'object' : 'array');
+  });
+}
+
+/**
+ * The segments of a path whose definition must read its member under the
+ * dialect's guard — the schema leaves a container of one of its steps open
+ * ({@link unpinnedStep}) and the dialect guards such a step — or
+ * `undefined`. A column over a path whose containers the schema declares
+ * reads it unguarded, which is every byte an earlier release wrote.
+ * @param {any} schema
+ * @param {any} dialect
+ * @param {import('./dialect.js').JsonPathSegment[]} segments
+ * @returns {import('./dialect.js').JsonPathSegment[] | undefined}
+ */
+function guardedPath(schema, dialect, segments) {
+  return unpinnedStep(schema, segments)
+    && dialect.queryGuard(dialect.quoteIdentifier(DOC_COLUMN), segments) !== null ? segments : undefined;
 }
 
 /**
@@ -637,14 +677,20 @@ export function planCollection(name, collection, dialect, options = undefined) {
       const columnName = generatedColumnName(expressionStem(index.expression),
         columnByCanonical, taken, { key: index.canonical, suffix: 'x' });
       if (!known) {
-        const sql = expressionSql(index.expression, dialect, {
+        const sqlWith = (/** @type {(segments: any) => any} */ unpinnedOf) => expressionSql(index.expression, dialect, {
           docColumnSql: dialect.quoteIdentifier(DOC_COLUMN),
           declarations: options?.expressions ?? {},
           registered: options?.registered !== false,
           docPath: `${index.docPath}/expression`,
           segmentsOf: (member) =>
             compileIndexPath(member, `${index.docPath}/expression`).segments,
+          unpinnedOf,
         });
+        const sql = sqlWith((segments) => guardedPath(collection.schema, dialect, segments));
+        // the other spelling a table holds: guarded where this one is not, and the reverse
+        const alternate = sql === sqlWith(() => undefined)
+          ? sqlWith((segments) => (dialect.queryGuard(dialect.quoteIdentifier(DOC_COLUMN), segments) === null ? undefined : segments))
+          : sqlWith(() => undefined);
         generated.push({
           name: columnName,
           // an expression's value is TEXT: one declared function, one
@@ -653,6 +699,7 @@ export function planCollection(name, collection, dialect, options = undefined) {
           kind: 'text',
           pathText: null,
           expression: sql,
+          ...(alternate === sql ? {} : { alternate }),
           canonical: index.canonical,
         });
         expressions.push({ column: columnName, canonical: index.canonical,
@@ -692,14 +739,23 @@ export function planCollection(name, collection, dialect, options = undefined) {
       if (!known) {
         const schemaType = columnSchemaTypeAt(collection.schema, segments, dialect);
         const firstType = schemaTypeAt(collection.schema, segments);
-        generated.push(unionColumn({
+        const column = unionColumn({
           name: columnName,
           type: dialect.typeFor(schemaType, 'generated'),
           kind: columnKindFor(schemaType),
           pathText,
           canonical,
         }, { schema: collection.schema, segments, schemaType, firstType, dialect,
-          held: options?.legacyColumns?.get(columnName) }));
+          held: options?.legacyColumns?.get(columnName) });
+        const unpinned = guardedPath(collection.schema, dialect, segments);
+        const doc = dialect.quoteIdentifier(DOC_COLUMN);
+        // a path the dialect guards has a second spelling, the one a table holds whose model
+        // declared the container the other way (or an earlier release created it)
+        const alternate = unpinned !== undefined ? dialect.columnRead(doc, column)
+          : dialect.queryGuard(doc, segments) === null ? undefined
+            : dialect.columnRead(doc, { ...column, unpinned: segments });
+        generated.push({ ...column, ...(unpinned === undefined ? {} : { unpinned }),
+          ...(alternate === undefined ? {} : { alternate }) });
       }
       columns.push(columnName);
     }
@@ -752,11 +808,20 @@ export function planCollection(name, collection, dialect, options = undefined) {
         `the interval path '${interval.path}' names a member the dialect's JSON path grammar cannot carry`,
         `${interval.docPath}/path`);
     }
-    const sql = dialect.ddl.intervalCheck({ docColumn: DOC_COLUMN, span: pathText, bounds,
-      start: dialect.quoteIdentifier(start), end: dialect.quoteIdentifier(end), maxDuration: interval.maxDuration });
+    const unpinned = guardedPath(collection.schema, dialect, interval.segments);
+    const checkWith = (/** @type {any} */ guard) => dialect.ddl.intervalCheck({ docColumn: DOC_COLUMN, span: pathText, bounds,
+      start: dialect.quoteIdentifier(start), end: dialect.quoteIdentifier(end), maxDuration: interval.maxDuration,
+      ...(guard === undefined ? {} : { unpinned: guard }) });
+    const sql = checkWith(unpinned);
+    // a CHECK over a path the dialect guards is read either way: with the guard where the schema leaves a
+    // container open and without it where it declares one, and a change of that alone is no change
+    const alternate = dialect.queryGuard(dialect.quoteIdentifier(DOC_COLUMN), interval.segments) === null
+      ? undefined : checkWith(unpinned === undefined ? interval.segments : undefined);
     return { name: interval.name, constraint: interval.constraint,
-      span: { segments: interval.segments, canonical: interval.canonical, pathText, bounds },
-      start, end, maxDuration: interval.maxDuration, sql, docPath: interval.docPath };
+      span: { segments: interval.segments, canonical: interval.canonical, pathText, bounds,
+        ...(unpinned === undefined ? {} : { unpinned }) },
+      start, end, maxDuration: interval.maxDuration, sql, ...(alternate === undefined ? {} : { alternate }),
+      docPath: interval.docPath };
   });
   // every name the table, its columns and its indexes take, at the member
   // each one comes from (see `refuseLongName`)
@@ -1107,8 +1172,15 @@ export function verifyShape(connection, plan, collection, docPath, kind = 'colle
         // a catalog that reports no expression for a generated column has none to read back
         const planned = readBack !== undefined && have.generated && have.computes !== null
           ? plannedExpression(dialect, plan, have.name) : undefined;
-        const difference = planned === undefined ? null
+        let difference = planned === undefined ? null
           : readBack.expression(/** @type {string} */ (have.computes), planned, have.conforming);
+        if (difference !== null) {
+          // the same path spelled with the guard or without it: a table whose container the model
+          // declared the other way, or one an earlier release created, opens as it did
+          const alternate = alternateExpression(plan, have.name);
+          if (alternate !== undefined && readBack.expression(/** @type {string} */ (have.computes), alternate, have.conforming) === null)
+            difference = null;
+        }
         if (difference !== null) disagree(`column '${have.name}' ${difference}`);
       }
       // a key the model leaves to the database over a column that allocates
@@ -1243,7 +1315,48 @@ function verifyIntervalChecks(connection, plan, disagree) {
 export function plannedExpression(dialect, plan, name) {
   const column = (plan.generated ?? []).find((/** @type {any} */ candidate) => candidate.name === name);
   if (column === undefined || column.stored === true || column.derive !== undefined) return undefined;
-  return column.expression ?? dialect.jsonExtract(dialect.quoteIdentifier(DOC_COLUMN), column.pathText, column.kind);
+  return columnExpression(dialect, column);
+}
+
+/**
+ * The expression one planned generated column is created with.
+ * @param {any} dialect @param {any} column
+ * @returns {string}
+ */
+function columnExpression(dialect, column) {
+  return column.expression ?? dialect.columnRead(dialect.quoteIdentifier(DOC_COLUMN), column);
+}
+
+/**
+ * Whether a table built for the planned column `held` is one `wanted` accepts
+ * as it is — it reads the member as `wanted` does, or as the other spelling a
+ * table may hold for it (`alternate`: with the guard of a path that leaves a
+ * container open, or without it). The guard names the kind of each digit step
+ * (an index off an array, a name off an object), so a column read under the
+ * guard of one kind is not one that `wanted` accepts when its step is the
+ * other; an unguarded column names no kind and is accepted wherever the text
+ * agrees. Meant for columns of a path the dialect guards (those carrying
+ * `alternate`).
+ * @param {any} dialect @param {any} held @param {any} wanted
+ * @returns {boolean}
+ */
+export function acceptsColumn(dialect, held, wanted) {
+  const text = columnExpression(dialect, held);
+  return text === columnExpression(dialect, wanted) || text === wanted.alternate;
+}
+
+/**
+ * The other expression a table may hold a planned generated column with: a
+ * path the dialect guards is read off the document under the guard where the
+ * schema leaves a container open and without it where the schema declares one,
+ * and a table holds either (a model that changes how it declares the container
+ * plans no change, and a table an earlier release created reads every such
+ * column unguarded). Both open as they are.
+ * @param {any} plan @param {string} name - the column
+ * @returns {string | undefined}
+ */
+function alternateExpression(plan, name) {
+  return (plan.generated ?? []).find((/** @type {any} */ candidate) => candidate.name === name)?.alternate;
 }
 
 /**

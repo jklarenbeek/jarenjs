@@ -46,9 +46,8 @@ import { compileBuckets, resampleSeries, toEpoch } from '@jarenjs/core/series';
 
 import { selectPlan, conjoin, plainFamily, PLAN_VERSION } from './algebra.js';
 import { typeOfPath, isNumericType } from './types.js';
-import { schemaNodeAt, canonicalOf } from './ddl.js';
+import { schemaNodeAt, canonicalOf, unpinnedStep } from './ddl.js';
 import { columnKindFor } from './scalar-types.js';
-import { readsAsIndex } from './model-path.js';
 import {
   BBOX_COMPONENTS, BBOX_INDEX_ORDER, PRECISION_MIN, PRECISION_MAX,
   probeBox, probePosition, probeCircleBox, cellNeighbourhood, probeVector,
@@ -386,29 +385,6 @@ function holdsOnlyScalars(ref, schema) {
  */
 function countsFromTheEnd(ref) {
   return ref.segments.some((segment) => 'index' in segment && segment.index < 0);
-}
-
-/**
- * Whether a step of a path meets a container the schema does not declare
- * as the kind the step means, where a path engine may read the step off
- * the other kind: an index off the key of that number in an object, a
- * member name that reads as an index ({@link readsAsIndex}) off an array's
- * element. A declared `type` that excludes the other kind pins the
- * container. A container with no `type` is not pinned — `properties`
- * binds objects alone and `items` arrays alone, so a value of the other
- * kind conforms — and neither is a path that leaves the schema.
- * @param {any} schema
- * @param {import('./dialect.js').JsonPathSegment[]} segments
- * @returns {boolean}
- */
-function unpinnedStep(schema, segments) {
-  return segments.some((segment, at) => {
-    const index = 'index' in segment;
-    if (!index && !readsAsIndex(segment.name)) return false;
-    const declared = schemaNodeAt(schema, segments.slice(0, at))?.type;
-    const kinds = typeof declared === 'string' ? [declared] : declared;
-    return !Array.isArray(kinds) || kinds.includes(index ? 'object' : 'array');
-  });
 }
 
 /**

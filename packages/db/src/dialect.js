@@ -248,6 +248,7 @@ export const MEMBER_WHEN = Symbol('dialect.memberWhen');
  *     end: { sql: string, pathText: string } }) => string,
  *   intervalSpelling: (conforming: boolean) => import('./dialects/check-read.js').IntervalSpelling,
  *   memberPathOf?: (expression: string) => (JsonPathSegment[] | null),
+ *   memberGuarded?: (expression: string) => boolean,
  *   expressionOf?: (expression: string, byName: Record<string, string>) => (any | null),
  *   readGenerated?: (rows: any[]) => { name: string, expression: string }[],
  *   physicalRead?: (codec: string, sql: string) => string,
@@ -284,6 +285,22 @@ export function createDialect(spec) {
   const q = spec.quoteIdentifier;
   const p = spec.parameterRef;
   const queryGuard = spec.queryGuard ?? (() => null);
+  /** @param {string} documentSql @param {JsonPathSegment[]} segments */
+  const queryDocument = (documentSql, segments) => {
+    const guard = queryGuard(documentSql, segments);
+    return guard === null ? documentSql : `(CASE WHEN ${guard} THEN ${documentSql} END)`;
+  };
+  /**
+   * The member a planned path column (or a path of an index expression)
+   * reads: from the document, or from the document under the guard of a
+   * path that leaves a container open (`unpinned`, the path's segments).
+   * @param {string} documentSql
+   * @param {{ pathText: string, kind?: string, unpinned?: JsonPathSegment[] }} column
+   * @returns {string}
+   */
+  const columnRead = (documentSql, column) => spec.jsonExtract(
+    column.unpinned === undefined ? documentSql : queryDocument(documentSql, column.unpinned),
+    column.pathText, column.kind);
   const foreignKeyActions = spec.foreignKeyActions ?? { cascade: 'CASCADE', restrict: 'RESTRICT', setNull: 'SET NULL' };
   const referenceSql = (reference) => ` REFERENCES ${q(reference.table)} (${q(reference.column)})`
     + ` ON DELETE ${foreignKeyActions[reference.onDelete]}${spec.foreignKeySuffix ?? ''}`;
@@ -303,8 +320,7 @@ export function createDialect(spec) {
    */
   const generatedColumnSql = (docColumn, column) => {
     if (column.stored === true) return `${q(column.name)} ${column.type}`;
-    const expression = column.expression
-      ?? spec.jsonExtract(q(docColumn), column.pathText, column.kind);
+    const expression = column.expression ?? columnRead(q(docColumn), column);
     return `${q(column.name)} ${column.type} GENERATED ALWAYS AS (${expression}) `
       + spec.generatedStorage;
   };
@@ -375,13 +391,17 @@ export function createDialect(spec) {
      * with NULL, which a CHECK would let through.
      * @param {{ docColumn: string, span: string,
      *   bounds: { start: string, end: string }, start: string, end: string,
-     *   maxDuration: number | null }} shape - `span` and `bounds` are path
-     *   texts as `jsonPathText` writes them; `start` and `end` the operand SQL
+     *   maxDuration: number | null, unpinned?: JsonPathSegment[] }} shape -
+     *   `span` and `bounds` are path texts as `jsonPathText` writes them;
+     *   `start` and `end` the operand SQL; `unpinned` the span's segments
+     *   where its path leaves a container open, so the span is read under
+     *   the guard of {@link queryDocument}
      * @returns {string} the CHECK's expression, without the keyword
      */
-    intervalCheck({ docColumn, span, bounds, start, end, maxDuration }) {
+    intervalCheck({ docColumn, span, bounds, start, end, maxDuration, unpinned }) {
       const docColumnSql = q(docColumn);
-      const typeOf = spec.jsonTypeName(docColumnSql, span);
+      const typeOf = spec.jsonTypeName(
+        unpinned === undefined ? docColumnSql : queryDocument(docColumnSql, unpinned), span);
       const safe = (/** @type {string} */ operand) => `${operand} BETWEEN ${-SAFE_BOUND} AND ${SAFE_BOUND}`;
       const integers = spec.integerBounds({ docColumnSql,
         start: { sql: start, pathText: bounds.start }, end: { sql: end, pathText: bounds.end } });
@@ -738,10 +758,12 @@ export function createDialect(spec) {
      * whose path text cannot tell a member NAME from an array INDEX
      * answers it (PostgreSQL's `#>` takes the element `0` of an array and
      * the key `0` of an object for both); an engine whose text can,
-     * answers `null`. Only query emitters call it and
-     * {@link queryDocument}: the generated columns, the migrations and
-     * the drift read-back keep spelling paths through {@link jsonExtract}
-     * alone.
+     * answers `null`. The query emitters read it through
+     * {@link queryDocument}, and so does the definition of a generated
+     * column, an index expression or an interval's CHECK over a path that
+     * leaves a container open ({@link columnRead}); the migrations and the
+     * drift read-back of every other path keep spelling it through
+     * {@link jsonExtract} alone.
      */
     queryGuard,
     /**
@@ -750,10 +772,15 @@ export function createDialect(spec) {
      * condition, the document under it — one that fails the guard is no
      * document at all, so every typed form over it reads NULL, absent.
      */
-    queryDocument: (documentSql, segments) => {
-      const guard = queryGuard(documentSql, segments);
-      return guard === null ? documentSql : `(CASE WHEN ${guard} THEN ${documentSql} END)`;
-    },
+    queryDocument,
+    /**
+     * The member a planned path column reads: {@link jsonExtract} over the
+     * document, or over {@link queryDocument} where the column's path
+     * leaves a container open (`unpinned`, its segments) — so a conforming
+     * document whose open container is the other kind has no member there,
+     * as the engine's path and SQLite read none.
+     */
+    columnRead,
     /**
      * How the row-predicate lowering spells this engine's comparisons, truth
      * values and text literals: what an index condition is rendered with.
@@ -922,6 +949,14 @@ export function createDialect(spec) {
      * reports rather than a path it invents.
      */
     memberPathOf: spec.memberPathOf,
+    /**
+     * Whether a generated column's expression reads its member under the
+     * guard of {@link queryGuard} — the schema left a container of the path
+     * open — which the introspector answers by leaving those containers
+     * untyped in the schema it derives, so the derived model plans the
+     * definition the catalog holds.
+     */
+    memberGuarded: spec.memberGuarded,
     /**
      * How this dialect's interval CHECK reads back through the one
      * interval reader, for a session whose string spelling is as given.

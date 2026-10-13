@@ -218,8 +218,14 @@ export function expressionStem(node) {
  * @param {any} node - a normalized expression
  * @param {any} dialect
  * @param {{ docColumnSql: string, declarations: Record<string, any>,
- *   registered: boolean, docPath: string }} context - `registered` is
- *   whether this connection can register a deterministic function
+ *   registered: boolean, docPath: string,
+ *   segmentsOf: (member: string) => import('./dialect.js').JsonPathSegment[],
+ *   unpinnedOf?: (segments: import('./dialect.js').JsonPathSegment[]) =>
+ *     (import('./dialect.js').JsonPathSegment[] | undefined) }} context -
+ *   `registered` is whether this connection can register a deterministic
+ *   function; `unpinnedOf`, where given, answers the segments of a member
+ *   the dialect reads under its guard, because the schema leaves a container
+ *   of its path open (a member is read unguarded when it is absent)
  * @returns {string}
  */
 export function expressionSql(node, dialect, context) {
@@ -231,7 +237,8 @@ export function expressionSql(node, dialect, context) {
         : String(node.value);
   }
   if (Object.hasOwn(node, 'member')) {
-    const pathText = dialect.jsonPathText(context.segmentsOf(node.member));
+    const segments = context.segmentsOf(node.member);
+    const pathText = dialect.jsonPathText(segments);
     if (pathText === null) {
       throw refuse(`the index expression reads '${node.member}', a member name the dialect's `
         + 'JSON path grammar cannot carry', context.docPath);
@@ -239,7 +246,8 @@ export function expressionSql(node, dialect, context) {
     // the member's own SCALAR, not its JSON text: a declared function is
     // a function of the VALUE, and `lower` of a string must be the same
     // answer on both engines rather than one of them quoting it first
-    return dialect.jsonExtract(context.docColumnSql, pathText, 'scalar');
+    return dialect.columnRead(context.docColumnSql,
+      { pathText, kind: 'scalar', unpinned: context.unpinnedOf?.(segments) });
   }
   const declared = context.declarations[node.call];
   const args = node.args.map((argument) => expressionSql(argument, dialect, context));
