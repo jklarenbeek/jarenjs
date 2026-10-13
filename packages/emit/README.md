@@ -158,6 +158,51 @@ across the optional boundary and `coerceTypes` widens what the input accepts.
 `trimStrings` is string-to-string, and `removeAdditional` removes members no
 type ever declared — neither earns a second declaration.
 
+**Choosing per field from the command line.** `--defaults` and `--coerce` turn a
+normalization on for every node. The per-node route the programmatic API offers
+as a predicate has a command-line spelling: `--config <file>` names a JSON
+object of `compileNormalizer` options (`useDefaults`, `coerceTypes`,
+`trimStrings`, `removeAdditional`), where a switch is `true`, `false`, or the
+name of a schema annotation that turns it on for the nodes carrying
+`<annotation>: true`:
+
+```json
+{ "coerceTypes": "x-coerce", "useDefaults": "x-default", "trimStrings": "x-trim" }
+```
+
+```bash
+jaren-emit --schema ./schemas --out ./types --config ./normalize.json
+```
+
+Over `{ "properties": { "port": { "type": "integer", "x-coerce": true },
+"retries": { "type": "integer" }, "mode": { "type": "string", "default": "fast",
+"x-default": true } }, "required": ["mode"] }`, only the annotated nodes move:
+`port?: number | string` and `mode?: string` on the input side, while `retries`
+stays `number` and `mode` is present on the normalized side. A normalizer
+compiled with the matching predicates
+(`coerceTypes: (node) => node['x-coerce'] === true`) does exactly that at
+runtime.
+A string switch is read the way that predicate reads it, so only `true` on the
+annotation counts (`false`, `"yes"` and `1` do not). That is the whole route: a
+predicate that looks at anything else, such as a node's `type` or `format`,
+stays programmatic. A route that no node of any schema carries as `true` is
+reported on stderr (`warning: config ... routes by 'x-coerse', which no schema
+node carries as true`) and the output is still written, because a misspelt
+annotation would otherwise switch the normalization off without a word.
+`removeAdditional` takes `true`, `false` or `"all"`; `trimStrings` and
+`removeAdditional` change no declaration, so they are checked but earn no
+second type.
+
+A config that cannot be read, is not a JSON object, names an unknown option
+(the message offers the nearest one), gives a switch anything but a boolean or a
+non-empty string, or gives `removeAdditional` anything but a boolean or `"all"`
+exits 2 and writes nothing; the string `"true"` or `"false"` in place of the
+boolean is named as such, since a quoted boolean is a typo and not an annotation.
+`--defaults`/`--coerce` beside a config that sets
+the same option is refused too (exit 2), so an option has one place it is
+decided. A config whose `useDefaults` and `coerceTypes` are both off emits one
+declaration per type, as no flag at all does.
+
 The switch resolution, including per-field predicates, is **imported from the
 normalizer rather than reimplemented**. Two copies of that rule would drift,
 and a variant that disagrees with the normalizer is worse than no variant: it
@@ -214,6 +259,10 @@ jaren-emit --schema <file|dir> --out <dir> [options]
   --name <Name>     root declaration name for a single schema
   --bundle <file>   one output file instead of one per schema
   --check           write nothing; exit 1 if any output is out of date
+  --defaults        accepted/normalized variants for schema defaults
+  --coerce          accepted/normalized variants for type coercion
+  --suffix <s>      name for the accepted variant (default Input)
+  --config <file>   JSON of normalization options, for a per-node route
 ```
 
 Options requiring a value reject a missing value before writing. Input and

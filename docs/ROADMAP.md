@@ -109,9 +109,6 @@ delete it or fix it.
   ever needs finer treatment.
 - [ ] **Unprefixed `query` alias / vocabulary registration** — register `$query` through a custom vocabulary and meta-schema (json-everything style) instead of only as an extension keyword.
 - [ ] **A reference keeps instance locations on** — once a `$data`, `data` or `$query` reader exists anywhere in the compilation, a subtree holding a `$ref`, `$dynamicRef` or `$recursiveRef` still extends member and item locations even when what it references reads none; resolving references during the compile-time scan would let those subtrees skip too.
-- [ ] **Predicate normalization from the CLI** — `--defaults`/`--coerce` are
-  booleans, so the per-node predicate route (`x-trim`, `x-coerce`, `x-default`)
-  is programmatic-only; a config-file route would make it usable from the CLI.
 - [ ] **ajv-style `errorMessage` `properties`/`items` map forms** — only if demand appears; the subtree prefix rule already covers what they express.
 - [ ] **Relative-pointer `${...}` interpolation in message templates** — ajv-errors-style data interpolation; params already carry the offending values, so this is convenience, not capability.
 

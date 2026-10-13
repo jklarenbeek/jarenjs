@@ -7,6 +7,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
+import { isPlainOptions, refuseUnknownMembers } from '@jarenjs/core/object';
+
 import { compileEmitModel } from './model.js';
 import { renderTypeScript } from './typescript.js';
 import { renderMarkdown } from './markdown.js';
@@ -32,13 +34,25 @@ Options:
   --check           Do not write; exit 1 if any output would differ (for CI)
   --defaults        Emit accepted/normalized variants for schema defaults
   --coerce          Emit accepted/normalized variants for type coercion
+  --config <file>   A JSON file of normalization options, for a per-node route
   --suffix <s>      Name for the accepted variant (default: Input)
   --help            This text
 
-The --defaults/--coerce flags mirror the compileNormalizer options of the same
-name. With either on, a type whose shape differs before and after normalizing
-gains a second declaration: Config is what you have afterwards, ConfigInput is
-what a caller may hand in.
+The --defaults/--coerce flags mirror the compileNormalizer options useDefaults
+and coerceTypes. With either on, a type whose shape differs before and after
+normalizing gains a second declaration: Config is what you have afterwards,
+ConfigInput is what a caller may hand in.
+
+--config names a JSON object holding compileNormalizer options: useDefaults,
+coerceTypes, trimStrings (each true, false, or the name of a schema annotation
+that switches it on per node, so "coerceTypes": "x-coerce" coerces exactly the
+nodes carrying "x-coerce": true) and removeAdditional (true, false or "all").
+It is the route for the per-node choice the two flags cannot make. A
+--defaults/--coerce flag and the config's setting for the same option refuse
+each other: give it in one place. A config that cannot be read, is not JSON, or
+names an unknown or mistyped option exits 2 and writes nothing (a quoted
+"true" or "false" for a boolean is named as such). An annotation no schema node
+carries as true is a warning on stderr: it is as often a typo as a choice.
 
 importmap options — serve installed packages unbundled:
   --packages <a,b>     Package names, comma separated; a bare name is a suite
@@ -62,6 +76,7 @@ Examples:
   jaren-emit --schema ./schemas --out ./src/types
   jaren-emit --schema ./schemas/user.json --out ./types --name User
   jaren-emit --schema ./schemas --out ./src/types --check
+  jaren-emit --schema ./schemas --out ./src/types --config ./normalize.json
   jaren-emit importmap --packages app,view --prefix /vendor/ > importmap.json
 `;
 
@@ -117,11 +132,95 @@ function importmapCommand(argv) {
   return 0;
 }
 
+/** The members of `--config`: the `compileNormalizer` options, by name. */
+const CONFIG_OPTIONS = Object.freeze(['useDefaults', 'removeAdditional', 'coerceTypes', 'trimStrings']);
+
+/**
+ * Read the `--config` file into `compileNormalizer` options. A string naming
+ * a schema annotation becomes the per-node predicate the programmatic API
+ * takes, `(node) => node[annotation] === true`: the same decision at the same
+ * moment, so the declarations describe exactly what a normalizer compiled
+ * with those options does. Everything wrong with the file is refused here,
+ * before any schema is read or any output is written.
+ * @param {string} file - the config path
+ * @returns {{ options: Record<string, any>, routes: string[] }} the options with
+ *   only the members the file set, and the annotation names they route by
+ */
+function readConfig(file) {
+  const refuse = (message) => new Error(`config ${file}: ${message}`);
+  let config;
+  try { config = JSON.parse(fs.readFileSync(file, 'utf8')); }
+  catch (error) { throw refuse(error.message); }
+  if (!isPlainOptions(config)) throw refuse('must be a JSON object of normalization options');
+  refuseUnknownMembers(config, CONFIG_OPTIONS, (key, hint) => refuse(`unknown option '${key}'${hint}`));
+  const options = {};
+  const routes = [];
+  for (const name of ['useDefaults', 'coerceTypes', 'trimStrings']) {
+    const value = config[name];
+    if (value === undefined) continue;
+    if (value === 'true' || value === 'false') {
+      throw refuse(`'${name}' is the string "${value}" but must be a boolean, true or false, or the name of a schema annotation: write ${value} without quotes`);
+    }
+    if (typeof value === 'string' && value !== '') {
+      options[name] = (node) => node[value] === true;
+      routes.push(value);
+    }
+    else if (typeof value === 'boolean') options[name] = value;
+    else throw refuse(`'${name}' must be true, false or the name of a schema annotation`);
+  }
+  const strip = config.removeAdditional;
+  if (strip !== undefined) {
+    if (typeof strip !== 'boolean' && strip !== 'all') throw refuse("'removeAdditional' must be true, false or 'all'");
+    options.removeAdditional = strip;
+  }
+  return { options, routes };
+}
+
+/**
+ * Whether some node of `value` carries `annotation: true`, for any of the
+ * `wanted` names; the ones found are added to `found`.
+ * @param {unknown} value - a parsed schema, or part of one
+ * @param {Set<string>} wanted
+ * @param {Set<string>} found
+ */
+function findAnnotations(value, wanted, found) {
+  if (value === null || typeof value !== 'object') return;
+  if (Array.isArray(value)) {
+    for (const item of value) findAnnotations(item, wanted, found);
+    return;
+  }
+  for (const [key, member] of Object.entries(value)) {
+    if (member === true && wanted.has(key)) found.add(key);
+    else findAnnotations(member, wanted, found);
+  }
+}
+
+/**
+ * The options the model derives variants from: the config file's, with the
+ * two flags as `true` for the option each names. A flag and the config both
+ * setting the same option is a contradiction nobody can resolve for the
+ * caller, so it is refused. `null` when neither `useDefaults` nor
+ * `coerceTypes` is on: the model then emits one declaration per type.
+ * @param {{ defaults: boolean, coerce: boolean, config: string | null }} options
+ * @returns {{ normalize: Record<string, any> | null, routes: string[] }}
+ */
+function normalizeOptionsOf(options) {
+  const { options: config, routes } = options.config === null ? { options: {}, routes: [] } : readConfig(options.config);
+  const settings = { ...config };
+  for (const [flag, name, set] of [['--defaults', 'useDefaults', options.defaults], ['--coerce', 'coerceTypes', options.coerce]]) {
+    if (!set) continue;
+    if (config[name] !== undefined) throw new Error(`${flag} and the '${name}' of ${options.config} both set it: give it in one place`);
+    settings[name] = true;
+  }
+  const on = (value) => value !== undefined && value !== false;
+  return { normalize: on(settings.useDefaults) || on(settings.coerceTypes) ? settings : null, routes };
+}
+
 function parseArgs(argv) {
   const options = {
     schema: null, out: null, target: 'typescript',
     name: null, bundle: null, check: false, help: false,
-    defaults: false, coerce: false, suffix: 'Input',
+    defaults: false, coerce: false, suffix: 'Input', config: null,
   };
   for (let i = 2; i < argv.length; i++) {
     const value = () => {
@@ -142,6 +241,7 @@ function parseArgs(argv) {
       case '--defaults': options.defaults = true; break;
       case '--coerce': options.coerce = true; break;
       case '--suffix': options.suffix = value(); break;
+      case '--config': options.config = value(); break;
       case '--help': case '-h': options.help = true; break;
       default:
         throw new Error(`unknown option: ${argv[i]}`);
@@ -252,11 +352,11 @@ function main() {
     }
   }
 
-  // Only pass normalize options when at least one is on: a null here is what
-  // tells the model to emit a single declaration per type rather than a pair.
-  const normalizeOptions = options.defaults || options.coerce
-    ? { useDefaults: options.defaults, coerceTypes: options.coerce }
-    : null;
+  // A null here is what tells the model to emit a single declaration per type
+  // rather than a pair. Read before any schema, so a bad config writes nothing.
+  const { normalize: normalizeOptions, routes } = normalizeOptionsOf(options);
+  const wanted = new Set(routes);
+  const found = new Set();
 
   let ok = true;
   const bundled = [];
@@ -273,6 +373,7 @@ function main() {
     let model;
     try {
       const schema = JSON.parse(fs.readFileSync(file, 'utf8'));
+      findAnnotations(schema, wanted, found);
       const name = options.name ?? nameFromFile(file);
       model = compileEmitModel(schema, {
         name, source: path.basename(file),
@@ -289,6 +390,11 @@ function main() {
       continue;
     }
     models.push({ file, model });
+  }
+  // A route no node answers to is a misspelt annotation as often as not, and
+  // it would otherwise switch the normalization off without a word.
+  for (const annotation of wanted) {
+    if (!found.has(annotation)) console.error(`warning: config ${options.config} routes by '${annotation}', which no schema node carries as true`);
   }
   for (const { file, model } of models) {
     const out = path.join(options.out, nameFromFile(file) + target.extension);
