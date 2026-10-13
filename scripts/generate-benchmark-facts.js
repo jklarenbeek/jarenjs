@@ -128,6 +128,11 @@ function cts() {
  * sweep, `698 of 703` for anything less.
  * @param {string} engine
  */
+/** The committed QT3 baseline (benchmark/qt3-baseline.json). @returns {any} */
+function qt3Baseline() {
+  return JSON.parse(readFileSync(join(ROOT, 'benchmark/qt3-baseline.json'), 'utf8'));
+}
+
 function ctsCompliance(engine) {
   const { total, groups } = data('jsonpath').compliance;
   let passed = 0;
@@ -546,6 +551,14 @@ const FACTS = {
   // `702 of 703` rather than leaving a sweep in the prose.
   'jsonpath.ctsPass': () => ctsCompliance('jaren'),
   'jsonpath.ctsRival': () => ctsCompliance('json-p3'),
+
+  // ——— @jarenjs/json: the QT3 scorecard, read from the committed baseline
+  // the runner ratchets (its summary is set from a fresh run; every
+  // attributed failure is one `deviation` entry) ———
+  'qt3.pass': () => thousands(qt3Baseline().summary.pass),
+  'qt3.unsupported': () => thousands(qt3Baseline().summary['unsupported-syntax']),
+  'qt3.attributed': () => thousands(Object.values(qt3Baseline().tests)
+    .filter((/** @type {any} */ t) => t.status === 'deviation').length),
 
   // ——— the census: what the repository publishes, counted once ———
   'packages.count': () => String(census().packages.length),
