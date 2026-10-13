@@ -172,7 +172,7 @@ compileXQuery(text)(null, { doc: inputDocument });
 | `A to B` | `{"$range": [A, B]}` |
 | `+ - * div idiv mod` | `$add $sub $mul $div $idiv $mod` (binary, left-associative) |
 | unary `-E` / `+E` | `{"$neg": E}` (folded into number literals: `-5` → `-5`) / no-op |
-| postfix lookup `?name ?N ?*` | path fold or `$get` (§4.3) |
+| postfix lookup `?name ?N ?*` | path fold, `$let`-bound path, or `$get` (§4.3) |
 | `map { K: V, ... }` | plain map constructor / `$map` (§4.4) |
 | `[E, ...]`, `array { E }` | array constructor `[E, ...]` (flattening caveat §3) |
 | `( E )` / `()` | the inner expression / `{"$seq": []}` |
@@ -196,19 +196,37 @@ postfix-lookup rule:
 | `$doc?store?book?*` | `"$doc.store.book[*]"` |
 | `$b?odd-name`, `$x?prénom` | `"$b['odd-name']"`, `"$x['prénom']"` (bracket form when not shorthand-safe) |
 
-On **any other base**, each lookup emits dynamic `{"$get": [base, key]}`
-(numeric keys 1-based → 0-based): `head($xs)?name` →
-`{"$get": [{"$head": "$xs"}, "name"]}`.
+A lookup applies to every item of its base, so any base that may hold
+several items is bound once and the whole chain becomes a path over that
+binding, the same per-item rule:
 
-> **`$get` addresses a single item.** If a non-variable base evaluates to
-> a sequence of two or more items, `$get` yields the empty sequence
-> instead of XQuery's per-item lookup. Bind the base with `let` and use a
-> variable lookup for per-item semantics. Also `?name` on an array,
-> `?N` out of bounds, and lookups on scalars yield the empty sequence
-> where XQuery raises a type/range error.
+| Text | Emitted |
+|---|---|
+| `tail($xs)?name` | `{"$let": {"lk_base": {"$tail": "$xs"}}, "$return": "$lk_base.name"}` |
+| `(map{"a":1}, map{"a":2})?a?1` | `{"$let": {"lk_base": {"$seq": [...]}}, "$return": "$lk_base.a[0]"}` |
+| `([10,20], [30,40])?*` | `{"$let": {"lk_base": {"$seq": [...]}}, "$return": "$lk_base[*]"}` → `10, 20, 30, 40` |
+| `($b?x)?y` | `"$b.x.y"` (a parenthesized variable path continues the path) |
 
-`?*` on a non-variable base, parenthesized key specifiers `?(E)`, and
-unary lookup (`?name` on the context item) are unsupported (§6).
+A base that is **at most one item** keeps the single-item dynamic lookup
+`{"$get": [base, key]}` (numeric keys 1-based → 0-based): literals, map and
+array constructors, `head(...)`, a lookup on such a base, and a conditional
+whose branches are such — `head($xs)?name` →
+`{"$get": [{"$head": "$xs"}, "name"]}`. The binding is named `lk_base`; the
+base is evaluated outside it and the path alone runs beneath it, so a
+variable of the same name written in the query is never captured.
+
+> *Upgrade: a lookup on a base that evaluated to two or more items used to
+> answer the empty sequence, and `?*` on a non-variable base was rejected
+> (`wildcard lookup on a non-variable expression`); both now apply per item,
+> as XQuery does.*
+
+`?name` on an array, `?N` out of bounds, and lookups on scalars yield the
+empty sequence where XQuery raises a type/range error (`FOAY0001`,
+`XPTY0004`). `map:get` and `array:get` are a single `$get` and share it: a
+sequence argument is empty rather than the type error.
+
+Parenthesized key specifiers `?(E)` and unary lookup (`?name` on the
+context item) are unsupported (§6).
 
 ### 4.4 Map constructors
 
@@ -391,7 +409,7 @@ Each is recognized and rejected by name (`unsupported construct '...'`):
 |---|---|
 | `/`-rooted, `//`, relative paths, axis steps, `@attr`, `..`, bare names, `*` | `path expression` |
 | context item `.` | `context item expression` |
-| unary lookup `?name`, `?*` on non-variables, `?( E )` keys, `?0` | `unary lookup`, `wildcard lookup on a non-variable expression`, `parenthesized lookup key`, `unsupported lookup index 0` |
+| unary lookup `?name`, `?( E )` keys, `?0` | `unary lookup`, `parenthesized lookup key`, `unsupported lookup index 0` |
 | predicates `E[...]` | `predicate` |
 | dynamic calls `E(...)`, `name#arity`, inline `function(){}`, `?` placeholder | `dynamic function call`, `named function reference`, `inline function expression`, `argument placeholder` |
 | `instance of`, `treat as`, `castable as`, `cast as` | `instance of`, `treat as`, `castable as`, `cast as` |

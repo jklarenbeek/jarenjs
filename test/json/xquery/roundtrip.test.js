@@ -242,6 +242,48 @@ describe('XQuery front-end roundtrips', () => {
       assert.strictEqual(run('some $x in (1,2), $x in (3,4) satisfies $x gt 3'), true);
     });
 
+    it('should apply a lookup on a sequence base to every item', () => {
+      assert.deepStrictEqual(run('(map{"n":1}, map{"n":2}, map{"n":3})?n'), [1, 2, 3]);
+      assert.deepStrictEqual(run('tail($doc?store?book?*)?price'), [12.99, 8.99, 22.99]);
+      assert.deepStrictEqual(run('reverse($doc?ratings?*)?stars'), [1, 4, 5]);
+      assert.deepStrictEqual(run('subsequence($doc?store?book?*, 2, 2)?title'),
+        ['Sword of Honour', 'Moby Dick']);
+      assert.deepStrictEqual(run('(for $x in (1, 2) return map{"k": $x})?k'), [1, 2]);
+      assert.deepStrictEqual(run('([10, 20], [30, 40])?1'), [10, 30]);
+      assert.deepStrictEqual(run('([10, 20], [30, 40])?2'), [20, 40]);
+      assert.deepStrictEqual(run('(map{"a": map{"b": 1}}, map{"a": map{"b": 2}})?a?b'), [1, 2]);
+      assert.deepStrictEqual(run('tail($doc?store?book?*)?price?1'), undefined); // a number holds no members
+      assert.deepStrictEqual(run('(map{"a": [5, 6]}, map{"a": [7]})?a?1'), [5, 7]);
+    });
+
+    it('should lift the wildcard lookup onto a sequence or a single item', () => {
+      assert.deepStrictEqual(run('([10, 20], [30, 40])?*'), [10, 20, 30, 40]);
+      assert.deepStrictEqual(run('[10, 20]?*'), [10, 20]);
+      assert.deepStrictEqual(run('map{"a": 1, "b": 2}?*'), [1, 2]);
+      assert.deepStrictEqual(run('(map{"a": [1, 2]}, map{"a": [3]})?a?*'), [1, 2, 3]);
+    });
+
+    it('should answer a lookup on an empty or single-item base as before', () => {
+      assert.strictEqual(run('()?n'), undefined);
+      assert.strictEqual(run('tail((map{"n": 1}))?n'), undefined);
+      assert.strictEqual(run('head($doc?store?book?*)?title'), 'Sayings of the Century');
+      assert.strictEqual(run('map{"n": 7}?n'), 7);
+      assert.strictEqual(run('[map{"n": 8}]?1?n'), 8);
+      assert.strictEqual(run('(if (true()) then map{"k": 1} else ())?k'), 1);
+      assert.strictEqual(run('map{"a": 1}?missing'), undefined);
+      assert.strictEqual(run('[1, 2]?3'), undefined);
+      assert.strictEqual(run('"text"?a'), undefined);
+    });
+
+    it('should keep the user variables out of the wrapper scope', () => {
+      assert.deepStrictEqual(
+        run('for $lk_base in (map{"a": 1}, map{"a": 2}) return ($lk_base, $lk_base)?a'),
+        [1, 1, 2, 2]);
+      assert.deepStrictEqual(
+        run('let $lk_base := (map{"a": 1}, map{"a": 2}) return tail($lk_base)?a'),
+        2);
+    });
+
     it('should surface engine runtime errors from compiled text', () => {
       assert.throws(() => run('1 idiv 0'), (e) => {
         assert.strictEqual(e instanceof JsonQueryRuntimeError, true);

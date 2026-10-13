@@ -83,7 +83,6 @@ delete it or fix it.
   operator first: `fn:tokenize` with a regular-expression pattern or flags (an I-Regexp split; the plain-text
   mapping probes every position, so it is quadratic in the text length and bounded by the sequence guards),
   `substring-before`/`-after` and `translate` (nothing finds a position in a string).
-- [ ] **Exact sequence-base lookups** — lookups on non-variable bases emit `$get`, which addresses a single item; a `$let`-wrapper emission would reproduce XQuery's per-item lookup exactly, and is the v2 candidate alongside the `!` simple-map and `=>` arrow operators.
 - [ ] **1-based positional *outputs*** — `at`/`count`/`fn:index-of` surface the format's 0-based D6 values, so QT3 asserts them as wrong-value; `fn:index-of` has a cheap local emission fix, `at`/`count` would need reference rewriting. Revisit if the scorecard noise starts to matter.
 - [ ] **Front-end diagnostic polish** — `import` or `module` standing alone as a
   name test still raises `unsupported construct 'import declaration'` /

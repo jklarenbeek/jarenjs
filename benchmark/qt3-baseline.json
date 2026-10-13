@@ -1,8 +1,8 @@
 {
  "$comment": "QT3 baseline: every attributed tier-A failure (see benchmark/qt3-README.md). Deviation ids: D1-D7 QUERY-FORMAT.md section 11; E1/E2 engine rules (comparison/no-atomization, sections 8.4-8.10); E3 resource guards (section 8.9); E4 NaN ordering (section 6.6); F1-F6 front-end approximations (XQUERY-FRONTEND.md section 3). skip: fatal resource exhaustion, never run in-process.",
  "summary": {
-  "pass": 3363,
-  "unsupported-syntax": 19199
+  "pass": 3376,
+  "unsupported-syntax": 19192
  },
  "tests": {
   "ArrayTest-044": {
@@ -645,70 +645,40 @@
    "id": "D1",
    "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
   },
-  "Lookup-101": {
-   "status": "deviation",
-   "id": "F3",
-   "note": "$get yields empty instead of XQuery type/range errors; non-variable sequence bases are single items (XQUERY-FRONTEND section 4.3)"
-  },
-  "Lookup-103": {
-   "status": "deviation",
-   "id": "F3",
-   "note": "$get yields empty instead of XQuery type/range errors; non-variable sequence bases are single items (XQUERY-FRONTEND section 4.3)"
-  },
   "Lookup-106": {
    "status": "deviation",
    "id": "F3",
-   "note": "$get yields empty instead of XQuery type/range errors; non-variable sequence bases are single items (XQUERY-FRONTEND section 4.3)"
+   "note": "$get yields empty instead of XQuery type/range errors (XQUERY-FRONTEND section 4.3)"
   },
   "Lookup-109": {
    "status": "deviation",
    "id": "F3",
-   "note": "$get yields empty instead of XQuery type/range errors; non-variable sequence bases are single items (XQUERY-FRONTEND section 4.3)"
+   "note": "$get yields empty instead of XQuery type/range errors (XQUERY-FRONTEND section 4.3)"
   },
   "Lookup-112": {
    "status": "deviation",
    "id": "F3",
-   "note": "$get yields empty instead of XQuery type/range errors; non-variable sequence bases are single items (XQUERY-FRONTEND section 4.3)"
+   "note": "$get yields empty instead of XQuery type/range errors (XQUERY-FRONTEND section 4.3)"
   },
   "Lookup-115": {
    "status": "deviation",
-   "id": "F3",
-   "note": "$get yields empty instead of XQuery type/range errors; non-variable sequence bases are single items (XQUERY-FRONTEND section 4.3)"
-  },
-  "Lookup-140": {
-   "status": "deviation",
-   "id": "F3",
-   "note": "$get yields empty instead of XQuery type/range errors; non-variable sequence bases are single items (XQUERY-FRONTEND section 4.3)"
-  },
-  "Lookup-143": {
-   "status": "deviation",
-   "id": "F3",
-   "note": "$get yields empty instead of XQuery type/range errors; non-variable sequence bases are single items (XQUERY-FRONTEND section 4.3)"
-  },
-  "Lookup-144": {
-   "status": "deviation",
-   "id": "F3",
-   "note": "$get yields empty instead of XQuery type/range errors; non-variable sequence bases are single items (XQUERY-FRONTEND section 4.3)"
+   "id": "D2",
+   "note": "= compares an array item structurally; XQuery atomizes the array into its members"
   },
   "Lookup-213": {
    "status": "deviation",
    "id": "F3",
-   "note": "$get yields empty instead of XQuery type/range errors; non-variable sequence bases are single items (XQUERY-FRONTEND section 4.3)"
+   "note": "$get yields empty instead of XQuery type/range errors (XQUERY-FRONTEND section 4.3)"
   },
   "Lookup-224": {
    "status": "deviation",
    "id": "F3",
-   "note": "$get yields empty instead of XQuery type/range errors; non-variable sequence bases are single items (XQUERY-FRONTEND section 4.3)"
-  },
-  "Lookup-225": {
-   "status": "deviation",
-   "id": "F3",
-   "note": "$get yields empty instead of XQuery type/range errors; non-variable sequence bases are single items (XQUERY-FRONTEND section 4.3)"
+   "note": "$get yields empty instead of XQuery type/range errors (XQUERY-FRONTEND section 4.3)"
   },
   "Lookup-226": {
    "status": "deviation",
    "id": "F3",
-   "note": "$get yields empty instead of XQuery type/range errors; non-variable sequence bases are single items (XQUERY-FRONTEND section 4.3)"
+   "note": "$get yields empty instead of XQuery type/range errors (XQUERY-FRONTEND section 4.3)"
   },
   "MapConstructor-036": {
    "status": "deviation",
@@ -833,37 +803,37 @@
   "array-get-003": {
    "status": "deviation",
    "id": "F3",
-   "note": "$get yields empty instead of XQuery type/range errors; non-variable sequence bases are single items (XQUERY-FRONTEND section 4.3)"
+   "note": "$get yields empty instead of XQuery type/range errors (XQUERY-FRONTEND section 4.3)"
   },
   "array-get-004": {
    "status": "deviation",
    "id": "F3",
-   "note": "$get yields empty instead of XQuery type/range errors; non-variable sequence bases are single items (XQUERY-FRONTEND section 4.3)"
+   "note": "$get yields empty instead of XQuery type/range errors (XQUERY-FRONTEND section 4.3)"
   },
   "array-get-005": {
    "status": "deviation",
    "id": "F3",
-   "note": "$get yields empty instead of XQuery type/range errors; non-variable sequence bases are single items (XQUERY-FRONTEND section 4.3)"
+   "note": "$get yields empty instead of XQuery type/range errors (XQUERY-FRONTEND section 4.3)"
   },
   "array-get-006": {
    "status": "deviation",
    "id": "F3",
-   "note": "$get yields empty instead of XQuery type/range errors; non-variable sequence bases are single items (XQUERY-FRONTEND section 4.3)"
+   "note": "$get yields empty instead of XQuery type/range errors (XQUERY-FRONTEND section 4.3)"
   },
   "array-get-008": {
    "status": "deviation",
    "id": "F3",
-   "note": "$get yields empty instead of XQuery type/range errors; non-variable sequence bases are single items (XQUERY-FRONTEND section 4.3)"
+   "note": "$get yields empty instead of XQuery type/range errors (XQUERY-FRONTEND section 4.3)"
   },
   "array-get-009": {
    "status": "deviation",
    "id": "F3",
-   "note": "$get yields empty instead of XQuery type/range errors; non-variable sequence bases are single items (XQUERY-FRONTEND section 4.3)"
+   "note": "$get yields empty instead of XQuery type/range errors (XQUERY-FRONTEND section 4.3)"
   },
   "array-get-010": {
    "status": "deviation",
    "id": "F3",
-   "note": "$get yields empty instead of XQuery type/range errors; non-variable sequence bases are single items (XQUERY-FRONTEND section 4.3)"
+   "note": "$get yields empty instead of XQuery type/range errors (XQUERY-FRONTEND section 4.3)"
   },
   "boolean-010": {
    "status": "deviation",
@@ -1823,17 +1793,17 @@
   "map-get-903": {
    "status": "deviation",
    "id": "F3",
-   "note": "$get yields empty instead of XQuery type/range errors; non-variable sequence bases are single items (XQUERY-FRONTEND section 4.3)"
+   "note": "$get yields empty instead of XQuery type/range errors (XQUERY-FRONTEND section 4.3)"
   },
   "map-get-904": {
    "status": "deviation",
    "id": "F3",
-   "note": "$get yields empty instead of XQuery type/range errors; non-variable sequence bases are single items (XQUERY-FRONTEND section 4.3)"
+   "note": "$get yields empty instead of XQuery type/range errors (XQUERY-FRONTEND section 4.3)"
   },
   "map-get-906": {
    "status": "deviation",
    "id": "F3",
-   "note": "$get yields empty instead of XQuery type/range errors; non-variable sequence bases are single items (XQUERY-FRONTEND section 4.3)"
+   "note": "$get yields empty instead of XQuery type/range errors (XQUERY-FRONTEND section 4.3)"
   },
   "no-try-catch-1": {
    "status": "deviation",

@@ -133,8 +133,7 @@ Divergences from XDM to keep in mind when triaging:
   - **Front-end approximations** (XQUERY-FRONTEND.md §§3–5): `F1` value
     comparisons mapped to general comparisons (`false` instead of empty/
     XPTY0004), `F2` square array constructors flatten their members (unused so
-    far), `F3` lookups map to `$get` (empty instead of type/range errors,
-    non-variable sequence bases are single items), `F4` the version/encoding
+    far), `F3` lookups map to `$get` or a path (empty instead of type/range errors), `F4` the version/encoding
     declaration is parsed and ignored (no `XQST0031`/`XQST0087`), `F5`
     `fn:number` maps to the stricter `$number` cast (`JQ2001` instead of `NaN`),
     `F6` XPath-only grammar restrictions do not apply (the front-end parses

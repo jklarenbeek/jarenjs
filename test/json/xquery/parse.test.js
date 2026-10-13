@@ -251,10 +251,50 @@ describe('XQuery front-end parser', () => {
       parses('[10,20]?1?x', { '$get': [{ '$get': [[10, 20], 0] }, 'x'] });
     });
 
+    it('should keep $get for bases that are at most one item', () => {
+      parses('(if ($c) then map{"a":1} else ())?a',
+        { '$get': [{ '$if': ['$c', { a: 1 }] }, 'a'] });
+      parses('(map{"a":map{"b":1}})?a?b',
+        { '$get': [{ '$get': [{ a: { b: 1 } }, 'a'] }, 'b'] });
+      parses('()?n', { '$get': [{ '$seq': [] }, 'n'] });
+      parses('map{concat("a", "b"): 1}?ab',
+        { '$get': [{ '$map': [[{ '$concat': ['a', 'b'] }, 1]] }, 'ab'] });
+      parses('array:get(tail($xs), 1)?x',
+        { '$get': [{ '$get': [{ '$tail': '$xs' }, 0] }, 'x'] });
+      parses('"x"?a', { '$get': ['x', 'a'] });
+      parses('"$x"?a', { '$get': ['$$x', 'a'] });
+    });
+
+    it('should wrap lookups on a base that can hold several items in one $let', () => {
+      parses('tail($xs)?name', { '$let': { lk_base: { '$tail': '$xs' } }, '$return': '$lk_base.name' });
+      parses('(1, 2)?3', { '$let': { lk_base: { '$seq': [1, 2] } }, '$return': '$lk_base[2]' });
+      parses('reverse($xs)?a?1?b',
+        { '$let': { lk_base: { '$reverse': '$xs' } }, '$return': '$lk_base.a[0].b' });
+      parses('tail($xs)?odd-name', { '$let': { lk_base: { '$tail': '$xs' } }, '$return': "$lk_base['odd-name']" });
+      parses('(for $x in $xs return map{"k":$x})?k', {
+        '$let': { lk_base: { '$for': { x: '$xs' }, '$return': { k: '$x' } } },
+        '$return': '$lk_base.k',
+      });
+    });
+
+    it('should append lookups on a parenthesized variable path to the path', () => {
+      parses('($b?x)?y', '$b.x.y');
+      parses('($b)?y?*', '$b.y[*]');
+    });
+
+    it('should lift the wildcard onto any base through the same wrapper', () => {
+      parses('tail($xs)?*', { '$let': { lk_base: { '$tail': '$xs' } }, '$return': '$lk_base[*]' });
+      parses('map{"a":1}?*', { '$let': { lk_base: { a: 1 } }, '$return': '$lk_base[*]' });
+      parses('map{"a":[1,2]}?a?*?b', {
+        '$let': { lk_base: { '$get': [{ a: [1, 2] }, 'a'] } },
+        '$return': '$lk_base[*].b',
+      });
+    });
+
     it('should reject the lookup forms outside the subset by name', () => {
       failsWith('$x?0', 'unsupported lookup index 0', 3);
       failsWith('$x?(1)', "unsupported construct 'parenthesized lookup key'", 3);
-      failsWith('head($xs)?*', "unsupported construct 'wildcard lookup on a non-variable expression'", 9);
+      failsWith('head($xs)?(1)', "unsupported construct 'parenthesized lookup key'", 10);
       failsWith('?name', "unsupported construct 'unary lookup'", 0);
       failsWith('$x?1.5', 'expected an integer lookup key', 3);
     });

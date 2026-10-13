@@ -540,6 +540,41 @@ function isEmptySeqExpr(e) {
     && Array.isArray(e.$seq) && e.$seq.length === 0;
 }
 
+// the variable a lookup on a sequence-valued base binds that base to; the
+// wrapper's return is the lookup path alone, so nothing the user wrote is
+// evaluated beneath the name
+const LOOKUP_VAR = 'lk_base';
+
+// A variable reference or a path folded from one: the emitted strings that
+// start with a single '$' ('$$' escapes a literal string).
+function isPathExpr(e) {
+  return typeof e === 'string' && e.charCodeAt(0) === CC_DOLLAR && e.charCodeAt(1) !== CC_DOLLAR;
+}
+
+// True when the emitted expression evaluates to at most one item whatever
+// the input, so a lookup on it is exactly the single-item `$get`: literals,
+// map and array constructors, `head`, any `$get` (a member is one item), and
+// a conditional whose branches are such. Anything else may
+// be a sequence, and a lookup on it is XQuery's per-item lookup.
+function isAtMostOneItem(e) {
+  if (typeof e === 'string')
+    return !isPathExpr(e);
+  if (e === null || typeof e !== 'object')
+    return true;
+  if (Array.isArray(e))
+    return true;
+  const keys = Object.keys(e);
+  if (keys.length === 1) {
+    if (keys[0] === '$head' || keys[0] === '$map' || keys[0] === '$get')
+      return true;
+    if (keys[0] === '$if')
+      return e.$if.slice(1).every(isAtMostOneItem);
+    if (keys[0] === '$seq')
+      return e.$seq.length === 0;
+  }
+  return keys.every((k) => k.charCodeAt(0) !== CC_DOLLAR);
+}
+
 //#endregion
 
 //#region parser
@@ -1106,55 +1141,54 @@ export function parseXQuery(source) {
     return n - 1; // 1-based XQuery -> 0-based RFC 9535 (D6)
   }
 
-  // PostfixExpr with the variable-rooted fold: `$b?price?1` becomes the
-  // path string "$b.price[0]" (per-item lookup over the variable's
-  // sequence, exactly the XQuery postfix-lookup rule); lookups on any
-  // other base map to $get, which addresses a *single* item (documented
-  // approximation). Unary lookup (`?name` on the context item) is
-  // outside the subset via parsePrimary.
+  // The path segment one lookup key adds to a variable-rooted path string
+  function lookupSegment(key) {
+    if (key === STAR_KEY)
+      return '[*]';
+    if (hasOwn(key, 'index'))
+      return '[' + key.index + ']';
+    return SHORTHAND_RE.test(key.name) ? '.' + key.name : "['" + key.name + "']";
+  }
+
+  // PostfixExpr. A lookup applies to every item of its base, so a chain
+  // folds into one variable-rooted RFC 9535 path string: `$b?price?1`
+  // becomes "$b.price[0]". A base that is at most one item keeps the
+  // single-item `$get` (`map{...}?a`); any other base is bound once and the
+  // whole chain becomes a path over that binding. Unary lookup (`?name` on
+  // the context item) is outside the subset via parsePrimary.
   function parsePostfix() {
     skipWS();
+    let expr;
     if (cc(pos) === CC_DOLLAR) {
       pos++;
-      const name = parseVarName();
-      let segs = '';
-      for (;;) {
-        const save = pos;
-        skipWS();
-        const c = cc(pos);
-        if (c === CC_QUESTION) {
-          pos++;
-          const key = parseLookupKey();
-          if (key === STAR_KEY)
-            segs += '[*]';
-          else if (hasOwn(key, 'index'))
-            segs += '[' + key.index + ']';
-          else
-            segs += SHORTHAND_RE.test(key.name) ? '.' + key.name : "['" + key.name + "']";
-          continue;
-        }
-        checkUnsupportedPostfix(c);
-        pos = save;
-        return '$' + name + segs;
-      }
+      expr = '$' + parseVarName();
     }
-    let expr = parsePrimary();
+    else {
+      expr = parsePrimary();
+    }
+    let bound; // the base a wrapped chain applies to
     for (;;) {
       const save = pos;
       skipWS();
       const c = cc(pos);
       if (c === CC_QUESTION) {
-        const at = pos;
         pos++;
         const key = parseLookupKey();
-        if (key === STAR_KEY)
-          fail("unsupported construct 'wildcard lookup on a non-variable expression'", at);
-        expr = { '$get': [expr, hasOwn(key, 'index') ? key.index : key.name] };
+        if (isPathExpr(expr)) {
+          expr += lookupSegment(key);
+        }
+        else if (key !== STAR_KEY && isAtMostOneItem(expr)) {
+          expr = { '$get': [expr, hasOwn(key, 'index') ? key.index : key.name] };
+        }
+        else {
+          bound = expr;
+          expr = '$' + LOOKUP_VAR + lookupSegment(key);
+        }
         continue;
       }
       checkUnsupportedPostfix(c);
       pos = save;
-      return expr;
+      return bound === undefined ? expr : { '$let': { [LOOKUP_VAR]: bound }, '$return': expr };
     }
   }
 
