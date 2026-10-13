@@ -731,3 +731,72 @@ describe('stream over SSE — ids are the decimal text of a seq', () => {
     assert.deepStrictEqual(seen, [0, 0, 0, 0, 12]);
   });
 });
+
+describe('stream over SSE — a frame larger than the whole queue bound', () => {
+  /**
+   * A dispatcher whose queue holds 2048 bytes, served through the fetch
+   * bridge and reached by a client that reconnects up to twice.
+   * @param {ReturnType<typeof makeSource>} src
+   */
+  function oversizeRig(src) {
+    const dispatch = serveHttp(CONTRACT, { feed: () => src.sub, tiny: () => src.sub }, { trace: () => 'trace-o', streamLimits: { queue: { bytes: 2048 } } });
+    const handler = toFetchHandler(dispatch);
+    let connections = 0;
+    const rigClient = openHttpClient(CONTRACT, {
+      baseUrl: 'http://contract.local',
+      fetch: (input, init) => {
+        connections += 1;
+        return handler(new Request(input, init));
+      },
+      sleep: async () => {},
+    });
+    /** @type {{ snapshots: any[], patches: any[], errors: any[] }} */
+    const seen = { snapshots: [], patches: [], errors: [] };
+    const sub = rigClient.subscribe('feed', { room: 'r1' }, {
+      onSnapshot: (value, info) => seen.snapshots.push({ value, ...info }),
+      onPatch: (emission) => seen.patches.push(emission),
+      onError: (outcome) => seen.errors.push(outcome),
+      reconnect: { max: 2 },
+    });
+    return { seen, sub, connections: () => connections, close: () => { rigClient.close(); dispatch.close(); } };
+  }
+
+  it('a patch over the bound ends the stream with the non-retryable JC2098 and a reconnecting client opens one connection, not three ending in JC2097', async () => {
+    const src = makeSource({ rows: [] });
+    const rig = oversizeRig(src);
+    try {
+      await wait(() => rig.seen.snapshots.length === 1);
+      src.emit({ patch: [{ op: 'add', path: '/rows/-', value: 'x'.repeat(4096) }], seq: 1 });
+      await wait(() => rig.seen.errors.length === 1);
+      await new Promise((r) => setTimeout(r, 30));
+      const outcome = rig.seen.errors[0];
+      assert.deepStrictEqual([outcome.kind, outcome.error.code, outcome.error.retryable], ['contract', 'JC2098', false]);
+      assert.strictEqual(outcome.error.message, 'the stream of operation feed ended with a server error (JC2098)');
+      assert.strictEqual(rig.seen.errors.length, 1, 'one error, never a JC2097 behind it');
+      assert.strictEqual(rig.connections(), 1);
+      assert.deepStrictEqual(rig.seen.patches, []);
+      await wait(() => src.counts.closes === 1);
+      assert.deepStrictEqual(src.counts, { stops: 1, closes: 1 });
+    }
+    finally {
+      rig.sub.stop();
+      rig.close();
+    }
+  });
+
+  it('a patch that fits the bound is delivered over the same rig', async () => {
+    const src = makeSource({ rows: [] });
+    const rig = oversizeRig(src);
+    try {
+      await wait(() => rig.seen.snapshots.length === 1);
+      src.emit({ patch: [{ op: 'add', path: '/rows/-', value: 'x'.repeat(1024) }], seq: 1 });
+      await wait(() => rig.seen.patches.length === 1);
+      assert.deepStrictEqual(rig.seen.errors, []);
+      assert.strictEqual(rig.connections(), 1);
+    }
+    finally {
+      rig.sub.stop();
+      rig.close();
+    }
+  });
+});

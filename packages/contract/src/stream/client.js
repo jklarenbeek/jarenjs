@@ -213,6 +213,16 @@ export function createStreamConsumer(options) {
         call(callbacks.onError, failedOutcome('network', outcomeError(code, message, null, record.details, row.retryable), meta));
         return;
       }
+      // the server ended the stream because a frame was larger than its
+      // whole queue bound: a contract-kind outcome under its own code,
+      // terminal on every reconnect setting, for the same frame would be
+      // refused again
+      if (code === 'JC2098') {
+        const row = STREAM_ERRORS.JC2098;
+        const message = typeof record.message === 'string' ? record.message : renderMessage(catalog, row.msgid, { op: route.id, code });
+        call(callbacks.onError, failedOutcome('contract', outcomeError(code, message, null, record.details, row.retryable), meta));
+        return;
+      }
       // an undeclared server error ends the stream as a contract violation;
       // the server's record rides in details so a JC2091 stays visible
       const details = code === null ? null : {

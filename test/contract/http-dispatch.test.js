@@ -944,7 +944,8 @@ describe('the English catalog', () => {
     const clientMsgids = Object.values(CLIENT_ERRORS).map((r) => r.msgid);
     const portLocalMsgids = Object.values(PORT_LOCAL_ERRORS).map((r) => r.msgid);
     const streamMsgids = Object.values(STREAM_ERRORS).map((r) => r.msgid);
-    assert.deepStrictEqual(Object.keys(contractMessagesEn).sort(), [...rows.map((r) => r.msgid), 'contract/handler-error', ...clientMsgids, ...portLocalMsgids, ...streamMsgids].sort());
+    // a msgid may serve two codes (JC2093 and JC2098 share the stream-error message), so the set is compared
+    assert.deepStrictEqual(Object.keys(contractMessagesEn).sort(), [...new Set([...rows.map((r) => r.msgid), 'contract/handler-error', ...clientMsgids, ...portLocalMsgids, ...streamMsgids])].sort());
     assert.strictEqual(Object.isFrozen(contractMessagesEn), true);
     assert.strictEqual(Object.isFrozen(contractCatalogEn), true);
     // the parameters are trusted artifacts or protocol facts only: op ids, limits, media, method lists,

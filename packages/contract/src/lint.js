@@ -23,6 +23,10 @@
  * - `retry-on-undeclared` — a `policy.retry.on` entry that is neither a
  *   code the operation declares nor a `JC` code a binding raises, so the
  *   retry it asks for can never happen.
+ * - `retry-on-subscribe` — a subscribe operation that declares
+ *   `policy.retry`: a stream is not retried as a call is, so `max` is
+ *   never read and `on` only sets the `retryable` flag of a declared
+ *   stream error.
  */
 
 import { isJsonObject } from '@jarenjs/core/object';
@@ -39,7 +43,7 @@ import { isCompiledContract } from './public.js';
 /**
  * One finding.
  * @typedef {Object} LintFinding
- * @property {'read-query-on-body-method' | 'body-limit-unsatisfiable' | 'body-limit-exceedable' | 'retry-on-undeclared'} rule
+ * @property {'read-query-on-body-method' | 'body-limit-unsatisfiable' | 'body-limit-exceedable' | 'retry-on-undeclared' | 'retry-on-subscribe'} rule
  * @property {string} op - the operation id
  * @property {string} docPath - the member at fault, a pointer into the document
  * @property {string} message - what happens, and the fix
@@ -47,7 +51,7 @@ import { isCompiledContract } from './public.js';
 
 /** The rule ids, in the order a report lists them. */
 export const LINT_RULES = Object.freeze(['read-query-on-body-method', 'body-limit-unsatisfiable', 'body-limit-exceedable',
-  'retry-on-undeclared']);
+  'retry-on-undeclared', 'retry-on-subscribe']);
 
 /** Methods that carry a request body. */
 const BODY_METHODS = new Set(['POST', 'PUT', 'PATCH']);
@@ -81,6 +85,7 @@ export function lintContract(contract) {
     bodyLimitUnsatisfiable(op, contract, base, findings);
     bodyLimitExceedable(op, contract, base, findings);
     retryOnUndeclared(op, base, findings);
+    retryOnSubscribe(op, base, findings);
   }
   return findings;
 }
@@ -313,6 +318,24 @@ function retryOnUndeclared(op, base, findings) {
         + 'a network loss (JC2051) is retried under any declared retry',
     });
   }
+}
+
+/**
+ * @param {CompiledOperation} op
+ * @param {string} base
+ * @param {LintFinding[]} findings
+ */
+function retryOnSubscribe(op, base, findings) {
+  if (op.kind !== 'subscribe' || op.policy.retry === null) return;
+  findings.push({
+    rule: 'retry-on-subscribe',
+    op: op.id,
+    docPath: `${base}/policy/retry`,
+    message: `'${op.id}' is a subscribe operation and declares policy.retry, but a stream is not retried as a call is: `
+      + 'policy.retry.max is never read, and policy.retry.on only sets the retryable flag of a declared stream error. '
+      + 'Remove policy.retry; a client re-establishes a lost stream with the subscribe option reconnect: { max }, '
+      + 'and a source marks one error retryable with its own retryable member',
+  });
 }
 
 /**

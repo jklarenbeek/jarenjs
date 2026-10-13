@@ -271,6 +271,21 @@ describe('client.subscribe reconnect — what reconnects', () => {
     assert.deepStrictEqual(h.delays, [1125]);
   });
 
+  it("the server's JC2098 (a frame larger than its whole queue) is terminal under a reconnect budget: one connection, one contract outcome that is not retryable", async () => {
+    const h = harness([
+      { chunks: [SNAPSHOT(1), ERROR({ code: 'JC2098', message: 'frame too large', requestId: 'r1', retryable: false })] },
+      { chunks: [PATCH(2), END('done')] },
+    ]);
+    h.client.subscribe('feed', { room: 'r' }, { ...h.callbacks, reconnect: { max: 3 } });
+    await wait(() => h.events.length === 2);
+    await tick();
+    assert.deepStrictEqual(h.events, ['snapshot:1', 'error:contract:JC2098']);
+    assert.strictEqual(h.calls.length, 1, 'the same frame would be refused again, so nothing reconnects');
+    assert.deepStrictEqual(h.delays, []);
+    assert.strictEqual(h.outcomes[0].error.retryable, false);
+    assert.strictEqual(h.outcomes[0].error.message, 'frame too large');
+  });
+
   it('a missed heartbeat (JC2094) reconnects; the silent attempt is released before the next opens', async () => {
     const h = harness([
       { chunks: [SNAPSHOT(1)], hold: true }, // then: silence

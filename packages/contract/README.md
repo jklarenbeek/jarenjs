@@ -786,8 +786,9 @@ deliberate decision, not a gap:
   stream after a network loss — a rejected request, a missed heartbeat,
   the server's `JC2096`, a body that ends before `end` — from the last
   delivered seq under the retry backoff, and ends with one `JC2097`
-  when the budget is spent; a declared failure, a contract outcome or
-  the server's `end` never reconnects, and the port client has no
+  when the budget is spent; a declared failure, a contract outcome (the
+  server's `JC2098`, a frame larger than its whole queue bound, included)
+  or the server's `end` never reconnects, and the port client has no
   network loss to reconnect from. Absent, a `network` outcome is
   delivered as is and the host re-enters `subscribe` with the
   subscription's `lastSeq`.
@@ -813,7 +814,7 @@ binding (`contractAppBinding`, `createContractEffect`); the projections
 `jaren-contract-port` frame grammar with collision-free client-scoped
 request ids); the `subscribe` kind with the `stream` binding
 (`client.subscribe` over SSE and port push frames carrying LIVE-FORMAT
-patches, `JC2090–JC2095`, the generated app subscription with
+patches, `JC2090–JC2098`, the generated app subscription with
 `createContractSubscription`, and the one SSE codec of the suite in
 `@jarenjs/core/text/sse`); and the `contract/*` locale packs in all
 eleven `@jarenjs/locales` languages, key parity enforced by test.

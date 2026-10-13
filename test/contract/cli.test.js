@@ -353,6 +353,14 @@ describe('jaren-contract diff --audience and lint', () => {
     const gated = run(['lint', '--contract', 'api.json', '--fail-on', 'all'], findings);
     assert.strictEqual(gated.status, 1);
     assert.match(gated.stderr, /lint: 2 finding\(s\)/);
+    const streamed = write({ 'live.json': { $contract: '0.1', operations: {
+      feed: { kind: 'subscribe', output: true, http: { method: 'GET', path: '/feed' }, policy: { retry: { max: 2, on: [] } } },
+    } } });
+    const warned = run(['lint', '--contract', 'live.json'], streamed);
+    assert.strictEqual(warned.status, 0, 'a finding alone does not fail');
+    assert.deepStrictEqual(JSON.parse(warned.stdout).map((/** @type {any} */ f) => f.rule), ['retry-on-subscribe']);
+    assert.strictEqual(run(['lint', '--contract', 'live.json', '--fail-on', 'retry-on-subscribe'], streamed).status, 1);
+    assert.strictEqual(run(['lint', '--contract', 'live.json', '--fail-on', 'retry-on-undeclared'], streamed).status, 0);
     const one = run(['lint', '--contract', 'api.json', '--fail-on', 'body-limit-unsatisfiable'], findings);
     assert.strictEqual(one.status, 0, 'a rule with no finding does not fail');
     const clean = run(['lint', '--contract', 'shop.json', '--fail-on', 'all']);

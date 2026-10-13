@@ -116,6 +116,7 @@ export const CONTRACT_CODES = Object.freeze({
   JC2095: 'a requested resume was refused — informational, carried as resumed:false in the fresh snapshot\'s event data, never an outcome',
   JC2096: 'the stream\'s bounded queue would overflow — the consumer reads slower than the source emits, or a replay page outran it (kind network, retryable; the stream ends with an error event carrying this code and the carrier tears the connection down)',
   JC2097: 'the client\'s reconnect budget is exhausted: every attempt after a network loss failed the same way (kind network, not retryable; details carry the attempts made and the last network code, client-side)',
+  JC2098: 'one stream frame is larger than the whole byte bound of the stream\'s queue, so no consumer could be handed it (kind contract, not retryable; the stream ends with an error event carrying this code, and a reconnecting client does not retry it — raise streamLimits.queue.bytes or emit smaller frames)',
   JC2110: 'a durable command was refused or failed validation',
   JC2120: 'a continuation token has malformed encoding, JSON, shape, version or algorithm',
   JC2121: 'a continuation exceeds its byte, depth or value limit',

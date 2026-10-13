@@ -16,8 +16,8 @@ import { load } from './helpers.js';
 const contract = (operations) => compileContract({ $contract: '0.1', operations });
 
 describe('lintContract', () => {
-  it('names its four rules, and a clean contract (the shop example) has no finding', () => {
-    assert.deepStrictEqual([...LINT_RULES], ['read-query-on-body-method', 'body-limit-unsatisfiable', 'body-limit-exceedable', 'retry-on-undeclared']);
+  it('names its five rules, and a clean contract (the shop example) has no finding', () => {
+    assert.deepStrictEqual([...LINT_RULES], ['read-query-on-body-method', 'body-limit-unsatisfiable', 'body-limit-exceedable', 'retry-on-undeclared', 'retry-on-subscribe']);
     assert.deepStrictEqual(lintContract(compileContract(load('./fixtures/shop.contract.json'))), []);
   });
 
@@ -96,6 +96,30 @@ describe('lintContract', () => {
       ['retry-on-undeclared', '/operations/labels.search/policy/retry/on/4'],
     ]);
     assert.match(findings[0].message, /'bussy'/);
+  });
+
+  it('retry-on-subscribe: a subscribe operation that declares policy.retry, however its entries read; a read with the same policy is not reported', () => {
+    const findings = lintContract(contract({
+      feed: { kind: 'subscribe', output: true, errors: { gone: { status: 410 } }, http: { method: 'GET', path: '/f' },
+        policy: { retry: { max: 3, on: ['gone'] }, stream: { resume: 'replay' } } },
+      'feed.none': { kind: 'subscribe', output: true, http: { method: 'GET', path: '/n' }, policy: { retry: { max: 0, on: [] } } },
+      'feed.ok': { kind: 'subscribe', output: true, errors: { gone: { status: 410 } }, http: { method: 'GET', path: '/o' }, policy: { stream: { resume: 'replay' } } },
+      'rows.read': { kind: 'read', output: true, errors: { gone: { status: 410 } }, http: { method: 'GET', path: '/r' }, policy: { retry: { max: 3, on: ['gone'] } } },
+    }));
+    assert.deepStrictEqual(findings.map((f) => [f.rule, f.op, f.docPath]), [
+      ['retry-on-subscribe', 'feed', '/operations/feed/policy/retry'],
+      ['retry-on-subscribe', 'feed.none', '/operations/feed.none/policy/retry'],
+    ]);
+    assert.match(findings[0].message, /^'feed' is a subscribe operation and declares policy\.retry, but a stream is not retried as a call is: policy\.retry\.max is never read/);
+    assert.match(findings[0].message, /reconnect: \{ max \}/);
+    // an entry that is also undeclared keeps its own finding beside this one
+    const both = lintContract(contract({
+      feed: { kind: 'subscribe', output: true, http: { method: 'GET', path: '/f' }, policy: { retry: { max: 1, on: ['bussy'] } } },
+    }));
+    assert.deepStrictEqual(both.map((f) => [f.rule, f.docPath]), [
+      ['retry-on-undeclared', '/operations/feed/policy/retry/on/0'],
+      ['retry-on-subscribe', '/operations/feed/policy/retry'],
+    ]);
   });
 
   it('takes a document too; a document that does not compile refuses with its own code; anything else is JC1008', () => {

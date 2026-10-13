@@ -164,7 +164,7 @@ function record(client, input = { collection: 'notes' }, options = {}) {
 }
 
 describe('stream over port — a MessageChannel pair', () => {
-  it('charges UTF-8 bytes to the actual port queue and refuses a frame one byte over its bound', async () => {
+  it('charges UTF-8 bytes to the actual port queue and refuses, as oversize, a frame one byte over its bound', async () => {
     const patch = [{ op: 'add', path: '/rows/-', value: '界'.repeat(100) }];
     const frame = { jaren: 'contract/0.1', id: 'unicode:1', event: 'patch', seq: 1, data: { patch, seq: 1 } };
     const bytes = new TextEncoder().encode(JSON.stringify(frame)).byteLength;
@@ -188,7 +188,8 @@ describe('stream over port — a MessageChannel pair', () => {
         }
         else {
           assert.deepStrictEqual(seen.patches, []);
-          assert.strictEqual(seen.errors[0].error.code, 'JC2096');
+          // alone it is larger than the whole bound, so it is no slow consumer's doing
+          assert.deepStrictEqual([seen.errors[0].kind, seen.errors[0].error.code, seen.errors[0].error.retryable], ['contract', 'JC2098', false]);
           assert.deepStrictEqual(emitted.map((f) => f.event), ['snapshot', 'error']);
           await wait(() => source.counts.closes === 1);
           assert.deepStrictEqual(source.counts, { stops: 1, closes: 1 });

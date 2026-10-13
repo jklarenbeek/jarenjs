@@ -29,7 +29,7 @@ import { validateOperationInput, settleOperation, safeTrace, PORT_LOCAL_ERRORS, 
 import { resolveLifecycle, identify as identifyHost, acquire as acquireHost, once, releaseLeases, RollbackCarrier } from '../host.js';
 import { resolveHostRuntime } from '../runtime.js';
 import { admitHandlers, admitServeOptions } from '../options.js';
-import { isSubscriptionLike, runSubscription, resolveStreamLimits, STREAM_ERRORS } from '../stream/server.js';
+import { isSubscriptionLike, runSubscription, resolveStreamLimits, streamErrorCode, STREAM_ERRORS } from '../stream/server.js';
 import { HTTP_ERRORS, renderMessage, declaredMessage } from '../http/wire.js';
 import { isContractFrame, valueFrame, errorFrame, pushFrame, attach, isChannel } from './frame.js';
 
@@ -74,7 +74,8 @@ export { PORT_LOCAL_ERRORS };
  *   §18.1): a replay page asks for at most `replay.limit` emissions /
  *   `replay.maxBytes` patch bytes (default 256 / 1 MiB); the undelivered
  *   queue holds at most `queue.events` frames / `queue.bytes` frame
- *   bytes (default 256 / 1 MiB) before the stream ends with `JC2096`
+ *   bytes (default 256 / 1 MiB) before the stream ends with `JC2096`;
+ *   one frame larger than `queue.bytes` alone ends it with `JC2098`
  */
 
 /**
@@ -491,10 +492,10 @@ export function servePort(contract, handlers, options) {
           if (intent === 'declared' && declared !== null) {
             return pushFrame(id, 'error', seq, wireError(declared.code, declaredMessage(catalog, opId, declared.code, declared.params), trace, declared.details, declared.retryable));
           }
-          const code = intent === 'invalid-snapshot' ? 'JC2091' : intent === 'slow-consumer' ? 'JC2096' : 'JC2070';
-          const row = intent === 'invalid-snapshot' ? STREAM_ERRORS.JC2091
-            : intent === 'slow-consumer' ? STREAM_ERRORS.JC2096 : PORT_LOCAL_ERRORS.JC2070;
-          return pushFrame(id, 'error', seq, wireError(code, renderMessage(catalog, row.msgid, { op: opId }), trace, undefined, row.retryable));
+          const streamCode = streamErrorCode(intent);
+          const code = streamCode ?? 'JC2070';
+          const row = streamCode === null ? PORT_LOCAL_ERRORS.JC2070 : STREAM_ERRORS[streamCode];
+          return pushFrame(id, 'error', seq, wireError(code, renderMessage(catalog, row.msgid, { op: opId, code }), trace, undefined, row.retryable));
         },
         end: (reason, seq) => pushFrame(id, 'end', seq, { reason }),
         // Account for the UTF-8 encoding of the posted frame's JSON text.

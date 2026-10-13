@@ -35,7 +35,7 @@ import {
   BodyLimitError, BodyEncodingError, isAsyncByteSource, normalizeBody, collectBytes, firstBytes, countingSource, onSettled, discard,
 } from './body.js';
 import {
-  isSubscriptionLike, runSubscription, STREAM_ERRORS, STREAM_MEDIA, HEARTBEAT_LINE, encodeStreamEvent,
+  isSubscriptionLike, runSubscription, streamErrorCode, STREAM_ERRORS, STREAM_MEDIA, HEARTBEAT_LINE, encodeStreamEvent,
 } from '../stream/server.js';
 import { timerMs } from '../timer.js';
 import {
@@ -1307,10 +1307,10 @@ function sseResponse(server, route, ctx, sub, trace, headers, life, armed) {
             ? { code: declared.code, message, requestId: trace, retryable: declared.retryable }
             : { code: declared.code, message, requestId: trace, details: declared.details, retryable: declared.retryable });
         }
-        const code = intent === 'invalid-snapshot' ? 'JC2091' : intent === 'slow-consumer' ? 'JC2096' : 'JC2008';
-        const row = intent === 'invalid-snapshot' ? STREAM_ERRORS.JC2091
-          : intent === 'slow-consumer' ? STREAM_ERRORS.JC2096 : HTTP_ERRORS.JC2008;
-        return frame('error', null, { code, message: renderMessage(server.catalog, row.msgid, { op: route.op.id }), requestId: trace, retryable: row.retryable });
+        const streamCode = streamErrorCode(intent);
+        const code = streamCode ?? 'JC2008';
+        const row = streamCode === null ? HTTP_ERRORS.JC2008 : STREAM_ERRORS[streamCode];
+        return frame('error', null, { code, message: renderMessage(server.catalog, row.msgid, { op: route.op.id, code }), requestId: trace, retryable: row.retryable });
       },
       end: (reason) => frame('end', null, { reason }),
       size: (text) => utf8ByteLength(text),

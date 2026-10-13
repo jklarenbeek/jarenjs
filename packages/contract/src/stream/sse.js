@@ -29,6 +29,7 @@ export const STREAM_ERRORS = Object.freeze({
   JC2094: Object.freeze({ kind: 'network', msgid: 'contract/heartbeat-missed', retryable: true }),
   JC2096: Object.freeze({ kind: 'network', msgid: 'contract/slow-consumer', retryable: true }),
   JC2097: Object.freeze({ kind: 'network', msgid: 'contract/reconnect-exhausted', retryable: false }),
+  JC2098: Object.freeze({ kind: 'contract', msgid: 'contract/stream-error', retryable: false }),
 });
 
 /** The event names of the stream wire, on both carriers. */

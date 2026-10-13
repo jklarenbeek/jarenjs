@@ -109,11 +109,12 @@ import { verdict } from '../http/wire.js';
  * (send `JC2091`), `'source'` (the subscription emitted `{ error }`
  * with no declared code, or a page/subscribe/snapshot fault — send the
  * host fault code), `'slow-consumer'` (the bounded queue would overflow
- * — send `JC2096`), `'declared'` (the subscription emitted `{ error }`
+ * — send `JC2096`), `'oversize-frame'` (one frame is larger than the
+ * queue's whole byte bound — send `JC2098`), `'declared'` (the subscription emitted `{ error }`
  * whose `code` the operation declares — send that code as the declared
  * failure it is, with the {@link DeclaredStreamFailure} the runner
  * classified).
- * @typedef {'invalid-snapshot' | 'source' | 'slow-consumer' | 'declared'} ErrorIntent
+ * @typedef {'invalid-snapshot' | 'source' | 'slow-consumer' | 'oversize-frame' | 'declared'} ErrorIntent
  */
 
 /**
@@ -489,6 +490,10 @@ export function runSubscription(route, sub, hooks, options) {
     catch {
       bytes = 0;
     }
+    if (bytes > limits.queue.bytes) {
+      oversize(bytes);
+      return false;
+    }
     if (!fits(bytes)) {
       overflow(bytes);
       return false;
@@ -498,19 +503,16 @@ export function runSubscription(route, sub, hooks, options) {
   }
 
   /**
-   * The bounded queue would overflow: end with `JC2096`. The terminal
-   * frame is admitted past the bound, and the carrier is told to tear
-   * the sink down rather than wait for a consumer that stopped reading.
-   * @param {number} bytes - the bytes of the frame that did not fit
+   * End with a terminal error frame admitted past the bound, so the peer
+   * that can still read hears why.
+   * @param {ErrorIntent} intent
+   * @param {Error} cause
+   * @param {boolean} drain - wait for the frames already queued before the carrier is done
    */
-  function overflow(bytes) {
-    if (finished) return;
-    terminalReason = 'slow-consumer';
-    const cause = new Error(`the stream's bounded queue would exceed ${limits.queue.events} events or ${limits.queue.bytes} bytes `
-      + `(${queuedEvents} queued, ${queuedBytes} bytes, ${bytes} more)`);
+  function endPastBound(intent, cause, drain) {
     let frame = null;
     try {
-      frame = hooks.error('slow-consumer', cause, lastSeq, null);
+      frame = hooks.error(intent, cause, lastSeq, null);
     }
     catch {
       frame = null;
@@ -525,7 +527,36 @@ export function runSubscription(route, sub, hooks, options) {
       }
       send(frame, size);
     }
-    release(false);
+    release(drain);
+  }
+
+  /**
+   * The bounded queue would overflow: end with `JC2096`. The carrier is
+   * told to tear the sink down rather than wait for a consumer that
+   * stopped reading.
+   * @param {number} bytes - the bytes of the frame that did not fit
+   */
+  function overflow(bytes) {
+    if (finished) return;
+    terminalReason = 'slow-consumer';
+    endPastBound('slow-consumer', new Error(`the stream's bounded queue would exceed ${limits.queue.events} events or ${limits.queue.bytes} bytes `
+      + `(${queuedEvents} queued, ${queuedBytes} bytes, ${bytes} more)`), false);
+  }
+
+  /**
+   * One frame is larger than the whole byte bound, so no consumer however
+   * fast could be handed it: end with `JC2098`, which a client does not
+   * retry. On an idle consumer the sink ends after the frames already
+   * queued; while earlier writes are still in flight they may never drain,
+   * so the carrier tears the sink down as for a slow consumer (the
+   * terminal frame is queued, and reaches the peer only if it drains).
+   * @param {number} bytes - the bytes of the frame that can never fit
+   */
+  function oversize(bytes) {
+    if (finished) return;
+    const stalled = queuedEvents > 0;
+    if (stalled) terminalReason = 'slow-consumer';
+    endPastBound('oversize-frame', new Error(`a stream frame of ${bytes} bytes is larger than the bounded queue's ${limits.queue.bytes} bytes`), !stalled);
   }
 
   /**
@@ -829,6 +860,22 @@ export function runSubscription(route, sub, hooks, options) {
   }
   page(options.lastSeq ?? 0, null);
   return runner;
+}
+
+/**
+ * The stream code an error intent is sent as, or `null` for an intent a
+ * binding answers with its own host fault code (`'source'`) or a declared
+ * code (`'declared'`).
+ * @param {ErrorIntent} intent
+ * @returns {'JC2091' | 'JC2096' | 'JC2098' | null}
+ */
+export function streamErrorCode(intent) {
+  switch (intent) {
+    case 'invalid-snapshot': return 'JC2091';
+    case 'slow-consumer': return 'JC2096';
+    case 'oversize-frame': return 'JC2098';
+    default: return null;
+  }
 }
 
 export { STREAM_ERRORS, STREAM_EVENTS, STREAM_MEDIA, HEARTBEAT_LINE, encodeStreamEvent } from './sse.js';

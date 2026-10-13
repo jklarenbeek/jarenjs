@@ -215,19 +215,6 @@ establish registry publication or downstream acceptance.
 
 ## @jarenjs/contract
 
-- [ ] **A retry policy on a subscribe operation is never read.** `policy.retry`
-  on a subscribe operation compiles and has no effect, since a stream is not
-  retried as a call is. The `retry-on-undeclared` lint flags an entry that names
-  a stream code, but an entry naming a declared code passes. Refusing a retry
-  policy where it cannot apply is a lint rule of its own.
-
-- [ ] **An oversize stream frame ends the stream as a slow consumer.** A
-  snapshot or patch larger than `streamLimits.queue.bytes` (1 MiB by default)
-  is refused with the retryable `JC2096` on an idle consumer, the connection is
-  torn down, and a client with `reconnect` retries the same frame until
-  `JC2097`. Wanted: an empty queue admits one oversize frame, or the refusal
-  gets its own non-retryable code.
-
 ## @jarenjs/md
 
 - [ ] **Chunking is text-only; a block sequence has no packer.** `@jarenjs/core/chunk`

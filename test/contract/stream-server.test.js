@@ -582,6 +582,49 @@ describe('stream runner — the bounded queue', () => {
     assert.deepStrictEqual(source.counts, { stops: 1, closes: 1 });
   });
 
+  it('a frame larger than the whole bound on an idle consumer ends with the oversize-frame intent, not the slow-consumer one; one exactly at the bound is delivered', () => {
+    const carrier = makeCarrier({ sync: true });
+    const snapshotBytes = carrier.hooks.size(carrier.hooks.snapshot(0, { value: { rows: [] }, resumed: false, reset: false, earliestAvailable: null, highWatermark: null }));
+    const big = (/** @type {number} */ seq, /** @type {number} */ n) => ({ patch: [{ op: 'add', path: '/rows/-', value: 'x'.repeat(n) }], seq });
+    const fitting = carrier.hooks.size(carrier.hooks.patch(1, big(1, 40)));
+    const bound = Math.max(fitting, snapshotBytes);
+    const limits = resolveStreamLimits({ queue: { bytes: bound } }, (r) => new Error(r));
+    // exactly the bound: admitted (an empty queue holds one such frame)
+    const exact = makeSource({ rows: [] });
+    const flowing = makeCarrier({ sync: true });
+    runSubscription(ROUTE, exact.sub, flowing.hooks, { lastSeq: null, validate: true, limits });
+    exact.emit(big(1, 40));
+    assert.deepStrictEqual(flowing.log, ['snapshot:0', 'patch:1']);
+    assert.deepStrictEqual(flowing.dones, []);
+    // one byte over: refused with its own intent, the consumer idle, the stream released once and ended gracefully (done carries no reason)
+    const source = makeSource({ rows: [] });
+    const refusing = makeCarrier({ sync: true });
+    const runner = runSubscription(ROUTE, source.sub, refusing.hooks, { lastSeq: null, validate: true, limits });
+    source.emit(big(1, 40 + (bound - fitting) + 1));
+    return runner.done.then(() => {
+      assert.deepStrictEqual(refusing.log, ['snapshot:0', 'error:1', 'done']);
+      assert.strictEqual(refusing.frames[1].data.intent, 'oversize-frame');
+      assert.deepStrictEqual(refusing.dones, [null]);
+      assert.deepStrictEqual(source.counts, { stops: 1, closes: 1 });
+    });
+  });
+
+  it('a frame larger than the whole bound with a write parked on a stalled consumer still terminates: done settles with the teardown reason, released once', async () => {
+    const source = makeSource({ rows: [] });
+    const carrier = makeCarrier();
+    const probe = makeCarrier();
+    const snapshotBytes = probe.hooks.size(probe.hooks.snapshot(0, { value: { rows: [] }, resumed: false, reset: false, earliestAvailable: null, highWatermark: null }));
+    const patchBytes = probe.hooks.size(probe.hooks.patch(1, patchAt(1)));
+    const limits = resolveStreamLimits({ queue: { bytes: snapshotBytes + patchBytes } }, (r) => new Error(r));
+    const runner = runSubscription(ROUTE, source.sub, carrier.hooks, { lastSeq: null, validate: true, limits });
+    // the snapshot write is parked and never settles; a patch larger than the whole bound can never fit
+    source.emit({ patch: [{ op: 'add', path: '/rows/-', value: 'x'.repeat(snapshotBytes + patchBytes) }], seq: 1 });
+    await runner.done;
+    assert.deepStrictEqual(carrier.dones, ['slow-consumer']);
+    assert.deepStrictEqual(source.counts, { stops: 1, closes: 1 });
+    assert.deepStrictEqual(carrier.log, ['snapshot:0', 'done']);
+  });
+
   it('a synchronous carrier never accumulates: a thousand emissions under a small bound all deliver', () => {
     const source = makeSource({ rows: [] });
     const carrier = makeCarrier({ sync: true });

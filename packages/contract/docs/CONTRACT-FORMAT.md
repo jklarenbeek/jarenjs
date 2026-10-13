@@ -224,7 +224,7 @@ the resolved value and marks it inferred.
 | `cache` | `none` \| `revision` | `none` | Whether a read's result may be cached by revision. |
 | `limits.maxBodyBytes` | positive integer | `1048576` | The request-body ceiling a server binding enforces. |
 | `errors.details` | `none` \| `paths` \| `full` | `paths` | How much of a validation failure crosses the wire: nothing, instance path + keyword, or the raw validator errors. |
-| `retry` | `{ max: integer ≥ 0, on: [codes] }` | absent (`null`) | Which error codes a client may retry (declared codes, or `JC2xxx` taxonomy codes), and how often beyond the first attempt; a network failure is always retried under a declared `retry`. A **command MUST declare `idempotency: "required"` to carry `retry`** (`JC0014`) — a retried command without a key the server deduplicates on runs twice; a read is idempotent by nature. |
+| `retry` | `{ max: integer ≥ 0, on: [codes] }` | absent (`null`) | Which error codes a client may retry (declared codes, or `JC2xxx` taxonomy codes), and how often beyond the first attempt; a network failure is always retried under a declared `retry`. A **command MUST declare `idempotency: "required"` to carry `retry`** (`JC0014`) — a retried command without a key the server deduplicates on runs twice; a read is idempotent by nature. A `subscribe` operation compiles with `retry` but a stream is not retried as a call is: `max` is never read, and `on` only decides the `retryable` flag of a declared stream error (§17.1); the `retry-on-subscribe` lint (§13.1) reports it, and a lost stream is re-established by the client's `reconnect` option (§19). |
 | `stream` | `{ resume?, heartbeatMs?, maxPatchBytes? }` | `{ resume: "snapshot", heartbeatMs: 15000 }` on a subscribe | The stream policy of a **subscribe** operation (`JC0014` on any other kind): `resume` is `snapshot` \| `replay` (§18's resumption rule), `heartbeatMs` an integer ≥ 1000 (the SSE heartbeat interval; a client treats `2 × heartbeatMs` of silence as `JC2094`), `maxPatchBytes` a positive integer — an emission whose serialized patch exceeds it is replaced by a fresh `snapshot` event (§18). |
 | `audience` | `public` \| `server` | `public` | Who may see the operation. A `server` operation is served and handled like any other, but is **kept out of the public projection** (§12.1) and therefore out of every projection built on it — OpenAPI, TypeScript, Markdown, the AI tools — and out of the revision. |
 
@@ -2610,6 +2610,15 @@ The rule ids are stable (`LINT_RULES`):
 | `body-limit-unsatisfiable` | the smallest body the required members can encode to exceeds `policy.limits.maxBodyBytes`, so every valid request is refused `JC2003` (an optional whole-body member can be left out, so it counts nothing; a requirement listed twice counts once) | raise the limit or relax the bounds. The size is a **lower bound**: `maxLength` counts code points and JSON escaping only adds bytes |
 | `body-limit-exceedable` | a body member's own `maxLength` admits a valid string whose encoding alone — up to six JSON-escaped bytes per code point and its two quotes — exceeds `policy.limits.maxBodyBytes`, so a valid request carrying one is refused `JC2003` (members inside a body member, array items and union branches are read; narrowing assertions such as `pattern`, `format`, `enum`, `const`, content assertions, `allOf`, `not` or conditionals on a member or ancestor are not traversed; a reference with assertion siblings is not traversed; the widest remaining member is named. This local bound does not prove that all surrounding object, array or union constraints are satisfiable) | lower the `maxLength`, or raise the limit |
 | `retry-on-undeclared` | a `policy.retry.on` entry the client can never retry: neither a code the operation declares, a `JC20xx` wire code (a failure outcome — `JC2009` is an in-progress claim), nor `JC2051` (a network loss, retried under any declared retry). `bussy`, `JC9999`, a compile or host code (`JC0003`, `JC1008`) and a client-side contract code (`JC2053`) are reported | name a declared code or a `JC20xx` wire code |
+| `retry-on-subscribe` | a `subscribe` operation that declares `policy.retry`. A stream is not retried as a call is, so `max` is never read, and `on` only sets the `retryable` flag of a declared stream error (§17.1); the document compiles and the policy does nothing a reader of the contract would expect. A `read` or `command` with the same policy is not reported. The finding's `docPath` is the `policy/retry` member | remove `policy.retry`; ask for a lost stream to be re-established with the client's `reconnect: { max }` (§19), and mark one error retryable where the source raises it |
+
+`--fail-on` takes rule ids (or `all`): the command prints every finding
+as JSON and exits **1** only when a named rule has at least one, `0`
+otherwise, so a CI job that gates on `retry-on-subscribe` alone leaves
+the other rules advisory. A finding never changes how a contract
+compiles or serves. **Upgrading:** a contract that declares `policy.retry`
+on a `subscribe` operation has one `retry-on-subscribe` finding per
+operation, and `jaren-contract lint --fail-on all` now exits 1 for it.
 
 A header member whose name is not an HTTP token, and an opaque operation's
 idempotency, are refused at compile (`JC0009`, `JC0022`), so they are not
@@ -2949,7 +2958,8 @@ dropped; a carrier write that fails (the peer dropped the socket, the
 consumer cancelled the stream) releases the subscription silently. The
 queue is **bounded** (§18.1): what it holds is charged until each write
 settled, and the emission that would cross the bound ends the stream
-with `JC2096` instead of growing memory or dropping an event.
+with `JC2096` instead of growing memory or dropping an event (an emission
+larger than the whole byte bound ends it with `JC2098`, §18.1).
 
 An `{ error }` emission ends the stream, and the binding classifies it
 once, carrier-neutrally. When the error's `code` — read guardedly — is
@@ -3086,7 +3096,21 @@ network`, retryable — the consumer reads slower than the source
 emits), then the subscription is released and the carrier tears its
 sink down (the node adapter destroys the socket, the fetch bridge
 errors the stream) rather than wait for a consumer that stopped
-reading; nothing is dropped silently, oldest or newest. A replay is fed to
+reading; nothing is dropped silently, oldest or newest. A single frame
+larger than `queue.bytes` can never be queued, whatever the consumer does,
+so it is not a slow consumer's doing: the stream ends with the terminal
+`error` event `JC2098` (`kind: contract`, not retryable). On an idle
+consumer it is written behind the frames already queued and the sink ends;
+while earlier writes are still in flight, which a stalled peer never
+settles, the carrier tears the sink down as for `JC2096` and the frame
+reaches the peer only if the queue drains.
+A client that reconnects does not retry it, since the same frame would be
+refused again; the cure is a larger `queue.bytes` or smaller emissions (a
+`policy.stream.maxPatchBytes` turns an oversize patch into a fresh
+snapshot, which is itself a frame the bound applies to). **Upgrading:** a
+frame larger than the whole `queue.bytes` used to end as `JC2096`, which a
+reconnecting client retried until `JC2097`; it now ends as `JC2098` on the
+first attempt. A frame within the bound behaves as before. A replay is fed to
 the carrier one page at a time: the next page is asked for, and the live
 emissions held meanwhile follow, once the frames already queued have been
 taken, so a backlog longer than `queue.events` reaches a consumer that
@@ -3152,8 +3176,9 @@ other range:
 | `JC2095` | — | — | — | a requested resume was refused; informational, carried as `resumed: false` in the fresh snapshot's event data, never an outcome |
 | `JC2096` | network | `contract/slow-consumer` | yes | the stream's bounded queue would overflow — the consumer reads slower than the source emits; sent as the terminal `error` event, then the carrier tears the connection down |
 | `JC2097` | network | `contract/reconnect-exhausted` | no | the HTTP client's reconnect budget is spent: every further attempt after a network loss ended in another loss (client-side); `details` is `{ attempts, lastCode }` — the further attempts made and the last loss's code |
+| `JC2098` | contract | `contract/stream-error` | no | one frame is larger than the whole `queue.bytes` of the stream's bounded queue, so no consumer could be handed it; sent as the terminal `error` event (the message is the stream-error message with the code), then the sink ends. A reconnecting client treats it as terminal |
 
-`JC2098–JC2109` are reserved for later stream codes. `JC1009` (an SSE
+`JC2099–JC2109` are reserved for later stream codes. `JC1009` (an SSE
 data string the frame cannot carry) and `JC1010` (`subscribe` of a
 non-subscribe operation) are the stream's host programming errors
 (§7.3's host table).
@@ -3185,7 +3210,8 @@ operation is `JC1010`, thrown — the host named the wrong operation.
   declared error event; `network` for a transport failure, a missed
   heartbeat, the server's `JC2096` — the consumer fell behind the
   stream's bounded queue — or `JC2097`, a spent reconnect budget;
-  `contract` for `JC2090`/`JC2092`/`JC2093`, an invalid snapshot value,
+  `contract` for `JC2090`/`JC2092`/`JC2093`/`JC2098` (a frame larger
+  than the server's whole queue bound), an invalid snapshot value,
   or a pre-send input refusal `JC2050`). Its `error` and `meta` carry
   every member (`status: null` where the wire has none). After
   `onError` the stream is finished and cleaned up.
@@ -3213,7 +3239,8 @@ between; every attempt is a fresh request with a consumer, reader and
 watchdog of its own, so a stale attempt's late bytes and settlements
 reach no callback and close no newer reader. A declared failure, a
 contract outcome, the server's `end`, `stop()` and the signal are
-terminal on every setting. When the budget is spent the subscription
+terminal on every setting (the server's `JC2098`, a frame larger than its
+whole queue bound, among them). When the budget is spent the subscription
 ends with one `onError` — `JC2097` (`kind: network`, not retryable),
 its `details` `{ attempts, lastCode }` naming the further attempts
 made and the last loss's code — after the reader, the watchdog and the

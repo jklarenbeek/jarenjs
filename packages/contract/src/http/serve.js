@@ -86,7 +86,8 @@ export { HTTP_ERRORS, WELL_KNOWN_PATH, BodyLimitError, BodyEncodingError, readBo
  *   a replay page asks for at most `replay.limit` emissions / `replay.
  *   maxBytes` patch bytes (default 256 / 1 MiB); the undelivered queue
  *   holds at most `queue.events` frames / `queue.bytes` SSE bytes
- *   (default 256 / 1 MiB) before the stream ends with `JC2096`
+ *   (default 256 / 1 MiB) before the stream ends with `JC2096`; one
+ *   frame larger than `queue.bytes` alone ends it with `JC2098`
  * @property {(meta: import('../host.js').IdentifyMeta) => unknown} [identify]
  *   - the host lifecycle's first hook (docs/CONTRACT-FORMAT.md §7.7):
  *   runs after the route resolved and before any byte of the body is
