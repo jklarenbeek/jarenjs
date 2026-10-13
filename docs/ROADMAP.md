@@ -863,14 +863,13 @@ what each does is its own documentation's job
 - [ ] **Two catalog tokenizers.** `schema-sql.js` and `dialects/check-read.js`
   each tokenize catalog SQL (`tokensOf`, `sqlTokens`); one could serve both.
 
-- [ ] **`createDbLedger().sweep()` removes every expired record in one
-  transaction.** It reads every expired id and deletes them one by one inside a
-  single immediate transaction, so a ledger that was not swept for a long time
-  holds the write lock and a result as large as its backlog; the ledger shape
-  (`sweep(now)` answering a count) carries no limit. Wanted: a bounded batch
-  the shape can express (a `limit` and a count that says whether more remain),
-  or a stated host cadence.
-
+- [ ] **The ledger shape carries no sweep bound.** `createDbLedger().sweep(now?, { limit })` bounds
+  one call (an ordered, index-read take of at most `limit` expired records; an answer equal to
+  `limit` says more may remain). `@jarenjs/contract`'s `Ledger.sweep(now?) -> count`, its
+  conformance kit and the in-memory ledger carry no limit (the memory ledger ignores a second
+  argument), so a host holding only the structural shape cannot bound a sweep, and "more remain"
+  is implicit (count === limit; an exact multiple costs one extra call). Wanted: a `limit` in the
+  structural shape and the kit, or a result that says whether more remain (a shape change).
 ## Lexical search (cross-package)
 
 The [resident lexical contract](../packages/core/docs/SEARCH.md), explicit JSON/LINQ

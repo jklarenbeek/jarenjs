@@ -239,6 +239,8 @@ export async function ledgerTyping(client: LedgerClient) {
   const record: DbLedgerRecord | null = await ledger.lookup({ op: 'a', scope: '', key: 'k' });
   const asRecord: LedgerRecord | null = record;
   const swept: number = await ledger.sweep();
+  const sweptBatch: number = await ledger.sweep(undefined, { limit: 500 });
+  void sweptBatch;
   // the claims an interrupted request left behind, found and freed
   for (const claim of await ledger.inFlight({ olderThan: Date.now() - 60_000 })) {
     const freed: boolean = await ledger.release(claim);

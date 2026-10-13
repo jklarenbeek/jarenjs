@@ -344,8 +344,14 @@ export interface DbLedger {
   commit(ref: unknown, response: unknown, now?: number): Promise<void>;
   fail(ref: unknown, retryable: boolean, response?: unknown, now?: number): Promise<void>;
   lookup(key: { op: string; scope: string; key: string; now?: number }): Promise<DbLedgerRecord | null>;
-  /** Drop every expired record; answers how many. */
-  sweep(now?: number): Promise<number>;
+  /** Drop the expired records and answer how many, in one transaction.
+   * Without `limit` that is every expired record; with `{ limit }` at most
+   * that many, the longest expired first (equal expiries in write order),
+   * read through the expiry index so one call touches only the rows it
+   * deletes and holds the write lock for a bounded time: an answer equal
+   * to `limit` means more may remain (call again), a smaller one that none
+   * do. */
+  sweep(now?: number, options?: { limit?: number }): Promise<number>;
   /** The claims still `started` and blocking their key, oldest first —
    * `olderThan` an instant (epoch ms), `limit` 1,000 by default. */
   inFlight(query?: { op?: string; scope?: string; olderThan?: number; limit?: number; now?: number }): Promise<InFlightClaim[]>;

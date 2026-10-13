@@ -16,7 +16,8 @@ import * as assert from 'node:assert';
 import * as fs from 'node:fs';
 import { spawn } from 'node:child_process';
 import { open, createDbLedger } from '@jarenjs/linq/db';
-import { nodeDriver } from '@jarenjs/db/node';
+import * as sqlite from 'node:sqlite';
+import { nodeDriver, fromNodeModule } from '@jarenjs/db/node';
 import { idempotencyLedgerModel } from '@jarenjs/contract/ledger';
 import { ledgerContract, CLAIM, RESPONSE } from '../contract/ledger-contract.js';
 import { tempDbPath } from '../db/helpers.js';
@@ -229,6 +230,134 @@ describe('createDbLedger — durability and the fence across processes', () => {
     assert.strictEqual(await ledger.sweep(600), 1, 'the legacy record expires by its expiresAt');
     assert.strictEqual(await client.collections.ledger.get(legacy.id), undefined);
     assert.strictEqual((await ledger.lookup(CLAIM))?.status, 'started');
+  });
+});
+
+/**
+ * One settled record expiring at `expiresAt`.
+ * @param {string} id
+ * @param {number} expiresAt
+ */
+function settledRecord(id, expiresAt) {
+  return {
+    id, generation: 'g', op: 'o', scope: '', key: id, hash: 'h', status: 'committed', response: null, retryable: null,
+    createdAt: 1, updatedAt: 1, expiresAt,
+  };
+}
+
+describe('createDbLedger — sweep(now, { limit })', () => {
+  /** @param {any} client @returns {Promise<string[]>} */
+  const remaining = async (client) => (await client.collections.ledger.toArray()).map((/** @type {any} */ r) => r.id).sort();
+
+  it('deletes at most `limit` records per call, the longest expired first, in one transaction each, and answers the count removed', async () => {
+    const client = await memoryClient();
+    // inserted out of order: the order of removal is the expiry's, not the insertion's
+    for (const [id, at] of [['c', 30], ['a', 10], ['live', 5000], ['e', 50], ['b', 20], ['d', 40]]) {
+      await client.collections.ledger.insert(settledRecord(String(id), Number(at)));
+    }
+    /** @type {any[]} */
+    const calls = [];
+    const spy = { ...client, transaction: (/** @type {any} */ fn, /** @type {any} */ opts) => { calls.push(opts); return client.transaction(fn, opts); } };
+    const ledger = createDbLedger(spy, { now: () => 1000 });
+    assert.strictEqual(await ledger.sweep(1000, { limit: 2 }), 2, 'a full batch: more may remain');
+    assert.deepStrictEqual(await remaining(client), ['c', 'd', 'e', 'live']);
+    assert.strictEqual(await ledger.sweep(undefined, { limit: 2 }), 2, 'the clock judges a call without an instant');
+    assert.deepStrictEqual(await remaining(client), ['e', 'live']);
+    assert.strictEqual(await ledger.sweep(1000, { limit: 2 }), 1, 'a short batch: none remain');
+    assert.strictEqual(await ledger.sweep(1000, { limit: 2 }), 0);
+    assert.deepStrictEqual(await remaining(client), ['live'], 'a record that has not expired is never swept');
+    assert.strictEqual(calls.length, 4, 'one transaction per call');
+  });
+
+  it('equal expiries are all taken, each once, across the calls', async () => {
+    const client = await memoryClient();
+    for (const id of ['z', 'm', 'a', 'q']) await client.collections.ledger.insert(settledRecord(id, 10));
+    const ledger = createDbLedger(client, { now: () => 1000 });
+    assert.strictEqual(await ledger.sweep(1000, { limit: 3 }), 3);
+    assert.strictEqual((await remaining(client)).length, 1);
+    assert.strictEqual(await ledger.sweep(1000, { limit: 3 }), 1);
+    assert.deepStrictEqual(await remaining(client), []);
+  });
+
+  it('without a limit (or with an empty options object) still removes every expired record', async () => {
+    const client = await memoryClient();
+    for (let i = 0; i < 7; i++) await client.collections.ledger.insert(settledRecord(`r${i}`, 10 + i));
+    await client.collections.ledger.insert(settledRecord('live', 9999));
+    const ledger = createDbLedger(client, { now: () => 1000 });
+    assert.strictEqual(await ledger.sweep(1000, {}), 7);
+    assert.deepStrictEqual(await remaining(client), ['live']);
+    for (let i = 0; i < 3; i++) await client.collections.ledger.insert(settledRecord(`s${i}`, 10));
+    assert.strictEqual(await ledger.sweep(), 3);
+  });
+
+  it('a limit larger than the backlog answers the backlog', async () => {
+    const client = await memoryClient();
+    for (let i = 0; i < 3; i++) await client.collections.ledger.insert(settledRecord(`r${i}`, 10));
+    const ledger = createDbLedger(client, { now: () => 1000 });
+    assert.strictEqual(await ledger.sweep(1000, { limit: 1_000_000 }), 3);
+  });
+
+  it('a bounded call reads only the rows it deletes, in index order: 50 rows read whether the table holds 1,000 or 8,000, and whether 100 or all of them are expired', async () => {
+    let read = 0;
+    /** @type {string[]} */
+    let plans = [];
+    // node:sqlite behind the driver contract, counting the rows every SELECT hands back
+    // and keeping the query plan of each one over the ledger table
+    class Counting extends sqlite.DatabaseSync {
+      /** @param {string} sql */
+      prepare(sql) {
+        const statement = super.prepare(sql);
+        const select = /^\s*SELECT/i.test(sql);
+        const planner = select && sql.includes('FROM "ledger"') ? super.prepare(`EXPLAIN QUERY PLAN ${sql}`) : null;
+        return {
+          run: (/** @type {any[]} */ ...args) => statement.run(...args),
+          get: (/** @type {any[]} */ ...args) => statement.get(...args),
+          all: (/** @type {any[]} */ ...args) => {
+            const found = statement.all(...args);
+            if (select) read += found.length;
+            if (planner !== null) plans.push(planner.all(...args).map((/** @type {any} */ step) => step.detail).join('; '));
+            return found;
+          },
+          iterate: function* (/** @type {any[]} */ ...args) { for (const row of statement.iterate(...args)) { if (select) read++; yield row; } },
+        };
+      }
+    }
+    const driver = { ...nodeDriver(), open: (/** @type {string} */ path, /** @type {any} */ opts) => Promise.resolve(fromNodeModule({ DatabaseSync: Counting }, path, opts)) };
+    for (const [table, expired] of [[1000, 100], [8000, 100], [8000, 8000]]) {
+      const client = await memoryClient({ driver });
+      await client.transaction(async (tx) => {
+        for (let i = 0; i < table; i++) await tx.collections.ledger.insert(settledRecord(`r${i}`, i < expired ? 10 + i : 1e12 + i));
+      });
+      const ledger = createDbLedger(client, { now: () => 1e9 });
+      read = 0;
+      plans = [];
+      assert.strictEqual(await ledger.sweep(1e9, { limit: 50 }), 50);
+      assert.strictEqual(read, 50, `${table} records, ${expired} expired`);
+      assert.deepStrictEqual(plans, ['SEARCH ledger USING INDEX ledger_by_expires (gx_expiresAt<?)'],
+        'one statement: the expiry index range in index order, no table scan and no sort');
+      assert.strictEqual((await client.collections.ledger.toArray()).length, table - 50);
+    }
+  });
+
+  it('refuses a malformed second argument by name and deletes nothing', async () => {
+    const client = await memoryClient();
+    await client.collections.ledger.insert(settledRecord('a', 10));
+    const ledger = createDbLedger(client, { now: () => 1000 });
+    for (const [options, message] of /** @type {[any, RegExp][]} */ ([
+      [{ limit: 0 }, /ledger\.sweep: limit is a whole number from 1/],
+      [{ limit: -3 }, /limit is a whole number from 1/],
+      [{ limit: 1.5 }, /limit is a whole number from 1/],
+      [{ limit: '2' }, /limit is a whole number from 1/],
+      [{ limit: Infinity }, /limit is a whole number from 1/],
+      [{ limit: null }, /limit is a whole number from 1/],
+      [{ limt: 2 }, /ledger\.sweep: 'limt' is not a member it reads; it reads 'limit'/],
+      [null, /ledger\.sweep: the second argument is \{ limit\? \}/],
+      [[], /the second argument is \{ limit\? \}/],
+      [5, /the second argument is \{ limit\? \}/],
+    ])) {
+      await assert.rejects(() => ledger.sweep(1000, options), (/** @type {any} */ e) => e instanceof TypeError && message.test(e.message), JSON.stringify(options));
+    }
+    assert.deepStrictEqual(await remaining(client), ['a']);
   });
 });
 

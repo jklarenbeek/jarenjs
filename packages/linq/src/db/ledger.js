@@ -110,6 +110,23 @@ function readInFlightQuery(query) {
 }
 
 /**
+ * The members `sweep` reads: a closed set, `limit` a whole number from 1.
+ * @param {unknown} options
+ * @returns {{ limit?: number }}
+ */
+function readSweepOptions(options) {
+  const spelling = 'ledger.sweep';
+  if (options === undefined) return {};
+  if (options === null || typeof options !== 'object' || Array.isArray(options))
+    throw new TypeError(`${spelling}: the second argument is { limit? }`);
+  refuseUnknown(options, ['limit'], (key, list) =>
+    `${spelling}: '${key}' is not a member it reads; it reads ${list}`);
+  const { limit } = /** @type {any} */ (options);
+  if (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1)) throw new TypeError(`${spelling}: limit is a whole number from 1`);
+  return { limit };
+}
+
+/**
  * The same closed set the memory ledger reads for `release`.
  * @param {unknown} claim
  * @returns {{ op: string, scope: string, key: string, generation?: string, now?: number }}
@@ -140,7 +157,7 @@ function readReleaseClaim(claim) {
  *   commit: (ref: unknown, response: unknown, now?: number) => Promise<void>,
  *   fail: (ref: unknown, retryable: boolean, response?: unknown, now?: number) => Promise<void>,
  *   lookup: (key: { op: string, scope: string, key: string, now?: number }) => Promise<any>,
- *   sweep: (now?: number) => Promise<number>,
+ *   sweep: (now?: number, options?: { limit?: number }) => Promise<number>,
  *   inFlight: (query?: { op?: string, scope?: string, olderThan?: number, limit?: number, now?: number }) =>
  *     Promise<{ op: string, scope: string, key: string, generation: string, claimedAt: number }[]>,
  *   release: (claim: { op: string, scope: string, key: string, generation?: string, now?: number }) => Promise<boolean> }}
@@ -273,11 +290,24 @@ export function createDbLedger(client, options = {}) {
         return record; // the store's fresh document: nothing of the ledger's own
       });
     },
-    sweep(now = undefined) {
+    async sweep(now = undefined, options = undefined) {
+      const { limit } = readSweepOptions(options);
       const at = instant(now);
       return inside(async (tx) => {
         const c = rows(tx);
-        const expired = await c.where((/** @type {any} */ r) => r.expiresAt.le(at)).select((/** @type {any} */ r) => r.id).toArray();
+        const due = (/** @type {any} */ r) => r.expiresAt.le(at);
+        // a bounded call takes the longest expired first (equal expiries in
+        // the order they were written). The ordered take is read as whole
+        // documents and the ids are taken here: a `select` after the `take`
+        // is a second query level the planner does not push, so the read
+        // would scan the whole table inside the write lock, and a second
+        // order key beside `expiresAt` leaves a sort over every expired
+        // record. The `expiresAt` order alone is one native statement over
+        // the `by_expires` index that stops after `limit` rows.
+        const expired = limit === undefined
+          ? await c.where(due).select((/** @type {any} */ r) => r.id).toArray()
+          : (await c.where(due).orderBy((/** @type {any} */ r) => r.expiresAt).take(limit).toArray())
+            .map((/** @type {any} */ r) => r.id);
         for (const id of expired) await c.delete(id);
         return expired.length;
       });

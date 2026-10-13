@@ -340,7 +340,16 @@ refused with **`JL2010`** (rejected; the memory ledger's twin is
 given neither, the ledger follows the instants the binding passes with
 each call (a host-side `lookup`/`sweep` without one uses the latest).
 A record past `expiresAt` is dropped on `claim` and `lookup`;
-`sweep(now?)` drops every expired record and answers the count. A
+`sweep(now?, { limit? })` drops the expired records in one transaction
+and answers the count: without a `limit` every expired record, so a ledger
+left unswept for long deletes its whole backlog under one write lock; with
+one (a whole number from 1) at most that many, the longest expired first
+(equal expiries in the order they were written), read through the
+`by_expires` index so the call touches only the rows it deletes, however
+many records the collection holds.
+A host bounds the lock by calling again while the answer equals the limit:
+a smaller answer says none remain, and a backlog that is an exact multiple
+of the limit costs one more call that answers 0. A
 started record's `expiresAt` is its lease (`startedTtlMs`), a settled
 one's its retention (`createdAt + ttlMs`): a claim whose request died
 blocks its key only for the lease, then the key is claimed afresh under
