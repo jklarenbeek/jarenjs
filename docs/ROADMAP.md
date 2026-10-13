@@ -563,11 +563,14 @@ what each does is its own documentation's job
   asking in JavaScript. Wanted: a root for a join table, so a membership can be
   filtered, counted and joined in one document
   ([DB-CLIENT §6](../packages/linq/docs/DB-CLIENT.md)).
-- [ ] **An aggregate method on a captured value ignores its argument.**
-  `g.items.sum((r) => r.score)` emits `$sum` over the rows and fails `JQ2001` at
-  run time, in memory and on a store alike; the documented spelling fans first
-  (`g.items.all().score.sum()`, QUERY-PEN). Refusing an argument the capture does
-  not read changes the capture's surface, so it needs a decision.
+- [ ] **A Sequence terminal ignores an argument it does not read.**
+  `from(rows).count((r) => r.n > 3)` answers every row (`3` for the three rows
+  where the predicate means `2`) and `from(rows).sum((r) => r.n)` fails
+  `JQ2001`: `count`, `sum`, `average`, `min` and `max` on `from()`/`fromAsync()`
+  take no selector or predicate (`any(pred)` is the predicate spelling) and drop
+  what they are handed, where the captured value's aggregates now refuse it.
+  Wanted: the same JL0005 refusal naming `where(pred).count()` /
+  `select(sel).sum()`.
 - [ ] **Live evaluation compares group keys and documents by a sorting
   serialization.** A group key computed to a non-finite number (`$div` by zero)
   shares or misorders live groups, because a live group is keyed by

@@ -70,9 +70,11 @@ export const LINQ_CODES = /* @__PURE__ */ Object.freeze({
  *  - `JL0005` — an operator was used invalidly at build time (`thenBy`
  *    without `orderBy`, `all()` off an operator result rather than a
  *    path, a member read off a to-many relation before `all()`, a
- *    negative `skip`/`take`, an `at()` index beyond a safe integer, a
- *    value that cannot embed in a document — a sparse array among them —
- *    or an option outside one of the chain's closed option bags)
+ *    negative `skip`/`take`, an `at()` index beyond a safe integer, an
+ *    argument handed to an aggregate (`count`, `sum`, `avg`, `min`,
+ *    `max`, `exists`, `isEmpty`), which reads none, a value that cannot
+ *    embed in a document — a sparse array among them — or an option
+ *    outside one of the chain's closed option bags)
  *  - `JL0006` — an operator the mapping table records as
  *    `unsupported` was invoked (`zip`); the table names the reason
  *  - `JL0007` — `from()`/`fromAsync()` received a provider that serves

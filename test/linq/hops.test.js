@@ -136,6 +136,14 @@ describe('a to-many hop is the array of related rows; fanned, their sequence', (
     assert.deepStrictEqual(users().where((u) => u.posts.all().isEmpty()).select((u) => u.id).toArray(), ['u3']);
   });
 
+  it('an aggregate handed an argument is refused on the hop, as on a group', () => {
+    const refused = (name) => codeIs('JL0005', new RegExp(`^JL0005: ${name}\\(\\) takes no argument`));
+    assert.throws(() => users().select((u) => u.posts.count((p) => p.stars.gt(2))), refused('count'));
+    assert.throws(() => users().select((u) => u.posts.all().exists((p) => p.stars.gt(2))), refused('exists'));
+    assert.throws(() => users().select((u) => u.posts.all().stars.sum((s) => s)), refused('sum'));
+    assert.deepStrictEqual(users().select((u) => u.posts.all().stars.sum()).toArray(), [7, 1, 0]);
+  });
+
   it('as a value it is the packed array; a member is read off the fan, an element by index', () => {
     const value = users().select((u) => ({ id: u.id, posts: u.posts }));
     assert.deepStrictEqual(value.toDocument().$return, { id: '$it.id', posts: [POSTS()] });

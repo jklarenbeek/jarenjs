@@ -280,7 +280,7 @@ is part of THIS design.
 | `OfType<S>` | `$valid` filter with a JSON Schema literal | native | `(schema)` → `Seq<S>`; needs `compileTypeTest` (`JL0003`) |
 | `Cast<S>` | `$assert` per item | native | `(schema)` → `Seq<S>`; needs `compileTypeTest` (`JL0003`) |
 | `Zip` | — no positional co-iteration in the grammar | unsupported (`JL0006`) | — |
-| expression methods | `eq ne lt le gt ge` → `$eq…$ge`; `in(values)` → `$eq` against `{ $seq: values }`, `in(path)` → `$eq` against `path[*]`, or a path that already fans as it stands (membership, never `eq(array)`); `and or not` (a chain extends one argument list); `add sub mul div idiv mod neg`; `startsWith endsWith contains matches upper lower length concat substring replace` → §8.7; `count sum avg min max` → §8.8 (aggregates as expressions, e.g. over a group); `exists isEmpty`; `at all get` | native | on `Expr<…>`, per the typed-surface order |
+| expression methods | `eq ne lt le gt ge` → `$eq…$ge`; `in(values)` → `$eq` against `{ $seq: values }`, `in(path)` → `$eq` against `path[*]`, or a path that already fans as it stands (membership, never `eq(array)`); `and or not` (a chain extends one argument list); `add sub mul div idiv mod neg`; `startsWith endsWith contains matches upper lower length concat substring replace` → §8.7; `count sum avg min max` → §8.8 (aggregates as expressions, e.g. over a group); `exists isEmpty` — these seven read no argument, and one handed an argument is `JL0005` (§13.3, §14.5); `at all get` | native | on `Expr<…>`, per the typed-surface order |
 | date family (§8.13) | the whole family, one method per operator. Components `year month day hours minutes seconds offset week weekYear quarter weekday`; instants `epoch datetime`; predicates `isDate isTime isDatetime isDuration`; arithmetic `startOf(unit) endOf(unit) dateAdd(duration \| amount, unit?) dateSub(…) dateDiff(to, unit) dateFormat(pattern)`. `dateAdd`/`dateSub`/`dateFormat` carry the prefix because `add`, `sub` and `format` are taken or ambiguous on this surface — the same reason §8.14 spells `geoArea`. There is no `now()`: §8.13 has no clock, and a fluent surface does not get to add one | native | on `DateTimeExpr` (the `DateTime` brand) and on `UnknownExpr` |
 | series family (§8.16) | `overlaps(other)` → `$overlaps`; `timeBucket(every, origin?, context?)` → `$time-bucket`; `resample(spec)`, `rolling(spec)` and `asof(right, spec?)` → the three sequence operators. A **spec is a literal** and is embedded verbatim — it is read once when the query compiles, so a spec built from the row is `JL0005`, and every rule about what it may *say* stays in the compiler (`JQ0003`). Note that a member literally named `at` is read with `get('at')`: `at(index)` is path navigation on this surface | native | on `ArrayExpr`/fanned paths for the three sequence operators, on `Expr<…>` for the two scalar ones |
 | spatial family (§8.14) | `bbox geoArea geoLength centroid` → `$bbox $area $length $centroid`; `distance within bboxIntersects` → `$distance $within $bbox-intersects`; `geohash(precision?)` → `$geohash` (optional arity, like `substring`); `geoParse geoText geohashBounds geohashNeighbours` → the conversion family; `geoSimplify(tolerance)` → `$geo-simplify`. A plain JSON polygon embeds as a literal (`p.at.within(poly)`); `.params({ region })` makes it an external instead | native | on `Expr<…>`, per the typed-surface order |
@@ -1067,6 +1067,15 @@ MEMBER of each row means fanning the rows first and then reading the
 member (`"$it.items[*].total"`). Only the aggregates changed, and only
 for the member the emitter writes the group into.
 
+An aggregate reads no argument — `count`, `sum`, `avg`, `min`, `max`,
+`exists` and `isEmpty` aggregate or test the value they are called on —
+so `g.items.sum((r) => r.score)` is `JL0005`, naming the spelling that
+works (`g.items.all().score.sum()`). It used to build: the callback was
+never called, `count((r) => r.score > 3)` counted every row, and
+`g.items.all().score.sum((x) => x.mul(2))` summed the scores
+unchanged. An `undefined` argument is not an argument, so a caller that
+forwards an optional one it did not receive is unchanged.
+
 An array a CALLER stored is a different thing and keeps the older rule:
 `u.tags.count()` is `1`. At capture time an array member and a scalar
 member are the same path — the chain has no type to tell them apart, and
@@ -1473,6 +1482,7 @@ that preserves it, so there is no spelling that is allowed to.
 | `from(rows).concat(42)` | `concat takes a sequence or a constant array` | a sequence over the same source, or an array |
 | `select((r) => r.v.all().rolling(spec))` where `spec` reads the row | `rolling() takes a plain literal spec object, not an expression or captured value` | a literal spec |
 | `select((u) => u.tags.at(2 ** 53))` | `at() takes a safe integer index, got 9007199254740992` | an index within ±(2^53 − 1), which an array can have |
+| `groupBy(…).select((g) => g.items.sum((r) => r.score))`; the same with `count`, `avg`, `min`, `max`, `exists`, `isEmpty` or a predicate | `sum() takes no argument — it reads none, so the one passed would be ignored; to aggregate a member of each row fan the rows first: .all().<member>.sum()` | `g.items.all().score.sum()` (§13.3) |
 | `from(rows, { limit: { steps: 3 } })` | `from() does not take 'limit' — did you mean 'limits'?` | `{ limits: { steps: 3 } }` |
 | `from(rows, { bogus: 1 })` | `from() does not take 'bogus'; the options are compileTypeTest, functions, collations, pathFunctions, limits, registry` | one of the six (§8.1); `fromAsync()` and `fromDocument()` refuse the same way, by their own names |
 | `from(rows, 'x')`, `from(rows, null)` | `from() takes a plain options object` | an object literal, or no second argument |

@@ -496,10 +496,20 @@ const unary = (op) => function (/** @type {any} */ record) {
  * an array value with a fanned twin (`groupJoin`'s group is bound as an
  * array so `at`/`all`/member position work, and its aggregates count
  * the members, not the array), the operator applies to the fanned
- * path; elsewhere it is `unary`.
+ * path; elsewhere it is `unary`. The operator reads no argument, so one
+ * that is passed is refused: `g.items.sum((r) => r.score)` would
+ * otherwise aggregate the rows themselves and `g.items.count(pred)`
+ * would count them all, the predicate never read.
  * @param {string} op
+ * @param {string} name - the method's spelling, for the refusal
  */
-const fanned = (op) => function (/** @type {any} */ record) {
+const fanned = (op, name) => function (/** @type {any} */ record, /** @type {any[]} */ ...args) {
+  // an `undefined` is a caller forwarding an optional argument it did not receive
+  if (args.some((arg) => arg !== undefined)) {
+    throw new LinqBuildError('JL0005',
+      `${name}() takes no argument — it reads none, so the one passed would be ignored; `
+      + `to aggregate a member of each row fan the rows first: .all().<member>.${name}()`);
+  }
   return makeExpr({ [op]: record.seq ?? record.doc }, record.epoch, false);
 };
 
@@ -564,7 +574,7 @@ const METHODS = {
   idiv: /* @__PURE__ */ binary('$idiv'), mod: /* @__PURE__ */ binary('$mod'),
   neg: /* @__PURE__ */ unary('$neg'),
   // §8.2 existence
-  exists: /* @__PURE__ */ fanned('$exists'), isEmpty: /* @__PURE__ */ fanned('$empty'),
+  exists: /* @__PURE__ */ fanned('$exists', 'exists'), isEmpty: /* @__PURE__ */ fanned('$empty', 'isEmpty'),
   // §8.7 strings
   startsWith: /* @__PURE__ */ binary('$starts-with'), endsWith: /* @__PURE__ */ binary('$ends-with'),
   contains: /* @__PURE__ */ binary('$contains'), matches: /* @__PURE__ */ binary('$match'),
@@ -588,9 +598,9 @@ const METHODS = {
   },
   // §8.8 aggregates as EXPRESSIONS (a group inside a projection:
   // `(u, g) => ({ n: g.count() })`)
-  count: /* @__PURE__ */ fanned('$count'), sum: /* @__PURE__ */ fanned('$sum'),
-  avg: /* @__PURE__ */ fanned('$avg'), min: /* @__PURE__ */ fanned('$min'),
-  max: /* @__PURE__ */ fanned('$max'),
+  count: /* @__PURE__ */ fanned('$count', 'count'), sum: /* @__PURE__ */ fanned('$sum', 'sum'),
+  avg: /* @__PURE__ */ fanned('$avg', 'avg'), min: /* @__PURE__ */ fanned('$min', 'min'),
+  max: /* @__PURE__ */ fanned('$max', 'max'),
   // §8.13 dates — the whole family, not a corner of it. A date in this
   // suite is an RFC 3339 STRING, so every one of these is an ordinary
   // string operator with a calendar's worth of rules behind it, and

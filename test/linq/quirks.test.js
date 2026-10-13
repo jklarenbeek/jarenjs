@@ -448,3 +448,41 @@ describe('an at() index is a safe integer', () => {
     assert.deepStrictEqual(from(ROWS).select((x) => x.tags.at(x.m)).toArray(), ['b']);
   });
 });
+
+describe('an aggregate method on a captured value reads no argument, so it is refused when given one', () => {
+  const SCORES = [{ c: 'a', n: 1 }, { c: 'a', n: 5 }, { c: 'b', n: 7 }];
+  const grouped = () => from(SCORES).groupBy((r) => r.c);
+  const refused = (name) => coded('JL0005', new RegExp(
+    `^JL0005: ${name}\\(\\) takes no argument .* \\.all\\(\\)\\.<member>\\.${name}\\(\\)$`));
+
+  it('count, exists and isEmpty handed a predicate were answering as if it had never been written', () => {
+    assert.throws(() => grouped().select((g) => g.items.count((r) => r.n.gt(3))), refused('count'));
+    assert.throws(() => grouped().select((g) => g.items.exists((r) => r.n.gt(6))), refused('exists'));
+    assert.throws(() => grouped().select((g) => g.items.isEmpty((r) => r.n.gt(6))), refused('isEmpty'));
+    assert.throws(() => from(SCORES).select((r) => r.n.exists(r.c)), refused('exists'));
+  });
+
+  it('sum, avg, min and max handed a selector were summing the rows, or the wrong number', () => {
+    for (const name of ['sum', 'avg', 'min', 'max']) {
+      assert.throws(() => grouped().select((g) => g.items[name]((r) => r.n)), refused(name));
+      // over numbers the selector was ignored without an error: [6, 7], never [12, 14]
+      assert.throws(() => grouped().select((g) => g.items.all().n[name]((x) => x.mul(2))), refused(name));
+    }
+    assert.throws(() => from([{ s: [1, 2, 3] }]).select((u) => u.s.all().sum((x) => x.mul(2))), refused('sum'));
+  });
+
+  it('the spelling the refusal names answers, and so does a call with no argument or an undefined one', () => {
+    const rows = (build) => grouped().select(build).toArray();
+    assert.deepStrictEqual(rows((g) => g.items.all().n.sum()), [6, 7]);
+    assert.deepStrictEqual(rows((g) => g.items.count()), [2, 1]);
+    assert.deepStrictEqual(rows((g) => g.items.all().n.min()), [1, 7]);
+    assert.deepStrictEqual(rows((g) => g.items.all().n.max()), [5, 7]);
+    assert.deepStrictEqual(rows((g) => g.items.all().n.avg()), [3, 7]);
+    assert.deepStrictEqual(rows((g) => g.items.exists()), [true, true]);
+    assert.deepStrictEqual(rows((g) => g.items.isEmpty()), [false, false]);
+    // a caller that forwards an optional argument it did not receive
+    const maybe = undefined;
+    assert.deepStrictEqual(rows((g) => g.items.count(maybe)), [2, 1]);
+    assert.deepStrictEqual(rows((g) => g.items.all().n.sum(maybe, undefined)), [6, 7]);
+  });
+});
