@@ -53,6 +53,22 @@ describe('README examples: JSON Pointer', () => {
     const getName = compileRelativeJSONPointer('0#');
     assert.strictEqual(getName(doc, '/limits/min'), 'min');
   });
+
+  it('steps along an array with the bhutton-00 index manipulation', () => {
+    const doc = { foo: ['bar', 'baz'], list: [{ x: 1 }, { x: 2 }, { x: 3 }] };
+
+    const previous = compileRelativeJSONPointer('0-1', { dialect: 'bhutton-00' });
+    assert.strictEqual(previous(doc, '/foo/1'), 'bar');
+
+    const nextX = compileRelativeJSONPointer('1+1/x', { dialect: 'bhutton-00' });
+    assert.strictEqual(nextX(doc, '/list/0/x'), 2);
+    assert.strictEqual(nextX(doc, '/list/2/x'), JSONPOINTER_NOTHING);
+
+    const index = compileRelativeJSONPointer('0-1#', { dialect: 'bhutton-00', hashIndex: 'number' });
+    assert.strictEqual(index(doc, '/foo/1'), 0);
+
+    assert.throws(() => compileRelativeJSONPointer('0-1'), { name: 'JSONPointerSyntaxError' });
+  });
 });
 
 describe('README examples: the JSONPath compiler', () => {

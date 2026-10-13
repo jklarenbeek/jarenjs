@@ -1,6 +1,8 @@
 import {
   CC_SLASH,
   CC_HASH,
+  CC_PLUS,
+  CC_MINUS,
   CC_PERCENT,
   CC_TILDE,
   CC_0,
@@ -8,6 +10,8 @@ import {
   isDigitCode,
   isHexDigitCode,
 } from '@jarenjs/core/scan';
+
+import { readIndexShiftDialect } from './relative-dialect.js';
 
 //#region JSON validation
 // JSON whitespace characters: space, tab, newline, carriage return
@@ -155,20 +159,51 @@ export function isValidJSONPointerUriFragment(str) {
   return true;
 }
 
-// relative JSON-pointer: http://tools.ietf.org/html/draft-luff-relative-json-pointer-00
-export function isValidRelativeJSONPointer(str) {
-  if (typeof str !== 'string')
-    return false;
+// Scan a non-negative-integer (`0`, or digits without a leading zero) at
+// `pos`; returns the position after it, or -1 when there is none.
+function scanNonNegativeInteger(str, pos) {
   const len = str.length;
-  if (len === 0)
-    return false;
-  const first = str.charCodeAt(0);
+  if (pos >= len)
+    return -1;
+  const first = str.charCodeAt(pos);
   if (!isDigitCode(first))
-    return false;
-  let pos = 1;
+    return -1;
+  pos++;
   if (first !== CC_0) {
     while (pos < len && isDigitCode(str.charCodeAt(pos)))
       pos++;
+  }
+  return pos;
+}
+
+/**
+ * Is `str` a Relative JSON Pointer?
+ *
+ * The default is draft-handrews-relative-json-pointer-01, the revision the
+ * `relative-json-pointer` format of JSON Schema 2020-12 names. With
+ * `{ dialect: 'bhutton-00' }` the grammar of draft-bhutton-relative-json-pointer-00
+ * applies: the integer may be followed by an index manipulation (`+` or `-`
+ * and a non-negative integer) before the `#` or the JSON Pointer.
+ * @param {*} str - The candidate; anything but a string is not a pointer
+ * @param {{ dialect?: 'handrews-01'|'bhutton-00' }} [options]
+ * @returns {boolean}
+ * @throws {TypeError} When `dialect` is neither accepted spelling
+ */
+export function isValidRelativeJSONPointer(str, options = undefined) {
+  const shiftAllowed = readIndexShiftDialect(options);
+  if (typeof str !== 'string')
+    return false;
+  const len = str.length;
+  let pos = scanNonNegativeInteger(str, 0);
+  if (pos < 0)
+    return false;
+  if (shiftAllowed && pos < len) {
+    const sign = str.charCodeAt(pos);
+    if (sign === CC_PLUS || sign === CC_MINUS) {
+      pos = scanNonNegativeInteger(str, pos + 1);
+      if (pos < 0)
+        return false;
+    }
   }
   if (pos === len)
     return true;

@@ -37,14 +37,14 @@ delete it or fix it.
 (RFC 6902) and Merge Patch (RFC 7396). See
 [`packages/json/ARCHITECTURE.md`](../packages/json/ARCHITECTURE.md).
 
-- [ ] **Relative pointer index manipulation (`0+1`, `1-1`)** — added by
-  draft-bhutton-relative-json-pointer-00 and not accepted by the parser. Jaren
-  is conformant to draft-handrews-01, the revision JSON Schema 2020-12
-  normatively references, and the official format suite still asserts
-  `+1/foo/bar` **invalid** — so this cannot be implemented alone: it needs a
-  dialect gate so the `relative-json-pointer` format tester keeps rejecting it
-  until the suite moves. `test/json/pointer-format.test.js` pins the current
-  answer and is what should fail first when that happens.
+- [ ] **Let `data`/`$data` and the `relative-json-pointer` format select the `bhutton-00` relative
+  pointer dialect** — `@jarenjs/json` accepts `0+1`, `1-1/name` and `0-1#` behind
+  `{ dialect: 'bhutton-00' }` (default draft-handrews-01, which the official format suite asserts).
+  The validator's `data`/`$data` keywords call `compileDataRef(ref)` without options and the
+  `relative-json-pointer` format tester is called with the value only, so a schema cannot ask for
+  the form yet. It needs a validator option (or keyword spelling) carrying the dialect into
+  `compileDataRef`, and a format spelling that selects it, while the default format keeps
+  rejecting `+1/foo/bar`.
 - [ ] **Give the relative resolver the ancestor the caller already has** — the
   one remaining structural inefficiency in addressing, and the only lead that
   survived measurement. `compileRelativeJSONPointer` receives `(dataRoot,

@@ -4,11 +4,11 @@
 // revision JSON Schema 2020-12 normatively references:
 // https://datatracker.ietf.org/doc/html/draft-handrews-relative-json-pointer-01
 //
-// The newer draft-bhutton-relative-json-pointer-00 adds an index-
-// manipulation form (`0+1`, `1-1`) that this grammar deliberately does not
-// accept: the official format suite still asserts `+1/foo/bar` INVALID, so
-// accepting it would have to arrive together with a dialect gate for the
-// `relative-json-pointer` format tester.
+// The newer draft-bhutton-relative-json-pointer-00 adds an index
+// manipulation form (`0+1`, `1-1`). It is opt-in per call through
+// `{ dialect: 'bhutton-00' }`; the default grammar stays handrews-01
+// exactly, because the official format suite still asserts `+1/foo/bar`
+// INVALID and the `relative-json-pointer` format tester answers by default.
 //
 // This module implements JSON Pointer as a two-stage compiler, mirroring
 // the JSONPath engine in path.js:
@@ -26,6 +26,8 @@
 import {
   CC_SLASH,
   CC_HASH,
+  CC_PLUS,
+  CC_MINUS,
   CC_TILDE,
   CC_0,
   CC_1,
@@ -34,6 +36,7 @@ import {
 
 import { NOTHING, scanArrayIndex } from './segments.js';
 import { LabeledSyntaxError } from './errors.js';
+import { readIndexShiftDialect } from './relative-dialect.js';
 
 /**
  * Sentinel for the absence of a value, as distinct from the JSON value
@@ -46,7 +49,8 @@ const hasOwn = Object.hasOwn;
 
 /**
  * Error thrown when a (relative) JSON Pointer is not valid RFC 6901 /
- * draft-luff-relative-json-pointer syntax.
+ * draft-handrews-relative-json-pointer-01 syntax
+ * (or draft-bhutton-relative-json-pointer-00 where the dialect is on).
  */
 export class JSONPointerSyntaxError extends LabeledSyntaxError {
   constructor(message, source, position) {
@@ -115,11 +119,16 @@ export function parseJSONPointer(pointer) {
 }
 
 /**
- * A parsed Relative JSON Pointer (draft-luff-relative-json-pointer).
+ * A parsed Relative JSON Pointer (draft-handrews-relative-json-pointer-01,
+ * or draft-bhutton-relative-json-pointer-00 where the dialect is on).
  * @typedef {Object} RelativeJsonPointer
  * @property {number} levels - Number of levels to ascend from the current location
  * @property {boolean} hash - True for the `#` form, which addresses the member name or array index itself
  * @property {string[]} segments - Decoded reference tokens applied after ascending
+ * @property {number} [shift] - The index manipulation (`+1` is 1, `-1` is -1)
+ *   applied to the array item reached after ascending. Present only when the
+ *   pointer wrote one, which only the `'bhutton-00'` dialect accepts; `0+0`
+ *   is `0`, so a zero shift is told apart from none.
  */
 
 /**
@@ -136,14 +145,32 @@ export function parseJSONPointer(pointer) {
  */
 
 /**
+ * Options of the Relative JSON Pointer parser and compilers.
+ * @typedef {Object} RelativeJsonPointerOptions
+ * @property {'handrews-01'|'bhutton-00'} [dialect] - The grammar revision:
+ *   `'handrews-01'` (default) is draft-handrews-relative-json-pointer-01;
+ *   `'bhutton-00'` is draft-bhutton-relative-json-pointer-00, which adds the
+ *   index manipulation (`0+1`, `1-1/name`, `0-1#`)
+ */
+
+/**
  * Parse a Relative JSON Pointer strictly per
- * draft-luff-relative-json-pointer: a non-negative integer without
- * leading zeros, followed by `#` or a JSON Pointer.
+ * draft-handrews-relative-json-pointer-01: a non-negative integer without
+ * leading zeros, followed by `#` or a JSON Pointer. With
+ * `{ dialect: 'bhutton-00' }` the integer may be followed by an index
+ * manipulation, a `+` or `-` and another non-negative integer
+ * (draft-bhutton-relative-json-pointer-00), which lands in `shift`.
  * @param {string} pointer - The relative pointer (e.g. `1/sibling`, `0#`)
+ * @param {RelativeJsonPointerOptions} [options]
  * @returns {RelativeJsonPointer} The parsed relative pointer
  * @throws {JSONPointerSyntaxError} When the pointer violates the grammar
+ * @throws {TypeError} When `dialect` is neither accepted spelling
+ * @example
+ * parseRelativeJSONPointer('1-1/name', { dialect: 'bhutton-00' });
+ * // { levels: 1, hash: false, segments: ['name'], shift: -1 }
  */
-export function parseRelativeJSONPointer(pointer) {
+export function parseRelativeJSONPointer(pointer, options = undefined) {
+  const shiftAllowed = readIndexShiftDialect(options);
   if (typeof pointer !== 'string')
     throw new JSONPointerSyntaxError('pointer must be a string', String(pointer), 0);
   const len = pointer.length;
@@ -164,17 +191,41 @@ export function parseRelativeJSONPointer(pointer) {
   const levels = Number(pointer.slice(0, pos));
   if (!Number.isSafeInteger(levels))
     throw new JSONPointerSyntaxError('level count out of range', pointer, 0);
+  /** @type {RelativeJsonPointer} */
+  const parsed = { levels, hash: false, segments: [] };
+  if (shiftAllowed && pos < len) {
+    const sign = pointer.charCodeAt(pos);
+    if (sign === CC_PLUS || sign === CC_MINUS) {
+      const start = ++pos;
+      if (pos >= len || !isDigitCode(pointer.charCodeAt(pos)))
+        throw new JSONPointerSyntaxError('expected a non-negative integer after the sign', pointer, pos);
+      if (pointer.charCodeAt(pos++) === CC_0) {
+        if (pos < len && isDigitCode(pointer.charCodeAt(pos)))
+          throw new JSONPointerSyntaxError('leading zeros are not allowed', pointer, start);
+      }
+      else {
+        while (pos < len && isDigitCode(pointer.charCodeAt(pos)))
+          pos++;
+      }
+      const magnitude = Number(pointer.slice(start, pos));
+      if (!Number.isSafeInteger(magnitude))
+        throw new JSONPointerSyntaxError('index shift out of range', pointer, start);
+      parsed.shift = sign === CC_MINUS ? 0 - magnitude : magnitude;
+    }
+  }
   if (pos === len)
-    return { levels, hash: false, segments: [] };
+    return parsed;
   const c = pointer.charCodeAt(pos);
   if (c === CC_HASH) {
     if (pos + 1 !== len)
       throw new JSONPointerSyntaxError("'#' must end the pointer", pointer, pos + 1);
-    return { levels, hash: true, segments: [] };
+    parsed.hash = true;
+    return parsed;
   }
   if (c !== CC_SLASH)
     throw new JSONPointerSyntaxError("expected '#' or a JSON Pointer after the level count", pointer, pos);
-  return { levels, hash: false, segments: scanSegments(pointer, pos) };
+  parsed.segments = scanSegments(pointer, pos);
+  return parsed;
 }
 
 const RE_TILDE = /~/g;
@@ -499,6 +550,42 @@ function walkPointerPrefix(root, path, end) {
 }
 
 /**
+ * The resolver of a pointer with an index manipulation
+ * (draft-bhutton-relative-json-pointer-00, section "Evaluation"): ascend
+ * `levels`, require the value reached to be an item of an array, move to the
+ * item `shift` positions away, then yield its index (`#`) or resolve
+ * `segments` from it. Every failure the draft names - the root, a value that
+ * is not an array item, an index outside the array - is `NOTHING`; so is a
+ * location that does not exist in `dataRoot`, which the shift cannot be
+ * measured from. Unlike the plain `#` form this one must read the document,
+ * since the array's length decides whether the target exists.
+ */
+function compileShiftedResolver(levels, hash, segments, shift, numericHash) {
+  const getter = compileSegmentsGetter(segments);
+  return function relativeShiftResolver(dataRoot, dataPath) {
+    if (typeof dataPath !== 'string')
+      dataPath = '';
+    else if (dataPath.length !== 0 && dataPath.charCodeAt(0) !== CC_SLASH)
+      return NOTHING;
+    const end = trimLevels(dataPath, levels);
+    if (end <= 0)
+      return NOTHING;
+    const array = walkPointerPrefix(dataRoot, dataPath, parentEndOf(dataPath, end));
+    if (!Array.isArray(array))
+      return NOTHING;
+    const index = scanArrayIndex(dataPath, dataPath.lastIndexOf('/', end - 1) + 1, end);
+    if (index < 0 || index >= array.length)
+      return NOTHING;
+    const target = index + shift;
+    if (target < 0 || target >= array.length)
+      return NOTHING;
+    if (!hash)
+      return getter(array[target]);
+    return numericHash ? target : String(target);
+  };
+}
+
+/**
  * Compile a Relative JSON Pointer into a reusable resolver.
  *
  * The relative part (level count, `#` form, trailing segments) compiles
@@ -530,24 +617,45 @@ function walkPointerPrefix(root, path, end) {
  * expected to pass a location it actually reached. The non-`#` form must
  * walk regardless, because it returns the value.
  *
+ * ### Index manipulation and `dialect`
+ *
+ * `{ dialect: 'bhutton-00' }` accepts draft-bhutton-relative-json-pointer-00's
+ * index manipulation: `0+1` is the next item of the array the location is an
+ * item of, `1-1/name` the `name` member of the previous item of the array the
+ * parent is an item of, and `0-1#` the index of the previous item. The
+ * default dialect, `'handrews-01'`, refuses the form at compile time. With a
+ * manipulation the location must exist in `dataRoot` and be an item of an
+ * array; a root, a member of an object, an index outside the array or a
+ * location the document does not hold resolves to `JSONPOINTER_NOTHING`.
+ * `#` after a manipulation is always an array index, so `hashIndex` only
+ * chooses its type (`'string'` by default, `'number'` as the draft has it).
+ *
  * @param {string} pointer - The relative pointer (e.g. `1/sibling`, `0#`)
- * @param {{ hashIndex?: 'string'|'number' }} [options] - `hashIndex`
- *   selects what the `#` form yields for an array position (default
- *   `'string'`)
+ * @param {{ hashIndex?: 'string'|'number', dialect?: 'handrews-01'|'bhutton-00' }} [options]
+ *   `hashIndex` selects what the `#` form yields for an array position
+ *   (default `'string'`); `dialect` selects the grammar (default
+ *   `'handrews-01'`)
  * @returns {RelativeJsonPointerResolver} resolver returning
  *   the addressed value, or `JSONPOINTER_NOTHING`
  * @throws {JSONPointerSyntaxError} When the pointer is not valid
- * @throws {TypeError} When `hashIndex` is neither `'string'` nor `'number'`
+ * @throws {TypeError} When `hashIndex` is neither `'string'` nor `'number'`,
+ *   or `dialect` is neither `'handrews-01'` nor `'bhutton-00'`
  * @example
  * const resolve = compileRelativeJSONPointer('1/limits');
  * resolve({ limits: { min: 2 } , value: 5 }, '/value'); // { min: 2 }
  * @example
  * const spec = compileRelativeJSONPointer('0#', { hashIndex: 'number' });
  * spec({ a: ['x', 'y'] }, '/a/1'); // 1  (the number, per the draft)
+ * @example
+ * const next = compileRelativeJSONPointer('0+1', { dialect: 'bhutton-00' });
+ * next({ a: ['x', 'y'] }, '/a/0'); // 'y'
+ * next({ a: ['x', 'y'] }, '/a/1'); // JSONPOINTER_NOTHING (no item after the last)
  */
 export function compileRelativeJSONPointer(pointer, options = undefined) {
-  const { levels, hash, segments } = parseRelativeJSONPointer(pointer);
+  const { levels, hash, segments, shift } = parseRelativeJSONPointer(pointer, options);
   const numericHash = readHashIndexOption(options) === 'number';
+  if (shift !== undefined)
+    return compileShiftedResolver(levels, hash, segments, shift, numericHash);
   if (hash) {
     if (!numericHash) {
       return function relativeHashResolver(dataRoot, dataPath) {
@@ -605,13 +713,15 @@ export function compileRelativeJSONPointer(pointer, options = undefined) {
  * Pointer, a leading `/` an absolute JSON Pointer, and `''` the root.
  *
  * @param {string} ref - The reference string
- * @param {{ hashIndex?: 'string'|'number' }} [options] - forwarded to
- *   {@link compileRelativeJSONPointer}; only the relative forms read it
+ * @param {{ hashIndex?: 'string'|'number', dialect?: 'handrews-01'|'bhutton-00' }} [options]
+ *   forwarded to {@link compileRelativeJSONPointer}; only the relative forms
+ *   act on it
  * @returns {RelativeJsonPointerResolver} resolver returning
  *   the addressed value, or `JSONPOINTER_NOTHING`
  * @throws {JSONPointerSyntaxError} When the reference is none of the
  *   accepted forms
- * @throws {TypeError} When `hashIndex` is neither `'string'` nor `'number'`
+ * @throws {TypeError} When `hashIndex` is neither `'string'` nor `'number'`,
+ *   or `dialect` is neither `'handrews-01'` nor `'bhutton-00'`
  */
 export function compileDataRef(ref, options = undefined) {
   if (typeof ref !== 'string')
@@ -619,6 +729,7 @@ export function compileDataRef(ref, options = undefined) {
   // Validate the option even on the forms that ignore it, so a typo is a
   // compile-time error wherever it appears rather than only on `N#` refs.
   readHashIndexOption(options);
+  readIndexShiftDialect(options);
   if (ref.length === 0)
     return getRoot;
   const c = ref.charCodeAt(0);

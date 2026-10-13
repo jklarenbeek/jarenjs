@@ -95,6 +95,40 @@ it actually reached. The root has no name, so `0#` there is
 `JSONPOINTER_NOTHING` and stays distinguishable from the member a document can
 genuinely name `''`.
 
+Relative JSON Pointer has two revisions. The default is
+draft-handrews-relative-json-pointer-01, the one JSON Schema 2020-12 references
+and the official `relative-json-pointer` format suite asserts, so `0+1` is a
+syntax error and the format tester rejects it. `{ dialect: 'bhutton-00' }`
+selects draft-bhutton-relative-json-pointer-00, which adds an index
+manipulation — a `+` or `-` and a non-negative integer after the level count —
+that steps along the array the location is an item of:
+
+```javascript
+const doc = { foo: ['bar', 'baz'], list: [{ x: 1 }, { x: 2 }, { x: 3 }] };
+
+const previous = compileRelativeJSONPointer('0-1', { dialect: 'bhutton-00' });
+previous(doc, '/foo/1'); // 'bar'
+
+const nextX = compileRelativeJSONPointer('1+1/x', { dialect: 'bhutton-00' });
+nextX(doc, '/list/0/x'); // 2
+nextX(doc, '/list/2/x'); // JSONPOINTER_NOTHING — no item after the last
+
+const index = compileRelativeJSONPointer('0-1#', { dialect: 'bhutton-00', hashIndex: 'number' });
+index(doc, '/foo/1'); // 0
+```
+
+The shift applies after the level count has ascended, to the value reached
+there, which must be an item of an array that exists in the document; a root, a
+member of an object, an index outside the array and a location the document
+does not hold all resolve to `JSONPOINTER_NOTHING`. The draft's ABNF writes the
+shift before a pointer only, but its own examples end one in `#` (`0-1#`), and
+so does the parser. `#` after a shift is always an index, so `hashIndex` only
+chooses whether it is the string or the number. `parseRelativeJSONPointer`,
+`isValidRelativeJSONPointer`, `compileRelativeJSONPointer` and `compileDataRef`
+all take the `dialect`; the parsed record gains `shift` (a number, `0` for
+`0+0`) only when the pointer wrote one, and an unknown dialect is a `TypeError`.
+The validator's `data`/`$data` keywords and the `relative-json-pointer` format do not pass a dialect, so they stay on handrews-01.
+
 `compileDataRef(ref)` compiles the union the validator accepts — `''` for the data root, a leading `/` for an absolute pointer, a leading digit for a relative one — deciding the dispatch once at compile time. On a realistic `$data` workload the compiled resolvers are 4–20x faster than the interpretive resolver they replaced, and beat the `jsonpointer` npm package on every scenario (`npm run benchmark:jsonpointer`, 2026-07-17: absolute pointers 12–16x, relative pointers 4–16x, `compileDataRef` dispatch 7–20x).
 
 The write-side encode is there too: `encodeJSONPointerSegment(key)` escapes one reference token (`~` → `~0`, `/` → `~1`), `decodeJSONPointerSegment(token)` is its inverse for one token (decoding `~1` before `~0`, so a member named `~1` survives the round trip), and `formatJSONPointer(segments)` is the inverse of `parseJSONPointer`.
