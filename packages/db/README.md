@@ -422,7 +422,7 @@ no continuation to emit.
   bounds: engine limits on the residual, a mandatory row bound that
   refuses rather than truncates, reference allow-lists, optional
   full-scan refusal, per-collection mandatory predicates no document
-  shape can shed, and a per-root MEMBER allow-list — the members a
+  shape can shed (a point read `get` answers only the rows a predicate that names no external keeps), and a per-root MEMBER allow-list — the members a
   document may read, checked wherever it names one, where allowing a
   member allows what is under it and reading the item whole is refused
   rather than quietly narrowed. A live query on a profiled store re-runs

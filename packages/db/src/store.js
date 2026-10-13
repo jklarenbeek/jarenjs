@@ -41,7 +41,7 @@ import { CLOSED_UNDER, admitCursor, admitSyncCursor, createCursor, createSyncCur
 import { refuseUnsupportedPragmaKeys, resolvePragmaRequests, configurePragmas, PRAGMA_NAMES } from './pragmas.js';
 import { createMaintenance } from './maintenance.js';
 import { createBackup } from './backup.js';
-import { normalizeProfile, assertProfileRoots } from './profile.js';
+import { normalizeProfile, assertProfileRoots, pointReadFilter } from './profile.js';
 import { compileEntityModel, joinTableRoots } from './model.js';
 import { entityCore, insertAttempt } from './entity.js';
 import { verifyPhysical, verifyRulePrograms } from './physical.js';
@@ -1432,12 +1432,14 @@ function untrackedPageOptions(options) {
  * @param {any} core
  * @param {Function | null} live - the store-level live registration
  *   for this collection (null when the store has no capture)
+ * @param {(key: any) => any} read - the point read this surface answers:
+ *   the core's, as the store's profile lets a caller see it
  * @returns {any}
  */
-function asyncCollection(core, live) {
+function asyncCollection(core, live, read) {
   return Object.freeze({
     stats: () => core.stats(),
-    get: lift(core.get),
+    get: lift(read),
     insert: lift(core.insert),
     put: lift(core.put),
     patch: lift(core.patch),
@@ -3538,6 +3540,22 @@ export function openStore(model, options) {
           };
           /** @type {Map<string, any>} */
           const entityCores = new Map();
+          /**
+           * A point read as the store's profile lets a caller see it: the row
+           * of `name` that `read` found, or absent when the root's mandatory
+           * predicate does not keep it (a predicate naming an external keeps
+           * every row: a read binds none). Only the surfaces a caller reads
+           * through take it; the cores the store's own writes, captures and
+           * rules read stay the stored row.
+           * @param {string} name - the collection or entity read
+           * @param {any} core - its core, whose `get` is the stored row
+           * @returns {(key: any) => any}
+           */
+          const profiledRead = (name, core) => {
+            const keeps = pointReadFilter(storeProfile, name, operators, zoneProvider);
+            return keeps === null ? (key) => core.get(key)
+              : (key) => chain(core.get(key), (doc) => (doc === undefined || keeps(doc) ? doc : undefined));
+          };
           const entityCoreFor = (name) => {
             let core = entityCores.get(name);
             if (core === undefined) {
@@ -3594,6 +3612,7 @@ export function openStore(model, options) {
             let ops = trackedOps.get(name);
             if (ops !== undefined) return ops;
             const core = entityCoreFor(name);
+            const read = profiledRead(name, core);
             const loads = loadEngineFor(name);
             /**
              * The many-to-many memberships a document carries, as join
@@ -3685,7 +3704,7 @@ export function openStore(model, options) {
                   chain(core.create(doc), (made) => chain(attach(made, memberships), () => made)));
                 return chain(guard(() => (capture === null ? write() : capture.nest(write))), registerCreated);
               },
-              get: (key) => chain(core.get(key), (doc) =>
+              get: (key) => chain(read(key), (doc) =>
                 (doc === undefined ? undefined : tracker.register(name, doc))),
               update: (key, changes) => chain(core.update(key, changes), registerUpdated),
               delete: (key) => chain(core.delete(key), (done) => {
@@ -3719,7 +3738,7 @@ export function openStore(model, options) {
               link: (own, member, target) => tracker.link(name, own, member, target),
               unlink: (own, member, target) => tracker.unlink(name, own, member, target),
               noTracking: {
-                get: (key) => core.get(key),
+                get: (key) => read(key),
                 load: (spec, loadOptions) => loads.load(spec, loadOptions),
               },
             };
@@ -3850,7 +3869,7 @@ export function openStore(model, options) {
             let handle = asyncHandles.get(name);
             if (handle === undefined) {
               handle = asyncCollection(coreFor(name),
-                liveRegistry === null ? null : registerCollectionLive);
+                liveRegistry === null ? null : registerCollectionLive, profiledRead(name, coreFor(name)));
               asyncHandles.set(name, handle);
             }
             return handle;
@@ -5001,7 +5020,7 @@ export function openStore(model, options) {
                 const core = coreFor(name);
                 handle = Object.freeze({
                   stats: () => core.stats(),
-                  get: (/** @type {any} */ key) => core.get(key),
+                  get: profiledRead(name, core),
                   insert: (/** @type {any} */ doc, /** @type {any} */ o) => core.insert(doc, o),
                   put: (/** @type {any} */ doc, /** @type {any} */ key, /** @type {any} */ o) => core.put(doc, key, o),
                   patch: (/** @type {any} */ key, /** @type {any} */ ops, /** @type {any} */ o) => core.patch(key, ops, o),

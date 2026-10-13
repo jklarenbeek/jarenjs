@@ -2110,8 +2110,10 @@ subquery) and store-root execution (`store.execute`); a live
 registration on a store opened with a profile re-runs through `execute`
 whatever its shape (LIVE-FORMAT §7; over an asynchronous connection a
 resnapshot, with the profile's limits narrowed to its credits), so the
-profile binds every result it holds. It bounds query documents, not
-every read: a point read (`get`) answers the row of any tenant, and
+profile binds every result it holds. It bounds query documents and point
+reads, not every read: a point read (`get`, collection or entity) answers a
+row only when the root's mandatory predicate, if it names no external, keeps
+it (below), while
 `store.observe`, capture and replication feeds deliver every tenant's
 records, because they are host surfaces. `collections` is
 the one allow-list and names collections AND entity roots; a document
@@ -2259,6 +2261,27 @@ prove was applied is not a budget.
    produce a fetch without it. A predicate MUST translate natively; a
    host-configured predicate that cannot is a `TypeError` at first
    use, because there is no residual to hide it in.
+
+   A point read is judged by the same predicate when the predicate names no
+   external. `get` on a collection or an entity — tracked or `asNoTracking()`,
+   synchronous or asynchronous, on the store or inside a transaction — answers
+   the row of its key only when the root's predicate keeps it, and `undefined`
+   otherwise, which no caller can tell from a key that holds nothing (and a
+   tracked entity `get` of such a row registers no snapshot). The predicate runs
+   in the engine over the one document, which agrees with the database's answer
+   by the pushdown contract, so a row a query keeps is a row `get` keeps; the
+   engine `limits`, `maxRows` and the member allow-list are bounds on a query
+   document and do not apply to it. A read binds no externals and `get` takes no
+   per-call options, so a root whose predicate names an external — the
+   tenant-isolation spelling above — reads as it always did: `get` answers the
+   row of any key, and a store that isolates tenants through an external reads
+   its rows by a query that supplies it. A root the profile keeps no predicate
+   for reads as stored. The store's own writes read the stored row — a patch's
+   and a put's precondition, an entity update, a rule's old row — because a
+   profile bounds what a caller reads, not what the store writes: a tracked
+   `put` of a key whose `get` answered `undefined` still replaces the stored
+   row. `get` takes no per-call `profile`, so the store's is the only one that
+   applies to it.
 
 **Read-only stores.** `openStore(model, { readOnly: true })` opens the
 connection read-only at the DRIVER, so every write is refused by the
@@ -3415,7 +3438,9 @@ compared member by member, not as the text a serializer wrote, so a
 continuation kept in a PostgreSQL `jsonb` column, which orders the members of
 an object by length, is the one that was handed out); a
 continuation whose `keys` do not match the declared key count, or
-whose `key` is not the entity's key shape, is `JD0035` too. Only a
+whose `key` is not the entity's key shape, is `JD0035` too, on every page of a
+walk (the cached statement is shared by every continuation of one shape, so the
+check is the page's own). Only a
 term that resumes from the text its table stores (a SQLite `uuid`,
 above) carries `"stored": true` in `order`, and its value is that text.
 Signing, tenant scoping, expiry and wire encoding are the **host's**: the store
@@ -3442,7 +3467,11 @@ without advancing the continuation — a caller that retries meets the
 same refusal, which is the honest answer, never a loop and never a
 silent breach; an item that does not fit beside earlier ones ends the
 page before it (`hasMore: true`). A page registers no snapshots unless
-`tracking: true` is spelled.
+`tracking: true` is spelled. A walk shares its statements: the first page
+and each shape of continuation (which order keys are NULL) are one
+statement-cache entry apiece, and the continuation's values are bound on
+every page, so a walk of any length compiles at most a few plans and leaves
+the cache's other plans where they are.
 
 **Snapshot versus live.** A page reports `snapshot: true` only when
 every order key is immutable — and the primary key is the one column
@@ -3543,11 +3572,15 @@ a number appears only where `capabilities.rowEstimates` is filled):
 - externals against document paths; booleans and `null` at bind time;
   a bound membership list against a boolean column, and one holding a
   `null`, a boolean, an object or an array at bind time;
-- on a dialect with a term bound (PostgreSQL: 128 leaf predicates per
-  statement, counted once the planner has regrouped, over every filter
-  the statement carries, every comparison that refines a join and the
-  profile's mandatory predicate), a document past it — an `$or` of more than 64 `$and` pairs, a top-level
-  `$and` of more than 128 `$ne` — named `predicate.termBound`; a graph
+- on a dialect with a term bound (PostgreSQL: 128 terms per statement, a
+  leaf predicate being one and an inequality or a negated comparison
+  between a document member and an external operand four, a member's
+  membership in an external list sixteen (four in its own column), counted once the
+  planner has regrouped, over every filter the statement carries, every
+  comparison that refines a join and the profile's mandatory predicate), a
+  document past it — an `$or` of more than 64 `$and` pairs, a top-level
+  `$and` of more than 128 `$ne` against literals, more than 32 against
+  externals or more than 8 distinct external lists — named `predicate.termBound`; a graph
   load (`JD0032`) and a native mutation (`JD0038`), which have no engine
   path, refuse it by name, and under a profile the residual is refused
   where its fetch is (`JD2007` past `maxRows`, `JD0011` under

@@ -2017,6 +2017,21 @@ A unique index over such a member now stores a value as the document holds it:
 `1` and `true` still collide (both are stored as 1), and the text `'1'` and the
 number `1` no longer do where a string-first member's `TEXT` column made them one.
 
+## 19. A point read on a profiled store
+
+- On a store opened with a `profile` that keeps a mandatory predicate for a
+  root, `get` of a collection or an entity answered the row of any key,
+  whichever tenant held it. When the predicate names no external it now answers
+  the row only when the predicate keeps it and `undefined` when it does not, as
+  for a key that holds nothing, so code that read another tenant's row through
+  `get` now meets `undefined`; a tracked entity `get` of such a row registers no
+  snapshot, and a tracked `put` of its key still replaces the stored row. A
+  predicate that names an external (`profile.externals`) cannot be judged by a
+  read that binds none, and `get` takes no options: that root's `get` answers
+  as before, and its rows are read by a query that supplies the external. A root
+  the profile keeps no predicate for, and a store opened with none, read as
+  before, and the store's own writes still read the stored row.
+
 ## Measured costs
 
 Exact identity stores complete canonical documents and model endpoints, so

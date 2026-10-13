@@ -601,15 +601,18 @@ what each does is its own documentation's job
   those reads measurably slower for text that never holds one, and an
   `$ends-with` that compares bytes to survive a U+0000 answers false under
   `$not` for the empty string; both mechanisms were tried and withdrawn.
-- [ ] **A store profile bounds query documents, not every read.** On a store
-  opened with a profile, a point read (`get`, collection or entity) answers the
-  row of any tenant, `store.observe`, capture and replication feeds deliver every
-  tenant's records, and a per-call `profile` option on `execute`, `query` and
-  `cursor` replaces the store's mandatory predicate instead of narrowing it
-  ([MODEL-FORMAT §8](../packages/db/docs/MODEL-FORMAT.md)). Wanted: the predicate
-  applied to point reads, the store's profile kept as a floor under a per-call
-  one (or a store option that pins it), and the feeds named as host surfaces
-  with their own bound.
+- [ ] **A store profile does not yet bound every read.** A point read (`get`)
+  applies the root's mandatory predicate when it names no external
+  ([MODEL-FORMAT §8](../packages/db/docs/MODEL-FORMAT.md)); a root whose
+  predicate names an external still answers the row of any key, because `get`
+  takes no per-call externals (or `profile`). `store.observe`, capture and
+  replication feeds deliver every tenant's records, a tracked `put`/`update` of
+  a key `get` hides still writes the stored row, and a per-call `profile` on
+  `execute`, `query` and `cursor` replaces the store's mandatory predicate
+  instead of narrowing it. Wanted: per-call options on `get` that supply
+  externals, the store's profile kept as a floor under a per-call one (or a
+  store option that pins it), and the feeds named as host surfaces with their
+  own bound.
 - [ ] **Federation merge strategy and spilling.** Connected N-way joins and
   nested fluent joins now have an explicit fetch order and combined admission
   credits (QUERY-PEN §12.1). A merge strategy still needs a provider ordering

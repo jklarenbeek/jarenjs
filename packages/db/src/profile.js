@@ -28,6 +28,13 @@
  *     item, and answering a narrowed document nobody asked for would be
  *     the wrong answer, not a safer one.
  *
+ * A point read (`get`) is not a query document but answers the row of one
+ * key, so the mandatory predicate reaches it as a test of the row it read:
+ * a row the predicate does not keep is answered as absent
+ * ({@link pointReadFilter}); a predicate that names an external keeps every
+ * row, because a read binds none. The member allow-list, the row bound and
+ * the engine limits are properties of a query document and do not apply to it.
+ *
  * The non-claims are part of the contract and live in
  * MODEL-FORMAT.md §8: no statement timeout exists on the SQLite
  * drivers (the capability slot is empty), so a long-running native
@@ -40,6 +47,8 @@ import { conjoin } from './algebra.js';
 import { compileIndexPath } from './ddl.js';
 import { DbCompileError } from './errors.js';
 import { isJsonObject } from '@jarenjs/core/object';
+import { analyzeQuery } from '@jarenjs/json/query';
+import { compileSetResidual } from './residual.js';
 
 /** The `'safe'` profile: the documented defaults. */
 export const SAFE_PROFILE = Object.freeze({
@@ -277,4 +286,44 @@ export function applyRowBound(plan, maxRows) {
       limit: plan.window.limit === null ? cap : Math.min(plan.window.limit, cap),
     };
   return { ...plan, window };
+}
+
+/**
+ * The profile's verdict on a row a point read found, for one root: `null`
+ * when the profile keeps no predicate for it (the read is answered as
+ * stored), otherwise a test of the row's document by the same predicate
+ * the query engines conjoin into every fetch. The test runs the predicate
+ * in the engine over the one document, which agrees with the database's
+ * answer by the pushdown contract, so a row the predicate keeps from a
+ * query is a row it keeps from a point read.
+ *
+ * A point read binds no externals, so a predicate that names one cannot be
+ * judged: such a root's point read is answered as stored, exactly as a store
+ * with no predicate for it answers. The predicate is analysed and compiled on
+ * first use, so a store that never reads a point never pays for it. The
+ * engine limits are not passed to the test: they bound the JavaScript a query
+ * document runs, and a point read runs no document of the caller's.
+ * @param {any} profile - a normalized profile, or `null`
+ * @param {string} root - the collection or entity read
+ * @param {{ functions?: any, extensions?: any } | null} operators - the
+ *   store's registered operators
+ * @param {any} zoneProvider - the injected clock
+ * @returns {((document: any) => boolean) | null}
+ */
+export function pointReadFilter(profile, root, operators, zoneProvider) {
+  const expression = profile === null ? undefined : profile.predicates[root];
+  if (expression === undefined) return null;
+  /** @type {((candidates: any[], externals: any) => any) | null} */
+  let keeps = null;
+  let judged = false;
+  return (document) => {
+    if (!judged) {
+      const wrapper = { $for: { it: '$[*]' }, $where: expression, $return: '$it' };
+      // a predicate that names an external keeps no row from a read that binds none
+      if (analyzeQuery(wrapper, operators ?? undefined).externals.length === 0)
+        keeps = compileSetResidual(wrapper, undefined, operators, zoneProvider);
+      judged = true;
+    }
+    return keeps === null || keeps([document], {}) !== undefined;
+  };
 }
