@@ -588,13 +588,6 @@ what each does is its own documentation's job
   validation cannot see it (the cast result always validates) and
   `report.destructive` stays false. Wanted: a refusal before the copy when a
   value does not survive the cast, on both engines.
-- [ ] **A native temporal bucket answers where the engine raises on a null
-  reading.** A `$time-bucket` `$groupby` over a reading that admits `null`
-  answers natively where the engine raises: `$min` and `$max` over
-  `['number','null']`, and `$sum`, `$avg`, `$min`, `$max` over
-  `['integer','null']` skip the `null` (`2, null, 4` answers `2`/`4`/`6`/`3`)
-  while the engine raises `JQ2001` ([MODEL-FORMAT §10.6](../packages/db/docs/MODEL-FORMAT.md)).
-  Wanted: either one answer or a named residual.
 - [ ] **A native `$resample` window never reads the rows outside it.** `start`
   and `end` are applied by the statement, so a row outside them that the
   temporal kernel refuses (no instant, no reading) is never met, where the

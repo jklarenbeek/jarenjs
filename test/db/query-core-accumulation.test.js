@@ -496,7 +496,8 @@ describe('a floating sum or average in a temporal bucket', () => {
 
 describe('a null reading in a temporal bucket', () => {
   // readings 2, null, 4 in one bucket. The engine refuses the null in a
-  // grouped aggregate and the temporal kernel skips it
+  // grouped aggregate and the temporal kernel skips it; a grouping that reads
+  // a nullable member is the engine's whatever the aggregate
   /** @param {string[]} type */
   const model = (type) => ({ $model: '0.1', collections: { rows: {
     key: '/id',
@@ -535,21 +536,37 @@ describe('a null reading in a temporal bucket', () => {
     });
   });
 
-  it('is still skipped by a pushed extreme, and by an integer sum or average', async () => {
-    for (const [type, fns] of [[['number', 'null'], { $min: 2, $max: 4 }],
-      [['integer', 'null'], { $min: 2, $max: 4, $sum: 6, $avg: 3 }]]) {
+  it("is the engine's refusal for an extreme, and for an integer sum or average, and names why", async () => {
+    for (const [type, fns] of [[['number', 'null'], ['$min', '$max']],
+      [['integer', 'null'], ['$min', '$max', '$sum', '$avg']]]) {
       await onBothEngines(model(type), async (store, host) => {
         const rows = store.collection('rows');
         for (const document of documents) await rows.insert(document);
-        for (const [fn, value] of Object.entries(fns)) {
+        for (const fn of fns) {
           const document = grouped(fn);
           const label = `${host} ${type} ${fn}`;
           assert.throws(() => compileJsonQuery(document)(structuredClone(documents)), { code: 'JQ2001' }, `engine: ${label}`);
-          assert.equal((await rows.explain(document)).mode, 'native', label);
-          assert.deepEqual(await rows.execute(document), { at: 0, v: value }, label);
+          await assert.rejects(Promise.resolve().then(() => rows.execute(document)), { code: 'JQ2001' }, label);
+          const explained = await rows.explain(document);
+          assert.equal(explained.mode, 'set', label);
+          if (fn === '$min' || fn === '$max' || type[0] === 'integer')
+            assert.deepEqual(explained.series.reasons.map((reason) => reason.code), ['nullable-reading'], label);
         }
       });
     }
+  });
+
+  it('stays native where the reading admits no stored null', async () => {
+    await onBothEngines(model(['number']), async (store, host) => {
+      const rows = store.collection('rows');
+      for (const document of [2, 3, 4].map((value, at) => ({ id: `r${at}`, series: 's', at, value })))
+        await rows.insert(document);
+      for (const [fn, value] of [['$min', 2], ['$max', 4]]) {
+        const document = grouped(fn);
+        assert.deepEqual(await rows.execute(document), { at: 0, v: value }, `${host} ${fn}`);
+        assert.equal((await rows.explain(document)).mode, 'native', `${host} ${fn}`);
+      }
+    });
   });
 });
 

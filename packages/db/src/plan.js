@@ -2203,6 +2203,7 @@ function groupLadder(key, itSlot, shape) {
  * value, each of them the group key, a `$count` of the whole binding,
  * `$min` or `$max` over a schema-typed numeric path, or `$sum` or `$avg`
  * over a path the schema types `integer` (a floating one is the engine's).
+ * A path that admits a stored `null` is the engine's too.
  * @param {any} ret - the `$return` node
  * @param {number} itSlot
  * @param {number} keySlot
@@ -2236,6 +2237,9 @@ function bucketProjection(ret, itSlot, keySlot, shape) {
       ?? (admitsMixedTypes(shape.schema, ref.segments) ? 'value-not-numeric' : null);
     if (valueBad !== null) return { code: valueBad };
     if (floatingAccumulation({ fn, ref })) return { code: 'floating-accumulation' };
+    // a stored null is an item of the engine's sequence, which it refuses
+    // (`JQ2001`); SQL skips it, so a reading that admits one is the engine's
+    if (nullReading(ref, shape.schema) === 'present') return { code: 'nullable-reading' };
     // what an aggregate over NO numbers says, in the ENGINE's words:
     // `$sum` of an empty sequence is 0 and the other three are the
     // empty sequence, which an object constructor leaves the member out

@@ -380,7 +380,8 @@ describe('the grouping spelling: every order and window the plan pushes', () => 
       { $lt: ['$r.at', ORIGIN + 300000] },
     ] },
     $groupby: { b: { '$time-bucket': ['$r.at', 60000, ORIGIN] } },
-    $return: { at: '$b', v: { $max: '$r.value' }, n: { $count: '$r' } },
+    // the corpus reading admits a stored null, which makes an aggregate over it the engine's
+    $return: { at: '$b', n: { $count: '$r' } },
     ...extra,
   });
   const SHAPES = {

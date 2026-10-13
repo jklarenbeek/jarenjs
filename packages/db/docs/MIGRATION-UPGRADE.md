@@ -817,6 +817,15 @@ the query engine, now refuse by code or answer what the engine answers:
   did. They answer the double the engine holds now, whole, grouped, in a
   temporal bucket and in a projection or a cursor over one; a number inside
   the range reads back as it did.
+- A `$time-bucket` grouping whose aggregated member admits `null` answered
+  natively where the engine raises `JQ2001`: `$min` and `$max` over
+  `['number', 'null']`, and `$sum`, `$avg`, `$min` and `$max` over
+  `['integer', 'null']` skipped the `null` (`2, null, 4` answered
+  `2`/`4`/`6`/`3`). Such a grouping is the engine's now and raises `JQ2001`
+  (`explain().series.reasons` names `nullable-reading`; `strict` refuses it)
+  over the fetch the series index still bounds. Declare the member without
+  `null`, or ask through `$resample`, which skips the `null` in the kernel,
+  to keep a native bucket.
 
 ## 8. Stricter models, keys and staged writes
 

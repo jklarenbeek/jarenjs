@@ -94,6 +94,9 @@ export const SERIES_REASONS = Object.freeze({
   'value-not-numeric':
     'the reading is not a schema-typed number, and a SQL aggregate over an untyped member '
     + 'answers where the engine refuses',
+  'nullable-reading':
+    'the reading admits a stored null, which a SQL aggregate skips where the engine refuses '
+    + 'the sequence that holds it',
   'floating-accumulation':
     'a floating sum or average runs in the engine, whose left-to-right addition decides the '
     + 'rounding a SQL sum would not reproduce',

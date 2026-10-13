@@ -3626,22 +3626,17 @@ no document column, an adopted one; a store-owned PostgreSQL table plans the
 set residual under `bind.entityGrouping`. An entity grouping under a window
 is the engine's on every dialect.
 
-One deviation between a pushed answer and the engine's is DECLARED
-rather than refused, because the database is right by its own
-arithmetic:
-
-- a `$time-bucket` `$groupby` whose aggregated path admits `null`: the
-  pushed `$min` and `$max` over `['number', 'null']` — and `$sum`,
-  `$avg`, `$min` and `$max` over `['integer', 'null']` — skip a `null`
-  reading exactly as the series kernel does, while the engine's
-  aggregate over a sequence holding `null` raises `JQ2001`; over
-  `2, null, 4` the store answers `$sum` `6`, `$avg` `3`, `$min` `2`
-  and `$max` `4`. The `$resample` spelling skips the `null` natively
-  and in the engine alike. A `$sum` or `$avg` over `['number', 'null']`
-  is no part of the deviation: it is the engine's, and raises `JQ2001`
-  for a bucket holding a `null` reading. Everywhere else an ordering
-  or an aggregate over a path that admits `null`, or over a boolean
-  path, is a named residual, so the two paths keep answering alike.
+A `$time-bucket` `$groupby` whose aggregated path admits `null` is the
+engine's as well, named `series.nullable-reading`
+(`explain().series.reasons[].code` is `nullable-reading`; `strict` refuses
+it): the engine's aggregate over a sequence holding `null` raises `JQ2001`,
+where a database skips the `null` — over `2, null, 4` a pushed `$sum` would
+answer `6`, `$avg` `3`, `$min` `2` and `$max` `4`. A `$sum` or `$avg` over
+`['number', 'null']` was already the engine's under
+`series.floating-accumulation`. The `$resample` spelling skips the `null`
+natively and in the engine alike. Everywhere else an ordering or an
+aggregate over a path that admits `null`, or over a boolean path, is a named
+residual too, so the two paths keep answering alike.
 
 An ordering over a member declared with more than one type
 (`['integer', 'string']`) is a named residual as well, since the engine

@@ -568,7 +568,8 @@ binding, `$min`/`$max` over singular schema-typed numeric paths and
 spec asks for nothing that ladder cannot do — a fixed width,
 `fill: 'omit'`, and one of `min|max|count`, or `sum|mean` over an
 `integer` reading. A floating sum or average is the engine's
-(`floating-accumulation`), over the fetch the index still bounds.
+(`floating-accumulation`), and so is any aggregate over a reading that admits a
+stored `null` (`nullable-reading`), over the fetch the index still bounds.
 Everything else about time is a NAMED refinement ("The temporal plan"
 below).
 
@@ -609,7 +610,7 @@ mode, `knn`, beside native, row and set.
 | the k-nearest ordering over a `derive: 'vector'` column | the column cuts the candidates; the engine orders them (mode `knn`, "The k-nearest plan" below) — engine work, so `strict: true` refuses it |
 | `$similarity` anywhere else — a threshold in `$where`, a score in `$return`, a second ordering key | no native spelling; runs in the residual over whatever the rest of the document pushed |
 | the k-nearest shape with no finite window, ascending, `$empty: 'greatest'`, a probe that is neither a literal vector nor an external, a literal probe of another width, or a selection not pushed whole (a residual conjunct, an implied one, a `$let` before the where) | nothing is proven; the whole document runs in the engine, and `explain()` names which precondition failed — a k-nearest query never falls to the full scan silently |
-| `$resample` with a fill policy other than `omit`, `$rolling`, `$asof`, `first`/`last`, a calendar width, a named zone, a `$time-bucket` whose width or origin is an EXPRESSION, an instant the schema does not type as an integer, or a `sum`/`mean` (a `$sum`/`$avg` in a `$time-bucket` grouping) over a reading the schema does not type `integer` | the index bounds the fetch and `@jarenjs/core/series` — for a grouping, the engine — decides over what comes back; `explain().series.reasons` carries the CODE — `fill-policy`, `rolling-refinement`, `asof-refinement`, `unsupported-aggregate`, `calendar-width`, `named-zone`, `nonliteral-spec`, `instant-not-integer`, `floating-accumulation` — and `strict: true` refuses every one of them |
+| `$resample` with a fill policy other than `omit`, `$rolling`, `$asof`, `first`/`last`, a calendar width, a named zone, a `$time-bucket` whose width or origin is an EXPRESSION, an instant the schema does not type as an integer, or a `sum`/`mean` (a `$sum`/`$avg` in a `$time-bucket` grouping) over a reading the schema does not type `integer` | the index bounds the fetch and `@jarenjs/core/series` — for a grouping, the engine — decides over what comes back; `explain().series.reasons` carries the CODE — `fill-policy`, `rolling-refinement`, `asof-refinement`, `unsupported-aggregate`, `calendar-width`, `named-zone`, `nonliteral-spec`, `instant-not-integer`, `floating-accumulation`, `nullable-reading` — and `strict: true` refuses every one of them |
 
 ### The type truth table
 

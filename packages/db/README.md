@@ -231,8 +231,9 @@ no continuation to emit.
   oracle — a committed corpus and a seeded generator, every case run
   resident, native, native again over a store with every declared index
   removed, and forced-residual — keeps every path agreeing, with the one
-  deviation declared rather than hidden (MODEL-FORMAT §10.6: a native
-  temporal bucket skips a `null` reading where the engine refuses it).
+  deviation declared rather than hidden (MODEL-FORMAT §10.6: a string
+  operator over a member typed `string` and `null` alone answers false for a
+  stored `null` where the engine refuses it).
   `strict: true` turns any residual into a compile error.
   Constant trees fetch only a row marker. Counts over entity projection trees
   lower too; a single-path count or window excludes absent members before
@@ -808,6 +809,9 @@ A bucket's `sum` or `mean` is pushed only over a reading the schema types
 reproduces, so it is a named refinement (`floating-accumulation`) over the
 fetch the series equality still bounds through the index, and `strict: true`
 refuses it.
+A `$time-bucket` grouping over a reading whose schema admits `null` is a named
+refinement as well (`nullable-reading`): the engine refuses a `null` in the
+sequence it aggregates (`JQ2001`), where a database skips it.
 
 **The numbers, the loss included.** `benchmark/series.js` answers the
 same range, the same buckets, the same rolling window and the same
@@ -829,7 +833,7 @@ answer, and a reason code for every thing the database could not do:
 `fill-policy`, `calendar-width`, `named-zone`, `rolling-refinement`,
 `asof-refinement`, `unsupported-aggregate`, `nonliteral-spec`,
 `instant-not-integer`, `missing-series-prefix`, `row-selector`,
-`value-not-numeric`, `floating-accumulation`, `nonnative-grouping`,
+`value-not-numeric`, `floating-accumulation`, `nullable-reading`, `nonnative-grouping`,
 `invalid-spec`. `strict: true` refuses
 every one of them before a statement runs, and the counts `explain()`
 prints are the LAST ACTUAL execution's — `null` until the document has
