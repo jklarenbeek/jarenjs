@@ -124,3 +124,4 @@ one, each attaching to the finished SVG from its own module.
 - A Gantt has no `todayMarker` and no undated first task: nothing in
   this suite reads a clock, so both are refused rather than answered
   from the machine's date (MERMAID-FORMAT §4.4).
+- Mermaid draws no 3D, so it does not adopt the `mat4` and projection kernel of `@jarenjs/core/math`; that changes only if a diagram type needs depth.

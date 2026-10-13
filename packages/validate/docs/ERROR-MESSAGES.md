@@ -120,7 +120,7 @@ names, read from the same parse that produces the renderer.
 
 Templates compile ONCE into a closure (`compileMessageTemplate`) — the
 two-stage house rule applies to messages too. There is **no pointer/data
-interpolation in v1** (`${/foo}` ajv-style is a roadmap follow-up; params
+interpolation in v1** (`${/foo}` ajv-style is not planned; params
 already carry the relevant values).
 
 ## 4. Catalogs
@@ -181,7 +181,7 @@ ajv-errors:
 - originals are never moved into `params.errors`;
 - no `${/pointer}` data interpolation (v1);
 - no `properties`/`items` map forms — the subtree prefix rule covers what
-  those express (roadmap follow-up if demand appears).
+  those express (not planned).
 
 An `errorMessage` spec only changes what `message` (and `msgid`) say on
 the errors it matches.

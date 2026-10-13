@@ -216,5 +216,5 @@ spells every one of them; the GeoJSON meta-schema artifacts live in
 `@jarenjs/json/schemas`; derived spatial index columns and the two-stage
 pushdown live in `@jarenjs/db`; the map chart and its bounded-memory
 streaming accumulator live in `@jarenjs/charts`. Overlay operations
-(union/intersection/difference/buffer) are deliberately absent — see the
-ROADMAP.
+(union/intersection/difference/buffer) are deliberately absent and not
+planned; the package README says why.

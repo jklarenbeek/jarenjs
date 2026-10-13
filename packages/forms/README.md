@@ -437,9 +437,10 @@ The shallow timings are close and do not justify a universal speedup
 claim; deeper trees benefit from carrying cursors. The fold stylesheet loses on every
 fixture even with expansion excluded. These measurements cover addressing
 only, not the complete session/validation/render pipeline. The production
-composer therefore keeps the JS walk. A complete stylesheet replacement
-still needs evidence for array-template expansion, hidden fields, enum
-values, errors and session state; first-class functions are not a
+composer therefore keeps the JS walk. A complete stylesheet replacement is
+not planned: it would have to show parity for array-template expansion,
+hidden fields, enum values, errors and session state, and then beat the
+walk across the complete pipeline; first-class functions are not a
 prerequisite.
 
 ```javascript

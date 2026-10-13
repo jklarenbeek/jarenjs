@@ -45,31 +45,11 @@ delete it or fix it.
   the form yet. It needs a validator option (or keyword spelling) carrying the dialect into
   `compileDataRef`, and a format spelling that selects it, while the default format keeps
   rejecting `+1/foo/bar`.
-- [ ] **Give the relative resolver the ancestor the caller already has** — the
-  one remaining structural inefficiency in addressing, and the only lead that
-  survived measurement. `compileRelativeJSONPointer` receives `(dataRoot,
-  dataPath)` and re-walks the location *string* from the root on every call,
-  re-scanning and re-slicing segments the validator had in hand when it
-  descended there. Four cheaper fixes were measured and rejected: a
-  prototype-guarded read instead of `Object.hasOwn` (faster in isolation,
-  **slower** in the real polymorphic walk), per-segment closure chains (slower),
-  caching the parsed location path (2.3× on repeat but **2× worse** when the
-  path varies, which is the array-iteration case that matters), and flattening
-  cons-string paths (no effect). What is left is an API that lets a caller pass
-  the ancestor value directly, which means threading it through the validator's
-  descent — real blast radius, so it wants deciding before doing. Note this
-  would not help JSLT or JTLT: they use `segments.js` for runtime addressing and
-  touch `pointer.js` only for compile-time error paths.
-- [ ] **Optional codegen backend** — compile hot queries to source via
-  `new Function` where CSP allows, reusing the same frozen AST and semantics, with
-  the closure compiler staying the default. The no-`eval` rule is absolute in this
-  package today, which is the guarantee this must not quietly cost.
 
 ## @jarenjs/json — JSLT
 
 - [ ] **JSLT matcher optimizer (single-walk)** — replace per-rule path pre-passes with a single multi-pattern walk, specialize location tracking by reachable modes, and use input-schema knowledge to prune impossible shape rules. The benchmark quantifies the gap: dense pure-path transforms pay ~9–12× over the raw path scan, and hand-written native JS stays 3–139× faster on real transformations — this is the main JSLT performance workstream.
 - [ ] **Prepass-level pruning in the JSLT matcher** — skip re-evaluating match *paths* over unchanged regions using the changed-path feed directly, rather than discovering the reuse afterwards through the memo cache. The remaining O(change) idea now that the memo layers have shipped.
-- [ ] **Standalone `@jarenjs/jslt` package** — publish the stylesheet layer as its own package only when the query-engine internals it needs have a deliberate public boundary; today the module stays colocated to avoid exposing compiler internals.
 - [ ] **`$apply` mode-argument typing in the schema twins** — the draft-neutral subset forbids tuple validation, so a non-string mode in the two-item `$apply` array is compiler-rejected (JT0007) but schema-accepted. Changing this means abandoning the mechanical twin transform or changing the language encoding; documented in JSLT-FORMAT Appendix B.
 
 ## @jarenjs/json — XQuery front-end & QT3
@@ -98,37 +78,14 @@ delete it or fix it.
   compile-time evaluated-set tracking. Computing a static evaluated set per schema
   scope (with a small dynamic remainder only where refs make it unknowable) is the
   main remaining validator performance workstream.
-- [ ] **Optional codegen backend for nano-schemas** — closure-compiled validators bottom out around 5× Ajv's generated code on trivial schemas (a two-branch `allOf` runs ~90 ns vs ~15 ns), which is the price of the CSP-safe no-`new Function` rule. Mirroring the query engine's codegen-backend idea — same compile pipeline, a codegen emitter where CSP allows, closures as the default — would close the floor without giving up the guarantee.
-- [ ] **Collected errors inside `allOf` branches** — `allOf` is not
-  speculative (every branch must hold), so its branch errors are kept, which
-  is right. What is still coarse is that a branch failing deep inside reports
-  both its own fault and the `allOf` wrapper error; a consumer wanting one
-  issue per fault has to filter the wrapper. The applicator-level rollback
-  shape added for `anyOf`/`oneOf`/`not`/`if`/`contains` is the tool if this
-  ever needs finer treatment.
 - [ ] **Unprefixed `query` alias / vocabulary registration** — register `$query` through a custom vocabulary and meta-schema (json-everything style) instead of only as an extension keyword.
 - [ ] **A reference keeps instance locations on** — once a `$data`, `data` or `$query` reader exists anywhere in the compilation, a subtree holding a `$ref`, `$dynamicRef` or `$recursiveRef` still extends member and item locations even when what it references reads none; resolving references during the compile-time scan would let those subtrees skip too.
-- [ ] **ajv-style `errorMessage` `properties`/`items` map forms** — only if demand appears; the subtree prefix rule already covers what they express.
-- [ ] **Relative-pointer `${...}` interpolation in message templates** — ajv-errors-style data interpolation; params already carry the offending values, so this is convenience, not capability.
 
 - [ ] **Recursion depth is the JavaScript stack.** `canonicalizeJson`, JSONPath
   `$..*`, validation of a deeply nested instance and a reference loop through
   an applicator (`allOf: [{ "$ref": "#" }]`, `anyOf: [{ "type": "string" },
   { "$ref": "#" }]` on a non-string) throw `RangeError` instead of a coded
   refusal; a depth option would turn them into one.
-
-## @jarenjs/forms
-
-- [ ] **Complete stylesheet composition needs a demonstrated benefit** —
-  `$fold` already supports typed-segment cursor walks; it does not parse
-  RFC 6901 pointer strings or carry an array template's instance cursor
-  through `$apply`. The addressing experiment and its losses are published
-  in `packages/forms/README.md`; the production composer now carries data
-  and initial-session cursors through its JS walk. A replacement must
-  demonstrate full parity for nested array/tuple expansion, hidden fields,
-  computed values, enum encoding, errors and session state, then measure
-  the complete pipeline. Parameterized `$apply` remains one possible path;
-  function values are neither needed nor planned for this purpose.
 
 ## @jarenjs/view & @jarenjs/app
 
@@ -176,12 +133,6 @@ establish registry publication or downstream acceptance.
   `@jarenjs/josl` incremental readers is the natural 0.2 composition,
   and doing it honestly changes the node contract, so it is a format
   revision rather than an option.
-- [ ] **A whole-graph checkpoint rule in the pen's types** — the flow pen's
-  types refuse a checkpoint on an unversioned task node, but a graph with a
-  checkpoint on its input node and an unversioned task elsewhere type-checks
-  and only `compileDag` refuses it (`JF0011`). "Any checkpoint means every task
-  is versioned" is a property of the whole graph, which the builder's types
-  would have to carry from node to node.
 - [ ] **Editor: free-form geometry** — the Flow studio lays out every
   diagram deterministically and connects by click-source-then-target;
   free-form node dragging and *persisted* positions are out of scope for
@@ -192,20 +143,6 @@ establish registry publication or downstream acceptance.
 ## @jarenjs/contract
 
 ## @jarenjs/md
-
-- [ ] **Chunking is text-only; a block sequence has no packer.** `@jarenjs/core/chunk`
-  cuts one string by size, line or separator with offsets back into it,
-  which is what a tool result or a transcript needs. A document that already
-  has structure — the block tree this package parses, or a host's typed
-  elements with headings, roles and page boxes — wants deterministic packing
-  over an ordered block sequence (a stable id, text, an optional role, a
-  hierarchy path, opaque metadata) that preserves order and attribution,
-  honors a hard size bound, exposes the overlap it actually produced and
-  takes boundary and size policy as injected functions. Nothing in the suite
-  consumes such a packer yet; the block tree here is rendered, not retrieved.
-  It is built when a suite surface needs it — this package's own tree is the
-  first candidate — and not before, so that the shape is fitted to a real
-  consumer rather than to a description of one.
 
 - [ ] **Canonical printing's last shapes.** parseMarkdown(toMarkdown(doc)) deep-
   equals doc over the CommonMark and GFM corpora and random documents, except
@@ -229,7 +166,6 @@ establish registry publication or downstream acceptance.
   do with.
 - [ ] **More domain projections** — the geometry-free-AST-as-model idea now ships executable arrows for flat FSMs, compound statecharts and DAGs (`stateDiagram ⇄ jaren-fsm` and `flowchart ⇄ jaren-dag`, run by `@jarenjs/flow`; MERMAID-FORMAT §5.1); the remaining follow-ups on the same idea are sequence⇄orchestration/saga and ER⇄JSON-Schema+`@jarenjs/forms`.
 - [ ] **Diagram tooltips beyond flowchart and state nodes** — `mermaidPlugin({ tooltips: true })` ships node tooltips (focus and hover, Escape, aria wiring) for the diagram types whose render marks nodes (`flowchart`, `stateDiagram`, `jaren-dag`). The remaining types draw no marked target: sequence actors and messages, class and ER panels, gantt rows (which carry `data-id` but a different class), edges, and the secondary placeholders. Their render needs per-element markers first. The text is English-only and derived from the DOM; a Mermaid `click` line's own tooltip text is parse-accepted and not modeled in the AST.
-- [ ] **Adopt the shared 3D kernel** — `@jarenjs/calc`'s x·y·z plotter introduced a reusable `@jarenjs/core/math` `mat4`/`project.js` kernel (matrices, projection, `surfaceNormal`, painter's-algorithm depth sort). Mermaid 3D could adopt it rather than growing its own projection math.
 
 ## @jarenjs/charts
 
@@ -257,6 +193,7 @@ costs a descriptor plus examples and no UI code at all.
   parsers are pure, but they consume a stream rather than a string, so a
   descriptor for them first needs a source pane that means "feed this in
   chunks" — a question the `(source, data)` shape does not answer.
+
 ## @jarenjs/studio
 
 - [ ] **Entity models and durable project stores** — collection models now
@@ -277,17 +214,6 @@ costs a descriptor plus examples and no UI code at all.
 
 ## @jarenjs/josl
 
-- [ ] **CSV header-keyed objects against a codegen parser** — `udsv` reads
-  the 10k record stream to objects in ~1.6 ms against the CSV reader's
-  ~3.2 ms, because it compiles a parser per schema with `new Function` and
-  builds each record object with literal keys the engine can inline-cache.
-  String-array rows are now within ~1.3× (cell ends come from cached
-  `indexOf` cursors instead of a per-character scan), so the remaining gap
-  is concentrated in the object build per record — a computed-key store per
-  cell. The no-codegen rule is absolute in this package, so closing it
-  means finding a closure-compiled shape for record construction. This is
-  the same trade the validator and query engine record under their own
-  codegen-backend items.
 - [ ] **Streaming CST** — `parseJoslCst` records source spans, which only
   the whole-document driver produces; the cutter has the same slices in
   hand but reports them per cut line, without the terminator. Rewriting a
@@ -861,8 +787,6 @@ validated command/receipt transaction with current-authority and snapshot checks
 - [ ] Qualify real downstream adoption, physical-device behavior and manual
   accessibility. Automated synthetic Node/Bun and browser results do not prove
   those host/operator outcomes.
-- [ ] Consider a textual formula front door only after a measured corpus
-  justifies its grammar and a round trip into the existing Query representation.
 
 ## Provider execution and durable domain workflows (cross-package)
 
@@ -1121,13 +1045,6 @@ still open is listed here, each with its reason.
   strategy must account for changed distances, window membership, ties and
   declared state credits; native bounding-box filtering alone supplies none of
   that state.
-- [ ] **Overlay operations (union, intersection, difference, buffer)** —
-  deliberately last, and possibly never. This is what [JSTS](https://github.com/bjornharrtell/jsts)
-  exists for, it is where floating-point robustness problems concentrate, and
-  a half-correct clipper is worse than none. Everything before it has shipped,
-  so if this is ever built it starts by benchmarking honestly against
-  [Turf](https://github.com/Turfjs/turf) (~796k weekly downloads) and JSTS
-  (~577k), and records the loss here rather than pretending the gap is small.
 
 ## Benchmarks & tooling
 

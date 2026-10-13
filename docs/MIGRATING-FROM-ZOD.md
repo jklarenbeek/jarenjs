@@ -252,7 +252,8 @@ because the no-`eval` rule is what makes it CSP-safe. Taken as a geometric
 mean across the three scenarios against the *fastest rival per scenario*,
 Jaren comes out **1.3× slower** — which is what the benchmarks page reports
 rather than quoting only the scenarios it wins. The remaining gap on small
-schemas is tracked as an optional codegen backend in the roadmap.
+schemas is the price of closure-compiled validators that run under a strict
+Content-Security-Policy; a code-generating backend is not planned.
 
 Compilation is paid once per process and is where Jaren is generally slowest
 — Zod 3 builds a schema 2.2–8.5× faster. If you compile thousands of schemas

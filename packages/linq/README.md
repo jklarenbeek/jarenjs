@@ -731,6 +731,8 @@ lists them. Not
 a general lazy-iterable library — if you don't want a query document,
 you don't want this package.
 
+Not a type for a rule about a whole graph: the flow pen refuses a checkpoint on a task that has no version, but "any checkpoint means every task is versioned" spans nodes, so a graph with a checkpoint on its input node and an unversioned task elsewhere type-checks, and `compileDag` refuses it with `JF0011`.
+
 The normative mapping — every operator, its emitted phrase, and the
 deliberate deviations — is [docs/QUERY-PEN.md](docs/QUERY-PEN.md);
 internals are in [ARCHITECTURE.md](ARCHITECTURE.md).

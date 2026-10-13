@@ -42,7 +42,7 @@ inside `@jarenjs/json`, like `xquery/` — NOT a new package: it needs the
 query engine's internals (`normalizeQuery`, `compileNode`, the sequence
 runtime), and a separate package would force those onto the public surface.
 The standalone `@jarenjs/jslt` package sketched in the prelude (§7 there)
-stays a roadmap note.
+is not planned.
 
 ### 1.2 Conformance and normative language
 

@@ -501,6 +501,21 @@ And for `additionalProperties: false`, Jaren points `instancePath` at the
 offending member (`/nested/extra`) where Ajv points at the parent object —
 deliberate, and spec-truer.
 
+`allOf` keeps its branches' errors, because every branch must hold, so a branch that fails deep inside reports its own fault and then one `allOf` error at the schema that holds the keyword, once per failing branch. A `false` branch reports nothing but that wrapper, so dropping every `allOf` error would hide it. A consumer that wants one issue per fault drops a wrapper only when an error from one of its own branches was reported since the previous wrapper at that location:
+
+```javascript
+const withoutWrappers = (errors) => errors.filter((e, i) => {
+  if (e.keyword !== 'allOf') return true;
+  let from = i;
+  while (from > 0 && !(errors[from - 1].keyword === 'allOf'
+    && errors[from - 1].schemaPath === e.schemaPath
+    && errors[from - 1].instancePath === e.instancePath)) from--;
+  return !errors.slice(from, i).some((x) => x.schemaPath.startsWith(`${e.schemaPath}/allOf/`));
+});
+```
+
+It never hides the only trace of a failure; a branch reached through `$ref` reports under the referenced schema, so its wrapper is kept as well.
+
 A member name is one pointer token, so `/` and `~` inside it are escaped as
 `~1` and `~0`: the member `a/b` is `/a~1b`, and a relative `$data` reference
 walks back up from that same escaped location. *Upgrade: these names used to
@@ -1012,6 +1027,12 @@ their own resolver), skip English rendering entirely:
 const validator = new JarenValidator({ collectErrors: true, messages: false });
 // errors arrive with message: '', params and msgid still set
 ```
+
+## Not planned
+
+- **A code-generating backend.** Validators are closures built without `eval` or `new Function`, so they run under a strict Content-Security-Policy; generated source would reach a lower floor on trivial schemas, and the guarantee is worth more than that floor.
+- **`errorMessage` maps over `properties` and `items`.** A string `errorMessage` already covers its node and everything under it, which is what those map forms express.
+- **Data interpolation by relative pointer in message templates.** A template reads the error's `params`, which already carry the offending values.
 
 ## Exports
 

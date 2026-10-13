@@ -847,6 +847,13 @@ Unmatched nodes follow the XSLT built-in template rules, restated for JSON: cont
 
 Open work lives in the repository-wide [ROADMAP](../../docs/ROADMAP.md), under the remaining `@jarenjs/json` sections. Function values are deliberately outside the JSON item model: use FLWOR for map/filter/fold and projection ordering, with named host functions and collations for host extensions.
 
+## Not planned
+
+- **Relative pointers resolved from an ancestor the caller passes in.** `compileRelativeJSONPointer` reads the location it is given, and none of the cheaper variants measured beat it on a real validation walk; handing in the ancestor would thread a new argument through every descent of the validator for no consumer that needs it.
+- **A code-generating query backend.** The query compiler builds closures and never calls `eval` or `new Function`, so it runs under a strict Content-Security-Policy; generated source would give that up.
+- **JSLT as its own package.** The stylesheet layer is built on the query compiler's internals, which are not a public boundary, so it stays in this package.
+- **A textual front door for saved formulas.** A formula is a JSON Query document; a text grammar would need a body of saved sources to justify it and a round trip into the Query representation.
+
 ## Exports
 
 Every subpath a consumer can import, derived from the manifest by

@@ -1154,7 +1154,8 @@ feedback shape a repair loop needs.
   `x-form`'s derivation vocabulary (`computed`/`visible`) to app-level
   derived state, and letting a stylesheet replace the view-model
   composition itself, which needs a language primitive this format does
-  not have (see ROADMAP, `@jarenjs/forms`).
+  not have (the `@jarenjs/forms` README says why a stylesheet replacement
+  is not planned).
 - ~~Dirty-path-pruned re-rendering~~ — largely **shipped** through the
   other side: the JSLT `memo` option makes unchanged subtrees return
   reference-equal vnodes the renderer skips in O(1); prepass-level

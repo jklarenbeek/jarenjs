@@ -149,9 +149,10 @@ The intended consumers, in order:
    view models are transformations of it, and template dispatch on schema
    shape is exactly how a form renderer picks widgets. The stylesheet
    compiled-closure model matches the package's compile-once philosophy.
-2. **`@jarenjs/jslt`** — the eventual standalone package: stylesheet
-   compiler, `$apply` dispatcher, default-rule library, its own docs and
-   schema artifacts, with this package and `@jarenjs/validate` as peers.
+2. **`@jarenjs/jslt`** — a standalone package: stylesheet compiler,
+   `$apply` dispatcher, default-rule library, its own docs and schema
+   artifacts. It is not planned: the layer stays inside `@jarenjs/json`
+   (see JSLT-FORMAT).
 
 The groundwork this prelude assumed — schema literals inside query
 documents, the compile-time `compileTypeTest` hook, per-item validation

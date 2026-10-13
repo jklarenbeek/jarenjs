@@ -266,3 +266,4 @@ entry deletion and eviction have one implementation in core.
   definition only binds links in blocks completed after it.
 - The YAML/TOML frontmatter parsers are documented subsets
   (MD-FORMAT.md §3), with `@jarenjs/josl` as the full-TOML companion.
+- There is no packer over a sequence of blocks: `@jarenjs/core/chunk` cuts text, and this package's block tree is rendered rather than retrieved, so no packer is planned until a surface needs one.

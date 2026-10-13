@@ -63,7 +63,7 @@ the derivative to hand Newton when `f` has none in closed form,
 `transformPoint`. `project3dTo2d(point3, mat, viewport)` maps a point to
 SVG pixels (Y flipped); `surfaceNormal(a, b, c)` returns the face normal
 as a `Vec3f64`. Reusable for any 3D projection (the x·y·z plotter is the
-first consumer; Mermaid 3D is a candidate — see ROADMAP).
+first consumer; Mermaid draws no 3D and does not use it).
 
 ## Number formatting — `format.js`
 
