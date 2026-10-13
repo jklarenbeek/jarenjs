@@ -44,7 +44,7 @@ import { createBackup } from './backup.js';
 import { normalizeProfile, assertProfileRoots, pointReadFilter } from './profile.js';
 import { compileEntityModel, joinTableRoots } from './model.js';
 import { entityCore, insertAttempt } from './entity.js';
-import { requireCodePointText, verifyPhysical, verifyRulePrograms } from './physical.js';
+import { requireCodePointText, verifyPhysical } from './physical.js';
 import { trustedSql, synchronousBody, RELEASE } from './sql.js';
 import { relationalEngine } from './relational.js';
 import { createTracker, membershipKeys } from './tracker.js';
@@ -847,14 +847,12 @@ function ensureEntityShape(connection, entityPlans, entities, createsNothing) {
                 `entity '${name}': the table does not exist and ${createsNothing} creates nothing`,
                 docPath);
             }
-            // the database must hold what its rule programs compare, before they are created
-            const refuse = (/** @type {string} */ why) => { throw new DbCompileError('JD0002', `entity '${name}': ${why}`, docPath); };
-            return chain(verifyRulePrograms(connection, name, plan.programs ?? [], refuse, { installed: false }), () =>
-              chain(runCreate(connection, plan), () => chain(statement.get([name]), (made) => {
-                created.push(name);
-                recordKeyConstraint(plan, made);
-                return step(i + 1);
-              })));
+            // the text encoding its rule programs compare by is checked when the store opens
+            return chain(runCreate(connection, plan), () => chain(statement.get([name]), (made) => {
+              created.push(name);
+              recordKeyConstraint(plan, made);
+              return step(i + 1);
+            }));
           }
           recordKeyConstraint(plan, row);
           return chain(verifyShape(connection, plan, name, docPath, 'entity'), () =>
