@@ -572,7 +572,8 @@ if (asyncLiveLeak.length)
 // Raised to 955,600 (measured 955583): SQLite's extremes and projections read
 // large integer-valued doubles back as doubles (add 259).
 // Raised to 957,100 (measured 957081): the shared capture's coded refusal of JSON.stringify on a captured value (386), the native temporal bucket kept in the engine over a nullable reading and the I-Regexp compile check the validator carries add 1498.
-if (clientBytes > 957100)
+// Raised to 958,200 (measured 958119): an entity comparison of two null-policy columns sent to the engine and the cycle-safe table-first creation order add 1038.
+if (clientBytes > 958200)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 
