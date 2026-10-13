@@ -572,6 +572,7 @@ export function createQueryEngine(context) {
     collection: collection.name,
     schema: collection.schema,
     columnByCanonical: physicalPlan.columnByCanonical,
+    anyKindColumns: physicalPlan.anyKindColumns,
     // the DECLARED indexes, in their declared column order: a temporal
     // plan is recognized by the index a model already has, so the
     // planner needs to see the list rather than guess a column's role
@@ -822,6 +823,7 @@ export function createQueryEngine(context) {
       plan,
       sql: emitted.sql,
       slots: emitted.slots,
+      columns: emitted.columns,
       // the plan's own anchor reads, prepared on first use and kept
       // with it: each one binds a TYPED slot in the statement above
       seeks: (emitted.seeks ?? []).map((seek) => ({ ...seek, statement: null })),
@@ -889,7 +891,7 @@ export function createQueryEngine(context) {
   const fullScanEmitted = (entry) => {
     if (entry.fullScanSql === null) {
       const emitted = emitPlan(entry.fullScanShape(), dialect, physical);
-      entry.fullScanSql = { sql: emitted.sql, slots: emitted.slots, statement: null };
+      entry.fullScanSql = { sql: emitted.sql, slots: emitted.slots, columns: emitted.columns, statement: null };
     }
     return entry.fullScanSql;
   };
@@ -1531,45 +1533,21 @@ export function createQueryEngine(context) {
     const chosen = diverted ? fullScanEmitted(entry) : entry;
     const mode = diverted ? 'set' : entry.planned.mode;
 
-    const touchedColumns = new Set();
+    // the columns the statement spells are the ones an index serves: a
+    // comparison the column cannot answer reads the document, and its
+    // index is not named
+    const touchedColumns = new Set(chosen.columns);
     // an R*Tree probe touches no generated column at all — the index it
     // reads IS a table — so the virtual tables are collected beside the
     // declared indexes and named in the same `indexes` list
     const touchedVirtual = new Set();
-    const collectColumns = (pred) => {
+    const collectVirtual = (pred) => {
       if (pred === null) return;
-      if (pred.p === 'and' || pred.p === 'or') pred.items.forEach(collectColumns);
-      else if (pred.p === 'not') collectColumns(pred.item);
-      else if (pred.p === 'bboxOverlap')
-        for (const column of Object.values(pred.columns)) touchedColumns.add(column);
+      if (pred.p === 'and' || pred.p === 'or') pred.items.forEach(collectVirtual);
+      else if (pred.p === 'not') collectVirtual(pred.item);
       else if (pred.p === 'bboxRtree') touchedVirtual.add(pred.table);
-      else if (pred.p === 'cellIn' || pred.p === 'cellPrefix')
-        touchedColumns.add(pred.column);
-      else if (pred.p === 'refCmp') {
-        if (pred.left.column) touchedColumns.add(pred.left.column);
-        if (pred.right.column) touchedColumns.add(pred.right.column);
-      }
-      else if ('ref' in pred && pred.ref?.column) touchedColumns.add(pred.ref.column);
     };
-    collectColumns(entry.plan.filter);
-    for (const term of entry.plan.order ?? []) {
-      if (term.ref.column !== null) touchedColumns.add(term.ref.column);
-    }
-    if (entry.plan.aggregate?.ref?.column) touchedColumns.add(entry.plan.aggregate.ref.column);
-    if (entry.plan.bucket !== null) {
-      if (entry.plan.bucket.ref.column) touchedColumns.add(entry.plan.bucket.ref.column);
-      for (const aggregate of entry.plan.bucket.aggregates) {
-        if (aggregate.ref?.column) touchedColumns.add(aggregate.ref.column);
-      }
-    }
-    if (entry.plan.group !== null) {
-      for (const key of entry.plan.group.keys) {
-        if (key.ref.column) touchedColumns.add(key.ref.column);
-      }
-      for (const aggregate of entry.plan.group.aggregates) {
-        if (aggregate.ref?.column) touchedColumns.add(aggregate.ref.column);
-      }
-    }
+    collectVirtual(diverted ? entry.fullScanShape().filter : entry.plan.filter);
     const indexes = [
       ...physicalPlan.expected.indexes
         .filter((index) => index.columns.some((column) => touchedColumns.has(column)))

@@ -323,7 +323,7 @@ describe('an entity query compares the plain family it always did', () => {
   });
 });
 
-describe('a member of several kinds reads its column as its own kind alone', () => {
+describe('a member of several kinds is held by an untyped column that every comparison reads', () => {
   const group = {
     group: 'union column',
     schema: { type: 'object', properties: { id: { type: 'string' }, x: { type: ['string', 'number', 'boolean', 'null'] } } },
@@ -333,7 +333,7 @@ describe('a member of several kinds reads its column as its own kind alone', () 
     cases: /** @type {any[]} */ ([]),
   };
 
-  it('a number is compared as a number: a TEXT column holds it as its text', async () => {
+  it('a number is compared as a number, and the column the index covers answers it', async () => {
     const { store, collection } = await storeForGroup(group);
     try {
       for (const [predicate, externals] of /** @type {[any, any][]} */ ([
@@ -344,8 +344,8 @@ describe('a member of several kinds reads its column as its own kind alone', () 
         assert.deepEqual(await collection.execute(where(predicate), options),
           compileJsonQuery(where(predicate))(structuredClone(group.documents), externals), JSON.stringify(predicate));
       }
-      // a number reads the document; a string still seeks the column
-      assert.ok(!(await collection.explain(where({ $eq: ['$it.x', 2] }))).sql.includes('"gx_x"'));
+      // a number and a string both seek the column
+      assert.ok((await collection.explain(where({ $eq: ['$it.x', 2] }))).sql.includes('"gx_x" = ?'));
       assert.ok((await collection.explain(where({ $eq: ['$it.x', 'b'] }))).sql.includes('"gx_x" = ?'));
     }
     finally {

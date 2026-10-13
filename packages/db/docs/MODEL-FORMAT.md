@@ -468,7 +468,10 @@ no SQL text exists outside a dialect. On SQLite:
 - one **virtual generated column** per distinct indexed path, typed
   from the collection's schema at that path (`string` → `TEXT`,
   `integer` → `INTEGER`, `number` → `REAL`, `boolean` → `INTEGER`,
-  undeclared → `ANY`), one derived column set per spatial `derive`
+  undeclared → `ANY`; a type that lists several types besides `null`,
+  `['number', 'string']`, → `ANY` too, since a column of the first type
+  would refuse a document that holds another),
+  one derived column set per spatial `derive`
   (§3.1), one stored `BLOB` column per `derive: 'vector'` width, and
 - one index per `indexes` entry, named `<collection>_<index name>`,
   over the generated columns of its paths — except a `vector` entry,

@@ -304,13 +304,15 @@ export function fixedLadder(spec, compileBuckets) {
  * Whether a `PlanRef` can carry a native bucket ladder: the instant
  * must be a declared whole epoch, because the boundary arithmetic in
  * SQL is integer arithmetic and a truncating division over a real
- * would put an instant before 1970 in the bucket after its own.
+ * would put an instant before 1970 in the bucket after its own. A
+ * member of several types is no such epoch even where its first type is
+ * `integer`: its untyped column holds a real or a text as well.
  * @param {import('./algebra.js').PlanRef | null} ref
  * @returns {string | null} the reason code, or `null` when it can
  */
 export function instantRefusal(ref) {
   if (ref === null || ref.column === null) return 'missing-series-prefix';
-  if (ref.type !== 'integer') return 'instant-not-integer';
+  if (ref.type !== 'integer' || ref.wholeColumn === true) return 'instant-not-integer';
   return null;
 }
 

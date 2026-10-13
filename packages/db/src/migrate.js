@@ -45,7 +45,7 @@ import { modelIdentity, migrationIdentity } from './migration-identity.js';
 import { migrationChecksum, historyStatements, readMigrationHistory, checkHistoryObservation, checkAppliedRows,
   historyHeader, identityRows, checkHistoryIdentity, checkHistoryChain, writeIdentityRows } from './migration-history.js';
 export { HISTORY_TABLE, ENGINE_TABLES };
-import { planCollection, verifyShape, planEntity, planJoinTable, plannedExpression, creationOrder } from './ddl.js';
+import { planCollection, verifyShape, legacyColumnTypes, planEntity, planJoinTable, plannedExpression, creationOrder } from './ddl.js';
 import { normalizeEntities, explainMapping } from './model.js';
 import { derivedValue, memberAt, registerDeriveFunctions } from './derive.js';
 import { mergeEntityRow } from './graph.js';
@@ -997,7 +997,11 @@ export function planMigration(fromModel, toModel, options = undefined) {
     // a derived column's EXPRESSION is part of its identity: the same
     // path at a different precision, or under the other physical
     // mapping, is a different column even where name and type agree
+    // and so is a member of several types by any change of its types or their
+    // order: its column is untyped whatever they are, and what differs is how
+    // the first of them makes it read the member
     const columnChanged = (a, b) => a.type !== b.type || a.pathText !== b.pathText
+      || (a.members ?? null) !== (b.members ?? null)
       || (a.expression ?? null) !== (b.expression ?? null)
       || (a.stored === true) !== (b.stored === true);
 
@@ -2230,13 +2234,26 @@ function renderRebuild(name, fromName, fm, tm, toMapping, dialect, report) {
  * @returns {any} value-or-promise
  */
 export function createModelShape(connection, model, expressions = undefined) {
+  return createShapeHolding(connection, model, expressions, new Map());
+}
+
+/**
+ * {@link createModelShape}, with some generated columns in the type a table
+ * holds them in.
+ * @param {any} connection
+ * @param {any} model
+ * @param {any} expressions
+ * @param {Map<string, Map<string, string>>} legacy - by table, then by column
+ * @returns {any}
+ */
+function createShapeHolding(connection, model, expressions, legacy) {
   const dialect = connection.dialect;
   /** @type {string[]} */
   const statements = [];
   for (const collection of normalizeModel(model, expressions).values()) {
     statements.push(
       ...planCollection(collection.name, collection, dialect,
-        mappingFor(connection, expressions)).createSql);
+        { ...mappingFor(connection, expressions), legacyColumns: legacy.get(collection.name) }).createSql);
   }
   const entities = normalizeEntities(model);
   if (entities.size > 0) {
@@ -2300,7 +2317,8 @@ export function compareShapeToModel(driver, connection, model, registerFunctions
   return withMigrationConnection({ driver, path: ':memory:' }, (reference) =>
     chain(chain(registerDeriveFunctions(reference),
       () => (registerFunctions !== undefined ? registerFunctions(reference) : null)), () => {
-      return chain(createModelShape(reference, model, expressions), () =>
+      return chain(legacyColumnsOf(connection, model, expressions), (legacy) =>
+        chain(createShapeHolding(reference, model, expressions, legacy), () =>
           chain(schemaShapeOf(reference, { columnOrder: 'ignore' }), (wanted) =>
             chain(schemaShapeOf(connection, { columnOrder: 'ignore' }), (actual) => {
               const wantedText = JSON.stringify(wanted);
@@ -2319,8 +2337,35 @@ export function compareShapeToModel(driver, connection, model, registerFunctions
                 if (!wantedMap.has(key)) return `unexpected ${key}`;
               }
               return 'schemas differ in ordering only';
-            })));
+            }))));
     }));
+}
+
+/**
+ * The generated columns of a database's collection tables that are declared in
+ * another of their member's types than the model's plan declares, by table and column.
+ * @param {any} connection - the database
+ * @param {any} model
+ * @param {any} expressions
+ * @returns {any} value-or-promise of `Map<string, Map<string, string>>`
+ */
+function legacyColumnsOf(connection, model, expressions) {
+  const dialect = connection.dialect;
+  /** @type {Map<string, Map<string, string>>} */
+  const legacy = new Map();
+  const collections = [...normalizeModel(model, expressions).values()];
+  const next = (/** @type {number} */ i) => {
+    if (i >= collections.length) return legacy;
+    const plan = planCollection(collections[i].name, collections[i], dialect, mappingFor(connection, expressions));
+    if (!plan.generated.some((column) => column.legacyTypes !== undefined)) return next(i + 1);
+    return chain(connection.prepare(dialect.introspect.columns(plan.table)), (statement) =>
+      chain(statement.all([]), (rows) => {
+        const held = legacyColumnTypes(dialect, plan, rows);
+        if (held.size > 0) legacy.set(plan.table, held);
+        return next(i + 1);
+      }));
+  };
+  return next(0);
 }
 
 /**

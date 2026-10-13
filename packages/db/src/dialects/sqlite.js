@@ -142,16 +142,19 @@ function schemaTypeOf(declaredType) {
 
 /**
  * The member path a generated column's expression reads, recovered
- * from this dialect's own spelling: `jsonb_extract("doc", '<path>')`
- * over a path text this same module wrote. Anything else — a hand-made
+ * from this dialect's own spelling: `jsonb_extract("doc", '<path>')`, or
+ * the same read with its numbers as doubles (the `key` read), over a path
+ * text this same module wrote. Anything else — a hand-made
  * column, another tool's expression — answers `null`, and the caller
  * reports the column rather than inventing a path for it.
  * @param {string} expression
  * @returns {import('../dialect.js').JsonPathSegment[] | null}
  */
 function memberPathOf(expression) {
-  const match = /^\s*\(*\s*jsonb_extract\s*\(\s*"[^"]*"\s*,\s*'((?:[^']|'')*)'\s*\)\s*\)*\s*$/
-    .exec(String(expression));
+  const text = String(expression);
+  const match = /^\s*\(*\s*jsonb_extract\s*\(\s*"[^"]*"\s*,\s*'((?:[^']|'')*)'\s*\)\s*\)*\s*$/.exec(text)
+    ?? /^\s*\(*\s*CASE\s+WHEN\s+json_type\s*\(\s*"[^"]*"\s*,\s*'((?:[^']|'')*)'\s*\)\s+IN\s*\(\s*'integer'\s*,\s*'real'\s*\)\s+THEN\s+CAST\s*\(\s*jsonb_extract\s*\(\s*"[^"]*"\s*,\s*'\1'\s*\)\s+AS\s+REAL\s*\)\s+ELSE\s+jsonb_extract\s*\(\s*"[^"]*"\s*,\s*'\1'\s*\)\s+END\s*\)*\s*$/i
+      .exec(text);
   if (match === null) return null;
   return parsePathText(match[1].replace(/''/g, "'"));
 }

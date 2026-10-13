@@ -373,7 +373,8 @@ function probeEdge(probe, param, axis) {
  * @param {import('./algebra.js').Plan} plan
  * @param {any} dialect
  * @param {{ table: string, keyColumn: string, docColumn: string }} physical
- * @returns {{ sql: string, slots: ParamSlot[] }}
+ * @returns {{ sql: string, slots: ParamSlot[], seeks?: any[], columns: string[] }} `columns`
+ *   are the generated columns the statements spell
  */
 export function emitPlan(plan, dialect, physical) {
   if (plan.group !== null && plan.aggregate?.fn === 'count') {
@@ -383,6 +384,14 @@ export function emitPlan(plan, dialect, physical) {
   }
   const q = dialect.quoteIdentifier;
   const docColumn = q(physical.docColumn);
+  /** The generated columns the statements spell, which is what an index is
+   * read through. @type {Set<string>} */
+  const spelled = new Set();
+  /** A generated column's name in SQL, noted as read. @param {string} name */
+  const col = (name) => {
+    spelled.add(name);
+    return q(name);
+  };
   /** @type {ParamSlot[]} */
   const slots = [];
   // the statement being emitted owns its slots: a positional dialect
@@ -401,21 +410,22 @@ export function emitPlan(plan, dialect, physical) {
    * real SQL type, asked to compare a text column with a number — the
    * member is read out of the document instead. Same answer, unindexed,
    * and never a type error the row's own type guard already excludes.
-   * A member the schema lets hold more than one kind has a column of its
-   * FIRST type, which a value of another kind does not survive intact (a
-   * TEXT column holds the number 2 as '2'), so that column answers its
-   * own kind alone. A column spelled by a path text that reads a step off
-   * the wrong kind of container (`unpinned`: the schema leaves the
-   * container open) gives way to the guarded document where the dialect
-   * guards one.
+   * A member the schema lets hold more than one kind has a column that
+   * is either untyped (`wholeColumn`), which holds the member as the
+   * document does and answers every kind, or of its FIRST type, which a
+   * value of another kind does not survive intact (a TEXT column holds the
+   * number 2 as '2') and which therefore answers its own kind alone. A
+   * column spelled by a path text that reads a step off the wrong kind of
+   * container (`unpinned`: the schema leaves the container open) gives
+   * way to the guarded document where the dialect guards one.
    * @param {any} ref
    * @param {'any' | 'text' | 'number' | 'boolean'} [kind]
    */
   const valueOf = (ref, kind = 'any') =>
     (ref.column !== null && dialect.columnUsableFor(ref.type, kind)
-      && !(ref.mixed === true && kind !== 'any' && kind !== kindOf(ref))
+      && !(ref.mixed === true && ref.wholeColumn !== true && kind !== 'any' && kind !== kindOf(ref))
       && !(ref.unpinned === true && docOf(ref) !== docColumn)
-      ? q(ref.column)
+      ? col(ref.column)
       : dialect.jsonExtract(docOf(ref), pathText(ref), kind));
   const pathText = (ref) => pathTextOf(dialect, ref);
   /** The document a query reads a ref's member from: guarded where the
@@ -699,7 +709,7 @@ export function emitPlan(plan, dialect, physical) {
       case 'in':
         return emitIn(pred);
       case 'colCmp': {
-        const column = q(pred.column);
+        const column = col(pred.column);
         const symbol = { eq: '=', lt: '<', le: '<=', gt: '>', ge: '>=' }[pred.op];
         return `(${column} IS NOT NULL AND ${column} ${symbol} `
           + `${param(slotFor(pred.operand))})`;
@@ -708,8 +718,8 @@ export function emitPlan(plan, dialect, physical) {
         // the declared bounds ARE the values (§8.16's precondition is a
         // schema one), so no `json_type` guard reads the document per
         // row; `IS NOT NULL` keeps the form total for a row with no span
-        const start = q(pred.columns.start);
-        const end = q(pred.columns.end);
+        const start = col(pred.columns.start);
+        const end = col(pred.columns.end);
         const guard = `${start} IS NOT NULL AND ${end} IS NOT NULL AND `;
         // a bounded duration bounds the start from below as well, and
         // first, so the start's two bounds sit side by side for its index
@@ -772,9 +782,9 @@ export function emitPlan(plan, dialect, physical) {
         // column read when it is a host function call per row.
         const c = pred.columns;
         const edge = (axis) => probeEdge(pred.probe, param, axis);
-        return `(${q(c.w)} IS NOT NULL AND ${q(c.w)} <= ${edge('e')}`
-          + ` AND ${q(c.e)} >= ${edge('w')}`
-          + ` AND ${q(c.s)} <= ${edge('n')} AND ${q(c.n)} >= ${edge('s')})`;
+        return `(${col(c.w)} IS NOT NULL AND ${col(c.w)} <= ${edge('e')}`
+          + ` AND ${col(c.e)} >= ${edge('w')}`
+          + ` AND ${col(c.s)} <= ${edge('n')} AND ${col(c.n)} >= ${edge('s')})`;
       }
       case 'bboxRtree': {
         // The same box test, over the same box, in the shape a
@@ -800,7 +810,7 @@ export function emitPlan(plan, dialect, physical) {
         // (it gives up past a handful of terms) and fall back to a scan,
         // which for a virtual generated column is a host function call
         // per row.
-        const column = q(pred.column);
+        const column = col(pred.column);
         // the one membership emission: the cells bound as one JSON list
         const member = () => inListSql(dialect, column, param({ literal: JSON.stringify(pred.cells) }), 'text');
         // An empty membership search item raises in the query engine. The
@@ -813,7 +823,7 @@ export function emitPlan(plan, dialect, physical) {
         // A cell SHORTER than the column's own: the half-open range an
         // index seeks. Every cell is base-32, so the code-point
         // successor always exists.
-        const column = q(pred.column);
+        const column = col(pred.column);
         const upper = codePointPrefixSuccessor(pred.prefix);
         if (upper === null)
           throw new Error('emit: a geohash cell has no code-point successor');
@@ -848,7 +858,7 @@ export function emitPlan(plan, dialect, physical) {
     // one alternative per emitted statement: the caller emits the plan
     // once per declared width, and each carries its own column
     ? `${dialect.rowIdentity()} AS ${q('rid')}, `
-      + `${q(plan.rank.alternatives[0].column)} AS ${q('vec')}`
+      + `${col(plan.rank.alternatives[0].column)} AS ${q('vec')}`
     : plan.group !== null
       ? [...plan.group.keys.map((key, i) => projectedPair(key.ref, `k${i}`, true)),
         ...plan.group.aggregates.map((entry, i) =>
@@ -967,7 +977,8 @@ export function emitPlan(plan, dialect, physical) {
   if (plan.window !== null && plan.aggregate === null) {
     sql += ` ${dialect.limitClause(plan.window.limit, plan.window.offset)}`;
   }
-  return { sql, slots, seeks: (plan.seeks ?? []).map((seek) => emitSeek(seek)) };
+  const seeks = (plan.seeks ?? []).map((seek) => emitSeek(seek));
+  return { sql, slots, seeks, columns: [...spelled] };
 
   /**
    * One seek statement: the extreme instant each group carries on the

@@ -272,9 +272,10 @@ export function schemaNodeAt(schema, segments) {
 
 /**
  * The declared schema type at a segment path: the first non-`null`
- * member of a union, which is the type a COLUMN takes its storage
- * from. A caller that must know the whole union (a promotion refusing
- * a member that may also be `null`) reads {@link schemaNodeAt}.
+ * member of a union. A COLUMN takes its storage from
+ * {@link columnSchemaTypeAt}, which answers none where a union lists
+ * several types. A caller that must know the whole union (a promotion
+ * refusing a member that may also be `null`) reads {@link schemaNodeAt}.
  * @param {any} schema
  * @param {import('./dialect.js').JsonPathSegment[]} segments
  * @returns {string | undefined}
@@ -287,6 +288,32 @@ export function schemaTypeAt(schema, segments) {
     return node.type.find((t) => typeof t === 'string' && t !== 'null');
   }
   return undefined;
+}
+
+/**
+ * The schema type a path's generated column takes its storage from: the
+ * member's declared type, except where the engine's columns can hold any
+ * value (`capabilities.untypedColumns`) and the member's union lists several
+ * types besides `null` (`['number', 'string']`, `['integer', 'number']`,
+ * `['string', 'object']`). A column of the first type would refuse a
+ * conforming document that holds another (a STRICT table refuses `'b'` in a
+ * REAL column) or rewrite its value (`2` is the text `'2'` in a TEXT one),
+ * so such a member is `undefined` here and the column is the engine's
+ * untyped one. An engine whose generated column cannot refuse a value
+ * (PostgreSQL reads a member of another JSON type as NULL) keeps the first
+ * type.
+ * @param {any} schema
+ * @param {import('./dialect.js').JsonPathSegment[]} segments
+ * @param {any} dialect
+ * @returns {string | undefined}
+ */
+function columnSchemaTypeAt(schema, segments, dialect) {
+  if (dialect.capabilities.untypedColumns === true) {
+    const declared = schemaNodeAt(schema, segments)?.type;
+    if (Array.isArray(declared)
+      && new Set(declared.filter((type) => typeof type === 'string' && type !== 'null')).size > 1) return undefined;
+  }
+  return schemaTypeAt(schema, segments);
 }
 
 /**
@@ -663,14 +690,16 @@ export function planCollection(name, collection, dialect, options = undefined) {
       const known = columnByCanonical.has(canonical);
       const columnName = generatedColumnName(canonical, columnByCanonical, taken);
       if (!known) {
-        const schemaType = schemaTypeAt(collection.schema, segments);
-        generated.push({
+        const schemaType = columnSchemaTypeAt(collection.schema, segments, dialect);
+        const firstType = schemaTypeAt(collection.schema, segments);
+        generated.push(unionColumn({
           name: columnName,
           type: dialect.typeFor(schemaType, 'generated'),
           kind: columnKindFor(schemaType),
           pathText,
           canonical,
-        });
+        }, { schema: collection.schema, segments, schemaType, firstType, dialect,
+          held: options?.legacyColumns?.get(columnName) }));
       }
       columns.push(columnName);
     }
@@ -778,7 +807,11 @@ export function planCollection(name, collection, dialect, options = undefined) {
   ];
   refuseNameCollisions(objects);
 
-  return {
+  // a column a table holds in a type that cannot answer the member's first
+  // kind is read through the document
+  for (const column of generated) if (column.unreadable === true) columnByCanonical.delete(column.canonical);
+
+  const plan = {
     table: name,
     keyColumn: KEY_COLUMN,
     docColumn: DOC_COLUMN,
@@ -790,6 +823,11 @@ export function planCollection(name, collection, dialect, options = undefined) {
      * table it created. */
     expressions,
     columnByCanonical,
+    /** The generated columns that hold their member as the document does,
+     * whatever its JSON type: an untyped column over a member of several
+     * types. A column a table holds in one of the member's types is not one
+     * (see {@link adoptLegacyColumns}). */
+    anyKindColumns: new Set(generated.filter((g) => g.legacyTypes !== undefined).map((g) => g.name)),
     virtualTables,
     createSql,
     objects,
@@ -821,6 +859,86 @@ export function planCollection(name, collection, dialect, options = undefined) {
         .sort((a, b) => (a.name < b.name ? -1 : 1)),
     },
   };
+  // the same plan for a table that holds some columns in one of their
+  // member's types; not enumerable, so a plan still clones and compares
+  Object.defineProperty(plan, 'replan', {
+    value: (/** @type {Map<string, string>} */ legacyColumns) =>
+      planCollection(name, collection, dialect, { ...options, legacyColumns }),
+  });
+  return plan;
+}
+
+/**
+ * Give a generated column over a member of several types its storage. On an
+ * engine whose columns hold any value it is untyped (see
+ * {@link columnSchemaTypeAt}) and carries `legacyTypes`, the types a column
+ * over a member's types was once declared in, which a table may still hold. A
+ * member whose first type is `number` (null aside) reads its numbers as the
+ * doubles the query engine compares, as a `REAL` column does. `members`
+ * names the types in their declared order: what a migration compares to see
+ * that the union changed, since two such columns are both untyped and differ
+ * only in how they read.
+ * @param {any} column
+ * @param {{ schema: any, segments: import('./dialect.js').JsonPathSegment[], schemaType: string | undefined,
+ *   firstType: string | undefined, dialect: any, held: string | undefined }} context - `held` is the type
+ *   the table at hand declares the column in, when it is one of `legacyTypes`
+ * @returns {any}
+ */
+function unionColumn(column, { schema, segments, schemaType, firstType, dialect, held }) {
+  if (schemaType === firstType) return column;
+  const declared = schemaNodeAt(schema, segments).type;
+  const members = declared.filter((/** @type {any} */ type) => typeof type === 'string' && type !== 'null');
+  const legacyTypes = [...new Set(members.map((/** @type {string} */ type) => dialect.typeFor(type, 'generated')))]
+    .filter((type) => type !== column.type);
+  if (held !== undefined && legacyTypes.includes(held)) {
+    // the column of the table at hand: its type, the plain expression it was written with, and
+    // the document for a kind it cannot answer
+    return { ...column, type: held, kind: undefined, members: members.join(),
+      ...(held === dialect.typeFor(firstType, 'generated') ? {} : { unreadable: true }) };
+  }
+  return { ...column, legacyTypes, members: members.join(), ...(firstType === 'number' ? { kind: 'key' } : {}) };
+}
+
+/**
+ * The columns of an existing table that are declared in one of their member's
+ * types, by the type word the table declares.
+ * @param {any} dialect
+ * @param {any} plan - from {@link planCollection}
+ * @param {any[]} rows - the table's columns, as the dialect's catalog query answers
+ * @returns {Map<string, string>}
+ */
+export function legacyColumnTypes(dialect, plan, rows) {
+  /** @type {Map<string, string>} */
+  const held = new Map();
+  for (const column of plan.generated) {
+    if (column.legacyTypes === undefined) continue;
+    const have = rows.find((row) => String(row.name) === column.name);
+    if (have === undefined) continue;
+    const type = column.legacyTypes.find(
+      (/** @type {string} */ candidate) => dialect.comparableColumnType(candidate) === dialect.comparableColumnType(String(have.type)));
+    if (type !== undefined) held.set(column.name, type);
+  }
+  return held;
+}
+
+/**
+ * Make the plan of an existing table describe the table: a generated column
+ * declared in one of its member's types stays that type, so the table opens
+ * and answers as it does. Nothing else may differ — the
+ * comparisons that follow refuse any other drift.
+ * @param {any} connection
+ * @param {any} plan
+ * @returns {any} value-or-promise
+ */
+function adoptLegacyColumns(connection, plan) {
+  if (!(plan.generated ?? []).some((/** @type {any} */ column) => column.legacyTypes !== undefined)) return null;
+  const dialect = connection.dialect;
+  return chain(connection.prepare(dialect.introspect.columns(plan.table)), (statement) =>
+    chain(statement.all([]), (rows) => {
+      const held = legacyColumnTypes(dialect, plan, rows);
+      if (held.size > 0) Object.assign(plan, plan.replan(held));
+      return null;
+    }));
 }
 
 /**
@@ -945,7 +1063,7 @@ export function verifyShape(connection, plan, collection, docPath, kind = 'colle
   // text would carry — each index's condition and shape, each generated
   // column's expression — through the dialect's exact read-back
   const readBack = dialect.capabilities.declaredSqlText === true ? undefined : dialect.readBack;
-  return chain(connection.prepare(dialect.introspect.columns(plan.table)), (columnsStatement) =>
+  return chain(adoptLegacyColumns(connection, plan), () => chain(connection.prepare(dialect.introspect.columns(plan.table)), (columnsStatement) =>
     chain(columnsStatement.all([]), (columnRows) => {
       // both sides through the dialect's own reduction, so a declared
       // type the catalog reports differently (an auto-key's allocation
@@ -1067,7 +1185,7 @@ export function verifyShape(connection, plan, collection, docPath, kind = 'colle
                 { installed: dialect.capabilities.declaredSqlText !== true, undeclared: true }), () =>
                 verifyDeclaredSql(connection, plan, disagree))));
         }));
-    }));
+    })));
 }
 
 /**

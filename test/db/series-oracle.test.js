@@ -650,24 +650,19 @@ describe('the as-of anchor', () => {
     await store.close();
   });
 
-  it('nothing of another type can reach the slot, and JD2086 is the backstop', async () => {
-    // A union-typed instant reads as its FIRST non-null type, so the
-    // plan calls this column integer and binds the anchor as a number.
-    // Nothing else can arrive: comparing text against an epoch would
-    // answer WRONG rather than fail, and a wrong answer is the one
-    // outcome a bind may not have.
+  it('a union-typed instant asks for no anchor, since its untyped column can hold a text', async () => {
+    // A union-typed instant reads as its FIRST non-null type, so the plan
+    // would call this column integer and bind the anchor as a number. Its
+    // column holds every type the schema allows, so a text instant is stored
+    // and the plan seeks nothing: the kernel decides over the fetch
     const model = structuredClone(MODEL);
     model.collections.sample.schema.properties.at = { type: ['integer', 'string'] };
     const store = await openStore(model, { driver: nodeDriver() });
     const collection = store.collection('sample');
-    await collection.insert({ series: 'a', at: 10, value: 1 });
-    // the generated column carries the declared type, and the database
-    // itself refuses the write that would make the anchor a string —
-    // which is why `JD2086` is a backstop for a driver that answers a
-    // type its own column cannot hold, not a case a caller can reach
-    await assert.rejects(async () => collection.insert(
-      { series: 'a', at: '2026-01-01T00:00:00Z', value: 1 }),
-    (error) => /** @type {any} */ (error).code === 'JD2005');
+    for (const row of ROWS.slice(0, 6)) await collection.insert(row);
+    await collection.insert({ series: 'a', at: '2026-01-01T00:00:00Z', value: 1 });
+    const explained = await collection.explain(asof([20, 30]));
+    assert.deepStrictEqual(explained.series.seeks, []);
     await store.close();
   });
 });

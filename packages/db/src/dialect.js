@@ -54,7 +54,10 @@ export const DIALECT_CAPABILITIES = Object.freeze({
   indexableGeneratedColumns: false,
   /** A column may be declared with no scalar type — SQLite's `ANY`.
    * Where this is false, an indexed path the schema does not type has
-   * no honest column type and the planner keeps it in the residual. */
+   * no honest column type and the planner keeps it in the residual.
+   * Where it is true, an indexed path whose type lists several types
+   * besides `null` gets one too: a column of the first type would refuse
+   * or rewrite a value of another. */
   untypedColumns: false,
   /** `INSERT ... RETURNING`. */
   returning: false,

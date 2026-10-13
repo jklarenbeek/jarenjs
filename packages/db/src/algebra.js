@@ -24,18 +24,20 @@ export const PLAN_VERSION = 2;
  * @typedef {'number' | 'text' | 'boolean' | 'null'} PlanFamily
  *
  * @typedef {{ segments: ({ name: string } | { index: number })[],
- *   type: string, column: string | null, mixed?: true, unpinned?: true,
- *   families?: PlanFamily[] }} PlanRef
+ *   type: string, column: string | null, mixed?: true, wholeColumn?: true,
+ *   unpinned?: true, families?: PlanFamily[] }} PlanRef
  *   A typed reference into the stored document: `type` is the
  *   schema-declared type or `'unknown'`; `column` is the generated
  *   column name when the collection indexes this path. `mixed` marks a
  *   member the schema lets hold more than one kind, whose column answers
- *   the first type's kind alone; `unpinned` marks a path with a step a
- *   path engine may read off the other kind of container (an index, or a
- *   name that reads as one) whose container the schema leaves open, so a
- *   column spelled by the engine's path text may read the wrong member of
- *   a conforming document; `families` is carried by the two sides of a
- *   path comparison: every JSON family the schema lets the member hold.
+ *   the first type's kind alone unless `wholeColumn` says the column holds
+ *   the member as the document does, whatever its kind; `unpinned` marks
+ *   a path with a step a path engine may read off the other kind of
+ *   container (an index, or a name that reads as one) whose container the
+ *   schema leaves open, so a column spelled by the engine's path text may
+ *   read the wrong member of a conforming document; `families` is carried
+ *   by the two sides of a path comparison: every JSON family the schema
+ *   lets the member hold.
  *
  * @typedef {{ lit: unknown } | { ext: string } | { seek: string }} PlanOperand
  *   A SEEK operand names one of the plan's own seeks: a scalar the

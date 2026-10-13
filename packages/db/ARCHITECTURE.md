@@ -291,7 +291,7 @@ common fallback, never a skip.
 |---|---|---|
 | `jsonb` | yes (`BLOB` + the JSONB family) | yes (`jsonb`) |
 | `generatedColumns` / `indexableGeneratedColumns` | yes, `VIRTUAL` | yes, `STORED` |
-| `untypedColumns` | yes (`ANY`) | — (the member is read from the document) |
+| `untypedColumns` | yes (`ANY`, also for a member of several types) | — (the member is read from the document; a member of several types has a column of its first type) |
 | `returning`, `upsert`, `savepoints` | yes | yes |
 | `immediateTransactions` | yes (`BEGIN IMMEDIATE`) | yes (`BEGIN`, then the store's advisory writer lock, `tx.writerLock`) |
 | `groupByAlias` | yes | yes |
@@ -678,15 +678,27 @@ else (`integer` against `number`) keep the plain `vL op vR`. An entity query
 keeps that plain form alone: its path comparisons over mapped columns
 compare one family, and every other pair stays with the engine.
 
-**A member's column answers its own kind.** A member the schema lets hold
-more than one kind (`['string', 'number']`) has a generated column of its
-FIRST type, and a SQLite column's affinity rewrites a value of any other
-kind — a `TEXT` column holds the number `2` as the text `'2'`, so a numeric
-comparison against it answers by text order or by the spelling of the bound
-number, never by value — so a comparison reads that column for the
-first type's kind and the document for every other, whether the operand is a
-literal, an external or another path. The string comparison of such a
-member still seeks its index; the number comparison does not.
+**A member's column answers every kind, or its own.** A member the schema
+lets hold more than one type besides `null` (`['string', 'number']`) has, on
+SQLite, an untyped (`ANY`) generated column, which stores a value as the
+document holds it: a column of the first type would refuse a conforming
+document (`'b'` in a `REAL` column) or rewrite its value (a `TEXT` column holds
+the number `2` as the text `'2'`, so a numeric comparison against it answers by
+text order or by the spelling of the bound number, never by value). Every
+comparison of the member, whether the operand is a literal, an external or
+another path and whatever its kind, reads the column and seeks its index, with
+the document's own type test beside it. Where the column holds the first type
+alone (PostgreSQL, which reads a value of another JSON type as `NULL`, and a
+SQLite table an earlier release created in one of the member's types, which
+still opens and is read for that type's kind alone, the document for every
+other) a comparison reads that column for its own kind and the document for
+every other, so a number comparison of a string-first member does not seek. A
+member whose first type besides `null` is `number` stores its numbers as the doubles the query
+engine compares, as its `REAL` column did. `explain().indexes`
+names an index when the statement spells one of its columns, so a comparison
+that reads the document names none. An untyped column may hold a text or a
+fraction where the first type is `integer`, so such a member is no whole epoch
+for a native bucket ladder and asks for no as-of anchor.
 
 **The prefix predicate is index-usable, and the other two are not.**
 `$starts-with` emits a half-open range over the value, so a declared

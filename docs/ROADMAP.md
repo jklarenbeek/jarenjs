@@ -782,24 +782,15 @@ what each does is its own documentation's job
   rebuild the catalog comparison must accept), `memberAt` changed in the same
   change; then an expression index would restore the seek the guarded reads
   give up.
-- [ ] **SQLite refuses a schema-conforming document under an indexed union
-  whose first type cannot hold it.** A generated column takes the union's first
-  type and a STRICT table refuses a value that type cannot hold: `{ q: 'b' }`
-  under `['boolean', 'number', 'string', 'null']`, `['number', 'string']` and
-  `['integer', 'string']` (`JD2005 cannot store TEXT value in INTEGER column`
-  / `... in REAL column`) and `2.5` under `['integer', 'number']` (`cannot
-  store REAL value in INTEGER column`); only a string-first union indexes.
-  Wanted: type the column of a union `ANY`, or refuse the index at the model.
-- [ ] **A number comparison on an indexed union member no longer seeks its
-  SQLite index, and `explain().indexes` still names it.** The generated column
-  of a member typed as a union takes the union's first type, so a comparison
-  reads the column only for a value of that type and the document for every
-  other kind (a number 2 is the text `'2'` in a TEXT column and never equals
-  the literal 2): a number comparison on a string-first union member does not
-  read the index, a string comparison still does, and `explain().indexes`
-  lists the index all the same. Wanted: a second typed column or an expression
-  index that restores the seek, and `explain()` naming only the indexes a plan
-  reads.
+- [ ] **A SQLite table the previous release created keeps one of its member's types under an indexed union until a link changes the union or the column is retyped by hand.**
+  Such a table opens, answers as it did and is accepted by `plan --store` and `migrate()`, but a comparison of a kind its column cannot hold reads the document and names no
+  index, and it still refuses the documents the column's type cannot hold. A plan that changes the union's types rebuilds the column; a plan between identical models
+  plans nothing. Wanted: a plan, or an open option, that retypes the column from the live catalog without changing the model.
+- [ ] **On PostgreSQL the generated column of an indexed union member is the first type's, so a comparison of another kind reads the document and does not seek.** Wanted: a typed column per kind or an expression index.
+- [ ] **An integer past 2^53 compares exactly in SQLite where the engine compares doubles.** Observed identically before this change: on every indexed union member whose column is not
+  number-first (string-first, integer-first, boolean-first, `['integer','number']`), on an indexed `integer` column, and on every unindexed path, `$eq`, `$ne`, `$le` and `$gt` of
+  2**60 or -(2**62) differ from the engine; and a `$seq` membership list holding such an integer misses on every number column, number-first unions included (the list element is
+  an INTEGER and the column holds the double). Wanted: read both sides of a comparison as the doubles the engine compares, and bind a membership list's numbers as doubles.
 - [ ] **Strict mode refuses a `$get` with an unspellable member name where the
   hatch ran it.** A literal `$get` whose name holds a `"` or a control
   character is promoted by the schema and refused by the dialect's grammar

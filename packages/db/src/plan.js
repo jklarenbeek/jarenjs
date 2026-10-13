@@ -592,6 +592,19 @@ function memberPath(node, itSlot) {
 }
 
 /**
+ * The `wholeColumn` field of a reference: set where the member's column is
+ * an untyped one over a member of several types, which holds the member as
+ * the document does, whatever its type.
+ * @param {any} shape - { anyKindColumns, columnByCanonical }
+ * @param {string} canonical
+ * @returns {{ wholeColumn?: true }}
+ */
+function wholeColumnOf(shape, canonical) {
+  const column = shape.columnByCanonical.get(canonical);
+  return column !== undefined && shape.anyKindColumns?.has(column) ? { wholeColumn: true } : {};
+}
+
+/**
  * A singular member path rooted on the binding → a PlanRef, or null.
  * @param {any} node
  * @param {number} itSlot
@@ -606,8 +619,10 @@ function pathRef(node, itSlot, shape) {
     type: typeOfPath(shape.schema, path.segments),
     column: shape.columnByCanonical.get(path.canonical) ?? null,
     // a member of several kinds: its column holds the first type's, and
-    // answers a value of that kind alone
+    // answers a value of that kind alone, unless it is an untyped column
+    // that holds the member as the document does (`wholeColumn`)
     ...(admitsMixedTypes(shape.schema, path.segments) ? { mixed: true } : {}),
+    ...wholeColumnOf(shape, path.canonical),
     // a step a path engine may read off the other kind of container, in a
     // container the schema leaves open: a column spelled that way reads
     // the wrong member of a conforming document
@@ -2058,10 +2073,12 @@ function collectionOperand(node) {
  */
 function memberRef(shape, name) {
   const segments = [{ name }];
+  const canonical = canonicalOf(segments);
   return {
     segments,
     type: typeOfPath(shape.schema, segments),
-    column: shape.columnByCanonical.get(canonicalOf(segments)) ?? null,
+    column: shape.columnByCanonical.get(canonical) ?? null,
+    ...wholeColumnOf(shape, canonical),
   };
 }
 
@@ -2497,7 +2514,8 @@ function impliedInstantBounds(ref, from, to) {
  * @returns {any[]}
  */
 function anchorSeeks(at, byRef, probes, tolerance, direction) {
-  if (tolerance !== null) return [];
+  // an untyped column can answer a text where the anchor is declared a number
+  if (tolerance !== null || at.wholeColumn === true) return [];
   if (byRef !== null && byRef.column === null) return [];
   const group = byRef === null ? null : byRef;
   const keys = byRef === null ? null : probes.keys;

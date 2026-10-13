@@ -520,7 +520,8 @@ the query engine, now refuse by code or answer what the engine answers:
   answered by text or by the spelling of the bound number, and missed the row.
   Only the first type's kind reads the column now, and a number reads the
   document, so a number comparison on such a member no longer seeks its index
-  (a string comparison still does).
+  (a string comparison still does); a table created later restores the seek
+  ([§18](#18-an-indexed-member-of-several-types)).
 - On PostgreSQL a query's path with a step `#>` reads off either container
   answered rows the query engine and SQLite do not: `$it.u['0']` also matched
   an array's first element, `$it.u[0]` an object's key `"0"`, and the member
@@ -1914,6 +1915,107 @@ dialect built with `createDialect` outside the package has no such spelling and
 plans the `CASE` with the document in both branches, as before. A rebuild that
 folds a member whose name holds a double quote, which failed `JD0023` on SQLite
 because no path can be spelled to such a name, folds it now.
+
+## 18. An indexed member of several types
+
+On SQLite the generated column of an indexed member whose schema type lists
+several types besides `null` took the first type, and a `STRICT` table refused a
+conforming document that held another: `{ q: 'b' }` under
+`['boolean', 'number', 'string', 'null']`, `['number', 'string']` and
+`['integer', 'string']` failed `JD2005` (`cannot store TEXT value in INTEGER
+column`, or `... in REAL column`), and `2.5` under `['integer', 'number']`
+(`cannot store REAL value in INTEGER column`); only a string-first union
+indexed. The column is `ANY` now, the engine's untyped one, which stores a value
+as the document holds it, so every conforming document is stored. A member whose
+first type besides `null` is `number` keeps the reading its `REAL` column gave: its numbers are
+stored as the doubles the query engine compares, so an integer past 2^53 still
+finds its row by its double. A number comparison of such a member reads the
+column again and seeks its index (an equality, or a range with both ends:
+`SEARCH ... USING INDEX`), where it had read the document since a `TEXT` column
+holds the number `2` as the text `'2'`. A member of one type besides `null` keeps
+the column it had, and PostgreSQL keeps the first type's.
+
+Three answers change with it.
+
+- `explain().indexes` names an index only when the statement spells one of its
+  columns, which it did not before. A comparison that reads the document names
+  none: a comparison with a boolean or a `null`, an `$exists`, a grouping key, a
+  member of the first type's column asked for another kind, and a diverted run
+  (it names the indexes of the statement it ran). This holds for every indexed
+  member, not only a union.
+- `introspect()` of a store whose table holds such a column reads the index back
+  over an untyped member and reports the column `unmapped-type`
+  (`c.gx_q`), where it read the first type (`q: { type: 'number' }`) and no
+  loss. Plan from the introspected model, or declare the union by hand.
+- An instant that is a member of several types is no whole epoch for a native
+  bucket: a `$resample` or a `$time-bucket` over `['integer', 'string']` is the
+  engine's now (`instant-not-integer`) where it ran in SQL over a column that
+  could only hold integers, and an as-of batch over such an instant asks the
+  store for no anchor. The answers are the engine's either way.
+
+**Downgrade.** A table this release creates, or a migration it plans, holds the
+untyped column, and the previous release refuses it at open (`JD0002`, `column
+'gx_q' is ANY generated, the model declares 'gx_q' REAL generated`). To go back,
+retype the column to the type the previous release declares for the first type of
+the union with the statements below, with that type in place of `ANY` and the
+plain `jsonb_extract("doc", '$."q"')` as its expression.
+
+**A table an earlier release created** still opens, and answers as it did: its
+column holds one of the member's types, and the store reads it for the kind of
+that type alone and the document for every other, whatever order the model now
+lists the types in. A comparison of a number against a text column, or of any
+kind against a column of another type than the model's first, reads the document
+and names no index. `jaren-db plan --store` and `migrate()` of a model that
+declares entities accept it too. It still refuses the documents it refused, and
+a column that differs from the declaration in anything but its type is `JD0002`
+at open, as before.
+
+**A plan that changes the types of a union rebuilds its column.** Any change of
+an indexed member's type list between two models, whether a reorder, a widening,
+a narrowing, or a move across the `number`-first boundary (`['number', 'string']`
+to `['string', 'number']`, or to `['integer', 'string']`), plans the same four
+steps the previous release planned when the first type changed: drop the index,
+drop the column, add the column in the new spelling, create the index. The
+previous release planned nothing for a widening or a reorder that kept the first
+type; the store of this release cannot open without the step, because two untyped
+columns differ in how they read. Applying the link also retypes a table of an
+earlier release, whichever type it holds. Narrowing a union to one type retypes
+the column to that type (`REAL` for `'number'`), and the link fails `JD0023`
+(`constraint failed`, nothing changed) when a stored document holds a kind the
+column cannot: migrate the documents first. A plan between two models that
+declare the same types in the same order plans no step, so a table of an earlier
+release that no link touches stays as it is. Retype it once, per column, on a
+copy first, in one transaction: drop the indexes over the column, drop the
+column, add it back untyped with the expression a fresh table carries, and create
+the indexes again (here the member `q` of the collection `c`, indexed as
+`c_by_q`; `sqlite_master` holds the `CREATE INDEX` text of every index over
+`gx_q`, and a composite index is dropped and created the same way):
+
+```sql
+BEGIN;
+DROP INDEX "c_by_q";
+ALTER TABLE "c" DROP COLUMN "gx_q";
+ALTER TABLE "c" ADD COLUMN "gx_q" ANY GENERATED ALWAYS AS (jsonb_extract("doc", '$."q"')) VIRTUAL;
+CREATE INDEX "c_by_q" ON "c" ("gx_q");
+COMMIT;
+```
+
+For a union whose first type besides `null` is `number` (`['number', 'string']`,
+`['null', 'number', 'string']`, `['number', 'integer', 'null']`) the expression
+is the reading of its doubles, the one `planMigration` emits as the `ADD COLUMN`
+for the same member:
+
+```sql
+(CASE WHEN json_type("doc", '$."q"') IN ('integer', 'real') THEN CAST(jsonb_extract("doc", '$."q"') AS REAL) ELSE jsonb_extract("doc", '$."q"') END)
+```
+
+The retyped table is the one a fresh store creates. Until then the member keeps
+the document reading above and `explain().indexes` does not name its index for a
+number comparison.
+
+A unique index over such a member now stores a value as the document holds it:
+`1` and `true` still collide (both are stored as 1), and the text `'1'` and the
+number `1` no longer do where a string-first member's `TEXT` column made them one.
 
 ## Measured costs
 
