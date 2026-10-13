@@ -271,7 +271,7 @@ export function createFormView(options = {}) {
         on: { input: { action: act.input, with: writeWith } },
       }]),
     },
-    // numbers: coerced by the standard number action
+    // numbers: the standard number action reads HTML floating-point text
     { match: ctl('number'), body: field(textInput('number', act.number)) },
     // fixed values render as text
     { match: ctl('const'), body: field(['span', { class: `${cls}-const` }, '$.value']) },
@@ -352,7 +352,32 @@ export function createFormActions(options = {}) {
       patch: [{ op: writeOp, path: target, value: '$event.checked' }],
     },
     [act.number]: {
-      $let: { v: { $if: ['$event.value', { $number: '$event.value' }, null] } },
+      // An `<input type=number>` hands over HTML floating-point text (`.5`,
+      // `-.5`, `01`), which is wider than the RFC 8259 numbers `$number`
+      // reads. A string that starts with a digit or a point (after an
+      // optional `-`) is normalised: the sign is split off, the leading
+      // zeros are stripped, a `0` is restored when no digit leads, and the
+      // sign is applied again; what is still not a number (`.`, `5.`) is
+      // refused by `$number`. Anything else (a number a host hands over,
+      // `-`, an exponent with no mantissa such as `e5`) is read by `$number`
+      // as it always was.
+      $let: {
+        v: {
+          $if: ['$event.value',
+            { $if: [{ $and: [{ '$is-string': '$event.value' }, { $match: ['$event.value', '-?[0-9.].*'] }] },
+              {
+                $let: {
+                  neg: { '$starts-with': ['$event.value', '-'] },
+                  z: { $replace: [{ $replace: ['$event.value', '^-', ''] }, '^0+', ''] },
+                  abs: { $if: [{ $match: ['$z', '[1-9].*'] }, '$z', { $concat: ['0', '$z'] }] },
+                  n: { $number: '$abs' },
+                },
+                $return: { $if: ['$neg', { $neg: '$n' }, '$n'] },
+              },
+              { $number: '$event.value' }] },
+            null],
+        },
+      },
       $return: {
         patch: [
           { op: writeOp, path: target, value: '$v' },

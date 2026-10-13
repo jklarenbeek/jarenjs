@@ -204,6 +204,38 @@ describe('the standard forms stylesheet', function () {
     assert.strictEqual(Object.hasOwn(app.getState().data, 'age'), false);
   });
 
+  it('number inputs read every text an input type=number can hand over, not only RFC 8259 numbers', function () {
+    /** @type {unknown[]} */
+    const errors = [];
+    const { app, container } = mountForm({ onError: (/** @type {unknown} */ e) => errors.push(e) });
+    const cases = [
+      ['.5', 0.5], ['-.5', -0.5], ['01', 1], ['-01', -1], ['00.5', 0.5], ['007.25', 7.25],
+      ['0', 0], ['0.5', 0.5], ['0e5', 0], ['.5e3', 500], ['-.5E+2', -50], ['1E+5', 100000],
+      ['01e2', 100], ['1.50', 1.5], ['44', 44], ['-7', -7],
+    ];
+    for (const [text, expected] of cases) {
+      fire(fieldControl(container, '/age'), 'input', { target: { value: text } });
+      assert.strictEqual(app.getState().data.age, expected, text);
+    }
+    assert.deepStrictEqual(errors, []);
+  });
+
+  it('the number action keeps a number a host hands over, and text without a digit stays refused', function () {
+    /** @type {any[]} */
+    const errors = [];
+    const { app, container } = mountForm({ onError: (/** @type {any} */ e) => errors.push(e) });
+    for (const [value, expected] of /** @type {[any, number][]} */ ([[7, 7], [-3.5, -3.5], [100, 100]])) {
+      fire(fieldControl(container, '/age'), 'input', { target: { value } });
+      assert.strictEqual(app.getState().data.age, expected, String(value));
+    }
+    assert.deepStrictEqual(errors, []);
+    for (const text of ['-', '+', '.', '-.', '.e5', 'e5', 'E5', 'e-5', '-e5']) {
+      fire(fieldControl(container, '/age'), 'input', { target: { value: text } });
+      assert.strictEqual(app.getState().data.age, 100, `${text} writes nothing`);
+    }
+    assert.deepStrictEqual(errors.map((e) => e.code), ['JA2002', 'JA2002', 'JA2002', 'JA2002', 'JA2002', 'JA2002', 'JA2002', 'JA2002', 'JA2002']);
+  });
+
   it('clearing a text field removes its member, so a required one is reported missing, not satisfied by ""', function () {
     const { app, container } = mountForm({ validateFields: true });
     fire(fieldControl(container, '/name'), 'input', { target: { value: 'Joham' } });

@@ -159,16 +159,6 @@ establish registry publication or downstream acceptance.
   handler string (`onclick: '…'`) is dropped on the DOM property path while
   SSR writes it as a live attribute. This needs an explicit trusted-mode
   policy and a rule in the shared property table before either renderer changes.
-- [ ] **A number control's text is not always a JSON number.** The standard
-  `form/number` action reads the control's text with `$number`, which accepts
-  only RFC 8259 numbers, while an `<input type=number>` may hand over HTML
-  floating-point text such as `.5`, `-.5` or `01`; the dispatch then fails
-  with `JA2002` and the field keeps its old value. Wanted: normalise the text
-  inside the action document or add an event-field extractor, decided together
-  with how hosts that grant event fields selectively learn about it.
-  A normalising expression inside the standard action doubles its size and
-  pushes the studio's form template past the site's share-token limit, so the
-  fix wants a compact spelling or a host-side extractor.
 - [ ] **Native IME verification** — composition-aware controlled writes,
   caret preservation, multiple selects and the safe create/update/remove/reinsert
   corpus are exercised in Chromium, Firefox and WebKit. The automated tests
