@@ -31,7 +31,7 @@ export const LINQ_CODES = /* @__PURE__ */ Object.freeze({
   JL0105: 'a relation hop cannot lower: a composite or undeclared key, an incomplete many-to-many entry, or a malformed relation record',
   JL0106: 'a migration step names a table the target model does not declare, or a draft it cannot match',
   JL0107: 'a client operation named a member that is not the relation kind it needs',
-  JL0108: 'a captured expression was converted to a JavaScript primitive',
+  JL0108: 'a captured expression was converted to a JavaScript primitive or serialized with JSON.stringify',
   JL0109: 'a captured callback read its argument and answered a JavaScript boolean',
   JL2001: 'first/single found no element',
   JL2002: 'single found more than one element',
@@ -126,7 +126,8 @@ export const LINQ_CODES = /* @__PURE__ */ Object.freeze({
  *    it does not have (it stands for a value the query engine computes
  *    later). `.eq()`, `.lt()`, `.concat()` and `.exists()` write those
  *    comparisons; `===` and truthiness test the proxy, never the value
- *    (`JL0109`)
+ *    (`JL0109`). `JSON.stringify` of a capture is refused with it too
+ *    (the capture has no value to serialize until the engine computes it)
  *  - `JL0109` — a captured callback read its argument and answered a
  *    plain JavaScript boolean: `===`, `!==`, `!`, `typeof` and `== null`
  *    test the capture proxy, never the value, so the document would hold

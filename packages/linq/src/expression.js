@@ -960,6 +960,20 @@ function toPrimitive() {
 }
 
 /**
+ * The capture proxy's `toJSON`: always a refusal (JL0108). `JSON.stringify(x)`
+ * reads `toJSON` first; without this the walk would list the record's names
+ * and recurse through member proxies until a `RangeError`. A document member
+ * named `toJSON` is reached by `get('toJSON')`.
+ */
+function toJSON() {
+  throw new LinqBuildError('JL0108',
+    'a captured expression is not a JavaScript value yet — JSON.stringify has no value to '
+    + 'serialize until the engine computes it; name the members you want (x.name) in the returned '
+    + 'object, and serialize the finished chain with JSON.stringify(chain.toDocument()) (a '
+    + 'document member named toJSON is read with get(\'toJSON\'))');
+}
+
+/**
  * Build one expression proxy.
  * @param {any} doc - the expression JSON so far
  * @param {number} epoch - the owning capture
@@ -991,6 +1005,7 @@ function makeExpr(doc, epoch, pathable, extra = undefined) {
       // proxy stands for a value the engine computes later, so the answer
       // is a coded refusal naming the spelling, not a raw TypeError
       if (prop === Symbol.toPrimitive) return toPrimitive;
+      if (prop === 'toJSON') return toJSON;
       if (typeof prop === 'symbol') return undefined;
       const method = METHODS[prop];
       if (method !== undefined) {

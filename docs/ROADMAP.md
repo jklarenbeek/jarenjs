@@ -809,15 +809,12 @@ what each does is its own documentation's job
   probe over a materialized source takes 1 ms. Wanted: build the probe by
   counting when the range fits the guard that bounds a materialized source
   (`JQ2007`), keeping the nested loop's pairs, order and errors.
-- [ ] **A capture argument answers `JSON.stringify` and array methods with raw
-  host errors.** Every unknown name on a captured value is a member proxy, so
-  `JSON.stringify(x)` of a capture argument recurses until a `RangeError` and
-  `x.tags.includes('a')` is a raw `TypeError` instead of a coded refusal.
-  Wanted: a `toJSON` special case in the value proxy's `get` (that would shadow
-  a member of that name, which `get('toJSON')` still reaches) and an `apply`
-  trap for array methods, each answering a coded refusal that names the
-  query-language spelling.
-
+- [ ] **A capture argument answers array methods with a raw host error.**
+  `x.tags.includes('a')` on a capture argument is a raw `TypeError` instead of
+  a coded refusal (`JSON.stringify(x)` already answers `JL0108`). Wanted: an
+  `apply` trap that answers a coded refusal naming the query-language
+  spelling, without turning every capture into a callable proxy (which would
+  change `typeof` on every captured value).
 - [ ] **A PostgreSQL index path's `[n]` step reads an object's key `n`.** A
   query that reads a member path through the document guards a step the
   database resolves on either container: an index step only on an array, and a

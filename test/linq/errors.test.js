@@ -101,6 +101,25 @@ describe('every JL code fires', () => {
     assert.deepStrictEqual(from(tab).where((v) => v.tab.eq('labels')).select((v) => v.tab.concat('!')).toArray(), ['labels!']);
   });
 
+  it('JL0108 — JSON.stringify of a captured expression is refused, the spellings named', () => {
+    const rows = [{ a: 1, tags: ['t'], toJSON: 'member' }];
+    for (const [label, fn] of /** @type {[string, (v: any) => unknown][]} */ ([
+      ['JSON.stringify of the row', (v) => JSON.stringify(v)],
+      ['JSON.stringify of a member', (v) => JSON.stringify(v.tags)],
+      ['JSON.stringify of an object holding one', (v) => JSON.stringify({ a: v.a })],
+    ])) {
+      assert.throws(() => from(rows).select(fn).toDocument(),
+        (e) => e instanceof LinqBuildError && e.code === 'JL0108'
+          && /JSON\.stringify/.test(e.message) && /x\.name/.test(e.message)
+          && /toDocument\(\)/.test(e.message), label);
+    }
+    // the finished chain serializes, and a document member named toJSON is read with get()
+    assert.strictEqual(JSON.stringify(from(rows).select((v) => v.a).toDocument()),
+      '{"$for":{"it":["$[*]"]},"$return":"$it.a"}');
+    assert.strictEqual(from(rows).select((v) => v.get('toJSON')).toDocument().$return, "$it['toJSON']");
+    assert.deepStrictEqual(from(rows).select((v) => v.get('toJSON')).toArray(), ['member']);
+  });
+
   it('JL0109 — a callback that read its argument answered a JavaScript boolean, the constant and the fix named', () => {
     const rows = [{ a: null }, { a: 1 }];
     assert.throws(() => from(rows).where((/** @type {any} */ x) => x.a === null).toDocument(),

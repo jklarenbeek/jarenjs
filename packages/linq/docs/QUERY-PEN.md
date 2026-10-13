@@ -198,12 +198,15 @@ value becomes the expression:
   `${u.name}`, and `==` against a string, a number or a boolean) do ask
   the proxy for a primitive, and the capture refuses them with `JL0108`:
   one message, naming the comparison methods and `.concat()`; §14.9 gives
-  the spelling that works for each. Host method calls and JSON
-  serialization are outside the capture DSL too: `u.toString()` can raise
-  a plain `TypeError`, and `JSON.stringify(u)` can recurse until a
-  `RangeError`. `toString` and `toJSON` remain ordinary data-member
-  names. Serialize the finished chain's `toDocument()` result, after
-  capture, to inspect or persist a query.
+  the spelling that works for each. `JSON.stringify(u)` is refused with
+  `JL0108` too (the capture has no value to serialize yet), and `u.toJSON`
+  is that refusal rather than a member read: a document member named
+  `toJSON` is read with `u.get('toJSON')`. Host method calls are outside the
+  capture DSL: `u.toString()` can raise a plain `TypeError`, and so can an
+  array method on a member (`u.tags.includes('a')`, which is not a
+  function: the capture has no array methods); `toString` remains an
+  ordinary data-member name. Serialize the finished chain's `toDocument()`
+  result, after capture, to inspect or persist a query.
 - **The parameters argument is not a value.** A callback's last
   argument is the parameters proxy (§7): `p.tenantId` reads one declared
   parameter, and the proxy itself embedded anywhere — a projection
@@ -653,7 +656,7 @@ the normative home, this table mirrors it):
 | `JL0105` | a relation hop on the chain cannot lower: a many-to-many member (its join table is not a queryable root), a composite or undeclared key, or a malformed relation entry (§3, §4 "relation navigation") |
 | `JL0106` | a migration step names a table the target model does not declare, or a draft it cannot match |
 | `JL0107` | the client (`@jarenjs/linq/db`, [DB-CLIENT.md](DB-CLIENT.md)) named a member that is not the relation kind the operation needs: `include()` over a member that is not a declared relation, `link()`/`unlink()` over a relation that is not many-to-many |
-| `JL0108` | a captured expression — in any pen's callback, or the chain's — was converted to a JavaScript primitive: `==`, `+`, a template literal or `<` met the capture proxy (§14.9) |
+| `JL0108` | a captured expression — in any pen's callback, or the chain's — was converted to a JavaScript primitive (`==`, `+`, a template literal or `<` met the capture proxy) or met `JSON.stringify` (§14.9) |
 | `JL0109` | a captured callback — in any pen, or the chain — read its argument and answered a plain JavaScript boolean: `===`, `!==`, `!`, `typeof` or `== null` tested the capture proxy, never the value (§14.10) |
 
 Runtime errors (`LinqRuntimeError`):
@@ -1328,7 +1331,7 @@ proves that too, so the exclusion cannot hide a chain refusal).
 | `JL0006` | an operator §4 records as `unsupported` was invoked |
 | `JL0007` | a provider serves several entity roots and has none of its own |
 | `JL0105` | a relation hop cannot lower to a phrase |
-| `JL0108` | a captured expression was converted to a JavaScript primitive: `==`, `+`, a template literal or `<` met the capture proxy |
+| `JL0108` | a captured expression was converted to a JavaScript primitive (`==`, `+`, a template literal or `<` met the capture proxy) or met `JSON.stringify` |
 | `JL0109` | a callback read its argument and answered a plain JavaScript boolean: `===`, `!==`, `!`, `typeof` or `== null` tested the capture proxy |
 | `JL2001` | `first`/`single`/`last`, or `average`/`min`/`max`, over an empty sequence |
 | `JL2002` | `single`/`singleOrDefault` over two or more elements |
@@ -1562,13 +1565,17 @@ later, so JavaScript's own operators cannot see what it holds. Whenever
 JavaScript asks the proxy for a primitive, the capture refuses with a
 coded message instead of the raw `TypeError: Cannot convert object to
 primitive value`. That covers loose equality against a string, a number
-or a boolean, `+`, a template literal and a relational comparison.
+or a boolean, `+`, a template literal and a relational comparison. It
+also refuses `JSON.stringify` of a capture (`toJSON` is read first, and the
+capture answers the same coded message instead of recursing until a
+`RangeError`).
 
 | The spelling that trips it | The message | The spelling that works |
 |---|---|---|
 | `(v) => v.tab == 'labels'` | `a captured expression is not a JavaScript value yet — ==, +, a template literal and < compare or join the capture itself; write the comparison with .eq(x), .ne(x), .lt(x), .exists() or .isEmpty(), and a string join with .concat(…) (=== and if (v) test the proxy, never the value, and a callback that answers such a boolean is refused JL0109)` | `(v) => v.tab.eq('labels')` |
 | `` (v) => `${v.first} ${v.last}` `` | the same message | `(v) => v.first.concat(' ').concat(v.last)` |
 | `(v) => v.n + 1`, `(v) => v.n < 2` | the same message | `(v) => v.n.add(1)`, `(v) => v.n.lt(2)` |
+| `(v) => JSON.stringify(v.tags)` | a message naming `JSON.stringify` | `(v) => ({ tags: v.tags })`; `JSON.stringify(chain.toDocument())` for the finished chain |
 
 Some spellings cannot be trapped, because JavaScript never asks the
 proxy for anything:
