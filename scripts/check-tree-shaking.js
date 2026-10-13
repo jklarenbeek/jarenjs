@@ -577,7 +577,8 @@ if (asyncLiveLeak.length)
 // Raised to 960,400 (measured 960363): the untyped column of an indexed union member, the adoption of a column an earlier store typed and the rebuild a changed union plans add 1465.
 // Raised to 961,600 (measured 961595): the profile's predicate on point reads, the keyset load's per-call continuation binding and the term weights of external comparisons add 1232.
 // Raised to 963,200 (measured 963128): the guarded reads of an open-container index path, the step kinds a migration compares and the null-counting grouped fold add 1533.
-if (clientBytes > 963200)
+// Raised to 964,100 (measured 964083): the codec agreement check of a model, the text-encoding check at open and the bounded ledger sweep add 955.
+if (clientBytes > 964100)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 

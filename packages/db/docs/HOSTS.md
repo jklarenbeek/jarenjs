@@ -745,11 +745,11 @@ On pool-3-readers, `reads: 'parallel'` runs the Store-level mixed work 2.47× fa
 
 | Bun 1.4.2 executable | Rows written | Rows streamed | Long read ms | Event-loop max ms |
 |---|---:|---:|---:|---:|
-| worker | 20001 | 20001 | 253.29 | 1.54 |
-| pool | 20001 | 20001 | 316.60 | 1.38 |
-| in-thread | 20001 | 20001 | 82.75 | 81.78 |
+| worker | 20001 | 20001 | 275.60 | 1.56 |
+| pool | 20001 | 20001 | 319.84 | 1.63 |
+| in-thread | 20001 | 20001 | 87.19 | 87.18 |
 
-Built with `bun build --compile ./worker-app.js ./worker-endpoint.js --outfile worker-hosts-bun` and run with every source and module path removed; the long read is 5 whole-collection reads of 20001 rows. The worker host held the event loop at most 1.54 ms against the 50 ms bound and took 3.06× as long as the in-thread binding, which held the loop 81.78 ms. The pool host held the event loop at most 1.38 ms against the 50 ms bound and took 3.83× as long as the in-thread binding, which held the loop 81.78 ms. Built without the second entrypoint, the open refused: worker JD0003 (retryable: false), pool JD0003 (retryable: false). The side-effect import of `@jarenjs/db/worker-endpoint`, bundled alone, keeps the endpoint: 120602 bytes with Bun, 165068 with esbuild.
+Built with `bun build --compile ./worker-app.js ./worker-endpoint.js --outfile worker-hosts-bun` and run with every source and module path removed; the long read is 5 whole-collection reads of 20001 rows. The worker host held the event loop at most 1.56 ms against the 50 ms bound and took 3.16× as long as the in-thread binding, which held the loop 87.18 ms. The pool host held the event loop at most 1.63 ms against the 50 ms bound and took 3.67× as long as the in-thread binding, which held the loop 87.18 ms. Built without the second entrypoint, the open refused: worker JD0003 (retryable: false), pool JD0003 (retryable: false). The side-effect import of `@jarenjs/db/worker-endpoint`, bundled alone, keeps the endpoint: 120907 bytes with Bun, 166484 with esbuild.
 
 | Include accounting | Encoded bytes | Time p50 ms | Uncollected heap growth p50 MiB |
 |---|---:|---:|---:|
