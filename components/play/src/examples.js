@@ -7,6 +7,8 @@
  * source runs over each shape (see the `-shapes` / `-inputs` examples).
  */
 
+import { ENGINE_LIST } from './engines.js';
+
 const j = (v) => JSON.stringify(v, null, 2);
 
 /** A small bookstore, shared by several path/pointer/query examples. */
@@ -26,6 +28,26 @@ const BOOKSTORE = {
   ],
 };
 const bookstore = { label: 'bookstore', data: { data: j(BOOKSTORE) } };
+
+/**
+ * One invalid-data example per message locale the validate engine offers
+ * besides English, derived from the engine's own option choices so a locale
+ * added there cannot be left without an example. All share one schema and
+ * one document, so only the language of the errors differs.
+ * @type {import('./index.js').PlayExample[]}
+ */
+const LOCALE_EXAMPLES = (() => {
+  const validate = ENGINE_LIST.find((engine) => engine.id === 'validate');
+  const choices = validate?.optionPanes?.find((pane) => pane.key === 'locale')?.choices ?? [];
+  const schema = j({ type: 'object', title: 'User', properties: {
+    name: { type: 'string', minLength: 2 }, age: { type: 'integer', minimum: 13 },
+  }, required: ['name', 'email'] });
+  const data = [{ label: 'invalid', data: { data: j({ name: 'A', age: 7 }) } }];
+  return choices.filter((choice) => choice.value !== 'en').map((choice) => ({
+    id: `validate-locale-${choice.value}`, label: `Errors in ${choice.label}`, engine: 'validate',
+    config: { locale: choice.value }, source: { schema }, datasets: data,
+  }));
+})();
 
 /** @type {import('./index.js').PlayExample[]} */
 export const EXAMPLE_LIST = [
@@ -492,6 +514,43 @@ is a fixed point.
   "Parsing" : 20
   "Layout" : 35
   "Rendering" : 45` } },
+  { id: 'mermaid-gantt', label: 'Gantt: a schedule on a real time axis', engine: 'mermaid', datasets: [],
+    source: { source: `gantt
+  title Release plan
+  dateFormat YYYY-MM-DD
+  excludes weekends
+  section Build
+  Design : done, a1, 2024-01-04, 3d
+  Implement : active, a2, after a1, 5d
+  section Ship
+  Review : crit, a3, after a2, 2d
+  Launch : milestone, m1, after a3, 0d` } },
+  { id: 'mermaid-class', label: 'Class diagram', engine: 'mermaid', datasets: [],
+    source: { source: `classDiagram
+  class Shape {
+    +String name
+    +area() Number
+  }
+  class Circle {
+    +Number radius
+  }
+  class Square {
+    +Number side
+  }
+  Shape <|-- Circle
+  Shape <|-- Square` } },
+  { id: 'mermaid-er', label: 'Entity-relationship', engine: 'mermaid', datasets: [],
+    source: { source: `erDiagram
+  CUSTOMER ||--o{ ORDER : places
+  ORDER ||--|{ LINE_ITEM : contains
+  CUSTOMER {
+    int id PK
+    string email
+  }
+  ORDER {
+    int id PK
+    int customer_id FK
+  }` } },
 
   // ——— Charts (visual: JSON/JSONX/JOSL definition → SVG; static only) ———
   { id: 'charts-pie', label: 'Pie', engine: 'charts', config: { format: 'json' }, datasets: [],
@@ -514,6 +573,50 @@ is a fixed point.
       { source: 'home', target: 'docs', value: 30 }, { source: 'home', target: 'play', value: 20 },
       { source: 'docs', target: 'github', value: 8 },
     ] }) } },
+  { id: 'charts-line', label: 'Line on a time axis', engine: 'charts', config: { format: 'json' }, datasets: [],
+    source: { source: j({ type: 'line', title: 'Requests per day', x: 'time', markers: true, series: [
+      { name: 'api', points: [
+        { x: Date.UTC(2026, 6, 27), y: 120 }, { x: Date.UTC(2026, 6, 28), y: 180 }, { x: Date.UTC(2026, 6, 29), y: 150 }, { x: Date.UTC(2026, 6, 30), y: 240 },
+      ] },
+    ] }) } },
+  { id: 'charts-scatter', label: 'Scatter with a reference line', engine: 'charts', config: { format: 'json' }, datasets: [],
+    source: { source: j({ type: 'scatter', title: 'Latency against payload', refY: 5, refLabel: 'budget', points: [
+      { x: 1, y: 1.2 }, { x: 4, y: 2.9 }, { x: 9, y: 4.1 }, { x: 16, y: 6.8, tone: 'loss' }, { x: 25, y: 9.5, tone: 'loss' },
+    ] }) } },
+  { id: 'charts-candlestick', label: 'Candlesticks (OHLC)', engine: 'charts', config: { format: 'json' }, datasets: [],
+    source: { source: j({ type: 'candlestick', title: 'A week of prices', candles: [
+      { t: Date.UTC(2026, 6, 27), open: 100, high: 108, low: 98, close: 105 },
+      { t: Date.UTC(2026, 6, 28), open: 105, high: 110, low: 101, close: 102 },
+      { t: Date.UTC(2026, 6, 29), open: 102, high: 107, low: 99, close: 106 },
+      { t: Date.UTC(2026, 6, 30), open: 106, high: 113, low: 104, close: 111 },
+    ] }) } },
+  { id: 'charts-radar', label: 'Radar', engine: 'charts', config: { format: 'json' }, datasets: [],
+    source: { source: j({ type: 'radar', title: 'Two engines compared', axes: ['parse', 'compile', 'run', 'memory', 'size'], series: [
+      { name: 'jaren', values: [8, 9, 7, 8, 9] }, { name: 'rival', values: [6, 5, 8, 4, 5] },
+    ] }) } },
+  { id: 'charts-gauge', label: 'Gauge', engine: 'charts', config: { format: 'json' }, datasets: [],
+    source: { source: j({ type: 'gauge', title: 'Cache hit rate', value: 87, unit: '%' }) } },
+  { id: 'charts-boxplot', label: 'Box plot from raw samples', engine: 'charts', config: { format: 'json' }, datasets: [],
+    source: { source: j({ type: 'boxplot', title: 'Response time by route', valLabel: 'ms', boxes: [
+      { label: '/home', values: [12, 14, 15, 15, 17, 18, 21, 60] },
+      { label: '/search', values: [30, 35, 41, 44, 52, 58, 66, 71] },
+    ] }) } },
+  { id: 'charts-treemap', label: 'Treemap in groups', engine: 'charts', config: { format: 'json' }, datasets: [],
+    source: { source: j({ type: 'treemap', title: 'Source size by package', items: [
+      { label: 'engines', children: [{ label: 'validate', value: 42 }, { label: 'json', value: 55 }] },
+      { label: 'views', children: [{ label: 'view', value: 24 }, { label: 'md', value: 18 }] },
+    ] }) } },
+  { id: 'charts-streamgraph', label: 'Streamgraph', engine: 'charts', config: { format: 'json' }, datasets: [],
+    source: { source: j({ type: 'streamgraph', title: 'Traffic by source', xs: [1, 2, 3, 4, 5], series: [
+      { name: 'search', values: [4, 7, 9, 6, 5] }, { name: 'social', values: [2, 3, 6, 8, 4] }, { name: 'direct', values: [3, 3, 4, 5, 6] },
+    ] }) } },
+  { id: 'charts-map', label: 'Map shaded by a property', engine: 'charts', config: { format: 'json' }, datasets: [],
+    source: { source: j({ type: 'map', title: 'Population by region', value: 'pop', features: { type: 'FeatureCollection', features: [
+      { type: 'Feature', properties: { name: 'West', pop: 1200 },
+        geometry: { type: 'Polygon', coordinates: [[[3, 50], [5, 50], [5, 54], [3, 54], [3, 50]]] } },
+      { type: 'Feature', properties: { name: 'East', pop: 9800 },
+        geometry: { type: 'Polygon', coordinates: [[[5, 50], [7, 50], [7, 54], [5, 54], [5, 50]]] } },
+    ] } }) } },
 
   // ——— JSON Schema validation (the validate engine, host-delegated) ———
   { id: 'validate-user', label: 'User', engine: 'validate', config: { locale: 'en' },
@@ -543,6 +646,7 @@ is a fixed point.
       name: { type: 'string', minLength: 2 }, email: { type: 'string', format: 'email' }, age: { type: 'integer', minimum: 13 },
     }, required: ['name', 'email'] }) },
     datasets: [{ label: 'invalid', data: { data: j({ name: 'A', email: 'not-an-email', age: 7 }) } }] },
+  ...LOCALE_EXAMPLES,
 
   // ——— Contract ($contract document → describe / OpenAPI / TypeScript / dispatch) ———
   { id: 'contract-shop', label: 'A shop contract', engine: 'contract',

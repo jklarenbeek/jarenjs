@@ -9,6 +9,7 @@ import * as assert from 'node:assert';
 
 import { EXAMPLES, ENGINES, runExample } from '@jarenjs/play';
 import { createJsltRegistry, mathPack, financePack, statsPack } from '@jarenjs/json/jslt';
+import chartSchema from '@jarenjs/charts/schemas/chart-definition.schema.json' with { type: 'json' };
 
 const ops = createJsltRegistry().use(mathPack).use(financePack).use(statsPack);
 
@@ -90,5 +91,21 @@ describe('@jarenjs/play — the example library', () => {
     const output = r.panels.find((p) => p.id === 'out').text;
     assert.match(output, /Q&amp;A/, 'interpolated data is escaped');
     assert.match(output, /<b>escaped attribute, raw body<\/b>/, '$raw passes markup through');
+  });
+
+  it('the library shows every chart type, every laid-out diagram and every message locale', () => {
+    // a reader who sees four chart examples concludes there are four charts:
+    // the library must pin one example per type the engines ship
+    const chartTypes = new Set(EXAMPLES.filter((e) => e.engine === 'charts').map((e) => JSON.parse(e.source.source).type));
+    assert.deepStrictEqual([...chartTypes].sort(), [...chartSchema.properties.type.enum].sort(), 'one chart example per shipped type');
+
+    const diagrams = new Set(EXAMPLES.filter((e) => e.engine === 'mermaid').map((e) => String(e.source.source).split(/\s/, 1)[0]));
+    for (const kind of ['flowchart', 'sequenceDiagram', 'stateDiagram-v2', 'gantt', 'classDiagram', 'erDiagram', 'pie']) {
+      assert.ok(diagrams.has(kind), `no mermaid example for ${kind}`);
+    }
+
+    const locales = ENGINES.validate.optionPanes[0].choices.map((c) => c.value);
+    const pinned = new Set(EXAMPLES.filter((e) => e.engine === 'validate').map((e) => e.config?.locale));
+    assert.deepStrictEqual(locales.filter((l) => !pinned.has(l)), [], 'every offered locale has an example that pins it');
   });
 });

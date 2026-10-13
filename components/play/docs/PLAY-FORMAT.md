@@ -156,6 +156,13 @@ A new engine is one `EngineDescriptor` (registered in `ENGINES`) plus its
 examples by engine, the panes render from `sourcePanes`/`dataPanes`, and
 the switcher appears whenever an example has ≥ 2 datasets.
 
+The library covers what an engine ships, not a sample of it: `charts` holds one
+example per chart type, `mermaid` one per laid-out diagram kind (flowchart,
+sequence, state, gantt, class, ER, pie), and `validate` one example per offered
+message locale, derived from the engine's own `locale` choices. A test pins the
+chart types to the chart schema's list and the locales to the engine's choices,
+so a type or locale added without an example fails it.
+
 ## §5 Host-injected seams (the dependency-light contract)
 
 Engines whose real work is heavy or opinionated keep the package free of that

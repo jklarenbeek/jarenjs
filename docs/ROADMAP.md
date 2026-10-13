@@ -271,13 +271,6 @@ costs a descriptor plus examples and no UI code at all.
   `addSchema`, so a schema that `$ref`s another by `$id` cannot be demonstrated
   even though the docs teach exactly that. The other surfaces that compile
   schemas register theirs; this one does not.
-- [ ] **The example library under-covers the engines it already has** — charts
-  ship four of thirteen types, mermaid four of seven laid-out diagrams, and the
-  validate engine offers twelve locales while every example pins `en`. Examples
-  are data, so each is cheap; what makes the gap worth listing is that it is
-  invisible from the page — a reader who sees four chart examples concludes
-  there are four charts.
-
 ## @jarenjs/studio
 
 - [ ] **Entity models and durable project stores** — collection models now
