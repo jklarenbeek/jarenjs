@@ -575,7 +575,8 @@ if (asyncLiveLeak.length)
 // Raised to 958,200 (measured 958119): an entity comparison of two null-policy columns sent to the engine and the cycle-safe table-first creation order add 1038.
 // Raised to 959,000 (measured 958898): the fold that writes the document expression once per column and the validator's per-subtree location scan add 779.
 // Raised to 960,400 (measured 960363): the untyped column of an indexed union member, the adoption of a column an earlier store typed and the rebuild a changed union plans add 1465.
-if (clientBytes > 960400)
+// Raised to 961,600 (measured 961595): the profile's predicate on point reads, the keyset load's per-call continuation binding and the term weights of external comparisons add 1232.
+if (clientBytes > 961600)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 
