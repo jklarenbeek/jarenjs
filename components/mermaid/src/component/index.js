@@ -12,7 +12,8 @@
  *    the app effect registry (`mermaid-render`, `mermaid-load`), and a
  *    `hydrate()` kept for API symmetry (a no-op: the render is already
  *    complete; pan, zoom and touch are the opt-in
- *    `mermaidPlugin({ interactive: true })` hydrate);
+ *    `mermaidPlugin({ interactive: true })` hydrate, node tooltips the opt-in
+ *    `mermaidPlugin({ tooltips: true })` one);
  *  - `styles/mermaid.css` — the component stylesheet.
  *
  * The boundary is one-way: the component imports the engine, never the

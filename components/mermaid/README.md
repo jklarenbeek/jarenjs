@@ -291,6 +291,43 @@ Everything runs on the SVG's `viewBox` — four numbers changing. Nothing
 re-renders, nothing re-parses, and the view is clamped so it can never be
 panned off its own canvas.
 
+**Node tooltips are a second opt-in.** `mermaidPlugin({ tooltips: true })`
+(alone, or beside `interactive: true`) hydrates each flowchart and state node
+with a tooltip: the node's label and id, what flows into it and what it leads
+to, named by the neighbours' labels and the edges' own. It is built from the
+`data-id`, `data-from` and `data-to` markers the render already writes and the
+label text in the DOM, so the render is unchanged and server output is
+byte-identical either way.
+
+```javascript
+const plugin = mermaidPlugin({ theme: 'host', tooltips: true });
+createMdComponent({ plugins: [plugin] });
+
+// The render stays a complete SVG; the block only gains the hydrate marker.
+const block = plugin.render({ value: 'flowchart LR\n  A["Start"] --> B["Done"]' });
+block[1]['data-md-hydrate'];       // 'mermaid'
+
+// The host's hydrate pass hands the rendered element back. Afterwards node A
+// is focusable, and focusing (or hovering) it shows a tooltip reading
+//   Start (A)
+//   to: Done
+await plugin.hydrate(blockElement);
+```
+
+Hover and keyboard focus show the same text. Every node becomes focusable and
+named, the tooltip is a `role="tooltip"` element, and the node it describes
+points at it with `aria-describedby` for as long as it is shown; Escape
+dismisses it, whichever of hover or focus showed it. Touch never hovers (a tap
+stays the page's), so a touch user reaches the text by focusing the node. The
+tooltip is `position: fixed` (and in the top layer where the browser has
+popovers), so the scrolling figure neither clips it nor grows a scrollbar to
+hold it; it sits under its node, or above it when there is no room below. A
+pan, zoom or scroll moves the node, and a shown tooltip is placed against it
+again. Sequence, class, ER, gantt and the other diagram types draw no marked
+nodes, so they are left as they are. `@jarenjs/mermaid/tooltips` exports
+`attachDiagramTooltips(el)` for a host that wires its own hydration; the
+stylesheet's `.mm-tooltip` rules style the result.
+
 **A pie is drawn by the renderer the host hands in.** The pie engine lives
 in [`@jarenjs/charts`](../charts), and mermaid imports no other component:
 `diagramToVnode(doc, { renderers: { pie } })` — and the same option on

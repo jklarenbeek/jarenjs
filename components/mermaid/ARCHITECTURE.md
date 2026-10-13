@@ -110,7 +110,8 @@ synchronous and complete, so a Markdown document with a `mermaid` fence
 renders to a full SVG string through SSR with **no browser** — a
 capability real Mermaid lacks. The component's `hydrate` is therefore a
 no-op; pan, zoom and touch are the opt-in `mermaidPlugin({ interactive: true })`
-hydrate, which attaches to the finished SVG.
+hydrate and per-node tooltips the opt-in `mermaidPlugin({ tooltips: true })`
+one, each attaching to the finished SVG from its own module.
 
 ## Known limits (v0.1)
 

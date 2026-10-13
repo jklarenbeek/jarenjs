@@ -23,6 +23,10 @@
       "types": "./dist/types/interactive.d.ts",
       "default": "./src/interactive.js"
     },
+    "./tooltips": {
+      "types": "./dist/types/tooltips.d.ts",
+      "default": "./src/tooltips.js"
+    },
     "./plugin": {
       "types": "./dist/types/plugin.d.ts",
       "default": "./src/plugin.js"

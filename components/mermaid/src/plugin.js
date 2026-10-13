@@ -12,10 +12,11 @@
  * so a Markdown document renders to a full SVG string through SSR with
  * no browser — a capability the old injection wrapper lacked.
  *
- * `hydrate` exists only when a consumer asks for `interactive: true`. The
- * render is complete without it: hydration adds pan/zoom/touch to an already
- * finished SVG, so server output is byte-identical either way and a page that
- * does not opt in never loads the module.
+ * `hydrate` exists only when a consumer asks for `interactive: true` (pan,
+ * zoom, touch) or `tooltips: true` (a tooltip on each flowchart and state
+ * node), alone or together. The render is complete without it: hydration
+ * enhances an already finished SVG, so server output is byte-identical either
+ * way and a page that does not opt in never loads either module.
  */
 
 import { diagramToVnode } from './render/index.js';
@@ -23,12 +24,13 @@ import { toMermaid } from './to-mermaid.js';
 import { hashContent } from './utils.js';
 
 /**
- * @param {{ theme?: any, interactive?: boolean, renderers?: { pie?: import('./render/index.js').DiagramRenderer },
+ * @param {{ theme?: any, interactive?: boolean, tooltips?: boolean, renderers?: { pie?: import('./render/index.js').DiagramRenderer },
  *   [k: string]: any }} [options] - `renderers.pie` draws a pie fence (charts'
  *   `mermaidPieRenderer`); without it a pie renders the placeholder
  * @returns {Readonly<{ name: string, fences: string[], node: string, render: (node: any, h: any, ctx: any) => any }>}
  */
 export function mermaidPlugin(options = {}) {
+  const hydrates = options.interactive === true || options.tooltips === true;
   return Object.freeze({
     name: 'mermaid',
     fences: Object.freeze(['mermaid', 'mmd']),
@@ -41,21 +43,27 @@ export function mermaidPlugin(options = {}) {
       const svg = diagramToVnode(node.value, options);
       const props = { class: 'md-mermaid mermaid-block', key: hash };
       // The hydrate marker is what the md component looks for; emitting it
-      // only when interactive keeps non-interactive output unchanged.
-      if (options.interactive === true) {
+      // only when a hydrate exists keeps every other output unchanged.
+      if (hydrates) {
         props['data-md-hydrate'] = 'mermaid';
         props['data-md-hash'] = hash;
       }
       return ['div', props, svg];
     },
-    ...(options.interactive === true
+    ...(hydrates
       ? {
         /**
          * @param {any} el the rendered block element
          */
         hydrate: async (el) => {
-          const { attachInteractiveDiagram } = await import('./interactive.js');
-          attachInteractiveDiagram(el);
+          if (options.interactive === true) {
+            const { attachInteractiveDiagram } = await import('./interactive.js');
+            attachInteractiveDiagram(el);
+          }
+          if (options.tooltips === true) {
+            const { attachDiagramTooltips } = await import('./tooltips.js');
+            attachDiagramTooltips(el);
+          }
         },
       }
       : {}),
