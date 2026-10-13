@@ -1168,8 +1168,9 @@ value the store did not honor now refuse by code, before any statement:
 - A collection live query with a literal offset over an `orderBy` (nested
   windows included, and a `@jarenjs/linq` `skip()` with no `select` after
   it) is maintained (`live.mode.strategy` `window`) instead of re-run;
-  `mode: 'incremental'` now accepts it, ties follow the window's key-text
-  order rather than a re-run's row order, and it is charged as a top window
+  `mode: 'incremental'` now accepts it, ties break as a re-run's do
+  (by the row's position in the table, [§26](#26-a-live-ordered-window-breaks-ties-as-a-fresh-run-does)),
+  and it is charged as a top window
   is — every matching row an entry — so over more rows than
   `live.maxMaintained` it is `JD2060` where it re-ran (`mode: 'rerun'` still
   re-runs it).
@@ -2218,6 +2219,52 @@ into a new database created with the default UTF-8 encoding, and open that.
   `omit` fill, which leaves empty buckets out; a narrower `start`/`end`; or a
   wider `every`. Fill the result on the client when a dense series over more
   buckets is genuinely wanted.
+
+## 25. A live event-time sum or mean equals a fresh run
+
+- An event-time live view (`eventTime`) over a `$resample` or `$rolling` with a
+  `sum` or `mean` could answer a floating reading differently from a fresh run in
+  its last bits, because floating additions do not associate: a rolling window's
+  total is added in two parts whose split depends on every reading before the
+  window, which a view recomputing a slice cannot reproduce, and rows sharing an
+  instant were added in the order they reached the view where a fresh run adds
+  them in the table's (readings `0.7` at minute 5, `0.01` at minute 2, `0.3` at
+  minute 4 and `0.6` at minute 5, inserted in that order under a three-minute
+  `$rolling` width, answered `1.6` live and `1.5999999999999999` when run). Readings
+  at distinct instants in a `$resample` were added in the same order as a fresh run
+  and are unchanged.
+- The view now counts the readings it holds: while every partial sum is exact
+  (integers and binary fractions of a modest scale: the readings' largest scale and
+  exponent, times their count, stay within 2^53) nothing changes. Past that bound a
+  rolling view folds the whole series again through the kernel on every write
+  (`stats().recomputes`), reading nothing from the store, and stays `incremental`;
+  a view holding two rows at one instant is handed to a fresh run for the rest of
+  its life, as a whole-query integer accumulator is: `live.mode` reads `rerun` with
+  the reason named where it read `rolling` or `bucket`. Late readings are still
+  reported in `lateData` and counted by such a view.
+- A registration that demanded `mode: 'incremental'` is `JD0051` at registration
+  when the stored rows already hold a tie of that kind, and `errored` with `JD0051`
+  when a write brings one; a view without such a tie is never refused. A rolling
+  view over decimal readings costs more per write than before (the whole series is
+  folded, not a slice). To keep the cheaper slice, store readings that are integers
+  (cents, not euros) or binary fractions, or use `min`, `max` or `count`.
+
+## 26. A live ordered window breaks ties as a fresh run does
+
+- A maintained ordered window (a collection live query with an `orderBy`, with
+  or without a limit and offset) ordered rows with equal sort values by the
+  collection key's text, where `execute` and a re-run keep the table's order
+  (insertion order: an update leaves a row where it is, a row deleted and stored
+  again is last). A keyed collection ordered by a non-unique member therefore held
+  one order live and another when run: keys `c`, `a`, `b` stored in that order
+  with one score read `a`, `b`, `c` live and `c`, `a`, `b` when run. The window
+  now ends its order with the row's position in the table, so the live result is
+  the one `execute` returns for the same document, and `live()` reads that
+  position for each row it places (one point read per row at registration).
+- Code that relied on the key's text as the tie order must declare the key as
+  the last `orderBy` term, which both orders honour. A row deleted and stored again
+  with the document it had, in one transaction, leaves no capture record, so the
+  window keeps it where it was until a record changes it.
 
 ## Measured costs
 

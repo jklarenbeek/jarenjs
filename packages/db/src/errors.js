@@ -218,7 +218,10 @@ export const DB_CODES = Object.freeze({
  *  - `JD0050` — a live query was registered on a store opened without
  *    `capture`; the patch stream is the invalidation source
  *  - `JD0051` — `mode: 'incremental'` was demanded but the document
- *    classifies as re-run; the reason names the forcing construct
+ *    classifies as re-run, or a maintained view can no longer answer what a
+ *    fresh run does (an integer accumulator past its exactness bound, an
+ *    event-time `sum` or `mean` holding two rows at one instant whose
+ *    readings do not add exactly); the reason names the forcing construct
  *  - `JD0052` — registering would exceed the store's `live.maxQueries`
  *    bound; the bound is printed, never silent
  *  - `JD0053` — a live query's `eventTime` names a member it does not

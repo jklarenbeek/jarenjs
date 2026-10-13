@@ -548,13 +548,16 @@ what each does is its own documentation's job
   question to the engine. Wanted: either state that the window prunes before
   validation, or a probe over the rows outside it that costs less than the
   window saves.
-- [ ] **An event-time `sum` or `mean` over floating readings can differ from a
-  fresh run in the last bits.** A rolling window's kernel carries a running
-  total that still holds rows that left it, and a view adds the slice it
-  recomputes afresh; rows at one instant add in arrival order in a view and in
-  store order in a fresh run
-  ([LIVE-FORMAT §13.3](../packages/db/docs/LIVE-FORMAT.md)). Wanted: a re-run
-  for a reading not typed `integer`, or a view that adds in the kernel's order.
+- [ ] **An event-time `sum` or `mean` of readings that do not add exactly hands
+  a view holding two rows at one instant to a fresh run.** A bucket or rolling
+  view adds rows sharing an instant in the order they reached it, a fresh run in
+  the table's, so once the readings are not integers or binary fractions of a
+  modest scale the view re-reads from the store for the rest of its life
+  (`live.mode` `rerun`; `JD0051` under `mode: 'incremental'`). Wanted: add
+  same-instant rows in table order (the position a live window already reads),
+  which keeps the view maintained (LIVE-FORMAT 13.3). A rolling view over such
+  readings folds the whole series on every write, which costs a few times a
+  slice repair.
 - [ ] **Join tables are not queryable roots.** A many-to-many join table has no
   root to bind: `u.labels` as a chain hop is `JL0105`, and a membership is read
   through `include` (`client.entities.User.include((u) => u.labels)` loads the
@@ -584,11 +587,6 @@ what each does is its own documentation's job
   (`semanticKey(value, { ordered: true })`), accepting a re-emission on a
   reorder-only write, or state that a stored document's member order is not part
   of its value.
-- [ ] **A valid `eventTime` on a document that is not temporal is ignored.**
-  `collection.live(document, { eventTime })` over a document that is neither a
-  `$resample` nor a `$rolling` registers an ordinary view and drops the
-  declaration, where an entity registration refuses it (`JD0053`). Wanted: a
-  decision whether a collection registration refuses it too.
 - [ ] **A chain handed to another source's `live()` runs against the wrong
   collection.** `client.collections.orders.live(<a chain over users>)` registers
   the users chain's document against `orders`: a chain's run bindings carry no
@@ -822,11 +820,12 @@ what each does is its own documentation's job
   it names and answers. Wanted: count
   natively only where the table cannot hold an invalid row (a declared check),
   or read the column.
-- [ ] **A live ordered window and a fresh run order equal keys differently.** A
-  maintained window breaks ties by the collection key token (LIVE-FORMAT §9
-  promises the total order), a fresh run keeps insertion order, so a keyed
-  collection ordered by a non-unique member holds one order live and another
-  when run. Wanted: decide which is the contract and make both agree.
+- [ ] **A row deleted and stored again with the same document leaves a window's
+  tie order stale.** A transaction that deletes a row and stores it again
+  unchanged writes no capture record, yet the table holds the row last, so a
+  maintained ordered window (and a nested group's order) keeps it where it was
+  and a fresh run orders it after its ties. Wanted: capture reports a row that
+  moved, or a view re-reads positions it cannot confirm (LIVE-FORMAT section 9).
 - [ ] **A native grouping cannot know its group count.** A native `$distinct`
   or `$groupby` groups every row it reads: with nearly as many groups as rows
   the statement does the engine's work and a sort besides and is slower than

@@ -1378,7 +1378,7 @@ table by reading the COMPILED PLAN — translated filters, order terms
 and aggregates are exactly the planner's, never re-derived. On a
 synchronous connection the strategies are: incremental **rows**
 (per-key items, arrival order); the maintained **window** (all matching
-rows sorted, ties by the key's text, a literal offset as well as a
+rows sorted, ties by the row's position in the table as a fresh run breaks them, a literal offset as well as a
 limit — nested windows composed by the planner — and a delete inside
 the visible slice answered without re-query); running **accumulators**
 for a whole-query aggregate (per-row contributions retained so a
@@ -1422,8 +1422,9 @@ over a FIXED width. There is no clock under either — the watermark is a
 finite epoch the host supplies and `advance()` is the only way it moves
 — and both fold through `@jarenjs/core/series` itself rather than
 carrying a second aggregate, so a maintained answer is what a fresh
-query gives (a floating `sum` or `mean` apart, in its last bits:
-LIVE-FORMAT §13.3). A write touches one bucket (two when it
+query gives (a `sum` or `mean` whose readings stop adding exactly makes a
+rolling view fold the series again, and hands a view holding two rows at one
+instant to a fresh run: LIVE-FORMAT §13.3). A write touches one bucket (two when it
 crosses a boundary) or the windows ending in `[t, t + width)`, and
 exactly those are recomputed. Everything a per-key state cannot place
 exactly re-runs with its member named: a calendar ladder, a named zone,

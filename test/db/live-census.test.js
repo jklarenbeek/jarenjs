@@ -123,7 +123,6 @@ const COUNT_STATEMENT = 'a count of a constructor of operators re-runs '
  * @property {any} document - the registered document, or a function of the store that builds it
  * @property {string} row - a phrase of the one maintenance-table row the document instantiates
  * @property {{ strategy: string, mode: string, reason?: string }} mode - `live.mode` as registered
- * @property {any} [reference] - the document a fresh run answers with, when it is not the registered one
  * @property {boolean} [multiset] - the result is compared as a multiset
  * @property {Record<string, unknown>} [externals] - bound at registration and in every fresh run
  * @property {any} [profile] - the store profile the store is opened with
@@ -295,18 +294,14 @@ const SHAPES = [
     mode: rerun("'$for' — only a single plain binding over the whole collection is translated") },
   { name: 'an explicit two-level nested group', on: 'rows', document: [NESTED],
     row: 'explicit two-level collection groups', mode: maintained('nested-group') },
-  // a window breaks ties by the collection key's text (LIVE-FORMAT §9): its
-  // fresh run is the document with the key appended to the order
   { name: 'an offset window over an ordered query', on: 'rows',
     document: [{ $subsequence: [ORDERED('$r.score'), 1, 3] }],
-    reference: [{ $subsequence: [ORDERED(['$r.score', '$r.id']), 1, 3] }],
     row: '`orderBy` over extractable paths, an optional literal offset and limit', mode: maintained('window') },
   { name: 'an offset window over nested groups', on: 'rows', document: [{ $subsequence: [NESTED, 1, 3] }],
     row: 'an offset or limit over a group, distinct projection, aggregate or nested group',
     mode: rerun('a windowed group re-runs') },
   { name: 'a top-k window over an ordered query', on: 'rows',
     document: [{ $subsequence: [ORDERED('$r.score'), 0, 3] }],
-    reference: [{ $subsequence: [ORDERED(['$r.score', '$r.id']), 0, 3] }],
     row: '`orderBy` over extractable paths, an optional literal offset and limit', mode: maintained('window') },
   { name: 'a projection that reads the collection root', on: 'rows',
     document: [{ $for: { r: '$[*]' }, $where: { $gt: ['$r.score', 2] }, $return: { id: '$r.id', total: { $count: '$[*]' } } }],
@@ -392,7 +387,7 @@ describe('the live census: each shape registers as its maintenance-table row say
           assert.deepEqual(demanded.mode, shape.mode);
           demanded.close();
         }
-        const reference = shape.reference ?? (Array.isArray(document) ? document : [document]);
+        const reference = Array.isArray(document) ? document : [document];
         const run = async () => shape.on === 'entity'
           ? store.execute(reference, { externals }) : store.collection('rows').execute(reference, { externals });
         const oracle = liveOracle(live, shape.multiset ? async () => sameRowsInLiveOrder(await run(), live.result.rows) : run);

@@ -26,7 +26,7 @@ import { DbCompileError, DbRuntimeError } from './errors.js';
 import { chain, attempt } from './driver.js';
 import { planQuery, BIND_REASONS } from './plan.js';
 import { createSortedWindow, compareCodepoint } from './window.js';
-import { classifyEventTime, bucketStrategy, rollingStrategy } from './live-time.js';
+import { classifyEventTime, bucketStrategy, rollingStrategy, termsStayExact } from './live-time.js';
 import { joinStrategy } from './live-join.js';
 import { classifyNestedGroup, nestedGroupStrategy, readsNoRoot, compilesBare, valueKey, sharedRow, segmentsOf } from './live-nested.js';
 import { LIVE_DEFAULTS } from './live-options.js';
@@ -692,12 +692,17 @@ function rowsStrategy(description, context) {
   };
 }
 
+/** The last order term of a maintained window: the row's position in the
+ * table, which is how a fresh run breaks a tie between equal sort values. */
+const POSITION_TERM = Object.freeze({ desc: false, emptyGreatest: false });
+
 /**
  * `orderBy` (+ `offset`, `limit`): §7's maintained window over ALL
  * matching rows — which is what answers a delete inside the visible
  * window, and a row entering or leaving above the offset, without a
  * re-query — with the `limit` entries after the first `offset` visible
- * and ties broken by the key token.
+ * and ties broken by the row's position in the table, as a fresh run
+ * breaks them.
  * @param {any} description
  * @param {any} context
  */
@@ -730,12 +735,17 @@ function windowStrategy(description, context) {
   // every matching row is kept; `visible()` is the first `offset +
   // limit` of them and the rows shown are those past the offset (a
   // `null` limit shows every row past it — never `offset + null`)
-  const sortedWindow = createSortedWindow(order, limit === null ? null : offset + limit);
+  const sortedWindow = createSortedWindow([...order, POSITION_TERM], limit === null ? null : offset + limit);
 
   const place = (token, doc, shared = false) => {
     const items = /** @type {any[]} */ (evaluate([doc], context.externals));
     if (items.length === 0) return;
-    sortedWindow.insert(token, getters.map((get) => get(doc)), shared ? cloneJson(items[0]) : items[0]);
+    const position = context.rowPosition(token);
+    // a driver may hand a position back as a bigint, which the window would
+    // order as text; a row with none (gone since the record) ties after the rest
+    sortedWindow.insert(token,
+      [...getters.map((get) => get(doc)), Number(position ?? Infinity)],
+      shared ? cloneJson(items[0]) : items[0]);
   };
   const visibleRows = () => sortedWindow.visible().slice(offset).map((entry) => entry.item);
 
@@ -827,9 +837,7 @@ function accumulatorStrategy(description, context) {
     if (fn === 'count') return count;
     if (fn === 'min' || fn === 'max') return extreme;
     // the native guard: largest <= floor((2^53 - 1) / count), exactly
-    if (count > 0 && largest > (Number.MAX_SAFE_INTEGER - Number.MAX_SAFE_INTEGER % count) / count) {
-      return INEXACT;
-    }
+    if (!termsStayExact(count, largest)) return INEXACT;
     if (fn === 'sum') return sum;
     return count === 0 ? undefined : sum / count;
   };
@@ -1001,6 +1009,8 @@ export function createLiveRegistry(bounds) {
         if (definition.demanded === 'incremental') throw unavailable(reason);
         mode = modeOf('rerun', reason);
       },
+      // the fresh run a strategy hands its registration to
+      rerun: () => rerunStrategy(classification, context),
     };
     const STRATEGIES = {
       rows: rowsStrategy, window: windowStrategy, accumulator: accumulatorStrategy,

@@ -2,12 +2,12 @@
 /**
  * @file The maintained ordered window (LIVE-FORMAT §7's window row,
  * `window.js`): inserts inside, outside and AT the boundary of a full
- * window, deterministic ties through the key tiebreaker, a delete
+ * window, ties broken as a fresh run breaks them, a delete
  * inside the window sliding the successor in without a re-query,
  * updates that move a row across the boundary, descending terms,
  * absent sort values under `$empty`, the unbounded ordered query, and
  * a seeded oracle that checks EXACT order — the documented total
- * order: declared terms, then the key's text, ascending. Offset windows
+ * order: declared terms, then the row's position in the table. Offset windows
  * (with and without a limit, nested windows composed as the planner
  * composes them) are maintained too, and a second seeded trial runs
  * them through three-write transactions and rollbacks; bounds that are
@@ -23,7 +23,7 @@ import * as assert from 'node:assert';
 import { applyJSONPatch } from '@jarenjs/json/patch';
 import { queryJson } from '@jarenjs/json/query';
 import { createJsltRegistry, financePack } from '@jarenjs/json/jslt';
-import { openStore, compareCodepoint } from '@jarenjs/db';
+import { openStore, createLiveRegistry } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';
 import { mulberry32 } from '@jarenjs/core/random';
 
@@ -50,8 +50,8 @@ const TOP3 = [{ $subsequence: [{
 /**
  * The documented total order over one `points` term, recomputed
  * independently of the window: an absent value is the least unless
- * `emptyGreatest`, `desc` reverses the term, and ties fall to the key's
- * text in code-point order, always ascending.
+ * `emptyGreatest`, `desc` reverses the term, and ties keep the order the
+ * rows are handed in, which is the table's own (the sort is stable).
  * @param {{ desc?: boolean, emptyGreatest?: boolean }} shape
  * @returns {(a: any, b: any) => number}
  */
@@ -64,7 +64,7 @@ const totalOrder = (shape) => (a, b) => {
       : av < bv ? -1 : 1;
     return shape.desc ? -cmp : cmp;
   }
-  return compareCodepoint(String(a.id), String(b.id));
+  return 0;
 };
 
 /**
@@ -171,16 +171,43 @@ describe('the maintained window', () => {
     await store.close();
   });
 
-  it('ties are deterministic: equal sort values order by key, ascending, always', async () => {
+  it('ties are broken as a fresh run breaks them: by the row\'s position in the table', async () => {
     const store = await open();
     const scores = store.collection('scores');
     // inserted in scrambled key order, all the same points
     for (const id of ['m', 'c', 'x', 'a']) await scores.insert({ id, points: 7 });
     const live = await scores.live(TOP3);
-    assert.deepStrictEqual(live.result.rows.map((row) => row.id), ['a', 'c', 'm'],
-      'the initial fill already wears the key tie order, not insertion order');
+    const fresh = async () => scores.execute([{ $subsequence: [TOP3[0].$subsequence[0], 0, 3] }]);
+    assert.deepStrictEqual(live.result.rows.map((row) => row.id), ['m', 'c', 'x']);
+    assert.deepStrictEqual(live.result.rows, await fresh());
+    // a later row ties behind the earlier ones, whatever its key
     await scores.insert({ id: 'b', points: 7 });
-    assert.deepStrictEqual(live.result.rows.map((row) => row.id), ['a', 'b', 'c']);
+    assert.deepStrictEqual(live.result.rows.map((row) => row.id), ['m', 'c', 'x']);
+    // an update keeps the row where it is, as the table does
+    await scores.put({ id: 'c', points: 7, name: 'renamed' }, 'c');
+    assert.deepStrictEqual(live.result.rows.map((row) => row.id), ['m', 'c', 'x']);
+    assert.deepStrictEqual(live.result.rows, await fresh());
+    // a row deleted and stored again is a new row at the end of the table
+    await scores.delete('m');
+    await scores.insert({ id: 'm', points: 7 });
+    assert.deepStrictEqual(live.result.rows.map((row) => row.id), ['c', 'x', 'a']);
+    assert.deepStrictEqual(live.result.rows, await fresh());
+    await store.close();
+  });
+
+  it('a row stored again in one transaction ties behind the rows that stayed, though no sort value moved', async () => {
+    const store = await open();
+    const scores = store.collection('scores');
+    for (const id of ['p', 'q', 'r']) await scores.insert({ id, points: 3, name: id });
+    const document = [{ $for: { it: '$[*]' }, $orderby: { $key: '$it.points' }, $return: '$it.id' }];
+    const live = await scores.live(document);
+    assert.deepStrictEqual(live.result.rows, ['p', 'q', 'r']);
+    await store.transaction(async (tx) => {
+      await tx.collection('scores').delete('p');
+      await tx.collection('scores').insert({ id: 'p', points: 3, name: 'again' });
+    });
+    assert.deepStrictEqual(await scores.execute(document), ['q', 'r', 'p']);
+    assert.deepStrictEqual(live.result.rows, ['q', 'r', 'p']);
     await store.close();
   });
 
@@ -620,9 +647,13 @@ describe('offset windows', () => {
           if (error === undefined) mirror = applyJSONPatch(mirror, patch);
           else errors.push(error);
         });
-        // one write: points 0–3 or none, or a delete
-        const write = async (collection) => {
-          const id = KEYS[Math.floor(rand() * KEYS.length)];
+        // one write: points 0–3 or none, or a delete. A transaction writes each
+        // key at most once: a row deleted and stored again with the document it
+        // had leaves no capture record, though the table holds it last
+        const write = async (collection, used = new Set()) => {
+          let id = KEYS[Math.floor(rand() * KEYS.length)];
+          while (used.has(id)) id = KEYS[(KEYS.indexOf(id) + 1) % KEYS.length];
+          used.add(id);
           if (rand() < 0.25) { await collection.delete(id); return; }
           const points = Math.floor(rand() * 5);
           await collection.put(points === 4 ? { id } : { id, points }, id);
@@ -633,7 +664,8 @@ describe('offset windows', () => {
           const roll = rand();
           if (roll < 0.15) {
             const undone = await store.transaction(async (tx) => {
-              for (let i = 0; i < 3; i++) await write(tx.collection('scores'));
+              const used = new Set();
+              for (let i = 0; i < 3; i++) await write(tx.collection('scores'), used);
               throw new Error('undo');
             }).catch((error) => {
               // only the deliberate rollback: a store error is a failure
@@ -645,7 +677,8 @@ describe('offset windows', () => {
           }
           else if (roll < 0.45) {
             await store.transaction(async (tx) => {
-              for (let i = 0; i < 3; i++) await write(tx.collection('scores'));
+              const used = new Set();
+              for (let i = 0; i < 3; i++) await write(tx.collection('scores'), used);
             });
           }
           else await write(scores);
@@ -660,5 +693,51 @@ describe('offset windows', () => {
       }
       finally { await store.close(); }
     }
+  });
+});
+
+describe('the position a window ties by, as a driver reports it', () => {
+  const INNER = { $for: { it: '$[*]' }, $orderby: { $key: '$it.points' }, $return: '$it' };
+  const ORDER = [{ ref: { segments: [{ name: 'points' }] }, desc: false, emptyGreatest: false }];
+
+  /** A window registered straight on the registry over a table the test holds,
+   * every row's position handed back by `positionOf`. */
+  const registered = (docs, positionOf) => {
+    const registry = createLiveRegistry({ maxQueries: 4, maxMaintained: 100 });
+    const table = new Map(Object.entries(docs));
+    const live = registry.register({
+      name: 'scores', tables: new Set(['scores']), document: [INNER], externals: {},
+      classification: { strategy: 'window', inner: INNER, order: ORDER, offset: 0, limit: null,
+        deps: { whole: true, members: new Set() } },
+      execute: () => [...table.values()],
+      readRow: (token) => table.get(token),
+      keyOf: (doc) => doc.id,
+      rowPosition: positionOf,
+    });
+    return {
+      get ids() { return live.result.rows.map((row) => row.id); },
+      add(doc) {
+        table.set(doc.id, doc);
+        registry.deliver({ seq: 1, collections: ['scores'], patch: [{ op: 'add', path: `/scores/${doc.id}`, value: doc }] });
+      },
+    };
+  };
+
+  it('orders a bigint position as a number, not as text', async () => {
+    const positions = { a: 10n, b: 9n, c: 100n };
+    const window = registered({ a: { id: 'a', points: 1 }, b: { id: 'b', points: 1 }, c: { id: 'c', points: 1 } },
+      (token) => positions[token]);
+    assert.deepStrictEqual(window.ids, ['b', 'a', 'c']);
+    positions.d = 11n;
+    window.add({ id: 'd', points: 1 });
+    assert.deepStrictEqual(window.ids, ['b', 'a', 'd', 'c']);
+  });
+
+  it('ties a row whose position is gone after the rows that have one', async () => {
+    const positions = { a: 5, b: 6 };
+    const window = registered({ a: { id: 'a', points: 1 }, b: { id: 'b', points: 1 } }, (token) => positions[token]);
+    window.add({ id: 'a0', points: 1 });
+    window.add({ id: 'z', points: 0 });
+    assert.deepStrictEqual(window.ids, ['z', 'a', 'b', 'a0']);
   });
 });

@@ -5,8 +5,10 @@
  * keeps EVERY matching row in sorted order (which is what makes a
  * delete inside the visible window answerable without a re-query: the
  * successor is already here), and the visible result is the first
- * `limit` entries. Ties are broken by the collection key token,
- * always ascending — the total order LIVE-FORMAT §9 promises.
+ * `limit` entries. Ties after the last term are broken by the collection
+ * key token, always ascending, which makes the order total; the live
+ * window ends its terms with the row's position in the table, so only
+ * rows with no position ever tie that far.
  *
  * String comparison is CODEPOINT order (SQLite BINARY over UTF-8 —
  * probed, never assumed), which `<` on JS strings gets wrong for

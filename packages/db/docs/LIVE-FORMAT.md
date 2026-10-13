@@ -342,7 +342,7 @@ PostgreSQL, or SQLite in a worker, a pool or a process — every registration is
 |---|---|---|
 | `where` whose predicates translate (the plan's filter) and read no collection root, no order, no aggregate | **incremental rows**: per-row re-evaluation; insert / remove / replace in the result | the result rows |
 | the same with a per-row `select` projection (row-mode plan) that reads no collection root | **incremental rows**: the affected row alone is recomputed; a source row may project to several items | result rows, grouped by source key |
-| `orderBy` over extractable paths, an optional literal offset and limit (non-negative integers, written as numbers or quoted with `$const`; nested windows compose as the planner composes them, the innermost first), and a return that yields at most one item per row, reads no collection root and compiles without the store's registered operators | **maintained window**: a sorted structure over every matching row, the visible rows the `limit` after the first `offset`; ties broken by the collection key's text in code-point order — for a numeric key `10` sorts before `9`, which can differ from `execute`, whose ties follow row identity (declare the key as the last `orderBy` term for one tie order everywhere); an insert sorting beyond a full window is a no-op, one sorting above the offset shifts the visible rows. The window orders schema-conformant sort values: a stored `null`, or numbers beside strings, is outside that contract — the engine refuses to order it (`JQ2005`), SQL ranks a `null` where `$empty` puts an absent value, and the window ranks numbers before other values in the term's ascending order and the rest by their text | every matching row and its sort values, each an entry — the rows before the offset included (§12) |
+| `orderBy` over extractable paths, an optional literal offset and limit (non-negative integers, written as numbers or quoted with `$const`; nested windows compose as the planner composes them, the innermost first), and a return that yields at most one item per row, reads no collection root and compiles without the store's registered operators | **maintained window**: a sorted structure over every matching row, the visible rows the `limit` after the first `offset`; ties broken by the row's position in the table, as `execute` breaks them (insertion order: an update keeps a row where it is, and a row deleted and stored again is last); an insert sorting beyond a full window is a no-op, one sorting above the offset shifts the visible rows. The window orders schema-conformant sort values: a stored `null`, or numbers beside strings, is outside that contract — the engine refuses to order it (`JQ2005`), SQL ranks a `null` where `$empty` puts an absent value, and the window ranks numbers before other values in the term's ascending order and the rest by their text | every matching row and its sort values, each an entry — the rows before the offset included (§12) |
 | whole-query `count` / `min` / `max`, and `sum` / `avg` over an `integer` member (the plan's aggregate), optional `where` | **running accumulator** plus a per-row contribution map — a delete can only be answered from retained contributions (§3: a `remove` carries no old value). `min`/`max` removal of the last extremum holder FALLS BACK to a recompute over the retained contributions; the accumulator alone cannot answer, and this fallback is the documented cost. Every aggregate but `count` skips a stored `null` term, as SQL does; a `sum` or `avg` answers from its terms only while the largest magnitude times the number of terms stays within ±(2^53 − 1) — the guard the query path checks; a term that is not an integer, which an `integer` member stores as given, counts as past it — because past it a fresh run adds left to right in the order it reads the rows (or SQL compensates a non-integer term's rounding), so from the write that crosses it the registration re-runs and `live.mode` says so (`{ strategy: 'rerun', mode: 'rerun', reason: "'accumulation' — integer accumulation exceeded its runtime exactness bound" }`; under a demanded `mode: 'incremental'` that write errors it `JD0051`, and a registration already past the bound refuses `JD0051`; beside a stored `null` term the re-run raises `JQ2001`, as `execute` does) | one contribution per matching row |
 | whole-query `sum` / `avg` over a `number` member | **re-run on invalidation**, the reason `plan.floatingAccumulation`: the answer is the engine's left-to-right addition over the matching rows in collection order, which a running accumulator would not reproduce, so every invalidation re-runs the whole document | the previous result, for diffing |
 | whole-query `count` over a constructor with an operator (an object or array of member paths, literals and operators that cannot raise, at least one an operator: the plan's statement is one `COUNT(*)` that evaluates no constructor) | **re-run on invalidation**: one statement of one row, where a running accumulator would retain a contribution for every row to answer it, so no number of rows refuses the registration (`live.maxMaintained`, `JD2060`); a demanded `mode: 'incremental'` is `JD0051` | the previous result, for diffing |
@@ -582,12 +582,15 @@ document and apply patches to it; ops are `add`, `remove` and
   end.
 - **Order.** An ordered (window) query's row order — offset windows
   included — is the engine's over the declared terms, with ties broken
-  by the collection key's text in code-point order, so the order is
-  total and stable by construction. For a string key that is the order
-  the key gives as a final term; for a numeric key it is not (`10`
-  sorts before `9`), and `execute` breaks ties by row identity — a
-  consumer that needs one tie order everywhere declares the key as the
-  last `orderBy` term. An UNORDERED query's initial order is the engine's;
+  by the row's position in the table, which is how `execute` breaks
+  them: insertion order, an update keeping a row where it is and a row
+  deleted and stored again being last. The window reads a row's
+  position when it places the row, and places it again whenever a record
+  changes it. A row deleted and stored
+  again with the document it had, in one transaction, leaves no capture
+  record, so the window cannot see it move to the end and keeps it
+  where it was; a consumer that needs one tie order whatever happens to
+  the table declares the key as the last `orderBy` term. An UNORDERED query's initial order is the engine's;
   maintenance then appends newly matching rows and splices removed
   ones, which is deterministic given the write history but is NOT
   re-derived rowid order — a consumer that needs a specific order
@@ -818,7 +821,11 @@ quietly ignored. `advance()` refuses a value that is not finite or that
 goes backwards (a `TypeError`), and it is absent on every view
 registered without an `eventTime`. An entity document has no collection
 for an event-time view to maintain, so an `eventTime` on `store.live` is
-`JD0053` too, whatever the document.
+`JD0053` too, whatever the document. A valid `eventTime` on a collection
+document that is neither a `$resample` nor a `$rolling` over the collection
+declares nothing for the view to maintain: it registers the view the table in
+§7 gives the document, with no watermark and no `advance()`, and its answer is
+a fresh run's all the same, so nothing is refused.
 
 ### 13.1 What is maintained
 
@@ -835,9 +842,9 @@ reason named, never a maintained view that dies on its first fold.
   — two, when it moves a reading across a boundary — and exactly those
   are folded again by calling `resampleSeries` over that bucket's own
   rows. The aggregate is therefore the kernel's: a bucket's `min`, `max`
-  and `count`, and its `sum` or `mean` over readings whose additions are
-  exact, are what a fresh query answers (the last bits of a floating
-  `sum` or `mean` are the exception, below).
+  and `count`, and its `sum` or `mean`, are what a fresh query answers (a
+  `sum` or `mean` of readings that do not add exactly, with two rows at one
+  instant, is a fresh run, below).
 - **A rolling view keeps its rows in instant order.** A write at `t` can
   only change the windows ending in `[t, t + width)`, so exactly that
   stretch is recomputed — again by the kernel, over the slice those
@@ -871,12 +878,16 @@ work and a visible lateness contract, not a smaller heap.
 | `fill: 'locf'` / `'linear'` | they fill an empty bucket from its neighbours, so one late reading moves buckets it never belonged to |
 | `aggregate: 'first'` / `'last'` | they name a row by its position in the series, which a per-key state does not preserve — the same refusal the pushdown planner makes |
 | a `retention` under `width + allowedLateness` | a repair could read outside the horizon the view claims |
+| a `sum` or `mean` holding two rows at one instant once its readings are not integers or binary fractions whose every partial sum is exact in a double (§13.3) | floating additions do not associate and the table's order of rows at one instant is not the order they reached the view; the registration answers by a fresh run from then on |
 | a `$subsequence` window, a projecting operand, a collection with no document key | there is no row a key can be tracked through |
 | a spec whose `at` selector is not `eventTime.path` | the state would place a row by one instant and aggregate it by another |
 | an operand `$where` that reads the collection root (`$`, `$.…`, `$[…]`, or the root inside a path filter) | the state files each row alone through the filter, and one row is not the collection the kernel's own run reads |
 
 Each of those is `live.mode.reason`, and `mode: 'incremental'` still
-refuses them at registration with `JD0051`.
+refuses them at registration with `JD0051`; the `sum` and `mean` row
+is found as the rows arrive, so a view that demanded incremental
+maintenance refuses at registration when it is registered over such
+rows and is `errored` with `JD0051` when a write brings them.
 
 ### 13.3 Late data is visible, never lost
 
@@ -901,25 +912,49 @@ nothing to be late for.
 
 The maintained answer is **equal to a full recomputation after every
 mutation** — not approximately, and not eventually — for `min`, `max` and
-`count`, and for a `sum` or `mean` over readings whose additions are exact
-(integers, binary fractions). `test/db/live-time.test.js` holds a shuffled
+`count`, and for a `sum` or `mean` (bit for bit, as the paragraphs below
+say). `test/db/live-time.test.js` holds a shuffled
 stream of inserts, in-place updates, instant moves and deletes against
 `resampleSeries` / `rollingSeries` over the whole collection after each
 one, which is the only oracle that cannot drift with the implementation.
 
-A floating `sum` or `mean` is the one exception, and it can differ from a
-fresh run in the last bits, because floating additions do not associate. The
-kernel adds a window's readings in two parts, the older ones from the newest
-end back and the newer ones as they arrived, and the view adds the slice it
-recomputes in its own order, and rows sharing an instant are added in the
-order they reached the view, which an update moves behind the rows it was
-before. Readings `0.7` at minute 5, `0.01` at minute 2, `0.3` at minute 4 and
-`0.6` at minute 5, inserted in that order under a three-minute width: the
-last two windows hold `0.3`, `0.7` and `0.6`; a fresh run answers
-`1.5999999999999999` and the view answers `1.6`. A registration
-whose floating readings must add in the fresh run's order asks for
-`mode: 'rerun'`.
+A `sum` or `mean` is held to that by two different means, because floating
+additions do not associate. The readings of a bucket are added in instant
+order by the view and by a fresh run alike, so readings at distinct instants
+need nothing more. A rolling view cannot slice: the kernel adds a window's
+readings in two parts (the older ones from the newest end back, the newer
+ones as they arrived) whose split depends on every reading before the window,
+so a slice recomputed on its own can differ from a fresh run in the last bits.
+And rows sharing an instant reach a view in arrival order where a fresh run
+reads them in the table's. Readings `0.7` at minute 5, `0.01` at minute 2,
+`0.3` at minute 4 and `0.6` at minute 5 under a three-minute width: the last
+two windows hold `0.3`, `0.7` and `0.6`; a fresh run answers
+`1.5999999999999999`, and a view that added them in its own order answered
+`1.6`.
 
+So the view counts the readings it holds: every reading is a whole multiple
+of 2^-S (S the largest scale among them) below 2^E (E the largest exponent),
+and a partial sum of `n` of them is exact while `n * 2^(E + S)` stays within
+2^53. Within that bound no order shows, and the view is maintained as it is
+for `min`, `max` and `count`. Past it (`0.1` beside `0.2`, two integers near
+2^52, a long run of integers close to 2^53 in all):
+
+- a **rolling** view folds the whole series again through the kernel on every
+  write (`stats().recomputes` counts it) instead of the slice, and stays
+  `incremental`: it reads nothing from the store and its answer is the fresh
+  run's bit for bit;
+- a view holding **two rows at one instant** hands the registration to a fresh
+  run for the rest of its life: `live.mode` is `rerun` with the reason named,
+  every later write re-reads from the store (`stats().reruns` counts them), and
+  the answer is a fresh run's by construction. A view that demanded
+  incremental maintenance is `JD0051` at registration when the stored rows
+  already hold such a tie, and `errored` with `JD0051` when a write brings
+  one. The view keeps placing rows, so a reading behind the boundary is still
+  re-read, reported in `lateData` and counted in `stats().lateData`, and the
+  watermark keeps moving. One decimal reading is exact on its own, so it takes
+  a second to cause either. A view that has handed over stays handed over after
+  the rows are deleted;
+- a **bucket** view holding readings at distinct instants is unchanged.
 
 ## Bounded joins, graph projections and nested groups
 

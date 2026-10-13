@@ -18,9 +18,7 @@
  *  - **A bucket view keeps its rows by bucket.** A write touches one
  *   bucket (two, when it moves a reading across a boundary), and only
  *   those are folded again — through `resampleSeries` itself, over that
- *   bucket's own rows, so the aggregate is the kernel's (a floating
- *   `sum` or `mean` can still differ from a fresh run in its last bits:
- *   the rows are added in the order the view holds them).
+ *   bucket's own rows, so the aggregate is the kernel's.
  *  - **A rolling view keeps its rows in instant order.** A write at `t`
  *   can only change the windows ending in `[t, t + width)`, so exactly
  *   that stretch is recomputed — again by the kernel, over the slice
@@ -35,6 +33,18 @@
  * `lateData` record naming the instant and the boundary, and the row is
  * never quietly folded into a bucket its reader already believed
  * closed.
+ *
+ * A `sum` or `mean` equals a fresh run bit for bit while every partial
+ * sum of its readings is exact (integers and binary fractions within
+ * 2^53), because the order the additions run in cannot show. Past that
+ * bound floating additions do not associate and two things differ: a
+ * rolling window's total depends on the whole series before it, so a
+ * rolling view then folds the whole series again through the kernel; and
+ * rows sharing an instant are added in arrival order here and in table
+ * order by a fresh run, so a view holding such rows hands the registration
+ * to a fresh run for the rest of its life, the reason named in
+ * `live.mode`. Readings at distinct instants are added in instant order
+ * by both, and are maintained as before.
  *
  * `retention` is the horizon this view claims to work over. It is
  * checked, not assumed: it must cover a whole window plus the lateness
@@ -313,6 +323,85 @@ function boundOf(value) {
 }
 
 /**
+ * Whether every partial sum of `count` terms, none larger in magnitude
+ * than `largest`, is an exact integer: `largest` times `count` within
+ * ±(2^53 - 1). Within it, the order the terms are added in cannot show.
+ * @param {number} count
+ * @param {number} largest
+ * @returns {boolean}
+ */
+export function termsStayExact(count, largest) {
+  return count === 0 || largest <= (Number.MAX_SAFE_INTEGER - Number.MAX_SAFE_INTEGER % count) / count;
+}
+
+/** The smallest `s` for which a finite positive `a` times 2^`s` is an integer. */
+function scaleOf(a) {
+  let scale = 0;
+  while (!Number.isInteger(a)) {
+    a *= 2;
+    scale += 1;
+  }
+  return scale;
+}
+
+/** The smallest `e` for which a finite positive `a` is below 2^`e`. */
+function exponentOf(a) {
+  let exponent = Math.floor(Math.log2(a)) + 1;
+  while (2 ** exponent <= a) exponent += 1;
+  while (exponent > -1073 && 2 ** (exponent - 1) > a) exponent -= 1;
+  return exponent;
+}
+
+/** `exponentOf` ranges over -1073..1024 for a finite double. */
+const EXPONENT_BASE = 1073;
+
+/**
+ * The readings a floating `sum` or `mean` adds, tracked so the view can
+ * say whether every partial sum of them is exact. A reading `v` is a whole
+ * multiple of 2^-`scaleOf(|v|)` below 2^`exponentOf(|v|)`, so all of them
+ * are whole multiples of 2^-S (S the largest scale) and a partial sum of
+ * `n` of them is a whole number of those units, below `n` times 2^(E + S)
+ * for E the largest exponent: exact while it stays within 2^53 - 1. Two
+ * counted histograms hold S and E, so a reading leaving is as cheap as one
+ * arriving. A member that is not a finite number is the kernel's to refuse.
+ * @param {string} member - the member a reading is read from
+ */
+function sumTerms(member) {
+  const scales = new Int32Array(1075);
+  const exponents = new Int32Array(EXPONENT_BASE + 1025);
+  let count = 0;
+  const largest = (counts) => {
+    for (let i = counts.length - 1; i >= 0; i--) {
+      if (counts[i] > 0) return i;
+    }
+    return -1;
+  };
+  const move = (row, by) => {
+    const value = row[member];
+    if (typeof value !== 'number' || !Number.isFinite(value)) return;
+    count += by;
+    if (value === 0) return;
+    const magnitude = Math.abs(value);
+    scales[scaleOf(magnitude)] += by;
+    exponents[exponentOf(magnitude) + EXPONENT_BASE] += by;
+  };
+  return {
+    add: (row) => move(row, 1),
+    remove: (row) => move(row, -1),
+    clear() {
+      scales.fill(0);
+      exponents.fill(0);
+      count = 0;
+    },
+    exact() {
+      const exponent = largest(exponents);
+      if (exponent < 0) return true;
+      return termsStayExact(count, 2 ** (exponent - EXPONENT_BASE + largest(scales)) - 1);
+    },
+  };
+}
+
+/**
  * The shared half of both event-time strategies: the watermark, the
  * lateness boundary, per-key row bookkeeping and the re-run a too-late
  * reading forces.
@@ -324,6 +413,21 @@ function eventTimeBase(description, context) {
   const evaluate = compileJsonQuery([description.source]);
   const stats = { lateData: 0, reruns: 0, recomputes: 0 };
   let watermark = description.eventTime.watermark;
+  const aggregate = description.spec.aggregate ?? 'mean';
+  // the readings a sum or mean adds: floating additions do not associate, so
+  // the view equals a fresh run only while every partial sum is exact
+  const terms = aggregate === 'sum' || aggregate === 'mean'
+    ? sumTerms(description.spec.value ?? 'value') : null;
+  /** The fresh run this registration answers by once rows sharing an
+   * instant add inexactly.
+   * @type {any} */
+  let delegate = null;
+  /** How many held rows sit at each instant, and at how many instants more
+   * than one does: only rows sharing an instant are added in an order the
+   * kernel does not decide by instant.
+   * @type {Map<number, number>} */
+  const instants = new Map();
+  let tied = 0;
 
   /** The instant a row is late BEFORE. */
   const boundary = () => watermark - description.eventTime.allowedLateness;
@@ -364,7 +468,56 @@ function eventTimeBase(description, context) {
     instantOf,
     advance,
     boundary,
-    watermarkOf: () => watermark,
+    /** The registration's counters, the fresh run's folded in once it answers. */
+    statsOf: () => ({ ...stats, watermark,
+      ...(delegate === null ? {} : { reruns: stats.reruns + delegate.stats().reruns }) }),
+    /** The fresh run that answers for this registration, or `null` while it is maintained. */
+    delegate: () => delegate,
+    /** A row now held (`track`) or no longer held (`untrack`) by the maintained state. */
+    track(row) {
+      if (terms === null) return;
+      terms.add(row);
+      const at = instantOf(row);
+      const count = (instants.get(at) ?? 0) + 1;
+      instants.set(at, count);
+      if (count === 2) tied += 1;
+    },
+    untrack(row) {
+      if (terms === null) return;
+      terms.remove(row);
+      const at = instantOf(row);
+      const count = /** @type {number} */ (instants.get(at)) - 1;
+      if (count === 0) instants.delete(at);
+      else instants.set(at, count);
+      if (count === 1) tied -= 1;
+    },
+    /** The maintained state was emptied. */
+    forget() {
+      terms?.clear();
+      instants.clear();
+      tied = 0;
+    },
+    /** Whether every partial sum of the held readings is exact. */
+    exact: () => terms === null || terms.exact(),
+    /** Whether the held readings add in an order only a fresh run reproduces:
+     * rows share an instant and the sums are not exact. */
+    diverges: () => tied > 0 && terms !== null && !terms.exact(),
+    /**
+     * The fresh run that answers for the rest of the registration's life,
+     * once the held readings diverge. A registration that demanded
+     * incremental maintenance refuses. The maintained state stays, so late
+     * readings are still told apart and counted.
+     * @returns {any}
+     */
+    rerun() {
+      if (delegate === null) {
+        context.handOver(`'${aggregate}' — rows sharing an instant add in the order they reached `
+          + 'the view, and readings that are not integers or binary fractions within 2^53 add '
+          + 'differently in the order a fresh run reads them');
+        delegate = context.rerun();
+      }
+      return delegate;
+    },
     /** The `lateData` record an emission carries when a reading landed
      * behind the boundary. */
     late: (at, key) => ({
@@ -424,6 +577,7 @@ export function bucketStrategy(description, context) {
       rows.get(previous.bucket)?.delete(key);
       touched.add(previous.bucket);
       placed.delete(key);
+      base.untrack(previous.row);
     }
     if (row === undefined) return;
     const at = base.instantOf(row);
@@ -437,6 +591,13 @@ export function bucketStrategy(description, context) {
     held.set(key, row);
     placed.set(key, { at, bucket, row });
     touched.add(bucket);
+    base.track(row);
+  };
+
+  const clear = () => {
+    placed.clear();
+    rows.clear();
+    folded.clear();
   };
 
   /** The result rows: the maintained folds, and — under a fill policy —
@@ -479,17 +640,19 @@ export function bucketStrategy(description, context) {
 
   return {
     advance: base.advance,
-    stats: () => ({ ...base.stats, watermark: base.watermarkOf() }),
-    entries: () => placed.size + folded.size,
+    stats: base.statsOf,
+    entries: (rows) => base.delegate()?.entries(rows) ?? placed.size + folded.size,
     init: () => chain(context.execute([description.source], { externals: context.externals }),
       (docs) => {
+        base.forget();
         const touched = new Set();
         for (const doc of /** @type {any[]} */ (docs))
           place(context.keyOf(doc), base.rowOf(doc), touched);
+        if (base.diverges()) return base.rerun().init();
         for (const bucket of touched) refold(bucket);
         return emit();
       }),
-    apply(record) {
+    apply(record, previousRows) {
       const touched = context.touchedKeys(record, description.deps);
       if (touched === null) return null;
       /** @type {any} */
@@ -511,6 +674,7 @@ export function bucketStrategy(description, context) {
         place(key, row, moved);
       }
       if (late !== null) return { rebuild: true, late };
+      if (base.delegate() !== null || base.diverges()) return base.rerun().apply(record, previousRows);
       if (moved.size === 0) return null;
       for (const bucket of moved) refold(bucket);
       return { rows: emit() };
@@ -520,9 +684,7 @@ export function bucketStrategy(description, context) {
     rebuild() {
       base.stats.lateData += 1;
       base.stats.reruns += 1;
-      placed.clear();
-      rows.clear();
-      folded.clear();
+      clear();
       return this.init();
     },
   };
@@ -609,6 +771,7 @@ export function rollingStrategy(description, context) {
       }
     }
     placed.delete(key);
+    base.untrack(previous.row);
     return previous.at;
   };
 
@@ -618,27 +781,47 @@ export function rollingStrategy(description, context) {
     ordered.splice(position, 0, row);
     out.splice(position, 0, null);
     placed.set(key, { at, row });
+    base.track(row);
     return at;
+  };
+
+  /** Fold the whole series again through the kernel. A rolling total that is
+   * not exact depends on every reading before the window it ends, so no
+   * slice of the series can reproduce it. */
+  const repairAll = () => {
+    base.stats.recomputes += 1;
+    const folded = rolled(ordered);
+    // a row the fold answers as before stays the object it was, so the
+    // emission shares it by reference and diffs only what moved
+    for (let i = 0; i < folded.length; i++) {
+      const held = out[i];
+      if (held !== null && held !== undefined && held.at === folded[i].at
+        && held.value === folded[i].value && held.count === folded[i].count) folded[i] = held;
+    }
+    out = folded;
   };
 
   return {
     advance: base.advance,
-    stats: () => ({ ...base.stats, watermark: base.watermarkOf() }),
-    entries: () => placed.size,
+    stats: base.statsOf,
+    entries: (rows) => base.delegate()?.entries(rows) ?? placed.size,
     init: () => chain(context.execute([description.source], { externals: context.externals }),
       (docs) => {
+        base.forget();
         ordered = [];
         for (const doc of /** @type {any[]} */ (docs)) {
           const row = base.rowOf(doc);
           if (row === undefined) continue;
           placed.set(context.keyOf(doc), { at: base.instantOf(row), row });
+          base.track(row);
           ordered.push(row);
         }
         ordered.sort(compareAt);
+        if (base.diverges()) return base.rerun().init();
         out = rolled(ordered);
         return out.slice();
       }),
-    apply(record) {
+    apply(record, previousRows) {
       const touched = context.touchedKeys(record, description.deps);
       if (touched === null) return null;
       /** @type {any} */
@@ -671,8 +854,10 @@ export function rollingStrategy(description, context) {
         removeRow(move.key);
         if (move.row !== undefined) insertRow(move.key, move.row);
       }
+      if (base.delegate() !== null || base.diverges()) return base.rerun().apply(record, previousRows);
       if (from === Infinity) return null;
-      repair(from, to);
+      if (base.exact()) repair(from, to);
+      else repairAll();
       return { rows: out.slice() };
     },
     rebuild() {
