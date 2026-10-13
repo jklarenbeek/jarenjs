@@ -279,6 +279,7 @@ flowchart LR
         SCHEMA --> OBJECT[object.js]
         SCHEMA --> COMBINE[combine.js]
         SCHEMA --> CONDITION[condition.js]
+        SCHEMA --> PROPDEP[property-dependencies.js]
         SCHEMA --> ENUM[enum.js]
         SCHEMA --> FORMAT[format.js]
         SCHEMA --> CONTENT[content.js]
@@ -778,6 +779,7 @@ flowchart TB
         subgraph "Logic Compilers"
             COMB[combine.js]
             COND[condition.js]
+            PDEP[property-dependencies.js]
             ENUM[enum.js]
         end
 
@@ -1064,6 +1066,7 @@ For broader context on how this package fits into the JarenJS ecosystem:
 | `object.js` | Object keywords | `compileObjectSchema` |
 | `combine.js` | Logic keywords | `compileCombineSchema` |
 | `condition.js` | If/then/else | `compileConditionSchema` |
+| `property-dependencies.js` | `propertyDependencies` proposal keyword (opt-in) | `compilePropertyDependencies` |
 | `enum.js` | Enum/const | `compileEnumBasic` |
 | `format.js` | Format registry | `registerFormatCompiler`, `compileFormatBasic` |
 | `content.js` | Content encoding | `compileContentSchema` |

@@ -46,7 +46,8 @@ validate({ age: -5 });                // false
 The validator constructor takes the operational switches: `collectErrors`
 gathers every failure instead of stopping at the first; `skipErrors: false`
 makes the compiled function return { valid, errors }; `formatAssertion`
-controls whether the format keyword asserts or only annotates.
+controls whether the format keyword asserts or only annotates;
+`propertyDependencies: true` turns on the proposed keyword of that name.
 
 ```js
 const jaren = new JarenValidator({

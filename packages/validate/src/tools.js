@@ -110,8 +110,9 @@ export const REF_SIBLING_KEYWORDS = Object.freeze(['type', 'const', 'enum',
 /**
  * The keywords whose values an object schema validates the members against:
  * the schemas that are handed a member's location. `propertyNames`,
- * `dependentSchemas` and the schema form of `dependencies` apply to the object
- * itself and receive the object's own location.
+ * `dependentSchemas`, `propertyDependencies` and the schema form of
+ * `dependencies` apply to the object itself and receive the object's own
+ * location.
  */
 export const OBJECT_CHILD_KEYWORDS = Object.freeze(['properties', 'patternProperties',
   'additionalProperties']);
@@ -135,11 +136,14 @@ export function extendsChildLocations(schemaObj, jsonSchema, keywords) {
 
 /**
  * Whether a schema carrying a `$ref` also carries a keyword of
- * {@link REF_SIBLING_KEYWORDS}.
+ * {@link REF_SIBLING_KEYWORDS}, or, when `propertyDependencies` is on, a
+ * `propertyDependencies` keyword.
  * @param {object} schema
+ * @param {boolean} [propertyDependencies=false] - Whether the `propertyDependencies` keyword is on
  * @returns {boolean}
  */
-export function hasRefSiblings(schema) {
+export function hasRefSiblings(schema, propertyDependencies = false) {
+  if (propertyDependencies && schema.propertyDependencies !== undefined) return true;
   const keys = Object.keys(schema);
   for (let i = 0; i < keys.length; i++) {
     if (REF_SIBLING_KEYWORDS.includes(keys[i])) return true;

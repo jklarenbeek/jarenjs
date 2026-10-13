@@ -122,7 +122,7 @@ it does not require Node's `Buffer` global.
 - dependentSchemas | _new `draft2019`_
 - propertyNames
 - unevaluatedProperties | _new `draft2019`_
-- ❌ [propertyDependencies](https://github.com/json-schema-org/json-schema-spec/blob/main/proposals/propertyDependencies.md)
+- [propertyDependencies](https://github.com/json-schema-org/json-schema-spec/blob/main/specs/proposals/propertyDependencies.md) | _proposal, off unless the `propertyDependencies` option is set — see [below](#propertydependencies--select-a-subschema-by-a-members-value)_
 
 ### 🔑 Keywords for all types
 
@@ -225,7 +225,7 @@ See also:
 
 ### 👉 Modelling Inheritance with JSON Schema
 
-Jaren fully supports `unevaluatedProperties`, so the inheritance patterns from the [Modelling Inheritance](https://json-schema.org/blog/posts/modelling-inheritance) blog post work out of the box. Annotations flow from `properties`, `patternProperties`, `additionalProperties` and every in-place applicator (`allOf`/`anyOf`/`oneOf`/`if-then-else`/`$ref`/`dependentSchemas`), with annotations from failed branches correctly discarded.
+Jaren fully supports `unevaluatedProperties`, so the inheritance patterns from the [Modelling Inheritance](https://json-schema.org/blog/posts/modelling-inheritance) blog post work out of the box. Annotations flow from `properties`, `patternProperties`, `additionalProperties` and every in-place applicator (`allOf`/`anyOf`/`oneOf`/`if-then-else`/`$ref`/`dependentSchemas`/`propertyDependencies`), with annotations from failed branches correctly discarded.
 
 See also:
 - [json-schema-core](https://json-schema.org/draft/2020-12/json-schema-core#name-unevaluatedproperties)
@@ -269,6 +269,70 @@ A schema's `$schema` declaration is honored per document: referenced documents t
 Modern reference chains preserve supported sibling assertions, including
 dependent schemas and dynamic references. Draft-07 retains its reference-only
 behavior, ignoring siblings beside `$ref`.
+
+## `propertyDependencies` — select a subschema by a member's value
+
+`propertyDependencies` is the
+[proposal](https://github.com/json-schema-org/json-schema-spec/blob/main/specs/proposals/propertyDependencies.md)
+that replaces the `oneOf`/`if`-`then` ladder for the commonest dispatch: pick the
+schema an object must satisfy from the string held by one of its members. It is
+not part of 2020-12, so it is **off by default** — an unknown keyword, exactly
+as before — and asserts only when the `propertyDependencies` option is set.
+While it is off the keyword is not looked into at all: a `$ref`, `$id`, `$anchor`
+or `$dynamicAnchor` inside it registers nothing, so a schema written for a
+validator that supports it compiles here exactly as it did before.
+
+With the option on it applies to documents of draft 2020-12, to documents that
+declare the proposal's own dialect (`https://json-schema.org/draft/next/schema`,
+read as 2020-12) and to documents that declare no draft. A document that declares
+draft 2019-09 or older, or any `$schema` this package does not recognise (read as
+draft-07), keeps ignoring the keyword and does not look into it either; the
+`draftVersion` option does not matter, only the declared `$schema`.
+*Upgrade: a document that declares `https://json-schema.org/draft/next/schema`
+was read as draft-07 for every keyword; it is now read as 2020-12, the draft
+next descends from.*
+
+```javascript
+const jaren = new JarenValidator({ propertyDependencies: true, collectErrors: true });
+
+const validate = jaren.compile({
+  type: 'object',
+  required: ['kind'],
+  properties: { kind: { type: 'string' } },
+  propertyDependencies: {
+    kind: {
+      circle: { required: ['radius'], properties: { radius: { type: 'number' } } },
+      square: { required: ['side'], properties: { side: { type: 'number' } } }
+    }
+  },
+  unevaluatedProperties: false
+});
+
+validate({ kind: 'circle', radius: 2 }).valid;   // true
+validate({ kind: 'circle', side: 2 }).valid;     // false: required 'radius' is missing
+validate({ kind: 'square', side: 2 }).valid;     // true
+validate({ kind: 'triangle' }).valid;            // true: no subschema is listed for it
+```
+
+When the instance is an object, the outer key is a member of it, that member
+holds a **string** and the inner key is equal to that string, the **whole
+instance** must validate against the subschema stored there — the keyword reads
+as `{ if: { properties: { kind: { const: 'circle' } }, required: ['kind'] }, then: … }`
+without evaluating the `if`. A member that is absent or holds any other type
+selects nothing, and the lookup is by exact own name, so a value such as
+`"toString"` never reaches `Object.prototype`.
+
+It is an in-place applicator like `dependentSchemas`: the matching subschema's
+errors are located at the object (`required` at `""`), no error of its own is
+added, and the members the subschema evaluated count as evaluated for an
+enclosing `unevaluatedProperties` (the example above accepts `radius`). A
+subschema that fails contributes no annotations. Without errors collected,
+validation stops at the first failing subschema; with `collectErrors` every
+selected subschema reports. Subschemas are addressable like any other:
+`#/propertyDependencies/kind/circle` is a valid `$ref` target, and an `$id`,
+`$anchor` or `$dynamicAnchor` inside one is registered. With the option set, an entry
+that is not an object, or a subschema that is not a schema, is a compile error; a
+keyword value that is not an object is ignored, as it is for `dependentSchemas`.
 
 ## `$query` — cross-field assertions
 
@@ -371,7 +435,7 @@ ordinary recursive `$ref` validation remains supported.
 
 ## Compatibility settings
 
-Five options decide answers that differ between validators, between JSON
+Six options decide answers that differ between validators, between JSON
 Schema drafts, or between Jaren and the library you are migrating from. Each
 one is a deliberate default, and each one is worth setting explicitly in a
 shared factory rather than inheriting.
@@ -383,6 +447,7 @@ shared factory rather than inheriting.
 | `useGrapheme` | **`true`** | Whether `minLength`/`maxLength` count grapheme clusters or UTF-16 code units |
 | `formatAssertion` | auto by draft | Whether `format` asserts or only annotates |
 | `contentValidation` | auto by draft | Whether `contentEncoding`/`contentMediaType` assert |
+| `propertyDependencies` | **`false`** | Whether the proposed `propertyDependencies` keyword asserts or is an unknown keyword |
 
 ### The return shape is `collectErrors`
 
@@ -443,9 +508,9 @@ appear unescaped (`/a/b`), which read as two nested members and made a
 `$data` reference from such a member resolve against the wrong location.*
 
 A subschema's errors, and any relative `$data` reference inside it, are located
-at the instance the subschema applies to. `dependentSchemas` and the schema
-form of draft 7 `dependencies` apply to the object that holds the trigger
-member, so their errors sit at that object (`required` at `""`, not at `/x`);
+at the instance the subschema applies to. `dependentSchemas`, `propertyDependencies`
+and the schema form of draft 7 `dependencies` apply to the object that holds the
+trigger member, so their errors sit at that object (`required` at `""`, not at `/x`);
 the schema form of `unevaluatedProperties` and `unevaluatedItems` applies to
 each leftover member or item, so its errors sit there. A failed draft 7 array
 `dependencies` entry reports the keyword `dependencies`. `dependentRequired` and

@@ -25,7 +25,6 @@ delete it or fix it.
 - **1.0 stable** — no milestone-level blockers remain; 1.0 is gated on the
   per-package items below rather than on any one feature.
 - **1.1**
-  - [ ] [propertyDependencies](https://github.com/json-schema-org/json-schema-spec/blob/main/proposals/propertyDependencies.md) proposal
   - [ ] JSON Schema standard output formats (`list`/`hierarchical` wrappers, `evaluationPath`/`schemaLocation` renames) — the remaining half of [Fixing JSON Schema output](https://json-schema.org/blog/posts/fixing-json-schema-output); the structured params + keyed messages are exactly what that format wants
 - **1.2**
   - [ ] compileAsync for asynchronous schema loading

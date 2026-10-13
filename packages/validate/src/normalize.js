@@ -35,7 +35,13 @@ import {
 import { parseJSONPointer } from '@jarenjs/json';
 import { createRegExpTester } from '@jarenjs/core/string';
 import { isJsonNumberString } from '@jarenjs/core/number';
-import { TRAVERSE_SCHEMA_OBJECTS, TRAVERSE_SCHEMA_MAPS } from './schema-keywords.js';
+import {
+  TRAVERSE_SCHEMA_OBJECTS,
+  TRAVERSE_SCHEMA_MAPS,
+  TRAVERSE_SCHEMA_MAP_MAPS,
+  detectSchemaDraft,
+  admitsPropertyDependencies,
+} from './schema-keywords.js';
 
 const hasOwn = Object.hasOwn;
 
@@ -119,34 +125,45 @@ function coerceToType(value, type) {
  * anchor scope, so it is not descended. First declaration wins, which keeps
  * the map deterministic for a document that (invalidly) repeats a name.
  * @param {object|boolean} root - The root schema of the document
+ * @param {{ propertyDependencies?: boolean }} [options] - `propertyDependencies: true` also walks the
+ *   subschemas of the `propertyDependencies` keyword (off, it is an unknown keyword and not walked)
  * @returns {Map<string, object>} anchor name -> schema node
  */
-export function collectSameDocumentAnchors(root) {
+export function collectSameDocumentAnchors(root, options = {}) {
   /** @type {Map<string, object>} */
   const anchors = new Map();
   if (!isJsonObject(root)) return anchors;
   const seen = new Set();
-  /** @param {any} node @param {boolean} isRoot */
-  const walk = (node, isRoot) => {
+  /** @param {any} node @param {boolean} isRoot @param {number|null} inheritedDraft */
+  const walk = (node, isRoot, inheritedDraft) => {
     if (!isJsonContainer(node) || seen.has(node)) return;
     seen.add(node);
     if (Array.isArray(node)) {
-      for (let i = 0; i < node.length; i++) walk(node[i], false);
+      for (let i = 0; i < node.length; i++) walk(node[i], false, inheritedDraft);
       return;
     }
+    // The draft a document declares is inherited by everything below it.
+    const draft = typeof node.$schema === 'string' ? detectSchemaDraft(node) : inheritedDraft;
     if (!isRoot && typeof node.$id === 'string') return;
     if (typeof node.$anchor === 'string' && !anchors.has(node.$anchor))
       anchors.set(node.$anchor, node);
     // Only schema positions declare anchors. Annotation values such as
     // defaults and examples are instance data, even when they contain $anchor.
     for (const key of Object.keys(node)) {
-      if (TRAVERSE_SCHEMA_OBJECTS.includes(key)) walk(node[key], false);
+      if (TRAVERSE_SCHEMA_OBJECTS.includes(key)) walk(node[key], false, draft);
       else if (TRAVERSE_SCHEMA_MAPS.includes(key) && isJsonObject(node[key])) {
-        for (const child of Object.values(node[key])) walk(child, false);
+        for (const child of Object.values(node[key])) walk(child, false, draft);
+      }
+      else if (TRAVERSE_SCHEMA_MAP_MAPS.includes(key) && admitsPropertyDependencies(options.propertyDependencies, draft)
+        && isJsonObject(node[key])) {
+        for (const inner of Object.values(node[key])) {
+          if (!isJsonObject(inner)) continue;
+          for (const child of Object.values(inner)) walk(child, false, draft);
+        }
       }
     }
   };
-  walk(root, true);
+  walk(root, true, null);
   return anchors;
 }
 

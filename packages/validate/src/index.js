@@ -15,6 +15,7 @@ import {
   isRefCycleError,
   RefCycleError,
   resolveRefSchemaDeep,
+  traverseOptionsFor,
   encodeJsonPointerPath,
   TraverseOptions,
   createJsonPointer,
@@ -32,6 +33,7 @@ import { registerFormatCompiler, registerFormatCompilers } from './format.js';
 import { mergeMap } from '@jarenjs/core/object';
 import { hasRecursiveAnchor, getDynamicAnchorName, collectDynamicAnchors, collectDynamicAnchorsDeep } from './dynamic-ref.js';
 import { isRecursiveQueryCompileError } from './query-keyword.js';
+import { TRAVERSE_SCHEMA_MAP_MAPS, detectSchemaDraft } from './schema-keywords.js';
 
 export {
   registerFormatCompilers
@@ -146,6 +148,7 @@ export { TraverseOptions };
  * @property {JSONSchema} [else] - Applied when 'if' does not validate
  * @property {Record<string, JSONSchema>} [dependentSchemas] - Schemas applied when a member is present (2019-09+)
  * @property {Record<string, string[]>} [dependentRequired] - Members required when a member is present (2019-09+)
+ * @property {Record<string, Record<string, JSONSchema>>} [propertyDependencies] - Schemas applied to the whole object when a member holds a given string (proposal keyword; asserts only with the `propertyDependencies` option)
  * @property {string} [title] - Short descriptive title
  * @property {string} [description] - Explanation of the schema's purpose
  * @property {unknown} [default] - Default value annotation
@@ -196,20 +199,7 @@ export { TraverseOptions };
 
 export const DEFAULT_SCHEMA_DRAFT = 'http://json-schema.org/draft-07/schema#'
 
-/**
- * Detects the JSON Schema draft version from the schema's $schema property
- * @param {object} schema - The JSON schema
- * @returns {number} - The draft version (6, 7, 2019, or 2020)
- */
-export function detectSchemaDraft(schema) {
-  if (!schema || typeof schema !== 'object') return 7; // default to draft7
-  const schemaUrl = schema.$schema || '';
-  if (schemaUrl.includes('2020-12')) return 2020;
-  if (schemaUrl.includes('2019-09')) return 2019;
-  if (schemaUrl.includes('draft-07') || schemaUrl.includes('draft/07')) return 7;
-  if (schemaUrl.includes('draft-06') || schemaUrl.includes('draft/06')) return 6;
-  return 7; // default to draft7 behavior
-}
+export { detectSchemaDraft };
 
 const isBrowser = typeof window !== 'undefined';
 
@@ -254,6 +244,7 @@ export class ValidationOptions {
    * @param {boolean|null} [formatAssertion=null] - Whether format asserts (null = auto: asserts below draft 2020-12, annotation-only from 2020-12 on)
    * @param {boolean} [messages=true] - Whether collected errors carry rendered message text; false skips rendering (message: '', params/msgid still set)
    * @param {'error'|'ignore'} [unknownFormats='ignore'] - What to do when an ASSERTING `format` names something no compiler is registered for: 'ignore' (the default, and what the specification requires) accepts it as an annotation; 'error' throws at COMPILE time. Never affects instance validation, and never applies where format is annotation-only anyway.
+   * @param {boolean} [propertyDependencies=false] - Whether the `propertyDependencies` proposal keyword asserts. Off, it is an unknown keyword like any other; on, it applies in documents of draft 2020-12 (and the draft-next dialect) and in documents that declare no draft.
    */
   constructor(
     skipErrors = true,
@@ -264,7 +255,8 @@ export class ValidationOptions {
     vocabValidation = true,
     formatAssertion = null,
     messages = true,
-    unknownFormats = 'ignore'
+    unknownFormats = 'ignore',
+    propertyDependencies = false
   ) {
     /** @type {boolean} Whether to stop at first error or continue */
     this.skipErrors = skipErrors;
@@ -284,6 +276,8 @@ export class ValidationOptions {
     this.messages = messages;
     /** @type {'error'|'ignore'} What an asserting `format` with no registered compiler does */
     this.unknownFormats = unknownFormats;
+    /** @type {boolean} Whether the propertyDependencies proposal keyword asserts */
+    this.propertyDependencies = propertyDependencies;
   }
 }
 
@@ -416,15 +410,16 @@ export class ValidationRoot {
    * @param {Set<object>} seen - Cycle guard
    * @param {(node: object, key: string) => boolean} visit - Returns true to stop the walk
    * @param {boolean} [isSchema=true] - Whether node's keys are schema keywords
+   * @param {boolean} [mapMaps=false] - Whether `propertyDependencies` is on, so its value is a map of maps of schemas (off, it is an unknown keyword and walked like one)
    * @returns {boolean} True when `visit` stopped the walk
    */
-  static #walkKeywords(node, seen, visit, isSchema = true) {
+  static #walkKeywords(node, seen, visit, isSchema = true, mapMaps = false) {
     if (node == null || typeof node !== 'object') return false;
     if (seen.has(node)) return false;
     seen.add(node);
     if (Array.isArray(node)) {
       for (let i = 0; i < node.length; ++i) {
-        if (ValidationRoot.#walkKeywords(node[i], seen, visit, isSchema)) return true;
+        if (ValidationRoot.#walkKeywords(node[i], seen, visit, isSchema, mapMaps)) return true;
       }
       return false;
     }
@@ -434,13 +429,22 @@ export class ValidationRoot {
       if (isSchema) {
         if (visit(node, key)) return true;
         if (key === '$query' || key === 'errorMessage') continue;
+        if (mapMaps && TRAVERSE_SCHEMA_MAP_MAPS.includes(key)) {
+          // member name -> member value -> schema: both levels are names.
+          const outer = node[key];
+          if (outer === null || typeof outer !== 'object' || Array.isArray(outer)) continue;
+          for (const inner of Object.values(outer)) {
+            if (ValidationRoot.#walkKeywords(inner, seen, visit, false, mapMaps)) return true;
+          }
+          continue;
+        }
         if (ValidationRoot.#SCAN_MAP_KEYWORDS.has(key)) {
           // The value is a name->schema map: its keys are names, its values schemas.
-          if (ValidationRoot.#walkKeywords(node[key], seen, visit, false)) return true;
+          if (ValidationRoot.#walkKeywords(node[key], seen, visit, false, mapMaps)) return true;
           continue;
         }
       }
-      if (ValidationRoot.#walkKeywords(node[key], seen, visit, true)) return true;
+      if (ValidationRoot.#walkKeywords(node[key], seen, visit, true, mapMaps)) return true;
     }
     return false;
   }
@@ -477,8 +481,9 @@ export class ValidationRoot {
    * @param {any} node - The schema node to scan
    * @param {Set<object>} seen - Cycle guard
    * @param {{dollarData: boolean, unevaluated: boolean, canElide: boolean}} flags - Output flags
+   * @param {boolean} mapMaps - Whether `propertyDependencies` is on
    */
-  static #scanSchemaFeatures(node, seen, flags) {
+  static #scanSchemaFeatures(node, seen, flags, mapMaps) {
     ValidationRoot.#walkKeywords(node, seen, (holder, key) => {
       if (ValidationRoot.#readsLocation(holder, key)) flags.dollarData = true;
       else if (key === 'unevaluatedProperties' || key === 'unevaluatedItems') {
@@ -486,7 +491,7 @@ export class ValidationRoot {
           flags.unevaluated = true;
       }
       return flags.dollarData && flags.unevaluated;
-    });
+    }, true, mapMaps);
   }
 
   /**
@@ -507,7 +512,7 @@ export class ValidationRoot {
     this.#formats = formats;
 
     this.#options = opts;
-    this.#traverse = traverse;
+    this.#traverse = traverseOptionsFor(traverse, opts.propertyDependencies);
     this.#owner = owner;
 
     this.#objects = new Map();
@@ -523,7 +528,7 @@ export class ValidationRoot {
     const flags = { dollarData: false, unevaluated: false, canElide: opts.skipErrors === true };
     const seen = new Set();
     for (const value of schemas.values()) {
-      ValidationRoot.#scanSchemaFeatures(value, seen, flags);
+      ValidationRoot.#scanSchemaFeatures(value, seen, flags, opts.propertyDependencies === true);
       if (flags.dollarData && flags.unevaluated) break;
     }
     this.#usesDollarData = flags.dollarData;
@@ -542,7 +547,7 @@ export class ValidationRoot {
 
     // Entering the root resource brings ALL of its $dynamicAnchors into the
     // dynamic scope (the root's own anchor is handled via #rootAnchorName).
-    this.#rootDynamicAnchors = collectDynamicAnchorsDeep(rootSchema)
+    this.#rootDynamicAnchors = collectDynamicAnchorsDeep(rootSchema, opts.propertyDependencies === true)
       .filter(anchor => anchor.schema !== rootSchema);
   }
 
@@ -583,7 +588,8 @@ export class ValidationRoot {
       const memo = isSchema ? this.#readsBelowSchema : this.#readsBelowMap;
       let reads = memo.get(value);
       if (reads === undefined) {
-        reads = ValidationRoot.#walkKeywords(value, new Set(), ValidationRoot.#holdsReaderOrReference, isSchema);
+        reads = ValidationRoot.#walkKeywords(value, new Set(), ValidationRoot.#holdsReaderOrReference, isSchema,
+          this.#options.propertyDependencies === true);
         memo.set(value, reads);
       }
       if (reads) return true;
@@ -977,7 +983,7 @@ export class ValidationObject {
       // as refValidator below). Source $defs anchors are kept for schemas
       // whose resource entry point is the $ref itself.
       const enterAnchors = sourceDynamicAnchors.slice();
-      const targetDeepAnchors = collectDynamicAnchorsDeep(resolvedSchema);
+      const targetDeepAnchors = collectDynamicAnchorsDeep(resolvedSchema, root.options.propertyDependencies === true);
       for (let i = 0; i < targetDeepAnchors.length; i++) {
         const anchor = targetDeepAnchors[i];
         if (anchor.schema === resolvedSchema) continue;
@@ -1080,7 +1086,7 @@ export class ValidationObject {
         // Entering the target resource brings ALL of its $dynamicAnchors into
         // the dynamic scope, exactly like the pre-compiled path above.
         const enterAnchors = boundSourceAnchors.slice();
-        const targetDeepAnchors = collectDynamicAnchorsDeep(resolvedSchema);
+        const targetDeepAnchors = collectDynamicAnchorsDeep(resolvedSchema, root.options.propertyDependencies === true);
         for (let i = 0; i < targetDeepAnchors.length; i++) {
           const anchor = targetDeepAnchors[i];
           if (anchor.schema === resolvedSchema) continue;
@@ -1201,7 +1207,7 @@ export class ValidationObject {
     const draft = this.#declaredDraft ?? root.options.draftVersion;
     if (draft >= 2020 && isObjectClass(schema) && isStringType(schema.$id)
       && path !== baseUri) {
-      const anchors = collectDynamicAnchorsDeep(schema);
+      const anchors = collectDynamicAnchorsDeep(schema, root.options.propertyDependencies === true, this.#declaredDraft);
       if (anchors.length > 0) {
         const resourceBase = this.#effectiveBaseUri;
         const inner = (data, dataPath, dataRoot, dataKey) => this.#validator(data, dataPath, dataRoot, dataKey);
@@ -1309,10 +1315,11 @@ export class ValidationObject {
    * This is used when compiling nested schemas (e.g., array items, object properties).
    * @param {JSONSchema | boolean} schema - The child schema to compile
    * @param {string} key - The property key where the schema is located
-   * @param {number} [index] - Optional array index for tuple items
+   * @param {number|string} [index] - Optional array index for tuple items, or the name inside a map
+   * @param {string} [member] - Optional name inside a map of maps, below `index`
    * @returns {function|undefined} The compiled validator function, or undefined if schema is invalid
    */
-  createValidator(schema, key, index) {
+  createValidator(schema, key, index, member) {
     if (!isBoolOrObjectClass(schema))
       return undefined;
 
@@ -1340,7 +1347,9 @@ export class ValidationObject {
       ? id
       : index == null
         ? encodeJsonPointerPath(id, key)
-        : encodeJsonPointerPath(id, key, String(index));
+        : member == null
+          ? encodeJsonPointerPath(id, key, String(index))
+          : encodeJsonPointerPath(encodeJsonPointerPath(id, key, String(index)), member);
 
 
 
@@ -1419,7 +1428,7 @@ export class ValidatorOptions {
       /** @type {object[]} Initial schemas to register */
       this.schemas = opts.schemas || [];
       // If collectErrors is passed directly, create ValidationOptions with it
-      if (opts.collectErrors != null || opts.skipErrors != null || opts.useGrapheme != null || opts.contentValidation != null || opts.draftVersion != null || opts.formatAssertion != null || opts.messages != null || opts.unknownFormats != null) {
+      if (opts.collectErrors != null || opts.skipErrors != null || opts.useGrapheme != null || opts.contentValidation != null || opts.draftVersion != null || opts.formatAssertion != null || opts.messages != null || opts.unknownFormats != null || opts.propertyDependencies != null) {
         const collectErrors = opts.collectErrors ?? false;
         this.validation = new ValidationOptions(
           // collecting errors implies actually recording them
@@ -1434,7 +1443,8 @@ export class ValidatorOptions {
           true,
           opts.formatAssertion ?? null,
           opts.messages ?? true,
-          opts.unknownFormats ?? 'ignore'
+          opts.unknownFormats ?? 'ignore',
+          opts.propertyDependencies ?? false
         );
       } else {
         /** @type {ValidationOptions} Validation behavior options */
@@ -1486,6 +1496,7 @@ export class ValidatorOptions {
  * @property {boolean} [formatAssertion] - Assert the format keyword
  * @property {boolean} [messages] - Render English message text on collected errors
  * @property {'error'|'ignore'} [unknownFormats] - What an ASSERTING `format` with no registered compiler does: 'ignore' (default, per spec) accepts it as an annotation, 'error' throws at compile time
+ * @property {boolean} [propertyDependencies] - Assert the `propertyDependencies` proposal keyword (default false: it is an unknown keyword); applies in draft 2020-12 (and draft-next) documents and in documents that declare no draft
  */
 
 /**
@@ -1512,6 +1523,8 @@ export class JarenValidator {
   #metaSchemas = new Map();
   /** @type {ValidatorOptions} Validator options */
   #options = new ValidatorOptions();
+  /** @type {TraverseOptions} The traversal options, carrying the `propertyDependencies` switch of the validation options */
+  #traverse = new TraverseOptions();
 
   /**
    * Creates a new JarenValidator instance.
@@ -1527,6 +1540,7 @@ export class JarenValidator {
     this.#schemas = new Map();
     this.#metaSchemas = new Map();
     this.#options = options;
+    this.#traverse = traverseOptionsFor(options.traverse, options.validation?.propertyDependencies);
   }
 
   /**
@@ -1655,7 +1669,7 @@ export class JarenValidator {
       if (!key.startsWith(prefix) || !isObjectClass(entry) || !hasSchemaReference(entry, '$ref'))
         continue;
       try {
-        resolveRefSchemaDeep(this.#schemas, key, entry, this.#options.traverse);
+        resolveRefSchemaDeep(this.#schemas, key, entry, this.#traverse);
       }
       catch (e) {
         // A target not registered yet is reported where it is used.
@@ -1673,7 +1687,7 @@ export class JarenValidator {
    * @param {object} schema - The schema to traverse
    */
   #traverseAndStoreIds(baseUri, schema) {
-    const traverseOpts = this.#options.traverse;
+    const traverseOpts = this.#traverse;
 
     // Create options with anchorsGlobal: false to scope anchors to their document.
     // This prevents conflicts when multiple schemas use the same anchor names (e.g., '#foo').
@@ -1683,7 +1697,8 @@ export class JarenValidator {
       traverseOpts.mergeSchemas,
       false, // anchorsGlobal: false - scope anchors to document
       traverseOpts.anchorsAllowed,
-      traverseOpts.skipErrors
+      traverseOpts.skipErrors,
+      traverseOpts.propertyDependencies
     );
 
     // Use a wrapper map to collect new entries, then merge them
@@ -1715,7 +1730,7 @@ export class JarenValidator {
       schemas,
       self.#formats,
       validation,
-      self.#options.traverse,
+      self.#traverse,
       self);
 
     const collectErrors = self.#options.validation?.collectErrors || false;
@@ -2040,7 +2055,7 @@ export class JarenValidator {
    * // result = { valid: false, errors: [...] }
    */
   compile(schema, schemas = undefined) {
-    const { origin, map } = JarenValidator.#traverseSchema(schema, schemas, this.#schemas, this.#options.traverse);
+    const { origin, map } = JarenValidator.#traverseSchema(schema, schemas, this.#schemas, this.#traverse);
 
     // Detect draft version from schema and update validation options
     const draftVersion = detectSchemaDraft(schema);
@@ -2083,7 +2098,8 @@ export class JarenValidator {
       vocabValidation,
       formatAssertion,
       existingValidation.messages ?? true,
-      existingValidation.unknownFormats ?? 'ignore'
+      existingValidation.unknownFormats ?? 'ignore',
+      existingValidation.propertyDependencies ?? false
     );
 
     // Pre-compile all refs before returning the validator
@@ -2093,7 +2109,7 @@ export class JarenValidator {
       map,
       this.#formats,
       validationOptions,
-      this.#options.traverse,
+      this.#traverse,
       this
     );
 

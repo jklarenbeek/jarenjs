@@ -43,6 +43,7 @@ import { compileCombineSchema } from './combine.js';
 import { compileConditionSchema } from './condition.js';
 import { compileDataSchema } from './data.js';
 import { compileQuerySchema } from './query-keyword.js';
+import { compilePropertyDependencies } from './property-dependencies.js';
 import { compileDollarDataSchema } from './dollar-data.js';
 import { wrapUnevaluated } from './unevaluated.js';
 import { createJsonPointer } from './traverse.js';
@@ -414,7 +415,7 @@ export function compileSchemaObject(schemaObj, jsonSchema) {
     // (REF_SIBLING_KEYWORDS — the one list the reference resolver reads
     // too). In draft 2019-09+, if there are validation siblings, we
     // process them together.
-    const hasValidationSiblings = hasRefSiblings(jsonSchema);
+    const hasValidationSiblings = hasRefSiblings(jsonSchema, schemaObj.options.propertyDependencies === true);
     // In draft 7 and earlier, $ref always overrides siblings regardless
     // In draft 2019-09+, $ref can have validation siblings
     if (!hasValidationSiblings || draftVersion < 2019) {
@@ -580,6 +581,7 @@ export function compileSchemaObject(schemaObj, jsonSchema) {
 
   addFunctionToArray(validators, compileCombineSchema(schemaObj, jsonSchema));
   addFunctionToArray(validators, compileConditionSchema(schemaObj, jsonSchema));
+  addFunctionToArray(validators, compilePropertyDependencies(schemaObj, jsonSchema));
   addFunctionToArray(validators, compileDataSchema(schemaObj, jsonSchema));
   addFunctionToArray(validators, compileQuerySchema(schemaObj, jsonSchema));
 

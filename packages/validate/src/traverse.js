@@ -26,7 +26,13 @@ import {
   decodeJSONPointerSegment,
 } from '@jarenjs/json/pointer';
 
-import { TRAVERSE_SCHEMA_OBJECTS, TRAVERSE_SCHEMA_MAPS } from './schema-keywords.js';
+import {
+  TRAVERSE_SCHEMA_OBJECTS,
+  TRAVERSE_SCHEMA_MAPS,
+  TRAVERSE_SCHEMA_MAP_MAPS,
+  detectSchemaDraft,
+  admitsPropertyDependencies,
+} from './schema-keywords.js';
 
 function encodeJsonPointerKey(key) {
   return encodeURIComponent(encodeJSONPointerSegment(key));
@@ -158,10 +164,12 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
 
   baseUri = rootUri;
 
-  const queue = [{ obj: schema, base: rootUri, path: '#' }];
+  const queue = [{ obj: schema, base: rootUri, path: '#', draft: null }];
   while (queue.length > 0) {
     // @ts-ignore
-    const { obj, base, path } = queue.shift();
+    const { obj, base, path, draft: inheritedDraft } = queue.shift();
+    // The draft a document declares is inherited by everything below it.
+    const draft = isStringType(obj.$schema) ? detectSchemaDraft(obj) : inheritedDraft;
 
     // Handle $id (draft 6+) or id (draft 4) for identifying subschemas
     const idKeyword = isStringType(obj.$id) ? obj.$id : isStringType(obj.id) ? obj.id : undefined;
@@ -249,13 +257,13 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
                 throw new Error(`${nextpath} is not a schema`);
             }
 
-            queue.push({ obj: item, base: baseUri, path: nextpath });
+            queue.push({ obj: item, base: baseUri, path: nextpath, draft });
           }
         }
         else {
           const nextpath = encodeJsonPointerPath(path, key);
 
-          queue.push({ obj: value, base: baseUri, path: nextpath });
+          queue.push({ obj: value, base: baseUri, path: nextpath, draft });
         }
       }
       // or is the property a map of key and schema objects?
@@ -274,7 +282,31 @@ export function storeSchemaIdsInMap(schemas, baseUri, schema, opts = new JsonPoi
               throw new Error(`${nextpath} is not a schema`);
           }
 
-          queue.push({ obj: item, base: baseUri, path: nextpath });
+          queue.push({ obj: item, base: baseUri, path: nextpath, draft });
+        }
+      }
+      // or a map of maps (member name -> member value -> schema objects)?
+      else if (TRAVERSE_SCHEMA_MAP_MAPS.includes(key) && admitsPropertyDependencies(opts.propertyDependencies, draft)) {
+        if (Array.isArray(value))
+          continue;
+
+        for (const [outer, inner] of Object.entries(value)) {
+          if (!isObjectClass(inner) || Array.isArray(inner))
+            continue;
+          const outerPath = encodeJsonPointerPath(path, key, outer);
+          for (const [index, item] of Object.entries(inner)) {
+            const nextpath = encodeJsonPointerPath(outerPath, index);
+            if (isBoolishType(item))
+              continue;
+            if (!isObjectClass(item)) {
+              if (opts.skipErrors === true)
+                continue;
+              else
+                throw new Error(`${nextpath} is not a schema`);
+            }
+
+            queue.push({ obj: item, base: baseUri, path: nextpath, draft });
+          }
         }
       }
     }
@@ -405,12 +437,29 @@ export class TraverseOptions extends JsonPointerOptions {
     mergeSchemas = true,
     anchorsGlobal = false,
     anchorsAllowed = true,
-    skipErrors = true
+    skipErrors = true,
+    propertyDependencies = false
   ) {
     super(anchorsGlobal, anchorsAllowed, skipErrors);
-    this.origin = origin,
+    this.origin = origin;
     this.mergeSchemas = mergeSchemas;
+    /** Whether the `propertyDependencies` keyword is on: its subschemas are then registered and walked */
+    this.propertyDependencies = propertyDependencies;
   }
+}
+
+/**
+ * The traversal options to use under a validation option set: `traverse`
+ * itself, or a copy of it carrying the `propertyDependencies` switch when the
+ * validation options turn the keyword on and `traverse` does not say so.
+ * @param {TraverseOptions} traverse
+ * @param {boolean|null|undefined} propertyDependencies - The validation option
+ * @returns {TraverseOptions}
+ */
+export function traverseOptionsFor(traverse, propertyDependencies) {
+  return propertyDependencies === true && traverse.propertyDependencies !== true
+    ? Object.assign(new TraverseOptions(), traverse, { propertyDependencies: true })
+    : traverse;
 }
 
 /**
@@ -458,7 +507,7 @@ export function resolveRefSchemaDeep(schemas, baseUri, refschema, opts = new Tra
     // written and compiled as a schema object, where the resource's
     // draft decides whether its siblings assert (draft-07 ignores them).
     if (hasSchemaReference(item, '$ref')) {
-      if (item !== refschema && hasRefSiblings(item))
+      if (item !== refschema && hasRefSiblings(item, opts.propertyDependencies === true))
         return { id: base, schema: item };
       const ref = item.$ref;
       const { id, schema } = resolveRefSchemaShallow(schemas, ref, base, opts);

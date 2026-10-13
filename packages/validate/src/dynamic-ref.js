@@ -15,7 +15,13 @@
  */
 
 import { isObjectClass, isStringType } from '@jarenjs/core';
-import { TRAVERSE_SCHEMA_OBJECTS, TRAVERSE_SCHEMA_MAPS } from './schema-keywords.js';
+import {
+  TRAVERSE_SCHEMA_OBJECTS,
+  TRAVERSE_SCHEMA_MAPS,
+  TRAVERSE_SCHEMA_MAP_MAPS,
+  detectSchemaDraft,
+  admitsPropertyDependencies,
+} from './schema-keywords.js';
 
 /**
  * Check if a schema has $recursiveAnchor: true.
@@ -48,21 +54,23 @@ export function getDynamicAnchorName(schema) {
  * @param {object} schema - The resource root schema object
  * @returns {Array<{name: string, schema: object, validator: (function|null)}>}
  */
-export function collectDynamicAnchorsDeep(schema) {
+export function collectDynamicAnchorsDeep(schema, propertyDependencies = false, declaredDraft = null) {
   const anchors = [];
   if (!isObjectClass(schema)) return anchors;
 
   const seen = new Set();
-  const queue = [{ node: schema, isRoot: true }];
+  const queue = [{ node: schema, isRoot: true, draft: declaredDraft }];
   while (queue.length > 0) {
-    const { node, isRoot } = queue.shift();
+    const { node, isRoot, draft: inheritedDraft } = queue.shift();
     if (!isObjectClass(node) && !Array.isArray(node)) continue;
     if (seen.has(node)) continue;
     seen.add(node);
+    // The draft a document declares is inherited by everything below it.
+    const draft = isStringType(node.$schema) ? detectSchemaDraft(node) : inheritedDraft;
 
     if (Array.isArray(node)) {
       for (let i = 0; i < node.length; ++i) {
-        queue.push({ node: node[i], isRoot: false });
+        queue.push({ node: node[i], isRoot: false, draft });
       }
       continue;
     }
@@ -78,10 +86,17 @@ export function collectDynamicAnchorsDeep(schema) {
 
     for (const key of Object.keys(node)) {
       if (TRAVERSE_SCHEMA_OBJECTS.includes(key))
-        queue.push({ node: node[key], isRoot: false });
+        queue.push({ node: node[key], isRoot: false, draft });
       else if (TRAVERSE_SCHEMA_MAPS.includes(key) && isObjectClass(node[key])) {
         for (const child of Object.values(node[key]))
-          queue.push({ node: child, isRoot: false });
+          queue.push({ node: child, isRoot: false, draft });
+      }
+      else if (TRAVERSE_SCHEMA_MAP_MAPS.includes(key) && admitsPropertyDependencies(propertyDependencies, draft) && isObjectClass(node[key])) {
+        for (const inner of Object.values(node[key])) {
+          if (!isObjectClass(inner)) continue;
+          for (const child of Object.values(inner))
+            queue.push({ node: child, isRoot: false, draft });
+        }
       }
     }
   }

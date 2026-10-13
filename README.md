@@ -237,7 +237,7 @@ For detailed API documentation beyond that, visit our official documentation. Wh
 
 ## 📅 Roadmap
 
-The roadmap lives in its own document: [ROADMAP.md](docs/ROADMAP.md). It tracks the remaining release milestones (1.0 stable → beyond) together with the open work per package — from the JSLT single-walk matcher optimizer and query hash joins to lazy `$range`, the `propertyDependencies` proposal and JSON Schema standard output formats.
+The roadmap lives in its own document: [ROADMAP.md](docs/ROADMAP.md). It tracks the remaining release milestones (1.0 stable → beyond) together with the open work per package — from the JSLT single-walk matcher optimizer and query hash joins to lazy `$range` and JSON Schema standard output formats.
 
 It deliberately lists **only what is still open**. When something ships, its knowledge moves into the document a reader would actually reach for — the package `README`, its `ARCHITECTURE.md`, the format spec — and the entry leaves the roadmap. That is what keeps it a plan you can act on rather than a changelog you have to read past; the record of *when* something shipped is in the git history and the release tags.
 

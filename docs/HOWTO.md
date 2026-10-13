@@ -953,6 +953,7 @@ new JarenValidator(options?: ValidationOptions)
 | `formatAssertion` | boolean\|null | null (per draft) | Assert `format`; auto-asserts below draft 2020-12 |
 | `contentValidation` | boolean\|null | null (per draft) | Assert `contentEncoding`/`contentMediaType`; auto-asserts below 2019-09 |
 | `messages` | boolean | true | Render English `message` text on collected errors |
+| `propertyDependencies` | boolean | false | Assert the proposed `propertyDependencies` keyword; off, it is an unknown keyword that is not looked into. On, it applies to 2020-12 documents, to `https://json-schema.org/draft/next/schema` (read as 2020-12) and to documents with no `$schema`; older or unrecognised `$schema` URIs ignore it |
 | `formats` | object | `{}` | Format compilers to register at construction |
 | `schemas` | object[] | `[]` | Schemas to register at construction |
 
