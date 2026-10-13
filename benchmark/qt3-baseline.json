@@ -1,8 +1,8 @@
 {
- "$comment": "QT3 baseline: every attributed tier-A failure (see benchmark/qt3-README.md). Deviation ids: D1-D7 QUERY-FORMAT.md section 11; E1/E2 engine rules (comparison/no-atomization, sections 8.4-8.10); F1-F6 front-end approximations (XQUERY-FRONTEND.md section 3). skip: fatal resource exhaustion, never run in-process.",
+ "$comment": "QT3 baseline: every attributed tier-A failure (see benchmark/qt3-README.md). Deviation ids: D1-D7 QUERY-FORMAT.md section 11; E1/E2 engine rules (comparison/no-atomization, sections 8.4-8.10); E3 resource guards (section 8.9); E4 NaN ordering (section 6.6); F1-F6 front-end approximations (XQUERY-FRONTEND.md section 3). skip: fatal resource exhaustion, never run in-process.",
  "summary": {
-  "pass": 1852,
-  "unsupported-syntax": 21198
+  "pass": 3363,
+  "unsupported-syntax": 19199
  },
  "tests": {
   "ArrayTest-044": {
@@ -34,6 +34,26 @@
    "status": "deviation",
    "id": "D1",
    "note": "IEEE double division: div by 0 is +-Infinity/NaN, not FOAR0001"
+  },
+  "FOAR0002_3": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "$idiv is IEEE: a NaN or infinite operand gives NaN/Infinity and a huge quotient is a double, never FOAR0002 (QUERY-FORMAT section 8.5)"
+  },
+  "FOAR0002_4": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "$idiv is IEEE: a NaN or infinite operand gives NaN/Infinity and a huge quotient is a double, never FOAR0002 (QUERY-FORMAT section 8.5)"
+  },
+  "FOCA0001_1": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "FOCA0003_1": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
   },
   "GenCompEq-7": {
    "status": "deviation",
@@ -120,6 +140,16 @@
    "id": "E1",
    "note": "incomparable item pairs compare false, never XPTY0004 (QUERY-FORMAT section 8.4); value comparisons are existential (F1)"
   },
+  "K-GenCompEq-52": {
+   "status": "deviation",
+   "id": "E1",
+   "note": "incomparable item pairs compare false, never XPTY0004 (QUERY-FORMAT section 8.4); value comparisons are existential (F1)"
+  },
+  "K-GenCompEq-53": {
+   "status": "deviation",
+   "id": "E1",
+   "note": "incomparable item pairs compare false, never XPTY0004 (QUERY-FORMAT section 8.4); value comparisons are existential (F1)"
+  },
   "K-GenCompNE-33": {
    "status": "deviation",
    "id": "E1",
@@ -131,6 +161,16 @@
    "note": "incomparable item pairs compare false, never XPTY0004 (QUERY-FORMAT section 8.4); value comparisons are existential (F1)"
   },
   "K-GenCompNE-36": {
+   "status": "deviation",
+   "id": "E1",
+   "note": "incomparable item pairs compare false, never XPTY0004 (QUERY-FORMAT section 8.4); value comparisons are existential (F1)"
+  },
+  "K-GenCompNE-37": {
+   "status": "deviation",
+   "id": "E1",
+   "note": "incomparable item pairs compare false, never XPTY0004 (QUERY-FORMAT section 8.4); value comparisons are existential (F1)"
+  },
+  "K-GenCompNE-38": {
    "status": "deviation",
    "id": "E1",
    "note": "incomparable item pairs compare false, never XPTY0004 (QUERY-FORMAT section 8.4); value comparisons are existential (F1)"
@@ -149,6 +189,46 @@
    "status": "deviation",
    "id": "E1",
    "note": "booleans/mixed types do not order; value comparisons over empty sequences are false, not empty (F1)"
+  },
+  "K-NumericIntegerDivide-31": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "$idiv is IEEE: a NaN or infinite operand gives NaN/Infinity and a huge quotient is a double, never FOAR0002 (QUERY-FORMAT section 8.5)"
+  },
+  "K-NumericIntegerDivide-32": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "$idiv is IEEE: a NaN or infinite operand gives NaN/Infinity and a huge quotient is a double, never FOAR0002 (QUERY-FORMAT section 8.5)"
+  },
+  "K-NumericIntegerDivide-33": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "$idiv is IEEE: a NaN or infinite operand gives NaN/Infinity and a huge quotient is a double, never FOAR0002 (QUERY-FORMAT section 8.5)"
+  },
+  "K-NumericIntegerDivide-34": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "$idiv is IEEE: a NaN or infinite operand gives NaN/Infinity and a huge quotient is a double, never FOAR0002 (QUERY-FORMAT section 8.5)"
+  },
+  "K-NumericIntegerDivide-37": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "$idiv is IEEE: a NaN or infinite operand gives NaN/Infinity and a huge quotient is a double, never FOAR0002 (QUERY-FORMAT section 8.5)"
+  },
+  "K-NumericIntegerDivide-38": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "$idiv is IEEE: a NaN or infinite operand gives NaN/Infinity and a huge quotient is a double, never FOAR0002 (QUERY-FORMAT section 8.5)"
+  },
+  "K-NumericIntegerDivide-39": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "$idiv is IEEE: a NaN or infinite operand gives NaN/Infinity and a huge quotient is a double, never FOAR0002 (QUERY-FORMAT section 8.5)"
+  },
+  "K-NumericIntegerDivide-40": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "$idiv is IEEE: a NaN or infinite operand gives NaN/Infinity and a huge quotient is a double, never FOAR0002 (QUERY-FORMAT section 8.5)"
   },
   "K-NumericMod-19": {
    "status": "deviation",
@@ -194,6 +274,26 @@
    "status": "deviation",
    "id": "D5",
    "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "K-SeqExprCast-78": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K-SeqExprCast-79": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K-SeqExprCast-83": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K-SeqExprCast-84": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
   },
   "K-SeqIndexOfFunc-12": {
    "status": "deviation",
@@ -420,10 +520,60 @@
    "id": "D1",
    "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
   },
+  "K2-NumericDivide-7": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-NumericDivide-8": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-NumericMod-22": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "$mod with a zero divisor is JQ2002; XQuery double mod by zero is NaN (QUERY-FORMAT section 8.5)"
+  },
+  "K2-NumericMod-25": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "$mod with a zero divisor is JQ2002; XQuery double mod by zero is NaN (QUERY-FORMAT section 8.5)"
+  },
+  "K2-NumericMod-26": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "$mod with a zero divisor is JQ2002; XQuery double mod by zero is NaN (QUERY-FORMAT section 8.5)"
+  },
+  "K2-NumericMod-34": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "$mod with a zero divisor is JQ2002; XQuery double mod by zero is NaN (QUERY-FORMAT section 8.5)"
+  },
+  "K2-NumericMod-37": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "$mod with a zero divisor is JQ2002; XQuery double mod by zero is NaN (QUERY-FORMAT section 8.5)"
+  },
+  "K2-NumericMod-38": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "$mod with a zero divisor is JQ2002; XQuery double mod by zero is NaN (QUERY-FORMAT section 8.5)"
+  },
   "K2-OrderbyExprWithout-16": {
    "status": "deviation",
    "id": "E1",
    "note": "only numbers and strings order in the JSON model ($orderby/$sort/$min/$max key rules)"
+  },
+  "K2-OrderbyExprWithout-46": {
+   "status": "deviation",
+   "id": "E4",
+   "note": "NaN orders least whatever the empty greatest/least modifier says (QUERY-FORMAT 6.6), where XQuery places NaN with the empties; Infinity also serializes as JS does (D1)"
+  },
+  "K2-OrderbyExprWithout-47": {
+   "status": "deviation",
+   "id": "E4",
+   "note": "NaN orders least whatever the empty greatest/least modifier says (QUERY-FORMAT 6.6), where XQuery places NaN with the empties; Infinity also serializes as JS does (D1)"
   },
   "K2-RangeExpr-1": {
    "status": "deviation",
@@ -445,10 +595,25 @@
    "id": "D5",
    "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
   },
+  "K2-SeqExprCast-223": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "K2-SeqExprCast-224": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
   "K2-TokenizeFunc-6": {
    "status": "deviation",
    "id": "D5",
    "note": "pattern is valid XSD regex but not I-Regexp"
+  },
+  "LetExpr006": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
   },
   "LetExpr020a": {
    "status": "deviation",
@@ -550,6 +715,31 @@
    "id": "E2",
    "note": "computed map keys must be strings (JQ2004); XQuery would find the duplicate xs:integer keys (XQDY0137)"
   },
+  "MapConstructor-038": {
+   "status": "deviation",
+   "id": "E2",
+   "note": "computed map keys must be strings (JQ2004); XQuery would find the duplicate xs:integer keys (XQDY0137)"
+  },
+  "MapConstructor-039": {
+   "status": "deviation",
+   "id": "E2",
+   "note": "computed map keys must be strings (JQ2004); XQuery would find the duplicate xs:integer keys (XQDY0137)"
+  },
+  "MapConstructor-040": {
+   "status": "deviation",
+   "id": "E2",
+   "note": "computed map keys must be strings (JQ2004); XQuery would find the duplicate xs:integer keys (XQDY0137)"
+  },
+  "RangeExpr-408c": {
+   "status": "deviation",
+   "id": "E3",
+   "note": "resource guard: a materialized $range over 1,000,000 items is refused JQ2007"
+  },
+  "RangeExpr-408d": {
+   "status": "deviation",
+   "id": "E3",
+   "note": "resource guard: a materialized $range over 1,000,000 items is refused JQ2007"
+  },
   "RangeExpr-409": {
    "status": "deviation",
    "id": "D1",
@@ -559,6 +749,11 @@
    "status": "deviation",
    "id": "D1",
    "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "RangeExpr-409c": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53: $range bounds must be safe integers (JQ2001)"
   },
   "RangeExpr-409d": {
    "status": "bug",
@@ -579,6 +774,16 @@
    "status": "deviation",
    "id": "D1",
    "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "RangeExpr-411c": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53: $range bounds must be safe integers (JQ2001)"
+  },
+  "RangeExpr-411d": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53: $range bounds must be safe integers (JQ2001)"
   },
   "RangeExpr-411e": {
    "status": "deviation",
@@ -679,6 +884,16 @@
    "status": "deviation",
    "id": "D3",
    "note": "EBV of a singleton array/object is true, never FORG0006"
+  },
+  "cbcl-count-001": {
+   "status": "deviation",
+   "id": "E3",
+   "note": "resource guard: a materialized $range over 1,000,000 items is refused JQ2007"
+  },
+  "cbcl-float-002": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "xs:float is an IEEE double here: no single-precision value, range or serialization"
   },
   "cbcl-fn-indexof-1": {
    "status": "deviation",
@@ -810,6 +1025,11 @@
    "id": "E1",
    "note": "only numbers and strings order in the JSON model ($orderby/$sort/$min/$max key rules)"
   },
+  "cbcl-numeric-idivide-008": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "$idiv is IEEE: a NaN or infinite operand gives NaN/Infinity and a huge quotient is a double, never FOAR0002 (QUERY-FORMAT section 8.5)"
+  },
   "cbcl-subsequence-010": {
    "status": "bug",
    "skip": true,
@@ -850,10 +1070,200 @@
    "id": "E1",
    "note": "incomparable item pairs compare false, never XPTY0004 (QUERY-FORMAT section 8.4); value comparisons are existential (F1)"
   },
+  "extvardeclwithouttype-6": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
   "fn-avg-10": {
    "status": "deviation",
    "id": "E2",
    "note": "aggregates treat an array as one item (no atomization), JQ2001"
+  },
+  "fn-avg-mix-args-012": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "fn-avg-mix-args-014": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "fn-avg-mix-args-017": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "fn-avg-mix-args-019": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "fn-avg-mix-args-024": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "fn-avg-mix-args-026": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "fn-avg-mix-args-027": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "fn-avgflt2args-2": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "xs:float is an IEEE double here: no single-precision value, range or serialization"
+  },
+  "fn-avgflt2args-4": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "xs:float is an IEEE double here: no single-precision value, range or serialization"
+  },
+  "fn-avgintg2args-2": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-avgintg2args-4": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-concatdbl2args-1": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "fn-concatdbl2args-2": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "fn-concatdbl2args-3": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "fn-concatdbl2args-4": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "fn-concatdbl2args-5": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "fn-concatdec2args-1": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-concatdec2args-2": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-concatdec2args-3": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-concatdec2args-4": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-concatdec2args-5": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-concatflt2args-1": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "xs:float is an IEEE double here: no single-precision value, range or serialization"
+  },
+  "fn-concatflt2args-2": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "xs:float is an IEEE double here: no single-precision value, range or serialization"
+  },
+  "fn-concatflt2args-3": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "xs:float is an IEEE double here: no single-precision value, range or serialization"
+  },
+  "fn-concatflt2args-4": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "xs:float is an IEEE double here: no single-precision value, range or serialization"
+  },
+  "fn-concatflt2args-5": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "xs:float is an IEEE double here: no single-precision value, range or serialization"
+  },
+  "fn-concatintg2args-1": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-concatintg2args-2": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-concatintg2args-3": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-concatintg2args-4": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-concatintg2args-5": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-distinct-values-mixed-args-015": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "fn-distinct-values-mixed-args-016": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "fn-distinct-values-mixed-args-017": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "fn-distinct-values-mixed-args-022": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "fn-distinct-values-mixed-args-023": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "fn-distinct-values-mixed-args-024": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
   },
   "fn-false-10": {
    "status": "deviation",
@@ -1035,6 +1445,46 @@
    "id": "F5",
    "note": "fn:number maps to $number: strict RFC 8259 number grammar, JQ2001 instead of NaN, empty propagates"
   },
+  "fn-numberdbl1args-1": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "fn-numberdbl1args-3": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "fn-numberdec1args-1": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-numberdec1args-3": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-numberflt1args-1": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "xs:float is an IEEE double here: no single-precision value, range or serialization"
+  },
+  "fn-numberflt1args-3": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "xs:float is an IEEE double here: no single-precision value, range or serialization"
+  },
+  "fn-numberintg1args-1": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-numberintg1args-3": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
   "fn-replace-10": {
    "status": "deviation",
    "id": "D5",
@@ -1135,10 +1585,90 @@
    "id": "E2",
    "note": "$string propagates the empty sequence; fn:string(()) is \"\""
   },
+  "fn-stringdbl1args-1": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "fn-stringdbl1args-3": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "fn-stringdec1args-1": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-stringdec1args-2": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-stringdec1args-3": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-stringflt1args-1": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "xs:float is an IEEE double here: no single-precision value, range or serialization"
+  },
+  "fn-stringflt1args-3": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "xs:float is an IEEE double here: no single-precision value, range or serialization"
+  },
+  "fn-stringintg1args-1": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-stringintg1args-2": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-stringintg1args-3": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-subsequence-mix-args-013": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "equality is the engine's (equalsJson): NaN equals nothing, where fn:deep-equal treats NaN as equal to itself"
+  },
   "fn-sum-11": {
    "status": "deviation",
    "id": "E2",
    "note": "aggregates treat an array as one item (no atomization), JQ2001"
+  },
+  "fn-sumdbl3args-1": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "fn-sumdbl3args-6": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "fn-sumflt3args-1": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "xs:float is an IEEE double here: no single-precision value, range or serialization"
+  },
+  "fn-sumintg2args-1": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "fn-sumintg2args-3": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
   },
   "fn-true-10": {
    "status": "deviation",
@@ -1159,6 +1689,16 @@
    "status": "deviation",
    "id": "E1",
    "note": "booleans/mixed types do not order; value comparisons over empty sequences are false, not empty (F1)"
+  },
+  "fo-test-fn-avg-004": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "equality is the engine's (equalsJson): NaN equals nothing, where fn:deep-equal treats NaN as equal to itself"
+  },
+  "fo-test-fn-avg-005": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "equality is the engine's (equalsJson): NaN equals nothing, where fn:deep-equal treats NaN as equal to itself"
   },
   "fo-test-fn-index-of-002": {
    "status": "deviation",
@@ -1305,10 +1845,340 @@
    "id": "E1",
    "note": "incomparable item pairs compare false, never XPTY0004 (QUERY-FORMAT section 8.4); value comparisons are existential (F1)"
   },
+  "op-boolean-greater-than-10": {
+   "status": "deviation",
+   "id": "E1",
+   "note": "booleans/mixed types do not order; value comparisons over empty sequences are false, not empty (F1)"
+  },
+  "op-boolean-greater-than-11": {
+   "status": "deviation",
+   "id": "E1",
+   "note": "booleans/mixed types do not order; value comparisons over empty sequences are false, not empty (F1)"
+  },
+  "op-boolean-greater-than-2": {
+   "status": "deviation",
+   "id": "E1",
+   "note": "booleans/mixed types do not order; value comparisons over empty sequences are false, not empty (F1)"
+  },
+  "op-boolean-greater-than-4": {
+   "status": "deviation",
+   "id": "E1",
+   "note": "booleans/mixed types do not order; value comparisons over empty sequences are false, not empty (F1)"
+  },
+  "op-boolean-greater-than-6": {
+   "status": "deviation",
+   "id": "E1",
+   "note": "booleans/mixed types do not order; value comparisons over empty sequences are false, not empty (F1)"
+  },
+  "op-boolean-greater-than-7": {
+   "status": "deviation",
+   "id": "E1",
+   "note": "booleans/mixed types do not order; value comparisons over empty sequences are false, not empty (F1)"
+  },
+  "op-boolean-greater-than-more-args-005": {
+   "status": "deviation",
+   "id": "E1",
+   "note": "booleans/mixed types do not order; value comparisons over empty sequences are false, not empty (F1)"
+  },
+  "op-boolean-greater-than-more-args-006": {
+   "status": "deviation",
+   "id": "E1",
+   "note": "booleans/mixed types do not order; value comparisons over empty sequences are false, not empty (F1)"
+  },
+  "op-boolean-greater-than-more-args-008": {
+   "status": "deviation",
+   "id": "E1",
+   "note": "booleans/mixed types do not order; value comparisons over empty sequences are false, not empty (F1)"
+  },
+  "op-boolean-greater-than-more-args-009": {
+   "status": "deviation",
+   "id": "E1",
+   "note": "booleans/mixed types do not order; value comparisons over empty sequences are false, not empty (F1)"
+  },
+  "op-boolean-greater-than-more-args-010": {
+   "status": "deviation",
+   "id": "E1",
+   "note": "booleans/mixed types do not order; value comparisons over empty sequences are false, not empty (F1)"
+  },
+  "op-boolean-greater-than-more-args-011": {
+   "status": "deviation",
+   "id": "E1",
+   "note": "booleans/mixed types do not order; value comparisons over empty sequences are false, not empty (F1)"
+  },
+  "op-boolean-greater-than-more-args-014": {
+   "status": "deviation",
+   "id": "E1",
+   "note": "booleans/mixed types do not order; value comparisons over empty sequences are false, not empty (F1)"
+  },
+  "op-boolean-greater-than2args-10": {
+   "status": "deviation",
+   "id": "E1",
+   "note": "booleans/mixed types do not order; value comparisons over empty sequences are false, not empty (F1)"
+  },
+  "op-boolean-greater-than2args-2": {
+   "status": "deviation",
+   "id": "E1",
+   "note": "booleans/mixed types do not order; value comparisons over empty sequences are false, not empty (F1)"
+  },
+  "op-boolean-greater-than2args-6": {
+   "status": "deviation",
+   "id": "E1",
+   "note": "booleans/mixed types do not order; value comparisons over empty sequences are false, not empty (F1)"
+  },
+  "op-boolean-greater-than2args-8": {
+   "status": "deviation",
+   "id": "E1",
+   "note": "booleans/mixed types do not order; value comparisons over empty sequences are false, not empty (F1)"
+  },
+  "op-boolean-greater-than2args-9": {
+   "status": "deviation",
+   "id": "E1",
+   "note": "booleans/mixed types do not order; value comparisons over empty sequences are false, not empty (F1)"
+  },
+  "op-boolean-less-than-1": {
+   "status": "deviation",
+   "id": "E1",
+   "note": "booleans/mixed types do not order; value comparisons over empty sequences are false, not empty (F1)"
+  },
+  "op-boolean-less-than-10": {
+   "status": "deviation",
+   "id": "E1",
+   "note": "booleans/mixed types do not order; value comparisons over empty sequences are false, not empty (F1)"
+  },
+  "op-boolean-less-than-12": {
+   "status": "deviation",
+   "id": "E1",
+   "note": "booleans/mixed types do not order; value comparisons over empty sequences are false, not empty (F1)"
+  },
+  "op-boolean-less-than-4": {
+   "status": "deviation",
+   "id": "E1",
+   "note": "booleans/mixed types do not order; value comparisons over empty sequences are false, not empty (F1)"
+  },
+  "op-boolean-less-than-6": {
+   "status": "deviation",
+   "id": "E1",
+   "note": "booleans/mixed types do not order; value comparisons over empty sequences are false, not empty (F1)"
+  },
+  "op-boolean-less-than-8": {
+   "status": "deviation",
+   "id": "E1",
+   "note": "booleans/mixed types do not order; value comparisons over empty sequences are false, not empty (F1)"
+  },
+  "op-boolean-less-than-more-args-003": {
+   "status": "deviation",
+   "id": "E1",
+   "note": "booleans/mixed types do not order; value comparisons over empty sequences are false, not empty (F1)"
+  },
+  "op-boolean-less-than-more-args-007": {
+   "status": "deviation",
+   "id": "E1",
+   "note": "booleans/mixed types do not order; value comparisons over empty sequences are false, not empty (F1)"
+  },
+  "op-boolean-less-than-more-args-008": {
+   "status": "deviation",
+   "id": "E1",
+   "note": "booleans/mixed types do not order; value comparisons over empty sequences are false, not empty (F1)"
+  },
+  "op-boolean-less-than-more-args-009": {
+   "status": "deviation",
+   "id": "E1",
+   "note": "booleans/mixed types do not order; value comparisons over empty sequences are false, not empty (F1)"
+  },
+  "op-boolean-less-than-more-args-011": {
+   "status": "deviation",
+   "id": "E1",
+   "note": "booleans/mixed types do not order; value comparisons over empty sequences are false, not empty (F1)"
+  },
+  "op-boolean-less-than-more-args-012": {
+   "status": "deviation",
+   "id": "E1",
+   "note": "booleans/mixed types do not order; value comparisons over empty sequences are false, not empty (F1)"
+  },
+  "op-boolean-less-than-more-args-013": {
+   "status": "deviation",
+   "id": "E1",
+   "note": "booleans/mixed types do not order; value comparisons over empty sequences are false, not empty (F1)"
+  },
+  "op-boolean-less-than2args-10": {
+   "status": "deviation",
+   "id": "E1",
+   "note": "booleans/mixed types do not order; value comparisons over empty sequences are false, not empty (F1)"
+  },
+  "op-boolean-less-than2args-4": {
+   "status": "deviation",
+   "id": "E1",
+   "note": "booleans/mixed types do not order; value comparisons over empty sequences are false, not empty (F1)"
+  },
+  "op-boolean-less-than2args-6": {
+   "status": "deviation",
+   "id": "E1",
+   "note": "booleans/mixed types do not order; value comparisons over empty sequences are false, not empty (F1)"
+  },
+  "op-boolean-less-than2args-7": {
+   "status": "deviation",
+   "id": "E1",
+   "note": "booleans/mixed types do not order; value comparisons over empty sequences are false, not empty (F1)"
+  },
+  "op-boolean-less-than2args-8": {
+   "status": "deviation",
+   "id": "E1",
+   "note": "booleans/mixed types do not order; value comparisons over empty sequences are false, not empty (F1)"
+  },
+  "op-concatdbl2args-1": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "op-concatdbl2args-2": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "op-concatdbl2args-3": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "op-concatdbl2args-4": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "op-concatdbl2args-5": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "op-concatdec2args-1": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "op-concatdec2args-2": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "op-concatdec2args-3": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "op-concatdec2args-4": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "op-concatdec2args-5": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "op-concatenate-mix-args-009": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "op-concatenate-mix-args-010": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "JS double serialization (Infinity, 1e+21, -0 -> \"0\") differs from XDM canonical form (INF, 1.0E21, -0)"
+  },
+  "op-concatflt2args-1": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "xs:float is an IEEE double here: no single-precision value, range or serialization"
+  },
+  "op-concatflt2args-2": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "xs:float is an IEEE double here: no single-precision value, range or serialization"
+  },
+  "op-concatflt2args-3": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "xs:float is an IEEE double here: no single-precision value, range or serialization"
+  },
+  "op-concatflt2args-4": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "xs:float is an IEEE double here: no single-precision value, range or serialization"
+  },
+  "op-concatflt2args-5": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "xs:float is an IEEE double here: no single-precision value, range or serialization"
+  },
+  "op-concatintg2args-1": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "op-concatintg2args-2": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "op-concatintg2args-3": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "op-concatintg2args-4": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "op-concatintg2args-5": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "op-numeric-addintg2args-1": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "op-numeric-addintg2args-3": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
   "op-numeric-equal-emptyseq": {
    "status": "deviation",
    "id": "F1",
    "note": "value comparisons map to general comparisons: false instead of the empty sequence over empty operands"
+  },
+  "op-numeric-integer-divide-1": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "$idiv is IEEE: a NaN or infinite operand gives NaN/Infinity and a huge quotient is a double, never FOAR0002 (QUERY-FORMAT section 8.5)"
+  },
+  "op-numeric-integer-dividedouble2args-1": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "$idiv is IEEE: a NaN or infinite operand gives NaN/Infinity and a huge quotient is a double, never FOAR0002 (QUERY-FORMAT section 8.5)"
+  },
+  "op-numeric-integer-dividedouble2args-2": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "$idiv is IEEE: a NaN or infinite operand gives NaN/Infinity and a huge quotient is a double, never FOAR0002 (QUERY-FORMAT section 8.5)"
+  },
+  "op-numeric-integer-dividefloat2args-1": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "$idiv is IEEE: a NaN or infinite operand gives NaN/Infinity and a huge quotient is a double, never FOAR0002 (QUERY-FORMAT section 8.5)"
+  },
+  "op-numeric-integer-dividefloat2args-2": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "$idiv is IEEE: a NaN or infinite operand gives NaN/Infinity and a huge quotient is a double, never FOAR0002 (QUERY-FORMAT section 8.5)"
+  },
+  "op-numeric-modintg2args-1": {
+   "status": "deviation",
+   "id": "D1",
+   "note": "integers beyond 2^53 lose precision as IEEE doubles"
   },
   "rangeExpr-28": {
    "status": "deviation",
@@ -1324,6 +2194,81 @@
    "status": "deviation",
    "id": "D1",
    "note": "integers beyond 2^53 lose precision as IEEE doubles"
+  },
+  "re00001": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00002": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00003": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00004": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00005": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00006": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00007": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00008": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00009": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00010": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00011": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00012": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00013": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00014": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00015": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
   },
   "re00016": {
    "status": "deviation",
@@ -1345,6 +2290,11 @@
    "id": "D5",
    "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
   },
+  "re00020": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
   "re00021": {
    "status": "deviation",
    "id": "D5",
@@ -1355,12 +2305,67 @@
    "id": "D5",
    "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
   },
+  "re00023": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00024": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00025": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00026": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00027": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00028": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00029": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00030": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00031": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
   "re00032": {
    "status": "deviation",
    "id": "D5",
    "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
   },
   "re00033": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00035": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00036": {
    "status": "deviation",
    "id": "D5",
    "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
@@ -1420,12 +2425,112 @@
    "id": "D5",
    "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
   },
+  "re00049": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00050": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00051": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00052": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00053": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00057": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00061": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00063": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00065": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00066": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00069": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00070": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
   "re00071": {
    "status": "deviation",
    "id": "D5",
    "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
   },
   "re00072": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00074": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00075": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00076": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00077": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00078": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00079": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00082": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00083": {
    "status": "deviation",
    "id": "D5",
    "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
@@ -1440,7 +2545,22 @@
    "id": "D5",
    "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
   },
+  "re00089": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
   "re00090": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00091": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00092": {
    "status": "deviation",
    "id": "D5",
    "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
@@ -1450,12 +2570,537 @@
    "id": "D5",
    "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
   },
+  "re00094": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00095": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00096": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
   "re00097": {
    "status": "deviation",
    "id": "D5",
    "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
   },
+  "re00098": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00099": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00100": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00101": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00103": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00104": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00105": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00106": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00107": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00108": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00109": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00110": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00111": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00112": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00113": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00114": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00115": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00116": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00117": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00118": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00119": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00120": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00121": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00122": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00123": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00124": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00131": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00132": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00133": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00134": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00135": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00136": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00137": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00140": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00141": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00142": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00143": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00144": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00145": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00146": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00147": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00148": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00149": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00150": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00151": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00152": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00153": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00155": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00156": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00157": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00158": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00159": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00160": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00161": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00162": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00163": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00164": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00165": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00166": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00167": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00168": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00169": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00171": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00172": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00173": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00176": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00177": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00178": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00179": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00180": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00181": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00182": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00183": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00184": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00185": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00186": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00187": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00188": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00189": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00190": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00191": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00192": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00193": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00194": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00195": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00196": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00197": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00198": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00199": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00200": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00201": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00202": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00203": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00204": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00205": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00206": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00207": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00208": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00209": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00210": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00211": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
   "re00212": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00213": {
    "status": "deviation",
    "id": "D5",
    "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
@@ -1475,12 +3120,737 @@
    "id": "D5",
    "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
   },
+  "re00217": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00218": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00219": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00220": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00221": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00222": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00223": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00224": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00225": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00226": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00227": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00228": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00229": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00230": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00231": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00232": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00233": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00234": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00235": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00236": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00237": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00238": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00239": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00240": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00241": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00242": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00243": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00244": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00245": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00246": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00247": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00248": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00249": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00250": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00251": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00252": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00253": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00254": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00255": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00256": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00257": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00258": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00259": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00260": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00261": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00262": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00263": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00264": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00265": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00266": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00267": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00268": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00269": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00270": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00271": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00272": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00273": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00274": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00275": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00276": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00277": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00278": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00279": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00280": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00281": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00282": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00283": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00284": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00285": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00286": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00287": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00288": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00288a": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00288b": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00289": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00290": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00291": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00292": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00293": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00294": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00295": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00296": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00297": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00480": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00481": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00482": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00483": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00484": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00486": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00489": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00490": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00491": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00493": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00494": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00495": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00496": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00497": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00498": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00499": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00500": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00501": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00502": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00503": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00504": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00507": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00508": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00509": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00510": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00511": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00512": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00513": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00514": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00515": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00516": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00517": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00518": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00519": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00520": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
   "re00521": {
    "status": "deviation",
    "id": "D5",
    "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
   },
+  "re00522": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00524": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00525": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00526": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00527": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00528": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00529": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00530": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00531": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00534": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00535": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00536": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00537": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00538": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00540": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
   "re00541": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00542": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00543": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00544": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00545": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00546": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00547": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00548": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00549": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00550": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00551": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00552": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00553": {
    "status": "deviation",
    "id": "D5",
    "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
@@ -1511,6 +3881,11 @@
    "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
   },
   "re00564": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00565": {
    "status": "deviation",
    "id": "D5",
    "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
@@ -1556,6 +3931,16 @@
    "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
   },
   "re00574": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00581": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00582": {
    "status": "deviation",
    "id": "D5",
    "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
@@ -1641,6 +4026,16 @@
    "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
   },
   "re00600": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00607": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00608": {
    "status": "deviation",
    "id": "D5",
    "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
@@ -1830,6 +4225,41 @@
    "id": "D5",
    "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
   },
+  "re00655": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00660": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00661": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00662": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00663": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00664": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00665": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
   "re00674": {
    "status": "deviation",
    "id": "D5",
@@ -1901,6 +4331,11 @@
    "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
   },
   "re00688": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00692": {
    "status": "deviation",
    "id": "D5",
    "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
@@ -2005,6 +4440,21 @@
    "id": "D5",
    "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
   },
+  "re00775": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00781": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00783": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
   "re00784": {
    "status": "deviation",
    "id": "D5",
@@ -2025,12 +4475,32 @@
    "id": "D5",
    "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
   },
+  "re00790": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
   "re00791": {
    "status": "deviation",
    "id": "D5",
    "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
   },
   "re00792": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00793": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00796": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00800": {
    "status": "deviation",
    "id": "D5",
    "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
@@ -2535,6 +5005,11 @@
    "id": "D5",
    "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
   },
+  "re00957": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
   "re00958": {
    "status": "deviation",
    "id": "D5",
@@ -2616,6 +5091,36 @@
    "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
   },
   "re00978": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00979": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00980": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00982": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00983": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00984": {
+   "status": "deviation",
+   "id": "D5",
+   "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"
+  },
+  "re00985": {
    "status": "deviation",
    "id": "D5",
    "note": "I-Regexp: invalid patterns make $search/$match false; replacements are literal (no capture refs, no flags)"

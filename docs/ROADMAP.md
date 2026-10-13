@@ -74,7 +74,15 @@ delete it or fix it.
 
 ## @jarenjs/json — XQuery front-end & QT3
 
-- [ ] **`xs:*` constructor casts and more `fn:*` mappings** — the QT3 scorecard attributes the bulk of its 21k `unsupported-syntax` cases to the function library, not the language; a handful of numeric/string casts plus `fn:tokenize` moves thousands of cases into the measurable buckets.
+- [ ] **More `xs:*` constructors and `fn:*` mappings** — the numeric, boolean and string constructors and
+  `fn:tokenize` with a plain-text separator are mapped. What still hides most of the scorecard's
+  `unsupported-syntax` cases falls in three groups. Mappable onto an operator the engine has: `fn:round`, `abs`,
+  `floor`, `ceiling`, `round-half-to-even`, `format-number`; the derived integer types (`xs:long`, `xs:int`, ...)
+  as range-checked integers; `cast as` / `castable as` for the types already mapped. Composable from existing
+  operators, to be checked: `fn:remove`, `fn:insert-before` (from `$subsequence`), `fn:compare`. Needing an engine
+  operator first: `fn:tokenize` with a regular-expression pattern or flags (an I-Regexp split; the plain-text
+  mapping probes every position, so it is quadratic in the text length and bounded by the sequence guards),
+  `substring-before`/`-after` and `translate` (nothing finds a position in a string).
 - [ ] **Exact sequence-base lookups** — lookups on non-variable bases emit `$get`, which addresses a single item; a `$let`-wrapper emission would reproduce XQuery's per-item lookup exactly, and is the v2 candidate alongside the `!` simple-map and `=>` arrow operators.
 - [ ] **1-based positional *outputs*** — `at`/`count`/`fn:index-of` surface the format's 0-based D6 values, so QT3 asserts them as wrong-value; `fn:index-of` has a cheap local emission fix, `at`/`count` would need reference rewriting. Revisit if the scorecard noise starts to matter.
 - [ ] **Front-end diagnostic polish** — `import` or `module` standing alone as a

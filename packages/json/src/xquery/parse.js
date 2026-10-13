@@ -14,7 +14,7 @@
 //   - `unsupported construct '<name>'`  - a recognized XQuery construct
 //     outside the subset (instance of, path expressions, typeswitch, ...)
 //   - `unsupported function '<name>'` / `'<name>#<arity>'` - a function
-//     (or an arity of one) outside the mapping table
+//     (or an arity of one) outside the mapping tables (fn:, xs:, map:, array:)
 //   - `unsupported clause order: ...` - a FLWOR clause sequence that
 //     cannot be expressed by mechanically nesting phrases (section below)
 //   - `unsupported variable name '<name>'` / `unsupported lookup index 0`
@@ -161,11 +161,311 @@ function fnAdjustedStart(op) {
   };
 }
 
+//#region xs: constructors and fn:tokenize
+
+// The XSD lexical spaces the numeric constructors read, written once as
+// the unsigned I-Regexp text the emitted documents match with `$match`
+// (which anchors) and the parser folds literals with (a RegExp built from
+// the same text): one grammar, two readers. The sign is read apart.
+const LEXICAL = Object.freeze({
+  integer: '[0-9]+',
+  decimal: '([0-9]+(\\.[0-9]*)?|\\.[0-9]+)',
+  double: '([0-9]+(\\.[0-9]*)?|\\.[0-9]+)([eE][+-]?[0-9]+)?',
+});
+
+const LEXICAL_RE = Object.freeze({
+  integer: new RegExp(`^[+-]?(?:${LEXICAL.integer})$`),
+  decimal: new RegExp(`^[+-]?(?:${LEXICAL.decimal})$`),
+  double: new RegExp(`^[+-]?(?:${LEXICAL.double})$`),
+});
+
+// the variable a cast binds its operand to: the operand is evaluated once,
+// outside the binding's scope, and nothing the user wrote is evaluated
+// beneath any of the names a cast introduces
+const CAST_VAR = 'xs_arg';
+const CAST_ARG = '$' + CAST_VAR;
+
+// JSON has no literal for the non-finite doubles; each emission builds its
+// own (a caller may edit the document it is handed)
+const notANumber = () => ({ '$div': [0, 0] });
+const positiveInfinity = () => ({ '$div': [1, 0] });
+const negativeInfinity = () => ({ '$div': [-1, 0] });
+
+// A cast that cannot succeed fails when the query runs (XQuery raises
+// FORG0001 when the cast is evaluated, never when the query is read), as
+// the engine's cast error JQ2001; the message quotes the type and text.
+function failedLiteralCast(name, text) {
+  return { '$number': `xs:${name}: ${text}` };
+}
+
+function failedCast(name) {
+  return { '$number': { '$concat': [`xs:${name}: `, CAST_ARG] } };
+}
+
+// the text of an emitted string that stands for a string literal, or null
+// when the string is a variable or path reference (Rule 2 escaping: a
+// literal starting with '$' is emitted with one more)
+function literalText(e) {
+  if (typeof e !== 'string')
+    return null;
+  if (e.charCodeAt(0) !== CC_DOLLAR)
+    return e;
+  return e.charCodeAt(1) === CC_DOLLAR ? e.slice(1) : null;
+}
+
+const trimXsdWhiteSpace = (s) => s.replace(/^[ \t\r\n]+|[ \t\r\n]+$/g, '');
+
+// the number a numeric constructor gives a string literal: a number, the
+// non-finite document, or the failing cast when the text is outside the
+// type's lexical space (XSD white space around it is not part of it)
+function foldNumericText(name, type, text) {
+  const trimmed = trimXsdWhiteSpace(text);
+  if (type === 'double') {
+    if (trimmed === 'NaN')
+      return notANumber();
+    if (trimmed === 'INF' || trimmed === '+INF')
+      return positiveInfinity();
+    if (trimmed === '-INF')
+      return negativeInfinity();
+  }
+  if (!LEXICAL_RE[type].test(trimmed))
+    return failedLiteralCast(name, text);
+  const n = Number(trimmed);
+  if (type === 'double') {
+    // a spelling beyond the double range is the infinity of its sign
+    if (n === Infinity)
+      return positiveInfinity();
+    return n === -Infinity ? negativeInfinity() : n;
+  }
+  // an integer or a decimal has no negative zero and no infinity
+  return Number.isFinite(n) ? n + 0 : failedLiteralCast(name, text);
+}
+
+// What a numeric constructor gives a literal operand (a string, a number
+// or a boolean), or undefined when the operand is not a literal.
+// xs:float is xs:double throughout: the engine has no single precision.
+function foldNumericOperand(name, type, e) {
+  if (typeof e === 'boolean')
+    return e ? 1 : 0;
+  if (typeof e === 'number') {
+    if (type === 'integer')
+      return Math.trunc(e) + 0;
+    return type === 'decimal' ? e + 0 : e;
+  }
+  const text = literalText(e);
+  return text === null ? undefined : foldNumericText(name, type, text);
+}
+
+// A string operand read by the type's lexical space, in the document (the
+// operand is the string at CAST_ARG): white space trimmed, the sign read
+// apart, the digits put in the JSON number grammar `$number` reads. Leading
+// zeros go behind a sentinel (an I-Regexp has no anchors; the text was
+// matched against the lexical space first, so it holds none), the digit
+// before a bare dot, exponent or end comes back, and a trailing dot gets its
+// zero.
+// A decimal or an integer goes through its text once more, which turns an
+// overflow into a failed cast and negative zero into zero.
+function readLexicalNumber(name, type) {
+  const signed = type === 'double'
+    ? { '$if': ['$xs_negative', { '$neg': '$xs_value' }, '$xs_value'] }
+    : { '$number': { '$string': { '$if': ['$xs_negative', { '$neg': '$xs_value' }, '$xs_value'] } } };
+  const digits = {
+    '$let': {
+      xs_digits: { '$substring': [{ '$replace': [{ '$concat': ['\uffff', '$xs_unsigned'] }, '\uffff0+', '\uffff'] }, 1] },
+      xs_leading: { '$if': [{ '$match': ['$xs_digits', '([.eE].*)?'] }, { '$concat': ['0', '$xs_digits'] }, '$xs_digits'] },
+      xs_json: {
+        '$if': [
+          { '$ends-with': ['$xs_leading', '.'] },
+          { '$concat': ['$xs_leading', '0'] },
+          { '$replace': [{ '$replace': ['$xs_leading', '\\.e', '.0e'] }, '\\.E', '.0E'] },
+        ],
+      },
+      xs_value: { '$number': '$xs_json' },
+    },
+    '$return': signed,
+  };
+  const unsigned = {
+    '$let': {
+      xs_negative: { '$starts-with': ['$xs_text', '-'] },
+      xs_unsigned: { '$if': [{ '$or': ['$xs_negative', { '$starts-with': ['$xs_text', '+'] }] }, { '$substring': ['$xs_text', 1] }, '$xs_text'] },
+    },
+    '$return': { '$if': [{ '$match': ['$xs_unsigned', LEXICAL[type]] }, digits, failedCast(name)] },
+  };
+  const special = type !== 'double' ? unsigned : {
+    '$if': [
+      { '$eq': ['$xs_text', 'NaN'] }, notANumber(),
+      { '$if': [
+        { '$or': [{ '$eq': ['$xs_text', 'INF'] }, { '$eq': ['$xs_text', '+INF'] }] }, positiveInfinity(),
+        { '$if': [{ '$eq': ['$xs_text', '-INF'] }, negativeInfinity(), unsigned] }] }],
+  };
+  return { '$let': { xs_text: { '$normalize-space': CAST_ARG } }, '$return': special };
+}
+
+// The constructor of a numeric type: a literal operand folds; any other
+// is evaluated once and read by what it is - a string by the lexical
+// space, a boolean as 1 or 0, a number by the type's value rule, and
+// everything else (the empty sequence stays empty; null, an array, an
+// object or several items are the type error JQ2001) by `$number`.
+function numericConstructor(name, type) {
+  return {
+    min: 1,
+    max: 1,
+    emit: (args) => {
+      const folded = foldNumericOperand(name, type, args[0]);
+      if (folded !== undefined)
+        return folded;
+      // a double takes a number as it is; an integer or a decimal takes the
+      // text of a number back, which is a number again only when it is
+      // finite (an integer first loses its fraction)
+      const otherwise = type === 'double'
+        ? { '$number': CAST_ARG }
+        : { '$if': [
+          { '$is-boolean': CAST_ARG }, { '$number': CAST_ARG },
+          { '$number': { '$string': type === 'integer' ? { '$idiv': [CAST_ARG, 1] } : CAST_ARG } }] };
+      return {
+        '$let': { [CAST_VAR]: args[0] },
+        '$return': { '$if': [{ '$is-string': CAST_ARG }, readLexicalNumber(name, type), otherwise] },
+      };
+    },
+  };
+}
+
+// The XSD boolean lexical space (white space around it is not part of it)
+const BOOLEAN_TRUE_TEXTS = Object.freeze(['true', '1']);
+const BOOLEAN_FALSE_TEXTS = Object.freeze(['false', '0']);
+
+// xs:boolean: a boolean is itself, a number is false only for 0 and NaN
+// (the `$boolean` of a number), a string is `true`/`1` or `false`/`0` once
+// trimmed; `$boolean` itself would be the EBV, for which "false" is true
+function booleanConstructor() {
+  // true when the trimmed operand text is one of `texts`
+  const isOneOf = (texts) => ({
+    '$or': texts.map((word) => ({ '$eq': [{ '$normalize-space': CAST_ARG }, word] })),
+  });
+  return {
+    min: 1,
+    max: 1,
+    emit: (args) => {
+      const e = args[0];
+      if (typeof e === 'boolean')
+        return e;
+      if (typeof e === 'number')
+        return e !== 0;
+      const literal = literalText(e);
+      if (literal !== null) {
+        const trimmed = trimXsdWhiteSpace(literal);
+        if (BOOLEAN_TRUE_TEXTS.includes(trimmed))
+          return true;
+        return BOOLEAN_FALSE_TEXTS.includes(trimmed) ? false : failedLiteralCast('boolean', literal);
+      }
+      return {
+        '$let': { [CAST_VAR]: e },
+        '$return': {
+          '$if': [
+            { '$is-boolean': CAST_ARG }, CAST_ARG,
+            { '$if': [
+              { '$is-number': CAST_ARG }, { '$boolean': CAST_ARG },
+              { '$if': [
+                { '$is-string': CAST_ARG },
+                { '$if': [isOneOf(BOOLEAN_TRUE_TEXTS), true, { '$if': [isOneOf(BOOLEAN_FALSE_TEXTS), false, failedCast('boolean')] }] },
+                { '$number': CAST_ARG }] }] }],
+        },
+      };
+    },
+  };
+}
+
+// The `xs:` constructor functions the JSON model has a value for. The
+// engine has one number type (D1), so integer, decimal, double and float
+// differ in the values they accept and the errors they raise, not in the
+// value they give.
+const XS_TABLE = Object.freeze({
+  'string': fnUnary('$string'),
+  'boolean': booleanConstructor(),
+  'integer': numericConstructor('integer', 'integer'),
+  'decimal': numericConstructor('decimal', 'decimal'),
+  'double': numericConstructor('double', 'double'),
+  'float': numericConstructor('float', 'double'),
+});
+
+// fn:tokenize splits at the matches of a regular expression, and the
+// engine has no operator that finds matches; the plain-text pattern is
+// the one case the document can express - the separator's occurrences are
+// the positions where the text holds it, cut into the pieces between them.
+// Plain text means no character an I-Regexp or an XSD pattern reads as
+// syntax. A separator that overlaps itself ("aa" in "aaa") would need the
+// left-to-right scan the document cannot make, so it is refused.
+const REGEXP_SYNTAX_RE = /[\\|.?*+(){}[\]^$]/;
+
+function overlapsItself(points) {
+  for (let n = 1; n < points.length; n++) {
+    let same = true;
+    for (let i = 0; i < n && same; i++)
+      same = points[i] === points[points.length - n + i];
+    if (same)
+      return true;
+  }
+  return false;
+}
+
+// tokenize `text` (an emitted expression) at the occurrences of
+// `separator`, a plain-text string of `size` code points that does not
+// overlap itself; the empty text has no tokens (F&O)
+function tokenizeAt(text, separator, size) {
+  const length = () => ({ '$string-length': '$tk_text' });
+  const cuts = {
+    '$for': { tk_at: { '$range': [0, { '$sub': [length(), size] }] } },
+    '$where': { '$eq': [{ '$substring': ['$tk_text', '$tk_at', size] }, separator] },
+    '$return': '$tk_at',
+  };
+  const piece = {
+    '$let': { tk_from: { '$add': [{ '$get': ['$tk_cuts', '$tk_n'] }, size] } },
+    '$return': {
+      '$substring': ['$tk_text', '$tk_from', { '$sub': [{ '$get': ['$tk_cuts', { '$add': ['$tk_n', 1] }] }, '$tk_from'] }],
+    },
+  };
+  return {
+    '$let': { tk_text: text },
+    '$return': {
+      '$if': [
+        { '$gt': [length(), 0] },
+        {
+          // the cut positions with a virtual cut before the text and one
+          // at its end, so every piece lies between two neighbours
+          '$let': { tk_cuts: [-size, cuts, length()] },
+          '$return': { '$for': { tk_n: { '$range': [0, { '$sub': [{ '$count': '$tk_cuts[*]' }, 2] }] } }, '$return': piece },
+        },
+      ],
+    },
+  };
+}
+
+// fn:tokenize#1 splits the normalized text at its single spaces
+const tokenizeFunction = Object.freeze({
+  min: 1,
+  max: 2,
+  emit: (args, refuse) => {
+    if (args.length === 1)
+      return tokenizeAt({ '$normalize-space': args[0] }, ' ', 1);
+    const pattern = literalText(args[1]);
+    if (pattern === null || pattern === '' || REGEXP_SYNTAX_RE.test(pattern))
+      return refuse("unsupported construct 'tokenize pattern other than plain text'");
+    const points = Array.from(pattern);
+    if (overlapsItself(points))
+      return refuse("unsupported construct 'tokenize separator that overlaps itself'");
+    return tokenizeAt(args[0], pattern, points.length);
+  },
+});
+
+//#endregion
+
 // The supported built-in functions (bare or `fn:`-prefixed), one entry
-// per name: `{ min, max, emit(args) }` over already-emitted argument
-// expressions. Arities outside [min, max] - including F&O arities that
-// exist but are not in the subset, like fn:sum#2 or the 0-argument
-// context-item forms - fail as `unsupported function 'name#arity'`.
+// per name: `{ min, max, emit(args, refuse) }` over already-emitted
+// argument expressions; `refuse(message)` throws the positioned
+// `unsupported ...` error for an argument shape the entry cannot map.
+// Arities outside [min, max] - including F&O arities that exist but are
+// not in the subset, like fn:sum#2 or the 0-argument context-item forms -
+// fail as `unsupported function 'name#arity'`.
 const FN_TABLE = Object.freeze({
   'count': fnUnary('$count'),
   'sum': fnUnary('$sum'),
@@ -199,6 +499,7 @@ const FN_TABLE = Object.freeze({
   'replace': { min: 3, max: 3, emit: (args) => ({ '$replace': args }) },
   'substring': fnAdjustedStart('$substring'),
   'subsequence': fnAdjustedStart('$subsequence'),
+  'tokenize': tokenizeFunction,
   // XQuery has no boolean literals; fn:true()/fn:false() are the spelling
   'true': { min: 0, max: 0, emit: () => true },
   'false': { min: 0, max: 0, emit: () => false },
@@ -1139,6 +1440,8 @@ export function parseXQuery(source) {
       table = MAP_FN_TABLE;
     else if (prefix === 'array')
       table = ARRAY_FN_TABLE;
+    else if (prefix === 'xs')
+      table = XS_TABLE;
     else
       return fail(`unsupported function '${written}'`, at);
     if (!hasOwn(table, local))
@@ -1146,7 +1449,7 @@ export function parseXQuery(source) {
     const def = table[local];
     if (args.length < def.min || args.length > def.max)
       return fail(`unsupported function '${written}#${args.length}'`, at);
-    return def.emit(args);
+    return def.emit(args, (message) => fail(message, at));
   }
 
   //#endregion

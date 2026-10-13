@@ -74,6 +74,7 @@ const ERROR_CODE_MAP = {
   XPTY0004: ['JQ2001', 'JQ2004', 'JQ2005'],
   FOTY0014: ['JQ2001'], // fn:string of a function item ~ $string of an array/object
   FORG0001: ['JQ2001'],
+  FOCA0002: ['JQ2001'], // a numeric cast of NaN or an infinity
   FORG0006: ['JQ2001', 'JQ2003'],
   FOAR0001: ['JQ2002'],
   FORX0002: ['JQ2001'],

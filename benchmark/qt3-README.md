@@ -125,6 +125,11 @@ Divergences from XDM to keep in mind when triaging:
     atomization or coercion — aggregates treat an array as one item, `$string`
     propagates the empty sequence, string parameters read empty as `""`,
     computed map keys must be strings.
+    `E3` resource guards (§8.9): a materialized `$range` over 1,000,000 items
+    is refused `JQ2007` where XQuery evaluates it lazily.
+    `E4` NaN orders least whatever an `empty greatest`/`empty least`
+    modifier says (QUERY-FORMAT.md §6.6), where XQuery places NaN with the
+    empties.
   - **Front-end approximations** (XQUERY-FRONTEND.md §§3–5): `F1` value
     comparisons mapped to general comparisons (`false` instead of empty/
     XPTY0004), `F2` square array constructors flatten their members (unused so

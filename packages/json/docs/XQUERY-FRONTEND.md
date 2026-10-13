@@ -42,6 +42,7 @@ q(null, { doc: data }); // parse + compile convenience; returns the engine's com
   |---|---|
   | `unsupported construct '<name>'` | recognized XQuery construct outside the subset |
   | `unsupported function '<name>'` / `unsupported function '<name>#<arity>'` | function (or an arity of one) outside the mapping table |
+  | `unsupported construct 'tokenize pattern other than plain text'` / `'tokenize separator that overlaps itself'` | `fn:tokenize` with a pattern the document cannot split at (§4.6) |
   | `unsupported clause order: '<kw>' after '<kw>'` | FLWOR clause sequence that cannot be expressed by nesting (§5.1) |
   | `unsupported variable name '<name>'`, `unsupported lookup index 0 ...` | lexeme outside the JSON format's rules |
 
@@ -130,6 +131,20 @@ compileXQuery(text)(null, { doc: inputDocument });
 > `array { ... }` has identical flattening semantics in both languages.
 > Members that are singletons (the JSON-shaped case) agree everywhere.
 
+> ### ⚠ `xs:` constructors: one number type, JSON-model values
+>
+> `xs:integer`, `xs:decimal`, `xs:double`, `xs:float`, `xs:boolean` and
+> `xs:string` are constructor functions (§4.6). The engine has one number
+> type (**D1**), so the numeric constructors differ in the *text and values
+> they accept and the errors they raise*, not in the value they give:
+> `xs:float` is a double (no single-precision rounding, range or
+> overflow to `INF`), `xs:integer(7.9)` is `7`, and an integer or decimal
+> beyond 2^53 loses precision. A cast that fails raises `JQ2001` (the
+> analogue of `FORG0001`, `FOCA0002` and `XPTY0004` alike), when the cast is
+> evaluated, never when the query is read. `cast as`, `castable as` and the
+> other `xs:` types (dates, durations, binary, the derived integer types)
+> stay outside the subset (§6).
+
 ## 4. The supported subset
 
 ### 4.1 Prolog
@@ -210,9 +225,10 @@ JSON member names are strings.
 
 ### 4.5 Function mapping table
 
-Bare and `fn:`-prefixed names are equivalent. Any other prefix, any name
-not listed, or any arity not listed is an error (`unsupported function
-'<name>'` / `'<name>#<arity>'`).
+Bare and `fn:`-prefixed names are equivalent. The `xs:` prefix names the
+constructor functions of §4.6, `map:` and `array:` their one function each.
+Any other prefix, any name not listed, or any arity not listed is an error
+(`unsupported function '<name>'` / `'<name>#<arity>'`).
 
 | Function | Arity | Emitted |
 |---|---|---|
@@ -229,6 +245,7 @@ not listed, or any arity not listed is an error (`unsupported function
 | `string-length`, `normalize-space` | 1 | `$string-length`, `$normalize-space` |
 | `matches` | 2 | `{"$search": [input, pattern]}` (**not** `$match`; §3) |
 | `replace` | 3 | `{"$replace": [input, pattern, replacement]}` (I-Regexp, no flags) |
+| `tokenize` | 1–2 | a `$for` over the separator's positions (**plain-text patterns only**, §4.6) |
 | `distinct-values` | 1 | `{"$distinct": e}` |
 | `reverse`, `head`, `tail` | 1 | `$reverse`, `$head`, `$tail` |
 | `subsequence` | 2–3 | `{"$subsequence": [seq, start−1, len?]}` (**start adjusted**, §3) |
@@ -236,6 +253,68 @@ not listed, or any arity not listed is an error (`unsupported function
 | `true`, `false` | 0 | the literals `true` / `false` |
 | `map:get` | 2 | `{"$get": [map, key]}` (key never adjusted) |
 | `array:get` | 2 | `{"$get": [array, pos−1]}` (**position adjusted**, §3) |
+| `xs:string` | 1 | `{"$string": e}` |
+| `xs:integer`, `xs:decimal`, `xs:double`, `xs:float`, `xs:boolean` | 1 | folded literal or a `$let` phrase (§4.6) |
+
+### 4.6 The `xs:` constructors and `fn:tokenize`
+
+**Numeric constructors** read their operand by what it is:
+
+| Operand | `xs:double`, `xs:float` | `xs:decimal` | `xs:integer` |
+|---|---|---|---|
+| string | XSD `double` text (below) | XSD `decimal` text | XSD `integer` text |
+| number | itself (`NaN`, `INF` too) | itself; `NaN`, `INF` are `JQ2001` | truncated toward zero; `NaN`, `INF` are `JQ2001` |
+| boolean | `1` / `0` | `1` / `0` | `1` / `0` |
+| empty sequence | empty | empty | empty |
+| `null`, array, object, two or more items | `JQ2001` | `JQ2001` | `JQ2001` |
+
+XSD text is read after trimming space, tab, CR and LF; an optional sign
+follows; the digits may carry leading zeros and a bare leading or trailing
+dot (`.5`, `5.`). `double` and `float` text also takes an exponent
+(`1.5E3`, `5.e3`) and the spellings `INF`, `+INF`, `-INF` and `NaN`;
+`decimal` and `integer` text takes no exponent, no `INF`, no `NaN`, and an
+integer no dot. Negative zero survives only in a double (`xs:double("-0")`);
+an integer or a decimal has none. Anything else is `JQ2001`, with the type
+and the text in the message (`xs:integer: 1.5`).
+
+A **literal** operand folds when the query is parsed: `xs:integer(" +007 ")`
+emits `7`, `xs:double("INF")` emits `{"$div": [1, 0]}` (JSON has no literal
+for the non-finite doubles), `xs:double("-INF")` `{"$div": [-1, 0]}`,
+`xs:double("NaN")` `{"$div": [0, 0]}`, and a literal outside the type's text
+emits a cast that fails when it runs (`{"$number": "xs:integer: 1.5"}`).
+Any other operand is bound once to the variable `xs_arg` in a `$let` phrase
+whose `$return` reads it by the table above, so the cast is lazy: `if
+(false()) then xs:integer("x") else 1` is `1`. The phrase is larger than the
+`$number` it replaces and costs a pattern match or two for a string operand;
+a number or a boolean takes one `$if` branch.
+
+`xs:boolean` is not the `$boolean` operator, which is the effective boolean
+value (for which the string `"false"` is `true`): a boolean is itself, a
+number is `false` only for `0` and `NaN`, a string (trimmed) is `true`/`1`
+or `false`/`0` and nothing else, and the empty sequence is empty.
+`xs:string(e)` is `{"$string": e}`: `xs:string(())` is the empty sequence, an
+array or object is `JQ2001`, and a number serializes the way JavaScript does
+(`Infinity`, `1e+21`; deviation **D1**), not as XDM's canonical form.
+
+**`fn:tokenize`** splits at the matches of a regular expression, and the
+engine has no operator that finds matches, so the front-end maps the one
+case a document can express: a **plain-text separator**, a string literal
+without any character an I-Regexp or XSD pattern reads as syntax
+(`\ | . ? * + ( ) { } [ ] ^ $`). It emits a `$let` phrase that finds the
+positions at which the text holds the separator and cuts the pieces
+between them, in code points. As in F&O, the empty text and the empty
+sequence give no tokens, and the pieces between neighbouring separators,
+and before the first or after the last, are kept (`tokenize("a,,b,", ",")`
+is `"a"`, `""`, `"b"`, `""`). `tokenize($s)` is `tokenize(normalize-space($s), " ")`.
+A separator that overlaps itself (`"aa"`, `"abab"`, `"--"`: some prefix is
+also its suffix) is refused, because the scan would then need XQuery's
+left-to-right match order, as is any other pattern, a computed one, and the
+flags argument (`tokenize#3`, `tokenize#4`). Every position is probed, so
+the cost grows with the square of the text's length, and the positions are a
+sequence the engine's guards bound: a text longer than 1,000,000 code points
+is `JQ2007`, one longer than a lower `limits.sequenceItems` is `JQ2009`. A
+long text wants a regular-expression operator in the engine, which does not
+exist.
 
 ## 5. FLWOR
 
@@ -322,6 +401,7 @@ Each is recognized and rejected by name (`unsupported construct '...'`):
 | `switch`, `typeswitch`, `try { } catch { }` | `switch expression`, `typeswitch expression`, `try/catch expression` |
 | direct (`<a/>`) and computed node constructors, `ordered {}`, `unordered {}`, `validate {}` | `node constructor`, `computed node constructor`, ... |
 | type declarations `as T` (anywhere), `allowing empty`, window clauses, collations | `type declaration`, `allowing empty`, `window clause`, `collation` |
+| `xs:` constructors other than §4.6's six (`xs:date`, `xs:dayTimeDuration`, `xs:long`, `xs:int`, `xs:hexBinary`, `xs:untypedAtomic`, `xs:anyURI`, ...) | `unsupported function '<name>'` |
 | string `&`-entities, non-finite number literals (`1e400`) | `character reference`, `non-finite number literal` |
 | string constructors `` `...` ``, ` ``[...]`` ` | `string constructor` |
 | annotations `declare %ann ...` | `annotation` |
