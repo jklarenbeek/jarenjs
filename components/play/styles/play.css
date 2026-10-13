@@ -46,7 +46,9 @@
 .jplay-split:hover::before, .jplay-split:focus-visible::before { background: var(--accent, #2563eb); }
 .jplay-split:focus-visible { outline: none; }
 .jplay-rail { grid-area: rail; min-width: 0; display: flex; flex-direction: column; overflow-y: auto; }
-.jplay-editors { grid-area: editors; min-width: 0; display: flex; flex-direction: column; gap: var(--space-2, 0.5rem); }
+/* the editors scroll inside their row like the rail and the result, so an
+   engine with several source panes never spills past the grid */
+.jplay-editors { grid-area: editors; min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: var(--space-2, 0.5rem); }
 .jplay-stage { grid-area: stage; min-width: 0; display: flex; flex-direction: column; }
 
 /* ——— the example rail ——— */
