@@ -273,6 +273,10 @@ describe('XQuery front-end roundtrips', () => {
       assert.strictEqual(run('map{"a": 1}?missing'), undefined);
       assert.strictEqual(run('[1, 2]?3'), undefined);
       assert.strictEqual(run('"text"?a'), undefined);
+      assert.strictEqual(run('1?a'), undefined);
+      assert.strictEqual(run('1.5?1'), undefined);
+      assert.strictEqual(run('true()?a'), undefined);
+      assert.strictEqual(run('false()?1'), undefined);
     });
 
     it('should keep the user variables out of the wrapper scope', () => {

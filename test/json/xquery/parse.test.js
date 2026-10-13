@@ -261,6 +261,10 @@ describe('XQuery front-end parser', () => {
         { '$get': [{ '$map': [[{ '$concat': ['a', 'b'] }, 1]] }, 'ab'] });
       parses('array:get(tail($xs), 1)?x',
         { '$get': [{ '$get': [{ '$tail': '$xs' }, 0] }, 'x'] });
+      parses('1?a', { '$get': [1, 'a'] });
+      parses('1.5?2', { '$get': [1.5, 1] });
+      parses('true()?a', { '$get': [true, 'a'] });
+      parses('false()?a', { '$get': [false, 'a'] });
       parses('"x"?a', { '$get': ['x', 'a'] });
       parses('"$x"?a', { '$get': ['$$x', 'a'] });
     });
