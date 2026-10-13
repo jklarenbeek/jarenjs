@@ -1228,7 +1228,7 @@ hand, or generate it some other way, when:
 
 ## 7. Cost
 
-`@jarenjs/linq/schema` builds to **<!--fact:bundle.schema-->39,686<!--/fact--> bytes** as a minified,
+`@jarenjs/linq/schema` builds to **<!--fact:bundle.schema-->39,955<!--/fact--> bytes** as a minified,
 tree-shaken ESM bundle — the figure `scripts/check-tree-shaking.js`
 measures and `npm run test:tree-shaking` reports, published rounded
 (<!--fact:bundle.schema.kb-->40<!--/fact--> kB) beside the other subpath prices in

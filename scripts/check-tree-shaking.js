@@ -147,7 +147,8 @@ if (engineLeak.length > 0)
 // Raised to 39,000 (measured 38910): the pen boundary that copies caller JSON and words the refusal of a symbol or a prototype-less value add 382.
 // Raised to 39,400 (measured 39300): core's deepFreeze, which every pen shares, freezing beneath an already frozen root with a memo of whole frozen subtrees and a cycle guard add 390.
 // Raised to 39,700 (measured 39686): the shared capture's coded refusal of JSON.stringify on a captured value add 386.
-if (schemaBytes > 39700)
+// Raised to 40,000 (measured 39955): the shared capture's coded refusal of an argument handed to an aggregate of a captured value add 269.
+if (schemaBytes > 40000)
   throw new Error(`The schema pen bundle grew to ${schemaBytes} bytes.`);
 
 console.log(`Tree-shaking smoke test passed (${schemaBytes} byte schema-pen bundle; no chain module, no engine).`);
@@ -222,7 +223,8 @@ if (chainEdgeLeak.length > 0)
 // Raised to 219,200 (measured 219196): core's occupied-bucket resample walk and nearest-rank quantiles the engine carries add 563.
 // Raised to 219,600 (measured 219582): the shared capture's coded refusal of JSON.stringify on a captured value add 386.
 // Raised to 220,200 (measured 220136): the resample fill's bucket budget the chain's series operators carry adds 554.
-if (chainBytes > 220200)
+// Raised to 220,900 (measured 220897): the shared capture's coded refusal of an argument handed to an aggregate of a captured value and the range join's bounds check add 761.
+if (chainBytes > 220900)
   throw new Error(`The chain bundle grew to ${chainBytes} bytes.`);
 
 console.log(`Tree-shaking smoke test passed (${chainBytes} byte chain bundle; no schema-pen module, no client module, no store/validator/formats bytes).`);
@@ -300,7 +302,8 @@ if (modelEngineLeak.length > 0)
 // Raised to 50,800 (measured 50710): caller JSON copied at the pen boundary and worded refusals of symbol and prototype-less values add 388.
 // Raised to 51,200 (measured 51102): core's deepFreeze, which every pen shares, freezing beneath an already frozen root with a memo of whole frozen subtrees and a cycle guard add 392.
 // Raised to 51,500 (measured 51488): the shared capture's coded refusal of JSON.stringify on a captured value add 386.
-if (modelBytes > 51500)
+// Raised to 51,800 (measured 51757): the shared capture's coded refusal of an argument handed to an aggregate of a captured value add 269.
+if (modelBytes > 51800)
   throw new Error(`The model pen bundle grew to ${modelBytes} bytes.`);
 const schemaModelLeak = Object.entries(schemaInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/model/') && info.bytesInOutput > 0);
@@ -355,7 +358,8 @@ if (jsltEngineLeak.length > 0)
 // Raised to 21,500 (measured 21448): the shared capture refuses a callback that reads its argument and answers a plain boolean (511) and explains the destructuring read it names (269).
 // Raised to 21,900 (measured 21878): core's deepFreeze, which every pen shares, freezing beneath an already frozen root with a memo of whole frozen subtrees and a cycle guard add 389.
 // Raised to 22,300 (measured 22264): the shared capture's coded refusal of JSON.stringify on a captured value add 386.
-if (jsltBytes > 22300)
+// Raised to 22,600 (measured 22533): the shared capture's coded refusal of an argument handed to an aggregate of a captured value add 269.
+if (jsltBytes > 22600)
   throw new Error(`The JSLT pen bundle grew to ${jsltBytes} bytes.`);
 const chainJsltLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/jslt/') && info.bytesInOutput > 0);
@@ -421,7 +425,8 @@ if (migrationEngineLeak.length > 0)
 // Raised to 27,700 (measured 27614): caller JSON copied at the pen boundary add 28.
 // Raised to 28,100 (measured 28005): core's deepFreeze, which every pen shares, freezing beneath an already frozen root with a memo of whole frozen subtrees and a cycle guard add 391.
 // Raised to 28,400 (measured 28391): the shared capture's coded refusal of JSON.stringify on a captured value add 386.
-if (migrationBytes > 28400)
+// Raised to 28,700 (measured 28660): the shared capture's coded refusal of an argument handed to an aggregate of a captured value add 269.
+if (migrationBytes > 28700)
   throw new Error(`The migration pen bundle grew to ${migrationBytes} bytes.`);
 const chainMigrationLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/migration/') && info.bytesInOutput > 0);
@@ -580,7 +585,8 @@ if (asyncLiveLeak.length)
 // Raised to 963,200 (measured 963128): the guarded reads of an open-container index path, the step kinds a migration compares and the null-counting grouped fold add 1533.
 // Raised to 964,100 (measured 964083): the codec agreement check of a model, the text-encoding check at open and the bounded ledger sweep add 955.
 // Raised to 964,800 (measured 964759): the retype's value-survival check and the resample fill's bucket budget add 676.
-if (clientBytes > 964800)
+// Raised to 967,500 (measured 967476): the live view's exact-sum check and tie position, the range join's bounds check and the shared capture's coded refusal of an argument handed to an aggregate of a captured value add 2717.
+if (clientBytes > 967500)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 
@@ -633,7 +639,8 @@ if (contractPenLeak.length > 0)
 // Raised to 52,600 (measured 52562): core's deepFreeze, which every pen shares, freezing beneath an already frozen root with a memo of whole frozen subtrees and a cycle guard add 393.
 // Raised to 52,900 (measured 52871): a contract declaration copied from the caller's spec add 309.
 // Raised to 53,300 (measured 53257): the shared capture's coded refusal of JSON.stringify on a captured value add 386.
-if (contractPenBytes > 53300)
+// Raised to 53,600 (measured 53526): the shared capture's coded refusal of an argument handed to an aggregate of a captured value add 269.
+if (contractPenBytes > 53600)
   throw new Error(`The contract pen bundle grew to ${contractPenBytes} bytes.`);
 const chainContractLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/contract/') && info.bytesInOutput > 0);
@@ -695,7 +702,8 @@ if (flowPenLeak.length > 0)
 // Raised to 21,600 (measured 21505): the shared capture refuses a callback that reads its argument and answers a plain boolean (511) and explains the destructuring read it names (268).
 // Raised to 22,000 (measured 21978): core's deepFreeze, which every pen shares, freezing beneath an already frozen root with a memo of whole frozen subtrees and a cycle guard add 388.
 // Raised to 22,400 (measured 22364): the shared capture's coded refusal of JSON.stringify on a captured value add 386.
-if (flowPenBytes > 22400)
+// Raised to 22,700 (measured 22633): the shared capture's coded refusal of an argument handed to an aggregate of a captured value add 269.
+if (flowPenBytes > 22700)
   throw new Error(`The flow pen bundle grew to ${flowPenBytes} bytes.`);
 const chainFlowLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/flow/') && info.bytesInOutput > 0);
@@ -752,7 +760,8 @@ if (appPenLeak.length > 0)
 // Raised to 54,000 (measured 53968): caller JSON copied at the pen boundary and its worded refusals add 263.
 // Raised to 54,400 (measured 54359): core's deepFreeze, which every pen shares, freezing beneath an already frozen root with a memo of whole frozen subtrees and a cycle guard add 391.
 // Raised to 54,800 (measured 54700): the shared capture's coded refusal of JSON.stringify on a captured value add 386.
-if (appPenBytes > 54800)
+// Raised to 55,000 (measured 54969): the shared capture's coded refusal of an argument handed to an aggregate of a captured value add 269.
+if (appPenBytes > 55000)
   throw new Error(`The app pen bundle grew to ${appPenBytes} bytes.`);
 const chainAppLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/app/') && info.bytesInOutput > 0);
@@ -808,7 +817,8 @@ if (formsPenLeak.length > 0)
 // Raised to 43,400 (measured 43389): core's deepFreeze, which every pen shares, freezing beneath an already frozen root with a memo of whole frozen subtrees and a cycle guard add 392.
 // Raised to 43,600 (measured 43566): the vacuous assert on a tuple slot the data does not hold yet adds 177.
 // Raised to 44,000 (measured 43952): the shared capture's coded refusal of JSON.stringify on a captured value add 386.
-if (formsPenBytes > 44000)
+// Raised to 44,300 (measured 44221): the shared capture's coded refusal of an argument handed to an aggregate of a captured value add 269.
+if (formsPenBytes > 44300)
   throw new Error(`The forms pen bundle grew to ${formsPenBytes} bytes.`);
 const chainFormsLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/forms/') && info.bytesInOutput > 0);
