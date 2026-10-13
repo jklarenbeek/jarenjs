@@ -6,6 +6,7 @@
  *
  *   data   = { items: [{ label, value }] }                  // flat
  *   data   = { items: [{ label, children: [{label, value}] }] }  // grouped
+ *   data   = { items: [{ label, children: [{ label, children: [...] }] }] }  // deeper
  *   config = { type:'treemap', title?, aspect? }
  *
  * The AST is a flat list of unit-square tiles (`x0..x1`/`y0..y1` in
@@ -15,18 +16,31 @@
  * (default 1.6), carried in the AST so the render maps height from
  * width with the same value.
  *
- * One level of grouping is supported: an item with `children` is a
- * group whose value is its children's sum. Groups squarify against each
- * other, then each group's children squarify inside its rect below a
- * header band that names it — the package→module reading. Groups take a
- * palette color each, so a group is one hue and its children are told
- * apart by the hairline between them. A childless item in a grouped
- * chart becomes a group of one, so no data is dropped either way; a
- * chart with no `children` anywhere lays out exactly as it always has.
+ * Hierarchies nest up to `MAX_TREEMAP_DEPTH` levels. An item with `children` is a group
+ * whose value is its children's sum, and a child may itself be a group.
+ * Siblings (leaves and groups alike) squarify against each other, then
+ * each group's children squarify inside its rect below a header band
+ * that names it — the package→module reading. Groups take a palette
+ * color each at the top level and everything beneath one shares its
+ * hue, so a subtree reads as one block and its leaves are told apart by
+ * the hairline between them. A childless item in a grouped chart becomes
+ * a group of one, so no data is dropped either way; a chart with no
+ * `children` anywhere lays out exactly as it always has.
+ *
+ * Two budgets keep a deep tree legible. The naming bands on the way
+ * from a top-level group down to any leaf total at most a third of that
+ * group's height (a nested group past the budget has no band, and its
+ * name is still in every leaf's hover text). And a nested group whose rect covers under
+ * `MIN_SUBTREE_AREA` of the map (1%) is too small to read as parts: it
+ * collapses into its parent and is laid as the one leaf it sums to.
+ * Top-level groups always keep their children. Groups nest at most
+ * `MAX_TREEMAP_DEPTH` (64) levels deep; deeper data throws a `CodedError`
+ * `CH0001` naming the group's JSON Pointer.
  */
 
 import { svgRoot, textAt, textWidth, coord } from '@jarenjs/view/helpers';
 import { clamp01 } from '@jarenjs/core/math';
+import { CodedError } from '@jarenjs/core/errors';
 import { FS_LABEL, annotateChart, chartTitle, fitLabel } from '../core/cartesian.js';
 import { measurableUnit } from '../core/domain.js';
 import { CATEGORICAL, seriesColor, inkFor } from '../core/palette.js';
@@ -39,8 +53,13 @@ import { normalizeTooltip, valueMark } from '../core/marks.js';
  * @property {number} frac fraction of the total (0..1)
  * @property {number} x0 @property {number} y0
  * @property {number} x1 @property {number} y1
- * @property {string|null} group the group this tile belongs to (null when flat)
- * @property {number} swatch palette index for the fill
+ * @property {string|null} group the group this tile sits directly in (null when flat)
+ * @property {string[]} [path] the labels of every group above the tile,
+ *  outermost first (empty when flat; its last entry is `group`); absent
+ *  in an AST built before groups could nest, which the render reads as
+ *  `[group]`
+ * @property {number} swatch palette index for the fill: the top-level
+ *  group's, shared by everything beneath it
  */
 /**
  * @typedef {object} TreemapGroupAST
@@ -50,7 +69,10 @@ import { normalizeTooltip, valueMark } from '../core/marks.js';
  * @property {number} x0 @property {number} y0
  * @property {number} x1 @property {number} y1
  * @property {number} header height of the naming band at the group's top
- *  (a fraction of the map height; the children fill what is left)
+ *  (a fraction of the map height; the children fill what is left; 0 for a
+ *  nested group past its top-level group's header budget)
+ * @property {number} [depth] 0 for a top-level group, 1 for a group in one,
+ *  ...; absent in an AST built before groups could nest
  * @property {number} swatch palette index
  */
 /**
@@ -61,8 +83,10 @@ import { normalizeTooltip, valueMark } from '../core/marks.js';
  * @property {number} total the leaves' sum; `Infinity` when it passes the
  *  largest double, which the fractions do not
  * @property {TreemapTileAST[]} tiles value-descending, grouped when
- *  `groups` is non-empty (descending inside each group)
- * @property {TreemapGroupAST[]} groups empty for a flat treemap
+ *  `groups` is non-empty (descending inside each group, a collapsed
+ *  subtree standing as one tile among its siblings)
+ * @property {TreemapGroupAST[]} groups every group that was subdivided,
+ *  each before the groups inside it; empty for a flat treemap
  */
 
 /**
@@ -76,12 +100,33 @@ import { normalizeTooltip, valueMark } from '../core/marks.js';
 const HEADER_FRAC = 0.06;
 
 /**
+ * The share of the map's area below which a nested group is not
+ * subdivided: its parts would be too small to tell apart, so it
+ * collapses into its parent and is laid as the one tile it sums to
+ * (named by the group, hover text carrying the path). 1%, about a
+ * 60×30px rect at the default drawing. A top-level group is never
+ * collapsed.
+ */
+const MIN_SUBTREE_AREA = 0.01;
+
+/**
+ * The most levels of groups a treemap nests (a top-level group is the
+ * first). Deeper data is refused by name, `CH0001`, rather than laid
+ * out: no drawing can show it (the collapse and header budgets already
+ * stop a subtree being subdivided long before) and every tile's hover
+ * text repeats the path of groups above it, so the text a chart
+ * carries grows with this bound.
+ */
+const MAX_TREEMAP_DEPTH = 64;
+
+/**
  * Build the geometry-free treemap AST. Leaves that sum past the largest
  * double are laid out in the unit `measurableUnit` picks over all of
  * them, so tiles and groups keep the proportions of their values.
  * @param {any} data
  * @param {any} [config]
  * @returns {TreemapAST}
+ * @throws {CodedError} `CH0001` when groups nest more than 64 levels deep
  */
 export function buildTreemapAST(data, config = {}) {
   const aspect = typeof config.aspect === 'number' && Number.isFinite(config.aspect) && config.aspect > 0
@@ -93,11 +138,18 @@ export function buildTreemapAST(data, config = {}) {
     : buildFlat(leavesOf(items), aspect, config);
 }
 
+/** The `{label, value}` leaf of an item, or null when its value is not a positive finite number. */
+function leafOf(item) {
+  return typeof item?.value === 'number' && Number.isFinite(item.value) && item.value > 0
+    ? { label: String(item.label ?? ''), value: item.value }
+    : null;
+}
+
 /** The positive-valued `{label, value}` leaves of a list, descending. */
 function leavesOf(items) {
   return items
-    .filter((item) => typeof item?.value === 'number' && Number.isFinite(item.value) && item.value > 0)
-    .map((item) => ({ label: String(item.label ?? ''), value: item.value }))
+    .map(leafOf)
+    .filter((leaf) => leaf !== null)
     .sort((a, b) => b.value - a.value);
 }
 
@@ -125,60 +177,163 @@ function buildFlat(input, aspect, config) {
 }
 
 /**
- * A grouped treemap: groups squarified against each other, each
- * group's children squarified below its header band.
+ * A grouped treemap: siblings squarified against each other at every
+ * level, each group's children squarified below its header band.
  */
 function buildGrouped(items, aspect, config) {
-  const input = [];
-  for (const item of items) {
-    // a childless item is a group of one, so nothing is dropped
-    const children = Array.isArray(item?.children) ? leavesOf(item.children) : leavesOf([item]);
-    if (children.length === 0) continue;
-    input.push({ label: String(item?.label ?? ''), children, value: 0 });
-  }
+  const { top, order, values } = readGroups(items);
   // one unit over every leaf, so the groups' sums compare
-  const unit = measurableUnit(input.flatMap((g) => g.children.map((c) => c.value)));
-  for (const group of input)
-    group.value = group.children.reduce((s, c) => s + c.value / unit, 0);
-  input.sort((a, b) => b.value - a.value);
-  const sum = input.reduce((s, g) => s + g.value, 0);
-
-  const tiles = [];
-  const groups = [];
+  const unit = measurableUnit(values);
+  settle(order, unit);
+  const groups = top.filter((g) => g.kids.length > 0).sort((a, b) => b.s - a.s);
+  const sum = groups.reduce((s, g) => s + g.s, 0);
+  const ctx = { aspect, unit, sum, tiles: [], groups: [] };
   if (sum > 0) {
-    const rects = squarify(input.map((g) => (g.value / sum) * aspect), 0, 0, aspect, 1);
-    for (let gi = 0; gi < input.length; gi++) {
-      const group = input[gi];
-      const rect = rects[gi];
-      const height = rect.y1 - rect.y0;
-      // never eat more than a third of a short group's own height
-      const header = Math.min(HEADER_FRAC, height / 3);
-      const inner = { x0: rect.x0, y0: rect.y0 + header, x1: rect.x1, y1: rect.y1 };
-      groups.push({
-        label: group.label,
-        value: group.value * unit,
-        frac: group.value / sum,
-        ...unitRect(rect, aspect),
-        header,
-        swatch: gi,
-      });
-      const area = (inner.x1 - inner.x0) * (inner.y1 - inner.y0);
-      const childRects = squarify(
-        group.children.map((c) => (c.value / unit / group.value) * area),
-        inner.x0, inner.y0, inner.x1 - inner.x0, inner.y1 - inner.y0);
-      for (let ci = 0; ci < group.children.length; ci++) {
-        tiles.push({
-          label: group.children[ci].label,
-          value: group.children[ci].value,
-          frac: group.children[ci].value / unit / sum,
-          ...unitRect(childRects[ci], aspect),
-          group: group.label,
-          swatch: gi,
-        });
-      }
+    const rects = squarify(groups.map((g) => (g.s / sum) * aspect), 0, 0, aspect, 1);
+    for (let gi = 0; gi < groups.length; gi++) placeGroups(ctx, groups[gi], rects[gi], gi);
+  }
+  return { type: 'treemap', title: config.title ?? null, aspect, total: sum * unit, tiles: ctx.tiles, groups: ctx.groups };
+}
+
+/**
+ * The hierarchy as `{label, kids, s}` groups and `{label, value}`
+ * leaves. A work list rather than recursion: a hierarchy's depth is the
+ * caller's, and a deep one must not exhaust the stack. `order` lists
+ * every group, each before the groups inside it; `values` every leaf's.
+ * An item is a group when it has a `children` array, except that a
+ * nested one with no children at all is a leaf when its own value is a
+ * positive number; a group's own `value` is ignored.
+ * @throws {CodedError} CH0001 when groups nest more than `MAX_TREEMAP_DEPTH` deep
+ */
+function readGroups(items) {
+  const top = [];
+  const order = [];
+  const values = [];
+  const work = [];
+  const groupOf = (item, up, at) => {
+    const group = { label: String(item?.label ?? ''), kids: [], s: 0, up, at, depth: up === null ? 0 : up.depth + 1 };
+    if (group.depth >= MAX_TREEMAP_DEPTH)
+      throw new CodedError('ChartError', 'CH0001',
+        `a treemap nests groups at most ${MAX_TREEMAP_DEPTH} deep`, pointerOf(group));
+    order.push(group);
+    return group;
+  };
+  const add = (into, item, up, at) => {
+    if (Array.isArray(item?.children) && (up === null || item.children.length > 0)) {
+      const group = groupOf(item, up, at);
+      into.push(group);
+      work.push({ src: item.children, group });
+      return;
+    }
+    const leaf = leafOf(item);
+    if (leaf) { into.push(leaf); values.push(leaf.value); }
+  };
+  for (let at = 0; at < items.length; at++) {
+    const item = items[at];
+    if (Array.isArray(item?.children)) add(top, item, null, at);
+    else {
+      // a childless item is a group of one, so nothing is dropped
+      const group = groupOf(item, null, at);
+      top.push(group);
+      add(group.kids, item, group, 0);
     }
   }
-  return { type: 'treemap', title: config.title ?? null, aspect, total: sum * unit, tiles, groups };
+  while (work.length > 0) {
+    const { src, group } = /** @type {any} */ (work.pop());
+    for (let at = 0; at < src.length; at++) add(group.kids, src[at], group, at);
+  }
+  return { top, order, values };
+}
+
+/** The JSON Pointer from the chart's data to `group`, as its `items` and `children` indexes. */
+function pointerOf(group) {
+  const parts = [];
+  for (let g = group; g !== null; g = g.up) parts.push(g.up === null ? `items/${g.at}` : `children/${g.at}`);
+  return `/${parts.reverse().join('/')}`;
+}
+
+/**
+ * Size every group in the unit, innermost first (`order` lists a group
+ * before the groups inside it, so walking it backwards visits a group
+ * after its children): drop the groups no leaf survived in, sort the
+ * siblings descending, and sum them in that order.
+ */
+function settle(order, unit) {
+  for (let i = order.length - 1; i >= 0; i--) {
+    const group = order[i];
+    group.kids = group.kids.filter((kid) => kid.kids === undefined || kid.kids.length > 0);
+    for (const kid of group.kids) if (kid.kids === undefined) kid.s = kid.value / unit;
+    group.kids.sort((a, b) => b.s - a.s);
+    group.s = group.kids.reduce((s, kid) => s + kid.s, 0);
+  }
+}
+
+/**
+ * Lay the group tree below `root` into `rootRect` (aspect-scaled
+ * space), depth first, on an explicit stack so a deep hierarchy cannot
+ * exhaust the call stack. Each group gets its header band, then its
+ * kids squarified in what is left; a nested group too small to
+ * subdivide, like a leaf, becomes one tile.
+ */
+function placeGroups(ctx, root, rootRect, swatch) {
+  const { aspect, unit, sum } = ctx;
+  /**
+   * Open a group: record it and squarify its kids. `budget` is what
+   * the bands above it have left of the top-level group's height; the
+   * frame carries what is left once this group's own band is taken.
+   */
+  const open = (group, rect, parent, budget) => {
+    // never eat more than a third of a short group's own height, nor more
+    // than the top-level group's budget has left
+    const header = Math.min(HEADER_FRAC, (rect.y1 - rect.y0) / 3, budget);
+    const depth = parent === null ? 0 : parent.depth + 1;
+    ctx.groups.push({
+      label: group.label,
+      value: group.s * unit,
+      frac: group.s / sum,
+      ...unitRect(rect, aspect),
+      header,
+      depth,
+      swatch,
+    });
+    const x0 = rect.x0;
+    const y0 = rect.y0 + header;
+    const w = rect.x1 - rect.x0;
+    const h = rect.y1 - y0;
+    const rects = squarify(group.kids.map((kid) => (kid.s / group.s) * (w * h)), x0, y0, w, h);
+    return { group, rects, index: 0, parent, depth, left: budget - header, path: null };
+  };
+  const stack = [open(root, rootRect, null, (rootRect.y1 - rootRect.y0) / 3)];
+  while (stack.length > 0) {
+    const frame = /** @type {any} */ (stack.at(-1));
+    if (frame.index === frame.group.kids.length) { stack.pop(); continue; }
+    const kid = frame.group.kids[frame.index];
+    const rect = frame.rects[frame.index++];
+    const nested = kid.kids !== undefined;
+    if (nested && (rect.x1 - rect.x0) * (rect.y1 - rect.y0) / aspect >= MIN_SUBTREE_AREA) {
+      stack.push(open(kid, rect, frame, frame.left));
+      continue;
+    }
+    ctx.tiles.push({
+      label: kid.label,
+      value: nested ? kid.s * unit : kid.value,
+      frac: kid.s / sum,
+      ...unitRect(rect, aspect),
+      group: frame.group.label,
+      path: pathOf(frame),
+      swatch,
+    });
+  }
+}
+
+/** The labels of the groups from the top-level one down to `frame`'s, cached on the frame. */
+function pathOf(frame) {
+  if (frame.path === null) {
+    const labels = [];
+    for (let f = frame; f !== null; f = f.parent) labels.push(f.group.label);
+    frame.path = labels.reverse();
+  }
+  return frame.path;
 }
 
 /**
@@ -254,9 +409,11 @@ function worst(areas, start, end, sum, side) {
  * Render a treemap AST to a pure-vnode SVG: inset tile rects on the
  * categorical palette, labels inside the tiles that fit them (ink
  * picked by fill luminance), and a label+share `<title>` on every tile.
- * A grouped treemap adds the group's name in its header band and a
- * hairline between same-hue siblings — both only when there are groups,
- * so a flat treemap renders exactly as it did before grouping existed.
+ * A grouped treemap adds each group's name in its header band (where it
+ * has one that fits) and a hairline between same-hue siblings — both
+ * only when there are groups, so a flat treemap renders exactly as it
+ * did before grouping existed; a tile's hover text spells out the path
+ * of groups above it.
  * @param {TreemapAST} ast
  * @param {{tokens: Record<string,string>, cssVars: Record<string,string>}} theme
  * @param {string} hash
@@ -314,7 +471,7 @@ export function renderTreemapAST(ast, theme, hash, options = {}) {
       },
     tooltip, tile.group === null
       ? `${tile.label}: ${tile.value} (${share})`
-      : `${tile.group} / ${tile.label}: ${tile.value} (${share})`,
+      : `${(tile.path ?? [tile.group]).join(' / ')} / ${tile.label}: ${tile.value} (${share})`,
     { type: 'treemap', label: tile.label, group: tile.group, value: tile.value }));
     if (h >= FS_LABEL + 8 && textWidth(tile.label, FS_LABEL) <= w - 8) {
       children.push(textAt(coord(x + 4), coord(y + FS_LABEL + 2), tile.label, FS_LABEL,

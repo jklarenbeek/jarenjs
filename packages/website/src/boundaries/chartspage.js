@@ -193,7 +193,7 @@ const DEMOS = [
   },
   {
     key: 'treemap',
-    blurb: 'Part-of-whole by area, squarified so tiles stay near-square. One hierarchy level: groups squarify against each other, their children squarify under a naming band, and a group is one hue with hairlines between its members.',
+    blurb: 'Part-of-whole by area, squarified so tiles stay near-square. Groups nest: siblings squarify against each other at every level, a group\'s children squarify under a naming band, and a subtree is one hue with hairlines between its leaves.',
     config: {
       type: 'treemap',
       title: 'Suite time by package and module',

@@ -178,7 +178,7 @@
         "properties": {
           "aspect": { "type": "number", "exclusiveMinimum": 0 },
           "items": {
-            "description": "leaves, or one level of groups; a chart with any group treats a bare leaf as a group of one",
+            "description": "leaves, or groups nested up to 64 levels deep; a chart with any group treats a bare top-level leaf as a group of one",
             "type": "array",
             "items": {
               "anyOf": [
@@ -402,7 +402,7 @@
       }
     },
     "treemapGroup": {
-      "description": "one hierarchy level: the group's value is its children's sum",
+      "description": "a hierarchy level: the group's value is its children's sum (a value of its own is ignored), and a child may itself be a group",
       "type": "object",
       "required": ["label", "children"],
       "properties": {
@@ -410,7 +410,12 @@
         "children": {
           "type": "array",
           "minItems": 1,
-          "items": { "$ref": "#/$defs/treemapItem" }
+          "items": {
+            "anyOf": [
+              { "$ref": "#/$defs/treemapItem" },
+              { "$ref": "#/$defs/treemapGroup" }
+            ]
+          }
         }
       }
     },

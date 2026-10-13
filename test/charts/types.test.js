@@ -13,10 +13,11 @@ import {
   buildLineAST, buildCandlestickAST,
   buildRadarAST, buildGaugeAST,
   buildBoxplotAST, quantileSorted, buildHeatmapAST,
-  buildTreemapAST, buildStreamgraphAST, buildSankeyAST, buildMapAST,
+  buildTreemapAST, renderTreemapAST, createTheme, buildStreamgraphAST, buildSankeyAST, buildMapAST,
   SEQUENTIAL, inkFor,
 } from '@jarenjs/charts';
 import { projectMercator } from '@jarenjs/core/geo';
+import { renderToString } from '@jarenjs/view';
 
 describe('radar AST', function () {
   it('spreads axes over the circle from 12 o\'clock and scales to a nice top', function () {
@@ -357,6 +358,274 @@ describe('treemap AST', function () {
     assert.equal(ast.tiles[0].group, null);
     assert.doesNotMatch(compileChart({ type: 'treemap', items: [{ label: 'a', value: 1 }] }).toSvgString(),
       /chart-treemap-tile[^>]*stroke=/);
+  });
+
+  describe('deeper nesting', function () {
+    const r6 = (n) => Math.round(n * 1e6) / 1e6;
+    const rect = (o) => [o.x0, o.y0, o.x1, o.y1].map(r6);
+    const groupsOf = (ast) => ast.groups.map((g) => [g.label, g.depth, g.value, r6(g.frac), rect(g), r6(g.header), g.swatch]);
+    const tilesOf = (ast) => ast.tiles.map((t) => [t.path.join('/'), t.group, t.label, t.value, r6(t.frac), rect(t), t.swatch]);
+    /** A group chain `n` deep: each level holds a leaf of 1 beside the next level. */
+    const chain = (n) => {
+      let node = { label: `L${n - 1}`, children: [{ label: 'leaf', value: 1 }] };
+      for (let i = n - 2; i >= 0; i--) node = { label: `L${i}`, children: [{ label: `k${i}`, value: 1 }, node] };
+      return node;
+    };
+
+    it('a group inside a group is laid out, not dropped: exact layout', function () {
+      const ast = buildTreemapAST({
+        items: [
+          {
+            label: 'a', children: [
+              { label: 'a1', children: [{ label: 'x', value: 6 }, { label: 'y', value: 2 }] },
+              { label: 'a2', value: 4 },
+            ],
+          },
+          { label: 'b', value: 8 },
+        ],
+      }, { type: 'treemap', aspect: 1 });
+      assert.equal(ast.total, 20);
+      assert.deepEqual(groupsOf(ast), [
+        ['a', 0, 12, 0.6, [0, 0, 1, 0.6], 0.06, 0],
+        ['a1', 1, 8, 0.4, [0, 0.06, 0.666667, 0.6], 0.06, 0],
+        ['b', 0, 8, 0.4, [0, 0.6, 1, 1], 0.06, 1],
+      ]);
+      // a1 (8) outweighs the leaf a2 (4), so it is laid first; its leaves
+      // start below its own band and the whole subtree keeps a's hue
+      assert.deepEqual(tilesOf(ast), [
+        ['a/a1', 'a1', 'x', 6, 0.3, [0, 0.12, 0.5, 0.6], 0],
+        ['a/a1', 'a1', 'y', 2, 0.1, [0.5, 0.12, 0.666667, 0.6], 0],
+        ['a', 'a', 'a2', 4, 0.2, [0.666667, 0.06, 1, 0.6], 0],
+        ['b', 'b', 'b', 8, 0.4, [0, 0.66, 1, 1], 1],
+      ]);
+    });
+
+    it('the tiles of every depth tile the leaves: areas follow values, rects stay inside their groups', function () {
+      const ast = buildTreemapAST({
+        items: [
+          { label: 'p', children: [{ label: 'q', children: [{ label: 'r', children: [{ label: 'l1', value: 5 }, { label: 'l2', value: 3 }] }, { label: 'l3', value: 4 }] }, { label: 'l4', value: 8 }] },
+          { label: 'l5', value: 10 },
+        ],
+      }, { type: 'treemap', aspect: 1.6 });
+      assert.equal(ast.total, 30);
+      assert.deepEqual(ast.groups.map((g) => [g.label, g.depth]), [['p', 0], ['q', 1], ['r', 2], ['l5', 0]]);
+      assert.deepEqual(ast.tiles.map((t) => [t.path.join('/'), t.label]), [
+        ['p/q/r', 'l1'], ['p/q/r', 'l2'], ['p/q', 'l3'], ['p', 'l4'], ['l5', 'l5'],
+      ]);
+      const area = (o) => (o.x1 - o.x0) * (o.y1 - o.y0);
+      let leafArea = 0;
+      for (const tile of ast.tiles) {
+        leafArea += area(tile);
+        assert.ok(Math.abs(tile.frac - tile.value / 30) < 1e-12, tile.label);
+      }
+      // the bands are the only area the leaves do not cover
+      let bands = 0;
+      for (const g of ast.groups) bands += (g.x1 - g.x0) * g.header;
+      assert.ok(Math.abs(leafArea + bands - 1) < 1e-9, `${leafArea} + ${bands}`);
+      for (const tile of ast.tiles) {
+        for (const label of tile.path) {
+          const g = ast.groups.find((x) => x.label === label);
+          assert.ok(tile.x0 >= g.x0 - 1e-9 && tile.x1 <= g.x1 + 1e-9 && tile.y0 >= g.y0 + g.header - 1e-9 && tile.y1 <= g.y1 + 1e-9,
+            `${tile.label} escapes ${label}`);
+        }
+      }
+    });
+
+    it('hover text and group names spell out the path', function () {
+      const svg = compileChart({
+        type: 'treemap', aspect: 1.6,
+        items: [{ label: 'a', children: [{ label: 'b', children: [{ label: 'c', value: 3 }, { label: 'd', value: 1 }] }, { label: 'e', value: 4 }] }],
+      }).toSvgString();
+      assert.match(svg, /<title>a \/ b \/ c: 3 \(37\.5%\)<\/title>/);
+      assert.match(svg, /<title>a \/ e: 4 \(50\.0%\)<\/title>/);
+      assert.match(svg, />a \(100\.0%\)</);
+      assert.match(svg, />b \(50\.0%\)</);
+      assert.ok(!svg.includes('NaN'));
+    });
+
+    it('a nested group under 1% of the map collapses into its parent as one tile', function () {
+      const small = buildTreemapAST({
+        items: [{
+          label: 'a', children: [
+            { label: 'a1', children: [{ label: 'x', value: 1 }, { label: 'y', value: 1 }] },
+            { label: 'a2', value: 198 },
+          ],
+        }],
+      }, { type: 'treemap', aspect: 1 });
+      assert.deepEqual(groupsOf(small), [['a', 0, 200, 1, [0, 0, 1, 1], 0.06, 0]]);
+      assert.deepEqual(tilesOf(small), [
+        ['a', 'a', 'a2', 198, 0.99, [0, 0.06, 0.99, 1], 0],
+        ['a', 'a', 'a1', 2, 0.01, [0.99, 0.06, 1, 1], 0],
+      ]);
+      // twice the weight puts it over the line: it keeps its band and its parts
+      const kept = buildTreemapAST({
+        items: [{
+          label: 'a', children: [
+            { label: 'a1', children: [{ label: 'x', value: 2 }, { label: 'y', value: 2 }] },
+            { label: 'a2', value: 196 },
+          ],
+        }],
+      }, { type: 'treemap', aspect: 1 });
+      assert.deepEqual(groupsOf(kept), [
+        ['a', 0, 200, 1, [0, 0, 1, 1], 0.06, 0],
+        ['a1', 1, 4, 0.02, [0.98, 0.06, 1, 1], 0.06, 0],
+      ]);
+      assert.deepEqual(tilesOf(kept).map((t) => t.slice(0, 5)), [
+        ['a', 'a', 'a2', 196, 0.98],
+        ['a/a1', 'a1', 'x', 2, 0.01],
+        ['a/a1', 'a1', 'y', 2, 0.01],
+      ]);
+    });
+
+    it('a top-level group keeps its children however small it is', function () {
+      const ast = buildTreemapAST({
+        items: [{ label: 'big', value: 1000 }, { label: 'tiny', children: [{ label: 'x', value: 1 }, { label: 'y', value: 1 }] }],
+      }, { type: 'treemap', aspect: 1 });
+      assert.deepEqual(ast.groups.map((g) => g.label), ['big', 'tiny']);
+      assert.deepEqual(ast.tiles.map((t) => t.label), ['big', 'x', 'y']);
+    });
+
+    it('the bands from a top-level group to any leaf total at most a third of its height', function () {
+      const ast = buildTreemapAST({ items: [chain(8)] }, { type: 'treemap', aspect: 1 });
+      assert.deepEqual(ast.groups.map((g) => [g.label, g.depth, r6(g.header), r6(g.y0)]), [
+        ['L0', 0, 0.06, 0], ['L1', 1, 0.06, 0.06], ['L2', 2, 0.06, 0.12], ['L3', 3, 0.06, 0.18],
+        ['L4', 4, 0.06, 0.24],
+        // the budget runs out: what is left of the third, then no band at all
+        ['L5', 5, 0.033333, 0.3], ['L6', 6, 0, 0.333333], ['L7', 7, 0, 0.333333],
+      ]);
+      const top = ast.groups[0];
+      const spine = ast.groups.reduce((sum, g) => sum + g.header, 0);
+      assert.ok(Math.abs(spine - (top.y1 - top.y0) / 3) < 1e-12, String(spine));
+      const leaf = ast.tiles.find((t) => t.label === 'leaf');
+      assert.ok(leaf && leaf.y1 - leaf.y0 > 0.3, 'the deepest leaf still has a body');
+      // a nested group past the budget draws no band text
+      const svg = compileChart({ type: 'treemap', items: [chain(8)] }).toSvgString();
+      assert.equal((svg.match(/chart-treemap-group/g) ?? []).length, 5);
+    });
+
+    it('a short nested group never gives more than a third of its height to its band', function () {
+      const ast = buildTreemapAST({
+        items: [{ label: 'a', children: [{ label: 'b', children: [{ label: 'c', value: 1 }, { label: 'd', value: 1 }] }, { label: 'e', value: 30 }] }],
+      }, { type: 'treemap', aspect: 1 });
+      const b = ast.groups.find((g) => g.label === 'b');
+      assert.ok(b && b.header <= (b.y1 - b.y0) / 3 + 1e-12);
+    });
+
+    it('drops what holds no leaf at any depth, and ignores a value on a group', function () {
+      const ast = buildTreemapAST({
+        items: [
+          { label: 'g', value: 99, children: [{ label: 'empty', children: [] }, { label: 'dead', children: [{ label: 'z', value: 0 }, { label: 'n', value: NaN }] }, { label: 'ok', value: 2 }] },
+          { label: 'void', children: [{ label: 'dead', children: [] }] },
+        ],
+      }, { type: 'treemap', aspect: 1 });
+      assert.deepEqual(ast.groups.map((g) => [g.label, g.value]), [['g', 2]]);
+      assert.deepEqual(ast.tiles.map((t) => [t.path.join('/'), t.label, t.value]), [['g', 'ok', 2]]);
+      assert.equal(ast.total, 2);
+    });
+
+    it('groups nest 64 levels deep; one more is refused by name, at any size, with its pointer', function () {
+      const ast = buildTreemapAST({ items: [chain(64)] }, { type: 'treemap', aspect: 1 });
+      assert.equal(ast.total, 64);
+      assert.equal(ast.groups[0].label, 'L0');
+      assert.equal(Math.max(...ast.groups.map((g) => g.depth)), ast.groups.length - 1);
+      assert.ok(ast.groups.length > 50);
+      // the text a chart carries stays bounded: a path is at most 64 labels
+      assert.ok(ast.tiles.every((t) => t.path.length <= 64));
+      const svg = compileChart({ type: 'treemap', items: [chain(64)] }).toSvgString();
+      assert.ok(svg.length < 40000, `svg is ${svg.length} bytes`);
+      const pointer = (n) => `/items/0${'/children/1'.repeat(n)}`;
+      for (const n of [65, 8000]) {
+        for (const run of [
+          () => buildTreemapAST({ items: [chain(n)] }),
+          () => compileChart({ type: 'treemap', items: [chain(n)] }),
+        ]) {
+          assert.throws(run, (err) => {
+            assert.equal(err.name, 'ChartError');
+            assert.equal(err.code, 'CH0001');
+            assert.equal(err.reason, 'a treemap nests groups at most 64 deep');
+            assert.equal(err.docPath, pointer(64));
+            return true;
+          });
+        }
+      }
+      // the same bound for a top-level sibling after others
+      assert.throws(() => buildTreemapAST({ items: [{ label: 'x', value: 1 }, chain(65)] }),
+        (err) => err.code === 'CH0001' && err.docPath === `/items/1${'/children/1'.repeat(64)}`);
+    });
+
+    it('an AST without path and depth still renders, reading the path as [group]', function () {
+      const config = {
+        type: 'treemap', aspect: 1.6,
+        items: [{ label: 'pkg', children: [{ label: 'a', value: 3 }, { label: 'b', value: 1 }] }],
+      };
+      const ast = buildTreemapAST(config, config);
+      const old = {
+        ...ast,
+        tiles: ast.tiles.map((tile) => Object.fromEntries(Object.entries(tile).filter(([key]) => key !== 'path'))),
+        groups: ast.groups.map((group) => Object.fromEntries(Object.entries(group).filter(([key]) => key !== 'depth'))),
+      };
+      const theme = createTheme();
+      const svg = renderToString(renderTreemapAST(/** @type {any} */ (old), theme, 'h'));
+      assert.equal(svg, renderToString(renderTreemapAST(ast, theme, 'h')));
+      assert.match(svg, /<title>pkg \/ a: 3 \(75\.0%\)<\/title>/);
+    });
+
+    it('an item with an empty children list is a leaf when it has a value, as it always was', function () {
+      const ast = buildTreemapAST({
+        items: [{
+          label: 'g', children: [
+            { label: 'c', value: 5, children: [] },
+            { label: 'd', value: 2 },
+            { label: 'e', children: [] },
+          ],
+        }],
+      }, { type: 'treemap', aspect: 1 });
+      assert.equal(ast.total, 7);
+      assert.deepEqual(ast.groups.map((g) => g.label), ['g']);
+      assert.deepEqual(ast.tiles.map((t) => [t.path.join('/'), t.label, t.value]), [['g', 'c', 5], ['g', 'd', 2]]);
+      // at the top level an empty group has always been dropped, value or not
+      const top = buildTreemapAST({
+        items: [{ label: 'x', value: 4, children: [] }, { label: 'y', children: [{ label: 'z', value: 1 }] }],
+      }, { type: 'treemap' });
+      assert.deepEqual(top.groups.map((g) => g.label), ['y']);
+      assert.equal(top.total, 1);
+    });
+
+    it('items without labels are named by the empty string at every level', function () {
+      const ast = buildTreemapAST({
+        items: [{ children: [{ children: [{ value: 1 }, { label: 'k', value: 1 }] }, { value: 2 }] }, { value: 4 }],
+      }, { type: 'treemap', aspect: 1 });
+      assert.deepEqual(ast.groups.map((g) => [g.label, g.depth]), [['', 0], ['', 1], ['', 0]]);
+      assert.deepEqual(ast.tiles.map((t) => [t.path.join('/'), t.label, t.value]),
+        [['/', '', 1], ['/', 'k', 1], ['', '', 2], ['', '', 4]]);
+    });
+
+    it('the 1% line sits at 1% of the map: just under collapses, at it and over it subdivide', function () {
+      // a2 is 100 and the group g is w, in a top group whose body is 94% of
+      // the map; these three weights give g a rect of 0.009999999999999998,
+      // 0.01 and 0.010000000000000002 of the map
+      const lay = (w) => buildTreemapAST({
+        items: [{
+          label: 'a', children: [
+            { label: 'g', children: [{ label: 'x', value: w / 2 }, { label: 'y', value: w / 2 }] },
+            { label: 'r', value: 100 },
+          ],
+        }],
+      }, { type: 'treemap', aspect: 1 });
+      assert.deepEqual(lay(1.075268817204301).groups.map((g) => g.label), ['a']);
+      assert.deepEqual(lay(1.0752688172043015).groups.map((g) => g.label), ['a', 'g']);
+      assert.deepEqual(lay(1.0752688172043017).groups.map((g) => g.label), ['a', 'g']);
+      assert.deepEqual(lay(1.075268817204301).tiles.map((t) => t.label), ['r', 'g']);
+    });
+
+    it('overflowing leaves keep the ratios of their values at depth', function () {
+      const M = Number.MAX_VALUE;
+      const ast = buildTreemapAST({
+        items: [{ label: 'g', children: [{ label: 'h', children: [{ label: 'a', value: M }, { label: 'b', value: M / 2 }] }, { label: 'c', value: M / 2 }] }],
+      }, { type: 'treemap' });
+      assert.deepEqual(ast.tiles.map((t) => [t.label, t.frac]), [['a', 0.5], ['b', 0.25], ['c', 0.25]]);
+      assert.equal(ast.total, Infinity);
+    });
   });
 
   it('inkFor flips between dark and light ink at the luminance threshold', function () {

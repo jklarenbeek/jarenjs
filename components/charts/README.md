@@ -73,9 +73,11 @@ separate `data` argument). The type-specific fields, briefly:
 | `gauge` | `value`; `min`/`max` (0..100 default), `unit`, `tone` |
 | `boxplot` | `boxes: [{label, values}]` raw, or `{label, min, q1, med, q3, max, outliers?}` |
 | `heatmap` | `xLabels`, `yLabels`, `values[yi][xi]` (row-major from the top); `log` |
-| `treemap` | `items: [{label, value}]` or `[{label, children: [{label, value}]}]`; `aspect` (default 1.6) |
+| `treemap` | `items: [{label, value}]`, or groups up to 64 levels deep, `[{label, children: [{label, value} or another group]}]`; `aspect` (default 1.6) |
 | `streamgraph` | `series: [{name, values}]`, optional numeric `xs` |
 | `sankey` | `links: [{source, target, value}]` by name or index; `nodes` optional |
+
+**Treemap nesting.** A group's value is its children's sum (a `value` on a group is ignored), and a child may itself be a group, up to 64 levels deep; deeper data is refused with a `CodedError` `CH0001` naming the group's JSON Pointer (`buildTreemapAST` and `compileChart` both throw it before laying anything out). A nested item with an empty `children` list and a positive `value` is a leaf; at the top level an item with an empty `children` list is dropped. Siblings at every level squarify against each other; a group's children fill its rect below a band naming it, and the whole subtree takes the top-level group's palette hue (the hairline between tiles tells leaves apart). Two budgets keep a deep tree legible: the naming bands on the way from a top-level group down to any leaf total at most a third of that group's height (a nested group past the budget has no band, and its name stays in every leaf's hover text, which spells out the path), and a nested group that would cover under 1% of the map is not subdivided: it collapses into its parent and is drawn as the one tile it sums to. A top-level group always keeps its children. In the AST each tile carries the `path` of group labels above it and each group its `depth` (both absent in an AST built before groups could nest, which `renderTreemapAST` still renders: it reads a missing path as `[group]`).
 
 **Time axes.** An `x: 'time'` axis (and every `candlestick`) accepts epoch milliseconds, a `Date`, or an **RFC 3339 string** — a date in a JSON document plots without being pre-converted, and a bare `2026-07-27` reads as UTC midnight. A *numeric* string still does not coerce: accepting `"5"` where the config asked for a number is a type confusion, not a date.
 

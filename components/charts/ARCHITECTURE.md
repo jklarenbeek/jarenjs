@@ -44,6 +44,11 @@ variant included — `bar`, `line`, `scatter`, `candlestick`) plus
 `radar`/`gauge` are polar around their own centers;
 `treemap`/`sankey`/`map` lay out in the unit square with `y` growing
 downward (no axes — reading order wins).
+The treemap's hierarchy is read and laid out on explicit work lists, not
+by recursion, because its depth is the caller's: reading a hierarchy
+never grows the call stack, so a chain thousands of groups deep is
+refused by name (`CH0001`, past 64 levels) rather than by a stack
+overflow.
 
 The `map` type is where the build/render split has to be argued rather
 than assumed, because a projection looks like a rendering step. It is

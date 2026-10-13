@@ -34,6 +34,10 @@ const FIXTURES = [
     values: [[1], [null]],
   },
   { type: 'treemap', aspect: 1.6, items: [{ label: 'a', value: 2 }] },
+  {
+    type: 'treemap',
+    items: [{ label: 'a', children: [{ label: 'b', children: [{ label: 'c', children: [{ label: 'd', value: 1 }] }, { label: 'e', value: 2 }] }] }],
+  },
   { type: 'streamgraph', xs: [0, 1], series: [{ name: 'a', values: [1, 2] }] },
   {
     type: 'sankey', nodes: ['a', { name: 'b' }],
@@ -81,6 +85,11 @@ describe('the chart-definition JSON Schema', function () {
     assert.equal(validate({ type: 'boxplot', boxes: [{ label: 'x', min: 1, q1: 2 }] }), false);
     assert.equal(validate({ type: 'heatmap', values: [[1], 'row'] }), false);
     assert.equal(validate({ type: 'treemap', items: [{ label: 'a', value: 0 }] }), false);
+    // a group nested deeper is held to the same rules as one at the top
+    const deep = (leaf) => ({ type: 'treemap', items: [{ label: 'a', children: [{ label: 'b', children: [leaf] }] }] });
+    assert.equal(validate(deep({ label: 'c', value: 0 })), false);
+    assert.equal(validate(deep({ label: 'c', children: [] })), false);
+    assert.equal(validate(deep({ children: [{ label: 'd', value: 1 }] })), false);
     assert.equal(validate({ type: 'streamgraph', xs: ['monday'] }), false);
     assert.equal(validate({ type: 'sankey', links: [{ source: 'a', target: 'b' }] }), false);
     assert.equal(validate({ type: 'sankey', links: [{ source: 'a', target: 'b', value: 0 }] }), false);

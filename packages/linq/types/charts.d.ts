@@ -107,14 +107,14 @@ export interface TreemapItem {
 
 
 /**
- * one hierarchy level: the group's value is its children's sum
+ * a hierarchy level: the group's value is its children's sum (a value of its own is ignored), and a child may itself be a group
  */
 export interface TreemapGroup {
   label: string;
   /**
    * Schema constraints this type cannot express: minItems=1
    */
-  children: Array<TreemapItem>;
+  children: Array<TreemapItem | TreemapGroup>;
   [key: string]: unknown;
 }
 
@@ -384,7 +384,7 @@ export interface TreemapChart {
    */
   aspect?: number;
   /**
-   * leaves, or one level of groups; a chart with any group treats a bare leaf as a group of one
+   * leaves, or groups nested up to 64 levels deep; a chart with any group treats a bare top-level leaf as a group of one
    */
   items?: Array<TreemapItem | TreemapGroup>;
 }

@@ -88,6 +88,14 @@ const GOLDEN_CONFIGS = {
       { label: 'view', value: 18 }, { label: 'md', value: 15 },
     ],
   },
+  'treemap-grouped.golden.svg': {
+    type: 'treemap', title: 'Grouped treemap fixture',
+    items: [
+      { label: 'engines', children: [{ label: 'validate', value: 42 }, { label: 'json', value: 25 }, { label: 'formats', value: 9 }] },
+      { label: 'views', children: [{ label: 'view', value: 18 }, { label: 'md', value: 15 }] },
+      { label: 'loose', value: 11 },
+    ],
+  },
   'streamgraph.golden.svg': {
     type: 'streamgraph', title: 'Streamgraph fixture', xLabel: 't',
     xs: [0, 1, 2, 3],
