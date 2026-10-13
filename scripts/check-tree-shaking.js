@@ -146,7 +146,8 @@ if (engineLeak.length > 0)
 // Raised to 38,600 (measured 38528): the shared capture refuses a callback that reads its argument and answers a plain boolean (511) and explains the destructuring read it names (269).
 // Raised to 39,000 (measured 38910): the pen boundary that copies caller JSON and words the refusal of a symbol or a prototype-less value add 382.
 // Raised to 39,400 (measured 39300): core's deepFreeze, which every pen shares, freezing beneath an already frozen root with a memo of whole frozen subtrees and a cycle guard add 390.
-if (schemaBytes > 39400)
+// Raised to 39,700 (measured 39686): the shared capture's coded refusal of JSON.stringify on a captured value add 386.
+if (schemaBytes > 39700)
   throw new Error(`The schema pen bundle grew to ${schemaBytes} bytes.`);
 
 console.log(`Tree-shaking smoke test passed (${schemaBytes} byte schema-pen bundle; no chain module, no engine).`);
@@ -219,7 +220,8 @@ if (chainEdgeLeak.length > 0)
 // Raised to 218,500 (measured 218468): core's corrected date, month, grapheme and moving-average helpers the engine carries add 1123.
 // Raised to 218,700 (measured 218633): the engine's group-key identity for bigints and undefined members add 165.
 // Raised to 219,200 (measured 219196): core's occupied-bucket resample walk and nearest-rank quantiles the engine carries add 563.
-if (chainBytes > 219200)
+// Raised to 219,600 (measured 219582): the shared capture's coded refusal of JSON.stringify on a captured value add 386.
+if (chainBytes > 219600)
   throw new Error(`The chain bundle grew to ${chainBytes} bytes.`);
 
 console.log(`Tree-shaking smoke test passed (${chainBytes} byte chain bundle; no schema-pen module, no client module, no store/validator/formats bytes).`);
@@ -296,7 +298,8 @@ if (modelEngineLeak.length > 0)
 // and its closed entries (73).
 // Raised to 50,800 (measured 50710): caller JSON copied at the pen boundary and worded refusals of symbol and prototype-less values add 388.
 // Raised to 51,200 (measured 51102): core's deepFreeze, which every pen shares, freezing beneath an already frozen root with a memo of whole frozen subtrees and a cycle guard add 392.
-if (modelBytes > 51200)
+// Raised to 51,500 (measured 51488): the shared capture's coded refusal of JSON.stringify on a captured value add 386.
+if (modelBytes > 51500)
   throw new Error(`The model pen bundle grew to ${modelBytes} bytes.`);
 const schemaModelLeak = Object.entries(schemaInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/model/') && info.bytesInOutput > 0);
@@ -350,7 +353,8 @@ if (jsltEngineLeak.length > 0)
 // recording (740).
 // Raised to 21,500 (measured 21448): the shared capture refuses a callback that reads its argument and answers a plain boolean (511) and explains the destructuring read it names (269).
 // Raised to 21,900 (measured 21878): core's deepFreeze, which every pen shares, freezing beneath an already frozen root with a memo of whole frozen subtrees and a cycle guard add 389.
-if (jsltBytes > 21900)
+// Raised to 22,300 (measured 22264): the shared capture's coded refusal of JSON.stringify on a captured value add 386.
+if (jsltBytes > 22300)
   throw new Error(`The JSLT pen bundle grew to ${jsltBytes} bytes.`);
 const chainJsltLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/jslt/') && info.bytesInOutput > 0);
@@ -415,7 +419,8 @@ if (migrationEngineLeak.length > 0)
 // Raised to 27,600 (measured 27586): the shared capture refuses a callback that reads its argument and answers a plain boolean (511) and explains the destructuring read it names (268).
 // Raised to 27,700 (measured 27614): caller JSON copied at the pen boundary add 28.
 // Raised to 28,100 (measured 28005): core's deepFreeze, which every pen shares, freezing beneath an already frozen root with a memo of whole frozen subtrees and a cycle guard add 391.
-if (migrationBytes > 28100)
+// Raised to 28,400 (measured 28391): the shared capture's coded refusal of JSON.stringify on a captured value add 386.
+if (migrationBytes > 28400)
   throw new Error(`The migration pen bundle grew to ${migrationBytes} bytes.`);
 const chainMigrationLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/migration/') && info.bytesInOutput > 0);
@@ -566,7 +571,8 @@ if (asyncLiveLeak.length)
 // Raised to 955,400 (measured 955324): the claim that dead-letters a job whose lease expired past its attempt bound adds 345.
 // Raised to 955,600 (measured 955583): SQLite's extremes and projections read
 // large integer-valued doubles back as doubles (add 259).
-if (clientBytes > 955600)
+// Raised to 957,100 (measured 957081): the shared capture's coded refusal of JSON.stringify on a captured value (386), the native temporal bucket kept in the engine over a nullable reading and the I-Regexp compile check the validator carries add 1498.
+if (clientBytes > 957100)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 
@@ -618,7 +624,8 @@ if (contractPenLeak.length > 0)
 // Raised to 52,200 (measured 52169): caller JSON copied at the pen boundary and an own-member read of the http `in` map add 384.
 // Raised to 52,600 (measured 52562): core's deepFreeze, which every pen shares, freezing beneath an already frozen root with a memo of whole frozen subtrees and a cycle guard add 393.
 // Raised to 52,900 (measured 52871): a contract declaration copied from the caller's spec add 309.
-if (contractPenBytes > 52900)
+// Raised to 53,300 (measured 53257): the shared capture's coded refusal of JSON.stringify on a captured value add 386.
+if (contractPenBytes > 53300)
   throw new Error(`The contract pen bundle grew to ${contractPenBytes} bytes.`);
 const chainContractLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/contract/') && info.bytesInOutput > 0);
@@ -679,7 +686,8 @@ if (flowPenLeak.length > 0)
 // recording (740).
 // Raised to 21,600 (measured 21505): the shared capture refuses a callback that reads its argument and answers a plain boolean (511) and explains the destructuring read it names (268).
 // Raised to 22,000 (measured 21978): core's deepFreeze, which every pen shares, freezing beneath an already frozen root with a memo of whole frozen subtrees and a cycle guard add 388.
-if (flowPenBytes > 22000)
+// Raised to 22,400 (measured 22364): the shared capture's coded refusal of JSON.stringify on a captured value add 386.
+if (flowPenBytes > 22400)
   throw new Error(`The flow pen bundle grew to ${flowPenBytes} bytes.`);
 const chainFlowLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/flow/') && info.bytesInOutput > 0);
@@ -735,7 +743,8 @@ if (appPenLeak.length > 0)
 // Raised to 53,800 (measured 53705): the shared capture refuses a callback that reads its argument and answers a plain boolean (514) and explains the destructuring read it names (270).
 // Raised to 54,000 (measured 53968): caller JSON copied at the pen boundary and its worded refusals add 263.
 // Raised to 54,400 (measured 54359): core's deepFreeze, which every pen shares, freezing beneath an already frozen root with a memo of whole frozen subtrees and a cycle guard add 391.
-if (appPenBytes > 54400)
+// Raised to 54,800 (measured 54700): the shared capture's coded refusal of JSON.stringify on a captured value add 386.
+if (appPenBytes > 54800)
   throw new Error(`The app pen bundle grew to ${appPenBytes} bytes.`);
 const chainAppLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/app/') && info.bytesInOutput > 0);
@@ -790,7 +799,8 @@ if (formsPenLeak.length > 0)
 // Raised to 43,000 (measured 42997): caller JSON copied at the pen boundary and its worded refusals add 272.
 // Raised to 43,400 (measured 43389): core's deepFreeze, which every pen shares, freezing beneath an already frozen root with a memo of whole frozen subtrees and a cycle guard add 392.
 // Raised to 43,600 (measured 43566): the vacuous assert on a tuple slot the data does not hold yet adds 177.
-if (formsPenBytes > 43600)
+// Raised to 44,000 (measured 43952): the shared capture's coded refusal of JSON.stringify on a captured value add 386.
+if (formsPenBytes > 44000)
   throw new Error(`The forms pen bundle grew to ${formsPenBytes} bytes.`);
 const chainFormsLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/forms/') && info.bytesInOutput > 0);
