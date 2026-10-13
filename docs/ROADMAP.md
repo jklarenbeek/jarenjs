@@ -644,10 +644,13 @@ what each does is its own documentation's job
   `false`) and PostgreSQL refuses `JD2005`; a foreign key or membership naming
   such a row refuses `JD2005` on both engines; session capture records the row
   under its epoch where journal capture records the string; and under
-  replication every create refuses `JD2104`. Either every key binding — the
+  replication every create refuses `JD2104`. Wanted: every key binding — the
   entity core, the unit of work, foreign-key and membership columns, session
-  capture's key decoding and the replication writer — encodes the instant as its
-  column stores it, or the model refuses an epoch key (`JD0005`).
+  capture's key decoding and the replication writer — encodes the instant
+  through the column's codec, as its column stores it. A refusal of an epoch key
+  (`JD0005`) was rejected: an append-only log keyed by the instant and queried
+  by range answers right today (create, load, ordered load, range predicates),
+  and the refusal would stop it opening.
 - [ ] **Store rules judge only the store's own statements.** A row the
   database's foreign-key actions remove or null runs none of its entity's rules
   (a child's delete rule refuses its own `delete()` yet a cascading parent
@@ -710,16 +713,11 @@ what each does is its own documentation's job
   whether resolving the profile refuses it (`JD0011`, the mandatory predicate
   running in the database or not at all) or the fetch regroups its own
   memberships.
-- [ ] **SQLite text in a UTF-16 file.** A store opened over a SQLite file whose
-  text encoding is UTF-16 compares and orders every native text term through
-  BINARY over the UTF-16 bytes, not by code point: `$lt` against U+FFFD answered
-  an astral character the engine excludes, and `load({ orderBy })`, a keyset
-  page and a native `$orderby` order `Ā, U+E000, 😀, a, z` (UTF-16le) where the
-  engine answers `a, z, Ā, U+E000`. A page still visits every row once. The
-  assumption that BINARY is code point order is stated for UTF-8 and nothing
-  checks the encoding at open. Wanted: decide between refusing a UTF-16 file
-  when a store opens (`JD0002`, as database rules already do) and a code-point
-  collation the dialect's `codepoint` spells in place of BINARY.
+- [ ] **A migration over a UTF-16 file compares a query step's text terms by
+  BINARY.** `migrate` still runs on a UTF-16 file (physical-transform key pages
+  read it through its own decoder), and a `query` step's native text comparison
+  is code point only over UTF-8; refuse the file when a step reads text, or give
+  the comparison the dialect's code-point collation.
 - [ ] **A pushed string operator answers false where the engine raises.** A
   pushed `$starts-with`, `$ends-with` or `$contains` over a member typed
   `string` alone, or `string` and `null` alone (`['string', 'null']`: a plain
@@ -798,13 +796,6 @@ what each does is its own documentation's job
   policy is read natively (`nativeQuery` is false for it), so the grouped sum,
   mean and extreme there also stay in the engine; qualifying such a column would
   close both.
-- [ ] **A schema that disagrees with its column's codec answers a predicate
-  natively where the engine raises.** A property typed `string` over a column
-  whose codec is `boolean` (the model validator accepts it) makes `$contains`
-  answer no row natively where the engine raises `JQ2001`; the ordering and
-  aggregate gates read what the column stores, the predicate planner reads the
-  schema. Wanted: refuse the disagreement at the model, which closes the class
-  for every shape.
 - [ ] **A conjunct that runs as a registered function can go unevaluated where
   the engine evaluates it and raises.** An ordered index stops at the window,
   and an index on a cheaper conjunct never visits the row, so a native window,

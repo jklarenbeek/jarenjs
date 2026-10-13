@@ -41,9 +41,10 @@ policies. Codecs needing transformed representations remain decoded-row work.
 
 A join pairs rows by equalities between mapped columns, and only where the
 database pairs them as the engine does: both columns of ONE comparison family —
-the family the column stores and the engine decodes, never a union's first type
-nor a schema type that claims another kind than the codec holds (a number
-against an integer, a string against a string) — neither a boolean, and not both
+the family the column stores and the engine decodes (a number against an
+integer, a string against a string), never a union's first type — a schema type
+that claims another kind than its codec decodes is refused at the model
+(MODEL-FORMAT §12) — neither a boolean, and not both
 able to read a NULL as a present `null`, which the engine equates with another
 and SQL does not. A NULL that reads back as no member pairs alike in both, so a
 nullable member still joins natively against a key or against another nullable
@@ -158,8 +159,8 @@ member paths and literals, `$upper`, `$lower` and `$string-length` over a member
 the schema types exactly `string` (reached by no negative index; an adopted
 column must also store text, under no date codec, and read no NULL as a present
 `null`), and `$count` and `$exists` over a member path. The engine evaluates the return of every row, so any other
-operator, a union, an epoch column or a column that stores another kind than its
-type claims keeps the count in the engine, which raises where a row does; so
+operator, a union or an epoch column keeps the count in the engine, which raises
+where a row does; so
 does a window over an operator projection of an entity, which has no row
 residual (a collection's window over such a constructor is pushed: MODEL-FORMAT
 §10.6).

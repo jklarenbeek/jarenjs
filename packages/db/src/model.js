@@ -286,6 +286,24 @@ function unreadEntityBlock(node, path, read) {
   return null;
 }
 
+let historyReads = 0;
+
+/**
+ * Run a read of a model that is HISTORY, not a declaration: a migration's
+ * baseline or an applied step's model. A declaration is refused where its
+ * property types disagree with their codecs, but an application whose applied
+ * history carries such a model must still plan and apply its next migration,
+ * so inside `read` that one check is not made. The scope is synchronous.
+ * @template T
+ * @param {() => T} read
+ * @returns {T}
+ */
+export function asHistory(read) {
+  historyReads++;
+  try { return read(); }
+  finally { historyReads--; }
+}
+
 /**
  * Normalize the `entities` member of a model document.
  * @param {any} model
@@ -316,12 +334,17 @@ export function normalizeEntities(model) {
 
     const anchors = collectSameDocumentAnchors(schema);
     const properties = new Map();
+    /** The schema's declared `type` of each property, `undefined` where it declares none.
+     * @type {Map<string, string[] | undefined>} */
+    const declaredTypes = new Map();
     const keys = [];
     const relations = [];
     for (const propertyName of Object.keys(schema.properties)) {
       const propertyPath = `${docPath}/schema/properties/${propertyName}`;
       const raw = schema.properties[propertyName];
       const effective = effectiveSchema(raw, schema, anchors, propertyPath);
+      declaredTypes.set(propertyName, Array.isArray(effective.type) ? effective.type.filter((t) => typeof t === 'string')
+        : typeof effective.type === 'string' ? [effective.type] : undefined);
       const entityBlock = normalizeEntityBlock(
         effective['x-entity'] ?? (isJsonContainer(raw)
           ? raw['x-entity'] : undefined),
@@ -458,7 +481,7 @@ export function normalizeEntities(model) {
       relations,
       version: versions.length === 1 ? versions[0].name : null,
       indexes: normalizeEntityIndexes(spec, docPath),
-      physical: normalizePhysical(spec.physical, properties, keys, docPath),
+      physical: normalizePhysical(spec.physical, properties, keys, docPath, historyReads > 0 ? undefined : declaredTypes),
       invariants: normalizeInvariants(spec.invariants, `${docPath}/invariants`),
     });
   }

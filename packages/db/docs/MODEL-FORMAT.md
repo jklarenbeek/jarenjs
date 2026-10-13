@@ -851,6 +851,16 @@ the report says what the engine answers (`'memory'`, `null`).
 `store.capabilities.busyTimeoutMs` and `store.capabilities.journalMode`
 are the same two read-back values under their long-published names.
 
+**A SQLite file's text encoding is checked at open.** Every native text
+comparison, order and page assumes SQLite's `BINARY` collation is code point
+order, which only a UTF-8 file makes true: a UTF-16 file compares the bytes of
+its UTF-16 text. Opening a store over a file or database whose `PRAGMA encoding`
+is not UTF-8 (`UTF-16le`, `UTF-16be`) is refused `JD0002` naming it, as a plain,
+an adopted and a read-only store alike, and the connection the open acquired is
+closed. A build compiled without UTF-16 answers that pragma with no row and
+reads only UTF-8, so it is a UTF-8 database here. PostgreSQL orders text under
+the collation the dialect spells (§10.5), so it has no such check.
+
 **The store's OWN options are a closed set too.** `driver`, `path`,
 `readOnly`, `queueTimeout`, `compileSchema`, `capture`, `replication`,
 `jobs`, `live`, `adopt`, `transactions`, `expressions`, `operators`,
@@ -1799,7 +1809,7 @@ error.
 | code | raised when |
 |---|---|
 | `JD0001` | the SQLite library is below the supported floor |
-| `JD0002` | the existing database disagrees with the declared model, or the open failed in the driver |
+| `JD0002` | the existing database disagrees with the declared model (a SQLite file whose text encoding is not UTF-8 included), or the open failed in the driver |
 | `JD0003` | the driver binding is unavailable on this runtime |
 | `JD0004` | a declared index cannot be mapped to a column, or a planned table, column or index name is longer than the engine holds (PostgreSQL: 63 bytes, refused when the model is planned; §3), or an index would take a name PostgreSQL gives one of the table's own objects (`<table>_pkey`, `<table>_<column>_seq`; §3), or a store-owned entity's member would take the name of the table's own document column (`doc`), of its row identity column on PostgreSQL (`rid`), or of another member's column as the engine compares names (SQLite folds ASCII case; §9.2), or a collection, entity or join table named like one of the engine's own tables (`_jaren_migrations`, `_jaren_jobs`, `_jaren_changes`, `_jaren_owner`, …; §9.4) |
 | `JD0005` | the model document is invalid |
@@ -3123,8 +3133,7 @@ An equality is a join edge only where the database pairs the rows as the engine
 does, and that takes three things. Both sides are mapped columns of ONE
 comparison family: the family the column stores and the engine decodes (an
 integer against a number, a string against a string), never the first type of a
-union (`['integer', 'string']` over a text column), never a schema type that
-claims another kind than the codec holds, never a boolean, and never a column of
+union (`['integer', 'string']` over a text column), never a boolean, and never a column of
 no declared type — except a foreign key no property declares, which compares as
 the key it references. SQLite compares a string column with an integer one by
 affinity, pairing `'1'` with `1`, and PostgreSQL has no such operator
@@ -3406,8 +3415,7 @@ and compares by code point whatever collation the column declares — in
 `load({ orderBy })` exactly as in `execute()`: on SQLite `COLLATE
 BINARY` over a UTF-8 database, so a NOCASE index cannot serve that order
 (a UTF-16 database compares BINARY over its UTF-16 bytes, which is not code
-point order: every row is still visited once, but a native text order, a page
-included, differs from the engine's there); on PostgreSQL the
+point order, so opening a store over one is refused `JD0002`, §4); on PostgreSQL the
 bare column where its collation is a code-point one of the server's own in
 `pg_catalog` (`C`, `POSIX`,
 `ucs_basic`, `pg_c_utf8`, or the database default of a libc-provider
@@ -4127,7 +4135,20 @@ table, and beside `physical` it is `JD0004`.
 | `uuid` | canonical lowercase UUID string | TEXT |
 | `local-timestamp`, `instant` | fixed six-digit fractional timestamp, local or UTC Z | TEXT |
 
-Unsafe narrowing refuses `JD2003`. A byte handle never enters the JSON-facing entity;
+A property's schema `type` must admit the kind its codec decodes: a string
+for every codec of the table that decodes a string, a number (`integer` or
+`number`) for `integer` and `number`, a boolean for `boolean`; a nullable or a
+union type admits it through any of its members, `json` takes any type, and a
+property that declares no `type` is not judged. A property typed another kind
+(`string` over a `boolean` column) is `JD0005` at
+`/entities/<E>/physical/columns/<name>/codec`, because the planner reads the
+property's type where the ordering and aggregate gates read what the column
+stores, and a native string operator over the column answered where the engine
+raises. A migration reads its baseline and the model of an applied step as
+history, where the rule is not applied, so an application whose history carries
+such a model still plans and applies the migration that retypes the property
+(`planPhysicalMigration`, `migrate`'s `baseline` and step models); the target
+model is held to it. Unsafe narrowing refuses `JD2003`. A byte handle never enters the JSON-facing entity;
 [the native SQLite channel](SQLITE-RELATIONAL.md#exact-writes-and-bytes) preserves
 Uint8Array/Buffer values on the same synchronous connection.
 `null: "null"` maps SQL NULL to present JSON null; `"absent"` omits the property;

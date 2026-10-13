@@ -18,6 +18,12 @@ const compiledCodecs = new WeakMap();
 const STORAGE = { text: 'string', integer: 'integer', number: 'number', boolean: 'boolean',
   json: 'string', date: 'string', datetime: 'string', 'epoch-ms': 'integer', bigint: 'integer', decimal: 'string', 'blob-hex': 'string',
   uuid: 'string', 'local-timestamp': 'string', instant: 'string' };
+/** The JSON kind each codec decodes to — what a property typed over its column must admit; `json` decodes any value. */
+const DECODED = { text: 'string', integer: 'number', number: 'number', boolean: 'boolean', json: null, date: 'string', datetime: 'string',
+  'epoch-ms': 'string', bigint: 'string', decimal: 'string', 'blob-hex': 'string', uuid: 'string', 'local-timestamp': 'string', instant: 'string' };
+/** The kind a declared schema type compares as: integers and numbers are one numeric kind.
+ * @param {string} type */
+const kindOf = (type) => (type === 'integer' ? 'number' : type);
 const identifier = (v) => typeof v === 'string' && v.length > 0 && !v.includes('\0');
 const PROGRAMS = ['constraints', 'indexes', 'triggers', 'strict', 'withoutRowid'];
 /** The closed members of a layout and of one of its columns. */
@@ -27,8 +33,11 @@ const COLUMN_MEMBERS = ['name', 'codec', 'null', 'default', 'generated', 'type',
 
 /** Normalize a declared layout; implicit conversions are never adoption policy.
  * @param {any} physical @param {Map<string, any>} properties @param {string[]} keys
- * @param {string} path @returns {any} */
-export function normalizePhysical(physical, properties, keys, path) {
+ * @param {string} path
+ * @param {Map<string, string[] | undefined>} [types] - each property's declared schema `type`;
+ *   a property whose type admits no kind its codec decodes to is refused
+ * @returns {any} */
+export function normalizePhysical(physical, properties, keys, path, types = new Map()) {
   if (physical === undefined) return null;
   const fail = (reason) => { throw new DbCompileError('JD0005', reason, `${path}/physical`); };
   if (!isJsonObject(physical)) fail('physical must be an object');
@@ -55,6 +64,16 @@ export function normalizePhysical(physical, properties, keys, path) {
     if (!isJsonObject(c)) fail(`'${name}' needs an explicit supported column codec`);
     refuseUnknownModelMembers(c, COLUMN_MEMBERS, `${path}/physical/columns/${encodeJSONPointerSegment(name)}`, 'physical column');
     if (!Object.hasOwn(STORAGE, c.codec)) fail(`'${name}' needs an explicit supported column codec`);
+    // the planner reads the property's type and the gates read what the column stores: a property
+    // that disagrees with its codec is answered by the native path where the engine raises
+    const declared = types.get(name)?.filter((type) => type !== 'null');
+    const decoded = DECODED[c.codec];
+    if (declared !== undefined && declared.length > 0 && decoded !== null && !declared.some((type) => kindOf(type) === decoded)) {
+      throw new DbCompileError('JD0005',
+        `'${name}' is typed ${declared.join(' or ')} but its '${c.codec}' codec decodes a ${decoded}; `
+        + 'type the property as what the column holds, or choose the codec that decodes what it declares',
+        `${path}/physical/columns/${encodeJSONPointerSegment(name)}/codec`);
+    }
     if (!identifier(c.name) || used.has(c.name.toLowerCase())) fail(`'${name}' needs a distinct physical column name`);
     if (!['null', 'absent', 'reject'].includes(c.null)) fail(`'${name}' must declare SQL NULL as null, absent or reject`);
     if (c.type !== undefined && (physical.schema === undefined
@@ -372,10 +391,8 @@ export function verifyRulePrograms(connection, table, triggers, fail, { installe
     : useStatementOnce(connection, dialect.introspect.pragma('recursive_triggers'), (s) => chain(s.get([]), (row) => {
       if (Number(row?.recursive_triggers) !== 0) fail('an increment rule updates its own row, and recursive_triggers would run its trigger again; switch it off');
     }));
-  const encoding = triggers.length === 0 || dialect.name !== 'sqlite' ? null
-    : chain(databaseEncoding(connection), (name) => {
-      if (String(name).toUpperCase() !== 'UTF-8') fail(`database rules compare text by code point, which a ${name} database does not; use a UTF-8 database`);
-    });
+  const encoding = triggers.length === 0 ? null
+    : requireCodePointText(connection, 'database rules compare text by code point', fail);
   return chain(recursion, () => chain(encoding, () => read));
 }
 
@@ -490,6 +507,24 @@ export function textKeyDecoding(connection) {
     return useStatementOnce(connection, probe, (bound) => chain(bound.get(['\uFEFFx']), (read) => ({
       decoder, keepsLeadingBom: decoder.decode(read.bytes) === '\uFEFFx',
     })));
+  });
+}
+
+/**
+ * Refuse a SQLite database whose text encoding is not UTF-8, by `fail`: the
+ * default BINARY collation compares a text value's stored bytes, which is
+ * code point order only over UTF-8 (a UTF-16 file orders by its UTF-16 bytes),
+ * and every native text comparison and order assumes it. Nothing for a
+ * dialect with no pragma to read (PostgreSQL), whose collation it spells.
+ * @param {any} connection
+ * @param {string} what - the sentence's subject: what compares text by code point
+ * @param {(why: string) => never} fail
+ * @returns {any} value-or-promise, `null` where there is nothing to check
+ */
+export function requireCodePointText(connection, what, fail) {
+  if (typeof connection.dialect.introspect.pragma !== 'function') return null;
+  return chain(databaseEncoding(connection), (name) => {
+    if (String(name).toUpperCase() !== 'UTF-8') fail(`${what}, which a ${name} database does not; use a UTF-8 database`);
   });
 }
 

@@ -46,7 +46,7 @@ import { migrationChecksum, historyStatements, readMigrationHistory, checkHistor
   historyHeader, identityRows, checkHistoryIdentity, checkHistoryChain, writeIdentityRows } from './migration-history.js';
 export { HISTORY_TABLE, ENGINE_TABLES };
 import { planCollection, verifyShape, legacyColumnTypes, planEntity, planJoinTable, plannedExpression, acceptsColumn, creationOrder } from './ddl.js';
-import { normalizeEntities, explainMapping } from './model.js';
+import { normalizeEntities, explainMapping, asHistory } from './model.js';
 import { derivedValue, memberAt, registerDeriveFunctions } from './derive.js';
 import { mergeEntityRow } from './graph.js';
 import { entityCore } from './entity.js';
@@ -639,7 +639,7 @@ function stepCursor(cursor, synchronous, closed, cursors) {
 function ownedTables(fromModel, toModel, steps) {
   const owned = new Set();
   for (const model of [fromModel, toModel]) {
-    const mapping = explainMapping(model);
+    const mapping = model === fromModel ? asHistory(() => explainMapping(model)) : explainMapping(model);
     for (const entity of Object.values(mapping.entities ?? {})) owned.add(/** @type {any} */ (entity).table);
     for (const table of Object.keys(mapping.joinTables ?? {})) owned.add(table);
     for (const name of normalizeModel(model).keys()) owned.add(name);
@@ -902,7 +902,7 @@ export function planMigration(fromModel, toModel, options = undefined) {
   const identity = migrationIdentity(fromModel, toModel);
   const from = hashContent(identity.from), to = hashContent(identity.to);
   if ([fromModel, toModel].some((m) => Object.values(m?.entities ?? {}).some((e) => e?.physical !== undefined))) {
-    normalizeEntities(fromModel);
+    asHistory(() => normalizeEntities(fromModel));
     normalizeEntities(toModel);
     if (canonicalizeJson(fromModel) !== canonicalizeJson(toModel))
       throw refuse('JD0021', 'changed column layouts require planTableMigration on the open connection or planPhysicalMigration with explicit preservation dispositions');
@@ -2261,9 +2261,10 @@ function createShapeHolding(connection, model, expressions, legacy) {
       ...planCollection(collection.name, collection, dialect,
         { ...mappingFor(connection, expressions), legacyColumns: legacy.get(collection.name) }).createSql);
   }
-  const entities = normalizeEntities(model);
+  // a shape is built for a baseline too, which is history
+  const entities = asHistory(() => normalizeEntities(model));
   if (entities.size > 0) {
-    const mapping = explainMapping(model);
+    const mapping = asHistory(() => explainMapping(model));
     const plans = Object.keys(mapping.entities).map((name) => planEntity(name, mapping.entities[name], mapping, dialect, { deferCycles: true }));
     for (const plan of plans) statements.push(...plan.createSql);
     for (const name of Object.keys(mapping.joinTables)) {
@@ -2464,14 +2465,16 @@ function entityColumnsOf(entityMapping) {
 function entityStepMapping(options, table, step, dialect) {
   const model = step?.model ?? options.model;
   if (model === undefined) return null;
-  const entities = normalizeEntities(model);
+  // a step's own model is history; the options' model is the declaration
+  const read = step?.model === undefined ? (/** @type {() => any} */ fn) => fn() : asHistory;
+  const entities = read(() => normalizeEntities(model));
   const entity = entities.get(table);
   if (entity === undefined) {
     if (step?.model !== undefined && !normalizeModel(model, options.expressions).has(table))
       throw refuse('JD0021', `the step model declares no collection or entity '${table}'`);
     return null;
   }
-  const all = explainMapping(model), mapping = all.entities[table];
+  const all = read(() => explainMapping(model)), mapping = all.entities[table];
   return { entity, mapping: mapping.document === false
     ? planEntity(table, mapping, all, dialect).physical : mapping };
 }
@@ -3455,7 +3458,7 @@ function runMigration(target, migrations, options, replay = undefined, shadowRep
  *   physicalTarget?: any }} options @returns {any} */
 export function planPhysicalMigration(connection, fromModel, toModel, options) {
   readOptions(options, ['id', 'steps', 'scope', 'dispositions', 'assertions', 'physicalTarget'], 'planPhysicalMigration()');
-  normalizeEntities(fromModel); normalizeEntities(toModel);
+  asHistory(() => normalizeEntities(fromModel)); normalizeEntities(toModel);
   if (!options || typeof options.id !== 'string' || !options.id || !Array.isArray(options.steps))
     throw refuse('JD0021', 'a physical plan requires id and explicit steps');
   const scope = options.scope === undefined ? undefined

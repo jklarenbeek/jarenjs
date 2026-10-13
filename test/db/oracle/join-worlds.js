@@ -10,12 +10,13 @@
  * `pushdown: false`.
  *
  * What the worlds pin: a join edge's family is the family the column
- * STORES and the engine DECODES, never a union's first type or a schema
- * that claims another kind than the codec holds; two columns that can each
- * read a NULL as a present `null` pair differently in the engine and the
- * database, and every other combination of null readings pairs alike; a
- * mapped column is the only member an edge reads; and a member named like
- * SQLite's row identity does not move the order a join or a fetch comes in.
+ * STORES and the engine DECODES, never a union's first type (a schema that
+ * claims another kind than its codec decodes is refused by the model, so no
+ * world holds one); two columns that can each read a NULL as a present
+ * `null` pair differently in the engine and the database, and every other
+ * combination of null readings pairs alike; a mapped column is the only
+ * member an edge reads; and a member named like SQLite's row identity does
+ * not move the order a join or a fetch comes in.
  */
 
 import { openStore, reasonId } from '@jarenjs/db';
@@ -158,8 +159,8 @@ function adoptedPair(tables, indexed = false) {
 
 /**
  * Column worlds in which the schema's claim and the column's storage part:
- * a union whose first type is not what the column holds, and a type over a
- * codec of another kind. SQLite pairs `'1'` with `1` by affinity and
+ * a union whose first type is not what the column holds (a type over a codec
+ * of another kind is no world: the model refuses it). SQLite pairs `'1'` with `1` by affinity and
  * PostgreSQL raises `JD2005` (`operator does not exist`) where the engine
  * pairs nothing; the same columns correlate a hop and refine an edge the same
  * way.
@@ -194,18 +195,6 @@ export const FAMILY_WORLDS = [
     }),
     queries: [
       { name: 'against a text column', query: join(eq('$a.v', '$b.v')), mode: 'set', reason: 'entity.joinKey', answer: { a: 2, b: 1 } },
-    ],
-  },
-  {
-    name: 'an integer claim over a text column',
-    ...adoptedPair({
-      a: { claim: { type: 'integer' }, codec: 'text', sql: 'text', rows: ["'1'", "'2'"] },
-      b: { claim: { type: 'integer' }, codec: 'integer', sql: 'integer', rows: ['1', '2'] },
-    }),
-    queries: [
-      { name: 'against an integer column', query: join(eq('$a.v', '$b.v')), mode: 'set', reason: 'entity.joinKey', answer: null },
-      { name: 'a hop correlated on the columns', mode: 'set', reason: 'entity.hopShape',
-        query: { $for: { a: '$.A[*]' }, $where: { $exists: { $for: { r: '$.B[*]' }, $where: eq('$r.v', '$a.v'), $return: '$r' } }, $return: '$a.id' } },
     ],
   },
   {
@@ -279,9 +268,23 @@ function matrixWorld(claim, codec) {
   };
 }
 
-/** Every claim over every codec, as the review's matrix drew it. @type {World[]} */
-export const FAMILY_MATRIX_WORLDS = Object.keys(MATRIX_CLAIMS).flatMap((claim) =>
-  Object.keys(MATRIX_CODECS).map((codec) => matrixWorld(claim, codec)));
+/** The kinds a claim admits of a stored value, `null` for a claim that names none. */
+const CLAIM_KINDS = { integer: ['number'], number: ['number'], string: ['string'], boolean: ['boolean'],
+  'integer|string': ['number', 'string'], 'string|null': ['string'], 'integer|null': ['number'], date: ['string'],
+  'date-time': ['string'], untyped: null };
+/** The kind a codec decodes to. */
+const CODEC_KIND = { text: 'string', integer: 'number', number: 'number', boolean: 'boolean', date: 'string', datetime: 'string' };
+
+const MATRIX_CELLS = Object.keys(MATRIX_CLAIMS).flatMap((claim) => Object.keys(MATRIX_CODECS).map((codec) => {
+  const kinds = /** @type {any} */ (CLAIM_KINDS)[claim];
+  return { claim, codec, admitted: kinds === null || kinds.includes(/** @type {any} */ (CODEC_KIND)[codec]) };
+}));
+
+/** Every claim over every codec the model admits, as the review's matrix drew it. @type {World[]} */
+export const FAMILY_MATRIX_WORLDS = MATRIX_CELLS.filter((cell) => cell.admitted).map((cell) => matrixWorld(cell.claim, cell.codec));
+
+/** Every claim the model refuses over the codec it disagrees with, as a world to open. @type {World[]} */
+export const REFUSED_CLAIM_WORLDS = MATRIX_CELLS.filter((cell) => !cell.admitted).map((cell) => matrixWorld(cell.claim, cell.codec));
 
 // ————— the nulls a join edge may pair —————
 
@@ -567,10 +570,9 @@ export const ORDER_WORLDS = [
     ],
   },
   {
-    // the engine refuses to order or fold a boolean whatever the schema claims of the column that
-    // holds it, where SQL orders and folds the 0/1 it stores
-    name: 'a column that stores a boolean under a schema that claims a string',
-    ...adoptedPair({ a: { claim: { type: 'string' }, codec: 'boolean', sql: 'BOOL', rows: ['TRUE', 'FALSE', 'TRUE'] } }),
+    // the engine refuses to order or fold a boolean, where SQL orders and folds the 0/1 it stores
+    name: 'a column that stores a boolean',
+    ...adoptedPair({ a: { claim: { type: 'boolean' }, codec: 'boolean', sql: 'BOOL', rows: ['TRUE', 'FALSE', 'TRUE'] } }),
     queries: [
       { name: 'an ordering by the column', query: { $for: { a: '$.A[*]' }, $orderby: ['$a.v'], $return: '$a.id' },
         mode: 'set', reason: 'entity.order', throws: 'JQ2005' },

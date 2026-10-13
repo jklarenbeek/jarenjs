@@ -137,7 +137,9 @@ export const DB_CODES = Object.freeze({
  *    the migration story, a later capability. Also a driver failure
  *    anywhere in the open sequence (an unopenable path, a corrupt or
  *    locked file): the error carries `class`/`retryable` from the
- *    classifier and the driver's error as `cause`
+ *    classifier and the driver's error as `cause`. Also a SQLite
+ *    database whose text encoding is not UTF-8 (its BINARY order is
+ *    code point order only over UTF-8; the encoding is named)
  *  - `JD0003` — the runtime builtin behind a driver could not be
  *    loaded here (Node cannot resolve `bun:`; a runtime without
  *    `node:sqlite` cannot load the Node binding), an injected handle is

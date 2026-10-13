@@ -635,7 +635,8 @@ the query engine, now refuse by code or answer what the engine answers:
   raise what it raises; the aggregate has run natively again since, as
   [§20](#20-a-grouped-fold-over-a-null-reading-column-counts-its-nulls) says.
 - A column that stores a boolean while its property claims another type (a
-  string over a `boolean` codec) was ordered and folded as 0/1 by an entity
+  string over a `boolean` codec, which the model refuses now: section 8) was
+  ordered and folded as 0/1 by an entity
   `$orderby`, by the ordering of groups and by a grouped `$min` or `$max`, where
   the engine refuses a boolean (`JQ2005`, `JQ2001`). They run in the engine now,
   as they always did for a property that claims a boolean.
@@ -1354,6 +1355,21 @@ value the store did not honor now refuse by code, before any statement:
   by — its key, or a column of the index that keys it — planned and matched
   nothing (`code = NULL`); it is now `JD0005` at planning: a keyed member
   matches a value.
+- A `physical` column whose property is typed another kind than its codec
+  decodes (`string` over a `boolean` or `integer` column, `integer` over a
+  `text` column, `boolean` over `number`) opened, and a native string operator
+  such as `$contains` over it answered no row (or the rows the stored 0 and 1
+  spelled) where the engine raises `JQ2001`; the ordering, join and aggregate
+  gates read what the column stores and the predicate planner read the type. It
+  is `JD0005` at `/entities/<E>/physical/columns/<name>/codec` now, naming the
+  property's types and the codec (MODEL-FORMAT §12). Type the property as what
+  the column holds, or choose the codec that decodes what it declares. A type
+  that names the decoded kind among several (`['string', 'null']`,
+  `['integer', 'string']` over a text column), a `json` codec and a property
+  that declares no `type` are not judged. A migration's baseline and the model of
+  an applied step are history and are not held to it: a history that carries such
+  a column still plans (`planPhysicalMigration`) and applies the migration that
+  retypes the property, whose target model is the declaration.
 
 ### Allocated entity keys on PostgreSQL
 
@@ -2135,6 +2151,25 @@ planned: applying it creates the columns, indexes and CHECK of a path with an
 open container unguarded, as that release did, and the store accepts them. Plan
 the link again with this release to create them guarded; an applied link is
 never re-planned (see section 1).
+
+## 22. A UTF-16 file is refused when a store opens
+
+SQLite's `BINARY` collation compares a text value's stored bytes, which is code
+point order only over UTF-8. A store opened over a UTF-16 file compared and
+ordered every native text term over the UTF-16 bytes: `$lt` against `'\uFFFD'`
+answered an astral character the engine excludes, and `load({ orderBy })`, a
+keyset page and a native `$orderby` ordered `'\u0100'`, `'\uE000'`,
+`'\u{1F600}'` before `'a'` and `'z'`. Opening a store over a file or database
+whose `PRAGMA encoding` is not UTF-8 is `JD0002` now, naming the encoding, for a
+plain, an adopted and a read-only store (it was already refused where the model
+declares a database rule). Nothing is altered.
+
+The refusal is made on the encoding, not on the data, so a UTF-16 file whose
+text is ASCII or Latin-1, which answered right, stops opening too. SQLite cannot attach files of
+two encodings together, so convert by dumping the schema and rows (the `sqlite3`
+shell's `.dump`, or a script that reads each table and writes it to a new file)
+into a new database created with the default UTF-8 encoding, and open that.
+`migrate` over a UTF-16 file is unchanged.
 
 ## Measured costs
 

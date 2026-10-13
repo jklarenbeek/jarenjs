@@ -907,7 +907,7 @@ describe('entities: a string operator takes the members the database and the eng
     schema: { type: 'object', required: ['wid'], properties: {
       wid: { type: 'integer', 'x-entity': { key: true } },
       plain: { type: 'string' }, gap: { type: 'string' }, hole: { type: 'string' },
-      maybe: { type: ['string', 'null'] }, tally: { type: 'string' }, day: { type: 'string', format: 'date-time' } } },
+      maybe: { type: ['string', 'null'] }, tally: { type: 'integer' }, day: { type: 'string', format: 'date-time' } } },
     physical: { ...(schema === null ? {} : { schema }), table: 'words', columns: {
       wid: column('wid', 'integer', 'reject'), plain: column('plain', 'text', 'reject'),
       gap: column('gap', 'text', 'absent'), hole: column('hole', 'text', 'null'), maybe: column('maybe', 'text', 'null'),
@@ -922,7 +922,7 @@ describe('entities: a string operator takes the members the database and the eng
     ['gap', true, undefined], // text, a NULL is a member that is not there
     ['hole', false, 'JQ2001'], // text, a NULL is a present `null` the schema does not mention
     ['maybe', false, 'JQ2001'], // text, a NULL is a present `null` the schema mentions
-    ['tally', false, 'JQ2001'], // an integer column the schema calls a string
+    ['tally', false, 'JQ2001'], // an integer column, which the engine's string operators refuse
     ['day', false, undefined], // a text column read through the datetime codec
   ]);
 

@@ -44,7 +44,7 @@ import { createBackup } from './backup.js';
 import { normalizeProfile, assertProfileRoots, pointReadFilter } from './profile.js';
 import { compileEntityModel, joinTableRoots } from './model.js';
 import { entityCore, insertAttempt } from './entity.js';
-import { verifyPhysical, verifyRulePrograms } from './physical.js';
+import { requireCodePointText, verifyPhysical, verifyRulePrograms } from './physical.js';
 import { trustedSql, synchronousBody, RELEASE } from './sql.js';
 import { relationalEngine } from './relational.js';
 import { createTracker, membershipKeys } from './tracker.js';
@@ -3004,7 +3004,14 @@ export function openStore(model, options) {
         throw parallelReadsError(options.driver.name, opened.capabilities.pooling === true ? ' opened no reader' : ' has no readers');
       };
       const opening = () => { refuseParallelReadsHere(); return openSequence(); };
+      // every native text comparison, order and page assumes SQLite's BINARY
+      // collation is code point order, which only a UTF-8 file makes true
+      const requireUtf8Text = () => requireCodePointText(connection,
+        'a store compares and orders text by code point', (why) => {
+          throw new DbCompileError('JD0002', why);
+        });
       const openSequence = () => chain(pragmas(), () =>
+        chain(requireUtf8Text(), () =>
         chain(acquireOwner(), () =>
         chain(registerExpressionFunctions(connection, expressionNames,
           options.expressions ?? {}), () =>
@@ -5166,7 +5173,7 @@ export function openStore(model, options) {
           return chain(replicationEngine === null ? null : replicationEngine.ready, () => Object.freeze(store));
           });
           });
-        }))))));
+        })))))));
 
       // Journal-mode lock upgrades may report busy without invoking SQLite's
       // busy handler. Yield before retrying this idempotent startup sequence
