@@ -87,8 +87,9 @@ forbids, is still read through it. The columns, the CHECK and the store's own
 interval check read the key `0` of an object for an index step and an array's
 element for a name, whatever the schema says of the container.
 
-One statement carries at most 128 leaf predicates (the dialect's
-`maxPredicateTerms`), counted over everything the statement holds once the
+One statement carries at most 128 predicate terms (the dialect's
+`maxPredicateTerms`), a leaf predicate being one term but for the one weighed
+below, counted over everything the statement holds once the
 planner has regrouped: the document's filters, every include filter of a graph
 load, the profile's mandatory predicate and every comparison between two
 bindings that refines a join (the equality that joins them is merged by the
@@ -97,7 +98,15 @@ however long it is, so a `$seq`, a same-member `$or` of equalities and a chain
 mixing equalities and ranges on two members all stay native; an `$or` of `$and`
 pairs and a top-level `$and` of `$ne` count per leaf, and a comparison of two
 member paths decided one family at a time counts a leaf for each family the two
-share. The bound exists because
+share. An inequality, or any comparison under a `$not`, between a document
+member and an external operand counts four, because the server compiles that
+leaf several times slower than one against a literal: a chain of 33 of them is
+past the bound, while a member in its own column, an unnegated ordering or
+equality against an external, and a comparison against a literal count one. A
+member's membership in an external list (`'$ids[*]'`), the slowest leaf of all
+to compile whatever the list's length, counts sixteen from the document, four in
+its own column and eight there under a `$not`: a chain of nine distinct lists is
+past the bound. The bound exists because
 the planner prices every leaf per row, and a chain whose cost crosses the
 server's JIT thresholds is compiled by LLVM, whose passes check for no
 interrupt: a cancel, a termination and a `statement_timeout` all wait for that
@@ -108,7 +117,8 @@ have no engine path, refuse it by name; under a profile the residual is refused
 where its fetch is (`JD2007` past `maxRows`, `JD0011` under `refuseFullScan`),
 and an asynchronous live registration re-snapshots through `execute()`, so its
 snapshot is the engine's answer. The price: a top-level `$and` of more than 128
-`$ne` over a PostgreSQL collection runs in the engine, and a `load({ where })`
+`$ne` over a PostgreSQL collection (more than 32 against externals) runs in the
+engine, and a `load({ where })`
 or native `mutate()` above the bound that ran before is refused. SQLite has no
 JIT and sets no bound.
 

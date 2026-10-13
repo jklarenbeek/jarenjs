@@ -354,6 +354,16 @@ the query engine, now refuse by code or answer what the engine answers:
   native `mutate()` past it, which ran natively before, is refused `JD0032` or
   `JD0038` naming the bound. Shorten the chain, spell equalities on one member
   as a list, or run the read through `execute()`, where the engine answers it.
+  An inequality, or a comparison under a `$not`, between a member read from the
+  document and an external operand counts four terms (it compiles several
+  times slower than any other leaf), so a chain of more than 32 of them runs
+  in the engine where it was native before, with the same answers, and under
+  `strict: true` it is now refused `JD0010` (`predicate.termBound`) where it was
+  native: run it without `strict`, or shorten the chain. A member's membership
+  in an external list counts sixteen (four in its own column), so a chain of
+  more than 8 distinct lists over a document member is the engine's too; a
+  member in its own column, an ordering, an equality and a comparison against a
+  literal count one.
 - On PostgreSQL `explain().budget.estimatedRows` is now the planner's own
   estimate, `{ rows, source: 'postgresql-planner' }`, for a native plan, where
   it was `'unavailable'` (the `'available'` the declaration also named was never

@@ -848,8 +848,9 @@ export function createDialect(spec) {
      */
     typedExtract: spec.typedExtract === true,
     /**
-     * The most leaf predicates one statement carries, or `null` for no
-     * bound. A database whose planner prices every term per row and
+     * The most predicate terms one statement carries, or `null` for no
+     * bound: a leaf predicate is one term, and the kind that compiles
+     * slowest counts several (`predicateTerms`). A database whose planner prices every term per row and
      * hands a long enough chain to a JIT compile it cannot interrupt
      * sets one; the planner then answers a document past it in the
      * engine, named, and a graph load or a native mutation, which have

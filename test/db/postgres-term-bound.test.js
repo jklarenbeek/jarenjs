@@ -185,6 +185,83 @@ describe('PostgreSQL: the predicate term bound', { skip: !url && 'JAREN_PG_URL i
     assert.deepEqual(await store.execute(overItem(within)), expected(BOUND));
   });
 
+  it('an inequality against an external operand on a document member counts four: 32 stay native, 33 run in the engine', async () => {
+    // the server compiles each such leaf several times slower than one against a literal (the
+    // operand's kind discriminator rides every one), so the bound weighs it; a member in its own
+    // column, an ordering and an equality keep the count of one leaf
+    const items = store.collection('items');
+    const externals = Object.fromEntries(Array.from({ length: BOUND + 1 }, (_, i) => [`e${i}`, i - 10]));
+    const options = { externals };
+    const chainOf = (/** @type {string} */ op, /** @type {number} */ count, /** @type {boolean} */ negated = false) =>
+      ({ $and: Array.from({ length: count }, (_, i) => (negated ? { $not: { [op]: ['$it.n', `$e${i}`] } } : { [op]: ['$it.n', `$e${i}`] })) });
+    // the values are -10 ..count-11, and n runs 0 ..ROWS-1
+    const except = (/** @type {number} */ count) =>
+      sorted(Array.from({ length: ROWS - Math.max(0, count - 10) }, (_, i) => `i${i + Math.max(0, count - 10)}`));
+    for (const [what, make, expected] of /** @type {[string, (count: number) => any, (count: number) => string[]][]} */ ([
+      ['$ne', (count) => chainOf('$ne', count), except],
+      ['$not of $eq', (count) => chainOf('$eq', count, true), except],
+    ])) {
+      assert.equal((await items.explain(overItems(make(BOUND / 4)), options)).mode, 'native', `32 ${what}`);
+      assert.deepEqual(sorted(await items.execute(overItems(make(BOUND / 4)), { ...options, strict: true })),
+        expected(BOUND / 4), `32 ${what}`);
+      const above = await items.explain(overItems(make(BOUND / 4 + 1)), options);
+      assert.equal(above.mode, 'set', `33 ${what}`);
+      assert.equal(reasonOf(above), 'predicate.termBound', `33 ${what}`);
+      assert.deepEqual(sorted(await items.execute(overItems(make(BOUND / 4 + 1)), options)), expected(BOUND / 4 + 1), `33 ${what}`);
+      assert.deepEqual(sorted(await items.execute(overItems(make(BOUND / 4 + 1)), { ...options, pushdown: false })),
+        expected(BOUND / 4 + 1), `33 ${what}`);
+      await assert.rejects(async () => items.execute(overItems(make(BOUND / 4 + 1)), { ...options, strict: true }),
+        (/** @type {any} */ error) => error.code === 'JD0010' && TERM_BOUND.test(error.message), `33 ${what}`);
+    }
+    // the weight adds to the other leaves of the statement: 16 of them and 64 plain ones fill the bound
+    const mixed = { $and: [...chainOf('$ne', BOUND / 8).$and, ...inequalities(BOUND / 2).$and] };
+    assert.equal((await items.explain(overItems(mixed), options)).mode, 'native');
+    assert.equal(reasonOf(await items.explain(overItems({ $and: [...mixed.$and, { $ne: ['$it.n', 5000] }] }), options)),
+      'predicate.termBound');
+    // an ordering and an equality against an external stay one leaf each: 128 are accepted
+    const orderings = overItems({ $and: Array.from({ length: BOUND }, (_, i) => ({ $ge: ['$it.n', `$e${i}`] })) });
+    assert.equal((await items.explain(orderings, options)).mode, 'native');
+    assert.deepEqual(sorted(await items.execute(orderings, { ...options, strict: true })),
+      sorted(Array.from({ length: ROWS - 117 }, (_, i) => `i${i + 117}`)));
+    // a member in its own column is compared like a literal: 128 inequalities against externals are accepted
+    const columns = overItem(chainOf('$ne', BOUND));
+    assert.equal((await store.explain(columns, options)).mode, 'native');
+    assert.deepEqual(await store.execute(columns, { ...options, strict: true }), except(BOUND));
+  });
+
+  it('a member in an external list counts sixteen from the document and four in its column: 8 and 32 stay native, one more runs in the engine', async () => {
+    // every such leaf keeps the list's own discriminator and unpacking, so a chain of distinct
+    // external lists compiles far slower, leaf for leaf, than anything else the bound admits
+    const items = store.collection('items');
+    const externals = Object.fromEntries(Array.from({ length: 40 }, (_, i) => [`l${i}`, ['s5', `s${i + 10}`]]));
+    const options = { externals };
+    const lists = (/** @type {number} */ count, /** @type {string} */ member, negated = false) => ({ $and: Array.from({ length: count }, (_, i) =>
+      (negated ? { $not: { $eq: [member, `$l${i}[*]`] } } : { $eq: [member, `$l${i}[*]`] })) });
+    // every list holds s5; list i also holds s(i+10)
+    const everywhere = ['i5'];
+    const nowhere = (/** @type {number} */ count) => sorted(Array.from({ length: ROWS }, (_, i) => `i${i}`)
+      .filter((id) => id !== 'i5' && !Array.from({ length: count }, (_, k) => `i${k + 10}`).includes(id)));
+    for (const [count, native] of [[8, true], [9, false]]) {
+      const plan = await items.explain(overItems(lists(count, '$it.sku')), options);
+      assert.equal(plan.mode, native ? 'native' : 'set', `${count} lists from the document`);
+      if (!native) assert.equal(reasonOf(plan), 'predicate.termBound');
+      assert.deepEqual(sorted(await items.execute(overItems(lists(count, '$it.sku')), options)), everywhere, `${count} lists`);
+      assert.deepEqual(sorted(await items.execute(overItems(lists(count, '$it.sku')), { ...options, pushdown: false })), everywhere);
+    }
+    await assert.rejects(async () => items.execute(overItems(lists(9, '$it.sku')), { ...options, strict: true }),
+      (/** @type {any} */ error) => error.code === 'JD0010' && TERM_BOUND.test(error.message));
+    assert.equal((await items.explain(overItems(lists(8, '$it.sku', true)), options)).mode, 'native');
+    assert.equal(reasonOf(await items.explain(overItems(lists(9, '$it.sku', true)), options)), 'predicate.termBound');
+    assert.deepEqual(sorted(await items.execute(overItems(lists(9, '$it.sku', true)), options)), nowhere(9));
+    // in its own column: 32 plain lists, 16 negated
+    for (const [count, negated, native] of /** @type {[number, boolean, boolean][]} */ ([[32, false, true], [33, false, false], [16, true, true], [17, true, false]])) {
+      const plan = await store.explain(overItem(lists(count, '$it.sku', negated)), options);
+      assert.equal(plan.mode, native ? 'native' : 'set', `${count} lists, negated ${negated}, in the column`);
+      assert.deepEqual(sorted(await store.execute(overItem(lists(count, '$it.sku', negated)), options)),
+        negated ? nowhere(count) : everywhere, `${count} lists, negated ${negated}`);
+    }
+  });
+
   it('a graph load has no engine path: 129 leaves are refused by name, 128 load', async () => {
     const entity = store.entity('Item');
     const refused = (/** @type {any} */ error) => error.code === 'JD0032' && TERM_BOUND.test(error.message)

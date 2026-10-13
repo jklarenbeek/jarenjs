@@ -694,19 +694,14 @@ what each does is its own documentation's job
   describe documents between transform steps. Typed SQL promotion needs an
   intermediate-schema contract and equivalent numeric/order/error semantics;
   inferring that schema from either endpoint can return a wrong answer.
-- [ ] **A PostgreSQL statement at the term bound can still compile for
-  seconds.** One statement carries at most 128 leaf predicates
-  ([POSTGRESQL](../packages/db/docs/POSTGRESQL.md)), and the regrouped `$or`
-  and the typed extraction keep common chains far below it, but a statement the
-  server's cost model sends through JIT is compiled by LLVM, which no signal
-  interrupts. A forced compile on PostgreSQL 17 of 128 comparison pairs takes
-  about 0.6 s, of 128 inequalities about 1.6 s and of 128 comparisons against
-  external operands about 6 s (259,000 characters of SQL). Wanted: a bound on the
-  emitted statement's size, or a weight per operand kind, instead of a leaf
-  count, so that external-operand chains stop earlier and plain ones later. A
-  top-level `$and` of `$ne` literals over one member is presence plus one
-  negated list and could regroup as an `$or` of equalities does, which would
-  make it one leaf.
+- [ ] **A PostgreSQL statement at the term bound can still compile for seconds.** One statement carries at most
+  128 predicate terms ([POSTGRESQL](../packages/db/docs/POSTGRESQL.md)); a leaf is one term, an inequality or a
+  negated comparison against an external operand on a document member counts four, and a member's membership in an
+  external list counts sixteen (four in its own column, eight there under a `$not`), so the external chains that
+  compiled for many seconds are the engine's. A statement the server's cost model sends through JIT is still
+  compiled by LLVM, which no signal interrupts, so what remains is the weights of the other leaf kinds (none is
+  known to compile slower leaf for leaf than a literal `$ne`), and a top-level `$and` of `$ne` literals over one
+  member, which is presence plus one negated list and could regroup as an `$or` of equalities does, making it one leaf.
 - [ ] **A mandatory predicate past the term bound still reaches PostgreSQL
   whole.** A profile's mandatory predicate with more leaves than the dialect's
   term bound demotes the document, but the residual's root fetch carries the

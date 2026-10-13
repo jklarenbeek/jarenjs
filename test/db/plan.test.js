@@ -1183,6 +1183,68 @@ describe('the predicate term bound', () => {
     assert.strictEqual(boundPredicateTerms(refined, 4), refined);
   });
 
+  it('counts the comparison that compiles slowest as four: an inequality or a negation against an external operand on a document member', () => {
+    const external = (/** @type {string} */ op, /** @type {number} */ i) => ({ [op]: ['$it.age', `$e${i}`] });
+    const chain = (/** @type {number} */ count, /** @type {(i: number) => any} */ leaf) =>
+      where({ $and: Array.from({ length: count }, (_, i) => leaf(i)) });
+    // the one leaf: four terms, so 32 fill a 128-term bound and a 33rd does not
+    assert.strictEqual(predicateTerms(where(external('$ne', 0)).plan), 4);
+    assert.strictEqual(predicateTerms(chain(32, (i) => external('$ne', i)).plan), 128);
+    assert.strictEqual(boundPredicateTerms(chain(32, (i) => external('$ne', i)), 128).mode, 'native');
+    const refused = boundPredicateTerms(chain(33, (i) => external('$ne', i)), 128);
+    assert.strictEqual(predicateTerms(chain(33, (i) => external('$ne', i)).plan), 132);
+    assert.strictEqual(refused.mode, 'set');
+    assert.deepStrictEqual(refused.reasons[0], BOUND_REASON);
+    // a negation of any comparison against an external is the same leaf, however deep the connectives
+    assert.strictEqual(predicateTerms(where({ $not: external('$eq', 0) }).plan), 4);
+    assert.strictEqual(predicateTerms(where({ $not: external('$ge', 0) }).plan), 4);
+    assert.strictEqual(predicateTerms(where({ $not: { $or: [external('$lt', 0), external('$gt', 1)] } }).plan), 8);
+    assert.strictEqual(predicateTerms(where({ $or: [{ $not: external('$ne', 0) }, name('a')] }).plan), 5);
+    // everything else stays one: the comparison against a literal, and an unnegated ordering or
+    // equality against an external
+    assert.strictEqual(predicateTerms(where(age('$ne', 3)).plan), 1);
+    assert.strictEqual(predicateTerms(where({ $not: age('$ne', 3) }).plan), 1);
+    assert.strictEqual(predicateTerms(chain(128, (i) => external('$ge', i)).plan), 128);
+    assert.strictEqual(predicateTerms(chain(128, (i) => external('$eq', i)).plan), 128);
+    // terms add up across kinds: 16 inequalities against externals and 64 plain leaves fill the bound
+    const mixed = where({ $and: [...Array.from({ length: 16 }, (_, i) => external('$ne', i)),
+      ...Array.from({ length: 64 }, (_, i) => age('$ne', i))] });
+    assert.strictEqual(predicateTerms(mixed.plan), 128);
+    assert.strictEqual(boundPredicateTerms(mixed, 128), mixed);
+    assert.strictEqual(boundPredicateTerms(mixed, 127).mode, 'set');
+    // a member in its own column is read like a literal's: an entity statement counts one
+    const MODEL = { $model: '0.1', entities: {
+      Person: { schema: { type: 'object', required: ['id'], properties: {
+        id: { type: 'string', 'x-entity': { key: true } }, age: { type: 'integer', 'x-entity': { index: true } } } } } } };
+    const planned = planEntityQuery({ $for: { a: '$.Person[*]' },
+      $where: { $and: [{ $ne: ['$a.age', '$e0'] }, { $not: { $eq: ['$a.age', '$e1'] } }] }, $return: '$a' },
+    normalizeEntities(MODEL), explainMapping(MODEL));
+    assert.strictEqual(planned.mode, 'native');
+    assert.strictEqual(predicateTerms(planned.plan), 2);
+  });
+
+  it('counts a member in an external list as sixteen from the document, four in its own column, eight there under a not', () => {
+    const list = (/** @type {number} */ i) => ({ $eq: ['$it.name', `$l${i}[*]`] });
+    assert.strictEqual(predicateTerms(where(list(0)).plan), 16);
+    assert.strictEqual(predicateTerms(where({ $not: list(0) }).plan), 16);
+    const eight = where({ $and: Array.from({ length: 8 }, (_, i) => list(i)) });
+    assert.strictEqual(predicateTerms(eight.plan), 128);
+    assert.strictEqual(boundPredicateTerms(eight, 128), eight);
+    const nine = where({ $and: Array.from({ length: 9 }, (_, i) => list(i)) });
+    assert.strictEqual(predicateTerms(nine.plan), 144);
+    assert.strictEqual(boundPredicateTerms(nine, 128).mode, 'set');
+    // a list of literals binds as one value, whatever its length: one leaf
+    assert.strictEqual(predicateTerms(where({ $eq: ['$it.name', { $seq: ['a', 'b'] }] }).plan), 1);
+    const MODEL = { $model: '0.1', entities: {
+      Person: { schema: { type: 'object', required: ['id'], properties: {
+        id: { type: 'string', 'x-entity': { key: true } }, age: { type: 'integer', 'x-entity': { index: true } } } } } } };
+    const terms = (/** @type {any} */ predicate) => predicateTerms(planEntityQuery({ $for: { a: '$.Person[*]' },
+      $where: predicate, $return: '$a' }, normalizeEntities(MODEL), explainMapping(MODEL)).plan);
+    assert.strictEqual(terms({ $eq: ['$a.age', '$ages[*]'] }), 4);
+    assert.strictEqual(terms({ $not: { $eq: ['$a.age', '$ages[*]'] } }), 8);
+    assert.strictEqual(terms({ $and: [{ $eq: ['$a.age', '$ages[*]'] }, { $eq: ['$a.id', '$ids[*]'] }] }), 8);
+  });
+
   it('demotes a collection plan past the bound with the reason first; at the bound, unbounded, or already in the engine it is untouched', () => {
     const at = where({ $or: pairs(32) });
     assert.strictEqual(boundPredicateTerms(at, 64), at);

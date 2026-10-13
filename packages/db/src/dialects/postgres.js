@@ -639,10 +639,10 @@ export function postgresDialect(options = undefined) {
     // cross the JIT thresholds is compiled by LLVM, which checks for no
     // interrupt: neither a cancel nor a statement timeout reaches the
     // backend until the compile ends. The compile grows with the count and
-    // with the kind of leaf: at this bound a forced compile of plain
-    // comparisons takes up to about two seconds and one of external operands
-    // several more; past it a chain of a thousand terms compiles for many
-    // seconds, so a longer chain is the engine's
+    // with the kind of leaf, so the planner counts terms, not leaves: the
+    // kinds that compile slowest, an inequality or a negation against an
+    // external operand and a membership in an external list, weigh several
+    // (predicateTerms), and a longer or heavier chain is the engine's
     maxPredicateTerms: 128,
     // An external's value is bound as its JSON TEXT. A PostgreSQL
     // parameter's type is resolved where it is used, once, for the

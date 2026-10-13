@@ -200,7 +200,10 @@ thresholds is compiled by LLVM, which checks for no interrupt, so a cancel
 and a statement timeout wait for the compile to end. The dialect declares
 `maxPredicateTerms: 128`; the planner counts the leaves once it has
 regrouped (a comparison of two paths decided one family at a time counts a
-leaf for each family the two share) and answers a document past the bound
+leaf for each family the two share, and an inequality or a negated
+comparison between a document member and an external operand, which
+compiles several times slower than any other leaf, counts four, and a member's
+membership in an external list counts sixteen, or four in its own column) and answers a document past the bound
 in the engine, named
 `predicate.termBound`, while a graph load and a native mutation, which
 have no engine path, refuse it by name. SQLite declares none.

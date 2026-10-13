@@ -1497,9 +1497,28 @@ export function reasonId(reason) {
 }
 
 /**
+ * What an inequality counts, or any
+ * comparison under a `not`, between a member read from the document and an
+ * external operand. The statement keeps the operand's kind discriminator
+ * beside each such comparison and reads the member through its typed
+ * extraction, so a chain of them compiles several times slower, leaf for
+ * leaf, than the same number of comparisons against literals.
+ */
+const EXTERNAL_INEQUALITY_TERMS = 4;
+
+/**
+ * What a member's membership in an external list counts, which compiles the
+ * slowest of all: every such leaf keeps the list's own kind discriminator and
+ * unpacking beside the comparison, whatever the list's length. Read from the
+ * document it counts this many; a member in its own column, whose comparison
+ * is cheaper, counts a quarter of it, and twice that under a `not`.
+ */
+const EXTERNAL_LIST_TERMS = 16;
+
+/**
  * The leaf predicates a plan or a predicate carries: every predicate
  * node except the connectives — `and`, `or`, `not` and a `binding`
- * scope — one bound membership list being one leaf and a comparison of
+ * scope — one bound membership list of literals being one leaf and a comparison of
  * two paths decided one family at a time one leaf for each family they
  * share, summed over a
  * collection plan's filter or an entity plan's binding filters and
@@ -1511,18 +1530,39 @@ export function reasonId(reason) {
  * prices them once). What a
  * statement costs the database per row, and what prices it into a JIT
  * compile, grows with this count and never with the depth of the tree,
- * which nests in halves.
+ * which nests in halves. A leaf is one term, except an inequality, or
+ * any comparison under a `not`, between a member read from the document and
+ * an external operand, which counts `EXTERNAL_INEQUALITY_TERMS`, and a
+ * member's membership in an external list, which counts `EXTERNAL_LIST_TERMS`
+ * or less (a member in its own column compiles like one against a literal
+ * for the first and cheaper for the second).
  * @param {any} value - a plan, a predicate node, or `null`
  * @returns {number}
  */
 export function predicateTerms(value) {
+  return termsOf(value, false);
+}
+
+/** Whether a member is compared in its own entity column, not read from the document.
+ * @param {any} ref */
+function ownColumn(ref) {
+  return ref.flavor === 'entity-column' || ref.flavor === 'entity-epoch';
+}
+
+/**
+ * {@link predicateTerms}, knowing whether the predicate sits under a `not`.
+ * @param {any} value
+ * @param {boolean} negated
+ * @returns {number}
+ */
+function termsOf(value, negated) {
   if (value === null || value === undefined) return 0;
   if (typeof value.p === 'string') {
     switch (value.p) {
       case 'and': case 'or':
-        return value.items.reduce((/** @type {number} */ sum, /** @type {any} */ item) => sum + predicateTerms(item), 0);
-      case 'not': return predicateTerms(value.item);
-      case 'binding': return predicateTerms(value.filter);
+        return value.items.reduce((/** @type {number} */ sum, /** @type {any} */ item) => sum + termsOf(item, negated), 0);
+      case 'not': return termsOf(value.item, true);
+      case 'binding': return termsOf(value.filter, false);
       // two paths decided one family at a time cost a term for each family
       // they can hold in common
       case 'refCmp': return plainFamily(value) !== null ? 1
@@ -1531,18 +1571,25 @@ export function predicateTerms(value) {
       // the rows of a related entity tested or counted: the filter inside
       // the subselect is read for every outer row, and the test itself is
       // a leaf where the filter holds none
-      case 'hop': return Math.max(1, predicateTerms(value.hop.filter));
-      case 'hopCount': return 1 + predicateTerms(value.hop.filter);
+      case 'hop': return Math.max(1, termsOf(value.hop.filter, false));
+      case 'hopCount': return 1 + termsOf(value.hop.filter, false);
+      case 'in': {
+        if (!('ext' in value.operand)) return 1;
+        if (!ownColumn(value.ref)) return EXTERNAL_LIST_TERMS;
+        return negated ? EXTERNAL_LIST_TERMS / 2 : EXTERNAL_LIST_TERMS / 4;
+      }
+      case 'cmp': return 'ext' in value.operand && (negated || value.op === 'ne')
+        && !ownColumn(value.ref) ? EXTERNAL_INEQUALITY_TERMS : 1;
       default: return 1;
     }
   }
-  let terms = predicateTerms(value.filter ?? null);
-  for (const entry of value.filters ?? []) terms += predicateTerms(entry.filter);
+  let terms = termsOf(value.filter ?? null, false);
+  for (const entry of value.filters ?? []) terms += termsOf(entry.filter, false);
   // a value leaf reads its hop twice, once for the member and once for its
   // type, so the statement carries the filter twice
   for (const leaf of value.project?.leaves ?? [])
-    terms += predicateTerms(leaf.count?.filter ?? null) + 2 * predicateTerms(leaf.hop?.filter ?? null);
-  for (const term of value.order ?? []) terms += predicateTerms(term.hop?.filter ?? null);
+    terms += termsOf(leaf.count?.filter ?? null, false) + 2 * termsOf(leaf.hop?.filter ?? null, false);
+  for (const term of value.order ?? []) terms += termsOf(term.hop?.filter ?? null, false);
   // a comparison between two bindings that is not an equality refines the
   // join, and the server evaluates it once per candidate pair
   for (const join of value.joins ?? [])
