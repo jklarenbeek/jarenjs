@@ -586,7 +586,8 @@ if (asyncLiveLeak.length)
 // Raised to 964,100 (measured 964083): the codec agreement check of a model, the text-encoding check at open and the bounded ledger sweep add 955.
 // Raised to 964,800 (measured 964759): the retype's value-survival check and the resample fill's bucket budget add 676.
 // Raised to 967,500 (measured 967476): the live view's exact-sum check and tie position, the range join's bounds check and the shared capture's coded refusal of an argument handed to an aggregate of a captured value add 2717.
-if (clientBytes > 967500)
+// Raised to 970,200 (measured 970113): the validator's propertyDependencies keyword and its draft gate, and the live groups keyed by the engine's group-key identity add 2637.
+if (clientBytes > 970200)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 
