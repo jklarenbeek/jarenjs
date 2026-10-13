@@ -309,3 +309,13 @@ describe('a reader still sees its own location through every route', () => {
     }
   });
 });
+
+describe('the root reports whether anything reads a location', () => {
+  it('usesDollarData is false without a reader and true with one', () => {
+    const rootOf = (/** @type {any} */ schema) => new ValidationRoot(ORIGIN, new Map([[ORIGIN, schema]]), {},
+      new ValidationOptions(true, true, false, null, 2020));
+    assert.equal(rootOf(PLAIN).usesDollarData, false);
+    assert.equal(rootOf(READER).usesDollarData, true);
+    assert.equal(rootOf({ allOf: [PLAIN, READER] }).usesDollarData, true);
+  });
+});
