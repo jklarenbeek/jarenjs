@@ -31,9 +31,11 @@ reference rather than a toy — the assistant reads the same library through its
 schema-guarded tools, so "show me a JSLT stylesheet that does X" and the pane you
 are looking at are the same source.
 
-Two details worth knowing. The validate engine's data pane can switch to a
+Three details worth knowing. The validate engine takes a second schema pane for
+the documents the main schema references, so a `$ref` by `$id` resolves. Its data pane can switch to a
 schema-generated form — the standard `@jarenjs/forms` stylesheet, validating per
-keystroke against the very schema in the pane beside it. And the result card's
+keystroke against the very schema in the pane beside it, with the fields of any
+referenced schema the main one pulls in by `$ref`. And the result card's
 locale switcher re-renders the validator's errors in any of the shipped language
 packs without re-validating anything: the errors carry msgids and params, and the
 text is produced at report time.

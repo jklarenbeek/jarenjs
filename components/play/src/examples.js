@@ -646,6 +646,18 @@ is a fixed point.
       name: { type: 'string', minLength: 2 }, email: { type: 'string', format: 'email' }, age: { type: 'integer', minimum: 13 },
     }, required: ['name', 'email'] }) },
     datasets: [{ label: 'invalid', data: { data: j({ name: 'A', email: 'not-an-email', age: 7 }) } }] },
+  { id: 'validate-ref-by-id', label: 'Reference another schema ($ref by $id)', engine: 'validate', config: { locale: 'en' },
+    source: {
+      schema: j({ $schema: 'https://json-schema.org/draft/2020-12/schema', type: 'object', title: 'Order',
+        properties: { billing: { $ref: 'https://example.com/address.json' }, shipping: { $ref: 'https://example.com/address.json' } },
+        required: ['billing'] }),
+      schemas: j([{ $schema: 'https://json-schema.org/draft/2020-12/schema', $id: 'https://example.com/address.json', title: 'Address',
+        type: 'object', properties: { street: { type: 'string' }, city: { type: 'string', minLength: 1 } }, required: ['street', 'city'] }]),
+    },
+    datasets: [
+      { label: 'valid', data: { data: j({ billing: { street: '1 Main St', city: 'Leiden' }, shipping: { street: '2 Quay', city: 'Delft' } }) } },
+      { label: 'missing city', data: { data: j({ billing: { street: '1 Main St' } }) } },
+    ] },
   ...LOCALE_EXAMPLES,
 
   // ——— Contract ($contract document → describe / OpenAPI / TypeScript / dispatch) ———

@@ -93,6 +93,35 @@ describe('@jarenjs/play — the example library', () => {
     assert.match(output, /<b>escaped attribute, raw body<\/b>/, '$raw passes markup through');
   });
 
+  it('the $ref-by-$id example validates through a runner that registers its schemas, and is refused without them', async () => {
+    const { JarenValidator } = await import('@jarenjs/validate');
+    // the host's job in miniature: addSchema each pane member, compile, validate
+    const runner = (schemaText, data, _locale, extras = []) => {
+      const v = new JarenValidator({ collectErrors: true });
+      try { for (const extra of extras) v.addSchema(extra); } catch (err) { return { schemaError: err.message, errors: [] }; }
+      let fn;
+      try { fn = v.compile(JSON.parse(schemaText)); } catch (err) { return { schemaError: err.message, errors: [] }; }
+      const r = fn(data);
+      return { schemaError: null, draft: '2020-12', compileMs: 0, validateMs: 0, valid: r.valid, errors: r.errors };
+    };
+    const ex = EXAMPLES.find((e) => e.id === 'validate-ref-by-id');
+    assert.ok(ex, 'a validate example demonstrates $ref by $id');
+    assert.ok(JSON.parse(ex.source.schemas).length >= 1, 'it carries the referenced schema(s)');
+    const [valid, invalid] = ex.datasets;
+    const ok = runExample('validate', ex.source, valid.data, { validate: runner, config: ex.config });
+    assert.strictEqual(ok.ok, true);
+    assert.match(ok.panels[0].text, /^✓ valid/);
+    const bad = runExample('validate', ex.source, invalid.data, { validate: runner, config: ex.config });
+    assert.strictEqual(bad.ok, true);
+    assert.match(bad.panels[0].text, /^✗ 1 error/);
+    assert.deepStrictEqual(bad.panels[1].rows, [['/billing', "must have required property 'city'"]]);
+    // the same schema with the pane emptied cannot resolve its reference
+    const without = runExample('validate', { ...ex.source, schemas: '' }, valid.data, { validate: runner, config: ex.config });
+    assert.strictEqual(without.ok, false);
+    assert.strictEqual(without.error.code, 'SCHEMA');
+    assert.match(without.error.message, /Can not resolve schema/);
+  });
+
   it('the library shows every chart type, every laid-out diagram and every message locale', () => {
     // a reader who sees four chart examples concludes there are four charts:
     // the library must pin one example per type the engines ship

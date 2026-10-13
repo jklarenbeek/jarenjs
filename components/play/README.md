@@ -52,9 +52,13 @@ examples — the picker, panes and switcher all derive from the descriptor.
 See [docs/PLAY-FORMAT.md](docs/PLAY-FORMAT.md) for descriptors and results,
 and [ARCHITECTURE.md](ARCHITECTURE.md) for the state, action and run-loop
 contract an embedding host supplies. Query, JSLT, JTLT and XQuery expose
-an editable JSON externals pane.
+an editable JSON externals pane; the JSON Schema engine an editable
+referenced-schemas pane, so a schema can `$ref` another by `$id`.
 
-Answers that changed (upgrade notes): `runExample` answers `unknown engine` for
+Answers that changed (upgrade notes): a host `validate` runner now receives a
+fourth argument, the parsed referenced schemas (`[]` when the pane is empty),
+and must register them before compiling; a runner that ignores it still
+answers as before. `runExample` answers `unknown engine` for
 an id every object inherits (`constructor`, `__proto__`, `toString`), where it
 failed with `engine.run is not a function`; a timing that is `NaN` or infinite
 prints a dash, where it printed `NaN ms`.

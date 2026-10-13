@@ -8,7 +8,7 @@
  */
 
 import { deriveSuite, draftConformanceTable, SUITES } from '../boundaries/bench.js';
-import { formViewFor } from '../boundaries/validator.js';
+import { formViewFor, referencedSchemas } from '../boundaries/validator.js';
 import { HOME_CONTENT } from '../content/home.js';
 import { HERO_DEMO } from '../content/hero.js';
 import { DOCS_SECTIONS } from '../content/docs.js';
@@ -223,7 +223,7 @@ export function viewModel(state) {
     // the form tree is built here (it needs @jarenjs/forms, a host dep) from
     // the schema source + the structured buffer, and mounted at `dataForm`
     if (state.play.engine === 'validate' && state.play.dataView === 'form') {
-      ui.play.dataForm = formViewFor(state.play.source?.schema ?? '', state.play.dataValue);
+      ui.play.dataForm = formViewFor(state.play.source?.schema ?? '', state.play.dataValue, referencedSchemas(state.play.source?.schemas));
     }
   }
   if (page === 'flow') ui.flow = flowPageViewModel(state.flow);

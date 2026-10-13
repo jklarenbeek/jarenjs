@@ -60,4 +60,33 @@ describe('play examples through the site renderers', () => {
       assert.notDeepStrictEqual(messages(localized), messages(english), `${ex.id}: the messages are not English`);
     }
   });
+
+  it('the $ref-by-$id example resolves its referenced schema, and editing that schema recompiles', async () => {
+    const ex = EXAMPLES.find((e) => e.id === 'validate-ref-by-id');
+    const [valid, invalid] = ex.datasets;
+    const good = await runOver(ex, valid);
+    assert.strictEqual(good.ok, true, good.error?.message);
+    assert.match(good.panels[0].text, /^✓ valid/);
+
+    const bad = await runOver(ex, invalid);
+    assert.strictEqual(bad.ok, true);
+    assert.deepStrictEqual(messages(bad), ['["/billing","must have required property \'city\'"]']);
+
+    // same main schema text, referenced schema edited: the compile cache must not answer for the old one
+    const address = JSON.parse(ex.source.schemas)[0];
+    const strict = { ...ex, source: { ...ex.source, schemas: JSON.stringify([{ ...address, properties: { ...address.properties, city: { type: 'string', minLength: 20 } } }]) } };
+    const stricter = await runOver(strict, valid);
+    assert.deepStrictEqual(messages(stricter), [
+      '["/billing/city","must NOT have fewer than 20 characters"]',
+      '["/shipping/city","must NOT have fewer than 20 characters"]',
+    ]);
+    const back = await runOver(ex, valid);
+    assert.match(back.panels[0].text, /^✓ valid/);
+
+    // without the pane the reference cannot resolve: the schema is refused, with the validator's message
+    const without = await runOver({ ...ex, source: { ...ex.source, schemas: '' } }, valid);
+    assert.strictEqual(without.ok, false);
+    assert.strictEqual(without.error.code, 'SCHEMA');
+    assert.match(without.error.message, /Can not resolve schema/);
+  });
 });

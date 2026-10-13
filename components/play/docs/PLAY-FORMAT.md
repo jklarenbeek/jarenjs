@@ -25,6 +25,11 @@ EnginePane = { key: string, label: string, control?: 'code' | 'text' }
   empty pane means `{}` and malformed JSON is attributed to that pane.
   XQuery's Data pane supplies the declared `$doc` external and takes
   precedence over an `externals.doc` member.
+  The JSON Schema engine's second pane, `schemas`, is a JSON array of schema
+  documents the main schema can `$ref` by their `$id`; an empty pane means
+  none, and malformed JSON, a non-array, a member without a string `$id` or
+  a repeated `$id` is attributed to that pane. The pane persists and shares
+  like any other source pane.
 - `dataPanes` are the JSON the engine runs against: usually one `data`; a
   patch's is its `target`; markdown / mermaid / charts have **none** — the
   source is everything.
@@ -180,9 +185,12 @@ shape for each:
   believed; one that does not leaves the package holding a single
   wall-clock number for the whole call, which it attributes to the RUN and
   leaves the compile `null` — it never invents a figure it did not measure.
-- `validate` — the JSON Schema engine hands `(schemaText, data, locale)` to a
-  host validator that returns `{ valid, errors, draft, compileMs, validateMs,
-  schemaError }` (errors already localized), so the compiled validator and the
+- `validate` — the JSON Schema engine hands `(schemaText, data, locale,
+  schemas)` to a host validator, which registers each parsed `schemas` member
+  (`addSchema`) before it compiles `schemaText`, and returns `{ valid, errors,
+  draft, compileMs, validateMs, schemaError }` (errors already localized; a
+  fault found in a referenced document adds `schemaPane: 'schemas'`, which
+  locates the error at that pane instead of `schema`), so the compiled validator and the
   `@jarenjs/locales` packs stay in the host.
 - `operators` — a registry threaded to the `query`/`jslt`/`jtlt` engines.
 

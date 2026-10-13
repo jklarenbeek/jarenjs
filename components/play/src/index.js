@@ -118,9 +118,15 @@ import { EXAMPLE_LIST } from './examples.js';
  *   `mdx` — and returns the preview vnode, or `{ vnode, deep }` where `deep`
  *   is extra `Panel`s (AST, canonical round-trip) the host derives — shown
  *   only behind the depth toggle
- * @property {(schemaText: string, data: any, locale: string) => { schemaError: string|null, draft: string, compileMs: number|null, validateMs: number|null, valid: boolean|null, errors: any[] }} [validate]
+ * @property {(schemaText: string, data: any, locale: string, schemas: object[]) => { schemaError: string|null, schemaPane?: string|null, draft: string, compileMs: number|null, validateMs: number|null, valid: boolean|null, errors: any[] }} [validate]
  *   host-injected JSON Schema validator (the same seam) — the `validate`
- *   engine delegates here so @jarenjs/validate + the locale packs stay in the host
+ *   engine delegates here so @jarenjs/validate + the locale packs stay in the host.
+ *   `schemas` are the parsed documents of the engine's referenced-schemas pane
+ *   (each with a unique string `$id`; `[]` when the pane is empty), which the
+ *   runner registers (`addSchema`) before compiling `schemaText`, so the schema
+ *   can `$ref` them by `$id`. A runner that finds the fault in a referenced
+ *   document sets `schemaPane: 'schemas'` beside its `schemaError`, so the
+ *   error is located at that pane (the default is `schema`)
  */
 
 /**

@@ -260,10 +260,6 @@ costs a descriptor plus examples and no UI code at all.
   parsers are pure, but they consume a stream rather than a string, so a
   descriptor for them first needs a source pane that means "feed this in
   chunks" — a question the `(source, data)` shape does not answer.
-- [ ] **The `validate` engine is single-schema** — one schema pane and no
-  `addSchema`, so a schema that `$ref`s another by `$id` cannot be demonstrated
-  even though the docs teach exactly that. The other surfaces that compile
-  schemas register theirs; this one does not.
 ## @jarenjs/studio
 
 - [ ] **Entity models and durable project stores** — collection models now

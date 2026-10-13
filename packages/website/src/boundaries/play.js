@@ -267,8 +267,8 @@ export function createPlaySplitterWidget() {
 /** Host-injected JSON Schema validator for the `validate` engine (the hybrid
  * seam): reuse the site's cached `runValidation`, then localize the errors to
  * the chosen locale — so @jarenjs/validate + the locale packs stay in the host. */
-function validateRunner(schemaText, data, locale) {
-  const report = runValidation(schemaText, data);
+function validateRunner(schemaText, data, locale, schemas) {
+  const report = runValidation(schemaText, data, schemas);
   return { ...report, errors: localizeErrors(report.errors, locale) };
 }
 

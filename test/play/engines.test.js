@@ -7,7 +7,7 @@
 import { describe, it } from 'node:test';
 import * as assert from 'node:assert';
 
-import { runExample, EXAMPLES } from '@jarenjs/play';
+import { runExample, EXAMPLES, ENGINES } from '@jarenjs/play';
 import { createJsltRegistry, mathPack, financePack, statsPack } from '@jarenjs/json/jslt';
 
 const ops = createJsltRegistry().use(mathPack).use(financePack).use(statsPack);
@@ -194,6 +194,14 @@ describe('@jarenjs/play — the engines run', () => {
     assert.match(bad.panels[1].rows[0][0], /root/, 'an empty instancePath renders as (root)');
   });
 
+  it('validate locates a schema error where the host says it is', () => {
+    const run = (extra) => runExample('validate', { schema: '{}' }, { data: '{}' }, {
+      validate: () => ({ schemaError: 'bad', draft: null, compileMs: null, validateMs: null, valid: null, errors: [], ...extra }),
+    });
+    assert.strictEqual(run({}).error.pane, 'schema');
+    assert.strictEqual(run({ schemaPane: 'schemas' }).error.pane, 'schemas');
+  });
+
   it('validate without a host runner is an honest Result; a schema error fails with a code', () => {
     const bare = runExample('validate', { schema: '{}' }, { data: '{}' });
     assert.strictEqual(bare.ok, false);
@@ -203,6 +211,40 @@ describe('@jarenjs/play — the engines run', () => {
     });
     assert.strictEqual(badSchema.ok, false);
     assert.strictEqual(badSchema.error.code, 'SCHEMA');
+  });
+
+  it('validate takes extra schemas the main schema can $ref by $id, and hands them to the host runner', () => {
+    assert.deepStrictEqual(ENGINES.validate.sourcePanes.map((p) => [p.key, p.control]), [['schema', 'code'], ['schemas', 'code']]);
+    const seen = [];
+    const spy = (...args) => { seen.push(args); return { schemaError: null, draft: 'draft-07', compileMs: 0, validateMs: 0, valid: true, errors: [] }; };
+    const address = { $id: 'https://example.com/address.json', type: 'object', required: ['city'] };
+    const tag = { $id: 'https://example.com/tag.json', type: 'string' };
+    const run = (source) => runExample('validate', source, { data: '{}' }, { validate: spy, config: { locale: 'nl' } });
+
+    assert.strictEqual(run({ schema: '{"$ref":"https://example.com/address.json"}', schemas: JSON.stringify([address, tag]) }).ok, true);
+    assert.deepStrictEqual(seen.at(-1), ['{"$ref":"https://example.com/address.json"}', {}, 'nl', [address, tag]]);
+
+    // no pane, an empty pane and an empty list are all "no extra schemas"
+    for (const source of [{ schema: '{}' }, { schema: '{}', schemas: '' }, { schema: '{}', schemas: ' \n' }, { schema: '{}', schemas: '[]' }]) {
+      assert.strictEqual(run(source).ok, true);
+      assert.deepStrictEqual(seen.at(-1)[3], []);
+    }
+  });
+
+  it('validate refuses a malformed schemas pane at that pane, before the host runner runs', () => {
+    let calls = 0;
+    const spy = () => { calls++; return { schemaError: null, draft: 'draft-07', compileMs: 0, validateMs: 0, valid: true, errors: [] }; };
+    const run = (schemas) => runExample('validate', { schema: '{}', schemas }, { data: '{}' }, { validate: spy });
+    const refused = (schemas) => { const r = run(schemas); assert.strictEqual(r.ok, false); assert.strictEqual(r.error.pane, 'schemas'); return r.error.message; };
+
+    assert.match(refused('['), /^schemas: /);
+    assert.strictEqual(refused('{"$id":"a"}'), 'schemas: expected a JSON array of schemas, each with an $id');
+    assert.strictEqual(refused('[{"$id":"a"},true]'), 'schemas: item 1 is not a schema object with an $id');
+    assert.strictEqual(refused('[{"$id":"a"},{"type":"string"}]'), 'schemas: item 1 is not a schema object with an $id');
+    assert.strictEqual(refused('[{"$id":"a"},{"$id":"b"},{"$id":"a"}]'), 'schemas: item 2 repeats the $id "a"');
+    assert.strictEqual(refused('[{"$id":""}]'), 'schemas: item 0 is not a schema object with an $id');
+    assert.strictEqual(refused('[{"$id":"urn:x"},{"$id":"urn:x#"}]'), 'schemas: item 1 repeats the $id "urn:x#"');
+    assert.strictEqual(calls, 0, 'the host runner never saw a refused pane');
   });
 
   it('a visual engine delegates to a host renderer and returns a single view panel', () => {

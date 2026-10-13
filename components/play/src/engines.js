@@ -50,6 +50,33 @@ function parseExternals(source) {
     ? { value: {} } : parseJson(source.externals, 'externals');
 }
 
+/**
+ * The `validate` engine's referenced-schemas pane: a JSON array of schema
+ * documents, each addressable by its own `$id`. `{ value }` (an empty or
+ * absent pane is no schemas) or `{ error, pane }`. A member with no string
+ * `$id` (or an empty one), or one repeating an earlier `$id`, is refused here: a document no
+ * `$ref` can name is silently dead weight, and two documents under one
+ * name leave it to the host which one a reference reaches.
+ */
+function parseReferencedSchemas(text) {
+  if (text === undefined || String(text).trim() === '') return { value: [] };
+  const parsed = parseJson(text, 'schemas');
+  if (parsed.error) return parsed;
+  if (!Array.isArray(parsed.value)) return { error: 'schemas: expected a JSON array of schemas, each with an $id', pane: 'schemas' };
+  const ids = new Set();
+  for (let i = 0; i < parsed.value.length; i++) {
+    const item = parsed.value[i];
+    if (item === null || typeof item !== 'object' || Array.isArray(item) || typeof item.$id !== 'string' || item.$id === '') {
+      return { error: `schemas: item ${i} is not a schema object with an $id`, pane: 'schemas' };
+    }
+    // `X` and `X#` name one document: a trailing empty fragment is no difference
+    const name = item.$id.endsWith('#') ? item.$id.slice(0, -1) : item.$id;
+    if (ids.has(name)) return { error: `schemas: item ${i} repeats the $id ${JSON.stringify(item.$id)}`, pane: 'schemas' };
+    ids.add(name);
+  }
+  return { value: parsed.value };
+}
+
 /** A single-`code`-panel Result — the shape most engines return. */
 /** @returns {import('./index.js').PlayResult} */
 const ok = (text, compileMs, runMs, deep) => okPanels([{ id: 'out', label: 'Output', kind: 'code', text }, ...(deep ?? [])], compileMs, runMs);
@@ -498,7 +525,10 @@ export const ENGINE_LIST = [
   },
   {
     id: 'validate', label: 'JSON Schema', lead: 'Compile a schema and validate data — every error, localized.',
-    sourcePanes: [{ key: 'schema', label: 'Schema', control: 'code' }],
+    sourcePanes: [
+      { key: 'schema', label: 'Schema', control: 'code' },
+      { key: 'schemas', label: 'Referenced schemas', control: 'code' },
+    ],
     dataPanes: [{ key: 'data', label: 'Data' }],
     optionPanes: [{
       key: 'locale', label: 'Messages', default: 'en',
@@ -515,19 +545,21 @@ export const ENGINE_LIST = [
     }],
     run(source, data, options) {
       // the validator + locale packs are heavy and already cached in the
-      // host — inject a `validate(schemaText, data, locale)` runner (the
-      // hybrid seam, like the visual engines' renderers). No runner → an
-      // honest Result, never a throw.
+      // host — inject a `validate(schemaText, data, locale, schemas)` runner
+      // (the hybrid seam, like the visual engines' renderers); `schemas` are
+      // the referenced documents the host registers before it compiles. No
+      // runner → an honest Result, never a throw.
       const validate = options?.validate;
       if (typeof validate !== 'function') {
         return fail('the JSON Schema engine validates in the host — inject options.validate', 'PLAY_NO_VALIDATOR');
       }
       const d = parseJson(data.data, 'data'); if (d.error) return failParse(d);
+      const referenced = parseReferencedSchemas(source.schemas); if (referenced.error) return failParse(referenced);
       const locale = options?.config?.locale ?? 'en';
       let report;
-      try { report = validate(source.schema ?? '', d.value, locale); }
+      try { report = validate(source.schema ?? '', d.value, locale, referenced.value); }
       catch (err) { return fail(msg(err), code(err), locate(err)); }
-      if (report.schemaError) return fail(report.schemaError, 'SCHEMA', { pane: 'schema' });
+      if (report.schemaError) return fail(report.schemaError, 'SCHEMA', { pane: typeof report.schemaPane === 'string' ? report.schemaPane : 'schema' });
       const errs = report.errors ?? [];
       const summary = (report.valid ? '✓ valid' : `✗ ${errs.length} error${errs.length === 1 ? '' : 's'}`)
         + ` · ${report.draft} · compiled ${formatMs(report.compileMs)} · validated ${formatMs(report.validateMs)}`;
