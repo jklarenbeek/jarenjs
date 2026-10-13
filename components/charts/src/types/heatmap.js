@@ -45,6 +45,54 @@ import { normalizeTooltip, valueMark } from '../core/marks.js';
  */
 
 /**
+ * Whether a cell value draws a rect: a finite number, and a positive one
+ * under `log` (the surface shows through everywhere else).
+ * @param {any} v @param {boolean} log
+ * @returns {boolean}
+ */
+export function heatDrawable(v, log) {
+  return typeof v === 'number' && Number.isFinite(v) && (!log || v > 0);
+}
+
+/**
+ * The finite-value extent of a row-major matrix over the first `nx`
+ * columns and `ny` rows; `null` when no cell draws. The stillness test
+ * of the session and the wholesale build share it, so the two cannot
+ * disagree about when the ramp moved.
+ * @param {any[]} values @param {number} nx @param {number} ny @param {boolean} log
+ * @returns {{min: number, max: number}|null}
+ */
+export function scanHeatmapExtent(values, nx, ny, log) {
+  let min = Infinity;
+  let max = -Infinity;
+  for (let yi = 0; yi < ny; yi++) {
+    const row = values[yi];
+    if (!Array.isArray(row)) continue;
+    for (let xi = 0; xi < nx; xi++) {
+      const v = row[xi];
+      if (!heatDrawable(v, log)) continue;
+      if (v < min) min = v;
+      if (v > max) max = v;
+    }
+  }
+  return Number.isFinite(min) ? { min, max } : null;
+}
+
+/**
+ * The magnitude-to-ramp-position function of a domain (decades under
+ * `log`); `null` when there is no data. A domain wider than a double
+ * still spreads over the ramp, since the linear scale measures it at
+ * half scale.
+ * @param {{min: number, max: number}|null} domain @param {boolean} log
+ * @returns {((v: number) => number)|null}
+ */
+export function heatmapShade(domain, log) {
+  if (domain === null) return null;
+  const scale = log ? scaleLog(domain.min, domain.max) : scaleLinear(domain.min, domain.max);
+  return (v) => clamp01(scale(v));
+}
+
+/**
  * Build the geometry-free heatmap AST.
  * @param {any} data
  * @param {any} [config]
@@ -56,23 +104,8 @@ export function buildHeatmapAST(data, config = {}) {
   const values = Array.isArray(data?.values) ? data.values : [];
   const log = config.log === true;
 
-  let min = Infinity;
-  let max = -Infinity;
-  for (let yi = 0; yi < yLabels.length; yi++) {
-    const row = values[yi];
-    if (!Array.isArray(row)) continue;
-    for (let xi = 0; xi < xLabels.length; xi++) {
-      const v = row[xi];
-      if (typeof v !== 'number' || !Number.isFinite(v)) continue;
-      if (log && v <= 0) continue;
-      if (v < min) min = v;
-      if (v > max) max = v;
-    }
-  }
-  const domain = Number.isFinite(min) ? { min, max } : null;
-  // the extent in decades under log; one wider than a double still spreads
-  // over the ramp, since the linear scale measures it at half scale
-  const shade = domain === null ? null : log ? scaleLog(min, max) : scaleLinear(min, max);
+  const domain = scanHeatmapExtent(values, xLabels.length, yLabels.length, log);
+  const shade = heatmapShade(domain, log);
 
   const xStep = xLabels.length === 0 ? 1 : 1 / xLabels.length;
   const yStep = yLabels.length === 0 ? 1 : 1 / yLabels.length;
@@ -83,9 +116,7 @@ export function buildHeatmapAST(data, config = {}) {
       if (!Array.isArray(row)) continue;
       for (let xi = 0; xi < xLabels.length; xi++) {
         const v = row[xi];
-        if (typeof v !== 'number' || !Number.isFinite(v)) continue;
-        if (log && v <= 0) continue;
-        const t = shade(v);
+        if (!heatDrawable(v, log)) continue;
         cells.push({
           xi, yi,
           u0: xi * xStep,
@@ -93,7 +124,7 @@ export function buildHeatmapAST(data, config = {}) {
           // yLabels[0] is the top row; v = 0 sits at the plot bottom.
           v0: 1 - (yi + 1) * yStep,
           v1: 1 - yi * yStep,
-          t: clamp01(t),
+          t: shade(v),
           value: v,
         });
       }
@@ -119,17 +150,45 @@ export function buildHeatmapAST(data, config = {}) {
 }
 
 /**
- * Render a heatmap AST to a pure-vnode SVG: inset cell rects colored by
- * the sequential ramp, a labeled min→max ramp key in the legend slot,
- * and a `<title>` per cell with the exact value.
+ * One cell's rect: inset, colored by the sequential ramp, carrying its
+ * exact value as hover text. Shared by the wholesale render and the
+ * session's in-place patch, so the two cannot print a cell differently.
+ * @param {HeatCellAST} cell
+ * @param {HeatmapAST} ast
+ * @param {{x:number,y:number,w:number,h:number}} plot
+ * @param {readonly string[]} ramp
+ * @param {import('../core/marks.js').ChartTooltipSpec} [tooltip] normalized
+ * @returns {any}
+ */
+export function heatCellRender(cell, ast, plot, ramp, tooltip = null) {
+  const inset = 1;
+  const x = plot.x + cell.u0 * plot.w + inset;
+  const y = plot.y + (1 - cell.v1) * plot.h + inset;
+  const w = (cell.u1 - cell.u0) * plot.w - 2 * inset;
+  const h = (cell.v1 - cell.v0) * plot.h - 2 * inset;
+  return valueMark('rect', {
+    x: coord(x), y: coord(y),
+    width: coord(Math.max(0.5, w)), height: coord(Math.max(0.5, h)),
+    fill: sequentialColor(cell.t, ramp), class: 'chart-heat-cell',
+  }, tooltip,
+  `${ast.xLabels[cell.xi]} × ${ast.yLabels[cell.yi]}: ${formatTickValue(cell.value)}`,
+  {
+    type: 'heatmap', x: ast.xLabels[cell.xi], y: ast.yLabels[cell.yi], value: cell.value,
+  });
+}
+
+/**
+ * Render a heatmap AST and return the svg WITH the geometry a session
+ * needs to replace one cell in place: the plot rect and how many chrome
+ * children precede the cells.
  * @param {HeatmapAST} ast
  * @param {{tokens: Record<string,string>, cssVars: Record<string,string>}} theme
  * @param {string} hash
  * @param {{rootClass?: string, keyPrefix?: string, ramp?: readonly string[], width?: number,
  *   tooltip?: import('../core/marks.js').ChartTooltipSpec}} [options]
- * @returns {any}
+ * @returns {{svg: any, plot: {x:number,y:number,w:number,h:number}, chromeLen: number}}
  */
-export function renderHeatmapAST(ast, theme, hash, options = {}) {
+export function buildHeatmapRender(ast, theme, hash, options = {}) {
   const ramp = options.ramp ?? SEQUENTIAL;
   const tooltip = normalizeTooltip(options.tooltip);
   // The ramp key rides the frame's legend mechanism: five sequential
@@ -148,23 +207,25 @@ export function renderHeatmapAST(ast, theme, hash, options = {}) {
   });
   const { plot } = frame;
   const children = frame.children;
-  const inset = 1;
-  for (const cell of ast.cells) {
-    const x = plot.x + cell.u0 * plot.w + inset;
-    const y = plot.y + (1 - cell.v1) * plot.h + inset;
-    const w = (cell.u1 - cell.u0) * plot.w - 2 * inset;
-    const h = (cell.v1 - cell.v0) * plot.h - 2 * inset;
-    children.push(valueMark('rect', {
-      x: coord(x), y: coord(y),
-      width: coord(Math.max(0.5, w)), height: coord(Math.max(0.5, h)),
-      fill: sequentialColor(cell.t, ramp), class: 'chart-heat-cell',
-    }, tooltip,
-    `${ast.xLabels[cell.xi]} × ${ast.yLabels[cell.yi]}: ${formatTickValue(cell.value)}`,
-    {
-      type: 'heatmap', x: ast.xLabels[cell.xi], y: ast.yLabels[cell.yi], value: cell.value,
-    }));
-  }
+  const chromeLen = children.length;
+  for (const cell of ast.cells) children.push(heatCellRender(cell, ast, plot, ramp, tooltip));
   const svg = svgRoot(options.rootClass ?? 'chart chart-svg chart-heatmap-chart',
     frame.width, frame.height, theme, children, (options.keyPrefix ?? 'heat-') + hash);
-  return annotateChart(svg, ast.title);
+  annotateChart(svg, ast.title);
+  return { svg, plot, chromeLen };
+}
+
+/**
+ * Render a heatmap AST to a pure-vnode SVG: inset cell rects colored by
+ * the sequential ramp, a labeled min→max ramp key in the legend slot,
+ * and a `<title>` per cell with the exact value.
+ * @param {HeatmapAST} ast
+ * @param {{tokens: Record<string,string>, cssVars: Record<string,string>}} theme
+ * @param {string} hash
+ * @param {{rootClass?: string, keyPrefix?: string, ramp?: readonly string[], width?: number,
+ *   tooltip?: import('../core/marks.js').ChartTooltipSpec}} [options]
+ * @returns {any}
+ */
+export function renderHeatmapAST(ast, theme, hash, options = {}) {
+  return buildHeatmapRender(ast, theme, hash, options).svg;
 }

@@ -240,7 +240,7 @@ establish registry publication or downstream acceptance.
 
 ## @jarenjs/charts
 
-- [ ] **Sessions for the remaining ten types** — `line`, `bar` and `candlestick` patch in place; the other ten re-render wholesale, which is correct and, at their sizes, cheap. A `heatmap` session (one cell rect per changed count) is the next one with an obvious incremental path now that the accumulator feeds it.
+- [ ] **Sessions for the remaining nine types** — `line`, `bar`, `heatmap` and `candlestick` patch in place; the other nine (`boxplot`, `gauge`, `map`, `pie`, `radar`, `sankey`, `scatter`, `streamgraph`, `treemap`) re-render wholesale, which is correct and, at their sizes, cheap.
 - [ ] **Deeper treemap nesting** — one hierarchy level ships (groups squarify, children squarify under a naming band). Arbitrary depth needs a recursive layout and a header budget that does not eat the leaves.
 
 ## @jarenjs/calc

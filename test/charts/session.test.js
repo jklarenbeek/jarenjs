@@ -13,7 +13,8 @@ import { compileChart, createChartSession } from '@jarenjs/charts';
 import { createChartComponent } from '@jarenjs/charts/component';
 import { createStreamAdapter } from '@jarenjs/charts/stream-adapter';
 import { createJsonxStreamReader } from '@jarenjs/josl';
-import { renderToString } from '@jarenjs/view';
+import { renderToString, createDomRenderer } from '@jarenjs/view';
+import { createStubHost, StubElement, serialize } from '../view/dom.stub.js';
 import { mulberry32 } from '@jarenjs/core/random';
 
 function feedDoc(adapter, message) {
@@ -359,6 +360,324 @@ describe('bar session', function () {
     assert.equal(cleared.mode, 'rebuilt');
     assert.equal(renderToString(cleared.vnode),
       renderToString(compileChart(COUNTS, adapter.getData()).toVnode()));
+  });
+});
+
+describe('heatmap session', function () {
+  const HEAT_SPEC = {
+    recordBoundary: 'document', xField: 'col', seriesField: 'row', changes: true,
+  };
+  const HEAT = { type: 'heatmap', title: 'Hits', xLabel: 'column', yLabel: 'row' };
+  const COLS = ['a', 'b', 'c', 'd'];
+  const ROWS = ['r1', 'r2', 'r3', 'r4'];
+
+  /** Fill every cell of a 4 x 4 matrix with 1..5 hits, then take the first frame. */
+  function seeded(config = HEAT) {
+    const adapter = createStreamAdapter('heatmap', HEAT_SPEC);
+    const session = createChartSession(config, adapter);
+    for (const row of ROWS) {
+      for (const col of COLS) {
+        const n = 1 + ((row.charCodeAt(1) + col.charCodeAt(0)) % 5);
+        for (let i = 0; i < n; i++) feedDoc(adapter, { col, row });
+      }
+    }
+    const first = session.tick();
+    assert.equal(first.mode, 'rebuilt');
+    return { adapter, session, first };
+  }
+
+  /** The matrix above reads [[2,3,4,5],[3,4,5,1],[4,5,1,2],[5,1,2,3]]: min 1, max 5. */
+  function wholesale(config, adapter) {
+    return renderToString(compileChart(config, adapter.getData()).toVnode());
+  }
+
+  it('a count between the extremes is incremental and replaces one rect', function () {
+    const { adapter, session, first } = seeded();
+    feedDoc(adapter, { col: 'b', row: 'r1' }); // 3 -> 4, inside [1, 5]
+    const next = session.tick();
+    assert.equal(next.mode, 'incremental');
+    const prev = first.vnode.slice(2);
+    const fresh = next.vnode.slice(2).filter((c, i) => c !== prev[i]);
+    assert.equal(fresh.length, 1);
+    assert.match(renderToString(fresh[0]), /<title>b × r1: 4<\/title>/);
+    assert.equal(renderToString(next.vnode), wholesale(HEAT, adapter));
+  });
+
+  it('a quiet tick returns the same vnode', function () {
+    const { session, first } = seeded();
+    const quiet = session.tick();
+    assert.equal(quiet.mode, 'unchanged');
+    assert.equal(quiet.vnode, first.vnode);
+  });
+
+  it('a count that sets a new extreme re-colours every cell, so it rebuilds', function () {
+    const { adapter, session } = seeded();
+    feedDoc(adapter, { col: 'a', row: 'r1' }); // 2 -> 3: still inside
+    assert.equal(session.tick().mode, 'incremental');
+    for (let i = 0; i < 3; i++) feedDoc(adapter, { col: 'a', row: 'r1' }); // 3 -> 6, new max
+    const next = session.tick();
+    assert.equal(next.mode, 'rebuilt');
+    assert.equal(renderToString(next.vnode), wholesale(HEAT, adapter));
+  });
+
+  it('a count that retires the minimum rebuilds', function () {
+    const { adapter, session } = seeded();
+    feedDoc(adapter, { col: 'd', row: 'r2' }); // the only... one of three 1s: 1 -> 2
+    assert.equal(session.tick().mode, 'incremental');
+    feedDoc(adapter, { col: 'c', row: 'r3' }); // 1 -> 2
+    assert.equal(session.tick().mode, 'incremental');
+    feedDoc(adapter, { col: 'b', row: 'r4' }); // the last 1 -> 2: min moves to 2
+    const next = session.tick();
+    assert.equal(next.mode, 'rebuilt');
+    assert.equal(renderToString(next.vnode), wholesale(HEAT, adapter));
+  });
+
+  it('a new row or column rebuilds — the grid re-divides', function () {
+    const { adapter, session } = seeded();
+    feedDoc(adapter, { col: 'e', row: 'r1' });
+    const widened = session.tick();
+    assert.equal(widened.mode, 'rebuilt');
+    assert.equal(renderToString(widened.vnode), wholesale(HEAT, adapter));
+    feedDoc(adapter, { col: 'a', row: 'r5' });
+    const taller = session.tick();
+    assert.equal(taller.mode, 'rebuilt');
+    assert.equal(renderToString(taller.vnode), wholesale(HEAT, adapter));
+  });
+
+  it('an unmeasured cell gaining its first count rebuilds — a rect appears', function () {
+    const { adapter, session } = seeded();
+    feedDoc(adapter, { col: 'e', row: 'r1' }); // widens: r2..r4 hold null under e
+    assert.equal(session.tick().mode, 'rebuilt');
+    feedDoc(adapter, { col: 'e', row: 'r2' }); // null -> 1
+    const next = session.tick();
+    assert.equal(next.mode, 'rebuilt');
+    assert.equal(renderToString(next.vnode), wholesale(HEAT, adapter));
+    feedDoc(adapter, { col: 'e', row: 'r2' }); // 1 -> 2: a measured cell again
+    assert.equal(session.tick().mode, 'incremental');
+  });
+
+  it('a reset rebuilds from the empty snapshot', function () {
+    const { adapter, session } = seeded();
+    adapter.reset();
+    const cleared = session.tick();
+    assert.equal(cleared.mode, 'rebuilt');
+    assert.equal(renderToString(cleared.vnode), wholesale(HEAT, adapter));
+  });
+
+  it('a replace of a cell the matrix does not hold rebuilds, not throws', function () {
+    const ops = [];
+    const odd = createChartSession(HEAT, {
+      takeChanges: () => ops.splice(0),
+      getData: () => ({ xLabels: ['a'], yLabels: ['r'], values: [[2]] }),
+    });
+    assert.equal(odd.tick().mode, 'rebuilt'); // the first frame
+    ops.push({ op: 'replace', path: '/values/9/9', value: 3 });
+    const next = odd.tick();
+    assert.equal(next.mode, 'rebuilt');
+    assert.match(renderToString(next.vnode), /<title>a × r: 2<\/title>/);
+  });
+
+  /** A source over one fixed matrix whose change feed the test drives by hand. */
+  function manual(config, matrix) {
+    const ops = [];
+    const data = {
+      xLabels: matrix[0].map((_, i) => `c${i}`),
+      yLabels: matrix.map((_, i) => `r${i}`),
+      values: matrix.map((row) => row.slice()),
+    };
+    const session = createChartSession(config, { takeChanges: () => ops.splice(0), getData: () => data });
+    assert.equal(session.tick().mode, 'rebuilt');
+    return {
+      session, data,
+      change(op, yi, xi, value) {
+        if (op === 'remove') data.values[yi].splice(xi, 1);
+        else if (op === 'add') data.values[yi].splice(xi, 0, value);
+        else (data.values[yi] ??= [])[xi] = value;
+        ops.push({ op, path: `/values/${yi}/${xi}`, value });
+      },
+    };
+  }
+
+  it('a cell going unmeasured inside the extremes rebuilds — its rect goes', function () {
+    const { session, data, change } = manual(HEAT, [[1, 5, 3], [2, 4, 3]]);
+    change('replace', 1, 2, null); // an interior cell: both extremes still stand
+    const next = session.tick();
+    assert.equal(next.mode, 'rebuilt');
+    assert.equal(renderToString(next.vnode),
+      renderToString(compileChart(HEAT, data).toVnode()));
+  });
+
+  /** The markup a stub DOM holds after patching `vnode` in. */
+  function paint(vnode) {
+    const host = createStubHost();
+    createDomRenderer(host.container, { document: host.document })(vnode);
+    return serialize(host.container);
+  }
+
+  it('a remove in the middle of a row is not a cell patch — it rebuilds', function () {
+    const { session, data, change } = manual(HEAT, [[1, 3, 5, 3], [2, 4, 3, 2]]);
+    change('remove', 0, 1); // row 0 reads [1, 5, 3]; both extremes still stand
+    const next = session.tick();
+    assert.equal(next.mode, 'rebuilt');
+    assert.equal(paint(next.vnode), paint(compileChart(HEAT, data).toVnode()));
+  });
+
+  it('an add in the middle of a row is not a cell patch — it rebuilds', function () {
+    const { session, data, change } = manual(HEAT, [[1, 3, 5, 3], [2, 4, 3, 2]]);
+    change('add', 0, 1, 2); // row 0 reads [1, 2, 3, 5, 3]: the fifth has no column
+    const next = session.tick();
+    assert.equal(next.mode, 'rebuilt');
+    assert.equal(paint(next.vnode), paint(compileChart(HEAT, data).toVnode()));
+  });
+
+  it('a path with a suffix is not a cell address — it rebuilds', function () {
+    const ops = [];
+    const data = { xLabels: ['a', 'b', 'c'], yLabels: ['r'], values: [[1, 3, 5]] };
+    const session = createChartSession(HEAT, { takeChanges: () => ops.splice(0), getData: () => data });
+    session.tick();
+    data.values[0][1] = 4;
+    ops.push({ op: 'replace', path: '/values/0/1/extra', value: 4 });
+    const next = session.tick();
+    assert.equal(next.mode, 'rebuilt');
+    assert.equal(paint(next.vnode), paint(compileChart(HEAT, data).toVnode()));
+  });
+
+  it('an op addressing a column or row past the grid rebuilds, repainting no other cell', function () {
+    const matrix = [[1, 2, 3], [4, 5, 6]];
+    for (const [yi, xi] of [[0, 5], [0, 3], [7, 0], [9, 9]]) {
+      const { session, data, change } = manual(HEAT, matrix);
+      change('replace', yi, xi, 4); // a hand-driven source; the grid is 3 x 2
+      const next = session.tick();
+      assert.equal(next.mode, 'rebuilt', `${yi}/${xi}`);
+      assert.equal(paint(next.vnode), paint(compileChart(HEAT, data).toVnode()), `${yi}/${xi}`);
+      assert.doesNotMatch(renderToString(next.vnode), /<title>c × r1: 4<\/title>/);
+    }
+  });
+
+  it('the ramp option reaches both the wholesale compile and the session', function () {
+    const ramp = ['#111111', '#777777', '#eeeeee'];
+    const adapter = createStreamAdapter('heatmap', { ...HEAT_SPEC, yField: 'n' });
+    const session = createChartSession(HEAT, adapter, { ramp });
+    for (const [col, row, n] of [['a', 'r1', 1], ['b', 'r1', 9], ['a', 'r2', 4], ['b', 'r2', 5]])
+      feedDoc(adapter, { col, row, n });
+    session.tick();
+    feedDoc(adapter, { col: 'a', row: 'r2', n: 2 }); // 4 -> 6, inside [1, 9]
+    const next = session.tick();
+    assert.equal(next.mode, 'incremental');
+    const wholesaleSvg = renderToString(compileChart(HEAT, adapter.getData(), { ramp }).toVnode());
+    assert.equal(renderToString(next.vnode), wholesaleSvg);
+    assert.match(wholesaleSvg, /fill="#111111" class="chart-heat-cell"/);
+    assert.notEqual(wholesaleSvg, renderToString(compileChart(HEAT, adapter.getData()).toVnode()));
+  });
+
+  it('a log ramp holds still on the drawable extent and ignores a non-positive cell', function () {
+    const LOG = { type: 'heatmap', log: true };
+    const { session, data, change } = manual(LOG, [[0, 2, 8], [4, -1, 3]]);
+    change('replace', 1, 2, 5); // 3 -> 5, inside [2, 8]; the 0 and -1 stay unmeasured
+    const next = session.tick();
+    assert.equal(next.mode, 'incremental');
+    assert.equal(renderToString(next.vnode),
+      renderToString(compileChart(LOG, data).toVnode()));
+    change('replace', 0, 0, 3); // a rect appears where there was none
+    assert.equal(session.tick().mode, 'rebuilt');
+  });
+
+  it('stays byte-equal to the wholesale compile over random traffic', function () {
+    const rand = mulberry32(0x4EA7);
+    const adapter = createStreamAdapter('heatmap', HEAT_SPEC);
+    const session = createChartSession(HEAT, adapter);
+    const cols = ['a', 'b', 'c'];
+    const rows = ['r1', 'r2', 'r3'];
+    const counters = { unchanged: 0, incremental: 0, rebuilt: 0 };
+    for (let frame = 0; frame < 300; frame++) {
+      if (rand() > 0.1) {
+        if (rand() > 0.97) cols.push(`late${cols.length}`);
+        if (rand() > 0.97) rows.push(`row${rows.length}`);
+        const burst = 1 + Math.floor(rand() * 3);
+        for (let b = 0; b < burst; b++) {
+          feedDoc(adapter, {
+            col: cols[Math.floor(rand() * cols.length)],
+            row: rows[Math.floor(rand() * rows.length)],
+          });
+        }
+      }
+      const { vnode, mode } = session.tick();
+      counters[mode]++;
+      assert.equal(renderToString(vnode), wholesale(HEAT, adapter),
+        `frame ${frame} (${mode}) diverged from the wholesale render`);
+    }
+    assert.ok(counters.incremental > 0 && counters.rebuilt > 0 && counters.unchanged > 0,
+      `expected all three modes, got ${JSON.stringify(counters)}`);
+  });
+
+  it('a log ramp stays byte-equal across decades', function () {
+    const config = { type: 'heatmap', log: true };
+    const adapter = createStreamAdapter('heatmap', HEAT_SPEC);
+    const session = createChartSession(config, adapter);
+    const seen = new Set();
+    for (let i = 0; i < 120; i++) {
+      feedDoc(adapter, { col: COLS[i % 3], row: ROWS[(i * 7) % 3] });
+      const { vnode, mode } = session.tick();
+      seen.add(mode);
+      assert.equal(renderToString(vnode), wholesale(config, adapter), `tick ${i}`);
+    }
+    assert.ok(seen.has('incremental'));
+  });
+
+  it('a summed value field stays byte-equal', function () {
+    const spec = { ...HEAT_SPEC, yField: 'n' };
+    const adapter = createStreamAdapter('heatmap', spec);
+    const session = createChartSession(HEAT, adapter);
+    for (const [col, row, n] of [['a', 'r1', 1], ['b', 'r1', 9], ['a', 'r2', 4], ['b', 'r2', 5]])
+      feedDoc(adapter, { col, row, n });
+    session.tick();
+    feedDoc(adapter, { col: 'a', row: 'r2', n: 2 }); // 4 -> 6, inside [1, 9]
+    const next = session.tick();
+    assert.equal(next.mode, 'incremental');
+    assert.equal(renderToString(next.vnode),
+      renderToString(compileChart(HEAT, adapter.getData()).toVnode()));
+    assert.match(renderToString(next.vnode), /<title>a × r2: 6<\/title>/);
+  });
+
+  it('writes fewer DOM nodes per update than re-patching a wholesale frame', function () {
+    const counted = [];
+    const originals = new Map();
+    for (const name of ['setAttribute', 'removeAttribute', 'insertBefore', 'removeChild']) {
+      originals.set(name, StubElement.prototype[name]);
+      StubElement.prototype[name] = function (...args) {
+        counted.push(`${name}:${this.tagName}`);
+        return originals.get(name).apply(this, args);
+      };
+    }
+    try {
+      const { adapter, session, first } = seeded();
+      const hostA = createStubHost();
+      const patchA = createDomRenderer(hostA.container, { document: hostA.document });
+      const hostB = createStubHost();
+      const patchB = createDomRenderer(hostB.container, { document: hostB.document });
+      patchA(first.vnode);
+      patchB(compileChart(HEAT, adapter.getData()).toVnode());
+
+      feedDoc(adapter, { col: 'b', row: 'r1' }); // 3 -> 4
+      const next = session.tick();
+      assert.equal(next.mode, 'incremental');
+
+      counted.length = 0;
+      patchA(next.vnode);
+      const sessionWrites = counted.splice(0);
+      patchB(compileChart(HEAT, adapter.getData()).toVnode());
+      const wholesaleWrites = counted.splice(0);
+
+      // the session's frame keeps the root's props by reference, so the
+      // patcher rewrites nothing but the one cell; a fresh tree also
+      // restates the root's style attribute
+      assert.deepEqual(sessionWrites, ['setAttribute:rect']);
+      assert.deepEqual(wholesaleWrites, ['setAttribute:svg', 'setAttribute:rect']);
+      assert.equal(serialize(hostA.container), serialize(hostB.container));
+    }
+    finally {
+      for (const [name, fn] of originals) StubElement.prototype[name] = fn;
+    }
   });
 });
 

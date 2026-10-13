@@ -28,7 +28,7 @@ import { hashContent } from '@jarenjs/core/string';
 import { stableStringify } from '@jarenjs/core/object';
 import { clamp01 } from '@jarenjs/core/math';
 import { scaleLinear, scaleTime } from './scale.js';
-import { createTheme, CATEGORICAL } from './palette.js';
+import { createTheme, CATEGORICAL, SEQUENTIAL } from './palette.js';
 import { normalizeDomainPolicy } from './domain.js';
 import { normalizeSampling, mightSample } from './sampling.js';
 import { normalizeTooltip } from './marks.js';
@@ -42,6 +42,10 @@ import {
   lineScales, lineVertex, lineSeriesRender, lineSeriesChildren,
 } from '../types/line.js';
 import {
+  buildHeatmapAST, buildHeatmapRender, heatCellRender, heatDrawable,
+  scanHeatmapExtent, heatmapShade,
+} from '../types/heatmap.js';
+import {
   buildCandlestickAST, buildCandlestickRender, scanCandleExtremes,
   resolveCandleDomains, candleUnit, candleRender,
 } from '../types/candlestick.js';
@@ -50,6 +54,7 @@ const APPEND_PATH = /^\/series\/(\d+)\/points\/-$/;
 const EVICT_PATH = /^\/series\/(\d+)\/points\/0$/;
 const UPSERT_PATH = /^\/candles\/(\d+)$/;
 const VALUE_PATH = /^\/series\/(\d+)\/values\/(\d+)$/;
+const CELL_PATH = /^\/values\/(\d+)\/(\d+)$/;
 
 /**
  * @typedef {object} ChartSessionSource
@@ -69,11 +74,12 @@ const VALUE_PATH = /^\/series\/(\d+)\/values\/(\d+)$/;
 /**
  * Create an incremental session for a streaming chart. Supported
  * `config.type`: `'line'` (append/evict traffic), `'bar'` (live counts
- * and sums) and `'candlestick'` (keyed kline upserts). The config is
- * treated as immutable for the session's lifetime.
+ * and sums), `'heatmap'` (live matrix counts) and `'candlestick'`
+ * (keyed kline upserts). The config is treated as immutable for the
+ * session's lifetime.
  * @param {{type: string, [k: string]: any}} config
  * @param {ChartSessionSource} source
- * @param {{theme?: any, palette?: readonly string[], width?: number,
+ * @param {{theme?: any, palette?: readonly string[], ramp?: readonly string[], width?: number,
  *   rootClass?: string, keyPrefix?: string,
  *   tooltip?: import('./marks.js').ChartTooltipSpec}} [options]
  * @returns {ChartSession}
@@ -82,6 +88,7 @@ const VALUE_PATH = /^\/series\/(\d+)\/values\/(\d+)$/;
 export function createChartSession(config, source, options = {}) {
   if (config?.type === 'line') return createLineSession(config, source, options);
   if (config?.type === 'bar') return createBarSession(config, source, options);
+  if (config?.type === 'heatmap') return createHeatmapSession(config, source, options);
   if (config?.type === 'candlestick') return createCandleSession(config, source, options);
   throw new TypeError(`createChartSession does not support type '${config?.type}'`);
 }
@@ -160,6 +167,93 @@ function createBarSession(config, source, options) {
       const bar = { ...ast.bars[at], v1: clamp01(scale(value)), value };
       ast.bars[at] = bar;
       next[offset + at] = barMarkRender(bar, ast, render.plot, theme, palette, tooltip);
+    }
+    vnode = next;
+    return { vnode, mode: /** @type {const} */ ('incremental') };
+  }
+
+  return { tick };
+}
+
+/**
+ * The heatmap session: a live cell count re-renders exactly its own
+ * rect while the ramp holds still.
+ *
+ * Every cell's colour is its magnitude's position between the matrix
+ * minimum and maximum, so the frame is still only while both extremes
+ * are: a count that sets a new extreme re-colours every cell (and the
+ * ramp key), which is a wholesale frame by construction. A new row or
+ * column re-divides the grid, and a cell going from unmeasured to
+ * measured (or back) adds or removes a rect, shifting every later
+ * child's index — those rebuild too. What stays is the steady state of
+ * a matrix filling in: a cell between the extremes counting up.
+ *
+ * The stillness test rescans the truth: a count can only grow here, but
+ * a source may replace a cell with any value, and an extreme that
+ * dropped away would otherwise leave the ramp stale.
+ * @param {any} config @param {ChartSessionSource} source @param {any} options
+ * @returns {ChartSession}
+ */
+function createHeatmapSession(config, source, options) {
+  const log = config.log === true;
+  const ramp = options.ramp ?? SEQUENTIAL;
+  const tooltip = normalizeTooltip(options.tooltip);
+  const theme = createTheme(options.theme);
+  const hash = hashContent(stableStringify(config) ?? '');
+
+  /** @type {any} */ let vnode = null;
+  /** @type {any} */ let ast = null;
+  /** @type {{svg:any, plot:any, chromeLen:number}|null} */ let render = null;
+  /** @type {Map<number, number>} `yi * columns + xi` → AST cell index */ let cellAt = new Map();
+
+  function rebuild(dataMaybe) {
+    const data = dataMaybe ?? source.getData();
+    ast = buildHeatmapAST(data, config);
+    render = buildHeatmapRender(ast, theme, hash, options);
+    cellAt = new Map();
+    for (let i = 0; i < ast.cells.length; i++)
+      cellAt.set(ast.cells[i].yi * ast.xLabels.length + ast.cells[i].xi, i);
+    vnode = render.svg;
+    return { vnode, mode: /** @type {const} */ ('rebuilt') };
+  }
+
+  function tick() {
+    const ops = source.takeChanges();
+    if (vnode !== null && ops.length === 0)
+      return { vnode, mode: /** @type {const} */ ('unchanged') };
+    if (vnode === null) return rebuild();
+
+    const steps = [];
+    for (const op of ops) {
+      const m = CELL_PATH.exec(op.path);
+      if (op.op !== 'replace' || m === null) return rebuild();
+      const step = { yi: Number(m[1]), xi: Number(m[2]) };
+      // a column past the grid would alias a cell of the next row in the
+      // flat key below, and a wholesale render draws nothing there (a row
+      // past the grid keys beyond every cell and rebuilds at the lookup)
+      if (step.xi >= ast.xLabels.length) return rebuild();
+      steps.push(step);
+    }
+
+    const truth = source.getData();
+    const columns = ast.xLabels.length;
+    const domain = scanHeatmapExtent(truth?.values ?? [], columns, ast.yLabels.length, log);
+    if (domain === null || ast.domain === null
+      || domain.min !== ast.domain.min || domain.max !== ast.domain.max)
+      return rebuild(truth);
+
+    const shade = heatmapShade(domain, log);
+    const offset = 2 + (ast.title ? 1 : 0) + render.chromeLen;
+    const next = vnode.slice();
+    for (const step of steps) {
+      const at = cellAt.get(step.yi * columns + step.xi);
+      const value = truth?.values?.[step.yi]?.[step.xi];
+      // no rect yet (or none any more) means the child list changes shape
+      if (at === undefined || !heatDrawable(value, log))
+        return rebuild(truth);
+      const cell = { ...ast.cells[at], t: shade(value), value };
+      ast.cells[at] = cell;
+      next[offset + at] = heatCellRender(cell, ast, render.plot, ramp, tooltip);
     }
     vnode = next;
     return { vnode, mode: /** @type {const} */ ('incremental') };

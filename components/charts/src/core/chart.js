@@ -71,7 +71,9 @@ export function chartTypes() {
  *
  * @param {{type: string, title?: string, [k: string]: any}} config
  * @param {any} [data]
- * @param {{theme?: any, tooltip?: import('./marks.js').ChartTooltipSpec}} [options]
+ * @param {{theme?: any, tooltip?: import('./marks.js').ChartTooltipSpec,
+ *   ramp?: readonly string[]}} [options] `ramp` is the heatmap's colour ramp
+ *   (light to dark); other types ignore it
  * @returns {CompiledChart}
  * @throws {TypeError} On an unknown chart type
  */
@@ -84,7 +86,8 @@ export function compileChart(config, data = config, options = {}) {
   const hash = contentKey(config);
   // Only the render half takes options; passing the object through
   // whole would let a `theme` member reach a type's palette options.
-  const renderOptions = options.tooltip === undefined ? undefined : { tooltip: options.tooltip };
+  const renderOptions = options.tooltip === undefined && options.ramp === undefined
+    ? undefined : { tooltip: options.tooltip, ramp: options.ramp };
   let vnode;
   let svg;
   return {

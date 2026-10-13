@@ -334,9 +334,9 @@ Measured (`npm run benchmark:charts`, one appended point):
 
 The session tick is *flat* in n — it
 moves <!--fact:charts.sessionFlatness-->1.4× while the wholesale tick grows 27.4×<!--/fact-->. Supported types: `line` (appends
-and ring-buffer evictions), `bar` (live counts and sums) and
-`candlestick` (keyed kline upserts — one candle group re-renders). The
-website's Binance demo runs on it.
+and ring-buffer evictions), `bar` (live counts and sums), `heatmap`
+(live matrix counts and sums) and `candlestick` (keyed kline upserts —
+one candle group re-renders). The website's Binance demo runs on it.
 
 The first three rows are lines the **sampler is not choosing the points
 of** (see below). A session over a time line above two thousand points
@@ -358,7 +358,17 @@ where one value shifts every bar above it in its category.
 | 20 | ~5.7 µs | ~33 µs |
 | 200 | ~11 µs | ~137 µs |
 
-Only the *vnode* work is O(1) there — one rect re-emitted instead of
+A heatmap's stillness test is its ramp: every cell is coloured by where
+its magnitude sits between the matrix minimum and maximum, so a count
+between the two repaints one rect, while a count that sets or retires
+either extreme re-colours every cell and the key, and rebuilds. A new row
+or column rebuilds (the grid re-divides), and so does a cell gaining its
+first count or losing its last — a rect appears or goes, and every later
+child's index moves. Like the bar session, one rect is re-emitted, but the
+tick still copies the root's child list and rescans the matrix, so it grows
+with the cell count.
+
+Only the *vnode* work is O(1) in the bar table above — one rect re-emitted instead of
 all of them. The stillness test still rescans every category (a count
 that drops can retire the tallest bar, so extremes cannot be extended)
 and the adapter rebuilds its snapshot arrays, so the bar session's tick
@@ -445,7 +455,10 @@ The same module's `mermaidPieToChartAST` maps a mermaid pie AST onto
 document; validate untrusted definitions with `@jarenjs/validate`
 before compiling.
 
-Answers that changed (upgrade notes): a bar chart with a negative value on a linear
+New capability (upgrade notes): `createChartSession` accepts `type: 'heatmap'`
+(it threw before), and a `ramp` option (a colour list, light to dark) is read by
+both `compileChart` and the heatmap session, so the two stay byte-equal under it.
+Answers that changed: a bar chart with a negative value on a linear
 axis used to drop it and draw nothing; it now draws the bar from a zero baseline inside
 the plot, and the value axis extends below zero to hold it (a chart with no negative
 value is unchanged). A bar chart places each bar and tick by its
