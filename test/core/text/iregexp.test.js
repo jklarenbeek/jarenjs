@@ -138,6 +138,23 @@ describe('isValidIRegexp', () => {
     assert.isFalse(isValidIRegexp('\uD800'));
   });
 
+  it('should reject grammar-valid patterns that cannot be compiled', () => {
+    for (const p of ['[z-a]', 'a{3,2}', '^*', '$+', '^{2}', '(a|[z-a])'])
+      assert.isFalse(isValidIRegexp(p), p);
+    for (const p of ['[z-a]', 'a{3,2}', '^*', '$+'])
+      assert.deepEqual(compileIRegexp(p), null, p);
+  });
+
+  it('should keep accepting what compiles', () => {
+    for (const p of ['[a-a]', 'a{2,2}', 'a{0}', '(^)*', '^', '$', '^a$', '[\\p{L}z]'])
+      assert.isTrue(isValidIRegexp(p), p);
+  });
+
+  it('should agree with compileIRegexp on every pattern', () => {
+    for (const p of ['a', '[z-a]', 'a{3,2}', '^*', '(^)*', '\\d', '[^]', '', 'a{2,4}'])
+      assert.deepEqual(isValidIRegexp(p), compileIRegexp(p) !== null, p);
+  });
+
   it('should reject non-string input', () => {
     assert.isFalse(isValidIRegexp(5));
     assert.isFalse(isValidIRegexp(null));

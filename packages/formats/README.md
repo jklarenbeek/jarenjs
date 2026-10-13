@@ -100,7 +100,7 @@ These are grouped in `jsonFormats`.
 - `lowercase` | allow only lower case alpha characters
 - `color` | web color hex string (starts with #, must be 3 or 6 hax characters)
 - `regex` | tests whether a string is a valid regular expression
-- `iregexp` | tests whether a string is a valid I-Regexp according to [RFC9485](https://www.rfc-editor.org/rfc/rfc9485.html) — the interoperable subset that means the same thing in every regexp dialect, so it is stricter than `regex`: shorthand classes (`\d`, `\w`), lazy quantifiers, anchors and lookaround are all rejected
+- `iregexp` | tests whether a string is a valid I-Regexp according to [RFC9485](https://www.rfc-editor.org/rfc/rfc9485.html) — the interoperable subset that means the same thing in every regexp dialect, so it is stricter than `regex`: shorthand classes (`\d`, `\w`), lazy quantifiers and lookaround are all rejected, and so is a pattern the grammar admits but no `RegExp` can be built from (`[z-a]`, `a{3,2}`, a quantified `^` or `$`, which this module reads as anchors, as JSONPath `match()` does). *Upgrade: those last used to pass, and JSONPath `match()` then treated them as false; they are refused now.*
 - `base64` | base64 encoded data
 - `byte` | same as `base64` format
 

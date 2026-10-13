@@ -298,11 +298,31 @@ export function compileIRegexp(pattern, fullMatch = false) {
   }
 }
 
+// Building a RegExp is the cost of validity, and a format validator meets the
+// same few patterns over and over; the answer is a pure function of the
+// string, so a bounded memo (cleared when full) keeps it cheap.
+const VALIDITY_MEMO_LIMIT = 256;
+const validityMemo = new Map();
+
 /**
- * Validates a pattern against the complete I-Regexp (RFC 9485) grammar.
+ * Validates a pattern against the complete I-Regexp (RFC 9485) grammar and
+ * requires that it can be built into a RegExp: a pattern the grammar admits
+ * but ECMAScript refuses (an out-of-order class range such as `[z-a]`, an
+ * inverted quantifier such as `a{3,2}`, a quantified `^` or `$`) is not
+ * valid, because JSONPath `match()` and `search()` could only treat it as
+ * false.
  * @param {string} pattern - The I-Regexp pattern to validate
- * @returns {boolean} True when the pattern is a valid I-Regexp
+ * @returns {boolean} True when the pattern is a valid, compilable I-Regexp
  */
 export function isValidIRegexp(pattern) {
-  return typeof pattern === 'string' && translateIRegexp(pattern) !== null;
+  if (typeof pattern !== 'string')
+    return false;
+  let valid = validityMemo.get(pattern);
+  if (valid === undefined) {
+    valid = compileIRegexp(pattern) !== null;
+    if (validityMemo.size >= VALIDITY_MEMO_LIMIT)
+      validityMemo.clear();
+    validityMemo.set(pattern, valid);
+  }
+  return valid;
 }

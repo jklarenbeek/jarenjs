@@ -66,12 +66,6 @@ delete it or fix it.
   the closure compiler staying the default. The no-`eval` rule is absolute in this
   package today, which is the guarantee this must not quietly cost.
 
-- [ ] **I-Regexp validity versus compilability.** `isValidIRegexp` accepts
-  grammar-valid patterns that `compileIRegexp` cannot build (`[z-a]`,
-  `a{3,2}`, a quantified `^` or `$`), so a validator can pass a pattern that
-  JSONPath `match()` then treats as false. Wanted: decide whether validity
-  requires compilability.
-
 ## @jarenjs/json — JSLT
 
 - [ ] **JSLT matcher optimizer (single-walk)** — replace per-rule path pre-passes with a single multi-pattern walk, specialize location tracking by reachable modes, and use input-schema knowledge to prune impossible shape rules. The benchmark quantifies the gap: dense pure-path transforms pay ~9–12× over the raw path scan, and hand-written native JS stays 3–139× faster on real transformations — this is the main JSLT performance workstream.

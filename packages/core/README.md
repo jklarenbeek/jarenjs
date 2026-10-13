@@ -15,7 +15,7 @@ unkeyable values. The caller owns resource cleanup and any explicit clearing.
 A limit under 1 retains nothing: each `set` hands its entry straight to the hook
 (it used to throw on the first `set`).
 
-Answers that changed (upgrade notes): `getUniqueArray` keeps one `NaN` where it
+Answers that changed (upgrade notes): `isValidIRegexp` is `false` for a grammar-valid pattern no `RegExp` can be built from (`[z-a]`, `a{3,2}`, a quantified `^` or `$`) where it was `true`; `getUniqueArray` keeps one `NaN` where it
 dropped every one (so `isUniqueArray([NaN])` is `true`) and runs in linear time;
 `getValidFloat64(NaN, d)` answers `d`, like the 16- and 32-bit twins, where it answered
 `NaN`; `lerpColor` holds every channel to 0-255 when `t` extrapolates (it spilled into the
@@ -126,7 +126,7 @@ isValidIPv6('::ffff:192.168.0.1');        // true
 isValidUriTemplate('/users{/id}{?q}');    // true (RFC 6570)
 ```
 
-Grouped by file: `email` (RFC 5321, and `isValidIdnEmail`, the same grammar over UTF-8 with an IDN-hostname domain, so spaces, control characters and empty labels are refused), `host` (hostnames, IDN hostnames, IPv4/IPv6, MAC, URI/URL/IRI and references, URI templates), `identifiers` (UUID, GUID, C/HTML/CSS identifiers), `iregexp` (I-Regexp / RFC 9485 validation and translation to `RegExp`: `isValidIRegexp`, `compileIRegexp`), `base64`, `basic` (alpha, numeric, hex, web colors), `misc` (ISBN-10/13 with their check digits — bare, or in groups joined by one hyphen or space, with an optional `ISBN` label; ISO 3166 country codes, ISO 13616 IBAN including its MOD 97-10 check digits), `i18n` (Unicode script tests and IDNA context checks) and `punycode` (the RFC 3492 codec, `punycodeEncode`/`punycodeDecode`, plus the domain-level `domainToASCII`/`domainToUnicode` and `hasAcePrefix`, the case-insensitive `xn--` label test the IDN hostname validator shares).
+Grouped by file: `email` (RFC 5321, and `isValidIdnEmail`, the same grammar over UTF-8 with an IDN-hostname domain, so spaces, control characters and empty labels are refused), `host` (hostnames, IDN hostnames, IPv4/IPv6, MAC, URI/URL/IRI and references, URI templates), `identifiers` (UUID, GUID, C/HTML/CSS identifiers), `iregexp` (I-Regexp / RFC 9485 validation and translation to `RegExp`: `isValidIRegexp`, which also requires the pattern to compile, and `compileIRegexp`), `base64`, `basic` (alpha, numeric, hex, web colors), `misc` (ISBN-10/13 with their check digits — bare, or in groups joined by one hyphen or space, with an optional `ISBN` label; ISO 3166 country codes, ISO 13616 IBAN including its MOD 97-10 check digits), `i18n` (Unicode script tests and IDNA context checks) and `punycode` (the RFC 3492 codec, `punycodeEncode`/`punycodeDecode`, plus the domain-level `domainToASCII`/`domainToUnicode` and `hasAcePrefix`, the case-insensitive `xn--` label test the IDN hostname validator shares).
 
 `host` answers `uri`, `uri-reference`, `iri` and `iri-reference` from one character-code scanner: RFC 3987 is RFC 3986 with the unreserved class widened by `ucschar` and `iprivate` admitted in the query, so both grammars are the same walk with one flag. That is what makes every URI an IRI by construction rather than by coincidence.
 
