@@ -392,9 +392,10 @@ function compileLet(node) {
 //     equality would later have dropped. A hash join never forms that
 //     tuple, which would silently retract a `$as` assertion;
 //   - the probe side is the innermost $for, with no `$at` (a position
-//     would have to survive bucketing), no `$allowing-empty`, no window,
-//     and no `$range` source: the scan counts through a range, a table
-//     would have to build it, and the range guard refuses a build;
+//     would have to survive bucketing), no `$allowing-empty` and no
+//     window. A `$range` source is probed only by a hash join whose inner
+//     key is the range variable itself (below): no table is built over
+//     it, so the range guard that refuses a build never applies;
 //   - its source reads no slot bound by an outer binding;
 //   - the equality is the whole `$where`, or its FIRST `$and` conjunct,
 //     so nothing that used to be evaluated before it is skipped;
@@ -560,8 +561,6 @@ function probeBinding(node) {
   if (inner.atSlot >= 0 || inner.allowingEmpty === true
     || (inner.window !== null && inner.window !== undefined))
     return null;
-  if (isRangeOp(inner.expr))
-    return null; // the scan counts through it; a probe would build it
 
   const outerSlots = [];
   for (let i = 0; i < fors.length - 1; i++) {
@@ -608,6 +607,10 @@ function planHashJoin(node) {
   const outerKey = uses0 ? eq.args[1] : eq.args[0];
   if (readsOf(outerKey).has(inner.slot) || intersects(readsOf(innerKey), outerSlots))
     return null;
+  // a range holds each integer once, so its item for an outer key is the key
+  // itself, and only a key that is the item itself says so
+  if (isRangeOp(inner.expr) && !(innerKey.kind === 'var' && innerKey.slot === inner.slot))
+    return null;
 
   return {
     inner, outerKey, innerKey, residual: rest, outerFirst: uses1,
@@ -644,6 +647,8 @@ function planScreenedJoin(node) {
   if (screen === undefined)
     return null; // only a bare screened predicate; an $and could throw first
   const { inner, outerSlots } = binding;
+  if (isRangeOp(inner.expr))
+    return null; // the scan raises at the first pair: a range holds numbers only
 
   // one operand must be the probe's own, the other must not mention it
   const [a, b] = where.args;
@@ -799,6 +804,8 @@ function joinKey(v) {
 // The hash-join probe clause and its driver. The table is built at the
 // first outer tuple that reaches the probe, once per phrase evaluation.
 function compileJoinProbe(plan, next) {
+  if (isRangeOp(plan.inner.expr))
+    return compileRangeProbe(plan, next);
   const slot = plan.inner.slot;
   const srcGet = compileNode(plan.inner.expr);
   const innerKeyGet = compileUncounted(plan.innerKey);
@@ -841,6 +848,46 @@ function compileJoinProbe(plan, next) {
       f[slot] = bucket[i];
       next(f, out);
     }
+  };
+  return { drive: probeDriver(cell), probe };
+}
+
+// The probe over a `$range` source, which builds nothing: the range holds
+// each integer from its first bound to its last once, so the only item an
+// outer key can equal is that key, when it is an integer inside the bounds.
+// The bounds are read, and checked, as the counting loop reads them, at the
+// first outer tuple that reaches the probe.
+function compileRangeProbe(plan, next) {
+  const slot = plan.inner.slot;
+  const [fromNode, toNode] = plan.inner.expr.args;
+  const fromGet = compileNode(fromNode);
+  const toGet = compileNode(toNode);
+  const outerKeyGet = compileUncounted(plan.outerKey);
+  const cell = { state: null };
+
+  const build = (f) => {
+    const a = fromGet(f);
+    const b = toGet(f);
+    if (a === EMPTY || b === EMPTY)
+      return { from: 0, to: -1 };
+    checkRangeBound(a, fromNode.docPath);
+    checkRangeBound(b, toNode.docPath);
+    return { from: a, to: b };
+  };
+
+  const probe = (f, out) => {
+    if (cell.state === null)
+      cell.state = build(f);
+    const { from, to } = cell.state;
+    if (from > to)
+      return; // no item: the scan reads no outer key here
+    const key = outerKeyGet(f);
+    if (!Number.isInteger(key) || key < from || key > to)
+      return;
+    // the item the counting loop reaches: its first one is the lower bound as
+    // handed over (a negative zero stays one), the others come from adding 1
+    f[slot] = key === from ? from : key + 0;
+    next(f, out);
   };
   return { drive: probeDriver(cell), probe };
 }

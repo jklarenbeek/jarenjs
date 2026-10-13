@@ -1393,9 +1393,10 @@ describe('index probes evaluate what the scan evaluates, when it evaluates it', 
     }
   });
 
-  it('should leave a $range inner source to the scan, which counts it instead of building it', () => {
+  it('should answer a $range inner source without building it, whatever the guard on a build', () => {
     // a phrase limit tightens the $range guard: built, the range would
-    // be refused; counted, it never is
+    // be refused; the equality is probed and the screens left to the
+    // scan, which counts through the range, so none of them builds it
     const options = { compile: { limits: { sequenceItems: 10 } } };
     const doc = (where) => ({ $for: { a: '$.outer[*]', b: { $range: [1, 20] } }, $where: where, $return: '$b' });
     const data = { outer: [outerRow] };
@@ -1433,5 +1434,244 @@ describe('index probes evaluate what the scan evaluates, when it evaluates it', 
       assert.deepStrictEqual(outcome(withLet(doc), data), { value: undefined });
       assert.strictEqual(reads, 12, `${kind}: the scan reads one per pair`);
     }
+  });
+});
+
+describe('a join over a $range inner source is probed without building the range', () => {
+  // The oracle is the same phrase with a `$let`, which makes the planner
+  // decline and run the nested loop. An outer row whose `k` is an accessor
+  // counts the equality's reads: the scan reads it once per pair, the probe
+  // once per outer row.
+  const withLet = (doc) => ({ ...doc, $let: { _z: 1 } });
+  const outcome = (doc, data, options = {}) => {
+    try {
+      return { value: compileJsonQuery(doc, options.compile)(data) };
+    }
+    catch (e) {
+      if (!(e instanceof JsonQueryRuntimeError))
+        throw e;
+      return { code: e.code, docPath: e.docPath, message: e.message };
+    }
+  };
+  const bothWays = (doc, data, options) => {
+    const probed = outcome(doc, data, options);
+    assert.deepStrictEqual(probed, outcome(withLet(doc), data, options),
+      'the probe must answer exactly what the scan answers');
+    return probed;
+  };
+  const counted = (keys, counter) => keys.map((k, i) => {
+    const row = { id: `o${i}` };
+    Object.defineProperty(row, 'k', {
+      enumerable: true,
+      get() {
+        counter.reads++;
+        return k;
+      },
+    });
+    return row;
+  });
+  const join = (range, where, extra = {}) => ({
+    $for: { a: '$.outer[*]', b: { $range: range } }, $where: where, $return: { a: '$a.id', b: '$b' }, ...extra,
+  });
+  const eq = { $eq: ['$a.k', '$b'] };
+  const rows = (...flat) => Array.from({ length: flat.length / 2 }, (_, i) => ({ a: flat[2 * i], b: flat[2 * i + 1] }));
+  const failedAt = (result) => ({ code: result.code, docPath: result.docPath });
+
+  it('should read the outer key once per outer row, not once per pair', () => {
+    const keys = [3, 1, 3, 99, 0, 7, 1];
+    const doc = join([1, 8], eq);
+    const answers = [];
+    for (const scan of [false, true]) {
+      const counter = { reads: 0 };
+      answers.push(outcome(scan ? withLet(doc) : doc, { outer: counted(keys, counter) }));
+      assert.strictEqual(counter.reads, scan ? 56 : 7, scan ? 'the scan reads one per pair' : 'one read per outer row');
+    }
+    assert.deepStrictEqual(answers[0], answers[1]);
+    assert.deepStrictEqual(answers[0].value, rows('o0', 3, 'o1', 1, 'o2', 3, 'o5', 7, 'o6', 1));
+  });
+
+  it('should answer a single outer row against a long range without counting or building it', () => {
+    const counter = { reads: 0 };
+    const options = { compile: { limits: { sequenceItems: 10 } } };
+    const result = outcome(join([1, 100000], eq), { outer: counted([99999], counter) }, options);
+    assert.deepStrictEqual(result, { value: { a: 'o0', b: 99999 } });
+    assert.strictEqual(counter.reads, 1);
+  });
+
+  it('should answer a range as wide as the safe integers in one step', () => {
+    const top = Number.MAX_SAFE_INTEGER;
+    const doc = join([-top, top], eq);
+    const keys = [top, -top, 0, top + 1, 1.5];
+    // a step limit turns a scan over the 2^54 items into a refusal instead of a wait
+    const options = { compile: { limits: { steps: 100000 } } };
+    assert.deepStrictEqual(outcome(doc, { outer: counted(keys, { reads: 0 }) }, options),
+      { value: rows('o0', top, 'o1', -top, 'o2', 0) });
+  });
+
+  it('should fill the range variable with the item the counting loop reaches, as it reaches it', () => {
+    // the first item is the lower bound as handed over, a negative zero
+    // included; every later item is a sum, so zero there is positive
+    const result = outcome(join([-1, 1], eq), { outer: counted([-0, 0], { reads: 0 }) });
+    assert.strictEqual(result.value.length, 2);
+    for (const row of result.value)
+      assert.ok(Object.is(row.b, 0), 'the item is 0');
+    const lead = join(['$.lo', 2], eq);
+    for (const lo of [-0, 0]) {
+      const answer = bothWays(lead, { outer: counted([0, -0, 1, -0], { reads: 0 }), lo });
+      assert.strictEqual(answer.value.length, 4);
+      assert.deepStrictEqual(answer.value.map((row) => Object.is(row.b, -0)), Object.is(lo, -0) ? [true, true, false, true] : [false, false, false, false],
+        `lower bound ${Object.is(lo, -0) ? '-0' : '0'}`);
+    }
+    // a negative zero as the upper bound or as the only item
+    assert.deepStrictEqual(bothWays(join(['$.lo', '$.lo'], eq), { outer: counted([0], { reads: 0 }), lo: -0 }), { value: { a: 'o0', b: -0 } });
+    assert.deepStrictEqual(bothWays(join([-1, '$.lo'], eq), { outer: counted([0], { reads: 0 }), lo: -0 }), { value: { a: 'o0', b: 0 } });
+  });
+
+  it('should match only a number that is an integer inside the bounds', () => {
+    const keys = [2, 2.0, 2.5, '2', null, true, [2], { k: 2 }, NaN, Infinity, 1e21, 6, 0];
+    const doc = join([1, 5], eq);
+    assert.deepStrictEqual(bothWays(doc, { outer: counted(keys, { reads: 0 }) }), { value: rows('o0', 2, 'o1', 2) });
+  });
+
+  it('should keep the inner key on either side and the residual conjuncts after the equality', () => {
+    const data = { outer: counted([2, 4, 4, 9], { reads: 0 }) };
+    assert.deepStrictEqual(bothWays(join([1, 5], { $eq: ['$b', '$a.k'] }), data),
+      { value: rows('o0', 2, 'o1', 4, 'o2', 4) });
+    assert.deepStrictEqual(bothWays(join([1, 5], { $and: [eq, { $gt: ['$b', 2] }] }), data),
+      { value: rows('o1', 4, 'o2', 4) });
+    // a conjunct that raises is reached only for a pair the equality kept
+    assert.deepStrictEqual(failedAt(bothWays(join([1, 5], { $and: [eq, { $idiv: ['$b', 0] }] }), data)),
+      { code: 'JQ2002', docPath: '/$where/$and/1/$idiv' });
+    assert.deepStrictEqual(bothWays(join([1, 5], { $and: [eq, { $idiv: ['$b', 0] }] }), { outer: counted([9], { reads: 0 }) }),
+      { value: undefined });
+  });
+
+  it('should read the bounds as the counting loop reads them', () => {
+    const data = { outer: counted([1, 2], { reads: 0 }), n: 3 };
+    assert.deepStrictEqual(bothWays(join([1, '$.n'], eq), data), { value: rows('o0', 1, 'o1', 2) });
+    assert.deepStrictEqual(bothWays(join([5, 1], eq), data), { value: undefined }, 'a descending range is empty');
+    assert.deepStrictEqual(bothWays(join([1, '$.missing'], eq), data), { value: undefined }, 'a missing bound is an empty range');
+    assert.deepStrictEqual(bothWays(join([1, 0], eq), data), { value: undefined });
+    assert.deepStrictEqual(bothWays(join([2, 2], eq), data), { value: { a: 'o1', b: 2 } });
+    assert.deepStrictEqual(bothWays(join([-1, 1], eq), { outer: counted([1, -1], { reads: 0 }) }), { value: rows('o0', 1, 'o1', -1) });
+    assert.deepStrictEqual(failedAt(bothWays(join([1, 2.5], eq), data)), { code: 'JQ2001', docPath: '/$for/b/$range/1' });
+    assert.deepStrictEqual(failedAt(bothWays(join(['1', 3], eq), data)), { code: 'JQ2001', docPath: '/$for/b/$range/0' });
+  });
+
+  it('should read the bounds once per evaluation, where the scan reads them per outer row', () => {
+    let reads = 0;
+    const data = { outer: counted([1, 2, 3], { reads: 0 }) };
+    Object.defineProperty(data, 'n', {
+      enumerable: true,
+      get() {
+        reads++;
+        return 3;
+      },
+    });
+    const doc = join([1, '$.n'], eq);
+    assert.deepStrictEqual(outcome(doc, data).value, rows('o0', 1, 'o1', 2, 'o2', 3));
+    assert.strictEqual(reads, 1);
+    reads = 0;
+    outcome(withLet(doc), data);
+    assert.strictEqual(reads, 3);
+  });
+
+  it('should raise a bound error only where the scan evaluates the range', () => {
+    const doc = join([1, { $idiv: [1, 0] }], eq);
+    assert.deepStrictEqual(bothWays(doc, { outer: [] }), { value: undefined }, 'no outer row reaches the range');
+    assert.deepStrictEqual(failedAt(bothWays(doc, { outer: [{ id: 'o', k: 1 }] })),
+      { code: 'JQ2002', docPath: '/$for/b/$range/1/$idiv' });
+  });
+
+  it('should read the lower bound before the upper, and check it first', () => {
+    const order = [];
+    const data = { outer: counted([1], { reads: 0 }) };
+    for (const name of ['lo', 'hi']) {
+      Object.defineProperty(data, name, {
+        enumerable: true,
+        get() {
+          order.push(name);
+          return name === 'lo' ? 1 : 2;
+        },
+      });
+    }
+    assert.deepStrictEqual(bothWays(join(['$.lo', '$.hi'], eq), data), { value: { a: 'o0', b: 1 } });
+    assert.deepStrictEqual(order.slice(0, 2), ['lo', 'hi']);
+    assert.deepStrictEqual(order.slice(2, 4), ['lo', 'hi'], 'the scan reads them in the same order');
+    // both bounds bad: the lower bound's refusal comes first
+    assert.deepStrictEqual(failedAt(bothWays(join([2.5, 'x'], eq), { outer: counted([1], { reads: 0 }) })),
+      { code: 'JQ2001', docPath: '/$for/b/$range/0' });
+  });
+
+  it('should not read the outer key beside an empty range', () => {
+    const counter = { reads: 0 };
+    const data = { outer: counted([1, 2, 3], counter) };
+    assert.deepStrictEqual(outcome(join([3, 1], eq), data), { value: undefined });
+    assert.strictEqual(counter.reads, 0);
+  });
+
+  it('should probe a range beneath two outer bindings and against an outer range', () => {
+    const doc = {
+      $for: { z: { $range: [1, 2] }, a: '$.outer[*]', b: { $range: [1, 4] } },
+      $where: eq,
+      $return: { z: '$z', a: '$a.id', b: '$b' },
+    };
+    assert.deepStrictEqual(bothWays(doc, { outer: counted([4, 2], { reads: 0 }) }), {
+      value: [[1, 'o0', 4], [1, 'o1', 2], [2, 'o0', 4], [2, 'o1', 2]].map(([z, a, b]) => ({ z, a, b })),
+    });
+    const ranges = { $for: { a: { $range: [-2, 6] }, b: { $range: [0, 4] } }, $where: { $eq: ['$a', '$b'] }, $return: '$a' };
+    assert.deepStrictEqual(bothWays(ranges, {}), { value: [0, 1, 2, 3, 4] });
+  });
+
+  it('should leave what it cannot answer to the scan', () => {
+    // a range whose bound reads an outer binding, an inner key that is not
+    // the range variable itself, and a screened predicate
+    const data = { outer: [{ id: 'o', k: 2, at: [1, 1], span: { start: 0, end: 5 } }, { id: 'p', k: 4, at: [1, 1], span: { start: 0, end: 5 } }] };
+    const correlated = { $for: { a: '$.outer[*]', b: { $range: [1, '$a.k'] } }, $where: eq, $return: '$b' };
+    assert.deepStrictEqual(bothWays(correlated, data), { value: [2, 4] });
+    const member = { $for: { a: '$.outer[*]', b: { $range: [1, 5] } }, $where: { $eq: ['$a.k', '$b.x'] }, $return: '$b' };
+    assert.deepStrictEqual(bothWays(member, data), { value: undefined });
+    for (const where of [{ $within: ['$a.at', '$b'] }, { $overlaps: ['$a.span', '$b'] }]) {
+      assert.strictEqual(bothWays(join([1, 3], where), data).code, 'JQ2001');
+    }
+  });
+
+  it('should agree with the nested loop on random phrases', () => {
+    let seed = 20261013;
+    const random = () => {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      return seed / 4294967296;
+    };
+    const pick = (list) => list[Math.floor(random() * list.length)];
+    const keys = [0, -0, 1, 2, 3, 5, 7, -3, 1.5, '1', null, true, [1], { k: 1 }, NaN, 1e21];
+    const bounds = [1, 5, 0, -2, 4, 8, 3, 2.5, '3', null, '$.n', '$.missing', '$.list', { $idiv: [1, 0] }];
+    let answered = 0;
+    let raised = 0;
+    for (let round = 0; round < 400; round++) {
+      const outer = Array.from({ length: Math.floor(random() * 12) }, (_, i) => ({ id: `o${i}`, k: pick(keys) }));
+      const key = pick([eq, { $eq: ['$b', '$a.k'] }]);
+      const where = pick([key, key, { $and: [key, { $gt: ['$b', 2] }] }, { $and: [key, { $idiv: ['$b', 0] }] }, { $and: [key] }]);
+      const doc = join([pick(bounds), pick(bounds)], where);
+      const result = bothWays(doc, { outer, n: 4, list: [1, 2] });
+      if (result.code === undefined)
+        answered++;
+      else
+        raised++;
+    }
+    assert.ok(answered > 100 && raised > 20, `answered ${answered}, raised ${raised}`);
+  });
+
+  it('should grow with the sides, not their product', () => {
+    // equal outer and range lengths over an 8x step: the equality's reads
+    // are the count of pairs examined
+    const run = (n) => {
+      const counter = { reads: 0 };
+      const keys = Array.from({ length: n }, (_, i) => i + 1);
+      const result = outcome(join([1, n], eq), { outer: counted(keys, counter) });
+      assert.strictEqual(result.value.length, n);
+      return counter.reads;
+    };
+    assert.strictEqual(run(1000), 1000);
+    assert.strictEqual(run(8000), 8000);
   });
 });

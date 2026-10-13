@@ -738,14 +738,6 @@ what each does is its own documentation's job
   over a member typed `string` alone. Wanted: a guarded native form that raises
   on the null row (a native count of the rows holding a null beside the seek),
   or a decision that the native answer is the contract for a nullable string.
-- [ ] **A join over a `$range` inner source runs as a nested loop.** The
-  engine builds its hash, spatial and interval probes over an uncorrelated
-  inner binding on the first outer tuple, but it declines a `$range` source and
-  answers that join by the nested loop (the json package's ARCHITECTURE, "Interval
-  joins"): the same pairs, order and first error, quadratically — about 178 ms for two 2,000-item ranges where a
-  probe over a materialized source takes 1 ms. Wanted: build the probe by
-  counting when the range fits the guard that bounds a materialized source
-  (`JQ2007`), keeping the nested loop's pairs, order and errors.
 - [ ] **A capture argument answers array methods with a raw host error.**
   `x.tags.includes('a')` on a capture argument is a raw `TypeError` instead of
   a coded refusal (`JSON.stringify(x)` already answers `JL0108`). Wanted: an
