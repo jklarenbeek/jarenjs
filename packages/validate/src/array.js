@@ -23,6 +23,8 @@ import {
   getBoolOrObjectClass,
   getArrayClassMinItems,
   isOfSchemaType,
+  extendsChildLocations,
+  ARRAY_CHILD_KEYWORDS,
 } from './tools.js';
 
 //#region Primitives
@@ -400,8 +402,9 @@ function compileArrayChildren(schemaObj, jsonSchema) {
   const track = root.usesUnevaluated;
   // In draft 2020-12 contains produces item annotations; in 2019-09 it doesn't.
   const trackContains = track && (schemaObj.options.draftVersion || 7) >= 2020;
-  // Item paths are consumed by error reporting and $data resolution only.
-  const extendPaths = !schemaObj.options.skipErrors || root.usesDollarData;
+  // Item paths are consumed by error reporting and by location readers
+  // (`$data`, `data`, `$query`) below the items only.
+  const extendPaths = extendsChildLocations(schemaObj, jsonSchema, ARRAY_CHILD_KEYWORDS);
 
   // Indexes below this limit count as evaluated (for unevaluatedItems) when
   // their item validation succeeds. Extra tuple items beyond the tuple length

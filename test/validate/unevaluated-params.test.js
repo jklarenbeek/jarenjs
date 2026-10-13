@@ -50,4 +50,20 @@ describe('the member an unevaluated failure names', () => {
     const result = validate({ o: { k: 1 } });
     assert.deepEqual(result.errors.map((/** @type {any} */ e) => [e.keyword, e.instancePath]), [['unevaluatedProperties', '/o']]);
   });
+
+  it('keeps the error of an array at the array, and a schema form at the member beside it', () => {
+    const where = (/** @type {any} */ schema, /** @type {any} */ data) => new JarenValidator({ collectErrors: true, draftVersion: 2020 })
+      .compile(schema)(data).errors.map((/** @type {any} */ e) => [e.keyword, e.instancePath]);
+    assert.deepEqual(
+      where({ properties: { l: { prefixItems: [{}], unevaluatedItems: false } } }, { l: [1, 2] }),
+      [['unevaluatedItems', '/l']]);
+    // The keyword's own failure is the holder's; what the schema form found
+    // wrong in the member is the member's, as for every subschema.
+    assert.deepEqual(
+      where({ unevaluatedProperties: { type: 'string' } }, { q: 1 }),
+      [['type', '/q'], ['unevaluatedProperties', '']]);
+    assert.deepEqual(
+      where({ prefixItems: [{}], unevaluatedItems: { type: 'string' } }, [0, 1]),
+      [['type', '/1'], ['unevaluatedItems', '']]);
+  });
 });

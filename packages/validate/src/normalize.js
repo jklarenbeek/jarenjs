@@ -468,8 +468,9 @@ function compileNode(node, ctx) {
     }
   }
 
-  // `allOf` branches all apply, so they compose. Stripping is disabled for
-  // the whole subtree underneath: a branch declares only its own share of
+  // `allOf` branches all apply, so they compose, once and in declaration
+  // order (the order is part of the contract: see the README). Stripping is
+  // disabled for the whole subtree underneath: a branch declares only its own share of
   // the object, so what looks "additional" to it may be exactly what a
   // sibling branch declares. Composition-shaped schemas therefore keep their
   // members; only defaults, coercion and trimming flow through.
@@ -538,7 +539,11 @@ function admitNormalizeOptions(options) {
  * **What is normalized.** `properties`, `patternProperties`,
  * `additionalProperties`, `items`/`prefixItems`/`additionalItems`, same-document
  * `$ref` (`#`, `#/pointer` and plain `#anchor` forms), and `allOf` (composed,
- * with stripping disabled inside it). A materialized root default passes
+ * with stripping disabled inside it). `allOf` branches run once, in
+ * declaration order, each on the previous step's output, so a default
+ * supplied by a later branch is not coerced by an earlier one until the next
+ * application; keep `type` and `default` on one property schema, or list the
+ * defaulting branch first, when one application must be enough. A materialized root default passes
  * through the same normalization steps as an explicitly supplied value.
  * A property default runs through that property's schema and every matching
  * `patternProperties` schema, in the same order as a supplied member.

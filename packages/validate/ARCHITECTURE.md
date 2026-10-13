@@ -607,6 +607,21 @@ flowchart TB
 out: the schema fails to compile. A reference that compiles but finds no
 value in the instance asserts nothing.
 
+**Locations are built where something reads them.** A relative `$data`
+reference, the `data` keyword and `$query`'s `path` external all read the
+location of the instance they sit on, and a location is a string built per
+member and per item. While the validator stops at the first failure
+(`skipErrors`, the default unless errors are collected), `ValidationRoot` scans
+the schemas once: with no reader anywhere, no location is built at all. With
+one, each object and array schema asks `childLocationsNeeded` about the
+subschemas its members and items are validated against, and extends the
+location for them only when that subtree holds a reader, or a reference
+(`$ref`, `$dynamicRef`, `$recursiveRef`) that may lead to one. A subtree
+that holds neither is handed its parent's location unextended and never looks
+at it. A validator that continues past failures (`skipErrors: false`, which
+collecting errors implies by default) always extends: its errors report the
+location.
+
 ---
 
 ## Error Handling Architecture

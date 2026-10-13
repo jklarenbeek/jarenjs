@@ -26,6 +26,8 @@ import {
   isOfSchemaType,
   ValidationResult,
   memberPath,
+  extendsChildLocations,
+  OBJECT_CHILD_KEYWORDS,
 } from './tools.js';
 
 import {
@@ -588,8 +590,9 @@ function compileObjectProperty(schemaObj, jsonSchema) {
  * Fused per-key validation loop for the default skipErrors mode.
  * Avoids the per-key ValidationResult allocations and eagerly built child
  * paths of the generic path; returns on the first failing property.
- * Child paths are still built (lazily) because $data validators resolve
- * relative JSON pointers against them at validation time.
+ * Child paths are still built (lazily) where a location reader below needs
+ * them: $data validators resolve relative JSON pointers against them at
+ * validation time.
  */
 function compileObjectChildrenFast(schemaObj, jsonSchema) {
   const namesValidator = compilePropertyNames(schemaObj, jsonSchema);
@@ -623,9 +626,10 @@ function compileObjectChildrenFast(schemaObj, jsonSchema) {
 
   const validateName = namesValidator || null;
 
-  // Child paths are only consumed by $data relative-pointer resolution
-  // in skipErrors mode; skip the per-property string concat otherwise.
-  const extendPaths = root.usesDollarData;
+  // In skipErrors mode a member's location is read only by a location reader
+  // (`$data`, `data`, `$query`) at or below the member's schema; skip the
+  // per-member string concat otherwise.
+  const extendPaths = extendsChildLocations(schemaObj, jsonSchema, OBJECT_CHILD_KEYWORDS);
 
   return function validateObjectChildrenFast(data, dataPath, dataRoot, dataKeys) {
     const len = dataKeys.length;
@@ -757,10 +761,11 @@ export function compileObjectSchema(schemaObj, jsonSchema) {
     const root = schemaObj.root;
     const track = root.usesUnevaluated;
 
-    // Child paths are only consumed by $data relative-pointer resolution
-    // in skipErrors mode; skip the per-property string concat otherwise.
-    if (root.usesDollarData || track) {
-      const extendPaths = root.usesDollarData;
+    // In skipErrors mode a member's location is read only by a location reader
+    // at or below the member's schema; skip the per-property string concat
+    // otherwise.
+    const extendPaths = extendsChildLocations(schemaObj, jsonSchema, OBJECT_CHILD_KEYWORDS);
+    if (extendPaths || track) {
       return function validateObjectPropertiesOnlyTracked(data, dataPath, dataRoot) {
         if (!isObjectType(data)) return true;
         for (let i = 0; i < requiredCount; ++i) {

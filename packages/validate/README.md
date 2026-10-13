@@ -460,7 +460,14 @@ the array form reported the dependent member's name as its keyword.*
 An `unevaluatedProperties` or `unevaluatedItems` failure names the member in its
 `params` (`unevaluatedProperty`, the member name; `unevaluatedItem`, the index), while
 its `instancePath` stays at the object or array that holds it (`additionalProperties`
-reports at the member). *Upgrade: `params` used to be empty, so two failing members read alike.*
+reports at the member). That is the JSON Schema reading: the keyword applies to the object
+or array, over what the other keywords left unevaluated, so its result belongs to that
+instance, and the leftover members are what it found there. The schema form is the one
+place a member is applied to:
+what its subschema finds wrong in a member sits at the member (`type` at `/q`) beside
+the keyword's own failure at the holder (`unevaluatedProperties` at `""`). A consumer that
+wants the member's location joins the holder's `instancePath` and the member from
+`params` (as one pointer token: `/` and `~` escaped). *Upgrade: `params` used to be empty, so two failing members read alike.*
 
 A reference from `items`, `prefixItems` or a tuple form back to a schema that is
 still being compiled (`{ "type": "array", "items": { "$ref": "#" } }`, or a cycle through
@@ -803,6 +810,30 @@ normalized by every one of them, in that order, and `additionalProperties`
 applies only to a member nothing else covered. A materialized `default` runs
 through its own property's normalizer too, so a defaulted `{ port: '8080' }`
 is shaped exactly like a supplied one rather than keeping its string.
+
+`allOf` branches compose **in declaration order, once**: a `$ref` first, then
+each branch, then the schema's own keywords, every step working on what the
+step before it returned. That order is the contract, and the normalizer does
+not iterate branches to a fixed point. The consequence shows when one branch
+supplies a default and another coerces the same member:
+
+```javascript
+const schema = {
+  allOf: [
+    { properties: { count: { type: 'integer' } } },   // coerces, but runs first
+    { properties: { count: { default: '42' } } },     // supplies the default after
+  ],
+};
+const normalize = compileNormalizer(schema, { useDefaults: true, coerceTypes: true });
+
+normalize({});                // { count: '42' }  - the coercion had already run
+normalize(normalize({}));     // { count: 42 }    - a second application coerces it
+```
+
+Keep one application enough by putting the `type` and the `default` on the same
+property schema, or by listing the branch that supplies the default first.
+Defining cross-branch default processing would change the order existing
+normalizers rely on, so the order stays as declared.
 
 Not walked: `anyOf`, `oneOf`, `if`/`then`/`else`, `not`. Which branch applies
 is only known after validating, and normalizing under one branch can change

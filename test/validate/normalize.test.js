@@ -341,6 +341,27 @@ describe('compileNormalizer — schema shapes', () => {
     deepStrictEqual(normalize({ a: '1', b: '2' }), { a: 1, b: 2 });
   });
 
+  it('runs allOf branches once, in declaration order, each on the previous output', () => {
+    const coercing = { properties: { count: { type: 'integer' } } };
+    const defaulting = { properties: { count: { default: '42' } } };
+    const options = { useDefaults: true, coerceTypes: true };
+
+    // The coercing branch runs first, so the default arrives after it.
+    const coercingFirst = compileNormalizer({ allOf: [coercing, defaulting] }, options);
+    deepStrictEqual(coercingFirst({}), { count: '42' });
+    deepStrictEqual(coercingFirst(coercingFirst({})), { count: 42 });
+
+    // The defaulting branch first: one application is enough.
+    const defaultingFirst = compileNormalizer({ allOf: [defaulting, coercing] }, options);
+    deepStrictEqual(defaultingFirst({}), { count: 42 });
+
+    // Type and default on one property schema: one application is enough.
+    const together = compileNormalizer({
+      allOf: [{ properties: { count: { type: 'integer', default: '42' } } }],
+    }, options);
+    deepStrictEqual(together({}), { count: 42 });
+  });
+
   it('does not descend anyOf/oneOf/if branches', () => {
     // Which branch applies is only known after validating, so normalizing
     // under one could change which branch validates.

@@ -10,6 +10,7 @@ import {
   hasUnevaluatedPropertiesCoverage,
   hasUnevaluatedItemsCoverage,
   memberPath,
+  extendsChildLocations,
 } from './tools.js';
 
 /**
@@ -34,8 +35,9 @@ function compileUnevaluatedProperties(schemaObj, jsonSchema) {
 
   const root = schemaObj.root;
   // A member's location is read by its errors (collecting mode) and by a
-  // relative `$data` reference; otherwise nobody looks, so it is not built.
-  const extendPaths = root.usesDollarData || !schemaObj.options.skipErrors;
+  // location reader in the member's schema; otherwise nobody looks, so it is
+  // not built.
+  const extendPaths = extendsChildLocations(schemaObj, jsonSchema, ['unevaluatedProperties']);
   const addError = schemaObj.createErrorHandler(uneval, 'unevaluatedProperties');
 
   // true: everything left over is valid, but counts as evaluated for
@@ -104,8 +106,9 @@ function compileUnevaluatedItems(schemaObj, jsonSchema) {
 
   const root = schemaObj.root;
   // A member's location is read by its errors (collecting mode) and by a
-  // relative `$data` reference; otherwise nobody looks, so it is not built.
-  const extendPaths = root.usesDollarData || !schemaObj.options.skipErrors;
+  // location reader in the member's schema; otherwise nobody looks, so it is
+  // not built.
+  const extendPaths = extendsChildLocations(schemaObj, jsonSchema, ['unevaluatedItems']);
   const addError = schemaObj.createErrorHandler(uneval, 'unevaluatedItems');
 
   if (uneval === true) {

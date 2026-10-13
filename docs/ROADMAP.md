@@ -101,24 +101,13 @@ delete it or fix it.
   shape added for `anyOf`/`oneOf`/`not`/`if`/`contains` is the tool if this
   ever needs finer treatment.
 - [ ] **Unprefixed `query` alias / vocabulary registration** — register `$query` through a custom vocabulary and meta-schema (json-everything style) instead of only as an extension keyword.
-- [ ] **Finer `$query`/`$data` feature scan** — the compile-time scan is conservative: any schema in the compilation map containing `$query` (or `$data`) turns on instance-path building for the whole root.
+- [ ] **A reference keeps instance locations on** — once a `$data`, `data` or `$query` reader exists anywhere in the compilation, a subtree holding a `$ref`, `$dynamicRef` or `$recursiveRef` still extends member and item locations even when what it references reads none; resolving references during the compile-time scan would let those subtrees skip too.
 - [ ] **Predicate normalization from the CLI** — `--defaults`/`--coerce` are
   booleans, so the per-node predicate route (`x-trim`, `x-coerce`, `x-default`)
   is programmatic-only; a config-file route would make it usable from the CLI.
-- [ ] **Normalization across `allOf` branches** — branches run once in declaration
-  order. If an earlier branch coerces `count` and a later branch supplies its
-  default `'42'`, the first application returns `{ count: '42' }` and a second
-  returns `{ count: 42 }`. Decide whether to preserve ordered composition or
-  define cross-branch default processing before promising a fixed point; changing
-  that order can affect existing normalizers.
 - [ ] **ajv-style `errorMessage` `properties`/`items` map forms** — only if demand appears; the subtree prefix rule already covers what they express.
 - [ ] **Relative-pointer `${...}` interpolation in message templates** — ajv-errors-style data interpolation; params already carry the offending values, so this is convenience, not capability.
 
-- [ ] **`unevaluated*` failures sit at the object or array, not at the
-  member.** The member is named in `params` (`unevaluatedProperty`,
-  `unevaluatedItem`), but `instancePath` is the holder's, where
-  `additionalProperties` reports at the member. Wanted: decide whether the two
-  should agree.
 - [ ] **Recursion depth is the JavaScript stack.** `canonicalizeJson`, JSONPath
   `$..*`, validation of a deeply nested instance and a reference loop through
   an applicator (`allOf: [{ "$ref": "#" }]`, `anyOf: [{ "type": "string" },

@@ -108,6 +108,32 @@ export const REF_SIBLING_KEYWORDS = Object.freeze(['type', 'const', 'enum',
   'unevaluatedProperties', 'unevaluatedItems', '$query', 'data']);
 
 /**
+ * The keywords whose values an object schema validates the members against:
+ * the schemas that are handed a member's location. `propertyNames`,
+ * `dependentSchemas` and the schema form of `dependencies` apply to the object
+ * itself and receive the object's own location.
+ */
+export const OBJECT_CHILD_KEYWORDS = Object.freeze(['properties', 'patternProperties',
+  'additionalProperties']);
+
+/** The keywords whose values an array schema validates the items against. */
+export const ARRAY_CHILD_KEYWORDS = Object.freeze(['items', 'prefixItems', 'additionalItems', 'contains']);
+
+/**
+ * Whether the validator compiled for `jsonSchema` extends the location it is
+ * given when it hands it to the subschemas under `keywords`: always while
+ * errors are collected (they report it), otherwise only where something below
+ * reads one (see `ValidationRoot.childLocationsNeeded`).
+ * @param {import('./index.js').ValidationObject} schemaObj
+ * @param {object} jsonSchema - The schema object holding the keywords
+ * @param {readonly string[]} keywords
+ * @returns {boolean}
+ */
+export function extendsChildLocations(schemaObj, jsonSchema, keywords) {
+  return !schemaObj.options.skipErrors || schemaObj.root.childLocationsNeeded(jsonSchema, keywords);
+}
+
+/**
  * Whether a schema carrying a `$ref` also carries a keyword of
  * {@link REF_SIBLING_KEYWORDS}.
  * @param {object} schema

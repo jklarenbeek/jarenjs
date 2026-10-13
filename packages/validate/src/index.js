@@ -355,8 +355,12 @@ export class ValidationRoot {
   #rootDynamicAnchors = [];
   /** @type {Map<object, Map<string, object>>} Anchor validators keyed by schema identity and resolution base */
   #anchorObjects = new Map();
-  /** @type {boolean} Whether any schema in this compilation contains a $data reference */
+  /** @type {boolean} Whether any schema in this compilation reads the location of its instance */
   #usesDollarData = false;
+  /** @type {WeakMap<object, boolean>} Schema subtree -> whether it holds a location reader or a reference */
+  #readsBelowSchema = new WeakMap();
+  /** @type {WeakMap<object, boolean>} Map of schemas (names -> schemas) -> the same; apart from the schema memo because an object read as a map has names where one read as a schema has keywords */
+  #readsBelowMap = new WeakMap();
   /** @type {boolean} Whether any schema in this compilation contains unevaluatedProperties/unevaluatedItems */
   #usesUnevaluated = false;
   /** @type {EvalLog} Log of evaluated properties/items for unevaluated* support */
@@ -396,61 +400,93 @@ export class ValidationRoot {
   }
 
   /**
-   * Recursively scans a schema (sub)tree for keys that require special
-   * runtime support: '$data' references and 'unevaluatedProperties'/
-   * 'unevaluatedItems'. Keys inside name->schema maps (properties, $defs,
-   * ...) are property/definition names and are not treated as keywords.
-   * @param {any} node - The schema node to scan
-   * @param {Set<object>} seen - Cycle guard
-   * @param {{dollarData: boolean, unevaluated: boolean}} flags - Output flags
-   * @param {boolean} [isSchema=true] - Whether node's keys are schema keywords
+   * Keywords that lead to another schema by name. A subtree holding one may
+   * reach a location reader that sits outside it.
    */
-  static #scanSchemaFeatures(node, seen, flags, isSchema = true) {
-    if (node == null || typeof node !== 'object') return;
-    if (flags.dollarData && flags.unevaluated) return;
-    if (seen.has(node)) return;
+  static #REFERENCE_KEYWORDS = new Set(['$ref', '$dynamicRef', '$recursiveRef']);
+
+  /**
+   * Walks a schema (sub)tree and offers every keyword to `visit`. Keys inside
+   * name->schema maps (properties, $defs, ...) are property/definition names
+   * and are not offered. The value of `$query` is a query document and the
+   * value of `errorMessage` a message spec: the keys inside them (operators,
+   * embedded schema literals, a map form spelling `$query`) are not keywords
+   * of this schema and are not walked.
+   * @param {any} node - The schema node to walk
+   * @param {Set<object>} seen - Cycle guard
+   * @param {(node: object, key: string) => boolean} visit - Returns true to stop the walk
+   * @param {boolean} [isSchema=true] - Whether node's keys are schema keywords
+   * @returns {boolean} True when `visit` stopped the walk
+   */
+  static #walkKeywords(node, seen, visit, isSchema = true) {
+    if (node == null || typeof node !== 'object') return false;
+    if (seen.has(node)) return false;
     seen.add(node);
     if (Array.isArray(node)) {
       for (let i = 0; i < node.length; ++i) {
-        ValidationRoot.#scanSchemaFeatures(node[i], seen, flags, isSchema);
+        if (ValidationRoot.#walkKeywords(node[i], seen, visit, isSchema)) return true;
       }
-      return;
+      return false;
     }
     const keys = Object.keys(node);
     for (let i = 0; i < keys.length; ++i) {
       const key = keys[i];
       if (isSchema) {
-        // The json-everything 'data' keyword resolves relative pointers
-        // against the data path at validation time, just like '$data'.
-        if (key === '$data'
-          || (key === 'data' && node[key] !== null && typeof node[key] === 'object')) flags.dollarData = true;
-        else if (key === '$query') {
-          // The '$query' keyword binds the instance path to its 'path'
-          // external at validation time, so it consumes data paths like
-          // '$data'. Its value is a query document, not a schema - the
-          // keys inside (operators, embedded schema literals) must not
-          // register as keywords of this compilation.
-          flags.dollarData = true;
-          continue;
-        }
-        else if (key === 'errorMessage') {
-          // 'errorMessage' is report-time metadata; its value is a message
-          // spec whose map form may spell keys like '$query' that must not
-          // register as keywords of this compilation.
-          continue;
-        }
-        else if (key === 'unevaluatedProperties' || key === 'unevaluatedItems') {
-          if (!flags.canElide || ValidationRoot.#unevaluatedForcesTracking(node, key))
-            flags.unevaluated = true;
-        }
+        if (visit(node, key)) return true;
+        if (key === '$query' || key === 'errorMessage') continue;
         if (ValidationRoot.#SCAN_MAP_KEYWORDS.has(key)) {
           // The value is a name->schema map: its keys are names, its values schemas.
-          ValidationRoot.#scanSchemaFeatures(node[key], seen, flags, false);
+          if (ValidationRoot.#walkKeywords(node[key], seen, visit, false)) return true;
           continue;
         }
       }
-      ValidationRoot.#scanSchemaFeatures(node[key], seen, flags, true);
+      if (ValidationRoot.#walkKeywords(node[key], seen, visit, true)) return true;
     }
+    return false;
+  }
+
+  /**
+   * Whether a keyword reads the location of the instance it applies to: a
+   * `$data` reference, the json-everything `data` keyword (an object, which
+   * resolves relative pointers against the data path at validation time) and
+   * `$query` (which binds the instance path to its `path` external).
+   * @param {object} node - The schema object holding the keyword
+   * @param {string} key - The keyword
+   * @returns {boolean}
+   */
+  static #readsLocation(node, key) {
+    return key === '$data' || key === '$query'
+      || (key === 'data' && node[key] !== null && typeof node[key] === 'object');
+  }
+
+  /**
+   * A visitor for `#walkKeywords`: true at a location reader or at a reference
+   * (which may lead to a reader the walk cannot see).
+   * @param {object} node
+   * @param {string} key
+   * @returns {boolean}
+   */
+  static #holdsReaderOrReference(node, key) {
+    return ValidationRoot.#readsLocation(node, key) || ValidationRoot.#REFERENCE_KEYWORDS.has(key);
+  }
+
+  /**
+   * Scans every schema of the compilation once for the features that need
+   * runtime support: location readers (see `#readsLocation`) and
+   * 'unevaluatedProperties'/'unevaluatedItems'.
+   * @param {any} node - The schema node to scan
+   * @param {Set<object>} seen - Cycle guard
+   * @param {{dollarData: boolean, unevaluated: boolean, canElide: boolean}} flags - Output flags
+   */
+  static #scanSchemaFeatures(node, seen, flags) {
+    ValidationRoot.#walkKeywords(node, seen, (holder, key) => {
+      if (ValidationRoot.#readsLocation(holder, key)) flags.dollarData = true;
+      else if (key === 'unevaluatedProperties' || key === 'unevaluatedItems') {
+        if (!flags.canElide || ValidationRoot.#unevaluatedForcesTracking(holder, key))
+          flags.unevaluated = true;
+      }
+      return flags.dollarData && flags.unevaluated;
+    });
   }
 
   /**
@@ -522,8 +558,38 @@ export class ValidationRoot {
   /** @returns {Array} Array of validation errors */
   get errors() { return this.#errors; }
 
-  /** @returns {boolean} Whether any schema in this compilation contains a $data reference */
+  /** @returns {boolean} Whether any schema in this compilation reads the location of its instance (`$data`, `data`, `$query`) */
   get usesDollarData() { return this.#usesDollarData; }
+
+  /**
+   * Whether a schema has to hand locations to the subschemas under the given
+   * keywords. Locations are strings built per member and per item, so they are
+   * built only where something below can read one: a `$data` reference, the
+   * `data` keyword or a `$query`, or a reference that may lead to one. A
+   * subtree holding none of those is given its parent's location unextended
+   * and nothing in it looks. An internal collaborator of the keyword
+   * compilers, like `usesDollarData`; not part of the package's API.
+   * @param {object} schema - The schema object holding the keywords
+   * @param {readonly string[]} keywords - The keywords whose values are validated against the children
+   * @returns {boolean}
+   */
+  childLocationsNeeded(schema, keywords) {
+    if (!this.#usesDollarData) return false;
+    for (let i = 0; i < keywords.length; ++i) {
+      const key = keywords[i];
+      const value = schema[key];
+      if (value === null || typeof value !== 'object') continue;
+      const isSchema = !ValidationRoot.#SCAN_MAP_KEYWORDS.has(key);
+      const memo = isSchema ? this.#readsBelowSchema : this.#readsBelowMap;
+      let reads = memo.get(value);
+      if (reads === undefined) {
+        reads = ValidationRoot.#walkKeywords(value, new Set(), ValidationRoot.#holdsReaderOrReference, isSchema);
+        memo.set(value, reads);
+      }
+      if (reads) return true;
+    }
+    return false;
+  }
 
   /** @returns {boolean} Whether any schema in this compilation contains unevaluatedProperties/unevaluatedItems */
   get usesUnevaluated() { return this.#usesUnevaluated; }
