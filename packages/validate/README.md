@@ -203,7 +203,7 @@ See also:
   - Object constraints: `minProperties`, `maxProperties`
   - Value constraints: `enum`, `const`
 
-  Both absolute JSON Pointers (e.g., `/A`, `/limits/min`) and relative JSON Pointers (e.g., `0/parent`, `1/sibling`) are supported.
+  Both absolute JSON Pointers (e.g., `/A`, `/limits/min`) and relative JSON Pointers (e.g., `0/parent`, `1/sibling`) are supported. A reference that cannot be compiled (`{ "minimum": "abc" }`) fails the compile, as it does for `$data`; a reference that compiles but finds no value in the instance asserts nothing.
 
 - `$data` | Ajv-style instance references (`{ "minimum": { "$data": "1/limit" } }`) — supports every keyword the `data` list above supports, plus `uniqueItems` and `required`. Takes the same three reference forms: empty for the whole instance, an absolute JSON Pointer (`/limit`), or a Relative JSON Pointer (`1/limit`). Refs compile once at schema compile time through the compiled pointer engine of `@jarenjs/json`, and a reference that cannot be compiled **fails the compile** rather than quietly resolving to nothing — a constraint that disables itself is worse than a rejected schema.
 
@@ -473,14 +473,22 @@ An inconsistent count pair (`minItems` above `maxItems`, `minProperties` above
 type passes it; inside a `not` or an `anyOf` branch it is satisfiable. *Upgrade: it was a
 compile error.*
 
-A schema whose `$ref` points at itself (`{ "$ref": "#" }`, with or without siblings, or
-`{ "properties": { "a": { "$ref": "#/properties/a" } } }`) is refused when the schema is
-compiled: `$ref cycle: <id> refers to itself and never reads the instance`. *Upgrade: such
-a schema compiled and overflowed the call stack when it validated.* A loop that reaches
-its target through another reference (a `$defs` entry that refers to itself, a ring of two
-definitions) still compiles and answers `true`, and a reference that passes through
-`properties`, `items` or another applicator before it comes back is recursion and is
-unchanged.
+A schema whose `$ref` leads back to itself without reading the instance is refused when
+the schema is compiled. A reference to itself (`{ "$ref": "#" }`, with or without siblings,
+`{ "properties": { "a": { "$ref": "#/properties/a" } } }`, or a `$defs` entry that refers to
+itself) fails with `$ref cycle: <id> refers to itself and never reads the instance`; a ring
+of definitions fails naming every hop, `$ref cycle: <a> -> <b> -> <a> never reads the
+instance`, whether or not anything refers to the ring. A ring of top-level
+registrations is refused by `addSchema`, where the second member is added; a ring inside
+a registered document is refused when something compiled reaches it, and does not affect
+other compiles. *Upgrade: a reference to itself used to overflow the call stack when it validated, and a
+loop through other references compiled to the empty schema and answered `true`.*
+A reference that passes through `properties`, `items` or another applicator before it comes
+back is recursion and is unchanged.
+
+An uncompilable reference in the `data` keyword (`{ "data": { "minimum": "abc" } }`) is
+refused when the schema is compiled, as it is for `$data`. *Upgrade: the keyword compiled
+and never asserted, so a document that should have failed passed.*
 
 The default (first-failure) validator and the collecting one answer alike for a
 one-keyword item schema. *Upgrade: in the default mode `items`/`prefixItems`

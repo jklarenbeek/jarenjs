@@ -12,6 +12,8 @@ import {
 import {
   storeSchemaIdsInMap,
   restoreSchemaRefsInMap,
+  isRefCycleError,
+  RefCycleError,
   resolveRefSchemaDeep,
   encodeJsonPointerPath,
   TraverseOptions,
@@ -333,6 +335,8 @@ export class ValidationRoot {
   #options = null;
   /** @type {TraverseOptions|null} Schema traversal options */
   #traverse = null;
+  /** ids of reference chains known to end without a loop (see assertNoRefLoop) */
+  #loopFree = new Set();
   /** @type {Map|null} Map of paths to ValidationObjects */
   #objects = null;
   /** @type {Set<string>} Paths whose ValidationObject is being constructed */
@@ -612,6 +616,23 @@ export class ValidationRoot {
   }
 
   /**
+   * Refuses a reference that leads back to itself through pure references.
+   * A target not built yet resolves on first use, so a loop would otherwise
+   * surface as a flattened empty schema or as a call-stack overflow.
+   * @param {string} path - The base the reference resolves against
+   * @param {object} schema - The schema containing the $ref
+   */
+  assertNoRefLoop(path, schema) {
+    try {
+      resolveRefSchemaDeep(this.#schemas, path, schema, this.#traverse, this.#loopFree);
+    }
+    catch (e) {
+      // A target that is not loaded is reported where it is used.
+      if (isRefCycleError(e)) throw e;
+    }
+  }
+
+  /**
    * Adds an error to the validation errors list.
    * @param {InternalValidationError} error - The error to add
    * @returns {boolean} Always returns false for convenience in validators
@@ -804,6 +825,18 @@ export class ValidationRoot {
 }
 
 /**
+ * Whether a schema id lies in the document being compiled. A loop among
+ * registrations of other documents is reported when something reaches it.
+ * @param {string} id
+ * @param {string} origin
+ * @returns {boolean}
+ */
+function inDocument(id, origin) {
+  const hash = origin.indexOf('#');
+  return id.startsWith(hash === -1 ? origin : origin.slice(0, hash));
+}
+
+/**
  * ValidationObject represents a single schema location with its compiled validator.
  * It handles the compilation of schema validation logic and provides methods for
  * creating child validators and error handlers.
@@ -850,7 +883,7 @@ export class ValidationObject {
     // A schema that references itself decides nothing: validating it re-enters
     // the same validator on the same instance until the stack runs out.
     if (ref === path)
-      throw new Error(`$ref cycle: ${path} refers to itself and never reads the instance`);
+      throw new RefCycleError([path, path]);
     // Only check for sibling validators in draft 2019-09+
     const siblingValidator = draftVersion >= 2019 ? compileSchemaObject(self, schema) : null;
 
@@ -967,6 +1000,7 @@ export class ValidationObject {
     const boundRefBase = refBase;
     const boundSchema = schema;
     const boundSiblingValidator = siblingValidator;
+    root.assertNoRefLoop(refBase, schema);
     const boundSourceAnchors = sourceDynamicAnchors;
 
     // Memoized state of the first resolution - the target never changes.
@@ -1514,6 +1548,7 @@ export class JarenValidator {
     else if (isBoolOrObjectClass(schema)) {
       const schemaKey = key || (isObjectClass(schema) ? schema.$id : undefined);
       if (schemaKey) {
+        const before = new Map(this.#schemas);
         this.#schemas.set(schemaKey, schema);
         // Only an empty fragment aliases the document URI. Replace both
         // aliases together; a named anchor remains a distinct registration.
@@ -1527,9 +1562,40 @@ export class JarenValidator {
         // This is important for remote schemas that may have location-independent identifiers
         // We use a wrapper that skips already-existing keys instead of throwing
         this.#traverseAndStoreIds(schemaKey, schema);
+
+        // A ring of references registered here would make every later compile
+        // on this validator throw, so it is refused where it is added.
+        try {
+          this.#assertNoRefLoops(schemaKey);
+        }
+        catch (e) {
+          this.#schemas.clear();
+          for (const [k, v] of before) this.#schemas.set(k, v);
+          throw e;
+        }
       }
     }
     return this;
+  }
+
+  /**
+   * Refuses a loop of pure references among the registrations of one document.
+   * @param {string} documentKey - The key the document was registered under
+   */
+  #assertNoRefLoops(documentKey) {
+    const hash = documentKey.indexOf('#');
+    const prefix = hash === -1 ? documentKey : documentKey.slice(0, hash);
+    for (const [key, entry] of this.#schemas) {
+      if (!key.startsWith(prefix) || !isObjectClass(entry) || !hasSchemaReference(entry, '$ref'))
+        continue;
+      try {
+        resolveRefSchemaDeep(this.#schemas, key, entry, this.#options.traverse);
+      }
+      catch (e) {
+        // A target not registered yet is reported where it is used.
+        if (isRefCycleError(e)) throw e;
+      }
+    }
   }
 
   /**
@@ -1751,7 +1817,7 @@ export class JarenValidator {
         try {
           root.createObject(id, schema, origin);
         } catch (_e) {
-          if (isRecursiveQueryCompileError(_e)) throw _e;
+          if (isRecursiveQueryCompileError(_e) || (isRefCycleError(_e) && inDocument(id, origin))) throw _e;
           // May fail if dependencies not resolved yet
         }
       }
@@ -1867,7 +1933,7 @@ export class JarenValidator {
       try {
         root.createObject(id, schema, baseUri);
       } catch (_e) {
-        if (isRecursiveQueryCompileError(_e)) throw _e;
+        if (isRecursiveQueryCompileError(_e) || (isRefCycleError(_e) && inDocument(id, origin))) throw _e;
         // Ref may not be resolvable yet, that's ok
       }
     }

@@ -143,6 +143,7 @@ compile(schema, schemas)
 - Merges instance-level schemas (`this.#schemas`) with compile-time schemas
 - After `restoreSchemaRefsInMap`, all ref values are resolved schemas (not null)
 - **Ref chains are flattened**: `A → B → C` becomes `A → C`
+- **A chain that comes back to an id it visited is a loop** that never reads the instance; `resolveRefSchemaDeep` throws a `RefCycleError` naming it (`A -> B -> A`, or `A refers to itself`), and the compile paths that tolerate a not-yet-resolvable target rethrow it
 
 **The Critical Optimization**: `restoreSchemaRefsInMap` now uses `resolveRefSchemaDeep` instead of `resolveRefSchemaShallow`. This follows the entire ref chain at load time and stores the final schema directly.
 
@@ -600,13 +601,11 @@ flowchart TB
     B5 --> C
 ```
 
-**Compile-failure fallback**: the ref compilers of `@jarenjs/json`
+**Compile failure**: the ref compilers of `@jarenjs/json`
 (`compileDataRef` for the `data` keyword, `compileRelativeJSONPointer` for
-`$data`) *throw* on a malformed reference. `data.js` and `dollar-data.js`
-each wrap the compile in a `compileRefResolver` try/catch that falls back to
-an always-`JSONPOINTER_NOTHING` resolver. A malformed `$data`/`data`
-reference therefore validates as "not found" — the keyword asserts nothing —
-instead of throwing at compile time, keeping the lax keyword semantics.
+`$data`) *throw* on a malformed reference, and both keywords let the error
+out: the schema fails to compile. A reference that compiles but finds no
+value in the instance asserts nothing.
 
 ---
 

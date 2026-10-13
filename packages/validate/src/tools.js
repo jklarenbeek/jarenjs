@@ -181,14 +181,6 @@ export function createIsSchemaTypeHandler(type, isStrict = false) {
 
 //#region Data references
 
-/**
- * The fallback resolver of the data-reference keywords (`data`, `$data`):
- * a ref that fails the strict compile keeps the lax keyword semantics, so
- * it resolves as not-found and the keyword asserts nothing.
- * @returns {any} the JSON Pointer not-found sentinel
- */
-export const resolveNothing = () => JSONPOINTER_NOTHING;
-
 const isDefined = (data) => data !== undefined;
 const isJsonString = (data) => typeof data === 'string';
 const isAnyValue = () => true;
@@ -201,9 +193,10 @@ const isAnyValue = () => true;
  * resolves a ref, so each module passes its own `compileRefResolver`
  * and gets the same fifteen compilers back.
  *
- * Every validator follows one lax contract: a data instance outside the
- * keyword's type, an unresolvable ref, or a resolved constraint of the
- * wrong type asserts nothing.
+ * A ref that cannot be compiled throws when the schema is compiled. Every
+ * validator then follows one lax contract: a data instance outside the
+ * keyword's type, a ref that finds no value, or a resolved constraint of
+ * the wrong type asserts nothing.
  *
  * @param {(ref: string) => (dataRoot: any, dataPath: string) => any} compileRefResolver
  * @returns {Record<string, (schemaObj: object, ref: string) => ((data: any, dataPath: string, dataRoot: any) => boolean) | undefined>}

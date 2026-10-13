@@ -34,23 +34,15 @@ import {
 } from '@jarenjs/json';
 
 import {
-  resolveNothing,
   createDataRefCompilers,
   allValidatorsPass,
 } from './tools.js';
 
-function compileRefResolver(ref) {
-  try {
-    return compileDataRef(ref);
-  }
-  catch {
-    return resolveNothing;
-  }
-}
-
-// The fifteen keyword validators are shared with the `$data` keyword;
-// only `compileRefResolver` above differs (see tools.js).
-const KEYWORD_COMPILERS = createDataRefCompilers(compileRefResolver);
+// The fifteen keyword validators are shared with the `$data` keyword; only the
+// pointer compiler differs (see tools.js). A reference that cannot be compiled
+// is a compile-time error, as it is for `$data`: a constraint that never
+// asserts lets a document that should fail pass.
+const KEYWORD_COMPILERS = createDataRefCompilers(compileDataRef);
 
 /**
  * Compile the data keyword schema

@@ -93,18 +93,16 @@ describe('Content assertion keywords (draft-07 default)', function () {
   });
 });
 
-describe('The data keyword with an unresolvable reference or numeric format', function () {
-  it('should assert nothing when the data reference cannot be compiled', function () {
-    // data.js -> resolveNothing (compileDataRef throws on a non-pointer ref)
+describe('The data keyword with an uncompilable reference or numeric format', function () {
+  it('should refuse a data reference that cannot be compiled, like $data', function () {
     const compiler = new JarenValidator();
-    const broken = compiler.compile({
+    assert.throws(() => compiler.compile({
       type: 'object',
       properties: {
         threshold: { type: 'number' },
         value: { type: 'number', data: { minimum: 'abc-not-a-pointer' } },
       },
-    });
-    // A working reference for contrast: it DOES reject value < threshold.
+    }), 'an uncompilable data pointer is a schema error');
     const working = compiler.compile({
       type: 'object',
       properties: {
@@ -112,12 +110,8 @@ describe('The data keyword with an unresolvable reference or numeric format', fu
         value: { type: 'number', data: { minimum: '/threshold' } },
       },
     });
-
     assert.isFalse(working({ threshold: 100, value: 5 }), 'working ref: 5 < 100 fails minimum');
     assert.isTrue(working({ threshold: 1, value: 5 }), 'working ref: 5 >= 1 passes');
-    // The broken ref resolves to "nothing", so minimum asserts nothing and the
-    // same instance the working ref rejects is accepted here.
-    assert.isTrue(broken({ threshold: 100, value: 5 }), 'broken ref asserts nothing');
   });
 
   it('should apply a number format resolved through the data keyword', function () {

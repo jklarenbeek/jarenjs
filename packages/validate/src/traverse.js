@@ -338,6 +338,29 @@ export function resolveRefSchemaShallow(schemas, refUri, baseUri, opts = new Jso
   return { id: base, schema };
 }
 
+/**
+ * A loop of references that never reads the instance. The compile paths that
+ * tolerate a reference not resolvable yet must not tolerate this one: no later
+ * resolution changes it.
+ */
+export class RefCycleError extends Error {
+  /** @param {string[]} ids - the ids on the loop, the first repeated at the end */
+  constructor(ids) {
+    super(ids.length === 2 && ids[0] === ids[1]
+      ? `$ref cycle: ${ids[0]} refers to itself and never reads the instance`
+      : `$ref cycle: ${ids.join(' -> ')} never reads the instance`);
+  }
+}
+
+/**
+ * Whether an error is a {@link RefCycleError}.
+ * @param {unknown} error - The thrown value
+ * @returns {boolean}
+ */
+export function isRefCycleError(error) {
+  return error instanceof RefCycleError;
+}
+
 export function restoreSchemaRefsInMap(schemas, opts = new JsonPointerOptions()) {
   for (const [id, item] of schemas.entries()) {
     if (item != null)
@@ -390,7 +413,20 @@ export class TraverseOptions extends JsonPointerOptions {
   }
 }
 
-export function resolveRefSchemaDeep(schemas, baseUri, refschema, opts = new TraverseOptions()) {
+/**
+ * Follow a chain of pure `$ref` hops to its end and flatten it.
+ * @param {Map<string, any>} schemas - The schema map
+ * @param {string} baseUri - The base the first reference resolves against
+ * @param {any} refschema - The schema holding the first `$ref`
+ * @param {TraverseOptions} [opts]
+ * @param {Set<string>} [clean] - For a caller that only checks for loops: ids
+ *   already walked to a schema without references (reaching one ends the walk
+ *   early, and the answer is then not the flattened schema); every id of a
+ *   chain that ends there is added
+ * @returns {{id: string, schema: any}}
+ * @throws {RefCycleError} when the chain comes back to an id it visited
+ */
+export function resolveRefSchemaDeep(schemas, baseUri, refschema, opts = new TraverseOptions(), clean = undefined) {
   if (!isObjectClass(refschema))
     return { id: baseUri, schema: refschema };
 
@@ -398,14 +434,19 @@ export function resolveRefSchemaDeep(schemas, baseUri, refschema, opts = new Tra
     return { id: baseUri, schema: refschema };
 
   const queue = [{ item: refschema, base: baseUri }];
-  const seen = new Set();
+  const seen = new Map();
   let result = {};
+  /** @param {{id: string, schema: any}} answer */
+  const finish = (answer) => {
+    if (clean !== undefined) for (const known of seen.keys()) clean.add(known);
+    return answer;
+  };
 
   while (queue.length > 0) {
     // @ts-ignore
     const { item, base } = queue.shift();
     if (!isObjectClass(item))
-      return { id: base, schema: item };
+      return finish({ id: base, schema: item });
 
     // A pure `$ref` hop is flattened away: only the `$ref` is kept to
     // resolve it, the other (annotation) keywords of this item are
@@ -422,10 +463,19 @@ export function resolveRefSchemaDeep(schemas, baseUri, refschema, opts = new Tra
       const ref = item.$ref;
       const { id, schema } = resolveRefSchemaShallow(schemas, ref, base, opts);
 
+      // A hop back to an id already visited is a loop of pure references: no
+      // schema on it reads the instance, so no answer is reachable.
       if (seen.has(id))
-        return { id: base, schema: result };
+        throw new RefCycleError([...[...seen.keys()].slice(seen.get(id)), id]);
 
-      seen.add(id);
+      seen.set(id, seen.size);
+
+      // A chain that stopped at a schema asserting beside its `$ref` is not
+      // recorded: that schema continues the chain when it is the first item.
+      if (clean !== undefined) {
+        if (clean.has(id))
+          return finish({ id, schema });
+      }
 
       queue.push({ item: schema, base: id });
     } else {
@@ -433,7 +483,7 @@ export function resolveRefSchemaDeep(schemas, baseUri, refschema, opts = new Tra
       result = opts.mergeSchemas == true
         ? { ...item, ...result }
         : { ...item };
-      return { id: base, schema: result };
+      return finish({ id: base, schema: result });
     }
   }
 

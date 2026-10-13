@@ -236,6 +236,11 @@ describe('Schema String Formats', function () {
       // RFC 9485 has no anchor production: '^' and '$' are ordinary
       // NormalChars, so a pattern using them is well-formed I-Regexp.
       assert.isTrue(validate('^abc$'), 'caret and dollar are NormalChars, not anchors');
+      assert.isFalse(validate('[z-a]'), 'an out-of-order class range cannot be compiled');
+      assert.isFalse(validate('a{3,2}'), 'an inverted quantifier cannot be compiled');
+      assert.isFalse(validate('^*'), 'a quantified caret cannot be compiled');
+      assert.isFalse(validate('$+'), 'a quantified dollar cannot be compiled');
+      assert.isTrue(validate('[a-a]'), 'a one-letter range compiles');
     });
   });
 

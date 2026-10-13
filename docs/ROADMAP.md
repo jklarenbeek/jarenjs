@@ -125,19 +125,11 @@ delete it or fix it.
   `unevaluatedItem`), but `instancePath` is the holder's, where
   `additionalProperties` reports at the member. Wanted: decide whether the two
   should agree.
-- [ ] **`data` and `$data` disagree about an uncompilable reference.** `$data`
-  refuses at compile time, `data` compiles to a constraint that never asserts.
-  Wanted: decide which reading wins for `data`.
 - [ ] **Recursion depth is the JavaScript stack.** `canonicalizeJson`, JSONPath
   `$..*`, validation of a deeply nested instance and a reference loop through
   an applicator (`allOf: [{ "$ref": "#" }]`, `anyOf: [{ "type": "string" },
   { "$ref": "#" }]` on a non-string) throw `RangeError` instead of a coded
   refusal; a depth option would turn them into one.
-- [ ] **A `$ref` loop that never reads the instance compiles and answers
-  `true`.** `{ "$defs": { "a": { "$ref": "#/$defs/a" } }, "$ref":
-  "#/$defs/a" }` and a ring of two definitions are flattened to the empty
-  schema. Wanted: refuse them at compile time (a minor, since they compile
-  today).
 
 ## @jarenjs/forms
 
