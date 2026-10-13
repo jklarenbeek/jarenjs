@@ -81,6 +81,8 @@ and the individual chart/fragment interfaces are types only. A bar series takes
 `values`; a line series takes `points`. A gauge's `value` is numeric, while a
 map's `value` names a feature property. `.options()` preserves the kind too.
 
+*Upgrade: a line point's `x` and a candle's `t` are typed `number | string` (an RFC 3339 date or date-time string) where they were `number`; the schema admits the same strings, and every value accepted before is accepted unchanged.*
+
 The runtime tests enumerate every schema kind and top-level member, validate
 each emitted document and compare its AST and SVG with the hand-written input.
 The consumer type pins reject cross-kind methods and malformed series values.

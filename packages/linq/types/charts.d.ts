@@ -37,8 +37,19 @@ export interface BarSeries {
 }
 
 
-export interface Point {
-  x: number;
+/**
+ * An RFC 3339 full-date or date-time; a bare date reads as UTC midnight. The pattern spells the calendar (month lengths, leap years) and the clock (a leap second only at 23:59:60 UTC, written Z or +00:00) because a validator does not assert `format` by default. A date-time with a non-zero offset spelling that leap second is read by the renderer and outside the pattern.
+ * Schema constraints this type cannot express: pattern="^(?:[0-9]{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12][0-9]|3[01])|(?:0[469]|11)-(?:0[1-9]|[12][0-9]|30)|02-(?:0[1-9]|1[0-9]|2[0-8]))|(?:[0-9]{2}(?:0[48]|[2468][048]|[13579][26])|(?:0[048]|[2468][048]|[13579][26])00)-02-29)(?:[Tt\\s](?:(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\\.[0-9]+)?(?:[Zz]|[+-](?:[01][0-9]|2[0-3]):[0-5][0-9])|23:59:60(?:\\.[0-9]+)?(?:[Zz]|[+-]00:00)))?$"
+ */
+export type Rfc3339Instant = string;
+
+/**
+ * A time coordinate: epoch milliseconds or an RFC 3339 string. A numeric string is not a time.
+ */
+export type Instant = number | Rfc3339Instant;
+
+export interface LinePoint {
+  x: Instant;
   y: number;
   tone?: Tone;
   [key: string]: unknown;
@@ -47,13 +58,21 @@ export interface Point {
 
 export interface LineSeries {
   name: string;
-  points: Array<Point>;
+  points: Array<LinePoint>;
+  [key: string]: unknown;
+}
+
+
+export interface Point {
+  x: number;
+  y: number;
+  tone?: Tone;
   [key: string]: unknown;
 }
 
 
 export interface Candle {
-  t: number;
+  t: Instant;
   open: number;
   high: number;
   low: number;
