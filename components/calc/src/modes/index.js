@@ -10,6 +10,7 @@ export { scientificMode } from './scientific.js';
 export { programmerMode, wordViews, BASES, WORD_SIZES } from './programmer.js';
 export { financialMode, solveTvm, buildAmortization, npvOf, irrOf } from './financial.js';
 export { converterMode, convertValue, unitOptions, converterDimensions, CURRENCY } from './converter.js';
+export { convertFuel, FUEL, FUEL_UNITS } from './fuel.js';
 
 import { standardMode } from './standard.js';
 import { scientificMode } from './scientific.js';

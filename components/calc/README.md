@@ -5,7 +5,8 @@ standard / scientific / programmer / financial / converter, with **x·y and
 x·y·z plotting rendered as pure-vnode SVG** through `@jarenjs/view`. The
 calculator *is* an `@jarenjs/app` document (state is JSON, keys are data
 bindings, transitions are copy-on-write RFC-6902 patches), and it is built
-on `@jarenjs/core` — it holds no formulas or unit factors of its own.
+on `@jarenjs/core` — it holds no formulas, and no unit factors beyond the reciprocal fuel-economy
+constants.
 
 Zero runtime dependencies beyond `@jarenjs/*`. No `eval`, no `new
 Function` (CSP-safe). SSR-able and deterministic.
@@ -50,13 +51,50 @@ them: `@jarenjs/core/math` (transcendentals, `word.js` BigInt word math,
 depreciation, bond, indicators, returns) and `@jarenjs/core/convert`
 (fixed-factor dimensional conversion + the pure `convertCurrency` rate-table
 primitive). The calculator's financial mode calls `core/finance`; its
-converter calls `core/convert`. Core is pure and never fetches.
+converter calls `core/convert` for every dimension but fuel economy, which is
+reciprocal and converts in the calculator's own `convertFuel`. Core is pure and
+never fetches.
 
 Changing the converter dimension updates its unit selections in the same
 transition. Existing choices survive when the new dimension offers them;
 otherwise it selects the first two available units (the same unit for both
 sides when only one exists). Currency choices come from the current rate
 table. A dimension with no available units leaves the conversion unchanged.
+
+## Fuel economy
+
+The converter's `fuel` dimension converts between `l100km` (L/100km),
+`mpgus` (mpg, US gallon), `mpguk` (mpg, imperial gallon) and `kml` (km/L). It
+is reciprocal rather than affine: L/100km is fuel per distance and the others
+are distance per fuel, so a conversion across the two kinds is a constant
+divided by the value (8 L/100km is 100 / 8 = 12.5 km/L), not a factor times it.
+The mpg constants follow from the US gallon (3.785411784 L), the imperial
+gallon (4.54609 L) and the mile (1.609344 km), each exact by definition, and
+each is one division of two integers.
+
+```js
+import { convertFuel, convertValue } from '@jarenjs/calc';
+
+convertFuel(8, 'l100km', 'kml');       // 12.5
+convertFuel(8, 'l100km', 'mpgus');     // 29.401822916666667
+convertFuel(30, 'mpgus', 'mpguk');     // 36.028497765145644
+convertFuel(0, 'kml', 'mpgus');        // 0
+convertFuel(0, 'l100km', 'kml');       // RangeError: convertFuel: 0 L/100km has no finite km/L
+convertValue('fuel', 0, 'l100km', 'kml'); // NaN, shown as — in the panel
+```
+
+`FUEL` is the dimension id (`'fuel'`) and `FUEL_UNITS` the frozen list of the
+four units, each `{ id, symbol, k }`: `k` is the consumption in L/100km of a
+vehicle at exactly 1 of that unit (`null` for L/100km itself), the constant
+every conversion across the two kinds divides by.
+
+An economy is a finite number of zero or more. Zero between two
+distance-per-fuel units stays zero; zero across the reciprocal (a vehicle that
+burns no fuel, or goes nowhere on it) has no finite answer and is refused, as
+is a negative or non-finite value, an unknown unit or a result beyond the
+double range (overflowing, or underflowing to zero). `convertFuel` throws a `RangeError`;
+`convertValue` keeps its contract of never throwing and answers `NaN`, which
+the panel shows as `—`.
 
 ## Live currency (the maturity example)
 

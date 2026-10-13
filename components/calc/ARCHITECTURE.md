@@ -43,7 +43,8 @@ constant-vs-variable factors.
   `Number`, and the component formats the exact value.
 - `modes/*` — the five data-driven mode kernels (keypad + env + formatter).
   `financial` orchestrates `core/finance` (no formulas); `converter`
-  orchestrates `core/convert` (no factors).
+  orchestrates `core/convert` and `convertCurrency`; its one dimension core's
+  affine registry cannot hold, fuel economy (reciprocal), is `modes/fuel.js`.
 - `plot/plot2d.js`, `plot/plot3d.js` — geometry-as-JSON scene builders +
   scene→SVG renderers. 3D uses the core `mat4`/`project.js` kernel and
   painter's-algorithm depth sort.

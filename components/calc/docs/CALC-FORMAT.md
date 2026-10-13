@@ -105,8 +105,11 @@ tone?, span? }` rows, where `k` is the token appended to the expression
 entry or a command `clear`/`back`/`equals`), a function-binding env, and a
 formatter. `financial` holds **no formulas** (it orchestrates
 `@jarenjs/core/finance` via `solveTvm`/`buildAmortization`/`npvOf`/`irrOf`);
-`converter` holds **no factors** (it orchestrates `@jarenjs/core/convert`
-via `convertValue`, currency included).
+`converter` holds **no factors** of its own for the static and currency
+dimensions (it orchestrates `@jarenjs/core/convert` via `convertValue`,
+currency included); its `fuel` dimension (`l100km`, `mpgus`, `mpguk`, `kml`)
+is reciprocal and converts in `convertFuel`, which refuses a negative or
+non-finite value and zero across L/100km and the distance-per-fuel units.
 
 ## Plotting
 

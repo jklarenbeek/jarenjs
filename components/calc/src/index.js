@@ -36,6 +36,7 @@ export {
   standardMode, scientificMode, programmerMode, financialMode, converterMode,
   wordViews, solveTvm, buildAmortization, npvOf, irrOf,
   convertValue, unitOptions, converterDimensions, CURRENCY,
+  convertFuel, FUEL, FUEL_UNITS,
 } from './modes/index.js';
 
 /**
