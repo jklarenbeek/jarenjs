@@ -49,7 +49,7 @@ is the index of those guides, and it is how a reader reaches any of them.
 | [MESSAGES-PEN.md](MESSAGES-PEN.md) | 105 | `./messages` — JSON message catalogs and message references. **Read it when** you want checked translation keys, placeholders and explicit completeness. |
 | [JTLT-PEN.md](JTLT-PEN.md) | 83 | `./jtlt` — text templates with JSLT dispatch and query expressions. **Read it when** you want to author Markdown, XML or source text as portable JSON. |
 | [PROJECT-PEN.md](PROJECT-PEN.md) | 84 | `./project` — Studio projects with named, typed files. **Read it when** you want a portable editor workspace containing documents written by several pens. |
-| [CHARTS-PEN.md](CHARTS-PEN.md) | 98 | `./charts` — chart-definition documents for every chart kind. **Read it when** you want typed chart data and presentation options that `compileChart` consumes. |
+| [CHARTS-PEN.md](CHARTS-PEN.md) | 100 | `./charts` — chart-definition documents for every chart kind. **Read it when** you want typed chart data and presentation options that `compileChart` consumes. |
 | [DB-CLIENT.md](DB-CLIENT.md) | 1,204 | `./db` — the client: the store's typed front door, not a pen, and the package's one runtime edge. **Read it when** you are reading or writing rows: `load`, `include`, `link`/`unlink`, `live` |
 | [FORMULA-PEN.md](FORMULA-PEN.md) | 41 | `./formula` — author versioned saved JSON Query profiles without executing them. |
 <!--/fact-->
@@ -218,10 +218,10 @@ and the bundle is the byte count the tree-shaking probe builds.
 | [MESSAGES-PEN.md](MESSAGES-PEN.md) | `./messages` | 105 | 9 | 2 | 1 | 13,999 B |
 | [JTLT-PEN.md](JTLT-PEN.md) | `./jtlt` | 83 | 13 | 1 | 2 | 19,247 B |
 | [PROJECT-PEN.md](PROJECT-PEN.md) | `./project` | 84 | 9 | 1 | 1 | 4,612 B |
-| [CHARTS-PEN.md](CHARTS-PEN.md) | `./charts` | 98 | 21 | 1 | 1 | 6,447 B |
+| [CHARTS-PEN.md](CHARTS-PEN.md) | `./charts` | 100 | 21 | 1 | 1 | 6,447 B |
 | [DB-CLIENT.md](DB-CLIENT.md) | `./db` | 1,204 | 45 | 4 | 2 | 971,321 B |
 | [FORMULA-PEN.md](FORMULA-PEN.md) | `./formula` | 41 | 2 | — | — | 11,183 B |
-| **16 documents** | | **13,596** | **372** | **73** | | |
+| **16 documents** | | **13,598** | **372** | **73** | | |
 <!--/fact-->
 
 A pen whose mapping rows are far below its worked examples is a pen

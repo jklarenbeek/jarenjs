@@ -439,6 +439,7 @@ Every subpath a consumer can import, derived from the manifest by
 | `@jarenjs/mermaid/component` | JavaScript | declared |
 | `@jarenjs/mermaid/styles` | JavaScript | declared |
 | `@jarenjs/mermaid/interactive` | JavaScript | declared |
+| `@jarenjs/mermaid/tooltips` | JavaScript | declared |
 | `@jarenjs/mermaid/plugin` | JavaScript | declared |
 | `@jarenjs/mermaid/theme` | JavaScript | declared |
 | `@jarenjs/mermaid/styles/mermaid.css` | asset | — |
