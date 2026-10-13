@@ -9,12 +9,19 @@
  * `evaluate(source, scope?, opts?)` is the error-safe front door: it
  * parses, compiles and runs, returning a tagged `{ ok, value } | { ok:
  * false, error }` result so the app/render path never throws.
+ *
+ * An exact environment (`env.exact`, the programmer one) computes with a
+ * `bigint` wherever a `Number` could not hold the integer. The public
+ * `compileExpr` and `evaluate` answer a `Number` regardless, rounding such a
+ * value once at the end; `compileExact` and `evaluateExact` answer the value
+ * itself, for the calculator's word display.
  */
 
 import { parseExpression } from './parser/index.js';
 import { defaultEnv } from './env.js';
 import { CalcParseError, errorAt } from './errors.js';
-import { siteOf } from './ast.js';
+import { siteOf, exactOf } from './ast.js';
+import { toNumber } from './exact.js';
 
 /**
  * Compile an AST against an environment.
@@ -24,18 +31,30 @@ import { siteOf } from './ast.js';
  */
 export function compileExpr(ast, opts = {}) {
   const env = opts.env ?? defaultEnv();
-  return build(ast, env);
+  const run = build(ast, env);
+  return env.exact === true ? (scope) => toNumber(run(scope)) : run;
+}
+
+/**
+ * Compile an AST and answer the value itself: a `bigint` where the
+ * environment is exact and the integer is past what a `Number` holds.
+ * @param {any} ast
+ * @param {{ env?: any }} [opts]
+ * @returns {(scope?: any) => number | bigint}
+ */
+export function compileExact(ast, opts = {}) {
+  return build(ast, opts.env ?? defaultEnv());
 }
 
 /**
  * @param {any} node
  * @param {any} env
- * @returns {(scope?: any) => number}
+ * @returns {(scope?: any) => number | bigint}
  */
 function build(node, env) {
   switch (node.type) {
     case 'num': {
-      const v = node.value;
+      const v = env.exact === true ? (exactOf(node) ?? node.value) : node.value;
       return () => v;
     }
     case 'const': {
@@ -121,22 +140,42 @@ function checkArity(node, arity) {
  * @property {number} value
  */
 /**
+ * @typedef {object} ExactOk
+ * @property {true} ok
+ * @property {number | bigint} value
+ */
+/**
  * @typedef {object} EvalErr
  * @property {false} ok
  * @property {{ message: string, line?: number, column?: number }} error
  */
 
 /**
- * Parse + compile + evaluate a source expression, error-safe.
+ * Parse + compile + evaluate a source expression, error-safe. A value an
+ * exact environment holds as a `bigint` is answered as the nearest `Number`.
  * @param {string} source
  * @param {any} [scope]
  * @param {{ env?: any }} [opts]
  * @returns {EvalOk | EvalErr}
  */
 export function evaluate(source, scope = {}, opts = {}) {
+  const result = evaluateExact(source, scope, opts);
+  return result.ok ? { ok: true, value: toNumber(result.value) } : result;
+}
+
+/**
+ * Parse + compile + evaluate a source expression, error-safe, answering the
+ * value itself: a `bigint` where the environment is exact and the integer is
+ * past what a `Number` holds.
+ * @param {string} source
+ * @param {any} [scope]
+ * @param {{ env?: any }} [opts]
+ * @returns {ExactOk | EvalErr}
+ */
+export function evaluateExact(source, scope = {}, opts = {}) {
   try {
     const ast = parseExpression(source, opts);
-    const fn = compileExpr(ast, opts);
+    const fn = compileExact(ast, opts);
     const value = fn(scope);
     return { ok: true, value };
   }

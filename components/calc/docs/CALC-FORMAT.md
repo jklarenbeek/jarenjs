@@ -52,13 +52,38 @@ overrides `& | << >> ~` with word-masked BigInt math from
 `@jarenjs/core/math/word.js` and adds `and/or/xor/not/shl/shr/rol/ror/mod`.
 
 > Bitwise **XOR** is the `xor(a, b)` function (not an infix operator), so
-> `^` stays exponentiation everywhere. Programmer results are surfaced as
-> `Number`, and the four-base display is derived from that Number: it is
-> truncated, converted to BigInt and wrapped to the word by `word.js`. It is
-> therefore exact for values within ±2^53 and shows the float-rounded value
-> beyond — `0xFFFFFFFFFFFFFFFF` evaluates to 2^64, which a 64-bit word
-> displays, wrapped, as `0x0`. The `ans` a programmer result commits is the
-> word the display shows (truncated and wrapped), not the unwrapped float.
+> `^` stays exponentiation everywhere.
+
+**Programmer integers are exact.** In `programmerEnv()` a value is a
+`number`, or a `bigint` once it is a whole number beyond ±(2^53 − 1). An
+integer literal (`0xFFFFFFFFFFFFFFFF`, `9007199254740993`), `+ - *`, unary
+`-`, `/` and `%` of whole numbers, `^` of a whole base by a whole non-negative
+exponent, the word operators and functions, `abs`, `min`, `max` and
+`trunc`/`floor`/`ceil`/`round` of one argument are computed on that value, so
+a 64-bit result is the integer it is: `0xFFFFFFFFFFFFFFFF` on a 64-bit word
+displays `0xFFFF FFFF FFFF FFFF`, `2^64 - 1` and `not(0)` do the same, and
+`0xFFFFFFFF * 0xFFFFFFFF` is `0xFFFF FFFE 0000 0001`. The display wraps the
+exact value to the word, as `word.js` does, and the committed entry is that
+displayed text, which evaluates to the same word again. Every operation on
+two safe values is the float operation it always was (`7/2` is `3.5`, `7/2*2`
+is `7`), and a function with no integer meaning (`sqrt`, `sin`, `!`,
+rounding to digits) takes the nearest `Number` of a big operand.
+
+The public `compileExpr` and `evaluate` answer a `Number` whatever the
+environment is, so a big programmer value reads as the nearest double
+(`0xFFFFFFFFFFFFFFFF` evaluates to 18446744073709552000); the exact value is
+what the calculator component formats. The `Number` a programmer-mode
+`evaluate` answers past 2^53 changed as a defect fix: an exact power is
+rounded once (`10^23` is `1e+23`, it was `1.0000000000000001e+23`) and the
+word operations are exact (`~~5` on a 64-bit word is `5`, it was
+`18446744073709552000`). The limits that remain: a division
+with a remainder whose quotient is beyond 2^53 is truncated, which is all a
+double that large holds of it; the committed `ans` and the memory register
+are JSON numbers in the state slice, so a word beyond 2^53 is held there as
+its nearest `Number`, so `=` shows the exact word while clearing the entry,
+reusing `ans` and `M+` read the rounded value (an unsigned 64-bit
+`0xFFFFFFFFFFFFFFFF` rounds up to 2^64, which wraps to `0x0`); a scope value must be a `Number`, as it always
+was; and `toExpression` prints a literal beyond 2^53 as that nearest `Number`.
 
 Every function declares how many arguments it takes — the environment's
 `arity` table, `[min, max]` per function name — and a call outside that range

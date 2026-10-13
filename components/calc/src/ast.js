@@ -41,6 +41,40 @@ export function siteOf(node) {
   return SITES.get(node);
 }
 
+/**
+ * The exact integer a numeric literal was written as, where a `Number` could
+ * not hold it. A side table like `SITES`, so the AST stays plain JSON: only a
+ * parsed integer literal past the safe range has an entry.
+ * @type {WeakMap<object, bigint>}
+ */
+const EXACT = new WeakMap();
+
+/**
+ * Record the exact integer a numeric node was parsed from.
+ * @template {object} T
+ * @param {T} node
+ * @param {bigint} value
+ * @returns {T}
+ */
+export function setExact(node, value) {
+  EXACT.set(node, value);
+  return node;
+}
+
+/**
+ * The integer a numeric node stands for exactly when its `Number` value is
+ * not that integer: the literal as written if the parser recorded it, else
+ * the whole number the value is. `undefined` for a value a `Number` holds.
+ * @param {{ value: number }} node
+ * @returns {bigint | undefined}
+ */
+export function exactOf(node) {
+  const written = EXACT.get(node);
+  if (written !== undefined) return written;
+  const v = node.value;
+  return Number.isInteger(v) && !Number.isSafeInteger(v) ? BigInt(v) : undefined;
+}
+
 /** Numeric literal (value only — the radix/format is not preserved). */
 export function num(value) {
   return { type: 'num', value: +value };

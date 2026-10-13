@@ -37,7 +37,10 @@ constant-vs-variable factors.
   deep-equals `ast` (a fixed point) and is idempotent.
 - `env.js` / `compile.js` — the binding environments (float / programmer
   word-math) and the compile-to-closure second stage; `evaluate` is the
-  error-safe front door.
+  error-safe front door. `exact.js` is the programmer environment's integer
+  algebra: a `number`, or a `bigint` once a whole number leaves the safe
+  range, so a 64-bit result is exact; the public entry points still answer a
+  `Number`, and the component formats the exact value.
 - `modes/*` — the five data-driven mode kernels (keypad + env + formatter).
   `financial` orchestrates `core/finance` (no formulas); `converter`
   orchestrates `core/convert` (no factors).

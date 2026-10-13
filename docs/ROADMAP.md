@@ -249,7 +249,7 @@ establish registry publication or downstream acceptance.
 ## @jarenjs/calc
 
 - [ ] **Interactive plots** — drag-to-rotate for x·y·z and pan/zoom for x·y are a `hydrate` enhancement (out of scope for v1; the static SVG render is complete).
-- [ ] **Programmer 64-bit precision** — the expression evaluator surfaces programmer-mode results as `Number`, so a result beyond 2^53 is rounded before the four-base display wraps it to the word (`0xFFFFFFFFFFFFFFFF` displays `0x0`; [CALC-FORMAT](../components/calc/docs/CALC-FORMAT.md) says so). A BigInt-valued evaluation path would close the gap.
+- [ ] **Programmer 64-bit state** — programmer-mode evaluation, the `=` display and the committed entry are exact to 64 bits, but the state slice holds `ans` and the memory register as JSON numbers (exact to 2^53), so a word beyond that is held rounded: `=` shows the exact word while clearing the entry afterwards, reusing `ans` and `M+` use the rounded one (an unsigned `0xFFFFFFFFFFFFFFFF` rounds up to 2^64 and shows `0x0`). Also open: a division with a remainder whose quotient is beyond 2^53 truncates (a double holds no fraction there), a scope value must still be a `Number` (a `bigint` is refused), and `toExpression` prints a literal beyond 2^53 as its nearest double. An exact `ans` needs the state schema to carry a string or bigint form (a minor).
 - [ ] **More converter dimensions & rate providers** — fuel economy (non-affine) and additional API-key-free tickers; websocket/streaming rates are deliberately out of v1 (REST polling only).
 
 ## @jarenjs/play

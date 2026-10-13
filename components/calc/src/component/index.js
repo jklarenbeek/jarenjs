@@ -27,12 +27,14 @@ import {
 import { buildFormModel, buildFormViewModel } from '@jarenjs/forms';
 
 import {
-  calcToVnode, evaluate, MODE_BY_ID, MODES,
-  programmerEnv, defaultEnv, wordViews,
+  calcToVnode, MODE_BY_ID, MODES,
+  programmerEnv, defaultEnv,
   solveTvm, convertValue, unitOptions, converterDimensions,
 } from '../index.js';
+import { evaluateExact } from '../compile.js';
+import { isFiniteValue } from '../exact.js';
 import { standardMode } from '../modes/standard.js';
-import { BASES, WORD_SIZES, wordValue } from '../modes/programmer.js';
+import { BASES, WORD_SIZES, wordValue, viewsOf, formatWord } from '../modes/programmer.js';
 import { financialMode } from '../modes/financial.js';
 import { converterMode } from '../modes/converter.js';
 import { createRatesLayer, FALLBACK_RATES } from './rates/index.js';
@@ -220,14 +222,20 @@ export const calcEditEffects = {
     if (entry === '') return;
     const mode = props.mode ?? 'standard';
     const env = envForMode(mode);
-    const res = evaluate(entry, scopeOf(props), { env });
+    const res = evaluateExact(entry, scopeOf(props), { env });
     if (!res.ok) return; // leave the entry; the live display shows the error
     const desc = MODE_BY_ID[mode] ?? standardMode;
-    const display = desc.format
-      ? desc.format(res.value, { angleMode: props.angleMode, wordBits: props.wordBits, signed: props.signed, base: props.base })
-      : String(res.value);
-    // The display shows a programmer result as its word, so `ans` is that
-    // word too: the next calculation uses the value the user saw.
+    const view = { angleMode: props.angleMode, wordBits: props.wordBits, signed: props.signed, base: props.base };
+    // a programmer result is the exact word, so it is formatted from that
+    // rather than from the Number a public `evaluate` would round it to
+    const display = mode === 'programmer'
+      ? formatWord(res.value, view)
+      : desc.format ? desc.format(res.value, view) : String(res.value);
+    // `ans` is the word the display shows, as a Number: the next calculation
+    // uses the value the user saw. A state slice holds JSON numbers, so a
+    // word beyond 2^53 is held as its nearest Number there, and the display
+    // of `ans` (after clearing the entry) or of a later `ans` use is of that
+    // rounded value, where `=` showed the exact word.
     const value = mode === 'programmer'
       ? wordValue(res.value, props.wordBits ?? 32, props.signed ?? false)
       : res.value;
@@ -235,7 +243,7 @@ export const calcEditEffects = {
     // number (`∞`, `NaN`, `—` are not expressions): the typed expression
     // stays, so the entry still evaluates. Grouping belongs on the
     // tape/display; expression literals contain no spaces.
-    const next = !Number.isFinite(res.value) ? entry
+    const next = !isFiniteValue(res.value) ? entry
       : mode === 'programmer' ? display.replaceAll(' ', '') : display;
     dispatch('calc/commit', { value, display, expr: entry, entry: next });
   },
@@ -257,21 +265,21 @@ export function contributeCalcViewModel(state, options = {}) {
   const scope = scopeOf(calc);
 
   // live result of the current entry
-  const live = calc.entry === '' ? { ok: true, value: calc.ans } : evaluate(calc.entry, scope, { env });
+  const live = calc.entry === '' ? { ok: true, value: calc.ans } : evaluateExact(calc.entry, scope, { env });
   const display = {
     entry: calc.entry === '' ? '0' : calc.entry,
-    result: live.ok ? desc.format(live.value, calc) : '',
+    result: !live.ok ? '' : calc.mode === 'programmer' ? formatWord(live.value, calc) : desc.format(live.value, calc),
     error: live.ok ? null : (live.error.message + (live.error.line ? ` (${live.error.line}:${live.error.column})` : '')),
   };
 
   // programmer four-base view
-  const pv = live.ok && Number.isFinite(live.value) ? live.value : calc.ans;
+  const pv = live.ok && isFiniteValue(live.value) ? live.value : calc.ans;
   const bases = {
     base: calc.base, wordBits: calc.wordBits, signed: calc.signed,
     baseOptions: BASES.map((b) => ({ id: b, label: b, active: b === calc.base, on: { click: { action: 'calc/base', with: { base: b } } } })),
     wordOptions: WORD_SIZES.map((w) => ({ id: String(w), label: w + '-bit', active: w === calc.wordBits, on: { click: { action: 'calc/word', with: { bits: w } } } })),
     signLabel: calc.signed ? 'signed' : 'unsigned',
-    views: wordViews(pv, calc.wordBits, calc.signed),
+    views: viewsOf(pv, calc.wordBits, calc.signed),
   };
 
   // financial: reuse @jarenjs/forms model + viewModel; solve via core

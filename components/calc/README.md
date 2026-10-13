@@ -79,7 +79,15 @@ spacing of doubles at its position (near 1e16) lays one tick, where it grew
 its tick array until the engine refused to allocate it; an unknown function, a
 wrong argument count and a constant the environment lacks report the line and
 column of the call (they reported line 1 column 1 wherever it stood; the parser
-records the position in a side table, so the AST itself stays geometry-free).
+records the position in a side table, so the AST itself stays geometry-free);
+a programmer result beyond 2^53 is the exact word, where the value was rounded
+to a double before the display wrapped it (`0xFFFFFFFFFFFFFFFF` on a 64-bit
+word displayed `0x0` and now displays `0xFFFF FFFF FFFF FFFF`; `not(0)` and
+`0xFFFFFFFFFFFFFFFF & 0xFF00000000000001` were wrong the same way). The `ans`
+and memory a state slice holds are still JSON numbers, exact to 2^53, so `=` shows the exact
+word while clearing the entry, reusing `ans` and `M+` use the rounded one. A programmer-mode
+`evaluate` answer past 2^53 changed too: an exact power is rounded once and the word
+operations are exact (see CALC-FORMAT).
 
 See `docs/CALC-FORMAT.md` and `ARCHITECTURE.md` for the full contract.
 

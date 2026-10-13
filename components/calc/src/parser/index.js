@@ -23,11 +23,13 @@
  * the leaf; the AST keeps only the numeric value.
  */
 
-import { num, constant, variable, unary, postfix, binary, call, isConstant, setSite } from '../ast.js';
+import { num, constant, variable, unary, postfix, binary, call, isConstant, setSite, setExact } from '../ast.js';
 import { CalcParseError, errorAt } from '../errors.js';
 
 /** Sticky number matcher: hex / octal / binary / decimal-with-exponent. */
 const RE_NUMBER = /0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[bB][01]+|(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?/y;
+/** An integer literal: a prefixed base, or decimal digits with no fraction or exponent. */
+const RE_INTEGER = /^(?:0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[bB][01]+|\d+)$/;
 /** Sticky identifier matcher (ascii idents plus the greek constant glyphs). */
 const RE_IDENT = /[A-Za-z_][A-Za-z0-9_]*|[πφτ]/y;
 
@@ -150,7 +152,7 @@ class Parser {
       const m = RE_NUMBER.exec(this.s);
       if (m === null || m.index !== this.p) this.fail('invalid number');
       this.p += m[0].length;
-      return num(parseNumericLiteral(m[0]));
+      return numericNode(m[0]);
     }
 
     // identifier: constant, variable, or function call
@@ -201,6 +203,21 @@ function parseNumericLiteral(lit) {
     if (k === 'b' || k === 'B') return parseInt(lit.slice(2), 2);
   }
   return Number(lit);
+}
+
+/**
+ * The node for a matched numeric literal. An integer literal past the safe
+ * range is rounded in the node's `Number` value, so the integer as written
+ * is recorded beside it for an environment that computes exactly.
+ * @param {string} lit
+ * @returns {any}
+ */
+function numericNode(lit) {
+  const node = num(parseNumericLiteral(lit));
+  if (!Number.isSafeInteger(node.value) && Number.isFinite(node.value) && RE_INTEGER.test(lit)) {
+    setExact(node, BigInt(lit));
+  }
+  return node;
 }
 
 /**

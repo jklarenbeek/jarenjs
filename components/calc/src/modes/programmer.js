@@ -12,6 +12,7 @@
 
 import { toWord, toBase } from '@jarenjs/core/math';
 import { programmerEnv } from '../env.js';
+import { isFiniteValue } from '../exact.js';
 
 export const BASES = ['HEX', 'DEC', 'OCT', 'BIN'];
 export const WORD_SIZES = [8, 16, 32, 64];
@@ -29,34 +30,35 @@ export const KEYPAD = [
 
 /**
  * The word a finite value stands for: truncated toward zero, then wrapped
- * to `wordBits` (two's complement when `signed`). The value arrives as a
- * Number, so above 2^53 it is already rounded before it is wrapped.
- * @param {number} value @param {number} wordBits @param {boolean} signed
+ * to `wordBits` (two's complement when `signed`). An exact `bigint` is
+ * wrapped as it is; a `Number` past 2^53 has already rounded.
+ * @param {number | bigint} value @param {number} wordBits @param {boolean} signed
  * @returns {bigint}
  */
 function wordOf(value, wordBits, signed) {
-  return toWord(BigInt(Math.trunc(value)), wordBits, signed);
+  return toWord(typeof value === 'bigint' ? value : BigInt(Math.trunc(value)), wordBits, signed);
 }
 
 /**
  * The word the display shows for `value`, as a Number — what a
  * programmer-mode result commits as `ans`, so the next calculation uses
  * the value the user saw rather than the unwrapped float. A non-finite
- * value has no word and is returned as it is.
- * @param {number} value @param {number} [wordBits] @param {boolean} [signed]
+ * value has no word and is returned as it is. A word past 2^53 is the
+ * nearest Number, which is all a JSON state slice can hold of it.
+ * @param {number | bigint} value @param {number} [wordBits] @param {boolean} [signed]
  * @returns {number}
  */
 export function wordValue(value, wordBits = 32, signed = false) {
-  return Number.isFinite(value) ? Number(wordOf(value, wordBits, signed)) : value;
+  return isFiniteValue(value) ? Number(wordOf(value, wordBits, signed)) : /** @type {number} */ (value);
 }
 
 /**
- * The live four-base view of an integer value at the given word size.
- * @param {number} value @param {number} [wordBits] @param {boolean} [signed]
+ * The four-base view of an integer value, a `Number` or an exact `bigint`.
+ * @param {number | bigint} value @param {number} wordBits @param {boolean} signed
  * @returns {{ hex: string, dec: string, oct: string, bin: string }}
  */
-export function wordViews(value, wordBits = 32, signed = false) {
-  if (!Number.isFinite(value)) return { hex: '—', dec: '—', oct: '—', bin: '—' };
+export function viewsOf(value, wordBits, signed) {
+  if (!isFiniteValue(value)) return { hex: '—', dec: '—', oct: '—', bin: '—' };
   const w = wordOf(value, wordBits, signed);
   // unsigned view for hex/oct/bin so the two's-complement bit pattern shows
   const u = toWord(w, wordBits, false);
@@ -69,16 +71,35 @@ export function wordViews(value, wordBits = 32, signed = false) {
 }
 
 /**
+ * The live four-base view of an integer value at the given word size.
+ * @param {number} value @param {number} [wordBits] @param {boolean} [signed]
+ * @returns {{ hex: string, dec: string, oct: string, bin: string }}
+ */
+export function wordViews(value, wordBits = 32, signed = false) {
+  return viewsOf(value, wordBits, signed);
+}
+
+/**
+ * The primary display of a value, a `Number` or an exact `bigint`, in the
+ * currently-selected base.
+ * @param {number | bigint} value @param {any} [state]
+ * @returns {string}
+ */
+export function formatWord(value, state) {
+  const bits = state?.wordBits ?? 32;
+  const signed = state?.signed ?? false;
+  const base = state?.base ?? 'DEC';
+  const v = viewsOf(value, bits, signed);
+  return base === 'HEX' ? '0x' + v.hex : base === 'OCT' ? '0o' + v.oct : base === 'BIN' ? '0b' + v.bin : v.dec;
+}
+
+/**
  * Format the primary display in the currently-selected base.
  * @param {number} value @param {any} [state]
  * @returns {string}
  */
 export function format(value, state) {
-  const bits = state?.wordBits ?? 32;
-  const signed = state?.signed ?? false;
-  const base = state?.base ?? 'DEC';
-  const v = wordViews(value, bits, signed);
-  return base === 'HEX' ? '0x' + v.hex : base === 'OCT' ? '0o' + v.oct : base === 'BIN' ? '0b' + v.bin : v.dec;
+  return formatWord(value, state);
 }
 
 export const programmerMode = {
