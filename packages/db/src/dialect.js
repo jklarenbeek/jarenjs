@@ -131,6 +131,18 @@ export function stringLiteral(text) {
 }
 
 /**
+ * The private key of a dialect's conditional member write, which `migrate.js`
+ * reads and no spec outside this package can name: the document with a
+ * top-level member set to a value where a condition holds and the document
+ * itself where it does not, written with the document expression once, so a
+ * chain of them grows with its length. A dialect that spells none (every one
+ * built outside the package) leaves the migration to repeat the document in
+ * both branches of a `CASE`.
+ * Signature: `(exprSql, memberName, valueSql, whenSql) => string`.
+ */
+export const MEMBER_WHEN = Symbol('dialect.memberWhen');
+
+/**
  * Compose a dialect from its spelling spec. Every statement the store
  * ever runs is built here from the spec's primitives, so a spec with
  * different quoting or parameter style produces correspondingly
@@ -788,6 +800,8 @@ export function createDialect(spec) {
     derivedColumn: (docColumnSql, pathText, column) => spec.derivedExpression(
       spec.jsonText(spec.jsonExtract(docColumnSql, pathText, 'json')), column),
     jsonSet: spec.jsonSet,
+    // the private conditional member write, when the spec spells one
+    [MEMBER_WHEN]: /** @type {any} */ (spec)[MEMBER_WHEN],
     jsonRemove: spec.jsonRemove,
     jsonAppend: spec.jsonAppend,
     jsonEncode: spec.jsonEncode,

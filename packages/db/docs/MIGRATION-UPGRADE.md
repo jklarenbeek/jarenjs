@@ -1898,6 +1898,23 @@ more attempt ([JOBS-FORMAT §10](JOBS-FORMAT.md)).
   engine's own error with its own code, as on `node:sqlite`. Code that
   branched on `JD2005` for such a query on wasm branches on the engine's code.
 
+## 17. A rebuild that folds columns plans a shorter copy
+
+The copy of a rebuild that folds columns into the document wrote the document
+expression into both branches of a `CASE` per column, so its text doubled with
+every column folded (kilobytes at eight columns, megabytes at sixteen). On
+SQLite and PostgreSQL it names the document once now (`jsonb_patch` on SQLite,
+`||` on PostgreSQL) and grows with the number of columns; the documents it
+writes are the same. On SQLite the linear copy costs somewhat more per row than
+the old one at a few columns, and the trade pays as the column count grows. A
+migration document keeps the `copy` it was planned with and runs as written, so
+an applied or pending link needs no change; planning the same model change again
+produces the new text, which is why an applied link is never re-planned (§1). A
+dialect built with `createDialect` outside the package has no such spelling and
+plans the `CASE` with the document in both branches, as before. A rebuild that
+folds a member whose name holds a double quote, which failed `JD0023` on SQLite
+because no path can be spelled to such a name, folds it now.
+
 ## Measured costs
 
 Exact identity stores complete canonical documents and model endpoints, so

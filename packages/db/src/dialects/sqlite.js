@@ -8,7 +8,7 @@
  * binding this package ships binds arrays.
  */
 
-import { createDialect, stringLiteral } from '../dialect.js';
+import { createDialect, stringLiteral, MEMBER_WHEN } from '../dialect.js';
 import { rtreeDdl } from './rtree-ddl.js';
 import { readExpression } from './expression-read.js';
 import { SQLITE, sqliteInvariantTriggers } from './invariant-sql.js';
@@ -398,6 +398,11 @@ export const sqliteDialect = createDialect({
   },
   jsonSet: (exprSql, pathText, valueSql) =>
     `jsonb_set(${exprSql}, ${stringLiteral(pathText)}, ${valueSql})`,
+  // a merge patch sets a member a scalar value names and, with nothing to
+  // patch, none: the document is named once
+  [MEMBER_WHEN]: (exprSql, memberName, valueSql, whenSql) =>
+    `jsonb_patch(${exprSql}, CASE WHEN ${whenSql} `
+    + `THEN json_object(${stringLiteral(memberName)}, ${valueSql}) ELSE '{}' END)`,
   jsonRemove: (exprSql, pathText) =>
     `jsonb_remove(${exprSql}, ${stringLiteral(pathText)})`,
   jsonAppend: (exprSql, arrayPathText, valueSql) =>

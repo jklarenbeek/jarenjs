@@ -52,6 +52,7 @@ import { mergeEntityRow } from './graph.js';
 import { entityCore } from './entity.js';
 import { sqlTokens } from './dialects/check-read.js';
 import { isKeyword } from './sql.js';
+import { MEMBER_WHEN } from './dialect.js';
 import { comparableDeclaredSql } from './schema-sql.js';
 import { applyTableMigration } from './table-migration.js';
 import { withForeignKeySettings } from './foreign-key-scope.js';
@@ -2087,10 +2088,13 @@ function renderRebuild(name, fromName, fm, tm, toMapping, dialect, report) {
   const lost = [];
   // a SQL NULL is an ABSENT member (§9.3): folding it in as JSON null
   // turned every row without the value into a narrowing the target
-  // schema refused
-  const foldColumn = (expression, columnName, fold) =>
-    `CASE WHEN ${q(columnName)} IS NULL THEN ${expression} `
-    + `ELSE ${dialect.jsonSet(expression, pathText(columnName), fold)} END`;
+  // schema refused. A built-in dialect names the document once, however many
+  // columns fold, so the copy grows with the columns it folds; one that
+  // spells no conditional write repeats it in both branches of a CASE
+  const foldColumn = (expression, columnName, fold) => (dialect[MEMBER_WHEN] === undefined
+    ? `CASE WHEN ${q(columnName)} IS NULL THEN ${expression} `
+      + `ELSE ${dialect.jsonSet(expression, pathText(columnName), fold)} END`
+    : dialect[MEMBER_WHEN](expression, columnName, fold, `${q(columnName)} IS NOT NULL`));
   // the checks of the members the copy reads from the document into a typed
   // column, which run ahead of the rebuild
   const guards = [];

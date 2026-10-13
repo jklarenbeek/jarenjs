@@ -331,7 +331,7 @@ describe('coverage-complete strategy variants', () => {
   });
 });
 
-describe('the statements a move between a column and the document plans on SQLite stay as they were', () => {
+describe('the statements a move between a column and the document plans on SQLite are these', () => {
   /** Member `m` of `type` placed in a column, in the document, or (an instant) in an epoch column. */
   const placed = (type, place, extra = {}) => ({
     m: { ...(type === 'datetime' ? { type: 'string', format: 'date-time' } : { type }),
@@ -354,7 +354,7 @@ describe('the statements a move between a column and the document plans on SQLit
     'lift integer rebuild': statements(placed('integer', 'json'), placed('integer', 'column', kind)),
   };
 
-  it('a fold, a lift, an epoch derivation and a cast are spelled as they have always been', () => {
+  it('a fold, a lift, an epoch derivation and a cast are spelled as pinned here', () => {
     assert.deepStrictEqual(plans, Object.fromEntries([
     ['fold number', [
       'UPDATE "User" SET "doc" = jsonb_set("doc", \'$."m"\', "m") WHERE "m" IS NOT NULL',
@@ -374,7 +374,7 @@ describe('the statements a move between a column and the document plans on SQLit
     ]],
     ['plain->epoch', [
       'CREATE TABLE "User__rebuild" ("id" TEXT PRIMARY KEY, "m" INTEGER, "doc" BLOB NOT NULL) STRICT',
-      'INSERT INTO "User__rebuild" ("id", "m", "doc") SELECT "id", CAST(round((julianday("m") - 2440587.5) * 86400000.0) AS INTEGER), CASE WHEN "m" IS NULL THEN "doc" ELSE jsonb_set("doc", \'$."m"\', "m") END FROM "User"',
+      'INSERT INTO "User__rebuild" ("id", "m", "doc") SELECT "id", CAST(round((julianday("m") - 2440587.5) * 86400000.0) AS INTEGER), jsonb_patch("doc", CASE WHEN "m" IS NOT NULL THEN json_object(\'m\', "m") ELSE \'{}\' END) FROM "User"',
     ]],
     ['integer->string', [
       'CREATE TABLE "User__rebuild" ("id" TEXT PRIMARY KEY, "m" TEXT, "doc" BLOB NOT NULL) STRICT',
@@ -390,7 +390,7 @@ describe('the statements a move between a column and the document plans on SQLit
     ]],
     ['fold string rebuild', [
       'CREATE TABLE "User__rebuild" ("id" TEXT PRIMARY KEY, "kind" TEXT CHECK ("kind" IN (\'a\', \'b\')), "doc" BLOB NOT NULL) STRICT',
-      'INSERT INTO "User__rebuild" ("id", "kind", "doc") SELECT "id", jsonb_extract("doc", \'$."kind"\'), jsonb_remove(CASE WHEN "m" IS NULL THEN "doc" ELSE jsonb_set("doc", \'$."m"\', "m") END, \'$."kind"\') FROM "User"',
+      'INSERT INTO "User__rebuild" ("id", "kind", "doc") SELECT "id", jsonb_extract("doc", \'$."kind"\'), jsonb_remove(jsonb_patch("doc", CASE WHEN "m" IS NOT NULL THEN json_object(\'m\', "m") ELSE \'{}\' END), \'$."kind"\') FROM "User"',
     ]],
     ['lift integer rebuild', [
       'CREATE TABLE "User__rebuild" ("id" TEXT PRIMARY KEY, "m" INTEGER, "kind" TEXT CHECK ("kind" IN (\'a\', \'b\')), "doc" BLOB NOT NULL) STRICT',

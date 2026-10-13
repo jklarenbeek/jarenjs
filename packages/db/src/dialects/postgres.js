@@ -41,7 +41,7 @@
  * (`tx.writerLock`).
  */
 
-import { createDialect, stringLiteral } from '../dialect.js';
+import { createDialect, stringLiteral, MEMBER_WHEN } from '../dialect.js';
 import { postgresPhysicalRead, postgresPhysicalCompare, postgresPhysicalValueType, postgresPhysicalDifferent, postgresPhysicalTypeMatches, qualifyPostgresPhysicalColumn } from './postgres-physical.js';
 import { postgresCatalog } from './postgres-catalog.js';
 import { POSTGRES, postgresInvariantTriggers } from './postgres-invariants.js';
@@ -608,6 +608,9 @@ export function postgresDialect(options = undefined) {
     },
     jsonSet: (exprSql, pathText, valueSql) =>
       `jsonb_set(${exprSql}, ${stringLiteral(pathText)}, ${valueSql}, true)`,
+    [MEMBER_WHEN]: (exprSql, memberName, valueSql, whenSql) =>
+      `(${exprSql} || CASE WHEN ${whenSql} `
+      + `THEN jsonb_build_object(${stringLiteral(memberName)}, ${valueSql}) ELSE '{}'::jsonb END)`,
     jsonRemove: (exprSql, pathText) =>
       `(${exprSql} #- ${stringLiteral(pathText)})`,
     // `-1` is the position AFTER the array's last element when

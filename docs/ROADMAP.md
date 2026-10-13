@@ -542,13 +542,6 @@ what each does is its own documentation's job
   it, so a rename alone is refused when one of those is itself referenced. Wanted:
   foreign keys re-pointed through the rebuild, or in-place `ALTER`s where
   PostgreSQL has them.
-- [ ] **A rebuild that folds several columns into the document plans a copy
-  statement that doubles per column.** The fold repeats the document expression
-  in both branches of its `CASE`, so a rebuild that folds 8, 12 and 16 columns
-  plans a copy of 18 KB, 287 KB and 4.6 MB on SQLite (22 KB, 352 KB and 5.6 MB
-  on PostgreSQL), where a lift of the same members stays linear (about 1 KB and
-  2 KB at 16). Wanted: a fold that writes the document expression once, so the
-  statement grows linearly per column.
 - [ ] **A column retype copies through a lossy `CAST`.** A rebuild that changes a
   mapped column's type copies `CAST("col" AS <type>)`: number to integer keeps
   `81` for `81.125`, text to integer or boolean keeps `0`/`false` for text that
