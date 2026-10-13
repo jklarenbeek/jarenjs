@@ -1169,6 +1169,17 @@ the first one's order, or answered where it must refuse an unbound name.
 `store.stats()` exposes hits, misses and evictions, so the cache is
 proven rather than assumed.
 
+A keyset load is the one place a value is not part of the identity: the
+values of a continuation (or of a scalar `after`) are bound into the
+statement's slots by each call, and the key holds the load without them
+plus their shape, one flag for each order key saying whether it is NULL,
+because that, and nothing else about a continuation, decides the SQL text.
+A walk therefore compiles one plan for the first page and one for each shape
+its continuations take, and every other page hits; a long walk does not push
+the other plans out of the cache. The continuation is checked against the
+ordering on every page, a hit included, since the plan is shared and the
+check is not.
+
 One semantic entry owns every statement it prepares: its main read,
 full-scan diversion, temporal seeks, vector-width alternatives or entity
 root fetchers. Capacity eviction retires all those owners. A preparation or

@@ -494,6 +494,14 @@ the query engine, now refuse by code or answer what the engine answers:
   host kept in a PostgreSQL `jsonb` column (which orders the members of an
   object by length) came back refused `JD0035`, the message naming the same
   ordering twice; its terms are compared member by member now and it resumes.
+- Every page of a keyset walk compiled its own statement, because the
+  continuation's values were part of the statement-cache key. They are bound by
+  each call now, and the key holds only which order keys are NULL, so a walk
+  shares one entry per shape: `store.stats().statementCache` reports a walk of
+  pages as one miss for the first page, one for each shape of continuation and a
+  hit for every other page, where it reported a miss (and, in a small cache, an
+  eviction) for each. Every page still checks its continuation against the
+  ordering (`JD0035`).
 - `explainLoad` read no option it was given beyond `profile`, so a misspelt
   `profle` explained the load under no profile and said so by answering; it
   takes `profile`, the one option its declaration lists, and refuses another

@@ -125,6 +125,32 @@ function retainEntry(state, key, entry) {
   return entry;
 }
 
+/**
+ * What of a load's `after` is part of its plan's identity. A structural
+ * continuation resumes by values, which every call binds; the SQL text
+ * depends only on which of its order keys are NULL, so the specification
+ * keyed is the load without its `after` and the shape is one flag for each
+ * order key. A scalar `after` (a single unique column's keyset) changes no
+ * text at all. `null` for a load with no continuation to share, or one
+ * that is no continuation (the compile names that).
+ * @param {any} spec
+ * @returns {{ spec: any, shape: string } | null}
+ */
+function afterIdentity(spec) {
+  const after = spec?.after;
+  if (after === undefined || after === null) return null;
+  /** @type {string} */
+  let shape;
+  if (typeof after !== 'object') shape = 'scalar';
+  else {
+    const keys = after.keys;
+    if (!Array.isArray(keys)) return null;
+    shape = `keys:${Array.from(keys, (/** @type {any} */ key) => ((key ?? null) === null ? '1' : '0')).join('')}`;
+  }
+  const { after: _after, ...rest } = spec;
+  return { spec: rest, shape };
+}
+
 /** Borrow one prepared child through the complete operation, including any
  * awaited binds. An evicted plan can still belong to a lazy cursor: its new
  * children are temporary and its already borrowed children finish normally.
@@ -2937,7 +2963,8 @@ export function createLoadEngine(context, entityName) {
   };
 
   /**
-   * Build the load: one statement, cached by spec. `keyset` forces
+   * Build the load: one statement, cached by spec, a continuation's values
+   * aside (the call binds those: {@link afterIdentity}). `keyset` forces
    * keyset mode — the primary key as the ORDER BY tie-breaker in place of
    * the row identity, so a continuation can resume exactly — which a
    * structural `after` implies; a scalar `after` keeps the single
@@ -2947,8 +2974,12 @@ export function createLoadEngine(context, entityName) {
    */
   const compileLoad = (spec, keyset = false, profile = null) => {
     // a cyclic specification cannot be keyed, so the cache reports a
-    // permanent miss and buildTree gets to NAME the cycle
-    const key = ['L', entityName, spec ?? {}, dialect.name, keyset, profile];
+    // permanent miss and buildTree gets to NAME the cycle. A continuation's
+    // values are not part of the key: every page of a walk resumes from
+    // different ones and shares the statement their shape selects
+    const resumed = afterIdentity(spec);
+    const key = resumed === null ? ['L', entityName, spec ?? {}, dialect.name, keyset, profile]
+      : ['L', entityName, resumed.spec, dialect.name, keyset, profile, resumed.shape];
     const cached = state.cache.get(key);
     if (cached !== undefined) {
       state.counters.hits++;
@@ -3086,6 +3117,9 @@ export function createLoadEngine(context, entityName) {
     };
     /** @type {ReturnType<typeof orderIdentity> | null} */
     let identity = null;
+    /** The values a call's `after` binds, checked against this ordering; `null` without one.
+     * @type {((given: any) => any[]) | null} */
+    let afterValues = null;
     /** @type {ReturnType<typeof textKeyPlan>} */
     let textKeys = null;
     if (keysetMode) {
@@ -3103,7 +3137,8 @@ export function createLoadEngine(context, entityName) {
             entities.get(entityName)?.docPath);
         }
         pagination = 'keyset';
-        const values = continuationValues(after, identity, order.length, keyColumns);
+        afterValues = (given) => continuationValues(given, identity, order.length, keyColumns);
+        const values = afterValues(after);
         const column = (/** @type {any} */ term) => termSql(term.column);
         // a term that cannot hold NULL: a key column, or a mapped column the
         // catalog declares NOT NULL (recorded at open, whatever policy the
@@ -3118,13 +3153,13 @@ export function createLoadEngine(context, entityName) {
           // comparison neither true nor false, so a term that can hold one
           // keeps the expansion, where its null branch is spelled out
           const columns = identity.map((term) => column(term));
-          const bound = identity.map((_, i) => param({ literal: values[i] }));
+          const bound = identity.map((_, i) => param({ continuation: i }));
           conditions.push(`(${columns.join(', ')}) ${identity[0].desc ? '<' : '>'} (${bound.join(', ')})`);
         }
         else {
           const equal = (i) => (values[i] === null
             ? `${column(identity[i])} IS NULL`
-            : `${column(identity[i])} = ${param({ literal: values[i] })}`);
+            : `${column(identity[i])} = ${param({ continuation: i })}`);
           // "comes after the value in this term's order": a null value is
           // followed by the non-nulls when nulls sort first and by nothing
           // when they sort last; a non-null value is followed by the greater
@@ -3134,7 +3169,7 @@ export function createLoadEngine(context, entityName) {
           const beyond = (i) => {
             const term = identity[i];
             if (values[i] === null) return `${column(term)} IS NOT NULL`;
-            const base = `${column(term)} ${term.desc ? '<' : '>'} ${param({ literal: values[i] })}`;
+            const base = `${column(term)} ${term.desc ? '<' : '>'} ${param({ continuation: i })}`;
             // a key column is NOT NULL and needs no null branch
             return term.nullsFirst || keyColumns.includes(term.column)
               ? base : `(${base} OR ${column(term)} IS NULL)`;
@@ -3178,8 +3213,9 @@ export function createLoadEngine(context, entityName) {
       // round-trips exactly as a continuation's does
       if (provesTextBytes) textKeys = textKeyPlan(tree.entityMapping, [columnOfProperty(property)], dialect, `${rendered.aliasSql}.`);
       pagination = 'keyset';
-      conditions.push(`${termSql(property)} `
-        + `${term.desc ? '<' : '>'} ${param({ literal: physicalEntity ? encodeColumn(property, after) : after })}`);
+      afterValues = (given) => [physicalEntity ? encodeColumn(property, given) : given];
+      afterValues(after);
+      conditions.push(`${termSql(property)} ${term.desc ? '<' : '>'} ${param({ continuation: 0 })}`);
     }
     else if (spec?.skip !== undefined && spec.skip > 0) {
       pagination = 'offset';
@@ -3226,6 +3262,7 @@ export function createLoadEngine(context, entityName) {
 
     const entry = {
       sql, slots, tree, pagination, statement: null,
+      afterValues,
       rowBound,
       byteBound: profile === null ? null : profile.maxBytes,
       profile,
@@ -3269,6 +3306,22 @@ export function createLoadEngine(context, entityName) {
         + '(a double quote or a control character) has no spelling in a graph load, which has no residual',
       entities.get(entityName)?.docPath, error);
     }
+  };
+
+  /**
+   * {@link buildLoad}, and the values this call binds into the statement's
+   * slots. A continuation's are checked against the ordering on a plan hit
+   * exactly as on a miss: the plan is shared by every continuation of its
+   * shape, the values never are.
+   * @param {any} spec
+   * @param {boolean} [keyset]
+   * @param {any} [profile]
+   */
+  const bindLoad = (spec, keyset = false, profile = null) => {
+    const entry = buildLoad(spec, keyset, profile);
+    const values = entry.afterValues === null ? [] : entry.afterValues(spec.after);
+    return { entry, params: entry.slots.map((/** @type {any} */ slot) =>
+      ('continuation' in slot ? values[slot.continuation] : slot.literal)) };
   };
 
   /**
@@ -3335,8 +3388,7 @@ export function createLoadEngine(context, entityName) {
   const storedText = new WeakMap();
 
   /** The graph cursor over one built load: one root row per pull. */
-  const openCursor = (entry, signal, register, deadline = undefined, cursorFactory = createCursor) => {
-    const params = entry.slots.map((slot) => slot.literal);
+  const openCursor = (entry, params, signal, register, deadline = undefined, cursorFactory = createCursor) => {
     const each = register === undefined ? (doc) => doc : (doc) => register(entry.tree, doc);
     let pulled = 0;
     // prepared by the first pull, never at construction (MODEL-FORMAT
@@ -3382,8 +3434,7 @@ export function createLoadEngine(context, entityName) {
     load(spec, options = undefined) {
       readCallOptions(options, LOAD_CALL_OPTIONS, `entity('${entityName}').load`);
       requireCallable(options, state.now);
-      const entry = buildLoad(spec, false, profileOf(options));
-      const params = entry.slots.map((slot) => slot.literal);
+      const { entry, params } = bindLoad(spec, false, profileOf(options));
       return useRead(connection, entry, (statement) => chain(entry.textKeys === null ? null : decodingOfText(), () =>
         chain(statement.all(params), (rows) =>
           rows.map((row, i) => checkRoot(entry, parseGraphRow(entry.tree, provenRow(entry, row), '__doc'), i + 1)))));
@@ -3402,8 +3453,8 @@ export function createLoadEngine(context, entityName) {
     loadCursor(spec, options = undefined, register = undefined, cursorFactory = createCursor) {
       readCallOptions(options, LOAD_CURSOR_OPTIONS, `entity('${entityName}').loadCursor`);
       requireCallable(options, state.now);
-      return openCursor(buildLoad(spec, false, profileOf(options)), options?.signal, register,
-        options?.deadline, cursorFactory);
+      const { entry, params } = bindLoad(spec, false, profileOf(options));
+      return openCursor(entry, params, options?.signal, register, options?.deadline, cursorFactory);
     },
     /**
      * One page: a bounded drain of the graph cursor in keyset mode —
@@ -3443,7 +3494,7 @@ export function createLoadEngine(context, entityName) {
       const paged = { ...(spec ?? {}), take: limit + (options?.lookahead === false ? 0 : 1) };
       if (after === undefined) delete paged.after;
       else paged.after = after;
-      const entry = buildLoad(paged, true, profileOf(options));
+      const { entry, params } = bindLoad(paged, true, profileOf(options));
       if (consistency === 'snapshot' && entry.snapshot !== true) {
         throw new DbCompileError('JD0036',
           `a snapshot page needs an ordering over immutable keys; this graph orders by (${
@@ -3456,7 +3507,7 @@ export function createLoadEngine(context, entityName) {
       // registration happens on the DELIVERED roots after the drain — a
       // peeked root the caller never received must not enter the unit
       // of work
-      const cursor = openCursor(entry, options?.signal, undefined, options?.deadline, cursorFactory);
+      const cursor = openCursor(entry, params, options?.signal, undefined, options?.deadline, cursorFactory);
       return chain(drainPage(cursor, {
         limit, maxBytes, after: after ?? null, lookahead: options?.lookahead,
         sizeOf: (doc) => utf8ByteLength(JSON.stringify(doc)),
@@ -3469,7 +3520,7 @@ export function createLoadEngine(context, entityName) {
     },
     explainLoad(spec, options = undefined) {
       readCallOptions(options, EXPLAIN_LOAD_OPTIONS, `entity('${entityName}').explainLoad`);
-      const entry = buildLoad(spec, spec?.after !== undefined && typeof spec.after === 'object', profileOf(options));
+      const { entry, params } = bindLoad(spec, spec?.after !== undefined && typeof spec.after === 'object', profileOf(options));
       const describe = (node, path) => node.includes.flatMap((include) => [
         { path: [...path, include.name].join('.'), kind: include.kind,
           count: include.count === true },
@@ -3485,7 +3536,7 @@ export function createLoadEngine(context, entityName) {
       // priced first where the connection gives estimates: that is a
       // statement of its own over the values a load binds, so the answer
       // is a promise there and stays a plain value everywhere else
-      return chain(estimateOf(connection, dialect, entry.sql, entry.slots.map((slot) => slot.literal)), (estimate) => ({
+      return chain(estimateOf(connection, dialect, entry.sql, params), (estimate) => ({
         sql: entry.sql,
         pagination: entry.pagination,
         includes: describe(entry.tree, []),
@@ -3520,5 +3571,5 @@ export function createLoadEngine(context, entityName) {
 }
 
 /**
- * @typedef {{ literal?: any, external?: string }[]} ParamCollector
+ * @typedef {{ literal?: any, external?: string, continuation?: number }[]} ParamCollector
  */

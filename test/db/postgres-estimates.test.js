@@ -219,6 +219,8 @@ describe('PostgreSQL: the labelled row estimate', { skip: !url && 'JAREN_PG_URL 
     assert.equal(explained.pagination, 'keyset');
     assert.equal(explained.budget.estimatedRows.source, LABEL);
     assert.equal(jsonStatements().length, 1);
+    assert.deepEqual(jsonStatements()[0].values, [first.continuation.key],
+      'the estimate is priced over the continuation\'s values, not over unbound slots');
     assert.equal(explained.budget.estimatedRows.rows, await plannerRows(jsonStatements()[0]));
   });
 

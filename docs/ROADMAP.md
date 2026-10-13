@@ -725,13 +725,6 @@ what each does is its own documentation's job
   checks the encoding at open. Wanted: decide between refusing a UTF-16 file
   when a store opens (`JD0002`, as database rules already do) and a code-point
   collation the dialect's `codepoint` spells in place of BINARY.
-- [ ] **Keyset pages share one plan.** Every page of a keyset walk misses the
-  store-wide statement cache, because the continuation's values are part of the
-  cache key: 100 pages are 100 compiles (about 24 µs each, 21% of a 4-row page
-  on SQLite) and a long walk evicts the other plans of a 128-entry cache.
-  Wanted: key the load by the continuation's shape (the null mask and the
-  row-value choice decide the SQL text) and bind its values through the slots,
-  so a walk reuses one entry.
 - [ ] **A pushed string operator answers false where the engine raises.** A
   pushed `$starts-with`, `$ends-with` or `$contains` over a member typed
   `string` alone, or `string` and `null` alone (`['string', 'null']`: a plain

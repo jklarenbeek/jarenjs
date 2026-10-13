@@ -5,7 +5,8 @@
  * Every cache in this package that decides a result — the collection
  * plan, the entity plan, the entity load specification, and the
  * registered deterministic UDF — is keyed by the whole serialized
- * discriminating tuple. The documents below are the reason: they differ
+ * discriminating tuple (but for the values of a keyset load's continuation,
+ * which each call binds: keyset-plan-reuse.test.js). The documents below are the reason: they differ
  * only in a return literal and share a 32-bit `contentKey`. While that
  * hash was the identity, running the first and then the second returned
  * the FIRST document's rows, reported a cache hit, and nothing anywhere
