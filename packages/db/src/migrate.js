@@ -1328,6 +1328,22 @@ const dropPrograms = (programs, kept, table) => [...programs].reverse().filter((
 const extractKind = (storage) => (storage === 'string' ? 'text' : storage === 'boolean' ? 'boolean' : 'number');
 
 /**
+ * A statement that fails, with `message`, when `source` yields a row and does
+ * nothing when it yields none: the message cast to a number on PostgreSQL, and a
+ * path SQLite cannot read as one, so each engine's own error carries the
+ * sentence.
+ * @param {any} dialect @param {string} name - the common table expression's name
+ * @param {string} source - its query, selecting the offending rows (at most one)
+ * @param {string} message - an SQL text expression
+ * @returns {string}
+ */
+function failingStatement(dialect, name, source, message) {
+  const q = dialect.quoteIdentifier;
+  return `WITH ${q(name)} AS (${source}) SELECT ${dialect.typedExtract === true
+    ? `(${message})::bigint` : `json_extract('{}', ${message})`} FROM ${q(name)}`;
+}
+
+/**
  * The step that refuses a lift over a document member of another JSON type
  * than the column that takes it, before any row changes, on an engine that
  * types its extraction: such an engine reads the member as NULL, and a lift
@@ -1344,9 +1360,10 @@ function mistypedMemberStep(dialect, table, member, kind) {
   const found = dialect.jsonTypeName(q('doc'), dialect.jsonPathText([{ name: member }]));
   const held = kind === 'text' ? 'string' : kind;
   return { kind: 'sql', note: `check that no document of '${table}' holds '${member}' as another JSON type than its column`,
-    sql: `WITH ${q('_jaren_member')} AS (SELECT ${found} AS ${q('found')} FROM ${q(table)} WHERE ${found} NOT IN ('null', ${literal(held)}) LIMIT 1) `
-      + `SELECT (${literal(`the member '${member}' of '${table}' holds a JSON `)} || ${q('found')} || `
-      + `${literal(`, where its column holds a JSON ${held}: correct the documents first`)})::bigint FROM ${q('_jaren_member')}` };
+    sql: failingStatement(dialect, '_jaren_member',
+      `SELECT ${found} AS ${q('found')} FROM ${q(table)} WHERE ${found} NOT IN ('null', ${literal(held)}) LIMIT 1`,
+      `${literal(`the member '${member}' of '${table}' holds a JSON `)} || ${q('found')} || `
+      + literal(`, where its column holds a JSON ${held}: correct the documents first`)) };
 }
 
 /**
@@ -1897,10 +1914,11 @@ function wholeKeySql(dialect, table, column) {
   const q = dialect.quoteIdentifier, literal = dialect.stringLiteral, key = q(column);
   // the key as the number it spells, whatever it is stored as (a key retyped into an integer may be text)
   const number = `${key}::numeric`;
-  return `WITH ${q('_jaren_key')} AS (SELECT ${key} FROM ${q(table)} WHERE ${number} <> pg_catalog.trunc(${number}) `
-    + `OR ${number} NOT BETWEEN -9223372036854775808 AND 9223372036854775807 ORDER BY ${number} LIMIT 1) `
-    + `SELECT (${literal(`the key '${column}' of '${table}' holds `)} || ${key}::text || `
-    + `${literal(', which is not a whole number a bigint holds')})::bigint FROM ${q('_jaren_key')}`;
+  return failingStatement(dialect, '_jaren_key',
+    `SELECT ${key} FROM ${q(table)} WHERE ${number} <> pg_catalog.trunc(${number}) `
+    + `OR ${number} NOT BETWEEN -9223372036854775808 AND 9223372036854775807 ORDER BY ${number} LIMIT 1`,
+    `${literal(`the key '${column}' of '${table}' holds `)} || ${key}::text || `
+    + literal(', which is not a whole number a bigint holds'));
 }
 
 /**
@@ -2051,6 +2069,86 @@ function nameRebuiltKey(connection, table) {
 }
 
 /**
+ * The check ahead of a rebuild's copy that no stored value of a column is one
+ * the cast to its new type would change, or `null` where the cast loses
+ * nothing. A value is changed when the cast truncates it, reads it as a number
+ * it does not name, or cannot hold it: a text that names no number reads as `0`
+ * on SQLite, `12.5` becomes the integer `12`, a number outside 64 bits
+ * saturates, an integer past 2^53 rounds into a double, and `0.5` or `81` is no
+ * boolean. A spelling the cast reads right (`007`, `+5`, ` 12`, `12.0`, `.5`)
+ * is no change. The statement fails, naming the member and the first value in
+ * order that would change, as `wholeKeySql` does; no such value, no failure,
+ * and a missing member (SQL NULL) is no value. Both engines refuse a value
+ * whose number the cast would not keep, with two exceptions of the engines'
+ * own casts: SQLite reads only the digits before a fraction or an exponent of
+ * a text (`1e3` is `1` there, and refused), and PostgreSQL's numeric column
+ * keeps an integer past 2^53 as it is (a double read back rounds it).
+ * @param {any} dialect @param {string} table @param {string} column
+ * @param {string} from - the column's storage now
+ * @param {string} to - the storage it is retyped to
+ * @param {boolean} instant - the column is an epoch column, which stays within a double's exact range
+ * @returns {string | null}
+ */
+function retypeCheckSql(dialect, table, column, from, to, instant) {
+  const q = dialect.quoteIdentifier, literal = dialect.stringLiteral, ref = q(column);
+  const postgres = dialect.name === 'postgres';
+  const text = from === 'string';
+  const int64 = '-9223372036854775808 AND 9223372036854775807';
+  // the decimal spellings a numeric cast reads: blanks, a sign, digits with an optional point, an exponent
+  // (bounded, so that no digit string reaches an overflow the server answers in its own words)
+  const decimalText = '^[[:space:]]*[+-]?([0-9]+[.]?[0-9]*|[.][0-9]+)([eE][+-]?[0-9]{1,4})?[[:space:]]*$';
+  const digitsText = '^[[:space:]]*[+-]?[0-9]+[[:space:]]*$';
+  /** @type {string} */
+  let lost, held;
+  if (to === 'boolean' && text) {
+    lost = postgres
+      ? `NOT CASE WHEN ${ref} ~ ${literal(digitsText)} THEN CAST(${ref} AS numeric) IN (0, 1) ELSE false END`
+      : `NOT (${ref} NOT GLOB '*[.eE]*' AND CAST(${ref} AS INTEGER) = ${ref} AND CAST(${ref} AS INTEGER) IN (0, 1))`;
+    held = 'the 0 or 1 a boolean is stored as';
+  }
+  else if (to === 'boolean') {
+    lost = `${ref} NOT IN (0, 1)`;
+    held = 'the 0 or 1 a boolean is stored as';
+  }
+  else if (to === 'integer' && text) {
+    // SQLite compares the cast with the text read as a number: a text just below -2^63 reads as the double
+    // -2^63, which the saturated cast equals, so that one boundary is held to its own spelling; a nonzero
+    // fraction is refused outright, for a double past 2^53 would hide it
+    lost = postgres
+      ? `NOT CASE WHEN ${ref} ~ ${literal(decimalText)} THEN CAST(${ref} AS numeric) = pg_catalog.trunc(CAST(${ref} AS numeric)) `
+        + `AND CAST(${ref} AS numeric) BETWEEN ${int64} ELSE false END`
+      : `NOT (CAST(${ref} AS INTEGER) = ${ref} AND ${ref} NOT GLOB '*.*[1-9]*' `
+        + `AND (CAST(${ref} AS INTEGER) <> -9223372036854775808 OR ${ref} = '-9223372036854775808'))`;
+    held = 'a whole number a 64-bit integer holds';
+  }
+  else if (to === 'integer' && from === 'number') {
+    // the double -2^63 is an integer: PostgreSQL's numeric column holds its decimal spelling, which is read as the double
+    lost = postgres
+      ? `${ref} <> pg_catalog.trunc(${ref}) OR NOT (CAST(${ref} AS double precision) >= -9223372036854775808 `
+        + `AND CAST(${ref} AS double precision) < 9223372036854775808)`
+      : `CAST(${ref} AS INTEGER) <> ${ref}`;
+    held = 'a whole number a 64-bit integer holds';
+  }
+  else if (to === 'number' && text) {
+    lost = postgres
+      ? `NOT CASE WHEN ${ref} ~ ${literal(decimalText)} THEN pg_catalog.abs(CAST(${ref} AS numeric)) <= 1.7976931348623157E+308 ELSE false END`
+      : `NOT (CAST(${ref} AS REAL) = ${ref} AND CAST(${ref} AS REAL) NOT IN (9e999, -9e999))`;
+    held = 'a finite number';
+  }
+  else if (to === 'number' && from === 'integer' && !instant && !postgres) {
+    lost = `CAST(${ref} AS REAL) <> ${ref}`;
+    held = 'an integer a double holds exactly';
+  }
+  else return null;
+  // SQLite spells a bad path's text back with its quotes doubled, so its names are quoted the other way
+  const mark = postgres ? "'" : '"';
+  const message = `${literal(`the member ${mark}${column}${mark} of ${mark}${table}${mark} holds `)} || CAST(${ref} AS TEXT) || `
+    + literal(`, which is not ${held}, so the retype would change it: correct the values first`);
+  return failingStatement(dialect, '_jaren_cast',
+    `SELECT ${ref} FROM ${q(table)} WHERE ${ref} IS NOT NULL AND (${lost}) ORDER BY ${ref} LIMIT 1`, message);
+}
+
+/**
  * Render one rebuild step (§10): self-contained SQL — the temporary
  * table, the column-mapped copy, the final-name indexes. The table's rule
  * programs are not the step's: the old ones were dropped before it, the new
@@ -2108,6 +2206,10 @@ function renderRebuild(name, fromName, fm, tm, toMapping, dialect, report) {
   // the checks of the members the copy reads from the document into a typed
   // column, which run ahead of the rebuild
   const guards = [];
+  // the checks of the columns the copy casts to another type, which run in the
+  // rebuild itself, after the new table and (on PostgreSQL) under the table lock
+  /** @type {string[]} */
+  const retypeChecks = [];
   for (const { name: columnName, column } of ordered) {
     targets.push(q(columnName));
     if (fromHas(columnName)) {
@@ -2139,6 +2241,9 @@ function renderRebuild(name, fromName, fm, tm, toMapping, dialect, report) {
         // the type's name alone: a collation belongs to the column, and
         // `CAST(x AS text COLLATE "C")` is not a cast
         sources.push(`CAST(${q(columnName)} AS ${dialect.comparableColumnType(storageType(column.storage))})`);
+        const check = retypeCheckSql(dialect, name, columnName, fromColumn.storage, column.storage,
+          fromColumn.source === 'epoch(document)');
+        if (check !== null) retypeChecks.push(check);
       }
       continue;
     }
@@ -2191,6 +2296,7 @@ function renderRebuild(name, fromName, fm, tm, toMapping, dialect, report) {
   }
   targets.push(q('doc'));
   sources.push(docExpr);
+  create.splice(1, 0, ...retypeChecks);
   if (dialect.name === 'postgres') {
     // writers wait from the first statement on: nothing committed after the
     // copy read the table is dropped with it, and no key is drawn from the

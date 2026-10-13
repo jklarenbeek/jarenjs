@@ -893,7 +893,7 @@ database of its own
 |---|---|
 | add mapped column (property added, or moved out of the document) | `ALTER TABLE ADD COLUMN` — always nullable (absent reads back absent, MODEL-FORMAT §9.3) — plus a `sql` data step when the property's values already live in the document |
 | drop mapped column (property removed, or moved into the document) | fold the column back into the document first (`sql` step) when the property survives — a `NULL` column folds to ABSENT, never to JSON `null`, so §9.3's rule survives the fold, in the rebuild copy too, which names the document once however many columns it folds; drop its index, then `DROP COLUMN` where SQLite's conditions hold, else rebuild |
-| change type / enum CHECK / key / epoch flavor | **rebuild** (§10) |
+| change type / enum CHECK / key / epoch flavor | **rebuild** (§10); a type change meets the stored values first: one that the new type cannot hold refuses the migration when it runs (§10) |
 | add, drop or change an index (`unique`/`index`/version, an entry of the entity's `indexes`, its `where`) | plain DDL — a changed index (uniqueness, columns or condition) is a `DROP INDEX` then a `CREATE INDEX`; a rebuild (§10) recreates every index with its condition |
 | add, drop or change a database rule of a store-owned layout (MODEL-FORMAT §13.4) | its programs as plain DDL: an added program is its `CREATE` (on PostgreSQL its function, then its trigger), a removed one its `DROP` (a trigger before its function), a changed one both, an unchanged one nothing. Every `DROP` goes before the table's other steps and every `CREATE` of a table that already exists comes last in the migration, after its transform steps: a renamed or a rebuilt table's programs are dropped before the rename or the rebuild (§10) and created again at the end; a new entity's table is created with its programs |
 | add or drop a relation (foreign-key column, join table) | foreign keys **rebuild** the holder — an inferred foreign-key column the target model no longer declares is folded into the document when the target declares the property, else named in `report.lost` and the plan is destructive; join tables create/drop directly |
@@ -1023,6 +1023,37 @@ the transaction** — a reference the rebuild broke fails the migration
 rather than shipping (compared against the same check taken before it
 began, as a link's is, §6; a parent an earlier step of the link renamed
 counts under its new name, which the rebuilt `REFERENCES` clause spells).
+
+**A retype meets the stored values first.** The copy casts a column whose type
+changes, and a cast changes a value its target cannot hold instead of refusing
+it: SQLite reads the text `abc` as `0` and `12.5` as the integer `12`, and
+PostgreSQL keeps `0.5` in an integer column and rounds it into a boolean. The
+step therefore carries, in `create`, one check for each cast that can change a
+value, right after the statement that creates the new table (on PostgreSQL after
+the lock, so no write slips a value in between the check and the copy): a
+text into an integer, a number or a boolean; a number into an integer or a
+boolean; an integer into a boolean, and into a number on SQLite. A cast that
+changes nothing — into text, out of a boolean, an epoch column into a number —
+has none. The check fails the step `JD0023`, naming the member, the table and
+the first value in order that would change, and the migration rolls back with
+every row as it was; no stored value, and a missing member, fail nothing. A
+value is refused only where the cast would change its number or invent one, so
+a spelling the cast reads right retypes as it always did:
+
+| into | a value is refused when |
+|---|---|
+| integer | it is not a whole number within 64 bits: a fraction (`12.5`, `.5`), a text that names no number (`abc`, `true`, `NaN`, the empty text), a number beyond the 64 bits (`9223372036854775808`, `-9223372036854775809`; a double is judged as the double it is, so `-2^63` is held and `2^63` is not). `007`, `+5`, ` 12`, `12.0` and `5.` are held |
+| number | it is a text that names no finite number (`abc`, `Infinity`, `NaN`, `1e999`, `0x10`); `.5`, `5.`, `+5`, `007` and ` 12` are held. On SQLite also a whole number a double does not hold exactly (past 2^53, for most), a text of one included |
+| boolean | it is not `0` or `1`; a text only as digits (`01` and `+1` are held, `1.0` and `true` are not) |
+
+Where the engines' own casts differ, so do the verdicts: SQLite reads only the
+digits before a fraction or an exponent of a text (`1e3` is `1` there, and is
+refused), PostgreSQL reads `1e3` as `1000` and keeps it; PostgreSQL's numeric
+column keeps an integer past 2^53, or a text of one, exactly, so an integer into a
+number plans no check there and a text of one is held.
+The plan reads no row, so it cannot know: `report.destructive` stays false, and
+the refusal comes when the migration runs. Correct the values it names and run
+again.
 
 A collection rebuilds through the same step where its interval declaration
 is added, changed or removed on SQLite (§3): `create` is the target

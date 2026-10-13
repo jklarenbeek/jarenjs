@@ -531,13 +531,14 @@ what each does is its own documentation's job
   it, so a rename alone is refused when one of those is itself referenced. Wanted:
   foreign keys re-pointed through the rebuild, or in-place `ALTER`s where
   PostgreSQL has them.
-- [ ] **A column retype copies through a lossy `CAST`.** A rebuild that changes a
-  mapped column's type copies `CAST("col" AS <type>)`: number to integer keeps
-  `81` for `81.125`, text to integer or boolean keeps `0`/`false` for text that
-  names no number, and PostgreSQL's cast rounds. The last link's real-data
-  validation cannot see it (the cast result always validates) and
-  `report.destructive` stays false. Wanted: a refusal before the copy when a
-  value does not survive the cast, on both engines.
+- [ ] **A rebuild that casts a number to text spells it as the engine does.**
+  `5` is `5.0` on SQLite and `5` on PostgreSQL, a boolean is `1` or `0`. Wanted:
+  one spelling.
+- [ ] **An integer past 2^53 is stored and cast exactly but read back as
+  `JD2003` on SQLite and rounded without a word on PostgreSQL.**
+- [ ] **A retype check does not see a text number below the double range.**
+  `1e-400`, which SQLite casts to `0.0`, passes; PostgreSQL's `0x10` and `1_000`
+  spellings are refused although its cast reads them.
 - [ ] **A native `$resample` window never reads the rows outside it.** `start`
   and `end` are applied by the statement, so a row outside them that the
   temporal kernel refuses (no instant, no reading) is never met, where the
@@ -707,12 +708,15 @@ what each does is its own documentation's job
   member, which is presence plus one negated list and could regroup as an `$or` of equalities does, making it one leaf.
 - [ ] **A mandatory predicate past the term bound still reaches PostgreSQL
   whole.** A profile's mandatory predicate with more leaves than the dialect's
-  term bound demotes the document, but the residual's root fetch carries the
-  predicate (a 200-leaf statement is sent), and the bound's mechanism, an
-  uninterruptible JIT compile, holds for that statement too. Wanted: decide
-  whether resolving the profile refuses it (`JD0011`, the mandatory predicate
-  running in the database or not at all) or the fetch regroups its own
-  memberships.
+  term bound demotes the document, and the residual's root fetch carries the
+  whole predicate (a 200-leaf statement is sent; it answers right and `maxRows`,
+  `strict` and `refuseFullScan` still bound it), and the bound's mechanism, an
+  uninterruptible JIT compile, holds for that statement too: measured under a
+  forced JIT, 128 terms (admitted) take 1.9 s and 800 take 22 s, a continuous
+  cost. A refusal (`JD0011`) was tried and rejected: profiles of 33 external
+  `$ne` terms or 65 tenant/level pairs answered right and would stop opening.
+  Wanted: a cheaper spelling of the fetch's predicate (regrouping its own
+  memberships), or a weight for it in the style of the external-operand weights.
 - [ ] **A migration over a UTF-16 file compares a query step's text terms by
   BINARY.** `migrate` still runs on a UTF-16 file (physical-transform key pages
   read it through its own decoder), and a `query` step's native text comparison

@@ -2171,6 +2171,33 @@ shell's `.dump`, or a script that reads each table and writes it to a new file)
 into a new database created with the default UTF-8 encoding, and open that.
 `migrate` over a UTF-16 file is unchanged.
 
+## 23. A retype refuses a value its cast would change
+
+- A rebuild that changed a mapped column's type copied it through `CAST` and
+  said nothing about a value the new type could not hold: on SQLite the text
+  `abc` became the integer `0`, `12.5` became `12`, `true` became the boolean
+  `false`, `-9223372036854775809` became `-9223372036854775808` and `81.125`
+  became the integer `81`; on PostgreSQL `12.5` stayed in the integer column,
+  `0.5` rounded into the boolean `true`, and `81` stayed in a boolean column. A
+  rebuild now checks the stored values ahead of its copy, where a cast can
+  change one (a text into an integer, a number or a boolean; a number into an
+  integer or a boolean; an integer into a boolean, and on SQLite into a number
+  a double does not hold exactly), and refuses the migration `JD0023` when one
+  would change, naming the member, the table and the first such value; the
+  migration rolls back with every row as it was. Only a value whose number the
+  cast would change or invent is refused: `007`, `+5`, ` 12`, `12.0` and `.5`
+  retype as before. The engines differ only where their casts do
+  ([MIGRATION-FORMAT §10](MIGRATION-FORMAT.md#10-the-rebuild-procedure)): SQLite
+  reads only the digits before a fraction or an exponent of a text, so `1e3` into
+  an integer is refused there and becomes `1000` on PostgreSQL.
+- A retype that changes nothing plans and runs as before (an integer, a number or
+  a boolean into text, a boolean into a number or an integer, an epoch column
+  into a number), and so does one whose values all survive. The plan cannot
+  see the rows, so `report.destructive` is unchanged; find the values the
+  refusal names with a query over the old column, correct them, and run again.
+  A migration an earlier release planned carries no check, so it copies as it
+  did; plan it again with this release to have the check.
+
 ## 24. A fill over a window past 100,000 buckets is refused
 
 - A `$resample` with a `fill` other than `omit` answers every bucket of its
