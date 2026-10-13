@@ -1879,6 +1879,22 @@ handler no more; no schema change is involved. Read `counts()` after rollout:
 rows that were looping now show as `dead`. `requeue(id)` gives a dead job one
 more attempt ([JOBS-FORMAT §10](JOBS-FORMAT.md)).
 
+## 16. Two answers that now match the engine
+
+- An equality or inequality of two columns of one entity binding, where a
+  column's policy reads a NULL as a present `null` (`null: 'null'`) and the
+  schema does not admit `null`, answered natively as SQL does (two NULLs
+  paired nothing, a NULL differed from nothing). It now runs in the engine and
+  answers as the engine does: two nulls are equal, a null differs from a
+  present value. `explain()` names `set` mode for such a query where it named
+  `native`, and `strict: true` refuses it `JD0010` where it answered before;
+  an ordering of the same pair is unchanged.
+- On the wasm SQLite host, an engine error raised inside a function the
+  store registers (`JQ2001` for a string operator over a stored number) was
+  reported as `JD2005`, wrapping a SQLite result-code error. It is now the
+  engine's own error with its own code, as on `node:sqlite`. Code that
+  branched on `JD2005` for such a query on wasm branches on the engine's code.
+
 ## Measured costs
 
 Exact identity stores complete canonical documents and model endpoints, so

@@ -823,19 +823,6 @@ what each does is its own documentation's job
   lists the index all the same. Wanted: a second typed column or an expression
   index that restores the seek, and `explain()` naming only the indexes a plan
   reads.
-- [ ] **An entity comparison of two columns of one family reads a NULL the
-  schema omits as a value.** `$eq: ['$t.a', '$t.c']` over two text columns of
-  an adopted table that read a NULL as a present `null` (`null: 'null'`) while
-  the schema omits `null` answers `[2, 4]` natively where the engine answers
-  `[1, 2, 3, 4]`: the entity planner trusts the schema over the column's NULL
-  policy for a pair of one family. Wanted: read the policy where the entity
-  gate decides, or refuse a pair whose column policy the schema does not state.
-- [ ] **The wasm SQLite host reports an engine error raised inside a
-  registered function as `JD2005`.** `node:sqlite` surfaces the engine's own
-  code (`JQ2001` for a string operator over a stored number) from a function
-  the hatch registers; the wasm build wraps it as a driver error, so one query
-  raises two codes on two hosts. Wanted: decide the contract and make both
-  hosts raise it.
 - [ ] **Strict mode refuses a `$get` with an unspellable member name where the
   hatch ran it.** A literal `$get` whose name holds a `"` or a control
   character is promoted by the schema and refused by the dialect's grammar

@@ -20,12 +20,30 @@ import { wasmSessions } from './wasm-session.js';
  */
 export function adaptOo1Database(sqlite3, db) {
   const capture = wasmSessions(sqlite3, db);
+  // SQLite turns an exception thrown inside a registered function into a
+  // generic result-code error that keeps only its text; the function's own
+  // exception is held here until the statement that called it fails, and
+  // that statement then throws it, as `node:sqlite` does.
+  /** @type {{ error: unknown } | null} */
+  let raised = null;
+  /**
+   * @template T
+   * @param {() => T} fn
+   * @returns {T}
+   */
+  const surfacing = (fn) => {
+    raised = null;
+    try { return fn(); }
+    catch (error) {
+      throw raised === null ? error : raised.error;
+    }
+  };
   return {
     ...(capture.session === undefined ? {} : { session: capture.session }),
     sessionReason: capture.reason,
     /** @param {string} sql */
     exec: (sql) => {
-      db.exec(sql);
+      surfacing(() => db.exec(sql));
     },
     /** @param {string} sql */
     prepare: (sql) => {
@@ -45,7 +63,7 @@ export function adaptOo1Database(sqlite3, db) {
       };
       const resetAfter = (fn) => {
         let result;
-        try { result = fn(); }
+        try { result = surfacing(fn); }
         catch (error) { try { statement.reset(); } catch { /* retain the initiating SQLite failure */ } throw error; }
         statement.reset();
         return result;
@@ -76,7 +94,7 @@ export function adaptOo1Database(sqlite3, db) {
           bind(params);
           return {
             next() {
-              if (statement.step()) return { done: false, value: statement.get({}) };
+              if (surfacing(() => statement.step())) return { done: false, value: statement.get({}) };
               statement.reset();
               return { done: true, value: undefined };
             },
@@ -91,7 +109,10 @@ export function adaptOo1Database(sqlite3, db) {
     },
     close: () => { capture.close(); db.close(); },
     registerFunction: (name, options, fn) => db.createFunction(name,
-      (_context, ...args) => fn(...args),
+      (_context, ...args) => {
+        try { return fn(...args); }
+        catch (error) { raised = { error }; throw error; }
+      },
       { deterministic: options?.deterministic === true, arity: -1 }),
   };
 }

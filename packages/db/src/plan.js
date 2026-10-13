@@ -4410,7 +4410,16 @@ export function planEntityPredicate(node, slot, shape) {
     if (pred.p === 'refCmp') {
       // the entity emitters compare two members of one plain family; a
       // pair that needs the family dispatch of a collection stays with the
-      // engine
+      // engine. A column whose policy reads a NULL as a present `null` can
+      // hold one whatever its schema omits, and an equality or inequality
+      // takes it for a value (the engine pairs two, SQL pairs none), so
+      // that side has the family of null too.
+      const withNull = (side) => {
+        const read = shape.entityFlavors.get(canonicalOf(side.segments))?.nullPolicy;
+        return read === 'null' && !side.families.includes('null') && (pred.op === 'eq' || pred.op === 'ne')
+          ? { ...side, families: [...side.families, 'null'] } : side;
+      };
+      pred = { ...pred, left: withNull(pred.left), right: withNull(pred.right) };
       if (plainFamily(pred) === null) {
         blocked = refusal(`$${pred.op}`, PREDICATE_REASONS.joinTerritory);
         return pred;

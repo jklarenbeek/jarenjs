@@ -6,6 +6,11 @@ capabilities are observed when the connection opens. The common oracle and
 lifecycle corpus is `test/db/store-hosts.test.js`; it checks values and coded
 errors across Node, worker, pool, wasm sessions and wasm journal fallback.
 
+An error a registered function raises reaches the caller as itself on
+`node:sqlite` and on wasm: the wasm adapter holds the exception SQLite reduces
+to a result code and throws it from the statement that called the function,
+so one query raises one code on both.
+
 Concurrent PostgreSQL first opens can race while creating the same collection
 or entity table. Each initialization transaction retries one catalog-creation
 collision after rollback, then re-reads and verifies the winning shape. Ordinary

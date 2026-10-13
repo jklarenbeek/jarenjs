@@ -53,6 +53,13 @@ product the engine builds, and beside a real edge it is a conjunct the engine
 decides. The comparisons that refine an edge, and a hop's correlation, follow
 the family rule and refuse any column that can read a NULL.
 
+An equality or inequality of two columns of one binding follows the same
+reading of NULL: a column whose policy reads a NULL back as a present `null`
+holds one whatever its schema omits, and the comparison is the engine's, which
+pairs two nulls and differs a null from every present value where SQL does
+neither. An ordering of the pair, and a pair of columns that admit no null,
+stay native.
+
 Grouping lowers over one root, or on SQLite, unordered, over a connected join of
 roots, with reconstructible keys/aggregates. A join is grouped through a derived
 table that numbers its rows in the engine's nested-loop order, every root's
