@@ -200,7 +200,7 @@ function planTicks(domain, rules, xOf, dateNames) {
  * @returns {any[]}
  */
 function planBands(domain, rules, xOf) {
-  const excluder = createExcluder(rules.excludes, rules.weekendStart);
+  const excluder = createExcluder(rules.excludes, rules.weekendStart, rules.includes?.days);
   if (!excluder.any) return [];
   const fromDay = Math.floor(domain.start / DAY_MS);
   const toDay = Math.ceil(domain.end / DAY_MS);

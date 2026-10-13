@@ -141,14 +141,19 @@ answer rather than only what the source said.
 ```
 
 `meta` holds the header lines **verbatim** (`title`, `dateFormat`,
-`axisFormat`, `excludes`, `tickInterval`, `weekday`, `weekend`,
-`todayMarker`), which is what keeps `printGantt` a fixed point. `rules`
-holds the same directives *interpreted*:
+`axisFormat`, `excludes`, `includes`, `inclusiveEndDates`, `tickInterval`,
+`weekday`, `weekend`, `todayMarker`), which is what keeps `printGantt` a
+fixed point. `rules` holds the same directives *interpreted*:
 `{ dateFormat, axisFormat, tick, weekStart, weekendStart, excludes,
-todayMarker }`, where `tick` is `{ amount, unit }` or `null`,
-`weekStart`/`weekendStart` are ISO weekdays (1 is Monday), and
-`excludes` is `{ weekends, weekdays[], days[] }` with `days` as day
-indexes from 1970-01-01.
+includes, inclusiveEndDates, todayMarker }`, where `tick` is
+`{ amount, unit }` or `null`, `weekStart`/`weekendStart` are ISO weekdays
+(1 is Monday), `excludes` is `{ weekends, weekdays[], days[] }` with
+`days` as day indexes from 1970-01-01, `includes` is `{ days[] }` in the
+same indexes, and `inclusiveEndDates` is a boolean. A tree written
+before `includes` and `inclusiveEndDates` existed lacks both members and
+reads as no exceptions and exclusive ends. Several `excludes` lines (or
+several `includes` lines) are one list, as in Mermaid, so `meta` holds
+their terms joined by a space on a single line.
 
 A task is
 `{ name, info, id, flags, start, end, duration, after, line }`. `info`
@@ -218,9 +223,27 @@ out one day per excluded day it crosses; an end written as an explicit
 *date* is the author's answer and is never pushed. The probes are the
 instants `start + k days`, so a task starting Friday noon and lasting a
 day ends Monday noon. Days are UTC days. This is not a holiday service:
-a schedule skips exactly what its own `excludes` line lists.
+a schedule skips exactly what its own `excludes` lines list.
 
-#### Three deliberate divergences from Mermaid
+`includes` is the exception list: a date written there (in the
+document's `dateFormat`) is a working day whatever `excludes` says, so it
+wins over `weekends`, a weekday name and an excluded date alike, and it
+does not matter which of the two directives comes first. It gives days
+back and removes none, so it changes nothing while nothing is excluded,
+and an included day is not shaded on the timeline. As in Mermaid, only a
+date can match: any other term on the line (a weekday name, `weekends`,
+the `10:00` of a time, a word) is ignored, and so is a trailing `%%`
+comment, which `excludes` and `inclusiveEndDates` accept as well.
+
+`inclusiveEndDates` takes no argument. With it, an end written as a date
+names the *last day worked*: the half-open `end` is the day after it, so
+`2024-01-01, 2024-01-03` occupies the first, second and third. A
+duration and `until` are exact instants and keep their meaning, and the
+extra day is added before anything that follows reads the end, so an
+`after` successor starts a day later too. The date end stays "the
+author's answer": the extra day is not pushed past `excludes` either.
+
+#### Four deliberate divergences from Mermaid
 
 1. **No clock.** Mermaid starts an undated first task *today*. This
    engine has no clock anywhere (`docs/ROADMAP.md`, "there is no now"),
@@ -232,6 +255,12 @@ a schedule skips exactly what its own `excludes` line lists.
    name, where Mermaid passes it through as text.
 3. **No guessed dependencies** — Mermaid falls back to today for an
    `after` naming an unknown id; this engine refuses.
+4. **A row named like a directive stays a row** — Mermaid reads every
+   line that starts with `includes` as that directive and drops the
+   task, so `includes the API docs : a1, 2024-01-05, 3d` vanishes
+   there. Here a line that starts with `includes` or `inclusiveEndDates`
+   and holds a colon that is not inside a time (`10:00`) is a task row,
+   which is what such a line was before the words were directives.
 
 ### 4.5 Secondary types, and the pie renderer
 

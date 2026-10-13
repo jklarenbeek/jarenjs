@@ -3,10 +3,10 @@
  * @file Gantt grammar → gantt AST: a schedule, resolved.
  *
  * Header directives (`title`, `dateFormat`, `axisFormat`, `excludes`,
- * `tickInterval`, `weekday`, `weekend`, `todayMarker`) are kept verbatim
- * in `meta` so the printer stays a fixed point, and are *also*
- * interpreted into `rules` — a compiled date parser, an axis pattern, a
- * tick step, a working calendar. `section` groups tasks; a task row
+ * `includes`, `inclusiveEndDates`, `tickInterval`, `weekday`, `weekend`,
+ * `todayMarker`) are kept verbatim in `meta` so the printer stays a
+ * fixed point, and are *also* interpreted into `rules` — a compiled
+ * date parser, an axis pattern, a tick step, a working calendar. `section` groups tasks; a task row
  * keeps its raw metadata string (`:done, id, 2014-01-06, 3d`) in `info`
  * for the same printing reason and gains the semantic members a
  * timeline needs: `{ id, flags, start, end, duration, after, line }`,
@@ -42,9 +42,45 @@ import {
 import { createExcluder, pushEndPastExclusions, dayIndexOf, DAY_MS } from '../gantt-calendar.js';
 
 const HEADER_KEYS = new Set([
-  'title', 'dateFormat', 'axisFormat', 'excludes', 'todayMarker',
-  'tickInterval', 'weekday', 'weekend',
+  'title', 'dateFormat', 'axisFormat', 'excludes', 'includes', 'inclusiveEndDates',
+  'todayMarker', 'tickInterval', 'weekday', 'weekend',
 ]);
+
+/**
+ * The two directives added after the task-row rule was fixed: a line
+ * that starts with one of these words and still reads as `Name : data`
+ * (a colon that is not inside a time such as `10:00`) is a task row, as
+ * it was before the words were directives. Mermaid reads such a line as
+ * the directive and drops the task; keeping the task is the divergence.
+ */
+const ROW_LIKE_KEYS = new Set(['includes', 'inclusiveEndDates']);
+
+/**
+ * @param {string} key - first word of the line
+ * @param {string} line - the trimmed line
+ * @returns {boolean}
+ */
+function isNamedLikeDirective(key, line) {
+  return ROW_LIKE_KEYS.has(key) && /(?<!\d):|:(?!\d)/.test(beforeComment(line));
+}
+
+/**
+ * A directive's argument without its trailing `%%` comment, which
+ * Mermaid's lexer skips.
+ * @param {string} text
+ * @returns {string}
+ */
+function beforeComment(text) {
+  const at = text.indexOf('%%');
+  return (at === -1 ? text : text.slice(0, at)).trim();
+}
+
+/**
+ * The directives whose lines accumulate: Mermaid concatenates the tokens
+ * of every `excludes` line (and every `includes` line) rather than
+ * letting the last one win.
+ */
+const LIST_KEYS = new Set(['excludes', 'includes']);
 
 /** The task flags Mermaid documents, in the order the AST lists them. */
 const FLAGS = Object.freeze(['done', 'active', 'crit', 'milestone']);
@@ -58,8 +94,8 @@ const FLAG_SET = new Set(FLAGS);
  * @returns {object}
  */
 export function parseGantt(lines, offset = 0, _header = '', options = {}) {
-  const { meta, metaLine, sections } = scan(lines, offset);
-  const rules = interpret(meta, metaLine, options.dateNames);
+  const { meta, metaLine, listed, sections } = scan(lines, offset);
+  const rules = interpret(meta, metaLine, listed, options.dateNames);
   resolve(sections, rules);
   return { meta, rules: rules.published, sections, domain: domainOf(sections) };
 }
@@ -72,13 +108,15 @@ export function parseGantt(lines, offset = 0, _header = '', options = {}) {
  * that later fails to resolve.
  * @param {string[]} lines
  * @param {number} offset
- * @returns {{ meta: any, metaLine: any, sections: any[] }}
+ * @returns {{ meta: any, metaLine: any, listed: any, sections: any[] }}
  */
 function scan(lines, offset) {
   /** @type {Record<string, string>} */
   const meta = {};
   /** @type {Record<string, number>} */
   const metaLine = {};
+  /** each line of a list directive, with its source line @type {Record<string, { text: string, line: number }[]>} */
+  const listed = {};
   const sections = [];
   let current = { name: null, tasks: [] };
   sections.push(current);
@@ -90,8 +128,15 @@ function scan(lines, offset) {
     const sp = line.indexOf(' ');
     const key = sp === -1 ? line : line.slice(0, sp);
 
-    if (HEADER_KEYS.has(key)) {
-      meta[key] = sp === -1 ? '' : line.slice(sp + 1).trim();
+    if (HEADER_KEYS.has(key) && !isNamedLikeDirective(key, line)) {
+      const value = sp === -1 ? '' : line.slice(sp + 1).trim();
+      if (LIST_KEYS.has(key)) {
+        const own = listed[key] ?? (listed[key] = []);
+        own.push({ text: beforeComment(value), line: at });
+        // placed now so the printer keeps the header order; joined once below
+        meta[key] = '';
+      }
+      else meta[key] = key === 'inclusiveEndDates' ? beforeComment(value) : value;
       metaLine[key] = at;
       continue;
     }
@@ -113,10 +158,16 @@ function scan(lines, offset) {
     }
   }
 
+  for (const key of LIST_KEYS) {
+    if (listed[key] !== undefined) {
+      meta[key] = listed[key].map((part) => part.text).filter((text) => text !== '').join(' ');
+    }
+  }
+
   // Drop a leading empty default section if unused.
   const trimmed = sections[0].name === null && sections[0].tasks.length === 0
     ? sections.slice(1) : sections;
-  return { meta, metaLine, sections: trimmed };
+  return { meta, metaLine, listed, sections: trimmed };
 }
 
 //#endregion
@@ -127,10 +178,11 @@ function scan(lines, offset) {
  * the layout need. Every failure names its own source line.
  * @param {Record<string, string>} meta
  * @param {Record<string, number>} metaLine
+ * @param {Record<string, { text: string, line: number }[]>} listed
  * @param {any} dateNames
  * @returns {any}
  */
-function interpret(meta, metaLine, dateNames) {
+function interpret(meta, metaLine, listed, dateNames) {
   const dateFormat = meta.dateFormat === undefined || meta.dateFormat === ''
     ? DEFAULT_DATE_FORMAT : meta.dateFormat;
   const axisFormat = meta.axisFormat === undefined || meta.axisFormat === ''
@@ -164,15 +216,23 @@ function interpret(meta, metaLine, dateNames) {
     weekendStart = got.value;
   }
 
-  const excludes = readExcludes(meta.excludes, metaLine.excludes ?? 0, readDate);
-  const excluder = createExcluder(excludes, weekendStart);
+  if (meta.inclusiveEndDates !== undefined && meta.inclusiveEndDates !== '') {
+    // Mermaid's grammar rejects the line too
+    fail(`inclusiveEndDates takes no argument, and '${meta.inclusiveEndDates}' follows it`,
+      metaLine.inclusiveEndDates ?? 0);
+  }
+
+  const excludes = readExcludes(listed.excludes, readDate);
+  const includes = readIncludes(listed.includes, readDate);
+  const excluder = createExcluder(excludes, weekendStart, includes.days);
 
   return {
     readDate,
     excluder,
     published: {
       dateFormat, axisFormat, tick, weekStart, weekendStart,
-      excludes, todayMarker: meta.todayMarker ?? null,
+      excludes, includes, inclusiveEndDates: meta.inclusiveEndDates !== undefined,
+      todayMarker: meta.todayMarker ?? null,
     },
   };
 }
@@ -207,36 +267,83 @@ function compilePattern(pattern, line, adapt, directive, names, asParser) {
 }
 
 /**
+ * The terms of a list directive, lowercased as Mermaid reads them, each
+ * with the source line of the directive line that wrote it.
+ * @param {{ text: string, line: number }[] | undefined} parts
+ * @returns {{ term: string, line: number }[]}
+ */
+function termsOf(parts) {
+  const out = [];
+  for (const { text, line } of parts ?? []) {
+    for (const term of text.toLowerCase().split(/[\s,]+/)) {
+      if (term !== '') out.push({ term, line });
+    }
+  }
+  return out;
+}
+
+/**
  * Parse the `excludes` terms: `weekends`, weekday names, and explicit
  * dates in the document's own `dateFormat` (or plain ISO, which Mermaid
  * also accepts).
- * @param {string | undefined} text
- * @param {number} line
+ * @param {{ text: string, line: number }[] | undefined} parts
  * @param {(s: string) => any} readDate
  * @returns {{ weekends: boolean, weekdays: number[], days: number[] }}
  */
-function readExcludes(text, line, readDate) {
-  const out = { weekends: false, weekdays: [], days: [] };
-  if (text === undefined || text === '') return out;
-  for (const term of text.toLowerCase().split(/[\s,]+/)) {
-    if (term === '') continue;
-    if (term === 'weekends') { out.weekends = true; continue; }
+function readExcludes(parts, readDate) {
+  let weekends = false;
+  const weekdays = new Set();
+  const days = new Set();
+  for (const { term, line } of termsOf(parts)) {
+    if (term === 'weekends') { weekends = true; continue; }
     const weekday = ISO_WEEKDAYS[term];
     if (weekday !== undefined) {
-      if (!out.weekdays.includes(weekday)) out.weekdays.push(weekday);
+      weekdays.add(weekday);
       continue;
     }
-    const at = readInstant(term, readDate);
-    if (Number.isNaN(at)) {
+    const day = dayOfTerm(term, readDate);
+    if (Number.isNaN(day)) {
       fail(`excludes '${term}' is neither 'weekends', a weekday name,`
         + ' nor a date in this diagram\'s dateFormat', line);
     }
-    const day = dayIndexOf(at);
-    if (!out.days.includes(day)) out.days.push(day);
+    days.add(day);
   }
-  out.weekdays.sort((a, b) => a - b);
-  out.days.sort((a, b) => a - b);
-  return out;
+  return {
+    weekends,
+    weekdays: [...weekdays].sort((a, b) => a - b),
+    days: [...days].sort((a, b) => a - b),
+  };
+}
+
+/**
+ * Parse the `includes` terms: dates in the document's `dateFormat` (or
+ * plain ISO), the days that stay working days whatever `excludes` says.
+ * Mermaid compares each probed day with these strings and with nothing
+ * else, so any other term (a weekday name, `weekends`, the `10:00` of a
+ * time, a word) matches no day and is ignored here exactly as it is
+ * there.
+ * @param {{ text: string, line: number }[] | undefined} parts
+ * @param {(s: string) => any} readDate
+ * @returns {{ days: number[] }}
+ */
+function readIncludes(parts, readDate) {
+  const days = new Set();
+  for (const { term } of termsOf(parts)) {
+    const day = dayOfTerm(term, readDate);
+    if (!Number.isNaN(day)) days.add(day);
+  }
+  return { days: [...days].sort((a, b) => a - b) };
+}
+
+/**
+ * The UTC day index a listed date names.
+ * @param {string} term
+ * @param {(s: string) => any} readDate
+ * @returns {number} NaN when the term is not a date
+ */
+function dayOfTerm(term, readDate) {
+  const at = readInstant(term, readDate);
+  return Number.isNaN(at) ? NaN : dayIndexOf(at);
 }
 
 /** ISO `yyyy-MM-dd`, which Mermaid accepts for an excluded date whatever the dateFormat is. */
@@ -417,7 +524,10 @@ function resolveTask(task, byId, specs, state, rules) {
   else {
     const at = readInstant(spec.endText, rules.readDate);
     if (!Number.isNaN(at)) {
-      end = at;
+      // inclusiveEndDates: the date names the last day worked, so the
+      // half-open end is the day after it (a duration or `until` is
+      // already an exact instant and keeps its meaning)
+      end = rules.published.inclusiveEndDates ? at + DAY_MS : at;
     }
     else {
       const duration = parseTaskDuration(spec.endText);

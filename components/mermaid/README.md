@@ -189,8 +189,10 @@ Launch : milestone, m1, after a3, 0d
 
 Every directive means something. `dateFormat` compiles to a strict date
 parser, `axisFormat` to the axis labels, `tickInterval` and `weekday` to
-the tick boundaries, and `excludes`/`weekend` to a working calendar that
-moves a duration-derived end past the days it skips. Tick positions come
+the tick boundaries, and `excludes`/`includes`/`weekend` to a working
+calendar that moves a duration-derived end past the days it skips (an
+`includes` date is a working day whatever `excludes` says), while
+`inclusiveEndDates` makes an end written as a date the last day worked. Tick positions come
 from `@jarenjs/core/dates` — the same ladder the chart component's time
 axis reads — so a timeline and a chart cannot disagree about where a
 week begins.
@@ -198,7 +200,7 @@ week begins.
 Each task carries `{ id, flags, start, end, duration, after, line }`
 beside its raw `info`, with `start`/`end` as epoch milliseconds and the
 interval half-open. The grammar, the vendored conformance table and the
-three deliberate divergences from Mermaid are in
+four deliberate divergences from Mermaid are in
 [docs/MERMAID-FORMAT.md §4.4](./docs/MERMAID-FORMAT.md). The load-bearing
 one: **there is no clock here**, so a schedule with no dated anchor is a
 line-aware error rather than a diagram whose meaning changes daily.
@@ -425,7 +427,18 @@ as `<br/>`, and prints a very small or very large pie value as a plain decimal
 (`1e-7` is not a number a pie row reads, so the slice vanished); an `erDiagram`
 attribute keeps the quoted comment that ends its line (`string name PK "the name"`)
 as a `comment` member, which `toMermaid` prints, and reads keys written
-comma-separated (`PK, FK` kept only `FK`), which `toMermaid` now prints that way.
+comma-separated (`PK, FK` kept only `FK`), which `toMermaid` now prints that way;
+repeated gantt `excludes` lines add up, as they do in Mermaid, where the last line
+used to replace the earlier ones (`excludes saturday` then `excludes sunday` with a
+task `2024-01-05, 3d` ended on 2024-01-09 and now ends on 2024-01-10), and a printed
+gantt holds them on one line, so its tasks sit a line higher on reading it back;
+a gantt `includes` line (dates that stay working days whatever `excludes` says) and
+`inclusiveEndDates` (an end written as a date is the last day worked) used to be
+ignored text and now change the schedule of every document that carries them; a
+trailing `%%` comment on `excludes` is skipped where it used to be refused as an
+unknown term; `inclusiveEndDates` followed by anything but a comment is an error,
+as in Mermaid; and a task row whose name starts with `includes` or
+`inclusiveEndDates` stays a task row.
 
 ## Exports
 

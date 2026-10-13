@@ -23,6 +23,8 @@ const CORPUS = [
   'mindmap\n  root\n    child',
   'gantt\ntitle Plan\ndateFormat YYYY-MM-DD\nexcludes weekends\ntickInterval 1week\nweekday monday\n'
     + 'section Build\nDesign : done, a1, 2024-01-04, 3d\nShip : milestone, m1, after a1, 0d',
+  'gantt\ndateFormat YYYY-MM-DD\ninclusiveEndDates\nexcludes weekends\nincludes 2024-01-06\n'
+    + 'section Build\nDesign : a1, 2024-01-04, 2024-01-08',
 ];
 
 describe('the DiagramDocument AST JSON Schema', function () {

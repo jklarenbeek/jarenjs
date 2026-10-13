@@ -348,6 +348,25 @@
             }
           }
         },
+        "includes": {
+          "description": "Dates that stay working days whatever `excludes` says, as day indexes from 1970-01-01. Absent in a tree written before `includes` existed, which reads as no exceptions.",
+          "type": "object",
+          "required": [
+            "days"
+          ],
+          "properties": {
+            "days": {
+              "type": "array",
+              "items": {
+                "type": "integer"
+              }
+            }
+          }
+        },
+        "inclusiveEndDates": {
+          "description": "Whether an end written as a date names the last day worked. Absent in a tree written before the directive existed, which reads as false.",
+          "type": "boolean"
+        },
         "todayMarker": {
           "type": [
             "string",

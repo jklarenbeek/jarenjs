@@ -62,7 +62,7 @@ so each computes at most once.
 | `src/parser/config.js` | `---` front-matter + `%%{init}%%` → `config` (built-in YAML subset; md parser injectable) |
 | `src/parser/{flowchart,sequence,class,er,state,gantt,pie}.js` | char-code recursive descent; module-const sticky regexes; `fail(msg, line)` |
 | `src/parser/gantt-grammar.js` | the three Gantt token grammars (dayjs `dateFormat`, strftime `axisFormat`, `tickInterval`/duration) adapted onto the core LDML vocabulary — never a string replace |
-| `src/gantt-calendar.js` | the `excludes` working calendar over `@jarenjs/core/series` intervals, beside the day-by-day oracle it is differential-tested against |
+| `src/gantt-calendar.js` | the `excludes`/`includes` working calendar over `@jarenjs/core/series` intervals, beside the day-by-day oracle it is differential-tested against |
 | `src/parser/index.js` | detect type on the first non-config line, dispatch, assemble the envelope |
 | `src/ast.js` | monomorphic node constructors + `walkSequence` |
 | `src/to-mermaid.js` | canonical AST → text printer (round-trip fixed point) |

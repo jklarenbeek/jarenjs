@@ -1,7 +1,7 @@
 //@ts-check
 /**
- * @file The working calendar behind `excludes`: which whole days a
- * schedule skips, and what a duration therefore means.
+ * @file The working calendar behind `excludes` and `includes`: which
+ * whole days a schedule skips, and what a duration therefore means.
  *
  * Two implementations of one answer live here on purpose. The exported
  * one expresses an excluded stretch as half-open day intervals and
@@ -20,7 +20,8 @@
  * UTC days, because this engine has no local zone and no clock.
  *
  * This is not a holiday service. A schedule skips exactly the weekends,
- * weekday names and dates its own `excludes` line lists.
+ * weekday names and dates its own `excludes` lines list, less the dates
+ * its `includes` lines give back.
  */
 
 import { mergeIntervals, coverageOf } from '@jarenjs/core/series';
@@ -60,9 +61,12 @@ export function dayIndexOf(ms) {
  * @param {{ weekends: boolean, weekdays: number[], days: number[] }} rules -
  *   `weekdays` are ISO weekday numbers, `days` are day indexes
  * @param {number} weekendStart - ISO weekday the weekend starts on
+ * @param {number[]} [includeDays] - day indexes `includes` names: working
+ *   days whatever the exclusions say, so they win over `weekends`, a
+ *   weekday name and an excluded date alike
  * @returns {Excluder}
  */
-export function createExcluder(rules, weekendStart) {
+export function createExcluder(rules, weekendStart, includeDays = []) {
   const weekdays = new Set(rules.weekdays);
   if (rules.weekends) {
     weekdays.add(weekendStart);
@@ -70,11 +74,14 @@ export function createExcluder(rules, weekendStart) {
     weekdays.add(weekendStart === 7 ? 1 : weekendStart + 1);
   }
   const days = new Set(rules.days);
+  const included = new Set(includeDays);
+  // `includes` alone changes nothing: with nothing excluded there is no
+  // day for it to win back (Mermaid skips the whole walk then too)
   const any = weekdays.size > 0 || days.size > 0;
 
   /** @param {number} dayIndex @returns {boolean} */
-  const isExcludedDay = (dayIndex) => days.has(dayIndex)
-    || weekdays.has(isoWeekdayFromDays(dayIndex));
+  const isExcludedDay = (dayIndex) => !included.has(dayIndex)
+    && (days.has(dayIndex) || weekdays.has(isoWeekdayFromDays(dayIndex)));
 
   /** @param {number} fromDay @param {number} toDay */
   const intervalsIn = (fromDay, toDay) => {
