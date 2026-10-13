@@ -29,6 +29,29 @@ const BOOKSTORE = {
 };
 const bookstore = { label: 'bookstore', data: { data: j(BOOKSTORE) } };
 
+/** The user schema the emit examples share: a named definition, an enum, a
+ * required member and a constraint a type cannot express. */
+const EMIT_USER = {
+  $defs: { Id: { type: 'string', format: 'uuid' } },
+  type: 'object',
+  description: 'A user',
+  properties: {
+    id: { $ref: '#/$defs/Id' },
+    name: { type: 'string', minLength: 2 },
+    role: { enum: ['admin', 'user'] },
+    tags: { type: 'array', items: { type: 'string' } },
+  },
+  required: ['id', 'name'],
+};
+
+/** The configuration schema the emit normalizer examples share: a defaulted
+ * member and a coercible one, so the accepted and normalized types differ. */
+const EMIT_CONFIG = {
+  type: 'object',
+  required: ['name'],
+  properties: { name: { type: 'string' }, port: { type: 'integer', default: 8080 }, verbose: { type: 'boolean', default: false } },
+};
+
 /**
  * One invalid-data example per message locale the validate engine offers
  * besides English, derived from the engine's own option choices so a locale
@@ -701,4 +724,23 @@ is a fixed point.
         http: { method: 'GET', path: '/api/catalog' } },
     } }) },
     datasets: [{ label: 'nothing to dispatch', data: { call: '' } }] },
+
+  // ——— Emit (JSON Schema → type model → TypeScript or Markdown, no data) ———
+  { id: 'emit-user', label: 'A user as TypeScript', engine: 'emit', config: { target: 'typescript', objects: 'open', normalize: 'none' },
+    source: { schema: j(EMIT_USER) }, datasets: [] },
+  { id: 'emit-markdown', label: 'The same user as a Markdown reference', engine: 'emit', config: { target: 'markdown', objects: 'open', normalize: 'none' },
+    source: { schema: j(EMIT_USER) }, datasets: [] },
+  { id: 'emit-closed', label: 'A closed object', engine: 'emit', config: { target: 'typescript', objects: 'closed', normalize: 'none' },
+    source: { schema: j(EMIT_USER) }, datasets: [] },
+  { id: 'emit-defaults', label: 'A default: present after, optional before', engine: 'emit', config: { target: 'typescript', objects: 'closed', normalize: 'defaults' },
+    source: { schema: j(EMIT_CONFIG) }, datasets: [] },
+  { id: 'emit-coerce', label: 'Coercion: widened on the way in', engine: 'emit', config: { target: 'typescript', objects: 'closed', normalize: 'coerce' },
+    source: { schema: j(EMIT_CONFIG) }, datasets: [] },
+  { id: 'emit-twins', label: 'Accepted and normalized twins', engine: 'emit', config: { target: 'typescript', objects: 'closed', normalize: 'both' },
+    source: { schema: j(EMIT_CONFIG) }, datasets: [] },
+  { id: 'emit-recursive', label: 'A recursive tree ($ref cycle)', engine: 'emit', config: { target: 'typescript', objects: 'closed', normalize: 'none' },
+    source: { schema: j({ $defs: { Node: { type: 'object', required: ['label'], properties: {
+      label: { type: 'string' }, children: { type: 'array', items: { $ref: '#/$defs/Node' } } } } },
+    $ref: '#/$defs/Node' }) },
+    datasets: [] },
 ];

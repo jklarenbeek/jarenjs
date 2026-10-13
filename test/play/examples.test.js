@@ -137,4 +137,12 @@ describe('@jarenjs/play — the example library', () => {
     const pinned = new Set(EXAMPLES.filter((e) => e.engine === 'validate').map((e) => e.config?.locale));
     assert.deepStrictEqual(locales.filter((l) => !pinned.has(l)), [], 'every offered locale has an example that pins it');
   });
+
+  it('the library shows every choice of the emit engine\'s option panes', () => {
+    const emitExamples = EXAMPLES.filter((e) => e.engine === 'emit');
+    for (const pane of ENGINES.emit.optionPanes) {
+      const shown = new Set(emitExamples.map((e) => e.config?.[pane.key]));
+      assert.deepStrictEqual(pane.choices.map((c) => c.value).filter((v) => !shown.has(v)), [], `every ${pane.key} choice has an emit example`);
+    }
+  });
 });

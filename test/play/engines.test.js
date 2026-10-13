@@ -9,6 +9,7 @@ import * as assert from 'node:assert';
 
 import { runExample, EXAMPLES, ENGINES } from '@jarenjs/play';
 import { createJsltRegistry, mathPack, financePack, statsPack } from '@jarenjs/json/jslt';
+import { compileEmitModel, emitTypeScript, emitMarkdown } from '@jarenjs/emit';
 
 const ops = createJsltRegistry().use(mathPack).use(financePack).use(statsPack);
 
@@ -436,5 +437,128 @@ describe('@jarenjs/play — the contract engine (the one async run)', () => {
     assert.strictEqual(r.ok, false);
     assert.match(String(r.error.code), /^JC00\d\d$/);
     assert.deepStrictEqual([r.error.pane, r.error.path], ['document', '/operations/catalog.load/output']);
+  });
+});
+
+describe('@jarenjs/play — the emit engine (a schema compiles to a type model and renders)', () => {
+  const schema = JSON.stringify({
+    $defs: { Id: { type: 'string', minLength: 3 } },
+    type: 'object',
+    properties: { id: { $ref: '#/$defs/Id' }, role: { enum: ['admin', 'user'] }, n: { type: 'integer', default: 1 } },
+    required: ['id'],
+  });
+  const emit = (source, config) => runExample('emit', { schema: source }, {}, { config });
+
+  it('renders TypeScript by default, exactly what the package emits, with the model behind the depth toggle', () => {
+    const r = emit(schema);
+    assert.strictEqual(r.ok, true, r.error?.message);
+    assert.deepStrictEqual(r.panels.map((p) => [p.id, p.kind, p.depth]), [['out', 'code', undefined], ['model', 'code', 'deep']]);
+    assert.strictEqual(r.panels[0].text, emitTypeScript(JSON.parse(schema), { banner: false }));
+    assert.strictEqual(r.panels[0].text, [
+      '/**',
+      ' * Schema constraints this type cannot express: minLength=3',
+      ' */',
+      'export type Id = string;',
+      '',
+      'export interface Root {',
+      '  id: Id;',
+      '  role?: "admin" | "user";',
+      '  /**',
+      '   * Schema constraints this type cannot express: type="integer"',
+      '   */',
+      '  n?: number;',
+      '  [key: string]: unknown;',
+      '}',
+      '',
+    ].join('\n'));
+    assert.deepStrictEqual(JSON.parse(r.panels[1].text), compileEmitModel(JSON.parse(schema)));
+    // both phases are measured: the model compiles, then the stylesheet renders it
+    assert.ok(r.timing.compileMs >= 0 && r.timing.runMs >= 0);
+  });
+
+  it('the Markdown target renders the same model as a reference', () => {
+    const r = emit(schema, { target: 'markdown' });
+    assert.strictEqual(r.ok, true);
+    assert.strictEqual(r.panels[0].text, emitMarkdown(JSON.parse(schema)));
+    assert.match(r.panels[0].text, /^## Id$/m);
+    assert.match(r.panels[0].text, /^\| `role` \| `"admin" or "user"` \| no \|$/m);
+  });
+
+  it('the objects option closes the index signature, and a value it does not offer is the default', () => {
+    assert.match(out(emit(schema)), /\[key: string\]: unknown;/);
+    assert.doesNotMatch(out(emit(schema, { objects: 'closed' })), /\[key: string\]/);
+    assert.strictEqual(out(emit(schema, { objects: 'nope', target: 'nope', normalize: 'nope' })), out(emit(schema)));
+  });
+
+  it('the normalizer option names the accepted twin only where the type differs', () => {
+    const names = (config) => [...out(emit(schema, config)).matchAll(/^export (?:interface|type) (\w+)/gm)].map((m) => m[1]);
+    assert.deepStrictEqual(names({}), ['Id', 'Root']);
+    // a default makes `n` present afterwards and optional on the way in
+    assert.deepStrictEqual(names({ normalize: 'defaults' }), ['Id', 'Root', 'RootInput']);
+    assert.match(out(emit(schema, { normalize: 'defaults' })), /interface RootInput \{[^}]*\bn\?: number;/);
+    // coercion widens what the input accepts
+    assert.match(out(emit(schema, { normalize: 'coerce' })), /interface RootInput \{[^}]*\bn\?: number \| string;/);
+    // the normalized side first, then the accepted twins
+    assert.deepStrictEqual(names({ normalize: 'both' }), ['Id', 'Root', 'IdInput', 'RootInput']);
+  });
+
+  it('a boolean schema is a schema', () => {
+    assert.strictEqual(out(emit('true')), 'export type Root = unknown;\n');
+    assert.strictEqual(out(emit('false')), 'export type Root = never;\n');
+  });
+
+  it('a reference cycle terminates', () => {
+    const r = emit('{"$defs":{"Node":{"type":"object","properties":{"next":{"$ref":"#/$defs/Node"}}}},"$ref":"#/$defs/Node"}', { objects: 'closed' });
+    assert.strictEqual(r.ok, true);
+    assert.match(out(r), /export interface Node \{\s+next\?: Node;\s+\}/);
+  });
+
+  it('refuses what is not a schema at the schema pane, where the emitter would answer an empty file', () => {
+    for (const bad of ['', '5', '[]', 'null', '"x"']) {
+      const r = emit(bad);
+      assert.strictEqual(r.ok, false, JSON.stringify(bad));
+      assert.deepStrictEqual(r.error, { message: 'schema: expected a JSON Schema, an object or a boolean', pane: 'schema' });
+      assert.deepStrictEqual(r.panels, []);
+    }
+    const broken = emit('{');
+    assert.strictEqual(broken.ok, false);
+    assert.strictEqual(broken.error.pane, 'schema');
+    assert.match(broken.error.message, /^schema: /);
+  });
+
+  // a schema nested past the host call stack is the one input that makes either phase throw:
+  // the model compiler has no refusal of its own, and the renderer's JTLT dispatch has a depth limit
+  const nested = (depth) => '{"type":"array","items":'.repeat(depth) + '{"type":"string"}' + '}'.repeat(depth);
+
+  it('a schema nested past the call stack fails in the compile phase, located at the schema pane', () => {
+    const r = emit(nested(20000));
+    assert.strictEqual(r.ok, false);
+    assert.deepStrictEqual(r.error, { message: 'Maximum call stack size exceeded', pane: 'schema' });
+    assert.strictEqual(r.timing, null);
+    assert.deepStrictEqual(r.panels, []);
+  });
+
+  it('a schema the model compiles but the renderer cannot dispatch fails in the render phase with the stylesheet\'s code, at the schema pane', () => {
+    // the renderer needs more stack per level than the compiler, so some depth compiles and
+    // does not render; the depth where that happens depends on the host stack, so scan for it
+    for (const target of ['typescript', 'markdown']) {
+      let found;
+      for (let depth = 1100; depth <= 1500 && found === undefined; depth += 100) {
+        const r = emit(nested(depth), { target });
+        if (r.ok === false && r.error.code === 'TL2003') found = r;
+      }
+      assert.ok(found, `${target}: some depth between 1100 and 1500 renders no further`);
+      assert.strictEqual(found.error.pane, 'schema');
+      assert.match(found.error.message, /^TL2003: JT2001: dispatch /);
+      assert.strictEqual(typeof found.error.path, 'string', 'the stylesheet states where');
+    }
+  });
+
+  it('declares one source pane, no data pane and three option panes whose defaults are choices', () => {
+    const engine = ENGINES.emit;
+    assert.deepStrictEqual(engine.sourcePanes.map((p) => p.key), ['schema']);
+    assert.deepStrictEqual(engine.dataPanes, []);
+    assert.deepStrictEqual(engine.optionPanes.map((p) => p.key), ['target', 'objects', 'normalize']);
+    for (const pane of engine.optionPanes) assert.ok(pane.choices.some((c) => c.value === pane.default), pane.key);
   });
 });

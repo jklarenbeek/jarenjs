@@ -5,7 +5,7 @@ card:
   blurb: >-
     The engine playground: pick a JSON engine — JSON Schema, JSONPath, JSON
     Pointer, JSON Patch, query, JSLT, JTLT, JOSL, CSV, Markdown, Mermaid,
-    Contract — feed it an input and one or more datasets from a curated example
+    Contract, Emit — feed it an input and one or more datasets from a curated example
     library, and watch it run. Understand an engine standalone before composing
     it in the Studio. The engine is headless; the component is the playground UI.
 ---

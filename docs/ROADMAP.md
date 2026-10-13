@@ -248,11 +248,11 @@ stateless, no worker, no live subscription, no side channel. That is why flow
 and the document store are studio file kinds instead, and why adding an engine
 costs a descriptor plus examples and no UI code at all.
 
-- [ ] **Engines the rule admits and the registry lacks** — fifteen ship.
-  `@jarenjs/linq` (a fluent chain compiles to a query document), `@jarenjs/emit`
-  (a schema compiles to TypeScript), JSONX as an *input* dialect rather than
-  only an output, and the `@jarenjs/core` kernels the query operators already
-  expose (geo, dates, math, text) all satisfy the rule and have no descriptor.
+- [ ] **Engines the rule admits and the registry lacks** — sixteen ship.
+  `@jarenjs/linq` (a fluent chain compiles to a query document), JSONX as an
+  *input* dialect rather than only an output, and the `@jarenjs/core` kernels
+  the query operators already expose (geo, dates, math, text) all satisfy the
+  rule and have no descriptor.
   The streaming readers are the interesting refusal: the JOSL and CSV stream
   parsers are pure, but they consume a stream rather than a string, so a
   descriptor for them first needs a source pane that means "feed this in

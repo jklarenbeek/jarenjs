@@ -3,7 +3,8 @@
 **A JSON-engine playground — understand an engine before you compose it.**
 
 Pick an engine (JSONPath, JSON Pointer, JSON Patch, `$query`, JSLT,
-markdown, mermaid, a `$contract` document, …), feed it a source input and
+markdown, mermaid, a `$contract` document, a JSON Schema emitted as
+TypeScript, …), feed it a source input and
 one or more datasets from a curated example library, and watch it run. Where `@jarenjs/studio` is for
 building an application out of many files, `@jarenjs/play` is for
 learning one engine standalone — a reference bench you experiment on first.
@@ -53,7 +54,12 @@ See [docs/PLAY-FORMAT.md](docs/PLAY-FORMAT.md) for descriptors and results,
 and [ARCHITECTURE.md](ARCHITECTURE.md) for the state, action and run-loop
 contract an embedding host supplies. Query, JSLT, JTLT and XQuery expose
 an editable JSON externals pane; the JSON Schema engine an editable
-referenced-schemas pane, so a schema can `$ref` another by `$id`.
+referenced-schemas pane, so a schema can `$ref` another by `$id`. The Emit
+engine takes a schema and no data: it compiles the schema to the type model
+`@jarenjs/emit` publishes and renders it as TypeScript declarations or a
+Markdown reference (the model rides behind the depth toggle), with option
+selects for the target, open or closed objects, and the normalizer that makes
+the accepted and normalized types differ.
 
 Answers that changed (upgrade notes): a host `validate` runner now receives a
 fourth argument, the parsed referenced schemas (`[]` when the pane is empty),

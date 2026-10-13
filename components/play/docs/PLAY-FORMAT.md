@@ -30,6 +30,9 @@ EnginePane = { key: string, label: string, control?: 'code' | 'text' }
   none, and malformed JSON, a non-array, a member without a string `$id` or
   a repeated `$id` is attributed to that pane. The pane persists and shares
   like any other source pane.
+  The Emit engine's single `schema` pane takes a JSON Schema (an object or a
+  boolean); malformed JSON or any other value is attributed to that pane,
+  because the emitter itself answers such a value with an empty file.
 - `dataPanes` are the JSON the engine runs against: usually one `data`; a
   patch's is its `target`; markdown / mermaid / charts have **none** — the
   source is everything.
@@ -164,9 +167,11 @@ the switcher appears whenever an example has ≥ 2 datasets.
 The library covers what an engine ships, not a sample of it: `charts` holds one
 example per chart type, `mermaid` one per laid-out diagram kind (flowchart,
 sequence, state, gantt, class, ER, pie), and `validate` one example per offered
-message locale, derived from the engine's own `locale` choices. A test pins the
-chart types to the chart schema's list and the locales to the engine's choices,
-so a type or locale added without an example fails it.
+message locale, derived from the engine's own `locale` choices, and `emit` one
+example per choice of each of its option panes (target, objects, normalizer).
+A test pins the chart types to the chart schema's list and the locales and emit
+choices to the engine's choices, so a type, locale or choice added without an
+example fails it.
 
 ## §5 Host-injected seams (the dependency-light contract)
 

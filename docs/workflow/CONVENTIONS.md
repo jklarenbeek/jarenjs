@@ -28,7 +28,7 @@ this file wins and the playbook is repaired.
   `@jarenjs/core` + `@jarenjs/view`, and their component layers add
   `@jarenjs/app`/`@jarenjs/forms` at most. `play` and `studio` host the suite's
   engines and edit their documents, so they import those packages too: play's
-  engine `json`, `josl`, `validate` and `contract`; studio `contract`, `json`,
+  engine `json`, `josl`, `validate`, `contract` and `emit`; studio `contract`, `json`,
   `validate`, `formats`, `flow` and `app` in both layers, and `db` in its
   engine. **No component imports another** — not by name, not by
   a relative path into its folder. Cooperation across components is by an

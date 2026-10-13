@@ -21,6 +21,9 @@ import { createTypeTestCompiler } from '@jarenjs/validate/query';
 import { compileContract } from '@jarenjs/contract';
 import { openLocalClient } from '@jarenjs/contract/local';
 import { toOpenApi, toTypeScript } from '@jarenjs/contract/project';
+import { compileEmitModel } from '@jarenjs/emit';
+import { renderTypeScript } from '@jarenjs/emit/typescript';
+import { renderMarkdown } from '@jarenjs/emit/markdown';
 import { formatMs } from './format.js';
 
 const compileTypeTest = createTypeTestCompiler();
@@ -662,6 +665,50 @@ export const ENGINE_LIST = [
         { id: 'types', label: 'TypeScript', kind: 'code', text: types },
         dispatch,
       ], t1 - t0, t2 - t1);
+    },
+  },
+  {
+    // two stages, like every engine here: the schema compiles to a TYPE MODEL
+    // (the compile phase), and a stylesheet renders the model as the chosen
+    // target (the run phase) — the model is the deep panel, so the learner
+    // sees that the target language is the only thing the stylesheet owns
+    id: 'emit', label: 'Emit', lead: 'A JSON Schema compiles to a type model and renders as TypeScript declarations or a Markdown reference.',
+    sourcePanes: [{ key: 'schema', label: 'JSON Schema', control: 'code' }],
+    dataPanes: [],
+    optionPanes: [
+      { key: 'target', label: 'Target', default: 'typescript', choices: [{ value: 'typescript', label: 'TypeScript' }, { value: 'markdown', label: 'Markdown' }] },
+      { key: 'objects', label: 'Objects', default: 'open', choices: [{ value: 'open', label: 'open' }, { value: 'closed', label: 'closed' }] },
+      {
+        key: 'normalize', label: 'Normalizer', default: 'none',
+        choices: [
+          { value: 'none', label: 'none' }, { value: 'defaults', label: 'defaults' },
+          { value: 'coerce', label: 'coercion' }, { value: 'both', label: 'both' },
+        ],
+      },
+    ],
+    run(source, data, options) {
+      const s = parseJson(source.schema, 'schema'); if (s.error) return failParse(s);
+      // a schema is an object or a boolean; the emitter answers any other
+      // value with an empty file, which a learner would read as a result
+      if (s.value === null || (typeof s.value !== 'object' && typeof s.value !== 'boolean') || Array.isArray(s.value)) {
+        return fail('schema: expected a JSON Schema, an object or a boolean', undefined, { pane: 'schema' });
+      }
+      const cfg = options?.config ?? {};
+      const normalize = cfg.normalize === 'defaults' ? { useDefaults: true }
+        : cfg.normalize === 'coerce' ? { coerceTypes: true }
+          : cfg.normalize === 'both' ? { useDefaults: true, coerceTypes: true } : null;
+      let model; const t0 = now();
+      try { model = compileEmitModel(s.value, { openObjects: cfg.objects === 'closed' ? 'closed' : 'open', normalize }); }
+      catch (err) { return fail(msg(err), code(err), locate(err, 'schema')); }
+      const t1 = now();
+      let text;
+      try { text = cfg.target === 'markdown' ? renderMarkdown(model) : renderTypeScript(model, { banner: false }); }
+      catch (err) { return fail(msg(err), code(err), locate(err, 'schema')); }
+      const t2 = now();
+      return ok(text, t1 - t0, t2 - t1, [
+        // the machinery: the language-neutral model both renderers read
+        deepCode('model', 'The type model', fmt(model)),
+      ]);
     },
   },
   // ——— the visual engines: descriptor + examples here, rendering delegated ———
