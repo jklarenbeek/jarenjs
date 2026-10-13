@@ -187,6 +187,24 @@ describe('the two error families land where §8.16 says', () => {
     }
   });
 
+  it('a fill over more buckets than one call may emit is refused, before any is built', () => {
+    const doc = (/** @type {any} */ spec) => [{ $resample: ['$.r', { every: 1, ...spec }] }];
+    const said = (/** @type {string} */ fill, /** @type {number} */ count) =>
+      `the window holds ${count} buckets of '1', more than the 100000 a '${fill}' fill may emit`;
+    for (const fill of ['null', 'zero', 'locf', 'linear']) {
+      // a window the document declares is authored: refused when the query compiles
+      assert.throws(() => compileJsonQuery(doc({ fill, start: 0, end: 1e12 })),
+        (/** @type {any} */ error) => error.code === 'JQ0003' && error.message.includes(said(fill, 1e12)), fill);
+      // a window the data derives is the data's: refused when it runs
+      const compiled = compileJsonQuery(doc({ fill }));
+      assert.throws(() => compiled({ r: [{ at: 0, value: 1 }, { at: 3.2e13, value: 5 }] }),
+        (/** @type {any} */ error) => error.code === 'JQ2001' && error.message.includes(said(fill, 3.2e13 + 1)), fill);
+    }
+    // omit walks only the buckets that hold rows
+    assert.deepStrictEqual(run(doc({ start: 0, end: 1e12 }), { r: [{ at: 5, value: 2 }] }),
+      [{ at: 5, value: 2, count: 1 }]);
+  });
+
   it('no rows is data; an empty answer is not an error', () => {
     // wrapped in an array constructor, because the empty SEQUENCE reads
     // back as `undefined` through this API and an empty ARRAY is what a

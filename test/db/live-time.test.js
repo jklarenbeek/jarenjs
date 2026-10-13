@@ -594,6 +594,35 @@ describe('a fill policy is charged to live.maxMaintained like every other result
     await store.close();
   });
 
+  it('refuses a declared window holding more buckets than one fill may emit, in a view and in a query', async function () {
+    const store = await open();
+    const readings = store.collection('readings');
+    await readings.insert({ id: 'a', series: 's', at: T0, value: 1 });
+    const wide = bucketDoc({ every: 1, aggregate: 'sum', fill: 'zero', start: 0, end: 1e12 });
+    const refusal = { code: 'JQ0003', reason: /the window holds 1000000000000 buckets of '1', more than the 100000 a 'zero' fill may emit/ };
+    await assert.rejects(async () => readings.live(wide, { eventTime: EVENT_TIME }), refusal);
+    await assert.rejects(async () => readings.execute(wide), refusal);
+    await assert.rejects(async () => readings.execute(wide, { pushdown: false }), refusal);
+    await store.close();
+  });
+
+  it('a ladder that follows the data is refused past the kernel cap, as the same query is', async function () {
+    const store = await open({ live: { maxMaintained: 1_000_000, maxBytes: 1e9 } });
+    const readings = store.collection('readings');
+    await readings.insert({ id: 'a', series: 's', at: T0, value: 1 });
+    const halfOpen = [{ $resample: ['$[*]', { every: 1000, aggregate: 'sum', fill: 'zero', start: T0 }] }];
+    const live = await readings.live(halfOpen, { eventTime: EVENT_TIME });
+    assert.strictEqual(live.result.rows.length, 1);
+    // the ladder to this reading is 150,001 buckets: past the cap, well inside maxMaintained
+    await readings.insert({ id: 'b', series: 's', at: T0 + 150_000_000, value: 2 });
+    assert.strictEqual(live.state, 'errored');
+    assert.strictEqual(live.error.code, 'JQ2001');
+    assert.match(live.error.message, /the window holds 150001 buckets of '1000', more than the 100000 a 'zero' fill may emit/);
+    await assert.rejects(async () => readings.live(halfOpen, { eventTime: EVENT_TIME }), { code: 'JQ2001' });
+    await assert.rejects(async () => readings.execute(halfOpen, { pushdown: false }), { code: 'JQ2001' });
+    await store.close();
+  });
+
   it('the bound is inclusive: the readings plus the ladder may fill it, and not one more', async function () {
     for (const [gap, state, rows] of [[97_000, 'live', 98], [98_000, 'errored', 1]]) {
       const store = await open({ live: { maxMaintained: 100 } });

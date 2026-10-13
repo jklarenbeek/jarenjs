@@ -253,6 +253,18 @@ Neither `locf` nor `linear` invents a value at the leading edge, and
 until the earlier reading falls inside it: the seed is then a bucket
 with data, which is the only anchor either policy will extrapolate from.
 
+Every fill but `omit` answers each bucket of the window, so a window far
+wider than `every` is a row per position. One call emits at most 100,000
+such buckets: a `TypeError` names the bucket count and refuses a window
+holding more before the first bucket is built (the count comes from the
+ladder's arithmetic, so the refusal costs nothing however wide the window;
+a calendar window ending past the last instant the ladder can name says so
+instead of giving a count).
+It applies to a declared `start`/`end` and to the window the data derives
+alike — two rows a century apart at a one-second width are refused under
+`null`, `zero`, `locf` and `linear`, and answered under `omit`. Narrow the
+window, widen `every`, or fill nothing.
+
 ## Rolling windows — `rolling.js`
 
 `rollingSeries(rows, spec)` aggregates over a *duration* rather than a

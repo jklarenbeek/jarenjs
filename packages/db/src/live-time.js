@@ -268,6 +268,19 @@ export function classifyEventTime(inner, windowed, keyed, eventTime) {
   const end = boundOf(spec.end);
   if (start === false || end === false || (start !== null && end !== null && !(start < end)))
     return rerun("'$resample' — the temporal kernel refuses this specification");
+  // a window declared in full is the author's own bound on the ladder, but
+  // not the kernel's: it refuses a fill over a window holding more buckets
+  // than one call may emit, and a view that built that ladder on every
+  // fold would never finish, so the kernel is asked once, over no rows,
+  // and a refusal makes this view the query re-run, which raises it
+  if (start !== null && end !== null) {
+    try {
+      resampleSeries([], kernelSpec);
+    }
+    catch {
+      return rerun("'$resample' — the temporal kernel refuses this specification");
+    }
+  }
   return {
     strategy: 'bucket',
     source: operand.source,
@@ -435,6 +448,16 @@ export function bucketStrategy(description, context) {
     const empty = aggregate === 'count' ? 0 : (fill === 'zero' ? 0 : null);
     const from = start === null ? starts[0] : start;
     const last = end === null ? starts[starts.length - 1] : null;
+    // the ladder that follows the data is also the kernel's to bound: it
+    // refuses the window a fresh query over this stretch would refuse
+    if (start === null || end === null) {
+      try {
+        resampleSeries([], { ...spec, start: from, end: end === null ? /** @type {number} */ (last) + 1 : end, fill });
+      }
+      catch (error) {
+        throw kernelRefusal(error);
+      }
+    }
     const out = [];
     let index = ladder.indexOf(from);
     let at = ladder.startOf(index);

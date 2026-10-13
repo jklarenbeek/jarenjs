@@ -2171,6 +2171,27 @@ shell's `.dump`, or a script that reads each table and writes it to a new file)
 into a new database created with the default UTF-8 encoding, and open that.
 `migrate` over a UTF-16 file is unchanged.
 
+## 24. A fill over a window past 100,000 buckets is refused
+
+- A `$resample` with a `fill` other than `omit` answers every bucket of its
+  window, so a window far wider than `every`, or two readings far apart at a
+  fine width, returned a row per position, however many that was (a live view
+  built the same ladder in memory). One `$resample` now emits at most 100,000
+  such buckets, and a call whose window holds more is refused before any is
+  built, by `execute()`, `explain()` planning and `live()` alike: `JQ0003` for
+  a window the document declares (`start` and `end`), when the query compiles
+  or the view is registered; `JQ2001` for a window the data derives, when it
+  runs, and for a live view whose ladder follows the data once it grows past
+  the cap (the view is `errored`, whatever `live.maxMaintained` allows). The
+  message names the bucket count. A plan for such a document reports
+  `invalid-spec` rather than `fill-policy`. Fills over 100,000 buckets or
+  fewer, and every `omit` resample (which walks only the buckets that hold
+  rows), answer as before.
+- A call that used to return that many rows needs one of three changes: an
+  `omit` fill, which leaves empty buckets out; a narrower `start`/`end`; or a
+  wider `every`. Fill the result on the client when a dense series over more
+  buckets is genuinely wanted.
+
 ## Measured costs
 
 Exact identity stores complete canonical documents and model endpoints, so

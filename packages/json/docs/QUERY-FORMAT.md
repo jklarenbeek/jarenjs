@@ -1862,6 +1862,15 @@ Neither `locf` nor `linear` extrapolates: with no measured bucket on the side
 it needs, the bucket stays `null`. A bucket that held rows and no numbers is a
 *measurement*, not an absence, and is never an anchor for either.
 
+Every fill but `omit` answers each bucket of the window, so a window far wider
+than `every` is a row per position, and one `$resample` emits at most 100,000
+of them. A window the spec declares (`start` and `end`) that holds more is
+refused when the query compiles (`JQ0003`); a window the data derives is
+refused when it runs (`JQ2001`); both name the bucket count (a calendar window
+ending past the last instant a calendar can name says that instead) and
+neither builds a bucket first. Narrow the window, widen `every`, or use `omit`, which walks
+only the buckets that hold rows.
+
 ```json
 { "$resample": [ "$.readings[*]",
                  { "every": "PT1H", "aggregate": "mean", "fill": "linear" } ] }

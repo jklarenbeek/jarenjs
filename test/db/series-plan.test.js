@@ -363,6 +363,18 @@ describe('every refinement names one reason, and the table is complete', () => {
   });
 });
 
+describe('a fill window the kernel refuses is not a pushdown', () => {
+  it('names invalid-spec for a fill over more buckets than one call may emit', () => {
+    const wide = (/** @type {string} */ fill) => plan({ $resample: [NARROWED,
+      { every: 1, fill, start: ORIGIN, end: ORIGIN + 1e12 }] });
+    assert.deepStrictEqual(codes(wide('null')), ['invalid-spec']);
+    assert.notStrictEqual(wide('null').mode, 'native');
+    // the same window without a fill is the kernel's to walk, occupied buckets only
+    assert.ok(!codes(plan({ $resample: [NARROWED,
+      { every: 1, start: ORIGIN, end: ORIGIN + 1e12 }] })).includes('invalid-spec'));
+  });
+});
+
 describe('a narrowing is implied, never decided', () => {
   it("a $resample's own window bounds the fetch and stays the kernel's to apply", () => {
     const planned = plan({ $resample: [NARROWED,

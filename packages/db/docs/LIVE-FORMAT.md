@@ -853,7 +853,11 @@ A `fill` policy's empty positions are part of the result and are counted
 with the rows when the ladder follows the data, a window open at `start`
 or `end`: readings far enough apart for their ladder to outgrow the bound
 are `JD2060`, refused before the ladder is built. A window declared at both
-ends is the author's own bound and is not charged.
+ends is the author's own bound and is not charged, except against the
+temporal kernel's: a fill over a window holding more buckets than one
+`$resample` may emit (100,000) is refused (`JQ0003`) when the view is
+registered, and a ladder that follows the data is refused (`JQ2001`) once it
+holds more than that, whatever `live.maxMaintained` allows.
 That is the honest statement of what this version buys: bounded repair
 work and a visible lateness contract, not a smaller heap.
 

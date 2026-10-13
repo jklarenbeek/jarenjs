@@ -47,6 +47,15 @@ const AGGREGATES = Object.freeze(['sum', 'mean', 'min', 'max', 'first', 'last', 
 const FILLS = Object.freeze(['omit', 'null', 'zero', 'locf', 'linear']);
 
 /**
+ * The most buckets one resample may emit under a fill that answers its
+ * empty buckets. `omit` emits only the buckets that hold rows, so the
+ * data bounds it; every other fill answers each bucket of the window,
+ * so the window and the width bound it, and a call whose window holds
+ * more is refused before the first bucket is built.
+ */
+const MAX_FILL_BUCKETS = 100_000;
+
+/**
  * A compiled bucket ladder: the boundary arithmetic for one `every`,
  * one `origin` and one clock, validated once so a resample never
  * re-reads its own specification.
@@ -337,6 +346,12 @@ export const RESAMPLE_MEMBERS = Object.freeze([
  * extrapolate from. (With `aggregate: 'count'` an empty bucket is `0` by
  * definition, so fill only decides whether it appears at all.)
  *
+ * Every fill but `omit` answers each bucket of the window, so a window
+ * far wider than `every` is a row per position. One call emits at most
+ * 100,000 such buckets: a window holding more is refused before any is
+ * built. Narrow the window, widen `every`, or fill nothing (`omit`
+ * walks only the buckets that hold rows, which the data bounds).
+ *
  * @param {any[]} rows - the samples, in any order
  * @param {Object} spec
  * @param {number | string} spec.every - the bucket width
@@ -357,7 +372,8 @@ export const RESAMPLE_MEMBERS = Object.freeze([
  *   where the reading lives (default `'value'`)
  * @returns {{ at: number, value: number | null, count: number }[]}
  * @throws {TypeError} for a bad width, origin, window, aggregate or fill,
- *   or a row that is not a canonical sample
+ *   a row that is not a canonical sample, or a window that a fill other
+ *   than `omit` would answer with more than 100,000 buckets
  * @example
  * resampleSeries(readings, { every: 'PT1H', aggregate: 'mean', fill: 'linear' });
  * resampleSeries(readings, { every: 'P1M', zone: 'Europe/Amsterdam', provider });
@@ -393,6 +409,8 @@ export function resampleSeries(rows, spec) {
   const empties = [];
   let index = buckets.indexOf(firstAt);
   let start = buckets.startOf(index);
+  if (fill !== 'omit')
+    requireFillBudget(buckets, index, limit, fill);
   let i = from;
   while (start < limit) {
     let end = buckets.calendar ? buckets.startOf(index + 1) : start + buckets.width;
@@ -445,6 +463,51 @@ export function resampleSeries(rows, spec) {
     else if (fill === 'linear') interpolate(out, empties);
   }
   return out;
+}
+
+/**
+ * Refuse a window a fill would answer with more buckets than one call
+ * may emit, counted from the ladder's arithmetic rather than by walking
+ * it: the walk is exactly what is being refused.
+ * @param {CompiledBuckets} buckets
+ * @param {number} first - the ladder position of the first bucket
+ * @param {number} limit - the instant no emitted bucket may start at or after
+ * @param {string} fill
+ * @returns {void}
+ */
+function requireFillBudget(buckets, first, limit, fill) {
+  const advice = 'narrow the window, widen \'every\', or use fill \'omit\'';
+  /** @type {number} */
+  let count;
+  try {
+    let last = buckets.indexOf(limit);
+    // a window ending exactly on a boundary does not hold the bucket that starts there
+    if (buckets.startOf(last) >= limit)
+      last--;
+    count = last - first + 1;
+  }
+  catch (error) {
+    // an end the calendar cannot name has no count. The window is still over
+    // the cap when the bucket one cap past the first is nameable and starts
+    // inside it; otherwise the walk would meet the same boundary first
+    if (!(error instanceof TypeError))
+      throw error;
+    let past;
+    try {
+      past = buckets.startOf(first + MAX_FILL_BUCKETS);
+    }
+    catch {
+      throw error;
+    }
+    if (past >= limit)
+      throw error;
+    throw new TypeError(`the window runs past the last instant the '${buckets.every}' ladder can name`
+      + ` and holds more than the ${MAX_FILL_BUCKETS} buckets a '${fill}' fill may emit; ${advice}`);
+  }
+  if (count > MAX_FILL_BUCKETS) {
+    throw new TypeError(`the window holds ${count} buckets of '${buckets.every}', more than the`
+      + ` ${MAX_FILL_BUCKETS} a '${fill}' fill may emit; ${advice}`);
+  }
 }
 
 /** @param {string} fill @returns {number | null} */
