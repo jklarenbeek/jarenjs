@@ -39,6 +39,17 @@ function mountSite({ hash = '#/project', stored = null, modelContext, share, dow
   return { app, container, go: (h) => routeCb(parseHash(h)), storage: () => storeData };
 }
 
+/** Text a share token cannot shrink: the compressed token stays near its length. */
+function noise(length) {
+  let seed = 7;
+  let text = '';
+  for (let i = 0; i < length; i++) {
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    text += 'abcdefghijklmnopqrstuvwxyz0123456789'[(seed >>> 16) % 36];
+  }
+  return text;
+}
+
 function find(node, pred) {
   if (pred(node)) return node;
   for (const c of node.childNodes ?? []) {
@@ -325,11 +336,11 @@ describe('website — app authoring on the project surface (the folded Studio)',
     const share = [];
     const { app, container } = mountSite({ share: (h) => { share.push(h); return `https://x/${h}`; } });
     app.dispatch('project/template', 'form');
-    // inflate the app file far past the token limit
+    // inflate the app file far past the token limit, with text that does not compress
     fire(editorOf(container), 'change', {
       target: {
         value: JSON.stringify({
-          state: { blob: 'x'.repeat(20000) },
+          state: { blob: noise(12000) },
           view: [{ match: '$', body: ['p', {}, 'big'] }],
         }),
       },

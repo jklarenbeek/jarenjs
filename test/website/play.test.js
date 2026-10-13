@@ -34,6 +34,17 @@ function mountSite({ hash = '#/play' } = {}) {
   return { app, container, document, go: (h) => routeCb(parseHash(h)) };
 }
 
+/** Text a share token cannot shrink: the compressed token stays near its length. */
+function noise(length) {
+  let seed = 7;
+  let text = '';
+  for (let i = 0; i < length; i++) {
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    text += 'abcdefghijklmnopqrstuvwxyz0123456789'[(seed >>> 16) % 36];
+  }
+  return text;
+}
+
 function find(node, pred) {
   if (pred(node)) return node;
   for (const c of node.childNodes ?? []) {
@@ -563,7 +574,7 @@ describe('a session can leave the page, and come back', () => {
   it('the oversized-share refusal now points somewhere that exists', function () {
     const { app, container } = mountFiles();
     const editor = find(container, (n) => n.tagName === 'textarea');
-    fire(editor, 'input', { target: { value: 'x'.repeat(9000) } });
+    fire(editor, 'input', { target: { value: noise(12000) } });
     app.dispatch('play/share');
     assert.match(app.getState().play.shared, /too large for a share link/);
     assert.match(app.getState().play.shared, /use Download instead/);

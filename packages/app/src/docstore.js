@@ -9,12 +9,13 @@
  * the store is one JSON object `{ [key]: { name → value } }`, read once per
  * storage adapter, shared by its collections and written back on every
  * mutation. `encodeShare` / `decodeShare`
- * turn a small snapshot into a Unicode-safe base64url token and back —
+ * turn a snapshot into a compressed, Unicode-safe base64url token and back —
  * forgivingly: a corrupt token decodes to `null`, never a throw.
  */
 
 import { isJsonObject, setObjectMember } from '@jarenjs/core/object';
 import { createWeakCache } from '@jarenjs/core/cache';
+import { compressBytes, decompressBytes, MAX_EXPANDED_BYTES } from './share-codec.js';
 
 /** Collection handles share their adapter's root, including unsaved fallback data. */
 const storesByStorage = createWeakCache();
@@ -52,29 +53,55 @@ export function createDocStore({ storage, key = 'experiments' }) {
   };
 }
 
-/**
- * Encode a snapshot as a base64url token: Unicode-safe (TextEncoder),
- * portable between browser and Node.
- * @param {any} snapshot
- * @returns {string} the base64url token
- */
-export function encodeShare(snapshot) {
-  const bytes = new TextEncoder().encode(JSON.stringify(snapshot));
+/** Starts a compressed token. `~` is outside the base64url alphabet, so a plain token never begins with it; the digit names the codec. */
+const COMPRESSED_PREFIX = '~1';
+
+/** @param {Uint8Array} bytes */
+function toBase64Url(bytes) {
   let binary = '';
   for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
   return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
+/** @param {string} token */
+function fromBase64Url(token) {
+  const binary = atob(token.replace(/-/g, '+').replace(/_/g, '/'));
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
 /**
- * Decode a base64url token back to its snapshot, forgivingly.
+ * Encode a snapshot as a share token: its JSON in UTF-8 (Unicode-safe,
+ * portable between browser and Node), compressed and written in the
+ * base64url alphabet behind a `~1` prefix. A snapshot the compressor does not
+ * shrink, or one past `MAX_EXPANDED_BYTES` that `decodeShare` would refuse to
+ * expand, is written as plain base64url instead, so a token is never longer
+ * than the plain one. A release before the compressed format reads only the
+ * plain form; `decodeShare` reads both.
+ * @param {any} snapshot
+ * @returns {string} the token
+ */
+export function encodeShare(snapshot) {
+  const bytes = new TextEncoder().encode(JSON.stringify(snapshot));
+  const plain = toBase64Url(bytes);
+  if (bytes.length > MAX_EXPANDED_BYTES) return plain;
+  const compressed = COMPRESSED_PREFIX + compressBytes(bytes);
+  return compressed.length < plain.length ? compressed : plain;
+}
+
+/**
+ * Decode a token written by `encodeShare`, or by an earlier release that wrote
+ * plain base64url only, back to its snapshot, forgivingly.
  * @param {string} token
  * @returns {any} the snapshot object, or `null` when the token is unusable
  */
 export function decodeShare(token) {
   try {
-    const binary = atob(token.replace(/-/g, '+').replace(/_/g, '/'));
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    const bytes = token.startsWith('~')
+      ? (token.startsWith(COMPRESSED_PREFIX) ? decompressBytes(token.slice(COMPRESSED_PREFIX.length)) : null)
+      : fromBase64Url(token);
+    if (bytes === null) return null;
     const snapshot = JSON.parse(new TextDecoder().decode(bytes));
     return snapshot !== null && typeof snapshot === 'object' ? snapshot : null;
   }
