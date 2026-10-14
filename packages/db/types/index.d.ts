@@ -1431,6 +1431,13 @@ export interface OpenStoreOptions {
 export declare function openStore(model: unknown, options: OpenStoreOptions): Promise<Store>;
 export declare function normalizeModel(model: unknown): Map<string, unknown>;
 export declare const MODEL_VERSION: string;
+/**
+ * The member every collection and entity view of a store carries its own
+ * source under: `{ kind: 'collection' | 'entity', name }`. A chain built
+ * over a view reports it, so a reader handed the chain can tell which rows
+ * its document names.
+ */
+export declare const STORE_SOURCE: unique symbol;
 
 // ————— the dialect and driver seams —————
 
