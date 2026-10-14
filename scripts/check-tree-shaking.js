@@ -616,7 +616,8 @@ if (asyncLiveLeak.length)
 // Raised to 978,700 (measured 978646): the shared capture's refusal to coerce a method read without its call, and the validator's relative pointer dialect option add 868.
 // Raised to 981,000 (measured 980988): the shared capture's coded refusal of every array and string method on a member, and the predicate a to-many relation's array method needs, add 2342.
 // Raised to 981,100 (measured 981042): a handle's check of the source a chain was built over add 54.
-if (clientBytes > 981100)
+// Raised to 982,700 (measured 982682): the database a store reads, named in its views' source, and the store's coded refusal of a chain where it takes a document add 1640.
+if (clientBytes > 982700)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 
