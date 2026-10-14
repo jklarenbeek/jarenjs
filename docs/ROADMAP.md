@@ -681,12 +681,6 @@ what each does is its own documentation's job
   number-first (string-first, integer-first, boolean-first, `['integer','number']`), on an indexed `integer` column, and on every unindexed path, `$eq`, `$ne`, `$le` and `$gt` of
   2**60 or -(2**62) differ from the engine; and a `$seq` membership list holding such an integer misses on every number column, number-first unions included (the list element is
   an INTEGER and the column holds the double). Wanted: read both sides of a comparison as the doubles the engine compares, and bind a membership list's numbers as doubles.
-- [ ] **Strict mode refuses a `$get` with an unspellable member name where the
-  hatch ran it.** A literal `$get` whose name holds a `"` or a control
-  character is promoted by the schema and refused by the dialect's grammar
-  (`UnrepresentablePath`) on `node:sqlite` and `bun:sqlite`, the fate of any
-  unspellable path name. Wanted: decide whether the hatch keeps the carve-out
-  for such a name or the refusal is the contract.
 - [ ] **A grouping ordered by a key that reads a NULL as a present `null` runs
   in the engine.** A column whose policy reads a NULL as a present `null`
   (`null: 'null'`) used as a group key under an `$orderby` makes the engine

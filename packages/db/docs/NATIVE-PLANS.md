@@ -10,7 +10,10 @@ entity identity would change the adoption contract.
 ## Reads
 
 Use `store.execute(document, { strict: true })` to require a native plan;
-`{ pushdown: false }` executes the decoded-row reference path. The JSON language
+`{ pushdown: false }` executes the decoded-row reference path. Under `strict`, a member
+name the dialect cannot spell as a path (one holding a `"` or a control
+character, even in a literal `$get`) is refused `UnrepresentablePath` like any
+other unspellable path, where the engine would run it without `strict`. The JSON language
 is unchanged: projections use object/array constructors, correlations use nested
 `$for` and `$count`, and groups use `$groupby`. LINQ chains emit the same documents.
 For example, a projection with a correlated count is:
