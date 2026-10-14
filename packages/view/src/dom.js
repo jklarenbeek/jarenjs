@@ -52,7 +52,7 @@ import {
   EMPTY_PROPS,
   WIDGET_TAG,
 } from './vnode.js';
-import { ENUMERATED_ALIASES, enumeratedAttribute, isAliased, removeProperty, writeProperty, writingSpelling } from './properties.js';
+import { ENUMERATED_ALIASES, enumeratedAttribute, isAliased, isInlineHandler, removeProperty, writeProperty, writingSpelling } from './properties.js';
 import { createSafePolicy } from './safe.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -544,7 +544,10 @@ function adoptChildren(ctx, parent, children, ns) {
       && (node.localName ?? node.tagName?.toLowerCase()) === tag
       && (namespace === null ? node.namespaceURI == null || node.namespaceURI === 'http://www.w3.org/1999/xhtml' : node.namespaceURI === namespace)) {
       const props = propsOf(vnode);
-      const names = new Set(Object.keys(props).map((name) => name === 'className' ? 'class' : name === 'htmlFor' ? 'for' : name.toLowerCase()));
+      // the attributes the vnode writes: an inline handler value writes none,
+      // so the one server markup carried from before that rule is removed
+      const names = new Set(Object.keys(props).filter((name) => !isInlineHandler(name, props[name]))
+        .map((name) => name === 'className' ? 'class' : name === 'htmlFor' ? 'for' : name.toLowerCase()));
       for (const name of node.getAttributeNames()) {
         if (!names.has(name.toLowerCase())) node.removeAttribute(name);
       }
@@ -937,6 +940,13 @@ function setProp(ctx, node, name, oldValue, newValue, ns) {
     if (newValue == null || newValue === false) node.removeAttribute(name);
     else node.setAttribute(name, newValue === true ? '' : String(newValue));
     return;
+  }
+  // A handler prop that is not a function is written by no renderer (the
+  // property table), so it is as good as absent: what the frame before
+  // assigned (a function) is cleared, and nothing else was written.
+  if (isInlineHandler(name, newValue)) {
+    if (isInlineHandler(name, oldValue)) return;
+    newValue = null;
   }
   // Trusted path: a property where the node has one, else an attribute —
   // the equivalent of writing the DOM by hand — with the property table's

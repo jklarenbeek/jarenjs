@@ -21,7 +21,7 @@ import {
   WIDGET_TAG,
 } from './vnode.js';
 import { styleToString } from './dom.js';
-import { aliasOf, enumeratedAttribute, writingSpelling } from './properties.js';
+import { aliasOf, enumeratedAttribute, isInlineHandler, writingSpelling } from './properties.js';
 import { createSafePolicy } from './safe.js';
 
 /** Void elements per the HTML standard: no children, no end tag. */
@@ -117,6 +117,9 @@ function serializeProps(props, skip, policy, onUnsafe) {
       attr = decided.name;
       value = decided.value;
     }
+    // an inline handler value that is not a function is written by no renderer
+    // (the property table)
+    if (isInlineHandler(attr, value)) continue;
     // an enumerated attribute is written with its keyword, exactly as the
     // DOM renderer writes it (the property table)
     const enumerated = enumeratedAttribute(attr, value);

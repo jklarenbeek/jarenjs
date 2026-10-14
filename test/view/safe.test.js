@@ -79,9 +79,11 @@ describe('safe render — SSR neutralizes every reproduced attack', () => {
 describe('safe render — trusted mode still passes the payloads (the teeth)', () => {
   // If trusted mode also neutralized these, the safe-mode assertions would
   // prove nothing. Trusted mode is the equivalent of writing the DOM by hand.
-  it('emits the script element and inline handler untouched by default', () => {
+  it('emits the script element untouched by default; an inline handler string is written by neither mode', () => {
     assert.strictEqual(renderToString(ATTACKS[1].vnode), '<script>alert(1)</script>');
-    assert.strictEqual(renderToString(ATTACKS[6].vnode), '<div onclick="alert(1)">x</div>');
+    // the property table drops it for both renderers in trusted mode; safe
+    // mode reports it (the next tests)
+    assert.strictEqual(renderToString(ATTACKS[6].vnode), '<div>x</div>');
   });
   it('emits the attribute-name injection untouched by default; a tag outside the grammar is refused', () => {
     // an attribute name is trusted in trusted mode; a tag never was markup's

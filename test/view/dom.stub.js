@@ -301,6 +301,9 @@ function idl(node, name, get, set) {
  *    non-boolean properties whose setter always writes the attribute, so
  *    assigning `''` writes `0`, `""` or `0`, `true` writes `"true"` and
  *    `'100px'` writes `0`;
+ *  - `onclick` — an event handler IDL attribute: a function is the handler,
+ *    anything else (a string included) leaves it `null`, and no content
+ *    attribute is written either way;
  *  - `popover` — a nullable string reflecting the enumerated attribute:
  *    `null` removes it, anything else is written as its string, and it reads
  *    back the state (`''` and `'auto'` are `auto`, an invalid value `manual`).
@@ -350,6 +353,9 @@ class ReflectingElement extends StubElement {
       idl(this, 'download', () => attr('download') ?? '', (value) => this.setAttribute('download', String(value)));
     }
     idl(this, 'title', () => attr('title') ?? '', (value) => this.setAttribute('title', String(value)));
+    /** @type {Function | null} */
+    let handler = null;
+    idl(this, 'onclick', () => handler, (value) => { handler = typeof value === 'function' ? value : null; });
     idl(this, 'popover', () => {
       const state = attr('popover');
       if (state === null) return null;

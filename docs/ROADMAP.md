@@ -115,10 +115,6 @@ establish registry publication or downstream acceptance.
   semantics. APP-FORMAT §8.4/§8.7 state the contracts that audit would have to
   prove.
 - [ ] **First-class awaiting action documents** — the async-task convention and `createTaskEffect` cover the pattern without a format change (`packages/app/docs/TASKS.md`); making *awaiting* expressible in the action document itself is the open half (APP-FORMAT §11).
-- [ ] **Trusted inline-handler strings differ between renderers.** A trusted
-  handler string (`onclick: '…'`) is dropped on the DOM property path while
-  SSR writes it as a live attribute. This needs an explicit trusted-mode
-  policy and a rule in the shared property table before either renderer changes.
 - [ ] **Native IME verification** — composition-aware controlled writes,
   caret preservation, multiple selects and the safe create/update/remove/reinsert
   corpus are exercised in Chromium, Firefox and WebKit. The automated tests

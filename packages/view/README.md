@@ -7,7 +7,7 @@ User interfaces as JSON documents. This package defines the **Jaren vnode format
 
 It owns vnode reconciliation and knows nothing about schemas, queries or state — a vnode is plain JSON, wherever it came from. App hosts and visual components use DOM APIs for mounting, events and browser interactions around this renderer. In practice a vnode comes from a [JSLT stylesheet](../json/docs/JSLT-FORMAT.md) compiled by [`@jarenjs/json`](../json), and the loop around it lives in [`@jarenjs/app`](../app). Its only runtime dependency is the pure, zero-dependency [`@jarenjs/core`](../core); no `eval`, CSP-safe.
 
-The vnode grammar is published as JSON Schema in [`schemas/jaren-vnode.schema.json`](schemas/jaren-vnode.schema.json) — hand it to a constrained decoder and a language model cannot emit a document outside the *grammar*. That is a **structural** guarantee, not a safety one: a grammar-valid vnode can still carry `innerHTML`, an inline `on*` handler or a `javascript:` URL, so validation alone does **not** make an untrusted document safe to render. Rendering an untrusted view — from a tenant, a remote service, a model — requires the [safe profile](#untrusted-views-the-safe-profile) below; the default renderers trust their input, exactly like writing the DOM by hand. The normative contract is [docs/VIEW-FORMAT.md](docs/VIEW-FORMAT.md).
+The vnode grammar is published as JSON Schema in [`schemas/jaren-vnode.schema.json`](schemas/jaren-vnode.schema.json) — hand it to a constrained decoder and a language model cannot emit a document outside the *grammar*. That is a **structural** guarantee, not a safety one: a grammar-valid vnode can still carry `innerHTML`, an `on*` property or a `javascript:` URL, so validation alone does **not** make an untrusted document safe to render. Rendering an untrusted view — from a tenant, a remote service, a model — requires the [safe profile](#untrusted-views-the-safe-profile) below; the default renderers trust their input, exactly like writing the DOM by hand. The normative contract is [docs/VIEW-FORMAT.md](docs/VIEW-FORMAT.md).
 
 ## The format in one glance
 
@@ -85,7 +85,7 @@ renderToString(['p', { class: 'note' }, 'a < b'])
 // '<p class="note">a &lt; b</p>'
 ```
 
-Text and attribute values are escaped, void elements render without end tags, `key` and `on` produce no markup. The text of an HTML `<style>` or `<script>` is the exception: it is raw text a browser never decodes, so it is written verbatim, and text holding the element's own end tag (or, in a script, an HTML comment opener) is refused with a `TypeError` where it used to be escaped into broken CSS or script (VIEW-FORMAT §6). On the client, `hydrate: true` adopts matching server DOM on the first trusted render, repairs local mismatches and gives widgets fresh hosts. Safe mode rebuilds existing DOM.
+Text and attribute values are escaped, void elements render without end tags, `key` and `on` produce no markup, and an inline handler value (`onclick: 'alert(1)'`, or a number or list under a handler's name) is omitted — the DOM renderer drops it too, so the two agree (VIEW-FORMAT §3). Upgrade note: `renderToString` used to write it as a live attribute, so the markup of a document that carried one changes and its handler is gone; bind actions with `on`. The text of an HTML `<style>` or `<script>` is the exception: it is raw text a browser never decodes, so it is written verbatim, and text holding the element's own end tag (or, in a script, an HTML comment opener) is refused with a `TypeError` where it used to be escaped into broken CSS or script (VIEW-FORMAT §6). On the client, `hydrate: true` adopts matching server DOM on the first trusted render, repairs local mismatches and gives widgets fresh hosts. Safe mode rebuilds existing DOM.
 
 ### With JavaScript in the middle
 
@@ -122,7 +122,10 @@ const render = createDomRenderer(container, {
 
 The default renderers **trust** their input. A vnode is plain JSON, and the
 default `createDomRenderer`/`renderToString` write whatever it says — including
-`innerHTML`, inline `on*` handlers and `javascript:` URLs. For a
+`innerHTML` and `javascript:` URLs. (An inline handler *value* is the
+exception: neither renderer writes one under an event handler's name, so
+`onclick: 'alert(1)'` is omitted from the markup and never set on the node; a
+function handler is assigned to the node's property by the DOM renderer.) For a
 source-authored view that is exactly right; it is the equivalent of writing the
 DOM by hand, and it is why the grammar's guarantee is *structural*, not a
 sanitizer. Validating a document against the vnode schema proves it is

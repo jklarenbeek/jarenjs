@@ -23,8 +23,8 @@ The grammar is published as JSON Schema in
 [`schemas/jaren-vnode.schema.json`](../schemas/jaren-vnode.schema.json).
 
 Schema validity is a **structural** property, not a safety one. A
-grammar-valid vnode can still carry an `innerHTML` sink, an inline `on*`
-handler or a `javascript:` URL, so validation alone does not make an
+grammar-valid vnode can still carry an `innerHTML` sink, an `on*` property
+or a `javascript:` URL, so validation alone does not make an
 untrusted document safe to render — the default renderers trust their
 input. Rendering an untrusted document requires the SAFE profile (§8).
 
@@ -145,10 +145,33 @@ Every other prop **writes through**:
   would replace the node's own method — and remove it as one when a frame
   drops it. Upgrade note: the DOM renderer used to drop such a prop.
 
-Three kinds of property are not left to the node's own property, and the
+Four kinds of property are not left to the node's own property, and the
 serializer and the patching renderer MUST write them identically — the
 reference implementation keeps them in one **property table**
 (`properties.js`) that both read:
+
+- **Inline handlers.** A prop named like an HTML event handler content
+  attribute (`onclick`, `onfocus`, `onpointerdown`, `onload`, ... — the
+  GlobalEventHandlers, WindowEventHandlers and DocumentAndElementEventHandlers
+  names of the HTML Standard, compared in any case, so `onClick` too) holds
+  source text a browser compiles and runs. In trusted mode neither renderer
+  writes a value there that is not a function: a string, a number, a list
+  or `true` is omitted by the serializer and neither assigned nor set as an
+  attribute by the patching renderer, and a patch to one clears whatever the
+  frame before wrote for the prop (`null` and `false` already mean absent).
+  A function value is a handler, and the patching renderer assigns it to the
+  node's property as before. A name that merely begins with `on` (`online`,
+  `once`, `onboarding`, `on-x`) is no handler and is an ordinary prop.
+  Handlers are bound with `on` (§4), not with source text. Hydration removes
+  an inline handler attribute that server markup carries for such a prop,
+  then assigns a function handler. The safe profile (§8) strips every `on*`
+  prop, whatever its name or value. Upgrade note: `renderToString` used to
+  write these values as live attributes (`<button onclick="alert(1)">`) and
+  the patching renderer, on a node with no such property or under a name
+  like `onClick`, set them as one, so the markup of a document that carried
+  one changes and its handler is gone (a document that needs one binds an
+  action with `on`); the markup of a prop that only begins with `on` is
+  unchanged.
 
 - **Enumerated attributes.** HTML spells some on/off settings as
   enumerated attributes, and reflects `spellcheck`, `draggable`,
@@ -328,8 +351,9 @@ equal.
 patching renderer would build: text and attribute values escaped (`&`,
 `<`, `>` in text; `&`, `"` in double-quoted attributes), void elements
 (`br`, `img`, `input`, ...) without end tags, `key` and `on` producing
-no output, boolean and style props serialized per §3. Serialization is
-pure: no state, no DOM, safe in any runtime.
+no output, boolean and style props serialized per §3, and an inline handler
+value (`onclick: 'alert(1)'`) omitted as §3's property table says.
+Serialization is pure: no state, no DOM, safe in any runtime.
 
 The text of an HTML `style` or `script` element (its tag in any case) is
 raw text, which an HTML parser never decodes, so it is written verbatim —
@@ -361,7 +385,8 @@ Lists flatten with the ordinary child rules and need no wrapper element.
 `createDomRenderer(container, { hydrate: true })` adopts matching text and
 element nodes on its first trusted render, patches props and handlers,
 reconciles controlled values, repairs mismatches locally and removes surplus
-nodes and attributes. Initial matching is positional by tag and namespace;
+nodes and attributes, including the inline handler attribute older server
+markup wrote for a handler value (§3). Initial matching is positional by tag and namespace;
 subsequent keyed patches preserve adopted identities. Widgets mount once on
 fresh hosts because their server-side markup has no transferable handle.
 Without `hydrate`, the first render rebuilds. Safe mode also rebuilds: existing
@@ -674,9 +699,9 @@ physical screen-reader and assistive-technology testing.
 ## 8. The safe profile
 
 The default renderers **trust** their input (§1.1): every prop writes
-through, so a producer that owns its stylesheet can reach `innerHTML`, an
-`on*` handler or any DOM property, exactly as it could writing the DOM by
-hand. A vnode from a source you do **not** control — a tenant, a remote
+through (but for an inline handler value, §3), so a producer that owns its
+stylesheet can reach `innerHTML` or any DOM property, exactly as it could
+writing the DOM by hand. A vnode from a source you do **not** control — a tenant, a remote
 service, a model — is different, and schema validity does not close the
 gap. A renderer therefore MUST offer a **safe mode** for untrusted
 documents, selected by a `safe` option on both the patching and

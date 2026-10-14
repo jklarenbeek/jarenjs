@@ -8,8 +8,9 @@
  * ([`jaren-vnode.schema.json`](../schemas/jaren-vnode.schema.json)) proves a
  * document is a well-formed *interface* — it does not prove the document is
  * *safe to render*. The default (trusted) renderer writes any DOM property a
- * node has, including `innerHTML` and inline `on*` handlers, and the SSR
- * serializer trusts the tag and attribute *names* it is given. For a
+ * node has, including `innerHTML`, and the SSR serializer trusts the tag and
+ * attribute *names* it is given. (Neither writes a value that is not a function under
+ * a handler's name, such as `onclick`: the property table drops it.) For a
  * source-authored view that is exactly right — it is the equivalent of
  * writing the DOM by hand. For a view that arrives from somewhere you do not
  * control — a tenant, a remote service, a language model — it is not: a

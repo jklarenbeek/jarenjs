@@ -3,9 +3,22 @@
  * @file The property table (VIEW-FORMAT §3): what a prop name means to the
  * two renderers. The serializer writes every prop as an attribute; the DOM
  * patcher writes a prop through the node's property where it has one, and
- * reads this table for the three kinds of property where that write would
- * differ from the serializer's markup: enumerated attributes, removal, and a
- * value the property would convert.
+ * reads this table for the kinds of property where that write would differ
+ * from the serializer's markup: enumerated attributes, removal, a value the
+ * property would convert, and an inline handler value, which neither
+ * renderer writes.
+ *
+ * **Inline handlers.** A prop named like an HTML event handler content
+ * attribute ({@link INLINE_HANDLERS}, compared in any case: `onclick`,
+ * `onClick`) holds source text a browser compiles and runs. Neither renderer
+ * writes a value there that is not a function, in trusted mode (the safe
+ * profile strips every `on*` prop whatever its value): a string, a number, a
+ * list or `true` is dropped.
+ * The DOM property would ignore such a value and a plain attribute would run
+ * it, which is how the two renderers once disagreed. A function is a handler
+ * the DOM renderer assigns; actions are bound with the `on` prop
+ * (VIEW-FORMAT §4). A name that merely begins with `on` (`online`, `once`,
+ * `onboarding`) is no handler and is an ordinary prop.
  *
  * **Enumerated attributes.** HTML spells a few on/off settings as
  * enumerated attributes with keywords of their own, and reflects four of
@@ -64,6 +77,65 @@
  * properties** (`disabled`, `hidden`, `multiple`, …) are unchanged: `true`
  * sets them, `false` and `null` clear them.
  */
+
+/**
+ * The event names whose `on<name>` content attribute is an event handler: the
+ * GlobalEventHandlers, WindowEventHandlers and DocumentAndElementEventHandlers
+ * lists of the HTML Standard's event handler section, plus the members other
+ * specifications add to GlobalEventHandlers that browsers read as content
+ * attributes (pointer, touch, animation, transition and selection events).
+ */
+const HANDLER_EVENTS = [
+  // GlobalEventHandlers
+  'abort', 'auxclick', 'beforeinput', 'beforematch', 'beforetoggle', 'blur', 'cancel', 'canplay',
+  'canplaythrough', 'change', 'click', 'close', 'contextlost', 'contextmenu', 'contextrestored',
+  'cuechange', 'dblclick', 'drag', 'dragend', 'dragenter', 'dragleave', 'dragover', 'dragstart',
+  'drop', 'durationchange', 'emptied', 'ended', 'error', 'focus', 'formdata', 'input', 'invalid',
+  'keydown', 'keypress', 'keyup', 'load', 'loadeddata', 'loadedmetadata', 'loadstart', 'mousedown',
+  'mouseenter', 'mouseleave', 'mousemove', 'mouseout', 'mouseover', 'mouseup', 'pause', 'play',
+  'playing', 'progress', 'ratechange', 'reset', 'resize', 'scroll', 'scrollend',
+  'securitypolicyviolation', 'seeked', 'seeking', 'select', 'slotchange', 'stalled', 'submit',
+  'suspend', 'timeupdate', 'toggle', 'volumechange', 'waiting', 'webkitanimationend',
+  'webkitanimationiteration', 'webkitanimationstart', 'webkittransitionend', 'wheel',
+  // DocumentAndElementEventHandlers
+  'copy', 'cut', 'paste',
+  // WindowEventHandlers
+  'afterprint', 'beforeprint', 'beforeunload', 'hashchange', 'languagechange', 'message',
+  'messageerror', 'offline', 'online', 'pagehide', 'pagereveal', 'pageshow', 'pageswap', 'popstate',
+  'rejectionhandled', 'storage', 'unhandledrejection', 'unload',
+  // other specifications' GlobalEventHandlers members
+  'gotpointercapture', 'lostpointercapture', 'pointercancel', 'pointerdown', 'pointerenter',
+  'pointerleave', 'pointermove', 'pointerout', 'pointerover', 'pointerrawupdate', 'pointerup',
+  'touchcancel', 'touchend', 'touchmove', 'touchstart', 'animationcancel', 'animationend',
+  'animationiteration', 'animationstart', 'transitioncancel', 'transitionend', 'transitionrun',
+  'transitionstart', 'selectionchange', 'selectstart', 'fullscreenchange', 'fullscreenerror',
+  'readystatechange', 'visibilitychange',
+];
+
+/**
+ * Every HTML event handler content attribute name, lower-case. A null-prototype
+ * record: a lookup never walks to `Object.prototype`.
+ * @type {Readonly<Record<string, true>>}
+ */
+export const INLINE_HANDLERS = Object.freeze(Object.assign(Object.create(null),
+  Object.fromEntries(HANDLER_EVENTS.map((event) => ['on' + event, true]))));
+
+/**
+ * Whether a prop is an inline handler value, which neither renderer writes: a
+ * handler attribute's name ({@link INLINE_HANDLERS}, in any case) with a value
+ * that is not a function (an absent prop, `null` and `false` included: there
+ * is nothing to write). Called for every prop of every element, so the cheap
+ * tests come first: the name's first two letters, then the value, and only
+ * then the lower-cased lookup.
+ * @param {string} name - the prop name
+ * @param {any} value - the prop value
+ * @returns {boolean}
+ */
+export function isInlineHandler(name, value) {
+  if (name.length < 5 || (name.charCodeAt(0) | 32) !== 111 || (name.charCodeAt(1) | 32) !== 110) return false;
+  if (typeof value === 'function') return false;
+  return INLINE_HANDLERS[name.toLowerCase()] === true;
+}
 
 /**
  * An enumerated attribute: the name written, and the keywords a JSON
