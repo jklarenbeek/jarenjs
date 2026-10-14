@@ -99,7 +99,17 @@ const CASES = [
   ['string', 'number', 'abc', null], ['string', 'number', 'true', null], ['string', 'number', 'NaN', null],
   ['string', 'number', 'Infinity', null], ['string', 'number', '1e999', null], ['string', 'number', '', null],
   ['string', 'number', '9007199254740992', 9007199254740992], ['string', 'number', '9223372036854775807', { sqlite: null, postgres: 2 ** 63 }],
-  ['string', 'number', '0x10', null], ['string', 'number', '1.2.3', null],
+  ['string', 'number', '1.2.3', null], ['string', 'number', '1e-400', 0],
+  // an unsigned hexadecimal, octal or binary integer, which Number() reads and PostgreSQL's cast reads alike (SQLite's reads 0);
+  // a signed one, digits grouped by `_` and a fraction of one, which Number() reads as NaN and PostgreSQL's cast reads as a number
+  ['string', 'number', '0x10', { sqlite: null, postgres: 16 }], ['string', 'number', '0X1f', { sqlite: null, postgres: 31 }],
+  ['string', 'number', '0o20', { sqlite: null, postgres: 16 }], ['string', 'number', '0b101', { sqlite: null, postgres: 5 }],
+  ['string', 'number', ' 0x10 ', { sqlite: null, postgres: 16 }], ['string', 'number', `0x${'f'.repeat(256)}`, null],
+  ['string', 'number', '-0x10', null], ['string', 'number', '+0x10', null], ['string', 'number', '1_000', null],
+  ['string', 'number', '0x1_0', null], ['string', 'number', '0x10.5', null],
+  ['string', 'integer', '0x10', { sqlite: null, postgres: 16 }], ['string', 'integer', `0x${'f'.repeat(16)}`, null],
+  ['string', 'integer', '1_000', null], ['string', 'boolean', '0x1', { sqlite: null, postgres: 1 }],
+  ['string', 'boolean', '0x2', null], ['string', 'boolean', '-0x1', null],
   ['string', 'boolean', '1', 1], ['string', 'boolean', '0', 0], ['string', 'boolean', '01', 1], ['string', 'boolean', '+1', 1],
   ['string', 'boolean', 'true', null], ['string', 'boolean', '2', null], ['string', 'boolean', '12', null],
   ['string', 'boolean', '-1', null], ['string', 'boolean', 'abc', null], ['string', 'boolean', '1.0', null],
@@ -115,7 +125,7 @@ const CASES = [
   ['number', 'integer', -(2 ** 63) - 4096, null],
   ['number', 'boolean', 0, 0], ['number', 'boolean', 1, 1], ['number', 'boolean', 0.5, null],
   ['number', 'boolean', 81.125, null], ['number', 'boolean', 2, null], ['number', 'boolean', 5, null], ['number', 'boolean', 1e30, null],
-  ['integer', 'string', 81, 81], ['number', 'string', 81.125, 81.125], ['boolean', 'string', true, 1],
+  ['integer', 'string', 81, 81], ['number', 'string', 81.125, 81.125],
   ['boolean', 'integer', true, 1], ['boolean', 'number', false, 0],
 ];
 

@@ -275,7 +275,7 @@ for (const engine of ENGINES) {
     }
 
     for (const [from, to, value, cast] of /** @type {const} */ ([
-      ['integer', 'string', 7, '7'], ['number', 'string', 1.5, '1.5'], ['boolean', 'string', true, '1'],
+      ['integer', 'string', 7, '7'], ['number', 'string', 1.5, '1.5'], ['number', 'string', 5, '5'], ['boolean', 'string', true, 'true'],
       ['string', 'integer', '7', 7], ['integer', 'number', 7, 7],
     ])) {
       it(`${article(from)} member retyped to ${to} is cast by the rebuild and reads back as ${JSON.stringify(cast)}`, async () => {
@@ -288,8 +288,8 @@ for (const engine of ENGINES) {
           });
           const migration = planned(db, before, after, 'retype');
           assert.deepEqual(migration.steps.map((/** @type {any} */ step) => step.kind), ['rebuild']);
-          // the target column declares its collation itself: the cast names a type, never a collation
-          assert.match(migration.steps[0].copy, /CAST\("m" AS [A-Za-z]+\)/);
+          // the target column declares its collation itself: the copy names a type, never a collation
+          assert.doesNotMatch(migration.steps[0].copy, /COLLATE/);
           assert.deepEqual((await migrate(db.target(), [migration], { baseline: before, model: after, shadow: false })).applied, ['retype']);
           await settled(db, before, after, migration);
           assert.deepEqual(await withOpen(db, after, async (store) => [await store.entity('Post').get('p1'), await store.entity('Post').get('p2')]),

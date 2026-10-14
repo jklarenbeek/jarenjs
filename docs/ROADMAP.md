@@ -417,9 +417,21 @@ what each does is its own documentation's job
   it, so a rename alone is refused when one of those is itself referenced. Wanted:
   foreign keys re-pointed through the rebuild, or in-place `ALTER`s where
   PostgreSQL has them.
-- [ ] **A rebuild that casts a number to text spells it as the engine does.**
-  `5` is `5.0` on SQLite and `5` on PostgreSQL, a boolean is `1` or `0`. Wanted:
-  one spelling.
+- [ ] **A rebuild that spells a number as text can end in another last digit
+  on SQLite, and keeps the cast for a referenced key.** A number or a boolean
+  retyped into text is copied as `String()` spells it on both engines (an
+  integer keeps its digits), but on SQLite a number whose shortest spelling
+  takes 16 or 17 significant digits can end in another last digit (SQLite's
+  formatter rounds it; the text reads back as the same number), and a key
+  another table's foreign key references, with the column that references it,
+  keeps the engine's cast (`5.0` on SQLite) so the reference matches while one
+  table is rebuilt and the other not yet. Wanted: exact last digits on SQLite,
+  and a referenced number key spelled as `String()` (the referencing table
+  rebuilt ahead of the key's check, or the check taken after both).
+- [ ] **A retype check refuses a blank text that `Number()` reads.** The empty
+  or blank text, which `Number()` reads as `0` (and SQLite's cast as `0.0`),
+  and a number led or trailed by a no-break space, which `Number()` trims, are
+  refused on both engines. Wanted: decide whether a blank text is a number.
 - [ ] **An integer past 2^53 in an `integer` column answers differently on the
   two engines.** A stored integer a JavaScript number would round is refused
   `JD2003` on both where a row is read whole; but one the store wrote
@@ -429,9 +441,6 @@ what each does is its own documentation's job
   child, and change capture still read a rounding one as the nearest double.
   Wanted: one answer for an integer past ±(2^53 − 1), at the write or at every
   read.
-- [ ] **A retype check does not see a text number below the double range.**
-  `1e-400`, which SQLite casts to `0.0`, passes; PostgreSQL's `0x10` and `1_000`
-  spellings are refused although its cast reads them.
 - [ ] **A native `$resample` window never reads the rows outside it.** `start`
   and `end` are applied by the statement, so a row outside them that the
   temporal kernel refuses (no instant, no reading) is never met, where the

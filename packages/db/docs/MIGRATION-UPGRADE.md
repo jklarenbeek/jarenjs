@@ -2410,6 +2410,42 @@ into a new database created with the default UTF-8 encoding, and open that.
   another (one point read per such row, again when a record places the row
   anew).
 
+## 32. A retype into text spells the value as the store reads it
+
+- A rebuild that retyped a number member into text copied it through the
+  engine's cast: on SQLite `5` read back as `"5.0"`, `1e21` as `"1.0e+21"` and
+  `1/3` as `"0.33333333333333332"`; on PostgreSQL `1e21` as
+  `"1000000000000000000000"` and `1e-7` as `"0.0000001"`; and a boolean as `"1"`
+  or `"0"` on both. The copy now writes the text JavaScript's `String()` spells
+  for the value the store read — `"5"`, `"1e+21"`, `"0.3333333333333333"`,
+  `"1e-7"`, `"true"` and `"false"` — on both engines
+  ([MIGRATION-FORMAT §10](MIGRATION-FORMAT.md#10-the-rebuild-procedure)). An
+  integer keeps its digits; on PostgreSQL a scale a retype from text left is
+  dropped (`"12.0"` is `"12"`), and an integer from 1e21 up is spelled with its
+  exponent. A number key another table's foreign key references, and the column
+  that references it, keep the cast (`"5.0"` on SQLite), so the reference still
+  matches. On SQLite a number whose shortest spelling takes 16 or 17 significant
+  digits can still end in another last digit than `String()` writes; the text
+  reads back as the same number.
+- On PostgreSQL a text spelling an unsigned hexadecimal, octal or binary integer
+  (`0x10`, `0o20`, `0b101`) retyped into a number, an integer or a boolean was
+  refused `JD0023`, although the cast reads it as `Number()` does; it now
+  retypes (`0x10` lands as 16). A sign, a fraction or digits grouped by `_`
+  (`-0x10`, `1_000`), which `Number()` reads as `NaN`, are refused as before, and
+  SQLite, whose cast reads `0x10` as `0`, refuses it as before. A text below the
+  double range (`1e-400`) retyped into a number lands as `0`, as `Number()`
+  reads it, unchanged.
+- A migration document an earlier release planned carries its own copy and runs
+  as it did; an applied document is the one its history records, so keep it as
+  it is, and plan with this release only what is not yet applied. The tables a
+  retype leaves are declared as before.
+
+**Downgrade.** The tables and the history this release writes are the ones the
+previous release writes; only the text a retype into text copied differs (`5`
+where it wrote `5.0`). The previous release opens such a store and reads those
+values as the text they hold, and it runs a migration document this release
+planned as written.
+
 ## Measured costs
 
 Exact identity stores complete canonical documents and model endpoints, so

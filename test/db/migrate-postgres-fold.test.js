@@ -86,6 +86,7 @@ describe('postgres: a rebuild that folds columns into the document',
         .steps.find((/** @type {any} */ step) => step.kind === 'rebuild').copy;
       const small = copy(8), large = copy(16);
       assert.ok(large.length < 3 * small.length, `${small.length} -> ${large.length}`);
-      assert.equal(small.split(' SELECT ')[1].split('"doc"').length - 1, 1);
+      // the copy of the retyped text member selects too: everything after the copy's own SELECT
+      assert.equal(small.slice(small.indexOf(' SELECT ')).split('"doc"').length - 1, 1);
     });
   });

@@ -1032,7 +1032,7 @@ step therefore carries, in `create`, one check for each cast that can change a
 value, right after the statement that creates the new table (on PostgreSQL after
 the lock, so no write slips a value in between the check and the copy): a
 text into an integer, a number or a boolean; a number into an integer or a
-boolean; an integer into a boolean, and into a number on SQLite. A cast that
+boolean; an integer into a boolean, and into a number on SQLite. A copy that
 changes nothing — into text, out of a boolean, an epoch column into a number —
 has none. The check fails the step `JD0023`, naming the member, the table and
 the first value in order that would change, and the migration rolls back with
@@ -1043,14 +1043,39 @@ a spelling the cast reads right retypes as it always did:
 | into | a value is refused when |
 |---|---|
 | integer | it is not a whole number within 64 bits: a fraction (`12.5`, `.5`), a text that names no number (`abc`, `true`, `NaN`, the empty text), a number beyond the 64 bits (`9223372036854775808`, `-9223372036854775809`; a double is judged as the double it is, so `-2^63` is held and `2^63` is not). `007`, `+5`, ` 12`, `12.0` and `5.` are held |
-| number | it is a text that names no finite number (`abc`, `Infinity`, `NaN`, `1e999`, `0x10`); `.5`, `5.`, `+5`, `007` and ` 12` are held. On SQLite also a whole number a double does not hold exactly (past 2^53, for most), a text of one included |
+| number | it is a text that names no finite number (`abc`, `Infinity`, `NaN`, `1e999`, `1_000`, `-0x10`); `.5`, `5.`, `+5`, `007` and ` 12` are held, and so is a text below the double range (`1e-400`), which lands as `0` on both engines, as `Number()` reads it: SQLite stores `0.0`, PostgreSQL's numeric column keeps the decimal and the store reads it as `0`. On SQLite also a whole number a double does not hold exactly (past 2^53, for most), a text of one included |
 | boolean | it is not `0` or `1`; a text only as digits (`01` and `+1` are held, `1.0` and `true` are not) |
 
 Where the engines' own casts differ, so do the verdicts: SQLite reads only the
 digits before a fraction or an exponent of a text (`1e3` is `1` there, and is
-refused), PostgreSQL reads `1e3` as `1000` and keeps it; PostgreSQL's numeric
+refused), PostgreSQL reads `1e3` as `1000` and keeps it; SQLite reads an unsigned
+hexadecimal, octal or binary integer (`0x10`, `0o20`, `0b101`) as `0`, and is
+refused, where PostgreSQL reads it as `Number()` does (`16`) and keeps it — a
+sign, a fraction or digits grouped by `_`, which PostgreSQL's cast also reads,
+are refused there, for `Number()` reads them as `NaN`; PostgreSQL's numeric
 column keeps an integer past 2^53, or a text of one, exactly, so an integer into a
 number plans no check there and a text of one is held.
+
+**Into text, a value is spelled as the store reads it.** A number, an integer or
+a boolean retyped into text is copied as the text JavaScript's `String()` spells
+for the value the store read, on both engines: `5`, `0.1`, `1e+21`, `1e-7`,
+`5e-324`, negative zero as `0`, a boolean as `true` or `false`. A cast alone
+would write `5.0`, `1.0e+21` and `1` on SQLite and `1000000000000000000000` and
+`0.0000001` on PostgreSQL. The copy finds the shortest digits that read back as
+the stored double — the engine's own rounding of 1 to 17 significant digits, and
+the one on either side of it — and writes them out in full from `1e-6` up to
+below `1e21` and with an exponent outside it. An integer keeps its digits, a
+scale a retype from text left on PostgreSQL dropped (`12.0` is `12`); one past
+2^53 that no double holds is not rounded. On PostgreSQL, whose numeric column
+holds what a double does not, `NaN` and the infinities spell as themselves, a
+value past the double range as `Infinity`, and one below it as `0`. Two limits:
+SQLite's formatter rounds the last of 16 or 17 significant digits on its own, so
+such a number can end in another last digit than `String()` writes (the text
+still reads back as the same number); and a key another table's foreign key
+references, with the column that references it, keeps the engine's cast
+(`5.0` on SQLite), so the reference still matches its key while one table is
+rebuilt and the other not yet. The spelled copy costs more than a cast, under
+the rebuild's lock, and most for numbers of 16 or 17 digits.
 The plan reads no row, so it cannot know: `report.destructive` stays false, and
 the refusal comes when the migration runs. Correct the values it names and run
 again.

@@ -2068,6 +2068,110 @@ function nameRebuiltKey(connection, table) {
       : connection.exec(`ALTER INDEX ${q(String(rows[0].schema))}.${q(String(rows[0].key))} RENAME TO ${q(natural)}`)));
 }
 
+/** Precisions 1 to 17 with each engine's format for that many significant
+ * digits, in exponent notation: the shortest that reads back as the stored
+ * double is the digits JavaScript's `String()` writes. */
+const PRECISIONS = Object.freeze({
+  sqlite: `(VALUES ${Array.from({ length: 17 }, (_, at) => `(${at + 1}, '%!.${at}e')`).join(', ')})`,
+  postgres: `(VALUES ${Array.from({ length: 17 }, (_, at) => `(${at + 1}, '9${at === 0 ? '' : `.${'9'.repeat(at)}`}EEEE')`).join(', ')})`,
+});
+
+/**
+ * The text a stored number reads as when the engine's `String()` spells the
+ * double it reads: the shortest digits that read back as that double, written
+ * out in full from 1e-6 up to below 1e21 and with an exponent outside it
+ * (`5`, `0.1`, `1e+21`, `1e-7`, `5e-324`); zero, negative zero included, is
+ * `0`. The digits are the fewest, of 1 to 17, that cast back to the same
+ * double, rounded by the engine's own formatter or the next number of as many
+ * digits on either side: SQLite rounds the double itself, and its last of 16 or
+ * 17 digits can differ from `String()`'s (the text still reads back as the
+ * double); PostgreSQL rounds the decimal its numeric column holds, which is the
+ * shortest spelling wherever the store wrote the number. PostgreSQL's numeric
+ * also holds what a double does not: `NaN` and the infinities spell as
+ * themselves, a value beyond the double range as `Infinity`, and one so small
+ * that it reads as zero as `0`. SQLite's infinities spell as JavaScript's.
+ * @param {any} dialect @param {string} ref - the quoted column
+ * @returns {string}
+ */
+function numberTextSql(dialect, ref) {
+  const postgres = dialect.name === 'postgres';
+  const q = dialect.quoteIdentifier;
+  const [abs, substr, at, length, rtrim, replace] = postgres
+    ? ['pg_catalog.abs', 'pg_catalog.substr', 'pg_catalog.strpos', 'pg_catalog.length', 'pg_catalog.rtrim', 'pg_catalog.replace']
+    : ['abs', 'substr', 'instr', 'length', 'rtrim', 'replace'];
+  const [a, p, s, m, e, d, n, k, c, o] = ['a', 'p', 's', 'm', 'e', 'd', 'n', 'k', 'c', 'o'].map((name) => q(`_jaren_${name}`));
+  const zeros = `'${'0'.repeat(20)}'`;
+  /** @param {string} format - the engine's format, a literal or a column */
+  const formattedBy = (format) => (postgres ? `pg_catalog.btrim(pg_catalog.to_char(${a}, ${format}))` : `printf(${format}, ${a})`);
+  // the column is read once, in a select of its own, so that no name of the
+  // derived tables below can stand for it
+  const target = `(SELECT ${abs}(${ref}) AS ${a}) AS ${q('_jaren_target')}`;
+  /** A text that spells a number in full, `s`, reads back as the double the store reads. @param {string} text */
+  const readsBack = (text) => (postgres
+    // a rounding can leave the double range, which PostgreSQL's cast refuses rather than reads
+    ? `CASE WHEN pg_catalog.pg_input_is_valid(${text}, 'double precision') `
+      + `THEN CAST(${text} AS double precision) = CAST(${a} AS double precision) ELSE false END`
+    : `CAST(${text} AS REAL) = ${a}`);
+  /** The engine's rounding `s` taken apart: the value is 0.<d> times ten to the n; a formatter that
+   * carries a rounding into a new digit writes it before the point (`10.0e+00`). @param {string} formatted */
+  const rounded = (formatted) => `SELECT ${s}, ${p}, ${a}, ${rtrim}(${replace}(${m}, '.', ''), '0') AS ${d}, `
+    + `${e} + CASE ${at}(${m}, '.') WHEN 0 THEN ${length}(${m}) ELSE ${at}(${m}, '.') - 1 END AS ${n} `
+    + `FROM (SELECT ${s}, ${p}, ${a}, ${substr}(${s}, 1, ${at}(${s}, 'e') - 1) AS ${m}, `
+    + `CAST(${substr}(${s}, ${at}(${s}, 'e') + 1) AS INTEGER) AS ${e} FROM (${formatted}) AS ${q('_jaren_formatted')}) AS ${q('_jaren_parts')}`;
+  // a normal double whose rounding to 15 digits reads back has no other spelling
+  // of 15 digits or fewer, so those digits are its shortest: most numbers stop here
+  const fifteen = `SELECT ${d}, ${n} FROM (${rounded(`SELECT ${formattedBy(postgres ? `'9.${'9'.repeat(14)}EEEE'` : "'%!.14e'")} AS ${s}, 15 AS ${p}, ${a} FROM ${target}`)}) `
+    + `AS ${q('_jaren_rounded')} WHERE ${a} >= 2.2250738585072014e-308 AND ${readsBack(s)}`;
+  // otherwise the first precision of 1 to 17 one of three candidates reads back
+  // at: the engine's rounding and its two neighbours, each an integer of p
+  // digits times ten to the e. Next to a power of two the double reads back
+  // from a wider interval above it than below, so the nearest rounding can
+  // miss where the one on the other side reads back
+  const candidates = `SELECT ${p}, ${a}, column1 AS ${o}, CAST(CAST(${substr}(${d} || ${zeros}, 1, ${p}) AS BIGINT) + column1 AS TEXT) AS ${c}, `
+    + `${n} - ${p} AS ${e} FROM (${rounded(`SELECT ${formattedBy('column2')} AS ${s}, column1 AS ${p}, ${a} FROM ${target}, `
+      + `${postgres ? PRECISIONS.postgres : PRECISIONS.sqlite} AS ${q('_jaren_precision')}`)}) AS ${q('_jaren_rounded')}, `
+    + `(VALUES (0), (1), (-1)) AS ${q('_jaren_offset')}`;
+  const searched = `SELECT ${rtrim}(${c}, '0') AS ${d}, ${e} + ${length}(${c}) AS ${n} FROM (${candidates}) AS ${q('_jaren_candidate')} `
+    + `WHERE ${readsBack(`${c} || 'e' || CAST(${e} AS TEXT)`)} ORDER BY ${p}, ${o} * ${o}, ${o} LIMIT 1`;
+  const shortest = `SELECT ${d}, ${n} FROM (${fifteen}) AS ${q('_jaren_fifteen')} UNION ALL `
+    + `SELECT ${d}, ${n} FROM (${searched}) AS ${q('_jaren_searched')} LIMIT 1`;
+  const spelled = `SELECT CASE WHEN ${n} >= ${k} AND ${n} <= 21 THEN ${d} || ${substr}(${zeros}, 1, ${n} - ${k}) `
+    + `WHEN ${n} > 0 AND ${n} <= 21 THEN ${substr}(${d}, 1, ${n}) || '.' || ${substr}(${d}, ${n} + 1) `
+    + `WHEN ${n} > -6 AND ${n} <= 0 THEN '0.' || ${substr}(${zeros}, 1, -${n}) || ${d} `
+    + `ELSE ${substr}(${d}, 1, 1) || CASE WHEN ${k} = 1 THEN '' ELSE '.' || ${substr}(${d}, 2) END `
+    + `|| 'e' || CASE WHEN ${n} > 0 THEN '+' ELSE '-' END || CAST(${abs}(${n} - 1) AS TEXT) END `
+    + `FROM (SELECT ${d}, ${length}(${d}) AS ${k}, ${n} FROM (${shortest}) AS ${q('_jaren_shortest')}) AS ${q('_jaren_digits')}`;
+  const outside = postgres
+    ? `WHEN ${ref} IN ('NaN', 'Infinity', '-Infinity') THEN CAST(${ref} AS TEXT) `
+      + `WHEN NOT pg_catalog.pg_input_is_valid(CAST(${ref} AS TEXT), 'double precision') `
+      + `THEN CASE WHEN ${abs}(${ref}) < 1 THEN '0' WHEN ${ref} < 0 THEN '-Infinity' ELSE 'Infinity' END `
+    : `WHEN ${ref} = 9e999 THEN 'Infinity' WHEN ${ref} = -9e999 THEN '-Infinity' `;
+  return `CASE WHEN ${ref} IS NULL THEN NULL ${outside}WHEN ${ref} = 0 THEN '0' `
+    + `ELSE CASE WHEN ${ref} < 0 THEN '-' ELSE '' END || (${spelled}) END`;
+}
+
+/**
+ * The copy of a column whose type a rebuild changes: its cast, except into
+ * text, where a value is spelled as the engine's `String()` spells what the
+ * store reads — a number as {@link numberTextSql} does, a boolean as `true` or
+ * `false`. An integer keeps its digits (SQLite's 64-bit integer, PostgreSQL's
+ * numeric below 1e21, which also drops a scale a retype from text left, `12.0`),
+ * so one past 2^53 that no double holds is not rounded by the retype.
+ * @param {any} dialect @param {string} ref - the quoted column
+ * @param {string} from - the column's storage now
+ * @param {string} to - the storage it is retyped to
+ * @param {string} type - the target column's type, its name alone
+ * @returns {string}
+ */
+function retypedSql(dialect, ref, from, to, type) {
+  if (to !== 'string') return `CAST(${ref} AS ${type})`;
+  if (from === 'boolean') return `CASE ${ref} WHEN 1 THEN 'true' WHEN 0 THEN 'false' ELSE CAST(${ref} AS ${type}) END`;
+  if (from === 'number') return numberTextSql(dialect, ref);
+  if (from === 'integer' && dialect.name === 'postgres')
+    return `CASE WHEN pg_catalog.abs(${ref}) < 1e21 THEN CAST(pg_catalog.trim_scale(${ref}) AS ${type}) ELSE ${numberTextSql(dialect, ref)} END`;
+  return `CAST(${ref} AS ${type})`;
+}
+
 /**
  * The check ahead of a rebuild's copy that no stored value of a column is one
  * the cast to its new type would change, or `null` where the cast loses
@@ -2079,10 +2183,13 @@ function nameRebuiltKey(connection, table) {
  * is no change. The statement fails, naming the member and the first value in
  * order that would change, as `wholeKeySql` does; no such value, no failure,
  * and a missing member (SQL NULL) is no value. Both engines refuse a value
- * whose number the cast would not keep, with two exceptions of the engines'
+ * whose number the cast would not keep, with three exceptions of the engines'
  * own casts: SQLite reads only the digits before a fraction or an exponent of
- * a text (`1e3` is `1` there, and refused), and PostgreSQL's numeric column
- * keeps an integer past 2^53 as it is (a double read back rounds it).
+ * a text (`1e3` is `1` there, and refused) and reads `0x10` as `0` (refused),
+ * where PostgreSQL reads an unsigned hexadecimal, octal or binary integer as
+ * `Number()` does (`0x10` is 16, and held); and PostgreSQL's numeric column
+ * keeps an integer past 2^53 as it is (a double read back rounds it). A text
+ * below the double range (`1e-400`) is no change: `Number()` reads it as 0 too.
  * @param {any} dialect @param {string} table @param {string} column
  * @param {string} from - the column's storage now
  * @param {string} to - the storage it is retyped to
@@ -2094,10 +2201,13 @@ function retypeCheckSql(dialect, table, column, from, to, instant) {
   const postgres = dialect.name === 'postgres';
   const text = from === 'string';
   const int64 = '-9223372036854775808 AND 9223372036854775807';
-  // the decimal spellings a numeric cast reads: blanks, a sign, digits with an optional point, an exponent
-  // (bounded, so that no digit string reaches an overflow the server answers in its own words)
-  const decimalText = '^[[:space:]]*[+-]?([0-9]+[.]?[0-9]*|[.][0-9]+)([eE][+-]?[0-9]{1,4})?[[:space:]]*$';
-  const digitsText = '^[[:space:]]*[+-]?[0-9]+[[:space:]]*$';
+  // the spellings PostgreSQL's numeric cast reads as JavaScript's Number() does: blanks around a sign,
+  // digits with an optional point and an exponent (bounded, so that no digit string reaches an overflow
+  // the server answers in its own words), or an unsigned hexadecimal, octal or binary integer (`0x10`);
+  // the cast also reads a signed one and digits grouped by `_`, which Number() reads as NaN
+  const radix = '0([xX][0-9a-fA-F]+|[oO][0-7]+|[bB][01]+)';
+  const decimalText = `^[[:space:]]*([+-]?([0-9]+[.]?[0-9]*|[.][0-9]+)([eE][+-]?[0-9]{1,4})?|${radix})[[:space:]]*$`;
+  const digitsText = `^[[:space:]]*([+-]?[0-9]+|${radix})[[:space:]]*$`;
   /** @type {string} */
   let lost, held;
   if (to === 'boolean' && text) {
@@ -2175,6 +2285,13 @@ function renderRebuild(name, fromName, fm, tm, toMapping, dialect, report) {
   const fromHas = (columnName) =>
     fromColumns.has(columnName) || fromFkOnly.includes(columnName);
   const storageType = (storage) => dialect.typeFor(storage, 'generated');
+  /** Whether a foreign key joins the column: one of this table's, or another
+   * table's (a join table's included) that references it. @param {string} columnName */
+  const joined = (columnName) => tm.foreignKeys.some((/** @type {any} */ fk) => fk.column === columnName)
+    || Object.values(toMapping.entities).some((/** @type {any} */ mapping) => mapping.foreignKeys
+      .some((/** @type {any} */ fk) => fk.references === name && fk.referencesKey === columnName))
+    || Object.values(toMapping.joinTables ?? {}).some((/** @type {any} */ join) => [join.left, join.right]
+      .some((side) => side.entity === name && side.referencesKey === columnName));
   /** The storage an inferred foreign-key column holds: the key it references. */
   const referencedStorage = (/** @type {any} */ mapping, /** @type {string} */ columnName) =>
     mapping.foreignKeys.find((/** @type {any} */ fk) => fk.column === columnName)?.referencesType;
@@ -2239,8 +2356,12 @@ function renderRebuild(name, fromName, fm, tm, toMapping, dialect, report) {
       }
       else {
         // the type's name alone: a collation belongs to the column, and
-        // `CAST(x AS text COLLATE "C")` is not a cast
-        sources.push(`CAST(${q(columnName)} AS ${dialect.comparableColumnType(storageType(column.storage))})`);
+        // `CAST(x AS text COLLATE "C")` is not a cast. A column a foreign key
+        // joins keeps the engine's cast into text, so the reference matches
+        // the key it names while one side is rebuilt and the other not yet
+        const type = dialect.comparableColumnType(storageType(column.storage));
+        sources.push(joined(columnName) ? `CAST(${q(columnName)} AS ${type})`
+          : retypedSql(dialect, q(columnName), fromColumn.storage, column.storage, type));
         const check = retypeCheckSql(dialect, name, columnName, fromColumn.storage, column.storage,
           fromColumn.source === 'epoch(document)');
         if (check !== null) retypeChecks.push(check);
