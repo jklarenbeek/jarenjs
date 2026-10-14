@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 import { parseMermaid, toMermaid } from '@jarenjs/mermaid';
 import { layoutGantt } from '../../components/mermaid/src/layout/gantt.js';
 import { createExcluder, DAY_MS } from '../../components/mermaid/src/gantt-calendar.js';
+import { growthRatio } from '../lib/growth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const GRAMMAR = JSON.parse(
@@ -185,21 +186,12 @@ describe('repeated list lines parse in linear time', () => {
     }
     return `gantt\ndateFormat YYYY-MM-DD\n${lines.join('\n')}\nsection S\nA : a1, 2024-01-05, 3d`;
   };
-  const best = (/** @type {string} */ source) => {
-    let fastest = Infinity;
-    for (let run = 0; run < 3; run++) {
-      const t0 = performance.now();
-      parseMermaid(source);
-      fastest = Math.min(fastest, performance.now() - t0);
-    }
-    return fastest;
-  };
 
   it('should grow with the line count, not with its square', () => {
-    const small = best(holidays(500));
-    const large = best(holidays(4000));
-    // 8x the lines: linear is ~8x, quadratic ~64x
-    assert.ok(large / Math.max(small, 0.05) < 24, `${small} ms -> ${large} ms`);
+    // 8x the lines: linear is ~8x, quadratic ~64x; the limit sits near their
+    // geometric mean
+    const ratio = growthRatio(parseMermaid, holidays(500), holidays(4000), { limit: 24 });
+    assert.ok(ratio < 24, `8x the lines multiplied the time by ${ratio.toFixed(1)}`);
   });
 });
 

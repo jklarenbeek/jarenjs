@@ -2,18 +2,13 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { createCsvStreamReader } from '@jarenjs/josl';
+import { growthRatio } from '../lib/growth.js';
 
-/** Best of three: feed `text` to a repairing reader in pieces of `size` characters. */
-function best(/** @type {string} */ text, /** @type {number} */ size) {
-  let fastest = Infinity;
-  for (let run = 0; run < 3; run++) {
-    const start = performance.now();
-    const reader = createCsvStreamReader({ repair: true });
-    for (let i = 0; i < text.length; i += size) reader.feed(text.slice(i, i + size));
-    reader.end();
-    fastest = Math.min(fastest, performance.now() - start);
-  }
-  return fastest;
+/** Feed `text` to a repairing reader in pieces of `size` characters. */
+function feedInPieces(/** @type {string} */ text, /** @type {number} */ size) {
+  const reader = createCsvStreamReader({ repair: true });
+  for (let i = 0; i < text.length; i += size) reader.feed(text.slice(i, i + size));
+  reader.end();
 }
 
 describe('the lookahead after a closing quote reads each byte once', () => {
@@ -24,10 +19,10 @@ describe('the lookahead after a closing quote reads each byte once', () => {
   const stray = (/** @type {number} */ n) => '"a"' + 'b'.repeat(n);
 
   it('grows with the input at a fixed chunk size, not with its square', () => {
-    const small = Math.max(best(stray(512 * 1024), 4096), 0.5);
-    const large = best(stray(4 * 1024 * 1024), 4096);
-    // eight times the bytes: linear is about 8x, a rescan per chunk about 64x
-    assert.ok(large / small < 24, `8x the bytes took ${(large / small).toFixed(1)}x`);
+    // eight times the bytes: linear is about 8x, a rescan per chunk about 64x;
+    // the limit sits near their geometric mean
+    const ratio = growthRatio((text) => feedInPieces(text, 4096), stray(512 * 1024), stray(4 * 1024 * 1024), { limit: 24 });
+    assert.ok(ratio < 24, `8x the bytes took ${ratio.toFixed(1)}x`);
   });
 });
 
@@ -38,9 +33,8 @@ describe('an open quoted field is read once, not once per chunk', () => {
   const open = (/** @type {number} */ n) => '"' + 'b'.repeat(n);
 
   it('grows with the input at a fixed chunk size, not with its square', () => {
-    const small = Math.max(best(open(512 * 1024), 4096), 0.5);
-    const large = best(open(4 * 1024 * 1024), 4096);
-    assert.ok(large / small < 24, `8x the bytes took ${(large / small).toFixed(1)}x`);
+    const ratio = growthRatio((text) => feedInPieces(text, 4096), open(512 * 1024), open(4 * 1024 * 1024), { limit: 24 });
+    assert.ok(ratio < 24, `8x the bytes took ${ratio.toFixed(1)}x`);
   });
 });
 
@@ -58,26 +52,19 @@ describe('a field fed in chunks that each hold a quote is read once, not once pe
     ['a quoted field with a doubled quote at the end', '"', () => run + run + '""', '"\n'],
   ]);
 
-  /** @param {string} head @param {number} chunks @param {() => string} piece @param {string} tail */
-  function feedTime(head, chunks, piece, tail) {
-    let fastest = Infinity;
-    for (let n = 0; n < 3; n++) {
-      const start = performance.now();
-      const reader = createCsvStreamReader({ repair: true });
-      reader.feed(head);
-      for (let i = 0; i < chunks; i++) reader.feed(piece());
-      reader.feed(tail);
-      reader.end();
-      fastest = Math.min(fastest, performance.now() - start);
-    }
-    return fastest;
-  }
+  /** Feed `chunks` chunks of `piece()` after `head`, then end the record with `tail`. @param {string} head @param {() => string} piece @param {string} tail */
+  const feedChunks = (head, piece, tail) => (/** @type {number} */ chunks) => {
+    const reader = createCsvStreamReader({ repair: true });
+    reader.feed(head);
+    for (let i = 0; i < chunks; i++) reader.feed(piece());
+    reader.feed(tail);
+    reader.end();
+  };
 
   for (const [name, head, piece, tail] of shapes) {
     it(`grows with the input at a fixed chunk size for ${name}`, () => {
-      const small = Math.max(feedTime(head, 128, piece, tail), 0.5);
-      const large = feedTime(head, 1024, piece, tail);
-      assert.ok(large / small < 24, `8x the chunks took ${(large / small).toFixed(1)}x`);
+      const ratio = growthRatio(feedChunks(head, piece, tail), 128, 1024, { limit: 24 });
+      assert.ok(ratio < 24, `8x the chunks took ${ratio.toFixed(1)}x`);
     });
   }
 

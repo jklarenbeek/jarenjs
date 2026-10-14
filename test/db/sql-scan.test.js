@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 import { comparableDeclaredSql } from '@jarenjs/db';
 import { QUOTE, SIMPLE, SPACE, WORD_PART, WORD_START, scannerFor, sqlTokens } from '../../packages/db/src/dialects/check-read.js';
 import { postgresSqlToken } from '../../packages/db/src/dialects/postgres-migration.js';
+import { growthRatio } from '../lib/growth.js';
 
 /** @param {{ kind: string, value: string, at: number }[]} tokens */
 const rows = (tokens) => tokens.map((t) => [t.kind, t.value, t.at]);
@@ -130,26 +131,17 @@ describe('the shared scanner', () => {
 describe('scanning many quoted tokens', () => {
   /** @param {number} count */
   const list = (count) => `CREATE TABLE t (a TEXT CHECK (a IN (${Array.from({ length: count }, (_, i) => `'v${i}'`).join(', ')})))`;
-  /** @param {(sql: string) => unknown} run @param {string} sql */
-  const best = (run, sql) => {
-    let fastest = Infinity;
-    for (let attempt = 0; attempt < 7; attempt++) {
-      const from = process.hrtime.bigint();
-      for (let i = 0; i < 5; i++) run(sql);
-      fastest = Math.min(fastest, Number(process.hrtime.bigint() - from));
-    }
-    return fastest;
-  };
 
   for (const [name, run] of /** @type {[string, (sql: string) => unknown][]} */ ([
     ['the catalog reader', (sql) => sqlTokens(sql)],
     ['the declaration identity', (sql) => comparableDeclaredSql(sql)],
   ])) {
     it(`${name} grows in step with the text over an 8x step`, () => {
-      for (const sql of [list(2000), list(16000)]) run(sql);
-      const small = best(run, list(2000)), large = best(run, list(16000));
-      // Linear is about 8x; a scan from every quoted token to the end of the text is over 25x.
-      assert.ok(large / small < 16, `${name}: ${large / small} times the cost for 8 times the quoted tokens`);
+      // Linear is about 8x; a scan from every quoted token to the end of the
+      // text is far above it. The limit sits near the geometric mean of the
+      // linear ratio and the quadratic one.
+      const ratio = growthRatio(run, list(2000), list(16000), { limit: 24 });
+      assert.ok(ratio < 24, `${name}: ${ratio} times the cost for 8 times the quoted tokens`);
     });
   }
 });

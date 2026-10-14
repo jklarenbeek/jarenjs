@@ -12,17 +12,7 @@ import { describe, it } from 'node:test';
 import * as assert from 'node:assert/strict';
 
 import { parseMermaid } from '@jarenjs/mermaid';
-
-/** @param {string} source @returns {number} best of three, in ms */
-function best(source) {
-  let low = Infinity;
-  for (let i = 0; i < 3; i++) {
-    const t = performance.now();
-    parseMermaid(source);
-    low = Math.min(low, performance.now() - t);
-  }
-  return low;
-}
+import { growthRatio } from '../lib/growth.js';
 
 describe('an unclosed brace body keeps all of what follows it', function () {
   it('keeps the whole last member of a class', () => {
@@ -55,9 +45,10 @@ describe('an unclosed brace body is read in linear time', function () {
     ['an entity body', lines('erDiagram\nA {', '  string a PK')],
   ]) {
     it(`${name}: eight times the lines cost far less than sixty-four times`, () => {
-      const small = Math.max(best(make(4000)), 0.5);
-      const large = best(make(32000));
-      assert.ok(large / small < 24, `${name}: ${small.toFixed(1)} ms -> ${large.toFixed(1)} ms`);
+      // linear is about 8x and quadratic about 64x: the limit sits near their
+      // geometric mean, where neither coverage nor a loaded host reaches it
+      const ratio = growthRatio(parseMermaid, make(4000), make(32000), { limit: 24 });
+      assert.ok(ratio < 24, `${name}: eight times the lines multiplied the time by ${ratio.toFixed(1)}`);
     });
   }
 });

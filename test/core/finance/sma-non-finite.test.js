@@ -8,6 +8,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { sma, wma } from '@jarenjs/core/finance';
+import { growthRatio } from '../../lib/growth.js';
 
 describe('sma — a non-finite value in the series', () => {
   it('is NaN only in the windows that hold the NaN', () => {
@@ -34,14 +35,23 @@ describe('sma — a non-finite value in the series', () => {
     assert.deepStrictEqual(sma([], 2), []);
   });
 
-  it('reads a null as 0 and answers a gap series in linear time', () => {
+  it('reads a null as 0', () => {
     assert.deepStrictEqual(sma([2, null, 4, null], 2), [null, 1, 2, 2]);
-    const values = Array.from({ length: 300000 }, (_, i) => (i % 10 === 0 ? null : Math.sin(i)));
+  });
+
+  it('answers a gap series in time that does not grow with the window', () => {
+    // a window re-read for every output costs the window per value, so an
+    // eightfold window costs about eight times as much; a running sum costs
+    // the same however wide the window is. The limit sits near the geometric
+    // mean of the two ratios.
+    const values = Array.from({ length: 200000 }, (_, i) => (i % 10 === 0 ? null : Math.sin(i)));
     const nans = Array.from({ length: 200000 }, () => NaN);
-    const started = Date.now();
-    sma(values, 1000);
-    sma(nans, 10000);
-    assert.ok(Date.now() - started < 1500, `took ${Date.now() - started} ms`);
+    const both = (/** @type {number} */ period) => {
+      sma(values, period);
+      sma(nans, period);
+    };
+    const ratio = growthRatio(both, 500, 4000, { limit: 3 });
+    assert.ok(ratio < 3, `an eightfold window multiplied the time by ${ratio.toFixed(2)}`);
   });
 
   it('agrees with a naive window over random series holding NaN, null and both infinities', () => {

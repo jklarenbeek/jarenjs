@@ -22,7 +22,7 @@ import { isDeepStrictEqual } from 'node:util';
 
 import { parseMarkdown, toMarkdown } from '@jarenjs/md';
 import { extractExamples } from '../../benchmark/lib/commonmark.js';
-import { growthRatio } from './scaling.js';
+import { growthRatio } from '../lib/growth.js';
 
 /**
  * Print, re-parse, and require the same AST and a stable canonical text.
@@ -206,18 +206,20 @@ describe('toMarkdown — content no searched spelling reads back as costs time i
     // The search is paid from a pool in proportion to what a call prints, so
     // content it cannot spell costs a bounded number of reads of itself, not the
     // thousands a search of every spelling would. Both documents print the same
-    // number of characters; the timing of each is the fastest of several, taken
-    // in turn so that a loaded host slows them alike.
+    // number of characters; each timing is several prints in a row, so that the
+    // easy one takes milliseconds, and the fastest of several, taken in turn so
+    // that a loaded host slows them alike. The limit sits near the geometric
+    // mean of the bounded multiple and the unbounded search.
     const hard = parseMarkdown(Array.from({ length: 40 }, () => UNIT).join('\n\n'));
     const easy = parseMarkdown(Array.from({ length: 40 }, () => '*a **b** c* and '.repeat(7).slice(0, UNIT.length)).join('\n\n'));
     const time = (/** @type {any} */ doc) => {
       const started = performance.now();
-      toMarkdown(doc);
+      for (let i = 0; i < 6; i++) toMarkdown(doc);
       return performance.now() - started;
     };
     let hardest = Infinity;
     let easiest = Infinity;
-    for (let i = 0; i < 9; i++) {
+    for (let i = 0; i < 5; i++) {
       hardest = Math.min(hardest, time(hard));
       easiest = Math.min(easiest, time(easy));
     }

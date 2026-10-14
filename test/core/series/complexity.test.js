@@ -3,6 +3,7 @@ import * as assert from '../../assert.node.js';
 
 import { createIntervalIndex } from '@jarenjs/core/series';
 import { mulberry32 } from '@jarenjs/core/random';
+import { growthRatio } from '../../lib/growth.js';
 
 // What "O(log n + k)" has to mean if it is a claim rather than a hope:
 // a query must not read the rows, and answering a fixed question over a
@@ -75,38 +76,34 @@ describe('the interval index answers without reading the corpus', () => {
   });
 
   it('should cost the same on a corpus 64 times larger', () => {
-    // linear work would be ~64x; two binary cuts and a walk over the
-    // hits is ~1x, and the margin between those is what is asserted
+    // linear work would be ~64x; two binary cuts and a walk over the hits
+    // is ~1x plus the cache misses of a larger corpus, and the limit sits
+    // near the geometric mean of that and 64, which neither coverage nor
+    // a loaded host can reach from the honest side
     const small = 2048;
     const large = small * 64;
     const smallIndex = createIntervalIndex(corpus(small));
     const largeIndex = createIntervalIndex(corpus(large));
     assert.strictEqual(largeIndex.size, large);
 
-    const smallProbes = probes(small, 2000);
-    const largeProbes = probes(large, 2000);
-    let smallRows = 0;
-    let largeRows = 0;
-    const smallMs = best(5, () => {
-      smallRows = 0;
-      for (const at of smallProbes)
-        smallRows += smallIndex.overlapping(at, at + QUERY_WIDTH).length;
-    });
-    const largeMs = best(5, () => {
-      largeRows = 0;
-      for (const at of largeProbes)
-        largeRows += largeIndex.overlapping(at, at + QUERY_WIDTH).length;
-    });
-
+    // 2000 queries per run, over a corpus of its own size
+    const ask = ({ index, at }) => {
+      let rows = 0;
+      for (const instant of at)
+        rows += index.overlapping(instant, instant + QUERY_WIDTH).length;
+      return rows;
+    };
+    const smallInput = { index: smallIndex, at: probes(small, 2000) };
+    const largeInput = { index: largeIndex, at: probes(large, 2000) };
     // same density, so the answers are the same size - the comparison
     // is of the search, not of the result
+    const smallRows = ask(smallInput);
+    const largeRows = ask(largeInput);
     assert.isTrue(Math.abs(largeRows - smallRows) < smallRows / 2,
       `result counts diverged: ${smallRows} vs ${largeRows} rows over 2000 queries`);
-    // a log-time search grows ~1.5x here plus cache misses on the larger
-    // corpus; a scan grows ~64x. 24x keeps that apart under coverage and load
-    assert.isTrue(largeMs < smallMs * 24,
-      `2000 queries: ${smallMs.toFixed(3)} ms over ${small} intervals, `
-      + `${largeMs.toFixed(3)} ms over ${large} - a full scan would be ~64x`);
+    const ratio = growthRatio(ask, smallInput, largeInput, { limit: 16 });
+    assert.isTrue(ratio < 16,
+      `2000 queries over ${large} intervals cost ${ratio.toFixed(1)} times what they cost over ${small} - a full scan would be ~64x`);
   });
 
   it('should beat asking every interval, on the same corpus and the same answer', () => {

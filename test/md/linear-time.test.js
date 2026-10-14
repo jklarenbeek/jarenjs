@@ -16,7 +16,7 @@ import { describe, it } from 'node:test';
 import * as assert from 'node:assert/strict';
 
 import { parseMarkdown, mdToVnode, parseHtmlFragment, toHtml } from '@jarenjs/md';
-import { growthRatio } from './scaling.js';
+import { growthRatio } from '../lib/growth.js';
 
 /** @param {string} s @param {number} n */
 const R = (s, n) => s.repeat(n);

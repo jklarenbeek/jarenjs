@@ -18,6 +18,7 @@ import {
   LocalDate,
   LocalDateTime,
 } from '@jarenjs/josl';
+import { growthRatio } from '../lib/growth.js';
 
 //#region reading
 
@@ -345,38 +346,19 @@ describe('csv: header naming', () => {
   });
 
   it('names a header in time linear in its columns', () => {
-    // relative, not absolute: twice the columns within about three times
-    // the time (3.5x, a 5 ms floor) - linear naming measures about 2.3x
-    // here, the rescanning algorithm 4.6x on distinct names and 8x on
-    // repeated ones. The two sizes alternate, best of five each, so a load
-    // spike lands on both alike, and a loaded host gets three attempts: a
-    // quadratic namer fails every one.
-    const scales = (small, large, options) => {
-      let once = Infinity;
-      let twice = Infinity;
-      for (let k = 0; k < 5; k++) {
-        let start = performance.now();
-        parseCsv(small, options);
-        once = Math.min(once, performance.now() - start);
-        start = performance.now();
-        parseCsv(large, options);
-        twice = Math.min(twice, performance.now() - start);
-      }
-      return { once, twice, linear: twice < 3.5 * Math.max(once, 5) };
-    };
+    // relative, not absolute: eight times the columns cost about eight times
+    // as much when linear and about sixty-four times as much for the
+    // rescanning namer, on distinct names and on repeated ones; the limit
+    // sits near the geometric mean of the two
     const distinct = (n) => Array.from({ length: n }, (_, i) => 'c' + i).join(',') + '\n';
     const repeated = (n) => Array(n).fill('a').join(',') + '\n';
     for (const [make, n, options] of [
-      [distinct, 20000, { headers: true }],
-      [repeated, 1500, { headers: true, repair: true }],
-      [(m) => 'a\n' + Array(m).fill('x').join(',') + '\n', 6000, { headers: true, repair: true }],
+      [distinct, 2500, { headers: true }],
+      [repeated, 190, { headers: true, repair: true }],
+      [(m) => 'a\n' + Array(m).fill('x').join(',') + '\n', 750, { headers: true, repair: true }],
     ]) {
-      const small = make(n);
-      const large = make(2 * n);
-      let run = scales(small, large, options);
-      for (let attempt = 1; attempt < 3 && !run.linear; attempt++)
-        run = scales(small, large, options);
-      ok(run.linear, `${2 * n} columns took ${run.twice.toFixed(1)} ms, ${n} took ${run.once.toFixed(1)} ms`);
+      const ratio = growthRatio((text) => parseCsv(text, options), make(n), make(8 * n), { limit: 24 });
+      ok(ratio < 24, `${8 * n} columns cost ${ratio.toFixed(1)} times what ${n} did`);
     }
   });
 });

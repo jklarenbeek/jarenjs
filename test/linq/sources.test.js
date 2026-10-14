@@ -12,6 +12,7 @@ import * as assert from 'node:assert';
 import { execFileSync } from 'node:child_process';
 
 import { fromAsync, createPushQueue } from '@jarenjs/linq';
+import { growthRatioAsync } from '../lib/growth.js';
 
 describe('source adapters', () => {
   it('a cursor ({ next, return? }) adapts and closes', async () => {
@@ -163,29 +164,23 @@ describe('the push queue', () => {
     assert.strictEqual(queue.feed(8), false, 'five unread exceeds a mark of four');
     await reader.return();
 
-    /** The fastest of three drains of `count` values fed ahead of the reader. */
+    /** Feed `count` values ahead of the reader, then drain them in order. */
     const drain = async (/** @type {number} */ count) => {
-      let best = Infinity;
-      for (let run = 0; run < 3; run++) {
-        const big = createPushQueue({ highWaterMark: Number.MAX_SAFE_INTEGER });
-        for (let n = 0; n < count; n++) big.feed(n);
-        big.end();
-        const started = performance.now();
-        let expected = 0;
-        for await (const value of big) {
-          if (value !== expected) assert.fail(`out of order at ${expected}: ${value}`);
-          expected++;
-        }
-        assert.strictEqual(expected, count);
-        best = Math.min(best, performance.now() - started);
+      const big = createPushQueue({ highWaterMark: Number.MAX_SAFE_INTEGER });
+      for (let n = 0; n < count; n++) big.feed(n);
+      big.end();
+      let expected = 0;
+      for await (const value of big) {
+        if (value !== expected) assert.fail(`out of order at ${expected}: ${value}`);
+        expected++;
       }
-      return best;
+      assert.strictEqual(expected, count);
     };
     // eight times the values: a linear drain takes about eight times as long, the
-    // quadratic one it replaced (a shift() per value) about sixty-four times; a
-    // ratio is steady on a loaded host where a wall-clock bound is not
-    const small = await drain(50000);
-    const large = await drain(400000);
-    assert.strictEqual(large / Math.max(small, 1) < 24, true, `50000 values took ${small.toFixed(1)} ms, 400000 took ${large.toFixed(1)} ms`);
+    // quadratic one it replaced (a shift() per value) several times more than
+    // that; the limit sits between the two, and a ratio is steady on a loaded
+    // host where a wall-clock bound is not
+    const ratio = await growthRatioAsync(drain, 12500, 100000, { limit: 20 });
+    assert.strictEqual(ratio < 20, true, `eight times the values multiplied the drain time by ${ratio.toFixed(1)}`);
   });
 });

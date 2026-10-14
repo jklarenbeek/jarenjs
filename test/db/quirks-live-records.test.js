@@ -72,9 +72,14 @@ describe('a live result is not the capture record it was built from', () => {
       await store.close();
       return elapsed;
     };
-    const best = async (views) => Math.min(await inserts(views), await inserts(views), await inserts(views));
-    const alone = await best(0);
-    const watched = await best(60);
+    // the two are timed in turn, the fastest of five each, so a load spike
+    // that lasts a while slows both and not one
+    let alone = Infinity;
+    let watched = Infinity;
+    for (let round = 0; round < 5; round++) {
+      alone = Math.min(alone, await inserts(0));
+      watched = Math.min(watched, await inserts(60));
+    }
     assert.ok(watched < alone * 3 + 20,
       `60 rejecting views cost ${watched.toFixed(0)} ms beside ${alone.toFixed(0)} ms for the writes alone`);
   });

@@ -21,6 +21,7 @@ import { renderToString } from '@jarenjs/view';
 import { textWidth } from '@jarenjs/view/helpers';
 
 import { layoutGantt } from '../../components/mermaid/src/layout/gantt.js';
+import { growthRatio } from '../lib/growth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const GRAMMAR = JSON.parse(
@@ -295,20 +296,11 @@ describe('compact mode packs the tasks of a section into the fewest rows', () =>
       + Array.from({ length: n }, (_, i) => `T${i} : t${i}, 2024-01-01, 400d`).join('\n');
     const small = parseMermaid(build(500));
     const large = parseMermaid(build(4000));
-    // `layoutDiagram` memoizes per document, so time the layout itself, and
-    // repeat it: one layout of 500 rows is well under a millisecond, which
-    // coverage and a loaded host turn into noise
-    const time = (doc) => {
-      let best = Infinity;
-      for (let i = 0; i < 3; i++) {
-        const t0 = process.hrtime.bigint();
-        for (let r = 0; r < 20; r++) layoutGantt(doc.ast, { config: doc.config });
-        best = Math.min(best, Number(process.hrtime.bigint() - t0));
-      }
-      return best;
-    };
+    // `layoutDiagram` memoizes per document, so time the layout itself
+    const layout = (doc) => layoutGantt(doc.ast, { config: doc.config });
     assert.strictEqual(layoutDiagram(large).rows.at(-1).lane, 3999);
-    const growth = time(large) / time(small);
+    // linear is ~8x, quadratic ~64x; the limit sits near their geometric mean
+    const growth = growthRatio(layout, small, large, { limit: 24 });
     assert.ok(growth < 24, `8x the tasks took ${growth.toFixed(1)}x (quadratic would be ~64x)`);
   });
 });
