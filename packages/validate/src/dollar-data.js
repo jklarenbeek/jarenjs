@@ -55,23 +55,9 @@ import {
 
 import {
   createDataRefCompilers,
+  dataRefOptions,
   allValidatorsPass,
 } from './tools.js';
-
-/**
- * Resolve a `$data` reference.
- *
- * Ajv's `$data` takes the same three forms the `data` keyword does — empty for
- * the root, a Relative JSON Pointer, or an absolute JSON Pointer. A reference
- * that cannot be compiled is a compile-time error rather than a resolver that
- * finds nothing: a constraint that silently never asserts lets a document
- * that should fail pass, which is worse than a rejected schema.
- * @param {string} ref
- * @returns {(dataRoot: any, dataPath: string) => any}
- */
-function compileRefResolver(ref) {
-  return compileDataRef(ref);
-}
 
 /**
  * Check if a value is a $data reference object
@@ -82,10 +68,14 @@ function isDollarDataRef(value) {
   return isObjectClass(value) && isStringType(value.$data);
 }
 
-// The fifteen keyword validators are shared with the `data` keyword;
-// only `compileRefResolver` above differs (see tools.js). uniqueItems
-// and required below are $data-only and stay local.
-const KEYWORD_COMPILERS = createDataRefCompilers(compileRefResolver);
+// The fifteen keyword validators are shared with the `data` keyword (see
+// tools.js). Ajv's `$data` takes the same three forms the `data` keyword does:
+// empty for the root, a Relative JSON Pointer, or an absolute JSON Pointer. A
+// reference that cannot be compiled is a compile-time error rather than a
+// resolver that finds nothing: a constraint that silently never asserts lets
+// a document that should fail pass, which is worse than a rejected schema.
+// uniqueItems and required below are $data-only and stay local.
+const KEYWORD_COMPILERS = createDataRefCompilers();
 
 //#region $data-only Validators
 
@@ -97,7 +87,7 @@ const KEYWORD_COMPILERS = createDataRefCompilers(compileRefResolver);
  */
 function compileDollarDataUniqueItems(schemaObj, ref) {
   const addError = schemaObj.createErrorHandler(ref, 'uniqueItems');
-  const resolveRef = compileRefResolver(ref);
+  const resolveRef = compileDataRef(ref, dataRefOptions(schemaObj));
 
   return function validateDollarDataUniqueItems(data, dataPath, dataRoot) {
     if (!Array.isArray(data)) return true;
@@ -127,7 +117,7 @@ function compileDollarDataRequired(schemaObj, ref) {
   // Keyed handler: the missing property name travels as the dataKey, so
   // error conversion extracts params.missingProperty like static required.
   const addError = schemaObj.createErrorHandler(ref, ['required']);
-  const resolveRef = compileRefResolver(ref);
+  const resolveRef = compileDataRef(ref, dataRefOptions(schemaObj));
 
   return function validateDollarDataRequired(data, dataPath, dataRoot) {
     if (typeof data !== 'object' || data === null || Array.isArray(data)) return true;

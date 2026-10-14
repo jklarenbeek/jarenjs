@@ -248,7 +248,7 @@ See also:
 Jaren supports the `data-ref` proposal from json-everything through the `data` keyword, plus Ajv-style `$data` references. Both allow a schema constraint to take its value from the instance being validated:
 
 - Absolute JSON Pointers (e.g., `/A`, `/limits/min`)
-- Relative JSON Pointers (e.g., `0/parent`, `1/sibling`)
+- Relative JSON Pointers (e.g., `0/parent`, `1/sibling`); `relativePointerDialect: 'bhutton-00'` also takes index manipulation (`0+1`, `1-1/name`), see [below](#relative-pointer-dialect)
 - All common constraint keywords: `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf`, `minLength`, `maxLength`, `pattern`, `format`, `enum`, `const`, `minItems`, `maxItems`, `minProperties`, `maxProperties`
 
 The refs compile once at schema compile time through the compiled pointer engine of [`@jarenjs/json`](../json) and resolve allocation-free per validation.
@@ -256,6 +256,39 @@ The refs compile once at schema compile time through the compiled pointer engine
 Dynamic `const` and `enum` use the same structural object/array equality as
 their static forms. Dynamic string bounds honor the compiler's `useGrapheme`
 option as well.
+
+#### Relative pointer dialect
+
+A Relative JSON Pointer has two revisions. The validator speaks
+draft-handrews-relative-json-pointer-01 by default, the one JSON Schema 2020-12
+references and the official `relative-json-pointer` format suite asserts: a
+level count, then `#` or a JSON Pointer. `relativePointerDialect: 'bhutton-00'`
+selects draft-bhutton-relative-json-pointer-00, which adds an index
+manipulation, a `+` or `-` and a non-negative integer after the level count,
+that steps along the array the location is an item of. The one option decides
+the `data` keyword, `$data` and the `relative-json-pointer` format together:
+
+```javascript
+const jaren = new JarenValidator({ relativePointerDialect: 'bhutton-00' });
+
+// Each item may not exceed the item after it; the last item has none.
+const ascending = jaren.compile({
+  type: 'array',
+  items: { type: 'number', maximum: { $data: '0+1' } },
+});
+ascending([1, 2, 3]); // true
+ascending([1, 3, 2]); // false
+
+const pointer = jaren.addFormats(jsonFormats).compile({ format: 'relative-json-pointer' }); // formatAssertion on
+pointer('1-1/name'); // true under 'bhutton-00', false by default
+pointer('+1/foo/bar'); // false under both
+```
+
+A reference the default grammar refuses (`0+1`) is a compile-time error, as
+every malformed reference is; a shifted reference that reaches no array item (the
+last item's `0+1`) finds no value and asserts nothing. Any value other than
+`'handrews-01'` or `'bhutton-00'` throws a `TypeError` when a schema compiles,
+so a misspelling cannot leave the default grammar in force unnoticed.
 
 See also:
 - [$data](https://github.com/json-schema-org/json-schema-spec/issues/51)
@@ -448,6 +481,7 @@ shared factory rather than inheriting.
 | `formatAssertion` | auto by draft | Whether `format` asserts or only annotates |
 | `contentValidation` | auto by draft | Whether `contentEncoding`/`contentMediaType` assert |
 | `propertyDependencies` | **`false`** | Whether the proposed `propertyDependencies` keyword asserts or is an unknown keyword |
+| `relativePointerDialect` | **`'handrews-01'`** | Which Relative JSON Pointer grammar `data`, `$data` and the `relative-json-pointer` format speak; `'bhutton-00'` also accepts index manipulation (`0+1`, `1-1/name`, `0-1#`) |
 
 ### The return shape is `collectErrors`
 

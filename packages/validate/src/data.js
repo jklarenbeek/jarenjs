@@ -20,7 +20,8 @@
  *   }
  * }
  *
- * Supports both absolute JSON Pointers (starting with /) and relative JSON Pointers.
+ * Supports both absolute JSON Pointers (starting with /) and relative JSON Pointers;
+ * the `relativePointerDialect` validator option selects the relative grammar.
  * @see https://docs.json-everything.net/schema/examples/data-ref/
  */
 
@@ -30,19 +31,15 @@ import {
 } from '@jarenjs/core';
 
 import {
-  compileDataRef,
-} from '@jarenjs/json';
-
-import {
   createDataRefCompilers,
   allValidatorsPass,
 } from './tools.js';
 
-// The fifteen keyword validators are shared with the `$data` keyword; only the
-// pointer compiler differs (see tools.js). A reference that cannot be compiled
-// is a compile-time error, as it is for `$data`: a constraint that never
-// asserts lets a document that should fail pass.
-const KEYWORD_COMPILERS = createDataRefCompilers(compileDataRef);
+// The fifteen keyword validators are shared with the `$data` keyword (see
+// tools.js). A reference that cannot be compiled is a compile-time error, as
+// it is for `$data`: a constraint that never asserts lets a document that
+// should fail pass.
+const KEYWORD_COMPILERS = createDataRefCompilers();
 
 /**
  * Compile the data keyword schema

@@ -33,6 +33,7 @@ import {
 
 import {
   JSONPOINTER_NOTHING,
+  compileDataRef,
 } from '@jarenjs/json';
 
 import {
@@ -216,22 +217,46 @@ const isJsonString = (data) => typeof data === 'string';
 const isAnyValue = () => true;
 
 /**
+ * The options `compileDataRef` takes from a validation object: the Relative
+ * JSON Pointer grammar the validator was configured with.
+ * @param {{ options: { relativePointerDialect?: 'handrews-01'|'bhutton-00' } }} schemaObj
+ * @returns {{ dialect: 'handrews-01'|'bhutton-00'|undefined }}
+ */
+export function dataRefOptions(schemaObj) {
+  return { dialect: schemaObj.options.relativePointerDialect };
+}
+
+/**
+ * Refuse a `relativePointerDialect` that names no grammar. Without this a
+ * misspelling is silent on every schema that has no `data` keyword and no
+ * `relative-json-pointer` format, and the author who meant `'bhutton-00'`
+ * keeps the grammar they opted out of.
+ * @param {unknown} dialect - The configured value; `undefined` is the default
+ * @throws {TypeError} When `dialect` is neither `'handrews-01'` nor `'bhutton-00'`
+ */
+export function assertRelativePointerDialect(dialect) {
+  if (dialect !== undefined && dialect !== 'handrews-01' && dialect !== 'bhutton-00')
+    throw new TypeError(
+      `relativePointerDialect must be 'handrews-01' or 'bhutton-00', got ${JSON.stringify(dialect)}`);
+}
+
+/**
  * Build the keyword validators the two data-reference keywords share
- * verbatim. The `data` keyword (json-everything, absolute + relative
- * pointers via `compileDataRef`) and the Ajv-style `$data` keyword
- * (relative pointers only) differ ONLY in which pointer compiler
- * resolves a ref, so each module passes its own `compileRefResolver`
- * and gets the same fifteen compilers back.
+ * verbatim. The `data` keyword (json-everything) and the Ajv-style `$data`
+ * keyword both resolve a ref with `compileDataRef`: empty for the root, an
+ * absolute JSON Pointer or a Relative JSON Pointer. The validator's
+ * `relativePointerDialect` travels in as its options (`{ dialect }`), so a
+ * schema that opted into the `bhutton-00` grammar resolves `1+1/n` where the
+ * default refuses it at compile time.
  *
  * A ref that cannot be compiled throws when the schema is compiled. Every
  * validator then follows one lax contract: a data instance outside the
  * keyword's type, a ref that finds no value, or a resolved constraint of
  * the wrong type asserts nothing.
  *
- * @param {(ref: string) => (dataRoot: any, dataPath: string) => any} compileRefResolver
  * @returns {Record<string, (schemaObj: object, ref: string) => ((data: any, dataPath: string, dataRoot: any) => boolean) | undefined>}
  */
-export function createDataRefCompilers(compileRefResolver) {
+export function createDataRefCompilers() {
   /**
    * @param {string} keyword
    * @param {(data: any) => boolean} accepts - Instance types the keyword constrains
@@ -241,7 +266,7 @@ export function createDataRefCompilers(compileRefResolver) {
   const constraint = (keyword, accepts, expects, isValid) =>
     (schemaObj, ref) => {
       const addError = schemaObj.createErrorHandler(ref, keyword);
-      const resolveRef = compileRefResolver(ref);
+      const resolveRef = compileDataRef(ref, dataRefOptions(schemaObj));
       const useGrapheme = schemaObj.options.useGrapheme;
 
       return function validateDataRefConstraint(data, dataPath, dataRoot) {
@@ -259,14 +284,19 @@ export function createDataRefCompilers(compileRefResolver) {
     if (!formats) return undefined;
 
     const addError = schemaObj.createErrorHandler(ref, 'format');
-    const resolveRef = compileRefResolver(ref);
+    const resolveRef = compileDataRef(ref, dataRefOptions(schemaObj));
 
     // The registry holds format COMPILERS; compile (and cache) a validator
-    // per referenced format name at validation time.
+    // per referenced format name at validation time. The stand-in carries the
+    // validator's pointer dialect, so a referenced `relative-json-pointer`
+    // speaks the grammar the schema chose.
     const compiled = new Map();
     const mockSchemaObj = {
       createErrorHandler: () => () => false,
-      options: { skipErrors: true },
+      options: {
+        skipErrors: true,
+        relativePointerDialect: schemaObj.options.relativePointerDialect,
+      },
     };
 
     return function validateDataRefFormat(data, dataPath, dataRoot) {

@@ -27,6 +27,7 @@ import {
   hasUnevaluatedPropertiesCoverage,
   hasUnevaluatedItemsCoverage,
   EvalLog,
+  assertRelativePointerDialect,
 } from './tools.js';
 import { wrapUnevaluated } from './unevaluated.js';
 import { registerFormatCompiler, registerFormatCompilers } from './format.js';
@@ -245,6 +246,7 @@ export class ValidationOptions {
    * @param {boolean} [messages=true] - Whether collected errors carry rendered message text; false skips rendering (message: '', params/msgid still set)
    * @param {'error'|'ignore'} [unknownFormats='ignore'] - What to do when an ASSERTING `format` names something no compiler is registered for: 'ignore' (the default, and what the specification requires) accepts it as an annotation; 'error' throws at COMPILE time. Never affects instance validation, and never applies where format is annotation-only anyway.
    * @param {boolean} [propertyDependencies=false] - Whether the `propertyDependencies` proposal keyword asserts. Off, it is an unknown keyword like any other; on, it applies in documents of draft 2020-12 (and the draft-next dialect) and in documents that declare no draft.
+   * @param {'handrews-01'|'bhutton-00'} [relativePointerDialect='handrews-01'] - Which Relative JSON Pointer grammar the `data` and `$data` keywords and the `relative-json-pointer` format speak: `'handrews-01'` is draft-handrews-relative-json-pointer-01 (what the format suite asserts); `'bhutton-00'` is draft-bhutton-relative-json-pointer-00, which also accepts index manipulation (`0+1`, `1-1/name`, `0-1#`). Any other value is a TypeError when a schema compiles.
    */
   constructor(
     skipErrors = true,
@@ -256,7 +258,8 @@ export class ValidationOptions {
     formatAssertion = null,
     messages = true,
     unknownFormats = 'ignore',
-    propertyDependencies = false
+    propertyDependencies = false,
+    relativePointerDialect = 'handrews-01'
   ) {
     /** @type {boolean} Whether to stop at first error or continue */
     this.skipErrors = skipErrors;
@@ -278,6 +281,8 @@ export class ValidationOptions {
     this.unknownFormats = unknownFormats;
     /** @type {boolean} Whether the propertyDependencies proposal keyword asserts */
     this.propertyDependencies = propertyDependencies;
+    /** @type {'handrews-01'|'bhutton-00'} The Relative JSON Pointer grammar of `data`, `$data` and the `relative-json-pointer` format */
+    this.relativePointerDialect = relativePointerDialect;
   }
 }
 
@@ -511,6 +516,7 @@ export class ValidationRoot {
     this.#schemas = schemas;
     this.#formats = formats;
 
+    assertRelativePointerDialect(opts.relativePointerDialect);
     this.#options = opts;
     this.#traverse = traverseOptionsFor(traverse, opts.propertyDependencies);
     this.#owner = owner;
@@ -1428,7 +1434,7 @@ export class ValidatorOptions {
       /** @type {object[]} Initial schemas to register */
       this.schemas = opts.schemas || [];
       // If collectErrors is passed directly, create ValidationOptions with it
-      if (opts.collectErrors != null || opts.skipErrors != null || opts.useGrapheme != null || opts.contentValidation != null || opts.draftVersion != null || opts.formatAssertion != null || opts.messages != null || opts.unknownFormats != null || opts.propertyDependencies != null) {
+      if (opts.collectErrors != null || opts.skipErrors != null || opts.useGrapheme != null || opts.contentValidation != null || opts.draftVersion != null || opts.formatAssertion != null || opts.messages != null || opts.unknownFormats != null || opts.propertyDependencies != null || opts.relativePointerDialect != null) {
         const collectErrors = opts.collectErrors ?? false;
         this.validation = new ValidationOptions(
           // collecting errors implies actually recording them
@@ -1444,7 +1450,8 @@ export class ValidatorOptions {
           opts.formatAssertion ?? null,
           opts.messages ?? true,
           opts.unknownFormats ?? 'ignore',
-          opts.propertyDependencies ?? false
+          opts.propertyDependencies ?? false,
+          opts.relativePointerDialect ?? 'handrews-01'
         );
       } else {
         /** @type {ValidationOptions} Validation behavior options */
@@ -1497,6 +1504,7 @@ export class ValidatorOptions {
  * @property {boolean} [messages] - Render English message text on collected errors
  * @property {'error'|'ignore'} [unknownFormats] - What an ASSERTING `format` with no registered compiler does: 'ignore' (default, per spec) accepts it as an annotation, 'error' throws at compile time
  * @property {boolean} [propertyDependencies] - Assert the `propertyDependencies` proposal keyword (default false: it is an unknown keyword); applies in draft 2020-12 (and draft-next) documents and in documents that declare no draft
+ * @property {'handrews-01'|'bhutton-00'} [relativePointerDialect] - The Relative JSON Pointer grammar of `data`, `$data` and the `relative-json-pointer` format: `'handrews-01'` (default) or `'bhutton-00'`, which also accepts index manipulation (`0+1`, `1-1/name`, `0-1#`)
  */
 
 /**
@@ -2099,7 +2107,8 @@ export class JarenValidator {
       formatAssertion,
       existingValidation.messages ?? true,
       existingValidation.unknownFormats ?? 'ignore',
-      existingValidation.propertyDependencies ?? false
+      existingValidation.propertyDependencies ?? false,
+      existingValidation.relativePointerDialect ?? 'handrews-01'
     );
 
     // Pre-compile all refs before returning the validator

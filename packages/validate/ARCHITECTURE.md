@@ -602,11 +602,21 @@ flowchart TB
     B5 --> C
 ```
 
-**Compile failure**: the ref compilers of `@jarenjs/json`
-(`compileDataRef` for the `data` keyword, `compileRelativeJSONPointer` for
-`$data`) *throw* on a malformed reference, and both keywords let the error
-out: the schema fails to compile. A reference that compiles but finds no
-value in the instance asserts nothing.
+**Compile failure**: the ref compiler of `@jarenjs/json` (`compileDataRef`,
+which both keywords call) *throws* on a malformed reference, and both keywords
+let the error out: the schema fails to compile. A reference that compiles but
+finds no value in the instance asserts nothing.
+
+**One grammar option, three readers.** The `relativePointerDialect` validation
+option (`'handrews-01'`, the default, or `'bhutton-00'`, which adds index
+manipulation such as `0+1`) reaches `compileDataRef` as its `{ dialect }`
+through `dataRefOptions(schemaObj)` in `tools.js`, which the shared keyword
+compilers and the `$data`-only `uniqueItems` and `required` all read, and
+reaches the `relative-json-pointer` format compiler of `@jarenjs/formats`
+through `schemaObj.options`. The format a `data` keyword names at run time is
+compiled against a stand-in validation object that carries the same dialect.
+`ValidationRoot` refuses any other spelling with a `TypeError` when a schema
+compiles, so a misspelling is not a silent fallback to the default.
 
 **Locations are built where something reads them.** A relative `$data`
 reference, the `data` keyword and `$query`'s `path` external all read the

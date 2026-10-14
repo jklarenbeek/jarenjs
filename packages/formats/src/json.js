@@ -1,7 +1,11 @@
 //@ts-check
 
 // The name -> predicate bindings live in ONE place: testers.js. This
-// module only wraps them in the validator's compiler contract.
+// module only wraps them in the validator's compiler contract (the one
+// dialect-selected tester, relative-json-pointer, is bound here to the
+// validator option that selects it).
+import { isValidRelativeJSONPointer } from '@jarenjs/json';
+
 import { jsonFormatTesters } from './testers.js';
 
 import { createStringFormatCompiler } from './string.js';
@@ -9,7 +13,7 @@ import { createStringFormatCompiler } from './string.js';
 /**
  * @typedef {{format?: string, formatMinimum?: string, formatExclusiveMinimum?: string, formatMaximum?: string, formatExclusiveMaximum?: string}} JSONSchema
  * @typedef {{
- *   options: {skipErrors: boolean},
+ *   options: {skipErrors: boolean, relativePointerDialect?: 'handrews-01'|'bhutton-00'},
  *   createErrorHandler: (expected: any, key: string, ...details: any[]) => (data: any, dataPath?: string) => boolean
  * }} ValidationObject
  */
@@ -40,13 +44,26 @@ export const compileJsonPointerUriFragmentFormat = createStringFormatCompiler('j
 
 /**
  * Compiles a validator for the 'relative-json-pointer' format.
- * Validates Relative JSON Pointer strings.
+ * Validates Relative JSON Pointer strings. The grammar is the validator's
+ * `relativePointerDialect` option (`schemaObj.options.relativePointerDialect`):
+ * draft-handrews-relative-json-pointer-01 by default, which the official format
+ * suite asserts, or `'bhutton-00'`, which also accepts index manipulation
+ * (`0+1`, `1-1/name`, `0-1#`).
  *
  * @param {ValidationObject} schemaObj - The validation JSONSchema for error handling and options
  * @param {JSONSchema} jsonSchema - The JSON schema containing the format definition
  * @returns {(data: unknown, dataPath?: string) => boolean} A validator function
  */
-export const compileRelativeJsonPointerFormat = createStringFormatCompiler('relative-json-pointer', jsonFormatTesters['relative-json-pointer']);
+export function compileRelativeJsonPointerFormat(schemaObj, jsonSchema) {
+  const dialect = schemaObj.options.relativePointerDialect;
+  let test = jsonFormatTesters['relative-json-pointer'];
+  if (dialect !== undefined && dialect !== 'handrews-01') {
+    test = (value) => isValidRelativeJSONPointer(value, { dialect });
+    // An unknown dialect throws here, when the schema compiles, not on the first value.
+    test('0');
+  }
+  return createStringFormatCompiler('relative-json-pointer', test)(schemaObj, jsonSchema);
+}
 
 // =============================================================================
 // JSONPath Format Compiler (RFC 9535)

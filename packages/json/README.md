@@ -127,7 +127,7 @@ chooses whether it is the string or the number. `parseRelativeJSONPointer`,
 `isValidRelativeJSONPointer`, `compileRelativeJSONPointer` and `compileDataRef`
 all take the `dialect`; the parsed record gains `shift` (a number, `0` for
 `0+0`) only when the pointer wrote one, and an unknown dialect is a `TypeError`.
-The validator's `data`/`$data` keywords and the `relative-json-pointer` format do not pass a dialect, so they stay on handrews-01.
+`@jarenjs/validate` passes the choice to `data`, `$data` and the `relative-json-pointer` format through its `relativePointerDialect` option, which defaults to handrews-01.
 
 `compileDataRef(ref)` compiles the union the validator accepts — `''` for the data root, a leading `/` for an absolute pointer, a leading digit for a relative one — deciding the dispatch once at compile time. On a realistic `$data` workload the compiled resolvers are 4–20x faster than the interpretive resolver they replaced, and beat the `jsonpointer` npm package on every scenario (`npm run benchmark:jsonpointer`, 2026-07-17: absolute pointers 12–16x, relative pointers 4–16x, `compileDataRef` dispatch 7–20x).
 

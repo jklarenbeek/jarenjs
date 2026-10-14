@@ -86,7 +86,7 @@ These are grouped in `jsonFormats`.
 
 - `json-pointer` | JSON-pointer according to [RFC6901](https://datatracker.ietf.org/doc/html/rfc6901)
 - `json-pointer-uri-fragment` | JSON-pointer fragment according to [RFC6901](https://datatracker.ietf.org/doc/html/rfc6901#section-6)
-- `relative-json-pointer` | relative JSON-pointer according to [draft-luff-relative-json-pointer-00](https://datatracker.ietf.org/doc/html/draft-luff-relative-json-pointer-00)
+- `relative-json-pointer` | relative JSON-pointer according to draft-handrews-relative-json-pointer-01, the revision JSON Schema 2020-12 references; with the validator's `relativePointerDialect: 'bhutton-00'` option, draft-bhutton-relative-json-pointer-00, which also accepts index manipulation (`0+1`, `1-1/name`, `0-1#`)
 - `json-path` | JSONPath query according to [RFC9535](https://www.rfc-editor.org/rfc/rfc9535.html), checked against the complete grammar (including filter well-typedness) by the parser of the JSONPath compiler in `@jarenjs/json`
 - `json-path-segments` | a variable-rooted path string — `$name` followed by optional [RFC9535](https://www.rfc-editor.org/rfc/rfc9535.html) segments (`$book.price[?@.isbn]`), the form the Jaren query format uses to address a bound variable. Not a valid RFC 9535 query on its own (the RFC's root identifier is `$` alone), so `json-path` rejects it; both formats recognize the five built-in function extensions and no others, because a format has to mean the same thing in every schema
 

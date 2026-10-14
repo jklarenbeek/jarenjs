@@ -954,6 +954,7 @@ new JarenValidator(options?: ValidationOptions)
 | `contentValidation` | boolean\|null | null (per draft) | Assert `contentEncoding`/`contentMediaType`; auto-asserts below 2019-09 |
 | `messages` | boolean | true | Render English `message` text on collected errors |
 | `propertyDependencies` | boolean | false | Assert the proposed `propertyDependencies` keyword; off, it is an unknown keyword that is not looked into. On, it applies to 2020-12 documents, to `https://json-schema.org/draft/next/schema` (read as 2020-12) and to documents with no `$schema`; older or unrecognised `$schema` URIs ignore it |
+| `relativePointerDialect` | `'handrews-01'`\|`'bhutton-00'` | `'handrews-01'` | Relative JSON Pointer grammar of `data`, `$data` and the `relative-json-pointer` format; `'bhutton-00'` also accepts index manipulation (`0+1`, `1-1/name`, `0-1#`) |
 | `formats` | object | `{}` | Format compilers to register at construction |
 | `schemas` | object[] | `[]` | Schemas to register at construction |
 
