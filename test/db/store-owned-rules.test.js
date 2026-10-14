@@ -3,17 +3,18 @@
  * @file Database rules over a layout the store owns: the programs the store
  * installs with its table, what they refuse from every writer, what a
  * store-owned rule cannot lower, how an open verifies the installed programs,
- * the migration planner's program diff, and a store rule judging the record
- * the store reads back. The live PostgreSQL half is
+ * the migration planner's program diff, a store rule judging the record
+ * the store reads back, and the rows a foreign-key action removes or nulls. The live PostgreSQL half is
  * `postgres-store-owned-rules.test.js`.
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { migrate, normalizeEntities, openStore, planInvariants, planModelMigration, sqliteDialect } from '@jarenjs/db';
-import { nodeDriver } from '@jarenjs/db/node';
+import { adaptNodeDatabase, nodeDriver } from '@jarenjs/db/node';
 import { postgresDialect } from '@jarenjs/db/postgres';
-import { BOOKING_TRANSFORM, bookingModel, childRuleMeetsParentAction, narrowedBookingModel } from './invariant-oracle.js';
+import { actionChainModel, BOOKING_TRANSFORM, bookingModel, childRuleMeetsParentAction, narrowedBookingModel, storeRulesMeetForeignKeyActions }
+  from './invariant-oracle.js';
 import { tempDbPath } from './helpers.js';
 
 const TENANT = postgresDialect({ searchPath: 'tenant' });
@@ -309,10 +310,67 @@ describe('a migration that adds a rule beside a document transform, on SQLite', 
   });
 });
 
-describe('a child\'s database rule meets its parent\'s foreign-key action, on SQLite', () => {
+describe('a child\'s rule meets its parent\'s foreign-key action, on SQLite', () => {
   for (const [onDelete, rule] of /** @type {const} */ ([['cascade', 'kept'], ['setNull', 'linked']]))
-    it(`${onDelete}: the parent's delete is refused in the child's rule's name and reported for the parent; a store rule lets it through`,
+    it(`${onDelete}: the parent's delete is refused in the child's rule's name, a database rule's reported for the parent, a store rule's with its own message`,
       () => childRuleMeetsParentAction('sqlite', onDelete, rule));
+});
+
+describe('store rules judge the rows a foreign-key action removes or nulls, on SQLite', () => {
+  it('a rule two levels down refuses, a probe sees the parent gone, and passing rules, no rules and restrict answer as before',
+    () => storeRulesMeetForeignKeyActions('sqlite'));
+});
+
+/**
+ * A driver over one in-memory database that records the text of every
+ * statement it prepares.
+ * @param {string[]} prepared
+ */
+const preparing = (prepared) => {
+  const db = new DatabaseSync(':memory:');
+  return {
+    /** @param {{ queueTimeout?: number }} [options] */
+    open: (options) => adaptNodeDatabase({
+      exec: (/** @type {string} */ sql) => db.exec(sql),
+      prepare: (/** @type {string} */ sql) => {
+        prepared.push(sql);
+        return db.prepare(sql);
+      },
+      function: (/** @type {any[]} */ ...args) => /** @type {any} */ (db.function)(...args),
+      aggregate: (/** @type {any[]} */ ...args) => /** @type {any} */ (db.aggregate)(...args),
+      createSession: (/** @type {any} */ sessionOptions) => db.createSession(sessionOptions),
+      close: () => db.close(),
+    }, { queueTimeout: options?.queueTimeout }),
+  };
+};
+
+describe('a delete reads the rows its foreign-key actions reach only for a store rule that judges one', () => {
+  it('no rule in reach: no statement reads a child, at 1000 children as at 8000; a rule two levels down: one per level and chunk of 500 keys', async () => {
+    const kept = { name: 'kept', on: ['delete'], enforcement: 'store', assert: { $ne: ['$.old.status', 'held'] } };
+    // a rule on the root's own delete judges the root alone
+    const rootRuled = /** @type {any} */ (actionChainModel('cascade', {}));
+    rootRuled.entities.A.invariants = [{ ...kept, assert: { $ne: ['$.old.id', 'z'] } }];
+    const readsOf = (/** @type {string[]} */ prepared) => prepared.filter((sql) => /FROM "[BC]" WHERE "[ab]Ref" IN \(/.test(sql)).length;
+    for (const [label, model, reads] of /** @type {const} */ ([['no rule', actionChainModel('cascade', {}), 0],
+      ['a rule on the root alone', rootRuled, 0], ['a rule two levels down', actionChainModel('cascade', { C: [kept] }), 2]])) {
+      for (const children of [1000, 8000]) {
+        /** @type {string[]} */
+        const prepared = [];
+        const store = await openStore(model, { driver: preparing(prepared) });
+        try {
+          await store.entity('A').create({ id: 'a' });
+          await store.transaction(async (/** @type {any} */ tx) => {
+            for (let i = 0; i < children; i += 1) await tx.entity('B').create({ id: `b${i}`, aRef: 'a', status: 'free' });
+          });
+          prepared.length = 0;
+          assert.equal(await store.entity('A').delete('a'), true, label);
+          assert.equal(readsOf(prepared), reads === 0 ? 0 : 1 + Math.ceil(children / 500), `${label}, ${children} children`);
+          assert.equal(await store.entity('B').get('b0'), undefined, label);
+        }
+        finally { await store.close(); }
+      }
+    }
+  });
 });
 
 describe('a store rule on a store-owned layout judges the record the store reads back', () => {

@@ -107,9 +107,12 @@ function inOrder(count, step, from = 0) {
 export function createTracker(context) {
   const { connection, entities, mapping, coreFor } = context;
   const captureRecord = context.captureRecord ?? null;
-  // journal capture's foreign-key closure: read before each delete statement
-  // runs, recorded by `commit` only after the statement removed its row
-  const captureCascade = context.captureCascade ?? null;
+  // the rows a delete's foreign-key actions reach: read before each delete
+  // statement runs when a journal records them or a store rule judges them,
+  // judged right after the statement removed its row and recorded by
+  // `commit`
+  const readCascade = context.readCascade ?? null;
+  const judgeCascade = context.judgeCascade ?? null;
   const dialect = connection.dialect;
   const q = dialect.quoteIdentifier;
   const parameterAt = (i) => dialect.parameterRef(i, 'v');
@@ -1082,8 +1085,9 @@ export function createTracker(context) {
    * statement, inside the transaction: a document's rules that read another
    * row just before its statement; a column-only row's after its write,
    * against the row as it was (read first) and as it is stored; a delete
-   * after the delete, against the row it removed. A join-only document's
-   * rules run after every statement.
+   * after the delete, against the row it removed, and then each row its
+   * foreign-key actions removed or nulled, by that row's entity's rules. A
+   * join-only document's rules run after every statement.
    * @param {any[]} statements @param {any} report
    * @param {Map<any, (() => any)[]>} deferred @param {any[]} joinOnly
    */
@@ -1110,8 +1114,10 @@ export function createTracker(context) {
       const statement = statements[i];
       const advance = () => {
         if (statement.kind === 'delete') {
-          if (statement.before === undefined || !(statement.deletedRows > 0)) return undefined;
-          return coreFor(statement.entity).plan.checkMutation('delete', statement.before, null);
+          if (!(statement.deletedRows > 0)) return undefined;
+          return chain(statement.before === undefined ? undefined
+            : coreFor(statement.entity).plan.checkMutation('delete', statement.before, null),
+          () => (statement.cascade === undefined || statement.cascade.length === 0 ? undefined : judgeCascade(statement.cascade)));
         }
         if (!['insert', 'update'].includes(statement.kind) || coreFor(statement.entity).plan.document !== false) return undefined;
         const core = coreFor(statement.entity);
@@ -1157,8 +1163,8 @@ export function createTracker(context) {
       const journalImage = statement.kind === 'update' && captureRecord !== null
         && coreFor(statement.entity).plan.document !== false;
       return chain(ahead(statement), () => chain(
-        statement.kind === 'delete' && captureCascade !== null
-          ? chain(captureCascade(statement.entity, statement.removal.parts), (closure) => {
+        statement.kind === 'delete' && readCascade !== null
+          ? chain(readCascade(statement.entity, statement.removal.parts), (closure) => {
             statement.cascade = closure?.entries ?? [];
           })
           : journalImage

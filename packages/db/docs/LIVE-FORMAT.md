@@ -107,8 +107,8 @@ them).
   depth, the foreign-key member of `'setNull'` rows, the membership
   rows of every removed row — locking them where the engine locks rows,
   and records them once the delete removed its row (a row both nulled
-  and removed is recorded as removed; a delete the database refuses
-  records nothing). For writes
+  and removed is recorded as removed; a delete the database or a store
+  rule over one of those rows refuses records nothing). For writes
   made through the store API within those bounds the two modes MUST
   produce the same op sets — proven by a differential test.
 - Requesting `mode: 'session'` on a driver without sessions is a

@@ -1061,30 +1061,172 @@ export const kinshipModel = (enforcement, onDelete) => ({ $model: '0.1', entitie
       { name: 'linked', on: ['update'], enforcement, assert: { $or: [{ $exists: '$.new.aRef' }, { $ne: ['$.new.status', 'held'] }] } }] } } });
 
 /**
- * A child's rule meets its parent's foreign-key action: under database
- * enforcement the parent's delete is refused in the child's rule's name and
- * reported for the parent's write, both rows staying; under store enforcement
- * the action is no store write and runs no rule, so the parent goes.
+ * A child's rule meets its parent's foreign-key action: the parent's delete is
+ * refused in the child's rule's name and both rows stay, under either
+ * enforcement. A database rule's refusal is reported for the parent's write;
+ * a store rule judges the row the action removes or nulls as the child's own
+ * statement on it is judged, and refuses with its own code and message —
+ * directly, inside a transaction, through a tracked save and on SQLite's
+ * synchronous surface, under every capture the engine runs, a refused delete
+ * writing and delivering nothing even inside a transaction that catches the
+ * refusal and commits. Once the child's row no longer breaks the rule, the
+ * parent's delete goes through and the action removes or nulls it.
  * @param {'sqlite' | 'postgres'} engine @param {'cascade' | 'setNull'} onDelete
  * @param {string} rule - the child's rule the action meets
  */
 export async function childRuleMeetsParentAction(engine, onDelete, rule) {
-  for (const enforcement of /** @type {const} */ (['database', 'store'])) {
-    await withStore(engine, kinshipModel(enforcement, onDelete), async (store) => {
+  await withStore(engine, kinshipModel('database', onDelete), async (store) => {
+    await store.entity('A').create({ id: 'a' });
+    await store.entity('B').create({ id: 'b', aRef: 'a', status: 'held' });
+    await assert.rejects(store.entity('B').delete('b'), { code: 'JD2096' });
+    await assert.rejects(store.entity('A').delete('a'), { code: 'JD2096', class: 'constraint', collection: 'A', docPath: '/entities/A',
+      message: new RegExp(`jaren invariant:${rule}`) });
+    assert.deepEqual(await store.entity('A').get('a'), { id: 'a' });
+    assert.deepEqual(await store.entity('B').get('b'), { id: 'b', aRef: 'a', status: 'held' });
+  });
+  for (const mode of engine === 'sqlite' ? [null, 'session', 'journal'] : [null, 'journal']) {
+    await withStore(engine, kinshipModel('store', onDelete), async (store) => {
       await store.entity('A').create({ id: 'a' });
       await store.entity('B').create({ id: 'b', aRef: 'a', status: 'held' });
+      /** @type {any[]} */
+      const seen = [];
+      if (mode !== null) store.observe((/** @type {any} */ record) => seen.push(record));
+      const refused = { code: 'JD2096', class: 'constraint', reason: `persistence invariant '${rule}' rejected the mutation` };
       await assert.rejects(store.entity('B').delete('b'), { code: 'JD2096' });
-      if (enforcement === 'database') {
-        await assert.rejects(store.entity('A').delete('a'), { code: 'JD2096', class: 'constraint', collection: 'A', docPath: '/entities/A',
-          message: new RegExp(`jaren invariant:${rule}`) });
-        assert.deepEqual(await store.entity('A').get('a'), { id: 'a' });
-        assert.deepEqual(await store.entity('B').get('b'), { id: 'b', aRef: 'a', status: 'held' });
-        return;
+      for (const [path, write] of Object.entries({
+        direct: () => store.entity('A').delete('a'),
+        transaction: () => store.transaction((/** @type {any} */ tx) => tx.entity('A').delete('a')),
+        tracked: () => { store.entity('A').remove('a'); return store.saveChanges(); },
+        // the synchronous surface refuses synchronously
+        ...(engine === 'sqlite' ? { synchronous: async () => store.sync.entity('A').delete('a') } : {}),
+      })) {
+        const label = `${mode ?? 'no capture'} ${path}`;
+        await assert.rejects(write(), refused, label);
+        assert.deepEqual(await store.entity('A').get('a'), { id: 'a' }, label);
+        assert.deepEqual(await store.entity('B').get('b'), { id: 'b', aRef: 'a', status: 'held' }, label);
       }
-      await store.entity('A').delete('a');
-      assert.equal(await store.entity('A').get('a'), undefined);
-      assert.deepEqual(await store.entity('B').get('b'), onDelete === 'cascade' ? undefined : { id: 'b', status: 'held' });
+      // refused inside a transaction that catches the refusal and commits: the delete wrote nothing
+      for (const [path, write] of Object.entries({
+        caught: (/** @type {any} */ tx) => tx.entity('A').delete('a'),
+        'caught tracked': (/** @type {any} */ tx) => { tx.entity('A').remove('a'); return tx.saveChanges(); },
+      })) {
+        const label = `${mode ?? 'no capture'} ${path}`;
+        await store.transaction(async (/** @type {any} */ tx) => {
+          await assert.rejects(write(tx), refused, label);
+          assert.deepEqual(await tx.entity('A').get('a'), { id: 'a' }, label);
+          assert.deepEqual(await tx.entity('B').get('b'), { id: 'b', aRef: 'a', status: 'held' }, label);
+        });
+        assert.deepEqual(await store.entity('A').get('a'), { id: 'a' }, label);
+        assert.deepEqual(await store.entity('B').get('b'), { id: 'b', aRef: 'a', status: 'held' }, label);
+      }
+      assert.deepEqual(seen, [], mode ?? 'no capture');
+      await store.entity('B').update('b', { status: 'free' });
+      assert.equal(await store.entity('A').delete('a'), true);
+      assert.deepEqual(await store.entity('B').get('b'), onDelete === 'cascade' ? undefined : { id: 'b', status: 'free' });
+    }, mode === null ? {} : { capture: { mode } });
+  }
+}
+
+/** A relation member: `to` rows naming this one through `via`, under `onDelete`.
+ * @param {string} to @param {string} via @param {string} onDelete */
+const kids = (to, via, onDelete) => ({ 'x-entity': { relation: { to, many: true, via, onDelete } } });
+/**
+ * A chain `A` → `B` (under `onDelete`) → `C` (under `cascade`), each child
+ * carrying the store rules `rules` gives it.
+ * @param {'cascade' | 'setNull' | 'restrict'} onDelete @param {{ B?: any[], C?: any[] }} rules
+ */
+export const actionChainModel = (onDelete, rules) => ({ $model: '0.1', entities: {
+  A: { schema: { type: 'object', required: ['id'], properties: { id: KEY, kids: kids('B', 'aRef', onDelete) } } },
+  B: { schema: { type: 'object', required: ['id'], properties: { id: KEY, aRef: { type: 'string' }, status: { type: 'string' },
+    kids: kids('C', 'bRef', 'cascade') } }, ...(rules.B === undefined ? {} : { invariants: rules.B }) },
+  C: { schema: { type: 'object', required: ['id'], properties: { id: KEY, bRef: { type: 'string' }, status: { type: 'string' } } },
+    ...(rules.C === undefined ? {} : { invariants: rules.C }) } } });
+/** A store delete rule keeping a held row. */
+const KEPT = { name: 'kept', on: ['delete'], enforcement: 'store', assert: { $ne: ['$.old.status', 'held'] } };
+/** A store update rule keeping a held row linked to its parent. */
+const LINKED = { name: 'linked', on: ['update'], enforcement: 'store', assert: { $or: [{ $exists: '$.new.aRef' }, { $ne: ['$.new.status', 'held'] }] } };
+/** A store delete rule that lets a row go only once its parent is gone. */
+const ORPHANED = { name: 'orphaned', on: ['delete'], enforcement: 'store',
+  assert: { $not: { '$exists-row': { entity: 'A', match: { id: '$.old.aRef' } } } } };
+
+/**
+ * Seed one row of each entity of {@link actionChainModel}.
+ * @param {any} store @param {string} bStatus @param {string} cStatus
+ */
+const seedChain = async (store, bStatus, cStatus) => {
+  await store.entity('A').create({ id: 'a' });
+  await store.entity('B').create({ id: 'b', aRef: 'a', status: bStatus });
+  await store.entity('C').create({ id: 'c', bRef: 'b', status: cStatus });
+};
+/** The three rows of {@link actionChainModel}, as stored. @param {any} store */
+const chainRows = async (store) => [await store.entity('A').get('a'), await store.entity('B').get('b'), await store.entity('C').get('c')];
+/** The patches a store delivered, in order. @param {any[]} records */
+const patchesOf = (records) => records.map((record) => record.patch);
+
+/**
+ * The store rules a parent's foreign-key actions reach, beside the shapes that
+ * answered right before they judged those rows and still answer the same: a
+ * rule two levels down refuses the root's delete; a rule that probes another
+ * row is judged after the parent's statement, as the row's own delete is, so
+ * it sees the parent gone; rules that pass delete exactly what no rule would,
+ * and a journal or session records exactly the same; an entity with no rule
+ * and a `restrict` key answer as before.
+ * @param {'sqlite' | 'postgres'} engine
+ */
+export async function storeRulesMeetForeignKeyActions(engine) {
+  const refused = (/** @type {string} */ rule) => ({ code: 'JD2096', class: 'constraint', reason: `persistence invariant '${rule}' rejected the mutation` });
+  const SEEDED = [{ id: 'a' }, { id: 'b', aRef: 'a', status: 'held' }, { id: 'c', bRef: 'b', status: 'held' }];
+  // a rule two levels down, on an entity the root's own delete never names
+  await withStore(engine, actionChainModel('cascade', { C: [KEPT] }), async (store) => {
+    await seedChain(store, 'held', 'held');
+    await assert.rejects(store.entity('A').delete('a'), refused('kept'));
+    assert.deepEqual(await chainRows(store), SEEDED);
+    await assert.rejects(store.entity('B').delete('b'), refused('kept'));
+    assert.deepEqual(await chainRows(store), SEEDED);
+  });
+  // judged after the parent's statement: the child's own delete sees its parent, the cascade does not
+  await withStore(engine, actionChainModel('cascade', { B: [ORPHANED] }), async (store) => {
+    await seedChain(store, 'held', 'held');
+    await assert.rejects(store.entity('B').delete('b'), refused('orphaned'));
+    assert.equal(await store.entity('A').delete('a'), true);
+    assert.deepEqual(await chainRows(store), [undefined, undefined, undefined]);
+  });
+  // a restrict key refuses as it refused before any rule judged the rows it protects
+  /** @type {any[]} */
+  const restricted = [];
+  for (const rules of [{}, { B: [KEPT] }]) {
+    await withStore(engine, actionChainModel('restrict', rules), async (store) => {
+      await seedChain(store, 'held', 'held');
+      await assert.rejects(store.entity('A').delete('a'), (/** @type {any} */ error) => {
+        restricted.push({ code: error.code, message: error.message });
+        return true;
+      });
+      assert.deepEqual(await chainRows(store), SEEDED);
     });
+  }
+  assert.deepEqual(restricted[1], restricted[0]);
+  assert.notEqual(restricted[0].code, 'JD2096');
+  // rules that pass, and no rule at all: the same rows go, the same records are delivered
+  for (const mode of engine === 'sqlite' ? [null, 'session', 'journal'] : [null, 'journal']) {
+    for (const onDelete of /** @type {const} */ (['cascade', 'setNull'])) {
+      /** @type {any[]} */
+      const answers = [];
+      for (const rules of [{}, { B: [KEPT, LINKED], C: [KEPT] }]) {
+        await withStore(engine, actionChainModel(onDelete, rules), async (store) => {
+          await seedChain(store, 'free', 'free');
+          /** @type {any[]} */
+          const seen = [];
+          if (mode !== null) store.observe((/** @type {any} */ record) => seen.push(record));
+          const deleted = await store.entity('A').delete('a');
+          answers.push({ deleted, rows: await chainRows(store), patches: patchesOf(seen) });
+        }, mode === null ? {} : { capture: { mode } });
+      }
+      const label = `${mode ?? 'no capture'} ${onDelete}`;
+      assert.deepEqual(answers[1], answers[0], label);
+      assert.deepEqual(answers[0].rows, onDelete === 'cascade' ? [undefined, undefined, undefined]
+        : [undefined, { id: 'b', status: 'free' }, { id: 'c', bRef: 'b', status: 'free' }], label);
+      assert.equal(answers[0].patches.length, mode === null ? 0 : 1, label);
+    }
   }
 }
 

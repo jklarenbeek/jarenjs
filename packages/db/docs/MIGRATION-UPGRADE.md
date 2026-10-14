@@ -1104,10 +1104,12 @@ value the store did not honor now refuse by code, before any statement:
   lower is `JD0005` at the member: a read of an epoch, document or relation
   member, `audit`, `effects` and `$exists-row`; `columns` keep their refusal.
   Such a rule judges the rows the database's own foreign-key actions write,
-  where a store rule runs for none of them: switching a child's delete or
-  update rule from `store` to `database` enforcement refuses a parent's
-  `cascade` or `setNull` delete that went through before, in the child's
-  rule's name ([MODEL-FORMAT §13.4](MODEL-FORMAT.md#134-database-enforcement)).
+  where a store rule then ran for none of them (it judges them now,
+  [§27](#27-store-rules-judge-the-rows-a-foreign-key-action-removes-or-nulls)):
+  switching a child's delete or update rule from `store` to `database`
+  enforcement refused a parent's `cascade` or `setNull` delete that went
+  through before, in the child's rule's name
+  ([MODEL-FORMAT §13.4](MODEL-FORMAT.md#134-database-enforcement)).
   `store.introspect()` reports the programs as `unmapped-object` rows and
   derives a model without the rules, which neither opens over that table
   (`JD0002`) nor migrates to the authored model (`JD0023`): open such a
@@ -2265,6 +2267,25 @@ into a new database created with the default UTF-8 encoding, and open that.
   the last `orderBy` term, which both orders honour. A row deleted and stored again
   with the document it had, in one transaction, leaves no capture record, so the
   window keeps it where it was until a record changes it.
+
+## 27. Store rules judge the rows a foreign-key action removes or nulls
+
+- A store delete — `delete()`, a tracked save's removal, a delete inside a
+  transaction, under every capture mode — whose `cascade` relations remove a
+  row, at any depth, that a store delete rule refuses, or whose `setNull`
+  relations null a row a store update rule refuses, is now refused with that
+  rule's `JD2096` and message, and nothing is written; it used to remove the
+  parent while the database removed or nulled the child unjudged
+  ([MODEL-FORMAT §13.3](MODEL-FORMAT.md#133-store-enforcement)). A nulled row
+  is judged with `$.new` the row with the foreign-key member null, read back
+  missing. Code that relied on a parent's delete going through such a child
+  first deletes or changes the child so that its rule passes.
+- Such a delete now reads the rows its actions reach before it runs, inside
+  its transaction, and judges them after it; on PostgreSQL it locks
+  them as journal capture's delete does (`FOR UPDATE`, or `FOR NO KEY UPDATE`
+  for a row whose non-unique member it nulls), so a writer outside the store
+  that would change one of them waits for the delete's commit. A delete that
+  reaches no row a store rule judges reads nothing more than before.
 
 ## Measured costs
 

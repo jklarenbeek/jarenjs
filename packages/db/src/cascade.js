@@ -1,11 +1,13 @@
 //@ts-check
 /**
  * The rows a store delete's declared foreign keys act on, read before the
- * delete runs so journal capture can record them once it ran.
+ * delete runs so journal capture can record them, and the store rules of
+ * their entities judge them, once it ran.
  *
- * A journal sees the rows its write paths write; the database's own
- * `ON DELETE CASCADE` / `SET NULL` actions, and a join row dying with its
- * endpoint, happen inside the DELETE statement. The store refuses at open a
+ * A journal sees the rows its write paths write, and a store rule judges the
+ * rows they write; the database's own `ON DELETE CASCADE` / `SET NULL`
+ * actions, and a join row dying with its endpoint, happen inside the DELETE
+ * statement. The store refuses at open a
  * physical foreign key that differs from the model's, so the model's edges are
  * the database's, and the rows those actions reach are predicted from them:
  * breadth first over the inbound edges of every row the delete removes, inside
@@ -34,8 +36,12 @@ const CHUNK = 500;
  *   `own.column` names an `own.entity` row are removed with that row;
  *   `columns` lists the table's two columns in table order
  * @typedef {ForeignKeyEdge | JoinEdge} CascadeEdge
- * @typedef {{ table: string, keyParts: any[], before: any, after: any }} CascadeEntry
- *   - one row the database's foreign-key actions change, as a journal entry
+ * @typedef {{ table: string, keyParts: any[], before: any, after: any,
+ *   op?: 'delete' | 'update' }} CascadeEntry - one row the database's
+ *   foreign-key actions change, as a journal entry; `op` names the write a
+ *   store rule judges it as — `delete` for an entity row a `cascade` key
+ *   removes, `update` for one a `setNull` key nulls — and a membership row,
+ *   which no rule judges, has none
  */
 
 /**
@@ -102,7 +108,7 @@ const repeat = (round) => {
 };
 
 /**
- * The closure journal capture reads around a store delete.
+ * The closure journal capture and the store rules read around a store delete.
  *
  * `predict(entityName, keyParts)` answers, value or promise (a synchronous
  * driver keeps a synchronous delete synchronous), `null` when no edge reaches
@@ -123,11 +129,19 @@ const repeat = (round) => {
  * met — those can come back without counting again, so a result short of that
  * limit is complete and a full one holds a row past the credit. Without
  * `bound` the closure is read whole, as a session changeset records it.
+ *
+ * `reaches(entityName)` answers whether any edge reaches the entity (whether
+ * `predict` reads at all); `judges(entityName)` whether its delete can reach a
+ * row a store rule judges, so a store that records no journal reads the
+ * closure only then; `judge(entries)` runs each entity row through its
+ * entity's store rules after the delete ran, as that entity's own `delete()`
+ * or `update()` is judged (value or promise; the first refusal throws).
  * @param {{ connection: any, mapping: any, entityCoreFor: (name: string) => any,
  *   bound: { maxOperations: number, maxBytes: number } | null }} options
- * @returns {{ predict: (entityName: string, keyParts: any[]) => any }}
+ * @returns {{ predict: (entityName: string, keyParts: any[]) => any, reaches: (entityName: string) => boolean,
+ *   judges: (entityName: string) => boolean, judge: (entries: CascadeEntry[]) => any }}
  */
-export function createCascadeCapture({ connection, mapping, entityCoreFor, bound }) {
+export function createCascadeClosure({ connection, mapping, entityCoreFor, bound }) {
   const { inbound } = foreignKeyEdges(mapping);
   const dialect = connection.dialect;
   const q = dialect.quoteIdentifier;
@@ -195,7 +209,7 @@ export function createCascadeCapture({ connection, mapping, entityCoreFor, bound
       }
       if (nulling === undefined) meet(edge.child, row);
       removedTokens.add(token);
-      removed.push({ table: edge.child, keyParts, before: row, after: null });
+      removed.push({ table: edge.child, keyParts, before: row, after: null, op: 'delete' });
       if (!inbound.has(edge.child)) return;
       const keys = frontier.get(edge.child);
       if (keys === undefined) frontier.set(edge.child, [storedKey(core, row)]);
@@ -247,14 +261,49 @@ export function createCascadeCapture({ connection, mapping, entityCoreFor, bound
         if (removedTokens.has(token)) continue;
         const after = { ...row.before };
         for (const name of row.members) delete after[name];
-        entries.push({ table: row.table, keyParts: row.keyParts, before: row.before, after });
+        entries.push({ table: row.table, keyParts: row.keyParts, before: row.before, after, op: 'update' });
       }
       entries.push(...members.values());
       return { root, entries };
     });
   };
 
+  /** per entity, whether its delete reaches a row a store rule judges @type {Map<string, boolean>} */
+  const judged = new Map();
   return {
+    /** @param {string} entityName */
+    reaches: (entityName) => inbound.has(entityName),
+    /** Breadth first over the inbound foreign keys: a row a `cascade` key
+     * removes, at any depth, is judged by its entity's delete rules, and a
+     * row a `setNull` key nulls by its update rules. @param {string} entityName */
+    judges(entityName) {
+      let answer = judged.get(entityName);
+      if (answer !== undefined) return answer;
+      answer = false;
+      const seen = new Set([entityName]);
+      const queue = [entityName];
+      for (let at = 0; at < queue.length && !answer; at += 1) {
+        for (const edge of inbound.get(queue[at]) ?? []) {
+          if (edge.kind !== 'fk') continue;
+          if (entityCoreFor(edge.child).plan.ruled(edge.onDelete === 'cascade' ? 'delete' : 'update')) {
+            answer = true;
+            break;
+          }
+          if (edge.onDelete === 'cascade' && !seen.has(edge.child)) {
+            seen.add(edge.child);
+            queue.push(edge.child);
+          }
+        }
+      }
+      judged.set(entityName, answer);
+      return answer;
+    },
+    /** @param {CascadeEntry[]} entries */
+    judge: (entries) => each(entries, (entry) => {
+      if (entry.op === undefined) return undefined;
+      const { plan } = entityCoreFor(entry.table);
+      return plan.ruled(entry.op) ? plan.checkMutation(entry.op, entry.before, entry.after) : undefined;
+    }),
     /** @param {string} entityName @param {any[]} keyParts */
     predict(entityName, keyParts) {
       if (!inbound.has(entityName)) return null;

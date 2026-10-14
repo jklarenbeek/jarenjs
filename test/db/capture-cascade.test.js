@@ -308,7 +308,7 @@ describe('journal capture of foreign-key actions', () => {
   });
 
   it('a bounded closure counts a row met through two foreign keys once and reads every row up to the credit', async () => {
-    const { createCascadeCapture } = await import('../../packages/db/src/cascade.js');
+    const { createCascadeClosure } = await import('../../packages/db/src/cascade.js');
     const temp = tempDbPath();
     let connection;
     try {
@@ -331,7 +331,7 @@ describe('journal capture of foreign-key actions', () => {
         return cores.get(name);
       };
       const predict = (/** @type {any} */ bound) =>
-        createCascadeCapture({ connection, mapping, entityCoreFor, bound }).predict('Hub', ['h']);
+        createCascadeClosure({ connection, mapping, entityCoreFor, bound }).predict('Hub', ['h']);
       const unbounded = predict(null);
       assert.deepEqual(unbounded.root, { id: 'h' });
       // nulled through `looseRef`, then removed through `tightRef`: removed, once

@@ -4507,10 +4507,24 @@ between it and the statement — and the row now stored: an update that changes 
 database rule counts runs no `changed` rule, and a `columns` rule runs when the
 statement assigns one of them (§13.1). A delete rule is checked after the
 delete, against the row it removed; a key with no row removes nothing and runs
-no rule. A row the database's own foreign-key actions remove or null — a
-`cascade` child, a `setNull` member — is no store write and runs none of its
-entity's store rules: a delete rule that refuses the child's own `delete()`
-does not stop its parent's. A document's insert and update rules are checked before its own
+no rule. A row the database's own foreign-key actions remove or null under a
+store delete — a `cascade` child at any depth, a `setNull` member — is judged
+by its entity's store rules as that entity's own `delete()` or `update()` of
+it is: read before the delete, inside its transaction and locked as the
+actions will lock it (on PostgreSQL `FOR UPDATE`, `FOR NO KEY UPDATE` for a
+row whose member that is no unique key is nulled), and judged after the
+delete, once the parent's own rule passed, so a rule's `$exists-row` reads the
+database as the delete left it. A removed row meets its delete rules, `$.old`
+the row as read; a nulled row meets its update rules, `$.old` the row as read
+and `$.new` that row with the foreign-key member or members null — which a
+store-owned layout reads back missing, so `$exists` of the member is false,
+as a database rule reads it. A rule that refuses refuses the whole delete with
+its own `JD2096` and message, and nothing is written, even inside a
+transaction that catches the refusal. That holds for `delete()`, a tracked
+save's removal and a delete inside a transaction, under every capture mode; a
+delete whose actions reach no row a store rule judges reads none of them for
+its rules (journal capture reads them to record them, LIVE-FORMAT §4). The
+replay a replica applies runs no store rule, on its own rows or on theirs. A document's insert and update rules are checked before its own
 statement, against the document the unit of work holds, membership arrays
 included, as the store reads it back: a member written `null` that the table
 keeps in a column reads back missing, so a rule judges it missing on the
@@ -4571,8 +4585,8 @@ covers the store's own writes only.
 
 A database rule judges every write of its row, the rows the database's own
 foreign-key actions write included — a `cascade` child's delete rule, a
-`setNull` member's update rule — where a store rule (§13.3) runs for none
-of them: a child's database rule refuses its parent's delete, in the
+`setNull` member's update rule — as a store rule (§13.3) judges them too: a
+child's database rule refuses its parent's delete, in the
 child's rule's name, and the parent's row stays with the child's. The
 refusal is reported for the write that ran — its `collection` and `docPath`
 are the parent entity's — and its message names the child's rule

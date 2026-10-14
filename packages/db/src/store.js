@@ -52,7 +52,7 @@ import { createTracker, membershipKeys } from './tracker.js';
 import { createCaptureEngine, DEFAULT_RETENTION } from './capture.js';
 import { createReplicationEngine, readReplicationOptions } from './replication.js';
 import { createLogicalRows } from './logical-rows.js';
-import { createCascadeCapture } from './cascade.js';
+import { createCascadeClosure } from './cascade.js';
 import { shapeHash } from './migrate.js';
 import { createLiveRegistry, classifyLiveQuery, LIVE_DEFAULTS } from './live.js';
 import { ASYNC_LIVE_DEFAULTS } from './live-options.js';
@@ -3368,24 +3368,33 @@ export function openStore(model, options) {
             for (const name of names) delete out[name];
             return out;
           };
-          /** A journal sees the rows its write paths write, not the rows the
-           * database's own foreign-key actions remove or null inside a DELETE:
-           * descendants through `cascade`, the member of `setNull` rows, the
-           * membership rows of every removed row. Those are read from the
-           * model's edges — the database's, the open-time check makes sure —
-           * before the statement runs, inside its transaction and locked where
-           * the engine locks rows, and recorded only once the statement removed
-           * its row, right after the statement's own entry: a delete the
-           * database refuses records nothing. Under replication the rows count
-           * against the envelope's credits, refused before the delete. */
-          const cascadeCapture = capture === null || capture.mode !== 'journal' || mapping === null ? null
-            : createCascadeCapture({ connection, mapping,
+          /** A journal sees the rows its write paths write, and a store rule
+           * judges them, not the rows the database's own foreign-key actions
+           * remove or null inside a DELETE: descendants through `cascade`, the
+           * member of `setNull` rows, the membership rows of every removed
+           * row. Those are read from the model's edges — the database's, the
+           * open-time check makes sure — before the statement runs, inside its
+           * transaction and locked where the engine locks rows; once the
+           * statement removed its row, each entity row is judged by its
+           * entity's store rules, then recorded right after the statement's
+           * own entry: a delete the database or a rule refuses records
+           * nothing. Under replication the rows count against the envelope's
+           * credits, refused before the delete. Without a journal the rows
+           * are read only for a delete that reaches a row a store rule judges. */
+          const journalCapture = capture !== null && capture.mode === 'journal';
+          const cascadeClosure = mapping === null ? null
+            : createCascadeClosure({ connection, mapping,
               // deferred: the entity cores are built further down
               entityCoreFor: (name) => entityCoreFor(name),
               // the credits replication reads: its own defaults under the given ones
-              bound: options.replication === undefined ? null : readReplicationOptions(options.replication) });
-          const captureCascade = cascadeCapture === null ? undefined
-            : (table, keyParts) => cascadeCapture.predict(table, keyParts);
+              bound: !journalCapture || options.replication === undefined ? null : readReplicationOptions(options.replication) });
+          /** The closure journal capture records (replay's writer reads it too). */
+          const captureCascade = cascadeClosure === null || !journalCapture ? undefined
+            : (table, keyParts) => cascadeClosure.predict(table, keyParts);
+          /** The closure a store delete reads: recorded by a journal, judged
+           * by the store rules it reaches; `null` when neither asks for it. */
+          const readCascade = cascadeClosure === null ? undefined
+            : (table, keyParts) => (journalCapture || cascadeClosure.judges(table) ? cascadeClosure.predict(table, keyParts) : null);
           /** Record a closure's entries, relation members stripped as every entry is. */
           const recordCascade = (entries) => {
             for (const entry of entries) {
@@ -3455,10 +3464,13 @@ export function openStore(model, options) {
               },
             };
           };
-          /** Journal-mode write wrappers for an entity core. */
+          /** Write wrappers for an entity core: journal capture's records,
+           * and the store rules of the rows a delete's foreign-key actions
+           * reach. */
           const captureEntity = (entityName, core) => {
-            if (capture === null) return core;
-            const journal = capture.mode === 'journal';
+            const reaches = cascadeClosure !== null && cascadeClosure.reaches(entityName);
+            if (capture === null && !reaches) return core;
+            const journal = journalCapture;
             const keysOf = (doc) => core.plan.keys.map((key) => doc[key]);
             return {
               ...core,
@@ -3479,22 +3491,30 @@ export function openStore(model, options) {
                   }))
                 : core.update(key, changes))),
               // the closure's locked root is the before-image when the entity
-              // has inbound edges; a refused delete throws before any record
-              delete: (key) => guard(() => (journal
-                ? chain(captureCascade(entityName, core.normalizeKey(key)), (closure) =>
+              // has inbound edges; a refused delete throws before any record.
+              // A closure a store rule judges is read, removed and judged in
+              // one transaction of its own, so a refusal leaves nothing
+              // written, even when the caller's transaction catches it.
+              delete: (key) => guard(() => {
+                const judged = reaches && cascadeClosure.judges(entityName);
+                if (!journal && !judged) return core.delete(key);
+                const remove = () => chain(readCascade(entityName, core.normalizeKey(key)), (closure) =>
                   chain(closure === null ? core.get(key) : closure.root, (before) =>
-                    chain(core.delete(key), (deleted) => {
-                      if (deleted && before !== undefined) {
-                        // under the key the stored row holds, as its create
-                        // recorded it — never another spelling of it ('16.0',
-                        // an instant's epoch) the delete was called with
-                        capture.record(entityName, keysOf(before),
-                          stripRelations(entityName, before), null);
-                        if (closure !== null) recordCascade(closure.entries);
-                      }
-                      return deleted;
-                    })))
-                : core.delete(key))),
+                    chain(core.delete(key), (deleted) => !deleted || before === undefined ? deleted
+                      : chain(judged ? cascadeClosure.judge(closure.entries) : null, () => {
+                        if (journal) {
+                          // under the key the stored row holds, as its create
+                          // recorded it — never another spelling of it ('16.0',
+                          // an instant's epoch) the delete was called with
+                          capture.record(entityName, keysOf(before),
+                            stripRelations(entityName, before), null);
+                          if (closure !== null) recordCascade(closure.entries);
+                        }
+                        return deleted;
+                      }))));
+                return judged ? attempt(() => connection.transaction(remove),
+                  (error) => wrapDriverError(error, { docPath: `/entities/${entityName}`, collection: entityName })) : remove();
+              }),
             };
           };
 
@@ -3665,7 +3685,8 @@ export function openStore(model, options) {
                   : (table, keyParts, before, after) => capture.record(table, keyParts,
                     before === undefined ? undefined : stripRelations(table, before),
                     stripRelations(table, after)),
-                captureCascade,
+                readCascade,
+                judgeCascade: cascadeClosure === null ? undefined : (entries) => cascadeClosure.judge(entries),
               })
               : null;
             /** @type {Map<string, any>} */

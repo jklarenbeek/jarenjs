@@ -234,9 +234,7 @@ what each does is its own documentation's job
   rule that reads an epoch member, a member the document holds or a relation;
   an `audit` or `effects`, whose trigger writes journal capture cannot see;
   and `$exists-row`, whose probe needs the target table's key columns and
-  their declared types. Wanted: those, and a decision whether a store rule
-  should see the rows a foreign-key action writes, which a database rule
-  judges and a store rule never does. Introspection reports such a table's
+  their declared types. Wanted: those. Introspection reports such a table's
   triggers as unmapped objects, so a model derived from the database neither
   reopens nor migrates to the authored one. Every PostgreSQL open reads each
   store-owned table's triggers and rewrite rules with a query per table (about
@@ -545,12 +543,6 @@ what each does is its own documentation's job
   transaction refuses `JD0060`. Wanted: the delete reads the stored key of the
   row it removes (as it reads the rows its foreign keys change) and journal
   capture records under it.
-- [ ] **Store rules judge only the store's own statements.** A row the
-  database's foreign-key actions remove or null runs none of its entity's rules
-  (a child's delete rule refuses its own `delete()` yet a cascading parent
-  delete removes it). Journal capture now reads exactly those rows before the
-  delete; judging them needs the same read under session capture and a decided
-  `$.old`/`$.new` for a nulled row.
 - [ ] **Remaining incremental live shapes.**
   [The matrix](../packages/db/docs/LIVE-FORMAT.md) still re-runs ordered groups,
   ordered or windowed distinct projections, windowed groups and windowed

@@ -12,7 +12,8 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { migrate, openStore, planInvariants, planModelMigration } from '@jarenjs/db';
 import { postgresDialect } from '@jarenjs/db/postgres';
-import { BOOKING_TRANSFORM, bookingModel, childRuleMeetsParentAction, narrowedBookingModel } from './invariant-oracle.js';
+import { BOOKING_TRANSFORM, bookingModel, childRuleMeetsParentAction, narrowedBookingModel, storeRulesMeetForeignKeyActions }
+  from './invariant-oracle.js';
 import { PG_URL, withPostgres } from './store-core-engines.js';
 
 const skip = !PG_URL && 'JAREN_PG_URL is not set';
@@ -181,10 +182,15 @@ describe('a database rule on a store-owned layout, on PostgreSQL', { skip }, () 
     }));
 });
 
-describe('a child\'s database rule meets its parent\'s foreign-key action, on PostgreSQL', { skip }, () => {
+describe('a child\'s rule meets its parent\'s foreign-key action, on PostgreSQL', { skip }, () => {
   for (const [onDelete, rule] of /** @type {const} */ ([['cascade', 'kept'], ['setNull', 'linked']]))
-    it(`${onDelete}: the parent's delete is refused in the child's rule's name and reported for the parent; a store rule lets it through`,
+    it(`${onDelete}: the parent's delete is refused in the child's rule's name, a database rule's reported for the parent, a store rule's with its own message`,
       () => childRuleMeetsParentAction('postgres', onDelete, rule));
+});
+
+describe('store rules judge the rows a foreign-key action removes or nulls, on PostgreSQL', { skip }, () => {
+  it('a rule two levels down refuses, a probe sees the parent gone, and passing rules, no rules and restrict answer as before',
+    () => storeRulesMeetForeignKeyActions('postgres'));
 });
 
 describe('a planned migration of a store-owned layout\'s rules, on PostgreSQL', { skip }, () => {
