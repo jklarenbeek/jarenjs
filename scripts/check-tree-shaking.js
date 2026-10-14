@@ -151,7 +151,8 @@ if (engineLeak.length > 0)
 // Raised to 42,000 (measured 41891): the shared capture's coded refusal of an array method called on a member, with the query spelling it names add 1936.
 // Raised to 42,300 (measured 42263): the shared capture's refusal to coerce a method read without its call add 391.
 // Raised to 44,600 (measured 44599): the shared capture's coded refusal of every array and string method on a member, and the predicate a to-many relation's array method needs, add 2336.
-if (schemaBytes > 44600)
+// Raised to 45,300 (measured 45247): the shared capture's reading of an index off a relation as a hop for in() and all() add 648.
+if (schemaBytes > 45300)
   throw new Error(`The schema pen bundle grew to ${schemaBytes} bytes.`);
 
 console.log(`Tree-shaking smoke test passed (${schemaBytes} byte schema-pen bundle; no chain module, no engine).`);
@@ -235,7 +236,8 @@ if (chainEdgeLeak.length > 0)
 // Raised to 226,900 (measured 226802): the shared capture's refusal to coerce a method read without its call add 391.
 // Raised to 229,200 (measured 229144): the shared capture's coded refusal of every array and string method on a member, and the predicate a to-many relation's array method needs, add 2342.
 // Raised to 229,300 (measured 229209): a handle's check of the source a chain was built over add 65.
-if (chainBytes > 229300)
+// Raised to 229,900 (measured 229858): the shared capture's reading of an index off a relation as a hop for in() and all() add 649.
+if (chainBytes > 229900)
   throw new Error(`The chain bundle grew to ${chainBytes} bytes.`);
 
 console.log(`Tree-shaking smoke test passed (${chainBytes} byte chain bundle; no schema-pen module, no client module, no store/validator/formats bytes).`);
@@ -317,7 +319,8 @@ if (modelEngineLeak.length > 0)
 // Raised to 53,700 (measured 53696): the shared capture's coded refusal of an array method called on a member, with the query spelling it names add 1939.
 // Raised to 54,100 (measured 54068): the shared capture's refusal to coerce a method read without its call add 391.
 // Raised to 56,500 (measured 56406): the shared capture's coded refusal of every array and string method on a member, and the predicate a to-many relation's array method needs, add 2338.
-if (modelBytes > 56500)
+// Raised to 57,100 (measured 57054): the shared capture's reading of an index off a relation as a hop for in() and all() add 648.
+if (modelBytes > 57100)
   throw new Error(`The model pen bundle grew to ${modelBytes} bytes.`);
 const schemaModelLeak = Object.entries(schemaInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/model/') && info.bytesInOutput > 0);
@@ -376,7 +379,8 @@ if (jsltEngineLeak.length > 0)
 // Raised to 24,500 (measured 24466): the shared capture's coded refusal of an array method called on a member, with the query spelling it names add 1933.
 // Raised to 24,900 (measured 24836): the shared capture's refusal to coerce a method read without its call add 391.
 // Raised to 27,200 (measured 27164): the shared capture's coded refusal of every array and string method on a member, and the predicate a to-many relation's array method needs, add 2328.
-if (jsltBytes > 27200)
+// Raised to 27,900 (measured 27811): the shared capture's reading of an index off a relation as a hop for in() and all() add 647.
+if (jsltBytes > 27900)
   throw new Error(`The JSLT pen bundle grew to ${jsltBytes} bytes.`);
 const chainJsltLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/jslt/') && info.bytesInOutput > 0);
@@ -446,7 +450,8 @@ if (migrationEngineLeak.length > 0)
 // Raised to 30,600 (measured 30598): the shared capture's coded refusal of an array method called on a member, with the query spelling it names add 1938.
 // Raised to 31,000 (measured 30970): the shared capture's refusal to coerce a method read without its call add 392.
 // Raised to 33,400 (measured 33304): the shared capture's coded refusal of every array and string method on a member, and the predicate a to-many relation's array method needs, add 2334.
-if (migrationBytes > 33400)
+// Raised to 34,000 (measured 33951): the shared capture's reading of an index off a relation as a hop for in() and all() add 647.
+if (migrationBytes > 34000)
   throw new Error(`The migration pen bundle grew to ${migrationBytes} bytes.`);
 const chainMigrationLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/migration/') && info.bytesInOutput > 0);
@@ -617,7 +622,8 @@ if (asyncLiveLeak.length)
 // Raised to 981,000 (measured 980988): the shared capture's coded refusal of every array and string method on a member, and the predicate a to-many relation's array method needs, add 2342.
 // Raised to 981,100 (measured 981042): a handle's check of the source a chain was built over add 54.
 // Raised to 982,700 (measured 982682): the database a store reads, named in its views' source, and the store's coded refusal of a chain where it takes a document add 1640.
-if (clientBytes > 982700)
+// Raised to 984,600 (measured 984578): the shared capture's reading of an index off a relation as a hop, the handle's refusal of rows it cannot count and the store's refusal of a document it cannot read add 1896.
+if (clientBytes > 984600)
   throw new Error(`The client bundle grew to ${clientBytes} bytes.`);
 console.log(`Tree-shaking smoke test passed (${clientBytes} byte client bundle — the store, the validator and the formats ride as declared; no other pen, no emit/refs).`);
 
@@ -674,7 +680,8 @@ if (contractPenLeak.length > 0)
 // Raised to 55,500 (measured 55463): the shared capture's coded refusal of an array method called on a member, with the query spelling it names add 1937.
 // Raised to 55,900 (measured 55835): the shared capture's refusal to coerce a method read without its call add 391.
 // Raised to 58,200 (measured 58172): the shared capture's coded refusal of every array and string method on a member, and the predicate a to-many relation's array method needs, add 2337.
-if (contractPenBytes > 58200)
+// Raised to 58,900 (measured 58820): the shared capture's reading of an index off a relation as a hop for in() and all() add 648.
+if (contractPenBytes > 58900)
   throw new Error(`The contract pen bundle grew to ${contractPenBytes} bytes.`);
 const chainContractLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/contract/') && info.bytesInOutput > 0);
@@ -740,7 +747,8 @@ if (flowPenLeak.length > 0)
 // Raised to 24,600 (measured 24566): the shared capture's coded refusal of an array method called on a member, with the query spelling it names add 1933.
 // Raised to 25,000 (measured 24934): the shared capture's refusal to coerce a method read without its call add 390.
 // Raised to 27,300 (measured 27266): the shared capture's coded refusal of every array and string method on a member, and the predicate a to-many relation's array method needs, add 2332.
-if (flowPenBytes > 27300)
+// Raised to 28,000 (measured 27913): the shared capture's reading of an index off a relation as a hop for in() and all() add 647.
+if (flowPenBytes > 28000)
   throw new Error(`The flow pen bundle grew to ${flowPenBytes} bytes.`);
 const chainFlowLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/flow/') && info.bytesInOutput > 0);
@@ -801,7 +809,8 @@ if (appPenLeak.length > 0)
 // Raised to 57,000 (measured 56908): the shared capture's coded refusal of an array method called on a member, with the query spelling it names add 1939.
 // Raised to 57,300 (measured 57281): the shared capture's refusal to coerce a method read without its call add 392.
 // Raised to 59,700 (measured 59619): the shared capture's coded refusal of every array and string method on a member, and the predicate a to-many relation's array method needs, add 2338.
-if (appPenBytes > 59700)
+// Raised to 60,300 (measured 60267): the shared capture's reading of an index off a relation as a hop for in() and all() add 648.
+if (appPenBytes > 60300)
   throw new Error(`The app pen bundle grew to ${appPenBytes} bytes.`);
 const chainAppLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/app/') && info.bytesInOutput > 0);
@@ -861,7 +870,8 @@ if (formsPenLeak.length > 0)
 // Raised to 46,200 (measured 46161): the shared capture's coded refusal of an array method called on a member, with the query spelling it names add 1940.
 // Raised to 46,600 (measured 46534): the shared capture's refusal to coerce a method read without its call add 392.
 // Raised to 48,900 (measured 48869): the shared capture's coded refusal of every array and string method on a member, and the predicate a to-many relation's array method needs, add 2335.
-if (formsPenBytes > 48900)
+// Raised to 49,600 (measured 49517): the shared capture's reading of an index off a relation as a hop for in() and all() add 648.
+if (formsPenBytes > 49600)
   throw new Error(`The forms pen bundle grew to ${formsPenBytes} bytes.`);
 const chainFormsLeak = Object.entries(chainInputs)
   .filter(([file, info]) => file.includes('packages/linq/src/forms/') && info.bytesInOutput > 0);
