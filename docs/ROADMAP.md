@@ -452,13 +452,34 @@ what each does is its own documentation's job
   asking in JavaScript. Wanted: a root for a join table, so a membership can be
   filtered, counted and joined in one document
   ([DB-CLIENT §6](../packages/linq/docs/DB-CLIENT.md)).
-- [ ] **A non-JSON external is read as `{}`.** `execute(document, { externals:
-  { since: new Date(…) } })` compares `$since` with an empty object (`$gt`
-  against a `Date` matches no row, on SQLite and PostgreSQL, with or without
-  pushdown), where its ISO string answers right. Wanted: refuse an external
-  that is not JSON (`JD0041`, as a document holding one is refused), or bind a
-  `Date` as its `toISOString()`
-  ([MODEL-FORMAT §10.1](../packages/db/docs/MODEL-FORMAT.md)).
+- [ ] **A non-JSON external compared through a variable is read as `{}`.** An
+  external a comparison names directly (`$since`, `$ids[*]`, `$window.from` as
+  an operand of `$eq $ne $lt $le $gt $ge`, or in the store profile's
+  predicate) that holds a `Date`, a `Map` or another object with no own member
+  is refused `JD0041` ([MODEL-FORMAT §10.1](../packages/db/docs/MODEL-FORMAT.md)).
+  One bound to a variable first (`$let`, `$for`, a quantifier) and compared
+  through it, or reached through a descendant, slice or filter path, is still
+  compared as `{}` and matches no row, and `$distinct`, `$index-of` and
+  ordering or grouping keys read such a value unchecked. A value returned or
+  handed to a registered function is the caller's own and answers right, so a
+  blanket refusal of every external is not the fix: follow the binding through
+  the analysed tree, or refuse where the engine's comparison reads the item.
+- [ ] **A collection's profile predicate binds an external the database cannot
+  take as the raw driver error.** A store profile predicate
+  `$eq ['$it.tenant', '$tenant']` on a collection, executed with `tenant`
+  `true`, `{}` or missing, throws Node's `ERR_INVALID_ARG_TYPE` ("Provided
+  value cannot be bound to SQLite parameter 1"), and `{ x: 1 }` or `['t1']`
+  throw `ERR_INVALID_STATE` ("Unknown named parameter"), where MODEL-FORMAT §8
+  promises `JD0011`, as an entity's fetch refuses one.
+- [ ] **A `bigint` external compares as no number.** `$gt ['$e.n', '$min']`
+  with `externals: { min: 2n }` matches no row, with or without pushdown,
+  where `2` answers right: the comparison does not read a `bigint` as the
+  number it holds. Wanted: compare it exactly where the engine can, or refuse
+  it with a coded reason.
+- [ ] **The load engine's `page()` takes options it never reads.** Its closed
+  option set admits `externals`, `strict`, `pushdown` and `strictStreaming`,
+  and none changes what a page answers. Wanted: read each, or drop it from the
+  set so a caller who passes one is told.
 - [ ] **A handle refuses a chain over one database a second store names
   differently.** A handle takes a chain over another store's view when both
   read one database (one SQLite file by its canonical path, one PostgreSQL

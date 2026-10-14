@@ -1834,7 +1834,7 @@ error.
 | `JD0038` | the native mutation document is unsupported or invalid |
 | `JD0039` | a member that takes a query document was handed a chain |
 | `JD0040` | the save spans a relation cycle |
-| `JD0041` | a query document is not JSON: a non-plain object with no own member to read, at its root or inside it |
+| `JD0041` | a query document, or an external a comparison reads, is not JSON: a non-plain object with no own member to read, at its root or inside it |
 | `JD0050` | live queries require change capture |
 | `JD0051` | the demanded live mode is unavailable |
 | `JD0052` | the live-query bound was reached |
@@ -2142,7 +2142,8 @@ external, which `execute()` binds from the call's `externals` — so it
 isolates tenants only when the host, not the caller, supplies those
 externals; one the database cannot bind — a missing one, a boolean, or a
 list holding a `null` or a boolean — is refused `JD0011` rather than
-dropped from the fetch. A load binds none, so
+dropped from the fetch, and one the predicate would compare as `{}` (a
+`Date`, a `Map`) is refused `JD0041` (§10.1). A load binds none, so
 a load under such a profile refuses `JD0032`, as a load whose own `where`
 names one does. `maxRows` bounds every
 fetch on every engine (`JD2007`), the residual's input rows included:
@@ -2992,6 +2993,28 @@ as `{}`, so a `$where` comparing with a `Date` matched no row and a
 stands for — a `Date` as its `toISOString()`, the form a `date-time`
 member holds. A class instance inside a document is still read by its
 own fields.
+
+An external is a call's own value, so the same members check it per
+call, against the compiled document: an external a comparison reads —
+a direct operand of `$eq`, `$ne`, `$lt`, `$le`, `$gt` or `$ge` (`$since`,
+`$ids[*]`, `$window.from`), in the document or in the store profile's
+predicate over a root it reads — that holds such a value, at its root
+or inside it, is `JD0041` naming the member, the external and the
+comparison's `docPath`, on every member above and on every view
+(`collection('ev').execute external '$since' holds a Date instance,
+which a comparison reads as {} — pass the JSON value it stands for, a
+Date as its toISOString() at /$where/$gt/1`). It used to be compared as
+`{}`, so `execute(document, { externals: { since: new Date(…) } })` with
+`$gt ['$e.at', '$since']` matched no row, with or without pushdown, on
+SQLite and PostgreSQL; pass `since.toISOString()`, the value a
+`date-time` member holds. Every other use answers as before: an
+external the query returns, or hands to a registered function, is
+passed through by reference (the function receives the `Date` itself);
+one the document never compares is not read; a plain or null-prototype
+object, a class instance read by its fields, an array and a primitive
+compare as JSON. An external bound to a variable first (`$let`, `$for`,
+a quantifier) and compared through it, or reached through a descendant,
+slice or filter path, is not followed and is still compared as `{}`.
 
 An entity set is a provider (QUERY-PEN §8): `store.entity(name)` and
 `store.sync.entity(name)` carry `execute(document, options)` and

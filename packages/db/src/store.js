@@ -36,7 +36,7 @@ import { isPlainOptions, refuseUnknownMembers, refuseUnknownModelMembers, readOp
 import { canonicalKeyText, namesNoNumber, noNumberKeyReason } from './key-text.js';
 import { planCollection, planEntity, planJoinTable, refuseNameCollisions, verifyShape, compileIndexPath, canonicalOf, creationOrder } from './ddl.js';
 import { translatePatch } from './patch-sql.js';
-import { createQueryEngine, createQueryState, createEntityQueryEngine, createLoadEngine, refuseNonDocument, refuseOpaqueValues } from './query.js';
+import { createQueryEngine, createQueryState, createEntityQueryEngine, createLoadEngine, refuseNonDocument, refuseOpaqueValues, refuseOpaqueExternals, liveComparedExternals } from './query.js';
 import { sqliteDatabasePath } from './migration-target.js';
 import { CLOSED_UNDER, admitCursor, admitSyncCursor, createCursor, createSyncCursor, shareCursor } from './cursor.js';
 import { refuseUnsupportedPragmaKeys, resolvePragmaRequests, configurePragmas, PRAGMA_NAMES } from './pragmas.js';
@@ -3318,6 +3318,8 @@ export function openStore(model, options) {
             readOptions(liveOptions, LIVE_OPTIONS, 'live');
             refuseNonDocument(document, `collection('${core.model.name}').live`);
             refuseOpaqueValues(document);
+            refuseOpaqueExternals(liveComparedExternals(document, operators, storeProfile, [core.model.name]),
+              liveOptions?.externals, `collection('${core.model.name}').live`);
             const externals = liveOptions?.externals ?? {};
             const keyed = core.model.keySegments !== null;
             const eventTime = normalizeEventTime(liveOptions, core.model.name);
@@ -3977,6 +3979,8 @@ export function openStore(model, options) {
                 + "a load specification is not a query document, and a collection's live query is "
                 + 'store.collection(name).live', '/entities');
             }
+            refuseOpaqueExternals(liveComparedExternals(document, operators, storeProfile, roots),
+              liveOptions?.externals, 'store.live');
             const logicalRows = createLogicalRows({ connection, shapes: captureShapes, capture,
               collectionCore: coreFor, entityCore: entityCoreFor });
             return closeOnRollback(liveRegistry.register({

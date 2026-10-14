@@ -53,7 +53,7 @@ export const DB_CODES = Object.freeze({
   JD0038: 'the native mutation document is unsupported or invalid',
   JD0039: 'a member that takes a query document was handed a chain',
   JD0040: 'the save spans a relation cycle',
-  JD0041: 'a query document is not JSON: a non-plain object with no own member to read, at its root or inside it',
+  JD0041: 'a query document, or an external a comparison reads, is not JSON: a non-plain object with no own member to read, at its root or inside it',
   JD0050: 'live queries require change capture',
   JD0051: 'the demanded live mode is unavailable',
   JD0052: 'the live-query bound was reached',
@@ -226,7 +226,10 @@ export const DB_CODES = Object.freeze({
  *    which has no own enumerable member (a `Date`, a `Map`), the reason
  *    naming the member; or a document holds, at any depth, such an object
  *    (a `Date` in a `$where`), which the compiler read as `{}` — the
- *    `docPath` names where
+ *    `docPath` names where; or an external a comparison reads (a direct
+ *    operand of `$eq $ne $lt $le $gt $ge`, in the document or the store
+ *    profile's predicate) holds one, which it compared as `{}` — the
+ *    reason names the external, the `docPath` the comparison
  *  - `JD0050` — a live query was registered on a store opened without
  *    `capture`; the patch stream is the invalidation source
  *  - `JD0051` — `mode: 'incremental'` was demanded but the document
