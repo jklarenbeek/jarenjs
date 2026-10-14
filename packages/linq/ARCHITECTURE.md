@@ -185,11 +185,13 @@ a handle: its document and bindings, the call's own `externals` merged
 over them — holding a parameter an `in()` reads whole to an array in that
 merged set, which is what the store runs — and the source check; `live.js`
 hands that to the store's own registration, and a handle's `execute`,
-`query` and `explain` hand it to the store's member of that name. `source.js` records, for each provider a client fronts, the kind and the
-name it stands for, and the chain reports the provider it was built over,
-so a handle takes only a chain over its own collection or entity by
-name (`JL0005` otherwise).
-Nothing here runs a query, plans one or keeps state beyond that record: the store stays
+`query` and `explain` hand it to the store's member of that name. A chain
+reports the provider or the rows in memory it was built over, every view
+of the store carries its own kind and name (`STORE_SOURCE`), and
+`source.js` compares them, so a handle takes only a chain over its own
+collection or entity by name, or over no rows (`from([])`, the document
+builder): `JL0005` otherwise, naming the other source or the count of rows.
+Nothing here runs a query, plans one or keeps state: the store stays
 the engine, and every read is one its `explain()` can name.
 
 ## The provider seam (`src/provider.js`)

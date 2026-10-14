@@ -80,7 +80,8 @@ export const LINQ_CODES = /* @__PURE__ */ Object.freeze({
  *    `take(1, 2)`, a comparer after `orderBy` or `join`), a value that
  *    cannot embed in a document — a sparse array among them — an option
  *    outside one of the chain's closed option bags, or a chain handed to
- *    the `live()` of a source it was not built over)
+ *    a handle's `live()`, `execute()`, `query()` or `explain()` that was
+ *    built over another collection or entity, or over rows in memory)
  *  - `JL0006` — an operator the mapping table records as
  *    `unsupported` was invoked (`zip`); the table names the reason
  *  - `JL0007` — `from()`/`fromAsync()` received a provider that serves

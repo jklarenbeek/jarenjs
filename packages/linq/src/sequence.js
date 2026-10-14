@@ -533,13 +533,15 @@ export class Sequence {
 
   /** What a run binds, unchecked ({@link RUN_BINDINGS}): for a handle's
    * `live()`, `execute()`, `query()` and `explain()`, which check the list
-   * rule against the externals they hand the store, and the source the
-   * chain was built over. */
+   * rule against the externals they hand the store, and the provider or
+   * the rows in memory the chain was built over. */
   [RUN_BINDINGS]() {
+    const provider = this.#sourceKind === 'provider';
     return {
       bindings: snapshot(Object.fromEntries(this.#params)),
       lists: this.#lists(),
-      source: this.#sourceKind === 'provider' ? this.#source : null,
+      source: provider ? this.#source : null,
+      rows: provider ? null : this.#source,
     };
   }
 

@@ -13,7 +13,7 @@
  * lazily inside `open()`.
  */
 
-export { openStore, normalizeModel, MODEL_VERSION } from './store.js';
+export { openStore, normalizeModel, MODEL_VERSION, STORE_SOURCE } from './store.js';
 export { createDialect, DIALECT_CAPABILITIES } from './dialect.js';
 export { rtreeDdl } from './dialects/rtree-ddl.js';
 export { sqliteDialect } from './dialects/sqlite.js';

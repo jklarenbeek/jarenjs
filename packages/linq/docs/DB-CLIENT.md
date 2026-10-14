@@ -100,8 +100,8 @@ decides which document answers a question about behaviour.
 | `where`, `select`, `orderBy`, …, `toArray`, `first`, `count`, … | the chain: `fromAsync(handle)` ([QUERY-PEN.md](QUERY-PEN.md) §8, §10) | every `AsyncSequence` operator and terminal, delegated — nothing is duplicated, every read is the chain's document and pushes down; the handle is iterable (`for await`); two handles of one client share a `scope`, so a join's inner may be `fromAsync(otherHandle)` |
 | `include(pick, spec?)` | the store's `load(spec)` (MODEL-FORMAT §10.4, §10.5) | opens a graph that EMITS the spec (§2.4, §3), typed `Loaded<>` by what it included |
 | `link(own, member, target)`, `unlink(…)` | the store's membership API (MODEL-FORMAT §11.7) | reads the relation table first — the member must be a many-to-many relation (`JL0107`, naming the kind it is, or the members that are) — then records through the store; `saveChanges()` writes the join rows |
-| `live(chain \| document, options?)` | the store's registration — `store.live` for an entity root, `collection.live` for a collection (LIVE-FORMAT §7) | hands over the chain's document and its `params()` bindings as the externals (`options.externals` merge over them, and a parameter an `in()` reads whole must be an array in the merged set — `JL0004`, so a placeholder the options override registers and a non-array override, which used to register unchecked, does not; options the store would refuse — `null`, a string, `externals` that is not a plain object — reach it as given and it refuses them with `JD0013`, where the merge used to accept an array or a string as bindings named `0`, `1`, …); a handle's `live` registers only a chain built over its own collection or entity (by name) — a chain over another one is `JL0005`, where it used to register its document over the handle's rows; the strategy, the reason and the maintenance are the store's |
-| `execute(chain \| document, options?)`, `query(…)`, `explain(…)` | the store's own members, on a collection handle and on an entity handle (a collection has `query`; an entity set has none) | a chain is handed over as `live()` hands it (`execute` answers the document's own shape: several rows an array, one row the row, none `undefined`): its document runs with its `params()` bindings as the externals (`options.externals` merge over them and a parameter an `in()` reads whole must be an array in the merged set — `JL0004`), and a chain built over another collection or entity is `JL0005` (`execute() on collection 'orders' was handed a chain built over collection 'users'`). A chain answers exactly what its `toDocument()` answers on the same member; a document, with or without options, goes to the store untouched. `explain()` with nothing is still the empty chain's explanation. A refusal of the chain is answered as the store answers a refused document on that member: `execute` and `query` throw, `explain` rejects. They used to read a chain as a document with no clauses: a collection answered `{}` for `execute(chain)` and `[{}]` for `query(chain)`, and an entity refused with `JD0033` |
+| `live(chain \| document, options?)` | the store's registration — `store.live` for an entity root, `collection.live` for a collection (LIVE-FORMAT §7) | hands over the chain's document and its `params()` bindings as the externals (`options.externals` merge over them, and a parameter an `in()` reads whole must be an array in the merged set — `JL0004`, so a placeholder the options override registers and a non-array override, which used to register unchecked, does not; options the store would refuse — `null`, a string, `externals` that is not a plain object — reach it as given and it refuses them with `JD0013`, where the merge used to accept an array or a string as bindings named `0`, `1`, …); a handle's `live` registers only a chain built over its own collection or entity (by name, from any view of the store) or over no rows (`from([])`, the document builder) — a chain over another one, or over rows in memory, is `JL0005`, where it used to register its document over the handle's rows; the strategy, the reason and the maintenance are the store's |
+| `execute(chain \| document, options?)`, `query(…)`, `explain(…)` | the store's own members, on a collection handle and on an entity handle (a collection has `query`; an entity set has none) | a chain is handed over as `live()` hands it (`execute` answers the document's own shape: several rows an array, one row the row, none `undefined`): its document runs with its `params()` bindings as the externals (`options.externals` merge over them and a parameter an `in()` reads whole must be an array in the merged set — `JL0004`), and a chain built over another collection or entity, or over rows in memory, is `JL0005` (`execute() on collection 'orders' was handed a chain built over collection 'users'`; `… built over 2 rows in memory`, where those rows used to be ignored and the handle's own answered); a chain over no rows (`from([])`) is the document builder and is taken. A chain answers exactly what its `toDocument()` answers on the same member; a document, with or without options, goes to the store untouched. `explain()` with nothing is still the empty chain's explanation. A refusal of the chain is answered as the store answers a refused document on that member: `execute` and `query` throw, `explain` rejects. They used to read a chain as a document with no clauses: a collection answered `{}` for `execute(chain)` and `[{}]` for `query(chain)`, and an entity refused with `JD0033` |
 | `client.collections.<name>` | the store's collection | the same chain start and `live`, typed from the pen's collection schema (§2.5) |
 | `saveChanges()`, `transaction(fn, options?)`, `close()`, `capabilities`, `store` | the store's | pass-throughs; `saveChanges` and `live` exist exactly when the model declares entities, as on the store; `store` is the escape hatch, typed `TypedStore` |
 
@@ -913,13 +913,27 @@ within the model, so every view of it is the same source: the handle,
 `fromAsync(handle)`, the store's own collection or entity set, the
 synchronous twin under `store.sync`, the handle of a transaction client,
 and the same-named collection of another client opened over the model —
-all of which answered right and register as before. So do a chain with no
-store source (`from([]).where(…)` used purely to write a document: it
-carries no collection, and a non-empty sequence's rows are ignored, as
-they were) and a hand-written document, which names no source. A chain
-over a provider the client cannot name (a view opened on the raw store,
-another transaction's handle, a provider written by hand) is registered
-as before. The client's own `live` takes a chain over any entity of its
+all of which answered right and register as before. Every view of a
+store carries its own name (`STORE_SOURCE`, MODEL-FORMAT §10.1), so a
+view the client never built is told the same way: a chain over another
+store's `users`, or over a `users` view a finished transaction handed
+out, is `JL0005` on `orders.live()`; those used to register over
+`orders` too. A chain over rows in memory is `JL0005` naming them
+(`live() on collection 'orders' was handed a chain built over 2 rows in
+memory`): the handle ran its document over the handle's rows and ignored
+the chain's, so `orders.live(from(rows).where(…))` answered from
+`orders`. An entity handle refused such a chain already, with the
+store's `JD0033` (its document names no entity), and now refuses it with
+the same `JL0005`. An upgrade that did that on purpose builds the chain from the
+handle; one that meant the rows runs the chain itself (`toArray()`).
+A chain over no rows is the document builder and registers as before:
+`from([]).where(…)` (an empty array, Set or Map, on either surface)
+writes a document and nothing else. So do a chain over rows whose count
+is known only by reading them (a generator, an async iterable, a cursor
+or a push queue: the handle does not consume them to find out, and
+their rows are still ignored), a chain over a provider written by hand,
+which carries no source, and a hand-written document, which names no
+source. The client's own `live` takes a chain over any entity of its
 store; a chain over a collection is still the store's `JD0033`.
 
 **A handle's `execute`, `query` and `explain` take a chain.**
@@ -929,10 +943,11 @@ document, as `live()` does, and `query(chain)` yields its rows and
 the handles of a transaction client, do the same. The source rule is
 `live()`'s: a chain built over another collection or entity is `JL0005`
 (`execute() on collection 'orders' was handed a chain built over collection
-'users'`), and a chain with no store source, the same-named source of
-another client or a hand-written document is taken. A chain over rows in
-memory (`from(rows).where(…)`) names no collection, so it runs over the
-handle's rows and its own rows are ignored, as `live()` ignores them.
+'users'`), and so is a chain over rows in memory; a chain over no rows
+(`from([])`), the same-named source of another client or a hand-written
+document is taken. A chain over rows in memory (`from(rows).where(…)`)
+used to run over the handle's rows with its own rows ignored, as
+`live()` ran it.
 `execute` answers the engine's shape for the document, not `toArray()`'s:
 several rows are an array, one row is the row itself and none is
 `undefined`; `query` and `toArray()` are the array-shaped spellings. They

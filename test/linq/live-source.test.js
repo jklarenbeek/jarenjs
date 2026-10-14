@@ -5,8 +5,8 @@
  * over another one used to register its document against the handle it
  * was handed to, which ran it over the wrong rows. A chain over the same
  * name, from any view of it or from another client of the same model, and
- * a chain with no collection source (a document builder), register as
- * they always did.
+ * a chain over no rows (a document builder), register as they always did;
+ * a chain over rows in memory, whose rows were ignored, is refused.
  */
 
 import { describe, it } from 'node:test';
@@ -15,6 +15,7 @@ import * as assert from 'node:assert';
 import { open } from '@jarenjs/linq/db';
 import { from, fromAsync } from '@jarenjs/linq';
 import * as m from '@jarenjs/linq/model';
+import { openStore } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';
 
 const Order = m.object({ id: m.string(), total: m.integer() });
@@ -142,7 +143,43 @@ describe('a collection handle registers only a chain over its own collection', (
     });
   });
 
-  it('a chain over a provider the client never fronted cannot be told apart, and registers as before', async () => {
+  it('a chain over rows in memory is JL0005 naming the rows, and registers nothing', async () => {
+    await withClient(async (client) => {
+      const rows = [{ id: 'x', total: 99 }];
+      for (const chain of [from(rows).where((o) => o.total.gt(1)), fromAsync(rows).where((o) => o.total.gt(1))]) {
+        const error = await rejection(() => client.collections.orders.live(chain));
+        assert.strictEqual(error.message,
+          "JL0005: live() on collection 'orders' was handed a chain built over 1 row in memory — "
+          + "a handle runs a chain's document over its own rows, never the chain's; build it from "
+          + 'this handle (or from([]) to write a document), or run it over its rows with toArray()');
+      }
+      const posts = from([{ pid: 7, stars: 1 }, { pid: 8, stars: 2 }]).where((p) => p.stars.gt(0));
+      assert.match((await rejection(() => client.entities.Post.live(posts))).message,
+        /^JL0005: live\(\) on entity 'Post' was handed a chain built over 2 rows in memory — /);
+      assert.strictEqual(liveCount(client), 0);
+    });
+  });
+
+  it('a view of another store carries its own name, its synchronous twin too', async () => {
+    await withClient(async (client) => {
+      const raw = await openStore(model, { driver: nodeDriver(), capture: true });
+      try {
+        for (const users of [fromAsync(raw.collection('users')), from(raw.sync.collection('users'))]) {
+          const error = await rejection(() => client.collections.orders.live(users.where((u) => u.age.gt(30))));
+          assert.match(error.message, /^JL0005: live\(\) on collection 'orders' was handed a chain built over collection 'users' — /);
+        }
+        const tags = from(raw.sync.entity('Tag')).where((t) => t.weight.gt(1));
+        assert.match((await rejection(() => client.entities.Post.live(tags))).message,
+          /^JL0005: live\(\) on entity 'Post' was handed a chain built over entity 'Tag' — /);
+        assert.strictEqual(liveCount(client), 0);
+        const sameName = await client.collections.orders.live(fromAsync(raw.collection('orders')).where((o) => o.total.gt(1)));
+        assert.deepStrictEqual(sameName.result.rows, [{ id: 'o1', total: 5 }]);
+      }
+      finally { await raw.close(); }
+    });
+  });
+
+  it('a chain over a provider written by hand carries no source, and registers as before', async () => {
     await withClient(async (client) => {
       const handWritten = fromAsync({ execute: () => [], root: '$[*]' }).where((o) => o.total.gt(1));
       const query = await client.collections.orders.live(handWritten);

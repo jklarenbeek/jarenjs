@@ -22,8 +22,8 @@ import { resolveSource } from './chain.js';
  * @param {any} source - a chain or a document
  * @param {any} [options] - LIVE-FORMAT §7 options; `externals` merge over
  *   the chain's bindings
- * @param {(chainSource: object) => void} [onlyOwn] - a handle's refusal of
- *   a chain built over another collection or entity than its own
+ * @param {(built: { source: any, rows: any }) => void} [onlyOwn] - a
+ *   handle's refusal of a chain built over another source than its own
  * @returns {Promise<any>} the store's live query
  */
 export function registerLive(register, source, options = undefined, onlyOwn = undefined) {

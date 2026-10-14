@@ -7,7 +7,8 @@
  * `options.externals` merges over them, a parameter an `in()` reads whole
  * as its list must be an array in the merged set (`JL0004`: a placeholder
  * the options override is not checked, and an override is), and a handle
- * takes only a chain built over its own collection or entity (`JL0005`).
+ * takes only a chain built over its own collection or entity, or over no
+ * rows (`JL0005`, `source.js`).
  * A chain split by a host callback has no document; its own refusal
  * (`JL0005`) names why.
  */
@@ -28,9 +29,10 @@ export const isChain = (source) => source !== null && typeof source === 'object'
  * what the store runs is decided only once the options are merged in.
  * @param {any} source - a chain (either surface) or a query document
  * @returns {{ document: any, bindings: Record<string, unknown>, lists: readonly string[],
- *   source?: object | null }} `source` is the provider the chain was
- *   built over (`null`: rows in memory), absent when the source
- *   is a document or a chain-like this package did not build
+ *   source?: object | null, rows?: any }} `source` is the provider the
+ *   chain was built over and `rows` the rows in memory (the other one
+ *   `null`), both absent when the source is a document or a chain-like
+ *   this package did not build
  */
 function documentOf(source) {
   if (!isChain(source)) return { document: source, bindings: {}, lists: [] };
@@ -46,13 +48,13 @@ function documentOf(source) {
  * @param {any} source - a chain or a query document
  * @param {any} [options] - the member's options; `externals` merge over
  *   the chain's bindings
- * @param {(chainSource: object) => void} [onlyOwn] - a handle's refusal of
- *   a chain built over another collection or entity than its own
+ * @param {(built: { source: any, rows: any }) => void} [onlyOwn] - a
+ *   handle's refusal of a chain built over another source than its own
  * @returns {{ document: any, options: any }}
  */
 export function resolveSource(source, options = {}, onlyOwn = undefined) {
-  const { document, bindings, lists, source: builtOver } = documentOf(source);
-  if (builtOver != null) onlyOwn?.(builtOver);
+  const { document, bindings, lists, source: provider = null, rows = null } = documentOf(source);
+  onlyOwn?.({ source: provider, rows });
   // options the store would refuse reach it as they were given: merging
   // would read `null` options as a TypeError, spread a string into
   // members and an array into `0`, `1`, ... and so accept them

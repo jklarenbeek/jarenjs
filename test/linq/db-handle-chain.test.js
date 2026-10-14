@@ -5,8 +5,9 @@
  * as the externals, so every answer is the answer its `toDocument()` gives
  * on the same member. They answered `{}` for a chain on a collection (the
  * chain object was read as a document with no clauses) and `JD0033` on an
- * entity. A chain built over another collection or entity is `JL0005`, as
- * `live()` answers it; a chain with no store source, or over the
+ * entity. A chain built over another collection or entity, from any view
+ * of the store, or over rows in memory, is `JL0005`, as `live()` answers
+ * it; a chain over no rows (the `from([])` document builder), or over the
  * same-named source of another client, is taken. A document is handed to
  * the store untouched. A store run is SQLite always, PostgreSQL where
  * JAREN_PG_URL names a server.
@@ -18,6 +19,7 @@ import * as assert from 'node:assert';
 import { from, fromAsync } from '@jarenjs/linq';
 import { open } from '@jarenjs/linq/db';
 import * as m from '@jarenjs/linq/model';
+import { openStore } from '@jarenjs/db';
 import { nodeDriver } from '@jarenjs/db/node';
 import { postgresDriver } from '@jarenjs/db/postgres';
 
@@ -104,6 +106,13 @@ const foreign = (/** @type {string} */ method, /** @type {string} */ kind,
   + 'a chain runs against the source it was built over; build it from this handle, '
   + 'or hand it to the handle it was built from';
 
+/** The message `JL0005` carries for a chain over rows in memory. */
+const inMemory = (/** @type {string} */ method, /** @type {string} */ kind,
+  /** @type {string} */ own, /** @type {string} */ count) =>
+  `JL0005: ${method}() on ${kind} '${own}' was handed a chain built over ${count} in memory — `
+  + "a handle runs a chain's document over its own rows, never the chain's; build it from "
+  + 'this handle (or from([]) to write a document), or run it over its rows with toArray()';
+
 const OVER_SIX = [{ id: 'o2', total: 12 }, { id: 'o3', total: 30 }];
 
 /** @type {{ name: string, postgres: boolean }[]} */
@@ -187,6 +196,51 @@ for (const host of HOSTS) {
       assert.throws(() => client.entities.Post.execute(tags), (/** @type {any} */ e) => e.code === 'JL0005'
         && e.message === foreign('execute', 'entity', 'Post', 'Tag'));
       assert.strictEqual((await rejection(() => client.entities.Post.explain(tags))).message, foreign('explain', 'entity', 'Post', 'Tag'));
+    });
+
+    it('a chain over rows in memory is JL0005 naming the rows; an empty sequence is the document builder', async () => {
+      const { orders } = client.collections;
+      const over = (/** @type {any} */ chain) => chain.where((/** @type {any} */ o) => o.total.gt(6)).orderBy((/** @type {any} */ o) => o.total);
+      // the rows were ignored: each answered the handle's OVER_SIX
+      const one = over(from([{ id: 'x', total: 99 }]));
+      assert.throws(() => orders.execute(one), (/** @type {any} */ e) => e.code === 'JL0005'
+        && e.message === inMemory('execute', 'collection', 'orders', '1 row'));
+      assert.throws(() => orders.query(one), (/** @type {any} */ e) => e.message === inMemory('query', 'collection', 'orders', '1 row'));
+      assert.strictEqual((await rejection(() => orders.explain(one))).message, inMemory('explain', 'collection', 'orders', '1 row'));
+      const two = over(fromAsync(new Set([{ id: 'x', total: 99 }, { id: 'y', total: 7 }])));
+      assert.throws(() => orders.execute(two), (/** @type {any} */ e) => e.message === inMemory('execute', 'collection', 'orders', '2 rows'));
+      assert.throws(() => orders.execute(from('ab')), (/** @type {any} */ e) => e.message === inMemory('execute', 'collection', 'orders', '2 rows'));
+      assert.throws(() => orders.execute(from(new Uint8Array(3))), (/** @type {any} */ e) => e.message === inMemory('execute', 'collection', 'orders', '3 rows'));
+      const stars = from([{ pid: 9, stars: 99 }]).where((/** @type {any} */ p) => p.stars.gt(3));
+      assert.throws(() => client.entities.Post.execute(stars), (/** @type {any} */ e) => e.message === inMemory('execute', 'entity', 'Post', '1 row'));
+      assert.strictEqual((await rejection(() => client.entities.Post.explain(stars))).message, inMemory('explain', 'entity', 'Post', '1 row'));
+      // no rows, or rows whose count is read only by consuming them, are taken as before
+      for (const builder of [from([]), fromAsync([]), from(new Map()), from((function* () {})())]) {
+        assert.deepStrictEqual(await orders.execute(over(builder)), OVER_SIX);
+      }
+      assert.deepStrictEqual(await rows(orders.query(over(fromAsync([])))), OVER_SIX);
+    });
+
+    it('a view the client never built carries its own name: another store\'s, an escaped transaction\'s', async () => {
+      const { orders } = client.collections;
+      const raw = await openStore(model, { driver: await driverFor(host.postgres) });
+      try {
+        const adults = fromAsync(raw.collection('users')).where((/** @type {any} */ u) => u.age.gt(30));
+        assert.throws(() => orders.execute(adults), (/** @type {any} */ e) => e.message === foreign('execute', 'collection', 'orders', 'users'));
+        assert.throws(() => orders.query(adults), (/** @type {any} */ e) => e.message === foreign('query', 'collection', 'orders', 'users'));
+        assert.strictEqual((await rejection(() => orders.explain(adults))).message, foreign('explain', 'collection', 'orders', 'users'));
+        const tags = fromAsync(raw.entity('Tag')).where((/** @type {any} */ t) => t.weight.gt(1));
+        assert.throws(() => client.entities.Post.execute(tags), (/** @type {any} */ e) => e.message === foreign('execute', 'entity', 'Post', 'Tag'));
+        // the same name answered right and still does
+        const sameName = fromAsync(raw.collection('orders')).where((/** @type {any} */ o) => o.total.gt(6)).orderBy((/** @type {any} */ o) => o.total);
+        assert.deepStrictEqual(await orders.execute(sameName), OVER_SIX);
+      }
+      finally { await raw.close(); }
+      /** @type {any} */
+      let escaped;
+      await client.transaction(async (/** @type {any} */ tx) => { escaped = tx.store.collection('users'); });
+      assert.throws(() => orders.execute(fromAsync(escaped).where((/** @type {any} */ u) => u.age.gt(30))),
+        (/** @type {any} */ e) => e.message === foreign('execute', 'collection', 'orders', 'users'));
     });
 
     it('the synchronous twin of a collection is the same source by name (SQLite only: PostgreSQL has none)', { skip: host.postgres }, async () => {

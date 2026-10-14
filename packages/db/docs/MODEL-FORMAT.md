@@ -2942,6 +2942,15 @@ emits so that an item that is itself an array stays one item
 (QUERY-PEN §3), names the same whole-entity source; the planner
 reads through it for collections (`["$[*]"]`) and entities alike.
 
+Every collection and entity view carries its own source under the
+symbol **`STORE_SOURCE`** (exported by `@jarenjs/db`): a frozen
+`{ kind: 'collection' | 'entity', name }`, the same on the store's view,
+a transaction's and the synchronous twin, and on any surface spread from
+one. A chain built over a view reports the view, so a reader handed the
+chain can tell which rows its document names without having built the
+view itself: `@jarenjs/linq`'s handles refuse a chain over another
+collection or entity by it ([DB-CLIENT §6](../../linq/docs/DB-CLIENT.md)).
+
 An entity set is a provider (QUERY-PEN §8): `store.entity(name)` and
 `store.sync.entity(name)` carry `execute(document, options)` and
 `explain(document, options)` — the document is over the multi-entity

@@ -1426,7 +1426,21 @@ function untrackedPageOptions(options) {
 }
 
 /**
+ * The member every collection and entity view of a store carries its own
+ * source under: `{ kind: 'collection' | 'entity', name }`, the same on the
+ * store's view, a transaction's, the synchronous twin and any surface
+ * spread from them. A chain built over a view reports it, so a reader
+ * handed the chain can tell which rows its document names.
+ */
+export const STORE_SOURCE = Symbol.for('@jarenjs/db/store-source');
+
+/** The source a view carries under {@link STORE_SOURCE}.
+ * @param {'collection' | 'entity'} kind @param {string} name */
+const sourceOf = (kind, name) => Object.freeze({ kind, name });
+
+/**
  * The asynchronous collection surface over a core.
+ * @param {string} name - the collection
  * @param {any} core
  * @param {Function | null} live - the store-level live registration
  *   for this collection (null when the store has no capture)
@@ -1434,8 +1448,9 @@ function untrackedPageOptions(options) {
  *   the core's, as the store's profile lets a caller see it
  * @returns {any}
  */
-function asyncCollection(core, live, read) {
+function asyncCollection(name, core, live, read) {
   return Object.freeze({
+    [STORE_SOURCE]: sourceOf('collection', name),
     stats: () => core.stats(),
     get: lift(read),
     insert: lift(core.insert),
@@ -3802,6 +3817,7 @@ export function openStore(model, options) {
                       ? (entity, doc) => tracker.register(entity, doc) : undefined),
                   explain: lift((document, queryOptions) => entityEngine.explain(document, queryOptions)),
                   root: entityRoot(name),
+                  [STORE_SOURCE]: sourceOf('entity', name),
                   scope: entityEngine,
                   relations: entityEngine.relations[name],
                 });
@@ -3844,6 +3860,7 @@ export function openStore(model, options) {
                   execute: (document, queryOptions) => entityEngine.execute(document, queryOptions),
                   explain: (document, queryOptions) => entityEngine.explain(document, queryOptions),
                   root: entityRoot(name),
+                  [STORE_SOURCE]: sourceOf('entity', name),
                   scope: entityEngine,
                   relations: entityEngine.relations[name],
                 });
@@ -3873,7 +3890,7 @@ export function openStore(model, options) {
           function boundCollection(name) {
             let handle = asyncHandles.get(name);
             if (handle === undefined) {
-              handle = asyncCollection(coreFor(name),
+              handle = asyncCollection(name, coreFor(name),
                 liveRegistry === null ? null : registerCollectionLive, profiledRead(name, coreFor(name)));
               asyncHandles.set(name, handle);
             }
@@ -5024,6 +5041,7 @@ export function openStore(model, options) {
               if (handle === undefined) {
                 const core = coreFor(name);
                 handle = Object.freeze({
+                  [STORE_SOURCE]: sourceOf('collection', name),
                   stats: () => core.stats(),
                   get: profiledRead(name, core),
                   insert: (/** @type {any} */ doc, /** @type {any} */ o) => core.insert(doc, o),

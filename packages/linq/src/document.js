@@ -197,9 +197,10 @@ export function readOptions(options, known, what) {
 
 /**
  * The key both chain classes answer, unchecked, with what a run of the
- * chain binds: `{ bindings, lists, source }` — its own parameter bindings,
- * the parameters its `in()` calls read whole as lists, and the provider
- * it was built over (`null` over rows in memory). The callers are a handle's
+ * chain binds: `{ bindings, lists, source, rows }` — its own parameter
+ * bindings, the parameters its `in()` calls read whole as lists, and the
+ * provider (`source`) or the rows in memory (`rows`) it was built over, the
+ * other one `null`. The callers are a handle's
  * `live()`, `execute()`, `query()` and `explain()` (`db/chain.js`): each hands
  * the chain's document to the store under externals of its own merged over
  * those bindings, so the list rule is held to the merged set, and only over the

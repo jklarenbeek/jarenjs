@@ -112,11 +112,13 @@ export class AsyncSequence {
   #relations;
 
   /**
-   * @param {{ kind: 'source', iterate: () => AsyncIterator<any> }
+   * @param {{ kind: 'source', iterate: () => AsyncIterator<any>, rows: any }
    *   | { kind: 'provider', source: any, root: string }
    *   | { kind: 'sequence', runPrefix: (params: ReadonlyMap<string, any>) => any[],
    *       prefixDocument: () => any, lists: readonly string[] }} origin -
-   *   a `sequence` origin carries the parameters its prefix's `in()` calls
+   *   a `source` origin keeps the rows it was handed, which a handle reads
+   *   to tell a document builder (no rows) from a chain over rows; a
+   *   `sequence` origin carries the parameters its prefix's `in()` calls
    *   read whole as lists
    * @param {readonly any[]} stages
    * @param {ReadonlyMap<string, any>} params
@@ -572,13 +574,15 @@ export class AsyncSequence {
 
   /** What a run binds, unchecked ({@link RUN_BINDINGS}): for a handle's
    * `live()`, `execute()`, `query()` and `explain()`, which check the list
-   * rule against the externals they hand the store, and the source the
-   * chain was built over. */
+   * rule against the externals they hand the store, and the provider or
+   * the rows in memory the chain was built over. */
   [RUN_BINDINGS]() {
+    const origin = this.#origin;
     return {
       bindings: snapshot(Object.fromEntries(this.#params)),
       lists: this.#lists(),
-      source: this.#origin.kind === 'provider' ? this.#origin.source : null,
+      source: origin.kind === 'provider' ? origin.source : null,
+      rows: origin.kind === 'source' ? origin.rows : null,
     };
   }
 
@@ -1021,7 +1025,7 @@ export function fromAsync(source, options, ...unread) {
       [], new Map(), readOptions(options, SOURCE_OPTION_KEYS, 'fromAsync()'), providerRelations(source));
   }
   const iterate = adaptAsyncSource(source);
-  return new AsyncSequence({ kind: 'source', iterate }, [], new Map(),
+  return new AsyncSequence({ kind: 'source', iterate, rows: source }, [], new Map(),
     readOptions(options, SOURCE_OPTION_KEYS, 'fromAsync()'));
 }
 
